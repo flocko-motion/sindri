@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os/exec"
 	"strings"
+
+	"github.com/flo-at/sindri/internal/ghlocal/store"
 )
 
 type Worker struct {
@@ -14,6 +16,7 @@ type Worker struct {
 	Path      string // worktree path
 	Container string // container name or ""
 	Task      string // current td task (e.g. "td-abc123 Add greeting module")
+	PR        string // open PR status (e.g. "pr-fjalar [open]")
 }
 
 type podmanContainer struct {
@@ -110,13 +113,28 @@ func List(projectRoot string) []Worker {
 
 	// Query td for in-progress tasks
 	tasks := getInProgressTasks(projectRoot)
-	// Assign tasks to workers — td doesn't track which worker owns which task,
-	// but we can distribute by order for now
 	taskIdx := 0
 	for i := range workers {
 		if workers[i].Role == "worker" && workers[i].Status == "running" && taskIdx < len(tasks) {
 			workers[i].Task = tasks[taskIdx]
 			taskIdx++
+		}
+	}
+
+	// Match PRs to workers by branch name (pr-<name> → worker <name>)
+	prs, _ := store.ListFor(projectRoot)
+	for _, pr := range prs {
+		if pr.Status == "merged" {
+			continue
+		}
+		for i := range workers {
+			if workers[i].IsMain {
+				continue
+			}
+			if pr.Branch == workers[i].Name {
+				workers[i].PR = pr.ID + " [" + pr.Status + "]"
+				break
+			}
 		}
 	}
 
@@ -131,7 +149,7 @@ func getInProgressTasks(projectRoot string) []string {
 	var tasks []string
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" {
+		if line == "" || !strings.HasPrefix(line, "td-") {
 			continue
 		}
 		// "td-abc123  [P2]  Title  task  [in_progress]" → "td-abc123 Title"

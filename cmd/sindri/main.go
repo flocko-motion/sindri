@@ -222,8 +222,17 @@ func runWorkerStart(cmd *cobra.Command, args []string, skill string, shell bool)
 		image,
 	}
 
+	// Rebase worktree onto current base branch BEFORE entering container
+	baseBranch := "master"
+	if out, err := exec.Command("git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
+		baseBranch = strings.TrimSpace(string(out))
+	}
+	fmt.Fprintf(os.Stderr, "Rebasing %s onto %s...\n", name, baseBranch)
+	if out, err := exec.Command("git", "-C", wtPath, "rebase", baseBranch).CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: rebase failed: %s\n", strings.TrimSpace(string(out)))
+	}
+
 	// Container startup: fix git worktree path + link skills
-	// Save original .git, rewrite for container paths, restore on exit
 	startup := "mkdir -p /home/sindri/.claude/skills && ln -sfn /opt/sindri/skills/* /home/sindri/.claude/skills/ 2>/dev/null; " +
 		"ln -sf /opt/sindri/CLAUDE.md /workspace/CLAUDE.md 2>/dev/null; " +
 		"cp /workspace/.git /tmp/.git.bak 2>/dev/null; " +
@@ -262,8 +271,8 @@ func runWorkerList(cmd *cobra.Command, args []string) error {
 
 	workers := worker.List(projectRoot)
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tROLE\tSTATUS\tTASK")
-	fmt.Fprintln(w, "----\t----\t------\t----")
+	fmt.Fprintln(w, "NAME\tROLE\tSTATUS\tTASK\tPR")
+	fmt.Fprintln(w, "----\t----\t------\t----\t--")
 	for _, wk := range workers {
 		icon := "🔨"
 		if wk.IsMain {
@@ -271,7 +280,7 @@ func runWorkerList(cmd *cobra.Command, args []string) error {
 		} else if wk.Role == "orphan" {
 			icon = "⚠ "
 		}
-		fmt.Fprintf(w, "%s %s\t%s\t%s\t%s\n", icon, wk.Name, wk.Role, wk.Status, wk.Task)
+		fmt.Fprintf(w, "%s %s\t%s\t%s\t%s\t%s\n", icon, wk.Name, wk.Role, wk.Status, wk.Task, wk.PR)
 	}
 	w.Flush()
 	return nil
