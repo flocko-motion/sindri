@@ -78,7 +78,7 @@ func (p *Plugin) Update(msg tea.Msg) (plugin.Plugin, tea.Cmd) {
 		p.prs = msg.prs
 		p.loading = false
 		// Poll every 5 seconds
-		return p, tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
+		return p, tea.Tick(1*time.Second, func(t time.Time) tea.Msg {
 			return refreshTickMsg{}
 		})
 

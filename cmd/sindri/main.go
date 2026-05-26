@@ -235,7 +235,7 @@ func runWorkerStart(cmd *cobra.Command, args []string, skill string, shell bool)
 		"-v", projectRoot + "/.todos:/project/.todos:rw,z",
 		"-v", wtPath + ":/workspace:rw,z",
 		"-v", projectRoot + ":/repo:ro,z",
-		"-v", projectRoot + "/.git/pr:/repo/.git/pr:rw,z",
+		"-v", projectRoot + "/.git:/repo/.git:rw,z",
 		"-w", "/workspace",
 		image,
 	}
@@ -243,6 +243,7 @@ func runWorkerStart(cmd *cobra.Command, args []string, skill string, shell bool)
 	// Container startup: fix git worktree path + link skills
 	// Save original .git, rewrite for container paths, restore on exit
 	startup := "mkdir -p /home/sindri/.claude/skills && ln -sfn /opt/sindri/skills/* /home/sindri/.claude/skills/ 2>/dev/null; " +
+		"ln -sf /opt/sindri/CLAUDE.md /workspace/CLAUDE.md 2>/dev/null; " +
 		"cp /workspace/.git /tmp/.git.bak 2>/dev/null; " +
 		fmt.Sprintf("echo 'gitdir: /repo/.git/worktrees/%s' > /workspace/.git; ", name) +
 		"trap 'cp /tmp/.git.bak /workspace/.git 2>/dev/null' EXIT; "
