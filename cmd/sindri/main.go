@@ -77,15 +77,7 @@ func main() {
 	workCmd.Flags().BoolVar(&workShell, "shell", false, "Open a shell instead of launching claude")
 	rootCmd.AddCommand(workCmd)
 
-	tuiCmd := &cobra.Command{
-		Use:   "tui",
-		Short: "Launch the Sindri TUI dashboard",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprintln(os.Stderr, "TUI not yet wired up — use 'sindri worker' subcommands for now")
-			return nil
-		},
-	}
-	rootCmd.AddCommand(tuiCmd)
+	rootCmd.AddCommand(newTuiCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -242,6 +234,7 @@ func runWorkerStart(cmd *cobra.Command, args []string, skill string, shell bool)
 		"-v", projectRoot + "/.todos:/project/.todos:rw,z",
 		"-v", wtPath + ":/workspace:rw,z",
 		"-v", projectRoot + ":/repo:ro,z",
+		"-v", projectRoot + "/.git/pr:/repo/.git/pr:rw,z",
 		"-w", "/workspace",
 		image,
 	}
