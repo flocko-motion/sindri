@@ -7,7 +7,7 @@ INTERVAL="${2:-10}"  # poll every 10 seconds
 ELAPSED=0
 
 while [ "$ELAPSED" -lt "$TIMEOUT" ]; do
-    TASK=$(td next 2>/dev/null | grep -oP 'td-[0-9a-f]+' | head -1)
+    TASK=$(td -w "${TD_ROOT:-/project}" next 2>/dev/null | grep -oP 'td-[0-9a-f]+' | head -1)
     if [ -n "$TASK" ]; then
         echo "$TASK"
         exit 0
