@@ -9,7 +9,7 @@ gh:
 	go build -o bin/gh ./cmd/gh/
 
 # Rebuild image when any container file changes
-CONTAINER_DEPS := $(wildcard container/Dockerfile container/*.sh container/*.mjs container/shims/*) $(shell find container/skills -type f 2>/dev/null)
+CONTAINER_DEPS := $(shell find container -type f 2>/dev/null)
 .image-stamp: $(CONTAINER_DEPS)
 	cp "$$(which td)" bin/td
 	cp "$$(which yq)" bin/yq

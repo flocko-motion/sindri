@@ -1,7 +1,6 @@
 package prs
 
 import (
-	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -9,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/flo-at/sindri/internal/ghlocal/store"
 	"github.com/flo-at/sindri/internal/plugin"
 	"github.com/flo-at/sindri/internal/styles"
 )
@@ -19,28 +19,18 @@ const (
 	pluginIcon = "P"
 )
 
-type PR struct {
-	ID        string `json:"id"`
-	Branch    string `json:"branch"`
-	Base      string `json:"base"`
-	Status    string `json:"status"`
-	Title     string `json:"title"`
-	Body      string `json:"body"`
-	CreatedAt string `json:"created_at"`
-}
-
 type Plugin struct {
 	ctx     *plugin.Context
 	focused bool
 	width   int
 	height  int
 
-	prs      []PR
+	prs      []*store.PR
 	selected int
 	loading  bool
 }
 
-type refreshMsg struct{ prs []PR }
+type refreshMsg struct{ prs []*store.PR }
 type refreshTickMsg struct{}
 
 func New() *Plugin { return &Plugin{} }
@@ -67,7 +57,7 @@ func (p *Plugin) Commands() []plugin.Command { return nil }
 
 func (p *Plugin) refresh() tea.Cmd {
 	return func() tea.Msg {
-		prs := loadPRs(p.ctx.ProjectRoot)
+		prs, _ := store.ListFor(p.ctx.ProjectRoot)
 		return refreshMsg{prs: prs}
 	}
 }
@@ -185,35 +175,3 @@ func (p *Plugin) View(width, height int) string {
 	return b.String()
 }
 
-func loadPRs(projectRoot string) []PR {
-	cmd := exec.Command("gh", "pr", "list")
-	cmd.Dir = projectRoot
-	out, err := cmd.Output()
-	if err != nil {
-		return nil
-	}
-
-	// gh pr list outputs: ID  STATUS  BRANCH → BASE
-	// But we can also read the JSON files directly
-	var prs []PR
-	prDir := projectRoot + "/.git/pr"
-	entries, err := exec.Command("ls", prDir).Output()
-	if err != nil {
-		return nil
-	}
-	for _, name := range strings.Split(strings.TrimSpace(string(entries)), "\n") {
-		if !strings.HasSuffix(name, ".json") {
-			continue
-		}
-		data, err := exec.Command("cat", prDir+"/"+name).Output()
-		if err != nil {
-			continue
-		}
-		var pr PR
-		if json.Unmarshal(data, &pr) == nil {
-			prs = append(prs, pr)
-		}
-	}
-	_ = out
-	return prs
-}

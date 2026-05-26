@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -31,6 +32,81 @@ func prDir() (string, error) {
 		return "", err
 	}
 	return p, nil
+}
+
+// Approve marks a PR as approved.
+func Approve(id string) (*PR, error) {
+	pr, err := Read(id)
+	if err != nil {
+		return nil, err
+	}
+	if pr.Status == "merged" {
+		return nil, fmt.Errorf("PR %s is already merged", id)
+	}
+	pr.Status = "approved"
+	return pr, Write(pr)
+}
+
+// Merge merges an approved PR into its base branch.
+func Merge(id string) (*PR, error) {
+	pr, err := Read(id)
+	if err != nil {
+		return nil, err
+	}
+	if pr.Status != "approved" {
+		return nil, fmt.Errorf("PR %s is not approved (status: %s)", id, pr.Status)
+	}
+	if out, err := exec.Command("git", "checkout", pr.Base).CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("checkout %s failed: %s", pr.Base, out)
+	}
+	mergeMsg := pr.Title
+	if out, err := exec.Command("git", "merge", "--no-ff", pr.Branch, "-m", mergeMsg).CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("merge failed: %s", out)
+	}
+	_ = exec.Command("git", "branch", "-d", pr.Branch).Run()
+	pr.Status = "merged"
+	return pr, Write(pr)
+}
+
+// PRDirFor returns the .git/pr/ directory for a specific project root.
+func PRDirFor(projectRoot string) string {
+	return filepath.Join(projectRoot, ".git", "pr")
+}
+
+// ListFor returns all PRs for a specific project root.
+func ListFor(projectRoot string) ([]*PR, error) {
+	dir := PRDirFor(projectRoot)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var prs []*PR
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		id := e.Name()[:len(e.Name())-5]
+		pr, err := ReadFrom(dir, id)
+		if err != nil {
+			continue
+		}
+		prs = append(prs, pr)
+	}
+	return prs, nil
+}
+
+// ReadFrom loads a PR by ID from a specific directory.
+func ReadFrom(dir, id string) (*PR, error) {
+	path := filepath.Join(dir, id+".json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("PR %q not found", id)
+	}
+	var pr PR
+	if err := json.Unmarshal(data, &pr); err != nil {
+		return nil, err
+	}
+	return &pr, nil
 }
 
 // findGitDir walks up from cwd until it finds a .git directory or worktree file.

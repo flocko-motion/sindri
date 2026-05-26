@@ -19,16 +19,17 @@ var rootCmd = &cobra.Command{
 		unknown := strings.Join(args, " ")
 		return fmt.Errorf(`unknown command: gh %s
 
-This is gh-local, a lightweight gh wrapper for sandboxed agent work.
-It implements a limited subset of the gh CLI:
+This is sindri's local git system — NOT the GitHub CLI.
+There is no GitHub remote. All PRs are local.
 
-  gh pr create    Create a PR from the current branch
-  gh pr list      List all PRs
+Available commands:
+  gh pr create    Create a local PR
+  gh pr list      List local PRs
   gh pr view      View PR details
   gh pr review    Review a PR (--approve)
   gh pr merge     Merge an approved PR
 
-Commands outside this set are not supported.`, unknown)
+Do NOT push, fetch, or use any GitHub-specific features.`, unknown)
 	},
 	Args: cobra.ArbitraryArgs,
 }

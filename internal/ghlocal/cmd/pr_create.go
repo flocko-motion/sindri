@@ -43,6 +43,11 @@ var prCreateCmd = &cobra.Command{
 			return fmt.Errorf("could not determine base branch: set GH_LOCAL_BASE or --base")
 		}
 
+		// Rebase onto base branch before creating PR
+		if out, err := exec.Command("git", "rebase", base).CombinedOutput(); err != nil {
+			return fmt.Errorf("rebase onto %s failed: %s", base, strings.TrimSpace(string(out)))
+		}
+
 		diff, err := gitDiff(base, branch)
 		if err != nil {
 			return fmt.Errorf("git diff failed: %w", err)
@@ -68,8 +73,36 @@ var prCreateCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Printf("Created PR: %s (branch: %s → %s)\n", pr.ID, branch, base)
-		return nil
+		fmt.Printf("[sindri local git] PR created: %s (%s → %s)\n", pr.ID, branch, base)
+		fmt.Printf("[sindri local git] Rebased onto %s.\n", base)
+		fmt.Printf("[sindri local git] Waiting for human review...\n")
+
+		// Poll PR status until approved or rejected
+		for {
+			time.Sleep(5 * time.Second)
+			current, err := store.Read(pr.ID)
+			if err != nil {
+				continue
+			}
+			switch current.Status {
+			case "approved":
+				fmt.Printf("[sindri local git] PR approved! Merging...\n")
+				if _, err := store.Merge(pr.ID); err != nil {
+					fmt.Printf("[sindri local git] Merge failed: %s\n", err)
+					return err
+				}
+				fmt.Printf("[sindri local git] Merged into %s. You may now work on the next task.\n", base)
+				return nil
+			case "open":
+				// Still waiting
+				continue
+			default:
+				// Rejected or unknown
+				fmt.Printf("[sindri local git] PR status changed to: %s\n", current.Status)
+				fmt.Printf("[sindri local git] Check td comments for reviewer feedback.\n")
+				return fmt.Errorf("PR %s was not approved (status: %s)", pr.ID, current.Status)
+			}
+		}
 	},
 }
 

@@ -23,20 +23,11 @@ var prReviewCmd = &cobra.Command{
 			return fmt.Errorf("specify --approve to approve the PR")
 		}
 
-		pr, err := store.Read(id)
+		pr, err := store.Approve(id)
 		if err != nil {
 			return err
 		}
-		if pr.Status == "merged" {
-			return fmt.Errorf("PR %s is already merged", id)
-		}
-
-		pr.Status = "approved"
-		if err := store.Write(pr); err != nil {
-			return err
-		}
-
-		fmt.Printf("Approved PR: %s\n", id)
+		fmt.Printf("Approved PR: %s\n", pr.ID)
 		return nil
 	},
 }

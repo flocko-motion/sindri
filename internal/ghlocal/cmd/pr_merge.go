@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os/exec"
 
 	"github.com/spf13/cobra"
 	"github.com/flo-at/sindri/internal/ghlocal/store"
@@ -17,34 +16,11 @@ var prMergeCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-
-		pr, err := store.Read(id)
+		pr, err := store.Merge(id)
 		if err != nil {
 			return err
 		}
-
-		if pr.Status != "approved" {
-			return fmt.Errorf("PR %s is not approved (status: %s) — merge blocked", id, pr.Status)
-		}
-
-		// Switch to base and merge
-		if out, err := exec.Command("git", "checkout", pr.Base).CombinedOutput(); err != nil {
-			return fmt.Errorf("checkout %s failed: %s", pr.Base, out)
-		}
-		if out, err := exec.Command("git", "merge", "--no-ff", pr.Branch, "-m",
-			fmt.Sprintf("Merge PR %s: %s", id, pr.Title)).CombinedOutput(); err != nil {
-			return fmt.Errorf("merge failed: %s", out)
-		}
-
-		// Cleanup: delete the branch
-		exec.Command("git", "branch", "-d", pr.Branch).Run() //nolint:errcheck
-
-		pr.Status = "merged"
-		if err := store.Write(pr); err != nil {
-			return err
-		}
-
-		fmt.Printf("Merged PR %s into %s\n", id, pr.Base)
+		fmt.Printf("Merged PR %s into %s\n", pr.ID, pr.Base)
 		return nil
 	},
 }

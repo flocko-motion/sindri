@@ -14,6 +14,8 @@ Your `/workspace/.git` is a worktree pointer to `/repo/.git/worktrees/<your-name
 You are on your own branch. Commit directly — no need to create branches.
 The main branch is at `/repo`. Your base branch is set via `GH_LOCAL_BASE`.
 
+`gh pr create` automatically rebases onto the base branch before creating the PR.
+
 ## Tools
 
 - `td` — task management. Always use `-w /project` flag.

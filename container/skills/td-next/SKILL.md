@@ -11,7 +11,11 @@ When you have a task:
 2. `td -w /project show <id>` to read the details
 3. If anything is unclear, ask me before guessing
 4. Implement the task, run tests, commit your changes
-5. `gh pr create --title "summary" --body "details"` to create a local PR
+5. `gh pr create --title "type(task-id): summary" --body "details"` — use conventional commits:
+   - feature → `feat(td-xxx): ...`
+   - bug → `fix(td-xxx): ...`
+   - task/chore → `chore(td-xxx): ...`
+   The td issue type tells you which prefix to use.
 6. `td -w /project handoff <id> --done "what you did"`
 7. `td -w /project review <id>` to submit for review
 8. STOP. Your job is done. Do NOT merge — that is the reviewer's job.
