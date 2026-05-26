@@ -63,7 +63,7 @@ cp "$(which yq)" "$SINDRI_ROOT/bin/yq"
 IMAGE="sindri-agent:test"
 section "BUILD"
 log "Building container image: $IMAGE"
-podman build -t "$IMAGE" -f "$SINDRI_ROOT/dockerfiles/Dockerfile" "$SINDRI_ROOT"
+podman build -t "$IMAGE" -f "$SINDRI_ROOT/container/Dockerfile" "$SINDRI_ROOT"
 
 # ── Create throwaway workspace ──────────────────────────────────────────────
 WORKDIR=$(mktemp -d /tmp/sindri-test-XXXX)

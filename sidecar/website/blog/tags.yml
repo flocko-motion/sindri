@@ -1,9 +1,0 @@
-announcement:
-  label: Announcement
-  permalink: /announcement
-  description: Official announcements
-
-release:
-  label: Release
-  permalink: /release
-  description: Release notes and updates
