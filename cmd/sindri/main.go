@@ -69,6 +69,7 @@ func main() {
 
 	workerCmd.AddCommand(workerListCmd, workerStartCmd, workerStopCmd, workerStreamCmd, workerInputCmd)
 	rootCmd.AddCommand(workerCmd)
+	rootCmd.AddCommand(newWatchCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -195,9 +196,19 @@ func runWorkerStream(cmd *cobra.Command, args []string, raw bool) error {
 	return streamWorkerLogs(cName, raw)
 }
 
-// streamWorkerLogs follows podman logs and optionally beautifies stream-json.
+// streamWorkerLogs streams output from the Claude daemon inside a container.
 func streamWorkerLogs(containerName string, raw bool) error {
-	logs := exec.Command("podman", "logs", "-f", containerName)
+	sessionID := getSessionUUID(containerName)
+	if sessionID == "" {
+		fmt.Fprintf(os.Stderr, "(no session found, falling back to podman logs)\n")
+		logs := exec.Command("podman", "logs", "-f", containerName)
+		logs.Stdout = os.Stdout
+		logs.Stderr = os.Stderr
+		return logs.Run()
+	}
+	fmt.Fprintf(os.Stderr, "(session: %s)\n", sessionID[:8])
+
+	logs := exec.Command("podman", "exec", containerName, "claude", "logs", sessionID)
 
 	if raw {
 		logs.Stdout = os.Stdout
@@ -391,6 +402,7 @@ func runWorkerStart(cmd *cobra.Command, args []string, stream bool) error {
 const defaultWorkerPrompt = `You are a Sindri worker agent. Your workspace is at /workspace (a git worktree). The main repo is at /repo (read-only).
 
 IMPORTANT: All td commands must use -w /project flag, e.g. td -w /project next
+IMPORTANT: Do NOT use EnterWorktree or create git worktrees. Work directly in /workspace.
 
 WORKFLOW:
 1. Run: TASK=$(wait-for-task) — this polls td for up to 5 minutes waiting for a task.
@@ -451,11 +463,21 @@ func runWorkerInput(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "→ %s: %s\n", name, message)
 
-	// Continue the most recent session with the message
-	input := exec.Command("podman", "exec", cName,
-		"claude", "--dangerously-skip-permissions",
-		"--verbose", "--output-format", "stream-json",
-		"-c", "-p", message)
+	// Get full session UUID from daemon
+	sessionID := getSessionUUID(cName)
+
+	var inputArgs []string
+	if sessionID != "" {
+		inputArgs = []string{"exec", cName, "claude", "--dangerously-skip-permissions",
+			"--verbose", "--output-format", "stream-json",
+			"--resume", sessionID, "-p", message}
+	} else {
+		inputArgs = []string{"exec", cName, "claude", "--dangerously-skip-permissions",
+			"--verbose", "--output-format", "stream-json",
+			"-c", "-p", message}
+	}
+
+	input := exec.Command("podman", inputArgs...)
 	input.Stdout = os.Stdout
 	input.Stderr = os.Stderr
 	return input.Run()
@@ -534,7 +556,11 @@ func ensureImage(projectRoot string) error {
 	dockerfile := projectRoot + "/container/Dockerfile"
 	content, err := os.ReadFile(dockerfile)
 	if err != nil {
-		return fmt.Errorf("read Dockerfile: %w", err)
+		// No Dockerfile in this repo — check if image exists already
+		if exec.Command("podman", "image", "exists", "sindri-agent:test").Run() == nil {
+			return nil
+		}
+		return fmt.Errorf("no Dockerfile at %s and no sindri-agent:test image found", dockerfile)
 	}
 
 	year, week := time.Now().ISOWeek()
@@ -571,6 +597,21 @@ func ensureImage(projectRoot string) error {
 	_ = os.MkdirAll(projectRoot+"/.worktrees", 0755)
 	_ = os.WriteFile(cacheFile, []byte(buildKey), 0644)
 	return nil
+}
+
+// getSessionUUID gets the full session UUID from the claude daemon inside a container.
+func getSessionUUID(containerName string) string {
+	out, err := exec.Command("podman", "exec", containerName,
+		"claude", "agents", "--json").Output()
+	if err != nil {
+		return ""
+	}
+	var agents []map[string]interface{}
+	if err := json.Unmarshal(out, &agents); err != nil || len(agents) == 0 {
+		return ""
+	}
+	sid, _ := agents[0]["sessionId"].(string)
+	return sid
 }
 
 func parseWorktreeNames(output, mainDir string) map[string]string {

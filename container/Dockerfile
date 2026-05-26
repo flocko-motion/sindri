@@ -36,6 +36,7 @@ RUN chmod +x /usr/local/bin/yq /usr/local/bin/td
 
 # ── claude CLI ────────────────────────────────────────────────────────────────
 RUN npm install -g @anthropic-ai/claude-code
+RUN mkdir -p /opt/sindri && cd /opt/sindri && npm init -y && npm install "@anthropic-ai/claude-agent-sdk@^0.1.59"
 
 # ── gh-local (built from source) ─────────────────────────────────────────────
 COPY go.mod go.sum /build/
