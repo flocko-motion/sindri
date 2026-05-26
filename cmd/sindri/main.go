@@ -246,8 +246,12 @@ func runWorkerStart(cmd *cobra.Command, args []string, skill string, shell bool)
 		image,
 	}
 
-	// Link skills from image into ~/.claude/skills/ (mount shadows the image path)
-	skillSetup := "mkdir -p /home/sindri/.claude/skills && ln -sfn /opt/sindri/skills/* /home/sindri/.claude/skills/ 2>/dev/null; "
+	// Container startup: fix git worktree path + link skills
+	// Save original .git, rewrite for container paths, restore on exit
+	startup := "mkdir -p /home/sindri/.claude/skills && ln -sfn /opt/sindri/skills/* /home/sindri/.claude/skills/ 2>/dev/null; " +
+		"cp /workspace/.git /tmp/.git.bak 2>/dev/null; " +
+		fmt.Sprintf("echo 'gitdir: /repo/.git/worktrees/%s' > /workspace/.git; ", name) +
+		"trap 'cp /tmp/.git.bak /workspace/.git 2>/dev/null' EXIT; "
 
 	if shell {
 		if skill == "" {
@@ -255,13 +259,13 @@ func runWorkerStart(cmd *cobra.Command, args []string, skill string, shell bool)
 		}
 		claudeCmd := fmt.Sprintf("claude --name %s /%s", name, skill)
 		podmanArgs = append(podmanArgs, "bash", "-c",
-			skillSetup+fmt.Sprintf("echo 'Would launch: %s'; echo 'Skills:'; ls -la ~/.claude/skills/; exec bash", claudeCmd))
+			startup+fmt.Sprintf("echo 'Would launch: %s'; echo 'Skills:'; ls -la ~/.claude/skills/; exec bash", claudeCmd))
 	} else {
 		if skill == "" {
 			skill = "td-next"
 		}
 		podmanArgs = append(podmanArgs, "bash", "-c",
-			skillSetup+fmt.Sprintf("exec claude --name %s /%s", name, skill))
+			startup+fmt.Sprintf("exec claude --name %s /%s", name, skill))
 	}
 
 	proc := exec.Command("podman", podmanArgs...)

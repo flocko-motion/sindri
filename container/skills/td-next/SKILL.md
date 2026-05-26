@@ -14,7 +14,9 @@ When you have a task:
 5. `gh pr create --title "summary" --body "details"` to submit a PR
 6. `td -w /project handoff <id> --done "what you did"`
 7. `td -w /project review <id>` to submit for review
-8. Wait for my approval before merging
+8. Tell me the PR is ready and wait for my approval
+9. After I approve: `gh pr merge <pr-id>`
 
+The `gh` command manages local PRs (no GitHub needed).
 The main repo is at /repo (read-only). Your workspace is /workspace.
 All td commands need `-w /project`.
