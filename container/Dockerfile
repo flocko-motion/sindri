@@ -52,6 +52,7 @@ RUN chmod +x /usr/local/bin/docker /usr/local/bin/docker-compose
 # ── Sindri scripts ────────────────────────────────────────────────────────────
 COPY container/wait-for-task.sh /usr/local/bin/wait-for-task
 COPY container/sindri-agent.sh  /usr/local/bin/sindri-agent
+COPY container/agent-bridge.mjs /opt/sindri/agent-bridge.mjs
 RUN chmod +x /usr/local/bin/wait-for-task /usr/local/bin/sindri-agent
 
 # ── Non-root user (claude refuses --dangerously-skip-permissions as root) ──

@@ -18,9 +18,32 @@ const initialPrompt = process.argv[2] || readFileSync("/home/sindri/.claude/syst
 console.log("=== sindri agent bridge starting ===");
 
 // Create long-lived session
+// Permission request queue — bridge emits events, waits for approval via HTTP
+let permissionResolve = null;
+
 // Don't use `await using` — we want the session to live forever
 const session = unstable_v2_createSession({
   cwd: "/workspace",
+  permissionMode: "acceptEdits",
+  allowedTools: [
+    "Bash", "Read", "Edit", "Write", "Glob", "Grep",
+    "NotebookEdit", "WebFetch", "WebSearch", "AskUserQuestion",
+    "TodoWrite", "EnterPlanMode", "ExitPlanMode", "LSP",
+    "Skill", "Task", "TaskOutput",
+  ],
+  permissionTool: async (req) => {
+    // Emit permission request as JSON event for watch/TUI to see
+    console.log(JSON.stringify({
+      type: "sindri_permission_request",
+      tool: req.tool_name || req.toolName || "unknown",
+      input: req.tool_input || req.input || {},
+      message: req.message || "",
+    }));
+
+    // Wait for approval via HTTP /approve endpoint
+    const result = await new Promise(r => { permissionResolve = r; });
+    return result;
+  },
 });
 
 console.log("=== session created ===");
@@ -43,7 +66,33 @@ console.log("=== initial prompt sent ===");
 const server = createServer((req, res) => {
   if (req.method === "GET" && req.url === "/status") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ status: "running" }));
+    res.end(JSON.stringify({ status: "running", pendingPermission: permissionResolve !== null }));
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/approve") {
+    if (permissionResolve) {
+      permissionResolve({ behavior: "allow" });
+      permissionResolve = null;
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, action: "approved" }));
+    } else {
+      res.writeHead(404);
+      res.end(JSON.stringify({ error: "no pending permission request" }));
+    }
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/deny") {
+    if (permissionResolve) {
+      permissionResolve({ behavior: "deny" });
+      permissionResolve = null;
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, action: "denied" }));
+    } else {
+      res.writeHead(404);
+      res.end(JSON.stringify({ error: "no pending permission request" }));
+    }
     return;
   }
 
