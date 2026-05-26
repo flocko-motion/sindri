@@ -53,6 +53,8 @@ RUN chmod +x /usr/local/bin/docker /usr/local/bin/docker-compose
 COPY container/wait-for-task.sh /usr/local/bin/wait-for-task
 COPY container/sindri-agent.sh  /usr/local/bin/sindri-agent
 COPY container/agent-bridge.mjs /opt/sindri/agent-bridge.mjs
+COPY container/skills/          /opt/sindri/skills/
+# Skills are copied into each worker's ~/.claude/skills/ at launch time
 RUN chmod +x /usr/local/bin/wait-for-task /usr/local/bin/sindri-agent
 
 # ── Non-root user (claude refuses --dangerously-skip-permissions as root) ──

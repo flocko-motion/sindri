@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+
 func main() {
 	var projectDir string
 	rootCmd := &cobra.Command{
@@ -38,12 +39,18 @@ func main() {
 		RunE:  runWorkerList,
 	}
 
+	var skillName string
+	var shellMode bool
 	workerStartCmd := &cobra.Command{
 		Use:   "start [name]",
 		Short: "Start a worker interactively (creates worktree if needed)",
 		Args:  cobra.MaximumNArgs(1),
-		RunE:  runWorkerStart,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkerStart(cmd, args, skillName, shellMode)
+		},
 	}
+	workerStartCmd.Flags().StringVar(&skillName, "skill", "", "Skill to run (e.g. td-next, td-review)")
+	workerStartCmd.Flags().BoolVar(&shellMode, "shell", false, "Open a shell instead of launching claude (for debugging)")
 
 	workerStopCmd := &cobra.Command{
 		Use:   "stop <name>",
@@ -54,6 +61,21 @@ func main() {
 
 	workerCmd.AddCommand(workerListCmd, workerStartCmd, workerStopCmd)
 	rootCmd.AddCommand(workerCmd)
+
+	// Top-level alias: sindri work = sindri worker start
+	var workSkill string
+	var workShell bool
+	workCmd := &cobra.Command{
+		Use:   "work [name]",
+		Short: "Start a worker (alias for 'worker start')",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkerStart(cmd, args, workSkill, workShell)
+		},
+	}
+	workCmd.Flags().StringVar(&workSkill, "skill", "", "Skill to run (e.g. td-next, td-review)")
+	workCmd.Flags().BoolVar(&workShell, "shell", false, "Open a shell instead of launching claude")
+	rootCmd.AddCommand(workCmd)
 
 	tuiCmd := &cobra.Command{
 		Use:   "tui",
@@ -81,7 +103,7 @@ var norseNames = []string{
 
 // ── worker start ────────────────────────────────────────────────────────────
 
-func runWorkerStart(cmd *cobra.Command, args []string) error {
+func runWorkerStart(cmd *cobra.Command, args []string, skill string, shell bool) error {
 	projectRoot, err := gitRoot()
 	if err != nil {
 		return fmt.Errorf("not in a git repo: %w", err)
@@ -162,15 +184,48 @@ func runWorkerStart(cmd *cobra.Command, args []string) error {
 	cName := "sindri-" + name
 	_ = exec.Command("podman", "rm", "-f", cName).Run()
 
-	// Prepare claude home with credentials
+	// Prepare claude home with credentials, settings, and skills
 	claudeHome := projectRoot + "/.worktrees/.claude-home-" + name
 	_ = os.MkdirAll(claudeHome, 0755)
 	homeDir, _ := os.UserHomeDir()
 	if data, err := os.ReadFile(homeDir + "/.claude/.credentials.json"); err == nil {
 		_ = os.WriteFile(claudeHome+"/.credentials.json", data, 0600)
 	}
-	configPath := projectRoot + "/.worktrees/.claude.json"
-	_ = os.WriteFile(configPath, []byte(`{"bypassPermissions":true,"bypassPermissionsModeAccepted":true,"hasCompletedOnboarding":true}`), 0644)
+
+	// Per-worker config at claudeHome/../.claude-<name>.json
+	configPath := claudeHome + ".json"
+	configData := map[string]interface{}{}
+	if existing, err := os.ReadFile(configPath); err == nil {
+		_ = json.Unmarshal(existing, &configData)
+	}
+	configData["hasCompletedOnboarding"] = true
+	trustedDirs, _ := configData["trustedDirectories"].(map[string]interface{})
+	if trustedDirs == nil {
+		trustedDirs = map[string]interface{}{}
+	}
+	trustedDirs["/workspace"] = true
+	configData["trustedDirectories"] = trustedDirs
+	configJSON, _ := json.Marshal(configData)
+	_ = os.WriteFile(configPath, configJSON, 0644)
+
+	// Settings — pre-grant permissions for /workspace
+	settingsPath := claudeHome + "/settings.json"
+	_ = os.WriteFile(settingsPath, []byte(`{
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "Read(*)",
+      "Edit(*)",
+      "Write(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "WebFetch(*)",
+      "WebSearch(*)",
+      "NotebookEdit(*)"
+    ],
+    "defaultMode": "default"
+  }
+}`), 0644)
 
 	image := "sindri-agent:test"
 
@@ -189,7 +244,24 @@ func runWorkerStart(cmd *cobra.Command, args []string) error {
 		"-v", projectRoot + ":/repo:ro,z",
 		"-w", "/workspace",
 		image,
-		"claude",
+	}
+
+	// Link skills from image into ~/.claude/skills/ (mount shadows the image path)
+	skillSetup := "mkdir -p /home/sindri/.claude/skills && ln -sfn /opt/sindri/skills/* /home/sindri/.claude/skills/ 2>/dev/null; "
+
+	if shell {
+		if skill == "" {
+			skill = "td-next"
+		}
+		claudeCmd := fmt.Sprintf("claude --name %s /%s", name, skill)
+		podmanArgs = append(podmanArgs, "bash", "-c",
+			skillSetup+fmt.Sprintf("echo 'Would launch: %s'; echo 'Skills:'; ls -la ~/.claude/skills/; exec bash", claudeCmd))
+	} else {
+		if skill == "" {
+			skill = "td-next"
+		}
+		podmanArgs = append(podmanArgs, "bash", "-c",
+			skillSetup+fmt.Sprintf("exec claude --name %s /%s", name, skill))
 	}
 
 	proc := exec.Command("podman", podmanArgs...)
@@ -313,6 +385,24 @@ func parseWorktreeNames(output, mainDir string) map[string]string {
 		}
 	}
 	return names
+}
+
+// loadSkill reads a skill from /opt/sindri/skills/<name>.md inside the container image.
+func loadSkill(image, name string) (string, error) {
+	path := "/opt/sindri/skills/" + name + "/SKILL.md"
+	out, err := exec.Command("podman", "run", "--rm", image, "cat", path).Output()
+	if err != nil {
+		// List available
+		listOut, _ := exec.Command("podman", "run", "--rm", image, "ls", "/opt/sindri/skills/").Output()
+		var available []string
+		for _, line := range strings.Split(strings.TrimSpace(string(listOut)), "\n") {
+			if strings.HasSuffix(line, ".md") {
+				available = append(available, strings.TrimSuffix(line, ".md"))
+			}
+		}
+		return "", fmt.Errorf("skill %q not found. Available: %s", name, strings.Join(available, ", "))
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 func ensureImage(projectRoot string) error {

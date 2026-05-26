@@ -8,10 +8,17 @@ sindri:
 gh:
 	go build -o bin/gh ./cmd/gh/
 
-image:
+# Rebuild image when any container file changes
+CONTAINER_DEPS := $(wildcard container/Dockerfile container/*.sh container/*.mjs container/shims/*) $(shell find container/skills -type f 2>/dev/null)
+.image-stamp: $(CONTAINER_DEPS)
 	cp "$$(which td)" bin/td
 	cp "$$(which yq)" bin/yq
 	podman build -t sindri-agent:test -f container/Dockerfile .
+	touch .image-stamp
+
+image: .image-stamp
+
+all: build image
 
 clean:
-	rm -f bin/sindri bin/gh bin/td bin/yq
+	rm -f bin/sindri bin/gh bin/td bin/yq .image-stamp
