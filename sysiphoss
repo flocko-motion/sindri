@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+
+cmd_help() {
+    cat <<'EOF'
+Usage: sysiphoss <command> [args]
+
+Commands:
+  work [path]   Start a worker container for a git worktree (default: cwd)
+
+Options:
+  -h, --help    Show this help
+
+EOF
+}
+
+# ── Ensure rootless Podman is usable (auto-fixes with sudo if needed) ────────
+ensure_podman_rootless() {
+    local fixed=0
+
+    for bin in /usr/sbin/newuidmap /usr/sbin/newgidmap; do
+        if [[ -f "$bin" ]] && ! ( stat -c '%a' "$bin" | grep -q '^[46]' ); then
+            sudo chmod u+s "$bin" && fixed=1
+        fi
+    done
+
+    if ! grep -q "^${USER}:" /etc/subuid 2>/dev/null; then
+        echo "$USER:100000:65536" | sudo tee -a /etc/subuid >/dev/null && fixed=1
+    fi
+    if ! grep -q "^${USER}:" /etc/subgid 2>/dev/null; then
+        echo "$USER:100000:65536" | sudo tee -a /etc/subgid >/dev/null && fixed=1
+    fi
+
+    [[ $fixed -eq 1 ]] && echo "Rootless Podman configured."
+    return 0
+}
+
+cmd_work() {
+    ensure_podman_rootless
+
+    local WORKTREE
+    WORKTREE="$(realpath "${1:-$(pwd)}")"
+
+    # ── Resolve main repo from worktree ──────────────────────────────────────
+    if [[ -f "$WORKTREE/.git" ]]; then
+        # Worktree: .git is a file "gitdir: /main/repo/.git/worktrees/<branch>"
+        local GITDIR MAIN_GIT
+        GITDIR="$(sed 's/^gitdir: //' "$WORKTREE/.git")"
+        MAIN_GIT="$(cd "$(dirname "$GITDIR")/.." && pwd)"  # strips /worktrees/<branch>
+        MAIN_REPO="$(dirname "$MAIN_GIT")"
+    elif [[ -d "$WORKTREE/.git" ]]; then
+        MAIN_REPO="$WORKTREE"
+    else
+        echo "error: $WORKTREE is not a git repository or worktree" >&2
+        exit 1
+    fi
+
+    # ── Detect base branch (whatever main worktree has checked out) ──────────
+    local BASE_BRANCH
+    BASE_BRANCH="$(git -C "$MAIN_REPO" rev-parse --abbrev-ref HEAD)"
+
+    local TODOS_DIR="$MAIN_REPO/.todos"
+    mkdir -p "$TODOS_DIR"
+
+    # ── Build image if missing ────────────────────────────────────────────────
+    local IMAGE="sysiphos-agent:latest"
+    if ! podman image exists "$IMAGE" 2>/dev/null; then
+        echo "Building $IMAGE (first run)..."
+        podman build -t "$IMAGE" \
+            -f "$SCRIPT_DIR/dockerfiles/Dockerfile" \
+            "$SCRIPT_DIR"
+    fi
+
+    # ── Run ──────────────────────────────────────────────────────────────────
+    echo "Starting sysiphos in: $WORKTREE"
+    echo "Main repo (ro):       $MAIN_REPO"
+    echo "Todos:                $TODOS_DIR"
+    echo
+
+    exec podman run --rm -it \
+        --name "sysiphos-$(basename "$WORKTREE")-$$" \
+        -v "$MAIN_REPO:/repo:ro,z" \
+        -v "$WORKTREE:/workspace:rw,z" \
+        -v "$TODOS_DIR:/todos:rw,z" \
+        -e GH_LOCAL_BASE="${GH_LOCAL_BASE:-$BASE_BRANCH}" \
+        -e TD_ROOT=/todos \
+        -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
+        -w /workspace \
+        "$IMAGE" \
+        bash -c '
+            echo "=== TODO STATE ==="
+            td usage 2>/dev/null || echo "(no todos yet)"
+            NEXT=$(td next 2>/dev/null || true)
+            [[ -n "$NEXT" ]] && echo "Next: $NEXT"
+            echo "=================="
+            echo
+            exec claude --dangerously-skip-permissions \
+                "Read the todo state above (also run '\''td usage'\'' and '\''td next'\'' to refresh). Summarize what is open, then ask me what to work on."
+        '
+}
+
+# ── Dispatch ─────────────────────────────────────────────────────────────────
+case "${1:-}" in
+    work)       shift; cmd_work "$@" ;;
+    -h|--help)  cmd_help ;;
+    "")         cmd_help ;;
+    *)          echo "error: unknown command '$1'" >&2; echo; cmd_help; exit 1 ;;
+esac

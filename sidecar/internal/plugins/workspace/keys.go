@@ -1,0 +1,2207 @@
+package workspace
+
+import (
+	"fmt"
+	"os/exec"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	appmsg "github.com/marcus/sidecar/internal/msg"
+	"github.com/marcus/sidecar/internal/plugins/gitstatus"
+	"github.com/marcus/sidecar/internal/state"
+)
+
+// handleKeyPress processes key input based on current view mode.
+func (p *Plugin) handleKeyPress(msg tea.KeyMsg) tea.Cmd {
+	switch p.viewMode {
+	case ViewModeList, ViewModeKanban:
+		return p.handleListKeys(msg)
+	case ViewModeCreate:
+		return p.handleCreateKeys(msg)
+	case ViewModeTaskLink:
+		return p.handleTaskLinkKeys(msg)
+	case ViewModeMerge:
+		return p.handleMergeKeys(msg)
+	case ViewModeAgentConfig:
+		return p.handleAgentConfigKeys(msg)
+	case ViewModeAgentChoice:
+		return p.handleAgentChoiceKeys(msg)
+	case ViewModeConfirmDelete:
+		return p.handleConfirmDeleteKeys(msg)
+	case ViewModeConfirmDeleteShell:
+		return p.handleConfirmDeleteShellKeys(msg)
+	case ViewModeCommitForMerge:
+		return p.handleCommitForMergeKeys(msg)
+	case ViewModePromptPicker:
+		return p.handlePromptPickerKeys(msg)
+	case ViewModeTypeSelector:
+		return p.handleTypeSelectorKeys(msg)
+	case ViewModeRenameShell:
+		return p.handleRenameShellKeys(msg)
+	case ViewModeError:
+		p.errorMessage = ""
+		p.viewMode = ViewModeList
+		return nil
+	case ViewModeFetchPR:
+		return p.handleFetchPRKeys(msg)
+	case ViewModeFilePicker:
+		return p.handleFilePickerKeys(msg)
+	case ViewModeInteractive:
+		return p.handleInteractiveKeys(msg)
+	}
+	return nil
+}
+
+// handleTypeSelectorKeys handles keys in the type selector modal.
+func (p *Plugin) handleTypeSelectorKeys(msg tea.KeyMsg) tea.Cmd {
+	p.ensureTypeSelectorModal()
+	if p.typeSelectorModal == nil {
+		return nil
+	}
+
+	// Track selection before to detect changes
+	prevIdx := p.typeSelectorIdx
+	prevAgentIdx := p.typeSelectorAgentIdx
+
+	action, cmd := p.typeSelectorModal.HandleKey(msg)
+
+	// Modal width depends on selection - rebuild if type changed
+	if p.typeSelectorIdx != prevIdx {
+		p.typeSelectorModalWidth = 0 // Force rebuild
+	}
+
+	// Sync agent type when agent index changes (td-f42a86)
+	// No need to rebuild modal - When sections handle visibility dynamically
+	if p.typeSelectorAgentIdx != prevAgentIdx && p.typeSelectorAgentIdx >= 0 && p.typeSelectorAgentIdx < len(ShellAgentOrder) {
+		p.typeSelectorAgentType = ShellAgentOrder[p.typeSelectorAgentIdx]
+	}
+
+	switch action {
+	case "cancel", typeSelectorCancelID:
+		p.viewMode = ViewModeList
+		p.clearTypeSelectorModal()
+		return nil
+	case typeSelectorConfirmID, "type-shell", "type-workspace":
+		return p.executeTypeSelectorConfirm()
+	}
+
+	return cmd
+}
+
+// executeTypeSelectorConfirm executes the type selector confirmation.
+func (p *Plugin) executeTypeSelectorConfirm() tea.Cmd {
+	p.viewMode = ViewModeList
+	if p.typeSelectorIdx == 0 {
+		// Shell selected - use createShellWithAgent which captures agent info (td-16b2b5)
+		cmd := p.createShellWithAgent()
+		p.clearTypeSelectorModal()
+		return cmd
+	}
+	// Workspace selected
+	p.clearTypeSelectorModal()
+	return p.openCreateModal()
+}
+
+// handleFetchPRKeys handles keys in the fetch PR modal.
+func (p *Plugin) handleFetchPRKeys(msg tea.KeyMsg) tea.Cmd {
+	p.ensureFetchPRModal()
+	if p.fetchPRModal == nil {
+		return nil
+	}
+
+	// Intercept custom keys before delegating to modal
+	switch msg.String() {
+	case "esc":
+		p.viewMode = ViewModeList
+		p.clearFetchPRState()
+		return nil
+	case "enter":
+		if p.fetchPRLoading || p.fetchPRError != "" {
+			return nil
+		}
+		filtered := p.filteredFetchPRItems()
+		if p.fetchPRCursor >= 0 && p.fetchPRCursor < len(filtered) {
+			pr := filtered[p.fetchPRCursor]
+			p.fetchPRLoading = true // Show loading while creating worktree
+			p.clearFetchPRModal()   // Rebuild to show loading state
+			return p.fetchAndCreateWorktree(pr)
+		}
+		return nil
+	case "j", "down":
+		filtered := p.filteredFetchPRItems()
+		if p.fetchPRCursor < len(filtered)-1 {
+			p.fetchPRCursor++
+			p.adjustFetchPRScroll()
+			p.clearFetchPRModal()
+		}
+		return nil
+	case "k", "up":
+		if p.fetchPRCursor > 0 {
+			p.fetchPRCursor--
+			p.adjustFetchPRScroll()
+			p.clearFetchPRModal()
+		}
+		return nil
+	case "backspace":
+		if len(p.fetchPRFilter) > 0 {
+			p.fetchPRFilter = p.fetchPRFilter[:len(p.fetchPRFilter)-1]
+			p.fetchPRCursor = 0
+			p.fetchPRScrollOffset = 0
+			p.clearFetchPRModal() // Rebuild to reflect filter change
+		}
+		return nil
+	default:
+		// Treat printable characters as filter input
+		if len(msg.String()) == 1 && msg.String()[0] >= 32 && msg.String()[0] < 127 {
+			p.fetchPRFilter += msg.String()
+			p.fetchPRCursor = 0
+			p.fetchPRScrollOffset = 0
+			p.clearFetchPRModal() // Rebuild to reflect filter change
+		}
+		return nil
+	}
+}
+
+// handlePromptPickerKeys handles keys in the prompt picker modal.
+func (p *Plugin) handlePromptPickerKeys(msg tea.KeyMsg) tea.Cmd {
+	if p.promptPicker == nil {
+		return nil
+	}
+
+	p.ensurePromptPickerModal()
+	if p.promptPickerModal == nil {
+		return nil
+	}
+
+	pp := p.promptPicker
+	key := msg.String()
+
+	if len(pp.prompts) == 0 && key == "d" {
+		return func() tea.Msg { return PromptInstallDefaultsMsg{} }
+	}
+
+	switch key {
+	case "esc", "q":
+		return func() tea.Msg { return PromptCancelledMsg{} }
+	case "tab", "shift+tab":
+		pp.filterFocused = !pp.filterFocused
+		p.syncPromptPickerFocus()
+		return nil
+	}
+
+	before := pp.filterInput.Value()
+	action, cmd := p.promptPickerModal.HandleKey(msg)
+	if action == "cancel" {
+		return func() tea.Msg { return PromptCancelledMsg{} }
+	}
+
+	if before != pp.filterInput.Value() {
+		pp.applyFilter()
+		if !pp.filterFocused {
+			p.syncPromptPickerFocus()
+		}
+	}
+
+	if action != "" {
+		if idx, ok := parsePromptPickerItemID(action); ok {
+			pp.selectedIdx = idx
+			return p.promptPickerSelectCmd()
+		}
+		if action == promptPickerFilterID {
+			return p.promptPickerSelectCmd()
+		}
+	}
+
+	switch key {
+	case "enter":
+		return p.promptPickerSelectCmd()
+
+	case "up":
+		if pp.selectedIdx > -1 {
+			pp.selectedIdx--
+		}
+		if !pp.filterFocused {
+			p.syncPromptPickerFocus()
+		}
+		return nil
+
+	case "down":
+		if pp.selectedIdx < len(pp.filtered)-1 {
+			pp.selectedIdx++
+		}
+		if !pp.filterFocused {
+			p.syncPromptPickerFocus()
+		}
+		return nil
+	}
+
+	if !pp.filterFocused {
+		switch key {
+		case "k":
+			if pp.selectedIdx > -1 {
+				pp.selectedIdx--
+			}
+			p.syncPromptPickerFocus()
+			return nil
+		case "j":
+			if pp.selectedIdx < len(pp.filtered)-1 {
+				pp.selectedIdx++
+			}
+			p.syncPromptPickerFocus()
+			return nil
+		case "home", "g":
+			pp.selectedIdx = -1
+			p.syncPromptPickerFocus()
+			return nil
+		case "end", "G":
+			if len(pp.filtered) > 0 {
+				pp.selectedIdx = len(pp.filtered) - 1
+			}
+			p.syncPromptPickerFocus()
+			return nil
+		}
+	}
+
+	return cmd
+}
+
+// handleAgentChoiceKeys handles keys in agent choice modal.
+func (p *Plugin) handleAgentChoiceKeys(msg tea.KeyMsg) tea.Cmd {
+	p.ensureAgentChoiceModal()
+	if p.agentChoiceModal == nil {
+		return nil
+	}
+
+	action, cmd := p.agentChoiceModal.HandleKey(msg)
+
+	switch action {
+	case "cancel", agentChoiceCancelID:
+		p.viewMode = ViewModeList
+		p.clearAgentChoiceModal()
+		return nil
+	case agentChoiceActionID, agentChoiceConfirmID, "agent-choice-attach", "agent-choice-restart":
+		return p.executeAgentChoice()
+	}
+
+	return cmd
+}
+
+// handleAgentConfigKeys handles keys in agent config modal.
+func (p *Plugin) handleAgentConfigKeys(msg tea.KeyMsg) tea.Cmd {
+	p.ensureAgentConfigModal()
+	if p.agentConfigModal == nil {
+		return nil
+	}
+
+	key := msg.String()
+
+	// Handle Enter manually to respect focused element — the modal's HandleKey
+	// falls through to primaryAction (submit) when the focused section doesn't
+	// consume Enter, which incorrectly submits when prompt or agent list is focused.
+	if key == "enter" {
+		focusID := p.agentConfigModal.FocusedID()
+		switch {
+		case focusID == agentConfigPromptFieldID:
+			// Open prompt picker
+			p.openPromptPicker(p.agentConfigPrompts, ViewModeAgentConfig)
+			return nil
+		case focusID == agentConfigSubmitID:
+			return p.executeAgentConfig()
+		case focusID == agentConfigCancelID:
+			p.viewMode = ViewModeList
+			p.clearAgentConfigModal()
+			return nil
+		case strings.HasPrefix(focusID, agentConfigAgentItemPrefix):
+			// Enter on agent list item — just absorb (selection already tracked by index)
+			return nil
+		case focusID == agentConfigSkipPermissionsID:
+			// Toggle checkbox
+			p.agentConfigSkipPerms = !p.agentConfigSkipPerms
+			return nil
+		}
+		return nil
+	}
+
+	// Delegate all other keys to the modal
+	prevAgentIdx := p.agentConfigAgentIdx
+	action, cmd := p.agentConfigModal.HandleKey(msg)
+
+	// Sync agent type when selection changes
+	if p.agentConfigAgentIdx != prevAgentIdx {
+		if p.agentConfigAgentIdx >= 0 && p.agentConfigAgentIdx < len(AgentTypeOrder) {
+			p.agentConfigAgentType = AgentTypeOrder[p.agentConfigAgentIdx]
+		}
+	}
+
+	switch action {
+	case "cancel", agentConfigCancelID:
+		p.viewMode = ViewModeList
+		p.clearAgentConfigModal()
+		return nil
+	}
+
+	return cmd
+}
+
+// executeAgentConfig executes the agent config modal action (start or restart).
+func (p *Plugin) executeAgentConfig() tea.Cmd {
+	wt := p.agentConfigWorktree
+	agentType := p.agentConfigAgentType
+	skipPerms := p.agentConfigSkipPerms
+	prompt := p.getAgentConfigPrompt()
+	isRestart := p.agentConfigIsRestart
+
+	p.viewMode = ViewModeList
+	p.clearAgentConfigModal()
+
+	if wt == nil {
+		return nil
+	}
+
+	if isRestart {
+		return tea.Sequence(
+			p.StopAgent(wt),
+			func() tea.Msg {
+				return restartAgentWithOptionsMsg{
+					worktree:  wt,
+					agentType: agentType,
+					skipPerms: skipPerms,
+					prompt:    prompt,
+				}
+			},
+		)
+	}
+	return p.StartAgentWithOptions(wt, agentType, skipPerms, prompt)
+}
+
+// executeAgentChoice executes the selected agent choice action.
+func (p *Plugin) executeAgentChoice() tea.Cmd {
+	wt := p.agentChoiceWorktree
+	idx := p.agentChoiceIdx
+	p.viewMode = ViewModeList
+	p.clearAgentChoiceModal()
+	if wt == nil {
+		return nil
+	}
+	if idx == 0 {
+		// Attach to existing session
+		return p.AttachToSession(wt)
+	}
+	// Restart agent: open config modal to choose options
+	p.openAgentConfigModal(wt, true)
+	return nil
+}
+
+// handleConfirmDeleteKeys handles keys in delete confirmation modal.
+func (p *Plugin) handleConfirmDeleteKeys(msg tea.KeyMsg) tea.Cmd {
+	p.ensureConfirmDeleteModal()
+	if p.deleteConfirmModal == nil {
+		return nil
+	}
+
+	switch msg.String() {
+	case "D":
+		// Power user shortcut - immediate confirm
+		return p.executeDelete()
+	case "esc", "q":
+		return p.cancelDelete()
+	case "j", "down", "l", "right":
+		p.deleteConfirmModal.HandleKey(tea.KeyMsg{Type: tea.KeyTab})
+		return nil
+	case "k", "up", "h", "left":
+		p.deleteConfirmModal.HandleKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+		return nil
+	}
+
+	action, cmd := p.deleteConfirmModal.HandleKey(msg)
+	switch action {
+	case "cancel", deleteConfirmCancelID:
+		return p.cancelDelete()
+	case deleteConfirmDeleteID:
+		return p.executeDelete()
+	}
+	return cmd
+}
+
+// executeDelete performs the actual worktree deletion and cleans up state.
+func (p *Plugin) executeDelete() tea.Cmd {
+	wt := p.deleteConfirmWorktree
+	if wt == nil {
+		p.viewMode = ViewModeList
+		return nil
+	}
+
+	name := wt.Name
+	path := wt.Path
+	branch := wt.Branch
+	isMissing := wt.IsMissing
+	deleteLocal := p.deleteLocalBranchOpt
+	deleteRemote := p.deleteRemoteBranchOpt && p.deleteHasRemote
+	workDir := p.ctx.WorkDir
+
+	// Kill tmux session if it exists (before deleting worktree)
+	sessionName := tmuxSessionPrefix + sanitizeName(name)
+	if sessionExists(sessionName) {
+		_ = exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	}
+	delete(p.managedSessions, sessionName)
+	globalPaneCache.remove(sessionName)
+
+	// Clear modal state
+	p.viewMode = ViewModeList
+	p.clearConfirmDeleteModal()
+
+	// Clear preview pane content
+	p.diffContent = ""
+	p.diffRaw = ""
+	p.cachedTaskID = ""
+	p.cachedTask = nil
+
+	return func() tea.Msg {
+		var warnings []string
+
+		// Delete the worktree first
+		err := doDeleteWorktree(workDir, path, isMissing)
+		if err != nil {
+			return DeleteDoneMsg{Name: name, Err: err}
+		}
+
+		// Delete local branch if requested
+		if deleteLocal {
+			if branchErr := deleteBranch(workDir, branch); branchErr != nil {
+				warnings = append(warnings, fmt.Sprintf("Local branch: %v", branchErr))
+			}
+		}
+
+		// Delete remote branch if requested
+		if deleteRemote {
+			if remoteErr := deleteRemoteBranchCmd(workDir, branch); remoteErr != nil {
+				warnings = append(warnings, fmt.Sprintf("Remote branch: %v", remoteErr))
+			}
+		}
+
+		return DeleteDoneMsg{Name: name, Err: nil, Warnings: warnings}
+	}
+}
+
+// cancelDelete closes the delete confirmation modal without deleting.
+func (p *Plugin) cancelDelete() tea.Cmd {
+	p.viewMode = ViewModeList
+	p.clearConfirmDeleteModal()
+	return nil
+}
+
+func (p *Plugin) clearConfirmDeleteModal() {
+	p.deleteConfirmWorktree = nil
+	p.deleteLocalBranchOpt = false
+	p.deleteRemoteBranchOpt = false
+	p.deleteHasRemote = false
+	p.deleteIsMainBranch = false
+	p.deleteConfirmModal = nil
+	p.deleteConfirmModalWidth = 0
+}
+
+// handleConfirmDeleteShellKeys handles keys in the shell delete confirmation modal.
+func (p *Plugin) handleConfirmDeleteShellKeys(msg tea.KeyMsg) tea.Cmd {
+	p.ensureConfirmDeleteShellModal()
+	if p.deleteShellModal == nil {
+		return nil
+	}
+
+	switch msg.String() {
+	case "D":
+		return p.executeShellDelete()
+	case "esc", "q":
+		return p.cancelShellDelete()
+	case "j", "down", "l", "right":
+		p.deleteShellModal.HandleKey(tea.KeyMsg{Type: tea.KeyTab})
+		return nil
+	case "k", "up", "h", "left":
+		p.deleteShellModal.HandleKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+		return nil
+	}
+
+	action, cmd := p.deleteShellModal.HandleKey(msg)
+	switch action {
+	case "cancel", deleteShellConfirmCancelID:
+		return p.cancelShellDelete()
+	case deleteShellConfirmDeleteID:
+		return p.executeShellDelete()
+	}
+	return cmd
+}
+
+// executeShellDelete performs the shell deletion.
+func (p *Plugin) executeShellDelete() tea.Cmd {
+	shell := p.deleteConfirmShell
+	if shell == nil {
+		p.viewMode = ViewModeList
+		return nil
+	}
+
+	sessionName := shell.TmuxName
+
+	// Clear modal state
+	p.viewMode = ViewModeList
+	p.clearConfirmDeleteShellModal()
+
+	return p.killShellSessionByName(sessionName)
+}
+
+// cancelShellDelete closes the shell delete confirmation modal without deleting.
+func (p *Plugin) cancelShellDelete() tea.Cmd {
+	p.viewMode = ViewModeList
+	p.clearConfirmDeleteShellModal()
+	return nil
+}
+
+func (p *Plugin) clearConfirmDeleteShellModal() {
+	p.deleteConfirmShell = nil
+	p.deleteShellModal = nil
+	p.deleteShellModalWidth = 0
+}
+
+// handleListKeys handles keys in list view (and kanban view).
+func (p *Plugin) handleListKeys(msg tea.KeyMsg) tea.Cmd {
+	// Clear any deletion warnings on key interaction
+	p.deleteWarnings = nil
+
+	switch msg.String() {
+	case "j", "down":
+		if p.viewMode == ViewModeKanban {
+			// Kanban mode: move cursor down within column (no selection change)
+			p.moveKanbanRow(1)
+			return nil
+		}
+		if p.activePane == PaneSidebar {
+			p.moveCursor(1)
+			return p.loadSelectedContent()
+		}
+		// Terminal panel split: switch focus between agent and terminal sub-panes
+		// Only applies on Output tab (or shell view) where the terminal panel is rendered
+		if p.activePane == PanePreview && p.termPanelVisible && p.termPanelLayout == TermPanelBottom && (p.previewTab == PreviewTabOutput || p.shellSelected) {
+			if !p.termPanelFocused {
+				p.termPanelFocused = true
+				return nil
+			}
+			// Already at terminal panel (bottom) — scroll down
+			if p.termPanelScroll > 0 {
+				p.termPanelScroll--
+			}
+			return nil
+		}
+		// Diff tab: route to internal two-pane navigation
+		if p.previewTab == PreviewTabDiff {
+			return p.handleDiffTabKey(msg)
+		}
+		// Scroll down: increase offset (toward bottom of content)
+		maxOffset := p.getMaxScrollOffset()
+		if p.previewOffset < maxOffset {
+			p.previewOffset++
+		}
+		if p.previewTab == PreviewTabOutput || p.shellSelected {
+			if p.previewOffset >= maxOffset {
+				p.autoScrollOutput = true
+			} else {
+				p.autoScrollOutput = false
+			}
+		}
+	case "k", "up":
+		if p.viewMode == ViewModeKanban {
+			// Kanban mode: move cursor up within column (no selection change)
+			p.moveKanbanRow(-1)
+			return nil
+		}
+		if p.activePane == PaneSidebar {
+			p.moveCursor(-1)
+			return p.loadSelectedContent()
+		}
+		// Terminal panel split: switch focus between agent and terminal sub-panes
+		// Only applies on Output tab (or shell view) where the terminal panel is rendered
+		if p.activePane == PanePreview && p.termPanelVisible && p.termPanelLayout == TermPanelBottom && (p.previewTab == PreviewTabOutput || p.shellSelected) {
+			if p.termPanelFocused {
+				p.termPanelFocused = false
+				return nil
+			}
+			// Already at agent (top) — fall through to scroll agent output
+		}
+		// Diff tab: route to internal two-pane navigation
+		if p.previewTab == PreviewTabDiff {
+			return p.handleDiffTabKey(msg)
+		}
+		// Scroll up: decrease offset (toward top of content)
+		if p.previewOffset > 0 {
+			p.previewOffset--
+		}
+		if p.previewTab == PreviewTabOutput || p.shellSelected {
+			p.autoScrollOutput = false
+		}
+	case "g":
+		if p.viewMode == ViewModeKanban {
+			// Kanban mode: jump cursor to top of current column
+			p.kanbanRow = 0
+			return nil
+		}
+		if p.activePane == PaneSidebar {
+			// Jump to top = select first shell if any, otherwise first worktree
+			if len(p.shells) > 0 {
+				p.shellSelected = true
+				p.selectedShellIdx = 0
+				// Exit interactive mode when switching selection (td-fc758e88)
+				p.exitInteractiveMode()
+				p.saveSelectionState()
+			} else if len(p.worktrees) > 0 {
+				p.shellSelected = false
+				p.selectedIdx = 0
+				// Exit interactive mode when switching selection (td-fc758e88)
+				p.exitInteractiveMode()
+				p.saveSelectionState()
+			}
+			p.scrollOffset = 0
+			return p.loadSelectedContent()
+		}
+		// Terminal panel focused: scroll to top of terminal panel output
+		if p.activePane == PanePreview && p.termPanelFocused && p.termPanelVisible && (p.previewTab == PreviewTabOutput || p.shellSelected) {
+			if p.termPanelOutput != nil {
+				p.termPanelScroll = p.termPanelOutput.LineCount() // Will be clamped in render
+			}
+			return nil
+		}
+		// Diff tab: route to internal two-pane navigation
+		if p.previewTab == PreviewTabDiff {
+			return p.handleDiffTabKey(msg)
+		}
+		// Go to top (first line) - pause auto-scroll
+		p.previewOffset = 0
+		if p.previewTab == PreviewTabOutput || p.shellSelected {
+			p.autoScrollOutput = false
+		}
+	case "G":
+		if p.viewMode == ViewModeKanban {
+			// Kanban mode: jump cursor to bottom of current column
+			columns := p.getKanbanColumns()
+			count := p.kanbanColumnItemCount(p.kanbanCol, columns)
+			if count > 0 {
+				p.kanbanRow = count - 1
+			}
+			return nil
+		}
+		if p.activePane == PaneSidebar {
+			// Jump to bottom = select last worktree (not shell)
+			if len(p.worktrees) > 0 {
+				p.shellSelected = false
+				p.selectedIdx = len(p.worktrees) - 1
+				// Exit interactive mode when switching selection (td-fc758e88)
+				p.exitInteractiveMode()
+				p.saveSelectionState()
+				p.ensureVisible()
+				return p.loadSelectedContent()
+			}
+			// No worktrees, stay on shell
+			return nil
+		}
+		// Terminal panel focused: scroll to bottom of terminal panel output
+		if p.activePane == PanePreview && p.termPanelFocused && p.termPanelVisible && (p.previewTab == PreviewTabOutput || p.shellSelected) {
+			p.termPanelScroll = 0
+			return nil
+		}
+		// Diff tab: route to internal two-pane navigation
+		if p.previewTab == PreviewTabDiff {
+			return p.handleDiffTabKey(msg)
+		}
+		// Go to bottom (newest content) - resume auto-scroll
+		p.previewOffset = p.getMaxScrollOffset()
+		if p.previewTab == PreviewTabOutput || p.shellSelected {
+			p.autoScrollOutput = true
+		}
+	case "n":
+		// In diff tab: handle internally (next change navigation)
+		if p.activePane == PanePreview && p.previewTab == PreviewTabDiff {
+			return p.handleDiffTabKey(msg)
+		}
+		// Auto-create a new worker with a Norse name
+		return p.quickCreateWorker()
+	case "D":
+		// Check if deleting a shell session
+		if p.shellSelected && p.selectedShellIdx >= 0 && p.selectedShellIdx < len(p.shells) {
+			p.viewMode = ViewModeConfirmDeleteShell
+			p.deleteConfirmShell = p.shells[p.selectedShellIdx]
+			p.deleteShellModal = nil
+			p.deleteShellModalWidth = 0
+			return nil
+		}
+		// Otherwise delete worktree
+		wt := p.selectedWorktree()
+		if wt == nil {
+			return nil
+		}
+		p.viewMode = ViewModeConfirmDelete
+		p.deleteConfirmWorktree = wt
+		p.deleteLocalBranchOpt = wt.IsMissing // Default ON when folder already gone
+		p.deleteRemoteBranchOpt = false
+		p.deleteHasRemote = false
+		p.deleteIsMainBranch = isMainBranch(p.ctx.WorkDir, wt.Branch)
+		p.deleteConfirmModal = nil
+		p.deleteConfirmModalWidth = 0
+		if p.deleteIsMainBranch {
+			// Main branch is protected: skip branch options
+			return nil
+		}
+		// Check for remote branch existence asynchronously
+		return p.checkRemoteBranch(wt)
+	case "p":
+		return p.pushSelected()
+	case "ctrl+l":
+		if p.activePane == PaneSidebar {
+			p.activePane = PanePreview
+		} else if p.activePane == PanePreview && p.previewTab == PreviewTabDiff {
+			return p.handleDiffTabKey(msg)
+		}
+	case "l", "right":
+		if p.viewMode == ViewModeKanban {
+			p.moveKanbanColumn(1)
+			return nil
+		}
+	case "enter":
+		// In diff tab file list: drill into diff pane
+		if p.activePane == PanePreview && p.previewTab == PreviewTabDiff && p.diffTabFocus == DiffTabFocusFileList {
+			return p.handleDiffTabKey(msg)
+		}
+		// Kanban mode: sync cursor to selection, then fall through to activate
+		if p.viewMode == ViewModeKanban {
+			oldShellSelected := p.shellSelected
+			oldShellIdx := p.selectedShellIdx
+			oldWorktreeIdx := p.selectedIdx
+			p.syncKanbanToList()
+			p.applyKanbanSelectionChange(oldShellSelected, oldShellIdx, oldWorktreeIdx)
+		}
+		// Terminal panel focused: enter interactive mode for the terminal panel
+		if p.termPanelFocused && p.termPanelVisible {
+			if cmd := p.enterTermPanelInteractiveMode(); cmd != nil {
+				return cmd
+			}
+			return nil
+		}
+		// Enter interactive mode (tmux input passthrough) - feature gated
+		// Only from Output tab or sidebar — Diff/Task tabs have no terminal to attach to.
+		if p.activePane != PanePreview || p.previewTab == PreviewTabOutput {
+			// Handle orphaned worktrees: start new agent instead of silently returning nil
+			if !p.shellSelected {
+				wt := p.selectedWorktree()
+				if wt != nil && wt.IsOrphaned && wt.Agent == nil {
+					wt.IsOrphaned = false
+					agentType := p.resolveWorktreeAgentType(wt)
+					return p.StartAgent(wt, agentType)
+				}
+			}
+			if cmd := p.enterInteractiveMode(); cmd != nil {
+				return cmd
+			}
+			// Interactive mode couldn't start — at least load content for the selection
+			return p.loadSelectedContent()
+		}
+	case "t":
+		// Attach to tmux session
+		// Shell entry: attach to selected shell session
+		if p.shellSelected {
+			if p.selectedShellIdx >= 0 && p.selectedShellIdx < len(p.shells) {
+				return p.ensureShellAndAttachByIndex(p.selectedShellIdx)
+			}
+			return nil
+		}
+		wt := p.selectedWorktree()
+		if wt == nil {
+			return nil
+		}
+		// Attach to tmux session if agent running
+		if wt.Agent != nil {
+			p.attachedSession = wt.Name
+			return p.AttachToSession(wt)
+		}
+		// Orphaned worktree: recover by starting new agent
+		if wt.IsOrphaned {
+			// Clear flag immediately for UI feedback; also cleared in AgentStartedMsg
+			// handler when agent actually starts (StartAgent is async)
+			wt.IsOrphaned = false
+			agentType := p.resolveWorktreeAgentType(wt)
+			return p.StartAgent(wt, agentType)
+		}
+		// No agent, not orphaned: focus preview
+		if p.activePane == PaneSidebar {
+			p.activePane = PanePreview
+		}
+	case "ctrl+h":
+		if p.activePane == PanePreview {
+			p.activePane = PaneSidebar
+		}
+	case "h", "left":
+		if p.viewMode == ViewModeKanban {
+			p.moveKanbanColumn(-1)
+			return nil
+		}
+		if p.activePane == PanePreview && p.termPanelVisible && p.termPanelLayout == TermPanelRight && p.termPanelFocused && (p.previewTab == PreviewTabOutput || p.shellSelected) {
+			// Right layout: move focus from terminal panel back to agent
+			p.termPanelFocused = false
+			return nil
+		}
+		if p.activePane == PanePreview && p.previewTab == PreviewTabDiff {
+			return p.handleDiffTabKey(msg)
+		}
+		if p.activePane == PanePreview {
+			p.termPanelFocused = false // Reset when leaving preview
+			p.activePane = PaneSidebar
+		}
+	case "esc":
+		if !p.sidebarVisible {
+			p.toggleSidebar()
+			return p.resizeSelectedPaneCmd()
+		}
+		// In diff tab: handle hierarchical back navigation
+		if p.activePane == PanePreview && p.previewTab == PreviewTabDiff {
+			switch p.diffTabFocus {
+			case DiffTabFocusCommitDiff:
+				p.diffTabFocus = DiffTabFocusCommitFiles
+				p.diffTabDiffScroll = 0
+				p.diffTabHorizScroll = 0
+				return nil
+			case DiffTabFocusCommitFiles:
+				p.diffTabFocus = DiffTabFocusFileList
+				p.commitDetail = nil
+				p.commitFileDiffRaw = ""
+				p.commitFileParsed = nil
+				p.fullFileDiff = nil
+				return nil
+			case DiffTabFocusDiff:
+				p.diffTabFocus = DiffTabFocusFileList
+				return nil
+			}
+		}
+		if p.activePane == PanePreview {
+			p.termPanelFocused = false
+			p.activePane = PaneSidebar
+		}
+	case "+":
+		// Grow sidebar width
+		if p.sidebarVisible {
+			p.sidebarWidth += 3
+			if p.sidebarWidth > 60 {
+				p.sidebarWidth = 60
+			}
+			_ = state.SetWorkspaceSidebarWidth(p.sidebarWidth)
+			if p.viewMode == ViewModeInteractive && p.interactiveState != nil && p.interactiveState.Active {
+				return tea.Batch(p.resizeInteractivePaneCmd(), p.pollInteractivePaneImmediate())
+			}
+			return p.resizeSelectedPaneCmd()
+		}
+
+	case "-":
+		// Shrink sidebar width
+		if p.sidebarVisible {
+			p.sidebarWidth -= 3
+			if p.sidebarWidth < 20 {
+				p.sidebarWidth = 20
+			}
+			_ = state.SetWorkspaceSidebarWidth(p.sidebarWidth)
+			if p.viewMode == ViewModeInteractive && p.interactiveState != nil && p.interactiveState.Active {
+				return tea.Batch(p.resizeInteractivePaneCmd(), p.pollInteractivePaneImmediate())
+			}
+			return p.resizeSelectedPaneCmd()
+		}
+
+	case "\\":
+		p.toggleSidebar()
+		if p.viewMode == ViewModeInteractive {
+			// Poll captures cursor atomically - no separate query needed
+			resizeCmds := []tea.Cmd{p.resizeInteractivePaneCmd(), p.pollInteractivePaneImmediate()}
+			// Also resize the non-interactive pane so both sides match
+			if p.termPanelVisible && p.interactiveState != nil {
+				if p.interactiveState.TermPanel {
+					resizeCmds = append(resizeCmds, p.resizeSelectedPaneCmd())
+				} else {
+					resizeCmds = append(resizeCmds, p.resizeTermPanelPaneCmd())
+				}
+			}
+			return tea.Batch(resizeCmds...)
+		}
+		resizeCmds := []tea.Cmd{p.resizeSelectedPaneCmd()}
+		if p.termPanelVisible {
+			resizeCmds = append(resizeCmds, p.resizeTermPanelPaneCmd())
+		}
+		if !p.sidebarVisible {
+			resizeCmds = append(resizeCmds, appmsg.ShowToast("Sidebar hidden (\\ to restore)", 2*time.Second))
+		}
+		return tea.Batch(resizeCmds...)
+	case "tab", "shift+tab":
+		// Switch focus between panes (consistent with other plugins)
+		if p.activePane == PaneSidebar && p.sidebarVisible {
+			p.activePane = PanePreview
+		} else if p.activePane == PanePreview && p.sidebarVisible {
+			p.activePane = PaneSidebar
+		}
+	case "[":
+		return p.cyclePreviewTab(-1)
+	case "]":
+		return p.cyclePreviewTab(1)
+	case "{":
+		// Jump to previous file in diff tab
+		if p.activePane == PanePreview && p.previewTab == PreviewTabDiff {
+			return p.jumpToPrevFile()
+		}
+	case "}":
+		// Jump to next file in diff tab
+		if p.activePane == PanePreview && p.previewTab == PreviewTabDiff {
+			return p.jumpToNextFile()
+		}
+	case "f":
+		// In diff tab with diff pane focused: open file picker (legacy support)
+		if p.activePane == PanePreview && p.previewTab == PreviewTabDiff {
+			return p.openFilePicker()
+		}
+	case "r":
+		return func() tea.Msg { return RefreshMsg{} }
+	case "i":
+		// Legacy shortcut for interactive mode (enter is now primary)
+		// Only from Output tab or sidebar — Diff/Task tabs have no terminal.
+		if p.activePane != PanePreview || p.previewTab == PreviewTabOutput {
+			return p.enterInteractiveMode()
+		}
+	case "v":
+		// In preview pane on diff tab: cycle view mode
+		if p.activePane == PanePreview && p.previewTab == PreviewTabDiff {
+			return p.handleDiffTabKey(msg)
+		} else if p.activePane == PaneSidebar || p.viewMode == ViewModeKanban {
+			switch p.viewMode {
+			case ViewModeList:
+				p.viewMode = ViewModeKanban
+				p.syncListToKanban()
+				return p.pollAllAgentStatusesNow()
+			case ViewModeKanban:
+				p.viewMode = ViewModeList
+				return p.pollSelectedAgentNowIfVisible()
+			}
+		}
+	case "V":
+		// In preview pane on diff tab: cycle view mode (unified → side-by-side → full-file)
+		if p.activePane == PanePreview && p.previewTab == PreviewTabDiff {
+			return p.handleDiffTabKey(msg)
+		}
+	case "ctrl+d":
+		// Page down in preview pane (unified: increase offset toward bottom)
+		if p.activePane == PanePreview {
+			if p.previewTab == PreviewTabDiff {
+				return p.handleDiffTabKey(msg)
+			}
+			pageSize := p.height / 2
+			if pageSize < 5 {
+				pageSize = 5
+			}
+			// Terminal panel focused: scroll terminal panel
+			if p.termPanelFocused && p.termPanelVisible {
+				if p.termPanelScroll > pageSize {
+					p.termPanelScroll -= pageSize
+				} else {
+					p.termPanelScroll = 0
+				}
+				return nil
+			}
+			maxOffset := p.getMaxScrollOffset()
+			p.previewOffset += pageSize
+			if p.previewOffset > maxOffset {
+				p.previewOffset = maxOffset
+			}
+			if (p.previewTab == PreviewTabOutput || p.shellSelected) && p.previewOffset >= maxOffset {
+				p.autoScrollOutput = true
+			}
+		}
+	case "ctrl+u":
+		// Page up in preview pane (unified: decrease offset toward top)
+		if p.activePane == PanePreview {
+			if p.previewTab == PreviewTabDiff {
+				return p.handleDiffTabKey(msg)
+			}
+			pageSize := p.height / 2
+			if pageSize < 5 {
+				pageSize = 5
+			}
+			// Terminal panel focused: scroll terminal panel
+			if p.termPanelFocused && p.termPanelVisible {
+				p.termPanelScroll += pageSize
+				return nil
+			}
+			p.previewOffset -= pageSize
+			if p.previewOffset < 0 {
+				p.previewOffset = 0
+			}
+			if p.previewTab == PreviewTabOutput || p.shellSelected {
+				p.autoScrollOutput = false
+			}
+		}
+	// Agent control keys
+	case "s":
+		// Start agent on selected worktree
+		wt := p.selectedWorktree()
+		if wt == nil {
+			return nil
+		}
+		if wt.Agent == nil {
+			// No agent running - open agent config modal
+			p.openAgentConfigModal(wt, false)
+			return nil
+		}
+		// Agent exists - show choice modal (attach or restart)
+		p.agentChoiceWorktree = wt
+		p.agentChoiceIdx = 0 // Default to attach
+		p.viewMode = ViewModeAgentChoice
+		return nil
+	case "S":
+		// Stop agent on selected worktree
+		wt := p.selectedWorktree()
+		if wt != nil && wt.Agent != nil {
+			return p.StopAgent(wt)
+		}
+	case "K":
+		// Kill selected shell session
+		if p.shellSelected && p.selectedShellIdx >= 0 && p.selectedShellIdx < len(p.shells) {
+			shell := p.shells[p.selectedShellIdx]
+			if shell.Agent != nil {
+				return p.killShellSessionByName(shell.TmuxName)
+			}
+		}
+	case "R":
+		// Rename selected shell session
+		if p.shellSelected && p.selectedShellIdx >= 0 && p.selectedShellIdx < len(p.shells) {
+			shell := p.shells[p.selectedShellIdx]
+			p.viewMode = ViewModeRenameShell
+			p.renameShellSession = shell
+			p.renameShellInput = textinput.New()
+			p.renameShellInput.SetValue(shell.Name)
+			p.renameShellInput.CharLimit = 50
+			p.renameShellInput.Width = 30
+			p.renameShellInput.Prompt = ""
+			p.renameShellError = ""
+		}
+	case "y":
+		// Approve pending prompt on selected worktree
+		wt := p.selectedWorktree()
+		if wt != nil && wt.Status == StatusWaiting && wt.Agent != nil {
+			return p.Approve(wt)
+		}
+	case "Y":
+		// Approve all pending prompts
+		return p.ApproveAll()
+	case "N":
+		// In diff tab: handle internally (prev change navigation)
+		if p.activePane == PanePreview && p.previewTab == PreviewTabDiff {
+			return p.handleDiffTabKey(msg)
+		}
+		// Reject pending prompt on selected worktree
+		wt := p.selectedWorktree()
+		if wt != nil && wt.Status == StatusWaiting && wt.Agent != nil {
+			return p.Reject(wt)
+		}
+	case "T":
+		// Link/unlink td task
+		wt := p.selectedWorktree()
+		if wt != nil {
+			if wt.TaskID != "" {
+				// Already linked - unlink
+				return p.unlinkTask(wt)
+			}
+			// No task linked - show task link modal
+			p.viewMode = ViewModeTaskLink
+			p.linkingWorktree = wt
+			p.taskSearchInput = textinput.New()
+			p.taskSearchInput.Placeholder = "Search tasks..."
+			p.taskSearchInput.Focus()
+			p.taskSearchInput.CharLimit = 100
+			p.taskSearchIdx = 0
+			p.taskSearchLoading = true
+			return p.loadOpenTasks()
+		}
+	case "F":
+		// Fetch remote PR as workspace
+		p.viewMode = ViewModeFetchPR
+		p.fetchPRLoading = true
+		p.fetchPRFilter = ""
+		p.fetchPRCursor = 0
+		p.fetchPRError = ""
+		return p.fetchPRList()
+	case "m":
+		// In preview pane on task tab: toggle markdown render mode
+		// Otherwise: start merge workflow
+		if p.activePane == PanePreview && p.previewTab == PreviewTabTask {
+			p.taskMarkdownMode = !p.taskMarkdownMode
+			// Clear cached render to force re-render on mode change
+			p.taskMarkdownRendered = nil
+			return nil
+		}
+		// Start merge workflow
+		wt := p.selectedWorktree()
+		if wt != nil {
+			return p.startMergeWorkflow(wt)
+		}
+	case "O":
+		// Open selected worktree in git tab - switch to worktree and focus git plugin
+		wt := p.selectedWorktree()
+		if wt != nil {
+			return p.openInGitTab(wt)
+		}
+	case "ctrl+t":
+		// Toggle terminal panel visibility (on/off with last layout)
+		p.ctx.Logger.Debug("termPanel: ctrl+t pressed", "currentlyVisible", p.termPanelVisible)
+		return p.toggleTermPanel()
+	case "alt+t":
+		// Switch terminal panel layout direction (bottom ↔ right)
+		p.ctx.Logger.Debug("termPanel: alt+t pressed, switching layout")
+		return p.switchTermPanelLayout()
+	default:
+		// Unhandled key in preview pane - flash to indicate attach is needed
+		// Only flash on the Output tab where there's a terminal to attach to.
+		// Diff and Task tabs have no interactive terminal.
+		if p.activePane == PanePreview && p.previewTab == PreviewTabOutput {
+			canAttach := p.shellSelected || (p.selectedWorktree() != nil && p.selectedWorktree().Agent != nil)
+			if canAttach {
+				p.flashPreviewTime = time.Now()
+			}
+		}
+	}
+	return nil
+}
+
+// handleCreateKeys handles keys in create modal.
+// createFocus: 0=name, 1=base, 2=prompt, 3=task, 4=agent, 5=skipPerms, 6=create button, 7=cancel button
+func (p *Plugin) handleCreateKeys(msg tea.KeyMsg) tea.Cmd {
+	p.ensureCreateModal()
+	if p.createModal == nil {
+		return nil
+	}
+
+	focusID := p.createModal.FocusedID()
+
+	switch msg.String() {
+	case "esc":
+		p.viewMode = ViewModeList
+		p.clearCreateModal()
+		return nil
+	case "tab":
+		p.blurCreateInputs()
+		p.createFocus = (p.createFocus + 1) % 8
+		p.normalizeCreateFocus()
+		p.focusCreateInput()
+		p.syncCreateModalFocus()
+		return nil
+	case "shift+tab":
+		p.blurCreateInputs()
+		p.createFocus = (p.createFocus + 7) % 8
+		p.normalizeCreateFocus()
+		p.focusCreateInput()
+		p.syncCreateModalFocus()
+		return nil
+	case "backspace":
+		if p.createFocus == 3 && p.createTaskID != "" {
+			p.createTaskID = ""
+			p.createTaskTitle = ""
+			p.taskSearchInput.SetValue("")
+			p.taskSearchInput.Focus()
+			p.taskSearchFiltered = filterTasks("", p.taskSearchAll)
+			p.taskSearchIdx = 0
+			p.syncCreateModalFocus()
+			return nil
+		}
+	case " ":
+		if p.createFocus == 5 {
+			p.createSkipPermissions = !p.createSkipPermissions
+			return nil
+		}
+	case "up":
+		if p.createFocus == 1 && len(p.branchFiltered) > 0 {
+			if p.branchIdx > 0 {
+				p.branchIdx--
+			}
+			return nil
+		}
+		if p.createFocus == 3 && len(p.taskSearchFiltered) > 0 {
+			if p.taskSearchIdx > 0 {
+				p.taskSearchIdx--
+			}
+			return nil
+		}
+	case "down":
+		if p.createFocus == 1 && len(p.branchFiltered) > 0 {
+			if p.branchIdx < len(p.branchFiltered)-1 {
+				p.branchIdx++
+			}
+			return nil
+		}
+		if p.createFocus == 3 && len(p.taskSearchFiltered) > 0 {
+			if p.taskSearchIdx < len(p.taskSearchFiltered)-1 {
+				p.taskSearchIdx++
+			}
+			return nil
+		}
+	case "enter":
+		if idx, ok := parseIndexedID(createBranchItemPrefix, focusID); ok && idx < len(p.branchFiltered) {
+			p.createBaseBranchInput.SetValue(p.branchFiltered[idx])
+			p.branchFiltered = nil
+			p.syncCreateModalFocus()
+			return nil
+		}
+		if idx, ok := parseIndexedID(createTaskItemPrefix, focusID); ok && idx < len(p.taskSearchFiltered) {
+			task := p.taskSearchFiltered[idx]
+			p.createTaskID = task.ID
+			p.createTaskTitle = task.Title
+			p.taskSearchInput.Blur()
+			p.createFocus = 4
+			p.syncCreateModalFocus()
+			return nil
+		}
+		if focusID == createPromptFieldID {
+			p.openPromptPicker(p.createPrompts, ViewModeCreate)
+			return nil
+		}
+		if focusID == createSubmitID {
+			return p.validateAndCreateWorktree()
+		}
+		if focusID == createCancelID {
+			p.viewMode = ViewModeList
+			p.clearCreateModal()
+			return nil
+		}
+		if p.createFocus == 1 && len(p.branchFiltered) > 0 {
+			selectedBranch := p.branchFiltered[p.branchIdx]
+			p.createBaseBranchInput.SetValue(selectedBranch)
+			p.createFocus = 2
+			p.focusCreateInput()
+			p.syncCreateModalFocus()
+			return nil
+		}
+		if p.createFocus == 2 {
+			p.openPromptPicker(p.createPrompts, ViewModeCreate)
+			return nil
+		}
+		if p.createFocus == 3 && len(p.taskSearchFiltered) > 0 {
+			selectedTask := p.taskSearchFiltered[p.taskSearchIdx]
+			p.createTaskID = selectedTask.ID
+			p.createTaskTitle = selectedTask.Title
+			p.taskSearchInput.Blur()
+			p.createFocus = 4
+			p.syncCreateModalFocus()
+			return nil
+		}
+		if p.createFocus == 6 {
+			return p.validateAndCreateWorktree()
+		}
+		if p.createFocus == 7 {
+			p.viewMode = ViewModeList
+			p.clearCreateModal()
+			return nil
+		}
+		if p.createFocus < 2 {
+			p.createFocus++
+			p.focusCreateInput()
+			p.syncCreateModalFocus()
+			return nil
+		}
+	}
+
+	wasAgentIdx := p.createAgentIdx
+	action, cmd := p.createModal.HandleKey(msg)
+	if p.createAgentIdx != wasAgentIdx && p.createAgentIdx < len(AgentTypeOrder) {
+		p.createAgentType = AgentTypeOrder[p.createAgentIdx]
+		p.syncCreateModalFocus()
+	}
+
+	if action == createSubmitID && focusID != createSubmitID {
+		return cmd
+	}
+	if action == "cancel" || action == createCancelID {
+		p.viewMode = ViewModeList
+		p.clearCreateModal()
+		return nil
+	}
+
+	// Delegate to task input for all other keys.
+	p.createError = ""
+	switch p.createFocus {
+	case 0:
+		name := p.createNameInput.Value()
+		p.branchNameValid, p.branchNameErrors, p.branchNameSanitized = ValidateBranchName(name)
+	case 1:
+		p.branchFiltered = filterBranches(p.createBaseBranchInput.Value(), p.branchAll)
+		p.branchIdx = 0
+	case 3:
+		if p.createTaskID == "" {
+			p.taskSearchInput, cmd = p.taskSearchInput.Update(msg)
+			p.taskSearchFiltered = filterTasks(p.taskSearchInput.Value(), p.taskSearchAll)
+			p.taskSearchIdx = 0
+		}
+	}
+
+	return cmd
+}
+
+func (p *Plugin) validateAndCreateWorktree() tea.Cmd {
+	name := p.createNameInput.Value()
+	if name == "" {
+		p.createError = "Name is required"
+		return nil
+	}
+	if !p.branchNameValid {
+		p.createError = "Invalid branch name: " + strings.Join(p.branchNameErrors, ", ")
+		return nil
+	}
+	return p.createWorktree()
+}
+
+// shouldShowSkipPermissions returns true if the current agent type supports skip permissions.
+func (p *Plugin) shouldShowSkipPermissions() bool {
+	if p.createAgentType == AgentNone {
+		return false
+	}
+	flag := SkipPermissionsFlags[p.createAgentType]
+	return flag != ""
+}
+
+// shouldShowShellSkipPerms returns true if the selected shell agent supports skip permissions.
+// td-a902fe: Used in type selector modal when Shell is selected with an agent.
+func (p *Plugin) shouldShowShellSkipPerms() bool {
+	if p.typeSelectorAgentType == AgentNone {
+		return false
+	}
+	return SkipPermissionsFlags[p.typeSelectorAgentType] != ""
+}
+
+func (p *Plugin) agentTypeIndex(agentType AgentType) int {
+	for i, at := range AgentTypeOrder {
+		if at == agentType {
+			return i
+		}
+	}
+	return 0
+}
+
+// blurCreateInputs blurs all create modal textinputs.
+func (p *Plugin) blurCreateInputs() {
+	p.createNameInput.Blur()
+	p.createBaseBranchInput.Blur()
+	p.taskSearchInput.Blur()
+}
+
+// focusCreateInput focuses the appropriate textinput based on createFocus.
+// createFocus: 0=name, 1=base, 2=prompt (no textinput), 3=task, 4+=non-inputs
+func (p *Plugin) focusCreateInput() {
+	switch p.createFocus {
+	case 0:
+		p.createNameInput.Focus()
+	case 1:
+		p.createBaseBranchInput.Focus()
+	// case 2 is prompt field - no textinput to focus (opens picker on Enter)
+	case 3:
+		p.taskSearchInput.Focus()
+	}
+}
+
+// handleTaskLinkKeys handles keys in task link modal.
+func (p *Plugin) handleTaskLinkKeys(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc":
+		p.viewMode = ViewModeList
+		p.linkingWorktree = nil
+		p.taskSearchInput = textinput.Model{}
+		p.taskSearchAll = nil
+		p.taskSearchFiltered = nil
+		p.taskSearchIdx = 0
+		return nil
+	case "up":
+		if len(p.taskSearchFiltered) > 0 && p.taskSearchIdx > 0 {
+			p.taskSearchIdx--
+		}
+		return nil
+	case "down":
+		if len(p.taskSearchFiltered) > 0 && p.taskSearchIdx < len(p.taskSearchFiltered)-1 {
+			p.taskSearchIdx++
+		}
+		return nil
+	case "enter":
+		if len(p.taskSearchFiltered) > 0 && p.linkingWorktree != nil {
+			selectedTask := p.taskSearchFiltered[p.taskSearchIdx]
+			wt := p.linkingWorktree
+			p.viewMode = ViewModeList
+			p.linkingWorktree = nil
+			p.taskSearchInput = textinput.Model{}
+			p.taskSearchAll = nil
+			p.taskSearchFiltered = nil
+			p.taskSearchIdx = 0
+			return p.linkTask(wt, selectedTask.ID)
+		}
+		return nil
+	}
+
+	// Delegate to textinput for all other keys (typing, backspace, paste, etc.)
+	var cmd tea.Cmd
+	p.taskSearchInput, cmd = p.taskSearchInput.Update(msg)
+	// Update filtered results on input change
+	p.taskSearchFiltered = filterTasks(p.taskSearchInput.Value(), p.taskSearchAll)
+	p.taskSearchIdx = 0
+	return cmd
+}
+
+// handleMergeKeys handles keys in merge workflow modal.
+func (p *Plugin) handleMergeKeys(msg tea.KeyMsg) tea.Cmd {
+	if p.mergeState == nil {
+		p.viewMode = ViewModeList
+		return nil
+	}
+
+	// Ensure modal is built for key handling
+	p.ensureMergeModal()
+
+	// Handle error step — yank, dismiss
+	if p.mergeState.Step == MergeStepError {
+		switch msg.String() {
+		case "y":
+			return p.yankMergeErrorToClipboard()
+		case "esc", "q", "enter":
+			p.cancelMergeWorkflow()
+			p.clearMergeModal()
+			return nil
+		}
+		if p.mergeModal != nil {
+			action, cmd := p.mergeModal.HandleKey(msg)
+			if action == "dismiss" || action == "cancel" {
+				p.cancelMergeWorkflow()
+				p.clearMergeModal()
+				return nil
+			}
+			return cmd
+		}
+		return nil
+	}
+
+	// For PostMergeConfirmation step, delegate to modal library for Tab/Enter/Space
+	if p.mergeState.Step == MergeStepPostMergeConfirmation && p.mergeModal != nil {
+		action, cmd := p.mergeModal.HandleKey(msg)
+		switch action {
+		case "cancel":
+			p.cancelMergeWorkflow()
+			p.clearMergeModal()
+			return nil
+		case mergeCleanUpButtonID:
+			return p.advanceMergeStep()
+		case mergeSkipButtonID:
+			p.mergeState.DeleteLocalWorktree = false
+			p.mergeState.DeleteLocalBranch = false
+			p.mergeState.DeleteRemoteBranch = false
+			p.mergeState.PullAfterMerge = false
+			return p.advanceMergeStep()
+		case "":
+			// Modal handled internally (Tab cycling, checkbox toggle, etc.)
+			if cmd != nil {
+				return cmd
+			}
+			// Fall through to custom key handling
+		default:
+			// Unhandled action from modal
+			return cmd
+		}
+	}
+
+	switch msg.String() {
+	case "esc", "q":
+		p.cancelMergeWorkflow()
+		p.clearMergeModal()
+		return nil
+
+	case "enter":
+		// Continue to next step based on current step
+		switch p.mergeState.Step {
+		case MergeStepReviewDiff:
+			// User reviewed diff, proceed to target branch selection
+			return p.advanceMergeStep()
+		case MergeStepTargetBranch:
+			// User selected target branch, proceed to merge method
+			return p.advanceMergeStep()
+		case MergeStepMergeMethod:
+			// User selected merge method, proceed
+			return p.advanceMergeStep()
+		case MergeStepWaitingMerge:
+			// Manual check for merge status
+			return p.checkPRMerged(p.mergeState.Worktree)
+		case MergeStepPostMergeConfirmation:
+			// Already handled by modal library above
+			return nil
+		case MergeStepDone:
+			// Close modal
+			p.cancelMergeWorkflow()
+			p.clearMergeModal()
+		}
+
+	case "up", "k":
+		switch p.mergeState.Step {
+		case MergeStepTargetBranch:
+			if p.mergeState.TargetBranchOption > 0 {
+				p.mergeState.TargetBranchOption--
+				p.clearMergeModal()
+			}
+		case MergeStepMergeMethod:
+			// Select PR workflow (option 0)
+			p.mergeState.MergeMethodOption = 0
+			p.clearMergeModal() // Rebuild with new selection
+		case MergeStepWaitingMerge:
+			// Select "Delete worktree after merge"
+			p.mergeState.DeleteAfterMerge = true
+		}
+
+	case "down", "j":
+		switch p.mergeState.Step {
+		case MergeStepTargetBranch:
+			if p.mergeState.TargetBranchOption < len(p.mergeState.TargetBranches)-1 {
+				p.mergeState.TargetBranchOption++
+				p.clearMergeModal()
+			}
+		case MergeStepMergeMethod:
+			// Select direct merge (option 1)
+			p.mergeState.MergeMethodOption = 1
+			p.clearMergeModal() // Rebuild with new selection
+		case MergeStepWaitingMerge:
+			// Select "Keep worktree"
+			p.mergeState.DeleteAfterMerge = false
+		}
+
+	case "s":
+		// Skip current step (for pushing, creating PR)
+		switch p.mergeState.Step {
+		case MergeStepReviewDiff:
+			// Skip push step if already pushed
+			p.mergeState.StepStatus[MergeStepReviewDiff] = "done"
+			p.mergeState.Step = MergeStepPush
+			return p.advanceMergeStep()
+		}
+
+	case "o":
+		// Open PR in browser (only during WaitingMerge step with a PR URL)
+		if p.mergeState.Step == MergeStepWaitingMerge && p.mergeState.PRURL != "" {
+			return openInBrowser(p.mergeState.PRURL)
+		}
+
+	case "y":
+		// Copy PR URL to clipboard (only during WaitingMerge step with a PR URL)
+		if p.mergeState.Step == MergeStepWaitingMerge && p.mergeState.PRURL != "" {
+			return p.yankPRURLToClipboard()
+		}
+
+	case "d":
+		// Toggle error details in Done step
+		if p.mergeState.Step == MergeStepDone &&
+			p.mergeState.CleanupResults != nil &&
+			p.mergeState.CleanupResults.PullError != nil {
+			p.mergeState.CleanupResults.ShowErrorDetails = !p.mergeState.CleanupResults.ShowErrorDetails
+			p.clearMergeModal() // Rebuild with toggled details
+		}
+		return nil
+
+	case "r":
+		// Rebase action (only when branch diverged in Done step)
+		if p.mergeState.Step == MergeStepDone &&
+			p.mergeState.CleanupResults != nil &&
+			p.mergeState.CleanupResults.BranchDiverged {
+			return p.executeRebaseResolution()
+		}
+		return nil
+
+	case "m":
+		// Merge action (only when branch diverged in Done step)
+		// Note: 'm' in list view starts merge workflow, but here we're in MergeStepDone
+		if p.mergeState.Step == MergeStepDone &&
+			p.mergeState.CleanupResults != nil &&
+			p.mergeState.CleanupResults.BranchDiverged {
+			return p.executeMergeResolution()
+		}
+		return nil
+	}
+	return nil
+}
+
+// handleCommitForMergeKeys handles keys in the commit-before-merge modal.
+func (p *Plugin) handleCommitForMergeKeys(msg tea.KeyMsg) tea.Cmd {
+	p.ensureCommitForMergeModal()
+	if p.commitForMergeModal == nil {
+		return nil
+	}
+
+	// Clear error when input is focused and user types
+	if p.commitForMergeModal.FocusedID() == commitForMergeInputID {
+		p.mergeCommitState.Error = ""
+	}
+
+	action, cmd := p.commitForMergeModal.HandleKey(msg)
+	switch action {
+	case "cancel", commitForMergeCancelID:
+		p.mergeCommitState = nil
+		p.mergeCommitMessageInput = textinput.Model{}
+		p.clearCommitForMergeModal()
+		p.viewMode = ViewModeList
+		return nil
+	case commitForMergeActionID, commitForMergeCommitID:
+		message := p.mergeCommitMessageInput.Value()
+		if message == "" {
+			p.mergeCommitState.Error = "Commit message cannot be empty"
+			return nil
+		}
+		p.mergeCommitState.Error = ""
+		return p.stageAllAndCommit(p.mergeCommitState.Worktree, message)
+	}
+	return cmd
+}
+
+// handleRenameShellKeys handles keys in the rename shell modal.
+func (p *Plugin) handleRenameShellKeys(msg tea.KeyMsg) tea.Cmd {
+	p.ensureRenameShellModal()
+	if p.renameShellModal == nil {
+		return nil
+	}
+
+	// Clear error on typing when input is focused
+	if p.renameShellModal.FocusedID() == renameShellInputID {
+		p.renameShellError = ""
+	}
+
+	action, cmd := p.renameShellModal.HandleKey(msg)
+
+	switch action {
+	case "cancel", renameShellCancelID:
+		p.viewMode = ViewModeList
+		p.clearRenameShellModal()
+		return nil
+	case renameShellActionID, renameShellRenameID:
+		return p.executeRenameShell()
+	}
+
+	return cmd
+}
+
+// executeRenameShell performs the rename operation.
+func (p *Plugin) executeRenameShell() tea.Cmd {
+	newName := strings.TrimSpace(p.renameShellInput.Value())
+
+	// Validation
+	if newName == "" {
+		p.renameShellError = "Name cannot be empty"
+		return nil
+	}
+
+	if len(newName) > 50 {
+		p.renameShellError = "Name too long (max 50 characters)"
+		return nil
+	}
+
+	// Check for duplicates
+	for _, shell := range p.shells {
+		if shell.Name == newName && shell.TmuxName != p.renameShellSession.TmuxName {
+			p.renameShellError = "Name already in use"
+			return nil
+		}
+	}
+
+	shell := p.renameShellSession
+	tmuxName := shell.TmuxName
+
+	// Clear modal state
+	p.viewMode = ViewModeList
+	p.clearRenameShellModal()
+
+	return func() tea.Msg {
+		// Rename is just a local state change - no tmux operation needed
+		return RenameShellDoneMsg{
+			TmuxName: tmuxName,
+			NewName:  newName,
+			Err:      nil,
+		}
+	}
+}
+
+// clearRenameShellModal clears rename modal state.
+func (p *Plugin) clearRenameShellModal() {
+	p.renameShellSession = nil
+	p.renameShellInput = textinput.Model{}
+	p.renameShellModal = nil
+	p.renameShellModalWidth = 0
+	p.renameShellError = ""
+}
+
+// handleFilePickerKeys handles keys in the file picker modal.
+func (p *Plugin) handleFilePickerKeys(msg tea.KeyMsg) tea.Cmd {
+	if p.multiFileDiff == nil || len(p.multiFileDiff.Files) == 0 {
+		p.viewMode = ViewModeList
+		return nil
+	}
+
+	fileCount := len(p.multiFileDiff.Files)
+
+	switch msg.String() {
+	case "esc", "q":
+		p.viewMode = ViewModeList
+		return nil
+	case "j", "down":
+		p.filePickerIdx++
+		if p.filePickerIdx >= fileCount {
+			p.filePickerIdx = fileCount - 1
+		}
+		return nil
+	case "k", "up":
+		p.filePickerIdx--
+		if p.filePickerIdx < 0 {
+			p.filePickerIdx = 0
+		}
+		return nil
+	case "g":
+		p.filePickerIdx = 0
+		return nil
+	case "G":
+		p.filePickerIdx = fileCount - 1
+		return nil
+	case "enter":
+		// Jump to selected file in the diff tab file list
+		var cmd tea.Cmd
+		if p.filePickerIdx >= 0 && p.filePickerIdx < fileCount {
+			oldCursor := p.diffTabCursor
+			p.diffTabCursor = p.filePickerIdx
+			cmd = p.onDiffTabCursorChanged(oldCursor)
+		}
+		p.viewMode = ViewModeList
+		return cmd
+	}
+	return nil
+}
+
+// openFilePicker opens the file picker modal.
+func (p *Plugin) openFilePicker() tea.Cmd {
+	if p.multiFileDiff == nil || len(p.multiFileDiff.Files) <= 1 {
+		return nil
+	}
+
+	// Set initial selection to current file, clamped to file list range
+	p.filePickerIdx = p.diffTabCursor
+	maxIdx := len(p.multiFileDiff.Files) - 1
+	if p.filePickerIdx > maxIdx {
+		p.filePickerIdx = maxIdx
+	}
+	if p.filePickerIdx < 0 {
+		p.filePickerIdx = 0
+	}
+	p.viewMode = ViewModeFilePicker
+	return nil
+}
+
+// handleDiffTabKey handles key events within the diff tab's two-pane layout.
+// Routes to file list navigation or diff pane scrolling based on diffTabFocus.
+func (p *Plugin) handleDiffTabKey(msg tea.KeyMsg) tea.Cmd {
+	switch p.diffTabFocus {
+	case DiffTabFocusDiff:
+		return p.handleDiffTabDiffPaneKey(msg)
+	case DiffTabFocusCommitFiles:
+		return p.handleCommitFilesKey(msg)
+	case DiffTabFocusCommitDiff:
+		return p.handleCommitDiffPaneKey(msg)
+	default:
+		return p.handleDiffTabFileListKey(msg)
+	}
+}
+
+// handleDiffTabFileListKey handles keys when the diff tab file list is focused.
+func (p *Plugin) handleDiffTabFileListKey(msg tea.KeyMsg) tea.Cmd {
+	totalItems := p.diffTabTotalItems()
+
+	switch msg.String() {
+	case "j", "down":
+		if p.diffTabCursor < totalItems-1 {
+			oldCursor := p.diffTabCursor
+			p.diffTabCursor++
+			return p.onDiffTabCursorChanged(oldCursor)
+		}
+	case "k", "up":
+		if p.diffTabCursor > 0 {
+			oldCursor := p.diffTabCursor
+			p.diffTabCursor--
+			return p.onDiffTabCursorChanged(oldCursor)
+		}
+	case "g":
+		if p.diffTabCursor != 0 {
+			oldCursor := p.diffTabCursor
+			p.diffTabCursor = 0
+			p.diffTabScroll = 0
+			return p.onDiffTabCursorChanged(oldCursor)
+		}
+	case "G":
+		if totalItems > 0 && p.diffTabCursor != totalItems-1 {
+			oldCursor := p.diffTabCursor
+			p.diffTabCursor = totalItems - 1
+			return p.onDiffTabCursorChanged(oldCursor)
+		}
+	case "l", "right", "enter":
+		if p.diffTabCursor < p.diffTabFileCount() {
+			// Drill into diff pane for a file
+			p.diffTabFocus = DiffTabFocusDiff
+		} else {
+			// Drill into a commit — load commit detail and show its files
+			commitIdx := p.diffTabCursor - p.diffTabFileCount()
+			if commitIdx >= 0 && commitIdx < len(p.commitStatusList) {
+				commit := p.commitStatusList[commitIdx]
+				p.diffTabFocus = DiffTabFocusCommitFiles
+				p.commitDetail = nil // Will be loaded async
+				p.commitFileCursor = 0
+				p.commitFileScroll = 0
+				p.commitFileDiffRaw = ""
+				p.commitFileParsed = nil
+				return p.loadCommitDetail(commit.Hash)
+			}
+		}
+	case "h", "left":
+		// Go back to workspace sidebar
+		p.activePane = PaneSidebar
+	case "v", "V":
+		return p.cycleDiffTabViewMode()
+	}
+	return nil
+}
+
+// handleDiffTabDiffPaneKey handles keys when the diff tab diff pane is focused.
+func (p *Plugin) handleDiffTabDiffPaneKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "j", "down":
+		p.diffTabDiffScroll++
+		// Clamp to max scroll position
+		lines := p.countDiffTabDiffLines()
+		maxScroll := lines - (p.height - 6)
+		if maxScroll < 0 {
+			maxScroll = 0
+		}
+		if p.diffTabDiffScroll > maxScroll {
+			p.diffTabDiffScroll = maxScroll
+		}
+	case "k", "up":
+		if p.diffTabDiffScroll > 0 {
+			p.diffTabDiffScroll--
+		}
+	case "g":
+		p.diffTabDiffScroll = 0
+		p.diffTabHorizScroll = 0
+	case "G":
+		lines := p.countDiffTabDiffLines()
+		maxScroll := lines - (p.height - 6)
+		if maxScroll < 0 {
+			maxScroll = 0
+		}
+		p.diffTabDiffScroll = maxScroll
+	case "ctrl+d":
+		p.diffTabDiffScroll += 10
+		// Clamp
+		lines := p.countDiffTabDiffLines()
+		maxScroll := lines - (p.height - 6)
+		if maxScroll < 0 {
+			maxScroll = 0
+		}
+		if p.diffTabDiffScroll > maxScroll {
+			p.diffTabDiffScroll = maxScroll
+		}
+	case "ctrl+u":
+		p.diffTabDiffScroll -= 10
+		if p.diffTabDiffScroll < 0 {
+			p.diffTabDiffScroll = 0
+		}
+	case "esc":
+		// Go back to file list
+		p.diffTabFocus = DiffTabFocusFileList
+	case "h", "left":
+		// Horizontal scroll left, or go back to file list if at leftmost
+		if p.diffTabHorizScroll > 0 {
+			p.diffTabHorizScroll -= 10
+			if p.diffTabHorizScroll < 0 {
+				p.diffTabHorizScroll = 0
+			}
+		} else {
+			p.diffTabFocus = DiffTabFocusFileList
+		}
+	case "l", "right":
+		// Horizontal scroll right
+		p.diffTabHorizScroll += 10
+	case "n":
+		// Jump to next change in full-file view
+		if p.diffViewMode == DiffViewFullFile && p.fullFileDiff != nil {
+			next := p.fullFileDiff.NextChange(p.diffTabDiffScroll)
+			if next >= 0 {
+				p.diffTabDiffScroll = next
+			}
+		}
+	case "N":
+		// Jump to previous change in full-file view
+		if p.diffViewMode == DiffViewFullFile && p.fullFileDiff != nil {
+			prev := p.fullFileDiff.PrevChange(p.diffTabDiffScroll)
+			if prev >= 0 {
+				p.diffTabDiffScroll = prev
+			}
+		}
+	case "v", "V":
+		return p.cycleDiffTabViewMode()
+	case "{":
+		// Previous file
+		return p.jumpToPrevFile()
+	case "}":
+		// Next file
+		return p.jumpToNextFile()
+	}
+	return nil
+}
+
+// cycleDiffTabViewMode cycles through diff view modes for the diff tab.
+func (p *Plugin) cycleDiffTabViewMode() tea.Cmd {
+	switch p.diffViewMode {
+	case DiffViewUnified:
+		p.diffViewMode = DiffViewSideBySide
+		_ = state.SetWorkspaceDiffMode("side-by-side")
+	case DiffViewSideBySide:
+		p.diffViewMode = DiffViewFullFile
+		_ = state.SetWorkspaceDiffMode("full-file")
+		// Load full-file content if needed
+		if p.fullFileDiff == nil {
+			return p.loadFullFileDiffForWorkspace()
+		}
+	default:
+		// Map scroll position from full-file back to hunk-based view
+		if p.fullFileDiff != nil && p.diffTabParsedDiff != nil && p.diffTabDiffScroll > 0 {
+			p.diffTabDiffScroll = p.fullFileDiff.FullFileLineToHunkLine(p.diffTabDiffScroll, p.diffTabParsedDiff)
+		}
+		p.diffViewMode = DiffViewUnified
+		_ = state.SetWorkspaceDiffMode("unified")
+		p.fullFileDiff = nil
+	}
+	p.diffTabHorizScroll = 0
+	return nil
+}
+
+// onDiffTabCursorChanged resets diff pane state when cursor changes in the file list.
+// Returns a tea.Cmd to reload full-file diff or commit detail if needed.
+func (p *Plugin) onDiffTabCursorChanged(oldCursor int) tea.Cmd {
+	if p.diffTabCursor == oldCursor {
+		return nil
+	}
+	p.diffTabDiffScroll = 0
+	p.diffTabHorizScroll = 0
+	p.fullFileDiff = nil
+
+	fileCount := p.diffTabFileCount()
+	if p.diffTabCursor < fileCount {
+		// Cursor on a file — update parsed diff and load full-file if needed
+		p.diffTabParsedDiff = p.parsedDiffForCurrentFile()
+		p.commitDetail = nil // Clear any previously loaded commit detail
+		if p.diffViewMode == DiffViewFullFile {
+			return p.loadFullFileDiffForWorkspace()
+		}
+	} else {
+		// Cursor on a commit — auto-load commit detail for preview
+		p.diffTabParsedDiff = nil
+		commitIdx := p.diffTabCursor - fileCount
+		if commitIdx >= 0 && commitIdx < len(p.commitStatusList) {
+			commit := p.commitStatusList[commitIdx]
+			p.commitDetail = nil
+			p.commitFileCursor = 0
+			p.commitFileScroll = 0
+			p.commitFileDiffRaw = ""
+			p.commitFileParsed = nil
+			return p.loadCommitDetail(commit.Hash)
+		}
+	}
+	return nil
+}
+
+// handleCommitFilesKey handles keys when viewing files within a commit.
+func (p *Plugin) handleCommitFilesKey(msg tea.KeyMsg) tea.Cmd {
+	if p.commitDetail == nil {
+		// Still loading — only allow escape
+		if msg.String() == "esc" || msg.String() == "h" || msg.String() == "left" {
+			p.diffTabFocus = DiffTabFocusFileList
+			p.commitDetail = nil
+		}
+		return nil
+	}
+
+	fileCount := len(p.commitDetail.Files)
+	switch msg.String() {
+	case "j", "down":
+		if p.commitFileCursor < fileCount-1 {
+			p.commitFileCursor++
+			p.commitFileDiffRaw = ""
+			p.commitFileParsed = nil
+			p.fullFileDiff = nil
+			return p.loadSelectedCommitFileDiff()
+		}
+	case "k", "up":
+		if p.commitFileCursor > 0 {
+			p.commitFileCursor--
+			p.commitFileDiffRaw = ""
+			p.commitFileParsed = nil
+			p.fullFileDiff = nil
+			return p.loadSelectedCommitFileDiff()
+		}
+	case "g":
+		if p.commitFileCursor != 0 {
+			p.commitFileCursor = 0
+			p.commitFileScroll = 0
+			p.commitFileDiffRaw = ""
+			p.commitFileParsed = nil
+			p.fullFileDiff = nil
+			return p.loadSelectedCommitFileDiff()
+		}
+	case "G":
+		if fileCount > 0 && p.commitFileCursor != fileCount-1 {
+			p.commitFileCursor = fileCount - 1
+			p.commitFileDiffRaw = ""
+			p.commitFileParsed = nil
+			p.fullFileDiff = nil
+			return p.loadSelectedCommitFileDiff()
+		}
+	case "l", "right", "enter":
+		// Drill into the commit file's diff
+		if fileCount > 0 {
+			p.diffTabFocus = DiffTabFocusCommitDiff
+			p.diffTabDiffScroll = 0
+			p.diffTabHorizScroll = 0
+		}
+	case "h", "left", "esc":
+		// Go back to main file+commit list
+		p.diffTabFocus = DiffTabFocusFileList
+		p.commitDetail = nil
+		p.commitFileDiffRaw = ""
+		p.commitFileParsed = nil
+		p.fullFileDiff = nil
+	}
+	return nil
+}
+
+// handleCommitDiffPaneKey handles keys when viewing a commit file's diff.
+func (p *Plugin) handleCommitDiffPaneKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "j", "down":
+		p.diffTabDiffScroll++
+	case "k", "up":
+		if p.diffTabDiffScroll > 0 {
+			p.diffTabDiffScroll--
+		}
+	case "g":
+		p.diffTabDiffScroll = 0
+		p.diffTabHorizScroll = 0
+	case "G":
+		var lines int
+		if p.diffViewMode == DiffViewFullFile && p.fullFileDiff != nil {
+			lines = p.fullFileDiff.TotalLines()
+		} else if p.commitFileParsed != nil {
+			lines = gitstatus.CountParsedDiffLines(p.commitFileParsed)
+		}
+		if lines > 0 {
+			maxScroll := lines - (p.height - 6)
+			if maxScroll < 0 {
+				maxScroll = 0
+			}
+			p.diffTabDiffScroll = maxScroll
+		}
+	case "ctrl+d":
+		p.diffTabDiffScroll += 10
+	case "ctrl+u":
+		p.diffTabDiffScroll -= 10
+		if p.diffTabDiffScroll < 0 {
+			p.diffTabDiffScroll = 0
+		}
+	case "h", "left":
+		if p.diffTabHorizScroll > 0 {
+			p.diffTabHorizScroll -= 10
+			if p.diffTabHorizScroll < 0 {
+				p.diffTabHorizScroll = 0
+			}
+		} else {
+			// Go back to commit file list
+			p.diffTabFocus = DiffTabFocusCommitFiles
+			p.diffTabDiffScroll = 0
+			p.diffTabHorizScroll = 0
+		}
+	case "l", "right":
+		p.diffTabHorizScroll += 10
+	case "esc":
+		p.diffTabFocus = DiffTabFocusCommitFiles
+		p.diffTabDiffScroll = 0
+		p.diffTabHorizScroll = 0
+	case "n":
+		if p.diffViewMode == DiffViewFullFile && p.fullFileDiff != nil {
+			next := p.fullFileDiff.NextChange(p.diffTabDiffScroll)
+			if next >= 0 {
+				p.diffTabDiffScroll = next
+			}
+		}
+	case "N":
+		if p.diffViewMode == DiffViewFullFile && p.fullFileDiff != nil {
+			prev := p.fullFileDiff.PrevChange(p.diffTabDiffScroll)
+			if prev >= 0 {
+				p.diffTabDiffScroll = prev
+			}
+		}
+	case "{":
+		// Previous file in commit
+		if p.commitDetail != nil && p.commitFileCursor > 0 {
+			p.commitFileCursor--
+			p.diffTabDiffScroll = 0
+			p.diffTabHorizScroll = 0
+			p.commitFileDiffRaw = ""
+			p.commitFileParsed = nil
+			p.fullFileDiff = nil
+			return p.loadSelectedCommitFileDiff()
+		}
+	case "}":
+		// Next file in commit
+		if p.commitDetail != nil && p.commitFileCursor < len(p.commitDetail.Files)-1 {
+			p.commitFileCursor++
+			p.diffTabDiffScroll = 0
+			p.diffTabHorizScroll = 0
+			p.commitFileDiffRaw = ""
+			p.commitFileParsed = nil
+			p.fullFileDiff = nil
+			return p.loadSelectedCommitFileDiff()
+		}
+	case "v", "V":
+		// Cycle view mode (unified → side-by-side → full-file)
+		p.diffTabDiffScroll = 0
+		p.diffTabHorizScroll = 0
+		switch p.diffViewMode {
+		case DiffViewUnified:
+			p.diffViewMode = DiffViewSideBySide
+			_ = state.SetWorkspaceDiffMode("side-by-side")
+		case DiffViewSideBySide:
+			p.diffViewMode = DiffViewFullFile
+			_ = state.SetWorkspaceDiffMode("full-file")
+			if p.fullFileDiff == nil {
+				return p.loadFullFileDiffForCommit()
+			}
+		default:
+			if p.fullFileDiff != nil && p.commitFileParsed != nil && p.diffTabDiffScroll > 0 {
+				p.diffTabDiffScroll = p.fullFileDiff.FullFileLineToHunkLine(p.diffTabDiffScroll, p.commitFileParsed)
+			}
+			p.diffViewMode = DiffViewUnified
+			_ = state.SetWorkspaceDiffMode("unified")
+			p.fullFileDiff = nil
+		}
+	}
+	return nil
+}
+
+// loadSelectedCommitFileDiff loads the diff for the currently selected commit file.
+func (p *Plugin) loadSelectedCommitFileDiff() tea.Cmd {
+	if p.commitDetail == nil || p.commitFileCursor < 0 || p.commitFileCursor >= len(p.commitDetail.Files) {
+		return nil
+	}
+	file := p.commitDetail.Files[p.commitFileCursor]
+	parentHash := ""
+	if p.commitDetail.IsMerge && len(p.commitDetail.ParentHashes) > 0 {
+		parentHash = p.commitDetail.ParentHashes[0]
+	}
+	return p.loadCommitFileDiff(p.commitDetail.Hash, file.Path, parentHash)
+}

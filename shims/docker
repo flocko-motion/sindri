@@ -1,0 +1,3 @@
+#!/bin/sh
+echo "Handing over to podman" >&2
+exec podman "$@"
