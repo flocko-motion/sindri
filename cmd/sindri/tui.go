@@ -18,9 +18,8 @@ import (
 	"github.com/flo-at/sindri/internal/features"
 	"github.com/flo-at/sindri/internal/keymap"
 	"github.com/flo-at/sindri/internal/plugin"
-	"github.com/flo-at/sindri/internal/plugins/conversations"
-	"github.com/flo-at/sindri/internal/plugins/filebrowser"
 	"github.com/flo-at/sindri/internal/plugins/gitstatus"
+	"github.com/flo-at/sindri/internal/plugins/prs"
 	"github.com/flo-at/sindri/internal/plugins/tdmonitor"
 	"github.com/flo-at/sindri/internal/plugins/workspace"
 	"github.com/flo-at/sindri/internal/state"
@@ -87,18 +86,9 @@ func runTui(cmd *cobra.Command, args []string) error {
 	// Plugin registry
 	registry := plugin.NewRegistry(pluginCtx)
 
-	if cfg.Plugins.TDMonitor.Enabled {
-		_ = registry.Register(tdmonitor.New())
-	}
-	if cfg.Plugins.GitStatus.Enabled {
-		_ = registry.Register(gitstatus.New())
-	}
-	if cfg.Plugins.FileBrowser.Enabled {
-		_ = registry.Register(filebrowser.New())
-	}
-	if cfg.Plugins.Conversations.Enabled {
-		_ = registry.Register(conversations.New())
-	}
+	_ = registry.Register(tdmonitor.New())
+	_ = registry.Register(gitstatus.New())
+	_ = registry.Register(prs.New())
 	_ = registry.Register(workspace.New())
 
 	// Keymap overrides
