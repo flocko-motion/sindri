@@ -235,9 +235,11 @@ func runWorkerStart(cmd *cobra.Command, args []string, skill string, shell bool)
 	// Container startup: fix git worktree path + link skills
 	startup := "mkdir -p /home/sindri/.claude/skills && ln -sfn /opt/sindri/skills/* /home/sindri/.claude/skills/ 2>/dev/null; " +
 		"ln -sf /opt/sindri/CLAUDE.md /workspace/CLAUDE.md 2>/dev/null; " +
-		"cp /workspace/.git /tmp/.git.bak 2>/dev/null; " +
+		"if [ -f /workspace/.git ]; then " +
+		"cp /workspace/.git /tmp/.git.bak; " +
 		fmt.Sprintf("echo 'gitdir: /repo/.git/worktrees/%s' > /workspace/.git; ", name) +
-		"trap 'cp /tmp/.git.bak /workspace/.git 2>/dev/null' EXIT; "
+		"trap 'cp /tmp/.git.bak /workspace/.git 2>/dev/null' EXIT; " +
+		"fi; "
 
 	if shell {
 		if skill == "" {
