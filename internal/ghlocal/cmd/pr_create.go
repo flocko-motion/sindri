@@ -85,13 +85,8 @@ var prCreateCmd = &cobra.Command{
 				continue
 			}
 			switch current.Status {
-			case "approved":
-				fmt.Printf("[sindri local git] PR approved! Merging...\n")
-				if _, err := store.Merge(pr.ID); err != nil {
-					fmt.Printf("[sindri local git] Merge failed: %s\n", err)
-					return err
-				}
-				fmt.Printf("[sindri local git] Merged into %s. You may now work on the next task.\n", base)
+			case "approved", "merged":
+				fmt.Printf("[sindri local git] PR approved! Reviewer will handle the merge.\n")
 				return nil
 			case "open":
 				// Still waiting
