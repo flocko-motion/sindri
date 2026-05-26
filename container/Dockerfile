@@ -55,6 +55,7 @@ COPY container/sindri-agent.sh  /usr/local/bin/sindri-agent
 COPY container/agent-bridge.mjs /opt/sindri/agent-bridge.mjs
 COPY container/skills/          /opt/sindri/skills/
 COPY container/CLAUDE.md        /opt/sindri/CLAUDE.md
+COPY container/CLAUDE.reviewer.md /opt/sindri/CLAUDE.reviewer.md
 # Skills are copied into each worker's ~/.claude/skills/ at launch time
 RUN chmod +x /usr/local/bin/wait-for-task /usr/local/bin/sindri-agent
 
