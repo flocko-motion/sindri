@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/flo-at/sindri/internal/worker"
 	"github.com/spf13/cobra"
 )
 
@@ -113,29 +114,10 @@ func runWorkerStart(cmd *cobra.Command, args []string, skill string, shell bool)
 
 	// If no name given, find an unattached worktree or create a new one
 	if name == "" {
-		wtOut, _ := exec.Command("git", "-C", projectRoot, "worktree", "list", "--porcelain").Output()
-		worktrees := parseWorktreeNames(string(wtOut), projectRoot)
-
-		// Query running containers
-		cOut, _ := exec.Command("podman", "ps", "--filter", "label=sindri.project="+projectRoot, "--format", "json").Output()
-		running := make(map[string]bool)
-		var containers []podmanContainer
-		if len(strings.TrimSpace(string(cOut))) > 0 {
-			_ = json.Unmarshal(cOut, &containers)
-		}
-		for _, c := range containers {
-			if w := c.Labels["sindri.worker"]; w != "" {
-				running[w] = true
-			}
-		}
-
-		// Find an unattached worktree
-		for wtName := range worktrees {
-			if wtName == "main" {
-				continue
-			}
-			if !running[wtName] {
-				name = wtName
+		workers := worker.List(projectRoot)
+		for _, wk := range workers {
+			if wk.Role == "worker" && wk.Status == "-" {
+				name = wk.Name
 				fmt.Fprintf(os.Stderr, "🔨 resuming %s\n", name)
 				break
 			}
@@ -147,8 +129,8 @@ func runWorkerStart(cmd *cobra.Command, args []string, skill string, shell bool)
 				return fmt.Errorf("repo has no commits yet")
 			}
 			taken := make(map[string]bool)
-			for n := range worktrees {
-				taken[n] = true
+			for _, wk := range workers {
+				taken[wk.Name] = true
 			}
 			for _, n := range norseNames {
 				if !taken[n] {
@@ -272,72 +254,25 @@ func runWorkerStart(cmd *cobra.Command, args []string, skill string, shell bool)
 
 // ── worker list ─────────────────────────────────────────────────────────────
 
-type podmanContainer struct {
-	Names  []string          `json:"Names"`
-	State  string            `json:"State"`
-	Status string            `json:"Status"`
-	Labels map[string]string `json:"Labels"`
-}
-
 func runWorkerList(cmd *cobra.Command, args []string) error {
 	projectRoot, err := gitRoot()
 	if err != nil {
 		return fmt.Errorf("not in a git repo: %w", err)
 	}
 
-	// Query containers
-	out, err := exec.Command("podman", "ps", "-a",
-		"--filter", "label=sindri.project="+projectRoot,
-		"--format", "json",
-	).Output()
-	if err != nil {
-		return fmt.Errorf("podman ps: %w", err)
-	}
-
-	var containers []podmanContainer
-	if len(strings.TrimSpace(string(out))) > 0 {
-		_ = json.Unmarshal(out, &containers)
-	}
-
-	containerByWorker := make(map[string]*podmanContainer)
-	for i, c := range containers {
-		if w := c.Labels["sindri.worker"]; w != "" {
-			containerByWorker[w] = &containers[i]
-		}
-	}
-
-	// Query worktrees
-	wtOut, _ := exec.Command("git", "-C", projectRoot, "worktree", "list", "--porcelain").Output()
-	worktrees := parseWorktreeNames(string(wtOut), projectRoot)
-
+	workers := worker.List(projectRoot)
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tROLE\tSTATUS")
-	fmt.Fprintln(w, "----\t----\t------")
-
-	// Main repo
-	mainName := "sindri"
-	if p, ok := worktrees["main"]; ok {
-		parts := strings.Split(p, "/")
-		mainName = parts[len(parts)-1]
-	}
-	if c, ok := containerByWorker["_reviewer"]; ok {
-		fmt.Fprintf(w, "👑 %s\treviewer\t%s\n", mainName, c.State)
-	} else {
-		fmt.Fprintf(w, "👑 %s\treviewer\t-\n", mainName)
-	}
-
-	// Workers
-	for name := range worktrees {
-		if name == "main" {
-			continue
+	fmt.Fprintln(w, "NAME\tROLE\tSTATUS\tTASK")
+	fmt.Fprintln(w, "----\t----\t------\t----")
+	for _, wk := range workers {
+		icon := "🔨"
+		if wk.IsMain {
+			icon = "👑"
+		} else if wk.Role == "orphan" {
+			icon = "⚠ "
 		}
-		if c, ok := containerByWorker[name]; ok {
-			fmt.Fprintf(w, "🔨 %s\tworker\t%s\n", name, c.State)
-		} else {
-			fmt.Fprintf(w, "🔨 %s\tworker\t-\n", name)
-		}
+		fmt.Fprintf(w, "%s %s\t%s\t%s\t%s\n", icon, wk.Name, wk.Role, wk.Status, wk.Task)
 	}
-
 	w.Flush()
 	return nil
 }
@@ -370,21 +305,6 @@ func gitRoot() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func parseWorktreeNames(output, mainDir string) map[string]string {
-	names := make(map[string]string)
-	for _, line := range strings.Split(output, "\n") {
-		if strings.HasPrefix(line, "worktree ") {
-			path := strings.TrimPrefix(line, "worktree ")
-			name := "main"
-			if path != mainDir {
-				parts := strings.Split(path, "/")
-				name = parts[len(parts)-1]
-			}
-			names[name] = path
-		}
-	}
-	return names
-}
 
 // loadSkill reads a skill from /opt/sindri/skills/<name>.md inside the container image.
 func loadSkill(image, name string) (string, error) {

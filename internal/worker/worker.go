@@ -1,0 +1,172 @@
+package worker
+
+import (
+	"encoding/json"
+	"os/exec"
+	"strings"
+)
+
+type Worker struct {
+	Name      string
+	Role      string // "worker" or "reviewer"
+	Status    string // "running", "exited", or "-"
+	IsMain    bool
+	Path      string // worktree path
+	Container string // container name or ""
+	Task      string // current td task (e.g. "td-abc123 Add greeting module")
+}
+
+type podmanContainer struct {
+	Names  []string          `json:"Names"`
+	State  string            `json:"State"`
+	Labels map[string]string `json:"Labels"`
+}
+
+// List returns all workers for a project: worktrees + container status.
+func List(projectRoot string) []Worker {
+	// Query podman containers
+	containerByWorker := make(map[string]*podmanContainer)
+	out, err := exec.Command("podman", "ps", "-a",
+		"--filter", "label=sindri.project="+projectRoot,
+		"--format", "json",
+	).Output()
+	if err == nil && len(strings.TrimSpace(string(out))) > 0 {
+		var containers []podmanContainer
+		if json.Unmarshal(out, &containers) == nil {
+			for i, c := range containers {
+				if w := c.Labels["sindri.worker"]; w != "" {
+					containerByWorker[w] = &containers[i]
+				}
+			}
+		}
+	}
+
+	// Query git worktrees
+	wtOut, _ := exec.Command("git", "-C", projectRoot, "worktree", "list", "--porcelain").Output()
+	worktrees := parseWorktreeNames(string(wtOut), projectRoot)
+
+	var workers []Worker
+
+	// Main repo = reviewer
+	mainName := "sindri"
+	if p, ok := worktrees["main"]; ok {
+		parts := strings.Split(p, "/")
+		mainName = parts[len(parts)-1]
+	}
+	status := "-"
+	cName := ""
+	if c, ok := containerByWorker["_reviewer"]; ok {
+		status = c.State
+		if len(c.Names) > 0 {
+			cName = c.Names[0]
+		}
+		delete(containerByWorker, "_reviewer")
+	}
+	workers = append(workers, Worker{
+		Name:      mainName,
+		Role:      "reviewer",
+		Status:    status,
+		IsMain:    true,
+		Path:      worktrees["main"],
+		Container: cName,
+	})
+
+	// Worker worktrees
+	for name, path := range worktrees {
+		if name == "main" {
+			continue
+		}
+		status := "-"
+		cName := ""
+		if c, ok := containerByWorker[name]; ok {
+			status = c.State
+			if len(c.Names) > 0 {
+				cName = c.Names[0]
+			}
+			delete(containerByWorker, name)
+		}
+		workers = append(workers, Worker{
+			Name:      name,
+			Role:      "worker",
+			Status:    status,
+			Path:      path,
+			Container: cName,
+		})
+	}
+
+	// Orphaned containers
+	for name, c := range containerByWorker {
+		cName := ""
+		if len(c.Names) > 0 {
+			cName = c.Names[0]
+		}
+		workers = append(workers, Worker{
+			Name:      name,
+			Role:      "orphan",
+			Status:    c.State,
+			Container: cName,
+		})
+	}
+
+	// Query td for in-progress tasks
+	tasks := getInProgressTasks(projectRoot)
+	// Assign tasks to workers — td doesn't track which worker owns which task,
+	// but we can distribute by order for now
+	taskIdx := 0
+	for i := range workers {
+		if workers[i].Role == "worker" && workers[i].Status == "running" && taskIdx < len(tasks) {
+			workers[i].Task = tasks[taskIdx]
+			taskIdx++
+		}
+	}
+
+	return workers
+}
+
+func getInProgressTasks(projectRoot string) []string {
+	out, err := exec.Command("td", "-w", projectRoot, "query", "status:in_progress").Output()
+	if err != nil {
+		return nil
+	}
+	var tasks []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// "td-abc123  [P2]  Title  task  [in_progress]" → "td-abc123 Title"
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		id := fields[0]
+		var title []string
+		for _, f := range fields[2:] {
+			if f == "task" || f == "bug" || f == "feature" || f == "chore" || f == "epic" {
+				break
+			}
+			if strings.HasPrefix(f, "[") && strings.HasSuffix(f, "]") {
+				continue
+			}
+			title = append(title, f)
+		}
+		tasks = append(tasks, id+" "+strings.Join(title, " "))
+	}
+	return tasks
+}
+
+func parseWorktreeNames(output, mainDir string) map[string]string {
+	names := make(map[string]string)
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, "worktree ") {
+			path := strings.TrimPrefix(line, "worktree ")
+			name := "main"
+			if path != mainDir {
+				parts := strings.Split(path, "/")
+				name = parts[len(parts)-1]
+			}
+			names[name] = path
+		}
+	}
+	return names
+}
