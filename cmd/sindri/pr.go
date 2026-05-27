@@ -7,8 +7,9 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
-	"text/tabwriter"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 	"github.com/flo-at/sindri/internal/ghlocal/store"
 	"github.com/spf13/cobra"
 )
@@ -32,11 +33,22 @@ func newPrCmd() *cobra.Command {
 					fmt.Println("No PRs found.")
 					return nil
 				}
-				w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+				rows := make([][]string, 0, len(prs))
 				for _, pr := range prs {
-					fmt.Fprintf(w, "%s\t%s\t%s → %s\n", pr.ID, pr.Status, pr.Branch, pr.Base)
+					rows = append(rows, []string{pr.ID, pr.Status, pr.Branch + " → " + pr.Base, pr.Title})
 				}
-				w.Flush()
+				dim := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+				t := table.New().
+					Headers("ID", "STATUS", "BRANCH", "TITLE").
+					Rows(rows...).
+					BorderStyle(dim).
+					StyleFunc(func(row, col int) lipgloss.Style {
+						if row == table.HeaderRow {
+							return lipgloss.NewStyle().Bold(true).Padding(0, 1)
+						}
+						return lipgloss.NewStyle().Padding(0, 1)
+					})
+				fmt.Println(t)
 				return nil
 			},
 		},
