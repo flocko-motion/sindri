@@ -143,14 +143,23 @@ func newPrCmd() *cobra.Command {
 			Short: "Approve a PR (defaults to selected)",
 			Args:  cobra.MaximumNArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				if !confirmHuman() {
-					return fmt.Errorf("aborted")
-				}
 				id, err := resolveSelectedPR(args)
 				if err != nil {
 					return err
 				}
-				pr, err := store.Approve(id)
+				pr, err := store.Read(id)
+				if err != nil {
+					return err
+				}
+				fmt.Printf("PR:    %s\n", pr.ID)
+				fmt.Printf("Title: %s\n", pr.Title)
+				if taskID := extractTaskID(pr.Title); taskID != "" {
+					printTaskSummary(taskID)
+				}
+				if !confirmHuman() {
+					return fmt.Errorf("aborted")
+				}
+				pr, err = store.Approve(id)
 				if err != nil {
 					return err
 				}
@@ -163,9 +172,6 @@ func newPrCmd() *cobra.Command {
 			Short: "Merge an approved PR (defaults to selected)",
 			Args:  cobra.MaximumNArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				if !confirmHuman() {
-					return fmt.Errorf("aborted")
-				}
 				id, err := resolveSelectedPR(args)
 				if err != nil {
 					return err
@@ -174,7 +180,15 @@ func newPrCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				fmt.Printf("PR:    %s\n", pr.ID)
+				fmt.Printf("Title: %s\n", pr.Title)
 				taskID := extractTaskID(pr.Title)
+				if taskID != "" {
+					printTaskSummary(taskID)
+				}
+				if !confirmHuman() {
+					return fmt.Errorf("aborted")
+				}
 				if taskID != "" {
 					if missing, err := checkReviewGates(taskID); err != nil {
 						fmt.Fprintf(os.Stderr, "Warning: could not check review gates: %v\n", err)
