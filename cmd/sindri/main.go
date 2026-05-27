@@ -66,7 +66,17 @@ func main() {
 		RunE:  runWorkerReset,
 	}
 
-	workerCmd.AddCommand(workerListCmd, workerStartCmd, workerStopCmd, workerResetCmd)
+	var reviewShell bool
+	workerReviewCmd := &cobra.Command{
+		Use:   "review",
+		Short: "Start a reviewer that reviews open PRs and merges approved ones",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runReview(reviewShell)
+		},
+	}
+	workerReviewCmd.Flags().BoolVar(&reviewShell, "shell", false, "Open a shell instead of launching claude (for debugging)")
+
+	workerCmd.AddCommand(workerListCmd, workerStartCmd, workerStopCmd, workerResetCmd, workerReviewCmd)
 	rootCmd.AddCommand(workerCmd)
 
 	// Top-level alias: sindri work = sindri worker start
