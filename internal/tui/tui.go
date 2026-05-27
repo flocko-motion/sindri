@@ -70,6 +70,19 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tickMsg:
+		return m, tea.Batch(refreshData(m.projectRoot), tickCmd())
+	case refreshMsg:
+		m.detectChanges(msg)
+		m.workers = msg.workers
+		m.tasks = msg.tasks
+		m.prs = msg.prs
+		m.rebuildBacklog()
+		m.clampCursors()
+		return m, nil
+	}
+
 	if m.showCreateModal {
 		return m.updateModal(msg)
 	}
@@ -121,17 +134,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case flashExpiredMsg:
 		return m, nil
-
-	case refreshMsg:
-		m.detectChanges(msg)
-		m.workers = msg.workers
-		m.tasks = msg.tasks
-		m.prs = msg.prs
-		m.rebuildBacklog()
-		m.clampCursors()
-
-	case tickMsg:
-		return m, tea.Batch(refreshData(m.projectRoot), tickCmd())
 	}
 
 	return m, nil
@@ -162,15 +164,6 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("G"))):
 			m.vpDetail.GotoBottom()
 		}
-	case refreshMsg:
-		m.detectChanges(msg)
-		m.workers = msg.workers
-		m.tasks = msg.tasks
-		m.prs = msg.prs
-		m.rebuildBacklog()
-		m.clampCursors()
-	case tickMsg:
-		return m, tea.Batch(refreshData(m.projectRoot), tickCmd())
 	case notifyMsg:
 		m.notify = notification{message: msg.message, isError: msg.isError, time: time.Now()}
 		return m, flashTimer()
