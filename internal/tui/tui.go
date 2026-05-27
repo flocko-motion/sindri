@@ -68,27 +68,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case key.Matches(msg, keys.Quit):
 			return m, tea.Quit
-		case key.Matches(msg, keys.Tab):
+		case key.Matches(msg, keys.NavRight):
 			if m.activeCol == colBacklog {
 				m.activeCol = colWorkers
-			} else {
-				m.activeCol = colBacklog
+				m.updateDetail()
 			}
-			m.updateDetail()
-		case key.Matches(msg, keys.ShiftTab):
+		case key.Matches(msg, keys.NavLeft):
 			if m.activeCol == colWorkers {
 				m.activeCol = colBacklog
-			} else {
-				m.activeCol = colWorkers
+				m.updateDetail()
 			}
-			m.updateDetail()
-		case key.Matches(msg, keys.PanelSwitch):
-			if m.activeCol == colBacklog {
-				if m.backlogPanel == panelTasks {
-					m.backlogPanel = panelPRs
-				} else {
-					m.backlogPanel = panelTasks
-				}
+		case key.Matches(msg, keys.NavDown):
+			if m.activeCol == colBacklog && m.backlogPanel == panelTasks {
+				m.backlogPanel = panelPRs
+				m.updateDetail()
+			}
+		case key.Matches(msg, keys.NavUp):
+			if m.activeCol == colBacklog && m.backlogPanel == panelPRs {
+				m.backlogPanel = panelTasks
 				m.updateDetail()
 			}
 		case key.Matches(msg, keys.DetailUp):
@@ -186,7 +183,7 @@ func (m Model) View() string {
 	}
 
 	title := titleStyle.Render("Sindri — AI Agent Orchestrator")
-	help := dimStyle.Render("tab:column  g:panel  j/k:list  J/K:detail  r:refresh  q:quit")
+	help := dimStyle.Render("C-hjkl:navigate  j/k:list  J/K:detail  r:refresh  q:quit")
 	titleBar := lipgloss.JoinHorizontal(lipgloss.Top,
 		title,
 		lipgloss.NewStyle().Width(m.width-lipgloss.Width(title)-lipgloss.Width(help)).Render(""),
