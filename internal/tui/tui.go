@@ -49,6 +49,8 @@ type Model struct {
 
 	showCreateModal bool
 	createModal     createTaskModel
+
+	notify notification
 }
 
 func New(projectRoot string) Model {
@@ -121,7 +123,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, refreshData(m.projectRoot)
 		}
 
+	case notifyMsg:
+		m.notify = notification{message: msg.message, isError: msg.isError, time: time.Now()}
+		return m, flashTimer()
+
+	case flashExpiredMsg:
+		// Just triggers a re-render so the flash dims
+		return m, nil
+
 	case refreshMsg:
+		m.detectChanges(msg)
 		m.workers = msg.workers
 		m.tasks = msg.tasks
 		m.prs = msg.prs
@@ -137,7 +148,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) resizeViewports() {
-	contentHeight := m.height - 3
+	contentHeight := m.height - 4
 	innerH := contentHeight - 4 // border(2) + header(2)
 	if innerH < 1 {
 		innerH = 1
@@ -179,6 +190,34 @@ func (m *Model) moveCursor(delta int) {
 		if next >= 0 && next < len(m.workers) {
 			m.workerCursor = next
 			m.updateDetail()
+		}
+	}
+}
+
+func (m *Model) detectChanges(msg refreshMsg) {
+	// Detect new or changed PRs
+	oldPRs := make(map[string]string)
+	for _, pr := range m.prs {
+		oldPRs[pr.ID] = pr.Status
+	}
+	for _, pr := range msg.prs {
+		old, existed := oldPRs[pr.ID]
+		if !existed {
+			m.notify = notification{message: fmt.Sprintf("PR created: %s", pr.ID), time: time.Now()}
+		} else if old != pr.Status {
+			m.notify = notification{message: fmt.Sprintf("PR %s: %s → %s", pr.ID, old, pr.Status), time: time.Now()}
+		}
+	}
+
+	// Detect task status changes
+	oldTasks := make(map[string]string)
+	for _, t := range m.tasks {
+		oldTasks[t.ID] = t.Status
+	}
+	for _, t := range msg.tasks {
+		old, existed := oldTasks[t.ID]
+		if existed && old != t.Status {
+			m.notify = notification{message: fmt.Sprintf("Task %s: %s → %s", t.ID, old, t.Status), time: time.Now()}
 		}
 	}
 }
@@ -233,7 +272,12 @@ func (m Model) updateModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case taskCreatedMsg:
 		m.showCreateModal = false
-		return m, refreshData(m.projectRoot)
+		if msg.err != nil {
+			m.notify = notification{message: "Error: " + msg.err.Error(), isError: true, time: time.Now()}
+			return m, flashTimer()
+		}
+		m.notify = notification{message: "Task created: " + msg.id, time: time.Now()}
+		return m, tea.Batch(refreshData(m.projectRoot), flashTimer())
 	}
 	var cmd tea.Cmd
 	m.createModal, cmd = m.createModal.Update(msg)
@@ -250,7 +294,7 @@ func (m Model) View() string {
 
 	// Title bar
 	title := titleStyle.Render("Sindri — AI Agent Orchestrator")
-	viewLabel := "backlog"
+	viewLabel := "tasks"
 	if m.leftView == viewWorkers {
 		viewLabel = "workers"
 	}
@@ -261,7 +305,7 @@ func (m Model) View() string {
 		help,
 	)
 
-	contentHeight := m.height - 3
+	contentHeight := m.height - 4 // title + padding + notify bar + gap
 	leftW := m.width * 2 / 3
 	rightW := m.width - leftW
 
@@ -270,7 +314,7 @@ func (m Model) View() string {
 	var leftHeader string
 	switch m.leftView {
 	case viewBacklog:
-		leftHeader = "Backlog"
+		leftHeader = "Tasks"
 		leftContent = renderBacklogList(m.backlogRows, m.listCursor, m.focusCol == colLeft)
 	case viewWorkers:
 		leftHeader = "Workers"
@@ -289,7 +333,8 @@ func (m Model) View() string {
 	right := renderColumn("Detail", m.vpDetail.View(), scrollStatus, rightW, contentHeight, m.focusCol == colDetail)
 
 	columns := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
-	return titleBar + "\n" + columns
+	notifyBar := m.notify.render(m.width)
+	return titleBar + "\n" + columns + "\n" + notifyBar
 }
 
 func renderColumn(header, content, footer string, width, height int, active bool) string {
