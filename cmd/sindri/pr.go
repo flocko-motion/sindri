@@ -143,6 +143,9 @@ func newPrCmd() *cobra.Command {
 			Short: "Approve a PR (defaults to selected)",
 			Args:  cobra.MaximumNArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
+				if !confirmHuman() {
+					return fmt.Errorf("aborted")
+				}
 				id, err := resolveSelectedPR(args)
 				if err != nil {
 					return err
@@ -160,6 +163,9 @@ func newPrCmd() *cobra.Command {
 			Short: "Merge an approved PR (defaults to selected)",
 			Args:  cobra.MaximumNArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
+				if !confirmHuman() {
+					return fmt.Errorf("aborted")
+				}
 				id, err := resolveSelectedPR(args)
 				if err != nil {
 					return err
@@ -437,6 +443,18 @@ func newPrCmd() *cobra.Command {
 	prCmd.AddCommand(reviewCmd)
 
 	return prCmd
+}
+
+func confirmHuman() bool {
+	fmt.Print("Agents don't approve/merge. Confirm that you are a human user (y/n): ")
+	reader := bufio.NewReader(os.Stdin)
+	answer, err := reader.ReadString('\n')
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: reading input: %v\n", err)
+		return false
+	}
+	answer = strings.TrimSpace(strings.ToLower(answer))
+	return answer == "y" || answer == "yes"
 }
 
 func printPRInfo(id string) error {
