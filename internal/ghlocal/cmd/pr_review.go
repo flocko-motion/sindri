@@ -14,6 +14,7 @@ var prReviewCmd = &cobra.Command{
 	Short: "Review a local PR",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		printBanner()
 		id, err := resolveID(args)
 		if err != nil {
 			return err

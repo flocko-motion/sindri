@@ -11,6 +11,7 @@ var prListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all local PRs",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		printBanner()
 		prs, err := store.List()
 		if err != nil {
 			return err

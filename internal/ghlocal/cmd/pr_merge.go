@@ -12,6 +12,7 @@ var prMergeCmd = &cobra.Command{
 	Short: "Merge an approved local PR",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		printBanner()
 		id, err := resolveID(args)
 		if err != nil {
 			return err

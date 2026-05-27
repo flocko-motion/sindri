@@ -2,14 +2,13 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"regexp"
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/flo-at/sindri/internal/ghlocal/store"
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -21,8 +20,9 @@ var (
 
 var prCreateCmd = &cobra.Command{
 	Use:   "create",
-	Short: "Create a local PR from the current branch",
+	Short: "Create a local PR from the current branch (prefer 'gh submit')",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		printBanner()
 		branch, err := currentBranch()
 		if err != nil {
 			return err
@@ -33,19 +33,9 @@ var prCreateCmd = &cobra.Command{
 
 		base := createBase
 		if base == "" {
-			base = os.Getenv("GH_LOCAL_BASE")
-		}
-		if base == "" {
-			// Fall back to the HEAD of /repo (main worktree mount inside container)
-			if out, err := exec.Command("git", "-C", "/repo", "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
-				base = strings.TrimSpace(string(out))
-			}
-		}
-		if base == "" {
-			return fmt.Errorf("could not determine base branch: set GH_LOCAL_BASE or --base")
+			base = baseBranch()
 		}
 
-		// Rebase onto base branch before creating PR
 		if out, err := exec.Command("git", "rebase", base).CombinedOutput(); err != nil {
 			return fmt.Errorf("rebase onto %s failed: %s", base, strings.TrimSpace(string(out)))
 		}
@@ -81,22 +71,14 @@ var prCreateCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Printf("[sindri local git] PR created: %s (%s → %s)\n", pr.ID, branch, base)
-		fmt.Printf("[sindri local git] Rebased onto %s.\n", base)
+		fmt.Printf("PR created: %s (%s → %s)\n", pr.ID, branch, base)
 		fmt.Println()
 		fmt.Println("╔══════════════════════════════════════════════════════════╗")
-		fmt.Println("║  STOP — YOUR WORK IS DONE                              ║")
-		fmt.Println("║                                                         ║")
-		fmt.Println("║  1. Do NOT merge this PR — the reviewer will merge it   ║")
-		fmt.Println("║  2. Do NOT approve your own PR                          ║")
-		fmt.Println("║  3. Run: td handoff <task-id> --done \"what you did\"     ║")
-		fmt.Println("║  4. Run: td review <task-id>                            ║")
-		fmt.Println("║  5. STOP. Wait for the reviewer.                        ║")
+		fmt.Println("║  Use 'gh submit' instead — it handles handoff + review  ║")
 		fmt.Println("╚══════════════════════════════════════════════════════════╝")
 		fmt.Println()
-		fmt.Printf("[sindri local git] Waiting for human review...\n")
+		fmt.Println("Waiting for review...")
 
-		// Poll PR status until approved or rejected
 		for {
 			time.Sleep(5 * time.Second)
 			current, err := store.Read(pr.ID)
@@ -105,55 +87,47 @@ var prCreateCmd = &cobra.Command{
 			}
 			switch current.Status {
 			case "approved", "merged":
-				fmt.Printf("[sindri local git] PR approved! Reviewer will handle the merge.\n")
+				fmt.Printf("PR %s approved!\n", pr.ID)
 				return nil
+			case "rejected":
+				fmt.Printf("PR %s rejected. Check comments.\n", pr.ID)
+				return fmt.Errorf("PR rejected")
 			case "open":
-				// Still waiting
 				continue
-			default:
-				// Rejected or unknown
-				fmt.Printf("[sindri local git] PR status changed to: %s\n", current.Status)
-				fmt.Printf("[sindri local git] Check td comments for reviewer feedback.\n")
-				return fmt.Errorf("PR %s was not approved (status: %s)", pr.ID, current.Status)
 			}
 		}
 	},
 }
 
 func init() {
-	prCreateCmd.Flags().StringVarP(&createTitle, "title", "t", "", "PR title (defaults to branch name)")
+	prCreateCmd.Flags().StringVarP(&createTitle, "title", "t", "", "PR title")
 	prCreateCmd.Flags().StringVarP(&createBody, "body", "b", "", "PR body")
-	prCreateCmd.Flags().StringVar(&createBase, "base", "", "Base branch (default: GH_LOCAL_BASE or main)")
-	prCreateCmd.Flags().StringVar(&createTask, "task", "", "Task ID for unique PR naming (e.g. td-8a5b6d)")
+	prCreateCmd.Flags().StringVar(&createBase, "base", "", "Base branch (default: auto-detect)")
+	prCreateCmd.Flags().StringVar(&createTask, "task", "", "Task ID for PR naming")
 }
 
 var taskIDPattern = regexp.MustCompile(`\(?(td-[0-9a-f]+)\)?`)
 
-// resolveID checks for existing PRs with the same ID.
-// If open/approved: returns an error. If merged: appends -2, -3, etc.
 func resolveCreateID(baseID string) (string, error) {
 	existing, err := store.Read(baseID)
 	if err != nil {
-		return baseID, nil // doesn't exist, use as-is
+		return baseID, nil
 	}
 	if existing.Status == "open" || existing.Status == "approved" {
 		return "", fmt.Errorf("PR %s already exists (status: %s). Close or merge it first", baseID, existing.Status)
 	}
-	// Merged — find next revision
 	for rev := 2; ; rev++ {
 		candidate := fmt.Sprintf("%s-%d", baseID, rev)
 		existing, err := store.Read(candidate)
 		if err != nil {
-			return candidate, nil // doesn't exist
+			return candidate, nil
 		}
 		if existing.Status == "open" || existing.Status == "approved" {
-			return "", fmt.Errorf("PR %s already exists (status: %s). Close or merge it first", candidate, existing.Status)
+			return "", fmt.Errorf("PR %s already exists (status: %s)", candidate, existing.Status)
 		}
-		// Also merged, try next revision
 	}
 }
 
-// prIDFromTask derives a PR ID from --task flag, title, or branch name.
 func prIDFromTask(task, title, branch string) string {
 	if task != "" {
 		return "pr-" + task
@@ -175,11 +149,22 @@ func currentBranch() (string, error) {
 func gitDiff(base, branch string) (string, error) {
 	out, err := exec.Command("git", "diff", base+"..."+branch).Output()
 	if err != nil {
-		// Fall back to simple diff if three-dot diff fails
 		out, err = exec.Command("git", "diff", base, branch).Output()
 		if err != nil {
 			return "", err
 		}
 	}
 	return string(out), nil
+}
+
+// currentTaskID returns the task ID from the current branch name, or empty if not on a task branch.
+func currentTaskID() string {
+	branch, err := currentBranch()
+	if err != nil {
+		return ""
+	}
+	if taskIDPattern.MatchString(branch) {
+		return branch
+	}
+	return ""
 }

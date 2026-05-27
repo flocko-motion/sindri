@@ -10,7 +10,7 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:          "gh",
-	Short:        "gh-local — a gh wrapper for sandboxed agent work",
+	Short:        "sindri-local — workflow engine for sandboxed agents (not GitHub)",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
@@ -19,17 +19,23 @@ var rootCmd = &cobra.Command{
 		unknown := strings.Join(args, " ")
 		return fmt.Errorf(`unknown command: gh %s
 
-This is sindri's local git system — NOT the GitHub CLI.
-There is no GitHub remote. All PRs are local.
+This is sindri-local — NOT the GitHub CLI.
+There is no GitHub remote. All operations are local.
 
-Available commands:
-  gh pr create    Create a local PR
-  gh pr list      List local PRs
-  gh pr view      View PR details
-  gh pr review    Review a PR (--approve)
-  gh pr merge     Merge an approved PR
+Workflow commands:
+  gh issue next       Pick up the next task (claim, branch, show details)
+  gh issue list       List tasks
+  gh issue view <id>  Show task details + comments + PR status
+  gh issue comment    Add a comment to a task
+  gh submit           Submit work (rebase, create PR, handoff, wait for review)
+  gh done             Return to base branch for next task
 
-Do NOT push, fetch, or use any GitHub-specific features.`, unknown)
+PR commands:
+  gh pr list          List local PRs
+  gh pr view          View a PR
+  gh pr create        Create a PR (prefer 'gh submit' instead)
+  gh pr review        Approve a PR
+  gh pr merge         Merge an approved PR`, unknown)
 	},
 	Args: cobra.ArbitraryArgs,
 }
