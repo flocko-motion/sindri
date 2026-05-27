@@ -95,6 +95,7 @@ func main() {
 	rootCmd.AddCommand(newPrCmd())
 	rootCmd.AddCommand(newReviewCmd())
 	rootCmd.AddCommand(newRejectCmd())
+	rootCmd.AddCommand(newTaskCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
