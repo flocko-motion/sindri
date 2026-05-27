@@ -407,11 +407,11 @@ func checkReviewGates(taskID string) ([]string, error) {
 	approved := make(map[string]bool)
 	var required []string
 	for _, label := range task.Labels {
-		if strings.HasPrefix(label, "require-review-") {
-			required = append(required, strings.TrimPrefix(label, "require-review-"))
+		if strings.HasPrefix(label, "require-") {
+			required = append(required, strings.TrimPrefix(label, "require-"))
 		}
-		if strings.HasPrefix(label, "approved-review-") {
-			approved[strings.TrimPrefix(label, "approved-review-")] = true
+		if strings.HasPrefix(label, "approved-") {
+			approved[strings.TrimPrefix(label, "approved-")] = true
 		}
 	}
 
