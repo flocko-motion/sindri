@@ -13,7 +13,7 @@ func newReviewCmd() *cobra.Command {
 	var shellMode bool
 	cmd := &cobra.Command{
 		Use:   "review",
-		Short: "Start a reviewer that reviews open PRs and merges approved ones",
+		Short: "Start a reviewer (alias for 'worker review')",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReview(shellMode)
 		},
