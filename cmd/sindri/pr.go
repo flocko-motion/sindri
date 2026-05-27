@@ -355,7 +355,118 @@ func newPrCmd() *cobra.Command {
 		},
 	)
 
+	reviewCmd := &cobra.Command{
+		Use:   "review <id>",
+		Short: "Show review gate status for a PR's task",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			pr, err := store.Read(args[0])
+			if err != nil {
+				return err
+			}
+			taskID := extractTaskID(pr.Title)
+			if taskID == "" {
+				return fmt.Errorf("no task ID found in PR title")
+			}
+			labels, err := getTaskLabels(taskID)
+			if err != nil {
+				return err
+			}
+			approved := make(map[string]bool)
+			var required []string
+			for _, l := range labels {
+				if strings.HasPrefix(l, "require-review-") {
+					required = append(required, strings.TrimPrefix(l, "require-review-"))
+				}
+				if strings.HasPrefix(l, "approved-review-") {
+					approved[strings.TrimPrefix(l, "approved-review-")] = true
+				}
+			}
+			if len(required) == 0 {
+				fmt.Printf("No review gates on %s\n", taskID)
+				return nil
+			}
+			fmt.Printf("Review gates for %s (%s):\n", args[0], taskID)
+			for _, r := range required {
+				if approved[r] {
+					fmt.Printf("  ☑ %s\n", r)
+				} else {
+					fmt.Printf("  ☐ %s\n", r)
+				}
+			}
+			return nil
+		},
+	}
+	reviewCmd.AddCommand(&cobra.Command{
+		Use:   "approve <pr-id> <gate>",
+		Short: "Mark a review gate as approved (e.g. 'code', 'security')",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			pr, err := store.Read(args[0])
+			if err != nil {
+				return err
+			}
+			taskID := extractTaskID(pr.Title)
+			if taskID == "" {
+				return fmt.Errorf("no task ID found in PR title")
+			}
+			gate := args[1]
+			requireLabel := "require-review-" + gate
+			approveLabel := "approved-review-" + gate
+
+			labels, err := getTaskLabels(taskID)
+			if err != nil {
+				return err
+			}
+			for _, l := range labels {
+				if l == approveLabel {
+					fmt.Printf("Gate '%s' already approved on %s\n", gate, taskID)
+					return nil
+				}
+			}
+			hasRequire := false
+			for _, l := range labels {
+				if l == requireLabel {
+					hasRequire = true
+					break
+				}
+			}
+			if !hasRequire {
+				labels = append(labels, requireLabel)
+			}
+			labels = append(labels, approveLabel)
+			labelsStr := strings.Join(labels, ",")
+			tdCmd := exec.Command("td", "update", taskID, "--labels", labelsStr)
+			tdCmd.Dir = tdWorkDir()
+			if out, err := tdCmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("td update failed: %s", strings.TrimSpace(string(out)))
+			}
+			fmt.Printf("Approved gate '%s' on %s (%s)\n", gate, args[0], taskID)
+			return nil
+		},
+	})
+	prCmd.AddCommand(reviewCmd)
+
 	return prCmd
+}
+
+func getTaskLabels(taskID string) ([]string, error) {
+	tdCmd := exec.Command("td", "show", taskID, "--json")
+	tdCmd.Dir = tdWorkDir()
+	out, err := tdCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("td show %s: %w", taskID, err)
+	}
+	var task struct {
+		Labels []string `json:"labels"`
+	}
+	if err := json.Unmarshal(out, &task); err != nil {
+		return nil, err
+	}
+	if task.Labels == nil {
+		task.Labels = []string{}
+	}
+	return task.Labels, nil
 }
 
 // rejectPRsForTask finds and rejects all open PRs for a given task ID.
