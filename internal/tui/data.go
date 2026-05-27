@@ -2,7 +2,6 @@ package tui
 
 import (
 	"encoding/json"
-	"fmt"
 	"os/exec"
 	"sort"
 	"strings"
@@ -82,10 +81,29 @@ func fetchTasks(projectRoot string) []taskItem {
 			UpdatedAt: updated,
 		}
 	}
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].UpdatedAt.After(items[j].UpdatedAt)
+	// Three sections: open (by priority), in-progress (by updated_at desc), closed (by updated_at desc)
+	var open, active, closed []taskItem
+	for _, t := range items {
+		switch t.Status {
+		case "open":
+			open = append(open, t)
+		case "in_progress", "in_review":
+			active = append(active, t)
+		default:
+			closed = append(closed, t)
+		}
+	}
+	sort.Slice(active, func(i, j int) bool {
+		return active[i].UpdatedAt.After(active[j].UpdatedAt)
 	})
-	return items
+	sort.Slice(closed, func(i, j int) bool {
+		return closed[i].UpdatedAt.After(closed[j].UpdatedAt)
+	})
+	result := make([]taskItem, 0, len(items))
+	result = append(result, open...)
+	result = append(result, active...)
+	result = append(result, closed...)
+	return result
 }
 
 func fetchPRs(projectRoot string) []prItem {
@@ -114,21 +132,3 @@ func fetchTaskDetail(projectRoot, taskID string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func relativeTime(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	case d < 7*24*time.Hour:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-	default:
-		return t.Format("Jan 2")
-	}
-}
