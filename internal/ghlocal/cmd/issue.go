@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -156,6 +157,9 @@ var issueNextCmd = &cobra.Command{
 			return fmt.Errorf("td start failed: %s", out)
 		}
 		fmt.Printf("Started task: %s %s\n\n", task.ID, task.Title)
+
+		// Update statusline
+		_ = os.WriteFile("/tmp/claude-status", []byte(task.ID+": "+task.Title), 0644)
 
 		// Create per-task branch from base (works from detached HEAD or base branch)
 		if out, err := exec.Command("git", "checkout", "-b", task.ID, base).CombinedOutput(); err != nil {

@@ -285,6 +285,11 @@ func prepareClaudeHome(projectRoot, name string) (claudeHome, configPath string)
       "NotebookEdit(*)"
     ],
     "defaultMode": "default"
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "cat /tmp/claude-status 2>/dev/null || echo 'idle'",
+    "refreshInterval": 5
   }
 }`), 0644)
 

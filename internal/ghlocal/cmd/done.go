@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -26,6 +27,7 @@ var doneCmd = &cobra.Command{
 			return fmt.Errorf("checkout %s failed: %s", base, strings.TrimSpace(string(out)))
 		}
 
+		_ = os.WriteFile("/tmp/claude-status", []byte("idle"), 0644)
 		fmt.Printf("Ready on %s. Run 'gh issue next' to pick up the next task.\n", base)
 		return nil
 	},
