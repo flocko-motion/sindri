@@ -20,19 +20,21 @@ const (
 	fieldTitle = iota
 	fieldType
 	fieldPriority
+	fieldReview
 	fieldDesc
 	fieldCount
 )
 
 type createTaskModel struct {
-	titleInput textinput.Model
-	descInput  textinput.Model
-	typeIdx    int
-	prioIdx    int
-	activeField int
-	err        error
-	submitted  bool
-	projectRoot string
+	titleInput    textinput.Model
+	descInput     textinput.Model
+	typeIdx       int
+	prioIdx       int
+	reviewChecked bool
+	activeField   int
+	err           error
+	submitted     bool
+	projectRoot   string
 }
 
 type taskCreatedMsg struct {
@@ -51,12 +53,13 @@ func newCreateTaskModel(projectRoot string) createTaskModel {
 	di.CharLimit = 500
 
 	return createTaskModel{
-		titleInput:  ti,
-		descInput:   di,
-		typeIdx:     0, // task
-		prioIdx:     2, // P2
-		activeField: fieldTitle,
-		projectRoot: projectRoot,
+		titleInput:    ti,
+		descInput:     di,
+		typeIdx:       0, // task
+		prioIdx:       2, // P2
+		reviewChecked: true,
+		activeField:   fieldTitle,
+		projectRoot:   projectRoot,
 	}
 }
 
@@ -79,9 +82,12 @@ func (m createTaskModel) Update(msg tea.Msg) (createTaskModel, tea.Cmd) {
 			m.activeField = (m.activeField + fieldCount - 1) % fieldCount
 			m.focusActive()
 			return m, nil
-		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+		case key.Matches(msg, key.NewBinding(key.WithKeys("enter", " "))):
+			if m.activeField == fieldReview {
+				m.reviewChecked = !m.reviewChecked
+				return m, nil
+			}
 			if m.activeField == fieldType || m.activeField == fieldPriority {
-				// Enter on selector cycles forward
 				if m.activeField == fieldType {
 					m.typeIdx = (m.typeIdx + 1) % len(taskTypes)
 				} else {
@@ -89,9 +95,13 @@ func (m createTaskModel) Update(msg tea.Msg) (createTaskModel, tea.Cmd) {
 				}
 				return m, nil
 			}
-			// Enter on title or desc: submit if title is non-empty
-			if strings.TrimSpace(m.titleInput.Value()) == "" {
+			title := strings.TrimSpace(m.titleInput.Value())
+			if title == "" {
 				m.err = fmt.Errorf("title is required")
+				return m, nil
+			}
+			if len(title) < 15 {
+				m.err = fmt.Errorf("title too short (min 15 chars, got %d)", len(title))
 				return m, nil
 			}
 			return m, m.submit()
@@ -142,12 +152,16 @@ func (m createTaskModel) submit() tea.Cmd {
 	typ := taskTypes[m.typeIdx]
 	prio := priorities[m.prioIdx]
 	desc := strings.TrimSpace(m.descInput.Value())
+	review := m.reviewChecked
 	projectRoot := m.projectRoot
 
 	return func() tea.Msg {
 		args := []string{"-w", projectRoot, "create", title, "-t", typ, "-p", prio}
 		if desc != "" {
 			args = append(args, "-d", desc)
+		}
+		if review {
+			args = append(args, "--labels", "require-review-code")
 		}
 		out, err := exec.Command("td", args...).CombinedOutput()
 		if err != nil {
@@ -198,6 +212,21 @@ func (m createTaskModel) View(width, height int) string {
 	}
 	b.WriteString(label)
 	b.WriteString(renderSelector(priorities, m.prioIdx, m.activeField == fieldPriority))
+	b.WriteString("\n\n")
+
+	// Review
+	label = "  Review:"
+	if m.activeField == fieldReview {
+		label = "> Review:"
+	}
+	checkbox := "☐ code review"
+	if m.reviewChecked {
+		checkbox = "☑ code review"
+	}
+	if m.activeField == fieldReview {
+		checkbox = selectedItemStyle.Render(checkbox)
+	}
+	b.WriteString(label + " " + checkbox)
 	b.WriteString("\n\n")
 
 	// Description

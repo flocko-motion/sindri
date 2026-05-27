@@ -48,6 +48,10 @@ func buildBacklogRows(tasks []taskItem, prs []prItem, workersByTask map[string]s
 			prLine := fmt.Sprintf("    └ %s [%s]", pr.ID, pr.Status)
 			rows = append(rows, backlogRow{isPR: true, prIdx: pi, display: prLine})
 		}
+
+		if gates := renderGates(t.Labels); gates != "" {
+			rows = append(rows, backlogRow{taskIdx: ti, display: dimStyle.Render("    " + gates)})
+		}
 	}
 
 	for _, pi := range orphanPRs {
@@ -99,6 +103,31 @@ func extractTaskIDFromTitle(title string) string {
 		return m[1]
 	}
 	return ""
+}
+
+func renderGates(labels []string) string {
+	approved := make(map[string]bool)
+	var required []string
+	for _, l := range labels {
+		if strings.HasPrefix(l, "require-review-") {
+			required = append(required, strings.TrimPrefix(l, "require-review-"))
+		}
+		if strings.HasPrefix(l, "approved-review-") {
+			approved[strings.TrimPrefix(l, "approved-review-")] = true
+		}
+	}
+	if len(required) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, r := range required {
+		if approved[r] {
+			parts = append(parts, "☑ "+r)
+		} else {
+			parts = append(parts, "☐ "+r)
+		}
+	}
+	return strings.Join(parts, "  ")
 }
 
 var _ = lipgloss.Width // keep import
