@@ -39,7 +39,9 @@ func readSelectedPR() string {
 
 func writeSelectedPR(id string) {
 	if path := selectedPRPath(); path != "" {
-		_ = os.WriteFile(path, []byte(id+"\n"), 0644)
+		if err := os.WriteFile(path, []byte(id+"\n"), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: write selected PR: %v\n", err)
+		}
 	}
 }
 
@@ -216,7 +218,11 @@ func newPrCmd() *cobra.Command {
 			if comment == "" {
 				fmt.Print("Rejection reason: ")
 				reader := bufio.NewReader(os.Stdin)
-				comment, _ = reader.ReadString('\n')
+				var readErr error
+				comment, readErr = reader.ReadString('\n')
+				if readErr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: reading input: %v\n", readErr)
+				}
 				comment = strings.TrimSpace(comment)
 			}
 			if comment == "" {
@@ -285,9 +291,15 @@ func newPrCmd() *cobra.Command {
 					base = "master"
 				}
 				fmt.Fprintf(os.Stderr, "Resetting to %s...\n", base)
-				_ = exec.Command("git", "-C", wtPath, "reset", "--hard").Run()
-				_ = exec.Command("git", "-C", wtPath, "clean", "-fd").Run()
-				_ = exec.Command("git", "-C", wtPath, "checkout", "--detach", base).Run()
+				if out, err := exec.Command("git", "-C", wtPath, "reset", "--hard").CombinedOutput(); err != nil {
+					return fmt.Errorf("git reset --hard failed: %s", strings.TrimSpace(string(out)))
+				}
+				if out, err := exec.Command("git", "-C", wtPath, "clean", "-fd").CombinedOutput(); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: git clean failed: %s\n", strings.TrimSpace(string(out)))
+				}
+				if out, err := exec.Command("git", "-C", wtPath, "checkout", "--detach", base).CombinedOutput(); err != nil {
+					return fmt.Errorf("checkout %s failed: %s", base, strings.TrimSpace(string(out)))
+				}
 
 				fmt.Fprintf(os.Stderr, "Merging %s...\n", pr.Branch)
 				if out, err := exec.Command("git", "-C", wtPath, "merge", "--no-ff", pr.Branch, "-m", "pr-try: "+pr.ID).CombinedOutput(); err != nil {

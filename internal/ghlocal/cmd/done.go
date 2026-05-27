@@ -27,7 +27,9 @@ var doneCmd = &cobra.Command{
 			return fmt.Errorf("checkout %s failed: %s", base, strings.TrimSpace(string(out)))
 		}
 
-		_ = os.WriteFile("/tmp/claude-status", []byte("idle"), 0644)
+		if err := os.WriteFile("/tmp/claude-status", []byte("idle"), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: update status file: %v\n", err)
+		}
 		fmt.Printf("Ready on %s. Run 'gh issue next' to pick up the next task.\n", base)
 		return nil
 	},
