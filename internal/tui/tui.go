@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/flo-at/sindri/internal/worker"
@@ -28,7 +30,7 @@ type Model struct {
 	height      int
 
 	activeCol    int
-	backlogPanel int // panelTasks or panelPRs
+	backlogPanel int
 	taskCursor   int
 	prCursor     int
 	workerCursor int
@@ -38,6 +40,10 @@ type Model struct {
 	prs     []prItem
 	detail  detailState
 
+	vpBacklog viewport.Model
+	vpWorkers viewport.Model
+	vpDetail  viewport.Model
+
 	showCreateModal bool
 	createModal     createTaskModel
 }
@@ -46,6 +52,9 @@ func New(projectRoot string) Model {
 	return Model{
 		projectRoot: projectRoot,
 		activeCol:   colBacklog,
+		vpBacklog:   viewport.New(0, 0),
+		vpWorkers:   viewport.New(0, 0),
+		vpDetail:    viewport.New(0, 0),
 	}
 }
 
@@ -62,7 +71,6 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Handle modal if open
 	if m.showCreateModal {
 		return m.updateModal(msg)
 	}
@@ -71,6 +79,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.resizeViewports()
 
 	case tea.KeyMsg:
 		switch {
@@ -101,10 +110,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.updateDetail()
 			}
 		case key.Matches(msg, keys.DetailUp):
-			m.detail.scrollUp()
+			m.vpDetail.LineUp(1)
 		case key.Matches(msg, keys.DetailDown):
-			contentHeight := m.height - 3
-			m.detail.scrollDown(contentHeight)
+			m.vpDetail.LineDown(1)
 		case key.Matches(msg, keys.Up):
 			m.moveCursor(-1)
 		case key.Matches(msg, keys.Down):
@@ -125,6 +133,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m *Model) resizeViewports() {
+	contentHeight := m.height - 3
+	// Border takes 2 lines (top + bottom)
+	innerH := contentHeight - 2
+	if innerH < 1 {
+		innerH = 1
+	}
+	leftW := m.width * 30 / 100
+	midW := m.width * 35 / 100
+	rightW := m.width - leftW - midW
+	// Subtract border (2) + horizontal padding (2) for inner width
+	m.vpBacklog.Width = leftW - 4
+	m.vpBacklog.Height = innerH
+	m.vpWorkers.Width = midW - 4
+	m.vpWorkers.Height = innerH
+	m.vpDetail.Width = rightW - 4
+	m.vpDetail.Height = innerH
 }
 
 func (m *Model) moveCursor(delta int) {
@@ -187,6 +214,8 @@ func (m *Model) updateDetail() {
 			m.detail = detailState{}
 		}
 	}
+	m.vpDetail.SetContent(m.detail.content)
+	m.vpDetail.GotoTop()
 }
 
 func (m Model) updateModal(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -220,7 +249,7 @@ func (m Model) View() string {
 	}
 
 	title := titleStyle.Render("Sindri — AI Agent Orchestrator")
-	help := dimStyle.Render("C-hjkl:navigate  j/k:list  J/K:detail  r:refresh  q:quit")
+	help := dimStyle.Render("C-hjkl:navigate  j/k:list  J/K:detail  n:new  r:refresh  q:quit")
 	titleBar := lipgloss.JoinHorizontal(lipgloss.Top,
 		title,
 		lipgloss.NewStyle().Width(m.width-lipgloss.Width(title)-lipgloss.Width(help)).Render(""),
@@ -228,17 +257,100 @@ func (m Model) View() string {
 	)
 
 	contentHeight := m.height - 3
-
 	leftW := m.width * 30 / 100
 	midW := m.width * 35 / 100
 	rightW := m.width - leftW - midW
 
-	isActive := m.activeCol == colBacklog
-	left := renderBacklogSplit(m.tasks, m.prs, m.taskCursor, m.prCursor, m.backlogPanel, leftW, contentHeight, isActive)
-	mid := renderWorkers(m.workers, m.workerCursor, midW, contentHeight, m.activeCol == colWorkers)
-	right := renderDetail(m.detail, rightW, contentHeight)
+	// Build content for viewports
+	m.vpBacklog.SetContent(renderBacklogContent(m.tasks, m.prs, m.taskCursor, m.prCursor, m.backlogPanel, m.activeCol == colBacklog))
+	m.vpWorkers.SetContent(renderWorkersContent(m.workers, m.workerCursor, m.activeCol == colWorkers))
+
+	// Render columns: border wraps viewport
+	left := renderColumn("Backlog", m.vpBacklog.View(), leftW, contentHeight, m.activeCol == colBacklog)
+	mid := renderColumn("Workers", m.vpWorkers.View(), midW, contentHeight, m.activeCol == colWorkers)
+	right := renderColumn("Detail", m.vpDetail.View(), rightW, contentHeight, false)
 
 	columns := lipgloss.JoinHorizontal(lipgloss.Top, left, mid, right)
-
 	return titleBar + "\n" + columns
+}
+
+func renderColumn(header, content string, width, height int, active bool) string {
+	style := columnStyle.Width(width).Height(height)
+	if active {
+		style = activeColumnStyle.Width(width).Height(height)
+	}
+	full := headerStyle.Render(header) + "\n" + content
+	return style.Render(full)
+}
+
+// renderBacklogContent builds the plain text content for the backlog viewport.
+func renderBacklogContent(tasks []taskItem, prs []prItem, taskCursor, prCursor, activePanel int, active bool) string {
+	var b strings.Builder
+
+	taskHeader := "Tasks"
+	if active && activePanel == panelTasks {
+		taskHeader = "Tasks ●"
+	}
+	b.WriteString(headerStyle.Render(taskHeader))
+	b.WriteByte('\n')
+
+	if len(tasks) == 0 {
+		b.WriteString(dimStyle.Render("No tasks"))
+		b.WriteByte('\n')
+	} else {
+		for i, t := range tasks {
+			line := formatTaskLine(t)
+			if active && activePanel == panelTasks && i == taskCursor {
+				b.WriteString(selectedItemStyle.Render("> " + line))
+			} else {
+				b.WriteString("  " + line)
+			}
+			b.WriteByte('\n')
+		}
+	}
+
+	b.WriteByte('\n')
+
+	prHeader := "Pull Requests"
+	if active && activePanel == panelPRs {
+		prHeader = "Pull Requests ●"
+	}
+	b.WriteString(headerStyle.Render(prHeader))
+	b.WriteByte('\n')
+
+	if len(prs) == 0 {
+		b.WriteString(dimStyle.Render("No PRs"))
+		b.WriteByte('\n')
+	} else {
+		for i, pr := range prs {
+			line := formatPRLine(pr)
+			if active && activePanel == panelPRs && i == prCursor {
+				b.WriteString(selectedItemStyle.Render("> " + line))
+			} else {
+				b.WriteString("  " + line)
+			}
+			b.WriteByte('\n')
+		}
+	}
+
+	return b.String()
+}
+
+// renderWorkersContent builds the plain text content for the workers viewport.
+func renderWorkersContent(workers []worker.Worker, selected int, active bool) string {
+	var b strings.Builder
+	if len(workers) == 0 {
+		b.WriteString(dimStyle.Render("No workers"))
+		b.WriteByte('\n')
+	}
+	for i, wk := range workers {
+		line := formatWorkerLine(wk)
+		if active && i == selected {
+			b.WriteString(selectedItemStyle.Render("> " + line))
+		} else {
+			b.WriteString("  " + line)
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
