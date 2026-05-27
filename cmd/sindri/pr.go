@@ -188,7 +188,7 @@ func newPrCmd() *cobra.Command {
 				}
 
 				fmt.Fprintf(os.Stderr, "Checking out %s...\n", pr.Branch)
-				if out, err := exec.Command("git", "-C", wtPath, "checkout", pr.Branch).CombinedOutput(); err != nil {
+				if out, err := exec.Command("git", "-C", wtPath, "checkout", "--detach", pr.Branch).CombinedOutput(); err != nil {
 					return fmt.Errorf("checkout failed: %s", strings.TrimSpace(string(out)))
 				}
 
