@@ -28,11 +28,13 @@ func GitRoot() (string, error) {
 
 // BaseBranch detects the main branch of the repository.
 func BaseBranch(projectRoot string) string {
-	branch := "master"
 	if out, err := exec.Command("git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
-		branch = strings.TrimSpace(string(out))
+		b := strings.TrimSpace(string(out))
+		if b != "" && b != "HEAD" {
+			return b
+		}
 	}
-	return branch
+	return "master"
 }
 
 // FindAvailable finds an idle worktree or creates one with the next available Norse name.
