@@ -115,6 +115,8 @@ func newPrCmd() *cobra.Command {
 				fmt.Printf("%s\n", pr.Title)
 				if taskID := extractTaskID(pr.Title); taskID != "" {
 					fmt.Println()
+					printTaskSummary(taskID)
+					fmt.Println()
 					tdShow := exec.Command("td", "show", taskID)
 					tdShow.Dir = tdWorkDir()
 					if out, err := tdShow.Output(); err == nil {
@@ -338,16 +340,7 @@ func newPrCmd() *cobra.Command {
 						fmt.Printf("PR:       %s\n", pr.Title)
 						fmt.Printf("Branch:   %s → %s\n", pr.Branch, pr.Base)
 						if taskID := extractTaskID(pr.Title); taskID != "" {
-							tdCmd := exec.Command("td", "show", taskID, "--json")
-							tdCmd.Dir = tdWorkDir()
-							if out, err := tdCmd.Output(); err == nil {
-								var task struct {
-									Title string `json:"title"`
-								}
-								if json.Unmarshal(out, &task) == nil && task.Title != "" {
-									fmt.Printf("Task:     %s — %s\n", taskID, task.Title)
-								}
-							}
+							printTaskSummary(taskID)
 						}
 						return nil
 					}
@@ -451,6 +444,37 @@ func newPrCmd() *cobra.Command {
 	prCmd.AddCommand(reviewCmd)
 
 	return prCmd
+}
+
+func printTaskSummary(taskID string) {
+	tdCmd := exec.Command("td", "show", taskID, "--json")
+	tdCmd.Dir = tdWorkDir()
+	if out, err := tdCmd.Output(); err == nil {
+		var task struct {
+			Title  string   `json:"title"`
+			Status string   `json:"status"`
+			Labels []string `json:"labels"`
+		}
+		if json.Unmarshal(out, &task) == nil {
+			fmt.Printf("Task:     %s [%s] %s\n", taskID, task.Status, task.Title)
+			approved := make(map[string]bool)
+			for _, l := range task.Labels {
+				if strings.HasPrefix(l, "approved-review-") {
+					approved[strings.TrimPrefix(l, "approved-review-")] = true
+				}
+			}
+			for _, l := range task.Labels {
+				if strings.HasPrefix(l, "require-review-") {
+					gate := strings.TrimPrefix(l, "require-review-")
+					if approved[gate] {
+						fmt.Printf("  ☑ %s\n", gate)
+					} else {
+						fmt.Printf("  ☐ %s\n", gate)
+					}
+				}
+			}
+		}
+	}
 }
 
 func getTaskLabels(taskID string) ([]string, error) {
