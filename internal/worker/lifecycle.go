@@ -27,14 +27,17 @@ func GitRoot() (string, error) {
 }
 
 // BaseBranch detects the main branch of the repository.
-func BaseBranch(projectRoot string) string {
-	if out, err := exec.Command("git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
-		b := strings.TrimSpace(string(out))
-		if b != "" && b != "HEAD" {
-			return b
-		}
+// Returns an error if the repo is in detached HEAD state.
+func BaseBranch(projectRoot string) (string, error) {
+	out, err := exec.Command("git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		return "", fmt.Errorf("cannot detect base branch: %w", err)
 	}
-	return "master"
+	b := strings.TrimSpace(string(out))
+	if b == "" || b == "HEAD" {
+		return "", fmt.Errorf("repository is in detached HEAD state — run 'git checkout master' on the main repo first")
+	}
+	return b, nil
 }
 
 // FindAvailable finds an idle worktree or creates one with the next available Norse name.
@@ -97,7 +100,10 @@ func Start(projectRoot, name string, opts StartOpts) error {
 	_ = exec.Command("podman", "rm", "-f", cName).Run()
 
 	claudeHome, configPath := prepareClaudeHome(projectRoot, name)
-	base := BaseBranch(projectRoot)
+	base, err := BaseBranch(projectRoot)
+	if err != nil {
+		return err
+	}
 
 	podmanArgs := []string{
 		"run", "--rm", "-it",
