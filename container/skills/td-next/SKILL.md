@@ -11,7 +11,7 @@ When you have a task:
 2. `td -w /project show <id>` to read the details
 3. If anything is unclear, ask me before guessing
 4. Implement the task, run tests, commit your changes
-5. `gh pr create --title "type(task-id): summary" --body "details"` — use conventional commits:
+5. `gh pr create --task <id> --title "type(task-id): summary" --body "details"` — use conventional commits:
    - feature → `feat(td-xxx): ...`
    - bug → `fix(td-xxx): ...`
    - task/chore → `chore(td-xxx): ...`
