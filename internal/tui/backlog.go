@@ -28,15 +28,14 @@ func buildBacklogRows(tasks []taskItem, prs []prItem, workersByTask map[string]s
 
 	var rows []backlogRow
 	for ti, t := range tasks {
-		worker := ""
-		if w, ok := workersByTask[t.ID]; ok {
-			worker = dimStyle.Render(" 🔨 " + w)
+		status := statusStyle(t.Status)
+		if w, ok := workersByTask[t.ID]; ok && t.Status == "in_progress" {
+			status = statusRunning.Render("🔨 " + w)
 		}
-		line := fmt.Sprintf("%s  %s  %s%s",
+		line := fmt.Sprintf("%s  %s  %s",
 			dimStyle.Render(t.Priority),
-			statusStyle(t.Status),
+			status,
 			t.Title,
-			worker,
 		)
 		rows = append(rows, backlogRow{taskIdx: ti, display: line})
 
