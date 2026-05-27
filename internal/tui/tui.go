@@ -1,16 +1,20 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
+	"os/exec"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/flo-at/sindri/internal/ghlocal/store"
 	"github.com/flo-at/sindri/internal/worker"
 )
 
@@ -45,6 +49,12 @@ type Model struct {
 	showDetail      bool
 	showCreateModal bool
 	createModal     createTaskModel
+
+	confirmAction string
+	confirmLabel  string
+
+	commenting   bool
+	commentInput textinput.Model
 
 	notify notification
 }
@@ -81,6 +91,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.prs = msg.prs
 		m.rebuildBacklog()
 		m.clampCursors()
+		if m.showDetail && m.detail.taskID != "" {
+			for _, t := range m.tasks {
+				if t.ID == m.detail.taskID {
+					m.detail = taskDetail(t, m.prs, m.workers, m.projectRoot)
+					m.vpDetail.SetContent(m.detail.content)
+					break
+				}
+			}
+		}
 		return m, nil
 	}
 
@@ -146,13 +165,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+type actionResultMsg struct {
+	message string
+	isError bool
+}
+
 func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Handle comment input mode
+	if m.commenting {
+		return m.updateCommentInput(msg)
+	}
+
+	// Handle confirmation mode
+	if m.confirmAction != "" {
+		return m.updateConfirm(msg)
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		m.resizeViewports()
 		return m, nil
+	case actionResultMsg:
+		if msg.isError {
+			m.notify = notification{message: msg.message, isError: true, time: time.Now()}
+		} else {
+			m.notify = notification{message: msg.message, time: time.Now()}
+		}
+		return m, tea.Batch(refreshData(m.projectRoot), flashTimer())
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("esc", "q"))):
@@ -170,6 +211,49 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.vpDetail.GotoTop()
 		case key.Matches(msg, key.NewBinding(key.WithKeys("G"))):
 			m.vpDetail.GotoBottom()
+
+		// Action hotkeys (only for task detail)
+		case key.Matches(msg, keys.Comment):
+			if m.detail.kind == detailTask {
+				ti := textinput.New()
+				ti.Placeholder = "Type your comment..."
+				ti.Focus()
+				ti.CharLimit = 500
+				ti.Width = m.width - 20
+				m.commenting = true
+				m.commentInput = ti
+				return m, textinput.Blink
+			}
+		case key.Matches(msg, keys.Status):
+			if m.detail.kind == detailTask {
+				return m, m.cycleTaskStatus()
+			}
+		case key.Matches(msg, keys.Approve):
+			if len(m.detail.prIDs) > 0 {
+				return m, m.approvePR()
+			}
+		case key.Matches(msg, keys.Merge):
+			if len(m.detail.prIDs) > 0 {
+				m.confirmAction = "merge"
+				m.confirmLabel = fmt.Sprintf("Merge %s? (y/n)", m.detail.prIDs[0])
+				return m, nil
+			}
+		case key.Matches(msg, keys.Reject):
+			if m.detail.kind == detailTask {
+				m.confirmAction = "reject"
+				m.confirmLabel = fmt.Sprintf("Reject task %s? (y/n)", m.detail.taskID)
+				return m, nil
+			}
+		case key.Matches(msg, keys.Yank):
+			id := m.detail.taskID
+			if id == "" && len(m.detail.prIDs) > 0 {
+				id = m.detail.prIDs[0]
+			}
+			if id != "" {
+				_ = clipboard.WriteAll(id)
+				m.notify = notification{message: "Copied: " + id, time: time.Now()}
+				return m, flashTimer()
+			}
 		}
 	case notifyMsg:
 		m.notify = notification{message: msg.message, isError: msg.isError, time: time.Now()}
@@ -178,6 +262,141 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+func (m Model) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "y", "Y":
+			action := m.confirmAction
+			m.confirmAction = ""
+			m.confirmLabel = ""
+			switch action {
+			case "merge":
+				return m, m.mergePR()
+			case "reject":
+				return m, m.rejectTask()
+			}
+		default:
+			m.confirmAction = ""
+			m.confirmLabel = ""
+		}
+	}
+	return m, nil
+}
+
+func (m Model) updateCommentInput(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch {
+		case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
+			m.commenting = false
+			return m, nil
+		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+			text := strings.TrimSpace(m.commentInput.Value())
+			if text == "" {
+				m.commenting = false
+				return m, nil
+			}
+			m.commenting = false
+			return m, m.addComment(text)
+		}
+	}
+	var cmd tea.Cmd
+	m.commentInput, cmd = m.commentInput.Update(msg)
+	return m, cmd
+}
+
+func (m *Model) approvePR() tea.Cmd {
+	prID := m.detail.prIDs[0]
+	return func() tea.Msg {
+		_, err := store.Approve(prID)
+		if err != nil {
+			return actionResultMsg{message: "Approve failed: " + err.Error(), isError: true}
+		}
+		return actionResultMsg{message: "PR approved: " + prID}
+	}
+}
+
+func (m *Model) mergePR() tea.Cmd {
+	prID := m.detail.prIDs[0]
+	return func() tea.Msg {
+		_, err := store.Merge(prID)
+		if err != nil {
+			return actionResultMsg{message: "Merge failed: " + err.Error(), isError: true}
+		}
+		return actionResultMsg{message: "PR merged: " + prID}
+	}
+}
+
+func (m *Model) rejectTask() tea.Cmd {
+	taskID := m.detail.taskID
+	projectRoot := m.projectRoot
+	prIDs := make([]string, len(m.detail.prIDs))
+	copy(prIDs, m.detail.prIDs)
+	return func() tea.Msg {
+		out, err := exec.Command("td", "-w", projectRoot, "reject", taskID).CombinedOutput()
+		if err != nil {
+			return actionResultMsg{message: fmt.Sprintf("Reject failed: %s", strings.TrimSpace(string(out))), isError: true}
+		}
+		for _, prID := range prIDs {
+			pr, err := store.Read(prID)
+			if err != nil {
+				continue
+			}
+			if pr.Status == "open" || pr.Status == "approved" {
+				pr.Status = "rejected"
+				if writeErr := store.Write(pr); writeErr != nil {
+					return actionResultMsg{message: "Task rejected but PR update failed: " + writeErr.Error(), isError: true}
+				}
+			}
+		}
+		return actionResultMsg{message: "Task rejected: " + taskID}
+	}
+}
+
+func (m *Model) cycleTaskStatus() tea.Cmd {
+	taskID := m.detail.taskID
+	projectRoot := m.projectRoot
+	return func() tea.Msg {
+		out, err := exec.Command("td", "-w", projectRoot, "show", taskID, "--json").Output()
+		if err != nil {
+			return actionResultMsg{message: "Failed to read task", isError: true}
+		}
+		var current struct {
+			Status string `json:"status"`
+		}
+		if jsonErr := json.Unmarshal(out, &current); jsonErr != nil {
+			return actionResultMsg{message: "Failed to parse task", isError: true}
+		}
+		var next string
+		switch current.Status {
+		case "open":
+			next = "in_progress"
+		case "in_progress":
+			next = "open"
+		default:
+			return actionResultMsg{message: "Cannot change status from " + current.Status, isError: true}
+		}
+		out, err = exec.Command("td", "-w", projectRoot, "update", taskID, "--status", next).CombinedOutput()
+		if err != nil {
+			return actionResultMsg{message: fmt.Sprintf("Status change failed: %s", strings.TrimSpace(string(out))), isError: true}
+		}
+		return actionResultMsg{message: fmt.Sprintf("Status: %s → %s", current.Status, next)}
+	}
+}
+
+func (m *Model) addComment(text string) tea.Cmd {
+	taskID := m.detail.taskID
+	projectRoot := m.projectRoot
+	return func() tea.Msg {
+		out, err := exec.Command("td", "-w", projectRoot, "comment", taskID, text).CombinedOutput()
+		if err != nil {
+			return actionResultMsg{message: fmt.Sprintf("Comment failed: %s", strings.TrimSpace(string(out))), isError: true}
+		}
+		return actionResultMsg{message: "Comment added"}
+	}
 }
 
 func (m *Model) resizeViewports() {
@@ -423,7 +642,12 @@ func (m Model) viewList() string {
 
 func (m Model) viewDetail() string {
 	title := titleStyle.Render(m.detail.title)
-	help := dimStyle.Render("j/k:scroll  g/G:top/bottom  esc/q:back")
+	var help string
+	if m.detail.kind == detailTask {
+		help = dimStyle.Render("j/k:scroll  c:comment  s:status  a:approve  m:merge  x:reject  y:copy  esc:back")
+	} else {
+		help = dimStyle.Render("j/k:scroll  a:approve  m:merge  y:copy  esc:back")
+	}
 	titleBar := lipgloss.JoinHorizontal(lipgloss.Top,
 		title,
 		lipgloss.NewStyle().Width(m.width-lipgloss.Width(title)-lipgloss.Width(help)).Render(""),
@@ -440,8 +664,21 @@ func (m Model) viewDetail() string {
 
 	col := renderColumn("", m.vpDetail.View(), scrollStatus, m.width, contentHeight, true)
 
-	notifyBar := m.notify.render(m.width)
-	return titleBar + "\n" + col + "\n" + notifyBar
+	var bottomBar string
+	if m.confirmAction != "" {
+		confirmStyle := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(lipgloss.Color("#FF6600")).
+			PaddingLeft(1).
+			PaddingRight(1)
+		bottomBar = confirmStyle.Width(m.width).Render(m.confirmLabel)
+	} else if m.commenting {
+		bottomBar = lipgloss.NewStyle().PaddingLeft(1).Render("Comment: " + m.commentInput.View())
+	} else {
+		bottomBar = m.notify.render(m.width)
+	}
+	return titleBar + "\n" + col + "\n" + bottomBar
 }
 
 func renderColumn(header, content, footer string, width, height int, active bool) string {
