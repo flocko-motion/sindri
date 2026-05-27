@@ -313,7 +313,7 @@ func newPrCmd() *cobra.Command {
 
 				fmt.Fprintf(os.Stderr, "Applying %s...\n", pr.Branch)
 				// Try checkout first (branch may exist)
-				if out, err := exec.Command("git", "-C", wtPath, "checkout", "--detach", pr.Branch).CombinedOutput(); err != nil {
+				if _, err := exec.Command("git", "-C", wtPath, "checkout", "--detach", pr.Branch).CombinedOutput(); err != nil {
 					// Branch doesn't exist — apply the stored diff
 					if pr.Diff == "" {
 						return fmt.Errorf("branch %s not found and PR has no stored diff", pr.Branch)
@@ -321,10 +321,9 @@ func newPrCmd() *cobra.Command {
 					fmt.Fprintf(os.Stderr, "Branch gone, applying stored diff...\n")
 					apply := exec.Command("git", "-C", wtPath, "apply", "--stat", "--apply", "-")
 					apply.Stdin = strings.NewReader(pr.Diff)
-					if out, err := apply.CombinedOutput(); err != nil {
-						return fmt.Errorf("git apply failed: %s", strings.TrimSpace(string(out)))
+					if _, err := apply.CombinedOutput(); err != nil {
+						return fmt.Errorf("PR diff is stale — doesn't apply to current %s. Reject this PR so the agent rebases and resubmits", base)
 					}
-					_ = out
 				}
 
 				fmt.Fprintf(os.Stderr, "Building in %s...\n", wtPath)
