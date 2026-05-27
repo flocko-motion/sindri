@@ -7,37 +7,7 @@ import (
 	"github.com/flo-at/sindri/internal/worker"
 )
 
-func renderWorkers(workers []worker.Worker, selected int, width, height int, active bool) string {
-	style := columnStyle.Width(width)
-	if active {
-		style = activeColumnStyle.Width(width)
-	}
-
-	var b strings.Builder
-	b.WriteString(headerStyle.Render("Workers"))
-	b.WriteByte('\n')
-
-	if len(workers) == 0 {
-		b.WriteString(dimStyle.Render("  No workers"))
-		b.WriteByte('\n')
-	}
-
-	for i, wk := range workers {
-		line := formatWorker(wk)
-		if active && i == selected {
-			b.WriteString(selectedItemStyle.Render("> " + line))
-		} else {
-			b.WriteString(normalItemStyle.Render("  " + line))
-		}
-		b.WriteByte('\n')
-	}
-
-	lines := strings.Split(b.String(), "\n")
-	lines = clipLines(lines, innerHeight(height))
-	return style.Height(height).Render(strings.Join(lines, "\n"))
-}
-
-func formatWorker(wk worker.Worker) string {
+func formatWorkerLine(wk worker.Worker) string {
 	icon := "🔨"
 	if wk.IsMain {
 		icon = "👑"
@@ -46,9 +16,7 @@ func formatWorker(wk worker.Worker) string {
 	}
 
 	status := statusStyle(wk.Status)
-	name := wk.Name
-
-	parts := []string{fmt.Sprintf("%s %s %s", icon, name, status)}
+	parts := []string{fmt.Sprintf("%s %s %s", icon, wk.Name, status)}
 	if wk.Task != "" {
 		parts = append(parts, dimStyle.Render(wk.Task))
 	}
