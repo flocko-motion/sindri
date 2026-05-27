@@ -17,6 +17,7 @@ type taskItem struct {
 	Status   string
 	Type     string
 	Priority string
+	Labels   []string
 }
 
 type prItem struct {
@@ -49,11 +50,12 @@ func fetchTasks(projectRoot string) []taskItem {
 		return nil
 	}
 	var raw []struct {
-		ID       string `json:"id"`
-		Title    string `json:"title"`
-		Status   string `json:"status"`
-		Type     string `json:"type"`
-		Priority string `json:"priority"`
+		ID       string   `json:"id"`
+		Title    string   `json:"title"`
+		Status   string   `json:"status"`
+		Type     string   `json:"type"`
+		Priority string   `json:"priority"`
+		Labels   []string `json:"labels"`
 	}
 	if json.Unmarshal(out, &raw) != nil {
 		return nil
@@ -66,6 +68,7 @@ func fetchTasks(projectRoot string) []taskItem {
 			Status:   r.Status,
 			Type:     r.Type,
 			Priority: r.Priority,
+			Labels:   r.Labels,
 		}
 	}
 	return items
