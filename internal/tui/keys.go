@@ -17,6 +17,7 @@ type keyMap struct {
 	NewTask    key.Binding
 	Approve    key.Binding
 	Merge      key.Binding
+	Yank       key.Binding
 }
 
 var keys = keyMap{
@@ -75,5 +76,9 @@ var keys = keyMap{
 	Merge: key.NewBinding(
 		key.WithKeys("m"),
 		key.WithHelp("m", "merge PR"),
+	),
+	Yank: key.NewBinding(
+		key.WithKeys("y"),
+		key.WithHelp("y", "copy ID"),
 	),
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -124,6 +125,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, keys.Enter):
 			m.openDetail()
+		case key.Matches(msg, keys.Yank):
+			if id := m.selectedID(); id != "" {
+				_ = clipboard.WriteAll(id)
+				m.notify = notification{message: "Copied: " + id, time: time.Now()}
+				return m, flashTimer()
+			}
 		case key.Matches(msg, keys.Refresh):
 			return m, refreshData(m.projectRoot)
 		}
@@ -221,6 +228,29 @@ func (m *Model) moveCursor(delta int) {
 			m.workerCursor = next
 		}
 	}
+}
+
+func (m *Model) selectedID() string {
+	switch m.leftView {
+	case viewBacklog:
+		if m.listCursor < len(m.backlogRows) {
+			row := m.backlogRows[m.listCursor]
+			if row.isPR {
+				if row.prIdx < len(m.prs) {
+					return m.prs[row.prIdx].ID
+				}
+			} else {
+				if row.taskIdx < len(m.tasks) {
+					return m.tasks[row.taskIdx].ID
+				}
+			}
+		}
+	case viewWorkers:
+		if m.workerCursor < len(m.workers) {
+			return m.workers[m.workerCursor].Name
+		}
+	}
+	return ""
 }
 
 func (m *Model) navigateInto() {
@@ -342,7 +372,7 @@ func (m Model) viewList() string {
 	if m.leftView == viewWorkers {
 		viewLabel = "workers"
 	}
-	help := dimStyle.Render(fmt.Sprintf("[%s]  T/w:view  j/k:nav  enter:open  n:new  r:refresh  q:quit", viewLabel))
+	help := dimStyle.Render(fmt.Sprintf("[%s]  T/w:view  j/k:nav  enter:open  y:copy  n:new  r:refresh  q:quit", viewLabel))
 	titleBar := lipgloss.JoinHorizontal(lipgloss.Top,
 		title,
 		lipgloss.NewStyle().Width(m.width-lipgloss.Width(title)-lipgloss.Width(help)).Render(""),
