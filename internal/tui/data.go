@@ -37,14 +37,23 @@ type refreshMsg struct {
 	tasks   []taskItem
 	prs     []prItem
 	err     error
+	manual  bool
 }
 
 func refreshData(projectRoot string) tea.Cmd {
+	return refreshDataOpt(projectRoot, false)
+}
+
+func refreshDataManual(projectRoot string) tea.Cmd {
+	return refreshDataOpt(projectRoot, true)
+}
+
+func refreshDataOpt(projectRoot string, manual bool) tea.Cmd {
 	return func() tea.Msg {
 		workers := worker.List(projectRoot)
 		tasks := fetchTasks(projectRoot)
 		prs := fetchPRs(projectRoot)
-		return refreshMsg{workers: workers, tasks: tasks, prs: prs}
+		return refreshMsg{workers: workers, tasks: tasks, prs: prs, manual: manual}
 	}
 }
 

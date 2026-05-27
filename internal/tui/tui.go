@@ -100,6 +100,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		if msg.manual {
+			m.notify = notification{
+				message: fmt.Sprintf("Refreshed — %d tasks, %d workers, %d PRs", len(m.tasks), len(m.workers), len(m.prs)),
+				time:    time.Now(),
+			}
+			return m, flashTimer()
+		}
 		return m, nil
 	}
 
@@ -151,7 +158,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, flashTimer()
 			}
 		case key.Matches(msg, keys.Refresh):
-			return m, refreshData(m.projectRoot)
+			return m, refreshDataManual(m.projectRoot)
 		}
 
 	case notifyMsg:
