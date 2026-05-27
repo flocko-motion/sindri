@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -215,38 +216,58 @@ func newPrCmd() *cobra.Command {
 		},
 	)
 
-	prCmd.AddCommand(
-		&cobra.Command{
-			Use:   "reject [id]",
-			Short: "Reject a PR and its associated task (defaults to selected)",
-			Args:  cobra.MaximumNArgs(1),
-			RunE: func(cmd *cobra.Command, args []string) error {
-				id, err := resolveSelectedPR(args)
-				if err != nil {
-					return err
+	var rejectComment string
+	rejectCmd := &cobra.Command{
+		Use:   "reject [id]",
+		Short: "Reject a PR and its associated task (defaults to selected)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := resolveSelectedPR(args)
+			if err != nil {
+				return err
+			}
+			pr, err := store.Read(id)
+			if err != nil {
+				return err
+			}
+
+			comment := rejectComment
+			if comment == "" {
+				fmt.Print("Rejection reason: ")
+				reader := bufio.NewReader(os.Stdin)
+				comment, _ = reader.ReadString('\n')
+				comment = strings.TrimSpace(comment)
+			}
+			if comment == "" {
+				return fmt.Errorf("rejection reason is required")
+			}
+
+			pr.Status = "rejected"
+			if err := store.Write(pr); err != nil {
+				return err
+			}
+			fmt.Printf("Rejected PR %s\n", pr.ID)
+
+			if taskID := extractTaskID(pr.Title); taskID != "" {
+				tdComment := exec.Command("td", "comment", taskID, comment)
+				tdComment.Dir = tdWorkDir()
+				if out, err := tdComment.CombinedOutput(); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: td comment failed: %s\n", strings.TrimSpace(string(out)))
 				}
-				pr, err := store.Read(id)
-				if err != nil {
-					return err
+
+				tdCmd := exec.Command("td", "reject", taskID)
+				tdCmd.Dir = tdWorkDir()
+				if out, err := tdCmd.CombinedOutput(); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: td reject %s failed: %s\n", taskID, strings.TrimSpace(string(out)))
+				} else {
+					fmt.Printf("Rejected task %s\n", taskID)
 				}
-				pr.Status = "rejected"
-				if err := store.Write(pr); err != nil {
-					return err
-				}
-				fmt.Printf("Rejected PR %s\n", pr.ID)
-				if taskID := extractTaskID(pr.Title); taskID != "" {
-					tdCmd := exec.Command("td", "reject", taskID)
-					tdCmd.Dir = tdWorkDir()
-					if out, err := tdCmd.CombinedOutput(); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: td reject %s failed: %s\n", taskID, strings.TrimSpace(string(out)))
-					} else {
-						fmt.Printf("Rejected task %s\n", taskID)
-					}
-				}
-				return nil
-			},
+			}
+			return nil
 		},
-	)
+	}
+	rejectCmd.Flags().StringVarP(&rejectComment, "comment", "c", "", "Rejection reason")
+	prCmd.AddCommand(rejectCmd)
 
 	prCmd.AddCommand(
 		&cobra.Command{

@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -31,6 +33,32 @@ func newTaskCmd() *cobra.Command {
 		Short: "Manage tasks",
 	}
 
+	var commentMsg string
+	commentCmd := &cobra.Command{
+		Use:   "comment <id>",
+		Short: "Add a comment to a task",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			msg := commentMsg
+			if msg == "" {
+				fmt.Print("Comment: ")
+				reader := bufio.NewReader(os.Stdin)
+				msg, _ = reader.ReadString('\n')
+				msg = strings.TrimSpace(msg)
+			}
+			if msg == "" {
+				return fmt.Errorf("comment is required")
+			}
+			out, err := exec.Command("td", "comment", args[0], msg).CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("td comment failed: %s", strings.TrimSpace(string(out)))
+			}
+			fmt.Println(strings.TrimSpace(string(out)))
+			return nil
+		},
+	}
+	commentCmd.Flags().StringVarP(&commentMsg, "message", "m", "", "Comment text")
+
 	taskCmd.AddCommand(
 		&cobra.Command{
 			Use:   "list",
@@ -43,6 +71,7 @@ func newTaskCmd() *cobra.Command {
 			Args:  cobra.ExactArgs(1),
 			RunE:  runTaskView,
 		},
+		commentCmd,
 	)
 
 	return taskCmd
