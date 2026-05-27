@@ -45,8 +45,9 @@ func buildBacklogRows(tasks []taskItem, prs []prItem, workersByTask map[string]s
 		if w, ok := workersByTask[t.ID]; ok && t.Status == "in_progress" {
 			statusText = "🔨 " + w
 		}
-		plain := fmt.Sprintf("%s  %s  %s  %s", t.Priority, tsStr, statusText, t.Title)
-		line := fmt.Sprintf("%s  %s  %s  %s",
+		plain := fmt.Sprintf("%-9s %s  %s  %s  %s", t.ID, t.Priority, tsStr, statusText, t.Title)
+		line := fmt.Sprintf("%s %s  %s  %s  %s",
+			dimStyle.Render(fmt.Sprintf("%-9s", t.ID)),
 			dimStyle.Render(t.Priority),
 			dimStyle.Render(tsStr),
 			status,
