@@ -94,6 +94,7 @@ func main() {
 	rootCmd.AddCommand(newTuiCmd())
 	rootCmd.AddCommand(newPrCmd())
 	rootCmd.AddCommand(newReviewCmd())
+	rootCmd.AddCommand(newRejectCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

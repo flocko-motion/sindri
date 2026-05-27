@@ -125,7 +125,70 @@ func newPrCmd() *cobra.Command {
 		},
 	)
 
+	prCmd.AddCommand(
+		&cobra.Command{
+			Use:   "reject <id>",
+			Short: "Reject a PR and its associated task",
+			Args:  cobra.ExactArgs(1),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				pr, err := store.Read(args[0])
+				if err != nil {
+					return err
+				}
+				pr.Status = "rejected"
+				if err := store.Write(pr); err != nil {
+					return err
+				}
+				fmt.Printf("Rejected PR %s\n", pr.ID)
+				if taskID := extractTaskID(pr.Title); taskID != "" {
+					if out, err := exec.Command("td", "reject", taskID).CombinedOutput(); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: td reject %s failed: %s\n", taskID, out)
+					} else {
+						fmt.Printf("Rejected task %s\n", taskID)
+					}
+				}
+				return nil
+			},
+		},
+	)
+
 	return prCmd
+}
+
+// rejectPRsForTask finds and rejects all open PRs for a given task ID.
+func rejectPRsForTask(taskID string) {
+	prs, err := store.List()
+	if err != nil {
+		return
+	}
+	for _, pr := range prs {
+		if pr.Status != "open" && pr.Status != "approved" {
+			continue
+		}
+		if extractTaskID(pr.Title) == taskID {
+			pr.Status = "rejected"
+			if err := store.Write(pr); err == nil {
+				fmt.Printf("Rejected PR %s\n", pr.ID)
+			}
+		}
+	}
+}
+
+func newRejectCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reject <task-id>",
+		Short: "Reject a task and close its open PRs",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			taskID := args[0]
+			if out, err := exec.Command("td", "reject", taskID).CombinedOutput(); err != nil {
+				return fmt.Errorf("td reject %s failed: %s", taskID, strings.TrimSpace(string(out)))
+			}
+			fmt.Printf("Rejected task %s\n", taskID)
+			rejectPRsForTask(taskID)
+			return nil
+		},
+	}
 }
 
 var prTaskIDPattern = regexp.MustCompile(`\(?(td-[0-9a-f]+)\)?`)
