@@ -222,6 +222,11 @@ func runWorkerStart(cmd *cobra.Command, args []string, skill string, shell bool)
 
 	image := "sindri-agent:test"
 
+	baseBranch := "master"
+	if out, err := exec.Command("git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
+		baseBranch = strings.TrimSpace(string(out))
+	}
+
 	podmanArgs := []string{
 		"run", "--rm", "-it",
 		"--name", cName,
@@ -230,7 +235,7 @@ func runWorkerStart(cmd *cobra.Command, args []string, skill string, shell bool)
 		"--label", "sindri.worker=" + name,
 		"-v", claudeHome + ":/home/sindri/.claude:rw,z",
 		"-v", configPath + ":/home/sindri/.claude.json:rw,z",
-		"-e", "GH_LOCAL_BASE=main",
+		"-e", "GH_LOCAL_BASE=" + baseBranch,
 		"-e", "COLORTERM=truecolor",
 		"-e", "TD_ROOT=/project",
 		"-v", projectRoot + "/.todos:/project/.todos:rw,z",
@@ -248,11 +253,6 @@ func runWorkerStart(cmd *cobra.Command, args []string, skill string, shell bool)
 		_ = os.WriteFile(gitFile, []byte(hostGitDir), 0644)
 	}
 
-	// Rebase worktree onto current base branch BEFORE entering container
-	baseBranch := "master"
-	if out, err := exec.Command("git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
-		baseBranch = strings.TrimSpace(string(out))
-	}
 	fmt.Fprintf(os.Stderr, "Rebasing %s onto %s...\n", name, baseBranch)
 	if out, err := exec.Command("git", "-C", wtPath, "rebase", baseBranch).CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: rebase failed: %s\n", strings.TrimSpace(string(out)))
