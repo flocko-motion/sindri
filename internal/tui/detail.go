@@ -24,12 +24,7 @@ type detailState struct {
 
 func renderDetail(d detailState, width, height int) string {
 	style := columnStyle.Width(width)
-
-	// Hard budget: header takes 2 lines (title + blank), scroll indicator 1
-	maxContent := height - 3
-	if maxContent < 1 {
-		maxContent = 1
-	}
+	avail := innerHeight(height)
 
 	var out []string
 	out = append(out, headerStyle.Render("Detail"))
@@ -38,22 +33,26 @@ func renderDetail(d detailState, width, height int) string {
 		out = append(out, dimStyle.Render("  Select an item to view details"))
 	} else {
 		lines := strings.Split(d.content, "\n")
+		// 1 line used by header
+		contentSlots := avail - 1
+		if contentSlots < 1 {
+			contentSlots = 1
+		}
+
 		start := d.scroll
 		if start > len(lines) {
 			start = len(lines)
 		}
 
-		// Show scroll-up indicator if scrolled
 		if start > 0 {
 			out = append(out, dimStyle.Render(fmt.Sprintf("  ↑ %d lines above", start)))
-			maxContent--
+			contentSlots--
 		}
 
-		// Reserve 1 line for overflow indicator if needed
-		end := start + maxContent
+		end := start + contentSlots
 		hasMore := end < len(lines)
 		if hasMore {
-			end = start + maxContent - 1
+			end = start + contentSlots - 1
 		}
 		if end > len(lines) {
 			end = len(lines)
@@ -64,12 +63,12 @@ func renderDetail(d detailState, width, height int) string {
 		}
 
 		if hasMore {
-			out = append(out, dimStyle.Render(fmt.Sprintf("  ↓ %d more (Shift+J/K)", len(lines)-end)))
+			out = append(out, dimStyle.Render(fmt.Sprintf("  ↓ %d more (J/K)", len(lines)-end)))
 		}
 	}
 
-	rendered := style.Render(strings.Join(out, "\n"))
-	return clipHeight(rendered, height)
+	out = clipLines(out, avail)
+	return style.Height(height).Render(strings.Join(out, "\n"))
 }
 
 func (d *detailState) scrollDown(height int) {

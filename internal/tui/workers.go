@@ -32,9 +32,9 @@ func renderWorkers(workers []worker.Worker, selected int, width, height int, act
 		b.WriteByte('\n')
 	}
 
-	content := b.String()
-	rendered := style.Render(content)
-	return clipHeight(rendered, height)
+	lines := strings.Split(b.String(), "\n")
+	lines = clipLines(lines, innerHeight(height))
+	return style.Height(height).Render(strings.Join(lines, "\n"))
 }
 
 func formatWorker(wk worker.Worker) string {
