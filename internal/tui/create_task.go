@@ -82,7 +82,13 @@ func (m createTaskModel) Update(msg tea.Msg) (createTaskModel, tea.Cmd) {
 			m.activeField = (m.activeField + fieldCount - 1) % fieldCount
 			m.focusActive()
 			return m, nil
-		case key.Matches(msg, key.NewBinding(key.WithKeys("enter", " "))):
+		case key.Matches(msg, key.NewBinding(key.WithKeys(" "))):
+			if m.activeField == fieldReview {
+				m.reviewChecked = !m.reviewChecked
+				return m, nil
+			}
+			// Space on text fields: fall through to textinput handling below
+		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
 			if m.activeField == fieldReview {
 				m.reviewChecked = !m.reviewChecked
 				return m, nil
