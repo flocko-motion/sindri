@@ -229,6 +229,13 @@ func runWorkerStart(cmd *cobra.Command, args []string, skill string, shell bool)
 		image,
 	}
 
+	// Ensure .git has correct host path (may be broken from previous container kill)
+	hostGitDir := fmt.Sprintf("gitdir: %s/.git/worktrees/%s\n", projectRoot, name)
+	gitFile := wtPath + "/.git"
+	if info, err := os.Stat(gitFile); err == nil && !info.IsDir() {
+		_ = os.WriteFile(gitFile, []byte(hostGitDir), 0644)
+	}
+
 	// Rebase worktree onto current base branch BEFORE entering container
 	baseBranch := "master"
 	if out, err := exec.Command("git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
@@ -239,14 +246,16 @@ func runWorkerStart(cmd *cobra.Command, args []string, skill string, shell bool)
 		fmt.Fprintf(os.Stderr, "Warning: rebase failed: %s\n", strings.TrimSpace(string(out)))
 	}
 
-	// Container startup: fix git worktree path + link skills
+	// Container startup: rewrite .git for container paths, restore on exit
+	containerGitDir := fmt.Sprintf("gitdir: /repo/.git/worktrees/%s", name)
 	startup := "mkdir -p /home/sindri/.claude/skills && ln -sfn /opt/sindri/skills/* /home/sindri/.claude/skills/ 2>/dev/null; " +
 		"ln -sf /opt/sindri/CLAUDE.md /workspace/CLAUDE.md 2>/dev/null; " +
 		"if [ -f /workspace/.git ]; then " +
-		"cp /workspace/.git /tmp/.git.bak; " +
-		fmt.Sprintf("echo 'gitdir: /repo/.git/worktrees/%s' > /workspace/.git; ", name) +
-		"trap 'cp /tmp/.git.bak /workspace/.git 2>/dev/null' EXIT; " +
+		fmt.Sprintf("echo '%s' > /workspace/.git; ", containerGitDir) +
 		"fi; "
+
+	// Restore host .git path AFTER container exits (on host side)
+	defer os.WriteFile(gitFile, []byte(hostGitDir), 0644)
 
 	if shell {
 		if skill == "" {
