@@ -127,7 +127,11 @@ var issueNextCmd = &cobra.Command{
 			for _, line := range strings.Split(listOut, "\n") {
 				f := strings.Fields(strings.TrimSpace(line))
 				if len(f) > 0 && strings.HasPrefix(f[0], "td-") {
-					td("unstart", f[0])
+					if out, err := td("unstart", f[0]); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: unstart %s failed: %s\n", f[0], out)
+					} else {
+						fmt.Fprintf(os.Stderr, "Cleaned up: %s\n", f[0])
+					}
 				}
 			}
 		}
