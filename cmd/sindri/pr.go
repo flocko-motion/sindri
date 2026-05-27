@@ -21,38 +21,43 @@ func newPrCmd() *cobra.Command {
 		Short: "Manage local pull requests",
 	}
 
-	prCmd.AddCommand(
-		&cobra.Command{
-			Use:   "list",
-			Short: "List all local PRs",
-			RunE: func(cmd *cobra.Command, args []string) error {
-				prs, err := store.List()
-				if err != nil {
-					return err
+	var prListAll bool
+	prListCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List local PRs (open only by default, --all for everything)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			prs, err := store.List()
+			if err != nil {
+				return err
+			}
+			rows := make([][]string, 0, len(prs))
+			for _, pr := range prs {
+				if !prListAll && pr.Status != "open" {
+					continue
 				}
-				if len(prs) == 0 {
-					fmt.Println("No PRs found.")
-					return nil
-				}
-				rows := make([][]string, 0, len(prs))
-				for _, pr := range prs {
-					rows = append(rows, []string{pr.ID, pr.Status, pr.Branch + " → " + pr.Base, pr.Title})
-				}
-				dim := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-				t := table.New().
-					Headers("ID", "STATUS", "BRANCH", "TITLE").
-					Rows(rows...).
-					BorderStyle(dim).
-					StyleFunc(func(row, col int) lipgloss.Style {
-						if row == table.HeaderRow {
-							return lipgloss.NewStyle().Bold(true).Padding(0, 1)
-						}
-						return lipgloss.NewStyle().Padding(0, 1)
-					})
-				fmt.Println(t)
+				rows = append(rows, []string{pr.ID, pr.Status, pr.Branch + " → " + pr.Base, pr.Title})
+			}
+			if len(rows) == 0 {
+				fmt.Println("No PRs found.")
 				return nil
-			},
+			}
+			dim := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+			t := table.New().
+				Headers("ID", "STATUS", "BRANCH", "TITLE").
+				Rows(rows...).
+				BorderStyle(dim).
+				StyleFunc(func(row, col int) lipgloss.Style {
+					if row == table.HeaderRow {
+						return lipgloss.NewStyle().Bold(true).Padding(0, 1)
+					}
+					return lipgloss.NewStyle().Padding(0, 1)
+				})
+			fmt.Println(t)
+			return nil
 		},
+	}
+	prListCmd.Flags().BoolVar(&prListAll, "all", false, "Show all PRs, not just open")
+	prCmd.AddCommand(prListCmd,
 		&cobra.Command{
 			Use:   "view <id>",
 			Short: "View a PR",
