@@ -1,0 +1,72 @@
+package container
+
+import (
+	"crypto/sha256"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+)
+
+const ImageName = "sindri-agent:test"
+
+// Ensure builds the container image if the Dockerfile changed or the cache is stale (weekly).
+func Ensure(projectRoot string) error {
+	dockerfile := projectRoot + "/container/Dockerfile"
+	content, err := os.ReadFile(dockerfile)
+	if err != nil {
+		if exec.Command("podman", "image", "exists", ImageName).Run() == nil {
+			return nil
+		}
+		return fmt.Errorf("no Dockerfile and no %s image", ImageName)
+	}
+
+	year, week := time.Now().ISOWeek()
+	h := sha256.New()
+	h.Write(content)
+	h.Write([]byte(fmt.Sprintf("%d-%d", year, week)))
+	buildKey := fmt.Sprintf("%x", h.Sum(nil))[:16]
+
+	cacheFile := projectRoot + "/.worktrees/.build-key"
+	if cached, err := os.ReadFile(cacheFile); err == nil && strings.TrimSpace(string(cached)) == buildKey {
+		return nil
+	}
+
+	fmt.Fprintf(os.Stderr, "Building container image...\n")
+	_ = os.MkdirAll(projectRoot+"/bin", 0755)
+	for _, bin := range []string{"td", "yq"} {
+		if path, err := exec.LookPath(bin); err == nil {
+			data, _ := os.ReadFile(path)
+			_ = os.WriteFile(projectRoot+"/bin/"+bin, data, 0755)
+		}
+	}
+
+	cmd := exec.Command("podman", "build", "-t", ImageName, "-f", dockerfile, projectRoot)
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("image build failed: %w", err)
+	}
+
+	_ = os.MkdirAll(projectRoot+"/.worktrees", 0755)
+	_ = os.WriteFile(cacheFile, []byte(buildKey), 0644)
+	return nil
+}
+
+// ReadSkill reads a skill from /opt/sindri/skills/<name>/SKILL.md inside the container image.
+func ReadSkill(name string) (string, error) {
+	path := "/opt/sindri/skills/" + name + "/SKILL.md"
+	out, err := exec.Command("podman", "run", "--rm", ImageName, "cat", path).Output()
+	if err != nil {
+		listOut, _ := exec.Command("podman", "run", "--rm", ImageName, "ls", "/opt/sindri/skills/").Output()
+		var available []string
+		for _, line := range strings.Split(strings.TrimSpace(string(listOut)), "\n") {
+			if strings.HasSuffix(line, ".md") {
+				available = append(available, strings.TrimSuffix(line, ".md"))
+			}
+		}
+		return "", fmt.Errorf("skill %q not found. Available: %s", name, strings.Join(available, ", "))
+	}
+	return strings.TrimSpace(string(out)), nil
+}

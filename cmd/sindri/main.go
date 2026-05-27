@@ -5,6 +5,7 @@ import (
 	"os"
 	"text/tabwriter"
 
+	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/worker"
 	"github.com/spf13/cobra"
 )
@@ -103,7 +104,7 @@ func runWorkerStart(args []string, skill string, shell bool) error {
 	if err != nil {
 		return fmt.Errorf("not in a git repo: %w", err)
 	}
-	if err := worker.EnsureImage(projectRoot); err != nil {
+	if err := container.Ensure(projectRoot); err != nil {
 		return err
 	}
 

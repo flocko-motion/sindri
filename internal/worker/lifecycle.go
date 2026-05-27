@@ -1,13 +1,13 @@
 package worker
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
-	"time"
+
+	"github.com/flo-at/sindri/internal/container"
 )
 
 var NorseNames = []string{
@@ -95,7 +95,6 @@ func Start(projectRoot, name string, opts StartOpts) error {
 	_ = exec.Command("podman", "rm", "-f", cName).Run()
 
 	claudeHome, configPath := prepareClaudeHome(projectRoot, name)
-	image := "sindri-agent:test"
 	base := BaseBranch(projectRoot)
 
 	podmanArgs := []string{
@@ -114,7 +113,7 @@ func Start(projectRoot, name string, opts StartOpts) error {
 		"-v", projectRoot + ":/repo:ro,z",
 		"-v", projectRoot + "/.git:/repo/.git:rw,z",
 		"-w", "/workspace",
-		image,
+		container.ImageName,
 	}
 
 	// Fix .git worktree pointer (may be broken from previous container kill)
@@ -168,7 +167,6 @@ func StartReviewer(projectRoot string, shell bool) error {
 	_ = exec.Command("podman", "rm", "-f", cName).Run()
 
 	claudeHome, configPath := prepareClaudeHome(projectRoot, "reviewer")
-	image := "sindri-agent:test"
 
 	podmanArgs := []string{
 		"run", "--rm", "-it",
@@ -184,7 +182,7 @@ func StartReviewer(projectRoot string, shell bool) error {
 		"-v", projectRoot + ":/workspace:ro,z",
 		"-v", projectRoot + "/.git:/workspace/.git:rw,z",
 		"-w", "/workspace",
-		image,
+		container.ImageName,
 	}
 
 	startup := "mkdir -p /home/sindri/.claude/skills && ln -sfn /opt/sindri/skills/* /home/sindri/.claude/skills/ 2>/dev/null; " +
@@ -242,62 +240,7 @@ func Reset(projectRoot string) (int, error) {
 
 // EnsureImage builds the container image if needed.
 func EnsureImage(projectRoot string) error {
-	dockerfile := projectRoot + "/container/Dockerfile"
-	content, err := os.ReadFile(dockerfile)
-	if err != nil {
-		if exec.Command("podman", "image", "exists", "sindri-agent:test").Run() == nil {
-			return nil
-		}
-		return fmt.Errorf("no Dockerfile and no sindri-agent:test image")
-	}
-
-	year, week := time.Now().ISOWeek()
-	h := sha256.New()
-	h.Write(content)
-	h.Write([]byte(fmt.Sprintf("%d-%d", year, week)))
-	buildKey := fmt.Sprintf("%x", h.Sum(nil))[:16]
-
-	cacheFile := projectRoot + "/.worktrees/.build-key"
-	if cached, err := os.ReadFile(cacheFile); err == nil && strings.TrimSpace(string(cached)) == buildKey {
-		return nil
-	}
-
-	fmt.Fprintf(os.Stderr, "Building container image...\n")
-	_ = os.MkdirAll(projectRoot+"/bin", 0755)
-	for _, bin := range []string{"td", "yq"} {
-		if path, err := exec.LookPath(bin); err == nil {
-			data, _ := os.ReadFile(path)
-			_ = os.WriteFile(projectRoot+"/bin/"+bin, data, 0755)
-		}
-	}
-
-	cmd := exec.Command("podman", "build", "-t", "sindri-agent:test", "-f", dockerfile, projectRoot)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("image build failed: %w", err)
-	}
-
-	_ = os.MkdirAll(projectRoot+"/.worktrees", 0755)
-	_ = os.WriteFile(cacheFile, []byte(buildKey), 0644)
-	return nil
-}
-
-// LoadSkill reads a skill from /opt/sindri/skills/<name>/SKILL.md inside the container image.
-func LoadSkill(image, name string) (string, error) {
-	path := "/opt/sindri/skills/" + name + "/SKILL.md"
-	out, err := exec.Command("podman", "run", "--rm", image, "cat", path).Output()
-	if err != nil {
-		listOut, _ := exec.Command("podman", "run", "--rm", image, "ls", "/opt/sindri/skills/").Output()
-		var available []string
-		for _, line := range strings.Split(strings.TrimSpace(string(listOut)), "\n") {
-			if strings.HasSuffix(line, ".md") {
-				available = append(available, strings.TrimSuffix(line, ".md"))
-			}
-		}
-		return "", fmt.Errorf("skill %q not found. Available: %s", name, strings.Join(available, ", "))
-	}
-	return strings.TrimSpace(string(out)), nil
+	return container.Ensure(projectRoot)
 }
 
 // prepareClaudeHome sets up the claude home directory with credentials and settings.
