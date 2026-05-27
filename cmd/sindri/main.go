@@ -181,6 +181,7 @@ func runWorkerStart(cmd *cobra.Command, args []string, skill string, shell bool)
 		_ = json.Unmarshal(existing, &configData)
 	}
 	configData["hasCompletedOnboarding"] = true
+	configData["autoUpdates"] = false
 	trustedDirs, _ := configData["trustedDirectories"].(map[string]interface{})
 	if trustedDirs == nil {
 		trustedDirs = map[string]interface{}{}
