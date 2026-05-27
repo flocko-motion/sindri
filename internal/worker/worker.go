@@ -221,16 +221,18 @@ func worktreeBranch(worktreePath string) string {
 }
 
 func parseWorktreeNames(output, mainDir string) map[string]string {
+	wtDir := mainDir + "/.worktrees/"
 	names := make(map[string]string)
 	for _, line := range strings.Split(output, "\n") {
 		if strings.HasPrefix(line, "worktree ") {
 			path := strings.TrimPrefix(line, "worktree ")
-			name := "main"
-			if path != mainDir {
-				parts := strings.Split(path, "/")
-				name = parts[len(parts)-1]
+			if path == mainDir {
+				names["main"] = path
+			} else if strings.HasPrefix(path, wtDir) {
+				name := strings.TrimPrefix(path, wtDir)
+				names[name] = path
 			}
-			names[name] = path
+			// Ignore worktrees outside .worktrees/ (e.g. container paths)
 		}
 	}
 	return names
