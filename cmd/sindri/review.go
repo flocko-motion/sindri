@@ -86,6 +86,7 @@ func runReview(shell bool) error {
 		"-v", claudeHome + ":/home/sindri/.claude:rw,z",
 		"-v", configPath + ":/home/sindri/.claude.json:rw,z",
 		"-e", "TD_ROOT=/project",
+		"-e", "COLORTERM=truecolor",
 		"-v", projectRoot + "/.todos:/project/.todos:rw,z",
 		"-v", projectRoot + ":/workspace:ro,z",
 		"-v", projectRoot + "/.git:/workspace/.git:rw,z",

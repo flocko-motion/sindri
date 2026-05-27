@@ -231,6 +231,7 @@ func runWorkerStart(cmd *cobra.Command, args []string, skill string, shell bool)
 		"-v", claudeHome + ":/home/sindri/.claude:rw,z",
 		"-v", configPath + ":/home/sindri/.claude.json:rw,z",
 		"-e", "GH_LOCAL_BASE=main",
+		"-e", "COLORTERM=truecolor",
 		"-e", "TD_ROOT=/project",
 		"-v", projectRoot + "/.todos:/project/.todos:rw,z",
 		"-v", wtPath + ":/workspace:rw,z",
