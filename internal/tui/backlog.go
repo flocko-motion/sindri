@@ -8,10 +8,11 @@ import (
 )
 
 type backlogRow struct {
-	isPR     bool
-	taskIdx  int
-	prIdx    int
-	display  string
+	isPR    bool
+	taskIdx int
+	prIdx   int
+	display string
+	plain   string // unstyled text for selection highlight
 }
 
 func buildBacklogRows(tasks []taskItem, prs []prItem, workersByTask map[string]string) []backlogRow {
@@ -36,31 +37,43 @@ func buildBacklogRows(tasks []taskItem, prs []prItem, workersByTask map[string]s
 		if t.Status == "closed" || t.Status == "approved" {
 			title = dimStyle.Render(t.Title)
 		}
-		line := fmt.Sprintf("%s  %s  %s",
+		tsStr := ""
+		if !t.UpdatedAt.IsZero() {
+			tsStr = t.UpdatedAt.Local().Format("06-01-02 15:04")
+		}
+		statusText := t.Status
+		if w, ok := workersByTask[t.ID]; ok && t.Status == "in_progress" {
+			statusText = "🔨 " + w
+		}
+		plain := fmt.Sprintf("%s  %s  %s  %s", t.Priority, tsStr, statusText, t.Title)
+		line := fmt.Sprintf("%s  %s  %s  %s",
 			dimStyle.Render(t.Priority),
+			dimStyle.Render(tsStr),
 			status,
 			title,
 		)
-		rows = append(rows, backlogRow{taskIdx: ti, display: line})
+		rows = append(rows, backlogRow{taskIdx: ti, display: line, plain: plain})
 
 		for _, pi := range prByTask[t.ID] {
 			pr := prs[pi]
-			prLine := fmt.Sprintf("    └ %s [%s]", pr.ID, pr.Status)
-			rows = append(rows, backlogRow{isPR: true, prIdx: pi, display: prLine})
+			prPlain := fmt.Sprintf("    └ %s [%s]", pr.ID, pr.Status)
+			rows = append(rows, backlogRow{isPR: true, prIdx: pi, display: prPlain, plain: prPlain})
 		}
 
 		if gates := renderGates(t.Labels); gates != "" {
-			rows = append(rows, backlogRow{taskIdx: ti, display: dimStyle.Render("    " + gates)})
+			rows = append(rows, backlogRow{taskIdx: ti, display: dimStyle.Render("    " + gates), plain: "    " + gates})
 		}
 	}
 
 	for _, pi := range orphanPRs {
 		pr := prs[pi]
-		prLine := fmt.Sprintf("%s  %s", statusStyle(pr.Status), pr.Title)
-		if pr.Title == "" {
-			prLine = fmt.Sprintf("%s  %s", statusStyle(pr.Status), pr.ID)
+		prTitle := pr.Title
+		if prTitle == "" {
+			prTitle = pr.ID
 		}
-		rows = append(rows, backlogRow{isPR: true, prIdx: pi, display: prLine})
+		prLine := fmt.Sprintf("%s  %s", statusStyle(pr.Status), prTitle)
+		prPlain := fmt.Sprintf("%s  %s", pr.Status, prTitle)
+		rows = append(rows, backlogRow{isPR: true, prIdx: pi, display: prLine, plain: prPlain})
 	}
 
 	return rows
@@ -70,7 +83,7 @@ func renderBacklogList(rows []backlogRow, cursor int, active bool) string {
 	var b strings.Builder
 	for i, row := range rows {
 		if active && i == cursor {
-			b.WriteString(selectedItemStyle.Render("> " + row.display))
+			b.WriteString(selectedItemStyle.Render("> " + row.plain))
 		} else {
 			b.WriteString("  " + row.display)
 		}

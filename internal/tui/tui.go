@@ -112,12 +112,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, keys.DetailDown):
 			m.vpDetail.LineDown(1)
 		case key.Matches(msg, keys.Up):
-			if m.focusCol == colLeft {
-				m.moveCursor(-1)
+			if m.focusCol == colDetail {
+				m.vpDetail.LineUp(1)
+			} else {
+				m.moveCursorTask(-1)
 			}
 		case key.Matches(msg, keys.Down):
-			if m.focusCol == colLeft {
-				m.moveCursor(1)
+			if m.focusCol == colDetail {
+				m.vpDetail.LineDown(1)
+			} else {
+				m.moveCursorTask(1)
+			}
+		case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+u"))):
+			m.vpDetail.HalfViewUp()
+		case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+d"))):
+			m.vpDetail.HalfViewDown()
+		case key.Matches(msg, key.NewBinding(key.WithKeys("l"))):
+			if m.focusCol == colLeft && m.leftView == viewBacklog {
+				m.navigateInto()
+			}
+		case key.Matches(msg, key.NewBinding(key.WithKeys("h"))):
+			if m.focusCol == colLeft && m.leftView == viewBacklog {
+				m.navigateOut()
 			}
 		case key.Matches(msg, keys.Refresh):
 			return m, refreshData(m.projectRoot)
@@ -177,19 +193,46 @@ func (m *Model) rebuildBacklog() {
 	m.backlogRows = buildBacklogRows(m.tasks, m.prs, workersByTask)
 }
 
-func (m *Model) moveCursor(delta int) {
+// moveCursorTask jumps between task rows only (skips PR/gate sub-rows).
+func (m *Model) moveCursorTask(delta int) {
 	switch m.leftView {
 	case viewBacklog:
-		next := m.listCursor + delta
-		if next >= 0 && next < len(m.backlogRows) {
-			m.listCursor = next
-			m.updateDetail()
+		pos := m.listCursor
+		for {
+			pos += delta
+			if pos < 0 || pos >= len(m.backlogRows) {
+				return
+			}
+			if !m.backlogRows[pos].isPR {
+				m.listCursor = pos
+				m.updateDetail()
+				return
+			}
 		}
 	case viewWorkers:
 		next := m.workerCursor + delta
 		if next >= 0 && next < len(m.workers) {
 			m.workerCursor = next
 			m.updateDetail()
+		}
+	}
+}
+
+// navigateInto moves from a task row to its first PR sub-row.
+func (m *Model) navigateInto() {
+	if m.listCursor+1 < len(m.backlogRows) && m.backlogRows[m.listCursor+1].isPR {
+		m.listCursor++
+		m.updateDetail()
+	}
+}
+
+// navigateOut moves from a PR sub-row back to its parent task.
+func (m *Model) navigateOut() {
+	for pos := m.listCursor - 1; pos >= 0; pos-- {
+		if !m.backlogRows[pos].isPR {
+			m.listCursor = pos
+			m.updateDetail()
+			return
 		}
 	}
 }

@@ -24,7 +24,8 @@ var (
 				Padding(0, 1)
 
 	selectedItemStyle = lipgloss.NewStyle().
-				Foreground(highlight).
+				Foreground(lipgloss.Color("#FFFFFF")).
+				Background(lipgloss.Color("#7D56F4")).
 				Bold(true)
 
 	normalItemStyle = lipgloss.NewStyle()
