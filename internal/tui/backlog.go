@@ -7,60 +7,94 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-func renderBacklog(tasks []taskItem, prs []prItem, selected int, width, height int, active bool) string {
+var dividerStyle = lipgloss.NewStyle().
+	Foreground(subtle).
+	PaddingTop(1).
+	PaddingBottom(1)
+
+func renderBacklogSplit(tasks []taskItem, prs []prItem, taskCursor, prCursor, activePanel int, width, height int, active bool) string {
 	style := columnStyle.Width(width)
 	if active {
 		style = activeColumnStyle.Width(width)
 	}
-
-	var b strings.Builder
-	b.WriteString(headerStyle.Render("Backlog"))
-	b.WriteByte('\n')
 
 	contentWidth := width - 4
 	if contentWidth < 10 {
 		contentWidth = 10
 	}
 
-	idx := 0
-	if len(tasks) > 0 {
-		b.WriteString(dimStyle.Render("  Tasks"))
+	// Split height: tasks get upper half, PRs get lower half
+	taskHeight := (height - 3) / 2
+	prHeight := height - 3 - taskHeight - 1 // -1 for divider
+
+	var b strings.Builder
+
+	// Tasks section
+	taskHeader := "Tasks"
+	if active && activePanel == panelTasks {
+		taskHeader = "Tasks ●"
+	}
+	b.WriteString(headerStyle.Render(taskHeader))
+	b.WriteByte('\n')
+
+	if len(tasks) == 0 {
+		b.WriteString(dimStyle.Render("  No tasks"))
 		b.WriteByte('\n')
-		for _, t := range tasks {
+	} else {
+		rendered := 0
+		for i, t := range tasks {
+			if rendered >= taskHeight {
+				b.WriteString(dimStyle.Render(fmt.Sprintf("  … %d more", len(tasks)-rendered)))
+				b.WriteByte('\n')
+				break
+			}
 			line := formatTask(t, contentWidth)
-			if active && idx == selected {
+			if active && activePanel == panelTasks && i == taskCursor {
 				b.WriteString(selectedItemStyle.Render("> " + line))
 			} else {
 				b.WriteString(normalItemStyle.Render("  " + line))
 			}
 			b.WriteByte('\n')
-			idx++
+			rendered++
 		}
 	}
 
-	if len(prs) > 0 {
+	// Divider
+	divider := strings.Repeat("─", contentWidth)
+	b.WriteString(dividerStyle.Render("  " + divider))
+	b.WriteByte('\n')
+
+	// PRs section
+	prHeader := "Pull Requests"
+	if active && activePanel == panelPRs {
+		prHeader = "Pull Requests ●"
+	}
+	b.WriteString(headerStyle.Render(prHeader))
+	b.WriteByte('\n')
+
+	if len(prs) == 0 {
+		b.WriteString(dimStyle.Render("  No PRs"))
 		b.WriteByte('\n')
-		b.WriteString(dimStyle.Render("  Pull Requests"))
-		b.WriteByte('\n')
-		for _, pr := range prs {
+	} else {
+		rendered := 0
+		for i, pr := range prs {
+			if rendered >= prHeight {
+				b.WriteString(dimStyle.Render(fmt.Sprintf("  … %d more", len(prs)-rendered)))
+				b.WriteByte('\n')
+				break
+			}
 			line := formatPR(pr, contentWidth)
-			if active && idx == selected {
+			if active && activePanel == panelPRs && i == prCursor {
 				b.WriteString(selectedItemStyle.Render("> " + line))
 			} else {
 				b.WriteString(normalItemStyle.Render("  " + line))
 			}
 			b.WriteByte('\n')
-			idx++
+			rendered++
 		}
 	}
 
-	if len(tasks) == 0 && len(prs) == 0 {
-		b.WriteString(dimStyle.Render("  No tasks or PRs"))
-		b.WriteByte('\n')
-	}
-
-	content := b.String()
-	return style.Height(height).Render(content)
+	return style.Height(height).Render(b.String())
 }
 
 func formatTask(t taskItem, width int) string {
@@ -99,6 +133,8 @@ func statusStyle(status string) string {
 		return statusRunning.Render(status)
 	case "open":
 		return statusOpen.Render(status)
+	case "in_review":
+		return statusOpen.Render(status)
 	case "merged", "approved", "closed":
 		return statusDone.Render(status)
 	default:
@@ -114,8 +150,4 @@ func truncate(s string, max int) string {
 		return s[:max]
 	}
 	return s[:max-3] + "..."
-}
-
-func backlogItemCount(tasks []taskItem, prs []prItem) int {
-	return len(tasks) + len(prs)
 }

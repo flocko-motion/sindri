@@ -3,13 +3,14 @@ package tui
 import "github.com/charmbracelet/bubbles/key"
 
 type keyMap struct {
-	Quit    key.Binding
-	Tab     key.Binding
-	ShiftTab key.Binding
-	Up      key.Binding
-	Down    key.Binding
-	Enter   key.Binding
-	Refresh key.Binding
+	Quit        key.Binding
+	Tab         key.Binding
+	ShiftTab    key.Binding
+	Up          key.Binding
+	Down        key.Binding
+	Enter       key.Binding
+	Refresh     key.Binding
+	PanelSwitch key.Binding
 }
 
 var keys = keyMap{
@@ -40,5 +41,9 @@ var keys = keyMap{
 	Refresh: key.NewBinding(
 		key.WithKeys("r"),
 		key.WithHelp("r", "refresh"),
+	),
+	PanelSwitch: key.NewBinding(
+		key.WithKeys("g"),
+		key.WithHelp("g", "switch panel"),
 	),
 }
