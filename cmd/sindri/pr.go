@@ -99,6 +99,67 @@ func newPrCmd() *cobra.Command {
 		},
 	}
 	prListCmd.Flags().BoolVar(&prListAll, "all", false, "Show all PRs, not just open")
+	var approveAndMerge bool
+	approveAndMergeCmd := &cobra.Command{
+		Use:   "approve [id]",
+		Short: "Approve a PR (defaults to selected, --merge to also merge)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := resolveSelectedPR(args)
+			if err != nil {
+				return err
+			}
+			pr, err := store.Read(id)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("PR:    %s\n", pr.ID)
+			fmt.Printf("Title: %s\n", pr.Title)
+			taskID := extractTaskID(pr.Title)
+			if taskID != "" {
+				printTaskSummary(taskID)
+			}
+			if !confirmHuman() {
+				return fmt.Errorf("aborted")
+			}
+			pr, err = store.Approve(id)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Approved PR: %s\n", pr.ID)
+			if !approveAndMerge {
+				return nil
+			}
+			if taskID != "" {
+				if missing, err := checkReviewGates(taskID); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not check review gates: %v\n", err)
+				} else if len(missing) > 0 {
+					fmt.Fprintf(os.Stderr, "Review gates not met for %s:\n", taskID)
+					for _, m := range missing {
+						fmt.Fprintf(os.Stderr, "  ✗ %s\n", m)
+					}
+					return fmt.Errorf("missing reviews: %s", strings.Join(missing, ", "))
+				}
+			}
+			pr, err = store.Merge(id)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Merged PR %s into %s\n", pr.ID, pr.Base)
+			if taskID != "" {
+				tdClose := exec.Command("td", "close", taskID, "--self-close-exception", "PR merged")
+				tdClose.Dir = tdWorkDir()
+				if out, err := tdClose.CombinedOutput(); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: td close %s failed: %s\n", taskID, strings.TrimSpace(string(out)))
+				} else {
+					fmt.Printf("Closed task %s\n", taskID)
+				}
+			}
+			return nil
+		},
+	}
+	approveAndMergeCmd.Flags().BoolVar(&approveAndMerge, "merge", false, "Also merge after approving")
+
 	prCmd.AddCommand(prListCmd,
 		&cobra.Command{
 			Use:   "info [id]",
@@ -138,35 +199,7 @@ func newPrCmd() *cobra.Command {
 				return nil
 			},
 		},
-		&cobra.Command{
-			Use:   "approve [id]",
-			Short: "Approve a PR (defaults to selected)",
-			Args:  cobra.MaximumNArgs(1),
-			RunE: func(cmd *cobra.Command, args []string) error {
-				id, err := resolveSelectedPR(args)
-				if err != nil {
-					return err
-				}
-				pr, err := store.Read(id)
-				if err != nil {
-					return err
-				}
-				fmt.Printf("PR:    %s\n", pr.ID)
-				fmt.Printf("Title: %s\n", pr.Title)
-				if taskID := extractTaskID(pr.Title); taskID != "" {
-					printTaskSummary(taskID)
-				}
-				if !confirmHuman() {
-					return fmt.Errorf("aborted")
-				}
-				pr, err = store.Approve(id)
-				if err != nil {
-					return err
-				}
-				fmt.Printf("Approved PR: %s\n", pr.ID)
-				return nil
-			},
-		},
+		approveAndMergeCmd,
 		&cobra.Command{
 			Use:   "merge [id]",
 			Short: "Merge an approved PR (defaults to selected)",
