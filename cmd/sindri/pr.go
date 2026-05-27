@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"regexp"
 	"text/tabwriter"
 
 	"github.com/flo-at/sindri/internal/ghlocal/store"
@@ -81,10 +83,26 @@ func newPrCmd() *cobra.Command {
 					return err
 				}
 				fmt.Printf("Merged PR %s into %s\n", pr.ID, pr.Base)
+				if taskID := extractTaskID(pr.Title); taskID != "" {
+					if out, err := exec.Command("td", "approve", taskID).CombinedOutput(); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: td approve %s failed: %s\n", taskID, out)
+					} else {
+						fmt.Printf("Approved task %s\n", taskID)
+					}
+				}
 				return nil
 			},
 		},
 	)
 
 	return prCmd
+}
+
+var prTaskIDPattern = regexp.MustCompile(`\(?(td-[0-9a-f]+)\)?`)
+
+func extractTaskID(title string) string {
+	if m := prTaskIDPattern.FindStringSubmatch(title); len(m) > 1 {
+		return m[1]
+	}
+	return ""
 }
