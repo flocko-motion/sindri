@@ -285,6 +285,8 @@ func newPrCmd() *cobra.Command {
 					base = "master"
 				}
 				fmt.Fprintf(os.Stderr, "Resetting to %s...\n", base)
+				_ = exec.Command("git", "-C", wtPath, "reset", "--hard").Run()
+				_ = exec.Command("git", "-C", wtPath, "clean", "-fd").Run()
 				_ = exec.Command("git", "-C", wtPath, "checkout", "--detach", base).Run()
 
 				fmt.Fprintf(os.Stderr, "Merging %s...\n", pr.Branch)
