@@ -2,7 +2,9 @@ package worker
 
 import (
 	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/ghlocal/store"
@@ -17,6 +19,7 @@ type Worker struct {
 	Container string // container name or ""
 	Task      string // current td task (e.g. "td-abc123 Add greeting module")
 	PR        string // open PR status (e.g. "pr-fjalar [open]")
+	Branch    string // current git branch in the worktree
 }
 
 type podmanContainer struct {
@@ -138,6 +141,13 @@ func List(projectRoot string) []Worker {
 		}
 	}
 
+	// Read current branch for each worker's worktree
+	for i := range workers {
+		if workers[i].Path != "" {
+			workers[i].Branch = worktreeBranch(workers[i].Path)
+		}
+	}
+
 	return workers
 }
 
@@ -171,6 +181,43 @@ func getInProgressTasks(projectRoot string) []string {
 		tasks = append(tasks, id+" "+strings.Join(title, " "))
 	}
 	return tasks
+}
+
+func worktreeBranch(worktreePath string) string {
+	headPath := filepath.Join(worktreePath, ".git")
+	info, err := os.Stat(headPath)
+	if err != nil {
+		return ""
+	}
+	if info.IsDir() {
+		headPath = filepath.Join(headPath, "HEAD")
+	} else {
+		data, err := os.ReadFile(headPath)
+		if err != nil {
+			return ""
+		}
+		line := strings.TrimSpace(string(data))
+		if !strings.HasPrefix(line, "gitdir: ") {
+			return ""
+		}
+		gitdir := strings.TrimPrefix(line, "gitdir: ")
+		if !filepath.IsAbs(gitdir) {
+			gitdir = filepath.Join(worktreePath, gitdir)
+		}
+		headPath = filepath.Join(gitdir, "HEAD")
+	}
+	data, err := os.ReadFile(headPath)
+	if err != nil {
+		return ""
+	}
+	ref := strings.TrimSpace(string(data))
+	if strings.HasPrefix(ref, "ref: refs/heads/") {
+		return strings.TrimPrefix(ref, "ref: refs/heads/")
+	}
+	if len(ref) >= 8 {
+		return ref[:8]
+	}
+	return ref
 }
 
 func parseWorktreeNames(output, mainDir string) map[string]string {
