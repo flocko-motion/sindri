@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -14,6 +15,44 @@ import (
 	"github.com/flo-at/sindri/internal/worker"
 	"github.com/spf13/cobra"
 )
+
+func selectedPRPath() string {
+	root, err := worker.GitRoot()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(root, ".git", "sindri-selected-pr")
+}
+
+func readSelectedPR() string {
+	path := selectedPRPath()
+	if path == "" {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func writeSelectedPR(id string) {
+	if path := selectedPRPath(); path != "" {
+		_ = os.WriteFile(path, []byte(id+"\n"), 0644)
+	}
+}
+
+// resolveSelectedPR returns the explicit arg or the selected PR.
+func resolveSelectedPR(args []string) (string, error) {
+	if len(args) > 0 {
+		return args[0], nil
+	}
+	sel := readSelectedPR()
+	if sel == "" {
+		return "", fmt.Errorf("no PR specified and none selected — run 'sindri pr next' first")
+	}
+	return sel, nil
+}
 
 func newPrCmd() *cobra.Command {
 	prCmd := &cobra.Command{
@@ -59,11 +98,15 @@ func newPrCmd() *cobra.Command {
 	prListCmd.Flags().BoolVar(&prListAll, "all", false, "Show all PRs, not just open")
 	prCmd.AddCommand(prListCmd,
 		&cobra.Command{
-			Use:   "view <id>",
-			Short: "View a PR",
-			Args:  cobra.ExactArgs(1),
+			Use:   "view [id]",
+			Short: "View a PR (defaults to selected)",
+			Args:  cobra.MaximumNArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				pr, err := store.Read(args[0])
+				id, err := resolveSelectedPR(args)
+				if err != nil {
+					return err
+				}
+				pr, err := store.Read(id)
 				if err != nil {
 					return err
 				}
@@ -81,11 +124,15 @@ func newPrCmd() *cobra.Command {
 			},
 		},
 		&cobra.Command{
-			Use:   "approve <id>",
-			Short: "Approve a PR",
-			Args:  cobra.ExactArgs(1),
+			Use:   "approve [id]",
+			Short: "Approve a PR (defaults to selected)",
+			Args:  cobra.MaximumNArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				pr, err := store.Approve(args[0])
+				id, err := resolveSelectedPR(args)
+				if err != nil {
+					return err
+				}
+				pr, err := store.Approve(id)
 				if err != nil {
 					return err
 				}
@@ -94,11 +141,15 @@ func newPrCmd() *cobra.Command {
 			},
 		},
 		&cobra.Command{
-			Use:   "merge <id>",
-			Short: "Merge an approved PR",
-			Args:  cobra.ExactArgs(1),
+			Use:   "merge [id]",
+			Short: "Merge an approved PR (defaults to selected)",
+			Args:  cobra.MaximumNArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				pr, err := store.Read(args[0])
+				id, err := resolveSelectedPR(args)
+				if err != nil {
+					return err
+				}
+				pr, err := store.Read(id)
 				if err != nil {
 					return err
 				}
@@ -135,11 +186,15 @@ func newPrCmd() *cobra.Command {
 
 	prCmd.AddCommand(
 		&cobra.Command{
-			Use:   "reject <id>",
-			Short: "Reject a PR and its associated task",
-			Args:  cobra.ExactArgs(1),
+			Use:   "reject [id]",
+			Short: "Reject a PR and its associated task (defaults to selected)",
+			Args:  cobra.MaximumNArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				pr, err := store.Read(args[0])
+				id, err := resolveSelectedPR(args)
+				if err != nil {
+					return err
+				}
+				pr, err := store.Read(id)
 				if err != nil {
 					return err
 				}
@@ -164,11 +219,15 @@ func newPrCmd() *cobra.Command {
 
 	prCmd.AddCommand(
 		&cobra.Command{
-			Use:   "try <id>",
-			Short: "Check out a PR branch in the review worktree and build",
-			Args:  cobra.ExactArgs(1),
+			Use:   "try [id]",
+			Short: "Check out a PR in review worktree and build (defaults to selected)",
+			Args:  cobra.MaximumNArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				pr, err := store.Read(args[0])
+				id, err := resolveSelectedPR(args)
+				if err != nil {
+					return err
+				}
+				pr, err := store.Read(id)
 				if err != nil {
 					return err
 				}
@@ -203,6 +262,30 @@ func newPrCmd() *cobra.Command {
 
 				fmt.Printf("\nReady to test: %s\n", wtPath)
 				fmt.Printf("Binaries: %s/bin/\n", wtPath)
+				return nil
+			},
+		},
+	)
+
+	prCmd.AddCommand(
+		&cobra.Command{
+			Use:   "next",
+			Short: "Select the next open PR for review",
+			RunE: func(cmd *cobra.Command, args []string) error {
+				prs, err := store.List()
+				if err != nil {
+					return err
+				}
+				for _, pr := range prs {
+					if pr.Status == "open" {
+						writeSelectedPR(pr.ID)
+						fmt.Printf("Selected: %s\n", pr.ID)
+						fmt.Printf("Title:    %s\n", pr.Title)
+						fmt.Printf("Branch:   %s → %s\n", pr.Branch, pr.Base)
+						return nil
+					}
+				}
+				fmt.Println("No open PRs.")
 				return nil
 			},
 		},
