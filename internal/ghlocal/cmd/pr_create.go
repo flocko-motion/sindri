@@ -77,25 +77,8 @@ var prCreateCmd = &cobra.Command{
 		fmt.Println("║  Use 'gh submit' instead — it handles handoff + review  ║")
 		fmt.Println("╚══════════════════════════════════════════════════════════╝")
 		fmt.Println()
-		fmt.Println("Waiting for review...")
-
-		for {
-			time.Sleep(5 * time.Second)
-			current, err := store.Read(pr.ID)
-			if err != nil {
-				continue
-			}
-			switch current.Status {
-			case "approved", "merged":
-				fmt.Printf("PR %s approved!\n", pr.ID)
-				return nil
-			case "rejected":
-				fmt.Printf("PR %s rejected. Check comments.\n", pr.ID)
-				return fmt.Errorf("PR rejected")
-			case "open":
-				continue
-			}
-		}
+		fmt.Println("Submitted. Run 'gh done' then 'gh issue next' for the next task.")
+		return nil
 	},
 }
 

@@ -94,31 +94,10 @@ var submitCmd = &cobra.Command{
 
 		fmt.Println()
 		fmt.Println("╔══════════════════════════════════════════════════════════╗")
-		fmt.Println("║  Submitted for review. Waiting for approval...          ║")
+		fmt.Println("║  Submitted for review.                                  ║")
+		fmt.Println("║  Run 'gh done' then 'gh issue next' for the next task.  ║")
 		fmt.Println("╚══════════════════════════════════════════════════════════╝")
-		fmt.Println()
-
-		// Poll for approval
-		for {
-			time.Sleep(5 * time.Second)
-			current, err := store.Read(pr.ID)
-			if err != nil {
-				continue
-			}
-			switch current.Status {
-			case "approved", "merged":
-				fmt.Printf("PR %s approved!\n", pr.ID)
-				fmt.Println("Run 'gh done' to return to base branch and pick up the next task.")
-				return nil
-			case "rejected":
-				fmt.Printf("PR %s was rejected.\n", pr.ID)
-				fmt.Println("Check comments for feedback:")
-				printTaskDetails(taskID)
-				return fmt.Errorf("PR rejected — fix and resubmit with 'gh submit'")
-			case "open":
-				continue
-			}
-		}
+		return nil
 	},
 }
 
