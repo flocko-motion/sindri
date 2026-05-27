@@ -122,6 +122,16 @@ var issueNextCmd = &cobra.Command{
 			return fmt.Errorf("you are on branch %q — run 'gh done' first to return to %s", branch, base)
 		}
 
+		// Clean up any orphaned in_progress tasks from previous runs
+		if listOut, err := td("query", "status:in_progress"); err == nil {
+			for _, line := range strings.Split(listOut, "\n") {
+				f := strings.Fields(strings.TrimSpace(line))
+				if len(f) > 0 && strings.HasPrefix(f[0], "td-") {
+					td("unstart", f[0])
+				}
+			}
+		}
+
 		out, err := td("next")
 		if err != nil {
 			fmt.Println("No tasks available.")
