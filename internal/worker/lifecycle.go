@@ -77,7 +77,11 @@ func FindAvailable(projectRoot string) (name string, created bool, err error) {
 func New(projectRoot, name string) error {
 	wtPath := projectRoot + "/.worktrees/" + name
 	_ = os.MkdirAll(projectRoot+"/.worktrees", 0755)
+	// Try creating with a new branch; if branch exists, use --detach
 	out, err := exec.Command("git", "-C", projectRoot, "worktree", "add", "-b", name, wtPath, "HEAD").CombinedOutput()
+	if err != nil {
+		out, err = exec.Command("git", "-C", projectRoot, "worktree", "add", "--detach", wtPath, "HEAD").CombinedOutput()
+	}
 	if err != nil {
 		return fmt.Errorf("git worktree add: %s: %w", strings.TrimSpace(string(out)), err)
 	}
