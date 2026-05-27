@@ -63,6 +63,7 @@ RUN chmod +x /usr/local/bin/wait-for-task /usr/local/bin/sindri-agent
 RUN useradd -m -s /bin/bash sindri
 
 USER sindri
+ENV GOMODCACHE=/home/sindri/go/pkg/mod
 
 RUN git config --global user.name  "sindri-agent" \
  && git config --global user.email "agent@sindri.local" \
