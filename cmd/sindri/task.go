@@ -150,27 +150,31 @@ func runTaskList(cmd *cobra.Command, args []string, showAll, showOpen, showClose
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	rows := make([][]string, 0)
 	for _, t := range tasks {
-		status := t.Status
+		var status string
 		if w, ok := workersByTask[t.ID]; ok {
 			status = "🔨 " + w
+		} else if t.Status == "in_progress" {
+			status = "⚠ in_progress"
+		} else {
+			status = t.Status
 		}
 		updated := ""
 		if ts, err := time.Parse(time.RFC3339Nano, t.UpdatedAt); err == nil {
 			updated = ts.Local().Format("06-01-02 15:04")
 		}
-		rows = append(rows, []string{t.Priority, updated, status, t.Title})
+		rows = append(rows, []string{t.ID, t.Priority, updated, status, t.Title})
 
 		for _, pr := range prByTask[t.ID] {
-			rows = append(rows, []string{"", "", "", fmt.Sprintf("  └ %s [%s]", pr.ID, pr.Status)})
+			rows = append(rows, []string{"", "", "", "", fmt.Sprintf("  └ %s [%s]", pr.ID, pr.Status)})
 		}
 
 		if gates := cliGateStatus(t.Labels); gates != "" {
-			rows = append(rows, []string{"", "", "", "  " + gates})
+			rows = append(rows, []string{"", "", "", "", "  " + gates})
 		}
 	}
 
 	tbl := table.New().
-		Headers("PRIO", "UPDATED", "STATUS", "TITLE").
+		Headers("ID", "PRIO", "UPDATED", "STATUS", "TITLE").
 		Rows(rows...).
 		BorderStyle(dim).
 		StyleFunc(func(row, col int) lipgloss.Style {

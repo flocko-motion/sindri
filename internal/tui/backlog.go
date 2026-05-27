@@ -29,9 +29,16 @@ func buildBacklogRows(tasks []taskItem, prs []prItem, workersByTask map[string]s
 
 	var rows []backlogRow
 	for ti, t := range tasks {
-		status := statusStyle(t.Status)
+		var status, statusText string
 		if w, ok := workersByTask[t.ID]; ok {
 			status = statusRunning.Render("🔨 " + w)
+			statusText = "🔨 " + w
+		} else if t.Status == "in_progress" {
+			status = statusOrphaned.Render("⚠ in_progress")
+			statusText = "⚠ in_progress"
+		} else {
+			status = statusStyle(t.Status)
+			statusText = t.Status
 		}
 		title := t.Title
 		if t.Status == "closed" || t.Status == "approved" {
@@ -40,10 +47,6 @@ func buildBacklogRows(tasks []taskItem, prs []prItem, workersByTask map[string]s
 		tsStr := ""
 		if !t.UpdatedAt.IsZero() {
 			tsStr = t.UpdatedAt.Local().Format("06-01-02 15:04")
-		}
-		statusText := t.Status
-		if w, ok := workersByTask[t.ID]; ok {
-			statusText = "🔨 " + w
 		}
 		plain := fmt.Sprintf("%-9s %s  %s  %s  %s", t.ID, t.Priority, tsStr, statusText, t.Title)
 		line := fmt.Sprintf("%s %s  %s  %s  %s",

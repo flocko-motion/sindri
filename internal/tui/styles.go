@@ -43,6 +43,10 @@ var (
 	statusDone = lipgloss.NewStyle().
 			Foreground(dimmed)
 
+	statusOrphaned = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FF6666")).
+			Bold(true)
+
 	headerStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(special).
