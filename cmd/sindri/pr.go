@@ -114,15 +114,18 @@ func newPrCmd() *cobra.Command {
 				fmt.Printf("%s [%s] %s → %s\n", pr.ID, pr.Status, pr.Branch, pr.Base)
 				fmt.Printf("%s\n", pr.Title)
 				if taskID := extractTaskID(pr.Title); taskID != "" {
-					tdCmd := exec.Command("td", "show", taskID, "--json")
-					tdCmd.Dir = tdWorkDir()
-					if out, err := tdCmd.Output(); err == nil {
-						var task struct {
-							Title  string `json:"title"`
-							Status string `json:"status"`
-						}
-						if json.Unmarshal(out, &task) == nil {
-							fmt.Printf("Task: %s [%s] %s\n", taskID, task.Status, task.Title)
+					fmt.Println()
+					tdShow := exec.Command("td", "show", taskID)
+					tdShow.Dir = tdWorkDir()
+					if out, err := tdShow.Output(); err == nil {
+						fmt.Println(strings.TrimSpace(string(out)))
+					}
+					tdComments := exec.Command("td", "comments", taskID)
+					tdComments.Dir = tdWorkDir()
+					if out, err := tdComments.Output(); err == nil {
+						c := strings.TrimSpace(string(out))
+						if c != "" && c != "No comments" {
+							fmt.Printf("\n--- Comments ---\n%s\n", c)
 						}
 					}
 				}
