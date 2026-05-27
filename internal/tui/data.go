@@ -2,8 +2,11 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/flo-at/sindri/internal/ghlocal/store"
 	"github.com/flo-at/sindri/internal/worker"
@@ -12,12 +15,14 @@ import (
 )
 
 type taskItem struct {
-	ID       string
-	Title    string
-	Status   string
-	Type     string
-	Priority string
-	Labels   []string
+	ID        string
+	Title     string
+	Status    string
+	Type      string
+	Priority  string
+	Labels    []string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type prItem struct {
@@ -50,27 +55,36 @@ func fetchTasks(projectRoot string) []taskItem {
 		return nil
 	}
 	var raw []struct {
-		ID       string   `json:"id"`
-		Title    string   `json:"title"`
-		Status   string   `json:"status"`
-		Type     string   `json:"type"`
-		Priority string   `json:"priority"`
-		Labels   []string `json:"labels"`
+		ID        string   `json:"id"`
+		Title     string   `json:"title"`
+		Status    string   `json:"status"`
+		Type      string   `json:"type"`
+		Priority  string   `json:"priority"`
+		Labels    []string `json:"labels"`
+		CreatedAt string   `json:"created_at"`
+		UpdatedAt string   `json:"updated_at"`
 	}
 	if json.Unmarshal(out, &raw) != nil {
 		return nil
 	}
 	items := make([]taskItem, len(raw))
 	for i, r := range raw {
+		created, _ := time.Parse(time.RFC3339, r.CreatedAt)
+		updated, _ := time.Parse(time.RFC3339, r.UpdatedAt)
 		items[i] = taskItem{
-			ID:       r.ID,
-			Title:    r.Title,
-			Status:   r.Status,
-			Type:     r.Type,
-			Priority: r.Priority,
-			Labels:   r.Labels,
+			ID:        r.ID,
+			Title:     r.Title,
+			Status:    r.Status,
+			Type:      r.Type,
+			Priority:  r.Priority,
+			Labels:    r.Labels,
+			CreatedAt: created,
+			UpdatedAt: updated,
 		}
 	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].UpdatedAt.After(items[j].UpdatedAt)
+	})
 	return items
 }
 
@@ -98,4 +112,23 @@ func fetchTaskDetail(projectRoot, taskID string) string {
 		return "Error loading task: " + err.Error()
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func relativeTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	case d < 7*24*time.Hour:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	default:
+		return t.Format("Jan 2")
+	}
 }
