@@ -345,15 +345,22 @@ func (m Model) View() string {
 
 func (m Model) viewList() string {
 	title := titleStyle.Render("Sindri — AI Agent Orchestrator")
-	viewLabel := "tasks"
-	if m.leftView == viewWorkers {
-		viewLabel = "workers"
+
+	activeView := lipgloss.NewStyle().Bold(true).Foreground(highlight)
+	inactiveView := dimStyle
+	var viewSelector string
+	if m.leftView == viewBacklog {
+		viewSelector = activeView.Render("[T]asks") + "  " + inactiveView.Render("[W]orkers")
+	} else {
+		viewSelector = inactiveView.Render("[T]asks") + "  " + activeView.Render("[W]orkers")
 	}
-	help := dimStyle.Render(fmt.Sprintf("[%s]  T/w:view  j/k:nav  enter:open  n:new  r:refresh  q:quit", viewLabel))
+	help := dimStyle.Render("j/k:nav  enter:open  n:new  r:refresh  q:quit")
+	rightSide := viewSelector + "  " + help
+
 	titleBar := lipgloss.JoinHorizontal(lipgloss.Top,
 		title,
-		lipgloss.NewStyle().Width(m.width-lipgloss.Width(title)-lipgloss.Width(help)).Render(""),
-		help,
+		lipgloss.NewStyle().Width(m.width-lipgloss.Width(title)-lipgloss.Width(rightSide)).Render(""),
+		rightSide,
 	)
 
 	contentHeight := m.height - 4
