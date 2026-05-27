@@ -30,6 +30,9 @@ var doneCmd = &cobra.Command{
 		if err := os.WriteFile("/tmp/claude-status", []byte("idle"), 0644); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: update status file: %v\n", err)
 		}
+		if err := os.Remove(".sindri-task"); err != nil && !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Warning: remove .sindri-task: %v\n", err)
+		}
 		fmt.Printf("Ready on %s. Run 'gh issue next' to pick up the next task.\n", base)
 		return nil
 	},

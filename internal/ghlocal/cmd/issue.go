@@ -172,9 +172,12 @@ var issueNextCmd = &cobra.Command{
 		}
 		fmt.Printf("Started task: %s %s\n\n", task.ID, task.Title)
 
-		// Update statusline
+		// Update statusline and task state file
 		if err := os.WriteFile("/tmp/claude-status", []byte(task.ID+": "+task.Title), 0644); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: update status file: %v\n", err)
+		}
+		if err := os.WriteFile(".sindri-task", []byte(task.ID+"\n"), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: write .sindri-task: %v\n", err)
 		}
 
 		// Create per-task branch from base (works from detached HEAD or base branch)

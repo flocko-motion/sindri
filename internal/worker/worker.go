@@ -114,27 +114,37 @@ func List(projectRoot string) []Worker {
 		})
 	}
 
-	// Query td for in-progress tasks
-	tasks := getInProgressTasks(projectRoot)
-	taskIdx := 0
+	// Read task from .sindri-task state file in each worktree
+	taskTitles := getTaskTitles(projectRoot)
 	for i := range workers {
-		if workers[i].Role == "worker" && workers[i].Status == "running" && taskIdx < len(tasks) {
-			workers[i].Task = tasks[taskIdx]
-			taskIdx++
+		if workers[i].Path == "" {
+			continue
+		}
+		taskFile := filepath.Join(workers[i].Path, ".sindri-task")
+		if data, err := os.ReadFile(taskFile); err == nil {
+			taskID := strings.TrimSpace(string(data))
+			if taskID != "" {
+				if title, ok := taskTitles[taskID]; ok {
+					workers[i].Task = taskID + " " + title
+				} else {
+					workers[i].Task = taskID
+				}
+			}
 		}
 	}
 
-	// Match PRs to workers by branch name (pr-<name> → worker <name>)
+	// Match PRs to workers by task ID
 	prs, _ := store.ListFor(projectRoot)
-	for _, pr := range prs {
-		if pr.Status == "merged" {
+	for i := range workers {
+		if workers[i].Task == "" {
 			continue
 		}
-		for i := range workers {
-			if workers[i].IsMain {
+		taskID := strings.Fields(workers[i].Task)[0]
+		for _, pr := range prs {
+			if pr.Status == "merged" {
 				continue
 			}
-			if pr.Branch == workers[i].Name {
+			if pr.Branch == taskID {
 				workers[i].PR = pr.ID + " [" + pr.Status + "]"
 				break
 			}
@@ -151,36 +161,23 @@ func List(projectRoot string) []Worker {
 	return workers
 }
 
-func getInProgressTasks(projectRoot string) []string {
-	out, err := exec.Command("td", "-w", projectRoot, "query", "status:in_progress").Output()
+func getTaskTitles(projectRoot string) map[string]string {
+	out, err := exec.Command("td", "-w", projectRoot, "list", "--json", "--limit", "50").Output()
 	if err != nil {
 		return nil
 	}
-	var tasks []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || !strings.HasPrefix(line, "td-") {
-			continue
-		}
-		// "td-abc123  [P2]  Title  task  [in_progress]" → "td-abc123 Title"
-		fields := strings.Fields(line)
-		if len(fields) < 3 {
-			continue
-		}
-		id := fields[0]
-		var title []string
-		for _, f := range fields[2:] {
-			if f == "task" || f == "bug" || f == "feature" || f == "chore" || f == "epic" {
-				break
-			}
-			if strings.HasPrefix(f, "[") && strings.HasSuffix(f, "]") {
-				continue
-			}
-			title = append(title, f)
-		}
-		tasks = append(tasks, id+" "+strings.Join(title, " "))
+	var tasks []struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
 	}
-	return tasks
+	if json.Unmarshal(out, &tasks) != nil {
+		return nil
+	}
+	m := make(map[string]string, len(tasks))
+	for _, t := range tasks {
+		m[t.ID] = t.Title
+	}
+	return m
 }
 
 func worktreeBranch(worktreePath string) string {
