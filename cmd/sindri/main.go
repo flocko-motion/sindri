@@ -125,7 +125,7 @@ func runWorkerStart(args []string, skill string, shell bool) error {
 		if created {
 			fmt.Fprintf(os.Stderr, "🔨 %s created\n", name)
 		} else {
-			fmt.Fprintf(os.Stderr, "🔨 resuming %s\n", name)
+			fmt.Fprintf(os.Stderr, "🔨 starting %s\n", name)
 		}
 	}
 
