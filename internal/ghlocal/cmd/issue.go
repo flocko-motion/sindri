@@ -120,21 +120,23 @@ var issueNextCmd = &cobra.Command{
 			return fmt.Errorf("you are on branch %q — run 'gh done' first to return to %s", branch, base)
 		}
 
-		out, err := td("next", "--json")
+		out, err := td("list", "--json", "--limit", "1")
 		if err != nil {
 			fmt.Println("No tasks available.")
 			return nil
 		}
 
-		var task struct {
+		var tasks []struct {
 			ID       string `json:"id"`
 			Title    string `json:"title"`
 			Type     string `json:"type"`
 			Priority string `json:"priority"`
 		}
-		if err := json.Unmarshal([]byte(out), &task); err != nil {
-			return fmt.Errorf("failed to parse task: %w\n%s", err, out)
+		if err := json.Unmarshal([]byte(out), &tasks); err != nil || len(tasks) == 0 {
+			fmt.Println("No tasks available.")
+			return nil
 		}
+		task := tasks[0]
 
 		if out, err := td("start", task.ID); err != nil {
 			return fmt.Errorf("td start failed: %s", out)
