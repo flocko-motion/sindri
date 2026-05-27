@@ -114,8 +114,10 @@ func newPrCmd() *cobra.Command {
 				}
 				fmt.Printf("Merged PR %s into %s\n", pr.ID, pr.Base)
 				if taskID != "" {
-					if out, err := exec.Command("td", "close", taskID, "--self-close-exception", "PR merged").CombinedOutput(); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: td close %s failed: %s\n", taskID, out)
+					tdClose := exec.Command("td", "close", taskID, "--self-close-exception", "PR merged")
+					tdClose.Dir = tdWorkDir()
+					if out, err := tdClose.CombinedOutput(); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: td close %s failed: %s\n", taskID, strings.TrimSpace(string(out)))
 					} else {
 						fmt.Printf("Closed task %s\n", taskID)
 					}
@@ -141,8 +143,10 @@ func newPrCmd() *cobra.Command {
 				}
 				fmt.Printf("Rejected PR %s\n", pr.ID)
 				if taskID := extractTaskID(pr.Title); taskID != "" {
-					if out, err := exec.Command("td", "reject", taskID).CombinedOutput(); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: td reject %s failed: %s\n", taskID, out)
+					tdCmd := exec.Command("td", "reject", taskID)
+					tdCmd.Dir = tdWorkDir()
+					if out, err := tdCmd.CombinedOutput(); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: td reject %s failed: %s\n", taskID, strings.TrimSpace(string(out)))
 					} else {
 						fmt.Printf("Rejected task %s\n", taskID)
 					}
@@ -181,7 +185,9 @@ func newRejectCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			taskID := args[0]
-			if out, err := exec.Command("td", "reject", taskID).CombinedOutput(); err != nil {
+			tdCmd := exec.Command("td", "reject", taskID)
+			tdCmd.Dir = tdWorkDir()
+			if out, err := tdCmd.CombinedOutput(); err != nil {
 				return fmt.Errorf("td reject %s failed: %s", taskID, strings.TrimSpace(string(out)))
 			}
 			fmt.Printf("Rejected task %s\n", taskID)
@@ -191,13 +197,25 @@ func newRejectCmd() *cobra.Command {
 	}
 }
 
+// tdWorkDir returns the project root for td commands.
+// After store.Merge() does git checkout, cwd may not be the project root.
+func tdWorkDir() string {
+	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return "."
+	}
+	return strings.TrimSpace(string(out))
+}
+
 var prTaskIDPattern = regexp.MustCompile(`\(?(td-[0-9a-f]+)\)?`)
 
 // checkReviewGates reads a task's labels and checks that every
 // require-review-X has a matching approved-review-X.
 // Returns the list of missing review names (empty = all gates pass).
 func checkReviewGates(taskID string) ([]string, error) {
-	out, err := exec.Command("td", "show", taskID, "--json").Output()
+	tdCmd := exec.Command("td", "show", taskID, "--json")
+	tdCmd.Dir = tdWorkDir()
+	out, err := tdCmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("td show %s: %w", taskID, err)
 	}
