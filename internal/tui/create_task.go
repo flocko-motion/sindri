@@ -95,7 +95,7 @@ func (m createTaskModel) Update(msg tea.Msg) (createTaskModel, tea.Cmd) {
 				return m, nil
 			}
 			return m, m.submit()
-		case key.Matches(msg, key.NewBinding(key.WithKeys("left"))):
+		case key.Matches(msg, key.NewBinding(key.WithKeys("left", "h"))):
 			if m.activeField == fieldType {
 				m.typeIdx = (m.typeIdx + len(taskTypes) - 1) % len(taskTypes)
 				return m, nil
@@ -104,7 +104,7 @@ func (m createTaskModel) Update(msg tea.Msg) (createTaskModel, tea.Cmd) {
 				m.prioIdx = (m.prioIdx + len(priorities) - 1) % len(priorities)
 				return m, nil
 			}
-		case key.Matches(msg, key.NewBinding(key.WithKeys("right"))):
+		case key.Matches(msg, key.NewBinding(key.WithKeys("right", "l"))):
 			if m.activeField == fieldType {
 				m.typeIdx = (m.typeIdx + 1) % len(taskTypes)
 				return m, nil
@@ -214,7 +214,7 @@ func (m createTaskModel) View(width, height int) string {
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString(dimStyle.Render("  tab:next field  ←/→:select  enter:create  esc:cancel"))
+	b.WriteString(dimStyle.Render("  tab:next field  h/l:select  enter:create  esc:cancel"))
 
 	modal := modalStyle.Render(b.String())
 

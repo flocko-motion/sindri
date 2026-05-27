@@ -23,9 +23,10 @@ func renderBacklogSplit(tasks []taskItem, prs []prItem, taskCursor, prCursor, ac
 		contentWidth = 10
 	}
 
-	// Split height: tasks get upper half, PRs get lower half
-	taskHeight := (height - 3) / 2
-	prHeight := height - 3 - taskHeight - 1 // -1 for divider
+	avail := innerHeight(height)
+	// Split: tasks get upper half, PRs get lower, 1 line for divider
+	taskHeight := (avail - 3) / 2 // -3 for headers and divider
+	prHeight := avail - 3 - taskHeight
 
 	var b strings.Builder
 
@@ -94,8 +95,10 @@ func renderBacklogSplit(tasks []taskItem, prs []prItem, taskCursor, prCursor, ac
 		}
 	}
 
-	rendered := style.Render(b.String())
-	return clipHeight(rendered, height)
+	// Pre-clip content lines, then let lipgloss render the border at full height
+	lines := strings.Split(b.String(), "\n")
+	lines = clipLines(lines, avail)
+	return style.Height(height).Render(strings.Join(lines, "\n"))
 }
 
 func formatTask(t taskItem, width int) string {

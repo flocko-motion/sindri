@@ -1,18 +1,23 @@
 package tui
 
-import (
-	"strings"
+import "github.com/charmbracelet/lipgloss"
 
-	"github.com/charmbracelet/lipgloss"
-)
-
-// clipHeight truncates a rendered string to at most maxLines lines.
-func clipHeight(s string, maxLines int) string {
-	lines := strings.SplitN(s, "\n", maxLines+1)
-	if len(lines) > maxLines {
-		lines = lines[:maxLines]
+// innerHeight returns the number of content lines available inside a bordered column.
+// RoundedBorder = 2 lines (top + bottom), Padding(0,1) = 0 vertical padding.
+func innerHeight(totalHeight int) int {
+	h := totalHeight - 2
+	if h < 1 {
+		h = 1
 	}
-	return strings.Join(lines, "\n")
+	return h
+}
+
+// clipLines truncates a slice of lines to at most max entries.
+func clipLines(lines []string, max int) []string {
+	if len(lines) <= max {
+		return lines
+	}
+	return lines[:max]
 }
 
 var (

@@ -3,8 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
-	"text/tabwriter"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/worker"
 	"github.com/spf13/cobra"
@@ -136,9 +137,7 @@ func runWorkerList(cmd *cobra.Command, args []string) error {
 	}
 
 	workers := worker.List(projectRoot)
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tROLE\tSTATUS\tTASK\tPR")
-	fmt.Fprintln(w, "----\t----\t------\t----\t--")
+	rows := make([][]string, 0, len(workers))
 	for _, wk := range workers {
 		icon := "🔨"
 		if wk.IsMain {
@@ -146,9 +145,21 @@ func runWorkerList(cmd *cobra.Command, args []string) error {
 		} else if wk.Role == "orphan" {
 			icon = "⚠ "
 		}
-		fmt.Fprintf(w, "%s %s\t%s\t%s\t%s\t%s\n", icon, wk.Name, wk.Role, wk.Status, wk.Task, wk.PR)
+		rows = append(rows, []string{icon + " " + wk.Name, wk.Role, wk.Status, wk.Task, wk.PR})
 	}
-	w.Flush()
+
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	t := table.New().
+		Headers("NAME", "ROLE", "STATUS", "TASK", "PR").
+		Rows(rows...).
+		BorderStyle(dim).
+		StyleFunc(func(row, col int) lipgloss.Style {
+			if row == table.HeaderRow {
+				return lipgloss.NewStyle().Bold(true).Padding(0, 1)
+			}
+			return lipgloss.NewStyle().Padding(0, 1)
+		})
+	fmt.Println(t)
 	return nil
 }
 

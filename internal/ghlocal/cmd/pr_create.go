@@ -60,7 +60,11 @@ var prCreateCmd = &cobra.Command{
 			title = branch
 		}
 
-		prID := prIDFromTask(createTask, title, branch)
+		baseID := prIDFromTask(createTask, title, branch)
+		prID, err := resolveCreateID(baseID)
+		if err != nil {
+			return err
+		}
 
 		pr := &store.PR{
 			ID:        prID,
@@ -124,6 +128,30 @@ func init() {
 }
 
 var taskIDPattern = regexp.MustCompile(`\(?(td-[0-9a-f]+)\)?`)
+
+// resolveID checks for existing PRs with the same ID.
+// If open/approved: returns an error. If merged: appends -2, -3, etc.
+func resolveCreateID(baseID string) (string, error) {
+	existing, err := store.Read(baseID)
+	if err != nil {
+		return baseID, nil // doesn't exist, use as-is
+	}
+	if existing.Status == "open" || existing.Status == "approved" {
+		return "", fmt.Errorf("PR %s already exists (status: %s). Close or merge it first", baseID, existing.Status)
+	}
+	// Merged — find next revision
+	for rev := 2; ; rev++ {
+		candidate := fmt.Sprintf("%s-%d", baseID, rev)
+		existing, err := store.Read(candidate)
+		if err != nil {
+			return candidate, nil // doesn't exist
+		}
+		if existing.Status == "open" || existing.Status == "approved" {
+			return "", fmt.Errorf("PR %s already exists (status: %s). Close or merge it first", candidate, existing.Status)
+		}
+		// Also merged, try next revision
+	}
+}
 
 // prIDFromTask derives a PR ID from --task flag, title, or branch name.
 func prIDFromTask(task, title, branch string) string {

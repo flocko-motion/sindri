@@ -1,12 +1,15 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
-	"text/tabwriter"
+	"strings"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 	"github.com/flo-at/sindri/internal/ghlocal/store"
 	"github.com/spf13/cobra"
 )
@@ -30,11 +33,22 @@ func newPrCmd() *cobra.Command {
 					fmt.Println("No PRs found.")
 					return nil
 				}
-				w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+				rows := make([][]string, 0, len(prs))
 				for _, pr := range prs {
-					fmt.Fprintf(w, "%s\t%s\t%s → %s\n", pr.ID, pr.Status, pr.Branch, pr.Base)
+					rows = append(rows, []string{pr.ID, pr.Status, pr.Branch + " → " + pr.Base, pr.Title})
 				}
-				w.Flush()
+				dim := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+				t := table.New().
+					Headers("ID", "STATUS", "BRANCH", "TITLE").
+					Rows(rows...).
+					BorderStyle(dim).
+					StyleFunc(func(row, col int) lipgloss.Style {
+						if row == table.HeaderRow {
+							return lipgloss.NewStyle().Bold(true).Padding(0, 1)
+						}
+						return lipgloss.NewStyle().Padding(0, 1)
+					})
+				fmt.Println(t)
 				return nil
 			},
 		},
@@ -78,12 +92,28 @@ func newPrCmd() *cobra.Command {
 			Short: "Merge an approved PR",
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				pr, err := store.Merge(args[0])
+				pr, err := store.Read(args[0])
+				if err != nil {
+					return err
+				}
+				taskID := extractTaskID(pr.Title)
+				if taskID != "" {
+					if missing, err := checkReviewGates(taskID); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: could not check review gates: %v\n", err)
+					} else if len(missing) > 0 {
+						fmt.Fprintf(os.Stderr, "Review gates not met for %s:\n", taskID)
+						for _, m := range missing {
+							fmt.Fprintf(os.Stderr, "  ✗ %s\n", m)
+						}
+						return fmt.Errorf("missing reviews: %s", strings.Join(missing, ", "))
+					}
+				}
+				pr, err = store.Merge(args[0])
 				if err != nil {
 					return err
 				}
 				fmt.Printf("Merged PR %s into %s\n", pr.ID, pr.Base)
-				if taskID := extractTaskID(pr.Title); taskID != "" {
+				if taskID != "" {
 					if out, err := exec.Command("td", "approve", taskID).CombinedOutput(); err != nil {
 						fmt.Fprintf(os.Stderr, "Warning: td approve %s failed: %s\n", taskID, out)
 					} else {
@@ -99,6 +129,41 @@ func newPrCmd() *cobra.Command {
 }
 
 var prTaskIDPattern = regexp.MustCompile(`\(?(td-[0-9a-f]+)\)?`)
+
+// checkReviewGates reads a task's labels and checks that every
+// require-review-X has a matching approved-review-X.
+// Returns the list of missing review names (empty = all gates pass).
+func checkReviewGates(taskID string) ([]string, error) {
+	out, err := exec.Command("td", "show", taskID, "--json").Output()
+	if err != nil {
+		return nil, fmt.Errorf("td show %s: %w", taskID, err)
+	}
+	var task struct {
+		Labels []string `json:"labels"`
+	}
+	if err := json.Unmarshal(out, &task); err != nil {
+		return nil, err
+	}
+
+	approved := make(map[string]bool)
+	var required []string
+	for _, label := range task.Labels {
+		if strings.HasPrefix(label, "require-review-") {
+			required = append(required, strings.TrimPrefix(label, "require-review-"))
+		}
+		if strings.HasPrefix(label, "approved-review-") {
+			approved[strings.TrimPrefix(label, "approved-review-")] = true
+		}
+	}
+
+	var missing []string
+	for _, r := range required {
+		if !approved[r] {
+			missing = append(missing, r)
+		}
+	}
+	return missing, nil
+}
 
 func extractTaskID(title string) string {
 	if m := prTaskIDPattern.FindStringSubmatch(title); len(m) > 1 {
