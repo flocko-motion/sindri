@@ -60,7 +60,13 @@ func main() {
 		RunE:  runWorkerStop,
 	}
 
-	workerCmd.AddCommand(workerListCmd, workerStartCmd, workerStopCmd)
+	workerResetCmd := &cobra.Command{
+		Use:   "reset",
+		Short: "Stop all running workers and remove their containers",
+		RunE:  runWorkerReset,
+	}
+
+	workerCmd.AddCommand(workerListCmd, workerStartCmd, workerStopCmd, workerResetCmd)
 	rootCmd.AddCommand(workerCmd)
 
 	// Top-level alias: sindri work = sindri worker start
@@ -286,6 +292,28 @@ func runWorkerList(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(w, "%s %s\t%s\t%s\t%s\t%s\n", icon, wk.Name, wk.Role, wk.Status, wk.Task, wk.PR)
 	}
 	w.Flush()
+	return nil
+}
+
+// ── worker reset ────────────────────────────────────────────────────────────
+
+func runWorkerReset(cmd *cobra.Command, args []string) error {
+	projectRoot, err := gitRoot()
+	if err != nil {
+		return fmt.Errorf("not in a git repo: %w", err)
+	}
+	workers := worker.List(projectRoot)
+	stopped := 0
+	for _, wk := range workers {
+		if wk.Container == "" {
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "Stopping %s...\n", wk.Name)
+		_ = exec.Command("podman", "stop", "-t", "3", wk.Container).Run()
+		_ = exec.Command("podman", "rm", "-f", wk.Container).Run()
+		stopped++
+	}
+	fmt.Fprintf(os.Stderr, "Stopped %d worker(s).\n", stopped)
 	return nil
 }
 
