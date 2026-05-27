@@ -61,28 +61,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, keys.Quit):
 			return m, tea.Quit
 		case key.Matches(msg, keys.Tab):
-			m.activeCol = (m.activeCol + 1) % 3
+			if m.activeCol == colBacklog {
+				m.activeCol = colWorkers
+			} else {
+				m.activeCol = colBacklog
+			}
 			m.updateDetail()
 		case key.Matches(msg, keys.ShiftTab):
-			m.activeCol = (m.activeCol + 2) % 3
+			if m.activeCol == colWorkers {
+				m.activeCol = colBacklog
+			} else {
+				m.activeCol = colWorkers
+			}
 			m.updateDetail()
 		case key.Matches(msg, keys.Up):
-			if m.activeCol == colDetail {
-				m.detail.scrollUp()
-			} else if m.cursor[m.activeCol] > 0 {
+			if m.cursor[m.activeCol] > 0 {
 				m.cursor[m.activeCol]--
 				m.updateDetail()
+			} else {
+				m.detail.scrollUp()
 			}
 		case key.Matches(msg, keys.Down):
-			if m.activeCol == colDetail {
+			max := m.maxCursor()
+			if m.cursor[m.activeCol] < max-1 {
+				m.cursor[m.activeCol]++
+				m.updateDetail()
+			} else {
 				contentHeight := m.height - 3
 				m.detail.scrollDown(contentHeight)
-			} else {
-				max := m.maxCursor()
-				if m.cursor[m.activeCol] < max-1 {
-					m.cursor[m.activeCol]++
-					m.updateDetail()
-				}
 			}
 		case key.Matches(msg, keys.Refresh):
 			return m, refreshData(m.projectRoot)
