@@ -32,10 +32,14 @@ func buildBacklogRows(tasks []taskItem, prs []prItem, workersByTask map[string]s
 		if w, ok := workersByTask[t.ID]; ok && t.Status == "in_progress" {
 			status = statusRunning.Render("🔨 " + w)
 		}
+		title := t.Title
+		if t.Status == "closed" || t.Status == "approved" {
+			title = dimStyle.Render(t.Title)
+		}
 		line := fmt.Sprintf("%s  %s  %s",
 			dimStyle.Render(t.Priority),
 			status,
-			t.Title,
+			title,
 		)
 		rows = append(rows, backlogRow{taskIdx: ti, display: line})
 

@@ -294,7 +294,7 @@ func (m Model) View() string {
 
 	// Title bar
 	title := titleStyle.Render("Sindri — AI Agent Orchestrator")
-	viewLabel := "backlog"
+	viewLabel := "tasks"
 	if m.leftView == viewWorkers {
 		viewLabel = "workers"
 	}
@@ -314,7 +314,7 @@ func (m Model) View() string {
 	var leftHeader string
 	switch m.leftView {
 	case viewBacklog:
-		leftHeader = "Backlog"
+		leftHeader = "Tasks"
 		leftContent = renderBacklogList(m.backlogRows, m.listCursor, m.focusCol == colLeft)
 	case viewWorkers:
 		leftHeader = "Workers"
