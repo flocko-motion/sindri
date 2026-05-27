@@ -19,7 +19,8 @@ When you have a task:
    The td issue type tells you which prefix to use.
 6. `td -w /project handoff <id> --done "what you did"`
 7. `td -w /project review <id>` to submit for review
-8. STOP. Your job is done. Do NOT merge — that is the reviewer's job.
+8. The gh tool will wait for review approval automatically.
+9. Once approved, go back to step 1 — pick up the next task.
 
 The `gh` command manages local PRs (no GitHub needed).
 The main repo is at /repo (read-only). Your workspace is /workspace.
