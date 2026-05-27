@@ -22,11 +22,11 @@ var doneCmd = &cobra.Command{
 			return nil
 		}
 
-		if out, err := exec.Command("git", "checkout", base).CombinedOutput(); err != nil {
+		if out, err := exec.Command("git", "checkout", "--detach", base).CombinedOutput(); err != nil {
 			return fmt.Errorf("checkout %s failed: %s", base, strings.TrimSpace(string(out)))
 		}
 
-		fmt.Printf("Checked out %s. Run 'gh next' to pick up the next task.\n", base)
+		fmt.Printf("Ready on %s. Run 'gh issue next' to pick up the next task.\n", base)
 		return nil
 	},
 }

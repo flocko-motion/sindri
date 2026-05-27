@@ -116,7 +116,8 @@ var issueNextCmd = &cobra.Command{
 
 		branch, _ := currentBranch()
 		base := baseBranch()
-		if branch != base {
+		// Accept base branch or detached HEAD (from gh done)
+		if branch != base && branch != "HEAD" {
 			return fmt.Errorf("you are on branch %q — run 'gh done' first to return to %s", branch, base)
 		}
 
@@ -156,13 +157,8 @@ var issueNextCmd = &cobra.Command{
 		}
 		fmt.Printf("Started task: %s %s\n\n", task.ID, task.Title)
 
-		// Rebase onto base branch
-		if out, err := exec.Command("git", "rebase", base).CombinedOutput(); err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: rebase failed: %s\n", strings.TrimSpace(string(out)))
-		}
-
-		// Create per-task branch
-		if out, err := exec.Command("git", "checkout", "-b", task.ID).CombinedOutput(); err != nil {
+		// Create per-task branch from base (works from detached HEAD or base branch)
+		if out, err := exec.Command("git", "checkout", "-b", task.ID, base).CombinedOutput(); err != nil {
 			return fmt.Errorf("failed to create branch %s: %s", task.ID, strings.TrimSpace(string(out)))
 		}
 		fmt.Printf("Branch: %s (from %s)\n\n", task.ID, base)

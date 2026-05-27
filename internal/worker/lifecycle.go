@@ -123,16 +123,11 @@ func Start(projectRoot, name string, opts StartOpts) error {
 		_ = os.WriteFile(gitFile, []byte(hostGitDir), 0644)
 	}
 
-	// Ensure worktree is on the base branch before entering container.
-	// The agent creates per-task branches inside the container.
-	fmt.Fprintf(os.Stderr, "Checking out %s in %s...\n", base, name)
-	if out, err := exec.Command("git", "-C", wtPath, "checkout", base).CombinedOutput(); err != nil {
-		// If checkout fails (e.g. uncommitted changes), try rebase instead
-		fmt.Fprintf(os.Stderr, "Checkout failed, rebasing onto %s...\n", base)
-		if out2, err2 := exec.Command("git", "-C", wtPath, "rebase", base).CombinedOutput(); err2 != nil {
-			fmt.Fprintf(os.Stderr, "Warning: rebase failed: %s\n", strings.TrimSpace(string(out)))
-			_ = out2
-		}
+	// Detach at base branch tip so agent can create per-task branches.
+	// Worktrees can't checkout a branch already used by another worktree.
+	fmt.Fprintf(os.Stderr, "Detaching %s at %s...\n", name, base)
+	if out, err := exec.Command("git", "-C", wtPath, "checkout", "--detach", base).CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: detach failed: %s\n", strings.TrimSpace(string(out)))
 	}
 
 	// Container startup: rewrite .git for container paths
