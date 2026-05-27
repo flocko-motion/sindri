@@ -184,10 +184,10 @@ func cliGateStatus(labels []string) string {
 	approved := make(map[string]bool)
 	var required []string
 	for _, l := range labels {
-		if strings.HasPrefix(l, "require-") {
+		if strings.HasPrefix(l, "require-review-") {
 			required = append(required, strings.TrimPrefix(l, "require-"))
 		}
-		if strings.HasPrefix(l, "approved-") {
+		if strings.HasPrefix(l, "approved-review-") {
 			approved[strings.TrimPrefix(l, "approved-")] = true
 		}
 	}
