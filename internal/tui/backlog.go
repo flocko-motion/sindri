@@ -94,7 +94,8 @@ func renderBacklogSplit(tasks []taskItem, prs []prItem, taskCursor, prCursor, ac
 		}
 	}
 
-	return style.Height(height).Render(b.String())
+	rendered := style.Render(b.String())
+	return clipHeight(rendered, height)
 }
 
 func formatTask(t taskItem, width int) string {

@@ -68,12 +68,8 @@ func renderDetail(d detailState, width, height int) string {
 		}
 	}
 
-	// Hard clip to height — never emit more lines than the box can hold
-	if len(out) > height {
-		out = out[:height]
-	}
-
-	return style.Height(height).Render(strings.Join(out, "\n"))
+	rendered := style.Render(strings.Join(out, "\n"))
+	return clipHeight(rendered, height)
 }
 
 func (d *detailState) scrollDown(height int) {

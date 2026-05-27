@@ -37,6 +37,9 @@ type Model struct {
 	tasks   []taskItem
 	prs     []prItem
 	detail  detailState
+
+	showCreateModal bool
+	createModal     createTaskModel
 }
 
 func New(projectRoot string) Model {
@@ -59,6 +62,11 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Handle modal if open
+	if m.showCreateModal {
+		return m.updateModal(msg)
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -68,6 +76,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case key.Matches(msg, keys.Quit):
 			return m, tea.Quit
+		case key.Matches(msg, key.NewBinding(key.WithKeys("n"))):
+			m.showCreateModal = true
+			m.createModal = newCreateTaskModel(m.projectRoot)
+			return m, m.createModal.Init()
 		case key.Matches(msg, keys.NavRight):
 			if m.activeCol == colBacklog {
 				m.activeCol = colWorkers
@@ -177,9 +189,34 @@ func (m *Model) updateDetail() {
 	}
 }
 
+func (m Model) updateModal(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
+	case tea.KeyMsg:
+		if key.Matches(msg, key.NewBinding(key.WithKeys("esc"))) {
+			m.showCreateModal = false
+			return m, nil
+		}
+	case taskCreatedMsg:
+		m.showCreateModal = false
+		return m, refreshData(m.projectRoot)
+	}
+
+	var cmd tea.Cmd
+	m.createModal, cmd = m.createModal.Update(msg)
+	return m, cmd
+}
+
 func (m Model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return "Loading..."
+	}
+
+	if m.showCreateModal {
+		return m.createModal.View(m.width, m.height)
 	}
 
 	title := titleStyle.Render("Sindri — AI Agent Orchestrator")
