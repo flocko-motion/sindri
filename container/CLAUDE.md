@@ -28,3 +28,11 @@ The main branch is at `/repo`. Your base branch is set via `GH_LOCAL_BASE`.
 - Do NOT edit files in `/repo` — it is read-only (except `.git`).
 - Do NOT merge PRs — that is the reviewer's job.
 - Ask before guessing when requirements are unclear.
+
+## TUI conventions
+
+When working on the TUI (internal/tui/):
+- Navigation between columns/panels: ctrl+h (left), ctrl+l (right), ctrl+j (down), ctrl+k (up)
+- List navigation within a panel: j/k
+- Detail pane scrolling: Shift+J / Shift+K
+- No tab key for navigation — use ctrl+h/l instead
