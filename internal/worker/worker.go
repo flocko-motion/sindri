@@ -76,7 +76,7 @@ func List(projectRoot string) []Worker {
 
 	// Worker worktrees
 	for name, path := range worktrees {
-		if name == "main" {
+		if name == "main" || name == "review" {
 			continue
 		}
 		status := "-"
