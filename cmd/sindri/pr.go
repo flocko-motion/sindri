@@ -303,9 +303,28 @@ func newPrCmd() *cobra.Command {
 					}
 				}
 
-				fmt.Fprintf(os.Stderr, "Checking out %s...\n", pr.Branch)
+				// Reset to base branch, then try to checkout the PR branch
+				base := pr.Base
+				if base == "" || base == "HEAD" {
+					base = "master"
+				}
+				fmt.Fprintf(os.Stderr, "Resetting to %s...\n", base)
+				_ = exec.Command("git", "-C", wtPath, "checkout", "--detach", base).Run()
+
+				fmt.Fprintf(os.Stderr, "Applying %s...\n", pr.Branch)
+				// Try checkout first (branch may exist)
 				if out, err := exec.Command("git", "-C", wtPath, "checkout", "--detach", pr.Branch).CombinedOutput(); err != nil {
-					return fmt.Errorf("checkout failed: %s", strings.TrimSpace(string(out)))
+					// Branch doesn't exist — apply the stored diff
+					if pr.Diff == "" {
+						return fmt.Errorf("branch %s not found and PR has no stored diff", pr.Branch)
+					}
+					fmt.Fprintf(os.Stderr, "Branch gone, applying stored diff...\n")
+					apply := exec.Command("git", "-C", wtPath, "apply", "--stat", "--apply", "-")
+					apply.Stdin = strings.NewReader(pr.Diff)
+					if out, err := apply.CombinedOutput(); err != nil {
+						return fmt.Errorf("git apply failed: %s", strings.TrimSpace(string(out)))
+					}
+					_ = out
 				}
 
 				fmt.Fprintf(os.Stderr, "Building in %s...\n", wtPath)
