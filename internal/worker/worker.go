@@ -114,21 +114,36 @@ func List(projectRoot string) []Worker {
 		})
 	}
 
-	// Read task from .sindri-task state file in each worktree
+	// Read current branch for each worker's worktree from .git/worktrees/<name>/HEAD
+	for i := range workers {
+		if workers[i].Name != "" && !workers[i].IsMain {
+			workers[i].Branch = worktreeBranch(projectRoot, workers[i].Name)
+		}
+	}
+
+	// Determine task from .sindri-task file or branch name (td-xxx = task ID)
 	taskTitles := getTaskTitles(projectRoot)
 	for i := range workers {
-		if workers[i].Path == "" {
+		if workers[i].IsMain {
 			continue
 		}
-		taskFile := filepath.Join(workers[i].Path, ".sindri-task")
-		if data, err := os.ReadFile(taskFile); err == nil {
-			taskID := strings.TrimSpace(string(data))
-			if taskID != "" {
-				if title, ok := taskTitles[taskID]; ok {
-					workers[i].Task = taskID + " " + title
-				} else {
-					workers[i].Task = taskID
-				}
+		var taskID string
+		// Try state file first
+		if workers[i].Path != "" {
+			taskFile := filepath.Join(workers[i].Path, ".sindri-task")
+			if data, err := os.ReadFile(taskFile); err == nil {
+				taskID = strings.TrimSpace(string(data))
+			}
+		}
+		// Fall back to branch name
+		if taskID == "" && strings.HasPrefix(workers[i].Branch, "td-") {
+			taskID = workers[i].Branch
+		}
+		if taskID != "" {
+			if title, ok := taskTitles[taskID]; ok {
+				workers[i].Task = taskID + " " + title
+			} else {
+				workers[i].Task = taskID
 			}
 		}
 	}
@@ -148,13 +163,6 @@ func List(projectRoot string) []Worker {
 				workers[i].PR = pr.ID + " [" + pr.Status + "]"
 				break
 			}
-		}
-	}
-
-	// Read current branch for each worker's worktree
-	for i := range workers {
-		if workers[i].Path != "" {
-			workers[i].Branch = worktreeBranch(workers[i].Path)
 		}
 	}
 
@@ -180,29 +188,10 @@ func getTaskTitles(projectRoot string) map[string]string {
 	return m
 }
 
-func worktreeBranch(worktreePath string) string {
-	headPath := filepath.Join(worktreePath, ".git")
-	info, err := os.Stat(headPath)
-	if err != nil {
-		return ""
-	}
-	if info.IsDir() {
-		headPath = filepath.Join(headPath, "HEAD")
-	} else {
-		data, err := os.ReadFile(headPath)
-		if err != nil {
-			return ""
-		}
-		line := strings.TrimSpace(string(data))
-		if !strings.HasPrefix(line, "gitdir: ") {
-			return ""
-		}
-		gitdir := strings.TrimPrefix(line, "gitdir: ")
-		if !filepath.IsAbs(gitdir) {
-			gitdir = filepath.Join(worktreePath, gitdir)
-		}
-		headPath = filepath.Join(gitdir, "HEAD")
-	}
+// worktreeBranch reads the branch from .git/worktrees/<name>/HEAD in the main repo.
+// This works even while the container is running (the worktree .git file has container paths).
+func worktreeBranch(projectRoot, name string) string {
+	headPath := filepath.Join(projectRoot, ".git", "worktrees", name, "HEAD")
 	data, err := os.ReadFile(headPath)
 	if err != nil {
 		return ""
