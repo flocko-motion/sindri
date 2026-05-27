@@ -107,31 +107,7 @@ func newPrCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				pr, err := store.Read(id)
-				if err != nil {
-					return err
-				}
-				fmt.Printf("%s [%s] %s → %s\n", pr.ID, pr.Status, pr.Branch, pr.Base)
-				fmt.Printf("%s\n", pr.Title)
-				if taskID := extractTaskID(pr.Title); taskID != "" {
-					fmt.Println()
-					printTaskSummary(taskID)
-					fmt.Println()
-					tdShow := exec.Command("td", "show", taskID)
-					tdShow.Dir = tdWorkDir()
-					if out, err := tdShow.Output(); err == nil {
-						fmt.Println(strings.TrimSpace(string(out)))
-					}
-					tdComments := exec.Command("td", "comments", taskID)
-					tdComments.Dir = tdWorkDir()
-					if out, err := tdComments.Output(); err == nil {
-						c := strings.TrimSpace(string(out))
-						if c != "" && c != "No comments" {
-							fmt.Printf("\n--- Comments ---\n%s\n", c)
-						}
-					}
-				}
-				return nil
+				return printPRInfo(id)
 			},
 		},
 		&cobra.Command{
@@ -344,13 +320,8 @@ func newPrCmd() *cobra.Command {
 				for _, pr := range prs {
 					if pr.Status == "open" {
 						writeSelectedPR(pr.ID)
-						fmt.Printf("Selected: %s\n", pr.ID)
-						fmt.Printf("PR:       %s\n", pr.Title)
-						fmt.Printf("Branch:   %s → %s\n", pr.Branch, pr.Base)
-						if taskID := extractTaskID(pr.Title); taskID != "" {
-							printTaskSummary(taskID)
-						}
-						return nil
+						fmt.Printf("Selected: %s\n\n", pr.ID)
+						return printPRInfo(pr.ID)
 					}
 				}
 				fmt.Println("No open PRs.")
@@ -452,6 +423,34 @@ func newPrCmd() *cobra.Command {
 	prCmd.AddCommand(reviewCmd)
 
 	return prCmd
+}
+
+func printPRInfo(id string) error {
+	pr, err := store.Read(id)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s [%s] %s → %s\n", pr.ID, pr.Status, pr.Branch, pr.Base)
+	fmt.Printf("%s\n", pr.Title)
+	if taskID := extractTaskID(pr.Title); taskID != "" {
+		fmt.Println()
+		printTaskSummary(taskID)
+		fmt.Println()
+		tdShow := exec.Command("td", "show", taskID)
+		tdShow.Dir = tdWorkDir()
+		if out, err := tdShow.Output(); err == nil {
+			fmt.Println(strings.TrimSpace(string(out)))
+		}
+		tdComments := exec.Command("td", "comments", taskID)
+		tdComments.Dir = tdWorkDir()
+		if out, err := tdComments.Output(); err == nil {
+			c := strings.TrimSpace(string(out))
+			if c != "" && c != "No comments" {
+				fmt.Printf("\n--- Comments ---\n%s\n", c)
+			}
+		}
+	}
+	return nil
 }
 
 func printTaskSummary(taskID string) {
