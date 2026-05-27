@@ -280,8 +280,20 @@ func newPrCmd() *cobra.Command {
 					if pr.Status == "open" {
 						writeSelectedPR(pr.ID)
 						fmt.Printf("Selected: %s\n", pr.ID)
-						fmt.Printf("Title:    %s\n", pr.Title)
+						fmt.Printf("PR:       %s\n", pr.Title)
 						fmt.Printf("Branch:   %s → %s\n", pr.Branch, pr.Base)
+						if taskID := extractTaskID(pr.Title); taskID != "" {
+							tdCmd := exec.Command("td", "show", taskID, "--json")
+							tdCmd.Dir = tdWorkDir()
+							if out, err := tdCmd.Output(); err == nil {
+								var task struct {
+									Title string `json:"title"`
+								}
+								if json.Unmarshal(out, &task) == nil && task.Title != "" {
+									fmt.Printf("Task:     %s — %s\n", taskID, task.Title)
+								}
+							}
+						}
 						return nil
 					}
 				}
