@@ -132,3 +132,11 @@ func fetchTaskDetail(projectRoot, taskID string) string {
 	return strings.TrimSpace(string(out))
 }
 
+func fetchTaskComments(projectRoot, taskID string) string {
+	out, err := exec.Command("td", "-w", projectRoot, "comments", taskID).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+

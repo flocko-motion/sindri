@@ -14,11 +14,6 @@ import (
 )
 
 const (
-	colLeft = iota
-	colDetail
-)
-
-const (
 	viewBacklog = iota
 	viewWorkers
 )
@@ -32,7 +27,6 @@ type Model struct {
 	width       int
 	height      int
 
-	focusCol int // colLeft or colDetail
 	leftView int // viewBacklog or viewWorkers
 
 	listCursor   int
@@ -44,9 +38,10 @@ type Model struct {
 	prs     []prItem
 	detail  detailState
 
-	vpLeft   viewport.Model
+	vpList   viewport.Model
 	vpDetail viewport.Model
 
+	showDetail      bool
 	showCreateModal bool
 	createModal     createTaskModel
 
@@ -56,9 +51,8 @@ type Model struct {
 func New(projectRoot string) Model {
 	return Model{
 		projectRoot: projectRoot,
-		focusCol:    colLeft,
 		leftView:    viewBacklog,
-		vpLeft:      viewport.New(0, 0),
+		vpList:      viewport.New(0, 0),
 		vpDetail:    viewport.New(0, 0),
 	}
 }
@@ -80,6 +74,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateModal(msg)
 	}
 
+	if m.showDetail {
+		return m.updateDetail(msg)
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -96,45 +94,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.createModal.Init()
 		case key.Matches(msg, keys.Backlog):
 			m.leftView = viewBacklog
-			m.focusCol = colLeft
 			m.rebuildBacklog()
-			m.updateDetail()
 		case key.Matches(msg, keys.Workers):
 			m.leftView = viewWorkers
-			m.focusCol = colLeft
-			m.updateDetail()
-		case key.Matches(msg, keys.NavRight):
-			m.focusCol = colDetail
-		case key.Matches(msg, keys.NavLeft):
-			m.focusCol = colLeft
-		case key.Matches(msg, keys.DetailUp):
-			m.vpDetail.LineUp(1)
-		case key.Matches(msg, keys.DetailDown):
-			m.vpDetail.LineDown(1)
 		case key.Matches(msg, keys.Up):
-			if m.focusCol == colDetail {
-				m.vpDetail.LineUp(1)
-			} else {
-				m.moveCursorTask(-1)
-			}
+			m.moveCursor(-1)
 		case key.Matches(msg, keys.Down):
-			if m.focusCol == colDetail {
-				m.vpDetail.LineDown(1)
-			} else {
-				m.moveCursorTask(1)
-			}
-		case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+u"))):
-			m.vpDetail.HalfViewUp()
-		case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+d"))):
-			m.vpDetail.HalfViewDown()
+			m.moveCursor(1)
 		case key.Matches(msg, key.NewBinding(key.WithKeys("l"))):
-			if m.focusCol == colLeft && m.leftView == viewBacklog {
+			if m.leftView == viewBacklog {
 				m.navigateInto()
 			}
 		case key.Matches(msg, key.NewBinding(key.WithKeys("h"))):
-			if m.focusCol == colLeft && m.leftView == viewBacklog {
+			if m.leftView == viewBacklog {
 				m.navigateOut()
 			}
+		case key.Matches(msg, keys.Enter):
+			m.openDetail()
 		case key.Matches(msg, keys.Refresh):
 			return m, refreshData(m.projectRoot)
 		}
@@ -144,7 +120,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, flashTimer()
 
 	case flashExpiredMsg:
-		// Just triggers a re-render so the flash dims
 		return m, nil
 
 	case refreshMsg:
@@ -154,12 +129,54 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.prs = msg.prs
 		m.rebuildBacklog()
 		m.clampCursors()
-		m.updateDetail()
 
 	case tickMsg:
 		return m, tea.Batch(refreshData(m.projectRoot), tickCmd())
 	}
 
+	return m, nil
+}
+
+func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.resizeViewports()
+		return m, nil
+	case tea.KeyMsg:
+		switch {
+		case key.Matches(msg, key.NewBinding(key.WithKeys("esc", "q"))):
+			m.showDetail = false
+			return m, nil
+		case key.Matches(msg, keys.Up):
+			m.vpDetail.LineUp(1)
+		case key.Matches(msg, keys.Down):
+			m.vpDetail.LineDown(1)
+		case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+u"))):
+			m.vpDetail.HalfViewUp()
+		case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+d"))):
+			m.vpDetail.HalfViewDown()
+		case key.Matches(msg, key.NewBinding(key.WithKeys("g"))):
+			m.vpDetail.GotoTop()
+		case key.Matches(msg, key.NewBinding(key.WithKeys("G"))):
+			m.vpDetail.GotoBottom()
+		}
+	case refreshMsg:
+		m.detectChanges(msg)
+		m.workers = msg.workers
+		m.tasks = msg.tasks
+		m.prs = msg.prs
+		m.rebuildBacklog()
+		m.clampCursors()
+	case tickMsg:
+		return m, tea.Batch(refreshData(m.projectRoot), tickCmd())
+	case notifyMsg:
+		m.notify = notification{message: msg.message, isError: msg.isError, time: time.Now()}
+		return m, flashTimer()
+	case flashExpiredMsg:
+		return m, nil
+	}
 	return m, nil
 }
 
@@ -169,12 +186,10 @@ func (m *Model) resizeViewports() {
 	if innerH < 1 {
 		innerH = 1
 	}
-	leftW := m.width * 2 / 3
-	rightW := m.width - leftW
-	m.vpLeft.Width = leftW - 4
-	m.vpLeft.Height = innerH
-	m.vpDetail.Width = rightW - 4
-	m.vpDetail.Height = innerH - 1 // room for scroll status
+	m.vpList.Width = m.width - 4
+	m.vpList.Height = innerH
+	m.vpDetail.Width = m.width - 4
+	m.vpDetail.Height = innerH - 1
 	if m.vpDetail.Height < 1 {
 		m.vpDetail.Height = 1
 	}
@@ -193,8 +208,7 @@ func (m *Model) rebuildBacklog() {
 	m.backlogRows = buildBacklogRows(m.tasks, m.prs, workersByTask)
 }
 
-// moveCursorTask jumps between task rows only (skips PR/gate sub-rows).
-func (m *Model) moveCursorTask(delta int) {
+func (m *Model) moveCursor(delta int) {
 	switch m.leftView {
 	case viewBacklog:
 		pos := m.listCursor
@@ -205,7 +219,6 @@ func (m *Model) moveCursorTask(delta int) {
 			}
 			if !m.backlogRows[pos].isPR {
 				m.listCursor = pos
-				m.updateDetail()
 				return
 			}
 		}
@@ -213,32 +226,51 @@ func (m *Model) moveCursorTask(delta int) {
 		next := m.workerCursor + delta
 		if next >= 0 && next < len(m.workers) {
 			m.workerCursor = next
-			m.updateDetail()
 		}
 	}
 }
 
-// navigateInto moves from a task row to its first PR sub-row.
 func (m *Model) navigateInto() {
 	if m.listCursor+1 < len(m.backlogRows) && m.backlogRows[m.listCursor+1].isPR {
 		m.listCursor++
-		m.updateDetail()
 	}
 }
 
-// navigateOut moves from a PR sub-row back to its parent task.
 func (m *Model) navigateOut() {
 	for pos := m.listCursor - 1; pos >= 0; pos-- {
 		if !m.backlogRows[pos].isPR {
 			m.listCursor = pos
-			m.updateDetail()
 			return
 		}
 	}
 }
 
+func (m *Model) openDetail() {
+	switch m.leftView {
+	case viewBacklog:
+		if m.listCursor < len(m.backlogRows) {
+			row := m.backlogRows[m.listCursor]
+			if row.isPR {
+				if row.prIdx < len(m.prs) {
+					m.detail = prDetail(m.prs[row.prIdx])
+				}
+			} else {
+				if row.taskIdx < len(m.tasks) {
+					m.detail = taskDetail(m.tasks[row.taskIdx], m.prs, m.workers, m.projectRoot)
+				}
+			}
+		}
+	case viewWorkers:
+		if m.workerCursor < len(m.workers) {
+			m.detail = workerDetail(m.workers[m.workerCursor])
+		}
+	}
+	m.vpDetail.SetContent(m.detail.content)
+	m.vpDetail.GotoTop()
+	m.showDetail = true
+}
+
 func (m *Model) detectChanges(msg refreshMsg) {
-	// Detect new or changed PRs
 	oldPRs := make(map[string]string)
 	for _, pr := range m.prs {
 		oldPRs[pr.ID] = pr.Status
@@ -252,7 +284,6 @@ func (m *Model) detectChanges(msg refreshMsg) {
 		}
 	}
 
-	// Detect task status changes
 	oldTasks := make(map[string]string)
 	for _, t := range m.tasks {
 		oldTasks[t.ID] = t.Status
@@ -272,34 +303,6 @@ func (m *Model) clampCursors() {
 	if n := len(m.workers); m.workerCursor >= n && n > 0 {
 		m.workerCursor = n - 1
 	}
-}
-
-func (m *Model) updateDetail() {
-	switch m.leftView {
-	case viewBacklog:
-		if m.listCursor < len(m.backlogRows) {
-			row := m.backlogRows[m.listCursor]
-			if row.isPR {
-				if row.prIdx < len(m.prs) {
-					m.detail = prDetail(m.prs[row.prIdx])
-				}
-			} else {
-				if row.taskIdx < len(m.tasks) {
-					m.detail = taskDetail(m.tasks[row.taskIdx], m.projectRoot)
-				}
-			}
-		} else {
-			m.detail = detailState{}
-		}
-	case viewWorkers:
-		if m.workerCursor < len(m.workers) {
-			m.detail = workerDetail(m.workers[m.workerCursor])
-		} else {
-			m.detail = detailState{}
-		}
-	}
-	m.vpDetail.SetContent(m.detail.content)
-	m.vpDetail.GotoTop()
 }
 
 func (m Model) updateModal(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -334,50 +337,66 @@ func (m Model) View() string {
 	if m.showCreateModal {
 		return m.createModal.View(m.width, m.height)
 	}
+	if m.showDetail {
+		return m.viewDetail()
+	}
+	return m.viewList()
+}
 
-	// Title bar
+func (m Model) viewList() string {
 	title := titleStyle.Render("Sindri — AI Agent Orchestrator")
 	viewLabel := "tasks"
 	if m.leftView == viewWorkers {
 		viewLabel = "workers"
 	}
-	help := dimStyle.Render(fmt.Sprintf("[%s]  b/w:view  j/k:list  J/K:detail  C-h/l:focus  n:new  r:refresh  q:quit", viewLabel))
+	help := dimStyle.Render(fmt.Sprintf("[%s]  T/w:view  j/k:nav  enter:open  n:new  r:refresh  q:quit", viewLabel))
 	titleBar := lipgloss.JoinHorizontal(lipgloss.Top,
 		title,
 		lipgloss.NewStyle().Width(m.width-lipgloss.Width(title)-lipgloss.Width(help)).Render(""),
 		help,
 	)
 
-	contentHeight := m.height - 4 // title + padding + notify bar + gap
-	leftW := m.width * 2 / 3
-	rightW := m.width - leftW
+	contentHeight := m.height - 4
 
-	// Left column content
-	var leftContent string
-	var leftHeader string
+	var listContent string
+	var header string
 	switch m.leftView {
 	case viewBacklog:
-		leftHeader = "Tasks"
-		leftContent = renderBacklogList(m.backlogRows, m.listCursor, m.focusCol == colLeft)
+		header = "Tasks"
+		listContent = renderBacklogList(m.backlogRows, m.listCursor, true)
 	case viewWorkers:
-		leftHeader = "Workers"
-		leftContent = renderWorkersList(m.workers, m.workerCursor, m.focusCol == colLeft)
+		header = "Workers"
+		listContent = renderWorkersList(m.workers, m.workerCursor, true)
 	}
-	m.vpLeft.SetContent(leftContent)
+	m.vpList.SetContent(listContent)
 
-	// Detail scroll status
+	col := renderColumn(header, m.vpList.View(), "", m.width, contentHeight, true)
+
+	notifyBar := m.notify.render(m.width)
+	return titleBar + "\n" + col + "\n" + notifyBar
+}
+
+func (m Model) viewDetail() string {
+	title := titleStyle.Render(m.detail.title)
+	help := dimStyle.Render("j/k:scroll  g/G:top/bottom  esc/q:back")
+	titleBar := lipgloss.JoinHorizontal(lipgloss.Top,
+		title,
+		lipgloss.NewStyle().Width(m.width-lipgloss.Width(title)-lipgloss.Width(help)).Render(""),
+		help,
+	)
+
+	contentHeight := m.height - 4
+
 	scrollStatus := ""
 	if m.vpDetail.TotalLineCount() > m.vpDetail.Height {
 		pct := int(m.vpDetail.ScrollPercent() * 100)
 		scrollStatus = dimStyle.Render(fmt.Sprintf(" %d%% (%d/%d)", pct, m.vpDetail.YOffset+m.vpDetail.Height, m.vpDetail.TotalLineCount()))
 	}
 
-	left := renderColumn(leftHeader, m.vpLeft.View(), "", leftW, contentHeight, m.focusCol == colLeft)
-	right := renderColumn("Detail", m.vpDetail.View(), scrollStatus, rightW, contentHeight, m.focusCol == colDetail)
+	col := renderColumn("", m.vpDetail.View(), scrollStatus, m.width, contentHeight, true)
 
-	columns := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	notifyBar := m.notify.render(m.width)
-	return titleBar + "\n" + columns + "\n" + notifyBar
+	return titleBar + "\n" + col + "\n" + notifyBar
 }
 
 func renderColumn(header, content, footer string, width, height int, active bool) string {
@@ -385,7 +404,12 @@ func renderColumn(header, content, footer string, width, height int, active bool
 	if active {
 		style = activeColumnStyle.Width(width).Height(height)
 	}
-	full := headerStyle.Render(header) + "\n" + content
+	var full string
+	if header != "" {
+		full = headerStyle.Render(header) + "\n" + content
+	} else {
+		full = content
+	}
 	if footer != "" {
 		full += "\n" + footer
 	}

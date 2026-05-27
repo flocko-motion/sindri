@@ -57,8 +57,8 @@ var keys = keyMap{
 		key.WithHelp("C-l", "focus right"),
 	),
 	Backlog: key.NewBinding(
-		key.WithKeys("b"),
-		key.WithHelp("b", "backlog view"),
+		key.WithKeys("T"),
+		key.WithHelp("T", "tasks view"),
 	),
 	Workers: key.NewBinding(
 		key.WithKeys("w"),
