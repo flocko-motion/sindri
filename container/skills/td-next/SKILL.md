@@ -9,7 +9,8 @@ If no task is available, say so and wait for instructions.
 When you have a task:
 1. `td -w /project start <id>` to claim it
 2. `td -w /project show <id>` to read the details
-3. If anything is unclear, ask me before guessing
+3. `td -w /project comments <id>` to read reviewer feedback (IMPORTANT — may contain rejection reasons or clarifications)
+4. If anything is unclear, ask me before guessing
 4. Implement the task, run tests, commit your changes
 5. `gh pr create --task <id> --title "type(task-id): summary" --body "details"` — use conventional commits:
    - feature → `feat(td-xxx): ...`
