@@ -33,7 +33,8 @@ func renderWorkers(workers []worker.Worker, selected int, width, height int, act
 	}
 
 	content := b.String()
-	return style.Height(height).Render(content)
+	rendered := style.Render(content)
+	return clipHeight(rendered, height)
 }
 
 func formatWorker(wk worker.Worker) string {
