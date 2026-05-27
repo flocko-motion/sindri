@@ -112,13 +112,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, keys.DetailDown):
 			m.vpDetail.LineDown(1)
 		case key.Matches(msg, keys.Up):
-			if m.focusCol == colLeft {
+			if m.focusCol == colDetail {
+				m.vpDetail.LineUp(1)
+			} else {
 				m.moveCursorTask(-1)
 			}
 		case key.Matches(msg, keys.Down):
-			if m.focusCol == colLeft {
+			if m.focusCol == colDetail {
+				m.vpDetail.LineDown(1)
+			} else {
 				m.moveCursorTask(1)
 			}
+		case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+u"))):
+			m.vpDetail.HalfViewUp()
+		case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+d"))):
+			m.vpDetail.HalfViewDown()
 		case key.Matches(msg, key.NewBinding(key.WithKeys("l"))):
 			if m.focusCol == colLeft && m.leftView == viewBacklog {
 				m.navigateInto()
