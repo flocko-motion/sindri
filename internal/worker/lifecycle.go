@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/container"
@@ -105,6 +106,11 @@ func Start(projectRoot, name string, opts StartOpts) error {
 		return err
 	}
 
+	ghBin, err := findSindriGH()
+	if err != nil {
+		return err
+	}
+
 	podmanArgs := []string{
 		"run", "--rm", "-it",
 		"--name", cName,
@@ -113,6 +119,7 @@ func Start(projectRoot, name string, opts StartOpts) error {
 		"--label", "sindri.worker=" + name,
 		"-v", claudeHome + ":/home/sindri/.claude:rw,z",
 		"-v", configPath + ":/home/sindri/.claude.json:rw,z",
+		"-v", ghBin + ":/opt/sindri/sindri-gh:ro,z",
 		"-e", "GH_LOCAL_BASE=" + base,
 		"-e", "COLORTERM=truecolor",
 		"-e", "TD_ROOT=/project",
@@ -140,7 +147,8 @@ func Start(projectRoot, name string, opts StartOpts) error {
 
 	// Container startup: rewrite .git for container paths
 	containerGitDir := fmt.Sprintf("gitdir: /repo/.git/worktrees/%s", name)
-	startup := "mkdir -p /home/sindri/.claude/skills && ln -sfn /opt/sindri/skills/* /home/sindri/.claude/skills/ 2>/dev/null; " +
+	startup := "ln -sf /opt/sindri/sindri-gh /usr/local/bin/gh 2>/dev/null; " +
+		"mkdir -p /home/sindri/.claude/skills && ln -sfn /opt/sindri/skills/* /home/sindri/.claude/skills/ 2>/dev/null; " +
 		"ln -sf /opt/sindri/CLAUDE.md /workspace/CLAUDE.md 2>/dev/null; " +
 		"if [ -f /workspace/.git ]; then " +
 		fmt.Sprintf("echo '%s' > /workspace/.git; ", containerGitDir) +
@@ -177,6 +185,11 @@ func StartReviewer(projectRoot string, shell bool) error {
 
 	claudeHome, configPath := prepareClaudeHome(projectRoot, "reviewer")
 
+	ghBin, err := findSindriGH()
+	if err != nil {
+		return err
+	}
+
 	podmanArgs := []string{
 		"run", "--rm", "-it",
 		"--name", cName,
@@ -185,6 +198,7 @@ func StartReviewer(projectRoot string, shell bool) error {
 		"--label", "sindri.worker=_reviewer",
 		"-v", claudeHome + ":/home/sindri/.claude:rw,z",
 		"-v", configPath + ":/home/sindri/.claude.json:rw,z",
+		"-v", ghBin + ":/opt/sindri/sindri-gh:ro,z",
 		"-e", "TD_ROOT=/project",
 		"-e", "COLORTERM=truecolor",
 		"-v", projectRoot + "/.todos:/project/.todos:rw,z",
@@ -194,7 +208,8 @@ func StartReviewer(projectRoot string, shell bool) error {
 		container.ImageName,
 	}
 
-	startup := "mkdir -p /home/sindri/.claude/skills && ln -sfn /opt/sindri/skills/* /home/sindri/.claude/skills/ 2>/dev/null; " +
+	startup := "ln -sf /opt/sindri/sindri-gh /usr/local/bin/gh 2>/dev/null; " +
+		"mkdir -p /home/sindri/.claude/skills && ln -sfn /opt/sindri/skills/* /home/sindri/.claude/skills/ 2>/dev/null; " +
 		"cp /opt/sindri/CLAUDE.reviewer.md /workspace/CLAUDE.md 2>/dev/null || ln -sf /opt/sindri/CLAUDE.reviewer.md /workspace/CLAUDE.md 2>/dev/null; "
 
 	skill := "td-review"
@@ -250,6 +265,23 @@ func Reset(projectRoot string) (int, error) {
 // EnsureImage builds the container image if needed.
 func EnsureImage(projectRoot string) error {
 	return container.Ensure(projectRoot)
+}
+
+// findSindriGH locates the sindri-gh binary on the host.
+func findSindriGH() (string, error) {
+	// Check next to the running sindri binary first
+	self, err := os.Executable()
+	if err == nil {
+		candidate := filepath.Join(filepath.Dir(self), "sindri-gh")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+	// Fall back to PATH
+	if path, err := exec.LookPath("sindri-gh"); err == nil {
+		return path, nil
+	}
+	return "", fmt.Errorf("sindri-gh binary not found — run 'make install'")
 }
 
 // prepareClaudeHome sets up the claude home directory with credentials and settings.

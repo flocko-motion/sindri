@@ -38,11 +38,9 @@ RUN chmod +x /usr/local/bin/yq /usr/local/bin/td
 RUN npm install -g @anthropic-ai/claude-code@latest
 RUN mkdir -p /opt/sindri && cd /opt/sindri && npm init -y && npm install "@anthropic-ai/claude-agent-sdk@^0.1.59"
 
-# ── gh-local (built from source) ─────────────────────────────────────────────
-COPY go.mod go.sum /build/
-COPY cmd/gh/ /build/cmd/gh/
-COPY internal/ghlocal/ /build/internal/ghlocal/
-RUN cd /build && go build -o /usr/local/bin/gh ./cmd/gh/ && rm -rf /build
+# ── gh-local (mounted from host at runtime, symlinked here) ──────────────────
+# The sindri-gh binary is mounted read-only at /opt/sindri/sindri-gh
+# and symlinked to /usr/local/bin/gh at container startup.
 
 # ── Shims ─────────────────────────────────────────────────────────────────────
 COPY container/shims/docker          /usr/local/bin/docker

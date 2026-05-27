@@ -1,4 +1,6 @@
-.PHONY: build sindri gh image clean
+.PHONY: build sindri gh image install clean
+
+PREFIX := $(HOME)/.local/bin
 
 build: sindri gh
 
@@ -6,10 +8,15 @@ sindri:
 	go build -o bin/sindri ./cmd/sindri/
 
 gh:
-	go build -o bin/gh ./cmd/gh/
+	go build -o bin/sindri-gh ./cmd/gh/
 
-# Rebuild image when container files, gh source, or go.mod change
-CONTAINER_DEPS := $(shell find container cmd/gh internal/ghlocal -type f 2>/dev/null) go.mod go.sum
+install: build
+	mkdir -p $(PREFIX)
+	cp bin/sindri $(PREFIX)/sindri
+	cp bin/sindri-gh $(PREFIX)/sindri-gh
+
+# Rebuild image when container files change (gh is now mounted, not built in image)
+CONTAINER_DEPS := $(shell find container -type f 2>/dev/null)
 .image-stamp: $(CONTAINER_DEPS)
 	cp "$$(which td)" bin/td
 	cp "$$(which yq)" bin/yq
@@ -18,7 +25,7 @@ CONTAINER_DEPS := $(shell find container cmd/gh internal/ghlocal -type f 2>/dev/
 
 image: .image-stamp
 
-all: build image
+all: build image install
 
 clean:
-	rm -f bin/sindri bin/gh bin/td bin/yq .image-stamp
+	rm -f bin/sindri bin/sindri-gh bin/gh bin/td bin/yq .image-stamp
