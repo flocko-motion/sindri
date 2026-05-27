@@ -70,6 +70,11 @@ func (m createTaskModel) Init() tea.Cmd {
 func (m createTaskModel) Update(msg tea.Msg) (createTaskModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Space toggles review checkbox only when review field is active
+		if msg.String() == " " && m.activeField == fieldReview {
+			m.reviewChecked = !m.reviewChecked
+			return m, nil
+		}
 		switch {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
 			m.submitted = false
@@ -82,12 +87,6 @@ func (m createTaskModel) Update(msg tea.Msg) (createTaskModel, tea.Cmd) {
 			m.activeField = (m.activeField + fieldCount - 1) % fieldCount
 			m.focusActive()
 			return m, nil
-		case key.Matches(msg, key.NewBinding(key.WithKeys(" "))):
-			if m.activeField == fieldReview {
-				m.reviewChecked = !m.reviewChecked
-				return m, nil
-			}
-			// Space on text fields: fall through to textinput handling below
 		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
 			if m.activeField == fieldReview {
 				m.reviewChecked = !m.reviewChecked
