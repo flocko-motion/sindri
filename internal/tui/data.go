@@ -68,8 +68,8 @@ func fetchTasks(projectRoot string) []taskItem {
 	}
 	items := make([]taskItem, len(raw))
 	for i, r := range raw {
-		created, _ := time.Parse(time.RFC3339, r.CreatedAt)
-		updated, _ := time.Parse(time.RFC3339, r.UpdatedAt)
+		created, _ := time.Parse(time.RFC3339Nano, r.CreatedAt)
+		updated, _ := time.Parse(time.RFC3339Nano, r.UpdatedAt)
 		items[i] = taskItem{
 			ID:        r.ID,
 			Title:     r.Title,
