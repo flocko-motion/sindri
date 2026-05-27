@@ -114,10 +114,10 @@ func newPrCmd() *cobra.Command {
 				}
 				fmt.Printf("Merged PR %s into %s\n", pr.ID, pr.Base)
 				if taskID != "" {
-					if out, err := exec.Command("td", "approve", taskID).CombinedOutput(); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: td approve %s failed: %s\n", taskID, out)
+					if out, err := exec.Command("td", "close", taskID, "--self-close-exception", "PR merged").CombinedOutput(); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: td close %s failed: %s\n", taskID, out)
 					} else {
-						fmt.Printf("Approved task %s\n", taskID)
+						fmt.Printf("Closed task %s\n", taskID)
 					}
 				}
 				return nil
