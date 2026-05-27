@@ -90,5 +90,8 @@ func workerDetail(wk worker.Worker) detailState {
 	if wk.PR != "" {
 		fmt.Fprintf(&b, "PR:        %s\n", wk.PR)
 	}
+	if wk.Branch != "" {
+		fmt.Fprintf(&b, "Branch:    %s\n", wk.Branch)
+	}
 	return detailState{kind: detailWorker, title: wk.Name, content: b.String()}
 }
