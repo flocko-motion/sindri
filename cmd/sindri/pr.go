@@ -303,7 +303,7 @@ func newPrCmd() *cobra.Command {
 					}
 				}
 
-				// Reset to base branch, then try to checkout the PR branch
+				// Reset to base, then merge the PR branch
 				base := pr.Base
 				if base == "" || base == "HEAD" {
 					base = "master"
@@ -311,19 +311,9 @@ func newPrCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "Resetting to %s...\n", base)
 				_ = exec.Command("git", "-C", wtPath, "checkout", "--detach", base).Run()
 
-				fmt.Fprintf(os.Stderr, "Applying %s...\n", pr.Branch)
-				// Try checkout first (branch may exist)
-				if _, err := exec.Command("git", "-C", wtPath, "checkout", "--detach", pr.Branch).CombinedOutput(); err != nil {
-					// Branch doesn't exist — apply the stored diff
-					if pr.Diff == "" {
-						return fmt.Errorf("branch %s not found and PR has no stored diff", pr.Branch)
-					}
-					fmt.Fprintf(os.Stderr, "Branch gone, applying stored diff...\n")
-					apply := exec.Command("git", "-C", wtPath, "apply", "--stat", "--apply", "-")
-					apply.Stdin = strings.NewReader(pr.Diff)
-					if _, err := apply.CombinedOutput(); err != nil {
-						return fmt.Errorf("PR diff is stale — doesn't apply to current %s. Reject this PR so the agent rebases and resubmits", base)
-					}
+				fmt.Fprintf(os.Stderr, "Merging %s...\n", pr.Branch)
+				if out, err := exec.Command("git", "-C", wtPath, "merge", "--no-ff", pr.Branch, "-m", "pr-try: "+pr.ID).CombinedOutput(); err != nil {
+					return fmt.Errorf("merge failed — branch %s may not exist or has conflicts:\n%s", pr.Branch, strings.TrimSpace(string(out)))
 				}
 
 				fmt.Fprintf(os.Stderr, "Building in %s...\n", wtPath)
