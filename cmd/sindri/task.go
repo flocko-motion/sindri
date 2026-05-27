@@ -214,10 +214,10 @@ func cliGateStatus(labels []string) string {
 	var required []string
 	for _, l := range labels {
 		if strings.HasPrefix(l, "require-review-") {
-			required = append(required, strings.TrimPrefix(l, "require-review-"))
+			required = append(required, strings.TrimPrefix(l, "require-"))
 		}
 		if strings.HasPrefix(l, "approved-review-") {
-			approved[strings.TrimPrefix(l, "approved-review-")] = true
+			approved[strings.TrimPrefix(l, "approved-")] = true
 		}
 	}
 	if len(required) == 0 {
@@ -225,10 +225,11 @@ func cliGateStatus(labels []string) string {
 	}
 	var parts []string
 	for _, r := range required {
+		display := strings.ReplaceAll(r, "-", " ")
 		if approved[r] {
-			parts = append(parts, "☑ "+r)
+			parts = append(parts, "☑ "+display)
 		} else {
-			parts = append(parts, "☐ "+r)
+			parts = append(parts, "☐ "+display)
 		}
 	}
 	return strings.Join(parts, "  ")
