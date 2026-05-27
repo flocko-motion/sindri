@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ var (
 	createTitle string
 	createBody  string
 	createBase  string
+	createTask  string
 )
 
 var prCreateCmd = &cobra.Command{
@@ -58,8 +60,10 @@ var prCreateCmd = &cobra.Command{
 			title = branch
 		}
 
+		prID := prIDFromTask(createTask, title, branch)
+
 		pr := &store.PR{
-			ID:        "pr-" + branch,
+			ID:        prID,
 			Branch:    branch,
 			Base:      base,
 			Status:    "open",
@@ -116,6 +120,20 @@ func init() {
 	prCreateCmd.Flags().StringVarP(&createTitle, "title", "t", "", "PR title (defaults to branch name)")
 	prCreateCmd.Flags().StringVarP(&createBody, "body", "b", "", "PR body")
 	prCreateCmd.Flags().StringVar(&createBase, "base", "", "Base branch (default: GH_LOCAL_BASE or main)")
+	prCreateCmd.Flags().StringVar(&createTask, "task", "", "Task ID for unique PR naming (e.g. td-8a5b6d)")
+}
+
+var taskIDPattern = regexp.MustCompile(`\(?(td-[0-9a-f]+)\)?`)
+
+// prIDFromTask derives a PR ID from --task flag, title, or branch name.
+func prIDFromTask(task, title, branch string) string {
+	if task != "" {
+		return "pr-" + task
+	}
+	if m := taskIDPattern.FindStringSubmatch(title); len(m) > 1 {
+		return "pr-" + m[1]
+	}
+	return "pr-" + branch
 }
 
 func currentBranch() (string, error) {
