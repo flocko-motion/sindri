@@ -63,12 +63,20 @@ func newTaskCmd() *cobra.Command {
 	}
 	commentCmd.Flags().StringVarP(&commentMsg, "message", "m", "", "Comment text")
 
-	taskCmd.AddCommand(
-		&cobra.Command{
-			Use:   "list",
-			Short: "List all tasks with PRs and workers",
-			RunE:  runTaskList,
+	var taskListAll, taskListClosed, taskListOpen bool
+	listCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List tasks (hides closed by default)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTaskList(cmd, args, taskListAll, taskListOpen, taskListClosed)
 		},
+	}
+	listCmd.Flags().BoolVar(&taskListAll, "all", false, "Show all tasks including closed")
+	listCmd.Flags().BoolVar(&taskListClosed, "closed", false, "Show closed tasks")
+	listCmd.Flags().BoolVar(&taskListOpen, "open", false, "Show only open tasks")
+
+	taskCmd.AddCommand(
+		listCmd,
 		&cobra.Command{
 			Use:   "view <id>",
 			Short: "View task details",
@@ -81,7 +89,7 @@ func newTaskCmd() *cobra.Command {
 	return taskCmd
 }
 
-func runTaskList(cmd *cobra.Command, args []string) error {
+func runTaskList(cmd *cobra.Command, args []string, showAll, showOpen, showClosed bool) error {
 	projectRoot, err := worker.GitRoot()
 	if err != nil {
 		return fmt.Errorf("not in a git repo: %w", err)
@@ -91,6 +99,30 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	if !showAll {
+		filtered := tasks[:0]
+		for _, t := range tasks {
+			isClosed := t.Status == "closed" || t.Status == "approved" || t.Status == "merged"
+			if showOpen && showClosed {
+				filtered = append(filtered, t)
+			} else if showOpen {
+				if !isClosed {
+					filtered = append(filtered, t)
+				}
+			} else if showClosed {
+				if isClosed {
+					filtered = append(filtered, t)
+				}
+			} else {
+				if !isClosed {
+					filtered = append(filtered, t)
+				}
+			}
+		}
+		tasks = filtered
+	}
+
 	if len(tasks) == 0 {
 		fmt.Println("No tasks found.")
 		return nil
