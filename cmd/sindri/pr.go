@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/flo-at/sindri/internal/ghlocal/store"
+	"github.com/flo-at/sindri/internal/worker"
 	"github.com/spf13/cobra"
 )
 
@@ -151,6 +152,52 @@ func newPrCmd() *cobra.Command {
 						fmt.Printf("Rejected task %s\n", taskID)
 					}
 				}
+				return nil
+			},
+		},
+	)
+
+	prCmd.AddCommand(
+		&cobra.Command{
+			Use:   "try <id>",
+			Short: "Check out a PR branch in the review worktree and build",
+			Args:  cobra.ExactArgs(1),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				pr, err := store.Read(args[0])
+				if err != nil {
+					return err
+				}
+
+				projectRoot, err := worker.GitRoot()
+				if err != nil {
+					return err
+				}
+
+				wtPath := projectRoot + "/.worktrees/review"
+				if _, err := os.Stat(wtPath); os.IsNotExist(err) {
+					fmt.Fprintf(os.Stderr, "Creating review worktree...\n")
+					out, err := exec.Command("git", "-C", projectRoot, "worktree", "add", wtPath, "HEAD", "--detach").CombinedOutput()
+					if err != nil {
+						return fmt.Errorf("worktree add failed: %s", strings.TrimSpace(string(out)))
+					}
+				}
+
+				fmt.Fprintf(os.Stderr, "Checking out %s...\n", pr.Branch)
+				if out, err := exec.Command("git", "-C", wtPath, "checkout", pr.Branch).CombinedOutput(); err != nil {
+					return fmt.Errorf("checkout failed: %s", strings.TrimSpace(string(out)))
+				}
+
+				fmt.Fprintf(os.Stderr, "Building in %s...\n", wtPath)
+				build := exec.Command("make")
+				build.Dir = wtPath
+				build.Stdout = os.Stdout
+				build.Stderr = os.Stderr
+				if err := build.Run(); err != nil {
+					return fmt.Errorf("build failed: %w", err)
+				}
+
+				fmt.Printf("\nReady to test: %s\n", wtPath)
+				fmt.Printf("Binaries: %s/bin/\n", wtPath)
 				return nil
 			},
 		},
