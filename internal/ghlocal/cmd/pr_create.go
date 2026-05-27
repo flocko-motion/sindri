@@ -75,6 +75,17 @@ var prCreateCmd = &cobra.Command{
 
 		fmt.Printf("[sindri local git] PR created: %s (%s → %s)\n", pr.ID, branch, base)
 		fmt.Printf("[sindri local git] Rebased onto %s.\n", base)
+		fmt.Println()
+		fmt.Println("╔══════════════════════════════════════════════════════════╗")
+		fmt.Println("║  STOP — YOUR WORK IS DONE                              ║")
+		fmt.Println("║                                                         ║")
+		fmt.Println("║  1. Do NOT merge this PR — the reviewer will merge it   ║")
+		fmt.Println("║  2. Do NOT approve your own PR                          ║")
+		fmt.Println("║  3. Run: td handoff <task-id> --done \"what you did\"     ║")
+		fmt.Println("║  4. Run: td review <task-id>                            ║")
+		fmt.Println("║  5. STOP. Wait for the reviewer.                        ║")
+		fmt.Println("╚══════════════════════════════════════════════════════════╝")
+		fmt.Println()
 		fmt.Printf("[sindri local git] Waiting for human review...\n")
 
 		// Poll PR status until approved or rejected
