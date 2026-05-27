@@ -390,17 +390,32 @@ func (m Model) viewList() string {
 
 	var listContent string
 	var header string
+	var cursorLine int
 	switch m.leftView {
 	case viewBacklog:
 		header = "Tasks"
 		listContent = renderBacklogList(m.backlogRows, m.listCursor, true)
+		cursorLine = m.listCursor
 	case viewWorkers:
 		header = "Workers"
 		listContent = renderWorkersList(m.workers, m.workerCursor, true)
+		cursorLine = m.workerCursor
 	}
 	m.vpList.SetContent(listContent)
 
-	col := renderColumn(header, m.vpList.View(), "", m.width, contentHeight, true)
+	if cursorLine < m.vpList.YOffset {
+		m.vpList.SetYOffset(cursorLine)
+	} else if cursorLine >= m.vpList.YOffset+m.vpList.Height {
+		m.vpList.SetYOffset(cursorLine - m.vpList.Height + 1)
+	}
+
+	scrollStatus := ""
+	if m.vpList.TotalLineCount() > m.vpList.Height {
+		pct := int(m.vpList.ScrollPercent() * 100)
+		scrollStatus = dimStyle.Render(fmt.Sprintf(" %d%% (%d/%d)", pct, m.vpList.YOffset+m.vpList.Height, m.vpList.TotalLineCount()))
+	}
+
+	col := renderColumn(header, m.vpList.View(), scrollStatus, m.width, contentHeight, true)
 
 	notifyBar := m.notify.render(m.width)
 	return titleBar + "\n" + col + "\n" + notifyBar
