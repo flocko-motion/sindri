@@ -95,8 +95,13 @@ func (m createTaskModel) Update(msg tea.Msg) (createTaskModel, tea.Cmd) {
 				}
 				return m, nil
 			}
-			if strings.TrimSpace(m.titleInput.Value()) == "" {
+			title := strings.TrimSpace(m.titleInput.Value())
+			if title == "" {
 				m.err = fmt.Errorf("title is required")
+				return m, nil
+			}
+			if len(title) < 15 {
+				m.err = fmt.Errorf("title too short (min 15 chars, got %d)", len(title))
 				return m, nil
 			}
 			return m, m.submit()
