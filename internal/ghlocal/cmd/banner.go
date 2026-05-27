@@ -36,7 +36,10 @@ func baseBranch() string {
 		return b
 	}
 	if out, err := exec.Command("git", "-C", "/repo", "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
-		return strings.TrimSpace(string(out))
+		b := strings.TrimSpace(string(out))
+		if b != "" && b != "HEAD" {
+			return b
+		}
 	}
 	return "master"
 }
