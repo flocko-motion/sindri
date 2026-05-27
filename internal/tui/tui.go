@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -137,8 +138,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) resizeViewports() {
 	contentHeight := m.height - 3
-	// Border takes 2 lines (top + bottom)
-	innerH := contentHeight - 2
+	// Border (2) + header with padding (2) = 4 lines overhead per column
+	innerH := contentHeight - 4
 	if innerH < 1 {
 		innerH = 1
 	}
@@ -151,7 +152,11 @@ func (m *Model) resizeViewports() {
 	m.vpWorkers.Width = midW - 4
 	m.vpWorkers.Height = innerH
 	m.vpDetail.Width = rightW - 4
-	m.vpDetail.Height = innerH
+	// Detail gets 1 less for scroll status line
+	m.vpDetail.Height = innerH - 1
+	if m.vpDetail.Height < 1 {
+		m.vpDetail.Height = 1
+	}
 }
 
 func (m *Model) moveCursor(delta int) {
@@ -265,21 +270,32 @@ func (m Model) View() string {
 	m.vpBacklog.SetContent(renderBacklogContent(m.tasks, m.prs, m.taskCursor, m.prCursor, m.backlogPanel, m.activeCol == colBacklog))
 	m.vpWorkers.SetContent(renderWorkersContent(m.workers, m.workerCursor, m.activeCol == colWorkers))
 
+	// Build detail scroll status
+	detailContent := m.vpDetail.View()
+	scrollStatus := ""
+	if m.vpDetail.TotalLineCount() > m.vpDetail.Height {
+		pct := int(m.vpDetail.ScrollPercent() * 100)
+		scrollStatus = dimStyle.Render(fmt.Sprintf(" %d%% (%d/%d) J/K:scroll", pct, m.vpDetail.YOffset+m.vpDetail.Height, m.vpDetail.TotalLineCount()))
+	}
+
 	// Render columns: border wraps viewport
-	left := renderColumn("Backlog", m.vpBacklog.View(), leftW, contentHeight, m.activeCol == colBacklog)
-	mid := renderColumn("Workers", m.vpWorkers.View(), midW, contentHeight, m.activeCol == colWorkers)
-	right := renderColumn("Detail", m.vpDetail.View(), rightW, contentHeight, false)
+	left := renderColumn("Backlog", m.vpBacklog.View(), "", leftW, contentHeight, m.activeCol == colBacklog)
+	mid := renderColumn("Workers", m.vpWorkers.View(), "", midW, contentHeight, m.activeCol == colWorkers)
+	right := renderColumn("Detail", detailContent, scrollStatus, rightW, contentHeight, false)
 
 	columns := lipgloss.JoinHorizontal(lipgloss.Top, left, mid, right)
 	return titleBar + "\n" + columns
 }
 
-func renderColumn(header, content string, width, height int, active bool) string {
+func renderColumn(header, content, footer string, width, height int, active bool) string {
 	style := columnStyle.Width(width).Height(height)
 	if active {
 		style = activeColumnStyle.Width(width).Height(height)
 	}
 	full := headerStyle.Render(header) + "\n" + content
+	if footer != "" {
+		full += "\n" + footer
+	}
 	return style.Render(full)
 }
 
