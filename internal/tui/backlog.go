@@ -42,9 +42,9 @@ func buildBacklogRows(tasks []taskItem, prs []prItem, workersByTask map[string]s
 		}
 		line := fmt.Sprintf("%s  %s  %s  %s",
 			dimStyle.Render(t.Priority),
+			ts,
 			status,
 			title,
-			ts,
 		)
 		rows = append(rows, backlogRow{taskIdx: ti, display: line})
 

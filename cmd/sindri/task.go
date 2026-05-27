@@ -93,19 +93,19 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 		if ts, err := time.Parse(time.RFC3339Nano, t.UpdatedAt); err == nil {
 			updated = ts.Local().Format("06-01-02 15:04")
 		}
-		rows = append(rows, []string{t.Priority, status, t.Title, updated})
+		rows = append(rows, []string{t.Priority, updated, status, t.Title})
 
 		for _, pr := range prByTask[t.ID] {
-			rows = append(rows, []string{"", "", fmt.Sprintf("  └ %s [%s]", pr.ID, pr.Status), ""})
+			rows = append(rows, []string{"", "", "", fmt.Sprintf("  └ %s [%s]", pr.ID, pr.Status)})
 		}
 
 		if gates := cliGateStatus(t.Labels); gates != "" {
-			rows = append(rows, []string{"", "", "  " + gates, ""})
+			rows = append(rows, []string{"", "", "", "  " + gates})
 		}
 	}
 
 	tbl := table.New().
-		Headers("PRIO", "STATUS", "TITLE", "UPDATED").
+		Headers("PRIO", "UPDATED", "STATUS", "TITLE").
 		Rows(rows...).
 		BorderStyle(dim).
 		StyleFunc(func(row, col int) lipgloss.Style {
