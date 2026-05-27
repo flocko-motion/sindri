@@ -1,9 +1,9 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/flo-at/sindri/internal/worker"
 )
 
@@ -20,32 +20,68 @@ type detailState struct {
 	kind    detailKind
 	title   string
 	content string
+	taskID  string
+	prIDs   []string
+}
+
+var (
+	sectionHeaderStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.AdaptiveColor{Light: "#43BF6D", Dark: "#73F59F"}).
+				PaddingLeft(1)
+
+	sectionBorder = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.AdaptiveColor{Light: "#D9DCCF", Dark: "#383838"}).
+			Padding(0, 1)
+
+	labelStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.AdaptiveColor{Light: "#A49FA5", Dark: "#777777"}).
+			Width(12)
+
+	valueStyle = lipgloss.NewStyle()
+)
+
+func renderSection(title, body string, width int) string {
+	header := sectionHeaderStyle.Render("── " + title + " ──")
+	content := sectionBorder.Width(width - 4).Render(body)
+	return header + "\n" + content
+}
+
+func renderField(label, value string) string {
+	return labelStyle.Render(label+":") + " " + valueStyle.Render(value)
 }
 
 func taskDetail(t taskItem, prs []prItem, workers []worker.Worker, projectRoot string) detailState {
-	var b strings.Builder
+	var sections []string
+	width := 80
 
-	b.WriteString(fetchTaskDetail(projectRoot, t.ID))
+	// Metadata section
+	var meta strings.Builder
+	meta.WriteString(renderField("ID", t.ID) + "\n")
+	meta.WriteString(renderField("Status", statusStyle(t.Status)) + "\n")
+	meta.WriteString(renderField("Type", t.Type) + "\n")
+	meta.WriteString(renderField("Priority", t.Priority) + "\n")
+	if !t.CreatedAt.IsZero() {
+		meta.WriteString(renderField("Created", t.CreatedAt.Local().Format("2006-01-02 15:04")) + "\n")
+	}
+	if !t.UpdatedAt.IsZero() {
+		meta.WriteString(renderField("Updated", t.UpdatedAt.Local().Format("2006-01-02 15:04")))
+	}
+	sections = append(sections, renderSection("Metadata", meta.String(), width))
 
-	comments := fetchTaskComments(projectRoot, t.ID)
-	if comments != "" && comments != "No comments" {
-		b.WriteString("\n\n── Comments ─────────────────────────\n")
-		b.WriteString(comments)
+	// Description section
+	desc := fetchTaskDetail(projectRoot, t.ID)
+	if desc != "" {
+		sections = append(sections, renderSection("Description", desc, width))
 	}
 
-	var taskPRs []prItem
-	for _, pr := range prs {
-		if extractTaskIDFromTitle(pr.Title) == t.ID {
-			taskPRs = append(taskPRs, pr)
-		}
-	}
-	if len(taskPRs) > 0 {
-		b.WriteString("\n\n── Associated PRs ───────────────────\n")
-		for _, pr := range taskPRs {
-			fmt.Fprintf(&b, "%s  %s  %s → %s\n", pr.ID, statusStyle(pr.Status), pr.Branch, pr.Base)
-		}
+	// Review gates section
+	if gates := renderDetailGates(t.Labels); gates != "" {
+		sections = append(sections, renderSection("Review Gates", gates, width))
 	}
 
+	// Worker section
 	var assignedWorker string
 	for _, wk := range workers {
 		if wk.Task != "" {
@@ -57,41 +93,119 @@ func taskDetail(t taskItem, prs []prItem, workers []worker.Worker, projectRoot s
 		}
 	}
 	if assignedWorker != "" {
-		b.WriteString("\n── Worker ───────────────────────────\n")
-		fmt.Fprintf(&b, "Assigned to: %s\n", assignedWorker)
+		sections = append(sections, renderSection("Worker", renderField("Assigned to", assignedWorker), width))
 	}
 
-	return detailState{kind: detailTask, title: t.ID + ": " + t.Title, content: b.String()}
+	// Associated PRs section
+	var taskPRs []prItem
+	var prIDs []string
+	for _, pr := range prs {
+		if extractTaskIDFromTitle(pr.Title) == t.ID {
+			taskPRs = append(taskPRs, pr)
+			prIDs = append(prIDs, pr.ID)
+		}
+	}
+	if len(taskPRs) > 0 {
+		var prContent strings.Builder
+		for i, pr := range taskPRs {
+			if i > 0 {
+				prContent.WriteByte('\n')
+			}
+			prContent.WriteString(renderField("PR", pr.ID) + "\n")
+			prContent.WriteString(renderField("Status", statusStyle(pr.Status)) + "\n")
+			prContent.WriteString(renderField("Branch", pr.Branch+" → "+pr.Base))
+		}
+		sections = append(sections, renderSection("Pull Requests", prContent.String(), width))
+	}
+
+	// Comments section
+	comments := fetchTaskComments(projectRoot, t.ID)
+	if comments != "" && comments != "No comments" {
+		sections = append(sections, renderSection("Comments", comments, width))
+	}
+
+	return detailState{
+		kind:    detailTask,
+		title:   t.ID + ": " + t.Title,
+		content: strings.Join(sections, "\n\n"),
+		taskID:  t.ID,
+		prIDs:   prIDs,
+	}
+}
+
+func renderDetailGates(labels []string) string {
+	approved := make(map[string]bool)
+	var required []string
+	for _, l := range labels {
+		if strings.HasPrefix(l, "require-review-") {
+			required = append(required, strings.TrimPrefix(l, "require-"))
+		}
+		if strings.HasPrefix(l, "approved-review-") {
+			approved[strings.TrimPrefix(l, "approved-")] = true
+		}
+	}
+	if len(required) == 0 {
+		return ""
+	}
+	var lines []string
+	for _, r := range required {
+		display := strings.ReplaceAll(r, "-", " ")
+		if approved[r] {
+			lines = append(lines, "  ☑ "+display)
+		} else {
+			lines = append(lines, "  ☐ "+display)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func prDetail(pr prItem) detailState {
-	var b strings.Builder
-	fmt.Fprintf(&b, "PR:     %s\n", pr.ID)
-	fmt.Fprintf(&b, "Title:  %s\n", pr.Title)
-	fmt.Fprintf(&b, "Branch: %s → %s\n", pr.Branch, pr.Base)
-	fmt.Fprintf(&b, "Status: %s\n", statusStyle(pr.Status))
-	return detailState{kind: detailPR, title: pr.ID, content: b.String()}
+	var sections []string
+	width := 80
+
+	var meta strings.Builder
+	meta.WriteString(renderField("PR", pr.ID) + "\n")
+	meta.WriteString(renderField("Title", pr.Title) + "\n")
+	meta.WriteString(renderField("Branch", pr.Branch+" → "+pr.Base) + "\n")
+	meta.WriteString(renderField("Status", statusStyle(pr.Status)))
+	sections = append(sections, renderSection("PR Details", meta.String(), width))
+
+	return detailState{
+		kind:    detailPR,
+		title:   pr.ID,
+		content: strings.Join(sections, "\n\n"),
+		prIDs:   []string{pr.ID},
+	}
 }
 
 func workerDetail(wk worker.Worker) detailState {
-	var b strings.Builder
-	fmt.Fprintf(&b, "Name:      %s\n", wk.Name)
-	fmt.Fprintf(&b, "Role:      %s\n", wk.Role)
-	fmt.Fprintf(&b, "Status:    %s\n", statusStyle(wk.Status))
+	var sections []string
+	width := 80
+
+	var meta strings.Builder
+	meta.WriteString(renderField("Name", wk.Name) + "\n")
+	meta.WriteString(renderField("Role", wk.Role) + "\n")
+	meta.WriteString(renderField("Status", statusStyle(wk.Status)))
 	if wk.Container != "" {
-		fmt.Fprintf(&b, "Container: %s\n", wk.Container)
+		meta.WriteString("\n" + renderField("Container", wk.Container))
 	}
 	if wk.Path != "" {
-		fmt.Fprintf(&b, "Path:      %s\n", wk.Path)
+		meta.WriteString("\n" + renderField("Path", wk.Path))
 	}
 	if wk.Task != "" {
-		fmt.Fprintf(&b, "Task:      %s\n", wk.Task)
+		meta.WriteString("\n" + renderField("Task", wk.Task))
 	}
 	if wk.PR != "" {
-		fmt.Fprintf(&b, "PR:        %s\n", wk.PR)
+		meta.WriteString("\n" + renderField("PR", wk.PR))
 	}
 	if wk.Branch != "" {
-		fmt.Fprintf(&b, "Branch:    %s\n", wk.Branch)
+		meta.WriteString("\n" + renderField("Branch", wk.Branch))
 	}
-	return detailState{kind: detailWorker, title: wk.Name, content: b.String()}
+	sections = append(sections, renderSection("Worker Details", meta.String(), width))
+
+	return detailState{
+		kind:    detailWorker,
+		title:   wk.Name,
+		content: strings.Join(sections, "\n\n"),
+	}
 }
