@@ -43,7 +43,11 @@ func newTaskCmd() *cobra.Command {
 			if msg == "" {
 				fmt.Print("Comment: ")
 				reader := bufio.NewReader(os.Stdin)
-				msg, _ = reader.ReadString('\n')
+				var readErr error
+				msg, readErr = reader.ReadString('\n')
+				if readErr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: reading input: %v\n", readErr)
+				}
 				msg = strings.TrimSpace(msg)
 			}
 			if msg == "" {

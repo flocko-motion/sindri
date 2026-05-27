@@ -76,14 +76,20 @@ func FindAvailable(projectRoot string) (name string, created bool, err error) {
 // New creates a git worktree with the given name under .worktrees/.
 func New(projectRoot, name string) error {
 	wtPath := projectRoot + "/.worktrees/" + name
-	_ = os.MkdirAll(projectRoot+"/.worktrees", 0755)
+	if err := os.MkdirAll(projectRoot+"/.worktrees", 0755); err != nil {
+		return fmt.Errorf("create .worktrees dir: %w", err)
+	}
 
 	// Clean up stale directory if git doesn't know about it
 	if _, err := os.Stat(wtPath); err == nil {
-		_ = exec.Command("git", "-C", projectRoot, "worktree", "prune").Run()
+		if out, err := exec.Command("git", "-C", projectRoot, "worktree", "prune").CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: worktree prune failed: %s\n", strings.TrimSpace(string(out)))
+		}
 		// If directory still exists after prune, remove it
 		if _, err := os.Stat(wtPath); err == nil {
-			_ = os.RemoveAll(wtPath)
+			if err := os.RemoveAll(wtPath); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: removing stale worktree %s: %v\n", wtPath, err)
+			}
 		}
 	}
 
@@ -108,7 +114,9 @@ func Start(projectRoot, name string, opts StartOpts) error {
 	}
 
 	cName := "sindri-" + name
-	_ = exec.Command("podman", "rm", "-f", cName).Run()
+	if out, err := exec.Command("podman", "rm", "-f", cName).CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: podman rm -f %s: %s\n", cName, strings.TrimSpace(string(out)))
+	}
 
 	claudeHome, configPath := prepareClaudeHome(projectRoot, name)
 	base, err := BaseBranch(projectRoot)
@@ -145,7 +153,9 @@ func Start(projectRoot, name string, opts StartOpts) error {
 	hostGitDir := fmt.Sprintf("gitdir: %s/.git/worktrees/%s\n", projectRoot, name)
 	gitFile := wtPath + "/.git"
 	if info, err := os.Stat(gitFile); err == nil && !info.IsDir() {
-		_ = os.WriteFile(gitFile, []byte(hostGitDir), 0644)
+		if err := os.WriteFile(gitFile, []byte(hostGitDir), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: fix .git worktree pointer: %v\n", err)
+		}
 	}
 
 	// Detach at base branch tip so agent can create per-task branches.
@@ -165,7 +175,11 @@ func Start(projectRoot, name string, opts StartOpts) error {
 		"fi; "
 
 	// Restore host .git path after container exits
-	defer os.WriteFile(gitFile, []byte(hostGitDir), 0644)
+	defer func() {
+		if err := os.WriteFile(gitFile, []byte(hostGitDir), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: restore .git worktree pointer: %v\n", err)
+		}
+	}()
 
 	skill := opts.Skill
 	if skill == "" {
@@ -191,7 +205,9 @@ func Start(projectRoot, name string, opts StartOpts) error {
 // StartReviewer launches the reviewer container.
 func StartReviewer(projectRoot string, shell bool) error {
 	cName := "sindri-reviewer"
-	_ = exec.Command("podman", "rm", "-f", cName).Run()
+	if out, err := exec.Command("podman", "rm", "-f", cName).CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: podman rm -f %s: %s\n", cName, strings.TrimSpace(string(out)))
+	}
 
 	claudeHome, configPath := prepareClaudeHome(projectRoot, "reviewer")
 
@@ -247,7 +263,9 @@ func Stop(name string) error {
 		cName = "sindri-reviewer"
 	}
 	fmt.Fprintf(os.Stderr, "Stopping %s...\n", name)
-	_ = exec.Command("podman", "stop", "-t", "3", cName).Run()
+	if out, err := exec.Command("podman", "stop", "-t", "3", cName).CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: podman stop %s: %s\n", cName, strings.TrimSpace(string(out)))
+	}
 	out, err := exec.Command("podman", "rm", "-f", cName).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed: %s", strings.TrimSpace(string(out)))
@@ -265,8 +283,12 @@ func Reset(projectRoot string) (int, error) {
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "Stopping %s...\n", wk.Name)
-		_ = exec.Command("podman", "stop", "-t", "3", wk.Container).Run()
-		_ = exec.Command("podman", "rm", "-f", wk.Container).Run()
+		if out, err := exec.Command("podman", "stop", "-t", "3", wk.Container).CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: podman stop %s: %s\n", wk.Container, strings.TrimSpace(string(out)))
+		}
+		if out, err := exec.Command("podman", "rm", "-f", wk.Container).CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: podman rm -f %s: %s\n", wk.Container, strings.TrimSpace(string(out)))
+		}
 		stopped++
 	}
 	return stopped, nil
@@ -297,17 +319,23 @@ func findSindriGH() (string, error) {
 // prepareClaudeHome sets up the claude home directory with credentials and settings.
 func prepareClaudeHome(projectRoot, name string) (claudeHome, configPath string) {
 	claudeHome = projectRoot + "/.worktrees/.claude-home-" + name
-	_ = os.MkdirAll(claudeHome, 0755)
+	if err := os.MkdirAll(claudeHome, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: create claude home dir: %v\n", err)
+	}
 
 	homeDir, _ := os.UserHomeDir()
 	if data, err := os.ReadFile(homeDir + "/.claude/.credentials.json"); err == nil {
-		_ = os.WriteFile(claudeHome+"/.credentials.json", data, 0600)
+		if err := os.WriteFile(claudeHome+"/.credentials.json", data, 0600); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: write credentials: %v\n", err)
+		}
 	}
 
 	configPath = claudeHome + ".json"
 	configData := map[string]interface{}{}
 	if existing, err := os.ReadFile(configPath); err == nil {
-		_ = json.Unmarshal(existing, &configData)
+		if err := json.Unmarshal(existing, &configData); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: parse existing config %s: %v\n", configPath, err)
+		}
 	}
 	configData["hasCompletedOnboarding"] = true
 	configData["autoUpdates"] = false
@@ -317,11 +345,15 @@ func prepareClaudeHome(projectRoot, name string) (claudeHome, configPath string)
 	}
 	trustedDirs["/workspace"] = true
 	configData["trustedDirectories"] = trustedDirs
-	configJSON, _ := json.Marshal(configData)
-	_ = os.WriteFile(configPath, configJSON, 0644)
+	configJSON, err := json.Marshal(configData)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: marshal config: %v\n", err)
+	} else if err := os.WriteFile(configPath, configJSON, 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: write config %s: %v\n", configPath, err)
+	}
 
 	settingsPath := claudeHome + "/settings.json"
-	_ = os.WriteFile(settingsPath, []byte(`{
+	if err := os.WriteFile(settingsPath, []byte(`{
   "permissions": {
     "allow": [
       "Bash(*)",
@@ -341,7 +373,9 @@ func prepareClaudeHome(projectRoot, name string) (claudeHome, configPath string)
     "command": "cat /tmp/claude-status 2>/dev/null || echo 'idle'",
     "refreshInterval": 5
   }
-}`), 0644)
+}`), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: write settings %s: %v\n", settingsPath, err)
+	}
 
 	return claudeHome, configPath
 }
