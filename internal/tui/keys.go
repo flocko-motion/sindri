@@ -61,8 +61,8 @@ var keys = keyMap{
 		key.WithHelp("T", "tasks view"),
 	),
 	Workers: key.NewBinding(
-		key.WithKeys("w"),
-		key.WithHelp("w", "workers view"),
+		key.WithKeys("W"),
+		key.WithHelp("W", "workers view"),
 	),
 	NewTask: key.NewBinding(
 		key.WithKeys("n"),
