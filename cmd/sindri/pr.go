@@ -165,7 +165,7 @@ func newPrCmd() *cobra.Command {
 						return fmt.Errorf("missing reviews: %s", strings.Join(missing, ", "))
 					}
 				}
-				pr, err = store.Merge(args[0])
+				pr, err = store.Merge(id)
 				if err != nil {
 					return err
 				}
