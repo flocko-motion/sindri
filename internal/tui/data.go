@@ -45,7 +45,7 @@ func refreshData(projectRoot string) tea.Cmd {
 }
 
 func fetchTasks(projectRoot string) []taskItem {
-	out, err := exec.Command("td", "-w", projectRoot, "list", "--json", "--limit", "100").Output()
+	out, err := exec.Command("td", "-w", projectRoot, "list", "--json", "--limit", "100", "--all").Output()
 	if err != nil {
 		return nil
 	}
