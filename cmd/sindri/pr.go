@@ -98,8 +98,39 @@ func newPrCmd() *cobra.Command {
 	prListCmd.Flags().BoolVar(&prListAll, "all", false, "Show all PRs, not just open")
 	prCmd.AddCommand(prListCmd,
 		&cobra.Command{
+			Use:   "info [id]",
+			Short: "Short PR summary (defaults to selected)",
+			Args:  cobra.MaximumNArgs(1),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				id, err := resolveSelectedPR(args)
+				if err != nil {
+					return err
+				}
+				pr, err := store.Read(id)
+				if err != nil {
+					return err
+				}
+				fmt.Printf("%s [%s] %s → %s\n", pr.ID, pr.Status, pr.Branch, pr.Base)
+				fmt.Printf("%s\n", pr.Title)
+				if taskID := extractTaskID(pr.Title); taskID != "" {
+					tdCmd := exec.Command("td", "show", taskID, "--json")
+					tdCmd.Dir = tdWorkDir()
+					if out, err := tdCmd.Output(); err == nil {
+						var task struct {
+							Title  string `json:"title"`
+							Status string `json:"status"`
+						}
+						if json.Unmarshal(out, &task) == nil {
+							fmt.Printf("Task: %s [%s] %s\n", taskID, task.Status, task.Title)
+						}
+					}
+				}
+				return nil
+			},
+		},
+		&cobra.Command{
 			Use:   "view [id]",
-			Short: "View a PR (defaults to selected)",
+			Short: "View a PR with full diff (defaults to selected)",
 			Args:  cobra.MaximumNArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				id, err := resolveSelectedPR(args)
