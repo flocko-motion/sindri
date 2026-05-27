@@ -30,7 +30,7 @@ func buildBacklogRows(tasks []taskItem, prs []prItem, workersByTask map[string]s
 	var rows []backlogRow
 	for ti, t := range tasks {
 		status := statusStyle(t.Status)
-		if w, ok := workersByTask[t.ID]; ok && t.Status == "in_progress" {
+		if w, ok := workersByTask[t.ID]; ok {
 			status = statusRunning.Render("🔨 " + w)
 		}
 		title := t.Title
@@ -42,7 +42,7 @@ func buildBacklogRows(tasks []taskItem, prs []prItem, workersByTask map[string]s
 			tsStr = t.UpdatedAt.Local().Format("06-01-02 15:04")
 		}
 		statusText := t.Status
-		if w, ok := workersByTask[t.ID]; ok && t.Status == "in_progress" {
+		if w, ok := workersByTask[t.ID]; ok {
 			statusText = "🔨 " + w
 		}
 		plain := fmt.Sprintf("%-9s %s  %s  %s  %s", t.ID, t.Priority, tsStr, statusText, t.Title)

@@ -151,7 +151,7 @@ func runTaskList(cmd *cobra.Command, args []string, showAll, showOpen, showClose
 	rows := make([][]string, 0)
 	for _, t := range tasks {
 		status := t.Status
-		if w, ok := workersByTask[t.ID]; ok && t.Status == "in_progress" {
+		if w, ok := workersByTask[t.ID]; ok {
 			status = "🔨 " + w
 		}
 		updated := ""
