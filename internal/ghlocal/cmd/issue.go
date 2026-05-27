@@ -120,23 +120,36 @@ var issueNextCmd = &cobra.Command{
 			return fmt.Errorf("you are on branch %q — run 'gh done' first to return to %s", branch, base)
 		}
 
-		out, err := td("list", "--json", "--limit", "1")
+		out, err := td("next")
 		if err != nil {
 			fmt.Println("No tasks available.")
 			return nil
 		}
 
-		var tasks []struct {
-			ID       string `json:"id"`
-			Title    string `json:"title"`
-			Type     string `json:"type"`
-			Priority string `json:"priority"`
-		}
-		if err := json.Unmarshal([]byte(out), &tasks); err != nil || len(tasks) == 0 {
+		// Parse td next output: "td-abc123  [P0]  Title  type  [status]"
+		fields := strings.Fields(out)
+		if len(fields) < 1 || !strings.HasPrefix(fields[0], "td-") {
 			fmt.Println("No tasks available.")
 			return nil
 		}
-		task := tasks[0]
+
+		var task struct {
+			ID    string
+			Title string
+		}
+		task.ID = fields[0]
+		// Extract title: everything between priority and type/status fields
+		var titleParts []string
+		for _, f := range fields[2:] {
+			if f == "task" || f == "bug" || f == "feature" || f == "chore" || f == "epic" {
+				break
+			}
+			if strings.HasPrefix(f, "[") && strings.HasSuffix(f, "]") {
+				continue
+			}
+			titleParts = append(titleParts, f)
+		}
+		task.Title = strings.Join(titleParts, " ")
 
 		if out, err := td("start", task.ID); err != nil {
 			return fmt.Errorf("td start failed: %s", out)
