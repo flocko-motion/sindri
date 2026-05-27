@@ -12,8 +12,11 @@ type keyMap struct {
 	DetailDown key.Binding
 	NavLeft    key.Binding
 	NavRight   key.Binding
-	NavUp      key.Binding
-	NavDown    key.Binding
+	Backlog    key.Binding
+	Workers    key.Binding
+	NewTask    key.Binding
+	Approve    key.Binding
+	Merge      key.Binding
 }
 
 var keys = keyMap{
@@ -47,18 +50,30 @@ var keys = keyMap{
 	),
 	NavLeft: key.NewBinding(
 		key.WithKeys("ctrl+h"),
-		key.WithHelp("C-h", "col left"),
+		key.WithHelp("C-h", "focus left"),
 	),
 	NavRight: key.NewBinding(
 		key.WithKeys("ctrl+l"),
-		key.WithHelp("C-l", "col right"),
+		key.WithHelp("C-l", "focus right"),
 	),
-	NavUp: key.NewBinding(
-		key.WithKeys("ctrl+k"),
-		key.WithHelp("C-k", "panel up"),
+	Backlog: key.NewBinding(
+		key.WithKeys("b"),
+		key.WithHelp("b", "backlog view"),
 	),
-	NavDown: key.NewBinding(
-		key.WithKeys("ctrl+j"),
-		key.WithHelp("C-j", "panel down"),
+	Workers: key.NewBinding(
+		key.WithKeys("w"),
+		key.WithHelp("w", "workers view"),
+	),
+	NewTask: key.NewBinding(
+		key.WithKeys("n"),
+		key.WithHelp("n", "new task"),
+	),
+	Approve: key.NewBinding(
+		key.WithKeys("a"),
+		key.WithHelp("a", "approve PR"),
+	),
+	Merge: key.NewBinding(
+		key.WithKeys("m"),
+		key.WithHelp("m", "merge PR"),
 	),
 }

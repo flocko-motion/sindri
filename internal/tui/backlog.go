@@ -2,23 +2,78 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
 
-func formatTaskLine(t taskItem) string {
-	status := statusStyle(t.Status)
-	prio := dimStyle.Render(t.Priority)
-	return fmt.Sprintf("%s %s %s", prio, status, t.Title)
+type backlogRow struct {
+	isPR     bool
+	taskIdx  int
+	prIdx    int
+	display  string
 }
 
-func formatPRLine(pr prItem) string {
-	status := statusStyle(pr.Status)
-	title := pr.Title
-	if title == "" {
-		title = pr.ID
+func buildBacklogRows(tasks []taskItem, prs []prItem, workersByTask map[string]string) []backlogRow {
+	prByTask := make(map[string][]int)
+	var orphanPRs []int
+	for i, pr := range prs {
+		taskID := extractTaskIDFromTitle(pr.Title)
+		if taskID != "" {
+			prByTask[taskID] = append(prByTask[taskID], i)
+		} else {
+			orphanPRs = append(orphanPRs, i)
+		}
 	}
-	return fmt.Sprintf("%s %s", status, title)
+
+	var rows []backlogRow
+	for ti, t := range tasks {
+		worker := ""
+		if w, ok := workersByTask[t.ID]; ok {
+			worker = dimStyle.Render(" 🔨 " + w)
+		}
+		line := fmt.Sprintf("%s  %s  %s%s",
+			dimStyle.Render(t.Priority),
+			statusStyle(t.Status),
+			t.Title,
+			worker,
+		)
+		rows = append(rows, backlogRow{taskIdx: ti, display: line})
+
+		for _, pi := range prByTask[t.ID] {
+			pr := prs[pi]
+			prLine := fmt.Sprintf("    └ %s [%s]", pr.ID, pr.Status)
+			rows = append(rows, backlogRow{isPR: true, prIdx: pi, display: prLine})
+		}
+	}
+
+	for _, pi := range orphanPRs {
+		pr := prs[pi]
+		prLine := fmt.Sprintf("%s  %s", statusStyle(pr.Status), pr.Title)
+		if pr.Title == "" {
+			prLine = fmt.Sprintf("%s  %s", statusStyle(pr.Status), pr.ID)
+		}
+		rows = append(rows, backlogRow{isPR: true, prIdx: pi, display: prLine})
+	}
+
+	return rows
+}
+
+func renderBacklogList(rows []backlogRow, cursor int, active bool) string {
+	var b strings.Builder
+	for i, row := range rows {
+		if active && i == cursor {
+			b.WriteString(selectedItemStyle.Render("> " + row.display))
+		} else {
+			b.WriteString("  " + row.display)
+		}
+		b.WriteByte('\n')
+	}
+	if len(rows) == 0 {
+		b.WriteString(dimStyle.Render("  No tasks or PRs"))
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
 
 func statusStyle(status string) string {
@@ -36,16 +91,11 @@ func statusStyle(status string) string {
 	}
 }
 
-func truncate(s string, max int) string {
-	runes := []rune(s)
-	if len(runes) <= max {
-		return s
+func extractTaskIDFromTitle(title string) string {
+	if m := taskIDRe.FindStringSubmatch(title); len(m) > 1 {
+		return m[1]
 	}
-	if max <= 3 {
-		return string(runes[:max])
-	}
-	return string(runes[:max-3]) + "..."
+	return ""
 }
 
-// unused but keep for lipgloss width calculations
-var _ = lipgloss.Width
+var _ = lipgloss.Width // keep import
