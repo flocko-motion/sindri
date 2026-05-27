@@ -91,6 +91,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.updateDetail()
 			}
+		case key.Matches(msg, keys.DetailUp):
+			m.detail.scrollUp()
+		case key.Matches(msg, keys.DetailDown):
+			contentHeight := m.height - 3
+			m.detail.scrollDown(contentHeight)
 		case key.Matches(msg, keys.Up):
 			m.moveCursor(-1)
 		case key.Matches(msg, keys.Down):
@@ -121,22 +126,12 @@ func (m *Model) moveCursor(delta int) {
 			if next >= 0 && next < len(m.tasks) {
 				m.taskCursor = next
 				m.updateDetail()
-			} else if delta > 0 {
-				contentHeight := m.height - 3
-				m.detail.scrollDown(contentHeight)
-			} else {
-				m.detail.scrollUp()
 			}
 		} else {
 			next := m.prCursor + delta
 			if next >= 0 && next < len(m.prs) {
 				m.prCursor = next
 				m.updateDetail()
-			} else if delta > 0 {
-				contentHeight := m.height - 3
-				m.detail.scrollDown(contentHeight)
-			} else {
-				m.detail.scrollUp()
 			}
 		}
 	case colWorkers:
@@ -144,11 +139,6 @@ func (m *Model) moveCursor(delta int) {
 		if next >= 0 && next < len(m.workers) {
 			m.workerCursor = next
 			m.updateDetail()
-		} else if delta > 0 {
-			contentHeight := m.height - 3
-			m.detail.scrollDown(contentHeight)
-		} else {
-			m.detail.scrollUp()
 		}
 	}
 }
@@ -196,7 +186,7 @@ func (m Model) View() string {
 	}
 
 	title := titleStyle.Render("Sindri — AI Agent Orchestrator")
-	help := dimStyle.Render("tab:column  g:panel  j/k:navigate  r:refresh  q:quit")
+	help := dimStyle.Render("tab:column  g:panel  j/k:list  J/K:detail  r:refresh  q:quit")
 	titleBar := lipgloss.JoinHorizontal(lipgloss.Top,
 		title,
 		lipgloss.NewStyle().Width(m.width-lipgloss.Width(title)-lipgloss.Width(help)).Render(""),

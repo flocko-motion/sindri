@@ -11,6 +11,8 @@ type keyMap struct {
 	Enter       key.Binding
 	Refresh     key.Binding
 	PanelSwitch key.Binding
+	DetailUp    key.Binding
+	DetailDown  key.Binding
 }
 
 var keys = keyMap{
@@ -45,5 +47,13 @@ var keys = keyMap{
 	PanelSwitch: key.NewBinding(
 		key.WithKeys("g"),
 		key.WithHelp("g", "switch panel"),
+	),
+	DetailUp: key.NewBinding(
+		key.WithKeys("K", "shift+up"),
+		key.WithHelp("Shift+K", "scroll detail up"),
+	),
+	DetailDown: key.NewBinding(
+		key.WithKeys("J", "shift+down"),
+		key.WithHelp("Shift+J", "scroll detail down"),
 	),
 }

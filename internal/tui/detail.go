@@ -17,60 +17,72 @@ const (
 )
 
 type detailState struct {
-	kind       detailKind
-	content    string
-	scroll     int
-	totalLines int
+	kind    detailKind
+	content string
+	scroll  int
 }
 
 func renderDetail(d detailState, width, height int) string {
 	style := columnStyle.Width(width)
 
-	var b strings.Builder
-	b.WriteString(headerStyle.Render("Detail"))
-	b.WriteByte('\n')
-
-	// Reserve 2 lines for header and scroll indicator
-	visibleLines := height - 4
-	if visibleLines < 1 {
-		visibleLines = 1
+	// Hard budget: header takes 2 lines (title + blank), scroll indicator 1
+	maxContent := height - 3
+	if maxContent < 1 {
+		maxContent = 1
 	}
 
+	var out []string
+	out = append(out, headerStyle.Render("Detail"))
+
 	if d.kind == detailNone {
-		b.WriteString(dimStyle.Render("  Select an item to view details"))
-		b.WriteByte('\n')
+		out = append(out, dimStyle.Render("  Select an item to view details"))
 	} else {
 		lines := strings.Split(d.content, "\n")
-		end := d.scroll + visibleLines
-		if end > len(lines) {
-			end = len(lines)
-		}
 		start := d.scroll
 		if start > len(lines) {
 			start = len(lines)
 		}
-		for _, line := range lines[start:end] {
-			b.WriteString("  " + line + "\n")
-		}
-		if end < len(lines) {
-			b.WriteString(dimStyle.Render(fmt.Sprintf("  ↓ %d more lines", len(lines)-end)))
-			b.WriteByte('\n')
-		}
+
+		// Show scroll-up indicator if scrolled
 		if start > 0 {
-			// Prepend scroll-up indicator (already scrolled past header)
+			out = append(out, dimStyle.Render(fmt.Sprintf("  ↑ %d lines above", start)))
+			maxContent--
+		}
+
+		// Reserve 1 line for overflow indicator if needed
+		end := start + maxContent
+		hasMore := end < len(lines)
+		if hasMore {
+			end = start + maxContent - 1
+		}
+		if end > len(lines) {
+			end = len(lines)
+		}
+
+		for _, line := range lines[start:end] {
+			out = append(out, "  "+line)
+		}
+
+		if hasMore {
+			out = append(out, dimStyle.Render(fmt.Sprintf("  ↓ %d more (Shift+J/K)", len(lines)-end)))
 		}
 	}
 
-	return style.Height(height).Render(b.String())
+	// Hard clip to height — never emit more lines than the box can hold
+	if len(out) > height {
+		out = out[:height]
+	}
+
+	return style.Height(height).Render(strings.Join(out, "\n"))
 }
 
 func (d *detailState) scrollDown(height int) {
-	visibleLines := height - 4
-	if visibleLines < 1 {
-		visibleLines = 1
+	maxContent := height - 3
+	if maxContent < 1 {
+		maxContent = 1
 	}
 	lines := strings.Count(d.content, "\n") + 1
-	maxScroll := lines - visibleLines
+	maxScroll := lines - maxContent
 	if maxScroll < 0 {
 		maxScroll = 0
 	}
@@ -85,13 +97,8 @@ func (d *detailState) scrollUp() {
 	}
 }
 
-func (d *detailState) resetScroll() {
-	d.scroll = 0
-}
-
 func taskDetail(t taskItem, projectRoot string) detailState {
-	content := fetchTaskDetail(projectRoot, t.ID)
-	return detailState{kind: detailTask, content: content}
+	return detailState{kind: detailTask, content: fetchTaskDetail(projectRoot, t.ID)}
 }
 
 func prDetail(pr prItem) detailState {
