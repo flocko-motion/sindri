@@ -1,3 +1,9 @@
+// package: main (sindri) / pr
+// type:    command
+// job:     the `sindri pr` subcommands (list/info/view/next/try/approve/merge/
+//          reject/review), rendering PRs and tasks for the human reviewer.
+// limits:  no domain logic — gate/status rules (-> issue), styling (-> render),
+//          PR storage (-> ghlocal/store), task I/O (-> adapter/td).
 package main
 
 import (

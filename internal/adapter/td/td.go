@@ -1,8 +1,9 @@
-// Package td adapts the external `td` task CLI to sindri's domain types.
-// It owns every invocation of the td binary (fetch and mutate) and converts
-// td's JSON into issue.Task; callers work with domain types, never the CLI.
-// It does not assemble issues or render them — see internal/board and
-// internal/render.
+// package: td
+// type:    adapter (external tool)
+// job:     wraps the td task CLI — every td invocation (fetch + mutate) lives
+//          here, converting td JSON into issue.Task.
+// limits:  doesn't assemble issues (-> board) nor render them (-> render);
+//          knows nothing of openspec (-> adapter/spec).
 package td
 
 import (

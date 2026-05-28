@@ -1,14 +1,10 @@
-// Package issue is the headless domain model for sindri work items.
-//
-// A work item (Issue) is the union of an optional td task and an optional
-// openspec change. It models three shapes:
-//   - a task with no spec        (Task != nil, Spec == nil)
-//   - a task implementing a spec (Task != nil, Spec != nil)
-//   - a spec with no task yet    (Task == nil, Spec != nil)
-//
-// All label and state logic lives here — review gates, spec links, status
-// classification — with no dependency on any UI. Interfaces consume Issue and
-// render it; they do not reimplement this logic.
+// package: issue
+// type:    logic (bottom primitive)
+// job:     domain model for work items — Issue is the union of an optional td
+//          task and an optional openspec change (task-only / task+spec /
+//          spec-only), with all gate/spec/status label logic and Assemble.
+// limits:  imports nothing internal; doesn't fetch (-> adapter/td, adapter/spec),
+//          doesn't assemble from sources (-> board), doesn't render (-> render).
 package issue
 
 import (

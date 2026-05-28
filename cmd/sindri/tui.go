@@ -1,3 +1,7 @@
+// package: main (sindri) / tui
+// type:    command
+// job:     wires `sindri tui`, launching the Bubble Tea program.
+// limits:  the TUI itself lives in internal/tui; nothing here but wiring.
 package main
 
 import (

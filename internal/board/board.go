@@ -1,8 +1,10 @@
-// Package board is the data layer that assembles the unified work list both
-// the CLI and TUI render. It is the single refresh path: it fetches td tasks,
-// openspec changes, worker assignments, and PRs, then hands them to the pure
-// issue.Assemble. It sits above issue (the bottom primitive) and depends on
-// the subsystems issue must not.
+// package: board
+// type:    assembly
+// job:     the single refresh path — fetches td tasks, openspec changes, worker
+//          assignments, and PRs, then derives one []issue.Issue via the pure
+//          issue.Assemble. Both UIs call board.List.
+// limits:  no rendering (-> render) and no interface code (-> cmd/sindri,
+//          internal/tui); it only gathers and assembles.
 package board
 
 import (

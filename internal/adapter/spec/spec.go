@@ -1,10 +1,9 @@
-// Package spec adapts the external openspec CLI to sindri. It provides a
-// read-only view of a project's openspec/ directory (changes and specs) by
-// shelling out to `openspec list --json`.
-//
-// It only reads, for display in the work list; the spec workflow itself
-// (propose/apply/archive) is driven by the openspec CLI inside agent
-// containers, not here. Assembly into issues lives in internal/board.
+// package: spec
+// type:    adapter (external tool)
+// job:     wraps the openspec CLI — reads a project's changes/specs via
+//          `openspec list --json` for display in the work list.
+// limits:  read-only; the propose/apply/archive workflow runs via the openspec
+//          CLI in agent containers, not here. Doesn't assemble (-> board).
 package spec
 
 import (

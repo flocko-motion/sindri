@@ -1,3 +1,7 @@
+// package: main (sindri) / review
+// type:    command
+// job:     wires `sindri review`, launching the reviewer worker container.
+// limits:  container lifecycle lives in internal/worker; nothing here but wiring.
 package main
 
 import (

@@ -1,3 +1,7 @@
+// package: main (sindri) / lint
+// type:    command
+// job:     wires `sindri lint deadcode`.
+// limits:  the dead-code analysis lives in internal/lint; nothing here but wiring.
 package main
 
 import (

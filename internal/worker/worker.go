@@ -1,3 +1,9 @@
+// package: worker / worker
+// type:    adapter (podman + git worktrees)
+// job:     discovery/status — lists workers by joining git worktrees, podman
+//          containers, and each worktree's branch/task.
+// limits:  start/stop/create live in lifecycle.go (neighbour); task data comes
+//          from adapter/td, PRs from ghlocal/store.
 package worker
 
 import (

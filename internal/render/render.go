@@ -1,6 +1,9 @@
-// Package render maps issue/PR state to display styling. It is shared by the
-// CLI and the TUI so both color the same state the same way. It depends on the
-// headless issue model but on no specific interface (CLI or TUI).
+// package: render
+// type:    rendering
+// job:     maps issue/PR state to display styling (status colors, gate marks),
+//          shared by every interface so the same state looks the same.
+// limits:  no data logic (-> issue); no interface code (-> cmd/sindri,
+//          internal/tui). Depends on issue types only.
 package render
 
 import (

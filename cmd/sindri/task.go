@@ -1,3 +1,9 @@
+// package: main (sindri) / task
+// type:    command
+// job:     the `sindri task` subcommands (list/new/view/comment); renders
+//          board.List issues and creates/reads tasks via the td adapter.
+// limits:  no domain logic (-> issue/board), no styling rules (-> render),
+//          no direct td calls (-> adapter/td).
 package main
 
 import (

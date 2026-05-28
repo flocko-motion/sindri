@@ -1,3 +1,8 @@
+// package: main (sindri) / main
+// type:    entrypoint
+// job:     wires the host CLI's Cobra command tree (worker, tui, pr, review,
+//          task, lint) and dispatches.
+// limits:  no logic — each command delegates to board/issue, worker, ghlocal.
 package main
 
 import (

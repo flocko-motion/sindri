@@ -1,6 +1,8 @@
-// data.go — TUI data plumbing. Wires the Bubble Tea refresh cycle to the
-// headless board/td layers; holds no domain logic of its own (see
-// internal/board and internal/adapter/td).
+// package: tui / data
+// type:    ui
+// job:     TUI data plumbing — drives the Bubble Tea refresh from board.List
+//          and worker.List, and reads task detail/comments via adapter/td.
+// limits:  no domain logic (-> issue/board), no styling (-> render).
 package tui
 
 import (
