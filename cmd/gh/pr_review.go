@@ -1,4 +1,8 @@
-package cmd
+// package: gh / pr_review
+// type:    command
+// job:     `gh pr review` — approves or rejects a PR.
+// limits:  PR records live in internal/ghlocal/store.
+package main
 
 import (
 	"fmt"

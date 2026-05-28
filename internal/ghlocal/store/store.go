@@ -1,3 +1,9 @@
+// package: store
+// type:    adapter (local PR persistence + git)
+// job:     the local pull-request store — PRs as JSON under .git/pr/, plus
+//          approve/merge (git checkout/merge/branch-delete).
+// limits:  no task knowledge (-> adapter/td), no review-gate or issue rules
+//          (-> issue); callers decide policy, this just persists and merges.
 package store
 
 import (

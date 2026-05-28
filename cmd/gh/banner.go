@@ -1,4 +1,9 @@
-package cmd
+// package: gh / banner
+// type:    command
+// job:     shared gh helpers — the "[sindri-local]" banner, the td wrapper,
+//          and base-branch detection used across the gh subcommands.
+// limits:  helpers only; each subcommand's behavior lives in its own file.
+package main
 
 import (
 	"fmt"

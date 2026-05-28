@@ -1,4 +1,8 @@
-package cmd
+// package: gh / pr_merge
+// type:    command
+// job:     `gh pr merge` — merges an approved PR into its base.
+// limits:  PR records live in internal/ghlocal/store.
+package main
 
 import (
 	"fmt"

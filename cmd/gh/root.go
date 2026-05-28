@@ -1,4 +1,9 @@
-package cmd
+// package: gh / root
+// type:    entrypoint
+// job:     the gh (sindri-local) command tree and the "not GitHub" unknown-
+//          command help. Agents drive the workflow through these subcommands.
+// limits:  subcommand behavior lives in the sibling files; storage in store.
+package main
 
 import (
 	"fmt"

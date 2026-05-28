@@ -1,4 +1,8 @@
-package cmd
+// package: gh / pr_list
+// type:    command
+// job:     `gh pr list` — lists local PRs.
+// limits:  PR records live in internal/ghlocal/store.
+package main
 
 import (
 	"fmt"

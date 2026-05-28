@@ -1,4 +1,8 @@
-package cmd
+// package: gh / done
+// type:    command
+// job:     the agent's `gh done` — return to the base branch, ready for next.
+// limits:  no task/PR mutation; just git branch state and the status file.
+package main
 
 import (
 	"fmt"

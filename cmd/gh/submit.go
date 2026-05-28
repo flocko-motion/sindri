@@ -1,4 +1,9 @@
-package cmd
+// package: gh / submit
+// type:    command
+// job:     the agent's `gh submit` — rebase, create the PR, hand off and submit
+//          the task for review, then return (no blocking wait).
+// limits:  PR records live in store; task state via the td CLI.
+package main
 
 import (
 	"fmt"

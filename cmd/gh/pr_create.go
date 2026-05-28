@@ -1,4 +1,9 @@
-package cmd
+// package: gh / pr_create
+// type:    command
+// job:     `gh pr create` plus the PR-ID derivation/revision helpers; rebases
+//          and records a PR, then waits for review.
+// limits:  persistence in store; prefer `gh submit`, which wraps this.
+package main
 
 import (
 	"fmt"

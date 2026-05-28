@@ -1,4 +1,10 @@
-package cmd
+// package: gh / issue
+// type:    command
+// job:     the agent's `gh issue next/list/view/comment` — claim the next task,
+//          create its per-task branch, and show task details + comments.
+// limits:  wraps the td CLI directly (container context); PR ops live in the
+//          pr_*.go siblings, persistence in store.
+package main
 
 import (
 	"encoding/json"
