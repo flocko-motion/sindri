@@ -91,6 +91,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.prs = msg.prs
 		m.rebuildBacklog()
 		m.clampCursors()
+		m.syncListScroll()
 		if m.showDetail && m.detail.taskID != "" {
 			for _, t := range m.tasks {
 				if t.ID == m.detail.taskID {
@@ -135,8 +136,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, keys.Backlog):
 			m.leftView = viewBacklog
 			m.rebuildBacklog()
+			m.syncListScroll()
 		case key.Matches(msg, keys.Workers):
 			m.leftView = viewWorkers
+			m.syncListScroll()
 		case key.Matches(msg, keys.Up):
 			m.moveCursor(-1)
 		case key.Matches(msg, keys.Down):
@@ -419,6 +422,7 @@ func (m *Model) resizeViewports() {
 	if m.vpDetail.Height < 1 {
 		m.vpDetail.Height = 1
 	}
+	m.syncListScroll()
 }
 
 func (m *Model) rebuildBacklog() {
@@ -445,6 +449,7 @@ func (m *Model) moveCursor(delta int) {
 			}
 			if !m.backlogRows[pos].isPR {
 				m.listCursor = pos
+				m.syncListScroll()
 				return
 			}
 		}
@@ -452,8 +457,39 @@ func (m *Model) moveCursor(delta int) {
 		next := m.workerCursor + delta
 		if next >= 0 && next < len(m.workers) {
 			m.workerCursor = next
+			m.syncListScroll()
 		}
 	}
+}
+
+// syncListScroll adjusts the left-column viewport offset so the active cursor
+// stays visible, scrolling only when the cursor moves outside the window. It is
+// driven from Update (not View) so the offset persists across frames.
+func (m *Model) syncListScroll() {
+	h := m.vpList.Height
+	if h < 1 {
+		return
+	}
+	var cursor, total int
+	switch m.leftView {
+	case viewBacklog:
+		cursor, total = m.listCursor, len(m.backlogRows)
+	case viewWorkers:
+		cursor, total = m.workerCursor, len(m.workers)
+	}
+	off := m.vpList.YOffset
+	if cursor < off {
+		off = cursor
+	} else if cursor >= off+h {
+		off = cursor - h + 1
+	}
+	if maxOff := total - h; off > maxOff {
+		off = maxOff
+	}
+	if off < 0 {
+		off = 0
+	}
+	m.vpList.YOffset = off
 }
 
 func (m *Model) selectedID() string {
@@ -482,6 +518,7 @@ func (m *Model) selectedID() string {
 func (m *Model) navigateInto() {
 	if m.listCursor+1 < len(m.backlogRows) && m.backlogRows[m.listCursor+1].isPR {
 		m.listCursor++
+		m.syncListScroll()
 	}
 }
 
@@ -489,6 +526,7 @@ func (m *Model) navigateOut() {
 	for pos := m.listCursor - 1; pos >= 0; pos-- {
 		if !m.backlogRows[pos].isPR {
 			m.listCursor = pos
+			m.syncListScroll()
 			return
 		}
 	}
@@ -616,24 +654,15 @@ func (m Model) viewList() string {
 
 	var listContent string
 	var header string
-	var cursorLine int
 	switch m.leftView {
 	case viewBacklog:
 		header = "Tasks"
 		listContent = renderBacklogList(m.backlogRows, m.listCursor, true)
-		cursorLine = m.listCursor
 	case viewWorkers:
 		header = "Workers"
 		listContent = renderWorkersList(m.workers, m.workerCursor, true)
-		cursorLine = m.workerCursor
 	}
-	m.vpList.SetContent(listContent)
-
-	if cursorLine < m.vpList.YOffset {
-		m.vpList.SetYOffset(cursorLine)
-	} else if cursorLine >= m.vpList.YOffset+m.vpList.Height {
-		m.vpList.SetYOffset(cursorLine - m.vpList.Height + 1)
-	}
+	m.vpList.SetContent(strings.TrimRight(listContent, "\n"))
 
 	scrollStatus := ""
 	if m.vpList.TotalLineCount() > m.vpList.Height {
@@ -689,9 +718,12 @@ func (m Model) viewDetail() string {
 }
 
 func renderColumn(header, content, footer string, width, height int, active bool) string {
-	style := columnStyle.Width(width).Height(height)
+	// lipgloss Width/Height size the content box; the border is drawn outside
+	// it. Subtract the left+right border so the column fits exactly in `width`,
+	// otherwise the right border overflows the terminal and is clipped.
+	style := columnStyle.Width(width - 2).Height(height)
 	if active {
-		style = activeColumnStyle.Width(width).Height(height)
+		style = activeColumnStyle.Width(width - 2).Height(height)
 	}
 	var full string
 	if header != "" {
