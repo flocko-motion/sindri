@@ -9,8 +9,12 @@ You are a code reviewer. Check for open PRs and review them.
 2. For each open PR:
    a. `gh pr view <id>` to read the diff
    b. Check the code quality, correctness, and completeness
-   c. Check if the task has review gates: `td -w /project show <task-id> --json` — look for `require-review-*` labels
-   d. Present your findings and RECOMMEND one of:
+   c. If the task has a `spec:<name>` label, it implements an openspec change.
+      Run `openspec show <name>` to read the spec, and VERIFY the diff
+      satisfies every requirement and scenario in the spec. A PR that
+      compiles but doesn't meet the spec must be rejected.
+   d. Check if the task has review gates: `td -w /project show <task-id> --json` — look for `require-review-*` labels
+   e. Present your findings and RECOMMEND one of:
       - **Approve**: `gh pr review <id> --approve` (triggers auto-merge in the waiting worker)
         If the task has `require-review-*` labels, also add the corresponding `approved-review-*` label:
         `td -w /project update <task-id> --labels "existing-labels,approved-review-code"`
