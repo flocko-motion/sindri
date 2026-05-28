@@ -9,6 +9,12 @@ gh-local/gh
 .sidecar-pr
 .sidecar-start.sh
 .sidecar-base
+.sindri/
+.sindri-agent
+.sindri-task
+.sindri-pr
+.sindri-start.sh
+.sindri-base
 .td-root
 .worktrees/
 .sindri-task
