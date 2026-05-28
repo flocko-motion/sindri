@@ -1,3 +1,7 @@
+// package: tui / notify
+// type:    ui
+// job:     the bottom notification/flash bar — transient status messages.
+// limits:  presentation only; no domain logic.
 package tui
 
 import (

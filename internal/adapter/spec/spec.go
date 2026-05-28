@@ -22,11 +22,6 @@ type Change struct {
 	Status         string `json:"status"`
 }
 
-// Capability is an established spec from `openspec list --specs --json`.
-type Capability struct {
-	Name string `json:"name"`
-}
-
 // Enabled reports whether the project uses openspec (has an openspec/ dir).
 func Enabled(projectRoot string) bool {
 	info, err := os.Stat(filepath.Join(projectRoot, "openspec"))
@@ -50,24 +45,6 @@ func Changes(projectRoot string) []Change {
 		return nil
 	}
 	return result.Changes
-}
-
-// Capabilities returns established specs via `openspec list --specs --json`.
-func Capabilities(projectRoot string) []Capability {
-	if !Enabled(projectRoot) {
-		return nil
-	}
-	out, err := run(projectRoot, "list", "--specs", "--json")
-	if err != nil {
-		return nil
-	}
-	var result struct {
-		Specs []Capability `json:"specs"`
-	}
-	if json.Unmarshal(out, &result) != nil {
-		return nil // plain "No specs found." or CLI missing
-	}
-	return result.Specs
 }
 
 func run(projectRoot string, args ...string) ([]byte, error) {

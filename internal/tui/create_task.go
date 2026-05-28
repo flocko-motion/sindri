@@ -1,3 +1,8 @@
+// package: tui / create_task
+// type:    ui
+// job:     the "new task" modal — collects title/type/priority/desc/review and
+//          creates the task via the td adapter.
+// limits:  no domain rules; creation goes through adapter/td.
 package tui
 
 import (

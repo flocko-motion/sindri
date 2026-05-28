@@ -1,3 +1,7 @@
+// package: tui / styles
+// type:    ui
+// job:     TUI chrome styles — borders, columns, selection highlight, title.
+// limits:  layout chrome only; state→color mapping lives in render.
 package tui
 
 import "github.com/charmbracelet/lipgloss"

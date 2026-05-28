@@ -1,3 +1,9 @@
+// package: tui / detail
+// type:    ui
+// job:     renders the multi-pane detail view for an issue, PR, or worker
+//          (metadata, description, gates, PRs, comments).
+// limits:  read-only rendering — actions live in actions.go; data via
+//          adapter/td (detail text) and the issue model.
 package tui
 
 import (

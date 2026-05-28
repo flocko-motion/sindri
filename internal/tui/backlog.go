@@ -1,3 +1,8 @@
+// package: tui / backlog
+// type:    ui
+// job:     builds the backlog list rows from []issue.Issue (task/spec rows, PR
+//          sub-rows, gate rows) and renders the scrolling list with a cursor.
+// limits:  no domain rules (-> issue), no color logic (-> render).
 package tui
 
 import (

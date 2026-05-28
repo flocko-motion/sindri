@@ -1,3 +1,7 @@
+// package: tui / workers
+// type:    ui
+// job:     renders the workers view — each worker's status, task, branch, path.
+// limits:  presentation only; worker data comes from internal/worker.
 package tui
 
 import (

@@ -1,3 +1,7 @@
+// package: tui / keys
+// type:    ui
+// job:     defines the TUI keybindings (navigation, view toggle, actions).
+// limits:  bindings only; the behaviors they trigger live in tui.go/actions.go.
 package tui
 
 import "github.com/charmbracelet/bubbles/key"

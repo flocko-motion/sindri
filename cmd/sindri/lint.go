@@ -1,10 +1,11 @@
 // package: main (sindri) / lint
 // type:    command
-// job:     wires `sindri lint deadcode`.
-// limits:  the dead-code analysis lives in internal/lint; nothing here but wiring.
+// job:     wires `sindri lint` — deadcode, loc, and all (run every linter).
+// limits:  analyses live in internal/lint; this only wires flags and exit codes.
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/flo-at/sindri/internal/lint"
@@ -28,16 +29,15 @@ func newLintCmd() *cobra.Command {
 			"Add a //deadcode:keep comment directly above a function to keep it " +
 			"(it will be excluded from the report).",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				args = []string{"./..."}
+			pkgs := args
+			if len(pkgs) == 0 {
+				pkgs = []string{"./..."}
 			}
-			found, err := lint.Deadcode(args, tags, includeTests, cmd.OutOrStdout())
+			found, err := lint.Deadcode(pkgs, tags, includeTests, cmd.OutOrStdout())
 			if err != nil {
 				return err
 			}
 			if found {
-				// Reported lines are the output; exit non-zero without an
-				// extra error message so this works cleanly as a gate.
 				os.Exit(1)
 			}
 			return nil
@@ -45,6 +45,61 @@ func newLintCmd() *cobra.Command {
 	}
 	deadcodeCmd.Flags().StringVar(&tags, "tags", "", "comma-separated list of extra build tags")
 	deadcodeCmd.Flags().BoolVar(&includeTests, "test", false, "include test packages and executables")
-	lintCmd.AddCommand(deadcodeCmd)
+
+	var maxLines int
+	locCmd := &cobra.Command{
+		Use:   "loc [dirs]",
+		Short: "Report source files exceeding the line limit",
+		Long: "Report Go source files longer than the per-file limit (default " +
+			"700). Defaults to the current directory; exits non-zero when any " +
+			"file is over the limit, so it can gate CI.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			found, err := lint.LOC(args, maxLines, cmd.OutOrStdout())
+			if err != nil {
+				return err
+			}
+			if found {
+				os.Exit(1)
+			}
+			return nil
+		},
+	}
+	locCmd.Flags().IntVar(&maxLines, "max", lint.DefaultMaxLines, "maximum lines per file")
+
+	allCmd := &cobra.Command{
+		Use:   "all",
+		Short: "Run all linters and report (exits non-zero if any fail)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
+			failed := false
+
+			fmt.Fprintln(out, "== deadcode ==")
+			dc, err := lint.Deadcode([]string{"./..."}, tags, includeTests, out)
+			if err != nil {
+				return err
+			}
+			failed = failed || dc
+
+			fmt.Fprintln(out, "\n== loc ==")
+			loc, err := lint.LOC([]string{"."}, maxLines, out)
+			if err != nil {
+				return err
+			}
+			failed = failed || loc
+
+			fmt.Fprintln(out)
+			if failed {
+				fmt.Fprintln(out, "FAIL: lint violations found")
+				os.Exit(1)
+			}
+			fmt.Fprintln(out, "OK: all linters passed")
+			return nil
+		},
+	}
+	allCmd.Flags().StringVar(&tags, "tags", "", "comma-separated list of extra build tags")
+	allCmd.Flags().BoolVar(&includeTests, "test", false, "include test packages")
+	allCmd.Flags().IntVar(&maxLines, "max", lint.DefaultMaxLines, "maximum lines per file")
+
+	lintCmd.AddCommand(deadcodeCmd, locCmd, allCmd)
 	return lintCmd
 }

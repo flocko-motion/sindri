@@ -80,6 +80,35 @@ all UI variants align to a single definition.
 - **WHEN** a view or action is introduced or modified
 - **THEN** an openspec specification defines it that all UIs implement
 
+### Requirement: Layer types and their rules
+
+Every source file's `type:` (see File headers) SHALL be one of the following,
+and each type MUST obey its dependency rules:
+
+- `logic` — domain model and rules. MUST NOT import UI, rendering, adapters, or
+  assembly packages, and MUST NOT call external tools/APIs. The bottom layer.
+- `adapter` — wraps one external tool or API. MAY import `logic` for its types.
+  MUST NOT import UI or rendering, and MUST NOT contain domain rules.
+- `assembly` — composes adapters + logic into the app's state. MAY import
+  `logic` and `adapter`. MUST NOT import UI or rendering.
+- `rendering` — maps state to presentation (styles, formatting). MAY import
+  `logic` types. MUST NOT import UI, adapters, or assembly, and holds no data logic.
+- `ui` — a specific interface (TUI/GUI). MAY import `logic`, `assembly`,
+  `rendering`, and `adapter` (for mutations). MUST NOT implement domain logic.
+- `command` — a CLI subcommand wrapper. Same dependency freedom as `ui`; thin.
+- `entrypoint` — wires a command tree and dispatches. No logic.
+
+#### Scenario: UI contains no logic
+
+- **WHEN** a `ui` or `command` file changes state
+- **THEN** it calls `logic`/`assembly`/`adapter`, never reimplementing the rule
+
+#### Scenario: Logic stays pure
+
+- **WHEN** a `logic` file is compiled
+- **THEN** it imports no adapter, assembly, rendering, or UI package, and calls
+  no external tool
+
 ### Requirement: File length limit
 
 No source file SHALL exceed 700 lines of code.
