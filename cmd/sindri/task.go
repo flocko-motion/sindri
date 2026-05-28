@@ -9,9 +9,9 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	"github.com/flo-at/sindri/internal/board"
 	"github.com/flo-at/sindri/internal/ghlocal/store"
 	"github.com/flo-at/sindri/internal/issue"
-	"github.com/flo-at/sindri/internal/openspec"
 	"github.com/flo-at/sindri/internal/render"
 	"github.com/flo-at/sindri/internal/worker"
 	"github.com/spf13/cobra"
@@ -124,101 +124,50 @@ func runTaskList(cmd *cobra.Command, args []string, showAll, showOpen, showClose
 		return fmt.Errorf("not in a git repo: %w", err)
 	}
 
-	tasks, err := issue.LoadAll(projectRoot)
+	issues, err := board.List(projectRoot)
 	if err != nil {
 		return err
 	}
 
 	if !showAll {
-		filtered := tasks[:0]
-		for _, t := range tasks {
+		filtered := issues[:0]
+		for _, iss := range issues {
 			switch {
 			case showOpen && showClosed:
-				filtered = append(filtered, t)
+				filtered = append(filtered, iss)
 			case showClosed:
-				if t.IsClosed() {
-					filtered = append(filtered, t)
+				if iss.IsClosed() {
+					filtered = append(filtered, iss)
 				}
-			default: // default and --open both hide closed
-				if !t.IsClosed() {
-					filtered = append(filtered, t)
+			default: // default and --open both hide closed (spec-only is never closed)
+				if !iss.IsClosed() {
+					filtered = append(filtered, iss)
 				}
 			}
 		}
-		tasks = filtered
+		issues = filtered
 	}
 
-	if len(tasks) == 0 && len(openspec.Changes(projectRoot)) == 0 {
+	if len(issues) == 0 {
 		fmt.Println("No tasks found.")
 		return nil
-	}
-
-	workers := worker.List(projectRoot)
-	workersByTask := make(map[string]string)
-	for _, wk := range workers {
-		if wk.Task != "" {
-			parts := strings.Fields(wk.Task)
-			if len(parts) > 0 {
-				workersByTask[parts[0]] = wk.Name
-			}
-		}
-	}
-
-	prs, _ := store.ListFor(projectRoot)
-	prByTask := make(map[string][]*store.PR)
-	for _, pr := range prs {
-		if id := issue.TaskIDFromTitle(pr.Title); id != "" {
-			prByTask[id] = append(prByTask[id], pr)
-		}
-	}
-
-	// Which specs already have a linked task (spec:<name> label)?
-	linkedSpecs := make(map[string]bool)
-	for _, t := range tasks {
-		if s := t.Spec(); s != "" {
-			linkedSpecs[s] = true
-		}
 	}
 
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	rows := make([][]string, 0)
 
-	// Specs with no linked task yet — surfaced as items at the top.
-	for _, ch := range openspec.Changes(projectRoot) {
-		if linkedSpecs[ch.Name] {
-			continue
-		}
-		status := "📋 spec"
-		if ch.TotalTasks > 0 {
-			status = fmt.Sprintf("📋 spec %d/%d", ch.CompletedTasks, ch.TotalTasks)
-		}
-		rows = append(rows, []string{ch.Name, "", "", status, "(no task — needs planning)"})
-	}
-
-	for _, t := range tasks {
-		var status string
-		if w, ok := workersByTask[t.ID]; ok {
-			status = render.Worker(w)
-		} else if t.Status == "in_progress" {
-			status = render.Orphaned()
-		} else {
-			status = render.TaskStatus(t.Status)
-		}
+	for _, iss := range issues {
 		updated := ""
-		if !t.UpdatedAt.IsZero() {
-			updated = t.UpdatedAt.Local().Format("06-01-02 15:04")
+		if !iss.UpdatedAt().IsZero() {
+			updated = iss.UpdatedAt().Local().Format("06-01-02 15:04")
 		}
-		title := t.Title
-		if s := t.Spec(); s != "" {
-			title = "📋 " + s + " · " + title
-		}
-		rows = append(rows, []string{t.ID, t.Priority, updated, status, title})
+		rows = append(rows, []string{iss.ID(), iss.Priority(), updated, render.IssueStatus(iss), iss.Title()})
 
-		for _, pr := range prByTask[t.ID] {
-			rows = append(rows, []string{"", "", "", "", "  └ " + pr.ID + " [" + render.PRStatus(pr.Status, t.IsClosed()) + "]"})
+		for _, pr := range iss.PRs {
+			rows = append(rows, []string{"", "", "", "", "  └ " + pr.ID + " [" + render.PRStatus(pr.Status, iss.IsClosed()) + "]"})
 		}
 
-		if gates := render.Gates(t.Gates()); gates != "" {
+		if gates := render.Gates(iss.Gates()); gates != "" {
 			rows = append(rows, []string{"", "", "", "", "  " + gates})
 		}
 	}

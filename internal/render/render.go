@@ -4,6 +4,7 @@
 package render
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -69,6 +70,25 @@ func PRStatus(status string, taskClosed bool) string {
 	default: // merged, closed, unknown
 		return dim.Render(status)
 	}
+}
+
+// IssueStatus renders the status cell for an issue, identically for CLI and
+// TUI: the assigned worker, an orphan warning, a spec marker, or the plain
+// task status — colored by state.
+func IssueStatus(iss issue.Issue) string {
+	if iss.SpecOnly() {
+		if done, total, _ := iss.SpecProgress(); total > 0 {
+			return dim.Render(fmt.Sprintf("📋 spec %d/%d", done, total))
+		}
+		return dim.Render("📋 spec")
+	}
+	if iss.Worker != "" {
+		return Worker(iss.Worker)
+	}
+	if iss.Task.Status == "in_progress" {
+		return Orphaned()
+	}
+	return TaskStatus(iss.Task.Status)
 }
 
 // Gates renders review gates as "☑ name" / "☐ name", space-separated.

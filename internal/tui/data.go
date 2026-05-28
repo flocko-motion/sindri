@@ -11,8 +11,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// taskItem is the headless issue model; the TUI renders it but owns no logic.
-type taskItem = issue.Issue
+// taskItem is the headless task model; the TUI renders it but owns no logic.
+type taskItem = issue.Task
 
 type prItem struct {
 	ID     string
@@ -48,7 +48,7 @@ func refreshDataOpt(projectRoot string, manual bool) tea.Cmd {
 }
 
 func fetchTasks(projectRoot string) []taskItem {
-	tasks, err := issue.LoadAll(projectRoot)
+	tasks, err := issue.LoadTasks(projectRoot)
 	if err != nil {
 		return nil
 	}

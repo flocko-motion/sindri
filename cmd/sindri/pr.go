@@ -82,7 +82,7 @@ func newPrCmd() *cobra.Command {
 				}
 				reviews := ""
 				if taskID := issue.TaskIDFromTitle(pr.Title); taskID != "" {
-					if iss, err := issue.Load(tdWorkDir(), taskID); err == nil {
+					if iss, err := issue.LoadTask(tdWorkDir(), taskID); err == nil {
 						reviews = render.Gates(iss.Gates())
 					}
 				}
@@ -436,7 +436,7 @@ func newPrCmd() *cobra.Command {
 			if taskID == "" {
 				return fmt.Errorf("no task ID found in PR title")
 			}
-			iss, err := issue.Load(tdWorkDir(), taskID)
+			iss, err := issue.LoadTask(tdWorkDir(), taskID)
 			if err != nil {
 				return err
 			}
@@ -582,7 +582,7 @@ func printTaskSummary(taskID string) {
 
 // getTaskLabels returns a task's labels (thin wrapper over issue.Load).
 func getTaskLabels(taskID string) ([]string, error) {
-	iss, err := issue.Load(tdWorkDir(), taskID)
+	iss, err := issue.LoadTask(tdWorkDir(), taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -640,7 +640,7 @@ func tdWorkDir() string {
 // checkReviewGates returns the required reviews not yet approved for a task
 // (thin wrapper over issue.Load + MissingReviews).
 func checkReviewGates(taskID string) ([]string, error) {
-	iss, err := issue.Load(tdWorkDir(), taskID)
+	iss, err := issue.LoadTask(tdWorkDir(), taskID)
 	if err != nil {
 		return nil, err
 	}
