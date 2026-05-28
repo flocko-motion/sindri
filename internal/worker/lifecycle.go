@@ -1,3 +1,9 @@
+// package: worker / lifecycle
+// type:    adapter (podman + git worktrees)
+// job:     create/start/stop workers — allocate Norse-named worktrees, launch
+//          worker/reviewer podman containers, and tear them down.
+// limits:  discovery/listing lives in worker.go (neighbour); container image
+//          name from internal/container; no task/PR logic here.
 package worker
 
 import (
