@@ -74,7 +74,7 @@ func newPrCmd() *cobra.Command {
 			}
 			rows := make([][]string, 0, len(prs))
 			for _, pr := range prs {
-				if !prListAll && pr.Status != "open" {
+				if !prListAll && pr.Status != "open" && pr.Status != "approved" {
 					continue
 				}
 				rows = append(rows, []string{pr.ID, pr.Status, pr.Branch + " → " + pr.Base, pr.Title})
@@ -378,20 +378,30 @@ func newPrCmd() *cobra.Command {
 	prCmd.AddCommand(
 		&cobra.Command{
 			Use:   "next",
-			Short: "Select the next open PR for review",
+			Short: "Select the next PR: open ones first, then approved-but-not-merged",
 			RunE: func(cmd *cobra.Command, args []string) error {
 				prs, err := store.List()
 				if err != nil {
 					return err
 				}
+				// Prefer open (need review), then approved (need merge)
+				var fallback *store.PR
 				for _, pr := range prs {
 					if pr.Status == "open" {
 						writeSelectedPR(pr.ID)
 						fmt.Printf("Selected: %s\n\n", pr.ID)
 						return printPRInfo(pr.ID)
 					}
+					if pr.Status == "approved" && fallback == nil {
+						fallback = pr
+					}
 				}
-				fmt.Println("No open PRs.")
+				if fallback != nil {
+					writeSelectedPR(fallback.ID)
+					fmt.Printf("Selected (approved, ready to merge): %s\n\n", fallback.ID)
+					return printPRInfo(fallback.ID)
+				}
+				fmt.Println("No open or approved PRs.")
 				return nil
 			},
 		},

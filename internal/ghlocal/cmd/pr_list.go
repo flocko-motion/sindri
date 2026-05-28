@@ -20,7 +20,7 @@ var prListCmd = &cobra.Command{
 		}
 		count := 0
 		for _, pr := range prs {
-			if !prListAll && pr.Status != "open" {
+			if !prListAll && pr.Status != "open" && pr.Status != "approved" {
 				continue
 			}
 			fmt.Printf("%-30s  %-8s  %s → %s\n", pr.ID, pr.Status, pr.Branch, pr.Base)
