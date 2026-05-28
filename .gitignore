@@ -11,6 +11,7 @@ gh-local/gh
 .sidecar-base
 .td-root
 .worktrees/
+.sindri-task
 CLAUDE.md
 /gh
 /sindri
