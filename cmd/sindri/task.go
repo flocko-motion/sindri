@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/flo-at/sindri/internal/ghlocal/store"
+	"github.com/flo-at/sindri/internal/openspec"
 	"github.com/flo-at/sindri/internal/worker"
 	"github.com/spf13/cobra"
 )
@@ -123,7 +124,7 @@ func runTaskList(cmd *cobra.Command, args []string, showAll, showOpen, showClose
 		tasks = filtered
 	}
 
-	if len(tasks) == 0 {
+	if len(tasks) == 0 && len(openspec.Changes(projectRoot)) == 0 {
 		fmt.Println("No tasks found.")
 		return nil
 	}
@@ -147,8 +148,29 @@ func runTaskList(cmd *cobra.Command, args []string, showAll, showOpen, showClose
 		}
 	}
 
+	// Which specs already have a linked task (spec:<name> label)?
+	linkedSpecs := make(map[string]bool)
+	for _, t := range tasks {
+		if s := specLabel(t.Labels); s != "" {
+			linkedSpecs[s] = true
+		}
+	}
+
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	rows := make([][]string, 0)
+
+	// Specs with no linked task yet — surfaced as items at the top.
+	for _, ch := range openspec.Changes(projectRoot) {
+		if linkedSpecs[ch.Name] {
+			continue
+		}
+		status := "📋 spec"
+		if ch.TotalTasks > 0 {
+			status = fmt.Sprintf("📋 spec %d/%d", ch.CompletedTasks, ch.TotalTasks)
+		}
+		rows = append(rows, []string{ch.Name, "", "", status, "(no task — needs planning)"})
+	}
+
 	for _, t := range tasks {
 		var status string
 		if w, ok := workersByTask[t.ID]; ok {
@@ -162,7 +184,11 @@ func runTaskList(cmd *cobra.Command, args []string, showAll, showOpen, showClose
 		if ts, err := time.Parse(time.RFC3339Nano, t.UpdatedAt); err == nil {
 			updated = ts.Local().Format("06-01-02 15:04")
 		}
-		rows = append(rows, []string{t.ID, t.Priority, updated, status, t.Title})
+		title := t.Title
+		if s := specLabel(t.Labels); s != "" {
+			title = "📋 " + s + " · " + title
+		}
+		rows = append(rows, []string{t.ID, t.Priority, updated, status, title})
 
 		for _, pr := range prByTask[t.ID] {
 			rows = append(rows, []string{"", "", "", "", fmt.Sprintf("  └ %s [%s]", pr.ID, pr.Status)})
@@ -247,6 +273,16 @@ func listAllTasks(projectRoot string) ([]cliTask, error) {
 	result = append(result, active...)
 	result = append(result, closed...)
 	return result, nil
+}
+
+// specLabel returns the spec name from a spec:<name> label, or "".
+func specLabel(labels []string) string {
+	for _, l := range labels {
+		if strings.HasPrefix(l, "spec:") {
+			return strings.TrimPrefix(l, "spec:")
+		}
+	}
+	return ""
 }
 
 func cliGateStatus(labels []string) string {
