@@ -107,8 +107,11 @@ func TestAssemble(t *testing.T) {
 	if len(issues) != 3 {
 		t.Fatalf("want 3 issues, got %d", len(issues))
 	}
-	if !issues[0].SpecOnly() || issues[0].ID() != "orphan-spec" {
+	if !issues[0].SpecOnly() || issues[0].Spec.Name != "orphan-spec" {
 		t.Errorf("first issue should be spec-only orphan-spec, got %+v", issues[0])
+	}
+	if issues[0].ID() != SpecID("orphan-spec") {
+		t.Errorf("spec-only ID = %q want %q", issues[0].ID(), SpecID("orphan-spec"))
 	}
 	// td-2 must carry its linked spec.
 	var found bool

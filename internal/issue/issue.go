@@ -12,6 +12,8 @@
 package issue
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os/exec"
 	"regexp"
@@ -147,15 +149,22 @@ func (i Issue) HasSpec() bool { return i.Spec != nil }
 // SpecOnly reports whether this is a spec with no task yet.
 func (i Issue) SpecOnly() bool { return i.Task == nil && i.Spec != nil }
 
-// ID is the task ID, or the spec name for a spec-only issue.
+// ID is the task ID (td-xxxxxx), or a synthetic os-xxxxxx id derived from the
+// spec name for a spec-only issue (so every row has a td-/os- style ID).
 func (i Issue) ID() string {
 	if i.Task != nil {
 		return i.Task.ID
 	}
 	if i.Spec != nil {
-		return i.Spec.Name
+		return SpecID(i.Spec.Name)
 	}
 	return ""
+}
+
+// SpecID derives a stable "os-xxxxxx" id from an openspec change name.
+func SpecID(name string) string {
+	h := sha256.Sum256([]byte(name))
+	return "os-" + hex.EncodeToString(h[:])[:6]
 }
 
 // Title is the task title, with a spec marker prefix when linked. For a
