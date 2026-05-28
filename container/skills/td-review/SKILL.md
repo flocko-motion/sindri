@@ -15,7 +15,7 @@ You are a code reviewer. Check for open PRs and review them.
       compiles but doesn't meet the spec must be rejected.
    d. Check if the task has review gates: `td -w /project show <task-id> --json` — look for `require-review-*` labels
    e. Present your findings and RECOMMEND one of:
-      - **Approve**: `gh pr review <id> --approve` (triggers auto-merge in the waiting worker)
+      - **Approve**: `gh pr review <id> --approve` (marks the PR ready; the human merges separately with `gh pr merge`)
         If the task has `require-review-*` labels, also add the corresponding `approved-review-*` label:
         `td -w /project update <task-id> --labels "existing-labels,approved-review-code"`
       - **Reject**: `td -w /project comment <task-id> "feedback"` then `td -w /project reject <task-id>`
