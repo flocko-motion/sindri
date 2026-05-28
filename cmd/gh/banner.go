@@ -1,7 +1,7 @@
 // package: gh / banner
 // type:    command
-// job:     shared gh helpers — the "[sindri-local]" banner, the td wrapper,
-//          and base-branch detection used across the gh subcommands.
+// job:     shared sindri-worker helpers — the "[sindri-worker]" banner, the td
+//          wrapper, and base-branch detection used across the subcommands.
 // limits:  helpers only; each subcommand's behavior lives in its own file.
 package main
 
@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-const bannerPrefix = "\033[2m[sindri-local — not github]"
+const bannerPrefix = "\033[2m[sindri-worker — not github]"
 
 func printBanner() {
 	taskID := currentTaskID()

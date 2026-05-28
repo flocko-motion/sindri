@@ -1,6 +1,6 @@
 // package: gh / done
 // type:    command
-// job:     the agent's `gh done` — return to the base branch, ready for next.
+// job:     the agent's `sindri-worker done` — return to base branch, ready for next.
 // limits:  no task/PR mutation; just git branch state and the status file.
 package main
 
@@ -23,7 +23,7 @@ var doneCmd = &cobra.Command{
 		branch, _ := currentBranch()
 
 		if branch == base {
-			fmt.Printf("Already on %s. Run 'gh next' to pick up a task.\n", base)
+			fmt.Printf("Already on %s. Run 'sindri-worker issue next' to pick up a task.\n", base)
 			return nil
 		}
 
@@ -37,7 +37,7 @@ var doneCmd = &cobra.Command{
 		if err := os.Remove(".sindri-task"); err != nil && !os.IsNotExist(err) {
 			fmt.Fprintf(os.Stderr, "Warning: remove .sindri-task: %v\n", err)
 		}
-		fmt.Printf("Ready on %s. Run 'gh issue next' to pick up the next task.\n", base)
+		fmt.Printf("Ready on %s. Run 'sindri-worker issue next' to pick up the next task.\n", base)
 		return nil
 	},
 }

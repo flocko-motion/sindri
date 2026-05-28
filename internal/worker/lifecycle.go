@@ -172,7 +172,7 @@ func Start(projectRoot, name string, opts StartOpts) error {
 	}
 
 	// Container startup: rewrite .git for container paths.
-	// gh symlink is created at image build time (sindri user can't write /usr/local/bin).
+	// sindri-worker symlink is created at image build time (sindri user can't write /usr/local/bin).
 	// Fail loudly (set -e) so startup problems are visible, not silently swallowed.
 	containerGitDir := fmt.Sprintf("gitdir: /repo/.git/worktrees/%s", name)
 	startup := "set -e; " +

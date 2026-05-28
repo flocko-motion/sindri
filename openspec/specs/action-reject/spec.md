@@ -34,10 +34,10 @@ sibling PRs for the same task SHALL also be closed out.
 
 ### Requirement: Worker picks it up again
 
-Because the task returns to open, the next `gh issue next` SHALL surface it
+Because the task returns to open, the next `sindri-worker issue next` SHALL surface it
 again with the rejection comment for the worker to act on.
 
 #### Scenario: Rework
 
-- **WHEN** a worker runs `gh issue next` after a rejection
+- **WHEN** a worker runs `sindri-worker issue next` after a rejection
 - **THEN** the rejected task can be picked up again with its feedback visible

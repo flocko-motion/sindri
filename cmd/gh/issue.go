@@ -1,6 +1,6 @@
 // package: gh / issue
 // type:    command
-// job:     the agent's `gh issue next/list/view/comment` — claim the next task,
+// job:     the agent's `sindri-worker issue next/list/view/comment` — claim a task,
 //          create its per-task branch, and show task details + comments.
 // limits:  wraps the td CLI directly (container context); PR ops live in the
 //          pr_*.go siblings, persistence in store.
@@ -123,9 +123,9 @@ var issueNextCmd = &cobra.Command{
 
 		branch, _ := currentBranch()
 		base := baseBranch()
-		// Accept base branch or detached HEAD (from gh done)
+		// Accept base branch or detached HEAD (from sindri-worker done)
 		if branch != base && branch != "HEAD" {
-			return fmt.Errorf("you are on branch %q — run 'gh done' first to return to %s", branch, base)
+			return fmt.Errorf("you are on branch %q — run 'sindri-worker done' first to return to %s", branch, base)
 		}
 
 		// Clean up any orphaned in_progress tasks from previous runs

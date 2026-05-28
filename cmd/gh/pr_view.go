@@ -1,6 +1,6 @@
 // package: gh / pr_view
 // type:    command
-// job:     `gh pr view` — prints a PR (JSON detail).
+// job:     `sindri-worker pr view` — prints a PR (JSON detail).
 // limits:  PR records live in internal/ghlocal/store.
 package main
 

@@ -1,8 +1,8 @@
 // package: gh / pr_create
 // type:    command
-// job:     `gh pr create` plus the PR-ID derivation/revision helpers; rebases
-//          and records a PR, then waits for review.
-// limits:  persistence in store; prefer `gh submit`, which wraps this.
+// job:     `sindri-worker pr create` plus the PR-ID derivation/revision helpers;
+//          rebases, lints, and records a PR.
+// limits:  persistence in store; prefer `sindri-worker submit`, which wraps this.
 package main
 
 import (
@@ -25,7 +25,7 @@ var (
 
 var prCreateCmd = &cobra.Command{
 	Use:   "create",
-	Short: "Create a local PR from the current branch (prefer 'gh submit')",
+	Short: "Create a local PR from the current branch (prefer 'sindri-worker submit')",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		printBanner()
 		branch, err := currentBranch()
@@ -43,6 +43,11 @@ var prCreateCmd = &cobra.Command{
 
 		if out, err := exec.Command("git", "rebase", base).CombinedOutput(); err != nil {
 			return fmt.Errorf("rebase onto %s failed: %s", base, strings.TrimSpace(string(out)))
+		}
+
+		// Lint gate: never create an unlinted PR.
+		if err := runLint(cmd.OutOrStdout()); err != nil {
+			return err
 		}
 
 		diff, err := gitDiff(base, branch)
@@ -78,11 +83,11 @@ var prCreateCmd = &cobra.Command{
 
 		fmt.Printf("PR created: %s (%s → %s)\n", pr.ID, branch, base)
 		fmt.Println()
-		fmt.Println("╔══════════════════════════════════════════════════════════╗")
-		fmt.Println("║  Use 'gh submit' instead — it handles handoff + review  ║")
-		fmt.Println("╚══════════════════════════════════════════════════════════╝")
+		fmt.Println("╔══════════════════════════════════════════════════════════════════╗")
+		fmt.Println("║  Use 'sindri-worker submit' instead — it handles handoff+review ║")
+		fmt.Println("╚══════════════════════════════════════════════════════════════════╝")
 		fmt.Println()
-		fmt.Println("Submitted. Run 'gh done' then 'gh issue next' for the next task.")
+		fmt.Println("Run 'sindri-worker done' then 'sindri-worker issue next' for the next task.")
 		return nil
 	},
 }

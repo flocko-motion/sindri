@@ -1,6 +1,6 @@
 // package: gh / pr_list
 // type:    command
-// job:     `gh pr list` — lists local PRs.
+// job:     `sindri-worker pr list` — lists local PRs.
 // limits:  PR records live in internal/ghlocal/store.
 package main
 

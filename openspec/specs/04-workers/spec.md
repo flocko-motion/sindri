@@ -51,20 +51,20 @@ in-progress from a previous run.
 
 #### Scenario: Orphaned in-progress task
 
-- **WHEN** an agent begins `gh issue next`
+- **WHEN** an agent begins `sindri-worker issue next`
 - **THEN** any task it left in-progress is returned to open before claiming a new one
 
 ### Requirement: Bundled agent tooling
 
-The container image SHALL bundle the tools an agent needs — the `gh` workflow
-CLI, `td`, and the openspec CLI — so a worker can drive the full propose →
-implement → submit → review loop offline. The `gh` binary SHALL be mounted from
-the host so it can be updated without rebuilding the image.
+The container image SHALL bundle the tools an agent needs — the `sindri-worker`
+workflow CLI, `td`, and the openspec CLI — so a worker can drive the full propose
+→ implement → submit → review loop offline. The `sindri-worker` binary SHALL be
+mounted from the host so it can be updated without rebuilding the image.
 
 #### Scenario: Agent runs the loop
 
 - **WHEN** a worker container starts
-- **THEN** `gh`, `td`, and `openspec` are all on its PATH
+- **THEN** `sindri-worker`, `td`, and `openspec` are all on its PATH
 
 ## Structure
 

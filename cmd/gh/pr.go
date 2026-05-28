@@ -1,6 +1,6 @@
 // package: gh / pr
 // type:    command
-// job:     the `gh pr` subcommand group (create/list/view/review/merge).
+// job:     the `sindri-worker pr` subcommand group (create/list/view/review/merge).
 // limits:  group wiring; each operation lives in its own pr_*.go file.
 package main
 

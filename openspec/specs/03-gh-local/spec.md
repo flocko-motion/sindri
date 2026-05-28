@@ -3,22 +3,23 @@
 ## Purpose
 
 Defines how sindri does pull requests and branches entirely locally — no
-GitHub, no remote. Agents drive a familiar `gh`-style workflow; PRs are records
-under `.git/`, and each task is developed on its own branch in an isolated
-worktree. This is the spec for the local PR/worktree machinery; the agent loop
-that uses it is in workers, and the human review flow is a separate action spec.
+GitHub, no remote. Agents drive the `sindri-worker` workflow (deliberately not
+named `gh`, so it is never mistaken for the GitHub CLI); PRs are records under
+`.git/`, and each task is developed on its own branch in an isolated worktree.
+This is the spec for the local PR/worktree machinery; the agent loop that uses
+it is in workers, and the human review flow is a separate action spec.
 
 ## Requirements
 
 ### Requirement: Local-only, not GitHub
 
-The `gh` command provided to agents SHALL be sindri-local, operating only on the
-local repository. It SHALL NOT contact GitHub or any remote, and every
-subcommand SHALL make clear it is not the GitHub CLI.
+The `sindri-worker` command provided to agents SHALL be sindri-local, operating
+only on the local repository. It SHALL NOT contact GitHub or any remote, and
+every subcommand SHALL make clear it is not the GitHub CLI.
 
 #### Scenario: Unknown command
 
-- **WHEN** an agent runs an unsupported `gh` command
+- **WHEN** an agent runs an unsupported `sindri-worker` command
 - **THEN** it is told this is sindri-local (not GitHub) and shown the real commands
 
 ### Requirement: PRs are local records
@@ -32,6 +33,23 @@ be found, with later revisions suffixed when an earlier PR for the task is gone.
 
 - **WHEN** an agent submits work for a task
 - **THEN** a PR record is written under `.git/` in the open state, keyed by the task
+
+### Requirement: Lint gate before submit
+
+Submitting (and creating a PR) SHALL run the project linters after the rebase
+and before the PR record is written; if any violation is found, or a linter
+cannot run (e.g. the code does not compile), the submit SHALL be refused and the
+violations reported, so an unlinted PR is never created.
+
+#### Scenario: Clean submit
+
+- **WHEN** an agent submits work that passes lint
+- **THEN** the PR record is created
+
+#### Scenario: Lint violation
+
+- **WHEN** an agent submits work that fails lint
+- **THEN** no PR is created and the violations are shown for the agent to fix
 
 ### Requirement: Per-task branches in worktrees
 
@@ -74,7 +92,8 @@ account; everything lives in the local git repository.
 
 - `internal/ghlocal/store/` (`type: adapter`) — the PR record store and the
   git checkout/merge/branch operations.
-- `cmd/gh/` (`type: command`) — the agent-facing `gh` workflow CLI
-  (issue/submit/done/pr…), wrapping the store, td, and git.
+- `cmd/gh/` (`type: command`) — the agent-facing `sindri-worker` workflow CLI
+  (issue/submit/done/pr…), wrapping the store, td, git, and the lint gate. Built
+  as the host binary `sindri-gh`, exposed in the container as `sindri-worker`.
 - `internal/worker/` (`type: adapter`) — creates and tends the worktrees the
   branches live in (see workers).

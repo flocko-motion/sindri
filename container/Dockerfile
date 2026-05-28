@@ -41,12 +41,13 @@ RUN mkdir -p /opt/sindri && cd /opt/sindri && npm init -y && npm install "@anthr
 # ── openspec CLI (spec-driven workflow, optional per project) ──────────────────
 RUN npm install -g @fission-ai/openspec@latest
 
-# ── gh-local (mounted from host at runtime) ──────────────────────────────────
-# The sindri-gh binary is mounted read-only at /opt/sindri/sindri-gh.
-# Create the symlink at build time (as root) — the mount provides the target
-# at runtime. The sindri user can't write to /usr/local/bin, so this must
-# happen here, not at container startup.
-RUN ln -sf /opt/sindri/sindri-gh /usr/local/bin/gh
+# ── sindri-worker (mounted from host at runtime) ─────────────────────────────
+# The sindri-gh binary is mounted read-only at /opt/sindri/sindri-gh and exposed
+# to agents as `sindri-worker` (deliberately NOT `gh`, so agents don't mistake it
+# for the GitHub CLI). Create the symlink at build time (as root) — the mount
+# provides the target at runtime. The sindri user can't write to /usr/local/bin,
+# so this must happen here, not at container startup.
+RUN ln -sf /opt/sindri/sindri-gh /usr/local/bin/sindri-worker
 
 # ── Shims ─────────────────────────────────────────────────────────────────────
 COPY container/shims/docker          /usr/local/bin/docker

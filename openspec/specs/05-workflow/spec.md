@@ -5,7 +5,7 @@
 Ties the board (02), gh-local (03), and workers (04) into the end-to-end loop:
 how a unit of work travels from a planned task to merged code. Humans plan and
 review; agents build. The individual human actions are the `action-*` specs; the
-agent's verbs are `gh issue next`, `gh submit`, `gh done`, `gh issue comment`.
+agent's verbs are `sindri-worker issue next`, `sindri-worker submit`, `sindri-worker done`, `sindri-worker issue comment`.
 This chapter is the integration.
 
 ## Requirements
@@ -24,29 +24,30 @@ their own work.
 
 ### Requirement: The worker loop
 
-A worker SHALL run a loop of: `gh issue next` (claim the highest-priority open
-task and branch for it) → implement, test, commit → `gh submit` (open a PR and
-submit for review) → `gh done` (return to base) → repeat. After submitting, the
-worker SHALL move on to the next task rather than block waiting for review.
+A worker SHALL run a loop of: `sindri-worker issue next` (claim the highest-priority open
+task and branch for it) → implement, test, commit → `sindri-worker submit` (lint, open a PR
+and submit for review) → `sindri-worker done` (return to base) → repeat. After submitting, the
+worker SHALL move on to the next task rather than block waiting for review. Submit enforces
+the lint gate (see 03-gh-local), so a failing worker fixes the violations and submits again.
 
 #### Scenario: One iteration
 
 - **WHEN** a worker finishes a task and submits it
-- **THEN** it runs `gh done` and `gh issue next` to pick up the next task
+- **THEN** it runs `sindri-worker done` and `sindri-worker issue next` to pick up the next task
   without waiting for the review verdict
 
 #### Scenario: Queue empty
 
-- **WHEN** `gh issue next` finds no open task
+- **WHEN** `sindri-worker issue next` finds no open task
 - **THEN** the worker reports none available and waits for instructions
 
 ### Requirement: The task lifecycle
 
-A task SHALL travel: open → claimed (in_progress, set by `gh issue next` via
-`td start`) → submitted (in_review with a PR, set by `gh submit` via `td
+A task SHALL travel: open → claimed (in_progress, set by `sindri-worker issue next` via
+`td start`) → submitted (in_review with a PR, set by `sindri-worker submit` via `td
 review`) → merged (task closed, by action-merge) or rejected (task back to open,
 by action-reject). A claimed task left over from a crashed run SHALL be reset on
-the next `gh issue next`.
+the next `sindri-worker issue next`.
 
 #### Scenario: Happy path
 
@@ -57,12 +58,12 @@ the next `gh issue next`.
 #### Scenario: Rework path
 
 - **WHEN** a submitted task is rejected with feedback
-- **THEN** it returns to open and `gh issue next` surfaces it again with the
+- **THEN** it returns to open and `sindri-worker issue next` surfaces it again with the
   rejection comment
 
 #### Scenario: Orphan recovery
 
-- **WHEN** `gh issue next` runs with a stale in_progress task from a prior run
+- **WHEN** `sindri-worker issue next` runs with a stale in_progress task from a prior run
 - **THEN** that task is unstarted before a new one is claimed
 
 ### Requirement: Spec-driven when present

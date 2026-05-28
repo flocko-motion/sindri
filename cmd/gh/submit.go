@@ -1,17 +1,19 @@
 // package: gh / submit
 // type:    command
-// job:     the agent's `gh submit` — rebase, create the PR, hand off and submit
-//          the task for review, then return (no blocking wait).
-// limits:  PR records live in store; task state via the td CLI.
+// job:     the agent's `sindri-worker submit` — rebase, lint, create the PR, hand
+//          off and submit the task for review, then return (no blocking wait).
+// limits:  PR records live in store; lint via internal/lint; task state via td CLI.
 package main
 
 import (
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/flo-at/sindri/internal/ghlocal/store"
+	"github.com/flo-at/sindri/internal/lint"
 	"github.com/spf13/cobra"
 )
 
@@ -34,7 +36,7 @@ var submitCmd = &cobra.Command{
 
 		base := baseBranch()
 		if branch == base {
-			return fmt.Errorf("you are on %s — nothing to submit. Run 'gh next' first", base)
+			return fmt.Errorf("you are on %s — nothing to submit. Run 'sindri-worker issue next' first", base)
 		}
 
 		taskID := branch
@@ -54,6 +56,11 @@ var submitCmd = &cobra.Command{
 		// Rebase onto base
 		if out, err := exec.Command("git", "rebase", base).CombinedOutput(); err != nil {
 			return fmt.Errorf("rebase onto %s failed: %s", base, strings.TrimSpace(string(out)))
+		}
+
+		// Lint gate: never submit an unlinted PR.
+		if err := runLint(cmd.OutOrStdout()); err != nil {
+			return err
 		}
 
 		// Create PR
@@ -98,12 +105,39 @@ var submitCmd = &cobra.Command{
 		}
 
 		fmt.Println()
-		fmt.Println("╔══════════════════════════════════════════════════════════╗")
-		fmt.Println("║  Submitted for review.                                  ║")
-		fmt.Println("║  Run 'gh done' then 'gh issue next' for the next task.  ║")
-		fmt.Println("╚══════════════════════════════════════════════════════════╝")
+		fmt.Println("╔══════════════════════════════════════════════════════════════════╗")
+		fmt.Println("║  Submitted for review.                                          ║")
+		fmt.Println("║  Run 'sindri-worker done' then 'sindri-worker issue next'.      ║")
+		fmt.Println("╚══════════════════════════════════════════════════════════════════╝")
 		return nil
 	},
+}
+
+// runLint runs the project linters (loc + deadcode) against the workspace and
+// refuses to proceed if any violation is found, so agents never submit an
+// unlinted PR. A linter that cannot run (e.g. the code does not compile) is also
+// a hard stop — the agent must fix it before submitting.
+func runLint(w io.Writer) error {
+	var out strings.Builder
+
+	fmt.Fprintln(&out, "== loc ==")
+	locFound, err := lint.LOC([]string{"."}, lint.DefaultMaxLines, &out)
+	if err != nil {
+		return fmt.Errorf("lint (loc) could not run — fix this before submitting:\n%s\n%w", out.String(), err)
+	}
+
+	fmt.Fprintln(&out, "== deadcode ==")
+	dcFound, err := lint.Deadcode([]string{"./..."}, "", false, &out)
+	if err != nil {
+		return fmt.Errorf("lint (deadcode) could not run — fix build errors before submitting:\n%s\n%w", out.String(), err)
+	}
+
+	if locFound || dcFound {
+		fmt.Fprint(w, out.String())
+		return fmt.Errorf("lint failed — fix the violations above before submitting")
+	}
+	fmt.Fprintln(w, "Lint passed.")
+	return nil
 }
 
 func init() {

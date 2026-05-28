@@ -12,7 +12,7 @@ Once I decide:
 2. `td -w /project show <id>` to read the details
 3. If anything is unclear, ask me before guessing
 4. Implement the task, run tests, commit your changes
-5. `gh pr create --title "summary" --body "details"` to submit a PR
+5. `sindri-worker pr create --title "summary" --body "details"` to submit a PR
 6. `td -w /project handoff <id> --done "what you did"`
 7. `td -w /project review <id>` to submit for review
 

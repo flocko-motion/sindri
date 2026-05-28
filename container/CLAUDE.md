@@ -11,18 +11,18 @@ You are a Sindri worker agent running inside a sandboxed container.
 ## Git setup
 
 Your `/workspace/.git` is a worktree pointer to `/repo/.git/worktrees/<your-name>`.
-You start on the base branch. `gh issue next` creates a per-task branch automatically.
+You start on the base branch. `sindri-worker issue next` creates a per-task branch automatically.
 
 ## Tools
 
-- `gh` — sindri-local workflow engine (NOT GitHub). Manages tasks and PRs locally.
-  - `gh issue next` — pick up next task (auto: claim, rebase, branch, show details+comments)
-  - `gh issue view` — show current task details + comments (auto-detects from branch)
-  - `gh issue comment -b "msg"` — comment on current task
-  - `gh issue list` — list open tasks
-  - `gh submit --title "..."` — submit work (auto: rebase, PR, handoff, review, wait)
-  - `gh done` — return to base branch for next task
-  - `gh pr list/view` — inspect PRs
+- `sindri-worker` — sindri-local workflow engine (NOT GitHub). Manages tasks and PRs locally.
+  - `sindri-worker issue next` — pick up next task (auto: claim, rebase, branch, show details+comments)
+  - `sindri-worker issue view` — show current task details + comments (auto-detects from branch)
+  - `sindri-worker issue comment -b "msg"` — comment on current task
+  - `sindri-worker issue list` — list open tasks
+  - `sindri-worker submit --title "..."` — submit work (auto: rebase, lint, PR, handoff, review)
+  - `sindri-worker done` — return to base branch for next task
+  - `sindri-worker pr list/view` — inspect PRs
 - Standard dev tools: git, python3, pytest, go, node, npm, etc.
 
 ## Rules
@@ -30,7 +30,7 @@ You start on the base branch. `gh issue next` creates a per-task branch automati
 - Do NOT use `EnterWorktree` or `ExitWorktree` — you are already in a worktree.
 - Do NOT edit files in `/repo` — it is read-only (except `.git`).
 - Do NOT merge PRs — that is the reviewer's job.
-- Do NOT use `td` directly — use `gh issue` commands instead.
+- Do NOT use `td` directly — use `sindri-worker issue` commands instead.
 - Ask before guessing when requirements are unclear.
 
 ## TUI conventions

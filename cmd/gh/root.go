@@ -1,7 +1,7 @@
 // package: gh / root
 // type:    entrypoint
-// job:     the gh (sindri-local) command tree and the "not GitHub" unknown-
-//          command help. Agents drive the workflow through these subcommands.
+// job:     the sindri-worker command tree and the "not GitHub" unknown-command
+//          help. Agents drive the workflow through these subcommands.
 // limits:  subcommand behavior lives in the sibling files; storage in store.
 package main
 
@@ -14,33 +14,33 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:          "gh",
-	Short:        "sindri-local — workflow engine for sandboxed agents (not GitHub)",
+	Use:          "sindri-worker",
+	Short:        "sindri-worker — local workflow engine for sandboxed agents (NOT GitHub)",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			return cmd.Help()
 		}
 		unknown := strings.Join(args, " ")
-		return fmt.Errorf(`unknown command: gh %s
+		return fmt.Errorf(`unknown command: sindri-worker %s
 
-This is sindri-local — NOT the GitHub CLI.
+This is sindri-worker — a local workflow engine, NOT the GitHub CLI.
 There is no GitHub remote. All operations are local.
 
 Workflow commands:
-  gh issue next       Pick up the next task (claim, branch, show details)
-  gh issue list       List tasks
-  gh issue view <id>  Show task details + comments + PR status
-  gh issue comment    Add a comment to a task
-  gh submit           Submit work (rebase, create PR, handoff, wait for review)
-  gh done             Return to base branch for next task
+  sindri-worker issue next       Pick up the next task (claim, branch, show details)
+  sindri-worker issue list       List tasks
+  sindri-worker issue view <id>  Show task details + comments + PR status
+  sindri-worker issue comment    Add a comment to a task
+  sindri-worker submit           Submit work (rebase, lint, create PR, handoff)
+  sindri-worker done             Return to base branch for next task
 
 PR commands:
-  gh pr list          List local PRs
-  gh pr view          View a PR
-  gh pr create        Create a PR (prefer 'gh submit' instead)
-  gh pr review        Approve a PR
-  gh pr merge         Merge an approved PR`, unknown)
+  sindri-worker pr list          List local PRs
+  sindri-worker pr view          View a PR
+  sindri-worker pr create        Create a PR (prefer 'sindri-worker submit' instead)
+  sindri-worker pr review        Approve a PR
+  sindri-worker pr merge         Merge an approved PR`, unknown)
 	},
 	Args: cobra.ArbitraryArgs,
 }

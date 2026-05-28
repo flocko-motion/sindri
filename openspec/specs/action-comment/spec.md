@@ -3,7 +3,7 @@
 ## Purpose
 
 Defines adding a comment to a task, independent of any interface (`sindri task
-comment`, the TUI detail comment input, and the agent's `gh issue comment` all
+comment`, the TUI detail comment input, and the agent's `sindri-worker issue comment` all
 perform this one action).
 
 ## Requirements

@@ -174,5 +174,6 @@ The layered structure that realizes the rules above:
   `issue` and render via `render`.
 - `internal/tui/` — **TUI interface.** Thin Bubble Tea wrappers over the same
   `board`/`issue` state, rendering via `render`.
-- `cmd/gh/`, `internal/ghlocal/cmd/` — **the agent-facing `gh` CLI** (sindri-
-  local), the workflow engine agents drive inside containers.
+- `cmd/gh/` — **the agent-facing `sindri-worker` CLI** (sindri-local; built as
+  the `sindri-gh` host binary, exposed in the container as `sindri-worker`), the
+  workflow engine agents drive inside containers.
