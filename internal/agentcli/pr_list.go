@@ -1,8 +1,8 @@
-// package: gh / pr_list
+// package: agentcli / pr_list
 // type:    command
 // job:     `sindri-worker pr list` — lists local PRs.
 // limits:  PR records live in internal/ghlocal/store.
-package main
+package agentcli
 
 import (
 	"fmt"

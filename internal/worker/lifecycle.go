@@ -130,7 +130,7 @@ func Start(projectRoot, name string, opts StartOpts) error {
 		return err
 	}
 
-	ghBin, err := findSindriGH()
+	workerBin, err := findAgentBin("sindri-worker")
 	if err != nil {
 		return err
 	}
@@ -143,7 +143,7 @@ func Start(projectRoot, name string, opts StartOpts) error {
 		"--label", "sindri.worker=" + name,
 		"-v", claudeHome + ":/home/sindri/.claude:rw,z",
 		"-v", configPath + ":/home/sindri/.claude.json:rw,z",
-		"-v", ghBin + ":/opt/sindri/sindri-gh:ro,z",
+		"-v", workerBin + ":/opt/sindri/sindri-worker:ro,z",
 		"-e", "GH_LOCAL_BASE=" + base,
 		"-e", "COLORTERM=truecolor",
 		"-e", "TD_ROOT=/project",
@@ -219,7 +219,7 @@ func StartReviewer(projectRoot string, shell bool) error {
 
 	claudeHome, configPath := prepareClaudeHome(projectRoot, "reviewer")
 
-	ghBin, err := findSindriGH()
+	reviewBin, err := findAgentBin("sindri-review")
 	if err != nil {
 		return err
 	}
@@ -232,7 +232,7 @@ func StartReviewer(projectRoot string, shell bool) error {
 		"--label", "sindri.worker=_reviewer",
 		"-v", claudeHome + ":/home/sindri/.claude:rw,z",
 		"-v", configPath + ":/home/sindri/.claude.json:rw,z",
-		"-v", ghBin + ":/opt/sindri/sindri-gh:ro,z",
+		"-v", reviewBin + ":/opt/sindri/sindri-review:ro,z",
 		"-e", "TD_ROOT=/project",
 		"-e", "COLORTERM=truecolor",
 		"-v", projectRoot + "/.todos:/project/.todos:rw,z",
@@ -302,21 +302,22 @@ func Reset(projectRoot string) (int, error) {
 	return stopped, nil
 }
 
-// findSindriGH locates the sindri-gh binary on the host.
-func findSindriGH() (string, error) {
+// findAgentBin locates an agent CLI binary (sindri-worker / sindri-review) on
+// the host: next to the running sindri binary first, then on PATH.
+func findAgentBin(name string) (string, error) {
 	// Check next to the running sindri binary first
 	self, err := os.Executable()
 	if err == nil {
-		candidate := filepath.Join(filepath.Dir(self), "sindri-gh")
+		candidate := filepath.Join(filepath.Dir(self), name)
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate, nil
 		}
 	}
 	// Fall back to PATH
-	if path, err := exec.LookPath("sindri-gh"); err == nil {
+	if path, err := exec.LookPath(name); err == nil {
 		return path, nil
 	}
-	return "", fmt.Errorf("sindri-gh binary not found — run 'make install'")
+	return "", fmt.Errorf("%s binary not found — run 'make install'", name)
 }
 
 // prepareClaudeHome sets up the claude home directory with credentials and settings.

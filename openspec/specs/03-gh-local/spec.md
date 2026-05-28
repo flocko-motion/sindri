@@ -3,23 +3,24 @@
 ## Purpose
 
 Defines how sindri does pull requests and branches entirely locally — no
-GitHub, no remote. Agents drive the `sindri-worker` workflow (deliberately not
-named `gh`, so it is never mistaken for the GitHub CLI); PRs are records under
-`.git/`, and each task is developed on its own branch in an isolated worktree.
-This is the spec for the local PR/worktree machinery; the agent loop that uses
-it is in workers, and the human review flow is a separate action spec.
+GitHub, no remote. Agents drive the sindri-local workflow CLIs (`sindri-worker`
+for the worker, `sindri-review` for the reviewer — deliberately not named `gh`,
+so they are never mistaken for the GitHub CLI); PRs are records under `.git/`,
+and each task is developed on its own branch in an isolated worktree. This is
+the spec for the local PR/worktree machinery; the agent loop that uses it is in
+workers, and the human review flow is a separate action spec.
 
 ## Requirements
 
 ### Requirement: Local-only, not GitHub
 
-The `sindri-worker` command provided to agents SHALL be sindri-local, operating
-only on the local repository. It SHALL NOT contact GitHub or any remote, and
-every subcommand SHALL make clear it is not the GitHub CLI.
+The agent CLIs (`sindri-worker`, `sindri-review`) SHALL be sindri-local,
+operating only on the local repository. They SHALL NOT contact GitHub or any
+remote, and every subcommand SHALL make clear it is not the GitHub CLI.
 
 #### Scenario: Unknown command
 
-- **WHEN** an agent runs an unsupported `sindri-worker` command
+- **WHEN** an agent runs an unsupported command on either CLI
 - **THEN** it is told this is sindri-local (not GitHub) and shown the real commands
 
 ### Requirement: PRs are local records
@@ -78,6 +79,27 @@ SHALL be gated by the task's review gates.
 - **WHEN** a merge is attempted while the task has an unmet review gate
 - **THEN** the merge is refused until the gate is satisfied
 
+### Requirement: Role-scoped commands; merge is human-only
+
+Each agent role's CLI SHALL expose only the commands that role needs. The worker
+CLI (`sindri-worker`) creates/lists/views PRs but cannot approve, reject, or
+merge. The reviewer CLI (`sindri-review`) adds `pr approve` and `pr reject` —
+the reviewer agent's job, taken without a human gate. Merging SHALL be
+human-only: it is exposed only on the host (`sindri pr merge`) and SHALL require
+explicit human confirmation; no agent CLI provides a merge command.
+
+#### Scenario: Reviewer approves, human merges
+
+- **WHEN** the reviewer agent approves a PR with `sindri-review pr approve`
+- **THEN** the PR is approved and its review gates satisfied, but it is merged
+  only later by a human on the host
+
+#### Scenario: No agent merge
+
+- **WHEN** any agent tries to merge
+- **THEN** no `sindri-worker`/`sindri-review` merge command exists; only the
+  host `sindri pr merge` can, after human confirmation
+
 ### Requirement: Self-contained, no remote dependency
 
 The whole PR/worktree workflow SHALL function with no network and no GitHub
@@ -92,8 +114,9 @@ account; everything lives in the local git repository.
 
 - `internal/ghlocal/store/` (`type: adapter`) — the PR record store and the
   git checkout/merge/branch operations.
-- `cmd/gh/` (`type: command`) — the agent-facing `sindri-worker` workflow CLI
-  (issue/submit/done/pr…), wrapping the store, td, git, and the lint gate. Built
-  as the host binary `sindri-gh`, exposed in the container as `sindri-worker`.
+- `internal/agentcli/` (`type: command`) — the shared agent command set
+  (issue/submit/done/pr create/list/view, plus pr approve/reject for review),
+  wrapping the store, td, git, and the lint gate. Two thin entrypoints wire role
+  subsets: `cmd/sindri-worker/` (worker) and `cmd/sindri-review/` (reviewer).
 - `internal/worker/` (`type: adapter`) — creates and tends the worktrees the
   branches live in (see workers).

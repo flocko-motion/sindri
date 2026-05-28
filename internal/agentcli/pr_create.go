@@ -1,9 +1,9 @@
-// package: gh / pr_create
+// package: agentcli / pr_create
 // type:    command
 // job:     `sindri-worker pr create` plus the PR-ID derivation/revision helpers;
 //          rebases, lints, and records a PR.
 // limits:  persistence in store; prefer `sindri-worker submit`, which wraps this.
-package main
+package agentcli
 
 import (
 	"fmt"

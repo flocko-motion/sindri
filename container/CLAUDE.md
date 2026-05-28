@@ -29,7 +29,7 @@ You start on the base branch. `sindri-worker issue next` creates a per-task bran
 
 - Do NOT use `EnterWorktree` or `ExitWorktree` — you are already in a worktree.
 - Do NOT edit files in `/repo` — it is read-only (except `.git`).
-- Do NOT merge PRs — that is the reviewer's job.
+- Do NOT approve or merge PRs — those are human-only actions on the host.
 - Do NOT use `td` directly — use `sindri-worker issue` commands instead.
 - Ask before guessing when requirements are unclear.
 

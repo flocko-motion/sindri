@@ -1,3 +1,8 @@
+// package: container / image
+// type:    adapter (podman)
+// job:     the agent image identity (ImageName) and build — rebuilds via podman
+//          when the Dockerfile changes or the weekly cache key is stale.
+// limits:  worker/reviewer container lifecycle lives in internal/worker.
 package container
 
 import (

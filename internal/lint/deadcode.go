@@ -1,9 +1,8 @@
-// Package lint provides in-process static-analysis linters.
-//
-// The deadcode linter is a port of the glue in golang.org/x/tools/cmd/deadcode,
-// reduced to the pieces this project needs and reworked to run as a library
-// (returning errors instead of calling log.Fatal) with no dependency on
-// x/tools internal packages.
+// package: lint / deadcode
+// type:    logic
+// job:     the dead-code linter — a library port of x/tools/cmd/deadcode that
+//          reports source functions unreachable from any main (via RTA).
+// limits:  reports only; CLI wiring and exit codes live in cmd/sindri/lint.go.
 package lint
 
 import (

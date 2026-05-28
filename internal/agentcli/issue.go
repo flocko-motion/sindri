@@ -1,10 +1,10 @@
-// package: gh / issue
+// package: agentcli / issue
 // type:    command
 // job:     the agent's `sindri-worker issue next/list/view/comment` — claim a task,
 //          create its per-task branch, and show task details + comments.
 // limits:  wraps the td CLI directly (container context); PR ops live in the
 //          pr_*.go siblings, persistence in store.
-package main
+package agentcli
 
 import (
 	"encoding/json"
@@ -16,11 +16,6 @@ import (
 	"github.com/flo-at/sindri/internal/ghlocal/store"
 	"github.com/spf13/cobra"
 )
-
-var issueCmd = &cobra.Command{
-	Use:   "issue",
-	Short: "Manage tasks (issues)",
-}
 
 var issueListState string
 
@@ -221,10 +216,4 @@ func printTaskDetails(taskID string) error {
 func init() {
 	issueListCmd.Flags().StringVar(&issueListState, "state", "", "Filter by state (open, closed, etc.)")
 	issueCommentCmd.Flags().StringVarP(&issueCommentBody, "body", "b", "", "Comment text")
-
-	issueCmd.AddCommand(issueListCmd)
-	issueCmd.AddCommand(issueViewCmd)
-	issueCmd.AddCommand(issueCommentCmd)
-	issueCmd.AddCommand(issueNextCmd)
-	rootCmd.AddCommand(issueCmd)
 }

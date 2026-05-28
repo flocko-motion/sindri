@@ -141,9 +141,6 @@ func newPrCmd() *cobra.Command {
 			if taskID != "" {
 				printTaskSummary(taskID)
 			}
-			if !confirmHuman() {
-				return fmt.Errorf("aborted")
-			}
 			pr, err = store.Approve(id)
 			if err != nil {
 				return err
@@ -151,6 +148,9 @@ func newPrCmd() *cobra.Command {
 			fmt.Printf("Approved PR: %s\n", pr.ID)
 			if !approveAndMerge {
 				return nil
+			}
+			if !confirmHuman() {
+				return fmt.Errorf("aborted")
 			}
 			if taskID != "" {
 				if missing, err := checkReviewGates(taskID); err != nil {

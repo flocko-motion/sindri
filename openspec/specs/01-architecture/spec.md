@@ -130,7 +130,9 @@ as the layout evolves.
 
 ### Requirement: File headers
 
-Every source file SHALL begin with a structured header with four fields:
+Every non-test source file SHALL begin with a structured header with four
+fields. Test files (`*_test.go`) are exempt — their subject is named by the file
+they test.
 
 - `package:` — the package, optionally `package / file` to name the file's role
 - `type:` — one of: `logic`, `adapter`, `assembly`, `rendering`, `ui`,
@@ -165,15 +167,21 @@ The layered structure that realizes the rules above:
   `issue` and depends on the adapters it must not.
 - `internal/render/` — **UI-neutral rendering.** Maps state to styling (status
   colors, gate marks). Shared by every interface; contains no interface code.
-- `internal/ghlocal/`, `internal/openspec/` — **adapters.** Wrap external tools
-  (the local PR store, the openspec CLI). Internal logic reaches these tools
-  only here.
+- `internal/adapter/td/`, `internal/adapter/spec/` — **adapters.** Wrap the td
+  task CLI and the openspec CLI. Internal logic reaches those tools only here.
+- `internal/ghlocal/store/` — **adapter.** The local PR record store and the git
+  checkout/merge/branch operations.
 - `internal/worker/` — **adapter + lifecycle.** Wraps podman/git worktrees for
   agent containers.
-- `cmd/sindri/` — **CLI interface.** Thin Cobra wrappers that call `board`/
-  `issue` and render via `render`.
+- `internal/container/` — **adapter.** The agent container image identity/build.
+- `internal/lint/` — **logic.** The loc + deadcode linters, used by `sindri
+  lint` and the submit lint gate.
+- `internal/agentcli/` — **command.** The shared agent command set
+  (issue/submit/done/pr…); wired into the two agent binaries below.
+- `cmd/sindri/` — **CLI interface (host, human).** Thin Cobra wrappers that call
+  `board`/`issue` and render via `render`; owns the human-only `pr merge`.
 - `internal/tui/` — **TUI interface.** Thin Bubble Tea wrappers over the same
   `board`/`issue` state, rendering via `render`.
-- `cmd/gh/` — **the agent-facing `sindri-worker` CLI** (sindri-local; built as
-  the `sindri-gh` host binary, exposed in the container as `sindri-worker`), the
-  workflow engine agents drive inside containers.
+- `cmd/sindri-worker/`, `cmd/sindri-review/` — **agent entrypoints.** Thin mains
+  wiring the worker / reviewer subset of `internal/agentcli` (sindri-local, NOT
+  GitHub), the CLIs agents drive inside containers.

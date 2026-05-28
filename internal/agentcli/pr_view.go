@@ -1,8 +1,8 @@
-// package: gh / pr_view
+// package: agentcli / pr_view
 // type:    command
 // job:     `sindri-worker pr view` — prints a PR (JSON detail).
 // limits:  PR records live in internal/ghlocal/store.
-package main
+package agentcli
 
 import (
 	"encoding/json"

@@ -1,9 +1,9 @@
-// package: gh / banner
+// package: agentcli / banner
 // type:    command
 // job:     shared sindri-worker helpers — the "[sindri-worker]" banner, the td
 //          wrapper, and base-branch detection used across the subcommands.
 // limits:  helpers only; each subcommand's behavior lives in its own file.
-package main
+package agentcli
 
 import (
 	"fmt"
@@ -12,14 +12,16 @@ import (
 	"strings"
 )
 
-const bannerPrefix = "\033[2m[sindri-worker — not github]"
+// bannerName is the binary identity shown in the banner; ReviewRoot overrides it.
+var bannerName = "sindri-worker"
 
 func printBanner() {
+	prefix := fmt.Sprintf("\033[2m[%s — not github]", bannerName)
 	taskID := currentTaskID()
 	if taskID != "" {
-		fmt.Fprintf(os.Stderr, "%s [task: %s]\033[0m\n", bannerPrefix, taskID)
+		fmt.Fprintf(os.Stderr, "%s [task: %s]\033[0m\n", prefix, taskID)
 	} else {
-		fmt.Fprintf(os.Stderr, "%s [no task selected]\033[0m\n", bannerPrefix)
+		fmt.Fprintf(os.Stderr, "%s [no task selected]\033[0m\n", prefix)
 	}
 }
 

@@ -1,8 +1,8 @@
-// package: gh / done
+// package: agentcli / done
 // type:    command
 // job:     the agent's `sindri-worker done` — return to base branch, ready for next.
 // limits:  no task/PR mutation; just git branch state and the status file.
-package main
+package agentcli
 
 import (
 	"fmt"
@@ -40,8 +40,4 @@ var doneCmd = &cobra.Command{
 		fmt.Printf("Ready on %s. Run 'sindri-worker issue next' to pick up the next task.\n", base)
 		return nil
 	},
-}
-
-func init() {
-	rootCmd.AddCommand(doneCmd)
 }

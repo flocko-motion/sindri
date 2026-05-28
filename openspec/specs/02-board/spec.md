@@ -60,15 +60,17 @@ data; refreshing re-runs it rather than mutating in place.
 
 ### Requirement: Ordering
 
-The board SHALL order Issues in three sections: open Issues first (in task
-priority order), then active Issues (most recently updated first), then closed
-Issues (most recently updated first). Spec-only Issues, having no task, sort
-with the open section.
+The board SHALL place spec-only Issues first (they have no task yet), then task
+Issues grouped open → active → closed: open Issues in the order the task source
+returns them (td's default ordering), then active Issues (most recently updated
+first), then closed Issues (most recently updated first).
 
 #### Scenario: Mixed states
 
-- **WHEN** the board contains open, in-progress, and closed Issues
-- **THEN** they appear grouped open → active → closed as specified
+- **WHEN** the board contains a spec-only Issue plus open, in-progress, and
+  closed tasks
+- **THEN** the spec-only Issue appears first, then the tasks grouped
+  open → active → closed
 
 ## Structure
 

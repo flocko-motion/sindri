@@ -12,15 +12,16 @@ This chapter is the integration.
 
 ### Requirement: Plan / build / review separation
 
-Humans SHALL plan (create tasks and specs) and review (approve/merge); agents
-SHALL build (implement tasks and open PRs). Agents SHALL NOT approve or merge
-their own work.
+Humans SHALL plan (author tasks and specs) and merge; the worker agent SHALL
+build (implement tasks, open PRs); the reviewer agent SHALL review (approve or
+reject the worker's PRs). No agent SHALL approve or merge its OWN work — review
+is performed by the separate reviewer agent, and merge is human-only.
 
 #### Scenario: Roles
 
 - **WHEN** work moves through the loop
-- **THEN** tasks/specs are authored by humans, implemented by agents, and
-  approved/merged by humans
+- **THEN** tasks/specs are authored by humans, implemented by the worker agent,
+  reviewed (approved/rejected) by the reviewer agent, and merged by a human
 
 ### Requirement: The worker loop
 
@@ -86,8 +87,8 @@ compiles but does not meet the spec.
 
 ### Requirement: Communication via comments
 
-A worker that is blocked or uncertain SHALL ask by commenting on the task (`gh
-issue comment -b "..."`); the human replies with another comment, and the
+A worker that is blocked or uncertain SHALL ask by commenting on the task
+(`sindri-worker issue comment -b "..."`); the human replies with another comment, and the
 comment thread SHALL be shown when the task is next viewed or picked up.
 
 #### Scenario: Blocking question
@@ -109,9 +110,10 @@ matching `approved-review-*`.
 
 ## Structure
 
-The agent's loop lives in `container/skills/td-next` (build) and
-`container/skills/td-review` (review); the agent's verbs are implemented in
-`cmd/gh/issue.go` (`next`/`list`/`view`/`comment`), `cmd/gh/submit.go`, and
-`cmd/gh/done.go`, with PR records in `internal/ghlocal/store`. The human review
-flow is the `action-*` specs driven from `cmd/sindri` and the TUI. Task state
-transitions go through the td CLI (in-container) and the td adapter (on host).
+The agent loops live in `container/skills/td-next` (worker) and
+`container/skills/td-review` (reviewer); the agents' verbs are implemented in
+`internal/agentcli` (issue/submit/done/pr…), wired into the `sindri-worker` and
+`sindri-review` binaries, with PR records in `internal/ghlocal/store`. The
+human-only merge and the host review flow are the `action-*` specs driven from
+`cmd/sindri` and the TUI. Task state transitions go through the td CLI
+(in-container) and the td adapter (on host).

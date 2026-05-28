@@ -56,15 +56,21 @@ in-progress from a previous run.
 
 ### Requirement: Bundled agent tooling
 
-The container image SHALL bundle the tools an agent needs — the `sindri-worker`
-workflow CLI, `td`, and the openspec CLI — so a worker can drive the full propose
-→ implement → submit → review loop offline. The `sindri-worker` binary SHALL be
-mounted from the host so it can be updated without rebuilding the image.
+The container image SHALL bundle the tools an agent needs — its role's sindri
+CLI, `td`, and the openspec CLI — so an agent can drive its loop offline. The
+role binary SHALL be mounted from the host so it can be updated without
+rebuilding the image: a worker container gets `sindri-worker`, the reviewer
+container gets `sindri-review`.
 
-#### Scenario: Agent runs the loop
+#### Scenario: Worker runs the loop
 
 - **WHEN** a worker container starts
 - **THEN** `sindri-worker`, `td`, and `openspec` are all on its PATH
+
+#### Scenario: Reviewer runs the loop
+
+- **WHEN** the reviewer container starts
+- **THEN** `sindri-review`, `td`, and `openspec` are all on its PATH
 
 ## Structure
 

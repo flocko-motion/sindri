@@ -41,13 +41,15 @@ RUN mkdir -p /opt/sindri && cd /opt/sindri && npm init -y && npm install "@anthr
 # ── openspec CLI (spec-driven workflow, optional per project) ──────────────────
 RUN npm install -g @fission-ai/openspec@latest
 
-# ── sindri-worker (mounted from host at runtime) ─────────────────────────────
-# The sindri-gh binary is mounted read-only at /opt/sindri/sindri-gh and exposed
-# to agents as `sindri-worker` (deliberately NOT `gh`, so agents don't mistake it
-# for the GitHub CLI). Create the symlink at build time (as root) — the mount
-# provides the target at runtime. The sindri user can't write to /usr/local/bin,
-# so this must happen here, not at container startup.
-RUN ln -sf /opt/sindri/sindri-gh /usr/local/bin/sindri-worker
+# ── agent CLIs (mounted from host at runtime) ────────────────────────────────
+# The per-role agent binaries are mounted read-only under /opt/sindri at runtime
+# (deliberately NOT named `gh`, so agents don't mistake them for the GitHub CLI):
+# a worker container gets /opt/sindri/sindri-worker, the reviewer container gets
+# /opt/sindri/sindri-review. Symlink both at build time (as root) — only the one
+# mounted for a given container resolves; the other dangles harmlessly. The
+# sindri user can't write to /usr/local/bin, so this must happen here.
+RUN ln -sf /opt/sindri/sindri-worker /usr/local/bin/sindri-worker \
+ && ln -sf /opt/sindri/sindri-review /usr/local/bin/sindri-review
 
 # ── Shims ─────────────────────────────────────────────────────────────────────
 COPY container/shims/docker          /usr/local/bin/docker

@@ -14,7 +14,7 @@ You review pull requests created by worker agents. You do NOT write code.
 ## Tools
 
 - `td` — task management. Always use `-w /project` flag.
-- `sindri-worker` — local PR management (NOT GitHub). Use `sindri-worker pr list`, `sindri-worker pr view`, `sindri-worker pr review --approve`, `sindri-worker pr merge`.
+- `sindri-review` — local PR review (NOT GitHub). `sindri-review pr list|view` to read PRs, `sindri-review pr approve|reject` to decide, `sindri-review issue comment <task-id> -b "..."` to record findings.
 - Standard read-only tools: git, grep, etc.
 
 ## Rules
@@ -22,6 +22,4 @@ You review pull requests created by worker agents. You do NOT write code.
 - Do NOT use `EnterWorktree` or `ExitWorktree`.
 - Do NOT edit source files — you are a reviewer, not a worker.
 - Do NOT create PRs — that is the worker's job.
-- ALWAYS ask the user for confirmation before approving, merging, or rejecting a PR.
-- When approving (after user confirms): `sindri-worker pr review <id> --approve` (marks the PR ready; merge separately with `sindri-worker pr merge`).
-- When rejecting (after user confirms): `td -w /project comment <task-id> "feedback"` then `td -w /project reject <task-id>`.
+- You approve/reject with `sindri-review pr approve|reject`. You CANNOT merge — merging is human-only on the host (`sindri pr merge`). After you approve, hand off to the human to merge.

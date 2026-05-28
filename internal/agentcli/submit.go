@@ -1,9 +1,9 @@
-// package: gh / submit
+// package: agentcli / submit
 // type:    command
 // job:     the agent's `sindri-worker submit` — rebase, lint, create the PR, hand
 //          off and submit the task for review, then return (no blocking wait).
 // limits:  PR records live in store; lint via internal/lint; task state via td CLI.
-package main
+package agentcli
 
 import (
 	"fmt"
@@ -144,5 +144,4 @@ func init() {
 	submitCmd.Flags().StringVarP(&submitTitle, "title", "t", "", "PR title (required, use conventional commits)")
 	submitCmd.Flags().StringVarP(&submitBody, "body", "b", "", "PR body")
 	submitCmd.Flags().StringVar(&submitDone, "done", "", "Handoff summary (defaults to title)")
-	rootCmd.AddCommand(submitCmd)
 }

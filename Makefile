@@ -1,21 +1,25 @@
-.PHONY: build sindri gh image install clean
+.PHONY: build sindri worker review image install clean
 
 PREFIX := $(HOME)/.local/bin
 
-build: sindri gh
+build: sindri worker review
 
 sindri:
 	go build -o bin/sindri ./cmd/sindri/
 
-gh:
-	go build -o bin/sindri-gh ./cmd/gh/
+worker:
+	go build -o bin/sindri-worker ./cmd/sindri-worker/
+
+review:
+	go build -o bin/sindri-review ./cmd/sindri-review/
 
 install: build
 	mkdir -p $(PREFIX)
 	cp bin/sindri $(PREFIX)/sindri
-	cp bin/sindri-gh $(PREFIX)/sindri-gh
+	cp bin/sindri-worker $(PREFIX)/sindri-worker
+	cp bin/sindri-review $(PREFIX)/sindri-review
 
-# Rebuild image when container files change (gh is now mounted, not built in image)
+# Rebuild image when container files change (agent CLIs are mounted, not built in image)
 CONTAINER_DEPS := $(shell find container -type f 2>/dev/null)
 .image-stamp: $(CONTAINER_DEPS)
 	cp "$$(which td)" bin/td
@@ -28,4 +32,4 @@ image: .image-stamp
 all: build image install
 
 clean:
-	rm -f bin/sindri bin/sindri-gh bin/gh bin/td bin/yq .image-stamp
+	rm -f bin/sindri bin/sindri-worker bin/sindri-review bin/td bin/yq .image-stamp

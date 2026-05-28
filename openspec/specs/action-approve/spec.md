@@ -3,7 +3,9 @@
 ## Purpose
 
 Defines approving a pull request, independent of any interface. Approval marks a
-PR ready to merge; it is a human decision.
+PR ready and satisfies its review gates. It is the reviewer's decision (the
+reviewer agent via `sindri-review pr approve`, or a human on the host) and does
+NOT require human confirmation — only merge does.
 
 ## Requirements
 
@@ -17,22 +19,28 @@ PR SHALL NOT be approvable.
 - **WHEN** an open PR is approved
 - **THEN** its status becomes approved
 
-### Requirement: Human-only
+#### Scenario: Merged PR
 
-Approving SHALL require explicit confirmation that a human is acting; agents
-SHALL NOT approve their own work.
+- **WHEN** approve is invoked on a merged PR
+- **THEN** it is refused
 
-#### Scenario: Confirmation required
+### Requirement: Satisfies review gates
 
-- **WHEN** approve is invoked
-- **THEN** it confirms a human is acting before changing the PR
+Approving SHALL satisfy the task's review gates by adding the matching
+`approved-review-*` label for each unmet `require-review-*` gate, so a later
+merge is unblocked.
 
-### Requirement: Show what is being approved
+#### Scenario: Gate satisfied
 
-Before confirming, the action SHALL show the PR id, title, and the task summary
-with its review gates, so the human approves the right thing.
+- **WHEN** a PR whose task requires `require-review-code` is approved
+- **THEN** the task gains `approved-review-code`
 
-#### Scenario: Pre-approval summary
+### Requirement: Not self-approval
 
-- **WHEN** approve is invoked
-- **THEN** the PR and its task/gate summary are shown before the confirmation
+Review SHALL be performed by an actor other than the one that built the work: an
+agent SHALL NOT approve its own PR. The reviewer agent reviews the worker's PRs.
+
+#### Scenario: Separate reviewer
+
+- **WHEN** a worker's PR is approved
+- **THEN** the approval comes from the reviewer agent or a human, not the worker
