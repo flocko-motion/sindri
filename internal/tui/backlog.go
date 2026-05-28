@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"github.com/flo-at/sindri/internal/issue"
+	"github.com/flo-at/sindri/internal/render"
 )
 
 type backlogRow struct {
@@ -19,7 +20,7 @@ func buildBacklogRows(tasks []taskItem, prs []prItem, workersByTask map[string]s
 	prByTask := make(map[string][]int)
 	var orphanPRs []int
 	for i, pr := range prs {
-		taskID := extractTaskIDFromTitle(pr.Title)
+		taskID := issue.TaskIDFromTitle(pr.Title)
 		if taskID != "" {
 			prByTask[taskID] = append(prByTask[taskID], i)
 		} else {
@@ -31,17 +32,17 @@ func buildBacklogRows(tasks []taskItem, prs []prItem, workersByTask map[string]s
 	for ti, t := range tasks {
 		var status, statusText string
 		if w, ok := workersByTask[t.ID]; ok {
-			status = statusRunning.Render("🔨 " + w)
+			status = render.Worker(w)
 			statusText = "🔨 " + w
 		} else if t.Status == "in_progress" {
-			status = statusOrphaned.Render("⚠ in_progress")
+			status = render.Orphaned()
 			statusText = "⚠ in_progress"
 		} else {
-			status = statusStyle(t.Status)
+			status = render.TaskStatus(t.Status)
 			statusText = t.Status
 		}
 		title := t.Title
-		if t.Status == "closed" || t.Status == "approved" {
+		if t.IsClosed() {
 			title = dimStyle.Render(t.Title)
 		}
 		tsStr := ""
@@ -58,15 +59,14 @@ func buildBacklogRows(tasks []taskItem, prs []prItem, workersByTask map[string]s
 		)
 		rows = append(rows, backlogRow{taskIdx: ti, display: line, plain: plain})
 
-		taskClosed := t.Status == "closed" || t.Status == "approved"
 		for _, pi := range prByTask[t.ID] {
 			pr := prs[pi]
 			prPlain := fmt.Sprintf("    └ %s [%s]", pr.ID, pr.Status)
-			prLine := fmt.Sprintf("    └ %s [%s]", pr.ID, prStatusStyle(pr.Status, taskClosed))
+			prLine := fmt.Sprintf("    └ %s [%s]", pr.ID, render.PRStatus(pr.Status, t.IsClosed()))
 			rows = append(rows, backlogRow{isPR: true, prIdx: pi, display: prLine, plain: prPlain})
 		}
 
-		if gates := renderGates(t.Labels); gates != "" {
+		if gates := render.Gates(t.Gates()); gates != "" {
 			rows = append(rows, backlogRow{taskIdx: ti, display: dimStyle.Render("    " + gates), plain: "    " + gates})
 		}
 	}
@@ -77,7 +77,7 @@ func buildBacklogRows(tasks []taskItem, prs []prItem, workersByTask map[string]s
 		if prTitle == "" {
 			prTitle = pr.ID
 		}
-		prLine := fmt.Sprintf("%s  %s", prStatusStyle(pr.Status, false), prTitle)
+		prLine := fmt.Sprintf("%s  %s", render.PRStatus(pr.Status, false), prTitle)
 		prPlain := fmt.Sprintf("%s  %s", pr.Status, prTitle)
 		rows = append(rows, backlogRow{isPR: true, prIdx: pi, display: prLine, plain: prPlain})
 	}
@@ -102,74 +102,3 @@ func renderBacklogList(rows []backlogRow, cursor int, active bool) string {
 	return b.String()
 }
 
-func statusStyle(status string) string {
-	switch status {
-	case "in_progress", "running":
-		return statusRunning.Render(status)
-	case "open":
-		return statusOpen.Render(status)
-	case "in_review":
-		return statusOpen.Render(status)
-	case "merged", "approved", "closed":
-		return statusDone.Render(status)
-	default:
-		return dimStyle.Render(status)
-	}
-}
-
-// prStatusStyle colors a PR status. An open PR is active/ready, so it is green
-// (not orange like an open task). A rejected PR is only highlighted red while
-// its parent task is still active; once the task is closed the reject history
-// is just noise, so it is dimmed.
-func prStatusStyle(status string, taskClosed bool) string {
-	switch status {
-	case "open":
-		return prOpenStyle.Render(status)
-	case "approved":
-		return prApprovedStyle.Render(status)
-	case "rejected":
-		if taskClosed {
-			return dimStyle.Render(status)
-		}
-		return prRejectedStyle.Render(status)
-	case "merged", "closed":
-		return dimStyle.Render(status)
-	default:
-		return dimStyle.Render(status)
-	}
-}
-
-func extractTaskIDFromTitle(title string) string {
-	if m := taskIDRe.FindStringSubmatch(title); len(m) > 1 {
-		return m[1]
-	}
-	return ""
-}
-
-func renderGates(labels []string) string {
-	approved := make(map[string]bool)
-	var required []string
-	for _, l := range labels {
-		if strings.HasPrefix(l, "require-review-") {
-			required = append(required, strings.TrimPrefix(l, "require-"))
-		}
-		if strings.HasPrefix(l, "approved-review-") {
-			approved[strings.TrimPrefix(l, "approved-")] = true
-		}
-	}
-	if len(required) == 0 {
-		return ""
-	}
-	var parts []string
-	for _, r := range required {
-		display := strings.ReplaceAll(r, "-", " ")
-		if approved[r] {
-			parts = append(parts, "☑ "+display)
-		} else {
-			parts = append(parts, "☐ "+display)
-		}
-	}
-	return strings.Join(parts, "  ")
-}
-
-var _ = lipgloss.Width // keep import

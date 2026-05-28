@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"regexp"
 	"strings"
 	"time"
 
@@ -22,8 +21,6 @@ const (
 	viewBacklog = iota
 	viewWorkers
 )
-
-var taskIDRe = regexp.MustCompile(`\(?(td-[0-9a-f]+)\)?`)
 
 const refreshInterval = 5 * time.Second
 

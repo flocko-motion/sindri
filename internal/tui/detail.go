@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/flo-at/sindri/internal/issue"
+	"github.com/flo-at/sindri/internal/render"
 	"github.com/flo-at/sindri/internal/worker"
 )
 
@@ -59,7 +61,7 @@ func taskDetail(t taskItem, prs []prItem, workers []worker.Worker, projectRoot s
 	// Metadata section
 	var meta strings.Builder
 	meta.WriteString(renderField("ID", t.ID) + "\n")
-	meta.WriteString(renderField("Status", statusStyle(t.Status)) + "\n")
+	meta.WriteString(renderField("Status", render.TaskStatus(t.Status)) + "\n")
 	meta.WriteString(renderField("Type", t.Type) + "\n")
 	meta.WriteString(renderField("Priority", t.Priority) + "\n")
 	if !t.CreatedAt.IsZero() {
@@ -77,7 +79,7 @@ func taskDetail(t taskItem, prs []prItem, workers []worker.Worker, projectRoot s
 	}
 
 	// Review gates section
-	if gates := renderDetailGates(t.Labels); gates != "" {
+	if gates := render.Gates(t.Gates()); gates != "" {
 		sections = append(sections, renderSection("Review Gates", gates, width))
 	}
 
@@ -100,7 +102,7 @@ func taskDetail(t taskItem, prs []prItem, workers []worker.Worker, projectRoot s
 	var taskPRs []prItem
 	var prIDs []string
 	for _, pr := range prs {
-		if extractTaskIDFromTitle(pr.Title) == t.ID {
+		if issue.TaskIDFromTitle(pr.Title) == t.ID {
 			taskPRs = append(taskPRs, pr)
 			prIDs = append(prIDs, pr.ID)
 		}
@@ -112,7 +114,7 @@ func taskDetail(t taskItem, prs []prItem, workers []worker.Worker, projectRoot s
 				prContent.WriteByte('\n')
 			}
 			prContent.WriteString(renderField("PR", pr.ID) + "\n")
-			prContent.WriteString(renderField("Status", statusStyle(pr.Status)) + "\n")
+			prContent.WriteString(renderField("Status", render.TaskStatus(pr.Status)) + "\n")
 			prContent.WriteString(renderField("Branch", pr.Branch+" → "+pr.Base))
 		}
 		sections = append(sections, renderSection("Pull Requests", prContent.String(), width))
@@ -133,31 +135,6 @@ func taskDetail(t taskItem, prs []prItem, workers []worker.Worker, projectRoot s
 	}
 }
 
-func renderDetailGates(labels []string) string {
-	approved := make(map[string]bool)
-	var required []string
-	for _, l := range labels {
-		if strings.HasPrefix(l, "require-review-") {
-			required = append(required, strings.TrimPrefix(l, "require-"))
-		}
-		if strings.HasPrefix(l, "approved-review-") {
-			approved[strings.TrimPrefix(l, "approved-")] = true
-		}
-	}
-	if len(required) == 0 {
-		return ""
-	}
-	var lines []string
-	for _, r := range required {
-		display := strings.ReplaceAll(r, "-", " ")
-		if approved[r] {
-			lines = append(lines, "  ☑ "+display)
-		} else {
-			lines = append(lines, "  ☐ "+display)
-		}
-	}
-	return strings.Join(lines, "\n")
-}
 
 func prDetail(pr prItem) detailState {
 	var sections []string
@@ -167,7 +144,7 @@ func prDetail(pr prItem) detailState {
 	meta.WriteString(renderField("PR", pr.ID) + "\n")
 	meta.WriteString(renderField("Title", pr.Title) + "\n")
 	meta.WriteString(renderField("Branch", pr.Branch+" → "+pr.Base) + "\n")
-	meta.WriteString(renderField("Status", statusStyle(pr.Status)))
+	meta.WriteString(renderField("Status", render.TaskStatus(pr.Status)))
 	sections = append(sections, renderSection("PR Details", meta.String(), width))
 
 	return detailState{
@@ -185,7 +162,7 @@ func workerDetail(wk worker.Worker) detailState {
 	var meta strings.Builder
 	meta.WriteString(renderField("Name", wk.Name) + "\n")
 	meta.WriteString(renderField("Role", wk.Role) + "\n")
-	meta.WriteString(renderField("Status", statusStyle(wk.Status)))
+	meta.WriteString(renderField("Status", render.TaskStatus(wk.Status)))
 	if wk.Container != "" {
 		meta.WriteString("\n" + renderField("Container", wk.Container))
 	}

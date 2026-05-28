@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/flo-at/sindri/internal/render"
 	"github.com/flo-at/sindri/internal/worker"
 )
 
@@ -75,7 +76,7 @@ func renderWorkersList(workers []worker.Worker, cursor int, active bool) string 
 			line := fmt.Sprintf("  %s %-12s %s  %-30s %s  %-12s %s",
 				r.icon,
 				r.name,
-				statusStyle(r.status),
+				render.TaskStatus(r.status),
 				dimStyle.Render(r.task),
 				dimStyle.Render(r.pr),
 				dimStyle.Render(r.path),

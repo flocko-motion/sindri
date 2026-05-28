@@ -7,12 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/flo-at/sindri/internal/ghlocal/store"
+	"github.com/flo-at/sindri/internal/issue"
+	"github.com/flo-at/sindri/internal/render"
 	"github.com/flo-at/sindri/internal/worker"
 	"github.com/spf13/cobra"
 )
@@ -80,9 +81,9 @@ func newPrCmd() *cobra.Command {
 					continue
 				}
 				reviews := ""
-				if taskID := extractTaskID(pr.Title); taskID != "" {
-					if labels, err := getTaskLabels(taskID); err == nil {
-						reviews = cliGateStatus(labels)
+				if taskID := issue.TaskIDFromTitle(pr.Title); taskID != "" {
+					if iss, err := issue.Load(tdWorkDir(), taskID); err == nil {
+						reviews = render.Gates(iss.Gates())
 					}
 				}
 				if pr.ID == selected {
@@ -130,7 +131,7 @@ func newPrCmd() *cobra.Command {
 			}
 			fmt.Printf("PR:    %s\n", pr.ID)
 			fmt.Printf("Title: %s\n", pr.Title)
-			taskID := extractTaskID(pr.Title)
+			taskID := issue.TaskIDFromTitle(pr.Title)
 			if taskID != "" {
 				printTaskSummary(taskID)
 			}
@@ -230,7 +231,7 @@ func newPrCmd() *cobra.Command {
 				}
 				fmt.Printf("PR:    %s\n", pr.ID)
 				fmt.Printf("Title: %s\n", pr.Title)
-				taskID := extractTaskID(pr.Title)
+				taskID := issue.TaskIDFromTitle(pr.Title)
 				if taskID != "" {
 					printTaskSummary(taskID)
 				}
@@ -303,7 +304,7 @@ func newPrCmd() *cobra.Command {
 			}
 			fmt.Printf("Rejected PR %s\n", pr.ID)
 
-			if taskID := extractTaskID(pr.Title); taskID != "" {
+			if taskID := issue.TaskIDFromTitle(pr.Title); taskID != "" {
 				tdComment := exec.Command("td", "comment", taskID, comment)
 				tdComment.Dir = tdWorkDir()
 				if out, err := tdComment.CombinedOutput(); err != nil {
@@ -431,35 +432,26 @@ func newPrCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			taskID := extractTaskID(pr.Title)
+			taskID := issue.TaskIDFromTitle(pr.Title)
 			if taskID == "" {
 				return fmt.Errorf("no task ID found in PR title")
 			}
-			labels, err := getTaskLabels(taskID)
+			iss, err := issue.Load(tdWorkDir(), taskID)
 			if err != nil {
 				return err
 			}
-			approved := make(map[string]bool)
-			var required []string
-			for _, l := range labels {
-				if strings.HasPrefix(l, "require-review-") {
-					required = append(required, strings.TrimPrefix(l, "require-review-"))
-				}
-				if strings.HasPrefix(l, "approved-review-") {
-					approved[strings.TrimPrefix(l, "approved-review-")] = true
-				}
-			}
-			if len(required) == 0 {
+			gates := iss.Gates()
+			if len(gates) == 0 {
 				fmt.Printf("No review gates on %s\n", taskID)
 				return nil
 			}
 			fmt.Printf("Review gates for %s (%s):\n", args[0], taskID)
-			for _, r := range required {
-				if approved[r] {
-					fmt.Printf("  ☑ %s\n", r)
-				} else {
-					fmt.Printf("  ☐ %s\n", r)
+			for _, g := range gates {
+				mark := "☐"
+				if g.Approved {
+					mark = "☑"
 				}
+				fmt.Printf("  %s %s\n", mark, g.Name)
 			}
 			return nil
 		},
@@ -473,7 +465,7 @@ func newPrCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			taskID := extractTaskID(pr.Title)
+			taskID := issue.TaskIDFromTitle(pr.Title)
 			if taskID == "" {
 				return fmt.Errorf("no task ID found in PR title")
 			}
@@ -536,7 +528,7 @@ func printPRInfo(id string) error {
 	}
 	fmt.Printf("%s [%s] %s → %s\n", pr.ID, pr.Status, pr.Branch, pr.Base)
 	fmt.Printf("%s\n", pr.Title)
-	if taskID := extractTaskID(pr.Title); taskID != "" {
+	if taskID := issue.TaskIDFromTitle(pr.Title); taskID != "" {
 		fmt.Println()
 		printTaskSummary(taskID)
 		fmt.Println()
@@ -588,23 +580,13 @@ func printTaskSummary(taskID string) {
 	}
 }
 
+// getTaskLabels returns a task's labels (thin wrapper over issue.Load).
 func getTaskLabels(taskID string) ([]string, error) {
-	tdCmd := exec.Command("td", "show", taskID, "--json")
-	tdCmd.Dir = tdWorkDir()
-	out, err := tdCmd.Output()
+	iss, err := issue.Load(tdWorkDir(), taskID)
 	if err != nil {
-		return nil, fmt.Errorf("td show %s: %w", taskID, err)
-	}
-	var task struct {
-		Labels []string `json:"labels"`
-	}
-	if err := json.Unmarshal(out, &task); err != nil {
 		return nil, err
 	}
-	if task.Labels == nil {
-		task.Labels = []string{}
-	}
-	return task.Labels, nil
+	return iss.Labels, nil
 }
 
 // rejectPRsForTask finds and rejects all open PRs for a given task ID.
@@ -617,7 +599,7 @@ func rejectPRsForTask(taskID string) {
 		if pr.Status != "open" && pr.Status != "approved" {
 			continue
 		}
-		if extractTaskID(pr.Title) == taskID {
+		if issue.TaskIDFromTitle(pr.Title) == taskID {
 			pr.Status = "rejected"
 			if err := store.Write(pr); err == nil {
 				fmt.Printf("Rejected PR %s\n", pr.ID)
@@ -655,48 +637,12 @@ func tdWorkDir() string {
 	return strings.TrimSpace(string(out))
 }
 
-var prTaskIDPattern = regexp.MustCompile(`\(?(td-[0-9a-f]+)\)?`)
-
-// checkReviewGates reads a task's labels and checks that every
-// require-review-X has a matching approved-review-X.
-// Returns the list of missing review names (empty = all gates pass).
+// checkReviewGates returns the required reviews not yet approved for a task
+// (thin wrapper over issue.Load + MissingReviews).
 func checkReviewGates(taskID string) ([]string, error) {
-	tdCmd := exec.Command("td", "show", taskID, "--json")
-	tdCmd.Dir = tdWorkDir()
-	out, err := tdCmd.Output()
+	iss, err := issue.Load(tdWorkDir(), taskID)
 	if err != nil {
-		return nil, fmt.Errorf("td show %s: %w", taskID, err)
-	}
-	var task struct {
-		Labels []string `json:"labels"`
-	}
-	if err := json.Unmarshal(out, &task); err != nil {
 		return nil, err
 	}
-
-	approved := make(map[string]bool)
-	var required []string
-	for _, label := range task.Labels {
-		if strings.HasPrefix(label, "require-review-") {
-			required = append(required, strings.TrimPrefix(label, "require-"))
-		}
-		if strings.HasPrefix(label, "approved-review-") {
-			approved[strings.TrimPrefix(label, "approved-")] = true
-		}
-	}
-
-	var missing []string
-	for _, r := range required {
-		if !approved[r] {
-			missing = append(missing, r)
-		}
-	}
-	return missing, nil
-}
-
-func extractTaskID(title string) string {
-	if m := prTaskIDPattern.FindStringSubmatch(title); len(m) > 1 {
-		return m[1]
-	}
-	return ""
+	return iss.MissingReviews(), nil
 }

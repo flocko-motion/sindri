@@ -2,31 +2,20 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
-	"sort"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/flo-at/sindri/internal/ghlocal/store"
+	"github.com/flo-at/sindri/internal/issue"
 	"github.com/flo-at/sindri/internal/openspec"
+	"github.com/flo-at/sindri/internal/render"
 	"github.com/flo-at/sindri/internal/worker"
 	"github.com/spf13/cobra"
 )
-
-type cliTask struct {
-	ID        string   `json:"id"`
-	Title     string   `json:"title"`
-	Status    string   `json:"status"`
-	Type      string   `json:"type"`
-	Priority  string   `json:"priority"`
-	Labels    []string `json:"labels"`
-	UpdatedAt string   `json:"updated_at"`
-}
 
 func newTaskCmd() *cobra.Command {
 	taskCmd := &cobra.Command{
@@ -135,7 +124,7 @@ func runTaskList(cmd *cobra.Command, args []string, showAll, showOpen, showClose
 		return fmt.Errorf("not in a git repo: %w", err)
 	}
 
-	tasks, err := listAllTasks(projectRoot)
+	tasks, err := issue.LoadAll(projectRoot)
 	if err != nil {
 		return err
 	}
@@ -143,19 +132,15 @@ func runTaskList(cmd *cobra.Command, args []string, showAll, showOpen, showClose
 	if !showAll {
 		filtered := tasks[:0]
 		for _, t := range tasks {
-			isClosed := t.Status == "closed" || t.Status == "approved" || t.Status == "merged"
-			if showOpen && showClosed {
+			switch {
+			case showOpen && showClosed:
 				filtered = append(filtered, t)
-			} else if showOpen {
-				if !isClosed {
+			case showClosed:
+				if t.IsClosed() {
 					filtered = append(filtered, t)
 				}
-			} else if showClosed {
-				if isClosed {
-					filtered = append(filtered, t)
-				}
-			} else {
-				if !isClosed {
+			default: // default and --open both hide closed
+				if !t.IsClosed() {
 					filtered = append(filtered, t)
 				}
 			}
@@ -182,15 +167,15 @@ func runTaskList(cmd *cobra.Command, args []string, showAll, showOpen, showClose
 	prs, _ := store.ListFor(projectRoot)
 	prByTask := make(map[string][]*store.PR)
 	for _, pr := range prs {
-		if m := prTaskIDPattern.FindStringSubmatch(pr.Title); len(m) > 1 {
-			prByTask[m[1]] = append(prByTask[m[1]], pr)
+		if id := issue.TaskIDFromTitle(pr.Title); id != "" {
+			prByTask[id] = append(prByTask[id], pr)
 		}
 	}
 
 	// Which specs already have a linked task (spec:<name> label)?
 	linkedSpecs := make(map[string]bool)
 	for _, t := range tasks {
-		if s := specLabel(t.Labels); s != "" {
+		if s := t.Spec(); s != "" {
 			linkedSpecs[s] = true
 		}
 	}
@@ -213,27 +198,27 @@ func runTaskList(cmd *cobra.Command, args []string, showAll, showOpen, showClose
 	for _, t := range tasks {
 		var status string
 		if w, ok := workersByTask[t.ID]; ok {
-			status = "🔨 " + w
+			status = render.Worker(w)
 		} else if t.Status == "in_progress" {
-			status = "⚠ in_progress"
+			status = render.Orphaned()
 		} else {
-			status = t.Status
+			status = render.TaskStatus(t.Status)
 		}
 		updated := ""
-		if ts, err := time.Parse(time.RFC3339Nano, t.UpdatedAt); err == nil {
-			updated = ts.Local().Format("06-01-02 15:04")
+		if !t.UpdatedAt.IsZero() {
+			updated = t.UpdatedAt.Local().Format("06-01-02 15:04")
 		}
 		title := t.Title
-		if s := specLabel(t.Labels); s != "" {
+		if s := t.Spec(); s != "" {
 			title = "📋 " + s + " · " + title
 		}
 		rows = append(rows, []string{t.ID, t.Priority, updated, status, title})
 
 		for _, pr := range prByTask[t.ID] {
-			rows = append(rows, []string{"", "", "", "", fmt.Sprintf("  └ %s [%s]", pr.ID, pr.Status)})
+			rows = append(rows, []string{"", "", "", "", "  └ " + pr.ID + " [" + render.PRStatus(pr.Status, t.IsClosed()) + "]"})
 		}
 
-		if gates := cliGateStatus(t.Labels); gates != "" {
+		if gates := render.Gates(t.Gates()); gates != "" {
 			rows = append(rows, []string{"", "", "", "", "  " + gates})
 		}
 	}
@@ -268,84 +253,10 @@ func runTaskView(cmd *cobra.Command, args []string) error {
 	prs, _ := store.ListFor(projectRoot)
 	fmt.Println()
 	for _, pr := range prs {
-		if m := prTaskIDPattern.FindStringSubmatch(pr.Title); len(m) > 1 && m[1] == taskID {
+		if issue.TaskIDFromTitle(pr.Title) == taskID {
 			fmt.Printf("PR: %s [%s] %s → %s\n", pr.ID, pr.Status, pr.Branch, pr.Base)
 		}
 	}
 
 	return nil
-}
-
-func listAllTasks(projectRoot string) ([]cliTask, error) {
-	out, err := exec.Command("td", "-w", projectRoot, "list", "--json", "--limit", "100", "--all").Output()
-	if err != nil {
-		return nil, fmt.Errorf("td list failed: %w", err)
-	}
-	var tasks []cliTask
-	if err := json.Unmarshal(out, &tasks); err != nil {
-		return nil, err
-	}
-
-	var open, active, closed []cliTask
-	for _, t := range tasks {
-		switch t.Status {
-		case "open":
-			open = append(open, t)
-		case "in_progress", "in_review":
-			active = append(active, t)
-		default:
-			closed = append(closed, t)
-		}
-	}
-	byUpdated := func(items []cliTask) func(i, j int) bool {
-		return func(i, j int) bool {
-			ti, _ := time.Parse(time.RFC3339Nano, items[i].UpdatedAt)
-			tj, _ := time.Parse(time.RFC3339Nano, items[j].UpdatedAt)
-			return ti.After(tj)
-		}
-	}
-	sort.Slice(active, byUpdated(active))
-	sort.Slice(closed, byUpdated(closed))
-
-	result := make([]cliTask, 0, len(tasks))
-	result = append(result, open...)
-	result = append(result, active...)
-	result = append(result, closed...)
-	return result, nil
-}
-
-// specLabel returns the spec name from a spec:<name> label, or "".
-func specLabel(labels []string) string {
-	for _, l := range labels {
-		if strings.HasPrefix(l, "spec:") {
-			return strings.TrimPrefix(l, "spec:")
-		}
-	}
-	return ""
-}
-
-func cliGateStatus(labels []string) string {
-	approved := make(map[string]bool)
-	var required []string
-	for _, l := range labels {
-		if strings.HasPrefix(l, "require-review-") {
-			required = append(required, strings.TrimPrefix(l, "require-"))
-		}
-		if strings.HasPrefix(l, "approved-review-") {
-			approved[strings.TrimPrefix(l, "approved-")] = true
-		}
-	}
-	if len(required) == 0 {
-		return ""
-	}
-	var parts []string
-	for _, r := range required {
-		display := strings.ReplaceAll(r, "-", " ")
-		if approved[r] {
-			parts = append(parts, "☑ "+display)
-		} else {
-			parts = append(parts, "☐ "+display)
-		}
-	}
-	return strings.Join(parts, "  ")
 }
