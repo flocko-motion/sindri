@@ -8,9 +8,10 @@ package board
 import (
 	"strings"
 
+	"github.com/flo-at/sindri/internal/adapter/spec"
+	"github.com/flo-at/sindri/internal/adapter/td"
 	"github.com/flo-at/sindri/internal/ghlocal/store"
 	"github.com/flo-at/sindri/internal/issue"
-	"github.com/flo-at/sindri/internal/openspec"
 	"github.com/flo-at/sindri/internal/worker"
 )
 
@@ -19,7 +20,7 @@ import (
 // PRs attached. This is the one refresh both interfaces use so they always
 // show the same data.
 func List(projectRoot string) ([]issue.Issue, error) {
-	tasks, err := issue.LoadTasks(projectRoot)
+	tasks, err := td.Tasks(projectRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -32,7 +33,7 @@ func List(projectRoot string) ([]issue.Issue, error) {
 }
 
 func specsFor(projectRoot string) []issue.Spec {
-	changes := openspec.Changes(projectRoot)
+	changes := spec.Changes(projectRoot)
 	specs := make([]issue.Spec, 0, len(changes))
 	for _, ch := range changes {
 		specs = append(specs, issue.Spec{

@@ -4,11 +4,11 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	"github.com/flo-at/sindri/internal/adapter/td"
 	"github.com/flo-at/sindri/internal/board"
 	"github.com/flo-at/sindri/internal/ghlocal/store"
 	"github.com/flo-at/sindri/internal/issue"
@@ -43,11 +43,14 @@ func newTaskCmd() *cobra.Command {
 			if msg == "" {
 				return fmt.Errorf("comment is required")
 			}
-			out, err := exec.Command("td", "comment", args[0], msg).CombinedOutput()
+			root, err := worker.GitRoot()
 			if err != nil {
-				return fmt.Errorf("td comment failed: %s", strings.TrimSpace(string(out)))
+				return err
 			}
-			fmt.Println(strings.TrimSpace(string(out)))
+			if err := td.Comment(root, args[0], msg); err != nil {
+				return err
+			}
+			fmt.Printf("Comment added to %s\n", args[0])
 			return nil
 		},
 	}
@@ -60,9 +63,9 @@ func newTaskCmd() *cobra.Command {
 		Short: "Create a task, optionally linked to an openspec change (--spec)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			tdArgs := []string{"create", args[0], "-t", newType, "-p", newPrio}
-			if newBody != "" {
-				tdArgs = append(tdArgs, "-d", newBody)
+			root, err := worker.GitRoot()
+			if err != nil {
+				return err
 			}
 			var labels []string
 			if newReview {
@@ -71,14 +74,13 @@ func newTaskCmd() *cobra.Command {
 			if newSpec != "" {
 				labels = append(labels, "spec:"+newSpec)
 			}
-			if len(labels) > 0 {
-				tdArgs = append(tdArgs, "--labels", strings.Join(labels, ","))
-			}
-			out, err := exec.Command("td", tdArgs...).CombinedOutput()
+			out, err := td.Create(root, args[0], td.CreateOpts{
+				Type: newType, Priority: newPrio, Body: newBody, Labels: labels,
+			})
 			if err != nil {
-				return fmt.Errorf("td create failed: %s", strings.TrimSpace(string(out)))
+				return err
 			}
-			fmt.Println(strings.TrimSpace(string(out)))
+			fmt.Println(out)
 			if newSpec != "" {
 				fmt.Printf("Linked to spec: %s\n", newSpec)
 			}
@@ -193,11 +195,11 @@ func runTaskView(cmd *cobra.Command, args []string) error {
 	}
 
 	taskID := args[0]
-	out, err := exec.Command("td", "-w", projectRoot, "show", taskID).Output()
+	out, err := td.Show(projectRoot, taskID)
 	if err != nil {
 		return fmt.Errorf("task %s not found", taskID)
 	}
-	fmt.Println(strings.TrimSpace(string(out)))
+	fmt.Println(out)
 
 	prs, _ := store.ListFor(projectRoot)
 	fmt.Println()

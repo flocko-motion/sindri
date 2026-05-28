@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	"github.com/flo-at/sindri/internal/adapter/td"
 	"github.com/flo-at/sindri/internal/ghlocal/store"
 	"github.com/flo-at/sindri/internal/issue"
 	"github.com/flo-at/sindri/internal/render"
@@ -82,7 +82,7 @@ func newPrCmd() *cobra.Command {
 				}
 				reviews := ""
 				if taskID := issue.TaskIDFromTitle(pr.Title); taskID != "" {
-					if iss, err := issue.LoadTask(tdWorkDir(), taskID); err == nil {
+					if iss, err := td.Get(tdWorkDir(), taskID); err == nil {
 						reviews = render.Gates(iss.Gates())
 					}
 				}
@@ -163,10 +163,8 @@ func newPrCmd() *cobra.Command {
 			}
 			fmt.Printf("Merged PR %s into %s\n", pr.ID, pr.Base)
 			if taskID != "" {
-				tdClose := exec.Command("td", "close", taskID, "--self-close-exception", "PR merged")
-				tdClose.Dir = tdWorkDir()
-				if out, err := tdClose.CombinedOutput(); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: td close %s failed: %s\n", taskID, strings.TrimSpace(string(out)))
+				if err := td.Close(tdWorkDir(), taskID, "PR merged"); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 				} else {
 					fmt.Printf("Closed task %s\n", taskID)
 				}
@@ -255,10 +253,8 @@ func newPrCmd() *cobra.Command {
 				}
 				fmt.Printf("Merged PR %s into %s\n", pr.ID, pr.Base)
 				if taskID != "" {
-					tdClose := exec.Command("td", "close", taskID, "--self-close-exception", "PR merged")
-					tdClose.Dir = tdWorkDir()
-					if out, err := tdClose.CombinedOutput(); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: td close %s failed: %s\n", taskID, strings.TrimSpace(string(out)))
+					if err := td.Close(tdWorkDir(), taskID, "PR merged"); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 					} else {
 						fmt.Printf("Closed task %s\n", taskID)
 					}
@@ -305,16 +301,11 @@ func newPrCmd() *cobra.Command {
 			fmt.Printf("Rejected PR %s\n", pr.ID)
 
 			if taskID := issue.TaskIDFromTitle(pr.Title); taskID != "" {
-				tdComment := exec.Command("td", "comment", taskID, comment)
-				tdComment.Dir = tdWorkDir()
-				if out, err := tdComment.CombinedOutput(); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: td comment failed: %s\n", strings.TrimSpace(string(out)))
+				if err := td.Comment(tdWorkDir(), taskID, comment); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 				}
-
-				tdCmd := exec.Command("td", "reject", taskID)
-				tdCmd.Dir = tdWorkDir()
-				if out, err := tdCmd.CombinedOutput(); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: td reject %s failed: %s\n", taskID, strings.TrimSpace(string(out)))
+				if err := td.Reject(tdWorkDir(), taskID); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 				} else {
 					fmt.Printf("Rejected task %s\n", taskID)
 				}
@@ -436,7 +427,7 @@ func newPrCmd() *cobra.Command {
 			if taskID == "" {
 				return fmt.Errorf("no task ID found in PR title")
 			}
-			iss, err := issue.LoadTask(tdWorkDir(), taskID)
+			iss, err := td.Get(tdWorkDir(), taskID)
 			if err != nil {
 				return err
 			}
@@ -494,11 +485,8 @@ func newPrCmd() *cobra.Command {
 				labels = append(labels, requireLabel)
 			}
 			labels = append(labels, approveLabel)
-			labelsStr := strings.Join(labels, ",")
-			tdCmd := exec.Command("td", "update", taskID, "--labels", labelsStr)
-			tdCmd.Dir = tdWorkDir()
-			if out, err := tdCmd.CombinedOutput(); err != nil {
-				return fmt.Errorf("td update failed: %s", strings.TrimSpace(string(out)))
+			if err := td.SetLabels(tdWorkDir(), taskID, labels); err != nil {
+				return err
 			}
 			fmt.Printf("Approved gate '%s' on %s (%s)\n", gate, args[0], taskID)
 			return nil
@@ -532,61 +520,34 @@ func printPRInfo(id string) error {
 		fmt.Println()
 		printTaskSummary(taskID)
 		fmt.Println()
-		tdShow := exec.Command("td", "show", taskID)
-		tdShow.Dir = tdWorkDir()
-		if out, err := tdShow.Output(); err == nil {
-			fmt.Println(strings.TrimSpace(string(out)))
+		if out, err := td.Show(tdWorkDir(), taskID); err == nil {
+			fmt.Println(out)
 		}
-		tdComments := exec.Command("td", "comments", taskID)
-		tdComments.Dir = tdWorkDir()
-		if out, err := tdComments.Output(); err == nil {
-			c := strings.TrimSpace(string(out))
-			if c != "" && c != "No comments" {
-				fmt.Printf("\n--- Comments ---\n%s\n", c)
-			}
+		if c, err := td.Comments(tdWorkDir(), taskID); err == nil && c != "" && c != "No comments" {
+			fmt.Printf("\n--- Comments ---\n%s\n", c)
 		}
 	}
 	return nil
 }
 
 func printTaskSummary(taskID string) {
-	tdCmd := exec.Command("td", "show", taskID, "--json")
-	tdCmd.Dir = tdWorkDir()
-	if out, err := tdCmd.Output(); err == nil {
-		var task struct {
-			Title  string   `json:"title"`
-			Status string   `json:"status"`
-			Labels []string `json:"labels"`
-		}
-		if json.Unmarshal(out, &task) == nil {
-			fmt.Printf("Task:     %s [%s] %s\n", taskID, task.Status, task.Title)
-			approved := make(map[string]bool)
-			for _, l := range task.Labels {
-				if strings.HasPrefix(l, "approved-review-") {
-					approved[strings.TrimPrefix(l, "approved-review-")] = true
-				}
-			}
-			for _, l := range task.Labels {
-				if strings.HasPrefix(l, "require-review-") {
-					gate := strings.TrimPrefix(l, "require-review-")
-					if approved[gate] {
-						fmt.Printf("  ☑ %s\n", gate)
-					} else {
-						fmt.Printf("  ☐ %s\n", gate)
-					}
-				}
-			}
-		}
+	t, err := td.Get(tdWorkDir(), taskID)
+	if err != nil {
+		return
+	}
+	fmt.Printf("Task:     %s [%s] %s\n", taskID, t.Status, t.Title)
+	if gates := render.Gates(t.Gates()); gates != "" {
+		fmt.Printf("  %s\n", gates)
 	}
 }
 
-// getTaskLabels returns a task's labels (thin wrapper over issue.Load).
+// getTaskLabels returns a task's labels (thin wrapper over the td adapter).
 func getTaskLabels(taskID string) ([]string, error) {
-	iss, err := issue.LoadTask(tdWorkDir(), taskID)
+	t, err := td.Get(tdWorkDir(), taskID)
 	if err != nil {
 		return nil, err
 	}
-	return iss.Labels, nil
+	return t.Labels, nil
 }
 
 // rejectPRsForTask finds and rejects all open PRs for a given task ID.
@@ -615,10 +576,8 @@ func newRejectCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			taskID := args[0]
-			tdCmd := exec.Command("td", "reject", taskID)
-			tdCmd.Dir = tdWorkDir()
-			if out, err := tdCmd.CombinedOutput(); err != nil {
-				return fmt.Errorf("td reject %s failed: %s", taskID, strings.TrimSpace(string(out)))
+			if err := td.Reject(tdWorkDir(), taskID); err != nil {
+				return err
 			}
 			fmt.Printf("Rejected task %s\n", taskID)
 			rejectPRsForTask(taskID)
@@ -640,7 +599,7 @@ func tdWorkDir() string {
 // checkReviewGates returns the required reviews not yet approved for a task
 // (thin wrapper over issue.Load + MissingReviews).
 func checkReviewGates(taskID string) ([]string, error) {
-	iss, err := issue.LoadTask(tdWorkDir(), taskID)
+	iss, err := td.Get(tdWorkDir(), taskID)
 	if err != nil {
 		return nil, err
 	}

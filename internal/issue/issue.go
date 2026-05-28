@@ -14,10 +14,7 @@ package issue
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
-	"os/exec"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 )
@@ -267,84 +264,3 @@ func TaskIDFromTitle(title string) string {
 	return ""
 }
 
-// LoadTasks loads every task from td (including closed), ordered in three
-// sections: open (td priority order), active (recent first), closed (recent
-// first).
-func LoadTasks(projectRoot string) ([]Task, error) {
-	out, err := exec.Command("td", "-w", projectRoot, "list", "--json", "--limit", "100", "--all").Output()
-	if err != nil {
-		return nil, err
-	}
-	return parseAndSort(out)
-}
-
-// LoadTask loads a single task by ID via `td show <id> --json`.
-func LoadTask(projectRoot, id string) (Task, error) {
-	out, err := exec.Command("td", "-w", projectRoot, "show", id, "--json").Output()
-	if err != nil {
-		return Task{}, err
-	}
-	return parseOne(out)
-}
-
-func parseOne(jsonData []byte) (Task, error) {
-	var r rawTask
-	if err := json.Unmarshal(jsonData, &r); err != nil {
-		return Task{}, err
-	}
-	return r.toTask(), nil
-}
-
-type rawTask struct {
-	ID        string   `json:"id"`
-	Title     string   `json:"title"`
-	Status    string   `json:"status"`
-	Type      string   `json:"type"`
-	Priority  string   `json:"priority"`
-	Labels    []string `json:"labels"`
-	CreatedAt string   `json:"created_at"`
-	UpdatedAt string   `json:"updated_at"`
-}
-
-func (r rawTask) toTask() Task {
-	created, _ := time.Parse(time.RFC3339Nano, r.CreatedAt)
-	updated, _ := time.Parse(time.RFC3339Nano, r.UpdatedAt)
-	return Task{
-		ID: r.ID, Title: r.Title, Status: r.Status, Type: r.Type,
-		Priority: r.Priority, Labels: r.Labels, CreatedAt: created, UpdatedAt: updated,
-	}
-}
-
-func parseAndSort(jsonData []byte) ([]Task, error) {
-	var raw []rawTask
-	if err := json.Unmarshal(jsonData, &raw); err != nil {
-		return nil, err
-	}
-	items := make([]Task, len(raw))
-	for i, r := range raw {
-		items[i] = r.toTask()
-	}
-
-	var open, active, closed []Task
-	for _, t := range items {
-		switch {
-		case t.IsActive():
-			active = append(active, t)
-		case t.IsClosed():
-			closed = append(closed, t)
-		default:
-			open = append(open, t)
-		}
-	}
-	byUpdatedDesc := func(s []Task) func(i, j int) bool {
-		return func(i, j int) bool { return s[i].UpdatedAt.After(s[j].UpdatedAt) }
-	}
-	sort.Slice(active, byUpdatedDesc(active))
-	sort.Slice(closed, byUpdatedDesc(closed))
-
-	result := make([]Task, 0, len(items))
-	result = append(result, open...)
-	result = append(result, active...)
-	result = append(result, closed...)
-	return result, nil
-}

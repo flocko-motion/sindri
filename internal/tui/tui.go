@@ -1,9 +1,7 @@
 package tui
 
 import (
-	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -13,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/flo-at/sindri/internal/adapter/td"
 	"github.com/flo-at/sindri/internal/ghlocal/store"
 	"github.com/flo-at/sindri/internal/issue"
 	"github.com/flo-at/sindri/internal/worker"
@@ -342,9 +341,8 @@ func (m *Model) rejectTask() tea.Cmd {
 	prIDs := make([]string, len(m.detail.prIDs))
 	copy(prIDs, m.detail.prIDs)
 	return func() tea.Msg {
-		out, err := exec.Command("td", "-w", projectRoot, "reject", taskID).CombinedOutput()
-		if err != nil {
-			return actionResultMsg{message: fmt.Sprintf("Reject failed: %s", strings.TrimSpace(string(out))), isError: true}
+		if err := td.Reject(projectRoot, taskID); err != nil {
+			return actionResultMsg{message: "Reject failed: " + err.Error(), isError: true}
 		}
 		for _, prID := range prIDs {
 			pr, err := store.Read(prID)
@@ -366,30 +364,23 @@ func (m *Model) cycleTaskStatus() tea.Cmd {
 	taskID := m.detail.taskID
 	projectRoot := m.projectRoot
 	return func() tea.Msg {
-		out, err := exec.Command("td", "-w", projectRoot, "show", taskID, "--json").Output()
+		t, err := td.Get(projectRoot, taskID)
 		if err != nil {
 			return actionResultMsg{message: "Failed to read task", isError: true}
 		}
-		var current struct {
-			Status string `json:"status"`
-		}
-		if jsonErr := json.Unmarshal(out, &current); jsonErr != nil {
-			return actionResultMsg{message: "Failed to parse task", isError: true}
-		}
 		var next string
-		switch current.Status {
+		switch t.Status {
 		case "open":
 			next = "in_progress"
 		case "in_progress":
 			next = "open"
 		default:
-			return actionResultMsg{message: "Cannot change status from " + current.Status, isError: true}
+			return actionResultMsg{message: "Cannot change status from " + t.Status, isError: true}
 		}
-		out, err = exec.Command("td", "-w", projectRoot, "update", taskID, "--status", next).CombinedOutput()
-		if err != nil {
-			return actionResultMsg{message: fmt.Sprintf("Status change failed: %s", strings.TrimSpace(string(out))), isError: true}
+		if err := td.SetStatus(projectRoot, taskID, next); err != nil {
+			return actionResultMsg{message: "Status change failed: " + err.Error(), isError: true}
 		}
-		return actionResultMsg{message: fmt.Sprintf("Status: %s → %s", current.Status, next)}
+		return actionResultMsg{message: fmt.Sprintf("Status: %s → %s", t.Status, next)}
 	}
 }
 
@@ -397,9 +388,8 @@ func (m *Model) addComment(text string) tea.Cmd {
 	taskID := m.detail.taskID
 	projectRoot := m.projectRoot
 	return func() tea.Msg {
-		out, err := exec.Command("td", "-w", projectRoot, "comment", taskID, text).CombinedOutput()
-		if err != nil {
-			return actionResultMsg{message: fmt.Sprintf("Comment failed: %s", strings.TrimSpace(string(out))), isError: true}
+		if err := td.Comment(projectRoot, taskID, text); err != nil {
+			return actionResultMsg{message: "Comment failed: " + err.Error(), isError: true}
 		}
 		return actionResultMsg{message: "Comment added"}
 	}

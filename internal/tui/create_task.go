@@ -2,13 +2,13 @@ package tui
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/flo-at/sindri/internal/adapter/td"
 )
 
 var (
@@ -161,18 +161,15 @@ func (m createTaskModel) submit() tea.Cmd {
 	projectRoot := m.projectRoot
 
 	return func() tea.Msg {
-		args := []string{"-w", projectRoot, "create", title, "-t", typ, "-p", prio}
-		if desc != "" {
-			args = append(args, "-d", desc)
-		}
+		var labels []string
 		if review {
-			args = append(args, "--labels", "require-review-code")
+			labels = []string{"require-review-code"}
 		}
-		out, err := exec.Command("td", args...).CombinedOutput()
+		out, err := td.Create(projectRoot, title, td.CreateOpts{Type: typ, Priority: prio, Body: desc, Labels: labels})
 		if err != nil {
-			return taskCreatedMsg{err: fmt.Errorf("%s: %w", strings.TrimSpace(string(out)), err)}
+			return taskCreatedMsg{err: err}
 		}
-		return taskCreatedMsg{id: strings.TrimSpace(string(out))}
+		return taskCreatedMsg{id: out}
 	}
 }
 

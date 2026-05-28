@@ -1,9 +1,10 @@
+// data.go — TUI data plumbing. Wires the Bubble Tea refresh cycle to the
+// headless board/td layers; holds no domain logic of its own (see
+// internal/board and internal/adapter/td).
 package tui
 
 import (
-	"os/exec"
-	"strings"
-
+	"github.com/flo-at/sindri/internal/adapter/td"
 	"github.com/flo-at/sindri/internal/board"
 	"github.com/flo-at/sindri/internal/issue"
 	"github.com/flo-at/sindri/internal/worker"
@@ -34,18 +35,18 @@ func refreshDataOpt(projectRoot string, manual bool) tea.Cmd {
 }
 
 func fetchTaskDetail(projectRoot, taskID string) string {
-	out, err := exec.Command("td", "-w", projectRoot, "show", taskID).Output()
+	out, err := td.Show(projectRoot, taskID)
 	if err != nil {
 		return "Error loading task: " + err.Error()
 	}
-	return strings.TrimSpace(string(out))
+	return out
 }
 
 func fetchTaskComments(projectRoot, taskID string) string {
-	out, err := exec.Command("td", "-w", projectRoot, "comments", taskID).Output()
+	out, err := td.Comments(projectRoot, taskID)
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	return out
 }
 
