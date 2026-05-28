@@ -64,6 +64,44 @@ func newTaskCmd() *cobra.Command {
 	}
 	commentCmd.Flags().StringVarP(&commentMsg, "message", "m", "", "Comment text")
 
+	var newType, newPrio, newBody, newSpec string
+	var newReview bool
+	newCmd := &cobra.Command{
+		Use:   "new <title>",
+		Short: "Create a task, optionally linked to an openspec change (--spec)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			tdArgs := []string{"create", args[0], "-t", newType, "-p", newPrio}
+			if newBody != "" {
+				tdArgs = append(tdArgs, "-d", newBody)
+			}
+			var labels []string
+			if newReview {
+				labels = append(labels, "require-review-code")
+			}
+			if newSpec != "" {
+				labels = append(labels, "spec:"+newSpec)
+			}
+			if len(labels) > 0 {
+				tdArgs = append(tdArgs, "--labels", strings.Join(labels, ","))
+			}
+			out, err := exec.Command("td", tdArgs...).CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("td create failed: %s", strings.TrimSpace(string(out)))
+			}
+			fmt.Println(strings.TrimSpace(string(out)))
+			if newSpec != "" {
+				fmt.Printf("Linked to spec: %s\n", newSpec)
+			}
+			return nil
+		},
+	}
+	newCmd.Flags().StringVarP(&newType, "type", "t", "task", "Task type (task, bug, feature, chore)")
+	newCmd.Flags().StringVarP(&newPrio, "priority", "p", "P2", "Priority (P0-P4)")
+	newCmd.Flags().StringVarP(&newBody, "body", "d", "", "Task description")
+	newCmd.Flags().StringVar(&newSpec, "spec", "", "Link to an openspec change by name")
+	newCmd.Flags().BoolVar(&newReview, "review", true, "Add require-review-code gate")
+
 	var taskListAll, taskListClosed, taskListOpen bool
 	listCmd := &cobra.Command{
 		Use:   "list",
@@ -78,6 +116,7 @@ func newTaskCmd() *cobra.Command {
 
 	taskCmd.AddCommand(
 		listCmd,
+		newCmd,
 		&cobra.Command{
 			Use:   "view <id>",
 			Short: "View task details",
