@@ -72,7 +72,9 @@ func newPrCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			selected := readSelectedPR()
 			rows := make([][]string, 0, len(prs))
+			selectedRow := -1
 			for _, pr := range prs {
 				if !prListAll && pr.Status != "open" && pr.Status != "approved" {
 					continue
@@ -83,6 +85,9 @@ func newPrCmd() *cobra.Command {
 						reviews = cliGateStatus(labels)
 					}
 				}
+				if pr.ID == selected {
+					selectedRow = len(rows)
+				}
 				rows = append(rows, []string{pr.ID, pr.Status, pr.Branch + " → " + pr.Base, reviews, pr.Title})
 			}
 			if len(rows) == 0 {
@@ -90,6 +95,7 @@ func newPrCmd() *cobra.Command {
 				return nil
 			}
 			dim := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+			selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7D56F4")).Padding(0, 1)
 			t := table.New().
 				Headers("ID", "STATUS", "BRANCH", "REVIEWS", "TITLE").
 				Rows(rows...).
@@ -97,6 +103,9 @@ func newPrCmd() *cobra.Command {
 				StyleFunc(func(row, col int) lipgloss.Style {
 					if row == table.HeaderRow {
 						return lipgloss.NewStyle().Bold(true).Padding(0, 1)
+					}
+					if row == selectedRow {
+						return selectedStyle
 					}
 					return lipgloss.NewStyle().Padding(0, 1)
 				})
