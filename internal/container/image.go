@@ -53,20 +53,3 @@ func Ensure(projectRoot string) error {
 	_ = os.WriteFile(cacheFile, []byte(buildKey), 0644)
 	return nil
 }
-
-// ReadSkill reads a skill from /opt/sindri/skills/<name>/SKILL.md inside the container image.
-func ReadSkill(name string) (string, error) {
-	path := "/opt/sindri/skills/" + name + "/SKILL.md"
-	out, err := exec.Command("podman", "run", "--rm", ImageName, "cat", path).Output()
-	if err != nil {
-		listOut, _ := exec.Command("podman", "run", "--rm", ImageName, "ls", "/opt/sindri/skills/").Output()
-		var available []string
-		for _, line := range strings.Split(strings.TrimSpace(string(listOut)), "\n") {
-			if strings.HasSuffix(line, ".md") {
-				available = append(available, strings.TrimSuffix(line, ".md"))
-			}
-		}
-		return "", fmt.Errorf("skill %q not found. Available: %s", name, strings.Join(available, ", "))
-	}
-	return strings.TrimSpace(string(out)), nil
-}

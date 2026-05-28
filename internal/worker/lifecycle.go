@@ -296,11 +296,6 @@ func Reset(projectRoot string) (int, error) {
 	return stopped, nil
 }
 
-// EnsureImage builds the container image if needed.
-func EnsureImage(projectRoot string) error {
-	return container.Ensure(projectRoot)
-}
-
 // findSindriGH locates the sindri-gh binary on the host.
 func findSindriGH() (string, error) {
 	// Check next to the running sindri binary first
