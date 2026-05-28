@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/flo-at/sindri/internal/ghlocal/store"
+	"github.com/flo-at/sindri/internal/issue"
 	"github.com/flo-at/sindri/internal/worker"
 )
 
@@ -36,8 +37,7 @@ type Model struct {
 	workerCursor int
 
 	workers []worker.Worker
-	tasks   []taskItem
-	prs     []prItem
+	issues  []issue.Issue
 	detail  detailState
 
 	vpList   viewport.Model
@@ -84,15 +84,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case refreshMsg:
 		m.detectChanges(msg)
 		m.workers = msg.workers
-		m.tasks = msg.tasks
-		m.prs = msg.prs
+		m.issues = msg.issues
 		m.rebuildBacklog()
 		m.clampCursors()
 		m.syncListScroll()
 		if m.showDetail && m.detail.taskID != "" {
-			for _, t := range m.tasks {
-				if t.ID == m.detail.taskID {
-					m.detail = taskDetail(t, m.prs, m.workers, m.projectRoot)
+			for _, iss := range m.issues {
+				if iss.ID() == m.detail.taskID {
+					m.detail = issueDetail(iss, m.projectRoot)
 					m.vpDetail.SetContent(m.detail.content)
 					break
 				}
@@ -100,7 +99,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.manual {
 			m.notify = notification{
-				message: fmt.Sprintf("Refreshed — %d tasks, %d workers, %d PRs", len(m.tasks), len(m.workers), len(m.prs)),
+				message: fmt.Sprintf("Refreshed — %d items, %d workers", len(m.issues), len(m.workers)),
 				time:    time.Now(),
 			}
 			return m, flashTimer()
@@ -423,16 +422,7 @@ func (m *Model) resizeViewports() {
 }
 
 func (m *Model) rebuildBacklog() {
-	workersByTask := make(map[string]string)
-	for _, wk := range m.workers {
-		if wk.Task != "" {
-			parts := strings.Fields(wk.Task)
-			if len(parts) > 0 {
-				workersByTask[parts[0]] = wk.Name
-			}
-		}
-	}
-	m.backlogRows = buildBacklogRows(m.tasks, m.prs, workersByTask)
+	m.backlogRows = buildBacklogRows(m.issues)
 }
 
 func (m *Model) moveCursor(delta int) {
@@ -495,13 +485,10 @@ func (m *Model) selectedID() string {
 		if m.listCursor < len(m.backlogRows) {
 			row := m.backlogRows[m.listCursor]
 			if row.isPR {
-				if row.prIdx < len(m.prs) {
-					return m.prs[row.prIdx].ID
-				}
-			} else {
-				if row.taskIdx < len(m.tasks) {
-					return m.tasks[row.taskIdx].ID
-				}
+				return row.pr.ID
+			}
+			if row.issueIdx < len(m.issues) {
+				return m.issues[row.issueIdx].ID()
 			}
 		}
 	case viewWorkers:
@@ -535,13 +522,9 @@ func (m *Model) openDetail() {
 		if m.listCursor < len(m.backlogRows) {
 			row := m.backlogRows[m.listCursor]
 			if row.isPR {
-				if row.prIdx < len(m.prs) {
-					m.detail = prDetail(m.prs[row.prIdx])
-				}
-			} else {
-				if row.taskIdx < len(m.tasks) {
-					m.detail = taskDetail(m.tasks[row.taskIdx], m.prs, m.workers, m.projectRoot)
-				}
+				m.detail = prDetail(row.pr)
+			} else if row.issueIdx < len(m.issues) {
+				m.detail = issueDetail(m.issues[row.issueIdx], m.projectRoot)
 			}
 		}
 	case viewWorkers:
@@ -555,27 +538,29 @@ func (m *Model) openDetail() {
 }
 
 func (m *Model) detectChanges(msg refreshMsg) {
-	oldPRs := make(map[string]string)
-	for _, pr := range m.prs {
-		oldPRs[pr.ID] = pr.Status
-	}
-	for _, pr := range msg.prs {
-		old, existed := oldPRs[pr.ID]
-		if !existed {
-			m.notify = notification{message: fmt.Sprintf("PR created: %s", pr.ID), time: time.Now()}
-		} else if old != pr.Status {
-			m.notify = notification{message: fmt.Sprintf("PR %s: %s → %s", pr.ID, old, pr.Status), time: time.Now()}
+	oldPRs := map[string]string{}
+	oldTasks := map[string]string{}
+	for _, iss := range m.issues {
+		if iss.Task != nil {
+			oldTasks[iss.Task.ID] = iss.Task.Status
+		}
+		for _, pr := range iss.PRs {
+			oldPRs[pr.ID] = pr.Status
 		}
 	}
-
-	oldTasks := make(map[string]string)
-	for _, t := range m.tasks {
-		oldTasks[t.ID] = t.Status
-	}
-	for _, t := range msg.tasks {
-		old, existed := oldTasks[t.ID]
-		if existed && old != t.Status {
-			m.notify = notification{message: fmt.Sprintf("Task %s: %s → %s", t.ID, old, t.Status), time: time.Now()}
+	for _, iss := range msg.issues {
+		for _, pr := range iss.PRs {
+			old, existed := oldPRs[pr.ID]
+			if !existed {
+				m.notify = notification{message: fmt.Sprintf("PR created: %s", pr.ID), time: time.Now()}
+			} else if old != pr.Status {
+				m.notify = notification{message: fmt.Sprintf("PR %s: %s → %s", pr.ID, old, pr.Status), time: time.Now()}
+			}
+		}
+		if iss.Task != nil {
+			if old, existed := oldTasks[iss.Task.ID]; existed && old != iss.Task.Status {
+				m.notify = notification{message: fmt.Sprintf("Task %s: %s → %s", iss.Task.ID, old, iss.Task.Status), time: time.Now()}
+			}
 		}
 	}
 }

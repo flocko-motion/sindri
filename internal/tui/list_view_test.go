@@ -16,7 +16,7 @@ func listModel(width, height, nrows int) Model {
 	rows := make([]backlogRow, nrows)
 	for i := range rows {
 		txt := fmt.Sprintf("td-%06d  P2  26-05-28 10:00  open  Task number %d", i, i)
-		rows[i] = backlogRow{taskIdx: i, display: txt, plain: txt}
+		rows[i] = backlogRow{issueIdx: i, display: txt, plain: txt}
 	}
 	m.backlogRows = rows
 	return m

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -54,16 +55,23 @@ func renderField(label, value string) string {
 	return labelStyle.Render(label+":") + " " + valueStyle.Render(value)
 }
 
-func taskDetail(t taskItem, prs []prItem, workers []worker.Worker, projectRoot string) detailState {
+func issueDetail(iss issue.Issue, projectRoot string) detailState {
+	if iss.SpecOnly() {
+		return specDetail(iss)
+	}
+	t := iss.Task
 	var sections []string
 	width := 80
 
 	// Metadata section
 	var meta strings.Builder
-	meta.WriteString(renderField("ID", t.ID) + "\n")
+	meta.WriteString(renderField("ID", iss.ID()) + "\n")
 	meta.WriteString(renderField("Status", render.TaskStatus(t.Status)) + "\n")
 	meta.WriteString(renderField("Type", t.Type) + "\n")
 	meta.WriteString(renderField("Priority", t.Priority) + "\n")
+	if iss.Spec != nil {
+		meta.WriteString(renderField("Spec", iss.Spec.Name) + "\n")
+	}
 	if !t.CreatedAt.IsZero() {
 		meta.WriteString(renderField("Created", t.CreatedAt.Local().Format("2006-01-02 15:04")) + "\n")
 	}
@@ -79,42 +87,24 @@ func taskDetail(t taskItem, prs []prItem, workers []worker.Worker, projectRoot s
 	}
 
 	// Review gates section
-	if gates := render.Gates(t.Gates()); gates != "" {
+	if gates := render.Gates(iss.Gates()); gates != "" {
 		sections = append(sections, renderSection("Review Gates", gates, width))
 	}
 
 	// Worker section
-	var assignedWorker string
-	for _, wk := range workers {
-		if wk.Task != "" {
-			parts := strings.Fields(wk.Task)
-			if len(parts) > 0 && parts[0] == t.ID {
-				assignedWorker = wk.Name
-				break
-			}
-		}
-	}
-	if assignedWorker != "" {
-		sections = append(sections, renderSection("Worker", renderField("Assigned to", assignedWorker), width))
+	if iss.Worker != "" {
+		sections = append(sections, renderSection("Worker", renderField("Assigned to", iss.Worker), width))
 	}
 
 	// Associated PRs section
-	var taskPRs []prItem
-	var prIDs []string
-	for _, pr := range prs {
-		if issue.TaskIDFromTitle(pr.Title) == t.ID {
-			taskPRs = append(taskPRs, pr)
-			prIDs = append(prIDs, pr.ID)
-		}
-	}
-	if len(taskPRs) > 0 {
+	if len(iss.PRs) > 0 {
 		var prContent strings.Builder
-		for i, pr := range taskPRs {
+		for i, pr := range iss.PRs {
 			if i > 0 {
 				prContent.WriteByte('\n')
 			}
 			prContent.WriteString(renderField("PR", pr.ID) + "\n")
-			prContent.WriteString(renderField("Status", render.TaskStatus(pr.Status)) + "\n")
+			prContent.WriteString(renderField("Status", render.PRStatus(pr.Status, iss.IsClosed())) + "\n")
 			prContent.WriteString(renderField("Branch", pr.Branch+" → "+pr.Base))
 		}
 		sections = append(sections, renderSection("Pull Requests", prContent.String(), width))
@@ -126,17 +116,40 @@ func taskDetail(t taskItem, prs []prItem, workers []worker.Worker, projectRoot s
 		sections = append(sections, renderSection("Comments", comments, width))
 	}
 
+	prIDs := make([]string, 0, len(iss.PRs))
+	for _, pr := range iss.PRs {
+		prIDs = append(prIDs, pr.ID)
+	}
 	return detailState{
 		kind:    detailTask,
-		title:   t.ID + ": " + t.Title,
+		title:   iss.ID() + ": " + t.Title,
 		content: strings.Join(sections, "\n\n"),
-		taskID:  t.ID,
+		taskID:  iss.ID(),
 		prIDs:   prIDs,
 	}
 }
 
+func specDetail(iss issue.Issue) detailState {
+	width := 80
+	var meta strings.Builder
+	meta.WriteString(renderField("ID", iss.ID()) + "\n")
+	meta.WriteString(renderField("Spec", iss.Spec.Name) + "\n")
+	if done, total, _ := iss.SpecProgress(); total > 0 {
+		meta.WriteString(renderField("Tasks", fmt.Sprintf("%d/%d", done, total)))
+	} else {
+		meta.WriteString(renderField("Tasks", "none yet"))
+	}
+	body := renderSection("Spec (no task yet)", meta.String(), width)
+	return detailState{
+		kind:    detailTask,
+		title:   iss.ID() + ": " + iss.Spec.Name,
+		content: body,
+		taskID:  iss.ID(),
+	}
+}
 
-func prDetail(pr prItem) detailState {
+
+func prDetail(pr issue.PR) detailState {
 	var sections []string
 	width := 80
 
@@ -144,7 +157,7 @@ func prDetail(pr prItem) detailState {
 	meta.WriteString(renderField("PR", pr.ID) + "\n")
 	meta.WriteString(renderField("Title", pr.Title) + "\n")
 	meta.WriteString(renderField("Branch", pr.Branch+" → "+pr.Base) + "\n")
-	meta.WriteString(renderField("Status", render.TaskStatus(pr.Status)))
+	meta.WriteString(renderField("Status", render.PRStatus(pr.Status, false)))
 	sections = append(sections, renderSection("PR Details", meta.String(), width))
 
 	return detailState{
