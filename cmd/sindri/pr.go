@@ -77,7 +77,13 @@ func newPrCmd() *cobra.Command {
 				if !prListAll && pr.Status != "open" && pr.Status != "approved" {
 					continue
 				}
-				rows = append(rows, []string{pr.ID, pr.Status, pr.Branch + " → " + pr.Base, pr.Title})
+				reviews := ""
+				if taskID := extractTaskID(pr.Title); taskID != "" {
+					if labels, err := getTaskLabels(taskID); err == nil {
+						reviews = cliGateStatus(labels)
+					}
+				}
+				rows = append(rows, []string{pr.ID, pr.Status, pr.Branch + " → " + pr.Base, reviews, pr.Title})
 			}
 			if len(rows) == 0 {
 				fmt.Println("No PRs found.")
@@ -85,7 +91,7 @@ func newPrCmd() *cobra.Command {
 			}
 			dim := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 			t := table.New().
-				Headers("ID", "STATUS", "BRANCH", "TITLE").
+				Headers("ID", "STATUS", "BRANCH", "REVIEWS", "TITLE").
 				Rows(rows...).
 				BorderStyle(dim).
 				StyleFunc(func(row, col int) lipgloss.Style {
