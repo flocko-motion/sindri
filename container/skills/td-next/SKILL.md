@@ -9,19 +9,22 @@ and prints the full details with comments.
 
 If no task is available, say so and wait for instructions.
 
+The statusline updates automatically — `gh issue next` writes the task there.
+Do NOT try to invoke any statusline skill or command.
+
 When you have a task:
-1. Run `/statusline <task-id>: <title>` to show the current task in the statusline
-2. If anything is unclear, ask me — or comment with `gh issue comment -b "question"`
-3. Implement the task, run tests, commit your changes
-4. `gh submit --title "type(task-id): summary"` — use conventional commits:
+1. If anything is unclear, ask me — or comment with `gh issue comment -b "question"`
+2. Implement the task, run tests, commit your changes
+3. `gh submit --title "type(task-id): summary"` — use conventional commits:
    - feature → `feat(td-xxx): ...`
    - bug → `fix(td-xxx): ...`
    - task/chore → `chore(td-xxx): ...`
    The task type tells you which prefix to use.
-5. `gh submit` handles everything: rebase, PR creation, handoff, review submission.
-   It will wait for approval automatically.
-6. If rejected, read the comments with `gh issue view` and fix the issues, then `gh submit` again.
-7. When approved, run `gh done` then go back to `gh issue next`.
+4. `gh submit` handles everything: rebase, PR creation, handoff, review submission.
+5. When done, run `gh done` then go back to `gh issue next` for the next task.
+   Do NOT wait for review — move on to the next task.
+6. If a previous task was rejected, `gh issue next` will surface it again with
+   the reviewer's comments — read them and fix the issues.
 
 The `gh` command is sindri-local (NOT GitHub). All operations are local.
 Do NOT use `td` directly — use `gh issue` commands instead.
