@@ -78,6 +78,37 @@ func (T) Unreachable() {}
 	}
 }
 
+func TestDeadcodeKeepDirective(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module keepprog\n\ngo 1.25\n",
+		"main.go": `package main
+
+func main() { live() }
+
+func live() {}
+
+//deadcode:keep
+func keptDead() {}
+
+func reallyDead() {}
+`,
+	})
+
+	out, found := runInDir(t, dir, "./...")
+	if !found {
+		t.Fatalf("expected reallyDead to be reported; output:\n%s", out)
+	}
+	if strings.Contains(out, "keptDead") {
+		t.Errorf("keptDead carries //deadcode:keep and must not be reported; got:\n%s", out)
+	}
+	if !strings.Contains(out, "unreachable func: reallyDead") {
+		t.Errorf("expected reallyDead to be reported; got:\n%s", out)
+	}
+	if !strings.Contains(out, "//deadcode:keep") {
+		t.Errorf("expected the output to advertise the //deadcode:keep directive; got:\n%s", out)
+	}
+}
+
 func TestDeadcodeCleanProgram(t *testing.T) {
 	dir := writeModule(t, map[string]string{
 		"go.mod":  "module cleanprog\n\ngo 1.25\n",

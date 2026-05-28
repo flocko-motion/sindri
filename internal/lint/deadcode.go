@@ -32,6 +32,10 @@ import (
 // to w (sorted by package, then file, then line). Reporting is limited to the
 // module(s) of the loaded packages so dependencies are never flagged.
 //
+// Generated files, marker interface methods, and functions annotated with a
+// //deadcode:keep directive are excluded. When anything is reported, a trailing
+// note reminds the reader that the directive exists.
+//
 // It returns true if any unreachable function was reported, which callers can
 // use as a non-zero exit gate.
 func Deadcode(patterns []string, tags string, includeTests bool, w io.Writer) (found bool, err error) {
@@ -131,6 +135,7 @@ func Deadcode(patterns []string, tags string, includeTests bool, w io.Writer) (f
 		m[fn] = true
 	}
 
+	var count int
 	for _, pkgpath := range slices.Sorted(maps.Keys(byPkgPath)) {
 		if !filter.MatchString(pkgpath) {
 			continue
@@ -152,11 +157,18 @@ func Deadcode(patterns []string, tags string, includeTests bool, w io.Writer) (f
 			if isMarkerMethod(fn, interfaceTypes[fn.Pkg.Pkg]) {
 				continue
 			}
+			if hasKeepDirective(fn) {
+				continue // explicitly kept by the author
+			}
 			fmt.Fprintf(w, "%s: unreachable func: %s\n", relPosition(posn), prettyName(fn))
-			found = true
+			count++
 		}
 	}
-	return found, nil
+	if count > 0 {
+		fmt.Fprintf(w, "\n%d unreachable function(s) found.\n", count)
+		fmt.Fprintln(w, "note: add a //deadcode:keep comment directly above a function to keep it (excludes it from this report).")
+	}
+	return count > 0, nil
 }
 
 // moduleFilter builds a regexp matching the import paths of the modules that
@@ -229,6 +241,24 @@ func isMarkerMethod(fn *ssa.Function, interfaceTypes []*types.Interface) bool {
 	return slices.ContainsFunc(interfaceTypes, func(iface *types.Interface) bool {
 		return types.Implements(fn.Signature.Recv().Type(), iface)
 	})
+}
+
+// hasKeepDirective reports whether fn's declaration carries a //deadcode:keep
+// directive, used to intentionally exclude an unreachable function from the
+// report (e.g. it is called only via reflection, or kept as future API). The
+// directive must sit directly above the func declaration, like other Go
+// tool directives.
+func hasKeepDirective(fn *ssa.Function) bool {
+	decl, ok := fn.Syntax().(*ast.FuncDecl)
+	if !ok || decl.Doc == nil {
+		return false
+	}
+	for _, c := range decl.Doc.List {
+		if strings.HasPrefix(strings.TrimSpace(c.Text), "//deadcode:keep") {
+			return true
+		}
+	}
+	return false
 }
 
 var cwd, _ = os.Getwd()

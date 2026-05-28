@@ -20,7 +20,9 @@ func newLintCmd() *cobra.Command {
 		Short: "Report unreachable functions (exits non-zero if any are found)",
 		Long: "Report source-level functions unreachable from any main package, " +
 			"computed via Rapid Type Analysis. Defaults to ./... and exits " +
-			"non-zero when any unreachable function is found, so it can gate CI.",
+			"non-zero when any unreachable function is found, so it can gate CI.\n\n" +
+			"Add a //deadcode:keep comment directly above a function to keep it " +
+			"(it will be excluded from the report).",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				args = []string{"./..."}
