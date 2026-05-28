@@ -38,6 +38,9 @@ RUN chmod +x /usr/local/bin/yq /usr/local/bin/td
 RUN npm install -g @anthropic-ai/claude-code@latest
 RUN mkdir -p /opt/sindri && cd /opt/sindri && npm init -y && npm install "@anthropic-ai/claude-agent-sdk@^0.1.59"
 
+# ── openspec CLI (spec-driven workflow, optional per project) ──────────────────
+RUN npm install -g @fission-ai/openspec@latest
+
 # ── gh-local (mounted from host at runtime) ──────────────────────────────────
 # The sindri-gh binary is mounted read-only at /opt/sindri/sindri-gh.
 # Create the symlink at build time (as root) — the mount provides the target
