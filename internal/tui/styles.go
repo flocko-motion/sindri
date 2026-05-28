@@ -47,6 +47,12 @@ var (
 			Foreground(lipgloss.Color("#FF6666")).
 			Bold(true)
 
+	// PR-status styles. Unlike task status (where open=orange means "needs
+	// work"), an open PR is active/ready, so it is green.
+	prOpenStyle     = lipgloss.NewStyle().Foreground(special)
+	prApprovedStyle = lipgloss.NewStyle().Foreground(special).Bold(true)
+	prRejectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF6666"))
+
 	headerStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(special).

@@ -58,10 +58,12 @@ func buildBacklogRows(tasks []taskItem, prs []prItem, workersByTask map[string]s
 		)
 		rows = append(rows, backlogRow{taskIdx: ti, display: line, plain: plain})
 
+		taskClosed := t.Status == "closed" || t.Status == "approved"
 		for _, pi := range prByTask[t.ID] {
 			pr := prs[pi]
 			prPlain := fmt.Sprintf("    └ %s [%s]", pr.ID, pr.Status)
-			rows = append(rows, backlogRow{isPR: true, prIdx: pi, display: prPlain, plain: prPlain})
+			prLine := fmt.Sprintf("    └ %s [%s]", pr.ID, prStatusStyle(pr.Status, taskClosed))
+			rows = append(rows, backlogRow{isPR: true, prIdx: pi, display: prLine, plain: prPlain})
 		}
 
 		if gates := renderGates(t.Labels); gates != "" {
@@ -75,7 +77,7 @@ func buildBacklogRows(tasks []taskItem, prs []prItem, workersByTask map[string]s
 		if prTitle == "" {
 			prTitle = pr.ID
 		}
-		prLine := fmt.Sprintf("%s  %s", statusStyle(pr.Status), prTitle)
+		prLine := fmt.Sprintf("%s  %s", prStatusStyle(pr.Status, false), prTitle)
 		prPlain := fmt.Sprintf("%s  %s", pr.Status, prTitle)
 		rows = append(rows, backlogRow{isPR: true, prIdx: pi, display: prLine, plain: prPlain})
 	}
@@ -110,6 +112,28 @@ func statusStyle(status string) string {
 		return statusOpen.Render(status)
 	case "merged", "approved", "closed":
 		return statusDone.Render(status)
+	default:
+		return dimStyle.Render(status)
+	}
+}
+
+// prStatusStyle colors a PR status. An open PR is active/ready, so it is green
+// (not orange like an open task). A rejected PR is only highlighted red while
+// its parent task is still active; once the task is closed the reject history
+// is just noise, so it is dimmed.
+func prStatusStyle(status string, taskClosed bool) string {
+	switch status {
+	case "open":
+		return prOpenStyle.Render(status)
+	case "approved":
+		return prApprovedStyle.Render(status)
+	case "rejected":
+		if taskClosed {
+			return dimStyle.Render(status)
+		}
+		return prRejectedStyle.Render(status)
+	case "merged", "closed":
+		return dimStyle.Render(status)
 	default:
 		return dimStyle.Render(status)
 	}
