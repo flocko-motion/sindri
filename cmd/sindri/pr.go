@@ -66,7 +66,7 @@ func newPrCmd() *cobra.Command {
 	var prListAll bool
 	prListCmd := &cobra.Command{
 		Use:   "list",
-		Short: "List local PRs (open only by default, --all for everything)",
+		Short: "List local PRs (open + approved by default, --all for everything)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prs, err := store.List()
 			if err != nil {

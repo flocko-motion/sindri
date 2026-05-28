@@ -165,11 +165,13 @@ func Start(projectRoot, name string, opts StartOpts) error {
 		fmt.Fprintf(os.Stderr, "Warning: detach failed: %s\n", strings.TrimSpace(string(out)))
 	}
 
-	// Container startup: rewrite .git for container paths
+	// Container startup: rewrite .git for container paths.
+	// gh symlink is created at image build time (sindri user can't write /usr/local/bin).
+	// Fail loudly (set -e) so startup problems are visible, not silently swallowed.
 	containerGitDir := fmt.Sprintf("gitdir: /repo/.git/worktrees/%s", name)
-	startup := "ln -sf /opt/sindri/sindri-gh /usr/local/bin/gh 2>/dev/null; " +
-		"mkdir -p /home/sindri/.claude/skills && ln -sfn /opt/sindri/skills/* /home/sindri/.claude/skills/ 2>/dev/null; " +
-		"ln -sf /opt/sindri/CLAUDE.md /workspace/CLAUDE.md 2>/dev/null; " +
+	startup := "set -e; " +
+		"mkdir -p /home/sindri/.claude/skills && ln -sfn /opt/sindri/skills/* /home/sindri/.claude/skills/; " +
+		"ln -sf /opt/sindri/CLAUDE.md /workspace/CLAUDE.md; " +
 		"if [ -f /workspace/.git ]; then " +
 		fmt.Sprintf("echo '%s' > /workspace/.git; ", containerGitDir) +
 		"fi; "
@@ -234,9 +236,9 @@ func StartReviewer(projectRoot string, shell bool) error {
 		container.ImageName,
 	}
 
-	startup := "ln -sf /opt/sindri/sindri-gh /usr/local/bin/gh 2>/dev/null; " +
-		"mkdir -p /home/sindri/.claude/skills && ln -sfn /opt/sindri/skills/* /home/sindri/.claude/skills/ 2>/dev/null; " +
-		"cp /opt/sindri/CLAUDE.reviewer.md /workspace/CLAUDE.md 2>/dev/null || ln -sf /opt/sindri/CLAUDE.reviewer.md /workspace/CLAUDE.md 2>/dev/null; "
+	startup := "set -e; " +
+		"mkdir -p /home/sindri/.claude/skills && ln -sfn /opt/sindri/skills/* /home/sindri/.claude/skills/; " +
+		"cp /opt/sindri/CLAUDE.reviewer.md /workspace/CLAUDE.md; "
 
 	skill := "td-review"
 	if shell {
