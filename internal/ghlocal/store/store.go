@@ -20,7 +20,7 @@ type PR struct {
 	ID        string `json:"id"`
 	Branch    string `json:"branch"`
 	Base      string `json:"base"`
-	Status    string `json:"status"` // open | approved | merged
+	Status    string `json:"status"` // open | approved | rejected | merged
 	Title     string `json:"title"`
 	Body      string `json:"body"`
 	CreatedAt string `json:"created_at"`

@@ -54,6 +54,7 @@ type Model struct {
 	confirmLabel  string
 
 	commenting   bool
+	rejecting    bool
 	commentInput textinput.Model
 
 	notify notification
@@ -180,6 +181,11 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateCommentInput(msg)
 	}
 
+	// Handle reject-reason input mode
+	if m.rejecting {
+		return m.updateRejectInput(msg)
+	}
+
 	// Handle confirmation mode
 	if m.confirmAction != "" {
 		return m.updateConfirm(msg)
@@ -244,9 +250,14 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, keys.Reject):
 			if m.detail.kind == detailTask {
-				m.confirmAction = "reject"
-				m.confirmLabel = fmt.Sprintf("Reject task %s? (y/n)", m.detail.taskID)
-				return m, nil
+				ti := textinput.New()
+				ti.Placeholder = "Reason for rejection..."
+				ti.Focus()
+				ti.CharLimit = 500
+				ti.Width = m.width - 20
+				m.rejecting = true
+				m.commentInput = ti
+				return m, textinput.Blink
 			}
 		case key.Matches(msg, keys.Yank):
 			id := m.detail.taskID
@@ -556,6 +567,8 @@ func (m Model) viewDetail() string {
 		bottomBar = confirmStyle.Width(m.width).Render(m.confirmLabel)
 	} else if m.commenting {
 		bottomBar = lipgloss.NewStyle().PaddingLeft(1).Render("Comment: " + m.commentInput.View())
+	} else if m.rejecting {
+		bottomBar = lipgloss.NewStyle().PaddingLeft(1).Render("Reject reason: " + m.commentInput.View())
 	} else {
 		bottomBar = m.notify.render(m.width)
 	}

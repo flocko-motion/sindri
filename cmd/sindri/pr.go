@@ -16,6 +16,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	"github.com/flo-at/sindri/internal/action"
 	"github.com/flo-at/sindri/internal/adapter/td"
 	"github.com/flo-at/sindri/internal/ghlocal/store"
 	"github.com/flo-at/sindri/internal/issue"
@@ -141,41 +142,17 @@ func newPrCmd() *cobra.Command {
 			if taskID != "" {
 				printTaskSummary(taskID)
 			}
-			pr, err = store.Approve(id)
-			if err != nil {
+			if _, err := action.Approve(tdWorkDir(), id); err != nil {
 				return err
 			}
-			fmt.Printf("Approved PR: %s\n", pr.ID)
+			fmt.Printf("Approved PR: %s\n", id)
 			if !approveAndMerge {
 				return nil
 			}
 			if !confirmHuman() {
 				return fmt.Errorf("aborted")
 			}
-			if taskID != "" {
-				if missing, err := checkReviewGates(taskID); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: could not check review gates: %v\n", err)
-				} else if len(missing) > 0 {
-					fmt.Fprintf(os.Stderr, "Review gates not met for %s:\n", taskID)
-					for _, m := range missing {
-						fmt.Fprintf(os.Stderr, "  ✗ %s\n", m)
-					}
-					return fmt.Errorf("missing reviews: %s", strings.Join(missing, ", "))
-				}
-			}
-			pr, err = store.Merge(id)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("Merged PR %s into %s\n", pr.ID, pr.Base)
-			if taskID != "" {
-				if err := td.Close(tdWorkDir(), taskID, "PR merged"); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-				} else {
-					fmt.Printf("Closed task %s\n", taskID)
-				}
-			}
-			return nil
+			return mergeAndReport(id)
 		},
 	}
 	approveAndMergeCmd.Flags().BoolVar(&approveAndMerge, "merge", false, "Also merge after approving")
@@ -242,30 +219,7 @@ func newPrCmd() *cobra.Command {
 				if !confirmHuman() {
 					return fmt.Errorf("aborted")
 				}
-				if taskID != "" {
-					if missing, err := checkReviewGates(taskID); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: could not check review gates: %v\n", err)
-					} else if len(missing) > 0 {
-						fmt.Fprintf(os.Stderr, "Review gates not met for %s:\n", taskID)
-						for _, m := range missing {
-							fmt.Fprintf(os.Stderr, "  ✗ %s\n", m)
-						}
-						return fmt.Errorf("missing reviews: %s", strings.Join(missing, ", "))
-					}
-				}
-				pr, err = store.Merge(id)
-				if err != nil {
-					return err
-				}
-				fmt.Printf("Merged PR %s into %s\n", pr.ID, pr.Base)
-				if taskID != "" {
-					if err := td.Close(tdWorkDir(), taskID, "PR merged"); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-					} else {
-						fmt.Printf("Closed task %s\n", taskID)
-					}
-				}
-				return nil
+				return mergeAndReport(id)
 			},
 		},
 	)
@@ -280,11 +234,6 @@ func newPrCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			pr, err := store.Read(id)
-			if err != nil {
-				return err
-			}
-
 			comment := rejectComment
 			if comment == "" {
 				fmt.Print("Rejection reason: ")
@@ -296,26 +245,11 @@ func newPrCmd() *cobra.Command {
 				}
 				comment = strings.TrimSpace(comment)
 			}
-			if comment == "" {
-				return fmt.Errorf("rejection reason is required")
-			}
-
-			pr.Status = "rejected"
-			if err := store.Write(pr); err != nil {
+			pr, err := action.Reject(tdWorkDir(), id, comment)
+			if err != nil {
 				return err
 			}
-			fmt.Printf("Rejected PR %s\n", pr.ID)
-
-			if taskID := issue.TaskIDFromTitle(pr.Title); taskID != "" {
-				if err := td.Comment(tdWorkDir(), taskID, comment); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-				}
-				if err := td.Reject(tdWorkDir(), taskID); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-				} else {
-					fmt.Printf("Rejected task %s\n", taskID)
-				}
-			}
+			fmt.Printf("Rejected PR %s and returned its task to open\n", pr.ID)
 			return nil
 		},
 	}
@@ -556,40 +490,22 @@ func getTaskLabels(taskID string) ([]string, error) {
 	return t.Labels, nil
 }
 
-// rejectPRsForTask finds and rejects all open PRs for a given task ID.
-func rejectPRsForTask(taskID string) {
-	prs, err := store.List()
-	if err != nil {
-		return
-	}
-	for _, pr := range prs {
-		if pr.Status != "open" && pr.Status != "approved" {
-			continue
-		}
-		if issue.TaskIDFromTitle(pr.Title) == taskID {
-			pr.Status = "rejected"
-			if err := store.Write(pr); err == nil {
-				fmt.Printf("Rejected PR %s\n", pr.ID)
-			}
-		}
-	}
-}
-
 func newRejectCmd() *cobra.Command {
-	return &cobra.Command{
+	var reason string
+	cmd := &cobra.Command{
 		Use:   "reject <task-id>",
-		Short: "Reject a task and close its open PRs",
+		Short: "Reject a task back for rework and reject its open PRs (requires -m reason)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			taskID := args[0]
-			if err := td.Reject(tdWorkDir(), taskID); err != nil {
+			if err := action.RejectTask(tdWorkDir(), args[0], reason); err != nil {
 				return err
 			}
-			fmt.Printf("Rejected task %s\n", taskID)
-			rejectPRsForTask(taskID)
+			fmt.Printf("Rejected task %s and its open PRs\n", args[0])
 			return nil
 		},
 	}
+	cmd.Flags().StringVarP(&reason, "message", "m", "", "Reason for rejection (required)")
+	return cmd
 }
 
 // tdWorkDir returns the project root for td commands.
@@ -602,12 +518,23 @@ func tdWorkDir() string {
 	return strings.TrimSpace(string(out))
 }
 
-// checkReviewGates returns the required reviews not yet approved for a task
-// (thin wrapper over issue.Load + MissingReviews).
-func checkReviewGates(taskID string) ([]string, error) {
-	iss, err := td.Get(tdWorkDir(), taskID)
+// mergeAndReport merges a PR through the shared action layer (gate-checked, then
+// closes the task) and prints the outcome. Human confirmation is the caller's.
+func mergeAndReport(id string) error {
+	merged, missing, err := action.Merge(tdWorkDir(), id)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return iss.MissingReviews(), nil
+	if len(missing) > 0 {
+		fmt.Fprintf(os.Stderr, "Review gates not met:\n")
+		for _, m := range missing {
+			fmt.Fprintf(os.Stderr, "  ✗ %s\n", m)
+		}
+		return fmt.Errorf("missing reviews: %s", strings.Join(missing, ", "))
+	}
+	fmt.Printf("Merged PR %s into %s\n", merged.ID, merged.Base)
+	if taskID := issue.TaskIDFromTitle(merged.Title); taskID != "" {
+		fmt.Printf("Closed task %s\n", taskID)
+	}
+	return nil
 }

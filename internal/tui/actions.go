@@ -1,10 +1,11 @@
 // package: tui / actions
 // type:    ui
-// job:     detail-view actions — comment input, the merge/reject confirmation
-//          gate, and the commands that approve/merge/reject/comment/cycle a
-//          task. Each command calls the logic layer and reports an actionResultMsg.
-// limits:  no domain rules (-> issue); mutations go through adapter/td and
-//          ghlocal/store, never raw exec.
+// job:     detail-view actions — comment + reject-reason input, the merge
+//          confirmation gate, and the commands that approve/merge/reject/
+//          comment/cycle a task. Each calls the shared action layer (or the td
+//          adapter) and reports an actionResultMsg.
+// limits:  no domain rules (-> issue/action); mutations go through
+//          internal/action and adapter/td, never raw exec.
 package tui
 
 import (
@@ -13,8 +14,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/flo-at/sindri/internal/action"
 	"github.com/flo-at/sindri/internal/adapter/td"
-	"github.com/flo-at/sindri/internal/ghlocal/store"
 )
 
 type actionResultMsg struct {
@@ -27,14 +28,11 @@ func (m Model) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "y", "Y":
-			action := m.confirmAction
+			act := m.confirmAction
 			m.confirmAction = ""
 			m.confirmLabel = ""
-			switch action {
-			case "merge":
+			if act == "merge" {
 				return m, m.mergePR()
-			case "reject":
-				return m, m.rejectTask()
 			}
 		default:
 			m.confirmAction = ""
@@ -66,50 +64,74 @@ func (m Model) updateCommentInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// updateRejectInput collects the (required) rejection reason, then rejects.
+func (m Model) updateRejectInput(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch {
+		case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
+			m.rejecting = false
+			return m, nil
+		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+			text := strings.TrimSpace(m.commentInput.Value())
+			m.rejecting = false
+			if text == "" {
+				return m, nil // no reason → cancel; reject always needs one
+			}
+			return m, m.rejectTask(text)
+		}
+	}
+	var cmd tea.Cmd
+	m.commentInput, cmd = m.commentInput.Update(msg)
+	return m, cmd
+}
+
 func (m *Model) approvePR() tea.Cmd {
 	prID := m.detail.prIDs[0]
+	root := m.projectRoot
 	return func() tea.Msg {
-		_, err := store.Approve(prID)
+		pr, err := action.Approve(root, prID)
 		if err != nil {
 			return actionResultMsg{message: "Approve failed: " + err.Error(), isError: true}
 		}
-		return actionResultMsg{message: "PR approved: " + prID}
+		return actionResultMsg{message: "PR approved: " + pr.ID}
 	}
 }
 
 func (m *Model) mergePR() tea.Cmd {
 	prID := m.detail.prIDs[0]
+	root := m.projectRoot
 	return func() tea.Msg {
-		_, err := store.Merge(prID)
+		merged, missing, err := action.Merge(root, prID)
 		if err != nil {
 			return actionResultMsg{message: "Merge failed: " + err.Error(), isError: true}
 		}
-		return actionResultMsg{message: "PR merged: " + prID}
+		if len(missing) > 0 {
+			return actionResultMsg{message: "Merge blocked — unmet gates: " + strings.Join(missing, ", "), isError: true}
+		}
+		return actionResultMsg{message: "PR merged: " + merged.ID}
 	}
 }
 
-func (m *Model) rejectTask() tea.Cmd {
+func (m *Model) rejectTask(reason string) tea.Cmd {
+	prID := ""
+	if len(m.detail.prIDs) > 0 {
+		prID = m.detail.prIDs[0]
+	}
 	taskID := m.detail.taskID
-	projectRoot := m.projectRoot
-	prIDs := make([]string, len(m.detail.prIDs))
-	copy(prIDs, m.detail.prIDs)
+	root := m.projectRoot
 	return func() tea.Msg {
-		if err := td.Reject(projectRoot, taskID); err != nil {
+		if prID != "" {
+			pr, err := action.Reject(root, prID, reason)
+			if err != nil {
+				return actionResultMsg{message: "Reject failed: " + err.Error(), isError: true}
+			}
+			return actionResultMsg{message: "Rejected PR " + pr.ID + " and reopened its task"}
+		}
+		if err := action.RejectTask(root, taskID, reason); err != nil {
 			return actionResultMsg{message: "Reject failed: " + err.Error(), isError: true}
 		}
-		for _, prID := range prIDs {
-			pr, err := store.Read(prID)
-			if err != nil {
-				continue
-			}
-			if pr.Status == "open" || pr.Status == "approved" {
-				pr.Status = "rejected"
-				if writeErr := store.Write(pr); writeErr != nil {
-					return actionResultMsg{message: "Task rejected but PR update failed: " + writeErr.Error(), isError: true}
-				}
-			}
-		}
-		return actionResultMsg{message: "Task rejected: " + taskID}
+		return actionResultMsg{message: "Rejected task " + taskID}
 	}
 }
 
