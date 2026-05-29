@@ -1,16 +1,39 @@
 // package: main (sindri) / lint
 // type:    command
-// job:     wires `sindri lint` — deadcode, loc, and all (run every linter).
-// limits:  analyses live in internal/lint; this only wires flags and exit codes.
+// job:     wires `sindri lint` — deadcode, loc, openspec, and all (run them all).
+// limits:  Go analyses live in internal/lint, openspec validation in
+//          adapter/spec; this only wires flags and exit codes.
 package main
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
+	"github.com/flo-at/sindri/internal/adapter/spec"
 	"github.com/flo-at/sindri/internal/lint"
 	"github.com/spf13/cobra"
 )
+
+// lintOpenspec validates the project's OpenSpec specs. It is a no-op (returns
+// false) when openspec isn't used or installed. Returns true on validation
+// failure.
+func lintOpenspec(w io.Writer) bool {
+	root, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(w, "openspec: cannot determine working dir: %v\n", err)
+		return true
+	}
+	ok, out := spec.Validate(root)
+	if out != "" {
+		fmt.Fprint(w, out)
+		if !strings.HasSuffix(out, "\n") {
+			fmt.Fprintln(w)
+		}
+	}
+	return !ok
+}
 
 func newLintCmd() *cobra.Command {
 	lintCmd := &cobra.Command{
@@ -66,6 +89,17 @@ func newLintCmd() *cobra.Command {
 	}
 	locCmd.Flags().IntVar(&maxLines, "max", lint.DefaultMaxLines, "maximum lines per file")
 
+	openspecCmd := &cobra.Command{
+		Use:   "openspec",
+		Short: "Validate OpenSpec specs (no-op if openspec isn't used/installed)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if lintOpenspec(cmd.OutOrStdout()) {
+				os.Exit(1)
+			}
+			return nil
+		},
+	}
+
 	allCmd := &cobra.Command{
 		Use:   "all",
 		Short: "Run all linters and report (exits non-zero if any fail)",
@@ -87,6 +121,9 @@ func newLintCmd() *cobra.Command {
 			}
 			failed = failed || loc
 
+			fmt.Fprintln(out, "\n== openspec ==")
+			failed = lintOpenspec(out) || failed
+
 			fmt.Fprintln(out)
 			if failed {
 				fmt.Fprintln(out, "FAIL: lint violations found")
@@ -100,6 +137,6 @@ func newLintCmd() *cobra.Command {
 	allCmd.Flags().BoolVar(&includeTests, "test", false, "include test packages")
 	allCmd.Flags().IntVar(&maxLines, "max", lint.DefaultMaxLines, "maximum lines per file")
 
-	lintCmd.AddCommand(deadcodeCmd, locCmd, allCmd)
+	lintCmd.AddCommand(deadcodeCmd, locCmd, openspecCmd, allCmd)
 	return lintCmd
 }

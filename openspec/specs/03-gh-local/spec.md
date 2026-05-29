@@ -37,19 +37,21 @@ be found, with later revisions suffixed when an earlier PR for the task is gone.
 
 ### Requirement: Lint gate before submit
 
-Submitting (and creating a PR) SHALL run the project linters after the rebase
-and before the PR record is written; if any violation is found, or a linter
-cannot run (e.g. the code does not compile), the submit SHALL be refused and the
-violations reported, so an unlinted PR is never created.
+Submitting (and creating a PR) SHALL run the project's quality gates after the
+rebase and before the PR record is written — the same gates as `sindri lint all`
+(file length, dead code, and OpenSpec validation). If any violation is found, or
+a gate cannot run (e.g. the code does not compile), the submit SHALL be refused
+and the violations reported, so a failing PR is never created. OpenSpec
+validation SHALL be skipped when the project doesn't use openspec.
 
 #### Scenario: Clean submit
 
-- **WHEN** an agent submits work that passes lint
+- **WHEN** an agent submits work that passes every gate
 - **THEN** the PR record is created
 
 #### Scenario: Lint violation
 
-- **WHEN** an agent submits work that fails lint
+- **WHEN** an agent submits work that fails a gate (lint or an invalid spec)
 - **THEN** no PR is created and the violations are shown for the agent to fix
 
 ### Requirement: Per-task branches in worktrees

@@ -2,7 +2,8 @@
 // type:    command
 // job:     the agent's `sindri-worker submit` — rebase, lint, create the PR, hand
 //          off and submit the task for review, then return (no blocking wait).
-// limits:  PR records live in store; lint via internal/lint; task state via td CLI.
+// limits:  PR records live in store; lint via internal/lint + openspec via
+//          adapter/spec; task state via td CLI.
 package agentcli
 
 import (
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flo-at/sindri/internal/adapter/spec"
 	"github.com/flo-at/sindri/internal/ghlocal/store"
 	"github.com/flo-at/sindri/internal/lint"
 	"github.com/spf13/cobra"
@@ -132,7 +134,12 @@ func runLint(w io.Writer) error {
 		return fmt.Errorf("lint (deadcode) could not run — fix build errors before submitting:\n%s\n%w", out.String(), err)
 	}
 
-	if locFound || dcFound {
+	// openspec validation (skipped when openspec isn't used/installed)
+	fmt.Fprintln(&out, "== openspec ==")
+	specOK, specOut := spec.Validate(".")
+	out.WriteString(specOut)
+
+	if locFound || dcFound || !specOK {
 		fmt.Fprint(w, out.String())
 		return fmt.Errorf("lint failed — fix the violations above before submitting")
 	}

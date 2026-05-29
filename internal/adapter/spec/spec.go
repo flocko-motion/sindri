@@ -1,7 +1,7 @@
 // package: spec
 // type:    adapter (external tool)
-// job:     wraps the openspec CLI — reads a project's changes/specs via
-//          `openspec list --json` for display in the work list.
+// job:     wraps the openspec CLI — reads a project's changes via
+//          `openspec list --json` and validates specs via `openspec validate`.
 // limits:  read-only; the propose/apply/archive workflow runs via the openspec
 //          CLI in agent containers, not here. Doesn't assemble (-> board).
 package spec
@@ -45,6 +45,29 @@ func Changes(projectRoot string) []Change {
 		return nil
 	}
 	return result.Changes
+}
+
+// Validate runs `openspec validate --all` for the project. It degrades
+// gracefully: when openspec isn't used (no openspec/ dir) or the CLI isn't
+// installed, it reports ok=true with no output, so non-openspec projects and
+// missing tooling never block a lint or submit. ok=false means at least one
+// spec is invalid; output carries the validator's report.
+func Validate(projectRoot string) (ok bool, output string) {
+	if !Enabled(projectRoot) {
+		return true, ""
+	}
+	cmd := exec.Command("openspec", "validate", "--all")
+	cmd.Dir = projectRoot
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		// A non-zero exit means validation failures; anything else (e.g. the
+		// CLI not being installed) is treated as "skip", not a hard failure.
+		if _, isExit := err.(*exec.ExitError); isExit {
+			return false, string(out)
+		}
+		return true, ""
+	}
+	return true, string(out)
 }
 
 func run(projectRoot string, args ...string) ([]byte, error) {
