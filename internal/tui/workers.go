@@ -13,6 +13,13 @@ import (
 	"github.com/flo-at/sindri/internal/worker"
 )
 
+func dash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
 func renderWorkersList(workers []worker.Worker, cursor int, active bool) string {
 	var b strings.Builder
 	if len(workers) == 0 {
@@ -24,6 +31,7 @@ func renderWorkersList(workers []worker.Worker, cursor int, active bool) string 
 	type row struct {
 		icon   string
 		name   string
+		role   string
 		status string
 		task   string
 		pr     string
@@ -41,34 +49,23 @@ func renderWorkersList(workers []worker.Worker, cursor int, active bool) string 
 			icon = "⚠ "
 		}
 
-		task := wk.Task
-		if task == "" {
-			task = "-"
-		}
-		pr := wk.PR
-		if pr == "" {
-			pr = "-"
-		}
 		path := "-"
 		if wk.Path != "" {
 			path = filepath.Base(wk.Path)
 		}
-		branch := wk.Branch
-		if branch == "" {
-			branch = "-"
-		}
 
-		plain := fmt.Sprintf("%s %-12s %-8s %-30s %-18s %-12s %s",
-			icon, wk.Name, wk.Status, task, pr, path, branch)
+		plain := fmt.Sprintf("%s %-12s %-9s %-8s %-26s %-16s %-12s %s",
+			icon, wk.Name, wk.Role, wk.Status, dash(wk.Task), dash(wk.PR), path, dash(wk.Branch))
 
 		rows = append(rows, row{
 			icon:   icon,
 			name:   wk.Name,
+			role:   wk.Role,
 			status: wk.Status,
-			task:   task,
-			pr:     pr,
+			task:   dash(wk.Task),
+			pr:     dash(wk.PR),
 			path:   path,
-			branch: branch,
+			branch: dash(wk.Branch),
 			plain:  plain,
 		})
 	}
@@ -77,9 +74,10 @@ func renderWorkersList(workers []worker.Worker, cursor int, active bool) string 
 		if active && i == cursor {
 			b.WriteString(selectedItemStyle.Render("> " + r.plain))
 		} else {
-			line := fmt.Sprintf("  %s %-12s %s  %-30s %s  %-12s %s",
+			line := fmt.Sprintf("  %s %-12s %-9s %s  %-26s %s  %-12s %s",
 				r.icon,
 				r.name,
+				dimStyle.Render(r.role),
 				render.TaskStatus(r.status),
 				dimStyle.Render(r.task),
 				dimStyle.Render(r.pr),

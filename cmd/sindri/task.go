@@ -16,7 +16,6 @@ import (
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/flo-at/sindri/internal/adapter/td"
 	"github.com/flo-at/sindri/internal/board"
-	"github.com/flo-at/sindri/internal/ghlocal/store"
 	"github.com/flo-at/sindri/internal/issue"
 	"github.com/flo-at/sindri/internal/render"
 	"github.com/flo-at/sindri/internal/worker"
@@ -137,24 +136,14 @@ func runTaskList(cmd *cobra.Command, args []string, showAll, showOpen, showClose
 		return err
 	}
 
-	if !showAll {
-		filtered := issues[:0]
-		for _, iss := range issues {
-			switch {
-			case showOpen && showClosed:
-				filtered = append(filtered, iss)
-			case showClosed:
-				if iss.IsClosed() {
-					filtered = append(filtered, iss)
-				}
-			default: // default and --open both hide closed (spec-only is never closed)
-				if !iss.IsClosed() {
-					filtered = append(filtered, iss)
-				}
-			}
-		}
-		issues = filtered
+	filter := issue.FilterOpen
+	switch {
+	case showAll || (showOpen && showClosed):
+		filter = issue.FilterAll
+	case showClosed:
+		filter = issue.FilterClosed
 	}
+	issues = issue.Apply(issues, filter)
 
 	if len(issues) == 0 {
 		fmt.Println("No tasks found.")
@@ -199,21 +188,67 @@ func runTaskView(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("not in a git repo: %w", err)
 	}
-
 	taskID := args[0]
-	out, err := td.Show(projectRoot, taskID)
-	if err != nil {
-		return fmt.Errorf("task %s not found", taskID)
-	}
-	fmt.Println(out)
 
-	prs, _ := store.ListFor(projectRoot)
-	fmt.Println()
-	for _, pr := range prs {
-		if issue.TaskIDFromTitle(pr.Title) == taskID {
-			fmt.Printf("PR: %s [%s] %s → %s\n", pr.ID, pr.Status, pr.Branch, pr.Base)
+	issues, err := board.List(projectRoot)
+	if err != nil {
+		return err
+	}
+	var iss *issue.Issue
+	for i := range issues {
+		if issues[i].ID() == taskID {
+			iss = &issues[i]
+			break
+		}
+	}
+	if iss == nil {
+		return fmt.Errorf("issue %s not found", taskID)
+	}
+
+	if iss.SpecOnly() {
+		fmt.Printf("ID:     %s\n", iss.ID())
+		fmt.Printf("Spec:   %s\n", iss.Spec.Name)
+		if done, total, _ := iss.SpecProgress(); total > 0 {
+			fmt.Printf("Tasks:  %d/%d\n", done, total)
+		} else {
+			fmt.Printf("Tasks:  none yet\n")
+		}
+		return nil
+	}
+
+	t := iss.Task
+	fmt.Printf("ID:       %s\n", iss.ID())
+	fmt.Printf("Status:   %s\n", render.TaskStatus(t.Status))
+	fmt.Printf("Type:     %s\n", t.Type)
+	fmt.Printf("Priority: %s\n", t.Priority)
+	if iss.Spec != nil {
+		fmt.Printf("Spec:     %s\n", iss.Spec.Name)
+	}
+	if iss.Worker != "" {
+		fmt.Printf("Worker:   %s\n", iss.Worker)
+	}
+	if gates := render.Gates(iss.Gates()); gates != "" {
+		fmt.Printf("Gates:    %s\n", gates)
+	}
+	if !t.CreatedAt.IsZero() {
+		fmt.Printf("Created:  %s\n", t.CreatedAt.Local().Format("2006-01-02 15:04"))
+	}
+	if !t.UpdatedAt.IsZero() {
+		fmt.Printf("Updated:  %s\n", t.UpdatedAt.Local().Format("2006-01-02 15:04"))
+	}
+
+	if len(iss.PRs) > 0 {
+		fmt.Println("\nPull Requests:")
+		for _, pr := range iss.PRs {
+			fmt.Printf("  %s [%s] %s → %s\n", pr.ID, render.PRStatus(pr.Status, iss.IsClosed()), pr.Branch, pr.Base)
 		}
 	}
 
+	if desc, err := td.Show(projectRoot, taskID); err == nil && desc != "" {
+		fmt.Printf("\n%s\n", desc)
+	}
+	if c, err := td.Comments(projectRoot, taskID); err == nil && c != "" && c != "No comments" {
+		fmt.Printf("\n--- Comments ---\n%s\n", c)
+	}
 	return nil
 }

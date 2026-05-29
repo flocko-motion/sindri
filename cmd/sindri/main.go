@@ -8,10 +8,12 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/flo-at/sindri/internal/container"
+	"github.com/flo-at/sindri/internal/render"
 	"github.com/flo-at/sindri/internal/worker"
 	"github.com/spf13/cobra"
 )
@@ -138,6 +140,13 @@ func runWorkerStart(args []string, skill string, shell bool) error {
 	return worker.Start(projectRoot, name, worker.StartOpts{Skill: skill, Shell: shell})
 }
 
+func dash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
 func runWorkerList(cmd *cobra.Command, args []string) error {
 	projectRoot, err := worker.GitRoot()
 	if err != nil {
@@ -153,12 +162,19 @@ func runWorkerList(cmd *cobra.Command, args []string) error {
 		} else if wk.Role == "orphan" {
 			icon = "⚠ "
 		}
-		rows = append(rows, []string{icon + " " + wk.Name, wk.Role, wk.Status, wk.Task, wk.PR})
+		path := "-"
+		if wk.Path != "" {
+			path = filepath.Base(wk.Path)
+		}
+		rows = append(rows, []string{
+			icon + " " + wk.Name, wk.Role, render.TaskStatus(wk.Status),
+			dash(wk.Task), dash(wk.PR), path, dash(wk.Branch),
+		})
 	}
 
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	t := table.New().
-		Headers("NAME", "ROLE", "STATUS", "TASK", "PR").
+		Headers("NAME", "ROLE", "STATUS", "TASK", "PR", "PATH", "BRANCH").
 		Rows(rows...).
 		BorderStyle(dim).
 		StyleFunc(func(row, col int) lipgloss.Style {

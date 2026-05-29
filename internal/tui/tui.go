@@ -39,9 +39,11 @@ type Model struct {
 	backlogRows  []backlogRow
 	workerCursor int
 
-	workers []worker.Worker
-	issues  []issue.Issue
-	detail  detailState
+	workers       []worker.Worker
+	issues        []issue.Issue // full board (all states)
+	visibleIssues []issue.Issue // issues after the active filter; rows index into this
+	filter        issue.Filter
+	detail        detailState
 
 	vpList   viewport.Model
 	vpDetail viewport.Model
@@ -158,6 +160,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if id := m.selectedID(); id != "" {
 				_ = clipboard.WriteAll(id)
 				m.notify = notification{message: "Copied: " + id, time: time.Now()}
+				return m, flashTimer()
+			}
+		case key.Matches(msg, key.NewBinding(key.WithKeys("f"))):
+			if m.leftView == viewBacklog {
+				m.filter = (m.filter + 1) % 3
+				m.rebuildBacklog()
+				m.notify = notification{message: "Filter: " + filterName(m.filter), time: time.Now()}
 				return m, flashTimer()
 			}
 		case key.Matches(msg, keys.Refresh):
@@ -296,7 +305,22 @@ func (m *Model) resizeViewports() {
 }
 
 func (m *Model) rebuildBacklog() {
-	m.backlogRows = buildBacklogRows(m.issues)
+	m.visibleIssues = issue.Apply(m.issues, m.filter)
+	m.backlogRows = buildBacklogRows(m.visibleIssues)
+	if m.listCursor >= len(m.backlogRows) {
+		m.listCursor = 0
+	}
+}
+
+func filterName(f issue.Filter) string {
+	switch f {
+	case issue.FilterAll:
+		return "all"
+	case issue.FilterClosed:
+		return "closed only"
+	default:
+		return "open (closed hidden)"
+	}
 }
 
 func (m *Model) moveCursor(delta int) {
@@ -361,8 +385,8 @@ func (m *Model) selectedID() string {
 			if row.isPR {
 				return row.pr.ID
 			}
-			if row.issueIdx < len(m.issues) {
-				return m.issues[row.issueIdx].ID()
+			if row.issueIdx < len(m.visibleIssues) {
+				return m.visibleIssues[row.issueIdx].ID()
 			}
 		}
 	case viewWorkers:
@@ -397,8 +421,8 @@ func (m *Model) openDetail() {
 			row := m.backlogRows[m.listCursor]
 			if row.isPR {
 				m.detail = prDetail(row.pr)
-			} else if row.issueIdx < len(m.issues) {
-				m.detail = issueDetail(m.issues[row.issueIdx], m.projectRoot)
+			} else if row.issueIdx < len(m.visibleIssues) {
+				m.detail = issueDetail(m.visibleIssues[row.issueIdx], m.projectRoot)
 			}
 		}
 	case viewWorkers:

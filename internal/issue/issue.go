@@ -250,6 +250,31 @@ func Assemble(tasks []Task, specs []Spec, workerByTask map[string]string, prsByT
 	return append(issues, withTask...)
 }
 
+// Filter selects which Issues a view shows. It is UI-neutral so every interface
+// filters identically.
+type Filter int
+
+const (
+	FilterOpen   Filter = iota // hide closed Issues (the default view)
+	FilterAll                  // every Issue
+	FilterClosed               // only closed Issues
+)
+
+// Apply returns the Issues matching the filter, without mutating the input.
+// Spec-only Issues are never closed, so they survive FilterOpen.
+func Apply(issues []Issue, f Filter) []Issue {
+	if f == FilterAll {
+		return issues
+	}
+	out := make([]Issue, 0, len(issues))
+	for _, iss := range issues {
+		if (f == FilterClosed) == iss.IsClosed() {
+			out = append(out, iss)
+		}
+	}
+	return out
+}
+
 var taskIDRe = regexp.MustCompile(`\(?(td-[0-9a-f]+)\)?`)
 
 // TaskIDFromTitle extracts a td-xxxxxx task ID from a PR title, or "".
