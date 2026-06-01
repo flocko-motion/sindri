@@ -59,6 +59,10 @@ type Model struct {
 	rejecting    bool
 	commentInput textinput.Model
 
+	pickingStatus bool
+	statusOptions []string
+	statusCursor  int
+
 	notify notification
 }
 
@@ -195,6 +199,11 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateRejectInput(msg)
 	}
 
+	// Handle status picker
+	if m.pickingStatus {
+		return m.updateStatusPick(msg)
+	}
+
 	// Handle confirmation mode
 	if m.confirmAction != "" {
 		return m.updateConfirm(msg)
@@ -245,7 +254,15 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, keys.Status):
 			if m.detail.kind == detailTask {
-				return m, m.cycleTaskStatus()
+				m.statusOptions = statusOptions()
+				m.statusCursor = 0
+				for i, opt := range m.statusOptions {
+					if opt == m.detail.taskStatus {
+						m.statusCursor = i
+					}
+				}
+				m.pickingStatus = true
+				return m, nil
 			}
 		case key.Matches(msg, keys.Approve):
 			if len(m.detail.prIDs) > 0 {
@@ -593,6 +610,8 @@ func (m Model) viewDetail() string {
 		bottomBar = lipgloss.NewStyle().PaddingLeft(1).Render("Comment: " + m.commentInput.View())
 	} else if m.rejecting {
 		bottomBar = lipgloss.NewStyle().PaddingLeft(1).Render("Reject reason: " + m.commentInput.View())
+	} else if m.pickingStatus {
+		bottomBar = lipgloss.NewStyle().PaddingLeft(1).Render(renderStatusPicker(m.statusOptions, m.statusCursor))
 	} else {
 		bottomBar = m.notify.render(m.width)
 	}

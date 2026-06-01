@@ -26,11 +26,12 @@ const (
 )
 
 type detailState struct {
-	kind    detailKind
-	title   string
-	content string
-	taskID  string
-	prIDs   []string
+	kind       detailKind
+	title      string
+	content    string
+	taskID     string
+	taskStatus string // current task status — used to pre-select the status picker
+	prIDs      []string
 }
 
 var (
@@ -127,11 +128,12 @@ func issueDetail(iss issue.Issue, projectRoot string) detailState {
 		prIDs = append(prIDs, pr.ID)
 	}
 	return detailState{
-		kind:    detailTask,
-		title:   iss.ID() + ": " + t.Title,
-		content: strings.Join(sections, "\n\n"),
-		taskID:  iss.ID(),
-		prIDs:   prIDs,
+		kind:       detailTask,
+		title:      iss.ID() + ": " + t.Title,
+		content:    strings.Join(sections, "\n\n"),
+		taskID:     iss.ID(),
+		taskStatus: t.Status,
+		prIDs:      prIDs,
 	}
 }
 

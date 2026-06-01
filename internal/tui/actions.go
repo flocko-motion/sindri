@@ -135,27 +135,62 @@ func (m *Model) rejectTask(reason string) tea.Cmd {
 	}
 }
 
-func (m *Model) cycleTaskStatus() tea.Cmd {
+// statusOptions returns the canonical td status list shown by the picker.
+func statusOptions() []string {
+	return []string{"open", "in_progress", "in_review", "blocked", "closed"}
+}
+
+// renderStatusPicker draws the picker as a single-line pill row: the cursor
+// option is wrapped in brackets, the rest are separated by middle dots.
+func renderStatusPicker(opts []string, cursor int) string {
+	parts := make([]string, len(opts))
+	for i, opt := range opts {
+		if i == cursor {
+			parts[i] = "[" + opt + "]"
+		} else {
+			parts[i] = opt
+		}
+	}
+	return "Status: " + strings.Join(parts, " · ") + "   (←/→ pick, enter apply, esc cancel)"
+}
+
+// updateStatusPick handles input while the status picker is open.
+func (m Model) updateStatusPick(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch {
+		case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
+			m.pickingStatus = false
+			return m, nil
+		case key.Matches(msg, key.NewBinding(key.WithKeys("left", "h"))):
+			if m.statusCursor > 0 {
+				m.statusCursor--
+			}
+			return m, nil
+		case key.Matches(msg, key.NewBinding(key.WithKeys("right", "l"))):
+			if m.statusCursor < len(m.statusOptions)-1 {
+				m.statusCursor++
+			}
+			return m, nil
+		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+			chosen := m.statusOptions[m.statusCursor]
+			m.pickingStatus = false
+			return m, m.setTaskStatus(chosen)
+		}
+	}
+	return m, nil
+}
+
+// setTaskStatus applies the chosen status through the td adapter.
+func (m *Model) setTaskStatus(status string) tea.Cmd {
 	taskID := m.detail.taskID
 	projectRoot := m.projectRoot
+	prev := m.detail.taskStatus
 	return func() tea.Msg {
-		t, err := td.Get(projectRoot, taskID)
-		if err != nil {
-			return actionResultMsg{message: "Failed to read task", isError: true}
-		}
-		var next string
-		switch t.Status {
-		case "open":
-			next = "in_progress"
-		case "in_progress":
-			next = "open"
-		default:
-			return actionResultMsg{message: "Cannot change status from " + t.Status, isError: true}
-		}
-		if err := td.SetStatus(projectRoot, taskID, next); err != nil {
+		if err := td.SetStatus(projectRoot, taskID, status); err != nil {
 			return actionResultMsg{message: "Status change failed: " + err.Error(), isError: true}
 		}
-		return actionResultMsg{message: fmt.Sprintf("Status: %s → %s", t.Status, next)}
+		return actionResultMsg{message: fmt.Sprintf("Status: %s → %s", prev, status)}
 	}
 }
 

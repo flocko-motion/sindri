@@ -153,6 +153,9 @@ func TestReplayGoldens(t *testing.T) {
 		"esc",                                     // dismiss confirm (stays in detail)
 		"x (capture reject-reason)",               // 8. reject-reason input bar
 		"esc",
+		"s (capture status-pick)",                 // 9. status picker (cursor on current = in_progress)
+		"right (capture status-pick-moved)",       // 10. picker after one right-arrow (cursor on in_review)
+		"esc",
 	}, " ")
 	if err := Replay(script, SimpleFixture(), dir); err != nil {
 		t.Fatalf("replay: %v", err)
@@ -162,6 +165,7 @@ func TestReplayGoldens(t *testing.T) {
 		"detail-task", "detail-spec",
 		"workers",
 		"merge-confirm", "reject-reason",
+		"status-pick", "status-pick-moved",
 	} {
 		AssertGolden(t, dir, name)
 	}
