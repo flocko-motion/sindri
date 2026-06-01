@@ -29,6 +29,12 @@ type Fixture struct {
 	Workers []worker.Worker
 	Width   int // initial terminal width  (default 100)
 	Height  int // initial terminal height (default 30)
+
+	// Descriptions / Comments are returned for the corresponding task IDs by
+	// the test-mode fetchers, so the detail view doesn't have to shell out to
+	// real td. A missing key returns the empty string (section omitted).
+	Descriptions map[string]string
+	Comments     map[string]string
 }
 
 // Replay drives the TUI Model headlessly through a key-sequence script, writing
@@ -40,6 +46,17 @@ func Replay(script string, fx Fixture, captureDir string) error {
 	// Force truecolor so captures look like a real terminal session, regardless
 	// of the host's TERM/NO_COLOR.
 	lipgloss.SetColorProfile(termenv.TrueColor)
+
+	// Swap the package-level fetchers so the detail view reads from the
+	// fixture instead of shelling out to real td. Restore on the way out so
+	// nothing leaks into other tests.
+	prevDetail, prevComments := fetchTaskDetailFn, fetchTaskCommentsFn
+	fetchTaskDetailFn = func(_, taskID string) string { return fx.Descriptions[taskID] }
+	fetchTaskCommentsFn = func(_, taskID string) string { return fx.Comments[taskID] }
+	defer func() {
+		fetchTaskDetailFn = prevDetail
+		fetchTaskCommentsFn = prevComments
+	}()
 
 	if captureDir != "" {
 		if err := os.MkdirAll(captureDir, 0o755); err != nil {

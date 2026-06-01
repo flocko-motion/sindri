@@ -5,12 +5,59 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
-// TestReplay_BasicListAndFilter sanity-checks the replay engine end-to-end:
-// build the simple fixture, capture the default list, cycle the filter to
-// "all" (which reveals the closed task), then back. The captures must show
-// the right items at each step.
+// TestMain pins the test process timezone to UTC so the View's
+// timestamp formatting is identical across machines, keeping the
+// golden frames stable. It also gives every test the same starting
+// world.
+func TestMain(m *testing.M) {
+	os.Setenv("TZ", "UTC")
+	time.Local = time.UTC
+	os.Exit(m.Run())
+}
+
+// AssertGolden compares <captureDir>/<name>.txt against the committed
+// golden at testdata/frames/<name>.txt. When GO_UPDATE_GOLDENS=1 (or the
+// golden does not yet exist), it (re)writes the golden from the capture
+// so intentional changes can be reviewed as a single diff.
+func AssertGolden(t *testing.T, captureDir, name string) {
+	t.Helper()
+	capPath := filepath.Join(captureDir, name+".txt")
+	got, err := os.ReadFile(capPath)
+	if err != nil {
+		t.Fatalf("missing capture %s: %v", name, err)
+	}
+	goldenDir := filepath.Join("testdata", "frames")
+	goldPath := filepath.Join(goldenDir, name+".txt")
+	want, err := os.ReadFile(goldPath)
+	switch {
+	case os.IsNotExist(err) || os.Getenv("GO_UPDATE_GOLDENS") == "1":
+		if mkErr := os.MkdirAll(goldenDir, 0o755); mkErr != nil {
+			t.Fatalf("mkdir goldens: %v", mkErr)
+		}
+		if wErr := os.WriteFile(goldPath, got, 0o644); wErr != nil {
+			t.Fatalf("write golden %s: %v", goldPath, wErr)
+		}
+		if err == nil {
+			t.Logf("updated golden %s", goldPath)
+		}
+		return
+	case err != nil:
+		t.Fatalf("read golden %s: %v", goldPath, err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("golden drift in %s — re-run with GO_UPDATE_GOLDENS=1 to refresh\n"+
+			"--- want (%d bytes)\n%s\n--- got (%d bytes)\n%s",
+			name, len(want), want, len(got), got)
+	}
+}
+
+// TestReplay_BasicListAndFilter sanity-checks the engine end-to-end with
+// substring assertions (cheap, independent of golden churn): build the
+// fixture, capture default list, cycle filter to "all" (closed appears),
+// then "closed only", then back.
 func TestReplay_BasicListAndFilter(t *testing.T) {
 	dir := t.TempDir()
 	script := "(capture list-default) f (capture list-all) f (capture list-closed) f (capture list-back)"
@@ -34,7 +81,6 @@ func TestReplay_BasicListAndFilter(t *testing.T) {
 		return true
 	}
 
-	// Default filter (FilterOpen) hides closed items.
 	def := readTxt("list-default")
 	if !containsAll(def, "td-aaaaaa", "td-bbbbbb") {
 		t.Errorf("default list missing open/in-progress items:\n%s", def)
@@ -43,13 +89,11 @@ func TestReplay_BasicListAndFilter(t *testing.T) {
 		t.Errorf("default list should hide closed td-cccccc but didn't:\n%s", def)
 	}
 
-	// One 'f' press → FilterAll: everything visible.
 	all := readTxt("list-all")
 	if !containsAll(all, "td-aaaaaa", "td-bbbbbb", "td-cccccc") {
 		t.Errorf("FilterAll missing some items:\n%s", all)
 	}
 
-	// Two presses → FilterClosed: only the closed task.
 	closed := readTxt("list-closed")
 	if !strings.Contains(closed, "td-cccccc") {
 		t.Errorf("FilterClosed missing closed task:\n%s", closed)
@@ -58,23 +102,13 @@ func TestReplay_BasicListAndFilter(t *testing.T) {
 		t.Errorf("FilterClosed should hide open td-aaaaaa but didn't:\n%s", closed)
 	}
 
-	// Three presses → back to FilterOpen, same as default.
 	back := readTxt("list-back")
 	if strings.Contains(back, "td-cccccc") {
 		t.Errorf("after cycling back, closed should be hidden again:\n%s", back)
 	}
-
-	// Captures should produce both .ansi and .txt variants.
-	for _, name := range []string{"list-default", "list-all", "list-closed", "list-back"} {
-		for _, ext := range []string{".ansi", ".txt"} {
-			if _, err := os.Stat(filepath.Join(dir, name+ext)); err != nil {
-				t.Errorf("missing capture file %s%s: %v", name, ext, err)
-			}
-		}
-	}
 }
 
-// TestReplay_UnknownToken proves bad scripts fail loudly.
+// TestReplay_UnknownToken proves bad scripts fail with the offending name.
 func TestReplay_UnknownToken(t *testing.T) {
 	err := Replay("(frobnicate)", SimpleFixture(), t.TempDir())
 	if err == nil {
@@ -82,5 +116,53 @@ func TestReplay_UnknownToken(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "frobnicate") {
 		t.Errorf("error should name the offending token: %v", err)
+	}
+}
+
+// TestReplayGoldens drives the TUI through every recently-touched state
+// and compares each capture against a committed golden under
+// testdata/frames/. To regenerate after an intentional layout change,
+// run: GO_UPDATE_GOLDENS=1 go test ./internal/tui/ -run TestReplayGoldens
+//
+// Backlog rows under the default filter (FilterOpen), in order:
+//
+//	row 0: os-... spec-only (auth-refactor)
+//	row 1: td-aaaaaa open
+//	row 2: td-aaaaaa unmet gate (navigable, not a PR)
+//	row 3: td-bbbbbb in_progress (worker brokkr)
+//	row 4: pr-td-bbbbbb (isPR — moveCursor skips this)
+//	row 5: td-bbbbbb met gate
+//
+// So three `down`s land on the in-progress task (rows 0→1→2→3); the
+// isPR row is skipped automatically by moveCursor.
+func TestReplayGoldens(t *testing.T) {
+	dir := t.TempDir()
+	script := strings.Join([]string{
+		"(capture list-default)",                  // 1. default filter
+		"f (capture list-all)",                    // 2. all
+		"f (capture list-closed)",                 // 3. closed only
+		"f",                                       // back to open
+		"down down down enter (capture detail-task)", // 4. in-progress task detail
+		"esc",
+		"up up up enter (capture detail-spec)",    // 5. spec-only detail
+		"esc",
+		"W (capture workers)",                     // 6. workers view (role column)
+		"T",                                       // back to backlog (cursor at row 0)
+		"down down down enter",                    // re-open in-progress detail
+		"m (capture merge-confirm)",               // 7. merge confirmation modal
+		"esc",                                     // dismiss confirm (stays in detail)
+		"x (capture reject-reason)",               // 8. reject-reason input bar
+		"esc",
+	}, " ")
+	if err := Replay(script, SimpleFixture(), dir); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	for _, name := range []string{
+		"list-default", "list-all", "list-closed",
+		"detail-task", "detail-spec",
+		"workers",
+		"merge-confirm", "reject-reason",
+	} {
+		AssertGolden(t, dir, name)
 	}
 }

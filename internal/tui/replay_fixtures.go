@@ -85,5 +85,14 @@ func SimpleFixture() Fixture {
 		},
 	}
 
-	return Fixture{Issues: issues, Workers: workers, Width: 100, Height: 30}
+	return Fixture{
+		Issues: issues, Workers: workers, Width: 100, Height: 30,
+		Descriptions: map[string]string{
+			"td-bbbbbb": "Export the issue list as CSV from the toolbar action.\n\n" +
+				"Acceptance: header row, one row per task, UTF-8.",
+		},
+		Comments: map[string]string{
+			"td-bbbbbb": "brokkr: PR is ready for review, gates met.",
+		},
+	}
 }

@@ -36,7 +36,23 @@ func refreshDataOpt(projectRoot string, manual bool) tea.Cmd {
 	}
 }
 
+// fetchTaskDetailFn and fetchTaskCommentsFn are package-level seams so the
+// replay engine can swap real td shell-outs for fixture lookups. Production
+// callers go through fetchTaskDetail/Comments below, which delegate here.
+var (
+	fetchTaskDetailFn   = realFetchTaskDetail
+	fetchTaskCommentsFn = realFetchTaskComments
+)
+
 func fetchTaskDetail(projectRoot, taskID string) string {
+	return fetchTaskDetailFn(projectRoot, taskID)
+}
+
+func fetchTaskComments(projectRoot, taskID string) string {
+	return fetchTaskCommentsFn(projectRoot, taskID)
+}
+
+func realFetchTaskDetail(projectRoot, taskID string) string {
 	out, err := td.Show(projectRoot, taskID)
 	if err != nil {
 		return "Error loading task: " + err.Error()
@@ -44,7 +60,7 @@ func fetchTaskDetail(projectRoot, taskID string) string {
 	return out
 }
 
-func fetchTaskComments(projectRoot, taskID string) string {
+func realFetchTaskComments(projectRoot, taskID string) string {
 	out, err := td.Comments(projectRoot, taskID)
 	if err != nil {
 		return ""

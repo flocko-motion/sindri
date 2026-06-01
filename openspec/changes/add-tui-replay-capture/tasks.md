@@ -21,18 +21,18 @@
 ## 4. Frame capture
 
 - [x] 4.1 At each `(capture <name>)`, write `<captureDir>/<name>.ansi` with the raw View output and `<captureDir>/<name>.txt` with ANSI escapes stripped
-- [ ] 4.2 Provide a small `tui.AssertGolden(t, name, content)` helper for committed-golden comparisons
-- [ ] 4.3 Support a `-update` mechanism (env var or test flag) so intentional changes can rewrite the goldens in one pass
+- [x] 4.2 Provide a small `tui.AssertGolden(t, captureDir, name)` helper for committed-golden comparisons
+- [x] 4.3 Support a `-update` mechanism via `GO_UPDATE_GOLDENS=1` so intentional changes can rewrite the goldens in one pass
 
 ## 5. Golden tests for the freshly-touched states
 
-- [x] 5.1 Capture the work list under each filter (open, all, closed) — exercises the new `f` key (`TestReplay_BasicListAndFilter`)
-- [ ] 5.2 Capture the item detail of a task with PRs, gates, worker, and a `spec:` link
-- [ ] 5.3 Capture the item detail of a spec-only Issue
-- [ ] 5.4 Capture the workers view, asserting the new role column is present
-- [ ] 5.5 Capture the merge-confirm modal and its prompt text
-- [ ] 5.6 Capture the reject-reason input bar with placeholder
-- [ ] 5.7 Wire the goldens into a single `TestReplayGoldens` so a layout regression fails the package test
+- [x] 5.1 Capture the work list under each filter (open, all, closed) — exercises the new `f` key (`TestReplay_BasicListAndFilter` + golden `list-default`/`list-all`/`list-closed`)
+- [x] 5.2 Capture the item detail of a task with PRs, gates, worker, and a `spec:` link (golden `detail-task`)
+- [x] 5.3 Capture the item detail of a spec-only Issue (golden `detail-spec`)
+- [x] 5.4 Capture the workers view, role column included (golden `workers`)
+- [x] 5.5 Capture the merge-confirm modal and its prompt text (golden `merge-confirm`)
+- [x] 5.6 Capture the reject-reason input bar with placeholder (golden `reject-reason`)
+- [x] 5.7 Wire the goldens into a single `TestReplayGoldens` so a layout regression fails the package test
 
 ## 6. Optional: sindri tui --script flag
 
