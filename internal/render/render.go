@@ -81,9 +81,9 @@ func PRStatus(status string, taskClosed bool) string {
 func IssueStatus(iss issue.Issue) string {
 	if iss.SpecOnly() {
 		if done, total, _ := iss.SpecProgress(); total > 0 {
-			return dim.Render(fmt.Sprintf("📋 spec %d/%d", done, total))
+			return dim.Render(fmt.Sprintf("📄 spec %d/%d", done, total))
 		}
-		return dim.Render("📋 spec")
+		return dim.Render("📄 spec")
 	}
 	if iss.Worker != "" {
 		return Worker(iss.Worker)

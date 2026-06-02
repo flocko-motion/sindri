@@ -169,7 +169,7 @@ func (i Issue) Title() string {
 		return "(no task — needs planning)"
 	}
 	if i.Spec != nil {
-		return "📋 " + i.Spec.Name + " · " + i.Task.Title
+		return "📄 " + i.Spec.Name + " · " + i.Task.Title
 	}
 	return i.Task.Title
 }

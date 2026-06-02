@@ -1,0 +1,30 @@
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                   ╭────────────────────────────────────────────────────────────╮                   
+                   │                                                            │                   
+                   │  New Task                                                  │                   
+                   │                                                            │                   
+                   │    Linked to spec: 📄 auth-refactor                        │                   
+                   │                                                            │                   
+                   │  > Title: > Task title (required)                          │                   
+                   │                                                            │                   
+                   │    Type:  [task]  bug   feature   chore                    │                   
+                   │                                                            │                   
+                   │    Prio:   P0   P1  [P2]  P3   P4                          │                   
+                   │                                                            │                   
+                   │    Review: ☑ code review                                   │                   
+                   │                                                            │                   
+                   │    Desc:  > Description (optional)                         │                   
+                   │                                                            │                   
+                   │    tab:next field  h/l:select  enter:create  esc:cancel    │                   
+                   │                                                            │                   
+                   ╰────────────────────────────────────────────────────────────╯                   
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    

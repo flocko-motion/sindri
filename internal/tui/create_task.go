@@ -40,6 +40,7 @@ type createTaskModel struct {
 	err           error
 	submitted     bool
 	projectRoot   string
+	specName      string // non-empty when invoked from a spec-only row; adds spec:<name> label
 }
 
 type taskCreatedMsg struct {
@@ -47,7 +48,7 @@ type taskCreatedMsg struct {
 	err error
 }
 
-func newCreateTaskModel(projectRoot string) createTaskModel {
+func newCreateTaskModel(projectRoot, specName string) createTaskModel {
 	// Fits the 60-wide modal minus border/padding (4) and the "  Title: "/
 	// "  Desc:  " labels (9). Without an explicit Width, textinput truncates
 	// the placeholder to one character — the user saw a stray "T"/"D".
@@ -72,6 +73,7 @@ func newCreateTaskModel(projectRoot string) createTaskModel {
 		reviewChecked: true,
 		activeField:   fieldTitle,
 		projectRoot:   projectRoot,
+		specName:      specName,
 	}
 }
 
@@ -171,11 +173,15 @@ func (m createTaskModel) submit() tea.Cmd {
 	desc := strings.TrimSpace(m.descInput.Value())
 	review := m.reviewChecked
 	projectRoot := m.projectRoot
+	specName := m.specName
 
 	return func() tea.Msg {
 		var labels []string
 		if review {
-			labels = []string{"require-review-code"}
+			labels = append(labels, "require-review-code")
+		}
+		if specName != "" {
+			labels = append(labels, "spec:"+specName)
 		}
 		out, err := td.Create(projectRoot, title, td.CreateOpts{Type: typ, Priority: prio, Body: desc, Labels: labels})
 		if err != nil {
@@ -200,6 +206,12 @@ func (m createTaskModel) View(width, height int) string {
 	var b strings.Builder
 	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(highlight).Render("New Task"))
 	b.WriteString("\n\n")
+
+	if m.specName != "" {
+		b.WriteString(dimStyle.Render("  Linked to spec: "))
+		b.WriteString(lipgloss.NewStyle().Bold(true).Render("📄 " + m.specName))
+		b.WriteString("\n\n")
+	}
 
 	// Title
 	label := "  Title: "

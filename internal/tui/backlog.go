@@ -25,6 +25,15 @@ const typeColCells = 6
 // into the title rather than truncate.
 const statusColCells = 16
 
+// prioColCells / tsColCells fix the visual-cell width of the priority and
+// timestamp columns. Spec-only rows have neither (so both render as ""), and
+// without explicit padding the title column on those rows would shift left by
+// ~16 cells and stop aligning with task rows.
+const (
+	prioColCells = 2
+	tsColCells   = 14
+)
+
 // typePrefix returns the leftmost-column content for an Issue: depth indent +
 // arrow on non-root rows, followed by the type icon. Spec-only rows (no Task)
 // have no icon and produce an empty content string; padCell turns that into
@@ -155,15 +164,17 @@ func buildBacklogRows(issues []issue.Issue) []backlogRow {
 		if !iss.UpdatedAt().IsZero() {
 			tsStr = iss.UpdatedAt().Local().Format("06-01-02 15:04")
 		}
+		prioCell := padCell(iss.Priority(), prioColCells)
+		tsCell := padCell(tsStr, tsColCells)
 		plain := fmt.Sprintf("%s %-9s %s  %s  %s  %s",
 			typeCell,
-			iss.ID(), iss.Priority(), tsStr,
+			iss.ID(), prioCell, tsCell,
 			padCell(iss.Status(), statusColCells), iss.Title())
 		line := fmt.Sprintf("%s %s %s  %s  %s  %s",
 			typeCell,
 			dimStyle.Render(fmt.Sprintf("%-9s", iss.ID())),
-			dimStyle.Render(iss.Priority()),
-			dimStyle.Render(tsStr),
+			dimStyle.Render(prioCell),
+			dimStyle.Render(tsCell),
 			padCell(render.IssueStatus(iss), statusColCells),
 			title,
 		)

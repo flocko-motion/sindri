@@ -261,6 +261,25 @@ func (m Model) cursorTaskAndPR() (taskID, prID string) {
 	return iss.Task.ID, prID
 }
 
+// cursorSpecName returns the spec name when the cursor sits on a spec-only
+// row (i.e. an openspec change with no td task yet), otherwise "". Used to
+// pre-link the new-task modal so pressing `n` on a spec row creates a task
+// that already carries the spec:<name> label.
+func (m Model) cursorSpecName() string {
+	if m.leftView != viewBacklog || m.listCursor < 0 || m.listCursor >= len(m.backlogRows) {
+		return ""
+	}
+	row := m.backlogRows[m.listCursor]
+	if row.isPR || row.issueIdx < 0 || row.issueIdx >= len(m.visibleIssues) {
+		return ""
+	}
+	iss := m.visibleIssues[row.issueIdx]
+	if !iss.SpecOnly() {
+		return ""
+	}
+	return iss.Spec.Name
+}
+
 // taskAtCursor returns the task at the backlog cursor and its parent_id;
 // empty strings if the cursor isn't on a task row (spec-only, PR sub-row, or
 // the workers panel).
