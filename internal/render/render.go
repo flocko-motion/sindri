@@ -94,15 +94,23 @@ func IssueStatus(iss issue.Issue) string {
 	return TaskStatus(iss.Task.Status)
 }
 
-// TaskTypeIcon returns the canonical glyph for a td task type — 🐛 bug,
-// ✨ feature, 🧹 chore, 📦 epic. Plain "task" has no glyph (empty string), so
-// most rows stay visually quiet.
+// TaskTypeIcon returns the canonical 2-cell glyph for a td task type:
+//   - 🪲 bug (beetle)
+//   - 🔧 feature (wrench)
+//   - ⚙️ task (gear, the small mechanical mark)
+//   - 🧹 chore (broom)
+//   - 📦 epic (package)
+//
+// All icons are 2 visual cells so columns align cleanly. An unknown type
+// returns "", which renderers pad to the same width.
 func TaskTypeIcon(typ string) string {
 	switch typ {
 	case "bug":
-		return "🐛"
+		return "🪲"
 	case "feature":
-		return "✨"
+		return "🔧"
+	case "task":
+		return "⚙️"
 	case "chore":
 		return "🧹"
 	case "epic":

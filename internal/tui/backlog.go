@@ -9,18 +9,21 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/flo-at/sindri/internal/issue"
 	"github.com/flo-at/sindri/internal/render"
 )
 
-// typeColWidth is the fixed character count of the leftmost type/indent column.
-// 6 chars cover depth 0–2 cleanly (depth 2 = "  ↳ " + icon ≈ 6 chars wide);
-// deeper trees overflow into the id column rather than truncate.
-const typeColWidth = 6
+// typeColCells is the fixed visual-cell width of the leftmost type/indent
+// column. 6 cells cover depth 0–2 cleanly: depth 0 = icon (2 cells); depth 1 =
+// "↳ " (2) + icon (2) = 4; depth 2 = "  ↳ " (4) + icon (2) = 6. Deeper trees
+// overflow rather than truncate.
+const typeColCells = 6
 
 // typePrefix returns the leftmost-column content for an Issue: depth indent +
-// arrow on non-root rows, followed by the type icon when there is one. Spec-only
-// rows have neither and produce "", so the column becomes pure padding.
+// arrow on non-root rows, followed by the type icon. Spec-only rows (no Task)
+// have no icon and produce an empty content string; padCell turns that into
+// pure space so the next column stays aligned.
 func typePrefix(iss issue.Issue) string {
 	var b strings.Builder
 	if iss.Depth > 0 {
@@ -28,11 +31,21 @@ func typePrefix(iss issue.Issue) string {
 		b.WriteString("↳ ")
 	}
 	if t := iss.Task; t != nil {
-		if icon := render.TaskTypeIcon(t.Type); icon != "" {
-			b.WriteString(icon)
-		}
+		b.WriteString(render.TaskTypeIcon(t.Type))
 	}
 	return b.String()
+}
+
+// padCell appends trailing spaces so s reaches n *visual* cells. The %-Ns verb
+// in fmt counts bytes, not cells, which mis-aligns the column whenever an
+// emoji (2 cells, multi-byte) shares a row with ASCII (1 cell each). lipgloss's
+// Width is the same display width the terminal renders.
+func padCell(s string, n int) string {
+	w := lipgloss.Width(s)
+	if w >= n {
+		return s
+	}
+	return s + strings.Repeat(" ", n-w)
 }
 
 type backlogRow struct {
@@ -53,16 +66,16 @@ func buildBacklogRows(issues []issue.Issue) []backlogRow {
 		// The leftmost column carries the depth indent + arrow + type icon, so
 		// every column after it stays aligned regardless of where in the tree
 		// the row sits.
-		typeCell := typePrefix(iss)
+		typeCell := padCell(typePrefix(iss), typeColCells)
 		tsStr := ""
 		if !iss.UpdatedAt().IsZero() {
 			tsStr = iss.UpdatedAt().Local().Format("06-01-02 15:04")
 		}
-		plain := fmt.Sprintf("%-*s %-9s %s  %s  %s  %s",
-			typeColWidth, typeCell,
+		plain := fmt.Sprintf("%s %-9s %s  %s  %s  %s",
+			typeCell,
 			iss.ID(), iss.Priority(), tsStr, iss.Status(), iss.Title())
-		line := fmt.Sprintf("%-*s %s %s  %s  %s  %s",
-			typeColWidth, typeCell,
+		line := fmt.Sprintf("%s %s %s  %s  %s  %s",
+			typeCell,
 			dimStyle.Render(fmt.Sprintf("%-9s", iss.ID())),
 			dimStyle.Render(iss.Priority()),
 			dimStyle.Render(tsStr),

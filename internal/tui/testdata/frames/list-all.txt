@@ -3,12 +3,12 @@
 │  Tasks                                                                                           │
 │                                                                                                  │
 │ >        os-17cb5f     spec  (no task — needs planning)                                          │
-│   🐛      td-aaaaaa P1  26-05-28 10:00  open  fix login redirect                                 │
+│   🪲     td-aaaaaa P1  26-05-28 10:00  open  fix login redirect                                  │
 │       ☐ review code                                                                              │
-│   ✨      td-bbbbbb P2  26-05-28 12:00  🔨 brokkr  📋 csv-export · add CSV export                │
+│   🔧     td-bbbbbb P2  26-05-28 12:00  🔨 brokkr  📋 csv-export · add CSV export                 │
 │       └ pr-td-bbbbbb [open]                                                                      │
 │       ☑ review code                                                                              │
-│   🧹      td-cccccc P3  26-05-26 12:00  closed  rename logger                                    │
+│   🧹     td-cccccc P3  26-05-26 12:00  closed  rename logger                                     │
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
