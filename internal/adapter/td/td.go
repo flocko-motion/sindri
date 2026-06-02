@@ -44,6 +44,27 @@ func Get(root, id string) (issue.Task, error) {
 // Show returns the human-readable detail of a task.
 func Show(root, id string) (string, error) { return run(root, "show", id) }
 
+// Detail returns the structured description + acceptance fields from a
+// `td show --json` call. Empty strings when the task is missing or the
+// field is unset. The TUI detail view uses this directly so the right
+// pane shows only the body text — the metadata block in the left pane
+// already covers ID/Status/Type/etc., and re-echoing them via `td show`
+// produced visible duplication.
+func Detail(root, id string) (description, acceptance string, err error) {
+	out, err := run(root, "show", id, "--json")
+	if err != nil {
+		return "", "", err
+	}
+	var r struct {
+		Description string `json:"description"`
+		Acceptance  string `json:"acceptance"`
+	}
+	if err := json.Unmarshal([]byte(out), &r); err != nil {
+		return "", "", err
+	}
+	return r.Description, r.Acceptance, nil
+}
+
 // Comments returns the human-readable comments of a task.
 func Comments(root, id string) (string, error) { return run(root, "comments", id) }
 

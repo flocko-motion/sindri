@@ -83,13 +83,23 @@ func warmCacheCmd(projectRoot string) tea.Cmd {
 // fetchTaskDetailFn and fetchTaskCommentsFn are package-level seams so the
 // replay engine can swap real td shell-outs for fixture lookups. Production
 // callers go through fetchTaskDetail/Comments below, which delegate here.
+//
+// fetchTaskDetail returns the task's *description body only* — the metadata
+// (ID/status/type/etc.) lives in the left pane of the detail view, and
+// echoing it again on the right used to produce visible duplication.
+// fetchTaskAcceptance returns acceptance criteria similarly.
 var (
-	fetchTaskDetailFn   = realFetchTaskDetail
-	fetchTaskCommentsFn = realFetchTaskComments
+	fetchTaskDetailFn     = realFetchTaskDetail
+	fetchTaskAcceptanceFn = realFetchTaskAcceptance
+	fetchTaskCommentsFn   = realFetchTaskComments
 )
 
 func fetchTaskDetail(projectRoot, taskID string) string {
 	return fetchTaskDetailFn(projectRoot, taskID)
+}
+
+func fetchTaskAcceptance(projectRoot, taskID string) string {
+	return fetchTaskAcceptanceFn(projectRoot, taskID)
 }
 
 func fetchTaskComments(projectRoot, taskID string) string {
@@ -97,11 +107,19 @@ func fetchTaskComments(projectRoot, taskID string) string {
 }
 
 func realFetchTaskDetail(projectRoot, taskID string) string {
-	out, err := td.Show(projectRoot, taskID)
+	desc, _, err := td.Detail(projectRoot, taskID)
 	if err != nil {
 		return "Error loading task: " + err.Error()
 	}
-	return out
+	return desc
+}
+
+func realFetchTaskAcceptance(projectRoot, taskID string) string {
+	_, acc, err := td.Detail(projectRoot, taskID)
+	if err != nil {
+		return ""
+	}
+	return acc
 }
 
 func realFetchTaskComments(projectRoot, taskID string) string {

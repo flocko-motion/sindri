@@ -28,7 +28,9 @@ const (
 type detailState struct {
 	kind       detailKind
 	title      string
-	content    string
+	leftCol    string // formal data: metadata, gates, worker, PRs
+	rightCol   string // free text: description, acceptance, comments — scrollable
+	content    string // legacy single-column content for PR/worker details (still one column)
 	taskID     string
 	taskStatus string // current task status — used to pre-select the status picker
 	prIDs      []string
@@ -62,48 +64,42 @@ func renderField(label, value string) string {
 	return labelStyle.Render(label+":") + " " + valueStyle.Render(value)
 }
 
-func issueDetail(iss issue.Issue, projectRoot string) detailState {
+func issueDetail(iss issue.Issue, projectRoot string, colWidth int) detailState {
+	if colWidth < 20 {
+		colWidth = 40 // safety floor for very narrow terminals / tests that didn't pass a width
+	}
 	if iss.SpecOnly() {
-		return specDetail(iss)
+		return specDetail(iss, colWidth)
 	}
 	t := iss.Task
-	var sections []string
-	width := 80
 
-	// Metadata section
+	// --- Left column: formal data the eye scans (metadata, gates, worker, PRs).
+	var leftSections []string
+
 	var meta strings.Builder
 	meta.WriteString(renderField("ID", iss.ID()) + "\n")
 	meta.WriteString(renderField("Status", render.TaskStatus(t.Status)) + "\n")
 	meta.WriteString(renderField("Type", t.Type) + "\n")
-	meta.WriteString(renderField("Priority", t.Priority) + "\n")
+	meta.WriteString(renderField("Priority", t.Priority))
 	if iss.Spec != nil {
-		meta.WriteString(renderField("Spec", iss.Spec.Name) + "\n")
+		meta.WriteString("\n" + renderField("Spec", iss.Spec.Name))
 	}
 	if !t.CreatedAt.IsZero() {
-		meta.WriteString(renderField("Created", t.CreatedAt.Local().Format("2006-01-02 15:04")) + "\n")
+		meta.WriteString("\n" + renderField("Created", t.CreatedAt.Local().Format("2006-01-02 15:04")))
 	}
 	if !t.UpdatedAt.IsZero() {
-		meta.WriteString(renderField("Updated", t.UpdatedAt.Local().Format("2006-01-02 15:04")))
+		meta.WriteString("\n" + renderField("Updated", t.UpdatedAt.Local().Format("2006-01-02 15:04")))
 	}
-	sections = append(sections, renderSection("Metadata", meta.String(), width))
+	leftSections = append(leftSections, renderSection("Metadata", meta.String(), colWidth))
 
-	// Description section
-	desc := fetchTaskDetail(projectRoot, t.ID)
-	if desc != "" {
-		sections = append(sections, renderSection("Description", desc, width))
-	}
-
-	// Review gates section
 	if gates := render.Gates(iss.Gates()); gates != "" {
-		sections = append(sections, renderSection("Review Gates", gates, width))
+		leftSections = append(leftSections, renderSection("Review Gates", gates, colWidth))
 	}
 
-	// Worker section
 	if iss.Worker != "" {
-		sections = append(sections, renderSection("Worker", renderField("Assigned to", iss.Worker), width))
+		leftSections = append(leftSections, renderSection("Worker", renderField("Assigned", iss.Worker), colWidth))
 	}
 
-	// Associated PRs section
 	if len(iss.PRs) > 0 {
 		var prContent strings.Builder
 		for i, pr := range iss.PRs {
@@ -114,13 +110,22 @@ func issueDetail(iss issue.Issue, projectRoot string) detailState {
 			prContent.WriteString(renderField("Status", render.PRStatus(pr.Status, iss.IsClosed())) + "\n")
 			prContent.WriteString(renderField("Branch", pr.Branch+" → "+pr.Base))
 		}
-		sections = append(sections, renderSection("Pull Requests", prContent.String(), width))
+		leftSections = append(leftSections, renderSection("Pull Requests", prContent.String(), colWidth))
 	}
 
-	// Comments section
-	comments := fetchTaskComments(projectRoot, t.ID)
-	if comments != "" && comments != "No comments" {
-		sections = append(sections, renderSection("Comments", comments, width))
+	// --- Right column: free-text body. Description and acceptance come from the
+	// structured td show --json fields, NOT the textual `td show`, so the
+	// metadata block doesn't get echoed back into the description and re-read
+	// next to the left pane.
+	var rightSections []string
+	if desc := strings.TrimSpace(fetchTaskDetail(projectRoot, t.ID)); desc != "" {
+		rightSections = append(rightSections, renderSection("Description", desc, colWidth))
+	}
+	if acc := strings.TrimSpace(fetchTaskAcceptance(projectRoot, t.ID)); acc != "" {
+		rightSections = append(rightSections, renderSection("Acceptance", acc, colWidth))
+	}
+	if comments := strings.TrimSpace(fetchTaskComments(projectRoot, t.ID)); comments != "" && comments != "No comments" {
+		rightSections = append(rightSections, renderSection("Comments", comments, colWidth))
 	}
 
 	prIDs := make([]string, 0, len(iss.PRs))
@@ -130,28 +135,27 @@ func issueDetail(iss issue.Issue, projectRoot string) detailState {
 	return detailState{
 		kind:       detailTask,
 		title:      iss.ID() + ": " + t.Title,
-		content:    strings.Join(sections, "\n\n"),
+		leftCol:    strings.Join(leftSections, "\n\n"),
+		rightCol:   strings.Join(rightSections, "\n\n"),
 		taskID:     iss.ID(),
 		taskStatus: t.Status,
 		prIDs:      prIDs,
 	}
 }
 
-func specDetail(iss issue.Issue) detailState {
-	width := 80
+func specDetail(iss issue.Issue, colWidth int) detailState {
 	var meta strings.Builder
 	meta.WriteString(renderField("ID", iss.ID()) + "\n")
-	meta.WriteString(renderField("Spec", iss.Spec.Name) + "\n")
+	meta.WriteString(renderField("Spec", iss.Spec.Name))
 	if done, total, _ := iss.SpecProgress(); total > 0 {
-		meta.WriteString(renderField("Tasks", fmt.Sprintf("%d/%d", done, total)))
+		meta.WriteString("\n" + renderField("Tasks", fmt.Sprintf("%d/%d", done, total)))
 	} else {
-		meta.WriteString(renderField("Tasks", "none yet"))
+		meta.WriteString("\n" + renderField("Tasks", "none yet"))
 	}
-	body := renderSection("Spec (no task yet)", meta.String(), width)
 	return detailState{
 		kind:    detailTask,
 		title:   iss.ID() + ": " + iss.Spec.Name,
-		content: body,
+		leftCol: renderSection("Spec (no task yet)", meta.String(), colWidth),
 		taskID:  iss.ID(),
 	}
 }

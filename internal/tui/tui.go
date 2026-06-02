@@ -357,7 +357,12 @@ func (m *Model) resizeViewports() {
 	}
 	m.vpList.Width = m.width - 4
 	m.vpList.Height = innerH
-	m.vpDetail.Width = m.width - 4
+	// Detail view is two columns; the right pane is the scrollable viewport
+	// and gets ~half the width. PR/worker (single-column) detail will still
+	// fit because they render through renderColumn with the full width and
+	// only ever read m.vpDetail.View() — the viewport just truncates rows
+	// that exceed its width, which a 50-char body never will.
+	m.vpDetail.Width = m.width/2 - 4
 	m.vpDetail.Height = innerH - 1
 	if m.vpDetail.Height < 1 {
 		m.vpDetail.Height = 1
@@ -475,7 +480,7 @@ func (m *Model) openDetail() {
 			if row.isPR {
 				m.detail = prDetail(row.pr)
 			} else if row.issueIdx < len(m.visibleIssues) {
-				m.detail = issueDetail(m.visibleIssues[row.issueIdx], m.projectRoot)
+				m.detail = issueDetail(m.visibleIssues[row.issueIdx], m.projectRoot, m.detailColWidth())
 			}
 		}
 	case viewWorkers:
@@ -483,9 +488,30 @@ func (m *Model) openDetail() {
 			m.detail = workerDetail(m.workers[m.workerCursor])
 		}
 	}
-	m.vpDetail.SetContent(m.detail.content)
+	m.vpDetail.SetContent(detailBody(m.detail))
 	m.vpDetail.GotoTop()
 	m.showDetail = true
+}
+
+// detailColWidth is the per-column width passed to issueDetail so the
+// section borders inside the detail panes match the viewport width — keeping
+// the inner sections from looking shrunken inside the outer column.
+func (m Model) detailColWidth() int {
+	w := m.width/2 - 4
+	if w < 20 {
+		return 40
+	}
+	return w
+}
+
+// detailBody picks the scrollable text for the right pane: prefer the
+// two-column rightCol when set (task detail), fall back to the legacy
+// single-column content (PR / worker detail) so we don't break those views.
+func detailBody(d detailState) string {
+	if d.rightCol != "" {
+		return d.rightCol
+	}
+	return d.content
 }
 
 // reassembleIssues runs issue.Assemble over the current boardData snapshot,
@@ -498,8 +524,8 @@ func (m *Model) reassembleIssues() {
 	if m.showDetail && m.detail.taskID != "" {
 		for _, iss := range m.issues {
 			if iss.ID() == m.detail.taskID {
-				m.detail = issueDetail(iss, m.projectRoot)
-				m.vpDetail.SetContent(m.detail.content)
+				m.detail = issueDetail(iss, m.projectRoot, m.detailColWidth())
+				m.vpDetail.SetContent(detailBody(m.detail))
 				break
 			}
 		}
@@ -583,7 +609,20 @@ func (m Model) viewDetail() string {
 		scrollStatus = dimStyle.Render(fmt.Sprintf(" %d%% (%d/%d)", pct, m.vpDetail.YOffset+m.vpDetail.Height, m.vpDetail.TotalLineCount()))
 	}
 
-	col := renderColumn("", m.vpDetail.View(), scrollStatus, m.width, contentHeight, true)
+	// Task detail is two columns: left = formal data (full height, no scroll),
+	// right = description + acceptance + comments (scrollable viewport). PR
+	// and worker detail keep the single-column layout because they don't
+	// have a separate text body.
+	var col string
+	if m.detail.leftCol != "" {
+		leftW := m.width / 2
+		rightW := m.width - leftW
+		left := renderColumn("", m.detail.leftCol, "", leftW, contentHeight, true)
+		right := renderColumn("", m.vpDetail.View(), scrollStatus, rightW, contentHeight, true)
+		col = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	} else {
+		col = renderColumn("", m.vpDetail.View(), scrollStatus, m.width, contentHeight, true)
+	}
 
 	var bottomBar string
 	if m.confirmAction != "" {
