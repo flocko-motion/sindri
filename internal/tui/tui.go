@@ -261,6 +261,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.openStatusPicker(taskID, status)
 			return m, nil
+		case key.Matches(msg, keys.Approve):
+			taskID, prID := m.cursorTaskAndPR()
+			if taskID == "" {
+				m.notify = notification{message: "Approve: pick a task row first", isError: true, time: time.Now()}
+				return m, flashTimer()
+			}
+			if prID == "" {
+				m.notify = notification{message: "Approve: this task has no PR yet", isError: true, time: time.Now()}
+				return m, flashTimer()
+			}
+			m.detail.taskID = taskID
+			m.detail.prIDs = []string{prID}
+			return m, m.approvePR()
+		case key.Matches(msg, keys.Reject):
+			taskID, prID := m.cursorTaskAndPR()
+			if taskID == "" {
+				m.notify = notification{message: "Reject: pick a task row first", isError: true, time: time.Now()}
+				return m, flashTimer()
+			}
+			// Stash IDs so the shared reject flow finds them. prID may be ""
+			// — rejectTask() then falls back to RejectTask (task-level reject).
+			m.detail.taskID = taskID
+			if prID != "" {
+				m.detail.prIDs = []string{prID}
+			} else {
+				m.detail.prIDs = nil
+			}
+			ti := textinput.New()
+			ti.Placeholder = "Reason for rejection..."
+			ti.Focus()
+			ti.CharLimit = 500
+			ti.Width = m.width - 20
+			m.rejecting = true
+			m.commentInput = ti
+			return m, textinput.Blink
 		case key.Matches(msg, keys.Refresh):
 			return m, refreshAllCmd(m.projectRoot, true)
 		}
@@ -348,15 +383,19 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.openStatusPicker(m.detail.taskID, m.detail.taskStatus)
 			return m, nil
 		case key.Matches(msg, keys.Approve):
-			if len(m.detail.prIDs) > 0 {
-				return m, m.approvePR()
+			if len(m.detail.prIDs) == 0 {
+				m.notify = notification{message: "Approve: this task has no PR yet", isError: true, time: time.Now()}
+				return m, flashTimer()
 			}
+			return m, m.approvePR()
 		case key.Matches(msg, keys.Merge):
-			if len(m.detail.prIDs) > 0 {
-				m.confirmAction = "merge"
-				m.confirmLabel = fmt.Sprintf("Merge %s? (y/n)", m.detail.prIDs[0])
-				return m, nil
+			if len(m.detail.prIDs) == 0 {
+				m.notify = notification{message: "Merge: this task has no PR yet", isError: true, time: time.Now()}
+				return m, flashTimer()
 			}
+			m.confirmAction = "merge"
+			m.confirmLabel = fmt.Sprintf("Merge %s? (y/n)", m.detail.prIDs[0])
+			return m, nil
 		case key.Matches(msg, keys.Reject):
 			if m.detail.kind == detailTask {
 				ti := textinput.New()

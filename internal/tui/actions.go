@@ -239,6 +239,28 @@ func (m Model) updateStatusPick(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// cursorTaskAndPR returns the (taskID, firstPRID) at the backlog cursor.
+// Both empty when the cursor isn't on a task row. firstPRID is empty when
+// the task has no PR yet; callers use that distinction to surface a clear
+// "no PR yet" notification instead of silently doing nothing.
+func (m Model) cursorTaskAndPR() (taskID, prID string) {
+	if m.leftView != viewBacklog || m.listCursor < 0 || m.listCursor >= len(m.backlogRows) {
+		return "", ""
+	}
+	row := m.backlogRows[m.listCursor]
+	if row.isPR || row.issueIdx < 0 || row.issueIdx >= len(m.visibleIssues) {
+		return "", ""
+	}
+	iss := m.visibleIssues[row.issueIdx]
+	if iss.Task == nil {
+		return "", ""
+	}
+	if len(iss.PRs) > 0 {
+		prID = iss.PRs[0].ID
+	}
+	return iss.Task.ID, prID
+}
+
 // taskAtCursor returns the task at the backlog cursor and its parent_id;
 // empty strings if the cursor isn't on a task row (spec-only, PR sub-row, or
 // the workers panel).

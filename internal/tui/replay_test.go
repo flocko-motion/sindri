@@ -189,6 +189,7 @@ func TestReplayGoldens(t *testing.T) {
 		"esc",
 		"m (capture list-move-active)",            // 12. move mode — current row painted red as "in movement"
 		"esc",                                     // cancel move
+		"up up a (capture list-approve-no-pr)",    // 13. cursor moves up to td-aaaaaa (open, no PR) — pressing 'a' surfaces the visible "no PR yet" notification
 	}, " ")
 	if err := Replay(script, SimpleFixture(), dir); err != nil {
 		t.Fatalf("replay: %v", err)
@@ -200,6 +201,7 @@ func TestReplayGoldens(t *testing.T) {
 		"merge-confirm", "reject-reason",
 		"status-pick", "status-pick-moved", "status-pick-from-list",
 		"list-move-active",
+		"list-approve-no-pr",
 	} {
 		AssertGolden(t, dir, name)
 	}
