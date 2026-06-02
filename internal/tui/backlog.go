@@ -53,12 +53,37 @@ func padCell(s string, n int) string {
 	return s + strings.Repeat(" ", n-w)
 }
 
+// rebuildBacklog refreshes the list state from m.issues — applies the active
+// filter, rebuilds the row slice, marks the row tagged as "in movement", and
+// clamps the cursor.
+func (m *Model) rebuildBacklog() {
+	m.visibleIssues = issue.Apply(m.issues, m.filter)
+	m.backlogRows = buildBacklogRows(m.visibleIssues)
+	if m.moving && m.movingTaskID != "" {
+		for i, row := range m.backlogRows {
+			if row.isPR {
+				continue
+			}
+			if row.issueIdx < len(m.visibleIssues) {
+				iss := m.visibleIssues[row.issueIdx]
+				if iss.Task != nil && iss.Task.ID == m.movingTaskID {
+					m.backlogRows[i].isMoving = true
+				}
+			}
+		}
+	}
+	if m.listCursor >= len(m.backlogRows) {
+		m.listCursor = 0
+	}
+}
+
 type backlogRow struct {
 	issueIdx int      // index into the issues slice
 	isPR     bool     // true for a PR sub-row
 	pr       issue.PR // set when isPR
 	display  string
 	plain    string // unstyled text for selection highlight
+	isMoving bool   // true on the row marked as "in movement" by the move flow
 }
 
 func buildBacklogRows(issues []issue.Issue) []backlogRow {
@@ -106,9 +131,14 @@ func buildBacklogRows(issues []issue.Issue) []backlogRow {
 func renderBacklogList(rows []backlogRow, cursor int, active, loaded bool) string {
 	var b strings.Builder
 	for i, row := range rows {
-		if active && i == cursor {
+		switch {
+		case active && i == cursor && row.isMoving:
+			b.WriteString(movingItemStyle.Render("> " + row.plain))
+		case active && i == cursor:
 			b.WriteString(selectedItemStyle.Render("> " + row.plain))
-		} else {
+		case row.isMoving:
+			b.WriteString(movingItemStyle.Render("  " + row.plain))
+		default:
 			b.WriteString("  " + row.display)
 		}
 		b.WriteByte('\n')

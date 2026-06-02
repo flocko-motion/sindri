@@ -32,6 +32,14 @@ var (
 				Background(lipgloss.Color("#7D56F4")).
 				Bold(true)
 
+	// movingItemStyle paints the row the user just picked up via 'm', so a
+	// quick glance shows what's "in flight" while the cursor moves to a
+	// target. Red background, white text.
+	movingItemStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(lipgloss.Color("#CC2222")).
+			Bold(true)
+
 	normalItemStyle = lipgloss.NewStyle()
 
 	dimStyle = lipgloss.NewStyle().

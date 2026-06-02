@@ -68,6 +68,12 @@ func SetLabels(root, id string, labels []string) error {
 	return mutate(root, "update", id, "--labels", strings.Join(labels, ","))
 }
 
+// SetParent re-parents a task. An empty parentID clears the parent so the
+// task becomes a root.
+func SetParent(root, id, parentID string) error {
+	return mutate(root, "update", id, "--parent", parentID)
+}
+
 // CreateOpts are optional fields for Create.
 type CreateOpts struct {
 	Type     string

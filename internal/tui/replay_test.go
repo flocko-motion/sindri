@@ -187,6 +187,8 @@ func TestReplayGoldens(t *testing.T) {
 		"esc",                                     // close detail, back to list (cursor at row 3 = in_progress)
 		"s (capture status-pick-from-list)",       // 11. picker opened from the LIST view
 		"esc",
+		"m (capture list-move-active)",            // 12. move mode — current row painted red as "in movement"
+		"esc",                                     // cancel move
 	}, " ")
 	if err := Replay(script, SimpleFixture(), dir); err != nil {
 		t.Fatalf("replay: %v", err)
@@ -197,6 +199,7 @@ func TestReplayGoldens(t *testing.T) {
 		"workers",
 		"merge-confirm", "reject-reason",
 		"status-pick", "status-pick-moved", "status-pick-from-list",
+		"list-move-active",
 	} {
 		AssertGolden(t, dir, name)
 	}

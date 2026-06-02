@@ -46,6 +46,13 @@ func cachedParent(id string) string {
 	return ""
 }
 
+// SetCachedParent updates the in-process parent-id cache after a mutation
+// (e.g. an interactive move), so the next refresh sees the new hierarchy
+// without re-running WarmParentCache.
+func SetCachedParent(id, parent string) {
+	parentCache.Store(id, parent)
+}
+
 // List returns the unified, ordered work items for a project: spec-only items
 // first, then tasks (open → active → closed), each with its spec, worker, and
 // PRs attached. This is the one refresh both interfaces use so they always

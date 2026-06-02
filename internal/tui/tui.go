@@ -63,6 +63,12 @@ type Model struct {
 	statusOptions []string
 	statusCursor  int
 
+	// moving / movingTaskID drive the "re-parent a task in the tree" flow
+	// described by view-work-list/move. When moving is true, h/l/esc are
+	// routed to updateMoveMode and the source row is rendered red.
+	moving        bool
+	movingTaskID  string
+
 	// loaded is false until the first refreshMsg has applied. Views consult
 	// it to render a "Loading…" placeholder instead of the empty-state line
 	// during the startup window before any data has landed.
@@ -172,12 +178,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, keys.Down):
 			m.moveCursor(1)
 		case key.Matches(msg, key.NewBinding(key.WithKeys("l"))):
+			if m.moving {
+				return m.applyMove(true) // child
+			}
 			if m.leftView == viewBacklog {
 				m.navigateInto()
 			}
 		case key.Matches(msg, key.NewBinding(key.WithKeys("h"))):
+			if m.moving {
+				return m.applyMove(false) // sibling
+			}
 			if m.leftView == viewBacklog {
 				m.navigateOut()
+			}
+		case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
+			if m.moving {
+				m.cancelMove()
+				return m, nil
+			}
+		case key.Matches(msg, key.NewBinding(key.WithKeys("m"))):
+			if m.leftView == viewBacklog {
+				return m.enterMoveMode()
 			}
 		case key.Matches(msg, keys.Enter):
 			m.openDetail()
@@ -343,14 +364,6 @@ func (m *Model) resizeViewports() {
 		m.vpDetail.Height = 1
 	}
 	m.syncListScroll()
-}
-
-func (m *Model) rebuildBacklog() {
-	m.visibleIssues = issue.Apply(m.issues, m.filter)
-	m.backlogRows = buildBacklogRows(m.visibleIssues)
-	if m.listCursor >= len(m.backlogRows) {
-		m.listCursor = 0
-	}
 }
 
 func filterName(f issue.Filter) string {

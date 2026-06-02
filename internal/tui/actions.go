@@ -11,11 +11,14 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/flo-at/sindri/internal/action"
 	"github.com/flo-at/sindri/internal/adapter/td"
+	"github.com/flo-at/sindri/internal/board"
+	"github.com/flo-at/sindri/internal/issue"
 )
 
 type actionResultMsg struct {
@@ -216,6 +219,116 @@ func (m Model) updateStatusPick(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// taskAtCursor returns the task at the backlog cursor and its parent_id;
+// empty strings if the cursor isn't on a task row (spec-only, PR sub-row, or
+// the workers panel).
+func (m Model) taskAtCursor() (taskID, parentID string) {
+	if m.leftView != viewBacklog || m.listCursor < 0 || m.listCursor >= len(m.backlogRows) {
+		return "", ""
+	}
+	row := m.backlogRows[m.listCursor]
+	if row.isPR || row.issueIdx < 0 || row.issueIdx >= len(m.visibleIssues) {
+		return "", ""
+	}
+	iss := m.visibleIssues[row.issueIdx]
+	if iss.Task == nil {
+		return "", ""
+	}
+	return iss.Task.ID, iss.Task.ParentID
+}
+
+// enterMoveMode marks the task at cursor as "in movement" and shows the user
+// the next-step hint. A non-task cursor produces a visible error rather than
+// silently doing nothing.
+func (m Model) enterMoveMode() (tea.Model, tea.Cmd) {
+	taskID, _ := m.taskAtCursor()
+	if taskID == "" {
+		m.notify = notification{message: "Move: pick a task row first", isError: true, time: time.Now()}
+		return m, flashTimer()
+	}
+	m.moving = true
+	m.movingTaskID = taskID
+	m.rebuildBacklog()
+	m.notify = notification{message: "Moving " + taskID + " — h: sibling of cursor, l: child of cursor, esc: cancel", time: time.Now()}
+	return m, flashTimer()
+}
+
+// cancelMove clears move mode with no state change.
+func (m *Model) cancelMove() {
+	m.moving = false
+	m.movingTaskID = ""
+	m.rebuildBacklog()
+}
+
+// applyMove commits the pending move. asChild=true ⇒ the moving task becomes
+// a child of the target row (parent_id = target.id); asChild=false ⇒ a sibling
+// of the target row (parent_id = target.parent_id). Refuses self-target and
+// cycles (target = source, or target descends from source) with a visible
+// notification and keeps move mode active.
+func (m Model) applyMove(asChild bool) (tea.Model, tea.Cmd) {
+	src := m.movingTaskID
+	targetID, targetParent := m.taskAtCursor()
+	if src == "" || targetID == "" {
+		m.notify = notification{message: "Move: cursor must be on a task", isError: true, time: time.Now()}
+		return m, flashTimer()
+	}
+	if targetID == src {
+		m.notify = notification{message: "Move: target must be a different task", isError: true, time: time.Now()}
+		return m, flashTimer()
+	}
+	newParent := targetParent
+	if asChild {
+		newParent = targetID
+	}
+	if newParent == src {
+		// Asking to make src a child of src — same prohibition as self-target.
+		m.notify = notification{message: "Move: cannot make a task its own parent", isError: true, time: time.Now()}
+		return m, flashTimer()
+	}
+	if descendantOfSource(m.issues, src, newParent) {
+		m.notify = notification{message: "Move: target is a descendant of " + src + " — would create a cycle", isError: true, time: time.Now()}
+		return m, flashTimer()
+	}
+	// Commit: clear move state, fire the update, refresh on success.
+	m.moving = false
+	m.movingTaskID = ""
+	return m, m.setTaskParent(src, newParent)
+}
+
+// descendantOfSource reports whether candidate is src or any of src's
+// descendants in the current issue set.
+func descendantOfSource(issues []issue.Issue, src, candidate string) bool {
+	if src == "" || candidate == "" {
+		return false
+	}
+	parentOf := map[string]string{}
+	for _, iss := range issues {
+		if iss.Task != nil {
+			parentOf[iss.Task.ID] = iss.Task.ParentID
+		}
+	}
+	for cur := candidate; cur != ""; cur = parentOf[cur] {
+		if cur == src {
+			return true
+		}
+	}
+	return false
+}
+
+// setTaskParent re-parents a task via the td adapter and triggers a manual
+// refresh so the new hierarchy redraws. The parent_id cache is updated in
+// place so the refresh sees the new structure without a second WarmParentCache.
+func (m *Model) setTaskParent(taskID, newParent string) tea.Cmd {
+	projectRoot := m.projectRoot
+	return func() tea.Msg {
+		if err := td.SetParent(projectRoot, taskID, newParent); err != nil {
+			return actionResultMsg{message: "Move failed: " + err.Error(), isError: true}
+		}
+		board.SetCachedParent(taskID, newParent)
+		return actionResultMsg{message: "Moved " + taskID}
+	}
 }
 
 // setTaskStatus applies the chosen status through the td adapter.
