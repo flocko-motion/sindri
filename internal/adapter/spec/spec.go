@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // Change is a proposed change from `openspec list --json`.
@@ -66,6 +67,25 @@ func Lookup(projectRoot, name string) *Change {
 func Archive(projectRoot, name string) error {
 	_, err := run(projectRoot, "archive", name, "--yes")
 	return err
+}
+
+// Title returns the human-readable title of an active spec, taken from the
+// first level-1 heading in its proposal.md. Falls back to the slug name
+// when the file is missing or has no top-level heading — callers can use
+// the return value as-is for pre-filling fields.
+func Title(projectRoot, name string) string {
+	path := filepath.Join(projectRoot, "openspec", "changes", name, "proposal.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return name
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "# ") {
+			return strings.TrimSpace(trimmed[2:])
+		}
+	}
+	return name
 }
 
 // Abandon deletes the change folder so the proposal is dropped without being

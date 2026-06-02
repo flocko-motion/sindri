@@ -9,7 +9,7 @@
                    │                                                            │                   
                    │    Linked to spec: 📄 auth-refactor                        │                   
                    │                                                            │                   
-                   │  > Title: > Task title (required)                          │                   
+                   │  > Title: > auth-refactor                                  │                   
                    │                                                            │                   
                    │    Type:  [task]  bug   feature   chore                    │                   
                    │                                                            │                   

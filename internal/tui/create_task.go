@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/flo-at/sindri/internal/adapter/spec"
 	"github.com/flo-at/sindri/internal/adapter/td"
 	"github.com/flo-at/sindri/internal/issue"
 )
@@ -68,6 +69,12 @@ func newCreateTaskModel(projectRoot, specName string) createTaskModel {
 	ti.Focus()
 	ti.CharLimit = 200
 	ti.Width = inputWidth
+	if specName != "" {
+		// Pre-fill the title from the spec's proposal H1 so the user starts
+		// from real wording instead of an empty field; spec.Title falls
+		// back to the slug when proposal.md is missing or has no heading.
+		ti.SetValue(spec.Title(projectRoot, specName))
+	}
 
 	di := textinput.New()
 	di.Placeholder = "Description (optional)"
