@@ -8,7 +8,6 @@ package tui
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -110,6 +109,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// One more refresh to pick up the now-populated parent-id cache so
 		// hierarchy actually renders.
 		return m, refreshData(m.projectRoot)
+	case movedMsg:
+		// Optimistic: patch the moving task's ParentID locally, re-arrange,
+		// redraw immediately, then sync with the source of truth in the
+		// background. Avoids the ~2s "nothing happens then jumps" feel.
+		for i := range m.issues {
+			if m.issues[i].Task != nil && m.issues[i].Task.ID == msg.taskID {
+				m.issues[i].Task.ParentID = msg.newParentID
+				break
+			}
+		}
+		m.issues = issue.ArrangeHierarchy(m.issues)
+		m.rebuildBacklog()
+		m.notify = notification{message: "Moved " + msg.taskID, time: time.Now()}
+		return m, tea.Batch(flashTimer(), refreshData(m.projectRoot))
+	case statusChangedMsg:
+		// Optimistic status update: patch the task's Status locally so the
+		// row re-colors immediately, then background-refresh.
+		for i := range m.issues {
+			if m.issues[i].Task != nil && m.issues[i].Task.ID == msg.taskID {
+				m.issues[i].Task.Status = msg.newStatus
+				break
+			}
+		}
+		m.rebuildBacklog()
+		m.notify = notification{message: fmt.Sprintf("Status: %s → %s", msg.prev, msg.newStatus), time: time.Now()}
+		return m, tea.Batch(flashTimer(), refreshData(m.projectRoot))
 	case refreshMsg:
 		m.detectChanges(msg)
 		m.workers = msg.workers
@@ -562,57 +587,6 @@ func (m Model) View() string {
 		return m.viewDetail()
 	}
 	return m.viewList()
-}
-
-func (m Model) viewList() string {
-	title := titleStyle.Render("Sindri — AI Agent Orchestrator")
-
-	activeView := lipgloss.NewStyle().Bold(true).Foreground(highlight)
-	inactiveView := dimStyle
-	var viewSelector string
-	if m.leftView == viewBacklog {
-		viewSelector = activeView.Render("[T]asks") + "  " + inactiveView.Render("[W]orkers")
-	} else {
-		viewSelector = inactiveView.Render("[T]asks") + "  " + activeView.Render("[W]orkers")
-	}
-	help := dimStyle.Render("j/k:nav  enter:open  y:copy  n:new  r:refresh  q:quit")
-	rightSide := viewSelector + "  " + help
-
-	titleBar := lipgloss.JoinHorizontal(lipgloss.Top,
-		title,
-		lipgloss.NewStyle().Width(m.width-lipgloss.Width(title)-lipgloss.Width(rightSide)).Render(""),
-		rightSide,
-	)
-
-	contentHeight := m.height - 4
-
-	var listContent string
-	var header string
-	switch m.leftView {
-	case viewBacklog:
-		header = "Tasks"
-		listContent = renderBacklogList(m.backlogRows, m.listCursor, true, m.loaded)
-	case viewWorkers:
-		header = "Workers"
-		listContent = renderWorkersList(m.workers, m.workerCursor, true, m.loaded)
-	}
-	m.vpList.SetContent(strings.TrimRight(listContent, "\n"))
-
-	scrollStatus := ""
-	if m.vpList.TotalLineCount() > m.vpList.Height {
-		pct := int(m.vpList.ScrollPercent() * 100)
-		scrollStatus = dimStyle.Render(fmt.Sprintf(" %d%% (%d/%d)", pct, m.vpList.YOffset+m.vpList.Height, m.vpList.TotalLineCount()))
-	}
-
-	col := renderColumn(header, m.vpList.View(), scrollStatus, m.width, contentHeight, true)
-
-	var bottomBar string
-	if m.pickingStatus {
-		bottomBar = lipgloss.NewStyle().PaddingLeft(1).Render(renderStatusPicker(m.statusOptions, m.statusCursor))
-	} else {
-		bottomBar = m.notify.render(m.width)
-	}
-	return titleBar + "\n" + col + "\n" + bottomBar
 }
 
 func (m Model) viewDetail() string {

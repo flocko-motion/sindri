@@ -9,7 +9,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -24,6 +23,25 @@ import (
 type actionResultMsg struct {
 	message string
 	isError bool
+}
+
+// movedMsg signals an optimistic move applied successfully — taskID's parent_id
+// was changed to newParentID via the td adapter and the in-process cache. The
+// Update handler patches m.issues locally so the redraw is instant, then
+// triggers a background refresh so the rest of the board syncs.
+type movedMsg struct {
+	taskID      string
+	newParentID string
+}
+
+// statusChangedMsg signals an optimistic status change applied successfully —
+// taskID's status was set to newStatus via the td adapter. Same optimistic
+// pattern as movedMsg: patch locally + background refresh, so the row updates
+// instantly instead of after the ~2s round-trip.
+type statusChangedMsg struct {
+	taskID    string
+	newStatus string
+	prev      string
 }
 
 func (m Model) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -317,9 +335,11 @@ func descendantOfSource(issues []issue.Issue, src, candidate string) bool {
 	return false
 }
 
-// setTaskParent re-parents a task via the td adapter and triggers a manual
-// refresh so the new hierarchy redraws. The parent_id cache is updated in
-// place so the refresh sees the new structure without a second WarmParentCache.
+// setTaskParent re-parents a task via the td adapter. On success it emits a
+// movedMsg so the Update handler can patch m.issues optimistically (instant
+// redraw) and sync via a background refresh — avoiding the ~2s gap the full
+// refreshData round-trip would otherwise add. The parent_id cache is updated
+// in place so the background refresh sees the new structure too.
 func (m *Model) setTaskParent(taskID, newParent string) tea.Cmd {
 	projectRoot := m.projectRoot
 	return func() tea.Msg {
@@ -327,11 +347,14 @@ func (m *Model) setTaskParent(taskID, newParent string) tea.Cmd {
 			return actionResultMsg{message: "Move failed: " + err.Error(), isError: true}
 		}
 		board.SetCachedParent(taskID, newParent)
-		return actionResultMsg{message: "Moved " + taskID}
+		return movedMsg{taskID: taskID, newParentID: newParent}
 	}
 }
 
-// setTaskStatus applies the chosen status through the td adapter.
+// setTaskStatus applies the chosen status through the td adapter. Same
+// optimistic pattern as setTaskParent: on success emit statusChangedMsg so
+// the Update handler patches the local task and the row re-colors without
+// waiting on the full refresh round-trip.
 func (m *Model) setTaskStatus(status string) tea.Cmd {
 	taskID := m.detail.taskID
 	projectRoot := m.projectRoot
@@ -340,7 +363,7 @@ func (m *Model) setTaskStatus(status string) tea.Cmd {
 		if err := td.SetStatus(projectRoot, taskID, status); err != nil {
 			return actionResultMsg{message: "Status change failed: " + err.Error(), isError: true}
 		}
-		return actionResultMsg{message: fmt.Sprintf("Status: %s → %s", prev, status)}
+		return statusChangedMsg{taskID: taskID, newStatus: status, prev: prev}
 	}
 }
 

@@ -53,6 +53,60 @@ func padCell(s string, n int) string {
 	return s + strings.Repeat(" ", n-w)
 }
 
+// viewList renders the list-view (backlog or workers) layout with title bar,
+// content column, and bottom bar. Lives here because it's the rendering
+// counterpart of the backlog model — keeps tui.go focused on the Update path.
+func (m Model) viewList() string {
+	title := titleStyle.Render("Sindri — AI Agent Orchestrator")
+
+	activeView := lipgloss.NewStyle().Bold(true).Foreground(highlight)
+	inactiveView := dimStyle
+	var viewSelector string
+	if m.leftView == viewBacklog {
+		viewSelector = activeView.Render("[T]asks") + "  " + inactiveView.Render("[W]orkers")
+	} else {
+		viewSelector = inactiveView.Render("[T]asks") + "  " + activeView.Render("[W]orkers")
+	}
+	help := dimStyle.Render("j/k:nav  enter:open  y:copy  n:new  r:refresh  q:quit")
+	rightSide := viewSelector + "  " + help
+
+	titleBar := lipgloss.JoinHorizontal(lipgloss.Top,
+		title,
+		lipgloss.NewStyle().Width(m.width-lipgloss.Width(title)-lipgloss.Width(rightSide)).Render(""),
+		rightSide,
+	)
+
+	contentHeight := m.height - 4
+
+	var listContent string
+	var header string
+	switch m.leftView {
+	case viewBacklog:
+		header = "Tasks"
+		listContent = renderBacklogList(m.backlogRows, m.listCursor, true, m.loaded)
+	case viewWorkers:
+		header = "Workers"
+		listContent = renderWorkersList(m.workers, m.workerCursor, true, m.loaded)
+	}
+	m.vpList.SetContent(strings.TrimRight(listContent, "\n"))
+
+	scrollStatus := ""
+	if m.vpList.TotalLineCount() > m.vpList.Height {
+		pct := int(m.vpList.ScrollPercent() * 100)
+		scrollStatus = dimStyle.Render(fmt.Sprintf(" %d%% (%d/%d)", pct, m.vpList.YOffset+m.vpList.Height, m.vpList.TotalLineCount()))
+	}
+
+	col := renderColumn(header, m.vpList.View(), scrollStatus, m.width, contentHeight, true)
+
+	var bottomBar string
+	if m.pickingStatus {
+		bottomBar = lipgloss.NewStyle().PaddingLeft(1).Render(renderStatusPicker(m.statusOptions, m.statusCursor))
+	} else {
+		bottomBar = m.notify.render(m.width)
+	}
+	return titleBar + "\n" + col + "\n" + bottomBar
+}
+
 // rebuildBacklog refreshes the list state from m.issues — applies the active
 // filter, rebuilds the row slice, marks the row tagged as "in movement", and
 // clamps the cursor.
