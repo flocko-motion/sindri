@@ -53,57 +53,76 @@ func SetCachedParent(id, parent string) {
 	parentCache.Store(id, parent)
 }
 
-// List returns the unified, ordered work items for a project: spec-only items
-// first, then tasks (open → active → closed), each with its spec, worker, and
-// PRs attached. This is the one refresh both interfaces use so they always
-// show the same data.
+// LoadTasks fetches td tasks for a project and applies cached parent_ids so
+// the hierarchy renders without the slow td.show round-trip. Used as one of
+// the four independent loaders the TUI dispatches per-source.
+func LoadTasks(projectRoot string) ([]issue.Task, error) {
+	tasks, err := td.Tasks(projectRoot)
+	if err != nil {
+		return nil, err
+	}
+	for i := range tasks {
+		if tasks[i].ParentID == "" {
+			tasks[i].ParentID = cachedParent(tasks[i].ID)
+		}
+	}
+	return tasks, nil
+}
+
+// LoadSpecs fetches openspec changes for a project. Returns nil when the
+// project doesn't use openspec.
+func LoadSpecs(projectRoot string) []issue.Spec {
+	return specsFor(projectRoot)
+}
+
+// LoadWorkers fetches the full worker list for a project (podman ps).
+func LoadWorkers(projectRoot string) []worker.Worker {
+	return worker.List(projectRoot)
+}
+
+// WorkerByID converts a worker list to the `taskID → workerName` map that
+// issue.Assemble consumes. Pure helper, no I/O.
+func WorkerByID(workers []worker.Worker) map[string]string {
+	m := map[string]string{}
+	for _, wk := range workers {
+		if wk.Task == "" {
+			continue
+		}
+		// wk.Task is "td-xxxxxx Some title"; the ID is the first field.
+		if parts := strings.Fields(wk.Task); len(parts) > 0 {
+			m[parts[0]] = wk.Name
+		}
+	}
+	return m
+}
+
+// LoadPRs fetches the PRs grouped by task ID for a project.
+func LoadPRs(projectRoot string) map[string][]issue.PR {
+	return prsByTask(projectRoot)
+}
+
+// List runs the four loaders in parallel and assembles their result. Used by
+// the CLI's one-shot list and view commands; the TUI fans the loaders out
+// individually so it can paint as soon as the first one returns.
 func List(projectRoot string) ([]issue.Issue, error) {
-	// The four data sources are independent; serializing them adds the slow
-	// ones (openspec ~1.2s, podman ~1.5s) to td (~0.3s) for a ~3s stall on
-	// first paint. Fan them out and wait on the slowest.
 	var (
 		tasks      []issue.Task
 		taskErr    error
 		specs      []issue.Spec
-		workerByID map[string]string
+		workers    []worker.Worker
 		prsByID    map[string][]issue.PR
 		wg         sync.WaitGroup
 	)
 	wg.Add(4)
-	go func() {
-		defer wg.Done()
-		ts, err := td.Tasks(projectRoot)
-		if err != nil {
-			taskErr = err
-			return
-		}
-		// td list strips parent_id; populate from the in-process cache so the
-		// hierarchy renders without the slow td.show round-trip. A separate
-		// WarmParentCache goroutine keeps the cache fresh in the background.
-		for i := range ts {
-			if ts[i].ParentID == "" {
-				ts[i].ParentID = cachedParent(ts[i].ID)
-			}
-		}
-		tasks = ts
-	}()
-	go func() {
-		defer wg.Done()
-		specs = specsFor(projectRoot)
-	}()
-	go func() {
-		defer wg.Done()
-		workerByID = workerAssignments(projectRoot)
-	}()
-	go func() {
-		defer wg.Done()
-		prsByID = prsByTask(projectRoot)
-	}()
+	go func() { defer wg.Done(); tasks, taskErr = LoadTasks(projectRoot) }()
+	go func() { defer wg.Done(); specs = LoadSpecs(projectRoot) }()
+	go func() { defer wg.Done(); workers = LoadWorkers(projectRoot) }()
+	go func() { defer wg.Done(); prsByID = LoadPRs(projectRoot) }()
 	wg.Wait()
 	if taskErr != nil {
 		return nil, taskErr
 	}
-	return issue.Assemble(tasks, specs, workerByID, prsByID), nil
+	return issue.Assemble(tasks, specs, WorkerByID(workers), prsByID), nil
 }
 
 func specsFor(projectRoot string) []issue.Spec {
@@ -117,20 +136,6 @@ func specsFor(projectRoot string) []issue.Spec {
 		})
 	}
 	return specs
-}
-
-func workerAssignments(projectRoot string) map[string]string {
-	m := map[string]string{}
-	for _, wk := range worker.List(projectRoot) {
-		if wk.Task == "" {
-			continue
-		}
-		// wk.Task is "td-xxxxxx Some title"; the ID is the first field.
-		if parts := strings.Fields(wk.Task); len(parts) > 0 {
-			m[parts[0]] = wk.Name
-		}
-	}
-	return m
 }
 
 func prsByTask(projectRoot string) map[string][]issue.PR {

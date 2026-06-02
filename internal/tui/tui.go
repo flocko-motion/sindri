@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/flo-at/sindri/internal/board"
 	"github.com/flo-at/sindri/internal/issue"
 	"github.com/flo-at/sindri/internal/worker"
 )
@@ -68,10 +69,21 @@ type Model struct {
 	moving        bool
 	movingTaskID  string
 
-	// loaded is false until the first refreshMsg has applied. Views consult
+	// loaded is false until the first tasks message has applied. Views consult
 	// it to render a "Loading…" placeholder instead of the empty-state line
 	// during the startup window before any data has landed.
 	loaded bool
+
+	// boardData holds the latest snapshot from each per-source loader. Each
+	// refresh message updates one field and triggers a reassemble — the TUI
+	// paints richer info as each loader returns instead of waiting on the
+	// slowest source.
+	boardData struct {
+		tasks      []issue.Task
+		specs      []issue.Spec
+		workerByID map[string]string
+		prsByID    map[string][]issue.PR
+	}
 
 	notify notification
 }
@@ -94,25 +106,25 @@ func tickCmd() tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	// Dispatch the fast refresh, the periodic tick, AND the slow background
-	// cache warmer in parallel. The first refresh paints quickly (~1-2s);
-	// when warmCacheCmd finishes (~7s), cacheWarmedMsg triggers one more
-	// refresh that finally shows hierarchy.
-	return tea.Batch(refreshData(m.projectRoot), tickCmd(), warmCacheCmd(m.projectRoot))
+	// Fan out all four per-source loaders in parallel; each one emits its own
+	// message and the list paints as soon as the tasks loader returns (~0.3s).
+	// Workers (~1.5s) and specs (~1.2s) land later without holding up the
+	// first paint. warmCacheCmd fills the parent-id cache in the background.
+	return tea.Batch(refreshAllCmd(m.projectRoot, false), tickCmd(), warmCacheCmd(m.projectRoot))
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
-		return m, tea.Batch(refreshData(m.projectRoot), tickCmd())
+		return m, tea.Batch(refreshAllCmd(m.projectRoot, false), tickCmd())
 	case cacheWarmedMsg:
-		// One more refresh to pick up the now-populated parent-id cache so
-		// hierarchy actually renders.
-		return m, refreshData(m.projectRoot)
+		// One more tasks-only refresh so the freshly populated parent-id cache
+		// gets applied; podman/openspec didn't change so don't re-poll them.
+		return m, refreshTasksCmd(m.projectRoot, false)
 	case movedMsg:
 		// Optimistic: patch the moving task's ParentID locally, re-arrange,
-		// redraw immediately, then sync with the source of truth in the
-		// background. Avoids the ~2s "nothing happens then jumps" feel.
+		// redraw immediately. Then a tasks-only refresh confirms — no need to
+		// ask podman/openspec since neither changed.
 		for i := range m.issues {
 			if m.issues[i].Task != nil && m.issues[i].Task.ID == msg.taskID {
 				m.issues[i].Task.ParentID = msg.newParentID
@@ -122,10 +134,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.issues = issue.ArrangeHierarchy(m.issues)
 		m.rebuildBacklog()
 		m.notify = notification{message: "Moved " + msg.taskID, time: time.Now()}
-		return m, tea.Batch(flashTimer(), refreshData(m.projectRoot))
+		return m, tea.Batch(flashTimer(), refreshTasksCmd(m.projectRoot, false))
 	case statusChangedMsg:
-		// Optimistic status update: patch the task's Status locally so the
-		// row re-colors immediately, then background-refresh.
+		// Optimistic status update + tasks-only refresh.
 		for i := range m.issues {
 			if m.issues[i].Task != nil && m.issues[i].Task.ID == msg.taskID {
 				m.issues[i].Task.Status = msg.newStatus
@@ -134,31 +145,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.rebuildBacklog()
 		m.notify = notification{message: fmt.Sprintf("Status: %s → %s", msg.prev, msg.newStatus), time: time.Now()}
-		return m, tea.Batch(flashTimer(), refreshData(m.projectRoot))
-	case refreshMsg:
-		m.detectChanges(msg)
-		m.workers = msg.workers
-		m.issues = msg.issues
-		m.rebuildBacklog()
-		m.clampCursors()
-		m.syncListScroll()
+		return m, tea.Batch(flashTimer(), refreshTasksCmd(m.projectRoot, false))
+	case tasksRefreshedMsg:
+		m.boardData.tasks = msg.tasks
+		m.reassembleIssues()
 		m.loaded = true
-		if m.showDetail && m.detail.taskID != "" {
-			for _, iss := range m.issues {
-				if iss.ID() == m.detail.taskID {
-					m.detail = issueDetail(iss, m.projectRoot)
-					m.vpDetail.SetContent(m.detail.content)
-					break
-				}
-			}
-		}
 		if msg.manual {
 			m.notify = notification{
-				message: fmt.Sprintf("Refreshed — %d items, %d workers", len(m.issues), len(m.workers)),
+				message: fmt.Sprintf("Refreshed — %d tasks", len(m.boardData.tasks)),
 				time:    time.Now(),
 			}
 			return m, flashTimer()
 		}
+		return m, nil
+	case specsRefreshedMsg:
+		m.boardData.specs = msg.specs
+		m.reassembleIssues()
+		return m, nil
+	case workersRefreshedMsg:
+		m.workers = msg.workers
+		m.boardData.workerByID = board.WorkerByID(msg.workers)
+		m.reassembleIssues()
+		m.clampCursors()
+		m.syncListScroll()
+		return m, nil
+	case prsRefreshedMsg:
+		m.boardData.prsByID = msg.prs
+		m.reassembleIssues()
 		return m, nil
 	}
 
@@ -249,7 +262,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.openStatusPicker(taskID, status)
 			return m, nil
 		case key.Matches(msg, keys.Refresh):
-			return m, refreshDataManual(m.projectRoot)
+			return m, refreshAllCmd(m.projectRoot, true)
 		}
 
 	case notifyMsg:
@@ -296,7 +309,7 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.notify = notification{message: msg.message, time: time.Now()}
 		}
-		return m, tea.Batch(refreshData(m.projectRoot), flashTimer())
+		return m, tea.Batch(refreshAllCmd(m.projectRoot, false), flashTimer())
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("esc", "q"))):
@@ -514,29 +527,19 @@ func (m *Model) openDetail() {
 	m.showDetail = true
 }
 
-func (m *Model) detectChanges(msg refreshMsg) {
-	oldPRs := map[string]string{}
-	oldTasks := map[string]string{}
-	for _, iss := range m.issues {
-		if iss.Task != nil {
-			oldTasks[iss.Task.ID] = iss.Task.Status
-		}
-		for _, pr := range iss.PRs {
-			oldPRs[pr.ID] = pr.Status
-		}
-	}
-	for _, iss := range msg.issues {
-		for _, pr := range iss.PRs {
-			old, existed := oldPRs[pr.ID]
-			if !existed {
-				m.notify = notification{message: fmt.Sprintf("PR created: %s", pr.ID), time: time.Now()}
-			} else if old != pr.Status {
-				m.notify = notification{message: fmt.Sprintf("PR %s: %s → %s", pr.ID, old, pr.Status), time: time.Now()}
-			}
-		}
-		if iss.Task != nil {
-			if old, existed := oldTasks[iss.Task.ID]; existed && old != iss.Task.Status {
-				m.notify = notification{message: fmt.Sprintf("Task %s: %s → %s", iss.Task.ID, old, iss.Task.Status), time: time.Now()}
+// reassembleIssues runs issue.Assemble over the current boardData snapshot,
+// updates m.issues, rebuilds the backlog, and re-renders the detail pane if
+// the currently-shown task is still present. Called by every per-source
+// refresh handler so the UI re-computes the moment any source updates.
+func (m *Model) reassembleIssues() {
+	m.issues = issue.Assemble(m.boardData.tasks, m.boardData.specs, m.boardData.workerByID, m.boardData.prsByID)
+	m.rebuildBacklog()
+	if m.showDetail && m.detail.taskID != "" {
+		for _, iss := range m.issues {
+			if iss.ID() == m.detail.taskID {
+				m.detail = issueDetail(iss, m.projectRoot)
+				m.vpDetail.SetContent(m.detail.content)
+				break
 			}
 		}
 	}
@@ -569,7 +572,7 @@ func (m Model) updateModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, flashTimer()
 		}
 		m.notify = notification{message: "Task created: " + msg.id, time: time.Now()}
-		return m, tea.Batch(refreshData(m.projectRoot), flashTimer())
+		return m, tea.Batch(refreshAllCmd(m.projectRoot, false), flashTimer())
 	}
 	var cmd tea.Cmd
 	m.createModal, cmd = m.createModal.Update(msg)

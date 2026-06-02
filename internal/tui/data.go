@@ -14,25 +14,52 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-type refreshMsg struct {
-	issues  []issue.Issue
-	workers []worker.Worker
-	manual  bool
+// Per-source refresh messages. Each loader emits its own message so the
+// Update handler can patch m.boardData independently and re-Assemble; the TUI
+// paints as soon as the first message lands.
+type tasksRefreshedMsg struct {
+	tasks  []issue.Task
+	manual bool
+}
+type specsRefreshedMsg struct{ specs []issue.Spec }
+type workersRefreshedMsg struct{ workers []worker.Worker }
+type prsRefreshedMsg struct{ prs map[string][]issue.PR }
+
+// refreshAllCmd dispatches all four loaders in parallel. Used by Init, the
+// periodic tick, and manual refresh.
+func refreshAllCmd(projectRoot string, manual bool) tea.Cmd {
+	return tea.Batch(
+		refreshTasksCmd(projectRoot, manual),
+		refreshSpecsCmd(projectRoot),
+		refreshWorkersCmd(projectRoot),
+		refreshPRsCmd(projectRoot),
+	)
 }
 
-func refreshData(projectRoot string) tea.Cmd {
-	return refreshDataOpt(projectRoot, false)
-}
-
-func refreshDataManual(projectRoot string) tea.Cmd {
-	return refreshDataOpt(projectRoot, true)
-}
-
-func refreshDataOpt(projectRoot string, manual bool) tea.Cmd {
+// refreshTasksCmd fetches only td tasks. Used as the lightweight post-mutation
+// path so podman and openspec are not contacted for things that didn't change.
+func refreshTasksCmd(projectRoot string, manual bool) tea.Cmd {
 	return func() tea.Msg {
-		issues, _ := board.List(projectRoot)
-		workers := worker.List(projectRoot)
-		return refreshMsg{issues: issues, workers: workers, manual: manual}
+		tasks, _ := board.LoadTasks(projectRoot)
+		return tasksRefreshedMsg{tasks: tasks, manual: manual}
+	}
+}
+
+func refreshSpecsCmd(projectRoot string) tea.Cmd {
+	return func() tea.Msg {
+		return specsRefreshedMsg{specs: board.LoadSpecs(projectRoot)}
+	}
+}
+
+func refreshWorkersCmd(projectRoot string) tea.Cmd {
+	return func() tea.Msg {
+		return workersRefreshedMsg{workers: board.LoadWorkers(projectRoot)}
+	}
+}
+
+func refreshPRsCmd(projectRoot string) tea.Cmd {
+	return func() tea.Msg {
+		return prsRefreshedMsg{prs: board.LoadPRs(projectRoot)}
 	}
 }
 
