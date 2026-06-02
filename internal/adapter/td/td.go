@@ -84,6 +84,43 @@ type CreateOpts struct {
 	Labels   []string
 }
 
+// UpdateOpts are the fields Update may change. Zero values are skipped so the
+// caller can submit a partial change (e.g. just the priority) without
+// rewriting the title or description.
+type UpdateOpts struct {
+	Title    string
+	Type     string
+	Priority string
+	Body     string   // updates description; empty leaves description as-is
+	Labels   []string // when non-nil, replaces the label set entirely
+}
+
+// Update mutates an existing task. Empty fields are not sent so the caller
+// can change one thing without clobbering the rest. Title and body take a
+// -- separator immediately before their values so titles or descriptions
+// starting with "--" never trip cobra's flag parser (cf. td-1905e2).
+func Update(root, id string, o UpdateOpts) error {
+	args := []string{"update", id}
+	if o.Type != "" {
+		args = append(args, "--type", o.Type)
+	}
+	if o.Priority != "" {
+		args = append(args, "--priority", o.Priority)
+	}
+	if o.Labels != nil {
+		args = append(args, "--labels", strings.Join(o.Labels, ","))
+	}
+	if o.Body != "" {
+		args = append(args, "-d", o.Body)
+	}
+	if o.Title != "" {
+		// Title is a string flag, but td's parser doesn't peek past it for
+		// positional args, so leading "--" is safe here.
+		args = append(args, "--title", o.Title)
+	}
+	return mutate(root, args...)
+}
+
 // Create creates a task and returns the td output (the new ID line). The title
 // is appended after every flag, with a -- separator immediately before it, so a
 // title like "--foo bar" never trips cobra's flag parser (cf. td-1905e2). Body

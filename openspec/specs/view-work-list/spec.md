@@ -201,48 +201,38 @@ notification rather than silently doing nothing.
 
 ### Requirement: Approve and reject from the list view
 
-The work list SHALL let the user approve or reject a task without first
-opening the detail view. `a` pressed in the list view, with the cursor on a
-task row whose Issue has an open PR, SHALL approve that PR using the same
-shared logic the detail view's `a` uses (the `action.Approve` path), and SHALL
-update the row optimistically. `x` pressed in the list view, with the cursor
-on a task row, SHALL enter the reject-reason input flow (same input flow the
-detail view's `x` uses); on submission the task is rejected using
-`action.Reject` for the cursor row's PR (or `action.RejectTask` if no PR
-exists yet).
+`a` SHALL approve the PR of the task at the cursor; `x` SHALL reject the
+task at the cursor — OR, when the cursor is on a spec-only row, `x` SHALL
+open the abandon-spec confirm dialog instead (the same key, the row kind
+picks the verb). From any other row, `x` is the existing reject flow.
+Every failure mode SHALL surface a visible notification.
 
-Every failure mode SHALL produce a visible notification — pressing `a` on a
-non-task row, on a task with no PR, or on a PR that cannot be approved, SHALL
-NOT silently do nothing. The detail view's existing `a` and `m` bindings,
-which previously fell through silently when `m.detail.prIDs` was empty, SHALL
-also surface a visible notification in that case.
+#### Scenario: Approve a task row that has a PR
 
-#### Scenario: Approve from the list view
+- **GIVEN** the cursor is on a task row whose task has at least one PR
+- **WHEN** the user presses `a`
+- **THEN** the PR is approved
 
-- **WHEN** the user presses `a` while the cursor is on a task row that has an
-  associated open PR
-- **THEN** that PR is approved through the shared action and the user sees a
-  confirmation notification
+#### Scenario: Approve a row with no PR
 
-#### Scenario: Reject from the list view
+- **GIVEN** the cursor is on a task row whose task has no PR
+- **WHEN** the user presses `a`
+- **THEN** the user sees "Approve: this task has no PR yet"
 
-- **WHEN** the user presses `x` while the cursor is on a task row
-- **THEN** the reject-reason input opens, and on submission the task is
-  rejected with the typed reason via the shared action
+#### Scenario: Reject a task row
 
-#### Scenario: No PR yet
+- **GIVEN** the cursor is on a task row
+- **WHEN** the user presses `x`
+- **THEN** the reject-reason input opens
 
-- **WHEN** the user presses `a` on a task that has no PR yet, in either the
-  list or detail view
-- **THEN** a notification "Approve: this task has no PR yet" is shown and the
-  key never silently does nothing
+#### Scenario: x on a spec-only row opens abandon
 
-#### Scenario: Non-task row
-
-- **WHEN** the user presses `a` or `x` on a spec-only row, a PR sub-row, or
-  the workers panel
-- **THEN** a visible notification names the constraint ("Approve: pick a task
-  row first" / "Reject: pick a task row first")
+- **GIVEN** the cursor is on a spec-only row for spec X
+- **WHEN** the user presses `x`
+- **THEN** the bottom bar shows the abandon-spec confirm — "Abandon spec
+  X? Deletes the change folder and closes its linked open tasks. (y/n)"
+- **AND** `y` runs the abandon (closes linked open tasks, deletes the
+  change folder); `n` (or any other key) cancels with no side effect
 
 ### Requirement: Pre-link new-task creation from a spec row
 
@@ -267,4 +257,27 @@ hotkey SHALL open the unlinked modal as before.
 - **WHEN** the user presses `n`
 - **THEN** the new-task modal opens with no linked spec, and the created
   task has no `spec:` label
+
+### Requirement: Drift warning for tasks whose spec is gone
+
+The work list SHALL render an `⚠ spec archived` warning (red, bold) in
+the status column of any open task whose `spec:<name>` label points at a
+spec that is no longer an active proposal — same warning style as the
+orphan-in_progress marker. The warning SHALL be suppressed once the task
+itself is closed, since closed is the steady state.
+
+#### Scenario: Open task with archived spec
+
+- **GIVEN** task td-a is open and carries `spec:X`
+- **AND** spec X is archived
+- **WHEN** the work list renders td-a
+- **THEN** its status column reads `⚠ spec archived`
+
+#### Scenario: Closed task with archived spec
+
+- **GIVEN** task td-a is closed and carries `spec:X`
+- **AND** spec X is archived
+- **WHEN** the work list renders td-a
+- **THEN** the warning is suppressed and the status column shows the
+  task's regular closed status
 

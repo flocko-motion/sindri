@@ -221,6 +221,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showCreateModal = true
 			m.createModal = newCreateTaskModel(m.projectRoot, m.cursorSpecName())
 			return m, m.createModal.Init()
+		case key.Matches(msg, keys.EditTask):
+			t := m.taskUnderCursor()
+			if t == nil {
+				m.notify = notification{message: "Edit: pick a task row first", isError: true, time: time.Now()}
+				return m, flashTimer()
+			}
+			m.showCreateModal = true
+			m.createModal = newEditTaskModel(m.projectRoot, *t)
+			return m, m.createModal.Init()
 		case key.Matches(msg, keys.Backlog):
 			m.leftView = viewBacklog
 			m.rebuildBacklog()
@@ -524,6 +533,14 @@ func (m Model) updateModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, flashTimer()
 		}
 		m.notify = notification{message: "Task created: " + msg.id, time: time.Now()}
+		return m, tea.Batch(refreshAllCmd(m.projectRoot, false), flashTimer())
+	case taskUpdatedMsg:
+		m.showCreateModal = false
+		if msg.err != nil {
+			m.notify = notification{message: "Edit failed: " + msg.err.Error(), isError: true, time: time.Now()}
+			return m, flashTimer()
+		}
+		m.notify = notification{message: "Task updated: " + msg.id, time: time.Now()}
 		return m, tea.Batch(refreshAllCmd(m.projectRoot, false), flashTimer())
 	}
 	var cmd tea.Cmd

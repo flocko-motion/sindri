@@ -281,6 +281,38 @@ func (m Model) cursorTaskAndPR() (taskID, prID string) {
 	return iss.Task.ID, prID
 }
 
+// findTaskByID returns the task with the given ID from the current board
+// snapshot, or nil if it isn't present. Used by the detail-view edit hotkey
+// (which needs the full Task, not just the taskID stored on m.detail).
+func (m Model) findTaskByID(id string) *issue.Task {
+	for i := range m.issues {
+		if m.issues[i].Task != nil && m.issues[i].Task.ID == id {
+			t := *m.issues[i].Task
+			return &t
+		}
+	}
+	return nil
+}
+
+// taskUnderCursor returns the issue.Task at the backlog cursor or nil when
+// the cursor is on a non-task row (spec-only, PR sub-row, gate line, or a
+// different left-view). Used by the edit hotkey to pre-fill the modal.
+func (m Model) taskUnderCursor() *issue.Task {
+	if m.leftView != viewBacklog || m.listCursor < 0 || m.listCursor >= len(m.backlogRows) {
+		return nil
+	}
+	row := m.backlogRows[m.listCursor]
+	if row.isPR || row.issueIdx < 0 || row.issueIdx >= len(m.visibleIssues) {
+		return nil
+	}
+	iss := m.visibleIssues[row.issueIdx]
+	if iss.Task == nil {
+		return nil
+	}
+	t := *iss.Task
+	return &t
+}
+
 // cursorSpecName returns the spec name when the cursor sits on a spec-only
 // row (i.e. an openspec change with no td task yet), otherwise "". Used to
 // pre-link the new-task modal so pressing `n` on a spec row creates a task

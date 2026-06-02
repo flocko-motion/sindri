@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/flo-at/sindri/internal/adapter/td"
+	"github.com/flo-at/sindri/internal/issue"
 )
 
 var (
@@ -41,9 +42,17 @@ type createTaskModel struct {
 	submitted     bool
 	projectRoot   string
 	specName      string // non-empty when invoked from a spec-only row; adds spec:<name> label
+	editingID     string // set in edit mode; submit dispatches td.Update instead of td.Create
+	origLabels    []string // labels carried by the task before editing — non-review ones are preserved on submit
 }
 
 type taskCreatedMsg struct {
+	id  string
+	err error
+}
+
+// taskUpdatedMsg is the edit-mode counterpart of taskCreatedMsg.
+type taskUpdatedMsg struct {
 	id  string
 	err error
 }
@@ -75,6 +84,66 @@ func newCreateTaskModel(projectRoot, specName string) createTaskModel {
 		projectRoot:   projectRoot,
 		specName:      specName,
 	}
+}
+
+// newEditTaskModel reuses the create-task modal in edit mode: same layout
+// and inputs, pre-populated from t, and submit dispatches td.Update instead
+// of td.Create. Other labels on the task (spec link, approved gates, etc.)
+// are preserved through origLabels so toggling Review never silently drops
+// them.
+func newEditTaskModel(projectRoot string, t issue.Task) createTaskModel {
+	const inputWidth = 45
+
+	ti := textinput.New()
+	ti.Placeholder = "Task title (required)"
+	ti.SetValue(t.Title)
+	ti.Focus()
+	ti.CharLimit = 200
+	ti.Width = inputWidth
+
+	di := textinput.New()
+	di.Placeholder = "Description — leave empty to keep current"
+	di.CharLimit = 500
+	di.Width = inputWidth
+
+	return createTaskModel{
+		titleInput:    ti,
+		descInput:     di,
+		typeIdx:       indexOf(taskTypes, t.Type),
+		prioIdx:       indexOfWithDefault(priorities, t.Priority, 2),
+		reviewChecked: hasLabel(t.Labels, "require-review-code"),
+		activeField:   fieldTitle,
+		projectRoot:   projectRoot,
+		editingID:     t.ID,
+		origLabels:    append([]string{}, t.Labels...),
+	}
+}
+
+func indexOf(items []string, v string) int {
+	for i, s := range items {
+		if s == v {
+			return i
+		}
+	}
+	return 0
+}
+
+func indexOfWithDefault(items []string, v string, def int) int {
+	for i, s := range items {
+		if s == v {
+			return i
+		}
+	}
+	return def
+}
+
+func hasLabel(labels []string, want string) bool {
+	for _, l := range labels {
+		if l == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (m createTaskModel) Init() tea.Cmd {
@@ -119,7 +188,10 @@ func (m createTaskModel) Update(msg tea.Msg) (createTaskModel, tea.Cmd) {
 				m.err = fmt.Errorf("title is required")
 				return m, nil
 			}
-			if len(title) < 15 {
+			// New tasks must clear the 15-char min so we don't get "fix" / "wip"
+			// titles. Editing skips the rule — existing tasks may have been
+			// created via the td CLI which doesn't enforce it.
+			if m.editingID == "" && len(title) < 15 {
 				m.err = fmt.Errorf("title too short (min 15 chars, got %d)", len(title))
 				return m, nil
 			}
@@ -174,8 +246,28 @@ func (m createTaskModel) submit() tea.Cmd {
 	review := m.reviewChecked
 	projectRoot := m.projectRoot
 	specName := m.specName
+	editingID := m.editingID
+	origLabels := m.origLabels
 
 	return func() tea.Msg {
+		if editingID != "" {
+			// Preserve every non-review label (spec:..., approved-*, etc.)
+			// so toggling the review checkbox doesn't silently drop them.
+			labels := make([]string, 0, len(origLabels)+1)
+			for _, l := range origLabels {
+				if l == "require-review-code" {
+					continue
+				}
+				labels = append(labels, l)
+			}
+			if review {
+				labels = append(labels, "require-review-code")
+			}
+			err := td.Update(projectRoot, editingID, td.UpdateOpts{
+				Title: title, Type: typ, Priority: prio, Body: desc, Labels: labels,
+			})
+			return taskUpdatedMsg{id: editingID, err: err}
+		}
 		var labels []string
 		if review {
 			labels = append(labels, "require-review-code")
@@ -204,7 +296,11 @@ func (m createTaskModel) View(width, height int) string {
 		Width(modalW)
 
 	var b strings.Builder
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(highlight).Render("New Task"))
+	heading := "New Task"
+	if m.editingID != "" {
+		heading = "Edit Task — " + m.editingID
+	}
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(highlight).Render(heading))
 	b.WriteString("\n\n")
 
 	if m.specName != "" {

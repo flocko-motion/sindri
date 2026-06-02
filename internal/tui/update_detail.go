@@ -65,6 +65,20 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("G"))):
 			m.vpDetail.GotoBottom()
 
+		case key.Matches(msg, keys.EditTask):
+			if m.detail.kind != detailTask || m.detail.taskID == "" {
+				m.notify = notification{message: "Edit: only applies to tasks", isError: true, time: time.Now()}
+				return m, flashTimer()
+			}
+			t := m.findTaskByID(m.detail.taskID)
+			if t == nil {
+				m.notify = notification{message: "Edit: task " + m.detail.taskID + " not found in board snapshot", isError: true, time: time.Now()}
+				return m, flashTimer()
+			}
+			m.showCreateModal = true
+			m.createModal = newEditTaskModel(m.projectRoot, *t)
+			m.showDetail = false
+			return m, m.createModal.Init()
 		case key.Matches(msg, keys.Comment):
 			if m.detail.kind == detailTask {
 				ti := textinput.New()

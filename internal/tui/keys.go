@@ -19,6 +19,7 @@ type keyMap struct {
 	Backlog    key.Binding
 	Workers    key.Binding
 	NewTask    key.Binding
+	EditTask   key.Binding
 	Approve    key.Binding
 	Merge      key.Binding
 	Reject     key.Binding
@@ -75,6 +76,10 @@ var keys = keyMap{
 	NewTask: key.NewBinding(
 		key.WithKeys("n"),
 		key.WithHelp("n", "new task"),
+	),
+	EditTask: key.NewBinding(
+		key.WithKeys("e"),
+		key.WithHelp("e", "edit task"),
 	),
 	Approve: key.NewBinding(
 		key.WithKeys("a"),
