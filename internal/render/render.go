@@ -97,12 +97,14 @@ func IssueStatus(iss issue.Issue) string {
 // TaskTypeIcon returns the canonical 2-cell glyph for a td task type:
 //   - 🪲 bug (beetle)
 //   - 🔧 feature (wrench)
-//   - ⚙️ task (gear, the small mechanical mark)
+//   - 🔩 task (nut and bolt)
 //   - 🧹 chore (broom)
 //   - 📦 epic (package)
 //
-// All icons are 2 visual cells so columns align cleanly. An unknown type
-// returns "", which renderers pad to the same width.
+// Every glyph is in the Unicode emoji block proper (no variation-selector
+// hints), so terminals render them at the same 2-cell width that
+// `lipgloss.Width` reports — column padding stays correct everywhere.
+// Unknown type returns "", which renderers pad to the same width.
 func TaskTypeIcon(typ string) string {
 	switch typ {
 	case "bug":
@@ -110,7 +112,7 @@ func TaskTypeIcon(typ string) string {
 	case "feature":
 		return "🔧"
 	case "task":
-		return "⚙️"
+		return "🔩"
 	case "chore":
 		return "🧹"
 	case "epic":

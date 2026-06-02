@@ -6,7 +6,7 @@
 │   📦     td-eeeeee P1  26-05-28 06:00  open  v2 auth overhaul                                              │
 │   ↳ 🔧   td-ff1111 P2  26-05-28 11:00  ⚠ in_progress  OAuth login provider                                 │
 │   ↳ 🧹   td-ff2222 P3  26-05-28 07:00  open  rotate session secret                                         │
-│   ⚙️     td-ff3333 P2  26-05-28 11:30  open  audit log retention                                           │
+│   🔩     td-ff3333 P2  26-05-28 11:30  open  audit log retention                                           │
 │                                                                                                            │
 │                                                                                                            │
 │                                                                                                            │
