@@ -49,3 +49,24 @@ func TestGates(t *testing.T) {
 		t.Errorf("Gates output missing unapproved security gate: %q", out)
 	}
 }
+
+func TestGateLabel(t *testing.T) {
+	// Gate names carry the "review-" prefix coming out of issue.Task.Gates(),
+	// because we only strip the "require-"/"approved-" prefix and keep
+	// "review-<type>" as content. The displayed label SHALL keep the
+	// "review" content (showing just "code" would be too short to read);
+	// dashes become spaces.
+	cases := []struct {
+		gate issue.Gate
+		want string
+	}{
+		{issue.Gate{Name: "review-code", Approved: false}, "☐ review code"},
+		{issue.Gate{Name: "review-code", Approved: true}, "☑ review code"},
+		{issue.Gate{Name: "review-security", Approved: false}, "☐ review security"},
+	}
+	for _, c := range cases {
+		if got := GateLabel(c.gate); got != c.want {
+			t.Errorf("GateLabel(%v) = %q want %q", c.gate, got, c.want)
+		}
+	}
+}

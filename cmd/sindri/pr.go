@@ -378,11 +378,7 @@ func newPrCmd() *cobra.Command {
 			}
 			fmt.Printf("Review gates for %s (%s):\n", args[0], taskID)
 			for _, g := range gates {
-				mark := "☐"
-				if g.Approved {
-					mark = "☑"
-				}
-				fmt.Printf("  %s %s\n", mark, g.Name)
+				fmt.Printf("  %s\n", render.GateLabel(g))
 			}
 			return nil
 		},

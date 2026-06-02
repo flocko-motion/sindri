@@ -157,20 +157,28 @@ func TaskTypeIcon(typ string) string {
 	}
 }
 
-// Gates renders review gates as "☑ name" / "☐ name", space-separated.
-// Returns "" when there are no gates.
+// GateLabel renders one review gate as "☑ review code" or "☐ review code".
+// The dash-to-space pass keeps the "review" content visible — stripping it
+// would leave just the type ("code") which is too short to read on its own.
+// This is the single source of truth for gate display; CLI and TUI both
+// call into it so the format stays identical.
+func GateLabel(g issue.Gate) string {
+	display := strings.ReplaceAll(g.Name, "-", " ")
+	if g.Approved {
+		return "☑ " + display
+	}
+	return "☐ " + display
+}
+
+// Gates renders a list of review gates, space-separated (two spaces between
+// each so the eye can split them). Returns "" when there are no gates.
 func Gates(gates []issue.Gate) string {
 	if len(gates) == 0 {
 		return ""
 	}
-	var parts []string
+	parts := make([]string, 0, len(gates))
 	for _, g := range gates {
-		display := strings.ReplaceAll(g.Name, "-", " ")
-		if g.Approved {
-			parts = append(parts, "☑ "+display)
-		} else {
-			parts = append(parts, "☐ "+display)
-		}
+		parts = append(parts, GateLabel(g))
 	}
 	return strings.Join(parts, "  ")
 }
