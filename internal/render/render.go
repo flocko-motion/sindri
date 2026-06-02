@@ -106,10 +106,14 @@ func IssueStatus(iss issue.Issue) string {
 }
 
 // TypeColumn returns the leftmost-column content for an Issue, shared by every
-// interface that lays out the work list. Tasks render their type glyph (🪲 bug,
-// 🔧 feature, …); spec-only rows render 📄 — the spec marker belongs in the
-// type column, not in the status column. Children are prefixed with depth
-// indent + "↳ " so the column also visualises the hierarchy.
+// interface that lays out the work list. The glyph follows the row's
+// dominant identity: any issue paired with an *active* openspec change —
+// spec-only or task-linked — renders 📄, replacing the type glyph it would
+// otherwise carry. Plain tasks render their type glyph (🪲 bug, 🔧 feature,
+// …). Orphan-linked tasks (label points at an archived/missing spec) fall
+// back to the type glyph so the row's kind stays identifiable; the drift
+// is surfaced separately in the status column. Children are prefixed with
+// depth indent + "↳ " so the column also visualises the hierarchy.
 func TypeColumn(iss issue.Issue) string {
 	var b strings.Builder
 	if iss.Depth > 0 {
@@ -117,10 +121,10 @@ func TypeColumn(iss issue.Issue) string {
 		b.WriteString("↳ ")
 	}
 	switch {
+	case iss.HasSpec():
+		b.WriteString("📄")
 	case iss.Task != nil:
 		b.WriteString(TaskTypeIcon(iss.Task.Type))
-	case iss.SpecOnly():
-		b.WriteString("📄")
 	}
 	return b.String()
 }

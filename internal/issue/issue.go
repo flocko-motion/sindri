@@ -182,7 +182,9 @@ func (i Issue) Title() string {
 		return "(no task — needs planning)"
 	}
 	if i.Spec != nil {
-		return "📄 " + i.Spec.Name + " · " + i.Task.Title
+		// 📄 lives in the type column (render.TypeColumn); the title carries
+		// only the spec/task pair so the eye isn't drawn to two glyphs.
+		return i.Spec.Name + " · " + i.Task.Title
 	}
 	return i.Task.Title
 }
