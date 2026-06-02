@@ -15,9 +15,12 @@ review:
 
 install: build
 	mkdir -p $(PREFIX)
-	cp bin/sindri $(PREFIX)/sindri
-	cp bin/sindri-worker $(PREFIX)/sindri-worker
-	cp bin/sindri-review $(PREFIX)/sindri-review
+	# Use mv rather than cp so install succeeds even when the previous
+	# binary is currently running (rename unlinks the in-use file; the
+	# running process keeps executing the memory-mapped inode unharmed).
+	mv bin/sindri $(PREFIX)/sindri
+	mv bin/sindri-worker $(PREFIX)/sindri-worker
+	mv bin/sindri-review $(PREFIX)/sindri-review
 
 # Rebuild image when container files change (agent CLIs are mounted, not built in image)
 CONTAINER_DEPS := $(shell find container -type f 2>/dev/null)
