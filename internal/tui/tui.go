@@ -89,13 +89,21 @@ func tickCmd() tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(refreshData(m.projectRoot), tickCmd())
+	// Dispatch the fast refresh, the periodic tick, AND the slow background
+	// cache warmer in parallel. The first refresh paints quickly (~1-2s);
+	// when warmCacheCmd finishes (~7s), cacheWarmedMsg triggers one more
+	// refresh that finally shows hierarchy.
+	return tea.Batch(refreshData(m.projectRoot), tickCmd(), warmCacheCmd(m.projectRoot))
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
 		return m, tea.Batch(refreshData(m.projectRoot), tickCmd())
+	case cacheWarmedMsg:
+		// One more refresh to pick up the now-populated parent-id cache so
+		// hierarchy actually renders.
+		return m, refreshData(m.projectRoot)
 	case refreshMsg:
 		m.detectChanges(msg)
 		m.workers = msg.workers

@@ -131,6 +131,10 @@ func runTaskList(cmd *cobra.Command, args []string, showAll, showOpen, showClose
 		return fmt.Errorf("not in a git repo: %w", err)
 	}
 
+	// One-shot CLI: warm the parent_id cache so hierarchy renders in this run.
+	// The TUI gets this in the background; the CLI accepts the latency.
+	board.WarmParentCache(projectRoot)
+
 	issues, err := board.List(projectRoot)
 	if err != nil {
 		return err

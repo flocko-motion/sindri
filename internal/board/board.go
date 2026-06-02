@@ -9,6 +9,7 @@ package board
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/flo-at/sindri/internal/adapter/spec"
 	"github.com/flo-at/sindri/internal/adapter/td"
@@ -17,23 +18,85 @@ import (
 	"github.com/flo-at/sindri/internal/worker"
 )
 
+// parentCache holds a per-process taskID → parentID map. td list strips
+// parent_id and td show is slow (~250ms each, DB locks prevent useful
+// parallelism), so we read whatever the cache has and let WarmParentCache fill
+// it in the background. Subsequent refreshes are then instant.
+var parentCache sync.Map // map[string]string
+
+// WarmParentCache refreshes the parent_id cache for a project by running
+// td.Enrich and storing each task's ParentID. Callers run this in a goroutine
+// when they can tolerate the latency (~7s parallel for 50 tasks); board.List
+// itself never calls it.
+func WarmParentCache(projectRoot string) {
+	tasks, err := td.Tasks(projectRoot)
+	if err != nil {
+		return
+	}
+	td.Enrich(projectRoot, tasks)
+	for _, t := range tasks {
+		parentCache.Store(t.ID, t.ParentID)
+	}
+}
+
+func cachedParent(id string) string {
+	if v, ok := parentCache.Load(id); ok {
+		return v.(string)
+	}
+	return ""
+}
+
 // List returns the unified, ordered work items for a project: spec-only items
 // first, then tasks (open → active → closed), each with its spec, worker, and
 // PRs attached. This is the one refresh both interfaces use so they always
 // show the same data.
 func List(projectRoot string) ([]issue.Issue, error) {
-	tasks, err := td.Tasks(projectRoot)
-	if err != nil {
-		return nil, err
+	// The four data sources are independent; serializing them adds the slow
+	// ones (openspec ~1.2s, podman ~1.5s) to td (~0.3s) for a ~3s stall on
+	// first paint. Fan them out and wait on the slowest.
+	var (
+		tasks      []issue.Task
+		taskErr    error
+		specs      []issue.Spec
+		workerByID map[string]string
+		prsByID    map[string][]issue.PR
+		wg         sync.WaitGroup
+	)
+	wg.Add(4)
+	go func() {
+		defer wg.Done()
+		ts, err := td.Tasks(projectRoot)
+		if err != nil {
+			taskErr = err
+			return
+		}
+		// td list strips parent_id; populate from the in-process cache so the
+		// hierarchy renders without the slow td.show round-trip. A separate
+		// WarmParentCache goroutine keeps the cache fresh in the background.
+		for i := range ts {
+			if ts[i].ParentID == "" {
+				ts[i].ParentID = cachedParent(ts[i].ID)
+			}
+		}
+		tasks = ts
+	}()
+	go func() {
+		defer wg.Done()
+		specs = specsFor(projectRoot)
+	}()
+	go func() {
+		defer wg.Done()
+		workerByID = workerAssignments(projectRoot)
+	}()
+	go func() {
+		defer wg.Done()
+		prsByID = prsByTask(projectRoot)
+	}()
+	wg.Wait()
+	if taskErr != nil {
+		return nil, taskErr
 	}
-	// td list strips parent_id; per-task show fills it in (~5ms each).
-	td.Enrich(projectRoot, tasks)
-
-	specs := specsFor(projectRoot)
-	workerByTask := workerAssignments(projectRoot)
-	prsByTask := prsByTask(projectRoot)
-
-	return issue.Assemble(tasks, specs, workerByTask, prsByTask), nil
+	return issue.Assemble(tasks, specs, workerByID, prsByID), nil
 }
 
 func specsFor(projectRoot string) []issue.Spec {
