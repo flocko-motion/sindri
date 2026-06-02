@@ -47,8 +47,10 @@ func Show(root, id string) (string, error) { return run(root, "show", id) }
 // Comments returns the human-readable comments of a task.
 func Comments(root, id string) (string, error) { return run(root, "comments", id) }
 
-// Comment adds a comment to a task.
-func Comment(root, id, body string) error { return mutate(root, "comment", id, body) }
+// Comment adds a comment to a task. The body is passed after a -- separator
+// so a free-text comment starting with "--" doesn't trip cobra's flag parser
+// (cf. td-1905e2 — typing "--foo" as a title or reject reason used to crash td).
+func Comment(root, id, body string) error { return mutate(root, "comment", id, "--", body) }
 
 // Reject moves a task from in_review back to open.
 func Reject(root, id string) error { return mutate(root, "reject", id) }
@@ -82,9 +84,13 @@ type CreateOpts struct {
 	Labels   []string
 }
 
-// Create creates a task and returns the td output (the new ID line).
+// Create creates a task and returns the td output (the new ID line). The title
+// is appended after every flag, with a -- separator immediately before it, so a
+// title like "--foo bar" never trips cobra's flag parser (cf. td-1905e2). Body
+// stays as -d's value (cobra consumes the next arg regardless of leading --),
+// but the title is positional and needs the explicit terminator.
 func Create(root, title string, o CreateOpts) (string, error) {
-	args := []string{"create", title}
+	args := []string{"create"}
 	if o.Type != "" {
 		args = append(args, "-t", o.Type)
 	}
@@ -97,6 +103,7 @@ func Create(root, title string, o CreateOpts) (string, error) {
 	if len(o.Labels) > 0 {
 		args = append(args, "--labels", strings.Join(o.Labels, ","))
 	}
+	args = append(args, "--", title)
 	return run(root, args...)
 }
 
