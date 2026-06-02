@@ -48,14 +48,21 @@ type taskCreatedMsg struct {
 }
 
 func newCreateTaskModel(projectRoot string) createTaskModel {
+	// Fits the 60-wide modal minus border/padding (4) and the "  Title: "/
+	// "  Desc:  " labels (9). Without an explicit Width, textinput truncates
+	// the placeholder to one character — the user saw a stray "T"/"D".
+	const inputWidth = 45
+
 	ti := textinput.New()
 	ti.Placeholder = "Task title (required)"
 	ti.Focus()
 	ti.CharLimit = 200
+	ti.Width = inputWidth
 
 	di := textinput.New()
 	di.Placeholder = "Description (optional)"
 	di.CharLimit = 500
+	di.Width = inputWidth
 
 	return createTaskModel{
 		titleInput:    ti,
