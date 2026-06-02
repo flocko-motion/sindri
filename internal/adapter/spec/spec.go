@@ -8,6 +8,7 @@ package spec
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -45,6 +46,45 @@ func Changes(projectRoot string) []Change {
 		return nil
 	}
 	return result.Changes
+}
+
+// Lookup returns the active change with the given name, or nil if no active
+// change carries that name (it may not exist at all, or it may have been
+// archived). Use IsArchived to tell those two apart when it matters.
+func Lookup(projectRoot, name string) *Change {
+	for _, c := range Changes(projectRoot) {
+		if c.Name == name {
+			cc := c
+			return &cc
+		}
+	}
+	return nil
+}
+
+// Archive runs `openspec archive <name> --yes`, moving the proposal under
+// openspec/changes/archive/ and applying its deltas to specs/.
+func Archive(projectRoot, name string) error {
+	_, err := run(projectRoot, "archive", name, "--yes")
+	return err
+}
+
+// Abandon deletes the change folder so the proposal is dropped without being
+// applied. It refuses if the change isn't active — there's nothing to abandon
+// once archived, and we never delete the archive folder. Returns the path
+// that was removed so callers can include it in their confirmation.
+func Abandon(projectRoot, name string) (string, error) {
+	p := filepath.Join(projectRoot, "openspec", "changes", name)
+	info, err := os.Stat(p)
+	if err != nil {
+		return "", fmt.Errorf("spec %s: not found at %s (already archived?)", name, p)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("spec %s: %s is not a directory", name, p)
+	}
+	if err := os.RemoveAll(p); err != nil {
+		return "", fmt.Errorf("spec %s: remove: %w", name, err)
+	}
+	return p, nil
 }
 
 // Validate runs `openspec validate --all` for the project. It degrades

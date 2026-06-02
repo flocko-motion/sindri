@@ -1,0 +1,30 @@
+ Sindri — AI Agent Orchestrator[T]asks  [W]orkers  j/k:nav  enter:open  y:copy  n:new  r:refresh  q:quit
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  Tasks                                                                                           │
+│                                                                                                  │
+│ > 📄     os-17cb5f                     spec              (no task — needs planning)              │
+│   🪲     td-aaaaaa P1  26-05-28 10:00  open              fix login redirect                      │
+│       ☐ review code                                                                              │
+│   🔧     td-bbbbbb P2  26-05-28 12:00  🔨 brokkr         📄 csv-export · add CSV export          │
+│       └ pr-td-bbbbbb [open]                                                                      │
+│       ☑ review code                                                                              │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ Abandon spec auth-refactor? Deletes the change folder and closes its linked open tasks. (y/n)      

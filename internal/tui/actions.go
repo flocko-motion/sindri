@@ -52,8 +52,15 @@ func (m Model) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			act := m.confirmAction
 			m.confirmAction = ""
 			m.confirmLabel = ""
-			if act == "merge" {
+			switch {
+			case act == "merge":
 				return m, m.mergePR()
+			case strings.HasPrefix(act, "abandon-spec:"):
+				name := strings.TrimPrefix(act, "abandon-spec:")
+				return m, abandonSpecCmd(m.projectRoot, name)
+			case strings.HasPrefix(act, "archive-spec:"):
+				name := strings.TrimPrefix(act, "archive-spec:")
+				return m, archiveSpecCmd(m.projectRoot, name)
 			}
 		default:
 			m.confirmAction = ""
@@ -119,6 +126,15 @@ func (m *Model) approvePR() tea.Cmd {
 	}
 }
 
+// mergeCompleteMsg lands in the top-level Update so a successful merge can
+// both notify the user AND kick off the spec-lifecycle check — the merge
+// just closed a td task, and if that task carried a spec:<name> label we
+// need to consider archiving the spec.
+type mergeCompleteMsg struct {
+	prID   string
+	taskID string
+}
+
 func (m *Model) mergePR() tea.Cmd {
 	prID := m.detail.prIDs[0]
 	root := m.projectRoot
@@ -130,7 +146,11 @@ func (m *Model) mergePR() tea.Cmd {
 		if len(missing) > 0 {
 			return actionResultMsg{message: "Merge blocked — unmet gates: " + strings.Join(missing, ", "), isError: true}
 		}
-		return actionResultMsg{message: "PR merged: " + merged.ID}
+		taskID := issue.TaskIDFromTitle(merged.Title)
+		if taskID == "" {
+			taskID = merged.Branch
+		}
+		return mergeCompleteMsg{prID: merged.ID, taskID: taskID}
 	}
 }
 

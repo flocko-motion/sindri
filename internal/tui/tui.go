@@ -117,6 +117,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
 		return m, tea.Batch(refreshAllCmd(m.projectRoot, false), tickCmd())
+	case mergeCompleteMsg, specCheckMsg, specArchivedMsg, specAbandonedMsg:
+		if next, cmd, ok := m.handleSpecLifecycle(msg); ok {
+			return next, cmd
+		}
+		return m, nil
 	case cacheWarmedMsg:
 		// One more tasks-only refresh so the freshly populated parent-id cache
 		// gets applied; podman/openspec didn't change so don't re-poll them.
@@ -145,7 +150,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.rebuildBacklog()
 		m.notify = notification{message: fmt.Sprintf("Status: %s → %s", msg.prev, msg.newStatus), time: time.Now()}
-		return m, tea.Batch(flashTimer(), refreshTasksCmd(m.projectRoot, false))
+		cmds := []tea.Cmd{flashTimer(), refreshTasksCmd(m.projectRoot, false)}
+		// A close keeps the td task and its linked spec in sync — see
+		// action.MaybeArchiveLinkedSpec for the decision logic.
+		if msg.newStatus == "closed" {
+			cmds = append(cmds, checkLinkedSpecCmd(m.projectRoot, msg.taskID))
+		}
+		return m, tea.Batch(cmds...)
 	case tasksRefreshedMsg:
 		m.boardData.tasks = msg.tasks
 		m.reassembleIssues()
@@ -184,6 +195,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if m.showCreateModal {
 		return m.updateModal(msg)
+	}
+
+	// Confirm modal (merge / abandon-spec / archive-spec) is global too —
+	// any active confirmation captures y/n before per-view handlers run.
+	if m.confirmAction != "" {
+		return m.updateConfirm(msg)
 	}
 
 	if m.showDetail {
@@ -275,6 +292,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detail.prIDs = []string{prID}
 			return m, m.approvePR()
 		case key.Matches(msg, keys.Reject):
+			// Same key, different verb depending on row kind: on a spec-only
+			// row 'x' abandons the spec (after a confirm dialog); on a task
+			// row it's the existing reject flow. Spec-linked task rows fall
+			// through to reject — the cursor must be on the spec row itself
+			// to abandon, which keeps the destructive action explicit.
+			if specName := m.cursorSpecName(); specName != "" {
+				m.confirmAction = "abandon-spec:" + specName
+				m.confirmLabel = fmt.Sprintf(
+					"Abandon spec %s? Deletes the change folder and closes its linked open tasks. (y/n)",
+					specName)
+				return m, nil
+			}
 			taskID, prID := m.cursorTaskAndPR()
 			if taskID == "" {
 				m.notify = notification{message: "Reject: pick a task row first", isError: true, time: time.Now()}
@@ -308,122 +337,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	return m, nil
-}
-
-func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Handle comment input mode
-	if m.commenting {
-		return m.updateCommentInput(msg)
-	}
-
-	// Handle reject-reason input mode
-	if m.rejecting {
-		return m.updateRejectInput(msg)
-	}
-
-	// Handle status picker
-	if m.pickingStatus {
-		return m.updateStatusPick(msg)
-	}
-
-	// Handle confirmation mode
-	if m.confirmAction != "" {
-		return m.updateConfirm(msg)
-	}
-
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.resizeViewports()
-		return m, nil
-	case actionResultMsg:
-		if msg.isError {
-			m.notify = notification{message: msg.message, isError: true, time: time.Now()}
-		} else {
-			m.notify = notification{message: msg.message, time: time.Now()}
-		}
-		return m, tea.Batch(refreshAllCmd(m.projectRoot, false), flashTimer())
-	case tea.KeyMsg:
-		switch {
-		case key.Matches(msg, key.NewBinding(key.WithKeys("esc", "q"))):
-			m.showDetail = false
-			return m, nil
-		case key.Matches(msg, keys.Up):
-			m.vpDetail.LineUp(1)
-		case key.Matches(msg, keys.Down):
-			m.vpDetail.LineDown(1)
-		case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+u"))):
-			m.vpDetail.HalfViewUp()
-		case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+d"))):
-			m.vpDetail.HalfViewDown()
-		case key.Matches(msg, key.NewBinding(key.WithKeys("g"))):
-			m.vpDetail.GotoTop()
-		case key.Matches(msg, key.NewBinding(key.WithKeys("G"))):
-			m.vpDetail.GotoBottom()
-
-		// Action hotkeys (only for task detail)
-		case key.Matches(msg, keys.Comment):
-			if m.detail.kind == detailTask {
-				ti := textinput.New()
-				ti.Placeholder = "Type your comment..."
-				ti.Focus()
-				ti.CharLimit = 500
-				ti.Width = m.width - 20
-				m.commenting = true
-				m.commentInput = ti
-				return m, textinput.Blink
-			}
-		case key.Matches(msg, keys.Status):
-			if m.detail.kind != detailTask {
-				m.notify = notification{message: "Status: only applies to tasks", isError: true, time: time.Now()}
-				return m, flashTimer()
-			}
-			m.openStatusPicker(m.detail.taskID, m.detail.taskStatus)
-			return m, nil
-		case key.Matches(msg, keys.Approve):
-			if len(m.detail.prIDs) == 0 {
-				m.notify = notification{message: "Approve: this task has no PR yet", isError: true, time: time.Now()}
-				return m, flashTimer()
-			}
-			return m, m.approvePR()
-		case key.Matches(msg, keys.Merge):
-			if len(m.detail.prIDs) == 0 {
-				m.notify = notification{message: "Merge: this task has no PR yet", isError: true, time: time.Now()}
-				return m, flashTimer()
-			}
-			m.confirmAction = "merge"
-			m.confirmLabel = fmt.Sprintf("Merge %s? (y/n)", m.detail.prIDs[0])
-			return m, nil
-		case key.Matches(msg, keys.Reject):
-			if m.detail.kind == detailTask {
-				ti := textinput.New()
-				ti.Placeholder = "Reason for rejection..."
-				ti.Focus()
-				ti.CharLimit = 500
-				ti.Width = m.width - 20
-				m.rejecting = true
-				m.commentInput = ti
-				return m, textinput.Blink
-			}
-		case key.Matches(msg, keys.Yank):
-			id := m.detail.taskID
-			if id == "" && len(m.detail.prIDs) > 0 {
-				id = m.detail.prIDs[0]
-			}
-			if id != "" {
-				_ = clipboard.WriteAll(id)
-				m.notify = notification{message: "Copied: " + id, time: time.Now()}
-				return m, flashTimer()
-			}
-		}
-	case notifyMsg:
-		m.notify = notification{message: msg.message, isError: msg.isError, time: time.Now()}
-		return m, flashTimer()
-	case flashExpiredMsg:
-		return m, nil
-	}
 	return m, nil
 }
 

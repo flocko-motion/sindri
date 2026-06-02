@@ -191,6 +191,8 @@ func TestReplayGoldens(t *testing.T) {
 		"esc",                                     // cancel move
 		"up up a (capture list-approve-no-pr)",    // 13. cursor moves up to td-aaaaaa (open, no PR) — pressing 'a' surfaces the visible "no PR yet" notification
 		"up n (capture create-spec-linked)",       // 14. cursor moves up to the spec-only row (auth-refactor); pressing 'n' opens the create-task modal pre-linked to that spec
+		"esc",                                     // dismiss create modal, back on spec row
+		"x (capture abandon-spec-confirm)",        // 15. x on a spec-only row → abandon confirm (impact line in the bottom bar)
 	}, " ")
 	if err := Replay(script, SimpleFixture(), dir); err != nil {
 		t.Fatalf("replay: %v", err)
@@ -204,6 +206,7 @@ func TestReplayGoldens(t *testing.T) {
 		"list-move-active",
 		"list-approve-no-pr",
 		"create-spec-linked",
+		"abandon-spec-confirm",
 	} {
 		AssertGolden(t, dir, name)
 	}

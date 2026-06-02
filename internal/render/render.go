@@ -88,6 +88,14 @@ func IssueStatus(iss issue.Issue) string {
 		}
 		return dim.Render("spec")
 	}
+	if iss.SpecOrphan() && !iss.IsClosed() {
+		// Task still open but its spec is archived or gone — surface the drift
+		// instead of pretending it's a regular row. Same red-bold style as
+		// the orphan-worker warning so the eye treats both as "needs fixing".
+		// Closed tasks are the steady state; suppressing the warning there
+		// keeps the closed history quiet.
+		return orphaned.Render("⚠ spec archived")
+	}
 	if iss.Worker != "" {
 		return Worker(iss.Worker)
 	}

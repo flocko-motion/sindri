@@ -97,9 +97,18 @@ func (m Model) viewList() string {
 	col := renderColumn(header, m.vpList.View(), scrollStatus, m.width, contentHeight, true)
 
 	var bottomBar string
-	if m.pickingStatus {
+	switch {
+	case m.pickingStatus:
 		bottomBar = lipgloss.NewStyle().PaddingLeft(1).Render(renderStatusPicker(m.statusOptions, m.statusCursor))
-	} else {
+	case m.confirmAction != "":
+		confirmStyle := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(lipgloss.Color("#FF6600")).
+			PaddingLeft(1).
+			PaddingRight(1)
+		bottomBar = confirmStyle.Width(m.width).Render(m.confirmLabel)
+	default:
 		bottomBar = m.notify.render(m.width)
 	}
 	return titleBar + "\n" + col + "\n" + bottomBar

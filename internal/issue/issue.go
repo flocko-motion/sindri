@@ -144,6 +144,19 @@ func (i Issue) HasSpec() bool { return i.Spec != nil }
 // SpecOnly reports whether this is a spec with no task yet.
 func (i Issue) SpecOnly() bool { return i.Task == nil && i.Spec != nil }
 
+// SpecOrphan reports whether the task carries a spec:<name> label but the
+// linked spec is no longer an active proposal (archived or deleted). It's a
+// state that shouldn't normally happen — auto-archive runs only when the
+// last task closes, and abandon closes the linked tasks first — but it can
+// arise when someone archives via the openspec CLI directly. The work list
+// surfaces it as a warning so the user can fix the drift.
+func (i Issue) SpecOrphan() bool {
+	if i.Task == nil || i.Spec != nil {
+		return false
+	}
+	return i.Task.SpecName() != ""
+}
+
 // ID is the task ID (td-xxxxxx), or a synthetic os-xxxxxx id derived from the
 // spec name for a spec-only issue (so every row has a td-/os- style ID).
 func (i Issue) ID() string {
