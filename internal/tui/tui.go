@@ -63,6 +63,11 @@ type Model struct {
 	statusOptions []string
 	statusCursor  int
 
+	// loaded is false until the first refreshMsg has applied. Views consult
+	// it to render a "Loading…" placeholder instead of the empty-state line
+	// during the startup window before any data has landed.
+	loaded bool
+
 	notify notification
 }
 
@@ -98,6 +103,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rebuildBacklog()
 		m.clampCursors()
 		m.syncListScroll()
+		m.loaded = true
 		if m.showDetail && m.detail.taskID != "" {
 			for _, iss := range m.issues {
 				if iss.ID() == m.detail.taskID {
@@ -564,10 +570,10 @@ func (m Model) viewList() string {
 	switch m.leftView {
 	case viewBacklog:
 		header = "Tasks"
-		listContent = renderBacklogList(m.backlogRows, m.listCursor, true)
+		listContent = renderBacklogList(m.backlogRows, m.listCursor, true, m.loaded)
 	case viewWorkers:
 		header = "Workers"
-		listContent = renderWorkersList(m.workers, m.workerCursor, true)
+		listContent = renderWorkersList(m.workers, m.workerCursor, true, m.loaded)
 	}
 	m.vpList.SetContent(strings.TrimRight(listContent, "\n"))
 

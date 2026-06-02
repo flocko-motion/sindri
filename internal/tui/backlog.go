@@ -55,7 +55,7 @@ func buildBacklogRows(issues []issue.Issue) []backlogRow {
 	return rows
 }
 
-func renderBacklogList(rows []backlogRow, cursor int, active bool) string {
+func renderBacklogList(rows []backlogRow, cursor int, active, loaded bool) string {
 	var b strings.Builder
 	for i, row := range rows {
 		if active && i == cursor {
@@ -66,7 +66,11 @@ func renderBacklogList(rows []backlogRow, cursor int, active bool) string {
 		b.WriteByte('\n')
 	}
 	if len(rows) == 0 {
-		b.WriteString(dimStyle.Render("  No tasks or PRs"))
+		if !loaded {
+			b.WriteString(dimStyle.Render("  Loading tasks…"))
+		} else {
+			b.WriteString(dimStyle.Render("  No tasks or PRs"))
+		}
 		b.WriteByte('\n')
 	}
 	return b.String()

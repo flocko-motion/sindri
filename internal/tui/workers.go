@@ -20,10 +20,14 @@ func dash(s string) string {
 	return s
 }
 
-func renderWorkersList(workers []worker.Worker, cursor int, active bool) string {
+func renderWorkersList(workers []worker.Worker, cursor int, active, loaded bool) string {
 	var b strings.Builder
 	if len(workers) == 0 {
-		b.WriteString(dimStyle.Render("  No workers"))
+		if !loaded {
+			b.WriteString(dimStyle.Render("  Loading workers…"))
+		} else {
+			b.WriteString(dimStyle.Render("  No workers"))
+		}
 		b.WriteByte('\n')
 		return b.String()
 	}

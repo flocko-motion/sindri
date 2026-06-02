@@ -108,6 +108,22 @@ func TestReplay_BasicListAndFilter(t *testing.T) {
 	}
 }
 
+// TestReplayGoldens_LoadingState captures the startup window before any
+// refresh has applied. The fixture has empty Issues and Workers and the
+// engine respects LoadingState=true by leaving m.loaded at false, so both
+// panels render their "Loading…" placeholders instead of the empty-state
+// "No tasks" / "No workers" text.
+func TestReplayGoldens_LoadingState(t *testing.T) {
+	dir := t.TempDir()
+	fx := Fixture{Width: 100, Height: 30, LoadingState: true}
+	script := "(capture list-loading) W (capture workers-loading)"
+	if err := Replay(script, fx, dir); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	AssertGolden(t, dir, "list-loading")
+	AssertGolden(t, dir, "workers-loading")
+}
+
 // TestReplay_UnknownToken proves bad scripts fail with the offending name.
 func TestReplay_UnknownToken(t *testing.T) {
 	err := Replay("(frobnicate)", SimpleFixture(), t.TempDir())

@@ -35,6 +35,11 @@ type Fixture struct {
 	// real td. A missing key returns the empty string (section omitted).
 	Descriptions map[string]string
 	Comments     map[string]string
+
+	// LoadingState, when true, leaves the Model's loaded flag at false so the
+	// startup "Loading…" placeholder can be captured. By default the engine
+	// marks the model loaded once the fixture is applied.
+	LoadingState bool
 }
 
 // Replay drives the TUI Model headlessly through a key-sequence script, writing
@@ -76,6 +81,9 @@ func Replay(script string, fx Fixture, captureDir string) error {
 	m.issues = append([]issue.Issue(nil), fx.Issues...)
 	m.workers = append([]worker.Worker(nil), fx.Workers...)
 	m.rebuildBacklog()
+	if !fx.LoadingState {
+		m.loaded = true // mirror the refreshMsg handler so existing goldens see "loaded" state
+	}
 
 	tokens, err := parseScript(script)
 	if err != nil {
