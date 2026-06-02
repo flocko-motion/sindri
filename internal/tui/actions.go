@@ -140,6 +140,43 @@ func statusOptions() []string {
 	return []string{"open", "in_progress", "in_review", "blocked", "closed"}
 }
 
+// statusAtCursor returns the (taskID, status) of the task at the backlog
+// cursor; empty strings when the cursor is not on a task row (spec-only Issue,
+// PR sub-row, or a different left-view).
+func (m Model) statusAtCursor() (taskID, status string) {
+	if m.leftView != viewBacklog {
+		return "", ""
+	}
+	if m.listCursor < 0 || m.listCursor >= len(m.backlogRows) {
+		return "", ""
+	}
+	row := m.backlogRows[m.listCursor]
+	if row.isPR || row.issueIdx < 0 || row.issueIdx >= len(m.visibleIssues) {
+		return "", ""
+	}
+	iss := m.visibleIssues[row.issueIdx]
+	if iss.Task == nil {
+		return "", ""
+	}
+	return iss.Task.ID, iss.Task.Status
+}
+
+// openStatusPicker primes the status picker for the given task. setTaskStatus
+// reads m.detail.taskID, so we stash the id there too — that way the picker
+// works whether opened from the list view or the detail view.
+func (m *Model) openStatusPicker(taskID, currentStatus string) {
+	m.detail.taskID = taskID
+	m.detail.taskStatus = currentStatus
+	m.statusOptions = statusOptions()
+	m.statusCursor = 0
+	for i, opt := range m.statusOptions {
+		if opt == currentStatus {
+			m.statusCursor = i
+		}
+	}
+	m.pickingStatus = true
+}
+
 // renderStatusPicker draws the picker as a single-line pill row: the cursor
 // option is wrapped in brackets, the rest are separated by middle dots.
 func renderStatusPicker(opts []string, cursor int) string {

@@ -117,6 +117,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// The status picker is a global modal that overlays whatever view is
+	// active, so its input dispatch must run before the per-view handlers
+	// below — otherwise s pressed in the list view would be silently ignored.
+	if m.pickingStatus {
+		return m.updateStatusPick(msg)
+	}
+
 	if m.showCreateModal {
 		return m.updateModal(msg)
 	}
@@ -173,6 +180,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.notify = notification{message: "Filter: " + filterName(m.filter), time: time.Now()}
 				return m, flashTimer()
 			}
+		case key.Matches(msg, keys.Status):
+			taskID, status := m.statusAtCursor()
+			if taskID == "" {
+				m.notify = notification{message: "Status: pick a task row first (cursor isn't on a task)", isError: true, time: time.Now()}
+				return m, flashTimer()
+			}
+			m.openStatusPicker(taskID, status)
+			return m, nil
 		case key.Matches(msg, keys.Refresh):
 			return m, refreshDataManual(m.projectRoot)
 		}
@@ -253,17 +268,12 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, textinput.Blink
 			}
 		case key.Matches(msg, keys.Status):
-			if m.detail.kind == detailTask {
-				m.statusOptions = statusOptions()
-				m.statusCursor = 0
-				for i, opt := range m.statusOptions {
-					if opt == m.detail.taskStatus {
-						m.statusCursor = i
-					}
-				}
-				m.pickingStatus = true
-				return m, nil
+			if m.detail.kind != detailTask {
+				m.notify = notification{message: "Status: only applies to tasks", isError: true, time: time.Now()}
+				return m, flashTimer()
 			}
+			m.openStatusPicker(m.detail.taskID, m.detail.taskStatus)
+			return m, nil
 		case key.Matches(msg, keys.Approve):
 			if len(m.detail.prIDs) > 0 {
 				return m, m.approvePR()
@@ -569,8 +579,13 @@ func (m Model) viewList() string {
 
 	col := renderColumn(header, m.vpList.View(), scrollStatus, m.width, contentHeight, true)
 
-	notifyBar := m.notify.render(m.width)
-	return titleBar + "\n" + col + "\n" + notifyBar
+	var bottomBar string
+	if m.pickingStatus {
+		bottomBar = lipgloss.NewStyle().PaddingLeft(1).Render(renderStatusPicker(m.statusOptions, m.statusCursor))
+	} else {
+		bottomBar = m.notify.render(m.width)
+	}
+	return titleBar + "\n" + col + "\n" + bottomBar
 }
 
 func (m Model) viewDetail() string {

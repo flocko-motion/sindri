@@ -1,0 +1,30 @@
+ Sindri — AI Agent Orchestrator[T]asks  [W]orkers  j/k:nav  enter:open  y:copy  n:new  r:refresh  q:quit
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  Tasks                                                                                           │
+│                                                                                                  │
+│   os-17cb5f     📋 spec 0/3  (no task — needs planning)                                          │
+│   td-aaaaaa P1  26-05-28 10:00  open  fix login redirect                                         │
+│       ☐ review code                                                                              │
+│ > td-bbbbbb P2  26-05-28 12:00  in_progress  📋 csv-export · add CSV export                      │
+│       └ pr-td-bbbbbb [open]                                                                      │
+│       ☑ review code                                                                              │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ Status: open · [in_progress] · in_review · blocked · closed   (←/→ pick, enter apply, esc cancel)

@@ -155,6 +155,9 @@ func TestReplayGoldens(t *testing.T) {
 		"esc",
 		"s (capture status-pick)",                 // 9. status picker (cursor on current = in_progress)
 		"right (capture status-pick-moved)",       // 10. picker after one right-arrow (cursor on in_review)
+		"esc",                                     // close picker, still in detail
+		"esc",                                     // close detail, back to list (cursor at row 3 = in_progress)
+		"s (capture status-pick-from-list)",       // 11. picker opened from the LIST view
 		"esc",
 	}, " ")
 	if err := Replay(script, SimpleFixture(), dir); err != nil {
@@ -165,7 +168,7 @@ func TestReplayGoldens(t *testing.T) {
 		"detail-task", "detail-spec",
 		"workers",
 		"merge-confirm", "reject-reason",
-		"status-pick", "status-pick-moved",
+		"status-pick", "status-pick-moved", "status-pick-from-list",
 	} {
 		AssertGolden(t, dir, name)
 	}
