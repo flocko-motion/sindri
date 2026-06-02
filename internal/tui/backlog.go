@@ -65,7 +65,7 @@ func (m Model) viewList() string {
 	} else {
 		viewSelector = inactiveView.Render("[T]asks") + "  " + activeView.Render("[W]orkers")
 	}
-	help := dimStyle.Render("j/k:nav  enter:open  y:copy  n:new  r:refresh  q:quit")
+	help := dimStyle.Render("j/k:nav  enter:open  y:copy  n:new  e:edit  r:refresh  q:quit")
 	rightSide := viewSelector + "  " + help
 
 	titleBar := lipgloss.JoinHorizontal(lipgloss.Top,
