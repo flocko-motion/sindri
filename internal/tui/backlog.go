@@ -20,6 +20,11 @@ import (
 // overflow rather than truncate.
 const typeColCells = 6
 
+// statusColCells is the visual-cell width of the status column. Wide enough
+// for "⚠ in_progress" (14 cells) or "🔨 some-dwarf-name"; longer values overflow
+// into the title rather than truncate.
+const statusColCells = 16
+
 // typePrefix returns the leftmost-column content for an Issue: depth indent +
 // arrow on non-root rows, followed by the type icon. Spec-only rows (no Task)
 // have no icon and produce an empty content string; padCell turns that into
@@ -73,13 +78,14 @@ func buildBacklogRows(issues []issue.Issue) []backlogRow {
 		}
 		plain := fmt.Sprintf("%s %-9s %s  %s  %s  %s",
 			typeCell,
-			iss.ID(), iss.Priority(), tsStr, iss.Status(), iss.Title())
+			iss.ID(), iss.Priority(), tsStr,
+			padCell(iss.Status(), statusColCells), iss.Title())
 		line := fmt.Sprintf("%s %s %s  %s  %s  %s",
 			typeCell,
 			dimStyle.Render(fmt.Sprintf("%-9s", iss.ID())),
 			dimStyle.Render(iss.Priority()),
 			dimStyle.Render(tsStr),
-			render.IssueStatus(iss),
+			padCell(render.IssueStatus(iss), statusColCells),
 			title,
 		)
 		rows = append(rows, backlogRow{issueIdx: ii, display: line, plain: plain})
