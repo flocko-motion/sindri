@@ -158,29 +158,30 @@ func runTaskList(cmd *cobra.Command, args []string, showAll, showOpen, showClose
 		if !iss.UpdatedAt().IsZero() {
 			updated = iss.UpdatedAt().Local().Format("06-01-02 15:04")
 		}
-		id := iss.ID()
-		title := iss.Title()
+		// Type column carries the depth indent and the type glyph; every
+		// column after stays aligned regardless of depth.
+		typeCell := ""
+		if iss.Depth > 0 {
+			typeCell = strings.Repeat("  ", iss.Depth-1) + "↳ "
+		}
 		if t := iss.Task; t != nil {
 			if icon := render.TaskTypeIcon(t.Type); icon != "" {
-				title = icon + " " + title
+				typeCell += icon
 			}
 		}
-		if iss.Depth > 0 {
-			id = strings.Repeat("  ", iss.Depth) + "↳ " + id
-		}
-		rows = append(rows, []string{id, iss.Priority(), updated, render.IssueStatus(iss), title})
+		rows = append(rows, []string{typeCell, iss.ID(), iss.Priority(), updated, render.IssueStatus(iss), iss.Title()})
 
 		for _, pr := range iss.PRs {
-			rows = append(rows, []string{"", "", "", "", "  └ " + pr.ID + " [" + render.PRStatus(pr.Status, iss.IsClosed()) + "]"})
+			rows = append(rows, []string{"", "", "", "", "", "  └ " + pr.ID + " [" + render.PRStatus(pr.Status, iss.IsClosed()) + "]"})
 		}
 
 		if gates := render.Gates(iss.Gates()); gates != "" {
-			rows = append(rows, []string{"", "", "", "", "  " + gates})
+			rows = append(rows, []string{"", "", "", "", "", "  " + gates})
 		}
 	}
 
 	tbl := table.New().
-		Headers("ID", "PRIO", "UPDATED", "STATUS", "TITLE").
+		Headers("TYPE", "ID", "PRIO", "UPDATED", "STATUS", "TITLE").
 		Rows(rows...).
 		BorderStyle(dim).
 		StyleFunc(func(row, col int) lipgloss.Style {
