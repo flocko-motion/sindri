@@ -94,6 +94,24 @@ func IssueStatus(iss issue.Issue) string {
 	return TaskStatus(iss.Task.Status)
 }
 
+// TaskTypeIcon returns the canonical glyph for a td task type — 🐛 bug,
+// ✨ feature, 🧹 chore, 📦 epic. Plain "task" has no glyph (empty string), so
+// most rows stay visually quiet.
+func TaskTypeIcon(typ string) string {
+	switch typ {
+	case "bug":
+		return "🐛"
+	case "feature":
+		return "✨"
+	case "chore":
+		return "🧹"
+	case "epic":
+		return "📦"
+	default:
+		return ""
+	}
+}
+
 // Gates renders review gates as "☑ name" / "☐ name", space-separated.
 // Returns "" when there are no gates.
 func Gates(gates []issue.Gate) string {

@@ -26,6 +26,8 @@ func List(projectRoot string) ([]issue.Issue, error) {
 	if err != nil {
 		return nil, err
 	}
+	// td list strips parent_id; per-task show fills it in (~5ms each).
+	td.Enrich(projectRoot, tasks)
 
 	specs := specsFor(projectRoot)
 	workerByTask := workerAssignments(projectRoot)

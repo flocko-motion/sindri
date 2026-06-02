@@ -9,6 +9,7 @@ package td
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -114,6 +115,7 @@ type rawTask struct {
 	Status    string   `json:"status"`
 	Type      string   `json:"type"`
 	Priority  string   `json:"priority"`
+	ParentID  string   `json:"parent_id"`
 	Labels    []string `json:"labels"`
 	CreatedAt string   `json:"created_at"`
 	UpdatedAt string   `json:"updated_at"`
@@ -124,7 +126,29 @@ func (r rawTask) toTask() issue.Task {
 	updated, _ := time.Parse(time.RFC3339Nano, r.UpdatedAt)
 	return issue.Task{
 		ID: r.ID, Title: r.Title, Status: r.Status, Type: r.Type,
-		Priority: r.Priority, Labels: r.Labels, CreatedAt: created, UpdatedAt: updated,
+		Priority: r.Priority, ParentID: r.ParentID,
+		Labels: r.Labels, CreatedAt: created, UpdatedAt: updated,
+	}
+}
+
+// Enrich populates fields td list strips out (currently: ParentID) by calling
+// `td show <id> --json` per task. Each call is ~5ms, so a 50-task board adds
+// roughly 0.25s to the refresh. Per-task failures are logged to stderr and
+// skipped — partial enrichment is better than a hard refresh failure, and the
+// warning keeps the problem visible per "never fail silently".
+func Enrich(root string, tasks []issue.Task) {
+	for i := range tasks {
+		out, err := run(root, "show", tasks[i].ID, "--json")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: td enrich %s: %v\n", tasks[i].ID, err)
+			continue
+		}
+		var r rawTask
+		if err := json.Unmarshal([]byte(out), &r); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: td enrich %s: parse: %v\n", tasks[i].ID, err)
+			continue
+		}
+		tasks[i].ParentID = r.ParentID
 	}
 }
 

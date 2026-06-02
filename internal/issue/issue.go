@@ -33,6 +33,7 @@ type Task struct {
 	Status    string
 	Type      string
 	Priority  string
+	ParentID  string // populated by td.Enrich; "" when task is a root or unknown
 	Labels    []string
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -131,6 +132,7 @@ type Issue struct {
 	Spec   *Spec
 	Worker string // assigned worker name, "" if none
 	PRs    []PR
+	Depth  int // hierarchy depth — 0 for roots, +1 per parent step (set by Assemble)
 }
 
 // HasTask reports whether the issue has a td task.
@@ -247,7 +249,58 @@ func Assemble(tasks []Task, specs []Spec, workerByTask map[string]string, prsByT
 			issues = append(issues, Issue{Spec: &specs[i]})
 		}
 	}
-	return append(issues, withTask...)
+	issues = append(issues, withTask...)
+	return ArrangeHierarchy(issues)
+}
+
+// ArrangeHierarchy reorders issues so each task with a known parent appears
+// immediately after its parent, in depth-first order, and stamps Depth onto
+// each Issue. Spec-only Issues and orphans (parent not present in the slice)
+// are treated as roots and keep their original relative order.
+func ArrangeHierarchy(issues []Issue) []Issue {
+	// Build by-id index over the issues with tasks; gather children per parent.
+	byTask := make(map[string]int, len(issues))
+	for i, iss := range issues {
+		if iss.Task != nil {
+			byTask[iss.Task.ID] = i
+		}
+	}
+	childrenOf := map[string][]int{}
+	isChild := make(map[int]bool, len(issues))
+	for i, iss := range issues {
+		if iss.Task == nil {
+			continue
+		}
+		pid := iss.Task.ParentID
+		if pid == "" {
+			continue
+		}
+		if _, ok := byTask[pid]; !ok {
+			continue // parent not in current view: treat as root
+		}
+		childrenOf[pid] = append(childrenOf[pid], i)
+		isChild[i] = true
+	}
+	// Walk roots in their original order, depth-first into children.
+	out := make([]Issue, 0, len(issues))
+	var emit func(i, depth int)
+	emit = func(i, depth int) {
+		iss := issues[i]
+		iss.Depth = depth
+		out = append(out, iss)
+		if iss.Task == nil {
+			return
+		}
+		for _, c := range childrenOf[iss.Task.ID] {
+			emit(c, depth+1)
+		}
+	}
+	for i := range issues {
+		if !isChild[i] {
+			emit(i, 0)
+		}
+	}
+	return out
 }
 
 // Filter selects which Issues a view shows. It is UI-neutral so every interface

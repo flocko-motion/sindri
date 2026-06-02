@@ -78,7 +78,10 @@ func Replay(script string, fx Fixture, captureDir string) error {
 	}
 	m.width, m.height = fx.Width, fx.Height
 	m.resizeViewports()
-	m.issues = append([]issue.Issue(nil), fx.Issues...)
+	// Run the fixture's Issues through the production hierarchy arranger so
+	// fixtures only need to set ParentID; ordering + Depth stamping is shared
+	// with board.List.
+	m.issues = issue.ArrangeHierarchy(append([]issue.Issue(nil), fx.Issues...))
 	m.workers = append([]worker.Worker(nil), fx.Workers...)
 	m.rebuildBacklog()
 	if !fx.LoadingState {

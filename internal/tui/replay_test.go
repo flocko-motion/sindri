@@ -108,6 +108,18 @@ func TestReplay_BasicListAndFilter(t *testing.T) {
 	}
 }
 
+// TestReplayGoldens_Mock captures the work list against MockFixture, which has
+// mixed task types (bug / feature / chore / epic / task) and an epic with two
+// children — exercising the type-indicator and hierarchy requirements added
+// by enrich-work-list-display.
+func TestReplayGoldens_Mock(t *testing.T) {
+	dir := t.TempDir()
+	if err := Replay("(capture list-mock)", MockFixture(), dir); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	AssertGolden(t, dir, "list-mock")
+}
+
 // TestReplayGoldens_LoadingState captures the startup window before any
 // refresh has applied. The fixture has empty Issues and Workers and the
 // engine respects LoadingState=true by leaving m.loaded at false, so both

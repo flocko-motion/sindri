@@ -158,7 +158,17 @@ func runTaskList(cmd *cobra.Command, args []string, showAll, showOpen, showClose
 		if !iss.UpdatedAt().IsZero() {
 			updated = iss.UpdatedAt().Local().Format("06-01-02 15:04")
 		}
-		rows = append(rows, []string{iss.ID(), iss.Priority(), updated, render.IssueStatus(iss), iss.Title()})
+		id := iss.ID()
+		title := iss.Title()
+		if t := iss.Task; t != nil {
+			if icon := render.TaskTypeIcon(t.Type); icon != "" {
+				title = icon + " " + title
+			}
+		}
+		if iss.Depth > 0 {
+			id = strings.Repeat("  ", iss.Depth) + "↳ " + id
+		}
+		rows = append(rows, []string{id, iss.Priority(), updated, render.IssueStatus(iss), title})
 
 		for _, pr := range iss.PRs {
 			rows = append(rows, []string{"", "", "", "", "  └ " + pr.ID + " [" + render.PRStatus(pr.Status, iss.IsClosed()) + "]"})

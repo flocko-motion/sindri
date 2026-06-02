@@ -96,3 +96,50 @@ func SimpleFixture() Fixture {
 		},
 	}
 }
+
+// MockFixture returns a richer board covering the layout add-tui-replay-capture
+// can't show: mixed task types (bug / feature / chore / epic) and a parent-child
+// hierarchy under an epic. Used by the list-mock golden so the work-list spec's
+// type-indicator and indentation requirements are exercised end to end.
+//
+//deadcode:keep
+func MockFixture() Fixture {
+	t0 := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+
+	bug := &issue.Task{
+		ID: "td-aaaaaa", Title: "fix login redirect",
+		Status: "open", Type: "bug", Priority: "P1",
+		CreatedAt: t0.Add(-3 * time.Hour), UpdatedAt: t0.Add(-2 * time.Hour),
+	}
+	epic := &issue.Task{
+		ID: "td-eeeeee", Title: "v2 auth overhaul",
+		Status: "open", Type: "epic", Priority: "P1",
+		CreatedAt: t0.Add(-72 * time.Hour), UpdatedAt: t0.Add(-6 * time.Hour),
+	}
+	feat := &issue.Task{
+		ID: "td-ff1111", Title: "OAuth login provider",
+		Status: "in_progress", Type: "feature", Priority: "P2",
+		ParentID:  "td-eeeeee",
+		CreatedAt: t0.Add(-24 * time.Hour), UpdatedAt: t0.Add(-1 * time.Hour),
+	}
+	chore := &issue.Task{
+		ID: "td-ff2222", Title: "rotate session secret",
+		Status: "open", Type: "chore", Priority: "P3",
+		ParentID:  "td-eeeeee",
+		CreatedAt: t0.Add(-12 * time.Hour), UpdatedAt: t0.Add(-5 * time.Hour),
+	}
+	plain := &issue.Task{
+		ID: "td-ff3333", Title: "audit log retention",
+		Status: "open", Type: "task", Priority: "P2",
+		CreatedAt: t0.Add(-8 * time.Hour), UpdatedAt: t0.Add(-30 * time.Minute),
+	}
+
+	issues := []issue.Issue{
+		{Task: bug},
+		{Task: epic},
+		{Task: feat},
+		{Task: chore},
+		{Task: plain},
+	}
+	return Fixture{Issues: issues, Width: 110, Height: 30}
+}
