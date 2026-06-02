@@ -80,10 +80,13 @@ func PRStatus(status string, taskClosed bool) string {
 // task status — colored by state.
 func IssueStatus(iss issue.Issue) string {
 	if iss.SpecOnly() {
+		// The 📄 glyph lives in the type column (see typePrefix); the status
+		// column carries only the textual state so spec rows and task rows
+		// line up cleanly.
 		if done, total, _ := iss.SpecProgress(); total > 0 {
-			return dim.Render(fmt.Sprintf("📄 spec %d/%d", done, total))
+			return dim.Render(fmt.Sprintf("spec %d/%d", done, total))
 		}
-		return dim.Render("📄 spec")
+		return dim.Render("spec")
 	}
 	if iss.Worker != "" {
 		return Worker(iss.Worker)
@@ -92,6 +95,26 @@ func IssueStatus(iss issue.Issue) string {
 		return Orphaned()
 	}
 	return TaskStatus(iss.Task.Status)
+}
+
+// TypeColumn returns the leftmost-column content for an Issue, shared by every
+// interface that lays out the work list. Tasks render their type glyph (🪲 bug,
+// 🔧 feature, …); spec-only rows render 📄 — the spec marker belongs in the
+// type column, not in the status column. Children are prefixed with depth
+// indent + "↳ " so the column also visualises the hierarchy.
+func TypeColumn(iss issue.Issue) string {
+	var b strings.Builder
+	if iss.Depth > 0 {
+		b.WriteString(strings.Repeat("  ", iss.Depth-1))
+		b.WriteString("↳ ")
+	}
+	switch {
+	case iss.Task != nil:
+		b.WriteString(TaskTypeIcon(iss.Task.Type))
+	case iss.SpecOnly():
+		b.WriteString("📄")
+	}
+	return b.String()
 }
 
 // TaskTypeIcon returns the canonical 2-cell glyph for a td task type:

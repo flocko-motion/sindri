@@ -2,7 +2,7 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │  Tasks                                                                                           │
 │                                                                                                  │
-│          os-17cb5f                     📄 spec 0/3       (no task — needs planning)              │
+│   📄     os-17cb5f                     spec 0/3          (no task — needs planning)              │
 │ > 🪲     td-aaaaaa P1  26-05-28 10:00  open              fix login redirect                      │
 │       ☐ review code                                                                              │
 │   🔧     td-bbbbbb P2  26-05-28 12:00  🔨 brokkr         📄 csv-export · add CSV export          │

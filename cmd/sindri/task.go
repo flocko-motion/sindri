@@ -162,18 +162,7 @@ func runTaskList(cmd *cobra.Command, args []string, showAll, showOpen, showClose
 		if !iss.UpdatedAt().IsZero() {
 			updated = iss.UpdatedAt().Local().Format("06-01-02 15:04")
 		}
-		// Type column carries the depth indent and the type glyph; every
-		// column after stays aligned regardless of depth.
-		typeCell := ""
-		if iss.Depth > 0 {
-			typeCell = strings.Repeat("  ", iss.Depth-1) + "↳ "
-		}
-		if t := iss.Task; t != nil {
-			if icon := render.TaskTypeIcon(t.Type); icon != "" {
-				typeCell += icon
-			}
-		}
-		rows = append(rows, []string{typeCell, iss.ID(), iss.Priority(), updated, render.IssueStatus(iss), iss.Title()})
+		rows = append(rows, []string{render.TypeColumn(iss), iss.ID(), iss.Priority(), updated, render.IssueStatus(iss), iss.Title()})
 
 		for _, pr := range iss.PRs {
 			rows = append(rows, []string{"", "", "", "", "", "  └ " + pr.ID + " [" + render.PRStatus(pr.Status, iss.IsClosed()) + "]"})

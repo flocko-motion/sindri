@@ -34,21 +34,10 @@ const (
 	tsColCells   = 14
 )
 
-// typePrefix returns the leftmost-column content for an Issue: depth indent +
-// arrow on non-root rows, followed by the type icon. Spec-only rows (no Task)
-// have no icon and produce an empty content string; padCell turns that into
-// pure space so the next column stays aligned.
-func typePrefix(iss issue.Issue) string {
-	var b strings.Builder
-	if iss.Depth > 0 {
-		b.WriteString(strings.Repeat("  ", iss.Depth-1))
-		b.WriteString("↳ ")
-	}
-	if t := iss.Task; t != nil {
-		b.WriteString(render.TaskTypeIcon(t.Type))
-	}
-	return b.String()
-}
+// typePrefix is a thin wrapper around render.TypeColumn so the work-list code
+// reads naturally; the actual layout lives in render so the CLI table and
+// TUI list stay identical (per the "identical across interfaces" rule).
+func typePrefix(iss issue.Issue) string { return render.TypeColumn(iss) }
 
 // padCell appends trailing spaces so s reaches n *visual* cells. The %-Ns verb
 // in fmt counts bytes, not cells, which mis-aligns the column whenever an
