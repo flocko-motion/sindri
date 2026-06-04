@@ -1,29 +1,29 @@
                                                                                                     
                                                                                                     
                                                                                                     
-                                                                                                    
-                                                                                                    
-                                                                                                    
-                   ╭────────────────────────────────────────────────────────────╮                   
-                   │                                                            │                   
-                   │  Edit Task — td-aaaaaa                                     │                   
-                   │                                                            │                   
-                   │  > Title: > fix login redirect                             │                   
-                   │                                                            │                   
-                   │    Type:   task  [bug]  feature   chore                    │                   
-                   │                                                            │                   
-                   │    Prio:   P0  [P1]  P2   P3   P4                          │                   
-                   │                                                            │                   
-                   │    Review: ☑ code review                                   │                   
-                   │                                                            │                   
-                   │    Desc:  > Description — leave empty to keep current      │                   
-                   │                                                            │                   
-                   │    tab:next field  h/l:select  enter:create  esc:cancel    │                   
-                   │                                                            │                   
-                   ╰────────────────────────────────────────────────────────────╯                   
-                                                                                                    
-                                                                                                    
-                                                                                                    
+         ╭────────────────────────────────────────────────────────────────────────────────╮         
+         │                                                                                │         
+         │  Edit Task — td-aaaaaa                                                         │         
+         │                                                                                │         
+         │  > Title: > fix login redirect                                                 │         
+         │                                                                                │         
+         │    Type:   task  [bug]  feature   chore                                        │         
+         │                                                                                │         
+         │    Prio:   P0  [P1]  P2   P3   P4                                              │         
+         │                                                                                │         
+         │    Review: ☑ code review                                                       │         
+         │                                                                                │         
+         │    Desc:                                                                       │         
+         │  ┃ Description — leave empty to keep current. ctrl+s submits.                  │         
+         │  ┃                                                                             │         
+         │  ┃                                                                             │         
+         │  ┃                                                                             │         
+         │  ┃                                                                             │         
+         │                                                                                │         
+         │    tab:next field  h/l:select  enter:create (in description: newline)          │         
+         │  ctrl+s:submit  esc:cancel                                                     │         
+         │                                                                                │         
+         ╰────────────────────────────────────────────────────────────────────────────────╯         
                                                                                                     
                                                                                                     
                                                                                                     

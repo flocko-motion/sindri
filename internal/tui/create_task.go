@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -34,7 +35,7 @@ const (
 
 type createTaskModel struct {
 	titleInput    textinput.Model
-	descInput     textinput.Model
+	descInput     textarea.Model
 	typeIdx       int
 	prioIdx       int
 	reviewChecked bool
@@ -59,27 +60,13 @@ type taskUpdatedMsg struct {
 }
 
 func newCreateTaskModel(projectRoot, specName string) createTaskModel {
-	// Fits the 60-wide modal minus border/padding (4) and the "  Title: "/
-	// "  Desc:  " labels (9). Without an explicit Width, textinput truncates
-	// the placeholder to one character — the user saw a stray "T"/"D".
-	const inputWidth = 45
-
-	ti := textinput.New()
-	ti.Placeholder = "Task title (required)"
-	ti.Focus()
-	ti.CharLimit = 200
-	ti.Width = inputWidth
+	ti, di := newCreateTaskInputs("Description (optional) — enter inserts a newline, ctrl+s submits")
 	if specName != "" {
 		// Pre-fill the title from the spec's proposal H1 so the user starts
 		// from real wording instead of an empty field; spec.Title falls
 		// back to the slug when proposal.md is missing or has no heading.
 		ti.SetValue(spec.Title(projectRoot, specName))
 	}
-
-	di := textinput.New()
-	di.Placeholder = "Description (optional)"
-	di.CharLimit = 500
-	di.Width = inputWidth
 
 	return createTaskModel{
 		titleInput:    ti,
@@ -93,25 +80,41 @@ func newCreateTaskModel(projectRoot, specName string) createTaskModel {
 	}
 }
 
+// newCreateTaskInputs builds the shared title input + multi-line description
+// textarea. The textarea (vs the previous single-line textinput) means a
+// long description wraps and the user can hit enter to insert a paragraph
+// break — the old single-line input scrolled horizontally and "glitched
+// weirdly" once the text passed one row (cf. td-f21f94).
+func newCreateTaskInputs(descPlaceholder string) (textinput.Model, textarea.Model) {
+	// Fits the 80-wide modal minus border/padding (4) and the "  Title: "
+	// label (9). Without an explicit Width, textinput truncates the
+	// placeholder to one character — the user saw a stray "T".
+	const inputWidth = 65
+	const descRows = 5
+
+	ti := textinput.New()
+	ti.Placeholder = "Task title (required)"
+	ti.Focus()
+	ti.CharLimit = 200
+	ti.Width = inputWidth
+
+	di := textarea.New()
+	di.Placeholder = descPlaceholder
+	di.CharLimit = 4000
+	di.SetWidth(inputWidth + 2) // small buffer so wrapped lines have a column to spare
+	di.SetHeight(descRows)
+	di.ShowLineNumbers = false
+	return ti, di
+}
+
 // newEditTaskModel reuses the create-task modal in edit mode: same layout
 // and inputs, pre-populated from t, and submit dispatches td.Update instead
 // of td.Create. Other labels on the task (spec link, approved gates, etc.)
 // are preserved through origLabels so toggling Review never silently drops
 // them.
 func newEditTaskModel(projectRoot string, t issue.Task) createTaskModel {
-	const inputWidth = 45
-
-	ti := textinput.New()
-	ti.Placeholder = "Task title (required)"
+	ti, di := newCreateTaskInputs("Description — leave empty to keep current. ctrl+s submits.")
 	ti.SetValue(t.Title)
-	ti.Focus()
-	ti.CharLimit = 200
-	ti.Width = inputWidth
-
-	di := textinput.New()
-	di.Placeholder = "Description — leave empty to keep current"
-	di.CharLimit = 500
-	di.Width = inputWidth
 
 	return createTaskModel{
 		titleInput:    ti,
@@ -169,6 +172,8 @@ func (m createTaskModel) Update(msg tea.Msg) (createTaskModel, tea.Cmd) {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
 			m.submitted = false
 			return m, nil
+		case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+s"))):
+			return m.trySubmit()
 		case key.Matches(msg, key.NewBinding(key.WithKeys("tab"))):
 			m.activeField = (m.activeField + 1) % fieldCount
 			m.focusActive()
@@ -178,6 +183,11 @@ func (m createTaskModel) Update(msg tea.Msg) (createTaskModel, tea.Cmd) {
 			m.focusActive()
 			return m, nil
 		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+			// In the description textarea, enter inserts a newline — fall
+			// through to the bottom delegation so the textarea receives it.
+			if m.activeField == fieldDesc {
+				break
+			}
 			if m.activeField == fieldReview {
 				m.reviewChecked = !m.reviewChecked
 				return m, nil
@@ -190,19 +200,7 @@ func (m createTaskModel) Update(msg tea.Msg) (createTaskModel, tea.Cmd) {
 				}
 				return m, nil
 			}
-			title := strings.TrimSpace(m.titleInput.Value())
-			if title == "" {
-				m.err = fmt.Errorf("title is required")
-				return m, nil
-			}
-			// New tasks must clear the 15-char min so we don't get "fix" / "wip"
-			// titles. Editing skips the rule — existing tasks may have been
-			// created via the td CLI which doesn't enforce it.
-			if m.editingID == "" && len(title) < 15 {
-				m.err = fmt.Errorf("title too short (min 15 chars, got %d)", len(title))
-				return m, nil
-			}
-			return m, m.submit()
+			return m.trySubmit()
 		case key.Matches(msg, key.NewBinding(key.WithKeys("left", "h"))):
 			if m.activeField == fieldType {
 				m.typeIdx = (m.typeIdx + len(taskTypes) - 1) % len(taskTypes)
@@ -241,8 +239,29 @@ func (m *createTaskModel) focusActive() {
 	case fieldTitle:
 		m.titleInput.Focus()
 	case fieldDesc:
-		m.descInput.Focus()
+		// textarea.Focus returns a tea.Cmd (blink); we drop it here because
+		// the caller path (tab/shift+tab handler) returns nil anyway —
+		// dropping a blink Cmd just costs one missed blink frame.
+		_ = m.descInput.Focus()
 	}
+}
+
+// trySubmit runs the create/edit submission, but only after validating the
+// title — extracted so both enter (on the title field) and ctrl+s can use it.
+func (m createTaskModel) trySubmit() (createTaskModel, tea.Cmd) {
+	title := strings.TrimSpace(m.titleInput.Value())
+	if title == "" {
+		m.err = fmt.Errorf("title is required")
+		return m, nil
+	}
+	// New tasks must clear the 15-char min so we don't get "fix" / "wip"
+	// titles. Editing skips the rule — existing tasks may have been created
+	// via the td CLI which doesn't enforce it.
+	if m.editingID == "" && len(title) < 15 {
+		m.err = fmt.Errorf("title too short (min 15 chars, got %d)", len(title))
+		return m, nil
+	}
+	return m, m.submit()
 }
 
 func (m createTaskModel) submit() tea.Cmd {
@@ -291,7 +310,7 @@ func (m createTaskModel) submit() tea.Cmd {
 }
 
 func (m createTaskModel) View(width, height int) string {
-	modalW := 60
+	modalW := 80
 	if modalW > width-4 {
 		modalW = width - 4
 	}
@@ -358,12 +377,17 @@ func (m createTaskModel) View(width, height int) string {
 	b.WriteString(label + " " + checkbox)
 	b.WriteString("\n\n")
 
-	// Description
-	label = "  Desc:  "
+	// Description: label on its own line so the multi-line textarea's
+	// wrapped/continuation rows all start at the same column (the column
+	// just after the "  " indent), rather than the second row landing
+	// under "Desc:  " and the first row landing under the textarea's own
+	// cursor gutter.
+	label = "  Desc:"
 	if m.activeField == fieldDesc {
-		label = "> Desc:  "
+		label = "> Desc:"
 	}
 	b.WriteString(label)
+	b.WriteString("\n")
 	b.WriteString(m.descInput.View())
 	b.WriteString("\n\n")
 
@@ -372,7 +396,7 @@ func (m createTaskModel) View(width, height int) string {
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString(dimStyle.Render("  tab:next field  h/l:select  enter:create  esc:cancel"))
+	b.WriteString(dimStyle.Render("  tab:next field  h/l:select  enter:create (in description: newline)  ctrl+s:submit  esc:cancel"))
 
 	modal := modalStyle.Render(b.String())
 
