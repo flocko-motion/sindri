@@ -1,8 +1,7 @@
- Sindri — AI Agent Orchestrator                                                   [T]asks  [W]orkers
+ Sindri — AI Agent Orchestrator                                                                     
 j/k:nav enter:open · y:copy n:new e:edit a:approve x:reject s:status m:move c:comment · f:filter r:refresh q:quit
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  Tasks                                                                                           │
-│                                                                                                  │
+│  [T]asks  [W]orkers                                                                              │
 │ > 📄     os-17cb5f                     spec              (no task — needs planning)              │
 │   🪲     td-aaaaaa P1  26-05-28 10:00  open              fix login redirect                      │
 │       ☐ review code                                                                              │
@@ -10,6 +9,7 @@ j/k:nav enter:open · y:copy n:new e:edit a:approve x:reject s:status m:move c:c
 │       └ pr-td-bbbbbb [open]                                                                      │
 │       ☑ review code                                                                              │
 │   🧹     td-cccccc P3  26-05-26 12:00  closed            rename logger                           │
+│                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │

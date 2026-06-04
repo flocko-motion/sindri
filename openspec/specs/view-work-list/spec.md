@@ -352,16 +352,39 @@ first" notification instead of opening anything.
 
 ### Requirement: Help bar lists every list-view binding
 
-The work-list view SHALL render every action binding the list view
-accepts as a `key:label` entry in the top help bar, so the help bar is
-the visible inventory of what the user can do. Adding a new binding to
-the list view SHALL include the corresponding help-bar entry.
+The work-list view SHALL render a dedicated help row beneath the
+title row that lists every action binding the current view accepts,
+as `key:label` entries. Entries SHALL be grouped into three
+` · `-separated chunks — **navigation**, **row actions**, and
+**view actions** — so the eye can find an action by category. Adding
+a new binding to the list view SHALL include the corresponding
+help-bar entry.
 
-#### Scenario: e:edit appears in the help bar
+For the backlog (tasks) view, the help row SHALL include every
+binding the backlog accepts: cursor navigation, item open, copy,
+new task, edit task, approve, reject, status, move, comment, filter
+cycle, refresh, quit. The workers view SHALL drop the row-action
+keys (they only apply to tasks) and keep navigation, refresh, and
+quit.
 
-- **GIVEN** the list view binds `e` to "edit task"
+#### Scenario: a:approve appears in the backlog help bar
+
+- **GIVEN** the backlog binds `a` to "approve"
 - **WHEN** the help bar renders
-- **THEN** the help bar contains the entry `e:edit`
+- **THEN** the help bar contains the entry `a:approve`
+
+#### Scenario: x:reject appears in the backlog help bar
+
+- **GIVEN** the backlog binds `x` to "reject task" / "abandon spec"
+- **WHEN** the help bar renders
+- **THEN** the help bar contains the entry `x:reject`
+
+#### Scenario: Workers help bar drops row actions
+
+- **WHEN** the workers view renders the help bar
+- **THEN** the help bar does NOT contain row-action entries
+  (a:approve, x:reject, s:status, m:move, c:comment, e:edit, n:new)
+- **AND** it still shows navigation, refresh, and quit
 
 #### Scenario: Adding a new binding without a help-bar entry is a regression
 

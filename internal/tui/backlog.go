@@ -51,30 +51,34 @@ func padCell(s string, n int) string {
 	return s + strings.Repeat(" ", n-w)
 }
 
+// tabHeader builds the tab strip used as the column header: the active tab is
+// rendered bold + highlight, the inactive tab is dimmed, both show the hotkey
+// letter in brackets so the user can learn the binding straight off the tab.
+// PaddingLeft mirrors the old headerStyle's padding so the visual position
+// matches what the green "Tasks"/"Workers" header used.
+func tabHeader(active lipgloss.Style, tasksActive, workersActive bool) string {
+	tasks := dimStyle.Render("[T]asks")
+	workers := dimStyle.Render("[W]orkers")
+	if tasksActive {
+		tasks = active.Render("[T]asks")
+	}
+	if workersActive {
+		workers = active.Render("[W]orkers")
+	}
+	return lipgloss.NewStyle().PaddingLeft(1).Render(tasks + "  " + workers)
+}
+
 // viewList renders the list-view (backlog or workers) layout with title bar,
 // content column, and bottom bar. Lives here because it's the rendering
 // counterpart of the backlog model — keeps tui.go focused on the Update path.
 func (m Model) viewList() string {
+	// Title row: project title only. The view selector used to live on the
+	// right of this row + the column also showed a redundant green "Tasks" /
+	// "Workers" header below — the tab strip now lives inside the column
+	// header so the row's title is the only thing that matters at the very
+	// top.
 	title := titleStyle.Render("Sindri — AI Agent Orchestrator")
-
-	activeView := lipgloss.NewStyle().Bold(true).Foreground(highlight)
-	inactiveView := dimStyle
-	var viewSelector string
-	if m.leftView == viewBacklog {
-		viewSelector = activeView.Render("[T]asks") + "  " + inactiveView.Render("[W]orkers")
-	} else {
-		viewSelector = inactiveView.Render("[T]asks") + "  " + activeView.Render("[W]orkers")
-	}
-
-	// Title row: project title on the left, view selector on the right —
-	// help moved to its own row below so we have space to list every binding
-	// the list view actually accepts (cf. td-c6cc6d / the "help bar lists
-	// every list-view binding" rule).
-	titleBar := lipgloss.JoinHorizontal(lipgloss.Top,
-		title,
-		lipgloss.NewStyle().Width(m.width-lipgloss.Width(title)-lipgloss.Width(viewSelector)).Render(""),
-		viewSelector,
-	)
+	titleBar := lipgloss.NewStyle().Width(m.width).Render(title)
 
 	// Help row, grouped with " · " into navigation / row actions / view
 	// actions. The backlog gets the full set; the workers view drops the
@@ -89,14 +93,19 @@ func (m Model) viewList() string {
 
 	contentHeight := m.height - 5 // titleBar + helpBar + col borders (2) + bottomBar
 
+	// Build the column header as a tab strip — active tab highlighted, the
+	// other dimmed, both showing the hotkey letter in brackets so the user
+	// learns the binding from the tab itself rather than from a separate
+	// selector. This replaces the previous green "Tasks"/"Workers" header
+	// and the top-right [T]asks/[W]orkers strip in one move.
+	activeTab := lipgloss.NewStyle().Bold(true).Foreground(highlight)
+	tabStrip := tabHeader(activeTab, m.leftView == viewBacklog, m.leftView == viewWorkers)
+
 	var listContent string
-	var header string
 	switch m.leftView {
 	case viewBacklog:
-		header = "Tasks"
 		listContent = renderBacklogList(m.backlogRows, m.listCursor, true, m.loaded)
 	case viewWorkers:
-		header = "Workers"
 		listContent = renderWorkersList(m.workers, m.workerCursor, true, m.loaded)
 	}
 	m.vpList.SetContent(strings.TrimRight(listContent, "\n"))
@@ -107,7 +116,11 @@ func (m Model) viewList() string {
 		scrollStatus = dimStyle.Render(fmt.Sprintf(" %d%% (%d/%d)", pct, m.vpList.YOffset+m.vpList.Height, m.vpList.TotalLineCount()))
 	}
 
-	col := renderColumn(header, m.vpList.View(), scrollStatus, m.width, contentHeight, true)
+	// Prepend the tab strip to the column content so the active tab acts as
+	// the column header. renderColumn's empty-header path keeps the inner
+	// styling untouched (otherwise headerStyle would re-color it green).
+	colContent := tabStrip + "\n" + m.vpList.View()
+	col := renderColumn("", colContent, scrollStatus, m.width, contentHeight, true)
 
 	var bottomBar string
 	switch {

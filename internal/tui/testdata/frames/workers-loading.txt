@@ -1,9 +1,9 @@
- Sindri — AI Agent Orchestrator                                                   [T]asks  [W]orkers
+ Sindri — AI Agent Orchestrator                                                                     
 j/k:nav enter:open · r:refresh q:quit
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  Workers                                                                                         │
-│                                                                                                  │
+│  [T]asks  [W]orkers                                                                              │
 │   Loading workers…                                                                               │
+│                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
