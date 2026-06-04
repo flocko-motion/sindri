@@ -46,6 +46,15 @@ type createTaskModel struct {
 	specName      string // non-empty when invoked from a spec-only row; adds spec:<name> label
 	editingID     string // set in edit mode; submit dispatches td.Update instead of td.Create
 	origLabels    []string // labels carried by the task before editing — non-review ones are preserved on submit
+
+	// cursorParentID / cursorParentType drive the auto-parent rule: when the
+	// modal opened with the cursor on an epic or a feature, a new task whose
+	// type is a "smaller unit" SHALL be created as that row's child so the
+	// user doesn't have to drop into m-mode after every create
+	// (cf. td-488d11). The rule is applied at submit time so toggling the
+	// new task's type in the modal recomputes the effect.
+	cursorParentID   string
+	cursorParentType string
 }
 
 type taskCreatedMsg struct {
@@ -59,7 +68,7 @@ type taskUpdatedMsg struct {
 	err error
 }
 
-func newCreateTaskModel(projectRoot, specName string) createTaskModel {
+func newCreateTaskModel(projectRoot, specName, cursorParentID, cursorParentType string) createTaskModel {
 	ti, di := newCreateTaskInputs("Description (optional) — enter inserts a newline, ctrl+s submits")
 	if specName != "" {
 		// Pre-fill the title from the spec's proposal H1 so the user starts
@@ -69,15 +78,39 @@ func newCreateTaskModel(projectRoot, specName string) createTaskModel {
 	}
 
 	return createTaskModel{
-		titleInput:    ti,
-		descInput:     di,
-		typeIdx:       0, // task
-		prioIdx:       2, // P2
-		reviewChecked: true,
-		activeField:   fieldTitle,
-		projectRoot:   projectRoot,
-		specName:      specName,
+		titleInput:       ti,
+		descInput:        di,
+		typeIdx:          0, // task
+		prioIdx:          2, // P2
+		reviewChecked:    true,
+		activeField:      fieldTitle,
+		projectRoot:      projectRoot,
+		specName:         specName,
+		cursorParentID:   cursorParentID,
+		cursorParentType: cursorParentType,
 	}
+}
+
+// resolveAutoParent applies the auto-child rule from td-488d11:
+//   - cursor on an epic    → any non-epic new task becomes its child
+//   - cursor on a feature  → any new task that's neither an epic nor a
+//     feature becomes its child
+//   - cursor on anything else → no auto-parent (user must move explicitly)
+//
+// Pure helper so the rule's branches are easy to test and the modal can
+// recompute the preview as the user toggles the type selector.
+func resolveAutoParent(parentID, parentType, newType string) string {
+	switch parentType {
+	case "epic":
+		if newType != "epic" {
+			return parentID
+		}
+	case "feature":
+		if newType != "epic" && newType != "feature" {
+			return parentID
+		}
+	}
+	return ""
 }
 
 // newCreateTaskInputs builds the shared title input + multi-line description
@@ -301,7 +334,10 @@ func (m createTaskModel) submit() tea.Cmd {
 		if specName != "" {
 			labels = append(labels, "spec:"+specName)
 		}
-		out, err := td.Create(projectRoot, title, td.CreateOpts{Type: typ, Priority: prio, Body: desc, Labels: labels})
+		parent := resolveAutoParent(m.cursorParentID, m.cursorParentType, typ)
+		out, err := td.Create(projectRoot, title, td.CreateOpts{
+			Type: typ, Priority: prio, Body: desc, Labels: labels, Parent: parent,
+		})
 		if err != nil {
 			return taskCreatedMsg{err: err}
 		}
@@ -333,6 +369,17 @@ func (m createTaskModel) View(width, height int) string {
 		b.WriteString(dimStyle.Render("  Linked to spec: "))
 		b.WriteString(lipgloss.NewStyle().Bold(true).Render("📄 " + m.specName))
 		b.WriteString("\n\n")
+	}
+
+	// Recompute the auto-parent preview on every render so toggling the
+	// type selector immediately shows/hides the effect.
+	if m.editingID == "" {
+		if parent := resolveAutoParent(m.cursorParentID, m.cursorParentType, taskTypes[m.typeIdx]); parent != "" {
+			b.WriteString(dimStyle.Render("  Auto-parent: "))
+			b.WriteString(lipgloss.NewStyle().Bold(true).Render(parent))
+			b.WriteString(dimStyle.Render(" (cursor on " + m.cursorParentType + ")"))
+			b.WriteString("\n\n")
+		}
 	}
 
 	// Title

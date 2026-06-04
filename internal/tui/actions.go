@@ -330,6 +330,24 @@ func (m Model) taskUnderCursor() *issue.Task {
 	return &t
 }
 
+// cursorAutoParent returns the (taskID, taskType) at the backlog cursor if
+// the row is a task row whose type is one the auto-parent rule cares about
+// (epic or feature). For other rows — non-task, spec-only, PR sub-row, or a
+// task whose type is bug/chore/task — it returns empty strings so
+// resolveAutoParent short-circuits. Closed tasks are still eligible: the
+// user's hierarchy intent doesn't depend on the parent's status.
+func (m Model) cursorAutoParent() (taskID, taskType string) {
+	t := m.taskUnderCursor()
+	if t == nil {
+		return "", ""
+	}
+	switch t.Type {
+	case "epic", "feature":
+		return t.ID, t.Type
+	}
+	return "", ""
+}
+
 // cursorSpecName returns the spec name when the cursor sits on a spec-only
 // row (i.e. an openspec change with no td task yet), otherwise "". Used to
 // pre-link the new-task modal so pressing `n` on a spec row creates a task

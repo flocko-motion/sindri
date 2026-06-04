@@ -1,0 +1,30 @@
+                                                                                                              
+                                                                                                              
+              ╭────────────────────────────────────────────────────────────────────────────────╮              
+              │                                                                                │              
+              │  New Task                                                                      │              
+              │                                                                                │              
+              │    Auto-parent: td-eeeeee (cursor on epic)                                     │              
+              │                                                                                │              
+              │  > Title: > Task title (required)                                              │              
+              │                                                                                │              
+              │    Type:  [task]  bug   feature   chore                                        │              
+              │                                                                                │              
+              │    Prio:   P0   P1  [P2]  P3   P4                                              │              
+              │                                                                                │              
+              │    Review: ☑ code review                                                       │              
+              │                                                                                │              
+              │    Desc:                                                                       │              
+              │  ┃ Description (optional) — enter inserts a newline, ctrl+s                    │              
+              │  ┃ submits                                                                     │              
+              │  ┃                                                                             │              
+              │  ┃                                                                             │              
+              │  ┃                                                                             │              
+              │                                                                                │              
+              │    tab:next field  h/l:select  enter:create (in description: newline)          │              
+              │  ctrl+s:submit  esc:cancel                                                     │              
+              │                                                                                │              
+              ╰────────────────────────────────────────────────────────────────────────────────╯              
+                                                                                                              
+                                                                                                              
+                                                                                                              

@@ -219,7 +219,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case key.Matches(msg, keys.NewTask):
 			m.showCreateModal = true
-			m.createModal = newCreateTaskModel(m.projectRoot, m.cursorSpecName())
+			parentID, parentType := m.cursorAutoParent()
+			m.createModal = newCreateTaskModel(m.projectRoot, m.cursorSpecName(), parentID, parentType)
 			return m, m.createModal.Init()
 		case key.Matches(msg, keys.EditTask):
 			t := m.taskUnderCursor()

@@ -103,6 +103,7 @@ type CreateOpts struct {
 	Priority string
 	Body     string
 	Labels   []string
+	Parent   string // when set, the new task is created as a child of this td ID
 }
 
 // UpdateOpts are the fields Update may change. Zero values are skipped so the
@@ -160,6 +161,9 @@ func Create(root, title string, o CreateOpts) (string, error) {
 	}
 	if len(o.Labels) > 0 {
 		args = append(args, "--labels", strings.Join(o.Labels, ","))
+	}
+	if o.Parent != "" {
+		args = append(args, "--parent", o.Parent)
 	}
 	args = append(args, "--", title)
 	return run(root, args...)

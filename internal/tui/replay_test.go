@@ -114,10 +114,34 @@ func TestReplay_BasicListAndFilter(t *testing.T) {
 // by enrich-work-list-display.
 func TestReplayGoldens_Mock(t *testing.T) {
 	dir := t.TempDir()
-	if err := Replay("(capture list-mock)", MockFixture(), dir); err != nil {
+	script := strings.Join([]string{
+		"(capture list-mock)",
+		// Cursor moves to td-eeeeee (epic). Pressing n shows the create-task
+		// modal with the Auto-parent line set to that epic — the rule from
+		// td-488d11. Default selected type is "task" so the rule applies.
+		"down n (capture create-auto-parent-epic)",
+		"esc",
+		// Cursor moves up to td-aaaaaa (bug — not an auto-parent type). The
+		// modal SHALL NOT show the Auto-parent line because the rule doesn't
+		// fire for non-epic/non-feature cursor rows.
+		"up n (capture create-no-auto-parent-bug)",
+		"esc",
+		// Cursor moves down twice — past the epic — to td-ff1111 (feature
+		// child of the epic). Pressing n with default type=task auto-parents
+		// the new task under the feature.
+		"down down n (capture create-auto-parent-feature)",
+	}, " ")
+	if err := Replay(script, MockFixture(), dir); err != nil {
 		t.Fatalf("replay: %v", err)
 	}
-	AssertGolden(t, dir, "list-mock")
+	for _, name := range []string{
+		"list-mock",
+		"create-auto-parent-epic",
+		"create-no-auto-parent-bug",
+		"create-auto-parent-feature",
+	} {
+		AssertGolden(t, dir, name)
+	}
 }
 
 // TestReplayGoldens_LoadingState captures the startup window before any
