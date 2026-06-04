@@ -48,8 +48,12 @@ func TestColumnFitsWidth(t *testing.T) {
 		m := listModel(w, 24, 50)
 		out := m.viewList()
 		for i, line := range strings.Split(out, "\n") {
-			// Skip the title bar (line 0): its long help text is separate chrome.
-			if i == 0 {
+			// Skip the title bar (line 0) and help bar (line 1): both are
+			// fixed chrome that lists every binding the view accepts.
+			// Making them width-adaptive would hide actions on narrow
+			// terminals, which violates the "help bar lists every binding"
+			// rule from td-8c5ba9 / help-bar-explains-every-hotkey.
+			if i <= 1 {
 				continue
 			}
 			if lw := lipgloss.Width(line); lw > w {

@@ -65,16 +65,29 @@ func (m Model) viewList() string {
 	} else {
 		viewSelector = inactiveView.Render("[T]asks") + "  " + activeView.Render("[W]orkers")
 	}
-	help := dimStyle.Render("j/k:nav  enter:open  y:copy  n:new  e:edit  r:refresh  q:quit")
-	rightSide := viewSelector + "  " + help
 
+	// Title row: project title on the left, view selector on the right —
+	// help moved to its own row below so we have space to list every binding
+	// the list view actually accepts (cf. td-c6cc6d / the "help bar lists
+	// every list-view binding" rule).
 	titleBar := lipgloss.JoinHorizontal(lipgloss.Top,
 		title,
-		lipgloss.NewStyle().Width(m.width-lipgloss.Width(title)-lipgloss.Width(rightSide)).Render(""),
-		rightSide,
+		lipgloss.NewStyle().Width(m.width-lipgloss.Width(title)-lipgloss.Width(viewSelector)).Render(""),
+		viewSelector,
 	)
 
-	contentHeight := m.height - 4
+	// Help row, grouped with " · " into navigation / row actions / view
+	// actions. The backlog gets the full set; the workers view drops the
+	// row-action keys because they only apply to tasks.
+	var helpText string
+	if m.leftView == viewBacklog {
+		helpText = "j/k:nav enter:open · y:copy n:new e:edit a:approve x:reject s:status m:move c:comment · f:filter r:refresh q:quit"
+	} else {
+		helpText = "j/k:nav enter:open · r:refresh q:quit"
+	}
+	helpBar := dimStyle.Render(helpText)
+
+	contentHeight := m.height - 5 // titleBar + helpBar + col borders (2) + bottomBar
 
 	var listContent string
 	var header string
@@ -111,7 +124,7 @@ func (m Model) viewList() string {
 	default:
 		bottomBar = m.notify.render(m.width)
 	}
-	return titleBar + "\n" + col + "\n" + bottomBar
+	return titleBar + "\n" + helpBar + "\n" + col + "\n" + bottomBar
 }
 
 // rebuildBacklog refreshes the list state from m.issues — applies the active

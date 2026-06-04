@@ -99,8 +99,8 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case key.Matches(msg, keys.Approve):
 			if len(m.detail.prIDs) == 0 {
-				m.notify = notification{message: "Approve: this task has no PR yet", isError: true, time: time.Now()}
-				return m, flashTimer()
+				// No PR → approve closes the task. See approveTaskNoPR.
+				return m, m.approveTaskNoPR()
 			}
 			return m, m.approvePR()
 		case key.Matches(msg, keys.Merge):

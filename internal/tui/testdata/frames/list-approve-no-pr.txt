@@ -1,4 +1,5 @@
- Sindri — AI Agent Orchestrator[T]asks  [W]orkers  j/k:nav  enter:open  y:copy  n:new  e:edit  r:refresh  q:quit
+ Sindri — AI Agent Orchestrator                                                   [T]asks  [W]orkers
+j/k:nav enter:open · y:copy n:new e:edit a:approve x:reject s:status m:move c:comment · f:filter r:refresh q:quit
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │  Tasks                                                                                           │
 │                                                                                                  │
@@ -25,6 +26,5 @@
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
-│                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
- Approve: this task has no PR yet                                                                   
+ Moving td-bbbbbb — h: sibling of cursor, l: child of cursor, esc: cancel                           

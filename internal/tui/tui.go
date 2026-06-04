@@ -293,11 +293,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.notify = notification{message: "Approve: pick a task row first", isError: true, time: time.Now()}
 				return m, flashTimer()
 			}
-			if prID == "" {
-				m.notify = notification{message: "Approve: this task has no PR yet", isError: true, time: time.Now()}
-				return m, flashTimer()
-			}
 			m.detail.taskID = taskID
+			if prID == "" {
+				// No PR → approve closes the task directly (we don't always
+				// work via PRs; chores / discussion items still need a
+				// "this is done" signal).
+				m.detail.prIDs = nil
+				return m, m.approveTaskNoPR()
+			}
 			m.detail.prIDs = []string{prID}
 			return m, m.approvePR()
 		case key.Matches(msg, keys.Reject):

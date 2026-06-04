@@ -1,11 +1,11 @@
- Sindri — AI Agent Orchestrator[T]asks  [W]orkers  j/k:nav  enter:open  y:copy  n:new  e:edit  r:refresh  q:quit
+ Sindri — AI Agent Orchestrator                                                   [T]asks  [W]orkers
+j/k:nav enter:open · r:refresh q:quit
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │  Workers                                                                                         │
 │                                                                                                  │
 │ > 🔨 brokkr       worker    running  td-bbbbbb add CSV export   pr-td-bbbbbb [open] brokkr       │
 │   🔨 dvalin       worker -  -   -  dvalin -                                                      │
 │   🔨 reviewer     reviewer -  -   -  reviewer -                                                  │
-│                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │

@@ -1,4 +1,5 @@
- Sindri — AI Agent Orchestrator[T]asks  [W]orkers  j/k:nav  enter:open  y:copy  n:new  e:edit  r:refresh  q:quit
+ Sindri — AI Agent Orchestrator                                                   [T]asks  [W]orkers
+j/k:nav enter:open · y:copy n:new e:edit a:approve x:reject s:status m:move c:comment · f:filter r:refresh q:quit
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │  Tasks                                                                                           │
 │                                                                                                  │
@@ -8,7 +9,6 @@
 │ > 📄     td-bbbbbb P2  26-05-28 12:00  in_progress       csv-export · add CSV export             │
 │       └ pr-td-bbbbbb [open]                                                                      │
 │       ☑ review code                                                                              │
-│                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │

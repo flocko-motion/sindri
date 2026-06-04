@@ -114,6 +114,23 @@ func (m Model) updateRejectInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// approveTaskNoPR closes the task at m.detail.taskID with reason "approved".
+// Used when the user presses 'a' on a task that has no associated PR — we
+// don't always work through PRs, so the natural meaning of "approve" there
+// is "this is done, close it".
+func (m *Model) approveTaskNoPR() tea.Cmd {
+	taskID := m.detail.taskID
+	root := m.projectRoot
+	return func() tea.Msg {
+		if err := action.ApproveTask(root, taskID); err != nil {
+			return actionResultMsg{message: "Approve failed: " + err.Error(), isError: true}
+		}
+		// Mirror the close path so the linked spec (if any) gets its
+		// lifecycle check — same flow as a status-pick to closed.
+		return statusChangedMsg{taskID: taskID, newStatus: "closed", prev: "approved"}
+	}
+}
+
 func (m *Model) approvePR() tea.Cmd {
 	prID := m.detail.prIDs[0]
 	root := m.projectRoot

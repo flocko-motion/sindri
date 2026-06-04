@@ -87,6 +87,15 @@ func Merge(root, prID string) (merged *store.PR, missing []string, err error) {
 	return merged, nil, nil
 }
 
+// ApproveTask closes a task with reason "approved" — the no-PR path of the
+// approve action. Tasks that don't go through a PR (no code change, e.g. a
+// chore or a discussion item) still need a way to signal "this is done";
+// approving them just closes. Idempotent: closing an already-closed task is
+// safe, td refuses with a clear error.
+func ApproveTask(root, taskID string) error {
+	return td.Close(root, taskID, "approved")
+}
+
 // Reject sends a PR's task back for rework: it requires a reason, comments it on
 // the task, marks the PR (and the task's other open/approved PRs) rejected, and
 // returns the task to open.
