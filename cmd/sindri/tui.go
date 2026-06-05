@@ -12,6 +12,7 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/flo-at/sindri/internal/sindri"
 	"github.com/flo-at/sindri/internal/tui"
 	"github.com/flo-at/sindri/internal/worker"
 	"github.com/spf13/cobra"
@@ -60,6 +61,16 @@ func runTui(cmd *cobra.Command, args []string) error {
 	projectRoot, err := worker.GitRoot()
 	if err != nil {
 		return fmt.Errorf("not in a git repo: %w", err)
+	}
+
+	// Ensure the project is initialised before launching (mirrors
+	// container.Ensure). The scaffold is idempotent; on a fresh project this
+	// runs the init routine non-interactively.
+	if !sindri.Exists(projectRoot) {
+		fmt.Fprintf(os.Stderr, "Initialising .sindri/ in %s...\n", projectRoot)
+	}
+	if err := sindri.EnsureSindri(projectRoot); err != nil {
+		return fmt.Errorf("ensure .sindri: %w", err)
 	}
 
 	model := tui.New(projectRoot)

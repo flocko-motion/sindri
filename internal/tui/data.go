@@ -40,7 +40,9 @@ func refreshAllCmd(projectRoot string, manual bool) tea.Cmd {
 // path so podman and openspec are not contacted for things that didn't change.
 func refreshTasksCmd(projectRoot string, manual bool) tea.Cmd {
 	return func() tea.Msg {
-		tasks, _ := board.LoadTasks(projectRoot)
+		// FilterAll: the TUI keeps the full set and does its own filtering
+		// (folders, show-all toggle).
+		tasks, _ := board.LoadTasks(projectRoot, issue.FilterAll)
 		return tasksRefreshedMsg{tasks: tasks, manual: manual}
 	}
 }
@@ -60,23 +62,6 @@ func refreshWorkersCmd(projectRoot string) tea.Cmd {
 func refreshPRsCmd(projectRoot string) tea.Cmd {
 	return func() tea.Msg {
 		return prsRefreshedMsg{prs: board.LoadPRs(projectRoot)}
-	}
-}
-
-// cacheWarmedMsg is dispatched once the background warmCacheCmd finishes
-// populating the parent-id cache, so the next refresh shows hierarchy.
-type cacheWarmedMsg struct{}
-
-// warmCacheCmd runs WarmParentCache off the foreground refresh path. It costs
-// several seconds today (each `td show` is ~250ms and td's DB locks defeat
-// useful parallelism), but it only runs once per session — the in-process
-// cache makes every subsequent List instant. When done it fires a
-// cacheWarmedMsg so the model can trigger one more refresh and finally render
-// the hierarchy.
-func warmCacheCmd(projectRoot string) tea.Cmd {
-	return func() tea.Msg {
-		board.WarmParentCache(projectRoot)
-		return cacheWarmedMsg{}
 	}
 }
 

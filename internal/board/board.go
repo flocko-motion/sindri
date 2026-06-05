@@ -18,55 +18,11 @@ import (
 	"github.com/flo-at/sindri/internal/worker"
 )
 
-// parentCache holds a per-process taskID → parentID map. td list strips
-// parent_id and td show is slow (~250ms each, DB locks prevent useful
-// parallelism), so we read whatever the cache has and let WarmParentCache fill
-// it in the background. Subsequent refreshes are then instant.
-var parentCache sync.Map // map[string]string
-
-// WarmParentCache refreshes the parent_id cache for a project by running
-// td.Enrich and storing each task's ParentID. Callers run this in a goroutine
-// when they can tolerate the latency (~7s parallel for 50 tasks); board.List
-// itself never calls it.
-func WarmParentCache(projectRoot string) {
-	tasks, err := td.Tasks(projectRoot)
-	if err != nil {
-		return
-	}
-	td.Enrich(projectRoot, tasks)
-	for _, t := range tasks {
-		parentCache.Store(t.ID, t.ParentID)
-	}
-}
-
-func cachedParent(id string) string {
-	if v, ok := parentCache.Load(id); ok {
-		return v.(string)
-	}
-	return ""
-}
-
-// SetCachedParent updates the in-process parent-id cache after a mutation
-// (e.g. an interactive move), so the next refresh sees the new hierarchy
-// without re-running WarmParentCache.
-func SetCachedParent(id, parent string) {
-	parentCache.Store(id, parent)
-}
-
-// LoadTasks fetches td tasks for a project and applies cached parent_ids so
-// the hierarchy renders without the slow td.show round-trip. Used as one of
-// the four independent loaders the TUI dispatches per-source.
-func LoadTasks(projectRoot string) ([]issue.Task, error) {
-	tasks, err := td.Tasks(projectRoot)
-	if err != nil {
-		return nil, err
-	}
-	for i := range tasks {
-		if tasks[i].ParentID == "" {
-			tasks[i].ParentID = cachedParent(tasks[i].ID)
-		}
-	}
-	return tasks, nil
+// LoadTasks fetches td tasks for a project. parent_id (hierarchy) comes
+// straight from `td list --json`, so no enrichment round-trip is needed. Used
+// as one of the four independent loaders the TUI dispatches per-source.
+func LoadTasks(projectRoot string, f issue.Filter) ([]issue.Task, error) {
+	return td.Tasks(projectRoot, f)
 }
 
 // LoadSpecs fetches openspec changes for a project. Returns nil when the
@@ -103,8 +59,9 @@ func LoadPRs(projectRoot string) map[string][]issue.PR {
 
 // List runs the four loaders in parallel and assembles their result. Used by
 // the CLI's one-shot list and view commands; the TUI fans the loaders out
-// individually so it can paint as soon as the first one returns.
-func List(projectRoot string) ([]issue.Issue, error) {
+// individually so it can paint as soon as the first one returns. The filter is
+// pushed down to the task query so closed tasks don't crowd out open ones.
+func List(projectRoot string, f issue.Filter) ([]issue.Issue, error) {
 	var (
 		tasks      []issue.Task
 		taskErr    error
@@ -114,7 +71,7 @@ func List(projectRoot string) ([]issue.Issue, error) {
 		wg         sync.WaitGroup
 	)
 	wg.Add(4)
-	go func() { defer wg.Done(); tasks, taskErr = LoadTasks(projectRoot) }()
+	go func() { defer wg.Done(); tasks, taskErr = LoadTasks(projectRoot, f) }()
 	go func() { defer wg.Done(); specs = LoadSpecs(projectRoot) }()
 	go func() { defer wg.Done(); workers = LoadWorkers(projectRoot) }()
 	go func() { defer wg.Done(); prsByID = LoadPRs(projectRoot) }()

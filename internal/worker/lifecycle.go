@@ -15,7 +15,20 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/container"
+	"github.com/flo-at/sindri/internal/sindri"
 )
+
+// skillToMode maps the launch skill to the index mode field.
+func skillToMode(skill string) string {
+	switch skill {
+	case "td-choose":
+		return "choose"
+	case "td-review":
+		return "review"
+	default:
+		return "next"
+	}
+}
 
 var NorseNames = []string{
 	"brokkr", "dvalin", "alviss", "andvari", "eitri", "fjalar", "galar",
@@ -52,7 +65,8 @@ func BaseBranch(projectRoot string) (string, error) {
 func FindAvailable(projectRoot string) (name string, created bool, err error) {
 	workers := List(projectRoot)
 	for _, wk := range workers {
-		if wk.Role == "worker" && wk.Status == "-" {
+		// Reuse an indexed worker that has a worktree but no running container.
+		if wk.Role == "worker" && wk.Container == "" && wk.Path != "" {
 			return wk.Name, false, nil
 		}
 	}
@@ -133,6 +147,19 @@ func Start(projectRoot, name string, opts StartOpts) error {
 	workerBin, err := findAgentBin("sindri-worker")
 	if err != nil {
 		return err
+	}
+
+	// Record this worker's durable identity in the index (identity only —
+	// task/status live in the workspace's .sindri-task). Written before launch
+	// so the roster is authoritative even if the container never comes up.
+	if err := sindri.WriteAgent(projectRoot, sindri.Agent{
+		Name:      name,
+		Role:      "worker",
+		Mode:      skillToMode(opts.Skill),
+		Base:      base,
+		Workspace: filepath.Join(".worktrees", name),
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: write agent index: %v\n", err)
 	}
 
 	podmanArgs := []string{
@@ -224,12 +251,22 @@ func StartReviewer(projectRoot string, shell bool) error {
 		return err
 	}
 
+	// The reviewer is the singleton "reviewer" agent (seeded by EnsureSindri).
+	// Record/refresh its identity; label by its real name so List reconciles it
+	// by name rather than a positional special case.
+	if err := sindri.WriteAgent(projectRoot, sindri.Agent{
+		Name: "reviewer",
+		Role: "reviewer",
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: write agent index: %v\n", err)
+	}
+
 	podmanArgs := []string{
 		"run", "--rm", "-it",
 		"--name", cName,
 		"--userns=keep-id",
 		"--label", "sindri.project=" + projectRoot,
-		"--label", "sindri.worker=_reviewer",
+		"--label", "sindri.worker=reviewer",
 		"-v", claudeHome + ":/home/sindri/.claude:rw,z",
 		"-v", configPath + ":/home/sindri/.claude.json:rw,z",
 		"-v", reviewBin + ":/opt/sindri/sindri-review:ro,z",

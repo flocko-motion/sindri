@@ -109,8 +109,8 @@ func (m Model) Init() tea.Cmd {
 	// Fan out all four per-source loaders in parallel; each one emits its own
 	// message and the list paints as soon as the tasks loader returns (~0.3s).
 	// Workers (~1.5s) and specs (~1.2s) land later without holding up the
-	// first paint. warmCacheCmd fills the parent-id cache in the background.
-	return tea.Batch(refreshAllCmd(m.projectRoot, false), tickCmd(), warmCacheCmd(m.projectRoot))
+	// first paint. Hierarchy (parent_id) comes straight from `td list`.
+	return tea.Batch(refreshAllCmd(m.projectRoot, false), tickCmd())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -122,10 +122,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return next, cmd
 		}
 		return m, nil
-	case cacheWarmedMsg:
-		// One more tasks-only refresh so the freshly populated parent-id cache
-		// gets applied; podman/openspec didn't change so don't re-poll them.
-		return m, refreshTasksCmd(m.projectRoot, false)
 	case movedMsg:
 		// Optimistic: patch the moving task's ParentID locally, re-arrange,
 		// redraw immediately. Then a tasks-only refresh confirms — no need to

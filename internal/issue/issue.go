@@ -175,10 +175,14 @@ func SpecID(name string) string {
 	return "os-" + hex.EncodeToString(h[:])[:6]
 }
 
-// Title is the task title, with a spec marker prefix when linked. For a
-// spec-only issue it explains the missing task.
+// Title is the task title, with a spec marker prefix when linked. A spec-only
+// issue shows the spec name (its identifier), which is more useful than a
+// generic placeholder.
 func (i Issue) Title() string {
 	if i.Task == nil {
+		if i.Spec != nil {
+			return i.Spec.Name
+		}
 		return "(no task — needs planning)"
 	}
 	if i.Spec != nil {

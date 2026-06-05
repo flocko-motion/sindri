@@ -8,12 +8,14 @@ package worker
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/ghlocal/store"
+	"github.com/flo-at/sindri/internal/sindri"
 )
 
 type Worker struct {
@@ -34,127 +36,191 @@ type podmanContainer struct {
 	Labels map[string]string `json:"Labels"`
 }
 
-// List returns all workers for a project: worktrees + container status.
+// List reconciles the agent index (the roll call of agents that should exist)
+// against observed reality (podman containers + git worktrees). The index is
+// the spine: agents come from it, with live state attached. Containers or
+// worktrees with no index entry surface as orphans.
 func List(projectRoot string) []Worker {
-	// Query podman containers
-	containerByWorker := make(map[string]*podmanContainer)
-	out, err := exec.Command("podman", "ps", "-a",
+	// Roll call: the index is the canonical set of agents.
+	roster, err := sindri.Roster(projectRoot)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: read agent index: %v\n", err)
+	}
+
+	// Attendance: podman containers keyed by their sindri.worker label.
+	containerByName := make(map[string]*podmanContainer)
+	out, cerr := exec.Command("podman", "ps", "-a",
 		"--filter", "label=sindri.project="+projectRoot,
 		"--format", "json",
 	).Output()
-	if err == nil && len(strings.TrimSpace(string(out))) > 0 {
+	if cerr == nil && len(strings.TrimSpace(string(out))) > 0 {
 		var containers []podmanContainer
 		if json.Unmarshal(out, &containers) == nil {
 			for i, c := range containers {
 				if w := c.Labels["sindri.worker"]; w != "" {
-					containerByWorker[w] = &containers[i]
+					containerByName[w] = &containers[i]
 				}
 			}
 		}
 	}
 
-	// Query git worktrees
+	// Worktrees on disk, keyed by name (excludes the main repo).
 	wtOut, _ := exec.Command("git", "-C", projectRoot, "worktree", "list", "--porcelain").Output()
 	worktrees := parseWorktreeNames(string(wtOut), projectRoot)
 
 	var workers []Worker
+	seen := make(map[string]bool)
 
-	// Main repo = reviewer
-	mainName := "sindri"
-	if p, ok := worktrees["main"]; ok {
-		parts := strings.Split(p, "/")
-		mainName = parts[len(parts)-1]
-	}
-	status := "-"
-	cName := ""
-	if c, ok := containerByWorker["_reviewer"]; ok {
-		status = c.State
-		if len(c.Names) > 0 {
-			cName = c.Names[0]
+	// 1. Indexed agents — role and identity come from the index, never position.
+	for _, a := range roster {
+		seen[a.Name] = true
+		w := Worker{
+			Name:   a.Name,
+			Role:   a.Role,
+			IsMain: a.Role == "reviewer",
 		}
-		delete(containerByWorker, "_reviewer")
-	}
-	workers = append(workers, Worker{
-		Name:      mainName,
-		Role:      "reviewer",
-		Status:    status,
-		IsMain:    true,
-		Path:      worktrees["main"],
-		Container: cName,
-	})
+		if a.Workspace != "" {
+			w.Path = filepath.Join(projectRoot, a.Workspace)
+		}
 
-	// Worker worktrees
+		var running bool
+		if c, ok := containerByName[a.Name]; ok {
+			w.Container = containerName(c)
+			running = c.State == "running"
+			delete(containerByName, a.Name)
+		}
+
+		workspaceMissing := a.Workspace != "" && !dirExists(w.Path)
+		w.Branch = worktreeBranch(projectRoot, a.Name)
+		w.Task = taskFor(w.Path, w.Branch)
+		w.Status = reconcileStatus(running, workspaceMissing, w.Task != "")
+		workers = append(workers, w)
+	}
+
+	// 2. Worktrees with no index entry → orphans (stale worktree).
 	for name, path := range worktrees {
-		if name == "main" || name == "review" {
+		if name == "main" || seen[name] {
 			continue
 		}
-		status := "-"
-		cName := ""
-		if c, ok := containerByWorker[name]; ok {
-			status = c.State
-			if len(c.Names) > 0 {
-				cName = c.Names[0]
-			}
-			delete(containerByWorker, name)
+		seen[name] = true
+		w := Worker{Name: name, Role: "orphan", Path: path, Status: "-"}
+		if c, ok := containerByName[name]; ok {
+			w.Container = containerName(c)
+			w.Status = c.State
+			delete(containerByName, name)
 		}
-		workers = append(workers, Worker{
-			Name:      name,
-			Role:      "worker",
-			Status:    status,
-			Path:      path,
-			Container: cName,
-		})
+		w.Branch = worktreeBranch(projectRoot, name)
+		workers = append(workers, w)
 	}
 
-	// Orphaned containers
-	for name, c := range containerByWorker {
-		cName := ""
-		if len(c.Names) > 0 {
-			cName = c.Names[0]
-		}
+	// 3. Containers with no index entry → orphans (stale pod).
+	for name, c := range containerByName {
 		workers = append(workers, Worker{
 			Name:      name,
 			Role:      "orphan",
 			Status:    c.State,
-			Container: cName,
+			Container: containerName(c),
 		})
 	}
 
-	// Read current branch for each worker's worktree from .git/worktrees/<name>/HEAD
-	for i := range workers {
-		if workers[i].Name != "" && !workers[i].IsMain {
-			workers[i].Branch = worktreeBranch(projectRoot, workers[i].Name)
+	attachTasks(projectRoot, workers)
+	attachPRs(projectRoot, workers)
+	return workers
+}
+
+// Orphans returns the agents that have a container or worktree but no index
+// entry — most likely stale, and safe to prune after confirmation.
+func Orphans(projectRoot string) []Worker {
+	var orphans []Worker
+	for _, w := range List(projectRoot) {
+		if w.Role == "orphan" {
+			orphans = append(orphans, w)
 		}
 	}
+	return orphans
+}
 
-	// Determine task from .sindri-task file or branch name (td-xxx = task ID)
+// RemoveOrphan deletes an orphan's container and worktree.
+func RemoveOrphan(projectRoot string, w Worker) error {
+	if w.Container != "" {
+		if out, err := exec.Command("podman", "rm", "-f", w.Container).CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: podman rm -f %s: %s\n", w.Container, strings.TrimSpace(string(out)))
+		}
+	}
+	if w.Path != "" {
+		if out, err := exec.Command("git", "-C", projectRoot, "worktree", "remove", "--force", w.Path).CombinedOutput(); err != nil {
+			// Fall back to a manual removal + prune if git refuses.
+			if rmErr := os.RemoveAll(w.Path); rmErr != nil {
+				return fmt.Errorf("remove worktree %s: %s", w.Path, strings.TrimSpace(string(out)))
+			}
+			_ = exec.Command("git", "-C", projectRoot, "worktree", "prune").Run()
+		}
+	}
+	return nil
+}
+
+// containerName returns a container's first name, or "".
+func containerName(c *podmanContainer) string {
+	if len(c.Names) > 0 {
+		return c.Names[0]
+	}
+	return ""
+}
+
+func dirExists(path string) bool {
+	if path == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+// reconcileStatus turns (declared vs observed) into an actionable status.
+func reconcileStatus(running, workspaceMissing, hasTask bool) string {
+	switch {
+	case running:
+		return "running"
+	case workspaceMissing:
+		return "no-workspace"
+	case hasTask:
+		return "crashed"
+	default:
+		return "idle"
+	}
+}
+
+// taskFor reads an agent's current task ID from its workspace .sindri-task file,
+// falling back to a td-… branch name.
+func taskFor(workspacePath, branch string) string {
+	if workspacePath != "" {
+		if data, err := os.ReadFile(filepath.Join(workspacePath, ".sindri-task")); err == nil {
+			if id := strings.TrimSpace(string(data)); id != "" {
+				return id
+			}
+		}
+	}
+	if strings.HasPrefix(branch, "td-") {
+		return branch
+	}
+	return ""
+}
+
+// attachTasks expands each worker's bare task ID into "td-xxx Title".
+func attachTasks(projectRoot string, workers []Worker) {
 	taskTitles := getTaskTitles(projectRoot)
 	for i := range workers {
-		if workers[i].IsMain {
+		id := workers[i].Task
+		if id == "" {
 			continue
 		}
-		var taskID string
-		// Try state file first
-		if workers[i].Path != "" {
-			taskFile := filepath.Join(workers[i].Path, ".sindri-task")
-			if data, err := os.ReadFile(taskFile); err == nil {
-				taskID = strings.TrimSpace(string(data))
-			}
-		}
-		// Fall back to branch name
-		if taskID == "" && strings.HasPrefix(workers[i].Branch, "td-") {
-			taskID = workers[i].Branch
-		}
-		if taskID != "" {
-			if title, ok := taskTitles[taskID]; ok {
-				workers[i].Task = taskID + " " + title
-			} else {
-				workers[i].Task = taskID
-			}
+		if title, ok := taskTitles[id]; ok {
+			workers[i].Task = id + " " + title
 		}
 	}
+}
 
-	// Match PRs to workers by task ID
+// attachPRs matches each worker's task to an open PR.
+func attachPRs(projectRoot string, workers []Worker) {
 	prs, _ := store.ListFor(projectRoot)
 	for i := range workers {
 		if workers[i].Task == "" {
@@ -171,8 +237,6 @@ func List(projectRoot string) []Worker {
 			}
 		}
 	}
-
-	return workers
 }
 
 func getTaskTitles(projectRoot string) map[string]string {

@@ -2,7 +2,7 @@
 j/k:nav enter:open · y:copy n:new e:edit a:approve x:reject s:status m:move c:comment · f:filter r:refresh q:quit
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │  [T]asks  [W]orkers                                                                              │
-│   📄     os-17cb5f                     spec 0/3          (no task — needs planning)              │
+│   📄     os-17cb5f                     spec 0/3          auth-refactor                           │
 │   🪲     td-aaaaaa P1  26-05-28 10:00  open              fix login redirect                      │
 │       ☐ review code                                                                              │
 │ > 📄     td-bbbbbb P2  26-05-28 12:00  in_progress       csv-export · add CSV export             │

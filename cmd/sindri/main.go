@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
@@ -80,7 +81,17 @@ func main() {
 	}
 	workerReviewCmd.Flags().BoolVar(&reviewShell, "shell", false, "Open a shell instead of launching claude (for debugging)")
 
-	workerCmd.AddCommand(workerListCmd, workerStartCmd, workerStopCmd, workerResetCmd, workerReviewCmd)
+	var pruneYes bool
+	workerPruneCmd := &cobra.Command{
+		Use:   "prune",
+		Short: "Delete orphaned workers (a container or worktree with no index entry)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkerPrune(pruneYes)
+		},
+	}
+	workerPruneCmd.Flags().BoolVarP(&pruneYes, "yes", "y", false, "Skip the confirmation prompt")
+
+	workerCmd.AddCommand(workerListCmd, workerStartCmd, workerStopCmd, workerResetCmd, workerReviewCmd, workerPruneCmd)
 	rootCmd.AddCommand(workerCmd)
 
 	// Top-level alias: sindri work = sindri worker start
@@ -98,6 +109,7 @@ func main() {
 	workCmd.Flags().BoolVar(&workShell, "shell", false, "Open a shell instead of launching claude")
 	rootCmd.AddCommand(workCmd)
 
+	rootCmd.AddCommand(newInitCmd())
 	rootCmd.AddCommand(newTuiCmd())
 	rootCmd.AddCommand(newPrCmd())
 	rootCmd.AddCommand(newReviewCmd())
@@ -202,4 +214,42 @@ func runWorkerReset(cmd *cobra.Command, args []string) error {
 
 func runWorkerStop(cmd *cobra.Command, args []string) error {
 	return worker.Stop(args[0])
+}
+
+func runWorkerPrune(yes bool) error {
+	projectRoot, err := worker.GitRoot()
+	if err != nil {
+		return fmt.Errorf("not in a git repo: %w", err)
+	}
+	orphans := worker.Orphans(projectRoot)
+	if len(orphans) == 0 {
+		fmt.Fprintln(os.Stderr, "No orphaned workers.")
+		return nil
+	}
+
+	fmt.Fprintln(os.Stderr, "Orphaned workers (no index entry):")
+	for _, o := range orphans {
+		what := []string{}
+		if o.Container != "" {
+			what = append(what, "container "+o.Container)
+		}
+		if o.Path != "" {
+			what = append(what, "worktree "+filepath.Base(o.Path))
+		}
+		fmt.Fprintf(os.Stderr, "  ⚠ %s — %s\n", o.Name, strings.Join(what, ", "))
+	}
+
+	if !yes && !confirm(fmt.Sprintf("Delete %d orphaned worker(s)?", len(orphans))) {
+		fmt.Fprintln(os.Stderr, "Aborted.")
+		return nil
+	}
+
+	for _, o := range orphans {
+		if err := worker.RemoveOrphan(projectRoot, o); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: prune %s: %v\n", o.Name, err)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "Removed %s.\n", o.Name)
+	}
+	return nil
 }

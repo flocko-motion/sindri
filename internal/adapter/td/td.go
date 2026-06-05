@@ -9,19 +9,29 @@ package td
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/flo-at/sindri/internal/issue"
 )
 
-// Tasks returns every task (including closed), ordered open → active → closed.
-func Tasks(root string) ([]issue.Task, error) {
-	out, err := run(root, "list", "--json", "--limit", "100", "--all")
+// maxTasks is a generous cap so a busy board is never silently truncated. td
+// reads a local SQLite db, so a high limit is cheap.
+const maxTasks = "100000"
+
+// Tasks returns tasks matching the given filter, ordered open → active → closed.
+// The filter is pushed down to td: the open view skips closed rows entirely so a
+// large backlog of closed tasks can't starve the limit and drop open ones.
+func Tasks(root string, f issue.Filter) ([]issue.Task, error) {
+	args := []string{"list", "--json", "--limit", maxTasks}
+	if f != issue.FilterOpen {
+		// Closed and All both need terminal-state rows; td excludes them by
+		// default. The closed-only narrowing happens client-side in issue.Apply.
+		args = append(args, "--all")
+	}
+	out, err := run(root, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -205,44 +215,6 @@ func (r rawTask) toTask() issue.Task {
 		Priority: r.Priority, ParentID: r.ParentID,
 		Labels: r.Labels, CreatedAt: created, UpdatedAt: updated,
 	}
-}
-
-// enrichConcurrency caps the parallel `td show` calls Enrich runs at once.
-// 8 keeps wall time low without thrashing the td database.
-const enrichConcurrency = 8
-
-// Enrich populates fields td list strips out (currently: ParentID) by calling
-// `td show <id> --json` per task. Calls run on a small worker pool so a
-// 50-task board enriches in roughly one show-latency (~30ms) instead of the
-// sequential ~300ms it would otherwise take. Per-task failures log to stderr
-// and skip — partial enrichment beats a hard refresh failure, and the warning
-// keeps the problem visible per "never fail silently".
-func Enrich(root string, tasks []issue.Task) {
-	if len(tasks) == 0 {
-		return
-	}
-	sem := make(chan struct{}, enrichConcurrency)
-	var wg sync.WaitGroup
-	for i := range tasks {
-		i := i
-		wg.Add(1)
-		sem <- struct{}{}
-		go func() {
-			defer func() { <-sem; wg.Done() }()
-			out, err := run(root, "show", tasks[i].ID, "--json")
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: td enrich %s: %v\n", tasks[i].ID, err)
-				return
-			}
-			var r rawTask
-			if err := json.Unmarshal([]byte(out), &r); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: td enrich %s: parse: %v\n", tasks[i].ID, err)
-				return
-			}
-			tasks[i].ParentID = r.ParentID
-		}()
-	}
-	wg.Wait()
 }
 
 // parseAndSort parses td list JSON and orders it open → active → closed.

@@ -16,7 +16,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/flo-at/sindri/internal/action"
 	"github.com/flo-at/sindri/internal/adapter/td"
-	"github.com/flo-at/sindri/internal/board"
 	"github.com/flo-at/sindri/internal/issue"
 )
 
@@ -466,15 +465,14 @@ func descendantOfSource(issues []issue.Issue, src, candidate string) bool {
 // setTaskParent re-parents a task via the td adapter. On success it emits a
 // movedMsg so the Update handler can patch m.issues optimistically (instant
 // redraw) and sync via a background refresh — avoiding the ~2s gap the full
-// refreshData round-trip would otherwise add. The parent_id cache is updated
-// in place so the background refresh sees the new structure too.
+// refreshData round-trip would otherwise add. The background refresh reads the
+// new parent_id straight from `td list`, so no local cache update is needed.
 func (m *Model) setTaskParent(taskID, newParent string) tea.Cmd {
 	projectRoot := m.projectRoot
 	return func() tea.Msg {
 		if err := td.SetParent(projectRoot, taskID, newParent); err != nil {
 			return actionResultMsg{message: "Move failed: " + err.Error(), isError: true}
 		}
-		board.SetCachedParent(taskID, newParent)
 		return movedMsg{taskID: taskID, newParentID: newParent}
 	}
 }

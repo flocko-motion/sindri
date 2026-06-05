@@ -94,7 +94,7 @@ func decideSpecAfterClose(closedTaskID string, allTasks []issue.Task, activeSpec
 // (typically the TUI) then either calls ArchiveSpec, surfaces a prompt, or
 // does nothing depending on Action.
 func MaybeArchiveLinkedSpec(root, closedTaskID string) (SpecAfterCloseDecision, error) {
-	tasks, err := td.Tasks(root)
+	tasks, err := td.Tasks(root, issue.FilterAll)
 	if err != nil {
 		return SpecAfterCloseDecision{}, fmt.Errorf("load tasks: %w", err)
 	}
@@ -128,7 +128,7 @@ func AbandonSpec(root, name string) (closed []string, err error) {
 	if c := spec.Lookup(root, name); c == nil {
 		return nil, fmt.Errorf("spec %s is not an active proposal (archived or missing)", name)
 	}
-	tasks, err := td.Tasks(root)
+	tasks, err := td.Tasks(root, issue.FilterAll)
 	if err != nil {
 		return nil, fmt.Errorf("load tasks: %w", err)
 	}

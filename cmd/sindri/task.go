@@ -131,15 +131,6 @@ func runTaskList(cmd *cobra.Command, args []string, showAll, showOpen, showClose
 		return fmt.Errorf("not in a git repo: %w", err)
 	}
 
-	// One-shot CLI: warm the parent_id cache so hierarchy renders in this run.
-	// The TUI gets this in the background; the CLI accepts the latency.
-	board.WarmParentCache(projectRoot)
-
-	issues, err := board.List(projectRoot)
-	if err != nil {
-		return err
-	}
-
 	filter := issue.FilterOpen
 	switch {
 	case showAll || (showOpen && showClosed):
@@ -147,6 +138,13 @@ func runTaskList(cmd *cobra.Command, args []string, showAll, showOpen, showClose
 	case showClosed:
 		filter = issue.FilterClosed
 	}
+
+	issues, err := board.List(projectRoot, filter)
+	if err != nil {
+		return err
+	}
+	// The query already narrowed by filter; Apply re-applies the same rule so
+	// spec-only rows (never closed) are handled consistently.
 	issues = issue.Apply(issues, filter)
 
 	if len(issues) == 0 {
@@ -194,7 +192,7 @@ func runTaskView(cmd *cobra.Command, args []string) error {
 	}
 	taskID := args[0]
 
-	issues, err := board.List(projectRoot)
+	issues, err := board.List(projectRoot, issue.FilterAll)
 	if err != nil {
 		return err
 	}
