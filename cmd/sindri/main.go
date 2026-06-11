@@ -109,6 +109,14 @@ func main() {
 	workCmd.Flags().BoolVar(&workShell, "shell", false, "Open a shell instead of launching claude")
 	rootCmd.AddCommand(workCmd)
 
+	// Hub-era verbs (Phase 1: hub architecture).
+	rootCmd.AddCommand(newHubCmd())
+	rootCmd.AddCommand(newNewCmd())
+	rootCmd.AddCommand(newLaunchCmd())
+	rootCmd.AddCommand(newTellCmd())
+	rootCmd.AddCommand(newAttachCmd())
+	rootCmd.AddCommand(newAgentsCmd())
+
 	rootCmd.AddCommand(newInitCmd())
 	rootCmd.AddCommand(newTuiCmd())
 	rootCmd.AddCommand(newPrCmd())

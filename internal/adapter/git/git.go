@@ -1,0 +1,51 @@
+// package: adapter/git / git
+// type:    adapter (external tool: git)
+// job:     wrap the git operations the hub needs — locate the repo root, add a
+//          detached worktree for an agent's workspace, read the current branch.
+//          The only place git is invoked (fuller surface — rebase, merge —
+//          lands in Phase 3).
+// limits:  no podman, no task/PR logic; pure git.
+package git
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+)
+
+// Root returns the git repository root containing dir.
+func Root(dir string) (string, error) {
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return "", fmt.Errorf("not a git repo: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// WorktreeAdd creates a detached worktree at path pointing at ref (e.g. "HEAD"),
+// creating the parent directory and pruning any stale registration first. It is
+// safe to call when the worktree already exists for a fresh path.
+func WorktreeAdd(repo, path, ref string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("mkdir worktree parent: %w", err)
+	}
+	if _, err := os.Stat(path); err == nil {
+		// Path exists already; prune stale git metadata then reuse it.
+		_ = exec.Command("git", "-C", repo, "worktree", "prune").Run()
+		if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
+			return nil // already a worktree
+		}
+	}
+	out, err := exec.Command("git", "-C", repo, "worktree", "add", "--detach", path, ref).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git worktree add: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// HasCommits reports whether the repo has at least one commit.
+func HasCommits(repo string) bool {
+	return exec.Command("git", "-C", repo, "rev-parse", "HEAD").Run() == nil
+}

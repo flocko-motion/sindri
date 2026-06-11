@@ -1,30 +1,26 @@
 #!/usr/bin/env bash
-# Sindri agent — starts Claude as a background daemon inside the container.
-# The daemon runs independently of this script.
-# The script's only job is to start the daemon and keep the container alive.
+# Sindri agent entrypoint (hub architecture).
 #
-# Output: podman exec <container> claude logs <session-id>
-# Input:  podman exec <container> claude -c -p "message"
-# Status: podman exec <container> claude agents --json
+# The agent runs INTERACTIVE inside a tmux session named after the agent. The
+# hub delivers all inbound messages by `tmux send-keys` into this session
+# ("as if the user typed"), and a human can `tmux attach` to dial in. The
+# container's PID 1 is a sleep that keeps the pod alive; the tmux server runs
+# the real session independently, so a hub crash never touches it.
+#
+# Phase 1 runs an interactive shell to prove the inbound channel end to end.
+# Later phases set SINDRI_AGENT_CMD to launch interactive Claude here instead.
 set -euo pipefail
 
-PROMPT_FILE="/home/sindri/.claude/system-prompt.txt"
-PROMPT="${1:-$(cat "$PROMPT_FILE" 2>/dev/null || echo 'You are a Sindri agent.')}"
+AGENT="${1:-${SINDRI_AGENT:-agent}}"
+SESSION="$AGENT"
+CMD="${SINDRI_AGENT_CMD:-bash}"
 
-echo "=== sindri agent starting ==="
+echo "=== sindri agent '$AGENT' starting (session: $SESSION, cmd: $CMD) ==="
 
-# Start Claude as a background daemon
-BG_OUTPUT=$(claude --bg --dangerously-skip-permissions \
-    --verbose --output-format stream-json \
-    --disallowedTools "EnterWorktree,ExitWorktree" \
-    -p "$PROMPT" 2>&1)
-echo "$BG_OUTPUT"
+# Start the detached interactive session. The tmux server daemonises; PID 1
+# below keeps the container alive so the session persists.
+tmux new-session -d -s "$SESSION" "$CMD"
 
-# Extract and persist session ID for external tools
-SESSION_ID=$(echo "$BG_OUTPUT" | grep -oP 'backgrounded · \K[a-f0-9]+' || true)
-echo "$SESSION_ID" > /tmp/sindri-session-id
-echo "=== session: ${SESSION_ID:-unknown} ==="
-echo "=== daemon running ==="
+echo "=== session ready — hub injects via 'tmux send-keys -t $SESSION' ==="
 
-# Keep container alive. The daemon runs in the background independently.
 exec sleep infinity

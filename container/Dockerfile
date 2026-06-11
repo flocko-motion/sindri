@@ -22,6 +22,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget netcat-openbsd dnsutils iputils-ping \
     # process / system
     procps lsof watch htop \
+    # terminal multiplexer — the agent runs interactively inside a tmux session
+    # that the hub injects into (send-keys) and humans attach to
+    tmux \
     # python
     python3 python3-pip python3-venv python3-pytest \
     # misc
@@ -59,7 +62,6 @@ RUN chmod +x /usr/local/bin/docker /usr/local/bin/docker-compose
 # ── Sindri scripts ────────────────────────────────────────────────────────────
 COPY container/wait-for-task.sh /usr/local/bin/wait-for-task
 COPY container/sindri-agent.sh  /usr/local/bin/sindri-agent
-COPY container/agent-bridge.mjs /opt/sindri/agent-bridge.mjs
 COPY container/skills/          /opt/sindri/skills/
 COPY container/CLAUDE.md        /opt/sindri/CLAUDE.md
 COPY container/CLAUDE.reviewer.md /opt/sindri/CLAUDE.reviewer.md
