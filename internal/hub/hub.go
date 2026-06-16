@@ -1,18 +1,24 @@
 // package: hub / hub
 // type:    logic (the single writer / gatekeeper)
 // job:     the per-repo hub — owns the SQLite store, registers agent identities,
-//          launches pods that assume those identities, and delivers inbound
-//          messages by driving tmux inside a pod (provenance-stamped). Usable
-//          in-process (ephemeral) or behind the socket server (persistent).
+//
+//	launches pods that assume those identities, and delivers inbound
+//	messages by driving tmux inside a pod (provenance-stamped). Usable
+//	in-process (ephemeral) or behind the socket server (persistent).
+//
 // limits:  reaches external tools only via internal/adapter/{pod,tmux,git};
-//          the agent's browser client + command surface arrive in Phase 2.
+//
+//	the agent's browser client + command surface arrive in Phase 2.
 package hub
 
 import (
 	"fmt"
+	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sync"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/adapter/pod"
@@ -26,6 +32,9 @@ import (
 type Hub struct {
 	root  string
 	store *store.Store
+
+	mu      sync.Mutex              // guards agentLn
+	agentLn map[string]net.Listener // per-agent socket listeners (identity-by-socket)
 }
 
 // AgentState is an agent as presented to clients: durable identity plus live
@@ -53,11 +62,14 @@ func New(root string) (*Hub, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Hub{root: root, store: st}, nil
+	return &Hub{root: root, store: st, agentLn: map[string]net.Listener{}}, nil
 }
 
-// Close releases the store.
-func (h *Hub) Close() error { return h.store.Close() }
+// Close shuts agent listeners and releases the store.
+func (h *Hub) Close() error {
+	h.closeAgents()
+	return h.store.Close()
+}
 
 // SocketPath is the hub's control socket for this repo.
 func (h *Hub) SocketPath() string { return SocketPath(h.root) }
@@ -108,6 +120,16 @@ func (h *Hub) Launch(name string) error {
 	if err := git.WorktreeAdd(h.root, wt, "HEAD"); err != nil {
 		return err
 	}
+	// Serve the agent's own socket BEFORE the pod launches — the pod bind-mounts
+	// it, and the socket IS the agent's identity (D2). Requires the persistent
+	// hub: an ephemeral in-process hub would take the listener down on exit.
+	if err := h.ServeAgent(name); err != nil {
+		return err
+	}
+	workerBin, err := agentBinary()
+	if err != nil {
+		return err
+	}
 	cName := Container(name)
 	_ = pod.Rm(cName) // clear any stale container with this name
 
@@ -118,8 +140,10 @@ func (h *Hub) Launch(name string) error {
 		Env:    map[string]string{"SINDRI_AGENT": name, "COLORTERM": "truecolor"},
 		Mounts: []pod.Mount{
 			{Host: wt, Container: "/workspace", Mode: "rw"},
-			// Phase 2 adds the agent's own socket mount (identity-by-socket); the
-			// Phase 1 agent has no browser client, so it needs only its workspace.
+			// The agent's own socket — its sole channel to the hub, its identity.
+			{Host: AgentSocketPath(h.root, name), Container: "/run/sindri.sock", Mode: "rw"},
+			// The thin browser binary (image symlinks /usr/local/bin/sindri-worker).
+			{Host: workerBin, Container: "/opt/sindri/sindri-worker", Mode: "ro"},
 		},
 		Workdir:    "/workspace",
 		Entrypoint: []string{"sindri-agent", name},
@@ -164,6 +188,22 @@ func (h *Hub) inject(name, text string) error {
 		}
 	}
 	return nil
+}
+
+// agentBinary locates the thin browser binary on the host: next to the running
+// sindri binary first, then on PATH.
+func agentBinary() (string, error) {
+	const name = "sindri-worker"
+	if self, err := os.Executable(); err == nil {
+		cand := filepath.Join(filepath.Dir(self), name)
+		if _, err := os.Stat(cand); err == nil {
+			return cand, nil
+		}
+	}
+	if p, err := exec.LookPath(name); err == nil {
+		return p, nil
+	}
+	return "", fmt.Errorf("%s binary not found — run 'make build/install'", name)
 }
 
 // State returns every agent with its live running status.

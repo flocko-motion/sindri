@@ -97,13 +97,23 @@ func newLaunchCmd() *cobra.Command {
 		Short: "Spin a pod that assumes an existing agent's identity",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withBackend(func(b backend) error {
-				if err := b.Launch(args[0]); err != nil {
-					return err
-				}
-				fmt.Fprintf(os.Stderr, "launched %s\n", args[0])
-				return nil
-			})
+			root, err := repoRoot()
+			if err != nil {
+				return err
+			}
+			// A launched agent needs its socket served for as long as it runs, so a
+			// persistent hub must be up — an ephemeral in-process hub would take the
+			// listener down on exit.
+			if !hub.IsRunning(root) {
+				return fmt.Errorf("no hub running — start one first: 'sindri hub &' (agents need a persistent hub)")
+			}
+			c := client.Dial(root)
+			defer c.Close()
+			if err := c.Launch(args[0]); err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stderr, "launched %s\n", args[0])
+			return nil
 		},
 	}
 }

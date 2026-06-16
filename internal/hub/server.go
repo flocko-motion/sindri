@@ -1,8 +1,10 @@
 // package: hub / server
 // type:    logic (HTTP/JSON over a unix socket)
 // job:     expose the hub's operations as a small HTTP API on the repo's unix
-//          socket — GET /state, POST /agents, POST /launch, POST /tell. The
-//          single point every client (CLI, TUI, later agents) talks to.
+//
+//	socket — GET /state, POST /agents, POST /launch, POST /tell. The
+//	single point every client (CLI, TUI, later agents) talks to.
+//
 // limits:  pure transport over Hub methods; no domain logic of its own.
 package hub
 
@@ -65,6 +67,11 @@ func (h *Hub) Handler() http.Handler {
 // Serve binds the repo's unix socket and serves until the listener closes. A
 // stale socket file from a previous run is removed first.
 func (h *Hub) Serve() error {
+	// Re-serve every rostered agent's socket so a restarted hub recovers all
+	// agent channels (D11).
+	if err := h.ServeAgents(); err != nil {
+		return err
+	}
 	path := h.SocketPath()
 	_ = os.Remove(path)
 	ln, err := net.Listen("unix", path)

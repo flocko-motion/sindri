@@ -1,7 +1,8 @@
 // package: hub / socket
 // type:    logic (transport addressing)
 // job:     the per-repo control-socket path and a liveness probe, shared by the
-//          server (bind) and clients (dial / ephemeral decision).
+//
+//	server (bind) and clients (dial / ephemeral decision).
 package hub
 
 import (

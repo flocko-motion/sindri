@@ -22,7 +22,7 @@ func TestRunArgsDeterministicAndComplete(t *testing.T) {
 
 	// Labels and env emitted in sorted key order → deterministic.
 	want := []string{
-		"run", "-d", "--name", "sindri-brokkr", "--userns=keep-id",
+		"run", "-d", "--name", "sindri-brokkr", "--userns=" + UserNS,
 		"--label", "sindri.agent=brokkr", "--label", "sindri.project=/repo",
 		"-e", "A=1", "-e", "B=2",
 		"-v", "/h/ws:/workspace:rw,z", "-v", "/h/sock:/run/hub.sock:rw,z",

@@ -1,0 +1,115 @@
+// package: hub / commands
+// type:    logic (the hub-side verb set the browser invokes)
+// job:     build the command registry with hub-bound behaviour, resolve a
+//
+//	caller's identity/role/state, and execute a verb on its behalf
+//	(logging the socket call to the activity log). Phase 2 ships the
+//	mechanism with real `status`/`log` plus role-scoped Phase-3 stubs.
+//
+// limits:  workflow verbs (submit/next/approve/reject) gain real behaviour in
+//
+//	Phase 3; here they exist only to prove surface filtering.
+package hub
+
+import (
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/flo-at/sindri/internal/adapter/pod"
+	"github.com/flo-at/sindri/internal/hub/registry"
+)
+
+// CmdInfo is a command as advertised to a browser (name + help).
+type CmdInfo struct {
+	Name string `json:"name"`
+	Help string `json:"help"`
+}
+
+// registry builds the command surface. Rebuilt per call (cheap); Run closures
+// capture the hub so commands can reach the store/adapters.
+func (h *Hub) registry() *registry.Registry {
+	return registry.New(
+		registry.Command{Name: "status", Help: "show who you are and your current state", Run: h.cmdStatus},
+		registry.Command{Name: "log", Help: "record a note in your activity log: log <message>", Run: h.cmdLog},
+		registry.Command{Name: "submit", Help: "request your branch be merged", Roles: []string{"worker"}, Run: phase3("submit")},
+		registry.Command{Name: "next", Help: "pick up the next task", Roles: []string{"worker"},
+			Hidden: func(c registry.Caller) bool { return c.HasTask }, Run: phase3("next")},
+		registry.Command{Name: "approve", Help: "approve a pull request", Roles: []string{"reviewer"}, Run: phase3("approve")},
+		registry.Command{Name: "reject", Help: "reject a pull request with feedback", Roles: []string{"reviewer"}, Run: phase3("reject")},
+	)
+}
+
+// caller resolves an agent's identity and role (workflow state arrives Phase 3).
+func (h *Hub) caller(name string) (registry.Caller, error) {
+	a, ok, err := h.store.GetAgent(name)
+	if err != nil {
+		return registry.Caller{}, err
+	}
+	if !ok {
+		return registry.Caller{}, fmt.Errorf("unknown agent %q", name)
+	}
+	return registry.Caller{Agent: name, Role: a.Role}, nil
+}
+
+// AgentCommands returns the command surface currently available to an agent.
+func (h *Hub) AgentCommands(name string) ([]CmdInfo, error) {
+	c, err := h.caller(name)
+	if err != nil {
+		return nil, err
+	}
+	avail := h.registry().Available(c)
+	out := make([]CmdInfo, len(avail))
+	for i, cmd := range avail {
+		out[i] = CmdInfo{Name: cmd.Name, Help: cmd.Help}
+	}
+	return out, nil
+}
+
+// AgentExec runs a verb on behalf of an agent, streaming to out and returning a
+// process-style exit code. Every call is recorded in the activity log (the
+// socket "messages sent", D12).
+func (h *Hub) AgentExec(name string, args []string, out io.Writer) (int, error) {
+	c, err := h.caller(name)
+	if err != nil {
+		return 1, err
+	}
+	if len(args) == 0 {
+		return 1, fmt.Errorf("no command given")
+	}
+	_ = h.store.Log(c.Agent, "exec", strings.Join(args, " "))
+	cmd, ok := h.registry().Lookup(args[0], c)
+	if !ok {
+		fmt.Fprintf(out, "unknown or unavailable command: %s\n", args[0])
+		return 127, nil
+	}
+	return cmd.Run(c, args[1:], out)
+}
+
+func (h *Hub) cmdStatus(c registry.Caller, _ []string, out io.Writer) (int, error) {
+	running := pod.Running(Container(c.Agent))
+	fmt.Fprintf(out, "agent:   %s\nrole:    %s\nrunning: %v\n", c.Agent, c.Role, running)
+	return 0, nil
+}
+
+func (h *Hub) cmdLog(c registry.Caller, args []string, out io.Writer) (int, error) {
+	msg := strings.TrimSpace(strings.Join(args, " "))
+	if msg == "" {
+		fmt.Fprintln(out, "usage: log <message>")
+		return 2, nil
+	}
+	if err := h.store.Log(c.Agent, "note", msg); err != nil {
+		return 1, err
+	}
+	fmt.Fprintln(out, "logged")
+	return 0, nil
+}
+
+// phase3 returns a placeholder Run for a verb whose behaviour lands in Phase 3 —
+// present in the surface (so role filtering is exercised) but not yet wired.
+func phase3(name string) func(registry.Caller, []string, io.Writer) (int, error) {
+	return func(_ registry.Caller, _ []string, out io.Writer) (int, error) {
+		fmt.Fprintf(out, "%s: arrives in Phase 3 (workflow)\n", name)
+		return 0, nil
+	}
+}

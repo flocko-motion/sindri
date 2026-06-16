@@ -35,10 +35,16 @@ type RunOpts struct {
 	Entrypoint []string // command + args run as the container's process
 }
 
+// UserNS maps the host user to the container's sindri uid/gid (1000) so
+// host-owned mounts (workspace, the agent socket) appear owned by the in-pod
+// user regardless of the host uid — plain keep-id breaks when the host uid is
+// not 1000 (e.g. a subuid-mapped rootless setup).
+const UserNS = "keep-id:uid=1000,gid=1000"
+
 // RunArgs builds the `podman run -d ...` argv (pure, for testing). Mounts and
 // env are emitted in a stable order so the output is deterministic.
 func RunArgs(o RunOpts) []string {
-	args := []string{"run", "-d", "--name", o.Name, "--userns=keep-id"}
+	args := []string{"run", "-d", "--name", o.Name, "--userns=" + UserNS}
 	for _, k := range sortedKeys(o.Labels) {
 		args = append(args, "--label", k+"="+o.Labels[k])
 	}

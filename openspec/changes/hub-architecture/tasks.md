@@ -29,10 +29,10 @@ back-compat: superseded code is deleted, not wrapped.
 
 - [x] 1.7 `internal/hub`: bind a per-repo unix socket; `EADDRINUSE` ⇒ "already
       running"; serve a stdlib `http.Server`
-- [ ] 1.8 Identity from the accepting socket (one socket per agent); map
-      connection → roster entry — *deferred to Phase 2: Phase 1 uses a single
-      control socket; the per-agent socket path is recorded in the roster and the
-      mount is grounded, but identity-by-socket lands with the agent browser client*
+- [x] 1.8 Identity from the accepting socket (one socket per agent); map
+      connection → roster entry — *done in Phase 2 (see 1.8 under §2): each agent
+      has `.sindri/sockets/<name>.sock`; the hub serves one listener per agent and
+      derives identity from which socket accepted the connection*
 - [x] 1.9 `GET /state` returns the roster as JSON (done). `POST /exec` deferred to
       Phase 2 — Phase 1 delivers `POST /agents`, `/launch`, `/tell` instead, which
       is what the skeleton demo exercises
@@ -73,17 +73,26 @@ back-compat: superseded code is deleted, not wrapped.
 
 ## 2. Phase 2 — browser client + command registry
 
-- [ ] 2.1 `internal/hub/registry` — command set keyed by `(role, state)`
-- [ ] 2.2 `GET /commands` returns only currently-valid commands for the caller
-- [ ] 2.3 `POST /exec` runs a real command hub-side and streams stdout/stderr/exit
-- [ ] 2.4 `internal/client` — thin socket client shared by the agent binary + host
-- [ ] 2.5 Collapse `cmd/sindri-review` into `cmd/sindri-worker`; make it a
-      role-agnostic browser with no built-in command tree (`sindri-worker` no-args
-      ⇒ ask hub for next action)
+- [x] 2.1 `internal/hub/registry` — command set keyed by `(role, state)`
+      (`Caller{Agent,Role,HasTask}`; role + Hidden-predicate filtering)
+- [x] 2.2 `GET /commands` returns only currently-valid commands for the caller
+- [x] 2.3 `POST /exec` runs a real command hub-side and streams stdout/stderr,
+      exit code via the `X-Sindri-Exit` trailer
+- [x] 2.4 `internal/client` — thin socket client shared by the agent binary + host
+      (`DialSocket`, `Commands`, `Exec`)
+- [x] 2.5 Collapsed `cmd/sindri-review` into `cmd/sindri-worker`; role-agnostic
+      browser with no command tree (`sindri-worker` no-args ⇒ hub `/commands` menu);
+      deleted `internal/agentcli`; Makefile/Dockerfile updated
 - [ ] 2.6 `internal/adapter/spec` → `internal/adapter/openspec` (rename); hub is
-      its only caller
-- [ ] 2.7 Reviewer surface excludes submit/merge; worker surface excludes
-      approve/reject/merge (assert with a test)
+      its only caller — *deferred to Phase 3: spec is still imported by ~10 legacy
+      packages; the rename is meaningful only once submit/lint move hub-side and the
+      hub becomes its sole caller*
+- [x] 2.7 Reviewer surface excludes submit/merge; worker surface excludes
+      approve/reject/merge — asserted in `registry_test.go` + `client_test.go`
+      (`TestAgentSocketIdentityAndSurface`)
+- [x] 1.8 (carried from Phase 1) Identity from the accepting socket — each agent
+      has its own `.sindri/sockets/<name>.sock`; a connection on it IS that agent
+      (verified live: `status` over brokkr's socket returns brokkr/worker)
 
 ## 3. Phase 3 — workflow + PR-as-merge-intent
 

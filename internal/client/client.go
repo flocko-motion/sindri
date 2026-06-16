@@ -14,6 +14,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 
 	"github.com/flo-at/sindri/internal/hub"
 )
@@ -24,18 +25,21 @@ type HTTP struct {
 	base string
 }
 
-// Dial returns a client for the hub serving root's socket.
-func Dial(root string) *HTTP {
-	sock := hub.SocketPath(root)
+// DialSocket returns a client that talks to the hub over a specific unix socket
+// — used by the in-pod browser, which dials its own mounted socket.
+func DialSocket(socketPath string) *HTTP {
 	return &HTTP{
 		base: "http://unix",
 		hc: &http.Client{Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				return (&net.Dialer{}).DialContext(ctx, "unix", sock)
+				return (&net.Dialer{}).DialContext(ctx, "unix", socketPath)
 			},
 		}},
 	}
 }
+
+// Dial returns a client for the hub serving root's control socket.
+func Dial(root string) *HTTP { return DialSocket(hub.SocketPath(root)) }
 
 // Close is a no-op (kept so HTTP satisfies the same interface as *hub.Hub).
 func (c *HTTP) Close() error { return nil }
@@ -59,6 +63,36 @@ func (c *HTTP) Launch(name string) error {
 // Tell delivers a provenance-stamped message into an agent's session.
 func (c *HTTP) Tell(name, msg, source string) error {
 	return c.post("/tell", hub.TellReq{Name: name, Msg: msg, Source: source})
+}
+
+// Commands fetches the caller's currently-available command surface (the browser
+// menu). Identity is the socket, so no name is sent.
+func (c *HTTP) Commands() ([]hub.CmdInfo, error) {
+	var out []hub.CmdInfo
+	return out, c.get("/commands", &out)
+}
+
+// Exec runs a verb on the hub, streaming output to out, and returns the
+// command's exit code (carried back in the X-Sindri-Exit trailer).
+func (c *HTTP) Exec(args []string, out io.Writer) (int, error) {
+	buf, err := json.Marshal(hub.ExecReq{Args: args})
+	if err != nil {
+		return 1, err
+	}
+	resp, err := c.hc.Post(c.base+"/exec", "application/json", bytes.NewReader(buf))
+	if err != nil {
+		return 1, err
+	}
+	defer resp.Body.Close()
+	if _, err := io.Copy(out, resp.Body); err != nil {
+		return 1, err
+	}
+	if v := resp.Trailer.Get("X-Sindri-Exit"); v != "" {
+		if code, err := strconv.Atoi(v); err == nil {
+			return code, nil
+		}
+	}
+	return 0, nil
 }
 
 func (c *HTTP) get(path string, out any) error {

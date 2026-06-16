@@ -1,11 +1,109 @@
 package client
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/flo-at/sindri/internal/hub"
 )
+
+func cmdNames(cmds []hub.CmdInfo) []string {
+	out := make([]string, len(cmds))
+	for i, c := range cmds {
+		out[i] = c.Name
+	}
+	return out
+}
+
+func has(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+// The agent socket IS the identity: a connection on brokkr's socket is brokkr.
+// Exercises GET /commands (role-filtered) and POST /exec (streamed + exit) over
+// a real per-agent socket.
+func TestAgentSocketIdentityAndSurface(t *testing.T) {
+	root := t.TempDir()
+	h, err := hub.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+
+	if err := h.NewAgent("brokkr", "worker"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.NewAgent("rune", "reviewer"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.ServeAgent("brokkr"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.ServeAgent("rune"); err != nil {
+		t.Fatal(err)
+	}
+
+	worker := DialSocket(hub.AgentSocketPath(root, "brokkr"))
+	rune := DialSocket(hub.AgentSocketPath(root, "rune"))
+
+	// Worker surface: status/log/submit/next — never approve/reject.
+	wc, err := worker.Commands()
+	if err != nil {
+		t.Fatalf("worker commands: %v", err)
+	}
+	wn := cmdNames(wc)
+	for _, want := range []string{"status", "submit", "next"} {
+		if !has(wn, want) {
+			t.Fatalf("worker surface missing %q: %v", want, wn)
+		}
+	}
+	for _, bad := range []string{"approve", "reject", "merge"} {
+		if has(wn, bad) {
+			t.Fatalf("worker surface must not include %q: %v", bad, wn)
+		}
+	}
+
+	// Reviewer surface: approve/reject — never submit/next.
+	rc, err := rune.Commands()
+	if err != nil {
+		t.Fatalf("reviewer commands: %v", err)
+	}
+	rn := cmdNames(rc)
+	for _, want := range []string{"approve", "reject"} {
+		if !has(rn, want) {
+			t.Fatalf("reviewer surface missing %q: %v", want, rn)
+		}
+	}
+	for _, bad := range []string{"submit", "next"} {
+		if has(rn, bad) {
+			t.Fatalf("reviewer surface must not include %q: %v", bad, rn)
+		}
+	}
+
+	// Exec status over the worker socket → identity is brokkr/worker.
+	var out bytes.Buffer
+	exit, err := worker.Exec([]string{"status"}, &out)
+	if err != nil || exit != 0 {
+		t.Fatalf("status exec: exit=%d err=%v", exit, err)
+	}
+	if !strings.Contains(out.String(), "agent:   brokkr") || !strings.Contains(out.String(), "role:    worker") {
+		t.Fatalf("status output wrong: %q", out.String())
+	}
+
+	// A reviewer-only verb is invisible to the worker → "unknown or unavailable".
+	out.Reset()
+	exit, _ = worker.Exec([]string{"approve"}, &out)
+	if exit != 127 || !strings.Contains(out.String(), "unknown or unavailable") {
+		t.Fatalf("worker should not run approve: exit=%d out=%q", exit, out.String())
+	}
+}
 
 // Exercise the full socket path end to end: hub server + HTTP client + store,
 // for the podman-free operations (register + state).
