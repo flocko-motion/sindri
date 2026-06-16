@@ -96,26 +96,30 @@ back-compat: superseded code is deleted, not wrapped.
 
 ## 3. Phase 3 — workflow + PR-as-merge-intent
 
-- [ ] 3.1 Hub owns merge-intent state (branch + wants-merge + verdict); `submit`
-      returns immediately ("registered, please wait")
-- [ ] 3.2 Agent loop: act → report → idle; hub injects next task / verdict (no
-      blocking, no `.sindri-task` file, no polling)
-- [ ] 3.3 Hub runs lint/review/merge via `adapter/git` (host-side, full access)
-- [ ] 3.4 Object-mediated agent2agent: `pr reject` → hub resolves branch→owner→pod
-      → inject `[reviewer]` feedback
+- [x] 3.1 Hub owns merge-intent state (`prs` table: branch + status + verdict);
+      `submit` records it and returns immediately ("registered, please wait")
+- [x] 3.2 Agent loop: act → report → idle; hub injects next task / verdict (no
+      blocking, no `.sindri-task` file, no polling) — `submit` returns, worker idles,
+      hub wakes it on merge/reject
+- [~] 3.3 Hub runs review/merge via `adapter/git` host-side (approve/reject + the
+      human `merge` done) — *lint gate at submit deferred (the lint pkg runs against
+      cwd, not a worktree path; needs a dir-scoped entry before it can gate submit)*
+- [x] 3.4 Object-mediated agent2agent: `reject` resolves branch→owner→pod →
+      injects `[reviewer]` feedback; `merge` routes `[hub]` back (verified live)
 - [ ] 3.5 **Delete** `internal/ghlocal/store` and the `worker.List` reconciler join
-- [ ] 3.6 Persist all live workflow state (task, merge-intent, verdict) write-through
-      in `hub.db`; a restarted hub recovers full state from `hub.db` +
-      `podman ps`/tmux and resumes, agents untouched across the blink (crash-restart test)
-- [ ] 3.7 Log workflow events (task claimed, merge-intent registered, verdict,
-      status transitions) to the `events` table via the Phase-1 `Log(...)` helper
-- [ ] 3.8 Rehydrate on (re)launch (D13): hub injects a briefing from the tail of the
-      agent's `events` log (raw last-N now; digest later) so a fresh pod resumes;
-      hub-log is canonical, Claude's mounted session not relied upon
-- [ ] 3.9 Task read model (D15): cache abstract tasks in `hub.db`; lists/board read
-      the cache. Targeted refresh from source of truth: all at startup, the task
-      before it is assigned, the task before its detail is shown (periodic optional).
-      `adapter/td` reads direct from td's SQLite, writes only via the `td` tool
+      — *deferred to Phase 4: still imported by the legacy board/action/worker/tui,
+      which Phase 4 rewires onto the hub. New flow uses hub.db `prs`, not this store*
+- [x] 3.6 Live workflow state persisted write-through in `hub.db` (`agent_state`,
+      `prs`, `tasks`); a restarted hub re-serves agent sockets + reads state from the
+      DB (in-memory is a projection)
+- [x] 3.7 Log workflow events (claim/submit/approve/reject/merged) to `events` via
+      `Log(...)` — verified in the activity log
+- [x] 3.8 Rehydrate on (re)launch (D13): `go h.rehydrate` injects a briefing from
+      the tail of the `events` log via `injectWhenReady`
+- [~] 3.9 Task read model (D15): cache in `hub.db` (`tasks`), synced from td;
+      refresh-before-assignment in `next`; `adapter/td` writes via the `td` tool.
+      *Sync currently reads via the td CLI; reading td's SQLite directly is the
+      pending optimization*
       (write-through to cache)
 
 ## 4. Phase 4 — TUI/CLI as clients

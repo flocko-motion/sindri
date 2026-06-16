@@ -18,7 +18,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/adapter/pod"
@@ -151,7 +153,11 @@ func (h *Hub) Launch(name string) error {
 	if err := pod.Run(opts); err != nil {
 		return err
 	}
-	return h.store.Log(name, "launch", "container="+cName)
+	if err := h.store.Log(name, "launch", "container="+cName); err != nil {
+		return err
+	}
+	go h.rehydrate(name) // resume from the activity log once the session is up (D13)
+	return nil
 }
 
 // Tell delivers a message into an agent's session, stamped with its source
@@ -188,6 +194,39 @@ func (h *Hub) inject(name, text string) error {
 		}
 	}
 	return nil
+}
+
+// injectWhenReady waits (briefly) for an agent's tmux session to exist, then
+// injects. Used for hub-originated messages (verdicts, rehydrate) right after a
+// launch, when the session may not be up yet. A message that never lands is
+// recorded so it is not silently lost.
+func (h *Hub) injectWhenReady(name, text string) error {
+	c := Container(name)
+	for i := 0; i < 25; i++ {
+		if pod.Running(c) {
+			if _, err := pod.Exec(c, "tmux", "has-session", "-t", session(name)); err == nil {
+				return h.inject(name, text)
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return h.store.Log(name, "inject-skipped", text)
+}
+
+// rehydrate injects a briefing built from the tail of an agent's activity log so
+// a freshly (re)launched pod resumes its prior work (D13). Best-effort; runs in
+// the background so it doesn't block launch waiting for the session.
+func (h *Hub) rehydrate(name string) {
+	evs, err := h.store.Events(name, 20)
+	if err != nil || len(evs) == 0 {
+		return
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "[hub] Resuming as %s. Recent activity:", name)
+	for _, e := range evs {
+		fmt.Fprintf(&b, " (%s: %s)", e.Type, e.Payload)
+	}
+	_ = h.injectWhenReady(name, b.String())
 }
 
 // agentBinary locates the thin browser binary on the host: next to the running

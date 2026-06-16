@@ -53,20 +53,21 @@ func TestAgentSocketIdentityAndSurface(t *testing.T) {
 	worker := DialSocket(hub.AgentSocketPath(root, "brokkr"))
 	rune := DialSocket(hub.AgentSocketPath(root, "rune"))
 
-	// Worker surface: status/log/submit/next — never approve/reject.
+	// Idle worker surface: status/log/next. submit is state-gated (hidden until a
+	// task is held); approve/reject/merge are reviewer/host-only.
 	wc, err := worker.Commands()
 	if err != nil {
 		t.Fatalf("worker commands: %v", err)
 	}
 	wn := cmdNames(wc)
-	for _, want := range []string{"status", "submit", "next"} {
+	for _, want := range []string{"status", "next"} {
 		if !has(wn, want) {
-			t.Fatalf("worker surface missing %q: %v", want, wn)
+			t.Fatalf("idle worker surface missing %q: %v", want, wn)
 		}
 	}
-	for _, bad := range []string{"approve", "reject", "merge"} {
+	for _, bad := range []string{"approve", "reject", "merge", "submit"} {
 		if has(wn, bad) {
-			t.Fatalf("worker surface must not include %q: %v", bad, wn)
+			t.Fatalf("idle worker surface must not include %q: %v", bad, wn)
 		}
 	}
 

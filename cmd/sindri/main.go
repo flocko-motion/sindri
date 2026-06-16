@@ -116,6 +116,8 @@ func main() {
 	rootCmd.AddCommand(newTellCmd())
 	rootCmd.AddCommand(newAttachCmd())
 	rootCmd.AddCommand(newAgentsCmd())
+	rootCmd.AddCommand(newMergeCmd())
+	rootCmd.AddCommand(newPRsCmd())
 
 	rootCmd.AddCommand(newInitCmd())
 	rootCmd.AddCommand(newTuiCmd())

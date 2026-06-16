@@ -61,6 +61,18 @@ func (h *Hub) Handler() http.Handler {
 		}
 		writeJSON(w, okMsg{"delivered"}, h.Tell(req.Name, req.Msg, req.Source))
 	})
+	mux.HandleFunc("POST /merge", func(w http.ResponseWriter, r *http.Request) {
+		var req NameReq // Name carries the PR id
+		if !decode(w, r, &req) {
+			return
+		}
+		pr, err := h.Merge(req.Name)
+		writeJSON(w, pr, err)
+	})
+	mux.HandleFunc("GET /prs", func(w http.ResponseWriter, r *http.Request) {
+		prs, err := h.PRs()
+		writeJSON(w, prs, err)
+	})
 	return mux
 }
 

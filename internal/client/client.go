@@ -17,6 +17,7 @@ import (
 	"strconv"
 
 	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/hub/store"
 )
 
 // HTTP talks to a hub over its repo unix socket.
@@ -93,6 +94,27 @@ func (c *HTTP) Exec(args []string, out io.Writer) (int, error) {
 		}
 	}
 	return 0, nil
+}
+
+// Merge merges an approved PR (host/human-only gate). Returns the merged PR.
+func (c *HTTP) Merge(id string) (store.PR, error) {
+	var pr store.PR
+	buf, err := json.Marshal(hub.NameReq{Name: id})
+	if err != nil {
+		return pr, err
+	}
+	resp, err := c.hc.Post(c.base+"/merge", "application/json", bytes.NewReader(buf))
+	if err != nil {
+		return pr, err
+	}
+	defer resp.Body.Close()
+	return pr, readResult(resp, &pr)
+}
+
+// PRs lists all merge-intents.
+func (c *HTTP) PRs() ([]store.PR, error) {
+	var out []store.PR
+	return out, c.get("/prs", &out)
 }
 
 func (c *HTTP) get(path string, out any) error {

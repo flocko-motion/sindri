@@ -49,3 +49,60 @@ func WorktreeAdd(repo, path, ref string) error {
 func HasCommits(repo string) bool {
 	return exec.Command("git", "-C", repo, "rev-parse", "HEAD").Run() == nil
 }
+
+// CurrentBranch returns the checked-out branch of dir, or an error in detached
+// HEAD. Used to read the repo's base branch from the main checkout.
+func CurrentBranch(dir string) (string, error) {
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		return "", fmt.Errorf("current branch: %w", err)
+	}
+	b := strings.TrimSpace(string(out))
+	if b == "" || b == "HEAD" {
+		return "", fmt.Errorf("detached HEAD")
+	}
+	return b, nil
+}
+
+// CreateBranch creates and checks out a new branch from base in dir (an agent's
+// worktree), discarding any prior checkout of that name.
+func CreateBranch(dir, name, base string) error {
+	if out, err := exec.Command("git", "-C", dir, "checkout", "-B", name, base).CombinedOutput(); err != nil {
+		return fmt.Errorf("create branch %s: %s: %w", name, strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// HasChanges reports whether dir's worktree has uncommitted changes.
+func HasChanges(dir string) bool {
+	out, err := exec.Command("git", "-C", dir, "status", "--porcelain").Output()
+	return err == nil && len(strings.TrimSpace(string(out))) > 0
+}
+
+// CommitAll stages and commits everything in dir's worktree. A no-op (nil) when
+// there is nothing to commit.
+func CommitAll(dir, msg string) error {
+	if !HasChanges(dir) {
+		return nil
+	}
+	if out, err := exec.Command("git", "-C", dir, "add", "-A").CombinedOutput(); err != nil {
+		return fmt.Errorf("git add: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	if out, err := exec.Command("git", "-C", dir, "commit", "-m", msg).CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// Merge merges branch into base in repo with a merge commit (no fast-forward),
+// leaving base checked out. Returns the combined output on conflict.
+func Merge(repo, base, branch string) error {
+	if out, err := exec.Command("git", "-C", repo, "checkout", base).CombinedOutput(); err != nil {
+		return fmt.Errorf("checkout %s: %s: %w", base, strings.TrimSpace(string(out)), err)
+	}
+	if out, err := exec.Command("git", "-C", repo, "merge", "--no-ff", "-m",
+		"merge "+branch, branch).CombinedOutput(); err != nil {
+		return fmt.Errorf("merge %s: %s: %w", branch, strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}

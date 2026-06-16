@@ -1,4 +1,4 @@
-.PHONY: build sindri worker image install clean test lint demo diag
+.PHONY: build sindri worker image install clean test lint demo diag loop
 
 PREFIX := $(HOME)/.local/bin
 
@@ -41,6 +41,10 @@ demo: build
 
 diag: build
 	./scripts/devhub.sh diag
+
+# Full worker loop: task -> next -> submit -> approve -> merge -> notify.
+loop: build
+	./scripts/devhub.sh loop
 
 all: build image install
 

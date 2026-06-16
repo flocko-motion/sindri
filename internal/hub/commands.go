@@ -32,11 +32,12 @@ func (h *Hub) registry() *registry.Registry {
 	return registry.New(
 		registry.Command{Name: "status", Help: "show who you are and your current state", Run: h.cmdStatus},
 		registry.Command{Name: "log", Help: "record a note in your activity log: log <message>", Run: h.cmdLog},
-		registry.Command{Name: "submit", Help: "request your branch be merged", Roles: []string{"worker"}, Run: phase3("submit")},
 		registry.Command{Name: "next", Help: "pick up the next task", Roles: []string{"worker"},
-			Hidden: func(c registry.Caller) bool { return c.HasTask }, Run: phase3("next")},
-		registry.Command{Name: "approve", Help: "approve a pull request", Roles: []string{"reviewer"}, Run: phase3("approve")},
-		registry.Command{Name: "reject", Help: "reject a pull request with feedback", Roles: []string{"reviewer"}, Run: phase3("reject")},
+			Hidden: func(c registry.Caller) bool { return c.HasTask }, Run: h.cmdNext},
+		registry.Command{Name: "submit", Help: "request your branch be merged: submit [message]", Roles: []string{"worker"},
+			Hidden: func(c registry.Caller) bool { return !c.HasTask }, Run: h.cmdSubmit},
+		registry.Command{Name: "approve", Help: "approve a pull request: approve [pr-id]", Roles: []string{"reviewer"}, Run: h.cmdApprove},
+		registry.Command{Name: "reject", Help: "reject a pull request: reject <pr-id> <feedback...>", Roles: []string{"reviewer"}, Run: h.cmdReject},
 	)
 }
 
@@ -49,7 +50,13 @@ func (h *Hub) caller(name string) (registry.Caller, error) {
 	if !ok {
 		return registry.Caller{}, fmt.Errorf("unknown agent %q", name)
 	}
-	return registry.Caller{Agent: name, Role: a.Role}, nil
+	// A worker holding a task (working or submitted) hides "next" and shows
+	// "submit"; an idle worker the reverse (state machine, D-hub).
+	st, err := h.store.GetState(name)
+	if err != nil {
+		return registry.Caller{}, err
+	}
+	return registry.Caller{Agent: name, Role: a.Role, HasTask: st.Phase != "idle"}, nil
 }
 
 // AgentCommands returns the command surface currently available to an agent.
@@ -103,13 +110,4 @@ func (h *Hub) cmdLog(c registry.Caller, args []string, out io.Writer) (int, erro
 	}
 	fmt.Fprintln(out, "logged")
 	return 0, nil
-}
-
-// phase3 returns a placeholder Run for a verb whose behaviour lands in Phase 3 —
-// present in the surface (so role filtering is exercised) but not yet wired.
-func phase3(name string) func(registry.Caller, []string, io.Writer) (int, error) {
-	return func(_ registry.Caller, _ []string, out io.Writer) (int, error) {
-		fmt.Fprintf(out, "%s: arrives in Phase 3 (workflow)\n", name)
-		return 0, nil
-	}
 }

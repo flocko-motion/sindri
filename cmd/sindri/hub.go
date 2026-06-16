@@ -17,6 +17,7 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/spf13/cobra"
 )
 
@@ -27,6 +28,8 @@ type backend interface {
 	Launch(name string) error
 	Tell(name, msg, source string) error
 	State() ([]hub.AgentState, error)
+	Merge(id string) (store.PR, error)
+	PRs() ([]store.PR, error)
 	Close() error
 }
 
@@ -175,6 +178,47 @@ func newAgentsCmd() *cobra.Command {
 						status = "running"
 					}
 					fmt.Printf("%-12s %-8s %s\n", a.Name, a.Role, status)
+				}
+				return nil
+			})
+		},
+	}
+}
+
+func newMergeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "merge <pr-id>",
+		Short: "Merge an approved PR (human-only — the single hard gate)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withBackend(func(b backend) error {
+				pr, err := b.Merge(args[0])
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "merged %s (task %s) → %s\n", pr.ID, pr.Task, pr.Base)
+				return nil
+			})
+		},
+	}
+}
+
+func newPRsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "prs",
+		Short: "List merge-intents (PRs) and their status",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withBackend(func(b backend) error {
+				prs, err := b.PRs()
+				if err != nil {
+					return err
+				}
+				if len(prs) == 0 {
+					fmt.Fprintln(os.Stderr, "no PRs")
+					return nil
+				}
+				for _, p := range prs {
+					fmt.Printf("%-14s %-9s %-10s %s\n", p.ID, p.Status, p.Agent, p.Branch)
 				}
 				return nil
 			})
