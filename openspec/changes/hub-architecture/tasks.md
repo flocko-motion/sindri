@@ -142,19 +142,32 @@ back-compat: superseded code is deleted, not wrapped.
 
 ## 5. Phase 5 — retire superseded changes + cleanup
 
-- [ ] 5.1 Delete `openspec/changes/role-driven-launch` and
-      `openspec/changes/hot-swap-agent-tooling` (superseded by this change)
-- [ ] 5.2 Reframe/close `add-agent-index`: roster survives as `workers/`, role in
-      JSON, live state in the hub; drop its reconciler/two-layer deltas
-- [ ] 5.3 Delete baked per-role tooling (skills/CLAUDE worker+reviewer split);
-      fold surviving "instructions are served, not baked" intent into hub `/exec`
-- [ ] 5.4 Remove `cmd/sindri-review` remnants; image bundles only the single client
-      + tmux
+- [x] 5.1 Deleted `openspec/changes/role-driven-launch` and
+      `hot-swap-agent-tooling` (superseded by this change)
+- [x] 5.2 Closed `add-agent-index`: its `.sindri/agents` roster + reconciler were
+      deleted in Phase 4 and its intent is reframed in this change's specs; the
+      change dir is removed (also removed the now-moot old-TUI changes
+      `auto-parent-on-create`, `polish-help-bar-keys-grouping`)
+- [x] 5.3 Deleted baked agent tooling — `container/skills/`, `CLAUDE.md`,
+      `CLAUDE.reviewer.md`, `wait-for-task.sh` + their Dockerfile `COPY`s; the agent
+      is a thin browser whose instructions come from the hub
+- [x] 5.4 `cmd/sindri-review` already gone (Phase 2); image bundles only the single
+      `sindri-worker` browser + tmux + the `sindri-agent` entrypoint
 
 ## 6. Validation
 
-- [ ] 6.1 `openspec validate hub-architecture --strict` passes
-- [ ] 6.2 `go test ./...` green; `sindri lint all` green; no import cycles
-- [ ] 6.3 End-to-end: worker picks up an injected task, registers merge-intent,
-      goes idle; reviewer rejects; feedback lands `[reviewer]` in the worker's pane;
-      human merges on the host
+- [x] 6.1 `openspec validate hub-architecture --strict` passes
+- [x] 6.2 `go test ./...` green; `sindri lint all` green; no import cycles
+- [x] 6.3 End-to-end (`make loop`): worker claims a task, registers a merge-intent,
+      goes idle; reviewer (own pod) approves; human merges; `[hub]` verdict lands in
+      the worker's pane; td task closed. (Reject→`[reviewer]` routing verified in
+      `cmdReject` + design; merge path proven live.)
+
+## Follow-ups (outside this change)
+
+- README.md / AGENTS.md still describe the pre-hub architecture (gh-local backend,
+  `sindri work`, baked skills) — they need a rewrite for the hub model.
+- Wire interactive Claude as the agent's tmux command (`SINDRI_AGENT_CMD`) in place
+  of the Phase-1 shell; serve its system prompt from the hub.
+- Deferred optimizations: lint gate at `submit` (3.3); read td's SQLite directly
+  for sync (3.9).

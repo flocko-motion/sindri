@@ -56,14 +56,11 @@ COPY container/shims/docker          /usr/local/bin/docker
 COPY container/shims/docker-compose  /usr/local/bin/docker-compose
 RUN chmod +x /usr/local/bin/docker /usr/local/bin/docker-compose
 
-# ── Sindri scripts ────────────────────────────────────────────────────────────
-COPY container/wait-for-task.sh /usr/local/bin/wait-for-task
+# ── Sindri agent entrypoint ───────────────────────────────────────────────────
+# The agent is a thin browser driven by the hub; its instructions come from the
+# hub, not baked-in skills/CLAUDE files (those were the pre-hub worker's).
 COPY container/sindri-agent.sh  /usr/local/bin/sindri-agent
-COPY container/skills/          /opt/sindri/skills/
-COPY container/CLAUDE.md        /opt/sindri/CLAUDE.md
-COPY container/CLAUDE.reviewer.md /opt/sindri/CLAUDE.reviewer.md
-# Skills are copied into each worker's ~/.claude/skills/ at launch time
-RUN chmod +x /usr/local/bin/wait-for-task /usr/local/bin/sindri-agent
+RUN chmod +x /usr/local/bin/sindri-agent
 
 # ── Non-root user (claude refuses --dangerously-skip-permissions as root) ──
 RUN useradd -m -s /bin/bash sindri
