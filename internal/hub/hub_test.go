@@ -39,14 +39,14 @@ func TestNewAgentRecordsIdentityAndLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(st) != 1 || st[0].Name != "dvalin" || st[0].Role != "reviewer" {
+	if len(st.Agents) != 1 || st.Agents[0].Name != "dvalin" || st.Agents[0].Role != "reviewer" {
 		t.Fatalf("unexpected state: %+v", st)
 	}
-	if st[0].Running { // podman absent → not running
+	if st.Agents[0].Running { // podman absent → not running
 		t.Fatalf("expected not running")
 	}
-	if st[0].Workspace != ".worktrees/dvalin" {
-		t.Fatalf("workspace not set: %q", st[0].Workspace)
+	if st.Agents[0].Phase != "idle" {
+		t.Fatalf("new agent should be idle: %+v", st.Agents[0])
 	}
 	// register event logged
 	evs, _ := h.store.Events("dvalin", 0)

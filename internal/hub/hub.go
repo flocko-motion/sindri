@@ -37,13 +37,7 @@ type Hub struct {
 
 	mu      sync.Mutex              // guards agentLn
 	agentLn map[string]net.Listener // per-agent socket listeners (identity-by-socket)
-}
-
-// AgentState is an agent as presented to clients: durable identity plus live
-// runtime status. (Orphans and richer status arrive in later phases.)
-type AgentState struct {
-	store.Agent
-	Running bool `json:"running"`
+	events  *bus                    // change notifications for /events
 }
 
 var nameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
@@ -64,7 +58,7 @@ func New(root string) (*Hub, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Hub{root: root, store: st, agentLn: map[string]net.Listener{}}, nil
+	return &Hub{root: root, store: st, agentLn: map[string]net.Listener{}, events: newBus()}, nil
 }
 
 // Close shuts agent listeners and releases the store.
@@ -98,6 +92,7 @@ func (h *Hub) NewAgent(name, role string) error {
 	if err := h.store.PutAgent(a); err != nil {
 		return err
 	}
+	defer h.notify()
 	return h.store.Log(name, "register", "role="+role)
 }
 
@@ -157,6 +152,7 @@ func (h *Hub) Launch(name string) error {
 		return err
 	}
 	go h.rehydrate(name) // resume from the activity log once the session is up (D13)
+	h.notify()
 	return nil
 }
 
@@ -178,6 +174,7 @@ func (h *Hub) Tell(name, msg, source string) error {
 		return err
 	}
 	_ = a
+	defer h.notify()
 	return h.store.Log(name, "recv", stamped)
 }
 
@@ -245,15 +242,3 @@ func agentBinary() (string, error) {
 	return "", fmt.Errorf("%s binary not found — run 'make build/install'", name)
 }
 
-// State returns every agent with its live running status.
-func (h *Hub) State() ([]AgentState, error) {
-	roster, err := h.store.Roster()
-	if err != nil {
-		return nil, err
-	}
-	out := make([]AgentState, 0, len(roster))
-	for _, a := range roster {
-		out = append(out, AgentState{Agent: a, Running: pod.Running(Container(a.Name))})
-	}
-	return out, nil
-}

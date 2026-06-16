@@ -7,6 +7,7 @@
 package client
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -14,7 +15,9 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -45,10 +48,47 @@ func Dial(root string) *HTTP { return DialSocket(hub.SocketPath(root)) }
 // Close is a no-op (kept so HTTP satisfies the same interface as *hub.Hub).
 func (c *HTTP) Close() error { return nil }
 
-// State fetches the agent roster + live status.
-func (c *HTTP) State() ([]hub.AgentState, error) {
-	var out []hub.AgentState
+// State fetches the whole board (agents, tasks, PRs, orphans).
+func (c *HTTP) State() (hub.BoardState, error) {
+	var out hub.BoardState
 	return out, c.get("/state", &out)
+}
+
+// Watch subscribes to board-state changes over SSE. It returns a channel that
+// yields the current state on connect and a fresh snapshot on every change; the
+// channel closes when ctx is cancelled or the hub goes away.
+func (c *HTTP) Watch(ctx context.Context) (<-chan hub.BoardState, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.base+"/events", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan hub.BoardState)
+	go func() {
+		defer resp.Body.Close()
+		defer close(out)
+		sc := bufio.NewScanner(resp.Body)
+		sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+		for sc.Scan() {
+			line := sc.Text()
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			var st hub.BoardState
+			if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &st) != nil {
+				continue
+			}
+			select {
+			case out <- st:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out, nil
 }
 
 // NewAgent registers an agent identity.
@@ -115,6 +155,15 @@ func (c *HTTP) Merge(id string) (store.PR, error) {
 func (c *HTTP) PRs() ([]store.PR, error) {
 	var out []store.PR
 	return out, c.get("/prs", &out)
+}
+
+// Refresh asks the hub to re-sync tasks from the source of truth.
+func (c *HTTP) Refresh() error { return c.post("/refresh", struct{}{}) }
+
+// Log fetches an agent's recent activity-log entries (the timeline).
+func (c *HTTP) Log(name string) ([]store.Event, error) {
+	var out []store.Event
+	return out, c.get("/log?agent="+url.QueryEscape(name), &out)
 }
 
 func (c *HTTP) get(path string, out any) error {

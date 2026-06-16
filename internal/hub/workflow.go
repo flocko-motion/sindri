@@ -232,5 +232,6 @@ func (h *Hub) Merge(prID string) (store.PR, error) {
 	_ = h.store.SetState(store.AgentState{Agent: pr.Agent, Phase: "idle"})
 	_ = h.store.Log(pr.Agent, "merged", prID)
 	_ = h.injectWhenReady(pr.Agent, fmt.Sprintf("[hub] %s merged. Run 'sindri-worker next' for the next task.", prID))
+	h.notify()
 	return pr, nil
 }

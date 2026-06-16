@@ -106,9 +106,10 @@ back-compat: superseded code is deleted, not wrapped.
       cwd, not a worktree path; needs a dir-scoped entry before it can gate submit)*
 - [x] 3.4 Object-mediated agent2agent: `reject` resolves branch→owner→pod →
       injects `[reviewer]` feedback; `merge` routes `[hub]` back (verified live)
-- [ ] 3.5 **Delete** `internal/ghlocal/store` and the `worker.List` reconciler join
-      — *deferred to Phase 4: still imported by the legacy board/action/worker/tui,
-      which Phase 4 rewires onto the hub. New flow uses hub.db `prs`, not this store*
+- [x] 3.5 **Deleted** `internal/ghlocal/store` and the `worker.List` reconciler
+      (done in Phase 4's sweep): removed `ghlocal`, `worker`, `board`, `action`, the
+      old `tui`, `cmd/timing`, and trimmed `render`(gone)/`issue`/`td`/`spec` to what
+      the hub uses
 - [x] 3.6 Live workflow state persisted write-through in `hub.db` (`agent_state`,
       `prs`, `tasks`); a restarted hub re-serves agent sockets + reads state from the
       DB (in-memory is a projection)
@@ -120,23 +121,24 @@ back-compat: superseded code is deleted, not wrapped.
       refresh-before-assignment in `next`; `adapter/td` writes via the `td` tool.
       *Sync currently reads via the td CLI; reading td's SQLite directly is the
       pending optimization*
-      (write-through to cache)
 
 ## 4. Phase 4 — TUI/CLI as clients
 
-- [ ] 4.1 `GET /events` SSE stream of state changes
-- [ ] 4.2 Rip `internal/tui` data layer off direct td/store; consume `/state` +
-      `/events` via `internal/client`
-- [ ] 4.3 TUI refuses to start without a running hub
-- [ ] 4.4 CLI + TUI render the same fields from the same hub payload (view-workers)
-- [ ] 4.5 Per-worker activity timeline in the TUI, rendered from the hub's `events`
-      log (actions, socket messages sent/received, merge-intents, status); served
-      via `GET /state`/an events query, not the freeform pane chat
-- [ ] 4.5b Refresh action: a user `refresh` (CLI flag / TUI `r`) triggers a re-sync
-      of tasks (and roster reality) from the source of truth into `hub.db`
-- [ ] 4.6 Orphan detection (D14): hub diffs `podman ps`/worktrees against the roster;
-      `/state` flags pods with no roster entry as orphans; TUI shows an "orphaned
-      agent" warning + a proposed `podman rm -f …` command; never auto-kills
+- [x] 4.1 `GET /events` SSE stream of state changes (hub pub/sub `bus`; `notify()`
+      after every mutation; client `Watch` consumes it)
+- [x] 4.2 **Replaced** the legacy TUI with a lean hub client (`internal/tui`): one
+      Bubble Tea model that reads `/state` and live-updates over `/events` via
+      `internal/client`. Deleted the old TUI/board/action stack
+- [x] 4.3 TUI refuses to start without a running hub (`tui.Run` guard + test)
+- [x] 4.4 CLI (`sindri agents`/`prs`) + TUI render the same fields from the same
+      `BoardState` payload
+- [x] 4.5 Per-worker activity timeline in the TUI from the hub's `events` log
+      (`GET /log`, Enter on an agent); not the freeform pane chat
+- [x] 4.5b Refresh action: TUI `r` (and `POST /refresh`) re-syncs tasks from the
+      source of truth into `hub.db`
+- [x] 4.6 Orphan detection (D14): `State` diffs `podman ps` (by project label)
+      against the roster; `/state.Orphans` lists pods with no roster entry; CLI +
+      TUI show an "orphan" warning + a proposed `podman rm -f …`; never auto-kills
 
 ## 5. Phase 5 — retire superseded changes + cleanup
 

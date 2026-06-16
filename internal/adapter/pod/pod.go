@@ -107,6 +107,23 @@ func Rm(name string) error {
 	return nil
 }
 
+// ListByLabel returns the names of containers (running or stopped) carrying
+// label=value — used to find sindri pods for orphan detection.
+func ListByLabel(label, value string) ([]string, error) {
+	out, err := exec.Command(Binary, "ps", "-a",
+		"--filter", "label="+label+"="+value, "--format", "{{.Names}}").Output()
+	if err != nil {
+		return nil, fmt.Errorf("podman ps: %w", err)
+	}
+	var names []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line != "" {
+			names = append(names, line)
+		}
+	}
+	return names, nil
+}
+
 // sortedKeys returns map keys in sorted order for deterministic argv.
 func sortedKeys(m map[string]string) []string {
 	keys := make([]string, 0, len(m))

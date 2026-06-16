@@ -2,12 +2,54 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/flo-at/sindri/internal/hub"
 )
+
+// /events streams the initial snapshot and a fresh one after a mutation.
+func TestWatchStreamsChanges(t *testing.T) {
+	root := t.TempDir()
+	h, err := hub.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	go h.Serve()
+	for deadline := time.Now().Add(2 * time.Second); !hub.IsRunning(root); {
+		if time.Now().After(deadline) {
+			t.Fatal("hub never came up")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	cl := Dial(root)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch, err := cl.Watch(ctx)
+	if err != nil {
+		t.Fatalf("watch: %v", err)
+	}
+	<-ch // initial snapshot (empty)
+
+	if err := cl.NewAgent("brokkr", "worker"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case st := <-ch:
+			if len(st.Agents) == 1 && st.Agents[0].Name == "brokkr" {
+				return // change observed over SSE
+			}
+		case <-deadline:
+			t.Fatal("never received the agent over /events")
+		}
+	}
+}
 
 func cmdNames(cmds []hub.CmdInfo) []string {
 	out := make([]string, len(cmds))
@@ -133,7 +175,7 @@ func TestServeAndClientRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("client State: %v", err)
 	}
-	if len(st) != 1 || st[0].Name != "brokkr" {
+	if len(st.Agents) != 1 || st.Agents[0].Name != "brokkr" {
 		t.Fatalf("unexpected state over socket: %+v", st)
 	}
 	// The hub's domain error must surface across the socket.

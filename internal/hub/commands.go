@@ -90,7 +90,9 @@ func (h *Hub) AgentExec(name string, args []string, out io.Writer) (int, error) 
 		fmt.Fprintf(out, "unknown or unavailable command: %s\n", args[0])
 		return 127, nil
 	}
-	return cmd.Run(c, args[1:], out)
+	exit, err := cmd.Run(c, args[1:], out)
+	h.notify() // the command may have changed board state
+	return exit, err
 }
 
 func (h *Hub) cmdStatus(c registry.Caller, _ []string, out io.Writer) (int, error) {

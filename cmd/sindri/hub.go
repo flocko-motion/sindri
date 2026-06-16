@@ -27,7 +27,7 @@ type backend interface {
 	NewAgent(name, role string) error
 	Launch(name string) error
 	Tell(name, msg, source string) error
-	State() ([]hub.AgentState, error)
+	State() (hub.BoardState, error)
 	Merge(id string) (store.PR, error)
 	PRs() ([]store.PR, error)
 	Close() error
@@ -168,16 +168,18 @@ func newAgentsCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if len(st) == 0 {
+				if len(st.Agents) == 0 {
 					fmt.Fprintln(os.Stderr, "no agents — register one with 'sindri new <name>'")
-					return nil
 				}
-				for _, a := range st {
-					status := "stopped"
+				for _, a := range st.Agents {
+					run := "stopped"
 					if a.Running {
-						status = "running"
+						run = "running"
 					}
-					fmt.Printf("%-12s %-8s %s\n", a.Name, a.Role, status)
+					fmt.Printf("%-12s %-8s %-8s %-10s %-12s %s\n", a.Name, a.Role, run, a.Phase, dash(a.Task), dash(a.PR))
+				}
+				for _, o := range st.Orphans {
+					fmt.Printf("⚠  orphan: %s — no roster entry; remove with 'podman rm -f %s'\n", o, o)
 				}
 				return nil
 			})

@@ -10,6 +10,7 @@ package hub
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -39,6 +40,14 @@ func (h *Hub) Handler() http.Handler {
 	mux.HandleFunc("GET /state", func(w http.ResponseWriter, r *http.Request) {
 		st, err := h.State()
 		writeJSON(w, st, err)
+	})
+	mux.HandleFunc("GET /events", h.handleEvents)
+	mux.HandleFunc("POST /refresh", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, okMsg{"refreshed"}, h.Refresh())
+	})
+	mux.HandleFunc("GET /log", func(w http.ResponseWriter, r *http.Request) {
+		evs, err := h.AgentLog(r.URL.Query().Get("agent"), 50)
+		writeJSON(w, evs, err)
 	})
 	mux.HandleFunc("POST /agents", func(w http.ResponseWriter, r *http.Request) {
 		var req AgentReq
@@ -92,6 +101,43 @@ func (h *Hub) Serve() error {
 	}
 	defer os.Remove(path)
 	return http.Serve(ln, h.Handler())
+}
+
+// handleEvents streams board state as Server-Sent Events: the current state on
+// connect, then a fresh snapshot on every change, until the client disconnects.
+func (h *Hub) handleEvents(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+
+	ch, unsub := h.events.subscribe()
+	defer unsub()
+
+	send := func() {
+		st, err := h.State()
+		if err != nil {
+			return
+		}
+		data, err := json.Marshal(st)
+		if err != nil {
+			return
+		}
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	}
+	send() // initial snapshot
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ch:
+			send()
+		}
+	}
 }
 
 type okMsg struct {
