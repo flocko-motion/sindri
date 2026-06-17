@@ -117,10 +117,11 @@ back-compat: superseded code is deleted, not wrapped.
       `Log(...)` — verified in the activity log
 - [x] 3.8 Rehydrate on (re)launch (D13): `go h.rehydrate` injects a briefing from
       the tail of the `events` log via `injectWhenReady`
-- [~] 3.9 Task read model (D15): cache in `hub.db` (`tasks`), synced from td;
-      refresh-before-assignment in `next`; `adapter/td` writes via the `td` tool.
-      *Sync currently reads via the td CLI; reading td's SQLite directly is the
-      pending optimization*
+- [x] 3.9 Task read model (D15): cache in `hub.db` (`tasks`), synced from td;
+      refresh-before-assignment in `next`; `adapter/td` writes via the `td` tool;
+      reads go **directly** from td's SQLite (`adapter/td/sqlite.go`), bypassing the
+      CLI on the hot path. (Also fixed a latent store ordering bug — td priorities
+      are `P1`..`P4`, not words.)
 
 ## 4. Phase 4 — TUI/CLI as clients
 
@@ -173,5 +174,5 @@ back-compat: superseded code is deleted, not wrapped.
   `submit` autonomously from the hub kickoff.
 - README.md / AGENTS.md still describe the pre-hub architecture (gh-local backend,
   `sindri work`, baked skills) — they need a rewrite for the hub model.
-- Deferred optimizations: lint gate at `submit` (3.3); read td's SQLite directly
-  for sync (3.9).
+- (Both former deferrals are now done: lint gate at `submit` (3.3) and direct
+  td-SQLite reads (3.9).)

@@ -110,12 +110,12 @@ func (s *Store) UpsertTask(t Task) error {
 
 // OpenTasks returns cached tasks with status "open", highest priority first.
 func (s *Store) OpenTasks() ([]Task, error) {
+	// td priorities are P1 (highest) … P4 (lowest); lexical order matches, with
+	// unset priorities sorted last.
 	rows, err := s.db.Query(`
 		SELECT id,title,status,priority,type,labels FROM tasks
 		WHERE status='open'
-		ORDER BY CASE priority
-			WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2
-			WHEN 'low' THEN 3 ELSE 4 END, id`)
+		ORDER BY CASE WHEN priority='' THEN 1 ELSE 0 END, priority, id`)
 	if err != nil {
 		return nil, fmt.Errorf("open tasks: %w", err)
 	}

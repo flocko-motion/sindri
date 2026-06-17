@@ -5,11 +5,12 @@ import "testing"
 func TestTaskCacheAndPriorityOrder(t *testing.T) {
 	s := openTmp(t)
 	if err := s.ReplaceTasks([]Task{
-		{ID: "td-low", Status: "open", Priority: "low"},
-		{ID: "td-crit", Status: "open", Priority: "critical"},
-		{ID: "td-med", Status: "open", Priority: "medium"},
-		{ID: "td-done", Status: "closed", Priority: "high"},
-		{ID: "td-active", Status: "in_progress", Priority: "high"},
+		{ID: "td-p3", Status: "open", Priority: "P3"},
+		{ID: "td-p1", Status: "open", Priority: "P1"},
+		{ID: "td-none", Status: "open", Priority: ""}, // unset → sorts last
+		{ID: "td-p2", Status: "open", Priority: "P2"},
+		{ID: "td-done", Status: "closed", Priority: "P1"},
+		{ID: "td-active", Status: "in_progress", Priority: "P1"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -17,12 +18,13 @@ func TestTaskCacheAndPriorityOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Only status=open, highest priority first; closed and in_progress excluded.
+	// Only status=open, highest priority (P1) first, unset last; closed and
+	// in_progress excluded.
 	got := []string{}
 	for _, o := range open {
 		got = append(got, o.ID)
 	}
-	want := []string{"td-crit", "td-med", "td-low"}
+	want := []string{"td-p1", "td-p2", "td-p3", "td-none"}
 	if len(got) != len(want) {
 		t.Fatalf("open tasks: got %v want %v", got, want)
 	}
