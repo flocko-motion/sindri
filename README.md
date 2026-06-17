@@ -1,173 +1,160 @@
 # Sindri
 
-A sandboxed AI agent that works through issues, submits PRs, and waits for human approval — in a loop.
+A sandboxed AI-agent orchestrator. Agents run inside containers, pick up tasks,
+write code, and open PRs; a human approves the merge — the one hard gate. A
+single per-repo **hub** owns all state and mediates everything.
 
 ---
 
 ## Concept
 
-Sindri runs an AI agent inside a container, pointed at a git worktree. The agent picks up issues, writes code, creates PRs, and blocks until a human approves. Then it merges and moves to the next issue.
-
-The agent speaks `gh` — the same CLI interface whether running fully local or against GitHub. A pluggable backend handles the routing.
+Everything goes through one process — the **hub** (`sindri hub`), a per-repo
+service bound to a unix socket. The hub is the only thing that touches the task
+store, git, and the agent registry. Agents, the CLI, and the TUI are all thin
+clients of it.
 
 ```
-┌───────────────────────────────────────────────┐
-│  Host                                         │
-│                                               │
-│  Human reviews via:                           │
-│    gh issue list / comment                    │
-│    gh pr view / review --approve              │
-│    td monitor  (td backend only)              │
-│                                               │
-│  ┌──────────────────────────────────────────┐ │
-│  │  Container (Podman)                      │ │
-│  │                                          │ │
-│  │  Agent (Claude Code)                     │ │
-│  │    gh issue list / view / comment        │ │
-│  │    gh pr create / merge                  │ │
-│  │                                          │ │
-│  │  gh binary routes to backend:            │ │
-│  │    td   → fully local, offline           │ │
-│  │    gh   → GitHub issues + PRs            │ │
-│  │                                          │ │
-│  │  Mounts:                                 │ │
-│  │    /repo      ← main repo (read-only)   │ │
-│  │    /workspace ← worktree (read-write)    │ │
-│  └──────────────────────────────────────────┘ │
-└───────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ Host                                                           │
+│                                                                │
+│   sindri CLI ─┐                          ┌─ sindri tui         │
+│   (you)       │                          │  (live board)       │
+│               ▼                          ▼                      │
+│            ┌──────────────────────────────────┐                │
+│            │  sindri hub   (single writer)     │                │
+│            │  .sindri/hub.db  (SQLite)         │                │
+│            │  td · git · openspec · podman     │                │
+│            └───────┬───────────────┬──────────┘                │
+│         per-agent  │ unix socket   │ tmux send-keys             │
+│            ┌───────▼───────┐   ┌───▼───────────┐                │
+│            │ pod: brokkr   │   │ pod: reviewer │   …            │
+│            │  Claude+tmux  │   │  Claude+tmux  │                │
+│            │  /workspace   │   │  /workspace   │                │
+│            └───────────────┘   └───────────────┘                │
+└──────────────────────────────────────────────────────────────┘
 ```
+
+The agent inside a pod runs a thin **browser** (`sindri-worker`) with *no
+built-in commands*: it asks the hub what it can do and forwards verbs for the
+hub to execute. The socket an agent connects through **is its identity** — no
+names on the wire, no visibility of other agents.
 
 ---
 
 ## The loop
 
 ```
-1.  gh issue list --state open         ← pick an issue
-2.  work on it                         ← code, test, commit
-3.  gh pr create --title "..."         ← submit for review
-4.  wait for approval                  ← poll gh pr view
-5.  gh pr merge                        ← blocked until approved
-6.  goto 1
+1.  sindri-worker next            ← claim the top task, branch in /workspace
+2.  edit /workspace               ← the agent writes code (the hub commits)
+3.  sindri-worker submit "…"      ← register a merge-intent; returns at once
+4.  …idle…                        ← the agent waits; no polling, no blocking
+5.  reviewer approves / rejects   ← rejection feedback is typed back to the agent
+6.  sindri merge <pr>             ← human-only: the one hard gate
+7.  [hub] verdict typed in        ← "merged — run sindri-worker next"  → goto 1
 ```
 
-The agent **cannot merge without human approval**. That's the only hard gate.
+`submit` never blocks. The agent reports and goes idle; the hub wakes it by
+typing the next instruction into its tmux session. A long wait is expected.
 
 ---
 
-## Communication
+## Key ideas
 
-Agent and human talk through issue comments.
-
-```bash
-# Agent is stuck — asks a question
-gh issue comment 42 -b "Should the cache TTL be configurable or hardcoded?"
-
-# Human replies
-gh issue comment 42 -b "Configurable, default 300s"
-
-# Agent reads comments, continues
-gh issue view 42 --comments
-```
-
-This works identically in both backends.
-
----
-
-## Backends
-
-### td (local)
-
-Issues, comments, and state live in a local td database. No network required.
-
-The agent's `gh` binary translates commands to `td`:
-
-| Agent runs | Backend executes |
-|---|---|
-| `gh issue list` | `td list` |
-| `gh issue create` | `td create` |
-| `gh issue comment` | `td comment` |
-| `gh pr create` | local PR store (`.git/pr/`) |
-| `gh pr review --approve` | local PR store |
-| `gh pr merge` | `git merge` (if approved) |
-
-Human gets `td monitor` for a live TUI dashboard, plus all `td` query and filtering features.
-
-### GitHub
-
-Issues and PRs live on GitHub. The agent's `gh` binary is the real GitHub CLI. Standard remote workflow — nothing special.
+- **Single writer.** The hub is the only writer of `td`, git, and `.sindri/`, so
+  there are no races. Every UI reads the same `GET /state` and live-updates over
+  `GET /events`.
+- **Identity is the socket.** Each pod mounts one socket (`.sindri/sockets/
+  <name>.sock`); the hub knows who is calling by which socket accepted the
+  connection.
+- **Server-driven commands.** `sindri-worker` with no args lists what's possible
+  *right now* — filtered by role and state. A command you can't run is invisible.
+- **Provenance.** Every message the hub types into an agent is tagged `[hub]`,
+  `[user]`, or `[reviewer]`.
+- **Identity precedes runtime.** An agent is a row in `hub.db`; the pod is a
+  disposable body that assumes it. Relaunch resumes from the activity log.
+- **PR = merge-intent.** "Submit" just flags a branch for merge; the hub lints,
+  the reviewer judges, the human merges.
+- **Crash-restartable.** All state is durable in `.sindri/hub.db`; pods/tmux
+  outlive a hub restart.
 
 ---
 
 ## Quick start
 
 ```bash
-# Create a worktree for the agent
-git worktree add ../my-feature my-feature
+make install                 # builds sindri + sindri-worker, builds the image
 
-# Start a worker with an instruction
-sindri work ../my-feature -p "Implement the login page per issue #12"
+sindri hub &                 # start the per-repo hub (agents need it running)
 
-# Or start interactive (no predefined task)
-sindri work ../my-feature
+sindri new brokkr            # register a worker identity (no pod yet)
+sindri new rune --role reviewer
+sindri launch brokkr         # spin its pod (runs interactive Claude)
+sindri launch rune
+
+sindri agents                # see the board (or: sindri tui)
+sindri tell brokkr "focus on the parser first"   # steer any agent live
+sindri attach brokkr         # dial into its live terminal
+
+sindri prs                   # pending merge-intents
+sindri merge pr-td-abc123    # approve → merge (human gate)
 ```
 
-On first run the container image is built automatically.
+Use `sindri launch <name> --shell` to run a bare shell instead of Claude (for
+demos/debugging). `make demo` / `make loop` drive a throwaway repo end to end
+(need podman).
 
 ---
 
-## Approval workflow
+## Commands
 
-```bash
-# See what the agent submitted
-gh pr list
-gh pr view <id>
+| Command | What |
+|---|---|
+| `sindri hub` | run the per-repo hub service (foreground) |
+| `sindri new <name> [--role]` | register an agent identity |
+| `sindri launch <name> [--shell]` | spin a pod that assumes the identity |
+| `sindri tell <name> "msg"` | type a message into an agent's session (`[user]`) |
+| `sindri attach <name>` | share an agent's live tmux terminal |
+| `sindri agents` | list agents + workflow state + orphan warnings |
+| `sindri prs` | list merge-intents |
+| `sindri merge <pr>` | merge an approved PR (human-only) |
+| `sindri tui` | live board (a hub client) |
 
-# Approve — this unblocks the agent
-gh pr review <id> --approve
-
-# Or with td backend, use the monitor
-td monitor
-```
+Inside a pod the agent uses the browser `sindri-worker` (`next`, `submit`,
+`approve`/`reject`, `status`, `log`, `prs`) — the surface the hub offers it.
 
 ---
 
-## Environment
+## State
 
-| Variable | Default | Description |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | — | Required for Claude Code |
-| `GH_LOCAL_BASE` | auto-detected | Target branch for merges |
-| `SINDRI_BACKEND` | `td` | Backend: `td` or `github` |
+| What | Where |
+|---|---|
+| Roster, workflow state, PRs, activity log | `.sindri/hub.db` (SQLite, gitignored) |
+| Per-agent socket | `.sindri/sockets/<name>.sock` |
+| Agent Claude home | `.sindri/claude/<name>/` |
+| Code / commits | `.worktrees/<name>` (host) |
+| Tasks (source of truth) | `td` (cached into `hub.db`) |
+
+Throw a pod away freely; relaunch resumes from the log. Restart the hub freely;
+nothing committed is lost.
 
 ---
 
 ## Repo layout
 
 ```
-sindri              ← entry point
-AGENTS.md           ← agent loop documentation
-gh-local/           ← gh CLI adapter (Go) — routes to td or github
-shims/              ← docker → podman shims
-dockerfiles/        ← container image
-agent/              ← pod definitions
+cmd/sindri/         host CLI (hub verbs + tui + lint)
+cmd/sindri-worker/  the agent's thin browser (no command tree)
+internal/hub/       the hub: service, SQLite store, command registry, routing
+internal/client/    thin hub client (CLI + TUI share it)
+internal/adapter/   one package per external tool: git, pod (podman), tmux, td, spec
+internal/tui/       lean Bubble Tea dashboard (a hub client)
+container/          the agent image (Dockerfile) + tmux entrypoint
+openspec/           the spec-driven design (changes/hub-architecture)
 ```
-
----
-
-## State persistence
-
-Everything meaningful lives on the host, not in the container.
-
-| What | Where |
-|---|---|
-| Code / commits | worktree (host) |
-| Issues / comments | td database or GitHub |
-| PR metadata | `.git/pr/` (td mode) or GitHub |
-
-Throw the container away freely. Restart picks up where it left off.
 
 ---
 
 ## Acknowledgments
 
-The Sindri TUI is built on [sidecar](https://github.com/marcus/sidecar) by Marcus — a terminal dashboard for AI coding agents. We forked the Bubble Tea plugin architecture, td monitor integration, and UI primitives as the foundation for Sindri's orchestration interface.
+The Sindri TUI began as a fork of [sidecar](https://github.com/marcus/sidecar)
+by Marcus; the current dashboard is a lean rewrite against the hub.
