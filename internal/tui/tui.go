@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/flo-at/sindri/internal/adapter/pod"
@@ -68,6 +69,16 @@ const (
 
 var filterNames = [...]string{"open", "closed", "all"}
 
+// inputMode is the active text-input modal (none = normal navigation).
+type inputMode int
+
+const (
+	inputNone inputMode = iota
+	inputNewTask
+	inputNewAgent
+	inputTell
+)
+
 type model struct {
 	cl    *client.HTTP
 	ch    <-chan hub.BoardState
@@ -88,13 +99,19 @@ type model struct {
 	prDetail   hub.PRDetail
 	taskDetail store.Task
 	quit       bool
+
+	mode        inputMode      // active text-input modal
+	input       textinput.Model
+	inputTarget string         // selection captured when the modal opened
 }
 
 func newModel(cl *client.HTTP, ch <-chan hub.BoardState) model {
 	// Default to a sane size so a frame renders immediately — the real size
 	// arrives via WindowSizeMsg and resizes. (Some terminals send the initial
 	// size late or as 0×0; without a default the view would stick on "loading".)
-	m := model{cl: cl, ch: ch, collapsed: map[string]bool{}, w: 80, h: 24}
+	in := textinput.New()
+	in.CharLimit = 200
+	m := model{cl: cl, ch: ch, collapsed: map[string]bool{}, w: 80, h: 24, input: in}
 	m.reclamp()
 	return m
 }
@@ -158,6 +175,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		return m, tea.Quit
 	case tea.KeyMsg:
+		if m.mode != inputNone {
+			return m.updateInput(msg)
+		}
 		cmd := m.onKey(msg.String())
 		if m.quit {
 			return m, tea.Quit
@@ -165,6 +185,51 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+// updateInput routes a keypress to the open modal: esc cancels, enter submits,
+// everything else edits the field.
+func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.mode, m.inputTarget = inputNone, ""
+		m.input.Blur()
+		return m, nil
+	case "enter":
+		cmd := m.submitInput()
+		m.mode, m.inputTarget = inputNone, ""
+		m.input.Blur()
+		return m, cmd
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
+}
+
+// openInput starts a modal, capturing the current selection as its target.
+func (m *model) openInput(mode inputMode, prompt string) {
+	m.mode, m.inputTarget = mode, m.selID()
+	m.input.SetValue("")
+	m.input.Prompt = prompt
+	m.input.Focus()
+}
+
+// submitInput performs the modal's hub action with the entered value.
+func (m *model) submitInput() tea.Cmd {
+	v := strings.TrimSpace(m.input.Value())
+	if v == "" || m.cl == nil {
+		return nil
+	}
+	cl, target := m.cl, m.inputTarget
+	switch m.mode {
+	case inputNewTask:
+		return func() tea.Msg { _, _ = cl.NewTask(v, "", "", nil); return nil }
+	case inputNewAgent:
+		return func() tea.Msg { _ = cl.NewAgent(v, "worker"); return nil }
+	case inputTell:
+		return func() tea.Msg { _ = cl.Tell(target, v, "user"); return nil }
+	}
+	return nil
 }
 
 // onKey applies a key (by its string form) — shared by the live loop and the
@@ -217,6 +282,19 @@ func (m *model) onKey(k string) tea.Cmd {
 	case "m": // prs: merge (the human gate)
 		if m.tab == 2 {
 			return m.action(func(id string) error { _, err := m.cl.Merge(id); return err })
+		}
+	case "n": // new task (tasks) / new agent (agents)
+		if m.tab == 0 {
+			m.openInput(inputNewTask, "new task: ")
+			return textinput.Blink
+		} else if m.tab == 1 {
+			m.openInput(inputNewAgent, "new agent name: ")
+			return textinput.Blink
+		}
+	case "t": // tell the selected agent
+		if m.tab == 1 && m.selID() != "" {
+			m.openInput(inputTell, "tell "+m.selID()+": ")
+			return textinput.Blink
 		}
 	case "r":
 		cl := m.cl
@@ -303,9 +381,9 @@ func (m model) detailLines() []string {
 func (m model) contextFooter() string {
 	switch m.tab {
 	case 0:
-		return fmt.Sprintf("f filter: %s   ·   h/l fold", filterNames[m.filter])
+		return fmt.Sprintf("n new · f filter: %s · h/l fold", filterNames[m.filter])
 	case 1:
-		return "l launch · a attach   (n new · t tell — soon)"
+		return "n new · l launch · t tell · a attach"
 	default:
 		return "m merge"
 	}
@@ -335,7 +413,12 @@ func (m model) View() string {
 	left := pane(rowTexts(m.rows()), m.list, m.leftWidth(), m.cursor[m.tab])
 	right := pane(m.detailLines(), m.detail, m.detailWidth(), -1)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, divider(m.bodyHeight()), right)
-	foot := footer("ctrl+h/l tab · j/k move · g/G ends · r refresh · q quit", m.contextFooter(), m.w)
+	var foot string
+	if m.mode != inputNone {
+		foot = dimStyle.Render(padTrunc("enter submit · esc cancel", m.w)) + "\n" + m.input.View()
+	} else {
+		foot = footer("ctrl+h/l tab · j/k move · g/G ends · r refresh · q quit", m.contextFooter(), m.w)
+	}
 	return strings.Join([]string{top, body, foot}, "\n")
 }
 
