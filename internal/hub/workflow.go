@@ -15,6 +15,8 @@ package hub
 import (
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -30,6 +32,24 @@ func (h *Hub) baseBranch() (string, error) { return git.CurrentBranch(h.root) }
 
 // PRs returns all merge-intents (newest first).
 func (h *Hub) PRs() ([]store.PR, error) { return h.store.PRs() }
+
+// runLint runs the project's quality gates against a worktree by invoking
+// `sindri lint all` there (a subprocess, so the concurrent hub never chdir's).
+// The gate applies only to Go modules — a non-Go workspace has no Go gates and
+// is skipped. openspec validation self-skips when openspec/ is absent.
+func (h *Hub) runLint(wt string) (output string, ok bool) {
+	if _, err := os.Stat(filepath.Join(wt, "go.mod")); err != nil {
+		return "", true // no Go module — no lint gate applies
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return "lint: " + err.Error(), false
+	}
+	cmd := exec.Command(self, "lint", "all")
+	cmd.Dir = wt
+	out, err := cmd.CombinedOutput()
+	return string(out), err == nil
+}
 
 // SyncTasks refreshes the whole cached task set from td (the sync read path).
 func (h *Hub) SyncTasks() error {
@@ -113,6 +133,14 @@ func (h *Hub) cmdSubmit(c registry.Caller, args []string, out io.Writer) (int, e
 	}
 	a, _, _ := h.store.GetAgent(c.Agent)
 	wt := filepath.Join(h.root, a.Workspace)
+	// Lint gate (3.3): never accept a merge-intent for code that fails the
+	// project's quality gates. Runs against the worktree before the PR exists, so
+	// a failing worker just fixes and submits again.
+	if lintOut, ok := h.runLint(wt); !ok {
+		fmt.Fprintf(out, "Lint failed — fix the violations and submit again:\n%s\n", strings.TrimSpace(lintOut))
+		_ = h.store.Log(c.Agent, "lint-fail", st.Task)
+		return 1, nil
+	}
 	msg := strings.TrimSpace(strings.Join(args, " "))
 	if msg == "" {
 		msg = "work on " + st.Task

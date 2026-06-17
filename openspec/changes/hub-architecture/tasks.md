@@ -101,9 +101,9 @@ back-compat: superseded code is deleted, not wrapped.
 - [x] 3.2 Agent loop: act → report → idle; hub injects next task / verdict (no
       blocking, no `.sindri-task` file, no polling) — `submit` returns, worker idles,
       hub wakes it on merge/reject
-- [~] 3.3 Hub runs review/merge via `adapter/git` host-side (approve/reject + the
-      human `merge` done) — *lint gate at submit deferred (the lint pkg runs against
-      cwd, not a worktree path; needs a dir-scoped entry before it can gate submit)*
+- [x] 3.3 Hub runs lint/review/merge host-side: `submit` runs the lint gate via
+      `sindri lint all` in the worktree (tolerant — Go modules only; non-Go skips);
+      reviewer approve/reject + human `merge` via `adapter/git`
 - [x] 3.4 Object-mediated agent2agent: `reject` resolves branch→owner→pod →
       injects `[reviewer]` feedback; `merge` routes `[hub]` back (verified live)
 - [x] 3.5 **Deleted** `internal/ghlocal/store` and the `worker.List` reconciler
