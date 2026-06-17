@@ -48,7 +48,7 @@ func (h *Hub) Handler() http.Handler {
 		writeJSON(w, okMsg{"refreshed"}, h.Refresh())
 	})
 	mux.HandleFunc("GET /log", func(w http.ResponseWriter, r *http.Request) {
-		evs, err := h.AgentLog(r.URL.Query().Get("agent"), 50)
+		evs, err := h.Log(r.URL.Query().Get("agent"))
 		writeJSON(w, evs, err)
 	})
 	mux.HandleFunc("POST /agents", func(w http.ResponseWriter, r *http.Request) {
@@ -84,7 +84,35 @@ func (h *Hub) Handler() http.Handler {
 		prs, err := h.PRs()
 		writeJSON(w, prs, err)
 	})
+	mux.HandleFunc("GET /pr", func(w http.ResponseWriter, r *http.Request) {
+		d, err := h.PRInfo(r.URL.Query().Get("id"))
+		writeJSON(w, d, err)
+	})
+	mux.HandleFunc("GET /tasks", func(w http.ResponseWriter, r *http.Request) {
+		tasks, err := h.Tasks()
+		writeJSON(w, tasks, err)
+	})
+	mux.HandleFunc("GET /task", func(w http.ResponseWriter, r *http.Request) {
+		t, err := h.TaskInfo(r.URL.Query().Get("id"))
+		writeJSON(w, t, err)
+	})
+	mux.HandleFunc("POST /tasks", func(w http.ResponseWriter, r *http.Request) {
+		var req TaskReq
+		if !decode(w, r, &req) {
+			return
+		}
+		id, err := h.NewTask(req.Title, req.Type, req.Priority, req.Labels)
+		writeJSON(w, okMsg{id}, err)
+	})
 	return mux
+}
+
+// TaskReq is the body for POST /tasks.
+type TaskReq struct {
+	Title    string   `json:"title"`
+	Type     string   `json:"type"`
+	Priority string   `json:"priority"`
+	Labels   []string `json:"labels"`
 }
 
 // Serve binds the repo's unix socket and serves until the listener closes. A

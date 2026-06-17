@@ -158,6 +158,33 @@ func (c *HTTP) PRs() ([]store.PR, error) {
 	return out, c.get("/prs", &out)
 }
 
+// PRInfo returns a PR with its diff.
+func (c *HTTP) PRInfo(id string) (hub.PRDetail, error) {
+	var d hub.PRDetail
+	return d, c.get("/pr?id="+url.QueryEscape(id), &d)
+}
+
+// Tasks lists all cached tasks (refreshed from the source of truth).
+func (c *HTTP) Tasks() ([]store.Task, error) {
+	var out []store.Task
+	return out, c.get("/tasks", &out)
+}
+
+// TaskInfo returns one task (refreshed first).
+func (c *HTTP) TaskInfo(id string) (store.Task, error) {
+	var t store.Task
+	return t, c.get("/task?id="+url.QueryEscape(id), &t)
+}
+
+// NewTask creates a task and returns its id.
+func (c *HTTP) NewTask(title, typ, priority string, labels []string) (string, error) {
+	var ok struct {
+		ID string `json:"ok"`
+	}
+	err := c.postResult("/tasks", hub.TaskReq{Title: title, Type: typ, Priority: priority, Labels: labels}, &ok)
+	return ok.ID, err
+}
+
 // Refresh asks the hub to re-sync tasks from the source of truth.
 func (c *HTTP) Refresh() error { return c.post("/refresh", struct{}{}) }
 
@@ -177,6 +204,11 @@ func (c *HTTP) get(path string, out any) error {
 }
 
 func (c *HTTP) post(path string, body any) error {
+	return c.postResult(path, body, nil)
+}
+
+// postResult posts body and decodes a successful JSON response into out.
+func (c *HTTP) postResult(path string, body, out any) error {
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -186,7 +218,7 @@ func (c *HTTP) post(path string, body any) error {
 		return err
 	}
 	defer resp.Body.Close()
-	return readResult(resp, nil)
+	return readResult(resp, out)
 }
 
 // readResult decodes a successful JSON body into out (if non-nil), or turns a

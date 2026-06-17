@@ -26,6 +26,35 @@ func Get(root, id string) (issue.Task, error) {
 	return taskFromDB(root, id)
 }
 
+// CreateOpts are optional fields for Create.
+type CreateOpts struct {
+	Type     string
+	Priority string
+	Body     string
+	Labels   []string
+}
+
+// Create creates a task and returns td's output (the new id line) — a write,
+// through the td tool. The title is terminated with -- so a leading "--" in the
+// title doesn't trip the flag parser.
+func Create(root, title string, o CreateOpts) (string, error) {
+	args := []string{"create"}
+	if o.Type != "" {
+		args = append(args, "-t", o.Type)
+	}
+	if o.Priority != "" {
+		args = append(args, "-p", o.Priority)
+	}
+	if o.Body != "" {
+		args = append(args, "-d", o.Body)
+	}
+	if len(o.Labels) > 0 {
+		args = append(args, "--labels", strings.Join(o.Labels, ","))
+	}
+	args = append(args, "--", title)
+	return run(root, args...)
+}
+
 // SetStatus updates a task's status — a write, so through the td tool.
 func SetStatus(root, id, status string) error {
 	return mutate(root, "update", id, "--status", status)

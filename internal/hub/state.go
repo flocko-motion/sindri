@@ -78,10 +78,10 @@ func (h *Hub) Refresh() error {
 	return err
 }
 
-// AgentLog returns an agent's recent activity-log entries (the per-worker
-// timeline, D12), oldest-first.
-func (h *Hub) AgentLog(name string, limit int) ([]store.Event, error) {
-	return h.store.Events(name, limit)
+// Log returns an agent's recent activity-log entries (the per-worker timeline,
+// D12), oldest-first.
+func (h *Hub) Log(name string) ([]store.Event, error) {
+	return h.store.Events(name, 50)
 }
 
 // openPRFor returns the id of an agent's not-yet-merged PR, if any.

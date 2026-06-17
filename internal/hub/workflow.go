@@ -33,6 +33,61 @@ func (h *Hub) baseBranch() (string, error) { return git.CurrentBranch(h.root) }
 // PRs returns all merge-intents (newest first).
 func (h *Hub) PRs() ([]store.PR, error) { return h.store.PRs() }
 
+// PRDetail is a merge-intent plus its diff (for `pr info`).
+type PRDetail struct {
+	PR   store.PR `json:"pr"`
+	Diff string   `json:"diff"`
+}
+
+// PRInfo returns a PR with its diff.
+func (h *Hub) PRInfo(id string) (PRDetail, error) {
+	pr, ok, err := h.store.GetPR(id)
+	if err != nil {
+		return PRDetail{}, err
+	}
+	if !ok {
+		return PRDetail{}, fmt.Errorf("no such PR %q", id)
+	}
+	diff, _ := git.Diff(h.root, pr.Base, pr.Branch)
+	return PRDetail{PR: pr, Diff: diff}, nil
+}
+
+// Tasks refreshes from td and returns all cached tasks (for `task list`).
+func (h *Hub) Tasks() ([]store.Task, error) {
+	_ = h.SyncTasks() // best-effort; fall back to cache on failure
+	return h.store.AllTasks()
+}
+
+// TaskInfo returns one task, refreshed from the source of truth first (D15).
+func (h *Hub) TaskInfo(id string) (store.Task, error) {
+	t, err := td.Get(h.root, id)
+	if err != nil {
+		return store.Task{}, err
+	}
+	st := toStoreTask(t)
+	_ = h.store.UpsertTask(st)
+	return st, nil
+}
+
+// NewTask creates a task via the td tool and returns its id.
+func (h *Hub) NewTask(title, typ, priority string, labels []string) (string, error) {
+	out, err := td.Create(h.root, title, td.CreateOpts{Type: typ, Priority: priority, Labels: labels})
+	if err != nil {
+		return "", err
+	}
+	_ = h.SyncTasks()
+	h.notify()
+	// td prints e.g. "CREATED td-1add0f" — return just the id.
+	id := strings.TrimSpace(out)
+	for _, f := range strings.Fields(out) {
+		if strings.HasPrefix(f, "td-") {
+			id = f
+			break
+		}
+	}
+	return id, nil
+}
+
 // runLint runs the project's quality gates against a worktree by invoking
 // `sindri lint all` there (a subprocess, so the concurrent hub never chdir's).
 // The gate applies only to Go modules — a non-Go workspace has no Go gates and

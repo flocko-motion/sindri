@@ -27,16 +27,11 @@ func main() {
 	}
 	rootCmd.PersistentFlags().StringVar(&projectDir, "project", "", "Project directory (default: git root from cwd)")
 
-	// Hub-era verbs.
+	// Hierarchical command tree: <category> <action>. First-order: hub, tui, lint.
 	rootCmd.AddCommand(newHubCmd())
-	rootCmd.AddCommand(newNewCmd())
-	rootCmd.AddCommand(newLaunchCmd())
-	rootCmd.AddCommand(newTellCmd())
-	rootCmd.AddCommand(newAttachCmd())
-	rootCmd.AddCommand(newAgentsCmd())
-	rootCmd.AddCommand(newMergeCmd())
-	rootCmd.AddCommand(newPRsCmd())
-
+	rootCmd.AddCommand(newAgentCmd())
+	rootCmd.AddCommand(newTaskCmd())
+	rootCmd.AddCommand(newPrCmd())
 	rootCmd.AddCommand(newTuiCmd())
 	rootCmd.AddCommand(newLintCmd())
 

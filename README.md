@@ -86,41 +86,46 @@ make install                 # builds sindri + sindri-worker, builds the image
 
 sindri hub &                 # start the per-repo hub (agents need it running)
 
-sindri new brokkr            # register a worker identity (no pod yet)
-sindri new rune --role reviewer
-sindri launch brokkr         # spin its pod (runs interactive Claude)
-sindri launch rune
+sindri agent new brokkr               # register a worker identity (no pod yet)
+sindri agent new rune --role reviewer
+sindri agent launch brokkr            # spin its pod (runs interactive Claude)
+sindri agent launch rune
 
-sindri agents                # see the board (or: sindri tui)
-sindri tell brokkr "focus on the parser first"   # steer any agent live
-sindri attach brokkr         # dial into its live terminal
+sindri agent list                     # the board (or: sindri tui)
+sindri agent tell brokkr "focus on the parser first"   # steer any agent live
+sindri agent attach brokkr            # dial into its live terminal
 
-sindri prs                   # pending merge-intents
-sindri merge pr-td-abc123    # approve → merge (human gate)
+sindri task new "Wire the login page" -t feature -p high
+sindri task list
+
+sindri pr list                        # pending merge-intents
+sindri pr info pr-td-abc123           # PR metadata + diff
+sindri pr merge pr-td-abc123          # the human gate
 ```
 
-Use `sindri launch <name> --shell` to run a bare shell instead of Claude (for
-demos/debugging). `make demo` / `make loop` drive a throwaway repo end to end
-(need podman).
+Use `sindri agent launch <name> --shell` to run a bare shell instead of Claude
+(for demos/debugging). `make demo` / `make loop` / `make fullloop` drive a
+throwaway repo end to end (need podman).
 
 ---
 
 ## Commands
 
-| Command | What |
+The host CLI is hierarchical — `sindri <category> <action>`. First-order:
+`hub`, `tui`, `lint`.
+
+| Category | Actions |
 |---|---|
-| `sindri hub` | run the per-repo hub service (foreground) |
-| `sindri new <name> [--role]` | register an agent identity |
-| `sindri launch <name> [--shell]` | spin a pod that assumes the identity |
-| `sindri tell <name> "msg"` | type a message into an agent's session (`[user]`) |
-| `sindri attach <name>` | share an agent's live tmux terminal |
-| `sindri agents` | list agents + workflow state + orphan warnings |
-| `sindri prs` | list merge-intents |
-| `sindri merge <pr>` | merge an approved PR (human-only) |
-| `sindri tui` | live board (a hub client) |
+| `agent` | `list` · `new <name> [--role]` · `launch <name> [--shell]` · `tell <name> "msg"` · `attach <name>` · `info <name>` |
+| `task` | `list` · `new <title> [-t -p --labels]` · `info <id>` |
+| `pr` | `list` · `info <id>` · `merge <id>` |
+
+Every hub capability has a CLI verb, so functionality is verifiable from the
+shell, not only the TUI.
 
 Inside a pod the agent uses the browser `sindri-worker` (`next`, `submit`,
-`approve`/`reject`, `status`, `log`, `prs`) — the surface the hub offers it.
+`approve`/`reject`, `show`, `status`, `log`, `prs`) — the surface the hub offers
+it, filtered by role and state.
 
 ---
 

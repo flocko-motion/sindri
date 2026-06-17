@@ -123,6 +123,18 @@ func (s *Store) OpenTasks() ([]Task, error) {
 	return scanTasks(rows)
 }
 
+// AllTasks returns every cached task, highest priority first (unset last).
+func (s *Store) AllTasks() ([]Task, error) {
+	rows, err := s.db.Query(`
+		SELECT id,title,status,priority,type,labels FROM tasks
+		ORDER BY CASE WHEN priority='' THEN 1 ELSE 0 END, priority, id`)
+	if err != nil {
+		return nil, fmt.Errorf("all tasks: %w", err)
+	}
+	defer rows.Close()
+	return scanTasks(rows)
+}
+
 func scanTasks(rows *sql.Rows) ([]Task, error) {
 	var out []Task
 	for rows.Next() {

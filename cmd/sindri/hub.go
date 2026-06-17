@@ -1,10 +1,15 @@
-// package: main (sindri) / hub commands
+// package: main (sindri) / commands
 // type:    command (host CLI)
-// job:     the hub-era verbs — `hub` (run the persistent service), `new`
-//          (register an identity), `launch` (spin a pod), `tell` (inject a
-//          message), `attach` (dial into the live session), `agents` (list).
-// limits:  no logic — every verb is a thin call into a backend (in-process hub
-//          when none is running, the socket client otherwise).
+// job:     the host command tree — hierarchical <category> <action>: agent
+//
+//	{list,new,launch,tell,attach,info}, task {list,new,info}, pr
+//	{list,info,merge}; plus first-order hub. Every hub capability has a
+//	CLI verb so functionality is verifiable from the shell, not only the
+//	TUI.
+//
+// limits:  no logic — each verb is a thin call into a backend (in-process hub
+//
+//	when none is running, the socket client otherwise).
 package main
 
 import (
@@ -21,19 +26,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// backend is the hub operation set; satisfied by both *hub.Hub (in-process,
+// backend is the full hub operation set; satisfied by both *hub.Hub (in-process,
 // ephemeral) and *client.HTTP (a running hub over its socket).
 type backend interface {
 	NewAgent(name, role string) error
 	Launch(name string, shell bool) error
 	Tell(name, msg, source string) error
 	State() (hub.BoardState, error)
-	Merge(id string) (store.PR, error)
+	Log(name string) ([]store.Event, error)
+	Tasks() ([]store.Task, error)
+	TaskInfo(id string) (store.Task, error)
+	NewTask(title, typ, priority string, labels []string) (string, error)
 	PRs() ([]store.PR, error)
+	PRInfo(id string) (hub.PRDetail, error)
+	Merge(id string) (store.PR, error)
 	Close() error
 }
 
-// repoRoot resolves the git root from the current directory.
 func repoRoot() (string, error) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -42,14 +51,29 @@ func repoRoot() (string, error) {
 	return git.Root(wd)
 }
 
-// open returns a backend: the running hub over its socket if one is up, else an
-// ephemeral in-process hub (serve this one call, exit).
+// open returns the running hub over its socket if one is up, else an ephemeral
+// in-process hub.
 func open(root string) (backend, error) {
 	if hub.IsRunning(root) {
 		return client.Dial(root), nil
 	}
 	return hub.New(root)
 }
+
+func withBackend(fn func(backend) error) error {
+	root, err := repoRoot()
+	if err != nil {
+		return err
+	}
+	b, err := open(root)
+	if err != nil {
+		return err
+	}
+	defer b.Close()
+	return fn(b)
+}
+
+// --- first-order: hub ---
 
 func newHubCmd() *cobra.Command {
 	return &cobra.Command{
@@ -74,18 +98,52 @@ func newHubCmd() *cobra.Command {
 	}
 }
 
-func newNewCmd() *cobra.Command {
+// --- agent ---
+
+func newAgentCmd() *cobra.Command {
+	c := &cobra.Command{Use: "agent", Short: "Manage agents (workers + reviewers)"}
+	c.AddCommand(agentListCmd(), agentNewCmd(), agentLaunchCmd(), agentTellCmd(), agentAttachCmd(), agentInfoCmd())
+	return c
+}
+
+func agentListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "list", Short: "List agents with their live state", Args: cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			return withBackend(func(b backend) error {
+				st, err := b.State()
+				if err != nil {
+					return err
+				}
+				for _, a := range st.Agents {
+					run := "stopped"
+					if a.Running {
+						run = "running"
+					}
+					fmt.Printf("%-12s %-8s %-8s %-10s %-14s %s\n", a.Name, a.Role, run, a.Phase, dash(a.Task), dash(a.PR))
+				}
+				for _, o := range st.Orphans {
+					fmt.Printf("⚠  orphan: %s — no roster entry; remove with 'podman rm -f %s'\n", o, o)
+				}
+				if len(st.Agents) == 0 && len(st.Orphans) == 0 {
+					fmt.Fprintln(os.Stderr, "no agents — register one with 'sindri agent new <name>'")
+				}
+				return nil
+			})
+		},
+	}
+}
+
+func agentNewCmd() *cobra.Command {
 	var role string
 	c := &cobra.Command{
-		Use:   "new <name>",
-		Short: "Register an agent identity (no pod) — identity precedes runtime",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Use: "new <name>", Short: "Register an agent identity (no pod)", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
 			return withBackend(func(b backend) error {
 				if err := b.NewAgent(args[0], role); err != nil {
 					return err
 				}
-				fmt.Fprintf(os.Stderr, "registered %s (%s) — launch with 'sindri launch %s'\n", args[0], role, args[0])
+				fmt.Fprintf(os.Stderr, "registered %s (%s) — launch with 'sindri agent launch %s'\n", args[0], role, args[0])
 				return nil
 			})
 		},
@@ -94,20 +152,15 @@ func newNewCmd() *cobra.Command {
 	return c
 }
 
-func newLaunchCmd() *cobra.Command {
+func agentLaunchCmd() *cobra.Command {
 	var shell bool
 	c := &cobra.Command{
-		Use:   "launch <name>",
-		Short: "Spin a pod that assumes an existing agent's identity (runs Claude)",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Use: "launch <name>", Short: "Spin a pod that assumes the identity (runs Claude)", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
 			root, err := repoRoot()
 			if err != nil {
 				return err
 			}
-			// A launched agent needs its socket served for as long as it runs, so a
-			// persistent hub must be up — an ephemeral in-process hub would take the
-			// listener down on exit.
 			if !hub.IsRunning(root) {
 				return fmt.Errorf("no hub running — start one first: 'sindri hub &' (agents need a persistent hub)")
 			}
@@ -124,12 +177,10 @@ func newLaunchCmd() *cobra.Command {
 	return c
 }
 
-func newTellCmd() *cobra.Command {
+func agentTellCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "tell <name> <message...>",
-		Short: "Send a message into an agent's session (stamped [user])",
-		Args:  cobra.MinimumNArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Use: "tell <name> <message...>", Short: "Send a message into an agent's session ([user])", Args: cobra.MinimumNArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
 			msg := strings.Join(args[1:], " ")
 			return withBackend(func(b backend) error {
 				if err := b.Tell(args[0], msg, "user"); err != nil {
@@ -142,13 +193,11 @@ func newTellCmd() *cobra.Command {
 	}
 }
 
-func newAttachCmd() *cobra.Command {
+func agentAttachCmd() *cobra.Command {
 	var ro bool
 	c := &cobra.Command{
-		Use:   "attach <name>",
-		Short: "Attach to an agent's live tmux session (out-of-band, bypasses the hub)",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Use: "attach <name>", Short: "Attach to an agent's live tmux session (out-of-band)", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
 			name := args[0]
 			c := hub.Container(name)
 			if !pod.Running(c) {
@@ -161,28 +210,33 @@ func newAttachCmd() *cobra.Command {
 	return c
 }
 
-func newAgentsCmd() *cobra.Command {
+func agentInfoCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "agents",
-		Short: "List registered agents and their live status",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Use: "info <name>", Short: "Show an agent's state and activity timeline", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
 			return withBackend(func(b backend) error {
 				st, err := b.State()
 				if err != nil {
 					return err
 				}
-				if len(st.Agents) == 0 {
-					fmt.Fprintln(os.Stderr, "no agents — register one with 'sindri new <name>'")
-				}
-				for _, a := range st.Agents {
-					run := "stopped"
-					if a.Running {
-						run = "running"
+				var found *hub.AgentView
+				for i := range st.Agents {
+					if st.Agents[i].Name == args[0] {
+						found = &st.Agents[i]
 					}
-					fmt.Printf("%-12s %-8s %-8s %-10s %-12s %s\n", a.Name, a.Role, run, a.Phase, dash(a.Task), dash(a.PR))
 				}
-				for _, o := range st.Orphans {
-					fmt.Printf("⚠  orphan: %s — no roster entry; remove with 'podman rm -f %s'\n", o, o)
+				if found == nil {
+					return fmt.Errorf("no such agent %q", args[0])
+				}
+				fmt.Printf("agent:   %s\nrole:    %s\nrunning: %v\nphase:   %s\ntask:    %s\npr:      %s\n",
+					found.Name, found.Role, found.Running, found.Phase, dash(found.Task), dash(found.PR))
+				evs, err := b.Log(args[0])
+				if err != nil {
+					return err
+				}
+				fmt.Println("\nactivity:")
+				for _, e := range evs {
+					fmt.Printf("  %-10s %s\n", e.Type, e.Payload)
 				}
 				return nil
 			})
@@ -190,12 +244,132 @@ func newAgentsCmd() *cobra.Command {
 	}
 }
 
-func newMergeCmd() *cobra.Command {
+// --- task ---
+
+func newTaskCmd() *cobra.Command {
+	c := &cobra.Command{Use: "task", Short: "Inspect and create tasks"}
+	c.AddCommand(taskListCmd(), taskInfoCmd(), taskNewCmd())
+	return c
+}
+
+func taskListCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "merge <pr-id>",
-		Short: "Merge an approved PR (human-only — the single hard gate)",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Use: "list", Short: "List tasks", Args: cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			return withBackend(func(b backend) error {
+				tasks, err := b.Tasks()
+				if err != nil {
+					return err
+				}
+				for _, t := range tasks {
+					fmt.Printf("%-12s %-4s %-12s %s\n", t.ID, dash(t.Priority), t.Status, t.Title)
+				}
+				if len(tasks) == 0 {
+					fmt.Fprintln(os.Stderr, "no tasks")
+				}
+				return nil
+			})
+		},
+	}
+}
+
+func taskInfoCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "info <id>", Short: "Show a task", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withBackend(func(b backend) error {
+				t, err := b.TaskInfo(args[0])
+				if err != nil {
+					return err
+				}
+				fmt.Printf("id:       %s\ntitle:    %s\nstatus:   %s\ntype:     %s\npriority: %s\nlabels:   %s\n",
+					t.ID, t.Title, t.Status, dash(t.Type), dash(t.Priority), dash(t.Labels))
+				return nil
+			})
+		},
+	}
+}
+
+func taskNewCmd() *cobra.Command {
+	var typ, priority, labels string
+	c := &cobra.Command{
+		Use: "new <title...>", Short: "Create a task", Args: cobra.MinimumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			title := strings.Join(args, " ")
+			var lbls []string
+			if labels != "" {
+				lbls = strings.Split(labels, ",")
+			}
+			return withBackend(func(b backend) error {
+				id, err := b.NewTask(title, typ, priority, lbls)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "created %s\n", id)
+				return nil
+			})
+		},
+	}
+	c.Flags().StringVarP(&typ, "type", "t", "", "task type (feature|bug|…)")
+	c.Flags().StringVarP(&priority, "priority", "p", "", "priority (e.g. high|low or P1…P4)")
+	c.Flags().StringVar(&labels, "labels", "", "comma-separated labels")
+	return c
+}
+
+// --- pr ---
+
+func newPrCmd() *cobra.Command {
+	c := &cobra.Command{Use: "pr", Short: "Inspect and merge pull requests (merge-intents)"}
+	c.AddCommand(prListCmd(), prInfoCmd(), prMergeCmd())
+	return c
+}
+
+func prListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "list", Short: "List PRs", Args: cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			return withBackend(func(b backend) error {
+				prs, err := b.PRs()
+				if err != nil {
+					return err
+				}
+				for _, p := range prs {
+					fmt.Printf("%-14s %-9s %-10s %s\n", p.ID, p.Status, p.Agent, p.Branch)
+				}
+				if len(prs) == 0 {
+					fmt.Fprintln(os.Stderr, "no PRs")
+				}
+				return nil
+			})
+		},
+	}
+}
+
+func prInfoCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "info <pr-id>", Short: "Show a PR and its diff", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withBackend(func(b backend) error {
+				d, err := b.PRInfo(args[0])
+				if err != nil {
+					return err
+				}
+				p := d.PR
+				fmt.Printf("%s  [%s]  by %s\nbranch %s → %s\n", p.ID, p.Status, p.Agent, p.Branch, p.Base)
+				if p.Feedback != "" {
+					fmt.Printf("feedback: %s\n", p.Feedback)
+				}
+				fmt.Printf("\n%s\n", strings.TrimSpace(d.Diff))
+				return nil
+			})
+		},
+	}
+}
+
+func prMergeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "merge <pr-id>", Short: "Merge an approved PR (human-only — the hard gate)", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
 			return withBackend(func(b backend) error {
 				pr, err := b.Merge(args[0])
 				if err != nil {
@@ -206,41 +380,4 @@ func newMergeCmd() *cobra.Command {
 			})
 		},
 	}
-}
-
-func newPRsCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "prs",
-		Short: "List merge-intents (PRs) and their status",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return withBackend(func(b backend) error {
-				prs, err := b.PRs()
-				if err != nil {
-					return err
-				}
-				if len(prs) == 0 {
-					fmt.Fprintln(os.Stderr, "no PRs")
-					return nil
-				}
-				for _, p := range prs {
-					fmt.Printf("%-14s %-9s %-10s %s\n", p.ID, p.Status, p.Agent, p.Branch)
-				}
-				return nil
-			})
-		},
-	}
-}
-
-// withBackend opens a backend for the repo, runs fn, and closes it.
-func withBackend(fn func(backend) error) error {
-	root, err := repoRoot()
-	if err != nil {
-		return err
-	}
-	b, err := open(root)
-	if err != nil {
-		return err
-	}
-	defer b.Close()
-	return fn(b)
 }
