@@ -5,3 +5,12 @@
 {"ts":"2026-06-17T12:24:29.724077021+02:00","cmd":"create","ok":true,"dur_ms":0}
 {"ts":"2026-06-17T12:25:05.819763421+02:00","cmd":"create","ok":true,"dur_ms":0}
 {"ts":"2026-06-17T13:01:39.474945298+02:00","cmd":"list","session":"ses_fe3b78","ok":true,"dur_ms":4}
+{"ts":"2026-06-17T13:13:46.003963708+02:00","cmd":"list","session":"ses_fe3b78","ok":true,"dur_ms":4}
+{"ts":"2026-06-17T13:20:24.193177462+02:00","cmd":"create","flags":{"priority":"P1","type":"epic","work-dir":"/home/florian.metzger-noel/r/sindri"},"session":"ses_fe3b78","ok":true,"dur_ms":459}
+{"ts":"2026-06-17T13:20:24.72633324+02:00","cmd":"create","flags":{"parent":"td-56710f","priority":"P1","type":"feature","work-dir":"/home/florian.metzger-noel/r/sindri"},"session":"ses_fe3b78","ok":true,"dur_ms":469}
+{"ts":"2026-06-17T13:20:25.26976405+02:00","cmd":"create","flags":{"parent":"td-4d9237","priority":"P2","type":"task","work-dir":"/home/florian.metzger-noel/r/sindri"},"session":"ses_fe3b78","ok":true,"dur_ms":403}
+{"ts":"2026-06-17T13:20:25.744416258+02:00","cmd":"create","flags":{"parent":"td-4d9237","priority":"P3","type":"task","work-dir":"/home/florian.metzger-noel/r/sindri"},"session":"ses_fe3b78","ok":true,"dur_ms":374}
+{"ts":"2026-06-17T13:20:26.188011656+02:00","cmd":"create","flags":{"parent":"td-56710f","priority":"P2","type":"feature","work-dir":"/home/florian.metzger-noel/r/sindri"},"session":"ses_fe3b78","ok":true,"dur_ms":437}
+{"ts":"2026-06-17T13:20:26.694803195+02:00","cmd":"create","flags":{"parent":"td-0b5a8f","priority":"P2","type":"task","work-dir":"/home/florian.metzger-noel/r/sindri"},"session":"ses_fe3b78","ok":true,"dur_ms":382}
+{"ts":"2026-06-17T13:20:27.145241527+02:00","cmd":"create","flags":{"priority":"P0","type":"bug","work-dir":"/home/florian.metzger-noel/r/sindri"},"session":"ses_fe3b78","ok":true,"dur_ms":376}
+{"ts":"2026-06-17T13:20:27.591632429+02:00","cmd":"create","flags":{"type":"task","work-dir":"/home/florian.metzger-noel/r/sindri"},"session":"ses_fe3b78","ok":true,"dur_ms":378}

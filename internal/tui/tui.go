@@ -11,10 +11,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/flo-at/sindri/internal/adapter/pod"
+	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -200,8 +203,20 @@ func (m *model) onKey(k string) tea.Cmd {
 			}
 		}
 	case "l":
-		if m.tab == 0 {
+		if m.tab == 0 { // tasks: expand fold
 			delete(m.collapsed, m.selID())
+		} else if m.tab == 1 { // agents: launch
+			return m.action(func(id string) error { return m.cl.Launch(id, false) })
+		}
+	case "a": // agents: attach to the live tmux session (out-of-band)
+		if m.tab == 1 {
+			if id := m.selID(); id != "" && m.cl != nil {
+				return tea.ExecProcess(attachCmd(id), func(error) tea.Msg { return nil })
+			}
+		}
+	case "m": // prs: merge (the human gate)
+		if m.tab == 2 {
+			return m.action(func(id string) error { _, err := m.cl.Merge(id); return err })
 		}
 	case "r":
 		cl := m.cl
@@ -210,6 +225,22 @@ func (m *model) onKey(k string) tea.Cmd {
 	}
 	m.reclamp()
 	return m.syncDetail()
+}
+
+// action runs a mutating hub call for the current selection; /events then
+// refreshes the view.
+func (m *model) action(fn func(id string) error) tea.Cmd {
+	id := m.selID()
+	if id == "" || m.cl == nil {
+		return nil
+	}
+	return func() tea.Msg { _ = fn(id); return nil }
+}
+
+// attachCmd builds the interactive `podman exec -it … tmux attach` for an agent.
+func attachCmd(name string) *exec.Cmd {
+	args := append([]string{"exec", "-it", hub.Container(name), "tmux"}, tmux.Attach(name, false)...)
+	return exec.Command(pod.Binary, args...)
 }
 
 // reclamp keeps the active tab's cursor + both viewports in range.
@@ -274,9 +305,9 @@ func (m model) contextFooter() string {
 	case 0:
 		return fmt.Sprintf("f filter: %s   ·   h/l fold", filterNames[m.filter])
 	case 1:
-		return "(actions: launch/tell/attach — next round)"
+		return "l launch · a attach   (n new · t tell — soon)"
 	default:
-		return "(actions: merge — next round)"
+		return "m merge"
 	}
 }
 

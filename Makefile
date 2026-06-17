@@ -36,6 +36,10 @@ test:
 screenshot:
 	go test ./internal/tui/ -run Screenshot -v
 
+# Seed a mock task hierarchy into the current repo's td store (titles "Mock:…").
+seed:
+	./scripts/seed.sh
+
 lint: sindri
 	./bin/sindri lint all
 
