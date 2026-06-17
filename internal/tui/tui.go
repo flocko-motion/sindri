@@ -100,10 +100,17 @@ type model struct {
 	taskDetail store.Task
 	quit       bool
 
-	mode        inputMode      // active text-input modal
+	mode        inputMode // active text-input modal
 	input       textinput.Model
-	inputTarget string         // selection captured when the modal opened
+	inputTarget string    // selection captured when the modal opened
+	modal       bool      // detail modal (full-screen) is open
 }
+
+// detailMinWidth is the narrowest terminal that still shows the inline detail
+// pane; below it the selector goes full-width and detail is ENTER-only.
+const detailMinWidth = 90
+
+func (m model) showDetail() bool { return m.w >= detailMinWidth }
 
 func newModel(cl *client.HTTP, ch <-chan hub.BoardState) model {
 	// Default to a sane size so a frame renders immediately — the real size
@@ -157,6 +164,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.w, m.h = msg.Width, msg.Height
 		}
 		m.reclamp()
+		if m.modal {
+			m.detail.SetHeight(modalContentHeight(m.h))
+		}
 	case stateMsg:
 		m.state = hub.BoardState(msg)
 		m.reclamp()
@@ -173,6 +183,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.mode != inputNone {
 			return m.updateInput(msg)
+		}
+		if m.modal {
+			return m.updateModal(msg)
 		}
 		cmd := m.onKey(msg.String())
 		if m.quit {
@@ -200,6 +213,40 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
+}
+
+// updateModal handles keys while the detail modal is open: scroll or close.
+func (m model) updateModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "enter", "q":
+		m.modal = false
+		m.reclamp() // restore the inline detail viewport
+	case "j", "down":
+		m.detail.ScrollDown()
+	case "k", "up":
+		m.detail.ScrollUp()
+	case "ctrl+d":
+		m.detail.ScrollPageDown()
+	case "ctrl+u":
+		m.detail.ScrollPageUp()
+	case "g":
+		m.detail.ScrollTop()
+	case "G":
+		m.detail.ScrollBottom()
+	}
+	return m, nil
+}
+
+// modalTitle labels the detail modal for the current selection.
+func (m model) modalTitle() string {
+	switch m.tab {
+	case 0:
+		return "Task " + m.selID()
+	case 1:
+		return "Agent " + m.selID()
+	default:
+		return "PR " + m.selID()
+	}
 }
 
 // openInput starts a modal, capturing the current selection as its target.
@@ -231,6 +278,7 @@ func (m *model) submitInput() tea.Cmd {
 // onKey applies a key (by its string form) — shared by the live loop and the
 // headless Screenshot harness. Mutates the model; returns an optional cmd.
 func (m *model) onKey(k string) tea.Cmd {
+	oldTab := m.tab
 	switch k {
 	case "q", "ctrl+c":
 		m.quit = true
@@ -292,13 +340,33 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.openInput(inputTell, "tell "+m.selID()+": ")
 			return textinput.Blink
 		}
+	case "enter": // open the full-screen detail modal
+		if m.selID() != "" {
+			m.modal = true
+			m.detail.SetHeight(modalContentHeight(m.h))
+			m.detail.SetTotal(len(m.detailLines()))
+			m.detail.ScrollTop()
+			return nil
+		}
 	case "r":
-		cl := m.cl
 		m.reclamp()
-		return func() tea.Msg { cl.Refresh(); return nil }
+		return m.refreshCmd()
 	}
 	m.reclamp()
-	return m.syncDetail()
+	cmd := m.syncDetail()
+	if m.tab != oldTab { // changing tabs auto-refreshes from the source of truth
+		return tea.Batch(cmd, m.refreshCmd())
+	}
+	return cmd
+}
+
+// refreshCmd asks the hub to re-sync tasks from the source of truth.
+func (m *model) refreshCmd() tea.Cmd {
+	cl := m.cl
+	if cl == nil {
+		return nil
+	}
+	return func() tea.Msg { cl.Refresh(); return nil }
 }
 
 // action runs a mutating hub call for the current selection; /events then
@@ -405,10 +473,20 @@ func (m model) View() string {
 	for i, s := range hub.Sections {
 		labels[i] = fmt.Sprintf("%d %s", s.Count(m.state), s.Title)
 	}
+	// Full-screen detail modal takes over the whole screen.
+	if m.modal {
+		return modal(m.modalTitle(), m.detailLines(), m.detail, m.w, m.h)
+	}
 	top := tabStrip(labels, m.tab, m.w)
-	left := pane(rowTexts(m.rows()), m.list, m.leftWidth(), m.cursor[m.tab])
-	right := pane(m.detailLines(), m.detail, m.detailWidth(), -1)
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, divider(m.bodyHeight()), right)
+	var body string
+	if m.showDetail() {
+		left := pane(rowTexts(m.rows()), m.list, m.leftWidth(), m.cursor[m.tab])
+		right := pane(m.detailLines(), m.detail, m.detailWidth(), -1)
+		body = lipgloss.JoinHorizontal(lipgloss.Top, left, divider(m.bodyHeight()), right)
+	} else {
+		// Narrow terminal: selector full-width; detail is ENTER-only.
+		body = pane(rowTexts(m.rows()), m.list, m.w, m.cursor[m.tab])
+	}
 	var foot string
 	if m.mode != inputNone {
 		foot = dimStyle.Render(padTrunc("enter submit · esc cancel", m.w)) + "\n" + m.input.View()

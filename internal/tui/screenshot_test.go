@@ -53,4 +53,7 @@ func TestScreenshot(t *testing.T) {
 	for _, sc := range scenes {
 		fmt.Printf("\n========== %s ==========\n%s\n", sc.name, Screenshot(b, 96, 20, sc.keys...))
 	}
+	// Detail modal (ENTER) and a narrow terminal (detail pane hidden).
+	fmt.Printf("\n========== detail modal (ENTER on a task) ==========\n%s\n", Screenshot(b, 96, 20, "j", "j", "enter"))
+	fmt.Printf("\n========== narrow terminal (70 wide — no detail pane) ==========\n%s\n", Screenshot(b, 70, 16))
 }
