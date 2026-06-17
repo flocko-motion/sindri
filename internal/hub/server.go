@@ -56,7 +56,8 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"registered"}, h.NewAgent(req.Name, req.Role))
+		name, err := h.NewAgent(req.Name, req.Role)
+		writeJSON(w, okMsg{name}, err)
 	})
 	mux.HandleFunc("POST /launch", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq

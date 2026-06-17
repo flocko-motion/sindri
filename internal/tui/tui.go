@@ -75,7 +75,6 @@ type inputMode int
 
 const (
 	inputNone inputMode = iota
-	inputNewAgent
 	inputTell
 )
 
@@ -306,10 +305,7 @@ func (m *model) submitInput() tea.Cmd {
 		return nil
 	}
 	cl, target := m.cl, m.inputTarget
-	switch m.mode {
-	case inputNewAgent:
-		return func() tea.Msg { _ = cl.NewAgent(v, "worker"); return nil }
-	case inputTell:
+	if m.mode == inputTell {
 		return func() tea.Msg { _ = cl.Tell(target, v, "user"); return nil }
 	}
 	return nil
@@ -386,9 +382,15 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 0 {
 			m.openTaskForm(false)
 			return nil
-		} else if m.tab == 1 {
-			m.openInput(inputNewAgent, "new agent name: ")
-			return textinput.Blink
+		} else if m.tab == 1 { // agents: auto-named after a dwarf
+			cl := m.cl
+			m.flash = "registering a new agent…"
+			return func() tea.Msg {
+				if cl != nil {
+					_, _ = cl.NewAgent("", "worker")
+				}
+				return nil
+			}
 		}
 	case "e": // edit the selected task
 		if m.tab == 0 && m.selID() != "" {

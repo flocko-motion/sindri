@@ -70,18 +70,27 @@ func (h *Hub) Close() error {
 // SocketPath is the hub's control socket for this repo.
 func (h *Hub) SocketPath() string { return SocketPath(h.root) }
 
-// NewAgent registers an agent identity (no pod). Identity precedes runtime (D13).
-func (h *Hub) NewAgent(name, role string) error {
+// NewAgent registers an agent identity (no pod). Identity precedes runtime
+// (D13). An empty name is auto-assigned a Norse dwarf name. Returns the final
+// name.
+func (h *Hub) NewAgent(name, role string) (string, error) {
+	if name == "" { // auto-name after a dwarf — a friend of Sindri
+		n, err := h.autoName()
+		if err != nil {
+			return "", err
+		}
+		name = n
+	}
 	if !nameRe.MatchString(name) {
-		return fmt.Errorf("invalid agent name %q (use lowercase letters, digits, - _)", name)
+		return "", fmt.Errorf("invalid agent name %q (use lowercase letters, digits, - _)", name)
 	}
 	if role != "worker" && role != "reviewer" {
-		return fmt.Errorf("invalid role %q (worker|reviewer)", role)
+		return "", fmt.Errorf("invalid role %q (worker|reviewer)", role)
 	}
 	if _, ok, err := h.store.GetAgent(name); err != nil {
-		return err
+		return "", err
 	} else if ok {
-		return fmt.Errorf("agent %q already exists", name)
+		return "", fmt.Errorf("agent %q already exists", name)
 	}
 	a := store.Agent{
 		Name:      name,
@@ -90,10 +99,10 @@ func (h *Hub) NewAgent(name, role string) error {
 		Socket:    filepath.Join(".sindri", "sockets", name+".sock"),
 	}
 	if err := h.store.PutAgent(a); err != nil {
-		return err
+		return "", err
 	}
 	defer h.notify()
-	return h.store.Log(name, "register", "role="+role)
+	return name, h.store.Log(name, "register", "role="+role)
 }
 
 // Launch spins a pod that assumes an existing agent's identity. The agent's

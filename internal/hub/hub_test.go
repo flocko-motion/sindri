@@ -16,23 +16,46 @@ func newHub(t *testing.T) *Hub {
 
 func TestNewAgentValidation(t *testing.T) {
 	h := newHub(t)
-	if err := h.NewAgent("Brokkr", "worker"); err == nil {
+	if _, err := h.NewAgent("Brokkr", "worker"); err == nil {
 		t.Fatalf("uppercase name should be rejected")
 	}
-	if err := h.NewAgent("brokkr", "boss"); err == nil {
+	if _, err := h.NewAgent("brokkr", "boss"); err == nil {
 		t.Fatalf("bad role should be rejected")
 	}
-	if err := h.NewAgent("brokkr", "worker"); err != nil {
+	if _, err := h.NewAgent("brokkr", "worker"); err != nil {
 		t.Fatalf("valid agent: %v", err)
 	}
-	if err := h.NewAgent("brokkr", "worker"); err == nil {
+	if _, err := h.NewAgent("brokkr", "worker"); err == nil {
 		t.Fatalf("duplicate agent should be rejected")
+	}
+}
+
+func TestNewAgentAutoName(t *testing.T) {
+	h := newHub(t)
+	// Empty name ⇒ first unused dwarf name.
+	n1, err := h.NewAgent("", "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n1 != dwarfNames[0] {
+		t.Fatalf("first auto-name = %q, want %q", n1, dwarfNames[0])
+	}
+	// Next one skips the taken name.
+	n2, err := h.NewAgent("", "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n2 != dwarfNames[1] {
+		t.Fatalf("second auto-name = %q, want %q", n2, dwarfNames[1])
+	}
+	if n2 == "sindri" || n1 == "sindri" {
+		t.Fatalf("must never hand out 'sindri'")
 	}
 }
 
 func TestNewAgentRecordsIdentityAndLog(t *testing.T) {
 	h := newHub(t)
-	if err := h.NewAgent("dvalin", "reviewer"); err != nil {
+	if _, err := h.NewAgent("dvalin", "reviewer"); err != nil {
 		t.Fatal(err)
 	}
 	st, err := h.State()

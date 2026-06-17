@@ -91,9 +91,14 @@ func (c *HTTP) Watch(ctx context.Context) (<-chan hub.BoardState, error) {
 	return out, nil
 }
 
-// NewAgent registers an agent identity.
-func (c *HTTP) NewAgent(name, role string) error {
-	return c.post("/agents", hub.AgentReq{Name: name, Role: role})
+// NewAgent registers an agent identity (empty name ⇒ hub auto-names it). Returns
+// the final name.
+func (c *HTTP) NewAgent(name, role string) (string, error) {
+	var ok struct {
+		Name string `json:"ok"`
+	}
+	err := c.postResult("/agents", hub.AgentReq{Name: name, Role: role}, &ok)
+	return ok.Name, err
 }
 
 // Launch spins a pod for an existing agent (shell=true runs a bare shell instead

@@ -35,7 +35,7 @@ func TestWatchStreamsChanges(t *testing.T) {
 	}
 	<-ch // initial snapshot (empty)
 
-	if err := cl.NewAgent("brokkr", "worker"); err != nil {
+	if _, err := cl.NewAgent("brokkr", "worker"); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.After(2 * time.Second)
@@ -79,10 +79,10 @@ func TestAgentSocketIdentityAndSurface(t *testing.T) {
 	}
 	defer h.Close()
 
-	if err := h.NewAgent("brokkr", "worker"); err != nil {
+	if _, err := h.NewAgent("brokkr", "worker"); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.NewAgent("rune", "reviewer"); err != nil {
+	if _, err := h.NewAgent("rune", "reviewer"); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.ServeAgent("brokkr"); err != nil {
@@ -168,7 +168,7 @@ func TestServeAndClientRoundTrip(t *testing.T) {
 	}
 
 	cl := Dial(root)
-	if err := cl.NewAgent("brokkr", "worker"); err != nil {
+	if _, err := cl.NewAgent("brokkr", "worker"); err != nil {
 		t.Fatalf("client NewAgent: %v", err)
 	}
 	st, err := cl.State()
@@ -179,7 +179,7 @@ func TestServeAndClientRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected state over socket: %+v", st)
 	}
 	// The hub's domain error must surface across the socket.
-	if err := cl.NewAgent("brokkr", "worker"); err == nil {
+	if _, err := cl.NewAgent("brokkr", "worker"); err == nil {
 		t.Fatalf("expected duplicate error over socket")
 	}
 }

@@ -29,7 +29,7 @@ import (
 // backend is the full hub operation set; satisfied by both *hub.Hub (in-process,
 // ephemeral) and *client.HTTP (a running hub over its socket).
 type backend interface {
-	NewAgent(name, role string) error
+	NewAgent(name, role string) (string, error)
 	Launch(name string, shell bool) error
 	Tell(name, msg, source string) error
 	State() (hub.BoardState, error)
@@ -139,13 +139,18 @@ func agentListCmd() *cobra.Command {
 func agentNewCmd() *cobra.Command {
 	var role string
 	c := &cobra.Command{
-		Use: "new <name>", Short: "Register an agent identity (no pod)", Args: cobra.ExactArgs(1),
+		Use: "new [name]", Short: "Register an agent identity (no pod; name optional — auto dwarf name)", Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			var want string
+			if len(args) == 1 {
+				want = args[0]
+			}
 			return withBackend(func(b backend) error {
-				if err := b.NewAgent(args[0], role); err != nil {
+				name, err := b.NewAgent(want, role)
+				if err != nil {
 					return err
 				}
-				fmt.Fprintf(os.Stderr, "registered %s (%s) — launch with 'sindri agent launch %s'\n", args[0], role, args[0])
+				fmt.Fprintf(os.Stderr, "registered %s (%s) — launch with 'sindri agent launch %s'\n", name, role, name)
 				return nil
 			})
 		},
