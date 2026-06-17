@@ -47,11 +47,11 @@
       + description), agent (state + `client.Log` timeline), pr (`PRInfo`: meta +
       linked task + diff)
 - [x] 4.6 Two-row footer: row1 global nav, row2 context actions for the active tab
-- [ ] 4.7 Actions via the hub client: Tasks `n` (new-task modal); Agents `n`
+- [x] 4.7 Actions via the hub client: Tasks `n` (new-task modal); Agents `n`
       (modal),`l` launch,`t` tell (modal),`a` attach; PRs `m` merge
 - [x] 4.8 `a` attach via `tea.ExecProcess` (podman exec -it … tmux attach), resume
       on detach
-- [ ] 4.9 `bubbles/textinput` modal for `n`/`t`
+- [x] 4.9 `bubbles/textinput` modal for `n`/`t`
 - [x] 4.10 Live updates: `Watch` channel → re-render; `r` forces task re-sync;
       refuse to start without a hub (keep the guard + test)
 
