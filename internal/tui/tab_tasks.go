@@ -63,12 +63,14 @@ func (m model) taskRows() []row {
 				fold = "▾"
 			}
 		}
-		mark := " "
+		mark := ""
 		if tr.PR != "" {
-			mark = "◆"
+			mark = "◆ "
 		}
-		text := fmt.Sprintf("%s%s %s %-2s %s %-11s %s",
-			strings.Repeat("  ", tr.Depth), fold, tr.ID, tr.Priority, mark, tr.Status, tr.Title)
+		// Fixed left columns (priority word, status) keep alignment; the tree
+		// indent applies only to the title region so hierarchy never shifts them.
+		title := strings.Repeat("  ", tr.Depth) + fold + " " + mark + tr.Title
+		text := fmt.Sprintf("%-8s %-11s %s", hub.PriorityLabel(tr.Priority), tr.Status, title)
 		out = append(out, row{text, tr.ID})
 		if m.collapsed[tr.ID] {
 			hideAbove = tr.Depth
@@ -105,7 +107,7 @@ func (m model) taskDetailLines() []string {
 	ls := []string{
 		t.Title, "",
 		"type:     " + dash(t.Type),
-		"priority: " + dash(t.Priority),
+		"priority: " + hub.PriorityLabel(t.Priority),
 		"status:   " + t.Status,
 		"parent:   " + dash(t.ParentID),
 		"agent:    " + assignee,

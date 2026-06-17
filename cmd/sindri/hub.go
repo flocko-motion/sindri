@@ -262,7 +262,7 @@ func taskListCmd() *cobra.Command {
 					return err
 				}
 				for _, t := range tasks {
-					fmt.Printf("%-12s %-4s %-12s %s\n", t.ID, dash(t.Priority), t.Status, t.Title)
+					fmt.Printf("%-12s %-8s %-12s %s\n", t.ID, hub.PriorityLabel(t.Priority), t.Status, t.Title)
 				}
 				if len(tasks) == 0 {
 					fmt.Fprintln(os.Stderr, "no tasks")
@@ -283,7 +283,7 @@ func taskInfoCmd() *cobra.Command {
 					return err
 				}
 				fmt.Printf("id:       %s\ntitle:    %s\nstatus:   %s\ntype:     %s\npriority: %s\nlabels:   %s\n",
-					t.ID, t.Title, t.Status, dash(t.Type), dash(t.Priority), dash(t.Labels))
+					t.ID, t.Title, t.Status, dash(t.Type), hub.PriorityLabel(t.Priority), dash(t.Labels))
 				return nil
 			})
 		},

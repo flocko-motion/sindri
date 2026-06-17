@@ -13,6 +13,27 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
+// PriorityLabel maps td's P0…P4 priority codes to readable words for display
+// (sorting still uses the codes). Shared by the CLI and the TUI so they agree.
+func PriorityLabel(p string) string {
+	switch p {
+	case "P0":
+		return "critical"
+	case "P1":
+		return "high"
+	case "P2":
+		return "mid"
+	case "P3":
+		return "low"
+	case "P4":
+		return "minor"
+	case "":
+		return "-"
+	default:
+		return p
+	}
+}
+
 // Section is one dashboard tab: a key, a title, and its actionable badge count
 // derived from board state.
 type Section struct {
