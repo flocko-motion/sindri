@@ -96,9 +96,10 @@ func (c *HTTP) NewAgent(name, role string) error {
 	return c.post("/agents", hub.AgentReq{Name: name, Role: role})
 }
 
-// Launch spins a pod for an existing agent.
-func (c *HTTP) Launch(name string) error {
-	return c.post("/launch", hub.NameReq{Name: name})
+// Launch spins a pod for an existing agent (shell=true runs a bare shell instead
+// of Claude — for demos/debugging).
+func (c *HTTP) Launch(name string, shell bool) error {
+	return c.post("/launch", hub.NameReq{Name: name, Shell: shell})
 }
 
 // Tell delivers a provenance-stamped message into an agent's session.

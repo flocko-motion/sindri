@@ -165,9 +165,12 @@ back-compat: superseded code is deleted, not wrapped.
 
 ## Follow-ups (outside this change)
 
+- [x] Wire interactive Claude as the agent's tmux command (the hub prepares the
+  agent's Claude home + credentials + a role-aware system prompt; the entrypoint
+  runs `claude --dangerously-skip-permissions`; `--shell` is the demo/debug
+  escape hatch). Verified live: a real Claude worker ran `next` → wrote a file →
+  `submit` autonomously from the hub kickoff.
 - README.md / AGENTS.md still describe the pre-hub architecture (gh-local backend,
   `sindri work`, baked skills) — they need a rewrite for the hub model.
-- Wire interactive Claude as the agent's tmux command (`SINDRI_AGENT_CMD`) in place
-  of the Phase-1 shell; serve its system prompt from the hub.
 - Deferred optimizations: lint gate at `submit` (3.3); read td's SQLite directly
   for sync (3.9).

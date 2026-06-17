@@ -98,8 +98,9 @@ func (h *Hub) NewAgent(name, role string) error {
 
 // Launch spins a pod that assumes an existing agent's identity. The agent's
 // workspace worktree is created on demand; the pod runs interactive Claude in a
-// tmux session named after the agent.
-func (h *Hub) Launch(name string) error {
+// tmux session named after the agent (or a bare shell when shell is true — used
+// for deterministic demos and debugging).
+func (h *Hub) Launch(name string, shell bool) error {
 	a, ok, err := h.store.GetAgent(name)
 	if err != nil {
 		return err
@@ -130,18 +131,36 @@ func (h *Hub) Launch(name string) error {
 	cName := Container(name)
 	_ = pod.Rm(cName) // clear any stale container with this name
 
+	env := map[string]string{"SINDRI_AGENT": name, "COLORTERM": "truecolor"}
+	mounts := []pod.Mount{
+		{Host: wt, Container: "/workspace", Mode: "rw"},
+		// The agent's own socket — its sole channel to the hub, its identity.
+		{Host: AgentSocketPath(h.root, name), Container: "/run/sindri.sock", Mode: "rw"},
+		// The thin browser binary (image symlinks /usr/local/bin/sindri-worker).
+		{Host: workerBin, Container: "/opt/sindri/sindri-worker", Mode: "ro"},
+	}
+	if shell {
+		env["SINDRI_SHELL"] = "1" // entrypoint runs bash instead of Claude
+	} else {
+		// Set up the agent's Claude home (credentials, config, system prompt) and
+		// mount it so Claude runs authenticated.
+		home, cfg, hasCreds, err := h.prepareClaudeHome(name, a.Role)
+		if err != nil {
+			return err
+		}
+		if !hasCreds {
+			return fmt.Errorf("no Claude credentials on host (~/.claude/.credentials.json) — launch with --shell, or log in")
+		}
+		mounts = append(mounts,
+			pod.Mount{Host: home, Container: "/home/sindri/.claude", Mode: "rw"},
+			pod.Mount{Host: cfg, Container: "/home/sindri/.claude.json", Mode: "rw"})
+	}
 	opts := pod.RunOpts{
-		Name:   cName,
-		Image:  container.ImageName,
-		Labels: map[string]string{"sindri.project": h.root, "sindri.agent": name},
-		Env:    map[string]string{"SINDRI_AGENT": name, "COLORTERM": "truecolor"},
-		Mounts: []pod.Mount{
-			{Host: wt, Container: "/workspace", Mode: "rw"},
-			// The agent's own socket — its sole channel to the hub, its identity.
-			{Host: AgentSocketPath(h.root, name), Container: "/run/sindri.sock", Mode: "rw"},
-			// The thin browser binary (image symlinks /usr/local/bin/sindri-worker).
-			{Host: workerBin, Container: "/opt/sindri/sindri-worker", Mode: "ro"},
-		},
+		Name:       cName,
+		Image:      container.ImageName,
+		Labels:     map[string]string{"sindri.project": h.root, "sindri.agent": name},
+		Env:        env,
+		Mounts:     mounts,
 		Workdir:    "/workspace",
 		Entrypoint: []string{"sindri-agent", name},
 	}
@@ -210,20 +229,44 @@ func (h *Hub) injectWhenReady(name, text string) error {
 	return h.store.Log(name, "inject-skipped", text)
 }
 
-// rehydrate injects a briefing built from the tail of an agent's activity log so
-// a freshly (re)launched pod resumes its prior work (D13). Best-effort; runs in
-// the background so it doesn't block launch waiting for the session.
+// rehydrate injects a kickoff/briefing once a (re)launched pod's session is up
+// (D13). A fresh agent gets a role-appropriate nudge; a resuming one gets the
+// tail of its activity log so it can pick up where it left off. Best-effort;
+// runs in the background so it doesn't block launch.
 func (h *Hub) rehydrate(name string) {
-	evs, err := h.store.Events(name, 20)
-	if err != nil || len(evs) == 0 {
-		return
+	role := "worker"
+	if a, ok, _ := h.store.GetAgent(name); ok {
+		role = a.Role
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "[hub] Resuming as %s. Recent activity:", name)
+	evs, _ := h.store.Events(name, 20)
+	// "Fresh" = nothing beyond register/launch bookkeeping.
+	fresh := true
 	for _, e := range evs {
-		fmt.Fprintf(&b, " (%s: %s)", e.Type, e.Payload)
+		if e.Type != "register" && e.Type != "launch" {
+			fresh = false
+			break
+		}
 	}
-	_ = h.injectWhenReady(name, b.String())
+	var msg string
+	if fresh {
+		if role == "reviewer" {
+			msg = "[hub] You're live. Run `sindri-worker prs` to see what needs review."
+		} else {
+			msg = "[hub] You're live. Run `sindri-worker next` to claim your first task."
+		}
+	} else {
+		var b strings.Builder
+		b.WriteString("[hub] Resuming. Recent activity:")
+		for _, e := range evs {
+			fmt.Fprintf(&b, " (%s: %s)", e.Type, e.Payload)
+		}
+		b.WriteString(" — run `sindri-worker` to see your options.")
+		msg = b.String()
+	}
+	// Let the agent program (Claude) boot to input-readiness before the kickoff,
+	// or its submitting Enter is eaten by the boot splash.
+	time.Sleep(8 * time.Second)
+	_ = h.injectWhenReady(name, msg)
 }
 
 // agentBinary locates the thin browser binary on the host: next to the running

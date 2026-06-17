@@ -32,6 +32,7 @@ func (h *Hub) registry() *registry.Registry {
 	return registry.New(
 		registry.Command{Name: "status", Help: "show who you are and your current state", Run: h.cmdStatus},
 		registry.Command{Name: "log", Help: "record a note in your activity log: log <message>", Run: h.cmdLog},
+		registry.Command{Name: "prs", Help: "list pull requests and their status", Run: h.cmdListPRs},
 		registry.Command{Name: "next", Help: "pick up the next task", Roles: []string{"worker"},
 			Hidden: func(c registry.Caller) bool { return c.HasTask }, Run: h.cmdNext},
 		registry.Command{Name: "submit", Help: "request your branch be merged: submit [message]", Roles: []string{"worker"},
@@ -111,5 +112,20 @@ func (h *Hub) cmdLog(c registry.Caller, args []string, out io.Writer) (int, erro
 		return 1, err
 	}
 	fmt.Fprintln(out, "logged")
+	return 0, nil
+}
+
+func (h *Hub) cmdListPRs(_ registry.Caller, _ []string, out io.Writer) (int, error) {
+	prs, err := h.store.PRs()
+	if err != nil {
+		return 1, err
+	}
+	if len(prs) == 0 {
+		fmt.Fprintln(out, "no PRs")
+		return 0, nil
+	}
+	for _, p := range prs {
+		fmt.Fprintf(out, "%-14s %-9s %-10s %s\n", p.ID, p.Status, p.Agent, p.Branch)
+	}
 	return 0, nil
 }

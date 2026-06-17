@@ -32,7 +32,7 @@ start_hub() {
 case "$MODE" in
 diag)
 	start_hub
-	( cd "$T" && "$SINDRI" new brokkr >/dev/null && "$SINDRI" launch brokkr ); sleep 2
+	( cd "$T" && "$SINDRI" new brokkr >/dev/null && "$SINDRI" launch brokkr --shell ); sleep 2
 	echo "== host socket =="; ls -ln "$T/.sindri/sockets/brokkr.sock"; echo "host uid: $(id -u)"
 	echo "== in-pod id =="; podman exec sindri-brokkr id
 	echo "== in-pod connect test =="
@@ -41,7 +41,7 @@ diag)
 	;;
 demo)
 	start_hub
-	( cd "$T" && "$SINDRI" new brokkr >/dev/null && "$SINDRI" launch brokkr ); sleep 2
+	( cd "$T" && "$SINDRI" new brokkr >/dev/null && "$SINDRI" launch brokkr --shell ); sleep 2
 	echo "== sindri-worker (menu) =="; podman exec sindri-brokkr sindri-worker || true
 	echo "== sindri-worker status =="; podman exec sindri-brokkr sindri-worker status || true
 	echo "== sindri-worker approve (invisible) =="; podman exec sindri-brokkr sindri-worker approve || true
@@ -51,8 +51,8 @@ loop)
 	( cd "$T" && td init >/dev/null 2>&1 || true )
 	( cd "$T" && td create -t feature -p high -- "wire the doohickey" >/dev/null 2>&1 || true )
 	start_hub
-	( cd "$T" && "$SINDRI" new brokkr --role worker >/dev/null && "$SINDRI" launch brokkr )
-	( cd "$T" && "$SINDRI" new rune --role reviewer >/dev/null && "$SINDRI" launch rune )
+	( cd "$T" && "$SINDRI" new brokkr --role worker >/dev/null && "$SINDRI" launch brokkr --shell )
+	( cd "$T" && "$SINDRI" new rune --role reviewer >/dev/null && "$SINDRI" launch rune --shell )
 	sleep 2
 
 	echo "== worker: next (claim a task) =="
@@ -74,6 +74,24 @@ loop)
 	( cd "$T" && "$SINDRI" prs )
 	echo "== task status in td =="
 	( cd "$T" && td list --all 2>/dev/null | tail -3 || true )
+	;;
+claude)
+	# Launch a REAL Claude worker (uses your ~/.claude credentials + API tokens).
+	# Boots Claude, lets it receive the hub kickoff, then captures the pane.
+	( cd "$T" && td init >/dev/null 2>&1 || true )
+	( cd "$T" && td create -t feature -p high -- "add a GREETING file saying hello" >/dev/null 2>&1 || true )
+	start_hub
+	( cd "$T" && "$SINDRI" new brokkr --role worker >/dev/null && "$SINDRI" launch brokkr )
+	echo "waiting ~25s for Claude to boot and act on the kickoff..."
+	sleep 25
+	echo "== brokkr pane =="
+	podman exec sindri-brokkr tmux capture-pane -p -t brokkr | tail -30
+	echo "== activity log =="
+	python3 - "$T/.sindri/hub.db" <<'PY'
+import sqlite3, sys
+for t, p in sqlite3.connect(sys.argv[1]).execute("SELECT type,payload FROM events WHERE agent='brokkr' ORDER BY id"):
+    print(f" • {t} — {p}")
+PY
 	;;
 *)
 	echo "unknown mode: $MODE" >&2

@@ -25,7 +25,7 @@ import (
 // ephemeral) and *client.HTTP (a running hub over its socket).
 type backend interface {
 	NewAgent(name, role string) error
-	Launch(name string) error
+	Launch(name string, shell bool) error
 	Tell(name, msg, source string) error
 	State() (hub.BoardState, error)
 	Merge(id string) (store.PR, error)
@@ -95,9 +95,10 @@ func newNewCmd() *cobra.Command {
 }
 
 func newLaunchCmd() *cobra.Command {
-	return &cobra.Command{
+	var shell bool
+	c := &cobra.Command{
 		Use:   "launch <name>",
-		Short: "Spin a pod that assumes an existing agent's identity",
+		Short: "Spin a pod that assumes an existing agent's identity (runs Claude)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := repoRoot()
@@ -110,15 +111,17 @@ func newLaunchCmd() *cobra.Command {
 			if !hub.IsRunning(root) {
 				return fmt.Errorf("no hub running — start one first: 'sindri hub &' (agents need a persistent hub)")
 			}
-			c := client.Dial(root)
-			defer c.Close()
-			if err := c.Launch(args[0]); err != nil {
+			cl := client.Dial(root)
+			defer cl.Close()
+			if err := cl.Launch(args[0], shell); err != nil {
 				return err
 			}
 			fmt.Fprintf(os.Stderr, "launched %s\n", args[0])
 			return nil
 		},
 	}
+	c.Flags().BoolVar(&shell, "shell", false, "run a bare shell instead of Claude (debug/demo)")
+	return c
 }
 
 func newTellCmd() *cobra.Command {

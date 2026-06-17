@@ -29,9 +29,11 @@ type TellReq struct {
 	Source string `json:"source"`
 }
 
-// NameReq is the body for operations addressing one agent (POST /launch).
+// NameReq is the body for operations addressing one agent (POST /launch) or PR
+// (POST /merge). Shell applies to /launch only.
 type NameReq struct {
-	Name string `json:"name"`
+	Name  string `json:"name"`
+	Shell bool   `json:"shell"`
 }
 
 // Handler builds the HTTP mux over a hub.
@@ -61,7 +63,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"launched"}, h.Launch(req.Name))
+		writeJSON(w, okMsg{"launched"}, h.Launch(req.Name, req.Shell))
 	})
 	mux.HandleFunc("POST /tell", func(w http.ResponseWriter, r *http.Request) {
 		var req TellReq
