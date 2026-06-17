@@ -160,8 +160,50 @@ func (h *Hub) cmdSubmit(c registry.Caller, args []string, out io.Writer) (int, e
 		return 1, err
 	}
 	_ = h.store.Log(c.Agent, "submit", pr.ID)
+	h.notifyReviewers(pr.ID, c.Agent)
 	fmt.Fprintf(out, "%s registered. You'll be informed when it's reviewed. Please wait — this may take a while.\n", pr.ID)
 	return 0, nil
+}
+
+// cmdShowPR prints a PR's metadata and diff so a reviewer can judge it.
+func (h *Hub) cmdShowPR(_ registry.Caller, args []string, out io.Writer) (int, error) {
+	if len(args) == 0 {
+		return 1, fmt.Errorf("usage: show <pr-id>")
+	}
+	pr, ok, err := h.store.GetPR(args[0])
+	if err != nil {
+		return 1, err
+	}
+	if !ok {
+		return 1, fmt.Errorf("no such PR %q", args[0])
+	}
+	fmt.Fprintf(out, "%s  [%s]  by %s\nbranch %s → %s\n", pr.ID, pr.Status, pr.Agent, pr.Branch, pr.Base)
+	if pr.Feedback != "" {
+		fmt.Fprintf(out, "feedback: %s\n", pr.Feedback)
+	}
+	diff, err := git.Diff(h.root, pr.Base, pr.Branch)
+	if err != nil {
+		return 1, err
+	}
+	fmt.Fprintf(out, "\n%s\n", strings.TrimSpace(diff))
+	return 0, nil
+}
+
+// notifyReviewers wakes reviewer agents that a PR is ready (object → agent
+// routing: a PR ready for review routes to whoever can review it).
+func (h *Hub) notifyReviewers(prID, worker string) {
+	roster, err := h.store.Roster()
+	if err != nil {
+		return
+	}
+	for _, a := range roster {
+		if a.Role == "reviewer" {
+			name := a.Name
+			go h.injectWhenReady(name, fmt.Sprintf(
+				"[hub] %s from %s is ready for review. Run `sindri-worker show %s`, then `approve %s` or `reject %s <feedback>`.",
+				prID, worker, prID, prID, prID))
+		}
+	}
 }
 
 // openPR resolves the PR a reviewer verb targets: an explicit id, or the single

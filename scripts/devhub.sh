@@ -93,6 +93,40 @@ for t, p in sqlite3.connect(sys.argv[1]).execute("SELECT type,payload FROM event
     print(f" • {t} — {p}")
 PY
 	;;
+fullloop)
+	# Full autonomous loop with TWO real Claude agents (worker + reviewer).
+	# Uses ~/.claude credentials + API tokens. The human only merges.
+	( cd "$T" && td init >/dev/null 2>&1 || true )
+	( cd "$T" && td create -t feature -p high -- "add a file named GREETING containing the word hello" >/dev/null 2>&1 || true )
+	start_hub
+	( cd "$T" && "$SINDRI" new brokkr --role worker >/dev/null && "$SINDRI" launch brokkr )
+	( cd "$T" && "$SINDRI" new rune --role reviewer >/dev/null && "$SINDRI" launch rune )
+	echo "two real Claude agents live; polling for the reviewer's verdict (up to ~180s)..."
+	PR=""
+	for i in $(seq 1 30); do
+		sleep 6
+		line="$( cd "$T" && "$SINDRI" prs 2>/dev/null | head -1 )"
+		[ -n "$line" ] && echo "  [$((i*6))s] $line"
+		status="$(echo "$line" | awk '{print $2}')"
+		if [ "$status" = "approved" ]; then PR="$(echo "$line" | awk '{print $1}')"; break; fi
+	done
+	if [ -n "$PR" ]; then
+		echo "== human: merge $PR =="
+		( cd "$T" && "$SINDRI" merge "$PR" )
+	else
+		echo "(no approved PR within the window — see panes below)"
+	fi
+	sleep 6
+	echo "== worker pane =="; podman exec sindri-brokkr tmux capture-pane -p -t brokkr | grep -v '^$' | tail -18
+	echo "== reviewer pane =="; podman exec sindri-rune tmux capture-pane -p -t rune | grep -v '^$' | tail -18
+	echo "== brokkr activity log =="
+	python3 - "$T/.sindri/hub.db" <<'PY'
+import sqlite3, sys
+for t, p in sqlite3.connect(sys.argv[1]).execute("SELECT type,payload FROM events WHERE agent='brokkr' ORDER BY id"):
+    print(f" • {t} — {p}")
+PY
+	echo "== final PRs / task =="; ( cd "$T" && "$SINDRI" prs; td list --all 2>/dev/null | tail -2 )
+	;;
 *)
 	echo "unknown mode: $MODE" >&2
 	exit 2

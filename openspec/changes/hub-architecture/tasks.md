@@ -158,10 +158,11 @@ back-compat: superseded code is deleted, not wrapped.
 
 - [x] 6.1 `openspec validate hub-architecture --strict` passes
 - [x] 6.2 `go test ./...` green; `sindri lint all` green; no import cycles
-- [x] 6.3 End-to-end (`make loop`): worker claims a task, registers a merge-intent,
-      goes idle; reviewer (own pod) approves; human merges; `[hub]` verdict lands in
-      the worker's pane; td task closed. (Reject→`[reviewer]` routing verified in
-      `cmdReject` + design; merge path proven live.)
+- [x] 6.3 End-to-end verified two ways: `make loop` (deterministic, --shell) and
+      `make fullloop` — TWO real Claude agents autonomously: worker `next`→writes
+      file→`submit`; the reviewer is notified, reasons about the change, and
+      `approve`s; the human merges; `[hub]` verdict routes back to the worker; td
+      task closed. (`reject`→`[reviewer]` routing in `cmdReject`.)
 
 ## Follow-ups (outside this change)
 

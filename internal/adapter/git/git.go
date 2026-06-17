@@ -94,6 +94,16 @@ func CommitAll(dir, msg string) error {
 	return nil
 }
 
+// Diff returns the changes a branch introduces relative to base (the merge-base
+// three-dot form), for review.
+func Diff(repo, base, branch string) (string, error) {
+	out, err := exec.Command("git", "-C", repo, "diff", base+"..."+branch).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git diff: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return string(out), nil
+}
+
 // Merge merges branch into base in repo with a merge commit (no fast-forward),
 // leaving base checked out. Returns the combined output on conflict.
 func Merge(repo, base, branch string) error {

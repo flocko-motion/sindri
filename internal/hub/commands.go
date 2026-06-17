@@ -33,6 +33,7 @@ func (h *Hub) registry() *registry.Registry {
 		registry.Command{Name: "status", Help: "show who you are and your current state", Run: h.cmdStatus},
 		registry.Command{Name: "log", Help: "record a note in your activity log: log <message>", Run: h.cmdLog},
 		registry.Command{Name: "prs", Help: "list pull requests and their status", Run: h.cmdListPRs},
+		registry.Command{Name: "show", Help: "show a PR's diff: show <pr-id>", Run: h.cmdShowPR},
 		registry.Command{Name: "next", Help: "pick up the next task", Roles: []string{"worker"},
 			Hidden: func(c registry.Caller) bool { return c.HasTask }, Run: h.cmdNext},
 		registry.Command{Name: "submit", Help: "request your branch be merged: submit [message]", Roles: []string{"worker"},

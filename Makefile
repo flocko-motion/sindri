@@ -1,4 +1,4 @@
-.PHONY: build sindri worker image install clean test lint demo diag loop claude-check
+.PHONY: build sindri worker image install clean test lint demo diag loop claude-check fullloop
 
 PREFIX := $(HOME)/.local/bin
 
@@ -49,6 +49,10 @@ loop: build
 # Launch a REAL Claude worker (uses your ~/.claude credentials + API tokens).
 claude-check: build
 	./scripts/devhub.sh claude
+
+# Full autonomous loop with two real Claude agents (worker + reviewer).
+fullloop: build
+	./scripts/devhub.sh fullloop
 
 all: build image install
 
