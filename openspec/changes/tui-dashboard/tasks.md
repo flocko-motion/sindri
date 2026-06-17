@@ -6,8 +6,9 @@
       columns to the `tasks` table; `ReplaceTasks`/`UpsertTask`/`scanTasks` carry them
 - [ ] 1.2 `adapter/td/sqlite.go`: select `parent_id, description, acceptance`;
       `toStoreTask`/`scanDBTask` map them
-- [ ] 1.3 Board carries all non-closed tasks (open + in_progress + in_review), each
-      with parent + description; add `store.NonClosedTasks()` or adjust assembly
+- [ ] 1.3 Board carries **all** tasks (sync with `issue.FilterAll`), each with
+      parent + description; `BoardState.Tasks` = `store.AllTasks()`. Section count
+      derives the non-closed subset
 - [ ] 1.4 Confirm a task resolves its working agent (assignee) from the board
 
 ## 2. Section model + tree + cross-links (hub)
@@ -40,7 +41,8 @@
 - [ ] 4.3 vi nav: `ctrl+h/l`+`1/2/3` tabs; `j/k`,`g/G`,`ctrl+d/u` move (drives the
       selector viewport's cursor); selection drives the detail pane
 - [ ] 4.4 Tasks tab: tree render (indent by Depth, `◆` PR marker), `h/l`
-      collapse/expand with fold state keyed by task id (survives refresh)
+      collapse/expand with fold state keyed by task id (survives refresh); `f`
+      cycles the open→closed→all filter (default open), shown in the footer
 - [ ] 4.5 Detail panes (each a free-scroll viewport): task (fields + assignee + PR
       + description), agent (state + `client.Log` timeline), pr (`PRInfo`: meta +
       linked task + diff)

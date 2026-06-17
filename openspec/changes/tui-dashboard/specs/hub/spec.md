@@ -40,17 +40,18 @@ SHALL be a logic-layer function so every UI renders the same tree.
 - **WHEN** a task has a non-merged PR
 - **THEN** its arranged row carries that PR's id
 
-### Requirement: Board carries all non-closed tasks with hierarchy
+### Requirement: Board carries all tasks with hierarchy
 
-The board state the hub serves SHALL include all non-closed tasks (open,
-in_progress, in_review) — not only open ones — each with its parent and a
-description, so a UI can show what is being worked, by whom, in its hierarchy.
+The board state the hub serves SHALL include all tasks (every status), each with
+its parent and a description, so a UI can show what is being worked — by whom, in
+its hierarchy — and can filter to open/closed/all client-side. Section counts
+SHALL derive the non-closed subset from this full set.
 
-#### Scenario: In-progress task visible
+#### Scenario: In-progress and closed tasks both present
 
-- **WHEN** a task is claimed and in progress
-- **THEN** it appears in the board state with its parent and assignable detail,
-  not hidden as the open-only view did
+- **WHEN** the board is requested
+- **THEN** it includes in_progress tasks (with parent + assignable detail) and
+  closed tasks, so a UI can filter between them without another fetch
 
 ### Requirement: PR detail includes its linked task
 

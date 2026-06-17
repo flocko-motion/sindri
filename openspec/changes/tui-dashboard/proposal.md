@@ -33,8 +33,11 @@ a real control surface — the same things the CLI can do, but navigable.
   detach. `n`/`t` use a small text-input modal.
 - **Plumbing:** `store.Task` gains `ParentID` (+ `description`/`acceptance` for
   the detail pane); the `tasks` cache table + the direct SQLite reader carry
-  them. `/state.Tasks` carries **all non-closed** tasks (open + in_progress +
-  in_review), so the Tasks tab shows what is being worked, with assignee.
+  them. `/state.Tasks` carries **all** tasks (synced with `FilterAll`) so the
+  Tasks-tab filter can reach closed ones; the badge counts the non-closed subset.
+- **Tasks filter.** The Tasks tab has a 3-way `f` toggle — **open → closed →
+  all** (default open); "open" = not done (open/in_progress/in_review), "closed"
+  = the done segment. A pure client-side predicate over the loaded tasks.
 
 ## Capabilities
 

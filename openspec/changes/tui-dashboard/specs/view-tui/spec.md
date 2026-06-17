@@ -106,6 +106,26 @@ immediately (no separate open step).
 - **WHEN** the user moves the selection with `j`/`k`
 - **THEN** the detail pane shows the newly selected item
 
+### Requirement: Tasks filter toggle
+
+The Tasks tab SHALL provide a filter, cycled with `f`, over three states: open →
+closed → all, defaulting to open. "open" SHALL mean not-done (open, in_progress,
+in_review); "closed" SHALL mean the done segment (closed/approved/merged); "all"
+SHALL mean both. The active filter SHALL be shown in the footer and applied to
+the displayed task tree. The tab's badge count SHALL remain the non-closed count
+regardless of the active filter.
+
+#### Scenario: Toggle to closed
+
+- **WHEN** the user presses `f` until the filter is "closed"
+- **THEN** the tree shows only done tasks, while the tab badge still counts
+  non-closed tasks
+
+#### Scenario: Default is open
+
+- **WHEN** the Tasks tab is first shown
+- **THEN** it lists not-done tasks (open, in_progress, in_review)
+
 ### Requirement: The dashboard is a control surface
 
 Each tab SHALL offer its actions (shown in the footer's second row), performed

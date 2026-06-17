@@ -29,7 +29,7 @@ consistent with the architecture (UIs are thin hub clients).
 
 `hub.Sections` is an ordered `[]Section{Key, Title, Count func(BoardState) int}`.
 The TUI iterates it to draw the tab strip (`[Count(state) Title]`) and to know
-which tabs exist. Counts: tasks = `len(non-closed)`, agents = running, PRs =
+which tabs exist. Counts: tasks = count of **non-closed**, agents = running, PRs =
 not-merged. Adding a section later is one list entry; the TUI changes nothing.
 
 ### D2 — Task tree in the logic layer
@@ -101,14 +101,25 @@ Unit tests cover the cases that historically broke: content shorter than the pan
 shrinking below the cursor, content shrinking below the offset, and page near the
 ends.
 
+### D9 — Tasks filter toggle
+
+The Tasks tab has a 3-way filter, cycled with `f` and shown in the footer:
+**open → closed → all** (default open). "open" means *not done* — open +
+in_progress + in_review (`!issue.Task.IsClosed()`); "closed" means the done
+segment (closed/approved/merged). Because `BoardState.Tasks` carries all tasks
+(D7), the filter is a pure client-side predicate over the tree — instant, no
+fetch — and the tree/assignee/PR-mark logic operates on the filtered subset. The
+tab badge always reflects non-closed regardless of the active filter.
+
 ### D7 — Data plumbing
 
 - `store.Task` gains `ParentID`, `Description`, `Acceptance`; the `tasks` table
   gains the columns; `adapter/td/sqlite.go` selects `parent_id, description,
   acceptance` and `toStoreTask` maps them.
-- `BoardState.Tasks` carries all **non-closed** tasks (open + in_progress +
-  in_review) — change the hub's task sync/board assembly accordingly — so the
-  Tasks tab shows in-progress rows with their assignee.
+- `BoardState.Tasks` carries **all** tasks (every status), so the Tasks-tab
+  filter (D9) can reach closed ones — sync with `issue.FilterAll`. The Tasks
+  badge counts only the **non-closed** subset (the section count, D1); the tab
+  defaults to the open filter.
 - `PRInfo` fetches the linked task (`td.Get(pr.Task)`) into `PRDetail.Task` so it
   resolves even after the task closes on merge.
 
