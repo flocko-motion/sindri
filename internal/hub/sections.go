@@ -26,7 +26,7 @@ func PriorityLabel(p string) string {
 	case "P3":
 		return "low"
 	case "P4":
-		return "minor"
+		return "trivial"
 	case "":
 		return "-"
 	default:
@@ -46,7 +46,7 @@ func PriorityCode(word string) string {
 		return "P2"
 	case "low":
 		return "P3"
-	case "minor":
+	case "trivial", "minor":
 		return "P4"
 	default:
 		return word
@@ -54,7 +54,7 @@ func PriorityCode(word string) string {
 }
 
 // PriorityWords are the assignable priorities, highest first (for choice menus).
-var PriorityWords = []string{"critical", "high", "mid", "low", "minor"}
+var PriorityWords = []string{"critical", "high", "mid", "low", "trivial"}
 
 // StateLabel maps a task status to a short, fixed-ish word for compact display
 // (so the column doesn't need room for "in_progress"). Shared by CLI and TUI.
