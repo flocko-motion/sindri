@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/flo-at/sindri/internal/adapter/pod"
@@ -105,6 +106,7 @@ type model struct {
 	inputTarget string    // selection captured when the modal opened
 	modal       bool      // detail modal (full-screen) is open
 	choice      choiceModalState
+	flash       string // transient status (e.g. "copied"), cleared on next key
 }
 
 // choiceModalState is a generic pick-one prompt: options, parallel values, and
@@ -316,6 +318,21 @@ func (m *model) submitInput() tea.Cmd {
 // headless Screenshot harness. Mutates the model; returns an optional cmd.
 func (m *model) onKey(k string) tea.Cmd {
 	oldTab := m.tab
+	m.flash = "" // any keypress clears the previous transient status
+	switch k {
+	case "y": // yank the selected id
+		if id := m.selID(); id != "" {
+			_ = clipboard.WriteAll(id)
+			m.flash = "copied id: " + id
+		}
+		return nil
+	case "Y": // yank the selection's full details
+		if m.selID() != "" {
+			_ = clipboard.WriteAll(strings.Join(m.detailLines(), "\n"))
+			m.flash = "copied full details"
+		}
+		return nil
+	}
 	switch k {
 	case "q", "ctrl+c":
 		m.quit = true
@@ -501,7 +518,7 @@ func (m model) detailLines() []string {
 func (m model) contextFooter() string {
 	switch m.tab {
 	case 0:
-		return fmt.Sprintf("n new · p priority · f filter: %s · h/l fold", filterNames[m.filter])
+		return fmt.Sprintf("n new · p priority · y/Y yank · f filter: %s · h/l fold", filterNames[m.filter])
 	case 1:
 		return "n new · l launch · t tell · a attach"
 	default:
@@ -550,7 +567,11 @@ func (m model) View() string {
 	if m.mode != inputNone {
 		foot = dimStyle.Render(padTrunc("enter submit · esc cancel", m.w)) + "\n" + m.input.View()
 	} else {
-		foot = footer("ctrl+h/l tab · j/k move · g/G ends · r refresh · q quit", m.contextFooter(), m.w)
+		global := "ctrl+h/l tab · j/k move · g/G ends · r refresh · q quit"
+		if m.flash != "" {
+			global = m.flash
+		}
+		foot = footer(global, m.contextFooter(), m.w)
 	}
 	return strings.Join([]string{top, body, foot}, "\n")
 }

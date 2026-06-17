@@ -14,3 +14,4 @@
 {"ts":"2026-06-17T13:20:26.694803195+02:00","cmd":"create","flags":{"parent":"td-0b5a8f","priority":"P2","type":"task","work-dir":"/home/florian.metzger-noel/r/sindri"},"session":"ses_fe3b78","ok":true,"dur_ms":382}
 {"ts":"2026-06-17T13:20:27.145241527+02:00","cmd":"create","flags":{"priority":"P0","type":"bug","work-dir":"/home/florian.metzger-noel/r/sindri"},"session":"ses_fe3b78","ok":true,"dur_ms":376}
 {"ts":"2026-06-17T13:20:27.591632429+02:00","cmd":"create","flags":{"type":"task","work-dir":"/home/florian.metzger-noel/r/sindri"},"session":"ses_fe3b78","ok":true,"dur_ms":378}
+{"ts":"2026-06-17T17:38:13.512989795+02:00","cmd":"/home/florian.metzger-noel/r/sindri","session":"ses_fe3b78","ok":false,"dur_ms":3,"err":"title too short (3 chars, need 15) - e.g. 'Fix login timeout' not 'Fix bug'"}

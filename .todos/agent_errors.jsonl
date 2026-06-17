@@ -1,2 +1,3 @@
 {"ts":"2026-06-11T11:24:15.314643925Z","args":["-w",".","show","td-bbbbbb","--json"],"error":"issue not found: td-bbbbbb"}
 {"ts":"2026-06-11T11:24:15.519381473Z","args":["-w",".","show","td-bbbbbb","--json"],"error":"issue not found: td-bbbbbb"}
+{"ts":"2026-06-17T15:38:13.78580877Z","args":["-w","/home/florian.metzger-noel/r/sindri","create","--","foo"],"error":"title too short (3 chars, need 15) - e.g. 'Fix login timeout' not 'Fix bug'","session":"ses_fe3b78"}
