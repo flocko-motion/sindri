@@ -25,22 +25,23 @@ is performed by the separate reviewer agent, and merge is human-only.
 
 ### Requirement: The worker loop
 
-A worker SHALL run a loop of: `sindri-worker issue next` (claim the highest-priority open
-task and branch for it) → implement, test, commit → `sindri-worker submit` (lint, open a PR
-and submit for review) → `sindri-worker done` (return to base) → repeat. After submitting, the
-worker SHALL move on to the next task rather than block waiting for review. Submit enforces
-the lint gate (see 03-gh-local), so a failing worker fixes the violations and submits again.
+A worker SHALL run a loop of: receive a task (injected by the hub) → implement,
+test, commit → register the branch for merge → go idle. Registering for merge
+SHALL return immediately; the worker SHALL NOT block waiting for the verdict and
+SHALL NOT poll. The hub SHALL wake the worker by injecting the next task or the
+verdict when ready. Idle is the worker's resting state, and a long wait is
+expected.
 
 #### Scenario: One iteration
 
-- **WHEN** a worker finishes a task and submits it
-- **THEN** it runs `sindri-worker done` and `sindri-worker issue next` to pick up the next task
-  without waiting for the review verdict
+- **WHEN** a worker finishes a task and registers it for merge
+- **THEN** the call returns at once and the worker goes idle until the hub injects
+  the next task or a verdict
 
 #### Scenario: Queue empty
 
-- **WHEN** `sindri-worker issue next` finds no open task
-- **THEN** the worker reports none available and waits for instructions
+- **WHEN** there is no open task for a worker
+- **THEN** the worker simply stays idle; the hub injects a task when one appears
 
 ### Requirement: The task lifecycle
 
@@ -87,15 +88,22 @@ compiles but does not meet the spec.
 
 ### Requirement: Communication via comments
 
-A worker that is blocked or uncertain SHALL ask by commenting on the task
-(`sindri-worker issue comment -b "..."`); the human replies with another comment, and the
-comment thread SHALL be shown when the task is next viewed or picked up.
+Messages to an agent SHALL be delivered by the hub injecting them into the
+agent's session, each stamped with its source. A human reaches an agent via the
+hub-mediated `tell` channel; another agent reaches it only by acting on a shared
+object whose consequence the hub routes. The agent SHALL see these as tagged
+lines in its single input stream.
 
-#### Scenario: Blocking question
+#### Scenario: Human nudge
 
-- **WHEN** a worker is unsure how to proceed
-- **THEN** it comments the question on the task and the human's reply is visible
-  on the next view
+- **WHEN** a human sends a message to an agent
+- **THEN** the hub injects it into that agent's session tagged `[user]`
+
+#### Scenario: Reviewer feedback
+
+- **WHEN** the reviewer rejects an agent's PR with feedback
+- **THEN** the hub routes the feedback to the owning agent's session tagged
+  `[reviewer]`
 
 ### Requirement: Quality gates before merge
 

@@ -25,15 +25,16 @@ remote, and every subcommand SHALL make clear it is not the GitHub CLI.
 
 ### Requirement: PRs are local records
 
-A pull request SHALL be stored as a record under the repository's `.git/`
-(branch, base, status, title, body, diff). PR state SHALL be one of open,
-approved, rejected, or merged. PRs SHALL be keyed by task id so a task's PRs can
-be found, with later revisions suffixed when an earlier PR for the task is gone.
+A pull request SHALL be a merge-intent owned by the hub: a branch, a flag meaning
+"the agent would like this branch merged," and a verdict. The hub SHALL hold this
+state; agents SHALL NOT write a PR store. There SHALL NOT be a separate `.git/pr`
+record store.
 
-#### Scenario: Creating a PR
+#### Scenario: Registering merge-intent
 
-- **WHEN** an agent submits work for a task
-- **THEN** a PR record is written under `.git/` in the open state, keyed by the task
+- **WHEN** an agent registers its branch for merge
+- **THEN** the hub records the intent (branch + wants-merge + pending verdict) in
+  its own state, and the call returns immediately
 
 ### Requirement: Lint gate before submit
 
@@ -83,24 +84,24 @@ SHALL be gated by the task's review gates.
 
 ### Requirement: Role-scoped commands; merge is human-only
 
-Each agent role's CLI SHALL expose only the commands that role needs. The worker
-CLI (`sindri-worker`) creates/lists/views PRs but cannot approve, reject, or
-merge. The reviewer CLI (`sindri-review`) adds `pr approve` and `pr reject` —
-the reviewer agent's job, taken without a human gate. Merging SHALL be
-human-only: it is exposed only on the host (`sindri pr merge`) and SHALL require
-explicit human confirmation; no agent CLI provides a merge command.
+The agent client SHALL be a single role-agnostic browser whose available commands
+are filtered by the hub from the caller's role and state. A worker's surface SHALL
+expose registering and inspecting merge-intents but never approve/reject/merge; a
+reviewer's surface SHALL expose approve/reject but never submit. Merge SHALL be
+human-only, exposed only on the host and requiring explicit confirmation; no agent
+surface SHALL ever include merge.
 
 #### Scenario: Reviewer approves, human merges
 
-- **WHEN** the reviewer agent approves a PR with `sindri-review pr approve`
-- **THEN** the PR is approved and its review gates satisfied, but it is merged
-  only later by a human on the host
+- **WHEN** the reviewer approves a PR
+- **THEN** the hub marks it approved and its gates satisfied, but it is merged only
+  later by a human on the host
 
 #### Scenario: No agent merge
 
-- **WHEN** any agent tries to merge
-- **THEN** no `sindri-worker`/`sindri-review` merge command exists; only the
-  host `sindri pr merge` can, after human confirmation
+- **WHEN** any agent queries its command surface
+- **THEN** no merge command appears; only the host `sindri pr merge` can merge,
+  after human confirmation
 
 ### Requirement: Self-contained, no remote dependency
 
@@ -111,6 +112,24 @@ account; everything lives in the local git repository.
 
 - **WHEN** sindri runs with no network
 - **THEN** create, review, and merge of local PRs all still work
+
+### Requirement: td reads are direct, writes go through the tool
+
+For the td backend, the td adapter SHALL read tasks directly from td's own SQLite
+database for speed, but SHALL perform every write action (create, start, comment,
+review, …) only through the `td` tool — never by writing td's database directly.
+Both strategies SHALL be encapsulated in `internal/adapter/td` so internal logic
+sees a single adapter interface.
+
+#### Scenario: Fast read
+
+- **WHEN** the hub syncs td tasks into its cache
+- **THEN** it reads td's SQLite directly rather than invoking the td CLI per query
+
+#### Scenario: Write through the tool
+
+- **WHEN** a td task is created or mutated
+- **THEN** the change goes through the `td` tool, never a direct write to td's DB
 
 ## Structure
 
