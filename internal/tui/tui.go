@@ -108,7 +108,7 @@ type model struct {
 
 // detailMinWidth is the narrowest terminal that still shows the inline detail
 // pane; below it the selector goes full-width and detail is ENTER-only.
-const detailMinWidth = 90
+const detailMinWidth = 135
 
 func (m model) showDetail() bool { return m.w >= detailMinWidth }
 

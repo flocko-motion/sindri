@@ -34,6 +34,23 @@ func PriorityLabel(p string) string {
 	}
 }
 
+// StateLabel maps a task status to a short, fixed-ish word for compact display
+// (so the column doesn't need room for "in_progress"). Shared by CLI and TUI.
+func StateLabel(s string) string {
+	switch s {
+	case "in_progress":
+		return "active"
+	case "in_review":
+		return "review"
+	case "closed":
+		return "done"
+	case "approved":
+		return "appr"
+	default:
+		return s // open, merged, …
+	}
+}
+
 // Section is one dashboard tab: a key, a title, and its actionable badge count
 // derived from board state.
 type Section struct {

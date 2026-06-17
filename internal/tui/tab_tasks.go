@@ -79,8 +79,8 @@ func (m model) taskRows() []row {
 			mark = "◆"
 		}
 		out[i] = row{
-			fmt.Sprintf("%s %-9s %-5s %-8s %-11s %s %s",
-				gutter, tr.ID, typeAbbr(tr.Type), hub.PriorityLabel(tr.Priority), tr.Status, mark, tr.Title),
+			fmt.Sprintf("%s %-9s %-5s %-8s %-6s %s %s",
+				gutter, tr.ID, typeAbbr(tr.Type), hub.PriorityLabel(tr.Priority), hub.StateLabel(tr.Status), mark, tr.Title),
 			tr.ID,
 		}
 	}
