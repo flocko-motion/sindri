@@ -247,7 +247,7 @@ func agentInfoCmd() *cobra.Command {
 // --- task ---
 
 func newTaskCmd() *cobra.Command {
-	c := &cobra.Command{Use: "task", Short: "Inspect and create tasks"}
+	c := &cobra.Command{Use: "task", Short: "Inspect and create tasks (td issues)"}
 	c.AddCommand(taskListCmd(), taskInfoCmd(), taskNewCmd())
 	return c
 }
@@ -293,7 +293,7 @@ func taskInfoCmd() *cobra.Command {
 func taskNewCmd() *cobra.Command {
 	var typ, priority, labels string
 	c := &cobra.Command{
-		Use: "new <title...>", Short: "Create a task", Args: cobra.MinimumNArgs(1),
+		Use: "new <title...>", Short: "Create a task (a td issue)", Args: cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			title := strings.Join(args, " ")
 			var lbls []string
@@ -310,8 +310,8 @@ func taskNewCmd() *cobra.Command {
 			})
 		},
 	}
-	c.Flags().StringVarP(&typ, "type", "t", "", "task type (feature|bug|…)")
-	c.Flags().StringVarP(&priority, "priority", "p", "", "priority (e.g. high|low or P1…P4)")
+	c.Flags().StringVarP(&typ, "type", "t", "", "issue type: bug, feature, task, epic, chore (default: task)")
+	c.Flags().StringVarP(&priority, "priority", "p", "", "priority: P0, P1, P2, P3, P4 (P0 highest; high/medium/low also accepted)")
 	c.Flags().StringVar(&labels, "labels", "", "comma-separated labels")
 	return c
 }
