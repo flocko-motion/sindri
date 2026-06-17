@@ -101,8 +101,15 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		id, err := h.NewTask(req.Title, req.Type, req.Priority, req.Labels)
+		id, err := h.CreateTask(req.spec())
 		writeJSON(w, okMsg{id}, err)
+	})
+	mux.HandleFunc("POST /task/edit", func(w http.ResponseWriter, r *http.Request) {
+		var req TaskReq
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{req.ID}, h.EditTask(req.ID, req.spec()))
 	})
 	mux.HandleFunc("POST /priority", func(w http.ResponseWriter, r *http.Request) {
 		var req PriorityReq
@@ -120,12 +127,18 @@ type PriorityReq struct {
 	Priority string `json:"priority"`
 }
 
-// TaskReq is the body for POST /tasks.
+// TaskReq is the body for POST /tasks (create) and POST /task/edit (ID set).
 type TaskReq struct {
-	Title    string   `json:"title"`
-	Type     string   `json:"type"`
-	Priority string   `json:"priority"`
-	Labels   []string `json:"labels"`
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	Type        string   `json:"type"`
+	Priority    string   `json:"priority"`
+	Description string   `json:"description"`
+	Labels      []string `json:"labels"`
+}
+
+func (r TaskReq) spec() TaskSpec {
+	return TaskSpec{Title: r.Title, Type: r.Type, Priority: r.Priority, Description: r.Description, Labels: r.Labels}
 }
 
 // Serve binds the repo's unix socket and serves until the listener closes. A

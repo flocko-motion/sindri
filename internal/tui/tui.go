@@ -75,7 +75,6 @@ type inputMode int
 
 const (
 	inputNone inputMode = iota
-	inputNewTask
 	inputNewAgent
 	inputTell
 )
@@ -106,7 +105,8 @@ type model struct {
 	inputTarget string    // selection captured when the modal opened
 	modal       bool      // detail modal (full-screen) is open
 	choice      choiceModalState
-	flash       string // transient status (e.g. "copied"), cleared on next key
+	form        formState // active fill-in form (new/edit task)
+	flash       string    // transient status (e.g. "copied"), cleared on next key
 }
 
 // choiceModalState is a generic pick-one prompt: options, parallel values, and
@@ -195,6 +195,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		return m, tea.Quit
 	case tea.KeyMsg:
+		if m.form.active {
+			return m, m.form.update(msg)
+		}
 		if m.mode != inputNone {
 			return m.updateInput(msg)
 		}
@@ -304,8 +307,6 @@ func (m *model) submitInput() tea.Cmd {
 	}
 	cl, target := m.cl, m.inputTarget
 	switch m.mode {
-	case inputNewTask:
-		return func() tea.Msg { _, _ = cl.NewTask(v, "", "", nil); return nil }
 	case inputNewAgent:
 		return func() tea.Msg { _ = cl.NewAgent(v, "worker"); return nil }
 	case inputTell:
@@ -383,11 +384,16 @@ func (m *model) onKey(k string) tea.Cmd {
 		}
 	case "n": // new task (tasks) / new agent (agents)
 		if m.tab == 0 {
-			m.openInput(inputNewTask, "new task: ")
-			return textinput.Blink
+			m.openTaskForm(false)
+			return nil
 		} else if m.tab == 1 {
 			m.openInput(inputNewAgent, "new agent name: ")
 			return textinput.Blink
+		}
+	case "e": // edit the selected task
+		if m.tab == 0 && m.selID() != "" {
+			m.openTaskForm(true)
+			return nil
 		}
 	case "t": // tell the selected agent
 		if m.tab == 1 && m.selID() != "" {
@@ -518,7 +524,7 @@ func (m model) detailLines() []string {
 func (m model) contextFooter() string {
 	switch m.tab {
 	case 0:
-		return fmt.Sprintf("n new · p priority · y/Y yank · f filter: %s · h/l fold", filterNames[m.filter])
+		return fmt.Sprintf("n new · e edit · p priority · y/Y yank · f filter: %s · h/l fold", filterNames[m.filter])
 	case 1:
 		return "n new · l launch · t tell · a attach"
 	default:
@@ -547,6 +553,9 @@ func (m model) View() string {
 		labels[i] = fmt.Sprintf("%d %s", s.Count(m.state), s.Title)
 	}
 	// Modals take over the whole screen.
+	if m.form.active {
+		return m.form.view(m.w, m.h)
+	}
 	if m.choice.active {
 		return choiceModal(m.choice.title, m.choice.options, m.choice.cursor, m.w, m.h)
 	}
@@ -614,19 +623,3 @@ func clampInt(v, lo, hi int) int {
 	return v
 }
 
-// Screenshot renders the dashboard headlessly at w×h with the given board state
-// and a sequence of key presses applied in order — for verifying layout without
-// a terminal or a hub. Returned cmds are not run (no hub calls), so detail panes
-// show their synchronous content only.
-//
-//deadcode:keep — dev/test harness for headless rendering
-func Screenshot(st hub.BoardState, w, h int, keys ...string) string {
-	m := newModel(nil, nil)
-	m.w, m.h = w, h
-	m.state = st
-	m.reclamp()
-	for _, k := range keys {
-		m.onKey(k)
-	}
-	return m.View()
-}

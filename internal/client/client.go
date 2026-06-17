@@ -176,13 +176,22 @@ func (c *HTTP) TaskInfo(id string) (store.Task, error) {
 	return t, c.get("/task?id="+url.QueryEscape(id), &t)
 }
 
-// NewTask creates a task and returns its id.
-func (c *HTTP) NewTask(title, typ, priority string, labels []string) (string, error) {
+// CreateTask creates a task from a spec and returns its id.
+func (c *HTTP) CreateTask(s hub.TaskSpec) (string, error) {
 	var ok struct {
 		ID string `json:"ok"`
 	}
-	err := c.postResult("/tasks", hub.TaskReq{Title: title, Type: typ, Priority: priority, Labels: labels}, &ok)
+	err := c.postResult("/tasks", specReq("", s), &ok)
 	return ok.ID, err
+}
+
+// EditTask applies a spec to an existing task.
+func (c *HTTP) EditTask(id string, s hub.TaskSpec) error {
+	return c.post("/task/edit", specReq(id, s))
+}
+
+func specReq(id string, s hub.TaskSpec) hub.TaskReq {
+	return hub.TaskReq{ID: id, Title: s.Title, Type: s.Type, Priority: s.Priority, Description: s.Description, Labels: s.Labels}
 }
 
 // SetPriority assigns a task's priority (P-code) — to td or our own db.

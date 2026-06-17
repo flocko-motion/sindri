@@ -77,9 +77,21 @@ func (h *Hub) TaskInfo(id string) (store.Task, error) {
 	return st, nil
 }
 
-// NewTask creates a task via the td tool and returns its id.
-func (h *Hub) NewTask(title, typ, priority string, labels []string) (string, error) {
-	out, err := td.Create(h.root, title, td.CreateOpts{Type: typ, Priority: priority, Labels: labels})
+// TaskSpec is the full editable shape of a task — the payload of both create
+// and edit. Empty fields mean "unset" (create) or "leave unchanged" (edit).
+type TaskSpec struct {
+	Title       string
+	Type        string
+	Priority    string // a P-code (P0…P4)
+	Description string
+	Labels      []string
+}
+
+// CreateTask creates a task via the td tool and returns its id.
+func (h *Hub) CreateTask(s TaskSpec) (string, error) {
+	out, err := td.Create(h.root, s.Title, td.CreateOpts{
+		Type: s.Type, Priority: s.Priority, Body: s.Description, Labels: s.Labels,
+	})
 	if err != nil {
 		return "", err
 	}
@@ -94,6 +106,26 @@ func (h *Hub) NewTask(title, typ, priority string, labels []string) (string, err
 		}
 	}
 	return id, nil
+}
+
+// EditTask applies a spec to an existing task. A td task is edited through the
+// td tool (its source of truth); an openspec item isn't editable as a task, so
+// only its locally-assigned priority is recorded in our own db.
+func (h *Hub) EditTask(id string, s TaskSpec) error {
+	if strings.HasPrefix(id, "td-") {
+		if err := td.Update(h.root, id, td.UpdateOpts{
+			Title: s.Title, Type: s.Type, Priority: s.Priority, Body: s.Description, Labels: s.Labels,
+		}); err != nil {
+			return err
+		}
+	} else if s.Priority != "" {
+		if err := h.store.SetPriorityOverride(id, s.Priority); err != nil {
+			return err
+		}
+	}
+	err := h.SyncTasks()
+	h.notify()
+	return err
 }
 
 // runLint runs the project's quality gates against a worktree by invoking

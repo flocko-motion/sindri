@@ -65,6 +65,36 @@ func SetPriority(root, id, priority string) error {
 	return mutate(root, "update", id, "--priority", priority)
 }
 
+// UpdateOpts are the editable fields; zero values are left unchanged.
+type UpdateOpts struct {
+	Title    string
+	Type     string
+	Priority string
+	Body     string // description
+	Labels   []string
+}
+
+// Update edits a task through the td tool, sending only the set fields.
+func Update(root, id string, o UpdateOpts) error {
+	args := []string{"update", id}
+	if o.Type != "" {
+		args = append(args, "--type", o.Type)
+	}
+	if o.Priority != "" {
+		args = append(args, "--priority", o.Priority)
+	}
+	if o.Labels != nil {
+		args = append(args, "--labels", strings.Join(o.Labels, ","))
+	}
+	if o.Body != "" {
+		args = append(args, "-d", o.Body)
+	}
+	if o.Title != "" {
+		args = append(args, "--title", o.Title)
+	}
+	return mutate(root, args...)
+}
+
 // Close closes a task via the self-close exception (used after a PR merge) — a
 // write, through the td tool.
 func Close(root, id, reason string) error {

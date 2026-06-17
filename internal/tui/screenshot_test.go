@@ -59,4 +59,7 @@ func TestScreenshot(t *testing.T) {
 	fmt.Printf("\n========== detail modal (ENTER on a task) ==========\n%s\n", Screenshot(b, 96, 20, "j", "j", "enter"))
 	fmt.Printf("\n========== narrow terminal (70 wide — no detail pane) ==========\n%s\n", Screenshot(b, 70, 16))
 	fmt.Printf("\n========== priority choice modal (p on a task) ==========\n%s\n", Screenshot(b, 70, 16, "p"))
+	fmt.Printf("\n========== new-task form (n) ==========\n%s\n", Screenshot(b, 70, 18, "n"))
+	fmt.Printf("\n========== new-task form — type field, cycled (n,tab,right) ==========\n%s\n", Screenshot(b, 70, 18, "n", "tab", "right"))
+	fmt.Printf("\n========== edit-task form (e on the bug) ==========\n%s\n", Screenshot(b, 70, 18, "j", "j", "j", "j", "j", "e"))
 }

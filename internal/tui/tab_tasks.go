@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
@@ -171,4 +173,80 @@ func (m model) taskDetailLines() []string {
 		ls = append(ls, strings.Split(strings.TrimRight(m.taskDetail.Description, "\n"), "\n")...)
 	}
 	return ls
+}
+
+// taskTypes is the full set of td issue types (display == td value).
+var taskTypes = []string{"task", "feature", "bug", "epic", "chore"}
+
+// selTask returns the currently-selected task from the board snapshot.
+func (m model) selTask() (store.Task, bool) {
+	id := m.selID()
+	for _, t := range m.state.Tasks {
+		if t.ID == id {
+			return t, true
+		}
+	}
+	return store.Task{}, false
+}
+
+// openTaskForm opens the new-task (edit=false) or edit-task (edit=true) form —
+// the same fields either way. Edit prefills from the selected task; on a td
+// task every field applies, on an openspec item only priority does (hub-side).
+func (m *model) openTaskForm(edit bool) {
+	prioCodes := make([]string, len(hub.PriorityWords))
+	for i, w := range hub.PriorityWords {
+		prioCodes[i] = hub.PriorityCode(w)
+	}
+	title, typ, prio, labels, desc, id := "", "task", "P2", "", "", ""
+	if edit {
+		t, ok := m.selTask()
+		if !ok {
+			return
+		}
+		id, title, prio, labels, desc = t.ID, t.Title, t.Priority, t.Labels, t.Description
+		if t.Type != "" {
+			typ = t.Type
+		}
+		if prio == "" {
+			prio = "P2"
+		}
+	}
+	titleF := newTextField("title", title)
+	typeF := newChoiceField("type", taskTypes, taskTypes, typ)
+	prioF := newChoiceField("priority", hub.PriorityWords, prioCodes, prio)
+	labelsF := newTextField("labels", labels)
+	descF := newTextField("description", desc)
+	heading := "new task"
+	if edit {
+		heading = "edit " + id
+	}
+	cl := m.cl
+	m.form.open(heading, []field{titleF, typeF, prioF, labelsF, descF}, func() tea.Cmd {
+		spec := hub.TaskSpec{
+			Title: titleF.value(), Type: typeF.value(), Priority: prioF.value(),
+			Description: descF.value(), Labels: csv(labelsF.value()),
+		}
+		return func() tea.Msg {
+			if cl == nil {
+				return nil
+			}
+			if edit {
+				_ = cl.EditTask(id, spec)
+			} else if strings.TrimSpace(spec.Title) != "" {
+				_, _ = cl.CreateTask(spec)
+			}
+			return nil
+		}
+	})
+}
+
+// csv splits a comma-separated field value into trimmed labels.
+func csv(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
