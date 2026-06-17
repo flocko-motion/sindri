@@ -144,6 +144,8 @@ func (h *Hub) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
+	flusher.Flush() // send headers immediately so the client connects even if a
+	// snapshot can't be built yet — never leave the request hanging.
 
 	ch, unsub := h.events.subscribe()
 	defer unsub()

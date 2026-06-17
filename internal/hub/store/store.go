@@ -74,7 +74,22 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
+	migrate(db) // additive column migrations for DBs created by an older schema
 	return &Store{db: db}, nil
+}
+
+// migrate applies additive column migrations to THIS store's own database
+// (`.sindri/hub.db`, hub-owned) for DBs created by an older schema. It never
+// touches td's database — td's `issues` table is read-only here (direct SELECT;
+// writes go through the td CLI). The table below is the hub's own `tasks` cache,
+// not td's issues. `CREATE TABLE IF NOT EXISTS` won't alter an existing table, so
+// new columns are added idempotently (a duplicate-column error is ignored).
+func migrate(db *sql.DB) {
+	for _, stmt := range []string{
+		`ALTER TABLE tasks ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''`, // hub.db cache
+	} {
+		_, _ = db.Exec(stmt) // ignore "duplicate column name" on already-migrated DBs
+	}
 }
 
 // Close closes the database.

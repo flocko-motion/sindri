@@ -82,7 +82,12 @@ type model struct {
 }
 
 func newModel(cl *client.HTTP, ch <-chan hub.BoardState) model {
-	return model{cl: cl, ch: ch, collapsed: map[string]bool{}}
+	// Default to a sane size so a frame renders immediately — the real size
+	// arrives via WindowSizeMsg and resizes. (Some terminals send the initial
+	// size late or as 0×0; without a default the view would stick on "loading".)
+	m := model{cl: cl, ch: ch, collapsed: map[string]bool{}, w: 80, h: 24}
+	m.reclamp()
+	return m
 }
 
 func (m model) Init() tea.Cmd { return waitForState(m.ch) }
@@ -126,7 +131,9 @@ func (m model) detailWidth() int {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.w, m.h = msg.Width, msg.Height
+		if msg.Width > 0 && msg.Height > 0 { // ignore bogus 0×0 (keeps the default)
+			m.w, m.h = msg.Width, msg.Height
+		}
 		m.reclamp()
 	case stateMsg:
 		m.state = hub.BoardState(msg)
