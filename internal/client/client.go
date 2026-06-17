@@ -191,7 +191,7 @@ func (c *HTTP) EditTask(id string, s hub.TaskSpec) error {
 }
 
 func specReq(id string, s hub.TaskSpec) hub.TaskReq {
-	return hub.TaskReq{ID: id, Title: s.Title, Type: s.Type, Priority: s.Priority, Description: s.Description, Labels: s.Labels}
+	return hub.TaskReq{ID: id, Title: s.Title, Type: s.Type, Priority: s.Priority, Parent: s.Parent, Description: s.Description, Labels: s.Labels}
 }
 
 // SetPriority assigns a task's priority (P-code) — to td or our own db.

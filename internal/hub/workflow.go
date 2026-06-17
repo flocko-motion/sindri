@@ -83,14 +83,18 @@ type TaskSpec struct {
 	Title       string
 	Type        string
 	Priority    string // a P-code (P0…P4)
+	Parent      string // parent task id (a child of this task)
 	Description string
 	Labels      []string
 }
 
 // CreateTask creates a task via the td tool and returns its id.
 func (h *Hub) CreateTask(s TaskSpec) (string, error) {
+	if err := h.checkParent(s.Parent, ""); err != nil {
+		return "", err
+	}
 	out, err := td.Create(h.root, s.Title, td.CreateOpts{
-		Type: s.Type, Priority: s.Priority, Body: s.Description, Labels: s.Labels,
+		Type: s.Type, Priority: s.Priority, Body: s.Description, Labels: s.Labels, Parent: s.Parent,
 	})
 	if err != nil {
 		return "", err
@@ -112,9 +116,12 @@ func (h *Hub) CreateTask(s TaskSpec) (string, error) {
 // td tool (its source of truth); an openspec item isn't editable as a task, so
 // only its locally-assigned priority is recorded in our own db.
 func (h *Hub) EditTask(id string, s TaskSpec) error {
+	if err := h.checkParent(s.Parent, id); err != nil {
+		return err
+	}
 	if strings.HasPrefix(id, "td-") {
 		if err := td.Update(h.root, id, td.UpdateOpts{
-			Title: s.Title, Type: s.Type, Priority: s.Priority, Body: s.Description, Labels: s.Labels,
+			Title: s.Title, Type: s.Type, Priority: s.Priority, Body: s.Description, Labels: s.Labels, Parent: s.Parent,
 		}); err != nil {
 			return err
 		}
@@ -199,6 +206,27 @@ func (h *Hub) SetPriority(id, priority string) error {
 	err := h.SyncTasks()
 	h.notify()
 	return err
+}
+
+// checkParent validates a requested parent id: empty is fine (a root task), it
+// must not be the task itself, and it must exist in the cached task set.
+func (h *Hub) checkParent(parent, self string) error {
+	if parent == "" {
+		return nil
+	}
+	if parent == self {
+		return fmt.Errorf("a task can't be its own parent")
+	}
+	tasks, err := h.store.AllTasks()
+	if err != nil {
+		return err
+	}
+	for _, t := range tasks {
+		if t.ID == parent {
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown parent %q", parent)
 }
 
 // specID derives a stable os-XXXXXX id from an openspec change name.

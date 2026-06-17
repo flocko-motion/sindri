@@ -1,10 +1,10 @@
 // package: tui / component_form
 // type:    ui component (generic, reusable)
-// job:     a centered modal form — a stack of fields (component_field.go) with
-//          one focused at a time. tab/↑↓ move between fields; ←/→ cycle a
-//          choice; any other key edits the focused field; ctrl+s submits via
-//          the apply callback; esc cancels. Reusable for any fill-in prompt
-//          (new task, edit task, launch options, …).
+// job:     a fill-in form rendered inside the generic almost-full-screen modal
+//          (modalFrame) — a stack of fields (component_field.go) with one
+//          focused at a time. tab/⇧tab move between fields; ←/→ cycle a choice;
+//          ↑↓ and other keys edit the focused field; ctrl+s validates then
+//          submits; esc cancels. The form owns layout + nav, not the chrome.
 package tui
 
 import (
@@ -14,23 +14,24 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const (
-	formLabelW = 12
-	formValueW = 42
-)
+var errStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 
 // formState is the active form. apply reads the field values (it closes over
-// the field pointers) and returns the hub action to run on submit.
+// the field pointers) and returns the hub action to run on submit; validate (if
+// set) returns a non-empty message to block submit and show an error.
 type formState struct {
-	active bool
-	title  string
-	fields []field
-	cur    int
-	apply  func() tea.Cmd
+	active   bool
+	title    string
+	fields   []field
+	cur      int
+	apply    func() tea.Cmd
+	validate func() string
+	err      string
 }
 
-func (f *formState) open(title string, fields []field, apply func() tea.Cmd) {
-	f.active, f.title, f.fields, f.cur, f.apply = true, title, fields, 0, apply
+func (f *formState) open(title string, fields []field, validate func() string, apply func() tea.Cmd) {
+	f.active, f.title, f.fields, f.cur = true, title, fields, 0
+	f.validate, f.apply, f.err = validate, apply, ""
 	for i, fl := range fields {
 		if i == 0 {
 			fl.focus()
@@ -54,41 +55,65 @@ func (f *formState) update(msg tea.KeyMsg) tea.Cmd {
 		f.active = false
 		return nil
 	case "ctrl+s":
+		if f.validate != nil {
+			if e := f.validate(); e != "" {
+				f.err = e
+				return nil
+			}
+		}
 		f.active = false
 		return f.apply()
-	case "tab", "down":
+	case "tab":
+		f.err = ""
 		f.move(1)
 		return nil
-	case "shift+tab", "up":
+	case "shift+tab":
+		f.err = ""
 		f.move(-1)
 		return nil
 	}
+	f.err = "" // editing clears a stale validation error
 	return f.fields[f.cur].update(msg)
 }
 
 func (f formState) view(screenW, screenH int) string {
-	hint := "tab/↑↓ field · ←/→ choose · ctrl+s save · esc cancel"
-	cw := formLabelW + 3 + formValueW
-	if w := lipgloss.Width(f.title); w > cw {
-		cw = w
-	}
-	if w := lipgloss.Width(hint); w > cw {
-		cw = w
-	}
-	blank := strings.Repeat(" ", cw)
-	lines := []string{modalTitleStyle.Render(padTrunc(f.title, cw)), blank}
+	cw := modalInnerWidth(screenW)
+	innerH := modalContentHeight(screenH)
+
+	// Height budget: single-line fields take one row each; the one growing
+	// field (the textarea) fills whatever is left.
+	grow, fixed := -1, 0
 	for i, fl := range f.fields {
-		marker := "  "
-		if i == f.cur {
-			marker = "▸ "
+		if fl.grows() {
+			grow = i
+		} else {
+			fixed++
 		}
-		row := padTrunc(marker+padTrunc(fl.label(), formLabelW)+" "+fl.display(), cw)
-		if i == f.cur {
-			row = selStyle.Render(row)
-		}
-		lines = append(lines, row)
 	}
-	lines = append(lines, blank, dimStyle.Render(padTrunc(hint, cw)))
-	box := modalBorderStyle.Render(strings.Join(lines, "\n"))
-	return lipgloss.Place(screenW, screenH, lipgloss.Center, lipgloss.Center, box)
+	growH := innerH - fixed
+	if growH < 3 {
+		growH = 3
+	}
+	for i, fl := range f.fields {
+		if i == grow {
+			fl.resize(cw, growH)
+		} else {
+			fl.resize(cw, 1)
+		}
+	}
+
+	var lines []string
+	for i, fl := range f.fields {
+		lines = append(lines, strings.Split(fl.render(i == f.cur), "\n")...)
+	}
+	for len(lines) < innerH { // pad to a stable height
+		lines = append(lines, "")
+	}
+	lines = lines[:innerH]
+
+	footer := dimStyle.Render(padTrunc("tab/⇧tab field · ←/→ choose · ctrl+s save · esc cancel", cw))
+	if f.err != "" {
+		footer = errStyle.Render(padTrunc("⚠ "+f.err, cw))
+	}
+	return modalFrame(f.title, strings.Join(lines, "\n"), footer, screenW, screenH)
 }

@@ -1,40 +1,60 @@
 // package: tui / component_field
 // type:    ui components (generic, reusable form elements)
 // job:     the building blocks a form is made of. Each field owns its own
-//          editing behaviour and current value behind a small interface; the
-//          form (component_form.go) only handles focus and layout. Text is
-//          edited manually (not via bubbles/textinput) so a field's display
-//          stays plain — paddable without ANSI miscounts.
+//          editing behaviour, current value, and rendering (a 1+ line block);
+//          the form (component_form.go) only handles focus, layout, and the
+//          frame. Single-line text/choice are edited manually so their rows pad
+//          cleanly; the multi-line textarea wraps bubbles/textarea.
 package tui
 
 import (
+	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
+
+const formLabelW = 12
 
 // field is one editable element of a form.
 type field interface {
-	label() string
-	value() string             // the value to submit
-	display() string           // plain text shown in the row
-	focus()                    // gain focus (form-driven)
-	blur()                     // lose focus
+	value() string
+	focus()
+	blur()
+	grows() bool               // true ⇒ wants to fill the form's spare height
+	resize(width, height int)  // layout hint from the form
 	update(tea.KeyMsg) tea.Cmd // handle an edit key; nav keys are the form's
+	render(active bool) string // the field's block (height lines), width-padded
 }
 
-// --- text field ---
+// fieldLine lays out one "marker label value" row padded/highlighted to width.
+func fieldLine(label, value string, width int, active bool) string {
+	marker := "  "
+	if active {
+		marker = "▸ "
+	}
+	body := marker + padTrunc(label, formLabelW) + " " + value
+	if active {
+		return selStyle.Width(width).Render(body)
+	}
+	return lipgloss.NewStyle().Width(width).Render(body)
+}
+
+// --- text field (single line) ---
 
 type textField struct {
 	name string
 	val  []rune
 	foc  bool
+	w    int
 }
 
 func newTextField(name, val string) *textField { return &textField{name: name, val: []rune(val)} }
 
-func (f *textField) label() string { return f.name }
-func (f *textField) value() string { return string(f.val) }
-func (f *textField) focus()        { f.foc = true }
-func (f *textField) blur()         { f.foc = false }
+func (f *textField) value() string   { return string(f.val) }
+func (f *textField) focus()           { f.foc = true }
+func (f *textField) blur()            { f.foc = false }
+func (f *textField) grows() bool      { return false }
+func (f *textField) resize(w, _ int)  { f.w = w }
 
 func (f *textField) update(msg tea.KeyMsg) tea.Cmd {
 	switch msg.Type {
@@ -50,23 +70,24 @@ func (f *textField) update(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-func (f *textField) display() string {
-	if f.foc {
-		return string(f.val) + "▏" // a plain caret marks the focused field
+func (f *textField) render(active bool) string {
+	v := string(f.val)
+	if active {
+		v += "▏" // a plain caret marks the focused field
+	} else if len(f.val) == 0 {
+		v = "—"
 	}
-	if len(f.val) == 0 {
-		return "—"
-	}
-	return string(f.val)
+	return fieldLine(f.name, v, f.w, active)
 }
 
-// --- choice field ---
+// --- choice field (cycle one of a fixed set) ---
 
 type choiceField struct {
 	name    string
 	options []string // display labels
 	values  []string // parallel codes returned by value()
 	cur     int
+	w       int
 }
 
 func newChoiceField(name string, options, values []string, sel string) *choiceField {
@@ -79,10 +100,11 @@ func newChoiceField(name string, options, values []string, sel string) *choiceFi
 	return f
 }
 
-func (f *choiceField) label() string { return f.name }
-func (f *choiceField) value() string { return f.values[f.cur] }
-func (f *choiceField) focus()        {}
-func (f *choiceField) blur()         {}
+func (f *choiceField) value() string   { return f.values[f.cur] }
+func (f *choiceField) focus()          {}
+func (f *choiceField) blur()           {}
+func (f *choiceField) grows() bool     { return false }
+func (f *choiceField) resize(w, _ int) { f.w = w }
 
 func (f *choiceField) update(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
@@ -94,4 +116,47 @@ func (f *choiceField) update(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-func (f *choiceField) display() string { return "‹ " + f.options[f.cur] + " ›" }
+func (f *choiceField) render(active bool) string {
+	return fieldLine(f.name, "‹ "+f.options[f.cur]+" ›", f.w, active)
+}
+
+// --- textarea field (multi-line) ---
+
+type textareaField struct {
+	name string
+	ta   textarea.Model
+	w    int
+}
+
+func newTextareaField(name, val string) *textareaField {
+	ta := textarea.New()
+	ta.ShowLineNumbers = false
+	ta.Prompt = "  "
+	ta.SetValue(val)
+	ta.MaxHeight = 0 // grow with the assigned height
+	return &textareaField{name: name, ta: ta}
+}
+
+func (f *textareaField) value() string { return f.ta.Value() }
+func (f *textareaField) focus()        { f.ta.Focus() }
+func (f *textareaField) blur()         { f.ta.Blur() }
+func (f *textareaField) grows() bool   { return true }
+
+func (f *textareaField) resize(w, h int) {
+	f.w = w
+	f.ta.SetWidth(w)
+	if h < 2 {
+		h = 2
+	}
+	f.ta.SetHeight(h - 1) // reserve one line for the label
+}
+
+func (f *textareaField) update(msg tea.KeyMsg) tea.Cmd {
+	var cmd tea.Cmd
+	f.ta, cmd = f.ta.Update(msg)
+	return cmd
+}
+
+func (f *textareaField) render(active bool) string {
+	return fieldLine(f.name, "", f.w, active) + "\n" + f.ta.View()
+}

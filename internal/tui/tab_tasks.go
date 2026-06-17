@@ -197,13 +197,13 @@ func (m *model) openTaskForm(edit bool) {
 	for i, w := range hub.PriorityWords {
 		prioCodes[i] = hub.PriorityCode(w)
 	}
-	title, typ, prio, labels, desc, id := "", "task", "P2", "", "", ""
+	title, typ, prio, parent, labels, desc, id := "", "task", "P2", "", "", "", ""
 	if edit {
 		t, ok := m.selTask()
 		if !ok {
 			return
 		}
-		id, title, prio, labels, desc = t.ID, t.Title, t.Priority, t.Labels, t.Description
+		id, title, prio, parent, labels, desc = t.ID, t.Title, t.Priority, t.ParentID, t.Labels, t.Description
 		if t.Type != "" {
 			typ = t.Type
 		}
@@ -214,17 +214,30 @@ func (m *model) openTaskForm(edit bool) {
 	titleF := newTextField("title", title)
 	typeF := newChoiceField("type", taskTypes, taskTypes, typ)
 	prioF := newChoiceField("priority", hub.PriorityWords, prioCodes, prio)
+	parentF := newTextField("parent", parent)
 	labelsF := newTextField("labels", labels)
-	descF := newTextField("description", desc)
+	descF := newTextareaField("description", desc)
 	heading := "new task"
 	if edit {
 		heading = "edit " + id
 	}
-	cl := m.cl
-	m.form.open(heading, []field{titleF, typeF, prioF, labelsF, descF}, func() tea.Cmd {
+	cl, known := m.cl, m.taskIDs()
+	validate := func() string {
+		p := strings.TrimSpace(parentF.value())
+		switch {
+		case p == "":
+			return "" // no parent ⇒ a root task
+		case p == id:
+			return "a task can't be its own parent"
+		case !known[p]:
+			return "unknown parent: " + p
+		}
+		return ""
+	}
+	m.form.open(heading, []field{titleF, typeF, prioF, parentF, labelsF, descF}, validate, func() tea.Cmd {
 		spec := hub.TaskSpec{
 			Title: titleF.value(), Type: typeF.value(), Priority: prioF.value(),
-			Description: descF.value(), Labels: csv(labelsF.value()),
+			Parent: strings.TrimSpace(parentF.value()), Description: descF.value(), Labels: csv(labelsF.value()),
 		}
 		return func() tea.Msg {
 			if cl == nil {
@@ -238,6 +251,15 @@ func (m *model) openTaskForm(edit bool) {
 			return nil
 		}
 	})
+}
+
+// taskIDs is the set of known task ids (for parent validation).
+func (m model) taskIDs() map[string]bool {
+	ids := make(map[string]bool, len(m.state.Tasks))
+	for _, t := range m.state.Tasks {
+		ids[t.ID] = true
+	}
+	return ids
 }
 
 // csv splits a comma-separated field value into trimmed labels.

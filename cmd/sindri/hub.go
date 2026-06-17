@@ -310,14 +310,14 @@ func taskInfoCmd() *cobra.Command {
 }
 
 func taskNewCmd() *cobra.Command {
-	var typ, priority, labels, desc string
+	var typ, priority, parent, labels, desc string
 	c := &cobra.Command{
 		Use: "new <title...>", Short: "Create a task (a td issue)", Args: cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withBackend(func(b backend) error {
 				id, err := b.CreateTask(hub.TaskSpec{
-					Title: strings.Join(args, " "), Type: typ,
-					Priority: priority, Description: desc, Labels: splitCSV(labels),
+					Title: strings.Join(args, " "), Type: typ, Priority: priority,
+					Parent: parent, Description: desc, Labels: splitCSV(labels),
 				})
 				if err != nil {
 					return err
@@ -327,19 +327,19 @@ func taskNewCmd() *cobra.Command {
 			})
 		},
 	}
-	taskSpecFlags(c, &typ, &priority, &labels, &desc)
+	taskSpecFlags(c, &typ, &priority, &parent, &labels, &desc)
 	return c
 }
 
 func taskEditCmd() *cobra.Command {
-	var typ, priority, labels, desc, title string
+	var typ, priority, parent, labels, desc, title string
 	c := &cobra.Command{
 		Use: "edit <id>", Short: "Edit a task (only the flags you pass are changed)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withBackend(func(b backend) error {
 				if err := b.EditTask(args[0], hub.TaskSpec{
-					Title: title, Type: typ,
-					Priority: priority, Description: desc, Labels: splitCSV(labels),
+					Title: title, Type: typ, Priority: priority,
+					Parent: parent, Description: desc, Labels: splitCSV(labels),
 				}); err != nil {
 					return err
 				}
@@ -349,13 +349,14 @@ func taskEditCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&title, "title", "", "new title")
-	taskSpecFlags(c, &typ, &priority, &labels, &desc)
+	taskSpecFlags(c, &typ, &priority, &parent, &labels, &desc)
 	return c
 }
 
-func taskSpecFlags(c *cobra.Command, typ, priority, labels, desc *string) {
+func taskSpecFlags(c *cobra.Command, typ, priority, parent, labels, desc *string) {
 	c.Flags().StringVarP(typ, "type", "t", "", "issue type: bug, feature, task, epic, chore (default: task)")
 	c.Flags().StringVarP(priority, "priority", "p", "", "priority: P0, P1, P2, P3, P4 (P0 highest; high/medium/low also accepted)")
+	c.Flags().StringVar(parent, "parent", "", "parent task id (creates a child)")
 	c.Flags().StringVarP(desc, "desc", "d", "", "description body")
 	c.Flags().StringVar(labels, "labels", "", "comma-separated labels")
 }

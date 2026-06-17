@@ -133,12 +133,13 @@ type TaskReq struct {
 	Title       string   `json:"title"`
 	Type        string   `json:"type"`
 	Priority    string   `json:"priority"`
+	Parent      string   `json:"parent"`
 	Description string   `json:"description"`
 	Labels      []string `json:"labels"`
 }
 
 func (r TaskReq) spec() TaskSpec {
-	return TaskSpec{Title: r.Title, Type: r.Type, Priority: r.Priority, Description: r.Description, Labels: r.Labels}
+	return TaskSpec{Title: r.Title, Type: r.Type, Priority: r.Priority, Parent: r.Parent, Description: r.Description, Labels: r.Labels}
 }
 
 // Serve binds the repo's unix socket and serves until the listener closes. A

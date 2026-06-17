@@ -59,7 +59,12 @@ func TestScreenshot(t *testing.T) {
 	fmt.Printf("\n========== detail modal (ENTER on a task) ==========\n%s\n", Screenshot(b, 96, 20, "j", "j", "enter"))
 	fmt.Printf("\n========== narrow terminal (70 wide — no detail pane) ==========\n%s\n", Screenshot(b, 70, 16))
 	fmt.Printf("\n========== priority choice modal (p on a task) ==========\n%s\n", Screenshot(b, 70, 16, "p"))
-	fmt.Printf("\n========== new-task form (n) ==========\n%s\n", Screenshot(b, 70, 18, "n"))
-	fmt.Printf("\n========== new-task form — type field, cycled (n,tab,right) ==========\n%s\n", Screenshot(b, 70, 18, "n", "tab", "right"))
-	fmt.Printf("\n========== edit-task form (e on the bug) ==========\n%s\n", Screenshot(b, 70, 18, "j", "j", "j", "j", "j", "e"))
+	fmt.Printf("\n========== new-task form (n) ==========\n%s\n", Screenshot(b, 80, 22, "n"))
+	// Focus the description textarea (tab×5) and type a multi-line body.
+	fmt.Printf("\n========== new-task form — description textarea focused ==========\n%s\n",
+		Screenshot(b, 80, 22, "n", "tab", "tab", "tab", "tab", "tab", "f", "i", "x", " ", "i", "t", "enter", "n", "o", "w"))
+	// Parent validation: type a bogus parent then try to save (ctrl+s blocks).
+	fmt.Printf("\n========== new-task form — parent validation error ==========\n%s\n",
+		Screenshot(b, 80, 22, "n", "tab", "tab", "tab", "x", "y", "z", "ctrl+s"))
+	fmt.Printf("\n========== edit-task form (e on the bug) ==========\n%s\n", Screenshot(b, 80, 22, "j", "j", "j", "j", "j", "e"))
 }

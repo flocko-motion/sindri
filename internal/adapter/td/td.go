@@ -32,6 +32,7 @@ type CreateOpts struct {
 	Priority string
 	Body     string
 	Labels   []string
+	Parent   string // when set, the new task is created as a child of this id
 }
 
 // Create creates a task and returns td's output (the new id line) — a write,
@@ -50,6 +51,9 @@ func Create(root, title string, o CreateOpts) (string, error) {
 	}
 	if len(o.Labels) > 0 {
 		args = append(args, "--labels", strings.Join(o.Labels, ","))
+	}
+	if o.Parent != "" {
+		args = append(args, "--parent", o.Parent)
 	}
 	args = append(args, "--", title)
 	return run(root, args...)
@@ -72,6 +76,7 @@ type UpdateOpts struct {
 	Priority string
 	Body     string // description
 	Labels   []string
+	Parent   string // re-parent under this id
 }
 
 // Update edits a task through the td tool, sending only the set fields.
@@ -91,6 +96,9 @@ func Update(root, id string, o UpdateOpts) error {
 	}
 	if o.Title != "" {
 		args = append(args, "--title", o.Title)
+	}
+	if o.Parent != "" {
+		args = append(args, "--parent", o.Parent)
 	}
 	return mutate(root, args...)
 }
