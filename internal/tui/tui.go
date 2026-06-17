@@ -10,6 +10,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -22,9 +23,13 @@ import (
 
 // Run starts the dashboard against the repo's hub (refuses without one).
 func Run(root string) error {
+	// Startup breadcrumbs to stderr (before the alt screen takes over) so a hang
+	// is attributable to a step rather than silent.
+	fmt.Fprintf(os.Stderr, "sindri tui: hub at %s\n", hub.SocketPath(root))
 	if !hub.IsRunning(root) {
 		return fmt.Errorf("no hub running — start one first: 'sindri hub &'")
 	}
+	fmt.Fprintln(os.Stderr, "sindri tui: connecting to /events…")
 	cl := client.Dial(root)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -32,6 +37,7 @@ func Run(root string) error {
 	if err != nil {
 		return err
 	}
+	fmt.Fprintln(os.Stderr, "sindri tui: connected — starting dashboard")
 	_, err = tea.NewProgram(newModel(cl, ch), tea.WithAltScreen()).Run()
 	return err
 }
