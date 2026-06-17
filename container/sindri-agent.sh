@@ -26,6 +26,19 @@ else
 		'claude --dangerously-skip-permissions --append-system-prompt "$(cat /home/sindri/.claude/system-prompt.txt)"'
 fi
 
+# Reserve the bottom row as a help/status line: the Claude pane gets every row
+# above it, and we print the hotkeys a dialed-in human needs — chiefly how to
+# detach again (C-b d leaves the agent running; do NOT C-c or `exit`).
+tmux set-option -t "$SESSION" status on
+tmux set-option -t "$SESSION" status-style "bg=colour63,fg=colour231"
+tmux set-option -t "$SESSION" status-justify left
+tmux set-option -t "$SESSION" status-left "#[bold] sindri · $AGENT #[default] "
+tmux set-option -t "$SESSION" status-left-length 40
+tmux set-option -t "$SESSION" status-right "detach: C-b d · scroll: C-b [ (q to exit) "
+tmux set-option -t "$SESSION" status-right-length 60
+tmux set-option -t "$SESSION" window-status-current-format ""
+tmux set-option -t "$SESSION" window-status-format ""
+
 echo "=== session ready — hub injects via 'tmux send-keys -t $SESSION' ==="
 
 exec sleep infinity
