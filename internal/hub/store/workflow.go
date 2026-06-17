@@ -42,6 +42,12 @@ CREATE TABLE IF NOT EXISTS prs (
   feedback   TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT ''
 );
+-- Durable priority we assign to tasks in our own db — survives the task-cache
+-- rebuild. Used mainly for openspec items, which have no source priority.
+CREATE TABLE IF NOT EXISTS task_priority (
+  id       TEXT PRIMARY KEY,
+  priority TEXT NOT NULL DEFAULT ''
+);
 `
 
 // Task is the cached read-model row for a td task. Description/Acceptance are
@@ -152,6 +158,35 @@ func scanTasks(rows *sql.Rows) ([]Task, error) {
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+// SetPriorityOverride records a priority we assign in our own db.
+func (s *Store) SetPriorityOverride(id, priority string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO task_priority (id,priority) VALUES (?,?)
+		 ON CONFLICT(id) DO UPDATE SET priority=excluded.priority`, id, priority)
+	if err != nil {
+		return fmt.Errorf("set priority override %s: %w", id, err)
+	}
+	return nil
+}
+
+// PriorityOverrides returns id→priority for all locally-assigned priorities.
+func (s *Store) PriorityOverrides() (map[string]string, error) {
+	rows, err := s.db.Query(`SELECT id, priority FROM task_priority`)
+	if err != nil {
+		return nil, fmt.Errorf("priority overrides: %w", err)
+	}
+	defer rows.Close()
+	m := map[string]string{}
+	for rows.Next() {
+		var id, p string
+		if err := rows.Scan(&id, &p); err != nil {
+			return nil, err
+		}
+		m[id] = p
+	}
+	return m, rows.Err()
 }
 
 // GetState returns an agent's workflow state (zero value if none recorded).

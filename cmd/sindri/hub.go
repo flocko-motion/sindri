@@ -37,6 +37,7 @@ type backend interface {
 	Tasks() ([]store.Task, error)
 	TaskInfo(id string) (store.Task, error)
 	NewTask(title, typ, priority string, labels []string) (string, error)
+	SetPriority(id, priority string) error
 	PRs() ([]store.PR, error)
 	PRInfo(id string) (hub.PRDetail, error)
 	Merge(id string) (store.PR, error)
@@ -248,8 +249,25 @@ func agentInfoCmd() *cobra.Command {
 
 func newTaskCmd() *cobra.Command {
 	c := &cobra.Command{Use: "task", Short: "Inspect and create tasks (td issues)"}
-	c.AddCommand(taskListCmd(), taskInfoCmd(), taskNewCmd())
+	c.AddCommand(taskListCmd(), taskInfoCmd(), taskNewCmd(), taskPriorityCmd())
 	return c
+}
+
+func taskPriorityCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "priority <id> <critical|high|mid|low|minor>",
+		Short: "Set a task's priority (td tasks → td; openspec items → our db)",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withBackend(func(b backend) error {
+				if err := b.SetPriority(args[0], hub.PriorityCode(args[1])); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "set %s priority %s\n", args[0], args[1])
+				return nil
+			})
+		},
+	}
 }
 
 func taskListCmd() *cobra.Command {

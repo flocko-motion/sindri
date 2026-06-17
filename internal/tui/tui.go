@@ -104,6 +104,18 @@ type model struct {
 	input       textinput.Model
 	inputTarget string    // selection captured when the modal opened
 	modal       bool      // detail modal (full-screen) is open
+	choice      choiceModalState
+}
+
+// choiceModalState is a generic pick-one prompt: options, parallel values, and
+// what to do with the chosen value.
+type choiceModalState struct {
+	active  bool
+	title   string
+	options []string
+	values  []string
+	cursor  int
+	apply   func(value string) tea.Cmd
 }
 
 // detailMinWidth is the narrowest terminal that still shows the inline detail
@@ -184,6 +196,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mode != inputNone {
 			return m.updateInput(msg)
 		}
+		if m.choice.active {
+			return m.updateChoice(msg)
+		}
 		if m.modal {
 			return m.updateModal(msg)
 		}
@@ -213,6 +228,28 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
+}
+
+// updateChoice handles keys while a pick-one modal is open.
+func (m model) updateChoice(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q":
+		m.choice.active = false
+	case "j", "down":
+		if m.choice.cursor < len(m.choice.options)-1 {
+			m.choice.cursor++
+		}
+	case "k", "up":
+		if m.choice.cursor > 0 {
+			m.choice.cursor--
+		}
+	case "enter":
+		val := m.choice.values[m.choice.cursor]
+		apply := m.choice.apply
+		m.choice.active = false
+		return m, apply(val)
+	}
+	return m, nil
 }
 
 // updateModal handles keys while the detail modal is open: scroll or close.
@@ -340,6 +377,25 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.openInput(inputTell, "tell "+m.selID()+": ")
 			return textinput.Blink
 		}
+	case "p": // set the selected task's priority
+		if m.tab == 0 && m.selID() != "" {
+			id, cl := m.selID(), m.cl
+			vals := make([]string, len(hub.PriorityWords))
+			for i, w := range hub.PriorityWords {
+				vals[i] = hub.PriorityCode(w)
+			}
+			m.choice = choiceModalState{
+				active: true, title: "priority for " + id,
+				options: hub.PriorityWords, values: vals,
+				apply: func(code string) tea.Cmd {
+					if cl == nil {
+						return nil
+					}
+					return func() tea.Msg { _ = cl.SetPriority(id, code); return nil }
+				},
+			}
+			return nil
+		}
 	case "enter": // open the full-screen detail modal
 		if m.selID() != "" {
 			m.modal = true
@@ -445,7 +501,7 @@ func (m model) detailLines() []string {
 func (m model) contextFooter() string {
 	switch m.tab {
 	case 0:
-		return fmt.Sprintf("n new · f filter: %s · h/l fold", filterNames[m.filter])
+		return fmt.Sprintf("n new · p priority · f filter: %s · h/l fold", filterNames[m.filter])
 	case 1:
 		return "n new · l launch · t tell · a attach"
 	default:
@@ -473,7 +529,10 @@ func (m model) View() string {
 	for i, s := range hub.Sections {
 		labels[i] = fmt.Sprintf("%d %s", s.Count(m.state), s.Title)
 	}
-	// Full-screen detail modal takes over the whole screen.
+	// Modals take over the whole screen.
+	if m.choice.active {
+		return choiceModal(m.choice.title, m.choice.options, m.choice.cursor, m.w, m.h)
+	}
 	if m.modal {
 		return modal(m.modalTitle(), m.detailLines(), m.detail, m.w, m.h)
 	}

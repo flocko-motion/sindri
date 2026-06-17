@@ -185,6 +185,11 @@ func (c *HTTP) NewTask(title, typ, priority string, labels []string) (string, er
 	return ok.ID, err
 }
 
+// SetPriority assigns a task's priority (P-code) — to td or our own db.
+func (c *HTTP) SetPriority(id, priority string) error {
+	return c.post("/priority", hub.PriorityReq{ID: id, Priority: priority})
+}
+
 // Refresh asks the hub to re-sync tasks from the source of truth.
 func (c *HTTP) Refresh() error { return c.post("/refresh", struct{}{}) }
 

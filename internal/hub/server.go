@@ -104,7 +104,20 @@ func (h *Hub) Handler() http.Handler {
 		id, err := h.NewTask(req.Title, req.Type, req.Priority, req.Labels)
 		writeJSON(w, okMsg{id}, err)
 	})
+	mux.HandleFunc("POST /priority", func(w http.ResponseWriter, r *http.Request) {
+		var req PriorityReq
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"ok"}, h.SetPriority(req.ID, req.Priority))
+	})
 	return mux
+}
+
+// PriorityReq is the body for POST /priority.
+type PriorityReq struct {
+	ID       string `json:"id"`
+	Priority string `json:"priority"`
 }
 
 // TaskReq is the body for POST /tasks.

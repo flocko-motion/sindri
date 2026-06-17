@@ -58,4 +58,5 @@ func TestScreenshot(t *testing.T) {
 	// Detail modal (ENTER) and a narrow terminal (detail pane hidden).
 	fmt.Printf("\n========== detail modal (ENTER on a task) ==========\n%s\n", Screenshot(b, 96, 20, "j", "j", "enter"))
 	fmt.Printf("\n========== narrow terminal (70 wide — no detail pane) ==========\n%s\n", Screenshot(b, 70, 16))
+	fmt.Printf("\n========== priority choice modal (p on a task) ==========\n%s\n", Screenshot(b, 70, 16, "p"))
 }

@@ -60,6 +60,11 @@ func SetStatus(root, id, status string) error {
 	return mutate(root, "update", id, "--status", status)
 }
 
+// SetPriority updates a task's priority (P0…P4) — a write, through the td tool.
+func SetPriority(root, id, priority string) error {
+	return mutate(root, "update", id, "--priority", priority)
+}
+
 // Close closes a task via the self-close exception (used after a PR merge) — a
 // write, through the td tool.
 func Close(root, id, reason string) error {

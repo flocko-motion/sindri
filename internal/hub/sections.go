@@ -34,6 +34,28 @@ func PriorityLabel(p string) string {
 	}
 }
 
+// PriorityCode maps a readable word to td's P-code (the inverse of
+// PriorityLabel). A value already in P-code form passes through.
+func PriorityCode(word string) string {
+	switch word {
+	case "critical":
+		return "P0"
+	case "high":
+		return "P1"
+	case "mid", "medium":
+		return "P2"
+	case "low":
+		return "P3"
+	case "minor":
+		return "P4"
+	default:
+		return word
+	}
+}
+
+// PriorityWords are the assignable priorities, highest first (for choice menus).
+var PriorityWords = []string{"critical", "high", "mid", "low", "minor"}
+
 // StateLabel maps a task status to a short, fixed-ish word for compact display
 // (so the column doesn't need room for "in_progress"). Shared by CLI and TUI.
 func StateLabel(s string) string {

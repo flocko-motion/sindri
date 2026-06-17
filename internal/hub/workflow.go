@@ -139,7 +139,34 @@ func (h *Hub) SyncTasks() error {
 			Type:   "spec",
 		})
 	}
+	// Apply locally-assigned priorities (mainly openspec items, which have none
+	// from their source).
+	if ov, err := h.store.PriorityOverrides(); err == nil {
+		for i := range rows {
+			if p, ok := ov[rows[i].ID]; ok {
+				rows[i].Priority = p
+			}
+		}
+	}
 	return h.store.ReplaceTasks(rows)
+}
+
+// SetPriority assigns a task's priority (a P-code). For a td task it writes
+// through the td tool (the source); for an openspec item it records a durable
+// override in our own db. Either way the cache is re-synced.
+func (h *Hub) SetPriority(id, priority string) error {
+	if strings.HasPrefix(id, "td-") {
+		if err := td.SetPriority(h.root, id, priority); err != nil {
+			return err
+		}
+	} else {
+		if err := h.store.SetPriorityOverride(id, priority); err != nil {
+			return err
+		}
+	}
+	err := h.SyncTasks()
+	h.notify()
+	return err
 }
 
 // specID derives a stable os-XXXXXX id from an openspec change name.
