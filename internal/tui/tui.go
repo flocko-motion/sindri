@@ -1,17 +1,15 @@
 // package: tui / tui
 // type:    ui (a thin hub client)
-// job:     a lean Bubble Tea dashboard that renders the hub's board (/state) and
-//          live-updates over /events — agents with their workflow phase/task/PR,
-//          open tasks, merge-intents, and orphan warnings. Enter shows an agent's
-//          activity timeline (/log). It owns no domain logic and reaches nothing
-//          but the hub.
-// limits:  refuses to start without a running hub; all data comes from the hub.
+// job:     the dashboard shell — model, update loop, and the full-height
+//          master-detail View that composes the generic components
+//          (component_*.go) around the per-tab content (tasks.go/agents.go/
+//          prs.go). Live over /events; all derivation comes from the hub.
+// limits:  no domain logic; hub client only; refuses to start without a hub.
 package tui
 
 import (
 	"context"
 	"fmt"
-	"io"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -19,10 +17,10 @@ import (
 	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/tui/scroll"
 )
 
-// Run starts the TUI against the repo's hub. It refuses to start without one
-// (the hub is the single source of truth — D-hub / task 4.3).
+// Run starts the dashboard against the repo's hub (refuses without one).
 func Run(root string) error {
 	if !hub.IsRunning(root) {
 		return fmt.Errorf("no hub running — start one first: 'sindri hub &'")
@@ -34,164 +32,288 @@ func Run(root string) error {
 	if err != nil {
 		return err
 	}
-	_, err = tea.NewProgram(model{cl: cl, ch: ch}, tea.WithAltScreen()).Run()
+	_, err = tea.NewProgram(newModel(cl, ch), tea.WithAltScreen()).Run()
 	return err
 }
 
 type stateMsg hub.BoardState
-type logMsg []store.Event
+type logMsg struct {
+	key string
+	evs []store.Event
+}
+type prMsg struct {
+	key string
+	d   hub.PRDetail
+}
+type taskMsg struct {
+	key string
+	t   store.Task
+}
 type errMsg struct{ err error }
 
+const (
+	filterOpen = iota
+	filterClosed
+	filterAll
+)
+
+var filterNames = [...]string{"open", "closed", "all"}
+
 type model struct {
-	cl       *client.HTTP
-	ch       <-chan hub.BoardState
-	state    hub.BoardState
-	cursor   int
-	logFor   string       // agent whose timeline is shown ("" = board)
-	log      []store.Event
-	err      error
-	w, h     int
+	cl    *client.HTTP
+	ch    <-chan hub.BoardState
+	state hub.BoardState
+	err   error
+	w, h  int
+
+	tab    int
+	cursor [3]int
+	list   scroll.Viewport
+	detail scroll.Viewport
+
+	filter    int
+	collapsed map[string]bool
+
+	detailKey  string
+	agentLog   []store.Event
+	prDetail   hub.PRDetail
+	taskDetail store.Task
+	quit       bool
+}
+
+func newModel(cl *client.HTTP, ch <-chan hub.BoardState) model {
+	return model{cl: cl, ch: ch, collapsed: map[string]bool{}}
 }
 
 func (m model) Init() tea.Cmd { return waitForState(m.ch) }
 
-// waitForState blocks on the next board snapshot from the SSE stream.
 func waitForState(ch <-chan hub.BoardState) tea.Cmd {
 	return func() tea.Msg {
 		st, ok := <-ch
 		if !ok {
-			return errMsg{io.EOF}
+			return errMsg{fmt.Errorf("hub connection closed")}
 		}
 		return stateMsg(st)
 	}
+}
+
+func (m model) bodyHeight() int {
+	if h := m.h - 3; h > 0 { // tab strip (1) + footer (2)
+		return h
+	}
+	return 1
+}
+
+func (m model) leftWidth() int {
+	w := 40
+	if w > m.w/2 {
+		w = m.w / 2
+	}
+	if w < 16 {
+		w = 16
+	}
+	return w
+}
+
+func (m model) detailWidth() int {
+	w := m.w - m.leftWidth() - 1 // 1 for the divider
+	if w < 1 {
+		w = 1
+	}
+	return w
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
+		m.reclamp()
 	case stateMsg:
 		m.state = hub.BoardState(msg)
-		if m.cursor >= len(m.state.Agents) {
-			m.cursor = max(0, len(m.state.Agents)-1)
-		}
-		return m, waitForState(m.ch) // keep listening
+		m.reclamp()
+		return m, tea.Batch(waitForState(m.ch), m.syncDetail())
 	case logMsg:
-		m.log = []store.Event(msg)
+		m.agentLog = msg.evs
+	case prMsg:
+		m.prDetail = msg.d
+	case taskMsg:
+		m.taskDetail = msg.t
 	case errMsg:
 		m.err = msg.err
 		return m, tea.Quit
 	case tea.KeyMsg:
-		return m.key(msg)
+		cmd := m.onKey(msg.String())
+		if m.quit {
+			return m, tea.Quit
+		}
+		return m, cmd
 	}
 	return m, nil
 }
 
-func (m model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch k.String() {
+// onKey applies a key (by its string form) — shared by the live loop and the
+// headless Screenshot harness. Mutates the model; returns an optional cmd.
+func (m *model) onKey(k string) tea.Cmd {
+	switch k {
 	case "q", "ctrl+c":
-		return m, tea.Quit
-	case "esc":
-		m.logFor = ""
+		m.quit = true
+		return nil
+	case "ctrl+l", "tab":
+		m.tab = (m.tab + 1) % len(hub.Sections)
+	case "ctrl+h", "shift+tab":
+		m.tab = (m.tab - 1 + len(hub.Sections)) % len(hub.Sections)
+	case "1", "2", "3":
+		m.tab = int(k[0] - '1')
 	case "j", "down":
-		if m.cursor < len(m.state.Agents)-1 {
-			m.cursor++
-		}
+		m.cursor[m.tab]++
 	case "k", "up":
-		if m.cursor > 0 {
-			m.cursor--
+		m.cursor[m.tab]--
+	case "g":
+		m.cursor[m.tab] = 0
+	case "G":
+		m.cursor[m.tab] = 1 << 30
+	case "ctrl+d":
+		m.cursor[m.tab] += m.bodyHeight() / 2
+	case "ctrl+u":
+		m.cursor[m.tab] -= m.bodyHeight() / 2
+	case "f":
+		if m.tab == 0 {
+			m.filter = (m.filter + 1) % 3
+		}
+	case "h":
+		if m.tab == 0 {
+			if id := m.selID(); id != "" {
+				m.collapsed[id] = true
+			}
+		}
+	case "l":
+		if m.tab == 0 {
+			delete(m.collapsed, m.selID())
 		}
 	case "r":
-		return m, func() tea.Msg { m.cl.Refresh(); return nil }
-	case "enter":
-		if m.cursor < len(m.state.Agents) {
-			name := m.state.Agents[m.cursor].Name
-			m.logFor = name
-			return m, func() tea.Msg { evs, _ := m.cl.Log(name); return logMsg(evs) }
-		}
+		cl := m.cl
+		m.reclamp()
+		return func() tea.Msg { cl.Refresh(); return nil }
 	}
-	return m, nil
+	m.reclamp()
+	return m.syncDetail()
 }
 
-var (
-	head = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
-	dim  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	warn = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
-	sel  = lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Background(lipgloss.Color("238"))
-)
+// reclamp keeps the active tab's cursor + both viewports in range.
+func (m *model) reclamp() {
+	n := len(m.rows())
+	m.cursor[m.tab] = clampInt(m.cursor[m.tab], 0, max(0, n-1))
+	m.list.SetHeight(m.bodyHeight())
+	m.list.SetTotal(n)
+	m.list.SetCursor(m.cursor[m.tab])
+	m.detail.SetHeight(m.bodyHeight())
+	m.detail.SetTotal(len(m.detailLines()))
+	m.detail.ScrollTop()
+}
 
+// syncDetail fetches the selected item's rich detail when the selection changes.
+func (m *model) syncDetail() tea.Cmd {
+	key := fmt.Sprintf("%d:%s", m.tab, m.selID())
+	if key == m.detailKey || m.cl == nil {
+		return nil
+	}
+	m.detailKey = key
+	id := m.selID()
+	if id == "" {
+		return nil
+	}
+	cl := m.cl
+	switch m.tab {
+	case 0:
+		return func() tea.Msg { t, _ := cl.TaskInfo(id); return taskMsg{id, t} }
+	case 1:
+		return func() tea.Msg { evs, _ := cl.Log(id); return logMsg{id, evs} }
+	default:
+		return func() tea.Msg { d, _ := cl.PRInfo(id); return prMsg{id, d} }
+	}
+}
+
+// rows / detailLines dispatch to the active tab (tasks.go / agents.go / prs.go).
+func (m model) rows() []row {
+	switch m.tab {
+	case 0:
+		return m.taskRows()
+	case 1:
+		return m.agentRows()
+	default:
+		return m.prRows()
+	}
+}
+
+func (m model) detailLines() []string {
+	switch m.tab {
+	case 0:
+		return m.taskDetailLines()
+	case 1:
+		return m.agentDetailLines()
+	default:
+		return m.prDetailLines()
+	}
+}
+
+func (m model) contextFooter() string {
+	switch m.tab {
+	case 0:
+		return fmt.Sprintf("f filter: %s   ·   h/l fold", filterNames[m.filter])
+	case 1:
+		return "(actions: launch/tell/attach — next round)"
+	default:
+		return "(actions: merge — next round)"
+	}
+}
+
+func (m model) selID() string {
+	r := m.rows()
+	if c := m.cursor[m.tab]; c >= 0 && c < len(r) {
+		return r[c].id
+	}
+	return ""
+}
+
+// View composes the full-height frame: tab strip, master-detail body, footer.
 func (m model) View() string {
 	if m.err != nil {
 		return fmt.Sprintf("hub connection lost: %v\n", m.err)
 	}
-	if m.logFor != "" {
-		return m.logView()
+	if m.w == 0 || m.h == 0 {
+		return "loading…"
 	}
-	var b strings.Builder
-	fmt.Fprintln(&b, head.Render("Sindri — agents"))
-	for i, a := range m.state.Agents {
-		run := "·"
-		if a.Running {
-			run = "●"
-		}
-		row := fmt.Sprintf("%s %-12s %-8s %-9s %-10s %s", run, a.Name, a.Role, a.Phase, dashTUI(a.Task), dashTUI(a.PR))
-		if i == m.cursor {
-			row = sel.Render("▸ " + row)
-		} else {
-			row = "  " + row
-		}
-		fmt.Fprintln(&b, row)
+	labels := make([]string, len(hub.Sections))
+	for i, s := range hub.Sections {
+		labels[i] = fmt.Sprintf("%d %s", s.Count(m.state), s.Title)
 	}
-	for _, o := range m.state.Orphans {
-		fmt.Fprintln(&b, warn.Render(fmt.Sprintf("  ⚠ orphan: %s (no roster entry — 'podman rm -f %s')", o, o)))
-	}
-
-	fmt.Fprintln(&b, head.Render("\nPRs"))
-	if len(m.state.PRs) == 0 {
-		fmt.Fprintln(&b, dim.Render("  none"))
-	}
-	for _, p := range m.state.PRs {
-		fmt.Fprintf(&b, "  %-14s %-9s %-10s %s\n", p.ID, p.Status, p.Agent, p.Branch)
-	}
-
-	fmt.Fprintln(&b, head.Render("\nOpen tasks"))
-	if len(m.state.Tasks) == 0 {
-		fmt.Fprintln(&b, dim.Render("  none"))
-	}
-	for _, t := range m.state.Tasks {
-		fmt.Fprintf(&b, "  %-12s %-8s %s\n", t.ID, t.Priority, t.Title)
-	}
-
-	fmt.Fprint(&b, dim.Render("\nj/k move · enter timeline · r refresh · q quit"))
-	return b.String()
+	top := tabStrip(labels, m.tab, m.w)
+	left := pane(rowTexts(m.rows()), m.list, m.leftWidth(), m.cursor[m.tab])
+	right := pane(m.detailLines(), m.detail, m.detailWidth(), -1)
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, divider(m.bodyHeight()), right)
+	foot := footer("ctrl+h/l tab · j/k move · g/G ends · r refresh · q quit", m.contextFooter(), m.w)
+	return strings.Join([]string{top, body, foot}, "\n")
 }
 
-func (m model) logView() string {
-	var b strings.Builder
-	fmt.Fprintln(&b, head.Render("Timeline — "+m.logFor))
-	if len(m.log) == 0 {
-		fmt.Fprintln(&b, dim.Render("  (no activity)"))
+func rowTexts(rows []row) []string {
+	out := make([]string, len(rows))
+	for i, r := range rows {
+		out[i] = r.text
 	}
-	for _, e := range m.log {
-		fmt.Fprintf(&b, "  %s  %-10s %s\n", dim.Render(shortTS(e.TS)), e.Type, e.Payload)
-	}
-	fmt.Fprint(&b, dim.Render("\nesc back · q quit"))
-	return b.String()
+	return out
 }
 
-func dashTUI(s string) string {
+// row is one selector line: display text + the id it selects ("" = not selectable).
+type row struct {
+	text string
+	id   string
+}
+
+func dash(s string) string {
 	if s == "" {
 		return "-"
 	}
 	return s
-}
-
-// shortTS trims an RFC3339 timestamp to HH:MM:SS for compact display.
-func shortTS(ts string) string {
-	if len(ts) >= 19 {
-		return ts[11:19]
-	}
-	return ts
 }
 
 func max(a, b int) int {
@@ -199,4 +321,31 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+// Screenshot renders the dashboard headlessly at w×h with the given board state
+// and a sequence of key presses applied in order — for verifying layout without
+// a terminal or a hub. Returned cmds are not run (no hub calls), so detail panes
+// show their synchronous content only.
+//
+//deadcode:keep — dev/test harness for headless rendering
+func Screenshot(st hub.BoardState, w, h int, keys ...string) string {
+	m := newModel(nil, nil)
+	m.w, m.h = w, h
+	m.state = st
+	m.reclamp()
+	for _, k := range keys {
+		m.onKey(k)
+	}
+	return m.View()
 }

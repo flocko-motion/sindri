@@ -33,13 +33,14 @@ func (h *Hub) baseBranch() (string, error) { return git.CurrentBranch(h.root) }
 // PRs returns all merge-intents (newest first).
 func (h *Hub) PRs() ([]store.PR, error) { return h.store.PRs() }
 
-// PRDetail is a merge-intent plus its diff (for `pr info`).
+// PRDetail is a merge-intent plus its linked task and diff (for `pr info`).
 type PRDetail struct {
-	PR   store.PR `json:"pr"`
-	Diff string   `json:"diff"`
+	PR   store.PR   `json:"pr"`
+	Task store.Task `json:"task"`
+	Diff string     `json:"diff"`
 }
 
-// PRInfo returns a PR with its diff.
+// PRInfo returns a PR with its linked task and diff.
 func (h *Hub) PRInfo(id string) (PRDetail, error) {
 	pr, ok, err := h.store.GetPR(id)
 	if err != nil {
@@ -49,7 +50,8 @@ func (h *Hub) PRInfo(id string) (PRDetail, error) {
 		return PRDetail{}, fmt.Errorf("no such PR %q", id)
 	}
 	diff, _ := git.Diff(h.root, pr.Base, pr.Branch)
-	return PRDetail{PR: pr, Diff: diff}, nil
+	task, _ := h.TaskInfo(pr.Task) // linked task; zero value if it can't be read
+	return PRDetail{PR: pr, Task: task, Diff: diff}, nil
 }
 
 // Tasks refreshes from td and returns all cached tasks (for `task list`).
@@ -65,6 +67,9 @@ func (h *Hub) TaskInfo(id string) (store.Task, error) {
 		return store.Task{}, err
 	}
 	st := toStoreTask(t)
+	if d, a, derr := td.Detail(h.root, id); derr == nil {
+		st.Description, st.Acceptance = d, a
+	}
 	_ = h.store.UpsertTask(st)
 	return st, nil
 }
@@ -107,8 +112,9 @@ func (h *Hub) runLint(wt string) (output string, ok bool) {
 }
 
 // SyncTasks refreshes the whole cached task set from td (the sync read path).
+// Caches all tasks (every status) so UIs can filter open/closed/all client-side.
 func (h *Hub) SyncTasks() error {
-	tasks, err := td.Tasks(h.root, issue.FilterOpen)
+	tasks, err := td.Tasks(h.root, issue.FilterAll)
 	if err != nil {
 		return err
 	}
@@ -129,8 +135,8 @@ func (h *Hub) refreshTask(id string) error {
 
 func toStoreTask(t issue.Task) store.Task {
 	return store.Task{
-		ID: t.ID, Title: t.Title, Status: t.Status,
-		Priority: t.Priority, Type: t.Type, Labels: strings.Join(t.Labels, ","),
+		ID: t.ID, Title: t.Title, Status: t.Status, Priority: t.Priority,
+		Type: t.Type, Labels: strings.Join(t.Labels, ","), ParentID: t.ParentID,
 	}
 }
 

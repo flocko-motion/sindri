@@ -43,7 +43,7 @@ func (h *Hub) State() (BoardState, error) {
 	if err != nil {
 		return BoardState{}, err
 	}
-	tasks, err := h.store.OpenTasks()
+	tasks, err := h.store.AllTasks() // all statuses; UIs filter open/closed/all
 	if err != nil {
 		return BoardState{}, err
 	}

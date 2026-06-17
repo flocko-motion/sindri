@@ -52,6 +52,21 @@ func tasksFromDB(root string, f issue.Filter) ([]issue.Task, error) {
 	return orderTasks(tasks), nil
 }
 
+// Detail reads a task's long-form fields (description, acceptance) — not carried
+// in issue.Task, fetched on demand for a detail view.
+func Detail(root, id string) (description, acceptance string, err error) {
+	db, err := sql.Open("sqlite", "file:"+DBPath(root))
+	if err != nil {
+		return "", "", err
+	}
+	defer db.Close()
+	row := db.QueryRow(`SELECT description, acceptance FROM issues WHERE id=?`, id)
+	if err := row.Scan(&description, &acceptance); err != nil && err != sql.ErrNoRows {
+		return "", "", err
+	}
+	return description, acceptance, nil
+}
+
 // taskFromDB reads a single task by id (live or not — Get is used post-mutation).
 func taskFromDB(root, id string) (issue.Task, error) {
 	db, err := sql.Open("sqlite", "file:"+DBPath(root))

@@ -1,4 +1,4 @@
-.PHONY: build sindri worker image install clean test lint demo diag loop claude-check fullloop
+.PHONY: build sindri worker image install clean test lint demo diag loop claude-check fullloop screenshot
 
 PREFIX := $(HOME)/.local/bin
 
@@ -31,6 +31,10 @@ image: .image-stamp
 
 test:
 	go test ./...
+
+# Render the TUI headlessly (mock data) so its layout can be eyeballed.
+screenshot:
+	go test ./internal/tui/ -run Screenshot -v
 
 lint: sindri
 	./bin/sindri lint all

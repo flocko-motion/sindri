@@ -60,6 +60,9 @@ func max0(n int) int {
 
 // --- cursor-follow mode (selectors) ---
 
+// SetCursor places the cursor at c, clamps it, and scrolls to keep it visible.
+func (v *Viewport) SetCursor(c int) { v.Cursor = c; v.follow() }
+
 // Up/Down move the cursor one line, scrolling to keep it visible.
 func (v *Viewport) Up()   { v.Cursor--; v.follow() }
 func (v *Viewport) Down() { v.Cursor++; v.follow() }

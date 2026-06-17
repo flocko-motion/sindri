@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   priority   TEXT NOT NULL DEFAULT '',
   type       TEXT NOT NULL DEFAULT '',
   labels     TEXT NOT NULL DEFAULT '',
+  parent_id  TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL DEFAULT '',
   synced_at  TEXT NOT NULL DEFAULT ''
 );
@@ -43,14 +44,19 @@ CREATE TABLE IF NOT EXISTS prs (
 );
 `
 
-// Task is the cached read-model row for a td task.
+// Task is the cached read-model row for a td task. Description/Acceptance are
+// not cached (they can be large) — they are populated only on a detail read
+// (TaskDetail), empty in board/list rows.
 type Task struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
-	Status   string `json:"status"`
-	Priority string `json:"priority"`
-	Type     string `json:"type"`
-	Labels   string `json:"labels"` // comma-joined
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Status      string `json:"status"`
+	Priority    string `json:"priority"`
+	Type        string `json:"type"`
+	Labels      string `json:"labels"` // comma-joined
+	ParentID    string `json:"parent_id"`
+	Description string `json:"description,omitempty"`
+	Acceptance  string `json:"acceptance,omitempty"`
 }
 
 // AgentState is an agent's live workflow state (durable, D11).
@@ -87,8 +93,8 @@ func (s *Store) ReplaceTasks(tasks []Task) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, t := range tasks {
 		if _, err := tx.Exec(
-			`INSERT INTO tasks (id,title,status,priority,type,labels,synced_at) VALUES (?,?,?,?,?,?,?)`,
-			t.ID, t.Title, t.Status, t.Priority, t.Type, t.Labels, now); err != nil {
+			`INSERT INTO tasks (id,title,status,priority,type,labels,parent_id,synced_at) VALUES (?,?,?,?,?,?,?,?)`,
+			t.ID, t.Title, t.Status, t.Priority, t.Type, t.Labels, t.ParentID, now); err != nil {
 			return err
 		}
 	}
@@ -98,12 +104,13 @@ func (s *Store) ReplaceTasks(tasks []Task) error {
 // UpsertTask refreshes a single cached task (the point-of-use refresh path, D15).
 func (s *Store) UpsertTask(t Task) error {
 	_, err := s.db.Exec(`
-		INSERT INTO tasks (id,title,status,priority,type,labels,synced_at)
-		VALUES (?,?,?,?,?,?,?)
+		INSERT INTO tasks (id,title,status,priority,type,labels,parent_id,synced_at)
+		VALUES (?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET
 			title=excluded.title, status=excluded.status, priority=excluded.priority,
-			type=excluded.type, labels=excluded.labels, synced_at=excluded.synced_at`,
-		t.ID, t.Title, t.Status, t.Priority, t.Type, t.Labels,
+			type=excluded.type, labels=excluded.labels, parent_id=excluded.parent_id,
+			synced_at=excluded.synced_at`,
+		t.ID, t.Title, t.Status, t.Priority, t.Type, t.Labels, t.ParentID,
 		time.Now().UTC().Format(time.RFC3339))
 	return err
 }
@@ -113,7 +120,7 @@ func (s *Store) OpenTasks() ([]Task, error) {
 	// td priorities are P1 (highest) … P4 (lowest); lexical order matches, with
 	// unset priorities sorted last.
 	rows, err := s.db.Query(`
-		SELECT id,title,status,priority,type,labels FROM tasks
+		SELECT id,title,status,priority,type,labels,parent_id FROM tasks
 		WHERE status='open'
 		ORDER BY CASE WHEN priority='' THEN 1 ELSE 0 END, priority, id`)
 	if err != nil {
@@ -126,7 +133,7 @@ func (s *Store) OpenTasks() ([]Task, error) {
 // AllTasks returns every cached task, highest priority first (unset last).
 func (s *Store) AllTasks() ([]Task, error) {
 	rows, err := s.db.Query(`
-		SELECT id,title,status,priority,type,labels FROM tasks
+		SELECT id,title,status,priority,type,labels,parent_id FROM tasks
 		ORDER BY CASE WHEN priority='' THEN 1 ELSE 0 END, priority, id`)
 	if err != nil {
 		return nil, fmt.Errorf("all tasks: %w", err)
@@ -139,7 +146,7 @@ func scanTasks(rows *sql.Rows) ([]Task, error) {
 	var out []Task
 	for rows.Next() {
 		var t Task
-		if err := rows.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Type, &t.Labels); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Type, &t.Labels, &t.ParentID); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
