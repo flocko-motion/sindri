@@ -93,11 +93,13 @@ func countPRs(ps []store.PR, pred func(store.PR) bool) (n int) {
 
 // --- task tree ---
 
-// TaskRow is a task placed in the hierarchy: its tree depth, and the id of a
+// TaskRow is a task placed in the hierarchy: its tree depth, whether it is the
+// last child of its parent (for drawing tree connectors), and the id of a
 // non-merged PR for it (or "").
 type TaskRow struct {
 	store.Task
 	Depth int    `json:"depth"`
+	Last  bool   `json:"last"`
 	PR    string `json:"pr"`
 }
 
@@ -131,8 +133,9 @@ func ArrangeTasks(tasks []store.Task, prs []store.PR) []TaskRow {
 	var out []TaskRow
 	var walk func(parent string, depth int)
 	walk = func(parent string, depth int) {
-		for _, t := range byParent[parent] {
-			out = append(out, TaskRow{Task: t, Depth: depth, PR: pr[t.ID]})
+		kids := byParent[parent]
+		for i, t := range kids {
+			out = append(out, TaskRow{Task: t, Depth: depth, Last: i == len(kids)-1, PR: pr[t.ID]})
 			walk(t.ID, depth+1)
 		}
 	}

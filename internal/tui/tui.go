@@ -136,14 +136,10 @@ func (m model) bodyHeight() int {
 }
 
 func (m model) leftWidth() int {
-	w := 40
-	if w > m.w/2 {
-		w = m.w / 2
-	}
-	if w < 16 {
-		w = 16
-	}
-	return w
+	// The Tasks table (gutter + id + type + prio + state + title) needs room, so
+	// give the selector ~60% — clamped so neither pane gets too narrow.
+	w := m.w * 3 / 5
+	return clampInt(w, 28, max(28, m.w-28))
 }
 
 func (m model) detailWidth() int {

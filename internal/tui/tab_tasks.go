@@ -48,35 +48,87 @@ func (m model) taskRows() []row {
 		}
 	}
 
-	var out []row
+	// Visible set after applying folds.
+	var visible []hub.TaskRow
 	hideAbove := -1 // depth of a collapsed ancestor; rows deeper than this are hidden
 	for _, tr := range arranged {
 		if hideAbove >= 0 && tr.Depth > hideAbove {
 			continue
 		}
 		hideAbove = -1
-		fold := " "
-		if hasKids[tr.ID] {
-			if m.collapsed[tr.ID] {
-				fold = "▸"
-			} else {
-				fold = "▾"
-			}
-		}
-		mark := ""
-		if tr.PR != "" {
-			mark = "◆ "
-		}
-		// Fixed left columns (priority word, status) keep alignment; the tree
-		// indent applies only to the title region so hierarchy never shifts them.
-		title := strings.Repeat("  ", tr.Depth) + fold + " " + mark + tr.Title
-		text := fmt.Sprintf("%-8s %-11s %s", hub.PriorityLabel(tr.Priority), tr.Status, title)
-		out = append(out, row{text, tr.ID})
-		if m.collapsed[tr.ID] {
+		visible = append(visible, tr)
+		if hasKids[tr.ID] && m.collapsed[tr.ID] {
 			hideAbove = tr.Depth
 		}
 	}
+
+	// Columns: fixed tree gutter (│ ├ └ connectors) · id · type · prio · state ·
+	// title. The gutter is fixed-width so id and the rest stay aligned; the tree
+	// lives entirely in the gutter.
+	out := make([]row, len(visible))
+	cont := []bool{} // cont[i]: ancestor at depth i has a later sibling (draw │)
+	for i, tr := range visible {
+		if len(cont) > tr.Depth {
+			cont = cont[:tr.Depth]
+		}
+		gutter := treeGutter(cont, tr.Depth, tr.Last, hasKids[tr.ID], m.collapsed[tr.ID])
+		cont = append(cont, !tr.Last)
+
+		mark := " "
+		if tr.PR != "" {
+			mark = "◆"
+		}
+		out[i] = row{
+			fmt.Sprintf("%s %-9s %-5s %-8s %-11s %s %s",
+				gutter, tr.ID, typeAbbr(tr.Type), hub.PriorityLabel(tr.Priority), tr.Status, mark, tr.Title),
+			tr.ID,
+		}
+	}
 	return out
+}
+
+const treeGutterW = 6 // fits ~3 levels of "│ "/"├─" connectors
+
+// treeGutter draws the fixed-width tree connectors for a node: ancestor pipes,
+// the branch into this node, and a fold marker for collapsible nodes.
+func treeGutter(cont []bool, depth int, last, kids, collapsed bool) string {
+	var b strings.Builder
+	for i := 0; i < depth; i++ {
+		switch {
+		case i < depth-1:
+			// pipe if the path node at depth i+1 is a non-last child (its parent's
+			// child-list continues below this row)
+			if i+1 < len(cont) && cont[i+1] {
+				b.WriteString("│ ")
+			} else {
+				b.WriteString("  ")
+			}
+		case last:
+			b.WriteString("└─")
+		default:
+			b.WriteString("├─")
+		}
+	}
+	s := b.String()
+	if kids { // fold indicator replaces the trailing dash
+		if collapsed {
+			s += "▸"
+		} else {
+			s += "▾"
+		}
+	}
+	return padTrunc(s, treeGutterW)
+}
+
+// typeAbbr shortens a td type to fit the column.
+func typeAbbr(t string) string {
+	if t == "feature" {
+		return "feat"
+	}
+	if len(t) > 5 {
+		return t[:5]
+	}
+	return t
 }
 
 // taskDetailLines renders the selected task: board fields + assignee + PR, plus
