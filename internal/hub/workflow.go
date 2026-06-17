@@ -13,6 +13,8 @@
 package hub
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -21,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
+	"github.com/flo-at/sindri/internal/adapter/spec"
 	"github.com/flo-at/sindri/internal/adapter/td"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -111,18 +114,38 @@ func (h *Hub) runLint(wt string) (output string, ok bool) {
 	return string(out), err == nil
 }
 
-// SyncTasks refreshes the whole cached task set from td (the sync read path).
-// Caches all tasks (every status) so UIs can filter open/closed/all client-side.
+// SyncTasks refreshes the whole cached task set from its sources — td tasks and
+// openspec changes — so the generalized task list is multi-source. Caches all
+// statuses so UIs can filter open/closed/all client-side.
 func (h *Hub) SyncTasks() error {
 	tasks, err := td.Tasks(h.root, issue.FilterAll)
 	if err != nil {
 		return err
 	}
-	rows := make([]store.Task, len(tasks))
-	for i, t := range tasks {
-		rows[i] = toStoreTask(t)
+	rows := make([]store.Task, 0, len(tasks))
+	for _, t := range tasks {
+		rows = append(rows, toStoreTask(t))
+	}
+	// openspec changes as `spec`-typed tasks (source: openspec).
+	for _, c := range spec.Changes(h.root) {
+		status := "open"
+		if c.Done() {
+			status = "closed"
+		}
+		rows = append(rows, store.Task{
+			ID:     specID(c.Name),
+			Title:  fmt.Sprintf("%s (%d/%d)", c.Name, c.CompletedTasks, c.TotalTasks),
+			Status: status,
+			Type:   "spec",
+		})
 	}
 	return h.store.ReplaceTasks(rows)
+}
+
+// specID derives a stable os-XXXXXX id from an openspec change name.
+func specID(name string) string {
+	sum := sha256.Sum256([]byte(name))
+	return "os-" + hex.EncodeToString(sum[:])[:6]
 }
 
 func (h *Hub) refreshTask(id string) error {

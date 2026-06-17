@@ -21,6 +21,8 @@ func mockBoard() hub.BoardState {
 			{ID: "td-t2", Title: "Session handling", Status: "closed", Priority: "P3", Type: "task", ParentID: "td-feat1"},
 			{ID: "td-feat2", Title: "Signup feature", Status: "open", Priority: "P2", Type: "feature", ParentID: "td-ep01"},
 			{ID: "td-bug9", Title: "Crash on empty input", Status: "open", Priority: "P0", Type: "bug"},
+			{ID: "os-a1b2c3", Title: "hub-architecture (15/15)", Status: "open", Type: "spec"},
+			{ID: "os-d4e5f6", Title: "tui-dashboard (22/23)", Status: "open", Type: "spec"},
 		},
 		Agents: []hub.AgentView{
 			{Name: "brokkr", Role: "worker", Running: true, Phase: "working", Task: "td-feat1", PR: "pr-td-feat1"},

@@ -7,10 +7,43 @@
 package spec
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 )
+
+// Change is an openspec change from `openspec list --json`.
+type Change struct {
+	Name           string `json:"name"`
+	CompletedTasks int    `json:"completedTasks"`
+	TotalTasks     int    `json:"totalTasks"`
+	Status         string `json:"status"`
+}
+
+// Done reports whether a change's tasks are all complete.
+func (c Change) Done() bool { return c.TotalTasks > 0 && c.CompletedTasks == c.TotalTasks }
+
+// Changes lists the project's active openspec changes (none if openspec isn't
+// used or the CLI is unavailable — it's an optional source).
+func Changes(projectRoot string) []Change {
+	if !Enabled(projectRoot) {
+		return nil
+	}
+	cmd := exec.Command("openspec", "list", "--json")
+	cmd.Dir = projectRoot
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var wrap struct {
+		Changes []Change `json:"changes"`
+	}
+	if json.Unmarshal(out, &wrap) != nil {
+		return nil
+	}
+	return wrap.Changes
+}
 
 // Enabled reports whether the project uses openspec (has an openspec/ dir).
 func Enabled(projectRoot string) bool {
