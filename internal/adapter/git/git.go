@@ -87,6 +87,15 @@ func CreateBranch(dir, name, base string) error {
 	return nil
 }
 
+// CheckoutDetached points a worktree at a ref in detached HEAD (no branch
+// claimed), so it can hold a branch already checked out in another worktree.
+func CheckoutDetached(dir, ref string) error {
+	if out, err := exec.Command("git", "-C", dir, "checkout", "--detach", ref).CombinedOutput(); err != nil {
+		return fmt.Errorf("checkout %s: %s: %w", ref, strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
 // HasChanges reports whether dir's worktree has uncommitted changes.
 func HasChanges(dir string) bool {
 	out, err := exec.Command("git", "-C", dir, "status", "--porcelain").Output()

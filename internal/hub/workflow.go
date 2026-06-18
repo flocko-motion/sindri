@@ -84,9 +84,11 @@ func (h *Hub) ReviewPrompt() (string, error) {
 // injecting the instruction. With no reviewer running, the requirement is
 // recorded unassigned for one to pick up later.
 func (h *Hub) RequestReview(prID, requirement string) error {
-	if _, ok, err := h.store.GetPR(prID); err != nil {
+	pr, ok, err := h.store.GetPR(prID)
+	if err != nil {
 		return err
-	} else if !ok {
+	}
+	if !ok {
 		return fmt.Errorf("no such PR %q", prID)
 	}
 	requirement = strings.TrimSpace(requirement)
@@ -101,9 +103,16 @@ func (h *Hub) RequestReview(prID, requirement string) error {
 		if err := h.store.AssignReview(id, reviewer); err != nil {
 			return err
 		}
-		_ = h.injectWhenReady(reviewer, fmt.Sprintf(
-			"[hub] Review %s. %s When done, run `sindri-worker review %s <pass|changes|fail> \"<findings>\"`.",
-			prID, requirement, prID))
+		// Check the PR's branch out (detached) into the reviewer's workspace, so
+		// it can read the full code in context, build, and run — not just the diff.
+		msg := fmt.Sprintf("[hub] Review %s. %s ", prID, requirement)
+		if a, ok, _ := h.store.GetAgent(reviewer); ok {
+			if err := git.CheckoutDetached(filepath.Join(h.root, a.Workspace), pr.Branch); err == nil {
+				msg += "The PR is checked out in /workspace. "
+			}
+		}
+		msg += fmt.Sprintf("`sindri-worker show %s` for the diff. When done, run `sindri-worker review %s <pass|changes|fail> \"<findings>\"`.", prID, prID)
+		_ = h.injectWhenReady(reviewer, msg)
 	}
 	h.notify()
 	return nil

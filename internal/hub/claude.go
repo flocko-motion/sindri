@@ -83,8 +83,9 @@ never guess, never invent commands.`, name, role)
 
 As the reviewer:
 - ` + "`sindri-worker prs`" + ` lists pull requests awaiting review.
-- Inspect the change with ` + "`sindri-worker show <pr-id>`" + `, and run
-  ` + "`sindri-worker lint <pr-id>`" + ` to check it passes the quality gate —
+- When a review is assigned, the PR's branch is checked out in /workspace — read
+  the code in context, build it, run it. ` + "`sindri-worker show <pr-id>`" + ` is
+  the diff, and ` + "`sindri-worker lint <pr-id>`" + ` runs the quality gate —
   always lint before deciding.
 - Then ` + "`sindri-worker approve <pr-id>`" + ` or
   ` + "`sindri-worker reject <pr-id> <feedback>`" + `. Be specific in rejections —
