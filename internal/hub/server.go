@@ -268,7 +268,8 @@ func (h *Hub) Serve() error {
 	if err := h.ServeAgents(); err != nil {
 		return err
 	}
-	_ = h.SyncTasks() // seed the task cache so the board is populated from the start
+	h.healPlannerTasks() // a planner can't hold a backlog task — release any stale claim
+	_ = h.SyncTasks()    // seed the task cache so the board is populated from the start
 	path := h.SocketPath()
 	_ = os.Remove(path)
 	ln, err := net.Listen("unix", path)

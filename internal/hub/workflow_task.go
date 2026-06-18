@@ -85,6 +85,25 @@ func (h *Hub) CreateTask(s TaskSpec) (string, error) {
 	return id, nil
 }
 
+// healPlannerTasks releases any backlog task a planner is holding in its state —
+// an invalid assignment (planners can't grab tasks). Self-heals stale claims
+// left by older builds; runs once at hub boot.
+func (h *Hub) healPlannerTasks() {
+	roster, _ := h.store.Roster()
+	for _, a := range roster {
+		if a.Role != "planner" {
+			continue
+		}
+		st, _ := h.store.GetState(a.Name)
+		if !strings.HasPrefix(st.Task, "td-") {
+			continue
+		}
+		_ = td.SetStatus(h.root, st.Task, "open")
+		_ = h.store.SetState(store.AgentState{Agent: a.Name, Phase: "idle"})
+		_ = h.store.Log(a.Name, "unassign", st.Task+" (planners don't hold tasks)")
+	}
+}
+
 // UnassignTask releases a task back to the backlog (status → open) and clears it
 // from whatever agent held it. Refused if that agent is currently alive and
 // working on it — stop or delete the agent first; allowed for a down agent or an
