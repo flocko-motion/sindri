@@ -75,7 +75,7 @@ func (m *model) openReviewForm(prID string) {
 	}
 	req := newTextareaField("requirement", prompt)
 	cl := m.cl
-	m.form.open("agentic review of "+prID, []field{req}, nil, func() tea.Cmd {
+	m.form.open("agent-review of "+prID, []field{req}, nil, func() tea.Cmd {
 		text := req.value()
 		return func() tea.Msg {
 			if cl == nil {

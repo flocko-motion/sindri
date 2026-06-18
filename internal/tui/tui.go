@@ -614,7 +614,7 @@ func (m model) contextFooter() string {
 		if m.rightFocus {
 			return "j/k item · enter open · y copy · h back to list"
 		}
-		return "l focus · V verify · A review · R reject · L lint · m merge"
+		return "l focus · V verify · A agent-review · R reject · L lint · m merge"
 	}
 }
 
