@@ -1,8 +1,9 @@
 // package: tui / agents
 // type:    ui (Agents tab)
-// job:     the Agents tab content — the agent list (running marker, role, phase,
-//          task) with orphan warnings, and the agent detail pane (state + the
-//          lazily-fetched activity timeline).
+// job:     the Agents tab content — the agent list (status, role, task) with
+//          orphan warnings, and the agent detail pane (state + the lazily-
+//          fetched activity timeline). Status is one word: down|idle|working|
+//          submitted (down ⇒ not running).
 package tui
 
 import (
@@ -14,11 +15,7 @@ import (
 func (m model) agentRows() []row {
 	var out []row
 	for _, a := range m.state.Agents {
-		run := "·"
-		if a.Running {
-			run = "●"
-		}
-		out = append(out, row{fmt.Sprintf("%s %-12s %-8s %-10s %s", run, a.Name, a.Role, a.Phase, dash(a.Task)), a.Name})
+		out = append(out, row{fmt.Sprintf("%-9s %-12s %-8s %s", a.Status, a.Name, a.Role, dash(a.Task)), a.Name})
 	}
 	for _, o := range m.state.Orphans {
 		out = append(out, row{"⚠ orphan: " + o, ""})
@@ -40,8 +37,7 @@ func (m model) agentDetailLines() []string {
 	ls := []string{
 		"agent:   " + a.Name,
 		"role:    " + a.Role,
-		fmt.Sprintf("running: %v", a.Running),
-		"phase:   " + a.Phase,
+		"status:  " + a.Status,
 		"task:    " + dash(a.Task),
 		"pr:      " + dash(a.PR),
 		"", "── activity ──",

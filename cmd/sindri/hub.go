@@ -120,11 +120,7 @@ func agentListCmd() *cobra.Command {
 					return err
 				}
 				for _, a := range st.Agents {
-					run := "stopped"
-					if a.Running {
-						run = "running"
-					}
-					fmt.Printf("%-12s %-8s %-8s %-10s %-14s %s\n", a.Name, a.Role, run, a.Phase, dash(a.Task), dash(a.PR))
+					fmt.Printf("%-12s %-8s %-10s %-14s %s\n", a.Name, a.Role, a.Status, dash(a.Task), dash(a.PR))
 				}
 				for _, o := range st.Orphans {
 					fmt.Printf("⚠  orphan: %s — no roster entry; remove with 'podman rm -f %s'\n", o, o)
@@ -267,8 +263,8 @@ func agentInfoCmd() *cobra.Command {
 				if found == nil {
 					return fmt.Errorf("no such agent %q", args[0])
 				}
-				fmt.Printf("agent:   %s\nrole:    %s\nrunning: %v\nphase:   %s\ntask:    %s\npr:      %s\n",
-					found.Name, found.Role, found.Running, found.Phase, dash(found.Task), dash(found.PR))
+				fmt.Printf("agent:   %s\nrole:    %s\nstatus:  %s\ntask:    %s\npr:      %s\n",
+					found.Name, found.Role, found.Status, dash(found.Task), dash(found.PR))
 				evs, err := b.Log(args[0])
 				if err != nil {
 					return err

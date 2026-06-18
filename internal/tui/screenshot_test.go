@@ -25,9 +25,9 @@ func mockBoard() hub.BoardState {
 			{ID: "os-d4e5f6", Title: "tui-dashboard (22/23)", Status: "open", Type: "spec"},
 		},
 		Agents: []hub.AgentView{
-			{Name: "brokkr", Role: "worker", Running: true, Phase: "working", Task: "td-feat1", PR: "pr-td-feat1"},
-			{Name: "rune", Role: "reviewer", Running: true, Phase: "idle"},
-			{Name: "dvalin", Role: "worker", Running: false, Phase: "idle"},
+			{Name: "brokkr", Role: "worker", Status: "working", Task: "td-feat1", PR: "pr-td-feat1"},
+			{Name: "rune", Role: "reviewer", Status: "idle"},
+			{Name: "dvalin", Role: "worker", Status: "down"},
 		},
 		PRs: []store.PR{
 			{ID: "pr-td-feat1", Task: "td-feat1", Agent: "brokkr", Branch: "td-feat1", Base: "master", Status: "open"},

@@ -12,7 +12,7 @@ func TestSectionCounts(t *testing.T) {
 			{ID: "a", Status: "open"}, {ID: "b", Status: "in_progress"},
 			{ID: "c", Status: "closed"}, {ID: "d", Status: "merged"},
 		},
-		Agents: []AgentView{{Name: "x", Running: true}, {Name: "y", Running: false}},
+		Agents: []AgentView{{Name: "x", Status: "idle"}, {Name: "y", Status: "down"}},
 		PRs:    []store.PR{{ID: "p1", Status: "open"}, {ID: "p2", Status: "merged"}},
 	}
 	want := map[string]int{"tasks": 2, "agents": 1, "prs": 1} // non-closed, running, not-merged

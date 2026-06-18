@@ -16,14 +16,15 @@ import (
 )
 
 // AgentView is an agent as the UIs see it: identity + live workflow + runtime.
+// Status collapses runtime + workflow into one word: down (not running) |
+// idle | working | submitted.
 type AgentView struct {
-	Name    string `json:"name"`
-	Role    string `json:"role"`
-	Running bool   `json:"running"`
-	Phase   string `json:"phase"` // idle | working | submitted
-	Task    string `json:"task"`
-	Branch  string `json:"branch"`
-	PR      string `json:"pr"`
+	Name   string `json:"name"`
+	Role   string `json:"role"`
+	Status string `json:"status"`
+	Task   string `json:"task"`
+	Branch string `json:"branch"`
+	PR     string `json:"pr"`
 }
 
 // BoardState is the whole board in one payload — the single read surface.
@@ -54,17 +55,18 @@ func (h *Hub) State() (BoardState, error) {
 	for _, a := range roster {
 		known[Container(a.Name)] = true
 		st, _ := h.store.GetState(a.Name)
-		// "Running" means the agent's tmux session is alive and attachable — not
-		// merely that the pod (a sleep) exists. A stopped agent's phase is shown
-		// as idle so the board never reports stale "working".
-		running := pod.Running(Container(a.Name)) && h.sessionAlive(a.Name)
-		phase := st.Phase
-		if !running {
-			phase = "idle"
+		// One status word. "Alive" means the agent's tmux session is up and
+		// attachable — not merely that the pod (a sleep) exists; a dead session
+		// is "down", never a stale "working".
+		status := "down"
+		if pod.Running(Container(a.Name)) && h.sessionAlive(a.Name) {
+			if status = st.Phase; status == "" {
+				status = "idle"
+			}
 		}
 		agents = append(agents, AgentView{
-			Name: a.Name, Role: a.Role, Running: running,
-			Phase: phase, Task: st.Task, Branch: st.Branch, PR: openPRFor(prs, a.Name),
+			Name: a.Name, Role: a.Role, Status: status,
+			Task: st.Task, Branch: st.Branch, PR: openPRFor(prs, a.Name),
 		})
 	}
 

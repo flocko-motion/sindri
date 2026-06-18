@@ -91,9 +91,9 @@ var Sections = []Section{
 
 // --- badge predicates ---
 
-func taskOpen(t store.Task) bool   { return !taskDone(t) }
-func agentRunning(a AgentView) bool { return a.Running }
-func prNotMerged(p store.PR) bool  { return p.Status != "merged" }
+func taskOpen(t store.Task) bool    { return !taskDone(t) }
+func agentRunning(a AgentView) bool { return a.Status != "down" }
+func prNotMerged(p store.PR) bool   { return p.Status != "merged" }
 
 // taskDone reports whether a task is in a terminal (done) state — the "closed"
 // segment of the open/closed filter.

@@ -65,11 +65,8 @@ func TestNewAgentRecordsIdentityAndLog(t *testing.T) {
 	if len(st.Agents) != 1 || st.Agents[0].Name != "dvalin" || st.Agents[0].Role != "reviewer" {
 		t.Fatalf("unexpected state: %+v", st)
 	}
-	if st.Agents[0].Running { // podman absent → not running
-		t.Fatalf("expected not running")
-	}
-	if st.Agents[0].Phase != "idle" {
-		t.Fatalf("new agent should be idle: %+v", st.Agents[0])
+	if st.Agents[0].Status != "down" { // podman absent → session not alive
+		t.Fatalf("expected status down, got %q", st.Agents[0].Status)
 	}
 	// register event logged
 	evs, _ := h.store.Events("dvalin", 0)
