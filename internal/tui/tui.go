@@ -408,10 +408,12 @@ func (m *model) onKey(k string) tea.Cmd {
 				m.collapsed[id] = true
 			}
 		}
-	case "l":
-		if m.tab == 0 { // tasks: expand fold
+	case "l": // tasks: expand fold (vi-right — kept lowercase for navigation)
+		if m.tab == 0 {
 			delete(m.collapsed, m.selID())
-		} else if m.tab == 1 { // agents: launch
+		}
+	case "L": // agents: launch (uppercase — never clashes with vi cursor keys)
+		if m.tab == 1 {
 			if a, ok := m.selAgent(); ok {
 				m.flash = "launching " + a.Name + "…"
 				// Seed the live-screen region immediately; the next poll replaces it
@@ -424,7 +426,7 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 1 {
 			if a, ok := m.selAgent(); ok {
 				if a.Status == "down" {
-					m.errText = "agent " + a.Name + " is down — launch it first ('l') before attaching"
+					m.errText = "agent " + a.Name + " is down — launch it first ('L') before attaching"
 					return nil
 				}
 				if m.cl != nil {
@@ -436,7 +438,7 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 2 {
 			return m.action(func(id string) error { _, err := m.cl.Merge(id); return err })
 		}
-	case "n": // new task (tasks) / new agent (agents)
+	case "N": // new task (tasks) / new agent (agents)
 		if m.tab == 0 {
 			m.openTaskForm(false)
 			return nil
@@ -460,7 +462,7 @@ func (m *model) onKey(k string) tea.Cmd {
 			}
 			return nil
 		}
-	case "d": // delete the selected agent (with confirm)
+	case "D": // delete the selected agent (with confirm)
 		if m.tab == 1 && m.selID() != "" {
 			id, cl := m.selID(), m.cl
 			m.choice = choiceModalState{
@@ -622,9 +624,9 @@ func (m model) detailLines() []string {
 func (m model) contextFooter() string {
 	switch m.tab {
 	case 0:
-		return fmt.Sprintf("n new · e edit · p priority · y/Y yank · f filter: %s · h/l fold", filterNames[m.filter])
+		return fmt.Sprintf("N new · e edit · p priority · y/Y yank · f filter: %s · h/l fold", filterNames[m.filter])
 	case 1:
-		return "n new · l launch · t tell · a attach · e role · d delete"
+		return "N new · L launch · t tell · a attach · e role · D delete"
 	default:
 		return "m merge"
 	}

@@ -59,16 +59,16 @@ func TestScreenshot(t *testing.T) {
 	fmt.Printf("\n========== detail modal (ENTER on a task) ==========\n%s\n", Screenshot(b, 96, 20, "j", "j", "enter"))
 	fmt.Printf("\n========== narrow terminal (70 wide — no detail pane) ==========\n%s\n", Screenshot(b, 70, 16))
 	fmt.Printf("\n========== priority choice modal (p on a task) ==========\n%s\n", Screenshot(b, 70, 16, "p"))
-	fmt.Printf("\n========== new-task form (n) ==========\n%s\n", Screenshot(b, 80, 22, "n"))
+	fmt.Printf("\n========== new-task form (N) ==========\n%s\n", Screenshot(b, 80, 22, "N"))
 	// Focus the description textarea (tab×5) and type a multi-line body.
 	fmt.Printf("\n========== new-task form — description textarea focused ==========\n%s\n",
-		Screenshot(b, 80, 22, "n", "tab", "tab", "tab", "tab", "tab", "f", "i", "x", " ", "i", "t", "enter", "n", "o", "w"))
+		Screenshot(b, 80, 22, "N", "tab", "tab", "tab", "tab", "tab", "f", "i", "x", " ", "i", "t", "enter", "n", "o", "w"))
 	// Parent validation: type a bogus parent then try to save (ctrl+s blocks).
 	fmt.Printf("\n========== new-task form — parent validation error ==========\n%s\n",
-		Screenshot(b, 80, 22, "n", "tab", "tab", "tab", "x", "y", "z", "ctrl+s"))
+		Screenshot(b, 80, 22, "N", "tab", "tab", "tab", "x", "y", "z", "ctrl+s"))
 	fmt.Printf("\n========== edit-task form (e on the bug) ==========\n%s\n", Screenshot(b, 80, 22, "j", "j", "j", "j", "j", "e"))
 	fmt.Printf("\n========== Agents tab — wide 3-region layout (list+tmux | detail) ==========\n%s\n", Screenshot(b, 150, 24, "2"))
 	fmt.Printf("\n========== agent role choice (2, e) ==========\n%s\n", Screenshot(b, 70, 16, "2", "e"))
-	fmt.Printf("\n========== agent delete confirm (2, d) ==========\n%s\n", Screenshot(b, 70, 16, "2", "d"))
+	fmt.Printf("\n========== agent delete confirm (2, D) ==========\n%s\n", Screenshot(b, 70, 16, "2", "D"))
 	fmt.Printf("\n========== error modal (attach a down agent) ==========\n%s\n", Screenshot(b, 80, 16, "2", "j", "j", "a"))
 }
