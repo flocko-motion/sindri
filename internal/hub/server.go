@@ -155,6 +155,17 @@ func (h *Hub) Handler() http.Handler {
 		d, err := h.PRInfo(r.URL.Query().Get("id"))
 		writeJSON(w, d, err)
 	})
+	mux.HandleFunc("POST /pr/reject", func(w http.ResponseWriter, r *http.Request) {
+		var req RejectReq
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"rejected"}, h.RejectPR(req.ID, req.Feedback))
+	})
+	mux.HandleFunc("GET /pr/lint", func(w http.ResponseWriter, r *http.Request) {
+		out, err := h.LintPR(r.URL.Query().Get("id"))
+		writeJSON(w, okMsg{out}, err)
+	})
 	mux.HandleFunc("GET /tasks", func(w http.ResponseWriter, r *http.Request) {
 		tasks, err := h.Tasks()
 		writeJSON(w, tasks, err)
@@ -192,6 +203,12 @@ func (h *Hub) Handler() http.Handler {
 type PriorityReq struct {
 	ID       string `json:"id"`
 	Priority string `json:"priority"`
+}
+
+// RejectReq is the body for POST /pr/reject.
+type RejectReq struct {
+	ID       string `json:"id"`
+	Feedback string `json:"feedback"`
 }
 
 // TaskReq is the body for POST /tasks (create) and POST /task/edit (ID set).

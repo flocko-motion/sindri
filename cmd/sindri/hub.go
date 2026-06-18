@@ -45,6 +45,8 @@ type backend interface {
 	SetPriority(id, priority string) error
 	PRs() ([]store.PR, error)
 	PRInfo(id string) (hub.PRDetail, error)
+	RejectPR(id, feedback string) error
+	LintPR(id string) (string, error)
 	Merge(id string) (store.PR, error)
 	Close() error
 }
@@ -445,8 +447,39 @@ func splitCSV(s string) []string {
 
 func newPrCmd() *cobra.Command {
 	c := &cobra.Command{Use: "pr", Short: "Inspect and merge pull requests (merge-intents)"}
-	c.AddCommand(prListCmd(), prInfoCmd(), prMergeCmd())
+	c.AddCommand(prListCmd(), prInfoCmd(), prRejectCmd(), prLintCmd(), prMergeCmd())
 	return c
+}
+
+func prRejectCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "reject <pr-id> <feedback...>", Short: "Reject a PR with feedback (routed to the worker)", Args: cobra.MinimumNArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withBackend(func(b backend) error {
+				if err := b.RejectPR(args[0], strings.Join(args[1:], " ")); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "rejected %s\n", args[0])
+				return nil
+			})
+		},
+	}
+}
+
+func prLintCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "lint <pr-id>", Short: "Run the quality gate against a PR's worktree", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withBackend(func(b backend) error {
+				out, err := b.LintPR(args[0])
+				if err != nil {
+					return err
+				}
+				fmt.Print(out)
+				return nil
+			})
+		},
+	}
 }
 
 func prListCmd() *cobra.Command {

@@ -450,33 +450,70 @@ func (h *Hub) cmdApprove(c registry.Caller, args []string, out io.Writer) (int, 
 	return 0, nil
 }
 
-// cmdReject rejects a PR with feedback and routes that feedback to the owning
-// worker's session (object-addressed; the reviewer never names the worker).
-func (h *Hub) cmdReject(c registry.Caller, args []string, out io.Writer) (int, error) {
-	if len(args) == 0 {
-		return 1, fmt.Errorf("usage: reject <pr-id> <feedback...>")
-	}
-	pr, ok, err := h.store.GetPR(args[0])
+// RejectPR rejects a PR with feedback and routes it to the owning worker
+// (object-addressed; the worker is never named by the rejecter). Shared by the
+// agent reviewer (cmdReject) and the human reviewer (TUI/CLI).
+func (h *Hub) RejectPR(prID, feedback string) error {
+	pr, ok, err := h.store.GetPR(prID)
 	if err != nil {
-		return 1, err
+		return err
 	}
 	if !ok {
-		return 1, fmt.Errorf("no such PR %q", args[0])
+		return fmt.Errorf("no such PR %q", prID)
 	}
-	feedback := strings.TrimSpace(strings.Join(args[1:], " "))
+	feedback = strings.TrimSpace(feedback)
 	if feedback == "" {
 		feedback = "changes requested"
 	}
 	pr.Status, pr.Feedback = "rejected", feedback
 	if err := h.store.PutPR(pr); err != nil {
+		return err
+	}
+	// The owning worker returns to working on the same branch, with the feedback.
+	_ = h.store.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "working"})
+	_ = h.store.Log(pr.Agent, "reject", pr.ID+": "+feedback)
+	_ = h.injectWhenReady(pr.Agent, fmt.Sprintf("[reviewer] %s rejected: %s — please fix and 'sindri-worker submit' again.", pr.ID, feedback))
+	h.notify()
+	return nil
+}
+
+// LintPR runs the quality gate (`sindri lint all`) against a PR's worktree and
+// returns the output, headed with PASS/FAIL.
+func (h *Hub) LintPR(prID string) (string, error) {
+	pr, ok, err := h.store.GetPR(prID)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("no such PR %q", prID)
+	}
+	a, ok, err := h.store.GetAgent(pr.Agent)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("no agent %q for %s", pr.Agent, prID)
+	}
+	out, passed := h.runLint(filepath.Join(h.root, a.Workspace))
+	status := "FAIL"
+	if passed {
+		status = "PASS"
+	}
+	if strings.TrimSpace(out) == "" {
+		out = "(no output)\n"
+	}
+	return fmt.Sprintf("lint %s\n\n%s", status, out), nil
+}
+
+// cmdReject is the agent-reviewer reject command — delegates to RejectPR.
+func (h *Hub) cmdReject(c registry.Caller, args []string, out io.Writer) (int, error) {
+	if len(args) == 0 {
+		return 1, fmt.Errorf("usage: reject <pr-id> <feedback...>")
+	}
+	if err := h.RejectPR(args[0], strings.Join(args[1:], " ")); err != nil {
 		return 1, err
 	}
-	// The owning worker returns to working on the same branch.
-	_ = h.store.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "working"})
-	_ = h.store.Log(c.Agent, "reject", pr.ID+": "+feedback)
-	// Object-mediated routing: resolve branch → owning agent → inject.
-	_ = h.injectWhenReady(pr.Agent, fmt.Sprintf("[reviewer] %s rejected: %s — please fix and 'sindri-worker submit' again.", pr.ID, feedback))
-	fmt.Fprintf(out, "%s rejected; %s notified.\n", pr.ID, pr.Agent)
+	fmt.Fprintf(out, "%s rejected; worker notified.\n", args[0])
 	return 0, nil
 }
 

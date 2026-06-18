@@ -201,6 +201,19 @@ func (c *HTTP) PRInfo(id string) (hub.PRDetail, error) {
 	return d, c.get("/pr?id="+url.QueryEscape(id), &d)
 }
 
+// RejectPR rejects a PR with feedback, routed to the owning worker.
+func (c *HTTP) RejectPR(id, feedback string) error {
+	return c.post("/pr/reject", hub.RejectReq{ID: id, Feedback: feedback})
+}
+
+// LintPR runs the quality gate against a PR's worktree and returns the output.
+func (c *HTTP) LintPR(id string) (string, error) {
+	var ok struct {
+		Out string `json:"ok"`
+	}
+	return ok.Out, c.get("/pr/lint?id="+url.QueryEscape(id), &ok)
+}
+
 // Tasks lists all cached tasks (refreshed from the source of truth).
 func (c *HTTP) Tasks() ([]store.Task, error) {
 	var out []store.Task
