@@ -13,6 +13,7 @@ package hub
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -41,6 +42,9 @@ type Hub struct {
 
 	lcMu      sync.Mutex        // guards lifecycle
 	lifecycle map[string]string // transient launch/stop intent: name -> "launching"|"stopping"
+
+	launchMu  sync.Mutex             // guards launchBuf
+	launchBuf map[string]*safeBuffer // per-agent image-build/pod-start output
 }
 
 var nameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
@@ -61,7 +65,8 @@ func New(root string) (*Hub, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Hub{root: root, store: st, agentLn: map[string]net.Listener{}, events: newBus(), lifecycle: map[string]string{}}, nil
+	return &Hub{root: root, store: st, agentLn: map[string]net.Listener{}, events: newBus(),
+		lifecycle: map[string]string{}, launchBuf: map[string]*safeBuffer{}}, nil
 }
 
 // setLifecycle records a transient launch/stop intent for an agent (cleared by
@@ -241,9 +246,13 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 			h.notify()
 		}
 	}()
-	if err := container.Ensure(h.root); err != nil {
+	// Tee the image build (+ our progress notes) into the agent's launch buffer
+	// so the TUI live-screen region shows it while the pod comes up.
+	buf := h.newLaunchBuf(name)
+	if err := container.Ensure(h.root, io.MultiWriter(os.Stderr, buf)); err != nil {
 		return err
 	}
+	fmt.Fprintf(buf, "Image ready. Starting pod %s…\n", Container(name))
 	wt := filepath.Join(h.root, a.Workspace)
 	if !git.HasCommits(h.root) {
 		return fmt.Errorf("repo has no commits yet")

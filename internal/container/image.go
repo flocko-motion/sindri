@@ -9,6 +9,7 @@ package container
 import (
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -19,8 +20,10 @@ import (
 
 const ImageName = "sindri-agent:test"
 
-// Ensure builds the container image if the Dockerfile changed or the cache is stale (weekly).
-func Ensure(projectRoot string) error {
+// Ensure builds the container image if anything under container/ changed or the
+// weekly cache key is stale. Build progress is written to out (so the hub can
+// tee it into an agent's live-screen region during launch).
+func Ensure(projectRoot string, out io.Writer) error {
 	dir := projectRoot + "/container"
 	dockerfile := dir + "/Dockerfile"
 	if _, err := os.Stat(dockerfile); err != nil {
@@ -52,7 +55,7 @@ func Ensure(projectRoot string) error {
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "Building container image...\n")
+	fmt.Fprintf(out, "Building container image...\n")
 	_ = os.MkdirAll(projectRoot+"/bin", 0755)
 	for _, bin := range []string{"td", "yq"} {
 		if path, err := exec.LookPath(bin); err == nil {
@@ -62,8 +65,8 @@ func Ensure(projectRoot string) error {
 	}
 
 	cmd := exec.Command("podman", "build", "-t", ImageName, "-f", dockerfile, projectRoot)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = out
+	cmd.Stderr = out
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("image build failed: %w", err)
 	}

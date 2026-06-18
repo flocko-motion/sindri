@@ -98,10 +98,13 @@ func (h *Hub) AgentPane(name string, lines int) (string, error) {
 		}
 		return string(out), nil
 	}
-	// tmux isn't up — fall back to the container's logs whether it's still
-	// booting OR has already exited, so a crash-on-boot is visible instead of an
-	// endless "launching…". Empty only when no container exists at all.
-	return pod.Logs(Container(name), lines), nil
+	// tmux isn't up — show the container's logs whether it's still booting OR has
+	// already exited, so a crash-on-boot is visible. If there's no container yet
+	// (image still building), fall back to the captured launch output.
+	if logs := pod.Logs(Container(name), lines); logs != "" {
+		return logs, nil
+	}
+	return h.launchOutput(name), nil
 }
 
 // Refresh re-syncs tasks from the source of truth and notifies watchers (the
