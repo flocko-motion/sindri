@@ -286,6 +286,11 @@ func (c *HTTP) RejectTask(id, comment string) error {
 	return c.post("/task/reject", hub.RejectReq{ID: id, Feedback: comment})
 }
 
+// UnassignTask releases a task back to the backlog (refused if a live agent holds it).
+func (c *HTTP) UnassignTask(id string) error {
+	return c.post("/task/unassign", hub.RejectReq{ID: id})
+}
+
 // Refresh asks the hub to re-sync tasks from the source of truth.
 func (c *HTTP) Refresh() error { return c.post("/refresh", struct{}{}) }
 

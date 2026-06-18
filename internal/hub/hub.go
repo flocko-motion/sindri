@@ -27,6 +27,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/adapter/pod"
+	"github.com/flo-at/sindri/internal/adapter/td"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -213,6 +214,15 @@ func (h *Hub) DeleteAgent(name string) error {
 	}
 	if !ok {
 		return fmt.Errorf("no such agent %q", name)
+	}
+	// Release the agent's task back to the backlog so it isn't stranded
+	// in_progress with no owner. (A planner's os-new sentinel and openspec items
+	// aren't real td tasks — skip those.)
+	if st, _ := h.store.GetState(name); strings.HasPrefix(st.Task, "td-") {
+		if err := td.SetStatus(h.root, st.Task, "open"); err != nil {
+			fmt.Printf("warning: reopen %s on delete of %s: %v\n", st.Task, name, err)
+		}
+		_ = h.refreshTask(st.Task)
 	}
 	_ = pod.Rm(h.container(name))
 	h.closeAgent(name)

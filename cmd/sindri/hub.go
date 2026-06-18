@@ -44,6 +44,7 @@ type backend interface {
 	SetPriority(id, priority string) error
 	ApproveTask(id string) error
 	RejectTask(id, comment string) error
+	UnassignTask(id string) error
 	PRs() ([]store.PR, error)
 	PRInfo(id string) (hub.PRDetail, error)
 	RejectPR(id, feedback string) error
@@ -317,8 +318,23 @@ func agentInfoCmd() *cobra.Command {
 
 func newTaskCmd() *cobra.Command {
 	c := &cobra.Command{Use: "task", Short: "Inspect and create tasks (td issues)"}
-	c.AddCommand(taskListCmd(), taskInfoCmd(), taskNewCmd(), taskEditCmd(), taskPriorityCmd(), taskApproveCmd(), taskRejectCmd())
+	c.AddCommand(taskListCmd(), taskInfoCmd(), taskNewCmd(), taskEditCmd(), taskPriorityCmd(), taskApproveCmd(), taskRejectCmd(), taskUnassignCmd())
 	return c
+}
+
+func taskUnassignCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "unassign <id>", Short: "Release a task back to the backlog (refused if a live agent holds it)", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withBackend(func(b backend) error {
+				if err := b.UnassignTask(args[0]); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "unassigned %s\n", args[0])
+				return nil
+			})
+		},
+	}
 }
 
 func taskApproveCmd() *cobra.Command {

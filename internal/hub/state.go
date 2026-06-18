@@ -78,6 +78,11 @@ func (h *Hub) State() (BoardState, error) {
 	return BoardState{Agents: agents, Tasks: tasks, PRs: prs, Orphans: orphans}, nil
 }
 
+// agentAlive reports whether an agent is running (pod up and tmux session live).
+func (h *Hub) agentAlive(name string) bool {
+	return pod.Running(h.container(name)) && h.sessionAlive(name)
+}
+
 // sessionAlive reports whether the agent's tmux session is up inside its pod.
 func (h *Hub) sessionAlive(name string) bool {
 	// tmux.* builders return the subcommand only — the command is "tmux".

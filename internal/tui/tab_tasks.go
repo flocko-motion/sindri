@@ -365,6 +365,23 @@ func (m model) taskGated() bool {
 	return ok && (t.Approval == "pending" || t.Approval == "rejected")
 }
 
+// unassignTaskCmd releases the selected task back to the backlog (the hub
+// refuses if a live agent is working on it — surfaced in the error modal).
+func (m *model) unassignTaskCmd(id string) tea.Cmd {
+	cl := m.cl
+	m.flash = "unassigning " + id + "…"
+	return func() tea.Msg {
+		if cl == nil {
+			return nil
+		}
+		if err := cl.UnassignTask(id); err != nil {
+			return errModalMsg{err}
+		}
+		st, _ := cl.State()
+		return polledMsg(st)
+	}
+}
+
 // approveTaskCmd clears the approval gate on the selected task (makes it
 // claimable).
 func (m *model) approveTaskCmd(id string) tea.Cmd {

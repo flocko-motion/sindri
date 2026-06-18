@@ -461,6 +461,10 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.openPriorityChoice(m.selID())
 			return nil
 		}
+	case "U": // tasks: release the selected task back to the backlog
+		if m.tab == 0 && m.selID() != "" {
+			return m.unassignTaskCmd(m.selID())
+		}
 	case "enter":
 		if m.rightFocus { // act on the focused detail item
 			if it, ok := m.focusedItem(); ok {
@@ -598,7 +602,7 @@ func (m model) contextFooter() string {
 	}
 	switch m.tab {
 	case 0:
-		return fmt.Sprintf("N new · e edit · p priority · A/R approve/reject · f filter: %s · h/l fold", filterNames[m.filter])
+		return fmt.Sprintf("N new · e edit · p priority · U unassign · A/R approve/reject · f filter: %s · h/l fold", filterNames[m.filter])
 	case 1:
 		return "N new · S start/stop · t tell · a attach · D delete"
 	default:

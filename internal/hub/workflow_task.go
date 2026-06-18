@@ -85,6 +85,33 @@ func (h *Hub) CreateTask(s TaskSpec) (string, error) {
 	return id, nil
 }
 
+// UnassignTask releases a task back to the backlog (status → open) and clears it
+// from whatever agent held it. Refused if that agent is currently alive and
+// working on it — stop or delete the agent first; allowed for a down agent or an
+// orphaned in_progress task.
+func (h *Hub) UnassignTask(id string) error {
+	roster, _ := h.store.Roster()
+	for _, a := range roster {
+		st, _ := h.store.GetState(a.Name)
+		if st.Task != id {
+			continue
+		}
+		if h.agentAlive(a.Name) {
+			return fmt.Errorf("%s is alive and working on %s — stop or delete it first", a.Name, id)
+		}
+		_ = h.store.SetState(store.AgentState{Agent: a.Name, Phase: "idle"})
+		_ = h.store.Log(a.Name, "unassign", id)
+	}
+	if strings.HasPrefix(id, "td-") {
+		if err := td.SetStatus(h.root, id, "open"); err != nil {
+			return err
+		}
+	}
+	_ = h.refreshTask(id)
+	h.notify()
+	return nil
+}
+
 // ApproveTask clears the approval gate on a planner-proposed task (user-only),
 // making it claimable, and tells any running planner.
 func (h *Hub) ApproveTask(id string) error {
