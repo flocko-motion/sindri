@@ -26,3 +26,10 @@ func Attach(session string, readOnly bool) []string {
 	}
 	return args
 }
+
+// HasSession builds `tmux has-session -t <session>` — exits 0 iff the session
+// exists. The true "is the agent alive / attachable" probe: the pod itself is
+// just a sleep that outlives Claude, so the container running ≠ agent alive.
+func HasSession(session string) []string {
+	return []string{"has-session", "-t", session}
+}

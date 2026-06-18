@@ -13,9 +13,10 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/flo-at/sindri/internal/adapter/pod"
@@ -61,6 +62,13 @@ type taskMsg struct {
 	t   store.Task
 }
 type errMsg struct{ err error }
+
+// tickMsg drives periodic polling; polledMsg carries a state fetched by a poll
+// (distinct from stateMsg so it doesn't re-arm the SSE waiter).
+type tickMsg time.Time
+type polledMsg hub.BoardState
+
+const refreshInterval = 3 * time.Second
 
 const (
 	filterOpen = iota
@@ -136,7 +144,25 @@ func newModel(cl *client.HTTP, ch <-chan hub.BoardState) model {
 	return m
 }
 
-func (m model) Init() tea.Cmd { return waitForState(m.ch) }
+func (m model) Init() tea.Cmd { return tea.Batch(waitForState(m.ch), tickCmd()) }
+
+// tickCmd fires a tickMsg every refreshInterval — the heartbeat behind the
+// agents-tab auto-refresh.
+func tickCmd() tea.Cmd {
+	return tea.Tick(refreshInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
+// pollStateCmd fetches a fresh board snapshot (re-evaluating live agent state)
+// without disturbing the SSE waiter.
+func pollStateCmd(cl *client.HTTP) tea.Cmd {
+	return func() tea.Msg {
+		st, err := cl.State()
+		if err != nil {
+			return nil
+		}
+		return polledMsg(st)
+	}
+}
 
 func waitForState(ch <-chan hub.BoardState) tea.Cmd {
 	return func() tea.Msg {
@@ -184,6 +210,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = hub.BoardState(msg)
 		m.reclamp()
 		return m, tea.Batch(waitForState(m.ch), m.syncDetail())
+	case polledMsg: // an auto-refresh poll — update the board, don't touch the SSE waiter
+		m.state = hub.BoardState(msg)
+		m.reclamp()
+		return m, m.syncDetail()
+	case tickMsg:
+		// Live agent state (running/phase) goes stale between hub notifications;
+		// while on the Agents tab, poll the board every few seconds.
+		cmds := []tea.Cmd{tickCmd()}
+		if m.tab == 1 && m.cl != nil {
+			cmds = append(cmds, pollStateCmd(m.cl))
+		}
+		return m, tea.Batch(cmds...)
 	case logMsg:
 		m.agentLog = msg.evs
 	case prMsg:
