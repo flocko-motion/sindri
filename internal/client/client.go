@@ -101,6 +101,16 @@ func (c *HTTP) NewAgent(name, role string) (string, error) {
 	return ok.Name, err
 }
 
+// DeleteAgent removes an agent (pod, socket, worktree, identity).
+func (c *HTTP) DeleteAgent(name string) error {
+	return c.post("/agent/delete", hub.NameReq{Name: name})
+}
+
+// SetRole changes an agent's role (worker|reviewer).
+func (c *HTTP) SetRole(name, role string) error {
+	return c.post("/agent/role", hub.AgentReq{Name: name, Role: role})
+}
+
 // Launch spins a pod for an existing agent (shell=true runs a bare shell instead
 // of Claude — for demos/debugging).
 func (c *HTTP) Launch(name string, shell bool) error {

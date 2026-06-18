@@ -150,6 +150,11 @@ func (s *Store) DeleteAgent(name string) error {
 	if _, err := s.db.Exec(`DELETE FROM agents WHERE name=?`, name); err != nil {
 		return fmt.Errorf("delete agent %s: %w", name, err)
 	}
+	// Drop the activity log too, so a future agent that reuses this (auto-named)
+	// name doesn't rehydrate from a stranger's history.
+	if _, err := s.db.Exec(`DELETE FROM events WHERE agent=?`, name); err != nil {
+		return fmt.Errorf("delete agent events %s: %w", name, err)
+	}
 	return nil
 }
 

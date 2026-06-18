@@ -67,4 +67,6 @@ func TestScreenshot(t *testing.T) {
 	fmt.Printf("\n========== new-task form — parent validation error ==========\n%s\n",
 		Screenshot(b, 80, 22, "n", "tab", "tab", "tab", "x", "y", "z", "ctrl+s"))
 	fmt.Printf("\n========== edit-task form (e on the bug) ==========\n%s\n", Screenshot(b, 80, 22, "j", "j", "j", "j", "j", "e"))
+	fmt.Printf("\n========== agent role choice (2, e) ==========\n%s\n", Screenshot(b, 70, 16, "2", "e"))
+	fmt.Printf("\n========== agent delete confirm (2, d) ==========\n%s\n", Screenshot(b, 70, 16, "2", "d"))
 }

@@ -392,9 +392,37 @@ func (m *model) onKey(k string) tea.Cmd {
 				return nil
 			}
 		}
-	case "e": // edit the selected task
+	case "e": // edit the selected task (tasks) / set role (agents)
 		if m.tab == 0 && m.selID() != "" {
 			m.openTaskForm(true)
+			return nil
+		} else if m.tab == 1 && m.selID() != "" {
+			id, cl := m.selID(), m.cl
+			m.choice = choiceModalState{
+				active: true, title: "role for " + id,
+				options: []string{"worker", "reviewer"}, values: []string{"worker", "reviewer"},
+				apply: func(v string) tea.Cmd {
+					if cl == nil {
+						return nil
+					}
+					return func() tea.Msg { _ = cl.SetRole(id, v); return nil }
+				},
+			}
+			return nil
+		}
+	case "d": // delete the selected agent (with confirm)
+		if m.tab == 1 && m.selID() != "" {
+			id, cl := m.selID(), m.cl
+			m.choice = choiceModalState{
+				active: true, title: "delete agent " + id + "?",
+				options: []string{"cancel", "delete"}, values: []string{"cancel", "delete"},
+				apply: func(v string) tea.Cmd {
+					if cl == nil || v != "delete" {
+						return nil
+					}
+					return func() tea.Msg { _ = cl.DeleteAgent(id); return nil }
+				},
+			}
 			return nil
 		}
 	case "t": // tell the selected agent
@@ -528,7 +556,7 @@ func (m model) contextFooter() string {
 	case 0:
 		return fmt.Sprintf("n new · e edit · p priority · y/Y yank · f filter: %s · h/l fold", filterNames[m.filter])
 	case 1:
-		return "n new · l launch · t tell · a attach"
+		return "n new · l launch · t tell · a attach · e role · d delete"
 	default:
 		return "m merge"
 	}

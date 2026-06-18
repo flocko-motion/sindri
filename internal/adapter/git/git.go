@@ -45,6 +45,20 @@ func WorktreeAdd(repo, path, ref string) error {
 	return nil
 }
 
+// WorktreeRemove force-removes a worktree and prunes its registration. Safe to
+// call when the worktree was never created (e.g. the agent never launched).
+func WorktreeRemove(repo, path string) error {
+	if _, err := os.Stat(path); err != nil {
+		_ = exec.Command("git", "-C", repo, "worktree", "prune").Run()
+		return nil // nothing to remove
+	}
+	out, err := exec.Command("git", "-C", repo, "worktree", "remove", "--force", path).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git worktree remove: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
 // HasCommits reports whether the repo has at least one commit.
 func HasCommits(repo string) bool {
 	return exec.Command("git", "-C", repo, "rev-parse", "HEAD").Run() == nil

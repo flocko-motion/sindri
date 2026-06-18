@@ -78,6 +78,18 @@ func (h *Hub) closeAgents() {
 	}
 }
 
+// closeAgent shuts a single agent's listener and removes its socket (used when
+// the agent is deleted).
+func (h *Hub) closeAgent(name string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if ln, ok := h.agentLn[name]; ok {
+		ln.Close()
+		delete(h.agentLn, name)
+	}
+	os.Remove(AgentSocketPath(h.root, name))
+}
+
 // agentHandler builds the agent-facing mux, bound to a fixed caller identity.
 func (h *Hub) agentHandler(name string) http.Handler {
 	mux := http.NewServeMux()

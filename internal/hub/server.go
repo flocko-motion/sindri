@@ -59,6 +59,20 @@ func (h *Hub) Handler() http.Handler {
 		name, err := h.NewAgent(req.Name, req.Role)
 		writeJSON(w, okMsg{name}, err)
 	})
+	mux.HandleFunc("POST /agent/delete", func(w http.ResponseWriter, r *http.Request) {
+		var req NameReq
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"deleted"}, h.DeleteAgent(req.Name))
+	})
+	mux.HandleFunc("POST /agent/role", func(w http.ResponseWriter, r *http.Request) {
+		var req AgentReq
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"ok"}, h.SetRole(req.Name, req.Role))
+	})
 	mux.HandleFunc("POST /launch", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
 		if !decode(w, r, &req) {

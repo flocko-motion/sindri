@@ -30,6 +30,8 @@ import (
 // ephemeral) and *client.HTTP (a running hub over its socket).
 type backend interface {
 	NewAgent(name, role string) (string, error)
+	DeleteAgent(name string) error
+	SetRole(name, role string) error
 	Launch(name string, shell bool) error
 	Tell(name, msg, source string) error
 	State() (hub.BoardState, error)
@@ -104,7 +106,7 @@ func newHubCmd() *cobra.Command {
 
 func newAgentCmd() *cobra.Command {
 	c := &cobra.Command{Use: "agent", Short: "Manage agents (workers + reviewers)"}
-	c.AddCommand(agentListCmd(), agentNewCmd(), agentLaunchCmd(), agentTellCmd(), agentAttachCmd(), agentInfoCmd())
+	c.AddCommand(agentListCmd(), agentNewCmd(), agentDeleteCmd(), agentRoleCmd(), agentLaunchCmd(), agentTellCmd(), agentAttachCmd(), agentInfoCmd())
 	return c
 }
 
@@ -157,6 +159,36 @@ func agentNewCmd() *cobra.Command {
 	}
 	c.Flags().StringVar(&role, "role", "worker", "agent role: worker|reviewer")
 	return c
+}
+
+func agentDeleteCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "delete <name>", Aliases: []string{"rm"}, Short: "Delete an agent (pod, socket, worktree, identity)", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withBackend(func(b backend) error {
+				if err := b.DeleteAgent(args[0]); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "deleted %s\n", args[0])
+				return nil
+			})
+		},
+	}
+}
+
+func agentRoleCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "role <name> <worker|reviewer>", Short: "Set an agent's role", Args: cobra.ExactArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withBackend(func(b backend) error {
+				if err := b.SetRole(args[0], args[1]); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "set %s role %s\n", args[0], args[1])
+				return nil
+			})
+		},
+	}
 }
 
 func agentLaunchCmd() *cobra.Command {
