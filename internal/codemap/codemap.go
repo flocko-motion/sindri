@@ -97,7 +97,8 @@ func writeFile(w io.Writer, rel, path, grepQ string) {
 	for _, decl := range f.Decls {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
-			units = append(units, unit{append(docLines(d.Doc), "  "+signature(fset, d)),
+			sig := fmt.Sprintf("  %s  %s", lineCol(fset.Position(d.Pos()).Line), signature(fset, d))
+			units = append(units, unit{append(docLines(d.Doc), sig),
 				startLine(fset, d.Doc, d.Pos()), fset.Position(d.End()).Line})
 		case *ast.GenDecl:
 			if d.Tok == token.TYPE {
@@ -189,7 +190,7 @@ func signature(fset *token.FileSet, fn *ast.FuncDecl) string {
 }
 
 // typeUnit renders a type declaration as a unit: doc + a one-line
-// `type Name kind` per spec.
+// `type Name kind` per spec (each prefixed with its source line).
 func typeUnit(fset *token.FileSet, d *ast.GenDecl) []string {
 	lines := docLines(d.Doc)
 	for _, spec := range d.Specs {
@@ -197,10 +198,14 @@ func typeUnit(fset *token.FileSet, d *ast.GenDecl) []string {
 		if !ok {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("  type %s %s", ts.Name.Name, typeKind(fset, ts.Type)))
+		lines = append(lines, fmt.Sprintf("  %s  type %s %s", lineCol(fset.Position(ts.Pos()).Line), ts.Name.Name, typeKind(fset, ts.Type)))
 	}
 	return lines
 }
+
+// lineCol renders a source line number as a fixed-width right-aligned gutter, so
+// decl signatures line up (the file is named once in the section header).
+func lineCol(line int) string { return fmt.Sprintf("%4d", line) }
 
 // typeKind summarizes a type expression: "struct"/"interface" for composites,
 // the rendered expression otherwise (e.g. an alias's target).
