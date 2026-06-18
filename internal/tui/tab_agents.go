@@ -118,7 +118,10 @@ func (m model) agentDetailLines() []string {
 		"workspace: " + dash(a.Workspace),
 		"", "── activity ──",
 	}
-	for _, e := range m.agentLog {
+	// Newest-first so the latest action (launch, stop, …) is visible at the top
+	// of the activity section rather than scrolled off the bottom.
+	for i := len(m.agentLog) - 1; i >= 0; i-- {
+		e := m.agentLog[i]
 		ls = append(ls, fmt.Sprintf("%s  %-10s %s", dimStyle.Render(eventTime(e.TS)), e.Type, e.Payload))
 	}
 	return ls
