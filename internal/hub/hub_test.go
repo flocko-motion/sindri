@@ -84,17 +84,3 @@ func TestTellUnknownAgent(t *testing.T) {
 		t.Fatalf("telling unknown agent should error")
 	}
 }
-
-func TestTellEmptyMessage(t *testing.T) {
-	h := newHub(t)
-	if _, err := h.NewAgent("brokkr", "worker"); err != nil {
-		t.Fatal(err)
-	}
-	// Empty or whitespace-only input must be rejected, not injected as a bare
-	// "[user] " line that submits a blank message into the agent's session.
-	for _, msg := range []string{"", "   ", "\n\t"} {
-		if err := h.Tell("brokkr", msg, "user"); err == nil {
-			t.Fatalf("empty message %q should be rejected", msg)
-		}
-	}
-}

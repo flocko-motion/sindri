@@ -187,12 +187,6 @@ func (h *Hub) Launch(name string, shell bool) error {
 // Tell delivers a message into an agent's session, stamped with its source
 // (provenance, D12). The stamped line is recorded in the activity log.
 func (h *Hub) Tell(name, msg, source string) error {
-	// Empty input would inject a bare "[user] " line and submit it into the
-	// agent's session — never useful, so reject it at the source rather than
-	// spuriously kicking the agent with a blank message.
-	if strings.TrimSpace(msg) == "" {
-		return fmt.Errorf("empty message — nothing to deliver")
-	}
 	a, ok, err := h.store.GetAgent(name)
 	if err != nil {
 		return err
