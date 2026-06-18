@@ -618,15 +618,15 @@ func (m model) detailLines() []string {
 
 func (m model) contextFooter() string {
 	if m.rightFocus { // focused on a detail cross-reference (Tasks/PRs)
-		return "j/k item · enter details · g goto · y copy · C-h back to list"
+		return "j/k item · enter details · g goto · y copy"
 	}
 	switch m.tab {
 	case 0:
-		return fmt.Sprintf("N new · e edit · p priority · C-l detail · f filter: %s · h/l fold", filterNames[m.filter])
+		return fmt.Sprintf("N new · e edit · p priority · f filter: %s · h/l fold", filterNames[m.filter])
 	case 1:
 		return "N new · S start/stop · t tell · a attach · e role · D delete"
 	default:
-		return "C-l focus · V verify · A agent-review · R reject · L lint · m merge"
+		return "V verify · A agent-review · R reject · L lint · m merge"
 	}
 }
 
