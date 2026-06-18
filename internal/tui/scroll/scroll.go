@@ -110,6 +110,15 @@ func (v *Viewport) SetTotal(n int) {
 	v.follow()
 }
 
+// Resize sets height and total and re-clamps Offset, preserving the scroll
+// position — for Offset-driven panes (the detail view) that scroll by Offset
+// rather than a cursor, so a re-layout doesn't snap them back to the top.
+func (v *Viewport) Resize(height, total int) {
+	v.Height = max0(height)
+	v.Total = max0(total)
+	v.Offset = clamp(v.Offset, 0, v.maxOffset())
+}
+
 // --- rendering ---
 
 // Window returns the visible line range [start, end) clamped to Total.

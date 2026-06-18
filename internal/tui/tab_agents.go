@@ -11,10 +11,31 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/flo-at/sindri/internal/hub"
 )
+
+// agentStartStop is the Start/Stop toggle for the selected agent: start it if
+// it's down, stop it if it's running, no-op while it's transitioning.
+func (m *model) agentStartStop() tea.Cmd {
+	a, ok := m.selAgent()
+	if !ok {
+		return nil
+	}
+	switch a.Status {
+	case "down":
+		m.flash = "starting " + a.Name + "…" // status (hub) drives the rest
+		return m.action(func(id string) error { return m.cl.Launch(id, false) })
+	case "launching", "stopping":
+		m.flash = a.Name + " is " + a.Status + "…"
+		return nil
+	default: // running
+		m.flash = "stopping " + a.Name + "…"
+		return m.action(func(id string) error { return m.cl.StopAgent(id) })
+	}
+}
 
 // agentDetailW is the fixed width of the Agents tab's right detail column —
 // wide enough that activity payloads (task ids + titles) aren't chopped.

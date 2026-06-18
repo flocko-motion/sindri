@@ -387,6 +387,12 @@ func (m *model) onKey(k string) tea.Cmd {
 		m.cursor[m.tab]++
 	case "k", "up":
 		m.cursor[m.tab]--
+	case "J": // scroll the detail pane down (yazi-style secondary-pane scroll)
+		m.detail.ScrollDown()
+		return nil
+	case "K": // scroll the detail pane up
+		m.detail.ScrollUp()
+		return nil
 	case "g":
 		m.cursor[m.tab] = 0
 	case "G":
@@ -409,25 +415,15 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 0 {
 			delete(m.collapsed, m.selID())
 		}
-	case "L": // agents: launch (uppercase — never clashes with vi cursor keys)
+	case "S": // agents: Start/Stop toggle — start if down, stop if running
 		if m.tab == 1 {
-			if a, ok := m.selAgent(); ok {
-				m.flash = "launching " + a.Name + "…" // status (hub) drives the rest
-			}
-			return m.action(func(id string) error { return m.cl.Launch(id, false) })
-		}
-	case "S": // agents: stop (opposite of launch — pod down, identity kept)
-		if m.tab == 1 {
-			if a, ok := m.selAgent(); ok {
-				m.flash = "stopping " + a.Name + "…"
-			}
-			return m.action(func(id string) error { return m.cl.StopAgent(id) })
+			return m.agentStartStop()
 		}
 	case "a": // agents: attach to the live tmux session (out-of-band)
 		if m.tab == 1 {
 			if a, ok := m.selAgent(); ok {
 				if a.Status == "down" {
-					m.errText = "agent " + a.Name + " is down — launch it first ('L') before attaching"
+					m.errText = "agent " + a.Name + " is down — start it first ('S') before attaching"
 					return nil
 				}
 				if m.cl != nil {
@@ -568,9 +564,9 @@ func (m *model) reclamp() {
 	m.list.SetHeight(listH)
 	m.list.SetTotal(n)
 	m.list.SetCursor(m.cursor[m.tab])
-	m.detail.SetHeight(m.bodyHeight())
-	m.detail.SetTotal(len(m.detailLines()))
-	m.detail.ScrollTop()
+	// Offset-driven scroll (J/K), preserved across re-layouts; reset to top only
+	// when the selection changes (syncDetail).
+	m.detail.Resize(m.bodyHeight(), len(m.detailLines()))
 }
 
 // syncDetail fetches the selected item's rich detail when the selection changes.
@@ -580,6 +576,7 @@ func (m *model) syncDetail() tea.Cmd {
 		return nil
 	}
 	m.detailKey = key
+	m.detail.ScrollTop() // new selection → show its detail from the top
 	id := m.selID()
 	if id == "" {
 		return nil
@@ -627,7 +624,7 @@ func (m model) contextFooter() string {
 	case 0:
 		return fmt.Sprintf("N new · e edit · p priority · y/Y yank · f filter: %s · h/l fold", filterNames[m.filter])
 	case 1:
-		return "N new · L launch · S stop · t tell · a attach · e role · D delete"
+		return "N new · S start/stop · t tell · a attach · e role · D delete"
 	default:
 		return "m merge"
 	}
@@ -682,7 +679,7 @@ func (m model) View() string {
 	if m.mode != inputNone {
 		foot = dimStyle.Render(padTrunc("enter submit · esc cancel", m.w)) + "\n" + m.input.View()
 	} else {
-		global := "ctrl+h/l tab · j/k move · g/G ends · r refresh · q quit"
+		global := "ctrl+h/l tab · j/k move · J/K scroll · g/G ends · r refresh · q quit"
 		if m.flash != "" {
 			global = m.flash
 		}

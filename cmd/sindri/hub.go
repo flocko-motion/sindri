@@ -108,7 +108,7 @@ func newHubCmd() *cobra.Command {
 
 func newAgentCmd() *cobra.Command {
 	c := &cobra.Command{Use: "agent", Short: "Manage agents (workers + reviewers)"}
-	c.AddCommand(agentListCmd(), agentNewCmd(), agentDeleteCmd(), agentRoleCmd(), agentPaneCmd(), agentLaunchCmd(), agentStopCmd(), agentTellCmd(), agentAttachCmd(), agentInfoCmd())
+	c.AddCommand(agentListCmd(), agentNewCmd(), agentDeleteCmd(), agentRoleCmd(), agentPaneCmd(), agentStartCmd(), agentStopCmd(), agentTellCmd(), agentAttachCmd(), agentInfoCmd())
 	return c
 }
 
@@ -150,7 +150,7 @@ func agentNewCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(os.Stderr, "registered %s (%s) — launch with 'sindri agent launch %s'\n", name, role, name)
+				fmt.Fprintf(os.Stderr, "registered %s (%s) — start with 'sindri agent start %s'\n", name, role, name)
 				return nil
 			})
 		},
@@ -212,10 +212,10 @@ func agentPaneCmd() *cobra.Command {
 	return c
 }
 
-func agentLaunchCmd() *cobra.Command {
+func agentStartCmd() *cobra.Command {
 	var shell bool
 	c := &cobra.Command{
-		Use: "launch <name>", Short: "Spin a pod that assumes the identity (runs Claude)", Args: cobra.ExactArgs(1),
+		Use: "start <name>", Short: "Start the agent: spin a pod that assumes its identity (runs Claude)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			root, err := repoRoot()
 			if err != nil {
@@ -229,7 +229,7 @@ func agentLaunchCmd() *cobra.Command {
 			if err := cl.Launch(args[0], shell); err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "launched %s\n", args[0])
+			fmt.Fprintf(os.Stderr, "started %s\n", args[0])
 			return nil
 		},
 	}

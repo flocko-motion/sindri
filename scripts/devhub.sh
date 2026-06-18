@@ -32,7 +32,7 @@ start_hub() {
 case "$MODE" in
 diag)
 	start_hub
-	( cd "$T" && "$SINDRI" agent new brokkr >/dev/null && "$SINDRI" agent launch brokkr --shell ); sleep 2
+	( cd "$T" && "$SINDRI" agent new brokkr >/dev/null && "$SINDRI" agent start brokkr --shell ); sleep 2
 	echo "== host socket =="; ls -ln "$T/.sindri/sockets/brokkr.sock"; echo "host uid: $(id -u)"
 	echo "== in-pod id =="; podman exec sindri-brokkr id
 	echo "== in-pod connect test =="
@@ -41,7 +41,7 @@ diag)
 	;;
 demo)
 	start_hub
-	( cd "$T" && "$SINDRI" agent new brokkr >/dev/null && "$SINDRI" agent launch brokkr --shell ); sleep 2
+	( cd "$T" && "$SINDRI" agent new brokkr >/dev/null && "$SINDRI" agent start brokkr --shell ); sleep 2
 	echo "== sindri-worker (menu) =="; podman exec sindri-brokkr sindri-worker || true
 	echo "== sindri-worker status =="; podman exec sindri-brokkr sindri-worker status || true
 	echo "== sindri-worker approve (invisible) =="; podman exec sindri-brokkr sindri-worker approve || true
@@ -51,8 +51,8 @@ loop)
 	( cd "$T" && td init >/dev/null 2>&1 || true )
 	( cd "$T" && td create -t feature -p high -- "wire the doohickey" >/dev/null 2>&1 || true )
 	start_hub
-	( cd "$T" && "$SINDRI" agent new brokkr --role worker >/dev/null && "$SINDRI" agent launch brokkr --shell )
-	( cd "$T" && "$SINDRI" agent new rune --role reviewer >/dev/null && "$SINDRI" agent launch rune --shell )
+	( cd "$T" && "$SINDRI" agent new brokkr --role worker >/dev/null && "$SINDRI" agent start brokkr --shell )
+	( cd "$T" && "$SINDRI" agent new rune --role reviewer >/dev/null && "$SINDRI" agent start rune --shell )
 	sleep 2
 
 	echo "== worker: next (claim a task) =="
@@ -81,7 +81,7 @@ claude)
 	( cd "$T" && td init >/dev/null 2>&1 || true )
 	( cd "$T" && td create -t feature -p high -- "add a GREETING file saying hello" >/dev/null 2>&1 || true )
 	start_hub
-	( cd "$T" && "$SINDRI" agent new brokkr --role worker >/dev/null && "$SINDRI" agent launch brokkr )
+	( cd "$T" && "$SINDRI" agent new brokkr --role worker >/dev/null && "$SINDRI" agent start brokkr )
 	echo "waiting ~25s for Claude to boot and act on the kickoff..."
 	sleep 25
 	echo "== brokkr pane =="
@@ -99,8 +99,8 @@ fullloop)
 	( cd "$T" && td init >/dev/null 2>&1 || true )
 	( cd "$T" && td create -t feature -p high -- "add a file named GREETING containing the word hello" >/dev/null 2>&1 || true )
 	start_hub
-	( cd "$T" && "$SINDRI" agent new brokkr --role worker >/dev/null && "$SINDRI" agent launch brokkr )
-	( cd "$T" && "$SINDRI" agent new rune --role reviewer >/dev/null && "$SINDRI" agent launch rune )
+	( cd "$T" && "$SINDRI" agent new brokkr --role worker >/dev/null && "$SINDRI" agent start brokkr )
+	( cd "$T" && "$SINDRI" agent new rune --role reviewer >/dev/null && "$SINDRI" agent start rune )
 	echo "two real Claude agents live; polling for the reviewer's verdict (up to ~180s)..."
 	PR=""
 	for i in $(seq 1 30); do
