@@ -141,17 +141,22 @@ func treeGutter(cont []bool, depth int, last, kids, collapsed bool) string {
 	return padTrunc(s, treeGutterW)
 }
 
-// taskMarks is the two-glyph status column: ⚒ when a worker is on the task
-// (dwarves at work), ◆ when it has an open PR (merge intent).
+// marksW is the display width of the status-marker column. 🔨 is two cells wide,
+// so the field is padded to a fixed width to keep the title column aligned.
+const marksW = 3
+
+// taskMarks is the status-marker column: 🔨 when a worker is on the task
+// (dwarves at work), ◆ when it has an open PR (merge intent). Padded (ANSI/width
+// aware) to a fixed width so rows line up regardless of which marks are present.
 func taskMarks(assigned, hasPR bool) string {
-	m := []rune{' ', ' '}
+	s := ""
 	if assigned {
-		m[0] = '⚒'
+		s += "🔨"
 	}
 	if hasPR {
-		m[1] = '◆'
+		s += "◆"
 	}
-	return string(m)
+	return padTrunc(s, marksW)
 }
 
 // typeAbbr shortens a td type to fit the column.

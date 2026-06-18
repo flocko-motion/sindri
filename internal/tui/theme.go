@@ -18,7 +18,8 @@ var (
 	cGreen  = lipgloss.Color("78")  // open / running
 	cGrey   = lipgloss.Color("244") // done / down
 	cRed    = lipgloss.Color("203") // critical
-	cYellow = lipgloss.Color("220") // transitioning (launching/stopping)
+	cYellow = lipgloss.Color("220") // idle / orphan
+	cOrange = lipgloss.Color("208") // transitioning (launching/stopping)
 )
 
 var (
@@ -27,6 +28,7 @@ var (
 	stDone   = lipgloss.NewStyle().Foreground(cGrey)
 	stCrit   = lipgloss.NewStyle().Foreground(cRed)
 	stWarn   = lipgloss.NewStyle().Foreground(cYellow)
+	stTrans  = lipgloss.NewStyle().Foreground(cOrange)
 )
 
 // taskStatusStyle is a task row's colour: pink active, grey done, green otherwise
@@ -42,13 +44,15 @@ func taskStatusStyle(status string) lipgloss.Style {
 	}
 }
 
-// agentStatusStyle is an agent row's colour: grey down, yellow transitioning,
-// green running (idle/working/submitted).
+// agentStatusStyle is an agent row's colour: grey down, orange transitioning
+// (launching/stopping), yellow idle, green working (working/submitted).
 func agentStatusStyle(status string) lipgloss.Style {
 	switch status {
 	case "down":
 		return stDone
 	case "launching", "stopping":
+		return stTrans
+	case "idle":
 		return stWarn
 	default:
 		return stOpen
