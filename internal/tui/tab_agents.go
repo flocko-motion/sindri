@@ -170,10 +170,18 @@ func (m model) selAgent() (hub.AgentView, bool) {
 func (m model) agentRows() []row {
 	var out []row
 	for _, a := range m.state.Agents {
-		out = append(out, row{fmt.Sprintf("%-9s %-12s %-8s %s", a.Status, a.Name, a.Role, dash(a.Task)), a.Name})
+		// Whole row coloured by lifecycle state (grey down, yellow transitioning,
+		// green running); cells styled independently so resets don't bleed.
+		ac := agentStatusStyle(a.Status)
+		out = append(out, row{strings.Join([]string{
+			ac.Render(fmt.Sprintf("%-9s", a.Status)),
+			ac.Render(fmt.Sprintf("%-12s", a.Name)),
+			ac.Render(fmt.Sprintf("%-8s", a.Role)),
+			ac.Render(dash(a.Task)),
+		}, " "), a.Name})
 	}
 	for _, o := range m.state.Orphans {
-		out = append(out, row{"⚠ orphan: " + o, ""})
+		out = append(out, row{stWarn.Render("⚠ orphan: " + o), ""})
 	}
 	return out
 }

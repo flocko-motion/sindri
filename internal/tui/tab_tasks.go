@@ -35,6 +35,14 @@ func (m model) taskRows() []row {
 	}
 	arranged := hub.ArrangeTasks(filtered, m.state.PRs)
 
+	// Which tasks have a worker on them right now (drives the ⚒ marker).
+	assigned := map[string]bool{}
+	for _, a := range m.state.Agents {
+		if a.Task != "" {
+			assigned[a.Task] = true
+		}
+	}
+
 	// A node has children if a later row is exactly one level deeper before the
 	// depth returns to its level.
 	hasKids := map[string]bool{}
@@ -76,13 +84,24 @@ func (m model) taskRows() []row {
 		gutter := treeGutter(cont, tr.Depth, tr.Last, hasKids[tr.ID], m.collapsed[tr.ID])
 		cont = append(cont, !tr.Last)
 
-		mark := " "
-		if tr.PR != "" {
-			mark = "◆"
+		// Each cell is styled independently (no nesting) so a colour reset never
+		// bleeds across the row: status colour throughout, red for a critical
+		// priority cell. The tree gutter stays uncoloured.
+		sc := taskStatusStyle(tr.Status)
+		prio := sc.Render(fmt.Sprintf("%-8s", hub.PriorityLabel(tr.Priority)))
+		if isCriticalPriority(tr.Priority) {
+			prio = stCrit.Render(fmt.Sprintf("%-8s", hub.PriorityLabel(tr.Priority)))
 		}
 		out[i] = row{
-			fmt.Sprintf("%s %-9s %-5s %-8s %-6s %s %s",
-				gutter, tr.ID, typeAbbr(tr.Type), hub.PriorityLabel(tr.Priority), hub.StateLabel(tr.Status), mark, tr.Title),
+			strings.Join([]string{
+				gutter,
+				sc.Render(fmt.Sprintf("%-9s", tr.ID)),
+				sc.Render(fmt.Sprintf("%-5s", typeAbbr(tr.Type))),
+				prio,
+				sc.Render(fmt.Sprintf("%-6s", hub.StateLabel(tr.Status))),
+				sc.Render(taskMarks(assigned[tr.ID], tr.PR != "")),
+				sc.Render(tr.Title),
+			}, " "),
 			tr.ID,
 		}
 	}
@@ -120,6 +139,19 @@ func treeGutter(cont []bool, depth int, last, kids, collapsed bool) string {
 		}
 	}
 	return padTrunc(s, treeGutterW)
+}
+
+// taskMarks is the two-glyph status column: ⚒ when a worker is on the task
+// (dwarves at work), ◆ when it has an open PR (merge intent).
+func taskMarks(assigned, hasPR bool) string {
+	m := []rune{' ', ' '}
+	if assigned {
+		m[0] = '⚒'
+	}
+	if hasPR {
+		m[1] = '◆'
+	}
+	return string(m)
 }
 
 // typeAbbr shortens a td type to fit the column.
