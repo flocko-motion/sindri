@@ -59,6 +59,6 @@
 
 - [x] 5.1 `openspec validate tui-dashboard --strict` passes
 - [x] 5.2 `go test ./...` + `sindri lint all` green; no import cycles
-- [ ] 5.3 Manual: launch agents + tasks, drive every tab/action; verify full-height
+- [x] 5.3 Manual: launch agents + tasks, drive every tab/action; verify full-height
       layout, counts, tree fold, cross-links, scroll (short+long content), attach
       round-trip

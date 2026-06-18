@@ -18,3 +18,4 @@
 {"ts":"2026-06-17T18:08:25.488070831+02:00","cmd":"create","ok":true,"dur_ms":0}
 {"ts":"2026-06-17T18:08:57.176897758+02:00","cmd":"update","ok":true,"dur_ms":0}
 {"ts":"2026-06-17T18:51:28.414779275+02:00","cmd":"update","flags":{"status":"in_progress","work-dir":"/home/florian.metzger-noel/r/sindri"},"session":"ses_fe3b78","ok":true,"dur_ms":243}
+{"ts":"2026-06-18T14:43:35.256275493+02:00","cmd":"next","session":"ses_e27791","ok":true,"dur_ms":3}
