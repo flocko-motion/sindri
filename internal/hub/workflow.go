@@ -105,16 +105,22 @@ func (h *Hub) RequestReview(prID, requirement string) error {
 		}
 		// Check the PR's branch out (detached) into the reviewer's workspace, so
 		// it can read the full code in context, build, and run — not just the diff.
-		msg := fmt.Sprintf("[hub] Review %s. %s ", prID, requirement)
+		checkedOut := false
 		if a, ok, _ := h.store.GetAgent(reviewer); ok {
-			if err := git.CheckoutDetached(filepath.Join(h.root, a.Workspace), pr.Branch); err == nil {
-				msg += fmt.Sprintf("The PR branch is checked out in /workspace; see what changed with `git diff %s` there, or `sindri-worker show %s` for the diff. ", pr.Base, prID)
-			} else {
-				msg += fmt.Sprintf("`sindri-worker show %s` for the diff. ", prID)
-			}
+			checkedOut = git.CheckoutDetached(filepath.Join(h.root, a.Workspace), pr.Branch) == nil
 		}
-		msg += fmt.Sprintf("When done, run `sindri-worker review %s <pass|changes|fail> \"<findings>\"`.", prID)
-		_ = h.injectWhenReady(reviewer, msg)
+		// One precise, single-line instruction with literal branch/base.
+		seeChanges := fmt.Sprintf("`sindri-worker show %s`", prID)
+		if checkedOut {
+			seeChanges = fmt.Sprintf("`git diff %s` in /workspace (or `sindri-worker show %s`)", pr.Base, prID)
+		}
+		loc := ""
+		if checkedOut {
+			loc = fmt.Sprintf("PR branch %s is checked out in /workspace, based on %s. ", pr.Branch, pr.Base)
+		}
+		_ = h.injectWhenReady(reviewer, fmt.Sprintf(
+			"[hub] Review %s — %s %s(1) see what changed: %s. (2) check the gate: `sindri-worker lint %s`. (3) record your verdict: `sindri-worker review %s <pass|changes|fail> \"<findings>\"`.",
+			prID, requirement, loc, seeChanges, prID, prID))
 	}
 	h.notify()
 	return nil
