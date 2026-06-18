@@ -201,26 +201,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case stateMsg:
 		m.state = hub.BoardState(msg)
 		m.reclamp()
-		return m, tea.Batch(waitForState(m.ch), m.syncDetail())
+		return m, tea.Batch(waitForState(m.ch), m.syncDetail(), m.agentLiveCmds())
 	case polledMsg: // an auto-refresh poll — update the board, don't touch the SSE waiter
 		m.state = hub.BoardState(msg)
 		m.reclamp()
-		return m, m.syncDetail()
+		return m, tea.Batch(m.syncDetail(), m.agentLiveCmds())
 	case tickMsg:
-		// Live agent state (status) and the tmux screen go stale between hub
-		// notifications; while on the Agents tab, poll both every few seconds.
+		// Live agent state (status), screen, and log go stale between hub
+		// notifications; while on the Agents tab, poll every few seconds. The
+		// state poll cascades to log+screen refetches via polledMsg.
 		cmds := []tea.Cmd{tickCmd()}
 		if m.tab == 1 && m.cl != nil {
 			cmds = append(cmds, pollStateCmd(m.cl))
-			if id := m.selID(); id != "" {
-				cmds = append(cmds, paneFetchCmd(m.cl, id))
-			}
 		}
 		return m, tea.Batch(cmds...)
 	case logMsg:
-		m.agentLog = msg.evs
+		if msg.key == m.selID() { // ignore a stale fetch from a prior selection
+			m.agentLog = msg.evs
+		}
 	case paneMsg:
-		if msg.agent == m.selID() { // ignore a stale capture from a prior selection
+		// Update only for the current selection, and never overwrite with an empty
+		// capture — during launch the pod doesn't exist yet, and an empty result
+		// would wipe the "launching…" placeholder (and the boot logs to come).
+		if msg.agent == m.selID() && msg.text != "" {
 			m.agentPane = msg.text
 		}
 	case prMsg:

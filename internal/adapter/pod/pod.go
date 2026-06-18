@@ -45,7 +45,9 @@ const UserNS = "keep-id:uid=1000,gid=1000"
 // RunArgs builds the `podman run -d ...` argv (pure, for testing). Mounts and
 // env are emitted in a stable order so the output is deterministic.
 func RunArgs(o RunOpts) []string {
-	args := []string{"run", "-d", "--name", o.Name, "--userns=" + UserNS}
+	// --replace tears down any stale container of the same name first, so a
+	// re-launch never fails with "container name already in use".
+	args := []string{"run", "-d", "--replace", "--name", o.Name, "--userns=" + UserNS}
 	for _, k := range sortedKeys(o.Labels) {
 		args = append(args, "--label", k+"="+o.Labels[k])
 	}

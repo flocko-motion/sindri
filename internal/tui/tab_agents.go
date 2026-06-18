@@ -9,6 +9,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -118,7 +119,17 @@ func (m model) agentDetailLines() []string {
 		"", "── activity ──",
 	}
 	for _, e := range m.agentLog {
-		ls = append(ls, fmt.Sprintf("%-10s %s", e.Type, e.Payload))
+		ls = append(ls, fmt.Sprintf("%s  %-10s %s", dimStyle.Render(eventTime(e.TS)), e.Type, e.Payload))
 	}
 	return ls
+}
+
+// eventTime renders an activity-log timestamp (stored UTC RFC3339) as a local
+// HH:MM:SS, falling back to the raw value if it doesn't parse.
+func eventTime(ts string) string {
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return ts
+	}
+	return t.Local().Format("15:04:05")
 }

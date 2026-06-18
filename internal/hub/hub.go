@@ -164,6 +164,10 @@ func (h *Hub) Launch(name string, shell bool) error {
 	if !ok {
 		return fmt.Errorf("no such agent %q — run 'sindri new %s' first", name, name)
 	}
+	// Log immediately so the activity timeline shows the launch the moment it's
+	// requested — not seconds later once the pod is up.
+	_ = h.store.Log(name, "launch", "requested")
+	h.notify()
 	if err := container.Ensure(h.root); err != nil {
 		return err
 	}
@@ -223,7 +227,7 @@ func (h *Hub) Launch(name string, shell bool) error {
 	if err := pod.Run(opts); err != nil {
 		return err
 	}
-	if err := h.store.Log(name, "launch", "container="+cName); err != nil {
+	if err := h.store.Log(name, "launch", "started container="+cName); err != nil {
 		return err
 	}
 	go h.rehydrate(name) // resume from the activity log once the session is up (D13)

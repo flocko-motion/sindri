@@ -41,6 +41,27 @@ func paneFetchCmd(cl *client.HTTP, agent string) tea.Cmd {
 	}
 }
 
+// logFetchCmd refetches an agent's activity log.
+func logFetchCmd(cl *client.HTTP, agent string) tea.Cmd {
+	return func() tea.Msg {
+		evs, _ := cl.Log(agent)
+		return logMsg{agent, evs}
+	}
+}
+
+// agentLiveCmds refetches the selected agent's log + screen so they stay live on
+// every board update while on the Agents tab (e.g. a freshly-logged launch).
+func (m model) agentLiveCmds() tea.Cmd {
+	if m.tab != 1 || m.cl == nil {
+		return nil
+	}
+	id := m.selID()
+	if id == "" {
+		return nil
+	}
+	return tea.Batch(logFetchCmd(m.cl, id), paneFetchCmd(m.cl, id))
+}
+
 // mutateThenRefresh runs a hub mutation, then immediately fetches fresh state so
 // the board reflects it without waiting for the SSE push or the next poll tick.
 func mutateThenRefresh(cl *client.HTTP, mutate func()) tea.Cmd {
