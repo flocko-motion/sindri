@@ -48,7 +48,7 @@ func (h *Hub) ServeAgent(name string) error {
 		return fmt.Errorf("serve agent socket %s: %w", name, err)
 	}
 	h.agentLn[name] = ln
-	go http.Serve(ln, h.agentHandler(name))
+	go http.Serve(ln, logRequests(name, h.agentHandler(name)))
 	return nil
 }
 
