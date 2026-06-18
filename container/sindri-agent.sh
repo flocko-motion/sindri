@@ -37,6 +37,11 @@ set -g window-status-format ""
 set -g allow-rename off
 set -g automatic-rename off
 set -g set-titles off
+# Mouse: drag to select (copy-mode), wheel to scroll; copy to the system
+# clipboard via OSC52 so a dialed-in human can mark/copy. (Hold Shift to fall
+# back to the terminal's own native selection.)
+set -g mouse on
+set -g set-clipboard on
 TMUXCONF
 
 if [ -n "${SINDRI_SHELL:-}" ]; then
