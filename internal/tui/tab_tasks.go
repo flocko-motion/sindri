@@ -96,11 +96,12 @@ func (m model) taskRows() []row {
 		// priority cell. The tree gutter stays uncoloured. A planner proposal under
 		// the approval gate overrides the colour — yellow pending, grey rejected.
 		sc := taskStatusStyle(tr.Status)
-		switch approval[tr.ID] {
+		state := hub.StateLabel(tr.Status)
+		switch approval[tr.ID] { // the approval gate overrides both colour and state word
 		case "pending":
-			sc = stWarn
+			sc, state = stWarn, "pending"
 		case "rejected":
-			sc = stDone
+			sc, state = stDone, "rejected"
 		}
 		prio := sc.Render(fmt.Sprintf("%-8s", hub.PriorityLabel(tr.Priority)))
 		if isCriticalPriority(tr.Priority) {
@@ -112,7 +113,7 @@ func (m model) taskRows() []row {
 				sc.Render(fmt.Sprintf("%-9s", tr.ID)),
 				sc.Render(fmt.Sprintf("%-5s", typeAbbr(tr.Type))),
 				prio,
-				sc.Render(fmt.Sprintf("%-6s", hub.StateLabel(tr.Status))),
+				sc.Render(fmt.Sprintf("%-8s", state)),
 				sc.Render(taskMarks(assigned[tr.ID], tr.PR != "")),
 				sc.Render(tr.Title),
 			}, " "),
