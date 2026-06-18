@@ -173,6 +173,10 @@ func (h *Hub) Handler() http.Handler {
 		}
 		writeJSON(w, okMsg{"review requested"}, h.RequestReview(req.ID, req.Feedback))
 	})
+	mux.HandleFunc("GET /review-prompt", func(w http.ResponseWriter, r *http.Request) {
+		p, err := h.ReviewPrompt()
+		writeJSON(w, okMsg{p}, err)
+	})
 	mux.HandleFunc("GET /tasks", func(w http.ResponseWriter, r *http.Request) {
 		tasks, err := h.Tasks()
 		writeJSON(w, tasks, err)

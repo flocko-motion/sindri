@@ -67,7 +67,11 @@ func (m *model) openRejectForm(prID string) {
 // openReviewForm opens a textarea (pre-filled, editable) to request an agentic
 // review of a PR.
 func (m *model) openReviewForm(prID string) {
-	req := newTextareaField("requirement", defaultReviewPrompt)
+	prompt := m.reviewPrompt // the editable default from .sindri/review-prompt.txt
+	if strings.TrimSpace(prompt) == "" {
+		prompt = defaultReviewPrompt
+	}
+	req := newTextareaField("requirement", prompt)
 	cl := m.cl
 	m.form.open("agentic review of "+prID, []field{req}, nil, func() tea.Cmd {
 		text := req.value()

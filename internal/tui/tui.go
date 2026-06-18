@@ -69,6 +69,7 @@ type prLintMsg struct {
 	pr   string
 	text string
 }
+type reviewPromptMsg string
 
 // paneLines is how many rows of an agent's tmux scrollback the detail shows.
 const paneLines = 200
@@ -119,9 +120,10 @@ type model struct {
 	detailKey  string
 	agentLog   []store.Event
 	agentPane  string // captured tmux screen of the selected agent (live)
-	prDetail   hub.PRDetail
-	prLint     string // lint output for the selected PR (shown in the big pane)
-	taskDetail store.Task
+	prDetail     hub.PRDetail
+	prLint       string // lint output for the selected PR (shown in the big pane)
+	reviewPrompt string // editable default review instruction (from the hub)
+	taskDetail   store.Task
 	quit       bool
 
 	modalOverride      []string // when set, the detail modal shows these instead of the tab detail
@@ -165,7 +167,20 @@ func newModel(cl *client.HTTP, ch <-chan hub.BoardState) model {
 	return m
 }
 
-func (m model) Init() tea.Cmd { return tea.Batch(waitForState(m.ch), tickCmd()) }
+func (m model) Init() tea.Cmd {
+	cmds := []tea.Cmd{waitForState(m.ch), tickCmd()}
+	if m.cl != nil { // load the editable default review prompt
+		cl := m.cl
+		cmds = append(cmds, func() tea.Msg {
+			p, err := cl.ReviewPrompt()
+			if err != nil {
+				return nil
+			}
+			return reviewPromptMsg(p)
+		})
+	}
+	return tea.Batch(cmds...)
+}
 
 func waitForState(ch <-chan hub.BoardState) tea.Cmd {
 	return func() tea.Msg {
@@ -239,6 +254,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.prLint = msg.text
 			m.detail.Resize(m.detail.Height, len(m.prContentLines())) // re-clamp for the new content
 		}
+	case reviewPromptMsg:
+		m.reviewPrompt = string(msg)
 	case prMsg:
 		m.prDetail = msg.d
 	case taskMsg:

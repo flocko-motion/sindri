@@ -220,6 +220,14 @@ func (c *HTTP) RequestReview(id, requirement string) error {
 	return c.post("/pr/review", hub.RejectReq{ID: id, Feedback: requirement})
 }
 
+// ReviewPrompt returns the editable default agentic-review instruction.
+func (c *HTTP) ReviewPrompt() (string, error) {
+	var ok struct {
+		Prompt string `json:"ok"`
+	}
+	return ok.Prompt, c.get("/review-prompt", &ok)
+}
+
 // Tasks lists all cached tasks (refreshed from the source of truth).
 func (c *HTTP) Tasks() ([]store.Task, error) {
 	var out []store.Task

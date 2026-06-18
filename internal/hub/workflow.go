@@ -60,6 +60,25 @@ func (h *Hub) PRInfo(id string) (PRDetail, error) {
 	return PRDetail{PR: pr, Task: task, Diff: diff, Reviews: reviews}, nil
 }
 
+// defaultReviewPrompt seeds .sindri/review-prompt.txt the first time.
+const defaultReviewPrompt = "Review this PR for correctness, clarity, and fit to the task. Flag bugs, missing tests, and anything that should change."
+
+// ReviewPrompt returns the default agentic-review instruction, read from
+// .sindri/review-prompt.txt — auto-created with a built-in default if absent, so
+// the user can edit the standard prompt in a plain text file.
+func (h *Hub) ReviewPrompt() (string, error) {
+	path := filepath.Join(h.root, ".sindri", "review-prompt.txt")
+	if data, err := os.ReadFile(path); err == nil {
+		return strings.TrimSpace(string(data)), nil
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	if err := os.WriteFile(path, []byte(defaultReviewPrompt+"\n"), 0o644); err != nil {
+		return "", err
+	}
+	return defaultReviewPrompt, nil
+}
+
 // RequestReview attaches a review requirement (free-text instruction) to a PR
 // and dispatches it to a running reviewer agent — assigning the row and
 // injecting the instruction. With no reviewer running, the requirement is
@@ -72,7 +91,7 @@ func (h *Hub) RequestReview(prID, requirement string) error {
 	}
 	requirement = strings.TrimSpace(requirement)
 	if requirement == "" {
-		requirement = "Review this PR for correctness and quality."
+		requirement, _ = h.ReviewPrompt()
 	}
 	id, err := h.store.AddReview(prID, requirement)
 	if err != nil {
