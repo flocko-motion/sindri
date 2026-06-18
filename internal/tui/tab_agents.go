@@ -35,7 +35,23 @@ func (m *model) openNewAgentChoice() {
 		active: true, title: "new agent role",
 		options: []string{"worker", "reviewer", "planner"}, values: []string{"worker", "reviewer", "planner"},
 		apply: func(v string) tea.Cmd {
-			return mutateThenRefresh(cl, func() { _, _ = cl.NewAgent("", v) })
+			// Register the identity, then auto-start its pod. Launch runs in the
+			// background (it can build the image) — the hub's lifecycle + /events
+			// reflect "launching" → running without blocking the new row's appearance.
+			return func() tea.Msg {
+				if cl == nil {
+					return nil
+				}
+				name, err := cl.NewAgent("", v)
+				if err != nil {
+					return errModalMsg{err}
+				}
+				if name != "" {
+					go func() { _ = cl.Launch(name, false) }()
+				}
+				st, _ := cl.State()
+				return polledMsg(st)
+			}
 		},
 	}
 }
