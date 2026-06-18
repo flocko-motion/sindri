@@ -85,15 +85,14 @@ type Section struct {
 // picks it up.
 var Sections = []Section{
 	{"tasks", "Tasks", func(b BoardState) int { return countTasks(b.Tasks, taskOpen) }},
-	{"agents", "Agents", func(b BoardState) int { return countAgents(b.Agents, agentRunning) }},
+	{"agents", "Agents", func(b BoardState) int { return len(b.Agents) }}, // the whole roster — down agents are still agents
 	{"prs", "PRs", func(b BoardState) int { return countPRs(b.PRs, prNotMerged) }},
 }
 
 // --- badge predicates ---
 
-func taskOpen(t store.Task) bool    { return !taskDone(t) }
-func agentRunning(a AgentView) bool { return a.Status != "down" }
-func prNotMerged(p store.PR) bool   { return p.Status != "merged" }
+func taskOpen(t store.Task) bool  { return !taskDone(t) }
+func prNotMerged(p store.PR) bool { return p.Status != "merged" }
 
 // taskDone reports whether a task is in a terminal (done) state — the "closed"
 // segment of the open/closed filter.
@@ -108,14 +107,6 @@ func taskDone(t store.Task) bool {
 func countTasks(ts []store.Task, pred func(store.Task) bool) (n int) {
 	for _, t := range ts {
 		if pred(t) {
-			n++
-		}
-	}
-	return
-}
-func countAgents(as []AgentView, pred func(AgentView) bool) (n int) {
-	for _, a := range as {
-		if pred(a) {
 			n++
 		}
 	}

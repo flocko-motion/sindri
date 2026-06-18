@@ -146,24 +146,6 @@ func newModel(cl *client.HTTP, ch <-chan hub.BoardState) model {
 
 func (m model) Init() tea.Cmd { return tea.Batch(waitForState(m.ch), tickCmd()) }
 
-// tickCmd fires a tickMsg every refreshInterval — the heartbeat behind the
-// agents-tab auto-refresh.
-func tickCmd() tea.Cmd {
-	return tea.Tick(refreshInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
-}
-
-// pollStateCmd fetches a fresh board snapshot (re-evaluating live agent state)
-// without disturbing the SSE waiter.
-func pollStateCmd(cl *client.HTTP) tea.Cmd {
-	return func() tea.Msg {
-		st, err := cl.State()
-		if err != nil {
-			return nil
-		}
-		return polledMsg(st)
-	}
-}
-
 func waitForState(ch <-chan hub.BoardState) tea.Cmd {
 	return func() tea.Msg {
 		st, ok := <-ch
@@ -423,12 +405,7 @@ func (m *model) onKey(k string) tea.Cmd {
 		} else if m.tab == 1 { // agents: auto-named after a dwarf
 			cl := m.cl
 			m.flash = "registering a new agent…"
-			return func() tea.Msg {
-				if cl != nil {
-					_, _ = cl.NewAgent("", "worker")
-				}
-				return nil
-			}
+			return mutateThenRefresh(cl, func() { _, _ = cl.NewAgent("", "worker") })
 		}
 	case "e": // edit the selected task (tasks) / set role (agents)
 		if m.tab == 0 && m.selID() != "" {
@@ -440,10 +417,7 @@ func (m *model) onKey(k string) tea.Cmd {
 				active: true, title: "role for " + id,
 				options: []string{"worker", "reviewer"}, values: []string{"worker", "reviewer"},
 				apply: func(v string) tea.Cmd {
-					if cl == nil {
-						return nil
-					}
-					return func() tea.Msg { _ = cl.SetRole(id, v); return nil }
+					return mutateThenRefresh(cl, func() { _ = cl.SetRole(id, v) })
 				},
 			}
 			return nil
@@ -455,10 +429,10 @@ func (m *model) onKey(k string) tea.Cmd {
 				active: true, title: "delete agent " + id + "?",
 				options: []string{"cancel", "delete"}, values: []string{"cancel", "delete"},
 				apply: func(v string) tea.Cmd {
-					if cl == nil || v != "delete" {
+					if v != "delete" {
 						return nil
 					}
-					return func() tea.Msg { _ = cl.DeleteAgent(id); return nil }
+					return mutateThenRefresh(cl, func() { _ = cl.DeleteAgent(id) })
 				},
 			}
 			return nil
