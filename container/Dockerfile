@@ -14,8 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git make patch build-essential \
     # text processing
     grep sed gawk jq ripgrep \
-    # better find  (binary is fdfind; symlinked to fd below)
-    fd-find \
+    # better find / cat / fuzzy-finder  (fdfind→fd, batcat→bat symlinked below)
+    fd-find bat fzf \
     # file / archive
     file tree zip unzip tar gzip bzip2 xz-utils \
     # network
@@ -30,7 +30,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # misc
     less diffutils vim-tiny \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd \
+    && ln -s /usr/bin/batcat /usr/local/bin/bat \
     && rm -rf /var/lib/apt/lists/*
+
+# ── yazi (TUI file manager — not in apt; prebuilt release binary) ──────────────
+RUN curl -fsSL https://github.com/sxyazi/yazi/releases/latest/download/yazi-x86_64-unknown-linux-gnu.zip -o /tmp/yazi.zip \
+ && unzip -q /tmp/yazi.zip -d /tmp/yazi \
+ && mv /tmp/yazi/*/yazi /tmp/yazi/*/ya /usr/local/bin/ \
+ && chmod +x /usr/local/bin/yazi /usr/local/bin/ya \
+ && rm -rf /tmp/yazi /tmp/yazi.zip
 
 # ── yq + td (copied from host via build context) ─────────────────────────────
 COPY bin/yq  /usr/local/bin/yq
