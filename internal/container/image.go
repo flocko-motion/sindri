@@ -1,15 +1,18 @@
 // package: container / image
 // type:    adapter (podman)
 // job:     the agent image identity (ImageName) and build — rebuilds via podman
-//          when the Dockerfile changes or the weekly cache key is stale.
+//          when anything under container/ changes or the weekly cache key is
+//          stale.
 // limits:  worker/reviewer container lifecycle lives in internal/worker.
 package container
 
 import (
 	"crypto/sha256"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -18,9 +21,9 @@ const ImageName = "sindri-agent:test"
 
 // Ensure builds the container image if the Dockerfile changed or the cache is stale (weekly).
 func Ensure(projectRoot string) error {
-	dockerfile := projectRoot + "/container/Dockerfile"
-	content, err := os.ReadFile(dockerfile)
-	if err != nil {
+	dir := projectRoot + "/container"
+	dockerfile := dir + "/Dockerfile"
+	if _, err := os.Stat(dockerfile); err != nil {
 		if exec.Command("podman", "image", "exists", ImageName).Run() == nil {
 			return nil
 		}
@@ -29,7 +32,18 @@ func Ensure(projectRoot string) error {
 
 	year, week := time.Now().ISOWeek()
 	h := sha256.New()
-	h.Write(content)
+	// Hash every file under container/ (Dockerfile, sindri-agent.sh, …) so a
+	// change to the entrypoint — not just the Dockerfile — triggers a rebuild.
+	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if data, e := os.ReadFile(p); e == nil {
+			h.Write([]byte(p))
+			h.Write(data)
+		}
+		return nil
+	})
 	h.Write([]byte(fmt.Sprintf("%d-%d", year, week)))
 	buildKey := fmt.Sprintf("%x", h.Sum(nil))[:16]
 
