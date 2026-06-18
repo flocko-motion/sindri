@@ -70,8 +70,8 @@ func TestScreenshot(t *testing.T) {
 	fmt.Printf("\n========== Agents tab — wide 3-region layout (list+tmux | detail) ==========\n%s\n", Screenshot(b, 150, 24, "tab"))
 	fmt.Printf("\n========== PRs tab — wide split (list+diff | metadata+task+reviews) ==========\n%s\n", Screenshot(b, 150, 24, "tab", "tab"))
 	fmt.Printf("\n========== Agents tab — § hides right detail (list+tmux full width) ==========\n%s\n", Screenshot(b, 150, 24, "tab", "§"))
-	// Focus the detail (C-l), move to the container item, ENTER → main pane shows pod info.
-	fmt.Printf("\n========== Agents tab — pod view selected (container item) ==========\n%s\n", Screenshot(b, 150, 24, "tab", "ctrl+l", "j", "enter"))
+	// Focus the detail (C-l), move down to the pod field, ENTER → main pane shows pod info.
+	fmt.Printf("\n========== Agents tab — pod view selected (pod field) ==========\n%s\n", Screenshot(b, 150, 24, "tab", "ctrl+l", "j", "j", "enter"))
 	fmt.Printf("\n========== new-agent role choice (2, N) ==========\n%s\n", Screenshot(b, 70, 16, "tab", "N"))
 	fmt.Printf("\n========== agent delete confirm (2, D) ==========\n%s\n", Screenshot(b, 70, 16, "tab", "D"))
 	fmt.Printf("\n========== error modal (attach a down agent) ==========\n%s\n", Screenshot(b, 80, 16, "tab", "j", "j", "a"))

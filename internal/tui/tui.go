@@ -459,9 +459,13 @@ func (m *model) onKey(k string) tea.Cmd {
 			if it, ok := m.focusedItem(); ok {
 				switch it.kind {
 				case "view": // switch the big content pane
-					if m.tab == 1 { // Agents: live screen ⇄ pod info
-						m.agentView = it.value
-						if it.value == "pod" && m.cl != nil {
+					if m.tab == 1 { // Agents: toggle live screen ⇄ pod info
+						if m.agentView == "pod" {
+							m.agentView = "screen"
+							return nil
+						}
+						m.agentView = "pod"
+						if m.cl != nil {
 							return podFetchCmd(m.cl, m.selID())
 						}
 						return nil

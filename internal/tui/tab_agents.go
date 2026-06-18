@@ -127,21 +127,14 @@ func (m model) agentsBody() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftCol, divider(h), right)
 }
 
-// agentItems is the selected agent's detail as metaItems: two view selectors
-// (the live screen and the full container name) that drive the main pane, the
-// agent's fields with task/PR as cross-references, and the activity log. Picking
-// the container item shows its pod info in the main pane.
+// agentItems is the selected agent's detail as metaItems: the agent's fields
+// (task/PR are cross-references, the pod is a focusable view toggle) followed by
+// the activity log. Selecting the pod field flips the main pane between the live
+// tmux screen and the container's pod info.
 func (m model) agentItems() []metaItem {
 	a, ok := m.selAgent()
 	if !ok {
 		return []metaItem{{text: dimStyle.Render("(orphan — no roster entry; 'podman rm -f' it)")}}
-	}
-	view := func(val, label string) metaItem {
-		mark := "  "
-		if m.agentView == val || (m.agentView == "" && val == "screen") {
-			mark = "▸ "
-		}
-		return metaItem{text: mark + label, kind: "view", value: val}
 	}
 	taskIt := metaItem{text: "task:      " + dash(a.Task)}
 	if a.Task != "" {
@@ -151,14 +144,16 @@ func (m model) agentItems() []metaItem {
 	if a.PR != "" {
 		prIt.kind, prIt.value = "pr", a.PR
 	}
+	pod := "pod:       " + hub.Container(m.root, a.Name)
+	if m.agentView == "pod" { // mark which view the main pane is showing
+		pod += dimStyle.Render("  ◂ shown")
+	}
 	items := []metaItem{
-		view("screen", "live screen"),
-		view("pod", hub.Container(m.root, a.Name)),
-		{text: ""},
 		{text: "role:      " + a.Role},
 		{text: "status:    " + a.Status},
 		taskIt, prIt,
 		{text: "workspace: " + dash(a.Workspace)},
+		{text: pod, kind: "view", value: "pod"},
 	}
 	items = append(items, metaItem{text: ""}, metaItem{text: dimStyle.Render("── activity ──")})
 	for i := len(m.agentLog) - 1; i >= 0; i-- { // newest-first
