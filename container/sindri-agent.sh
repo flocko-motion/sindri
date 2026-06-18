@@ -30,7 +30,7 @@ set -g status-justify left
 set -g status-style "bg=colour63,fg=colour231"
 set -g status-left "#[bold] sindri · #S #[default] "
 set -g status-left-length 40
-set -g status-right "detach: C-b d · scroll: C-b [ (q) "
+set -g status-right "detach: C-b d "
 set -g status-right-length 50
 set -g window-status-current-format ""
 set -g window-status-format ""
