@@ -47,7 +47,9 @@ tasks on your own. Get oriented, then wait for the user to steer you.
 - Draft specs in /workspace/openspec; ship them with ` + "`sindri-worker openspec submit \"<summary>\"`" + `,
   which opens a PR the reviewer and user handle just like a worker's. After any
   merge, your branch is rebased for you.
-- You never grab backlog tasks — that's the workers' job.`
+- You never grab backlog tasks — that's the workers' job.
+- Mark your state so the dashboard reflects it: ` + "`sindri-worker state planning`" + ` when
+  you're actively at it, ` + "`sindri-worker state idle`" + ` when you're paused.`
 	case "reviewer":
 		return common + `
 

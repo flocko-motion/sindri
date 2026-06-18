@@ -106,6 +106,15 @@ func plannerBranch(name string) string { return "plan-" + name }
 // real backlog task behind it).
 const mockSpecTask = "os-new"
 
+// restPhase is an agent's resting (not-busy) phase: a planner rests in "planning"
+// (it never holds a backlog task, so "idle" would mislead); everyone else "idle".
+func restPhase(role string) string {
+	if role == "planner" {
+		return "planning"
+	}
+	return "idle"
+}
+
 // New opens the hub for a project: ensures `.sindri/` exists and opens the DB.
 func New(root string) (*Hub, error) {
 	dir := filepath.Join(root, ".sindri")
@@ -304,6 +313,10 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 		}
 		if err := git.EnsureBranch(wt, plannerBranch(name), base); err != nil {
 			return err
+		}
+		// Rest in "planning", not "idle" — unless a PR is already in flight.
+		if st, _ := h.store.GetState(name); st.Phase != "submitted" {
+			_ = h.store.SetState(store.AgentState{Agent: name, Phase: "planning"})
 		}
 	}
 	// Serve the agent's own socket BEFORE the pod launches — the pod bind-mounts

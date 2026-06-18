@@ -372,7 +372,7 @@ func (h *Hub) reject(prID, feedback string, byUser bool) error {
 	// drives the fix either way.
 	phase := "working"
 	if a, ok, _ := h.store.GetAgent(pr.Agent); ok && a.Role == "planner" {
-		phase = "idle"
+		phase = restPhase(a.Role) // planning — a planner has no backlog task to "work"
 	}
 	_ = h.store.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: phase})
 	_ = h.store.LogPR(pr.ID, "rejected", "by reviewer: "+feedback)
@@ -495,7 +495,11 @@ func (h *Hub) Merge(prID string) (store.PR, error) {
 		}
 		_ = h.refreshTask(pr.Task)
 	}
-	_ = h.store.SetState(store.AgentState{Agent: pr.Agent, Phase: "idle"})
+	rest := "idle"
+	if a, ok, _ := h.store.GetAgent(pr.Agent); ok {
+		rest = restPhase(a.Role)
+	}
+	_ = h.store.SetState(store.AgentState{Agent: pr.Agent, Phase: rest})
 	_ = h.store.Log(pr.Agent, "merged", prID)
 	_ = h.store.LogPR(prID, "merged", "into "+pr.Base)
 	_ = h.injectWhenReady(pr.Agent, msgMerged(prID))

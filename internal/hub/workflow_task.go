@@ -99,7 +99,7 @@ func (h *Hub) healPlannerTasks() {
 			continue
 		}
 		_ = td.SetStatus(h.root, st.Task, "open")
-		_ = h.store.SetState(store.AgentState{Agent: a.Name, Phase: "idle"})
+		_ = h.store.SetState(store.AgentState{Agent: a.Name, Phase: "planning"})
 		_ = h.store.Log(a.Name, "unassign", st.Task+" (planners don't hold tasks)")
 	}
 }
@@ -166,6 +166,22 @@ func (h *Hub) notifyPlanners(msg string) {
 			go func() { _ = h.injectWhenReady(name, msg) }()
 		}
 	}
+}
+
+// cmdState lets a planner flip its own resting state between "planning" (active)
+// and "idle" (paused) — a planner never holds a backlog task, so it owns this.
+func (h *Hub) cmdState(c registry.Caller, args []string, out io.Writer) (int, error) {
+	if len(args) != 1 || (args[0] != "planning" && args[0] != "idle") {
+		return 1, fmt.Errorf("usage: state <planning|idle>")
+	}
+	st, _ := h.store.GetState(c.Agent)
+	st.Agent, st.Phase = c.Agent, args[0]
+	if err := h.store.SetState(st); err != nil {
+		return 1, err
+	}
+	h.notify()
+	fmt.Fprintf(out, "state: %s\n", args[0])
+	return 0, nil
 }
 
 // cmdCreateTask lets a planner propose a task. It's created in td but flagged
