@@ -78,6 +78,9 @@ type polledMsg hub.BoardState
 
 const refreshInterval = 3 * time.Second
 
+// detailScrollStep is how many lines J/K scroll the detail pane at once.
+const detailScrollStep = 5
+
 const (
 	filterOpen = iota
 	filterClosed
@@ -388,10 +391,14 @@ func (m *model) onKey(k string) tea.Cmd {
 	case "k", "up":
 		m.cursor[m.tab]--
 	case "J": // scroll the detail pane down (yazi-style secondary-pane scroll)
-		m.detail.ScrollDown()
+		for i := 0; i < detailScrollStep; i++ {
+			m.detail.ScrollDown()
+		}
 		return nil
 	case "K": // scroll the detail pane up
-		m.detail.ScrollUp()
+		for i := 0; i < detailScrollStep; i++ {
+			m.detail.ScrollUp()
+		}
 		return nil
 	case "g":
 		m.cursor[m.tab] = 0
