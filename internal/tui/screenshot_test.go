@@ -25,9 +25,9 @@ func mockBoard() hub.BoardState {
 			{ID: "os-d4e5f6", Title: "tui-dashboard (22/23)", Status: "open", Type: "spec"},
 		},
 		Agents: []hub.AgentView{
-			{Name: "brokkr", Role: "worker", Status: "working", Task: "td-feat1", PR: "pr-td-feat1"},
-			{Name: "rune", Role: "reviewer", Status: "idle"},
-			{Name: "dvalin", Role: "worker", Status: "down"},
+			{Name: "brokkr", Role: "worker", Status: "working", Task: "td-feat1", PR: "pr-td-feat1", Workspace: ".worktrees/brokkr"},
+			{Name: "rune", Role: "reviewer", Status: "idle", Workspace: ".worktrees/rune"},
+			{Name: "dvalin", Role: "worker", Status: "down", Workspace: ".worktrees/dvalin"},
 		},
 		PRs: []store.PR{
 			{ID: "pr-td-feat1", Task: "td-feat1", Agent: "brokkr", Branch: "td-feat1", Base: "master", Status: "open"},
@@ -67,6 +67,7 @@ func TestScreenshot(t *testing.T) {
 	fmt.Printf("\n========== new-task form — parent validation error ==========\n%s\n",
 		Screenshot(b, 80, 22, "n", "tab", "tab", "tab", "x", "y", "z", "ctrl+s"))
 	fmt.Printf("\n========== edit-task form (e on the bug) ==========\n%s\n", Screenshot(b, 80, 22, "j", "j", "j", "j", "j", "e"))
+	fmt.Printf("\n========== Agents tab — wide 3-region layout (list+tmux | detail) ==========\n%s\n", Screenshot(b, 150, 24, "2"))
 	fmt.Printf("\n========== agent role choice (2, e) ==========\n%s\n", Screenshot(b, 70, 16, "2", "e"))
 	fmt.Printf("\n========== agent delete confirm (2, d) ==========\n%s\n", Screenshot(b, 70, 16, "2", "d"))
 }

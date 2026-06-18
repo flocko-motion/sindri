@@ -111,6 +111,15 @@ func (c *HTTP) SetRole(name, role string) error {
 	return c.post("/agent/role", hub.AgentReq{Name: name, Role: role})
 }
 
+// AgentPane returns the last `lines` rows of the agent's tmux pane (plain text).
+func (c *HTTP) AgentPane(name string, lines int) (string, error) {
+	var ok struct {
+		Out string `json:"ok"`
+	}
+	err := c.get(fmt.Sprintf("/agent/pane?agent=%s&lines=%d", url.QueryEscape(name), lines), &ok)
+	return ok.Out, err
+}
+
 // Launch spins a pod for an existing agent (shell=true runs a bare shell instead
 // of Claude — for demos/debugging).
 func (c *HTTP) Launch(name string, shell bool) error {

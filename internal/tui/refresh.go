@@ -33,6 +33,14 @@ func pollStateCmd(cl *client.HTTP) tea.Cmd {
 	}
 }
 
+// paneFetchCmd captures the agent's live tmux screen.
+func paneFetchCmd(cl *client.HTTP, agent string) tea.Cmd {
+	return func() tea.Msg {
+		out, _ := cl.AgentPane(agent, paneLines)
+		return paneMsg{agent, out}
+	}
+}
+
 // mutateThenRefresh runs a hub mutation, then immediately fetches fresh state so
 // the board reflects it without waiting for the SSE push or the next poll tick.
 func mutateThenRefresh(cl *client.HTTP, mutate func()) tea.Cmd {

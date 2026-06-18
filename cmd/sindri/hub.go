@@ -32,6 +32,7 @@ type backend interface {
 	NewAgent(name, role string) (string, error)
 	DeleteAgent(name string) error
 	SetRole(name, role string) error
+	AgentPane(name string, lines int) (string, error)
 	Launch(name string, shell bool) error
 	Tell(name, msg, source string) error
 	State() (hub.BoardState, error)
@@ -106,7 +107,7 @@ func newHubCmd() *cobra.Command {
 
 func newAgentCmd() *cobra.Command {
 	c := &cobra.Command{Use: "agent", Short: "Manage agents (workers + reviewers)"}
-	c.AddCommand(agentListCmd(), agentNewCmd(), agentDeleteCmd(), agentRoleCmd(), agentLaunchCmd(), agentTellCmd(), agentAttachCmd(), agentInfoCmd())
+	c.AddCommand(agentListCmd(), agentNewCmd(), agentDeleteCmd(), agentRoleCmd(), agentPaneCmd(), agentLaunchCmd(), agentTellCmd(), agentAttachCmd(), agentInfoCmd())
 	return c
 }
 
@@ -187,6 +188,29 @@ func agentRoleCmd() *cobra.Command {
 	}
 }
 
+func agentPaneCmd() *cobra.Command {
+	var lines int
+	c := &cobra.Command{
+		Use: "pane <name>", Short: "Print the agent's live tmux screen (capture-pane)", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withBackend(func(b backend) error {
+				out, err := b.AgentPane(args[0], lines)
+				if err != nil {
+					return err
+				}
+				if out == "" {
+					fmt.Fprintln(os.Stderr, "(no live screen — agent is down)")
+					return nil
+				}
+				fmt.Print(out)
+				return nil
+			})
+		},
+	}
+	c.Flags().IntVarP(&lines, "lines", "n", 40, "rows of scrollback to capture")
+	return c
+}
+
 func agentLaunchCmd() *cobra.Command {
 	var shell bool
 	c := &cobra.Command{
@@ -263,8 +287,8 @@ func agentInfoCmd() *cobra.Command {
 				if found == nil {
 					return fmt.Errorf("no such agent %q", args[0])
 				}
-				fmt.Printf("agent:   %s\nrole:    %s\nstatus:  %s\ntask:    %s\npr:      %s\n",
-					found.Name, found.Role, found.Status, dash(found.Task), dash(found.PR))
+				fmt.Printf("agent:     %s\nrole:      %s\nstatus:    %s\ntask:      %s\npr:        %s\nworkspace: %s\n",
+					found.Name, found.Role, found.Status, dash(found.Task), dash(found.PR), dash(found.Workspace))
 				evs, err := b.Log(args[0])
 				if err != nil {
 					return err

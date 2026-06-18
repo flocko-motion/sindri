@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 )
 
 // AgentReq is the body for POST /agents.
@@ -50,6 +51,14 @@ func (h *Hub) Handler() http.Handler {
 	mux.HandleFunc("GET /log", func(w http.ResponseWriter, r *http.Request) {
 		evs, err := h.Log(r.URL.Query().Get("agent"))
 		writeJSON(w, evs, err)
+	})
+	mux.HandleFunc("GET /agent/pane", func(w http.ResponseWriter, r *http.Request) {
+		lines, _ := strconv.Atoi(r.URL.Query().Get("lines"))
+		if lines <= 0 {
+			lines = 40
+		}
+		out, err := h.AgentPane(r.URL.Query().Get("agent"), lines)
+		writeJSON(w, okMsg{out}, err)
 	})
 	mux.HandleFunc("POST /agents", func(w http.ResponseWriter, r *http.Request) {
 		var req AgentReq

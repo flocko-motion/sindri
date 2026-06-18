@@ -61,6 +61,13 @@ type taskMsg struct {
 	key string
 	t   store.Task
 }
+type paneMsg struct {
+	agent string
+	text  string
+}
+
+// paneLines is how many rows of an agent's tmux scrollback the detail shows.
+const paneLines = 200
 type errMsg struct{ err error }
 
 // tickMsg drives periodic polling; polledMsg carries a state fetched by a poll
@@ -103,6 +110,7 @@ type model struct {
 
 	detailKey  string
 	agentLog   []store.Event
+	agentPane  string // captured tmux screen of the selected agent (live)
 	prDetail   hub.PRDetail
 	taskDetail store.Task
 	quit       bool
@@ -197,15 +205,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reclamp()
 		return m, m.syncDetail()
 	case tickMsg:
-		// Live agent state (running/phase) goes stale between hub notifications;
-		// while on the Agents tab, poll the board every few seconds.
+		// Live agent state (status) and the tmux screen go stale between hub
+		// notifications; while on the Agents tab, poll both every few seconds.
 		cmds := []tea.Cmd{tickCmd()}
 		if m.tab == 1 && m.cl != nil {
 			cmds = append(cmds, pollStateCmd(m.cl))
+			if id := m.selID(); id != "" {
+				cmds = append(cmds, paneFetchCmd(m.cl, id))
+			}
 		}
 		return m, tea.Batch(cmds...)
 	case logMsg:
 		m.agentLog = msg.evs
+	case paneMsg:
+		if msg.agent == m.selID() { // ignore a stale capture from a prior selection
+			m.agentPane = msg.text
+		}
 	case prMsg:
 		m.prDetail = msg.d
 	case taskMsg:
@@ -510,7 +525,11 @@ func attachCmd(name string) *exec.Cmd {
 func (m *model) reclamp() {
 	n := len(m.rows())
 	m.cursor[m.tab] = clampInt(m.cursor[m.tab], 0, max(0, n-1))
-	m.list.SetHeight(m.bodyHeight())
+	listH := m.bodyHeight()
+	if m.tab == 1 && m.showDetail() { // agents: the list is the short top region
+		listH = m.agentListHeight()
+	}
+	m.list.SetHeight(listH)
 	m.list.SetTotal(n)
 	m.list.SetCursor(m.cursor[m.tab])
 	m.detail.SetHeight(m.bodyHeight())
@@ -534,7 +553,11 @@ func (m *model) syncDetail() tea.Cmd {
 	case 0:
 		return func() tea.Msg { t, _ := cl.TaskInfo(id); return taskMsg{id, t} }
 	case 1:
-		return func() tea.Msg { evs, _ := cl.Log(id); return logMsg{id, evs} }
+		m.agentPane = "" // selection changed — drop the previous agent's screen
+		return tea.Batch(
+			func() tea.Msg { evs, _ := cl.Log(id); return logMsg{id, evs} },
+			paneFetchCmd(cl, id),
+		)
 	default:
 		return func() tea.Msg { d, _ := cl.PRInfo(id); return prMsg{id, d} }
 	}
@@ -606,7 +629,9 @@ func (m model) View() string {
 	}
 	top := tabStrip(labels, m.tab, m.w)
 	var body string
-	if m.showDetail() {
+	if m.tab == 1 && m.showDetail() {
+		body = m.agentsBody() // bespoke: list + live tmux pane (left) · detail (right)
+	} else if m.showDetail() {
 		left := pane(rowTexts(m.rows()), m.list, m.leftWidth(), m.cursor[m.tab])
 		right := pane(m.detailLines(), m.detail, m.detailWidth(), -1)
 		body = lipgloss.JoinHorizontal(lipgloss.Top, left, divider(m.bodyHeight()), right)

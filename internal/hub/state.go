@@ -19,12 +19,13 @@ import (
 // Status collapses runtime + workflow into one word: down (not running) |
 // idle | working | submitted.
 type AgentView struct {
-	Name   string `json:"name"`
-	Role   string `json:"role"`
-	Status string `json:"status"`
-	Task   string `json:"task"`
-	Branch string `json:"branch"`
-	PR     string `json:"pr"`
+	Name      string `json:"name"`
+	Role      string `json:"role"`
+	Status    string `json:"status"`
+	Task      string `json:"task"`
+	Branch    string `json:"branch"`
+	PR        string `json:"pr"`
+	Workspace string `json:"workspace"` // the agent's git worktree path (repo-relative)
 }
 
 // BoardState is the whole board in one payload — the single read surface.
@@ -66,7 +67,7 @@ func (h *Hub) State() (BoardState, error) {
 		}
 		agents = append(agents, AgentView{
 			Name: a.Name, Role: a.Role, Status: status,
-			Task: st.Task, Branch: st.Branch, PR: openPRFor(prs, a.Name),
+			Task: st.Task, Branch: st.Branch, PR: openPRFor(prs, a.Name), Workspace: a.Workspace,
 		})
 	}
 
@@ -85,6 +86,20 @@ func (h *Hub) State() (BoardState, error) {
 func (h *Hub) sessionAlive(name string) bool {
 	_, err := pod.Exec(Container(name), tmux.HasSession(name)...)
 	return err == nil
+}
+
+// AgentPane returns a plain-text capture of the agent's tmux pane — the last
+// `lines` rows of what its Claude (or shell) is showing. Empty when the session
+// isn't alive (nothing to show).
+func (h *Hub) AgentPane(name string, lines int) (string, error) {
+	if !h.sessionAlive(name) {
+		return "", nil
+	}
+	out, err := pod.Exec(Container(name), tmux.CapturePane(name, lines)...)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }
 
 // Refresh re-syncs tasks from the source of truth and notifies watchers (the
