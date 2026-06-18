@@ -220,10 +220,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.agentLog = msg.evs
 		}
 	case paneMsg:
-		// Update only for the current selection, and never overwrite with an empty
-		// capture — during launch the pod doesn't exist yet, and an empty result
-		// would wipe the "launching…" placeholder (and the boot logs to come).
-		if msg.agent == m.selID() && msg.text != "" {
+		if msg.agent == m.selID() { // ignore a stale capture from a prior selection
 			m.agentPane = msg.text
 		}
 	case prMsg:
@@ -415,10 +412,7 @@ func (m *model) onKey(k string) tea.Cmd {
 	case "L": // agents: launch (uppercase — never clashes with vi cursor keys)
 		if m.tab == 1 {
 			if a, ok := m.selAgent(); ok {
-				m.flash = "launching " + a.Name + "…"
-				// Seed the live-screen region immediately; the next poll replaces it
-				// with the pod's boot logs, then the tmux screen.
-				m.agentPane = "launching " + a.Name + "… (starting pod and tmux session)"
+				m.flash = "launching " + a.Name + "…" // status (hub) drives the rest
 			}
 			return m.action(func(id string) error { return m.cl.Launch(id, false) })
 		}

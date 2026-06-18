@@ -56,15 +56,11 @@ func (h *Hub) State() (BoardState, error) {
 	for _, a := range roster {
 		known[Container(a.Name)] = true
 		st, _ := h.store.GetState(a.Name)
-		// One status word. "Alive" means the agent's tmux session is up and
-		// attachable — not merely that the pod (a sleep) exists; a dead session
-		// is "down", never a stale "working".
-		status := "down"
-		if pod.Running(Container(a.Name)) && h.sessionAlive(a.Name) {
-			if status = st.Phase; status == "" {
-				status = "idle"
-			}
-		}
+		// One status word, reconciling transient intent (launching/stopping) with
+		// observed runtime. "Alive" means the tmux session is up and attachable —
+		// not merely that the pod (a sleep) exists.
+		running := pod.Running(Container(a.Name)) && h.sessionAlive(a.Name)
+		status := h.agentStatus(a.Name, running, st.Phase)
 		agents = append(agents, AgentView{
 			Name: a.Name, Role: a.Role, Status: status,
 			Task: st.Task, Branch: st.Branch, PR: openPRFor(prs, a.Name), Workspace: a.Workspace,

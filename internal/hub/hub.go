@@ -38,6 +38,9 @@ type Hub struct {
 	mu      sync.Mutex              // guards agentLn
 	agentLn map[string]net.Listener // per-agent socket listeners (identity-by-socket)
 	events  *bus                    // change notifications for /events
+
+	lcMu      sync.Mutex        // guards lifecycle
+	lifecycle map[string]string // transient launch/stop intent: name -> "launching"|"stopping"
 }
 
 var nameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
@@ -58,7 +61,46 @@ func New(root string) (*Hub, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Hub{root: root, store: st, agentLn: map[string]net.Listener{}, events: newBus()}, nil
+	return &Hub{root: root, store: st, agentLn: map[string]net.Listener{}, events: newBus(), lifecycle: map[string]string{}}, nil
+}
+
+// setLifecycle records a transient launch/stop intent for an agent (cleared by
+// State once observed reality catches up). "" clears it.
+func (h *Hub) setLifecycle(name, state string) {
+	h.lcMu.Lock()
+	defer h.lcMu.Unlock()
+	if state == "" {
+		delete(h.lifecycle, name)
+	} else {
+		h.lifecycle[name] = state
+	}
+}
+
+// agentStatus reconciles transient intent with observed runtime into one status
+// word — and clears the intent once fulfilled (launching→running, stopping→
+// down). The single source of truth for "what is this agent doing".
+func (h *Hub) agentStatus(name string, running bool, phase string) string {
+	h.lcMu.Lock()
+	defer h.lcMu.Unlock()
+	intent := h.lifecycle[name]
+	switch {
+	case intent == "stopping":
+		if running {
+			return "stopping" // stop requested, pod still up
+		}
+		delete(h.lifecycle, name) // down now — stop intent fulfilled
+		return "down"
+	case running:
+		delete(h.lifecycle, name) // up now — launch intent fulfilled
+		if phase == "" {
+			return "idle"
+		}
+		return phase
+	case intent == "launching":
+		return "launching" // requested, pod not up yet
+	default:
+		return "down"
+	}
 }
 
 // Close shuts agent listeners and releases the store.
@@ -139,7 +181,11 @@ func (h *Hub) StopAgent(name string) error {
 	if !pod.Running(Container(name)) {
 		return fmt.Errorf("agent %q is not running", name)
 	}
+	h.setLifecycle(name, "stopping") // status → stopping (pod still up); → down once gone
+	h.notify()
 	if err := pod.Rm(Container(name)); err != nil {
+		h.setLifecycle(name, "")
+		h.notify()
 		return err
 	}
 	_ = h.store.Log(name, "stop", "pod removed")
@@ -176,7 +222,7 @@ func (h *Hub) SetRole(name, role string) error {
 // workspace worktree is created on demand; the pod runs interactive Claude in a
 // tmux session named after the agent (or a bare shell when shell is true — used
 // for deterministic demos and debugging).
-func (h *Hub) Launch(name string, shell bool) error {
+func (h *Hub) Launch(name string, shell bool) (err error) {
 	a, ok, err := h.store.GetAgent(name)
 	if err != nil {
 		return err
@@ -184,10 +230,17 @@ func (h *Hub) Launch(name string, shell bool) error {
 	if !ok {
 		return fmt.Errorf("no such agent %q — run 'sindri new %s' first", name, name)
 	}
-	// Log immediately so the activity timeline shows the launch the moment it's
-	// requested — not seconds later once the pod is up.
+	// Status → launching immediately (cleared by State once the pod is up); on
+	// any failure below, clear it so it doesn't stick at "launching".
+	h.setLifecycle(name, "launching")
 	_ = h.store.Log(name, "launch", "requested")
 	h.notify()
+	defer func() {
+		if err != nil {
+			h.setLifecycle(name, "")
+			h.notify()
+		}
+	}()
 	if err := container.Ensure(h.root); err != nil {
 		return err
 	}

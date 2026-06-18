@@ -50,12 +50,28 @@ func (m model) agentsBody() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftCol, divider(h), right)
 }
 
-// paneLines is the captured tmux screen split into rows (placeholder when empty).
+// paneLines is the live-screen region: the captured tmux screen when running,
+// otherwise a message reflecting the hub's lifecycle status.
 func (m model) paneLines() []string {
-	if strings.TrimSpace(m.agentPane) == "" {
-		return []string{dimStyle.Render("(no live screen — agent is down)")}
+	a, _ := m.selAgent()
+	body := strings.Split(strings.TrimRight(m.agentPane, "\n"), "\n")
+	hasBody := strings.TrimSpace(m.agentPane) != ""
+	switch a.Status {
+	case "down":
+		return []string{dimStyle.Render("(not running — launch with 'L')")}
+	case "stopping":
+		return []string{dimStyle.Render("stopping…")}
+	case "launching":
+		if hasBody { // pod is up and booting — show its startup output
+			return body
+		}
+		return []string{dimStyle.Render("launching… (building image / starting pod)")}
+	default: // running
+		if !hasBody {
+			return []string{dimStyle.Render("(starting…)")}
+		}
+		return body
 	}
-	return strings.Split(strings.TrimRight(m.agentPane, "\n"), "\n")
 }
 
 // tailPane renders the last h lines of content into a width×h block.
