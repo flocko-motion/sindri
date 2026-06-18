@@ -18,7 +18,7 @@ import (
 func main() {
 	sock := os.Getenv("SINDRI_SOCKET")
 	if sock == "" {
-		sock = "/run/sindri.sock"
+		sock = "/run/sindri/sock"
 	}
 	c := client.DialSocket(sock)
 	args := os.Args[1:]

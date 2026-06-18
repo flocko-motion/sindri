@@ -277,7 +277,9 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 	mounts := []pod.Mount{
 		{Host: wt, Container: "/workspace", Mode: "rw"},
 		// The agent's own socket — its sole channel to the hub, its identity.
-		{Host: AgentSocketPath(h.root, name), Container: "/run/sindri.sock", Mode: "rw"},
+		// Mount the socket DIRECTORY (not the file) so the agent survives a hub
+		// restart, which recreates the socket file with a new inode.
+		{Host: AgentSocketDir(h.root, name), Container: "/run/sindri", Mode: "rw"},
 		// The thin browser binary (image symlinks /usr/local/bin/sindri-worker).
 		{Host: workerBin, Container: "/opt/sindri/sindri-worker", Mode: "ro"},
 	}

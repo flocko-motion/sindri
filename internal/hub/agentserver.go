@@ -27,19 +27,31 @@ type ExecReq struct {
 	Args []string `json:"args"`
 }
 
-// AgentSocketPath is an agent's own socket — the one mounted into its pod.
+// AgentSocketDir is an agent's own socket directory — the pod bind-mounts this
+// DIRECTORY (not the socket file), so the agent keeps reaching the socket across
+// hub restarts: a restart removes + recreates the socket file (new inode), which
+// a directory mount reflects but a file mount would not (it'd pin the dead one).
+func AgentSocketDir(root, name string) string {
+	return filepath.Join(root, ".sindri", "sockets", name)
+}
+
+// AgentSocketPath is the agent's socket file inside its socket directory.
 func AgentSocketPath(root, name string) string {
-	return filepath.Join(root, ".sindri", "sockets", name+".sock")
+	return filepath.Join(AgentSocketDir(root, name), "sock")
 }
 
 // ServeAgent starts (idempotently) the listener on an agent's socket. The
 // socket file is (re)created here, so this must run before the agent's pod is
-// launched (the pod bind-mounts it). Must run inside the persistent hub.
+// launched (the pod bind-mounts its directory). Must run inside the persistent
+// hub.
 func (h *Hub) ServeAgent(name string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if _, ok := h.agentLn[name]; ok {
 		return nil
+	}
+	if err := os.MkdirAll(AgentSocketDir(h.root, name), 0o755); err != nil {
+		return fmt.Errorf("agent socket dir %s: %w", name, err)
 	}
 	path := AgentSocketPath(h.root, name)
 	_ = os.Remove(path)
