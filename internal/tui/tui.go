@@ -433,9 +433,13 @@ func (m *model) onKey(k string) tea.Cmd {
 				return m.lintCmd(id)
 			}
 		}
-	case "R": // prs: reject with a (multiline) reason
+	case "R": // prs: reject a PR · tasks: reject a planner-proposed task (with a comment)
 		if m.tab == 2 && m.selID() != "" {
 			m.openRejectForm(m.selID())
+			return nil
+		}
+		if m.tab == 0 && m.taskGated() {
+			m.openTaskRejectForm(m.selID())
 			return nil
 		}
 	case "V": // prs: verify — materialize the PR into the review workspace + shell in
@@ -444,10 +448,13 @@ func (m *model) onKey(k string) tea.Cmd {
 				return m.verifyCmd(id)
 			}
 		}
-	case "A": // prs: request an agentic review (editable instruction)
+	case "A": // prs: request an agentic review · tasks: approve a planner-proposed task
 		if m.tab == 2 && m.selID() != "" {
 			m.openReviewForm(m.selID())
 			return nil
+		}
+		if m.tab == 0 && m.taskGated() {
+			return m.approveTaskCmd(m.selID())
 		}
 	case "p": // set the selected task's priority
 		if m.tab == 0 && m.selID() != "" {
@@ -591,7 +598,7 @@ func (m model) contextFooter() string {
 	}
 	switch m.tab {
 	case 0:
-		return fmt.Sprintf("N new · e edit · p priority · f filter: %s · h/l fold", filterNames[m.filter])
+		return fmt.Sprintf("N new · e edit · p priority · A/R approve/reject · f filter: %s · h/l fold", filterNames[m.filter])
 	case 1:
 		return "N new · S start/stop · t tell · a attach · D delete"
 	default:

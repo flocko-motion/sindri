@@ -35,11 +35,18 @@ func (m model) taskRows() []row {
 	}
 	arranged := hub.ArrangeTasks(filtered, m.state.PRs)
 
-	// Which tasks have a worker on them right now (drives the ⚒ marker).
+	// Which tasks have a worker on them right now (drives the 🔨 marker).
 	assigned := map[string]bool{}
 	for _, a := range m.state.Agents {
 		if a.Task != "" {
 			assigned[a.Task] = true
+		}
+	}
+	// Hub-side approval per task (drives the row colour for planner proposals).
+	approval := map[string]string{}
+	for _, t := range m.state.Tasks {
+		if t.Approval != "" {
+			approval[t.ID] = t.Approval
 		}
 	}
 
@@ -86,8 +93,15 @@ func (m model) taskRows() []row {
 
 		// Each cell is styled independently (no nesting) so a colour reset never
 		// bleeds across the row: status colour throughout, red for a critical
-		// priority cell. The tree gutter stays uncoloured.
+		// priority cell. The tree gutter stays uncoloured. A planner proposal under
+		// the approval gate overrides the colour — yellow pending, grey rejected.
 		sc := taskStatusStyle(tr.Status)
+		switch approval[tr.ID] {
+		case "pending":
+			sc = stWarn
+		case "rejected":
+			sc = stDone
+		}
 		prio := sc.Render(fmt.Sprintf("%-8s", hub.PriorityLabel(tr.Priority)))
 		if isCriticalPriority(tr.Priority) {
 			prio = stCrit.Render(fmt.Sprintf("%-8s", hub.PriorityLabel(tr.Priority)))
@@ -232,16 +246,26 @@ func (m model) taskItemsFor(t store.Task, desc string) []metaItem {
 		}
 		return metaItem{text: label + val, kind: kind, value: val}
 	}
-	return append([]metaItem{
+	items := []metaItem{
 		{text: t.Title}, {text: ""},
 		{text: "type:     " + dash(t.Type)},
 		{text: "priority: " + hub.PriorityLabel(t.Priority)},
 		{text: "status:   " + t.Status},
+	}
+	if t.Approval != "" { // a planner proposal under the approval gate
+		line := "approval: " + t.Approval
+		if t.ApprovalComment != "" {
+			line += " — " + t.ApprovalComment
+		}
+		items = append(items, metaItem{text: line})
+	}
+	items = append(items,
 		xref("parent:   ", t.ParentID, "task"),
 		xref("agent:    ", assignee, "agent"),
 		xref("pr:       ", pr, "pr"),
-		{text: "labels:   " + dash(t.Labels)},
-	}, descItems(desc)...)
+		metaItem{text: "labels:   " + dash(t.Labels)},
+	)
+	return append(items, descItems(desc)...)
 }
 
 // descItems renders an optional description block.
@@ -330,6 +354,41 @@ func (m *model) openTaskForm(edit bool) {
 				_, _ = cl.CreateTask(spec)
 			}
 			return nil
+		}
+	})
+}
+
+// taskGated reports whether the selected task is a planner proposal still under
+// the approval gate (pending or rejected) — the only state A/R act on.
+func (m model) taskGated() bool {
+	t, ok := m.selTask()
+	return ok && (t.Approval == "pending" || t.Approval == "rejected")
+}
+
+// approveTaskCmd clears the approval gate on the selected task (makes it
+// claimable).
+func (m *model) approveTaskCmd(id string) tea.Cmd {
+	cl := m.cl
+	m.flash = "approving " + id + "…"
+	return mutateThenRefresh(cl, func() { _ = cl.ApproveTask(id) })
+}
+
+// openTaskRejectForm opens a multiline textarea to reject a proposed task with a
+// comment (delivered to the planner).
+func (m *model) openTaskRejectForm(id string) {
+	reason := newTextareaField("reason", "")
+	cl := m.cl
+	m.form.open("reject task "+id, []field{reason}, nil, func() tea.Cmd {
+		text := reason.value()
+		return func() tea.Msg {
+			if cl == nil || strings.TrimSpace(text) == "" {
+				return nil
+			}
+			if err := cl.RejectTask(id, text); err != nil {
+				return errModalMsg{err}
+			}
+			st, _ := cl.State()
+			return polledMsg(st)
 		}
 	})
 }
