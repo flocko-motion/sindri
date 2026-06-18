@@ -68,7 +68,8 @@ type paneMsg struct {
 
 // paneLines is how many rows of an agent's tmux scrollback the detail shows.
 const paneLines = 200
-type errMsg struct{ err error }
+type errMsg struct{ err error }       // fatal: hub connection lost
+type errModalMsg struct{ err error }  // non-fatal: show the error modal
 
 // tickMsg drives periodic polling; polledMsg carries a state fetched by a poll
 // (distinct from stateMsg so it doesn't re-arm the SSE waiter).
@@ -122,6 +123,7 @@ type model struct {
 	choice      choiceModalState
 	form        formState // active fill-in form (new/edit task)
 	flash       string    // transient status (e.g. "copied"), cleared on next key
+	errText     string    // when set, the error modal is shown (any key dismisses)
 }
 
 // choiceModalState is a generic pick-one prompt: options, parallel values, and
@@ -225,10 +227,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.prDetail = msg.d
 	case taskMsg:
 		m.taskDetail = msg.t
+	case errModalMsg:
+		m.errText = msg.err.Error()
 	case errMsg:
 		m.err = msg.err
 		return m, tea.Quit
 	case tea.KeyMsg:
+		if m.errText != "" { // any key dismisses the error modal
+			m.errText = ""
+			return m, nil
+		}
 		if m.form.active {
 			return m, m.form.update(msg)
 		}
@@ -405,8 +413,14 @@ func (m *model) onKey(k string) tea.Cmd {
 		}
 	case "a": // agents: attach to the live tmux session (out-of-band)
 		if m.tab == 1 {
-			if id := m.selID(); id != "" && m.cl != nil {
-				return tea.ExecProcess(attachCmd(id), func(error) tea.Msg { return nil })
+			if a, ok := m.selAgent(); ok {
+				if a.Status == "down" {
+					m.errText = "agent " + a.Name + " is down — launch it first ('l') before attaching"
+					return nil
+				}
+				if m.cl != nil {
+					return tea.ExecProcess(attachCmd(a.Name), func(error) tea.Msg { return nil })
+				}
 			}
 		}
 	case "m": // prs: merge (the human gate)
@@ -512,7 +526,17 @@ func (m *model) action(fn func(id string) error) tea.Cmd {
 	if id == "" || m.cl == nil {
 		return nil
 	}
-	return func() tea.Msg { _ = fn(id); return nil }
+	cl := m.cl
+	return func() tea.Msg {
+		if err := fn(id); err != nil {
+			return errModalMsg{err} // surface failures instead of swallowing them
+		}
+		st, err := cl.State() // reflect the change at once
+		if err != nil {
+			return nil
+		}
+		return polledMsg(st)
+	}
 }
 
 // attachCmd builds the interactive `podman exec -it … tmux attach` for an agent.
@@ -618,6 +642,9 @@ func (m model) View() string {
 		labels[i] = fmt.Sprintf("%d %s", s.Count(m.state), s.Title)
 	}
 	// Modals take over the whole screen.
+	if m.errText != "" {
+		return errModal(m.errText, m.w, m.h)
+	}
 	if m.form.active {
 		return m.form.view(m.w, m.h)
 	}
@@ -652,41 +679,4 @@ func (m model) View() string {
 	return strings.Join([]string{top, body, foot}, "\n")
 }
 
-func rowTexts(rows []row) []string {
-	out := make([]string, len(rows))
-	for i, r := range rows {
-		out[i] = r.text
-	}
-	return out
-}
-
-// row is one selector line: display text + the id it selects ("" = not selectable).
-type row struct {
-	text string
-	id   string
-}
-
-func dash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func clampInt(v, lo, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
-}
 

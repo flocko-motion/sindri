@@ -51,6 +51,16 @@ func modalFrame(title, body, footer string, screenW, screenH int) string {
 	return lipgloss.Place(screenW, screenH, lipgloss.Center, lipgloss.Center, box)
 }
 
+// errModal renders a compact centered error box. The single presenter for any
+// "that didn't work" feedback; dismissed with any key.
+func errModal(msg string, screenW, screenH int) string {
+	w := clampInt(screenW-10, 24, 72)
+	body := lipgloss.NewStyle().Width(w).Render(msg)
+	box := modalBorderStyle.BorderForeground(lipgloss.Color("203")).Render(
+		errStyle.Render("⚠ error") + "\n\n" + body + "\n\n" + dimStyle.Render("any key to dismiss"))
+	return lipgloss.Place(screenW, screenH, lipgloss.Center, lipgloss.Center, box)
+}
+
 // modal renders content as an almost-full-screen centered modal. vp scrolls the
 // content (its Height should be modalContentHeight(screenH)).
 func modal(title string, content []string, vp scroll.Viewport, screenW, screenH int) string {

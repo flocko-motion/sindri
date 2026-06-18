@@ -75,6 +75,17 @@ func tailPane(lines []string, w, h int) string {
 // hdivider is a horizontal rule of w columns.
 func hdivider(w int) string { return divStyle.Render(strings.Repeat("─", w)) }
 
+// selAgent returns the currently-selected agent from the board snapshot.
+func (m model) selAgent() (hub.AgentView, bool) {
+	id := m.selID()
+	for _, a := range m.state.Agents {
+		if a.Name == id {
+			return a, true
+		}
+	}
+	return hub.AgentView{}, false
+}
+
 func (m model) agentRows() []row {
 	var out []row
 	for _, a := range m.state.Agents {

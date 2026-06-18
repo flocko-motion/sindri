@@ -70,4 +70,5 @@ func TestScreenshot(t *testing.T) {
 	fmt.Printf("\n========== Agents tab — wide 3-region layout (list+tmux | detail) ==========\n%s\n", Screenshot(b, 150, 24, "2"))
 	fmt.Printf("\n========== agent role choice (2, e) ==========\n%s\n", Screenshot(b, 70, 16, "2", "e"))
 	fmt.Printf("\n========== agent delete confirm (2, d) ==========\n%s\n", Screenshot(b, 70, 16, "2", "d"))
+	fmt.Printf("\n========== error modal (attach a down agent) ==========\n%s\n", Screenshot(b, 80, 16, "2", "j", "j", "a"))
 }
