@@ -14,8 +14,30 @@ set -euo pipefail
 
 AGENT="${1:-${SINDRI_AGENT:-agent}}"
 SESSION="$AGENT"
+HOME="${HOME:-/home/sindri}"
 
 echo "=== sindri agent '$AGENT' starting ==="
+
+# Reserve the bottom row as a help/status line so the Claude pane no longer
+# fills the whole screen: it shows the hotkeys a dialed-in human needs — chiefly
+# how to detach again (C-b d leaves the agent running; do NOT C-c or `exit`).
+# Written as ~/.tmux.conf (global options) so the server adopts it at start and
+# nothing — including Claude's pane title — shadows our status-right.
+cat > "$HOME/.tmux.conf" <<'TMUXCONF'
+set -g status on
+set -g status-interval 5
+set -g status-justify left
+set -g status-style "bg=colour63,fg=colour231"
+set -g status-left "#[bold] sindri · #S #[default] "
+set -g status-left-length 40
+set -g status-right "detach: C-b d · scroll: C-b [ (q) "
+set -g status-right-length 50
+set -g window-status-current-format ""
+set -g window-status-format ""
+set -g allow-rename off
+set -g automatic-rename off
+set -g set-titles off
+TMUXCONF
 
 if [ -n "${SINDRI_SHELL:-}" ]; then
 	tmux new-session -d -s "$SESSION" bash
@@ -26,18 +48,8 @@ else
 		'claude --dangerously-skip-permissions --append-system-prompt "$(cat /home/sindri/.claude/system-prompt.txt)"'
 fi
 
-# Reserve the bottom row as a help/status line: the Claude pane gets every row
-# above it, and we print the hotkeys a dialed-in human needs — chiefly how to
-# detach again (C-b d leaves the agent running; do NOT C-c or `exit`).
-tmux set-option -t "$SESSION" status on
-tmux set-option -t "$SESSION" status-style "bg=colour63,fg=colour231"
-tmux set-option -t "$SESSION" status-justify left
-tmux set-option -t "$SESSION" status-left "#[bold] sindri · $AGENT #[default] "
-tmux set-option -t "$SESSION" status-left-length 40
-tmux set-option -t "$SESSION" status-right "detach: C-b d · scroll: C-b [ (q to exit) "
-tmux set-option -t "$SESSION" status-right-length 60
-tmux set-option -t "$SESSION" window-status-current-format ""
-tmux set-option -t "$SESSION" window-status-format ""
+# Belt-and-suspenders: re-source in case the server was already running.
+tmux source-file "$HOME/.tmux.conf" 2>/dev/null || true
 
 echo "=== session ready — hub injects via 'tmux send-keys -t $SESSION' ==="
 
