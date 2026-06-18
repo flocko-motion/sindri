@@ -110,14 +110,86 @@ func (m model) agentsBody() string {
 	if !m.showDetail() { // § hid the right column — left split takes the full width
 		return leftCol
 	}
-	right := pane(m.detailLines(), m.detail, m.w-leftW-1, -1)
+	// Right column from metaItems, highlighting the focused actionable item.
+	items := m.agentItems()
+	lines := make([]string, len(items))
+	hl, ai := -1, 0
+	for i, it := range items {
+		lines[i] = it.text
+		if it.kind != "" {
+			if m.rightFocus && ai == m.rightCursor {
+				hl = i
+			}
+			ai++
+		}
+	}
+	right := pane(lines, m.detail, m.w-leftW-1, hl)
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftCol, divider(h), right)
+}
+
+// agentItems is the selected agent's detail as metaItems: two view selectors
+// (the live screen and the full container name) that drive the main pane, the
+// agent's fields with task/PR as cross-references, and the activity log. Picking
+// the container item shows its pod info in the main pane.
+func (m model) agentItems() []metaItem {
+	a, ok := m.selAgent()
+	if !ok {
+		return []metaItem{{text: dimStyle.Render("(orphan — no roster entry; 'podman rm -f' it)")}}
+	}
+	view := func(val, label string) metaItem {
+		mark := "  "
+		if m.agentView == val || (m.agentView == "" && val == "screen") {
+			mark = "▸ "
+		}
+		return metaItem{text: mark + label, kind: "view", value: val}
+	}
+	taskIt := metaItem{text: "task:      " + dash(a.Task)}
+	if a.Task != "" {
+		taskIt.kind, taskIt.value = "task", a.Task
+	}
+	prIt := metaItem{text: "pr:        " + dash(a.PR)}
+	if a.PR != "" {
+		prIt.kind, prIt.value = "pr", a.PR
+	}
+	items := []metaItem{
+		view("screen", "live screen"),
+		view("pod", hub.Container(m.root, a.Name)),
+		{text: ""},
+		{text: "role:      " + a.Role},
+		{text: "status:    " + a.Status},
+		taskIt, prIt,
+		{text: "workspace: " + dash(a.Workspace)},
+	}
+	items = append(items, metaItem{text: ""}, metaItem{text: dimStyle.Render("── activity ──")})
+	for i := len(m.agentLog) - 1; i >= 0; i-- { // newest-first
+		e := m.agentLog[i]
+		items = append(items, metaItem{text: fmt.Sprintf("%s  %-10s %s", dimStyle.Render(eventTime(e.TS)), e.Type, e.Payload)})
+	}
+	return items
+}
+
+// agentActionable is the focusable subset of the agent detail (view selectors +
+// task/PR cross-refs).
+func (m model) agentActionable() []metaItem {
+	var out []metaItem
+	for _, it := range m.agentItems() {
+		if it.kind != "" {
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 // paneLines is the live-screen region: the captured tmux screen when running,
 // otherwise a message reflecting the hub's lifecycle status.
 func (m model) paneLines() []string {
 	a, _ := m.selAgent()
+	if m.agentView == "pod" { // pod-info view (selected the container item)
+		if strings.TrimSpace(m.agentPod) == "" {
+			return []string{dimStyle.Render("(fetching pod info…)")}
+		}
+		return strings.Split(strings.TrimRight(m.agentPod, "\n"), "\n")
+	}
 	body := strings.Split(strings.TrimRight(m.agentPane, "\n"), "\n")
 	hasBody := strings.TrimSpace(m.agentPane) != ""
 	switch a.Status {
@@ -206,6 +278,7 @@ func (m model) agentDetailFor(a hub.AgentView) []string {
 		"task:      " + dash(a.Task),
 		"pr:        " + dash(a.PR),
 		"workspace: " + dash(a.Workspace),
+		"pod:       " + hub.Container(m.root, a.Name),
 	}
 	if m.tab == 1 && a.Name == m.selID() {
 		ls = append(ls, "", "── activity ──")

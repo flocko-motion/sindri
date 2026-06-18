@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -44,45 +43,6 @@ func Run(root string) error {
 	_, err = tea.NewProgram(newModel(cl, ch, root), tea.WithAltScreen()).Run()
 	return err
 }
-
-type stateMsg hub.BoardState
-type logMsg struct {
-	key string
-	evs []store.Event
-}
-type prMsg struct {
-	key string
-	d   hub.PRDetail
-}
-type taskMsg struct {
-	key string
-	t   store.Task
-}
-type paneMsg struct {
-	agent string
-	text  string
-}
-type prLintMsg struct {
-	pr   string
-	text string
-}
-type reviewPromptMsg string
-type reviewReadyMsg string // the review-workspace path to open a shell in
-
-// paneLines is how many rows of an agent's tmux scrollback the detail shows.
-const paneLines = 200
-type errMsg struct{ err error }       // fatal: hub connection lost
-type errModalMsg struct{ err error }  // non-fatal: show the error modal
-
-// tickMsg drives periodic polling; polledMsg carries a state fetched by a poll
-// (distinct from stateMsg so it doesn't re-arm the SSE waiter).
-type tickMsg time.Time
-type polledMsg hub.BoardState
-
-const refreshInterval = 3 * time.Second
-
-// detailScrollStep is how many lines J/K scroll the detail pane at once.
-const detailScrollStep = 5
 
 const (
 	filterOpen = iota
@@ -123,6 +83,8 @@ type model struct {
 	detailKey  string
 	agentLog   []store.Event
 	agentPane  string // captured tmux screen of the selected agent (live)
+	agentView  string // Agents main pane: "screen" (tmux, default) | "pod" (podman info)
+	agentPod   string // fetched podman pod-info for the selected agent
 	prDetail     hub.PRDetail
 	prView       string // which content the PR big pane shows: "diff" (default) | "lint"
 	reviewPrompt string // editable default review instruction (from the hub)
@@ -258,6 +220,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.agent == m.selID() { // ignore a stale capture from a prior selection
 			m.agentPane = msg.text
 		}
+	case agentPodMsg:
+		if msg.agent == m.selID() {
+			m.agentPod = msg.text
+		}
 	case prLintMsg:
 		if msg.pr == m.selID() { // store the result, switch to the lint view, focus it
 			m.prDetail.Lint = msg.text
@@ -355,7 +321,7 @@ func (m *model) onKey(k string) tea.Cmd {
 	case "shift+tab":
 		m.tab = (m.tab - 1 + len(hub.Sections)) % len(hub.Sections)
 	case "ctrl+l": // the only way to switch panes (with ctrl+h): focus the detail
-		if (m.tab == 0 || m.tab == 2) && m.showDetail() {
+		if m.showDetail() && len(m.actionableItems()) > 0 {
 			m.rightFocus = true
 			m.rightCursor = clampInt(m.rightCursor, 0, max(0, len(m.actionableItems())-1))
 		}
@@ -492,8 +458,15 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.rightFocus { // act on the focused detail item
 			if it, ok := m.focusedItem(); ok {
 				switch it.kind {
-				case "view": // switch the big content pane (diff/lint)
-					m.prView = it.value
+				case "view": // switch the big content pane
+					if m.tab == 1 { // Agents: live screen ⇄ pod info
+						m.agentView = it.value
+						if it.value == "pod" && m.cl != nil {
+							return podFetchCmd(m.cl, m.selID())
+						}
+						return nil
+					}
+					m.prView = it.value // PRs: diff ⇄ lint
 					m.detail.Resize(m.detail.Height, len(m.prContentLines()))
 				case "path": // open a shell in the workspace
 					return tea.ExecProcess(shellAt(it.value), func(error) tea.Msg { return nil })
@@ -573,7 +546,8 @@ func (m *model) syncDetail() tea.Cmd {
 	case 0:
 		return func() tea.Msg { t, _ := cl.TaskInfo(id); return taskMsg{id, t} }
 	case 1:
-		m.agentPane = "" // selection changed — drop the previous agent's screen
+		m.agentPane, m.agentPod = "", "" // selection changed — drop the previous agent's screen/pod
+		m.agentView = "screen"            // default back to the live screen
 		return tea.Batch(
 			func() tea.Msg { evs, _ := cl.Log(id); return logMsg{id, evs} },
 			paneFetchCmd(cl, id),

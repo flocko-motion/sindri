@@ -107,6 +107,18 @@ func (h *Hub) AgentPane(name string, lines int) (string, error) {
 	return h.launchOutput(name), nil
 }
 
+// PodInfo returns a short summary of an agent's podman container for the
+// Agents-tab pod view. The full (repo-scoped) container name is the first line,
+// followed by its `podman ps` summary — or a note when no container exists.
+func (h *Hub) PodInfo(name string) (string, error) {
+	c := h.container(name)
+	header := "container: " + c + "\n\n"
+	if info := pod.Info(c); info != "" {
+		return header + info, nil
+	}
+	return header + "(no container — agent is down)", nil
+}
+
 // Refresh re-syncs tasks from the source of truth and notifies watchers (the
 // user `refresh` action, D15).
 func (h *Hub) Refresh() error {

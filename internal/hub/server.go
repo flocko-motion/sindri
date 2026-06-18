@@ -21,7 +21,7 @@ import (
 
 // quietPaths are high-frequency reads (UI polling) excluded from the access log
 // so it stays an action log, not a flood.
-var quietPaths = map[string]bool{"/state": true, "/events": true, "/log": true, "/agent/pane": true}
+var quietPaths = map[string]bool{"/state": true, "/events": true, "/log": true, "/agent/pane": true, "/agent/pod": true}
 
 // logRequests wraps a handler to print one access-log line per request — the
 // hub's window onto every action it executes. label is the socket's owner
@@ -94,6 +94,10 @@ func (h *Hub) Handler() http.Handler {
 			lines = 40
 		}
 		out, err := h.AgentPane(r.URL.Query().Get("agent"), lines)
+		writeJSON(w, okMsg{out}, err)
+	})
+	mux.HandleFunc("GET /agent/pod", func(w http.ResponseWriter, r *http.Request) {
+		out, err := h.PodInfo(r.URL.Query().Get("agent"))
 		writeJSON(w, okMsg{out}, err)
 	})
 	mux.HandleFunc("POST /agents", func(w http.ResponseWriter, r *http.Request) {

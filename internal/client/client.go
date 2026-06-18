@@ -120,6 +120,15 @@ func (c *HTTP) AgentPane(name string, lines int) (string, error) {
 	return ok.Out, err
 }
 
+// PodInfo returns a short summary of an agent's podman container (plain text).
+func (c *HTTP) PodInfo(name string) (string, error) {
+	var ok struct {
+		Out string `json:"ok"`
+	}
+	err := c.get("/agent/pod?agent="+url.QueryEscape(name), &ok)
+	return ok.Out, err
+}
+
 // Launch spins a pod for an existing agent (shell=true runs a bare shell instead
 // of Claude — for demos/debugging).
 func (c *HTTP) Launch(name string, shell bool) error {

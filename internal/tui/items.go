@@ -127,6 +127,8 @@ func (m model) actionableItems() []metaItem {
 	switch m.tab {
 	case 0:
 		return m.taskActionable()
+	case 1:
+		return m.agentActionable()
 	case 2:
 		return m.prActionable()
 	}
