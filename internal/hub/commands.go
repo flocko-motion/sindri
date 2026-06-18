@@ -14,6 +14,7 @@ package hub
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/pod"
@@ -36,6 +37,7 @@ func (h *Hub) registry() *registry.Registry {
 		registry.Command{Name: "show", Help: "show a PR's diff: show <pr-id>", Run: h.cmdShowPR},
 		registry.Command{Name: "next", Help: "pick up the next task", Roles: []string{"worker"},
 			Hidden: func(c registry.Caller) bool { return c.HasTask }, Run: h.cmdNext},
+		registry.Command{Name: "lint", Help: "run the quality gate on your workspace", Roles: []string{"worker"}, Run: h.cmdLint},
 		registry.Command{Name: "submit", Help: "request your branch be merged: submit [message]", Roles: []string{"worker"},
 			Hidden: func(c registry.Caller) bool { return !c.HasTask }, Run: h.cmdSubmit},
 		registry.Command{Name: "approve", Help: "approve a pull request: approve [pr-id]", Roles: []string{"reviewer"}, Run: h.cmdApprove},
@@ -103,6 +105,27 @@ func (h *Hub) AgentExec(name string, args []string, out io.Writer) (int, error) 
 func (h *Hub) cmdStatus(c registry.Caller, _ []string, out io.Writer) (int, error) {
 	running := pod.Running(Container(c.Agent))
 	fmt.Fprintf(out, "agent:   %s\nrole:    %s\nrunning: %v\n", c.Agent, c.Role, running)
+	return 0, nil
+}
+
+// cmdLint runs the quality gate against the caller's own worktree (host-side)
+// and streams the result — so a worker can self-check before submitting.
+func (h *Hub) cmdLint(c registry.Caller, _ []string, out io.Writer) (int, error) {
+	a, ok, err := h.store.GetAgent(c.Agent)
+	if err != nil {
+		return 1, err
+	}
+	if !ok {
+		return 1, fmt.Errorf("unknown agent %q", c.Agent)
+	}
+	res, passed := h.runLint(filepath.Join(h.root, a.Workspace))
+	if strings.TrimSpace(res) == "" {
+		res = "lint: clean\n"
+	}
+	fmt.Fprint(out, res)
+	if !passed {
+		return 1, nil // non-zero so the agent knows the gate failed
+	}
 	return 0, nil
 }
 

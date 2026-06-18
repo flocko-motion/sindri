@@ -95,6 +95,8 @@ As a worker:
   /workspace.
 - Implement it by editing files in /workspace. Do NOT run git yourself — the hub
   commits your work when you submit.
+- ` + "`sindri-worker lint`" + ` runs the quality gate on your workspace — use it to
+  self-check and fix failures before submitting.
 - When done, ` + "`sindri-worker submit \"<one-line summary>\"`" + `. Then wait: the
   reviewer's verdict (or your next task) will be typed here.`
 	}
