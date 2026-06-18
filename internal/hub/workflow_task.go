@@ -236,16 +236,13 @@ func (h *Hub) AgentDirective(ctx context.Context, name string) (string, error) {
 	}
 	st, _ := h.store.GetState(name)
 	if a.Role == "planner" {
-		// A planner never auto-claims work. Idle, it orients itself and waits for
-		// the user to steer (the worker phases apply only if it took on a task).
-		switch st.Phase {
-		case "working":
-			return dirWorking(st.Task), nil
-		case "submitted":
+		// A planner never grabs backlog tasks. It orients and waits for the user;
+		// only an in-flight openspec PR (submitted) puts it in the wait-for-verdict
+		// state. Everything else → the planner brief.
+		if st.Phase == "submitted" {
 			return dirSubmitted, nil
-		default:
-			return dirPlanner, nil
 		}
+		return dirPlanner, nil
 	}
 	switch st.Phase {
 	case "working":

@@ -96,6 +96,36 @@ func CheckoutDetached(dir, ref string) error {
 	return nil
 }
 
+// EnsureBranch puts dir's worktree on branch name, creating it from base if it
+// doesn't exist yet — and preserving it (and any work on it) if it does. Used to
+// give a planner a standing branch to draft openspec on.
+func EnsureBranch(dir, name, base string) error {
+	if cur, _ := CurrentBranch(dir); cur == name {
+		return nil
+	}
+	if exec.Command("git", "-C", dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+name).Run() == nil {
+		if out, err := exec.Command("git", "-C", dir, "checkout", name).CombinedOutput(); err != nil {
+			return fmt.Errorf("checkout %s: %s: %w", name, strings.TrimSpace(string(out)), err)
+		}
+		return nil
+	}
+	if out, err := exec.Command("git", "-C", dir, "checkout", "-b", name, base).CombinedOutput(); err != nil {
+		return fmt.Errorf("create branch %s: %s: %w", name, strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// Ahead reports whether dir's HEAD has any commit not in base (i.e. there's
+// something to submit even with a clean worktree).
+func Ahead(dir, base string) bool {
+	out, err := exec.Command("git", "-C", dir, "rev-list", "--count", base+"..HEAD").Output()
+	if err != nil {
+		return false
+	}
+	n := strings.TrimSpace(string(out))
+	return n != "" && n != "0"
+}
+
 // Rebase rebases dir's current branch onto onto. It aborts a rebase that hits
 // conflicts (rather than leaving the worktree mid-rebase) and reports the error,
 // so the caller can treat it as best-effort.

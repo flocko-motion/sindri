@@ -97,6 +97,14 @@ func (h *Hub) container(name string) string { return Container(h.root, name) }
 // session is the tmux session name for an agent (named after the agent, D4).
 func session(name string) string { return name }
 
+// plannerBranch is a planner's standing branch — it drafts openspec here and
+// ships it via `openspec submit` (it never grabs a backlog task).
+func plannerBranch(name string) string { return "plan-" + name }
+
+// mockSpecTask is the placeholder todo id on a planner's openspec PR (there's no
+// real backlog task behind it).
+const mockSpecTask = "os-new"
+
 // New opens the hub for a project: ensures `.sindri/` exists and opens the DB.
 func New(root string) (*Hub, error) {
 	dir := filepath.Join(root, ".sindri")
@@ -276,6 +284,17 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 	}
 	if err := git.WorktreeAdd(h.root, wt, "HEAD"); err != nil {
 		return err
+	}
+	if a.Role == "planner" {
+		// Put the planner on its standing branch so it can draft openspec and ship
+		// it via `openspec submit` without ever grabbing a backlog task.
+		base, err := h.baseBranch()
+		if err != nil {
+			return err
+		}
+		if err := git.EnsureBranch(wt, plannerBranch(name), base); err != nil {
+			return err
+		}
 	}
 	// Serve the agent's own socket BEFORE the pod launches — the pod bind-mounts
 	// it, and the socket IS the agent's identity (D2). Requires the persistent

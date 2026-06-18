@@ -196,6 +196,56 @@ func (h *Hub) cmdSubmit(c registry.Caller, args []string, out io.Writer) (int, e
 	return 0, nil
 }
 
+// cmdOpenspec is the planner's ship verb: `openspec submit [message]` turns its
+// openspec edits into a PR — the same review→approve→merge cycle as a worker's,
+// just on the planner's standing branch and with the mock todo id os-new (there's
+// no backlog task behind it).
+func (h *Hub) cmdOpenspec(c registry.Caller, args []string, out io.Writer) (int, error) {
+	if len(args) == 0 || args[0] != "submit" {
+		return 1, fmt.Errorf("usage: openspec submit [message]")
+	}
+	a, _, _ := h.store.GetAgent(c.Agent)
+	wt := filepath.Join(h.root, a.Workspace)
+	base, err := h.baseBranch()
+	if err != nil {
+		return 1, err
+	}
+	branch := plannerBranch(c.Agent)
+	if !git.HasChanges(wt) && !git.Ahead(wt, base) {
+		fmt.Fprintln(out, "Nothing to submit — edit /workspace/openspec first.")
+		return 1, nil
+	}
+	if lintOut, ok := h.runLint(wt); !ok {
+		fmt.Fprintln(out, replyLintFail(strings.TrimSpace(lintOut)))
+		_ = h.store.Log(c.Agent, "lint-fail", branch)
+		return 1, nil
+	}
+	msg := strings.TrimSpace(strings.Join(args[1:], " "))
+	if msg == "" {
+		msg = "openspec update"
+	}
+	if err := git.CommitAll(wt, msg); err != nil {
+		return 1, err
+	}
+	pr := store.PR{ID: "pr-" + branch, Task: mockSpecTask, Agent: c.Agent, Branch: branch, Base: base, Status: "open"}
+	_, existed, _ := h.store.GetPR(pr.ID)
+	if err := h.store.PutPR(pr); err != nil {
+		return 1, err
+	}
+	if err := h.store.SetState(store.AgentState{Agent: c.Agent, Task: mockSpecTask, Branch: branch, Phase: "submitted"}); err != nil {
+		return 1, err
+	}
+	_ = h.store.Log(c.Agent, "submit", pr.ID)
+	if existed {
+		_ = h.store.LogPR(pr.ID, "resubmitted", "by "+c.Agent+": "+msg)
+	} else {
+		_ = h.store.LogPR(pr.ID, "created", "by "+c.Agent+": "+msg)
+	}
+	h.notifyReviewers(pr.ID, c.Agent)
+	fmt.Fprintln(out, replyRegistered(pr.ID))
+	return 0, nil
+}
+
 // cmdShowPR prints a PR's metadata and diff so a reviewer can judge it.
 func (h *Hub) cmdShowPR(_ registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) == 0 {
@@ -316,8 +366,15 @@ func (h *Hub) reject(prID, feedback string, byUser bool) error {
 		h.notify()
 		return nil
 	}
-	// Reviewer reject: the owning worker returns to working the same branch.
-	_ = h.store.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "working"})
+	// Reviewer reject: the owner returns to its branch to fix and resubmit. A
+	// worker goes back to "working" its task; a planner has no backlog task, so it
+	// drops to idle (its directive stays the planner brief) — the injected message
+	// drives the fix either way.
+	phase := "working"
+	if a, ok, _ := h.store.GetAgent(pr.Agent); ok && a.Role == "planner" {
+		phase = "idle"
+	}
+	_ = h.store.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: phase})
 	_ = h.store.LogPR(pr.ID, "rejected", "by reviewer: "+feedback)
 	_ = h.store.Log(pr.Agent, "reject", pr.ID+": "+feedback)
 	_ = h.injectWhenReady(pr.Agent, msgRejectedByReviewer(pr.ID, feedback))
@@ -432,10 +489,12 @@ func (h *Hub) Merge(prID string) (store.PR, error) {
 	if err := h.store.PutPR(pr); err != nil {
 		return store.PR{}, err
 	}
-	if err := td.Close(h.root, pr.Task, "merged via "+prID); err != nil {
-		fmt.Printf("warning: td close %s: %v\n", pr.Task, err)
+	if strings.HasPrefix(pr.Task, "td-") { // a planner's openspec PR has no real td task (os-new)
+		if err := td.Close(h.root, pr.Task, "merged via "+prID); err != nil {
+			fmt.Printf("warning: td close %s: %v\n", pr.Task, err)
+		}
+		_ = h.refreshTask(pr.Task)
 	}
-	_ = h.refreshTask(pr.Task)
 	_ = h.store.SetState(store.AgentState{Agent: pr.Agent, Phase: "idle"})
 	_ = h.store.Log(pr.Agent, "merged", prID)
 	_ = h.store.LogPR(prID, "merged", "into "+pr.Base)

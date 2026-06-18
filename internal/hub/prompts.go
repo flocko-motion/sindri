@@ -44,8 +44,10 @@ tasks on your own. Get oriented, then wait for the user to steer you.
 - ` + "`sindri-worker create-task \"<title>\"`" + ` proposes a task. It needs the user's
   approval before any worker can pick it up — you'll be told if it's approved or
   rejected (with a reason).
-- Draft specs in /workspace/openspec; when a change is ready, ` + "`sindri-worker submit \"<summary>\"`" + `
-  opens a PR the reviewer and user handle. After any merge, your branch is rebased for you.`
+- Draft specs in /workspace/openspec; ship them with ` + "`sindri-worker openspec submit \"<summary>\"`" + `,
+  which opens a PR the reviewer and user handle just like a worker's. After any
+  merge, your branch is rebased for you.
+- You never grab backlog tasks — that's the workers' job.`
 	case "reviewer":
 		return common + `
 
@@ -86,7 +88,7 @@ const dirSubmitted = "Your pull request is under review. Wait — the hub will t
 
 // dirPlanner is the idle planner's directive: orient, then wait for the user. A
 // planner is never auto-assigned work.
-const dirPlanner = "You're planning new features together with the user. Get oriented first: read README.md, read the backlog with `sindri-worker task list` (and `sindri-worker task <id>` for detail), and read the specs under /workspace/openspec. Then wait — the user will tell you what to plan. When you do: propose tasks with `sindri-worker create-task \"<title>\"` (each needs the user's approval) and draft specs in /workspace/openspec."
+const dirPlanner = "You're planning new features together with the user. Get oriented first: read README.md, read the backlog with `sindri-worker task list` (and `sindri-worker task <id>` for detail), and read the specs under /workspace/openspec. Then wait — the user will tell you what to plan. When you do: propose tasks with `sindri-worker create-task \"<title>\"` (each needs the user's approval), draft specs in /workspace/openspec, and ship them with `sindri-worker openspec submit \"<summary>\"`."
 
 func dirReview(prID, task string) string {
 	return fmt.Sprintf("Review %s (task %s): `sindri-worker show %s` and `sindri-worker lint %s`, then `sindri-worker approve %s` — or `sindri-worker reject %s \"<reason>\"`.",
@@ -120,7 +122,7 @@ func msgRejectedByUser(prID, feedback string) string {
 }
 
 func msgRejectedByReviewer(prID, feedback string) string {
-	return fmt.Sprintf("[reviewer] %s rejected: %s — please fix and 'sindri-worker submit' again.", prID, feedback)
+	return fmt.Sprintf("[reviewer] %s rejected: %s — please address the feedback and submit again.", prID, feedback)
 }
 
 func msgReviewReady(prID, worker string) string {
