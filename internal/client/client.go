@@ -143,6 +143,14 @@ func (c *HTTP) Commands() ([]hub.CmdInfo, error) {
 	return out, c.get("/commands", &out)
 }
 
+// Directive returns the hub's single next-action instruction for this agent.
+func (c *HTTP) Directive() (string, error) {
+	var ok struct {
+		Directive string `json:"ok"`
+	}
+	return ok.Directive, c.get("/directive", &ok)
+}
+
 // Exec runs a verb on the hub, streaming output to out, and returns the
 // command's exit code (carried back in the X-Sindri-Exit trailer).
 func (c *HTTP) Exec(args []string, out io.Writer) (int, error) {

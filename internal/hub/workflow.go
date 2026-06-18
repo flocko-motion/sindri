@@ -153,6 +153,41 @@ func (h *Hub) runLint(wt string) (output string, ok bool) {
 	return string(out), err == nil
 }
 
+// AgentDirective is the single next action the hub wants this agent to take —
+// the no-arg `sindri-worker` answer. The hub decides exactly what to do next;
+// the agent obeys (it never has to find work for itself).
+func (h *Hub) AgentDirective(name string) (string, error) {
+	a, ok, err := h.store.GetAgent(name)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("unknown agent %q", name)
+	}
+	if a.Role == "reviewer" {
+		prs, err := h.store.PRs()
+		if err != nil {
+			return "", err
+		}
+		for _, pr := range prs {
+			if pr.Status == "open" { // awaiting a verdict
+				return fmt.Sprintf("Review %s (task %s): run `sindri-worker show %s`, then `sindri-worker approve %s` — or `sindri-worker reject %s \"<reason>\"`.",
+					pr.ID, pr.Task, pr.ID, pr.ID, pr.ID), nil
+			}
+		}
+		return "Nothing is awaiting review. Wait — the hub will tell you when a pull request arrives.", nil
+	}
+	st, _ := h.store.GetState(name)
+	switch st.Phase {
+	case "working":
+		return fmt.Sprintf("Work on task %s. When your change is committed, run `sindri-worker submit \"<summary>\"`.", st.Task), nil
+	case "submitted":
+		return "Your pull request is under review. Wait — the hub will tell you the verdict.", nil
+	default: // idle
+		return "Claim your next task: run `sindri-worker next`.", nil
+	}
+}
+
 // SyncTasks refreshes the whole cached task set from its sources — td tasks and
 // openspec changes — so the generalized task list is multi-source. Caches all
 // statuses so UIs can filter open/closed/all client-side.

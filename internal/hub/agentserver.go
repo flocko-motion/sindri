@@ -97,6 +97,10 @@ func (h *Hub) agentHandler(name string) http.Handler {
 		cmds, err := h.AgentCommands(name)
 		writeJSON(w, cmds, err)
 	})
+	mux.HandleFunc("GET /directive", func(w http.ResponseWriter, r *http.Request) {
+		d, err := h.AgentDirective(name)
+		writeJSON(w, okMsg{d}, err)
+	})
 	mux.HandleFunc("POST /exec", func(w http.ResponseWriter, r *http.Request) {
 		var req ExecReq
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

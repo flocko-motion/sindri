@@ -375,10 +375,6 @@ var resumeEvents = map[string]bool{
 }
 
 func (h *Hub) rehydrate(name string) {
-	role := "worker"
-	if a, ok, _ := h.store.GetAgent(name); ok {
-		role = a.Role
-	}
 	evs, _ := h.store.Events(name, 40)
 	// Summarize only the agent's own work — not pod lifecycle (launch/stop/
 	// register) or injected messages — so resume context is signal, not noise.
@@ -390,17 +386,13 @@ func (h *Hub) rehydrate(name string) {
 	}
 	var msg string
 	if len(recent) == 0 { // no work yet — a fresh kickoff
-		if role == "reviewer" {
-			msg = "[hub] You're live. Run `sindri-worker prs` to see what needs review."
-		} else {
-			msg = "[hub] You're live. Run `sindri-worker next` to claim your first task."
-		}
+		msg = "[hub] You're live. Run `sindri-worker` and do exactly what it tells you."
 	} else {
 		if len(recent) > 5 { // just the last few
 			recent = recent[len(recent)-5:]
 		}
 		msg = "[hub] Resuming. Recently you did: " + strings.Join(recent, " · ") +
-			". Run `sindri-worker` for your options."
+			". Run `sindri-worker` for your next step."
 	}
 	// Let the agent program (Claude) boot to input-readiness before the kickoff,
 	// or its submitting Enter is eaten by the boot splash.

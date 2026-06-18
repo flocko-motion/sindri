@@ -1,11 +1,11 @@
 // package: main (sindri-worker) / main
 // type:    entrypoint (the agent's thin "browser")
 // job:     a role-agnostic client with NO built-in subcommands. It dials the
-//          hub over its mounted socket (its identity) and either lists what it
-//          may currently do (no args) or forwards a verb to the hub for
-//          execution, streaming the result. The hub decides everything.
-// limits:  knows no domain logic and no command tree — the surface comes from
-//          the hub (GET /commands); execution is hub-side (POST /exec).
+//          hub over its mounted socket (its identity). With no args the hub
+//          tells it exactly what to do next (GET /directive); otherwise it
+//          forwards a verb to the hub for execution (POST /exec), streaming the
+//          result. The hub decides everything — the agent just obeys.
+// limits:  knows no domain logic and no command tree.
 package main
 
 import (
@@ -23,18 +23,29 @@ func main() {
 	c := client.DialSocket(sock)
 	args := os.Args[1:]
 
-	// No args → ask the hub what this agent can do right now (the browser menu).
+	// No args → the hub tells you exactly what to do next (one directive, not a
+	// menu). The agent loop is simply: run `sindri-worker`, do what it says.
 	if len(args) == 0 {
+		d, err := c.Directive()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "cannot reach the hub — is it running?", err)
+			os.Exit(1)
+		}
+		fmt.Println(d)
+		return
+	}
+
+	// `sindri-worker commands` lists every verb currently available to you.
+	if args[0] == "commands" || args[0] == "help" {
 		cmds, err := c.Commands()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "cannot reach the hub — is it running?", err)
 			os.Exit(1)
 		}
-		fmt.Println("What you can do right now:")
+		fmt.Println("Available commands:")
 		for _, cmd := range cmds {
 			fmt.Printf("  %-10s %s\n", cmd.Name, cmd.Help)
 		}
-		fmt.Println("\nRun 'sindri-worker <command>' to act.")
 		return
 	}
 
