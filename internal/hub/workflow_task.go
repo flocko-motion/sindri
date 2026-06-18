@@ -13,12 +13,14 @@
 package hub
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/adapter/spec"
@@ -106,10 +108,17 @@ func (h *Hub) EditTask(id string, s TaskSpec) error {
 	return err
 }
 
+// workPollInterval re-checks for work while a directive is parked — frequent
+// enough to feel responsive, since external td edits don't notify the hub.
+const workPollInterval = 3 * time.Second
+
 // AgentDirective is the single next action the hub wants this agent to take —
-// the no-arg `sindri-worker` answer. The hub decides exactly what to do next;
-// the agent obeys (it never has to find work for itself).
-func (h *Hub) AgentDirective(name string) (string, error) {
+// the no-arg `sindri-worker` answer. The hub decides exactly what to do next; the
+// agent obeys (it never has to find work for itself, and never needs a second
+// command). When there is nothing to do it BLOCKS until there is — so the agent's
+// whole loop is "run `sindri-worker`, do what it says, repeat". ctx (the request)
+// cancels the wait when the agent's pod dies or it disconnects.
+func (h *Hub) AgentDirective(ctx context.Context, name string) (string, error) {
 	a, ok, err := h.store.GetAgent(name)
 	if err != nil {
 		return "", err
@@ -118,26 +127,51 @@ func (h *Hub) AgentDirective(name string) (string, error) {
 		return "", fmt.Errorf("unknown agent %q", name)
 	}
 	if a.Role == "reviewer" {
-		prs, err := h.store.PRs()
-		if err != nil {
-			return "", err
-		}
-		for _, pr := range prs {
-			if pr.Status == "open" { // awaiting a verdict
-				return fmt.Sprintf("Review %s (task %s): `sindri-worker show %s` and `sindri-worker lint %s`, then `sindri-worker approve %s` — or `sindri-worker reject %s \"<reason>\"`.",
-					pr.ID, pr.Task, pr.ID, pr.ID, pr.ID, pr.ID), nil
+		// Block until a pull request needs a verdict.
+		return h.waitForWork(ctx, func() (string, bool, error) {
+			prs, err := h.store.PRs()
+			if err != nil {
+				return "", false, err
 			}
-		}
-		return "Nothing is awaiting review. Wait — the hub will tell you when a pull request arrives.", nil
+			for _, pr := range prs {
+				if pr.Status == "open" {
+					return dirReview(pr.ID, pr.Task), true, nil
+				}
+			}
+			return "", false, nil
+		})
 	}
 	st, _ := h.store.GetState(name)
 	switch st.Phase {
 	case "working":
-		return fmt.Sprintf("Work on task %s. When your change is committed, run `sindri-worker submit \"<summary>\"`.", st.Task), nil
+		return dirWorking(st.Task), nil
 	case "submitted":
-		return "Your pull request is under review. Wait — the hub will tell you the verdict.", nil
-	default: // idle
-		return "Claim your next task: run `sindri-worker next`.", nil
+		return dirSubmitted, nil
+	default: // idle — claim the next task, blocking until one exists
+		return h.waitForWork(ctx, func() (string, bool, error) { return h.claimNext(name) })
+	}
+}
+
+// waitForWork blocks until check reports work is ready (returning its directive)
+// or ctx is cancelled. It re-checks on every hub change and on a short timer, so
+// it also picks up tasks created directly in td (which the hub doesn't observe).
+func (h *Hub) waitForWork(ctx context.Context, check func() (string, bool, error)) (string, error) {
+	ch, unsub := h.events.subscribe()
+	defer unsub()
+	for {
+		d, ready, err := check()
+		if err != nil {
+			return "", err
+		}
+		if ready {
+			return d, nil
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-ch: // a hub mutation — re-check
+		case <-time.After(workPollInterval): // re-sync td and re-check
+		}
 	}
 }
 
@@ -242,39 +276,53 @@ func toStoreTask(t issue.Task) store.Task {
 // Tasks are refreshed from the source of truth first (refresh-before-assignment,
 // D15) so a stale/closed task is never handed out.
 func (h *Hub) cmdNext(c registry.Caller, _ []string, out io.Writer) (int, error) {
-	if err := h.SyncTasks(); err != nil {
-		fmt.Fprintf(out, "warning: task sync failed (%v) — using cached tasks\n", err)
-	}
-	open, err := h.store.OpenTasks()
+	d, claimed, err := h.claimNext(c.Agent)
 	if err != nil {
 		return 1, err
 	}
-	if len(open) == 0 {
-		fmt.Fprintln(out, "No open tasks. Wait — the hub will tell you when there is work.")
+	if !claimed {
+		fmt.Fprintln(out, dirNoTasks)
 		return 0, nil
+	}
+	fmt.Fprintln(out, d)
+	return 0, nil
+}
+
+// claimNext claims the highest-priority open task for a worker — moving it to
+// in_progress, branching in the worker's worktree, and setting the worker
+// "working". Returns (directive, true) on a claim, ("", false) when nothing is
+// open. A td sync failure is non-fatal (it falls back to the cached task set).
+func (h *Hub) claimNext(agent string) (string, bool, error) {
+	_ = h.SyncTasks() // best-effort refresh from td/openspec; cached set on failure
+	open, err := h.store.OpenTasks()
+	if err != nil {
+		return "", false, err
+	}
+	if len(open) == 0 {
+		return "", false, nil
 	}
 	t := open[0]
 	base, err := h.baseBranch()
 	if err != nil {
-		return 1, err
+		return "", false, err
 	}
-	a, ok, err := h.store.GetAgent(c.Agent)
+	a, ok, err := h.store.GetAgent(agent)
 	if err != nil || !ok {
-		return 1, fmt.Errorf("agent %s missing: %v", c.Agent, err)
+		return "", false, fmt.Errorf("agent %s missing: %v", agent, err)
 	}
 	wt := filepath.Join(h.root, a.Workspace)
 	branch := t.ID
 	if err := td.SetStatus(h.root, t.ID, "in_progress"); err != nil {
-		return 1, err
+		return "", false, err
 	}
 	_ = h.refreshTask(t.ID)
 	if err := git.CreateBranch(wt, branch, base); err != nil {
-		return 1, err
+		return "", false, err
 	}
-	if err := h.store.SetState(store.AgentState{Agent: c.Agent, Task: t.ID, Branch: branch, Phase: "working"}); err != nil {
-		return 1, err
+	if err := h.store.SetState(store.AgentState{Agent: agent, Task: t.ID, Branch: branch, Phase: "working"}); err != nil {
+		return "", false, err
 	}
-	_ = h.store.Log(c.Agent, "claim", t.ID+" "+t.Title)
-	fmt.Fprintf(out, "Claimed %s: %s\nBranch:  %s (your /workspace)\nWhen done, run 'sindri-worker submit'.\n", t.ID, t.Title, branch)
-	return 0, nil
+	_ = h.store.Log(agent, "claim", t.ID+" "+t.Title)
+	h.notify()
+	return dirClaimed(t.ID, t.Title, branch), true, nil
 }

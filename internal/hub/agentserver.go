@@ -110,7 +110,9 @@ func (h *Hub) agentHandler(name string) http.Handler {
 		writeJSON(w, cmds, err)
 	})
 	mux.HandleFunc("GET /directive", func(w http.ResponseWriter, r *http.Request) {
-		d, err := h.AgentDirective(name)
+		// Blocks until the agent has something to do (or it disconnects) — the
+		// agent's whole loop is "run sindri-worker, do what it says, repeat".
+		d, err := h.AgentDirective(r.Context(), name)
 		writeJSON(w, okMsg{d}, err)
 	})
 	mux.HandleFunc("POST /exec", func(w http.ResponseWriter, r *http.Request) {

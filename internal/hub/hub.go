@@ -414,13 +414,12 @@ func (h *Hub) rehydrate(name string) {
 	}
 	var msg string
 	if len(recent) == 0 { // no work yet — a fresh kickoff
-		msg = "[hub] You're live. Run `sindri-worker` and do exactly what it tells you."
+		msg = msgKickoff
 	} else {
 		if len(recent) > 5 { // just the last few
 			recent = recent[len(recent)-5:]
 		}
-		msg = "[hub] Resuming. Recently you did: " + strings.Join(recent, " · ") +
-			". Run `sindri-worker` for your next step."
+		msg = msgResuming(strings.Join(recent, " · "))
 	}
 	// Let the agent program (Claude) boot to input-readiness before the kickoff,
 	// or its submitting Enter is eaten by the boot splash.

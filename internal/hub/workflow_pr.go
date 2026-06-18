@@ -54,9 +54,6 @@ func (h *Hub) PRInfo(id string) (PRDetail, error) {
 	return PRDetail{PR: pr, Task: task, Diff: diff, Reviews: reviews, Lint: lint, LintAt: lintAt, History: history}, nil
 }
 
-// defaultReviewPrompt seeds .sindri/review-prompt.txt the first time.
-const defaultReviewPrompt = "Review this PR for correctness, clarity, and fit to the task. Flag bugs, missing tests, and anything that should change."
-
 // ReviewPrompt returns the default agentic-review instruction, read from
 // .sindri/review-prompt.txt — auto-created with a built-in default if absent, so
 // the user can edit the standard prompt in a plain text file.
@@ -116,16 +113,7 @@ func (h *Hub) assignedReviewInject(reviewer string, pr store.PR, prID, requireme
 	if a, ok, _ := h.store.GetAgent(reviewer); ok {
 		checkedOut = git.CheckoutDetached(filepath.Join(h.root, a.Workspace), pr.Branch) == nil
 	}
-	// One precise, single-line instruction with literal branch/base.
-	seeChanges := fmt.Sprintf("`sindri-worker show %s`", prID)
-	loc := ""
-	if checkedOut {
-		seeChanges = fmt.Sprintf("`git diff %s` in /workspace (or `sindri-worker show %s`)", pr.Base, prID)
-		loc = fmt.Sprintf("PR branch %s is checked out in /workspace, based on %s. ", pr.Branch, pr.Base)
-	}
-	return h.injectWhenReady(reviewer, fmt.Sprintf(
-		"[hub] Review %s — %s %s(1) see what changed: %s. (2) check the gate: `sindri-worker lint %s`. (3) record your verdict: `sindri-worker review %s <pass|changes|fail> \"<findings>\"`.",
-		prID, requirement, loc, seeChanges, prID, prID))
+	return h.injectWhenReady(reviewer, msgReviewAssigned(prID, requirement, pr.Branch, pr.Base, checkedOut))
 }
 
 // runningReviewer returns the name of a live reviewer agent, or "".
@@ -165,7 +153,7 @@ func (h *Hub) cmdSubmit(c registry.Caller, args []string, out io.Writer) (int, e
 		return 1, err
 	}
 	if st.Phase != "working" || st.Task == "" {
-		fmt.Fprintln(out, "Nothing to submit — run 'sindri-worker next' to pick up a task first.")
+		fmt.Fprintln(out, replyNothingToSubmit)
 		return 1, nil
 	}
 	a, _, _ := h.store.GetAgent(c.Agent)
@@ -174,7 +162,7 @@ func (h *Hub) cmdSubmit(c registry.Caller, args []string, out io.Writer) (int, e
 	// project's quality gates. Runs against the worktree before the PR exists, so
 	// a failing worker just fixes and submits again.
 	if lintOut, ok := h.runLint(wt); !ok {
-		fmt.Fprintf(out, "Lint failed — fix the violations and submit again:\n%s\n", strings.TrimSpace(lintOut))
+		fmt.Fprintln(out, replyLintFail(strings.TrimSpace(lintOut)))
 		_ = h.store.Log(c.Agent, "lint-fail", st.Task)
 		return 1, nil
 	}
@@ -204,7 +192,7 @@ func (h *Hub) cmdSubmit(c registry.Caller, args []string, out io.Writer) (int, e
 		_ = h.store.LogPR(pr.ID, "created", "by "+c.Agent+": "+msg)
 	}
 	h.notifyReviewers(pr.ID, c.Agent)
-	fmt.Fprintf(out, "%s registered. You'll be informed when it's reviewed. Please wait — this may take a while.\n", pr.ID)
+	fmt.Fprintln(out, replyRegistered(pr.ID))
 	return 0, nil
 }
 
@@ -242,9 +230,7 @@ func (h *Hub) notifyReviewers(prID, worker string) {
 	for _, a := range roster {
 		if a.Role == "reviewer" {
 			name := a.Name
-			go h.injectWhenReady(name, fmt.Sprintf(
-				"[hub] %s from %s is ready for review. Run `sindri-worker show %s`, then `approve %s` or `reject %s <feedback>`.",
-				prID, worker, prID, prID, prID))
+			go h.injectWhenReady(name, msgReviewReady(prID, worker))
 		}
 	}
 }
@@ -326,7 +312,7 @@ func (h *Hub) reject(prID, feedback string, byUser bool) error {
 		// message is authoritative.
 		_ = h.store.LogPR(pr.ID, "rejected", "by user: "+feedback)
 		_ = h.store.Log(pr.Agent, "reject", pr.ID+" (user): "+feedback)
-		_ = h.injectWhenReady(pr.Agent, fmt.Sprintf("[user] %s was rejected: %s — stop working on it and wait for further instructions.", pr.ID, feedback))
+		_ = h.injectWhenReady(pr.Agent, msgRejectedByUser(pr.ID, feedback))
 		h.notify()
 		return nil
 	}
@@ -334,7 +320,7 @@ func (h *Hub) reject(prID, feedback string, byUser bool) error {
 	_ = h.store.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "working"})
 	_ = h.store.LogPR(pr.ID, "rejected", "by reviewer: "+feedback)
 	_ = h.store.Log(pr.Agent, "reject", pr.ID+": "+feedback)
-	_ = h.injectWhenReady(pr.Agent, fmt.Sprintf("[reviewer] %s rejected: %s — please fix and 'sindri-worker submit' again.", pr.ID, feedback))
+	_ = h.injectWhenReady(pr.Agent, msgRejectedByReviewer(pr.ID, feedback))
 	h.notify()
 	return nil
 }
@@ -453,7 +439,7 @@ func (h *Hub) Merge(prID string) (store.PR, error) {
 	_ = h.store.SetState(store.AgentState{Agent: pr.Agent, Phase: "idle"})
 	_ = h.store.Log(pr.Agent, "merged", prID)
 	_ = h.store.LogPR(prID, "merged", "into "+pr.Base)
-	_ = h.injectWhenReady(pr.Agent, fmt.Sprintf("[hub] %s merged. Run 'sindri-worker next' for the next task.", prID))
+	_ = h.injectWhenReady(pr.Agent, msgMerged(prID))
 	h.notify()
 	return pr, nil
 }
