@@ -16,6 +16,7 @@ import (
 	"go/token"
 	"io"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -25,11 +26,13 @@ var skipDirs = map[string]bool{".git": true, "vendor": true, "node_modules": tru
 
 // Write prints a code map of every .go file under root to w. maxDepth bounds
 // how many directory levels below root to descend (0 = root only, 1 = root +
-// immediate subdirs, …); a negative maxDepth means unlimited. When find is
-// non-empty, only files whose header or a decl contains it (case-insensitive)
-// are printed, and within them only the matching decls.
-func Write(w io.Writer, root string, maxDepth int, find string) error {
-	q := strings.ToLower(find)
+// immediate subdirs, …); a negative maxDepth means unlimited.
+//
+// fileQ (if non-empty) keeps only files whose path contains it. grepQ (if
+// non-empty) keeps only files whose source contains it, and within them only
+// the decls that enclose a match (both case-insensitive).
+func Write(w io.Writer, root string, maxDepth int, fileQ, grepQ string) error {
+	fq, gq := strings.ToLower(fileQ), strings.ToLower(grepQ)
 	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -50,7 +53,10 @@ func Write(w io.Writer, root string, maxDepth int, find string) error {
 		if e != nil {
 			rel = path
 		}
-		writeFile(w, rel, path, q)
+		if fq != "" && !strings.Contains(strings.ToLower(rel), fq) {
+			return nil // filename filter
+		}
+		writeFile(w, rel, path, gq)
 		return nil
 	})
 }
@@ -64,11 +70,18 @@ func dirDepth(root, path string) int {
 	return strings.Count(rel, string(filepath.Separator)) + 1
 }
 
-func writeFile(w io.Writer, rel, path, q string) {
+// unit is one mapped declaration: the lines to print plus its source line range
+// (doc comment through closing brace), used to test grep hits.
+type unit struct {
+	lines      []string
+	start, end int
+}
+
+func writeFile(w io.Writer, rel, path, grepQ string) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, nil, parser.ParseComments|parser.SkipObjectResolution)
 	if err != nil {
-		if q == "" {
+		if grepQ == "" {
 			fmt.Fprintf(w, "\n%s\n  // parse error: %v\n", rel, err)
 		}
 		return
@@ -80,29 +93,32 @@ func writeFile(w io.Writer, rel, path, q string) {
 			header = append(header, c.Text)
 		}
 	}
-	var units [][]string // one per func/type decl: doc lines + signature/type line(s)
+	var units []unit
 	for _, decl := range f.Decls {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
-			units = append(units, append(docLines(d.Doc), "  "+signature(fset, d)))
+			units = append(units, unit{append(docLines(d.Doc), "  "+signature(fset, d)),
+				startLine(fset, d.Doc, d.Pos()), fset.Position(d.End()).Line})
 		case *ast.GenDecl:
 			if d.Tok == token.TYPE {
-				units = append(units, typeUnit(fset, d))
+				units = append(units, unit{typeUnit(fset, d),
+					startLine(fset, d.Doc, d.Pos()), fset.Position(d.End()).Line})
 			}
 		}
 	}
 
-	if q != "" { // filter: keep only matching units; skip the file if nothing hits
+	if grepQ != "" { // keep only decls enclosing a source match; skip the file if none
+		hits := matchingLines(path, grepQ)
+		if len(hits) == 0 {
+			return
+		}
 		kept := units[:0]
 		for _, u := range units {
-			if matches(u, q) {
+			if anyInRange(hits, u.start, u.end) {
 				kept = append(kept, u)
 			}
 		}
 		units = kept
-		if len(units) == 0 && !matches(header, q) {
-			return
-		}
 	}
 
 	fmt.Fprintf(w, "\n%s\n", rel)
@@ -110,16 +126,44 @@ func writeFile(w io.Writer, rel, path, q string) {
 		fmt.Fprintln(w, l)
 	}
 	for _, u := range units {
-		for _, l := range u {
+		for _, l := range u.lines {
 			fmt.Fprintln(w, l)
 		}
 	}
 }
 
-// matches reports whether the query (already lowercased) appears in any of the
-// lines (case-insensitive).
-func matches(lines []string, q string) bool {
-	return strings.Contains(strings.ToLower(strings.Join(lines, "\n")), q)
+// startLine is a decl's first mapped line — its doc comment if any, else the
+// declaration keyword (so a grep hit in the doc counts as enclosed).
+func startLine(fset *token.FileSet, doc *ast.CommentGroup, pos token.Pos) int {
+	if doc != nil {
+		return fset.Position(doc.Pos()).Line
+	}
+	return fset.Position(pos).Line
+}
+
+// matchingLines returns the 1-based line numbers of path whose text contains q
+// (q already lowercased).
+func matchingLines(path, q string) []int {
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var hits []int
+	for i, line := range strings.Split(string(src), "\n") {
+		if strings.Contains(strings.ToLower(line), q) {
+			hits = append(hits, i+1)
+		}
+	}
+	return hits
+}
+
+func anyInRange(lines []int, start, end int) bool {
+	for _, ln := range lines {
+		if ln >= start && ln <= end {
+			return true
+		}
+	}
+	return false
 }
 
 // docLines returns a doc comment's raw lines, indented (nil if no doc).
