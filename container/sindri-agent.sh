@@ -43,9 +43,11 @@ if [ -n "${SINDRI_SHELL:-}" ]; then
 	tmux new-session -d -s "$SESSION" bash
 else
 	# Single-quote the command so $(cat ...) is evaluated by tmux's shell at
-	# session start, not here — the system prompt is multi-line.
+	# session start, not here — the system prompt is multi-line. When Claude
+	# exits, drop into an interactive shell (exec bash) so the session lives on
+	# and a dialed-in human lands at a prompt instead of the pane dying.
 	tmux new-session -d -s "$SESSION" \
-		'claude --dangerously-skip-permissions --append-system-prompt "$(cat /home/sindri/.claude/system-prompt.txt)"'
+		'claude --dangerously-skip-permissions --append-system-prompt "$(cat /home/sindri/.claude/system-prompt.txt)"; exec bash -i'
 fi
 
 # Belt-and-suspenders: re-source in case the server was already running.
