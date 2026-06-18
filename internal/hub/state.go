@@ -84,7 +84,8 @@ func (h *Hub) State() (BoardState, error) {
 
 // sessionAlive reports whether the agent's tmux session is up inside its pod.
 func (h *Hub) sessionAlive(name string) bool {
-	_, err := pod.Exec(Container(name), tmux.HasSession(name)...)
+	// tmux.* builders return the subcommand only — the command is "tmux".
+	_, err := pod.Exec(Container(name), append([]string{"tmux"}, tmux.HasSession(name)...)...)
 	return err == nil
 }
 
@@ -94,7 +95,8 @@ func (h *Hub) sessionAlive(name string) bool {
 // so a launch shows progress instead of silence. Empty when truly down.
 func (h *Hub) AgentPane(name string, lines int) (string, error) {
 	if h.sessionAlive(name) {
-		out, err := pod.Exec(Container(name), tmux.CapturePane(name, lines)...)
+		// tmux.* builders return the subcommand only — the command is "tmux".
+		out, err := pod.Exec(Container(name), append([]string{"tmux"}, tmux.CapturePane(name, lines)...)...)
 		if err != nil {
 			return "", err
 		}
