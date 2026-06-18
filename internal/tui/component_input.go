@@ -1,0 +1,52 @@
+// package: tui / component_input
+// type:    ui component (single-line input modal)
+// job:     the one-line text prompt used for "tell <agent>" and new-agent name
+//          entry — open it with openInput, route keys through updateInput, and
+//          submitInput runs the captured action.
+package tui
+
+import (
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+// updateInput routes a keypress to the open modal: esc cancels, enter submits,
+// everything else edits the field.
+func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.mode, m.inputTarget = inputNone, ""
+		m.input.Blur()
+		return m, nil
+	case "enter":
+		cmd := m.submitInput()
+		m.mode, m.inputTarget = inputNone, ""
+		m.input.Blur()
+		return m, cmd
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
+}
+
+// openInput starts a modal, capturing the current selection as its target.
+func (m *model) openInput(mode inputMode, prompt string) {
+	m.mode, m.inputTarget = mode, m.selID()
+	m.input.SetValue("")
+	m.input.Prompt = prompt
+	m.input.Focus()
+}
+
+// submitInput performs the modal's hub action with the entered value.
+func (m *model) submitInput() tea.Cmd {
+	v := strings.TrimSpace(m.input.Value())
+	if v == "" || m.cl == nil {
+		return nil
+	}
+	cl, target := m.cl, m.inputTarget
+	if m.mode == inputTell {
+		return func() tea.Msg { _ = cl.Tell(target, v, "user"); return nil }
+	}
+	return nil
+}

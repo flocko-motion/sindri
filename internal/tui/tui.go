@@ -65,6 +65,10 @@ type paneMsg struct {
 	agent string
 	text  string
 }
+type prLintMsg struct {
+	pr   string
+	text string
+}
 
 // paneLines is how many rows of an agent's tmux scrollback the detail shows.
 const paneLines = 200
@@ -116,8 +120,12 @@ type model struct {
 	agentLog   []store.Event
 	agentPane  string // captured tmux screen of the selected agent (live)
 	prDetail   hub.PRDetail
+	prLint     string // lint output for the selected PR (shown in the big pane)
 	taskDetail store.Task
 	quit       bool
+
+	modalOverride      []string // when set, the detail modal shows these instead of the tab detail
+	modalOverrideTitle string
 
 	mode        inputMode // active text-input modal
 	input       textinput.Model
@@ -226,6 +234,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.agent == m.selID() { // ignore a stale capture from a prior selection
 			m.agentPane = msg.text
 		}
+	case prLintMsg:
+		if msg.pr == m.selID() {
+			m.prLint = msg.text
+			m.detail.Resize(m.detail.Height, len(m.prContentLines())) // re-clamp for the new content
+		}
 	case prMsg:
 		m.prDetail = msg.d
 	case taskMsg:
@@ -261,24 +274,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateInput routes a keypress to the open modal: esc cancels, enter submits,
-// everything else edits the field.
-func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		m.mode, m.inputTarget = inputNone, ""
-		m.input.Blur()
-		return m, nil
-	case "enter":
-		cmd := m.submitInput()
-		m.mode, m.inputTarget = inputNone, ""
-		m.input.Blur()
-		return m, cmd
-	}
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-	return m, cmd
-}
 
 // updateChoice handles keys while a pick-one modal is open.
 func (m model) updateChoice(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -307,6 +302,7 @@ func (m model) updateModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "enter", "q":
 		m.modal = false
+		m.modalOverride, m.modalOverrideTitle = nil, ""
 		m.reclamp() // restore the inline detail viewport
 	case "j", "down":
 		m.detail.ScrollDown()
@@ -336,26 +332,6 @@ func (m model) modalTitle() string {
 	}
 }
 
-// openInput starts a modal, capturing the current selection as its target.
-func (m *model) openInput(mode inputMode, prompt string) {
-	m.mode, m.inputTarget = mode, m.selID()
-	m.input.SetValue("")
-	m.input.Prompt = prompt
-	m.input.Focus()
-}
-
-// submitInput performs the modal's hub action with the entered value.
-func (m *model) submitInput() tea.Cmd {
-	v := strings.TrimSpace(m.input.Value())
-	if v == "" || m.cl == nil {
-		return nil
-	}
-	cl, target := m.cl, m.inputTarget
-	if m.mode == inputTell {
-		return func() tea.Msg { _ = cl.Tell(target, v, "user"); return nil }
-	}
-	return nil
-}
 
 // onKey applies a key (by its string form) — shared by the live loop and the
 // headless Screenshot harness. Mutates the model; returns an optional cmd.
@@ -456,53 +432,43 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.openTaskForm(true)
 			return nil
 		} else if m.tab == 1 && m.selID() != "" {
-			id, cl := m.selID(), m.cl
-			m.choice = choiceModalState{
-				active: true, title: "role for " + id,
-				options: []string{"worker", "reviewer"}, values: []string{"worker", "reviewer"},
-				apply: func(v string) tea.Cmd {
-					return mutateThenRefresh(cl, func() { _ = cl.SetRole(id, v) })
-				},
-			}
+			m.openRoleChoice(m.selID())
 			return nil
 		}
 	case "D": // delete the selected agent (with confirm)
 		if m.tab == 1 && m.selID() != "" {
-			id, cl := m.selID(), m.cl
-			m.choice = choiceModalState{
-				active: true, title: "delete agent " + id + "?",
-				options: []string{"cancel", "delete"}, values: []string{"cancel", "delete"},
-				apply: func(v string) tea.Cmd {
-					if v != "delete" {
-						return nil
-					}
-					return mutateThenRefresh(cl, func() { _ = cl.DeleteAgent(id) })
-				},
-			}
+			m.openDeleteChoice(m.selID())
 			return nil
 		}
-	case "t": // tell the selected agent
+	case "t": // tell the selected agent (agents) / show linked task (prs)
 		if m.tab == 1 && m.selID() != "" {
 			m.openInput(inputTell, "tell "+m.selID()+": ")
 			return textinput.Blink
+		} else if m.tab == 2 {
+			if d := m.prDetail; d.PR.ID == m.selID() && d.Task.ID != "" {
+				m.openTaskModal(d.Task)
+			}
+			return nil
+		}
+	case "L": // prs: run the quality gate against the PR's worktree
+		if m.tab == 2 {
+			if id := m.selID(); id != "" && m.cl != nil {
+				return m.lintCmd(id)
+			}
+		}
+	case "R": // prs: reject with a (multiline) reason
+		if m.tab == 2 && m.selID() != "" {
+			m.openRejectForm(m.selID())
+			return nil
+		}
+	case "A": // prs: request an agentic review (editable instruction)
+		if m.tab == 2 && m.selID() != "" {
+			m.openReviewForm(m.selID())
+			return nil
 		}
 	case "p": // set the selected task's priority
 		if m.tab == 0 && m.selID() != "" {
-			id, cl := m.selID(), m.cl
-			vals := make([]string, len(hub.PriorityWords))
-			for i, w := range hub.PriorityWords {
-				vals[i] = hub.PriorityCode(w)
-			}
-			m.choice = choiceModalState{
-				active: true, title: "priority for " + id,
-				options: hub.PriorityWords, values: vals,
-				apply: func(code string) tea.Cmd {
-					if cl == nil {
-						return nil
-					}
-					return func() tea.Msg { _ = cl.SetPriority(id, code); return nil }
-				},
-			}
+			m.openPriorityChoice(m.selID())
 			return nil
 		}
 	case "enter": // open the full-screen detail modal
@@ -565,15 +531,24 @@ func (m *model) reclamp() {
 	n := len(m.rows())
 	m.cursor[m.tab] = clampInt(m.cursor[m.tab], 0, max(0, n-1))
 	listH := m.bodyHeight()
-	if m.tab == 1 && m.showDetail() { // agents: the list is the short top region
-		listH = m.agentListHeight()
+	if m.showDetail() { // agents/prs: the list is the short top region of a split
+		switch m.tab {
+		case 1:
+			listH = m.agentListHeight()
+		case 2:
+			listH = m.prListHeight()
+		}
 	}
 	m.list.SetHeight(listH)
 	m.list.SetTotal(n)
 	m.list.SetCursor(m.cursor[m.tab])
 	// Offset-driven scroll (J/K), preserved across re-layouts; reset to top only
 	// when the selection changes (syncDetail).
-	m.detail.Resize(m.bodyHeight(), len(m.detailLines()))
+	if m.tab == 2 && m.showDetail() { // PRs: detail pane is the big bottom-left content
+		m.detail.Resize(max(1, m.bodyHeight()-m.prListHeight()-1), len(m.prContentLines()))
+	} else {
+		m.detail.Resize(m.bodyHeight(), len(m.detailLines()))
+	}
 }
 
 // syncDetail fetches the selected item's rich detail when the selection changes.
@@ -599,6 +574,7 @@ func (m *model) syncDetail() tea.Cmd {
 			paneFetchCmd(cl, id),
 		)
 	default:
+		m.prLint = "" // new PR → show its diff, not the previous lint
 		return func() tea.Msg { d, _ := cl.PRInfo(id); return prMsg{id, d} }
 	}
 }
@@ -633,7 +609,7 @@ func (m model) contextFooter() string {
 	case 1:
 		return "N new · S start/stop · t tell · a attach · e role · D delete"
 	default:
-		return "m merge"
+		return "t task · A review · R reject · L lint · m merge"
 	}
 }
 
@@ -668,12 +644,18 @@ func (m model) View() string {
 		return choiceModal(m.choice.title, m.choice.options, m.choice.cursor, m.w, m.h)
 	}
 	if m.modal {
-		return modal(m.modalTitle(), m.detailLines(), m.detail, m.w, m.h)
+		title, lines := m.modalTitle(), m.detailLines()
+		if m.modalOverride != nil { // e.g. the task modal opened from the PRs tab
+			title, lines = m.modalOverrideTitle, m.modalOverride
+		}
+		return modal(title, lines, m.detail, m.w, m.h)
 	}
 	top := tabStrip(labels, m.tab, m.w)
 	var body string
 	if m.tab == 1 && m.showDetail() {
 		body = m.agentsBody() // bespoke: list + live tmux pane (left) · detail (right)
+	} else if m.tab == 2 && m.showDetail() {
+		body = m.prBody() // bespoke: list + diff/lint (left) · metadata+task+reviews (right)
 	} else if m.showDetail() {
 		left := pane(rowTexts(m.rows()), m.list, m.leftWidth(), m.cursor[m.tab])
 		right := pane(m.detailLines(), m.detail, m.detailWidth(), -1)

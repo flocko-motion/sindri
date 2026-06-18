@@ -146,15 +146,25 @@ func (m model) taskDetailLines() []string {
 			t = x
 		}
 	}
+	desc := ""
+	if m.taskDetail.ID == id {
+		desc = m.taskDetail.Description
+	}
+	return m.taskDetailFor(t, desc)
+}
+
+// taskDetailFor renders a task's detail block (used for the Tasks tab and, from
+// the PRs tab, the linked-task modal). desc is the (possibly empty) description.
+func (m model) taskDetailFor(t store.Task, desc string) []string {
 	assignee := "-"
 	for _, a := range m.state.Agents {
-		if a.Task == id {
+		if a.Task == t.ID {
 			assignee = a.Name
 		}
 	}
 	pr := "-"
 	for _, p := range m.state.PRs {
-		if p.Task == id && p.Status != "merged" {
+		if p.Task == t.ID && p.Status != "merged" {
 			pr = p.ID
 		}
 	}
@@ -168,9 +178,9 @@ func (m model) taskDetailLines() []string {
 		"pr:       " + pr,
 		"labels:   " + dash(t.Labels),
 	}
-	if m.taskDetail.ID == id && strings.TrimSpace(m.taskDetail.Description) != "" {
+	if strings.TrimSpace(desc) != "" {
 		ls = append(ls, "", "── description ──")
-		ls = append(ls, strings.Split(strings.TrimRight(m.taskDetail.Description, "\n"), "\n")...)
+		ls = append(ls, strings.Split(strings.TrimRight(desc, "\n"), "\n")...)
 	}
 	return ls
 }
@@ -251,6 +261,25 @@ func (m *model) openTaskForm(edit bool) {
 			return nil
 		}
 	})
+}
+
+// openPriorityChoice opens the priority picker for a task.
+func (m *model) openPriorityChoice(id string) {
+	cl := m.cl
+	vals := make([]string, len(hub.PriorityWords))
+	for i, w := range hub.PriorityWords {
+		vals[i] = hub.PriorityCode(w)
+	}
+	m.choice = choiceModalState{
+		active: true, title: "priority for " + id,
+		options: hub.PriorityWords, values: vals,
+		apply: func(code string) tea.Cmd {
+			if cl == nil {
+				return nil
+			}
+			return func() tea.Msg { _ = cl.SetPriority(id, code); return nil }
+		},
+	}
 }
 
 // taskIDs is the set of known task ids (for parent validation).

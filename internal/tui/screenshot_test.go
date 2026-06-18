@@ -68,6 +68,7 @@ func TestScreenshot(t *testing.T) {
 		Screenshot(b, 80, 22, "N", "tab", "tab", "tab", "x", "y", "z", "ctrl+s"))
 	fmt.Printf("\n========== edit-task form (e on the bug) ==========\n%s\n", Screenshot(b, 80, 22, "j", "j", "j", "j", "j", "e"))
 	fmt.Printf("\n========== Agents tab — wide 3-region layout (list+tmux | detail) ==========\n%s\n", Screenshot(b, 150, 24, "2"))
+	fmt.Printf("\n========== PRs tab — wide split (list+diff | metadata+task+reviews) ==========\n%s\n", Screenshot(b, 150, 24, "3"))
 	fmt.Printf("\n========== agent role choice (2, e) ==========\n%s\n", Screenshot(b, 70, 16, "2", "e"))
 	fmt.Printf("\n========== agent delete confirm (2, D) ==========\n%s\n", Screenshot(b, 70, 16, "2", "D"))
 	fmt.Printf("\n========== error modal (attach a down agent) ==========\n%s\n", Screenshot(b, 80, 16, "2", "j", "j", "a"))

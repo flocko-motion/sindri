@@ -17,6 +17,33 @@ import (
 	"github.com/flo-at/sindri/internal/hub"
 )
 
+// openRoleChoice opens the worker|reviewer picker for an agent.
+func (m *model) openRoleChoice(id string) {
+	cl := m.cl
+	m.choice = choiceModalState{
+		active: true, title: "role for " + id,
+		options: []string{"worker", "reviewer"}, values: []string{"worker", "reviewer"},
+		apply: func(v string) tea.Cmd {
+			return mutateThenRefresh(cl, func() { _ = cl.SetRole(id, v) })
+		},
+	}
+}
+
+// openDeleteChoice opens the delete-agent confirm.
+func (m *model) openDeleteChoice(id string) {
+	cl := m.cl
+	m.choice = choiceModalState{
+		active: true, title: "delete agent " + id + "?",
+		options: []string{"cancel", "delete"}, values: []string{"cancel", "delete"},
+		apply: func(v string) tea.Cmd {
+			if v != "delete" {
+				return nil
+			}
+			return mutateThenRefresh(cl, func() { _ = cl.DeleteAgent(id) })
+		},
+	}
+}
+
 // agentStartStop is the Start/Stop toggle for the selected agent: start it if
 // it's down, stop it if it's running, no-op while it's transitioning.
 func (m *model) agentStartStop() tea.Cmd {
