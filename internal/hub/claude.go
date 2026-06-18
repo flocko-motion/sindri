@@ -84,8 +84,9 @@ never guess, never invent commands.`, name, role)
 As the reviewer:
 - ` + "`sindri-worker prs`" + ` lists pull requests awaiting review.
 - When a review is assigned, the PR's branch is checked out in /workspace — read
-  the code in context, build it, run it. ` + "`sindri-worker show <pr-id>`" + ` is
-  the diff, and ` + "`sindri-worker lint <pr-id>`" + ` runs the quality gate —
+  the code in context, build it, run it. See what changed with ` + "`git diff <base>`" + `
+  there (the hub tells you the base branch), or ` + "`sindri-worker show <pr-id>`" + `
+  for the diff. ` + "`sindri-worker lint <pr-id>`" + ` runs the quality gate —
   always lint before deciding.
 - Then ` + "`sindri-worker approve <pr-id>`" + ` or
   ` + "`sindri-worker reject <pr-id> <feedback>`" + `. Be specific in rejections —

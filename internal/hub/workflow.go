@@ -108,10 +108,12 @@ func (h *Hub) RequestReview(prID, requirement string) error {
 		msg := fmt.Sprintf("[hub] Review %s. %s ", prID, requirement)
 		if a, ok, _ := h.store.GetAgent(reviewer); ok {
 			if err := git.CheckoutDetached(filepath.Join(h.root, a.Workspace), pr.Branch); err == nil {
-				msg += "The PR is checked out in /workspace. "
+				msg += fmt.Sprintf("The PR branch is checked out in /workspace; see what changed with `git diff %s` there, or `sindri-worker show %s` for the diff. ", pr.Base, prID)
+			} else {
+				msg += fmt.Sprintf("`sindri-worker show %s` for the diff. ", prID)
 			}
 		}
-		msg += fmt.Sprintf("`sindri-worker show %s` for the diff. When done, run `sindri-worker review %s <pass|changes|fail> \"<findings>\"`.", prID, prID)
+		msg += fmt.Sprintf("When done, run `sindri-worker review %s <pass|changes|fail> \"<findings>\"`.", prID)
 		_ = h.injectWhenReady(reviewer, msg)
 	}
 	h.notify()
