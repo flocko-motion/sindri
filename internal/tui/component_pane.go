@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/flo-at/sindri/internal/tui/scroll"
 )
 
@@ -48,31 +49,32 @@ func divider(h int) string {
 	return strings.Join(rows, "\n")
 }
 
-// padTrunc fits s to exactly w display cells (rune-count approximation): too long
-// is truncated with an ellipsis, too short is right-padded with spaces. Tabs are
-// expanded and other control characters dropped first: a raw tab is one rune but
-// several columns (overflows and wraps), and a carriage return snaps the cursor
-// to column 0 (text bleeds over the left edge) — both common in diffs.
+// padTrunc fits s to exactly w display cells: too long is truncated with an
+// ellipsis, too short is right-padded with spaces. ANSI-aware (lipgloss-styled
+// lines keep their colour and count by display width), with tabs expanded and
+// stray control chars dropped from plain lines first.
 func padTrunc(s string, w int) string {
 	if w <= 0 {
 		return ""
 	}
 	s = sanitize(s)
-	r := []rune(s)
-	if len(r) > w {
-		if w == 1 {
-			return "…"
-		}
-		return string(r[:w-1]) + "…"
+	if width := ansi.StringWidth(s); width > w {
+		return ansi.Truncate(s, w, "…")
+	} else {
+		return s + strings.Repeat(" ", w-width)
 	}
-	return s + strings.Repeat(" ", w-len(r))
 }
 
-// sanitize makes a line safe to render in a fixed-width cell: tabs become spaces
-// and all other control characters (CR, ANSI escapes, …) are dropped, so nothing
-// wraps or repositions the cursor.
+// sanitize makes a line safe to render in a fixed-width cell. A line carrying an
+// ANSI escape is lipgloss-styled and already well-formed — only its tabs are
+// expanded. A plain line additionally has stray control chars (CR, …) dropped,
+// since a raw tab overflows/wraps and a carriage return bleeds over the left
+// edge (both common in diffs).
 func sanitize(s string) string {
 	s = strings.ReplaceAll(s, "\t", "    ")
+	if strings.IndexByte(s, 0x1b) >= 0 { // contains ANSI — leave the sequences intact
+		return s
+	}
 	return strings.Map(func(r rune) rune {
 		if r < 0x20 || r == 0x7f {
 			return -1
