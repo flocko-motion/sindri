@@ -239,15 +239,34 @@ func (m *model) activateRightItem() tea.Cmd {
 	case "task":
 		m.openTaskModal(m.prDetail.Task)
 	case "path":
-		sh := os.Getenv("SHELL")
-		if sh == "" {
-			sh = "bash"
-		}
-		c := exec.Command(sh)
-		c.Dir = it.value
-		return tea.ExecProcess(c, func(error) tea.Msg { return nil })
+		return tea.ExecProcess(shellAt(it.value), func(error) tea.Msg { return nil })
 	}
 	return nil
+}
+
+// shellAt builds an interactive shell rooted at dir (for opening a workspace).
+func shellAt(dir string) *exec.Cmd {
+	sh := os.Getenv("SHELL")
+	if sh == "" {
+		sh = "bash"
+	}
+	c := exec.Command(sh)
+	c.Dir = dir
+	return c
+}
+
+// verifyCmd materializes a PR into the review workspace, then signals the loop
+// to open a shell there.
+func (m *model) verifyCmd(id string) tea.Cmd {
+	cl := m.cl
+	m.flash = "materializing " + id + " for review…"
+	return func() tea.Msg {
+		path, err := cl.MaterializeReview(id)
+		if err != nil {
+			return errModalMsg{err}
+		}
+		return reviewReadyMsg(path)
+	}
 }
 
 // reviewLine summarizes a review item: its state, verdict, and author.

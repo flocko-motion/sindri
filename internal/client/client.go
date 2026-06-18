@@ -228,6 +228,15 @@ func (c *HTTP) ReviewPrompt() (string, error) {
 	return ok.Prompt, c.get("/review-prompt", &ok)
 }
 
+// MaterializeReview checks a PR out into the reserved review workspace and
+// returns the path.
+func (c *HTTP) MaterializeReview(id string) (string, error) {
+	var ok struct {
+		Path string `json:"ok"`
+	}
+	return ok.Path, c.get("/pr/materialize?id="+url.QueryEscape(id), &ok)
+}
+
 // Tasks lists all cached tasks (refreshed from the source of truth).
 func (c *HTTP) Tasks() ([]store.Task, error) {
 	var out []store.Task

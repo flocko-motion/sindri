@@ -8,14 +8,23 @@ package tui
 
 import (
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/flo-at/sindri/internal/adapter/pod"
+	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/hub"
 )
+
+// attachCmd builds the interactive `podman exec -it … tmux attach` for an agent.
+func attachCmd(name string) *exec.Cmd {
+	args := append([]string{"exec", "-it", hub.Container(name), "tmux"}, tmux.Attach(name, false)...)
+	return exec.Command(pod.Binary, args...)
+}
 
 // openRoleChoice opens the worker|reviewer picker for an agent.
 func (m *model) openRoleChoice(id string) {

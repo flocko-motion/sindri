@@ -177,6 +177,10 @@ func (h *Hub) Handler() http.Handler {
 		p, err := h.ReviewPrompt()
 		writeJSON(w, okMsg{p}, err)
 	})
+	mux.HandleFunc("GET /pr/materialize", func(w http.ResponseWriter, r *http.Request) {
+		path, err := h.MaterializeReview(r.URL.Query().Get("id"))
+		writeJSON(w, okMsg{path}, err)
+	})
 	mux.HandleFunc("GET /tasks", func(w http.ResponseWriter, r *http.Request) {
 		tasks, err := h.Tasks()
 		writeJSON(w, tasks, err)

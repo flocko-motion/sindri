@@ -48,6 +48,7 @@ type backend interface {
 	RejectPR(id, feedback string) error
 	LintPR(id string) (string, error)
 	RequestReview(id, requirement string) error
+	MaterializeReview(id string) (string, error)
 	Merge(id string) (store.PR, error)
 	Close() error
 }
@@ -448,8 +449,24 @@ func splitCSV(s string) []string {
 
 func newPrCmd() *cobra.Command {
 	c := &cobra.Command{Use: "pr", Short: "Inspect and merge pull requests (merge-intents)"}
-	c.AddCommand(prListCmd(), prInfoCmd(), prReviewCmd(), prRejectCmd(), prLintCmd(), prMergeCmd())
+	c.AddCommand(prListCmd(), prInfoCmd(), prReviewCmd(), prVerifyCmd(), prRejectCmd(), prLintCmd(), prMergeCmd())
 	return c
+}
+
+func prVerifyCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "verify <pr-id>", Short: "Check the PR out into the review workspace for hands-on inspection", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withBackend(func(b backend) error {
+				path, err := b.MaterializeReview(args[0])
+				if err != nil {
+					return err
+				}
+				fmt.Println(path) // the worktree path — cd there to inspect
+				return nil
+			})
+		},
+	}
 }
 
 func prReviewCmd() *cobra.Command {

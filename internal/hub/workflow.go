@@ -540,6 +540,26 @@ func (h *Hub) RejectPR(prID, feedback string) error {
 	return nil
 }
 
+// MaterializeReview checks out a PR's branch (detached) into the reserved
+// .worktrees/review workspace, so a human can inspect, build, and run it.
+// Returns the path. Detached HEAD avoids conflicting with the agent's own
+// worktree, which holds the same branch.
+func (h *Hub) MaterializeReview(prID string) (string, error) {
+	pr, ok, err := h.store.GetPR(prID)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("no such PR %q", prID)
+	}
+	path := filepath.Join(h.root, ".worktrees", "review")
+	_ = git.WorktreeRemove(h.root, path) // fresh checkout each time
+	if err := git.WorktreeAdd(h.root, path, pr.Branch); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
 // LintPR runs the quality gate (`sindri lint all`) against a PR's worktree and
 // returns the output, headed with PASS/FAIL.
 func (h *Hub) LintPR(prID string) (string, error) {

@@ -11,7 +11,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -19,8 +18,6 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/flo-at/sindri/internal/adapter/pod"
-	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -70,6 +67,7 @@ type prLintMsg struct {
 	text string
 }
 type reviewPromptMsg string
+type reviewReadyMsg string // the review-workspace path to open a shell in
 
 // paneLines is how many rows of an agent's tmux scrollback the detail shows.
 const paneLines = 200
@@ -259,6 +257,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case reviewPromptMsg:
 		m.reviewPrompt = string(msg)
+	case reviewReadyMsg: // PR materialized — drop into a shell in the review workspace
+		return m, tea.ExecProcess(shellAt(string(msg)), func(error) tea.Msg { return nil })
 	case prMsg:
 		m.prDetail = msg.d
 	case taskMsg:
@@ -457,6 +457,12 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.openRejectForm(m.selID())
 			return nil
 		}
+	case "V": // prs: verify — materialize the PR into the review workspace + shell in
+		if m.tab == 2 {
+			if id := m.selID(); id != "" && m.cl != nil {
+				return m.verifyCmd(id)
+			}
+		}
 	case "A": // prs: request an agentic review (editable instruction)
 		if m.tab == 2 && m.selID() != "" {
 			m.openReviewForm(m.selID())
@@ -520,11 +526,6 @@ func (m *model) action(fn func(id string) error) tea.Cmd {
 	}
 }
 
-// attachCmd builds the interactive `podman exec -it … tmux attach` for an agent.
-func attachCmd(name string) *exec.Cmd {
-	args := append([]string{"exec", "-it", hub.Container(name), "tmux"}, tmux.Attach(name, false)...)
-	return exec.Command(pod.Binary, args...)
-}
 
 // reclamp keeps the active tab's cursor + both viewports in range.
 func (m *model) reclamp() {
@@ -613,7 +614,7 @@ func (m model) contextFooter() string {
 		if m.rightFocus {
 			return "j/k item · enter open · y copy · h back to list"
 		}
-		return "l focus detail · t task · A review · R reject · L lint · m merge"
+		return "l focus · V verify · A review · R reject · L lint · m merge"
 	}
 }
 
