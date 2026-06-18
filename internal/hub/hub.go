@@ -198,31 +198,6 @@ func (h *Hub) StopAgent(name string) error {
 	return nil
 }
 
-// SetRole changes an agent's role (worker|reviewer). The role is hub-side state
-// the agent can't see; a running agent picks up the new role on its next
-// launch/rehydrate.
-func (h *Hub) SetRole(name, role string) error {
-	if role != "worker" && role != "reviewer" {
-		return fmt.Errorf("invalid role %q (worker|reviewer)", role)
-	}
-	a, ok, err := h.store.GetAgent(name)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("no such agent %q", name)
-	}
-	a.Role = role
-	if err := h.store.PutAgent(a); err != nil {
-		return err
-	}
-	if err := h.store.Log(name, "role", "role="+role); err != nil {
-		return err
-	}
-	h.notify()
-	return nil
-}
-
 // Launch spins a pod that assumes an existing agent's identity. The agent's
 // workspace worktree is created on demand; the pod runs interactive Claude in a
 // tmux session named after the agent (or a bare shell when shell is true — used

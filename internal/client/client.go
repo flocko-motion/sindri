@@ -111,11 +111,6 @@ func (c *HTTP) StopAgent(name string) error {
 	return c.post("/agent/stop", hub.NameReq{Name: name})
 }
 
-// SetRole changes an agent's role (worker|reviewer).
-func (c *HTTP) SetRole(name, role string) error {
-	return c.post("/agent/role", hub.AgentReq{Name: name, Role: role})
-}
-
 // AgentPane returns the last `lines` rows of the agent's tmux pane (plain text).
 func (c *HTTP) AgentPane(name string, lines int) (string, error) {
 	var ok struct {

@@ -436,17 +436,13 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 0 {
 			m.openTaskForm(false)
 			return nil
-		} else if m.tab == 1 { // agents: auto-named after a dwarf
-			cl := m.cl
-			m.flash = "registering a new agent…"
-			return mutateThenRefresh(cl, func() { _, _ = cl.NewAgent("", "worker") })
+		} else if m.tab == 1 { // agents: pick the role, then auto-name after a dwarf
+			m.openNewAgentChoice()
+			return nil
 		}
-	case "e": // edit the selected task (tasks) / set role (agents)
+	case "e": // edit the selected task (agents have no editable fields — role is fixed at creation)
 		if m.tab == 0 && m.selID() != "" {
 			m.openTaskForm(true)
-			return nil
-		} else if m.tab == 1 && m.selID() != "" {
-			m.openRoleChoice(m.selID())
 			return nil
 		}
 	case "D": // delete the selected agent (with confirm)
@@ -618,7 +614,7 @@ func (m model) contextFooter() string {
 	case 0:
 		return fmt.Sprintf("N new · e edit · p priority · f filter: %s · h/l fold", filterNames[m.filter])
 	case 1:
-		return "N new · S start/stop · t tell · a attach · e role · D delete"
+		return "N new · S start/stop · t tell · a attach · D delete"
 	default:
 		return "V verify · A agent-review · R reject · L lint · m merge"
 	}

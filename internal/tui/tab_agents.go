@@ -26,14 +26,15 @@ func attachCmd(name string) *exec.Cmd {
 	return exec.Command(pod.Binary, args...)
 }
 
-// openRoleChoice opens the worker|reviewer picker for an agent.
-func (m *model) openRoleChoice(id string) {
+// openNewAgentChoice opens the worker|reviewer picker for a new agent. The role
+// is fixed at creation — there is no way to change it later.
+func (m *model) openNewAgentChoice() {
 	cl := m.cl
 	m.choice = choiceModalState{
-		active: true, title: "role for " + id,
+		active: true, title: "new agent role",
 		options: []string{"worker", "reviewer"}, values: []string{"worker", "reviewer"},
 		apply: func(v string) tea.Cmd {
-			return mutateThenRefresh(cl, func() { _ = cl.SetRole(id, v) })
+			return mutateThenRefresh(cl, func() { _, _ = cl.NewAgent("", v) })
 		},
 	}
 }
