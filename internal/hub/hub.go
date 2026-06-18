@@ -53,7 +53,8 @@ var nameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
 // repoTag is a short, stable per-repo id derived from the absolute project root.
 // It scopes container names so two repos that reuse an agent name (the dwarf
-// pool is small) don't collide in podman's host-global namespace.
+// pool is small) don't collide in podman's host-global namespace. The digest is
+// one-way — see repoSlug for the human-readable half.
 func repoTag(root string) string {
 	abs, err := filepath.Abs(root)
 	if err != nil {
@@ -63,9 +64,32 @@ func repoTag(root string) string {
 	return hex.EncodeToString(sum[:4]) // 8 hex chars — plenty to separate repos
 }
 
+// repoSlug is the repo's directory name, lowercased and reduced to podman-safe
+// characters, so `podman ps` is eyeballable (the digest disambiguates two repos
+// that share a basename).
+func repoSlug(root string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(filepath.Base(root)) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	s := b.String()
+	if s == "" {
+		s = "repo"
+	}
+	if len(s) > 16 {
+		s = s[:16]
+	}
+	return s
+}
+
 // Container is the podman container name for an agent, scoped to its repo so it
-// never collides with a same-named agent in another repo.
-func Container(root, name string) string { return "sindri-" + repoTag(root) + "-" + name }
+// never collides with a same-named agent in another repo:
+// sindri-<slug>-<digest>-<name> (slug for humans, digest for uniqueness).
+func Container(root, name string) string {
+	return "sindri-" + repoSlug(root) + "-" + repoTag(root) + "-" + name
+}
 
 // container is Container bound to this hub's repo (the common in-hub case).
 func (h *Hub) container(name string) string { return Container(h.root, name) }
