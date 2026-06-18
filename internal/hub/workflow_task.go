@@ -142,12 +142,12 @@ func (h *Hub) cmdCreateTask(_ registry.Caller, args []string, out io.Writer) (in
 	return 0, nil
 }
 
-// cmdTasks lets a planner read the backlog: with no args it lists every task
-// (status, approval, priority, title); with an id it prints that task's full
+// cmdTasks lets a planner read the backlog: `task list` (or no arg) lists every
+// task (status, approval, priority, title); `task <id>` prints that task's full
 // detail including description.
 func (h *Hub) cmdTasks(_ registry.Caller, args []string, out io.Writer) (int, error) {
 	_ = h.SyncTasks()
-	if len(args) > 0 {
+	if len(args) > 0 && args[0] != "list" {
 		t, err := h.TaskInfo(args[0])
 		if err != nil {
 			return 1, err
@@ -235,6 +235,18 @@ func (h *Hub) AgentDirective(ctx context.Context, name string) (string, error) {
 		})
 	}
 	st, _ := h.store.GetState(name)
+	if a.Role == "planner" {
+		// A planner never auto-claims work. Idle, it orients itself and waits for
+		// the user to steer (the worker phases apply only if it took on a task).
+		switch st.Phase {
+		case "working":
+			return dirWorking(st.Task), nil
+		case "submitted":
+			return dirSubmitted, nil
+		default:
+			return dirPlanner, nil
+		}
+	}
 	switch st.Phase {
 	case "working":
 		return dirWorking(st.Task), nil

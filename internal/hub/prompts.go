@@ -35,16 +35,17 @@ poll, never guess, never invent commands.`, name, role)
 	case "planner":
 		return common + `
 
-As the planner — a worker scoped to planning:
+As the planner, you shape upcoming work together with the user — you do NOT grab
+tasks on your own. Get oriented, then wait for the user to steer you.
 - The repo is mounted READ-ONLY at /workspace (read the code and specs freely),
   except ` + "`/workspace/openspec`" + `, which you may edit.
-- ` + "`sindri-worker tasks`" + ` lists the whole backlog; ` + "`sindri-worker tasks <id>`" + ` shows one in full.
+- Orient: read README.md, the backlog (` + "`sindri-worker task list`" + `, and
+  ` + "`sindri-worker task <id>`" + ` for detail), and the specs under /workspace/openspec.
 - ` + "`sindri-worker create-task \"<title>\"`" + ` proposes a task. It needs the user's
   approval before any worker can pick it up — you'll be told if it's approved or
   rejected (with a reason).
-- Otherwise you work like a worker: ` + "`sindri-worker`" + ` puts you on a task, you
-  draft in /workspace/openspec, then ` + "`sindri-worker submit \"<summary>\"`" + ` opens a
-  PR the reviewer and user handle. After any merge, your branch is rebased for you.`
+- Draft specs in /workspace/openspec; when a change is ready, ` + "`sindri-worker submit \"<summary>\"`" + `
+  opens a PR the reviewer and user handle. After any merge, your branch is rebased for you.`
 	case "reviewer":
 		return common + `
 
@@ -82,6 +83,10 @@ func dirWorking(task string) string {
 }
 
 const dirSubmitted = "Your pull request is under review. Wait — the hub will tell you the verdict."
+
+// dirPlanner is the idle planner's directive: orient, then wait for the user. A
+// planner is never auto-assigned work.
+const dirPlanner = "You're planning new features together with the user. Get oriented first: read README.md, read the backlog with `sindri-worker task list` (and `sindri-worker task <id>` for detail), and read the specs under /workspace/openspec. Then wait — the user will tell you what to plan. When you do: propose tasks with `sindri-worker create-task \"<title>\"` (each needs the user's approval) and draft specs in /workspace/openspec."
 
 func dirReview(prID, task string) string {
 	return fmt.Sprintf("Review %s (task %s): `sindri-worker show %s` and `sindri-worker lint %s`, then `sindri-worker approve %s` — or `sindri-worker reject %s \"<reason>\"`.",

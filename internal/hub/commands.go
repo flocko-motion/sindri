@@ -40,7 +40,7 @@ func (h *Hub) registry() *registry.Registry {
 		registry.Command{Name: "lint", Help: "run the quality gate: lint (your workspace) or lint <pr-id> (a PR)", Run: h.cmdLint},
 		registry.Command{Name: "submit", Help: "request your branch be merged: submit [message]", Roles: []string{"worker", "planner"},
 			Hidden: func(c registry.Caller) bool { return !c.HasTask }, Run: h.cmdSubmit},
-		registry.Command{Name: "tasks", Help: "read the backlog: tasks (list all) or tasks <id> (full detail)", Roles: []string{"planner"}, Run: h.cmdTasks},
+		registry.Command{Name: "task", Help: "read the backlog: task list (all) or task <id> (full detail)", Roles: []string{"planner"}, Run: h.cmdTasks},
 		registry.Command{Name: "create-task", Help: "propose a new task (needs the user's approval): create-task <title...>", Roles: []string{"planner"}, Run: h.cmdCreateTask},
 		registry.Command{Name: "approve", Help: "approve a pull request: approve [pr-id]", Roles: []string{"reviewer"}, Run: h.cmdApprove},
 		registry.Command{Name: "reject", Help: "reject a pull request: reject <pr-id> <feedback...>", Roles: []string{"reviewer"}, Run: h.cmdReject},
