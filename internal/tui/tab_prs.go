@@ -26,7 +26,11 @@ const defaultReviewPrompt = "Review this PR for correctness, clarity, and fit to
 // result in the big content pane.
 func (m *model) lintCmd(id string) tea.Cmd {
 	cl := m.cl
-	m.prLint = "running lint…"
+	m.flash = "linting " + id + "…"
+	m.prDetail.Lint = "running lint…" // shown immediately; replaced by the result
+	m.prView = "lint"
+	m.rightFocus = true
+	m.rightCursor = m.viewCursor("lint")
 	return func() tea.Msg {
 		out, err := cl.LintPR(id)
 		if err != nil {
@@ -34,6 +38,29 @@ func (m *model) lintCmd(id string) tea.Cmd {
 		}
 		return prLintMsg{id, out}
 	}
+}
+
+// viewCursor is the actionable index of the view-selector item for a view.
+func (m model) viewCursor(val string) int {
+	for i, it := range m.prActionable() {
+		if it.kind == "view" && it.value == val {
+			return i
+		}
+	}
+	return 0
+}
+
+// lintStatus summarizes a PR's stored lint result for the selector label.
+func lintStatus(lint string) string {
+	switch {
+	case strings.TrimSpace(lint) == "":
+		return "not linted"
+	case strings.HasPrefix(lint, "lint PASS"):
+		return "PASS"
+	case strings.HasPrefix(lint, "lint FAIL"):
+		return "FAIL"
+	}
+	return "done"
 }
 
 // openTaskModal shows a PR's linked task in the full-screen detail modal —
@@ -151,14 +178,18 @@ func (m model) prBody() string {
 
 // prContentLines is the big left pane: the lint output if one was just run,
 // otherwise the diff.
+// prContentLines is the big left pane, driven by the selected view (diff/lint).
 func (m model) prContentLines() []string {
-	if strings.TrimSpace(m.prLint) != "" {
-		return append([]string{dimStyle.Render("── lint ──"), ""},
-			strings.Split(strings.TrimRight(m.prLint, "\n"), "\n")...)
-	}
 	d := m.prDetail
 	if d.PR.ID != m.selID() {
 		return []string{dimStyle.Render("(loading…)")}
+	}
+	if m.prView == "lint" {
+		if strings.TrimSpace(d.Lint) == "" {
+			return []string{dimStyle.Render("(not linted — press L to run)")}
+		}
+		return append([]string{dimStyle.Render("── lint ──"), ""},
+			strings.Split(strings.TrimRight(d.Lint, "\n"), "\n")...)
 	}
 	if strings.TrimSpace(d.Diff) == "" {
 		return []string{dimStyle.Render("(no diff)")}
@@ -182,11 +213,24 @@ func (m model) prMetaItems() []metaItem {
 	if d.PR.ID != m.selID() {
 		return []metaItem{{text: m.selID()}, {text: dimStyle.Render("(loading…)")}}
 	}
-	items := []metaItem{
-		{text: d.PR.ID},
-		{text: "status: " + d.PR.Status},
-		{text: "agent:  " + d.PR.Agent, kind: "agent", value: d.PR.Agent},
+	// View selectors drive the big content pane (ENTER switches it).
+	view := func(val, label string) metaItem {
+		mark := "  "
+		if m.prView == val || (m.prView == "" && val == "diff") {
+			mark = "▸ "
+		}
+		return metaItem{text: mark + label, kind: "view", value: val}
 	}
+	items := []metaItem{
+		view("diff", "diff"),
+		view("lint", "lint ("+lintStatus(d.Lint)+")"),
+		{text: ""},
+	}
+	items = append(items,
+		metaItem{text: d.PR.ID},
+		metaItem{text: "status: " + d.PR.Status},
+		metaItem{text: "agent:  " + d.PR.Agent, kind: "agent", value: d.PR.Agent},
+	)
 	if ws := m.agentWorkspace(d.PR.Agent); ws != "" {
 		items = append(items, metaItem{text: "path:   " + ws, kind: "path", value: ws})
 	}

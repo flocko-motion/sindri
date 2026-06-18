@@ -123,7 +123,7 @@ type model struct {
 	agentLog   []store.Event
 	agentPane  string // captured tmux screen of the selected agent (live)
 	prDetail     hub.PRDetail
-	prLint       string // lint output for the selected PR (shown in the big pane)
+	prView       string // which content the PR big pane shows: "diff" (default) | "lint"
 	reviewPrompt string // editable default review instruction (from the hub)
 	taskDetail   store.Task
 	quit       bool
@@ -258,9 +258,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.agentPane = msg.text
 		}
 	case prLintMsg:
-		if msg.pr == m.selID() {
-			m.prLint = msg.text
-			m.detail.Resize(m.detail.Height, len(m.prContentLines())) // re-clamp for the new content
+		if msg.pr == m.selID() { // store the result, switch to the lint view, focus it
+			m.prDetail.Lint = msg.text
+			m.prView = "lint"
+			m.rightFocus = true
+			m.rightCursor = m.viewCursor("lint")
+			m.detail.Resize(m.detail.Height, len(m.prContentLines()))
 		}
 	case reviewPromptMsg:
 		m.reviewPrompt = string(msg)
@@ -489,12 +492,17 @@ func (m *model) onKey(k string) tea.Cmd {
 			return nil
 		}
 	case "enter":
-		if m.rightFocus { // focused cross-ref: open its details (paths open a shell)
+		if m.rightFocus { // act on the focused detail item
 			if it, ok := m.focusedItem(); ok {
-				if it.kind == "path" {
+				switch it.kind {
+				case "view": // switch the big content pane (diff/lint)
+					m.prView = it.value
+					m.detail.Resize(m.detail.Height, len(m.prContentLines()))
+				case "path": // open a shell in the workspace
 					return tea.ExecProcess(shellAt(it.value), func(error) tea.Msg { return nil })
+				default: // cross-reference: open its details modal
+					m.openItemModal(it.kind, it.value)
 				}
-				m.openItemModal(it.kind, it.value)
 			}
 			return nil
 		}
@@ -574,7 +582,7 @@ func (m *model) syncDetail() tea.Cmd {
 			paneFetchCmd(cl, id),
 		)
 	default:
-		m.prLint = "" // new PR → show its diff, not the previous lint
+		m.prView = "diff" // new PR → show its diff (its stored lint loads via PRInfo)
 		return func() tea.Msg { d, _ := cl.PRInfo(id); return prMsg{id, d} }
 	}
 }

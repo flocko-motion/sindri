@@ -43,6 +43,8 @@ type PRDetail struct {
 	Task    store.Task     `json:"task"`
 	Diff    string         `json:"diff"`
 	Reviews []store.Review `json:"reviews"`
+	Lint    string         `json:"lint"`    // latest stored lint output ("" = never run)
+	LintAt  string         `json:"lint_at"` // when it was run
 }
 
 // PRInfo returns a PR with its linked task and diff.
@@ -57,7 +59,8 @@ func (h *Hub) PRInfo(id string) (PRDetail, error) {
 	diff, _ := git.Diff(h.root, pr.Base, pr.Branch)
 	task, _ := h.TaskInfo(pr.Task) // linked task; zero value if it can't be read
 	reviews, _ := h.store.Reviews(id)
-	return PRDetail{PR: pr, Task: task, Diff: diff, Reviews: reviews}, nil
+	lint, lintAt := h.store.GetPRLint(id)
+	return PRDetail{PR: pr, Task: task, Diff: diff, Reviews: reviews, Lint: lint, LintAt: lintAt}, nil
 }
 
 // defaultReviewPrompt seeds .sindri/review-prompt.txt the first time.
@@ -602,7 +605,9 @@ func (h *Hub) LintPR(prID string) (string, error) {
 	if strings.TrimSpace(out) == "" {
 		out = "(no output)\n"
 	}
-	return fmt.Sprintf("lint %s\n\n%s", status, out), nil
+	result := fmt.Sprintf("lint %s\n\n%s", status, out)
+	_ = h.store.SetPRLint(prID, result) // persist the latest result
+	return result, nil
 }
 
 // cmdReject is the agent-reviewer reject command — delegates to RejectPR.

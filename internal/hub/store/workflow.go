@@ -62,6 +62,13 @@ CREATE TABLE IF NOT EXISTS reviews (
   review_at   TEXT NOT NULL DEFAULT '',  -- picked up by an agent
   verdict_at  TEXT NOT NULL DEFAULT ''   -- verdict given
 );
+-- The latest lint result for a PR (so it persists across hub restarts and is
+-- shown without re-running until L re-runs it).
+CREATE TABLE IF NOT EXISTS pr_lint (
+  pr     TEXT PRIMARY KEY,
+  output TEXT NOT NULL DEFAULT '',
+  ran_at TEXT NOT NULL DEFAULT ''
+);
 `
 
 // Task is the cached read-model row for a td task. Description/Acceptance are
@@ -324,6 +331,25 @@ func scanPRRow(row scanner) (PR, error) {
 
 func placeholders(n int) string {
 	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
+}
+
+// --- pr lint ---
+
+// SetPRLint stores (or replaces) a PR's latest lint output, stamped now.
+func (s *Store) SetPRLint(prID, output string) error {
+	_, err := s.db.Exec(`INSERT INTO pr_lint (pr, output, ran_at) VALUES (?,?,?)
+		ON CONFLICT(pr) DO UPDATE SET output=excluded.output, ran_at=excluded.ran_at`,
+		prID, output, time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return fmt.Errorf("set pr lint %s: %w", prID, err)
+	}
+	return nil
+}
+
+// GetPRLint returns a PR's stored lint output and run time ("" if never run).
+func (s *Store) GetPRLint(prID string) (output, ranAt string) {
+	_ = s.db.QueryRow(`SELECT output, ran_at FROM pr_lint WHERE pr=?`, prID).Scan(&output, &ranAt)
+	return output, ranAt
 }
 
 // --- reviews ---
