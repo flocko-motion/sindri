@@ -313,35 +313,41 @@ func (h *Hub) injectWhenReady(name, text string) error {
 // (D13). A fresh agent gets a role-appropriate nudge; a resuming one gets the
 // tail of its activity log so it can pick up where it left off. Best-effort;
 // runs in the background so it doesn't block launch.
+// resumeEvents are the activity types worth replaying to an agent on resume —
+// its actual work, not pod lifecycle or injected chatter.
+var resumeEvents = map[string]bool{
+	"claim": true, "submit": true, "note": true,
+	"approve": true, "reject": true, "merged": true, "lint-fail": true,
+	"recv": true,
+}
+
 func (h *Hub) rehydrate(name string) {
 	role := "worker"
 	if a, ok, _ := h.store.GetAgent(name); ok {
 		role = a.Role
 	}
-	evs, _ := h.store.Events(name, 20)
-	// "Fresh" = nothing beyond register/launch bookkeeping.
-	fresh := true
+	evs, _ := h.store.Events(name, 40)
+	// Summarize only the agent's own work — not pod lifecycle (launch/stop/
+	// register) or injected messages — so resume context is signal, not noise.
+	var recent []string
 	for _, e := range evs {
-		if e.Type != "register" && e.Type != "launch" {
-			fresh = false
-			break
+		if resumeEvents[e.Type] {
+			recent = append(recent, e.Type+" "+e.Payload)
 		}
 	}
 	var msg string
-	if fresh {
+	if len(recent) == 0 { // no work yet — a fresh kickoff
 		if role == "reviewer" {
 			msg = "[hub] You're live. Run `sindri-worker prs` to see what needs review."
 		} else {
 			msg = "[hub] You're live. Run `sindri-worker next` to claim your first task."
 		}
 	} else {
-		var b strings.Builder
-		b.WriteString("[hub] Resuming. Recent activity:")
-		for _, e := range evs {
-			fmt.Fprintf(&b, " (%s: %s)", e.Type, e.Payload)
+		if len(recent) > 5 { // just the last few
+			recent = recent[len(recent)-5:]
 		}
-		b.WriteString(" — run `sindri-worker` to see your options.")
-		msg = b.String()
+		msg = "[hub] Resuming. Recently you did: " + strings.Join(recent, " · ") +
+			". Run `sindri-worker` for your options."
 	}
 	// Let the agent program (Claude) boot to input-readiness before the kickoff,
 	// or its submitting Enter is eaten by the boot splash.

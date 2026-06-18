@@ -16,8 +16,9 @@ import (
 	"github.com/flo-at/sindri/internal/hub"
 )
 
-// agentDetailW is the fixed width of the Agents tab's right detail column.
-const agentDetailW = 46
+// agentDetailW is the fixed width of the Agents tab's right detail column —
+// wide enough that activity payloads (task ids + titles) aren't chopped.
+const agentDetailW = 62
 
 // agentListHeight is the height of the short agent-list region (top-left); the
 // live tmux pane gets the rest of the left column.

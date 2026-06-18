@@ -86,7 +86,9 @@ func (h *Hub) AgentExec(name string, args []string, out io.Writer) (int, error) 
 	if len(args) == 0 {
 		return 1, fmt.Errorf("no command given")
 	}
-	_ = h.store.Log(c.Agent, "exec", strings.Join(args, " "))
+	// Note: command invocations aren't logged as activity — the meaningful ones
+	// record their own outcome (claim/submit/note/approve/reject/merged); reads
+	// (status/prs/show) are not activity at all.
 	cmd, ok := h.registry().Lookup(args[0], c)
 	if !ok {
 		fmt.Fprintf(out, "unknown or unavailable command: %s\n", args[0])
