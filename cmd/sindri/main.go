@@ -27,13 +27,15 @@ func main() {
 	}
 	rootCmd.PersistentFlags().StringVar(&projectDir, "project", "", "Project directory (default: git root from cwd)")
 
-	// Hierarchical command tree: <category> <action>. First-order: hub, tui, lint.
+	// Hierarchical command tree: <category> <action>. First-order: hub, tui,
+	// lint, code.
 	rootCmd.AddCommand(newHubCmd())
 	rootCmd.AddCommand(newAgentCmd())
 	rootCmd.AddCommand(newTaskCmd())
 	rootCmd.AddCommand(newPrCmd())
 	rootCmd.AddCommand(newTuiCmd())
 	rootCmd.AddCommand(newLintCmd())
+	rootCmd.AddCommand(newCodeCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
