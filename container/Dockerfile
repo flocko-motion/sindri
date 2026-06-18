@@ -67,6 +67,9 @@ RUN useradd -m -s /bin/bash sindri
 
 USER sindri
 ENV GOMODCACHE=/home/sindri/go/pkg/mod
+# UTF-8 locale so Claude's box-drawing/bullet glyphs render instead of "_"
+# (Debian's default C locale mangles multibyte output). C.UTF-8 is built in.
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 
 RUN git config --global user.name  "sindri-agent" \
  && git config --global user.email "agent@sindri.local" \
