@@ -1,4 +1,4 @@
-# golang:latest is Debian-slim-based with Go already correctly installed.
+# golang:latest is Debian-slim-based with Go already correctly installed..
 FROM golang:latest
 
 # ── Node.js LTS ───────────────────────────────────────────────────────────────

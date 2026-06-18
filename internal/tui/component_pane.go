@@ -49,11 +49,15 @@ func divider(h int) string {
 }
 
 // padTrunc fits s to exactly w display cells (rune-count approximation): too long
-// is truncated with an ellipsis, too short is right-padded with spaces.
+// is truncated with an ellipsis, too short is right-padded with spaces. Tabs are
+// expanded and other control characters dropped first: a raw tab is one rune but
+// several columns (overflows and wraps), and a carriage return snaps the cursor
+// to column 0 (text bleeds over the left edge) — both common in diffs.
 func padTrunc(s string, w int) string {
 	if w <= 0 {
 		return ""
 	}
+	s = sanitize(s)
 	r := []rune(s)
 	if len(r) > w {
 		if w == 1 {
@@ -62,4 +66,17 @@ func padTrunc(s string, w int) string {
 		return string(r[:w-1]) + "…"
 	}
 	return s + strings.Repeat(" ", w-len(r))
+}
+
+// sanitize makes a line safe to render in a fixed-width cell: tabs become spaces
+// and all other control characters (CR, ANSI escapes, …) are dropped, so nothing
+// wraps or repositions the cursor.
+func sanitize(s string) string {
+	s = strings.ReplaceAll(s, "\t", "    ")
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
 }
