@@ -106,6 +106,11 @@ func (c *HTTP) DeleteAgent(name string) error {
 	return c.post("/agent/delete", hub.NameReq{Name: name})
 }
 
+// StopAgent tears down the agent's pod but keeps its identity.
+func (c *HTTP) StopAgent(name string) error {
+	return c.post("/agent/stop", hub.NameReq{Name: name})
+}
+
 // SetRole changes an agent's role (worker|reviewer).
 func (c *HTTP) SetRole(name, role string) error {
 	return c.post("/agent/role", hub.AgentReq{Name: name, Role: role})

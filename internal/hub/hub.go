@@ -127,6 +127,26 @@ func (h *Hub) DeleteAgent(name string) error {
 	return nil
 }
 
+// StopAgent is the opposite of Launch: it tears down the agent's pod (killing
+// its tmux session) but keeps the identity, worktree, socket listener, and
+// activity log — so it can be re-launched and resumes where it left off.
+func (h *Hub) StopAgent(name string) error {
+	if _, ok, err := h.store.GetAgent(name); err != nil {
+		return err
+	} else if !ok {
+		return fmt.Errorf("no such agent %q", name)
+	}
+	if !pod.Running(Container(name)) {
+		return fmt.Errorf("agent %q is not running", name)
+	}
+	if err := pod.Rm(Container(name)); err != nil {
+		return err
+	}
+	_ = h.store.Log(name, "stop", "pod removed")
+	h.notify()
+	return nil
+}
+
 // SetRole changes an agent's role (worker|reviewer). The role is hub-side state
 // the agent can't see; a running agent picks up the new role on its next
 // launch/rehydrate.

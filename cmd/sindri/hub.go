@@ -31,6 +31,7 @@ import (
 type backend interface {
 	NewAgent(name, role string) (string, error)
 	DeleteAgent(name string) error
+	StopAgent(name string) error
 	SetRole(name, role string) error
 	AgentPane(name string, lines int) (string, error)
 	Launch(name string, shell bool) error
@@ -107,7 +108,7 @@ func newHubCmd() *cobra.Command {
 
 func newAgentCmd() *cobra.Command {
 	c := &cobra.Command{Use: "agent", Short: "Manage agents (workers + reviewers)"}
-	c.AddCommand(agentListCmd(), agentNewCmd(), agentDeleteCmd(), agentRoleCmd(), agentPaneCmd(), agentLaunchCmd(), agentTellCmd(), agentAttachCmd(), agentInfoCmd())
+	c.AddCommand(agentListCmd(), agentNewCmd(), agentDeleteCmd(), agentRoleCmd(), agentPaneCmd(), agentLaunchCmd(), agentStopCmd(), agentTellCmd(), agentAttachCmd(), agentInfoCmd())
 	return c
 }
 
@@ -234,6 +235,21 @@ func agentLaunchCmd() *cobra.Command {
 	}
 	c.Flags().BoolVar(&shell, "shell", false, "run a bare shell instead of Claude (debug/demo)")
 	return c
+}
+
+func agentStopCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "stop <name>", Short: "Tear down the agent's pod (keeps its identity)", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withBackend(func(b backend) error {
+				if err := b.StopAgent(args[0]); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "stopped %s\n", args[0])
+				return nil
+			})
+		},
+	}
 }
 
 func agentTellCmd() *cobra.Command {

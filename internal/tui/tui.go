@@ -422,6 +422,13 @@ func (m *model) onKey(k string) tea.Cmd {
 			}
 			return m.action(func(id string) error { return m.cl.Launch(id, false) })
 		}
+	case "S": // agents: stop (opposite of launch — pod down, identity kept)
+		if m.tab == 1 {
+			if a, ok := m.selAgent(); ok {
+				m.flash = "stopping " + a.Name + "…"
+			}
+			return m.action(func(id string) error { return m.cl.StopAgent(id) })
+		}
 	case "a": // agents: attach to the live tmux session (out-of-band)
 		if m.tab == 1 {
 			if a, ok := m.selAgent(); ok {
@@ -626,7 +633,7 @@ func (m model) contextFooter() string {
 	case 0:
 		return fmt.Sprintf("N new · e edit · p priority · y/Y yank · f filter: %s · h/l fold", filterNames[m.filter])
 	case 1:
-		return "N new · L launch · t tell · a attach · e role · D delete"
+		return "N new · L launch · S stop · t tell · a attach · e role · D delete"
 	default:
 		return "m merge"
 	}
