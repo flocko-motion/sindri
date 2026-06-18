@@ -374,12 +374,14 @@ func (m *model) onKey(k string) tea.Cmd {
 		return nil
 	case "g": // goto the focused cross-reference's home, else jump the list to top
 		if m.rightFocus {
+			// gotoItem may switch tabs; fall through to the tail reclamp + syncDetail
+			// so the destination tab's viewports are sized for it (not the old tab).
 			if it, ok := m.focusedItem(); ok && it.kind != "path" {
 				m.gotoItem(it.kind, it.value)
 			}
-			return nil
+		} else {
+			m.cursor[m.tab] = 0
 		}
-		m.cursor[m.tab] = 0
 	case "G":
 		m.cursor[m.tab] = 1 << 30
 	case "ctrl+d":
