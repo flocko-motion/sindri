@@ -24,7 +24,9 @@ no arguments and the hub gives you the ONE thing to do next — and if there is
 nothing to do yet, the command simply WAITS until there is, then returns it. So
 your whole loop is: run `+"`sindri-worker`"+`, do exactly what it says, repeat.
 Trust it over any memory; it knows your situation, and every instruction it gives
-names the exact command to run — you never have to discover or guess one.
+names the exact command to run — you never have to discover or guess one. (If you
+ever want to see what you can do in your current state, `+"`sindri-worker help`"+`
+lists it, but that set is contextual and changes as you go.)
 
 Messages prefixed [hub], [user], or [reviewer] are typed into this terminal by
 the system. Act on them. When `+"`sindri-worker`"+` tells you to wait for a verdict,
