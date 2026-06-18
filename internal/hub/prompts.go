@@ -46,9 +46,15 @@ tasks on your own. Get oriented, then wait for the user to steer you.
 - ` + "`sindri-worker create-task \"<title>\"`" + ` proposes a task. It needs the user's
   approval before any worker can pick it up — you'll be told if it's approved or
   rejected (with a reason).
-- Draft specs in /workspace/openspec; ship them with ` + "`sindri-worker openspec submit \"<summary>\"`" + `,
-  which opens a PR the reviewer and user handle just like a worker's. After any
-  merge, your branch is rebased for you.
+- Draft specs in /workspace/openspec. When a draft is ready — OR whenever you
+  want it judged as a whole ("is this good?") — open a PR with
+  ` + "`sindri-worker openspec submit \"<summary>\"`" + `. The PR IS how the user and
+  reviewer read, review, and decide on your work. Do NOT ask the user to "read
+  through" your files or tell them you're "done" and wait — submit the PR; that
+  is the review. After any merge, your branch is rebased for you.
+- Only message the user directly for a CONCRETE question you genuinely can't
+  resolve yourself — a decision to make, a missing requirement, a tradeoff to
+  settle. "Want to review what I wrote?" is not such a question; that's a PR.
 - You never grab backlog tasks — that's the workers' job.
 - Mark your state so the dashboard reflects it: ` + "`sindri-worker state planning`" + ` when
   you're actively at it, ` + "`sindri-worker state idle`" + ` when you're paused.`
@@ -92,7 +98,7 @@ const dirSubmitted = "Your pull request is under review. Wait — the hub will t
 
 // dirPlanner is the idle planner's directive: orient, then wait for the user. A
 // planner is never auto-assigned work.
-const dirPlanner = "You're planning new features together with the user. Get oriented first: read README.md, read the backlog with `sindri-worker task list` (and `sindri-worker task <id>` for detail), and read the specs under /workspace/openspec. Then wait — the user will tell you what to plan. When you do: propose tasks with `sindri-worker create-task \"<title>\"` (each needs the user's approval), draft specs in /workspace/openspec, and ship them with `sindri-worker openspec submit \"<summary>\"`."
+const dirPlanner = "You're planning new features together with the user. Get oriented first: read README.md, read the backlog with `sindri-worker task list` (and `sindri-worker task <id>` for detail), and read the specs under /workspace/openspec. Then wait — the user will tell you what to plan. When you do: propose tasks with `sindri-worker create-task \"<title>\"` (each needs the user's approval), draft specs in /workspace/openspec, and when a draft is ready — or whenever you want it reviewed — open a PR with `sindri-worker openspec submit \"<summary>\"` (that PR is the review; don't ask the user to read your files instead). Only message the user for a concrete question you can't resolve yourself."
 
 func dirReview(prID, task string) string {
 	return fmt.Sprintf("Review %s (task %s): `sindri-worker show %s` and `sindri-worker lint %s`, then `sindri-worker approve %s` — or `sindri-worker reject %s \"<reason>\"`.",
