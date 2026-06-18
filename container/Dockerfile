@@ -73,6 +73,10 @@ RUN chmod +x /usr/local/bin/sindri-agent
 # ── Non-root user (claude refuses --dangerously-skip-permissions as root) ──
 RUN useradd -m -s /bin/bash sindri
 
+# `y` yazi wrapper, sourced by interactive shells (attach / post-Claude bash).
+COPY container/yazi.sh /etc/sindri/yazi.sh
+RUN echo '. /etc/sindri/yazi.sh' >> /home/sindri/.bashrc
+
 USER sindri
 ENV GOMODCACHE=/home/sindri/go/pkg/mod
 # UTF-8 locale so Claude's box-drawing/bullet glyphs render instead of "_"
