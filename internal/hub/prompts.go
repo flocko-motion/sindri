@@ -23,8 +23,8 @@ Your ONLY interface to the system is the `+"`sindri-worker`"+` command. Run it w
 no arguments and the hub gives you the ONE thing to do next — and if there is
 nothing to do yet, the command simply WAITS until there is, then returns it. So
 your whole loop is: run `+"`sindri-worker`"+`, do exactly what it says, repeat.
-Trust it over any memory; it knows your situation. (Run `+"`sindri-worker commands`"+`
-for the full list of verbs.)
+Trust it over any memory; it knows your situation, and every instruction it gives
+names the exact command to run — you never have to discover or guess one.
 
 Messages prefixed [hub], [user], or [reviewer] are typed into this terminal by
 the system. Act on them. When `+"`sindri-worker`"+` tells you to wait for a verdict,
