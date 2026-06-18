@@ -223,6 +223,9 @@ func (m *model) openTaskForm(edit bool) {
 	}
 	cl, known := m.cl, m.taskIDs()
 	validate := func() string {
+		if strings.TrimSpace(titleF.value()) == "" {
+			return "title can't be empty"
+		}
 		p := strings.TrimSpace(parentF.value())
 		switch {
 		case p == "":
