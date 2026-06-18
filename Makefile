@@ -1,4 +1,4 @@
-.PHONY: build sindri worker image install clean test lint demo diag loop claude-check fullloop screenshot
+.PHONY: build sindri worker image install clean test lint check demo diag loop claude-check fullloop screenshot
 
 PREFIX := $(HOME)/.local/bin
 
@@ -42,6 +42,13 @@ seed:
 
 lint: sindri
 	./bin/sindri lint all
+
+# One-shot quality gate with terse output: build + test + lint, each reporting
+# PASS or printing the tail of its failure. Stops at the first failure.
+check: sindri
+	@out=$$(go build ./... 2>&1) && echo "BUILD OK" || { echo "BUILD FAIL"; echo "$$out" | tail -20; exit 1; }
+	@out=$$(go test ./... 2>&1) && echo "TESTS PASS" || { echo "TESTS FAIL"; echo "$$out" | tail -30; exit 1; }
+	@out=$$(./bin/sindri lint all 2>&1) && echo "LINT PASS" || { echo "LINT FAIL"; echo "$$out" | tail -40; exit 1; }
 
 # End-to-end hub demo / diagnostic in a throwaway repo (needs podman + image).
 demo: build
