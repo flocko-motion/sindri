@@ -276,6 +276,16 @@ func (c *HTTP) SetPriority(id, priority string) error {
 	return c.post("/priority", hub.PriorityReq{ID: id, Priority: priority})
 }
 
+// ApproveTask clears the approval gate on a planner-proposed task.
+func (c *HTTP) ApproveTask(id string) error {
+	return c.post("/task/approve", hub.RejectReq{ID: id})
+}
+
+// RejectTask rejects a planner-proposed task with a comment.
+func (c *HTTP) RejectTask(id, comment string) error {
+	return c.post("/task/reject", hub.RejectReq{ID: id, Feedback: comment})
+}
+
 // Refresh asks the hub to re-sync tasks from the source of truth.
 func (c *HTTP) Refresh() error { return c.post("/refresh", struct{}{}) }
 

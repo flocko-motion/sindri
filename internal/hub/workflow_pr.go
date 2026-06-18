@@ -440,6 +440,26 @@ func (h *Hub) Merge(prID string) (store.PR, error) {
 	_ = h.store.Log(pr.Agent, "merged", prID)
 	_ = h.store.LogPR(prID, "merged", "into "+pr.Base)
 	_ = h.injectWhenReady(pr.Agent, msgMerged(prID))
+	h.rebasePlanners(pr.Base) // any merge moves base → keep planners current
 	h.notify()
 	return pr, nil
+}
+
+// rebasePlanners rebases every planner's branch onto base after a merge, so
+// planners always see the latest code. Best-effort: a dirty or conflicting
+// worktree is logged and skipped (the rebase is aborted, leaving it untouched).
+func (h *Hub) rebasePlanners(base string) {
+	roster, _ := h.store.Roster()
+	for _, a := range roster {
+		if a.Role != "planner" {
+			continue
+		}
+		wt := filepath.Join(h.root, a.Workspace)
+		if err := git.Rebase(wt, base); err != nil {
+			_ = h.store.Log(a.Name, "rebase-skip", base+": "+err.Error())
+			continue
+		}
+		_ = h.store.Log(a.Name, "rebase", "onto "+base)
+		_ = h.injectWhenReady(a.Name, msgRebased(base))
+	}
 }

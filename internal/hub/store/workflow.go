@@ -78,6 +78,14 @@ CREATE TABLE IF NOT EXISTS pr_events (
   type    TEXT NOT NULL,
   payload TEXT NOT NULL DEFAULT ''
 );
+-- The hub-side approval gate for planner-created tasks. A task with no row here
+-- is a normal task (claimable); pending/rejected tasks are hidden from workers.
+CREATE TABLE IF NOT EXISTS task_approval (
+  task    TEXT PRIMARY KEY,
+  status  TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected
+  comment TEXT NOT NULL DEFAULT '',
+  at      TEXT NOT NULL DEFAULT ''
+);
 `
 
 // Task is the cached read-model row for a td task. Description/Acceptance are
@@ -93,6 +101,11 @@ type Task struct {
 	ParentID    string `json:"parent_id"`
 	Description string `json:"description,omitempty"`
 	Acceptance  string `json:"acceptance,omitempty"`
+	// Approval is the hub-side gate on planner-created tasks: "" = none (a normal
+	// task, claimable), pending (awaiting the user), approved (claimable), or
+	// rejected (with ApprovalComment). Workers only ever see "" / approved tasks.
+	Approval        string `json:"approval,omitempty"`
+	ApprovalComment string `json:"approval_comment,omitempty"`
 }
 
 // AgentState is an agent's live workflow state (durable, D11).
@@ -167,14 +180,21 @@ func (s *Store) UpsertTask(t Task) error {
 	return err
 }
 
-// OpenTasks returns cached tasks with status "open", highest priority first.
+// taskCols is the shared SELECT projection: the cached td fields plus the
+// hub-side approval overlay (empty when there's no approval row).
+const taskCols = `t.id,t.title,t.status,t.priority,t.type,t.labels,t.parent_id,
+	COALESCE(a.status,''), COALESCE(a.comment,'')`
+
+// OpenTasks returns claimable tasks: status "open" and not gated by an
+// unresolved approval (pending/rejected planner tasks are hidden), highest
+// priority first.
 func (s *Store) OpenTasks() ([]Task, error) {
 	// td priorities are P1 (highest) … P4 (lowest); lexical order matches, with
 	// unset priorities sorted last.
 	rows, err := s.db.Query(`
-		SELECT id,title,status,priority,type,labels,parent_id FROM tasks
-		WHERE status='open'
-		ORDER BY CASE WHEN priority='' THEN 1 ELSE 0 END, priority, id`)
+		SELECT ` + taskCols + ` FROM tasks t LEFT JOIN task_approval a ON a.task=t.id
+		WHERE t.status='open' AND (a.status IS NULL OR a.status='approved')
+		ORDER BY CASE WHEN t.priority='' THEN 1 ELSE 0 END, t.priority, t.id`)
 	if err != nil {
 		return nil, fmt.Errorf("open tasks: %w", err)
 	}
@@ -182,11 +202,12 @@ func (s *Store) OpenTasks() ([]Task, error) {
 	return scanTasks(rows)
 }
 
-// AllTasks returns every cached task, highest priority first (unset last).
+// AllTasks returns every cached task with its approval overlay, highest priority
+// first (unset last).
 func (s *Store) AllTasks() ([]Task, error) {
 	rows, err := s.db.Query(`
-		SELECT id,title,status,priority,type,labels,parent_id FROM tasks
-		ORDER BY CASE WHEN priority='' THEN 1 ELSE 0 END, priority, id`)
+		SELECT ` + taskCols + ` FROM tasks t LEFT JOIN task_approval a ON a.task=t.id
+		ORDER BY CASE WHEN t.priority='' THEN 1 ELSE 0 END, t.priority, t.id`)
 	if err != nil {
 		return nil, fmt.Errorf("all tasks: %w", err)
 	}
@@ -198,7 +219,7 @@ func scanTasks(rows *sql.Rows) ([]Task, error) {
 	var out []Task
 	for rows.Next() {
 		var t Task
-		if err := rows.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Type, &t.Labels, &t.ParentID); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Type, &t.Labels, &t.ParentID, &t.Approval, &t.ApprovalComment); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
@@ -215,6 +236,25 @@ func (s *Store) SetPriorityOverride(id, priority string) error {
 		return fmt.Errorf("set priority override %s: %w", id, err)
 	}
 	return nil
+}
+
+// SetApproval records a task's approval state (pending|approved|rejected) and an
+// optional comment, stamped now.
+func (s *Store) SetApproval(task, status, comment string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO task_approval (task,status,comment,at) VALUES (?,?,?,?)
+		 ON CONFLICT(task) DO UPDATE SET status=excluded.status, comment=excluded.comment, at=excluded.at`,
+		task, status, comment, time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return fmt.Errorf("set approval %s: %w", task, err)
+	}
+	return nil
+}
+
+// GetApproval returns a task's approval status and comment ("" status = no gate).
+func (s *Store) GetApproval(task string) (status, comment string) {
+	_ = s.db.QueryRow(`SELECT status, comment FROM task_approval WHERE task=?`, task).Scan(&status, &comment)
+	return status, comment
 }
 
 // PriorityOverrides returns id→priority for all locally-assigned priorities.

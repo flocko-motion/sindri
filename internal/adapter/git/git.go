@@ -96,6 +96,17 @@ func CheckoutDetached(dir, ref string) error {
 	return nil
 }
 
+// Rebase rebases dir's current branch onto onto. It aborts a rebase that hits
+// conflicts (rather than leaving the worktree mid-rebase) and reports the error,
+// so the caller can treat it as best-effort.
+func Rebase(dir, onto string) error {
+	if out, err := exec.Command("git", "-C", dir, "rebase", onto).CombinedOutput(); err != nil {
+		_ = exec.Command("git", "-C", dir, "rebase", "--abort").Run()
+		return fmt.Errorf("rebase onto %s: %s: %w", onto, strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
 // HasChanges reports whether dir's worktree has uncommitted changes.
 func HasChanges(dir string) bool {
 	out, err := exec.Command("git", "-C", dir, "status", "--porcelain").Output()

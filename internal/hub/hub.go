@@ -173,8 +173,8 @@ func (h *Hub) NewAgent(name, role string) (string, error) {
 	if !nameRe.MatchString(name) {
 		return "", fmt.Errorf("invalid agent name %q (use lowercase letters, digits, - _)", name)
 	}
-	if role != "worker" && role != "reviewer" {
-		return "", fmt.Errorf("invalid role %q (worker|reviewer)", role)
+	if role != "worker" && role != "reviewer" && role != "planner" {
+		return "", fmt.Errorf("invalid role %q (worker|reviewer|planner)", role)
 	}
 	if _, ok, err := h.store.GetAgent(name); err != nil {
 		return "", err
@@ -299,6 +299,15 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 		{Host: AgentSocketDir(h.root, name), Container: "/run/sindri", Mode: "rw"},
 		// The thin browser binary (image symlinks /usr/local/bin/sindri-worker).
 		{Host: workerBin, Container: "/opt/sindri/sindri-worker", Mode: "ro"},
+	}
+	if a.Role == "planner" {
+		// A planner sees the whole repo read-only and may only write openspec — so
+		// it plans (specs + tasks) without touching code. /workspace is remounted
+		// ro and openspec/ overlaid rw on top.
+		osDir := filepath.Join(wt, "openspec")
+		_ = os.MkdirAll(osDir, 0o755) // ensure the overlay target exists
+		mounts[0] = pod.Mount{Host: wt, Container: "/workspace", Mode: "ro"}
+		mounts = append(mounts, pod.Mount{Host: osDir, Container: "/workspace/openspec", Mode: "rw"})
 	}
 	if shell {
 		env["SINDRI_SHELL"] = "1" // entrypoint runs bash instead of Claude

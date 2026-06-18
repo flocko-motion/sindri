@@ -42,6 +42,8 @@ type backend interface {
 	CreateTask(s hub.TaskSpec) (string, error)
 	EditTask(id string, s hub.TaskSpec) error
 	SetPriority(id, priority string) error
+	ApproveTask(id string) error
+	RejectTask(id, comment string) error
 	PRs() ([]store.PR, error)
 	PRInfo(id string) (hub.PRDetail, error)
 	RejectPR(id, feedback string) error
@@ -158,7 +160,7 @@ func agentNewCmd() *cobra.Command {
 			})
 		},
 	}
-	c.Flags().StringVar(&role, "role", "worker", "agent role: worker|reviewer")
+	c.Flags().StringVar(&role, "role", "worker", "agent role: worker|reviewer|planner")
 	return c
 }
 
@@ -315,8 +317,38 @@ func agentInfoCmd() *cobra.Command {
 
 func newTaskCmd() *cobra.Command {
 	c := &cobra.Command{Use: "task", Short: "Inspect and create tasks (td issues)"}
-	c.AddCommand(taskListCmd(), taskInfoCmd(), taskNewCmd(), taskEditCmd(), taskPriorityCmd())
+	c.AddCommand(taskListCmd(), taskInfoCmd(), taskNewCmd(), taskEditCmd(), taskPriorityCmd(), taskApproveCmd(), taskRejectCmd())
 	return c
+}
+
+func taskApproveCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "approve <id>", Short: "Approve a planner-proposed task (makes it claimable)", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withBackend(func(b backend) error {
+				if err := b.ApproveTask(args[0]); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "approved %s\n", args[0])
+				return nil
+			})
+		},
+	}
+}
+
+func taskRejectCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "reject <id> <comment...>", Short: "Reject a planner-proposed task with a comment", Args: cobra.MinimumNArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withBackend(func(b backend) error {
+				if err := b.RejectTask(args[0], strings.Join(args[1:], " ")); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "rejected %s\n", args[0])
+				return nil
+			})
+		},
+	}
 }
 
 func taskPriorityCmd() *cobra.Command {

@@ -85,6 +85,99 @@ func (h *Hub) CreateTask(s TaskSpec) (string, error) {
 	return id, nil
 }
 
+// ApproveTask clears the approval gate on a planner-proposed task (user-only),
+// making it claimable, and tells any running planner.
+func (h *Hub) ApproveTask(id string) error {
+	if err := h.store.SetApproval(id, "approved", ""); err != nil {
+		return err
+	}
+	h.notifyPlanners(fmt.Sprintf("[user] task %s was approved — it's now in the backlog for a worker.", id))
+	h.notify()
+	return nil
+}
+
+// RejectTask rejects a planner-proposed task with a comment (user-only); it stays
+// hidden from workers, and the comment is delivered to any running planner.
+func (h *Hub) RejectTask(id, comment string) error {
+	comment = strings.TrimSpace(comment)
+	if comment == "" {
+		comment = "rejected"
+	}
+	if err := h.store.SetApproval(id, "rejected", comment); err != nil {
+		return err
+	}
+	h.notifyPlanners(fmt.Sprintf("[user] task %s was rejected: %s", id, comment))
+	h.notify()
+	return nil
+}
+
+// notifyPlanners injects a message into every running planner's session.
+func (h *Hub) notifyPlanners(msg string) {
+	roster, _ := h.store.Roster()
+	for _, a := range roster {
+		if a.Role == "planner" {
+			name := a.Name
+			go func() { _ = h.injectWhenReady(name, msg) }()
+		}
+	}
+}
+
+// cmdCreateTask lets a planner propose a task. It's created in td but flagged
+// pending the user's approval, so no worker can pick it up until the user
+// approves it (planner-only — the planner's defining extra power).
+func (h *Hub) cmdCreateTask(_ registry.Caller, args []string, out io.Writer) (int, error) {
+	title := strings.TrimSpace(strings.Join(args, " "))
+	if title == "" {
+		return 1, fmt.Errorf("usage: create-task <title...>")
+	}
+	id, err := h.CreateTask(TaskSpec{Title: title, Type: "task"})
+	if err != nil {
+		return 1, err
+	}
+	if err := h.store.SetApproval(id, "pending", ""); err != nil {
+		return 1, err
+	}
+	h.notify()
+	fmt.Fprintln(out, replyTaskProposed(id, title))
+	return 0, nil
+}
+
+// cmdTasks lets a planner read the backlog: with no args it lists every task
+// (status, approval, priority, title); with an id it prints that task's full
+// detail including description.
+func (h *Hub) cmdTasks(_ registry.Caller, args []string, out io.Writer) (int, error) {
+	_ = h.SyncTasks()
+	if len(args) > 0 {
+		t, err := h.TaskInfo(args[0])
+		if err != nil {
+			return 1, err
+		}
+		appr, comment := h.store.GetApproval(t.ID)
+		if comment != "" {
+			appr += " — " + comment
+		}
+		fmt.Fprintf(out, "%s  [%s]  %s  priority=%s\napproval: %s\n\n%s\n",
+			t.ID, t.Status, t.Title, dash(t.Priority), dash(appr), dash(t.Description))
+		return 0, nil
+	}
+	tasks, err := h.store.AllTasks()
+	if err != nil {
+		return 1, err
+	}
+	for _, t := range tasks {
+		fmt.Fprintf(out, "%-12s %-8s %-9s %-3s %s\n", t.ID, t.Status, dash(t.Approval), dash(t.Priority), t.Title)
+	}
+	return 0, nil
+}
+
+// dash renders "-" for an empty string (agent-facing output helper).
+func dash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
 // EditTask applies a spec to an existing task. A td task is edited through the
 // td tool (its source of truth); an openspec item isn't editable as a task, so
 // only its locally-assigned priority is recorded in our own db.

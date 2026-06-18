@@ -32,6 +32,19 @@ stop and wait quietly — it will appear here, and that may take a long time. Ne
 poll, never guess, never invent commands.`, name, role)
 
 	switch role {
+	case "planner":
+		return common + `
+
+As the planner — a worker scoped to planning:
+- The repo is mounted READ-ONLY at /workspace (read the code and specs freely),
+  except ` + "`/workspace/openspec`" + `, which you may edit.
+- ` + "`sindri-worker tasks`" + ` lists the whole backlog; ` + "`sindri-worker tasks <id>`" + ` shows one in full.
+- ` + "`sindri-worker create-task \"<title>\"`" + ` proposes a task. It needs the user's
+  approval before any worker can pick it up — you'll be told if it's approved or
+  rejected (with a reason).
+- Otherwise you work like a worker: ` + "`sindri-worker`" + ` puts you on a task, you
+  draft in /workspace/openspec, then ` + "`sindri-worker submit \"<summary>\"`" + ` opens a
+  PR the reviewer and user handle. After any merge, your branch is rebased for you.`
 	case "reviewer":
 		return common + `
 
@@ -93,6 +106,10 @@ func msgMerged(prID string) string {
 	return fmt.Sprintf("[hub] %s merged. Run `sindri-worker` for your next task.", prID)
 }
 
+func msgRebased(base string) string {
+	return fmt.Sprintf("[hub] %s moved — your branch was rebased onto it, so you're up to date.", base)
+}
+
 func msgRejectedByUser(prID, feedback string) string {
 	return fmt.Sprintf("[user] %s was rejected: %s — stop working on it and wait for further instructions.", prID, feedback)
 }
@@ -127,6 +144,10 @@ func replyRegistered(prID string) string {
 }
 
 const replyNothingToSubmit = "Nothing to submit — run `sindri-worker` to pick up a task first."
+
+func replyTaskProposed(id, title string) string {
+	return fmt.Sprintf("Proposed %s: %s — awaiting the user's approval before any worker can pick it up.", id, title)
+}
 
 func replyLintFail(out string) string {
 	return fmt.Sprintf("Lint failed — fix the violations and submit again:\n%s", out)

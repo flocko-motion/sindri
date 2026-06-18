@@ -209,6 +209,20 @@ func (h *Hub) Handler() http.Handler {
 		}
 		writeJSON(w, okMsg{"ok"}, h.SetPriority(req.ID, req.Priority))
 	})
+	mux.HandleFunc("POST /task/approve", func(w http.ResponseWriter, r *http.Request) {
+		var req RejectReq // reuse: ID (+ unused Feedback)
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"approved"}, h.ApproveTask(req.ID))
+	})
+	mux.HandleFunc("POST /task/reject", func(w http.ResponseWriter, r *http.Request) {
+		var req RejectReq // ID + Feedback (the rejection comment)
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"rejected"}, h.RejectTask(req.ID, req.Feedback))
+	})
 	return mux
 }
 

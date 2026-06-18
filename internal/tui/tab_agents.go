@@ -33,7 +33,7 @@ func (m *model) openNewAgentChoice() {
 	cl := m.cl
 	m.choice = choiceModalState{
 		active: true, title: "new agent role",
-		options: []string{"worker", "reviewer"}, values: []string{"worker", "reviewer"},
+		options: []string{"worker", "reviewer", "planner"}, values: []string{"worker", "reviewer", "planner"},
 		apply: func(v string) tea.Cmd {
 			return mutateThenRefresh(cl, func() { _, _ = cl.NewAgent("", v) })
 		},
