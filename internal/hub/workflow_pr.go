@@ -1,20 +1,11 @@
-// package: hub / workflow
-// type:    logic (the act → report → idle loop + PR-as-merge-intent)
-// job:     the real worker/reviewer verbs and the host merge. Tasks are a cached
+// package: hub / workflow (PR, review, merge)
+// type:    logic (PR-as-merge-intent: submit → review → approve → host merge)
+// job:     the reviewer verbs and the host merge; verdicts route to the owning
 //
-//	read model synced from td (D15); `next` claims one and branches;
-//	`submit` records a merge-intent and returns (no blocking); the
-//	reviewer approves/rejects; the human merges. Verdicts are routed to
-//	the owning agent's session by branch (object-mediated, D-routing).
-//
-// limits:  git is entirely hub-side (the agent edits /workspace, the hub commits
-//
-//	and merges); writes to td go through the td adapter (D15).
+//	agent's session by branch (object-mediated, D-routing). git is hub-side.
 package hub
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -24,11 +15,9 @@ import (
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/adapter/pod"
-	"github.com/flo-at/sindri/internal/adapter/spec"
 	"github.com/flo-at/sindri/internal/adapter/td"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/issue"
 )
 
 // baseBranch reads the repo's base branch from the main checkout.
@@ -45,6 +34,7 @@ type PRDetail struct {
 	Reviews []store.Review `json:"reviews"`
 	Lint    string         `json:"lint"`    // latest stored lint output ("" = never run)
 	LintAt  string         `json:"lint_at"` // when it was run
+	History []store.Event  `json:"history"` // lifecycle log (oldest-first)
 }
 
 // PRInfo returns a PR with its linked task and diff.
@@ -60,7 +50,8 @@ func (h *Hub) PRInfo(id string) (PRDetail, error) {
 	task, _ := h.TaskInfo(pr.Task) // linked task; zero value if it can't be read
 	reviews, _ := h.store.Reviews(id)
 	lint, lintAt := h.store.GetPRLint(id)
-	return PRDetail{PR: pr, Task: task, Diff: diff, Reviews: reviews, Lint: lint, LintAt: lintAt}, nil
+	history, _ := h.store.PREvents(id)
+	return PRDetail{PR: pr, Task: task, Diff: diff, Reviews: reviews, Lint: lint, LintAt: lintAt, History: history}, nil
 }
 
 // defaultReviewPrompt seeds .sindri/review-prompt.txt the first time.
@@ -106,27 +97,35 @@ func (h *Hub) RequestReview(prID, requirement string) error {
 		if err := h.store.AssignReview(id, reviewer); err != nil {
 			return err
 		}
-		// Check the PR's branch out (detached) into the reviewer's workspace, so
-		// it can read the full code in context, build, and run — not just the diff.
-		checkedOut := false
-		if a, ok, _ := h.store.GetAgent(reviewer); ok {
-			checkedOut = git.CheckoutDetached(filepath.Join(h.root, a.Workspace), pr.Branch) == nil
-		}
-		// One precise, single-line instruction with literal branch/base.
-		seeChanges := fmt.Sprintf("`sindri-worker show %s`", prID)
-		if checkedOut {
-			seeChanges = fmt.Sprintf("`git diff %s` in /workspace (or `sindri-worker show %s`)", pr.Base, prID)
-		}
-		loc := ""
-		if checkedOut {
-			loc = fmt.Sprintf("PR branch %s is checked out in /workspace, based on %s. ", pr.Branch, pr.Base)
-		}
-		_ = h.injectWhenReady(reviewer, fmt.Sprintf(
-			"[hub] Review %s — %s %s(1) see what changed: %s. (2) check the gate: `sindri-worker lint %s`. (3) record your verdict: `sindri-worker review %s <pass|changes|fail> \"<findings>\"`.",
-			prID, requirement, loc, seeChanges, prID, prID))
+		_ = h.store.LogPR(prID, "review-requested", "assigned to "+reviewer)
+		_ = h.assignedReviewInject(reviewer, pr, prID, requirement)
+		h.notify()
+		return nil
 	}
+	_ = h.store.LogPR(prID, "review-requested", "unassigned (no reviewer running)")
 	h.notify()
 	return nil
+}
+
+// assignedReviewInject checks the PR branch out into the reviewer's workspace and
+// injects the precise, single-line review instruction.
+func (h *Hub) assignedReviewInject(reviewer string, pr store.PR, prID, requirement string) error {
+	// Check the PR's branch out (detached) into the reviewer's workspace, so it
+	// can read the full code in context, build, and run — not just the diff.
+	checkedOut := false
+	if a, ok, _ := h.store.GetAgent(reviewer); ok {
+		checkedOut = git.CheckoutDetached(filepath.Join(h.root, a.Workspace), pr.Branch) == nil
+	}
+	// One precise, single-line instruction with literal branch/base.
+	seeChanges := fmt.Sprintf("`sindri-worker show %s`", prID)
+	loc := ""
+	if checkedOut {
+		seeChanges = fmt.Sprintf("`git diff %s` in /workspace (or `sindri-worker show %s`)", pr.Base, prID)
+		loc = fmt.Sprintf("PR branch %s is checked out in /workspace, based on %s. ", pr.Branch, pr.Base)
+	}
+	return h.injectWhenReady(reviewer, fmt.Sprintf(
+		"[hub] Review %s — %s %s(1) see what changed: %s. (2) check the gate: `sindri-worker lint %s`. (3) record your verdict: `sindri-worker review %s <pass|changes|fail> \"<findings>\"`.",
+		prID, requirement, loc, seeChanges, prID, prID))
 }
 
 // runningReviewer returns the name of a live reviewer agent, or "".
@@ -138,84 +137,6 @@ func (h *Hub) runningReviewer() string {
 		}
 	}
 	return ""
-}
-
-// Tasks refreshes from td and returns all cached tasks (for `task list`).
-func (h *Hub) Tasks() ([]store.Task, error) {
-	_ = h.SyncTasks() // best-effort; fall back to cache on failure
-	return h.store.AllTasks()
-}
-
-// TaskInfo returns one task, refreshed from the source of truth first (D15).
-func (h *Hub) TaskInfo(id string) (store.Task, error) {
-	t, err := td.Get(h.root, id)
-	if err != nil {
-		return store.Task{}, err
-	}
-	st := toStoreTask(t)
-	if d, a, derr := td.Detail(h.root, id); derr == nil {
-		st.Description, st.Acceptance = d, a
-	}
-	_ = h.store.UpsertTask(st)
-	return st, nil
-}
-
-// TaskSpec is the full editable shape of a task — the payload of both create
-// and edit. Empty fields mean "unset" (create) or "leave unchanged" (edit).
-type TaskSpec struct {
-	Title       string
-	Type        string
-	Priority    string // a P-code (P0…P4)
-	Parent      string // parent task id (a child of this task)
-	Description string
-	Labels      []string
-}
-
-// CreateTask creates a task via the td tool and returns its id.
-func (h *Hub) CreateTask(s TaskSpec) (string, error) {
-	if err := h.checkParent(s.Parent, ""); err != nil {
-		return "", err
-	}
-	out, err := td.Create(h.root, s.Title, td.CreateOpts{
-		Type: s.Type, Priority: s.Priority, Body: s.Description, Labels: s.Labels, Parent: s.Parent,
-	})
-	if err != nil {
-		return "", err
-	}
-	_ = h.SyncTasks()
-	h.notify()
-	// td prints e.g. "CREATED td-1add0f" — return just the id.
-	id := strings.TrimSpace(out)
-	for _, f := range strings.Fields(out) {
-		if strings.HasPrefix(f, "td-") {
-			id = f
-			break
-		}
-	}
-	return id, nil
-}
-
-// EditTask applies a spec to an existing task. A td task is edited through the
-// td tool (its source of truth); an openspec item isn't editable as a task, so
-// only its locally-assigned priority is recorded in our own db.
-func (h *Hub) EditTask(id string, s TaskSpec) error {
-	if err := h.checkParent(s.Parent, id); err != nil {
-		return err
-	}
-	if strings.HasPrefix(id, "td-") {
-		if err := td.Update(h.root, id, td.UpdateOpts{
-			Title: s.Title, Type: s.Type, Priority: s.Priority, Body: s.Description, Labels: s.Labels, Parent: s.Parent,
-		}); err != nil {
-			return err
-		}
-	} else if s.Priority != "" {
-		if err := h.store.SetPriorityOverride(id, s.Priority); err != nil {
-			return err
-		}
-	}
-	err := h.SyncTasks()
-	h.notify()
-	return err
 }
 
 // runLint runs the project's quality gates against a worktree by invoking
@@ -234,179 +155,6 @@ func (h *Hub) runLint(wt string) (output string, ok bool) {
 	cmd.Dir = wt
 	out, err := cmd.CombinedOutput()
 	return string(out), err == nil
-}
-
-// AgentDirective is the single next action the hub wants this agent to take —
-// the no-arg `sindri-worker` answer. The hub decides exactly what to do next;
-// the agent obeys (it never has to find work for itself).
-func (h *Hub) AgentDirective(name string) (string, error) {
-	a, ok, err := h.store.GetAgent(name)
-	if err != nil {
-		return "", err
-	}
-	if !ok {
-		return "", fmt.Errorf("unknown agent %q", name)
-	}
-	if a.Role == "reviewer" {
-		prs, err := h.store.PRs()
-		if err != nil {
-			return "", err
-		}
-		for _, pr := range prs {
-			if pr.Status == "open" { // awaiting a verdict
-				return fmt.Sprintf("Review %s (task %s): `sindri-worker show %s` and `sindri-worker lint %s`, then `sindri-worker approve %s` — or `sindri-worker reject %s \"<reason>\"`.",
-					pr.ID, pr.Task, pr.ID, pr.ID, pr.ID, pr.ID), nil
-			}
-		}
-		return "Nothing is awaiting review. Wait — the hub will tell you when a pull request arrives.", nil
-	}
-	st, _ := h.store.GetState(name)
-	switch st.Phase {
-	case "working":
-		return fmt.Sprintf("Work on task %s. When your change is committed, run `sindri-worker submit \"<summary>\"`.", st.Task), nil
-	case "submitted":
-		return "Your pull request is under review. Wait — the hub will tell you the verdict.", nil
-	default: // idle
-		return "Claim your next task: run `sindri-worker next`.", nil
-	}
-}
-
-// SyncTasks refreshes the whole cached task set from its sources — td tasks and
-// openspec changes — so the generalized task list is multi-source. Caches all
-// statuses so UIs can filter open/closed/all client-side.
-func (h *Hub) SyncTasks() error {
-	tasks, err := td.Tasks(h.root, issue.FilterAll)
-	if err != nil {
-		return err
-	}
-	rows := make([]store.Task, 0, len(tasks))
-	for _, t := range tasks {
-		rows = append(rows, toStoreTask(t))
-	}
-	// openspec changes as `spec`-typed tasks (source: openspec).
-	for _, c := range spec.Changes(h.root) {
-		status := "open"
-		if c.Done() {
-			status = "closed"
-		}
-		rows = append(rows, store.Task{
-			ID:     specID(c.Name),
-			Title:  fmt.Sprintf("%s (%d/%d)", c.Name, c.CompletedTasks, c.TotalTasks),
-			Status: status,
-			Type:   "spec",
-		})
-	}
-	// Apply locally-assigned priorities (mainly openspec items, which have none
-	// from their source).
-	if ov, err := h.store.PriorityOverrides(); err == nil {
-		for i := range rows {
-			if p, ok := ov[rows[i].ID]; ok {
-				rows[i].Priority = p
-			}
-		}
-	}
-	return h.store.ReplaceTasks(rows)
-}
-
-// SetPriority assigns a task's priority (a P-code). For a td task it writes
-// through the td tool (the source); for an openspec item it records a durable
-// override in our own db. Either way the cache is re-synced.
-func (h *Hub) SetPriority(id, priority string) error {
-	if strings.HasPrefix(id, "td-") {
-		if err := td.SetPriority(h.root, id, priority); err != nil {
-			return err
-		}
-	} else {
-		if err := h.store.SetPriorityOverride(id, priority); err != nil {
-			return err
-		}
-	}
-	err := h.SyncTasks()
-	h.notify()
-	return err
-}
-
-// checkParent validates a requested parent id: empty is fine (a root task), it
-// must not be the task itself, and it must exist in the cached task set.
-func (h *Hub) checkParent(parent, self string) error {
-	if parent == "" {
-		return nil
-	}
-	if parent == self {
-		return fmt.Errorf("a task can't be its own parent")
-	}
-	tasks, err := h.store.AllTasks()
-	if err != nil {
-		return err
-	}
-	for _, t := range tasks {
-		if t.ID == parent {
-			return nil
-		}
-	}
-	return fmt.Errorf("unknown parent %q", parent)
-}
-
-// specID derives a stable os-XXXXXX id from an openspec change name.
-func specID(name string) string {
-	sum := sha256.Sum256([]byte(name))
-	return "os-" + hex.EncodeToString(sum[:])[:6]
-}
-
-func (h *Hub) refreshTask(id string) error {
-	t, err := td.Get(h.root, id)
-	if err != nil {
-		return err
-	}
-	return h.store.UpsertTask(toStoreTask(t))
-}
-
-func toStoreTask(t issue.Task) store.Task {
-	return store.Task{
-		ID: t.ID, Title: t.Title, Status: t.Status, Priority: t.Priority,
-		Type: t.Type, Labels: strings.Join(t.Labels, ","), ParentID: t.ParentID,
-	}
-}
-
-// cmdNext claims the highest-priority open task for a worker and branches for it.
-// Tasks are refreshed from the source of truth first (refresh-before-assignment,
-// D15) so a stale/closed task is never handed out.
-func (h *Hub) cmdNext(c registry.Caller, _ []string, out io.Writer) (int, error) {
-	if err := h.SyncTasks(); err != nil {
-		fmt.Fprintf(out, "warning: task sync failed (%v) — using cached tasks\n", err)
-	}
-	open, err := h.store.OpenTasks()
-	if err != nil {
-		return 1, err
-	}
-	if len(open) == 0 {
-		fmt.Fprintln(out, "No open tasks. Wait — the hub will tell you when there is work.")
-		return 0, nil
-	}
-	t := open[0]
-	base, err := h.baseBranch()
-	if err != nil {
-		return 1, err
-	}
-	a, ok, err := h.store.GetAgent(c.Agent)
-	if err != nil || !ok {
-		return 1, fmt.Errorf("agent %s missing: %v", c.Agent, err)
-	}
-	wt := filepath.Join(h.root, a.Workspace)
-	branch := t.ID
-	if err := td.SetStatus(h.root, t.ID, "in_progress"); err != nil {
-		return 1, err
-	}
-	_ = h.refreshTask(t.ID)
-	if err := git.CreateBranch(wt, branch, base); err != nil {
-		return 1, err
-	}
-	if err := h.store.SetState(store.AgentState{Agent: c.Agent, Task: t.ID, Branch: branch, Phase: "working"}); err != nil {
-		return 1, err
-	}
-	_ = h.store.Log(c.Agent, "claim", t.ID+" "+t.Title)
-	fmt.Fprintf(out, "Claimed %s: %s\nBranch:  %s (your /workspace)\nWhen done, run 'sindri-worker submit'.\n", t.ID, t.Title, branch)
-	return 0, nil
 }
 
 // cmdSubmit commits the worker's worktree, records a merge-intent, and returns
@@ -442,6 +190,7 @@ func (h *Hub) cmdSubmit(c registry.Caller, args []string, out io.Writer) (int, e
 		return 1, err
 	}
 	pr := store.PR{ID: "pr-" + st.Task, Task: st.Task, Agent: c.Agent, Branch: st.Branch, Base: base, Status: "open"}
+	_, existed, _ := h.store.GetPR(pr.ID) // first submit vs a resubmit after rejection
 	if err := h.store.PutPR(pr); err != nil {
 		return 1, err
 	}
@@ -449,6 +198,11 @@ func (h *Hub) cmdSubmit(c registry.Caller, args []string, out io.Writer) (int, e
 		return 1, err
 	}
 	_ = h.store.Log(c.Agent, "submit", pr.ID)
+	if existed {
+		_ = h.store.LogPR(pr.ID, "resubmitted", "by "+c.Agent+": "+msg)
+	} else {
+		_ = h.store.LogPR(pr.ID, "created", "by "+c.Agent+": "+msg)
+	}
 	h.notifyReviewers(pr.ID, c.Agent)
 	fmt.Fprintf(out, "%s registered. You'll be informed when it's reviewed. Please wait — this may take a while.\n", pr.ID)
 	return 0, nil
@@ -524,19 +278,33 @@ func (h *Hub) cmdApprove(c registry.Caller, args []string, out io.Writer) (int, 
 	if err != nil {
 		return 1, err
 	}
+	// Only an open PR can be approved. A PR the user rejected stays "rejected"
+	// (the worker is told to stop, not resubmit), so a reviewer can never approve
+	// over the user's rejection.
+	if pr.Status != "open" {
+		fmt.Fprintf(out, "%s is %s — only an open PR can be approved.\n", pr.ID, pr.Status)
+		return 1, nil
+	}
 	pr.Status = "approved"
 	if err := h.store.PutPR(pr); err != nil {
 		return 1, err
 	}
 	_ = h.store.Log(c.Agent, "approve", pr.ID)
+	_ = h.store.LogPR(pr.ID, "approved", "by "+c.Agent)
 	fmt.Fprintf(out, "%s approved — awaiting human merge ('sindri merge %s').\n", pr.ID, pr.ID)
 	return 0, nil
 }
 
-// RejectPR rejects a PR with feedback and routes it to the owning worker
-// (object-addressed; the worker is never named by the rejecter). Shared by the
-// agent reviewer (cmdReject) and the human reviewer (TUI/CLI).
-func (h *Hub) RejectPR(prID, feedback string) error {
+// RejectPR is the human reject path (TUI/CLI): tells the worker to STOP and wait,
+// and leaves the PR rejected so no reviewer can approve over the user.
+func (h *Hub) RejectPR(prID, feedback string) error { return h.reject(prID, feedback, true) }
+
+// reject rejects a PR with feedback and routes it to the owning worker
+// (object-addressed; the worker is never named by the rejecter). byUser
+// distinguishes the two senders: an agent reviewer (cmdReject) sends the worker
+// back to fix-and-resubmit; the human (RejectPR) instead tells the worker to STOP
+// and wait — the PR stays rejected, so no reviewer can approve over the user.
+func (h *Hub) reject(prID, feedback string, byUser bool) error {
 	pr, ok, err := h.store.GetPR(prID)
 	if err != nil {
 		return err
@@ -552,8 +320,19 @@ func (h *Hub) RejectPR(prID, feedback string) error {
 	if err := h.store.PutPR(pr); err != nil {
 		return err
 	}
-	// The owning worker returns to working on the same branch, with the feedback.
+	if byUser {
+		// Sticky rejection: do NOT resume the worker. Tell it to down tools and
+		// wait — the user will give instructions. Phase is left as-is; the [user]
+		// message is authoritative.
+		_ = h.store.LogPR(pr.ID, "rejected", "by user: "+feedback)
+		_ = h.store.Log(pr.Agent, "reject", pr.ID+" (user): "+feedback)
+		_ = h.injectWhenReady(pr.Agent, fmt.Sprintf("[user] %s was rejected: %s — stop working on it and wait for further instructions.", pr.ID, feedback))
+		h.notify()
+		return nil
+	}
+	// Reviewer reject: the owning worker returns to working the same branch.
 	_ = h.store.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "working"})
+	_ = h.store.LogPR(pr.ID, "rejected", "by reviewer: "+feedback)
 	_ = h.store.Log(pr.Agent, "reject", pr.ID+": "+feedback)
 	_ = h.injectWhenReady(pr.Agent, fmt.Sprintf("[reviewer] %s rejected: %s — please fix and 'sindri-worker submit' again.", pr.ID, feedback))
 	h.notify()
@@ -615,7 +394,7 @@ func (h *Hub) cmdReject(c registry.Caller, args []string, out io.Writer) (int, e
 	if len(args) == 0 {
 		return 1, fmt.Errorf("usage: reject <pr-id> <feedback...>")
 	}
-	if err := h.RejectPR(args[0], strings.Join(args[1:], " ")); err != nil {
+	if err := h.reject(args[0], strings.Join(args[1:], " "), false); err != nil {
 		return 1, err
 	}
 	fmt.Fprintf(out, "%s rejected; worker notified.\n", args[0])
@@ -673,6 +452,7 @@ func (h *Hub) Merge(prID string) (store.PR, error) {
 	_ = h.refreshTask(pr.Task)
 	_ = h.store.SetState(store.AgentState{Agent: pr.Agent, Phase: "idle"})
 	_ = h.store.Log(pr.Agent, "merged", prID)
+	_ = h.store.LogPR(prID, "merged", "into "+pr.Base)
 	_ = h.injectWhenReady(pr.Agent, fmt.Sprintf("[hub] %s merged. Run 'sindri-worker next' for the next task.", prID))
 	h.notify()
 	return pr, nil

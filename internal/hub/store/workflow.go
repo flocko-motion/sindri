@@ -69,6 +69,15 @@ CREATE TABLE IF NOT EXISTS pr_lint (
   output TEXT NOT NULL DEFAULT '',
   ran_at TEXT NOT NULL DEFAULT ''
 );
+-- A PR's lifecycle history (created/approved/rejected/merged/…), shown in the
+-- detail column with timestamps — the PR analog of the agent activity log.
+CREATE TABLE IF NOT EXISTS pr_events (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  pr      TEXT NOT NULL,
+  ts      TEXT NOT NULL,
+  type    TEXT NOT NULL,
+  payload TEXT NOT NULL DEFAULT ''
+);
 `
 
 // Task is the cached read-model row for a td task. Description/Acceptance are
@@ -350,6 +359,37 @@ func (s *Store) SetPRLint(prID, output string) error {
 func (s *Store) GetPRLint(prID string) (output, ranAt string) {
 	_ = s.db.QueryRow(`SELECT output, ran_at FROM pr_lint WHERE pr=?`, prID).Scan(&output, &ranAt)
 	return output, ranAt
+}
+
+// --- pr history ---
+
+// LogPR appends a lifecycle event to a PR's history (stamped now, UTC).
+func (s *Store) LogPR(prID, typ, payload string) error {
+	_, err := s.db.Exec(`INSERT INTO pr_events (pr, ts, type, payload) VALUES (?,?,?,?)`,
+		prID, time.Now().UTC().Format(time.RFC3339), typ, payload)
+	if err != nil {
+		return fmt.Errorf("log pr event %s: %w", prID, err)
+	}
+	return nil
+}
+
+// PREvents returns a PR's history, oldest-first. The Event.Agent field carries
+// the PR id (the table is keyed by PR, not agent).
+func (s *Store) PREvents(prID string) ([]Event, error) {
+	rows, err := s.db.Query(`SELECT id, pr, ts, type, payload FROM pr_events WHERE pr=? ORDER BY id`, prID)
+	if err != nil {
+		return nil, fmt.Errorf("pr events for %s: %w", prID, err)
+	}
+	defer rows.Close()
+	var evs []Event
+	for rows.Next() {
+		var e Event
+		if err := rows.Scan(&e.ID, &e.Agent, &e.TS, &e.Type, &e.Payload); err != nil {
+			return nil, fmt.Errorf("scan pr event: %w", err)
+		}
+		evs = append(evs, e)
+	}
+	return evs, rows.Err()
 }
 
 // --- reviews ---

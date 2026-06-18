@@ -250,6 +250,12 @@ func (m model) prMetaItems() []metaItem {
 	for _, r := range d.Reviews {
 		items = append(items, metaItem{text: reviewLine(r)})
 	}
+	items = append(items, metaItem{text: ""}, metaItem{text: dimStyle.Render("── history ──")})
+	// Newest-first so the latest event is at the top, like the agent activity log.
+	for i := len(d.History) - 1; i >= 0; i-- {
+		e := d.History[i]
+		items = append(items, metaItem{text: fmt.Sprintf("%s  %-9s %s", dimStyle.Render(eventTime(e.TS)), e.Type, e.Payload)})
+	}
 	return items
 }
 
@@ -334,6 +340,13 @@ func (m model) prDetailLines() []string {
 		ls = append(ls, "", "── review ── "+reviewLine(r), "requirement: "+r.Requirement)
 		if r.Result != "" {
 			ls = append(ls, "findings: "+r.Result)
+		}
+	}
+	if len(d.History) > 0 {
+		ls = append(ls, "", "── history ──")
+		for i := len(d.History) - 1; i >= 0; i-- {
+			e := d.History[i]
+			ls = append(ls, fmt.Sprintf("%s  %-9s %s", eventTime(e.TS), e.Type, e.Payload))
 		}
 	}
 	ls = append(ls, "", "── diff ──")
