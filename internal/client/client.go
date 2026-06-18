@@ -214,6 +214,12 @@ func (c *HTTP) LintPR(id string) (string, error) {
 	return ok.Out, c.get("/pr/lint?id="+url.QueryEscape(id), &ok)
 }
 
+// RequestReview attaches a review requirement to a PR and dispatches it to a
+// reviewer agent.
+func (c *HTTP) RequestReview(id, requirement string) error {
+	return c.post("/pr/review", hub.RejectReq{ID: id, Feedback: requirement})
+}
+
 // Tasks lists all cached tasks (refreshed from the source of truth).
 func (c *HTTP) Tasks() ([]store.Task, error) {
 	var out []store.Task

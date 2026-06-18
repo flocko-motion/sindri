@@ -166,6 +166,13 @@ func (h *Hub) Handler() http.Handler {
 		out, err := h.LintPR(r.URL.Query().Get("id"))
 		writeJSON(w, okMsg{out}, err)
 	})
+	mux.HandleFunc("POST /pr/review", func(w http.ResponseWriter, r *http.Request) {
+		var req RejectReq // reuse: ID + Feedback (the requirement text)
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"review requested"}, h.RequestReview(req.ID, req.Feedback))
+	})
 	mux.HandleFunc("GET /tasks", func(w http.ResponseWriter, r *http.Request) {
 		tasks, err := h.Tasks()
 		writeJSON(w, tasks, err)

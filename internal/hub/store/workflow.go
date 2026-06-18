@@ -48,6 +48,20 @@ CREATE TABLE IF NOT EXISTS task_priority (
   id       TEXT PRIMARY KEY,
   priority TEXT NOT NULL DEFAULT ''
 );
+-- Review items attached to a PR. One row per requirement; its lifecycle is read
+-- from which fields are filled: unassigned (created_at) → in progress (author +
+-- review_at) → done (verdict + result + verdict_at).
+CREATE TABLE IF NOT EXISTS reviews (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  pr          TEXT NOT NULL,
+  requirement TEXT NOT NULL DEFAULT '',
+  author      TEXT NOT NULL DEFAULT '',  -- assigned reviewer ("" = unassigned)
+  verdict     TEXT NOT NULL DEFAULT '',  -- pass | changes | fail ("" = not done)
+  result      TEXT NOT NULL DEFAULT '',  -- the reviewer's findings
+  created_at  TEXT NOT NULL DEFAULT '',  -- requirement added
+  review_at   TEXT NOT NULL DEFAULT '',  -- picked up by an agent
+  verdict_at  TEXT NOT NULL DEFAULT ''   -- verdict given
+);
 `
 
 // Task is the cached read-model row for a td task. Description/Acceptance are
@@ -71,6 +85,22 @@ type AgentState struct {
 	Task   string `json:"task"`
 	Branch string `json:"branch"`
 	Phase  string `json:"phase"`
+}
+
+// Review is one review item attached to a PR. Its lifecycle is read from which
+// fields are filled: unassigned (only created_at) → in progress (author +
+// review_at) → done (verdict + result + verdict_at). Requirement is the free-text
+// instruction handed to the reviewing agent.
+type Review struct {
+	ID          int64  `json:"id"`
+	PR          string `json:"pr"`
+	Requirement string `json:"requirement"`
+	Author      string `json:"author"`
+	Verdict     string `json:"verdict"`
+	Result      string `json:"result"`
+	CreatedAt   string `json:"created_at"`
+	ReviewAt    string `json:"review_at"`
+	VerdictAt   string `json:"verdict_at"`
 }
 
 // PR is a merge-intent: a branch its owner would like merged, plus a verdict.
@@ -294,4 +324,58 @@ func scanPRRow(row scanner) (PR, error) {
 
 func placeholders(n int) string {
 	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
+}
+
+// --- reviews ---
+
+const reviewCols = `SELECT id,pr,requirement,author,verdict,result,created_at,review_at,verdict_at FROM reviews`
+
+// AddReview attaches a requirement (free-text review instruction) to a PR,
+// unassigned. Returns the new row id.
+func (s *Store) AddReview(pr, requirement string) (int64, error) {
+	res, err := s.db.Exec(`INSERT INTO reviews (pr, requirement, created_at) VALUES (?,?,?)`,
+		pr, requirement, time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, fmt.Errorf("add review: %w", err)
+	}
+	return res.LastInsertId()
+}
+
+// AssignReview marks a review as picked up by an author (in progress).
+func (s *Store) AssignReview(id int64, author string) error {
+	_, err := s.db.Exec(`UPDATE reviews SET author=?, review_at=? WHERE id=?`,
+		author, time.Now().UTC().Format(time.RFC3339), id)
+	if err != nil {
+		return fmt.Errorf("assign review %d: %w", id, err)
+	}
+	return nil
+}
+
+// RecordVerdict completes a review with a verdict and the reviewer's findings.
+func (s *Store) RecordVerdict(id int64, verdict, result string) error {
+	_, err := s.db.Exec(`UPDATE reviews SET verdict=?, result=?, verdict_at=? WHERE id=?`,
+		verdict, result, time.Now().UTC().Format(time.RFC3339), id)
+	if err != nil {
+		return fmt.Errorf("record verdict %d: %w", id, err)
+	}
+	return nil
+}
+
+// Reviews lists a PR's review items, oldest first.
+func (s *Store) Reviews(pr string) ([]Review, error) {
+	rows, err := s.db.Query(reviewCols+` WHERE pr=? ORDER BY id`, pr)
+	if err != nil {
+		return nil, fmt.Errorf("reviews %s: %w", pr, err)
+	}
+	defer rows.Close()
+	var out []Review
+	for rows.Next() {
+		var r Review
+		if err := rows.Scan(&r.ID, &r.PR, &r.Requirement, &r.Author, &r.Verdict,
+			&r.Result, &r.CreatedAt, &r.ReviewAt, &r.VerdictAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }

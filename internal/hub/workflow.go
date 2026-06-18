@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
+	"github.com/flo-at/sindri/internal/adapter/pod"
 	"github.com/flo-at/sindri/internal/adapter/spec"
 	"github.com/flo-at/sindri/internal/adapter/td"
 	"github.com/flo-at/sindri/internal/hub/registry"
@@ -38,9 +39,10 @@ func (h *Hub) PRs() ([]store.PR, error) { return h.store.PRs() }
 
 // PRDetail is a merge-intent plus its linked task and diff (for `pr info`).
 type PRDetail struct {
-	PR   store.PR   `json:"pr"`
-	Task store.Task `json:"task"`
-	Diff string     `json:"diff"`
+	PR      store.PR       `json:"pr"`
+	Task    store.Task     `json:"task"`
+	Diff    string         `json:"diff"`
+	Reviews []store.Review `json:"reviews"`
 }
 
 // PRInfo returns a PR with its linked task and diff.
@@ -54,7 +56,49 @@ func (h *Hub) PRInfo(id string) (PRDetail, error) {
 	}
 	diff, _ := git.Diff(h.root, pr.Base, pr.Branch)
 	task, _ := h.TaskInfo(pr.Task) // linked task; zero value if it can't be read
-	return PRDetail{PR: pr, Task: task, Diff: diff}, nil
+	reviews, _ := h.store.Reviews(id)
+	return PRDetail{PR: pr, Task: task, Diff: diff, Reviews: reviews}, nil
+}
+
+// RequestReview attaches a review requirement (free-text instruction) to a PR
+// and dispatches it to a running reviewer agent — assigning the row and
+// injecting the instruction. With no reviewer running, the requirement is
+// recorded unassigned for one to pick up later.
+func (h *Hub) RequestReview(prID, requirement string) error {
+	if _, ok, err := h.store.GetPR(prID); err != nil {
+		return err
+	} else if !ok {
+		return fmt.Errorf("no such PR %q", prID)
+	}
+	requirement = strings.TrimSpace(requirement)
+	if requirement == "" {
+		requirement = "Review this PR for correctness and quality."
+	}
+	id, err := h.store.AddReview(prID, requirement)
+	if err != nil {
+		return err
+	}
+	if reviewer := h.runningReviewer(); reviewer != "" {
+		if err := h.store.AssignReview(id, reviewer); err != nil {
+			return err
+		}
+		_ = h.injectWhenReady(reviewer, fmt.Sprintf(
+			"[hub] Review %s. %s When done, run `sindri-worker review %s <pass|changes|fail> \"<findings>\"`.",
+			prID, requirement, prID))
+	}
+	h.notify()
+	return nil
+}
+
+// runningReviewer returns the name of a live reviewer agent, or "".
+func (h *Hub) runningReviewer() string {
+	roster, _ := h.store.Roster()
+	for _, a := range roster {
+		if a.Role == "reviewer" && pod.Running(Container(a.Name)) && h.sessionAlive(a.Name) {
+			return a.Name
+		}
+	}
+	return ""
 }
 
 // Tasks refreshes from td and returns all cached tasks (for `task list`).
@@ -515,6 +559,30 @@ func (h *Hub) cmdReject(c registry.Caller, args []string, out io.Writer) (int, e
 	}
 	fmt.Fprintf(out, "%s rejected; worker notified.\n", args[0])
 	return 0, nil
+}
+
+// cmdReview records a reviewer agent's verdict on a PR review it was assigned.
+func (h *Hub) cmdReview(c registry.Caller, args []string, out io.Writer) (int, error) {
+	if len(args) < 2 {
+		return 1, fmt.Errorf("usage: review <pr-id> <pass|changes|fail> <findings...>")
+	}
+	prID, verdict := args[0], args[1]
+	findings := strings.TrimSpace(strings.Join(args[2:], " "))
+	revs, err := h.store.Reviews(prID)
+	if err != nil {
+		return 1, err
+	}
+	for _, r := range revs {
+		if r.Author == c.Agent && r.Verdict == "" { // your in-progress review
+			if err := h.store.RecordVerdict(r.ID, verdict, findings); err != nil {
+				return 1, err
+			}
+			h.notify()
+			fmt.Fprintf(out, "review recorded on %s: %s\n", prID, verdict)
+			return 0, nil
+		}
+	}
+	return 1, fmt.Errorf("no review assigned to you on %s", prID)
 }
 
 // Merge merges an approved PR into the base branch (host/human-only — the single

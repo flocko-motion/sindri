@@ -47,6 +47,7 @@ type backend interface {
 	PRInfo(id string) (hub.PRDetail, error)
 	RejectPR(id, feedback string) error
 	LintPR(id string) (string, error)
+	RequestReview(id, requirement string) error
 	Merge(id string) (store.PR, error)
 	Close() error
 }
@@ -447,8 +448,23 @@ func splitCSV(s string) []string {
 
 func newPrCmd() *cobra.Command {
 	c := &cobra.Command{Use: "pr", Short: "Inspect and merge pull requests (merge-intents)"}
-	c.AddCommand(prListCmd(), prInfoCmd(), prRejectCmd(), prLintCmd(), prMergeCmd())
+	c.AddCommand(prListCmd(), prInfoCmd(), prReviewCmd(), prRejectCmd(), prLintCmd(), prMergeCmd())
 	return c
+}
+
+func prReviewCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "review <pr-id> [requirement...]", Short: "Request an agentic review of a PR (assigns a reviewer agent)", Args: cobra.MinimumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withBackend(func(b backend) error {
+				if err := b.RequestReview(args[0], strings.Join(args[1:], " ")); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "review requested for %s\n", args[0])
+				return nil
+			})
+		},
+	}
 }
 
 func prRejectCmd() *cobra.Command {
