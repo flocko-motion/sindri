@@ -118,13 +118,19 @@ func (m model) prListHeight() int {
 // lint) on the left, with the metadata + task + reviews detail on the right.
 func (m model) prBody() string {
 	h := m.bodyHeight()
-	rightW := clampInt(prDetailW, 20, max(20, m.w-30))
-	leftW := m.w - rightW - 1
+	leftW := m.w
+	if m.showDetail() {
+		leftW = m.w - clampInt(prDetailW, 20, max(20, m.w-30)) - 1
+	}
 
 	listBox := pane(rowTexts(m.rows()), m.list, leftW, m.cursor[m.tab])
 	contentBox := pane(m.prContentLines(), m.detail, leftW, -1) // big pane: diff/lint, J/K scrolls
 	leftCol := strings.Join([]string{listBox, hdivider(leftW), contentBox}, "\n")
 
+	if !m.showDetail() { // § hid the right column — list + diff/lint take the full width
+		return leftCol
+	}
+	rightW := m.w - leftW - 1
 	items := m.prMetaItems()
 	lines := make([]string, len(items))
 	hl, ai := -1, 0 // highlight the focused actionable item when the right column has focus

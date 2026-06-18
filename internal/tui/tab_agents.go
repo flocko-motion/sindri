@@ -94,8 +94,10 @@ func (m model) agentListHeight() int {
 // on the left (main), and the fixed-width agent detail on the right.
 func (m model) agentsBody() string {
 	h := m.bodyHeight()
-	rightW := clampInt(agentDetailW, 20, max(20, m.w-30))
-	leftW := m.w - rightW - 1 // minus the vertical divider
+	leftW := m.w
+	if m.showDetail() { // leave room for the right detail column
+		leftW = m.w - clampInt(agentDetailW, 20, max(20, m.w-30)) - 1
+	}
 	listH := m.agentListHeight()
 	paneH := max(1, h-listH-1) // minus the horizontal divider
 
@@ -103,7 +105,10 @@ func (m model) agentsBody() string {
 	paneBox := tailPane(m.paneLines(), leftW, paneH)
 	leftCol := strings.Join([]string{listBox, hdivider(leftW), paneBox}, "\n")
 
-	right := pane(m.detailLines(), m.detail, rightW, -1)
+	if !m.showDetail() { // § hid the right column — left split takes the full width
+		return leftCol
+	}
+	right := pane(m.detailLines(), m.detail, m.w-leftW-1, -1)
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftCol, divider(h), right)
 }
 

@@ -62,6 +62,35 @@ func (m model) agentLiveCmds() tea.Cmd {
 	return tea.Batch(logFetchCmd(m.cl, id), paneFetchCmd(m.cl, id))
 }
 
+// refreshCmd asks the hub to re-sync tasks from the source of truth.
+func (m *model) refreshCmd() tea.Cmd {
+	cl := m.cl
+	if cl == nil {
+		return nil
+	}
+	return func() tea.Msg { cl.Refresh(); return nil }
+}
+
+// action runs a mutating hub call for the current selection: surfaces failures
+// in the error modal and refetches state on success.
+func (m *model) action(fn func(id string) error) tea.Cmd {
+	id := m.selID()
+	if id == "" || m.cl == nil {
+		return nil
+	}
+	cl := m.cl
+	return func() tea.Msg {
+		if err := fn(id); err != nil {
+			return errModalMsg{err}
+		}
+		st, err := cl.State()
+		if err != nil {
+			return nil
+		}
+		return polledMsg(st)
+	}
+}
+
 // mutateThenRefresh runs a hub mutation, then immediately fetches fresh state so
 // the board reflects it without waiting for the SSE push or the next poll tick.
 func mutateThenRefresh(cl *client.HTTP, mutate func()) tea.Cmd {

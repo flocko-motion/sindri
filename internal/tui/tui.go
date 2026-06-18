@@ -112,8 +112,9 @@ type model struct {
 	list   scroll.Viewport
 	detail scroll.Viewport
 
-	filter    int
-	collapsed map[string]bool
+	filter     int
+	collapsed  map[string]bool
+	hideDetail bool // § force-hides the detail pane (else shown when wide enough)
 
 	rightFocus  bool // detail (right) column has focus (h/l switch; j/k move within)
 	rightCursor int  // focused actionable item in the right column
@@ -155,7 +156,13 @@ type choiceModalState struct {
 // pane; below it the selector goes full-width and detail is ENTER-only.
 const detailMinWidth = 135
 
-func (m model) showDetail() bool { return m.w >= detailMinWidth }
+// wide reports whether the terminal is wide enough for a side detail column.
+func (m model) wide() bool { return m.w >= detailMinWidth }
+
+// showDetail reports whether the right detail column should be shown (wide
+// enough and not §-hidden). The Agents/PRs left split still renders when wide
+// even if the detail is hidden — § only drops the right column there.
+func (m model) showDetail() bool { return m.wide() && !m.hideDetail }
 
 func newModel(cl *client.HTTP, ch <-chan hub.BoardState) model {
 	// Default to a sane size so a frame renders immediately — the real size
@@ -498,6 +505,11 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.detail.ScrollTop()
 			return nil
 		}
+	case "§": // toggle the detail pane (full-width selector when hidden)
+		m.hideDetail = !m.hideDetail
+		if m.hideDetail {
+			m.rightFocus = false // can't focus a hidden pane
+		}
 	case "r":
 		m.reclamp()
 		return m.refreshCmd()
@@ -511,34 +523,6 @@ func (m *model) onKey(k string) tea.Cmd {
 	return cmd
 }
 
-// refreshCmd asks the hub to re-sync tasks from the source of truth.
-func (m *model) refreshCmd() tea.Cmd {
-	cl := m.cl
-	if cl == nil {
-		return nil
-	}
-	return func() tea.Msg { cl.Refresh(); return nil }
-}
-
-// action runs a mutating hub call for the current selection; /events then
-// refreshes the view.
-func (m *model) action(fn func(id string) error) tea.Cmd {
-	id := m.selID()
-	if id == "" || m.cl == nil {
-		return nil
-	}
-	cl := m.cl
-	return func() tea.Msg {
-		if err := fn(id); err != nil {
-			return errModalMsg{err} // surface failures instead of swallowing them
-		}
-		st, err := cl.State() // reflect the change at once
-		if err != nil {
-			return nil
-		}
-		return polledMsg(st)
-	}
-}
 
 
 // reclamp keeps the active tab's cursor + both viewports in range.
@@ -546,7 +530,7 @@ func (m *model) reclamp() {
 	n := len(m.rows())
 	m.cursor[m.tab] = clampInt(m.cursor[m.tab], 0, max(0, n-1))
 	listH := m.bodyHeight()
-	if m.showDetail() { // agents/prs: the list is the short top region of a split
+	if m.wide() { // agents/prs: the list is the short top region of a split
 		switch m.tab {
 		case 1:
 			listH = m.agentListHeight()
@@ -559,7 +543,7 @@ func (m *model) reclamp() {
 	m.list.SetCursor(m.cursor[m.tab])
 	// Offset-driven scroll (J/K), preserved across re-layouts; reset to top only
 	// when the selection changes (syncDetail).
-	if m.tab == 2 && m.showDetail() { // PRs: detail pane is the big bottom-left content
+	if m.tab == 2 && m.wide() { // PRs: detail pane is the big bottom-left content
 		m.detail.Resize(max(1, m.bodyHeight()-m.prListHeight()-1), len(m.prContentLines()))
 	} else {
 		m.detail.Resize(m.bodyHeight(), len(m.detailLines()))
@@ -672,10 +656,10 @@ func (m model) View() string {
 	}
 	top := tabStrip(labels, m.tab, m.w)
 	var body string
-	if m.tab == 1 && m.showDetail() {
-		body = m.agentsBody() // bespoke: list + live tmux pane (left) · detail (right)
-	} else if m.tab == 2 && m.showDetail() {
-		body = m.prBody() // bespoke: list + diff/lint (left) · metadata+task+reviews (right)
+	if m.tab == 1 && m.wide() { // bespoke: list + live tmux pane; right detail unless §-hidden
+		body = m.agentsBody()
+	} else if m.tab == 2 && m.wide() { // bespoke: list + diff/lint; right detail unless §-hidden
+		body = m.prBody()
 	} else if m.showDetail() {
 		left := pane(rowTexts(m.rows()), m.list, m.leftWidth(), m.cursor[m.tab])
 		right := pane(m.detailLines(), m.detail, m.detailWidth(), m.detailHighlight())
@@ -688,7 +672,7 @@ func (m model) View() string {
 	if m.mode != inputNone {
 		foot = dimStyle.Render(padTrunc("enter submit · esc cancel", m.w)) + "\n" + m.input.View()
 	} else {
-		global := "⇥/⇧⇥ tab · C-h/l pane · j/k move · J/K scroll · r refresh · q quit"
+		global := "⇥/⇧⇥ tab · C-h/l pane · § detail · j/k move · J/K scroll · r refresh · q quit"
 		if m.flash != "" {
 			global = m.flash
 		}
