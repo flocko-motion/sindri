@@ -173,16 +173,17 @@ func (m model) agentRows() []row {
 }
 
 func (m model) agentDetailLines() []string {
-	id := m.selID()
-	if id == "" {
+	a, ok := m.selAgent()
+	if !ok {
 		return []string{dimStyle.Render("(orphan — no roster entry; 'podman rm -f' it)")}
 	}
-	var a hub.AgentView
-	for _, x := range m.state.Agents {
-		if x.Name == id {
-			a = x
-		}
-	}
+	return m.agentDetailFor(a)
+}
+
+// agentDetailFor renders an agent's detail (used for the Agents tab and, via the
+// item convention, the modal-peek). The activity log is only shown for the
+// currently-selected agent (it's lazily fetched for that one).
+func (m model) agentDetailFor(a hub.AgentView) []string {
 	ls := []string{
 		"agent:     " + a.Name,
 		"role:      " + a.Role,
@@ -190,13 +191,14 @@ func (m model) agentDetailLines() []string {
 		"task:      " + dash(a.Task),
 		"pr:        " + dash(a.PR),
 		"workspace: " + dash(a.Workspace),
-		"", "── activity ──",
 	}
-	// Newest-first so the latest action (launch, stop, …) is visible at the top
-	// of the activity section rather than scrolled off the bottom.
-	for i := len(m.agentLog) - 1; i >= 0; i-- {
-		e := m.agentLog[i]
-		ls = append(ls, fmt.Sprintf("%s  %-10s %s", dimStyle.Render(eventTime(e.TS)), e.Type, e.Payload))
+	if m.tab == 1 && a.Name == m.selID() {
+		ls = append(ls, "", "── activity ──")
+		// Newest-first so the latest action is visible at the top.
+		for i := len(m.agentLog) - 1; i >= 0; i-- {
+			e := m.agentLog[i]
+			ls = append(ls, fmt.Sprintf("%s  %-10s %s", dimStyle.Render(eventTime(e.TS)), e.Type, e.Payload))
+		}
 	}
 	return ls
 }

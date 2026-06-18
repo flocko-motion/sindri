@@ -49,8 +49,8 @@ func TestScreenshot(t *testing.T) {
 		{"Tasks tab (default: open filter)", nil},
 		{"Tasks tab — cursor on the feature", []string{"j", "j"}},
 		{"Tasks tab — filter=all (shows closed)", []string{"f", "f"}},
-		{"Agents tab", []string{"2"}},
-		{"PRs tab", []string{"3"}},
+		{"Agents tab", []string{"tab"}},
+		{"PRs tab", []string{"tab", "tab"}},
 	}
 	for _, sc := range scenes {
 		fmt.Printf("\n========== %s ==========\n%s\n", sc.name, Screenshot(b, 96, 20, sc.keys...))
@@ -67,9 +67,9 @@ func TestScreenshot(t *testing.T) {
 	fmt.Printf("\n========== new-task form — parent validation error ==========\n%s\n",
 		Screenshot(b, 80, 22, "N", "tab", "tab", "tab", "x", "y", "z", "ctrl+s"))
 	fmt.Printf("\n========== edit-task form (e on the bug) ==========\n%s\n", Screenshot(b, 80, 22, "j", "j", "j", "j", "j", "e"))
-	fmt.Printf("\n========== Agents tab — wide 3-region layout (list+tmux | detail) ==========\n%s\n", Screenshot(b, 150, 24, "2"))
-	fmt.Printf("\n========== PRs tab — wide split (list+diff | metadata+task+reviews) ==========\n%s\n", Screenshot(b, 150, 24, "3"))
-	fmt.Printf("\n========== agent role choice (2, e) ==========\n%s\n", Screenshot(b, 70, 16, "2", "e"))
-	fmt.Printf("\n========== agent delete confirm (2, D) ==========\n%s\n", Screenshot(b, 70, 16, "2", "D"))
-	fmt.Printf("\n========== error modal (attach a down agent) ==========\n%s\n", Screenshot(b, 80, 16, "2", "j", "j", "a"))
+	fmt.Printf("\n========== Agents tab — wide 3-region layout (list+tmux | detail) ==========\n%s\n", Screenshot(b, 150, 24, "tab"))
+	fmt.Printf("\n========== PRs tab — wide split (list+diff | metadata+task+reviews) ==========\n%s\n", Screenshot(b, 150, 24, "tab", "tab"))
+	fmt.Printf("\n========== agent role choice (2, e) ==========\n%s\n", Screenshot(b, 70, 16, "tab", "e"))
+	fmt.Printf("\n========== agent delete confirm (2, D) ==========\n%s\n", Screenshot(b, 70, 16, "tab", "D"))
+	fmt.Printf("\n========== error modal (attach a down agent) ==========\n%s\n", Screenshot(b, 80, 16, "tab", "j", "j", "a"))
 }

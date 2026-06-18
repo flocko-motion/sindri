@@ -136,10 +136,16 @@ func typeAbbr(t string) string {
 // taskDetailLines renders the selected task: board fields + assignee + PR, plus
 // the description once the lazy detail fetch has filled it.
 func (m model) taskDetailLines() []string {
-	id := m.selID()
-	if id == "" {
+	if m.selID() == "" {
 		return []string{dimStyle.Render("(no task)")}
 	}
+	return itemTexts(m.taskItems())
+}
+
+// taskItems is the selected task's detail as metaItems (parent/agent/pr are
+// focusable cross-references).
+func (m model) taskItems() []metaItem {
+	id := m.selID()
 	var t store.Task
 	for _, x := range m.state.Tasks {
 		if x.ID == id {
@@ -150,39 +156,67 @@ func (m model) taskDetailLines() []string {
 	if m.taskDetail.ID == id {
 		desc = m.taskDetail.Description
 	}
-	return m.taskDetailFor(t, desc)
+	return m.taskItemsFor(t, desc)
 }
 
-// taskDetailFor renders a task's detail block (used for the Tasks tab and, from
-// the PRs tab, the linked-task modal). desc is the (possibly empty) description.
+func (m model) taskActionable() []metaItem {
+	var out []metaItem
+	for _, it := range m.taskItems() {
+		if it.kind != "" {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+// taskDetailFor renders any task's detail block (used for the modal-peek and the
+// PRs tab's linked-task modal). desc is the (possibly empty) description.
 func (m model) taskDetailFor(t store.Task, desc string) []string {
-	assignee := "-"
+	return itemTexts(m.taskItemsFor(t, desc))
+}
+
+// taskItemsFor builds a task's detail metaItems: scalar fields plus the agent,
+// PR, and parent as actionable cross-references.
+func (m model) taskItemsFor(t store.Task, desc string) []metaItem {
+	assignee, pr := "", ""
 	for _, a := range m.state.Agents {
 		if a.Task == t.ID {
 			assignee = a.Name
 		}
 	}
-	pr := "-"
 	for _, p := range m.state.PRs {
 		if p.Task == t.ID && p.Status != "merged" {
 			pr = p.ID
 		}
 	}
-	ls := []string{
-		t.Title, "",
-		"type:     " + dash(t.Type),
-		"priority: " + hub.PriorityLabel(t.Priority),
-		"status:   " + t.Status,
-		"parent:   " + dash(t.ParentID),
-		"agent:    " + assignee,
-		"pr:       " + pr,
-		"labels:   " + dash(t.Labels),
+	xref := func(label, val, kind string) metaItem {
+		if val == "" {
+			return metaItem{text: label + "-"}
+		}
+		return metaItem{text: label + val, kind: kind, value: val}
 	}
-	if strings.TrimSpace(desc) != "" {
-		ls = append(ls, "", "── description ──")
-		ls = append(ls, strings.Split(strings.TrimRight(desc, "\n"), "\n")...)
+	return append([]metaItem{
+		{text: t.Title}, {text: ""},
+		{text: "type:     " + dash(t.Type)},
+		{text: "priority: " + hub.PriorityLabel(t.Priority)},
+		{text: "status:   " + t.Status},
+		xref("parent:   ", t.ParentID, "task"),
+		xref("agent:    ", assignee, "agent"),
+		xref("pr:       ", pr, "pr"),
+		{text: "labels:   " + dash(t.Labels)},
+	}, descItems(desc)...)
+}
+
+// descItems renders an optional description block.
+func descItems(desc string) []metaItem {
+	if strings.TrimSpace(desc) == "" {
+		return nil
 	}
-	return ls
+	items := []metaItem{{text: ""}, {text: "── description ──"}}
+	for _, l := range strings.Split(strings.TrimRight(desc, "\n"), "\n") {
+		items = append(items, metaItem{text: l})
+	}
+	return items
 }
 
 // taskTypes is the full set of td issue types (display == td value).

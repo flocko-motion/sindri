@@ -39,6 +39,7 @@ func keyMsg(k string) tea.KeyMsg {
 		"esc": tea.KeyEsc, "up": tea.KeyUp, "down": tea.KeyDown,
 		"left": tea.KeyLeft, "right": tea.KeyRight, "backspace": tea.KeyBackspace,
 		" ": tea.KeySpace, "ctrl+s": tea.KeyCtrlS, "ctrl+d": tea.KeyCtrlD, "ctrl+u": tea.KeyCtrlU,
+		"ctrl+l": tea.KeyCtrlL, "ctrl+h": tea.KeyCtrlH,
 	}
 	if k == " " {
 		return tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}

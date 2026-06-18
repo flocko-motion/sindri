@@ -224,26 +224,6 @@ func (m model) agentWorkspace(name string) string {
 	return ""
 }
 
-// activateRightItem performs ENTER on the focused right-column item: jump to the
-// agent, open the linked task, or open a shell in the workspace path.
-func (m *model) activateRightItem() tea.Cmd {
-	act := m.prActionable()
-	if m.rightCursor < 0 || m.rightCursor >= len(act) {
-		return nil
-	}
-	switch it := act[m.rightCursor]; it.kind {
-	case "agent":
-		m.rightFocus = false
-		m.tab = 1
-		m.selectRow(it.value) // jump to that agent on the Agents tab
-	case "task":
-		m.openTaskModal(m.prDetail.Task)
-	case "path":
-		return tea.ExecProcess(shellAt(it.value), func(error) tea.Msg { return nil })
-	}
-	return nil
-}
-
 // shellAt builds an interactive shell rooted at dir (for opening a workspace).
 func shellAt(dir string) *exec.Cmd {
 	sh := os.Getenv("SHELL")

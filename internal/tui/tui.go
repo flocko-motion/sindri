@@ -317,9 +317,9 @@ func (m *model) onKey(k string) tea.Cmd {
 	switch k {
 	case "y": // yank: the focused right-column value, else the selected id
 		if m.rightFocus {
-			if act := m.prActionable(); m.rightCursor < len(act) {
-				_ = clipboard.WriteAll(act[m.rightCursor].value)
-				m.flash = "copied: " + act[m.rightCursor].value
+			if it, ok := m.focusedItem(); ok {
+				_ = clipboard.WriteAll(it.value)
+				m.flash = "copied: " + it.value
 			}
 			return nil
 		}
@@ -339,21 +339,26 @@ func (m *model) onKey(k string) tea.Cmd {
 	case "q", "ctrl+c":
 		m.quit = true
 		return nil
-	case "ctrl+l", "tab":
+	case "tab": // the only way to switch tabs (with shift+tab)
 		m.tab = (m.tab + 1) % len(hub.Sections)
-	case "ctrl+h", "shift+tab":
+	case "shift+tab":
 		m.tab = (m.tab - 1 + len(hub.Sections)) % len(hub.Sections)
-	case "1", "2", "3":
-		m.tab = int(k[0] - '1')
+	case "ctrl+l": // the only way to switch panes (with ctrl+h): focus the detail
+		if (m.tab == 0 || m.tab == 2) && m.showDetail() {
+			m.rightFocus = true
+			m.rightCursor = clampInt(m.rightCursor, 0, max(0, len(m.actionableItems())-1))
+		}
+	case "ctrl+h": // focus back to the list
+		m.rightFocus = false
 	case "j", "down":
 		if m.rightFocus {
-			m.rightCursor = clampInt(m.rightCursor+1, 0, max(0, len(m.prActionable())-1))
+			m.rightCursor = clampInt(m.rightCursor+1, 0, max(0, len(m.actionableItems())-1))
 		} else {
 			m.cursor[m.tab]++
 		}
 	case "k", "up":
 		if m.rightFocus {
-			m.rightCursor = clampInt(m.rightCursor-1, 0, max(0, len(m.prActionable())-1))
+			m.rightCursor = clampInt(m.rightCursor-1, 0, max(0, len(m.actionableItems())-1))
 		} else {
 			m.cursor[m.tab]--
 		}
@@ -367,7 +372,13 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.detail.ScrollUp()
 		}
 		return nil
-	case "g":
+	case "g": // goto the focused cross-reference's home, else jump the list to top
+		if m.rightFocus {
+			if it, ok := m.focusedItem(); ok && it.kind != "path" {
+				m.gotoItem(it.kind, it.value)
+			}
+			return nil
+		}
 		m.cursor[m.tab] = 0
 	case "G":
 		m.cursor[m.tab] = 1 << 30
@@ -379,20 +390,15 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 0 {
 			m.filter = (m.filter + 1) % 3
 		}
-	case "h": // tasks: collapse fold · prs: focus the list (left)
-		if m.tab == 0 {
+	case "h": // tasks: collapse the fold under the cursor (tree navigation)
+		if m.tab == 0 && !m.rightFocus {
 			if id := m.selID(); id != "" {
 				m.collapsed[id] = true
 			}
-		} else if m.tab == 2 {
-			m.rightFocus = false
 		}
-	case "l": // tasks: expand fold · prs: focus the detail column (right)
-		if m.tab == 0 {
+	case "l": // tasks: expand the fold under the cursor (tree navigation)
+		if m.tab == 0 && !m.rightFocus {
 			delete(m.collapsed, m.selID())
-		} else if m.tab == 2 && m.showDetail() {
-			m.rightFocus = true
-			m.rightCursor = clampInt(m.rightCursor, 0, max(0, len(m.prActionable())-1))
 		}
 	case "S": // agents: Start/Stop toggle — start if down, stop if running
 		if m.tab == 1 {
@@ -474,8 +480,14 @@ func (m *model) onKey(k string) tea.Cmd {
 			return nil
 		}
 	case "enter":
-		if m.rightFocus { // act on the focused right-column item (jump/open)
-			return m.activateRightItem()
+		if m.rightFocus { // focused cross-ref: open its details (paths open a shell)
+			if it, ok := m.focusedItem(); ok {
+				if it.kind == "path" {
+					return tea.ExecProcess(shellAt(it.value), func(error) tea.Msg { return nil })
+				}
+				m.openItemModal(it.kind, it.value)
+			}
+			return nil
 		}
 		if m.selID() != "" { // open the full-screen detail modal
 			m.modal = true
@@ -605,16 +617,16 @@ func (m model) detailLines() []string {
 }
 
 func (m model) contextFooter() string {
+	if m.rightFocus { // focused on a detail cross-reference (Tasks/PRs)
+		return "j/k item · enter details · g goto · y copy · C-h back to list"
+	}
 	switch m.tab {
 	case 0:
-		return fmt.Sprintf("N new · e edit · p priority · y/Y yank · f filter: %s · h/l fold", filterNames[m.filter])
+		return fmt.Sprintf("N new · e edit · p priority · C-l detail · f filter: %s · h/l fold", filterNames[m.filter])
 	case 1:
 		return "N new · S start/stop · t tell · a attach · e role · D delete"
 	default:
-		if m.rightFocus {
-			return "j/k item · enter open · y copy · h back to list"
-		}
-		return "l focus · V verify · A agent-review · R reject · L lint · m merge"
+		return "C-l focus · V verify · A agent-review · R reject · L lint · m merge"
 	}
 }
 
@@ -626,15 +638,6 @@ func (m model) selID() string {
 	return ""
 }
 
-// selectRow moves the current tab's cursor to the row with the given id.
-func (m *model) selectRow(id string) {
-	for i, r := range m.rows() {
-		if r.id == id {
-			m.cursor[m.tab] = i
-			return
-		}
-	}
-}
 
 // View composes the full-height frame: tab strip, master-detail body, footer.
 func (m model) View() string {
@@ -673,7 +676,7 @@ func (m model) View() string {
 		body = m.prBody() // bespoke: list + diff/lint (left) · metadata+task+reviews (right)
 	} else if m.showDetail() {
 		left := pane(rowTexts(m.rows()), m.list, m.leftWidth(), m.cursor[m.tab])
-		right := pane(m.detailLines(), m.detail, m.detailWidth(), -1)
+		right := pane(m.detailLines(), m.detail, m.detailWidth(), m.detailHighlight())
 		body = lipgloss.JoinHorizontal(lipgloss.Top, left, divider(m.bodyHeight()), right)
 	} else {
 		// Narrow terminal: selector full-width; detail is ENTER-only.
@@ -683,7 +686,7 @@ func (m model) View() string {
 	if m.mode != inputNone {
 		foot = dimStyle.Render(padTrunc("enter submit · esc cancel", m.w)) + "\n" + m.input.View()
 	} else {
-		global := "ctrl+h/l tab · j/k move · J/K scroll · g/G ends · r refresh · q quit"
+		global := "⇥/⇧⇥ tab · C-h/l pane · j/k move · J/K scroll · r refresh · q quit"
 		if m.flash != "" {
 			global = m.flash
 		}
