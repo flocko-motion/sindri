@@ -8,8 +8,31 @@ package tui
 import (
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
+
+// updateChoice handles keys while a pick-one modal is open.
+func (m model) updateChoice(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q":
+		m.choice.active = false
+	case "j", "down":
+		if m.choice.cursor < len(m.choice.options)-1 {
+			m.choice.cursor++
+		}
+	case "k", "up":
+		if m.choice.cursor > 0 {
+			m.choice.cursor--
+		}
+	case "enter":
+		val := m.choice.values[m.choice.cursor]
+		apply := m.choice.apply
+		m.choice.active = false
+		return m, apply(val)
+	}
+	return m, nil
+}
 
 // choiceModal renders a centered pick-one modal: title, options (cursor row
 // highlighted), and a key hint.

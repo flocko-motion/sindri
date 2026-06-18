@@ -117,6 +117,9 @@ type model struct {
 	filter    int
 	collapsed map[string]bool
 
+	rightFocus  bool // detail (right) column has focus (h/l switch; j/k move within)
+	rightCursor int  // focused actionable item in the right column
+
 	detailKey  string
 	agentLog   []store.Event
 	agentPane  string // captured tmux screen of the selected agent (live)
@@ -292,50 +295,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 
-// updateChoice handles keys while a pick-one modal is open.
-func (m model) updateChoice(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "q":
-		m.choice.active = false
-	case "j", "down":
-		if m.choice.cursor < len(m.choice.options)-1 {
-			m.choice.cursor++
-		}
-	case "k", "up":
-		if m.choice.cursor > 0 {
-			m.choice.cursor--
-		}
-	case "enter":
-		val := m.choice.values[m.choice.cursor]
-		apply := m.choice.apply
-		m.choice.active = false
-		return m, apply(val)
-	}
-	return m, nil
-}
-
-// updateModal handles keys while the detail modal is open: scroll or close.
-func (m model) updateModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "enter", "q":
-		m.modal = false
-		m.modalOverride, m.modalOverrideTitle = nil, ""
-		m.reclamp() // restore the inline detail viewport
-	case "j", "down":
-		m.detail.ScrollDown()
-	case "k", "up":
-		m.detail.ScrollUp()
-	case "ctrl+d":
-		m.detail.ScrollPageDown()
-	case "ctrl+u":
-		m.detail.ScrollPageUp()
-	case "g":
-		m.detail.ScrollTop()
-	case "G":
-		m.detail.ScrollBottom()
-	}
-	return m, nil
-}
 
 // modalTitle labels the detail modal for the current selection.
 func (m model) modalTitle() string {
@@ -356,7 +315,14 @@ func (m *model) onKey(k string) tea.Cmd {
 	oldTab := m.tab
 	m.flash = "" // any keypress clears the previous transient status
 	switch k {
-	case "y": // yank the selected id
+	case "y": // yank: the focused right-column value, else the selected id
+		if m.rightFocus {
+			if act := m.prActionable(); m.rightCursor < len(act) {
+				_ = clipboard.WriteAll(act[m.rightCursor].value)
+				m.flash = "copied: " + act[m.rightCursor].value
+			}
+			return nil
+		}
 		if id := m.selID(); id != "" {
 			_ = clipboard.WriteAll(id)
 			m.flash = "copied id: " + id
@@ -380,9 +346,17 @@ func (m *model) onKey(k string) tea.Cmd {
 	case "1", "2", "3":
 		m.tab = int(k[0] - '1')
 	case "j", "down":
-		m.cursor[m.tab]++
+		if m.rightFocus {
+			m.rightCursor = clampInt(m.rightCursor+1, 0, max(0, len(m.prActionable())-1))
+		} else {
+			m.cursor[m.tab]++
+		}
 	case "k", "up":
-		m.cursor[m.tab]--
+		if m.rightFocus {
+			m.rightCursor = clampInt(m.rightCursor-1, 0, max(0, len(m.prActionable())-1))
+		} else {
+			m.cursor[m.tab]--
+		}
 	case "J": // scroll the detail pane down (yazi-style secondary-pane scroll)
 		for i := 0; i < detailScrollStep; i++ {
 			m.detail.ScrollDown()
@@ -405,15 +379,20 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 0 {
 			m.filter = (m.filter + 1) % 3
 		}
-	case "h":
+	case "h": // tasks: collapse fold · prs: focus the list (left)
 		if m.tab == 0 {
 			if id := m.selID(); id != "" {
 				m.collapsed[id] = true
 			}
+		} else if m.tab == 2 {
+			m.rightFocus = false
 		}
-	case "l": // tasks: expand fold (vi-right — kept lowercase for navigation)
+	case "l": // tasks: expand fold · prs: focus the detail column (right)
 		if m.tab == 0 {
 			delete(m.collapsed, m.selID())
+		} else if m.tab == 2 && m.showDetail() {
+			m.rightFocus = true
+			m.rightCursor = clampInt(m.rightCursor, 0, max(0, len(m.prActionable())-1))
 		}
 	case "S": // agents: Start/Stop toggle — start if down, stop if running
 		if m.tab == 1 {
@@ -488,8 +467,11 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.openPriorityChoice(m.selID())
 			return nil
 		}
-	case "enter": // open the full-screen detail modal
-		if m.selID() != "" {
+	case "enter":
+		if m.rightFocus { // act on the focused right-column item (jump/open)
+			return m.activateRightItem()
+		}
+		if m.selID() != "" { // open the full-screen detail modal
 			m.modal = true
 			m.detail.SetHeight(modalContentHeight(m.h))
 			m.detail.SetTotal(len(m.detailLines()))
@@ -502,7 +484,8 @@ func (m *model) onKey(k string) tea.Cmd {
 	}
 	m.reclamp()
 	cmd := m.syncDetail()
-	if m.tab != oldTab { // changing tabs auto-refreshes from the source of truth
+	if m.tab != oldTab { // changing tabs: drop right-column focus, auto-refresh
+		m.rightFocus, m.rightCursor = false, 0
 		return tea.Batch(cmd, m.refreshCmd())
 	}
 	return cmd
@@ -575,7 +558,8 @@ func (m *model) syncDetail() tea.Cmd {
 		return nil
 	}
 	m.detailKey = key
-	m.detail.ScrollTop() // new selection → show its detail from the top
+	m.detail.ScrollTop()  // new selection → show its detail from the top
+	m.rightCursor = 0     // and reset the right-column cursor to its first item
 	id := m.selID()
 	if id == "" {
 		return nil
@@ -626,7 +610,10 @@ func (m model) contextFooter() string {
 	case 1:
 		return "N new · S start/stop · t tell · a attach · e role · D delete"
 	default:
-		return "t task · A review · R reject · L lint · m merge"
+		if m.rightFocus {
+			return "j/k item · enter open · y copy · h back to list"
+		}
+		return "l focus detail · t task · A review · R reject · L lint · m merge"
 	}
 }
 
@@ -636,6 +623,16 @@ func (m model) selID() string {
 		return r[c].id
 	}
 	return ""
+}
+
+// selectRow moves the current tab's cursor to the row with the given id.
+func (m *model) selectRow(id string) {
+	for i, r := range m.rows() {
+		if r.id == id {
+			m.cursor[m.tab] = i
+			return
+		}
+	}
 }
 
 // View composes the full-height frame: tab strip, master-detail body, footer.

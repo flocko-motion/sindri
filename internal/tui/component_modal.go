@@ -6,9 +6,33 @@
 package tui
 
 import (
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/flo-at/sindri/internal/tui/scroll"
 )
+
+// updateModal handles keys while the detail modal is open: scroll or close.
+func (m model) updateModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "enter", "q":
+		m.modal = false
+		m.modalOverride, m.modalOverrideTitle = nil, ""
+		m.reclamp() // restore the inline detail viewport
+	case "j", "down":
+		m.detail.ScrollDown()
+	case "k", "up":
+		m.detail.ScrollUp()
+	case "ctrl+d":
+		m.detail.ScrollPageDown()
+	case "ctrl+u":
+		m.detail.ScrollPageUp()
+	case "g":
+		m.detail.ScrollTop()
+	case "G":
+		m.detail.ScrollBottom()
+	}
+	return m, nil
+}
 
 var (
 	modalBorderStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).

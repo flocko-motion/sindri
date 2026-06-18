@@ -8,6 +8,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -123,10 +125,21 @@ func (m model) prBody() string {
 	contentBox := pane(m.prContentLines(), m.detail, leftW, -1) // big pane: diff/lint, J/K scrolls
 	leftCol := strings.Join([]string{listBox, hdivider(leftW), contentBox}, "\n")
 
+	items := m.prMetaItems()
+	lines := make([]string, len(items))
+	hl, ai := -1, 0 // highlight the focused actionable item when the right column has focus
+	for i, it := range items {
+		lines[i] = it.text
+		if it.kind != "" {
+			if m.rightFocus && ai == m.rightCursor {
+				hl = i
+			}
+			ai++
+		}
+	}
 	var rv scroll.Viewport
-	meta := m.prMetaLines()
-	rv.Resize(h, len(meta))
-	right := pane(meta, rv, rightW, -1)
+	rv.Resize(h, len(lines))
+	right := pane(lines, rv, rightW, hl)
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftCol, divider(h), right)
 }
 
@@ -148,33 +161,93 @@ func (m model) prContentLines() []string {
 		strings.Split(strings.TrimRight(d.Diff, "\n"), "\n")...)
 }
 
-// prMetaLines is the right detail column: PR metadata, the linked task, and the
-// review items.
-func (m model) prMetaLines() []string {
+// metaItem is one line of the right detail column. An actionable item (kind
+// set) can be focused (h/l, then j/k) and acted on (ENTER) or yanked (y).
+type metaItem struct {
+	text  string
+	kind  string // "" plain · "agent" · "task" · "path"
+	value string
+}
+
+// prMetaItems is the right detail column: PR metadata (with the agent, its
+// workspace, and the linked task as actionable cross-references), then reviews.
+func (m model) prMetaItems() []metaItem {
 	d := m.prDetail
 	if d.PR.ID != m.selID() {
-		return []string{m.selID(), dimStyle.Render("(loading…)")}
+		return []metaItem{{text: m.selID()}, {text: dimStyle.Render("(loading…)")}}
 	}
-	ls := []string{
-		d.PR.ID,
-		"status: " + d.PR.Status,
-		"agent:  " + d.PR.Agent,
-		"branch: " + d.PR.Branch + " → " + d.PR.Base,
-		"", dimStyle.Render("── task ──"),
-		dash(d.Task.ID),
-		d.Task.Title,
+	items := []metaItem{
+		{text: d.PR.ID},
+		{text: "status: " + d.PR.Status},
+		{text: "agent:  " + d.PR.Agent, kind: "agent", value: d.PR.Agent},
 	}
+	if ws := m.agentWorkspace(d.PR.Agent); ws != "" {
+		items = append(items, metaItem{text: "path:   " + ws, kind: "path", value: ws})
+	}
+	items = append(items,
+		metaItem{text: "branch: " + d.PR.Branch + " → " + d.PR.Base},
+		metaItem{text: ""}, metaItem{text: dimStyle.Render("── task ──")},
+		metaItem{text: dash(d.Task.ID), kind: "task", value: d.Task.ID},
+		metaItem{text: d.Task.Title},
+	)
 	if d.PR.Feedback != "" {
-		ls = append(ls, "", dimStyle.Render("── feedback ──"), d.PR.Feedback)
+		items = append(items, metaItem{text: ""}, metaItem{text: dimStyle.Render("── feedback ──")}, metaItem{text: d.PR.Feedback})
 	}
-	ls = append(ls, "", dimStyle.Render("── reviews ──"))
+	items = append(items, metaItem{text: ""}, metaItem{text: dimStyle.Render("── reviews ──")})
 	if len(d.Reviews) == 0 {
-		ls = append(ls, dimStyle.Render("(none — A to request)"))
+		items = append(items, metaItem{text: dimStyle.Render("(none — A to request)")})
 	}
 	for _, r := range d.Reviews {
-		ls = append(ls, reviewLine(r))
+		items = append(items, metaItem{text: reviewLine(r)})
 	}
-	return ls
+	return items
+}
+
+// prActionable is the focusable subset of the right column (j/k cycles these).
+func (m model) prActionable() []metaItem {
+	var out []metaItem
+	for _, it := range m.prMetaItems() {
+		if it.kind != "" {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+// agentWorkspace returns an agent's (repo-relative) worktree path, or "".
+func (m model) agentWorkspace(name string) string {
+	for _, a := range m.state.Agents {
+		if a.Name == name {
+			return a.Workspace
+		}
+	}
+	return ""
+}
+
+// activateRightItem performs ENTER on the focused right-column item: jump to the
+// agent, open the linked task, or open a shell in the workspace path.
+func (m *model) activateRightItem() tea.Cmd {
+	act := m.prActionable()
+	if m.rightCursor < 0 || m.rightCursor >= len(act) {
+		return nil
+	}
+	switch it := act[m.rightCursor]; it.kind {
+	case "agent":
+		m.rightFocus = false
+		m.tab = 1
+		m.selectRow(it.value) // jump to that agent on the Agents tab
+	case "task":
+		m.openTaskModal(m.prDetail.Task)
+	case "path":
+		sh := os.Getenv("SHELL")
+		if sh == "" {
+			sh = "bash"
+		}
+		c := exec.Command(sh)
+		c.Dir = it.value
+		return tea.ExecProcess(c, func(error) tea.Msg { return nil })
+	}
+	return nil
 }
 
 // reviewLine summarizes a review item: its state, verdict, and author.
