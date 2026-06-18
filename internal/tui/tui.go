@@ -409,6 +409,12 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 0 { // tasks: expand fold
 			delete(m.collapsed, m.selID())
 		} else if m.tab == 1 { // agents: launch
+			if a, ok := m.selAgent(); ok {
+				m.flash = "launching " + a.Name + "…"
+				// Seed the live-screen region immediately; the next poll replaces it
+				// with the pod's boot logs, then the tmux screen.
+				m.agentPane = "launching " + a.Name + "… (starting pod and tmux session)"
+			}
 			return m.action(func(id string) error { return m.cl.Launch(id, false) })
 		}
 	case "a": // agents: attach to the live tmux session (out-of-band)

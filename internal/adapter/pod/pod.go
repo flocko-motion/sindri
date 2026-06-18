@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -97,6 +98,17 @@ func ExecInteractive(name string, args ...string) error {
 func Running(name string) bool {
 	out, err := exec.Command(Binary, "inspect", "-f", "{{.State.Running}}", name).Output()
 	return err == nil && strings.TrimSpace(string(out)) == "true"
+}
+
+// Logs returns the last `tail` lines of a container's stdout/stderr — the
+// entrypoint's startup output, useful while the agent boots and tmux isn't up
+// yet. Best-effort: returns "" on error (e.g. no such container).
+func Logs(name string, tail int) string {
+	out, err := exec.Command(Binary, "logs", "--tail", strconv.Itoa(tail), name).CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return string(out)
 }
 
 // Rm force-removes a container.

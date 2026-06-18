@@ -88,18 +88,22 @@ func (h *Hub) sessionAlive(name string) bool {
 	return err == nil
 }
 
-// AgentPane returns a plain-text capture of the agent's tmux pane — the last
-// `lines` rows of what its Claude (or shell) is showing. Empty when the session
-// isn't alive (nothing to show).
+// AgentPane returns the last `lines` rows of what the agent is showing. Once its
+// tmux session is up that's the live screen (capture-pane). While the pod is
+// still booting (tmux not yet up) it falls back to the container's startup logs
+// so a launch shows progress instead of silence. Empty when truly down.
 func (h *Hub) AgentPane(name string, lines int) (string, error) {
-	if !h.sessionAlive(name) {
-		return "", nil
+	if h.sessionAlive(name) {
+		out, err := pod.Exec(Container(name), tmux.CapturePane(name, lines)...)
+		if err != nil {
+			return "", err
+		}
+		return string(out), nil
 	}
-	out, err := pod.Exec(Container(name), tmux.CapturePane(name, lines)...)
-	if err != nil {
-		return "", err
+	if pod.Running(Container(name)) {
+		return pod.Logs(Container(name), lines), nil // booting — show entrypoint output
 	}
-	return string(out), nil
+	return "", nil
 }
 
 // Refresh re-syncs tasks from the source of truth and notifies watchers (the
