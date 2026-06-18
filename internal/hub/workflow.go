@@ -234,8 +234,8 @@ func (h *Hub) AgentDirective(name string) (string, error) {
 		}
 		for _, pr := range prs {
 			if pr.Status == "open" { // awaiting a verdict
-				return fmt.Sprintf("Review %s (task %s): run `sindri-worker show %s`, then `sindri-worker approve %s` — or `sindri-worker reject %s \"<reason>\"`.",
-					pr.ID, pr.Task, pr.ID, pr.ID, pr.ID), nil
+				return fmt.Sprintf("Review %s (task %s): `sindri-worker show %s` and `sindri-worker lint %s`, then `sindri-worker approve %s` — or `sindri-worker reject %s \"<reason>\"`.",
+					pr.ID, pr.Task, pr.ID, pr.ID, pr.ID, pr.ID), nil
 			}
 		}
 		return "Nothing is awaiting review. Wait — the hub will tell you when a pull request arrives.", nil

@@ -83,7 +83,10 @@ never guess, never invent commands.`, name, role)
 
 As the reviewer:
 - ` + "`sindri-worker prs`" + ` lists pull requests awaiting review.
-- Inspect the change, then ` + "`sindri-worker approve <pr-id>`" + ` or
+- Inspect the change with ` + "`sindri-worker show <pr-id>`" + `, and run
+  ` + "`sindri-worker lint <pr-id>`" + ` to check it passes the quality gate —
+  always lint before deciding.
+- Then ` + "`sindri-worker approve <pr-id>`" + ` or
   ` + "`sindri-worker reject <pr-id> <feedback>`" + `. Be specific in rejections —
   your feedback is delivered straight to the worker.
 - You never merge; a human does that.`

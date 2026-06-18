@@ -37,7 +37,7 @@ func (h *Hub) registry() *registry.Registry {
 		registry.Command{Name: "show", Help: "show a PR's diff: show <pr-id>", Run: h.cmdShowPR},
 		registry.Command{Name: "next", Help: "pick up the next task", Roles: []string{"worker"},
 			Hidden: func(c registry.Caller) bool { return c.HasTask }, Run: h.cmdNext},
-		registry.Command{Name: "lint", Help: "run the quality gate on your workspace", Roles: []string{"worker"}, Run: h.cmdLint},
+		registry.Command{Name: "lint", Help: "run the quality gate: lint (your workspace) or lint <pr-id> (a PR)", Run: h.cmdLint},
 		registry.Command{Name: "submit", Help: "request your branch be merged: submit [message]", Roles: []string{"worker"},
 			Hidden: func(c registry.Caller) bool { return !c.HasTask }, Run: h.cmdSubmit},
 		registry.Command{Name: "approve", Help: "approve a pull request: approve [pr-id]", Roles: []string{"reviewer"}, Run: h.cmdApprove},
@@ -108,9 +108,18 @@ func (h *Hub) cmdStatus(c registry.Caller, _ []string, out io.Writer) (int, erro
 	return 0, nil
 }
 
-// cmdLint runs the quality gate against the caller's own worktree (host-side)
-// and streams the result — so a worker can self-check before submitting.
-func (h *Hub) cmdLint(c registry.Caller, _ []string, out io.Writer) (int, error) {
+// cmdLint runs the quality gate (host-side) and streams the result. With a
+// pr-id it lints that PR's worktree (the reviewer's pre-verdict check); with no
+// args it lints the caller's own worktree (the worker's pre-submit self-check).
+func (h *Hub) cmdLint(c registry.Caller, args []string, out io.Writer) (int, error) {
+	if len(args) > 0 { // lint a specific PR's worktree
+		res, err := h.LintPR(args[0])
+		if err != nil {
+			return 1, err
+		}
+		fmt.Fprint(out, res)
+		return 0, nil
+	}
 	a, ok, err := h.store.GetAgent(c.Agent)
 	if err != nil {
 		return 1, err
