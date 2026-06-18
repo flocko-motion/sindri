@@ -25,8 +25,11 @@ var skipDirs = map[string]bool{".git": true, "vendor": true, "node_modules": tru
 
 // Write prints a code map of every .go file under root to w. maxDepth bounds
 // how many directory levels below root to descend (0 = root only, 1 = root +
-// immediate subdirs, …); a negative maxDepth means unlimited.
-func Write(w io.Writer, root string, maxDepth int) error {
+// immediate subdirs, …); a negative maxDepth means unlimited. When find is
+// non-empty, only files whose header or a decl contains it (case-insensitive)
+// are printed, and within them only the matching decls.
+func Write(w io.Writer, root string, maxDepth int, find string) error {
+	q := strings.ToLower(find)
 	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -47,7 +50,7 @@ func Write(w io.Writer, root string, maxDepth int) error {
 		if e != nil {
 			rel = path
 		}
-		writeFile(w, rel, path)
+		writeFile(w, rel, path, q)
 		return nil
 	})
 }
@@ -61,40 +64,74 @@ func dirDepth(root, path string) int {
 	return strings.Count(rel, string(filepath.Separator)) + 1
 }
 
-func writeFile(w io.Writer, rel, path string) {
+func writeFile(w io.Writer, rel, path, q string) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, nil, parser.ParseComments|parser.SkipObjectResolution)
 	if err != nil {
-		fmt.Fprintf(w, "\n%s\n  // parse error: %v\n", rel, err)
+		if q == "" {
+			fmt.Fprintf(w, "\n%s\n  // parse error: %v\n", rel, err)
+		}
 		return
 	}
-	fmt.Fprintf(w, "\n%s\n", rel)
-	if f.Doc != nil { // the arch header (comment block above `package`)
+
+	var header []string // the arch header (comment block above `package`)
+	if f.Doc != nil {
 		for _, c := range f.Doc.List {
-			fmt.Fprintf(w, "%s\n", c.Text)
+			header = append(header, c.Text)
 		}
 	}
+	var units [][]string // one per func/type decl: doc lines + signature/type line(s)
 	for _, decl := range f.Decls {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
-			writeDoc(w, d.Doc)
-			fmt.Fprintf(w, "  %s\n", signature(fset, d))
+			units = append(units, append(docLines(d.Doc), "  "+signature(fset, d)))
 		case *ast.GenDecl:
 			if d.Tok == token.TYPE {
-				writeType(w, fset, d)
+				units = append(units, typeUnit(fset, d))
 			}
+		}
+	}
+
+	if q != "" { // filter: keep only matching units; skip the file if nothing hits
+		kept := units[:0]
+		for _, u := range units {
+			if matches(u, q) {
+				kept = append(kept, u)
+			}
+		}
+		units = kept
+		if len(units) == 0 && !matches(header, q) {
+			return
+		}
+	}
+
+	fmt.Fprintf(w, "\n%s\n", rel)
+	for _, l := range header {
+		fmt.Fprintln(w, l)
+	}
+	for _, u := range units {
+		for _, l := range u {
+			fmt.Fprintln(w, l)
 		}
 	}
 }
 
-// writeDoc prints a declaration's doc comment, indented.
-func writeDoc(w io.Writer, doc *ast.CommentGroup) {
+// matches reports whether the query (already lowercased) appears in any of the
+// lines (case-insensitive).
+func matches(lines []string, q string) bool {
+	return strings.Contains(strings.ToLower(strings.Join(lines, "\n")), q)
+}
+
+// docLines returns a doc comment's raw lines, indented (nil if no doc).
+func docLines(doc *ast.CommentGroup) []string {
 	if doc == nil {
-		return
+		return nil
 	}
-	for _, c := range doc.List {
-		fmt.Fprintf(w, "  %s\n", c.Text)
+	out := make([]string, len(doc.List))
+	for i, c := range doc.List {
+		out[i] = "  " + c.Text
 	}
+	return out
 }
 
 // signature renders a func declaration without its body.
@@ -107,16 +144,18 @@ func signature(fset *token.FileSet, fn *ast.FuncDecl) string {
 	return b.String()
 }
 
-// writeType prints type declarations (doc + a one-line `type Name kind`).
-func writeType(w io.Writer, fset *token.FileSet, d *ast.GenDecl) {
-	writeDoc(w, d.Doc)
+// typeUnit renders a type declaration as a unit: doc + a one-line
+// `type Name kind` per spec.
+func typeUnit(fset *token.FileSet, d *ast.GenDecl) []string {
+	lines := docLines(d.Doc)
 	for _, spec := range d.Specs {
 		ts, ok := spec.(*ast.TypeSpec)
 		if !ok {
 			continue
 		}
-		fmt.Fprintf(w, "  type %s %s\n", ts.Name.Name, typeKind(fset, ts.Type))
+		lines = append(lines, fmt.Sprintf("  type %s %s", ts.Name.Name, typeKind(fset, ts.Type)))
 	}
+	return lines
 }
 
 // typeKind summarizes a type expression: "struct"/"interface" for composites,

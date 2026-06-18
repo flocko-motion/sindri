@@ -18,6 +18,7 @@ func newCodeCmd() *cobra.Command {
 
 func codeMapCmd() *cobra.Command {
 	var depth int
+	var find string
 	c := &cobra.Command{
 		Use:   "map [path]",
 		Short: "Print a structured overview: per file, the arch header + each type/func with its doc and signature",
@@ -27,9 +28,10 @@ func codeMapCmd() *cobra.Command {
 			if len(args) == 1 {
 				root = args[0]
 			}
-			return codemap.Write(cmd.OutOrStdout(), root, depth)
+			return codemap.Write(cmd.OutOrStdout(), root, depth, find)
 		},
 	}
 	c.Flags().IntVar(&depth, "depth", -1, "max directory levels to descend (0 = given path only; -1 = unlimited)")
+	c.Flags().StringVar(&find, "find", "", "show only files matching this (case-insensitive) text, and within them only the matching decls")
 	return c
 }
