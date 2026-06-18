@@ -132,7 +132,7 @@ func (h *Hub) assignedReviewInject(reviewer string, pr store.PR, prID, requireme
 func (h *Hub) runningReviewer() string {
 	roster, _ := h.store.Roster()
 	for _, a := range roster {
-		if a.Role == "reviewer" && pod.Running(Container(a.Name)) && h.sessionAlive(a.Name) {
+		if a.Role == "reviewer" && pod.Running(h.container(a.Name)) && h.sessionAlive(a.Name) {
 			return a.Name
 		}
 	}

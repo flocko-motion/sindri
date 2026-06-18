@@ -41,7 +41,7 @@ func Run(root string) error {
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "sindri tui: connected — starting dashboard")
-	_, err = tea.NewProgram(newModel(cl, ch), tea.WithAltScreen()).Run()
+	_, err = tea.NewProgram(newModel(cl, ch, root), tea.WithAltScreen()).Run()
 	return err
 }
 
@@ -103,6 +103,7 @@ const (
 type model struct {
 	cl    *client.HTTP
 	ch    <-chan hub.BoardState
+	root  string // repo root — needed to build repo-scoped podman container names
 	state hub.BoardState
 	err   error
 	w, h  int
@@ -164,13 +165,13 @@ func (m model) wide() bool { return m.w >= detailMinWidth }
 // even if the detail is hidden — § only drops the right column there.
 func (m model) showDetail() bool { return m.wide() && !m.hideDetail }
 
-func newModel(cl *client.HTTP, ch <-chan hub.BoardState) model {
+func newModel(cl *client.HTTP, ch <-chan hub.BoardState, root string) model {
 	// Default to a sane size so a frame renders immediately — the real size
 	// arrives via WindowSizeMsg and resizes. (Some terminals send the initial
 	// size late or as 0×0; without a default the view would stick on "loading".)
 	in := textinput.New()
 	in.CharLimit = 200
-	m := model{cl: cl, ch: ch, collapsed: map[string]bool{}, w: 80, h: 24, input: in}
+	m := model{cl: cl, ch: ch, root: root, collapsed: map[string]bool{}, w: 80, h: 24, input: in}
 	m.reclamp()
 	return m
 }
@@ -424,7 +425,7 @@ func (m *model) onKey(k string) tea.Cmd {
 					return nil
 				}
 				if m.cl != nil {
-					return tea.ExecProcess(attachCmd(a.Name), func(error) tea.Msg { return nil })
+					return tea.ExecProcess(attachCmd(m.root, a.Name), func(error) tea.Msg { return nil })
 				}
 			}
 		}

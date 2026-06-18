@@ -103,7 +103,7 @@ func (h *Hub) AgentExec(name string, args []string, out io.Writer) (int, error) 
 }
 
 func (h *Hub) cmdStatus(c registry.Caller, _ []string, out io.Writer) (int, error) {
-	running := pod.Running(Container(c.Agent))
+	running := pod.Running(h.container(c.Agent))
 	fmt.Fprintf(out, "agent:   %s\nrole:    %s\nrunning: %v\n", c.Agent, c.Role, running)
 	return 0, nil
 }

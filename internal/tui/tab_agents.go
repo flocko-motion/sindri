@@ -21,8 +21,9 @@ import (
 )
 
 // attachCmd builds the interactive `podman exec -it … tmux attach` for an agent.
-func attachCmd(name string) *exec.Cmd {
-	args := append([]string{"exec", "-it", hub.Container(name), "tmux"}, tmux.Attach(name, false)...)
+// root scopes the container name to this repo.
+func attachCmd(root, name string) *exec.Cmd {
+	args := append([]string{"exec", "-it", hub.Container(root, name), "tmux"}, tmux.Attach(name, false)...)
 	return exec.Command(pod.Binary, args...)
 }
 

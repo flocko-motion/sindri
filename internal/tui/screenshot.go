@@ -17,7 +17,7 @@ import (
 //
 //deadcode:keep — dev/test harness for headless rendering
 func Screenshot(st hub.BoardState, w, h int, keys ...string) string {
-	var tm tea.Model = newModel(nil, nil)
+	var tm tea.Model = newModel(nil, nil, "")
 	m := tm.(model)
 	m.w, m.h = w, h
 	m.state = st

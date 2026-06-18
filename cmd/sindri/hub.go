@@ -262,7 +262,11 @@ func agentAttachCmd() *cobra.Command {
 		Use: "attach <name>", Short: "Attach to an agent's live tmux session (out-of-band)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			name := args[0]
-			c := hub.Container(name)
+			root, err := repoRoot()
+			if err != nil {
+				return err
+			}
+			c := hub.Container(root, name)
 			if !pod.Running(c) {
 				return fmt.Errorf("agent %q is not running", name)
 			}

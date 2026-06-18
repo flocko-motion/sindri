@@ -54,12 +54,12 @@ func (h *Hub) State() (BoardState, error) {
 	known := map[string]bool{}
 	agents := make([]AgentView, 0, len(roster))
 	for _, a := range roster {
-		known[Container(a.Name)] = true
+		known[h.container(a.Name)] = true
 		st, _ := h.store.GetState(a.Name)
 		// One status word, reconciling transient intent (launching/stopping) with
 		// observed runtime. "Alive" means the tmux session is up and attachable —
 		// not merely that the pod (a sleep) exists.
-		running := pod.Running(Container(a.Name)) && h.sessionAlive(a.Name)
+		running := pod.Running(h.container(a.Name)) && h.sessionAlive(a.Name)
 		status := h.agentStatus(a.Name, running, st.Phase)
 		agents = append(agents, AgentView{
 			Name: a.Name, Role: a.Role, Status: status,
@@ -81,7 +81,7 @@ func (h *Hub) State() (BoardState, error) {
 // sessionAlive reports whether the agent's tmux session is up inside its pod.
 func (h *Hub) sessionAlive(name string) bool {
 	// tmux.* builders return the subcommand only — the command is "tmux".
-	_, err := pod.Exec(Container(name), append([]string{"tmux"}, tmux.HasSession(name)...)...)
+	_, err := pod.Exec(h.container(name), append([]string{"tmux"}, tmux.HasSession(name)...)...)
 	return err == nil
 }
 
@@ -92,7 +92,7 @@ func (h *Hub) sessionAlive(name string) bool {
 func (h *Hub) AgentPane(name string, lines int) (string, error) {
 	if h.sessionAlive(name) {
 		// tmux.* builders return the subcommand only — the command is "tmux".
-		out, err := pod.Exec(Container(name), append([]string{"tmux"}, tmux.CapturePane(name, lines)...)...)
+		out, err := pod.Exec(h.container(name), append([]string{"tmux"}, tmux.CapturePane(name, lines)...)...)
 		if err != nil {
 			return "", err
 		}
@@ -101,7 +101,7 @@ func (h *Hub) AgentPane(name string, lines int) (string, error) {
 	// tmux isn't up — show the container's logs whether it's still booting OR has
 	// already exited, so a crash-on-boot is visible. If there's no container yet
 	// (image still building), fall back to the captured launch output.
-	if logs := pod.Logs(Container(name), lines); logs != "" {
+	if logs := pod.Logs(h.container(name), lines); logs != "" {
 		return logs, nil
 	}
 	return h.launchOutput(name), nil

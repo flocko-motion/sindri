@@ -12,6 +12,8 @@
 package hub
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
@@ -49,8 +51,24 @@ type Hub struct {
 
 var nameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
-// Container is the podman container name for an agent.
-func Container(name string) string { return "sindri-" + name }
+// repoTag is a short, stable per-repo id derived from the absolute project root.
+// It scopes container names so two repos that reuse an agent name (the dwarf
+// pool is small) don't collide in podman's host-global namespace.
+func repoTag(root string) string {
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		abs = root
+	}
+	sum := sha256.Sum256([]byte(abs))
+	return hex.EncodeToString(sum[:4]) // 8 hex chars — plenty to separate repos
+}
+
+// Container is the podman container name for an agent, scoped to its repo so it
+// never collides with a same-named agent in another repo.
+func Container(root, name string) string { return "sindri-" + repoTag(root) + "-" + name }
+
+// container is Container bound to this hub's repo (the common in-hub case).
+func (h *Hub) container(name string) string { return Container(h.root, name) }
 
 // session is the tmux session name for an agent (named after the agent, D4).
 func session(name string) string { return name }
@@ -164,7 +182,7 @@ func (h *Hub) DeleteAgent(name string) error {
 	if !ok {
 		return fmt.Errorf("no such agent %q", name)
 	}
-	_ = pod.Rm(Container(name))
+	_ = pod.Rm(h.container(name))
 	h.closeAgent(name)
 	_ = git.WorktreeRemove(h.root, filepath.Join(h.root, a.Workspace))
 	if err := h.store.DeleteAgent(name); err != nil {
@@ -183,12 +201,12 @@ func (h *Hub) StopAgent(name string) error {
 	} else if !ok {
 		return fmt.Errorf("no such agent %q", name)
 	}
-	if !pod.Running(Container(name)) {
+	if !pod.Running(h.container(name)) {
 		return fmt.Errorf("agent %q is not running", name)
 	}
 	h.setLifecycle(name, "stopping") // status → stopping (pod still up); → down once gone
 	h.notify()
-	if err := pod.Rm(Container(name)); err != nil {
+	if err := pod.Rm(h.container(name)); err != nil {
 		h.setLifecycle(name, "")
 		h.notify()
 		return err
@@ -227,7 +245,7 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 	if err := container.Ensure(h.root, io.MultiWriter(os.Stderr, buf)); err != nil {
 		return err
 	}
-	fmt.Fprintf(buf, "Image ready. Starting pod %s…\n", Container(name))
+	fmt.Fprintf(buf, "Image ready. Starting pod %s…\n", h.container(name))
 	wt := filepath.Join(h.root, a.Workspace)
 	if !git.HasCommits(h.root) {
 		return fmt.Errorf("repo has no commits yet")
@@ -245,7 +263,7 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 	if err != nil {
 		return err
 	}
-	cName := Container(name)
+	cName := h.container(name)
 	_ = pod.Rm(cName) // clear any stale container with this name
 
 	env := map[string]string{"SINDRI_AGENT": name, "COLORTERM": "truecolor"}
@@ -318,7 +336,7 @@ func (h *Hub) Tell(name, msg, source string) error {
 
 // inject types text into an agent's tmux session via podman exec.
 func (h *Hub) inject(name, text string) error {
-	c := Container(name)
+	c := h.container(name)
 	if !pod.Running(c) {
 		return fmt.Errorf("agent %q is not running — launch it first", name)
 	}
@@ -336,7 +354,7 @@ func (h *Hub) inject(name, text string) error {
 // launch, when the session may not be up yet. A message that never lands is
 // recorded so it is not silently lost.
 func (h *Hub) injectWhenReady(name, text string) error {
-	c := Container(name)
+	c := h.container(name)
 	for i := 0; i < 25; i++ {
 		if pod.Running(c) {
 			if _, err := pod.Exec(c, "tmux", "has-session", "-t", session(name)); err == nil {
