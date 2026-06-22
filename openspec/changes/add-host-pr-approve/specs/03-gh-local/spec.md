@@ -7,14 +7,17 @@
 The agent client SHALL be a single role-agnostic browser whose available commands
 are filtered by the hub from the caller's role and state. A worker's surface SHALL
 expose registering and inspecting merge-intents but never approve/reject/merge; a
-reviewer's surface SHALL expose approve/reject but never submit. Approval SHALL
-NOT be the reviewer agent's exclusive power: the host SHALL also expose a human
-approve (`sindri pr approve`), the positive counterpart of the existing human
-reject, so a PR can reach `approved` without a reviewer agent in the loop. A human
-approve SHALL mark the PR approved and satisfy its review gates exactly as a
-reviewer approve does, and SHALL apply only to an open PR (one awaiting a verdict).
-Merge SHALL remain human-only, exposed only on the host and requiring explicit
-confirmation; no agent surface SHALL ever include merge.
+reviewer's surface SHALL expose approve/reject but never submit; a planner's
+surface SHALL expose reading the backlog, proposing tasks, and shipping openspec
+(`task`/`create-task`/`openspec`) but never the worker's `next`/`submit` nor the
+reviewer's `approve`/`reject`. Approval SHALL NOT be the reviewer agent's
+exclusive power: the host SHALL also expose a human approve (`sindri pr approve`),
+the positive counterpart of the existing human reject, so a PR can reach
+`approved` without a reviewer agent in the loop. A human approve SHALL mark the PR
+approved and satisfy its review gates exactly as a reviewer approve does, and SHALL
+apply only to an open PR (one awaiting a verdict). Merge SHALL be human-only,
+exposed only on the host and requiring explicit confirmation; no agent surface
+SHALL ever include merge.
 
 #### Scenario: Reviewer approves, human merges
 
@@ -34,6 +37,12 @@ confirmation; no agent surface SHALL ever include merge.
   or rejected)
 - **THEN** the approve is refused and the PR's current status is reported, mirroring
   the reviewer approve's open-only guard
+
+#### Scenario: Planner ships, not builds
+
+- **WHEN** a planner queries its surface
+- **THEN** it can read the backlog, propose tasks, and ship openspec, but it has no
+  `next`/`submit`/`approve`/`reject`, and no merge
 
 #### Scenario: No agent merge
 

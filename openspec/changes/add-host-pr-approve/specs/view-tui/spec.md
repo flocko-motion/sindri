@@ -5,14 +5,15 @@
 ### Requirement: The dashboard is a control surface
 
 Each tab SHALL offer its actions (shown in the footer's second row), performed
-via the hub: Tasks — create a task; Agents — new, launch, tell, attach; PRs —
-approve, reject, and merge. The PRs approve action SHALL be the human approve
-(distinct from requesting an agentic review). Attaching SHALL hand the terminal to
-the agent's live tmux session and return to the TUI on detach. After an action,
-the view SHALL reflect the change (live, via board events). For an action that is
-not instantaneous — notably merge — the view SHALL give immediate feedback the
-moment it is invoked (e.g. a transient "merging" status on the row) rather than
-appearing to hang until the hub's board event lands.
+via the hub: Tasks — create a task, and approve or reject a planner-proposed task
+that is still under the approval gate; Agents — new (worker/reviewer/planner),
+launch, tell, attach; PRs — approve, reject, and merge. The PRs approve action
+SHALL be the human approve (distinct from requesting an agentic review). Attaching
+SHALL hand the terminal to the agent's live tmux session and return to the TUI on
+detach. After an action, the view SHALL reflect the change (live, via board
+events). For an action that is not instantaneous — notably merge — the view SHALL
+give immediate feedback the moment it is invoked (e.g. a transient "merging" status
+on the row) rather than appearing to hang until the hub's board event lands.
 
 #### Scenario: Approve from the PRs tab
 
@@ -36,3 +37,15 @@ appearing to hang until the hub's board event lands.
 - **WHEN** the user attaches to an agent
 - **THEN** the TUI suspends into the agent's live terminal and resumes when the
   user detaches
+
+#### Scenario: Approve a planner proposal
+
+- **WHEN** the user approves a gated planner-proposed task on the Tasks tab
+- **THEN** the hub clears its approval gate, the task becomes claimable, and the
+  view reflects the change
+
+#### Scenario: Reject a planner proposal
+
+- **WHEN** the user rejects a gated planner-proposed task with a comment
+- **THEN** the hub records the rejection, the comment is delivered to the planner,
+  and the task stays hidden from workers
