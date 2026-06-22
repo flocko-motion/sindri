@@ -17,7 +17,3 @@
 {"ts":"2026-06-17T17:38:13.512989795+02:00","cmd":"/home/florian.metzger-noel/r/sindri","session":"ses_fe3b78","ok":false,"dur_ms":3,"err":"title too short (3 chars, need 15) - e.g. 'Fix login timeout' not 'Fix bug'"}
 {"ts":"2026-06-17T18:08:25.488070831+02:00","cmd":"create","ok":true,"dur_ms":0}
 {"ts":"2026-06-17T18:08:57.176897758+02:00","cmd":"update","ok":true,"dur_ms":0}
-{"ts":"2026-06-18T07:27:15.5865272Z","cmd":"show","flags":{"work-dir":"."},"ok":true,"dur_ms":4}
-{"ts":"2026-06-18T07:27:18.107711026Z","cmd":"show","flags":{"json":"true","work-dir":"."},"ok":true,"dur_ms":4}
-{"ts":"2026-06-18T13:21:52.136510799Z","cmd":"show","ok":true,"dur_ms":3}
-{"ts":"2026-06-18T13:21:54.756933524Z","cmd":"show","flags":{"json":"true"},"ok":true,"dur_ms":3}
