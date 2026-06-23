@@ -57,7 +57,11 @@ func Ensure(projectRoot string, out io.Writer) error {
 
 	fmt.Fprintf(out, "Building container image...\n")
 	_ = os.MkdirAll(projectRoot+"/bin", 0755)
-	for _, bin := range []string{"td", "yq"} {
+	// Only yq goes into the agent image. td is deliberately NOT shipped: agents
+	// reach the task tracker only through the hub (the single td writer, operating
+	// on the main checkout). A td binary in the worktree would let an agent write
+	// .todos there and pollute its branch — see the hub-isolation rule.
+	for _, bin := range []string{"yq"} {
 		if path, err := exec.LookPath(bin); err == nil {
 			data, _ := os.ReadFile(path)
 			_ = os.WriteFile(projectRoot+"/bin/"+bin, data, 0755)

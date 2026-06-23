@@ -35,13 +35,16 @@ import (
 // //deadcode:keep directive are excluded. When anything is reported, a trailing
 // note reminds the reader that the directive exists.
 //
+// Test packages are always analysed: tests are live code, so a function reachable
+// only from a _test.go (a helper, a fixture) is reachable, not dead.
+//
 // It returns true if any unreachable function was reported, which callers can
 // use as a non-zero exit gate.
-func Deadcode(patterns []string, tags string, includeTests bool, w io.Writer) (found bool, err error) {
+func Deadcode(patterns []string, tags string, w io.Writer) (found bool, err error) {
 	cfg := &packages.Config{
 		BuildFlags: []string{"-tags=" + tags},
 		Mode:       packages.LoadAllSyntax | packages.NeedModule,
-		Tests:      includeTests,
+		Tests:      true,
 	}
 	initial, err := packages.Load(cfg, patterns...)
 	if err != nil {

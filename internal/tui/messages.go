@@ -3,6 +3,8 @@
 // job:     the messages the update loop reacts to — board snapshots, lazily
 //          fetched detail (log/pr/task/pane/pod), and the poll/error signals —
 //          plus the few timing constants that govern live updates.
+// limits:  message type definitions only; the loop that reacts to them is in
+//          tui.go (-> Update).
 package tui
 
 import (

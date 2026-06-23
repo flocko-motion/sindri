@@ -5,6 +5,8 @@
 //          the form (component_form.go) only handles focus, layout, and the
 //          frame. Single-line text/choice are edited manually so their rows pad
 //          cleanly; the multi-line textarea wraps bubbles/textarea.
+// limits:  a field edits and renders only itself; focus, layout, and the frame
+//          are the form's (-> component_form.go).
 package tui
 
 import (

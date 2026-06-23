@@ -3,6 +3,8 @@
 // job:     a centered multiple-choice modal — a titled bordered box listing
 //          options with a cursor. Reusable for any pick-one prompt (priority,
 //          status, role, …).
+// limits:  generic chrome + keys; what the options mean and what a pick does
+//          belong to the caller (-> the tab that opens it).
 package tui
 
 import (

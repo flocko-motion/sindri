@@ -149,6 +149,10 @@ func msgReviewAssigned(prID, requirement, branch, base string, checkedOut bool) 
 	if checkedOut {
 		seeChanges = fmt.Sprintf("`git diff %s` in /workspace (or `sindri-worker show %s`)", base, prID)
 		loc = fmt.Sprintf("PR branch %s is checked out in /workspace, based on %s. ", branch, base)
+	} else {
+		// Loud: the checkout failed, so /workspace is NOT this PR. Say so plainly
+		// rather than letting the reviewer assume /workspace holds the change.
+		loc = fmt.Sprintf("⚠ %s could NOT be checked out into /workspace — review from the diff only; do NOT trust /workspace. ", branch)
 	}
 	return fmt.Sprintf("[hub] Review %s — %s %s(1) see what changed: %s. (2) check the gate: `sindri-worker lint %s`. (3) record your verdict: `sindri-worker review %s <pass|changes|fail> \"<findings>\"`.",
 		prID, requirement, loc, seeChanges, prID, prID)

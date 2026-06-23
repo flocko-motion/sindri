@@ -5,6 +5,8 @@
 //          actions (delete/role/new) reflect at once. All fetch via /state and
 //          deliver polledMsg, which updates the board without re-arming the SSE
 //          waiter.
+// limits:  scheduling and fetch only; rendering the refreshed board is the tabs'
+//          and the data is the hub's (-> client).
 package tui
 
 import (

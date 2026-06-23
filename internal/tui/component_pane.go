@@ -5,6 +5,8 @@
 //          selector and the detail pane. Optionally highlights the cursor row.
 //          Every line is padded/truncated to width and the block padded to the
 //          viewport height, so panes always fill their box.
+// limits:  renders the given lines only; scroll state belongs to the
+//          scroll.Viewport (-> scroll) and the content to the caller.
 package tui
 
 import (

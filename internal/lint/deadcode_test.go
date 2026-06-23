@@ -35,7 +35,7 @@ func runInDir(t *testing.T, dir string, patterns ...string) (string, bool) {
 	t.Cleanup(func() { _ = os.Chdir(orig) })
 
 	var sb strings.Builder
-	found, err := Deadcode(patterns, "", false, &sb)
+	found, err := Deadcode(patterns, "", &sb)
 	if err != nil {
 		t.Fatalf("Deadcode: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestDeadcodeNoMainPackage(t *testing.T) {
 		_ = os.Chdir(dir)
 		defer os.Chdir(orig)
 		var sb strings.Builder
-		f, e := Deadcode([]string{"./..."}, "", false, &sb)
+		f, e := Deadcode([]string{"./..."}, "", &sb)
 		return sb.String(), f, e
 	}(); err == nil {
 		t.Fatal("expected an error when no main package is present")

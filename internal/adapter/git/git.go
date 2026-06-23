@@ -144,7 +144,10 @@ func HasChanges(dir string) bool {
 }
 
 // CommitAll stages and commits everything in dir's worktree. A no-op (nil) when
-// there is nothing to commit.
+// there is nothing to commit. It stages honestly (`git add -A`): an agent that
+// reaches the task tracker only through the hub never touches `.todos/` in its
+// worktree, so nothing churns it here — and if something ever does, it surfaces
+// (a noisy diff, a loud merge failure) rather than being silently dropped.
 func CommitAll(dir, msg string) error {
 	if !HasChanges(dir) {
 		return nil
@@ -156,6 +159,17 @@ func CommitAll(dir, msg string) error {
 		return fmt.Errorf("git commit: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
+}
+
+// RebaseOnto checks branch out in dir and rebases it onto onto. A conflict is
+// reported (the rebase is aborted, leaving the worktree clean) so the caller can
+// route it back to the owning worker. Used to bring a PR branch up to the current
+// base before merging, so a merely-stale branch merges without human help.
+func RebaseOnto(dir, branch, onto string) error {
+	if out, err := exec.Command("git", "-C", dir, "checkout", branch).CombinedOutput(); err != nil {
+		return fmt.Errorf("checkout %s: %s: %w", branch, strings.TrimSpace(string(out)), err)
+	}
+	return Rebase(dir, onto)
 }
 
 // Diff returns the changes a branch introduces relative to base (the merge-base

@@ -2,6 +2,7 @@
 // type:    ui component (generic)
 // job:     render the top tab strip — each label as `[<n> Title]`, the active
 //          one highlighted — padded to the full width.
+// limits:  pure rendering; which tab is active is the model's (-> tui.go).
 package tui
 
 import (

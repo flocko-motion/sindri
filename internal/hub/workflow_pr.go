@@ -3,6 +3,8 @@
 // job:     the reviewer verbs and the host merge; verdicts route to the owning
 //
 //	agent's session by branch (object-mediated, D-routing). git is hub-side.
+// limits:  the PR side only; task claim/submit-to-td is workflow_task.go and the
+//          git mechanics are the adapter's (-> adapter/git).
 package hub
 
 import (
@@ -109,9 +111,24 @@ func (h *Hub) RequestReview(prID, requirement string) error {
 func (h *Hub) assignedReviewInject(reviewer string, pr store.PR, prID, requirement string) error {
 	// Check the PR's branch out (detached) into the reviewer's workspace, so it
 	// can read the full code in context, build, and run — not just the diff.
+	//
+	// A failure here is LOUD, never silent: a reviewer that quietly falls back to
+	// diff-only would be judging a stale base with no signal it ever happened. So
+	// we record a host-visible PR history entry naming the failure, and the review
+	// instruction below warns the reviewer that /workspace is NOT this PR.
 	checkedOut := false
-	if a, ok, _ := h.store.GetAgent(reviewer); ok {
-		checkedOut = git.CheckoutDetached(filepath.Join(h.root, a.Workspace), pr.Branch) == nil
+	a, ok, err := h.store.GetAgent(reviewer)
+	switch {
+	case err != nil:
+		_ = h.store.LogPR(prID, "checkout-failed", fmt.Sprintf("reviewer %s lookup: %v", reviewer, err))
+	case !ok:
+		_ = h.store.LogPR(prID, "checkout-failed", "reviewer "+reviewer+" has no roster entry")
+	default:
+		if coErr := git.CheckoutDetached(filepath.Join(h.root, a.Workspace), pr.Branch); coErr != nil {
+			_ = h.store.LogPR(prID, "checkout-failed", fmt.Sprintf("%s into %s: %v", pr.Branch, a.Workspace, coErr))
+		} else {
+			checkedOut = true
+		}
 	}
 	return h.injectWhenReady(reviewer, msgReviewAssigned(prID, requirement, pr.Branch, pr.Base, checkedOut))
 }
@@ -481,6 +498,18 @@ func (h *Hub) Merge(prID string) (store.PR, error) {
 	}
 	if pr.Status != "approved" {
 		return store.PR{}, fmt.Errorf("%s is %s — only an approved PR may be merged", prID, pr.Status)
+	}
+	// Bring the branch up to the current base first: a branch that merely fell
+	// behind (base moved on under it) rebases cleanly and then merges without any
+	// human step. A rebase CONFLICT is a genuine divergence — route it straight
+	// back to the owning worker to resolve and resubmit, and stop the merge.
+	if a, ok, _ := h.store.GetAgent(pr.Agent); ok {
+		wt := filepath.Join(h.root, a.Workspace)
+		if err := git.RebaseOnto(wt, pr.Branch, pr.Base); err != nil {
+			fb := fmt.Sprintf("merge conflict: rebasing %s onto %s hit conflicts (%v). Resolve against the latest %s and resubmit.", pr.Branch, pr.Base, err, pr.Base)
+			_ = h.reject(prID, fb, false) // object-addressed back to the worker
+			return store.PR{}, fmt.Errorf("%s could not be merged — rebase onto %s conflicted; sent back to %s to resolve", prID, pr.Base, pr.Agent)
+		}
 	}
 	if err := git.Merge(h.root, pr.Base, pr.Branch); err != nil {
 		return store.PR{}, err

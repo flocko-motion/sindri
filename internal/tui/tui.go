@@ -238,6 +238,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.ExecProcess(shellAt(string(msg)), func(error) tea.Msg { return nil })
 	case prMsg:
 		m.prDetail = msg.d
+		// The diff arrives async, well after syncDetail sized the viewport to the
+		// "(loading…)" placeholder. Resize it to the real content now, or the diff
+		// renders against a stale 1-line window (showing only its header) until some
+		// later event happens to reclamp.
+		m.reclamp()
 	case taskMsg:
 		m.taskDetail = msg.t
 	case errModalMsg:

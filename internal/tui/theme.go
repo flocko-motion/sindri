@@ -4,6 +4,8 @@
 //          when active, green when open, grey when done; agents are grey when
 //          down, yellow while transitioning, green when running. Critical
 //          priority is red. Everything else renders in the terminal's default.
+// limits:  colours only; no layout or data logic (-> the component/tab that
+//          uses them).
 package tui
 
 import (
@@ -29,6 +31,17 @@ var (
 	stCrit   = lipgloss.NewStyle().Foreground(cRed)
 	stWarn   = lipgloss.NewStyle().Foreground(cYellow)
 	stTrans  = lipgloss.NewStyle().Foreground(cOrange)
+)
+
+// Diff colours — the classic editor look: additions on a dark green background,
+// removals on dark red, both with a forced light foreground so they stay legible
+// regardless of the terminal's own theme. Hunk and file headers are tinted, not
+// backgrounded, so they read as structure rather than content.
+var (
+	diffAddStyle  = lipgloss.NewStyle().Background(lipgloss.Color("22")).Foreground(lipgloss.Color("231"))
+	diffDelStyle  = lipgloss.NewStyle().Background(lipgloss.Color("52")).Foreground(lipgloss.Color("231"))
+	diffHunkStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("44")).Bold(true)
+	diffMetaStyle = lipgloss.NewStyle().Foreground(cGrey).Bold(true)
 )
 
 // taskStatusStyle is a task row's colour: pink active, grey done, green otherwise

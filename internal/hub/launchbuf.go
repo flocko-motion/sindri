@@ -4,6 +4,8 @@
 //          and pod-start output into, so the TUI's live-screen region can show
 //          launch progress while the pod is still coming up (AgentPane returns
 //          its tail until the container has logs of its own).
+// limits:  just buffers bytes; deciding what to tee in is Launch's (-> hub.go)
+//          and showing it is the TUI's (-> state.go AgentPane).
 package hub
 
 import (

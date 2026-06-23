@@ -4,6 +4,8 @@
 //          orphan warnings, and the agent detail pane (state + the lazily-
 //          fetched activity timeline). Status is one word: down|idle|working|
 //          submitted (down ⇒ not running).
+// limits:  renders agent state only; mutations go through the hub (-> client)
+//          and assembly is the hub's (-> State).
 package tui
 
 import (

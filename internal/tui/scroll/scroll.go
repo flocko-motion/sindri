@@ -1,11 +1,13 @@
 // package: tui/scroll / scroll
 // type:    ui primitive (pure, no Bubble Tea coupling)
 // job:     a fixed-height scrollable pane. Given a Height and Total line count,
-//          it tracks the visible window (and an optional cursor that the window
-//          follows), clamped against every edge, and renders content of any
-//          length into exactly Height rows — padding when shorter, scrolling
-//          when longer. The single home for viewport arithmetic so no pane
-//          reimplements (and re-breaks) it.
+//
+//	it tracks the visible window (and an optional cursor that the window
+//	follows), clamped against every edge, and renders content of any
+//	length into exactly Height rows — padding when shorter, scrolling
+//	when longer. The single home for viewport arithmetic so no pane
+//	reimplements (and re-breaks) it.
+//
 // limits:  width/styling is the caller's job; this owns vertical geometry only.
 package scroll
 
@@ -63,16 +65,22 @@ func max0(n int) int {
 // SetCursor places the cursor at c, clamps it, and scrolls to keep it visible.
 func (v *Viewport) SetCursor(c int) { v.Cursor = c; v.follow() }
 
-// Up/Down move the cursor one line, scrolling to keep it visible.
-func (v *Viewport) Up()   { v.Cursor--; v.follow() }
+// Up moves the cursor up one line, scrolling to keep it visible.
+func (v *Viewport) Up() { v.Cursor--; v.follow() }
+
+// Down moves the cursor down one line, scrolling to keep it visible.
 func (v *Viewport) Down() { v.Cursor++; v.follow() }
 
-// Top/Bottom jump the cursor to the first/last line.
-func (v *Viewport) Top()    { v.Cursor = 0; v.follow() }
+// Top jumps the cursor to the first line.
+func (v *Viewport) Top() { v.Cursor = 0; v.follow() }
+
+// Bottom jumps the cursor to the last line.
 func (v *Viewport) Bottom() { v.Cursor = max0(v.Total - 1); v.follow() }
 
-// PageUp/PageDown move the cursor by a (near) page.
-func (v *Viewport) PageUp()   { v.Cursor -= v.page(); v.follow() }
+// PageUp moves the cursor up by a (near) page.
+func (v *Viewport) PageUp() { v.Cursor -= v.page(); v.follow() }
+
+// PageDown moves the cursor down by a (near) page.
 func (v *Viewport) PageDown() { v.Cursor += v.page(); v.follow() }
 
 func (v Viewport) page() int {
@@ -84,16 +92,22 @@ func (v Viewport) page() int {
 
 // --- free-scroll mode (detail panes) ---
 
-// ScrollUp/ScrollDown move the window one line without a cursor.
-func (v *Viewport) ScrollUp()   { v.Offset = clamp(v.Offset-1, 0, v.maxOffset()) }
+// ScrollUp moves the window up one line without a cursor.
+func (v *Viewport) ScrollUp() { v.Offset = clamp(v.Offset-1, 0, v.maxOffset()) }
+
+// ScrollDown moves the window down one line without a cursor.
 func (v *Viewport) ScrollDown() { v.Offset = clamp(v.Offset+1, 0, v.maxOffset()) }
 
-// ScrollPageUp/ScrollPageDown move the window by a page.
-func (v *Viewport) ScrollPageUp()   { v.Offset = clamp(v.Offset-v.page(), 0, v.maxOffset()) }
+// ScrollPageUp moves the window up by a page.
+func (v *Viewport) ScrollPageUp() { v.Offset = clamp(v.Offset-v.page(), 0, v.maxOffset()) }
+
+// ScrollPageDown moves the window down by a page.
 func (v *Viewport) ScrollPageDown() { v.Offset = clamp(v.Offset+v.page(), 0, v.maxOffset()) }
 
-// ScrollTop/ScrollBottom jump the window to the start/end.
-func (v *Viewport) ScrollTop()    { v.Offset = 0 }
+// ScrollTop jumps the window to the start.
+func (v *Viewport) ScrollTop() { v.Offset = 0 }
+
+// ScrollBottom jumps the window to the end.
 func (v *Viewport) ScrollBottom() { v.Offset = v.maxOffset() }
 
 // --- resize / content change ---
