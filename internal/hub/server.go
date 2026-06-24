@@ -168,6 +168,13 @@ func (h *Hub) Handler() http.Handler {
 		// The reject endpoint is the human path (TUI/CLI).
 		writeJSON(w, okMsg{"rejected"}, h.RejectPR(req.ID, req.Feedback))
 	})
+	mux.HandleFunc("POST /pr/approve", func(w http.ResponseWriter, r *http.Request) {
+		var req NameReq // Name carries the PR id; the human approve path.
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"approved"}, h.ApprovePR(req.Name))
+	})
 	mux.HandleFunc("GET /pr/lint", func(w http.ResponseWriter, r *http.Request) {
 		out, err := h.LintPR(r.URL.Query().Get("id"))
 		writeJSON(w, okMsg{out}, err)

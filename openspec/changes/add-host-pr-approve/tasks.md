@@ -2,14 +2,14 @@
 
 ## 1. Human approve on the host
 
-- [ ] 1.1 Add `ApprovePR(prID)` to the hub in `internal/hub/workflow_pr.go`,
-      mirroring `RejectPR`: set status `approved`, satisfy the review gates, and
-      log it (`Log`/`LogPR`). Reuse `cmdApprove`'s open-only guard so a non-open
-      PR is refused with its current status.
-- [ ] 1.2 Expose `sindri pr approve <id>` on the host CLI (`cmd/sindri`) next to
-      `pr merge` / the reject path, calling the new hub method.
-- [ ] 1.3 Add a client method `ApprovePR` in `internal/client/client.go` so the
-      TUI and CLI share one path.
+- [x] 1.1 Add `ApprovePR(prID)` to the hub in `internal/hub/workflow_pr.go`,
+      mirroring `RejectPR`: open-only guard, set status `approved`, log it. (The
+      merge gate is simply status == approved, so there's no separate gate to
+      satisfy.)
+- [x] 1.2 Expose `sindri pr approve <id>` on the host CLI (`cmd/sindri`), next to
+      `pr merge` / `pr reject`, calling the new hub method.
+- [x] 1.3 Add a client method `ApprovePR` in `internal/client/client.go`
+      (+ `POST /pr/approve` route) so the TUI and CLI share one path.
 - [ ] 1.4 Add a human-approve action to the TUI PRs tab (`internal/tui/tab_prs.go`,
       `internal/tui/tui.go`) on its own key, distinct from the existing `A`
       "request an agentic review"; update the PRs footer hint to list it.

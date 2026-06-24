@@ -48,6 +48,7 @@ type backend interface {
 	PRs() ([]store.PR, error)
 	PRInfo(id string) (hub.PRDetail, error)
 	RejectPR(id, feedback string) error
+	ApprovePR(id string) error
 	LintPR(id string) (string, error)
 	RequestReview(id, requirement string) error
 	MaterializeReview(id string) (string, error)
@@ -486,8 +487,25 @@ func splitCSV(s string) []string {
 
 func newPrCmd() *cobra.Command {
 	c := &cobra.Command{Use: "pr", Short: "Inspect and merge pull requests (merge-intents)"}
-	c.AddCommand(prListCmd(), prInfoCmd(), prReviewCmd(), prVerifyCmd(), prRejectCmd(), prLintCmd(), prMergeCmd(), prMilestoneCmd())
+	c.AddCommand(prListCmd(), prInfoCmd(), prReviewCmd(), prVerifyCmd(), prApproveCmd(), prRejectCmd(), prLintCmd(), prMergeCmd(), prMilestoneCmd())
 	return c
+}
+
+// prApproveCmd is the human approve: mark an open PR approved so it can be merged
+// without a reviewer agent (the positive counterpart of pr reject).
+func prApproveCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "approve <pr-id>", Short: "Approve an open PR yourself (no reviewer agent needed), so it can be merged", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withBackend(func(b backend) error {
+				if err := b.ApprovePR(args[0]); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "%s approved — merge it with 'sindri pr merge %s'\n", args[0], args[0])
+				return nil
+			})
+		},
+	}
 }
 
 // prMilestoneCmd opens a milestone PR for the container an agent is collaborating

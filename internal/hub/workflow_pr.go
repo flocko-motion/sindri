@@ -348,6 +348,30 @@ func (h *Hub) cmdApprove(c registry.Caller, args []string, out io.Writer) (int, 
 	return 0, nil
 }
 
+// ApprovePR is the human approve path (TUI/CLI) — the positive counterpart of
+// RejectPR. It marks an open PR approved so the human can then merge it, with or
+// without a reviewer agent in the loop (the merge gate is simply status ==
+// approved). Only an open PR awaiting a verdict can be approved.
+func (h *Hub) ApprovePR(prID string) error {
+	pr, ok, err := h.store.GetPR(prID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("no such PR %q", prID)
+	}
+	if pr.Status != "open" {
+		return fmt.Errorf("%s is %s — only an open PR can be approved", prID, pr.Status)
+	}
+	pr.Status = "approved"
+	if err := h.store.PutPR(pr); err != nil {
+		return err
+	}
+	_ = h.store.LogPR(prID, "approved", "by user")
+	h.notify()
+	return nil
+}
+
 // RejectPR is the human reject path (TUI/CLI): tells the worker to STOP and wait,
 // and leaves the PR rejected so no reviewer can approve over the user.
 func (h *Hub) RejectPR(prID, feedback string) error { return h.reject(prID, feedback, true) }

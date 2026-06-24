@@ -226,6 +226,12 @@ func (c *HTTP) RejectPR(id, feedback string) error {
 	return c.post("/pr/reject", hub.RejectReq{ID: id, Feedback: feedback})
 }
 
+// ApprovePR marks an open PR approved (the human path), so it can be merged
+// without a reviewer agent.
+func (c *HTTP) ApprovePR(id string) error {
+	return c.post("/pr/approve", hub.NameReq{Name: id})
+}
+
 // LintPR runs the quality gate against a PR's worktree and returns the output.
 func (c *HTTP) LintPR(id string) (string, error) {
 	var ok struct {
