@@ -144,6 +144,14 @@ func (h *Hub) Handler() http.Handler {
 		pr, err := h.Merge(req.Name)
 		writeJSON(w, pr, err)
 	})
+	mux.HandleFunc("POST /milestone", func(w http.ResponseWriter, r *http.Request) {
+		var req NameReq // Name carries the agent holding the container
+		if !decode(w, r, &req) {
+			return
+		}
+		pr, err := h.MilestonePR(req.Name)
+		writeJSON(w, pr, err)
+	})
 	mux.HandleFunc("GET /prs", func(w http.ResponseWriter, r *http.Request) {
 		prs, err := h.PRs()
 		writeJSON(w, prs, err)

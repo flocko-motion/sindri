@@ -310,17 +310,22 @@ func (h *Hub) AgentDirective(ctx context.Context, name string) (string, error) {
 	// an unrelated leaf — work the current subtask, or (subtasks exhausted) pick up
 	// a newly-added child, else wait for the human to open a milestone PR.
 	if st.Container != "" {
-		switch st.Phase {
-		case "submitted":
-			return dirSubmitted, nil
-		case "working":
-			return dirWorking(st.Task), nil
-		default:
-			if next, ok := h.advanceContainer(name, st.Container); ok {
-				return dirWorking(next.ID), nil
+		if t, ok, _ := h.store.GetTask(st.Container); ok && t.Status != "closed" && t.Status != "approved" && t.Status != "merged" {
+			switch st.Phase {
+			case "submitted":
+				return dirSubmitted, nil
+			case "working":
+				return dirWorking(st.Task), nil
+			default:
+				if next, ok := h.advanceContainer(name, st.Container); ok {
+					return dirWorking(next.ID), nil
+				}
+				return dirContainerWait(st.Container), nil
 			}
-			return dirContainerWait(st.Container), nil
 		}
+		// Container closed (the feature is done) → free the agent for normal work.
+		_ = h.store.SetState(store.AgentState{Agent: name, Phase: "idle"})
+		return h.waitForWork(ctx, func() (string, bool, error) { return h.claimNext(name) })
 	}
 	switch st.Phase {
 	case "working":

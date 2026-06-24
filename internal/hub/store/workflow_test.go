@@ -120,6 +120,46 @@ func TestOpenLeavesAndChildren(t *testing.T) {
 	}
 }
 
+func TestMarkedContainersAndGetTask(t *testing.T) {
+	s := openTmp(t)
+	if err := s.ReplaceTasks([]Task{
+		{ID: "P", Status: "open", Priority: "P1", Labels: "feature,collab"},     // marked, has open child
+		{ID: "C1", Status: "open", Priority: "P1", ParentID: "P"},                // open child of P
+		{ID: "Q", Status: "open", Priority: "P1", Labels: "collab"},              // marked but no children
+		{ID: "R", Status: "open", Priority: "P1", Labels: "other", ParentID: ""}, // not marked
+		{ID: "RC", Status: "open", Priority: "P1", ParentID: "R"},                // R has a child but isn't marked
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(mustMarked(t, s)); !eq(got, []string{"P"}) {
+		t.Fatalf("MarkedContainers: want [P] (marked + has open child + unheld), got %v", got)
+	}
+	// Holding P removes it from the candidates.
+	if err := s.SetState(AgentState{Agent: "brokkr", Container: "P", Branch: "P", Task: "C1", Phase: "working"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(mustMarked(t, s)); len(got) != 0 {
+		t.Fatalf("a held container must drop out of candidates, got %v", got)
+	}
+
+	tk, ok, err := s.GetTask("C1")
+	if err != nil || !ok || tk.ParentID != "P" {
+		t.Fatalf("GetTask(C1): ok=%v parent=%q err=%v", ok, tk.ParentID, err)
+	}
+	if _, ok, _ := s.GetTask("nope"); ok {
+		t.Fatal("GetTask of a missing id must report ok=false")
+	}
+}
+
+func mustMarked(t *testing.T, s *Store) []Task {
+	t.Helper()
+	v, err := s.MarkedContainers("collab")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
 func TestAgentStateContainerRoundTrip(t *testing.T) {
 	s := openTmp(t)
 	if err := s.SetState(AgentState{Agent: "brokkr", Container: "P", Branch: "P", Task: "C1", Phase: "working"}); err != nil {

@@ -193,6 +193,22 @@ func (c *HTTP) Merge(id string) (store.PR, error) {
 	return pr, readResult(resp, &pr)
 }
 
+// MilestonePR opens a milestone PR for the container an agent is collaborating
+// on — blocking that agent until the human merges.
+func (c *HTTP) MilestonePR(agent string) (store.PR, error) {
+	var pr store.PR
+	buf, err := json.Marshal(hub.NameReq{Name: agent})
+	if err != nil {
+		return pr, err
+	}
+	resp, err := c.hc.Post(c.base+"/milestone", "application/json", bytes.NewReader(buf))
+	if err != nil {
+		return pr, err
+	}
+	defer resp.Body.Close()
+	return pr, readResult(resp, &pr)
+}
+
 // PRs lists all merge-intents.
 func (c *HTTP) PRs() ([]store.PR, error) {
 	var out []store.PR

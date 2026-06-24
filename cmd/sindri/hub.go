@@ -52,6 +52,7 @@ type backend interface {
 	RequestReview(id, requirement string) error
 	MaterializeReview(id string) (string, error)
 	Merge(id string) (store.PR, error)
+	MilestonePR(agent string) (store.PR, error)
 	Close() error
 }
 
@@ -485,8 +486,27 @@ func splitCSV(s string) []string {
 
 func newPrCmd() *cobra.Command {
 	c := &cobra.Command{Use: "pr", Short: "Inspect and merge pull requests (merge-intents)"}
-	c.AddCommand(prListCmd(), prInfoCmd(), prReviewCmd(), prVerifyCmd(), prRejectCmd(), prLintCmd(), prMergeCmd())
+	c.AddCommand(prListCmd(), prInfoCmd(), prReviewCmd(), prVerifyCmd(), prRejectCmd(), prLintCmd(), prMergeCmd(), prMilestoneCmd())
 	return c
+}
+
+// prMilestoneCmd opens a milestone PR for the container an agent is collaborating
+// on: it captures the feature branch's current state and blocks the agent until
+// you review and merge it; the agent then resumes the same container.
+func prMilestoneCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "milestone <agent>", Short: "Open a milestone PR for the feature an agent is working (blocks it until merged)", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withBackend(func(b backend) error {
+				pr, err := b.MilestonePR(args[0])
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "opened milestone %s on %s\n", pr.ID, pr.Branch)
+				return nil
+			})
+		},
+	}
 }
 
 func prVerifyCmd() *cobra.Command {

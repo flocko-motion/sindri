@@ -242,6 +242,21 @@ func (s *Store) OpenChildren(parentID string) ([]Task, error) {
 	return scanTasks(rows)
 }
 
+// GetTask returns a single cached task by id (with its approval overlay); ok is
+// false if it isn't cached.
+func (s *Store) GetTask(id string) (Task, bool, error) {
+	row := s.db.QueryRow(`SELECT `+taskCols+` FROM tasks t LEFT JOIN task_approval a ON a.task=t.id WHERE t.id=?`, id)
+	var t Task
+	err := row.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Type, &t.Labels, &t.ParentID, &t.Approval, &t.ApprovalComment)
+	if err == sql.ErrNoRows {
+		return Task{}, false, nil
+	}
+	if err != nil {
+		return Task{}, false, fmt.Errorf("get task %s: %w", id, err)
+	}
+	return t, true, nil
+}
+
 // MarkedContainers returns tasks eligible for collaborative assignment: not
 // closed, carrying the given mark label, with at least one open child, and not
 // already held by an agent. Highest priority first.

@@ -518,6 +518,21 @@ func (h *Hub) Merge(prID string) (store.PR, error) {
 	if err := h.store.PutPR(pr); err != nil {
 		return store.PR{}, err
 	}
+	// Milestone PR for a held container: land the work but KEEP the branch and the
+	// agent — fast-forward the container branch past the merge and resume the agent
+	// on the container (it is not freed, the container task is not closed).
+	if holder, _ := h.store.GetState(pr.Agent); holder.Container != "" && holder.Container == pr.Branch {
+		if a, ok, _ := h.store.GetAgent(pr.Agent); ok {
+			_ = git.RebaseOnto(filepath.Join(h.root, a.Workspace), pr.Branch, pr.Base) // ff past the merge
+		}
+		_ = h.store.Log(pr.Agent, "merged", prID+" (milestone)")
+		_ = h.store.LogPR(prID, "merged", "milestone into "+pr.Base)
+		h.resumeContainer(pr.Agent)
+		_ = h.injectWhenReady(pr.Agent, msgMilestoneMerged(prID))
+		h.rebasePlanners(pr.Base)
+		h.notify()
+		return pr, nil
+	}
 	if strings.HasPrefix(pr.Task, "td-") { // a planner's openspec PR has no real td task (os-new)
 		if err := td.Close(h.root, pr.Task, "merged via "+prID); err != nil {
 			fmt.Printf("warning: td close %s: %v\n", pr.Task, err)
@@ -553,5 +568,71 @@ func (h *Hub) rebasePlanners(base string) {
 		}
 		_ = h.store.Log(a.Name, "rebase", "onto "+base)
 		_ = h.injectWhenReady(a.Name, msgRebased(base))
+	}
+}
+
+// MilestonePR opens (or refreshes) a milestone PR for the container an agent
+// holds: it captures the current state of the container branch and blocks the
+// agent until the human reviews and merges. The agent resumes the same container
+// after the merge (its branch is not retired). Host-triggered, in coordination
+// with the agent.
+func (h *Hub) MilestonePR(agent string) (store.PR, error) {
+	st, err := h.store.GetState(agent)
+	if err != nil {
+		return store.PR{}, err
+	}
+	if st.Container == "" {
+		return store.PR{}, fmt.Errorf("%s isn't working a container — no milestone to open", agent)
+	}
+	a, ok, err := h.store.GetAgent(agent)
+	if err != nil || !ok {
+		return store.PR{}, fmt.Errorf("no such agent %q", agent)
+	}
+	wt := filepath.Join(h.root, a.Workspace)
+	if err := git.CommitAll(wt, "milestone: "+st.Container); err != nil { // capture current state
+		return store.PR{}, err
+	}
+	base, err := h.baseBranch()
+	if err != nil {
+		return store.PR{}, err
+	}
+	pr := store.PR{ID: "pr-" + st.Container, Task: st.Container, Agent: agent, Branch: st.Container, Base: base, Status: "open"}
+	_, existed, _ := h.store.GetPR(pr.ID)
+	if err := h.store.PutPR(pr); err != nil {
+		return store.PR{}, err
+	}
+	// Block the agent until the human merges (the one deliberate pause).
+	if err := h.store.SetState(store.AgentState{Agent: agent, Container: st.Container, Branch: st.Container, Task: st.Task, Phase: "submitted"}); err != nil {
+		return store.PR{}, err
+	}
+	if existed {
+		_ = h.store.LogPR(pr.ID, "resubmitted", "milestone by "+agent)
+	} else {
+		_ = h.store.LogPR(pr.ID, "created", "milestone by "+agent)
+	}
+	_ = h.store.Log(agent, "milestone", pr.ID)
+	h.notify()
+	return pr, nil
+}
+
+// resumeContainer puts a container's agent back to work after a milestone merge:
+// it continues the current subtask if it's still open, else advances to the next
+// open child, else rests holding the container (awaiting more subtasks or the
+// container's close).
+func (h *Hub) resumeContainer(agent string) {
+	st, _ := h.store.GetState(agent)
+	if st.Container == "" {
+		return
+	}
+	if st.Task != "" {
+		if t, ok, _ := h.store.GetTask(st.Task); ok && (t.Status == "open" || t.Status == "in_progress") {
+			_ = h.store.SetState(store.AgentState{Agent: agent, Container: st.Container, Branch: st.Container, Task: st.Task, Phase: "working"})
+			h.notify()
+			return
+		}
+	}
+	if _, ok := h.advanceContainer(agent, st.Container); !ok {
+		_ = h.store.SetState(store.AgentState{Agent: agent, Container: st.Container, Branch: st.Container, Phase: "idle"})
+		h.notify()
 	}
 }

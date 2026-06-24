@@ -30,14 +30,18 @@ adds the container path alongside it.
 
 ## 4. Milestone PRs
 
-- [ ] 4.1 A milestone PR: open/refresh a merge-intent on the container branch for
-      its current state, on request or when children are exhausted.
-- [ ] 4.2 A milestone `Merge` variant: block the agent on the milestone PR, land
-      current state, rebase the branch onto the new base, then resume the agent on
-      the same container (do NOT free/retire). Retire the branch and free the
-      agent only when the container closes.
-- [ ] 4.3 Advisory review: a requested review delivers feedback without gating the
-      merge; human approve+merge stays the path to base.
+- [x] 4.1 A milestone PR: `Hub.MilestonePR(agent)` opens/refreshes a merge-intent
+      on the container branch for its current state and blocks the agent. Wired
+      host-side: `client.MilestonePR`, `POST /milestone`, `sindri pr milestone
+      <agent>`. (On-request; auto-on-completion deferred — `checkpoint` rests.)
+- [x] 4.2 A milestone `Merge` variant: in `Hub.Merge`, a PR whose held owner's
+      container == branch lands, fast-forwards the branch past the merge
+      (`RebaseOnto`), and resumes the agent (`resumeContainer`) — branch kept,
+      agent not freed. `AgentDirective` frees the agent only when the container
+      task itself is closed.
+- [ ] 4.3 Advisory review: requested review delivers feedback without gating the
+      merge. Needs the human approve+merge path (the add-host-pr-approve change) so
+      the user can review+merge a milestone without a reviewer agent — NEXT.
 
 ## 5. Verify
 

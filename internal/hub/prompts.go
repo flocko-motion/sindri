@@ -155,6 +155,10 @@ func msgRebased(base string) string {
 	return fmt.Sprintf("[hub] %s moved — your branch was rebased onto it, so you're up to date.", base)
 }
 
+func msgMilestoneMerged(prID string) string {
+	return fmt.Sprintf("[hub] Milestone %s merged — your feature branch is rebased onto the new base. Run `sindri-worker` to continue.", prID)
+}
+
 func msgRejectedByUser(prID, feedback string) string {
 	return fmt.Sprintf("[user] %s was rejected: %s — stop working on it and wait for further instructions.", prID, feedback)
 }
