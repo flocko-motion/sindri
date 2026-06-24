@@ -87,6 +87,17 @@ func errModal(msg string, screenW, screenH int) string {
 	return lipgloss.Place(screenW, screenH, lipgloss.Center, lipgloss.Center, box)
 }
 
+// warnModal renders a compact centered warning box (orange), dismissed with any
+// key. Used for non-fatal startup notices — e.g. an optional tool the project
+// expects is missing — so the degrade is seen, not silent.
+func warnModal(msg string, screenW, screenH int) string {
+	w := clampInt(screenW-10, 24, 72)
+	body := lipgloss.NewStyle().Width(w).Render(msg)
+	box := modalBorderStyle.BorderForeground(cOrange).Render(
+		lipgloss.NewStyle().Bold(true).Foreground(cOrange).Render("⚠ warning") + "\n\n" + body + "\n\n" + dimStyle.Render("any key to dismiss"))
+	return lipgloss.Place(screenW, screenH, lipgloss.Center, lipgloss.Center, box)
+}
+
 // modal renders content as an almost-full-screen centered modal. vp scrolls the
 // content (its Height should be modalContentHeight(screenH)).
 func modal(title string, content []string, vp scroll.Viewport, screenW, screenH int) string {

@@ -121,6 +121,21 @@ func TestDeadcodeCleanProgram(t *testing.T) {
 	}
 }
 
+func TestDeadcodeSkipsWithoutGoToolchain(t *testing.T) {
+	t.Setenv("PATH", "") // hide the go toolchain
+	var sb strings.Builder
+	found, err := Deadcode([]string{"./..."}, "", &sb)
+	if err != nil {
+		t.Fatalf("a missing go toolchain must degrade, not error: %v", err)
+	}
+	if found {
+		t.Error("a skip must report nothing found")
+	}
+	if !strings.Contains(sb.String(), "skipping") {
+		t.Errorf("the skip must be visible, got: %q", sb.String())
+	}
+}
+
 func TestDeadcodeNoMainPackage(t *testing.T) {
 	dir := writeModule(t, map[string]string{
 		"go.mod":     "module libonly\n\ngo 1.25\n",

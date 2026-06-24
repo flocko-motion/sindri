@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/flo-at/sindri/internal/adapter/spec"
 	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -40,7 +41,13 @@ func Run(root string) error {
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "sindri tui: connected — starting dashboard")
-	_, err = tea.NewProgram(newModel(cl, ch, root), tea.WithAltScreen()).Run()
+	m := newModel(cl, ch, root)
+	// A project with an openspec/ folder expects the openspec CLI; warn (once, at
+	// startup) if it's absent rather than letting spec features quietly do nothing.
+	if spec.Enabled(root) && !spec.CLIInstalled() {
+		m.noticeText = openspecMissingNotice
+	}
+	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }
 
@@ -102,6 +109,7 @@ type model struct {
 	form        formState // active fill-in form (new/edit task)
 	flash       string    // transient status (e.g. "copied"), cleared on next key
 	errText     string    // when set, the error modal is shown (any key dismisses)
+	noticeText  string    // when set, a startup warning modal is shown (any key dismisses)
 }
 
 // choiceModalState is a generic pick-one prompt: options, parallel values, and
@@ -253,6 +261,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.errText != "" { // any key dismisses the error modal
 			m.errText = ""
+			return m, nil
+		}
+		if m.noticeText != "" { // any key dismisses the startup notice
+			m.noticeText = ""
 			return m, nil
 		}
 		if m.form.active {
@@ -639,6 +651,9 @@ func (m model) View() string {
 	// Modals take over the whole screen.
 	if m.errText != "" {
 		return errModal(m.errText, m.w, m.h)
+	}
+	if m.noticeText != "" {
+		return warnModal(m.noticeText, m.w, m.h)
 	}
 	if m.form.active {
 		return m.form.view(m.w, m.h)
