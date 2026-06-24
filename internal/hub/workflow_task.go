@@ -306,6 +306,22 @@ func (h *Hub) AgentDirective(ctx context.Context, name string) (string, error) {
 		}
 		return dirPlanner, nil
 	}
+	// A worker holding a container is in the collaborative loop: never auto-claim
+	// an unrelated leaf — work the current subtask, or (subtasks exhausted) pick up
+	// a newly-added child, else wait for the human to open a milestone PR.
+	if st.Container != "" {
+		switch st.Phase {
+		case "submitted":
+			return dirSubmitted, nil
+		case "working":
+			return dirWorking(st.Task), nil
+		default:
+			if next, ok := h.advanceContainer(name, st.Container); ok {
+				return dirWorking(next.ID), nil
+			}
+			return dirContainerWait(st.Container), nil
+		}
+	}
 	switch st.Phase {
 	case "working":
 		return dirWorking(st.Task), nil
@@ -452,13 +468,26 @@ func (h *Hub) cmdNext(c registry.Caller, _ []string, out io.Writer) (int, error)
 	return 0, nil
 }
 
-// claimNext claims the highest-priority open task for a worker — moving it to
-// in_progress, branching in the worker's worktree, and setting the worker
+// claimNext claims the highest-priority open LEAF task for a worker — moving it
+// to in_progress, branching in the worker's worktree, and setting the worker
 // "working". Returns (directive, true) on a claim, ("", false) when nothing is
-// open. A td sync failure is non-fatal (it falls back to the cached task set).
+// open. Container tasks (those with children) are never auto-claimed, nor are
+// children reserved to a held container — see OpenLeaves. A td sync failure is
+// non-fatal (it falls back to the cached task set).
 func (h *Hub) claimNext(agent string) (string, bool, error) {
 	_ = h.SyncTasks() // best-effort refresh from td/openspec; cached set on failure
-	open, err := h.store.OpenTasks()
+	// A human-marked container (a deliberate "work this whole feature with me")
+	// takes priority over the leaf queue.
+	if d, ok, err := h.claimContainer(agent); ok || err != nil {
+		return d, ok, err
+	}
+	return h.claimLeaf(agent)
+}
+
+// claimLeaf claims the highest-priority open leaf for a worker, branching on the
+// leaf (the structured one-task-one-branch path).
+func (h *Hub) claimLeaf(agent string) (string, bool, error) {
+	open, err := h.store.OpenLeaves()
 	if err != nil {
 		return "", false, err
 	}
@@ -489,4 +518,109 @@ func (h *Hub) claimNext(agent string) (string, bool, error) {
 	_ = h.store.Log(agent, "claim", t.ID+" "+t.Title)
 	h.notify()
 	return dirClaimed(t.ID, t.Title, branch), true, nil
+}
+
+// collabLabel marks a parent task for collaborative assignment: the next free
+// agent takes the whole container, working its children on one standing branch.
+const collabLabel = "collab"
+
+// claimContainer assigns the highest-priority marked, unheld container to the
+// agent: it puts the agent on a standing branch named for the container (created
+// from base if new, preserved if it exists) and starts it on the container's
+// first open child. Returns (_, false, nil) when there's no such container.
+func (h *Hub) claimContainer(agent string) (string, bool, error) {
+	containers, err := h.store.MarkedContainers(collabLabel)
+	if err != nil || len(containers) == 0 {
+		return "", false, err
+	}
+	c := containers[0]
+	children, err := h.store.OpenChildren(c.ID)
+	if err != nil {
+		return "", false, err
+	}
+	if len(children) == 0 {
+		return "", false, nil // marked but nothing open to work
+	}
+	base, err := h.baseBranch()
+	if err != nil {
+		return "", false, err
+	}
+	a, ok, err := h.store.GetAgent(agent)
+	if err != nil || !ok {
+		return "", false, fmt.Errorf("agent %s missing: %v", agent, err)
+	}
+	wt := filepath.Join(h.root, a.Workspace)
+	if err := git.EnsureBranch(wt, c.ID, base); err != nil {
+		return "", false, err
+	}
+	child := children[0]
+	if err := td.SetStatus(h.root, child.ID, "in_progress"); err != nil {
+		return "", false, err
+	}
+	_ = h.refreshTask(child.ID)
+	if err := h.store.SetState(store.AgentState{Agent: agent, Container: c.ID, Branch: c.ID, Task: child.ID, Phase: "working"}); err != nil {
+		return "", false, err
+	}
+	_ = h.store.Log(agent, "claim-container", c.ID+" "+c.Title)
+	h.notify()
+	return dirContainerClaimed(c.ID, c.Title, child.ID, child.Title), true, nil
+}
+
+// cmdCheckpoint is the collaborative worker's non-blocking verb: commit the
+// current subtask to the container branch, close that child, and advance to the
+// next open child — staying working, never blocking for review. When no open
+// children remain the agent rests (still holding the container) until the human
+// opens a milestone PR or adds more subtasks.
+func (h *Hub) cmdCheckpoint(c registry.Caller, args []string, out io.Writer) (int, error) {
+	st, err := h.store.GetState(c.Agent)
+	if err != nil {
+		return 1, err
+	}
+	if st.Container == "" || st.Phase != "working" || st.Task == "" {
+		fmt.Fprintln(out, replyNothingToCheckpoint)
+		return 1, nil
+	}
+	a, _, _ := h.store.GetAgent(c.Agent)
+	wt := filepath.Join(h.root, a.Workspace)
+	msg := strings.TrimSpace(strings.Join(args, " "))
+	if msg == "" {
+		msg = "work on " + st.Task
+	}
+	if err := git.CommitAll(wt, msg); err != nil {
+		return 1, err
+	}
+	if err := td.SetStatus(h.root, st.Task, "closed"); err != nil {
+		return 1, err
+	}
+	_ = h.refreshTask(st.Task)
+	_ = h.store.Log(c.Agent, "checkpoint", st.Task)
+	done := st.Task
+	if next, ok := h.advanceContainer(c.Agent, st.Container); ok {
+		fmt.Fprintln(out, replyCheckpointed(done, next.ID, next.Title))
+		return 0, nil
+	}
+	// No open children left — rest holding the container; the human drives the
+	// milestone PR (or adds subtasks).
+	_ = h.store.SetState(store.AgentState{Agent: c.Agent, Container: st.Container, Branch: st.Container, Phase: "idle"})
+	h.notify()
+	fmt.Fprintln(out, replyCheckpointedLast(done, st.Container))
+	return 0, nil
+}
+
+// advanceContainer moves a held container's agent onto its next open child,
+// returning (child, true) when one was assigned (state set to working) or
+// (zero, false) when the container has no open children left.
+func (h *Hub) advanceContainer(agent, container string) (store.Task, bool) {
+	children, err := h.store.OpenChildren(container)
+	if err != nil || len(children) == 0 {
+		return store.Task{}, false
+	}
+	child := children[0]
+	if err := td.SetStatus(h.root, child.ID, "in_progress"); err != nil {
+		return store.Task{}, false
+	}
+	_ = h.refreshTask(child.ID)
+	_ = h.store.SetState(store.AgentState{Agent: agent, Container: container, Branch: container, Task: child.ID, Phase: "working"})
+	h.notify()
+	return child, true
 }

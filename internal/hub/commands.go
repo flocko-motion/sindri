@@ -42,7 +42,9 @@ func (h *Hub) registry() *registry.Registry {
 			Hidden: func(c registry.Caller) bool { return c.HasTask }, Run: h.cmdNext},
 		registry.Command{Name: "lint", Help: "run the quality gate: lint (your workspace) or lint <pr-id> (a PR)", Run: h.cmdLint},
 		registry.Command{Name: "submit", Help: "request your branch be merged: submit [message]", Roles: []string{"worker"},
-			Hidden: func(c registry.Caller) bool { return !c.HasTask }, Run: h.cmdSubmit},
+			Hidden: func(c registry.Caller) bool { return !c.HasTask || c.InContainer }, Run: h.cmdSubmit},
+		registry.Command{Name: "checkpoint", Help: "commit the current subtask and move to the next: checkpoint [message]", Roles: []string{"worker"},
+			Hidden: func(c registry.Caller) bool { return !c.InContainer }, Run: h.cmdCheckpoint},
 		registry.Command{Name: "task", Help: "read the backlog: task list (all) or task <id> (full detail)", Roles: []string{"planner"}, Run: h.cmdTasks},
 		registry.Command{Name: "create-task", Help: "propose a new task (needs the user's approval): create-task <title...>", Roles: []string{"planner"}, Run: h.cmdCreateTask},
 		registry.Command{Name: "openspec", Help: "ship your openspec changes as a PR: openspec submit [message]", Roles: []string{"planner"}, Run: h.cmdOpenspec},
@@ -62,13 +64,21 @@ func (h *Hub) caller(name string) (registry.Caller, error) {
 	if !ok {
 		return registry.Caller{}, fmt.Errorf("unknown agent %q", name)
 	}
-	// A worker holding a task (working or submitted) hides "next" and shows
-	// "submit"; an idle worker the reverse (state machine, D-hub).
+	// A worker holding work hides "next" and shows "submit"; an idle worker the
+	// reverse (state machine, D-hub). Holding a collaborative container also counts
+	// as "has work" (so "next" stays hidden even when resting between subtasks) and
+	// swaps "submit" for "checkpoint".
 	st, err := h.store.GetState(name)
 	if err != nil {
 		return registry.Caller{}, err
 	}
-	return registry.Caller{Agent: name, Role: a.Role, HasTask: st.Phase != "idle"}, nil
+	inContainer := st.Container != ""
+	return registry.Caller{
+		Agent:       name,
+		Role:        a.Role,
+		HasTask:     st.Phase != "idle" || inContainer,
+		InContainer: inContainer,
+	}, nil
 }
 
 // AgentCommands returns the command surface currently available to an agent.

@@ -111,6 +111,34 @@ func dirClaimed(id, title, branch string) string {
 
 const dirNoTasks = "No open tasks. Wait — the hub will tell you when there is work."
 
+// --- collaborative (container) workflow ---
+
+// dirContainerClaimed starts an agent on a feature: it works the container's
+// subtasks one at a time on a single standing branch, checkpointing (not
+// submitting) between them. The whole feature lands as one PR when the user opens
+// a milestone.
+func dirContainerClaimed(container, ctitle, child, childTitle string) string {
+	return fmt.Sprintf("You're working feature %s: %s — on a single branch in /workspace. "+
+		"Current subtask %s: %s. Implement it, then run `sindri-worker checkpoint \"<summary>\"` "+
+		"to commit it and move to the next subtask. Do NOT submit per subtask — the whole feature "+
+		"is merged as one PR when you and the user reach a milestone.", container, ctitle, child, childTitle)
+}
+
+func dirContainerWait(container string) string {
+	return fmt.Sprintf("All open subtasks of feature %s are checkpointed. Wait — the user will open a "+
+		"milestone PR to merge the work so far, or add more subtasks. Don't poll.", container)
+}
+
+func replyCheckpointed(done, next, nextTitle string) string {
+	return fmt.Sprintf("Checkpointed %s. Next subtask %s: %s — implement it, then `sindri-worker checkpoint \"<summary>\"` again.", done, next, nextTitle)
+}
+
+func replyCheckpointedLast(done, container string) string {
+	return fmt.Sprintf("Checkpointed %s — that was the last open subtask of %s. Wait: the user will open a milestone PR (or add more subtasks).", done, container)
+}
+
+const replyNothingToCheckpoint = "Nothing to checkpoint — you're not working a subtask. Run `sindri-worker` for your current directive."
+
 // --- injected messages ([hub]/[user]/[reviewer], typed into the agent's tmux) ---
 
 const msgKickoff = "[hub] You're live. Run `sindri-worker` and do exactly what it tells you."

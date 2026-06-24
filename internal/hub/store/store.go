@@ -86,7 +86,8 @@ func Open(path string) (*Store, error) {
 // new columns are added idempotently (a duplicate-column error is ignored).
 func migrate(db *sql.DB) {
 	for _, stmt := range []string{
-		`ALTER TABLE tasks ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''`, // hub.db cache
+		`ALTER TABLE tasks ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''`,            // hub.db cache
+		`ALTER TABLE agent_state ADD COLUMN container TEXT NOT NULL DEFAULT ''`,      // collaborative workflow
 	} {
 		_, _ = db.Exec(stmt) // ignore "duplicate column name" on already-migrated DBs
 	}

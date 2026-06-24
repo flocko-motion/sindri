@@ -27,10 +27,11 @@ CREATE TABLE IF NOT EXISTS tasks (
   synced_at  TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS agent_state (
-  agent  TEXT PRIMARY KEY,
-  task   TEXT NOT NULL DEFAULT '',
-  branch TEXT NOT NULL DEFAULT '',
-  phase  TEXT NOT NULL DEFAULT 'idle'  -- idle | working | submitted
+  agent     TEXT PRIMARY KEY,
+  task      TEXT NOT NULL DEFAULT '',
+  branch    TEXT NOT NULL DEFAULT '',
+  phase     TEXT NOT NULL DEFAULT 'idle',  -- idle | working | submitted
+  container TEXT NOT NULL DEFAULT ''       -- container task held in the collaborative workflow ('' = structured)
 );
 CREATE TABLE IF NOT EXISTS prs (
   id         TEXT PRIMARY KEY,  -- pr-<task>
@@ -108,12 +109,17 @@ type Task struct {
 	ApprovalComment string `json:"approval_comment,omitempty"`
 }
 
-// AgentState is an agent's live workflow state (durable, D11).
+// AgentState is an agent's live workflow state (durable, D11). In the structured
+// workflow Branch tracks Task (one leaf, one branch). In the collaborative
+// workflow Container holds the assigned parent task, Branch is named for the
+// container and persists, and Task is the current subtask rolling through the
+// container's children — so Branch is decoupled from Task.
 type AgentState struct {
-	Agent  string `json:"agent"`
-	Task   string `json:"task"`
-	Branch string `json:"branch"`
-	Phase  string `json:"phase"`
+	Agent     string `json:"agent"`
+	Task      string `json:"task"`
+	Branch    string `json:"branch"`
+	Phase     string `json:"phase"`
+	Container string `json:"container,omitempty"`
 }
 
 // Review is one review item attached to a PR. Its lifecycle is read from which
@@ -202,6 +208,59 @@ func (s *Store) OpenTasks() ([]Task, error) {
 	return scanTasks(rows)
 }
 
+// OpenLeaves returns the claimable tasks the automatic assigner may take: open,
+// approved leaves (a task no other task has as parent), excluding any child of a
+// container currently held by an agent (those are reserved to that agent's
+// collaborative session). Highest priority first.
+func (s *Store) OpenLeaves() ([]Task, error) {
+	rows, err := s.db.Query(`
+		SELECT ` + taskCols + ` FROM tasks t LEFT JOIN task_approval a ON a.task=t.id
+		WHERE t.status='open' AND (a.status IS NULL OR a.status='approved')
+		  AND t.id NOT IN (SELECT parent_id FROM tasks WHERE parent_id != '')
+		  AND t.parent_id NOT IN (SELECT container FROM agent_state WHERE container != '')
+		ORDER BY CASE WHEN t.priority='' THEN 1 ELSE 0 END, t.priority, t.id`)
+	if err != nil {
+		return nil, fmt.Errorf("open leaves: %w", err)
+	}
+	defer rows.Close()
+	return scanTasks(rows)
+}
+
+// OpenChildren returns a container's open, approved children (its remaining
+// subtasks), highest priority first — the stream a collaborating agent works
+// through. Unlike OpenLeaves it ignores the held-container reservation, since the
+// caller is the holding agent.
+func (s *Store) OpenChildren(parentID string) ([]Task, error) {
+	rows, err := s.db.Query(`
+		SELECT ` + taskCols + ` FROM tasks t LEFT JOIN task_approval a ON a.task=t.id
+		WHERE t.status='open' AND (a.status IS NULL OR a.status='approved') AND t.parent_id=?
+		ORDER BY CASE WHEN t.priority='' THEN 1 ELSE 0 END, t.priority, t.id`, parentID)
+	if err != nil {
+		return nil, fmt.Errorf("open children of %s: %w", parentID, err)
+	}
+	defer rows.Close()
+	return scanTasks(rows)
+}
+
+// MarkedContainers returns tasks eligible for collaborative assignment: not
+// closed, carrying the given mark label, with at least one open child, and not
+// already held by an agent. Highest priority first.
+func (s *Store) MarkedContainers(label string) ([]Task, error) {
+	rows, err := s.db.Query(`
+		SELECT `+taskCols+` FROM tasks t LEFT JOIN task_approval a ON a.task=t.id
+		WHERE t.status NOT IN ('closed','approved','merged')
+		  AND (a.status IS NULL OR a.status='approved')
+		  AND (',' || t.labels || ',') LIKE '%,' || ? || ',%'
+		  AND EXISTS (SELECT 1 FROM tasks c WHERE c.parent_id=t.id AND c.status='open')
+		  AND t.id NOT IN (SELECT container FROM agent_state WHERE container != '')
+		ORDER BY CASE WHEN t.priority='' THEN 1 ELSE 0 END, t.priority, t.id`, label)
+	if err != nil {
+		return nil, fmt.Errorf("marked containers: %w", err)
+	}
+	defer rows.Close()
+	return scanTasks(rows)
+}
+
 // AllTasks returns every cached task with its approval overlay, highest priority
 // first (unset last).
 func (s *Store) AllTasks() ([]Task, error) {
@@ -278,8 +337,8 @@ func (s *Store) PriorityOverrides() (map[string]string, error) {
 // GetState returns an agent's workflow state (zero value if none recorded).
 func (s *Store) GetState(agent string) (AgentState, error) {
 	st := AgentState{Agent: agent, Phase: "idle"}
-	row := s.db.QueryRow(`SELECT task,branch,phase FROM agent_state WHERE agent=?`, agent)
-	err := row.Scan(&st.Task, &st.Branch, &st.Phase)
+	row := s.db.QueryRow(`SELECT task,branch,phase,container FROM agent_state WHERE agent=?`, agent)
+	err := row.Scan(&st.Task, &st.Branch, &st.Phase, &st.Container)
 	if err == sql.ErrNoRows {
 		return st, nil
 	}
@@ -295,9 +354,9 @@ func (s *Store) SetState(st AgentState) error {
 		st.Phase = "idle"
 	}
 	_, err := s.db.Exec(`
-		INSERT INTO agent_state (agent,task,branch,phase) VALUES (?,?,?,?)
-		ON CONFLICT(agent) DO UPDATE SET task=excluded.task, branch=excluded.branch, phase=excluded.phase`,
-		st.Agent, st.Task, st.Branch, st.Phase)
+		INSERT INTO agent_state (agent,task,branch,phase,container) VALUES (?,?,?,?,?)
+		ON CONFLICT(agent) DO UPDATE SET task=excluded.task, branch=excluded.branch, phase=excluded.phase, container=excluded.container`,
+		st.Agent, st.Task, st.Branch, st.Phase, st.Container)
 	if err != nil {
 		return fmt.Errorf("set state %s: %w", st.Agent, err)
 	}

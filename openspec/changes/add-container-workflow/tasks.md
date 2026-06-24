@@ -5,26 +5,28 @@ adds the container path alongside it.
 
 ## 1. Assignment
 
-- [ ] 1.1 Derive leaf vs container from the open set (a task is a container if any
+- [x] 1.1 Derive leaf vs container from the open set (a task is a container if any
       open task has it as `ParentID`); make `claimNext` skip containers.
-- [ ] 1.2 Recognise a container marked for collaboration (a td label) and assign
-      it as a unit to a free agent; reserve its open children to that agent so the
-      leaf assigner doesn't hand them out elsewhere.
+      (`store.OpenLeaves`; `claimNext` now uses it.)
+- [x] 1.2 Recognise a container marked for collaboration (the `collab` label) and
+      assign it as a unit to a free agent (`store.MarkedContainers`,
+      `Hub.claimContainer`); children reserved via `OpenLeaves`. `claimNext` now
+      tries a marked container before the leaf queue.
 
 ## 2. Branch + state
 
-- [ ] 2.1 Decouple `store.AgentState.Branch` from the current task; add a
-      current-subtask field. For a container, `Branch = container.ID` (set once,
-      via the planner's `EnsureBranch` standing-branch pattern) while the current
-      subtask cycles.
+- [x] 2.1 Decoupled `store.AgentState.Branch` from `Task` via a new `Container`
+      field; for a container `Branch = container.ID` (set once via `EnsureBranch`)
+      while `Task` (the current subtask) cycles.
 - [ ] 2.2 Render the agent on the board with the container as context and the
-      current subtask as the headline.
+      current subtask as the headline. (TUI — pending.)
 
 ## 3. Checkpoints
 
-- [ ] 3.1 Add a non-blocking `checkpoint` (a.k.a. `done`) verb: commit the current
-      subtask to the container branch, close that child in td, advance to the next
-      open child; the agent stays working (idles only when the stream is empty).
+- [x] 3.1 Non-blocking `checkpoint` verb (`Hub.cmdCheckpoint`): commit the current
+      subtask to the container branch, close that child, advance to the next open
+      child (`advanceContainer`); rests holding the container when the stream is
+      empty. Surfaced for container-holders only; `submit` hidden, `next` hidden.
 
 ## 4. Milestone PRs
 
