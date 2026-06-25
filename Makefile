@@ -89,7 +89,7 @@ deb: build ## build the .deb package into bin/ (bundles brokkr, td, yq)
 	VERSION="$(VERSION)" ARCH="$(ARCH)" $(NFPM) pkg --config nfpm.yaml --packager deb --target bin/
 	@echo "built .deb in bin/ (version $(VERSION), arch $(ARCH))"
 
-release: verify ## lint, then cut a release: make release <major|minor|patch> (breaking|feature|fix too)
+release: ## cut a release (validates arg, then lints): make release <major|minor|patch> (breaking|feature|fix too)
 	@./scripts/release.sh $(filter major minor patch breaking feature fix,$(MAKECMDGOALS))
 major minor patch breaking feature fix:
 	@:

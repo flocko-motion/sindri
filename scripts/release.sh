@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Cut a release as a self-contained cycle: ensure the tree is clean, push your
-# branch, open + merge a PR into the default branch (so the tag points at merged
-# code), tag the merged tip, and push the tag — which triggers the release
-# workflow (build + attach the .deb). It then returns you to the branch you
-# started on; it never leaves you on, or commits directly to, the default branch.
+# Cut a release as a self-contained cycle: validate the bump arg, ensure the tree
+# is clean, lint (the quality gate), then push your branch, open + merge a PR into
+# the default branch (so the tag points at merged code), tag the merged tip, and
+# push the tag — which triggers the release workflow (build + attach the .deb). It
+# then returns you to the branch you started on; it never leaves you on, or
+# commits directly to, the default branch.
 #
 # Usage: make release <major|minor|patch>   (aliases: breaking|feature|fix;
 #        needs gh when run from a feature branch)
@@ -23,6 +24,14 @@ esac
 # 1. Everything committed — the release must capture a clean, committed state.
 if [ -n "$(git status --porcelain)" ]; then
 	echo "working tree is dirty — commit or stash before releasing" >&2
+	exit 1
+fi
+
+# 2. Quality gate: lint here (after the arg + clean checks, so a missing argument
+#    or dirty tree fails fast) and before any network/merge work.
+echo "linting…"
+if ! go run ./cmd/brokkr lint; then
+	echo "linters failed — fix them before releasing" >&2
 	exit 1
 fi
 
