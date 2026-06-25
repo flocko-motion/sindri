@@ -27,11 +27,11 @@ if [ -n "$(git status --porcelain)" ]; then
 	exit 1
 fi
 
-# 2. Quality gate: lint here (after the arg + clean checks, so a missing argument
-#    or dirty tree fails fast) and before any network/merge work.
-echo "linting…"
-if ! go run ./cmd/brokkr lint; then
-	echo "linters failed — fix them before releasing" >&2
+# 2. Quality gate (after the arg + clean checks, so a bad arg / dirty tree fails
+#    fast): the active Go toolchain must be current and the linters must pass.
+echo "verifying (toolchain + linters)…"
+if ! make verify; then
+	echo "verify failed — fix it before releasing" >&2
 	exit 1
 fi
 

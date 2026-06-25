@@ -1,4 +1,4 @@
-.PHONY: help build sindri worker brokkr image install clean test verify lint check demo diag loop claude-check fullloop screenshot seed deb release major minor patch breaking feature fix
+.PHONY: help build sindri worker brokkr image install clean test verify lint check-go check demo diag loop claude-check fullloop screenshot seed deb release major minor patch breaking feature fix
 
 .DEFAULT_GOAL := help
 
@@ -56,10 +56,13 @@ screenshot: ## render the TUI headlessly (mock data) to eyeball its layout
 seed: ## seed a mock task hierarchy into the current repo's td store
 	./scripts/seed.sh
 
-verify: brokkr ## run the linters (deadcode, loc, comments, openspec) — the quality gate
+verify: check-go brokkr ## run the linters (deadcode, loc, comments, openspec) — the quality gate
 	./bin/brokkr lint
 
 lint: verify ## alias for verify
+
+check-go: ## fail unless the active Go toolchain is the latest release (linters need current Go)
+	@./scripts/check-go.sh
 
 check: brokkr ## terse one-shot gate: build + test + lint, stops at the first failure
 	@out=$$(go build ./... 2>&1) && echo "BUILD OK" || { echo "BUILD FAIL"; echo "$$out" | tail -20; exit 1; }
