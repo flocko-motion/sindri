@@ -10,14 +10,22 @@ package main
 import (
 	"os"
 
+	"github.com/flo-at/sindri/internal/update"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
+
+// version is the build version, baked in via -ldflags "-X main.version=…" (see
+// the Makefile). Empty/"dev" for a plain `go build`/`go run` — those skip the
+// update check.
+var version = "dev"
 
 func main() {
 	var projectDir string
 	rootCmd := &cobra.Command{
-		Use:   "sindri",
-		Short: "Sindri — AI agent orchestrator",
+		Use:     "sindri",
+		Short:   "Sindri — AI agent orchestrator",
+		Version: version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if projectDir != "" {
 				return os.Chdir(projectDir)
@@ -26,6 +34,12 @@ func main() {
 		},
 	}
 	rootCmd.PersistentFlags().StringVar(&projectDir, "project", "", "Project directory (default: git root from cwd)")
+
+	// Best-effort, once-a-day upgrade check — only when stderr is a terminal, so it
+	// never corrupts piped output or nags in CI/scripts.
+	if term.IsTerminal(int(os.Stderr.Fd())) {
+		update.MaybeNotify(version, os.Stderr)
+	}
 
 	// Hierarchical command tree: <category> <action>. First-order: hub, tui,
 	// lint, code.

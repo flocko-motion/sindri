@@ -12,7 +12,7 @@ NFPM    := go run github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
 build: sindri worker
 
 sindri:
-	go build -o bin/sindri ./cmd/sindri/
+	go build -ldflags "-X main.version=$(VERSION)" -o bin/sindri ./cmd/sindri/
 
 # The single, role-agnostic agent browser (was sindri-worker + sindri-review).
 worker:
