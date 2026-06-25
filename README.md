@@ -11,16 +11,13 @@ This README is about *using* sindri. For the internal design, see `openspec/`.
 
 ## Install
 
-One line — download the latest release and install it:
+Download the latest release and install it — a one-time step (after that,
+`sindri upgrade` and the daily check keep you current):
 
 ```bash
-curl -sL https://github.com/flocko-motion/sindri/releases/latest/download/sindri_amd64.deb \
-  | sudo dpkg -i /dev/stdin || sudo apt-get -f install -y
+wget https://github.com/flocko-motion/sindri/releases/latest/download/sindri_amd64.deb
+sudo apt install ./sindri_amd64.deb
 ```
-
-(`dpkg -i` installs from the pipe; the `apt-get -f install` pulls the `git` and
-`podman` dependencies if they're missing. If you'd rather, download the file and
-`sudo apt install ./sindri_amd64.deb` instead.)
 
 That's it. The package bundles everything sindri ships — the `sindri` CLI/TUI, the
 agent browser `sindri-worker` (it runs as `sindri` inside a pod), the `brokkr` toolbelt (code map + linters),
@@ -327,11 +324,13 @@ For hacking on sindri (end users just install the `.deb`). Needs Go, plus `td`
 and `yq` on `PATH` (they get bundled into the build).
 
 ```bash
+make           # (or make help) list all targets
 make install   # build sindri + sindri-worker + brokkr, install to ~/.local/bin
 make all       # + build the agent image too (needs podman)
+make verify    # run the linters (the gate; release runs this first)
 make check     # build + test + lint — the quality gate
 make deb       # build the .deb into bin/
-make release <major|minor|patch>   # release cycle: push, open+merge a PR (gh), tag the merged default branch, then return you to your branch (breaking|feature|fix aliases too)
+make release <major|minor|patch>   # lint, then release: push, open+merge a PR (gh), tag the merged default branch, return you to your branch (breaking|feature|fix aliases too)
 ```
 
 ---
