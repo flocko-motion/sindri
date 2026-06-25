@@ -39,6 +39,36 @@ var skipDirs = map[string]bool{".git": true, "vendor": true, "node_modules": tru
 // A root that does not exist (or cannot be walked) is a loud error, not a silent
 // skip — it names the offending path.
 func Write(w io.Writer, roots []string, maxDepth int, fileQ, grepQ string) error {
+	return write(w, roots, maxDepth, fileQ, grepQ, false)
+}
+
+// DefaultMaxLines is the line budget above which WriteAdaptive falls back to
+// headers-only output unless full is requested.
+const DefaultMaxLines = 1000
+
+// WriteAdaptive renders the map, but guards against flooding the terminal: it
+// buffers the full output and, if that runs past max lines (and full is false),
+// instead prints just the per-file headers preceded by a note saying so and how
+// to get more (narrow the scope, or --full). With full, or when the map already
+// fits, it prints everything.
+func WriteAdaptive(w io.Writer, roots []string, maxDepth int, fileQ, grepQ string, full bool, max int) error {
+	var buf bytes.Buffer
+	if err := write(&buf, roots, maxDepth, fileQ, grepQ, false); err != nil {
+		return err
+	}
+	n := bytes.Count(buf.Bytes(), []byte{'\n'})
+	if full || n <= max {
+		_, err := w.Write(buf.Bytes())
+		return err
+	}
+	fmt.Fprintf(w, "The full map is %d lines (over the %d-line budget) — showing per-file headers only.\n", n, max)
+	fmt.Fprintf(w, "Narrow the scope (a path, --file, or --grep), or pass --full to print everything.\n")
+	return write(w, roots, maxDepth, fileQ, grepQ, true)
+}
+
+// write walks each root and renders the map to w. headersOnly drops each file's
+// declarations, leaving just its arch header (the reduced view).
+func write(w io.Writer, roots []string, maxDepth int, fileQ, grepQ string, headersOnly bool) error {
 	fq, gq := strings.ToLower(fileQ), strings.ToLower(grepQ)
 	cwd, _ := os.Getwd()
 	multi := len(roots) > 1
@@ -48,7 +78,7 @@ func Write(w io.Writer, roots []string, maxDepth int, fileQ, grepQ string) error
 	// a half-map first.
 	for _, root := range roots {
 		if _, err := os.Stat(root); err != nil {
-			return fmt.Errorf("code map %q: %w", root, err)
+			return fmt.Errorf("brokkr map %q: %w", root, err)
 		}
 	}
 	for _, root := range roots {
@@ -72,11 +102,11 @@ func Write(w io.Writer, roots []string, maxDepth int, fileQ, grepQ string) error
 			if fq != "" && !strings.Contains(strings.ToLower(disp), fq) {
 				return nil // filename filter
 			}
-			writeFile(w, disp, path, gq)
+			writeFile(w, disp, path, gq, headersOnly)
 			return nil
 		})
 		if err != nil {
-			return fmt.Errorf("code map %q: %w", root, err)
+			return fmt.Errorf("brokkr map %q: %w", root, err)
 		}
 	}
 	return nil
@@ -113,7 +143,7 @@ type unit struct {
 	start, end int
 }
 
-func writeFile(w io.Writer, rel, path, grepQ string) {
+func writeFile(w io.Writer, rel, path, grepQ string, headersOnly bool) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, nil, parser.ParseComments|parser.SkipObjectResolution)
 	if err != nil {
@@ -161,6 +191,9 @@ func writeFile(w io.Writer, rel, path, grepQ string) {
 	fmt.Fprintf(w, "\n%s\n", rel)
 	for _, l := range header {
 		fmt.Fprintln(w, l)
+	}
+	if headersOnly {
+		return // reduced view: the arch header, none of the declarations
 	}
 	for _, u := range units {
 		for _, l := range u.lines {

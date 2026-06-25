@@ -11,17 +11,21 @@ This README is about *using* sindri. For the internal design, see `openspec/`.
 
 ## Install
 
-Grab the `.deb` from the [latest release](https://github.com/flocko-motion/sindri/releases/latest)
-and install it:
+One line — download the latest release and install it:
 
 ```bash
-sudo apt install ./sindri_*.deb
+curl -sL https://github.com/flocko-motion/sindri/releases/latest/download/sindri_amd64.deb \
+  | sudo dpkg -i /dev/stdin || sudo apt-get -f install -y
 ```
+
+(`dpkg -i` installs from the pipe; the `apt-get -f install` pulls the `git` and
+`podman` dependencies if they're missing. If you'd rather, download the file and
+`sudo apt install ./sindri_amd64.deb` instead.)
 
 That's it. The package bundles everything sindri ships — the `sindri` CLI/TUI, the
 agent browser `sindri-worker` (it runs as `sindri` inside a pod), the `brokkr` toolbelt (code map + linters),
-and the `td` task backend (plus `yq`) — and `apt` pulls in the only system tools
-it needs, **git** and **podman**.
+and the `td` task backend (plus `yq`) — and pulls in the only system tools it
+needs, **git** and **podman**.
 
 The one thing you bring yourself: **Claude credentials** at `~/.claude` (sindri
 seeds them into the agent pods). The agent container image is built automatically
@@ -39,9 +43,11 @@ spec-driven workflow, and the Go toolchain for the `deadcode` linter.
 
 ### Updating
 
-Sindri checks for a newer release once a day and, when there is one, tells you to
-run **`sindri-update`** — a one-shot script it drops in `~/.local/bin` that
-fetches and installs the latest `.deb`.
+Sindri checks for a newer release once a day (and on demand via **`sindri
+upgrade`**); when there is one it points you at **`sindri-do-upgrade`** — a
+one-shot script it drops in `~/.local/bin` that fetches and installs the latest
+`.deb`. (The check can't replace the running binary itself, so the install is a
+separate script.)
 
 ---
 
@@ -243,7 +249,9 @@ brokkr lint openspec       # validate openspec specs (skips if unused/uninstalle
 - **`comments`** enforces the project convention: every non-test `.go` file opens
   with a four-field header (`package` / `type` / `job` / `limits`, the block
   `brokkr map` reads), and every exported function and type has a doc comment. On
-  a violation it prints the convention with a short example.
+  a violation it prints the convention with a short example. Each header field's
+  content is also length-bounded (so the map stays compact); extra free-form
+  comments in the header don't count.
 
 ### Codebase map — `brokkr map`
 
@@ -256,7 +264,11 @@ brokkr map internal/hub internal/tui    # several paths at once
 brokkr map --grep "func Merge"          # only decls whose source matches
 brokkr map internal/tui --file tab_prs  # only files whose path matches
 brokkr map --depth 1                    # bound how deep it descends
+brokkr map --full                       # don't reduce, however long
 ```
+
+If the full map runs past a line budget (default 1000, `--max`), it reduces to
+per-file headers only and tells you so — narrow the scope or pass `--full`.
 
 ---
 
@@ -319,7 +331,7 @@ make install   # build sindri + sindri-worker + brokkr, install to ~/.local/bin
 make all       # + build the agent image too (needs podman)
 make check     # build + test + lint — the quality gate
 make deb       # build the .deb into bin/
-make release <major|minor|patch>   # release: from a feature branch it opens+merges a PR (gh), then tags from the default branch (breaking|feature|fix aliases too)
+make release <major|minor|patch>   # release cycle: push, open+merge a PR (gh), tag the merged default branch, then return you to your branch (breaking|feature|fix aliases too)
 ```
 
 ---

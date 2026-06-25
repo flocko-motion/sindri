@@ -1,10 +1,9 @@
 // package: update / update
 // type:    logic (self-update check)
 // job:     a once-a-day, best-effort check of the GitHub latest release; if it's
-//          newer than the running binary, print a one-line notice and drop a
-//          `sindri-update` script. The script is generated (not shipped in the
-//          .deb) because the running binary can't overwrite itself — the script
-//          does the dpkg install in a separate process.
+//          newer, print a one-line notice and drop a `sindri-do-upgrade` script.
+//          The script is generated (not in the .deb) because the running binary
+//          can't overwrite itself — it does the dpkg install in a separate run.
 // limits:  best-effort and silent on failure — an update check must never get in
 //          sindri's way; the actual upgrade is the generated script's job. The
 //          network call is bounded to 2s (the "ping"); past that we forget it.
@@ -25,9 +24,13 @@ import (
 // repo is the GitHub repository whose releases are checked and installed.
 const repo = "flocko-motion/sindri"
 
-// netTimeout bounds the whole release check — the "ping": no answer in this long
-// and we forget about the upgrade.
-const netTimeout = 2 * time.Second
+// netTimeout bounds the daily background check — the "ping": no answer in this
+// long and we forget about it. explicitTimeout is longer because `sindri upgrade`
+// is a deliberate, blocking request — the user is waiting for an answer.
+const (
+	netTimeout      = 2 * time.Second
+	explicitTimeout = 10 * time.Second
+)
 
 // cache is the throttle record under the user cache dir: the day we last hit the
 // network and the latest release tag we saw then.
@@ -37,7 +40,7 @@ type cache struct {
 }
 
 // MaybeNotify checks (at most once a day) whether a newer sindri release exists
-// and, if so, writes the `sindri-update` script and prints a one-line notice to
+// and, if so, writes the `sindri-do-upgrade` script and prints a one-line notice to
 // w. It is best-effort: any failure (offline, timeout, parse, fs) is ignored, and
 // it does nothing for a dev build (version "dev"/empty). The caller should only
 // pass an interactive stream (e.g. a terminal stderr).
@@ -58,7 +61,7 @@ func MaybeNotify(current string, w io.Writer) {
 		// Hit the network at most once per day; record the day either way so a
 		// flaky network can't make us retry (and stall 2s) every invocation.
 		c.LastCheck = today
-		if latest, err := fetchLatest(); err == nil {
+		if latest, err := fetchLatest(netTimeout); err == nil {
 			c.Latest = latest
 		}
 		_ = os.MkdirAll(dir, 0o755)
@@ -72,18 +75,53 @@ func MaybeNotify(current string, w io.Writer) {
 	if p, err := writeUpdater(); err == nil {
 		hint = updaterHint(p)
 	}
-	fmt.Fprintf(w, "\nsindri %s is available (you have %s) — run `sindri-update` to upgrade%s.\n\n",
+	fmt.Fprintf(w, "\nsindri %s is available (you have %s) — run `sindri-do-upgrade` to upgrade%s.\n\n",
 		c.Latest, current, hint)
 }
 
-// fetchLatest asks GitHub for the latest release tag, bounded by netTimeout.
-func fetchLatest() (string, error) {
-	cl := &http.Client{Timeout: netTimeout}
+// Upgrade is the explicit, on-demand check behind `sindri upgrade`: it always
+// hits GitHub (no daily throttle), with a longer timeout since the user is
+// waiting, and reports the result. If a newer release exists it writes the
+// sindri-do-upgrade helper and tells the user to run it; if up to date it says so.
+// Returns an error only when the check itself couldn't run (offline, etc.).
+func Upgrade(current string, w io.Writer) error {
+	if current == "" || current == "dev" {
+		fmt.Fprintln(w, "this is a dev build (no baked version) — nothing to compare against a release.")
+		return nil
+	}
+	latest, err := fetchLatest(explicitTimeout)
+	if err != nil {
+		return fmt.Errorf("couldn't check for updates: %w", err)
+	}
+	// Keep the daily-check cache in sync so the background notice agrees.
+	if dir, e := os.UserCacheDir(); e == nil {
+		d := filepath.Join(dir, "sindri")
+		_ = os.MkdirAll(d, 0o755)
+		_ = writeCache(filepath.Join(d, "update.json"), cache{LastCheck: time.Now().UTC().Format("2006-01-02"), Latest: latest})
+	}
+	if !newer(latest, current) {
+		fmt.Fprintf(w, "sindri %s is up to date (latest release is %s).\n", current, latest)
+		return nil
+	}
+	hint := ""
+	if p, e := writeUpdater(); e == nil {
+		hint = updaterHint(p)
+	}
+	fmt.Fprintf(w, "sindri %s is available (you have %s) — run `sindri-do-upgrade` to upgrade%s.\n", latest, current, hint)
+	return nil
+}
+
+// fetchLatest asks GitHub for the latest release tag, bounded by timeout.
+func fetchLatest(timeout time.Duration) (string, error) {
+	cl := &http.Client{Timeout: timeout}
 	resp, err := cl.Get("https://api.github.com/repos/" + repo + "/releases/latest")
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return "", fmt.Errorf("no published release found for %s — or the repo is private (this check is unauthenticated, and GitHub 404s private repos)", repo)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("github: %s", resp.Status)
 	}
@@ -156,9 +194,11 @@ func writeCache(path string, c cache) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
-// writeUpdater drops the `sindri-update` script into ~/.local/bin (created if
+// writeUpdater drops the `sindri-do-upgrade` script into ~/.local/bin (created if
 // needed) and returns its path. It's generated rather than shipped in the .deb so
-// it can install a new .deb that overwrites the running sindri binary.
+// it can install a new .deb that overwrites the running sindri binary. (Named
+// distinctly from the `sindri upgrade` command, which only checks and recommends
+// running this.)
 func writeUpdater() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -168,14 +208,14 @@ func writeUpdater() (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	p := filepath.Join(dir, "sindri-update")
+	p := filepath.Join(dir, "sindri-do-upgrade")
 	if err := os.WriteFile(p, []byte(updaterScript()), 0o755); err != nil {
 		return "", err
 	}
 	return p, nil
 }
 
-// updaterHint returns "" when the updater is on PATH (so bare `sindri-update`
+// updaterHint returns "" when the updater is on PATH (so bare `sindri-do-upgrade`
 // runs), else its full path in parentheses for the notice.
 func updaterHint(path string) string {
 	dir := filepath.Dir(path)

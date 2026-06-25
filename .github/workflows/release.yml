@@ -34,6 +34,11 @@ jobs:
       - name: Build the .deb
         run: make deb VERSION="${GITHUB_REF_NAME#v}"
 
+      - name: Add a stable-named copy for the latest-download URL
+        # so `releases/latest/download/sindri_amd64.deb` is a real direct link
+        # (the versioned name can't be guessed without knowing the version).
+        run: cp bin/sindri_*_amd64.deb bin/sindri_amd64.deb
+
       - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:

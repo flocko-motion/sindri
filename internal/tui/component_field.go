@@ -1,10 +1,9 @@
 // package: tui / component_field
 // type:    ui components (generic, reusable form elements)
 // job:     the building blocks a form is made of. Each field owns its own
-//          editing behaviour, current value, and rendering (a 1+ line block);
-//          the form (component_form.go) only handles focus, layout, and the
-//          frame. Single-line text/choice are edited manually so their rows pad
-//          cleanly; the multi-line textarea wraps bubbles/textarea.
+//          editing, value, and rendering (a 1+ line block); the form
+//          (component_form.go) handles only focus, layout, and the frame.
+//          Text/choice are edited manually; the textarea wraps bubbles/textarea.
 // limits:  a field edits and renders only itself; focus, layout, and the frame
 //          are the form's (-> component_form.go).
 package tui
