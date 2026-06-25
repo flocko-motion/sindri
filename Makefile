@@ -1,4 +1,4 @@
-.PHONY: build sindri worker image install clean test lint check demo diag loop claude-check fullloop screenshot deb release major minor patch
+.PHONY: build sindri worker image install clean test lint check demo diag loop claude-check fullloop screenshot deb release major minor patch breaking feature fix
 
 PREFIX := $(HOME)/.local/bin
 
@@ -88,10 +88,11 @@ deb: build
 	@echo "built .deb in bin/ (version $(VERSION), arch $(ARCH))"
 
 # Cut a release: bump the latest semver tag and push it; the release workflow then
-# builds and attaches the .deb. Usage: make release <major|minor|patch>.
+# builds and attaches the .deb. Usage: make release <bump>, where <bump> is
+# major|breaking, minor|feature, or patch|fix.
 release:
-	@./scripts/release.sh $(filter major minor patch,$(MAKECMDGOALS))
-major minor patch:
+	@./scripts/release.sh $(filter major minor patch breaking feature fix,$(MAKECMDGOALS))
+major minor patch breaking feature fix:
 	@:
 
 clean:

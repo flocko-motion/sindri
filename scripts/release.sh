@@ -7,9 +7,11 @@ set -euo pipefail
 
 bump="${1:-}"
 case "$bump" in
-	major | minor | patch) ;;
+	major | breaking) bump=major ;; # incompatible change
+	minor | feature) bump=minor ;;  # backwards-compatible feature
+	patch | fix) bump=patch ;;      # backwards-compatible fix
 	*)
-		echo "usage: make release <major|minor|patch>" >&2
+		echo "usage: make release <major|breaking | minor|feature | patch|fix>" >&2
 		exit 1
 		;;
 esac
