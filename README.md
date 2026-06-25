@@ -43,13 +43,6 @@ Sindri checks for a newer release once a day and, when there is one, tells you t
 run **`sindri-update`** — a one-shot script it drops in `~/.local/bin` that
 fetches and installs the latest `.deb`.
 
-### From source (for hacking on sindri)
-
-```bash
-make all          # build the binaries + agent image, install to ~/.local/bin
-make deb          # build the .deb into bin/  (bundles brokkr, td, yq)
-```
-
 ---
 
 ## Quick start
@@ -312,6 +305,21 @@ internal/tui/       lean Bubble Tea dashboard (a hub client)
 internal/lint/      the linters; internal/codemap/ the code map
 container/          the agent image (Dockerfile) + tmux entrypoint
 openspec/           the spec-driven design (specs + changes)
+```
+
+---
+
+## Building from source
+
+For hacking on sindri (end users just install the `.deb`). Needs Go, plus `td`
+and `yq` on `PATH` (they get bundled into the build).
+
+```bash
+make install   # build sindri + sindri-worker + brokkr, install to ~/.local/bin
+make all       # + build the agent image too (needs podman)
+make check     # build + test + lint — the quality gate
+make deb       # build the .deb into bin/
+make release <major|minor|patch>   # tag + push a release from the default branch (breaking|feature|fix aliases too)
 ```
 
 ---

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Cut a release: fetch tags, bump the latest semver tag, tag HEAD, push the tag.
-# The pushed tag triggers the release workflow, which builds and attaches the .deb.
+# Cut a release from the default branch: bump the latest semver tag, tag HEAD,
+# push the tag. The pushed tag triggers the release workflow, which builds and
+# attaches the .deb. Refuses unless the tree is clean and you're on the default
+# branch in sync with origin — so a tag only ever points at merged, pushed code.
 #
 # Usage: make release <major|minor|patch>
 set -euo pipefail
@@ -22,7 +24,24 @@ if [ -n "$(git status --porcelain)" ]; then
 	exit 1
 fi
 
-git fetch --tags --force >/dev/null 2>&1 || true
+git fetch --tags --force origin >/dev/null 2>&1 || true
+
+# Releases are cut only from the default branch, in sync with origin — so a tag
+# can only ever point at PR'd, merged, and pushed code (not a feature branch or
+# an unpushed local commit).
+default="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')"
+default="${default:-master}"
+current="$(git rev-parse --abbrev-ref HEAD)"
+if [ "$current" != "$default" ]; then
+	echo "releases come from '$default', not '$current' — merge your branch first" >&2
+	exit 1
+fi
+if git rev-parse --verify --quiet "origin/$default" >/dev/null; then
+	if [ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/$default")" ]; then
+		echo "local $default differs from origin/$default — push (and merge) before releasing" >&2
+		exit 1
+	fi
+fi
 
 latest="$(git tag --list 'v*' --sort=-v:refname | head -n1)"
 latest="${latest:-v0.0.0}"
