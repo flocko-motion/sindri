@@ -2,6 +2,8 @@
 // type:    small shared helpers
 // job:     the selector row type and tiny generic helpers used across the
 //          tab/component files.
+// limits:  tiny generic helpers only; no domain logic and no rendering of its
+//          own (-> the tabs/components).
 package tui
 
 // row is one selector line: display text + the id it selects ("" = not selectable).

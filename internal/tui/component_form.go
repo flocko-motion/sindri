@@ -5,6 +5,8 @@
 //          focused at a time. tab/⇧tab move between fields; ←/→ cycle a choice;
 //          ↑↓ and other keys edit the focused field; ctrl+s validates then
 //          submits; esc cancels. The form owns layout + nav, not the chrome.
+// limits:  layout + navigation only; fields own their editing
+//          (-> component_field.go) and the frame is the modal's (-> component_modal.go).
 package tui
 
 import (

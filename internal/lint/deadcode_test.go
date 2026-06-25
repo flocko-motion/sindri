@@ -35,7 +35,7 @@ func runInDir(t *testing.T, dir string, patterns ...string) (string, bool) {
 	t.Cleanup(func() { _ = os.Chdir(orig) })
 
 	var sb strings.Builder
-	found, err := Deadcode(patterns, "", false, &sb)
+	found, err := Deadcode(patterns, "", &sb)
 	if err != nil {
 		t.Fatalf("Deadcode: %v", err)
 	}
@@ -121,6 +121,21 @@ func TestDeadcodeCleanProgram(t *testing.T) {
 	}
 }
 
+func TestDeadcodeSkipsWithoutGoToolchain(t *testing.T) {
+	t.Setenv("PATH", "") // hide the go toolchain
+	var sb strings.Builder
+	found, err := Deadcode([]string{"./..."}, "", &sb)
+	if err != nil {
+		t.Fatalf("a missing go toolchain must degrade, not error: %v", err)
+	}
+	if found {
+		t.Error("a skip must report nothing found")
+	}
+	if !strings.Contains(sb.String(), "skipping") {
+		t.Errorf("the skip must be visible, got: %q", sb.String())
+	}
+}
+
 func TestDeadcodeNoMainPackage(t *testing.T) {
 	dir := writeModule(t, map[string]string{
 		"go.mod":     "module libonly\n\ngo 1.25\n",
@@ -132,7 +147,7 @@ func TestDeadcodeNoMainPackage(t *testing.T) {
 		_ = os.Chdir(dir)
 		defer os.Chdir(orig)
 		var sb strings.Builder
-		f, e := Deadcode([]string{"./..."}, "", false, &sb)
+		f, e := Deadcode([]string{"./..."}, "", &sb)
 		return sb.String(), f, e
 	}(); err == nil {
 		t.Fatal("expected an error when no main package is present")

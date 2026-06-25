@@ -4,6 +4,8 @@
 //          big modal (using that item's own home-tab renderer), and g goes to
 //          where the item lives (its home tab, selected). Shared by the
 //          focusable detail columns on every tab.
+// limits:  routing and opening only; each item's detail rendering is its home
+//          tab's (-> tab_*.go).
 package tui
 
 import "github.com/flo-at/sindri/internal/hub/store"
@@ -127,6 +129,8 @@ func (m model) actionableItems() []metaItem {
 	switch m.tab {
 	case 0:
 		return m.taskActionable()
+	case 1:
+		return m.agentActionable()
 	case 2:
 		return m.prActionable()
 	}

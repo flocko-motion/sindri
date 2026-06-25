@@ -3,6 +3,8 @@
 // job:     an almost-full-screen modal — a bordered frame centered on the screen
 //          with a title and scrollable content (via a scroll.Viewport). Used for
 //          the detail overlay; reusable for any "expand to full screen" view.
+// limits:  just the frame and scroll; the content shown is the caller's
+//          (-> detailLines / the tabs).
 package tui
 
 import (
@@ -82,6 +84,17 @@ func errModal(msg string, screenW, screenH int) string {
 	body := lipgloss.NewStyle().Width(w).Render(msg)
 	box := modalBorderStyle.BorderForeground(lipgloss.Color("203")).Render(
 		errStyle.Render("⚠ error") + "\n\n" + body + "\n\n" + dimStyle.Render("any key to dismiss"))
+	return lipgloss.Place(screenW, screenH, lipgloss.Center, lipgloss.Center, box)
+}
+
+// warnModal renders a compact centered warning box (orange), dismissed with any
+// key. Used for non-fatal startup notices — e.g. an optional tool the project
+// expects is missing — so the degrade is seen, not silent.
+func warnModal(msg string, screenW, screenH int) string {
+	w := clampInt(screenW-10, 24, 72)
+	body := lipgloss.NewStyle().Width(w).Render(msg)
+	box := modalBorderStyle.BorderForeground(cOrange).Render(
+		lipgloss.NewStyle().Bold(true).Foreground(cOrange).Render("⚠ warning") + "\n\n" + body + "\n\n" + dimStyle.Render("any key to dismiss"))
 	return lipgloss.Place(screenW, screenH, lipgloss.Center, lipgloss.Center, box)
 }
 

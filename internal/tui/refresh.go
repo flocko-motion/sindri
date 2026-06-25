@@ -5,6 +5,8 @@
 //          actions (delete/role/new) reflect at once. All fetch via /state and
 //          deliver polledMsg, which updates the board without re-arming the SSE
 //          waiter.
+// limits:  scheduling and fetch only; rendering the refreshed board is the tabs'
+//          and the data is the hub's (-> client).
 package tui
 
 import (
@@ -41,6 +43,14 @@ func paneFetchCmd(cl *client.HTTP, agent string) tea.Cmd {
 	}
 }
 
+// podFetchCmd fetches the agent's podman pod-info summary.
+func podFetchCmd(cl *client.HTTP, agent string) tea.Cmd {
+	return func() tea.Msg {
+		out, _ := cl.PodInfo(agent)
+		return agentPodMsg{agent, out}
+	}
+}
+
 // logFetchCmd refetches an agent's activity log.
 func logFetchCmd(cl *client.HTTP, agent string) tea.Cmd {
 	return func() tea.Msg {
@@ -59,7 +69,11 @@ func (m model) agentLiveCmds() tea.Cmd {
 	if id == "" {
 		return nil
 	}
-	return tea.Batch(logFetchCmd(m.cl, id), paneFetchCmd(m.cl, id))
+	cmds := []tea.Cmd{logFetchCmd(m.cl, id), paneFetchCmd(m.cl, id)}
+	if m.agentView == "pod" { // keep the pod view live too
+		cmds = append(cmds, podFetchCmd(m.cl, id))
+	}
+	return tea.Batch(cmds...)
 }
 
 // refreshCmd asks the hub to re-sync tasks from the source of truth.

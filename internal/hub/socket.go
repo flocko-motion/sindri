@@ -3,6 +3,8 @@
 // job:     the per-repo control-socket path and a liveness probe, shared by the
 //
 //	server (bind) and clients (dial / ephemeral decision).
+// limits:  path + liveness only; serving the socket (-> server.go) and the verb
+//          set (-> commands.go) live elsewhere.
 package hub
 
 import (

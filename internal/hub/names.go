@@ -2,6 +2,8 @@
 // type:    headless helper
 // job:     auto-name new agents after Norse dwarves — friends of Sindri the
 //          smith. "sindri" itself is never handed out.
+// limits:  only allocates names; registering and launching the agent are the
+//          hub's (-> hub.go).
 package hub
 
 import "fmt"

@@ -4,6 +4,8 @@
 //          a big content pane (diff, or lint output after L) on the left, with
 //          the fixed-width detail (metadata + linked task + reviews) on the
 //          right. Detail is lazily fetched.
+// limits:  renders PR state and actions; verdict/merge logic is the hub's
+//          (-> client / workflow_pr.go).
 package tui
 
 import (
@@ -158,7 +160,7 @@ func (m model) prBody() string {
 		return leftCol
 	}
 	rightW := m.w - leftW - 1
-	items := m.prMetaItems()
+	items := wrapMeta(m.prMetaItems(), rightW)
 	lines := make([]string, len(items))
 	hl, ai := -1, 0 // highlight the focused actionable item when the right column has focus
 	for i, it := range items {
@@ -194,8 +196,7 @@ func (m model) prContentLines() []string {
 	if strings.TrimSpace(d.Diff) == "" {
 		return []string{dimStyle.Render("(no diff)")}
 	}
-	return append([]string{dimStyle.Render("── diff ──"), ""},
-		strings.Split(strings.TrimRight(d.Diff, "\n"), "\n")...)
+	return append([]string{dimStyle.Render("── diff ──"), ""}, renderDiff(d.Diff)...)
 }
 
 // metaItem is one line of the right detail column. An actionable item (kind
@@ -250,7 +251,35 @@ func (m model) prMetaItems() []metaItem {
 	for _, r := range d.Reviews {
 		items = append(items, metaItem{text: reviewLine(r)})
 	}
+	items = append(items, metaItem{text: ""}, metaItem{text: dimStyle.Render("── history ──")})
+	// Newest-first so the latest event is at the top, like the agent activity log.
+	for i := len(d.History) - 1; i >= 0; i-- {
+		e := d.History[i]
+		items = append(items, metaItem{text: fmt.Sprintf("%s  %-9s %s", dimStyle.Render(eventTime(e.TS)), e.Type, e.Payload)})
+	}
 	return items
+}
+
+// wrapMeta word-wraps each plain detail line to the column width, so long text
+// (history payloads, feedback) is readable in full rather than truncated with an
+// ellipsis. Actionable items (and blank spacers) are passed through untouched so
+// the right-column focus cursor still maps 1:1 to its actionable rows.
+func wrapMeta(items []metaItem, width int) []metaItem {
+	if width <= 0 {
+		return items
+	}
+	wrap := lipgloss.NewStyle().Width(width)
+	out := make([]metaItem, 0, len(items))
+	for _, it := range items {
+		if it.kind != "" || it.text == "" {
+			out = append(out, it)
+			continue
+		}
+		for _, s := range strings.Split(wrap.Render(it.text), "\n") {
+			out = append(out, metaItem{text: s})
+		}
+	}
+	return out
 }
 
 // prActionable is the focusable subset of the right column (j/k cycles these).
@@ -334,6 +363,13 @@ func (m model) prDetailLines() []string {
 		ls = append(ls, "", "── review ── "+reviewLine(r), "requirement: "+r.Requirement)
 		if r.Result != "" {
 			ls = append(ls, "findings: "+r.Result)
+		}
+	}
+	if len(d.History) > 0 {
+		ls = append(ls, "", "── history ──")
+		for i := len(d.History) - 1; i >= 0; i-- {
+			e := d.History[i]
+			ls = append(ls, fmt.Sprintf("%s  %-9s %s", eventTime(e.TS), e.Type, e.Payload))
 		}
 	}
 	ls = append(ls, "", "── diff ──")

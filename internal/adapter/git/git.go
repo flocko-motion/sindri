@@ -96,6 +96,47 @@ func CheckoutDetached(dir, ref string) error {
 	return nil
 }
 
+// EnsureBranch puts dir's worktree on branch name, creating it from base if it
+// doesn't exist yet — and preserving it (and any work on it) if it does. Used to
+// give a planner a standing branch to draft openspec on.
+func EnsureBranch(dir, name, base string) error {
+	if cur, _ := CurrentBranch(dir); cur == name {
+		return nil
+	}
+	if exec.Command("git", "-C", dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+name).Run() == nil {
+		if out, err := exec.Command("git", "-C", dir, "checkout", name).CombinedOutput(); err != nil {
+			return fmt.Errorf("checkout %s: %s: %w", name, strings.TrimSpace(string(out)), err)
+		}
+		return nil
+	}
+	if out, err := exec.Command("git", "-C", dir, "checkout", "-b", name, base).CombinedOutput(); err != nil {
+		return fmt.Errorf("create branch %s: %s: %w", name, strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// Ahead reports whether dir's HEAD has any commit not in base (i.e. there's
+// something to submit even with a clean worktree).
+func Ahead(dir, base string) bool {
+	out, err := exec.Command("git", "-C", dir, "rev-list", "--count", base+"..HEAD").Output()
+	if err != nil {
+		return false
+	}
+	n := strings.TrimSpace(string(out))
+	return n != "" && n != "0"
+}
+
+// Rebase rebases dir's current branch onto onto. It aborts a rebase that hits
+// conflicts (rather than leaving the worktree mid-rebase) and reports the error,
+// so the caller can treat it as best-effort.
+func Rebase(dir, onto string) error {
+	if out, err := exec.Command("git", "-C", dir, "rebase", onto).CombinedOutput(); err != nil {
+		_ = exec.Command("git", "-C", dir, "rebase", "--abort").Run()
+		return fmt.Errorf("rebase onto %s: %s: %w", onto, strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
 // HasChanges reports whether dir's worktree has uncommitted changes.
 func HasChanges(dir string) bool {
 	out, err := exec.Command("git", "-C", dir, "status", "--porcelain").Output()
@@ -103,7 +144,10 @@ func HasChanges(dir string) bool {
 }
 
 // CommitAll stages and commits everything in dir's worktree. A no-op (nil) when
-// there is nothing to commit.
+// there is nothing to commit. It stages honestly (`git add -A`): an agent that
+// reaches the task tracker only through the hub never touches `.todos/` in its
+// worktree, so nothing churns it here — and if something ever does, it surfaces
+// (a noisy diff, a loud merge failure) rather than being silently dropped.
 func CommitAll(dir, msg string) error {
 	if !HasChanges(dir) {
 		return nil
@@ -115,6 +159,17 @@ func CommitAll(dir, msg string) error {
 		return fmt.Errorf("git commit: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
+}
+
+// RebaseOnto checks branch out in dir and rebases it onto onto. A conflict is
+// reported (the rebase is aborted, leaving the worktree clean) so the caller can
+// route it back to the owning worker. Used to bring a PR branch up to the current
+// base before merging, so a merely-stale branch merges without human help.
+func RebaseOnto(dir, branch, onto string) error {
+	if out, err := exec.Command("git", "-C", dir, "checkout", branch).CombinedOutput(); err != nil {
+		return fmt.Errorf("checkout %s: %s: %w", branch, strings.TrimSpace(string(out)), err)
+	}
+	return Rebase(dir, onto)
 }
 
 // Diff returns the changes a branch introduces relative to base (the merge-base

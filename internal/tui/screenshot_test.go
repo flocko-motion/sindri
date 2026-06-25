@@ -21,6 +21,7 @@ func mockBoard() hub.BoardState {
 			{ID: "td-t2", Title: "Session handling", Status: "closed", Priority: "P3", Type: "task", ParentID: "td-feat1"},
 			{ID: "td-feat2", Title: "Signup feature", Status: "open", Priority: "P2", Type: "feature", ParentID: "td-ep01"},
 			{ID: "td-bug9", Title: "Crash on empty input", Status: "open", Priority: "P0", Type: "bug"},
+			{ID: "td-plan1", Title: "Add rate limiting (proposed)", Status: "open", Priority: "P2", Type: "task", Approval: "pending"},
 			{ID: "os-a1b2c3", Title: "hub-architecture (15/15)", Status: "open", Type: "spec"},
 			{ID: "os-d4e5f6", Title: "tui-dashboard (22/23)", Status: "open", Type: "spec"},
 		},
@@ -28,6 +29,7 @@ func mockBoard() hub.BoardState {
 			{Name: "brokkr", Role: "worker", Status: "working", Task: "td-feat1", PR: "pr-td-feat1", Workspace: ".worktrees/brokkr"},
 			{Name: "rune", Role: "reviewer", Status: "idle", Workspace: ".worktrees/rune"},
 			{Name: "dvalin", Role: "worker", Status: "down", Workspace: ".worktrees/dvalin"},
+			{Name: "nabbi", Role: "planner", Status: "idle", Workspace: ".worktrees/nabbi"},
 		},
 		PRs: []store.PR{
 			{ID: "pr-td-feat1", Task: "td-feat1", Agent: "brokkr", Branch: "td-feat1", Base: "master", Status: "open"},
@@ -70,6 +72,8 @@ func TestScreenshot(t *testing.T) {
 	fmt.Printf("\n========== Agents tab — wide 3-region layout (list+tmux | detail) ==========\n%s\n", Screenshot(b, 150, 24, "tab"))
 	fmt.Printf("\n========== PRs tab — wide split (list+diff | metadata+task+reviews) ==========\n%s\n", Screenshot(b, 150, 24, "tab", "tab"))
 	fmt.Printf("\n========== Agents tab — § hides right detail (list+tmux full width) ==========\n%s\n", Screenshot(b, 150, 24, "tab", "§"))
+	// Focus the detail (C-l), move down to the pod field, ENTER → main pane shows pod info.
+	fmt.Printf("\n========== Agents tab — pod view selected (pod field) ==========\n%s\n", Screenshot(b, 150, 24, "tab", "ctrl+l", "j", "j", "enter"))
 	fmt.Printf("\n========== new-agent role choice (2, N) ==========\n%s\n", Screenshot(b, 70, 16, "tab", "N"))
 	fmt.Printf("\n========== agent delete confirm (2, D) ==========\n%s\n", Screenshot(b, 70, 16, "tab", "D"))
 	fmt.Printf("\n========== error modal (attach a down agent) ==========\n%s\n", Screenshot(b, 80, 16, "tab", "j", "j", "a"))

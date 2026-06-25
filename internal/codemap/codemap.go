@@ -24,41 +24,77 @@ import (
 // skipDirs are trees with no first-party source worth mapping.
 var skipDirs = map[string]bool{".git": true, "vendor": true, "node_modules": true, ".worktrees": true}
 
-// Write prints a code map of every .go file under root to w. maxDepth bounds
-// how many directory levels below root to descend (0 = root only, 1 = root +
-// immediate subdirs, …); a negative maxDepth means unlimited.
+// Write prints a code map of every .go file under each of roots to w. maxDepth
+// bounds how many directory levels below each root to descend (0 = root only, 1
+// = root + immediate subdirs, …); a negative maxDepth means unlimited.
+//
+// A single root names files relative to it (concise). With several roots the
+// display path is made relative to the working directory instead, so files from
+// different roots never collide ambiguously.
 //
 // fileQ (if non-empty) keeps only files whose path contains it. grepQ (if
 // non-empty) keeps only files whose source contains it, and within them only
 // the decls that enclose a match (both case-insensitive).
-func Write(w io.Writer, root string, maxDepth int, fileQ, grepQ string) error {
+//
+// A root that does not exist (or cannot be walked) is a loud error, not a silent
+// skip — it names the offending path.
+func Write(w io.Writer, roots []string, maxDepth int, fileQ, grepQ string) error {
 	fq, gq := strings.ToLower(fileQ), strings.ToLower(grepQ)
-	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	cwd, _ := os.Getwd()
+	multi := len(roots) > 1
+	// Fail loud, up front: a missing/unreadable root is an error naming the path,
+	// not a quiet no-op that looks like "this tree has nothing to map". Validate
+	// every root before emitting anything, so a typo in a later arg doesn't print
+	// a half-map first.
+	for _, root := range roots {
+		if _, err := os.Stat(root); err != nil {
+			return fmt.Errorf("code map %q: %w", root, err)
+		}
+	}
+	for _, root := range roots {
+		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				if skipDirs[d.Name()] {
+					return fs.SkipDir
+				}
+				if maxDepth >= 0 && dirDepth(root, path) > maxDepth {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasSuffix(path, ".go") {
+				return nil
+			}
+			disp := displayPath(root, cwd, path, multi)
+			if fq != "" && !strings.Contains(strings.ToLower(disp), fq) {
+				return nil // filename filter
+			}
+			writeFile(w, disp, path, gq)
+			return nil
+		})
 		if err != nil {
-			return err
+			return fmt.Errorf("code map %q: %w", root, err)
 		}
-		if d.IsDir() {
-			if skipDirs[d.Name()] {
-				return fs.SkipDir
-			}
-			if maxDepth >= 0 && dirDepth(root, path) > maxDepth {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") {
-			return nil
-		}
-		rel, e := filepath.Rel(root, path)
-		if e != nil {
-			rel = path
-		}
-		if fq != "" && !strings.Contains(strings.ToLower(rel), fq) {
-			return nil // filename filter
-		}
-		writeFile(w, rel, path, gq)
-		return nil
-	})
+	}
+	return nil
+}
+
+// displayPath is the label shown for a file: relative to its root for a single
+// root (concise), else relative to the working directory so files from
+// different roots stay unambiguous. Falls back to the raw path if neither
+// relativization works.
+func displayPath(root, cwd, path string, multi bool) string {
+	base := root
+	if multi {
+		base = cwd
+	}
+	if rel, err := filepath.Rel(base, path); err == nil {
+		return rel
+	}
+	return path
 }
 
 // dirDepth is how many directory levels path sits below root (root itself = 0).
@@ -97,7 +133,8 @@ func writeFile(w io.Writer, rel, path, grepQ string) {
 	for _, decl := range f.Decls {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
-			units = append(units, unit{append(docLines(d.Doc), "  "+signature(fset, d)),
+			sig := fmt.Sprintf("  %s  %s", lineCol(fset.Position(d.Pos()).Line), signature(fset, d))
+			units = append(units, unit{append(docLines(d.Doc), sig),
 				startLine(fset, d.Doc, d.Pos()), fset.Position(d.End()).Line})
 		case *ast.GenDecl:
 			if d.Tok == token.TYPE {
@@ -189,7 +226,7 @@ func signature(fset *token.FileSet, fn *ast.FuncDecl) string {
 }
 
 // typeUnit renders a type declaration as a unit: doc + a one-line
-// `type Name kind` per spec.
+// `type Name kind` per spec (each prefixed with its source line).
 func typeUnit(fset *token.FileSet, d *ast.GenDecl) []string {
 	lines := docLines(d.Doc)
 	for _, spec := range d.Specs {
@@ -197,10 +234,14 @@ func typeUnit(fset *token.FileSet, d *ast.GenDecl) []string {
 		if !ok {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("  type %s %s", ts.Name.Name, typeKind(fset, ts.Type)))
+		lines = append(lines, fmt.Sprintf("  %s  type %s %s", lineCol(fset.Position(ts.Pos()).Line), ts.Name.Name, typeKind(fset, ts.Type)))
 	}
 	return lines
 }
+
+// lineCol renders a source line number as a fixed-width right-aligned gutter, so
+// decl signatures line up (the file is named once in the section header).
+func lineCol(line int) string { return fmt.Sprintf("%4d", line) }
 
 // typeKind summarizes a type expression: "struct"/"interface" for composites,
 // the rendered expression otherwise (e.g. an alias's target).

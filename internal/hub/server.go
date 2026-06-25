@@ -21,7 +21,7 @@ import (
 
 // quietPaths are high-frequency reads (UI polling) excluded from the access log
 // so it stays an action log, not a flood.
-var quietPaths = map[string]bool{"/state": true, "/events": true, "/log": true, "/agent/pane": true}
+var quietPaths = map[string]bool{"/state": true, "/events": true, "/log": true, "/agent/pane": true, "/agent/pod": true}
 
 // logRequests wraps a handler to print one access-log line per request — the
 // hub's window onto every action it executes. label is the socket's owner
@@ -96,6 +96,10 @@ func (h *Hub) Handler() http.Handler {
 		out, err := h.AgentPane(r.URL.Query().Get("agent"), lines)
 		writeJSON(w, okMsg{out}, err)
 	})
+	mux.HandleFunc("GET /agent/pod", func(w http.ResponseWriter, r *http.Request) {
+		out, err := h.PodInfo(r.URL.Query().Get("agent"))
+		writeJSON(w, okMsg{out}, err)
+	})
 	mux.HandleFunc("POST /agents", func(w http.ResponseWriter, r *http.Request) {
 		var req AgentReq
 		if !decode(w, r, &req) {
@@ -140,6 +144,14 @@ func (h *Hub) Handler() http.Handler {
 		pr, err := h.Merge(req.Name)
 		writeJSON(w, pr, err)
 	})
+	mux.HandleFunc("POST /milestone", func(w http.ResponseWriter, r *http.Request) {
+		var req NameReq // Name carries the agent holding the container
+		if !decode(w, r, &req) {
+			return
+		}
+		pr, err := h.MilestonePR(req.Name)
+		writeJSON(w, pr, err)
+	})
 	mux.HandleFunc("GET /prs", func(w http.ResponseWriter, r *http.Request) {
 		prs, err := h.PRs()
 		writeJSON(w, prs, err)
@@ -153,7 +165,15 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
+		// The reject endpoint is the human path (TUI/CLI).
 		writeJSON(w, okMsg{"rejected"}, h.RejectPR(req.ID, req.Feedback))
+	})
+	mux.HandleFunc("POST /pr/approve", func(w http.ResponseWriter, r *http.Request) {
+		var req NameReq // Name carries the PR id; the human approve path.
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"approved"}, h.ApprovePR(req.Name))
 	})
 	mux.HandleFunc("GET /pr/lint", func(w http.ResponseWriter, r *http.Request) {
 		out, err := h.LintPR(r.URL.Query().Get("id"))
@@ -204,6 +224,27 @@ func (h *Hub) Handler() http.Handler {
 		}
 		writeJSON(w, okMsg{"ok"}, h.SetPriority(req.ID, req.Priority))
 	})
+	mux.HandleFunc("POST /task/approve", func(w http.ResponseWriter, r *http.Request) {
+		var req RejectReq // reuse: ID (+ unused Feedback)
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"approved"}, h.ApproveTask(req.ID))
+	})
+	mux.HandleFunc("POST /task/reject", func(w http.ResponseWriter, r *http.Request) {
+		var req RejectReq // ID + Feedback (the rejection comment)
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"rejected"}, h.RejectTask(req.ID, req.Feedback))
+	})
+	mux.HandleFunc("POST /task/unassign", func(w http.ResponseWriter, r *http.Request) {
+		var req RejectReq // ID (+ unused Feedback)
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"unassigned"}, h.UnassignTask(req.ID))
+	})
 	return mux
 }
 
@@ -242,7 +283,8 @@ func (h *Hub) Serve() error {
 	if err := h.ServeAgents(); err != nil {
 		return err
 	}
-	_ = h.SyncTasks() // seed the task cache so the board is populated from the start
+	h.healPlannerTasks() // a planner can't hold a backlog task — release any stale claim
+	_ = h.SyncTasks()    // seed the task cache so the board is populated from the start
 	path := h.SocketPath()
 	_ = os.Remove(path)
 	ln, err := net.Listen("unix", path)

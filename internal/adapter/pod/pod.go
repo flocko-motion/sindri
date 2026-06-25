@@ -113,6 +113,18 @@ func Logs(name string, tail int) string {
 	return string(out)
 }
 
+// Info returns a labelled summary of a container via `podman ps -a`
+// (name/state/status/image/created/ports/id), or "" if there's no such
+// container. The name is anchored so it never matches a different pod by prefix.
+func Info(name string) string {
+	const f = "name:    {{.Names}}\nstate:   {{.State}}\nstatus:  {{.Status}}\nimage:   {{.Image}}\ncreated: {{.CreatedAt}}\nports:   {{.Ports}}\nid:      {{.ID}}"
+	out, err := exec.Command(Binary, "ps", "-a", "--filter", "name=^"+name+"$", "--format", f).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // Rm force-removes a container.
 func Rm(name string) error {
 	if out, err := exec.Command(Binary, "rm", "-f", name).CombinedOutput(); err != nil {

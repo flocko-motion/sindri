@@ -4,6 +4,8 @@
 //          orphan warnings, and the agent detail pane (state + the lazily-
 //          fetched activity timeline). Status is one word: down|idle|working|
 //          submitted (down ⇒ not running).
+// limits:  renders agent state only; mutations go through the hub (-> client)
+//          and assembly is the hub's (-> State).
 package tui
 
 import (
@@ -21,8 +23,9 @@ import (
 )
 
 // attachCmd builds the interactive `podman exec -it … tmux attach` for an agent.
-func attachCmd(name string) *exec.Cmd {
-	args := append([]string{"exec", "-it", hub.Container(name), "tmux"}, tmux.Attach(name, false)...)
+// root scopes the container name to this repo.
+func attachCmd(root, name string) *exec.Cmd {
+	args := append([]string{"exec", "-it", hub.Container(root, name), "tmux"}, tmux.Attach(name, false)...)
 	return exec.Command(pod.Binary, args...)
 }
 
@@ -32,9 +35,25 @@ func (m *model) openNewAgentChoice() {
 	cl := m.cl
 	m.choice = choiceModalState{
 		active: true, title: "new agent role",
-		options: []string{"worker", "reviewer"}, values: []string{"worker", "reviewer"},
+		options: []string{"worker", "reviewer", "planner"}, values: []string{"worker", "reviewer", "planner"},
 		apply: func(v string) tea.Cmd {
-			return mutateThenRefresh(cl, func() { _, _ = cl.NewAgent("", v) })
+			// Register the identity, then auto-start its pod. Launch runs in the
+			// background (it can build the image) — the hub's lifecycle + /events
+			// reflect "launching" → running without blocking the new row's appearance.
+			return func() tea.Msg {
+				if cl == nil {
+					return nil
+				}
+				name, err := cl.NewAgent("", v)
+				if err != nil {
+					return errModalMsg{err}
+				}
+				if name != "" {
+					go func() { _ = cl.Launch(name, false) }()
+				}
+				st, _ := cl.State()
+				return polledMsg(st)
+			}
 		},
 	}
 }
@@ -109,14 +128,81 @@ func (m model) agentsBody() string {
 	if !m.showDetail() { // § hid the right column — left split takes the full width
 		return leftCol
 	}
-	right := pane(m.detailLines(), m.detail, m.w-leftW-1, -1)
+	// Right column from metaItems, highlighting the focused actionable item.
+	items := m.agentItems()
+	lines := make([]string, len(items))
+	hl, ai := -1, 0
+	for i, it := range items {
+		lines[i] = it.text
+		if it.kind != "" {
+			if m.rightFocus && ai == m.rightCursor {
+				hl = i
+			}
+			ai++
+		}
+	}
+	right := pane(lines, m.detail, m.w-leftW-1, hl)
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftCol, divider(h), right)
+}
+
+// agentItems is the selected agent's detail as metaItems: the agent's fields
+// (task/PR are cross-references, the pod is a focusable view toggle) followed by
+// the activity log. Selecting the pod field flips the main pane between the live
+// tmux screen and the container's pod info.
+func (m model) agentItems() []metaItem {
+	a, ok := m.selAgent()
+	if !ok {
+		return []metaItem{{text: dimStyle.Render("(orphan — no roster entry; 'podman rm -f' it)")}}
+	}
+	taskIt := metaItem{text: "task:      " + dash(a.Task)}
+	if a.Task != "" {
+		taskIt.kind, taskIt.value = "task", a.Task
+	}
+	prIt := metaItem{text: "pr:        " + dash(a.PR)}
+	if a.PR != "" {
+		prIt.kind, prIt.value = "pr", a.PR
+	}
+	pod := "pod:       " + hub.Container(m.root, a.Name)
+	if m.agentView == "pod" { // mark which view the main pane is showing
+		pod += dimStyle.Render("  ◂ shown")
+	}
+	items := []metaItem{
+		{text: "role:      " + a.Role},
+		{text: "status:    " + a.Status},
+		taskIt, prIt,
+		{text: "workspace: " + dash(a.Workspace)},
+		{text: pod, kind: "view", value: "pod"},
+	}
+	items = append(items, metaItem{text: ""}, metaItem{text: dimStyle.Render("── activity ──")})
+	for i := len(m.agentLog) - 1; i >= 0; i-- { // newest-first
+		e := m.agentLog[i]
+		items = append(items, metaItem{text: fmt.Sprintf("%s  %-10s %s", dimStyle.Render(eventTime(e.TS)), e.Type, e.Payload)})
+	}
+	return items
+}
+
+// agentActionable is the focusable subset of the agent detail (view selectors +
+// task/PR cross-refs).
+func (m model) agentActionable() []metaItem {
+	var out []metaItem
+	for _, it := range m.agentItems() {
+		if it.kind != "" {
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 // paneLines is the live-screen region: the captured tmux screen when running,
 // otherwise a message reflecting the hub's lifecycle status.
 func (m model) paneLines() []string {
 	a, _ := m.selAgent()
+	if m.agentView == "pod" { // pod-info view (selected the container item)
+		if strings.TrimSpace(m.agentPod) == "" {
+			return []string{dimStyle.Render("(fetching pod info…)")}
+		}
+		return strings.Split(strings.TrimRight(m.agentPod, "\n"), "\n")
+	}
 	body := strings.Split(strings.TrimRight(m.agentPane, "\n"), "\n")
 	hasBody := strings.TrimSpace(m.agentPane) != ""
 	switch a.Status {
@@ -170,10 +256,18 @@ func (m model) selAgent() (hub.AgentView, bool) {
 func (m model) agentRows() []row {
 	var out []row
 	for _, a := range m.state.Agents {
-		out = append(out, row{fmt.Sprintf("%-9s %-12s %-8s %s", a.Status, a.Name, a.Role, dash(a.Task)), a.Name})
+		// Whole row coloured by lifecycle state (grey down, yellow transitioning,
+		// green running); cells styled independently so resets don't bleed.
+		ac := agentStatusStyle(a.Status)
+		out = append(out, row{strings.Join([]string{
+			ac.Render(fmt.Sprintf("%-9s", a.Status)),
+			ac.Render(fmt.Sprintf("%-12s", a.Name)),
+			ac.Render(fmt.Sprintf("%-8s", a.Role)),
+			ac.Render(dash(a.Task)),
+		}, " "), a.Name})
 	}
 	for _, o := range m.state.Orphans {
-		out = append(out, row{"⚠ orphan: " + o, ""})
+		out = append(out, row{stWarn.Render("⚠ orphan: " + o), ""})
 	}
 	return out
 }
@@ -197,6 +291,7 @@ func (m model) agentDetailFor(a hub.AgentView) []string {
 		"task:      " + dash(a.Task),
 		"pr:        " + dash(a.PR),
 		"workspace: " + dash(a.Workspace),
+		"pod:       " + hub.Container(m.root, a.Name),
 	}
 	if m.tab == 1 && a.Name == m.selID() {
 		ls = append(ls, "", "── activity ──")

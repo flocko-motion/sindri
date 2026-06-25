@@ -16,9 +16,10 @@ import (
 // Caller is who is asking: their identity, role, and (from Phase 3) workflow
 // state. The registry filters the surface against this.
 type Caller struct {
-	Agent   string
-	Role    string // "worker" | "reviewer"
-	HasTask bool   // Phase 3: a worker holding a task hides "next" until done
+	Agent       string
+	Role        string // "worker" | "reviewer"
+	HasTask     bool   // a worker holding work (a leaf task OR a container) hides "next"
+	InContainer bool   // a worker holding a collaborative container: shows "checkpoint", hides "submit"
 }
 
 // Command is one hub-side verb the browser can invoke.

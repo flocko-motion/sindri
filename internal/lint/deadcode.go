@@ -13,6 +13,7 @@ import (
 	"io"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -35,13 +36,22 @@ import (
 // //deadcode:keep directive are excluded. When anything is reported, a trailing
 // note reminds the reader that the directive exists.
 //
+// Test packages are always analysed: tests are live code, so a function reachable
+// only from a _test.go (a helper, a fixture) is reachable, not dead.
+//
 // It returns true if any unreachable function was reported, which callers can
 // use as a non-zero exit gate.
-func Deadcode(patterns []string, tags string, includeTests bool, w io.Writer) (found bool, err error) {
+func Deadcode(patterns []string, tags string, w io.Writer) (found bool, err error) {
+	// The Go toolchain is optional: deadcode loads packages via `go`, so without it
+	// on PATH we degrade gracefully (a visible skip), rather than hard-failing.
+	if _, err := exec.LookPath("go"); err != nil {
+		fmt.Fprintln(w, "deadcode: go toolchain not found on PATH — skipping (optional)")
+		return false, nil
+	}
 	cfg := &packages.Config{
 		BuildFlags: []string{"-tags=" + tags},
 		Mode:       packages.LoadAllSyntax | packages.NeedModule,
-		Tests:      includeTests,
+		Tests:      true,
 	}
 	initial, err := packages.Load(cfg, patterns...)
 	if err != nil {

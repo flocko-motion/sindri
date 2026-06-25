@@ -20,15 +20,15 @@ func codeMapCmd() *cobra.Command {
 	var depth int
 	var file, grep string
 	c := &cobra.Command{
-		Use:   "map [path]",
+		Use:   "map [path...]",
 		Short: "Print a structured overview: per file, the arch header + each type/func with its doc and signature",
-		Args:  cobra.MaximumNArgs(1),
+		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			root := "."
-			if len(args) == 1 {
-				root = args[0]
+			roots := args
+			if len(roots) == 0 {
+				roots = []string{"."}
 			}
-			return codemap.Write(cmd.OutOrStdout(), root, depth, file, grep)
+			return codemap.Write(cmd.OutOrStdout(), roots, depth, file, grep)
 		},
 	}
 	c.Flags().IntVar(&depth, "depth", -1, "max directory levels to descend (0 = given path only; -1 = unlimited)")

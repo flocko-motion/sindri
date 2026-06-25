@@ -51,20 +51,32 @@ func Enabled(projectRoot string) bool {
 	return err == nil && info.IsDir()
 }
 
+// CLIInstalled reports whether the openspec CLI is available on PATH.
+func CLIInstalled() bool {
+	_, err := exec.LookPath("openspec")
+	return err == nil
+}
+
 // Validate runs `openspec validate --all`. A non-zero exit is a validation
-// failure; anything else (e.g. the CLI not installed) is treated as "skip".
+// failure (ok=false); everything else is a non-failing skip (ok=true). openspec
+// is OPTIONAL: a project with no openspec/ skips silently, but one that uses
+// openspec yet lacks the CLI degrades with a visible note (in output) rather than
+// vanishing — so a skipped validation is never mistaken for a passed one.
 func Validate(projectRoot string) (ok bool, output string) {
 	if !Enabled(projectRoot) {
-		return true, ""
+		return true, "" // project doesn't use openspec — nothing to validate
+	}
+	if _, err := exec.LookPath("openspec"); err != nil {
+		return true, "openspec/ present but the openspec CLI is not installed — skipping spec validation (optional)"
 	}
 	cmd := exec.Command("openspec", "validate", "--all")
 	cmd.Dir = projectRoot
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if _, isExit := err.(*exec.ExitError); isExit {
-			return false, string(out)
+			return false, string(out) // a real validation failure
 		}
-		return true, ""
+		return true, "openspec validate could not run: " + err.Error() // degrade, but visibly
 	}
 	return true, string(out)
 }

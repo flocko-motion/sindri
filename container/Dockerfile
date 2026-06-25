@@ -40,10 +40,11 @@ RUN curl -fsSL https://github.com/sxyazi/yazi/releases/latest/download/yazi-x86_
  && chmod +x /usr/local/bin/yazi /usr/local/bin/ya \
  && rm -rf /tmp/yazi /tmp/yazi.zip
 
-# ── yq + td (copied from host via build context) ─────────────────────────────
+# ── yq (copied from host via build context) ─────────────────────────────────
+# td is deliberately absent: agents reach the task tracker only via the hub
+# (sindri-worker → hub), never a local td that could write .todos in the worktree.
 COPY bin/yq  /usr/local/bin/yq
-COPY bin/td  /usr/local/bin/td
-RUN chmod +x /usr/local/bin/yq /usr/local/bin/td
+RUN chmod +x /usr/local/bin/yq
 
 # ── claude CLI ────────────────────────────────────────────────────────────────
 RUN npm install -g @anthropic-ai/claude-code@latest

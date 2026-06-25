@@ -12,6 +12,8 @@
 package hub
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
@@ -25,6 +27,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/adapter/pod"
+	"github.com/flo-at/sindri/internal/adapter/td"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -49,11 +52,68 @@ type Hub struct {
 
 var nameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
-// Container is the podman container name for an agent.
-func Container(name string) string { return "sindri-" + name }
+// repoTag is a short, stable per-repo id derived from the absolute project root.
+// It scopes container names so two repos that reuse an agent name (the dwarf
+// pool is small) don't collide in podman's host-global namespace. The digest is
+// one-way — see repoSlug for the human-readable half.
+func repoTag(root string) string {
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		abs = root
+	}
+	sum := sha256.Sum256([]byte(abs))
+	return hex.EncodeToString(sum[:4]) // 8 hex chars — plenty to separate repos
+}
+
+// repoSlug is the repo's directory name, lowercased and reduced to podman-safe
+// characters, so `podman ps` is eyeballable (the digest disambiguates two repos
+// that share a basename).
+func repoSlug(root string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(filepath.Base(root)) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	s := b.String()
+	if s == "" {
+		s = "repo"
+	}
+	if len(s) > 16 {
+		s = s[:16]
+	}
+	return s
+}
+
+// Container is the podman container name for an agent, scoped to its repo so it
+// never collides with a same-named agent in another repo:
+// sindri-<slug>-<digest>-<name> (slug for humans, digest for uniqueness).
+func Container(root, name string) string {
+	return "sindri-" + repoSlug(root) + "-" + repoTag(root) + "-" + name
+}
+
+// container is Container bound to this hub's repo (the common in-hub case).
+func (h *Hub) container(name string) string { return Container(h.root, name) }
 
 // session is the tmux session name for an agent (named after the agent, D4).
 func session(name string) string { return name }
+
+// plannerBranch is a planner's standing branch — it drafts openspec here and
+// ships it via `openspec submit` (it never grabs a backlog task).
+func plannerBranch(name string) string { return "plan-" + name }
+
+// mockSpecTask is the placeholder todo id on a planner's openspec PR (there's no
+// real backlog task behind it).
+const mockSpecTask = "os-new"
+
+// restPhase is an agent's resting (not-busy) phase: a planner rests in "planning"
+// (it never holds a backlog task, so "idle" would mislead); everyone else "idle".
+func restPhase(role string) string {
+	if role == "planner" {
+		return "planning"
+	}
+	return "idle"
+}
 
 // New opens the hub for a project: ensures `.sindri/` exists and opens the DB.
 func New(root string) (*Hub, error) {
@@ -131,8 +191,8 @@ func (h *Hub) NewAgent(name, role string) (string, error) {
 	if !nameRe.MatchString(name) {
 		return "", fmt.Errorf("invalid agent name %q (use lowercase letters, digits, - _)", name)
 	}
-	if role != "worker" && role != "reviewer" {
-		return "", fmt.Errorf("invalid role %q (worker|reviewer)", role)
+	if role != "worker" && role != "reviewer" && role != "planner" {
+		return "", fmt.Errorf("invalid role %q (worker|reviewer|planner)", role)
 	}
 	if _, ok, err := h.store.GetAgent(name); err != nil {
 		return "", err
@@ -164,7 +224,16 @@ func (h *Hub) DeleteAgent(name string) error {
 	if !ok {
 		return fmt.Errorf("no such agent %q", name)
 	}
-	_ = pod.Rm(Container(name))
+	// Release the agent's task back to the backlog so it isn't stranded
+	// in_progress with no owner. (A planner's os-new sentinel and openspec items
+	// aren't real td tasks — skip those.)
+	if st, _ := h.store.GetState(name); strings.HasPrefix(st.Task, "td-") {
+		if err := td.SetStatus(h.root, st.Task, "open"); err != nil {
+			fmt.Printf("warning: reopen %s on delete of %s: %v\n", st.Task, name, err)
+		}
+		_ = h.refreshTask(st.Task)
+	}
+	_ = pod.Rm(h.container(name))
 	h.closeAgent(name)
 	_ = git.WorktreeRemove(h.root, filepath.Join(h.root, a.Workspace))
 	if err := h.store.DeleteAgent(name); err != nil {
@@ -183,12 +252,12 @@ func (h *Hub) StopAgent(name string) error {
 	} else if !ok {
 		return fmt.Errorf("no such agent %q", name)
 	}
-	if !pod.Running(Container(name)) {
+	if !pod.Running(h.container(name)) {
 		return fmt.Errorf("agent %q is not running", name)
 	}
 	h.setLifecycle(name, "stopping") // status → stopping (pod still up); → down once gone
 	h.notify()
-	if err := pod.Rm(Container(name)); err != nil {
+	if err := pod.Rm(h.container(name)); err != nil {
 		h.setLifecycle(name, "")
 		h.notify()
 		return err
@@ -227,13 +296,28 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 	if err := container.Ensure(h.root, io.MultiWriter(os.Stderr, buf)); err != nil {
 		return err
 	}
-	fmt.Fprintf(buf, "Image ready. Starting pod %s…\n", Container(name))
+	fmt.Fprintf(buf, "Image ready. Starting pod %s…\n", h.container(name))
 	wt := filepath.Join(h.root, a.Workspace)
 	if !git.HasCommits(h.root) {
 		return fmt.Errorf("repo has no commits yet")
 	}
 	if err := git.WorktreeAdd(h.root, wt, "HEAD"); err != nil {
 		return err
+	}
+	if a.Role == "planner" {
+		// Put the planner on its standing branch so it can draft openspec and ship
+		// it via `openspec submit` without ever grabbing a backlog task.
+		base, err := h.baseBranch()
+		if err != nil {
+			return err
+		}
+		if err := git.EnsureBranch(wt, plannerBranch(name), base); err != nil {
+			return err
+		}
+		// Rest in "planning", not "idle" — unless a PR is already in flight.
+		if st, _ := h.store.GetState(name); st.Phase != "submitted" {
+			_ = h.store.SetState(store.AgentState{Agent: name, Phase: "planning"})
+		}
 	}
 	// Serve the agent's own socket BEFORE the pod launches — the pod bind-mounts
 	// it, and the socket IS the agent's identity (D2). Requires the persistent
@@ -245,7 +329,7 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 	if err != nil {
 		return err
 	}
-	cName := Container(name)
+	cName := h.container(name)
 	_ = pod.Rm(cName) // clear any stale container with this name
 
 	env := map[string]string{"SINDRI_AGENT": name, "COLORTERM": "truecolor"}
@@ -257,6 +341,15 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 		{Host: AgentSocketDir(h.root, name), Container: "/run/sindri", Mode: "rw"},
 		// The thin browser binary (image symlinks /usr/local/bin/sindri-worker).
 		{Host: workerBin, Container: "/opt/sindri/sindri-worker", Mode: "ro"},
+	}
+	if a.Role == "planner" {
+		// A planner sees the whole repo read-only and may only write openspec — so
+		// it plans (specs + tasks) without touching code. /workspace is remounted
+		// ro and openspec/ overlaid rw on top.
+		osDir := filepath.Join(wt, "openspec")
+		_ = os.MkdirAll(osDir, 0o755) // ensure the overlay target exists
+		mounts[0] = pod.Mount{Host: wt, Container: "/workspace", Mode: "ro"}
+		mounts = append(mounts, pod.Mount{Host: osDir, Container: "/workspace/openspec", Mode: "rw"})
 	}
 	if shell {
 		env["SINDRI_SHELL"] = "1" // entrypoint runs bash instead of Claude
@@ -318,7 +411,7 @@ func (h *Hub) Tell(name, msg, source string) error {
 
 // inject types text into an agent's tmux session via podman exec.
 func (h *Hub) inject(name, text string) error {
-	c := Container(name)
+	c := h.container(name)
 	if !pod.Running(c) {
 		return fmt.Errorf("agent %q is not running — launch it first", name)
 	}
@@ -336,7 +429,7 @@ func (h *Hub) inject(name, text string) error {
 // launch, when the session may not be up yet. A message that never lands is
 // recorded so it is not silently lost.
 func (h *Hub) injectWhenReady(name, text string) error {
-	c := Container(name)
+	c := h.container(name)
 	for i := 0; i < 25; i++ {
 		if pod.Running(c) {
 			if _, err := pod.Exec(c, "tmux", "has-session", "-t", session(name)); err == nil {
@@ -372,13 +465,12 @@ func (h *Hub) rehydrate(name string) {
 	}
 	var msg string
 	if len(recent) == 0 { // no work yet — a fresh kickoff
-		msg = "[hub] You're live. Run `sindri-worker` and do exactly what it tells you."
+		msg = msgKickoff
 	} else {
 		if len(recent) > 5 { // just the last few
 			recent = recent[len(recent)-5:]
 		}
-		msg = "[hub] Resuming. Recently you did: " + strings.Join(recent, " · ") +
-			". Run `sindri-worker` for your next step."
+		msg = msgResuming(strings.Join(recent, " · "))
 	}
 	// Let the agent program (Claude) boot to input-readiness before the kickoff,
 	// or its submitting Enter is eaten by the boot splash.

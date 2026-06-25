@@ -5,6 +5,8 @@
 //          selector and the detail pane. Optionally highlights the cursor row.
 //          Every line is padded/truncated to width and the block padded to the
 //          viewport height, so panes always fill their box.
+// limits:  renders the given lines only; scroll state belongs to the
+//          scroll.Viewport (-> scroll) and the content to the caller.
 package tui
 
 import (
@@ -27,11 +29,13 @@ func pane(lines []string, vp scroll.Viewport, width, cursor int) string {
 	start, end := vp.Window()
 	out := make([]string, 0, vp.Height)
 	for i := start; i < end && i < len(lines); i++ {
-		s := padTrunc(lines[i], width)
 		if i == cursor {
-			s = selStyle.Render(s)
+			// Strip any per-cell colour first so the highlight bar is a clean,
+			// uninterrupted block (nested styles would otherwise reset its bg).
+			out = append(out, selStyle.Render(padTrunc(ansi.Strip(lines[i]), width)))
+			continue
 		}
-		out = append(out, s)
+		out = append(out, padTrunc(lines[i], width))
 	}
 	blank := strings.Repeat(" ", width)
 	for len(out) < vp.Height {

@@ -12,12 +12,12 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/flo-at/sindri/internal/adapter/spec"
 	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -41,48 +41,15 @@ func Run(root string) error {
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "sindri tui: connected — starting dashboard")
-	_, err = tea.NewProgram(newModel(cl, ch), tea.WithAltScreen()).Run()
+	m := newModel(cl, ch, root)
+	// A project with an openspec/ folder expects the openspec CLI; warn (once, at
+	// startup) if it's absent rather than letting spec features quietly do nothing.
+	if spec.Enabled(root) && !spec.CLIInstalled() {
+		m.noticeText = openspecMissingNotice
+	}
+	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }
-
-type stateMsg hub.BoardState
-type logMsg struct {
-	key string
-	evs []store.Event
-}
-type prMsg struct {
-	key string
-	d   hub.PRDetail
-}
-type taskMsg struct {
-	key string
-	t   store.Task
-}
-type paneMsg struct {
-	agent string
-	text  string
-}
-type prLintMsg struct {
-	pr   string
-	text string
-}
-type reviewPromptMsg string
-type reviewReadyMsg string // the review-workspace path to open a shell in
-
-// paneLines is how many rows of an agent's tmux scrollback the detail shows.
-const paneLines = 200
-type errMsg struct{ err error }       // fatal: hub connection lost
-type errModalMsg struct{ err error }  // non-fatal: show the error modal
-
-// tickMsg drives periodic polling; polledMsg carries a state fetched by a poll
-// (distinct from stateMsg so it doesn't re-arm the SSE waiter).
-type tickMsg time.Time
-type polledMsg hub.BoardState
-
-const refreshInterval = 3 * time.Second
-
-// detailScrollStep is how many lines J/K scroll the detail pane at once.
-const detailScrollStep = 5
 
 const (
 	filterOpen = iota
@@ -103,6 +70,7 @@ const (
 type model struct {
 	cl    *client.HTTP
 	ch    <-chan hub.BoardState
+	root  string // repo root — needed to build repo-scoped podman container names
 	state hub.BoardState
 	err   error
 	w, h  int
@@ -122,6 +90,8 @@ type model struct {
 	detailKey  string
 	agentLog   []store.Event
 	agentPane  string // captured tmux screen of the selected agent (live)
+	agentView  string // Agents main pane: "screen" (tmux, default) | "pod" (podman info)
+	agentPod   string // fetched podman pod-info for the selected agent
 	prDetail     hub.PRDetail
 	prView       string // which content the PR big pane shows: "diff" (default) | "lint"
 	reviewPrompt string // editable default review instruction (from the hub)
@@ -139,6 +109,7 @@ type model struct {
 	form        formState // active fill-in form (new/edit task)
 	flash       string    // transient status (e.g. "copied"), cleared on next key
 	errText     string    // when set, the error modal is shown (any key dismisses)
+	noticeText  string    // when set, a startup warning modal is shown (any key dismisses)
 }
 
 // choiceModalState is a generic pick-one prompt: options, parallel values, and
@@ -164,13 +135,13 @@ func (m model) wide() bool { return m.w >= detailMinWidth }
 // even if the detail is hidden — § only drops the right column there.
 func (m model) showDetail() bool { return m.wide() && !m.hideDetail }
 
-func newModel(cl *client.HTTP, ch <-chan hub.BoardState) model {
+func newModel(cl *client.HTTP, ch <-chan hub.BoardState, root string) model {
 	// Default to a sane size so a frame renders immediately — the real size
 	// arrives via WindowSizeMsg and resizes. (Some terminals send the initial
 	// size late or as 0×0; without a default the view would stick on "loading".)
 	in := textinput.New()
 	in.CharLimit = 200
-	m := model{cl: cl, ch: ch, collapsed: map[string]bool{}, w: 80, h: 24, input: in}
+	m := model{cl: cl, ch: ch, root: root, collapsed: map[string]bool{}, w: 80, h: 24, input: in}
 	m.reclamp()
 	return m
 }
@@ -257,6 +228,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.agent == m.selID() { // ignore a stale capture from a prior selection
 			m.agentPane = msg.text
 		}
+	case agentPodMsg:
+		if msg.agent == m.selID() {
+			m.agentPod = msg.text
+		}
 	case prLintMsg:
 		if msg.pr == m.selID() { // store the result, switch to the lint view, focus it
 			m.prDetail.Lint = msg.text
@@ -271,6 +246,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.ExecProcess(shellAt(string(msg)), func(error) tea.Msg { return nil })
 	case prMsg:
 		m.prDetail = msg.d
+		// The diff arrives async, well after syncDetail sized the viewport to the
+		// "(loading…)" placeholder. Resize it to the real content now, or the diff
+		// renders against a stale 1-line window (showing only its header) until some
+		// later event happens to reclamp.
+		m.reclamp()
 	case taskMsg:
 		m.taskDetail = msg.t
 	case errModalMsg:
@@ -281,6 +261,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.errText != "" { // any key dismisses the error modal
 			m.errText = ""
+			return m, nil
+		}
+		if m.noticeText != "" { // any key dismisses the startup notice
+			m.noticeText = ""
 			return m, nil
 		}
 		if m.form.active {
@@ -354,7 +338,7 @@ func (m *model) onKey(k string) tea.Cmd {
 	case "shift+tab":
 		m.tab = (m.tab - 1 + len(hub.Sections)) % len(hub.Sections)
 	case "ctrl+l": // the only way to switch panes (with ctrl+h): focus the detail
-		if (m.tab == 0 || m.tab == 2) && m.showDetail() {
+		if m.showDetail() && len(m.actionableItems()) > 0 {
 			m.rightFocus = true
 			m.rightCursor = clampInt(m.rightCursor, 0, max(0, len(m.actionableItems())-1))
 		}
@@ -424,7 +408,7 @@ func (m *model) onKey(k string) tea.Cmd {
 					return nil
 				}
 				if m.cl != nil {
-					return tea.ExecProcess(attachCmd(a.Name), func(error) tea.Msg { return nil })
+					return tea.ExecProcess(attachCmd(m.root, a.Name), func(error) tea.Msg { return nil })
 				}
 			}
 		}
@@ -466,9 +450,13 @@ func (m *model) onKey(k string) tea.Cmd {
 				return m.lintCmd(id)
 			}
 		}
-	case "R": // prs: reject with a (multiline) reason
+	case "R": // prs: reject a PR · tasks: reject a planner-proposed task (with a comment)
 		if m.tab == 2 && m.selID() != "" {
 			m.openRejectForm(m.selID())
+			return nil
+		}
+		if m.tab == 0 && m.taskGated() {
+			m.openTaskRejectForm(m.selID())
 			return nil
 		}
 	case "V": // prs: verify — materialize the PR into the review workspace + shell in
@@ -477,22 +465,40 @@ func (m *model) onKey(k string) tea.Cmd {
 				return m.verifyCmd(id)
 			}
 		}
-	case "A": // prs: request an agentic review (editable instruction)
+	case "A": // prs: request an agentic review · tasks: approve a planner-proposed task
 		if m.tab == 2 && m.selID() != "" {
 			m.openReviewForm(m.selID())
 			return nil
+		}
+		if m.tab == 0 && m.taskGated() {
+			return m.approveTaskCmd(m.selID())
 		}
 	case "p": // set the selected task's priority
 		if m.tab == 0 && m.selID() != "" {
 			m.openPriorityChoice(m.selID())
 			return nil
 		}
+	case "U": // tasks: release the selected task back to the backlog
+		if m.tab == 0 && m.selID() != "" {
+			return m.unassignTaskCmd(m.selID())
+		}
 	case "enter":
 		if m.rightFocus { // act on the focused detail item
 			if it, ok := m.focusedItem(); ok {
 				switch it.kind {
-				case "view": // switch the big content pane (diff/lint)
-					m.prView = it.value
+				case "view": // switch the big content pane
+					if m.tab == 1 { // Agents: toggle live screen ⇄ pod info
+						if m.agentView == "pod" {
+							m.agentView = "screen"
+							return nil
+						}
+						m.agentView = "pod"
+						if m.cl != nil {
+							return podFetchCmd(m.cl, m.selID())
+						}
+						return nil
+					}
+					m.prView = it.value // PRs: diff ⇄ lint
 					m.detail.Resize(m.detail.Height, len(m.prContentLines()))
 				case "path": // open a shell in the workspace
 					return tea.ExecProcess(shellAt(it.value), func(error) tea.Msg { return nil })
@@ -572,7 +578,8 @@ func (m *model) syncDetail() tea.Cmd {
 	case 0:
 		return func() tea.Msg { t, _ := cl.TaskInfo(id); return taskMsg{id, t} }
 	case 1:
-		m.agentPane = "" // selection changed — drop the previous agent's screen
+		m.agentPane, m.agentPod = "", "" // selection changed — drop the previous agent's screen/pod
+		m.agentView = "screen"            // default back to the live screen
 		return tea.Batch(
 			func() tea.Msg { evs, _ := cl.Log(id); return logMsg{id, evs} },
 			paneFetchCmd(cl, id),
@@ -612,7 +619,7 @@ func (m model) contextFooter() string {
 	}
 	switch m.tab {
 	case 0:
-		return fmt.Sprintf("N new · e edit · p priority · f filter: %s · h/l fold", filterNames[m.filter])
+		return fmt.Sprintf("N new · e edit · p priority · U unassign · A/R approve/reject · f filter: %s · h/l fold", filterNames[m.filter])
 	case 1:
 		return "N new · S start/stop · t tell · a attach · D delete"
 	default:
@@ -644,6 +651,9 @@ func (m model) View() string {
 	// Modals take over the whole screen.
 	if m.errText != "" {
 		return errModal(m.errText, m.w, m.h)
+	}
+	if m.noticeText != "" {
+		return warnModal(m.noticeText, m.w, m.h)
 	}
 	if m.form.active {
 		return m.form.view(m.w, m.h)

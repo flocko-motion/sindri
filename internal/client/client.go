@@ -120,6 +120,15 @@ func (c *HTTP) AgentPane(name string, lines int) (string, error) {
 	return ok.Out, err
 }
 
+// PodInfo returns a short summary of an agent's podman container (plain text).
+func (c *HTTP) PodInfo(name string) (string, error) {
+	var ok struct {
+		Out string `json:"ok"`
+	}
+	err := c.get("/agent/pod?agent="+url.QueryEscape(name), &ok)
+	return ok.Out, err
+}
+
 // Launch spins a pod for an existing agent (shell=true runs a bare shell instead
 // of Claude — for demos/debugging).
 func (c *HTTP) Launch(name string, shell bool) error {
@@ -184,6 +193,22 @@ func (c *HTTP) Merge(id string) (store.PR, error) {
 	return pr, readResult(resp, &pr)
 }
 
+// MilestonePR opens a milestone PR for the container an agent is collaborating
+// on — blocking that agent until the human merges.
+func (c *HTTP) MilestonePR(agent string) (store.PR, error) {
+	var pr store.PR
+	buf, err := json.Marshal(hub.NameReq{Name: agent})
+	if err != nil {
+		return pr, err
+	}
+	resp, err := c.hc.Post(c.base+"/milestone", "application/json", bytes.NewReader(buf))
+	if err != nil {
+		return pr, err
+	}
+	defer resp.Body.Close()
+	return pr, readResult(resp, &pr)
+}
+
 // PRs lists all merge-intents.
 func (c *HTTP) PRs() ([]store.PR, error) {
 	var out []store.PR
@@ -199,6 +224,12 @@ func (c *HTTP) PRInfo(id string) (hub.PRDetail, error) {
 // RejectPR rejects a PR with feedback, routed to the owning worker.
 func (c *HTTP) RejectPR(id, feedback string) error {
 	return c.post("/pr/reject", hub.RejectReq{ID: id, Feedback: feedback})
+}
+
+// ApprovePR marks an open PR approved (the human path), so it can be merged
+// without a reviewer agent.
+func (c *HTTP) ApprovePR(id string) error {
+	return c.post("/pr/approve", hub.NameReq{Name: id})
 }
 
 // LintPR runs the quality gate against a PR's worktree and returns the output.
@@ -265,6 +296,21 @@ func specReq(id string, s hub.TaskSpec) hub.TaskReq {
 // SetPriority assigns a task's priority (P-code) — to td or our own db.
 func (c *HTTP) SetPriority(id, priority string) error {
 	return c.post("/priority", hub.PriorityReq{ID: id, Priority: priority})
+}
+
+// ApproveTask clears the approval gate on a planner-proposed task.
+func (c *HTTP) ApproveTask(id string) error {
+	return c.post("/task/approve", hub.RejectReq{ID: id})
+}
+
+// RejectTask rejects a planner-proposed task with a comment.
+func (c *HTTP) RejectTask(id, comment string) error {
+	return c.post("/task/reject", hub.RejectReq{ID: id, Feedback: comment})
+}
+
+// UnassignTask releases a task back to the backlog (refused if a live agent holds it).
+func (c *HTTP) UnassignTask(id string) error {
+	return c.post("/task/unassign", hub.RejectReq{ID: id})
 }
 
 // Refresh asks the hub to re-sync tasks from the source of truth.

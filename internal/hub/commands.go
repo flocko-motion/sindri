@@ -35,11 +35,20 @@ func (h *Hub) registry() *registry.Registry {
 		registry.Command{Name: "log", Help: "record a note in your activity log: log <message>", Run: h.cmdLog},
 		registry.Command{Name: "prs", Help: "list pull requests and their status", Run: h.cmdListPRs},
 		registry.Command{Name: "show", Help: "show a PR's diff: show <pr-id>", Run: h.cmdShowPR},
+		// Only a worker grabs tasks (next) and submits a task branch (submit). A
+		// reviewer has neither. A planner has neither either — it ships openspec via
+		// its own `openspec submit`, a PR in different dress (mock todo id os-new).
 		registry.Command{Name: "next", Help: "pick up the next task", Roles: []string{"worker"},
 			Hidden: func(c registry.Caller) bool { return c.HasTask }, Run: h.cmdNext},
 		registry.Command{Name: "lint", Help: "run the quality gate: lint (your workspace) or lint <pr-id> (a PR)", Run: h.cmdLint},
 		registry.Command{Name: "submit", Help: "request your branch be merged: submit [message]", Roles: []string{"worker"},
-			Hidden: func(c registry.Caller) bool { return !c.HasTask }, Run: h.cmdSubmit},
+			Hidden: func(c registry.Caller) bool { return !c.HasTask || c.InContainer }, Run: h.cmdSubmit},
+		registry.Command{Name: "checkpoint", Help: "commit the current subtask and move to the next: checkpoint [message]", Roles: []string{"worker"},
+			Hidden: func(c registry.Caller) bool { return !c.InContainer }, Run: h.cmdCheckpoint},
+		registry.Command{Name: "task", Help: "read the backlog: task list (all) or task <id> (full detail)", Roles: []string{"planner"}, Run: h.cmdTasks},
+		registry.Command{Name: "create-task", Help: "propose a new task (needs the user's approval): create-task <title...>", Roles: []string{"planner"}, Run: h.cmdCreateTask},
+		registry.Command{Name: "openspec", Help: "ship your openspec changes as a PR: openspec submit [message]", Roles: []string{"planner"}, Run: h.cmdOpenspec},
+		registry.Command{Name: "state", Help: "set your resting state: state planning | state idle", Roles: []string{"planner"}, Run: h.cmdState},
 		registry.Command{Name: "approve", Help: "approve a pull request: approve [pr-id]", Roles: []string{"reviewer"}, Run: h.cmdApprove},
 		registry.Command{Name: "reject", Help: "reject a pull request: reject <pr-id> <feedback...>", Roles: []string{"reviewer"}, Run: h.cmdReject},
 		registry.Command{Name: "review", Help: "record a review verdict: review <pr-id> <pass|changes|fail> <findings...>", Roles: []string{"reviewer"}, Run: h.cmdReview},
@@ -55,13 +64,21 @@ func (h *Hub) caller(name string) (registry.Caller, error) {
 	if !ok {
 		return registry.Caller{}, fmt.Errorf("unknown agent %q", name)
 	}
-	// A worker holding a task (working or submitted) hides "next" and shows
-	// "submit"; an idle worker the reverse (state machine, D-hub).
+	// A worker holding work hides "next" and shows "submit"; an idle worker the
+	// reverse (state machine, D-hub). Holding a collaborative container also counts
+	// as "has work" (so "next" stays hidden even when resting between subtasks) and
+	// swaps "submit" for "checkpoint".
 	st, err := h.store.GetState(name)
 	if err != nil {
 		return registry.Caller{}, err
 	}
-	return registry.Caller{Agent: name, Role: a.Role, HasTask: st.Phase != "idle"}, nil
+	inContainer := st.Container != ""
+	return registry.Caller{
+		Agent:       name,
+		Role:        a.Role,
+		HasTask:     st.Phase != "idle" || inContainer,
+		InContainer: inContainer,
+	}, nil
 }
 
 // AgentCommands returns the command surface currently available to an agent.
@@ -103,7 +120,7 @@ func (h *Hub) AgentExec(name string, args []string, out io.Writer) (int, error) 
 }
 
 func (h *Hub) cmdStatus(c registry.Caller, _ []string, out io.Writer) (int, error) {
-	running := pod.Running(Container(c.Agent))
+	running := pod.Running(h.container(c.Agent))
 	fmt.Fprintf(out, "agent:   %s\nrole:    %s\nrunning: %v\n", c.Agent, c.Role, running)
 	return 0, nil
 }
