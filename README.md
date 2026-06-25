@@ -319,7 +319,7 @@ make install   # build sindri + sindri-worker + brokkr, install to ~/.local/bin
 make all       # + build the agent image too (needs podman)
 make check     # build + test + lint — the quality gate
 make deb       # build the .deb into bin/
-make release <major|minor|patch>   # tag + push a release from the default branch (breaking|feature|fix aliases too)
+make release <major|minor|patch>   # release: from a feature branch it opens+merges a PR (gh), then tags from the default branch (breaking|feature|fix aliases too)
 ```
 
 ---

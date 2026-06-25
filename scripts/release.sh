@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Cut a release from the default branch: bump the latest semver tag, tag HEAD,
-# push the tag. The pushed tag triggers the release workflow, which builds and
-# attaches the .deb. Refuses unless the tree is clean and you're on the default
-# branch in sync with origin — so a tag only ever points at merged, pushed code.
+# Cut a release. From a feature branch it HELPS get there: pushes the branch,
+# opens a PR if needed (gh pr create), merges it, then continues from the default
+# branch — so a tag only ever points at merged, pushed code. Then it bumps the
+# latest semver tag, tags HEAD, and pushes the tag, which triggers the release
+# workflow (build + attach the .deb). Refuses on a dirty tree.
 #
-# Usage: make release <major|minor|patch>
+# Usage: make release <major|minor|patch>  (needs gh when on a feature branch)
 set -euo pipefail
 
 bump="${1:-}"
@@ -26,21 +27,38 @@ fi
 
 git fetch --tags --force origin >/dev/null 2>&1 || true
 
-# Releases are cut only from the default branch, in sync with origin — so a tag
-# can only ever point at PR'd, merged, and pushed code (not a feature branch or
-# an unpushed local commit).
+# A release is cut from the default branch — so a tag only ever points at merged,
+# pushed code. If you're on a feature branch, don't just refuse: HELP get the work
+# in — push it, open a PR if there isn't one, merge it, then continue from default.
 default="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')"
 default="${default:-master}"
 current="$(git rev-parse --abbrev-ref HEAD)"
+
 if [ "$current" != "$default" ]; then
-	echo "releases come from '$default', not '$current' — merge your branch first" >&2
-	exit 1
-fi
-if git rev-parse --verify --quiet "origin/$default" >/dev/null; then
-	if [ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/$default")" ]; then
-		echo "local $default differs from origin/$default — push (and merge) before releasing" >&2
+	if ! command -v gh >/dev/null; then
+		echo "on '$current' — releasing needs it merged to '$default'. Install gh (https://cli.github.com) or merge manually, then re-run." >&2
 		exit 1
 	fi
+	echo "on '$current' — pushing and merging into '$default' before releasing…"
+	git push -u origin "$current"
+	if [ -z "$(gh pr list --head "$current" --state open --json number --jq '.[0].number' 2>/dev/null)" ]; then
+		echo "opening a pull request…"
+		gh pr create --base "$default" --head "$current" --fill
+	fi
+	echo "merging the pull request…"
+	gh pr merge "$current" --merge --delete-branch
+	git checkout "$default"
+fi
+
+# On the default branch: fast-forward to origin so the tag points at the merged,
+# pushed tip; refuse if it still has unpushed local commits.
+git pull --ff-only origin "$default" || {
+	echo "couldn't fast-forward '$default' from origin — reconcile it manually, then re-run" >&2
+	exit 1
+}
+if [ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/$default" 2>/dev/null || git rev-parse HEAD)" ]; then
+	echo "'$default' has commits not on origin — push them first" >&2
+	exit 1
 fi
 
 latest="$(git tag --list 'v*' --sort=-v:refname | head -n1)"
