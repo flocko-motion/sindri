@@ -1,6 +1,13 @@
-.PHONY: build sindri worker image install clean test lint check demo diag loop claude-check fullloop screenshot
+.PHONY: build sindri worker image install clean test lint check demo diag loop claude-check fullloop screenshot deb release major minor patch
 
 PREFIX := $(HOME)/.local/bin
+
+# Packaging. VERSION is derived from the latest git tag (overridden by CI with the
+# exact tag, e.g. `make deb VERSION=1.2.3`); dashes are flattened so a
+# describe-style "0.1.0-3-gabc" stays a valid deb version. ARCH is the Go target.
+VERSION ?= $(shell v=$$(git describe --tags --dirty 2>/dev/null); echo "$${v:-v0.0.0}" | sed 's/^v//; s/-/./g')
+ARCH    := $(shell go env GOARCH)
+NFPM    := go run github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
 
 build: sindri worker
 
@@ -71,5 +78,21 @@ fullloop: build
 
 all: build image install
 
+# Build the .deb: the binaries we ship (sindri, sindri-worker) plus the bundled
+# tools (td, yq) staged from PATH, packaged via nfpm. git/podman are declared as
+# apt dependencies, not bundled. Run after `go install`ing td/yq (CI does this).
+deb: build
+	cp "$$(command -v td)" bin/td
+	cp "$$(command -v yq)" bin/yq
+	VERSION="$(VERSION)" ARCH="$(ARCH)" $(NFPM) pkg --config nfpm.yaml --packager deb --target bin/
+	@echo "built .deb in bin/ (version $(VERSION), arch $(ARCH))"
+
+# Cut a release: bump the latest semver tag and push it; the release workflow then
+# builds and attaches the .deb. Usage: make release <major|minor|patch>.
+release:
+	@./scripts/release.sh $(filter major minor patch,$(MAKECMDGOALS))
+major minor patch:
+	@:
+
 clean:
-	rm -f bin/sindri bin/sindri-worker bin/td bin/yq .image-stamp
+	rm -f bin/sindri bin/sindri-worker bin/td bin/yq bin/*.deb .image-stamp
