@@ -511,7 +511,7 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.selID() != "" { // open the full-screen detail modal
 			m.modal = true
 			m.detail.SetHeight(modalContentHeight(m.h))
-			m.detail.SetTotal(len(m.detailLines()))
+			m.detail.SetTotal(len(m.modalLines()))
 			m.detail.ScrollTop()
 			return nil
 		}
@@ -662,11 +662,11 @@ func (m model) View() string {
 		return choiceModal(m.choice.title, m.choice.options, m.choice.cursor, m.w, m.h)
 	}
 	if m.modal {
-		title, lines := m.modalTitle(), m.detailLines()
+		title := m.modalTitle()
 		if m.modalOverride != nil { // e.g. the task modal opened from the PRs tab
-			title, lines = m.modalOverrideTitle, m.modalOverride
+			title = m.modalOverrideTitle
 		}
-		return modal(title, lines, m.detail, m.w, m.h)
+		return modal(title, m.modalLines(), m.detail, m.w, m.h)
 	}
 	top := tabStrip(labels, m.tab, m.w)
 	var body string

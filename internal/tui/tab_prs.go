@@ -72,7 +72,7 @@ func (m *model) openTaskModal(t store.Task) {
 	m.modalOverrideTitle = "Task " + t.ID
 	m.modal = true
 	m.detail.SetHeight(modalContentHeight(m.h))
-	m.detail.SetTotal(len(m.modalOverride))
+	m.detail.SetTotal(len(m.modalLines())) // wrapped count, matching the render
 	m.detail.ScrollTop()
 }
 
@@ -147,10 +147,7 @@ func (m model) prListHeight() int {
 // lint) on the left, with the metadata + task + reviews detail on the right.
 func (m model) prBody() string {
 	h := m.bodyHeight()
-	leftW := m.w
-	if m.showDetail() {
-		leftW = m.w - clampInt(prDetailW, 20, max(20, m.w-30)) - 1
-	}
+	leftW := m.prContentWidth()
 
 	listBox := pane(rowTexts(m.rows()), m.list, leftW, m.cursor[m.tab])
 	contentBox := pane(m.prContentLines(), m.detail, leftW, -1) // big pane: diff/lint, J/K scrolls
@@ -178,10 +175,25 @@ func (m model) prBody() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftCol, divider(h), right)
 }
 
-// prContentLines is the big left pane: the lint output if one was just run,
-// otherwise the diff.
-// prContentLines is the big left pane, driven by the selected view (diff/lint).
+// prContentWidth is the display width of the big content pane — the left column,
+// narrowed by the detail column when it's shown. The diff/lint text is wrapped to
+// this so nothing overflows off the right edge.
+func (m model) prContentWidth() int {
+	if m.showDetail() {
+		return m.w - clampInt(prDetailW, 20, max(20, m.w-30)) - 1
+	}
+	return m.w
+}
+
+// prContentLines is the big left pane, driven by the selected view (diff/lint),
+// word-wrapped to the pane width so the full PR is readable (no truncation).
 func (m model) prContentLines() []string {
+	return wrapContent(m.prRawContentLines(), m.prContentWidth())
+}
+
+// prRawContentLines builds the unwrapped content: lint output if one was just
+// run, otherwise the diff.
+func (m model) prRawContentLines() []string {
 	d := m.prDetail
 	if d.PR.ID != m.selID() {
 		return []string{dimStyle.Render("(loading…)")}

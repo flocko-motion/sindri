@@ -99,7 +99,7 @@ func (m *model) openItemModal(kind, id string) {
 	m.modalOverrideTitle = m.itemTitle(kind, id)
 	m.modal = true
 	m.detail.SetHeight(modalContentHeight(m.h))
-	m.detail.SetTotal(len(m.modalOverride))
+	m.detail.SetTotal(len(m.modalLines())) // wrapped count, matching the render
 	m.detail.ScrollTop()
 }
 
