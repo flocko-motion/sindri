@@ -10,6 +10,18 @@ package tui
 
 import "github.com/flo-at/sindri/internal/hub/store"
 
+// detailLines is the current tab's detail content (the right column / modal body).
+func (m model) detailLines() []string {
+	switch m.tab {
+	case 0:
+		return m.taskDetailLines()
+	case 1:
+		return m.agentDetailLines()
+	default:
+		return m.prDetailLines()
+	}
+}
+
 // homeTab maps an item kind to the tab where it lives (-1 if none).
 func homeTab(kind string) int {
 	switch kind {
