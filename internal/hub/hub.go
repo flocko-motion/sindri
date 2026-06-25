@@ -126,12 +126,56 @@ func New(root string) (*Hub, error) {
 	if err := os.MkdirAll(filepath.Join(dir, "sockets"), 0o755); err != nil {
 		return nil, fmt.Errorf("create .sindri: %w", err)
 	}
+	ensureGitignore(root) // keep the hub's process artifacts out of the repo
 	st, err := store.Open(filepath.Join(dir, "hub.db"))
 	if err != nil {
 		return nil, err
 	}
 	return &Hub{root: root, store: st, agentLn: map[string]net.Listener{}, events: newBus(),
 		lifecycle: map[string]string{}, launchBuf: map[string]*safeBuffer{}}, nil
+}
+
+// hubIgnores are the hub's process artifacts that must never be committed: its
+// own state/home dir and the agent worktrees (per-agent Claude homes carry
+// history, backups, and snapshots — a lot of churn). `.todos/` is deliberately
+// NOT ignored: task data is tracked.
+var hubIgnores = []string{".sindri/", ".worktrees/"}
+
+// ensureGitignore appends any missing hub-artifact patterns to the repo's
+// .gitignore (creating it if absent), idempotently — so a fresh project never
+// fills lazygit/`git status` with hub churn. Best-effort and loud on failure: it
+// never blocks hub startup, but a write error is reported rather than swallowed.
+func ensureGitignore(root string) {
+	path := filepath.Join(root, ".gitignore")
+	data, _ := os.ReadFile(path) // missing file → empty, we'll create it
+	existing := string(data)
+
+	have := map[string]bool{}
+	for _, line := range strings.Split(existing, "\n") {
+		have[strings.Trim(strings.TrimSpace(line), "/")] = true
+	}
+	var missing []string
+	for _, e := range hubIgnores {
+		if !have[strings.Trim(e, "/")] {
+			missing = append(missing, e)
+		}
+	}
+	if len(missing) == 0 {
+		return
+	}
+
+	var b strings.Builder
+	b.WriteString(existing)
+	if existing != "" && !strings.HasSuffix(existing, "\n") {
+		b.WriteByte('\n')
+	}
+	b.WriteString("\n# sindri hub artifacts (agent worktrees + hub state) — not for the repo\n")
+	for _, e := range missing {
+		b.WriteString(e + "\n")
+	}
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "hub: WARNING — could not update %s: %v\n", path, err)
+	}
 }
 
 // setLifecycle records a transient launch/stop intent for an agent (cleared by

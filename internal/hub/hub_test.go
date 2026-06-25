@@ -1,8 +1,60 @@
 package hub
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestEnsureGitignore(t *testing.T) {
+	count := func(s, sub string) int { return strings.Count(s, sub) }
+
+	// Fresh repo: New() (called by newHub) creates .gitignore with the hub patterns.
+	root := t.TempDir()
+	if _, err := New(root); err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	gi := filepath.Join(root, ".gitignore")
+	data, err := os.ReadFile(gi)
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	got := string(data)
+	for _, want := range hubIgnores {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in .gitignore:\n%s", want, got)
+		}
+	}
+
+	// Idempotent: a second pass adds nothing.
+	ensureGitignore(root)
+	again, _ := os.ReadFile(gi)
+	if string(again) != got {
+		t.Errorf("ensureGitignore not idempotent:\n--- first ---\n%s\n--- second ---\n%s", got, again)
+	}
+	if c := count(string(again), ".sindri/"); c != 1 {
+		t.Errorf("expected .sindri/ once, got %d", c)
+	}
+
+	// Existing entries (any slash form) are respected, not duplicated; .todos stays
+	// untouched (it is tracked).
+	root2 := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root2, ".gitignore"), []byte("node_modules\n/.sindri\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ensureGitignore(root2)
+	out, _ := os.ReadFile(filepath.Join(root2, ".gitignore"))
+	if c := count(string(out), ".sindri"); c != 1 {
+		t.Errorf("existing /.sindri should not be duplicated, got %d occurrences:\n%s", c, out)
+	}
+	if !strings.Contains(string(out), ".worktrees/") {
+		t.Errorf(".worktrees/ should have been added:\n%s", out)
+	}
+	if strings.Contains(string(out), ".todos") {
+		t.Errorf(".todos must not be ignored (it is tracked):\n%s", out)
+	}
+}
 
 func newHub(t *testing.T) *Hub {
 	t.Helper()
