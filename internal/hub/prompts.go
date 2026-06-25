@@ -188,7 +188,7 @@ func msgMilestoneMerged(prID string) string {
 }
 
 func msgRejectedByUser(prID, feedback string) string {
-	return fmt.Sprintf("[user] %s was rejected: %s — stop working on it and wait for further instructions.", prID, feedback)
+	return fmt.Sprintf("[user] %s was rejected: %s — address the feedback on your branch and run `sindri submit` again.", prID, feedback)
 }
 
 func msgRejectedByReviewer(prID, feedback string) string {
