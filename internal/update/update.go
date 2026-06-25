@@ -1,10 +1,9 @@
 // package: update / update
 // type:    logic (self-update check)
 // job:     a once-a-day, best-effort check of the GitHub latest release; if it's
-//          newer than the running binary, print a one-line notice and drop a
-//          `sindri-do-upgrade` script. The script is generated (not shipped in the
-//          .deb) because the running binary can't overwrite itself — the script
-//          does the dpkg install in a separate process.
+//          newer, print a one-line notice and drop a `sindri-do-upgrade` script.
+//          The script is generated (not in the .deb) because the running binary
+//          can't overwrite itself — it does the dpkg install in a separate run.
 // limits:  best-effort and silent on failure — an update check must never get in
 //          sindri's way; the actual upgrade is the generated script's job. The
 //          network call is bounded to 2s (the "ping"); past that we forget it.

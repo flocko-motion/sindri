@@ -1,10 +1,9 @@
 // package: main (sindri-worker) / main
 // type:    entrypoint (the agent's thin "browser")
 // job:     a role-agnostic client with NO built-in subcommands. It dials the
-//          hub over its mounted socket (its identity). With no args the hub
-//          tells it exactly what to do next (GET /directive); otherwise it
-//          forwards a verb to the hub for execution (POST /exec), streaming the
-//          result. The hub decides everything — the agent just obeys.
+//          hub over its mounted socket (its identity); with no args the hub says
+//          what to do next (GET /directive), else it forwards a verb to the hub
+//          (POST /exec) and streams the result. The hub decides; the agent obeys.
 // limits:  knows no domain logic and no command tree.
 package main
 

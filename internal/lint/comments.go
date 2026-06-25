@@ -25,6 +25,12 @@ import (
 // carry, per the architecture spec's "File headers" requirement.
 var canonicalHeaderFields = []string{"package", "type", "job", "limits"}
 
+// DefaultMaxHeaderFieldLen bounds how long one header field's content
+// (package/type/job/limits, continuation lines joined) may be, so headers stay
+// compact in `brokkr map`. Free-form comment lines elsewhere in the header are
+// not counted — only the field values.
+const DefaultMaxHeaderFieldLen = 300
+
 // commentViol is one documentation violation: a file (and line, 0 = file-level)
 // and the message describing what's missing.
 type commentViol struct {
@@ -99,6 +105,20 @@ func checkFileComments(path string) []commentViol {
 		}
 	}
 
+	// Bound each field's content so headers stay compact in `brokkr map`. Extra
+	// free-form comment lines in the header are allowed and not counted — only the
+	// package/type/job/limits values (continuations joined).
+	if f.Doc != nil {
+		ln := fset.Position(f.Doc.Pos()).Line
+		fc := headerFieldContent(f.Doc)
+		for _, field := range canonicalHeaderFields {
+			if n := len(fc[field]); n > DefaultMaxHeaderFieldLen {
+				viols = append(viols, commentViol{path, ln,
+					fmt.Sprintf("%s:%d: header field %q is %d chars (max %d) — keep it concise so `brokkr map` stays compact", path, ln, field, n, DefaultMaxHeaderFieldLen)})
+			}
+		}
+	}
+
 	for _, decl := range f.Decls {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
@@ -164,6 +184,46 @@ func missingHeaderFields(doc *ast.CommentGroup) []string {
 		}
 	}
 	return missing
+}
+
+// headerFieldContent maps each present canonical field to its full content — the
+// value after the label plus any aligned continuation lines, joined with spaces.
+// A blank line or an un-aligned (extra, free-form) comment line ends a field, so
+// such lines aren't counted against the field's length.
+func headerFieldContent(doc *ast.CommentGroup) map[string]string {
+	out := map[string]string{}
+	if doc == nil {
+		return out
+	}
+	current := ""
+	for _, c := range doc.List {
+		for _, raw := range strings.Split(c.Text, "\n") {
+			body := strings.TrimPrefix(raw, "//") // keep leading indentation
+			trimmed := strings.TrimSpace(body)
+			if field, val, ok := matchField(trimmed); ok {
+				current = field
+				out[field] = val
+				continue
+			}
+			indent := len(body) - len(strings.TrimLeft(body, " \t"))
+			if current != "" && trimmed != "" && indent >= 4 { // aligned continuation
+				out[current] = strings.TrimSpace(out[current] + " " + trimmed)
+			} else {
+				current = "" // blank or un-aligned comment — the field's content ends
+			}
+		}
+	}
+	return out
+}
+
+// matchField reports whether a normalized line is a "<field>: value" header line.
+func matchField(line string) (field, value string, ok bool) {
+	for _, f := range canonicalHeaderFields {
+		if strings.HasPrefix(line, f+":") {
+			return f, strings.TrimSpace(line[len(f)+1:]), true
+		}
+	}
+	return "", "", false
 }
 
 // fieldValue returns the text after "<field>:" on a normalized header line.

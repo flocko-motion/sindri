@@ -1,10 +1,9 @@
 // package: tui / component_pane
 // type:    ui component (generic)
-// job:     render a slice of text lines into a fixed width×height scrollable
-//          block via a scroll.Viewport — the shared primitive behind both the
-//          selector and the detail pane. Optionally highlights the cursor row.
-//          Every line is padded/truncated to width and the block padded to the
-//          viewport height, so panes always fill their box.
+// job:     render text lines into a fixed width×height scrollable block via a
+//          scroll.Viewport — the shared primitive behind the selector and the
+//          detail pane. Each line is padded/truncated to width and the block
+//          padded to the viewport height, so panes always fill their box.
 // limits:  renders the given lines only; scroll state belongs to the
 //          scroll.Viewport (-> scroll) and the content to the caller.
 package tui

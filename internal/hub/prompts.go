@@ -1,10 +1,9 @@
 // package: hub / prompts
 // type:    logic (every agent-facing string in one place)
 // job:     the agent's whole world is text the hub feeds it — the system prompt,
-//          the no-arg `sindri` directives, the [hub]/[user]/[reviewer]
-//          messages injected into its terminal, and the instructive replies to
-//          its verbs. Centralised here so the agent's voice is tuned in one file
-//          rather than scattered across the workflow.
+//          the no-arg `sindri` directives, the [hub]/[user]/[reviewer] injected
+//          messages, and the replies to its verbs. Centralised here so the
+//          agent's voice is tuned in one file, not scattered across the workflow.
 // limits:  pure strings/builders; the logic that decides WHICH to use lives in
 //          workflow_task.go / workflow_pr.go / hub.go.
 package hub

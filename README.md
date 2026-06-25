@@ -249,7 +249,9 @@ brokkr lint openspec       # validate openspec specs (skips if unused/uninstalle
 - **`comments`** enforces the project convention: every non-test `.go` file opens
   with a four-field header (`package` / `type` / `job` / `limits`, the block
   `brokkr map` reads), and every exported function and type has a doc comment. On
-  a violation it prints the convention with a short example.
+  a violation it prints the convention with a short example. Each header field's
+  content is also length-bounded (so the map stays compact); extra free-form
+  comments in the header don't count.
 
 ### Codebase map — `brokkr map`
 

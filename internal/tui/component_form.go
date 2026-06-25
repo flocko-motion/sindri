@@ -1,10 +1,9 @@
 // package: tui / component_form
 // type:    ui component (generic, reusable)
-// job:     a fill-in form rendered inside the generic almost-full-screen modal
-//          (modalFrame) — a stack of fields (component_field.go) with one
-//          focused at a time. tab/⇧tab move between fields; ←/→ cycle a choice;
-//          ↑↓ and other keys edit the focused field; ctrl+s validates then
-//          submits; esc cancels. The form owns layout + nav, not the chrome.
+// job:     a fill-in form inside the generic almost-full-screen modal — a stack
+//          of fields (component_field.go), one focused. tab/⇧tab move; ←/→ cycle
+//          a choice; ctrl+s validates+submits; esc cancels. Owns layout + nav,
+//          not the chrome.
 // limits:  layout + navigation only; fields own their editing
 //          (-> component_field.go) and the frame is the modal's (-> component_modal.go).
 package tui

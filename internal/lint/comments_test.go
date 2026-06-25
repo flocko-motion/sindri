@@ -82,6 +82,28 @@ func unexported() {}
 	}
 }
 
+func TestCommentsHeaderFieldTooLong(t *testing.T) {
+	long := strings.Repeat("blah ", 80) // ~400 chars, over the budget
+	out := runComments(t, map[string]string{
+		"x.go": "// package: x\n// type:    logic\n// job:     " + long + "\n// limits:  y\npackage x\n",
+	})
+	if !strings.Contains(out, `header field "job"`) || !strings.Contains(out, "max 300") {
+		t.Fatalf("expected a job-too-long violation, got:\n%s", out)
+	}
+}
+
+func TestCommentsHeaderExtraCommentsNotCounted(t *testing.T) {
+	// Short fields, plus a long free-form note in the header — the note must not
+	// count against any field, so there should be no length violation.
+	note := strings.Repeat("note ", 80)
+	out := runComments(t, map[string]string{
+		"x.go": "// package: x\n// type:    logic\n// job:     short\n// limits:  short\n//\n// " + note + "\npackage x\n",
+	})
+	if strings.Contains(out, "header field") {
+		t.Fatalf("free-form header comments must not count against field length, got:\n%s", out)
+	}
+}
+
 func TestCommentsMethodReceiverVisibility(t *testing.T) {
 	out := runComments(t, map[string]string{
 		"x.go": goodHeader + `
