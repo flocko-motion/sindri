@@ -9,40 +9,45 @@ This README is about *using* sindri. For the internal design, see `openspec/`.
 
 ---
 
-## Prerequisites
+## Install
 
-Sindri is an orchestrator — it drives external tools rather than reimplementing
-them. On the host you need:
-
-| Tool | Why | Required? |
-|---|---|---|
-| **git** | branches, worktrees, merges | required |
-| **podman** | builds the agent image and runs agent pods | required (for agents) |
-| **td** | the task backend (the default todo system) | required |
-| **Claude credentials** (`~/.claude/.credentials.json`) | seeded into agent pods | required to run Claude agents |
-| **openspec** | spec-driven workflow + spec lint | optional — degrades if absent |
-| **go** toolchain | the `deadcode` linter | optional — degrades if absent |
-
-Optional tools never fail hard: if `openspec` or `go` isn't installed, the
-feature that needs it **skips with a visible note** rather than erroring. (The
-TUI also warns once at startup if the project has an `openspec/` folder but the
-`openspec` CLI is missing.)
-
-The agent **image** is built on first launch via podman (it bundles Node, the
-Claude CLI, tmux, and a toolbox) — that first build needs network access.
-
----
-
-## Install & start
+Grab the `.deb` from the [latest release](https://github.com/flocko-motion/sindri/releases/latest)
+and install it:
 
 ```bash
-make all          # build sindri + sindri-worker, build the agent image, install
-sindri hub &      # start the per-repo hub (everything needs it running)
+sudo apt install ./sindri_*.deb
 ```
 
-`make all` = binaries + image + install. Later rebuilds: `make install` (binaries
-only) or `make image` (agent image only). `make demo` / `make loop` /
-`make fullloop` drive a throwaway repo end-to-end (need podman).
+That's it. The package bundles everything sindri ships — the `sindri` CLI/TUI, the
+in-pod agent browser `sindri-worker`, and the `td` task backend (plus `yq`) — and
+`apt` pulls in the only system tools it needs, **git** and **podman**.
+
+The one thing you bring yourself: **Claude credentials** at `~/.claude` (sindri
+seeds them into the agent pods). The agent container image is built automatically
+on first `sindri agent start` (needs network that once).
+
+Then, in any repo:
+
+```bash
+sindri hub &      # start the per-repo hub (everything is a client of it)
+```
+
+**Optional extras** (sindri degrades gracefully without them, with a visible
+note — never a hard failure): `openspec` (`npm i -g @fission-ai/openspec`) for the
+spec-driven workflow, and the Go toolchain for the `deadcode` linter.
+
+### Updating
+
+Sindri checks for a newer release once a day and, when there is one, tells you to
+run **`sindri-update`** — a one-shot script it drops in `~/.local/bin` that
+fetches and installs the latest `.deb`.
+
+### From source (for hacking on sindri)
+
+```bash
+make all          # build the binaries + agent image, install to ~/.local/bin
+make deb          # build the .deb into bin/  (bundles td + yq)
+```
 
 ---
 
