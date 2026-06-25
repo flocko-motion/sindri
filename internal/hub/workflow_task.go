@@ -277,6 +277,22 @@ func (h *Hub) EditTask(id string, s TaskSpec) error {
 // enough to feel responsive, since external td edits don't notify the hub.
 const workPollInterval = 3 * time.Second
 
+// prRejected reports whether an agent has a rejected PR — the signal that it
+// should be revising (working), not waiting under review. A reject is a reject
+// whoever sent it, so the worker always continues its work.
+func (h *Hub) prRejected(agent string) bool {
+	prs, err := h.store.PRs()
+	if err != nil {
+		return false
+	}
+	for _, p := range prs {
+		if p.Agent == agent && p.Status == "rejected" {
+			return true
+		}
+	}
+	return false
+}
+
 // AgentDirective is the single next action the hub wants this agent to take —
 // the no-arg `sindri` answer. The hub decides exactly what to do next; the agent
 // obeys (it never has to find work for itself, and never needs a second
@@ -328,6 +344,12 @@ func (h *Hub) AgentDirective(ctx context.Context, name string) (string, error) {
 		if t, ok, _ := h.store.GetTask(st.Container); ok && t.Status != "closed" && t.Status != "approved" && t.Status != "merged" {
 			switch st.Phase {
 			case "submitted":
+				// A rejected milestone PR means revise & resubmit — resume the
+				// container's current subtask rather than waiting under review.
+				if h.prRejected(name) {
+					_ = h.store.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "working"})
+					return dirWorking(st.Task), nil
+				}
 				return dirSubmitted, nil
 			case "working":
 				return dirWorking(st.Task), nil
@@ -346,6 +368,13 @@ func (h *Hub) AgentDirective(ctx context.Context, name string) (string, error) {
 	case "working":
 		return dirWorking(st.Task), nil
 	case "submitted":
+		// Self-heal: a rejected PR means revise & resubmit, so a worker sitting in
+		// "submitted" with a rejected PR should be working, not waiting under review
+		// (recovers any state left "submitted" by an older reject path).
+		if h.prRejected(name) {
+			_ = h.store.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Phase: "working"})
+			return dirWorking(st.Task), nil
+		}
 		return dirSubmitted, nil
 	default: // idle — claim the next task, blocking until one exists
 		return h.waitForWork(ctx, func() (string, bool, error) { return h.claimNext(name) })
