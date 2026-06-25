@@ -109,15 +109,35 @@ func Close(root, id, reason string) error {
 	return mutate(root, "close", id, "--self-close-exception", reason)
 }
 
-// run executes td -w <root> <args...> and returns trimmed combined output.
+// run executes td -w <root> <args...> and returns trimmed combined output. On
+// failure it reports just td's error message, not its whole usage screen (cobra
+// dumps the full --help to stderr on any error — too noisy to surface verbatim).
 func run(root string, args ...string) (string, error) {
 	full := append([]string{"-w", root}, args...)
 	out, err := exec.Command("td", full...).CombinedOutput()
 	s := strings.TrimSpace(string(out))
 	if err != nil {
-		return s, fmt.Errorf("td %s: %s", strings.Join(args, " "), s)
+		return s, fmt.Errorf("td %s: %s", args[0], tdErrorMessage(s))
 	}
 	return s, nil
+}
+
+// tdErrorMessage distills td's combined output down to its actual error: the
+// line cobra prints as "Error: <msg>". Falls back to the last non-empty line
+// (then the whole output) when there's no such line, so nothing is ever lost.
+func tdErrorMessage(out string) string {
+	lines := strings.Split(out, "\n")
+	for _, l := range lines {
+		if msg, ok := strings.CutPrefix(strings.TrimSpace(l), "Error:"); ok {
+			return strings.TrimSpace(msg)
+		}
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		if l := strings.TrimSpace(lines[i]); l != "" {
+			return l
+		}
+	}
+	return out
 }
 
 func mutate(root string, args ...string) error {

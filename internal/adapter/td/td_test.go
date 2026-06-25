@@ -7,6 +7,33 @@ import (
 	"github.com/flo-at/sindri/internal/issue"
 )
 
+func TestTdErrorMessage(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{
+			name: "extracts the Error line from a full usage dump",
+			in:   "Usage:\n  td create [title] [flags]\n\nFlags:\n  -h, --help\n\nError: title 'test' is too generic - describe what it does or fixes",
+			want: "title 'test' is too generic - describe what it does or fixes",
+		},
+		{
+			name: "falls back to the last non-empty line when there's no Error: prefix",
+			in:   "something went wrong\n\n",
+			want: "something went wrong",
+		},
+		{
+			name: "single line passes through",
+			in:   "title too short (3 chars, need 15)",
+			want: "title too short (3 chars, need 15)",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := tdErrorMessage(c.in); got != c.want {
+				t.Errorf("tdErrorMessage()\n got: %q\nwant: %q", got, c.want)
+			}
+		})
+	}
+}
+
 func TestOrderTasks(t *testing.T) {
 	ts := func(s string) time.Time { v, _ := time.Parse(time.RFC3339, s); return v }
 	got := orderTasks([]issue.Task{
