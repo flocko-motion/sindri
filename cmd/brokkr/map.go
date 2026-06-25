@@ -1,7 +1,7 @@
-// package: main (sindri) / code
+// package: main (brokkr) / map
 // type:    command
-// job:     wires `sindri code` — codebase tooling for navigating/understanding
-//          the source. Currently `code map`; more subcommands will join it.
+// job:     wires `brokkr map` — a structured overview of a Go tree to navigate by
+//          (per file: the arch header + each type/func with its doc and signature).
 // limits:  logic lives in internal/codemap; this only wires flags.
 package main
 
@@ -10,13 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newCodeCmd() *cobra.Command {
-	c := &cobra.Command{Use: "code", Short: "Codebase tooling (overview, navigation)"}
-	c.AddCommand(codeMapCmd())
-	return c
-}
-
-func codeMapCmd() *cobra.Command {
+func newMapCmd() *cobra.Command {
 	var depth int
 	var file, grep string
 	c := &cobra.Command{

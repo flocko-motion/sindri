@@ -1,8 +1,8 @@
 // package: main (sindri) / main
 // type:    entrypoint
-// job:     wires the host CLI command tree — the hub-era verbs (hub, new,
-//          launch, tell, attach, agents, merge, prs), the TUI, and lint — and
-//          dispatches. Everything is a thin client of the hub.
+// job:     wires the host CLI command tree — the hub-era verbs (hub, agent,
+//          task, pr) and the TUI — and dispatches. The generic dev tools (code
+//          map, linters) are the separate `brokkr` binary.
 // limits:  no logic — each command delegates to the hub (in-process or over the
 //          socket).
 package main
@@ -41,15 +41,13 @@ func main() {
 		update.MaybeNotify(version, os.Stderr)
 	}
 
-	// Hierarchical command tree: <category> <action>. First-order: hub, tui,
-	// lint, code.
+	// Hierarchical command tree: <category> <action>. The generic dev tools
+	// (code map, linters) live in the separate `brokkr` binary, not here.
 	rootCmd.AddCommand(newHubCmd())
 	rootCmd.AddCommand(newAgentCmd())
 	rootCmd.AddCommand(newTaskCmd())
 	rootCmd.AddCommand(newPrCmd())
 	rootCmd.AddCommand(newTuiCmd())
-	rootCmd.AddCommand(newLintCmd())
-	rootCmd.AddCommand(newCodeCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

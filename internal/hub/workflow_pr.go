@@ -145,18 +145,18 @@ func (h *Hub) runningReviewer() string {
 }
 
 // runLint runs the project's quality gates against a worktree by invoking
-// `sindri lint all` there (a subprocess, so the concurrent hub never chdir's).
+// `brokkr lint` there (a subprocess, so the concurrent hub never chdir's).
 // The gate applies only to Go modules — a non-Go workspace has no Go gates and
 // is skipped. openspec validation self-skips when openspec/ is absent.
 func (h *Hub) runLint(wt string) (output string, ok bool) {
 	if _, err := os.Stat(filepath.Join(wt, "go.mod")); err != nil {
 		return "", true // no Go module — no lint gate applies
 	}
-	self, err := os.Executable()
+	bin, err := brokkrBinary()
 	if err != nil {
 		return "lint: " + err.Error(), false
 	}
-	cmd := exec.Command(self, "lint", "all")
+	cmd := exec.Command(bin, "lint")
 	cmd.Dir = wt
 	out, err := cmd.CombinedOutput()
 	return string(out), err == nil

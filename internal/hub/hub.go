@@ -494,3 +494,20 @@ func agentBinary() (string, error) {
 	return "", fmt.Errorf("%s binary not found — run 'make build/install'", name)
 }
 
+// brokkrBinary locates the brokkr toolbelt binary (which runs the linters): next
+// to the running sindri binary first, then on PATH. The lint gate shells out to
+// it (brokkr ships alongside sindri).
+func brokkrBinary() (string, error) {
+	const name = "brokkr"
+	if self, err := os.Executable(); err == nil {
+		cand := filepath.Join(filepath.Dir(self), name)
+		if _, err := os.Stat(cand); err == nil {
+			return cand, nil
+		}
+	}
+	if p, err := exec.LookPath(name); err == nil {
+		return p, nil
+	}
+	return "", fmt.Errorf("brokkr binary not found — it ships with sindri ('make install')")
+}
+

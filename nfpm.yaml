@@ -19,7 +19,8 @@ description: |
   Sandboxed AI-agent orchestrator (hub + CLI/TUI).
   A per-repo hub runs agents in containers; they pick up tasks, write code, and
   open PRs that a human merges. Installs the host CLI/TUI (sindri), the in-pod
-  agent browser (sindri-worker), and the bundled tools td (task backend) and yq.
+  agent browser (sindri-worker), the toolbelt (brokkr: code map + linters), and
+  the bundled tools td (task backend) and yq.
 depends:
   - git
   - podman
@@ -28,6 +29,8 @@ contents:
     dst: /usr/bin/sindri
   - src: ./bin/sindri-worker
     dst: /usr/bin/sindri-worker
+  - src: ./bin/brokkr
+    dst: /usr/bin/brokkr
   - src: ./bin/td
     dst: /usr/bin/td
   - src: ./bin/yq

@@ -1,4 +1,4 @@
-.PHONY: build sindri worker image install clean test lint check demo diag loop claude-check fullloop screenshot deb release major minor patch breaking feature fix
+.PHONY: build sindri worker brokkr image install clean test lint check demo diag loop claude-check fullloop screenshot deb release major minor patch breaking feature fix
 
 PREFIX := $(HOME)/.local/bin
 
@@ -9,7 +9,7 @@ VERSION ?= $(shell v=$$(git describe --tags --dirty 2>/dev/null); echo "$${v:-v0
 ARCH    := $(shell go env GOARCH)
 NFPM    := go run github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
 
-build: sindri worker
+build: sindri worker brokkr
 
 sindri:
 	go build -ldflags "-X main.version=$(VERSION)" -o bin/sindri ./cmd/sindri/
@@ -18,6 +18,10 @@ sindri:
 worker:
 	go build -o bin/sindri-worker ./cmd/sindri-worker/
 
+# brokkr — the toolbelt: code map + linters, no orchestration.
+brokkr:
+	go build -o bin/brokkr ./cmd/brokkr/
+
 install: build
 	mkdir -p $(PREFIX)
 	# Use mv rather than cp so install succeeds even when the previous
@@ -25,6 +29,7 @@ install: build
 	# running process keeps executing the memory-mapped inode unharmed).
 	mv bin/sindri $(PREFIX)/sindri
 	mv bin/sindri-worker $(PREFIX)/sindri-worker
+	mv bin/brokkr $(PREFIX)/brokkr
 
 # Rebuild image when container files change (agent CLI is mounted, not built in image)
 CONTAINER_DEPS := $(shell find container -type f 2>/dev/null)
@@ -47,15 +52,15 @@ screenshot:
 seed:
 	./scripts/seed.sh
 
-lint: sindri
-	./bin/sindri lint all
+lint: brokkr
+	./bin/brokkr lint
 
 # One-shot quality gate with terse output: build + test + lint, each reporting
 # PASS or printing the tail of its failure. Stops at the first failure.
-check: sindri
+check: brokkr
 	@out=$$(go build ./... 2>&1) && echo "BUILD OK" || { echo "BUILD FAIL"; echo "$$out" | tail -20; exit 1; }
 	@out=$$(go test ./... 2>&1) && echo "TESTS PASS" || { echo "TESTS FAIL"; echo "$$out" | tail -30; exit 1; }
-	@out=$$(./bin/sindri lint all 2>&1) && echo "LINT PASS" || { echo "LINT FAIL"; echo "$$out" | tail -40; exit 1; }
+	@out=$$(./bin/brokkr lint 2>&1) && echo "LINT PASS" || { echo "LINT FAIL"; echo "$$out" | tail -40; exit 1; }
 
 # End-to-end hub demo / diagnostic in a throwaway repo (needs podman + image).
 demo: build
@@ -96,4 +101,4 @@ major minor patch breaking feature fix:
 	@:
 
 clean:
-	rm -f bin/sindri bin/sindri-worker bin/td bin/yq bin/*.deb .image-stamp
+	rm -f bin/sindri bin/sindri-worker bin/brokkr bin/td bin/yq bin/*.deb .image-stamp
