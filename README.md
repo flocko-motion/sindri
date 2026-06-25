@@ -11,17 +11,21 @@ This README is about *using* sindri. For the internal design, see `openspec/`.
 
 ## Install
 
-Grab the `.deb` from the [latest release](https://github.com/flocko-motion/sindri/releases/latest)
-and install it:
+One line — download the latest release and install it:
 
 ```bash
-sudo apt install ./sindri_*.deb
+curl -sL https://github.com/flocko-motion/sindri/releases/latest/download/sindri_amd64.deb \
+  | sudo dpkg -i /dev/stdin || sudo apt-get -f install -y
 ```
+
+(`dpkg -i` installs from the pipe; the `apt-get -f install` pulls the `git` and
+`podman` dependencies if they're missing. If you'd rather, download the file and
+`sudo apt install ./sindri_amd64.deb` instead.)
 
 That's it. The package bundles everything sindri ships — the `sindri` CLI/TUI, the
 agent browser `sindri-worker` (it runs as `sindri` inside a pod), the `brokkr` toolbelt (code map + linters),
-and the `td` task backend (plus `yq`) — and `apt` pulls in the only system tools
-it needs, **git** and **podman**.
+and the `td` task backend (plus `yq`) — and pulls in the only system tools it
+needs, **git** and **podman**.
 
 The one thing you bring yourself: **Claude credentials** at `~/.claude` (sindri
 seeds them into the agent pods). The agent container image is built automatically
