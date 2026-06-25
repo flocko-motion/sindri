@@ -339,7 +339,8 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 		// Mount the socket DIRECTORY (not the file) so the agent survives a hub
 		// restart, which recreates the socket file with a new inode.
 		{Host: AgentSocketDir(h.root, name), Container: "/run/sindri", Mode: "rw"},
-		// The thin browser binary (image symlinks /usr/local/bin/sindri-worker).
+		// The thin browser binary (image symlinks it to /usr/local/bin/sindri — the
+		// agent's in-pod interface to the hub).
 		{Host: workerBin, Container: "/opt/sindri/sindri-worker", Mode: "ro"},
 	}
 	if a.Role == "planner" {

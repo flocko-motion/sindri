@@ -19,7 +19,7 @@ sudo apt install ./sindri_*.deb
 ```
 
 That's it. The package bundles everything sindri ships — the `sindri` CLI/TUI, the
-in-pod agent browser `sindri-worker`, the `brokkr` toolbelt (code map + linters),
+agent browser `sindri-worker` (it runs as `sindri` inside a pod), the `brokkr` toolbelt (code map + linters),
 and the `td` task backend (plus `yq`) — and `apt` pulls in the only system tools
 it needs, **git** and **podman**.
 
@@ -105,9 +105,9 @@ collaborative "work a whole feature" workflow — is opt-in, for when you want m
   `.sindri/`. Every UI reads `GET /state` and live-updates over `GET /events`.
 - **Identity is the socket.** Each pod mounts one socket; the hub knows who's
   calling by which socket accepted the connection — no names on the wire.
-- **The agent is a browser.** Inside a pod, `sindri-worker` has *no built-in
-  commands*: run it with no arguments and the hub tells it the one thing to do
-  next, filtered by role and state. A command it can't run is invisible.
+- **The agent is a browser.** Inside a pod, the agent's command `sindri` has *no
+  built-in commands*: run it with no arguments and the hub tells it the one thing
+  to do next, filtered by role and state. A command it can't run is invisible.
 - **You hold the gate.** Merge is human-only.
 
 ---
@@ -142,7 +142,7 @@ The default. Good for independent, one-off tasks.
 ```
 1.  worker claims the top task        → branch in /workspace
 2.  edits /workspace                  → the hub commits
-3.  sindri-worker submit "…"          → registers a merge-intent; returns at once
+3.  sindri submit "…"                 → registers a merge-intent; returns at once
 4.  …idle…                            → the agent waits (no polling)
 5.  review                            → a reviewer agent, OR you on the host
 6.  sindri pr approve <pr> && merge   → the human gate
@@ -171,7 +171,7 @@ sindri task new "Validation" --parent td-LOGIN
 A free agent picks up the marked container automatically: it goes on a standing
 branch named for the container and starts on the first child. Then:
 
-- The agent works a subtask, runs **`sindri-worker checkpoint "…"`** → commits to
+- The agent works a subtask, runs **`sindri checkpoint "…"`** → commits to
   the container branch, closes that child, and moves to the next — **no blocking**
   between subtasks.
 - When you reach a milestone, **`sindri pr milestone <agent>`** captures the
@@ -279,10 +279,12 @@ Orchestration is `sindri <category> <action>`; the toolbelt is the separate
 | `pr` | `list` · `info <id>` · `lint <id>` · `verify <id>` · `review <id> "…"` · `approve <id>` · `reject <id> "…"` · `milestone <agent>` · `merge <id>` |
 | `brokkr` | `map [paths…] [--grep --file --depth]` · `lint [deadcode\|loc\|comments\|openspec]` (none = all) |
 
-Inside a pod the agent uses the `sindri-worker` browser — run with no args to get
-its next directive, or a verb the hub currently offers it: workers get
-`next`/`submit`/`checkpoint`/`show`/`lint`; reviewers `approve`/`reject`/`review`;
-planners `task`/`create-task`/`openspec`/`state`; all get `status`/`log`/`prs`.
+Inside a pod the agent talks to the hub through a single command, **`sindri`**
+(the browser binary, presented under that name in the isolated container) — run
+with no args to get its next directive, or a verb the hub currently offers it:
+workers get `next`/`submit`/`checkpoint`/`show`/`lint`; reviewers
+`approve`/`reject`/`review`; planners `task`/`create-task`/`openspec`/`state`; all
+get `status`/`log`/`prs`.
 
 ---
 
@@ -301,7 +303,7 @@ freely; nothing committed is lost.
 
 ```
 cmd/sindri/         host CLI (agent/task/pr + hub + tui)
-cmd/sindri-worker/  the agent's thin browser (no command tree)
+cmd/sindri-worker/  the agent's thin browser (no command tree; `sindri` in a pod)
 cmd/brokkr/         the toolbelt: code map + linters (no orchestration)
 internal/hub/       the hub: service, SQLite store, command registry, workflows
 internal/client/    thin hub client (CLI + TUI share it)

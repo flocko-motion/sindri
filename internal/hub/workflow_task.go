@@ -268,10 +268,10 @@ func (h *Hub) EditTask(id string, s TaskSpec) error {
 const workPollInterval = 3 * time.Second
 
 // AgentDirective is the single next action the hub wants this agent to take —
-// the no-arg `sindri-worker` answer. The hub decides exactly what to do next; the
-// agent obeys (it never has to find work for itself, and never needs a second
+// the no-arg `sindri` answer. The hub decides exactly what to do next; the agent
+// obeys (it never has to find work for itself, and never needs a second
 // command). When there is nothing to do it BLOCKS until there is — so the agent's
-// whole loop is "run `sindri-worker`, do what it says, repeat". ctx (the request)
+// whole loop is "run `sindri`, do what it says, repeat". ctx (the request)
 // cancels the wait when the agent's pod dies or it disconnects.
 func (h *Hub) AgentDirective(ctx context.Context, name string) (string, error) {
 	a, ok, err := h.store.GetAgent(name)
