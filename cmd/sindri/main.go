@@ -1,8 +1,8 @@
 // package: main (sindri) / main
 // type:    entrypoint
-// job:     wires the host CLI command tree — the hub-era verbs (hub, new,
-//          launch, tell, attach, agents, merge, prs), the TUI, and lint — and
-//          dispatches. Everything is a thin client of the hub.
+// job:     wires the host CLI command tree — the hub-era verbs (hub, agent,
+//          task, pr) and the TUI — and dispatches. The generic dev tools (code
+//          map, linters) are the separate `brokkr` binary.
 // limits:  no logic — each command delegates to the hub (in-process or over the
 //          socket).
 package main
@@ -10,14 +10,22 @@ package main
 import (
 	"os"
 
+	"github.com/flo-at/sindri/internal/update"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
+
+// version is the build version, baked in via -ldflags "-X main.version=…" (see
+// the Makefile). Empty/"dev" for a plain `go build`/`go run` — those skip the
+// update check.
+var version = "dev"
 
 func main() {
 	var projectDir string
 	rootCmd := &cobra.Command{
-		Use:   "sindri",
-		Short: "Sindri — AI agent orchestrator",
+		Use:     "sindri",
+		Short:   "Sindri — AI agent orchestrator",
+		Version: version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if projectDir != "" {
 				return os.Chdir(projectDir)
@@ -27,15 +35,19 @@ func main() {
 	}
 	rootCmd.PersistentFlags().StringVar(&projectDir, "project", "", "Project directory (default: git root from cwd)")
 
-	// Hierarchical command tree: <category> <action>. First-order: hub, tui,
-	// lint, code.
+	// Best-effort, once-a-day upgrade check — only when stderr is a terminal, so it
+	// never corrupts piped output or nags in CI/scripts.
+	if term.IsTerminal(int(os.Stderr.Fd())) {
+		update.MaybeNotify(version, os.Stderr)
+	}
+
+	// Hierarchical command tree: <category> <action>. The generic dev tools
+	// (code map, linters) live in the separate `brokkr` binary, not here.
 	rootCmd.AddCommand(newHubCmd())
 	rootCmd.AddCommand(newAgentCmd())
 	rootCmd.AddCommand(newTaskCmd())
 	rootCmd.AddCommand(newPrCmd())
 	rootCmd.AddCommand(newTuiCmd())
-	rootCmd.AddCommand(newLintCmd())
-	rootCmd.AddCommand(newCodeCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

@@ -42,7 +42,7 @@ RUN curl -fsSL https://github.com/sxyazi/yazi/releases/latest/download/yazi-x86_
 
 # ── yq (copied from host via build context) ─────────────────────────────────
 # td is deliberately absent: agents reach the task tracker only via the hub
-# (sindri-worker → hub), never a local td that could write .todos in the worktree.
+# (the in-pod `sindri` command → hub), never a local td that could write .todos.
 COPY bin/yq  /usr/local/bin/yq
 RUN chmod +x /usr/local/bin/yq
 
@@ -54,11 +54,12 @@ RUN mkdir -p /opt/sindri && cd /opt/sindri && npm init -y && npm install "@anthr
 RUN npm install -g @fission-ai/openspec@latest
 
 # ── agent browser (mounted from host at runtime) ─────────────────────────────
-# The single, role-agnostic agent binary is mounted read-only at
-# /opt/sindri/sindri-worker at runtime (deliberately NOT named `gh`, so agents
-# don't mistake it for the GitHub CLI). Role is hub-side, so there is one binary
-# for every agent. The sindri user can't write to /usr/local/bin, so symlink here.
-RUN ln -sf /opt/sindri/sindri-worker /usr/local/bin/sindri-worker
+# The single, role-agnostic agent binary (built host-side as sindri-worker) is
+# mounted read-only at /opt/sindri/sindri-worker at runtime. Inside the isolated
+# pod it's the agent's interface to the hub, so we present it simply as `sindri`
+# (no host CLI is in the pod to collide with). Role is hub-side, one binary for
+# every agent; the sindri user can't write /usr/local/bin, so symlink here.
+RUN ln -sf /opt/sindri/sindri-worker /usr/local/bin/sindri
 
 # ── Shims ─────────────────────────────────────────────────────────────────────
 COPY container/shims/docker          /usr/local/bin/docker

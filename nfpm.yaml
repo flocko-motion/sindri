@@ -1,0 +1,37 @@
+# nfpm package spec for the sindri .deb. Built by `make deb`; VERSION and ARCH are
+# supplied from the environment (nfpm expands ${...}).
+#
+# Bundles the binaries sindri ships — sindri, sindri-worker, and the task backend
+# td + yq (all installed to /usr/bin) — and declares the host tools it can't
+# bundle as apt dependencies (git, podman). openspec and the go toolchain are
+# OPTIONAL and intentionally not dependencies: sindri degrades gracefully without
+# them. The agent container image is built on first launch (needs podman).
+name: sindri
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: devel
+priority: optional
+maintainer: Florian Metzger-Noel <florian.metzger-noel@ml-pa.com>
+vendor: Florian Metzger-Noel
+license: MIT
+description: |
+  Sandboxed AI-agent orchestrator (hub + CLI/TUI).
+  A per-repo hub runs agents in containers; they pick up tasks, write code, and
+  open PRs that a human merges. Installs the host CLI/TUI (sindri), the in-pod
+  agent browser (sindri-worker), the toolbelt (brokkr: code map + linters), and
+  the bundled tools td (task backend) and yq.
+depends:
+  - git
+  - podman
+contents:
+  - src: ./bin/sindri
+    dst: /usr/bin/sindri
+  - src: ./bin/sindri-worker
+    dst: /usr/bin/sindri-worker
+  - src: ./bin/brokkr
+    dst: /usr/bin/brokkr
+  - src: ./bin/td
+    dst: /usr/bin/td
+  - src: ./bin/yq
+    dst: /usr/bin/yq

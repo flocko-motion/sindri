@@ -9,40 +9,68 @@ This README is about *using* sindri. For the internal design, see `openspec/`.
 
 ---
 
-## Prerequisites
+## Install
 
-Sindri is an orchestrator — it drives external tools rather than reimplementing
-them. On the host you need:
+Grab the `.deb` from the [latest release](https://github.com/flocko-motion/sindri/releases/latest)
+and install it:
 
-| Tool | Why | Required? |
-|---|---|---|
-| **git** | branches, worktrees, merges | required |
-| **podman** | builds the agent image and runs agent pods | required (for agents) |
-| **td** | the task backend (the default todo system) | required |
-| **Claude credentials** (`~/.claude/.credentials.json`) | seeded into agent pods | required to run Claude agents |
-| **openspec** | spec-driven workflow + spec lint | optional — degrades if absent |
-| **go** toolchain | the `deadcode` linter | optional — degrades if absent |
+```bash
+sudo apt install ./sindri_*.deb
+```
 
-Optional tools never fail hard: if `openspec` or `go` isn't installed, the
-feature that needs it **skips with a visible note** rather than erroring. (The
-TUI also warns once at startup if the project has an `openspec/` folder but the
-`openspec` CLI is missing.)
+That's it. The package bundles everything sindri ships — the `sindri` CLI/TUI, the
+agent browser `sindri-worker` (it runs as `sindri` inside a pod), the `brokkr` toolbelt (code map + linters),
+and the `td` task backend (plus `yq`) — and `apt` pulls in the only system tools
+it needs, **git** and **podman**.
 
-The agent **image** is built on first launch via podman (it bundles Node, the
-Claude CLI, tmux, and a toolbox) — that first build needs network access.
+The one thing you bring yourself: **Claude credentials** at `~/.claude` (sindri
+seeds them into the agent pods). The agent container image is built automatically
+on first `sindri agent start` (needs network that once).
+
+Then, in any repo:
+
+```bash
+sindri hub &      # start the per-repo hub (everything is a client of it)
+```
+
+**Optional extras** (sindri degrades gracefully without them, with a visible
+note — never a hard failure): `openspec` (`npm i -g @fission-ai/openspec`) for the
+spec-driven workflow, and the Go toolchain for the `deadcode` linter.
+
+### Updating
+
+Sindri checks for a newer release once a day and, when there is one, tells you to
+run **`sindri-update`** — a one-shot script it drops in `~/.local/bin` that
+fetches and installs the latest `.deb`.
 
 ---
 
-## Install & start
+## Quick start
+
+The happy path: put **one worker** on a task and merge what it produces — you're
+the reviewer, no second agent needed. Run this in any git repo:
 
 ```bash
-make all          # build sindri + sindri-worker, build the agent image, install
-sindri hub &      # start the per-repo hub (everything needs it running)
+sindri hub &                                # start the per-repo hub
+
+sindri task new "Add a /healthz endpoint"   # describe a task
+sindri agent new                            # create a worker — auto-named (e.g. dvalin)
+sindri agent start dvalin                   # start it: it claims the task and starts coding
+
+sindri tui                                  # watch the board live
 ```
 
-`make all` = binaries + image + install. Later rebuilds: `make install` (binaries
-only) or `make image` (agent image only). `make demo` / `make loop` /
-`make fullloop` drive a throwaway repo end-to-end (need podman).
+Use the name `agent new` printed (or `sindri agent list` to see it). The worker
+writes code in its own sandbox and opens a PR; review and land it:
+
+```bash
+sindri pr list
+sindri pr approve pr-td-abc123              # sign off (you're the reviewer)
+sindri pr merge   pr-td-abc123              # the one hard gate — human only
+```
+
+That's the whole loop. Everything below — a reviewer agent, a planner, the
+collaborative "work a whole feature" workflow — is opt-in, for when you want more.
 
 ---
 
@@ -60,7 +88,7 @@ only) or `make image` (agent image only). `make demo` / `make loop` /
 │            └───────┬───────────────┬──────────┘                │
 │         per-agent  │ unix socket   │ tmux send-keys             │
 │            ┌───────▼───────┐   ┌───▼───────────┐                │
-│            │ pod: brokkr   │   │ pod: reviewer │   …            │
+│            │ pod: dvalin   │   │ pod: reviewer │   …            │
 │            │  Claude+tmux  │   │  Claude+tmux  │                │
 │            └───────────────┘   └───────────────┘                │
 └──────────────────────────────────────────────────────────────┘
@@ -70,36 +98,27 @@ only) or `make image` (agent image only). `make demo` / `make loop` /
   `.sindri/`. Every UI reads `GET /state` and live-updates over `GET /events`.
 - **Identity is the socket.** Each pod mounts one socket; the hub knows who's
   calling by which socket accepted the connection — no names on the wire.
-- **The agent is a browser.** Inside a pod, `sindri-worker` has *no built-in
-  commands*: run it with no arguments and the hub tells it the one thing to do
-  next, filtered by role and state. A command it can't run is invisible.
+- **The agent is a browser.** Inside a pod, the agent's command `sindri` has *no
+  built-in commands*: run it with no arguments and the hub tells it the one thing
+  to do next, filtered by role and state. A command it can't run is invisible.
 - **You hold the gate.** Merge is human-only.
 
 ---
 
-## Agents & roles
+## Roles
 
-```bash
-sindri agent new brokkr                    # register a worker (name optional → dwarf name)
-sindri agent new rune --role reviewer
-sindri agent new vala --role planner
-sindri agent start brokkr                  # spin its pod (runs interactive Claude)
+Three roles — start more agents as you need them (`sindri agent new --role <role>`,
+auto-named after Norse dwarves):
 
-sindri agent list                          # the board (or: sindri tui)
-sindri agent tell brokkr "do the parser first"   # steer any agent live ([user])
-sindri agent attach brokkr                 # dial into its live terminal
-sindri agent stop brokkr                   # tear down the pod, keep the identity
-sindri agent delete brokkr                 # remove pod + worktree + identity
-```
+- **worker** — builds: claims tasks, writes code, opens PRs. (The quick-start agent.)
+- **reviewer** — reviews a worker's PR. Optional — you can approve/reject yourself
+  on the host instead.
+- **planner** — plans *with you*: reads the repo and specs, proposes tasks (you
+  approve them), and ships specs as a PR. Never grabs backlog work.
 
-Three roles:
-
-- **worker** — builds: claims tasks, writes code, opens PRs.
-- **reviewer** — reviews: approves or rejects a worker's PR (optional — you can
-  also approve/reject yourself on the host).
-- **planner** — plans *with you*: reads the repo and specs, proposes tasks
-  (you approve them), drafts openspec, and ships specs as a PR. Never grabs
-  backlog work.
+You steer and manage any agent live — `agent tell <name> "…"`, `attach`, `stop`,
+`delete`; `sindri tui` or `sindri agent list` show the board. (See the command
+reference below.)
 
 ---
 
@@ -116,7 +135,7 @@ The default. Good for independent, one-off tasks.
 ```
 1.  worker claims the top task        → branch in /workspace
 2.  edits /workspace                  → the hub commits
-3.  sindri-worker submit "…"          → registers a merge-intent; returns at once
+3.  sindri submit "…"                 → registers a merge-intent; returns at once
 4.  …idle…                            → the agent waits (no polling)
 5.  review                            → a reviewer agent, OR you on the host
 6.  sindri pr approve <pr> && merge   → the human gate
@@ -145,7 +164,7 @@ sindri task new "Validation" --parent td-LOGIN
 A free agent picks up the marked container automatically: it goes on a standing
 branch named for the container and starts on the first child. Then:
 
-- The agent works a subtask, runs **`sindri-worker checkpoint "…"`** → commits to
+- The agent works a subtask, runs **`sindri checkpoint "…"`** → commits to
   the container branch, closes that child, and moves to the next — **no blocking**
   between subtasks.
 - When you reach a milestone, **`sindri pr milestone <agent>`** captures the
@@ -200,60 +219,65 @@ claim it before then.
 
 ---
 
-## Dev tooling
+## Dev tooling — `brokkr`
 
-These work on any Go project, with or without a hub.
+`brokkr` is sindri's toolbelt: a separate, hub-less binary with the generic Go
+tools. Works on any repo, no orchestration involved.
 
-### Linters — `sindri lint`
+### Linters — `brokkr lint`
 
 ```bash
-sindri lint all            # run them all (gates submit/CI); ends with "=== EXIT N ==="
-sindri lint deadcode       # unreachable functions (RTA); tests are live code
-sindri lint loc            # files over the 700-line limit
-sindri lint comments       # canonical file headers + documented exported funcs/types
-sindri lint openspec       # validate openspec specs (skips if unused/uninstalled)
+brokkr lint                # run them all (gates submit/CI); ends with "=== EXIT N ==="
+brokkr lint deadcode       # unreachable functions (RTA); tests are live code
+brokkr lint loc            # files over the 700-line limit
+brokkr lint comments       # canonical file headers + documented exported funcs/types
+brokkr lint openspec       # validate openspec specs (skips if unused/uninstalled)
 ```
 
-- Every subcommand ends with a loud **`=== EXIT N ===`** marker and turns a panic
-  into a marked failure — so you (or an agent) never have to append `echo "$?"`.
+- `brokkr lint` (no arg) runs every linter with a summary; `brokkr lint <name>`
+  runs just one.
+- Every run ends with a loud **`=== EXIT N ===`** marker and turns a panic into a
+  marked failure — so you (or an agent) never have to append `echo "$?"`.
 - **`deadcode`** always analyses test packages (tests are live code), and skips
   with a note if the `go` toolchain isn't on PATH.
 - **`comments`** enforces the project convention: every non-test `.go` file opens
   with a four-field header (`package` / `type` / `job` / `limits`, the block
-  `code map` reads), and every exported function and type has a doc comment. On a
-  violation it prints the convention with a short example.
+  `brokkr map` reads), and every exported function and type has a doc comment. On
+  a violation it prints the convention with a short example.
 
-### Codebase map — `sindri code map`
+### Codebase map — `brokkr map`
 
 A structured overview to navigate by, instead of reading whole files: per file,
 the header plus each type/func with its doc and signature (bodies omitted).
 
 ```bash
-sindri code map                              # whole tree
-sindri code map internal/hub internal/tui    # several paths at once
-sindri code map --grep "func Merge"          # only decls whose source matches
-sindri code map internal/tui --file tab_prs  # only files whose path matches
-sindri code map --depth 1                    # bound how deep it descends
+brokkr map                              # whole tree
+brokkr map internal/hub internal/tui    # several paths at once
+brokkr map --grep "func Merge"          # only decls whose source matches
+brokkr map internal/tui --file tab_prs  # only files whose path matches
+brokkr map --depth 1                    # bound how deep it descends
 ```
 
 ---
 
 ## Command reference
 
-`sindri <category> <action>`. First-order: `hub`, `tui`, `lint`, `code`.
+Orchestration is `sindri <category> <action>`; the toolbelt is the separate
+`brokkr` binary.
 
 | Category | Actions |
 |---|---|
-| `agent` | `list` · `new <name> [--role worker\|reviewer\|planner]` · `start <name>` · `stop <name>` · `delete <name>` · `tell <name> "msg"` · `attach <name>` · `info <name>` · `pane <name>` |
+| `agent` | `list` · `new [name] [--role worker\|reviewer\|planner]` · `start <name>` · `stop <name>` · `delete <name>` · `tell <name> "msg"` · `attach <name>` · `info <name>` · `pane <name>` |
 | `task` | `list` · `new <title> [-t -p -d --labels --parent]` · `info <id>` · `edit <id>` · `priority <id> <P0..P4>` · `approve <id>` · `reject <id> "why"` · `unassign <id>` |
 | `pr` | `list` · `info <id>` · `lint <id>` · `verify <id>` · `review <id> "…"` · `approve <id>` · `reject <id> "…"` · `milestone <agent>` · `merge <id>` |
-| `code` | `map [paths…] [--grep --file --depth]` |
-| `lint` | `all` · `deadcode` · `loc` · `comments` · `openspec` |
+| `brokkr` | `map [paths…] [--grep --file --depth]` · `lint [deadcode\|loc\|comments\|openspec]` (none = all) |
 
-Inside a pod the agent uses the `sindri-worker` browser — run with no args to get
-its next directive, or a verb the hub currently offers it: workers get
-`next`/`submit`/`checkpoint`/`show`/`lint`; reviewers `approve`/`reject`/`review`;
-planners `task`/`create-task`/`openspec`/`state`; all get `status`/`log`/`prs`.
+Inside a pod the agent talks to the hub through a single command, **`sindri`**
+(the browser binary, presented under that name in the isolated container) — run
+with no args to get its next directive, or a verb the hub currently offers it:
+workers get `next`/`submit`/`checkpoint`/`show`/`lint`; reviewers
+`approve`/`reject`/`review`; planners `task`/`create-task`/`openspec`/`state`; all
+get `status`/`log`/`prs`.
 
 ---
 
@@ -271,8 +295,9 @@ Throw a pod away freely; relaunch resumes from the activity log. Restart the hub
 freely; nothing committed is lost.
 
 ```
-cmd/sindri/         host CLI (agent/task/pr/code/lint + hub + tui)
-cmd/sindri-worker/  the agent's thin browser (no command tree)
+cmd/sindri/         host CLI (agent/task/pr + hub + tui)
+cmd/sindri-worker/  the agent's thin browser (no command tree; `sindri` in a pod)
+cmd/brokkr/         the toolbelt: code map + linters (no orchestration)
 internal/hub/       the hub: service, SQLite store, command registry, workflows
 internal/client/    thin hub client (CLI + TUI share it)
 internal/adapter/   one package per external tool: git, pod (podman), tmux, td, spec
@@ -280,6 +305,21 @@ internal/tui/       lean Bubble Tea dashboard (a hub client)
 internal/lint/      the linters; internal/codemap/ the code map
 container/          the agent image (Dockerfile) + tmux entrypoint
 openspec/           the spec-driven design (specs + changes)
+```
+
+---
+
+## Building from source
+
+For hacking on sindri (end users just install the `.deb`). Needs Go, plus `td`
+and `yq` on `PATH` (they get bundled into the build).
+
+```bash
+make install   # build sindri + sindri-worker + brokkr, install to ~/.local/bin
+make all       # + build the agent image too (needs podman)
+make check     # build + test + lint — the quality gate
+make deb       # build the .deb into bin/
+make release <major|minor|patch>   # release: from a feature branch it opens+merges a PR (gh), then tags from the default branch (breaking|feature|fix aliases too)
 ```
 
 ---

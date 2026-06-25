@@ -339,7 +339,8 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 		// Mount the socket DIRECTORY (not the file) so the agent survives a hub
 		// restart, which recreates the socket file with a new inode.
 		{Host: AgentSocketDir(h.root, name), Container: "/run/sindri", Mode: "rw"},
-		// The thin browser binary (image symlinks /usr/local/bin/sindri-worker).
+		// The thin browser binary (image symlinks it to /usr/local/bin/sindri — the
+		// agent's in-pod interface to the hub).
 		{Host: workerBin, Container: "/opt/sindri/sindri-worker", Mode: "ro"},
 	}
 	if a.Role == "planner" {
@@ -492,5 +493,22 @@ func agentBinary() (string, error) {
 		return p, nil
 	}
 	return "", fmt.Errorf("%s binary not found — run 'make build/install'", name)
+}
+
+// brokkrBinary locates the brokkr toolbelt binary (which runs the linters): next
+// to the running sindri binary first, then on PATH. The lint gate shells out to
+// it (brokkr ships alongside sindri).
+func brokkrBinary() (string, error) {
+	const name = "brokkr"
+	if self, err := os.Executable(); err == nil {
+		cand := filepath.Join(filepath.Dir(self), name)
+		if _, err := os.Stat(cand); err == nil {
+			return cand, nil
+		}
+	}
+	if p, err := exec.LookPath(name); err == nil {
+		return p, nil
+	}
+	return "", fmt.Errorf("brokkr binary not found — it ships with sindri ('make install')")
 }
 
