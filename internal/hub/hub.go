@@ -107,12 +107,17 @@ func plannerBranch(name string) string { return "plan-" + name }
 const mockSpecTask = "os-new"
 
 // restPhase is an agent's resting (not-busy) phase: a planner rests in "planning"
-// (it never holds a backlog task, so "idle" would mislead); everyone else "idle".
+// and a coauthor in "collab" (neither holds a backlog task, so "idle" would
+// mislead — they're standing with the user, not unoccupied); everyone else "idle".
 func restPhase(role string) string {
-	if role == "planner" {
+	switch role {
+	case "planner":
 		return "planning"
+	case "coauthor":
+		return "collab"
+	default:
+		return "idle"
 	}
-	return "idle"
 }
 
 // New opens the hub for a project: ensures `.sindri/` exists and opens the DB.
@@ -191,18 +196,24 @@ func (h *Hub) NewAgent(name, role string) (string, error) {
 	if !nameRe.MatchString(name) {
 		return "", fmt.Errorf("invalid agent name %q (use lowercase letters, digits, - _)", name)
 	}
-	if role != "worker" && role != "reviewer" && role != "planner" {
-		return "", fmt.Errorf("invalid role %q (worker|reviewer|planner)", role)
+	if role != "worker" && role != "reviewer" && role != "planner" && role != "coauthor" {
+		return "", fmt.Errorf("invalid role %q (worker|reviewer|planner|coauthor)", role)
 	}
 	if _, ok, err := h.store.GetAgent(name); err != nil {
 		return "", err
 	} else if ok {
 		return "", fmt.Errorf("agent %q already exists", name)
 	}
+	// A coauthor shares the user's real checkout (the repo root) rather than an
+	// isolated worktree — it works the SAME material as the user, freestyle.
+	workspace := filepath.Join(".worktrees", name)
+	if role == "coauthor" {
+		workspace = "."
+	}
 	a := store.Agent{
 		Name:      name,
 		Role:      role,
-		Workspace: filepath.Join(".worktrees", name),
+		Workspace: workspace,
 		Socket:    filepath.Join(".sindri", "sockets", name+".sock"),
 	}
 	if err := h.store.PutAgent(a); err != nil {
@@ -235,7 +246,11 @@ func (h *Hub) DeleteAgent(name string) error {
 	}
 	_ = pod.Rm(h.container(name))
 	h.closeAgent(name)
-	_ = git.WorktreeRemove(h.root, filepath.Join(h.root, a.Workspace))
+	// A coauthor's workspace is the repo root itself (the shared checkout), not a
+	// disposable worktree — never run `git worktree remove` on it.
+	if a.Workspace != "." {
+		_ = git.WorktreeRemove(h.root, filepath.Join(h.root, a.Workspace))
+	}
 	if err := h.store.DeleteAgent(name); err != nil {
 		return err
 	}
@@ -301,7 +316,14 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 	if !git.HasCommits(h.root) {
 		return fmt.Errorf("repo has no commits yet")
 	}
-	if err := git.WorktreeAdd(h.root, wt, "HEAD"); err != nil {
+	if a.Role == "coauthor" {
+		// A coauthor's /workspace IS the user's checkout (wt == repo root) — no
+		// isolated worktree to add. Rest in "collab" so the dashboard shows it's
+		// standing with the user, not idle.
+		if st, _ := h.store.GetState(name); st.Phase == "" || st.Phase == "idle" {
+			_ = h.store.SetState(store.AgentState{Agent: name, Phase: "collab"})
+		}
+	} else if err := git.WorktreeAdd(h.root, wt, "HEAD"); err != nil {
 		return err
 	}
 	if a.Role == "planner" {
@@ -352,6 +374,16 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 		mounts[0] = pod.Mount{Host: wt, Container: "/workspace", Mode: "ro"}
 		mounts = append(mounts, pod.Mount{Host: osDir, Container: "/workspace/openspec", Mode: "rw"})
 	}
+	if a.Role == "coauthor" {
+		// The coauthor's /workspace IS the user's checkout, so it would otherwise see
+		// .sindri/ (hub.db, sockets) live. Overlay an empty read-only dir over
+		// /workspace/.sindri so it can't read or corrupt hub state while it works.
+		shield := filepath.Join(h.root, ".sindri", "shield")
+		if err := os.MkdirAll(shield, 0o755); err != nil {
+			return err
+		}
+		mounts = append(mounts, pod.Mount{Host: shield, Container: "/workspace/.sindri", Mode: "ro"})
+	}
 	if shell {
 		env["SINDRI_SHELL"] = "1" // entrypoint runs bash instead of Claude
 	} else {
@@ -367,6 +399,15 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 		mounts = append(mounts,
 			pod.Mount{Host: home, Container: "/home/sindri/.claude", Mode: "rw"},
 			pod.Mount{Host: cfg, Container: "/home/sindri/.claude.json", Mode: "rw"})
+		// Mount the user's Claude skills into the agent's home so it works with the
+		// same skills the user has — read-only and live (edits on the host show up
+		// without a relaunch). Any symlinks inside are the user's to manage.
+		if host, herr := os.UserHomeDir(); herr == nil {
+			skills := filepath.Join(host, ".claude", "skills")
+			if fi, serr := os.Stat(skills); serr == nil && fi.IsDir() {
+				mounts = append(mounts, pod.Mount{Host: skills, Container: "/home/sindri/.claude/skills", Mode: "ro"})
+			}
+		}
 	}
 	opts := pod.RunOpts{
 		Name:       cName,

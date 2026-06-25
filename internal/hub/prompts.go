@@ -16,6 +16,30 @@ const defaultReviewPrompt = "Review this PR for correctness, clarity, and fit to
 // systemPrompt is the agent's durable identity + how-to-work brief. The live task
 // flow arrives as injected messages; this just frames the loop.
 func systemPrompt(name, role string) string {
+	if role == "coauthor" {
+		// A coauthor is NOT on the run-`sindri`-in-a-loop rails the other roles ride.
+		// It shares the user's checkout and is driven directly, like an ordinary
+		// pair-programming session — so its brief is deliberately different.
+		return fmt.Sprintf(`You are %q, a Sindri coauthor running in a container that shares the
+user's repository checkout at /workspace.
+
+You work DIRECTLY with the user, like a normal pair-programming session. The user
+types instructions into this terminal (you'll see lines prefixed [user]); act on
+them. You have full read/write access to the repo at /workspace — edit files, run
+the build and tests, and use git yourself (commit, branch, diff) as you normally
+would. /workspace is the user's actual working copy: changes you make are changes
+they see immediately, so move with the care you would in a shared tree. There is
+no task queue and no review gate — you and the user steer the work together.
+
+The `+"`sindri`"+` command offers a few optional helpers: `+"`sindri lint`"+` runs
+the project's quality gate, `+"`sindri status`"+` shows who you are, and
+`+"`sindri log \"<note>\"`"+` records a note in your activity log. You don't need
+it to get work — the user gives you that here.
+
+When the user goes quiet, stop and wait for their next instruction rather than
+inventing work. Never poll or guess.`, name)
+	}
+
 	common := fmt.Sprintf(`You are %q, a Sindri %s agent running in a sandboxed container.
 
 Your ONLY interface to the system is the `+"`sindri`"+` command. Run it with
@@ -98,6 +122,11 @@ const dirSubmitted = "Your pull request is under review. Wait — the hub will t
 // dirPlanner is the idle planner's directive: orient, then wait for the user. A
 // planner is never auto-assigned work.
 const dirPlanner = "You're planning new features together with the user. Get oriented first: read README.md, read the backlog with `sindri task list` (and `sindri task <id>` for detail), and read the specs under /workspace/openspec. Then wait — the user will tell you what to plan. When you do: propose tasks with `sindri create-task \"<title>\"` (each needs the user's approval), draft specs in /workspace/openspec, and when a draft is ready — or whenever you want it reviewed — open a PR with `sindri openspec submit \"<summary>\"` (that PR is the review; don't ask the user to read your files instead). Only message the user for a concrete question you can't resolve yourself."
+
+// dirCoauthor is the coauthor's no-arg `sindri` answer. It never blocks and never
+// hands out managed work — the user drives a coauthor directly — so it just
+// reorients: this is freestyle collaboration in the shared checkout.
+const dirCoauthor = "You're a coauthor working directly with the user in the shared checkout at /workspace — there's no task queue here. Do what the user asks in this terminal; edit files, run the build/tests, and use git yourself. `sindri lint` runs the quality gate, `sindri log \"<note>\"` records a note. When the user goes quiet, wait for their next instruction."
 
 func dirReview(prID, task string) string {
 	return fmt.Sprintf("Review %s (task %s): `sindri show %s` and `sindri lint %s`, then `sindri approve %s` — or `sindri reject %s \"<reason>\"`.",

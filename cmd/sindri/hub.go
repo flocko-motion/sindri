@@ -115,7 +115,7 @@ func newHubCmd() *cobra.Command {
 // --- agent ---
 
 func newAgentCmd() *cobra.Command {
-	c := &cobra.Command{Use: "agent", Short: "Manage agents (workers + reviewers)"}
+	c := &cobra.Command{Use: "agent", Short: "Manage agents (workers, reviewers, planners, coauthors)"}
 	c.AddCommand(agentListCmd(), agentNewCmd(), agentDeleteCmd(), agentPaneCmd(), agentStartCmd(), agentStopCmd(), agentTellCmd(), agentAttachCmd(), agentInfoCmd())
 	return c
 }
@@ -163,7 +163,7 @@ func agentNewCmd() *cobra.Command {
 			})
 		},
 	}
-	c.Flags().StringVar(&role, "role", "worker", "agent role: worker|reviewer|planner")
+	c.Flags().StringVar(&role, "role", "worker", "agent role: worker|reviewer|planner|coauthor")
 	return c
 }
 

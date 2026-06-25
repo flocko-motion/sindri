@@ -35,7 +35,7 @@ func (m *model) openNewAgentChoice() {
 	cl := m.cl
 	m.choice = choiceModalState{
 		active: true, title: "new agent role",
-		options: []string{"worker", "reviewer", "planner"}, values: []string{"worker", "reviewer", "planner"},
+		options: []string{"worker", "reviewer", "planner", "coauthor"}, values: []string{"worker", "reviewer", "planner", "coauthor"},
 		apply: func(v string) tea.Cmd {
 			// Register the identity, then auto-start its pod. Launch runs in the
 			// background (it can build the image) — the hub's lifecycle + /events

@@ -281,6 +281,11 @@ func (h *Hub) AgentDirective(ctx context.Context, name string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("unknown agent %q", name)
 	}
+	if a.Role == "coauthor" {
+		// Freestyle: no managed queue and no blocking. The user drives it directly
+		// in the terminal; `sindri` just reminds it of that (and of the helpers).
+		return dirCoauthor, nil
+	}
 	if a.Role == "reviewer" {
 		// Block until a pull request needs a verdict.
 		return h.waitForWork(ctx, func() (string, bool, error) {
