@@ -182,6 +182,40 @@ func Diff(repo, base, branch string) (string, error) {
 	return string(out), nil
 }
 
+// BlockingLocalChanges returns the tracked files in repo that a merge of branch
+// (relative to base) would overwrite — git's "your local changes would be
+// overwritten" set. Computed as the working-tree changes vs HEAD that also lie in
+// the files the merge touches, so unrelated dirt (e.g. .todos churn the merge
+// never touches) is excluded. Best-effort: returns nil on any git error.
+func BlockingLocalChanges(repo, base, branch string) []string {
+	touched := make(map[string]bool)
+	for _, f := range nameOnly(repo, "diff", "--name-only", base+".."+branch) {
+		touched[f] = true
+	}
+	var blocking []string
+	for _, f := range nameOnly(repo, "diff", "--name-only", "HEAD") { // local changes vs HEAD
+		if touched[f] {
+			blocking = append(blocking, f)
+		}
+	}
+	return blocking
+}
+
+// nameOnly runs a git name-only listing in repo and returns the non-empty paths.
+func nameOnly(repo string, args ...string) []string {
+	out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).Output()
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			files = append(files, l)
+		}
+	}
+	return files
+}
+
 // Merge merges branch into base in repo with a merge commit (no fast-forward),
 // leaving base checked out. Returns the combined output on conflict.
 func Merge(repo, base, branch string) error {

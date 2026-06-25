@@ -376,11 +376,18 @@ func (h *Hub) ApprovePR(prID string) error {
 // its branch to address the feedback and resubmit, with the [user] voice.
 func (h *Hub) RejectPR(prID, feedback string) error { return h.reject(prID, feedback, true) }
 
-// mergeFailureReason collapses git's merge error (multi-line output plus Go error
-// wrapping) into a single readable line, for relaying the technical reason to the
-// worker on an auto-reject.
-func mergeFailureReason(err error) string {
-	return strings.Join(strings.Fields(err.Error()), " ")
+// fileList renders a blocking-files list for a user message: all of them when
+// few, else the first few plus an "and N more" tail so the message stays short.
+// Empty (git couldn't enumerate) falls back to a generic phrase.
+func fileList(files []string) string {
+	switch {
+	case len(files) == 0:
+		return "the conflicting files"
+	case len(files) <= 5:
+		return strings.Join(files, ", ")
+	default:
+		return strings.Join(files[:4], ", ") + fmt.Sprintf(", and %d more", len(files)-4)
+	}
 }
 
 // reject rejects a PR with feedback and routes it to the owning worker
@@ -539,14 +546,16 @@ func (h *Hub) Merge(prID string) (store.PR, error) {
 		}
 	}
 	if err := git.Merge(h.root, pr.Base, pr.Branch); err != nil {
-		// The branch was rebased onto base just above, yet merging into the base
-		// checkout still failed (e.g. uncommitted changes there would be
-		// overwritten). Don't leave an approved-but-unmergeable PR stuck on the
-		// human: route it back to the worker with the technical reason, telling it a
-		// rebase was already done. It resolves on its branch and resubmits.
-		fb := fmt.Sprintf("merge failed, so the PR was returned to you. Your branch was first rebased onto %s (it's current). Technical reason: %s. Resolve it on your branch, then run `sindri submit` again.", pr.Base, mergeFailureReason(err))
-		_ = h.reject(prID, fb, false)
-		return store.PR{}, fmt.Errorf("%s could not be merged (%s) — rebased onto %s and sent back to %s", prID, mergeFailureReason(err), pr.Base, pr.Agent)
+		// The branch was rebased onto base just above, so a genuine branch conflict
+		// was already caught there. The remaining failure mode is the base checkout
+		// itself being dirty — uncommitted local changes the merge would overwrite.
+		// That's the human's to resolve (the worker can't touch the main checkout),
+		// so do NOT reject the PR; give a clear, actionable message naming the files.
+		if e := err.Error(); strings.Contains(e, "would be overwritten") || strings.Contains(e, "commit your changes or stash") {
+			files := fileList(git.BlockingLocalChanges(h.root, pr.Base, pr.Branch))
+			return store.PR{}, fmt.Errorf("merge blocked: commit or stash your local changes to %s in the working checkout, then merge again (the PR is fine and stays approved)", files)
+		}
+		return store.PR{}, err
 	}
 	pr.Status = "merged"
 	if err := h.store.PutPR(pr); err != nil {
