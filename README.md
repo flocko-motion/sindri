@@ -51,6 +51,35 @@ make deb          # build the .deb into bin/  (bundles td + yq)
 
 ---
 
+## Quick start
+
+The happy path: put **one worker** on a task and merge what it produces — you're
+the reviewer, no second agent needed. Run this in any git repo:
+
+```bash
+sindri hub &                                # start the per-repo hub
+
+sindri task new "Add a /healthz endpoint"   # describe a task
+sindri agent new                            # create a worker — auto-named (e.g. brokkr)
+sindri agent start brokkr                   # start it: it claims the task and starts coding
+
+sindri tui                                  # watch the board live
+```
+
+Use the name `agent new` printed (or `sindri agent list` to see it). The worker
+writes code in its own sandbox and opens a PR; review and land it:
+
+```bash
+sindri pr list
+sindri pr approve pr-td-abc123              # sign off (you're the reviewer)
+sindri pr merge   pr-td-abc123              # the one hard gate — human only
+```
+
+That's the whole loop. Everything below — a reviewer agent, a planner, the
+collaborative "work a whole feature" workflow — is opt-in, for when you want more.
+
+---
+
 ## How it works (one picture)
 
 ```
@@ -82,29 +111,20 @@ make deb          # build the .deb into bin/  (bundles td + yq)
 
 ---
 
-## Agents & roles
+## Roles
 
-```bash
-sindri agent new brokkr                    # register a worker (name optional → dwarf name)
-sindri agent new rune --role reviewer
-sindri agent new vala --role planner
-sindri agent start brokkr                  # spin its pod (runs interactive Claude)
+Three roles — start more agents as you need them (`sindri agent new --role <role>`,
+auto-named after Norse dwarves):
 
-sindri agent list                          # the board (or: sindri tui)
-sindri agent tell brokkr "do the parser first"   # steer any agent live ([user])
-sindri agent attach brokkr                 # dial into its live terminal
-sindri agent stop brokkr                   # tear down the pod, keep the identity
-sindri agent delete brokkr                 # remove pod + worktree + identity
-```
+- **worker** — builds: claims tasks, writes code, opens PRs. (The quick-start agent.)
+- **reviewer** — reviews a worker's PR. Optional — you can approve/reject yourself
+  on the host instead.
+- **planner** — plans *with you*: reads the repo and specs, proposes tasks (you
+  approve them), and ships specs as a PR. Never grabs backlog work.
 
-Three roles:
-
-- **worker** — builds: claims tasks, writes code, opens PRs.
-- **reviewer** — reviews: approves or rejects a worker's PR (optional — you can
-  also approve/reject yourself on the host).
-- **planner** — plans *with you*: reads the repo and specs, proposes tasks
-  (you approve them), drafts openspec, and ships specs as a PR. Never grabs
-  backlog work.
+You steer and manage any agent live — `agent tell <name> "…"`, `attach`, `stop`,
+`delete`; `sindri tui` or `sindri agent list` show the board. (See the command
+reference below.)
 
 ---
 
