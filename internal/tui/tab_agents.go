@@ -196,7 +196,10 @@ func (m model) agentActionable() []metaItem {
 // paneLines is the live-screen region: the captured tmux screen when running,
 // otherwise a message reflecting the hub's lifecycle status.
 func (m model) paneLines() []string {
-	a, _ := m.selAgent()
+	a, ok := m.selAgent()
+	if !ok { // nothing selected — usually because there are no agents yet
+		return []string{dimStyle.Render("(no agents)")}
+	}
 	if m.agentView == "pod" { // pod-info view (selected the container item)
 		if strings.TrimSpace(m.agentPod) == "" {
 			return []string{dimStyle.Render("(fetching pod info…)")}
