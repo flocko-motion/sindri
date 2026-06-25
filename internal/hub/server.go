@@ -284,7 +284,13 @@ func (h *Hub) Serve() error {
 		return err
 	}
 	h.healPlannerTasks() // a planner can't hold a backlog task — release any stale claim
-	_ = h.SyncTasks()    // seed the task cache so the board is populated from the start
+	// Seed the task cache so the board is populated from the start. A failure here
+	// (typically no td store at the repo root) is not fatal — the hub still serves
+	// agents/PRs — but it must be loud, not silent, or the board shows zero tasks
+	// with no explanation.
+	if err := h.SyncTasks(); err != nil {
+		fmt.Fprintf(os.Stderr, "hub: WARNING — could not load tasks: %v\n", err)
+	}
 	path := h.SocketPath()
 	_ = os.Remove(path)
 	ln, err := net.Listen("unix", path)

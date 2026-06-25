@@ -99,7 +99,7 @@ func (m *model) action(fn func(id string) error) tea.Cmd {
 		}
 		st, err := cl.State()
 		if err != nil {
-			return nil
+			return errModalMsg{err} // never swallow — the hub became unreachable
 		}
 		return polledMsg(st)
 	}
@@ -107,15 +107,19 @@ func (m *model) action(fn func(id string) error) tea.Cmd {
 
 // mutateThenRefresh runs a hub mutation, then immediately fetches fresh state so
 // the board reflects it without waiting for the SSE push or the next poll tick.
-func mutateThenRefresh(cl *client.HTTP, mutate func()) tea.Cmd {
+// Both the mutation and the refresh surface their error in the modal — never
+// swallowed.
+func mutateThenRefresh(cl *client.HTTP, mutate func() error) tea.Cmd {
 	return func() tea.Msg {
 		if cl == nil {
 			return nil
 		}
-		mutate()
+		if err := mutate(); err != nil {
+			return errModalMsg{err}
+		}
 		st, err := cl.State()
 		if err != nil {
-			return nil
+			return errModalMsg{err}
 		}
 		return polledMsg(st)
 	}

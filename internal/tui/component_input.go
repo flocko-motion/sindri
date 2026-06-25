@@ -48,7 +48,12 @@ func (m *model) submitInput() tea.Cmd {
 	}
 	cl, target := m.cl, m.inputTarget
 	if m.mode == inputTell {
-		return func() tea.Msg { _ = cl.Tell(target, v, "user"); return nil }
+		return func() tea.Msg {
+			if err := cl.Tell(target, v, "user"); err != nil {
+				return errModalMsg{err}
+			}
+			return nil
+		}
 	}
 	return nil
 }

@@ -68,7 +68,7 @@ func (m *model) openDeleteChoice(id string) {
 			if v != "delete" {
 				return nil
 			}
-			return mutateThenRefresh(cl, func() { _ = cl.DeleteAgent(id) })
+			return mutateThenRefresh(cl, func() error { return cl.DeleteAgent(id) })
 		},
 	}
 }

@@ -30,9 +30,13 @@ import (
 	"github.com/flo-at/sindri/internal/issue"
 )
 
-// Tasks refreshes from td and returns all cached tasks (for `task list`).
+// Tasks refreshes from td and returns all cached tasks (for `task list`). A sync
+// failure (e.g. no td store at the repo root) is surfaced, never swallowed —
+// returning a stale cache with no warning hides real misconfiguration.
 func (h *Hub) Tasks() ([]store.Task, error) {
-	_ = h.SyncTasks() // best-effort; fall back to cache on failure
+	if err := h.SyncTasks(); err != nil {
+		return nil, err
+	}
 	return h.store.AllTasks()
 }
 
@@ -72,8 +76,6 @@ func (h *Hub) CreateTask(s TaskSpec) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	_ = h.SyncTasks()
-	h.notify()
 	// td prints e.g. "CREATED td-1add0f" — return just the id.
 	id := strings.TrimSpace(out)
 	for _, f := range strings.Fields(out) {
@@ -82,6 +84,12 @@ func (h *Hub) CreateTask(s TaskSpec) (string, error) {
 			break
 		}
 	}
+	// Refresh the cache so the new task shows up; if that fails the task still
+	// exists in td, so report the id alongside the error rather than swallowing it.
+	if err := h.SyncTasks(); err != nil {
+		return id, fmt.Errorf("created %s but refreshing the task list failed: %w", id, err)
+	}
+	h.notify()
 	return id, nil
 }
 
@@ -208,7 +216,9 @@ func (h *Hub) cmdCreateTask(_ registry.Caller, args []string, out io.Writer) (in
 // task (status, approval, priority, title); `task <id>` prints that task's full
 // detail including description.
 func (h *Hub) cmdTasks(_ registry.Caller, args []string, out io.Writer) (int, error) {
-	_ = h.SyncTasks()
+	if err := h.SyncTasks(); err != nil {
+		return 1, err // surface it — don't list a stale cache as if it were current
+	}
 	if len(args) > 0 && args[0] != "list" {
 		t, err := h.TaskInfo(args[0])
 		if err != nil {

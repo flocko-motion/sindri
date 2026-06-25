@@ -351,12 +351,17 @@ func (m *model) openTaskForm(edit bool) {
 			if cl == nil {
 				return nil
 			}
+			var err error
 			if edit {
-				_ = cl.EditTask(id, spec)
-			} else if strings.TrimSpace(spec.Title) != "" {
-				_, _ = cl.CreateTask(spec)
+				err = cl.EditTask(id, spec)
+			} else {
+				_, err = cl.CreateTask(spec)
 			}
-			return nil
+			if err != nil {
+				return errModalMsg{err} // surface it — never swallow (e.g. td's title rules)
+			}
+			st, _ := cl.State()
+			return polledMsg(st)
 		}
 	})
 }
@@ -390,7 +395,7 @@ func (m *model) unassignTaskCmd(id string) tea.Cmd {
 func (m *model) approveTaskCmd(id string) tea.Cmd {
 	cl := m.cl
 	m.flash = "approving " + id + "…"
-	return mutateThenRefresh(cl, func() { _ = cl.ApproveTask(id) })
+	return mutateThenRefresh(cl, func() error { return cl.ApproveTask(id) })
 }
 
 // openTaskRejectForm opens a multiline textarea to reject a proposed task with a
@@ -427,7 +432,7 @@ func (m *model) openPriorityChoice(id string) {
 			if cl == nil {
 				return nil
 			}
-			return func() tea.Msg { _ = cl.SetPriority(id, code); return nil }
+			return mutateThenRefresh(cl, func() error { return cl.SetPriority(id, code) })
 		},
 	}
 }
