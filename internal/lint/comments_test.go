@@ -17,7 +17,7 @@ func runComments(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := writeModule(t, files)
 	var sb strings.Builder
-	if _, err := Comments([]string{dir}, &sb); err != nil {
+	if _, err := Comments([]string{dir}, nil, &sb); err != nil {
 		t.Fatalf("Comments: %v", err)
 	}
 	return sb.String()

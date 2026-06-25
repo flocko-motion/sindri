@@ -25,8 +25,9 @@ var skipDirs = map[string]bool{
 }
 
 // LOC walks the given roots (default ".") for .go files and reports each file
-// whose line count exceeds maxLines. Returns true if any violation was found.
-func LOC(roots []string, maxLines int, w io.Writer) (bool, error) {
+// whose line count exceeds maxLines, skipping any path matched by ig. Returns
+// true if any violation was found.
+func LOC(roots []string, maxLines int, ig *Ignore, w io.Writer) (bool, error) {
 	if len(roots) == 0 {
 		roots = []string{"."}
 	}
@@ -51,7 +52,7 @@ func LOC(roots []string, maxLines int, w io.Writer) (bool, error) {
 				}
 				return nil
 			}
-			if !strings.HasSuffix(path, ".go") {
+			if !strings.HasSuffix(path, ".go") || ig.Match(path) {
 				return nil
 			}
 			n, err := countLines(path)

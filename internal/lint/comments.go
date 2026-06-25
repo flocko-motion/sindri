@@ -41,8 +41,9 @@ type commentViol struct {
 
 // Comments walks the given roots (default ".") for non-test .go files and reports
 // documentation violations: a missing or incomplete canonical header, or an
-// exported func or type with no doc comment. Returns true if any was found.
-func Comments(roots []string, w io.Writer) (bool, error) {
+// exported func or type with no doc comment. Paths matched by ig are skipped.
+// Returns true if any was found.
+func Comments(roots []string, ig *Ignore, w io.Writer) (bool, error) {
 	if len(roots) == 0 {
 		roots = []string{"."}
 	}
@@ -60,7 +61,7 @@ func Comments(roots []string, w io.Writer) (bool, error) {
 			}
 			// Test files are exempt from the header rule (their subject is the file
 			// they test); their decls are not public API either.
-			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || ig.Match(path) {
 				return nil
 			}
 			viols = append(viols, checkFileComments(path)...)
