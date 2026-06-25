@@ -12,11 +12,13 @@ This README is about *using* sindri. For the internal design, see `openspec/`.
 ## Install
 
 Download the latest release and install it — a one-time step (after that,
-`sindri upgrade` and the daily check keep you current):
+`sindri upgrade` and the daily check keep you current). Grab the `.deb` from the
+[releases page](https://github.com/flocko-motion/sindri/releases/latest), or pull
+the latest from the command line:
 
 ```bash
-wget https://github.com/flocko-motion/sindri/releases/latest/download/sindri_amd64.deb
-sudo apt install ./sindri_amd64.deb
+url=$(curl -fsSL https://api.github.com/repos/flocko-motion/sindri/releases/latest | grep -o 'https://[^"]*_amd64\.deb' | head -1)
+curl -fsSL "$url" -o /tmp/sindri.deb && sudo apt install -y /tmp/sindri.deb && rm -f /tmp/sindri.deb
 ```
 
 That's it. The package bundles everything sindri ships — the `sindri` CLI/TUI, the
