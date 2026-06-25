@@ -48,6 +48,7 @@ func main() {
 	rootCmd.AddCommand(newTaskCmd())
 	rootCmd.AddCommand(newPrCmd())
 	rootCmd.AddCommand(newTuiCmd())
+	rootCmd.AddCommand(newUpgradeCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

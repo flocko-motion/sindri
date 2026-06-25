@@ -39,9 +39,11 @@ spec-driven workflow, and the Go toolchain for the `deadcode` linter.
 
 ### Updating
 
-Sindri checks for a newer release once a day and, when there is one, tells you to
-run **`sindri-update`** — a one-shot script it drops in `~/.local/bin` that
-fetches and installs the latest `.deb`.
+Sindri checks for a newer release once a day (and on demand via **`sindri
+upgrade`**); when there is one it points you at **`sindri-do-upgrade`** — a
+one-shot script it drops in `~/.local/bin` that fetches and installs the latest
+`.deb`. (The check can't replace the running binary itself, so the install is a
+separate script.)
 
 ---
 
