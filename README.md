@@ -324,11 +324,13 @@ For hacking on sindri (end users just install the `.deb`). Needs Go, plus `td`
 and `yq` on `PATH` (they get bundled into the build).
 
 ```bash
+make           # (or make help) list all targets
 make install   # build sindri + sindri-worker + brokkr, install to ~/.local/bin
 make all       # + build the agent image too (needs podman)
+make verify    # run the linters (the gate; release runs this first)
 make check     # build + test + lint — the quality gate
 make deb       # build the .deb into bin/
-make release <major|minor|patch>   # release cycle: push, open+merge a PR (gh), tag the merged default branch, then return you to your branch (breaking|feature|fix aliases too)
+make release <major|minor|patch>   # lint, then release: push, open+merge a PR (gh), tag the merged default branch, return you to your branch (breaking|feature|fix aliases too)
 ```
 
 ---
