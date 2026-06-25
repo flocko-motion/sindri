@@ -26,7 +26,7 @@ worker:
 
 # brokkr — the toolbelt: code map + linters, no orchestration.
 brokkr:
-	go build -o bin/brokkr ./cmd/brokkr/
+	go build -ldflags "-X main.version=$(VERSION)" -o bin/brokkr ./cmd/brokkr/
 
 install: build ## build, then install the binaries to ~/.local/bin
 	mkdir -p $(PREFIX)
