@@ -37,12 +37,15 @@ install: build ## build, then install the binaries to ~/.local/bin
 	mv bin/sindri-worker $(PREFIX)/sindri-worker
 	mv bin/brokkr $(PREFIX)/brokkr
 
-# Rebuild image when container files change (agent CLI is mounted, not built in image)
-CONTAINER_DEPS := $(shell find container -type f 2>/dev/null)
+# Rebuild image when the (now embedded) build context changes. The agent binary
+# is mounted at runtime, not baked in; only yq is staged into the context (the
+# Dockerfile COPYs it), mirroring what container.Ensure does at launch.
+CONTAINER_DEPS := $(shell find internal/container/buildctx -type f 2>/dev/null)
 .image-stamp: $(CONTAINER_DEPS)
-	cp "$$(which td)" bin/td
-	cp "$$(which yq)" bin/yq
-	podman build -t sindri-agent:test -f container/Dockerfile .
+	rm -rf bin/buildctx
+	cp -r internal/container/buildctx bin/buildctx
+	cp "$$(command -v yq)" bin/buildctx/yq
+	podman build -t sindri-agent:test -f bin/buildctx/Dockerfile bin/buildctx
 	touch .image-stamp
 
 image: .image-stamp ## build the agent container image (needs podman)
@@ -98,4 +101,4 @@ major minor patch breaking feature fix:
 	@:
 
 clean: ## remove build artifacts (bin/ binaries, .deb, image stamp)
-	rm -f bin/sindri bin/sindri-worker bin/brokkr bin/td bin/yq bin/*.deb .image-stamp
+	rm -rf bin/sindri bin/sindri-worker bin/brokkr bin/td bin/yq bin/*.deb bin/buildctx .image-stamp

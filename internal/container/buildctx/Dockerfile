@@ -43,7 +43,7 @@ RUN curl -fsSL https://github.com/sxyazi/yazi/releases/latest/download/yazi-x86_
 # ── yq (copied from host via build context) ─────────────────────────────────
 # td is deliberately absent: agents reach the task tracker only via the hub
 # (the in-pod `sindri` command → hub), never a local td that could write .todos.
-COPY bin/yq  /usr/local/bin/yq
+COPY yq  /usr/local/bin/yq
 RUN chmod +x /usr/local/bin/yq
 
 # ── claude CLI ────────────────────────────────────────────────────────────────
@@ -62,21 +62,21 @@ RUN npm install -g @fission-ai/openspec@latest
 RUN ln -sf /opt/sindri/sindri-worker /usr/local/bin/sindri
 
 # ── Shims ─────────────────────────────────────────────────────────────────────
-COPY container/shims/docker          /usr/local/bin/docker
-COPY container/shims/docker-compose  /usr/local/bin/docker-compose
+COPY shims/docker          /usr/local/bin/docker
+COPY shims/docker-compose  /usr/local/bin/docker-compose
 RUN chmod +x /usr/local/bin/docker /usr/local/bin/docker-compose
 
 # ── Sindri agent entrypoint ───────────────────────────────────────────────────
 # The agent is a thin browser driven by the hub; its instructions come from the
 # hub, not baked-in skills/CLAUDE files (those were the pre-hub worker's).
-COPY container/sindri-agent.sh  /usr/local/bin/sindri-agent
+COPY sindri-agent.sh  /usr/local/bin/sindri-agent
 RUN chmod +x /usr/local/bin/sindri-agent
 
 # ── Non-root user (claude refuses --dangerously-skip-permissions as root) ──
 RUN useradd -m -s /bin/bash sindri
 
 # `y` yazi wrapper, sourced by interactive shells (attach / post-Claude bash).
-COPY container/yazi.sh /etc/sindri/yazi.sh
+COPY yazi.sh /etc/sindri/yazi.sh
 RUN echo '. /etc/sindri/yazi.sh' >> /home/sindri/.bashrc
 
 USER sindri
