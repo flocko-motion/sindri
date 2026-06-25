@@ -72,3 +72,44 @@ func TestWriteMissingRootFailsLoud(t *testing.T) {
 		t.Fatalf("must validate roots before emitting any output, got:\n%s", buf.String())
 	}
 }
+
+func TestWriteAdaptiveReducesWhenLong(t *testing.T) {
+	root := writeTree(t, map[string]string{"pkg/a.go": "" +
+		"// package: pkg / a\n// type: logic\n// job: x\n// limits: y\npackage pkg\n\n" +
+		"// Foo does foo.\nfunc Foo() {}\n\n// Bar does bar.\nfunc Bar() {}\n"})
+	dir := filepath.Join(root, "pkg")
+
+	// Tiny budget → reduce to headers only, with a note pointing at --full.
+	var small strings.Builder
+	if err := WriteAdaptive(&small, []string{dir}, -1, "", "", false, 3); err != nil {
+		t.Fatal(err)
+	}
+	out := small.String()
+	if !strings.Contains(out, "showing per-file headers only") || !strings.Contains(out, "--full") {
+		t.Fatalf("expected a reduction note, got:\n%s", out)
+	}
+	if !strings.Contains(out, "package: pkg / a") {
+		t.Errorf("reduced output should keep the header, got:\n%s", out)
+	}
+	if strings.Contains(out, "func Foo") {
+		t.Errorf("reduced output should omit declarations, got:\n%s", out)
+	}
+
+	// --full prints declarations regardless of the budget.
+	var full strings.Builder
+	if err := WriteAdaptive(&full, []string{dir}, -1, "", "", true, 3); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(full.String(), "func Foo") || strings.Contains(full.String(), "headers only") {
+		t.Errorf("--full should print everything with no note, got:\n%s", full.String())
+	}
+
+	// Under budget → full automatically, no note.
+	var auto strings.Builder
+	if err := WriteAdaptive(&auto, []string{dir}, -1, "", "", false, 1000); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(auto.String(), "func Foo") || strings.Contains(auto.String(), "headers only") {
+		t.Errorf("under budget should print full with no note, got:\n%s", auto.String())
+	}
+}

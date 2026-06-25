@@ -256,7 +256,11 @@ brokkr map internal/hub internal/tui    # several paths at once
 brokkr map --grep "func Merge"          # only decls whose source matches
 brokkr map internal/tui --file tab_prs  # only files whose path matches
 brokkr map --depth 1                    # bound how deep it descends
+brokkr map --full                       # don't reduce, however long
 ```
+
+If the full map runs past a line budget (default 1000, `--max`), it reduces to
+per-file headers only and tells you so — narrow the scope or pass `--full`.
 
 ---
 
