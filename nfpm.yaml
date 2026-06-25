@@ -35,3 +35,10 @@ contents:
     dst: /usr/bin/td
   - src: ./bin/yq
     dst: /usr/bin/yq
+  # License + the bundled tools' MIT notices (td, yq) — MIT requires shipping them.
+  - src: ./LICENSE
+    dst: /usr/share/doc/sindri/copyright
+  - src: ./THIRD_PARTY_LICENSES.md
+    dst: /usr/share/doc/sindri/THIRD_PARTY_LICENSES.md
+    file_info:
+      mode: 0644
