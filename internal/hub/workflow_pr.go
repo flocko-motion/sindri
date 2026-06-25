@@ -376,6 +376,13 @@ func (h *Hub) ApprovePR(prID string) error {
 // its branch to address the feedback and resubmit, with the [user] voice.
 func (h *Hub) RejectPR(prID, feedback string) error { return h.reject(prID, feedback, true) }
 
+// mergeFailureReason collapses git's merge error (multi-line output plus Go error
+// wrapping) into a single readable line, for relaying the technical reason to the
+// worker on an auto-reject.
+func mergeFailureReason(err error) string {
+	return strings.Join(strings.Fields(err.Error()), " ")
+}
+
 // reject rejects a PR with feedback and routes it to the owning worker
 // (object-addressed; the worker is never named by the rejecter). A rejection is
 // "revise this", not "abandon it": whoever rejects — an agent reviewer
@@ -532,14 +539,14 @@ func (h *Hub) Merge(prID string) (store.PR, error) {
 		}
 	}
 	if err := git.Merge(h.root, pr.Base, pr.Branch); err != nil {
-		// The merge applies to the main checkout (where base lives). If that working
-		// tree has uncommitted edits the merge would clobber, git refuses. That's not
-		// the worker's doing — its branch is fine — so say so and point at the fix,
-		// rather than dumping git's raw output or rejecting the PR.
-		if e := err.Error(); strings.Contains(e, "would be overwritten") || strings.Contains(e, "commit your changes or stash") {
-			return store.PR{}, fmt.Errorf("merge blocked: the main checkout (%s) has uncommitted local changes the merge would overwrite — commit or stash them there, then merge again (the PR branch itself is fine)", h.root)
-		}
-		return store.PR{}, err
+		// The branch was rebased onto base just above, yet merging into the base
+		// checkout still failed (e.g. uncommitted changes there would be
+		// overwritten). Don't leave an approved-but-unmergeable PR stuck on the
+		// human: route it back to the worker with the technical reason, telling it a
+		// rebase was already done. It resolves on its branch and resubmits.
+		fb := fmt.Sprintf("merge failed, so the PR was returned to you. Your branch was first rebased onto %s (it's current). Technical reason: %s. Resolve it on your branch, then run `sindri submit` again.", pr.Base, mergeFailureReason(err))
+		_ = h.reject(prID, fb, false)
+		return store.PR{}, fmt.Errorf("%s could not be merged (%s) — rebased onto %s and sent back to %s", prID, mergeFailureReason(err), pr.Base, pr.Agent)
 	}
 	pr.Status = "merged"
 	if err := h.store.PutPR(pr); err != nil {
