@@ -415,8 +415,12 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 2 && m.selID() != "" { // approve the PR yourself, so it can be merged
 			return m.action(func(id string) error { return m.cl.ApprovePR(id) })
 		}
-	case "m": // prs: merge (the human gate)
-		if m.tab == 2 {
+	case "m": // prs: merge (the human gate) — if it isn't approved, offer to approve first
+		if m.tab == 2 && m.selID() != "" {
+			if !m.selPRApproved() {
+				m.openApproveMergeChoice(m.selID())
+				return nil
+			}
 			return m.action(func(id string) error { _, err := m.cl.Merge(id); return err })
 		}
 	case "N": // new task (tasks) / new agent (agents)

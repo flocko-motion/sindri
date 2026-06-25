@@ -65,6 +65,42 @@ func lintStatus(lint string) string {
 	return "done"
 }
 
+// selPRApproved reports whether the selected PR is approved (ready to merge).
+func (m model) selPRApproved() bool {
+	id := m.selID()
+	for _, p := range m.state.PRs {
+		if p.ID == id {
+			return p.Status == "approved"
+		}
+	}
+	return false
+}
+
+// openApproveMergeChoice handles pressing merge on a not-yet-approved PR: rather
+// than failing the merge, offer to approve (the human gate) and merge in one step.
+func (m *model) openApproveMergeChoice(id string) {
+	cl := m.cl
+	m.choice = choiceModalState{
+		active: true, title: id + " isn't approved yet — approve and merge?",
+		options: []string{"approve & merge", "cancel"}, values: []string{"merge", "cancel"},
+		apply: func(v string) tea.Cmd {
+			if v != "merge" || cl == nil {
+				return nil
+			}
+			return func() tea.Msg {
+				if err := cl.ApprovePR(id); err != nil {
+					return errModalMsg{err}
+				}
+				if _, err := cl.Merge(id); err != nil {
+					return errModalMsg{err}
+				}
+				st, _ := cl.State()
+				return polledMsg(st)
+			}
+		},
+	}
+}
+
 // openTaskModal shows a PR's linked task in the full-screen detail modal —
 // identical to the Tasks-tab detail.
 func (m *model) openTaskModal(t store.Task) {

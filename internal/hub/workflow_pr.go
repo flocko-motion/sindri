@@ -532,6 +532,13 @@ func (h *Hub) Merge(prID string) (store.PR, error) {
 		}
 	}
 	if err := git.Merge(h.root, pr.Base, pr.Branch); err != nil {
+		// The merge applies to the main checkout (where base lives). If that working
+		// tree has uncommitted edits the merge would clobber, git refuses. That's not
+		// the worker's doing — its branch is fine — so say so and point at the fix,
+		// rather than dumping git's raw output or rejecting the PR.
+		if e := err.Error(); strings.Contains(e, "would be overwritten") || strings.Contains(e, "commit your changes or stash") {
+			return store.PR{}, fmt.Errorf("merge blocked: the main checkout (%s) has uncommitted local changes the merge would overwrite — commit or stash them there, then merge again (the PR branch itself is fine)", h.root)
+		}
 		return store.PR{}, err
 	}
 	pr.Status = "merged"
