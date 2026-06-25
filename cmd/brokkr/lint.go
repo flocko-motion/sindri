@@ -23,6 +23,7 @@ import (
 func newLintCmd() *cobra.Command {
 	var tags string
 	var maxLines int
+	var ignore []string
 	c := &cobra.Command{
 		Use:   "lint [linter]",
 		Short: "Run the quality gate: lint (all) or lint <deadcode|loc|comments|openspec>",
@@ -30,6 +31,11 @@ func newLintCmd() *cobra.Command {
 			"all (deadcode, loc, comments, openspec) with a summary; with a linter " +
 			"name, runs just that one. Exits non-zero on any violation and always " +
 			"prints a final '=== EXIT N ===' marker, so it can gate CI.\n\n" +
+			"Use --ignore to exclude files you can't fix (e.g. generated code): a " +
+			"pattern with no '/' matches a basename at any depth (--ignore='*.gen.go'), " +
+			"one containing '/' matches the relative path with '*'/'**' wildcards " +
+			"(--ignore='internal/gen/**'), and a 're:' prefix is a Go regexp. Repeat " +
+			"the flag for several patterns. It applies to the Go linters, not openspec.\n\n" +
 			commentsConvention,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -38,30 +44,35 @@ func newLintCmd() *cobra.Command {
 			if len(args) == 1 {
 				which = args[0]
 			}
+			ig, err := lint.NewIgnore(ignore)
+			if err != nil {
+				return err
+			}
 			return runLint(out, func() (bool, error) {
-				return runLinters(out, which, tags, maxLines)
+				return runLinters(out, which, tags, maxLines, ig)
 			})
 		},
 	}
 	c.Flags().StringVar(&tags, "tags", "", "comma-separated list of extra build tags (deadcode)")
 	c.Flags().IntVar(&maxLines, "max", lint.DefaultMaxLines, "maximum lines per file (loc)")
+	c.Flags().StringArrayVar(&ignore, "ignore", nil, "skip files matching this glob (no '/' = basename anywhere) or 're:'-prefixed regexp; repeatable")
 	return c
 }
 
 // runLinters runs the named linter, or all of them when which is empty. Returns
 // whether any violation was found.
-func runLinters(out io.Writer, which, tags string, maxLines int) (bool, error) {
+func runLinters(out io.Writer, which, tags string, maxLines int, ig *lint.Ignore) (bool, error) {
 	switch which {
 	case "deadcode":
-		return lint.Deadcode([]string{"./..."}, tags, out)
+		return lint.Deadcode([]string{"./..."}, tags, ig, out)
 	case "loc":
-		return lint.LOC([]string{"."}, maxLines, out)
+		return lint.LOC([]string{"."}, maxLines, ig, out)
 	case "comments":
-		return runComments(out)
+		return runComments(out, ig)
 	case "openspec":
 		return lintOpenspec(out), nil
 	case "":
-		return runAll(out, tags, maxLines)
+		return runAll(out, tags, maxLines, ig)
 	default:
 		return false, fmt.Errorf("unknown linter %q (want deadcode|loc|comments|openspec)", which)
 	}
@@ -69,8 +80,8 @@ func runLinters(out io.Writer, which, tags string, maxLines int) (bool, error) {
 
 // runComments runs the documentation linter and, on a violation, follows it with
 // the convention so the fix is obvious without leaving the terminal.
-func runComments(out io.Writer) (bool, error) {
-	found, err := lint.Comments([]string{"."}, out)
+func runComments(out io.Writer, ig *lint.Ignore) (bool, error) {
+	found, err := lint.Comments([]string{"."}, ig, out)
 	if err != nil {
 		return false, err
 	}
@@ -82,25 +93,25 @@ func runComments(out io.Writer) (bool, error) {
 
 // runAll runs every linter in turn and prints a section per linter plus a final
 // PASS/FAIL summary.
-func runAll(out io.Writer, tags string, maxLines int) (bool, error) {
+func runAll(out io.Writer, tags string, maxLines int, ig *lint.Ignore) (bool, error) {
 	failed := false
 
 	fmt.Fprintln(out, "== deadcode ==")
-	dc, err := lint.Deadcode([]string{"./..."}, tags, out)
+	dc, err := lint.Deadcode([]string{"./..."}, tags, ig, out)
 	if err != nil {
 		return false, err
 	}
 	failed = failed || dc
 
 	fmt.Fprintln(out, "\n== loc ==")
-	loc, err := lint.LOC([]string{"."}, maxLines, out)
+	loc, err := lint.LOC([]string{"."}, maxLines, ig, out)
 	if err != nil {
 		return false, err
 	}
 	failed = failed || loc
 
 	fmt.Fprintln(out, "\n== comments ==")
-	cm, err := runComments(out)
+	cm, err := runComments(out, ig)
 	if err != nil {
 		return false, err
 	}

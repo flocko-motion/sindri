@@ -32,16 +32,17 @@ import (
 // to w (sorted by package, then file, then line). Reporting is limited to the
 // module(s) of the loaded packages so dependencies are never flagged.
 //
-// Generated files, marker interface methods, and functions annotated with a
-// //deadcode:keep directive are excluded. When anything is reported, a trailing
-// note reminds the reader that the directive exists.
+// Generated files, marker interface methods, functions annotated with a
+// //deadcode:keep directive, and files whose path matches ig (--ignore) are
+// excluded. When anything is reported, a trailing note reminds the reader that
+// the directive exists.
 //
 // Test packages are always analysed: tests are live code, so a function reachable
 // only from a _test.go (a helper, a fixture) is reachable, not dead.
 //
 // It returns true if any unreachable function was reported, which callers can
 // use as a non-zero exit gate.
-func Deadcode(patterns []string, tags string, w io.Writer) (found bool, err error) {
+func Deadcode(patterns []string, tags string, ig *Ignore, w io.Writer) (found bool, err error) {
 	// The Go toolchain is optional: deadcode loads packages via `go`, so without it
 	// on PATH we degrade gracefully (a visible skip), rather than hard-failing.
 	if _, err := exec.LookPath("go"); err != nil {
@@ -163,6 +164,9 @@ func Deadcode(patterns []string, tags string, w io.Writer) (found bool, err erro
 			if generated[posn.Filename] {
 				continue // skip generated files
 			}
+			if ig.Match(relFilename(posn.Filename)) {
+				continue // excluded by --ignore
+			}
 			if isMarkerMethod(fn, interfaceTypes[fn.Pkg.Pkg]) {
 				continue
 			}
@@ -274,9 +278,14 @@ var cwd, _ = os.Getwd()
 
 // relPosition renders a position with a cwd-relative filename when possible.
 func relPosition(posn token.Position) string {
-	filename := posn.Filename
+	return fmt.Sprintf("%s:%d:%d", relFilename(posn.Filename), posn.Line, posn.Column)
+}
+
+// relFilename renders filename relative to the working dir when it sits inside
+// it, else unchanged — the form both the report and --ignore matching use.
+func relFilename(filename string) string {
 	if rel, err := filepath.Rel(cwd, filename); err == nil && !strings.HasPrefix(rel, "..") {
-		filename = rel
+		return rel
 	}
-	return fmt.Sprintf("%s:%d:%d", filename, posn.Line, posn.Column)
+	return filename
 }
