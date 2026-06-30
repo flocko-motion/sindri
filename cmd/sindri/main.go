@@ -44,6 +44,7 @@ func main() {
 	// Hierarchical command tree: <category> <action>. The generic dev tools
 	// (code map, linters) live in the separate `brokkr` binary, not here.
 	rootCmd.AddCommand(newHubCmd())
+	rootCmd.AddCommand(newCoauthorCmd())
 	rootCmd.AddCommand(newAgentCmd())
 	rootCmd.AddCommand(newTaskCmd())
 	rootCmd.AddCommand(newPrCmd())

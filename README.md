@@ -77,6 +77,20 @@ sindri pr merge   pr-td-abc123              # the one hard gate — human only
 That's the whole loop. Everything below — a reviewer agent, a planner, the
 collaborative "work a whole feature" workflow — is opt-in, for when you want more.
 
+### Or just pair, freestyle
+
+Prefer the classic "run Claude in my repo and work with me" over the task loop?
+One command:
+
+```bash
+sindri coauthor   # starts the hub if needed, creates/reattaches one coauthor, drops you in
+```
+
+A coauthor works on your **actual checkout** (you share the same files), with no
+task queue and no PR gate — you drive it directly in its terminal. Detach (your
+tmux prefix, then `d`) to leave it running and `sindri coauthor` again to
+reattach; run `sindri tui` in another terminal to add workers alongside it.
+
 ---
 
 ## How it works (one picture)
