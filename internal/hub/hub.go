@@ -445,7 +445,7 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 			return err
 		}
 		if !hasCreds {
-			return fmt.Errorf("no Claude credentials on host (~/.claude/.credentials.json) — launch with --shell, or log in")
+			return fmt.Errorf("no Claude credentials on host (~/.claude/.credentials.json, or the macOS Keychain) — log in with `claude`, or launch with --shell")
 		}
 		mounts = append(mounts,
 			pod.Mount{Host: home, Container: "/home/sindri/.claude", Mode: "rw"},
