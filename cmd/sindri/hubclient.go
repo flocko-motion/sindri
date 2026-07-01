@@ -40,7 +40,7 @@ func reconcileHubVersion(root string) error {
 	if !hub.IsRunning(root) {
 		return nil // nothing to reconcile
 	}
-	pid, hubVer, ok := hub.ReadPID(root)
+	_, hubVer, ok := hub.ReadPID(root)
 	if ok && hubVer == version {
 		return nil // hub matches this CLI
 	}
@@ -58,28 +58,33 @@ func reconcileHubVersion(root string) error {
 		fmt.Fprintln(os.Stderr, "  continuing against the running hub.")
 		return nil
 	}
-	if !ok {
-		// No pid recorded (a pre-stamp hub) — we can't target it to kill it.
-		return fmt.Errorf("can't restart automatically: this hub predates version tracking and recorded no pid — stop the running `sindri hub` for %s manually, then re-run", root)
+	pid, havePID := hub.HubPID(root) // may find a legacy hub via its socket, not just the pid file
+	if !havePID {
+		return fmt.Errorf("couldn't find the running hub's pid to stop it — stop the `sindri hub` for %s manually, then re-run", root)
 	}
 	return restartHub(root, pid)
 }
 
-// restartHub stops the hub with the given pid, waits for its socket to go down,
-// and starts a fresh one from this binary.
-func restartHub(root string, pid int) error {
+// stopHub sends SIGTERM to the hub with the given pid and waits for its control
+// socket to go down.
+func stopHub(root string, pid int) error {
 	fmt.Fprintf(os.Stderr, "stopping hub (pid %d)…\n", pid)
 	if p, err := os.FindProcess(pid); err == nil {
 		_ = p.Signal(syscall.SIGTERM)
 	}
 	for i := 0; i < 50; i++ { // ~5s for it to release the socket
 		if !hub.IsRunning(root) {
-			break
+			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if hub.IsRunning(root) {
-		return fmt.Errorf("hub (pid %d) did not shut down — stop it and re-run", pid)
+	return fmt.Errorf("hub (pid %d) did not shut down — stop it and re-run", pid)
+}
+
+// restartHub stops the hub with the given pid and starts a fresh detached one.
+func restartHub(root string, pid int) error {
+	if err := stopHub(root, pid); err != nil {
+		return err
 	}
 	return startHub(root)
 }

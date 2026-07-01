@@ -11,7 +11,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 )
 
@@ -62,4 +65,24 @@ func RemovePID(root string) { _ = os.Remove(pidPath(root)) }
 func ProcessAlive(pid int) bool {
 	err := syscall.Kill(pid, 0)
 	return err == nil || err == syscall.EPERM
+}
+
+// HubPID returns the pid of the process serving root's hub, so a caller can stop
+// it. It prefers the recorded pid file, and falls back to whoever holds the
+// control socket (via lsof) — which lets us stop even a legacy hub that predates
+// pid stamping. ok=false when no live hub owner can be found.
+func HubPID(root string) (pid int, ok bool) {
+	if p, _, isok := ReadPID(root); isok && ProcessAlive(p) {
+		return p, true
+	}
+	out, err := exec.Command("lsof", "-t", SocketPath(root)).Output()
+	if err != nil {
+		return 0, false
+	}
+	for _, f := range strings.Fields(string(out)) { // -t may list several pids
+		if p, err := strconv.Atoi(f); err == nil && ProcessAlive(p) {
+			return p, true
+		}
+	}
+	return 0, false
 }
