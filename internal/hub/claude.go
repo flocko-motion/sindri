@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,12 +31,12 @@ const claudeSettings = `{
 // /home/sindri/.claude.json), seeding host credentials so the agent is
 // authenticated. Returns the host paths to mount and whether credentials were
 // found (no creds → caller should fall back to a shell).
-func (h *Hub) prepareClaudeHome(name, role string) (homeDir, configPath string, hasCreds bool, err error) {
+func (h *Hub) prepareClaudeHome(name, role string, out io.Writer) (homeDir, configPath string, hasCreds bool, err error) {
 	homeDir = filepath.Join(h.root, ".sindri", "claude", name)
 	if err = os.MkdirAll(homeDir, 0o755); err != nil {
 		return "", "", false, fmt.Errorf("create claude home: %w", err)
 	}
-	if data, found := hostClaudeCredentials(); found {
+	if data, found := hostClaudeCredentials(out); found {
 		if werr := os.WriteFile(filepath.Join(homeDir, ".credentials.json"), data, 0o600); werr == nil {
 			hasCreds = true
 		}
@@ -67,18 +68,21 @@ func (h *Hub) prepareClaudeHome(name, role string) (homeDir, configPath string, 
 // the pod expects at ~/.claude/.credentials.json), or ok=false when none exist.
 // Claude Code keeps them in a file on Linux but in the macOS Keychain (a "Claude
 // Code-credentials" generic-password item), so on macOS we fall back to reading
-// the Keychain — which may pop a one-time "Allow" prompt the first time.
-func hostClaudeCredentials() (data []byte, ok bool) {
+// the Keychain — announcing that on w, since it may pop a one-time "Allow" prompt.
+func hostClaudeCredentials(w io.Writer) (data []byte, ok bool) {
 	if host, err := os.UserHomeDir(); err == nil {
 		if data, err := os.ReadFile(filepath.Join(host, ".claude", ".credentials.json")); err == nil {
 			return data, true
 		}
 	}
 	if runtime.GOOS == "darwin" {
-		out, err := exec.Command("security", "find-generic-password", "-s", "Claude Code-credentials", "-w").Output()
-		if out = bytes.TrimSpace(out); err == nil && len(out) > 0 {
-			return out, true
+		fmt.Fprintln(w, "macOS: no ~/.claude/.credentials.json — reading Claude credentials from the Keychain (may prompt for access)…")
+		raw, err := exec.Command("security", "find-generic-password", "-s", "Claude Code-credentials", "-w").Output()
+		if raw = bytes.TrimSpace(raw); err == nil && len(raw) > 0 {
+			fmt.Fprintln(w, "macOS: loaded Claude credentials from the Keychain.")
+			return raw, true
 		}
+		fmt.Fprintf(w, "macOS: could not read Claude credentials from the Keychain: %v\n", err)
 	}
 	return nil, false
 }

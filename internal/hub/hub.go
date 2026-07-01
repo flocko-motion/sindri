@@ -440,7 +440,7 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 	} else {
 		// Set up the agent's Claude home (credentials, config, system prompt) and
 		// mount it so Claude runs authenticated.
-		home, cfg, hasCreds, err := h.prepareClaudeHome(name, a.Role)
+		home, cfg, hasCreds, err := h.prepareClaudeHome(name, a.Role, buf)
 		if err != nil {
 			return err
 		}
