@@ -5,8 +5,8 @@
 //          installed sindri can build the image for ANY orchestrated repo, not
 //          just the sindri repo.
 // limits:  worker/reviewer container lifecycle lives in internal/hub. Ensure
-//          materializes the embedded context to a cache dir, stages yq, and
-//          builds via podman when that context or the weekly key is stale.
+//          materializes the embedded context to a cache dir and builds via podman
+//          when that context or the weekly key is stale.
 package container
 
 import (
@@ -28,8 +28,8 @@ const ImageName = "sindri-agent:test"
 // buildContext is the agent image's whole build context — Dockerfile, the
 // entrypoint, the yazi helper, and the docker shims — embedded so the binary
 // carries its own image recipe and never depends on files in the orchestrated
-// repo. `yq` is NOT embedded (it's a separate licensed binary); it is staged
-// from the host PATH into the materialized context at build time.
+// repo. Arch-specific tools (yq, yazi) are downloaded in-container by the
+// Dockerfile for the pod's own OS/arch, not copied from the (possibly macOS) host.
 //
 //go:embed all:buildctx
 var buildContext embed.FS
@@ -71,13 +71,12 @@ func Ensure(projectRoot string, out io.Writer) error {
 		return nil // up to date and the image is actually present
 	}
 
-	// Materialize the embedded context into a writable staging dir and stage yq
-	// (which the Dockerfile COPYs) alongside it.
+	// Materialize the embedded context into a writable staging dir. Tools that
+	// must match the pod's OS/arch (yq, yazi) are downloaded in-container by the
+	// Dockerfile, not copied from the host — the host may be macOS/arm64 while the
+	// pod is Linux.
 	ctxDir := filepath.Join(cacheDir, "buildctx")
 	if err := materialize(ctxDir); err != nil {
-		return err
-	}
-	if err := stageYq(ctxDir); err != nil {
 		return err
 	}
 
@@ -170,20 +169,3 @@ func materialize(dir string) error {
 	})
 }
 
-// stageYq copies the host's yq into the build context (the Dockerfile COPYs it).
-// yq is bundled by the .deb, so it is expected on PATH; its absence is a loud
-// failure rather than a silently broken image.
-func stageYq(ctxDir string) error {
-	path, err := exec.LookPath("yq")
-	if err != nil {
-		return fmt.Errorf("yq not found on PATH — it ships with sindri and the agent image needs it: %w", err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read yq: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(ctxDir, "yq"), data, 0o755); err != nil {
-		return fmt.Errorf("stage yq: %w", err)
-	}
-	return nil
-}

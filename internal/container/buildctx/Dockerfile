@@ -34,17 +34,32 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ── yazi (TUI file manager — not in apt; prebuilt release binary) ──────────────
-RUN curl -fsSL https://github.com/sxyazi/yazi/releases/latest/download/yazi-x86_64-unknown-linux-gnu.zip -o /tmp/yazi.zip \
+# Pick the release matching the build arch, so the image is correct whether it's
+# built on amd64 or arm64 (e.g. an Apple Silicon podman VM).
+RUN case "$(uname -m)" in \
+      x86_64)  target=x86_64-unknown-linux-gnu ;; \
+      aarch64) target=aarch64-unknown-linux-gnu ;; \
+      *) echo "unsupported arch $(uname -m) for yazi" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/sxyazi/yazi/releases/latest/download/yazi-$target.zip" -o /tmp/yazi.zip \
  && unzip -q /tmp/yazi.zip -d /tmp/yazi \
  && mv /tmp/yazi/*/yazi /tmp/yazi/*/ya /usr/local/bin/ \
  && chmod +x /usr/local/bin/yazi /usr/local/bin/ya \
  && rm -rf /tmp/yazi /tmp/yazi.zip
 
-# ── yq (copied from host via build context) ─────────────────────────────────
-# td is deliberately absent: agents reach the task tracker only via the hub
-# (the in-pod `sindri` command → hub), never a local td that could write .todos.
-COPY yq  /usr/local/bin/yq
-RUN chmod +x /usr/local/bin/yq
+# ── yq (prebuilt release binary, arch-matched) ────────────────────────────────
+# Downloaded in-container for the build arch rather than copied from the host:
+# the host may be a different OS/arch (e.g. macOS) than the Linux pod, so a copied
+# host binary wouldn't run. td is deliberately absent: agents reach the task
+# tracker only via the hub (the in-pod `sindri` command → hub), never a local td
+# that could write .todos.
+RUN case "$(uname -m)" in \
+      x86_64)  arch=amd64 ;; \
+      aarch64) arch=arm64 ;; \
+      *) echo "unsupported arch $(uname -m) for yq" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_$arch" -o /usr/local/bin/yq \
+ && chmod +x /usr/local/bin/yq
 
 # ── claude CLI ────────────────────────────────────────────────────────────────
 RUN npm install -g @anthropic-ai/claude-code@latest
