@@ -126,7 +126,8 @@ func New(root string) (*Hub, error) {
 	if err := os.MkdirAll(filepath.Join(dir, "sockets"), 0o755); err != nil {
 		return nil, fmt.Errorf("create .sindri: %w", err)
 	}
-	ensureGitignore(root) // keep the hub's process artifacts out of the repo
+	ensureGitignore(root)   // keep the hub's process artifacts out of the repo's status
+	ensureSindriIgnore(dir) // and make .sindri/ self-ignoring — it holds secrets
 	st, err := store.Open(filepath.Join(dir, "hub.db"))
 	if err != nil {
 		return nil, err
@@ -140,6 +141,24 @@ func New(root string) (*Hub, error) {
 // history, backups, and snapshots — a lot of churn). `.todos/` is deliberately
 // NOT ignored: task data is tracked.
 var hubIgnores = []string{".sindri/", ".worktrees/"}
+
+// sindriSelfIgnore is written to .sindri/.gitignore on every hub start. A nested
+// ".gitignore" of "*" ignores the whole directory (including itself), so .sindri/
+// — which holds Claude credentials, agent tokens, the db, and sockets — can never
+// be committed, even in a repo whose root .gitignore never learned about it (or if
+// that entry is later removed). This is the guarantee for the secret-bearing dir;
+// the root .gitignore entry (see hubIgnores) is just for a clean `git status`.
+const sindriSelfIgnore = "# sindri hub state — credentials, tokens, db, sockets. Never commit.\n*\n"
+
+// ensureSindriIgnore writes .sindri/.gitignore unconditionally (idempotent) so the
+// secret-bearing hub dir stays self-protecting regardless of the repo's own config.
+// Best-effort and loud on failure: it never blocks startup.
+func ensureSindriIgnore(dir string) {
+	path := filepath.Join(dir, ".gitignore")
+	if err := os.WriteFile(path, []byte(sindriSelfIgnore), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "hub: WARNING — could not write %s: %v\n", path, err)
+	}
+}
 
 // ensureGitignore appends any missing hub-artifact patterns to the repo's
 // .gitignore (creating it if absent), idempotently — so a fresh project never
