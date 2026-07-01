@@ -338,6 +338,12 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 	if !ok {
 		return fmt.Errorf("no such agent %q — run 'sindri new %s' first", name, name)
 	}
+	// Pre-flight: podman must be installed and reachable. Fail fast with an
+	// actionable message (before touching status or staging an image build) rather
+	// than surfacing a cryptic exit code mid-build.
+	if err := pod.Check(); err != nil {
+		return err
+	}
 	// Status → launching immediately (cleared by State once the pod is up); on
 	// any failure below, clear it so it doesn't stick at "launching".
 	h.setLifecycle(name, "launching")
