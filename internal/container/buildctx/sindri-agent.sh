@@ -47,12 +47,19 @@ TMUXCONF
 if [ -n "${SINDRI_SHELL:-}" ]; then
 	tmux new-session -d -s "$SESSION" bash
 else
+	# --continue resumes the most recent Claude session for this workspace, so an
+	# agent picks up its full conversation after a pod restart or a machine reboot
+	# — the transcripts live under ~/.claude (a persistent host bind-mount) and the
+	# cwd is always /workspace, so the lookup is stable. On a first launch there's
+	# nothing to resume and --continue just starts fresh. --append-system-prompt is
+	# re-applied every launch (harmless if the resumed session already has it, and
+	# it must never be silently dropped, or the agent would lose its role).
 	# Single-quote the command so $(cat ...) is evaluated by tmux's shell at
 	# session start, not here — the system prompt is multi-line. When Claude
 	# exits, drop into an interactive shell (exec bash) so the session lives on
 	# and a dialed-in human lands at a prompt instead of the pane dying.
 	tmux new-session -d -s "$SESSION" \
-		'claude --dangerously-skip-permissions --append-system-prompt "$(cat /home/sindri/.claude/system-prompt.txt)"; exec bash -i'
+		'claude --continue --dangerously-skip-permissions --append-system-prompt "$(cat /home/sindri/.claude/system-prompt.txt)"; exec bash -i'
 fi
 
 # Belt-and-suspenders: re-source in case the server was already running.

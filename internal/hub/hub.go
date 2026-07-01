@@ -577,41 +577,19 @@ func (h *Hub) injectWhenReady(name, text string) error {
 	return h.store.Log(name, "inject-skipped", text)
 }
 
-// rehydrate injects a kickoff/briefing once a (re)launched pod's session is up
-// (D13). A fresh agent gets a role-appropriate nudge; a resuming one gets the
-// tail of its activity log so it can pick up where it left off. Best-effort;
-// runs in the background so it doesn't block launch.
-// resumeEvents are the activity types worth replaying to an agent on resume —
-// its actual work, not pod lifecycle or injected chatter.
-var resumeEvents = map[string]bool{
-	"claim": true, "submit": true, "note": true,
-	"approve": true, "reject": true, "merged": true, "lint-fail": true,
-	"recv": true,
-}
-
+// rehydrate nudges a (re)launched agent to start once its pod's session is up
+// (D13): it injects one kickoff telling the agent to ask the hub for work. The
+// same nudge fits whether the agent is brand new or resuming — AgentDirective is
+// idempotent and state-driven, so running `sindri` always lands it back on its
+// currently-assigned job (including anything that changed while it was down, like
+// a merged or rejected PR). Claude's own --continue restores the prior
+// conversation when there is one, so no activity-log replay is needed here.
+// Best-effort; runs in the background so it doesn't block launch.
 func (h *Hub) rehydrate(name string) {
-	evs, _ := h.store.Events(name, 40)
-	// Summarize only the agent's own work — not pod lifecycle (launch/stop/
-	// register) or injected messages — so resume context is signal, not noise.
-	var recent []string
-	for _, e := range evs {
-		if resumeEvents[e.Type] {
-			recent = append(recent, e.Type+" "+e.Payload)
-		}
-	}
-	var msg string
-	if len(recent) == 0 { // no work yet — a fresh kickoff
-		msg = msgKickoff
-	} else {
-		if len(recent) > 5 { // just the last few
-			recent = recent[len(recent)-5:]
-		}
-		msg = msgResuming(strings.Join(recent, " · "))
-	}
 	// Let the agent program (Claude) boot to input-readiness before the kickoff,
 	// or its submitting Enter is eaten by the boot splash.
 	time.Sleep(8 * time.Second)
-	_ = h.injectWhenReady(name, msg)
+	_ = h.injectWhenReady(name, msgKickoff)
 }
 
 // agentBinary locates the thin browser binary on the host: next to the running

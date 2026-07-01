@@ -169,11 +169,7 @@ const replyNothingToCheckpoint = "Nothing to checkpoint — you're not working a
 
 // --- injected messages ([hub]/[user]/[reviewer], typed into the agent's tmux) ---
 
-const msgKickoff = "[hub] You're live. Run `sindri` and do exactly what it tells you."
-
-func msgResuming(recent string) string {
-	return "[hub] Resuming. Recently you did: " + recent + ". Run `sindri` for your next step."
-}
+const msgKickoff = "[hub] You're live. Run `sindri` and do exactly what it tells you — it always returns your current job, whether you're new or resuming."
 
 func msgMerged(prID string) string {
 	return fmt.Sprintf("[hub] %s merged. Run `sindri` for your next task.", prID)
