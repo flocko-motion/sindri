@@ -56,6 +56,10 @@ CREATE TABLE IF NOT EXISTS events (
   payload TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_events_agent ON events(agent, id);
+CREATE TABLE IF NOT EXISTS meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 `
 
 // Open opens (creating if needed) the SQLite DB at path and applies the schema.
@@ -95,6 +99,31 @@ func migrate(db *sql.DB) {
 
 // Close closes the database.
 func (s *Store) Close() error { return s.db.Close() }
+
+// GetMeta returns a repo-scoped key/value (ok=false when unset) — used for
+// hub-level state that isn't per-agent, e.g. the agent-token secret.
+func (s *Store) GetMeta(key string) (value string, ok bool, err error) {
+	row := s.db.QueryRow(`SELECT value FROM meta WHERE key=?`, key)
+	err = row.Scan(&value)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("get meta %s: %w", key, err)
+	}
+	return value, true, nil
+}
+
+// SetMeta inserts or updates a repo-scoped key/value.
+func (s *Store) SetMeta(key, value string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
+		key, value)
+	if err != nil {
+		return fmt.Errorf("set meta %s: %w", key, err)
+	}
+	return nil
+}
 
 // PutAgent inserts or updates an agent, preserving created_at across updates.
 func (s *Store) PutAgent(a Agent) error {

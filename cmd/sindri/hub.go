@@ -20,10 +20,10 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/adapter/pod"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
-	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // backend is the full hub operation set; satisfied by both *hub.Hub (in-process,
@@ -69,7 +69,7 @@ func repoRoot() (string, error) {
 // in-process hub.
 func open(root string) (backend, error) {
 	if hub.IsRunning(root) {
-		return client.Dial(root), nil
+		return dialHub(root)
 	}
 	return hub.New(root)
 }
@@ -99,13 +99,40 @@ func newHubCmd() *cobra.Command {
 				return err
 			}
 			if hub.IsRunning(root) {
-				return fmt.Errorf("a hub is already running for this repo (%s)", hub.SocketPath(root))
+				// A hub is already up. If it's the same build, there's nothing to do. If
+				// it's a different (or unknown, pre-stamp) build, offer to take over —
+				// otherwise you'd be stuck unable to run the new hub.
+				_, ver, ok := hub.ReadPID(root)
+				if ok && ver == version {
+					return fmt.Errorf("a hub is already running for this repo (%s)", hub.SocketPath(root))
+				}
+				desc := "an older build (predates version stamping)"
+				if ok {
+					desc = "sindri " + ver
+				}
+				fmt.Fprintf(os.Stderr, "a hub (%s) is already running for this repo; this CLI is %s.\n", desc, version)
+				if !term.IsTerminal(int(os.Stdin.Fd())) || !promptYesNo("stop it and start this one?") {
+					return fmt.Errorf("a hub is already running for this repo (%s)", hub.SocketPath(root))
+				}
+				pid, havePID := hub.HubPID(root)
+				if !havePID {
+					return fmt.Errorf("couldn't find the running hub's pid to stop it — stop it manually, then re-run")
+				}
+				if err := stopHub(root, pid); err != nil {
+					return err
+				}
 			}
 			h, err := hub.New(root)
 			if err != nil {
 				return err
 			}
 			defer h.Close()
+			// Stamp this process (pid + build version) as the repo's hub, so a second
+			// hub can't start for it and clients can detect a stale-version hub.
+			if err := hub.WritePID(root, version); err != nil {
+				return err
+			}
+			defer hub.RemovePID(root)
 			fmt.Fprintf(os.Stderr, "sindri hub listening at %s\n", h.SocketPath())
 			return h.Serve()
 		},
@@ -217,7 +244,10 @@ func agentStartCmd() *cobra.Command {
 			if !hub.IsRunning(root) {
 				return fmt.Errorf("no hub running — start one first: 'sindri hub &' (agents need a persistent hub)")
 			}
-			cl := client.Dial(root)
+			cl, err := dialHub(root)
+			if err != nil {
+				return err
+			}
 			defer cl.Close()
 			if err := cl.Launch(args[0], shell); err != nil {
 				return err

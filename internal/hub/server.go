@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime"
 	"strconv"
 	"time"
 )
@@ -282,6 +283,13 @@ func (h *Hub) Serve() error {
 	// agent channels (D11).
 	if err := h.ServeAgents(); err != nil {
 		return err
+	}
+	// macOS: unix sockets can't cross the podman VM boundary, so also serve the
+	// agent surface over a loopback TCP channel (token-authenticated).
+	if runtime.GOOS == "darwin" {
+		if err := h.serveAgentTCP(); err != nil {
+			return err
+		}
 	}
 	h.healPlannerTasks() // a planner can't hold a backlog task — release any stale claim
 	// Seed the task cache so the board is populated from the start. A failure here

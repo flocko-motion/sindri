@@ -45,6 +45,29 @@ func DialSocket(socketPath string) *HTTP {
 // Dial returns a client for the hub serving root's control socket.
 func Dial(root string) *HTTP { return DialSocket(hub.SocketPath(root)) }
 
+// DialTCP returns a client that talks to the hub over TCP, presenting token on
+// every request as its identity. Used by the in-pod browser on macOS, where a
+// bind-mounted unix socket can't be connected to across the podman VM boundary, so
+// the hub serves a loopback TCP channel and the token stands in for the socket.
+func DialTCP(addr, token string) *HTTP {
+	return &HTTP{
+		base: "http://" + addr,
+		hc:   &http.Client{Transport: &tokenTransport{token: token, rt: http.DefaultTransport}},
+	}
+}
+
+// tokenTransport adds the agent's bearer token to every request.
+type tokenTransport struct {
+	token string
+	rt    http.RoundTripper
+}
+
+func (t *tokenTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context()) // don't mutate the caller's request (RoundTripper contract)
+	r.Header.Set("X-Sindri-Token", t.token)
+	return t.rt.RoundTrip(r)
+}
+
 // Close is a no-op (kept so HTTP satisfies the same interface as *hub.Hub).
 func (c *HTTP) Close() error { return nil }
 

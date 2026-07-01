@@ -1,9 +1,9 @@
 // package: main (sindri-worker) / main
 // type:    entrypoint (the agent's thin "browser")
-// job:     a role-agnostic client with NO built-in subcommands. It dials the
-//          hub over its mounted socket (its identity); with no args the hub says
-//          what to do next (GET /directive), else it forwards a verb to the hub
-//          (POST /exec) and streams the result. The hub decides; the agent obeys.
+// job:     a role-agnostic client with NO built-in subcommands. It dials the hub
+//          (a mounted unix socket on Linux, or a token-authed loopback TCP channel
+//          on macOS — see dialHub); with no args the hub says what to do next (GET
+//          /directive), else it forwards a verb (POST /exec) and streams output.
 // limits:  knows no domain logic and no command tree.
 package main
 
@@ -15,11 +15,7 @@ import (
 )
 
 func main() {
-	sock := os.Getenv("SINDRI_SOCKET")
-	if sock == "" {
-		sock = "/run/sindri/sock"
-	}
-	c := client.DialSocket(sock)
+	c := dialHub()
 	args := os.Args[1:]
 
 	// No args → the hub tells you exactly what to do next (one directive, not a
@@ -60,4 +56,18 @@ func main() {
 		os.Exit(1)
 	}
 	os.Exit(exit)
+}
+
+// dialHub connects to the hub the way the hub told us to: over the loopback TCP
+// channel with a token when SINDRI_HUB_ADDR is set (macOS, where the unix socket
+// can't cross the podman VM boundary), otherwise over the mounted unix socket.
+func dialHub() *client.HTTP {
+	if addr := os.Getenv("SINDRI_HUB_ADDR"); addr != "" {
+		return client.DialTCP(addr, os.Getenv("SINDRI_TOKEN"))
+	}
+	sock := os.Getenv("SINDRI_SOCKET")
+	if sock == "" {
+		sock = "/run/sindri/sock"
+	}
+	return client.DialSocket(sock)
 }

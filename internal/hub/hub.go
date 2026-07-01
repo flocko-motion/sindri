@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -42,6 +43,12 @@ type Hub struct {
 	mu      sync.Mutex              // guards agentLn
 	agentLn map[string]net.Listener // per-agent socket listeners (identity-by-socket)
 	events  *bus                    // change notifications for /events
+
+	// macOS only: a bind-mounted unix socket can't be connected to across the
+	// podman VM boundary, so agents reach the hub over a loopback TCP channel
+	// authenticated by a per-agent token. Zero/nil on Linux (unix sockets suffice).
+	agentTCPLn   net.Listener
+	agentTCPPort int
 
 	lcMu      sync.Mutex        // guards lifecycle
 	lifecycle map[string]string // transient launch/stop intent: name -> "launching"|"stopping"
@@ -126,7 +133,8 @@ func New(root string) (*Hub, error) {
 	if err := os.MkdirAll(filepath.Join(dir, "sockets"), 0o755); err != nil {
 		return nil, fmt.Errorf("create .sindri: %w", err)
 	}
-	ensureGitignore(root) // keep the hub's process artifacts out of the repo
+	ensureGitignore(root)   // keep the hub's process artifacts out of the repo's status
+	ensureSindriIgnore(dir) // and make .sindri/ self-ignoring — it holds secrets
 	st, err := store.Open(filepath.Join(dir, "hub.db"))
 	if err != nil {
 		return nil, err
@@ -140,6 +148,24 @@ func New(root string) (*Hub, error) {
 // history, backups, and snapshots — a lot of churn). `.todos/` is deliberately
 // NOT ignored: task data is tracked.
 var hubIgnores = []string{".sindri/", ".worktrees/"}
+
+// sindriSelfIgnore is written to .sindri/.gitignore on every hub start. A nested
+// ".gitignore" of "*" ignores the whole directory (including itself), so .sindri/
+// — which holds Claude credentials, agent tokens, the db, and sockets — can never
+// be committed, even in a repo whose root .gitignore never learned about it (or if
+// that entry is later removed). This is the guarantee for the secret-bearing dir;
+// the root .gitignore entry (see hubIgnores) is just for a clean `git status`.
+const sindriSelfIgnore = "# sindri hub state — credentials, tokens, db, sockets. Never commit.\n*\n"
+
+// ensureSindriIgnore writes .sindri/.gitignore unconditionally (idempotent) so the
+// secret-bearing hub dir stays self-protecting regardless of the repo's own config.
+// Best-effort and loud on failure: it never blocks startup.
+func ensureSindriIgnore(dir string) {
+	path := filepath.Join(dir, ".gitignore")
+	if err := os.WriteFile(path, []byte(sindriSelfIgnore), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "hub: WARNING — could not write %s: %v\n", path, err)
+	}
+}
 
 // ensureGitignore appends any missing hub-artifact patterns to the repo's
 // .gitignore (creating it if absent), idempotently — so a fresh project never
@@ -220,6 +246,9 @@ func (h *Hub) agentStatus(name string, running bool, phase string) string {
 // Close shuts agent listeners and releases the store.
 func (h *Hub) Close() error {
 	h.closeAgents()
+	if h.agentTCPLn != nil {
+		h.agentTCPLn.Close()
+	}
 	return h.store.Close()
 }
 
@@ -406,6 +435,20 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 	_ = pod.Rm(cName) // clear any stale container with this name
 
 	env := map[string]string{"SINDRI_AGENT": name, "COLORTERM": "truecolor"}
+	// macOS: the pod can't connect to the bind-mounted unix socket across the VM
+	// boundary, so point the worker at the loopback TCP channel with its token. On
+	// Linux these are unset and the worker uses /run/sindri/sock (below).
+	if runtime.GOOS == "darwin" {
+		if h.agentTCPPort == 0 {
+			return fmt.Errorf("agent TCP channel not started — launch needs a persistent hub")
+		}
+		token, terr := h.AgentToken(name)
+		if terr != nil {
+			return terr
+		}
+		env["SINDRI_HUB_ADDR"] = fmt.Sprintf("host.containers.internal:%d", h.agentTCPPort)
+		env["SINDRI_TOKEN"] = token
+	}
 	mounts := []pod.Mount{
 		{Host: wt, Container: "/workspace", Mode: "rw"},
 		// The agent's own socket — its sole channel to the hub, its identity.
@@ -440,12 +483,12 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 	} else {
 		// Set up the agent's Claude home (credentials, config, system prompt) and
 		// mount it so Claude runs authenticated.
-		home, cfg, hasCreds, err := h.prepareClaudeHome(name, a.Role)
+		home, cfg, hasCreds, err := h.prepareClaudeHome(name, a.Role, buf)
 		if err != nil {
 			return err
 		}
 		if !hasCreds {
-			return fmt.Errorf("no Claude credentials on host (~/.claude/.credentials.json) — launch with --shell, or log in")
+			return fmt.Errorf("no Claude credentials on host (~/.claude/.credentials.json, or the macOS Keychain) — log in with `claude`, or launch with --shell")
 		}
 		mounts = append(mounts,
 			pod.Mount{Host: home, Container: "/home/sindri/.claude", Mode: "rw"},
