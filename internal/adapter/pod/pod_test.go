@@ -1,6 +1,7 @@
 package pod
 
 import (
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -10,7 +11,7 @@ func TestCheckReportsMissingPodman(t *testing.T) {
 	orig := Binary
 	Binary = "podman-does-not-exist-xyz"
 	t.Cleanup(func() { Binary = orig })
-	err := Check()
+	err := Check(io.Discard)
 	if err == nil {
 		t.Fatal("expected an error when podman is not on PATH")
 	}

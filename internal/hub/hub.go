@@ -338,10 +338,14 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 	if !ok {
 		return fmt.Errorf("no such agent %q — run 'sindri new %s' first", name, name)
 	}
+	// Tee the image build (+ our progress notes) into the agent's launch buffer
+	// so the TUI live-screen region shows it while the pod comes up.
+	buf := h.newLaunchBuf(name)
 	// Pre-flight: podman must be installed and reachable. Fail fast with an
 	// actionable message (before touching status or staging an image build) rather
-	// than surfacing a cryptic exit code mid-build.
-	if err := pod.Check(); err != nil {
+	// than surfacing a cryptic exit code mid-build. On macOS/Windows this also
+	// auto-starts a stopped podman VM, teeing that progress into the launch buffer.
+	if err := pod.Check(io.MultiWriter(os.Stderr, buf)); err != nil {
 		return err
 	}
 	// Status → launching immediately (cleared by State once the pod is up); on
@@ -355,9 +359,6 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 			h.notify()
 		}
 	}()
-	// Tee the image build (+ our progress notes) into the agent's launch buffer
-	// so the TUI live-screen region shows it while the pod comes up.
-	buf := h.newLaunchBuf(name)
 	if err := container.Ensure(h.root, io.MultiWriter(os.Stderr, buf)); err != nil {
 		return err
 	}

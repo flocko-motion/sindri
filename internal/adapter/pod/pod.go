@@ -8,9 +8,12 @@
 package pod
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -101,24 +104,104 @@ func ExecInteractive(name string, args ...string) error {
 // fails with a clear reason instead of a cryptic exit code mid-build. `podman
 // info` is the canonical probe: on macOS/Windows it fails until the podman VM is
 // started, and on Linux until the service is up.
-func Check() error {
+//
+// On macOS/Windows podman runs in a VM, and a fresh boot leaves it stopped. When
+// the VM merely needs starting, Check starts it automatically (teeing progress to
+// w) and re-probes — the user asked to launch an agent, and starting the VM is
+// the unavoidable prerequisite. It deliberately never runs `podman machine init`:
+// that provisions a VM image and ~100GiB of disk, too heavy to do behind the
+// user's back, so a missing machine yields an actionable "run init once" error.
+func Check(w io.Writer) error {
 	if _, err := exec.LookPath(Binary); err != nil {
 		return fmt.Errorf("%s not found on PATH — install podman (https://podman.io) to run agents", Binary)
 	}
-	out, err := exec.Command(Binary, "info").CombinedOutput()
-	if err == nil {
+	detail, ok := reachable()
+	if ok {
 		return nil
 	}
-	detail := strings.TrimSpace(string(out))
-	if i := strings.LastIndexByte(detail, '\n'); i >= 0 { // last line carries the reason
-		detail = strings.TrimSpace(detail[i+1:])
+	// podman is installed but `podman info` failed. On macOS/Windows this is
+	// usually just a stopped VM — start it (but never create one).
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		switch machineState() {
+		case machineStopped:
+			fmt.Fprintln(w, "podman VM is stopped — starting it (this can take a minute)…")
+			if out, err := exec.Command(Binary, "machine", "start").CombinedOutput(); err != nil {
+				return fmt.Errorf("podman VM is stopped and `podman machine start` failed: %s", lastLine(string(out)))
+			}
+			if _, ok := reachable(); ok {
+				fmt.Fprintln(w, "podman VM is up.")
+				return nil
+			}
+		case machineMissing:
+			return fmt.Errorf("no podman VM exists yet — on %s podman runs in a VM.\n"+
+				"Create and start it once with:\n"+
+				"    podman machine init\n"+
+				"    podman machine start\n"+
+				"then re-run. (sindri auto-starts the VM after that, but won't create it for "+
+				"you — `podman machine init` downloads a VM image and provisions ~100GiB of disk.)", runtime.GOOS)
+		}
 	}
 	if detail == "" {
-		detail = err.Error()
+		detail = "podman info failed"
 	}
 	return fmt.Errorf("podman is installed but not reachable: %s\n"+
 		"On macOS/Windows podman runs in a VM — run `podman machine init` (first time) then "+
 		"`podman machine start`, and verify with `podman info`", detail)
+}
+
+// reachable reports whether `podman info` succeeds, returning the trimmed last
+// line of its output (which carries the reason) when it doesn't.
+func reachable() (detail string, ok bool) {
+	out, err := exec.Command(Binary, "info").CombinedOutput()
+	if err == nil {
+		return "", true
+	}
+	return lastLine(string(out)), false
+}
+
+// machineStatus is the coarse state of the podman VM, as far as pre-flight cares.
+type machineStatus int
+
+const (
+	machineUnknown machineStatus = iota // couldn't tell (not macOS/Windows, or query failed)
+	machineMissing                      // no VM has been created (`podman machine init` needed)
+	machineStopped                      // a VM exists but none is running
+	machineRunning                      // a VM is already running
+)
+
+// machineState reports the podman VM state via `podman machine list`. It returns
+// machineUnknown on any query/parse error so callers fall back to a plain error
+// rather than acting on a guess.
+func machineState() machineStatus {
+	out, err := exec.Command(Binary, "machine", "list", "--format", "json").Output()
+	if err != nil {
+		return machineUnknown
+	}
+	var machines []struct {
+		Running bool `json:"Running"`
+	}
+	if err := json.Unmarshal(out, &machines); err != nil {
+		return machineUnknown
+	}
+	if len(machines) == 0 {
+		return machineMissing
+	}
+	for _, m := range machines {
+		if m.Running {
+			return machineRunning
+		}
+	}
+	return machineStopped
+}
+
+// lastLine returns the trimmed final non-empty line of s (podman writes the
+// actionable reason last), or "" when s is blank.
+func lastLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.LastIndexByte(s, '\n'); i >= 0 {
+		s = strings.TrimSpace(s[i+1:])
+	}
+	return s
 }
 
 // Running reports whether a container exists and is running.
