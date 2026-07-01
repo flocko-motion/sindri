@@ -2,8 +2,8 @@
 // type:    command
 // job:     wires `brokkr lint` — no argument runs every linter (deadcode, loc,
 //          comments, openspec) with a summary; `brokkr lint <name>` runs one.
-//          Always ends with an "=== EXIT N ===" marker and exits non-zero on any
-//          violation, so it can gate CI.
+//          Exits non-zero on any violation, so it can gate CI; add --tail to also
+//          print the exit status inline.
 // limits:  Go analyses live in internal/lint, openspec validation in
 //          adapter/spec; this only wires flags, dispatch, and exit codes.
 package main
@@ -29,8 +29,8 @@ func newLintCmd() *cobra.Command {
 		Short: "Run the quality gate: lint (all) or lint <deadcode|loc|comments|openspec>",
 		Long: "Run the project's static-analysis linters. With no argument, runs them " +
 			"all (deadcode, loc, comments, openspec) with a summary; with a linter " +
-			"name, runs just that one. Exits non-zero on any violation and always " +
-			"prints a final '=== EXIT N ===' marker, so it can gate CI.\n\n" +
+			"name, runs just that one. Exits non-zero on any violation, so it can gate " +
+			"CI (add --tail to also print the exit status inline).\n\n" +
 			"Use --ignore to exclude files you can't fix (e.g. generated code): a " +
 			"pattern with no '/' matches a basename at any depth (--ignore='*.gen.go'), " +
 			"one containing '/' matches the relative path with '*'/'**' wildcards " +
@@ -38,6 +38,9 @@ func newLintCmd() *cobra.Command {
 			"the flag for several patterns. It applies to the Go linters, not openspec.\n\n" +
 			commentsConvention,
 		Args: cobra.MaximumNArgs(1),
+		// lint reports failures itself and signals them with an exitCodeError (empty
+		// message); silence cobra's own error echo for it.
+		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := cmd.OutOrStdout()
 			which := ""
@@ -129,24 +132,21 @@ func runAll(out io.Writer, tags string, maxLines int, ig *lint.Ignore) (bool, er
 	return failed, nil
 }
 
-// runLint runs one linter's body and always finishes with an "=== EXIT N ==="
-// marker on out, so a caller (often an agent) reading the output learns the
-// result without appending its own `echo "$?"`. It also recovers from a panic,
-// turning it into a loud EXIT 1 with the stack rather than an opaque crash with
-// no marker. On failure it exits non-zero; on success it returns so the normal
-// command teardown still runs.
+// runLint runs one linter's body, recovering a panic into a loud failure with its
+// stack rather than an opaque crash. On failure it returns an exitCodeError so main
+// exits non-zero (never os.Exit here — that would bypass the --tail flush); on
+// success it returns nil. Use --tail to get the exit status printed inline.
 func runLint(out io.Writer, fn func() (bool, error)) error {
-	if lintOutcome(out, fn) != 0 {
-		os.Exit(1)
+	if code := lintOutcome(out, fn); code != 0 {
+		return exitCodeError{code}
 	}
 	return nil
 }
 
 // lintOutcome runs fn under a panic recover, reports the failure reason (a hard
-// error or a panic with its stack) to out, always prints the "=== EXIT N ==="
-// marker, and returns the exit code (1 if violations were found, an error
-// occurred, or fn panicked; else 0). Split from runLint so it's testable without
-// os.Exit.
+// error or a panic with its stack) to out, and returns the exit code (1 if
+// violations were found, an error occurred, or fn panicked; else 0). Split from
+// runLint so it's testable in isolation.
 func lintOutcome(out io.Writer, fn func() (bool, error)) int {
 	code := func() (code int) {
 		defer func() {
@@ -165,7 +165,6 @@ func lintOutcome(out io.Writer, fn func() (bool, error)) int {
 		}
 		return 0
 	}()
-	fmt.Fprintf(out, "=== EXIT %d ===\n", code)
 	return code
 }
 

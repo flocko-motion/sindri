@@ -21,8 +21,12 @@ sindri:
 	go build -ldflags "-X main.version=$(VERSION)" -o bin/sindri ./cmd/sindri/
 
 # The single, role-agnostic agent browser (was sindri-worker + sindri-review).
+# It runs ONLY inside the Linux pod (mounted read-only at runtime), never on the
+# host, so it's always built for linux/$(ARCH) — native on a Linux host, a cross-
+# compile on macOS/Windows. Pure Go, so CGO_ENABLED=0 keeps the cross-build
+# hermetic. ARCH is the host's Go arch, which matches the native podman VM.
 worker:
-	go build -o bin/sindri-worker ./cmd/sindri-worker/
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go build -o bin/sindri-worker ./cmd/sindri-worker/
 
 # brokkr — the toolbelt: code map + linters, no orchestration.
 brokkr:
@@ -38,13 +42,13 @@ install: build ## build, then install the binaries to ~/.local/bin
 	mv bin/brokkr $(PREFIX)/brokkr
 
 # Rebuild image when the (now embedded) build context changes. The agent binary
-# is mounted at runtime, not baked in; only yq is staged into the context (the
-# Dockerfile COPYs it), mirroring what container.Ensure does at launch.
+# is mounted at runtime, not baked in; arch-specific tools (yq, yazi) are
+# downloaded in-container by the Dockerfile, mirroring what container.Ensure does
+# at launch.
 CONTAINER_DEPS := $(shell find internal/container/buildctx -type f 2>/dev/null)
 .image-stamp: $(CONTAINER_DEPS)
 	rm -rf bin/buildctx
 	cp -r internal/container/buildctx bin/buildctx
-	cp "$$(command -v yq)" bin/buildctx/yq
 	podman build -t sindri-agent:test -f bin/buildctx/Dockerfile bin/buildctx
 	touch .image-stamp
 

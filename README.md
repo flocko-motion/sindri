@@ -246,7 +246,7 @@ tools. Works on any repo, no orchestration involved.
 ### Linters — `brokkr lint`
 
 ```bash
-brokkr lint                # run them all (gates submit/CI); ends with "=== EXIT N ==="
+brokkr lint                # run them all (gates submit/CI); exits non-zero on any violation
 brokkr lint deadcode       # unreachable functions (RTA); tests are live code
 brokkr lint loc            # files over the 700-line limit
 brokkr lint comments       # canonical file headers + documented exported funcs/types
@@ -255,8 +255,10 @@ brokkr lint openspec       # validate openspec specs (skips if unused/uninstalle
 
 - `brokkr lint` (no arg) runs every linter with a summary; `brokkr lint <name>`
   runs just one.
-- Every run ends with a loud **`=== EXIT N ===`** marker and turns a panic into a
-  marked failure — so you (or an agent) never have to append `echo "$?"`.
+- Exits non-zero on any violation and turns a panic into a marked failure, so it
+  gates CI. Add **`--tail N`** (on any brokkr command) to buffer the output, print
+  only its last N lines, and end with a **`=== exit: <code> ===`** marker — the
+  exit status inline, so you (or an agent) never append `echo "$?"`.
 - **`deadcode`** always analyses test packages (tests are live code), and skips
   with a note if the `go` toolchain isn't on PATH.
 - **`comments`** enforces the project convention: every non-test `.go` file opens
