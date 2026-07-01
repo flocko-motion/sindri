@@ -11,9 +11,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/pod"
@@ -45,7 +42,10 @@ func newCoauthorCmd() *cobra.Command {
 			if err := ensureHubRunning(root); err != nil {
 				return err
 			}
-			cl := client.Dial(root)
+			cl, err := dialHub(root)
+			if err != nil {
+				return err
+			}
 			defer cl.Close()
 
 			name, err := ensureCoauthor(cl)
@@ -61,44 +61,14 @@ func newCoauthorCmd() *cobra.Command {
 	}
 }
 
-// ensureHubRunning starts a detached background `sindri hub` for root when none is
-// running, then waits until its control socket answers. The hub outlives this
-// command (own session via Setsid), so the coauthor — and `sindri tui` in another
-// terminal — keep working after you detach. Its output goes to .sindri/hub.log.
+// ensureHubRunning starts a detached background hub for root when none is running.
+// A hub that's already up is left as-is (dialHub reconciles its version).
 func ensureHubRunning(root string) error {
 	if hub.IsRunning(root) {
 		return nil
 	}
-	self, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("locate the sindri binary: %w", err)
-	}
-	fmt.Fprintln(os.Stderr, "no hub running — starting one in the background…")
-	if err := os.MkdirAll(filepath.Join(root, ".sindri"), 0o755); err != nil {
-		return err
-	}
-	logPath := filepath.Join(root, ".sindri", "hub.log")
-	logf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return fmt.Errorf("open hub log: %w", err)
-	}
-	defer logf.Close()
-	c := exec.Command(self, "hub")
-	c.Dir = root
-	c.Stdout, c.Stderr = logf, logf
-	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // detach: own session, survives us
-	if err := c.Start(); err != nil {
-		return fmt.Errorf("start hub: %w", err)
-	}
-	_ = c.Process.Release()
-	for i := 0; i < 100; i++ { // ~10s for the socket to come up
-		if hub.IsRunning(root) {
-			fmt.Fprintf(os.Stderr, "hub up (log: %s)\n", logPath)
-			return nil
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return fmt.Errorf("hub did not come up within 10s — see %s", logPath)
+	fmt.Fprintln(os.Stderr, "no hub running…")
+	return startHub(root)
 }
 
 // ensureCoauthor returns the existing coauthor agent's name, creating one (auto

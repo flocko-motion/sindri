@@ -26,6 +26,9 @@ func newTuiCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := reconcileHubVersion(root); err != nil {
+				return err
+			}
 			return tui.Run(root)
 		},
 	}

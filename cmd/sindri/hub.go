@@ -20,7 +20,6 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/adapter/pod"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
-	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/spf13/cobra"
@@ -69,7 +68,7 @@ func repoRoot() (string, error) {
 // in-process hub.
 func open(root string) (backend, error) {
 	if hub.IsRunning(root) {
-		return client.Dial(root), nil
+		return dialHub(root)
 	}
 	return hub.New(root)
 }
@@ -106,6 +105,12 @@ func newHubCmd() *cobra.Command {
 				return err
 			}
 			defer h.Close()
+			// Stamp this process (pid + build version) as the repo's hub, so a second
+			// hub can't start for it and clients can detect a stale-version hub.
+			if err := hub.WritePID(root, version); err != nil {
+				return err
+			}
+			defer hub.RemovePID(root)
 			fmt.Fprintf(os.Stderr, "sindri hub listening at %s\n", h.SocketPath())
 			return h.Serve()
 		},
@@ -217,7 +222,10 @@ func agentStartCmd() *cobra.Command {
 			if !hub.IsRunning(root) {
 				return fmt.Errorf("no hub running — start one first: 'sindri hub &' (agents need a persistent hub)")
 			}
-			cl := client.Dial(root)
+			cl, err := dialHub(root)
+			if err != nil {
+				return err
+			}
 			defer cl.Close()
 			if err := cl.Launch(args[0], shell); err != nil {
 				return err
