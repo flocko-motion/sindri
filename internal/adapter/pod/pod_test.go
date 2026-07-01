@@ -6,6 +6,19 @@ import (
 	"testing"
 )
 
+func TestCheckReportsMissingPodman(t *testing.T) {
+	orig := Binary
+	Binary = "podman-does-not-exist-xyz"
+	t.Cleanup(func() { Binary = orig })
+	err := Check()
+	if err == nil {
+		t.Fatal("expected an error when podman is not on PATH")
+	}
+	if !strings.Contains(err.Error(), "not found on PATH") {
+		t.Errorf("error should name the missing binary, got: %v", err)
+	}
+}
+
 func TestRunArgsDeterministicAndComplete(t *testing.T) {
 	got := RunArgs(RunOpts{
 		Name:   "sindri-brokkr",

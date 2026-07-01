@@ -96,6 +96,31 @@ func ExecInteractive(name string, args ...string) error {
 	return c.Run()
 }
 
+// Check verifies podman is installed and its service/VM is reachable, returning
+// an actionable error otherwise. It's a fast pre-flight so launching an agent
+// fails with a clear reason instead of a cryptic exit code mid-build. `podman
+// info` is the canonical probe: on macOS/Windows it fails until the podman VM is
+// started, and on Linux until the service is up.
+func Check() error {
+	if _, err := exec.LookPath(Binary); err != nil {
+		return fmt.Errorf("%s not found on PATH — install podman (https://podman.io) to run agents", Binary)
+	}
+	out, err := exec.Command(Binary, "info").CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	detail := strings.TrimSpace(string(out))
+	if i := strings.LastIndexByte(detail, '\n'); i >= 0 { // last line carries the reason
+		detail = strings.TrimSpace(detail[i+1:])
+	}
+	if detail == "" {
+		detail = err.Error()
+	}
+	return fmt.Errorf("podman is installed but not reachable: %s\n"+
+		"On macOS/Windows podman runs in a VM — run `podman machine init` (first time) then "+
+		"`podman machine start`, and verify with `podman info`", detail)
+}
+
 // Running reports whether a container exists and is running.
 func Running(name string) bool {
 	out, err := exec.Command(Binary, "inspect", "-f", "{{.State.Running}}", name).Output()
