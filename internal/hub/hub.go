@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -42,6 +43,12 @@ type Hub struct {
 	mu      sync.Mutex              // guards agentLn
 	agentLn map[string]net.Listener // per-agent socket listeners (identity-by-socket)
 	events  *bus                    // change notifications for /events
+
+	// macOS only: a bind-mounted unix socket can't be connected to across the
+	// podman VM boundary, so agents reach the hub over a loopback TCP channel
+	// authenticated by a per-agent token. Zero/nil on Linux (unix sockets suffice).
+	agentTCPLn   net.Listener
+	agentTCPPort int
 
 	lcMu      sync.Mutex        // guards lifecycle
 	lifecycle map[string]string // transient launch/stop intent: name -> "launching"|"stopping"
@@ -239,6 +246,9 @@ func (h *Hub) agentStatus(name string, running bool, phase string) string {
 // Close shuts agent listeners and releases the store.
 func (h *Hub) Close() error {
 	h.closeAgents()
+	if h.agentTCPLn != nil {
+		h.agentTCPLn.Close()
+	}
 	return h.store.Close()
 }
 
@@ -425,6 +435,20 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 	_ = pod.Rm(cName) // clear any stale container with this name
 
 	env := map[string]string{"SINDRI_AGENT": name, "COLORTERM": "truecolor"}
+	// macOS: the pod can't connect to the bind-mounted unix socket across the VM
+	// boundary, so point the worker at the loopback TCP channel with its token. On
+	// Linux these are unset and the worker uses /run/sindri/sock (below).
+	if runtime.GOOS == "darwin" {
+		if h.agentTCPPort == 0 {
+			return fmt.Errorf("agent TCP channel not started — launch needs a persistent hub")
+		}
+		token, terr := h.AgentToken(name)
+		if terr != nil {
+			return terr
+		}
+		env["SINDRI_HUB_ADDR"] = fmt.Sprintf("host.containers.internal:%d", h.agentTCPPort)
+		env["SINDRI_TOKEN"] = token
+	}
 	mounts := []pod.Mount{
 		{Host: wt, Container: "/workspace", Mode: "rw"},
 		// The agent's own socket — its sole channel to the hub, its identity.
