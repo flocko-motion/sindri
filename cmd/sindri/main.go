@@ -8,6 +8,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/flo-at/sindri/internal/update"
@@ -27,6 +28,9 @@ func main() {
 		Short:   "Sindri — AI agent orchestrator",
 		Version: version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// Print our build on every run (to stderr, so it never pollutes piped
+			// output) — makes a stale binary obvious at a glance.
+			fmt.Fprintf(os.Stderr, "sindri %s\n", version)
 			if projectDir != "" {
 				return os.Chdir(projectDir)
 			}
