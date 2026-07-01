@@ -22,7 +22,7 @@ var version = "dev"
 func main() {
 	root := &cobra.Command{
 		Use:     "brokkr",
-		Short:   "brokkr — sindri's toolbelt: code map + linters (no orchestration)",
+		Short:   "brokkr — sindri's toolbelt: code map + linters",
 		Version: fmt.Sprintf("%s (built with %s)", version, runtime.Version()),
 		// Bare `brokkr` reports its own version and the Go toolchain it was built
 		// with — a linter must run on current Go, so its toolchain is worth seeing
