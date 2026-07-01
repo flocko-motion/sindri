@@ -10,6 +10,7 @@
 package container
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"embed"
 	"fmt"
@@ -81,16 +82,54 @@ func Ensure(projectRoot string, out io.Writer) error {
 	}
 
 	fmt.Fprintf(out, "Building agent image %s...\n", ImageName)
+	// Capture podman's output alongside streaming it, so a failure carries the
+	// actual diagnostic — not a bare "exit status 125". The hub may be running
+	// detached (its stream goes to .sindri/hub.log), so the returned error is often
+	// the only place the caller sees why.
+	var captured bytes.Buffer
 	cmd := exec.Command("podman", "build", "-t", ImageName, "-f", filepath.Join(ctxDir, "Dockerfile"), ctxDir)
-	cmd.Stdout = out
-	cmd.Stderr = out
+	cmd.Stdout = io.MultiWriter(out, &captured)
+	cmd.Stderr = io.MultiWriter(out, &captured)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("image build failed: %w", err)
+		return fmt.Errorf("podman build failed (%v):\n%s", err, buildFailureDetail(captured.String()))
 	}
 	if err := os.WriteFile(keyFile, []byte(buildKey), 0o644); err != nil {
 		return fmt.Errorf("write build key: %w", err)
 	}
 	return nil
+}
+
+// buildFailureDetail distills podman's build output for an error message: the
+// meaningful tail (its own diagnostics), plus a hint for the most common cause of
+// a pre-build failure — podman not being reachable, notably on macOS/Windows where
+// it runs in a VM that must be started. Falls back to the hint alone when podman
+// printed nothing.
+func buildFailureDetail(out string) string {
+	var lines []string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, strings.TrimRight(l, "\r"))
+		}
+	}
+	if len(lines) > 12 { // keep the tail, where podman's error lands
+		lines = lines[len(lines)-12:]
+	}
+	detail := strings.Join(lines, "\n")
+	low := strings.ToLower(out)
+	unreachable := detail == "" ||
+		strings.Contains(low, "cannot connect") ||
+		strings.Contains(low, "connection refused") ||
+		strings.Contains(low, "no such host") ||
+		strings.Contains(low, "machine") ||
+		strings.Contains(low, "is the podman")
+	if unreachable {
+		hint := "hint: podman doesn't look reachable. On macOS/Windows it runs in a VM — run `podman machine init` (first time) then `podman machine start`; check with `podman info`."
+		if detail == "" {
+			return hint
+		}
+		detail += "\n" + hint
+	}
+	return detail
 }
 
 // buildCacheDir is the per-user cache dir for the image build (recipe staging +
