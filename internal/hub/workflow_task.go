@@ -30,9 +30,13 @@ import (
 	"github.com/flo-at/sindri/internal/issue"
 )
 
-// Tasks refreshes from td and returns all cached tasks (for `task list`).
+// Tasks refreshes from td and returns all cached tasks (for `task list`). A sync
+// failure (e.g. no td store at the repo root) is surfaced, never swallowed —
+// returning a stale cache with no warning hides real misconfiguration.
 func (h *Hub) Tasks() ([]store.Task, error) {
-	_ = h.SyncTasks() // best-effort; fall back to cache on failure
+	if err := h.SyncTasks(); err != nil {
+		return nil, err
+	}
 	return h.store.AllTasks()
 }
 
@@ -72,8 +76,6 @@ func (h *Hub) CreateTask(s TaskSpec) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	_ = h.SyncTasks()
-	h.notify()
 	// td prints e.g. "CREATED td-1add0f" — return just the id.
 	id := strings.TrimSpace(out)
 	for _, f := range strings.Fields(out) {
@@ -82,6 +84,12 @@ func (h *Hub) CreateTask(s TaskSpec) (string, error) {
 			break
 		}
 	}
+	// Refresh the cache so the new task shows up; if that fails the task still
+	// exists in td, so report the id alongside the error rather than swallowing it.
+	if err := h.SyncTasks(); err != nil {
+		return id, fmt.Errorf("created %s but refreshing the task list failed: %w", id, err)
+	}
+	h.notify()
 	return id, nil
 }
 
@@ -208,7 +216,9 @@ func (h *Hub) cmdCreateTask(_ registry.Caller, args []string, out io.Writer) (in
 // task (status, approval, priority, title); `task <id>` prints that task's full
 // detail including description.
 func (h *Hub) cmdTasks(_ registry.Caller, args []string, out io.Writer) (int, error) {
-	_ = h.SyncTasks()
+	if err := h.SyncTasks(); err != nil {
+		return 1, err // surface it — don't list a stale cache as if it were current
+	}
 	if len(args) > 0 && args[0] != "list" {
 		t, err := h.TaskInfo(args[0])
 		if err != nil {
@@ -267,6 +277,22 @@ func (h *Hub) EditTask(id string, s TaskSpec) error {
 // enough to feel responsive, since external td edits don't notify the hub.
 const workPollInterval = 3 * time.Second
 
+// prRejected reports whether an agent has a rejected PR — the signal that it
+// should be revising (working), not waiting under review. A reject is a reject
+// whoever sent it, so the worker always continues its work.
+func (h *Hub) prRejected(agent string) bool {
+	prs, err := h.store.PRs()
+	if err != nil {
+		return false
+	}
+	for _, p := range prs {
+		if p.Agent == agent && p.Status == "rejected" {
+			return true
+		}
+	}
+	return false
+}
+
 // AgentDirective is the single next action the hub wants this agent to take —
 // the no-arg `sindri` answer. The hub decides exactly what to do next; the agent
 // obeys (it never has to find work for itself, and never needs a second
@@ -280,6 +306,11 @@ func (h *Hub) AgentDirective(ctx context.Context, name string) (string, error) {
 	}
 	if !ok {
 		return "", fmt.Errorf("unknown agent %q", name)
+	}
+	if a.Role == "coauthor" {
+		// Freestyle: no managed queue and no blocking. The user drives it directly
+		// in the terminal; `sindri` just reminds it of that (and of the helpers).
+		return dirCoauthor, nil
 	}
 	if a.Role == "reviewer" {
 		// Block until a pull request needs a verdict.
@@ -313,6 +344,12 @@ func (h *Hub) AgentDirective(ctx context.Context, name string) (string, error) {
 		if t, ok, _ := h.store.GetTask(st.Container); ok && t.Status != "closed" && t.Status != "approved" && t.Status != "merged" {
 			switch st.Phase {
 			case "submitted":
+				// A rejected milestone PR means revise & resubmit — resume the
+				// container's current subtask rather than waiting under review.
+				if h.prRejected(name) {
+					_ = h.store.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "working"})
+					return dirWorking(st.Task), nil
+				}
 				return dirSubmitted, nil
 			case "working":
 				return dirWorking(st.Task), nil
@@ -331,6 +368,13 @@ func (h *Hub) AgentDirective(ctx context.Context, name string) (string, error) {
 	case "working":
 		return dirWorking(st.Task), nil
 	case "submitted":
+		// Self-heal: a rejected PR means revise & resubmit, so a worker sitting in
+		// "submitted" with a rejected PR should be working, not waiting under review
+		// (recovers any state left "submitted" by an older reject path).
+		if h.prRejected(name) {
+			_ = h.store.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Phase: "working"})
+			return dirWorking(st.Task), nil
+		}
 		return dirSubmitted, nil
 	default: // idle — claim the next task, blocking until one exists
 		return h.waitForWork(ctx, func() (string, bool, error) { return h.claimNext(name) })

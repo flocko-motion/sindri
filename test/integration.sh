@@ -54,16 +54,19 @@ if [[ ! -x "$GH_BIN" ]]; then
     (cd "$SINDRI_ROOT/gh-local" && go build -o gh .)
 fi
 
-# ── Stage host binaries for container build ─────────────────────────────────
-mkdir -p "$SINDRI_ROOT/bin"
-cp "$(which td)" "$SINDRI_ROOT/bin/td"
-cp "$(which yq)" "$SINDRI_ROOT/bin/yq"
+# ── Stage the embedded build context (Dockerfile, entrypoint, shims) + yq ────
+# The build context now lives under internal/container/buildctx (embedded in the
+# binary at runtime); stage a copy with yq for this standalone podman build.
+CTXDIR="$SINDRI_ROOT/bin/buildctx"
+rm -rf "$CTXDIR"
+cp -r "$SINDRI_ROOT/internal/container/buildctx" "$CTXDIR"
+cp "$(which yq)" "$CTXDIR/yq"
 
 # ── Build container image ──────────────────────────────────────────────────
 IMAGE="sindri-agent:test"
 section "BUILD"
 log "Building container image: $IMAGE"
-podman build -t "$IMAGE" -f "$SINDRI_ROOT/container/Dockerfile" "$SINDRI_ROOT"
+podman build -t "$IMAGE" -f "$CTXDIR/Dockerfile" "$CTXDIR"
 
 # ── Create throwaway workspace ──────────────────────────────────────────────
 WORKDIR=$(mktemp -d /tmp/sindri-test-XXXX)

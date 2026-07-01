@@ -400,7 +400,7 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 1 {
 			return m.agentStartStop()
 		}
-	case "a": // agents: attach to the live tmux session (out-of-band)
+	case "a": // agents: attach to the live tmux session · prs: approve (the human gate)
 		if m.tab == 1 {
 			if a, ok := m.selAgent(); ok {
 				if a.Status == "down" {
@@ -412,8 +412,15 @@ func (m *model) onKey(k string) tea.Cmd {
 				}
 			}
 		}
-	case "m": // prs: merge (the human gate)
-		if m.tab == 2 {
+		if m.tab == 2 && m.selID() != "" { // approve the PR yourself, so it can be merged
+			return m.action(func(id string) error { return m.cl.ApprovePR(id) })
+		}
+	case "m": // prs: merge (the human gate) — if it isn't approved, offer to approve first
+		if m.tab == 2 && m.selID() != "" {
+			if !m.selPRApproved() {
+				m.openApproveMergeChoice(m.selID())
+				return nil
+			}
 			return m.action(func(id string) error { _, err := m.cl.Merge(id); return err })
 		}
 	case "N": // new task (tasks) / new agent (agents)
@@ -511,7 +518,7 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.selID() != "" { // open the full-screen detail modal
 			m.modal = true
 			m.detail.SetHeight(modalContentHeight(m.h))
-			m.detail.SetTotal(len(m.detailLines()))
+			m.detail.SetTotal(len(m.modalLines()))
 			m.detail.ScrollTop()
 			return nil
 		}
@@ -602,17 +609,6 @@ func (m model) rows() []row {
 	}
 }
 
-func (m model) detailLines() []string {
-	switch m.tab {
-	case 0:
-		return m.taskDetailLines()
-	case 1:
-		return m.agentDetailLines()
-	default:
-		return m.prDetailLines()
-	}
-}
-
 func (m model) contextFooter() string {
 	if m.rightFocus { // focused on a detail cross-reference (Tasks/PRs)
 		return "j/k item · enter details · g goto · y copy"
@@ -623,7 +619,7 @@ func (m model) contextFooter() string {
 	case 1:
 		return "N new · S start/stop · t tell · a attach · D delete"
 	default:
-		return "V verify · A agent-review · R reject · L lint · m merge"
+		return "V verify · a approve · R reject · A agent-review · L lint · m merge"
 	}
 }
 
@@ -662,11 +658,11 @@ func (m model) View() string {
 		return choiceModal(m.choice.title, m.choice.options, m.choice.cursor, m.w, m.h)
 	}
 	if m.modal {
-		title, lines := m.modalTitle(), m.detailLines()
+		title := m.modalTitle()
 		if m.modalOverride != nil { // e.g. the task modal opened from the PRs tab
-			title, lines = m.modalOverrideTitle, m.modalOverride
+			title = m.modalOverrideTitle
 		}
-		return modal(title, lines, m.detail, m.w, m.h)
+		return modal(title, m.modalLines(), m.detail, m.w, m.h)
 	}
 	top := tabStrip(labels, m.tab, m.w)
 	var body string

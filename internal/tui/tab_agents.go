@@ -35,7 +35,7 @@ func (m *model) openNewAgentChoice() {
 	cl := m.cl
 	m.choice = choiceModalState{
 		active: true, title: "new agent role",
-		options: []string{"worker", "reviewer", "planner"}, values: []string{"worker", "reviewer", "planner"},
+		options: []string{"worker", "reviewer", "planner", "coauthor"}, values: []string{"worker", "reviewer", "planner", "coauthor"},
 		apply: func(v string) tea.Cmd {
 			// Register the identity, then auto-start its pod. Launch runs in the
 			// background (it can build the image) — the hub's lifecycle + /events
@@ -68,7 +68,7 @@ func (m *model) openDeleteChoice(id string) {
 			if v != "delete" {
 				return nil
 			}
-			return mutateThenRefresh(cl, func() { _ = cl.DeleteAgent(id) })
+			return mutateThenRefresh(cl, func() error { return cl.DeleteAgent(id) })
 		},
 	}
 }
@@ -196,7 +196,10 @@ func (m model) agentActionable() []metaItem {
 // paneLines is the live-screen region: the captured tmux screen when running,
 // otherwise a message reflecting the hub's lifecycle status.
 func (m model) paneLines() []string {
-	a, _ := m.selAgent()
+	a, ok := m.selAgent()
+	if !ok { // nothing selected — usually because there are no agents yet
+		return []string{dimStyle.Render("(no agents)")}
+	}
 	if m.agentView == "pod" { // pod-info view (selected the container item)
 		if strings.TrimSpace(m.agentPod) == "" {
 			return []string{dimStyle.Render("(fetching pod info…)")}

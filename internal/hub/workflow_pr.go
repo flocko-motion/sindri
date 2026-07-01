@@ -372,15 +372,30 @@ func (h *Hub) ApprovePR(prID string) error {
 	return nil
 }
 
-// RejectPR is the human reject path (TUI/CLI): tells the worker to STOP and wait,
-// and leaves the PR rejected so no reviewer can approve over the user.
+// RejectPR is the human reject path (TUI/CLI): sends the owning worker back to
+// its branch to address the feedback and resubmit, with the [user] voice.
 func (h *Hub) RejectPR(prID, feedback string) error { return h.reject(prID, feedback, true) }
 
+// fileList renders a blocking-files list for a user message: all of them when
+// few, else the first few plus an "and N more" tail so the message stays short.
+// Empty (git couldn't enumerate) falls back to a generic phrase.
+func fileList(files []string) string {
+	switch {
+	case len(files) == 0:
+		return "the conflicting files"
+	case len(files) <= 5:
+		return strings.Join(files, ", ")
+	default:
+		return strings.Join(files[:4], ", ") + fmt.Sprintf(", and %d more", len(files)-4)
+	}
+}
+
 // reject rejects a PR with feedback and routes it to the owning worker
-// (object-addressed; the worker is never named by the rejecter). byUser
-// distinguishes the two senders: an agent reviewer (cmdReject) sends the worker
-// back to fix-and-resubmit; the human (RejectPR) instead tells the worker to STOP
-// and wait — the PR stays rejected, so no reviewer can approve over the user.
+// (object-addressed; the worker is never named by the rejecter). A rejection is
+// "revise this", not "abandon it": whoever rejects — an agent reviewer
+// (cmdReject) or the human (RejectPR) — the owner returns to its branch to
+// address the feedback and resubmit. byUser only selects the message's voice
+// ([user] vs [reviewer]) so the worker knows who asked.
 func (h *Hub) reject(prID, feedback string, byUser bool) error {
 	pr, ok, err := h.store.GetPR(prID)
 	if err != nil {
@@ -397,28 +412,23 @@ func (h *Hub) reject(prID, feedback string, byUser bool) error {
 	if err := h.store.PutPR(pr); err != nil {
 		return err
 	}
-	if byUser {
-		// Sticky rejection: do NOT resume the worker. Tell it to down tools and
-		// wait — the user will give instructions. Phase is left as-is; the [user]
-		// message is authoritative.
-		_ = h.store.LogPR(pr.ID, "rejected", "by user: "+feedback)
-		_ = h.store.Log(pr.Agent, "reject", pr.ID+" (user): "+feedback)
-		_ = h.injectWhenReady(pr.Agent, msgRejectedByUser(pr.ID, feedback))
-		h.notify()
-		return nil
-	}
-	// Reviewer reject: the owner returns to its branch to fix and resubmit. A
-	// worker goes back to "working" its task; a planner has no backlog task, so it
-	// drops to idle (its directive stays the planner brief) — the injected message
-	// drives the fix either way.
+	// The owner returns to its branch to fix and resubmit. A worker goes back to
+	// "working" its task; a planner has no backlog task, so it drops to its resting
+	// phase (its directive stays the planner brief) — the injected message drives
+	// the fix either way.
 	phase := "working"
 	if a, ok, _ := h.store.GetAgent(pr.Agent); ok && a.Role == "planner" {
-		phase = restPhase(a.Role) // planning — a planner has no backlog task to "work"
+		phase = restPhase(a.Role)
 	}
 	_ = h.store.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: phase})
-	_ = h.store.LogPR(pr.ID, "rejected", "by reviewer: "+feedback)
-	_ = h.store.Log(pr.Agent, "reject", pr.ID+": "+feedback)
-	_ = h.injectWhenReady(pr.Agent, msgRejectedByReviewer(pr.ID, feedback))
+
+	who, msg := "reviewer", msgRejectedByReviewer(pr.ID, feedback)
+	if byUser {
+		who, msg = "user", msgRejectedByUser(pr.ID, feedback)
+	}
+	_ = h.store.LogPR(pr.ID, "rejected", "by "+who+": "+feedback)
+	_ = h.store.Log(pr.Agent, "reject", pr.ID+" ("+who+"): "+feedback)
+	_ = h.injectWhenReady(pr.Agent, msg)
 	h.notify()
 	return nil
 }
@@ -473,7 +483,7 @@ func (h *Hub) LintPR(prID string) (string, error) {
 	return result, nil
 }
 
-// cmdReject is the agent-reviewer reject command — delegates to RejectPR.
+// cmdReject is the agent-reviewer reject command — rejects with the [reviewer] voice.
 func (h *Hub) cmdReject(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) == 0 {
 		return 1, fmt.Errorf("usage: reject <pr-id> <feedback...>")
@@ -536,6 +546,15 @@ func (h *Hub) Merge(prID string) (store.PR, error) {
 		}
 	}
 	if err := git.Merge(h.root, pr.Base, pr.Branch); err != nil {
+		// The branch was rebased onto base just above, so a genuine branch conflict
+		// was already caught there. The remaining failure mode is the base checkout
+		// itself being dirty — uncommitted local changes the merge would overwrite.
+		// That's the human's to resolve (the worker can't touch the main checkout),
+		// so do NOT reject the PR; give a clear, actionable message naming the files.
+		if e := err.Error(); strings.Contains(e, "would be overwritten") || strings.Contains(e, "commit your changes or stash") {
+			files := fileList(git.BlockingLocalChanges(h.root, pr.Base, pr.Branch))
+			return store.PR{}, fmt.Errorf("merge blocked: commit or stash your local changes to %s in the working checkout, then merge again (the PR is fine and stays approved)", files)
+		}
 		return store.PR{}, err
 	}
 	pr.Status = "merged"

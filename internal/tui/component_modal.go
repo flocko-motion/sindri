@@ -98,6 +98,18 @@ func warnModal(msg string, screenW, screenH int) string {
 	return lipgloss.Place(screenW, screenH, lipgloss.Center, lipgloss.Center, box)
 }
 
+// modalLines is the full-screen modal's content (the override, else the current
+// tab's detail), word-wrapped to the modal's inner width so long lines (diffs,
+// feedback) read in full instead of truncating. Used both to render the modal and
+// to size its scroll viewport, so they always agree.
+func (m model) modalLines() []string {
+	lines := m.detailLines()
+	if m.modalOverride != nil {
+		lines = m.modalOverride
+	}
+	return wrapContent(lines, modalInnerWidth(m.w))
+}
+
 // modal renders content as an almost-full-screen centered modal. vp scrolls the
 // content (its Height should be modalContentHeight(screenH)).
 func modal(title string, content []string, vp scroll.Viewport, screenW, screenH int) string {

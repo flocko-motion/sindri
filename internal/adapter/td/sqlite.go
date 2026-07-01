@@ -9,6 +9,8 @@ package td
 
 import (
 	"database/sql"
+	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -26,6 +28,13 @@ const dbCols = `id, title, status, type, priority, labels, parent_id, created_at
 // tasksFromDB reads all live tasks from td's db, applies the filter, and orders
 // them open → active → closed (matching the CLI path).
 func tasksFromDB(root string, f issue.Filter) ([]issue.Task, error) {
+	if _, err := os.Stat(DBPath(root)); err != nil {
+		// The hub reads td's db directly from the repo root (where it launched, and
+		// where .sindri lives). If it isn't there, td's writes (which td may route
+		// to a .todos found elsewhere) would diverge from these reads — fail loud
+		// rather than silently report zero tasks.
+		return nil, fmt.Errorf("no td store at %s — the hub expects td's database at the repo root where it was launched; run `td` there to create one", DBPath(root))
+	}
 	db, err := sql.Open("sqlite", "file:"+DBPath(root))
 	if err != nil {
 		return nil, err

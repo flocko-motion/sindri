@@ -43,6 +43,21 @@ func pane(lines []string, vp scroll.Viewport, width, cursor int) string {
 	return strings.Join(out, "\n")
 }
 
+// wrapContent word-wraps each line to width so a pane shows the full text instead
+// of truncating it with an ellipsis. ANSI-aware (a coloured diff keeps its colour
+// across the wrap) and hard-breaks any token longer than width, so no line ever
+// overflows. Returns a flat list of the wrapped lines, ready for pane().
+func wrapContent(lines []string, width int) []string {
+	if width <= 0 {
+		return lines
+	}
+	out := make([]string, 0, len(lines))
+	for _, l := range lines {
+		out = append(out, strings.Split(ansi.Wrap(l, width, ""), "\n")...)
+	}
+	return out
+}
+
 // divider is a vertical rule of h rows.
 func divider(h int) string {
 	rows := make([]string, h)
