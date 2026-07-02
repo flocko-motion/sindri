@@ -42,6 +42,7 @@ func Run(root string) error {
 	}
 	fmt.Fprintln(os.Stderr, "sindri tui: connected — starting dashboard")
 	m := newModel(cl, ch, root)
+	m.cancel = cancel
 	// A project with an openspec/ folder expects the openspec CLI; warn (once, at
 	// startup) if it's absent rather than letting spec features quietly do nothing.
 	if spec.Enabled(root) && !spec.CLIInstalled() {
@@ -68,9 +69,11 @@ const (
 )
 
 type model struct {
-	cl    *client.HTTP
-	ch    <-chan hub.BoardState
-	root  string // repo root — needed to build repo-scoped podman container names
+	cl     *client.HTTP
+	ch     <-chan hub.BoardState
+	cancel context.CancelFunc // cancels the current /events subscription (re-created on repo switch)
+	gen    int               // subscription generation; bumped on switch so stale /events msgs are ignored
+	root   string             // the selected repo — scopes the Tasks tab and container names
 	state hub.BoardState
 	err   error
 	w, h  int
@@ -112,17 +115,6 @@ type model struct {
 	noticeText  string    // when set, a startup warning modal is shown (any key dismisses)
 }
 
-// choiceModalState is a generic pick-one prompt: options, parallel values, and
-// what to do with the chosen value.
-type choiceModalState struct {
-	active  bool
-	title   string
-	options []string
-	values  []string
-	cursor  int
-	apply   func(value string) tea.Cmd
-}
-
 // detailMinWidth is the narrowest terminal that still shows the inline detail
 // pane; below it the selector goes full-width and detail is ENTER-only.
 const detailMinWidth = 135
@@ -147,7 +139,7 @@ func newModel(cl *client.HTTP, ch <-chan hub.BoardState, root string) model {
 }
 
 func (m model) Init() tea.Cmd {
-	cmds := []tea.Cmd{waitForState(m.ch), tickCmd()}
+	cmds := []tea.Cmd{waitForState(m.ch, m.gen), tickCmd()}
 	if m.cl != nil { // load the editable default review prompt
 		cl := m.cl
 		cmds = append(cmds, func() tea.Msg {
@@ -161,13 +153,13 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func waitForState(ch <-chan hub.BoardState) tea.Cmd {
+func waitForState(ch <-chan hub.BoardState, gen int) tea.Cmd {
 	return func() tea.Msg {
 		st, ok := <-ch
 		if !ok {
-			return errMsg{fmt.Errorf("hub connection closed")}
+			return errMsg{err: fmt.Errorf("hub connection closed"), gen: gen}
 		}
-		return stateMsg(st)
+		return stateMsg{st: st, gen: gen}
 	}
 }
 
@@ -204,9 +196,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detail.SetHeight(modalContentHeight(m.h))
 		}
 	case stateMsg:
-		m.state = hub.BoardState(msg)
+		if msg.gen != m.gen { // a snapshot from a stream abandoned by a repo switch
+			return m, nil
+		}
+		m.state = msg.st
 		m.reclamp()
-		return m, tea.Batch(waitForState(m.ch), m.syncDetail(), m.agentLiveCmds())
+		return m, tea.Batch(waitForState(m.ch, m.gen), m.syncDetail(), m.agentLiveCmds())
 	case polledMsg: // an auto-refresh poll — update the board, don't touch the SSE waiter
 		m.state = hub.BoardState(msg)
 		m.reclamp()
@@ -256,8 +251,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case errModalMsg:
 		m.errText = msg.err.Error()
 	case errMsg:
+		if msg.gen != m.gen { // the close of a stream abandoned by a repo switch — not fatal
+			return m, nil
+		}
 		m.err = msg.err
 		return m, tea.Quit
+	case switchRepoMsg:
+		return m, m.switchRepo(string(msg))
 	case tea.KeyMsg:
 		if m.errText != "" { // any key dismisses the error modal
 			m.errText = ""
@@ -530,6 +530,9 @@ func (m *model) onKey(k string) tea.Cmd {
 	case "r":
 		m.reclamp()
 		return m.refreshCmd()
+	case "P": // switch the selected repo (scopes the Tasks tab; Agents/PRs stay global)
+		m.openSwitcher()
+		return nil
 	}
 	m.reclamp()
 	cmd := m.syncDetail()

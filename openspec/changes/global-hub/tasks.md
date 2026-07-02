@@ -27,10 +27,10 @@
 ## 5. Board + TUI
 
 - [x] 5.1 Split `BoardState`: global `Agents`/`PRs` tagged with `project`/repo; `Tasks` for the requested project. Update `/state` (takes selected repo) and `/events` (global agent/PR changes).
-- [ ] 5.2 TUI Agents and PRs tabs: aggregate across projects, add a repo column; live counts stay hub-provided.
-- [ ] 5.3 TUI Tasks tab: scope to the selected repo.
-- [ ] 5.4 Add a repo switcher as a picker overlay backed by `Projects()`; selecting a repo rescopes the per-repo view only.
-- [ ] 5.5 Add a deterministic per-project color scheme in the render layer: a fixed palette, a project's scheme = a `(primary, accent)` pair chosen by `hash(repoTag)`; tint the board chrome with the selected repo's scheme and color per-row repo tags by their project.
+- [x] 5.2 TUI Agents and PRs tabs: aggregate across projects, add a repo column; live counts stay hub-provided.
+- [x] 5.3 TUI Tasks tab: scope to the selected repo.
+- [x] 5.4 Add a repo switcher as a picker overlay backed by `Projects()`; selecting a repo rescopes the per-repo view only.
+- [x] 5.5 Add a deterministic per-project color scheme in the render layer: a fixed palette, a project's scheme = a `(primary, accent)` pair chosen by `hash(repoTag)`; tint the board chrome with the selected repo's scheme and color per-row repo tags by their project.
 
 ## 6. CLI lifecycle
 

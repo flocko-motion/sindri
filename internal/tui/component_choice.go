@@ -14,6 +14,17 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// choiceModalState is a generic pick-one prompt: options, parallel values, and
+// what to do with the chosen value.
+type choiceModalState struct {
+	active  bool
+	title   string
+	options []string
+	values  []string
+	cursor  int
+	apply   func(value string) tea.Cmd
+}
+
 // updateChoice handles keys while a pick-one modal is open.
 func (m model) updateChoice(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
