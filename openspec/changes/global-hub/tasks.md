@@ -1,6 +1,6 @@
 ## 1. Central paths
 
-- [ ] 1.1 Add an `internal/paths` package resolving the state dir (`$XDG_STATE_HOME/sindri`, fallback `~/.local/state/sindri`), runtime dir (`$XDG_RUNTIME_DIR/sindri` on Linux, state dir on macOS), and honoring `SINDRI_HOME`; keep the image cache on `os.UserCacheDir()`.
+- [x] 1.1 Add an `internal/paths` package resolving the state dir (`$XDG_STATE_HOME/sindri`, fallback `~/.local/state/sindri`), runtime dir (`$XDG_RUNTIME_DIR/sindri` on Linux, state dir on macOS), and honoring `SINDRI_HOME`; keep the image cache on `os.UserCacheDir()`.
 - [ ] 1.2 Move the control socket + pid/version file to the runtime dir; update `SocketPath`/`IsRunning`/`HubPID`/`WritePID` to the machine-level location (no `root` arg).
 - [ ] 1.3 Delete the in-repo `.sindri/` machinery: `ensureSindriIgnore`/`.sindri/.gitignore`, and the `.sindri/` entry from `ensureGitignore` (keep `.worktrees/`).
 
