@@ -30,7 +30,7 @@ func Run(root string) error {
 	// is attributable to a step rather than silent.
 	fmt.Fprintf(os.Stderr, "sindri tui: hub at %s\n", hub.SocketPath(root))
 	if !hub.IsRunning(root) {
-		return fmt.Errorf("no hub running — start one first: 'sindri hub &'")
+		return fmt.Errorf("no hub running — start one first: 'sindri hub start --bg'")
 	}
 	fmt.Fprintln(os.Stderr, "sindri tui: connecting to /events…")
 	cl := client.Dial(root)

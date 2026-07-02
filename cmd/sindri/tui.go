@@ -1,8 +1,8 @@
 // package: main (sindri) / tui
 // type:    command
-// job:     wires `sindri tui`, launching the lean hub-client dashboard.
-// limits:  the TUI itself lives in internal/tui; it refuses to start without a
-//          running hub.
+// job:     wires `sindri tui`, launching the lean hub-client dashboard —
+//          auto-starting a background hub first if none is running.
+// limits:  the TUI itself lives in internal/tui.
 package main
 
 import (
@@ -24,6 +24,9 @@ func newTuiCmd() *cobra.Command {
 			}
 			root, err := repoRoot()
 			if err != nil {
+				return err
+			}
+			if err := ensureHubRunning(root); err != nil { // auto-start a bg hub if none is up
 				return err
 			}
 			if err := reconcileHubVersion(root); err != nil {

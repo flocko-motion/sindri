@@ -89,6 +89,17 @@ func restartHub(root string, pid int) error {
 	return startHub(root)
 }
 
+// ensureHubRunning starts a detached background hub for root when none is running,
+// so commands like `coauthor` and `tui` just work without a manual `hub start`. A
+// hub that's already up is left as-is (reconcileHubVersion handles a stale one).
+func ensureHubRunning(root string) error {
+	if hub.IsRunning(root) {
+		return nil
+	}
+	fmt.Fprintln(os.Stderr, "no hub running…")
+	return startHub(root)
+}
+
 // startHub launches a detached background `sindri hub start` for root and waits until its
 // control socket answers. The hub outlives this command (own session via Setsid),
 // so agents — and `sindri tui` in another terminal — keep working after we exit.
