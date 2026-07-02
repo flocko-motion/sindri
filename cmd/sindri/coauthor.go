@@ -4,7 +4,7 @@
 //          running (start a detached one if not), reuse or create the single
 //          coauthor agent, launch it if down, and attach to its live session.
 // limits:  composes existing hub/client/pod operations; no new hub behaviour. The
-//          hub it starts is a normal background `sindri hub`, so `sindri tui` in
+//          hub it starts is a normal background `sindri hub start`, so `sindri tui` in
 //          another terminal works alongside it.
 package main
 

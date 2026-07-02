@@ -51,7 +51,7 @@ func reconcileHubVersion(root string) error {
 		fmt.Fprintln(os.Stderr, "warning: the hub for this repo predates version tracking, so it may be running stale code.")
 	}
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		fmt.Fprintln(os.Stderr, "  restart it to pick up this build (stop the running `sindri hub` and re-run).")
+		fmt.Fprintln(os.Stderr, "  restart it to pick up this build: `sindri hub stop` then `sindri hub start --bg`.")
 		return nil
 	}
 	if !promptYesNo("restart the hub now?") {
@@ -60,7 +60,7 @@ func reconcileHubVersion(root string) error {
 	}
 	pid, havePID := hub.HubPID(root) // may find a legacy hub via its socket, not just the pid file
 	if !havePID {
-		return fmt.Errorf("couldn't find the running hub's pid to stop it — stop the `sindri hub` for %s manually, then re-run", root)
+		return fmt.Errorf("couldn't find the running hub's pid — stop it with `sindri hub stop` (or find its pid via `sindri hub list`) for %s, then re-run", root)
 	}
 	return restartHub(root, pid)
 }
@@ -89,7 +89,7 @@ func restartHub(root string, pid int) error {
 	return startHub(root)
 }
 
-// startHub launches a detached background `sindri hub` for root and waits until its
+// startHub launches a detached background `sindri hub start` for root and waits until its
 // control socket answers. The hub outlives this command (own session via Setsid),
 // so agents — and `sindri tui` in another terminal — keep working after we exit.
 // Its output goes to .sindri/hub.log.
@@ -108,7 +108,7 @@ func startHub(root string) error {
 		return fmt.Errorf("open hub log: %w", err)
 	}
 	defer logf.Close()
-	c := exec.Command(self, "hub")
+	c := exec.Command(self, "hub", "start")
 	c.Dir = root
 	c.Stdout, c.Stderr = logf, logf
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // detach: own session, survives us

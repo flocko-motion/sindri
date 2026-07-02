@@ -92,10 +92,23 @@ func withBackend(fn func(backend) error) error {
 func newHubCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "hub",
-		Short: "Run the per-repo hub service (foreground). See `sindri hub list` to see all running hubs.",
-		Long: "Run the per-repo hub service in the foreground.\n\n" +
-			"Subcommand:\n" +
-			"  sindri hub list   list every hub running on this machine and the repo each serves",
+		Short: "Manage the per-repo hub service (start, list, stop)",
+		Long: "The hub is the per-repo coordinator that drives the agents.\n\n" +
+			"  sindri hub start        run this repo's hub in the foreground\n" +
+			"  sindri hub start --bg   run it in the background (same as `sindri hub start &`)\n" +
+			"  sindri hub list         list every hub running on this machine and the repo each serves\n" +
+			"  sindri hub stop         stop this repo's hub (or `stop <pid>` for one from `hub list`)",
+	}
+	c.AddCommand(newHubStartCmd(), newHubListCmd(), newHubStopCmd())
+	return c
+}
+
+func newHubStartCmd() *cobra.Command {
+	var bg bool
+	c := &cobra.Command{
+		Use:   "start",
+		Short: "Run this repo's hub in the foreground (--bg to run it in the background)",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := repoRoot()
 			if err != nil {
@@ -125,6 +138,9 @@ func newHubCmd() *cobra.Command {
 					return err
 				}
 			}
+			if bg {
+				return startHub(root) // detached; returns once the socket answers
+			}
 			h, err := hub.New(root)
 			if err != nil {
 				return err
@@ -140,7 +156,7 @@ func newHubCmd() *cobra.Command {
 			return h.Serve()
 		},
 	}
-	c.AddCommand(newHubListCmd())
+	c.Flags().BoolVar(&bg, "bg", false, "run the hub detached in the background instead of the foreground")
 	return c
 }
 
@@ -247,7 +263,7 @@ func agentStartCmd() *cobra.Command {
 				return err
 			}
 			if !hub.IsRunning(root) {
-				return fmt.Errorf("no hub running — start one first: 'sindri hub &' (agents need a persistent hub)")
+				return fmt.Errorf("no hub running — start one first: 'sindri hub start --bg' (agents need a persistent hub)")
 			}
 			cl, err := dialHub(root)
 			if err != nil {

@@ -48,6 +48,58 @@ func newHubListCmd() *cobra.Command {
 	}
 }
 
+func newHubStopCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "stop [pid]",
+		Short: "Stop this repo's hub, or the hub with the given pid (from `hub list`)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 1 {
+				return stopHubByID(args[0])
+			}
+			// No pid → the hub for the repo we're standing in.
+			root, err := repoRoot()
+			if err != nil {
+				return fmt.Errorf("not inside a repo, so there's no hub to infer — run this in the target repo, or pass a pid from `sindri hub list`")
+			}
+			if !hub.IsRunning(root) {
+				return fmt.Errorf("no hub is running for this repo (%s)", root)
+			}
+			pid, ok := hub.HubPID(root)
+			if !ok {
+				return fmt.Errorf("could not find the hub's pid for %s — try `sindri hub list`", root)
+			}
+			fmt.Fprintf(os.Stderr, "stopping hub for %s (pid %d)…\n", root, pid)
+			if err := stopHub(root, pid); err != nil {
+				return err
+			}
+			fmt.Fprintln(os.Stderr, "stopped.")
+			return nil
+		},
+	}
+}
+
+// stopHubByID stops the hub with the given pid, but only after confirming that pid
+// is actually a running sindri hub (it must appear in `hub list`) — so a mistyped
+// or stale pid can never signal an unrelated process.
+func stopHubByID(idStr string) error {
+	pid, err := strconv.Atoi(idStr)
+	if err != nil {
+		return fmt.Errorf("%q is not a pid — pass a numeric pid from `sindri hub list`", idStr)
+	}
+	for _, h := range runningHubs() {
+		if h.PID == pid {
+			fmt.Fprintf(os.Stderr, "stopping hub for %s (pid %d)…\n", h.Root, pid)
+			if err := stopHub(h.Root, pid); err != nil {
+				return err
+			}
+			fmt.Fprintln(os.Stderr, "stopped.")
+			return nil
+		}
+	}
+	return fmt.Errorf("pid %d is not a running sindri hub — see `sindri hub list`", pid)
+}
+
 // hubProc is one running hub: the repo it serves, its serving pid, build version
 // (from the repo's hub.pid, "" if it predates stamping), and process uptime.
 type hubProc struct {
