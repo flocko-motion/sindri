@@ -1,15 +1,12 @@
 // package: hub / workflow
 // type:    logic (the act → report → idle loop + PR-as-merge-intent)
 // job:     the real worker/reviewer verbs and the host merge. Tasks are a cached
-//
-//	read model synced from td (D15); `next` claims one and branches;
-//	`submit` records a merge-intent and returns (no blocking); the
-//	reviewer approves/rejects; the human merges. Verdicts are routed to
-//	the owning agent's session by branch (object-mediated, D-routing).
-//
+//          read model synced from td (D15); `next` claims one and branches;
+//          `submit` records a merge-intent and returns (no blocking); the reviewer
+//          approves/rejects; the human merges. All state is per-project — methods
+//          take a project (repoTag) and work through store.For(project).
 // limits:  git is entirely hub-side (the agent edits /workspace, the hub commits
-//
-//	and merges); writes to td go through the td adapter (D15).
+//          and merges); writes to td go through the td adapter (D15).
 package hub
 
 import (
@@ -30,32 +27,32 @@ import (
 	"github.com/flo-at/sindri/internal/issue"
 )
 
-// Tasks refreshes from td and returns all cached tasks (for `task list`). A sync
-// failure (e.g. no td store at the repo root) is surfaced, never swallowed —
-// returning a stale cache with no warning hides real misconfiguration.
-func (h *Hub) Tasks() ([]store.Task, error) {
-	if err := h.SyncTasks(); err != nil {
+// Tasks refreshes from td and returns all cached tasks for a project (for `task
+// list`). A sync failure is surfaced, never swallowed.
+func (h *Hub) Tasks(project string) ([]store.Task, error) {
+	if err := h.SyncTasks(project); err != nil {
 		return nil, err
 	}
-	return h.store.AllTasks()
+	return h.store.For(project).AllTasks()
 }
 
-// TaskInfo returns one task, refreshed from the source of truth first (D15).
-func (h *Hub) TaskInfo(id string) (store.Task, error) {
-	t, err := td.Get(h.root, id)
+// TaskInfo returns one task in a project, refreshed from the source of truth first.
+func (h *Hub) TaskInfo(project, id string) (store.Task, error) {
+	root := h.projectRoot(project)
+	t, err := td.Get(root, id)
 	if err != nil {
 		return store.Task{}, err
 	}
 	st := toStoreTask(t)
-	if d, a, derr := td.Detail(h.root, id); derr == nil {
+	if d, a, derr := td.Detail(root, id); derr == nil {
 		st.Description, st.Acceptance = d, a
 	}
-	_ = h.store.UpsertTask(st)
+	_ = h.store.For(project).UpsertTask(st)
 	return st, nil
 }
 
-// TaskSpec is the full editable shape of a task — the payload of both create
-// and edit. Empty fields mean "unset" (create) or "leave unchanged" (edit).
+// TaskSpec is the full editable shape of a task — the payload of both create and
+// edit. Empty fields mean "unset" (create) or "leave unchanged" (edit).
 type TaskSpec struct {
 	Title       string
 	Type        string
@@ -65,12 +62,13 @@ type TaskSpec struct {
 	Labels      []string
 }
 
-// CreateTask creates a task via the td tool and returns its id.
-func (h *Hub) CreateTask(s TaskSpec) (string, error) {
-	if err := h.checkParent(s.Parent, ""); err != nil {
+// CreateTask creates a task via the td tool in a project and returns its id.
+func (h *Hub) CreateTask(project string, s TaskSpec) (string, error) {
+	if err := h.checkParent(project, s.Parent, ""); err != nil {
 		return "", err
 	}
-	out, err := td.Create(h.root, s.Title, td.CreateOpts{
+	root := h.projectRoot(project)
+	out, err := td.Create(root, s.Title, td.CreateOpts{
 		Type: s.Type, Priority: s.Priority, Body: s.Description, Labels: s.Labels, Parent: s.Parent,
 	})
 	if err != nil {
@@ -84,107 +82,104 @@ func (h *Hub) CreateTask(s TaskSpec) (string, error) {
 			break
 		}
 	}
-	// Refresh the cache so the new task shows up; if that fails the task still
-	// exists in td, so report the id alongside the error rather than swallowing it.
-	if err := h.SyncTasks(); err != nil {
+	if err := h.SyncTasks(project); err != nil {
 		return id, fmt.Errorf("created %s but refreshing the task list failed: %w", id, err)
 	}
 	h.notify()
 	return id, nil
 }
 
-// healPlannerTasks releases any backlog task a planner is holding in its state —
-// an invalid assignment (planners can't grab tasks). Self-heals stale claims
-// left by older builds; runs once at hub boot.
+// healPlannerTasks releases any backlog task a planner is holding — an invalid
+// assignment. Self-heals stale claims; runs once at hub boot, across all projects.
 func (h *Hub) healPlannerTasks() {
-	roster, _ := h.store.Roster()
-	for _, a := range roster {
+	agents, _ := h.store.AllAgents()
+	for _, a := range agents {
 		if a.Role != "planner" {
 			continue
 		}
-		st, _ := h.store.GetState(a.Name)
+		ps := h.store.For(a.Project)
+		st, _ := ps.GetState(a.Name)
 		if !strings.HasPrefix(st.Task, "td-") {
 			continue
 		}
-		_ = td.SetStatus(h.root, st.Task, "open")
-		_ = h.store.SetState(store.AgentState{Agent: a.Name, Phase: "planning"})
-		_ = h.store.Log(a.Name, "unassign", st.Task+" (planners don't hold tasks)")
+		_ = td.SetStatus(h.projectRoot(a.Project), st.Task, "open")
+		_ = ps.SetState(store.AgentState{Agent: a.Name, Phase: "planning"})
+		_ = ps.Log(a.Name, "unassign", st.Task+" (planners don't hold tasks)")
 	}
 }
 
-// UnassignTask releases a task back to the backlog (status → open) and clears it
-// from whatever agent held it. Refused if that agent is currently alive and
-// working on it — stop or delete the agent first; allowed for a down agent or an
-// orphaned in_progress task.
-func (h *Hub) UnassignTask(id string) error {
-	roster, _ := h.store.Roster()
+// UnassignTask releases a task in a project back to the backlog and clears it from
+// whatever agent held it. Refused if that agent is currently alive and working.
+func (h *Hub) UnassignTask(project, id string) error {
+	ps := h.store.For(project)
+	roster, _ := ps.Roster()
 	for _, a := range roster {
-		st, _ := h.store.GetState(a.Name)
+		st, _ := ps.GetState(a.Name)
 		if st.Task != id {
 			continue
 		}
-		if h.agentAlive(a.Name) {
+		if h.agentAlive(project, a.Name) {
 			return fmt.Errorf("%s is alive and working on %s — stop or delete it first", a.Name, id)
 		}
-		_ = h.store.SetState(store.AgentState{Agent: a.Name, Phase: "idle"})
-		_ = h.store.Log(a.Name, "unassign", id)
+		_ = ps.SetState(store.AgentState{Agent: a.Name, Phase: "idle"})
+		_ = ps.Log(a.Name, "unassign", id)
 	}
 	if strings.HasPrefix(id, "td-") {
-		if err := td.SetStatus(h.root, id, "open"); err != nil {
+		if err := td.SetStatus(h.projectRoot(project), id, "open"); err != nil {
 			return err
 		}
 	}
-	_ = h.refreshTask(id)
+	_ = h.refreshTask(project, id)
 	h.notify()
 	return nil
 }
 
 // ApproveTask clears the approval gate on a planner-proposed task (user-only),
-// making it claimable, and tells any running planner.
-func (h *Hub) ApproveTask(id string) error {
-	if err := h.store.SetApproval(id, "approved", ""); err != nil {
+// making it claimable, and tells any running planner in the project.
+func (h *Hub) ApproveTask(project, id string) error {
+	if err := h.store.For(project).SetApproval(id, "approved", ""); err != nil {
 		return err
 	}
-	h.notifyPlanners(fmt.Sprintf("[user] task %s was approved — it's now in the backlog for a worker.", id))
+	h.notifyPlanners(project, fmt.Sprintf("[user] task %s was approved — it's now in the backlog for a worker.", id))
 	h.notify()
 	return nil
 }
 
 // RejectTask rejects a planner-proposed task with a comment (user-only); it stays
 // hidden from workers, and the comment is delivered to any running planner.
-func (h *Hub) RejectTask(id, comment string) error {
+func (h *Hub) RejectTask(project, id, comment string) error {
 	comment = strings.TrimSpace(comment)
 	if comment == "" {
 		comment = "rejected"
 	}
-	if err := h.store.SetApproval(id, "rejected", comment); err != nil {
+	if err := h.store.For(project).SetApproval(id, "rejected", comment); err != nil {
 		return err
 	}
-	h.notifyPlanners(fmt.Sprintf("[user] task %s was rejected: %s", id, comment))
+	h.notifyPlanners(project, fmt.Sprintf("[user] task %s was rejected: %s", id, comment))
 	h.notify()
 	return nil
 }
 
-// notifyPlanners injects a message into every running planner's session.
-func (h *Hub) notifyPlanners(msg string) {
-	roster, _ := h.store.Roster()
+// notifyPlanners injects a message into every running planner's session in a project.
+func (h *Hub) notifyPlanners(project, msg string) {
+	roster, _ := h.store.For(project).Roster()
 	for _, a := range roster {
 		if a.Role == "planner" {
 			name := a.Name
-			go func() { _ = h.injectWhenReady(name, msg) }()
+			go func() { _ = h.injectWhenReady(project, name, msg) }()
 		}
 	}
 }
 
-// cmdState lets a planner flip its own resting state between "planning" (active)
-// and "idle" (paused) — a planner never holds a backlog task, so it owns this.
+// cmdState lets a planner flip its own resting state between "planning" and "idle".
 func (h *Hub) cmdState(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) != 1 || (args[0] != "planning" && args[0] != "idle") {
 		return 1, fmt.Errorf("usage: state <planning|idle>")
 	}
-	st, _ := h.store.GetState(c.Agent)
+	ps := h.store.For(c.Project)
+	st, _ := ps.GetState(c.Agent)
 	st.Agent, st.Phase = c.Agent, args[0]
-	if err := h.store.SetState(st); err != nil {
+	if err := ps.SetState(st); err != nil {
 		return 1, err
 	}
 	h.notify()
@@ -192,19 +187,17 @@ func (h *Hub) cmdState(c registry.Caller, args []string, out io.Writer) (int, er
 	return 0, nil
 }
 
-// cmdCreateTask lets a planner propose a task. It's created in td but flagged
-// pending the user's approval, so no worker can pick it up until the user
-// approves it (planner-only — the planner's defining extra power).
-func (h *Hub) cmdCreateTask(_ registry.Caller, args []string, out io.Writer) (int, error) {
+// cmdCreateTask lets a planner propose a task, flagged pending the user's approval.
+func (h *Hub) cmdCreateTask(c registry.Caller, args []string, out io.Writer) (int, error) {
 	title := strings.TrimSpace(strings.Join(args, " "))
 	if title == "" {
 		return 1, fmt.Errorf("usage: create-task <title...>")
 	}
-	id, err := h.CreateTask(TaskSpec{Title: title, Type: "task"})
+	id, err := h.CreateTask(c.Project, TaskSpec{Title: title, Type: "task"})
 	if err != nil {
 		return 1, err
 	}
-	if err := h.store.SetApproval(id, "pending", ""); err != nil {
+	if err := h.store.For(c.Project).SetApproval(id, "pending", ""); err != nil {
 		return 1, err
 	}
 	h.notify()
@@ -212,19 +205,19 @@ func (h *Hub) cmdCreateTask(_ registry.Caller, args []string, out io.Writer) (in
 	return 0, nil
 }
 
-// cmdTasks lets a planner read the backlog: `task list` (or no arg) lists every
-// task (status, approval, priority, title); `task <id>` prints that task's full
-// detail including description.
-func (h *Hub) cmdTasks(_ registry.Caller, args []string, out io.Writer) (int, error) {
-	if err := h.SyncTasks(); err != nil {
-		return 1, err // surface it — don't list a stale cache as if it were current
+// cmdTasks lets a planner read the backlog: `task list` lists every task; `task
+// <id>` prints that task's full detail.
+func (h *Hub) cmdTasks(c registry.Caller, args []string, out io.Writer) (int, error) {
+	if err := h.SyncTasks(c.Project); err != nil {
+		return 1, err
 	}
+	ps := h.store.For(c.Project)
 	if len(args) > 0 && args[0] != "list" {
-		t, err := h.TaskInfo(args[0])
+		t, err := h.TaskInfo(c.Project, args[0])
 		if err != nil {
 			return 1, err
 		}
-		appr, comment := h.store.GetApproval(t.ID)
+		appr, comment := ps.GetApproval(t.ID)
 		if comment != "" {
 			appr += " — " + comment
 		}
@@ -232,7 +225,7 @@ func (h *Hub) cmdTasks(_ registry.Caller, args []string, out io.Writer) (int, er
 			t.ID, t.Status, t.Title, dash(t.Priority), dash(appr), dash(t.Description))
 		return 0, nil
 	}
-	tasks, err := h.store.AllTasks()
+	tasks, err := ps.AllTasks()
 	if err != nil {
 		return 1, err
 	}
@@ -250,38 +243,34 @@ func dash(s string) string {
 	return s
 }
 
-// EditTask applies a spec to an existing task. A td task is edited through the
-// td tool (its source of truth); an openspec item isn't editable as a task, so
-// only its locally-assigned priority is recorded in our own db.
-func (h *Hub) EditTask(id string, s TaskSpec) error {
-	if err := h.checkParent(s.Parent, id); err != nil {
+// EditTask applies a spec to an existing task in a project.
+func (h *Hub) EditTask(project, id string, s TaskSpec) error {
+	if err := h.checkParent(project, s.Parent, id); err != nil {
 		return err
 	}
 	if strings.HasPrefix(id, "td-") {
-		if err := td.Update(h.root, id, td.UpdateOpts{
+		if err := td.Update(h.projectRoot(project), id, td.UpdateOpts{
 			Title: s.Title, Type: s.Type, Priority: s.Priority, Body: s.Description, Labels: s.Labels, Parent: s.Parent,
 		}); err != nil {
 			return err
 		}
 	} else if s.Priority != "" {
-		if err := h.store.SetPriorityOverride(id, s.Priority); err != nil {
+		if err := h.store.For(project).SetPriorityOverride(id, s.Priority); err != nil {
 			return err
 		}
 	}
-	err := h.SyncTasks()
+	err := h.SyncTasks(project)
 	h.notify()
 	return err
 }
 
-// workPollInterval re-checks for work while a directive is parked — frequent
-// enough to feel responsive, since external td edits don't notify the hub.
+// workPollInterval re-checks for work while a directive is parked.
 const workPollInterval = 3 * time.Second
 
-// prRejected reports whether an agent has a rejected PR — the signal that it
-// should be revising (working), not waiting under review. A reject is a reject
-// whoever sent it, so the worker always continues its work.
-func (h *Hub) prRejected(agent string) bool {
-	prs, err := h.store.PRs()
+// prRejected reports whether an agent has a rejected PR in its project — the signal
+// that it should be revising (working), not waiting under review.
+func (h *Hub) prRejected(project, agent string) bool {
+	prs, err := h.store.For(project).PRs()
 	if err != nil {
 		return false
 	}
@@ -293,14 +282,12 @@ func (h *Hub) prRejected(agent string) bool {
 	return false
 }
 
-// AgentDirective is the single next action the hub wants this agent to take —
-// the no-arg `sindri` answer. The hub decides exactly what to do next; the agent
-// obeys (it never has to find work for itself, and never needs a second
-// command). When there is nothing to do it BLOCKS until there is — so the agent's
-// whole loop is "run `sindri`, do what it says, repeat". ctx (the request)
-// cancels the wait when the agent's pod dies or it disconnects.
-func (h *Hub) AgentDirective(ctx context.Context, name string) (string, error) {
-	a, ok, err := h.store.GetAgent(name)
+// AgentDirective is the single next action the hub wants this agent to take — the
+// no-arg `sindri` answer. The hub decides; the agent obeys. When there's nothing to
+// do it BLOCKS until there is. ctx cancels the wait when the pod dies.
+func (h *Hub) AgentDirective(ctx context.Context, project, name string) (string, error) {
+	ps := h.store.For(project)
+	a, ok, err := ps.GetAgent(name)
 	if err != nil {
 		return "", err
 	}
@@ -308,14 +295,11 @@ func (h *Hub) AgentDirective(ctx context.Context, name string) (string, error) {
 		return "", fmt.Errorf("unknown agent %q", name)
 	}
 	if a.Role == "coauthor" {
-		// Freestyle: no managed queue and no blocking. The user drives it directly
-		// in the terminal; `sindri` just reminds it of that (and of the helpers).
 		return dirCoauthor, nil
 	}
 	if a.Role == "reviewer" {
-		// Block until a pull request needs a verdict.
 		return h.waitForWork(ctx, func() (string, bool, error) {
-			prs, err := h.store.PRs()
+			prs, err := ps.PRs()
 			if err != nil {
 				return "", false, err
 			}
@@ -327,63 +311,51 @@ func (h *Hub) AgentDirective(ctx context.Context, name string) (string, error) {
 			return "", false, nil
 		})
 	}
-	st, _ := h.store.GetState(name)
+	st, _ := ps.GetState(name)
 	if a.Role == "planner" {
-		// A planner never grabs backlog tasks. It orients and waits for the user;
-		// only an in-flight openspec PR (submitted) puts it in the wait-for-verdict
-		// state. Everything else → the planner brief.
 		if st.Phase == "submitted" {
 			return dirSubmitted, nil
 		}
 		return dirPlanner, nil
 	}
-	// A worker holding a container is in the collaborative loop: never auto-claim
-	// an unrelated leaf — work the current subtask, or (subtasks exhausted) pick up
-	// a newly-added child, else wait for the human to open a milestone PR.
+	// A worker holding a container is in the collaborative loop.
 	if st.Container != "" {
-		if t, ok, _ := h.store.GetTask(st.Container); ok && t.Status != "closed" && t.Status != "approved" && t.Status != "merged" {
+		if t, ok, _ := ps.GetTask(st.Container); ok && t.Status != "closed" && t.Status != "approved" && t.Status != "merged" {
 			switch st.Phase {
 			case "submitted":
-				// A rejected milestone PR means revise & resubmit — resume the
-				// container's current subtask rather than waiting under review.
-				if h.prRejected(name) {
-					_ = h.store.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "working"})
+				if h.prRejected(project, name) {
+					_ = ps.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "working"})
 					return dirWorking(st.Task), nil
 				}
 				return dirSubmitted, nil
 			case "working":
 				return dirWorking(st.Task), nil
 			default:
-				if next, ok := h.advanceContainer(name, st.Container); ok {
+				if next, ok := h.advanceContainer(project, name, st.Container); ok {
 					return dirWorking(next.ID), nil
 				}
 				return dirContainerWait(st.Container), nil
 			}
 		}
-		// Container closed (the feature is done) → free the agent for normal work.
-		_ = h.store.SetState(store.AgentState{Agent: name, Phase: "idle"})
-		return h.waitForWork(ctx, func() (string, bool, error) { return h.claimNext(name) })
+		_ = ps.SetState(store.AgentState{Agent: name, Phase: "idle"})
+		return h.waitForWork(ctx, func() (string, bool, error) { return h.claimNext(project, name) })
 	}
 	switch st.Phase {
 	case "working":
 		return dirWorking(st.Task), nil
 	case "submitted":
-		// Self-heal: a rejected PR means revise & resubmit, so a worker sitting in
-		// "submitted" with a rejected PR should be working, not waiting under review
-		// (recovers any state left "submitted" by an older reject path).
-		if h.prRejected(name) {
-			_ = h.store.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Phase: "working"})
+		if h.prRejected(project, name) {
+			_ = ps.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Phase: "working"})
 			return dirWorking(st.Task), nil
 		}
 		return dirSubmitted, nil
 	default: // idle — claim the next task, blocking until one exists
-		return h.waitForWork(ctx, func() (string, bool, error) { return h.claimNext(name) })
+		return h.waitForWork(ctx, func() (string, bool, error) { return h.claimNext(project, name) })
 	}
 }
 
-// waitForWork blocks until check reports work is ready (returning its directive)
-// or ctx is cancelled. It re-checks on every hub change and on a short timer, so
-// it also picks up tasks created directly in td (which the hub doesn't observe).
+// waitForWork blocks until check reports work is ready (returning its directive) or
+// ctx is cancelled. Re-checks on every hub change and on a short timer.
 func (h *Hub) waitForWork(ctx context.Context, check func() (string, bool, error)) (string, error) {
 	ch, unsub := h.events.subscribe()
 	defer unsub()
@@ -404,11 +376,12 @@ func (h *Hub) waitForWork(ctx context.Context, check func() (string, bool, error
 	}
 }
 
-// SyncTasks refreshes the whole cached task set from its sources — td tasks and
-// openspec changes — so the generalized task list is multi-source. Caches all
-// statuses so UIs can filter open/closed/all client-side.
-func (h *Hub) SyncTasks() error {
-	tasks, err := td.Tasks(h.root, issue.FilterAll)
+// SyncTasks refreshes a project's whole cached task set from its sources — td tasks
+// and openspec changes. Caches all statuses so UIs can filter client-side.
+func (h *Hub) SyncTasks(project string) error {
+	root := h.projectRoot(project)
+	ps := h.store.For(project)
+	tasks, err := td.Tasks(root, issue.FilterAll)
 	if err != nil {
 		return err
 	}
@@ -416,8 +389,7 @@ func (h *Hub) SyncTasks() error {
 	for _, t := range tasks {
 		rows = append(rows, toStoreTask(t))
 	}
-	// openspec changes as `spec`-typed tasks (source: openspec).
-	for _, c := range spec.Changes(h.root) {
+	for _, c := range spec.Changes(root) {
 		status := "open"
 		if c.Done() {
 			status = "closed"
@@ -429,46 +401,41 @@ func (h *Hub) SyncTasks() error {
 			Type:   "spec",
 		})
 	}
-	// Apply locally-assigned priorities (mainly openspec items, which have none
-	// from their source).
-	if ov, err := h.store.PriorityOverrides(); err == nil {
+	if ov, err := ps.PriorityOverrides(); err == nil {
 		for i := range rows {
 			if p, ok := ov[rows[i].ID]; ok {
 				rows[i].Priority = p
 			}
 		}
 	}
-	return h.store.ReplaceTasks(rows)
+	return ps.ReplaceTasks(rows)
 }
 
-// SetPriority assigns a task's priority (a P-code). For a td task it writes
-// through the td tool (the source); for an openspec item it records a durable
-// override in our own db. Either way the cache is re-synced.
-func (h *Hub) SetPriority(id, priority string) error {
+// SetPriority assigns a task's priority (a P-code) in a project.
+func (h *Hub) SetPriority(project, id, priority string) error {
 	if strings.HasPrefix(id, "td-") {
-		if err := td.SetPriority(h.root, id, priority); err != nil {
+		if err := td.SetPriority(h.projectRoot(project), id, priority); err != nil {
 			return err
 		}
 	} else {
-		if err := h.store.SetPriorityOverride(id, priority); err != nil {
+		if err := h.store.For(project).SetPriorityOverride(id, priority); err != nil {
 			return err
 		}
 	}
-	err := h.SyncTasks()
+	err := h.SyncTasks(project)
 	h.notify()
 	return err
 }
 
-// checkParent validates a requested parent id: empty is fine (a root task), it
-// must not be the task itself, and it must exist in the cached task set.
-func (h *Hub) checkParent(parent, self string) error {
+// checkParent validates a requested parent id within a project.
+func (h *Hub) checkParent(project, parent, self string) error {
 	if parent == "" {
 		return nil
 	}
 	if parent == self {
 		return fmt.Errorf("a task can't be its own parent")
 	}
-	tasks, err := h.store.AllTasks()
+	tasks, err := h.store.For(project).AllTasks()
 	if err != nil {
 		return err
 	}
@@ -486,12 +453,12 @@ func specID(name string) string {
 	return "os-" + hex.EncodeToString(sum[:])[:6]
 }
 
-func (h *Hub) refreshTask(id string) error {
-	t, err := td.Get(h.root, id)
+func (h *Hub) refreshTask(project, id string) error {
+	t, err := td.Get(h.projectRoot(project), id)
 	if err != nil {
 		return err
 	}
-	return h.store.UpsertTask(toStoreTask(t))
+	return h.store.For(project).UpsertTask(toStoreTask(t))
 }
 
 func toStoreTask(t issue.Task) store.Task {
@@ -502,10 +469,8 @@ func toStoreTask(t issue.Task) store.Task {
 }
 
 // cmdNext claims the highest-priority open task for a worker and branches for it.
-// Tasks are refreshed from the source of truth first (refresh-before-assignment,
-// D15) so a stale/closed task is never handed out.
 func (h *Hub) cmdNext(c registry.Caller, _ []string, out io.Writer) (int, error) {
-	d, claimed, err := h.claimNext(c.Agent)
+	d, claimed, err := h.claimNext(c.Project, c.Agent)
 	if err != nil {
 		return 1, err
 	}
@@ -517,26 +482,21 @@ func (h *Hub) cmdNext(c registry.Caller, _ []string, out io.Writer) (int, error)
 	return 0, nil
 }
 
-// claimNext claims the highest-priority open LEAF task for a worker — moving it
-// to in_progress, branching in the worker's worktree, and setting the worker
-// "working". Returns (directive, true) on a claim, ("", false) when nothing is
-// open. Container tasks (those with children) are never auto-claimed, nor are
-// children reserved to a held container — see OpenLeaves. A td sync failure is
-// non-fatal (it falls back to the cached task set).
-func (h *Hub) claimNext(agent string) (string, bool, error) {
-	_ = h.SyncTasks() // best-effort refresh from td/openspec; cached set on failure
-	// A human-marked container (a deliberate "work this whole feature with me")
-	// takes priority over the leaf queue.
-	if d, ok, err := h.claimContainer(agent); ok || err != nil {
+// claimNext claims the highest-priority open LEAF task (or a marked container) for a
+// worker in a project. Returns (directive, true) on a claim, ("", false) when idle.
+func (h *Hub) claimNext(project, agent string) (string, bool, error) {
+	_ = h.SyncTasks(project) // best-effort refresh; cached set on failure
+	if d, ok, err := h.claimContainer(project, agent); ok || err != nil {
 		return d, ok, err
 	}
-	return h.claimLeaf(agent)
+	return h.claimLeaf(project, agent)
 }
 
-// claimLeaf claims the highest-priority open leaf for a worker, branching on the
-// leaf (the structured one-task-one-branch path).
-func (h *Hub) claimLeaf(agent string) (string, bool, error) {
-	open, err := h.store.OpenLeaves()
+// claimLeaf claims the highest-priority open leaf for a worker, branching on it.
+func (h *Hub) claimLeaf(project, agent string) (string, bool, error) {
+	ps := h.store.For(project)
+	root := h.projectRoot(project)
+	open, err := ps.OpenLeaves()
 	if err != nil {
 		return "", false, err
 	}
@@ -544,84 +504,82 @@ func (h *Hub) claimLeaf(agent string) (string, bool, error) {
 		return "", false, nil
 	}
 	t := open[0]
-	base, err := h.baseBranch()
+	base, err := h.baseBranch(root)
 	if err != nil {
 		return "", false, err
 	}
-	a, ok, err := h.store.GetAgent(agent)
+	a, ok, err := ps.GetAgent(agent)
 	if err != nil || !ok {
 		return "", false, fmt.Errorf("agent %s missing: %v", agent, err)
 	}
-	wt := filepath.Join(h.root, a.Workspace)
+	wt := filepath.Join(root, a.Workspace)
 	branch := t.ID
-	if err := td.SetStatus(h.root, t.ID, "in_progress"); err != nil {
+	if err := td.SetStatus(root, t.ID, "in_progress"); err != nil {
 		return "", false, err
 	}
-	_ = h.refreshTask(t.ID)
+	_ = h.refreshTask(project, t.ID)
 	if err := git.CreateBranch(wt, branch, base); err != nil {
 		return "", false, err
 	}
-	if err := h.store.SetState(store.AgentState{Agent: agent, Task: t.ID, Branch: branch, Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: agent, Task: t.ID, Branch: branch, Phase: "working"}); err != nil {
 		return "", false, err
 	}
-	_ = h.store.Log(agent, "claim", t.ID+" "+t.Title)
+	_ = ps.Log(agent, "claim", t.ID+" "+t.Title)
 	h.notify()
 	return dirClaimed(t.ID, t.Title, branch), true, nil
 }
 
-// collabLabel marks a parent task for collaborative assignment: the next free
-// agent takes the whole container, working its children on one standing branch.
+// collabLabel marks a parent task for collaborative assignment.
 const collabLabel = "collab"
 
-// claimContainer assigns the highest-priority marked, unheld container to the
-// agent: it puts the agent on a standing branch named for the container (created
-// from base if new, preserved if it exists) and starts it on the container's
-// first open child. Returns (_, false, nil) when there's no such container.
-func (h *Hub) claimContainer(agent string) (string, bool, error) {
-	containers, err := h.store.MarkedContainers(collabLabel)
+// claimContainer assigns the highest-priority marked, unheld container in a project
+// to the agent, starting it on the container's first open child.
+func (h *Hub) claimContainer(project, agent string) (string, bool, error) {
+	ps := h.store.For(project)
+	root := h.projectRoot(project)
+	containers, err := ps.MarkedContainers(collabLabel)
 	if err != nil || len(containers) == 0 {
 		return "", false, err
 	}
 	c := containers[0]
-	children, err := h.store.OpenChildren(c.ID)
+	children, err := ps.OpenChildren(c.ID)
 	if err != nil {
 		return "", false, err
 	}
 	if len(children) == 0 {
 		return "", false, nil // marked but nothing open to work
 	}
-	base, err := h.baseBranch()
+	base, err := h.baseBranch(root)
 	if err != nil {
 		return "", false, err
 	}
-	a, ok, err := h.store.GetAgent(agent)
+	a, ok, err := ps.GetAgent(agent)
 	if err != nil || !ok {
 		return "", false, fmt.Errorf("agent %s missing: %v", agent, err)
 	}
-	wt := filepath.Join(h.root, a.Workspace)
+	wt := filepath.Join(root, a.Workspace)
 	if err := git.EnsureBranch(wt, c.ID, base); err != nil {
 		return "", false, err
 	}
 	child := children[0]
-	if err := td.SetStatus(h.root, child.ID, "in_progress"); err != nil {
+	if err := td.SetStatus(root, child.ID, "in_progress"); err != nil {
 		return "", false, err
 	}
-	_ = h.refreshTask(child.ID)
-	if err := h.store.SetState(store.AgentState{Agent: agent, Container: c.ID, Branch: c.ID, Task: child.ID, Phase: "working"}); err != nil {
+	_ = h.refreshTask(project, child.ID)
+	if err := ps.SetState(store.AgentState{Agent: agent, Container: c.ID, Branch: c.ID, Task: child.ID, Phase: "working"}); err != nil {
 		return "", false, err
 	}
-	_ = h.store.Log(agent, "claim-container", c.ID+" "+c.Title)
+	_ = ps.Log(agent, "claim-container", c.ID+" "+c.Title)
 	h.notify()
 	return dirContainerClaimed(c.ID, c.Title, child.ID, child.Title), true, nil
 }
 
-// cmdCheckpoint is the collaborative worker's non-blocking verb: commit the
-// current subtask to the container branch, close that child, and advance to the
-// next open child — staying working, never blocking for review. When no open
-// children remain the agent rests (still holding the container) until the human
-// opens a milestone PR or adds more subtasks.
+// cmdCheckpoint commits the current subtask to the container branch, closes that
+// child, and advances to the next — staying working, never blocking for review.
 func (h *Hub) cmdCheckpoint(c registry.Caller, args []string, out io.Writer) (int, error) {
-	st, err := h.store.GetState(c.Agent)
+	ps := h.store.For(c.Project)
+	root := h.projectRoot(c.Project)
+	st, err := ps.GetState(c.Agent)
 	if err != nil {
 		return 1, err
 	}
@@ -629,8 +587,8 @@ func (h *Hub) cmdCheckpoint(c registry.Caller, args []string, out io.Writer) (in
 		fmt.Fprintln(out, replyNothingToCheckpoint)
 		return 1, nil
 	}
-	a, _, _ := h.store.GetAgent(c.Agent)
-	wt := filepath.Join(h.root, a.Workspace)
+	a, _, _ := ps.GetAgent(c.Agent)
+	wt := filepath.Join(root, a.Workspace)
 	msg := strings.TrimSpace(strings.Join(args, " "))
 	if msg == "" {
 		msg = "work on " + st.Task
@@ -638,38 +596,36 @@ func (h *Hub) cmdCheckpoint(c registry.Caller, args []string, out io.Writer) (in
 	if err := git.CommitAll(wt, msg); err != nil {
 		return 1, err
 	}
-	if err := td.SetStatus(h.root, st.Task, "closed"); err != nil {
+	if err := td.SetStatus(root, st.Task, "closed"); err != nil {
 		return 1, err
 	}
-	_ = h.refreshTask(st.Task)
-	_ = h.store.Log(c.Agent, "checkpoint", st.Task)
+	_ = h.refreshTask(c.Project, st.Task)
+	_ = ps.Log(c.Agent, "checkpoint", st.Task)
 	done := st.Task
-	if next, ok := h.advanceContainer(c.Agent, st.Container); ok {
+	if next, ok := h.advanceContainer(c.Project, c.Agent, st.Container); ok {
 		fmt.Fprintln(out, replyCheckpointed(done, next.ID, next.Title))
 		return 0, nil
 	}
-	// No open children left — rest holding the container; the human drives the
-	// milestone PR (or adds subtasks).
-	_ = h.store.SetState(store.AgentState{Agent: c.Agent, Container: st.Container, Branch: st.Container, Phase: "idle"})
+	_ = ps.SetState(store.AgentState{Agent: c.Agent, Container: st.Container, Branch: st.Container, Phase: "idle"})
 	h.notify()
 	fmt.Fprintln(out, replyCheckpointedLast(done, st.Container))
 	return 0, nil
 }
 
-// advanceContainer moves a held container's agent onto its next open child,
-// returning (child, true) when one was assigned (state set to working) or
-// (zero, false) when the container has no open children left.
-func (h *Hub) advanceContainer(agent, container string) (store.Task, bool) {
-	children, err := h.store.OpenChildren(container)
+// advanceContainer moves a held container's agent onto its next open child in a
+// project, returning (child, true) when one was assigned or (zero, false) if none.
+func (h *Hub) advanceContainer(project, agent, container string) (store.Task, bool) {
+	ps := h.store.For(project)
+	children, err := ps.OpenChildren(container)
 	if err != nil || len(children) == 0 {
 		return store.Task{}, false
 	}
 	child := children[0]
-	if err := td.SetStatus(h.root, child.ID, "in_progress"); err != nil {
+	if err := td.SetStatus(h.projectRoot(project), child.ID, "in_progress"); err != nil {
 		return store.Task{}, false
 	}
-	_ = h.refreshTask(child.ID)
-	_ = h.store.SetState(store.AgentState{Agent: agent, Container: container, Branch: container, Task: child.ID, Phase: "working"})
+	_ = h.refreshTask(project, child.ID)
+	_ = ps.SetState(store.AgentState{Agent: agent, Container: container, Branch: container, Task: child.ID, Phase: "working"})
 	h.notify()
 	return child, true
 }
