@@ -30,11 +30,8 @@ The one thing you bring yourself: **Claude credentials** at `~/.claude` (sindri
 seeds them into the agent pods). The agent container image is built automatically
 on first `sindri agent start` (needs network that once).
 
-Then, in any repo:
-
-```bash
-sindri hub &      # start the per-repo hub (everything is a client of it)
-```
+Then, in any repo, `sindri coauthor` gets you going in one command (see the Quick
+start below) — it starts the per-repo hub for you, so you rarely launch one by hand.
 
 **Optional extras** (sindri degrades gracefully without them, with a visible
 note — never a hard failure): `openspec` (`npm i -g @fission-ai/openspec`) for the
@@ -52,11 +49,28 @@ separate script.)
 
 ## Quick start
 
-The happy path: put **one worker** on a task and merge what it produces — you're
-the reviewer, no second agent needed. Run this in any git repo:
+The simplest way in: **pair with an agent in your repo** — like running Claude
+yourself, but sandboxed in a container. One command, in any git repo:
 
 ```bash
-sindri hub &                                # start the per-repo hub
+sindri coauthor
+```
+
+It starts everything it needs (the per-repo hub, a sandboxed pod, an agent
+auto-named after a Norse dwarf) and drops you into its terminal. The coauthor
+works on your **actual checkout** — you share the same files and drive it
+directly, with no task queue and no PR gate. Detach with your tmux prefix then
+`d` to leave it running; `sindri coauthor` again reattaches. That's the whole
+thing.
+
+### Advanced: managed workers and the task loop
+
+When you'd rather hand off work than pair: put **one worker** on a task and merge
+what it produces — you're the reviewer, no second agent needed.
+
+```bash
+sindri hub start --bg                       # start the per-repo hub in the background
+                                            # (foreground: `sindri hub start`; see also `sindri hub list` / `sindri hub stop`)
 
 sindri task new "Add a /healthz endpoint"   # describe a task
 sindri agent new                            # create a worker — auto-named (e.g. dvalin)
@@ -74,22 +88,10 @@ sindri pr approve pr-td-abc123              # sign off (you're the reviewer)
 sindri pr merge   pr-td-abc123              # the one hard gate — human only
 ```
 
-That's the whole loop. Everything below — a reviewer agent, a planner, the
-collaborative "work a whole feature" workflow — is opt-in, for when you want more.
-
-### Or just pair, freestyle
-
-Prefer the classic "run Claude in my repo and work with me" over the task loop?
-One command:
-
-```bash
-sindri coauthor   # starts the hub if needed, creates/reattaches one coauthor, drops you in
-```
-
-A coauthor works on your **actual checkout** (you share the same files), with no
-task queue and no PR gate — you drive it directly in its terminal. Detach (your
-tmux prefix, then `d`) to leave it running and `sindri coauthor` again to
-reattach; run `sindri tui` in another terminal to add workers alongside it.
+Everything beyond this — a reviewer agent, a planner, the collaborative "work a
+whole feature" workflow — is opt-in, for when you want more. And a running hub
+serves any number of agents at once: `sindri tui` shows the whole board, and you
+can add workers alongside a coauthor.
 
 ---
 
