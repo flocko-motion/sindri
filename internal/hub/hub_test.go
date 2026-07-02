@@ -7,14 +7,27 @@ import (
 	"testing"
 )
 
+const testProject = "proj"
+
+// newHub opens a global hub rooted at a temp state dir (via SINDRI_HOME), so tests
+// never touch the real ~/.local/state/sindri.
+func newHub(t *testing.T) *Hub {
+	t.Helper()
+	t.Setenv("SINDRI_HOME", t.TempDir())
+	h, err := New()
+	if err != nil {
+		t.Fatalf("new hub: %v", err)
+	}
+	t.Cleanup(func() { h.Close() })
+	return h
+}
+
 func TestEnsureGitignore(t *testing.T) {
 	count := func(s, sub string) int { return strings.Count(s, sub) }
 
-	// Fresh repo: New() (called by newHub) creates .gitignore with the hub patterns.
+	// ensureGitignore adds the hub's in-repo artifacts (now just .worktrees/).
 	root := t.TempDir()
-	if _, err := New(root); err != nil {
-		t.Fatalf("new: %v", err)
-	}
+	ensureGitignore(root)
 	gi := filepath.Join(root, ".gitignore")
 	data, err := os.ReadFile(gi)
 	if err != nil {
@@ -33,67 +46,55 @@ func TestEnsureGitignore(t *testing.T) {
 	if string(again) != got {
 		t.Errorf("ensureGitignore not idempotent:\n--- first ---\n%s\n--- second ---\n%s", got, again)
 	}
-	if c := count(string(again), ".sindri/"); c != 1 {
-		t.Errorf("expected .sindri/ once, got %d", c)
+	if c := count(string(again), ".worktrees/"); c != 1 {
+		t.Errorf("expected .worktrees/ once, got %d", c)
 	}
 
 	// Existing entries (any slash form) are respected, not duplicated; .todos stays
-	// untouched (it is tracked).
+	// untouched (it is tracked). .sindri is no longer written (hub state is central).
 	root2 := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root2, ".gitignore"), []byte("node_modules\n/.sindri\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root2, ".gitignore"), []byte("node_modules\n/.worktrees\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	ensureGitignore(root2)
 	out, _ := os.ReadFile(filepath.Join(root2, ".gitignore"))
-	if c := count(string(out), ".sindri"); c != 1 {
-		t.Errorf("existing /.sindri should not be duplicated, got %d occurrences:\n%s", c, out)
-	}
-	if !strings.Contains(string(out), ".worktrees/") {
-		t.Errorf(".worktrees/ should have been added:\n%s", out)
+	if c := count(string(out), ".worktrees"); c != 1 {
+		t.Errorf("existing /.worktrees should not be duplicated, got %d:\n%s", c, out)
 	}
 	if strings.Contains(string(out), ".todos") {
 		t.Errorf(".todos must not be ignored (it is tracked):\n%s", out)
 	}
-}
-
-func newHub(t *testing.T) *Hub {
-	t.Helper()
-	h, err := New(t.TempDir())
-	if err != nil {
-		t.Fatalf("new hub: %v", err)
+	if strings.Contains(string(out), ".sindri") {
+		t.Errorf(".sindri must not be written (hub state is central now):\n%s", out)
 	}
-	t.Cleanup(func() { h.Close() })
-	return h
 }
 
 func TestNewAgentValidation(t *testing.T) {
 	h := newHub(t)
-	if _, err := h.NewAgent("Brokkr", "worker"); err == nil {
+	if _, err := h.NewAgent(testProject, "Brokkr", "worker"); err == nil {
 		t.Fatalf("uppercase name should be rejected")
 	}
-	if _, err := h.NewAgent("brokkr", "boss"); err == nil {
+	if _, err := h.NewAgent(testProject, "brokkr", "boss"); err == nil {
 		t.Fatalf("bad role should be rejected")
 	}
-	if _, err := h.NewAgent("brokkr", "worker"); err != nil {
+	if _, err := h.NewAgent(testProject, "brokkr", "worker"); err != nil {
 		t.Fatalf("valid agent: %v", err)
 	}
-	if _, err := h.NewAgent("brokkr", "worker"); err == nil {
+	if _, err := h.NewAgent(testProject, "brokkr", "worker"); err == nil {
 		t.Fatalf("duplicate agent should be rejected")
 	}
 }
 
 func TestNewAgentAutoName(t *testing.T) {
 	h := newHub(t)
-	// Empty name ⇒ first unused dwarf name.
-	n1, err := h.NewAgent("", "worker")
+	n1, err := h.NewAgent(testProject, "", "worker")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if n1 != dwarfNames[0] {
 		t.Fatalf("first auto-name = %q, want %q", n1, dwarfNames[0])
 	}
-	// Next one skips the taken name.
-	n2, err := h.NewAgent("", "worker")
+	n2, err := h.NewAgent(testProject, "", "worker")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,10 +108,10 @@ func TestNewAgentAutoName(t *testing.T) {
 
 func TestNewAgentRecordsIdentityAndLog(t *testing.T) {
 	h := newHub(t)
-	if _, err := h.NewAgent("dvalin", "reviewer"); err != nil {
+	if _, err := h.NewAgent(testProject, "dvalin", "reviewer"); err != nil {
 		t.Fatal(err)
 	}
-	st, err := h.State()
+	st, err := h.State(testProject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,8 +121,7 @@ func TestNewAgentRecordsIdentityAndLog(t *testing.T) {
 	if st.Agents[0].Status != "down" { // podman absent → session not alive
 		t.Fatalf("expected status down, got %q", st.Agents[0].Status)
 	}
-	// register event logged
-	evs, _ := h.store.Events("dvalin", 0)
+	evs, _ := h.store.For(testProject).Events("dvalin", 0)
 	if len(evs) != 1 || evs[0].Type != "register" {
 		t.Fatalf("register not logged: %+v", evs)
 	}
@@ -129,7 +129,7 @@ func TestNewAgentRecordsIdentityAndLog(t *testing.T) {
 
 func TestTellUnknownAgent(t *testing.T) {
 	h := newHub(t)
-	if err := h.Tell("ghost", "hi", "user"); err == nil {
+	if err := h.Tell(testProject, "ghost", "hi", "user"); err == nil {
 		t.Fatalf("telling unknown agent should error")
 	}
 }

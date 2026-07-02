@@ -1,10 +1,9 @@
 // package: hub / workflow
 // type:    logic (the act → report → idle loop + PR-as-merge-intent)
-// job:     the real worker/reviewer verbs and the host merge. Tasks are a cached
-//          read model synced from td (D15); `next` claims one and branches;
-//          `submit` records a merge-intent and returns (no blocking); the reviewer
-//          approves/rejects; the human merges. All state is per-project — methods
-//          take a project (repoTag) and work through store.For(project).
+// job:     the worker verbs and task assignment. Tasks are a cached read model
+//          synced from td (D15); `next` claims one and branches; the directive loop
+//          decides the next action. All state is per-project — methods take a
+//          project (repoTag) and work through store.For(project).
 // limits:  git is entirely hub-side (the agent edits /workspace, the hub commits
 //          and merges); writes to td go through the td adapter (D15).
 package hub

@@ -10,21 +10,30 @@ import (
 	"github.com/flo-at/sindri/internal/hub"
 )
 
-// /events streams the initial snapshot and a fresh one after a mutation.
-func TestWatchStreamsChanges(t *testing.T) {
-	root := t.TempDir()
-	h, err := hub.New(root)
+// serveTestHub starts a global hub isolated under a temp SINDRI_HOME (so its socket
+// and state don't collide with the real hub or other tests) and waits for it.
+func serveTestHub(t *testing.T) *hub.Hub {
+	t.Helper()
+	t.Setenv("SINDRI_HOME", t.TempDir())
+	h, err := hub.New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer h.Close()
+	t.Cleanup(func() { h.Close() })
 	go h.Serve()
-	for deadline := time.Now().Add(2 * time.Second); !hub.IsRunning(root); {
+	for deadline := time.Now().Add(2 * time.Second); !hub.IsRunning(); {
 		if time.Now().After(deadline) {
 			t.Fatal("hub never came up")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	return h
+}
+
+// /events streams the initial snapshot and a fresh one after a mutation.
+func TestWatchStreamsChanges(t *testing.T) {
+	serveTestHub(t)
+	root := t.TempDir() // the repo this client's requests concern (X-Sindri-Project)
 
 	cl := Dial(root)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -69,34 +78,41 @@ func has(s []string, v string) bool {
 }
 
 // The agent socket IS the identity: a connection on brokkr's socket is brokkr.
-// Exercises GET /commands (role-filtered) and POST /exec (streamed + exit) over
-// a real per-agent socket.
+// Exercises GET /commands (role-filtered) and POST /exec (streamed + exit) over a
+// real per-agent socket.
 func TestAgentSocketIdentityAndSurface(t *testing.T) {
-	root := t.TempDir()
-	h, err := hub.New(root)
+	t.Setenv("SINDRI_HOME", t.TempDir())
+	h, err := hub.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer h.Close()
+	const proj = "proj"
 
-	if _, err := h.NewAgent("brokkr", "worker"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.NewAgent("rune", "reviewer"); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.ServeAgent("brokkr"); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.ServeAgent("rune"); err != nil {
-		t.Fatal(err)
+	// This exercises the Linux per-agent unix socket (on macOS agents use the TCP
+	// channel — see TestAgentTCPChannelAuth). AF_UNIX paths are capped ~104 chars,
+	// which a deep temp dir can exceed; skip rather than fail on that platform limit.
+	if len(hub.AgentSocketPath(proj, "brokkr")) > 100 {
+		t.Skip("agent socket path exceeds the AF_UNIX length limit under this temp dir")
 	}
 
-	worker := DialSocket(hub.AgentSocketPath(root, "brokkr"))
-	rune := DialSocket(hub.AgentSocketPath(root, "rune"))
+	if _, err := h.NewAgent(proj, "brokkr", "worker"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.NewAgent(proj, "rune", "reviewer"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.ServeAgent(proj, "brokkr"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.ServeAgent(proj, "rune"); err != nil {
+		t.Fatal(err)
+	}
 
-	// Idle worker surface: status/log/next. submit is state-gated (hidden until a
-	// task is held); approve/reject/merge are reviewer/host-only.
+	worker := DialSocket(hub.AgentSocketPath(proj, "brokkr"))
+	rune := DialSocket(hub.AgentSocketPath(proj, "rune"))
+
+	// Idle worker surface: status/log/next; submit state-gated; approve/reject host-only.
 	wc, err := worker.Commands()
 	if err != nil {
 		t.Fatalf("worker commands: %v", err)
@@ -148,24 +164,11 @@ func TestAgentSocketIdentityAndSurface(t *testing.T) {
 	}
 }
 
-// Exercise the full socket path end to end: hub server + HTTP client + store,
-// for the podman-free operations (register + state).
+// Exercise the full socket path end to end: hub server + HTTP client + store, for
+// the podman-free operations (register + state).
 func TestServeAndClientRoundTrip(t *testing.T) {
+	serveTestHub(t)
 	root := t.TempDir()
-	h, err := hub.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer h.Close()
-	go h.Serve()
-
-	deadline := time.Now().Add(2 * time.Second)
-	for !hub.IsRunning(root) {
-		if time.Now().After(deadline) {
-			t.Fatal("hub never came up")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
 
 	cl := Dial(root)
 	if _, err := cl.NewAgent("brokkr", "worker"); err != nil {

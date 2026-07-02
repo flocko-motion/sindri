@@ -28,8 +28,8 @@ import (
 func Run(root string) error {
 	// Startup breadcrumbs to stderr (before the alt screen takes over) so a hang
 	// is attributable to a step rather than silent.
-	fmt.Fprintf(os.Stderr, "sindri tui: hub at %s\n", hub.SocketPath(root))
-	if !hub.IsRunning(root) {
+	fmt.Fprintf(os.Stderr, "sindri tui: hub at %s\n", hub.SocketPath())
+	if !hub.IsRunning() {
 		return fmt.Errorf("no hub running — start one first: 'sindri hub start --bg'")
 	}
 	fmt.Fprintln(os.Stderr, "sindri tui: connecting to /events…")

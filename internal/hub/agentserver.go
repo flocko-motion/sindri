@@ -1,10 +1,9 @@
 // package: hub / agentserver
 // type:    logic (per-agent socket = identity, Linux)
-// job:     serve each agent's own unix socket. The socket an agent connects
-//          through IS its identity (D2): a connection on a given agent's socket is,
-//          by construction, that (project, agent) — no name on the wire. Sockets
-//          live under the central state dir, per project. Exposes the agent surface:
-//          GET /commands, GET /directive, POST /exec (streamed).
+// job:     serve each agent's own unix socket (Linux). The socket a caller connects
+//          through IS its (project, agent) identity — no name on the wire. Sockets
+//          live under the central state dir. Exposes the agent surface: GET
+//          /commands, GET /directive, POST /exec.
 // limits:  agent sockets carry only the agent surface; host-control endpoints live
 //          on the control socket (server.go). macOS uses the TCP channel instead
 //          (agenttcp.go) — a bind-mounted socket can't cross the podman VM.

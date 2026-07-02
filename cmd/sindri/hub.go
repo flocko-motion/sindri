@@ -26,8 +26,9 @@ import (
 	"golang.org/x/term"
 )
 
-// backend is the full hub operation set; satisfied by both *hub.Hub (in-process,
-// ephemeral) and *client.HTTP (a running hub over its socket).
+// backend is the full hub operation set the host CLI uses; satisfied by
+// *client.HTTP (the single global hub over its socket — repo context rides the
+// client's X-Sindri-Project header, so these signatures don't carry a project).
 type backend interface {
 	NewAgent(name, role string) (string, error)
 	DeleteAgent(name string) error
@@ -65,13 +66,14 @@ func repoRoot() (string, error) {
 	return git.Root(wd)
 }
 
-// open returns the running hub over its socket if one is up, else an ephemeral
-// in-process hub.
+// open connects to the single global hub for a host command, auto-starting it if
+// needed. There's no ephemeral in-process backend anymore — one hub serves every
+// repo, and it's cheap to keep running.
 func open(root string) (backend, error) {
-	if hub.IsRunning(root) {
-		return dialHub(root)
+	if err := ensureHubRunning(); err != nil {
+		return nil, err
 	}
-	return hub.New(root)
+	return dialHub(root)
 }
 
 func withBackend(fn func(backend) error) error {
@@ -93,13 +95,14 @@ func newHubCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "hub",
 		Short: "Manage the per-repo hub service (start, list, stop)",
-		Long: "The hub is the per-repo coordinator that drives the agents.\n\n" +
-			"  sindri hub start        run this repo's hub in the foreground\n" +
+		Long: "The hub is the single global coordinator that drives the agents across\n" +
+			"every repo.\n\n" +
+			"  sindri hub start        run the hub in the foreground\n" +
 			"  sindri hub start --bg   run it in the background (same as `sindri hub start &`)\n" +
-			"  sindri hub list         list every hub running on this machine and the repo each serves\n" +
-			"  sindri hub stop         stop this repo's hub (or `stop <pid>` for one from `hub list`)",
+			"  sindri hub status       show the running hub (pid, version, uptime)\n" +
+			"  sindri hub stop         stop the running hub",
 	}
-	c.AddCommand(newHubStartCmd(), newHubListCmd(), newHubStopCmd())
+	c.AddCommand(newHubStartCmd(), newHubStatusCmd(), newHubStopCmd())
 	return c
 }
 
@@ -110,48 +113,43 @@ func newHubStartCmd() *cobra.Command {
 		Short: "Run this repo's hub in the foreground (--bg to run it in the background)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			root, err := repoRoot()
-			if err != nil {
-				return err
-			}
-			if hub.IsRunning(root) {
-				// A hub is already up. If it's the same build, there's nothing to do. If
-				// it's a different (or unknown, pre-stamp) build, offer to take over —
-				// otherwise you'd be stuck unable to run the new hub.
-				_, ver, ok := hub.ReadPID(root)
+			if hub.IsRunning() {
+				// A hub is already up. Same build → nothing to do; a different (or
+				// unknown, pre-stamp) build → offer to take over.
+				_, ver, ok := hub.ReadPID()
 				if ok && ver == version {
-					return fmt.Errorf("a hub is already running for this repo (%s)", hub.SocketPath(root))
+					return fmt.Errorf("a hub is already running (%s)", hub.SocketPath())
 				}
 				desc := "an older build (predates version stamping)"
 				if ok {
 					desc = "sindri " + ver
 				}
-				fmt.Fprintf(os.Stderr, "a hub (%s) is already running for this repo; this CLI is %s.\n", desc, version)
+				fmt.Fprintf(os.Stderr, "a hub (%s) is already running; this CLI is %s.\n", desc, version)
 				if !term.IsTerminal(int(os.Stdin.Fd())) || !promptYesNo("stop it and start this one?") {
-					return fmt.Errorf("a hub is already running for this repo (%s)", hub.SocketPath(root))
+					return fmt.Errorf("a hub is already running (%s)", hub.SocketPath())
 				}
-				pid, havePID := hub.HubPID(root)
+				pid, havePID := hub.HubPID()
 				if !havePID {
 					return fmt.Errorf("couldn't find the running hub's pid to stop it — stop it manually, then re-run")
 				}
-				if err := stopHub(root, pid); err != nil {
+				if err := stopHub(pid); err != nil {
 					return err
 				}
 			}
 			if bg {
-				return startHub(root) // detached; returns once the socket answers
+				return startHub() // detached; returns once the socket answers
 			}
-			h, err := hub.New(root)
+			h, err := hub.New()
 			if err != nil {
 				return err
 			}
 			defer h.Close()
-			// Stamp this process (pid + build version) as the repo's hub, so a second
-			// hub can't start for it and clients can detect a stale-version hub.
-			if err := hub.WritePID(root, version); err != nil {
+			// Stamp this process (pid + build version) as the hub, so a second hub
+			// can't start and clients can detect a stale-version hub.
+			if err := hub.WritePID(version); err != nil {
 				return err
 			}
-			defer hub.RemovePID(root)
+			defer hub.RemovePID()
 			fmt.Fprintf(os.Stderr, "sindri hub listening at %s\n", h.SocketPath())
 			return h.Serve()
 		},
@@ -262,7 +260,7 @@ func agentStartCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if !hub.IsRunning(root) {
+			if !hub.IsRunning() {
 				return fmt.Errorf("no hub running — start one first: 'sindri hub start --bg' (agents need a persistent hub)")
 			}
 			cl, err := dialHub(root)

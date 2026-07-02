@@ -39,7 +39,7 @@ func newCoauthorCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := ensureHubRunning(root); err != nil {
+			if err := ensureHubRunning(); err != nil {
 				return err
 			}
 			cl, err := dialHub(root)

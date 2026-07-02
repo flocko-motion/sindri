@@ -26,10 +26,10 @@ func newTuiCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := ensureHubRunning(root); err != nil { // auto-start a bg hub if none is up
+			if err := ensureHubRunning(); err != nil { // auto-start a bg hub if none is up
 				return err
 			}
-			if err := reconcileHubVersion(root); err != nil {
+			if err := reconcileHubVersion(); err != nil {
 				return err
 			}
 			return tui.Run(root)
