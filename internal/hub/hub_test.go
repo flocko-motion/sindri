@@ -87,22 +87,31 @@ func TestNewAgentValidation(t *testing.T) {
 
 func TestNewAgentAutoName(t *testing.T) {
 	h := newHub(t)
+	isDwarf := func(n string) bool {
+		for _, d := range dwarfNames {
+			if d == n {
+				return true
+			}
+		}
+		return false
+	}
 	n1, err := h.NewAgent(testProject, "", "worker")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n1 != dwarfNames[0] {
-		t.Fatalf("first auto-name = %q, want %q", n1, dwarfNames[0])
-	}
-	n2, err := h.NewAgent(testProject, "", "worker")
+	// A different project must still get a globally-unique name (not reuse n1).
+	n2, err := h.NewAgent("other", "", "worker")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n2 != dwarfNames[1] {
-		t.Fatalf("second auto-name = %q, want %q", n2, dwarfNames[1])
+	if !isDwarf(n1) || !isDwarf(n2) {
+		t.Fatalf("auto-names should be dwarves: %q, %q", n1, n2)
 	}
-	if n2 == "sindri" || n1 == "sindri" {
-		t.Fatalf("must never hand out 'sindri'")
+	if n1 == n2 {
+		t.Fatalf("auto-names must be globally unique across projects, got %q twice", n1)
+	}
+	if n1 == "sindri" || n2 == "sindri" || n1 == "brokkr" || n2 == "brokkr" {
+		t.Fatalf("must never hand out a binary name")
 	}
 }
 

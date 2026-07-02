@@ -42,5 +42,5 @@
 
 - [x] 7.1 Store tests: project scoping + `(project, name)` isolation (same name in two projects).
 - [x] 7.2 Token test: `(project, agent)` derivation + resolution; cross-project token rejected.
-- [ ] 7.3 Live: two repos under one hub — agents in both, unified Agents/PRs board, per-repo Tasks via the switcher; hub restart resumes both projects.
+- [x] 7.3 Live: two repos under one hub — agents in both, unified Agents/PRs board, per-repo Tasks via the switcher; hub restart resumes both projects.
 - [x] 7.4 `make verify` green; `openspec validate global-hub` passes.

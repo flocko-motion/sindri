@@ -2,14 +2,16 @@
 // type:    headless helper
 // job:     auto-name new agents after Norse dwarves — friends of Sindri the
 //          smith. The binary names "sindri" and "brokkr" are never handed out.
+//          Names are picked at random and are unique across ALL projects, so each
+//          dwarf identifies one agent machine-wide (recognisable on the unified
+//          cross-repo board).
 // limits:  only allocates names; registering and launching the agent are the
 //          hub's (-> hub.go).
 package hub
 
 import (
 	"fmt"
-
-	"github.com/flo-at/sindri/internal/hub/store"
+	"math/rand"
 )
 
 // dwarfNames are Norse dwarves (Dvergatal + the smith Eitri), lowercased for use
@@ -23,26 +25,26 @@ var dwarfNames = []string{
 	"frar", "loni", "jari", "hepti", "nar", "lit",
 }
 
-// autoName returns the first dwarf name unused in the given project; once the pool
-// is exhausted it appends a numeric suffix (brokkr2, eitri2, …) so creation never
-// fails. Names are unique per project, so two repos may each have an "eitri".
-func (h *Hub) autoName(ps *store.ProjectStore) (string, error) {
-	roster, err := ps.Roster()
+// autoName returns a random dwarf name unused by any agent across all projects, so
+// names are globally unique and don't always start at "eitri". Once the pool is
+// exhausted it appends a numeric suffix (thorin2, …) so creation never fails.
+func (h *Hub) autoName() (string, error) {
+	agents, err := h.store.AllAgents()
 	if err != nil {
 		return "", err
 	}
-	taken := make(map[string]bool, len(roster))
-	for _, a := range roster {
+	taken := make(map[string]bool, len(agents))
+	for _, a := range agents {
 		taken[a.Name] = true
 	}
-	for _, n := range dwarfNames {
-		if !taken[n] {
-			return n, nil
+	for _, i := range rand.Perm(len(dwarfNames)) { // random order → variety
+		if !taken[dwarfNames[i]] {
+			return dwarfNames[i], nil
 		}
 	}
 	for i := 2; ; i++ {
-		for _, n := range dwarfNames {
-			if cand := fmt.Sprintf("%s%d", n, i); !taken[cand] {
+		for _, j := range rand.Perm(len(dwarfNames)) {
+			if cand := fmt.Sprintf("%s%d", dwarfNames[j], i); !taken[cand] {
 				return cand, nil
 			}
 		}

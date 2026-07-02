@@ -269,8 +269,8 @@ func (h *Hub) SocketPath() string { return SocketPath() }
 // project. Returns the final name.
 func (h *Hub) NewAgent(project, name, role string) (string, error) {
 	ps := h.store.For(project)
-	if name == "" { // auto-name after a dwarf — a friend of Sindri
-		n, err := h.autoName(ps)
+	if name == "" { // auto-name after a dwarf — a friend of Sindri (globally unique)
+		n, err := h.autoName()
 		if err != nil {
 			return "", err
 		}
