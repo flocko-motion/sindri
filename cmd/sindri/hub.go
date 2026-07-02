@@ -90,9 +90,12 @@ func withBackend(fn func(backend) error) error {
 // --- first-order: hub ---
 
 func newHubCmd() *cobra.Command {
-	return &cobra.Command{
+	c := &cobra.Command{
 		Use:   "hub",
-		Short: "Run the per-repo hub service (foreground)",
+		Short: "Run the per-repo hub service (foreground). See `sindri hub list` to see all running hubs.",
+		Long: "Run the per-repo hub service in the foreground.\n\n" +
+			"Subcommand:\n" +
+			"  sindri hub list   list every hub running on this machine and the repo each serves",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := repoRoot()
 			if err != nil {
@@ -137,6 +140,8 @@ func newHubCmd() *cobra.Command {
 			return h.Serve()
 		},
 	}
+	c.AddCommand(newHubListCmd())
+	return c
 }
 
 // --- agent ---
