@@ -16,31 +16,31 @@ func openTmp(t *testing.T) *Store {
 }
 
 func TestPutGetRoster(t *testing.T) {
-	s := openTmp(t)
+	p := openTmp(t).For("repo")
 
-	if _, ok, err := s.GetAgent("brokkr"); err != nil || ok {
+	if _, ok, err := p.GetAgent("brokkr"); err != nil || ok {
 		t.Fatalf("expected absent agent, got ok=%v err=%v", ok, err)
 	}
 
-	if err := s.PutAgent(Agent{Name: "brokkr", Role: "worker", Workspace: ".worktrees/brokkr"}); err != nil {
+	if err := p.PutAgent(Agent{Name: "brokkr", Role: "worker", Workspace: ".worktrees/brokkr"}); err != nil {
 		t.Fatalf("put: %v", err)
 	}
-	if err := s.PutAgent(Agent{Name: "dvalin", Role: "reviewer"}); err != nil {
+	if err := p.PutAgent(Agent{Name: "dvalin", Role: "reviewer"}); err != nil {
 		t.Fatalf("put: %v", err)
 	}
 
-	got, ok, err := s.GetAgent("brokkr")
+	got, ok, err := p.GetAgent("brokkr")
 	if err != nil || !ok {
 		t.Fatalf("get brokkr: ok=%v err=%v", ok, err)
 	}
-	if got.Role != "worker" || got.Workspace != ".worktrees/brokkr" {
+	if got.Role != "worker" || got.Workspace != ".worktrees/brokkr" || got.Project != "repo" {
 		t.Fatalf("unexpected agent: %+v", got)
 	}
 	if got.CreatedAt == "" {
 		t.Fatalf("created_at not stamped")
 	}
 
-	roster, err := s.Roster()
+	roster, err := p.Roster()
 	if err != nil {
 		t.Fatalf("roster: %v", err)
 	}
@@ -50,16 +50,16 @@ func TestPutGetRoster(t *testing.T) {
 }
 
 func TestPutPreservesCreatedAt(t *testing.T) {
-	s := openTmp(t)
-	if err := s.PutAgent(Agent{Name: "brokkr", Role: "worker"}); err != nil {
+	p := openTmp(t).For("repo")
+	if err := p.PutAgent(Agent{Name: "brokkr", Role: "worker"}); err != nil {
 		t.Fatal(err)
 	}
-	first, _, _ := s.GetAgent("brokkr")
+	first, _, _ := p.GetAgent("brokkr")
 	// Update role; created_at must survive.
-	if err := s.PutAgent(Agent{Name: "brokkr", Role: "reviewer"}); err != nil {
+	if err := p.PutAgent(Agent{Name: "brokkr", Role: "reviewer"}); err != nil {
 		t.Fatal(err)
 	}
-	second, _, _ := s.GetAgent("brokkr")
+	second, _, _ := p.GetAgent("brokkr")
 	if second.Role != "reviewer" {
 		t.Fatalf("role not updated: %+v", second)
 	}
@@ -69,26 +69,26 @@ func TestPutPreservesCreatedAt(t *testing.T) {
 }
 
 func TestDeleteAgent(t *testing.T) {
-	s := openTmp(t)
-	s.PutAgent(Agent{Name: "brokkr", Role: "worker"})
-	if err := s.DeleteAgent("brokkr"); err != nil {
+	p := openTmp(t).For("repo")
+	p.PutAgent(Agent{Name: "brokkr", Role: "worker"})
+	if err := p.DeleteAgent("brokkr"); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, _ := s.GetAgent("brokkr"); ok {
+	if _, ok, _ := p.GetAgent("brokkr"); ok {
 		t.Fatalf("agent still present after delete")
 	}
 }
 
 func TestEventsAppendAndOrder(t *testing.T) {
-	s := openTmp(t)
+	p := openTmp(t).For("repo")
 	for _, m := range []string{"first", "second", "third"} {
-		if err := s.Log("brokkr", "inject", m); err != nil {
+		if err := p.Log("brokkr", "inject", m); err != nil {
 			t.Fatalf("log: %v", err)
 		}
 	}
-	s.Log("dvalin", "inject", "other") // different agent, must not leak in
+	p.Log("dvalin", "inject", "other") // different agent, must not leak in
 
-	all, err := s.Events("brokkr", 0)
+	all, err := p.Events("brokkr", 0)
 	if err != nil {
 		t.Fatalf("events: %v", err)
 	}
@@ -100,12 +100,62 @@ func TestEventsAppendAndOrder(t *testing.T) {
 	}
 
 	// limit returns the most-recent N, still oldest-first.
-	last2, err := s.Events("brokkr", 2)
+	last2, err := p.Events("brokkr", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(last2) != 2 || last2[0].Payload != "second" || last2[1].Payload != "third" {
 		t.Fatalf("limit/order wrong: %+v", last2)
+	}
+}
+
+// Two projects may each hold an agent of the same name without collision, and one
+// project's roster/events never leak into another's (task 7.1).
+func TestProjectIsolation(t *testing.T) {
+	s := openTmp(t)
+	a, b := s.For("repoA"), s.For("repoB")
+
+	if err := a.PutAgent(Agent{Name: "eitri", Role: "coauthor"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.PutAgent(Agent{Name: "eitri", Role: "worker"}); err != nil {
+		t.Fatalf("same name in another project must be allowed: %v", err)
+	}
+	a.Log("eitri", "note", "in-A")
+	b.Log("eitri", "note", "in-B")
+
+	ea, _, _ := a.GetAgent("eitri")
+	eb, _, _ := b.GetAgent("eitri")
+	if ea.Role != "coauthor" || eb.Role != "worker" {
+		t.Fatalf("cross-project bleed: A=%+v B=%+v", ea, eb)
+	}
+	if r, _ := a.Roster(); len(r) != 1 {
+		t.Fatalf("repoA roster leaked: %+v", r)
+	}
+	if evs, _ := a.Events("eitri", 0); len(evs) != 1 || evs[0].Payload != "in-A" {
+		t.Fatalf("repoA events wrong/leaked: %+v", evs)
+	}
+
+	all, _ := s.AllAgents()
+	if len(all) != 2 {
+		t.Fatalf("AllAgents across projects = %d, want 2", len(all))
+	}
+}
+
+func TestProjectRegistry(t *testing.T) {
+	s := openTmp(t)
+	if err := s.RegisterProject("tagA", "/repos/a"); err != nil {
+		t.Fatal(err)
+	}
+	s.RegisterProject("tagB", "/repos/b")
+	if path, ok := s.ProjectPath("tagA"); !ok || path != "/repos/a" {
+		t.Fatalf("ProjectPath(tagA) = %q, %v", path, ok)
+	}
+	if _, ok := s.ProjectPath("nope"); ok {
+		t.Fatalf("unknown tag resolved")
+	}
+	if ps, _ := s.Projects(); len(ps) != 2 {
+		t.Fatalf("Projects = %d, want 2", len(ps))
 	}
 }
 
@@ -117,8 +167,8 @@ func TestDurableAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s1.PutAgent(Agent{Name: "brokkr", Role: "worker"})
-	s1.Log("brokkr", "launch", "started")
+	s1.For("repo").PutAgent(Agent{Name: "brokkr", Role: "worker"})
+	s1.For("repo").Log("brokkr", "launch", "started")
 	s1.Close()
 
 	s2, err := Open(path)
@@ -126,10 +176,10 @@ func TestDurableAcrossReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s2.Close()
-	if _, ok, _ := s2.GetAgent("brokkr"); !ok {
+	if _, ok, _ := s2.For("repo").GetAgent("brokkr"); !ok {
 		t.Fatalf("agent lost across reopen")
 	}
-	if evs, _ := s2.Events("brokkr", 0); len(evs) != 1 {
+	if evs, _ := s2.For("repo").Events("brokkr", 0); len(evs) != 1 {
 		t.Fatalf("events lost across reopen: %d", len(evs))
 	}
 }

@@ -46,8 +46,16 @@ A single `hub.db` under the state dir; every currently-per-repo table gains a
 Reads/writes scope by project; the global board is a single query. *Alternative
 (Strategy A):* the hub holds `map[repo]*Store` over per-repo DBs — zero store
 rewrite, but the unified board must aggregate in Go and identity stays awkward.
-With no migration cost, B's one-time rewrite of the ~35 store methods buys the
-cleaner end state and the natural global board; chosen.
+With no migration cost, B's one-time rewrite of the store buys the cleaner end
+state and the natural global board; chosen.
+
+**Refinement — project scoping via a handle, not a parameter.** Instead of adding a
+`project` argument to every store method (and touching every call site), the one
+`*Store` owns the DB plus the *global* reads (board across all projects, registry,
+meta), and `store.For(project)` returns a `*ProjectStore` whose methods are
+implicitly scoped to that project (`WHERE project = ?`). The hub takes one
+`ps := store.For(project)` per request and calls it unchanged. Keeps the scoping
+concern in one place and the call sites small — the same single multiplexed DB.
 
 ### D3 — Repo context travels on the wire
 The client resolves the repo root (from cwd, as today) and sends it on every

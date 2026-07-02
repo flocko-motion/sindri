@@ -6,9 +6,9 @@
 
 ## 2. Project-keyed store
 
-- [ ] 2.1 Add a `project` column to every per-repo table (agents, agent_state, prs, events, tasks-cache, task_priority, reviews, pr_lint, pr_events, task_approval); make `agents` PK `(project, name)`. Keep `meta` hub-global.
-- [ ] 2.2 Add `project` as the leading argument to the ~35 `*store.Store` methods and scope every query/insert by it (let the compiler enumerate call sites).
-- [ ] 2.3 Add a `projects(repoTag, path, first_seen)` table with `RegisterProject`, `ProjectPath(repoTag)`, and `Projects()`.
+- [x] 2.1 Add a `project` column to every per-repo table (agents, agent_state, prs, events, tasks-cache, task_priority, reviews, pr_lint, pr_events, task_approval); make `agents` PK `(project, name)`. Keep `meta` hub-global.
+- [x] 2.2 Scope every query/insert by project — via a `ProjectStore` handle (`store.For(project)`) rather than a per-method arg (design D2 refinement); global board reads (`AllAgents`/`AllPRs`) stay on `*Store`.
+- [x] 2.3 Add a `projects(repoTag, path, first_seen)` table with `RegisterProject`, `ProjectPath(repoTag)`, and `Projects()`.
 - [ ] 2.4 Point `store.Open` at the single central `hub.db`.
 
 ## 3. Hub core (single global, project-aware)
