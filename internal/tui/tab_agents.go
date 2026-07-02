@@ -263,6 +263,7 @@ func (m model) agentRows() []row {
 		// green running); cells styled independently so resets don't bleed.
 		ac := agentStatusStyle(a.Status)
 		out = append(out, row{strings.Join([]string{
+			projectStyle(a.Project).Render(fmt.Sprintf("%-10.10s", a.Repo)),
 			ac.Render(fmt.Sprintf("%-9s", a.Status)),
 			ac.Render(fmt.Sprintf("%-12s", a.Name)),
 			ac.Render(fmt.Sprintf("%-8s", a.Role)),

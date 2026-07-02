@@ -34,12 +34,14 @@ type AgentView struct {
 
 // BoardState is the whole board in one payload. Agents and PRs are global (across
 // every project, each row tagged with its repo); Tasks are the selected project's
-// (td is per-repo, so a merged backlog would mislead).
+// (td is per-repo, so a merged backlog would mislead); Projects is every repo the
+// hub knows, for the TUI's repo switcher and repo labels.
 type BoardState struct {
-	Agents  []AgentView  `json:"agents"`
-	Tasks   []store.Task `json:"tasks"`
-	PRs      []store.PR  `json:"prs"`
-	Orphans []string     `json:"orphans"` // pods with no roster entry (D14)
+	Agents   []AgentView     `json:"agents"`
+	Tasks    []store.Task    `json:"tasks"`
+	PRs      []store.PR      `json:"prs"`
+	Projects []store.Project `json:"projects"`
+	Orphans  []string        `json:"orphans"` // pods with no roster entry (D14)
 }
 
 // State assembles the board: agents and PRs across all projects, tasks for the
@@ -84,7 +86,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			}
 		}
 	}
-	return BoardState{Agents: agents, Tasks: tasks, PRs: prs, Orphans: orphans}, nil
+	return BoardState{Agents: agents, Tasks: tasks, PRs: prs, Projects: h.knownProjects(), Orphans: orphans}, nil
 }
 
 // knownProjects returns the registry's projects (best-effort; empty on error).

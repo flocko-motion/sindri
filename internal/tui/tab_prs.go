@@ -161,7 +161,8 @@ const prDetailW = 44
 func (m model) prRows() []row {
 	var out []row
 	for _, p := range m.state.PRs {
-		out = append(out, row{fmt.Sprintf("%-14s %-9s %-10s %s", p.ID, p.Status, p.Agent, p.Branch), p.ID})
+		repo := projectStyle(p.Project).Render(fmt.Sprintf("%-10.10s", m.repoName(p.Project)))
+		out = append(out, row{fmt.Sprintf("%s %-14s %-9s %-10s %s", repo, p.ID, p.Status, p.Agent, p.Branch), p.ID})
 	}
 	return out
 }
