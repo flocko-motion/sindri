@@ -6,7 +6,11 @@
 //          hub's (-> hub.go).
 package hub
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/flo-at/sindri/internal/hub/store"
+)
 
 // dwarfNames are Norse dwarves (Dvergatal + the smith Eitri), lowercased for use
 // as agent/workspace names. Deliberately excludes "sindri" and "brokkr" — those
@@ -19,10 +23,11 @@ var dwarfNames = []string{
 	"frar", "loni", "jari", "hepti", "nar", "lit",
 }
 
-// autoName returns the first unused dwarf name; once the pool is exhausted it
-// appends a numeric suffix (brokkr2, eitri2, …) so creation never fails.
-func (h *Hub) autoName() (string, error) {
-	roster, err := h.store.Roster()
+// autoName returns the first dwarf name unused in the given project; once the pool
+// is exhausted it appends a numeric suffix (brokkr2, eitri2, …) so creation never
+// fails. Names are unique per project, so two repos may each have an "eitri".
+func (h *Hub) autoName(ps *store.ProjectStore) (string, error) {
+	roster, err := ps.Roster()
 	if err != nil {
 		return "", err
 	}
