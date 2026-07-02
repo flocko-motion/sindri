@@ -74,6 +74,24 @@ type NameReq struct {
 	Shell bool   `json:"shell"`
 }
 
+// globalRoutes are the only control endpoints valid without a repo context: the
+// board reads, which return global agents/PRs (and no tasks when no repo is
+// selected). Everything else is repo-scoped and requires X-Sindri-Project.
+var globalRoutes = map[string]bool{"/state": true, "/events": true}
+
+// requireProject rejects a repo-scoped request that arrives without an
+// X-Sindri-Project header (rather than silently acting on a phantom empty project),
+// with a clear message. The board reads are exempt (see globalRoutes).
+func requireProject(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !globalRoutes[r.URL.Path] && r.Header.Get("X-Sindri-Project") == "" {
+			writeJSON(w, nil, fmt.Errorf("missing repo context (X-Sindri-Project) — run this inside a repo"))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // reqProject resolves (and registers) the repo a host request concerns, from the
 // X-Sindri-Project header (the client sends its repo root). Returns the repoTag; ""
 // when no header is present (a repo-agnostic request, e.g. the board with no repo
@@ -322,7 +340,7 @@ func (h *Hub) Serve() error {
 		return err
 	}
 	defer os.Remove(path)
-	return http.Serve(ln, logRequests("hub", h.Handler()))
+	return http.Serve(ln, logRequests("hub", requireProject(h.Handler())))
 }
 
 // handleEvents streams board state as Server-Sent Events: the current state on

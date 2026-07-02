@@ -115,6 +115,17 @@ func TestNewAgentAutoName(t *testing.T) {
 	}
 }
 
+func TestNewAgentNameGloballyUnique(t *testing.T) {
+	h := newHub(t)
+	if _, err := h.NewAgent("repoA", "eitri", "worker"); err != nil {
+		t.Fatal(err)
+	}
+	// The same name in a DIFFERENT repo is refused — names are unique machine-wide.
+	if _, err := h.NewAgent("repoB", "eitri", "worker"); err == nil {
+		t.Fatalf("same name in another repo should be rejected (global uniqueness)")
+	}
+}
+
 func TestNewAgentRecordsIdentityAndLog(t *testing.T) {
 	h := newHub(t)
 	if _, err := h.NewAgent(testProject, "dvalin", "reviewer"); err != nil {

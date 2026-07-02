@@ -22,7 +22,7 @@
 
 - [x] 4.1 Client: resolve repo root (cwd) and send it as `X-Sindri-Project` on repo-scoped calls; dial the one global socket. Thread through the ~36 client methods.
 - [x] 4.2 Hub server: middleware/helper that resolves the project from the header (host CLI/TUI) or from agent identity (agent socket/token), and passes it to handlers across the ~32 routes.
-- [ ] 4.3 Reject/omit project where it doesn't apply (hub-global endpoints) and error clearly when a repo-scoped call arrives without context.
+- [x] 4.3 Reject/omit project where it doesn't apply (hub-global endpoints) and error clearly when a repo-scoped call arrives without context.
 
 ## 5. Board + TUI
 

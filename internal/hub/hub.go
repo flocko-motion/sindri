@@ -282,10 +282,16 @@ func (h *Hub) NewAgent(project, name, role string) (string, error) {
 	if role != "worker" && role != "reviewer" && role != "planner" && role != "coauthor" {
 		return "", fmt.Errorf("invalid role %q (worker|reviewer|planner|coauthor)", role)
 	}
-	if _, ok, err := ps.GetAgent(name); err != nil {
+	// Names are unique across ALL repos — a dwarf identifies one agent machine-wide,
+	// so the unified board never shows two agents with the same name.
+	agents, err := h.store.AllAgents()
+	if err != nil {
 		return "", err
-	} else if ok {
-		return "", fmt.Errorf("agent %q already exists", name)
+	}
+	for _, a := range agents {
+		if a.Name == name {
+			return "", fmt.Errorf("agent %q already exists (in %s) — names are unique across all repos", name, a.Project)
+		}
 	}
 	// A coauthor shares the user's real checkout (the repo root) rather than an
 	// isolated worktree — it works the SAME material as the user, freestyle.
