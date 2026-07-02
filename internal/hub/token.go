@@ -1,11 +1,11 @@
 // package: hub / token
 // type:    logic (agent authentication for the TCP channel)
-// job:     derive each agent's bearer token from one per-repo secret, and resolve
-//          an incoming token back to its agent. Used only by the macOS TCP agent
-//          channel (agenttcp.go), where — unlike a per-agent unix socket — the
-//          endpoint can't be the identity, so a token must be.
+// job:     derive each agent's bearer token from one hub-global secret over its
+//          (project, name), and resolve an incoming token back to that pair. Used
+//          only by the macOS TCP agent channel (agenttcp.go), where — unlike a
+//          per-agent unix socket — the endpoint can't be the identity.
 // limits:  no transport here; agenttcp.go serves and hub.go hands the token to the
-//          pod. The secret lives in the store (hub.db), which is gitignored.
+//          pod. The secret lives in the central store (hub.db), outside any repo.
 package hub
 
 import (
@@ -16,10 +16,10 @@ import (
 	"fmt"
 )
 
-// tokenSecretKey names the per-repo secret in the store's meta table.
+// tokenSecretKey names the hub-global secret in the store's meta table.
 const tokenSecretKey = "agent_token_secret"
 
-// agentSecret returns the per-repo secret that agent tokens are derived from,
+// agentSecret returns the hub-global secret that agent tokens are derived from,
 // generating and persisting it on first use. Persisting it (rather than keeping it
 // in memory) keeps tokens stable across hub restarts, so a restarted hub still
 // authenticates already-running pods (D11).
@@ -39,35 +39,36 @@ func (h *Hub) agentSecret() ([]byte, error) {
 	return buf, nil
 }
 
-// AgentToken derives agent name's bearer token: HMAC-SHA256(secret, name). It's
-// deterministic given the repo secret, so the same agent always gets the same
-// token — no per-agent storage needed, and it survives hub restarts.
-func (h *Hub) AgentToken(name string) (string, error) {
+// AgentToken derives an agent's bearer token: HMAC-SHA256(secret, project\x00name).
+// Folding the project in means the same agent name in two repos gets distinct
+// tokens. Deterministic given the hub secret, so it needs no per-agent storage and
+// survives hub restarts.
+func (h *Hub) AgentToken(project, name string) (string, error) {
 	secret, err := h.agentSecret()
 	if err != nil {
 		return "", err
 	}
 	mac := hmac.New(sha256.New, secret)
-	mac.Write([]byte(name))
+	mac.Write([]byte(project + "\x00" + name))
 	return hex.EncodeToString(mac.Sum(nil)), nil
 }
 
-// agentForToken returns the rostered agent whose token matches (constant-time),
-// ok=false if none does. This is how the TCP channel turns a bearer token into an
-// identity, the way a unix socket's path does on Linux.
-func (h *Hub) agentForToken(token string) (name string, ok bool) {
+// agentForToken resolves a bearer token to its (project, name), ok=false if none
+// matches (constant-time compare per candidate). This is how the TCP channel turns
+// a token into an identity, the way a unix socket's path does on Linux.
+func (h *Hub) agentForToken(token string) (project, name string, ok bool) {
 	if token == "" {
-		return "", false
+		return "", "", false
 	}
-	roster, err := h.store.Roster()
+	agents, err := h.store.AllAgents()
 	if err != nil {
-		return "", false
+		return "", "", false
 	}
-	for _, a := range roster {
-		want, err := h.AgentToken(a.Name)
+	for _, a := range agents {
+		want, err := h.AgentToken(a.Project, a.Name)
 		if err == nil && hmac.Equal([]byte(want), []byte(token)) {
-			return a.Name, true
+			return a.Project, a.Name, true
 		}
 	}
-	return "", false
+	return "", "", false
 }

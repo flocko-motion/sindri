@@ -1,8 +1,8 @@
 // package: hub / pidfile
 // type:    logic (single-instance guard + version stamp)
-// job:     record the running hub's pid and build version in .sindri/hub.pid, so a
-//          second hub can't start for the same repo and clients can tell whether
-//          the hub they'd talk to matches their own build.
+// job:     record the running global hub's pid and build version under the runtime
+//          dir, so a second hub can't start and clients can tell whether the hub
+//          they'd talk to matches their own build.
 // limits:  just the file; deciding what to do on a version mismatch is the CLI's
 //          (-> cmd/sindri, which offers a restart).
 package hub
@@ -16,37 +16,39 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/flo-at/sindri/internal/paths"
 )
 
-// pidInfo is what .sindri/hub.pid holds.
+// pidInfo is what hub.pid holds.
 type pidInfo struct {
 	PID     int    `json:"pid"`
 	Version string `json:"version"`
 }
 
-func pidPath(root string) string { return filepath.Join(root, ".sindri", "hub.pid") }
+func pidPath() string { return filepath.Join(paths.RuntimeDir(), "hub.pid") }
 
-// WritePID stamps the current process (pid + build version) as the hub for root.
-// It refuses when a different, live hub already owns the repo, so two hubs can't
-// serve one repo; a stale file (owner gone) is overwritten.
-func WritePID(root, version string) error {
-	if err := os.MkdirAll(filepath.Join(root, ".sindri"), 0o755); err != nil {
+// WritePID stamps the current process (pid + build version) as the global hub. It
+// refuses when a different, live hub already owns the runtime dir; a stale file
+// (owner gone) is overwritten.
+func WritePID(version string) error {
+	if err := os.MkdirAll(paths.RuntimeDir(), 0o755); err != nil {
 		return err
 	}
-	if pid, _, ok := ReadPID(root); ok && pid != os.Getpid() && ProcessAlive(pid) {
-		return fmt.Errorf("a hub is already running for this repo (pid %d)", pid)
+	if pid, _, ok := ReadPID(); ok && pid != os.Getpid() && ProcessAlive(pid) {
+		return fmt.Errorf("a hub is already running (pid %d)", pid)
 	}
 	data, err := json.Marshal(pidInfo{PID: os.Getpid(), Version: version})
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(pidPath(root), data, 0o644)
+	return os.WriteFile(pidPath(), data, 0o644)
 }
 
 // ReadPID returns the recorded hub pid and build version, ok=false when the file
-// is absent or unreadable (e.g. a hub predating this stamp).
-func ReadPID(root string) (pid int, version string, ok bool) {
-	data, err := os.ReadFile(pidPath(root))
+// is absent or unreadable.
+func ReadPID() (pid int, version string, ok bool) {
+	data, err := os.ReadFile(pidPath())
 	if err != nil {
 		return 0, "", false
 	}
@@ -58,7 +60,7 @@ func ReadPID(root string) (pid int, version string, ok bool) {
 }
 
 // RemovePID clears the hub's pid file (best-effort, on shutdown).
-func RemovePID(root string) { _ = os.Remove(pidPath(root)) }
+func RemovePID() { _ = os.Remove(pidPath()) }
 
 // ProcessAlive reports whether pid is a live process. Signal 0 probes without
 // actually signalling; EPERM means the process exists but isn't ours to signal.
@@ -67,19 +69,17 @@ func ProcessAlive(pid int) bool {
 	return err == nil || err == syscall.EPERM
 }
 
-// HubPID returns the pid of the process serving root's hub, so a caller can stop
-// it. It prefers the recorded pid file, and falls back to whoever holds the
-// control socket (via lsof) — which lets us stop even a legacy hub that predates
-// pid stamping. ok=false when no live hub owner can be found.
-func HubPID(root string) (pid int, ok bool) {
-	if p, _, isok := ReadPID(root); isok && ProcessAlive(p) {
+// HubPID returns the pid of the running hub, preferring the pid file and falling
+// back to whoever holds the control socket (via lsof). ok=false when none found.
+func HubPID() (pid int, ok bool) {
+	if p, _, isok := ReadPID(); isok && ProcessAlive(p) {
 		return p, true
 	}
-	out, err := exec.Command("lsof", "-t", SocketPath(root)).Output()
+	out, err := exec.Command("lsof", "-t", SocketPath()).Output()
 	if err != nil {
 		return 0, false
 	}
-	for _, f := range strings.Fields(string(out)) { // -t may list several pids
+	for _, f := range strings.Fields(string(out)) {
 		if p, err := strconv.Atoi(f); err == nil && ProcessAlive(p) {
 			return p, true
 		}

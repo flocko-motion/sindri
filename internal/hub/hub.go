@@ -32,17 +32,19 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/paths"
 )
 
-// Hub is the per-repo coordinator. It is the only writer of the store and the
-// only thing that drives pods/tmux.
+// Hub is the single global coordinator across every repo. It is the only writer
+// of the store and the only thing that drives pods/tmux. Per-repo work is scoped
+// by an agentKey (project + name); repos are resolved to a store handle via
+// store.For(repoTag).
 type Hub struct {
-	root  string
 	store *store.Store
 
-	mu      sync.Mutex              // guards agentLn
-	agentLn map[string]net.Listener // per-agent socket listeners (identity-by-socket)
-	events  *bus                    // change notifications for /events
+	mu      sync.Mutex                // guards agentLn
+	agentLn map[agentKey]net.Listener // per-agent socket listeners (Linux identity-by-socket)
+	events  *bus                      // change notifications for /events
 
 	// macOS only: a bind-mounted unix socket can't be connected to across the
 	// podman VM boundary, so agents reach the hub over a loopback TCP channel
@@ -50,11 +52,18 @@ type Hub struct {
 	agentTCPLn   net.Listener
 	agentTCPPort int
 
-	lcMu      sync.Mutex        // guards lifecycle
-	lifecycle map[string]string // transient launch/stop intent: name -> "launching"|"stopping"
+	lcMu      sync.Mutex          // guards lifecycle
+	lifecycle map[agentKey]string // transient launch/stop intent: "launching"|"stopping"
 
-	launchMu  sync.Mutex             // guards launchBuf
-	launchBuf map[string]*safeBuffer // per-agent image-build/pod-start output
+	launchMu  sync.Mutex               // guards launchBuf
+	launchBuf map[agentKey]*safeBuffer // per-agent image-build/pod-start output
+}
+
+// agentKey identifies an agent within a project — the key for the hub's per-agent
+// maps now that one hub serves many repos. project is a repoTag.
+type agentKey struct {
+	project string
+	name    string
 }
 
 var nameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
@@ -127,50 +136,43 @@ func restPhase(role string) string {
 	}
 }
 
-// New opens the hub for a project: ensures `.sindri/` exists and opens the DB.
-func New(root string) (*Hub, error) {
-	dir := filepath.Join(root, ".sindri")
-	if err := os.MkdirAll(filepath.Join(dir, "sockets"), 0o755); err != nil {
-		return nil, fmt.Errorf("create .sindri: %w", err)
+// New opens the single global hub: ensures the central state dir exists and opens
+// the one project-keyed store. Repos are registered lazily on first use (repo).
+func New() (*Hub, error) {
+	dir := paths.StateDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("create state dir %s: %w", dir, err)
 	}
-	ensureGitignore(root)   // keep the hub's process artifacts out of the repo's status
-	ensureSindriIgnore(dir) // and make .sindri/ self-ignoring — it holds secrets
 	st, err := store.Open(filepath.Join(dir, "hub.db"))
 	if err != nil {
 		return nil, err
 	}
-	return &Hub{root: root, store: st, agentLn: map[string]net.Listener{}, events: newBus(),
-		lifecycle: map[string]string{}, launchBuf: map[string]*safeBuffer{}}, nil
+	return &Hub{store: st, events: newBus(),
+		agentLn:   map[agentKey]net.Listener{},
+		lifecycle: map[agentKey]string{},
+		launchBuf: map[agentKey]*safeBuffer{}}, nil
 }
 
-// hubIgnores are the hub's process artifacts that must never be committed: its
-// own state/home dir and the agent worktrees (per-agent Claude homes carry
-// history, backups, and snapshots — a lot of churn). `.todos/` is deliberately
-// NOT ignored: task data is tracked.
-var hubIgnores = []string{".sindri/", ".worktrees/"}
-
-// sindriSelfIgnore is written to .sindri/.gitignore on every hub start. A nested
-// ".gitignore" of "*" ignores the whole directory (including itself), so .sindri/
-// — which holds Claude credentials, agent tokens, the db, and sockets — can never
-// be committed, even in a repo whose root .gitignore never learned about it (or if
-// that entry is later removed). This is the guarantee for the secret-bearing dir;
-// the root .gitignore entry (see hubIgnores) is just for a clean `git status`.
-const sindriSelfIgnore = "# sindri hub state — credentials, tokens, db, sockets. Never commit.\n*\n"
-
-// ensureSindriIgnore writes .sindri/.gitignore unconditionally (idempotent) so the
-// secret-bearing hub dir stays self-protecting regardless of the repo's own config.
-// Best-effort and loud on failure: it never blocks startup.
-func ensureSindriIgnore(dir string) {
-	path := filepath.Join(dir, ".gitignore")
-	if err := os.WriteFile(path, []byte(sindriSelfIgnore), 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "hub: WARNING — could not write %s: %v\n", path, err)
-	}
+// repo registers a repo (idempotent) and returns its project-scoped store handle.
+// It's the hub's single entry to per-repo state: the transport resolves a request's
+// repo root, calls this, and works through the returned handle — so the project
+// (a repoTag) is derived here, once, not threaded through every method.
+func (h *Hub) repo(root string) *store.ProjectStore {
+	tag := repoTag(root)
+	_ = h.store.RegisterProject(tag, root)
+	ensureGitignore(root) // keep .worktrees/ out of the repo's git status
+	return h.store.For(tag)
 }
+
+// hubIgnores are the git-owned worktrees, kept in the repo but not committed. The
+// hub's own state no longer lives in the repo (it's central under the state dir),
+// and `.todos/` is deliberately NOT ignored — task data is tracked.
+var hubIgnores = []string{".worktrees/"}
 
 // ensureGitignore appends any missing hub-artifact patterns to the repo's
 // .gitignore (creating it if absent), idempotently — so a fresh project never
-// fills lazygit/`git status` with hub churn. Best-effort and loud on failure: it
-// never blocks hub startup, but a write error is reported rather than swallowed.
+// fills lazygit/`git status` with worktree churn. Best-effort and loud on failure:
+// it never blocks hub startup, but a write error is reported rather than swallowed.
 func ensureGitignore(root string) {
 	path := filepath.Join(root, ".gitignore")
 	data, _ := os.ReadFile(path) // missing file → empty, we'll create it
