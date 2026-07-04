@@ -1,3 +1,20 @@
+## RENAMED Requirements
+
+- FROM: `### Requirement: One hub per repo is the single writer`
+- TO: `### Requirement: One global hub is the single writer across repos`
+
+- FROM: `### Requirement: The socket is the caller's identity`
+- TO: `### Requirement: Identity is the (project, agent) pair, never client-supplied`
+
+- FROM: `### Requirement: Hub lifecycle — ephemeral for CLI, persistent for agents`
+- TO: `### Requirement: Hub lifecycle — one persistent global daemon`
+
+- FROM: `### Requirement: Protocol is HTTP/JSON over the unix socket`
+- TO: `### Requirement: Protocol is HTTP/JSON carrying repo context`
+
+- FROM: `### Requirement: Hub state is durable and crash-restartable`
+- TO: `### Requirement: Hub state is durable, central, and crash-restartable`
+
 ## MODIFIED Requirements
 
 ### Requirement: One global hub is the single writer across repos
