@@ -18,19 +18,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fd-find bat fzf \
     # file / archive
     file tree zip unzip tar gzip bzip2 xz-utils \
-    # network
-    wget netcat-openbsd dnsutils iputils-ping \
+    # network + remote fs (sshfs needs --cap-add SYS_ADMIN + /dev/fuse at run time)
+    wget netcat-openbsd dnsutils iputils-ping openssh-client sshfs \
     # process / system
     procps lsof watch htop \
     # terminal multiplexer — the agent runs interactively inside a tmux session
     # that the hub injects into (send-keys) and humans attach to
     tmux \
+    # shells / editors / file manager
+    zsh mc nano \
     # python
     python3 python3-pip python3-venv python3-pytest \
     # misc
-    less diffutils vim-tiny \
+    less diffutils vim-tiny locales \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd \
     && ln -s /usr/bin/batcat /usr/local/bin/bat \
+    && sed -i 's/# en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && locale-gen \
     && rm -rf /var/lib/apt/lists/*
 
 # ── yazi (TUI file manager — not in apt; prebuilt release binary) ──────────────
@@ -60,6 +63,16 @@ RUN case "$(uname -m)" in \
     esac; \
     curl -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_$arch" -o /usr/local/bin/yq \
  && chmod +x /usr/local/bin/yq
+
+# ── micromamba (standalone conda/mamba; bzip2 above is needed for `tar -xvj`) ───
+# Arch-matched like yazi/yq — the image also builds on an arm64 podman VM.
+RUN case "$(uname -m)" in \
+      x86_64)  mamba=linux-64 ;; \
+      aarch64) mamba=linux-aarch64 ;; \
+      *) echo "unsupported arch $(uname -m) for micromamba" >&2; exit 1 ;; \
+    esac; \
+    curl -Ls "https://micro.mamba.pm/api/micromamba/$mamba/latest" \
+      | tar -xvj -C /usr/local/bin --strip-components=1 bin/micromamba
 
 # ── claude CLI ────────────────────────────────────────────────────────────────
 RUN npm install -g @anthropic-ai/claude-code@latest
