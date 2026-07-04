@@ -50,16 +50,17 @@ else
 	# --continue resumes the most recent Claude session for this workspace, so an
 	# agent picks up its full conversation after a pod restart or a machine reboot
 	# — the transcripts live under ~/.claude (a persistent host bind-mount) and the
-	# cwd is always /workspace, so the lookup is stable. On a first launch there's
-	# nothing to resume and --continue just starts fresh. --append-system-prompt is
-	# re-applied every launch (harmless if the resumed session already has it, and
-	# it must never be silently dropped, or the agent would lose its role).
-	# Single-quote the command so $(cat ...) is evaluated by tmux's shell at
-	# session start, not here — the system prompt is multi-line. When Claude
-	# exits, drop into an interactive shell (exec bash) so the session lives on
-	# and a dialed-in human lands at a prompt instead of the pane dying.
+	# cwd is always /workspace, so the lookup is stable. But `claude --continue`
+	# EXITS NON-ZERO when there's nothing to resume (a first launch), so we fall
+	# back to a fresh `claude` on failure rather than dropping straight to bash.
+	# --append-system-prompt is re-applied every launch (harmless if the resumed
+	# session already has it, and it must never be silently dropped, or the agent
+	# would lose its role). Single-quote the command so $() is evaluated by tmux's
+	# shell at session start, not here — the system prompt is multi-line. When
+	# Claude exits, drop into an interactive shell (exec bash) so the session lives
+	# on and a dialed-in human lands at a prompt instead of the pane dying.
 	tmux new-session -d -s "$SESSION" \
-		'claude --continue --dangerously-skip-permissions --append-system-prompt "$(cat /home/sindri/.claude/system-prompt.txt)"; exec bash -i'
+		'SP="$(cat /home/sindri/.claude/system-prompt.txt)"; claude --continue --dangerously-skip-permissions --append-system-prompt "$SP" || claude --dangerously-skip-permissions --append-system-prompt "$SP"; exec bash -i'
 fi
 
 # Belt-and-suspenders: re-source in case the server was already running.
