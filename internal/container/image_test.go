@@ -77,6 +77,34 @@ func TestMaterializeStripsPrefix(t *testing.T) {
 	}
 }
 
+// customDockerfile discovers a user recipe in the central sindri home (StateDir,
+// via SINDRI_HOME), preferring Containerfile, and ignores a directory of that name.
+func TestCustomDockerfile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SINDRI_HOME", home)
+
+	if got := customDockerfile(); got != "" {
+		t.Errorf("no recipe present, want \"\", got %q", got)
+	}
+
+	df := filepath.Join(home, "Dockerfile")
+	if err := os.WriteFile(df, []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := customDockerfile(); got != df {
+		t.Errorf("Dockerfile present, want %q, got %q", df, got)
+	}
+
+	// Containerfile takes precedence over Dockerfile.
+	cf := filepath.Join(home, "Containerfile")
+	if err := os.WriteFile(cf, []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := customDockerfile(); got != cf {
+		t.Errorf("Containerfile should win, want %q, got %q", cf, got)
+	}
+}
+
 // materialize must overwrite a stale staging dir cleanly (a removed recipe file
 // must not survive into the next build).
 func TestMaterializeClearsStaleStaging(t *testing.T) {

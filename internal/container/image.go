@@ -21,6 +21,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/flo-at/sindri/internal/paths"
 )
 
 const ImageName = "sindri-agent:test"
@@ -39,6 +41,18 @@ var buildContext embed.FS
 // tee it into an agent's live-screen region during launch). It is independent of
 // projectRoot — the recipe is embedded — so it works for any orchestrated repo.
 func Ensure(projectRoot string, out io.Writer) error {
+	// A custom recipe in the central sindri home replaces the embedded Dockerfile
+	// (read once, folded into the build key below so edits rebuild).
+	custom := customDockerfile()
+	var customData []byte
+	if custom != "" {
+		data, err := os.ReadFile(custom)
+		if err != nil {
+			return fmt.Errorf("read custom image recipe %s: %w", custom, err)
+		}
+		customData = data
+	}
+
 	// Hash the embedded context (Dockerfile + entrypoint + shims) plus the ISO
 	// week, so any change to the recipe — or a new week — triggers a rebuild.
 	year, week := time.Now().ISOWeek()
@@ -58,6 +72,10 @@ func Ensure(projectRoot string, out io.Writer) error {
 		return fmt.Errorf("hash embedded build context: %w", err)
 	}
 	h.Write([]byte(fmt.Sprintf("%d-%d", year, week)))
+	if customData != nil {
+		h.Write([]byte("custom"))
+		h.Write(customData)
+	}
 	buildKey := fmt.Sprintf("%x", h.Sum(nil))[:16]
 
 	cacheDir, err := buildCacheDir()
@@ -78,6 +96,15 @@ func Ensure(projectRoot string, out io.Writer) error {
 	ctxDir := filepath.Join(cacheDir, "buildctx")
 	if err := materialize(ctxDir); err != nil {
 		return err
+	}
+	// Overlay the custom recipe onto the materialized context: the embedded
+	// support files (entrypoint, shims, yazi.sh) stay put, so a custom Dockerfile
+	// can COPY them and keep the agent contract.
+	if customData != nil {
+		if err := os.WriteFile(filepath.Join(ctxDir, "Dockerfile"), customData, 0o644); err != nil {
+			return fmt.Errorf("apply custom image recipe: %w", err)
+		}
+		fmt.Fprintf(out, "Using custom image recipe: %s\n", custom)
 	}
 
 	fmt.Fprintf(out, "Building agent image %s...\n", ImageName)
@@ -129,6 +156,23 @@ func buildFailureDetail(out string) string {
 		detail += "\n" + hint
 	}
 	return detail
+}
+
+// customDockerfile returns the path to a user-provided image recipe in the central
+// sindri home (paths.StateDir), or "" if none. A file named "Containerfile" or
+// "Dockerfile" there fully replaces the embedded recipe — maximum customization
+// (extra tools, private base images) without editing the binary. The recipe must
+// still honor the agent contract: a non-root `sindri` user, /usr/local/bin/sindri
+// pointing at the mounted worker, the sindri-agent entrypoint, and WORKDIR
+// /workspace — easiest by starting from a copy of the embedded Dockerfile.
+func customDockerfile() string {
+	for _, name := range []string{"Containerfile", "Dockerfile"} {
+		p := filepath.Join(paths.StateDir(), name)
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return p
+		}
+	}
+	return ""
 }
 
 // buildCacheDir is the per-user cache dir for the image build (recipe staging +
