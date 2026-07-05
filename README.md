@@ -12,7 +12,12 @@ This README is about *using* sindri. For the internal design, see `openspec/`.
 ## Install
 
 Download the latest release and install it — a one-time step (after that,
-`sindri upgrade` and the daily check keep you current). Grab the `.deb` from the
+`sindri upgrade` and the daily check keep you current). Both platforms install the
+same binaries; pick your OS.
+
+### Linux (`.deb`)
+
+Grab the `.deb` from the
 [releases page](https://github.com/flocko-motion/sindri/releases/latest), or pull
 the latest from the command line:
 
@@ -21,10 +26,26 @@ url=$(curl -fsSL https://api.github.com/repos/flocko-motion/sindri/releases/late
 curl -fsSL "$url" -o /tmp/sindri.deb && sudo apt install -y /tmp/sindri.deb && rm -f /tmp/sindri.deb
 ```
 
-That's it. The package bundles everything sindri ships — the `sindri` CLI/TUI, the
+### macOS (tarball → `~/.local/bin`)
+
+Download the tarball for your Mac (Apple Silicon or Intel), extract it, and run the
+bundled `install.sh` — it installs the binaries to `~/.local/bin` and clears the
+Gatekeeper quarantine on the unsigned binaries:
+
+```bash
+arch=$(uname -m); [ "$arch" = x86_64 ] && arch=amd64
+url=$(curl -fsSL https://api.github.com/repos/flocko-motion/sindri/releases/latest | grep -o "https://[^\"]*_darwin_${arch}\.tar\.gz" | head -1)
+curl -fsSL "$url" -o /tmp/sindri.tar.gz && tar -C /tmp -xzf /tmp/sindri.tar.gz && /tmp/sindri_*_darwin_${arch}/install.sh
+```
+
+Ensure `~/.local/bin` is on your `PATH` (the installer says so if it isn't). podman
+runs in a VM on macOS — `podman machine init` once, then `podman machine start`
+(sindri auto-starts it after that).
+
+That's it. The release bundles everything sindri ships — the `sindri` CLI/TUI, the
 agent browser `sindri-worker` (it runs as `sindri` inside a pod), the `brokkr` toolbelt (code map + linters),
-and the `td` task backend (plus `yq`) — and pulls in the only system tools it
-needs, **git** and **podman**.
+and the `td` task backend (plus `yq`) — and needs the system tools **git** and
+**podman** present.
 
 The one thing you bring yourself: **Claude credentials** at `~/.claude` (sindri
 seeds them into the agent pods). The agent container image is built automatically
@@ -41,8 +62,9 @@ spec-driven workflow, and the Go toolchain for the `deadcode` linter.
 
 Sindri checks for a newer release once a day (and on demand via **`sindri
 upgrade`**); when there is one it points you at **`sindri-do-upgrade`** — a
-one-shot script it drops in `~/.local/bin` that fetches and installs the latest
-`.deb`. (The check can't replace the running binary itself, so the install is a
+one-shot script it drops in `~/.local/bin`. On Linux it fetches and installs the
+latest `.deb`; on macOS it fetches the latest tarball and replaces the binaries in
+place. (The check can't replace the running binary itself, so the install is a
 separate script.)
 
 ---
