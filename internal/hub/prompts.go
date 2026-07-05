@@ -146,7 +146,7 @@ func dirWorking(task string) string {
 	return fmt.Sprintf("Work on task %s. When your change is committed, run `sindri submit \"<summary>\"`.", task)
 }
 
-const dirSubmitted = "Your pull request is under review. Wait — the hub will tell you the verdict."
+const dirSubmitted = "Your pull request is under review. Wait — the hub will tell you the verdict. While you wait, you may run `sindri resolve` any time to check your branch still merges onto its base (and resolve it if the base has moved) — it does no harm and keeps the PR healthy."
 
 // dirPlanner is the idle planner's directive: orient, then wait for the user. A
 // planner is never auto-assigned work.
