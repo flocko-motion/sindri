@@ -310,6 +310,13 @@ func (h *Hub) Handler() http.Handler {
 		}
 		writeJSON(w, okMsg{"unassigned"}, h.UnassignTask(h.reqProject(r), req.ID))
 	})
+	mux.HandleFunc("POST /task/close", func(w http.ResponseWriter, r *http.Request) {
+		var req RejectReq // ID (+ unused Feedback)
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"closed"}, h.CloseTask(h.reqProject(r), req.ID))
+	})
 	return mux
 }
 

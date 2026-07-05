@@ -196,6 +196,17 @@ func TestTellUnknownAgent(t *testing.T) {
 	}
 }
 
+// TestCloseTaskUnsupportedBackend covers the agnostic dispatch: closing is
+// routed by the task's backend, and a backend with no close of its own (here an
+// openspec-change row, os-…) is refused with an error the caller surfaces in the
+// standard error modal — rather than silently doing nothing.
+func TestCloseTaskUnsupportedBackend(t *testing.T) {
+	h := newHub(t)
+	if err := h.CloseTask(testProject, "os-abc123"); err == nil {
+		t.Fatalf("closing a non-td (openspec) row should be refused")
+	}
+}
+
 // TestApprovePR covers the human approve path: an open PR reaches "approved"
 // without a reviewer agent, approving a non-open PR is refused (the open-only
 // guard, mirroring the reviewer approve), and an unknown PR errors.

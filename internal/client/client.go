@@ -390,6 +390,13 @@ func (c *HTTP) UnassignTask(id string) error {
 	return c.post("/task/unassign", hub.RejectReq{ID: id})
 }
 
+// CloseTask marks a task done from the task list. The hub dispatches to the
+// task's backend; backends with no close report it unsupported (surfaced to the
+// caller as an error).
+func (c *HTTP) CloseTask(id string) error {
+	return c.post("/task/close", hub.RejectReq{ID: id})
+}
+
 // Refresh asks the hub to re-sync tasks from the source of truth.
 func (c *HTTP) Refresh() error { return c.post("/refresh", struct{}{}) }
 
