@@ -14,6 +14,7 @@ package hub
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -118,7 +119,20 @@ func (h *Hub) AgentExec(project, name string, args []string, out io.Writer) (int
 	}
 	exit, err := cmd.Run(c, args[1:], out)
 	h.notify() // the command may have changed board state
-	return exit, err
+	if err != nil {
+		// A returned error is a hub-INTERNAL failure — an outcome the agent should
+		// act on is written to `out` with a nil error (the command pattern). So never
+		// leak it across the boundary: it may carry host paths or operator
+		// instructions ("run 'td init' first") that are not the agent's concern and
+		// nothing it could act on. Log the real error host-side (the operator's
+		// channel) and hand the agent a neutral, non-actionable message.
+		fmt.Fprintf(os.Stderr, "hub: agent %q command %q failed: %v\n", name, args[0], err)
+		if exit == 0 {
+			exit = 1
+		}
+		return exit, fmt.Errorf("the hub hit an internal error running %q — it's logged for the operator; nothing for you to fix, try again later", args[0])
+	}
+	return exit, nil
 }
 
 func (h *Hub) cmdStatus(c registry.Caller, _ []string, out io.Writer) (int, error) {
