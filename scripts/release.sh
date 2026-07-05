@@ -57,8 +57,25 @@ if [ "$start" != "$default" ]; then
 		echo "opening a pull request…"
 		gh pr create --base "$default" --head "$start" --fill
 	fi
-	echo "merging the pull request…"
-	gh pr merge "$start" --merge
+	# master's branch protection requires the CI check to pass before a merge, so an
+	# immediate `--merge` is refused. --auto queues the merge for when checks pass;
+	# we then wait for it, so the tag below comes off the truly-merged tip (not the
+	# pre-merge commit). Needs auto-merge enabled on the repo (Settings → Pull
+	# Requests → Allow auto-merge).
+	echo "enabling auto-merge (merges once CI passes)…"
+	gh pr merge "$start" --merge --auto
+	echo "waiting for the PR to merge — CI must pass first…"
+	state=""
+	for _ in $(seq 1 180); do # up to ~30 min for CI + merge
+		state="$(gh pr view "$start" --json state --jq .state 2>/dev/null || echo)"
+		[ "$state" = "MERGED" ] && break
+		[ "$state" = "CLOSED" ] && { echo "PR was closed without merging" >&2; exit 1; }
+		sleep 10
+	done
+	if [ "$state" != "MERGED" ]; then
+		echo "PR hasn't merged yet (CI still running or failing) — merge it once green, then re-run to tag" >&2
+		exit 1
+	fi
 	git fetch origin "$default" >/dev/null 2>&1
 	target="origin/$default"
 else
