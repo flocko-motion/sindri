@@ -2,10 +2,13 @@
 FROM golang:latest
 
 # ── Node.js LTS ───────────────────────────────────────────────────────────────
+# The nodesource `nodejs` package bundles npm — do NOT also install Debian's
+# standalone `npm` package: it Conflicts with nodesource nodejs and the build
+# fails with "held broken packages" (npm is available after this either way).
 RUN apt-get update && apt-get install -y --no-install-recommends \
   curl ca-certificates \
   && curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
-  && apt-get install -y --no-install-recommends nodejs npm \
+  && apt-get install -y --no-install-recommends nodejs \
   && rm -rf /var/lib/apt/lists/*
 
 
