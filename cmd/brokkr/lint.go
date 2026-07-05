@@ -94,42 +94,47 @@ func runComments(out io.Writer, ig *lint.Ignore) (bool, error) {
 	return found, nil
 }
 
-// runAll runs every linter in turn and prints a section per linter plus a final
-// PASS/FAIL summary.
+// runAll runs every linter in turn, streaming each section live, then ends with a
+// summary. On failure the summary NAMES the failing linters and re-surfaces their
+// findings — so the culprit is obvious even when the live sections scrolled off or
+// `--tail` clipped them (the reason you never have to run a single linter to find
+// out what failed).
 func runAll(out io.Writer, tags string, maxLines int, ig *lint.Ignore) (bool, error) {
-	failed := false
-
-	fmt.Fprintln(out, "== deadcode ==")
-	dc, err := lint.Deadcode([]string{"./..."}, tags, ig, out)
-	if err != nil {
-		return false, err
+	linters := []struct {
+		name string
+		run  func(io.Writer) (bool, error)
+	}{
+		{"deadcode", func(w io.Writer) (bool, error) { return lint.Deadcode([]string{"./..."}, tags, ig, w) }},
+		{"loc", func(w io.Writer) (bool, error) { return lint.LOC([]string{"."}, maxLines, ig, w) }},
+		{"comments", func(w io.Writer) (bool, error) { return runComments(w, ig) }},
+		{"openspec", func(w io.Writer) (bool, error) { return lintOpenspec(w), nil }},
 	}
-	failed = failed || dc
-
-	fmt.Fprintln(out, "\n== loc ==")
-	loc, err := lint.LOC([]string{"."}, maxLines, ig, out)
-	if err != nil {
-		return false, err
+	var failed []string
+	captured := map[string]string{}
+	for _, l := range linters {
+		var buf strings.Builder
+		fmt.Fprintf(out, "== %s ==\n", l.name)
+		bad, err := l.run(io.MultiWriter(out, &buf)) // stream live AND capture for the recap
+		if err != nil {
+			return false, err
+		}
+		fmt.Fprintln(out)
+		if bad {
+			failed = append(failed, l.name)
+			captured[l.name] = strings.TrimSpace(buf.String())
+		}
 	}
-	failed = failed || loc
-
-	fmt.Fprintln(out, "\n== comments ==")
-	cm, err := runComments(out, ig)
-	if err != nil {
-		return false, err
-	}
-	failed = failed || cm
-
-	fmt.Fprintln(out, "\n== openspec ==")
-	failed = lintOpenspec(out) || failed
-
-	fmt.Fprintln(out)
-	if failed {
-		fmt.Fprintln(out, "FAIL: lint violations found")
-	} else {
+	if len(failed) == 0 {
 		fmt.Fprintln(out, "OK: all linters passed")
+		return false, nil
 	}
-	return failed, nil
+	fmt.Fprintf(out, "FAIL: %s\n", strings.Join(failed, ", "))
+	for _, name := range failed {
+		if c := captured[name]; c != "" {
+			fmt.Fprintf(out, "\n--- %s ---\n%s\n", name, c)
+		}
+	}
+	return true, nil
 }
 
 // runLint runs one linter's body, recovering a panic into a loud failure with its

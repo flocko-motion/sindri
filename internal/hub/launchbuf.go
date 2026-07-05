@@ -38,19 +38,19 @@ func (b *safeBuffer) tail(n int) string {
 }
 
 // newLaunchBuf installs a fresh launch-output buffer for an agent and returns it.
-func (h *Hub) newLaunchBuf(name string) *safeBuffer {
+func (h *Hub) newLaunchBuf(project, name string) *safeBuffer {
 	b := &safeBuffer{}
 	h.launchMu.Lock()
-	h.launchBuf[name] = b
+	h.launchBuf[agentKey{project, name}] = b
 	h.launchMu.Unlock()
 	return b
 }
 
 // launchOutput returns the tail of an agent's captured launch output ("" if none).
-func (h *Hub) launchOutput(name string) string {
+func (h *Hub) launchOutput(project, name string) string {
 	h.launchMu.Lock()
 	defer h.launchMu.Unlock()
-	if b, ok := h.launchBuf[name]; ok {
+	if b, ok := h.launchBuf[agentKey{project, name}]; ok {
 		return b.tail(200)
 	}
 	return ""

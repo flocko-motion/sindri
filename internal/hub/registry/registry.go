@@ -16,6 +16,7 @@ import (
 // Caller is who is asking: their identity, role, and (from Phase 3) workflow
 // state. The registry filters the surface against this.
 type Caller struct {
+	Project     string // the repo (repoTag) the caller belongs to
 	Agent       string
 	Role        string // "worker" | "reviewer"
 	HasTask     bool   // a worker holding work (a leaf task OR a container) hides "next"

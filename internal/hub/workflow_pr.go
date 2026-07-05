@@ -1,8 +1,9 @@
 // package: hub / workflow (PR, review, merge)
 // type:    logic (PR-as-merge-intent: submit → review → approve → host merge)
 // job:     the reviewer verbs and the host merge; verdicts route to the owning
-//
-//	agent's session by branch (object-mediated, D-routing). git is hub-side.
+//          agent's session by branch (object-mediated, D-routing). git is hub-side.
+//          All state is per-project — methods take a project (repoTag) and work
+//          through store.For(project) + h.projectRoot(project).
 // limits:  the PR side only; task claim/submit-to-td is workflow_task.go and the
 //          git mechanics are the adapter's (-> adapter/git).
 package hub
@@ -20,13 +21,14 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/td"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/paths"
 )
 
-// baseBranch reads the repo's base branch from the main checkout.
-func (h *Hub) baseBranch() (string, error) { return git.CurrentBranch(h.root) }
+// baseBranch reads a repo's base branch from its main checkout.
+func (h *Hub) baseBranch(root string) (string, error) { return git.CurrentBranch(root) }
 
-// PRs returns all merge-intents (newest first).
-func (h *Hub) PRs() ([]store.PR, error) { return h.store.PRs() }
+// PRs returns a project's merge-intents (newest first).
+func (h *Hub) PRs(project string) ([]store.PR, error) { return h.store.For(project).PRs() }
 
 // PRDetail is a merge-intent plus its linked task and diff (for `pr info`).
 type PRDetail struct {
@@ -39,28 +41,32 @@ type PRDetail struct {
 	History []store.Event  `json:"history"` // lifecycle log (oldest-first)
 }
 
-// PRInfo returns a PR with its linked task and diff.
-func (h *Hub) PRInfo(id string) (PRDetail, error) {
-	pr, ok, err := h.store.GetPR(id)
+// PRInfo returns a project's PR with its linked task and diff.
+func (h *Hub) PRInfo(project, id string) (PRDetail, error) {
+	ps := h.store.For(project)
+	pr, ok, err := ps.GetPR(id)
 	if err != nil {
 		return PRDetail{}, err
 	}
 	if !ok {
 		return PRDetail{}, fmt.Errorf("no such PR %q", id)
 	}
-	diff, _ := git.Diff(h.root, pr.Base, pr.Branch)
-	task, _ := h.TaskInfo(pr.Task) // linked task; zero value if it can't be read
-	reviews, _ := h.store.Reviews(id)
-	lint, lintAt := h.store.GetPRLint(id)
-	history, _ := h.store.PREvents(id)
+	diff, _ := git.Diff(h.projectRoot(project), pr.Base, pr.Branch)
+	task, _ := h.TaskInfo(project, pr.Task) // linked task; zero value if unreadable
+	reviews, _ := ps.Reviews(id)
+	lint, lintAt := ps.GetPRLint(id)
+	history, _ := ps.PREvents(id)
 	return PRDetail{PR: pr, Task: task, Diff: diff, Reviews: reviews, Lint: lint, LintAt: lintAt, History: history}, nil
 }
 
-// ReviewPrompt returns the default agentic-review instruction, read from
-// .sindri/review-prompt.txt — auto-created with a built-in default if absent, so
-// the user can edit the standard prompt in a plain text file.
-func (h *Hub) ReviewPrompt() (string, error) {
-	path := filepath.Join(h.root, ".sindri", "review-prompt.txt")
+// ReviewPrompt returns a project's default agentic-review instruction, read from
+// its central review-prompt.txt — auto-created with a built-in default if absent.
+func (h *Hub) ReviewPrompt(project string) (string, error) {
+	dir := filepath.Join(paths.StateDir(), project)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "review-prompt.txt")
 	if data, err := os.ReadFile(path); err == nil {
 		return strings.TrimSpace(string(data)), nil
 	} else if !os.IsNotExist(err) {
@@ -72,12 +78,11 @@ func (h *Hub) ReviewPrompt() (string, error) {
 	return defaultReviewPrompt, nil
 }
 
-// RequestReview attaches a review requirement (free-text instruction) to a PR
-// and dispatches it to a running reviewer agent — assigning the row and
-// injecting the instruction. With no reviewer running, the requirement is
-// recorded unassigned for one to pick up later.
-func (h *Hub) RequestReview(prID, requirement string) error {
-	pr, ok, err := h.store.GetPR(prID)
+// RequestReview attaches a review requirement to a project's PR and dispatches it
+// to a running reviewer (or records it unassigned for one to pick up later).
+func (h *Hub) RequestReview(project, prID, requirement string) error {
+	ps := h.store.For(project)
+	pr, ok, err := ps.GetPR(prID)
 	if err != nil {
 		return err
 	}
@@ -86,68 +91,60 @@ func (h *Hub) RequestReview(prID, requirement string) error {
 	}
 	requirement = strings.TrimSpace(requirement)
 	if requirement == "" {
-		requirement, _ = h.ReviewPrompt()
+		requirement, _ = h.ReviewPrompt(project)
 	}
-	id, err := h.store.AddReview(prID, requirement)
+	id, err := ps.AddReview(prID, requirement)
 	if err != nil {
 		return err
 	}
-	if reviewer := h.runningReviewer(); reviewer != "" {
-		if err := h.store.AssignReview(id, reviewer); err != nil {
+	if reviewer := h.runningReviewer(project); reviewer != "" {
+		if err := ps.AssignReview(id, reviewer); err != nil {
 			return err
 		}
-		_ = h.store.LogPR(prID, "review-requested", "assigned to "+reviewer)
-		_ = h.assignedReviewInject(reviewer, pr, prID, requirement)
+		_ = ps.LogPR(prID, "review-requested", "assigned to "+reviewer)
+		_ = h.assignedReviewInject(project, reviewer, pr, prID, requirement)
 		h.notify()
 		return nil
 	}
-	_ = h.store.LogPR(prID, "review-requested", "unassigned (no reviewer running)")
+	_ = ps.LogPR(prID, "review-requested", "unassigned (no reviewer running)")
 	h.notify()
 	return nil
 }
 
 // assignedReviewInject checks the PR branch out into the reviewer's workspace and
-// injects the precise, single-line review instruction.
-func (h *Hub) assignedReviewInject(reviewer string, pr store.PR, prID, requirement string) error {
-	// Check the PR's branch out (detached) into the reviewer's workspace, so it
-	// can read the full code in context, build, and run — not just the diff.
-	//
-	// A failure here is LOUD, never silent: a reviewer that quietly falls back to
-	// diff-only would be judging a stale base with no signal it ever happened. So
-	// we record a host-visible PR history entry naming the failure, and the review
-	// instruction below warns the reviewer that /workspace is NOT this PR.
+// injects the review instruction. A checkout failure is loud (recorded), never silent.
+func (h *Hub) assignedReviewInject(project, reviewer string, pr store.PR, prID, requirement string) error {
+	ps := h.store.For(project)
 	checkedOut := false
-	a, ok, err := h.store.GetAgent(reviewer)
+	a, ok, err := ps.GetAgent(reviewer)
 	switch {
 	case err != nil:
-		_ = h.store.LogPR(prID, "checkout-failed", fmt.Sprintf("reviewer %s lookup: %v", reviewer, err))
+		_ = ps.LogPR(prID, "checkout-failed", fmt.Sprintf("reviewer %s lookup: %v", reviewer, err))
 	case !ok:
-		_ = h.store.LogPR(prID, "checkout-failed", "reviewer "+reviewer+" has no roster entry")
+		_ = ps.LogPR(prID, "checkout-failed", "reviewer "+reviewer+" has no roster entry")
 	default:
-		if coErr := git.CheckoutDetached(filepath.Join(h.root, a.Workspace), pr.Branch); coErr != nil {
-			_ = h.store.LogPR(prID, "checkout-failed", fmt.Sprintf("%s into %s: %v", pr.Branch, a.Workspace, coErr))
+		if coErr := git.CheckoutDetached(filepath.Join(h.projectRoot(project), a.Workspace), pr.Branch); coErr != nil {
+			_ = ps.LogPR(prID, "checkout-failed", fmt.Sprintf("%s into %s: %v", pr.Branch, a.Workspace, coErr))
 		} else {
 			checkedOut = true
 		}
 	}
-	return h.injectWhenReady(reviewer, msgReviewAssigned(prID, requirement, pr.Branch, pr.Base, checkedOut))
+	return h.injectWhenReady(project, reviewer, msgReviewAssigned(prID, requirement, pr.Branch, pr.Base, checkedOut))
 }
 
-// runningReviewer returns the name of a live reviewer agent, or "".
-func (h *Hub) runningReviewer() string {
-	roster, _ := h.store.Roster()
+// runningReviewer returns the name of a live reviewer agent in a project, or "".
+func (h *Hub) runningReviewer(project string) string {
+	roster, _ := h.store.For(project).Roster()
 	for _, a := range roster {
-		if a.Role == "reviewer" && pod.Running(h.container(a.Name)) && h.sessionAlive(a.Name) {
+		if a.Role == "reviewer" && pod.Running(h.container(project, a.Name)) && h.sessionAlive(project, a.Name) {
 			return a.Name
 		}
 	}
 	return ""
 }
 
-// runLint runs the project's quality gates against a worktree by invoking
-// `brokkr lint` there (a subprocess, so the concurrent hub never chdir's).
-// The gate applies only to Go modules — a non-Go workspace has no Go gates and
-// is skipped. openspec validation self-skips when openspec/ is absent.
+// runLint runs the project's quality gates against a worktree by invoking `brokkr
+// lint` there (a subprocess, so the concurrent hub never chdir's). Go modules only.
 func (h *Hub) runLint(wt string) (output string, ok bool) {
 	if _, err := os.Stat(filepath.Join(wt, "go.mod")); err != nil {
 		return "", true // no Go module — no lint gate applies
@@ -165,7 +162,9 @@ func (h *Hub) runLint(wt string) (output string, ok bool) {
 // cmdSubmit commits the worker's worktree, records a merge-intent, and returns
 // immediately — the worker then goes idle until the hub injects a verdict (D5).
 func (h *Hub) cmdSubmit(c registry.Caller, args []string, out io.Writer) (int, error) {
-	st, err := h.store.GetState(c.Agent)
+	ps := h.store.For(c.Project)
+	root := h.projectRoot(c.Project)
+	st, err := ps.GetState(c.Agent)
 	if err != nil {
 		return 1, err
 	}
@@ -173,14 +172,11 @@ func (h *Hub) cmdSubmit(c registry.Caller, args []string, out io.Writer) (int, e
 		fmt.Fprintln(out, replyNothingToSubmit)
 		return 1, nil
 	}
-	a, _, _ := h.store.GetAgent(c.Agent)
-	wt := filepath.Join(h.root, a.Workspace)
-	// Lint gate (3.3): never accept a merge-intent for code that fails the
-	// project's quality gates. Runs against the worktree before the PR exists, so
-	// a failing worker just fixes and submits again.
+	a, _, _ := ps.GetAgent(c.Agent)
+	wt := filepath.Join(root, a.Workspace)
 	if lintOut, ok := h.runLint(wt); !ok {
 		fmt.Fprintln(out, replyLintFail(strings.TrimSpace(lintOut)))
-		_ = h.store.Log(c.Agent, "lint-fail", st.Task)
+		_ = ps.Log(c.Agent, "lint-fail", st.Task)
 		return 1, nil
 	}
 	msg := strings.TrimSpace(strings.Join(args, " "))
@@ -190,40 +186,40 @@ func (h *Hub) cmdSubmit(c registry.Caller, args []string, out io.Writer) (int, e
 	if err := git.CommitAll(wt, msg); err != nil {
 		return 1, err
 	}
-	base, err := h.baseBranch()
+	base, err := h.baseBranch(root)
 	if err != nil {
 		return 1, err
 	}
 	pr := store.PR{ID: "pr-" + st.Task, Task: st.Task, Agent: c.Agent, Branch: st.Branch, Base: base, Status: "open"}
-	_, existed, _ := h.store.GetPR(pr.ID) // first submit vs a resubmit after rejection
-	if err := h.store.PutPR(pr); err != nil {
+	_, existed, _ := ps.GetPR(pr.ID) // first submit vs a resubmit after rejection
+	if err := ps.PutPR(pr); err != nil {
 		return 1, err
 	}
-	if err := h.store.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Phase: "submitted"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Phase: "submitted"}); err != nil {
 		return 1, err
 	}
-	_ = h.store.Log(c.Agent, "submit", pr.ID)
+	_ = ps.Log(c.Agent, "submit", pr.ID)
 	if existed {
-		_ = h.store.LogPR(pr.ID, "resubmitted", "by "+c.Agent+": "+msg)
+		_ = ps.LogPR(pr.ID, "resubmitted", "by "+c.Agent+": "+msg)
 	} else {
-		_ = h.store.LogPR(pr.ID, "created", "by "+c.Agent+": "+msg)
+		_ = ps.LogPR(pr.ID, "created", "by "+c.Agent+": "+msg)
 	}
-	h.notifyReviewers(pr.ID, c.Agent)
+	h.notifyReviewers(c.Project, pr.ID, c.Agent)
 	fmt.Fprintln(out, replyRegistered(pr.ID))
 	return 0, nil
 }
 
-// cmdOpenspec is the planner's ship verb: `openspec submit [message]` turns its
-// openspec edits into a PR — the same review→approve→merge cycle as a worker's,
-// just on the planner's standing branch and with the mock todo id os-new (there's
-// no backlog task behind it).
+// cmdOpenspec is the planner's ship verb: turns its openspec edits into a PR on its
+// standing branch (mock todo id os-new).
 func (h *Hub) cmdOpenspec(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) == 0 || args[0] != "submit" {
 		return 1, fmt.Errorf("usage: openspec submit [message]")
 	}
-	a, _, _ := h.store.GetAgent(c.Agent)
-	wt := filepath.Join(h.root, a.Workspace)
-	base, err := h.baseBranch()
+	ps := h.store.For(c.Project)
+	root := h.projectRoot(c.Project)
+	a, _, _ := ps.GetAgent(c.Agent)
+	wt := filepath.Join(root, a.Workspace)
+	base, err := h.baseBranch(root)
 	if err != nil {
 		return 1, err
 	}
@@ -234,7 +230,7 @@ func (h *Hub) cmdOpenspec(c registry.Caller, args []string, out io.Writer) (int,
 	}
 	if lintOut, ok := h.runLint(wt); !ok {
 		fmt.Fprintln(out, replyLintFail(strings.TrimSpace(lintOut)))
-		_ = h.store.Log(c.Agent, "lint-fail", branch)
+		_ = ps.Log(c.Agent, "lint-fail", branch)
 		return 1, nil
 	}
 	msg := strings.TrimSpace(strings.Join(args[1:], " "))
@@ -245,30 +241,30 @@ func (h *Hub) cmdOpenspec(c registry.Caller, args []string, out io.Writer) (int,
 		return 1, err
 	}
 	pr := store.PR{ID: "pr-" + branch, Task: mockSpecTask, Agent: c.Agent, Branch: branch, Base: base, Status: "open"}
-	_, existed, _ := h.store.GetPR(pr.ID)
-	if err := h.store.PutPR(pr); err != nil {
+	_, existed, _ := ps.GetPR(pr.ID)
+	if err := ps.PutPR(pr); err != nil {
 		return 1, err
 	}
-	if err := h.store.SetState(store.AgentState{Agent: c.Agent, Task: mockSpecTask, Branch: branch, Phase: "submitted"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: c.Agent, Task: mockSpecTask, Branch: branch, Phase: "submitted"}); err != nil {
 		return 1, err
 	}
-	_ = h.store.Log(c.Agent, "submit", pr.ID)
+	_ = ps.Log(c.Agent, "submit", pr.ID)
 	if existed {
-		_ = h.store.LogPR(pr.ID, "resubmitted", "by "+c.Agent+": "+msg)
+		_ = ps.LogPR(pr.ID, "resubmitted", "by "+c.Agent+": "+msg)
 	} else {
-		_ = h.store.LogPR(pr.ID, "created", "by "+c.Agent+": "+msg)
+		_ = ps.LogPR(pr.ID, "created", "by "+c.Agent+": "+msg)
 	}
-	h.notifyReviewers(pr.ID, c.Agent)
+	h.notifyReviewers(c.Project, pr.ID, c.Agent)
 	fmt.Fprintln(out, replyRegistered(pr.ID))
 	return 0, nil
 }
 
 // cmdShowPR prints a PR's metadata and diff so a reviewer can judge it.
-func (h *Hub) cmdShowPR(_ registry.Caller, args []string, out io.Writer) (int, error) {
+func (h *Hub) cmdShowPR(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) == 0 {
 		return 1, fmt.Errorf("usage: show <pr-id>")
 	}
-	pr, ok, err := h.store.GetPR(args[0])
+	pr, ok, err := h.store.For(c.Project).GetPR(args[0])
 	if err != nil {
 		return 1, err
 	}
@@ -279,7 +275,7 @@ func (h *Hub) cmdShowPR(_ registry.Caller, args []string, out io.Writer) (int, e
 	if pr.Feedback != "" {
 		fmt.Fprintf(out, "feedback: %s\n", pr.Feedback)
 	}
-	diff, err := git.Diff(h.root, pr.Base, pr.Branch)
+	diff, err := git.Diff(h.projectRoot(c.Project), pr.Base, pr.Branch)
 	if err != nil {
 		return 1, err
 	}
@@ -287,26 +283,26 @@ func (h *Hub) cmdShowPR(_ registry.Caller, args []string, out io.Writer) (int, e
 	return 0, nil
 }
 
-// notifyReviewers wakes reviewer agents that a PR is ready (object → agent
-// routing: a PR ready for review routes to whoever can review it).
-func (h *Hub) notifyReviewers(prID, worker string) {
-	roster, err := h.store.Roster()
+// notifyReviewers wakes a project's reviewer agents that a PR is ready.
+func (h *Hub) notifyReviewers(project, prID, worker string) {
+	roster, err := h.store.For(project).Roster()
 	if err != nil {
 		return
 	}
 	for _, a := range roster {
 		if a.Role == "reviewer" {
 			name := a.Name
-			go h.injectWhenReady(name, msgReviewReady(prID, worker))
+			go h.injectWhenReady(project, name, msgReviewReady(prID, worker))
 		}
 	}
 }
 
-// openPR resolves the PR a reviewer verb targets: an explicit id, or the single
-// oldest open PR when none is given.
-func (h *Hub) openPR(args []string) (store.PR, error) {
+// openPR resolves the PR a reviewer verb targets in a project: an explicit id, or
+// the single oldest open PR when none is given.
+func (h *Hub) openPR(project string, args []string) (store.PR, error) {
+	ps := h.store.For(project)
 	if len(args) > 0 {
-		pr, ok, err := h.store.GetPR(args[0])
+		pr, ok, err := ps.GetPR(args[0])
 		if err != nil {
 			return store.PR{}, err
 		}
@@ -315,7 +311,7 @@ func (h *Hub) openPR(args []string) (store.PR, error) {
 		}
 		return pr, nil
 	}
-	open, err := h.store.PRs("open")
+	open, err := ps.PRs("open")
 	if err != nil {
 		return store.PR{}, err
 	}
@@ -327,33 +323,29 @@ func (h *Hub) openPR(args []string) (store.PR, error) {
 
 // cmdApprove marks a PR approved (the human still merges — the only hard gate).
 func (h *Hub) cmdApprove(c registry.Caller, args []string, out io.Writer) (int, error) {
-	pr, err := h.openPR(args)
+	ps := h.store.For(c.Project)
+	pr, err := h.openPR(c.Project, args)
 	if err != nil {
 		return 1, err
 	}
-	// Only an open PR can be approved. A PR the user rejected stays "rejected"
-	// (the worker is told to stop, not resubmit), so a reviewer can never approve
-	// over the user's rejection.
 	if pr.Status != "open" {
 		fmt.Fprintf(out, "%s is %s — only an open PR can be approved.\n", pr.ID, pr.Status)
 		return 1, nil
 	}
 	pr.Status = "approved"
-	if err := h.store.PutPR(pr); err != nil {
+	if err := ps.PutPR(pr); err != nil {
 		return 1, err
 	}
-	_ = h.store.Log(c.Agent, "approve", pr.ID)
-	_ = h.store.LogPR(pr.ID, "approved", "by "+c.Agent)
+	_ = ps.Log(c.Agent, "approve", pr.ID)
+	_ = ps.LogPR(pr.ID, "approved", "by "+c.Agent)
 	fmt.Fprintf(out, "%s approved — awaiting human merge ('sindri merge %s').\n", pr.ID, pr.ID)
 	return 0, nil
 }
 
-// ApprovePR is the human approve path (TUI/CLI) — the positive counterpart of
-// RejectPR. It marks an open PR approved so the human can then merge it, with or
-// without a reviewer agent in the loop (the merge gate is simply status ==
-// approved). Only an open PR awaiting a verdict can be approved.
-func (h *Hub) ApprovePR(prID string) error {
-	pr, ok, err := h.store.GetPR(prID)
+// ApprovePR is the human approve path (TUI/CLI): marks a project's open PR approved.
+func (h *Hub) ApprovePR(project, prID string) error {
+	ps := h.store.For(project)
+	pr, ok, err := ps.GetPR(prID)
 	if err != nil {
 		return err
 	}
@@ -364,21 +356,21 @@ func (h *Hub) ApprovePR(prID string) error {
 		return fmt.Errorf("%s is %s — only an open PR can be approved", prID, pr.Status)
 	}
 	pr.Status = "approved"
-	if err := h.store.PutPR(pr); err != nil {
+	if err := ps.PutPR(pr); err != nil {
 		return err
 	}
-	_ = h.store.LogPR(prID, "approved", "by user")
+	_ = ps.LogPR(prID, "approved", "by user")
 	h.notify()
 	return nil
 }
 
-// RejectPR is the human reject path (TUI/CLI): sends the owning worker back to
-// its branch to address the feedback and resubmit, with the [user] voice.
-func (h *Hub) RejectPR(prID, feedback string) error { return h.reject(prID, feedback, true) }
+// RejectPR is the human reject path (TUI/CLI): sends the owning worker back to its
+// branch to address the feedback and resubmit, with the [user] voice.
+func (h *Hub) RejectPR(project, prID, feedback string) error {
+	return h.reject(project, prID, feedback, true)
+}
 
-// fileList renders a blocking-files list for a user message: all of them when
-// few, else the first few plus an "and N more" tail so the message stays short.
-// Empty (git couldn't enumerate) falls back to a generic phrase.
+// fileList renders a blocking-files list for a user message.
 func fileList(files []string) string {
 	switch {
 	case len(files) == 0:
@@ -390,14 +382,11 @@ func fileList(files []string) string {
 	}
 }
 
-// reject rejects a PR with feedback and routes it to the owning worker
-// (object-addressed; the worker is never named by the rejecter). A rejection is
-// "revise this", not "abandon it": whoever rejects — an agent reviewer
-// (cmdReject) or the human (RejectPR) — the owner returns to its branch to
-// address the feedback and resubmit. byUser only selects the message's voice
-// ([user] vs [reviewer]) so the worker knows who asked.
-func (h *Hub) reject(prID, feedback string, byUser bool) error {
-	pr, ok, err := h.store.GetPR(prID)
+// reject rejects a project's PR with feedback and routes it to the owning worker
+// (object-addressed). byUser selects the message's voice ([user] vs [reviewer]).
+func (h *Hub) reject(project, prID, feedback string, byUser bool) error {
+	ps := h.store.For(project)
+	pr, ok, err := ps.GetPR(prID)
 	if err != nil {
 		return err
 	}
@@ -409,68 +398,65 @@ func (h *Hub) reject(prID, feedback string, byUser bool) error {
 		feedback = "changes requested"
 	}
 	pr.Status, pr.Feedback = "rejected", feedback
-	if err := h.store.PutPR(pr); err != nil {
+	if err := ps.PutPR(pr); err != nil {
 		return err
 	}
-	// The owner returns to its branch to fix and resubmit. A worker goes back to
-	// "working" its task; a planner has no backlog task, so it drops to its resting
-	// phase (its directive stays the planner brief) — the injected message drives
-	// the fix either way.
 	phase := "working"
-	if a, ok, _ := h.store.GetAgent(pr.Agent); ok && a.Role == "planner" {
+	if a, ok, _ := ps.GetAgent(pr.Agent); ok && a.Role == "planner" {
 		phase = restPhase(a.Role)
 	}
-	_ = h.store.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: phase})
+	_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: phase})
 
 	who, msg := "reviewer", msgRejectedByReviewer(pr.ID, feedback)
 	if byUser {
 		who, msg = "user", msgRejectedByUser(pr.ID, feedback)
 	}
-	_ = h.store.LogPR(pr.ID, "rejected", "by "+who+": "+feedback)
-	_ = h.store.Log(pr.Agent, "reject", pr.ID+" ("+who+"): "+feedback)
-	_ = h.injectWhenReady(pr.Agent, msg)
+	_ = ps.LogPR(pr.ID, "rejected", "by "+who+": "+feedback)
+	_ = ps.Log(pr.Agent, "reject", pr.ID+" ("+who+"): "+feedback)
+	_ = h.injectWhenReady(project, pr.Agent, msg)
 	h.notify()
 	return nil
 }
 
-// MaterializeReview checks out a PR's branch (detached) into the reserved
-// .worktrees/review workspace, so a human can inspect, build, and run it.
-// Returns the path. Detached HEAD avoids conflicting with the agent's own
-// worktree, which holds the same branch.
-func (h *Hub) MaterializeReview(prID string) (string, error) {
-	pr, ok, err := h.store.GetPR(prID)
+// MaterializeReview checks out a project's PR branch (detached) into its reserved
+// .worktrees/review workspace, so a human can inspect it. Returns the path.
+func (h *Hub) MaterializeReview(project, prID string) (string, error) {
+	ps := h.store.For(project)
+	root := h.projectRoot(project)
+	pr, ok, err := ps.GetPR(prID)
 	if err != nil {
 		return "", err
 	}
 	if !ok {
 		return "", fmt.Errorf("no such PR %q", prID)
 	}
-	path := filepath.Join(h.root, ".worktrees", "review")
-	_ = git.WorktreeRemove(h.root, path) // fresh checkout each time
-	if err := git.WorktreeAdd(h.root, path, pr.Branch); err != nil {
+	path := filepath.Join(root, ".worktrees", "review")
+	_ = git.WorktreeRemove(root, path) // fresh checkout each time
+	if err := git.WorktreeAdd(root, path, pr.Branch); err != nil {
 		return "", err
 	}
 	return path, nil
 }
 
-// LintPR runs the quality gate (`sindri lint all`) against a PR's worktree and
-// returns the output, headed with PASS/FAIL.
-func (h *Hub) LintPR(prID string) (string, error) {
-	pr, ok, err := h.store.GetPR(prID)
+// LintPR runs the quality gate against a project's PR worktree and returns the
+// output, headed with PASS/FAIL.
+func (h *Hub) LintPR(project, prID string) (string, error) {
+	ps := h.store.For(project)
+	pr, ok, err := ps.GetPR(prID)
 	if err != nil {
 		return "", err
 	}
 	if !ok {
 		return "", fmt.Errorf("no such PR %q", prID)
 	}
-	a, ok, err := h.store.GetAgent(pr.Agent)
+	a, ok, err := ps.GetAgent(pr.Agent)
 	if err != nil {
 		return "", err
 	}
 	if !ok {
 		return "", fmt.Errorf("no agent %q for %s", pr.Agent, prID)
 	}
-	out, passed := h.runLint(filepath.Join(h.root, a.Workspace))
+	out, passed := h.runLint(filepath.Join(h.projectRoot(project), a.Workspace))
 	status := "FAIL"
 	if passed {
 		status = "PASS"
@@ -479,7 +465,7 @@ func (h *Hub) LintPR(prID string) (string, error) {
 		out = "(no output)\n"
 	}
 	result := fmt.Sprintf("lint %s\n\n%s", status, out)
-	_ = h.store.SetPRLint(prID, result) // persist the latest result
+	_ = ps.SetPRLint(prID, result) // persist the latest result
 	return result, nil
 }
 
@@ -488,7 +474,7 @@ func (h *Hub) cmdReject(c registry.Caller, args []string, out io.Writer) (int, e
 	if len(args) == 0 {
 		return 1, fmt.Errorf("usage: reject <pr-id> <feedback...>")
 	}
-	if err := h.reject(args[0], strings.Join(args[1:], " "), false); err != nil {
+	if err := h.reject(c.Project, args[0], strings.Join(args[1:], " "), false); err != nil {
 		return 1, err
 	}
 	fmt.Fprintf(out, "%s rejected; worker notified.\n", args[0])
@@ -500,15 +486,16 @@ func (h *Hub) cmdReview(c registry.Caller, args []string, out io.Writer) (int, e
 	if len(args) < 2 {
 		return 1, fmt.Errorf("usage: review <pr-id> <pass|changes|fail> <findings...>")
 	}
+	ps := h.store.For(c.Project)
 	prID, verdict := args[0], args[1]
 	findings := strings.TrimSpace(strings.Join(args[2:], " "))
-	revs, err := h.store.Reviews(prID)
+	revs, err := ps.Reviews(prID)
 	if err != nil {
 		return 1, err
 	}
 	for _, r := range revs {
 		if r.Author == c.Agent && r.Verdict == "" { // your in-progress review
-			if err := h.store.RecordVerdict(r.ID, verdict, findings); err != nil {
+			if err := ps.RecordVerdict(r.ID, verdict, findings); err != nil {
 				return 1, err
 			}
 			h.notify()
@@ -519,11 +506,12 @@ func (h *Hub) cmdReview(c registry.Caller, args []string, out io.Writer) (int, e
 	return 1, fmt.Errorf("no review assigned to you on %s", prID)
 }
 
-// Merge merges an approved PR into the base branch (host/human-only — the single
-// hard gate), closes the task, frees the worker, and notifies it. Returns the
-// PR for reporting.
-func (h *Hub) Merge(prID string) (store.PR, error) {
-	pr, ok, err := h.store.GetPR(prID)
+// Merge merges a project's approved PR into the base branch (host/human-only — the
+// single hard gate), closes the task, frees the worker, and notifies it.
+func (h *Hub) Merge(project, prID string) (store.PR, error) {
+	ps := h.store.For(project)
+	root := h.projectRoot(project)
+	pr, ok, err := ps.GetPR(prID)
 	if err != nil {
 		return store.PR{}, err
 	}
@@ -533,149 +521,137 @@ func (h *Hub) Merge(prID string) (store.PR, error) {
 	if pr.Status != "approved" {
 		return store.PR{}, fmt.Errorf("%s is %s — only an approved PR may be merged", prID, pr.Status)
 	}
-	// Bring the branch up to the current base first: a branch that merely fell
-	// behind (base moved on under it) rebases cleanly and then merges without any
-	// human step. A rebase CONFLICT is a genuine divergence — route it straight
-	// back to the owning worker to resolve and resubmit, and stop the merge.
-	if a, ok, _ := h.store.GetAgent(pr.Agent); ok {
-		wt := filepath.Join(h.root, a.Workspace)
+	// Bring the branch up to the current base first; a rebase CONFLICT is a genuine
+	// divergence — route it back to the owning worker and stop the merge.
+	if a, ok, _ := ps.GetAgent(pr.Agent); ok {
+		wt := filepath.Join(root, a.Workspace)
 		if err := git.RebaseOnto(wt, pr.Branch, pr.Base); err != nil {
 			fb := fmt.Sprintf("merge conflict: rebasing %s onto %s hit conflicts (%v). Resolve against the latest %s and resubmit.", pr.Branch, pr.Base, err, pr.Base)
-			_ = h.reject(prID, fb, false) // object-addressed back to the worker
+			_ = h.reject(project, prID, fb, false)
 			return store.PR{}, fmt.Errorf("%s could not be merged — rebase onto %s conflicted; sent back to %s to resolve", prID, pr.Base, pr.Agent)
 		}
 	}
-	if err := git.Merge(h.root, pr.Base, pr.Branch); err != nil {
-		// The branch was rebased onto base just above, so a genuine branch conflict
-		// was already caught there. The remaining failure mode is the base checkout
-		// itself being dirty — uncommitted local changes the merge would overwrite.
-		// That's the human's to resolve (the worker can't touch the main checkout),
-		// so do NOT reject the PR; give a clear, actionable message naming the files.
+	if err := git.Merge(root, pr.Base, pr.Branch); err != nil {
 		if e := err.Error(); strings.Contains(e, "would be overwritten") || strings.Contains(e, "commit your changes or stash") {
-			files := fileList(git.BlockingLocalChanges(h.root, pr.Base, pr.Branch))
+			files := fileList(git.BlockingLocalChanges(root, pr.Base, pr.Branch))
 			return store.PR{}, fmt.Errorf("merge blocked: commit or stash your local changes to %s in the working checkout, then merge again (the PR is fine and stays approved)", files)
 		}
 		return store.PR{}, err
 	}
 	pr.Status = "merged"
-	if err := h.store.PutPR(pr); err != nil {
+	if err := ps.PutPR(pr); err != nil {
 		return store.PR{}, err
 	}
-	// Milestone PR for a held container: land the work but KEEP the branch and the
-	// agent — fast-forward the container branch past the merge and resume the agent
-	// on the container (it is not freed, the container task is not closed).
-	if holder, _ := h.store.GetState(pr.Agent); holder.Container != "" && holder.Container == pr.Branch {
-		if a, ok, _ := h.store.GetAgent(pr.Agent); ok {
-			_ = git.RebaseOnto(filepath.Join(h.root, a.Workspace), pr.Branch, pr.Base) // ff past the merge
+	// Milestone PR for a held container: land the work but KEEP the branch/agent.
+	if holder, _ := ps.GetState(pr.Agent); holder.Container != "" && holder.Container == pr.Branch {
+		if a, ok, _ := ps.GetAgent(pr.Agent); ok {
+			_ = git.RebaseOnto(filepath.Join(root, a.Workspace), pr.Branch, pr.Base) // ff past the merge
 		}
-		_ = h.store.Log(pr.Agent, "merged", prID+" (milestone)")
-		_ = h.store.LogPR(prID, "merged", "milestone into "+pr.Base)
-		h.resumeContainer(pr.Agent)
-		_ = h.injectWhenReady(pr.Agent, msgMilestoneMerged(prID))
-		h.rebasePlanners(pr.Base)
+		_ = ps.Log(pr.Agent, "merged", prID+" (milestone)")
+		_ = ps.LogPR(prID, "merged", "milestone into "+pr.Base)
+		h.resumeContainer(project, pr.Agent)
+		_ = h.injectWhenReady(project, pr.Agent, msgMilestoneMerged(prID))
+		h.rebasePlanners(project, pr.Base)
 		h.notify()
 		return pr, nil
 	}
-	if strings.HasPrefix(pr.Task, "td-") { // a planner's openspec PR has no real td task (os-new)
-		if err := td.Close(h.root, pr.Task, "merged via "+prID); err != nil {
+	if strings.HasPrefix(pr.Task, "td-") { // a planner's openspec PR has no real td task
+		if err := td.Close(root, pr.Task, "merged via "+prID); err != nil {
 			fmt.Printf("warning: td close %s: %v\n", pr.Task, err)
 		}
-		_ = h.refreshTask(pr.Task)
+		_ = h.refreshTask(project, pr.Task)
 	}
 	rest := "idle"
-	if a, ok, _ := h.store.GetAgent(pr.Agent); ok {
+	if a, ok, _ := ps.GetAgent(pr.Agent); ok {
 		rest = restPhase(a.Role)
 	}
-	_ = h.store.SetState(store.AgentState{Agent: pr.Agent, Phase: rest})
-	_ = h.store.Log(pr.Agent, "merged", prID)
-	_ = h.store.LogPR(prID, "merged", "into "+pr.Base)
-	_ = h.injectWhenReady(pr.Agent, msgMerged(prID))
-	h.rebasePlanners(pr.Base) // any merge moves base → keep planners current
+	_ = ps.SetState(store.AgentState{Agent: pr.Agent, Phase: rest})
+	_ = ps.Log(pr.Agent, "merged", prID)
+	_ = ps.LogPR(prID, "merged", "into "+pr.Base)
+	_ = h.injectWhenReady(project, pr.Agent, msgMerged(prID))
+	h.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
 	h.notify()
 	return pr, nil
 }
 
-// rebasePlanners rebases every planner's branch onto base after a merge, so
-// planners always see the latest code. Best-effort: a dirty or conflicting
-// worktree is logged and skipped (the rebase is aborted, leaving it untouched).
-func (h *Hub) rebasePlanners(base string) {
-	roster, _ := h.store.Roster()
+// rebasePlanners rebases every planner's branch in a project onto base after a
+// merge. Best-effort: a dirty or conflicting worktree is logged and skipped.
+func (h *Hub) rebasePlanners(project, base string) {
+	ps := h.store.For(project)
+	root := h.projectRoot(project)
+	roster, _ := ps.Roster()
 	for _, a := range roster {
 		if a.Role != "planner" {
 			continue
 		}
-		wt := filepath.Join(h.root, a.Workspace)
+		wt := filepath.Join(root, a.Workspace)
 		if err := git.Rebase(wt, base); err != nil {
-			_ = h.store.Log(a.Name, "rebase-skip", base+": "+err.Error())
+			_ = ps.Log(a.Name, "rebase-skip", base+": "+err.Error())
 			continue
 		}
-		_ = h.store.Log(a.Name, "rebase", "onto "+base)
-		_ = h.injectWhenReady(a.Name, msgRebased(base))
+		_ = ps.Log(a.Name, "rebase", "onto "+base)
+		_ = h.injectWhenReady(project, a.Name, msgRebased(base))
 	}
 }
 
-// MilestonePR opens (or refreshes) a milestone PR for the container an agent
-// holds: it captures the current state of the container branch and blocks the
-// agent until the human reviews and merges. The agent resumes the same container
-// after the merge (its branch is not retired). Host-triggered, in coordination
-// with the agent.
-func (h *Hub) MilestonePR(agent string) (store.PR, error) {
-	st, err := h.store.GetState(agent)
+// MilestonePR opens (or refreshes) a milestone PR for the container an agent holds
+// in a project, blocking the agent until the human merges.
+func (h *Hub) MilestonePR(project, agent string) (store.PR, error) {
+	ps := h.store.For(project)
+	root := h.projectRoot(project)
+	st, err := ps.GetState(agent)
 	if err != nil {
 		return store.PR{}, err
 	}
 	if st.Container == "" {
 		return store.PR{}, fmt.Errorf("%s isn't working a container — no milestone to open", agent)
 	}
-	a, ok, err := h.store.GetAgent(agent)
+	a, ok, err := ps.GetAgent(agent)
 	if err != nil || !ok {
 		return store.PR{}, fmt.Errorf("no such agent %q", agent)
 	}
-	wt := filepath.Join(h.root, a.Workspace)
+	wt := filepath.Join(root, a.Workspace)
 	if err := git.CommitAll(wt, "milestone: "+st.Container); err != nil { // capture current state
 		return store.PR{}, err
 	}
-	base, err := h.baseBranch()
+	base, err := h.baseBranch(root)
 	if err != nil {
 		return store.PR{}, err
 	}
 	pr := store.PR{ID: "pr-" + st.Container, Task: st.Container, Agent: agent, Branch: st.Container, Base: base, Status: "open"}
-	_, existed, _ := h.store.GetPR(pr.ID)
-	if err := h.store.PutPR(pr); err != nil {
+	_, existed, _ := ps.GetPR(pr.ID)
+	if err := ps.PutPR(pr); err != nil {
 		return store.PR{}, err
 	}
-	// Block the agent until the human merges (the one deliberate pause).
-	if err := h.store.SetState(store.AgentState{Agent: agent, Container: st.Container, Branch: st.Container, Task: st.Task, Phase: "submitted"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: agent, Container: st.Container, Branch: st.Container, Task: st.Task, Phase: "submitted"}); err != nil {
 		return store.PR{}, err
 	}
 	if existed {
-		_ = h.store.LogPR(pr.ID, "resubmitted", "milestone by "+agent)
+		_ = ps.LogPR(pr.ID, "resubmitted", "milestone by "+agent)
 	} else {
-		_ = h.store.LogPR(pr.ID, "created", "milestone by "+agent)
+		_ = ps.LogPR(pr.ID, "created", "milestone by "+agent)
 	}
-	_ = h.store.Log(agent, "milestone", pr.ID)
+	_ = ps.Log(agent, "milestone", pr.ID)
 	h.notify()
 	return pr, nil
 }
 
-// resumeContainer puts a container's agent back to work after a milestone merge:
-// it continues the current subtask if it's still open, else advances to the next
-// open child, else rests holding the container (awaiting more subtasks or the
-// container's close).
-func (h *Hub) resumeContainer(agent string) {
-	st, _ := h.store.GetState(agent)
+// resumeContainer puts a container's agent back to work after a milestone merge.
+func (h *Hub) resumeContainer(project, agent string) {
+	ps := h.store.For(project)
+	st, _ := ps.GetState(agent)
 	if st.Container == "" {
 		return
 	}
 	if st.Task != "" {
-		if t, ok, _ := h.store.GetTask(st.Task); ok && (t.Status == "open" || t.Status == "in_progress") {
-			_ = h.store.SetState(store.AgentState{Agent: agent, Container: st.Container, Branch: st.Container, Task: st.Task, Phase: "working"})
+		if t, ok, _ := ps.GetTask(st.Task); ok && (t.Status == "open" || t.Status == "in_progress") {
+			_ = ps.SetState(store.AgentState{Agent: agent, Container: st.Container, Branch: st.Container, Task: st.Task, Phase: "working"})
 			h.notify()
 			return
 		}
 	}
-	if _, ok := h.advanceContainer(agent, st.Container); !ok {
-		_ = h.store.SetState(store.AgentState{Agent: agent, Container: st.Container, Branch: st.Container, Phase: "idle"})
+	if _, ok := h.advanceContainer(project, agent, st.Container); !ok {
+		_ = ps.SetState(store.AgentState{Agent: agent, Container: st.Container, Branch: st.Container, Phase: "idle"})
 		h.notify()
 	}
 }

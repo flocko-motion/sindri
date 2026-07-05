@@ -32,17 +32,19 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/paths"
 )
 
-// Hub is the per-repo coordinator. It is the only writer of the store and the
-// only thing that drives pods/tmux.
+// Hub is the single global coordinator across every repo. It is the only writer
+// of the store and the only thing that drives pods/tmux. Per-repo work is scoped
+// by an agentKey (project + name); repos are resolved to a store handle via
+// store.For(repoTag).
 type Hub struct {
-	root  string
 	store *store.Store
 
-	mu      sync.Mutex              // guards agentLn
-	agentLn map[string]net.Listener // per-agent socket listeners (identity-by-socket)
-	events  *bus                    // change notifications for /events
+	mu      sync.Mutex                // guards agentLn
+	agentLn map[agentKey]net.Listener // per-agent socket listeners (Linux identity-by-socket)
+	events  *bus                      // change notifications for /events
 
 	// macOS only: a bind-mounted unix socket can't be connected to across the
 	// podman VM boundary, so agents reach the hub over a loopback TCP channel
@@ -50,11 +52,18 @@ type Hub struct {
 	agentTCPLn   net.Listener
 	agentTCPPort int
 
-	lcMu      sync.Mutex        // guards lifecycle
-	lifecycle map[string]string // transient launch/stop intent: name -> "launching"|"stopping"
+	lcMu      sync.Mutex          // guards lifecycle
+	lifecycle map[agentKey]string // transient launch/stop intent: "launching"|"stopping"
 
-	launchMu  sync.Mutex             // guards launchBuf
-	launchBuf map[string]*safeBuffer // per-agent image-build/pod-start output
+	launchMu  sync.Mutex               // guards launchBuf
+	launchBuf map[agentKey]*safeBuffer // per-agent image-build/pod-start output
+}
+
+// agentKey identifies an agent within a project — the key for the hub's per-agent
+// maps now that one hub serves many repos. project is a repoTag.
+type agentKey struct {
+	project string
+	name    string
 }
 
 var nameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
@@ -99,8 +108,13 @@ func Container(root, name string) string {
 	return "sindri-" + repoSlug(root) + "-" + repoTag(root) + "-" + name
 }
 
-// container is Container bound to this hub's repo (the common in-hub case).
-func (h *Hub) container(name string) string { return Container(h.root, name) }
+// projectRoot resolves a project (repoTag) to its on-disk repo root via the
+// registry ("" if unknown). The hub's filesystem work (git, worktrees) needs the
+// path; state needs only the tag.
+func (h *Hub) projectRoot(project string) string {
+	root, _ := h.store.ProjectPath(project)
+	return root
+}
 
 // session is the tmux session name for an agent (named after the agent, D4).
 func session(name string) string { return name }
@@ -127,50 +141,43 @@ func restPhase(role string) string {
 	}
 }
 
-// New opens the hub for a project: ensures `.sindri/` exists and opens the DB.
-func New(root string) (*Hub, error) {
-	dir := filepath.Join(root, ".sindri")
-	if err := os.MkdirAll(filepath.Join(dir, "sockets"), 0o755); err != nil {
-		return nil, fmt.Errorf("create .sindri: %w", err)
+// New opens the single global hub: ensures the central state dir exists and opens
+// the one project-keyed store. Repos are registered lazily on first use (repo).
+func New() (*Hub, error) {
+	dir := paths.StateDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("create state dir %s: %w", dir, err)
 	}
-	ensureGitignore(root)   // keep the hub's process artifacts out of the repo's status
-	ensureSindriIgnore(dir) // and make .sindri/ self-ignoring — it holds secrets
 	st, err := store.Open(filepath.Join(dir, "hub.db"))
 	if err != nil {
 		return nil, err
 	}
-	return &Hub{root: root, store: st, agentLn: map[string]net.Listener{}, events: newBus(),
-		lifecycle: map[string]string{}, launchBuf: map[string]*safeBuffer{}}, nil
+	return &Hub{store: st, events: newBus(),
+		agentLn:   map[agentKey]net.Listener{},
+		lifecycle: map[agentKey]string{},
+		launchBuf: map[agentKey]*safeBuffer{}}, nil
 }
 
-// hubIgnores are the hub's process artifacts that must never be committed: its
-// own state/home dir and the agent worktrees (per-agent Claude homes carry
-// history, backups, and snapshots — a lot of churn). `.todos/` is deliberately
-// NOT ignored: task data is tracked.
-var hubIgnores = []string{".sindri/", ".worktrees/"}
-
-// sindriSelfIgnore is written to .sindri/.gitignore on every hub start. A nested
-// ".gitignore" of "*" ignores the whole directory (including itself), so .sindri/
-// — which holds Claude credentials, agent tokens, the db, and sockets — can never
-// be committed, even in a repo whose root .gitignore never learned about it (or if
-// that entry is later removed). This is the guarantee for the secret-bearing dir;
-// the root .gitignore entry (see hubIgnores) is just for a clean `git status`.
-const sindriSelfIgnore = "# sindri hub state — credentials, tokens, db, sockets. Never commit.\n*\n"
-
-// ensureSindriIgnore writes .sindri/.gitignore unconditionally (idempotent) so the
-// secret-bearing hub dir stays self-protecting regardless of the repo's own config.
-// Best-effort and loud on failure: it never blocks startup.
-func ensureSindriIgnore(dir string) {
-	path := filepath.Join(dir, ".gitignore")
-	if err := os.WriteFile(path, []byte(sindriSelfIgnore), 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "hub: WARNING — could not write %s: %v\n", path, err)
-	}
+// repo registers a repo (idempotent) and returns its project-scoped store handle.
+// It's the hub's single entry to per-repo state: the transport resolves a request's
+// repo root, calls this, and works through the returned handle — so the project
+// (a repoTag) is derived here, once, not threaded through every method.
+func (h *Hub) repo(root string) *store.ProjectStore {
+	tag := repoTag(root)
+	_ = h.store.RegisterProject(tag, root)
+	ensureGitignore(root) // keep .worktrees/ out of the repo's git status
+	return h.store.For(tag)
 }
+
+// hubIgnores are the git-owned worktrees, kept in the repo but not committed. The
+// hub's own state no longer lives in the repo (it's central under the state dir),
+// and `.todos/` is deliberately NOT ignored — task data is tracked.
+var hubIgnores = []string{".worktrees/"}
 
 // ensureGitignore appends any missing hub-artifact patterns to the repo's
 // .gitignore (creating it if absent), idempotently — so a fresh project never
-// fills lazygit/`git status` with hub churn. Best-effort and loud on failure: it
-// never blocks hub startup, but a write error is reported rather than swallowed.
+// fills lazygit/`git status` with worktree churn. Best-effort and loud on failure:
+// it never blocks hub startup, but a write error is reported rather than swallowed.
 func ensureGitignore(root string) {
 	path := filepath.Join(root, ".gitignore")
 	data, _ := os.ReadFile(path) // missing file → empty, we'll create it
@@ -206,32 +213,34 @@ func ensureGitignore(root string) {
 
 // setLifecycle records a transient launch/stop intent for an agent (cleared by
 // State once observed reality catches up). "" clears it.
-func (h *Hub) setLifecycle(name, state string) {
+func (h *Hub) setLifecycle(project, name, state string) {
 	h.lcMu.Lock()
 	defer h.lcMu.Unlock()
+	key := agentKey{project, name}
 	if state == "" {
-		delete(h.lifecycle, name)
+		delete(h.lifecycle, key)
 	} else {
-		h.lifecycle[name] = state
+		h.lifecycle[key] = state
 	}
 }
 
 // agentStatus reconciles transient intent with observed runtime into one status
 // word — and clears the intent once fulfilled (launching→running, stopping→
 // down). The single source of truth for "what is this agent doing".
-func (h *Hub) agentStatus(name string, running bool, phase string) string {
+func (h *Hub) agentStatus(project, name string, running bool, phase string) string {
 	h.lcMu.Lock()
 	defer h.lcMu.Unlock()
-	intent := h.lifecycle[name]
+	key := agentKey{project, name}
+	intent := h.lifecycle[key]
 	switch {
 	case intent == "stopping":
 		if running {
 			return "stopping" // stop requested, pod still up
 		}
-		delete(h.lifecycle, name) // down now — stop intent fulfilled
+		delete(h.lifecycle, key) // down now — stop intent fulfilled
 		return "down"
 	case running:
-		delete(h.lifecycle, name) // up now — launch intent fulfilled
+		delete(h.lifecycle, key) // up now — launch intent fulfilled
 		if phase == "" {
 			return "idle"
 		}
@@ -252,14 +261,15 @@ func (h *Hub) Close() error {
 	return h.store.Close()
 }
 
-// SocketPath is the hub's control socket for this repo.
-func (h *Hub) SocketPath() string { return SocketPath(h.root) }
+// SocketPath is the global hub's control socket.
+func (h *Hub) SocketPath() string { return SocketPath() }
 
-// NewAgent registers an agent identity (no pod). Identity precedes runtime
-// (D13). An empty name is auto-assigned a Norse dwarf name. Returns the final
-// name.
-func (h *Hub) NewAgent(name, role string) (string, error) {
-	if name == "" { // auto-name after a dwarf — a friend of Sindri
+// NewAgent registers an agent identity in a project (no pod). Identity precedes
+// runtime (D13). An empty name is auto-assigned a Norse dwarf name unused in that
+// project. Returns the final name.
+func (h *Hub) NewAgent(project, name, role string) (string, error) {
+	ps := h.store.For(project)
+	if name == "" { // auto-name after a dwarf — a friend of Sindri (globally unique)
 		n, err := h.autoName()
 		if err != nil {
 			return "", err
@@ -272,10 +282,16 @@ func (h *Hub) NewAgent(name, role string) (string, error) {
 	if role != "worker" && role != "reviewer" && role != "planner" && role != "coauthor" {
 		return "", fmt.Errorf("invalid role %q (worker|reviewer|planner|coauthor)", role)
 	}
-	if _, ok, err := h.store.GetAgent(name); err != nil {
+	// Names are unique across ALL repos — a dwarf identifies one agent machine-wide,
+	// so the unified board never shows two agents with the same name.
+	agents, err := h.store.AllAgents()
+	if err != nil {
 		return "", err
-	} else if ok {
-		return "", fmt.Errorf("agent %q already exists", name)
+	}
+	for _, a := range agents {
+		if a.Name == name {
+			return "", fmt.Errorf("agent %q already exists (in %s) — names are unique across all repos", name, a.Project)
+		}
 	}
 	// A coauthor shares the user's real checkout (the repo root) rather than an
 	// isolated worktree — it works the SAME material as the user, freestyle.
@@ -287,21 +303,23 @@ func (h *Hub) NewAgent(name, role string) (string, error) {
 		Name:      name,
 		Role:      role,
 		Workspace: workspace,
-		Socket:    filepath.Join(".sindri", "sockets", name+".sock"),
+		Socket:    filepath.Join(AgentSocketDir(project, name), "sock"),
 	}
-	if err := h.store.PutAgent(a); err != nil {
+	if err := ps.PutAgent(a); err != nil {
 		return "", err
 	}
 	defer h.notify()
-	return name, h.store.Log(name, "register", "role="+role)
+	return name, ps.Log(name, "register", "role="+role)
 }
 
 // DeleteAgent removes an agent entirely: stops its pod, closes its socket
 // listener, removes its worktree, and drops its identity (and activity log)
 // from the roster. Best-effort on the runtime teardown — a missing pod or
 // worktree is fine; the identity is always removed.
-func (h *Hub) DeleteAgent(name string) error {
-	a, ok, err := h.store.GetAgent(name)
+func (h *Hub) DeleteAgent(project, name string) error {
+	ps := h.store.For(project)
+	root := h.projectRoot(project)
+	a, ok, err := ps.GetAgent(name)
 	if err != nil {
 		return err
 	}
@@ -311,20 +329,20 @@ func (h *Hub) DeleteAgent(name string) error {
 	// Release the agent's task back to the backlog so it isn't stranded
 	// in_progress with no owner. (A planner's os-new sentinel and openspec items
 	// aren't real td tasks — skip those.)
-	if st, _ := h.store.GetState(name); strings.HasPrefix(st.Task, "td-") {
-		if err := td.SetStatus(h.root, st.Task, "open"); err != nil {
+	if st, _ := ps.GetState(name); strings.HasPrefix(st.Task, "td-") {
+		if err := td.SetStatus(root, st.Task, "open"); err != nil {
 			fmt.Printf("warning: reopen %s on delete of %s: %v\n", st.Task, name, err)
 		}
-		_ = h.refreshTask(st.Task)
+		_ = h.refreshTask(project, st.Task)
 	}
-	_ = pod.Rm(h.container(name))
-	h.closeAgent(name)
+	_ = pod.Rm(h.container(project, name))
+	h.closeAgent(project, name)
 	// A coauthor's workspace is the repo root itself (the shared checkout), not a
 	// disposable worktree — never run `git worktree remove` on it.
 	if a.Workspace != "." {
-		_ = git.WorktreeRemove(h.root, filepath.Join(h.root, a.Workspace))
+		_ = git.WorktreeRemove(root, filepath.Join(root, a.Workspace))
 	}
-	if err := h.store.DeleteAgent(name); err != nil {
+	if err := ps.DeleteAgent(name); err != nil {
 		return err
 	}
 	h.notify()
@@ -334,23 +352,24 @@ func (h *Hub) DeleteAgent(name string) error {
 // StopAgent is the opposite of Launch: it tears down the agent's pod (killing
 // its tmux session) but keeps the identity, worktree, socket listener, and
 // activity log — so it can be re-launched and resumes where it left off.
-func (h *Hub) StopAgent(name string) error {
-	if _, ok, err := h.store.GetAgent(name); err != nil {
+func (h *Hub) StopAgent(project, name string) error {
+	ps := h.store.For(project)
+	if _, ok, err := ps.GetAgent(name); err != nil {
 		return err
 	} else if !ok {
 		return fmt.Errorf("no such agent %q", name)
 	}
-	if !pod.Running(h.container(name)) {
+	if !pod.Running(h.container(project, name)) {
 		return fmt.Errorf("agent %q is not running", name)
 	}
-	h.setLifecycle(name, "stopping") // status → stopping (pod still up); → down once gone
+	h.setLifecycle(project, name, "stopping") // status → stopping (pod up); → down once gone
 	h.notify()
-	if err := pod.Rm(h.container(name)); err != nil {
-		h.setLifecycle(name, "")
+	if err := pod.Rm(h.container(project, name)); err != nil {
+		h.setLifecycle(project, name, "")
 		h.notify()
 		return err
 	}
-	_ = h.store.Log(name, "stop", "pod removed")
+	_ = ps.Log(name, "stop", "pod removed")
 	h.notify()
 	return nil
 }
@@ -359,8 +378,10 @@ func (h *Hub) StopAgent(name string) error {
 // workspace worktree is created on demand; the pod runs interactive Claude in a
 // tmux session named after the agent (or a bare shell when shell is true — used
 // for deterministic demos and debugging).
-func (h *Hub) Launch(name string, shell bool) (err error) {
-	a, ok, err := h.store.GetAgent(name)
+func (h *Hub) Launch(project, name string, shell bool) (err error) {
+	ps := h.store.For(project)
+	root := h.projectRoot(project)
+	a, ok, err := ps.GetAgent(name)
 	if err != nil {
 		return err
 	}
@@ -369,7 +390,7 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 	}
 	// Tee the image build (+ our progress notes) into the agent's launch buffer
 	// so the TUI live-screen region shows it while the pod comes up.
-	buf := h.newLaunchBuf(name)
+	buf := h.newLaunchBuf(project, name)
 	// Pre-flight: podman must be installed and reachable. Fail fast with an
 	// actionable message (before touching status or staging an image build) rather
 	// than surfacing a cryptic exit code mid-build. On macOS/Windows this also
@@ -379,37 +400,37 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 	}
 	// Status → launching immediately (cleared by State once the pod is up); on
 	// any failure below, clear it so it doesn't stick at "launching".
-	h.setLifecycle(name, "launching")
-	_ = h.store.Log(name, "launch", "requested")
+	h.setLifecycle(project, name, "launching")
+	_ = ps.Log(name, "launch", "requested")
 	h.notify()
 	defer func() {
 		if err != nil {
-			h.setLifecycle(name, "")
+			h.setLifecycle(project, name, "")
 			h.notify()
 		}
 	}()
-	if err := container.Ensure(h.root, io.MultiWriter(os.Stderr, buf)); err != nil {
+	if err := container.Ensure(root, io.MultiWriter(os.Stderr, buf)); err != nil {
 		return err
 	}
-	fmt.Fprintf(buf, "Image ready. Starting pod %s…\n", h.container(name))
-	wt := filepath.Join(h.root, a.Workspace)
-	if !git.HasCommits(h.root) {
+	fmt.Fprintf(buf, "Image ready. Starting pod %s…\n", h.container(project, name))
+	wt := filepath.Join(root, a.Workspace)
+	if !git.HasCommits(root) {
 		return fmt.Errorf("repo has no commits yet")
 	}
 	if a.Role == "coauthor" {
 		// A coauthor's /workspace IS the user's checkout (wt == repo root) — no
 		// isolated worktree to add. Rest in "collab" so the dashboard shows it's
 		// standing with the user, not idle.
-		if st, _ := h.store.GetState(name); st.Phase == "" || st.Phase == "idle" {
-			_ = h.store.SetState(store.AgentState{Agent: name, Phase: "collab"})
+		if st, _ := ps.GetState(name); st.Phase == "" || st.Phase == "idle" {
+			_ = ps.SetState(store.AgentState{Agent: name, Phase: "collab"})
 		}
-	} else if err := git.WorktreeAdd(h.root, wt, "HEAD"); err != nil {
+	} else if err := git.WorktreeAdd(root, wt, "HEAD"); err != nil {
 		return err
 	}
 	if a.Role == "planner" {
 		// Put the planner on its standing branch so it can draft openspec and ship
 		// it via `openspec submit` without ever grabbing a backlog task.
-		base, err := h.baseBranch()
+		base, err := h.baseBranch(root)
 		if err != nil {
 			return err
 		}
@@ -417,21 +438,21 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 			return err
 		}
 		// Rest in "planning", not "idle" — unless a PR is already in flight.
-		if st, _ := h.store.GetState(name); st.Phase != "submitted" {
-			_ = h.store.SetState(store.AgentState{Agent: name, Phase: "planning"})
+		if st, _ := ps.GetState(name); st.Phase != "submitted" {
+			_ = ps.SetState(store.AgentState{Agent: name, Phase: "planning"})
 		}
 	}
 	// Serve the agent's own socket BEFORE the pod launches — the pod bind-mounts
 	// it, and the socket IS the agent's identity (D2). Requires the persistent
 	// hub: an ephemeral in-process hub would take the listener down on exit.
-	if err := h.ServeAgent(name); err != nil {
+	if err := h.ServeAgent(project, name); err != nil {
 		return err
 	}
 	workerBin, err := agentBinary()
 	if err != nil {
 		return err
 	}
-	cName := h.container(name)
+	cName := h.container(project, name)
 	_ = pod.Rm(cName) // clear any stale container with this name
 
 	env := map[string]string{"SINDRI_AGENT": name, "COLORTERM": "truecolor"}
@@ -442,7 +463,7 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 		if h.agentTCPPort == 0 {
 			return fmt.Errorf("agent TCP channel not started — launch needs a persistent hub")
 		}
-		token, terr := h.AgentToken(name)
+		token, terr := h.AgentToken(project, name)
 		if terr != nil {
 			return terr
 		}
@@ -454,7 +475,7 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 		// The agent's own socket — its sole channel to the hub, its identity.
 		// Mount the socket DIRECTORY (not the file) so the agent survives a hub
 		// restart, which recreates the socket file with a new inode.
-		{Host: AgentSocketDir(h.root, name), Container: "/run/sindri", Mode: "rw"},
+		{Host: AgentSocketDir(project, name), Container: "/run/sindri", Mode: "rw"},
 		// The thin browser binary (image symlinks it to /usr/local/bin/sindri — the
 		// agent's in-pod interface to the hub).
 		{Host: workerBin, Container: "/opt/sindri/sindri-worker", Mode: "ro"},
@@ -468,22 +489,14 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 		mounts[0] = pod.Mount{Host: wt, Container: "/workspace", Mode: "ro"}
 		mounts = append(mounts, pod.Mount{Host: osDir, Container: "/workspace/openspec", Mode: "rw"})
 	}
-	if a.Role == "coauthor" {
-		// The coauthor's /workspace IS the user's checkout, so it would otherwise see
-		// .sindri/ (hub.db, sockets) live. Overlay an empty read-only dir over
-		// /workspace/.sindri so it can't read or corrupt hub state while it works.
-		shield := filepath.Join(h.root, ".sindri", "shield")
-		if err := os.MkdirAll(shield, 0o755); err != nil {
-			return err
-		}
-		mounts = append(mounts, pod.Mount{Host: shield, Container: "/workspace/.sindri", Mode: "ro"})
-	}
+	// Note: no coauthor .sindri shield anymore — hub state lives centrally under the
+	// state dir, never inside the repo, so the shared checkout exposes nothing.
 	if shell {
 		env["SINDRI_SHELL"] = "1" // entrypoint runs bash instead of Claude
 	} else {
 		// Set up the agent's Claude home (credentials, config, system prompt) and
 		// mount it so Claude runs authenticated.
-		home, cfg, hasCreds, err := h.prepareClaudeHome(name, a.Role, buf)
+		home, cfg, hasCreds, err := h.prepareClaudeHome(project, name, a.Role, buf)
 		if err != nil {
 			return err
 		}
@@ -506,7 +519,7 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 	opts := pod.RunOpts{
 		Name:       cName,
 		Image:      container.ImageName,
-		Labels:     map[string]string{"sindri.project": h.root, "sindri.agent": name},
+		Labels:     map[string]string{"sindri.project": root, "sindri.agent": name},
 		Env:        env,
 		Mounts:     mounts,
 		Workdir:    "/workspace",
@@ -515,39 +528,37 @@ func (h *Hub) Launch(name string, shell bool) (err error) {
 	if err := pod.Run(opts); err != nil {
 		return err
 	}
-	if err := h.store.Log(name, "launch", "started container="+cName); err != nil {
+	if err := ps.Log(name, "launch", "started container="+cName); err != nil {
 		return err
 	}
-	go h.rehydrate(name) // resume from the activity log once the session is up (D13)
+	go h.rehydrate(project, name) // resume once the session is up (D13)
 	h.notify()
 	return nil
 }
 
 // Tell delivers a message into an agent's session, stamped with its source
 // (provenance, D12). The stamped line is recorded in the activity log.
-func (h *Hub) Tell(name, msg, source string) error {
-	a, ok, err := h.store.GetAgent(name)
-	if err != nil {
+func (h *Hub) Tell(project, name, msg, source string) error {
+	ps := h.store.For(project)
+	if _, ok, err := ps.GetAgent(name); err != nil {
 		return err
-	}
-	if !ok {
+	} else if !ok {
 		return fmt.Errorf("no such agent %q", name)
 	}
 	if source == "" {
 		source = "user"
 	}
 	stamped := fmt.Sprintf("[%s] %s", source, msg)
-	if err := h.inject(name, stamped); err != nil {
+	if err := h.inject(project, name, stamped); err != nil {
 		return err
 	}
-	_ = a
 	defer h.notify()
-	return h.store.Log(name, "recv", stamped)
+	return ps.Log(name, "recv", stamped)
 }
 
 // inject types text into an agent's tmux session via podman exec.
-func (h *Hub) inject(name, text string) error {
-	c := h.container(name)
+func (h *Hub) inject(project, name, text string) error {
+	c := h.container(project, name)
 	if !pod.Running(c) {
 		return fmt.Errorf("agent %q is not running — launch it first", name)
 	}
@@ -564,17 +575,17 @@ func (h *Hub) inject(name, text string) error {
 // injects. Used for hub-originated messages (verdicts, rehydrate) right after a
 // launch, when the session may not be up yet. A message that never lands is
 // recorded so it is not silently lost.
-func (h *Hub) injectWhenReady(name, text string) error {
-	c := h.container(name)
+func (h *Hub) injectWhenReady(project, name, text string) error {
+	c := h.container(project, name)
 	for i := 0; i < 25; i++ {
 		if pod.Running(c) {
 			if _, err := pod.Exec(c, "tmux", "has-session", "-t", session(name)); err == nil {
-				return h.inject(name, text)
+				return h.inject(project, name, text)
 			}
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return h.store.Log(name, "inject-skipped", text)
+	return h.store.For(project).Log(name, "inject-skipped", text)
 }
 
 // rehydrate nudges a (re)launched agent to start once its pod's session is up
@@ -585,11 +596,11 @@ func (h *Hub) injectWhenReady(name, text string) error {
 // a merged or rejected PR). Claude's own --continue restores the prior
 // conversation when there is one, so no activity-log replay is needed here.
 // Best-effort; runs in the background so it doesn't block launch.
-func (h *Hub) rehydrate(name string) {
+func (h *Hub) rehydrate(project, name string) {
 	// Let the agent program (Claude) boot to input-readiness before the kickoff,
 	// or its submitting Enter is eaten by the boot splash.
 	time.Sleep(8 * time.Second)
-	_ = h.injectWhenReady(name, msgKickoff)
+	_ = h.injectWhenReady(project, name, msgKickoff)
 }
 
 // agentBinary locates the thin browser binary on the host: next to the running

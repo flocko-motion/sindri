@@ -29,42 +29,46 @@ type HTTP struct {
 	base string
 }
 
-// DialSocket returns a client that talks to the hub over a specific unix socket
-// — used by the in-pod browser, which dials its own mounted socket.
+// DialSocket returns a client that talks to the hub over a specific unix socket —
+// used by the in-pod worker on Linux, whose socket IS its identity (no header).
 func DialSocket(socketPath string) *HTTP {
-	return &HTTP{
-		base: "http://unix",
-		hc: &http.Client{Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				return (&net.Dialer{}).DialContext(ctx, "unix", socketPath)
-			},
-		}},
-	}
+	return &HTTP{base: "http://unix", hc: &http.Client{Transport: unixTransport(socketPath)}}
 }
 
-// Dial returns a client for the hub serving root's control socket.
-func Dial(root string) *HTTP { return DialSocket(hub.SocketPath(root)) }
+// Dial returns a host client for the single global hub, tagging every request with
+// the repo it concerns (X-Sindri-Project = the repo root) so the hub scopes to that
+// project. The ~repo context rides at the transport layer, so callers don't thread
+// it through each method.
+func Dial(root string) *HTTP {
+	return &HTTP{base: "http://unix", hc: &http.Client{Transport: &headerRT{
+		key: "X-Sindri-Project", val: root, rt: unixTransport(hub.SocketPath())}}}
+}
 
 // DialTCP returns a client that talks to the hub over TCP, presenting token on
-// every request as its identity. Used by the in-pod browser on macOS, where a
-// bind-mounted unix socket can't be connected to across the podman VM boundary, so
-// the hub serves a loopback TCP channel and the token stands in for the socket.
+// every request as its identity — the in-pod worker on macOS, where a bind-mounted
+// unix socket can't cross the podman VM boundary.
 func DialTCP(addr, token string) *HTTP {
-	return &HTTP{
-		base: "http://" + addr,
-		hc:   &http.Client{Transport: &tokenTransport{token: token, rt: http.DefaultTransport}},
-	}
+	return &HTTP{base: "http://" + addr, hc: &http.Client{Transport: &headerRT{
+		key: "X-Sindri-Token", val: token, rt: http.DefaultTransport}}}
 }
 
-// tokenTransport adds the agent's bearer token to every request.
-type tokenTransport struct {
-	token string
-	rt    http.RoundTripper
+// unixTransport dials the given unix socket for every request.
+func unixTransport(socketPath string) *http.Transport {
+	return &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", socketPath)
+	}}
 }
 
-func (t *tokenTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+// headerRT adds a fixed header — the caller's project (host) or token (agent) — to
+// every request; that header is the caller's identity/context on the wire.
+type headerRT struct {
+	key, val string
+	rt       http.RoundTripper
+}
+
+func (t *headerRT) RoundTrip(r *http.Request) (*http.Response, error) {
 	r = r.Clone(r.Context()) // don't mutate the caller's request (RoundTripper contract)
-	r.Header.Set("X-Sindri-Token", t.token)
+	r.Header.Set(t.key, t.val)
 	return t.rt.RoundTrip(r)
 }
 

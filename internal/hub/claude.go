@@ -16,6 +16,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+
+	"github.com/flo-at/sindri/internal/paths"
 )
 
 // claudeSettings grants the agent the tools it needs without per-call prompts.
@@ -31,8 +33,8 @@ const claudeSettings = `{
 // /home/sindri/.claude.json), seeding host credentials so the agent is
 // authenticated. Returns the host paths to mount and whether credentials were
 // found (no creds → caller should fall back to a shell).
-func (h *Hub) prepareClaudeHome(name, role string, out io.Writer) (homeDir, configPath string, hasCreds bool, err error) {
-	homeDir = filepath.Join(h.root, ".sindri", "claude", name)
+func (h *Hub) prepareClaudeHome(project, name, role string, out io.Writer) (homeDir, configPath string, hasCreds bool, err error) {
+	homeDir = filepath.Join(paths.StateDir(), project, "claude", name)
 	if err = os.MkdirAll(homeDir, 0o755); err != nil {
 		return "", "", false, fmt.Errorf("create claude home: %w", err)
 	}

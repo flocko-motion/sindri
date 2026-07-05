@@ -55,9 +55,10 @@ func (h *Hub) registry() *registry.Registry {
 	)
 }
 
-// caller resolves an agent's identity and role (workflow state arrives Phase 3).
-func (h *Hub) caller(name string) (registry.Caller, error) {
-	a, ok, err := h.store.GetAgent(name)
+// caller resolves an agent's identity and role within its project.
+func (h *Hub) caller(project, name string) (registry.Caller, error) {
+	ps := h.store.For(project)
+	a, ok, err := ps.GetAgent(name)
 	if err != nil {
 		return registry.Caller{}, err
 	}
@@ -68,12 +69,13 @@ func (h *Hub) caller(name string) (registry.Caller, error) {
 	// reverse (state machine, D-hub). Holding a collaborative container also counts
 	// as "has work" (so "next" stays hidden even when resting between subtasks) and
 	// swaps "submit" for "checkpoint".
-	st, err := h.store.GetState(name)
+	st, err := ps.GetState(name)
 	if err != nil {
 		return registry.Caller{}, err
 	}
 	inContainer := st.Container != ""
 	return registry.Caller{
+		Project:     project,
 		Agent:       name,
 		Role:        a.Role,
 		HasTask:     st.Phase != "idle" || inContainer,
@@ -82,8 +84,8 @@ func (h *Hub) caller(name string) (registry.Caller, error) {
 }
 
 // AgentCommands returns the command surface currently available to an agent.
-func (h *Hub) AgentCommands(name string) ([]CmdInfo, error) {
-	c, err := h.caller(name)
+func (h *Hub) AgentCommands(project, name string) ([]CmdInfo, error) {
+	c, err := h.caller(project, name)
 	if err != nil {
 		return nil, err
 	}
@@ -98,8 +100,8 @@ func (h *Hub) AgentCommands(name string) ([]CmdInfo, error) {
 // AgentExec runs a verb on behalf of an agent, streaming to out and returning a
 // process-style exit code. Every call is recorded in the activity log (the
 // socket "messages sent", D12).
-func (h *Hub) AgentExec(name string, args []string, out io.Writer) (int, error) {
-	c, err := h.caller(name)
+func (h *Hub) AgentExec(project, name string, args []string, out io.Writer) (int, error) {
+	c, err := h.caller(project, name)
 	if err != nil {
 		return 1, err
 	}
@@ -120,7 +122,7 @@ func (h *Hub) AgentExec(name string, args []string, out io.Writer) (int, error) 
 }
 
 func (h *Hub) cmdStatus(c registry.Caller, _ []string, out io.Writer) (int, error) {
-	running := pod.Running(h.container(c.Agent))
+	running := pod.Running(h.container(c.Project, c.Agent))
 	fmt.Fprintf(out, "agent:   %s\nrole:    %s\nrunning: %v\n", c.Agent, c.Role, running)
 	return 0, nil
 }
@@ -130,21 +132,22 @@ func (h *Hub) cmdStatus(c registry.Caller, _ []string, out io.Writer) (int, erro
 // args it lints the caller's own worktree (the worker's pre-submit self-check).
 func (h *Hub) cmdLint(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) > 0 { // lint a specific PR's worktree
-		res, err := h.LintPR(args[0])
+		res, err := h.LintPR(c.Project, args[0])
 		if err != nil {
 			return 1, err
 		}
 		fmt.Fprint(out, res)
 		return 0, nil
 	}
-	a, ok, err := h.store.GetAgent(c.Agent)
+	ps := h.store.For(c.Project)
+	a, ok, err := ps.GetAgent(c.Agent)
 	if err != nil {
 		return 1, err
 	}
 	if !ok {
 		return 1, fmt.Errorf("unknown agent %q", c.Agent)
 	}
-	res, passed := h.runLint(filepath.Join(h.root, a.Workspace))
+	res, passed := h.runLint(filepath.Join(h.projectRoot(c.Project), a.Workspace))
 	if strings.TrimSpace(res) == "" {
 		res = "lint: clean\n"
 	}
@@ -161,15 +164,15 @@ func (h *Hub) cmdLog(c registry.Caller, args []string, out io.Writer) (int, erro
 		fmt.Fprintln(out, "usage: log <message>")
 		return 2, nil
 	}
-	if err := h.store.Log(c.Agent, "note", msg); err != nil {
+	if err := h.store.For(c.Project).Log(c.Agent, "note", msg); err != nil {
 		return 1, err
 	}
 	fmt.Fprintln(out, "logged")
 	return 0, nil
 }
 
-func (h *Hub) cmdListPRs(_ registry.Caller, _ []string, out io.Writer) (int, error) {
-	prs, err := h.store.PRs()
+func (h *Hub) cmdListPRs(c registry.Caller, _ []string, out io.Writer) (int, error) {
+	prs, err := h.store.For(c.Project).PRs()
 	if err != nil {
 		return 1, err
 	}

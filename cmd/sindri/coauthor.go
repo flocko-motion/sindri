@@ -39,7 +39,7 @@ func newCoauthorCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := ensureHubRunning(root); err != nil {
+			if err := ensureHubRunning(); err != nil {
 				return err
 			}
 			cl, err := dialHub(root)
@@ -59,16 +59,6 @@ func newCoauthorCmd() *cobra.Command {
 			return pod.ExecInteractive(hub.Container(root, name), append([]string{"tmux"}, tmux.Attach(name, false)...)...)
 		},
 	}
-}
-
-// ensureHubRunning starts a detached background hub for root when none is running.
-// A hub that's already up is left as-is (dialHub reconciles its version).
-func ensureHubRunning(root string) error {
-	if hub.IsRunning(root) {
-		return nil
-	}
-	fmt.Fprintln(os.Stderr, "no hub running…")
-	return startHub(root)
 }
 
 // ensureCoauthor returns the existing coauthor agent's name, creating one (auto

@@ -51,11 +51,11 @@ func (h *Hub) serveAgentTCP() error {
 // socket's "the endpoint is the identity".
 func (h *Hub) agentTCPHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		name, ok := h.agentForToken(r.Header.Get("X-Sindri-Token"))
+		project, name, ok := h.agentForToken(r.Header.Get("X-Sindri-Token"))
 		if !ok {
 			http.Error(w, `{"error":"unauthorized: bad or missing agent token"}`, http.StatusUnauthorized)
 			return
 		}
-		h.agentHandler(name).ServeHTTP(w, r)
+		h.agentHandler(project, name).ServeHTTP(w, r)
 	})
 }

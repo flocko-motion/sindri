@@ -6,6 +6,19 @@
 //          own (-> the tabs/components).
 package tui
 
+import "path/filepath"
+
+// repoName maps a project's repoTag to its short repo name (its path's basename),
+// falling back to the tag when the project isn't in the board's registry.
+func (m model) repoName(tag string) string {
+	for _, p := range m.state.Projects {
+		if p.Tag == tag {
+			return filepath.Base(p.Path)
+		}
+	}
+	return tag
+}
+
 // row is one selector line: display text + the id it selects ("" = not selectable).
 type row struct {
 	text string

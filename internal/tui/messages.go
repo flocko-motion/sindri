@@ -14,7 +14,13 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-type stateMsg hub.BoardState
+// stateMsg carries a board snapshot from the /events waiter, tagged with the
+// subscription generation it came from — so snapshots (and closes) from a stream
+// abandoned by a repo switch can be ignored.
+type stateMsg struct {
+	st  hub.BoardState
+	gen int
+}
 type logMsg struct {
 	key string
 	evs []store.Event
@@ -45,7 +51,10 @@ type reviewReadyMsg string // the review-workspace path to open a shell in
 // paneLines is how many rows of an agent's tmux scrollback the detail shows.
 const paneLines = 200
 
-type errMsg struct{ err error }      // fatal: hub connection lost
+type errMsg struct {                 // fatal: hub connection lost (unless a stale generation)
+	err error
+	gen int
+}
 type errModalMsg struct{ err error } // non-fatal: show the error modal
 
 // tickMsg drives periodic polling; polledMsg carries a state fetched by a poll

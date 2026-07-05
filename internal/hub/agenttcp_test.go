@@ -10,21 +10,18 @@ import (
 
 // TestAgentTCPChannelAuth exercises the macOS agent channel end to end at the HTTP
 // layer: the listener comes up on loopback, a valid token authenticates and routes
-// into the agent surface, and a missing or bad token is rejected with 401.
+// into the agent surface (resolving to its project+agent), and a missing or bad
+// token is rejected with 401.
 func TestAgentTCPChannelAuth(t *testing.T) {
-	h, err := New(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer h.Close()
-	if err := h.store.PutAgent(store.Agent{Name: "eitri", Role: "coauthor"}); err != nil {
+	h := newHub(t)
+	if err := h.store.For("proj").PutAgent(store.Agent{Name: "eitri", Role: "coauthor"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.serveAgentTCP(); err != nil {
 		t.Fatal(err)
 	}
 	base := fmt.Sprintf("http://127.0.0.1:%d/commands", h.agentTCPPort)
-	tok, _ := h.AgentToken("eitri")
+	tok, _ := h.AgentToken("proj", "eitri")
 
 	do := func(token string) int {
 		req, _ := http.NewRequest("GET", base, nil)
