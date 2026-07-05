@@ -22,10 +22,21 @@ func TestSendTextIsLiteralThenEnter(t *testing.T) {
 }
 
 func TestAttachReadOnly(t *testing.T) {
-	if got := Attach("brokkr", false); !slices.Equal(got, []string{"attach-session", "-t", "brokkr"}) {
+	// Read-write attach carries -d so it evicts any other (incl. orphaned) client
+	// and the human gets sole control.
+	if got := Attach("brokkr", false); !slices.Equal(got, []string{"attach-session", "-t", "brokkr", "-d"}) {
 		t.Fatalf("attach: %q", got)
 	}
+	// Read-only observers use -r and must NOT carry -d — they watch without kicking
+	// the actual driver.
 	if got := Attach("brokkr", true); !slices.Equal(got, []string{"attach-session", "-t", "brokkr", "-r"}) {
 		t.Fatalf("attach -r: %q", got)
+	}
+}
+
+func TestListClients(t *testing.T) {
+	want := []string{"list-clients", "-t", "brokkr", "-F", "#{client_tty} #{client_width} #{client_height} #{client_readonly}"}
+	if got := ListClients("brokkr"); !slices.Equal(got, want) {
+		t.Fatalf("list-clients argv:\n got %q\nwant %q", got, want)
 	}
 }

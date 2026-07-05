@@ -57,10 +57,12 @@ else
 	# session already has it, and it must never be silently dropped, or the agent
 	# would lose its role). Single-quote the command so $() is evaluated by tmux's
 	# shell at session start, not here — the system prompt is multi-line. When
-	# Claude exits, drop into an interactive shell (exec bash) so the session lives
-	# on and a dialed-in human lands at a prompt instead of the pane dying.
+	# Claude exits, `stty sane` restores the line discipline (Claude leaves the
+	# terminal raw with echo off) before we drop into an interactive shell (exec
+	# bash) — otherwise a dialed-in human would type into a shell that never echoes.
+	# The session lives on so they land at a prompt instead of the pane dying.
 	tmux new-session -d -s "$SESSION" \
-		'SP="$(cat /home/sindri/.claude/system-prompt.txt)"; claude --continue --dangerously-skip-permissions --append-system-prompt "$SP" || claude --dangerously-skip-permissions --append-system-prompt "$SP"; exec bash -i'
+		'SP="$(cat /home/sindri/.claude/system-prompt.txt)"; claude --continue --dangerously-skip-permissions --append-system-prompt "$SP" || claude --dangerously-skip-permissions --append-system-prompt "$SP"; stty sane; exec bash -i'
 fi
 
 # Belt-and-suspenders: re-source in case the server was already running.

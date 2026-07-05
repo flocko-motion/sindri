@@ -72,11 +72,11 @@ type model struct {
 	cl     *client.HTTP
 	ch     <-chan hub.BoardState
 	cancel context.CancelFunc // cancels the current /events subscription (re-created on repo switch)
-	gen    int               // subscription generation; bumped on switch so stale /events msgs are ignored
+	gen    int                // subscription generation; bumped on switch so stale /events msgs are ignored
 	root   string             // the selected repo — scopes the Tasks tab and container names
-	state hub.BoardState
-	err   error
-	w, h  int
+	state  hub.BoardState
+	err    error
+	w, h   int
 
 	tab    int
 	cursor [3]int
@@ -90,24 +90,25 @@ type model struct {
 	rightFocus  bool // detail (right) column has focus (h/l switch; j/k move within)
 	rightCursor int  // focused actionable item in the right column
 
-	detailKey  string
-	agentLog   []store.Event
-	agentPane  string // captured tmux screen of the selected agent (live)
-	agentView  string // Agents main pane: "screen" (tmux, default) | "pod" (podman info)
-	agentPod   string // fetched podman pod-info for the selected agent
+	detailKey    string
+	agentLog     []store.Event
+	agentPane    string           // captured tmux screen of the selected agent (live)
+	agentView    string           // Agents main pane: "screen" (tmux, default) | "pod" (podman info)
+	agentPod     string           // fetched podman pod-info for the selected agent
+	agentClients []hub.ClientView // dial-ins attached to the selected agent's session
 	prDetail     hub.PRDetail
 	prView       string // which content the PR big pane shows: "diff" (default) | "lint"
 	reviewPrompt string // editable default review instruction (from the hub)
 	taskDetail   store.Task
-	quit       bool
+	quit         bool
 
 	modalOverride      []string // when set, the detail modal shows these instead of the tab detail
 	modalOverrideTitle string
 
 	mode        inputMode // active text-input modal
 	input       textinput.Model
-	inputTarget string    // selection captured when the modal opened
-	modal       bool      // detail modal (full-screen) is open
+	inputTarget string // selection captured when the modal opened
+	modal       bool   // detail modal (full-screen) is open
 	choice      choiceModalState
 	form        formState // active fill-in form (new/edit task)
 	flash       string    // transient status (e.g. "copied"), cleared on next key
@@ -163,28 +164,6 @@ func waitForState(ch <-chan hub.BoardState, gen int) tea.Cmd {
 	}
 }
 
-func (m model) bodyHeight() int {
-	if h := m.h - 3; h > 0 { // tab strip (1) + footer (2)
-		return h
-	}
-	return 1
-}
-
-func (m model) leftWidth() int {
-	// The Tasks table (gutter + id + type + prio + state + title) needs room, so
-	// give the selector ~60% — clamped so neither pane gets too narrow.
-	w := m.w * 3 / 5
-	return clampInt(w, 28, max(28, m.w-28))
-}
-
-func (m model) detailWidth() int {
-	w := m.w - m.leftWidth() - 1 // 1 for the divider
-	if w < 1 {
-		w = 1
-	}
-	return w
-}
-
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -226,6 +205,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case agentPodMsg:
 		if msg.agent == m.selID() {
 			m.agentPod = msg.text
+		}
+	case clientsMsg:
+		if msg.agent == m.selID() { // ignore a stale fetch from a prior selection
+			m.agentClients = msg.clients
 		}
 	case prLintMsg:
 		if msg.pr == m.selID() { // store the result, switch to the lint view, focus it
@@ -288,8 +271,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-
-
 // modalTitle labels the detail modal for the current selection.
 func (m model) modalTitle() string {
 	switch m.tab {
@@ -301,7 +282,6 @@ func (m model) modalTitle() string {
 		return "PR " + m.selID()
 	}
 }
-
 
 // onKey applies a key (by its string form) — shared by the live loop and the
 // headless Screenshot harness. Mutates the model; returns an optional cmd.
@@ -408,7 +388,7 @@ func (m *model) onKey(k string) tea.Cmd {
 					return nil
 				}
 				if m.cl != nil {
-					return tea.ExecProcess(attachCmd(m.root, a.Name), func(error) tea.Msg { return nil })
+					return tea.ExecProcess(attachCmd(m.agentContainer(a), a.Name), func(error) tea.Msg { return nil })
 				}
 			}
 		}
@@ -543,8 +523,6 @@ func (m *model) onKey(k string) tea.Cmd {
 	return cmd
 }
 
-
-
 // reclamp keeps the active tab's cursor + both viewports in range.
 func (m *model) reclamp() {
 	n := len(m.rows())
@@ -577,8 +555,8 @@ func (m *model) syncDetail() tea.Cmd {
 		return nil
 	}
 	m.detailKey = key
-	m.detail.ScrollTop()  // new selection → show its detail from the top
-	m.rightCursor = 0     // and reset the right-column cursor to its first item
+	m.detail.ScrollTop() // new selection → show its detail from the top
+	m.rightCursor = 0    // and reset the right-column cursor to its first item
 	id := m.selID()
 	if id == "" {
 		return nil
@@ -588,11 +566,12 @@ func (m *model) syncDetail() tea.Cmd {
 	case 0:
 		return func() tea.Msg { t, _ := cl.TaskInfo(id); return taskMsg{id, t} }
 	case 1:
-		m.agentPane, m.agentPod = "", "" // selection changed — drop the previous agent's screen/pod
-		m.agentView = "screen"            // default back to the live screen
+		m.agentPane, m.agentPod, m.agentClients = "", "", nil // selection changed — drop the previous agent's screen/pod/clients
+		m.agentView = "screen"                                // default back to the live screen
 		return tea.Batch(
 			func() tea.Msg { evs, _ := cl.Log(id); return logMsg{id, evs} },
 			paneFetchCmd(cl, id),
+			clientsFetchCmd(cl, id),
 		)
 	default:
 		m.prView = "diff" // new PR → show its diff (its stored lint loads via PRInfo)
@@ -633,7 +612,6 @@ func (m model) selID() string {
 	}
 	return ""
 }
-
 
 // View composes the full-height frame: tab strip, master-detail body, footer.
 func (m model) View() string {
@@ -693,5 +671,3 @@ func (m model) View() string {
 	}
 	return strings.Join([]string{top, body, foot}, "\n")
 }
-
-

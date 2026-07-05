@@ -11,32 +11,40 @@ package hub
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"os"
 	"runtime"
 	"strconv"
 	"time"
+
+	"golang.org/x/term"
 )
 
-// quietPaths are high-frequency reads (UI polling) excluded from the access log
-// so it stays an action log, not a flood.
-var quietPaths = map[string]bool{"/state": true, "/events": true, "/log": true, "/agent/pane": true, "/agent/pod": true}
+// streamingPaths are long-lived by design (SSE): they'd hold an access-log run
+// open for the life of the connection, so they're left out of the log entirely.
+var streamingPaths = map[string]bool{"/events": true}
 
-// logRequests wraps a handler to print one access-log line per request — the
-// hub's window onto every action it executes. label is the socket's owner
-// ("hub" or an agent name).
+// accessLogger coalesces the access log so high-frequency UI polling collapses to
+// counted lines instead of flooding. It writes to os.Stderr — where log(1) and
+// the background hub's redirected hub.log both go — and rewrites lines in place
+// when that's a terminal (foreground hub).
+var accessLogger = newAccessLog(os.Stderr, term.IsTerminal(int(os.Stderr.Fd())))
+
+// logRequests wraps a handler to record one access-log entry per request — the
+// hub's window onto every action it executes. label is the socket's owner ("hub"
+// or an agent name). Entries are coalesced (see accessLog), so a repeated read
+// shows as one counted line rather than being dropped or flooding the log.
 func logRequests(label string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if quietPaths[r.URL.Path] {
+		if streamingPaths[r.URL.Path] {
 			next.ServeHTTP(w, r)
 			return
 		}
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		start := time.Now()
 		next.ServeHTTP(rec, r)
-		log.Printf("%-8s %-4s %-14s %d %s", label, r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Millisecond))
+		accessLogger.record(label, r.Method, r.URL.Path, rec.status, time.Since(start))
 	})
 }
 
@@ -133,6 +141,10 @@ func (h *Hub) Handler() http.Handler {
 	mux.HandleFunc("GET /agent/pod", func(w http.ResponseWriter, r *http.Request) {
 		out, err := h.PodInfo(h.reqProject(r), r.URL.Query().Get("agent"))
 		writeJSON(w, okMsg{out}, err)
+	})
+	mux.HandleFunc("GET /agent/clients", func(w http.ResponseWriter, r *http.Request) {
+		cs, err := h.Clients(h.reqProject(r), r.URL.Query().Get("agent"))
+		writeJSON(w, cs, err)
 	})
 	mux.HandleFunc("POST /agents", func(w http.ResponseWriter, r *http.Request) {
 		var req AgentReq

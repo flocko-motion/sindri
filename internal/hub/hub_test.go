@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/flo-at/sindri/internal/hub/store"
 )
 
 const testProject = "proj"
@@ -50,8 +52,9 @@ func TestEnsureGitignore(t *testing.T) {
 		t.Errorf("expected .worktrees/ once, got %d", c)
 	}
 
-	// Existing entries (any slash form) are respected, not duplicated; .todos stays
-	// untouched (it is tracked). .sindri is no longer written (hub state is central).
+	// Existing entries (any slash form) are respected, not duplicated; .todos/ is
+	// added (a tracked task DB breaks the hub's merge flow). .sindri is no longer
+	// written (hub state is central).
 	root2 := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root2, ".gitignore"), []byte("node_modules\n/.worktrees\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -61,8 +64,8 @@ func TestEnsureGitignore(t *testing.T) {
 	if c := count(string(out), ".worktrees"); c != 1 {
 		t.Errorf("existing /.worktrees should not be duplicated, got %d:\n%s", c, out)
 	}
-	if strings.Contains(string(out), ".todos") {
-		t.Errorf(".todos must not be ignored (it is tracked):\n%s", out)
+	if !strings.Contains(string(out), ".todos") {
+		t.Errorf(".todos/ should be ignored (the hub's merge flow needs a clean tree):\n%s", out)
 	}
 	if strings.Contains(string(out), ".sindri") {
 		t.Errorf(".sindri must not be written (hub state is central now):\n%s", out)
@@ -147,9 +150,81 @@ func TestNewAgentRecordsIdentityAndLog(t *testing.T) {
 	}
 }
 
+// TestEnsureArchitectureDoc: the hub seeds a placeholder ARCHITECTURE.md into a
+// repo that has none (pointing the user at the brokkr baseline), and never
+// overwrites an existing one.
+func TestEnsureArchitectureDoc(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "ARCHITECTURE.md")
+
+	ensureArchitectureDoc(root)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("expected a seeded ARCHITECTURE.md: %v", err)
+	}
+	if !strings.Contains(string(data), "brokkr") {
+		t.Errorf("seed should mention the brokkr linter baseline:\n%s", data)
+	}
+
+	// Idempotent + non-destructive: an existing doc is left untouched.
+	if err := os.WriteFile(path, []byte("# mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ensureArchitectureDoc(root)
+	again, _ := os.ReadFile(path)
+	if string(again) != "# mine\n" {
+		t.Errorf("existing ARCHITECTURE.md must not be overwritten, got:\n%s", again)
+	}
+}
+
+// TestReviewInstructionsCarryArchitecture: both review-instruction paths (pull =
+// dirReview, push = msgReviewAssigned) always tell the reviewer to read the repo's
+// ARCHITECTURE.md.
+func TestReviewInstructionsCarryArchitecture(t *testing.T) {
+	if !strings.Contains(dirReview("pr-1", "td-1"), "ARCHITECTURE.md") {
+		t.Errorf("dirReview must tell the reviewer to read ARCHITECTURE.md")
+	}
+	if !strings.Contains(msgReviewAssigned("pr-1", "req", "br", "base", true), "ARCHITECTURE.md") {
+		t.Errorf("msgReviewAssigned must tell the reviewer to read ARCHITECTURE.md")
+	}
+}
+
 func TestTellUnknownAgent(t *testing.T) {
 	h := newHub(t)
 	if err := h.Tell(testProject, "ghost", "hi", "user"); err == nil {
 		t.Fatalf("telling unknown agent should error")
+	}
+}
+
+// TestApprovePR covers the human approve path: an open PR reaches "approved"
+// without a reviewer agent, approving a non-open PR is refused (the open-only
+// guard, mirroring the reviewer approve), and an unknown PR errors.
+func TestApprovePR(t *testing.T) {
+	h := newHub(t)
+	ps := h.store.For(testProject)
+	if err := ps.PutPR(store.PR{ID: "pr-td-1", Task: "td-1", Agent: "brokkr", Branch: "td-1", Base: "main"}); err != nil {
+		t.Fatalf("put pr: %v", err)
+	}
+
+	// Human approve moves an open PR to approved, no reviewer agent involved.
+	if err := h.ApprovePR(testProject, "pr-td-1"); err != nil {
+		t.Fatalf("approve open PR: %v", err)
+	}
+	pr, ok, err := ps.GetPR("pr-td-1")
+	if err != nil || !ok {
+		t.Fatalf("get pr: ok=%v err=%v", ok, err)
+	}
+	if pr.Status != "approved" {
+		t.Fatalf("status = %q, want approved", pr.Status)
+	}
+
+	// Open-only guard: an already-approved (non-open) PR cannot be re-approved.
+	if err := h.ApprovePR(testProject, "pr-td-1"); err == nil {
+		t.Fatalf("approving a non-open PR should be refused")
+	}
+
+	// Unknown PR errors.
+	if err := h.ApprovePR(testProject, "pr-nope"); err == nil {
+		t.Fatalf("approving an unknown PR should error")
 	}
 }

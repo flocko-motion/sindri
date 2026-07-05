@@ -62,11 +62,29 @@ func ReadPID() (pid int, version string, ok bool) {
 // RemovePID clears the hub's pid file (best-effort, on shutdown).
 func RemovePID() { _ = os.Remove(pidPath()) }
 
-// ProcessAlive reports whether pid is a live process. Signal 0 probes without
-// actually signalling; EPERM means the process exists but isn't ours to signal.
+// ProcessAlive reports whether pid is a live process that could still be serving
+// — not merely one that occupies a slot in the process table. Signal 0 probes
+// existence (EPERM means it exists but isn't ours to signal), but a zombie (a dead
+// child not yet reaped by its parent) also answers signal 0 while being unable to
+// do anything. A zombie hub is a dead hub, so it must not count as alive or it
+// would wedge every restart; we reject it explicitly.
 func ProcessAlive(pid int) bool {
-	err := syscall.Kill(pid, 0)
-	return err == nil || err == syscall.EPERM
+	if err := syscall.Kill(pid, 0); err != nil && err != syscall.EPERM {
+		return false
+	}
+	return !isZombie(pid)
+}
+
+// isZombie reports whether pid is a zombie (defunct): still in the process table,
+// holding its exit status until the parent reaps it, but dead. Best-effort — if we
+// can't read the state we assume it's not a zombie, so we never discard a hub that
+// might be live.
+func isZombie(pid int) bool {
+	out, err := exec.Command("ps", "-o", "state=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(string(out)), "Z")
 }
 
 // HubPID returns the pid of the running hub, preferring the pid file and falling

@@ -23,10 +23,21 @@ import (
 )
 
 // attachCmd builds the interactive `podman exec -it … tmux attach` for an agent.
-// root scopes the container name to this repo.
-func attachCmd(root, name string) *exec.Cmd {
-	args := append([]string{"exec", "-it", hub.Container(root, name), "tmux"}, tmux.Attach(name, false)...)
+// container is the agent's project-resolved pod (from the board), so it's correct
+// for any repo's agent — the board is multi-repo. name is the tmux session.
+func attachCmd(container, name string) *exec.Cmd {
+	args := append([]string{"exec", "-it", container, "tmux"}, tmux.Attach(name, false)...)
 	return exec.Command(pod.Binary, args...)
+}
+
+// agentContainer is the agent's podman container, preferring the board's
+// project-resolved name (correct for any repo) and falling back to the current
+// repo only for an older hub that doesn't report it.
+func (m model) agentContainer(a hub.AgentView) string {
+	if a.Container != "" {
+		return a.Container
+	}
+	return hub.Container(m.root, a.Name)
 }
 
 // openNewAgentChoice opens the worker|reviewer picker for a new agent. The role
@@ -162,7 +173,7 @@ func (m model) agentItems() []metaItem {
 	if a.PR != "" {
 		prIt.kind, prIt.value = "pr", a.PR
 	}
-	pod := "pod:       " + hub.Container(m.root, a.Name)
+	pod := "pod:       " + m.agentContainer(a)
 	if m.agentView == "pod" { // mark which view the main pane is showing
 		pod += dimStyle.Render("  ◂ shown")
 	}
@@ -172,6 +183,9 @@ func (m model) agentItems() []metaItem {
 		taskIt, prIt,
 		{text: "workspace: " + dash(a.Workspace)},
 		{text: pod, kind: "view", value: "pod"},
+	}
+	for _, line := range clientLines(m.agentClients) { // same dial-in detail as `agent info`
+		items = append(items, metaItem{text: line})
 	}
 	items = append(items, metaItem{text: ""}, metaItem{text: dimStyle.Render("── activity ──")})
 	for i := len(m.agentLog) - 1; i >= 0; i-- { // newest-first
@@ -262,12 +276,16 @@ func (m model) agentRows() []row {
 		// Whole row coloured by lifecycle state (grey down, yellow transitioning,
 		// green running); cells styled independently so resets don't bleed.
 		ac := agentStatusStyle(a.Status)
+		task := dash(a.Task)
+		if a.Clients > 0 { // dial-ins attached — show the eye like the CLI list
+			task += fmt.Sprintf("  👁%d", a.Clients)
+		}
 		out = append(out, row{strings.Join([]string{
 			projectStyle(a.Project).Render(fmt.Sprintf("%-10.10s", a.Repo)),
 			ac.Render(fmt.Sprintf("%-9s", a.Status)),
 			ac.Render(fmt.Sprintf("%-12s", a.Name)),
 			ac.Render(fmt.Sprintf("%-8s", a.Role)),
-			ac.Render(dash(a.Task)),
+			ac.Render(task),
 		}, " "), a.Name})
 	}
 	for _, o := range m.state.Orphans {
@@ -295,7 +313,10 @@ func (m model) agentDetailFor(a hub.AgentView) []string {
 		"task:      " + dash(a.Task),
 		"pr:        " + dash(a.PR),
 		"workspace: " + dash(a.Workspace),
-		"pod:       " + hub.Container(m.root, a.Name),
+		"pod:       " + m.agentContainer(a),
+	}
+	if a.Name == m.selID() { // dial-ins are fetched for the selected agent only
+		ls = append(ls, clientLines(m.agentClients)...)
 	}
 	if m.tab == 1 && a.Name == m.selID() {
 		ls = append(ls, "", "── activity ──")
@@ -306,6 +327,17 @@ func (m model) agentDetailFor(a hub.AgentView) []string {
 		}
 	}
 	return ls
+}
+
+// clientLines renders attached dial-ins as detail lines, reusing the hub's shared
+// formatter so the TUI shows exactly what `sindri agent info` prints. Empty when
+// nobody's attached.
+func clientLines(cs []hub.ClientView) []string {
+	s := hub.FormatClients(cs)
+	if s == "" {
+		return nil
+	}
+	return strings.Split(strings.TrimRight(s, "\n"), "\n")
 }
 
 // eventTime renders an activity-log timestamp (stored UTC RFC3339) as a local

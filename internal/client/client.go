@@ -147,6 +147,12 @@ func (c *HTTP) AgentPane(name string, lines int) (string, error) {
 	return ok.Out, err
 }
 
+// Clients returns the humans attached to an agent's tmux session (dial-ins).
+func (c *HTTP) Clients(name string) ([]hub.ClientView, error) {
+	var out []hub.ClientView
+	return out, c.get("/agent/clients?agent="+url.QueryEscape(name), &out)
+}
+
 // PodInfo returns a short summary of an agent's podman container (plain text).
 func (c *HTTP) PodInfo(name string) (string, error) {
 	var ok struct {

@@ -18,8 +18,6 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
-	"github.com/flo-at/sindri/internal/adapter/pod"
-	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/spf13/cobra"
@@ -34,6 +32,7 @@ type backend interface {
 	DeleteAgent(name string) error
 	StopAgent(name string) error
 	AgentPane(name string, lines int) (string, error)
+	Clients(name string) ([]hub.ClientView, error)
 	Launch(name string, shell bool) error
 	Tell(name, msg, source string) error
 	State() (hub.BoardState, error)
@@ -162,207 +161,8 @@ func newHubStartCmd() *cobra.Command {
 
 func newAgentCmd() *cobra.Command {
 	c := &cobra.Command{Use: "agent", Short: "Manage agents (workers, reviewers, planners, coauthors)"}
-	c.AddCommand(agentListCmd(), agentNewCmd(), agentDeleteCmd(), agentPaneCmd(), agentStartCmd(), agentStopCmd(), agentTellCmd(), agentAttachCmd(), agentInfoCmd())
+	c.AddCommand(agentListCmd(), agentNewCmd(), agentDeleteCmd(), agentPaneCmd(), agentStartCmd(), agentStopCmd(), agentRestartCmd(), agentTellCmd(), agentAttachCmd(), agentInfoCmd())
 	return c
-}
-
-func agentListCmd() *cobra.Command {
-	return &cobra.Command{
-		Use: "list", Short: "List agents with their live state", Args: cobra.NoArgs,
-		RunE: func(*cobra.Command, []string) error {
-			return withBackend(func(b backend) error {
-				st, err := b.State()
-				if err != nil {
-					return err
-				}
-				for _, a := range st.Agents {
-					fmt.Printf("%-12s %-8s %-10s %-14s %s\n", a.Name, a.Role, a.Status, dash(a.Task), dash(a.PR))
-				}
-				for _, o := range st.Orphans {
-					fmt.Printf("⚠  orphan: %s — no roster entry; remove with 'podman rm -f %s'\n", o, o)
-				}
-				if len(st.Agents) == 0 && len(st.Orphans) == 0 {
-					fmt.Fprintln(os.Stderr, "no agents — register one with 'sindri agent new <name>'")
-				}
-				return nil
-			})
-		},
-	}
-}
-
-func agentNewCmd() *cobra.Command {
-	var role string
-	c := &cobra.Command{
-		Use: "new [name]", Short: "Register an agent identity (no pod; name optional — auto dwarf name)", Args: cobra.MaximumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			var want string
-			if len(args) == 1 {
-				want = args[0]
-			}
-			return withBackend(func(b backend) error {
-				name, err := b.NewAgent(want, role)
-				if err != nil {
-					return err
-				}
-				fmt.Fprintf(os.Stderr, "registered %s (%s) — start with 'sindri agent start %s'\n", name, role, name)
-				return nil
-			})
-		},
-	}
-	c.Flags().StringVar(&role, "role", "worker", "agent role: worker|reviewer|planner|coauthor")
-	return c
-}
-
-func agentDeleteCmd() *cobra.Command {
-	return &cobra.Command{
-		Use: "delete <name>", Aliases: []string{"rm"}, Short: "Delete an agent (pod, socket, worktree, identity)", Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			return withBackend(func(b backend) error {
-				if err := b.DeleteAgent(args[0]); err != nil {
-					return err
-				}
-				fmt.Fprintf(os.Stderr, "deleted %s\n", args[0])
-				return nil
-			})
-		},
-	}
-}
-
-func agentPaneCmd() *cobra.Command {
-	var lines int
-	c := &cobra.Command{
-		Use: "pane <name>", Short: "Print the agent's live tmux screen (capture-pane)", Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			return withBackend(func(b backend) error {
-				out, err := b.AgentPane(args[0], lines)
-				if err != nil {
-					return err
-				}
-				if out == "" {
-					fmt.Fprintln(os.Stderr, "(no live screen — agent is down)")
-					return nil
-				}
-				fmt.Print(out)
-				return nil
-			})
-		},
-	}
-	c.Flags().IntVarP(&lines, "lines", "n", 40, "rows of scrollback to capture")
-	return c
-}
-
-func agentStartCmd() *cobra.Command {
-	var shell bool
-	c := &cobra.Command{
-		Use: "start <name>", Short: "Start the agent: spin a pod that assumes its identity (runs Claude)", Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			root, err := repoRoot()
-			if err != nil {
-				return err
-			}
-			if !hub.IsRunning() {
-				return fmt.Errorf("no hub running — start one first: 'sindri hub start --bg' (agents need a persistent hub)")
-			}
-			cl, err := dialHub(root)
-			if err != nil {
-				return err
-			}
-			defer cl.Close()
-			if err := cl.Launch(args[0], shell); err != nil {
-				return err
-			}
-			fmt.Fprintf(os.Stderr, "started %s\n", args[0])
-			return nil
-		},
-	}
-	c.Flags().BoolVar(&shell, "shell", false, "run a bare shell instead of Claude (debug/demo)")
-	return c
-}
-
-func agentStopCmd() *cobra.Command {
-	return &cobra.Command{
-		Use: "stop <name>", Short: "Tear down the agent's pod (keeps its identity)", Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			return withBackend(func(b backend) error {
-				if err := b.StopAgent(args[0]); err != nil {
-					return err
-				}
-				fmt.Fprintf(os.Stderr, "stopped %s\n", args[0])
-				return nil
-			})
-		},
-	}
-}
-
-func agentTellCmd() *cobra.Command {
-	return &cobra.Command{
-		Use: "tell <name> <message...>", Short: "Send a message into an agent's session ([user])", Args: cobra.MinimumNArgs(2),
-		RunE: func(_ *cobra.Command, args []string) error {
-			msg := strings.Join(args[1:], " ")
-			return withBackend(func(b backend) error {
-				if err := b.Tell(args[0], msg, "user"); err != nil {
-					return err
-				}
-				fmt.Fprintf(os.Stderr, "delivered to %s\n", args[0])
-				return nil
-			})
-		},
-	}
-}
-
-func agentAttachCmd() *cobra.Command {
-	var ro bool
-	c := &cobra.Command{
-		Use: "attach <name>", Short: "Attach to an agent's live tmux session (out-of-band)", Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			name := args[0]
-			root, err := repoRoot()
-			if err != nil {
-				return err
-			}
-			c := hub.Container(root, name)
-			if !pod.Running(c) {
-				return fmt.Errorf("agent %q is not running", name)
-			}
-			return pod.ExecInteractive(c, append([]string{"tmux"}, tmux.Attach(name, ro)...)...)
-		},
-	}
-	c.Flags().BoolVar(&ro, "read-only", false, "observe without typing")
-	return c
-}
-
-func agentInfoCmd() *cobra.Command {
-	return &cobra.Command{
-		Use: "info <name>", Short: "Show an agent's state and activity timeline", Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			return withBackend(func(b backend) error {
-				st, err := b.State()
-				if err != nil {
-					return err
-				}
-				var found *hub.AgentView
-				for i := range st.Agents {
-					if st.Agents[i].Name == args[0] {
-						found = &st.Agents[i]
-					}
-				}
-				if found == nil {
-					return fmt.Errorf("no such agent %q", args[0])
-				}
-				fmt.Printf("agent:     %s\nrole:      %s\nstatus:    %s\ntask:      %s\npr:        %s\nworkspace: %s\n",
-					found.Name, found.Role, found.Status, dash(found.Task), dash(found.PR), dash(found.Workspace))
-				evs, err := b.Log(args[0])
-				if err != nil {
-					return err
-				}
-				fmt.Println("\nactivity:")
-				for _, e := range evs {
-					fmt.Printf("  %-10s %s\n", e.Type, e.Payload)
-				}
-				return nil
-			})
-		},
-	}
 }
 
 // --- task ---

@@ -81,6 +81,12 @@ func repoTag(root string) string {
 	return hex.EncodeToString(sum[:4]) // 8 hex chars — plenty to separate repos
 }
 
+// RepoTag exposes the per-repo id (AgentView.Project) to host CLIs. State returns
+// agents across every project, so a command scoped to one repo (e.g. coauthor)
+// must filter its rows by RepoTag(root) — matching on the repo basename would
+// collide exactly where repoTag was designed to disambiguate.
+func RepoTag(root string) string { return repoTag(root) }
+
 // repoSlug is the repo's directory name, lowercased and reduced to podman-safe
 // characters, so `podman ps` is eyeballable (the digest disambiguates two repos
 // that share a basename).
@@ -165,14 +171,35 @@ func New() (*Hub, error) {
 func (h *Hub) repo(root string) *store.ProjectStore {
 	tag := repoTag(root)
 	_ = h.store.RegisterProject(tag, root)
-	ensureGitignore(root) // keep .worktrees/ out of the repo's git status
+	ensureGitignore(root)       // keep .worktrees/ out of the repo's git status
+	ensureArchitectureDoc(root) // give the repo a home for the rules reviewers enforce
 	return h.store.For(tag)
 }
 
-// hubIgnores are the git-owned worktrees, kept in the repo but not committed. The
-// hub's own state no longer lives in the repo (it's central under the state dir),
-// and `.todos/` is deliberately NOT ignored — task data is tracked.
-var hubIgnores = []string{".worktrees/"}
+// ensureArchitectureDoc seeds a placeholder ARCHITECTURE.md at the repo root when
+// none exists, so every repo the hub serves gains a home for its architecture
+// rules — the file reviewers are told to read before every verdict. Idempotent and
+// best-effort: it only creates a missing file (never overwrites the project's own
+// doc) and never blocks hub startup, but a write error is reported not swallowed.
+func ensureArchitectureDoc(root string) {
+	path := filepath.Join(root, "ARCHITECTURE.md")
+	if _, err := os.Stat(path); err == nil {
+		return // present already — leave the project's doc alone
+	} else if !os.IsNotExist(err) {
+		return // can't tell (permissions, etc.) — don't risk clobbering
+	}
+	if err := os.WriteFile(path, []byte(architecturePlaceholder), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "hub: WARNING — could not seed %s: %v\n", path, err)
+	}
+}
+
+// hubIgnores are the patterns the hub keeps out of the repo's git: the git-owned
+// agent worktrees, and `.todos/` — the task DB td rewrites on every task change. A
+// tracked task DB dirties the working tree constantly, which breaks the hub's PR
+// merge/rebase (that needs a clean tree), so the hub ignores it: task state is
+// tactical and local, not versioned. (Hub state proper lives centrally under the
+// state dir, not in the repo at all.)
+var hubIgnores = []string{".worktrees/", ".todos/"}
 
 // ensureGitignore appends any missing hub-artifact patterns to the repo's
 // .gitignore (creating it if absent), idempotently — so a fresh project never
@@ -258,6 +285,7 @@ func (h *Hub) Close() error {
 	if h.agentTCPLn != nil {
 		h.agentTCPLn.Close()
 	}
+	accessLogger.Flush() // emit any open access-log run before we go quiet
 	return h.store.Close()
 }
 
@@ -635,4 +663,3 @@ func brokkrBinary() (string, error) {
 	}
 	return "", fmt.Errorf("brokkr binary not found — it ships with sindri ('make install')")
 }
-

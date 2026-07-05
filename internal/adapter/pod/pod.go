@@ -8,6 +8,7 @@
 package pod
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -82,8 +83,16 @@ func Run(o RunOpts) error {
 
 // Exec runs a command inside a pod and returns its combined output.
 func Exec(name string, args ...string) ([]byte, error) {
+	return ExecContext(context.Background(), name, args...)
+}
+
+// ExecContext is Exec bounded by ctx: when ctx is cancelled (e.g. a timeout) the
+// podman process is killed and the call returns promptly, so a wedged container
+// can't stall the caller. Used by the board read, where a stuck exec must degrade
+// to "down" rather than hang every UI.
+func ExecContext(ctx context.Context, name string, args ...string) ([]byte, error) {
 	full := append([]string{"exec", name}, args...)
-	out, err := exec.Command(Binary, full...).CombinedOutput()
+	out, err := exec.CommandContext(ctx, Binary, full...).CombinedOutput()
 	if err != nil {
 		return out, fmt.Errorf("podman exec %s: %s: %w", name, strings.TrimSpace(string(out)), err)
 	}
@@ -206,7 +215,14 @@ func lastLine(s string) string {
 
 // Running reports whether a container exists and is running.
 func Running(name string) bool {
-	out, err := exec.Command(Binary, "inspect", "-f", "{{.State.Running}}", name).Output()
+	return RunningContext(context.Background(), name)
+}
+
+// RunningContext is Running bounded by ctx: on cancellation the podman process is
+// killed and it reports false, so a stalled inspect degrades to "down" instead of
+// blocking the board read.
+func RunningContext(ctx context.Context, name string) bool {
+	out, err := exec.CommandContext(ctx, Binary, "inspect", "-f", "{{.State.Running}}", name).Output()
 	return err == nil && strings.TrimSpace(string(out)) == "true"
 }
 
@@ -241,10 +257,11 @@ func Rm(name string) error {
 	return nil
 }
 
-// ListByLabel returns the names of containers (running or stopped) carrying
-// label=value — used to find sindri pods for orphan detection.
-func ListByLabel(label, value string) ([]string, error) {
-	out, err := exec.Command(Binary, "ps", "-a",
+// ListByLabelContext returns the names of containers (running or stopped)
+// carrying label=value — used to find sindri pods for orphan detection. Bounded
+// by ctx so orphan detection can't stall the board read.
+func ListByLabelContext(ctx context.Context, label, value string) ([]string, error) {
+	out, err := exec.CommandContext(ctx, Binary, "ps", "-a",
 		"--filter", "label="+label+"="+value, "--format", "{{.Names}}").Output()
 	if err != nil {
 		return nil, fmt.Errorf("podman ps: %w", err)

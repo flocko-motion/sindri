@@ -37,6 +37,13 @@ automatically** before merging.
   free of task-tracker churn. `git add -A` stays honest: if `.todos/` ever did
   appear in a worktree, it would surface (a loud merge failure), not be silently
   dropped.
+- **`.todos/` is gitignored.** The hub adds `.todos/` (alongside `.worktrees/`) to
+  every repo's `.gitignore`, so the constantly-rewritten task DB can never be
+  committed — closing the collision at the root, even for a branch created before
+  td-isolation or a stray in-tree write. Task state is tactical and local; the
+  shared, durable work lives in `openspec/`, which stays tracked. (Existing repos
+  with `.todos/` already committed must untrack it once — `git rm -r --cached
+  .todos/`, files stay on disk.)
 
 ## Capabilities
 
@@ -49,13 +56,16 @@ automatically** before merging.
 - `04-workers`: the agent pod has no direct task-tracker access — `td` is not in
   the image; task state is reached only via the hub, keeping `.todos/` out of
   agent branches.
+- `hub`: the hub gitignores `.todos/` (with `.worktrees/`) in every repo it
+  serves, so a tracked task DB can't dirty the tree or collide at merge time.
 
 ## Impact
 
 - **Source of truth:** `internal/adapter/git/git.go` (`RebaseOnto`; `CommitAll`
   stays `git add -A`), `internal/hub/workflow_pr.go` (`Merge` rebases then routes
   conflicts back via `reject`), `internal/container/image.go` and
-  `container/Dockerfile` (drop `td` from the image).
+  `container/Dockerfile` (drop `td` from the image), `internal/hub/hub.go`
+  (`hubIgnores` gains `.todos/`).
 - **Caveat:** branches created before the isolation fix may still carry a
   `.todos/` commit in their history and can still collide on merge — recreate or
   redo those.
