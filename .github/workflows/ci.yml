@@ -1,0 +1,39 @@
+name: ci
+
+# The merge gate for master: run the Go test suite and the lint gate (make
+# verify) on every PR, so nothing lands on master that fails `make verify` or the
+# tests. Also runs on push to master as a post-merge safety net.
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+# Bundled tools some tests/linters expect on PATH (mirrors release.yml).
+env:
+  TD_VERSION: v0.45.0
+  YQ_VERSION: v4.53.3
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 'stable' = the latest released Go, so scripts/check-go.sh (which demands
+      # the current toolchain for the linters) is satisfied.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Stage bundled tools (td, yq) onto PATH
+        run: |
+          go install "github.com/marcus/td@${TD_VERSION}"
+          go install "github.com/mikefarah/yq/v4@${YQ_VERSION}"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Test
+        run: make test
+
+      - name: Lint gate (make verify)
+        run: make verify
