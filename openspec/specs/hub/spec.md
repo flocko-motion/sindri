@@ -312,7 +312,8 @@ with every per-repo row tagged by a project key (`repoTag`, a stable digest of t
 repo's absolute path). Agent identity SHALL be unique per `(project, name)`, so the
 same agent name MAY exist in different repos. The hub SHALL NOT write any state into
 the repositories it serves; a repo's only sindri-related on-disk content is
-git-owned worktrees and td's own `.todos/`.
+git-owned worktrees and td's own `.todos/` — both gitignored by the hub, never
+committed.
 
 #### Scenario: Same agent name in two repos
 
