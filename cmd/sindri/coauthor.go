@@ -48,11 +48,12 @@ func newCoauthorCmd() *cobra.Command {
 			}
 			defer cl.Close()
 
-			name, err := ensureCoauthor(cl)
+			proj := hub.RepoTag(root)
+			name, err := ensureCoauthor(cl, proj)
 			if err != nil {
 				return err
 			}
-			if err := ensureCoauthorAlive(cl, name); err != nil {
+			if err := ensureCoauthorAlive(cl, proj, name); err != nil {
 				return err
 			}
 			fmt.Fprintf(os.Stderr, "attaching to %s — detach with your tmux prefix then d\n", name)
@@ -61,15 +62,18 @@ func newCoauthorCmd() *cobra.Command {
 	}
 }
 
-// ensureCoauthor returns the existing coauthor agent's name, creating one (auto
-// dwarf-named) when there isn't one yet.
-func ensureCoauthor(cl *client.HTTP) (string, error) {
+// ensureCoauthor returns this project's coauthor agent's name, creating one (auto
+// dwarf-named) when there isn't one yet. State lists agents across every project,
+// so it must match on proj (the current repo's tag) — otherwise it would adopt a
+// coauthor from another repo and then try to attach to a container that, under
+// this repo's name scheme, doesn't exist.
+func ensureCoauthor(cl *client.HTTP, proj string) (string, error) {
 	st, err := cl.State()
 	if err != nil {
 		return "", err
 	}
 	for _, a := range st.Agents {
-		if a.Role == "coauthor" {
+		if a.Role == "coauthor" && a.Project == proj {
 			return a.Name, nil
 		}
 	}
@@ -86,12 +90,12 @@ func ensureCoauthor(cl *client.HTTP) (string, error) {
 // tmux session is live, so the attach lands on a running pod. The first launch
 // also builds the agent image, which can take a few minutes (Launch blocks for
 // it); a coauthor that's already running is reattached without relaunching.
-func ensureCoauthorAlive(cl *client.HTTP, name string) error {
+func ensureCoauthorAlive(cl *client.HTTP, proj, name string) error {
 	st, err := cl.State()
 	if err != nil {
 		return err
 	}
-	if statusOf(st, name) == "down" {
+	if statusOf(st, proj, name) == "down" {
 		fmt.Fprintf(os.Stderr, "launching agent '%s' (first run builds the agent image — may take a few minutes)…\n", name)
 		if err := cl.Launch(name, false); err != nil {
 			return err
@@ -102,7 +106,7 @@ func ensureCoauthorAlive(cl *client.HTTP, name string) error {
 		if err != nil {
 			return err
 		}
-		switch statusOf(st, name) {
+		switch statusOf(st, proj, name) {
 		case "", "down", "launching", "stopping":
 			time.Sleep(100 * time.Millisecond)
 		default: // a running phase (collab/idle/…): the session is alive
@@ -113,9 +117,10 @@ func ensureCoauthorAlive(cl *client.HTTP, name string) error {
 }
 
 // statusOf returns the named agent's status word from a board snapshot, or "".
-func statusOf(st hub.BoardState, name string) string {
+// Matches on project too: agent names are unique per project, not globally.
+func statusOf(st hub.BoardState, proj, name string) string {
 	for _, a := range st.Agents {
-		if a.Name == name {
+		if a.Project == proj && a.Name == name {
 			return a.Status
 		}
 	}

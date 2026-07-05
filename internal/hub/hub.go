@@ -81,6 +81,12 @@ func repoTag(root string) string {
 	return hex.EncodeToString(sum[:4]) // 8 hex chars — plenty to separate repos
 }
 
+// RepoTag exposes the per-repo id (AgentView.Project) to host CLIs. State returns
+// agents across every project, so a command scoped to one repo (e.g. coauthor)
+// must filter its rows by RepoTag(root) — matching on the repo basename would
+// collide exactly where repoTag was designed to disambiguate.
+func RepoTag(root string) string { return repoTag(root) }
+
 // repoSlug is the repo's directory name, lowercased and reduced to podman-safe
 // characters, so `podman ps` is eyeballable (the digest disambiguates two repos
 // that share a basename).
