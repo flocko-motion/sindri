@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/flo-at/sindri/internal/hub/store"
 )
 
 const testProject = "proj"
@@ -151,5 +153,38 @@ func TestTellUnknownAgent(t *testing.T) {
 	h := newHub(t)
 	if err := h.Tell(testProject, "ghost", "hi", "user"); err == nil {
 		t.Fatalf("telling unknown agent should error")
+	}
+}
+
+// TestApprovePR covers the human approve path: an open PR reaches "approved"
+// without a reviewer agent, approving a non-open PR is refused (the open-only
+// guard, mirroring the reviewer approve), and an unknown PR errors.
+func TestApprovePR(t *testing.T) {
+	h := newHub(t)
+	ps := h.store.For(testProject)
+	if err := ps.PutPR(store.PR{ID: "pr-td-1", Task: "td-1", Agent: "brokkr", Branch: "td-1", Base: "main"}); err != nil {
+		t.Fatalf("put pr: %v", err)
+	}
+
+	// Human approve moves an open PR to approved, no reviewer agent involved.
+	if err := h.ApprovePR(testProject, "pr-td-1"); err != nil {
+		t.Fatalf("approve open PR: %v", err)
+	}
+	pr, ok, err := ps.GetPR("pr-td-1")
+	if err != nil || !ok {
+		t.Fatalf("get pr: ok=%v err=%v", ok, err)
+	}
+	if pr.Status != "approved" {
+		t.Fatalf("status = %q, want approved", pr.Status)
+	}
+
+	// Open-only guard: an already-approved (non-open) PR cannot be re-approved.
+	if err := h.ApprovePR(testProject, "pr-td-1"); err == nil {
+		t.Fatalf("approving a non-open PR should be refused")
+	}
+
+	// Unknown PR errors.
+	if err := h.ApprovePR(testProject, "pr-nope"); err == nil {
+		t.Fatalf("approving an unknown PR should error")
 	}
 }

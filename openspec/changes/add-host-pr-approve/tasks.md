@@ -10,7 +10,7 @@
       `pr merge` / `pr reject`, calling the new hub method.
 - [x] 1.3 Add a client method `ApprovePR` in `internal/client/client.go`
       (+ `POST /pr/approve` route) so the TUI and CLI share one path.
-- [ ] 1.4 Add a human-approve action to the TUI PRs tab (`internal/tui/tab_prs.go`,
+- [x] 1.4 Add a human-approve action to the TUI PRs tab (`internal/tui/tab_prs.go`,
       `internal/tui/tui.go`) on its own key, distinct from the existing `A`
       "request an agentic review"; update the PRs footer hint to list it.
 
