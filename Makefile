@@ -63,7 +63,9 @@ screenshot: ## render the TUI headlessly (mock data) to eyeball its layout
 seed: ## seed a mock task hierarchy into the current repo's td store
 	./scripts/seed.sh
 
-verify: check-go brokkr ## run the linters (deadcode, loc, comments, openspec) — the quality gate
+verify: check-go brokkr ## build + test + lint (deadcode, loc, comments, openspec) — the quality gate
+	go build ./...
+	go test ./...
 	./bin/brokkr lint
 
 lint: verify ## alias for verify

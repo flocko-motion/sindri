@@ -41,6 +41,10 @@ type agentPodMsg struct {
 	agent string
 	text  string
 }
+type clientsMsg struct {
+	agent   string
+	clients []hub.ClientView
+}
 type prLintMsg struct {
 	pr   string
 	text string
@@ -51,7 +55,7 @@ type reviewReadyMsg string // the review-workspace path to open a shell in
 // paneLines is how many rows of an agent's tmux scrollback the detail shows.
 const paneLines = 200
 
-type errMsg struct {                 // fatal: hub connection lost (unless a stale generation)
+type errMsg struct { // fatal: hub connection lost (unless a stale generation)
 	err error
 	gen int
 }

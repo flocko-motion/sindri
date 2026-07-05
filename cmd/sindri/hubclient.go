@@ -91,12 +91,26 @@ func restartHub(pid int) error {
 
 // ensureHubRunning starts the detached background hub when none is running, so
 // commands like `coauthor` and `tui` just work without a manual `hub start`. A
-// running hub is left as-is (reconcileHubVersion handles a stale one).
+// running hub is left as-is (reconcileHubVersion handles a stale one). It narrates
+// each step — probe, health check, any stale record — so a failed start isn't a
+// mystery.
 func ensureHubRunning() error {
+	fmt.Fprint(os.Stderr, "looking for a running hub… ")
 	if hub.IsRunning() {
+		fmt.Fprintln(os.Stderr, "found one, answering its socket.")
 		return nil
 	}
-	fmt.Fprintln(os.Stderr, "no hub running…")
+	fmt.Fprintln(os.Stderr, "none answering.")
+	// Nothing is serving the socket. A leftover pid record is common — a hub that
+	// died or was killed without cleaning up (including a zombie held by its
+	// parent). Say what we find so the restart is transparent.
+	if pid, _, ok := hub.ReadPID(); ok {
+		if hub.ProcessAlive(pid) {
+			fmt.Fprintf(os.Stderr, "a hub (pid %d) is recorded and alive but not answering — it may be hung; will try to start a fresh one.\n", pid)
+		} else {
+			fmt.Fprintf(os.Stderr, "found a stale hub record (pid %d, no longer serving); replacing it.\n", pid)
+		}
+	}
 	return startHub()
 }
 
@@ -109,7 +123,7 @@ func startHub() error {
 	if err != nil {
 		return fmt.Errorf("locate the sindri binary: %w", err)
 	}
-	fmt.Fprintln(os.Stderr, "starting the hub in the background…")
+	fmt.Fprintln(os.Stderr, "starting a new hub in the background…")
 	if err := os.MkdirAll(paths.StateDir(), 0o755); err != nil {
 		return err
 	}
@@ -125,15 +139,41 @@ func startHub() error {
 	if err := c.Start(); err != nil {
 		return fmt.Errorf("start hub: %w", err)
 	}
+	pid := c.Process.Pid
 	_ = c.Process.Release()
+	fmt.Fprint(os.Stderr, "waiting for it to answer the health check…")
 	for i := 0; i < 100; i++ { // ~10s for the socket to come up
 		if hub.IsRunning() {
-			fmt.Fprintf(os.Stderr, "hub up (log: %s)\n", logPath)
+			fmt.Fprintf(os.Stderr, " up (pid %d, log: %s)\n", pid, logPath)
 			return nil
+		}
+		// Fast-fail: if the detached process already exited it will never answer,
+		// so stop waiting and report why instead of burning the full 10s.
+		if !hub.ProcessAlive(pid) {
+			fmt.Fprintln(os.Stderr, " it exited.")
+			return fmt.Errorf("hub failed to start: %s (see %s)", lastLogLine(logPath), logPath)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return fmt.Errorf("hub did not come up within 10s — see %s", logPath)
+	fmt.Fprintln(os.Stderr, " timed out.")
+	return fmt.Errorf("hub did not come up within 10s: %s (see %s)", lastLogLine(logPath), logPath)
+}
+
+// lastLogLine returns the last non-empty line of the hub log, so a failed start
+// surfaces the hub's own error (e.g. "a hub is already running") instead of just
+// pointing at a file. Falls back to a hint when the log can't be read.
+func lastLogLine(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "no log output"
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if s := strings.TrimSpace(lines[i]); s != "" {
+			return s
+		}
+	}
+	return "no log output"
 }
 
 // promptYesNo asks q on stderr and reads a yes/no answer from stdin (default yes).

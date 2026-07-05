@@ -59,6 +59,15 @@ func logFetchCmd(cl *client.HTTP, agent string) tea.Cmd {
 	}
 }
 
+// clientsFetchCmd fetches the humans attached to an agent's tmux session, so the
+// detail view shows the same dial-ins as the CLI's `agent info`.
+func clientsFetchCmd(cl *client.HTTP, agent string) tea.Cmd {
+	return func() tea.Msg {
+		cs, _ := cl.Clients(agent)
+		return clientsMsg{agent, cs}
+	}
+}
+
 // agentLiveCmds refetches the selected agent's log + screen so they stay live on
 // every board update while on the Agents tab (e.g. a freshly-logged launch).
 func (m model) agentLiveCmds() tea.Cmd {
@@ -69,7 +78,7 @@ func (m model) agentLiveCmds() tea.Cmd {
 	if id == "" {
 		return nil
 	}
-	cmds := []tea.Cmd{logFetchCmd(m.cl, id), paneFetchCmd(m.cl, id)}
+	cmds := []tea.Cmd{logFetchCmd(m.cl, id), paneFetchCmd(m.cl, id), clientsFetchCmd(m.cl, id)}
 	if m.agentView == "pod" { // keep the pod view live too
 		cmds = append(cmds, podFetchCmd(m.cl, id))
 	}

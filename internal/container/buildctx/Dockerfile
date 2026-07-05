@@ -115,6 +115,11 @@ RUN useradd -m -s /bin/bash sindri
 COPY yazi.sh /etc/sindri/yazi.sh
 RUN echo '. /etc/sindri/yazi.sh' >> /home/sindri/.bashrc
 
+# `claude` wrapper that resets the terminal on exit, so a dialed-in human always
+# has echo in the fallback shell (see shell.sh). Sourced by interactive shells.
+COPY shell.sh /etc/sindri/shell.sh
+RUN echo '. /etc/sindri/shell.sh' >> /home/sindri/.bashrc
+
 USER sindri
 ENV GOMODCACHE=/home/sindri/go/pkg/mod
 # UTF-8 locale so Claude's box-drawing/bullet glyphs render instead of "_"

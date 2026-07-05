@@ -9,7 +9,10 @@ package hub
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,6 +40,20 @@ type AgentView struct {
 	Branch    string `json:"branch"`
 	PR        string `json:"pr"`
 	Workspace string `json:"workspace"` // the agent's git worktree path (repo-relative)
+	Clients   int    `json:"clients"`   // humans attached to its tmux session (dial-ins)
+	Container string `json:"container"` // podman container name (project-resolved, so cross-repo callers target the right pod)
+}
+
+// ClientView is one human attached to an agent's tmux session — a live dial-in.
+// Surfaced so the UIs can show who's watching and whether they can type (a
+// read-only client observes but can't send keys). An orphaned client (a dropped
+// `podman exec` that left its tmux attach behind) shows up here too, which is how
+// a session that "sees but can't type" becomes visible instead of mysterious.
+type ClientView struct {
+	TTY      string `json:"tty"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	ReadOnly bool   `json:"read_only"`
 }
 
 // BoardState is the whole board in one payload. Agents and PRs are global (across
@@ -71,16 +88,25 @@ func (h *Hub) State(selected string) (BoardState, error) {
 
 	// Liveness needs a podman round-trip per agent (inspect + a tmux exec); probe
 	// every agent concurrently and time-bounded, so one wedged pod slows the read
-	// by at most probeTimeout instead of serialising all of them.
+	// by at most probeTimeout instead of serialising all of them. The same
+	// list-clients probe that confirms the session is up also yields the dial-in
+	// count, so the board shows who's attached at no extra cost.
 	var wg sync.WaitGroup
 	running := make([]bool, len(agentsRow))
+	clients := make([]int, len(agentsRow))
 	for i, a := range agentsRow {
 		wg.Add(1)
 		go func(i int, a store.Agent) {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
 			defer cancel()
-			running[i] = h.agentAliveCtx(ctx, a.Project, a.Name)
+			if !pod.RunningContext(ctx, h.container(a.Project, a.Name)) {
+				return
+			}
+			if cs, ok := h.clientsCtx(ctx, a.Project, a.Name); ok {
+				running[i] = true
+				clients[i] = len(cs)
+			}
 		}(i, a)
 	}
 	wg.Wait()
@@ -88,12 +114,14 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	known := map[string]bool{}
 	agents := make([]AgentView, 0, len(agentsRow))
 	for i, a := range agentsRow {
-		known[h.container(a.Project, a.Name)] = true
+		container := h.container(a.Project, a.Name)
+		known[container] = true
 		st, _ := h.store.For(a.Project).GetState(a.Name)
 		agents = append(agents, AgentView{
 			Project: a.Project, Repo: h.repoName(a.Project), Name: a.Name, Role: a.Role,
 			Status: h.agentStatus(a.Project, a.Name, running[i], st.Phase),
 			Task:   st.Task, Branch: st.Branch, PR: openPRFor(prs, a.Project, a.Name), Workspace: a.Workspace,
+			Clients: clients[i], Container: container,
 		})
 	}
 
@@ -155,6 +183,63 @@ func (h *Hub) agentAlive(project, name string) bool {
 // pod times out to "down" instead of blocking. Used by the board read.
 func (h *Hub) agentAliveCtx(ctx context.Context, project, name string) bool {
 	return pod.RunningContext(ctx, h.container(project, name)) && h.sessionAliveCtx(ctx, project, name)
+}
+
+// Clients lists the humans attached to an agent's tmux session (dial-ins). Errors
+// when the agent isn't running. The headless read behind both `agent info` and the
+// TUI detail view, so they show the same thing.
+func (h *Hub) Clients(project, name string) ([]ClientView, error) {
+	cs, ok := h.clientsCtx(context.Background(), project, name)
+	if !ok {
+		return nil, fmt.Errorf("agent %q is not running", name)
+	}
+	return cs, nil
+}
+
+// clientsCtx parses `tmux list-clients` for the agent's session, bounded by ctx.
+// ok=false when the session is absent (so it also serves as a liveness probe).
+func (h *Hub) clientsCtx(ctx context.Context, project, name string) (cs []ClientView, ok bool) {
+	out, err := pod.ExecContext(ctx, h.container(project, name), append([]string{"tmux"}, tmux.ListClients(name)...)...)
+	if err != nil {
+		return nil, false
+	}
+	return parseClients(string(out)), true
+}
+
+// parseClients turns list-clients output (one "tty width height readonly" line per
+// client) into ClientViews. Malformed lines are skipped rather than failing the
+// whole read.
+func parseClients(out string) []ClientView {
+	var cs []ClientView
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 4 {
+			continue
+		}
+		w, _ := strconv.Atoi(f[1])
+		ht, _ := strconv.Atoi(f[2])
+		cs = append(cs, ClientView{TTY: f[0], Width: w, Height: ht, ReadOnly: f[3] == "1"})
+	}
+	return cs
+}
+
+// FormatClients renders attached clients for a human — shared by the CLI's
+// `agent info` and the TUI detail view so both read identically. Empty when
+// nobody's attached.
+func FormatClients(cs []ClientView) string {
+	if len(cs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "clients:   %d attached\n", len(cs))
+	for _, c := range cs {
+		mode := "read-write"
+		if c.ReadOnly {
+			mode = "read-only"
+		}
+		fmt.Fprintf(&b, "  %s  %dx%d  %s\n", c.TTY, c.Width, c.Height, mode)
+	}
+	return b.String()
 }
 
 // sessionAlive reports whether the agent's tmux session is up inside its pod.

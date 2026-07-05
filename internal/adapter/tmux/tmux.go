@@ -19,14 +19,29 @@ func SendText(session, text string) [][]string {
 	}
 }
 
-// Attach builds `tmux attach-session -t <session>` (+ -r for read-only) — the
-// human dial-in.
+// Attach builds `tmux attach-session -t <session>` — the human dial-in. readOnly
+// adds -r (observe without typing). A read-write attach instead adds -d, which
+// detaches every other client on the way in: these agent sessions are single-
+// driver (the hub injects via send-keys, not a client), and a dropped `podman
+// exec` can leave an orphaned client wedged on a dead pty — sharing the session
+// with it is what makes a fresh attach "see it but can't type". -d evicts it so
+// the human always gets sole, clean control. Read-only observers skip -d so they
+// don't kick the actual driver.
 func Attach(session string, readOnly bool) []string {
 	args := []string{"attach-session", "-t", session}
 	if readOnly {
-		args = append(args, "-r")
+		return append(args, "-r")
 	}
-	return args
+	return append(args, "-d")
+}
+
+// ListClients builds `tmux list-clients -t <session> -F <fmt>`, one line per
+// client currently attached to the session: tty, width, height, and readonly
+// (0/1), space-separated (a tty never contains spaces). Callers use it both to
+// count attachers and to describe them; it also errors when the session is
+// absent, so it doubles as a liveness probe.
+func ListClients(session string) []string {
+	return []string{"list-clients", "-t", session, "-F", "#{client_tty} #{client_width} #{client_height} #{client_readonly}"}
 }
 
 // HasSession builds `tmux has-session -t <session>` — exits 0 iff the session

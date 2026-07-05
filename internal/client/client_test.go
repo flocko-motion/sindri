@@ -10,6 +10,13 @@ import (
 	"github.com/flo-at/sindri/internal/hub"
 )
 
+// testTimeout bounds the waits for the hub to come up and for an event to arrive.
+// It's deliberately generous: a correct hub isn't slower under load, only later-
+// scheduled, so a tight wall-clock deadline produces false failures on a busy
+// machine (e.g. running the suite while agents work in parallel). Big enough to
+// absorb scheduling starvation, small enough to still fail a genuine hang.
+const testTimeout = 30 * time.Second
+
 // serveTestHub starts a global hub isolated under a temp SINDRI_HOME (so its socket
 // and state don't collide with the real hub or other tests) and waits for it.
 func serveTestHub(t *testing.T) *hub.Hub {
@@ -21,7 +28,7 @@ func serveTestHub(t *testing.T) *hub.Hub {
 	}
 	t.Cleanup(func() { h.Close() })
 	go h.Serve()
-	for deadline := time.Now().Add(2 * time.Second); !hub.IsRunning(); {
+	for deadline := time.Now().Add(testTimeout); !hub.IsRunning(); {
 		if time.Now().After(deadline) {
 			t.Fatal("hub never came up")
 		}
@@ -47,7 +54,7 @@ func TestWatchStreamsChanges(t *testing.T) {
 	if _, err := cl.NewAgent("brokkr", "worker"); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(testTimeout)
 	for {
 		select {
 		case st := <-ch:
