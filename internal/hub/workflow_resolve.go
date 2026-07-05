@@ -39,9 +39,17 @@ func (h *Hub) cmdResolve(c registry.Caller, _ []string, out io.Writer) (int, err
 	if err != nil {
 		return 1, err
 	}
+	inProgress := git.RebaseInProgress(wt)
+	// A rebase needs a clean worktree. If the worker has uncommitted work (and isn't
+	// mid-resolution, where the edits ARE the resolution), tell it to commit first —
+	// don't touch its changes.
+	if !inProgress && git.HasChanges(wt) {
+		fmt.Fprintln(out, "you have uncommitted changes — run `sindri submit` (or commit) first, then check with `sindri resolve`")
+		return 1, nil
+	}
 	var conflicts []string
 	var done bool
-	if git.RebaseInProgress(wt) { // a resolution already underway — advance it
+	if inProgress { // a resolution already underway — advance it
 		conflicts, done, err = git.RebaseContinue(wt)
 	} else {
 		conflicts, done, err = git.RebaseStart(wt, st.Branch, base)
@@ -49,18 +57,15 @@ func (h *Hub) cmdResolve(c registry.Caller, _ []string, out io.Writer) (int, err
 	if err != nil {
 		return 1, err // internal git failure — AgentExec sanitizes it for the agent
 	}
-	keep := func(phase string) {
-		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: phase})
-	}
 	if !done {
-		keep("resolving")
+		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "resolving"})
 		_ = ps.Log(c.Agent, "resolve", "conflicts: "+strings.Join(conflicts, ", "))
 		fmt.Fprintln(out, replyResolveConflicts(base, conflicts))
 		return 0, nil
 	}
-	// Clean. If we were resolving a conflict, the branch changed — renew the PR so
-	// the reviewer re-reviews before the human merges. A proactive resolve from a
-	// still-current branch just reports "up to date".
+	// Clean. Only a completed *conflict* resolution changed the branch and needs the
+	// PR renewed for re-review; a proactive check on an already-current branch leaves
+	// the phase (working/submitted) untouched.
 	if st.Phase == "resolving" {
 		if pr, ok, _ := ps.GetPR("pr-" + st.Task); ok {
 			pr.Status, pr.Feedback = "open", ""
@@ -68,11 +73,11 @@ func (h *Hub) cmdResolve(c registry.Caller, _ []string, out io.Writer) (int, err
 			_ = ps.LogPR(pr.ID, "renewed", "rebased clean onto "+base)
 			h.notifyReviewers(c.Project, pr.ID, c.Agent)
 		}
+		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "submitted"})
 		fmt.Fprintln(out, replyResolvedClean(base))
-	} else {
-		fmt.Fprintln(out, replyAlreadyCurrent(base))
+		h.notify()
+		return 0, nil
 	}
-	keep("submitted")
-	h.notify()
+	fmt.Fprintln(out, replyAlreadyCurrent(base))
 	return 0, nil
 }

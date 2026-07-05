@@ -44,8 +44,9 @@ func (h *Hub) registry() *registry.Registry {
 		registry.Command{Name: "lint", Help: "run the quality gate: lint (your workspace) or lint <pr-id> (a PR)", Run: h.cmdLint},
 		registry.Command{Name: "submit", Help: "request your branch be merged: submit [message]", Roles: []string{"worker"},
 			Hidden: func(c registry.Caller) bool { return !c.HasTask || c.InContainer || c.Phase == "resolving" }, Run: h.cmdSubmit},
-		registry.Command{Name: "resolve", Help: "bring your branch current with its base and resolve any merge conflicts: resolve", Roles: []string{"worker"},
-			Hidden: func(c registry.Caller) bool { return c.Phase != "submitted" && c.Phase != "resolving" }, Run: h.cmdResolve},
+		// Always available to a worker — checking whether your branch still merges (and
+		// resolving it if not) does no harm and is useful at any time.
+		registry.Command{Name: "resolve", Help: "check your branch still merges onto its base, and resolve any conflicts: resolve", Roles: []string{"worker"}, Run: h.cmdResolve},
 		registry.Command{Name: "checkpoint", Help: "commit the current subtask and move to the next: checkpoint [message]", Roles: []string{"worker"},
 			Hidden: func(c registry.Caller) bool { return !c.InContainer }, Run: h.cmdCheckpoint},
 		registry.Command{Name: "task", Help: "read the backlog: task list (all) or task <id> (full detail)", Roles: []string{"planner"}, Run: h.cmdTasks},
