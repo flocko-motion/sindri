@@ -149,6 +149,45 @@ func TestNewAgentRecordsIdentityAndLog(t *testing.T) {
 	}
 }
 
+// TestEnsureArchitectureDoc: the hub seeds a placeholder ARCHITECTURE.md into a
+// repo that has none (pointing the user at the brokkr baseline), and never
+// overwrites an existing one.
+func TestEnsureArchitectureDoc(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "ARCHITECTURE.md")
+
+	ensureArchitectureDoc(root)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("expected a seeded ARCHITECTURE.md: %v", err)
+	}
+	if !strings.Contains(string(data), "brokkr") {
+		t.Errorf("seed should mention the brokkr linter baseline:\n%s", data)
+	}
+
+	// Idempotent + non-destructive: an existing doc is left untouched.
+	if err := os.WriteFile(path, []byte("# mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ensureArchitectureDoc(root)
+	again, _ := os.ReadFile(path)
+	if string(again) != "# mine\n" {
+		t.Errorf("existing ARCHITECTURE.md must not be overwritten, got:\n%s", again)
+	}
+}
+
+// TestReviewInstructionsCarryArchitecture: both review-instruction paths (pull =
+// dirReview, push = msgReviewAssigned) always tell the reviewer to read the repo's
+// ARCHITECTURE.md.
+func TestReviewInstructionsCarryArchitecture(t *testing.T) {
+	if !strings.Contains(dirReview("pr-1", "td-1"), "ARCHITECTURE.md") {
+		t.Errorf("dirReview must tell the reviewer to read ARCHITECTURE.md")
+	}
+	if !strings.Contains(msgReviewAssigned("pr-1", "req", "br", "base", true), "ARCHITECTURE.md") {
+		t.Errorf("msgReviewAssigned must tell the reviewer to read ARCHITECTURE.md")
+	}
+}
+
 func TestTellUnknownAgent(t *testing.T) {
 	h := newHub(t)
 	if err := h.Tell(testProject, "ghost", "hi", "user"); err == nil {

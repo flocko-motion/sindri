@@ -1,17 +1,46 @@
 // package: hub / prompts
 // type:    logic (every agent-facing string in one place)
 // job:     the agent's whole world is text the hub feeds it — the system prompt,
-//          the no-arg `sindri` directives, the [hub]/[user]/[reviewer] injected
-//          messages, and the replies to its verbs. Centralised here so the
-//          agent's voice is tuned in one file, not scattered across the workflow.
+//
+//	the no-arg `sindri` directives, the [hub]/[user]/[reviewer] injected
+//	messages, and the replies to its verbs. Centralised here so the
+//	agent's voice is tuned in one file, not scattered across the workflow.
+//
 // limits:  pure strings/builders; the logic that decides WHICH to use lives in
-//          workflow_task.go / workflow_pr.go / hub.go.
+//
+//	workflow_task.go / workflow_pr.go / hub.go.
 package hub
 
 import "fmt"
 
 // defaultReviewPrompt seeds .sindri/review-prompt.txt the first time.
 const defaultReviewPrompt = "Review this PR for correctness, clarity, and fit to the task. Flag bugs, missing tests, and anything that should change."
+
+// reviewArchitecture is appended to every review instruction so a reviewer always
+// (re-)reads the repo's architecture guide before ruling. The hub seeds an
+// ARCHITECTURE.md into every repo it serves (see ensureArchitectureDoc), so there
+// is always one to read.
+const reviewArchitecture = " Read /workspace/ARCHITECTURE.md now (even if you read it before) and confirm the changes follow it."
+
+// architecturePlaceholder seeds a repo's ARCHITECTURE.md when it has none, so the
+// repo gains a home for the rules reviewers enforce. Deliberately minimal — a
+// prompt to fill in, plus the one rule that already holds: conform to the brokkr
+// linters.
+const architecturePlaceholder = "# Architecture\n" + `
+<!-- Seeded by sindri. Describe how this project is meant to be built so reviewers
+     can hold every change to it, then commit this file. Replace this comment. -->
+
+## Baseline
+
+All code must conform to the built-in ` + "`brokkr`" + ` linters (` + "`brokkr lint`" + `).
+That floor is enforced automatically.
+
+## Project rules
+
+<!-- Add the rules that matter: layering and boundaries, what belongs where,
+     naming, dependencies, patterns to follow or avoid. -->
+_(none documented yet)_
+`
 
 // systemPrompt is the agent's durable identity + how-to-work brief. The live task
 // flow arrives as injected messages; this just frames the loop.
@@ -129,8 +158,8 @@ const dirPlanner = "You're planning new features together with the user. Get ori
 const dirCoauthor = "You're a coauthor working directly with the user in the shared checkout at /workspace — there's no task queue here. Do what the user asks in this terminal; edit files, run the build/tests, and use git yourself. `sindri lint` runs the quality gate, `sindri log \"<note>\"` records a note. When the user goes quiet, wait for their next instruction."
 
 func dirReview(prID, task string) string {
-	return fmt.Sprintf("Review %s (task %s): `sindri show %s` and `sindri lint %s`, then `sindri approve %s` — or `sindri reject %s \"<reason>\"`.",
-		prID, task, prID, prID, prID, prID)
+	return fmt.Sprintf("Review %s (task %s): `sindri show %s` and `sindri lint %s`, then `sindri approve %s` — or `sindri reject %s \"<reason>\"`.%s",
+		prID, task, prID, prID, prID, prID, reviewArchitecture)
 }
 
 func dirClaimed(id, title, branch string) string {
@@ -210,8 +239,8 @@ func msgReviewAssigned(prID, requirement, branch, base string, checkedOut bool) 
 		// rather than letting the reviewer assume /workspace holds the change.
 		loc = fmt.Sprintf("⚠ %s could NOT be checked out into /workspace — review from the diff only; do NOT trust /workspace. ", branch)
 	}
-	return fmt.Sprintf("[hub] Review %s — %s %s(1) see what changed: %s. (2) check the gate: `sindri lint %s`. (3) record your verdict: `sindri review %s <pass|changes|fail> \"<findings>\"`.",
-		prID, requirement, loc, seeChanges, prID, prID)
+	return fmt.Sprintf("[hub] Review %s — %s %s(1) see what changed: %s. (2) check the gate: `sindri lint %s`. (3) record your verdict: `sindri review %s <pass|changes|fail> \"<findings>\"`.%s",
+		prID, requirement, loc, seeChanges, prID, prID, reviewArchitecture)
 }
 
 // --- instructive replies to worker verbs ---

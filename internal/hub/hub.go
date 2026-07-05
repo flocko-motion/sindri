@@ -171,8 +171,26 @@ func New() (*Hub, error) {
 func (h *Hub) repo(root string) *store.ProjectStore {
 	tag := repoTag(root)
 	_ = h.store.RegisterProject(tag, root)
-	ensureGitignore(root) // keep .worktrees/ out of the repo's git status
+	ensureGitignore(root)       // keep .worktrees/ out of the repo's git status
+	ensureArchitectureDoc(root) // give the repo a home for the rules reviewers enforce
 	return h.store.For(tag)
+}
+
+// ensureArchitectureDoc seeds a placeholder ARCHITECTURE.md at the repo root when
+// none exists, so every repo the hub serves gains a home for its architecture
+// rules — the file reviewers are told to read before every verdict. Idempotent and
+// best-effort: it only creates a missing file (never overwrites the project's own
+// doc) and never blocks hub startup, but a write error is reported not swallowed.
+func ensureArchitectureDoc(root string) {
+	path := filepath.Join(root, "ARCHITECTURE.md")
+	if _, err := os.Stat(path); err == nil {
+		return // present already — leave the project's doc alone
+	} else if !os.IsNotExist(err) {
+		return // can't tell (permissions, etc.) — don't risk clobbering
+	}
+	if err := os.WriteFile(path, []byte(architecturePlaceholder), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "hub: WARNING — could not seed %s: %v\n", path, err)
+	}
 }
 
 // hubIgnores are the git-owned worktrees, kept in the repo but not committed. The
@@ -642,4 +660,3 @@ func brokkrBinary() (string, error) {
 	}
 	return "", fmt.Errorf("brokkr binary not found — it ships with sindri ('make install')")
 }
-
