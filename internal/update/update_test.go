@@ -55,10 +55,25 @@ func TestCacheRoundTrip(t *testing.T) {
 }
 
 func TestUpdaterScript(t *testing.T) {
-	s := updaterScript()
+	// Linux: installs the .deb via dpkg.
+	linux := updaterScript("linux", "amd64")
 	for _, want := range []string{"#!/usr/bin/env bash", repo, "dpkg -i", "releases/latest"} {
-		if !strings.Contains(s, want) {
-			t.Errorf("updater script missing %q", want)
+		if !strings.Contains(linux, want) {
+			t.Errorf("linux updater script missing %q", want)
 		}
+	}
+	if strings.Contains(linux, "tar") {
+		t.Error("linux updater must not use the tarball path")
+	}
+
+	// macOS: installs the darwin tarball for the baked arch, not a .deb.
+	mac := updaterScript("darwin", "arm64")
+	for _, want := range []string{"#!/usr/bin/env bash", repo, "_darwin_", "arch=\"arm64\"", "tar -C", "com.apple.quarantine"} {
+		if !strings.Contains(mac, want) {
+			t.Errorf("darwin updater script missing %q", want)
+		}
+	}
+	if strings.Contains(mac, "dpkg") {
+		t.Error("darwin updater must not use dpkg")
 	}
 }

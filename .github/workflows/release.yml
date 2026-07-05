@@ -59,6 +59,10 @@ jobs:
             cp "${gopath}/bin/darwin_${arch}/td" "$stage/td"
             curl -fsSL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_darwin_${arch}" -o "$stage/yq"
             chmod +x "$stage/yq"
+            # install.sh handles first-install AND in-place upgrades (atomic replace
+            # of a running binary, Gatekeeper quarantine) — the tarball's upgrade path.
+            cp scripts/install-macos.sh "$stage/install.sh"
+            chmod +x "$stage/install.sh"
             cp LICENSE THIRD_PARTY_LICENSES.md "$stage/"
             tar -C dist -czf "dist/sindri_${ver}_darwin_${arch}.tar.gz" "sindri_${ver}_darwin_${arch}"
           done
