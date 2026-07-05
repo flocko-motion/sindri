@@ -37,3 +37,7 @@
 {"ts":"2026-06-22T10:26:27.863520723+02:00","cmd":"update","flags":{"priority":"P4","title":"Mock: standalone chore with no parent","type":"task","work-dir":"/home/florian.metzger-noel/r/sindri"},"session":"ses_fe3b78","ok":true,"dur_ms":119}
 {"ts":"2026-06-25T08:52:23.056497901+02:00","cmd":"","ok":true,"dur_ms":0}
 {"ts":"2026-06-25T14:25:42.594658113+02:00","cmd":"","ok":true,"dur_ms":0}
+{"ts":"2026-07-05T12:08:35.485033+02:00","cmd":"update","flags":{"status":"in_progress","work-dir":"/Users/flo/Developer/sindri"},"session":"ses_0655de","ok":true,"dur_ms":41}
+{"ts":"2026-07-05T12:12:10.209376+02:00","cmd":"update","flags":{"status":"open","work-dir":"/Users/flo/Developer/sindri"},"session":"ses_0655de","ok":true,"dur_ms":48}
+{"ts":"2026-07-05T12:18:23.315056+02:00","cmd":"close","flags":{"self-close-exception":"merged via pr-td-52e59c","work-dir":"/Users/flo/Developer/sindri"},"session":"ses_0655de","ok":true,"dur_ms":56}
+{"ts":"2026-07-05T12:18:27.495177+02:00","cmd":"update","flags":{"status":"in_progress","work-dir":"/Users/flo/Developer/sindri"},"session":"ses_0655de","ok":true,"dur_ms":44}
