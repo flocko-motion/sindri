@@ -1,10 +1,10 @@
 ## 1. The `internal/adapter/github` package
 
 - [ ] 1.1 Add `internal/adapter/github/github.go` with the four-field header (`type: adapter (external tool)`), importing nothing from `hub`/`store`/`issue`.
-- [ ] 1.2 `Enabled(root string) bool` — true only when `gh` is on PATH, authenticated, and the repo has a GitHub remote; cheap and side-effect-free.
-- [ ] 1.3 `Issues(ctx, root string) ([]Issue, error)` via `gh issue list --state open --json number,title,body,labels,updatedAt`; define the `Issue` struct (`Number, Title, Body, Labels, UpdatedAt`). Confirm PRs are excluded.
+- [ ] 1.2 `Enabled(root string) bool` — cheap, local, side-effect-free: `gh` on PATH + repo has a GitHub remote. Do NOT probe the network for auth here; an unauthenticated/offline `gh` is handled at call time by `Issues()` erroring and `SyncTasks` degrading to no tasks.
+- [ ] 1.3 `Issues(ctx, root string) ([]Issue, error)` via `gh issue list --state open --limit <high> --json number,title,body,labels,updatedAt` — MUST pass an explicit high `--limit` (e.g. 1000), or paginate, because `gh issue list` defaults to `--limit 30` and would silently drop the rest. Define the `Issue` struct (`Number, Title, Body, Labels, UpdatedAt`). Confirm PRs are excluded.
 - [ ] 1.4 `Close(ctx, root string, number int, comment string) error` via `gh issue close <number> --comment <comment>`.
-- [ ] 1.5 Unit tests with a faked `gh` (stub binary on PATH or exec seam): enabled/disabled detection, list parsing, close command shape, and error surfacing.
+- [ ] 1.5 Unit tests with a faked `gh` (stub binary on PATH or exec seam): enabled/disabled detection, list parsing, close command shape, error surfacing, and **a >30-issue list** that asserts every issue is returned (guards the `--limit` fix).
 
 ## 2. Merge issues into the cache
 

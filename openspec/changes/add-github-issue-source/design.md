@@ -21,10 +21,15 @@ plumbing of our own.
 
 ```
 Enabled(root string) bool
-    // gh present + authenticated + repo has a GitHub remote. Cheap; used to gate.
+    // Cheap, local, side-effect-free: gh on PATH + repo has a GitHub remote.
+    // Does NOT probe the network for auth — an unauthenticated/offline gh is
+    // handled at call time: Issues() returns an error and SyncTasks degrades to
+    // contributing no tasks (see the graceful-absence requirement).
 
 Issues(ctx, root string) ([]Issue, error)
-    // gh issue list --state open --json number,title,body,labels,updatedAt ...
+    // gh issue list --state open --limit 1000 --json number,title,body,labels,updatedAt
+    // MUST pass an explicit high --limit (gh defaults to 30) or paginate, so ALL
+    // open issues are returned — the "import every open issue" acceptance criterion.
     // Returns []Issue (a dedicated struct, like spec.Change) — NOT issue.Task.
     // gh issue list already excludes PRs.
 
@@ -77,10 +82,11 @@ human re-rating for that id (the existing override merge already does this for
 
 `SyncTasks` can fire every `workPollInterval` (3s) per idle worker. A local td/
 openspec read is cheap; a `gh` API call is not, and GitHub rate-limits. Cache the
-`Issues` result per project with a short TTL (e.g. 30–60s) — either inside the
-adapter (a package-level map keyed by root) or as a small hub-side memo. On a
-cache hit within the TTL, `SyncTasks` reuses the last issue list and does no
-network call. Explicit user refresh MAY bypass the TTL.
+`Issues` result per project with a short TTL (e.g. 30–60s) as a **hub-side memo**
+(keyed by project, held by the hub) — *not* inside the adapter, which must stay
+stateless per the `github-issues` capability. On a cache hit within the TTL,
+`SyncTasks` reuses the last issue list and does no network call. Explicit user
+refresh MAY bypass the TTL.
 
 ## Write-back on merge
 
