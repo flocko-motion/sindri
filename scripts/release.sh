@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Cut a release as a self-contained cycle: validate the bump arg, ensure the tree
-# is clean, lint (the quality gate), then push your branch, open + merge a PR into
-# the default branch (so the tag points at merged code), tag the merged tip, and
-# push the tag — which triggers the release workflow (build + attach the .deb). It
-# then returns you to the branch you started on; it never leaves you on, or
-# commits directly to, the default branch.
+# is clean, lint (the quality gate), then rebase your branch onto the default
+# branch (catching any conflict locally, up front), force-push it, open + merge a
+# PR into the default branch (so the tag points at merged code), tag the merged
+# tip, and push the tag — which triggers the release workflow (build + attach the
+# .deb). It then returns you to the branch you started on; it never leaves you on,
+# or commits directly to, the default branch. The rebase rewrites history, so the
+# branch push is a lease-guarded force.
 #
 # Usage: make release <major|minor|patch>   (aliases: breaking|feature|fix;
 #        needs gh when run from a feature branch)
@@ -51,8 +53,23 @@ if [ "$start" != "$default" ]; then
 		echo "on '$start' — releasing needs it merged to '$default'. Install gh (https://cli.github.com) or merge manually, then re-run." >&2
 		exit 1
 	fi
+	# Rebase onto the current default branch FIRST. A branch that has merely fallen
+	# behind is brought current (so the PR merges cleanly), and a real conflict is
+	# caught here — locally, where you can fix it — instead of after a push and a
+	# 30-minute auto-merge wait that can never complete. Rebasing rewrites history,
+	# so the push below must be a (lease-guarded) force.
+	echo "rebasing '$start' onto '$default'…"
+	git fetch origin "$default" >/dev/null 2>&1 || true
+	if ! git rebase "origin/$default"; then
+		git rebase --abort 2>/dev/null || true
+		echo "'$start' conflicts with '$default' — run 'git rebase origin/$default', resolve the conflicts, then re-run." >&2
+		exit 1
+	fi
 	echo "pushing '$start' and merging it into '$default'…"
-	git push -u origin "$start"
+	# --force-with-lease: the rebase above rewrote history, so a plain push would be
+	# rejected as non-fast-forward. The lease still refuses to clobber the branch if
+	# someone else pushed to it since our fetch.
+	git push --force-with-lease -u origin "$start"
 	if [ -z "$(gh pr list --head "$start" --state open --json number --jq '.[0].number' 2>/dev/null)" ]; then
 		echo "opening a pull request…"
 		gh pr create --base "$default" --head "$start" --fill
@@ -67,9 +84,17 @@ if [ "$start" != "$default" ]; then
 	echo "waiting for the PR to merge — CI must pass first…"
 	state=""
 	for _ in $(seq 1 180); do # up to ~30 min for CI + merge
-		state="$(gh pr view "$start" --json state --jq .state 2>/dev/null || echo)"
+		read -r state mergeable <<<"$(gh pr view "$start" --json state,mergeable --jq '.state + " " + .mergeable' 2>/dev/null)"
 		[ "$state" = "MERGED" ] && break
 		[ "$state" = "CLOSED" ] && { echo "PR was closed without merging" >&2; exit 1; }
+		# Don't spin the full 30 min on a PR that can never merge: a definitive
+		# CONFLICTING verdict (rare here, since we rebased above, but master can move)
+		# means auto-merge is stuck. Bail now with a fix. UNKNOWN = GitHub still
+		# computing mergeability, so we keep waiting.
+		if [ "$mergeable" = "CONFLICTING" ]; then
+			echo "PR conflicts with '$default' — run 'git rebase origin/$default', resolve, then re-run." >&2
+			exit 1
+		fi
 		sleep 10
 	done
 	if [ "$state" != "MERGED" ]; then
