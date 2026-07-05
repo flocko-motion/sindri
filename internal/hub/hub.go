@@ -193,10 +193,13 @@ func ensureArchitectureDoc(root string) {
 	}
 }
 
-// hubIgnores are the git-owned worktrees, kept in the repo but not committed. The
-// hub's own state no longer lives in the repo (it's central under the state dir),
-// and `.todos/` is deliberately NOT ignored — task data is tracked.
-var hubIgnores = []string{".worktrees/"}
+// hubIgnores are the patterns the hub keeps out of the repo's git: the git-owned
+// agent worktrees, and `.todos/` — the task DB td rewrites on every task change. A
+// tracked task DB dirties the working tree constantly, which breaks the hub's PR
+// merge/rebase (that needs a clean tree), so the hub ignores it: task state is
+// tactical and local, not versioned. (Hub state proper lives centrally under the
+// state dir, not in the repo at all.)
+var hubIgnores = []string{".worktrees/", ".todos/"}
 
 // ensureGitignore appends any missing hub-artifact patterns to the repo's
 // .gitignore (creating it if absent), idempotently — so a fresh project never

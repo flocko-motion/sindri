@@ -52,8 +52,9 @@ func TestEnsureGitignore(t *testing.T) {
 		t.Errorf("expected .worktrees/ once, got %d", c)
 	}
 
-	// Existing entries (any slash form) are respected, not duplicated; .todos stays
-	// untouched (it is tracked). .sindri is no longer written (hub state is central).
+	// Existing entries (any slash form) are respected, not duplicated; .todos/ is
+	// added (a tracked task DB breaks the hub's merge flow). .sindri is no longer
+	// written (hub state is central).
 	root2 := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root2, ".gitignore"), []byte("node_modules\n/.worktrees\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -63,8 +64,8 @@ func TestEnsureGitignore(t *testing.T) {
 	if c := count(string(out), ".worktrees"); c != 1 {
 		t.Errorf("existing /.worktrees should not be duplicated, got %d:\n%s", c, out)
 	}
-	if strings.Contains(string(out), ".todos") {
-		t.Errorf(".todos must not be ignored (it is tracked):\n%s", out)
+	if !strings.Contains(string(out), ".todos") {
+		t.Errorf(".todos/ should be ignored (the hub's merge flow needs a clean tree):\n%s", out)
 	}
 	if strings.Contains(string(out), ".sindri") {
 		t.Errorf(".sindri must not be written (hub state is central now):\n%s", out)
