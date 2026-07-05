@@ -1,5 +1,9 @@
 # golang:latest is Debian-slim-based with Go already correctly installed..
-FROM golang:latest
+# Fully qualify the registry (docker.io/library/...) so the build works under
+# podman even when the host has no unqualified-search-registries configured —
+# a bare "golang:latest" makes podman error out with "short-name did not
+# resolve to an alias and no unqualified-search registries are defined".
+FROM docker.io/library/golang:latest
 
 # ── Node.js LTS ───────────────────────────────────────────────────────────────
 # The nodesource `nodejs` package bundles npm — do NOT also install Debian's
