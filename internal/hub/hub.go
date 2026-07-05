@@ -264,6 +264,7 @@ func (h *Hub) Close() error {
 	if h.agentTCPLn != nil {
 		h.agentTCPLn.Close()
 	}
+	accessLogger.Flush() // emit any open access-log run before we go quiet
 	return h.store.Close()
 }
 

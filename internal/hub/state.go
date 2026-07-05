@@ -8,13 +8,20 @@
 package hub
 
 import (
+	"context"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/pod"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
+
+// probeTimeout bounds each podman probe during a board read. A container that
+// can't answer within this window is reported "down" rather than stalling the
+// whole read — the board must stay responsive even when a pod is wedged.
+const probeTimeout = 3 * time.Second
 
 // AgentView is an agent as the UIs see it: identity + live workflow + runtime.
 // Status collapses runtime + workflow into one word: down | idle | working |
@@ -62,31 +69,60 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		}
 	}
 
+	// Liveness needs a podman round-trip per agent (inspect + a tmux exec); probe
+	// every agent concurrently and time-bounded, so one wedged pod slows the read
+	// by at most probeTimeout instead of serialising all of them.
+	var wg sync.WaitGroup
+	running := make([]bool, len(agentsRow))
+	for i, a := range agentsRow {
+		wg.Add(1)
+		go func(i int, a store.Agent) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+			defer cancel()
+			running[i] = h.agentAliveCtx(ctx, a.Project, a.Name)
+		}(i, a)
+	}
+	wg.Wait()
+
 	known := map[string]bool{}
 	agents := make([]AgentView, 0, len(agentsRow))
-	for _, a := range agentsRow {
+	for i, a := range agentsRow {
 		known[h.container(a.Project, a.Name)] = true
 		st, _ := h.store.For(a.Project).GetState(a.Name)
-		running := h.agentAlive(a.Project, a.Name)
 		agents = append(agents, AgentView{
 			Project: a.Project, Repo: h.repoName(a.Project), Name: a.Name, Role: a.Role,
-			Status: h.agentStatus(a.Project, a.Name, running, st.Phase),
+			Status: h.agentStatus(a.Project, a.Name, running[i], st.Phase),
 			Task:   st.Task, Branch: st.Branch, PR: openPRFor(prs, a.Project, a.Name), Workspace: a.Workspace,
 		})
 	}
 
-	// Orphans: sindri pods with no roster entry, across every known project.
+	// Orphans: sindri pods with no roster entry, across every known project. One
+	// podman ps per project, run concurrently and bounded like the liveness probes.
+	projects := h.knownProjects()
+	orphanLists := make([][]string, len(projects))
+	for i, proj := range projects {
+		wg.Add(1)
+		go func(i int, proj store.Project) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+			defer cancel()
+			if pods, err := pod.ListByLabelContext(ctx, "sindri.project", proj.Path); err == nil {
+				orphanLists[i] = pods
+			}
+		}(i, proj)
+	}
+	wg.Wait()
+
 	var orphans []string
-	for _, proj := range h.knownProjects() {
-		if pods, err := pod.ListByLabel("sindri.project", proj.Path); err == nil {
-			for _, p := range pods {
-				if !known[p] {
-					orphans = append(orphans, p)
-				}
+	for _, pods := range orphanLists {
+		for _, p := range pods {
+			if !known[p] {
+				orphans = append(orphans, p)
 			}
 		}
 	}
-	return BoardState{Agents: agents, Tasks: tasks, PRs: prs, Projects: h.knownProjects(), Orphans: orphans}, nil
+	return BoardState{Agents: agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans}, nil
 }
 
 // knownProjects returns the registry's projects (best-effort; empty on error).
@@ -112,12 +148,23 @@ func (h *Hub) container(project, name string) string {
 
 // agentAlive reports whether an agent is running (pod up and tmux session live).
 func (h *Hub) agentAlive(project, name string) bool {
-	return pod.Running(h.container(project, name)) && h.sessionAlive(project, name)
+	return h.agentAliveCtx(context.Background(), project, name)
+}
+
+// agentAliveCtx is agentAlive with each podman probe bounded by ctx, so a wedged
+// pod times out to "down" instead of blocking. Used by the board read.
+func (h *Hub) agentAliveCtx(ctx context.Context, project, name string) bool {
+	return pod.RunningContext(ctx, h.container(project, name)) && h.sessionAliveCtx(ctx, project, name)
 }
 
 // sessionAlive reports whether the agent's tmux session is up inside its pod.
 func (h *Hub) sessionAlive(project, name string) bool {
-	_, err := pod.Exec(h.container(project, name), append([]string{"tmux"}, tmux.HasSession(name)...)...)
+	return h.sessionAliveCtx(context.Background(), project, name)
+}
+
+// sessionAliveCtx is sessionAlive bounded by ctx.
+func (h *Hub) sessionAliveCtx(ctx context.Context, project, name string) bool {
+	_, err := pod.ExecContext(ctx, h.container(project, name), append([]string{"tmux"}, tmux.HasSession(name)...)...)
 	return err == nil
 }
 
