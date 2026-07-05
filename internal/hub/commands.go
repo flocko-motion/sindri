@@ -14,6 +14,7 @@ package hub
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -42,7 +43,10 @@ func (h *Hub) registry() *registry.Registry {
 			Hidden: func(c registry.Caller) bool { return c.HasTask }, Run: h.cmdNext},
 		registry.Command{Name: "lint", Help: "run the quality gate: lint (your workspace) or lint <pr-id> (a PR)", Run: h.cmdLint},
 		registry.Command{Name: "submit", Help: "request your branch be merged: submit [message]", Roles: []string{"worker"},
-			Hidden: func(c registry.Caller) bool { return !c.HasTask || c.InContainer }, Run: h.cmdSubmit},
+			Hidden: func(c registry.Caller) bool { return !c.HasTask || c.InContainer || c.Phase == "resolving" }, Run: h.cmdSubmit},
+		// Always available to a worker — checking whether your branch still merges (and
+		// resolving it if not) does no harm and is useful at any time.
+		registry.Command{Name: "resolve", Help: "check your branch still merges onto its base, and resolve any conflicts: resolve", Roles: []string{"worker"}, Run: h.cmdResolve},
 		registry.Command{Name: "checkpoint", Help: "commit the current subtask and move to the next: checkpoint [message]", Roles: []string{"worker"},
 			Hidden: func(c registry.Caller) bool { return !c.InContainer }, Run: h.cmdCheckpoint},
 		registry.Command{Name: "task", Help: "read the backlog: task list (all) or task <id> (full detail)", Roles: []string{"planner"}, Run: h.cmdTasks},
@@ -80,6 +84,7 @@ func (h *Hub) caller(project, name string) (registry.Caller, error) {
 		Role:        a.Role,
 		HasTask:     st.Phase != "idle" || inContainer,
 		InContainer: inContainer,
+		Phase:       st.Phase,
 	}, nil
 }
 
@@ -118,7 +123,20 @@ func (h *Hub) AgentExec(project, name string, args []string, out io.Writer) (int
 	}
 	exit, err := cmd.Run(c, args[1:], out)
 	h.notify() // the command may have changed board state
-	return exit, err
+	if err != nil {
+		// A returned error is a hub-INTERNAL failure — an outcome the agent should
+		// act on is written to `out` with a nil error (the command pattern). So never
+		// leak it across the boundary: it may carry host paths or operator
+		// instructions ("run 'td init' first") that are not the agent's concern and
+		// nothing it could act on. Log the real error host-side (the operator's
+		// channel) and hand the agent a neutral, non-actionable message.
+		fmt.Fprintf(os.Stderr, "hub: agent %q command %q failed: %v\n", name, args[0], err)
+		if exit == 0 {
+			exit = 1
+		}
+		return exit, fmt.Errorf("the hub hit an internal error running %q — it's logged for the operator; nothing for you to fix, try again later", args[0])
+	}
+	return exit, nil
 }
 
 func (h *Hub) cmdStatus(c registry.Caller, _ []string, out io.Writer) (int, error) {

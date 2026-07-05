@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Binary is the podman executable; overridable for tests/alternate runtimes.
@@ -156,6 +157,20 @@ func Check(w io.Writer) error {
 	return fmt.Errorf("podman is installed but not reachable: %s\n"+
 		"On macOS/Windows podman runs in a VM — run `podman machine init` (first time) then "+
 		"`podman machine start`, and verify with `podman info`", detail)
+}
+
+// Healthy is a fast, time-bounded reachability probe for the CLI's pre-flight:
+// `podman info` bounded by a short timeout, so a WEDGED VM (marked running but its
+// socket unresponsive — which makes a bare `podman info` hang) fails the check
+// quickly instead of hanging the command. Returns ok, plus a one-line actionable
+// hint when it isn't. Kept separate from Check, which may auto-start the VM.
+func Healthy() (ok bool, hint string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := exec.CommandContext(ctx, Binary, "info").Run(); err == nil {
+		return true, ""
+	}
+	return false, "podman isn't reachable — agents can't run until it is. On macOS/Windows: `podman machine start` (or stop then start if it's wedged), then verify with `podman info`."
 }
 
 // reachable reports whether `podman info` succeeds, returning the trimmed last

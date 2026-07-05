@@ -521,14 +521,24 @@ func (h *Hub) Merge(project, prID string) (store.PR, error) {
 	if pr.Status != "approved" {
 		return store.PR{}, fmt.Errorf("%s is %s — only an approved PR may be merged", prID, pr.Status)
 	}
-	// Bring the branch up to the current base first; a rebase CONFLICT is a genuine
-	// divergence — route it back to the owning worker and stop the merge.
+	// Bring the branch up to the current base first. A merely-stale branch rebases
+	// silently; a CONFLICT is routed into the worker's resolution loop — the hub
+	// leaves the conflict in the worker's workspace to edit (it can't run git) and
+	// the branch returns for review once clean, rather than a dead-end "resubmit".
 	if a, ok, _ := ps.GetAgent(pr.Agent); ok {
 		wt := filepath.Join(root, a.Workspace)
-		if err := git.RebaseOnto(wt, pr.Branch, pr.Base); err != nil {
-			fb := fmt.Sprintf("merge conflict: rebasing %s onto %s hit conflicts (%v). Resolve against the latest %s and resubmit.", pr.Branch, pr.Base, err, pr.Base)
-			_ = h.reject(project, prID, fb, false)
-			return store.PR{}, fmt.Errorf("%s could not be merged — rebase onto %s conflicted; sent back to %s to resolve", prID, pr.Base, pr.Agent)
+		conflicts, done, err := git.RebaseStart(wt, pr.Branch, pr.Base)
+		if err != nil {
+			return store.PR{}, err
+		}
+		if !done {
+			pr.Status, pr.Feedback = "open", "" // no longer mergeable; back to review after the worker resolves
+			_ = ps.PutPR(pr)
+			_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "resolving"})
+			_ = ps.LogPR(pr.ID, "conflict", "rebase onto "+pr.Base+" conflicts: "+strings.Join(conflicts, ", "))
+			_ = h.injectWhenReady(project, pr.Agent, msgResolveNeeded(pr.Base, conflicts))
+			h.notify()
+			return store.PR{}, fmt.Errorf("%s conflicts with %s — sent to %s to resolve; it returns for review once clean", prID, pr.Base, pr.Agent)
 		}
 	}
 	if err := git.Merge(root, pr.Base, pr.Branch); err != nil {

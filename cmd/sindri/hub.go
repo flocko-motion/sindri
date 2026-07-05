@@ -160,7 +160,8 @@ func newHubStartCmd() *cobra.Command {
 // --- agent ---
 
 func newAgentCmd() *cobra.Command {
-	c := &cobra.Command{Use: "agent", Short: "Manage agents (workers, reviewers, planners, coauthors)"}
+	c := &cobra.Command{Use: "agent", Short: "Manage agents (workers, reviewers, planners, coauthors)",
+		PersistentPreRun: agentPreflight} // warn up front if podman is down — nothing works without it
 	c.AddCommand(agentListCmd(), agentNewCmd(), agentDeleteCmd(), agentPaneCmd(), agentStartCmd(), agentStopCmd(), agentRestartCmd(), agentTellCmd(), agentAttachCmd(), agentInfoCmd())
 	return c
 }

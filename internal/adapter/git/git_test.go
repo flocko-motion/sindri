@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -31,6 +32,61 @@ func mustCommitOn(t *testing.T, repo, branch, rel, body string) {
 		if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %s", args, out)
 		}
+	}
+}
+
+// gitOut runs a git command in repo, failing the test on error.
+func gitOut(t *testing.T, repo string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %s", args, out)
+	}
+	return string(out)
+}
+
+// TestRebaseStartLeavesConflictThenContinues covers the hub-assisted resolution
+// loop: RebaseStart leaves a conflict in the worktree (does not abort), and after
+// the worker resolves the file to base's version — making the branch's commit
+// empty against base, the issue #27 case — RebaseContinue skips it and finishes.
+func TestRebaseStartLeavesConflictThenContinues(t *testing.T) {
+	repo := newRepo(t)
+	def := strings.TrimSpace(gitOut(t, repo, "rev-parse", "--abbrev-ref", "HEAD"))
+
+	gitOut(t, repo, "checkout", "-q", "-b", "feat")
+	mustWrite(t, repo, "f", "feat\n")
+	gitOut(t, repo, "commit", "-aqm", "feat change")
+
+	gitOut(t, repo, "checkout", "-q", def)
+	mustWrite(t, repo, "f", "base\n")
+	gitOut(t, repo, "commit", "-aqm", "base change")
+
+	conflicts, done, err := RebaseStart(repo, "feat", def)
+	if err != nil {
+		t.Fatalf("RebaseStart: %v", err)
+	}
+	if done {
+		t.Fatal("expected a conflict, got done")
+	}
+	if len(conflicts) != 1 || conflicts[0] != "f" {
+		t.Fatalf("conflicts = %v, want [f]", conflicts)
+	}
+	if !RebaseInProgress(repo) {
+		t.Fatal("rebase should be left in progress for the worker to resolve")
+	}
+
+	// Worker resolves to base's version → the branch's commit is now empty against
+	// base; RebaseContinue must --skip it and finish cleanly.
+	mustWrite(t, repo, "f", "base\n")
+	conflicts, done, err = RebaseContinue(repo)
+	if err != nil {
+		t.Fatalf("RebaseContinue: %v", err)
+	}
+	if !done || len(conflicts) > 0 {
+		t.Fatalf("expected done with no conflicts, got done=%v conflicts=%v", done, conflicts)
+	}
+	if RebaseInProgress(repo) {
+		t.Fatal("rebase should have finished")
 	}
 }
 

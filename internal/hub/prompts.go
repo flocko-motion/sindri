@@ -146,7 +146,7 @@ func dirWorking(task string) string {
 	return fmt.Sprintf("Work on task %s. When your change is committed, run `sindri submit \"<summary>\"`.", task)
 }
 
-const dirSubmitted = "Your pull request is under review. Wait — the hub will tell you the verdict."
+const dirSubmitted = "Your pull request is under review. Wait — the hub will tell you the verdict. While you wait, you may run `sindri resolve` any time to check your branch still merges onto its base (and resolve it if the base has moved) — it does no harm and keeps the PR healthy."
 
 // dirPlanner is the idle planner's directive: orient, then wait for the user. A
 // planner is never auto-assigned work.
@@ -208,6 +208,13 @@ func msgRebased(base string) string {
 	return fmt.Sprintf("[hub] %s moved — your branch was rebased onto it, so you're up to date.", base)
 }
 
+// msgResolveNeeded is injected when a branch can't merge because it conflicts with
+// its base: the hub has left the conflicts in the worker's workspace to edit (the
+// worker has no git — the hub drives it), and points at the single verb to retry.
+func msgResolveNeeded(base string, files []string) string {
+	return fmt.Sprintf("[hub] Your branch conflicts with %s and can't be merged yet: %s. The conflicts are in your /workspace with <<<<<<< markers — edit each file to the intended result (remove the markers), then run `sindri resolve`. Repeat until it's clean; it then goes back for review.", base, fileList(files))
+}
+
 func msgMilestoneMerged(prID string) string {
 	return fmt.Sprintf("[hub] Milestone %s merged — your feature branch is rebased onto the new base. Run `sindri` to continue.", prID)
 }
@@ -247,6 +254,23 @@ func msgReviewAssigned(prID, requirement, branch, base string, checkedOut bool) 
 
 func replyRegistered(prID string) string {
 	return fmt.Sprintf("%s registered. You'll be informed when it's reviewed. Please wait — this may take a while.", prID)
+}
+
+// replyResolveConflicts answers `resolve` when conflicts remain to edit.
+func replyResolveConflicts(base string, files []string) string {
+	return fmt.Sprintf("Rebasing onto %s conflicts in %s. They're in your /workspace with <<<<<<< markers — edit each file to the intended result (remove the markers), then run `sindri resolve` again.", base, fileList(files))
+}
+
+// replyResolvedClean answers `resolve` once the branch applies cleanly after a
+// conflict was resolved — it's back with the reviewer.
+func replyResolvedClean(base string) string {
+	return fmt.Sprintf("Your branch is now current with %s and conflict-free — it's back with the reviewer.", base)
+}
+
+// replyAlreadyCurrent answers a proactive `resolve` on a branch that already sits
+// cleanly on its base.
+func replyAlreadyCurrent(base string) string {
+	return fmt.Sprintf("Your branch is already current with %s — nothing to resolve.", base)
 }
 
 const replyNothingToSubmit = "Nothing to submit — run `sindri` to pick up a task first."
