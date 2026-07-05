@@ -1,22 +1,24 @@
 name: release
 
-# Build and publish the .deb whenever a semver tag (vMAJOR.MINOR.PATCH) is pushed
-# — e.g. by `make release <major|minor|patch>`.
+# Build and publish release assets whenever a semver tag (vMAJOR.MINOR.PATCH) is
+# pushed — e.g. by `make release <major|minor|patch>`. Ships a Linux .deb plus
+# macOS tarballs (darwin arm64 + amd64), all cross-compiled on the Linux runner
+# (sindri is pure Go — no cgo — so no macOS runner is needed).
 on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
 
 permissions:
-  contents: write # create the GitHub release and upload the .deb
+  contents: write # create the GitHub release and upload the assets
 
-# Versions of the bundled tools (go install-able). Bump alongside the image.
+# Versions of the bundled tools. Bump alongside the image.
 env:
   TD_VERSION: v0.45.0
   YQ_VERSION: v4.53.3
 
 jobs:
-  deb:
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,8 +36,38 @@ jobs:
       - name: Build the .deb
         run: make deb VERSION="${GITHUB_REF_NAME#v}"
 
+      - name: Build macOS tarballs (darwin arm64 + amd64)
+        run: |
+          set -euo pipefail
+          ver="${GITHUB_REF_NAME#v}"
+          gopath="$(go env GOPATH)"
+          for arch in arm64 amd64; do
+            stage="dist/sindri_${ver}_darwin_${arch}"
+            mkdir -p "$stage"
+            # Host binaries for macOS (CLI/TUI/hub + the lint toolbelt).
+            CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" \
+              go build -ldflags "-X main.version=${ver}" -o "$stage/sindri" ./cmd/sindri/
+            CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" \
+              go build -ldflags "-X main.version=${ver}" -o "$stage/brokkr" ./cmd/brokkr/
+            # The agent browser runs INSIDE the Linux pod (mounted into the podman
+            # VM), so it's a linux binary arch-matched to the Mac's VM, not darwin.
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
+              go build -o "$stage/sindri-worker" ./cmd/sindri-worker/
+            # Bundled tools, mirroring the .deb: td cross-compiled (its cross output
+            # lands in $GOPATH/bin/<os>_<arch>/), yq from its official darwin release.
+            GOOS=darwin GOARCH="$arch" go install "github.com/marcus/td@${TD_VERSION}"
+            cp "${gopath}/bin/darwin_${arch}/td" "$stage/td"
+            curl -fsSL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_darwin_${arch}" -o "$stage/yq"
+            chmod +x "$stage/yq"
+            cp LICENSE THIRD_PARTY_LICENSES.md "$stage/"
+            tar -C dist -czf "dist/sindri_${ver}_darwin_${arch}.tar.gz" "sindri_${ver}_darwin_${arch}"
+          done
+          ls -la dist/*.tar.gz
+
       - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:
-          files: bin/sindri_*_amd64.deb # the versioned package (one asset)
+          files: |
+            bin/sindri_*_amd64.deb
+            dist/sindri_*_darwin_*.tar.gz
           generate_release_notes: true
