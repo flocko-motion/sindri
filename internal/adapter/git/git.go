@@ -172,6 +172,89 @@ func RebaseOnto(dir, branch, onto string) error {
 	return Rebase(dir, onto)
 }
 
+// RebaseInProgress reports whether dir has a rebase stopped mid-flight (conflict or
+// an empty patch awaiting --skip). Resolves the real state path via git, since a
+// worktree's .git is a file pointing elsewhere.
+func RebaseInProgress(dir string) bool {
+	for _, p := range []string{"rebase-merge", "rebase-apply"} {
+		out, err := exec.Command("git", "-C", dir, "rev-parse", "--git-path", p).Output()
+		if err != nil {
+			continue
+		}
+		path := strings.TrimSpace(string(out))
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(dir, path)
+		}
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// gitEditless runs a git command in dir with editors forced non-interactive, so a
+// `rebase --continue`/`--skip` that would otherwise open $EDITOR (for a commit
+// message) never blocks the hub.
+func gitEditless(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_EDITOR=true", "GIT_SEQUENCE_EDITOR=true")
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// unmergedFiles lists the conflicted (unmerged) paths in dir's worktree.
+func unmergedFiles(dir string) []string {
+	return nameOnly(dir, "diff", "--name-only", "--diff-filter=U")
+}
+
+// RebaseStart checks branch out in dir and begins rebasing it onto onto WITHOUT
+// aborting on conflict — the opposite of Rebase. It returns:
+//   - done=true when the branch rebased cleanly (nothing to resolve);
+//   - conflicts (the unmerged files) with done=false when it stopped on a conflict,
+//     leaving the rebase in progress so a worker can resolve the file content and
+//     the hub can continue it;
+//   - a non-nil err only for a genuine failure (bad ref, etc.), with no rebase left
+//     in progress.
+func RebaseStart(dir, branch, onto string) (conflicts []string, done bool, err error) {
+	if out, e := exec.Command("git", "-C", dir, "checkout", branch).CombinedOutput(); e != nil {
+		return nil, false, fmt.Errorf("checkout %s: %s: %w", branch, strings.TrimSpace(string(out)), e)
+	}
+	out, e := gitEditless(dir, "rebase", onto)
+	return settleRebase(dir, out, e)
+}
+
+// RebaseContinue stages the worker's conflict resolutions and advances a rebase
+// that RebaseStart (or a prior RebaseContinue) left in progress. Return values
+// match RebaseStart: done, or the next conflict set, or a hard error.
+func RebaseContinue(dir string) (conflicts []string, done bool, err error) {
+	if out, e := exec.Command("git", "-C", dir, "add", "-A").CombinedOutput(); e != nil {
+		return nil, false, fmt.Errorf("git add: %s: %w", strings.TrimSpace(string(out)), e)
+	}
+	out, e := gitEditless(dir, "rebase", "--continue")
+	return settleRebase(dir, out, e)
+}
+
+// settleRebase interprets the state after a rebase step (start/continue/skip) and
+// drives past commits that became empty (already present in the base — e.g. a
+// commit the base superseded): it --skips them so a redundant commit needs no
+// worker action. It returns the next conflict set, done, or a hard error.
+func settleRebase(dir, stepOut string, stepErr error) (conflicts []string, done bool, err error) {
+	for {
+		if !RebaseInProgress(dir) {
+			if stepErr != nil { // rebase not in progress AND the step errored → genuine failure
+				return nil, false, fmt.Errorf("rebase: %s: %w", strings.TrimSpace(stepOut), stepErr)
+			}
+			return nil, true, nil // rebase finished cleanly
+		}
+		if u := unmergedFiles(dir); len(u) > 0 {
+			return u, false, nil // stopped on a real conflict — hand it to the worker
+		}
+		// In progress with no conflict = the current commit is empty against base;
+		// skip it and re-evaluate.
+		stepOut, stepErr = gitEditless(dir, "rebase", "--skip")
+	}
+}
+
 // Diff returns the changes a branch introduces relative to base (the merge-base
 // three-dot form), for review.
 func Diff(repo, base, branch string) (string, error) {
