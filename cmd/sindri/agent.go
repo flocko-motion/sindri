@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub"
@@ -264,8 +265,9 @@ func agentTellCmd() *cobra.Command {
 }
 
 func agentInfoCmd() *cobra.Command {
-	return &cobra.Command{
-		Use: "info <name>", Short: "Show an agent's state and activity timeline", Args: cobra.ExactArgs(1),
+	var n int
+	c := &cobra.Command{
+		Use: "info <name>", Short: "Show an agent's status (state, task, PR, clients, recent activity)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, found *hub.AgentView) error {
 				fmt.Printf("agent:     %s\nrole:      %s\nstatus:    %s\ntask:      %s\npr:        %s\nworkspace: %s\n",
@@ -277,12 +279,42 @@ func agentInfoCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Println("\nactivity:")
+				// Status, not a log dump: show the last n events, each on one
+				// timestamped, length-capped line. `-n 0` shows all.
+				total := len(evs)
+				if n > 0 && total > n {
+					evs = evs[total-n:]
+				}
+				fmt.Printf("\nrecent activity (%d of %d):\n", len(evs), total)
 				for _, e := range evs {
-					fmt.Printf("  %-10s %s\n", e.Type, e.Payload)
+					fmt.Printf("  %s  %-10s %s\n", eventTime(e.TS), e.Type, oneLine(e.Payload, 100))
 				}
 				return nil
 			})
 		},
 	}
+	c.Flags().IntVarP(&n, "num", "n", 8, "recent activity lines to show (0 = all)")
+	return c
+}
+
+// eventTime renders an activity timestamp (UTC RFC3339) as a local HH:MM:SS,
+// falling back to the raw value if it doesn't parse.
+func eventTime(ts string) string {
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return ts
+	}
+	return t.Local().Format("15:04:05")
+}
+
+// oneLine collapses a possibly-multi-line payload to its first line, capped to max
+// runes with an ellipsis — so `info` stays one line per event, not a log dump.
+func oneLine(s string, max int) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = strings.TrimRight(s[:i], " ") + " …"
+	}
+	if r := []rune(s); len(r) > max {
+		s = string(r[:max]) + "…"
+	}
+	return s
 }

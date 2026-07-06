@@ -560,11 +560,29 @@ func (h *Hub) Launch(project, name string, shell bool, progress io.Writer) (err 
 	if err := ps.Log(name, "launch", "started container="+cName); err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "Agent %s launched — it will come up shortly (watch `sindri agent info %s`).\n", name, name)
-	go h.rehydrate(project, name) // resume once the session is up (D13)
+	// Stay until we OBSERVE the agent up (its container is running AND its tmux
+	// session answers) — no optimistic "launched" while it's still coming up.
+	// Stream progress; on timeout report the failure (the deferred cleanup clears
+	// the launching intent, so the board shows "down", not a stuck "launching").
+	fmt.Fprintf(w, "Waiting for %s to come up…\n", name)
+	deadline := time.Now().Add(launchReadyTimeout)
+	for !h.agentAlive(project, name) {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%s launched but its session hasn't come up within %s — check `sindri agent pane %s`", name, launchReadyTimeout, name)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	h.setLifecycle(project, name, "") // observed up — clear the launching intent now
+	fmt.Fprintf(w, "Agent %s is up.\n", name)
+	go h.rehydrate(project, name) // nudge it to resume once the session is live (D13)
 	h.notify()
 	return nil
 }
+
+// launchReadyTimeout bounds how long Launch waits to observe a freshly-launched
+// agent's session come up before reporting the launch failed. Generous: a cold
+// micro-VM/pod boot plus the entrypoint starting tmux can take a bit.
+const launchReadyTimeout = 45 * time.Second
 
 // Tell delivers a message into an agent's session, stamped with its source
 // (provenance, D12). The stamped line is recorded in the activity log.
