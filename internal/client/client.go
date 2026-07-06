@@ -147,6 +147,17 @@ func (c *HTTP) AgentPane(name string, lines int) (string, error) {
 	return ok.Out, err
 }
 
+// Diagnose asks the hub what its liveness probes observe for an agent (running
+// check + session check, with a wedged exec surfaced as a timeout) — the detail
+// behind `agent info --debug` that explains a "down" contradicting a live pod.
+func (c *HTTP) Diagnose(name string) (string, error) {
+	var ok struct {
+		Out string `json:"ok"`
+	}
+	err := c.get("/agent/diagnose?agent="+url.QueryEscape(name), &ok)
+	return ok.Out, err
+}
+
 // Clients returns the humans attached to an agent's tmux session (dial-ins).
 func (c *HTTP) Clients(name string) ([]hub.ClientView, error) {
 	var out []hub.ClientView

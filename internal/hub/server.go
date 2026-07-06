@@ -143,6 +143,9 @@ func (h *Hub) Handler() http.Handler {
 		out, err := h.PodInfo(h.reqProject(r), r.URL.Query().Get("agent"))
 		writeJSON(w, okMsg{out}, err)
 	})
+	mux.HandleFunc("GET /agent/diagnose", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, okMsg{h.AgentDiagnostic(h.reqProject(r), r.URL.Query().Get("agent"))}, nil)
+	})
 	mux.HandleFunc("GET /agent/clients", func(w http.ResponseWriter, r *http.Request) {
 		cs, err := h.Clients(h.reqProject(r), r.URL.Query().Get("agent"))
 		writeJSON(w, cs, err)

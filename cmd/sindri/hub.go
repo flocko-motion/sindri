@@ -33,6 +33,7 @@ type backend interface {
 	DeleteAgent(name string) error
 	StopAgent(name string) error
 	AgentPane(name string, lines int) (string, error)
+	Diagnose(name string) (string, error)
 	Clients(name string) ([]hub.ClientView, error)
 	Launch(name string, shell, debug bool, out io.Writer) error
 	Tell(name, msg, source string) error
@@ -94,15 +95,16 @@ func withBackend(fn func(backend) error) error {
 func newHubCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "hub",
-		Short: "Manage the per-repo hub service (start, list, stop)",
+		Short: "Manage the global hub service (start, restart, status, stop)",
 		Long: "The hub is the single global coordinator that drives the agents across\n" +
 			"every repo.\n\n" +
 			"  sindri hub start        run the hub in the foreground\n" +
 			"  sindri hub start --bg   run it in the background (same as `sindri hub start &`)\n" +
+			"  sindri hub restart      stop it and start a fresh detached one (pick up a rebuild)\n" +
 			"  sindri hub status       show the running hub (pid, version, uptime)\n" +
 			"  sindri hub stop         stop the running hub",
 	}
-	c.AddCommand(newHubStartCmd(), newHubStatusCmd(), newHubStopCmd())
+	c.AddCommand(newHubStartCmd(), newHubRestartCmd(), newHubStatusCmd(), newHubStopCmd())
 	return c
 }
 
@@ -156,6 +158,30 @@ func newHubStartCmd() *cobra.Command {
 	}
 	c.Flags().BoolVar(&bg, "bg", false, "run the hub detached in the background instead of the foreground")
 	return c
+}
+
+// newHubRestartCmd stops the running hub and starts a fresh detached one — the way
+// to pick up a rebuilt binary without a manual stop-then-start. If no hub is
+// running it's just a start, so `restart` is always safe to reach for (mirrors
+// `sindri agent restart`). Agents keep running across the restart; only the
+// coordinator process is replaced.
+func newHubRestartCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "restart",
+		Short: "Restart the hub in the background (starts one if none is running)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !hub.IsRunning() {
+				fmt.Fprintln(os.Stderr, "no hub running — starting a fresh one.")
+				return startHub()
+			}
+			pid, ok := hub.HubPID()
+			if !ok {
+				return fmt.Errorf("couldn't find the running hub's pid to restart it — stop it manually, then `sindri hub start --bg`")
+			}
+			return restartHub(pid)
+		},
+	}
 }
 
 // --- agent ---

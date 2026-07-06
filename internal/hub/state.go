@@ -196,6 +196,36 @@ func (h *Hub) launchDiagnostic(project, name string) string {
 	return "container and session both answer now — the liveness checks had been failing transiently"
 }
 
+// AgentDiagnostic reports, as one human string, what BOTH liveness probes observe
+// for an agent — the running check and the tmux session check — each with its real
+// result rather than the single "down" the board collapses them into. The session
+// exec is time-bounded, so a WEDGED exec (which otherwise silently reads as "down")
+// is reported as a timeout, not a hang. Behind `agent info --debug`, so a "down"
+// that contradicts a live container is explainable on demand.
+func (h *Hub) AgentDiagnostic(project, name string) string {
+	c := h.container(project, name)
+	var b strings.Builder
+	fmt.Fprintf(&b, "container:      %s\n", c)
+	fmt.Fprintf(&b, "running check:  %s\n", container.Diagnose(context.Background(), c))
+
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	out, err := container.ExecContext(ctx, c, append([]string{"tmux"}, tmux.HasSession(name)...)...)
+	switch {
+	case ctx.Err() == context.DeadlineExceeded:
+		fmt.Fprintf(&b, "session check:  TIMED OUT after %s — `tmux has-session` in the container did not return (exec is wedged); this is why liveness reads 'down'\n", probeTimeout)
+	case err != nil:
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		fmt.Fprintf(&b, "session check:  FAILED: %s\n", msg)
+	default:
+		fmt.Fprintf(&b, "session check:  ok — tmux session %q answers\n", name)
+	}
+	return b.String()
+}
+
 // agentAlive reports whether an agent is running (pod up and tmux session live).
 func (h *Hub) agentAlive(project, name string) bool {
 	return h.agentAliveCtx(context.Background(), project, name)
@@ -211,7 +241,11 @@ func (h *Hub) agentAliveCtx(ctx context.Context, project, name string) bool {
 // when the agent isn't running. The headless read behind both `agent info` and the
 // TUI detail view, so they show the same thing.
 func (h *Hub) Clients(project, name string) ([]ClientView, error) {
-	cs, ok := h.clientsCtx(context.Background(), project, name)
+	// Bounded: a wedged `container exec` must not hang the caller forever (it once
+	// hung `agent info` indefinitely). On timeout the probe degrades to "not running".
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	cs, ok := h.clientsCtx(ctx, project, name)
 	if !ok {
 		return nil, fmt.Errorf("agent %q is not running", name)
 	}

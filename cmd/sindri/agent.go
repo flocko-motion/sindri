@@ -268,12 +268,18 @@ func agentTellCmd() *cobra.Command {
 
 func agentInfoCmd() *cobra.Command {
 	var n int
+	var debug bool
 	c := &cobra.Command{
 		Use: "info <name>", Short: "Show an agent's status (state, task, PR, clients, recent activity)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, found *hub.AgentView) error {
 				fmt.Printf("agent:     %s\nrole:      %s\nstatus:    %s\ntask:      %s\npr:        %s\nworkspace: %s\n",
 					found.Name, found.Role, found.Status, dash(found.Task), dash(found.PR), dash(found.Workspace))
+				if debug { // explain the status: what each liveness probe actually observes
+					if d, err := b.Diagnose(found.Name); err == nil {
+						fmt.Printf("\nliveness probe (why status is %q):\n%s", found.Status, d)
+					}
+				}
 				if cs, err := b.Clients(found.Name); err == nil {
 					fmt.Print(hub.FormatClients(cs))
 				}
@@ -296,6 +302,7 @@ func agentInfoCmd() *cobra.Command {
 		},
 	}
 	c.Flags().IntVarP(&n, "num", "n", 8, "recent activity lines to show (0 = all)")
+	c.Flags().BoolVar(&debug, "debug", false, "show what the hub's liveness probes observe (explains a puzzling status)")
 	return c
 }
 
