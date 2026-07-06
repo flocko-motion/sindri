@@ -174,6 +174,27 @@ func (h *Hub) container(project, name string) string {
 	return Container(root, name)
 }
 
+// launchDiagnostic reports WHY a just-launched agent isn't observed up, so a
+// timeout is actionable instead of a shrug. It re-runs the two liveness probes
+// through the runtime, capturing their errors: the running check, then the tmux
+// session check inside the container. Whichever fails (and its error) is almost
+// always the real cause — a runtime that can't answer, or a session that never
+// started.
+func (h *Hub) launchDiagnostic(project, name string) string {
+	c := h.container(project, name)
+	if !container.Running(c) {
+		return fmt.Sprintf("the runtime does not report container %s as running", c)
+	}
+	if out, err := container.Exec(c, append([]string{"tmux"}, tmux.HasSession(name)...)...); err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Sprintf("container is running but its tmux session check failed: %s", msg)
+	}
+	return "container and session both answer now — the liveness checks had been failing transiently"
+}
+
 // agentAlive reports whether an agent is running (pod up and tmux session live).
 func (h *Hub) agentAlive(project, name string) bool {
 	return h.agentAliveCtx(context.Background(), project, name)

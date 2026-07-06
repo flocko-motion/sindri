@@ -568,7 +568,8 @@ func (h *Hub) Launch(project, name string, shell bool, progress io.Writer) (err 
 	deadline := time.Now().Add(launchReadyTimeout)
 	for !h.agentAlive(project, name) {
 		if time.Now().After(deadline) {
-			return fmt.Errorf("%s launched but its session hasn't come up within %s — check `sindri agent pane %s`", name, launchReadyTimeout, name)
+			return fmt.Errorf("%s launched but didn't come up within %s: %s (check `sindri agent pane %s`)",
+				name, launchReadyTimeout, h.launchDiagnostic(project, name), name)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
