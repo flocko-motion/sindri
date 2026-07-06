@@ -193,7 +193,7 @@ func agentPaneCmd() *cobra.Command {
 }
 
 func agentStartCmd() *cobra.Command {
-	var shell bool
+	var shell, debug bool
 	c := &cobra.Command{
 		Use: "start <name>", Short: "Start the agent: spin a container that assumes its identity (runs Claude)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -201,11 +201,12 @@ func agentStartCmd() *cobra.Command {
 				// Launch streams its build/start progress to stderr and ends with a
 				// "launched — coming up" line; don't print a second, contradicting
 				// "started" (the agent isn't live until the board says so).
-				return b.Launch(a.Name, shell, os.Stderr)
+				return b.Launch(a.Name, shell, debug, os.Stderr)
 			})
 		},
 	}
 	c.Flags().BoolVar(&shell, "shell", false, "run a bare shell instead of Claude (debug/demo)")
+	c.Flags().BoolVar(&debug, "debug", false, "stream the hub's liveness-probe detail while waiting for the agent to come up")
 	return c
 }
 
@@ -228,7 +229,7 @@ func agentStopCmd() *cobra.Command {
 // up a rebuilt agent image or clear a wedged session. If the agent wasn't running,
 // it's just a start (no error), so `restart` is always safe to reach for.
 func agentRestartCmd() *cobra.Command {
-	var shell bool
+	var shell, debug bool
 	c := &cobra.Command{
 		Use: "restart <name>", Short: "Restart the agent's container (starts it if it wasn't running)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -240,11 +241,12 @@ func agentRestartCmd() *cobra.Command {
 					fmt.Fprintf(os.Stderr, "stopped %s — relaunching…\n", a.Name)
 				}
 				// Launch streams progress and ends with "launched — coming up".
-				return b.Launch(a.Name, shell, os.Stderr)
+				return b.Launch(a.Name, shell, debug, os.Stderr)
 			})
 		},
 	}
 	c.Flags().BoolVar(&shell, "shell", false, "run a bare shell instead of Claude (debug/demo)")
+	c.Flags().BoolVar(&debug, "debug", false, "stream the hub's liveness-probe detail while waiting for the agent to come up")
 	return c
 }
 

@@ -157,6 +157,18 @@ func (Engine) RunningContext(ctx context.Context, name string) bool {
 	return err == nil && strings.TrimSpace(string(out)) == "true"
 }
 
+// Diagnose reports exactly what the running probe sees: the `inspect` exit/stderr
+// and the raw {{.State.Running}} value — so a "not running" verdict is explainable
+// (no such container, VM unreachable, unexpected value) rather than a silent false.
+func (Engine) Diagnose(ctx context.Context, name string) string {
+	out, err := exec.CommandContext(ctx, Binary, "inspect", "-f", "{{.State.Running}}", name).Output()
+	msg := fmt.Sprintf("`%s inspect %s`: exit=%v, out=%q", Binary, name, err, strings.TrimSpace(string(out)))
+	if ee, ok := err.(*exec.ExitError); ok {
+		msg += fmt.Sprintf(", stderr=%q", strings.TrimSpace(string(ee.Stderr)))
+	}
+	return msg
+}
+
 // Logs returns the last `tail` lines of a container's stdout/stderr. Best-effort.
 func (Engine) Logs(name string, tail int) string {
 	out, err := exec.Command(Binary, "logs", "--tail", strconv.Itoa(tail), name).CombinedOutput()

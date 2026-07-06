@@ -61,7 +61,7 @@ func (m *model) openNewAgentChoice() {
 					return errModalMsg{err}
 				}
 				if name != "" {
-					go func() { _ = cl.Launch(name, false, io.Discard) }()
+					go func() { _ = cl.Launch(name, false, false, io.Discard) }()
 				}
 				st, _ := cl.State()
 				return polledMsg(st)
@@ -95,7 +95,7 @@ func (m *model) agentStartStop() tea.Cmd {
 	switch a.Status {
 	case "down":
 		m.flash = "starting " + a.Name + "…" // status (hub) drives the rest
-		return m.action(func(id string) error { return m.cl.Launch(id, false, io.Discard) })
+		return m.action(func(id string) error { return m.cl.Launch(id, false, false, io.Discard) })
 	case "launching", "stopping":
 		m.flash = a.Name + " is " + a.Status + "…"
 		return nil

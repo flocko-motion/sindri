@@ -164,9 +164,10 @@ func (c *HTTP) PodInfo(name string) (string, error) {
 
 // Launch spins a pod for an existing agent (shell=true runs a bare shell instead
 // of Claude), streaming the hub's build/start progress to out so a long image
-// build isn't a frozen prompt. The failure, if any, rides back in a trailer.
-func (c *HTTP) Launch(name string, shell bool, out io.Writer) error {
-	body, err := json.Marshal(hub.NameReq{Name: name, Shell: shell})
+// build isn't a frozen prompt. debug=true streams the hub's liveness-probe detail
+// during the wait. The failure, if any, rides back in a trailer.
+func (c *HTTP) Launch(name string, shell, debug bool, out io.Writer) error {
+	body, err := json.Marshal(hub.NameReq{Name: name, Shell: shell, Debug: debug})
 	if err != nil {
 		return err
 	}

@@ -47,6 +47,10 @@ type Runtime interface {
 	AttachCmd(name string, args ...string) *exec.Cmd
 	Running(name string) bool
 	RunningContext(ctx context.Context, name string) bool
+	// Diagnose returns a one-line, human-readable account of what the running
+	// probe actually observes for name (raw command result, stderr, parsed state)
+	// — so a "not running" verdict is explainable, not a silent false.
+	Diagnose(ctx context.Context, name string) string
 	Logs(name string, tail int) string
 	Info(name string) string
 	Rm(name string) error
@@ -79,6 +83,7 @@ func (noop) ExecInteractive(string, ...string) error                    { return
 func (noop) AttachCmd(string, ...string) *exec.Cmd                      { return exec.Command("true") }
 func (noop) Running(string) bool                                        { return false }
 func (noop) RunningContext(context.Context, string) bool                { return false }
+func (noop) Diagnose(context.Context, string) string                    { return "no container runtime configured" }
 func (noop) Logs(string, int) string                                    { return "" }
 func (noop) Info(string) string                                         { return "" }
 func (noop) Rm(string) error                                            { return errNoRuntime }
@@ -113,6 +118,10 @@ func Running(name string) bool { return active.Running(name) }
 func RunningContext(ctx context.Context, name string) bool {
 	return active.RunningContext(ctx, name)
 }
+
+// Diagnose returns a one-line account of what the running probe observes for name,
+// so a "not running" verdict can be explained instead of shrugged at.
+func Diagnose(ctx context.Context, name string) string { return active.Diagnose(ctx, name) }
 
 // Logs returns the last `tail` lines of a pod's output.
 func Logs(name string, tail int) string { return active.Logs(name, tail) }

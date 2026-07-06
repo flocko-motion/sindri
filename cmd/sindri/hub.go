@@ -34,7 +34,7 @@ type backend interface {
 	StopAgent(name string) error
 	AgentPane(name string, lines int) (string, error)
 	Clients(name string) ([]hub.ClientView, error)
-	Launch(name string, shell bool, out io.Writer) error
+	Launch(name string, shell, debug bool, out io.Writer) error
 	Tell(name, msg, source string) error
 	State() (hub.BoardState, error)
 	Log(name string) ([]store.Event, error)

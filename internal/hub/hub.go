@@ -12,6 +12,7 @@
 package hub
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -405,7 +406,7 @@ func (h *Hub) StopAgent(project, name string) error {
 // workspace worktree is created on demand; the pod runs interactive Claude in a
 // tmux session named after the agent (or a bare shell when shell is true — used
 // for deterministic demos and debugging).
-func (h *Hub) Launch(project, name string, shell bool, progress io.Writer) (err error) {
+func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer) (err error) {
 	ps := h.store.For(project)
 	root := h.projectRoot(project)
 	a, ok, err := ps.GetAgent(name)
@@ -566,12 +567,20 @@ func (h *Hub) Launch(project, name string, shell bool, progress io.Writer) (err 
 	// the launching intent, so the board shows "down", not a stuck "launching").
 	fmt.Fprintf(w, "Waiting for %s to come up…\n", name)
 	deadline := time.Now().Add(launchReadyTimeout)
+	shown := 0
 	for !h.agentAlive(project, name) {
+		if full := container.Logs(cName, 1000); len(full) > shown { // follow the container's output during the wait
+			fmt.Fprint(w, full[shown:])
+			shown = len(full)
+		}
+		if debug { // --debug: surface what the hub's liveness probe actually observes
+			fmt.Fprintf(w, "  [debug] %s\n", container.Diagnose(context.Background(), cName))
+		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("%s launched but didn't come up within %s: %s (check `sindri agent pane %s`)",
 				name, launchReadyTimeout, h.launchDiagnostic(project, name), name)
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(time.Second)
 	}
 	h.setLifecycle(project, name, "") // observed up — clear the launching intent now
 	fmt.Fprintf(w, "Agent %s is up.\n", name)

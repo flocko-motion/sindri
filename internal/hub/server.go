@@ -76,10 +76,11 @@ type TellReq struct {
 }
 
 // NameReq is the body for operations addressing one agent (POST /launch) or PR
-// (POST /merge). Shell applies to /launch only.
+// (POST /merge). Shell and Debug apply to /launch only.
 type NameReq struct {
 	Name  string `json:"name"`
 	Shell bool   `json:"shell"`
+	Debug bool   `json:"debug"` // stream the hub's liveness-probe detail during the launch wait
 }
 
 // globalRoutes are the only control endpoints valid without a repo context: the
@@ -181,7 +182,7 @@ func (h *Hub) Handler() http.Handler {
 		if f, ok := w.(http.Flusher); ok {
 			fw.f = f
 		}
-		if err := h.Launch(h.reqProject(r), req.Name, req.Shell, fw); err != nil {
+		if err := h.Launch(h.reqProject(r), req.Name, req.Shell, req.Debug, fw); err != nil {
 			fmt.Fprintf(fw, "error: %v\n", err)
 			w.Header().Set("X-Sindri-Error", err.Error())
 		}

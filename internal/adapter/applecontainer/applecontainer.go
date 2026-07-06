@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -28,16 +29,35 @@ var Binary = "container"
 type Engine struct{}
 
 // inspectEntry is the slice of `container inspect`/`ls --format json` we read.
+// NOTE: configuration.image is an OBJECT ({reference, descriptor}), not a string —
+// modelling it as a string made json.Unmarshal fail on the whole entry, and because
+// the callers swallowed that error as "false", a live container read as down. Keep
+// this shape faithful to `container inspect`'s real output.
 type inspectEntry struct {
 	ID     string `json:"id"`
 	Status struct {
 		State string `json:"state"`
 	} `json:"status"`
 	Configuration struct {
-		ID     string            `json:"id"`
-		Image  string            `json:"image"`
+		ID    string `json:"id"`
+		Image struct {
+			Reference string `json:"reference"`
+		} `json:"image"`
 		Labels map[string]string `json:"labels"`
 	} `json:"configuration"`
+}
+
+// parseInspect unmarshals `container inspect`/`ls` JSON. A shape mismatch here is a
+// BUG in our model of the tool's output — never a normal "not present" — so it is
+// logged loudly instead of being swallowed into a misleading false/empty. (A silent
+// return-false on exactly this kind of error once cost hours of misdiagnosis.)
+func parseInspect(what string, raw []byte) ([]inspectEntry, error) {
+	var entries []inspectEntry
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		log.Printf("applecontainer: %s returned JSON we can't parse (adapter bug — schema drift?): %v", what, err)
+		return nil, err
+	}
+	return entries, nil
 }
 
 // runArgs builds `container run -d …`. Unlike podman there is no `--userns` (each
@@ -109,13 +129,32 @@ func (e Engine) Running(name string) bool { return e.RunningContext(context.Back
 func (Engine) RunningContext(ctx context.Context, name string) bool {
 	out, err := exec.CommandContext(ctx, Binary, "inspect", name).Output()
 	if err != nil {
-		return false
+		return false // no such container / apiserver down — a legitimate "not running"
 	}
-	var entries []inspectEntry
-	if json.Unmarshal(out, &entries) != nil || len(entries) == 0 {
+	entries, err := parseInspect("inspect "+name, out)
+	if err != nil || len(entries) == 0 {
 		return false
 	}
 	return entries[0].Status.State == "running"
+}
+
+// Diagnose reports exactly what the running probe sees: the `inspect` exit/stderr,
+// how many entries parsed, and the state string — so a "not running" verdict is
+// explainable (tool missing, apiserver error, unexpected state) rather than a
+// silent false. It mirrors RunningContext's command so it reflects the real probe.
+func (Engine) Diagnose(ctx context.Context, name string) string {
+	out, err := exec.CommandContext(ctx, Binary, "inspect", name).Output()
+	msg := fmt.Sprintf("`%s inspect %s`: exit=%v, stdout=%dB", Binary, name, err, len(out))
+	if ee, ok := err.(*exec.ExitError); ok {
+		msg += fmt.Sprintf(", stderr=%q", strings.TrimSpace(string(ee.Stderr)))
+	}
+	var entries []inspectEntry
+	if e := json.Unmarshal(out, &entries); e != nil {
+		return msg + fmt.Sprintf(", json-error=%v", e)
+	} else if len(entries) == 0 {
+		return msg + ", entries=0"
+	}
+	return msg + fmt.Sprintf(", state=%q -> running=%v", entries[0].Status.State, entries[0].Status.State == "running")
 }
 
 // Logs returns the last `tail` lines of a container's output. Apple `container logs`
@@ -138,12 +177,12 @@ func (Engine) Info(name string) string {
 	if err != nil {
 		return ""
 	}
-	var entries []inspectEntry
-	if json.Unmarshal(out, &entries) != nil || len(entries) == 0 {
+	entries, err := parseInspect("inspect "+name, out)
+	if err != nil || len(entries) == 0 {
 		return ""
 	}
 	c := entries[0]
-	return fmt.Sprintf("name:  %s\nstate: %s\nimage: %s\nid:    %s", name, c.Status.State, c.Configuration.Image, c.ID)
+	return fmt.Sprintf("name:  %s\nstate: %s\nimage: %s\nid:    %s", name, c.Status.State, c.Configuration.Image.Reference, c.ID)
 }
 
 // Rm force-removes a container (and its micro-VM).
@@ -161,8 +200,8 @@ func (Engine) ListByLabelContext(ctx context.Context, label, value string) ([]st
 	if err != nil {
 		return nil, fmt.Errorf("container ls: %w", err)
 	}
-	var entries []inspectEntry
-	if err := json.Unmarshal(out, &entries); err != nil {
+	entries, err := parseInspect("ls --format json", out)
+	if err != nil {
 		return nil, fmt.Errorf("container ls json: %w", err)
 	}
 	var names []string

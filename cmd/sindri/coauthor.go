@@ -97,7 +97,7 @@ func ensureCoauthorAlive(cl *client.HTTP, proj, name string) error {
 	}
 	if statusOf(st, proj, name) == "down" {
 		fmt.Fprintf(os.Stderr, "launching agent '%s' (first run builds the agent image — may take a few minutes)…\n", name)
-		if err := cl.Launch(name, false); err != nil {
+		if err := cl.Launch(name, false, false, os.Stderr); err != nil {
 			return err
 		}
 	}

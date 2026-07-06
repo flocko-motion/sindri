@@ -183,7 +183,8 @@ func (h *Hub) container(project, name string) string {
 func (h *Hub) launchDiagnostic(project, name string) string {
 	c := h.container(project, name)
 	if !container.Running(c) {
-		return fmt.Sprintf("the runtime does not report container %s as running", c)
+		return fmt.Sprintf("the runtime does not report container %s as running [%s]", c,
+			container.Diagnose(context.Background(), c))
 	}
 	if out, err := container.Exec(c, append([]string{"tmux"}, tmux.HasSession(name)...)...); err != nil {
 		msg := strings.TrimSpace(string(out))
