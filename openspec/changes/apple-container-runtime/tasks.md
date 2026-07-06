@@ -1,10 +1,10 @@
 ## 1. Spike: verify Apple `container` maps to sindri's needs
 
-- [ ] 1.1 On macOS 26, install Apple `container`; confirm the agent OCI image builds (`container build`) or loads, and runs detached with a **host bind mount** (worktree + `~/.claude`).
-- [ ] 1.2 Verify `exec` and interactive `exec -it` (attach): TTY, resize, and signal behaviour match `podman exec -it` closely enough for the tmux-attach flow.
-- [ ] 1.3 Verify running-state inspect, `logs`, `rm`, and **label-based listing** (needed for orphan detection). Note any format/flag differences.
+- [x] 1.1 On macOS 26, install Apple `container`; confirm the agent OCI image builds (`container build`) or loads, and runs detached with a **host bind mount** (worktree + `~/.claude`).
+- [x] 1.2 Verify `exec` and interactive `exec -it` (attach): TTY, resize, and signal behaviour match `podman exec -it` closely enough for the tmux-attach flow.
+- [x] 1.3 Verify running-state inspect, `logs`, `rm`, and **label-based listing** (needed for orphan detection). Note any format/flag differences.
 - [ ] 1.4 Verify the hub reaches an agent in a `container` micro-VM over the existing TCP agent channel (token auth), since a shared unix socket won't cross the micro-VM boundary.
-- [ ] 1.5 Write up gaps; if any primitive is missing, decide shim vs. defer.
+- [x] 1.5 Write up gaps; if any primitive is missing, decide shim vs. defer.
 
 ## 2. Define the runtime port (podman-only first)
 

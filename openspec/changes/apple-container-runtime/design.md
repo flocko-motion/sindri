@@ -75,3 +75,30 @@ semantics differ.
 - **Scope creep.** The abstraction (port + podman backend) is worthwhile on its own;
   land it first, then add the `container` backend behind it — so the refactor is not
   gated on Apple-`container` verification.
+
+## Spike findings (Apple `container` 1.0.0, macOS 26) — 2026-07-06
+
+Verified against `container` CLI 1.0.0 with a throwaway alpine container:
+
+- **Flag surface maps to podman**: `-d`, `-v`/`--mount`, `-l`/`--label`, `--name`,
+  `-e`, `-i`/`-t`, `-w`, `--entrypoint`, `--rm`. `RunArgs` translation is mechanical.
+- **Bind mounts work**: `-v /tmp:/host` + `container exec … cat /host/<file>` read a
+  host-written file. The overlay-image-root + bind-mounted-worktree model holds.
+- **Per-container isolation confirmed** (the point): each container gets its own IP
+  (`192.168.64.x`, gateway `.1`) and its own memory (default 1024 MB). One
+  container's OOM/crash can't touch another.
+- **Running state**: `container inspect <name>` → `.status.state == "running"` (also
+  in `container ls --format json`). Maps `Running()`.
+- **`logs`, `rm -f`, `exec` work.** Service lifecycle: `container system start`
+  (installs a kata Linux kernel once) — so this backend's `Healthy` probes
+  `container system status`.
+- **DIFFERENCE — no `container ls --filter label=`.** Orphan detection (`ListByLabel`)
+  can't use a native filter; the backend must `container ls --all --format json` and
+  match labels in Go. (Labels live under each entry's `configuration`.)
+- **OPEN — micro-VM → hub networking (task 1.4).** The agent gets its own IP and the
+  host is the gateway (`192.168.64.1`), so the hub's TCP agent channel must listen on
+  an address reachable from the container network (e.g. `0.0.0.0` / the gateway), not
+  only `127.0.0.1`. To confirm with a real hub + agent during task 3.
+- **OPEN — image build (`container build`) and interactive `exec -it` attach**
+  (TTY/resize/signals) not yet exercised end to end; low risk (buildkit + podman-like
+  flags), confirm during task 3.
