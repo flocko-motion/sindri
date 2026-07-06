@@ -46,6 +46,44 @@ type ImageBuilder interface {
 	Build(ctxDir, dockerfile string, out io.Writer) error
 }
 
+// buildProgress collapses a build's plain, line-oriented output into a single
+// in-place status line (carriage-return overwrite, padded to erase the previous
+// one), so a build — cached or fresh — shows one moving line instead of scrolling
+// the whole buildkit log. finish() ends the line. A non-TTY consumer just sees the
+// last state each CR yields; the surrounding messages are written separately.
+type buildProgress struct {
+	out  io.Writer
+	line []byte
+}
+
+func (p *buildProgress) Write(b []byte) (int, error) {
+	for _, c := range b {
+		if c == '\n' || c == '\r' {
+			p.flush()
+			continue
+		}
+		p.line = append(p.line, c)
+	}
+	return len(b), nil
+}
+
+func (p *buildProgress) flush() {
+	s := strings.TrimSpace(string(p.line))
+	p.line = p.line[:0]
+	if s == "" {
+		return
+	}
+	if r := []rune(s); len(r) > 90 {
+		s = string(r[:90]) + "…"
+	}
+	fmt.Fprintf(p.out, "\r  %-92s", s) // CR + pad to overwrite a longer previous line
+}
+
+func (p *buildProgress) finish() {
+	p.flush()
+	fmt.Fprint(p.out, "\n")
+}
+
 // EnsureImageWith runs the shared build recipe — hash the embedded context + ISO
 // week (+ any custom Dockerfile) into a key, skip when it's unchanged and the image
 // is present, else materialize and build — delegating the backend-specific steps
@@ -118,8 +156,13 @@ func EnsureImageWith(projectRoot string, out io.Writer, b ImageBuilder) error {
 	}
 
 	fmt.Fprintf(out, "Building agent image %s...\n", ImageName)
-	if err := b.Build(ctxDir, filepath.Join(ctxDir, "Dockerfile"), out); err != nil {
-		return err
+	// Collapse the (verbose) build log into one in-place-updating line, so the caller
+	// sees progress happening without pages of buildkit output.
+	bp := &buildProgress{out: out}
+	buildErr := b.Build(ctxDir, filepath.Join(ctxDir, "Dockerfile"), bp)
+	bp.finish()
+	if buildErr != nil {
+		return buildErr
 	}
 	if err := os.WriteFile(keyFile, []byte(buildKey), 0o644); err != nil {
 		return fmt.Errorf("write build key: %w", err)
