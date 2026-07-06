@@ -441,7 +441,7 @@ func (h *Hub) Launch(project, name string, shell bool, progress io.Writer) (err 
 	if err := container.EnsureImage(root, w); err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "Image ready. Starting pod %s…\n", h.container(project, name))
+	fmt.Fprintf(w, "Image ready. Starting container %s…\n", h.container(project, name))
 	wt := filepath.Join(root, a.Workspace)
 	if !git.HasCommits(root) {
 		return fmt.Errorf("repo has no commits yet")

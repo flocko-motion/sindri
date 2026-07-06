@@ -174,7 +174,7 @@ func (m model) agentItems() []metaItem {
 	if a.PR != "" {
 		prIt.kind, prIt.value = "pr", a.PR
 	}
-	pod := "pod:       " + m.agentContainer(a)
+	pod := "container: " + m.agentContainer(a)
 	if m.agentView == "pod" { // mark which view the main pane is showing
 		pod += dimStyle.Render("  ◂ shown")
 	}
@@ -217,7 +217,7 @@ func (m model) paneLines() []string {
 	}
 	if m.agentView == "pod" { // pod-info view (selected the container item)
 		if strings.TrimSpace(m.agentPod) == "" {
-			return []string{dimStyle.Render("(fetching pod info…)")}
+			return []string{dimStyle.Render("(fetching container info…)")}
 		}
 		return strings.Split(strings.TrimRight(m.agentPod, "\n"), "\n")
 	}
@@ -232,7 +232,7 @@ func (m model) paneLines() []string {
 		if hasBody { // pod is up and booting — show its startup output
 			return body
 		}
-		return []string{dimStyle.Render("launching… (building image / starting pod)")}
+		return []string{dimStyle.Render("launching… (building image / starting container)")}
 	default: // running
 		if !hasBody {
 			return []string{dimStyle.Render("(starting…)")}
@@ -314,7 +314,7 @@ func (m model) agentDetailFor(a hub.AgentView) []string {
 		"task:      " + dash(a.Task),
 		"pr:        " + dash(a.PR),
 		"workspace: " + dash(a.Workspace),
-		"pod:       " + m.agentContainer(a),
+		"container: " + m.agentContainer(a),
 	}
 	if a.Name == m.selID() { // dial-ins are fetched for the selected agent only
 		ls = append(ls, clientLines(m.agentClients)...)

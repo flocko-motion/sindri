@@ -133,7 +133,7 @@ func agentListCmd() *cobra.Command {
 func agentNewCmd() *cobra.Command {
 	var role string
 	c := &cobra.Command{
-		Use: "new [name]", Short: "Register an agent identity (no pod; name optional — auto dwarf name)", Args: cobra.MaximumNArgs(1),
+		Use: "new [name]", Short: "Register an agent identity (no container; name optional — auto dwarf name)", Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			var want string
 			if len(args) == 1 {
@@ -155,7 +155,7 @@ func agentNewCmd() *cobra.Command {
 
 func agentDeleteCmd() *cobra.Command {
 	return &cobra.Command{
-		Use: "delete <name>", Aliases: []string{"rm"}, Short: "Delete an agent (pod, socket, worktree, identity)", Args: cobra.ExactArgs(1),
+		Use: "delete <name>", Aliases: []string{"rm"}, Short: "Delete an agent (container, socket, worktree, identity)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
 				if err := b.DeleteAgent(a.Name); err != nil {
@@ -194,7 +194,7 @@ func agentPaneCmd() *cobra.Command {
 func agentStartCmd() *cobra.Command {
 	var shell bool
 	c := &cobra.Command{
-		Use: "start <name>", Short: "Start the agent: spin a pod that assumes its identity (runs Claude)", Args: cobra.ExactArgs(1),
+		Use: "start <name>", Short: "Start the agent: spin a container that assumes its identity (runs Claude)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
 				// Launch streams its build/start progress to stderr and ends with a
@@ -210,7 +210,7 @@ func agentStartCmd() *cobra.Command {
 
 func agentStopCmd() *cobra.Command {
 	return &cobra.Command{
-		Use: "stop <name>", Short: "Tear down the agent's pod (keeps its identity)", Args: cobra.ExactArgs(1),
+		Use: "stop <name>", Short: "Tear down the agent's container (keeps its identity)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
 				if err := b.StopAgent(a.Name); err != nil {
@@ -229,10 +229,10 @@ func agentStopCmd() *cobra.Command {
 func agentRestartCmd() *cobra.Command {
 	var shell bool
 	c := &cobra.Command{
-		Use: "restart <name>", Short: "Restart the agent's pod (starts it if it wasn't running)", Args: cobra.ExactArgs(1),
+		Use: "restart <name>", Short: "Restart the agent's container (starts it if it wasn't running)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
-				if a.Status != "down" { // tear down the running pod first
+				if a.Status != "down" { // tear down the running container first
 					if err := b.StopAgent(a.Name); err != nil {
 						return err
 					}
