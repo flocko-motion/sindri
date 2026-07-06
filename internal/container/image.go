@@ -23,7 +23,7 @@ import (
 	"github.com/flo-at/sindri/internal/paths"
 )
 
-const ImageName = "sindri-agent:test"
+const ImageName = "sindri-agent:latest"
 
 // buildContext is the agent image's whole build context — Dockerfile, the
 // entrypoint, the yazi helper, and the docker shims — embedded so the binary
