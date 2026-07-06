@@ -17,7 +17,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
-	"github.com/flo-at/sindri/internal/adapter/pod"
+	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/adapter/td"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -136,7 +136,7 @@ func (h *Hub) assignedReviewInject(project, reviewer string, pr store.PR, prID, 
 func (h *Hub) runningReviewer(project string) string {
 	roster, _ := h.store.For(project).Roster()
 	for _, a := range roster {
-		if a.Role == "reviewer" && pod.Running(h.container(project, a.Name)) && h.sessionAlive(project, a.Name) {
+		if a.Role == "reviewer" && container.Running(h.container(project, a.Name)) && h.sessionAlive(project, a.Name) {
 			return a.Name
 		}
 	}

@@ -4,43 +4,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
-
-func TestBuildFailureDetail(t *testing.T) {
-	// A connection failure (the macOS "machine not started" case) surfaces the
-	// message AND the podman-machine hint.
-	got := buildFailureDetail("Error: Cannot connect to Podman socket")
-	if !strings.Contains(got, "Cannot connect") || !strings.Contains(got, "podman machine start") {
-		t.Errorf("connection failure should surface the error + hint, got:\n%s", got)
-	}
-	// Empty output still yields the hint (better than nothing).
-	if got := buildFailureDetail(""); !strings.Contains(got, "podman machine") {
-		t.Errorf("empty output should fall back to the hint, got: %q", got)
-	}
-	// An ordinary build error (no connection signal) is surfaced without the hint.
-	got = buildFailureDetail("Step 3/9: RUN apt-get install foo\nE: Unable to locate package foo")
-	if !strings.Contains(got, "Unable to locate package foo") {
-		t.Errorf("build error should be surfaced, got:\n%s", got)
-	}
-	if strings.Contains(got, "podman machine") {
-		t.Errorf("a normal build error must not get the machine hint, got:\n%s", got)
-	}
-	// Long output is tailed to the last lines (where the error lands).
-	var b strings.Builder
-	for i := 0; i < 50; i++ {
-		b.WriteString("layer line\n")
-	}
-	b.WriteString("Error: final failure line")
-	got = buildFailureDetail(b.String())
-	if !strings.Contains(got, "final failure line") {
-		t.Errorf("tail must include the final error line, got:\n%s", got)
-	}
-	if strings.Count(got, "\n") > 12 {
-		t.Errorf("tail should be bounded (~12 lines), got %d lines", strings.Count(got, "\n"))
-	}
-}
 
 // The build context must be embedded so an installed binary can build the agent
 // image for any repo — the files the Dockerfile COPYs have to be present.

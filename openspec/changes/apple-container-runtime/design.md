@@ -35,18 +35,23 @@ semantics differ.
 
 ## Decisions
 
-- **The port.** A `Runtime` interface (likely in a new `internal/adapter/runtime`,
-  or promoted within `internal/adapter/pod`) with methods mirroring today's surface:
-  `Run`, `Exec`, `ExecContext`, `ExecInteractive`, `Running`, `RunningContext`,
-  `Logs`, `Info`, `Rm`, `ListByLabel`, `Healthy`/`Check`, and image `Ensure`. Shared
-  value types (`RunOpts`, `Mount`) move to the port package. Image building is part
-  of the port (podman `build` vs `container build`).
-- **Backends.** `podman` backend = today's code behind the interface. `applecontainer`
-  backend = the same methods mapped to the `container` CLI. Each backend owns its CLI
-  quirks (arg construction, output parsing, label filtering).
-- **Selection.** A single startup choice: config key (e.g. `runtime: podman|container`)
-  with a platform default (podman everywhere; `container` opt-in on macOS). Resolved
-  once into the concrete `Runtime`, injected into the hub. Linux forces podman.
+- **The port lives in the core (hexagonal).** `internal/container` IS the abstraction:
+  it declares the `Runtime` interface — `Run`, `Exec`, `ExecContext`,
+  `ExecInteractive`, `Running`, `RunningContext`, `Logs`, `Info`, `Rm`, `ListByLabel`,
+  `Check`, `Healthy`, `EnsureImage`, `ImageName` — plus the shared value types
+  (`RunOpts`, `Mount`) and the shared, backend-agnostic build recipe (the embedded
+  buildctx, materialize, build-key, `ImageName`). It imports **no** adapter.
+- **Adapters implement the port.** `internal/adapter/pod` (podman) and
+  `internal/adapter/applecontainer` become `Engine` types implementing
+  `container.Runtime`; each imports `internal/container` (for the types + shared build
+  helpers) and owns its CLI quirks (argv, output parsing, label filtering, the actual
+  `build` invocation). The adapters do **not** depend on each other.
+- **Core depends only on the abstraction.** `internal/hub`, `cmd/sindri`, and
+  `internal/tui` call `internal/container` (the port), never a specific adapter.
+- **Wiring at the composition root.** `cmd/sindri` (main) is the only place that
+  imports the adapters; it picks one from config and injects it via
+  `container.Use(engine)`. Platform default: podman everywhere, `container` opt-in on
+  macOS; Linux forces podman. Resolved once at startup.
 - **Identity/naming.** Container naming (`hub.Container`) and label scheme stay; each
   backend maps them to its `ls --filter`/inspect. Orphan detection (`ListByLabel`)
   must work on both.

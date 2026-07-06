@@ -11,7 +11,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/flo-at/sindri/internal/adapter/pod"
+	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/spf13/cobra"
@@ -21,10 +21,10 @@ import (
 // agentPreflight warns — without blocking — when podman is unreachable. Every
 // agent subcommand ultimately needs pods, so infrastructure being offline is the
 // likeliest reason nothing works; say so up front (e.g. "all agents down") instead
-// of leaving the user to infer it. The probe is time-bounded (see pod.Healthy) so
+// of leaving the user to infer it. The probe is time-bounded (see container.Healthy) so
 // a wedged VM can't hang the command.
 func agentPreflight(*cobra.Command, []string) {
-	if ok, hint := pod.Healthy(); !ok {
+	if ok, hint := container.Healthy(); !ok {
 		fmt.Fprintf(os.Stderr, "warning: %s\n", hint)
 	}
 }

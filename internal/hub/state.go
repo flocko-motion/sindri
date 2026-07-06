@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/flo-at/sindri/internal/adapter/pod"
+	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
@@ -100,7 +100,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
 			defer cancel()
-			if !pod.RunningContext(ctx, h.container(a.Project, a.Name)) {
+			if !container.RunningContext(ctx, h.container(a.Project, a.Name)) {
 				return
 			}
 			if cs, ok := h.clientsCtx(ctx, a.Project, a.Name); ok {
@@ -135,7 +135,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
 			defer cancel()
-			if pods, err := pod.ListByLabelContext(ctx, "sindri.project", proj.Path); err == nil {
+			if pods, err := container.ListByLabelContext(ctx, "sindri.project", proj.Path); err == nil {
 				orphanLists[i] = pods
 			}
 		}(i, proj)
@@ -182,7 +182,7 @@ func (h *Hub) agentAlive(project, name string) bool {
 // agentAliveCtx is agentAlive with each podman probe bounded by ctx, so a wedged
 // pod times out to "down" instead of blocking. Used by the board read.
 func (h *Hub) agentAliveCtx(ctx context.Context, project, name string) bool {
-	return pod.RunningContext(ctx, h.container(project, name)) && h.sessionAliveCtx(ctx, project, name)
+	return container.RunningContext(ctx, h.container(project, name)) && h.sessionAliveCtx(ctx, project, name)
 }
 
 // Clients lists the humans attached to an agent's tmux session (dial-ins). Errors
@@ -199,7 +199,7 @@ func (h *Hub) Clients(project, name string) ([]ClientView, error) {
 // clientsCtx parses `tmux list-clients` for the agent's session, bounded by ctx.
 // ok=false when the session is absent (so it also serves as a liveness probe).
 func (h *Hub) clientsCtx(ctx context.Context, project, name string) (cs []ClientView, ok bool) {
-	out, err := pod.ExecContext(ctx, h.container(project, name), append([]string{"tmux"}, tmux.ListClients(name)...)...)
+	out, err := container.ExecContext(ctx, h.container(project, name), append([]string{"tmux"}, tmux.ListClients(name)...)...)
 	if err != nil {
 		return nil, false
 	}
@@ -249,7 +249,7 @@ func (h *Hub) sessionAlive(project, name string) bool {
 
 // sessionAliveCtx is sessionAlive bounded by ctx.
 func (h *Hub) sessionAliveCtx(ctx context.Context, project, name string) bool {
-	_, err := pod.ExecContext(ctx, h.container(project, name), append([]string{"tmux"}, tmux.HasSession(name)...)...)
+	_, err := container.ExecContext(ctx, h.container(project, name), append([]string{"tmux"}, tmux.HasSession(name)...)...)
 	return err == nil
 }
 
@@ -258,13 +258,13 @@ func (h *Hub) sessionAliveCtx(ctx context.Context, project, name string) bool {
 // output. Empty when truly down.
 func (h *Hub) AgentPane(project, name string, lines int) (string, error) {
 	if h.sessionAlive(project, name) {
-		out, err := pod.Exec(h.container(project, name), append([]string{"tmux"}, tmux.CapturePane(name, lines)...)...)
+		out, err := container.Exec(h.container(project, name), append([]string{"tmux"}, tmux.CapturePane(name, lines)...)...)
 		if err != nil {
 			return "", err
 		}
 		return string(out), nil
 	}
-	if logs := pod.Logs(h.container(project, name), lines); logs != "" {
+	if logs := container.Logs(h.container(project, name), lines); logs != "" {
 		return logs, nil
 	}
 	return h.launchOutput(project, name), nil
@@ -275,7 +275,7 @@ func (h *Hub) AgentPane(project, name string, lines int) (string, error) {
 func (h *Hub) PodInfo(project, name string) (string, error) {
 	c := h.container(project, name)
 	header := "container: " + c + "\n\n"
-	if info := pod.Info(c); info != "" {
+	if info := container.Info(c); info != "" {
 		return header + info, nil
 	}
 	return header + "(no container — agent is down)", nil

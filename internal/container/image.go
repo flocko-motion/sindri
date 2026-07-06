@@ -10,14 +10,12 @@
 package container
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"embed"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -40,7 +38,20 @@ var buildContext embed.FS
 // weekly cache key is stale. Build progress is written to out (so the hub can
 // tee it into an agent's live-screen region during launch). It is independent of
 // projectRoot — the recipe is embedded — so it works for any orchestrated repo.
-func Ensure(projectRoot string, out io.Writer) error {
+// ImageBuilder is the backend-specific slice of image building that the shared
+// recipe delegates to: whether the image is already present, and how to build it.
+// The podman and apple-container adapters each provide one.
+type ImageBuilder interface {
+	ImageExists() bool
+	Build(ctxDir, dockerfile string, out io.Writer) error
+}
+
+// EnsureImageWith runs the shared build recipe — hash the embedded context + ISO
+// week (+ any custom Dockerfile) into a key, skip when it's unchanged and the image
+// is present, else materialize and build — delegating the backend-specific steps
+// (image-exists check, build invocation) to b. It's independent of projectRoot: the
+// recipe is embedded, so it works for any orchestrated repo.
+func EnsureImageWith(projectRoot string, out io.Writer, b ImageBuilder) error {
 	// A custom recipe in the central sindri home replaces the embedded Dockerfile
 	// (read once, folded into the build key below so edits rebuild).
 	custom := customDockerfile()
@@ -84,8 +95,7 @@ func Ensure(projectRoot string, out io.Writer) error {
 	}
 	keyFile := filepath.Join(cacheDir, "build-key")
 	if cached, err := os.ReadFile(keyFile); err == nil &&
-		strings.TrimSpace(string(cached)) == buildKey &&
-		exec.Command("podman", "image", "exists", ImageName).Run() == nil {
+		strings.TrimSpace(string(cached)) == buildKey && b.ImageExists() {
 		return nil // up to date and the image is actually present
 	}
 
@@ -108,54 +118,13 @@ func Ensure(projectRoot string, out io.Writer) error {
 	}
 
 	fmt.Fprintf(out, "Building agent image %s...\n", ImageName)
-	// Capture podman's output alongside streaming it, so a failure carries the
-	// actual diagnostic — not a bare "exit status 125". The hub may be running
-	// detached (its stream goes to .sindri/hub.log), so the returned error is often
-	// the only place the caller sees why.
-	var captured bytes.Buffer
-	cmd := exec.Command("podman", "build", "-t", ImageName, "-f", filepath.Join(ctxDir, "Dockerfile"), ctxDir)
-	cmd.Stdout = io.MultiWriter(out, &captured)
-	cmd.Stderr = io.MultiWriter(out, &captured)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("podman build failed (%v):\n%s", err, buildFailureDetail(captured.String()))
+	if err := b.Build(ctxDir, filepath.Join(ctxDir, "Dockerfile"), out); err != nil {
+		return err
 	}
 	if err := os.WriteFile(keyFile, []byte(buildKey), 0o644); err != nil {
 		return fmt.Errorf("write build key: %w", err)
 	}
 	return nil
-}
-
-// buildFailureDetail distills podman's build output for an error message: the
-// meaningful tail (its own diagnostics), plus a hint for the most common cause of
-// a pre-build failure — podman not being reachable, notably on macOS/Windows where
-// it runs in a VM that must be started. Falls back to the hint alone when podman
-// printed nothing.
-func buildFailureDetail(out string) string {
-	var lines []string
-	for _, l := range strings.Split(out, "\n") {
-		if strings.TrimSpace(l) != "" {
-			lines = append(lines, strings.TrimRight(l, "\r"))
-		}
-	}
-	if len(lines) > 12 { // keep the tail, where podman's error lands
-		lines = lines[len(lines)-12:]
-	}
-	detail := strings.Join(lines, "\n")
-	low := strings.ToLower(out)
-	unreachable := detail == "" ||
-		strings.Contains(low, "cannot connect") ||
-		strings.Contains(low, "connection refused") ||
-		strings.Contains(low, "no such host") ||
-		strings.Contains(low, "machine") ||
-		strings.Contains(low, "is the podman")
-	if unreachable {
-		hint := "hint: podman doesn't look reachable. On macOS/Windows it runs in a VM — run `podman machine init` (first time) then `podman machine start`; check with `podman info`."
-		if detail == "" {
-			return hint
-		}
-		detail += "\n" + hint
-	}
-	return detail
 }
 
 // customDockerfile returns the path to a user-provided image recipe in the central

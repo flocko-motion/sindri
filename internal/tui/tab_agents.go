@@ -17,17 +17,17 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/flo-at/sindri/internal/adapter/pod"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
+	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub"
 )
 
-// attachCmd builds the interactive `podman exec -it … tmux attach` for an agent.
-// container is the agent's project-resolved pod (from the board), so it's correct
-// for any repo's agent — the board is multi-repo. name is the tmux session.
-func attachCmd(container, name string) *exec.Cmd {
-	args := append([]string{"exec", "-it", container, "tmux"}, tmux.Attach(name, false)...)
-	return exec.Command(pod.Binary, args...)
+// attachCmd builds the interactive `<runtime> exec -it … tmux attach` for an agent
+// through the container port, so it works whatever backend is wired. cname is the
+// agent's project-resolved pod (from the board — the board is multi-repo); name is
+// the tmux session.
+func attachCmd(cname, name string) *exec.Cmd {
+	return container.AttachCmd(cname, append([]string{"tmux"}, tmux.Attach(name, false)...)...)
 }
 
 // agentContainer is the agent's podman container, preferring the board's

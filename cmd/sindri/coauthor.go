@@ -13,7 +13,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/flo-at/sindri/internal/adapter/pod"
+	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/hub"
@@ -57,7 +57,7 @@ func newCoauthorCmd() *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(os.Stderr, "attaching to %s — detach with your tmux prefix then d\n", name)
-			return pod.ExecInteractive(hub.Container(root, name), append([]string{"tmux"}, tmux.Attach(name, false)...)...)
+			return container.ExecInteractive(hub.Container(root, name), append([]string{"tmux"}, tmux.Attach(name, false)...)...)
 		},
 	}
 }
