@@ -405,7 +405,7 @@ func (h *Hub) StopAgent(project, name string) error {
 // workspace worktree is created on demand; the pod runs interactive Claude in a
 // tmux session named after the agent (or a bare shell when shell is true — used
 // for deterministic demos and debugging).
-func (h *Hub) Launch(project, name string, shell bool) (err error) {
+func (h *Hub) Launch(project, name string, shell bool, progress io.Writer) (err error) {
 	ps := h.store.For(project)
 	root := h.projectRoot(project)
 	a, ok, err := ps.GetAgent(name)
@@ -415,14 +415,16 @@ func (h *Hub) Launch(project, name string, shell bool) (err error) {
 	if !ok {
 		return fmt.Errorf("no such agent %q — run 'sindri new %s' first", name, name)
 	}
-	// Tee the image build (+ our progress notes) into the agent's launch buffer
-	// so the TUI live-screen region shows it while the pod comes up.
+	// Tee build/start progress three ways: the launch buffer (TUI live-screen), the
+	// hub log (stderr), and progress — the caller's stream, so `agent start` shows
+	// the image build live instead of a frozen prompt (long ops must be visible).
 	buf := h.newLaunchBuf(project, name)
+	w := io.MultiWriter(os.Stderr, buf, progress)
 	// Pre-flight: podman must be installed and reachable. Fail fast with an
 	// actionable message (before touching status or staging an image build) rather
 	// than surfacing a cryptic exit code mid-build. On macOS/Windows this also
 	// auto-starts a stopped podman VM, teeing that progress into the launch buffer.
-	if err := container.Check(io.MultiWriter(os.Stderr, buf)); err != nil {
+	if err := container.Check(w); err != nil {
 		return err
 	}
 	// Status → launching immediately (cleared by State once the pod is up); on
@@ -436,10 +438,10 @@ func (h *Hub) Launch(project, name string, shell bool) (err error) {
 			h.notify()
 		}
 	}()
-	if err := container.EnsureImage(root, io.MultiWriter(os.Stderr, buf)); err != nil {
+	if err := container.EnsureImage(root, w); err != nil {
 		return err
 	}
-	fmt.Fprintf(buf, "Image ready. Starting pod %s…\n", h.container(project, name))
+	fmt.Fprintf(w, "Image ready. Starting pod %s…\n", h.container(project, name))
 	wt := filepath.Join(root, a.Workspace)
 	if !git.HasCommits(root) {
 		return fmt.Errorf("repo has no commits yet")
@@ -523,7 +525,7 @@ func (h *Hub) Launch(project, name string, shell bool) (err error) {
 	} else {
 		// Set up the agent's Claude home (credentials, config, system prompt) and
 		// mount it so Claude runs authenticated.
-		home, cfg, hasCreds, err := h.prepareClaudeHome(project, name, a.Role, buf)
+		home, cfg, hasCreds, err := h.prepareClaudeHome(project, name, a.Role, w)
 		if err != nil {
 			return err
 		}
@@ -558,6 +560,7 @@ func (h *Hub) Launch(project, name string, shell bool) (err error) {
 	if err := ps.Log(name, "launch", "started container="+cName); err != nil {
 		return err
 	}
+	fmt.Fprintf(w, "Agent %s launched — it will come up shortly (watch `sindri agent info %s`).\n", name, name)
 	go h.rehydrate(project, name) // resume once the session is up (D13)
 	h.notify()
 	return nil

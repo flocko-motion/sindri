@@ -173,7 +173,18 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"launched"}, h.Launch(h.reqProject(r), req.Name, req.Shell))
+		// Stream build/start progress so the client isn't frozen during a long image
+		// build; carry any error in a trailer (like /exec carries the exit code).
+		w.Header().Set("Trailer", "X-Sindri-Error")
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		fw := &flushWriter{w: w}
+		if f, ok := w.(http.Flusher); ok {
+			fw.f = f
+		}
+		if err := h.Launch(h.reqProject(r), req.Name, req.Shell, fw); err != nil {
+			fmt.Fprintf(fw, "error: %v\n", err)
+			w.Header().Set("X-Sindri-Error", err.Error())
+		}
 	})
 	mux.HandleFunc("POST /tell", func(w http.ResponseWriter, r *http.Request) {
 		var req TellReq

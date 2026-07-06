@@ -163,9 +163,23 @@ func (c *HTTP) PodInfo(name string) (string, error) {
 }
 
 // Launch spins a pod for an existing agent (shell=true runs a bare shell instead
-// of Claude — for demos/debugging).
-func (c *HTTP) Launch(name string, shell bool) error {
-	return c.post("/launch", hub.NameReq{Name: name, Shell: shell})
+// of Claude), streaming the hub's build/start progress to out so a long image
+// build isn't a frozen prompt. The failure, if any, rides back in a trailer.
+func (c *HTTP) Launch(name string, shell bool, out io.Writer) error {
+	body, err := json.Marshal(hub.NameReq{Name: name, Shell: shell})
+	if err != nil {
+		return err
+	}
+	resp, err := c.hc.Post(c.base+"/launch", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(out, resp.Body)
+	if e := resp.Trailer.Get("X-Sindri-Error"); e != "" {
+		return fmt.Errorf("%s", e)
+	}
+	return nil
 }
 
 // Tell delivers a provenance-stamped message into an agent's session.

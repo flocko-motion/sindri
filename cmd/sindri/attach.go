@@ -48,8 +48,13 @@ func agentAttachCmd() *cobra.Command {
 			if cname == "" {
 				return fmt.Errorf("can't resolve %q's container — restart the hub to pick up this build", name)
 			}
-			if !container.Running(cname) {
-				return fmt.Errorf("agent %q is not running", name)
+			// Trust the board's status (the same source `info`/`list` use) so the three
+			// commands never contradict each other.
+			switch a.Status {
+			case "down":
+				return fmt.Errorf("agent %q is not running (status: down)", name)
+			case "launching", "stopping":
+				return fmt.Errorf("agent %q is %s — try again in a moment", name, a.Status)
 			}
 			reportAttach(name, ro, a.Clients)
 			return container.ExecInteractive(cname, append([]string{"tmux"}, tmux.Attach(name, ro)...)...)

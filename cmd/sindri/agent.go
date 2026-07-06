@@ -197,11 +197,10 @@ func agentStartCmd() *cobra.Command {
 		Use: "start <name>", Short: "Start the agent: spin a pod that assumes its identity (runs Claude)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
-				if err := b.Launch(a.Name, shell); err != nil {
-					return err
-				}
-				fmt.Fprintf(os.Stderr, "started %s\n", a.Name)
-				return nil
+				// Launch streams its build/start progress to stderr and ends with a
+				// "launched — coming up" line; don't print a second, contradicting
+				// "started" (the agent isn't live until the board says so).
+				return b.Launch(a.Name, shell, os.Stderr)
 			})
 		},
 	}
@@ -233,17 +232,14 @@ func agentRestartCmd() *cobra.Command {
 		Use: "restart <name>", Short: "Restart the agent's pod (starts it if it wasn't running)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
-				verb := "restarted"
-				if a.Status == "down" {
-					verb = "started" // wasn't running — a plain start, not a restart
-				} else if err := b.StopAgent(a.Name); err != nil {
-					return err
+				if a.Status != "down" { // tear down the running pod first
+					if err := b.StopAgent(a.Name); err != nil {
+						return err
+					}
+					fmt.Fprintf(os.Stderr, "stopped %s — relaunching…\n", a.Name)
 				}
-				if err := b.Launch(a.Name, shell); err != nil {
-					return err
-				}
-				fmt.Fprintf(os.Stderr, "%s %s\n", verb, a.Name)
-				return nil
+				// Launch streams progress and ends with "launched — coming up".
+				return b.Launch(a.Name, shell, os.Stderr)
 			})
 		},
 	}
