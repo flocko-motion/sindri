@@ -221,8 +221,21 @@ func (Engine) EnsureImage(root string, out io.Writer) error {
 // podmanBuilder is the podman slice of image building for container.EnsureImageWith.
 type podmanBuilder struct{}
 
-func (podmanBuilder) ImageExists() bool {
-	return exec.Command(Binary, "image", "exists", container.ImageName).Run() == nil
+func (podmanBuilder) ImageExists() (bool, error) {
+	cmd := exec.Command(Binary, "image", "exists", container.ImageName)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	// `podman image exists` documents exit 1 as "image does not exist" — a legitimate
+	// absent, with nothing on stderr. Any other exit (e.g. 125, VM unreachable) is a
+	// real error we surface instead of collapsing to "absent, rebuild".
+	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 && stderr.Len() == 0 {
+		return false, nil
+	}
+	return false, fmt.Errorf("podman image exists %s: %s: %w", container.ImageName, strings.TrimSpace(stderr.String()), err)
 }
 
 func (podmanBuilder) Build(ctxDir, dockerfile string, out io.Writer) error {

@@ -243,8 +243,21 @@ func (Engine) EnsureImage(root string, out io.Writer) error {
 // appleBuilder is the Apple-`container` slice of image building.
 type appleBuilder struct{}
 
-func (appleBuilder) ImageExists() bool {
-	return exec.Command(Binary, "images", "inspect", container.ImageName).Run() == nil
+func (appleBuilder) ImageExists() (bool, error) {
+	// NB: the subcommand is `image` (singular); `images` is not a valid subcommand and
+	// exits non-zero, which — when this returned a bare bool — silently read as "absent"
+	// and rebuilt on every launch.
+	out, err := exec.Command(Binary, "image", "inspect", container.ImageName).CombinedOutput()
+	if err == nil {
+		return true, nil
+	}
+	// A genuinely-missing image is a legitimate "absent", not a failure: `container
+	// image inspect` prints "image not found" and exits 1. Anything else (service
+	// down, bad args) is a real error we surface instead of masquerading as "absent".
+	if strings.Contains(string(out), "not found") {
+		return false, nil
+	}
+	return false, fmt.Errorf("container image inspect %s: %s: %w", container.ImageName, strings.TrimSpace(string(out)), err)
 }
 
 func (appleBuilder) Build(ctxDir, dockerfile string, out io.Writer) error {

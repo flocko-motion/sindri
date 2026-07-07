@@ -42,7 +42,11 @@ var buildContext embed.FS
 // recipe delegates to: whether the image is already present, and how to build it.
 // The podman and apple-container adapters each provide one.
 type ImageBuilder interface {
-	ImageExists() bool
+	// ImageExists reports whether the agent image is present. A non-nil error means
+	// presence could NOT be determined (tool/service failure) — distinct from a
+	// confident "absent" (false, nil) — so a broken check is never mistaken for
+	// "image missing, rebuild" (a swallowed error here rebuilt on every launch).
+	ImageExists() (bool, error)
 	Build(ctxDir, dockerfile string, out io.Writer) error
 }
 
@@ -132,9 +136,16 @@ func EnsureImageWith(projectRoot string, out io.Writer, b ImageBuilder) error {
 		return err
 	}
 	keyFile := filepath.Join(cacheDir, "build-key")
-	if cached, err := os.ReadFile(keyFile); err == nil &&
-		strings.TrimSpace(string(cached)) == buildKey && b.ImageExists() {
-		return nil // up to date and the image is actually present
+	if cached, err := os.ReadFile(keyFile); err == nil && strings.TrimSpace(string(cached)) == buildKey {
+		present, perr := b.ImageExists()
+		if perr != nil {
+			// Couldn't determine presence — surface it rather than silently rebuilding
+			// (or worse, silently skipping). The caller needs the real reason.
+			return fmt.Errorf("check whether image %s already exists: %w", ImageName, perr)
+		}
+		if present {
+			return nil // up to date and the image is actually present
+		}
 	}
 
 	// Materialize the embedded context into a writable staging dir. Tools that
