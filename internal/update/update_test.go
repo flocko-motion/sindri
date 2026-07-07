@@ -1,10 +1,29 @@
 package update
 
 import (
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// TestUpgradeRejectsNonSemver: an explicit target must be a semver (optionally
+// v-prefixed) — junk is rejected before any network call, so downgrades to a real
+// release work but typos/garbage don't send us hunting a bogus tag.
+func TestUpgradeRejectsNonSemver(t *testing.T) {
+	for _, bad := range []string{"junk", "1.2", "1.2.3.4", "latest", "v", "1.x.0"} {
+		if err := Upgrade("1.0.0", bad, io.Discard); err == nil {
+			t.Errorf("target %q should be rejected as non-semver", bad)
+		}
+	}
+	// Sanity: the accepted forms parse (the network step is separate and not tested
+	// here).
+	for _, ok := range []string{"1.2.3", "v1.2.3", "0.4.0"} {
+		if _, _, _, valid := parseSemver(ok); !valid {
+			t.Errorf("target %q should be accepted as semver", ok)
+		}
+	}
+}
 
 func TestNewer(t *testing.T) {
 	cases := []struct {

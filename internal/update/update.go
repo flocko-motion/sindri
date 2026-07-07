@@ -119,8 +119,13 @@ func Upgrade(current, target string, w io.Writer) error {
 
 // upgradeTo resolves an explicit release tag and writes the helper to install it —
 // no newer-than check, so it supports reinstalling the current version or moving to
-// an older one.
+// an older one (downgrades are allowed). The target must be a semver (optionally
+// v-prefixed), since releases are semver tags — anything else is rejected up front,
+// before any network call.
 func upgradeTo(current, target string, w io.Writer) error {
+	if _, _, _, ok := parseSemver(target); !ok {
+		return fmt.Errorf("invalid version %q — use a semver like v1.2.3 or 1.2.3 (see `sindri upgrade --list`)", target)
+	}
 	tag, err := fetchRelease(target, explicitTimeout)
 	if err != nil {
 		return fmt.Errorf("couldn't find release %q: %w", target, err)
