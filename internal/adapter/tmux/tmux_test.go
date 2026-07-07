@@ -40,3 +40,21 @@ func TestListClients(t *testing.T) {
 		t.Fatalf("list-clients argv:\n got %q\nwant %q", got, want)
 	}
 }
+
+func TestCapturePane(t *testing.T) {
+	// Plain (color=false): the visible screen only, no escape sequences — this dump
+	// is pattern-matched to classify Claude's state, so colour would corrupt it.
+	if got := CapturePane("brokkr", 0, false); !slices.Equal(got, []string{"capture-pane", "-t", "brokkr", "-p"}) {
+		t.Fatalf("plain capture argv: %q", got)
+	}
+	// Coloured (color=true): -e keeps the pane's escape sequences for the TUI
+	// preview, which renders ANSI.
+	if got := CapturePane("brokkr", 0, true); !slices.Equal(got, []string{"capture-pane", "-t", "brokkr", "-p", "-e"}) {
+		t.Fatalf("colour capture argv: %q", got)
+	}
+	// lines>0 reaches that many rows back into the scrollback (-S -<lines>), after
+	// the -e flag.
+	if got := CapturePane("brokkr", 40, true); !slices.Equal(got, []string{"capture-pane", "-t", "brokkr", "-p", "-e", "-S", "-40"}) {
+		t.Fatalf("colour+scrollback capture argv: %q", got)
+	}
+}

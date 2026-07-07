@@ -39,11 +39,15 @@ type Event struct {
 }
 
 // Project is one row of the registry: a repo the hub knows, keyed by its stable
-// repoTag (a digest of the abs path), with the on-disk path and when first seen.
+// repoTag (a digest of the abs path), with the on-disk path, when first seen, and
+// when last used (touched on every register/use, so the repo switcher can order by
+// recency).
 type Project struct {
 	Tag       string `json:"tag"`
 	Path      string `json:"path"`
 	FirstSeen string `json:"first_seen"`
+	LastUsed  string `json:"last_used"`
+	Color     int    `json:"color"` // repo colour choice: 0 = hash-derived default, 1..N = palette index
 }
 
 // Store wraps the one central SQLite database. Per-project work goes through a
@@ -88,7 +92,9 @@ CREATE TABLE IF NOT EXISTS meta (
 CREATE TABLE IF NOT EXISTS projects (
   tag        TEXT PRIMARY KEY,
   path       TEXT NOT NULL,
-  first_seen TEXT NOT NULL
+  first_seen TEXT NOT NULL,
+  last_used  TEXT NOT NULL DEFAULT '',
+  color      INTEGER NOT NULL DEFAULT 0
 );
 `
 
@@ -121,6 +127,8 @@ func Open(path string) (*Store, error) {
 func migrate(db *sql.DB) error {
 	alters := []string{
 		`ALTER TABLE agents ADD COLUMN memory TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE projects ADD COLUMN last_used TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE projects ADD COLUMN color INTEGER NOT NULL DEFAULT 0`,
 	}
 	for _, a := range alters {
 		if _, err := db.Exec(a); err != nil && !strings.Contains(err.Error(), "duplicate column") {
@@ -138,14 +146,28 @@ func (s *Store) For(project string) *ProjectStore { return &ProjectStore{s: s, p
 
 // --- registry (global) ---
 
-// RegisterProject records (or refreshes the path of) a repo the hub now serves.
+// RegisterProject records (or refreshes the path of) a repo the hub now serves, and
+// touches its last_used stamp — this is called on every request that carries a repo,
+// so last_used doubles as the "recently active" signal the switcher orders by.
 func (s *Store) RegisterProject(tag, path string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(
-		`INSERT INTO projects (tag, path, first_seen) VALUES (?, ?, ?)
-		 ON CONFLICT(tag) DO UPDATE SET path=excluded.path`,
-		tag, path, time.Now().UTC().Format(time.RFC3339))
+		`INSERT INTO projects (tag, path, first_seen, last_used) VALUES (?, ?, ?, ?)
+		 ON CONFLICT(tag) DO UPDATE SET path=excluded.path, last_used=excluded.last_used`,
+		tag, path, now, now)
 	if err != nil {
 		return fmt.Errorf("register project %s: %w", tag, err)
+	}
+	return nil
+}
+
+// UnregisterProject removes a repo's registry row and nothing else — no agents,
+// events, tasks, or on-disk files are touched. This backs `repo forget`: the hub
+// gives up tracking the repo, it does not delete it (and implicit registration
+// re-adds it on next use).
+func (s *Store) UnregisterProject(tag string) error {
+	if _, err := s.db.Exec(`DELETE FROM projects WHERE tag=?`, tag); err != nil {
+		return fmt.Errorf("unregister project %s: %w", tag, err)
 	}
 	return nil
 }
@@ -164,9 +186,10 @@ func (s *Store) ProjectPath(tag string) (path string, ok bool, err error) {
 	return path, true, nil
 }
 
-// Projects returns every known project, ordered by path.
+// Projects returns every known project, ordered by path. Callers that need recency
+// or live-agent ordering (the switcher) re-sort using LastUsed and the roster.
 func (s *Store) Projects() ([]Project, error) {
-	rows, err := s.db.Query(`SELECT tag, path, first_seen FROM projects ORDER BY path`)
+	rows, err := s.db.Query(`SELECT tag, path, first_seen, last_used, color FROM projects ORDER BY path`)
 	if err != nil {
 		return nil, fmt.Errorf("projects: %w", err)
 	}
@@ -174,12 +197,21 @@ func (s *Store) Projects() ([]Project, error) {
 	var out []Project
 	for rows.Next() {
 		var p Project
-		if err := rows.Scan(&p.Tag, &p.Path, &p.FirstSeen); err != nil {
+		if err := rows.Scan(&p.Tag, &p.Path, &p.FirstSeen, &p.LastUsed, &p.Color); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// SetProjectColor sets a repo's colour choice (0 = hash-derived default, 1..N = a
+// palette index). A no-op-safe write on an unknown tag (affects zero rows).
+func (s *Store) SetProjectColor(tag string, color int) error {
+	if _, err := s.db.Exec(`UPDATE projects SET color=? WHERE tag=?`, color, tag); err != nil {
+		return fmt.Errorf("set project colour %s: %w", tag, err)
+	}
+	return nil
 }
 
 // --- meta (global) ---

@@ -14,7 +14,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const formLabelW = 12
+// formLabelW is the label column width — wide enough for the longest field label in
+// any form (the repo-config keys "containerfile"/"review_prompt"/"github.issues" are
+// 13), so no label is truncated.
+const formLabelW = 14
 
 // field is one editable element of a form.
 type field interface {

@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
@@ -410,6 +411,44 @@ func (c *HTTP) Refresh() error { return c.post("/refresh", struct{}{}) }
 func (c *HTTP) Log(name string) ([]store.Event, error) {
 	var out []store.Event
 	return out, c.get("/log?agent="+url.QueryEscape(name), &out)
+}
+
+// Repos lists every registered repo (the registry overview / TUI switcher source).
+func (c *HTTP) Repos() ([]hub.RepoSummary, error) {
+	var out []hub.RepoSummary
+	return out, c.get("/repos", &out)
+}
+
+// RepoInfo returns one repo's resolved config + counts; an empty tag defaults to the
+// caller's repo (the client's X-Sindri-Project).
+func (c *HTTP) RepoInfo(tag string) (hub.RepoDetail, error) {
+	var out hub.RepoDetail
+	path := "/repo"
+	if tag != "" {
+		path += "?tag=" + url.QueryEscape(tag)
+	}
+	return out, c.get(path, &out)
+}
+
+// RepoInit registers the caller's repo and scaffolds its .sindri/config.yaml.
+func (c *HTTP) RepoInit() (hub.RepoSummary, error) {
+	var out hub.RepoSummary
+	return out, c.postResult("/repo/init", struct{}{}, &out)
+}
+
+// RepoForget drops a repo from the registry by tag (files untouched, agent-guarded).
+func (c *HTTP) RepoForget(tag string) error {
+	return c.post("/repo/forget", hub.RepoReq{Tag: tag})
+}
+
+// SetRepoColor pins a repo's colour choice by tag (0 = hash-derived default).
+func (c *HTTP) SetRepoColor(tag string, color int) error {
+	return c.post("/repo/color", hub.RepoReq{Tag: tag, Color: color})
+}
+
+// WriteRepoConfig persists the caller's repo's .sindri/config.yaml (validated hub-side).
+func (c *HTTP) WriteRepoConfig(cfg config.Config) error {
+	return c.post("/repo/config", cfg)
 }
 
 func (c *HTTP) get(path string, out any) error {

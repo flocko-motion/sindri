@@ -25,7 +25,9 @@ const defaultArchitecture = "ARCHITECTURE.md"
 
 // GitHub is the `github:` block.
 type GitHub struct {
-	Issues bool `yaml:"issues"` // enable the GitHub issue source for this project
+	// Issues toggles the GitHub issue source. nil (key unset) means the default —
+	// ON (opt-out): a repo imports its open issues unless it sets `issues: false`.
+	Issues *bool `yaml:"issues"`
 }
 
 // Config is a project's resolved .sindri/config.yaml (repo over global over default).
@@ -107,6 +109,51 @@ func (c Config) validate(root string) error {
 				return fmt.Errorf(".sindri/config.yaml: %s %q — file not found at %s", ch.key, ch.val, abs)
 			}
 		}
+	}
+	return nil
+}
+
+// IssuesEnabled reports whether the GitHub issue source is on. It defaults to ON
+// (opt-out): a repo imports its open issues unless it explicitly sets
+// `github.issues: false`. The source still degrades to absent whenever gh is
+// missing / unauthenticated / offline or the repo has no GitHub remote.
+func (c Config) IssuesEnabled() bool {
+	return c.GitHub.Issues == nil || *c.GitHub.Issues
+}
+
+// Write serializes c to <root>/.sindri/config.yaml, first validating it against
+// root so a broken config is never persisted (the caller surfaces the error). Only
+// keys the caller set are written — empty paths and an unset github toggle are
+// omitted — so the file stays clean and unset keys keep defaulting.
+func Write(root string, c Config) error {
+	c.ArchitectureSet = c.Architecture != "" && c.Architecture != defaultArchitecture
+	if err := c.validate(root); err != nil {
+		return err
+	}
+	out := map[string]any{}
+	if c.Architecture != "" && c.Architecture != defaultArchitecture {
+		out["architecture"] = c.Architecture
+	}
+	if c.Containerfile != "" {
+		out["containerfile"] = c.Containerfile
+	}
+	if c.ReviewPrompt != "" {
+		out["review_prompt"] = c.ReviewPrompt
+	}
+	if c.GitHub.Issues != nil {
+		out["github"] = map[string]any{"issues": *c.GitHub.Issues}
+	}
+	data, err := yaml.Marshal(out)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	dir := filepath.Join(root, ".sindri")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", dir, err)
+	}
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
 }

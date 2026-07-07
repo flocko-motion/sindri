@@ -213,10 +213,14 @@ func (p *ProjectStore) OpenTasks() ([]Task, error) {
 }
 
 // OpenLeaves returns the claimable tasks the automatic assigner may take in this
-// project: open, approved leaves, excluding any child of a container an agent
-// holds. A task with no priority is left out — no priority, no assignment: an
-// unprioritized task stays in the backlog (visible, editable) until a human sets a
-// priority, which is the signal that it's ready to be worked.
+// project: open, approved leaves, excluding any child of a container an agent holds
+// AND any leaf an agent already holds (agent_state.task). The held-leaf exclusion
+// matters for sources with no external status to flip: a td task claims flip to
+// in_progress at the source and drop out that way, but a gh-* issue stays "open" on
+// GitHub, so agent_state is what keeps a claimed issue from being handed out twice.
+// A task with no priority is left out — no priority, no assignment: an unprioritized
+// task stays in the backlog (visible, editable) until a human sets a priority, which
+// is the signal that it's ready to be worked.
 func (p *ProjectStore) OpenLeaves() ([]Task, error) {
 	rows, err := p.s.db.Query(`
 		SELECT `+taskCols+taskFrom+`
@@ -224,8 +228,9 @@ func (p *ProjectStore) OpenLeaves() ([]Task, error) {
 		  AND t.priority != ''
 		  AND t.id NOT IN (SELECT parent_id FROM tasks WHERE project=? AND parent_id != '')
 		  AND t.parent_id NOT IN (SELECT container FROM agent_state WHERE project=? AND container != '')
+		  AND t.id NOT IN (SELECT task FROM agent_state WHERE project=? AND task != '')
 		ORDER BY t.priority, t.id`,
-		p.project, p.project, p.project)
+		p.project, p.project, p.project, p.project)
 	if err != nil {
 		return nil, fmt.Errorf("open leaves: %w", err)
 	}

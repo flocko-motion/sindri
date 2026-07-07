@@ -17,8 +17,24 @@ func (m model) detailLines() []string {
 		return m.taskDetailLines()
 	case 1:
 		return m.agentDetailLines()
-	default:
+	case 2:
 		return m.prDetailLines()
+	default:
+		return m.repoDetailLines()
+	}
+}
+
+// modalTitle titles the full-screen detail modal by the active tab's item.
+func (m model) modalTitle() string {
+	switch m.tab {
+	case 0:
+		return "Task " + m.selID()
+	case 1:
+		return "Agent " + m.selID()
+	case 2:
+		return "PR " + m.selID()
+	default:
+		return "Repo " + m.repoName(m.selID())
 	}
 }
 
@@ -134,6 +150,47 @@ func (m *model) gotoItem(kind, id string) {
 	m.rightFocus = false
 	m.tab = t
 	m.selectRow(id)
+}
+
+// selID is the id of the row under the active tab's cursor ("" if none).
+func (m model) selID() string {
+	r := m.rows()
+	if c := m.cursor[m.tab]; c >= 0 && c < len(r) {
+		return r[c].id
+	}
+	return ""
+}
+
+// rows dispatches to the active tab's row builder (tasks/agents/prs).
+func (m model) rows() []row {
+	switch m.tab {
+	case 0:
+		return m.taskRows()
+	case 1:
+		return m.agentRows()
+	case 2:
+		return m.prRows()
+	default:
+		return m.repoRows()
+	}
+}
+
+// scopeName labels the global↔repo scope toggle for the footer.
+func scopeName(repoScoped bool) string {
+	if repoScoped {
+		return "repo"
+	}
+	return "global"
+}
+
+// contextFooter is the active tab's action hints (second footer row), generated from
+// the keymap (keys.go) so the help never drifts from the bindings. The right-column
+// focus is a distinct mode with its own item-navigation hints.
+func (m model) contextFooter() string {
+	if m.rightFocus { // focused on a detail cross-reference (Tasks/PRs)
+		return "j/k item · enter details · g goto · y copy"
+	}
+	return m.footerFor(tabScope(m.tab))
 }
 
 // actionableItems is the focusable cross-references of the current tab's detail.

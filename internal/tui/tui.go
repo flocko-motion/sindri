@@ -79,14 +79,16 @@ type model struct {
 	w, h   int
 
 	tab    int
-	cursor [3]int
+	cursor [4]int
 	list   scroll.Viewport
 	detail scroll.Viewport
 
-	filter     int
+	filter     int // Tasks tab: open/closed/all
+	prFilter   int // PRs tab: unmerged/merged/all (default hides merged)
 	collapsed  map[string]bool
 	merging    map[string]bool // PR ids the user just triggered a merge on — shown as a transient "merging" on the row until the hub confirms
 	hideDetail bool            // § force-hides the detail pane (else shown when wide enough)
+	scopeRepo  [4]bool         // per-tab global↔repo scope; Agents(1)/PRs(2) narrow to the active repo when true (Tasks always repo-scoped)
 
 	rightFocus  bool // detail (right) column has focus (h/l switch; j/k move within)
 	rightCursor int  // focused actionable item in the right column
@@ -243,6 +245,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reclamp()
 	case taskMsg:
 		m.taskDetail = msg.t
+	case repoConfigMsg:
+		if msg.err != nil {
+			m.errText = msg.err.Error()
+		} else {
+			m.openRepoConfigForm(msg.d)
+		}
 	case errModalMsg:
 		m.errText = msg.err.Error()
 	case errMsg:
@@ -284,16 +292,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // modalTitle labels the detail modal for the current selection.
-func (m model) modalTitle() string {
-	switch m.tab {
-	case 0:
-		return "Task " + m.selID()
-	case 1:
-		return "Agent " + m.selID()
-	default:
-		return "PR " + m.selID()
-	}
-}
 
 // onKey applies a key (by its string form) — shared by the live loop and the
 // headless Screenshot harness. Mutates the model; returns an optional cmd.
@@ -322,7 +320,7 @@ func (m *model) onKey(k string) tea.Cmd {
 		return nil
 	}
 	switch k {
-	case "q", "ctrl+c":
+	case keyQuit, "ctrl+c":
 		m.quit = true
 		return nil
 	case "tab": // the only way to switch tabs (with shift+tab)
@@ -374,9 +372,11 @@ func (m *model) onKey(k string) tea.Cmd {
 		m.cursor[m.tab] += m.bodyHeight() / 2
 	case "ctrl+u":
 		m.cursor[m.tab] -= m.bodyHeight() / 2
-	case "f":
+	case keyFilter:
 		if m.tab == 0 {
 			m.filter = (m.filter + 1) % 3
+		} else if m.tab == 2 {
+			m.prFilter = (m.prFilter + 1) % 3
 		}
 	case "h": // tasks: collapse the fold under the cursor (tree navigation)
 		if m.tab == 0 && !m.rightFocus {
@@ -388,11 +388,11 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 0 && !m.rightFocus {
 			delete(m.collapsed, m.selID())
 		}
-	case "S": // agents: Start/Stop toggle — start if down, stop if running
+	case keyStartS: // agents: Start/Stop toggle — start if down, stop if running
 		if m.tab == 1 {
 			return m.agentStartStop()
 		}
-	case "a": // agents: attach to the live tmux session · prs: approve (the human gate)
+	case keyAttachAp: // agents: attach to the live tmux session · prs: approve (the human gate)
 		if m.tab == 1 {
 			if a, ok := m.selAgent(); ok {
 				if a.Status == "down" {
@@ -407,7 +407,7 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 2 && m.selID() != "" { // approve the PR yourself, so it can be merged
 			return m.action(func(id string) error { return m.cl.ApprovePR(id) })
 		}
-	case "m": // prs: merge (the human gate) — if it isn't approved, offer to approve first
+	case keyMerge: // prs: merge (the human gate) — if it isn't approved, offer to approve first
 		if m.tab == 2 && m.selID() != "" {
 			if !m.selPRApproved() {
 				m.openApproveMergeChoice(m.selID())
@@ -417,7 +417,7 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.markMerging(id) // show "merging" on the row at once, before the hub confirms
 			return m.mergeCmd(id)
 		}
-	case "N": // new task (tasks) / new agent (agents)
+	case keyNew: // new task (tasks) / new agent (agents)
 		if m.tab == 0 {
 			m.openTaskForm(false)
 			return nil
@@ -425,7 +425,7 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.openNewAgentChoice()
 			return nil
 		}
-	case "e": // edit: the selected task's fields (tasks) / the agent's memory limit (agents)
+	case keyEdit: // edit: the selected task's fields (tasks) / the agent's memory limit (agents)
 		if m.tab == 0 && m.selID() != "" {
 			m.openTaskForm(true)
 			return nil
@@ -436,12 +436,16 @@ func (m *model) onKey(k string) tea.Cmd {
 				return nil
 			}
 		}
-	case "D": // delete the selected agent (with confirm)
+	case keyDelete: // agents: delete the selected agent · repos: forget the selected repo
 		if m.tab == 1 && m.selID() != "" {
 			m.openDeleteChoice(m.selID())
 			return nil
 		}
-	case "t": // tell the selected agent (agents) / show linked task (prs)
+		if m.tab == 3 && m.selID() != "" {
+			m.openForgetChoice(m.selID(), m.repoName(m.selID()))
+			return nil
+		}
+	case keyTell: // tell the selected agent (agents) / show linked task (prs)
 		if m.tab == 1 && m.selID() != "" {
 			m.openInput(inputTell, "tell "+m.selID()+": ")
 			return textinput.Blink
@@ -451,13 +455,13 @@ func (m *model) onKey(k string) tea.Cmd {
 			}
 			return nil
 		}
-	case "L": // prs: run the quality gate against the PR's worktree
+	case keyLint: // prs: run the quality gate against the PR's worktree
 		if m.tab == 2 {
 			if id := m.selID(); id != "" && m.cl != nil {
 				return m.lintCmd(id)
 			}
 		}
-	case "R": // prs: reject a PR · tasks: reject a planner-proposed task (with a comment)
+	case keyReject: // prs: reject a PR · tasks: reject a planner-proposed task (with a comment)
 		if m.tab == 2 && m.selID() != "" {
 			m.openRejectForm(m.selID())
 			return nil
@@ -466,13 +470,13 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.openTaskRejectForm(m.selID())
 			return nil
 		}
-	case "V": // prs: verify — materialize the PR into the review workspace + shell in
+	case keyVerify: // prs: verify — materialize the PR into the review workspace + shell in
 		if m.tab == 2 {
 			if id := m.selID(); id != "" && m.cl != nil {
 				return m.verifyCmd(id)
 			}
 		}
-	case "A": // prs: request an agentic review · tasks: approve a planner-proposed task
+	case keyApprove: // prs: request an agentic review · tasks: approve a planner-proposed task
 		if m.tab == 2 && m.selID() != "" {
 			m.openReviewForm(m.selID())
 			return nil
@@ -480,16 +484,16 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 0 && m.taskGated() {
 			return m.approveTaskCmd(m.selID())
 		}
-	case "p": // set the selected task's priority
+	case keyPriority: // set the selected task's priority (shift = a modifying action)
 		if m.tab == 0 && m.selID() != "" {
 			m.openPriorityChoice(m.selID())
 			return nil
 		}
-	case "U": // tasks: release the selected task back to the backlog
+	case keyUnassign: // tasks: release the selected task back to the backlog
 		if m.tab == 0 && m.selID() != "" {
 			return m.unassignTaskCmd(m.selID())
 		}
-	case "C": // tasks: close the selected task (mark it done)
+	case keyClose: // tasks: close the selected task (mark it done)
 		if m.tab == 0 && m.selID() != "" {
 			return m.closeTaskCmd(m.selID())
 		}
@@ -519,6 +523,16 @@ func (m *model) onKey(k string) tea.Cmd {
 			}
 			return nil
 		}
+		if m.tab == 3 { // Repos: enter switches to the selected repo
+			if tag := m.selID(); tag != "" {
+				for _, p := range m.state.Projects {
+					if p.Tag == tag {
+						return m.switchRepo(p.Path)
+					}
+				}
+			}
+			return nil
+		}
 		if m.selID() != "" { // open the full-screen detail modal
 			m.modal = true
 			m.detail.SetHeight(modalContentHeight(m.h))
@@ -526,17 +540,34 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.detail.ScrollTop()
 			return nil
 		}
-	case "§": // toggle the detail pane (full-width selector when hidden)
+	case keyDetail: // toggle the detail pane (full-width selector when hidden)
 		m.hideDetail = !m.hideDetail
 		if m.hideDetail {
 			m.rightFocus = false // can't focus a hidden pane
 		}
-	case "r":
+	case keyRefresh:
 		m.reclamp()
 		return m.refreshCmd()
-	case "P": // switch the selected repo (scopes the Tasks tab; Agents/PRs stay global)
+	case keyRepo: // switch the active repo/project (lowercase = harmless navigation)
 		m.openSwitcher()
 		return nil
+	case keyConfig: // edit the current repo's .sindri/config.yaml in a form
+		return m.repoConfigCmd()
+	case keyColor: // repos: pick the selected repo's display colour
+		if m.tab == 3 && m.selID() != "" {
+			m.openColorChoice(m.selID())
+			return nil
+		}
+	case keyScopeTog: // agents/prs: toggle this tab's scope between global (all repos) and the active repo
+		if m.tab == 1 || m.tab == 2 {
+			m.scopeRepo[m.tab] = !m.scopeRepo[m.tab]
+			m.cursor[m.tab] = 0
+			if m.scopeRepo[m.tab] {
+				m.flash = "scope: this repo"
+			} else {
+				m.flash = "scope: all repos"
+			}
+		}
 	}
 	m.reclamp()
 	cmd := m.syncDetail()
@@ -603,40 +634,6 @@ func (m *model) syncDetail() tea.Cmd {
 	}
 }
 
-// rows / detailLines dispatch to the active tab (tasks.go / agents.go / prs.go).
-func (m model) rows() []row {
-	switch m.tab {
-	case 0:
-		return m.taskRows()
-	case 1:
-		return m.agentRows()
-	default:
-		return m.prRows()
-	}
-}
-
-func (m model) contextFooter() string {
-	if m.rightFocus { // focused on a detail cross-reference (Tasks/PRs)
-		return "j/k item · enter details · g goto · y copy"
-	}
-	switch m.tab {
-	case 0:
-		return fmt.Sprintf("N new · e edit · p priority · U unassign · C close · A/R approve/reject · f filter: %s · h/l fold", filterNames[m.filter])
-	case 1:
-		return "N new · S start/stop · t tell · a attach · D delete"
-	default:
-		return "V verify · a approve · R reject · A agent-review · L lint · m merge"
-	}
-}
-
-func (m model) selID() string {
-	r := m.rows()
-	if c := m.cursor[m.tab]; c >= 0 && c < len(r) {
-		return r[c].id
-	}
-	return ""
-}
-
 // View composes the full-height frame: tab strip, master-detail body, footer.
 func (m model) View() string {
 	if m.err != nil {
@@ -660,7 +657,7 @@ func (m model) View() string {
 		return m.form.view(m.w, m.h)
 	}
 	if m.choice.active {
-		return choiceModal(m.choice.title, m.choice.options, m.choice.cursor, m.w, m.h)
+		return choiceModal(m.choice, m.w, m.h)
 	}
 	if m.modal {
 		title := m.modalTitle()
@@ -669,7 +666,8 @@ func (m model) View() string {
 		}
 		return modal(title, m.modalLines(), m.detail, m.w, m.h)
 	}
-	top := tabStrip(labels, m.tab, m.w)
+	repoName, repoTag := m.currentRepo()
+	top := headerBar(labels, m.tab, m.w, repoName, repoTag, m.repoColorIdx(repoTag))
 	var body string
 	if m.tab == 1 && m.wide() { // bespoke: list + live tmux pane; right detail unless §-hidden
 		body = m.agentsBody()
@@ -687,7 +685,7 @@ func (m model) View() string {
 	if m.mode != inputNone {
 		foot = dimStyle.Render(padTrunc("enter submit · esc cancel", m.w)) + "\n" + m.input.View()
 	} else {
-		global := "⇥/⇧⇥ tab · C-h/l pane · § detail · j/k move · J/K scroll · r refresh · q quit"
+		global := m.footerFor(scopeGlobal)
 		if m.flash != "" {
 			global = m.flash
 		}

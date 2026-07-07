@@ -123,7 +123,7 @@ func taskRejectCmd() *cobra.Command {
 
 func taskPriorityCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "priority <id> <critical|high|mid|low|minor>",
+		Use:   "priority <id> <critical|high|mid|low|none>",
 		Short: "Set a task's priority (td tasks → td; openspec items → our db)",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {

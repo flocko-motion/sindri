@@ -87,6 +87,21 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	if err != nil {
 		return BoardState{}, err
 	}
+	// Only registered repos surface in the global views. A forgotten repo's PRs stay
+	// in the db (keyed by its stable tag, so re-adding the repo reactivates them) but
+	// drop out of the fleet PR tab — forgetting a repo means giving up its management,
+	// not surfacing its records. (Its agents are already deleted, so AllAgents is clean.)
+	registered := map[string]bool{}
+	for _, p := range h.knownProjects() {
+		registered[p.Tag] = true
+	}
+	kept := prs[:0]
+	for _, pr := range prs {
+		if registered[pr.Project] {
+			kept = append(kept, pr)
+		}
+	}
+	prs = kept
 	var tasks []store.Task
 	if selected != "" {
 		if tasks, err = h.store.For(selected).AllTasks(); err != nil {
@@ -268,7 +283,7 @@ func (h *Hub) container(project, name string) string {
 // at the prompt) — or "" when it can't tell (plain shell, transcript view, boot).
 // Bounded by ctx (it reuses the board probe's), so a wedged capture can't stall the read.
 func (h *Hub) runtimeState(ctx context.Context, project, name string) string {
-	out, err := container.ExecContext(ctx, h.container(project, name), append([]string{"tmux"}, tmux.CapturePane(name, 0)...)...)
+	out, err := container.ExecContext(ctx, h.container(project, name), append([]string{"tmux"}, tmux.CapturePane(name, 0, false)...)...) // plain: the text is pattern-matched
 	if err != nil {
 		return ""
 	}
@@ -442,7 +457,7 @@ func (h *Hub) sessionAliveCtx(ctx context.Context, project, name string) bool {
 // output. Empty when truly down.
 func (h *Hub) AgentPane(project, name string, lines int) (string, error) {
 	if h.sessionAlive(project, name) {
-		out, err := container.Exec(h.container(project, name), append([]string{"tmux"}, tmux.CapturePane(name, lines)...)...)
+		out, err := container.Exec(h.container(project, name), append([]string{"tmux"}, tmux.CapturePane(name, lines, true)...)...) // colour: the preview renders ANSI
 		if err != nil {
 			return "", err
 		}

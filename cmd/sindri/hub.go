@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
+	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/spf13/cobra"
@@ -58,6 +59,12 @@ type backend interface {
 	MaterializeReview(id string) (string, error)
 	Merge(id string) (store.PR, error)
 	MilestonePR(agent string) (store.PR, error)
+	Repos() ([]hub.RepoSummary, error)
+	RepoInfo(tag string) (hub.RepoDetail, error)
+	RepoInit() (hub.RepoSummary, error)
+	RepoForget(tag string) error
+	SetRepoColor(tag string, color int) error
+	WriteRepoConfig(cfg config.Config) error
 	Close() error
 }
 

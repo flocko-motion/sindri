@@ -26,7 +26,7 @@ func PriorityLabel(p string) string {
 	case "P3":
 		return "low"
 	case "P4":
-		return "trivial"
+		return "none" // "came in unrated" — GitHub issues import here by default
 	case "":
 		return "-"
 	default:
@@ -46,7 +46,7 @@ func PriorityCode(word string) string {
 		return "P2"
 	case "low":
 		return "P3"
-	case "trivial", "minor":
+	case "none", "trivial", "minor": // trivial/minor kept as back-compat input aliases
 		return "P4"
 	default:
 		return word
@@ -54,7 +54,7 @@ func PriorityCode(word string) string {
 }
 
 // PriorityWords are the assignable priorities, highest first (for choice menus).
-var PriorityWords = []string{"critical", "high", "mid", "low", "trivial"}
+var PriorityWords = []string{"critical", "high", "mid", "low", "none"}
 
 // StateLabel maps a task status to a short, fixed-ish word for compact display
 // (so the column doesn't need room for "in_progress"). Shared by CLI and TUI.
@@ -87,6 +87,7 @@ var Sections = []Section{
 	{"tasks", "Tasks", func(b BoardState) int { return countTasks(b.Tasks, taskOpen) }},
 	{"agents", "Agents", func(b BoardState) int { return len(b.Agents) }}, // the whole roster — down agents are still agents
 	{"prs", "PRs", func(b BoardState) int { return countPRs(b.PRs, prNotMerged) }},
+	{"repos", "Repos", func(b BoardState) int { return len(b.Projects) }}, // every repo the hub tracks
 }
 
 // --- badge predicates ---

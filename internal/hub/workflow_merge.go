@@ -130,6 +130,10 @@ func (h *Hub) Merge(project, prID string) (store.PR, error) {
 		}
 		_ = h.refreshTask(project, pr.Task)
 	}
+	// A gh-* task's only outbound GitHub write: close+comment the issue. Best-effort —
+	// runs AFTER the local merge landed, and a GitHub failure is a warning, never a
+	// merge failure (the issue simply stays open upstream for the next human decision).
+	h.closeGitHubIssue(project, root, pr, prID)
 	rest := "idle"
 	if a, ok, _ := ps.GetAgent(pr.Agent); ok {
 		rest = restPhase(a.Role)

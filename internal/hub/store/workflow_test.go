@@ -133,6 +133,34 @@ func eq(a, b []string) bool {
 	return true
 }
 
+// TestOpenLeavesExcludesHeldLeaf: a gh-* issue rides the store as an open, childless
+// P4 leaf (so it's directly claimable), but once an agent holds it (agent_state.task)
+// it drops out of the leaf pool — the mechanism that stops a claimed GitHub issue from
+// being handed out twice, since GitHub keeps the issue "open" and there's no source
+// status to flip (unlike a td task going in_progress).
+func TestOpenLeavesExcludesHeldLeaf(t *testing.T) {
+	p := openTmpProject(t)
+	if err := p.ReplaceTasks([]Task{
+		{ID: "gh-7", Status: "open", Priority: "P4", Type: "issue"},
+		{ID: "td-p1", Status: "open", Priority: "P1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The gh issue is a claimable leaf alongside the td task.
+	if got := ids(mustLeaves(t, p)); !eq(got, []string{"td-p1", "gh-7"}) {
+		t.Fatalf("gh-* leaf should be claimable: got %v", got)
+	}
+
+	// Once a worker holds gh-7, it leaves the pool (no source status flip to rely on).
+	if err := p.SetState(AgentState{Agent: "eitri", Task: "gh-7", Branch: "gh-7", Phase: "working"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(mustLeaves(t, p)); !eq(got, []string{"td-p1"}) {
+		t.Fatalf("held gh-7 must be excluded from leaves: got %v", got)
+	}
+}
+
 func TestOpenLeavesAndChildren(t *testing.T) {
 	p := openTmpProject(t)
 	// A container P with two open children; a standalone leaf L.

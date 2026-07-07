@@ -228,10 +228,40 @@ func (m *model) openReviewForm(prID string) {
 // prDetailW is the fixed width of the PRs tab's right detail column.
 const prDetailW = 44
 
+// PR filter states (the PRs tab's f-toggle): unmerged (hide merged, the default),
+// merged only, or all — mirroring the Tasks tab's open/closed/all.
+const (
+	prFilterUnmerged = iota
+	prFilterMerged
+	prFilterAll
+)
+
+var prFilterNames = [...]string{"unmerged", "merged", "all"}
+
+// prFilterShows reports whether a PR of the given status passes the active f-filter:
+// unmerged hides merged (the default), merged shows only merged, all shows both.
+func (m model) prFilterShows(status string) bool {
+	switch m.prFilter {
+	case prFilterMerged:
+		return status == "merged"
+	case prFilterAll:
+		return true
+	default: // prFilterUnmerged
+		return status != "merged"
+	}
+}
+
 func (m model) prRows() []row {
+	_, tag := m.currentRepo()
 	var out []row
 	for _, p := range m.state.PRs {
-		repo := projectStyle(p.Project).Render(fmt.Sprintf("%-10.10s", m.repoName(p.Project)))
+		if m.scopeRepo[2] && p.Project != tag { // repo-scoped: only the active repo's PRs
+			continue
+		}
+		if !m.prFilterShows(p.Status) { // f-toggle: merged hidden by default
+			continue
+		}
+		repo := m.repoStyle(p.Project).Render(fmt.Sprintf("%-10.10s", m.repoName(p.Project)))
 		status := p.Status
 		if m.merging[p.ID] && p.Status != "merged" { // transient: the user triggered a merge, awaiting the hub
 			status = "merging"

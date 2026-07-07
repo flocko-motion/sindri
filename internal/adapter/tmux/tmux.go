@@ -51,12 +51,17 @@ func HasSession(session string) []string {
 	return []string{"has-session", "-t", session}
 }
 
-// CapturePane builds `tmux capture-pane -p` to dump a session's pane as plain
-// text — a read-only peek at what the agent is showing. lines>0 reaches that
-// many rows back into the scrollback (-S -<lines>); 0 captures the visible
-// screen only.
-func CapturePane(session string, lines int) []string {
+// CapturePane builds `tmux capture-pane -p` to dump a session's pane — a
+// read-only peek at what the agent is showing. lines>0 reaches that many rows
+// back into the scrollback (-S -<lines>); 0 captures the visible screen only.
+// color adds -e so the dump keeps the pane's escape sequences (colour), for the
+// TUI preview; leave it off when the text is parsed (the escapes would corrupt
+// pattern matching).
+func CapturePane(session string, lines int, color bool) []string {
 	args := []string{"capture-pane", "-t", session, "-p"}
+	if color {
+		args = append(args, "-e")
+	}
 	if lines > 0 {
 		args = append(args, "-S", fmt.Sprintf("-%d", lines))
 	}

@@ -154,8 +154,37 @@ func TestProjectRegistry(t *testing.T) {
 	if _, ok, err := s.ProjectPath("nope"); err != nil || ok {
 		t.Fatalf("unknown tag resolved (ok=%v err=%v)", ok, err)
 	}
-	if ps, _ := s.Projects(); len(ps) != 2 {
+	ps, _ := s.Projects()
+	if len(ps) != 2 {
 		t.Fatalf("Projects = %d, want 2", len(ps))
+	}
+	// RegisterProject stamps last_used (the switcher's recency signal).
+	for _, p := range ps {
+		if p.LastUsed == "" {
+			t.Errorf("project %s has no last_used stamp", p.Tag)
+		}
+	}
+
+	// UnregisterProject removes only that row — the other project stays.
+	if err := s.UnregisterProject("tagA"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := s.ProjectPath("tagA"); ok {
+		t.Error("forgotten project should be gone from the registry")
+	}
+	if _, ok, _ := s.ProjectPath("tagB"); !ok {
+		t.Error("forget of tagA must not remove tagB")
+	}
+	if ps, _ := s.Projects(); len(ps) != 1 {
+		t.Fatalf("after forget, Projects = %d, want 1", len(ps))
+	}
+
+	// Forget is transient: registering again re-adds it.
+	if err := s.RegisterProject("tagA", "/repos/a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := s.ProjectPath("tagA"); !ok {
+		t.Error("re-registered project should resolve again")
 	}
 }
 
