@@ -98,6 +98,7 @@ var keymap = []binding{
 	{keyApprove, lbl("agent-review"), scopePRs},
 	{keyLint, lbl("lint"), scopePRs},
 	{keyMerge, lbl("merge"), scopePRs},
+	{keyFilter, func(m model) string { return "filter: " + prFilterNames[m.prFilter] }, scopePRs},
 	{keyScopeTog, func(m model) string { return "scope: " + scopeName(m.scopeRepo[2]) }, scopePRs},
 
 	// Repos.

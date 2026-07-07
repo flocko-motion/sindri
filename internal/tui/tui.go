@@ -83,7 +83,8 @@ type model struct {
 	list   scroll.Viewport
 	detail scroll.Viewport
 
-	filter     int
+	filter     int // Tasks tab: open/closed/all
+	prFilter   int // PRs tab: unmerged/merged/all (default hides merged)
 	collapsed  map[string]bool
 	merging    map[string]bool // PR ids the user just triggered a merge on — shown as a transient "merging" on the row until the hub confirms
 	hideDetail bool            // § force-hides the detail pane (else shown when wide enough)
@@ -374,6 +375,8 @@ func (m *model) onKey(k string) tea.Cmd {
 	case keyFilter:
 		if m.tab == 0 {
 			m.filter = (m.filter + 1) % 3
+		} else if m.tab == 2 {
+			m.prFilter = (m.prFilter + 1) % 3
 		}
 	case "h": // tasks: collapse the fold under the cursor (tree navigation)
 		if m.tab == 0 && !m.rightFocus {
@@ -629,14 +632,6 @@ func (m *model) syncDetail() tea.Cmd {
 		m.prView = "diff" // new PR → show its diff (its stored lint loads via PRInfo)
 		return func() tea.Msg { d, _ := cl.PRInfo(id); return prMsg{id, d} }
 	}
-}
-
-func (m model) selID() string {
-	r := m.rows()
-	if c := m.cursor[m.tab]; c >= 0 && c < len(r) {
-		return r[c].id
-	}
-	return ""
 }
 
 // View composes the full-height frame: tab strip, master-detail body, footer.

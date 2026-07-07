@@ -152,6 +152,15 @@ func (m *model) gotoItem(kind, id string) {
 	m.selectRow(id)
 }
 
+// selID is the id of the row under the active tab's cursor ("" if none).
+func (m model) selID() string {
+	r := m.rows()
+	if c := m.cursor[m.tab]; c >= 0 && c < len(r) {
+		return r[c].id
+	}
+	return ""
+}
+
 // rows dispatches to the active tab's row builder (tasks/agents/prs).
 func (m model) rows() []row {
 	switch m.tab {

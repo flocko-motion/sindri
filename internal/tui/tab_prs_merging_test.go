@@ -38,15 +38,21 @@ func TestMergingTransient(t *testing.T) {
 		t.Fatalf("after trigger row = %q, want merging", txt)
 	}
 
-	// Confirm: a fresh snapshot showing it merged clears the transient (reconcile),
-	// and the row shows the real "merged".
+	// Confirm: a fresh snapshot showing it merged clears the transient (reconcile).
 	m.state = hub.BoardState{PRs: []store.PR{{ID: "pr-td-1", Status: "merged", Project: "repo"}}}
 	m.reconcileMerging()
 	if m.merging["pr-td-1"] {
 		t.Fatalf("marker should clear once the board confirms merged")
 	}
+	// Merged PRs are hidden by the default filter, so the row drops out of the list.
+	if txt := prRowText(m, "pr-td-1"); txt != "" {
+		t.Fatalf("merged PR should be hidden by the default (unmerged) filter, got %q", txt)
+	}
+	// With the filter showing merged, the row reappears with the real "merged" status
+	// (and no lingering transient "merging").
+	m.prFilter = prFilterAll
 	if txt := prRowText(m, "pr-td-1"); !strings.Contains(txt, "merged") || strings.Contains(txt, "merging") {
-		t.Fatalf("after confirm row = %q, want merged and not merging", txt)
+		t.Fatalf("with filter=all, row = %q, want merged and not merging", txt)
 	}
 }
 
