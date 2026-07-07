@@ -17,8 +17,24 @@ func (m model) detailLines() []string {
 		return m.taskDetailLines()
 	case 1:
 		return m.agentDetailLines()
-	default:
+	case 2:
 		return m.prDetailLines()
+	default:
+		return m.repoDetailLines()
+	}
+}
+
+// modalTitle titles the full-screen detail modal by the active tab's item.
+func (m model) modalTitle() string {
+	switch m.tab {
+	case 0:
+		return "Task " + m.selID()
+	case 1:
+		return "Agent " + m.selID()
+	case 2:
+		return "PR " + m.selID()
+	default:
+		return "Repo " + m.repoName(m.selID())
 	}
 }
 
@@ -143,8 +159,10 @@ func (m model) rows() []row {
 		return m.taskRows()
 	case 1:
 		return m.agentRows()
-	default:
+	case 2:
 		return m.prRows()
+	default:
+		return m.repoRows()
 	}
 }
 

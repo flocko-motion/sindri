@@ -79,7 +79,7 @@ type model struct {
 	w, h   int
 
 	tab    int
-	cursor [3]int
+	cursor [4]int
 	list   scroll.Viewport
 	detail scroll.Viewport
 
@@ -87,7 +87,7 @@ type model struct {
 	collapsed  map[string]bool
 	merging    map[string]bool // PR ids the user just triggered a merge on — shown as a transient "merging" on the row until the hub confirms
 	hideDetail bool            // § force-hides the detail pane (else shown when wide enough)
-	scopeRepo  [3]bool         // per-tab global↔repo scope; Agents(1)/PRs(2) narrow to the active repo when true (Tasks always repo-scoped)
+	scopeRepo  [4]bool         // per-tab global↔repo scope; Agents(1)/PRs(2) narrow to the active repo when true (Tasks always repo-scoped)
 
 	rightFocus  bool // detail (right) column has focus (h/l switch; j/k move within)
 	rightCursor int  // focused actionable item in the right column
@@ -291,16 +291,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // modalTitle labels the detail modal for the current selection.
-func (m model) modalTitle() string {
-	switch m.tab {
-	case 0:
-		return "Task " + m.selID()
-	case 1:
-		return "Agent " + m.selID()
-	default:
-		return "PR " + m.selID()
-	}
-}
 
 // onKey applies a key (by its string form) — shared by the live loop and the
 // headless Screenshot harness. Mutates the model; returns an optional cmd.
@@ -443,9 +433,13 @@ func (m *model) onKey(k string) tea.Cmd {
 				return nil
 			}
 		}
-	case keyDelete: // delete the selected agent (with confirm)
+	case keyDelete: // agents: delete the selected agent · repos: forget the selected repo
 		if m.tab == 1 && m.selID() != "" {
 			m.openDeleteChoice(m.selID())
+			return nil
+		}
+		if m.tab == 3 && m.selID() != "" {
+			m.openForgetChoice(m.selID(), m.repoName(m.selID()))
 			return nil
 		}
 	case keyTell: // tell the selected agent (agents) / show linked task (prs)
@@ -522,6 +516,16 @@ func (m *model) onKey(k string) tea.Cmd {
 					return tea.ExecProcess(shellAt(it.value), func(error) tea.Msg { return nil })
 				default: // cross-reference: open its details modal
 					m.openItemModal(it.kind, it.value)
+				}
+			}
+			return nil
+		}
+		if m.tab == 3 { // Repos: enter switches to the selected repo
+			if tag := m.selID(); tag != "" {
+				for _, p := range m.state.Projects {
+					if p.Tag == tag {
+						return m.switchRepo(p.Path)
+					}
 				}
 			}
 			return nil

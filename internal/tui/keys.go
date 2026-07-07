@@ -45,6 +45,7 @@ const (
 	scopeTasks
 	scopeAgents
 	scopePRs
+	scopeRepos
 )
 
 // binding is one row of help: the key(s) as displayed, a label (may depend on model
@@ -97,6 +98,11 @@ var keymap = []binding{
 	{keyLint, lbl("lint"), scopePRs},
 	{keyMerge, lbl("merge"), scopePRs},
 	{keyScopeTog, func(m model) string { return "scope: " + scopeName(m.scopeRepo[2]) }, scopePRs},
+
+	// Repos.
+	{"enter", lbl("switch"), scopeRepos},
+	{keyConfig, lbl("config"), scopeRepos},
+	{keyDelete, lbl("forget"), scopeRepos},
 }
 
 // footerFor renders the "key label · key label" hints for a scope from the keymap.
@@ -117,7 +123,9 @@ func tabScope(tab int) keyScope {
 		return scopeTasks
 	case 1:
 		return scopeAgents
-	default:
+	case 2:
 		return scopePRs
+	default:
+		return scopeRepos
 	}
 }
