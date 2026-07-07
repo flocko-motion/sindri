@@ -13,15 +13,31 @@ import (
 )
 
 func newUpgradeCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "upgrade",
-		Short: "Check for a newer release; if found, recommend running sindri-do-upgrade",
-		Args:  cobra.NoArgs,
+	var list bool
+	c := &cobra.Command{
+		Use:   "upgrade [version]",
+		Short: "Upgrade sindri: latest by default, or a specific released version",
+		Long: "With no argument, check the latest release and (if newer) recommend\n" +
+			"`sindri-do-upgrade`. Pass a version to install exactly that release —\n" +
+			"including a reinstall or a downgrade. `--list` shows available versions.\n\n" +
+			"  sindri upgrade            # latest\n" +
+			"  sindri upgrade v0.12.0    # a specific release (a 'v' prefix is optional)\n" +
+			"  sindri upgrade --list     # list published releases",
+		Args: cobra.MaximumNArgs(1),
 		// A network/check failure is a runtime error, not a usage mistake — don't
 		// dump the usage block after it.
 		SilenceUsage: true,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return update.Upgrade(version, cmd.OutOrStdout())
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if list {
+				return update.ListReleases(cmd.OutOrStdout())
+			}
+			target := ""
+			if len(args) == 1 {
+				target = args[0]
+			}
+			return update.Upgrade(version, target, cmd.OutOrStdout())
 		},
 	}
+	c.Flags().BoolVar(&list, "list", false, "list published releases you can upgrade (or downgrade) to")
+	return c
 }

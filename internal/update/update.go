@@ -62,7 +62,7 @@ func MaybeNotify(current string, w io.Writer) {
 		// Hit the network at most once per day; record the day either way so a
 		// flaky network can't make us retry (and stall 2s) every invocation.
 		c.LastCheck = today
-		if latest, err := fetchLatest(netTimeout); err == nil {
+		if latest, err := fetchRelease("", netTimeout); err == nil {
 			c.Latest = latest
 		}
 		_ = os.MkdirAll(dir, 0o755)
@@ -73,24 +73,29 @@ func MaybeNotify(current string, w io.Writer) {
 		return
 	}
 	hint := ""
-	if p, err := writeUpdater(); err == nil {
+	if p, err := writeUpdater(""); err == nil { // "" = latest, the daily notice's target
 		hint = updaterHint(p)
 	}
 	fmt.Fprintf(w, "\nsindri %s is available (you have %s) — run `sindri-do-upgrade` to upgrade%s.\n\n",
 		c.Latest, current, hint)
 }
 
-// Upgrade is the explicit, on-demand check behind `sindri upgrade`: it always
-// hits GitHub (no daily throttle), with a longer timeout since the user is
-// waiting, and reports the result. If a newer release exists it writes the
-// sindri-do-upgrade helper and tells the user to run it; if up to date it says so.
-// Returns an error only when the check itself couldn't run (offline, etc.).
-func Upgrade(current string, w io.Writer) error {
+// Upgrade is the explicit, on-demand action behind `sindri upgrade [version]`: it
+// hits GitHub (no daily throttle) with a longer timeout since the user is waiting.
+// With no target it checks the latest release and, if newer, writes the
+// sindri-do-upgrade helper (targeting latest) and recommends it; if up to date it
+// says so. With an explicit target it resolves that exact release (allowing a
+// reinstall or a downgrade) and writes the helper to install THAT version. Returns
+// an error only when the check itself couldn't run (offline, unknown version, etc.).
+func Upgrade(current, target string, w io.Writer) error {
 	if current == "" || current == "dev" {
 		fmt.Fprintln(w, "this is a dev build (no baked version) — nothing to compare against a release.")
 		return nil
 	}
-	latest, err := fetchLatest(explicitTimeout)
+	if target != "" {
+		return upgradeTo(current, target, w)
+	}
+	latest, err := fetchRelease("", explicitTimeout)
 	if err != nil {
 		return fmt.Errorf("couldn't check for updates: %w", err)
 	}
@@ -101,26 +106,96 @@ func Upgrade(current string, w io.Writer) error {
 		_ = writeCache(filepath.Join(d, "update.json"), cache{LastCheck: time.Now().UTC().Format("2006-01-02"), Latest: latest})
 	}
 	if !newer(latest, current) {
-		fmt.Fprintf(w, "sindri %s is up to date (latest release is %s).\n", current, latest)
+		fmt.Fprintf(w, "sindri %s is up to date (latest release is %s). Pin another with `sindri upgrade <version>` (see `--list`).\n", current, latest)
 		return nil
 	}
 	hint := ""
-	if p, e := writeUpdater(); e == nil {
+	if p, e := writeUpdater(""); e == nil {
 		hint = updaterHint(p)
 	}
 	fmt.Fprintf(w, "sindri %s is available (you have %s) — run `sindri-do-upgrade` to upgrade%s.\n", latest, current, hint)
 	return nil
 }
 
-// fetchLatest asks GitHub for the latest release tag, bounded by timeout.
-func fetchLatest(timeout time.Duration) (string, error) {
+// upgradeTo resolves an explicit release tag and writes the helper to install it —
+// no newer-than check, so it supports reinstalling the current version or moving to
+// an older one (downgrades are allowed). The target must be a semver (optionally
+// v-prefixed), since releases are semver tags — anything else is rejected up front,
+// before any network call.
+func upgradeTo(current, target string, w io.Writer) error {
+	if _, _, _, ok := parseSemver(target); !ok {
+		return fmt.Errorf("invalid version %q — use a semver like v1.2.3 or 1.2.3 (see `sindri upgrade --list`)", target)
+	}
+	tag, err := fetchRelease(target, explicitTimeout)
+	if err != nil {
+		return fmt.Errorf("couldn't find release %q: %w", target, err)
+	}
+	hint := ""
+	if p, e := writeUpdater(tag); e == nil {
+		hint = updaterHint(p)
+	}
+	verb := "install"
+	switch {
+	case tag == current:
+		verb = "reinstall"
+	case newer(tag, current):
+		verb = "upgrade to"
+	case newer(current, tag):
+		verb = "downgrade to"
+	}
+	fmt.Fprintf(w, "sindri %s selected (you have %s) — run `sindri-do-upgrade` to %s it%s.\n", tag, current, verb, hint)
+	return nil
+}
+
+// ListReleases prints the repo's published release tags, newest first — so a user
+// can pick one for `sindri upgrade <version>`.
+func ListReleases(w io.Writer) error {
+	tags, err := fetchReleaseTags(explicitTimeout)
+	if err != nil {
+		return fmt.Errorf("couldn't list releases: %w", err)
+	}
+	if len(tags) == 0 {
+		fmt.Fprintf(w, "no published releases found for %s.\n", repo)
+		return nil
+	}
+	for _, t := range tags {
+		fmt.Fprintln(w, t)
+	}
+	return nil
+}
+
+// fetchRelease resolves a release's canonical tag from GitHub, bounded by timeout.
+// An empty tag means the latest release. For an explicit tag that 404s, it retries
+// once with the "v" prefix toggled (so "0.12.1" finds a "v0.12.1" tag and vice
+// versa) before giving up.
+func fetchRelease(tag string, timeout time.Duration) (string, error) {
+	name, err := fetchReleaseExact(tag, timeout)
+	if err != nil && tag != "" {
+		if alt := togglePrefix(tag); alt != tag {
+			if n, e := fetchReleaseExact(alt, timeout); e == nil {
+				return n, nil
+			}
+		}
+	}
+	return name, err
+}
+
+// fetchReleaseExact fetches one release by tag ("" = latest) without any fallback.
+func fetchReleaseExact(tag string, timeout time.Duration) (string, error) {
+	url := "https://api.github.com/repos/" + repo + "/releases/latest"
+	if tag != "" {
+		url = "https://api.github.com/repos/" + repo + "/releases/tags/" + tag
+	}
 	cl := &http.Client{Timeout: timeout}
-	resp, err := cl.Get("https://api.github.com/repos/" + repo + "/releases/latest")
+	resp, err := cl.Get(url)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
+		if tag != "" {
+			return "", fmt.Errorf("no release tagged %q", tag)
+		}
 		return "", fmt.Errorf("no published release found for %s — or the repo is private (this check is unauthenticated, and GitHub 404s private repos)", repo)
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -133,6 +208,40 @@ func fetchLatest(timeout time.Duration) (string, error) {
 		return "", err
 	}
 	return rel.TagName, nil
+}
+
+// togglePrefix flips a leading "v" on a version string, so a user's "0.12.1" and the
+// repo's "v0.12.1" (or vice versa) resolve to the same release.
+func togglePrefix(tag string) string {
+	if strings.HasPrefix(tag, "v") {
+		return strings.TrimPrefix(tag, "v")
+	}
+	return "v" + tag
+}
+
+// fetchReleaseTags lists the repo's release tags, newest first (GitHub returns
+// releases in reverse-chronological order).
+func fetchReleaseTags(timeout time.Duration) ([]string, error) {
+	cl := &http.Client{Timeout: timeout}
+	resp, err := cl.Get("https://api.github.com/repos/" + repo + "/releases?per_page=100")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("github: %s", resp.Status)
+	}
+	var rels []struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rels); err != nil {
+		return nil, err
+	}
+	tags := make([]string, 0, len(rels))
+	for _, r := range rels {
+		tags = append(tags, r.TagName)
+	}
+	return tags, nil
 }
 
 // newer reports whether release tag latest is a higher semver than current. A tag
@@ -200,7 +309,7 @@ func writeCache(path string, c cache) error {
 // it can install a new .deb that overwrites the running sindri binary. (Named
 // distinctly from the `sindri upgrade` command, which only checks and recommends
 // running this.)
-func writeUpdater() (string, error) {
+func writeUpdater(tag string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -210,7 +319,7 @@ func writeUpdater() (string, error) {
 		return "", err
 	}
 	p := filepath.Join(dir, "sindri-do-upgrade")
-	if err := os.WriteFile(p, []byte(updaterScript(runtime.GOOS, runtime.GOARCH)), 0o755); err != nil {
+	if err := os.WriteFile(p, []byte(updaterScript(runtime.GOOS, runtime.GOARCH, tag)), 0o755); err != nil {
 		return "", err
 	}
 	return p, nil
@@ -233,23 +342,34 @@ func updaterHint(path string) string {
 // so the script picks the right release asset without runtime detection. Replacing
 // the binaries while sindri/the hub runs is safe — the running process keeps its
 // open inode (dpkg and the atomic mv below both preserve it).
-func updaterScript(goos, goarch string) string {
+func updaterScript(goos, goarch, tag string) string {
 	if goos == "darwin" {
-		return darwinUpdaterScript(goarch)
+		return darwinUpdaterScript(goarch, tag)
 	}
-	return debUpdaterScript()
+	return debUpdaterScript(tag)
 }
 
-// debUpdaterScript downloads the latest release's .deb and installs it (needs sudo).
-func debUpdaterScript() string {
+// releaseAPIPath is the GitHub releases sub-path a script fetches: the pinned tag
+// when set, else the latest release.
+func releaseAPIPath(tag string) string {
+	if tag == "" {
+		return "latest"
+	}
+	return "tags/" + tag
+}
+
+// debUpdaterScript downloads a release's .deb and installs it (needs sudo). An empty
+// tag installs the latest; a set tag installs exactly that release.
+func debUpdaterScript(tag string) string {
 	return fmt.Sprintf(`#!/usr/bin/env bash
-# Generated by sindri when a newer release was found. Installs the latest .deb.
+# Generated by sindri. Installs the %[2]s sindri .deb.
 set -euo pipefail
-repo=%q
-echo "fetching the latest sindri release…"
-url=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" \
+repo=%[1]q
+rel=%[2]q
+echo "fetching sindri release ($rel)…"
+url=$(curl -fsSL "https://api.github.com/repos/$repo/releases/$rel" \
   | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*\.deb"' | head -1 | cut -d'"' -f4)
-[ -n "$url" ] || { echo "no .deb asset in the latest release" >&2; exit 1; }
+[ -n "$url" ] || { echo "no .deb asset in the $rel release" >&2; exit 1; }
 tmp="$(mktemp --suffix=.deb)"
 trap 'rm -f "$tmp"' EXIT
 echo "downloading $url"
@@ -257,25 +377,25 @@ curl -fsSL "$url" -o "$tmp"
 echo "installing (sudo dpkg -i)…"
 sudo dpkg -i "$tmp" || sudo apt-get install -f -y
 echo "done — run 'sindri --version' to confirm."
-`, repo)
+`, repo, releaseAPIPath(tag))
 }
 
 // darwinUpdaterScript downloads the latest macOS tarball for arch and installs it
 // over the current binaries. It replaces them next to the running sindri (so it
 // upgrades whichever install is in use), via a rename within that dir so a live
 // sindri/hub is swapped atomically, and clears the Gatekeeper quarantine.
-func darwinUpdaterScript(arch string) string {
+func darwinUpdaterScript(arch, tag string) string {
 	return fmt.Sprintf(`#!/usr/bin/env bash
-# Generated by sindri when a newer release was found. Installs the latest macOS
-# tarball (darwin/%[2]s) over the current install — no sudo when it lives in
-# ~/.local/bin.
+# Generated by sindri. Installs the %[3]s macOS tarball (darwin/%[2]s) over the
+# current install — no sudo when it lives in ~/.local/bin.
 set -euo pipefail
 repo=%[1]q
 arch=%[2]q
-echo "fetching the latest sindri release…"
-url=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" \
+rel=%[3]q
+echo "fetching sindri release ($rel)…"
+url=$(curl -fsSL "https://api.github.com/repos/$repo/releases/$rel" \
   | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*_darwin_'"$arch"'\.tar\.gz"' | head -1 | cut -d'"' -f4)
-[ -n "$url" ] || { echo "no darwin_$arch tarball in the latest release" >&2; exit 1; }
+[ -n "$url" ] || { echo "no darwin_$arch tarball in the $rel release" >&2; exit 1; }
 # Upgrade wherever the current sindri lives; fall back to ~/.local/bin.
 dest="$(dirname "$(command -v sindri 2>/dev/null || true)")"
 [ -n "$dest" ] && [ -d "$dest" ] || dest="$HOME/.local/bin"
@@ -295,5 +415,5 @@ for bin in sindri sindri-worker brokkr td yq; do
 	mv -f "$dest/.$bin.new" "$dest/$bin" # atomic within $dest; safe while running
 done
 echo "installed to $dest — run 'sindri --version' to confirm."
-`, repo, arch)
+`, repo, arch, releaseAPIPath(tag))
 }

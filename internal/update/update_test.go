@@ -1,10 +1,29 @@
 package update
 
 import (
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// TestUpgradeRejectsNonSemver: an explicit target must be a semver (optionally
+// v-prefixed) — junk is rejected before any network call, so downgrades to a real
+// release work but typos/garbage don't send us hunting a bogus tag.
+func TestUpgradeRejectsNonSemver(t *testing.T) {
+	for _, bad := range []string{"junk", "1.2", "1.2.3.4", "latest", "v", "1.x.0"} {
+		if err := Upgrade("1.0.0", bad, io.Discard); err == nil {
+			t.Errorf("target %q should be rejected as non-semver", bad)
+		}
+	}
+	// Sanity: the accepted forms parse (the network step is separate and not tested
+	// here).
+	for _, ok := range []string{"1.2.3", "v1.2.3", "0.4.0"} {
+		if _, _, _, valid := parseSemver(ok); !valid {
+			t.Errorf("target %q should be accepted as semver", ok)
+		}
+	}
+}
 
 func TestNewer(t *testing.T) {
 	cases := []struct {
@@ -55,9 +74,9 @@ func TestCacheRoundTrip(t *testing.T) {
 }
 
 func TestUpdaterScript(t *testing.T) {
-	// Linux: installs the .deb via dpkg.
-	linux := updaterScript("linux", "amd64")
-	for _, want := range []string{"#!/usr/bin/env bash", repo, "dpkg -i", "releases/latest"} {
+	// Linux, no tag: installs the .deb via dpkg from the latest release.
+	linux := updaterScript("linux", "amd64", "")
+	for _, want := range []string{"#!/usr/bin/env bash", repo, "dpkg -i", `rel="latest"`} {
 		if !strings.Contains(linux, want) {
 			t.Errorf("linux updater script missing %q", want)
 		}
@@ -66,8 +85,8 @@ func TestUpdaterScript(t *testing.T) {
 		t.Error("linux updater must not use the tarball path")
 	}
 
-	// macOS: installs the darwin tarball for the baked arch, not a .deb.
-	mac := updaterScript("darwin", "arm64")
+	// macOS, no tag: installs the darwin tarball for the baked arch, not a .deb.
+	mac := updaterScript("darwin", "arm64", "")
 	for _, want := range []string{"#!/usr/bin/env bash", repo, "_darwin_", "arch=\"arm64\"", "tar -C", "com.apple.quarantine"} {
 		if !strings.Contains(mac, want) {
 			t.Errorf("darwin updater script missing %q", want)
@@ -75,5 +94,21 @@ func TestUpdaterScript(t *testing.T) {
 	}
 	if strings.Contains(mac, "dpkg") {
 		t.Error("darwin updater must not use dpkg")
+	}
+
+	// A pinned tag targets that exact release (tags/<tag>), on both platforms.
+	for _, s := range []string{updaterScript("linux", "amd64", "v0.12.0"), updaterScript("darwin", "arm64", "v0.12.0")} {
+		if !strings.Contains(s, `rel="tags/v0.12.0"`) {
+			t.Errorf("pinned updater script should target tags/v0.12.0:\n%s", s)
+		}
+	}
+}
+
+func TestTogglePrefix(t *testing.T) {
+	if got := togglePrefix("0.12.0"); got != "v0.12.0" {
+		t.Errorf("togglePrefix(0.12.0) = %q, want v0.12.0", got)
+	}
+	if got := togglePrefix("v0.12.0"); got != "0.12.0" {
+		t.Errorf("togglePrefix(v0.12.0) = %q, want 0.12.0", got)
 	}
 }
