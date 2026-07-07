@@ -47,6 +47,7 @@ type AgentView struct {
 	Workspace string `json:"workspace"` // the agent's git worktree path (repo-relative)
 	Clients   int    `json:"clients"`   // humans attached to its tmux session (dial-ins)
 	Container string `json:"container"` // podman container name (project-resolved, so cross-repo callers target the right pod)
+	Memory    string `json:"memory"`    // configured RAM limit ("" = hub default)
 }
 
 // ClientView is one human attached to an agent's tmux session — a live dial-in.
@@ -126,7 +127,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			Project: a.Project, Repo: h.repoName(a.Project), Name: a.Name, Role: a.Role,
 			Status: h.agentStatus(a.Project, a.Name, running[i], st.Phase),
 			Task:   st.Task, Branch: st.Branch, PR: openPRFor(prs, a.Project, a.Name), Workspace: a.Workspace,
-			Clients: clients[i], Container: container,
+			Clients: clients[i], Container: container, Memory: a.Memory,
 		})
 	}
 

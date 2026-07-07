@@ -11,6 +11,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -24,6 +25,7 @@ type Agent struct {
 	Workspace string `json:"workspace"`
 	Socket    string `json:"socket"`
 	CreatedAt string `json:"created_at"`
+	Memory    string `json:"memory"` // per-agent RAM limit (e.g. "4g"); "" = hub default
 }
 
 // Event is one row of the append-only activity log.
@@ -65,6 +67,7 @@ CREATE TABLE IF NOT EXISTS agents (
   workspace  TEXT NOT NULL DEFAULT '',
   socket     TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
+  memory     TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (project, name)
 );
 CREATE TABLE IF NOT EXISTS events (
@@ -105,7 +108,26 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &Store{db: db}, nil
+}
+
+// migrate adds columns that CREATE TABLE IF NOT EXISTS can't add to a pre-existing
+// table. Each ALTER is idempotent — a "duplicate column" error means it's already
+// applied and is ignored; any other error is real.
+func migrate(db *sql.DB) error {
+	alters := []string{
+		`ALTER TABLE agents ADD COLUMN memory TEXT NOT NULL DEFAULT ''`,
+	}
+	for _, a := range alters {
+		if _, err := db.Exec(a); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return fmt.Errorf("migrate (%s): %w", a, err)
+		}
+	}
+	return nil
 }
 
 // Close closes the database.
@@ -192,7 +214,7 @@ func (s *Store) SetMeta(key, value string) error {
 // the canonical set backing the global board and token resolution.
 func (s *Store) AllAgents() ([]Agent, error) {
 	rows, err := s.db.Query(
-		`SELECT project, name, role, workspace, socket, created_at FROM agents ORDER BY project, name`)
+		`SELECT project, name, role, workspace, socket, created_at, memory FROM agents ORDER BY project, name`)
 	if err != nil {
 		return nil, fmt.Errorf("all agents: %w", err)
 	}
@@ -204,7 +226,7 @@ func scanAgents(rows *sql.Rows) ([]Agent, error) {
 	var agents []Agent
 	for rows.Next() {
 		var a Agent
-		if err := rows.Scan(&a.Project, &a.Name, &a.Role, &a.Workspace, &a.Socket, &a.CreatedAt); err != nil {
+		if err := rows.Scan(&a.Project, &a.Name, &a.Role, &a.Workspace, &a.Socket, &a.CreatedAt, &a.Memory); err != nil {
 			return nil, fmt.Errorf("scan agent: %w", err)
 		}
 		agents = append(agents, a)
@@ -221,11 +243,11 @@ func (p *ProjectStore) PutAgent(a Agent) error {
 		a.CreatedAt = time.Now().UTC().Format(time.RFC3339)
 	}
 	_, err := p.s.db.Exec(`
-		INSERT INTO agents (project, name, role, workspace, socket, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO agents (project, name, role, workspace, socket, created_at, memory)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(project, name) DO UPDATE SET
-			role=excluded.role, workspace=excluded.workspace, socket=excluded.socket`,
-		a.Project, a.Name, a.Role, a.Workspace, a.Socket, a.CreatedAt)
+			role=excluded.role, workspace=excluded.workspace, socket=excluded.socket, memory=excluded.memory`,
+		a.Project, a.Name, a.Role, a.Workspace, a.Socket, a.CreatedAt, a.Memory)
 	if err != nil {
 		return fmt.Errorf("put agent %s/%s: %w", a.Project, a.Name, err)
 	}
@@ -235,9 +257,9 @@ func (p *ProjectStore) PutAgent(a Agent) error {
 // GetAgent returns an agent by name within this project; ok is false if absent.
 func (p *ProjectStore) GetAgent(name string) (a Agent, ok bool, err error) {
 	row := p.s.db.QueryRow(
-		`SELECT project, name, role, workspace, socket, created_at FROM agents WHERE project=? AND name=?`,
+		`SELECT project, name, role, workspace, socket, created_at, memory FROM agents WHERE project=? AND name=?`,
 		p.project, name)
-	err = row.Scan(&a.Project, &a.Name, &a.Role, &a.Workspace, &a.Socket, &a.CreatedAt)
+	err = row.Scan(&a.Project, &a.Name, &a.Role, &a.Workspace, &a.Socket, &a.CreatedAt, &a.Memory)
 	if err == sql.ErrNoRows {
 		return Agent{}, false, nil
 	}
@@ -250,7 +272,7 @@ func (p *ProjectStore) GetAgent(name string) (a Agent, ok bool, err error) {
 // Roster returns this project's agents, ordered by name.
 func (p *ProjectStore) Roster() ([]Agent, error) {
 	rows, err := p.s.db.Query(
-		`SELECT project, name, role, workspace, socket, created_at FROM agents WHERE project=? ORDER BY name`,
+		`SELECT project, name, role, workspace, socket, created_at, memory FROM agents WHERE project=? ORDER BY name`,
 		p.project)
 	if err != nil {
 		return nil, fmt.Errorf("roster %s: %w", p.project, err)

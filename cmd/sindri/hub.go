@@ -26,7 +26,8 @@ import (
 // *client.HTTP (the single global hub over its socket — repo context rides the
 // client's X-Sindri-Project header, so these signatures don't carry a project).
 type backend interface {
-	NewAgent(name, role string) (string, error)
+	NewAgent(name, role, memory string) (string, error)
+	SetMemory(name, memory string) error
 	DeleteAgent(name string) error
 	StopAgent(name string) error
 	AgentPane(name string, lines int) (string, error)
@@ -190,7 +191,7 @@ func newHubRestartCmd() *cobra.Command {
 func newAgentCmd() *cobra.Command {
 	c := &cobra.Command{Use: "agent", Short: "Manage agents (workers, reviewers, planners, coauthors)",
 		PersistentPreRun: agentPreflight} // warn up front if podman is down — nothing works without it
-	c.AddCommand(agentListCmd(), agentStatsCmd(), agentNewCmd(), agentDeleteCmd(), agentPaneCmd(), agentStartCmd(), agentStopCmd(), agentRestartCmd(), agentTellCmd(), agentAttachCmd(), agentInfoCmd())
+	c.AddCommand(agentListCmd(), agentStatsCmd(), agentNewCmd(), agentDeleteCmd(), agentPaneCmd(), agentStartCmd(), agentStopCmd(), agentRestartCmd(), agentMemoryCmd(), agentTellCmd(), agentAttachCmd(), agentInfoCmd())
 	return c
 }
 

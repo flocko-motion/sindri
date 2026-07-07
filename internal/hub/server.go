@@ -64,8 +64,9 @@ func (r *statusRecorder) Flush() {
 
 // AgentReq is the body for POST /agents.
 type AgentReq struct {
-	Name string `json:"name"`
-	Role string `json:"role"`
+	Name   string `json:"name"`
+	Role   string `json:"role"`
+	Memory string `json:"memory"` // optional per-agent RAM limit (e.g. "4g"); "" = hub default
 }
 
 // TellReq is the body for POST /tell.
@@ -78,9 +79,10 @@ type TellReq struct {
 // NameReq is the body for operations addressing one agent (POST /launch) or PR
 // (POST /merge). Shell and Debug apply to /launch only.
 type NameReq struct {
-	Name  string `json:"name"`
-	Shell bool   `json:"shell"`
-	Debug bool   `json:"debug"` // stream the hub's liveness-probe detail during the launch wait
+	Name   string `json:"name"`
+	Shell  bool   `json:"shell"`
+	Debug  bool   `json:"debug"`  // stream the hub's liveness-probe detail during the launch wait
+	Memory string `json:"memory"` // set an agent's RAM limit (POST /agent/memory)
 }
 
 // globalRoutes are the only control endpoints valid without a repo context: the
@@ -159,8 +161,15 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		name, err := h.NewAgent(h.reqProject(r), req.Name, req.Role)
+		name, err := h.NewAgent(h.reqProject(r), req.Name, req.Role, req.Memory)
 		writeJSON(w, okMsg{name}, err)
+	})
+	mux.HandleFunc("POST /agent/memory", func(w http.ResponseWriter, r *http.Request) {
+		var req NameReq
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"ok"}, h.SetAgentMemory(h.reqProject(r), req.Name, req.Memory))
 	})
 	mux.HandleFunc("POST /agent/delete", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq

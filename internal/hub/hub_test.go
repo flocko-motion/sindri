@@ -75,16 +75,16 @@ func TestEnsureGitignore(t *testing.T) {
 
 func TestNewAgentValidation(t *testing.T) {
 	h := newHub(t)
-	if _, err := h.NewAgent(testProject, "Brokkr", "worker"); err == nil {
+	if _, err := h.NewAgent(testProject, "Brokkr", "worker", ""); err == nil {
 		t.Fatalf("uppercase name should be rejected")
 	}
-	if _, err := h.NewAgent(testProject, "brokkr", "boss"); err == nil {
+	if _, err := h.NewAgent(testProject, "brokkr", "boss", ""); err == nil {
 		t.Fatalf("bad role should be rejected")
 	}
-	if _, err := h.NewAgent(testProject, "brokkr", "worker"); err != nil {
+	if _, err := h.NewAgent(testProject, "brokkr", "worker", ""); err != nil {
 		t.Fatalf("valid agent: %v", err)
 	}
-	if _, err := h.NewAgent(testProject, "brokkr", "worker"); err == nil {
+	if _, err := h.NewAgent(testProject, "brokkr", "worker", ""); err == nil {
 		t.Fatalf("duplicate agent should be rejected")
 	}
 }
@@ -99,12 +99,12 @@ func TestNewAgentAutoName(t *testing.T) {
 		}
 		return false
 	}
-	n1, err := h.NewAgent(testProject, "", "worker")
+	n1, err := h.NewAgent(testProject, "", "worker", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// A different project must still get a globally-unique name (not reuse n1).
-	n2, err := h.NewAgent("other", "", "worker")
+	n2, err := h.NewAgent("other", "", "worker", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,18 +121,18 @@ func TestNewAgentAutoName(t *testing.T) {
 
 func TestNewAgentNameGloballyUnique(t *testing.T) {
 	h := newHub(t)
-	if _, err := h.NewAgent("repoA", "eitri", "worker"); err != nil {
+	if _, err := h.NewAgent("repoA", "eitri", "worker", ""); err != nil {
 		t.Fatal(err)
 	}
 	// The same name in a DIFFERENT repo is refused — names are unique machine-wide.
-	if _, err := h.NewAgent("repoB", "eitri", "worker"); err == nil {
+	if _, err := h.NewAgent("repoB", "eitri", "worker", ""); err == nil {
 		t.Fatalf("same name in another repo should be rejected (global uniqueness)")
 	}
 }
 
 func TestNewAgentRecordsIdentityAndLog(t *testing.T) {
 	h := newHub(t)
-	if _, err := h.NewAgent(testProject, "dvalin", "reviewer"); err != nil {
+	if _, err := h.NewAgent(testProject, "dvalin", "reviewer", ""); err != nil {
 		t.Fatal(err)
 	}
 	st, err := h.State(testProject)

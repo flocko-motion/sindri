@@ -296,7 +296,7 @@ func (h *Hub) SocketPath() string { return SocketPath() }
 // NewAgent registers an agent identity in a project (no pod). Identity precedes
 // runtime (D13). An empty name is auto-assigned a Norse dwarf name unused in that
 // project. Returns the final name.
-func (h *Hub) NewAgent(project, name, role string) (string, error) {
+func (h *Hub) NewAgent(project, name, role, memory string) (string, error) {
 	ps := h.store.For(project)
 	if name == "" { // auto-name after a dwarf — a friend of Sindri (globally unique)
 		n, err := h.autoName()
@@ -310,6 +310,9 @@ func (h *Hub) NewAgent(project, name, role string) (string, error) {
 	}
 	if role != "worker" && role != "reviewer" && role != "planner" && role != "coauthor" {
 		return "", fmt.Errorf("invalid role %q (worker|reviewer|planner|coauthor)", role)
+	}
+	if !validMemory(memory) {
+		return "", fmt.Errorf("invalid memory %q (e.g. 2g, 512m)", memory)
 	}
 	// Names are unique across ALL repos — a dwarf identifies one agent machine-wide,
 	// so the unified board never shows two agents with the same name.
@@ -333,6 +336,7 @@ func (h *Hub) NewAgent(project, name, role string) (string, error) {
 		Role:      role,
 		Workspace: workspace,
 		Socket:    filepath.Join(AgentSocketDir(project, name), "sock"),
+		Memory:    strings.TrimSpace(memory),
 	}
 	if err := ps.PutAgent(a); err != nil {
 		return "", err
@@ -478,9 +482,8 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 			_ = ps.SetState(store.AgentState{Agent: name, Phase: "planning"})
 		}
 	}
-	// Serve the agent's own socket BEFORE the pod launches — the pod bind-mounts
-	// it, and the socket IS the agent's identity (D2). Requires the persistent
-	// hub: an ephemeral in-process hub would take the listener down on exit.
+	// Serve the agent's own socket BEFORE the pod launches — the pod bind-mounts it,
+	// and the socket IS the agent's identity (D2); needs the persistent hub.
 	if err := h.ServeAgent(project, name); err != nil {
 		return err
 	}
@@ -525,8 +528,7 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 		mounts[0] = container.Mount{Host: wt, Container: "/workspace", Mode: "ro"}
 		mounts = append(mounts, container.Mount{Host: osDir, Container: "/workspace/openspec", Mode: "rw"})
 	}
-	// Note: no coauthor .sindri shield anymore — hub state lives centrally under the
-	// state dir, never inside the repo, so the shared checkout exposes nothing.
+	// Hub state lives centrally, never in the repo — a coauthor's shared checkout needs no shield.
 	if shell {
 		env["SINDRI_SHELL"] = "1" // entrypoint runs bash instead of Claude
 	} else {
@@ -560,6 +562,7 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 		Mounts:     mounts,
 		Workdir:    "/workspace",
 		Entrypoint: []string{"sindri-agent", name},
+		Memory:     memoryOrDefault(a.Memory),
 	}
 	if err := container.Run(opts); err != nil {
 		return err
@@ -651,17 +654,14 @@ func (h *Hub) injectWhenReady(project, name, text string) error {
 	return h.store.For(project).Log(name, "inject-skipped", text)
 }
 
-// rehydrate nudges a (re)launched agent to start once its pod's session is up
-// (D13): it injects one kickoff telling the agent to ask the hub for work. The
-// same nudge fits whether the agent is brand new or resuming — AgentDirective is
-// idempotent and state-driven, so running `sindri` always lands it back on its
-// currently-assigned job (including anything that changed while it was down, like
-// a merged or rejected PR). Claude's own --continue restores the prior
-// conversation when there is one, so no activity-log replay is needed here.
+// rehydrate nudges a (re)launched agent to start once its pod's session is up (D13):
+// it injects one kickoff telling the agent to ask the hub for work. The nudge fits
+// new or resuming agents alike — AgentDirective is idempotent and state-driven, so
+// `sindri` always lands it back on its current job (incl. changes while it was down,
+// like a merged/rejected PR); Claude's --continue restores the prior conversation.
 // Best-effort; runs in the background so it doesn't block launch.
 func (h *Hub) rehydrate(project, name string) {
-	// Let the agent program (Claude) boot to input-readiness before the kickoff,
-	// or its submitting Enter is eaten by the boot splash.
+	// Let Claude boot to input-readiness first, or its Enter is eaten by the splash.
 	time.Sleep(8 * time.Second)
 	_ = h.injectWhenReady(project, name, msgKickoff)
 }

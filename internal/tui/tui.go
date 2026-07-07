@@ -411,10 +411,16 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.openNewAgentChoice()
 			return nil
 		}
-	case "e": // edit the selected task (agents have no editable fields — role is fixed at creation)
+	case "e": // edit: the selected task's fields (tasks) / the agent's memory limit (agents)
 		if m.tab == 0 && m.selID() != "" {
 			m.openTaskForm(true)
 			return nil
+		}
+		if m.tab == 1 {
+			if a, ok := m.selAgent(); ok {
+				m.openMemoryForm(a.Name, a.Memory)
+				return nil
+			}
 		}
 	case "D": // delete the selected agent (with confirm)
 		if m.tab == 1 && m.selID() != "" {

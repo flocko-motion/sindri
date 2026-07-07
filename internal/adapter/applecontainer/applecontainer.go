@@ -118,6 +118,9 @@ func parseInspect(what string, raw []byte) ([]inspectEntry, error) {
 // micro-VM maps mounts itself) and no `--replace` (Run removes any stale first).
 func runArgs(o container.RunOpts) []string {
 	args := []string{"run", "-d", "--name", o.Name}
+	if o.Memory != "" {
+		args = append(args, "-m", o.Memory)
+	}
 	for _, k := range sortedKeys(o.Labels) {
 		args = append(args, "-l", k+"="+o.Labels[k])
 	}

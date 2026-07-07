@@ -209,7 +209,7 @@ func memBar(pct float64) string {
 }
 
 func agentNewCmd() *cobra.Command {
-	var role string
+	var role, memory string
 	c := &cobra.Command{
 		Use: "new [name]", Short: "Register an agent identity (no container; name optional — auto dwarf name)", Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -218,7 +218,7 @@ func agentNewCmd() *cobra.Command {
 				want = args[0]
 			}
 			return withBackend(func(b backend) error {
-				name, err := b.NewAgent(want, role)
+				name, err := b.NewAgent(want, role, memory)
 				if err != nil {
 					return err
 				}
@@ -228,7 +228,30 @@ func agentNewCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&role, "role", "worker", "agent role: worker|reviewer|planner|coauthor")
+	c.Flags().StringVar(&memory, "memory", "", "RAM limit for this agent's container (e.g. 4g, 512m; default 2g)")
 	return c
+}
+
+// agentMemoryCmd sets (or resets) an agent's RAM limit. Takes effect on the agent's
+// next start/restart — a running container's limit is fixed when it's created.
+func agentMemoryCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "memory <name> <size>", Short: "Set an agent's container RAM limit (e.g. 4g, 512m; 'default' to reset)", Args: cobra.ExactArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			size := args[1]
+			if size == "default" {
+				size = "" // reset to the hub default
+			}
+			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+				if err := b.SetMemory(a.Name, size); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "%s memory set to %s — restart it to apply ('sindri agent restart %s')\n",
+					a.Name, args[1], a.Name)
+				return nil
+			})
+		},
+	}
 }
 
 func agentDeleteCmd() *cobra.Command {
@@ -350,8 +373,8 @@ func agentInfoCmd() *cobra.Command {
 		Use: "info <name>", Short: "Show an agent's status (state, task, PR, clients, recent activity)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, found *hub.AgentView) error {
-				fmt.Printf("agent:     %s\nrole:      %s\nstatus:    %s\ntask:      %s\npr:        %s\nworkspace: %s\n",
-					found.Name, found.Role, found.Status, dash(found.Task), dash(found.PR), dash(found.Workspace))
+				fmt.Printf("agent:     %s\nrole:      %s\nstatus:    %s\ntask:      %s\npr:        %s\nworkspace: %s\nmemory:    %s\n",
+					found.Name, found.Role, found.Status, dash(found.Task), dash(found.PR), dash(found.Workspace), memoryLabel(found.Memory))
 				// engine + the exact runtime instance (id, image, cpus, memory limit, host pid)
 				if inst, err := b.Instance(found.Name); err == nil && inst != "" {
 					fmt.Printf("\n%s\n", inst)
@@ -395,6 +418,15 @@ func eventTime(ts string) string {
 		return ts
 	}
 	return t.Local().Format("15:04:05")
+}
+
+// memoryLabel renders an agent's configured RAM limit, marking the hub fallback when
+// none is set (the "2g" here mirrors the hub's defaultAgentMemory — display only).
+func memoryLabel(m string) string {
+	if strings.TrimSpace(m) == "" {
+		return "2g (default)"
+	}
+	return m
 }
 
 // shortAge renders how long ago an RFC3339 timestamp was, compactly ("3d", "2h",
