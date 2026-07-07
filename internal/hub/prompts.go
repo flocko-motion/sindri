@@ -146,6 +146,13 @@ func dirWorking(task string) string {
 	return fmt.Sprintf("Work on task %s. When your change is committed, run `sindri submit \"<summary>\"`.", task)
 }
 
+// dirRejected hands a worker its reviewer's feedback verbatim — pushed every time it
+// asks the hub what to do, so a rejected PR's comments reach it whether or not it saw
+// the moment-of-rejection message, and it never has to go dig them out of `sindri show`.
+func dirRejected(task, feedback string) string {
+	return fmt.Sprintf("Your PR for task %s was REJECTED — address this reviewer feedback, then run `sindri submit \"<summary>\"`:\n\n%s", task, feedback)
+}
+
 const dirSubmitted = "Your pull request is under review. Wait — the hub will tell you the verdict. While you wait, you may run `sindri resolve` any time to check your branch still merges onto its base (and resolve it if the base has moved) — it does no harm and keeps the PR healthy."
 
 // dirPlanner is the idle planner's directive: orient, then wait for the user. A

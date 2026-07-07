@@ -291,19 +291,34 @@ func (h *Hub) EditTask(project, id string, s TaskSpec) error {
 // workPollInterval re-checks for work while a directive is parked.
 const workPollInterval = 3 * time.Second
 
-// prRejected reports whether an agent has a rejected PR in its project — the signal
-// that it should be revising (working), not waiting under review.
-func (h *Hub) prRejected(project, agent string) (bool, error) {
+// prRejected reports whether an agent has a rejected PR in its project (the signal to
+// revise, not wait) and returns the reviewer's feedback, so the worker can be handed
+// the comments directly rather than having to go find them.
+func (h *Hub) prRejected(project, agent string) (feedback string, rejected bool, err error) {
 	prs, err := h.store.For(project).PRs()
 	if err != nil {
-		return false, fmt.Errorf("load PRs for %s: %w", agent, err)
+		return "", false, fmt.Errorf("load PRs for %s: %w", agent, err)
 	}
 	for _, p := range prs {
 		if p.Agent == agent && p.Status == "rejected" {
-			return true, nil
+			return p.Feedback, true, nil
 		}
 	}
-	return false, nil
+	return "", false, nil
+}
+
+// workDirective is what a working agent is told: if its PR was rejected, the
+// reviewer's feedback is PUSHED (every time it asks — it never has to go hunting for
+// why the PR bounced); otherwise the plain "work on the task" directive.
+func (h *Hub) workDirective(project, name, task string) (string, error) {
+	feedback, rejected, err := h.prRejected(project, name)
+	if err != nil {
+		return "", err
+	}
+	if rejected {
+		return dirRejected(task, feedback), nil
+	}
+	return dirWorking(task), nil
 }
 
 // AgentDirective is the single next action the hub wants this agent to take — the
@@ -347,17 +362,17 @@ func (h *Hub) AgentDirective(ctx context.Context, project, name string) (string,
 		if t, ok, _ := ps.GetTask(st.Container); ok && t.Status != "closed" && t.Status != "approved" && t.Status != "merged" {
 			switch st.Phase {
 			case "submitted":
-				rejected, err := h.prRejected(project, name)
+				feedback, rejected, err := h.prRejected(project, name)
 				if err != nil {
 					return "", err
 				}
 				if rejected {
 					_ = ps.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "working"})
-					return dirWorking(st.Task), nil
+					return dirRejected(st.Task, feedback), nil
 				}
 				return dirSubmitted, nil
 			case "working":
-				return dirWorking(st.Task), nil
+				return h.workDirective(project, name, st.Task)
 			default:
 				if next, ok := h.advanceContainer(project, name, st.Container); ok {
 					return dirWorking(next.ID), nil
@@ -370,15 +385,15 @@ func (h *Hub) AgentDirective(ctx context.Context, project, name string) (string,
 	}
 	switch st.Phase {
 	case "working":
-		return dirWorking(st.Task), nil
+		return h.workDirective(project, name, st.Task)
 	case "submitted":
-		rejected, err := h.prRejected(project, name)
+		feedback, rejected, err := h.prRejected(project, name)
 		if err != nil {
 			return "", err
 		}
 		if rejected {
 			_ = ps.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Phase: "working"})
-			return dirWorking(st.Task), nil
+			return dirRejected(st.Task, feedback), nil
 		}
 		return dirSubmitted, nil
 	default: // idle — claim the next task, blocking until one exists
