@@ -42,6 +42,11 @@ set -g set-titles off
 # back to the terminal's own native selection.)
 set -g mouse on
 set -g set-clipboard on
+# Scrollback: vi keys in copy-mode so `prefix [` then C-u/C-d (half-page), C-b/C-f
+# (page), g/G and `/` search all work — the default emacs copy-mode leaves C-u/C-d
+# unbound, so keyboard scrollback appeared stuck. Generous history for a chatty agent.
+set -g mode-keys vi
+set -g history-limit 50000
 TMUXCONF
 
 if [ -n "${SINDRI_SHELL:-}" ]; then
