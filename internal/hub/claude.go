@@ -28,8 +28,9 @@ const claudeSettings = `{
   }
 }`
 
-// prepareClaudeHome sets up a per-agent Claude home under .sindri/claude/<name>/
-// (mounted at /home/sindri/.claude) and a config file (mounted at
+// prepareClaudeHome sets up a per-agent Claude home under the central state dir
+// (<state>/<project>/claude/<name>/, mounted at /home/sindri/.claude) and a config
+// file (mounted at
 // /home/sindri/.claude.json), seeding host credentials so the agent is
 // authenticated. Returns the host paths to mount and whether credentials were
 // found (no creds → caller should fall back to a shell).

@@ -13,7 +13,7 @@ package hub
 
 import "fmt"
 
-// defaultReviewPrompt seeds .sindri/review-prompt.txt the first time.
+// defaultReviewPrompt seeds the project's central review-prompt.txt the first time.
 const defaultReviewPrompt = "Review this PR for correctness, clarity, and fit to the task. Flag bugs, missing tests, and anything that should change."
 
 // reviewArchitecture is appended to every review instruction so a reviewer always
