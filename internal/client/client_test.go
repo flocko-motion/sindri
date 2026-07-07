@@ -51,7 +51,7 @@ func TestWatchStreamsChanges(t *testing.T) {
 	}
 	<-ch // initial snapshot (empty)
 
-	if _, err := cl.NewAgent("brokkr", "worker"); err != nil {
+	if _, err := cl.NewAgent("brokkr", "worker", ""); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.After(testTimeout)
@@ -103,10 +103,10 @@ func TestAgentSocketIdentityAndSurface(t *testing.T) {
 		t.Skip("agent socket path exceeds the AF_UNIX length limit under this temp dir")
 	}
 
-	if _, err := h.NewAgent(proj, "brokkr", "worker"); err != nil {
+	if _, err := h.NewAgent(proj, "brokkr", "worker", ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.NewAgent(proj, "rune", "reviewer"); err != nil {
+	if _, err := h.NewAgent(proj, "rune", "reviewer", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.ServeAgent(proj, "brokkr"); err != nil {
@@ -178,7 +178,7 @@ func TestServeAndClientRoundTrip(t *testing.T) {
 	root := t.TempDir()
 
 	cl := Dial(root)
-	if _, err := cl.NewAgent("brokkr", "worker"); err != nil {
+	if _, err := cl.NewAgent("brokkr", "worker", ""); err != nil {
 		t.Fatalf("client NewAgent: %v", err)
 	}
 	st, err := cl.State()
@@ -189,7 +189,7 @@ func TestServeAndClientRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected state over socket: %+v", st)
 	}
 	// The hub's domain error must surface across the socket.
-	if _, err := cl.NewAgent("brokkr", "worker"); err == nil {
+	if _, err := cl.NewAgent("brokkr", "worker", ""); err == nil {
 		t.Fatalf("expected duplicate error over socket")
 	}
 }

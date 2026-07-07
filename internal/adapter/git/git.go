@@ -96,11 +96,19 @@ func CreateBranch(dir, name, base string) error {
 	return nil
 }
 
-// CheckoutDetached points a worktree at a ref in detached HEAD (no branch
-// claimed), so it can hold a branch already checked out in another worktree.
-func CheckoutDetached(dir, ref string) error {
-	if out, err := exec.Command("git", "-C", dir, "checkout", "--detach", ref).CombinedOutput(); err != nil {
+// CheckoutDetachedClean force-checks-out ref in detached HEAD (no branch claimed, so
+// it can hold a branch checked out in another worktree) and removes untracked files,
+// landing the worktree EXACTLY on ref's tip regardless of prior state. It's for the
+// disposable review worktree: a reviewer only reads (and runs `sindri lint`, which
+// builds and drops artifacts), so it produces nothing worth keeping — discarding is
+// always safe, and forcing guarantees the reviewer sees the latest branch, never a
+// stale checkout that a plain `git checkout` would refuse over local changes.
+func CheckoutDetachedClean(dir, ref string) error {
+	if out, err := exec.Command("git", "-C", dir, "checkout", "--detach", "--force", ref).CombinedOutput(); err != nil {
 		return fmt.Errorf("checkout %s: %s: %w", ref, strings.TrimSpace(string(out)), err)
+	}
+	if out, err := exec.Command("git", "-C", dir, "clean", "-fd").CombinedOutput(); err != nil {
+		return fmt.Errorf("clean %s: %s: %w", dir, strings.TrimSpace(string(out)), err)
 	}
 	return nil
 }

@@ -78,7 +78,7 @@ func ensureCoauthor(cl *client.HTTP, proj string) (string, error) {
 		}
 	}
 	fmt.Fprintln(os.Stderr, "no coauthor yet — creating one…")
-	name, err := cl.NewAgent("", "coauthor")
+	name, err := cl.NewAgent("", "coauthor", "")
 	if err != nil {
 		return "", err
 	}

@@ -52,6 +52,7 @@ type RunOpts struct {
 	Mounts     []Mount
 	Workdir    string
 	Entrypoint []string
+	Memory     string // memory limit passed to the runtime (-m), e.g. "4g"; "" = runtime default
 }
 
 // Runtime is the port: everything the hub needs from a container backend. Podman

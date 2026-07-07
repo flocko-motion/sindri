@@ -183,3 +183,35 @@ func TestDurableAcrossReopen(t *testing.T) {
 		t.Fatalf("events lost across reopen: %d", len(evs))
 	}
 }
+
+// An agent's memory limit round-trips through the store, and reopening the same DB
+// (which re-runs the ALTER migration) is idempotent — not an error.
+func TestAgentMemoryRoundTripAndMigrateIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "hub.db")
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	ps := s.For("proj")
+	if err := ps.PutAgent(Agent{Name: "brokkr", Role: "worker", Memory: "4g"}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	got, ok, err := ps.GetAgent("brokkr")
+	if err != nil || !ok || got.Memory != "4g" {
+		t.Fatalf("GetAgent memory = %q (ok=%v err=%v), want 4g", got.Memory, ok, err)
+	}
+	s.Close()
+
+	// Reopen: migrate() runs again and must not error on the already-present column.
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen (migrate not idempotent?): %v", err)
+	}
+	defer s2.Close()
+	got2, _, _ := s2.For("proj").GetAgent("brokkr")
+	if got2.Memory != "4g" {
+		t.Errorf("after reopen, memory = %q, want 4g", got2.Memory)
+	}
+}

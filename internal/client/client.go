@@ -136,14 +136,20 @@ func (c *HTTP) Watch(ctx context.Context) (<-chan hub.BoardState, error) {
 	return out, nil
 }
 
-// NewAgent registers an agent identity (empty name ⇒ hub auto-names it). Returns
-// the final name.
-func (c *HTTP) NewAgent(name, role string) (string, error) {
+// NewAgent registers an agent identity (empty name ⇒ hub auto-names it). memory is
+// an optional RAM limit (e.g. "4g"; "" = hub default). Returns the final name.
+func (c *HTTP) NewAgent(name, role, memory string) (string, error) {
 	var ok struct {
 		Name string `json:"ok"`
 	}
-	err := c.postResult("/agents", hub.AgentReq{Name: name, Role: role}, &ok)
+	err := c.postResult("/agents", hub.AgentReq{Name: name, Role: role, Memory: memory}, &ok)
 	return ok.Name, err
+}
+
+// SetMemory sets an agent's RAM limit (e.g. "4g"; "" resets to the hub default).
+// Takes effect on the agent's next start/restart.
+func (c *HTTP) SetMemory(name, memory string) error {
+	return c.post("/agent/memory", hub.NameReq{Name: name, Memory: memory})
 }
 
 // DeleteAgent removes an agent (pod, socket, worktree, identity).

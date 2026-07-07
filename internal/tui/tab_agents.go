@@ -41,6 +41,35 @@ func (m model) agentContainer(a hub.AgentView) string {
 	return hub.Container(m.root, a.Name)
 }
 
+// memoryLabelTUI renders an agent's configured RAM limit, marking the hub fallback
+// when unset (the "2g" mirrors the hub's defaultAgentMemory — display only).
+func memoryLabelTUI(m string) string {
+	if strings.TrimSpace(m) == "" {
+		return "2g (default)"
+	}
+	return m
+}
+
+// openMemoryForm edits an agent's RAM limit (e.g. "4g", "512m"; empty resets to the
+// hub default). Takes effect on the agent's next start/restart.
+func (m *model) openMemoryForm(name, current string) {
+	mem := newTextField("memory (e.g. 4g, 512m; empty = default)", current)
+	cl := m.cl
+	m.form.open("memory "+name, []field{mem}, nil, func() tea.Cmd {
+		val := strings.TrimSpace(mem.value())
+		return func() tea.Msg {
+			if cl == nil {
+				return nil
+			}
+			if err := cl.SetMemory(name, val); err != nil {
+				return errModalMsg{err}
+			}
+			st, _ := cl.State()
+			return polledMsg(st)
+		}
+	})
+}
+
 // openNewAgentChoice opens the worker|reviewer picker for a new agent. The role
 // is fixed at creation — there is no way to change it later.
 func (m *model) openNewAgentChoice() {
@@ -56,7 +85,7 @@ func (m *model) openNewAgentChoice() {
 				if cl == nil {
 					return nil
 				}
-				name, err := cl.NewAgent("", v)
+				name, err := cl.NewAgent("", v, "") // memory: hub default; editable via the detail view / CLI
 				if err != nil {
 					return errModalMsg{err}
 				}
@@ -183,6 +212,7 @@ func (m model) agentItems() []metaItem {
 		{text: "status:    " + a.Status},
 		taskIt, prIt,
 		{text: "workspace: " + dash(a.Workspace)},
+		{text: "memory:    " + memoryLabelTUI(a.Memory) + dimStyle.Render("  (e to edit)")},
 		{text: pod, kind: "view", value: "pod"},
 	}
 	for _, line := range clientLines(m.agentClients) { // same dial-in detail as `agent info`

@@ -174,6 +174,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.modal {
 			m.detail.SetHeight(modalContentHeight(m.h))
 		}
+		// A resize — a shrink especially — leaves stale cells from the old, larger
+		// frame in the alt-screen buffer, so the new frame renders over leftovers
+		// (the "ugly resize"). Force a full clear+repaint so it comes up clean.
+		return m, tea.ClearScreen
 	case stateMsg:
 		if msg.gen != m.gen { // a snapshot from a stream abandoned by a repo switch
 			return m, nil
@@ -411,10 +415,16 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.openNewAgentChoice()
 			return nil
 		}
-	case "e": // edit the selected task (agents have no editable fields — role is fixed at creation)
+	case "e": // edit: the selected task's fields (tasks) / the agent's memory limit (agents)
 		if m.tab == 0 && m.selID() != "" {
 			m.openTaskForm(true)
 			return nil
+		}
+		if m.tab == 1 {
+			if a, ok := m.selAgent(); ok {
+				m.openMemoryForm(a.Name, a.Memory)
+				return nil
+			}
 		}
 	case "D": // delete the selected agent (with confirm)
 		if m.tab == 1 && m.selID() != "" {

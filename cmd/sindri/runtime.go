@@ -16,27 +16,37 @@ import (
 )
 
 // macDefaultRuntime is the container backend used on macOS when SINDRI_RUNTIME is
-// unset. Flip this one constant to change the macOS default:
+// unset. Podman is the default everywhere — an existing macOS install keeps its
+// podman backend (no breaking flip); Apple `container` is opt-in via
+// SINDRI_RUNTIME=container. Flip this one constant to change the macOS default:
 //
+//	"podman"    — the shared podman VM (default)
 //	"container" — Apple `container`, one micro-VM per agent (isolated failures)
-//	"podman"    — the shared podman VM
 //
 // (Linux always uses podman.)
-const macDefaultRuntime = "container"
+const macDefaultRuntime = "podman"
 
-// chooseRuntime resolves the single container backend for this process. SINDRI_RUNTIME
-// overrides; otherwise the platform default applies (Linux → podman always; macOS →
-// macDefaultRuntime). Apple `container` off macOS falls back to podman.
-func chooseRuntime() container.Runtime {
-	name := os.Getenv("SINDRI_RUNTIME")
-	if name == "" {
-		if runtime.GOOS == "darwin" {
-			name = macDefaultRuntime
-		} else {
-			name = "podman"
+// runtimeName resolves which container backend to use from the SINDRI_RUNTIME
+// override and the host OS, as a plain name so it's testable without the host's
+// actual GOOS. Podman is the default everywhere (Linux always); Apple `container`
+// is opt-in on macOS, and requested off macOS it falls back to podman.
+func runtimeName(env, goos string) string {
+	if env == "" {
+		if goos == "darwin" {
+			return macDefaultRuntime
 		}
+		return "podman"
 	}
-	if name == "container" && runtime.GOOS == "darwin" {
+	if env == "container" && goos == "darwin" {
+		return "container"
+	}
+	return "podman"
+}
+
+// chooseRuntime resolves the single container backend for this process, mapping
+// the selected name to its adapter (the only place that imports them).
+func chooseRuntime() container.Runtime {
+	if runtimeName(os.Getenv("SINDRI_RUNTIME"), runtime.GOOS) == "container" {
 		return applecontainer.Engine{}
 	}
 	return pod.Engine{} // podman: the default, and the only Linux runtime

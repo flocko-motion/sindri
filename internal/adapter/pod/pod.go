@@ -48,6 +48,9 @@ const UserNS = "keep-id:uid=1000,gid=1000"
 func RunArgs(o container.RunOpts) []string {
 	// --replace tears down any stale container of the same name first.
 	args := []string{"run", "-d", "--replace", "--name", o.Name, "--userns=" + UserNS}
+	if o.Memory != "" {
+		args = append(args, "-m", o.Memory)
+	}
 	for _, k := range sortedKeys(o.Labels) {
 		args = append(args, "--label", k+"="+o.Labels[k])
 	}

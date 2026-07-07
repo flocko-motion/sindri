@@ -77,8 +77,14 @@ func (h *Hub) ReviewPrompt(project string) (string, error) {
 	return defaultReviewPrompt, nil
 }
 
-// RequestReview attaches a review requirement to a project's PR and dispatches it
-// to a running reviewer (or records it unassigned for one to pick up later).
+// RequestReview is the ONE review path — every trigger (a worker's submit/resubmit,
+// a resolve that lands clean, or an explicit `sindri pr review`) funnels through it,
+// so a review is always the same thing. It records the review, finds a running
+// reviewer, PREPARES THE TERRAIN — force-checks-out the PR branch fresh into the
+// reviewer's workspace so the reviewer only ever reads, never a stale tree it must
+// refresh itself — marks it "reviewing", and sends one instruction. No reviewer
+// running → recorded unassigned for one to pick up later. requirement "" uses the
+// project's default review prompt.
 func (h *Hub) RequestReview(project, prID, requirement string) error {
 	ps := h.store.For(project)
 	pr, ok, err := ps.GetPR(prID)
@@ -100,39 +106,31 @@ func (h *Hub) RequestReview(project, prID, requirement string) error {
 	if err != nil {
 		return err
 	}
-	if reviewer != "" {
-		if err := ps.AssignReview(id, reviewer); err != nil {
-			return err
-		}
-		_ = ps.LogPR(prID, "review-requested", "assigned to "+reviewer)
-		_ = h.assignedReviewInject(project, reviewer, pr, prID, requirement)
+	if reviewer == "" {
+		_ = ps.LogPR(prID, "review-requested", "unassigned (no reviewer running)")
 		h.notify()
 		return nil
 	}
-	_ = ps.LogPR(prID, "review-requested", "unassigned (no reviewer running)")
+	if err := ps.AssignReview(id, reviewer); err != nil {
+		return err
+	}
+	// The hub prepares the terrain so the reviewer just reviews: force-checkout the PR
+	// branch fresh into its workspace (it only reads + lints, so discarding any prior
+	// state is always safe). A failure is loud, and the reviewer is told not to trust
+	// /workspace.
+	checkedOut := true
+	if a, ok, gerr := ps.GetAgent(reviewer); gerr != nil || !ok {
+		checkedOut = false
+		_ = ps.LogPR(prID, "checkout-failed", "reviewer "+reviewer+" not on roster")
+	} else if coErr := git.CheckoutDetachedClean(filepath.Join(h.projectRoot(project), a.Workspace), pr.Branch); coErr != nil {
+		checkedOut = false
+		_ = ps.LogPR(prID, "checkout-failed", fmt.Sprintf("%s into %s: %v", pr.Branch, a.Workspace, coErr))
+	}
+	_ = ps.SetState(store.AgentState{Agent: reviewer, Phase: "reviewing"}) // board shows it working, not idle
+	_ = ps.LogPR(prID, "review-requested", "assigned to "+reviewer)
+	go h.injectWhenReady(project, reviewer, msgReview(prID, requirement, pr.Branch, pr.Base, checkedOut)) // async: don't block a worker's submit
 	h.notify()
 	return nil
-}
-
-// assignedReviewInject checks the PR branch out into the reviewer's workspace and
-// injects the review instruction. A checkout failure is loud (recorded), never silent.
-func (h *Hub) assignedReviewInject(project, reviewer string, pr store.PR, prID, requirement string) error {
-	ps := h.store.For(project)
-	checkedOut := false
-	a, ok, err := ps.GetAgent(reviewer)
-	switch {
-	case err != nil:
-		_ = ps.LogPR(prID, "checkout-failed", fmt.Sprintf("reviewer %s lookup: %v", reviewer, err))
-	case !ok:
-		_ = ps.LogPR(prID, "checkout-failed", "reviewer "+reviewer+" has no roster entry")
-	default:
-		if coErr := git.CheckoutDetached(filepath.Join(h.projectRoot(project), a.Workspace), pr.Branch); coErr != nil {
-			_ = ps.LogPR(prID, "checkout-failed", fmt.Sprintf("%s into %s: %v", pr.Branch, a.Workspace, coErr))
-		} else {
-			checkedOut = true
-		}
-	}
-	return h.injectWhenReady(project, reviewer, msgReviewAssigned(prID, requirement, pr.Branch, pr.Base, checkedOut))
 }
 
 // runningReviewer returns the name of a live reviewer agent in a project, or "". A
@@ -212,7 +210,7 @@ func (h *Hub) cmdSubmit(c registry.Caller, args []string, out io.Writer) (int, e
 	} else {
 		_ = ps.LogPR(pr.ID, "created", "by "+c.Agent+": "+msg)
 	}
-	h.notifyReviewers(c.Project, pr.ID, c.Agent)
+	_ = h.RequestReview(c.Project, pr.ID, "") // one review path; the hub preps the terrain
 	fmt.Fprintln(out, replyRegistered(pr.ID))
 	return 0, nil
 }
@@ -270,7 +268,7 @@ func (h *Hub) cmdOpenspec(c registry.Caller, args []string, out io.Writer) (int,
 	} else {
 		_ = ps.LogPR(pr.ID, "created", "by "+c.Agent+": "+msg)
 	}
-	h.notifyReviewers(c.Project, pr.ID, c.Agent)
+	_ = h.RequestReview(c.Project, pr.ID, "") // one review path; the hub preps the terrain
 	fmt.Fprintln(out, replyRegistered(pr.ID))
 	return 0, nil
 }
@@ -297,20 +295,6 @@ func (h *Hub) cmdShowPR(c registry.Caller, args []string, out io.Writer) (int, e
 	}
 	fmt.Fprintf(out, "\n%s\n", strings.TrimSpace(diff))
 	return 0, nil
-}
-
-// notifyReviewers wakes a project's reviewer agents that a PR is ready.
-func (h *Hub) notifyReviewers(project, prID, worker string) {
-	roster, err := h.store.For(project).Roster()
-	if err != nil {
-		return
-	}
-	for _, a := range roster {
-		if a.Role == "reviewer" {
-			name := a.Name
-			go h.injectWhenReady(project, name, msgReviewReady(prID, worker))
-		}
-	}
 }
 
 // openPR resolves the PR a reviewer verb targets in a project: an explicit id, or
@@ -354,8 +338,26 @@ func (h *Hub) cmdApprove(c registry.Caller, args []string, out io.Writer) (int, 
 	}
 	_ = ps.Log(c.Agent, "approve", pr.ID)
 	_ = ps.LogPR(pr.ID, "approved", "by "+c.Agent)
+	h.completeReview(c.Project, pr.ID, c.Agent, "pass", "") // record the verdict + return the reviewer to idle
+	h.notify()
 	fmt.Fprintf(out, "%s approved — awaiting human merge ('sindri merge %s').\n", pr.ID, pr.ID)
 	return 0, nil
+}
+
+// completeReview records the reviewer's verdict on its open review record for prID
+// (if one is assigned to it — a human approve/reject has none) and returns the
+// reviewer to idle, so a finished review no longer shows as "reviewing".
+func (h *Hub) completeReview(project, prID, agent, verdict, findings string) {
+	ps := h.store.For(project)
+	if revs, err := ps.Reviews(prID); err == nil {
+		for _, r := range revs {
+			if r.Author == agent && r.Verdict == "" {
+				_ = ps.RecordVerdict(r.ID, verdict, findings)
+				break
+			}
+		}
+	}
+	_ = ps.SetState(store.AgentState{Agent: agent, Phase: "idle"})
 }
 
 // ApprovePR is the human approve path (TUI/CLI): marks a project's open PR approved.
@@ -485,41 +487,19 @@ func (h *Hub) LintPR(project, prID string) (string, error) {
 	return result, nil
 }
 
-// cmdReject is the agent-reviewer reject command — rejects with the [reviewer] voice.
+// cmdReject is the agent-reviewer reject command — rejects with the [reviewer] voice,
+// records the "changes" verdict on the review, and returns the reviewer to idle.
 func (h *Hub) cmdReject(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) == 0 {
 		return 1, fmt.Errorf("usage: reject <pr-id> <feedback...>")
 	}
-	if err := h.reject(c.Project, args[0], strings.Join(args[1:], " "), false); err != nil {
+	feedback := strings.Join(args[1:], " ")
+	if err := h.reject(c.Project, args[0], feedback, false); err != nil {
 		return 1, err
 	}
+	h.completeReview(c.Project, args[0], c.Agent, "changes", strings.TrimSpace(feedback))
 	fmt.Fprintf(out, "%s rejected; worker notified.\n", args[0])
 	return 0, nil
-}
-
-// cmdReview records a reviewer agent's verdict on a PR review it was assigned.
-func (h *Hub) cmdReview(c registry.Caller, args []string, out io.Writer) (int, error) {
-	if len(args) < 2 {
-		return 1, fmt.Errorf("usage: review <pr-id> <pass|changes|fail> <findings...>")
-	}
-	ps := h.store.For(c.Project)
-	prID, verdict := args[0], args[1]
-	findings := strings.TrimSpace(strings.Join(args[2:], " "))
-	revs, err := ps.Reviews(prID)
-	if err != nil {
-		return 1, err
-	}
-	for _, r := range revs {
-		if r.Author == c.Agent && r.Verdict == "" { // your in-progress review
-			if err := ps.RecordVerdict(r.ID, verdict, findings); err != nil {
-				return 1, err
-			}
-			h.notify()
-			fmt.Fprintf(out, "review recorded on %s: %s\n", prID, verdict)
-			return 0, nil
-		}
-	}
-	return 1, fmt.Errorf("no review assigned to you on %s", prID)
 }
 
 // rebasePlanners rebases every planner's branch in a project onto base after a
