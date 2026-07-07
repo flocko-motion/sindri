@@ -16,9 +16,6 @@ import (
 var (
 	activeTabStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("231")).Background(lipgloss.Color("63"))
 	tabStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	// headerFg is the text colour laid over a repo's colour bar — white+bold reads
-	// on the saturated project palette.
-	headerFg = lipgloss.Color("231")
 )
 
 // headerBar renders the top bar. With an active repo, the entire width is filled with
@@ -29,15 +26,16 @@ func headerBar(labels []string, active, width int, repoName, repoTag string) str
 	if repoName == "" {
 		return plainTabStrip(labels, active, width)
 	}
-	primary, _ := projectScheme(repoTag)
-	base := lipgloss.NewStyle().Background(primary).Foreground(headerFg)
+	dark, bright := repoColors(repoTag)
+	base := lipgloss.NewStyle().Background(dark).Foreground(bright)
+	activeSeg := lipgloss.NewStyle().Background(bright).Foreground(dark).Bold(true) // inverted block
 
 	var b strings.Builder
 	plainW := 0
 	for i, l := range labels {
 		seg := " " + l + " "
 		if i == active {
-			b.WriteString(base.Bold(true).Underline(true).Render(seg))
+			b.WriteString(activeSeg.Render(seg))
 		} else {
 			b.WriteString(base.Render(seg))
 		}

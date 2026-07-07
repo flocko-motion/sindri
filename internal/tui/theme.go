@@ -9,7 +9,9 @@
 package tui
 
 import (
+	"fmt"
 	"hash/fnv"
+	"math"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -78,33 +80,62 @@ func agentStatusStyle(status string) lipgloss.Style {
 	}
 }
 
-// projectColors is a palette of distinct 256-colour codes. A project's scheme is a
-// (primary, accent) pair drawn from it by hashing the repoTag — len² combinations,
-// enough that the handful of repos in view rarely collide, and stable per repo
-// across sessions (no persistence, just the hash).
-var projectColors = []lipgloss.Color{
-	lipgloss.Color("39"), lipgloss.Color("75"), lipgloss.Color("141"), lipgloss.Color("213"),
-	lipgloss.Color("208"), lipgloss.Color("78"), lipgloss.Color("220"), lipgloss.Color("44"),
-	lipgloss.Color("170"), lipgloss.Color("202"), lipgloss.Color("111"), lipgloss.Color("150"),
-}
+// A project's colour is one hue (deterministic from its repoTag) rendered in two
+// shades: a bright shade for text/labels on the terminal's dark background, and a
+// muted dark shade for a filled background (the header bar). Same hue → the same
+// repo always reads the same; two shades → a guaranteed dark/bright contrast pair,
+// none at full intensity. Derived in truecolour (HSL) so lightness is controllable.
+const (
+	repoDarkSat,   repoDarkLight   = 0.32, 0.22 // muted, dark: for filled backgrounds
+	repoBrightSat, repoBrightLight = 0.55, 0.72 // bright: for text on a dark background
+)
 
-// projectScheme returns a project's deterministic (primary, accent) colours by tag.
-func projectScheme(tag string) (primary, accent lipgloss.Color) {
-	n := uint32(len(projectColors))
+// projectHue maps a repoTag to a stable hue in [0,360).
+func projectHue(tag string) float64 {
 	h := fnv.New32a()
 	h.Write([]byte(tag))
-	sum := h.Sum32()
-	return projectColors[sum%n], projectColors[(sum/n)%n]
+	return float64(h.Sum32() % 360)
 }
 
-// projectStyle colours a repo label by its project's primary colour, so the same
-// repo always reads in the same colour across the board. Empty tag → plain.
+// repoColors returns a project's (dark, bright) shades — the same hue at two
+// lightnesses, a ready contrast pair for a filled bar (dark bg + bright fg).
+func repoColors(tag string) (dark, bright lipgloss.Color) {
+	hue := projectHue(tag)
+	return lipgloss.Color(hslHex(hue, repoDarkSat, repoDarkLight)),
+		lipgloss.Color(hslHex(hue, repoBrightSat, repoBrightLight))
+}
+
+// projectStyle colours a repo label in its bright shade, so the same repo always
+// reads the same across the board. Empty tag → plain.
 func projectStyle(tag string) lipgloss.Style {
 	if tag == "" {
 		return lipgloss.NewStyle()
 	}
-	primary, _ := projectScheme(tag)
-	return lipgloss.NewStyle().Foreground(primary)
+	_, bright := repoColors(tag)
+	return lipgloss.NewStyle().Foreground(bright)
+}
+
+// hslHex converts an HSL colour (h in [0,360), s,l in [0,1]) to a "#rrggbb" string.
+func hslHex(h, s, l float64) string {
+	c := (1 - math.Abs(2*l-1)) * s
+	x := c * (1 - math.Abs(math.Mod(h/60, 2)-1))
+	m := l - c/2
+	var r, g, b float64
+	switch {
+	case h < 60:
+		r, g, b = c, x, 0
+	case h < 120:
+		r, g, b = x, c, 0
+	case h < 180:
+		r, g, b = 0, c, x
+	case h < 240:
+		r, g, b = 0, x, c
+	case h < 300:
+		r, g, b = x, 0, c
+	default:
+		r, g, b = c, 0, x
+	}
+	return fmt.Sprintf("#%02x%02x%02x", int((r+m)*255), int((g+m)*255), int((b+m)*255))
 }
 
 // isCriticalPriority reports whether a priority code is the top (critical) band.
