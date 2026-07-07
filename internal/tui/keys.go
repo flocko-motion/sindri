@@ -32,6 +32,7 @@ const (
 	keyScopeTog = "s" // toggle a tab's global↔repo scope
 	keyRepo     = "p" // switch the active repo/project (navigation → lowercase)
 	keyConfig   = "E" // edit the repo's config (mutation → shift)
+	keyColor    = "c" // pick a repo's colour (opens a chooser → lowercase)
 	keyRefresh  = "r" // refresh the board
 	keyDetail   = "§" // toggle the detail pane
 	keyQuit     = "q" // quit
@@ -101,6 +102,7 @@ var keymap = []binding{
 
 	// Repos.
 	{"enter", lbl("switch"), scopeRepos},
+	{keyColor, lbl("colour"), scopeRepos},
 	{keyConfig, lbl("config"), scopeRepos},
 	{keyDelete, lbl("forget"), scopeRepos},
 }

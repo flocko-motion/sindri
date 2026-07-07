@@ -441,6 +441,11 @@ func (c *HTTP) RepoForget(tag string) error {
 	return c.post("/repo/forget", hub.RepoReq{Tag: tag})
 }
 
+// SetRepoColor pins a repo's colour choice by tag (0 = hash-derived default).
+func (c *HTTP) SetRepoColor(tag string, color int) error {
+	return c.post("/repo/color", hub.RepoReq{Tag: tag, Color: color})
+}
+
 // WriteRepoConfig persists the caller's repo's .sindri/config.yaml (validated hub-side).
 func (c *HTTP) WriteRepoConfig(cfg config.Config) error {
 	return c.post("/repo/config", cfg)

@@ -166,3 +166,14 @@ func (h *Hub) RepoForget(project string) error {
 func (h *Hub) WriteRepoConfig(root string, cfg config.Config) error {
 	return config.Write(root, cfg)
 }
+
+// SetRepoColor pins a repo's display-colour choice in the registry (0 = the
+// hash-derived default; a positive value is a palette index the UI maps to a hue).
+// Colour is a per-machine display preference, so it lives in the central registry,
+// not the committed .sindri/config.yaml.
+func (h *Hub) SetRepoColor(project string, color int) error {
+	if color < 0 {
+		return fmt.Errorf("colour choice must be >= 0 (0 = default), got %d", color)
+	}
+	return h.store.SetProjectColor(project, color)
+}

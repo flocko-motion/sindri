@@ -9,6 +9,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -30,7 +31,7 @@ func (m model) repoRows() []row {
 		if pad := 20 - lipgloss.Width(label); pad > 0 {
 			label += repeat(pad)
 		}
-		text := projectStyle(p.Tag).Render(label) + fmt.Sprintf("  %2d agents  %s", m.repoAgentCount(p.Tag), p.Path)
+		text := m.repoStyle(p.Tag).Render(label) + fmt.Sprintf("  %2d agents  %s", m.repoAgentCount(p.Tag), p.Path)
 		out = append(out, row{text, p.Tag})
 	}
 	return out
@@ -108,6 +109,27 @@ func joinOrDash(xs []string) string {
 		out += x
 	}
 	return out
+}
+
+// openColorChoice opens a picker of colour swatches for a repo: "default" (the
+// hash-derived hue) plus each palette choice rendered in its own bright shade, so the
+// list is visual. Selecting one pins it in the registry (per-machine display pref).
+func (m *model) openColorChoice(tag string) {
+	cl := m.cl
+	opts := []string{"default (auto)"}
+	vals := []string{"0"}
+	for i := 1; i <= nRepoColors; i++ {
+		swatch := repoStyleFor(tag, i).Render("████")
+		opts = append(opts, fmt.Sprintf("%s  colour %d", swatch, i))
+		vals = append(vals, strconv.Itoa(i))
+	}
+	m.choice = choiceModalState{
+		active: true, title: "colour for " + m.repoName(tag), options: opts, values: vals, filterable: true,
+		apply: func(v string) tea.Cmd {
+			n, _ := strconv.Atoi(v)
+			return mutateThenRefresh(cl, func() error { return cl.SetRepoColor(tag, n) })
+		},
+	}
 }
 
 // openForgetChoice confirms forgetting a repo (it deletes the repo's agents and drops

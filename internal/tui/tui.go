@@ -550,6 +550,11 @@ func (m *model) onKey(k string) tea.Cmd {
 		return nil
 	case keyConfig: // edit the current repo's .sindri/config.yaml in a form
 		return m.repoConfigCmd()
+	case keyColor: // repos: pick the selected repo's display colour
+		if m.tab == 3 && m.selID() != "" {
+			m.openColorChoice(m.selID())
+			return nil
+		}
 	case keyScopeTog: // agents/prs: toggle this tab's scope between global (all repos) and the active repo
 		if m.tab == 1 || m.tab == 2 {
 			m.scopeRepo[m.tab] = !m.scopeRepo[m.tab]
@@ -667,7 +672,7 @@ func (m model) View() string {
 		return modal(title, m.modalLines(), m.detail, m.w, m.h)
 	}
 	repoName, repoTag := m.currentRepo()
-	top := headerBar(labels, m.tab, m.w, repoName, repoTag)
+	top := headerBar(labels, m.tab, m.w, repoName, repoTag, m.repoColorIdx(repoTag))
 	var body string
 	if m.tab == 1 && m.wide() { // bespoke: list + live tmux pane; right detail unless §-hidden
 		body = m.agentsBody()

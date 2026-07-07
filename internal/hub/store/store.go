@@ -47,6 +47,7 @@ type Project struct {
 	Path      string `json:"path"`
 	FirstSeen string `json:"first_seen"`
 	LastUsed  string `json:"last_used"`
+	Color     int    `json:"color"` // repo colour choice: 0 = hash-derived default, 1..N = palette index
 }
 
 // Store wraps the one central SQLite database. Per-project work goes through a
@@ -92,7 +93,8 @@ CREATE TABLE IF NOT EXISTS projects (
   tag        TEXT PRIMARY KEY,
   path       TEXT NOT NULL,
   first_seen TEXT NOT NULL,
-  last_used  TEXT NOT NULL DEFAULT ''
+  last_used  TEXT NOT NULL DEFAULT '',
+  color      INTEGER NOT NULL DEFAULT 0
 );
 `
 
@@ -126,6 +128,7 @@ func migrate(db *sql.DB) error {
 	alters := []string{
 		`ALTER TABLE agents ADD COLUMN memory TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE projects ADD COLUMN last_used TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE projects ADD COLUMN color INTEGER NOT NULL DEFAULT 0`,
 	}
 	for _, a := range alters {
 		if _, err := db.Exec(a); err != nil && !strings.Contains(err.Error(), "duplicate column") {
@@ -186,7 +189,7 @@ func (s *Store) ProjectPath(tag string) (path string, ok bool, err error) {
 // Projects returns every known project, ordered by path. Callers that need recency
 // or live-agent ordering (the switcher) re-sort using LastUsed and the roster.
 func (s *Store) Projects() ([]Project, error) {
-	rows, err := s.db.Query(`SELECT tag, path, first_seen, last_used FROM projects ORDER BY path`)
+	rows, err := s.db.Query(`SELECT tag, path, first_seen, last_used, color FROM projects ORDER BY path`)
 	if err != nil {
 		return nil, fmt.Errorf("projects: %w", err)
 	}
@@ -194,12 +197,21 @@ func (s *Store) Projects() ([]Project, error) {
 	var out []Project
 	for rows.Next() {
 		var p Project
-		if err := rows.Scan(&p.Tag, &p.Path, &p.FirstSeen, &p.LastUsed); err != nil {
+		if err := rows.Scan(&p.Tag, &p.Path, &p.FirstSeen, &p.LastUsed, &p.Color); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// SetProjectColor sets a repo's colour choice (0 = hash-derived default, 1..N = a
+// palette index). A no-op-safe write on an unknown tag (affects zero rows).
+func (s *Store) SetProjectColor(tag string, color int) error {
+	if _, err := s.db.Exec(`UPDATE projects SET color=? WHERE tag=?`, color, tag); err != nil {
+		return fmt.Errorf("set project colour %s: %w", tag, err)
+	}
+	return nil
 }
 
 // --- meta (global) ---

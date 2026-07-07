@@ -6,7 +6,11 @@
 //          own (-> the tabs/components).
 package tui
 
-import "path/filepath"
+import (
+	"path/filepath"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // repoName maps a project's repoTag to its short repo name (its path's basename),
 // falling back to the tag when the project isn't in the board's registry.
@@ -17,6 +21,21 @@ func (m model) repoName(tag string) string {
 		}
 	}
 	return tag
+}
+
+// repoColorIdx is a repo's pinned colour choice from the registry (0 = default).
+func (m model) repoColorIdx(tag string) int {
+	for _, p := range m.state.Projects {
+		if p.Tag == tag {
+			return p.Color
+		}
+	}
+	return 0
+}
+
+// repoStyle colours text in a repo's bright shade, honouring its pinned colour.
+func (m model) repoStyle(tag string) lipgloss.Style {
+	return repoStyleFor(tag, m.repoColorIdx(tag))
 }
 
 // currentRepo returns the selected repo's short name and tag (resolved from m.root),

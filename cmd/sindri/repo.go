@@ -9,6 +9,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/hub"
@@ -27,7 +28,7 @@ func newRepoCmd() *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error { return repoInfo("") }, // bare `repo` → current repo
 	}
-	c.AddCommand(repoInitCmd(), repoListCmd(), repoInfoCmd(), repoForgetCmd())
+	c.AddCommand(repoInitCmd(), repoListCmd(), repoInfoCmd(), repoForgetCmd(), repoColorCmd())
 	return c
 }
 
@@ -103,6 +104,35 @@ func repoForgetCmd() *cobra.Command {
 					return err
 				}
 				fmt.Fprintf(os.Stderr, "forgot %s — its files are untouched; it re-registers if you use it again\n", args[0])
+				return nil
+			})
+		},
+	}
+}
+
+func repoColorCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "color <repo> <n>",
+		Short: "Pin a repo's display colour (0 = default; 1..24 = palette index)",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			n, err := strconv.Atoi(args[1])
+			if err != nil || n < 0 {
+				return fmt.Errorf("colour must be a non-negative number (0 = default), got %q", args[1])
+			}
+			return withHub(func(b backend) error {
+				repos, err := b.Repos()
+				if err != nil {
+					return err
+				}
+				tag, err := resolveRepo(repos, args[0])
+				if err != nil {
+					return err
+				}
+				if err := b.SetRepoColor(tag, n); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "set %s colour to %d\n", args[0], n)
 				return nil
 			})
 		},

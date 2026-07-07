@@ -22,11 +22,11 @@ var (
 // the repo's primary colour and the label sits on it (the active tab underlined+bold
 // to stand out on the shared background) — loud enough to never mistake which repo is
 // in view. With no repo, it degrades to the classic tab strip.
-func headerBar(labels []string, active, width int, repoName, repoTag string) string {
+func headerBar(labels []string, active, width int, repoName, repoTag string, repoColor int) string {
 	if repoName == "" {
 		return plainTabStrip(labels, active, width)
 	}
-	dark, bright := repoColors(repoTag)
+	dark, bright := repoColorsFor(repoTag, repoColor)
 	base := lipgloss.NewStyle().Background(dark).Foreground(bright)
 	activeSeg := lipgloss.NewStyle().Background(bright).Foreground(dark).Bold(true) // inverted block
 

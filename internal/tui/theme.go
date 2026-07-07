@@ -90,28 +90,46 @@ const (
 	repoBrightSat, repoBrightLight = 0.55, 0.72 // bright: for text on a dark background
 )
 
-// projectHue maps a repoTag to a stable hue in [0,360).
+// nRepoColors is the size of the pickable colour palette: evenly-spaced hues around
+// the wheel, so a repo can be pinned to a chosen colour (1..nRepoColors) instead of
+// the hash-derived default (0).
+const nRepoColors = 24
+
+// paletteHue is the hue (degrees) for a 1-based palette choice.
+func paletteHue(choice int) float64 { return float64(((choice - 1) * 360 / nRepoColors) % 360) }
+
+// projectHue maps a repoTag to a stable hue in [0,360) — the default when no colour
+// is pinned.
 func projectHue(tag string) float64 {
 	h := fnv.New32a()
 	h.Write([]byte(tag))
 	return float64(h.Sum32() % 360)
 }
 
-// repoColors returns a project's (dark, bright) shades — the same hue at two
-// lightnesses, a ready contrast pair for a filled bar (dark bg + bright fg).
-func repoColors(tag string) (dark, bright lipgloss.Color) {
-	hue := projectHue(tag)
+// hueFor is a repo's hue: a pinned palette choice (1..nRepoColors) if set, else the
+// hash-derived default.
+func hueFor(tag string, choice int) float64 {
+	if choice >= 1 && choice <= nRepoColors {
+		return paletteHue(choice)
+	}
+	return projectHue(tag)
+}
+
+// repoColorsFor returns a repo's (dark, bright) shades for a colour choice — the same
+// hue at two lightnesses, a ready contrast pair for a filled bar (dark bg + bright fg).
+func repoColorsFor(tag string, choice int) (dark, bright lipgloss.Color) {
+	hue := hueFor(tag, choice)
 	return lipgloss.Color(hslHex(hue, repoDarkSat, repoDarkLight)),
 		lipgloss.Color(hslHex(hue, repoBrightSat, repoBrightLight))
 }
 
-// projectStyle colours a repo label in its bright shade, so the same repo always
-// reads the same across the board. Empty tag → plain.
-func projectStyle(tag string) lipgloss.Style {
+// repoStyleFor colours text in a repo's bright shade for a colour choice. Empty tag
+// → plain.
+func repoStyleFor(tag string, choice int) lipgloss.Style {
 	if tag == "" {
 		return lipgloss.NewStyle()
 	}
-	_, bright := repoColors(tag)
+	_, bright := repoColorsFor(tag, choice)
 	return lipgloss.NewStyle().Foreground(bright)
 }
 

@@ -40,7 +40,7 @@ func (m *model) openSwitcher() {
 		// Each entry in its repo's bright shade, so the picker mirrors the header's
 		// per-repo colours. padTrunc is ANSI-aware and the (plain) name stays
 		// contiguous, so the typeahead filter still matches.
-		opts = append(opts, projectStyle(p.Tag).Render(label))
+		opts = append(opts, m.repoStyle(p.Tag).Render(label))
 		vals = append(vals, p.Path)
 	}
 	m.choice = choiceModalState{
