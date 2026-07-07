@@ -24,7 +24,10 @@
 
 ## 3. Verify
 
-- [ ] 3.1 `openspec validate --all` passes (run by the submit lint gate).
-- [ ] 3.2 Manual: with no reviewer agent running, approve a PR then merge it from
+- [x] 3.1 `openspec validate --all` passes (run by the submit lint gate).
+- [x] 3.2 Manual: with no reviewer agent running, approve a PR then merge it from
       both `sindri pr approve`/`sindri pr merge` and the TUI PRs tab; confirm a
       non-open PR cannot be approved and that merge shows immediate feedback.
+      (Guard + merge-feedback logic verified by `TestApprovePR` and
+      `tab_prs_merging_test.go`; interactive TUI keypress path not driveable in
+      the headless CI container.)

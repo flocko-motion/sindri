@@ -268,7 +268,7 @@ func (h *Hub) container(project, name string) string {
 // at the prompt) — or "" when it can't tell (plain shell, transcript view, boot).
 // Bounded by ctx (it reuses the board probe's), so a wedged capture can't stall the read.
 func (h *Hub) runtimeState(ctx context.Context, project, name string) string {
-	out, err := container.ExecContext(ctx, h.container(project, name), append([]string{"tmux"}, tmux.CapturePane(name, 0)...)...)
+	out, err := container.ExecContext(ctx, h.container(project, name), append([]string{"tmux"}, tmux.CapturePane(name, 0, false)...)...) // plain: the text is pattern-matched
 	if err != nil {
 		return ""
 	}
@@ -442,7 +442,7 @@ func (h *Hub) sessionAliveCtx(ctx context.Context, project, name string) bool {
 // output. Empty when truly down.
 func (h *Hub) AgentPane(project, name string, lines int) (string, error) {
 	if h.sessionAlive(project, name) {
-		out, err := container.Exec(h.container(project, name), append([]string{"tmux"}, tmux.CapturePane(name, lines)...)...)
+		out, err := container.Exec(h.container(project, name), append([]string{"tmux"}, tmux.CapturePane(name, lines, true)...)...) // colour: the preview renders ANSI
 		if err != nil {
 			return "", err
 		}
