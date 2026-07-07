@@ -329,7 +329,7 @@ func (m *model) onKey(k string) tea.Cmd {
 		return nil
 	}
 	switch k {
-	case "q", "ctrl+c":
+	case keyQuit, "ctrl+c":
 		m.quit = true
 		return nil
 	case "tab": // the only way to switch tabs (with shift+tab)
@@ -381,7 +381,7 @@ func (m *model) onKey(k string) tea.Cmd {
 		m.cursor[m.tab] += m.bodyHeight() / 2
 	case "ctrl+u":
 		m.cursor[m.tab] -= m.bodyHeight() / 2
-	case "f":
+	case keyFilter:
 		if m.tab == 0 {
 			m.filter = (m.filter + 1) % 3
 		}
@@ -395,11 +395,11 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 0 && !m.rightFocus {
 			delete(m.collapsed, m.selID())
 		}
-	case "S": // agents: Start/Stop toggle — start if down, stop if running
+	case keyStartS: // agents: Start/Stop toggle — start if down, stop if running
 		if m.tab == 1 {
 			return m.agentStartStop()
 		}
-	case "a": // agents: attach to the live tmux session · prs: approve (the human gate)
+	case keyAttachAp: // agents: attach to the live tmux session · prs: approve (the human gate)
 		if m.tab == 1 {
 			if a, ok := m.selAgent(); ok {
 				if a.Status == "down" {
@@ -414,7 +414,7 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 2 && m.selID() != "" { // approve the PR yourself, so it can be merged
 			return m.action(func(id string) error { return m.cl.ApprovePR(id) })
 		}
-	case "m": // prs: merge (the human gate) — if it isn't approved, offer to approve first
+	case keyMerge: // prs: merge (the human gate) — if it isn't approved, offer to approve first
 		if m.tab == 2 && m.selID() != "" {
 			if !m.selPRApproved() {
 				m.openApproveMergeChoice(m.selID())
@@ -424,7 +424,7 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.markMerging(id) // show "merging" on the row at once, before the hub confirms
 			return m.mergeCmd(id)
 		}
-	case "N": // new task (tasks) / new agent (agents)
+	case keyNew: // new task (tasks) / new agent (agents)
 		if m.tab == 0 {
 			m.openTaskForm(false)
 			return nil
@@ -432,7 +432,7 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.openNewAgentChoice()
 			return nil
 		}
-	case "e": // edit: the selected task's fields (tasks) / the agent's memory limit (agents)
+	case keyEdit: // edit: the selected task's fields (tasks) / the agent's memory limit (agents)
 		if m.tab == 0 && m.selID() != "" {
 			m.openTaskForm(true)
 			return nil
@@ -443,12 +443,12 @@ func (m *model) onKey(k string) tea.Cmd {
 				return nil
 			}
 		}
-	case "D": // delete the selected agent (with confirm)
+	case keyDelete: // delete the selected agent (with confirm)
 		if m.tab == 1 && m.selID() != "" {
 			m.openDeleteChoice(m.selID())
 			return nil
 		}
-	case "t": // tell the selected agent (agents) / show linked task (prs)
+	case keyTell: // tell the selected agent (agents) / show linked task (prs)
 		if m.tab == 1 && m.selID() != "" {
 			m.openInput(inputTell, "tell "+m.selID()+": ")
 			return textinput.Blink
@@ -458,13 +458,13 @@ func (m *model) onKey(k string) tea.Cmd {
 			}
 			return nil
 		}
-	case "L": // prs: run the quality gate against the PR's worktree
+	case keyLint: // prs: run the quality gate against the PR's worktree
 		if m.tab == 2 {
 			if id := m.selID(); id != "" && m.cl != nil {
 				return m.lintCmd(id)
 			}
 		}
-	case "R": // prs: reject a PR · tasks: reject a planner-proposed task (with a comment)
+	case keyReject: // prs: reject a PR · tasks: reject a planner-proposed task (with a comment)
 		if m.tab == 2 && m.selID() != "" {
 			m.openRejectForm(m.selID())
 			return nil
@@ -473,13 +473,13 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.openTaskRejectForm(m.selID())
 			return nil
 		}
-	case "V": // prs: verify — materialize the PR into the review workspace + shell in
+	case keyVerify: // prs: verify — materialize the PR into the review workspace + shell in
 		if m.tab == 2 {
 			if id := m.selID(); id != "" && m.cl != nil {
 				return m.verifyCmd(id)
 			}
 		}
-	case "A": // prs: request an agentic review · tasks: approve a planner-proposed task
+	case keyApprove: // prs: request an agentic review · tasks: approve a planner-proposed task
 		if m.tab == 2 && m.selID() != "" {
 			m.openReviewForm(m.selID())
 			return nil
@@ -487,16 +487,16 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 0 && m.taskGated() {
 			return m.approveTaskCmd(m.selID())
 		}
-	case "P": // set the selected task's priority (shift = a modifying action)
+	case keyPriority: // set the selected task's priority (shift = a modifying action)
 		if m.tab == 0 && m.selID() != "" {
 			m.openPriorityChoice(m.selID())
 			return nil
 		}
-	case "U": // tasks: release the selected task back to the backlog
+	case keyUnassign: // tasks: release the selected task back to the backlog
 		if m.tab == 0 && m.selID() != "" {
 			return m.unassignTaskCmd(m.selID())
 		}
-	case "C": // tasks: close the selected task (mark it done)
+	case keyClose: // tasks: close the selected task (mark it done)
 		if m.tab == 0 && m.selID() != "" {
 			return m.closeTaskCmd(m.selID())
 		}
@@ -533,20 +533,20 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.detail.ScrollTop()
 			return nil
 		}
-	case "§": // toggle the detail pane (full-width selector when hidden)
+	case keyDetail: // toggle the detail pane (full-width selector when hidden)
 		m.hideDetail = !m.hideDetail
 		if m.hideDetail {
 			m.rightFocus = false // can't focus a hidden pane
 		}
-	case "r":
+	case keyRefresh:
 		m.reclamp()
 		return m.refreshCmd()
-	case "p": // switch the active repo/project (lowercase = harmless navigation)
+	case keyRepo: // switch the active repo/project (lowercase = harmless navigation)
 		m.openSwitcher()
 		return nil
-	case "E": // edit the current repo's .sindri/config.yaml in a form
+	case keyConfig: // edit the current repo's .sindri/config.yaml in a form
 		return m.repoConfigCmd()
-	case "s": // agents/prs: toggle this tab's scope between global (all repos) and the active repo
+	case keyScopeTog: // agents/prs: toggle this tab's scope between global (all repos) and the active repo
 		if m.tab == 1 || m.tab == 2 {
 			m.scopeRepo[m.tab] = !m.scopeRepo[m.tab]
 			m.cursor[m.tab] = 0
@@ -681,7 +681,7 @@ func (m model) View() string {
 	if m.mode != inputNone {
 		foot = dimStyle.Render(padTrunc("enter submit · esc cancel", m.w)) + "\n" + m.input.View()
 	} else {
-		global := "⇥/⇧⇥ tab · C-h/l pane · § detail · j/k move · p repo · E config · r refresh · q quit"
+		global := m.footerFor(scopeGlobal)
 		if m.flash != "" {
 			global = m.flash
 		}

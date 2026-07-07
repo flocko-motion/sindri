@@ -8,11 +8,7 @@
 //          tab's (-> tab_*.go).
 package tui
 
-import (
-	"fmt"
-
-	"github.com/flo-at/sindri/internal/hub/store"
-)
+import "github.com/flo-at/sindri/internal/hub/store"
 
 // detailLines is the current tab's detail content (the right column / modal body).
 func (m model) detailLines() []string {
@@ -160,19 +156,14 @@ func scopeName(repoScoped bool) string {
 	return "global"
 }
 
-// contextFooter is the active tab's action hints (second footer row).
+// contextFooter is the active tab's action hints (second footer row), generated from
+// the keymap (keys.go) so the help never drifts from the bindings. The right-column
+// focus is a distinct mode with its own item-navigation hints.
 func (m model) contextFooter() string {
 	if m.rightFocus { // focused on a detail cross-reference (Tasks/PRs)
 		return "j/k item · enter details · g goto · y copy"
 	}
-	switch m.tab {
-	case 0:
-		return fmt.Sprintf("N new · e edit · P priority · U unassign · C close · A/R approve/reject · f filter: %s · h/l fold", filterNames[m.filter])
-	case 1:
-		return "N new · S start/stop · t tell · a attach · D delete · s scope: " + scopeName(m.scopeRepo[1])
-	default:
-		return "V verify · a approve · R reject · A agent-review · L lint · m merge · s scope: " + scopeName(m.scopeRepo[2])
-	}
+	return m.footerFor(tabScope(m.tab))
 }
 
 // actionableItems is the focusable cross-references of the current tab's detail.
