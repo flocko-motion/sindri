@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"path/filepath"
 	"strings"
 	"time"
@@ -452,6 +453,14 @@ func (h *Hub) SyncTasks(project string) error {
 			Type:   "spec",
 		})
 	}
+	// Third source: open GitHub issues, gated by the per-project opt-in. Best-effort —
+	// a config or network failure contributes no issues (never fails the sync). A bad
+	// config is the exception the operator should see, so it's logged, not swallowed.
+	cfg, err := h.projectConfig(project)
+	if err != nil {
+		log.Printf("hub: github source skipped for %s (config error): %v", project, err)
+	}
+	rows = append(rows, h.githubRows(project, root, cfg.GitHub.Issues, false)...)
 	if ov, err := ps.PriorityOverrides(); err == nil {
 		for i := range rows {
 			if p, ok := ov[rows[i].ID]; ok {
@@ -565,10 +574,15 @@ func (h *Hub) claimLeaf(project, agent string) (string, bool, error) {
 	}
 	wt := filepath.Join(root, a.Workspace)
 	branch := t.ID
-	if err := td.SetStatus(root, t.ID, "in_progress"); err != nil {
-		return "", false, err
+	// Only td owns a task's status. A gh-* issue's "in_progress" lives in agent_state
+	// (which OpenLeaves honors) — GitHub isn't told a worker started; the issue is
+	// touched only on merge (close+comment). Calling td for a gh-/os- id would error.
+	if strings.HasPrefix(t.ID, "td-") {
+		if err := td.SetStatus(root, t.ID, "in_progress"); err != nil {
+			return "", false, err
+		}
+		_ = h.refreshTask(project, t.ID)
 	}
-	_ = h.refreshTask(project, t.ID)
 	if err := git.CreateBranch(wt, branch, base); err != nil {
 		return "", false, err
 	}

@@ -373,7 +373,7 @@ architecture: docs/ARCHITECTURE.md    # doc the reviewer must read (default: ARC
 containerfile: .sindri/Containerfile  # agent image recipe (highest-precedence; see below)
 review_prompt: .sindri/review.md      # file whose contents become the reviewer's prompt
 github:
-  issues: true                        # (reserved) GitHub-issue task source — not wired yet
+  issues: true                        # import open GitHub issues as tasks (default: false)
 ```
 
 - **`architecture`** — repo-relative path to the doc the reviewer is told to read
@@ -382,8 +382,11 @@ github:
 - **`containerfile`** — repo-relative agent-image recipe (see the next section).
 - **`review_prompt`** — repo-relative file whose contents replace the default reviewer
   prompt.
-- **`github.issues`** — reserved for the GitHub-issue task source, which isn't
-  implemented yet; the key validates but has no effect today.
+- **`github.issues`** — when `true`, the repo's open GitHub issues are imported as
+  claimable `gh-<number>` tasks (via the `gh` CLI, reusing your `gh` auth). Off by
+  default; degrades to no tasks when `gh` is missing / offline / the repo has no
+  GitHub remote. On merge of a `gh-*` task's PR, sindri closes+comments the issue
+  (best-effort — a merge is never blocked on GitHub).
 
 **Fail-loud:** a malformed file, an unknown key, a wrong-typed value, or a path that's
 absolute / escapes the repo / (when set) names a missing file makes the operation that
