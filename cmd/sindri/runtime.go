@@ -16,31 +16,33 @@ import (
 )
 
 // macDefaultRuntime is the container backend used on macOS when SINDRI_RUNTIME is
-// unset. Podman is the default everywhere — an existing macOS install keeps its
-// podman backend (no breaking flip); Apple `container` is opt-in via
-// SINDRI_RUNTIME=container. Flip this one constant to change the macOS default:
+// unset. macOS defaults to Apple `container` — one micro-VM per agent, so one
+// agent's crash or OOM can't take the others down. That isolation is the whole
+// reason sindri moved off the shared podman VM on macOS; podman is the fallback,
+// opt in with SINDRI_RUNTIME=podman. Flip this one constant to change the default:
 //
-//	"podman"    — the shared podman VM (default)
-//	"container" — Apple `container`, one micro-VM per agent (isolated failures)
+//	"container" — Apple `container`, one micro-VM per agent (macOS default)
+//	"podman"    — the shared podman VM
 //
-// (Linux always uses podman.)
-const macDefaultRuntime = "podman"
+// (Linux always uses podman — Apple `container` needs macOS.)
+const macDefaultRuntime = "container"
 
 // runtimeName resolves which container backend to use from the SINDRI_RUNTIME
 // override and the host OS, as a plain name so it's testable without the host's
-// actual GOOS. Podman is the default everywhere (Linux always); Apple `container`
-// is opt-in on macOS, and requested off macOS it falls back to podman.
+// actual GOOS. macOS defaults to Apple `container` (opt out with SINDRI_RUNTIME=
+// podman); Linux always uses podman, since Apple `container` needs macOS.
 func runtimeName(env, goos string) string {
-	if env == "" {
-		if goos == "darwin" {
-			return macDefaultRuntime
-		}
-		return "podman"
+	if goos != "darwin" {
+		return "podman" // Apple `container` needs macOS; Linux always podman
 	}
-	if env == "container" && goos == "darwin" {
+	switch env {
+	case "podman":
+		return "podman" // opt out of the macOS default
+	case "container":
 		return "container"
+	default:
+		return macDefaultRuntime // unset → the macOS default (Apple container)
 	}
-	return "podman"
 }
 
 // chooseRuntime resolves the single container backend for this process, mapping

@@ -30,7 +30,7 @@ semantics differ.
 
 **Non-Goals:**
 - Changing the agent image, the overlay architecture, or the agent↔hub protocol.
-- Dropping podman — it stays the default and the Linux runtime.
+- Dropping podman — it stays the Linux runtime and the macOS opt-out.
 - Native-macOS / non-Linux execution (settled: sindri needs overlayfs → Linux).
 
 ## Decisions
@@ -50,8 +50,8 @@ semantics differ.
   `internal/tui` call `internal/container` (the port), never a specific adapter.
 - **Wiring at the composition root.** `cmd/sindri` (main) is the only place that
   imports the adapters; it picks one from config and injects it via
-  `container.Use(engine)`. Platform default: podman everywhere, `container` opt-in on
-  macOS; Linux forces podman. Resolved once at startup.
+  `container.Use(engine)`. Platform default: Apple `container` on macOS (podman via
+  `SINDRI_RUNTIME=podman` opt-out); Linux always podman. Resolved once at startup.
 - **Identity/naming.** Container naming (`hub.Container`) and label scheme stay; each
   backend maps them to its `ls --filter`/inspect. Orphan detection (`ListByLabel`)
   must work on both.

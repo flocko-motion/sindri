@@ -19,6 +19,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
+	"github.com/flo-at/sindri/internal/detect"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -48,6 +49,7 @@ type AgentView struct {
 	Clients   int    `json:"clients"`   // humans attached to its tmux session (dial-ins)
 	Container string `json:"container"` // podman container name (project-resolved, so cross-repo callers target the right pod)
 	Memory    string `json:"memory"`    // configured RAM limit ("" = hub default)
+	Runtime   string `json:"runtime"`   // Claude's live runtime: "working"|"blocked"|"idle"|"" (folded into Status; kept raw for the herdr projection)
 }
 
 // ClientView is one human attached to an agent's tmux session — a live dial-in.
@@ -100,6 +102,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	var wg sync.WaitGroup
 	running := make([]bool, len(agentsRow))
 	clients := make([]int, len(agentsRow))
+	runtimes := make([]string, len(agentsRow)) // Claude's live runtime: busy|blocked|idle|""
 	for i, a := range agentsRow {
 		wg.Add(1)
 		go func(i int, a store.Agent) {
@@ -112,6 +115,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			if cs, ok := h.clientsCtx(ctx, a.Project, a.Name); ok {
 				running[i] = true
 				clients[i] = len(cs)
+				runtimes[i] = h.runtimeState(ctx, a.Project, a.Name) // what Claude is doing now
 			}
 		}(i, a)
 	}
@@ -125,8 +129,9 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		st, _ := h.store.For(a.Project).GetState(a.Name)
 		agents = append(agents, AgentView{
 			Project: a.Project, Repo: h.repoName(a.Project), Name: a.Name, Role: a.Role,
-			Status: h.agentStatus(a.Project, a.Name, running[i], st.Phase),
-			Task:   st.Task, Branch: st.Branch, PR: openPRFor(prs, a.Project, a.Name), Workspace: a.Workspace,
+			Status:  overlayRuntime(h.agentStatus(a.Project, a.Name, running[i], st.Phase), runtimes[i]),
+			Runtime: runtimes[i],
+			Task:    st.Task, Branch: st.Branch, PR: openPRFor(prs, a.Project, a.Name), Workspace: a.Workspace,
 			Clients: clients[i], Container: container, Memory: a.Memory,
 		})
 	}
@@ -256,6 +261,45 @@ func (h *Hub) repoName(project string) string {
 func (h *Hub) container(project, name string) string {
 	root, _ := h.projectPath(project)
 	return Container(root, name)
+}
+
+// runtimeState captures an agent's Claude pane and classifies what Claude is doing
+// right now — "busy" (computing), "blocked" (waiting for user input), "idle" (stopped
+// at the prompt) — or "" when it can't tell (plain shell, transcript view, boot).
+// Bounded by ctx (it reuses the board probe's), so a wedged capture can't stall the read.
+func (h *Hub) runtimeState(ctx context.Context, project, name string) string {
+	out, err := container.ExecContext(ctx, h.container(project, name), append([]string{"tmux"}, tmux.CapturePane(name, 0)...)...)
+	if err != nil {
+		return ""
+	}
+	switch detect.ClaudeState(string(out)) {
+	case detect.Working:
+		return "working"
+	case detect.Blocked:
+		return "blocked"
+	case detect.Idle:
+		return "idle"
+	}
+	return "idle" // a shell (maintenance mode) or unrecognized screen = not doing anything
+}
+
+// overlayRuntime folds Claude's live runtime (working|blocked|idle|"") into the
+// workflow status, three states in herdr's own vocabulary: "blocked" = needs your
+// attention now (any phase); "working" = busy; "idle" = not doing anything (no task,
+// stalled at the prompt, or dropped to the maintenance shell). The live state
+// replaces a plain working/idle phase; the meaningful workflow phases
+// (submitted/collab/resolving/reviewing/planning) are kept, unless Claude is blocked.
+// runtime "" (probe failed) leaves the phase untouched.
+func overlayRuntime(status, runtime string) string {
+	switch runtime {
+	case "blocked":
+		return "blocked"
+	case "working", "idle":
+		if status == "working" || status == "idle" {
+			return runtime
+		}
+	}
+	return status
 }
 
 // launchDiagnostic reports WHY a just-launched agent isn't observed up, so a

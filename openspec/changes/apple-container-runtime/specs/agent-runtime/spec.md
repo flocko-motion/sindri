@@ -2,7 +2,7 @@
 
 ### Requirement: Container runtime is a pluggable backend behind one port
 
-The hub SHALL reach the container runtime through a single port (interface), with interchangeable backends, so that no hub, CLI, or TUI code depends on a specific runtime CLI. At least two backends SHALL satisfy the port: podman (a shared Linux VM) and Apple `container` (a per-container micro-VM, macOS). The backend SHALL be selectable by configuration, defaulting to podman, and Linux SHALL always use podman.
+The hub SHALL reach the container runtime through a single port (interface), with interchangeable backends, so that no hub, CLI, or TUI code depends on a specific runtime CLI. At least two backends SHALL satisfy the port: podman (a shared Linux VM) and Apple `container` (a per-container micro-VM, macOS). The backend SHALL be selectable by configuration. On macOS the default SHALL be Apple `container` — its per-agent micro-VM is what satisfies the isolation requirement below — with podman available as an opt-out (`SINDRI_RUNTIME=podman`); on Linux the backend SHALL always be podman, since Apple `container` requires macOS.
 
 #### Scenario: A caller drives the runtime through the port
 
@@ -16,7 +16,9 @@ The hub SHALL reach the container runtime through a single port (interface), wit
 
 #### Scenario: Default and platform constraint
 
-- **WHEN** no runtime is configured, or the host is Linux
+- **WHEN** no runtime is configured on macOS
+- **THEN** the Apple `container` backend is used (opt out with `SINDRI_RUNTIME=podman`)
+- **WHEN** the host is Linux, or podman is explicitly selected
 - **THEN** the podman backend is used
 
 ### Requirement: One agent's runtime failure is isolated from other agents

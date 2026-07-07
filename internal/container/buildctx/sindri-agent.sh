@@ -30,8 +30,8 @@ set -g status-justify left
 set -g status-style "bg=colour63,fg=colour231"
 set -g status-left "#[bold] sindri · #S #[default] "
 set -g status-left-length 40
-set -g status-right "detach: C-b d "
-set -g status-right-length 50
+set -g status-right "scrollback: Ctrl-O (Claude) · detach: C-b d "
+set -g status-right-length 60
 set -g window-status-current-format ""
 set -g window-status-format ""
 set -g allow-rename off
@@ -42,6 +42,11 @@ set -g set-titles off
 # back to the terminal's own native selection.)
 set -g mouse on
 set -g set-clipboard on
+# Scrollback: vi keys in copy-mode so `prefix [` then C-u/C-d (half-page), C-b/C-f
+# (page), g/G and `/` search all work — the default emacs copy-mode leaves C-u/C-d
+# unbound, so keyboard scrollback appeared stuck. Generous history for a chatty agent.
+set -g mode-keys vi
+set -g history-limit 50000
 TMUXCONF
 
 if [ -n "${SINDRI_SHELL:-}" ]; then
