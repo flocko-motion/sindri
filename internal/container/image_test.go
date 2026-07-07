@@ -49,7 +49,7 @@ func TestCustomDockerfile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SINDRI_HOME", home)
 
-	if got := customDockerfile(); got != "" {
+	if got := customDockerfile(""); got != "" {
 		t.Errorf("no recipe present, want \"\", got %q", got)
 	}
 
@@ -57,7 +57,7 @@ func TestCustomDockerfile(t *testing.T) {
 	if err := os.WriteFile(df, []byte("FROM scratch\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := customDockerfile(); got != df {
+	if got := customDockerfile(""); got != df {
 		t.Errorf("Dockerfile present, want %q, got %q", df, got)
 	}
 
@@ -66,8 +66,52 @@ func TestCustomDockerfile(t *testing.T) {
 	if err := os.WriteFile(cf, []byte("FROM scratch\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := customDockerfile(); got != cf {
+	if got := customDockerfile(""); got != cf {
 		t.Errorf("Containerfile should win, want %q, got %q", cf, got)
+	}
+}
+
+// A repo's own .sindri/ recipe takes precedence over the global StateDir one, so a
+// project can carry its own toolchain.
+func TestCustomDockerfileRepoPrecedence(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SINDRI_HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "Containerfile"), []byte("FROM global\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := t.TempDir()
+	repoCf := filepath.Join(repo, ".sindri", "Containerfile")
+	if err := os.MkdirAll(filepath.Dir(repoCf), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(repoCf, []byte("FROM repo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := customDockerfile(repo); got != repoCf {
+		t.Errorf("repo .sindri/Containerfile should win over global, want %q, got %q", repoCf, got)
+	}
+	// With no repo recipe, it falls back to the global one.
+	if got := customDockerfile(t.TempDir()); got != filepath.Join(home, "Containerfile") {
+		t.Errorf("want global fallback, got %q", got)
+	}
+}
+
+// imageRef is the shared default for the embedded recipe and a stable, content-
+// derived tag for a custom one (identical recipes share; different ones don't).
+func TestImageRef(t *testing.T) {
+	if got := imageRef(nil); got != ImageName {
+		t.Errorf("no custom recipe: want %q, got %q", ImageName, got)
+	}
+	a1 := imageRef([]byte("FROM alpine\n"))
+	a2 := imageRef([]byte("FROM alpine\n"))
+	b := imageRef([]byte("FROM ubuntu\n"))
+	if a1 != a2 {
+		t.Errorf("identical recipes must share a tag: %q vs %q", a1, a2)
+	}
+	if a1 == b || a1 == ImageName {
+		t.Errorf("distinct/custom recipes must get distinct non-default tags: %q, %q, %q", a1, b, ImageName)
 	}
 }
 

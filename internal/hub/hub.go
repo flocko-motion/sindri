@@ -440,7 +440,8 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 			h.notify()
 		}
 	}()
-	if err := container.EnsureImage(root, w); err != nil {
+	imageRef, err := container.EnsureImage(root, w)
+	if err != nil {
 		return err
 	}
 	fmt.Fprintf(w, "Image ready. Starting container %s…\n", h.container(project, name))
@@ -553,7 +554,7 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 	}
 	opts := container.RunOpts{
 		Name:       cName,
-		Image:      container.ImageName,
+		Image:      imageRef,
 		Labels:     map[string]string{"sindri.project": root, "sindri.agent": name},
 		Env:        env,
 		Mounts:     mounts,
@@ -566,10 +567,9 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 	if err := ps.Log(name, "launch", "started container="+cName); err != nil {
 		return err
 	}
-	// Stay until we OBSERVE the agent up (its container is running AND its tmux
-	// session answers) — no optimistic "launched" while it's still coming up.
-	// Stream progress; on timeout report the failure (the deferred cleanup clears
-	// the launching intent, so the board shows "down", not a stuck "launching").
+	// Stay until we OBSERVE the agent up (container running AND tmux session answers)
+	// — no optimistic "launched" while it's still coming up. On timeout report the
+	// failure (deferred cleanup clears the launching intent → board shows "down").
 	fmt.Fprintf(w, "Waiting for %s to come up…\n", name)
 	deadline := time.Now().Add(launchReadyTimeout)
 	shown := 0

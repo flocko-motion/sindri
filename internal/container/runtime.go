@@ -85,7 +85,7 @@ type Runtime interface {
 	ListByLabelContext(ctx context.Context, label, value string) ([]string, error)
 	Check(w io.Writer) error
 	Healthy() (ok bool, hint string)
-	EnsureImage(root string, out io.Writer) error
+	EnsureImage(root string, out io.Writer) (string, error)
 }
 
 // active is the backend this process runs against, wired once at startup by the
@@ -127,7 +127,7 @@ func (noop) Rm(string) error                                            { return
 func (noop) ListByLabelContext(context.Context, string, string) ([]string, error) { return nil, nil }
 func (noop) Check(io.Writer) error                                      { return errNoRuntime }
 func (noop) Healthy() (bool, string)                                    { return false, "no container runtime configured" }
-func (noop) EnsureImage(string, io.Writer) error                        { return errNoRuntime }
+func (noop) EnsureImage(string, io.Writer) (string, error)              { return "", errNoRuntime }
 
 // --- package façade: the core calls these; they dispatch to the wired backend ---
 
@@ -189,5 +189,6 @@ func Check(w io.Writer) error { return active.Check(w) }
 // Healthy is a fast, time-bounded reachability probe.
 func Healthy() (ok bool, hint string) { return active.Healthy() }
 
-// EnsureImage builds the agent image if the recipe is stale.
-func EnsureImage(root string, out io.Writer) error { return active.EnsureImage(root, out) }
+// EnsureImage builds the agent image if the recipe is stale, returning the image
+// reference to run (default or a custom per-recipe tag).
+func EnsureImage(root string, out io.Writer) (string, error) { return active.EnsureImage(root, out) }

@@ -23,7 +23,10 @@ import (
 	"github.com/flo-at/sindri/internal/paths"
 )
 
-const ImageName = "sindri-agent:latest"
+// imageBase is the image repository; ImageName is the default (embedded-recipe) ref.
+// A custom recipe builds imageBase:custom-<hash> instead (see imageRef).
+const imageBase = "sindri-agent"
+const ImageName = imageBase + ":latest"
 
 // buildContext is the agent image's whole build context — Dockerfile, the
 // entrypoint, the yazi helper, and the docker shims — embedded so the binary
@@ -42,12 +45,12 @@ var buildContext embed.FS
 // recipe delegates to: whether the image is already present, and how to build it.
 // The podman and apple-container adapters each provide one.
 type ImageBuilder interface {
-	// ImageExists reports whether the agent image is present. A non-nil error means
+	// ImageExists reports whether image ref is present. A non-nil error means
 	// presence could NOT be determined (tool/service failure) — distinct from a
 	// confident "absent" (false, nil) — so a broken check is never mistaken for
 	// "image missing, rebuild" (a swallowed error here rebuilt on every launch).
-	ImageExists() (bool, error)
-	Build(ctxDir, dockerfile string, out io.Writer) error
+	ImageExists(ref string) (bool, error)
+	Build(ref, ctxDir, dockerfile string, out io.Writer) error
 }
 
 // buildProgress collapses a build's plain, line-oriented output into a single
@@ -89,22 +92,25 @@ func (p *buildProgress) finish() {
 }
 
 // EnsureImageWith runs the shared build recipe — hash the embedded context + ISO
-// week (+ any custom Dockerfile) into a key, skip when it's unchanged and the image
-// is present, else materialize and build — delegating the backend-specific steps
-// (image-exists check, build invocation) to b. It's independent of projectRoot: the
-// recipe is embedded, so it works for any orchestrated repo.
-func EnsureImageWith(projectRoot string, out io.Writer, b ImageBuilder) error {
-	// A custom recipe in the central sindri home replaces the embedded Dockerfile
-	// (read once, folded into the build key below so edits rebuild).
-	custom := customDockerfile()
+// week (+ any custom recipe) into a key, skip when it's unchanged and the image is
+// present, else materialize and build — delegating the backend-specific steps to b.
+// It returns the image REFERENCE to run: the shared sindri-agent:latest for the
+// embedded (or absent) recipe, or a content-derived sindri-agent:custom-<hash> when
+// a repo/global custom recipe is in play, so repos with different recipes don't
+// clobber each other's tag (or thrash each other's build cache).
+func EnsureImageWith(projectRoot string, out io.Writer, b ImageBuilder) (string, error) {
+	// Precedence: a repo-local .sindri/ recipe, then the global StateDir recipe,
+	// then the embedded default (read once, folded into the build key so edits rebuild).
+	custom := customDockerfile(projectRoot)
 	var customData []byte
 	if custom != "" {
 		data, err := os.ReadFile(custom)
 		if err != nil {
-			return fmt.Errorf("read custom image recipe %s: %w", custom, err)
+			return "", fmt.Errorf("read custom image recipe %s: %w", custom, err)
 		}
 		customData = data
 	}
+	ref := imageRef(customData)
 
 	// Hash the embedded context (Dockerfile + entrypoint + shims) plus the ISO
 	// week, so any change to the recipe — or a new week — triggers a rebuild.
@@ -122,7 +128,7 @@ func EnsureImageWith(projectRoot string, out io.Writer, b ImageBuilder) error {
 		h.Write(data)
 		return nil
 	}); err != nil {
-		return fmt.Errorf("hash embedded build context: %w", err)
+		return "", fmt.Errorf("hash embedded build context: %w", err)
 	}
 	h.Write([]byte(fmt.Sprintf("%d-%d", year, week)))
 	if customData != nil {
@@ -133,18 +139,20 @@ func EnsureImageWith(projectRoot string, out io.Writer, b ImageBuilder) error {
 
 	cacheDir, err := buildCacheDir()
 	if err != nil {
-		return err
+		return "", err
 	}
-	keyFile := filepath.Join(cacheDir, "build-key")
+	// Per-ref key file, so alternating between repos with different recipes doesn't
+	// invalidate each other's cache and force a rebuild every switch.
+	keyFile := filepath.Join(cacheDir, "build-key-"+tagOf(ref))
 	if cached, err := os.ReadFile(keyFile); err == nil && strings.TrimSpace(string(cached)) == buildKey {
-		present, perr := b.ImageExists()
+		present, perr := b.ImageExists(ref)
 		if perr != nil {
 			// Couldn't determine presence — surface it rather than silently rebuilding
 			// (or worse, silently skipping). The caller needs the real reason.
-			return fmt.Errorf("check whether image %s already exists: %w", ImageName, perr)
+			return "", fmt.Errorf("check whether image %s already exists: %w", ref, perr)
 		}
 		if present {
-			return nil // up to date and the image is actually present
+			return ref, nil // up to date and the image is actually present
 		}
 	}
 
@@ -154,45 +162,72 @@ func EnsureImageWith(projectRoot string, out io.Writer, b ImageBuilder) error {
 	// pod is Linux.
 	ctxDir := filepath.Join(cacheDir, "buildctx")
 	if err := materialize(ctxDir); err != nil {
-		return err
+		return "", err
 	}
 	// Overlay the custom recipe onto the materialized context: the embedded
 	// support files (entrypoint, shims, yazi.sh) stay put, so a custom Dockerfile
 	// can COPY them and keep the agent contract.
 	if customData != nil {
 		if err := os.WriteFile(filepath.Join(ctxDir, "Dockerfile"), customData, 0o644); err != nil {
-			return fmt.Errorf("apply custom image recipe: %w", err)
+			return "", fmt.Errorf("apply custom image recipe: %w", err)
 		}
 		fmt.Fprintf(out, "Using custom image recipe: %s\n", custom)
 	}
 
-	fmt.Fprintf(out, "Building agent image %s...\n", ImageName)
+	fmt.Fprintf(out, "Building agent image %s...\n", ref)
 	// Collapse the (verbose) build log into one in-place-updating line, so the caller
 	// sees progress happening without pages of buildkit output.
 	bp := &buildProgress{out: out}
-	buildErr := b.Build(ctxDir, filepath.Join(ctxDir, "Dockerfile"), bp)
+	buildErr := b.Build(ref, ctxDir, filepath.Join(ctxDir, "Dockerfile"), bp)
 	bp.finish()
 	if buildErr != nil {
-		return buildErr
+		return "", buildErr
 	}
 	if err := os.WriteFile(keyFile, []byte(buildKey), 0o644); err != nil {
-		return fmt.Errorf("write build key: %w", err)
+		return "", fmt.Errorf("write build key: %w", err)
 	}
-	return nil
+	return ref, nil
 }
 
-// customDockerfile returns the path to a user-provided image recipe in the central
-// sindri home (paths.StateDir), or "" if none. A file named "Containerfile" or
-// "Dockerfile" there fully replaces the embedded recipe — maximum customization
-// (extra tools, private base images) without editing the binary. The recipe must
-// still honor the agent contract: a non-root `sindri` user, /usr/local/bin/sindri
-// pointing at the mounted worker, the sindri-agent entrypoint, and WORKDIR
-// /workspace — easiest by starting from a copy of the embedded Dockerfile.
-func customDockerfile() string {
-	for _, name := range []string{"Containerfile", "Dockerfile"} {
-		p := filepath.Join(paths.StateDir(), name)
-		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-			return p
+// imageRef is the tag to build/run: the shared default for the embedded recipe, or
+// a content-derived tag for a custom recipe so distinct recipes never share (or
+// clobber) a tag. Identical recipes hash to the same tag and are reused.
+func imageRef(customData []byte) string {
+	if len(customData) == 0 {
+		return ImageName
+	}
+	sum := sha256.Sum256(customData)
+	return fmt.Sprintf("%s:custom-%x", imageBase, sum[:6])
+}
+
+// tagOf returns the tag portion of an image reference (after the last ':').
+func tagOf(ref string) string {
+	if i := strings.LastIndexByte(ref, ':'); i >= 0 {
+		return ref[i+1:]
+	}
+	return ref
+}
+
+// customDockerfile returns the path to a user-provided image recipe, or "" if none.
+// Precedence: the orchestrated repo's own .sindri/{Containerfile,Dockerfile} first
+// (per-repo toolchains), then the global one in the central sindri home
+// (paths.StateDir, applies to every repo). Either fully replaces the embedded recipe
+// — maximum customization (extra tools, private base images) without editing the
+// binary. The recipe must still honor the agent contract: a non-root `sindri` user,
+// /usr/local/bin/sindri pointing at the mounted worker, the sindri-agent entrypoint,
+// and WORKDIR /workspace — easiest by starting from a copy of the embedded Dockerfile.
+func customDockerfile(projectRoot string) string {
+	dirs := []string{}
+	if projectRoot != "" {
+		dirs = append(dirs, filepath.Join(projectRoot, ".sindri"))
+	}
+	dirs = append(dirs, paths.StateDir())
+	for _, dir := range dirs {
+		for _, name := range []string{"Containerfile", "Dockerfile"} {
+			p := filepath.Join(dir, name)
+			if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+				return p
+			}
 		}
 	}
 	return ""

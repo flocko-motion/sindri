@@ -267,16 +267,17 @@ func (Engine) ListByLabelContext(ctx context.Context, label, value string) ([]st
 	return names, nil
 }
 
-// EnsureImage builds the agent image via `podman build` when the recipe is stale.
-func (Engine) EnsureImage(root string, out io.Writer) error {
+// EnsureImage builds the agent image via `podman build` when the recipe is stale,
+// returning the image reference to run.
+func (Engine) EnsureImage(root string, out io.Writer) (string, error) {
 	return container.EnsureImageWith(root, out, podmanBuilder{})
 }
 
 // podmanBuilder is the podman slice of image building for container.EnsureImageWith.
 type podmanBuilder struct{}
 
-func (podmanBuilder) ImageExists() (bool, error) {
-	cmd := exec.Command(Binary, "image", "exists", container.ImageName)
+func (podmanBuilder) ImageExists(ref string) (bool, error) {
+	cmd := exec.Command(Binary, "image", "exists", ref)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	err := cmd.Run()
@@ -289,14 +290,14 @@ func (podmanBuilder) ImageExists() (bool, error) {
 	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 && stderr.Len() == 0 {
 		return false, nil
 	}
-	return false, fmt.Errorf("podman image exists %s: %s: %w", container.ImageName, strings.TrimSpace(stderr.String()), err)
+	return false, fmt.Errorf("podman image exists %s: %s: %w", ref, strings.TrimSpace(stderr.String()), err)
 }
 
-func (podmanBuilder) Build(ctxDir, dockerfile string, out io.Writer) error {
+func (podmanBuilder) Build(ref, ctxDir, dockerfile string, out io.Writer) error {
 	// Capture podman's output alongside streaming it, so a failure carries the actual
 	// diagnostic — not a bare "exit status 125".
 	var captured bytes.Buffer
-	cmd := exec.Command(Binary, "build", "-t", container.ImageName, "-f", dockerfile, ctxDir)
+	cmd := exec.Command(Binary, "build", "-t", ref, "-f", dockerfile, ctxDir)
 	cmd.Stdout = io.MultiWriter(out, &captured)
 	cmd.Stderr = io.MultiWriter(out, &captured)
 	if err := cmd.Run(); err != nil {

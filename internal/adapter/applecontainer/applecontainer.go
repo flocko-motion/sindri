@@ -333,19 +333,20 @@ func (Engine) Healthy() (ok bool, hint string) {
 	return false, "Apple `container` service isn't running — start it with `container system start`, then verify with `container ls`."
 }
 
-// EnsureImage builds the agent image via `container build` when the recipe is stale.
-func (Engine) EnsureImage(root string, out io.Writer) error {
+// EnsureImage builds the agent image via `container build` when the recipe is stale,
+// returning the image reference to run.
+func (Engine) EnsureImage(root string, out io.Writer) (string, error) {
 	return container.EnsureImageWith(root, out, appleBuilder{})
 }
 
 // appleBuilder is the Apple-`container` slice of image building.
 type appleBuilder struct{}
 
-func (appleBuilder) ImageExists() (bool, error) {
+func (appleBuilder) ImageExists(ref string) (bool, error) {
 	// NB: the subcommand is `image` (singular); `images` is not a valid subcommand and
 	// exits non-zero, which — when this returned a bare bool — silently read as "absent"
 	// and rebuilt on every launch.
-	out, err := exec.Command(Binary, "image", "inspect", container.ImageName).CombinedOutput()
+	out, err := exec.Command(Binary, "image", "inspect", ref).CombinedOutput()
 	if err == nil {
 		return true, nil
 	}
@@ -355,11 +356,11 @@ func (appleBuilder) ImageExists() (bool, error) {
 	if strings.Contains(string(out), "not found") {
 		return false, nil
 	}
-	return false, fmt.Errorf("container image inspect %s: %s: %w", container.ImageName, strings.TrimSpace(string(out)), err)
+	return false, fmt.Errorf("container image inspect %s: %s: %w", ref, strings.TrimSpace(string(out)), err)
 }
 
-func (appleBuilder) Build(ctxDir, dockerfile string, out io.Writer) error {
-	cmd := exec.Command(Binary, "build", "-t", container.ImageName, "-f", dockerfile, ctxDir)
+func (appleBuilder) Build(ref, ctxDir, dockerfile string, out io.Writer) error {
+	cmd := exec.Command(Binary, "build", "-t", ref, "-f", dockerfile, ctxDir)
 	cmd.Stdout, cmd.Stderr = out, out
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("container build failed: %w", err)
