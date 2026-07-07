@@ -174,6 +174,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.modal {
 			m.detail.SetHeight(modalContentHeight(m.h))
 		}
+		// A resize — a shrink especially — leaves stale cells from the old, larger
+		// frame in the alt-screen buffer, so the new frame renders over leftovers
+		// (the "ugly resize"). Force a full clear+repaint so it comes up clean.
+		return m, tea.ClearScreen
 	case stateMsg:
 		if msg.gen != m.gen { // a snapshot from a stream abandoned by a repo switch
 			return m, nil
