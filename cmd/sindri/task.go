@@ -35,8 +35,28 @@ func tasksJSON(tasks []store.Task) (string, error) {
 
 func newTaskCmd() *cobra.Command {
 	c := &cobra.Command{Use: "task", Short: "Inspect and create tasks (td issues)"}
-	c.AddCommand(taskListCmd(), taskInfoCmd(), taskNewCmd(), taskEditCmd(), taskPriorityCmd(), taskApproveCmd(), taskRejectCmd(), taskUnassignCmd(), taskCloseCmd())
+	c.AddCommand(taskListCmd(), taskInfoCmd(), taskNewCmd(), taskEditCmd(), taskPriorityCmd(), taskApproveCmd(), taskRejectCmd(), taskUnassignCmd(), taskCloseCmd(), taskRefreshCmd())
 	return c
+}
+
+// taskRefreshCmd re-syncs the hub's task cache from td (the source of truth) and
+// notifies watchers — the shell counterpart of the TUI's refresh, so the sync is
+// reachable from the CLI too, not only the dashboard. Reads (list/info) already
+// sync on their own; this is for forcing a refresh (e.g. to push fresh state to a
+// running TUI) without listing.
+func taskRefreshCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "refresh", Short: "Re-sync tasks from td (the source of truth) and notify watchers", Args: cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return withBackend(func(b backend) error {
+				if err := b.Refresh(); err != nil {
+					return err
+				}
+				fmt.Fprintln(os.Stderr, "synced tasks from td")
+				return nil
+			})
+		},
+	}
 }
 
 // taskCloseCmd marks a task done from the task list — the CLI counterpart of the
