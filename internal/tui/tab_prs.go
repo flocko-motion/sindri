@@ -79,26 +79,95 @@ func (m model) selPRApproved() bool {
 
 // openApproveMergeChoice handles pressing merge on a not-yet-approved PR: rather
 // than failing the merge, offer to approve (the human gate) and merge in one step.
+// On confirm it emits approveMergeMsg so Update can set the transient "merging"
+// marker (and render it) before the async approve+merge runs.
 func (m *model) openApproveMergeChoice(id string) {
-	cl := m.cl
 	m.choice = choiceModalState{
 		active: true, title: id + " isn't approved yet — approve and merge?",
 		options: []string{"approve & merge", "cancel"}, values: []string{"merge", "cancel"},
 		apply: func(v string) tea.Cmd {
-			if v != "merge" || cl == nil {
+			if v != "merge" {
 				return nil
 			}
-			return func() tea.Msg {
-				if err := cl.ApprovePR(id); err != nil {
-					return errModalMsg{err}
-				}
-				if _, err := cl.Merge(id); err != nil {
-					return errModalMsg{err}
-				}
-				st, _ := cl.State()
-				return polledMsg(st)
-			}
+			return func() tea.Msg { return approveMergeMsg{id: id} }
 		},
+	}
+}
+
+// markMerging flags a PR id as mid-merge so its row shows a transient "merging"
+// (see prRows) until the hub confirms the real status.
+func (m *model) markMerging(id string) {
+	if m.merging == nil {
+		m.merging = map[string]bool{}
+	}
+	m.merging[id] = true
+}
+
+// mergeCmd merges an already-approved PR, then fetches fresh state. Success and
+// failure both come back as mergeDoneMsg, which clears the transient marker.
+func (m *model) mergeCmd(id string) tea.Cmd {
+	cl := m.cl
+	if cl == nil || id == "" {
+		return nil
+	}
+	return func() tea.Msg {
+		if _, err := cl.Merge(id); err != nil {
+			return mergeDoneMsg{id: id, err: err}
+		}
+		st, _ := cl.State()
+		return mergeDoneMsg{id: id, state: st}
+	}
+}
+
+// approveMergeCmd approves an open PR then merges it (the "approve & merge" path),
+// reporting the outcome as mergeDoneMsg.
+func (m *model) approveMergeCmd(id string) tea.Cmd {
+	cl := m.cl
+	if cl == nil || id == "" {
+		return nil
+	}
+	return func() tea.Msg {
+		if err := cl.ApprovePR(id); err != nil {
+			return mergeDoneMsg{id: id, err: err}
+		}
+		if _, err := cl.Merge(id); err != nil {
+			return mergeDoneMsg{id: id, err: err}
+		}
+		st, _ := cl.State()
+		return mergeDoneMsg{id: id, state: st}
+	}
+}
+
+// mergeDone finishes a triggered merge: it drops the row's transient "merging"
+// marker, then either applies the fresh board snapshot (success) or surfaces the
+// error in the modal and leaves the row to revert to its real status (failure).
+func (m model) mergeDone(msg mergeDoneMsg) (tea.Model, tea.Cmd) {
+	delete(m.merging, msg.id)
+	if msg.err != nil {
+		m.errText = msg.err.Error()
+		return m, nil
+	}
+	m.state = msg.state
+	m.reclamp()
+	return m, tea.Batch(m.syncDetail(), m.agentLiveCmds())
+}
+
+// reconcileMerging drops transient "merging" markers once a fresh board snapshot
+// confirms the merge (status merged) or the PR is gone — a safety net so a marker
+// can't linger past the real status (e.g. if the merge lands via an SSE push
+// rather than this client's own mergeDoneMsg).
+func (m *model) reconcileMerging() {
+	if len(m.merging) == 0 {
+		return
+	}
+	status := make(map[string]string, len(m.state.PRs))
+	for _, p := range m.state.PRs {
+		status[p.ID] = p.Status
+	}
+	for id := range m.merging {
+		if st, ok := status[id]; !ok || st == "merged" {
+			delete(m.merging, id)
+		}
 	}
 }
 
@@ -163,7 +232,11 @@ func (m model) prRows() []row {
 	var out []row
 	for _, p := range m.state.PRs {
 		repo := projectStyle(p.Project).Render(fmt.Sprintf("%-10.10s", m.repoName(p.Project)))
-		out = append(out, row{fmt.Sprintf("%s %-14s %-9s %4s %-10s %s", repo, p.ID, p.Status, shortAge(p.CreatedAt), p.Agent, p.Branch), p.ID})
+		status := p.Status
+		if m.merging[p.ID] && p.Status != "merged" { // transient: the user triggered a merge, awaiting the hub
+			status = "merging"
+		}
+		out = append(out, row{fmt.Sprintf("%s %-14s %-9s %4s %-10s %s", repo, p.ID, status, shortAge(p.CreatedAt), p.Agent, p.Branch), p.ID})
 	}
 	return out
 }

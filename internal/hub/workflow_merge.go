@@ -84,7 +84,11 @@ func (h *Hub) Merge(project, prID string) (store.PR, error) {
 		wt := filepath.Join(root, a.Workspace)
 		conflicts, done, err := git.RebaseStart(wt, pr.Branch, pr.Base)
 		if err != nil {
-			return revert(err)
+			// The rebase runs in the AGENT's worktree, not your checkout — say so, or
+			// "unstaged changes" sends you hunting in the wrong place. Usually the agent
+			// left uncommitted edits there; it must commit or discard them.
+			return revert(fmt.Errorf("can't rebase %s onto %s in %s's worktree (%s) — most often it has uncommitted changes (NOT your checkout); have the agent commit or discard them, e.g. `sindri agent tell %s \"commit or discard your /workspace changes, then say done\"`. git said: %w",
+				pr.Branch, pr.Base, pr.Agent, a.Workspace, pr.Agent, err))
 		}
 		if !done {
 			pr.Status, pr.Feedback = "open", "" // no longer mergeable; back to review after the worker resolves
