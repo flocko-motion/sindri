@@ -124,7 +124,7 @@ func (m *model) openColorChoice(tag string) {
 		vals = append(vals, strconv.Itoa(i))
 	}
 	m.choice = choiceModalState{
-		active: true, title: "colour for " + m.repoName(tag), options: opts, values: vals, filterable: true,
+		active: true, title: "colour for " + m.repoName(tag), options: opts, values: vals,
 		apply: func(v string) tea.Cmd {
 			n, _ := strconv.Atoi(v)
 			return mutateThenRefresh(cl, func() error { return cl.SetRepoColor(tag, n) })
