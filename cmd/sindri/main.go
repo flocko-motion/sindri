@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/update"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -22,6 +23,7 @@ import (
 var version = "dev"
 
 func main() {
+	container.Use(chooseRuntime()) // wire the one container backend for this process
 	var projectDir string
 	rootCmd := &cobra.Command{
 		Use:     "sindri",

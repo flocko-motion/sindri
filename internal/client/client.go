@@ -81,6 +81,24 @@ func (c *HTTP) State() (hub.BoardState, error) {
 	return out, c.get("/state", &out)
 }
 
+// Stats returns the wired engine plus a memory snapshot for every running agent
+// across all repos (the data behind `agent stats`).
+func (c *HTTP) Stats() (hub.StatsReport, error) {
+	var out hub.StatsReport
+	return out, c.get("/stats", &out)
+}
+
+// Instance returns the engine + container instance detail for one agent (engine,
+// container name, state, image, cpus, memory limit, platform, host pid) — the
+// identity behind `agent info`.
+func (c *HTTP) Instance(name string) (string, error) {
+	var ok struct {
+		Out string `json:"ok"`
+	}
+	err := c.get("/agent/pod?agent="+url.QueryEscape(name), &ok)
+	return ok.Out, err
+}
+
 // Watch subscribes to board-state changes over SSE. It returns a channel that
 // yields the current state on connect and a fresh snapshot on every change; the
 // channel closes when ctx is cancelled or the hub goes away.
@@ -147,6 +165,17 @@ func (c *HTTP) AgentPane(name string, lines int) (string, error) {
 	return ok.Out, err
 }
 
+// Diagnose asks the hub what its liveness probes observe for an agent (running
+// check + session check, with a wedged exec surfaced as a timeout) — the detail
+// behind `agent info --debug` that explains a "down" contradicting a live pod.
+func (c *HTTP) Diagnose(name string) (string, error) {
+	var ok struct {
+		Out string `json:"ok"`
+	}
+	err := c.get("/agent/diagnose?agent="+url.QueryEscape(name), &ok)
+	return ok.Out, err
+}
+
 // Clients returns the humans attached to an agent's tmux session (dial-ins).
 func (c *HTTP) Clients(name string) ([]hub.ClientView, error) {
 	var out []hub.ClientView
@@ -163,9 +192,24 @@ func (c *HTTP) PodInfo(name string) (string, error) {
 }
 
 // Launch spins a pod for an existing agent (shell=true runs a bare shell instead
-// of Claude — for demos/debugging).
-func (c *HTTP) Launch(name string, shell bool) error {
-	return c.post("/launch", hub.NameReq{Name: name, Shell: shell})
+// of Claude), streaming the hub's build/start progress to out so a long image
+// build isn't a frozen prompt. debug=true streams the hub's liveness-probe detail
+// during the wait. The failure, if any, rides back in a trailer.
+func (c *HTTP) Launch(name string, shell, debug bool, out io.Writer) error {
+	body, err := json.Marshal(hub.NameReq{Name: name, Shell: shell, Debug: debug})
+	if err != nil {
+		return err
+	}
+	resp, err := c.hc.Post(c.base+"/launch", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(out, resp.Body)
+	if e := resp.Trailer.Get("X-Sindri-Error"); e != "" {
+		return fmt.Errorf("%s", e)
+	}
+	return nil
 }
 
 // Tell delivers a provenance-stamped message into an agent's session.
@@ -344,6 +388,13 @@ func (c *HTTP) RejectTask(id, comment string) error {
 // UnassignTask releases a task back to the backlog (refused if a live agent holds it).
 func (c *HTTP) UnassignTask(id string) error {
 	return c.post("/task/unassign", hub.RejectReq{ID: id})
+}
+
+// CloseTask marks a task done from the task list. The hub dispatches to the
+// task's backend; backends with no close report it unsupported (surfaced to the
+// caller as an error).
+func (c *HTTP) CloseTask(id string) error {
+	return c.post("/task/close", hub.RejectReq{ID: id})
 }
 
 // Refresh asks the hub to re-sync tasks from the source of truth.

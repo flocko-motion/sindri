@@ -33,19 +33,19 @@ func TestAgentForToken(t *testing.T) {
 	}
 	tok, _ := h.AgentToken("proj", "eitri")
 
-	if p, n, ok := h.agentForToken(tok); !ok || p != "proj" || n != "eitri" {
-		t.Errorf("agentForToken(valid) = (%q, %q, %v), want (proj, eitri, true)", p, n, ok)
+	if p, n, ok, err := h.agentForToken(tok); err != nil || !ok || p != "proj" || n != "eitri" {
+		t.Errorf("agentForToken(valid) = (%q, %q, %v, %v), want (proj, eitri, true, nil)", p, n, ok, err)
 	}
-	if _, _, ok := h.agentForToken("deadbeef"); ok {
-		t.Error("a bogus token resolved to an agent")
+	if _, _, ok, err := h.agentForToken("deadbeef"); err != nil || ok {
+		t.Errorf("a bogus token resolved to an agent (ok=%v err=%v)", ok, err)
 	}
-	if _, _, ok := h.agentForToken(""); ok {
-		t.Error("an empty token resolved to an agent")
+	if _, _, ok, err := h.agentForToken(""); err != nil || ok {
+		t.Errorf("an empty token resolved to an agent (ok=%v err=%v)", ok, err)
 	}
 	// A well-formed token for an agent NOT on the roster must not resolve.
 	dvalin, _ := h.AgentToken("proj", "dvalin")
-	if _, _, ok := h.agentForToken(dvalin); ok {
-		t.Error("token for an unrostered agent resolved")
+	if _, _, ok, err := h.agentForToken(dvalin); err != nil || ok {
+		t.Errorf("token for an unrostered agent resolved (ok=%v err=%v)", ok, err)
 	}
 }
 

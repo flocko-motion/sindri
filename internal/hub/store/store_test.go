@@ -148,11 +148,11 @@ func TestProjectRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.RegisterProject("tagB", "/repos/b")
-	if path, ok := s.ProjectPath("tagA"); !ok || path != "/repos/a" {
-		t.Fatalf("ProjectPath(tagA) = %q, %v", path, ok)
+	if path, ok, err := s.ProjectPath("tagA"); err != nil || !ok || path != "/repos/a" {
+		t.Fatalf("ProjectPath(tagA) = %q, %v, %v", path, ok, err)
 	}
-	if _, ok := s.ProjectPath("nope"); ok {
-		t.Fatalf("unknown tag resolved")
+	if _, ok, err := s.ProjectPath("nope"); err != nil || ok {
+		t.Fatalf("unknown tag resolved (ok=%v err=%v)", ok, err)
 	}
 	if ps, _ := s.Projects(); len(ps) != 2 {
 		t.Fatalf("Projects = %d, want 2", len(ps))

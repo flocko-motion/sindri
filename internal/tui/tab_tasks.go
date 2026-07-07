@@ -390,6 +390,23 @@ func (m *model) unassignTaskCmd(id string) tea.Cmd {
 	}
 }
 
+// closeTaskCmd marks the selected task done (the hub dispatches to its backend;
+// a backend that can't close surfaces the error in the modal).
+func (m *model) closeTaskCmd(id string) tea.Cmd {
+	cl := m.cl
+	m.flash = "closing " + id + "…"
+	return func() tea.Msg {
+		if cl == nil {
+			return nil
+		}
+		if err := cl.CloseTask(id); err != nil {
+			return errModalMsg{err}
+		}
+		st, _ := cl.State()
+		return polledMsg(st)
+	}
+}
+
 // approveTaskCmd clears the approval gate on the selected task (makes it
 // claimable).
 func (m *model) approveTaskCmd(id string) tea.Cmd {

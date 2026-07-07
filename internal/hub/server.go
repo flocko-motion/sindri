@@ -76,16 +76,17 @@ type TellReq struct {
 }
 
 // NameReq is the body for operations addressing one agent (POST /launch) or PR
-// (POST /merge). Shell applies to /launch only.
+// (POST /merge). Shell and Debug apply to /launch only.
 type NameReq struct {
 	Name  string `json:"name"`
 	Shell bool   `json:"shell"`
+	Debug bool   `json:"debug"` // stream the hub's liveness-probe detail during the launch wait
 }
 
 // globalRoutes are the only control endpoints valid without a repo context: the
 // board reads, which return global agents/PRs (and no tasks when no repo is
 // selected). Everything else is repo-scoped and requires X-Sindri-Project.
-var globalRoutes = map[string]bool{"/state": true, "/events": true}
+var globalRoutes = map[string]bool{"/state": true, "/events": true, "/stats": true}
 
 // requireProject rejects a repo-scoped request that arrives without an
 // X-Sindri-Project header (rather than silently acting on a phantom empty project),
@@ -122,6 +123,10 @@ func (h *Hub) Handler() http.Handler {
 		st, err := h.State(h.reqProject(r))
 		writeJSON(w, st, err)
 	})
+	mux.HandleFunc("GET /stats", func(w http.ResponseWriter, r *http.Request) {
+		report, err := h.Stats()
+		writeJSON(w, report, err)
+	})
 	mux.HandleFunc("GET /events", h.handleEvents)
 	mux.HandleFunc("POST /refresh", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, okMsg{"refreshed"}, h.Refresh(h.reqProject(r)))
@@ -141,6 +146,9 @@ func (h *Hub) Handler() http.Handler {
 	mux.HandleFunc("GET /agent/pod", func(w http.ResponseWriter, r *http.Request) {
 		out, err := h.PodInfo(h.reqProject(r), r.URL.Query().Get("agent"))
 		writeJSON(w, okMsg{out}, err)
+	})
+	mux.HandleFunc("GET /agent/diagnose", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, okMsg{h.AgentDiagnostic(h.reqProject(r), r.URL.Query().Get("agent"))}, nil)
 	})
 	mux.HandleFunc("GET /agent/clients", func(w http.ResponseWriter, r *http.Request) {
 		cs, err := h.Clients(h.reqProject(r), r.URL.Query().Get("agent"))
@@ -173,7 +181,18 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"launched"}, h.Launch(h.reqProject(r), req.Name, req.Shell))
+		// Stream build/start progress so the client isn't frozen during a long image
+		// build; carry any error in a trailer (like /exec carries the exit code).
+		w.Header().Set("Trailer", "X-Sindri-Error")
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		fw := &flushWriter{w: w}
+		if f, ok := w.(http.Flusher); ok {
+			fw.f = f
+		}
+		if err := h.Launch(h.reqProject(r), req.Name, req.Shell, req.Debug, fw); err != nil {
+			fmt.Fprintf(fw, "error: %v\n", err)
+			w.Header().Set("X-Sindri-Error", err.Error())
+		}
 	})
 	mux.HandleFunc("POST /tell", func(w http.ResponseWriter, r *http.Request) {
 		var req TellReq
@@ -291,6 +310,13 @@ func (h *Hub) Handler() http.Handler {
 		}
 		writeJSON(w, okMsg{"unassigned"}, h.UnassignTask(h.reqProject(r), req.ID))
 	})
+	mux.HandleFunc("POST /task/close", func(w http.ResponseWriter, r *http.Request) {
+		var req RejectReq // ID (+ unused Feedback)
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"closed"}, h.CloseTask(h.reqProject(r), req.ID))
+	})
 	return mux
 }
 
@@ -336,7 +362,8 @@ func (h *Hub) Serve() error {
 			return err
 		}
 	}
-	h.healPlannerTasks() // a planner can't hold a backlog task — release any stale claim
+	h.healPlannerTasks()    // a planner can't hold a backlog task — release any stale claim
+	h.reconcileMergingPRs() // a merge in flight when we last died → merge-failed (outcome unknown)
 	// Seed each known project's task cache so its board is populated from the start.
 	// A per-project failure (typically no td store at that repo) is not fatal — the
 	// hub still serves agents/PRs — but it must be loud, not silent.

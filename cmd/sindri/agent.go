@@ -10,8 +10,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
-	"github.com/flo-at/sindri/internal/adapter/pod"
+	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/spf13/cobra"
@@ -21,10 +22,10 @@ import (
 // agentPreflight warns — without blocking — when podman is unreachable. Every
 // agent subcommand ultimately needs pods, so infrastructure being offline is the
 // likeliest reason nothing works; say so up front (e.g. "all agents down") instead
-// of leaving the user to infer it. The probe is time-bounded (see pod.Healthy) so
+// of leaving the user to infer it. The probe is time-bounded (see container.Healthy) so
 // a wedged VM can't hang the command.
 func agentPreflight(*cobra.Command, []string) {
-	if ok, hint := pod.Healthy(); !ok {
+	if ok, hint := container.Healthy(); !ok {
 		fmt.Fprintf(os.Stderr, "warning: %s\n", hint)
 	}
 }
@@ -130,10 +131,87 @@ func agentListCmd() *cobra.Command {
 	}
 }
 
+// agentStatsCmd shows each running agent's VM memory usage against its limit — the
+// view for tuning per-agent memory (how close each micro-VM is to its ceiling).
+// Optional name arg narrows to one agent. Down agents are omitted (no VM to sample).
+func agentStatsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "stats [name]", Short: "Show each running agent's VM memory usage vs its limit", Args: cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withBackend(func(b backend) error {
+				report, err := b.Stats()
+				if err != nil {
+					return err
+				}
+				views := report.Agents
+				if len(args) == 1 { // narrow to one agent
+					var only []hub.AgentStatsView
+					for _, v := range views {
+						if v.Name == args[0] {
+							only = append(only, v)
+						}
+					}
+					views = only
+				}
+				fmt.Printf("engine: %s\n\n", report.Engine)
+				if len(views) == 0 {
+					fmt.Fprintln(os.Stderr, "no running agents to sample")
+					return nil
+				}
+				fmt.Printf("%-10.10s %-12s %s\n", "REPO", "AGENT", "MEMORY")
+				for _, v := range views {
+					if v.Err != "" { // surface the reason, don't hide it behind a blank row
+						fmt.Printf("%-10.10s %-12s stats unavailable: %s\n", v.Repo, v.Name, v.Err)
+						continue
+					}
+					fmt.Printf("%-10.10s %-12s %s\n", v.Repo, v.Name, memLine(v.MemUsageBytes, v.MemLimitBytes))
+				}
+				return nil
+			})
+		},
+	}
+}
+
+// memLine renders "544 MiB / 1024 MiB  53% [█████·····]" for a usage/limit pair.
+func memLine(usage, limit int64) string {
+	pct := 0.0
+	if limit > 0 {
+		pct = float64(usage) / float64(limit) * 100
+	}
+	return fmt.Sprintf("%9s / %-9s %3.0f%% %s", humanBytes(usage), humanBytes(limit), pct, memBar(pct))
+}
+
+// humanBytes formats a byte count in binary units (matches how memory limits are
+// configured — 1024 MiB == the 1 GiB default).
+func humanBytes(n int64) string {
+	const u = 1024
+	if n < u {
+		return fmt.Sprintf("%d B", n)
+	}
+	f, units, i := float64(n), []string{"KiB", "MiB", "GiB", "TiB"}, -1
+	for f >= u && i < len(units)-1 {
+		f, i = f/u, i+1
+	}
+	return fmt.Sprintf("%.0f %s", f, units[i])
+}
+
+// memBar is a 10-cell usage meter; fuller = closer to the limit.
+func memBar(pct float64) string {
+	const w = 10
+	fill := int(pct/100*w + 0.5)
+	if fill > w {
+		fill = w
+	}
+	if fill < 0 {
+		fill = 0
+	}
+	return "[" + strings.Repeat("█", fill) + strings.Repeat("·", w-fill) + "]"
+}
+
 func agentNewCmd() *cobra.Command {
 	var role string
 	c := &cobra.Command{
-		Use: "new [name]", Short: "Register an agent identity (no pod; name optional — auto dwarf name)", Args: cobra.MaximumNArgs(1),
+		Use: "new [name]", Short: "Register an agent identity (no container; name optional — auto dwarf name)", Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			var want string
 			if len(args) == 1 {
@@ -155,7 +233,7 @@ func agentNewCmd() *cobra.Command {
 
 func agentDeleteCmd() *cobra.Command {
 	return &cobra.Command{
-		Use: "delete <name>", Aliases: []string{"rm"}, Short: "Delete an agent (pod, socket, worktree, identity)", Args: cobra.ExactArgs(1),
+		Use: "delete <name>", Aliases: []string{"rm"}, Short: "Delete an agent (container, socket, worktree, identity)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
 				if err := b.DeleteAgent(a.Name); err != nil {
@@ -192,26 +270,26 @@ func agentPaneCmd() *cobra.Command {
 }
 
 func agentStartCmd() *cobra.Command {
-	var shell bool
+	var shell, debug bool
 	c := &cobra.Command{
-		Use: "start <name>", Short: "Start the agent: spin a pod that assumes its identity (runs Claude)", Args: cobra.ExactArgs(1),
+		Use: "start <name>", Short: "Start the agent: spin a container that assumes its identity (runs Claude)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
-				if err := b.Launch(a.Name, shell); err != nil {
-					return err
-				}
-				fmt.Fprintf(os.Stderr, "started %s\n", a.Name)
-				return nil
+				// Launch streams its build/start progress to stderr and ends with a
+				// "launched — coming up" line; don't print a second, contradicting
+				// "started" (the agent isn't live until the board says so).
+				return b.Launch(a.Name, shell, debug, os.Stderr)
 			})
 		},
 	}
 	c.Flags().BoolVar(&shell, "shell", false, "run a bare shell instead of Claude (debug/demo)")
+	c.Flags().BoolVar(&debug, "debug", false, "stream the hub's liveness-probe detail while waiting for the agent to come up")
 	return c
 }
 
 func agentStopCmd() *cobra.Command {
 	return &cobra.Command{
-		Use: "stop <name>", Short: "Tear down the agent's pod (keeps its identity)", Args: cobra.ExactArgs(1),
+		Use: "stop <name>", Short: "Tear down the agent's container (keeps its identity)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
 				if err := b.StopAgent(a.Name); err != nil {
@@ -228,26 +306,24 @@ func agentStopCmd() *cobra.Command {
 // up a rebuilt agent image or clear a wedged session. If the agent wasn't running,
 // it's just a start (no error), so `restart` is always safe to reach for.
 func agentRestartCmd() *cobra.Command {
-	var shell bool
+	var shell, debug bool
 	c := &cobra.Command{
-		Use: "restart <name>", Short: "Restart the agent's pod (starts it if it wasn't running)", Args: cobra.ExactArgs(1),
+		Use: "restart <name>", Short: "Restart the agent's container (starts it if it wasn't running)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
-				verb := "restarted"
-				if a.Status == "down" {
-					verb = "started" // wasn't running — a plain start, not a restart
-				} else if err := b.StopAgent(a.Name); err != nil {
-					return err
+				if a.Status != "down" { // tear down the running container first
+					if err := b.StopAgent(a.Name); err != nil {
+						return err
+					}
+					fmt.Fprintf(os.Stderr, "stopped %s — relaunching…\n", a.Name)
 				}
-				if err := b.Launch(a.Name, shell); err != nil {
-					return err
-				}
-				fmt.Fprintf(os.Stderr, "%s %s\n", verb, a.Name)
-				return nil
+				// Launch streams progress and ends with "launched — coming up".
+				return b.Launch(a.Name, shell, debug, os.Stderr)
 			})
 		},
 	}
 	c.Flags().BoolVar(&shell, "shell", false, "run a bare shell instead of Claude (debug/demo)")
+	c.Flags().BoolVar(&debug, "debug", false, "stream the hub's liveness-probe detail while waiting for the agent to come up")
 	return c
 }
 
@@ -268,12 +344,23 @@ func agentTellCmd() *cobra.Command {
 }
 
 func agentInfoCmd() *cobra.Command {
-	return &cobra.Command{
-		Use: "info <name>", Short: "Show an agent's state and activity timeline", Args: cobra.ExactArgs(1),
+	var n int
+	var debug bool
+	c := &cobra.Command{
+		Use: "info <name>", Short: "Show an agent's status (state, task, PR, clients, recent activity)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, found *hub.AgentView) error {
 				fmt.Printf("agent:     %s\nrole:      %s\nstatus:    %s\ntask:      %s\npr:        %s\nworkspace: %s\n",
 					found.Name, found.Role, found.Status, dash(found.Task), dash(found.PR), dash(found.Workspace))
+				// engine + the exact runtime instance (id, image, cpus, memory limit, host pid)
+				if inst, err := b.Instance(found.Name); err == nil && inst != "" {
+					fmt.Printf("\n%s\n", inst)
+				}
+				if debug { // explain the status: what each liveness probe actually observes
+					if d, err := b.Diagnose(found.Name); err == nil {
+						fmt.Printf("\nliveness probe (why status is %q):\n%s", found.Status, d)
+					}
+				}
 				if cs, err := b.Clients(found.Name); err == nil {
 					fmt.Print(hub.FormatClients(cs))
 				}
@@ -281,12 +368,63 @@ func agentInfoCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Println("\nactivity:")
+				// Status, not a log dump: show the last n events, each on one
+				// timestamped, length-capped line. `-n 0` shows all.
+				total := len(evs)
+				if n > 0 && total > n {
+					evs = evs[total-n:]
+				}
+				fmt.Printf("\nrecent activity (%d of %d):\n", len(evs), total)
 				for _, e := range evs {
-					fmt.Printf("  %-10s %s\n", e.Type, e.Payload)
+					fmt.Printf("  %s  %-10s %s\n", eventTime(e.TS), e.Type, oneLine(e.Payload, 100))
 				}
 				return nil
 			})
 		},
 	}
+	c.Flags().IntVarP(&n, "num", "n", 8, "recent activity lines to show (0 = all)")
+	c.Flags().BoolVar(&debug, "debug", false, "show what the hub's liveness probes observe (explains a puzzling status)")
+	return c
+}
+
+// eventTime renders an activity timestamp (UTC RFC3339) as a local HH:MM:SS,
+// falling back to the raw value if it doesn't parse.
+func eventTime(ts string) string {
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return ts
+	}
+	return t.Local().Format("15:04:05")
+}
+
+// shortAge renders how long ago an RFC3339 timestamp was, compactly ("3d", "2h",
+// "5m", "now"); "-" when empty or unparseable.
+func shortAge(ts string) string {
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return "-"
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+}
+
+// oneLine collapses a possibly-multi-line payload to its first line, capped to max
+// runes with an ellipsis — so `info` stays one line per event, not a log dump.
+func oneLine(s string, max int) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = strings.TrimRight(s[:i], " ") + " …"
+	}
+	if r := []rune(s); len(r) > max {
+		s = string(r[:max]) + "…"
+	}
+	return s
 }

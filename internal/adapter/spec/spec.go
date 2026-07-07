@@ -8,6 +8,7 @@ package spec
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,25 +25,27 @@ type Change struct {
 // Done reports whether a change's tasks are all complete.
 func (c Change) Done() bool { return c.TotalTasks > 0 && c.CompletedTasks == c.TotalTasks }
 
-// Changes lists the project's active openspec changes (none if openspec isn't
-// used or the CLI is unavailable — it's an optional source).
-func Changes(projectRoot string) []Change {
+// Changes lists the project's active openspec changes. Returns (nil, nil) when
+// openspec isn't used (an optional source), but a CLI failure or unparseable output
+// is returned as an error — after Enabled() is true, those are real failures, not a
+// legitimate "no changes".
+func Changes(projectRoot string) ([]Change, error) {
 	if !Enabled(projectRoot) {
-		return nil
+		return nil, nil
 	}
 	cmd := exec.Command("openspec", "list", "--json")
 	cmd.Dir = projectRoot
 	out, err := cmd.Output()
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("openspec list in %s: %w", projectRoot, err)
 	}
 	var wrap struct {
 		Changes []Change `json:"changes"`
 	}
-	if json.Unmarshal(out, &wrap) != nil {
-		return nil
+	if e := json.Unmarshal(out, &wrap); e != nil {
+		return nil, fmt.Errorf("parse openspec list output: %w", e)
 	}
-	return wrap.Changes
+	return wrap.Changes, nil
 }
 
 // Enabled reports whether the project uses openspec (has an openspec/ dir).

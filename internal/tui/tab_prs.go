@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -134,7 +135,7 @@ func (m *model) openRejectForm(prID string) {
 // openReviewForm opens a textarea (pre-filled, editable) to request an agentic
 // review of a PR.
 func (m *model) openReviewForm(prID string) {
-	prompt := m.reviewPrompt // the editable default from .sindri/review-prompt.txt
+	prompt := m.reviewPrompt // the editable default from the hub's review-prompt.txt
 	if strings.TrimSpace(prompt) == "" {
 		prompt = defaultReviewPrompt
 	}
@@ -162,9 +163,30 @@ func (m model) prRows() []row {
 	var out []row
 	for _, p := range m.state.PRs {
 		repo := projectStyle(p.Project).Render(fmt.Sprintf("%-10.10s", m.repoName(p.Project)))
-		out = append(out, row{fmt.Sprintf("%s %-14s %-9s %-10s %s", repo, p.ID, p.Status, p.Agent, p.Branch), p.ID})
+		out = append(out, row{fmt.Sprintf("%s %-14s %-9s %4s %-10s %s", repo, p.ID, p.Status, shortAge(p.CreatedAt), p.Agent, p.Branch), p.ID})
 	}
 	return out
+}
+
+// shortAge renders how long ago an RFC3339 timestamp was, compactly ("3d", "2h",
+// "5m", "now"); "-" when it's empty or unparseable, so a missing timestamp reads as
+// unknown rather than a bogus age.
+func shortAge(ts string) string {
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return "-"
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
 }
 
 // prListHeight is the height of the short PR-list region (top-left); the big

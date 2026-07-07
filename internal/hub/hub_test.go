@@ -2,6 +2,7 @@ package hub
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -193,6 +194,71 @@ func TestTellUnknownAgent(t *testing.T) {
 	h := newHub(t)
 	if err := h.Tell(testProject, "ghost", "hi", "user"); err == nil {
 		t.Fatalf("telling unknown agent should error")
+	}
+}
+
+// tdCreate runs `td -w <root> create <args...>`, failing the test on error.
+func tdCreate(t *testing.T, root string, args ...string) {
+	t.Helper()
+	full := append([]string{"-w", root, "create"}, args...)
+	if out, err := exec.Command("td", full...).CombinedOutput(); err != nil {
+		t.Fatalf("td create %v: %s", args, out)
+	}
+}
+
+// TestRefreshSyncsTasksFromTd: Refresh re-syncs the hub's task cache from td's
+// store (the source of truth), so a task td gains after the first sync shows up
+// on the next Refresh. Skips when the td CLI isn't installed (matching the td
+// adapter's tests) — the read path is td's SQLite db.
+func TestRefreshSyncsTasksFromTd(t *testing.T) {
+	if _, err := exec.LookPath("td"); err != nil {
+		t.Skip("td CLI not installed")
+	}
+	h := newHub(t)
+	root := t.TempDir()
+	if out, err := exec.Command("td", "-w", root, "init").CombinedOutput(); err != nil {
+		t.Fatalf("td init: %s", out)
+	}
+	ps := h.repo(root) // register the project → its tag; seeds the cache
+	tag := RepoTag(root)
+
+	tdCreate(t, root, "-t", "feature", "First task in the backlog")
+	if err := h.Refresh(tag); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	after, _ := ps.AllTasks()
+	if !hasTaskTitled(after, "First task in the backlog") {
+		t.Fatalf("first task not synced from td: %+v", after)
+	}
+
+	// A task td gains later must appear on the next Refresh — the point of the sync.
+	tdCreate(t, root, "-t", "bug", "Second task added later on")
+	if err := h.Refresh(tag); err != nil {
+		t.Fatalf("second refresh: %v", err)
+	}
+	after, _ = ps.AllTasks()
+	if !hasTaskTitled(after, "Second task added later on") {
+		t.Fatalf("task added after the first sync was not picked up on refresh: %+v", after)
+	}
+}
+
+func hasTaskTitled(tasks []store.Task, title string) bool {
+	for _, t := range tasks {
+		if t.Title == title {
+			return true
+		}
+	}
+	return false
+}
+
+// TestCloseTaskUnsupportedBackend covers the agnostic dispatch: closing is
+// routed by the task's backend, and a backend with no close of its own (here an
+// openspec-change row, os-…) is refused with an error the caller surfaces in the
+// standard error modal — rather than silently doing nothing.
+func TestCloseTaskUnsupportedBackend(t *testing.T) {
+	h := newHub(t)
+	if err := h.CloseTask(testProject, "os-abc123"); err == nil {
+		t.Fatalf("closing a non-td (openspec) row should be refused")
 	}
 }
 

@@ -17,8 +17,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
-	"github.com/flo-at/sindri/internal/adapter/pod"
-	"github.com/flo-at/sindri/internal/adapter/td"
+	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/paths"
@@ -97,7 +96,11 @@ func (h *Hub) RequestReview(project, prID, requirement string) error {
 	if err != nil {
 		return err
 	}
-	if reviewer := h.runningReviewer(project); reviewer != "" {
+	reviewer, err := h.runningReviewer(project)
+	if err != nil {
+		return err
+	}
+	if reviewer != "" {
 		if err := ps.AssignReview(id, reviewer); err != nil {
 			return err
 		}
@@ -132,15 +135,20 @@ func (h *Hub) assignedReviewInject(project, reviewer string, pr store.PR, prID, 
 	return h.injectWhenReady(project, reviewer, msgReviewAssigned(prID, requirement, pr.Branch, pr.Base, checkedOut))
 }
 
-// runningReviewer returns the name of a live reviewer agent in a project, or "".
-func (h *Hub) runningReviewer(project string) string {
-	roster, _ := h.store.For(project).Roster()
+// runningReviewer returns the name of a live reviewer agent in a project, or "". A
+// roster read failure is returned, not disguised as "no reviewer running" (which
+// would silently drop the review request).
+func (h *Hub) runningReviewer(project string) (string, error) {
+	roster, err := h.store.For(project).Roster()
+	if err != nil {
+		return "", fmt.Errorf("load roster for %s: %w", project, err)
+	}
 	for _, a := range roster {
-		if a.Role == "reviewer" && pod.Running(h.container(project, a.Name)) && h.sessionAlive(project, a.Name) {
-			return a.Name
+		if a.Role == "reviewer" && container.Running(h.container(project, a.Name)) && h.sessionAlive(project, a.Name) {
+			return a.Name, nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 // runLint runs the project's quality gates against a worktree by invoking `brokkr
@@ -224,7 +232,15 @@ func (h *Hub) cmdOpenspec(c registry.Caller, args []string, out io.Writer) (int,
 		return 1, err
 	}
 	branch := plannerBranch(c.Agent)
-	if !git.HasChanges(wt) && !git.Ahead(wt, base) {
+	changed, err := git.HasChanges(wt)
+	if err != nil {
+		return 1, err
+	}
+	ahead, err := git.Ahead(wt, base)
+	if err != nil {
+		return 1, err
+	}
+	if !changed && !ahead {
 		fmt.Fprintln(out, "Nothing to submit — edit /workspace/openspec first.")
 		return 1, nil
 	}
@@ -504,84 +520,6 @@ func (h *Hub) cmdReview(c registry.Caller, args []string, out io.Writer) (int, e
 		}
 	}
 	return 1, fmt.Errorf("no review assigned to you on %s", prID)
-}
-
-// Merge merges a project's approved PR into the base branch (host/human-only — the
-// single hard gate), closes the task, frees the worker, and notifies it.
-func (h *Hub) Merge(project, prID string) (store.PR, error) {
-	ps := h.store.For(project)
-	root := h.projectRoot(project)
-	pr, ok, err := ps.GetPR(prID)
-	if err != nil {
-		return store.PR{}, err
-	}
-	if !ok {
-		return store.PR{}, fmt.Errorf("no such PR %q", prID)
-	}
-	if pr.Status != "approved" {
-		return store.PR{}, fmt.Errorf("%s is %s — only an approved PR may be merged", prID, pr.Status)
-	}
-	// Bring the branch up to the current base first. A merely-stale branch rebases
-	// silently; a CONFLICT is routed into the worker's resolution loop — the hub
-	// leaves the conflict in the worker's workspace to edit (it can't run git) and
-	// the branch returns for review once clean, rather than a dead-end "resubmit".
-	if a, ok, _ := ps.GetAgent(pr.Agent); ok {
-		wt := filepath.Join(root, a.Workspace)
-		conflicts, done, err := git.RebaseStart(wt, pr.Branch, pr.Base)
-		if err != nil {
-			return store.PR{}, err
-		}
-		if !done {
-			pr.Status, pr.Feedback = "open", "" // no longer mergeable; back to review after the worker resolves
-			_ = ps.PutPR(pr)
-			_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "resolving"})
-			_ = ps.LogPR(pr.ID, "conflict", "rebase onto "+pr.Base+" conflicts: "+strings.Join(conflicts, ", "))
-			_ = h.injectWhenReady(project, pr.Agent, msgResolveNeeded(pr.Base, conflicts))
-			h.notify()
-			return store.PR{}, fmt.Errorf("%s conflicts with %s — sent to %s to resolve; it returns for review once clean", prID, pr.Base, pr.Agent)
-		}
-	}
-	if err := git.Merge(root, pr.Base, pr.Branch); err != nil {
-		if e := err.Error(); strings.Contains(e, "would be overwritten") || strings.Contains(e, "commit your changes or stash") {
-			files := fileList(git.BlockingLocalChanges(root, pr.Base, pr.Branch))
-			return store.PR{}, fmt.Errorf("merge blocked: commit or stash your local changes to %s in the working checkout, then merge again (the PR is fine and stays approved)", files)
-		}
-		return store.PR{}, err
-	}
-	pr.Status = "merged"
-	if err := ps.PutPR(pr); err != nil {
-		return store.PR{}, err
-	}
-	// Milestone PR for a held container: land the work but KEEP the branch/agent.
-	if holder, _ := ps.GetState(pr.Agent); holder.Container != "" && holder.Container == pr.Branch {
-		if a, ok, _ := ps.GetAgent(pr.Agent); ok {
-			_ = git.RebaseOnto(filepath.Join(root, a.Workspace), pr.Branch, pr.Base) // ff past the merge
-		}
-		_ = ps.Log(pr.Agent, "merged", prID+" (milestone)")
-		_ = ps.LogPR(prID, "merged", "milestone into "+pr.Base)
-		h.resumeContainer(project, pr.Agent)
-		_ = h.injectWhenReady(project, pr.Agent, msgMilestoneMerged(prID))
-		h.rebasePlanners(project, pr.Base)
-		h.notify()
-		return pr, nil
-	}
-	if strings.HasPrefix(pr.Task, "td-") { // a planner's openspec PR has no real td task
-		if err := td.Close(root, pr.Task, "merged via "+prID); err != nil {
-			fmt.Printf("warning: td close %s: %v\n", pr.Task, err)
-		}
-		_ = h.refreshTask(project, pr.Task)
-	}
-	rest := "idle"
-	if a, ok, _ := ps.GetAgent(pr.Agent); ok {
-		rest = restPhase(a.Role)
-	}
-	_ = ps.SetState(store.AgentState{Agent: pr.Agent, Phase: rest})
-	_ = ps.Log(pr.Agent, "merged", prID)
-	_ = ps.LogPR(prID, "merged", "into "+pr.Base)
-	_ = h.injectWhenReady(project, pr.Agent, msgMerged(prID))
-	h.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
-	h.notify()
-	return pr, nil
 }
 
 // rebasePlanners rebases every planner's branch in a project onto base after a

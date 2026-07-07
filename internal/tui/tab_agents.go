@@ -10,6 +10,7 @@ package tui
 
 import (
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"time"
@@ -17,17 +18,17 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/flo-at/sindri/internal/adapter/pod"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
+	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub"
 )
 
-// attachCmd builds the interactive `podman exec -it … tmux attach` for an agent.
-// container is the agent's project-resolved pod (from the board), so it's correct
-// for any repo's agent — the board is multi-repo. name is the tmux session.
-func attachCmd(container, name string) *exec.Cmd {
-	args := append([]string{"exec", "-it", container, "tmux"}, tmux.Attach(name, false)...)
-	return exec.Command(pod.Binary, args...)
+// attachCmd builds the interactive `<runtime> exec -it … tmux attach` for an agent
+// through the container port, so it works whatever backend is wired. cname is the
+// agent's project-resolved pod (from the board — the board is multi-repo); name is
+// the tmux session.
+func attachCmd(cname, name string) *exec.Cmd {
+	return container.AttachCmd(cname, append([]string{"tmux"}, tmux.Attach(name, false)...)...)
 }
 
 // agentContainer is the agent's podman container, preferring the board's
@@ -60,7 +61,7 @@ func (m *model) openNewAgentChoice() {
 					return errModalMsg{err}
 				}
 				if name != "" {
-					go func() { _ = cl.Launch(name, false) }()
+					go func() { _ = cl.Launch(name, false, false, io.Discard) }()
 				}
 				st, _ := cl.State()
 				return polledMsg(st)
@@ -94,7 +95,7 @@ func (m *model) agentStartStop() tea.Cmd {
 	switch a.Status {
 	case "down":
 		m.flash = "starting " + a.Name + "…" // status (hub) drives the rest
-		return m.action(func(id string) error { return m.cl.Launch(id, false) })
+		return m.action(func(id string) error { return m.cl.Launch(id, false, false, io.Discard) })
 	case "launching", "stopping":
 		m.flash = a.Name + " is " + a.Status + "…"
 		return nil
@@ -173,7 +174,7 @@ func (m model) agentItems() []metaItem {
 	if a.PR != "" {
 		prIt.kind, prIt.value = "pr", a.PR
 	}
-	pod := "pod:       " + m.agentContainer(a)
+	pod := "container: " + m.agentContainer(a)
 	if m.agentView == "pod" { // mark which view the main pane is showing
 		pod += dimStyle.Render("  ◂ shown")
 	}
@@ -216,7 +217,7 @@ func (m model) paneLines() []string {
 	}
 	if m.agentView == "pod" { // pod-info view (selected the container item)
 		if strings.TrimSpace(m.agentPod) == "" {
-			return []string{dimStyle.Render("(fetching pod info…)")}
+			return []string{dimStyle.Render("(fetching container info…)")}
 		}
 		return strings.Split(strings.TrimRight(m.agentPod, "\n"), "\n")
 	}
@@ -231,7 +232,7 @@ func (m model) paneLines() []string {
 		if hasBody { // pod is up and booting — show its startup output
 			return body
 		}
-		return []string{dimStyle.Render("launching… (building image / starting pod)")}
+		return []string{dimStyle.Render("launching… (building image / starting container)")}
 	default: // running
 		if !hasBody {
 			return []string{dimStyle.Render("(starting…)")}
@@ -313,7 +314,7 @@ func (m model) agentDetailFor(a hub.AgentView) []string {
 		"task:      " + dash(a.Task),
 		"pr:        " + dash(a.PR),
 		"workspace: " + dash(a.Workspace),
-		"pod:       " + m.agentContainer(a),
+		"container: " + m.agentContainer(a),
 	}
 	if a.Name == m.selID() { // dial-ins are fetched for the selected agent only
 		ls = append(ls, clientLines(m.agentClients)...)

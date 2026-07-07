@@ -43,9 +43,15 @@ func (h *Hub) cmdResolve(c registry.Caller, _ []string, out io.Writer) (int, err
 	// A rebase needs a clean worktree. If the worker has uncommitted work (and isn't
 	// mid-resolution, where the edits ARE the resolution), tell it to commit first —
 	// don't touch its changes.
-	if !inProgress && git.HasChanges(wt) {
-		fmt.Fprintln(out, "you have uncommitted changes — run `sindri submit` (or commit) first, then check with `sindri resolve`")
-		return 1, nil
+	if !inProgress {
+		changed, cerr := git.HasChanges(wt)
+		if cerr != nil {
+			return 1, cerr
+		}
+		if changed {
+			fmt.Fprintln(out, "you have uncommitted changes — run `sindri submit` (or commit) first, then check with `sindri resolve`")
+			return 1, nil
+		}
 	}
 	var conflicts []string
 	var done bool

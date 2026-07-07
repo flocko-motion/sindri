@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/flo-at/sindri/internal/adapter/pod"
+	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/hub"
 	"github.com/spf13/cobra"
@@ -41,18 +41,23 @@ func agentAttachCmd() *cobra.Command {
 			if !warnCrossRepo(a, root, projectRoot(st.Projects, a.Project)) {
 				return fmt.Errorf("not attached")
 			}
-			container := a.Container
-			if container == "" && root != "" { // older hub without the field — current-repo scope
-				container = hub.Container(root, name)
+			cname := a.Container
+			if cname == "" && root != "" { // older hub without the field — current-repo scope
+				cname = hub.Container(root, name)
 			}
-			if container == "" {
+			if cname == "" {
 				return fmt.Errorf("can't resolve %q's container — restart the hub to pick up this build", name)
 			}
-			if !pod.Running(container) {
-				return fmt.Errorf("agent %q is not running", name)
+			// Trust the board's status (the same source `info`/`list` use) so the three
+			// commands never contradict each other.
+			switch a.Status {
+			case "down":
+				return fmt.Errorf("agent %q is not running (status: down)", name)
+			case "launching", "stopping":
+				return fmt.Errorf("agent %q is %s — try again in a moment", name, a.Status)
 			}
 			reportAttach(name, ro, a.Clients)
-			return pod.ExecInteractive(container, append([]string{"tmux"}, tmux.Attach(name, ro)...)...)
+			return container.ExecInteractive(cname, append([]string{"tmux"}, tmux.Attach(name, ro)...)...)
 		},
 	}
 	c.Flags().BoolVar(&ro, "read-only", false, "observe without typing")

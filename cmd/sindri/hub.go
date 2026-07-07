@@ -1,19 +1,17 @@
 // package: main (sindri) / commands
 // type:    command (host CLI)
 // job:     the host command tree — hierarchical <category> <action>: agent
-//
-//	{list,new,launch,tell,attach,info}, task {list,new,info}, pr
-//	{list,info,merge}; plus first-order hub. Every hub capability has a
-//	CLI verb so functionality is verifiable from the shell, not only the
-//	TUI.
-//
+//          {list,new,launch,tell,attach,info}, task {list,new,info}, pr
+//          {list,info,merge}; plus first-order hub. Every hub capability has a
+//          CLI verb so functionality is verifiable from the shell, not only the
+//          TUI.
 // limits:  no logic — each verb is a thin call into a backend (in-process hub
-//
-//	when none is running, the socket client otherwise).
+//          when none is running, the socket client otherwise).
 package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -32,8 +30,11 @@ type backend interface {
 	DeleteAgent(name string) error
 	StopAgent(name string) error
 	AgentPane(name string, lines int) (string, error)
+	Diagnose(name string) (string, error)
+	Stats() (hub.StatsReport, error)
+	Instance(name string) (string, error)
 	Clients(name string) ([]hub.ClientView, error)
-	Launch(name string, shell bool) error
+	Launch(name string, shell, debug bool, out io.Writer) error
 	Tell(name, msg, source string) error
 	State() (hub.BoardState, error)
 	Log(name string) ([]store.Event, error)
@@ -45,6 +46,8 @@ type backend interface {
 	ApproveTask(id string) error
 	RejectTask(id, comment string) error
 	UnassignTask(id string) error
+	CloseTask(id string) error
+	Refresh() error
 	PRs() ([]store.PR, error)
 	PRInfo(id string) (hub.PRDetail, error)
 	RejectPR(id, feedback string) error
@@ -93,15 +96,16 @@ func withBackend(fn func(backend) error) error {
 func newHubCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "hub",
-		Short: "Manage the per-repo hub service (start, list, stop)",
+		Short: "Manage the global hub service (start, restart, status, stop)",
 		Long: "The hub is the single global coordinator that drives the agents across\n" +
 			"every repo.\n\n" +
 			"  sindri hub start        run the hub in the foreground\n" +
 			"  sindri hub start --bg   run it in the background (same as `sindri hub start &`)\n" +
+			"  sindri hub restart      stop it and start a fresh detached one (pick up a rebuild)\n" +
 			"  sindri hub status       show the running hub (pid, version, uptime)\n" +
 			"  sindri hub stop         stop the running hub",
 	}
-	c.AddCommand(newHubStartCmd(), newHubStatusCmd(), newHubStopCmd())
+	c.AddCommand(newHubStartCmd(), newHubRestartCmd(), newHubStatusCmd(), newHubStopCmd())
 	return c
 }
 
@@ -157,180 +161,37 @@ func newHubStartCmd() *cobra.Command {
 	return c
 }
 
+// newHubRestartCmd stops the running hub and starts a fresh detached one — the way
+// to pick up a rebuilt binary without a manual stop-then-start. If no hub is
+// running it's just a start, so `restart` is always safe to reach for (mirrors
+// `sindri agent restart`). Agents keep running across the restart; only the
+// coordinator process is replaced.
+func newHubRestartCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "restart",
+		Short: "Restart the hub in the background (starts one if none is running)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !hub.IsRunning() {
+				fmt.Fprintln(os.Stderr, "no hub running — starting a fresh one.")
+				return startHub()
+			}
+			pid, ok := hub.HubPID()
+			if !ok {
+				return fmt.Errorf("couldn't find the running hub's pid to restart it — stop it manually, then `sindri hub start --bg`")
+			}
+			return restartHub(pid)
+		},
+	}
+}
+
 // --- agent ---
 
 func newAgentCmd() *cobra.Command {
 	c := &cobra.Command{Use: "agent", Short: "Manage agents (workers, reviewers, planners, coauthors)",
 		PersistentPreRun: agentPreflight} // warn up front if podman is down — nothing works without it
-	c.AddCommand(agentListCmd(), agentNewCmd(), agentDeleteCmd(), agentPaneCmd(), agentStartCmd(), agentStopCmd(), agentRestartCmd(), agentTellCmd(), agentAttachCmd(), agentInfoCmd())
+	c.AddCommand(agentListCmd(), agentStatsCmd(), agentNewCmd(), agentDeleteCmd(), agentPaneCmd(), agentStartCmd(), agentStopCmd(), agentRestartCmd(), agentTellCmd(), agentAttachCmd(), agentInfoCmd())
 	return c
-}
-
-// --- task ---
-
-func newTaskCmd() *cobra.Command {
-	c := &cobra.Command{Use: "task", Short: "Inspect and create tasks (td issues)"}
-	c.AddCommand(taskListCmd(), taskInfoCmd(), taskNewCmd(), taskEditCmd(), taskPriorityCmd(), taskApproveCmd(), taskRejectCmd(), taskUnassignCmd())
-	return c
-}
-
-func taskUnassignCmd() *cobra.Command {
-	return &cobra.Command{
-		Use: "unassign <id>", Short: "Release a task back to the backlog (refused if a live agent holds it)", Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			return withBackend(func(b backend) error {
-				if err := b.UnassignTask(args[0]); err != nil {
-					return err
-				}
-				fmt.Fprintf(os.Stderr, "unassigned %s\n", args[0])
-				return nil
-			})
-		},
-	}
-}
-
-func taskApproveCmd() *cobra.Command {
-	return &cobra.Command{
-		Use: "approve <id>", Short: "Approve a planner-proposed task (makes it claimable)", Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			return withBackend(func(b backend) error {
-				if err := b.ApproveTask(args[0]); err != nil {
-					return err
-				}
-				fmt.Fprintf(os.Stderr, "approved %s\n", args[0])
-				return nil
-			})
-		},
-	}
-}
-
-func taskRejectCmd() *cobra.Command {
-	return &cobra.Command{
-		Use: "reject <id> <comment...>", Short: "Reject a planner-proposed task with a comment", Args: cobra.MinimumNArgs(2),
-		RunE: func(_ *cobra.Command, args []string) error {
-			return withBackend(func(b backend) error {
-				if err := b.RejectTask(args[0], strings.Join(args[1:], " ")); err != nil {
-					return err
-				}
-				fmt.Fprintf(os.Stderr, "rejected %s\n", args[0])
-				return nil
-			})
-		},
-	}
-}
-
-func taskPriorityCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "priority <id> <critical|high|mid|low|minor>",
-		Short: "Set a task's priority (td tasks → td; openspec items → our db)",
-		Args:  cobra.ExactArgs(2),
-		RunE: func(_ *cobra.Command, args []string) error {
-			return withBackend(func(b backend) error {
-				if err := b.SetPriority(args[0], hub.PriorityCode(args[1])); err != nil {
-					return err
-				}
-				fmt.Fprintf(os.Stderr, "set %s priority %s\n", args[0], args[1])
-				return nil
-			})
-		},
-	}
-}
-
-func taskListCmd() *cobra.Command {
-	return &cobra.Command{
-		Use: "list", Short: "List tasks", Args: cobra.NoArgs,
-		RunE: func(*cobra.Command, []string) error {
-			return withBackend(func(b backend) error {
-				tasks, err := b.Tasks()
-				if err != nil {
-					return err
-				}
-				for _, t := range tasks {
-					fmt.Printf("%-12s %-8s %-12s %s\n", t.ID, hub.PriorityLabel(t.Priority), t.Status, t.Title)
-				}
-				if len(tasks) == 0 {
-					fmt.Fprintln(os.Stderr, "no tasks")
-				}
-				return nil
-			})
-		},
-	}
-}
-
-func taskInfoCmd() *cobra.Command {
-	return &cobra.Command{
-		Use: "info <id>", Short: "Show a task", Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			return withBackend(func(b backend) error {
-				t, err := b.TaskInfo(args[0])
-				if err != nil {
-					return err
-				}
-				fmt.Printf("id:       %s\ntitle:    %s\nstatus:   %s\ntype:     %s\npriority: %s\nlabels:   %s\n",
-					t.ID, t.Title, t.Status, dash(t.Type), hub.PriorityLabel(t.Priority), dash(t.Labels))
-				return nil
-			})
-		},
-	}
-}
-
-func taskNewCmd() *cobra.Command {
-	var typ, priority, parent, labels, desc string
-	c := &cobra.Command{
-		Use: "new <title...>", Short: "Create a task (a td issue)", Args: cobra.MinimumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			return withBackend(func(b backend) error {
-				id, err := b.CreateTask(hub.TaskSpec{
-					Title: strings.Join(args, " "), Type: typ, Priority: priority,
-					Parent: parent, Description: desc, Labels: splitCSV(labels),
-				})
-				if err != nil {
-					return err
-				}
-				fmt.Fprintf(os.Stderr, "created %s\n", id)
-				return nil
-			})
-		},
-	}
-	taskSpecFlags(c, &typ, &priority, &parent, &labels, &desc)
-	return c
-}
-
-func taskEditCmd() *cobra.Command {
-	var typ, priority, parent, labels, desc, title string
-	c := &cobra.Command{
-		Use: "edit <id>", Short: "Edit a task (only the flags you pass are changed)", Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			return withBackend(func(b backend) error {
-				if err := b.EditTask(args[0], hub.TaskSpec{
-					Title: title, Type: typ, Priority: priority,
-					Parent: parent, Description: desc, Labels: splitCSV(labels),
-				}); err != nil {
-					return err
-				}
-				fmt.Fprintf(os.Stderr, "edited %s\n", args[0])
-				return nil
-			})
-		},
-	}
-	c.Flags().StringVar(&title, "title", "", "new title")
-	taskSpecFlags(c, &typ, &priority, &parent, &labels, &desc)
-	return c
-}
-
-func taskSpecFlags(c *cobra.Command, typ, priority, parent, labels, desc *string) {
-	c.Flags().StringVarP(typ, "type", "t", "", "issue type: bug, feature, task, epic, chore (default: task)")
-	c.Flags().StringVarP(priority, "priority", "p", "", "priority: P0, P1, P2, P3, P4 (P0 highest; high/medium/low also accepted)")
-	c.Flags().StringVar(parent, "parent", "", "parent task id (creates a child)")
-	c.Flags().StringVarP(desc, "desc", "d", "", "description body")
-	c.Flags().StringVar(labels, "labels", "", "comma-separated labels")
-}
-
-func splitCSV(s string) []string {
-	if strings.TrimSpace(s) == "" {
-		return nil
-	}
-	return strings.Split(s, ",")
 }
 
 // --- pr ---
@@ -449,7 +310,7 @@ func prListCmd() *cobra.Command {
 					return err
 				}
 				for _, p := range prs {
-					fmt.Printf("%-14s %-9s %-10s %s\n", p.ID, p.Status, p.Agent, p.Branch)
+					fmt.Printf("%-14s %-12s %4s  %-10s %s\n", p.ID, p.Status, shortAge(p.CreatedAt), p.Agent, p.Branch)
 				}
 				if len(prs) == 0 {
 					fmt.Fprintln(os.Stderr, "no PRs")

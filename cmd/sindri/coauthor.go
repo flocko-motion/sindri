@@ -13,7 +13,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/flo-at/sindri/internal/adapter/pod"
+	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/hub"
@@ -57,7 +57,7 @@ func newCoauthorCmd() *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(os.Stderr, "attaching to %s — detach with your tmux prefix then d\n", name)
-			return pod.ExecInteractive(hub.Container(root, name), append([]string{"tmux"}, tmux.Attach(name, false)...)...)
+			return container.ExecInteractive(hub.Container(root, name), append([]string{"tmux"}, tmux.Attach(name, false)...)...)
 		},
 	}
 }
@@ -97,7 +97,7 @@ func ensureCoauthorAlive(cl *client.HTTP, proj, name string) error {
 	}
 	if statusOf(st, proj, name) == "down" {
 		fmt.Fprintf(os.Stderr, "launching agent '%s' (first run builds the agent image — may take a few minutes)…\n", name)
-		if err := cl.Launch(name, false); err != nil {
+		if err := cl.Launch(name, false, false, os.Stderr); err != nil {
 			return err
 		}
 	}

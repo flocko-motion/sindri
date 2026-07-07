@@ -10,13 +10,14 @@ package hub
 import (
 	"context"
 	"fmt"
+	"log"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/flo-at/sindri/internal/adapter/pod"
+	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
@@ -25,6 +26,10 @@ import (
 // can't answer within this window is reported "down" rather than stalling the
 // whole read — the board must stay responsive even when a pod is wedged.
 const probeTimeout = 3 * time.Second
+
+// statsTimeout bounds a single `stats` sample, which is slower than a liveness
+// probe (the runtime samples over a short window before returning).
+const statsTimeout = 8 * time.Second
 
 // AgentView is an agent as the UIs see it: identity + live workflow + runtime.
 // Status collapses runtime + workflow into one word: down | idle | working |
@@ -100,7 +105,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
 			defer cancel()
-			if !pod.RunningContext(ctx, h.container(a.Project, a.Name)) {
+			if !container.RunningContext(ctx, h.container(a.Project, a.Name)) {
 				return
 			}
 			if cs, ok := h.clientsCtx(ctx, a.Project, a.Name); ok {
@@ -135,7 +140,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
 			defer cancel()
-			if pods, err := pod.ListByLabelContext(ctx, "sindri.project", proj.Path); err == nil {
+			if pods, err := container.ListByLabelContext(ctx, "sindri.project", proj.Path); err == nil {
 				orphanLists[i] = pods
 			}
 		}(i, proj)
@@ -153,16 +158,94 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	return BoardState{Agents: agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans}, nil
 }
 
+// AgentStatsView is one agent's resource snapshot for `agent stats`. Err is set
+// (not swallowed) when the sample couldn't be read, so the row shows why instead
+// of a misleading zero.
+type AgentStatsView struct {
+	Name          string `json:"name"`
+	Repo          string `json:"repo"`
+	MemUsageBytes int64  `json:"memUsageBytes"`
+	MemLimitBytes int64  `json:"memLimitBytes"`
+	Err           string `json:"err,omitempty"`
+}
+
+// StatsReport is the `agent stats` payload: which runtime is wired, plus a memory
+// snapshot per running agent. Engine is included so the numbers are read in the
+// right context (podman shares one VM; apple container is one micro-VM per agent).
+type StatsReport struct {
+	Engine string           `json:"engine"`
+	Agents []AgentStatsView `json:"agents"`
+}
+
+// Stats returns the engine name and a resource snapshot for every running agent.
+func (h *Hub) Stats() (StatsReport, error) {
+	views, err := h.AllStats()
+	return StatsReport{Engine: container.Name(), Agents: views}, err
+}
+
+// AllStats returns a resource snapshot for every RUNNING agent, gathered
+// concurrently — each `stats` sample is slow (the runtime samples over a window),
+// so serial would be N×that. Down agents are omitted (no VM to sample). A per-agent
+// stats failure is reported in that row's Err, never silently dropped.
+func (h *Hub) AllStats() ([]AgentStatsView, error) {
+	agentsRow, err := h.store.AllAgents()
+	if err != nil {
+		return nil, err
+	}
+	views := make([]AgentStatsView, len(agentsRow))
+	var wg sync.WaitGroup
+	for i, a := range agentsRow {
+		wg.Add(1)
+		go func(i int, a store.Agent) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), statsTimeout)
+			defer cancel()
+			c := h.container(a.Project, a.Name)
+			if !container.RunningContext(ctx, c) {
+				return // down — no VM to sample; filtered out below (Name stays "")
+			}
+			v := AgentStatsView{Name: a.Name, Repo: h.repoName(a.Project)}
+			if s, serr := container.Stats(ctx, c); serr != nil {
+				v.Err = serr.Error()
+			} else {
+				v.MemUsageBytes, v.MemLimitBytes = s.MemoryUsageBytes, s.MemoryLimitBytes
+			}
+			views[i] = v
+		}(i, a)
+	}
+	wg.Wait()
+
+	out := make([]AgentStatsView, 0, len(views))
+	for _, v := range views {
+		if v.Name != "" { // running agents only
+			out = append(out, v)
+		}
+	}
+	return out, nil
+}
+
 // knownProjects returns the registry's projects (best-effort; empty on error).
 func (h *Hub) knownProjects() []store.Project {
 	ps, _ := h.store.Projects()
 	return ps
 }
 
+// projectPath resolves a project tag to its path, logging loudly on a real store
+// error (distinct from an unknown project) instead of swallowing it into "". The
+// string-returning callers (projectRoot/repoName/container) can't thread an error,
+// so this is where the DB failure is surfaced.
+func (h *Hub) projectPath(project string) (string, bool) {
+	path, ok, err := h.store.ProjectPath(project)
+	if err != nil {
+		log.Printf("hub: resolve project path for %q failed: %v", project, err)
+	}
+	return path, ok
+}
+
 // repoName is a project's short human label (its directory name), resolved from the
 // registry; falls back to the tag when the path is unknown.
 func (h *Hub) repoName(project string) string {
-	if path, ok := h.store.ProjectPath(project); ok {
+	if path, ok := h.projectPath(project); ok {
 		return filepath.Base(path)
 	}
 	return project
@@ -170,8 +253,60 @@ func (h *Hub) repoName(project string) string {
 
 // container is the podman container name for an agent, resolved via the registry.
 func (h *Hub) container(project, name string) string {
-	root, _ := h.store.ProjectPath(project)
+	root, _ := h.projectPath(project)
 	return Container(root, name)
+}
+
+// launchDiagnostic reports WHY a just-launched agent isn't observed up, so a
+// timeout is actionable instead of a shrug. It re-runs the two liveness probes
+// through the runtime, capturing their errors: the running check, then the tmux
+// session check inside the container. Whichever fails (and its error) is almost
+// always the real cause — a runtime that can't answer, or a session that never
+// started.
+func (h *Hub) launchDiagnostic(project, name string) string {
+	c := h.container(project, name)
+	if !container.Running(c) {
+		return fmt.Sprintf("the runtime does not report container %s as running [%s]", c,
+			container.Diagnose(context.Background(), c))
+	}
+	if out, err := container.Exec(c, append([]string{"tmux"}, tmux.HasSession(name)...)...); err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Sprintf("container is running but its tmux session check failed: %s", msg)
+	}
+	return "container and session both answer now — the liveness checks had been failing transiently"
+}
+
+// AgentDiagnostic reports, as one human string, what BOTH liveness probes observe
+// for an agent — the running check and the tmux session check — each with its real
+// result rather than the single "down" the board collapses them into. The session
+// exec is time-bounded, so a WEDGED exec (which otherwise silently reads as "down")
+// is reported as a timeout, not a hang. Behind `agent info --debug`, so a "down"
+// that contradicts a live container is explainable on demand.
+func (h *Hub) AgentDiagnostic(project, name string) string {
+	c := h.container(project, name)
+	var b strings.Builder
+	fmt.Fprintf(&b, "container:      %s\n", c)
+	fmt.Fprintf(&b, "running check:  %s\n", container.Diagnose(context.Background(), c))
+
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	out, err := container.ExecContext(ctx, c, append([]string{"tmux"}, tmux.HasSession(name)...)...)
+	switch {
+	case ctx.Err() == context.DeadlineExceeded:
+		fmt.Fprintf(&b, "session check:  TIMED OUT after %s — `tmux has-session` in the container did not return (exec is wedged); this is why liveness reads 'down'\n", probeTimeout)
+	case err != nil:
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		fmt.Fprintf(&b, "session check:  FAILED: %s\n", msg)
+	default:
+		fmt.Fprintf(&b, "session check:  ok — tmux session %q answers\n", name)
+	}
+	return b.String()
 }
 
 // agentAlive reports whether an agent is running (pod up and tmux session live).
@@ -182,14 +317,18 @@ func (h *Hub) agentAlive(project, name string) bool {
 // agentAliveCtx is agentAlive with each podman probe bounded by ctx, so a wedged
 // pod times out to "down" instead of blocking. Used by the board read.
 func (h *Hub) agentAliveCtx(ctx context.Context, project, name string) bool {
-	return pod.RunningContext(ctx, h.container(project, name)) && h.sessionAliveCtx(ctx, project, name)
+	return container.RunningContext(ctx, h.container(project, name)) && h.sessionAliveCtx(ctx, project, name)
 }
 
 // Clients lists the humans attached to an agent's tmux session (dial-ins). Errors
 // when the agent isn't running. The headless read behind both `agent info` and the
 // TUI detail view, so they show the same thing.
 func (h *Hub) Clients(project, name string) ([]ClientView, error) {
-	cs, ok := h.clientsCtx(context.Background(), project, name)
+	// Bounded: a wedged `container exec` must not hang the caller forever (it once
+	// hung `agent info` indefinitely). On timeout the probe degrades to "not running".
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	cs, ok := h.clientsCtx(ctx, project, name)
 	if !ok {
 		return nil, fmt.Errorf("agent %q is not running", name)
 	}
@@ -199,7 +338,7 @@ func (h *Hub) Clients(project, name string) ([]ClientView, error) {
 // clientsCtx parses `tmux list-clients` for the agent's session, bounded by ctx.
 // ok=false when the session is absent (so it also serves as a liveness probe).
 func (h *Hub) clientsCtx(ctx context.Context, project, name string) (cs []ClientView, ok bool) {
-	out, err := pod.ExecContext(ctx, h.container(project, name), append([]string{"tmux"}, tmux.ListClients(name)...)...)
+	out, err := container.ExecContext(ctx, h.container(project, name), append([]string{"tmux"}, tmux.ListClients(name)...)...)
 	if err != nil {
 		return nil, false
 	}
@@ -249,7 +388,7 @@ func (h *Hub) sessionAlive(project, name string) bool {
 
 // sessionAliveCtx is sessionAlive bounded by ctx.
 func (h *Hub) sessionAliveCtx(ctx context.Context, project, name string) bool {
-	_, err := pod.ExecContext(ctx, h.container(project, name), append([]string{"tmux"}, tmux.HasSession(name)...)...)
+	_, err := container.ExecContext(ctx, h.container(project, name), append([]string{"tmux"}, tmux.HasSession(name)...)...)
 	return err == nil
 }
 
@@ -258,13 +397,13 @@ func (h *Hub) sessionAliveCtx(ctx context.Context, project, name string) bool {
 // output. Empty when truly down.
 func (h *Hub) AgentPane(project, name string, lines int) (string, error) {
 	if h.sessionAlive(project, name) {
-		out, err := pod.Exec(h.container(project, name), append([]string{"tmux"}, tmux.CapturePane(name, lines)...)...)
+		out, err := container.Exec(h.container(project, name), append([]string{"tmux"}, tmux.CapturePane(name, lines)...)...)
 		if err != nil {
 			return "", err
 		}
 		return string(out), nil
 	}
-	if logs := pod.Logs(h.container(project, name), lines); logs != "" {
+	if logs := container.Logs(h.container(project, name), lines); logs != "" {
 		return logs, nil
 	}
 	return h.launchOutput(project, name), nil
@@ -274,8 +413,8 @@ func (h *Hub) AgentPane(project, name string, lines int) (string, error) {
 // pod view.
 func (h *Hub) PodInfo(project, name string) (string, error) {
 	c := h.container(project, name)
-	header := "container: " + c + "\n\n"
-	if info := pod.Info(c); info != "" {
+	header := fmt.Sprintf("engine:    %s\ncontainer: %s\n\n", container.Name(), c)
+	if info := container.Info(c); info != "" {
 		return header + info, nil
 	}
 	return header + "(no container — agent is down)", nil

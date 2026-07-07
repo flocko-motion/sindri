@@ -55,20 +55,22 @@ func (h *Hub) AgentToken(project, name string) (string, error) {
 
 // agentForToken resolves a bearer token to its (project, name), ok=false if none
 // matches (constant-time compare per candidate). This is how the TCP channel turns
-// a token into an identity, the way a unix socket's path does on Linux.
-func (h *Hub) agentForToken(token string) (project, name string, ok bool) {
+// a token into an identity, the way a unix socket's path does on Linux. A store
+// failure is returned as err (distinct from ok=false), so the caller can answer 500
+// rather than disguising a DB outage as "bad token".
+func (h *Hub) agentForToken(token string) (project, name string, ok bool, err error) {
 	if token == "" {
-		return "", "", false
+		return "", "", false, nil
 	}
 	agents, err := h.store.AllAgents()
 	if err != nil {
-		return "", "", false
+		return "", "", false, fmt.Errorf("load agents for token auth: %w", err)
 	}
 	for _, a := range agents {
-		want, err := h.AgentToken(a.Project, a.Name)
-		if err == nil && hmac.Equal([]byte(want), []byte(token)) {
-			return a.Project, a.Name, true
+		want, terr := h.AgentToken(a.Project, a.Name)
+		if terr == nil && hmac.Equal([]byte(want), []byte(token)) {
+			return a.Project, a.Name, true, nil
 		}
 	}
-	return "", "", false
+	return "", "", false, nil
 }

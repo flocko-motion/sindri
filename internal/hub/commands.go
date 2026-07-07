@@ -18,7 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/flo-at/sindri/internal/adapter/pod"
+	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/registry"
 )
 
@@ -140,7 +140,7 @@ func (h *Hub) AgentExec(project, name string, args []string, out io.Writer) (int
 }
 
 func (h *Hub) cmdStatus(c registry.Caller, _ []string, out io.Writer) (int, error) {
-	running := pod.Running(h.container(c.Project, c.Agent))
+	running := container.Running(h.container(c.Project, c.Agent))
 	fmt.Fprintf(out, "agent:   %s\nrole:    %s\nrunning: %v\n", c.Agent, c.Role, running)
 	return 0, nil
 }

@@ -37,6 +37,50 @@ func TestTaskCacheAndPriorityOrder(t *testing.T) {
 	}
 }
 
+func TestOpenLeavesRequiresPriority(t *testing.T) {
+	p := openTmpProject(t)
+	if err := p.ReplaceTasks([]Task{
+		{ID: "td-p2", Status: "open", Priority: "P2"},
+		{ID: "td-none", Status: "open", Priority: ""}, // no priority → not auto-assignable
+		{ID: "td-p1", Status: "open", Priority: "P1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// No prio, no assignment: the auto-assigner's leaf set excludes the
+	// unprioritized task, and returns the rest highest-priority first.
+	leaves, err := p.OpenLeaves()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := []string{}
+	for _, l := range leaves {
+		got = append(got, l.ID)
+	}
+	want := []string{"td-p1", "td-p2"}
+	if len(got) != len(want) {
+		t.Fatalf("open leaves: got %v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("open leaves order/contents: got %v want %v", got, want)
+		}
+	}
+
+	// It's still in the backlog (OpenTasks) — visible and editable — just not
+	// auto-assigned until a human gives it a priority.
+	open, _ := p.OpenTasks()
+	var seenNone bool
+	for _, o := range open {
+		if o.ID == "td-none" {
+			seenNone = true
+		}
+	}
+	if !seenNone {
+		t.Fatalf("unprioritized task should stay visible in the backlog: %+v", open)
+	}
+}
+
 func TestReplaceTasksMirrors(t *testing.T) {
 	p := openTmpProject(t)
 	p.ReplaceTasks([]Task{{ID: "a", Status: "open"}, {ID: "b", Status: "open"}})

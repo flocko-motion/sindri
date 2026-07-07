@@ -12,6 +12,7 @@
 package hub
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -27,7 +28,6 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
-	"github.com/flo-at/sindri/internal/adapter/pod"
 	"github.com/flo-at/sindri/internal/adapter/td"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/container"
@@ -51,6 +51,7 @@ type Hub struct {
 	// authenticated by a per-agent token. Zero/nil on Linux (unix sockets suffice).
 	agentTCPLn   net.Listener
 	agentTCPPort int
+	agentDialHost string // how a pod addresses the host for the TCP channel (runtime-specific)
 
 	lcMu      sync.Mutex          // guards lifecycle
 	lifecycle map[agentKey]string // transient launch/stop intent: "launching"|"stopping"
@@ -118,7 +119,7 @@ func Container(root, name string) string {
 // registry ("" if unknown). The hub's filesystem work (git, worktrees) needs the
 // path; state needs only the tag.
 func (h *Hub) projectRoot(project string) string {
-	root, _ := h.store.ProjectPath(project)
+	root, _ := h.projectPath(project)
 	return root
 }
 
@@ -363,7 +364,7 @@ func (h *Hub) DeleteAgent(project, name string) error {
 		}
 		_ = h.refreshTask(project, st.Task)
 	}
-	_ = pod.Rm(h.container(project, name))
+	_ = container.Rm(h.container(project, name))
 	h.closeAgent(project, name)
 	// A coauthor's workspace is the repo root itself (the shared checkout), not a
 	// disposable worktree — never run `git worktree remove` on it.
@@ -387,12 +388,12 @@ func (h *Hub) StopAgent(project, name string) error {
 	} else if !ok {
 		return fmt.Errorf("no such agent %q", name)
 	}
-	if !pod.Running(h.container(project, name)) {
+	if !container.Running(h.container(project, name)) {
 		return fmt.Errorf("agent %q is not running", name)
 	}
 	h.setLifecycle(project, name, "stopping") // status → stopping (pod up); → down once gone
 	h.notify()
-	if err := pod.Rm(h.container(project, name)); err != nil {
+	if err := container.Rm(h.container(project, name)); err != nil {
 		h.setLifecycle(project, name, "")
 		h.notify()
 		return err
@@ -406,7 +407,7 @@ func (h *Hub) StopAgent(project, name string) error {
 // workspace worktree is created on demand; the pod runs interactive Claude in a
 // tmux session named after the agent (or a bare shell when shell is true — used
 // for deterministic demos and debugging).
-func (h *Hub) Launch(project, name string, shell bool) (err error) {
+func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer) (err error) {
 	ps := h.store.For(project)
 	root := h.projectRoot(project)
 	a, ok, err := ps.GetAgent(name)
@@ -416,14 +417,16 @@ func (h *Hub) Launch(project, name string, shell bool) (err error) {
 	if !ok {
 		return fmt.Errorf("no such agent %q — run 'sindri new %s' first", name, name)
 	}
-	// Tee the image build (+ our progress notes) into the agent's launch buffer
-	// so the TUI live-screen region shows it while the pod comes up.
+	// Tee build/start progress three ways: the launch buffer (TUI live-screen), the
+	// hub log (stderr), and progress — the caller's stream, so `agent start` shows
+	// the image build live instead of a frozen prompt (long ops must be visible).
 	buf := h.newLaunchBuf(project, name)
+	w := io.MultiWriter(os.Stderr, buf, progress)
 	// Pre-flight: podman must be installed and reachable. Fail fast with an
 	// actionable message (before touching status or staging an image build) rather
 	// than surfacing a cryptic exit code mid-build. On macOS/Windows this also
 	// auto-starts a stopped podman VM, teeing that progress into the launch buffer.
-	if err := pod.Check(io.MultiWriter(os.Stderr, buf)); err != nil {
+	if err := container.Check(w); err != nil {
 		return err
 	}
 	// Status → launching immediately (cleared by State once the pod is up); on
@@ -437,12 +440,17 @@ func (h *Hub) Launch(project, name string, shell bool) (err error) {
 			h.notify()
 		}
 	}()
-	if err := container.Ensure(root, io.MultiWriter(os.Stderr, buf)); err != nil {
+	imageRef, err := container.EnsureImage(root, w)
+	if err != nil {
 		return err
 	}
-	fmt.Fprintf(buf, "Image ready. Starting pod %s…\n", h.container(project, name))
+	fmt.Fprintf(w, "Image ready. Starting container %s…\n", h.container(project, name))
 	wt := filepath.Join(root, a.Workspace)
-	if !git.HasCommits(root) {
+	hasCommits, err := git.HasCommits(root)
+	if err != nil {
+		return err
+	}
+	if !hasCommits {
 		return fmt.Errorf("repo has no commits yet")
 	}
 	if a.Role == "coauthor" {
@@ -481,7 +489,7 @@ func (h *Hub) Launch(project, name string, shell bool) (err error) {
 		return err
 	}
 	cName := h.container(project, name)
-	_ = pod.Rm(cName) // clear any stale container with this name
+	_ = container.Rm(cName) // clear any stale container with this name
 
 	env := map[string]string{"SINDRI_AGENT": name, "COLORTERM": "truecolor"}
 	// macOS: the pod can't connect to the bind-mounted unix socket across the VM
@@ -495,10 +503,10 @@ func (h *Hub) Launch(project, name string, shell bool) (err error) {
 		if terr != nil {
 			return terr
 		}
-		env["SINDRI_HUB_ADDR"] = fmt.Sprintf("host.containers.internal:%d", h.agentTCPPort)
+		env["SINDRI_HUB_ADDR"] = fmt.Sprintf("%s:%d", h.agentDialHost, h.agentTCPPort)
 		env["SINDRI_TOKEN"] = token
 	}
-	mounts := []pod.Mount{
+	mounts := []container.Mount{
 		{Host: wt, Container: "/workspace", Mode: "rw"},
 		// The agent's own socket — its sole channel to the hub, its identity.
 		// Mount the socket DIRECTORY (not the file) so the agent survives a hub
@@ -514,8 +522,8 @@ func (h *Hub) Launch(project, name string, shell bool) (err error) {
 		// ro and openspec/ overlaid rw on top.
 		osDir := filepath.Join(wt, "openspec")
 		_ = os.MkdirAll(osDir, 0o755) // ensure the overlay target exists
-		mounts[0] = pod.Mount{Host: wt, Container: "/workspace", Mode: "ro"}
-		mounts = append(mounts, pod.Mount{Host: osDir, Container: "/workspace/openspec", Mode: "rw"})
+		mounts[0] = container.Mount{Host: wt, Container: "/workspace", Mode: "ro"}
+		mounts = append(mounts, container.Mount{Host: osDir, Container: "/workspace/openspec", Mode: "rw"})
 	}
 	// Note: no coauthor .sindri shield anymore — hub state lives centrally under the
 	// state dir, never inside the repo, so the shared checkout exposes nothing.
@@ -524,7 +532,7 @@ func (h *Hub) Launch(project, name string, shell bool) (err error) {
 	} else {
 		// Set up the agent's Claude home (credentials, config, system prompt) and
 		// mount it so Claude runs authenticated.
-		home, cfg, hasCreds, err := h.prepareClaudeHome(project, name, a.Role, buf)
+		home, cfg, hasCreds, err := h.prepareClaudeHome(project, name, a.Role, w)
 		if err != nil {
 			return err
 		}
@@ -532,37 +540,64 @@ func (h *Hub) Launch(project, name string, shell bool) (err error) {
 			return fmt.Errorf("no Claude credentials on host (~/.claude/.credentials.json, or the macOS Keychain) — log in with `claude`, or launch with --shell")
 		}
 		mounts = append(mounts,
-			pod.Mount{Host: home, Container: "/home/sindri/.claude", Mode: "rw"},
-			pod.Mount{Host: cfg, Container: "/home/sindri/.claude.json", Mode: "rw"})
+			container.Mount{Host: home, Container: "/home/sindri/.claude", Mode: "rw"},
+			container.Mount{Host: cfg, Container: "/home/sindri/.claude.json", Mode: "rw"})
 		// Mount the user's Claude skills into the agent's home so it works with the
 		// same skills the user has — read-only and live (edits on the host show up
 		// without a relaunch). Any symlinks inside are the user's to manage.
 		if host, herr := os.UserHomeDir(); herr == nil {
 			skills := filepath.Join(host, ".claude", "skills")
 			if fi, serr := os.Stat(skills); serr == nil && fi.IsDir() {
-				mounts = append(mounts, pod.Mount{Host: skills, Container: "/home/sindri/.claude/skills", Mode: "ro"})
+				mounts = append(mounts, container.Mount{Host: skills, Container: "/home/sindri/.claude/skills", Mode: "ro"})
 			}
 		}
 	}
-	opts := pod.RunOpts{
+	opts := container.RunOpts{
 		Name:       cName,
-		Image:      container.ImageName,
+		Image:      imageRef,
 		Labels:     map[string]string{"sindri.project": root, "sindri.agent": name},
 		Env:        env,
 		Mounts:     mounts,
 		Workdir:    "/workspace",
 		Entrypoint: []string{"sindri-agent", name},
 	}
-	if err := pod.Run(opts); err != nil {
+	if err := container.Run(opts); err != nil {
 		return err
 	}
 	if err := ps.Log(name, "launch", "started container="+cName); err != nil {
 		return err
 	}
-	go h.rehydrate(project, name) // resume once the session is up (D13)
+	// Stay until we OBSERVE the agent up (container running AND tmux session answers)
+	// — no optimistic "launched" while it's still coming up. On timeout report the
+	// failure (deferred cleanup clears the launching intent → board shows "down").
+	fmt.Fprintf(w, "Waiting for %s to come up…\n", name)
+	deadline := time.Now().Add(launchReadyTimeout)
+	shown := 0
+	for !h.agentAlive(project, name) {
+		if full := container.Logs(cName, 1000); len(full) > shown { // follow the container's output during the wait
+			fmt.Fprint(w, full[shown:])
+			shown = len(full)
+		}
+		if debug { // --debug: surface what the hub's liveness probe actually observes
+			fmt.Fprintf(w, "  [debug] %s\n", container.Diagnose(context.Background(), cName))
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%s launched but didn't come up within %s: %s (check `sindri agent pane %s`)",
+				name, launchReadyTimeout, h.launchDiagnostic(project, name), name)
+		}
+		time.Sleep(time.Second)
+	}
+	h.setLifecycle(project, name, "") // observed up — clear the launching intent now
+	fmt.Fprintf(w, "Agent %s is up.\n", name)
+	go h.rehydrate(project, name) // nudge it to resume once the session is live (D13)
 	h.notify()
 	return nil
 }
+
+// launchReadyTimeout bounds how long Launch waits to observe a freshly-launched
+// agent's session come up before reporting the launch failed. Generous: a cold
+// micro-VM/pod boot plus the entrypoint starting tmux can take a bit.
+const launchReadyTimeout = 45 * time.Second
 
 // Tell delivers a message into an agent's session, stamped with its source
 // (provenance, D12). The stamped line is recorded in the activity log.
@@ -587,12 +622,12 @@ func (h *Hub) Tell(project, name, msg, source string) error {
 // inject types text into an agent's tmux session via podman exec.
 func (h *Hub) inject(project, name, text string) error {
 	c := h.container(project, name)
-	if !pod.Running(c) {
+	if !container.Running(c) {
 		return fmt.Errorf("agent %q is not running — launch it first", name)
 	}
 	for _, argv := range tmux.SendText(session(name), text) {
 		full := append([]string{"tmux"}, argv...)
-		if _, err := pod.Exec(c, full...); err != nil {
+		if _, err := container.Exec(c, full...); err != nil {
 			return err
 		}
 	}
@@ -606,8 +641,8 @@ func (h *Hub) inject(project, name, text string) error {
 func (h *Hub) injectWhenReady(project, name, text string) error {
 	c := h.container(project, name)
 	for i := 0; i < 25; i++ {
-		if pod.Running(c) {
-			if _, err := pod.Exec(c, "tmux", "has-session", "-t", session(name)); err == nil {
+		if container.Running(c) {
+			if _, err := container.Exec(c, "tmux", "has-session", "-t", session(name)); err == nil {
 				return h.inject(project, name, text)
 			}
 		}

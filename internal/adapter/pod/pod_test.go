@@ -5,13 +5,15 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/flo-at/sindri/internal/container"
 )
 
 func TestCheckReportsMissingPodman(t *testing.T) {
 	orig := Binary
 	Binary = "podman-does-not-exist-xyz"
 	t.Cleanup(func() { Binary = orig })
-	err := Check(io.Discard)
+	err := Engine{}.Check(io.Discard)
 	if err == nil {
 		t.Fatal("expected an error when podman is not on PATH")
 	}
@@ -21,12 +23,12 @@ func TestCheckReportsMissingPodman(t *testing.T) {
 }
 
 func TestRunArgsDeterministicAndComplete(t *testing.T) {
-	got := RunArgs(RunOpts{
+	got := RunArgs(container.RunOpts{
 		Name:   "sindri-brokkr",
 		Image:  "sindri-agent:test",
 		Labels: map[string]string{"sindri.project": "/repo", "sindri.agent": "brokkr"},
 		Env:    map[string]string{"B": "2", "A": "1"},
-		Mounts: []Mount{
+		Mounts: []container.Mount{
 			{Host: "/h/ws", Container: "/workspace", Mode: "rw"},
 			{Host: "/h/sock", Container: "/run/hub.sock", Mode: "rw"},
 		},
@@ -49,13 +51,47 @@ func TestRunArgsDeterministicAndComplete(t *testing.T) {
 }
 
 func TestRunArgsDefaultMountMode(t *testing.T) {
-	got := RunArgs(RunOpts{
+	got := RunArgs(container.RunOpts{
 		Name:   "c",
 		Image:  "img",
-		Mounts: []Mount{{Host: "/h", Container: "/c"}},
+		Mounts: []container.Mount{{Host: "/h", Container: "/c"}},
 	})
 	joined := strings.Join(got, " ")
 	if !strings.Contains(joined, "/h:/c:rw,z") {
 		t.Fatalf("default mount mode not rw: %q", joined)
+	}
+}
+
+func TestBuildFailureDetail(t *testing.T) {
+	// A connection failure (the macOS "machine not started" case) surfaces the
+	// message AND the podman-machine hint.
+	got := buildFailureDetail("Error: Cannot connect to Podman socket")
+	if !strings.Contains(got, "Cannot connect") || !strings.Contains(got, "podman machine start") {
+		t.Errorf("connection failure should surface the error + hint, got:\n%s", got)
+	}
+	// Empty output still yields the hint (better than nothing).
+	if got := buildFailureDetail(""); !strings.Contains(got, "podman machine") {
+		t.Errorf("empty output should fall back to the hint, got: %q", got)
+	}
+	// An ordinary build error (no connection signal) is surfaced without the hint.
+	got = buildFailureDetail("Step 3/9: RUN apt-get install foo\nE: Unable to locate package foo")
+	if !strings.Contains(got, "Unable to locate package foo") {
+		t.Errorf("build error should be surfaced, got:\n%s", got)
+	}
+	if strings.Contains(got, "podman machine") {
+		t.Errorf("a normal build error must not get the machine hint, got:\n%s", got)
+	}
+	// Long output is tailed to the last lines (where the error lands).
+	var b strings.Builder
+	for i := 0; i < 50; i++ {
+		b.WriteString("layer line\n")
+	}
+	b.WriteString("Error: final failure line")
+	got = buildFailureDetail(b.String())
+	if !strings.Contains(got, "final failure line") {
+		t.Errorf("tail must include the final error line, got:\n%s", got)
+	}
+	if strings.Count(got, "\n") > 12 {
+		t.Errorf("tail should be bounded (~12 lines), got %d lines", strings.Count(got, "\n"))
 	}
 }

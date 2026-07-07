@@ -133,6 +133,31 @@ func (h *Hub) UnassignTask(project, id string) error {
 	return nil
 }
 
+// CloseTask marks a task done from the task list (host-only). The task list is a
+// union of several backends, so it dispatches by the task's backend: td tasks
+// close via the td adapter; backends with no close of their own (e.g. openspec
+// changes, whose only lifecycle op is archive) report it unsupported, which the
+// caller surfaces in the standard error modal. Refused if a live agent is working
+// on the task, mirroring UnassignTask.
+func (h *Hub) CloseTask(project, id string) error {
+	ps := h.store.For(project)
+	roster, _ := ps.Roster()
+	for _, a := range roster {
+		if st, _ := ps.GetState(a.Name); st.Task == id && h.agentAlive(project, a.Name) {
+			return fmt.Errorf("%s is alive and working on %s — stop or delete it first", a.Name, id)
+		}
+	}
+	if !strings.HasPrefix(id, "td-") {
+		return fmt.Errorf("%s can't be closed here — closing a task is only supported for td tasks", id)
+	}
+	if err := td.Close(h.projectRoot(project), id, "closed from task list"); err != nil {
+		return err
+	}
+	err := h.SyncTasks(project)
+	h.notify()
+	return err
+}
+
 // ApproveTask clears the approval gate on a planner-proposed task (user-only),
 // making it claimable, and tells any running planner in the project.
 func (h *Hub) ApproveTask(project, id string) error {
@@ -268,17 +293,17 @@ const workPollInterval = 3 * time.Second
 
 // prRejected reports whether an agent has a rejected PR in its project — the signal
 // that it should be revising (working), not waiting under review.
-func (h *Hub) prRejected(project, agent string) bool {
+func (h *Hub) prRejected(project, agent string) (bool, error) {
 	prs, err := h.store.For(project).PRs()
 	if err != nil {
-		return false
+		return false, fmt.Errorf("load PRs for %s: %w", agent, err)
 	}
 	for _, p := range prs {
 		if p.Agent == agent && p.Status == "rejected" {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // AgentDirective is the single next action the hub wants this agent to take — the
@@ -322,7 +347,11 @@ func (h *Hub) AgentDirective(ctx context.Context, project, name string) (string,
 		if t, ok, _ := ps.GetTask(st.Container); ok && t.Status != "closed" && t.Status != "approved" && t.Status != "merged" {
 			switch st.Phase {
 			case "submitted":
-				if h.prRejected(project, name) {
+				rejected, err := h.prRejected(project, name)
+				if err != nil {
+					return "", err
+				}
+				if rejected {
 					_ = ps.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "working"})
 					return dirWorking(st.Task), nil
 				}
@@ -343,7 +372,11 @@ func (h *Hub) AgentDirective(ctx context.Context, project, name string) (string,
 	case "working":
 		return dirWorking(st.Task), nil
 	case "submitted":
-		if h.prRejected(project, name) {
+		rejected, err := h.prRejected(project, name)
+		if err != nil {
+			return "", err
+		}
+		if rejected {
 			_ = ps.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Phase: "working"})
 			return dirWorking(st.Task), nil
 		}
@@ -388,7 +421,11 @@ func (h *Hub) SyncTasks(project string) error {
 	for _, t := range tasks {
 		rows = append(rows, toStoreTask(t))
 	}
-	for _, c := range spec.Changes(root) {
+	changes, err := spec.Changes(root)
+	if err != nil {
+		return err
+	}
+	for _, c := range changes {
 		status := "open"
 		if c.Done() {
 			status = "closed"
