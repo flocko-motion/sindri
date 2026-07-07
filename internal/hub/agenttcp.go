@@ -1,10 +1,9 @@
 // package: hub / agenttcp
 // type:    logic (macOS agent channel over TCP)
-// job:     on macOS, where a bind-mounted unix socket can't be connected to across
-//          the podman VM boundary, serve the agent surface over a loopback TCP
-//          listener instead. Identity is a per-agent bearer token (token.go), not
-//          the socket path. Bound to 127.0.0.1; pods reach it via
-//          host.containers.internal.
+// job:     on macOS, where a bind-mounted unix socket can't cross the VM boundary,
+//          serve the agent surface over a TCP listener instead, authenticated by a
+//          per-agent bearer token (token.go). Where it binds and how a pod reaches
+//          it come from the wired runtime's AgentChannel (podman vs apple container).
 // limits:  Linux keeps per-agent unix sockets (agentserver.go); this runs only on
 //          darwin. Same handler surface, token-resolved caller.
 package hub
@@ -15,6 +14,8 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+
+	"github.com/flo-at/sindri/internal/container"
 )
 
 // tcpPortMetaKey names the persisted TCP port in the store's meta table.
@@ -25,23 +26,32 @@ const tcpPortMetaKey = "agent_tcp_port"
 // hub restart keeps the same address and already-running pods stay connected (D11);
 // only if that port is taken does it fall back to an ephemeral one.
 func (h *Hub) serveAgentTCP() error {
+	// The wired runtime decides where to bind and how a pod addresses the host —
+	// podman uses loopback + host.containers.internal, apple container the bridge
+	// gateway IP. A failure to determine this is fatal (the channel is unusable).
+	ch, err := container.AgentChannel()
+	if err != nil {
+		return fmt.Errorf("determine agent network channel: %w", err)
+	}
+	h.agentDialHost = ch.DialHost
 	port := 0
 	if v, ok, _ := h.store.GetMeta(tcpPortMetaKey); ok {
 		port, _ = strconv.Atoi(v)
 	}
-	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	ln, err := net.Listen("tcp", net.JoinHostPort(ch.BindAddr, strconv.Itoa(port)))
 	if err != nil && port != 0 { // saved port unavailable — take any free one
-		ln, err = net.Listen("tcp", "127.0.0.1:0")
+		ln, err = net.Listen("tcp", net.JoinHostPort(ch.BindAddr, "0"))
 	}
 	if err != nil {
-		return fmt.Errorf("serve agent tcp: %w", err)
+		return fmt.Errorf("serve agent tcp on %s: %w", ch.BindAddr, err)
 	}
 	h.agentTCPLn = ln
 	h.agentTCPPort = ln.Addr().(*net.TCPAddr).Port
 	if err := h.store.SetMeta(tcpPortMetaKey, strconv.Itoa(h.agentTCPPort)); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "hub: agent TCP channel on 127.0.0.1:%d (macOS; token-authenticated)\n", h.agentTCPPort)
+	fmt.Fprintf(os.Stderr, "hub: agent TCP channel on %s:%d, pods dial %s (macOS; token-authenticated)\n",
+		ch.BindAddr, h.agentTCPPort, h.agentDialHost)
 	go http.Serve(ln, logRequests("agent-tcp", h.agentTCPHandler()))
 	return nil
 }

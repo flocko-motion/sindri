@@ -31,6 +31,31 @@ type Engine struct{}
 // Name identifies this backend for humans.
 func (Engine) Name() string { return "apple container" }
 
+// AgentChannel: apple-container micro-VMs have no host.containers.internal; a pod
+// reaches the host directly at the network gateway (e.g. 192.168.64.1). The hub
+// therefore binds and advertises that gateway IP. The gateway is read from the
+// runtime rather than assumed to be .1, and a failure to determine it is returned
+// (never defaulted silently) — the agent channel is unusable without it.
+func (Engine) AgentChannel() (container.NetChannel, error) {
+	out, err := exec.Command(Binary, "network", "inspect", "default").Output()
+	if err != nil {
+		return container.NetChannel{}, fmt.Errorf("container network inspect default: %w", err)
+	}
+	var nets []struct {
+		Status struct {
+			IPv4Gateway string `json:"ipv4Gateway"`
+		} `json:"status"`
+	}
+	if e := json.Unmarshal(out, &nets); e != nil {
+		return container.NetChannel{}, fmt.Errorf("parse container network inspect default: %w", e)
+	}
+	if len(nets) == 0 || nets[0].Status.IPv4Gateway == "" {
+		return container.NetChannel{}, fmt.Errorf("container network 'default' reports no ipv4Gateway")
+	}
+	gw := nets[0].Status.IPv4Gateway
+	return container.NetChannel{BindAddr: gw, DialHost: gw}, nil
+}
+
 // inspectEntry is the slice of `container inspect`/`ls --format json` we read.
 // NOTE: configuration.image is an OBJECT ({reference, descriptor}), not a string —
 // modelling it as a string made json.Unmarshal fail on the whole entry, and because

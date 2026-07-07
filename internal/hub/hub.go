@@ -51,6 +51,7 @@ type Hub struct {
 	// authenticated by a per-agent token. Zero/nil on Linux (unix sockets suffice).
 	agentTCPLn   net.Listener
 	agentTCPPort int
+	agentDialHost string // how a pod addresses the host for the TCP channel (runtime-specific)
 
 	lcMu      sync.Mutex          // guards lifecycle
 	lifecycle map[agentKey]string // transient launch/stop intent: "launching"|"stopping"
@@ -497,7 +498,7 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 		if terr != nil {
 			return terr
 		}
-		env["SINDRI_HUB_ADDR"] = fmt.Sprintf("host.containers.internal:%d", h.agentTCPPort)
+		env["SINDRI_HUB_ADDR"] = fmt.Sprintf("%s:%d", h.agentDialHost, h.agentTCPPort)
 		env["SINDRI_TOKEN"] = token
 	}
 	mounts := []container.Mount{

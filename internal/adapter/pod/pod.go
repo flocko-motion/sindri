@@ -32,6 +32,13 @@ type Engine struct{}
 // Name identifies this backend for humans.
 func (Engine) Name() string { return "podman" }
 
+// AgentChannel: podman resolves the magic name host.containers.internal to a
+// forwarded route to host services, so pods dial that name and the hub binds
+// loopback.
+func (Engine) AgentChannel() (container.NetChannel, error) {
+	return container.NetChannel{BindAddr: "127.0.0.1", DialHost: "host.containers.internal"}, nil
+}
+
 // UserNS maps the host user to the container's sindri uid/gid (1000) so
 // host-owned mounts appear owned by the in-pod user regardless of the host uid.
 const UserNS = "keep-id:uid=1000,gid=1000"

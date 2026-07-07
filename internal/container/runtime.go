@@ -30,6 +30,19 @@ type Usage struct {
 	MemoryLimitBytes int64
 }
 
+// NetChannel describes how the macOS agent TCP channel is reached — on macOS a
+// bind-mounted unix socket can't cross the VM boundary, so the hub serves agents
+// over TCP: it binds the listener at BindAddr, and a pod addresses the host at
+// DialHost (handed to the pod as SINDRI_HUB_ADDR). These differ per backend: podman
+// resolves the magic name host.containers.internal to a forwarded loopback (bind
+// 127.0.0.1), while apple-container pods reach the host directly at the network
+// gateway, so the hub must both bind and advertise that gateway IP. Obtained via
+// the runtime's AgentChannel method.
+type NetChannel struct {
+	BindAddr string
+	DialHost string
+}
+
 // RunOpts configures a detached agent pod.
 type RunOpts struct {
 	Name       string
@@ -63,6 +76,9 @@ type Runtime interface {
 	// Stats returns a point-in-time resource snapshot (memory usage vs limit) for a
 	// running pod, so the human can see how close an agent's VM is to its ceiling.
 	Stats(ctx context.Context, name string) (Usage, error)
+	// AgentChannel reports how the macOS agent TCP channel is bound and addressed
+	// (see AgentChannel). Backend-specific because pod↔host networking differs.
+	AgentChannel() (NetChannel, error)
 	Logs(name string, tail int) string
 	Info(name string) string
 	Rm(name string) error
@@ -98,6 +114,13 @@ func (noop) Running(string) bool                                        { return
 func (noop) RunningContext(context.Context, string) bool                { return false }
 func (noop) Diagnose(context.Context, string) string                    { return "no container runtime configured" }
 func (noop) Stats(context.Context, string) (Usage, error)               { return Usage{}, errNoRuntime }
+
+// AgentChannel: the historical loopback default (podman-style). Not an error — a
+// legitimate default config for an unwired backend; production always wires a real
+// one via Use, whose AgentChannel reflects that backend's actual networking.
+func (noop) AgentChannel() (NetChannel, error) {
+	return NetChannel{BindAddr: "127.0.0.1", DialHost: "host.containers.internal"}, nil
+}
 func (noop) Logs(string, int) string                                    { return "" }
 func (noop) Info(string) string                                         { return "" }
 func (noop) Rm(string) error                                            { return errNoRuntime }
@@ -142,6 +165,9 @@ func Diagnose(ctx context.Context, name string) string { return active.Diagnose(
 
 // Stats returns a point-in-time resource snapshot (memory usage vs limit) for a pod.
 func Stats(ctx context.Context, name string) (Usage, error) { return active.Stats(ctx, name) }
+
+// AgentChannel reports how the macOS agent TCP channel is bound and addressed.
+func AgentChannel() (NetChannel, error) { return active.AgentChannel() }
 
 // Logs returns the last `tail` lines of a pod's output.
 func Logs(name string, tail int) string { return active.Logs(name, tail) }
