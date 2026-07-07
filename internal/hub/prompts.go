@@ -158,7 +158,7 @@ const dirPlanner = "You're planning new features together with the user. Get ori
 const dirCoauthor = "You're a coauthor working directly with the user in the shared checkout at /workspace — there's no task queue here. Do what the user asks in this terminal; edit files, run the build/tests, and use git yourself. `sindri lint` runs the quality gate, `sindri log \"<note>\"` records a note. When the user goes quiet, wait for their next instruction."
 
 func dirReview(prID, task string) string {
-	return fmt.Sprintf("Review %s (task %s): `sindri show %s` and `sindri lint %s`, then `sindri approve %s` — or `sindri reject %s \"<reason>\"`.%s",
+	return fmt.Sprintf("Review %s (task %s): the PR branch is checked out fresh in /workspace — review it (or `sindri show %s`), run `sindri lint %s`, then `sindri approve %s` or `sindri reject %s \"<reason>\"`.%s",
 		prID, task, prID, prID, prID, prID, reviewArchitecture)
 }
 
@@ -227,27 +227,23 @@ func msgRejectedByReviewer(prID, feedback string) string {
 	return fmt.Sprintf("[reviewer] %s rejected: %s — please address the feedback and submit again.", prID, feedback)
 }
 
-func msgReviewReady(prID, worker string) string {
-	return fmt.Sprintf("[hub] %s from %s is ready for review. Run `sindri show %s`, then `approve %s` or `reject %s <feedback>`.",
-		prID, worker, prID, prID, prID)
-}
-
-// msgReviewAssigned is the precise, single-line review instruction. When the PR
-// branch is checked out in the reviewer's /workspace it points there (and at the
-// literal base); otherwise it falls back to the diff over the socket.
-func msgReviewAssigned(prID, requirement, branch, base string, checkedOut bool) string {
+// msgReview is the single review instruction — the hub has already checked the PR
+// branch out fresh into the reviewer's /workspace (the reviewer only reads), so it
+// points there. If that checkout failed it says so loudly and falls back to the diff
+// over the socket, so the reviewer never mistakes a stale tree for the PR.
+func msgReview(prID, requirement, branch, base string, checkedOut bool) string {
 	seeChanges := fmt.Sprintf("`sindri show %s`", prID)
 	loc := ""
 	if checkedOut {
 		seeChanges = fmt.Sprintf("`git diff %s` in /workspace (or `sindri show %s`)", base, prID)
-		loc = fmt.Sprintf("PR branch %s is checked out in /workspace, based on %s. ", branch, base)
+		loc = fmt.Sprintf("PR branch %s is checked out FRESH in /workspace, based on %s. ", branch, base)
 	} else {
 		// Loud: the checkout failed, so /workspace is NOT this PR. Say so plainly
 		// rather than letting the reviewer assume /workspace holds the change.
 		loc = fmt.Sprintf("⚠ %s could NOT be checked out into /workspace — review from the diff only; do NOT trust /workspace. ", branch)
 	}
-	return fmt.Sprintf("[hub] Review %s — %s %s(1) see what changed: %s. (2) check the gate: `sindri lint %s`. (3) record your verdict: `sindri review %s <pass|changes|fail> \"<findings>\"`.%s",
-		prID, requirement, loc, seeChanges, prID, prID, reviewArchitecture)
+	return fmt.Sprintf("[hub] Review %s — %s %s(1) see what changed: %s. (2) check the gate: `sindri lint %s`. (3) decide: `sindri approve %s` or `sindri reject %s \"<findings>\"`.%s",
+		prID, requirement, loc, seeChanges, prID, prID, prID, reviewArchitecture)
 }
 
 // --- instructive replies to worker verbs ---

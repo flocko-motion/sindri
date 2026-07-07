@@ -77,7 +77,7 @@ func (h *Hub) cmdResolve(c registry.Caller, _ []string, out io.Writer) (int, err
 			pr.Status, pr.Feedback = "open", ""
 			_ = ps.PutPR(pr)
 			_ = ps.LogPR(pr.ID, "renewed", "rebased clean onto "+base)
-			h.notifyReviewers(c.Project, pr.ID, c.Agent)
+			_ = h.RequestReview(c.Project, pr.ID, "") // one review path; the hub preps the terrain
 		}
 		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "submitted"})
 		fmt.Fprintln(out, replyResolvedClean(base))

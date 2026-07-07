@@ -178,15 +178,15 @@ func TestEnsureArchitectureDoc(t *testing.T) {
 	}
 }
 
-// TestReviewInstructionsCarryArchitecture: both review-instruction paths (pull =
-// dirReview, push = msgReviewAssigned) always tell the reviewer to read the repo's
-// ARCHITECTURE.md.
+// TestReviewInstructionsCarryArchitecture: both review-instruction paths (the no-arg
+// `sindri` directive = dirReview, and the injected = msgReview) always tell the
+// reviewer to read the repo's ARCHITECTURE.md.
 func TestReviewInstructionsCarryArchitecture(t *testing.T) {
 	if !strings.Contains(dirReview("pr-1", "td-1"), "ARCHITECTURE.md") {
 		t.Errorf("dirReview must tell the reviewer to read ARCHITECTURE.md")
 	}
-	if !strings.Contains(msgReviewAssigned("pr-1", "req", "br", "base", true), "ARCHITECTURE.md") {
-		t.Errorf("msgReviewAssigned must tell the reviewer to read ARCHITECTURE.md")
+	if !strings.Contains(msgReview("pr-1", "req", "br", "base", true), "ARCHITECTURE.md") {
+		t.Errorf("msgReview must tell the reviewer to read ARCHITECTURE.md")
 	}
 }
 

@@ -55,7 +55,6 @@ func (h *Hub) registry() *registry.Registry {
 		registry.Command{Name: "state", Help: "set your resting state: state planning | state idle", Roles: []string{"planner"}, Run: h.cmdState},
 		registry.Command{Name: "approve", Help: "approve a pull request: approve [pr-id]", Roles: []string{"reviewer"}, Run: h.cmdApprove},
 		registry.Command{Name: "reject", Help: "reject a pull request: reject <pr-id> <feedback...>", Roles: []string{"reviewer"}, Run: h.cmdReject},
-		registry.Command{Name: "review", Help: "record a review verdict: review <pr-id> <pass|changes|fail> <findings...>", Roles: []string{"reviewer"}, Run: h.cmdReview},
 	)
 }
 
