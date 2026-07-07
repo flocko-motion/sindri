@@ -20,12 +20,13 @@ func InPane() bool {
 	return os.Getenv("HERDR_ENV") == "1" && os.Getenv("HERDR_PANE_ID") != ""
 }
 
-// Report labels the current herdr pane as a sindri agent for the sidebar: the kind
-// is "sindri" (the identity — not "claude", which is just today's config) and the
-// display name is the agent's own name (e.g. "austri", which the user relates to),
-// with the live state (working|blocked|idle|done|unknown). Two calls: report-agent
-// carries the kind + state, report-metadata the display name. Best-effort — a no-op
-// outside herdr, errors ignored so it never disturbs the attach.
+// Report labels the current herdr pane as a sindri agent for the sidebar. herdr
+// renders an entry as "title · agent · state", so we put the agent's own NAME (e.g.
+// "austri", which the user relates to) in the title and "sindri" as the agent kind
+// (the identity — not "claude", which is just today's config), with the live state
+// (working|blocked|idle|done|unknown). It reads "austri · sindri · working". Two
+// calls: report-agent carries kind + state, report-metadata the title. Best-effort —
+// a no-op outside herdr, errors ignored so it never disturbs the attach.
 func Report(name, state string) {
 	pane := os.Getenv("HERDR_PANE_ID")
 	if pane == "" {
@@ -34,11 +35,11 @@ func Report(name, state string) {
 	_ = exec.Command("herdr", "pane", "report-agent", pane,
 		"--source", "sindri", "--agent", "sindri", "--state", state).Run()
 	_ = exec.Command("herdr", "pane", "report-metadata", pane,
-		"--source", "sindri", "--agent", "sindri", "--display-agent", name).Run()
+		"--source", "sindri", "--agent", "sindri", "--title", name, "--display-agent", "sindri").Run()
 }
 
-// Release drops sindri's sidebar authority over the pane on detach — clearing both
-// the agent report and the display name — so herdr falls back to its own detection
+// Release drops sindri's sidebar authority over the pane on detach — clearing the
+// agent report and the title/display name — so herdr falls back to its own detection
 // for what is now a plain shell. Best-effort.
 func Release() {
 	pane := os.Getenv("HERDR_PANE_ID")
@@ -47,7 +48,7 @@ func Release() {
 	}
 	_ = exec.Command("herdr", "pane", "release-agent", pane, "--source", "sindri").Run()
 	_ = exec.Command("herdr", "pane", "report-metadata", pane,
-		"--source", "sindri", "--clear-display-agent").Run()
+		"--source", "sindri", "--clear-title", "--clear-display-agent").Run()
 }
 
 // State projects sindri's runtime substate (busy|blocked|idle|"") onto herdr's agent
