@@ -55,9 +55,9 @@ func TestCacheRoundTrip(t *testing.T) {
 }
 
 func TestUpdaterScript(t *testing.T) {
-	// Linux: installs the .deb via dpkg.
-	linux := updaterScript("linux", "amd64")
-	for _, want := range []string{"#!/usr/bin/env bash", repo, "dpkg -i", "releases/latest"} {
+	// Linux, no tag: installs the .deb via dpkg from the latest release.
+	linux := updaterScript("linux", "amd64", "")
+	for _, want := range []string{"#!/usr/bin/env bash", repo, "dpkg -i", `rel="latest"`} {
 		if !strings.Contains(linux, want) {
 			t.Errorf("linux updater script missing %q", want)
 		}
@@ -66,8 +66,8 @@ func TestUpdaterScript(t *testing.T) {
 		t.Error("linux updater must not use the tarball path")
 	}
 
-	// macOS: installs the darwin tarball for the baked arch, not a .deb.
-	mac := updaterScript("darwin", "arm64")
+	// macOS, no tag: installs the darwin tarball for the baked arch, not a .deb.
+	mac := updaterScript("darwin", "arm64", "")
 	for _, want := range []string{"#!/usr/bin/env bash", repo, "_darwin_", "arch=\"arm64\"", "tar -C", "com.apple.quarantine"} {
 		if !strings.Contains(mac, want) {
 			t.Errorf("darwin updater script missing %q", want)
@@ -75,5 +75,21 @@ func TestUpdaterScript(t *testing.T) {
 	}
 	if strings.Contains(mac, "dpkg") {
 		t.Error("darwin updater must not use dpkg")
+	}
+
+	// A pinned tag targets that exact release (tags/<tag>), on both platforms.
+	for _, s := range []string{updaterScript("linux", "amd64", "v0.12.0"), updaterScript("darwin", "arm64", "v0.12.0")} {
+		if !strings.Contains(s, `rel="tags/v0.12.0"`) {
+			t.Errorf("pinned updater script should target tags/v0.12.0:\n%s", s)
+		}
+	}
+}
+
+func TestTogglePrefix(t *testing.T) {
+	if got := togglePrefix("0.12.0"); got != "v0.12.0" {
+		t.Errorf("togglePrefix(0.12.0) = %q, want v0.12.0", got)
+	}
+	if got := togglePrefix("v0.12.0"); got != "0.12.0" {
+		t.Errorf("togglePrefix(v0.12.0) = %q, want 0.12.0", got)
 	}
 }
