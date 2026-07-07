@@ -20,27 +20,34 @@ func InPane() bool {
 	return os.Getenv("HERDR_ENV") == "1" && os.Getenv("HERDR_PANE_ID") != ""
 }
 
-// Report labels the current herdr pane with agent `name` in herdr state `state`
-// (working|blocked|idle|done|unknown), sourced as "sindri", so herdr's sidebar shows
-// the agent by its own name (e.g. "austri") rather than the generic "claude".
-// Best-effort: a no-op outside herdr, errors ignored (it must not affect the attach).
+// Report labels the current herdr pane as a sindri agent for the sidebar: the kind
+// is "sindri" (the identity — not "claude", which is just today's config) and the
+// display name is the agent's own name (e.g. "austri", which the user relates to),
+// with the live state (working|blocked|idle|done|unknown). Two calls: report-agent
+// carries the kind + state, report-metadata the display name. Best-effort — a no-op
+// outside herdr, errors ignored so it never disturbs the attach.
 func Report(name, state string) {
 	pane := os.Getenv("HERDR_PANE_ID")
 	if pane == "" {
 		return
 	}
 	_ = exec.Command("herdr", "pane", "report-agent", pane,
-		"--source", "sindri", "--agent", name, "--state", state).Run()
+		"--source", "sindri", "--agent", "sindri", "--state", state).Run()
+	_ = exec.Command("herdr", "pane", "report-metadata", pane,
+		"--source", "sindri", "--agent", "sindri", "--display-agent", name).Run()
 }
 
-// Release drops sindri's authority over the pane's sidebar entry on detach, so herdr
-// falls back to its own detection for what is now a plain shell. Best-effort.
+// Release drops sindri's sidebar authority over the pane on detach — clearing both
+// the agent report and the display name — so herdr falls back to its own detection
+// for what is now a plain shell. Best-effort.
 func Release() {
 	pane := os.Getenv("HERDR_PANE_ID")
 	if pane == "" {
 		return
 	}
 	_ = exec.Command("herdr", "pane", "release-agent", pane, "--source", "sindri").Run()
+	_ = exec.Command("herdr", "pane", "report-metadata", pane,
+		"--source", "sindri", "--clear-display-agent").Run()
 }
 
 // State projects sindri's runtime substate (busy|blocked|idle|"") onto herdr's agent
