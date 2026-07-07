@@ -487,7 +487,7 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 0 && m.taskGated() {
 			return m.approveTaskCmd(m.selID())
 		}
-	case "p": // set the selected task's priority
+	case "P": // set the selected task's priority (shift = a modifying action)
 		if m.tab == 0 && m.selID() != "" {
 			m.openPriorityChoice(m.selID())
 			return nil
@@ -541,7 +541,7 @@ func (m *model) onKey(k string) tea.Cmd {
 	case "r":
 		m.reclamp()
 		return m.refreshCmd()
-	case "P": // switch the selected repo (scopes the Tasks tab; Agents/PRs stay global)
+	case "p": // switch the active repo/project (lowercase = harmless navigation)
 		m.openSwitcher()
 		return nil
 	case "E": // edit the current repo's .sindri/config.yaml in a form
@@ -653,7 +653,7 @@ func (m model) View() string {
 		return m.form.view(m.w, m.h)
 	}
 	if m.choice.active {
-		return choiceModal(m.choice.title, m.choice.options, m.choice.cursor, m.w, m.h)
+		return choiceModal(m.choice, m.w, m.h)
 	}
 	if m.modal {
 		title := m.modalTitle()
@@ -681,7 +681,7 @@ func (m model) View() string {
 	if m.mode != inputNone {
 		foot = dimStyle.Render(padTrunc("enter submit · esc cancel", m.w)) + "\n" + m.input.View()
 	} else {
-		global := "⇥/⇧⇥ tab · C-h/l pane · § detail · j/k move · P repo · E config · r refresh · q quit"
+		global := "⇥/⇧⇥ tab · C-h/l pane · § detail · j/k move · p repo · E config · r refresh · q quit"
 		if m.flash != "" {
 			global = m.flash
 		}

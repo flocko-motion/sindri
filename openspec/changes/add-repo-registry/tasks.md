@@ -23,7 +23,7 @@
 ## 4. TUI — persistent indicator + scalable switcher
 
 - [x] 4.1 Show the active repo's name persistently in the top bar, in that repo's deterministic color (reuse the project color scheme).
-- [~] 4.2 Ordering done (live-agents-first → recency → alphabetical) + it's already a modal, not a tab strip; scrollable/typeahead-filter still TODO.
+- [x] 4.2 Switcher is a scrollable, typeahead-filterable picker (not a tab strip), ordered live-agents-first → recency → alphabetical.
 - [x] 4.3 Selecting a repo updates the top-bar indicator and rescopes the Tasks tab.
 
 ## 5. TUI — global/repo scope toggle

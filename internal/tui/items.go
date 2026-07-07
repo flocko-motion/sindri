@@ -167,7 +167,7 @@ func (m model) contextFooter() string {
 	}
 	switch m.tab {
 	case 0:
-		return fmt.Sprintf("N new · e edit · p priority · U unassign · C close · A/R approve/reject · f filter: %s · h/l fold", filterNames[m.filter])
+		return fmt.Sprintf("N new · e edit · P priority · U unassign · C close · A/R approve/reject · f filter: %s · h/l fold", filterNames[m.filter])
 	case 1:
 		return "N new · S start/stop · t tell · a attach · D delete · s scope: " + scopeName(m.scopeRepo[1])
 	default:

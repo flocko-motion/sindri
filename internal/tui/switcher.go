@@ -41,7 +41,7 @@ func (m *model) openSwitcher() {
 		vals = append(vals, p.Path)
 	}
 	m.choice = choiceModalState{
-		active: true, title: "Switch repo", options: opts, values: vals,
+		active: true, title: "Switch repo", options: opts, values: vals, filterable: true,
 		apply: func(path string) tea.Cmd { return func() tea.Msg { return switchRepoMsg(path) } },
 	}
 }
