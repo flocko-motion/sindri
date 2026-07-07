@@ -4,9 +4,11 @@
 # branch (catching any conflict locally, up front), force-push it, open + merge a
 # PR into the default branch (so the tag points at merged code), tag the merged
 # tip, and push the tag — which triggers the release workflow (build + attach the
-# .deb). It then returns you to the branch you started on; it never leaves you on,
-# or commits directly to, the default branch. The rebase rewrites history, so the
-# branch push is a lease-guarded force.
+# .deb). Once the PR has merged it rebases your branch onto the updated default and
+# pushes it, so the release branch ends the cycle current with main (ready for the
+# next round) rather than stranded behind. It then returns you to the branch you
+# started on; it never leaves you on, or commits directly to, the default branch.
+# The rebases rewrite history, so the branch pushes are lease-guarded forces.
 #
 # Usage: make release <major|minor|patch>   (aliases: breaking|feature|fix;
 #        needs gh when run from a feature branch)
@@ -102,6 +104,21 @@ if [ "$start" != "$default" ]; then
 		exit 1
 	fi
 	git fetch origin "$default" >/dev/null 2>&1
+	# The PR merged, so everything on '$start' now lives on '$default' — but the local
+	# branch still points at its pre-merge tip, stranded behind. Rebase it onto the
+	# updated default and push, so the release branch ends the cycle current with main
+	# (its merged commits collapse away, ready for new work). The --merge (not squash)
+	# preserves the commits, so this replays cleanly; it's best-effort — a hiccup here
+	# warns but never fails an already-merged release (the tag still comes off the
+	# merged default tip below).
+	echo "rebasing '$start' onto the updated '$default'…"
+	if git rebase "origin/$default"; then
+		git push --force-with-lease origin "$start" >/dev/null 2>&1 ||
+			echo "note: rebased '$start' locally but couldn't push it — push it yourself" >&2
+	else
+		git rebase --abort 2>/dev/null || true
+		echo "note: couldn't auto-rebase '$start' onto '$default' — do it manually with 'git rebase origin/$default'" >&2
+	fi
 	target="origin/$default"
 else
 	# Already on the default branch: it must be in sync with origin so the tag
