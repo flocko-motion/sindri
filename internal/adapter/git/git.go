@@ -246,7 +246,10 @@ func RebaseStart(dir, branch, onto string) (conflicts []string, done bool, err e
 	if out, e := exec.Command("git", "-C", dir, "checkout", branch).CombinedOutput(); e != nil {
 		return nil, false, fmt.Errorf("checkout %s: %s: %w", branch, strings.TrimSpace(string(out)), e)
 	}
-	out, e := gitEditless(dir, "rebase", onto)
+	// --autostash: an agent's incidental uncommitted edits (e.g. ticking task
+	// checkboxes) are set aside and re-applied around the rebase, so they never block
+	// a merge — the PR is the committed work, not the scratch in the worktree.
+	out, e := gitEditless(dir, "rebase", "--autostash", onto)
 	return settleRebase(dir, out, e)
 }
 
