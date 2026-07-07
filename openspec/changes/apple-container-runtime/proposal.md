@@ -26,9 +26,9 @@ Apple `container` — selectable without touching the hub or UIs.
 - **Apple `container` is a second backend** implementing the same port on macOS via
   the `container` CLI (per-container micro-VMs). The overlay image + bind-mounted
   worktree model is preserved.
-- **Runtime is selectable** (config / platform default): podman by default; opt in
-  to Apple `container` on macOS. **BREAKING**: none for existing installs (podman
-  stays the default).
+- **Runtime is selectable** (config / platform default): on macOS the default is
+  Apple `container` (per-agent micro-VM isolation — the point of this change); opt
+  out to podman with `SINDRI_RUNTIME=podman`. Linux always uses podman.
 - **Failure isolation becomes a stated property**: an agent's runtime failure must
   not take down other agents — met by per-container-VM backends, and the reason the
   shared-VM default is a liability at scale.
@@ -53,7 +53,7 @@ Apple `container` — selectable without touching the hub or UIs.
   build vs `container build`).
 - **Call sites** in `internal/hub`, `cmd/sindri`, `internal/tui` reference the port,
   not `pod.*` directly; runtime is chosen once at startup.
-- **Config**: a runtime-selection setting (default podman). Requires macOS 26 +
-  Apple `container` installed for that backend.
+- **Config**: a runtime-selection setting (macOS default: Apple `container`; podman
+  elsewhere and via opt-out). The Apple backend requires macOS 26 + `container` installed.
 - No change to the agent image, the overlay model, or the agent↔hub protocol (the
   macOS TCP channel already crosses the VM boundary and covers per-micro-VM too).

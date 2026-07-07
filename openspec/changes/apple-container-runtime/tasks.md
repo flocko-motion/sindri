@@ -12,7 +12,7 @@
 - [x] 2.2 Refactor the current podman code in `internal/adapter/pod` into a `podman` backend implementing the port (behaviour unchanged).
 - [x] 2.3 Route `internal/container.Ensure`/`ImageName` through the port (build is backend-specific).
 - [x] 2.4 Update callers in `internal/hub`, `cmd/sindri`, `internal/tui` to use the port (injected `Runtime`), not `pod.*` directly.
-- [x] 2.5 Runtime selection: a config key (default podman; Linux forced to podman), resolved once at startup into the concrete `Runtime`. `make verify` green; behaviour identical to today.
+- [x] 2.5 Runtime selection: SINDRI_RUNTIME override + platform default (macOS → Apple `container`; Linux → podman), resolved once at startup into the concrete `Runtime`. `make verify` green.
 
 ## 3. Apple `container` backend
 
