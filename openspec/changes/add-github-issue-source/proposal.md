@@ -24,27 +24,29 @@ review, the human merge gate — remains offline git, untouched.
   imports nothing from `hub`/`store`/`issue`.
 - **Issues become cached tasks.** `SyncTasks` gains a third loop appending each
   open issue as a `store.Task` with a `gh-<number>` id (the issue number, stable
-  and human-meaningful) and type `issue`. They are childless leaves, so the
-  existing auto-assignment claims them exactly like any other leaf — **directly
-  claimable, no gate.**
+  and human-meaningful) and type `issue`. They are childless leaves imported
+  **unrated** — visible in the backlog but not auto-claimed until a human gives one
+  a priority (same as openspec items), so enabling the source never floods a repo
+  with surprise work.
 - **Import scope is all open issues.** Every open issue in the repo's GitHub
   remote is imported (pull requests are excluded — `gh issue list` already does).
 - **Close + comment on merge.** When a worker's PR for a `gh-*` task merges, the
   hub closes the GitHub issue and leaves a comment noting the merge. This is
   best-effort: if GitHub is unreachable the *local* merge still succeeds and the
   write-back is skipped with a warning — the merge is never blocked on the network.
-- **Priority: default to the lowest tier.** GitHub issues carry no native
-  priority, so a newly imported issue defaults to the lowest priority tier and a
-  human re-rates it via the existing hub-side priority override (the same
-  mechanism openspec `os-*` items already use). As part of this we **rename the
-  lowest priority tier's display word from `trivial` to `none`** — the honest
-  label for "came in unrated."
-- **Opt-in per project, graceful when absent.** The GitHub source is **off by
-  default** and enabled per project; importing *all* open issues into a busy
-  repo's backlog should never be a surprise. And because it is a network source,
-  it degrades to absent — never a hard failure — whenever `gh` is missing, the
-  repo has no GitHub remote, the user is unauthenticated, or the network is down
-  (the same "optional source" posture as openspec).
+- **Priority: import unrated.** GitHub issues carry no native priority, so an
+  imported issue arrives with no priority — visible in the backlog but not
+  auto-assigned — and a human rates it via the existing hub-side priority override
+  (the same mechanism openspec `os-*` items already use) to release it for work.
+  As part of this we **rename the lowest priority tier's display word from
+  `trivial` to `none`** — the honest label for a rated-but-lowest task.
+- **On by default (opt-out), graceful when absent.** The GitHub source is **on by
+  default** and disabled per project via `github.issues: false`; a user shouldn't
+  have to discover a flag to see their issues, and the unrated-import rule keeps
+  importing *all* open issues from ever becoming surprise work. Because it is a
+  network source, it degrades to absent — never a hard failure — whenever `gh` is
+  missing, the repo has no GitHub remote, the user is unauthenticated, or the
+  network is down (the same "optional source" posture as openspec).
 
 ## Capabilities
 

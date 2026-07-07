@@ -460,7 +460,7 @@ func (h *Hub) SyncTasks(project string) error {
 	if err != nil {
 		log.Printf("hub: github source skipped for %s (config error): %v", project, err)
 	}
-	rows = append(rows, h.githubRows(project, root, cfg.GitHub.Issues, false)...)
+	rows = append(rows, h.githubRows(project, root, err == nil && cfg.IssuesEnabled(), false)...)
 	if ov, err := ps.PriorityOverrides(); err == nil {
 		for i := range rows {
 			if p, ok := ov[rows[i].ID]; ok {

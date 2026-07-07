@@ -70,6 +70,14 @@ func (h *Hub) githubRows(project, root string, enabled, force bool) []store.Task
 	if !ok {
 		return nil
 	}
+	return issuesToRows(issues)
+}
+
+// issuesToRows maps GitHub issues to cached tasks. Issues import UNRATED (no
+// priority): they're visible in the backlog but OpenLeaves skips empty-priority
+// tasks, so a worker never auto-claims an unvetted issue — a human rates one (via
+// the priority override) to release it for assignment, exactly like openspec items.
+func issuesToRows(issues []github.Issue) []store.Task {
 	rows := make([]store.Task, 0, len(issues))
 	for _, is := range issues {
 		rows = append(rows, store.Task{
@@ -77,7 +85,7 @@ func (h *Hub) githubRows(project, root string, enabled, force bool) []store.Task
 			Title:       is.Title,
 			Status:      "open",
 			Type:        "issue",
-			Priority:    "P4", // lowest tier ("none"); a human re-rates via the override
+			Priority:    "", // unrated — visible, not auto-claimed until a human rates it
 			Description: is.Body,
 		})
 	}

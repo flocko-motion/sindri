@@ -9,7 +9,7 @@
 ## 2. Merge issues into the cache
 
 - [x] 2.1 Add `githubID(number int) string` (`gh-<number>`) in `internal/hub/github_source.go` (kept out of `workflow_task.go` for the loc gate).
-- [x] 2.2 Add the third source loop in `SyncTasks`: when opt-in is on and `github.Enabled(root)`, append each issue as `store.Task{ID: githubID, Type: "issue", Status: "open", Priority: "P4", Title, Description}`. On `Issues` error, log a warning and contribute no tasks — never fail the sync.
+- [x] 2.2 Add the third source loop in `SyncTasks`: when the source is on (default) and `github.Enabled(root)`, append each issue as `store.Task{ID: githubID, Type: "issue", Status: "open", Priority: "" (unrated — visible, not auto-claimed until a human rates it), Title, Description}`. On `Issues` error, log a warning and contribute no tasks — never fail the sync.
 - [x] 2.3 Confirm the existing `task_priority` override merge applies to `gh-*` rows exactly as it does to `os-*` (default P4 unless a human re-rating exists).
 - [x] 2.4 Verify `gh-*` rows are childless leaves and are returned by `OpenLeaves()` so auto-assignment claims them (asserted by `TestOpenLeavesExcludesHeldLeaf`).
 
@@ -36,8 +36,8 @@
 
 ## 7. Opt-in config
 
-- [x] 7.1 The per-project opt-in is the `github.issues` key in `.sindri/config.yaml` (off by default), on the config surface added by `add-project-config`.
-- [x] 7.2 `SyncTasks` reads the toggle (`cfg.GitHub.Issues`); when off, no issues are imported regardless of `gh` availability.
+- [x] 7.1 The per-project toggle is the `github.issues` key in `.sindri/config.yaml`, **on by default (opt-out)** — a `*bool` so an unset key defaults on while an explicit `false` disables. On the config surface added by `add-project-config`.
+- [x] 7.2 `SyncTasks` reads the toggle (`cfg.IssuesEnabled()`); when explicitly disabled (or the config errors), no issues are imported regardless of `gh` availability.
 
 ## 8. Verify
 

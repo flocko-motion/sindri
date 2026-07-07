@@ -33,8 +33,27 @@ func TestLoadDefaults(t *testing.T) {
 	if c.Architecture != "ARCHITECTURE.md" || c.ArchitectureSet {
 		t.Errorf("default architecture: got %q set=%v, want ARCHITECTURE.md unset", c.Architecture, c.ArchitectureSet)
 	}
-	if c.Containerfile != "" || c.ReviewPrompt != "" || c.GitHub.Issues {
-		t.Errorf("defaults should be empty/false, got %+v", c)
+	if c.Containerfile != "" || c.ReviewPrompt != "" {
+		t.Errorf("path defaults should be empty, got %+v", c)
+	}
+	if c.GitHub.Issues != nil {
+		t.Error("unset github.issues should be nil (so explicit false is distinguishable)")
+	}
+	if !c.IssuesEnabled() {
+		t.Error("github.issues defaults to ON (opt-out) when unset")
+	}
+}
+
+// TestIssuesOptOut: the source is on by default; only an explicit `issues: false`
+// disables it.
+func TestIssuesOptOut(t *testing.T) {
+	off := repoWith(t, "github:\n  issues: false\n")
+	c, err := Load(off)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if c.IssuesEnabled() {
+		t.Error("explicit github.issues: false must disable the source")
 	}
 }
 
@@ -54,7 +73,7 @@ func TestLoadValid(t *testing.T) {
 	if c.Architecture != "docs/ARCH.md" || !c.ArchitectureSet {
 		t.Errorf("architecture: got %q set=%v", c.Architecture, c.ArchitectureSet)
 	}
-	if !c.GitHub.Issues {
+	if !c.IssuesEnabled() {
 		t.Error("github.issues should be true")
 	}
 }
@@ -90,7 +109,7 @@ func TestRepoOverridesGlobal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if !c.GitHub.Issues { // inherited from the global layer
+	if !c.IssuesEnabled() { // inherited from the global layer
 		t.Error("github.issues should be inherited from global")
 	}
 	if c.ReviewPrompt != "review.txt" { // set at the repo layer

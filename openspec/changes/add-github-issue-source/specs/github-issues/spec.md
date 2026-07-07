@@ -56,37 +56,42 @@ issue, and the task's type SHALL be `issue`.
 - **WHEN** the same issue is synced again
 - **THEN** it keeps the id `gh-123` (no duplicate row is created)
 
-### Requirement: Imported issues are directly claimable
+### Requirement: Imported issues are visible but not auto-claimed until rated
 
-An imported issue SHALL be an open, childless leaf and SHALL be eligible for the
-hub's normal auto-assignment with no extra approval gate — a worker claims it,
-branches, builds, and opens a local PR exactly as for a td task.
+An imported issue SHALL be an open, childless leaf that is visible in the backlog,
+but SHALL import UNRATED (no priority) so the hub's auto-assignment does NOT claim
+it until a human gives it a priority — the same posture as openspec items (no
+priority, no assignment). Once rated, it SHALL be eligible for normal
+auto-assignment with no extra approval gate: a worker claims it, branches, builds,
+and opens a local PR exactly as for a td task. This keeps a repo's whole open-issue
+list from turning into surprise work the moment the source is enabled.
 
-#### Scenario: Worker claims an issue
+#### Scenario: Imported issue is visible but not auto-claimed
 
-- **WHEN** a free worker asks for the next task and the highest-priority open
-  leaf is `gh-123`
+- **WHEN** issue #123 is imported and no human has rated it
+- **THEN** `gh-123` appears in the backlog but a free worker asking for the next task
+  is NOT assigned it (an unrated task is never auto-claimed)
+
+#### Scenario: Worker claims a rated issue
+
+- **WHEN** a human has given `gh-123` a priority and a free worker asks for the next
+  task and `gh-123` is the highest-priority open leaf
 - **THEN** the worker claims `gh-123`, works on a `gh-123` branch in its worktree,
   and can register the branch for merge — no approval step is required first
 
-### Requirement: New issues default to the lowest priority tier
+### Requirement: Priority re-rating is hub-side; lowest tier reads "none"
 
-GitHub issues carry no native priority. A newly imported issue SHALL be assigned
-the lowest priority tier by default, and a human SHALL be able to re-rate it via
-the hub's existing priority override (the same mechanism used for openspec items).
-The lowest priority tier's display word SHALL be `none` (renamed from `trivial`);
-`trivial` SHALL still be accepted as an input alias for that tier.
+GitHub issues carry no native priority. A human SHALL be able to rate an imported
+issue via the hub's existing priority override (the same mechanism used for openspec
+items), and the override SHALL survive subsequent resyncs. The lowest priority
+tier's display word SHALL be `none` (renamed from `trivial`); `trivial` SHALL still
+be accepted as an input alias for that tier.
 
-#### Scenario: New issue comes in as none
+#### Scenario: Human rates an imported issue
 
-- **WHEN** issue #123 is first imported
-- **THEN** its priority is the lowest tier, displayed as `none`
-
-#### Scenario: Human re-rates an imported issue
-
-- **WHEN** a human sets `gh-123` to a higher priority
-- **THEN** the override is stored hub-side and the issue sorts at the new priority,
-  and this override survives subsequent resyncs
+- **WHEN** a human sets `gh-123` to a priority
+- **THEN** the override is stored hub-side, the issue sorts at that priority and
+  becomes auto-claimable, and the override survives subsequent resyncs
 
 #### Scenario: Lowest tier reads "none" everywhere
 
@@ -112,19 +117,27 @@ merge is never blocked on the network or on GitHub.
 - **THEN** the local merge still completes and the failed write-back is reported as
   a warning (the issue stays open on GitHub)
 
-### Requirement: Opt-in per project, absent when GitHub is unavailable
+### Requirement: On by default (opt-out), absent when GitHub is unavailable
 
-The GitHub source SHALL be disabled by default and enabled explicitly per
-project. Even when enabled, it SHALL degrade to absent — importing no issues and
-never raising a hard error — whenever `gh` is not installed, the user is not
-authenticated, the repository has no GitHub remote, or the network is
-unreachable. Absence of the source SHALL NOT affect td tasks, openspec changes,
-or any offline workflow.
+The GitHub source SHALL be enabled by default and disabled explicitly per project
+(opt-out via `github.issues: false`) — a repo shows its issues without the user
+first discovering a flag, while the unrated-import rule keeps that from becoming
+surprise work. Whether on or off, it SHALL degrade to absent — importing no issues
+and never raising a hard error — whenever `gh` is not installed, the user is not
+authenticated, the repository has no GitHub remote, or the network is unreachable.
+Absence of the source SHALL NOT affect td tasks, openspec changes, or any offline
+workflow.
 
-#### Scenario: Disabled by default
+#### Scenario: On by default
 
-- **WHEN** a project has a GitHub remote but has not enabled the source
-- **THEN** no issues are imported
+- **WHEN** a project has a GitHub remote, `gh` is available, and the source has not
+  been explicitly disabled
+- **THEN** its open issues are imported (unrated)
+
+#### Scenario: Explicitly disabled
+
+- **WHEN** a project sets `github.issues: false`
+- **THEN** no issues are imported regardless of `gh` availability
 
 #### Scenario: Enabled but gh unavailable
 

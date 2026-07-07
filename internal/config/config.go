@@ -25,7 +25,9 @@ const defaultArchitecture = "ARCHITECTURE.md"
 
 // GitHub is the `github:` block.
 type GitHub struct {
-	Issues bool `yaml:"issues"` // enable the GitHub issue source for this project
+	// Issues toggles the GitHub issue source. nil (key unset) means the default —
+	// ON (opt-out): a repo imports its open issues unless it sets `issues: false`.
+	Issues *bool `yaml:"issues"`
 }
 
 // Config is a project's resolved .sindri/config.yaml (repo over global over default).
@@ -109,6 +111,14 @@ func (c Config) validate(root string) error {
 		}
 	}
 	return nil
+}
+
+// IssuesEnabled reports whether the GitHub issue source is on. It defaults to ON
+// (opt-out): a repo imports its open issues unless it explicitly sets
+// `github.issues: false`. The source still degrades to absent whenever gh is
+// missing / unauthenticated / offline or the repo has no GitHub remote.
+func (c Config) IssuesEnabled() bool {
+	return c.GitHub.Issues == nil || *c.GitHub.Issues
 }
 
 // Abs resolves a repo-relative config path against root ("" stays "").

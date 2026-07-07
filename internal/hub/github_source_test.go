@@ -3,7 +3,26 @@ package hub
 import (
 	"os/exec"
 	"testing"
+
+	"github.com/flo-at/sindri/internal/adapter/github"
 )
+
+// TestIssuesToRowsUnrated: imported issues become open "issue" tasks with NO priority,
+// so they're visible in the backlog but OpenLeaves won't auto-claim them until a human
+// rates one (same posture as openspec items).
+func TestIssuesToRowsUnrated(t *testing.T) {
+	rows := issuesToRows([]github.Issue{
+		{Number: 5, Title: "fix it", Body: "body"},
+		{Number: 8, Title: "add it"},
+	})
+	if len(rows) != 2 {
+		t.Fatalf("want 2 rows, got %d", len(rows))
+	}
+	r := rows[0]
+	if r.ID != "gh-5" || r.Type != "issue" || r.Status != "open" || r.Priority != "" || r.Description != "body" {
+		t.Fatalf("unexpected row (issues must import unrated): %+v", r)
+	}
+}
 
 func TestGithubID(t *testing.T) {
 	if got := githubID(123); got != "gh-123" {
