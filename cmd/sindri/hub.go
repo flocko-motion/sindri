@@ -309,7 +309,7 @@ func prListCmd() *cobra.Command {
 					return err
 				}
 				for _, p := range prs {
-					fmt.Printf("%-14s %-9s %-10s %s\n", p.ID, p.Status, p.Agent, p.Branch)
+					fmt.Printf("%-14s %-12s %4s  %-10s %s\n", p.ID, p.Status, shortAge(p.CreatedAt), p.Agent, p.Branch)
 				}
 				if len(prs) == 0 {
 					fmt.Fprintln(os.Stderr, "no PRs")
