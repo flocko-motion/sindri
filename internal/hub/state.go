@@ -49,7 +49,7 @@ type AgentView struct {
 	Clients   int    `json:"clients"`   // humans attached to its tmux session (dial-ins)
 	Container string `json:"container"` // podman container name (project-resolved, so cross-repo callers target the right pod)
 	Memory    string `json:"memory"`    // configured RAM limit ("" = hub default)
-	Runtime   string `json:"runtime"`   // Claude's live runtime: "busy"|"blocked"|"idle"|"" (folded into Status; kept raw for the herdr projection)
+	Runtime   string `json:"runtime"`   // Claude's live runtime: "working"|"blocked"|"idle"|"" (folded into Status; kept raw for the herdr projection)
 }
 
 // ClientView is one human attached to an agent's tmux session — a live dial-in.
@@ -274,26 +274,29 @@ func (h *Hub) runtimeState(ctx context.Context, project, name string) string {
 	}
 	switch detect.ClaudeState(string(out)) {
 	case detect.Working:
-		return "busy"
+		return "working"
 	case detect.Blocked:
 		return "blocked"
 	case detect.Idle:
 		return "idle"
 	}
-	return ""
+	return "idle" // a shell (maintenance mode) or unrecognized screen = not doing anything
 }
 
-// overlayRuntime folds Claude's live runtime into the workflow status so the board
-// says what to DO: "blocked" (any phase) = the agent needs your attention now; a
-// task-holding agent stalled at its prompt = "waiting" (nudge it). A task-less agent
-// stays "idle" (give it work), and a busy one keeps its workflow phase.
+// overlayRuntime folds Claude's live runtime (working|blocked|idle|"") into the
+// workflow status, three states in herdr's own vocabulary: "blocked" = needs your
+// attention now (any phase); "working" = busy; "idle" = not doing anything (no task,
+// stalled at the prompt, or dropped to the maintenance shell). The live state
+// replaces a plain working/idle phase; the meaningful workflow phases
+// (submitted/collab/resolving/reviewing/planning) are kept, unless Claude is blocked.
+// runtime "" (probe failed) leaves the phase untouched.
 func overlayRuntime(status, runtime string) string {
 	switch runtime {
 	case "blocked":
 		return "blocked"
-	case "idle":
-		if status == "working" {
-			return "waiting"
+	case "working", "idle":
+		if status == "working" || status == "idle" {
+			return runtime
 		}
 	}
 	return status
