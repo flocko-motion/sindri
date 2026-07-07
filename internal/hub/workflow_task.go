@@ -344,7 +344,7 @@ func (h *Hub) AgentDirective(ctx context.Context, project, name string) (string,
 			}
 			for _, pr := range prs {
 				if pr.Status == "open" {
-					return dirReview(pr.ID, pr.Task), true, nil
+					return dirReview(pr.ID, pr.Task, h.architectureDoc(project)), true, nil
 				}
 			}
 			return "", false, nil

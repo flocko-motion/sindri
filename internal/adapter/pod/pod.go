@@ -272,8 +272,8 @@ func (Engine) ListByLabelContext(ctx context.Context, label, value string) ([]st
 
 // EnsureImage builds the agent image via `podman build` when the recipe is stale,
 // returning the image reference to run.
-func (Engine) EnsureImage(root string, out io.Writer) (string, error) {
-	return container.EnsureImageWith(root, out, podmanBuilder{})
+func (Engine) EnsureImage(root, containerfile string, out io.Writer) (string, error) {
+	return container.EnsureImageWith(root, containerfile, out, podmanBuilder{})
 }
 
 // podmanBuilder is the podman slice of image building for container.EnsureImageWith.
