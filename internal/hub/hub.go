@@ -119,7 +119,7 @@ func Container(root, name string) string {
 // registry ("" if unknown). The hub's filesystem work (git, worktrees) needs the
 // path; state needs only the tag.
 func (h *Hub) projectRoot(project string) string {
-	root, _ := h.store.ProjectPath(project)
+	root, _ := h.projectPath(project)
 	return root
 }
 
@@ -445,7 +445,11 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 	}
 	fmt.Fprintf(w, "Image ready. Starting container %s…\n", h.container(project, name))
 	wt := filepath.Join(root, a.Workspace)
-	if !git.HasCommits(root) {
+	hasCommits, err := git.HasCommits(root)
+	if err != nil {
+		return err
+	}
+	if !hasCommits {
 		return fmt.Errorf("repo has no commits yet")
 	}
 	if a.Role == "coauthor" {

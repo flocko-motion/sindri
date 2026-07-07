@@ -126,8 +126,8 @@ func TestRootAndCommits(t *testing.T) {
 	if gotResolved != want {
 		t.Fatalf("root: got %q want %q", gotResolved, want)
 	}
-	if !HasCommits(repo) {
-		t.Fatalf("expected commits")
+	if ok, err := HasCommits(repo); err != nil || !ok {
+		t.Fatalf("expected commits (ok=%v err=%v)", ok, err)
 	}
 }
 
@@ -177,7 +177,7 @@ func TestRebaseOntoCleanAndConflict(t *testing.T) {
 	if err := RebaseOnto(repo, "clash", base); err == nil {
 		t.Fatal("a conflicting rebase must be reported as an error")
 	}
-	if HasChanges(repo) {
-		t.Error("after a conflicting rebase the worktree must be clean (aborted), not mid-rebase")
+	if changed, err := HasChanges(repo); err != nil || changed {
+		t.Errorf("after a conflicting rebase the worktree must be clean (aborted), not mid-rebase (changed=%v err=%v)", changed, err)
 	}
 }

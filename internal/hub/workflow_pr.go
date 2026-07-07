@@ -97,7 +97,11 @@ func (h *Hub) RequestReview(project, prID, requirement string) error {
 	if err != nil {
 		return err
 	}
-	if reviewer := h.runningReviewer(project); reviewer != "" {
+	reviewer, err := h.runningReviewer(project)
+	if err != nil {
+		return err
+	}
+	if reviewer != "" {
 		if err := ps.AssignReview(id, reviewer); err != nil {
 			return err
 		}
@@ -132,15 +136,20 @@ func (h *Hub) assignedReviewInject(project, reviewer string, pr store.PR, prID, 
 	return h.injectWhenReady(project, reviewer, msgReviewAssigned(prID, requirement, pr.Branch, pr.Base, checkedOut))
 }
 
-// runningReviewer returns the name of a live reviewer agent in a project, or "".
-func (h *Hub) runningReviewer(project string) string {
-	roster, _ := h.store.For(project).Roster()
+// runningReviewer returns the name of a live reviewer agent in a project, or "". A
+// roster read failure is returned, not disguised as "no reviewer running" (which
+// would silently drop the review request).
+func (h *Hub) runningReviewer(project string) (string, error) {
+	roster, err := h.store.For(project).Roster()
+	if err != nil {
+		return "", fmt.Errorf("load roster for %s: %w", project, err)
+	}
 	for _, a := range roster {
 		if a.Role == "reviewer" && container.Running(h.container(project, a.Name)) && h.sessionAlive(project, a.Name) {
-			return a.Name
+			return a.Name, nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 // runLint runs the project's quality gates against a worktree by invoking `brokkr
@@ -224,7 +233,15 @@ func (h *Hub) cmdOpenspec(c registry.Caller, args []string, out io.Writer) (int,
 		return 1, err
 	}
 	branch := plannerBranch(c.Agent)
-	if !git.HasChanges(wt) && !git.Ahead(wt, base) {
+	changed, err := git.HasChanges(wt)
+	if err != nil {
+		return 1, err
+	}
+	ahead, err := git.Ahead(wt, base)
+	if err != nil {
+		return 1, err
+	}
+	if !changed && !ahead {
 		fmt.Fprintln(out, "Nothing to submit — edit /workspace/openspec first.")
 		return 1, nil
 	}

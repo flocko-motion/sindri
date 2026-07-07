@@ -10,6 +10,7 @@ package hub
 import (
 	"context"
 	"fmt"
+	"log"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -229,10 +230,22 @@ func (h *Hub) knownProjects() []store.Project {
 	return ps
 }
 
+// projectPath resolves a project tag to its path, logging loudly on a real store
+// error (distinct from an unknown project) instead of swallowing it into "". The
+// string-returning callers (projectRoot/repoName/container) can't thread an error,
+// so this is where the DB failure is surfaced.
+func (h *Hub) projectPath(project string) (string, bool) {
+	path, ok, err := h.store.ProjectPath(project)
+	if err != nil {
+		log.Printf("hub: resolve project path for %q failed: %v", project, err)
+	}
+	return path, ok
+}
+
 // repoName is a project's short human label (its directory name), resolved from the
 // registry; falls back to the tag when the path is unknown.
 func (h *Hub) repoName(project string) string {
-	if path, ok := h.store.ProjectPath(project); ok {
+	if path, ok := h.projectPath(project); ok {
 		return filepath.Base(path)
 	}
 	return project
@@ -240,7 +253,7 @@ func (h *Hub) repoName(project string) string {
 
 // container is the podman container name for an agent, resolved via the registry.
 func (h *Hub) container(project, name string) string {
-	root, _ := h.store.ProjectPath(project)
+	root, _ := h.projectPath(project)
 	return Container(root, name)
 }
 

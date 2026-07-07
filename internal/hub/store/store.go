@@ -128,13 +128,18 @@ func (s *Store) RegisterProject(tag, path string) error {
 	return nil
 }
 
-// ProjectPath resolves a repoTag to its on-disk path; ok is false if unknown.
-func (s *Store) ProjectPath(tag string) (path string, ok bool) {
-	err := s.db.QueryRow(`SELECT path FROM projects WHERE tag=?`, tag).Scan(&path)
-	if err != nil {
-		return "", false
+// ProjectPath resolves a repoTag to its on-disk path; ok is false if unknown. A
+// real query error is returned (distinct from "unknown project"), never collapsed
+// into a silent "" that would hand callers the wrong repo root.
+func (s *Store) ProjectPath(tag string) (path string, ok bool, err error) {
+	err = s.db.QueryRow(`SELECT path FROM projects WHERE tag=?`, tag).Scan(&path)
+	if err == sql.ErrNoRows {
+		return "", false, nil
 	}
-	return path, true
+	if err != nil {
+		return "", false, fmt.Errorf("project path %s: %w", tag, err)
+	}
+	return path, true, nil
 }
 
 // Projects returns every known project, ordered by path.

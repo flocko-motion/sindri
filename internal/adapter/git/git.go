@@ -59,9 +59,18 @@ func WorktreeRemove(repo, path string) error {
 	return nil
 }
 
-// HasCommits reports whether the repo has at least one commit.
-func HasCommits(repo string) bool {
-	return exec.Command("git", "-C", repo, "rev-parse", "HEAD").Run() == nil
+// HasCommits reports whether the repo has at least one commit. An unborn HEAD (no
+// commits yet) is a legitimate false; a real git failure (not a repo, etc.) is
+// returned rather than collapsed into "no commits".
+func HasCommits(repo string) (bool, error) {
+	err := exec.Command("git", "-C", repo, "rev-parse", "--verify", "-q", "HEAD").Run()
+	if err == nil {
+		return true, nil
+	}
+	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+		return false, nil // `--verify -q` exits 1, quietly, when HEAD is unborn
+	}
+	return false, fmt.Errorf("git rev-parse HEAD in %s: %w", repo, err)
 }
 
 // CurrentBranch returns the checked-out branch of dir, or an error in detached
@@ -116,14 +125,15 @@ func EnsureBranch(dir, name, base string) error {
 }
 
 // Ahead reports whether dir's HEAD has any commit not in base (i.e. there's
-// something to submit even with a clean worktree).
-func Ahead(dir, base string) bool {
+// something to submit even with a clean worktree). A rev-list failure is returned,
+// not collapsed into "not ahead" — that would silently skip a submit.
+func Ahead(dir, base string) (bool, error) {
 	out, err := exec.Command("git", "-C", dir, "rev-list", "--count", base+"..HEAD").Output()
 	if err != nil {
-		return false
+		return false, fmt.Errorf("git rev-list %s..HEAD in %s: %w", base, dir, err)
 	}
 	n := strings.TrimSpace(string(out))
-	return n != "" && n != "0"
+	return n != "" && n != "0", nil
 }
 
 // Rebase rebases dir's current branch onto onto. It aborts a rebase that hits
@@ -137,10 +147,15 @@ func Rebase(dir, onto string) error {
 	return nil
 }
 
-// HasChanges reports whether dir's worktree has uncommitted changes.
-func HasChanges(dir string) bool {
+// HasChanges reports whether dir's worktree has uncommitted changes. A status
+// failure is returned, not collapsed into "clean" — that would let CommitAll
+// silently drop an agent's work.
+func HasChanges(dir string) (bool, error) {
 	out, err := exec.Command("git", "-C", dir, "status", "--porcelain").Output()
-	return err == nil && len(strings.TrimSpace(string(out))) > 0
+	if err != nil {
+		return false, fmt.Errorf("git status in %s: %w", dir, err)
+	}
+	return len(strings.TrimSpace(string(out))) > 0, nil
 }
 
 // CommitAll stages and commits everything in dir's worktree. A no-op (nil) when
@@ -149,7 +164,11 @@ func HasChanges(dir string) bool {
 // worktree, so nothing churns it here — and if something ever does, it surfaces
 // (a noisy diff, a loud merge failure) rather than being silently dropped.
 func CommitAll(dir, msg string) error {
-	if !HasChanges(dir) {
+	changed, err := HasChanges(dir)
+	if err != nil {
+		return err
+	}
+	if !changed {
 		return nil
 	}
 	if out, err := exec.Command("git", "-C", dir, "add", "-A").CombinedOutput(); err != nil {

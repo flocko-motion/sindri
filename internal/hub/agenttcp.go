@@ -10,6 +10,7 @@ package hub
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -61,7 +62,12 @@ func (h *Hub) serveAgentTCP() error {
 // socket's "the endpoint is the identity".
 func (h *Hub) agentTCPHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		project, name, ok := h.agentForToken(r.Header.Get("X-Sindri-Token"))
+		project, name, ok, err := h.agentForToken(r.Header.Get("X-Sindri-Token"))
+		if err != nil { // a store failure is 500, not "bad token" — and it's logged, not swallowed
+			log.Printf("agent-tcp: token lookup failed: %v", err)
+			http.Error(w, `{"error":"token lookup failed"}`, http.StatusInternalServerError)
+			return
+		}
 		if !ok {
 			http.Error(w, `{"error":"unauthorized: bad or missing agent token"}`, http.StatusUnauthorized)
 			return
