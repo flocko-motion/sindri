@@ -16,10 +16,10 @@
 
 ## 2. Immediate merge feedback
 
-- [ ] 2.1 In the PRs tab, when the user triggers a merge, optimistically show a
+- [x] 2.1 In the PRs tab, when the user triggers a merge, optimistically show a
       transient "merging" status on the selected row before the hub's board event
       lands.
-- [ ] 2.2 Replace the transient state with the real status when the merged board
+- [x] 2.2 Replace the transient state with the real status when the merged board
       event arrives, and clear it if the merge returns an error.
 
 ## 3. Verify

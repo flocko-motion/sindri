@@ -85,7 +85,8 @@ type model struct {
 
 	filter     int
 	collapsed  map[string]bool
-	hideDetail bool // § force-hides the detail pane (else shown when wide enough)
+	merging    map[string]bool // PR ids the user just triggered a merge on — shown as a transient "merging" on the row until the hub confirms
+	hideDetail bool            // § force-hides the detail pane (else shown when wide enough)
 
 	rightFocus  bool // detail (right) column has focus (h/l switch; j/k move within)
 	rightCursor int  // focused actionable item in the right column
@@ -134,7 +135,7 @@ func newModel(cl *client.HTTP, ch <-chan hub.BoardState, root string) model {
 	// size late or as 0×0; without a default the view would stick on "loading".)
 	in := textinput.New()
 	in.CharLimit = 200
-	m := model{cl: cl, ch: ch, root: root, collapsed: map[string]bool{}, w: 80, h: 24, input: in}
+	m := model{cl: cl, ch: ch, root: root, collapsed: map[string]bool{}, merging: map[string]bool{}, w: 80, h: 24, input: in}
 	m.reclamp()
 	return m
 }
@@ -183,12 +184,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.state = msg.st
+		m.reconcileMerging()
 		m.reclamp()
 		return m, tea.Batch(waitForState(m.ch, m.gen), m.syncDetail(), m.agentLiveCmds())
 	case polledMsg: // an auto-refresh poll — update the board, don't touch the SSE waiter
 		m.state = hub.BoardState(msg)
+		m.reconcileMerging()
 		m.reclamp()
 		return m, tea.Batch(m.syncDetail(), m.agentLiveCmds())
+	case approveMergeMsg: // "approve & merge" confirmed — mark the row merging, then run it
+		m.markMerging(msg.id)
+		return m, m.approveMergeCmd(msg.id)
+	case mergeDoneMsg:
+		return m.mergeDone(msg)
 	case tickMsg:
 		// Live agent state (status), screen, and log go stale between hub
 		// notifications; while on the Agents tab, poll every few seconds. The
@@ -405,7 +413,9 @@ func (m *model) onKey(k string) tea.Cmd {
 				m.openApproveMergeChoice(m.selID())
 				return nil
 			}
-			return m.action(func(id string) error { _, err := m.cl.Merge(id); return err })
+			id := m.selID()
+			m.markMerging(id) // show "merging" on the row at once, before the hub confirms
+			return m.mergeCmd(id)
 		}
 	case "N": // new task (tasks) / new agent (agents)
 		if m.tab == 0 {

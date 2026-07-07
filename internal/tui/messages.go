@@ -52,6 +52,20 @@ type prLintMsg struct {
 type reviewPromptMsg string
 type reviewReadyMsg string // the review-workspace path to open a shell in
 
+// approveMergeMsg carries the approve-then-merge intent from the "approve & merge"
+// choice back into Update, so the transient "merging" marker is set on the model
+// (and rendered) before the async approve+merge runs.
+type approveMergeMsg struct{ id string }
+
+// mergeDoneMsg reports a merge attempt finished: on success it carries a fresh
+// board snapshot; on failure, the error. Either way the row's transient "merging"
+// marker is cleared (replaced by the real status, or reverted on error).
+type mergeDoneMsg struct {
+	id    string
+	state hub.BoardState
+	err   error
+}
+
 // paneLines is how many rows of an agent's tmux scrollback the detail shows.
 const paneLines = 200
 
