@@ -29,6 +29,9 @@ var Binary = "podman"
 // Engine is the podman implementation of container.Runtime.
 type Engine struct{}
 
+// Name identifies this backend for humans.
+func (Engine) Name() string { return "podman" }
+
 // UserNS maps the host user to the container's sindri uid/gid (1000) so
 // host-owned mounts appear owned by the in-pod user regardless of the host uid.
 const UserNS = "keep-id:uid=1000,gid=1000"
@@ -167,6 +170,50 @@ func (Engine) Diagnose(ctx context.Context, name string) string {
 		msg += fmt.Sprintf(", stderr=%q", strings.TrimSpace(string(ee.Stderr)))
 	}
 	return msg
+}
+
+// Stats returns a memory snapshot for a running container. Podman renders memory as
+// a human string "usage / limit" (e.g. "543.9MB / 1.074GB"); parse both sides.
+// --no-stream takes a single sample; the caller bounds it with ctx.
+func (Engine) Stats(ctx context.Context, name string) (container.Usage, error) {
+	out, err := exec.CommandContext(ctx, Binary, "stats", "--no-stream", "--format", "{{.MemUsage}}", name).Output()
+	if err != nil {
+		if ctx.Err() != nil {
+			return container.Usage{}, fmt.Errorf("podman stats %s timed out: %w", name, ctx.Err())
+		}
+		return container.Usage{}, fmt.Errorf("podman stats %s: %w", name, err)
+	}
+	usage, limit, ok := strings.Cut(strings.TrimSpace(string(out)), "/")
+	if !ok {
+		return container.Usage{}, fmt.Errorf("podman stats %s: unexpected mem usage %q", name, strings.TrimSpace(string(out)))
+	}
+	u, uerr := parseByteSize(usage)
+	l, lerr := parseByteSize(limit)
+	if uerr != nil || lerr != nil {
+		return container.Usage{}, fmt.Errorf("podman stats %s: parse %q: %v / %v", name, strings.TrimSpace(string(out)), uerr, lerr)
+	}
+	return container.Usage{MemoryUsageBytes: u, MemoryLimitBytes: l}, nil
+}
+
+// parseByteSize parses a human byte size as podman prints it ("543.9MB", "1.074GB",
+// decimal/1000-based) into bytes.
+func parseByteSize(s string) (int64, error) {
+	s = strings.TrimSpace(s)
+	mult := 1.0
+	for _, u := range []struct {
+		suffix string
+		m      float64
+	}{{"GB", 1e9}, {"MB", 1e6}, {"kB", 1e3}, {"KB", 1e3}, {"B", 1}} {
+		if strings.HasSuffix(s, u.suffix) {
+			mult, s = u.m, strings.TrimSuffix(s, u.suffix)
+			break
+		}
+	}
+	f, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil {
+		return 0, fmt.Errorf("%q: %w", s, err)
+	}
+	return int64(f * mult), nil
 }
 
 // Logs returns the last `tail` lines of a container's stdout/stderr. Best-effort.

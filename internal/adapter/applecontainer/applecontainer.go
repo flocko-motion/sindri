@@ -28,6 +28,9 @@ var Binary = "container"
 // Engine is the Apple-`container` implementation of container.Runtime.
 type Engine struct{}
 
+// Name identifies this backend for humans.
+func (Engine) Name() string { return "apple container" }
+
 // inspectEntry is the slice of `container inspect`/`ls --format json` we read.
 // NOTE: configuration.image is an OBJECT ({reference, descriptor}), not a string —
 // modelling it as a string made json.Unmarshal fail on the whole entry, and because
@@ -43,8 +46,34 @@ type inspectEntry struct {
 		Image struct {
 			Reference string `json:"reference"`
 		} `json:"image"`
-		Labels map[string]string `json:"labels"`
+		Labels    map[string]string `json:"labels"`
+		Resources struct {
+			CPUs          int   `json:"cpus"`
+			MemoryInBytes int64 `json:"memoryInBytes"`
+		} `json:"resources"`
+		Platform struct {
+			OS           string `json:"os"`
+			Architecture string `json:"architecture"`
+		} `json:"platform"`
 	} `json:"configuration"`
+}
+
+// hostPID finds the macOS pid of the micro-VM's runtime process for a container by
+// matching the `container-runtime-linux … --uuid <name>` argv — the concrete host
+// process backing this exact instance. "" if not found.
+func hostPID(name string) string {
+	out, err := exec.Command("pgrep", "-fl", "container-runtime-linux").Output()
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if strings.Contains(line, "--uuid "+name) {
+			if f := strings.Fields(line); len(f) > 0 {
+				return f[0]
+			}
+		}
+	}
+	return ""
 }
 
 // parseInspect unmarshals `container inspect`/`ls` JSON. A shape mismatch here is a
@@ -157,6 +186,34 @@ func (Engine) Diagnose(ctx context.Context, name string) string {
 	return msg + fmt.Sprintf(", state=%q -> running=%v", entries[0].Status.State, entries[0].Status.State == "running")
 }
 
+// statsEntry is the slice of `container stats --format json` we read.
+type statsEntry struct {
+	ID               string `json:"id"`
+	MemoryUsageBytes int64  `json:"memoryUsageBytes"`
+	MemoryLimitBytes int64  `json:"memoryLimitBytes"`
+}
+
+// Stats returns a memory snapshot for a running pod via `container stats`. Uses
+// --no-stream (one sample, ~2s) so it returns rather than streaming forever; the
+// caller bounds it with ctx.
+func (Engine) Stats(ctx context.Context, name string) (container.Usage, error) {
+	out, err := exec.CommandContext(ctx, Binary, "stats", "--no-stream", "--format", "json", name).Output()
+	if err != nil {
+		if ctx.Err() != nil {
+			return container.Usage{}, fmt.Errorf("container stats %s timed out: %w", name, ctx.Err())
+		}
+		return container.Usage{}, fmt.Errorf("container stats %s: %w", name, err)
+	}
+	var entries []statsEntry
+	if e := json.Unmarshal(out, &entries); e != nil {
+		return container.Usage{}, fmt.Errorf("container stats %s: parse JSON: %w", name, e)
+	}
+	if len(entries) == 0 {
+		return container.Usage{}, fmt.Errorf("container stats %s: no sample returned", name)
+	}
+	return container.Usage{MemoryUsageBytes: entries[0].MemoryUsageBytes, MemoryLimitBytes: entries[0].MemoryLimitBytes}, nil
+}
+
 // Logs returns the last `tail` lines of a container's output. Apple `container logs`
 // has no --tail, so we trim client-side. Best-effort.
 func (Engine) Logs(name string, tail int) string {
@@ -182,7 +239,23 @@ func (Engine) Info(name string) string {
 		return ""
 	}
 	c := entries[0]
-	return fmt.Sprintf("name:  %s\nstate: %s\nimage: %s\nid:    %s", name, c.Status.State, c.Configuration.Image.Reference, c.ID)
+	var b strings.Builder
+	fmt.Fprintf(&b, "state:    %s\n", c.Status.State)
+	fmt.Fprintf(&b, "image:    %s\n", c.Configuration.Image.Reference)
+	if c.Configuration.Resources.CPUs > 0 {
+		fmt.Fprintf(&b, "cpus:     %d\n", c.Configuration.Resources.CPUs)
+	}
+	if c.Configuration.Resources.MemoryInBytes > 0 {
+		fmt.Fprintf(&b, "memory:   %d MiB (limit)\n", c.Configuration.Resources.MemoryInBytes/(1024*1024))
+	}
+	if c.Configuration.Platform.OS != "" {
+		fmt.Fprintf(&b, "platform: %s/%s\n", c.Configuration.Platform.OS, c.Configuration.Platform.Architecture)
+	}
+	if pid := hostPID(name); pid != "" {
+		fmt.Fprintf(&b, "host pid: %s (micro-VM runtime process)\n", pid)
+	}
+	fmt.Fprintf(&b, "id:       %s", c.ID)
+	return b.String()
 }
 
 // Rm force-removes a container (and its micro-VM).

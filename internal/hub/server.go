@@ -86,7 +86,7 @@ type NameReq struct {
 // globalRoutes are the only control endpoints valid without a repo context: the
 // board reads, which return global agents/PRs (and no tasks when no repo is
 // selected). Everything else is repo-scoped and requires X-Sindri-Project.
-var globalRoutes = map[string]bool{"/state": true, "/events": true}
+var globalRoutes = map[string]bool{"/state": true, "/events": true, "/stats": true}
 
 // requireProject rejects a repo-scoped request that arrives without an
 // X-Sindri-Project header (rather than silently acting on a phantom empty project),
@@ -122,6 +122,10 @@ func (h *Hub) Handler() http.Handler {
 	mux.HandleFunc("GET /state", func(w http.ResponseWriter, r *http.Request) {
 		st, err := h.State(h.reqProject(r))
 		writeJSON(w, st, err)
+	})
+	mux.HandleFunc("GET /stats", func(w http.ResponseWriter, r *http.Request) {
+		report, err := h.Stats()
+		writeJSON(w, report, err)
 	})
 	mux.HandleFunc("GET /events", h.handleEvents)
 	mux.HandleFunc("POST /refresh", func(w http.ResponseWriter, r *http.Request) {

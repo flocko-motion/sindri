@@ -23,6 +23,13 @@ type Mount struct {
 	Mode      string // "ro" | "rw"
 }
 
+// Usage is a point-in-time resource snapshot of a running pod. A zero field means
+// the backend didn't report that metric.
+type Usage struct {
+	MemoryUsageBytes int64
+	MemoryLimitBytes int64
+}
+
 // RunOpts configures a detached agent pod.
 type RunOpts struct {
 	Name       string
@@ -38,6 +45,8 @@ type RunOpts struct {
 // (internal/adapter/pod) and Apple container (internal/adapter/applecontainer) each
 // implement it; the hub/CLI/TUI depend only on this interface.
 type Runtime interface {
+	// Name identifies the backend for humans (e.g. "podman", "apple container").
+	Name() string
 	Run(o RunOpts) error
 	Exec(name string, args ...string) ([]byte, error)
 	ExecContext(ctx context.Context, name string, args ...string) ([]byte, error)
@@ -51,6 +60,9 @@ type Runtime interface {
 	// probe actually observes for name (raw command result, stderr, parsed state)
 	// — so a "not running" verdict is explainable, not a silent false.
 	Diagnose(ctx context.Context, name string) string
+	// Stats returns a point-in-time resource snapshot (memory usage vs limit) for a
+	// running pod, so the human can see how close an agent's VM is to its ceiling.
+	Stats(ctx context.Context, name string) (Usage, error)
 	Logs(name string, tail int) string
 	Info(name string) string
 	Rm(name string) error
@@ -76,6 +88,7 @@ var errNoRuntime = errors.New("no container runtime configured")
 // present; mutations error. It keeps the port panic-free when unwired.
 type noop struct{}
 
+func (noop) Name() string                                               { return "none (no runtime configured)" }
 func (noop) Run(RunOpts) error                                          { return errNoRuntime }
 func (noop) Exec(string, ...string) ([]byte, error)                     { return nil, errNoRuntime }
 func (noop) ExecContext(context.Context, string, ...string) ([]byte, error) { return nil, errNoRuntime }
@@ -84,6 +97,7 @@ func (noop) AttachCmd(string, ...string) *exec.Cmd                      { return
 func (noop) Running(string) bool                                        { return false }
 func (noop) RunningContext(context.Context, string) bool                { return false }
 func (noop) Diagnose(context.Context, string) string                    { return "no container runtime configured" }
+func (noop) Stats(context.Context, string) (Usage, error)               { return Usage{}, errNoRuntime }
 func (noop) Logs(string, int) string                                    { return "" }
 func (noop) Info(string) string                                         { return "" }
 func (noop) Rm(string) error                                            { return errNoRuntime }
@@ -93,6 +107,9 @@ func (noop) Healthy() (bool, string)                                    { return
 func (noop) EnsureImage(string, io.Writer) error                        { return errNoRuntime }
 
 // --- package façade: the core calls these; they dispatch to the wired backend ---
+
+// Name identifies the wired backend for humans (e.g. "podman", "apple container").
+func Name() string { return active.Name() }
 
 // Run launches a detached agent pod on the wired backend.
 func Run(o RunOpts) error { return active.Run(o) }
@@ -122,6 +139,9 @@ func RunningContext(ctx context.Context, name string) bool {
 // Diagnose returns a one-line account of what the running probe observes for name,
 // so a "not running" verdict can be explained instead of shrugged at.
 func Diagnose(ctx context.Context, name string) string { return active.Diagnose(ctx, name) }
+
+// Stats returns a point-in-time resource snapshot (memory usage vs limit) for a pod.
+func Stats(ctx context.Context, name string) (Usage, error) { return active.Stats(ctx, name) }
 
 // Logs returns the last `tail` lines of a pod's output.
 func Logs(name string, tail int) string { return active.Logs(name, tail) }

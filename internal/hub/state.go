@@ -26,6 +26,10 @@ import (
 // whole read — the board must stay responsive even when a pod is wedged.
 const probeTimeout = 3 * time.Second
 
+// statsTimeout bounds a single `stats` sample, which is slower than a liveness
+// probe (the runtime samples over a short window before returning).
+const statsTimeout = 8 * time.Second
+
 // AgentView is an agent as the UIs see it: identity + live workflow + runtime.
 // Status collapses runtime + workflow into one word: down | idle | working |
 // submitted. Project (repoTag) and Repo (human path) tag which repo it belongs to,
@@ -151,6 +155,72 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		}
 	}
 	return BoardState{Agents: agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans}, nil
+}
+
+// AgentStatsView is one agent's resource snapshot for `agent stats`. Err is set
+// (not swallowed) when the sample couldn't be read, so the row shows why instead
+// of a misleading zero.
+type AgentStatsView struct {
+	Name          string `json:"name"`
+	Repo          string `json:"repo"`
+	MemUsageBytes int64  `json:"memUsageBytes"`
+	MemLimitBytes int64  `json:"memLimitBytes"`
+	Err           string `json:"err,omitempty"`
+}
+
+// StatsReport is the `agent stats` payload: which runtime is wired, plus a memory
+// snapshot per running agent. Engine is included so the numbers are read in the
+// right context (podman shares one VM; apple container is one micro-VM per agent).
+type StatsReport struct {
+	Engine string           `json:"engine"`
+	Agents []AgentStatsView `json:"agents"`
+}
+
+// Stats returns the engine name and a resource snapshot for every running agent.
+func (h *Hub) Stats() (StatsReport, error) {
+	views, err := h.AllStats()
+	return StatsReport{Engine: container.Name(), Agents: views}, err
+}
+
+// AllStats returns a resource snapshot for every RUNNING agent, gathered
+// concurrently — each `stats` sample is slow (the runtime samples over a window),
+// so serial would be N×that. Down agents are omitted (no VM to sample). A per-agent
+// stats failure is reported in that row's Err, never silently dropped.
+func (h *Hub) AllStats() ([]AgentStatsView, error) {
+	agentsRow, err := h.store.AllAgents()
+	if err != nil {
+		return nil, err
+	}
+	views := make([]AgentStatsView, len(agentsRow))
+	var wg sync.WaitGroup
+	for i, a := range agentsRow {
+		wg.Add(1)
+		go func(i int, a store.Agent) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), statsTimeout)
+			defer cancel()
+			c := h.container(a.Project, a.Name)
+			if !container.RunningContext(ctx, c) {
+				return // down — no VM to sample; filtered out below (Name stays "")
+			}
+			v := AgentStatsView{Name: a.Name, Repo: h.repoName(a.Project)}
+			if s, serr := container.Stats(ctx, c); serr != nil {
+				v.Err = serr.Error()
+			} else {
+				v.MemUsageBytes, v.MemLimitBytes = s.MemoryUsageBytes, s.MemoryLimitBytes
+			}
+			views[i] = v
+		}(i, a)
+	}
+	wg.Wait()
+
+	out := make([]AgentStatsView, 0, len(views))
+	for _, v := range views {
+		if v.Name != "" { // running agents only
+			out = append(out, v)
+		}
+	}
+	return out, nil
 }
 
 // knownProjects returns the registry's projects (best-effort; empty on error).
@@ -330,7 +400,7 @@ func (h *Hub) AgentPane(project, name string, lines int) (string, error) {
 // pod view.
 func (h *Hub) PodInfo(project, name string) (string, error) {
 	c := h.container(project, name)
-	header := "container: " + c + "\n\n"
+	header := fmt.Sprintf("engine:    %s\ncontainer: %s\n\n", container.Name(), c)
 	if info := container.Info(c); info != "" {
 		return header + info, nil
 	}

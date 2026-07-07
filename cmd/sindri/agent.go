@@ -131,6 +131,83 @@ func agentListCmd() *cobra.Command {
 	}
 }
 
+// agentStatsCmd shows each running agent's VM memory usage against its limit — the
+// view for tuning per-agent memory (how close each micro-VM is to its ceiling).
+// Optional name arg narrows to one agent. Down agents are omitted (no VM to sample).
+func agentStatsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "stats [name]", Short: "Show each running agent's VM memory usage vs its limit", Args: cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withBackend(func(b backend) error {
+				report, err := b.Stats()
+				if err != nil {
+					return err
+				}
+				views := report.Agents
+				if len(args) == 1 { // narrow to one agent
+					var only []hub.AgentStatsView
+					for _, v := range views {
+						if v.Name == args[0] {
+							only = append(only, v)
+						}
+					}
+					views = only
+				}
+				fmt.Printf("engine: %s\n\n", report.Engine)
+				if len(views) == 0 {
+					fmt.Fprintln(os.Stderr, "no running agents to sample")
+					return nil
+				}
+				fmt.Printf("%-10.10s %-12s %s\n", "REPO", "AGENT", "MEMORY")
+				for _, v := range views {
+					if v.Err != "" { // surface the reason, don't hide it behind a blank row
+						fmt.Printf("%-10.10s %-12s stats unavailable: %s\n", v.Repo, v.Name, v.Err)
+						continue
+					}
+					fmt.Printf("%-10.10s %-12s %s\n", v.Repo, v.Name, memLine(v.MemUsageBytes, v.MemLimitBytes))
+				}
+				return nil
+			})
+		},
+	}
+}
+
+// memLine renders "544 MiB / 1024 MiB  53% [█████·····]" for a usage/limit pair.
+func memLine(usage, limit int64) string {
+	pct := 0.0
+	if limit > 0 {
+		pct = float64(usage) / float64(limit) * 100
+	}
+	return fmt.Sprintf("%9s / %-9s %3.0f%% %s", humanBytes(usage), humanBytes(limit), pct, memBar(pct))
+}
+
+// humanBytes formats a byte count in binary units (matches how memory limits are
+// configured — 1024 MiB == the 1 GiB default).
+func humanBytes(n int64) string {
+	const u = 1024
+	if n < u {
+		return fmt.Sprintf("%d B", n)
+	}
+	f, units, i := float64(n), []string{"KiB", "MiB", "GiB", "TiB"}, -1
+	for f >= u && i < len(units)-1 {
+		f, i = f/u, i+1
+	}
+	return fmt.Sprintf("%.0f %s", f, units[i])
+}
+
+// memBar is a 10-cell usage meter; fuller = closer to the limit.
+func memBar(pct float64) string {
+	const w = 10
+	fill := int(pct/100*w + 0.5)
+	if fill > w {
+		fill = w
+	}
+	if fill < 0 {
+		fill = 0
+	}
+	return "[" + strings.Repeat("█", fill) + strings.Repeat("·", w-fill) + "]"
+}
+
 func agentNewCmd() *cobra.Command {
 	var role string
 	c := &cobra.Command{
@@ -275,6 +352,10 @@ func agentInfoCmd() *cobra.Command {
 			return withAgent(args[0], func(b backend, found *hub.AgentView) error {
 				fmt.Printf("agent:     %s\nrole:      %s\nstatus:    %s\ntask:      %s\npr:        %s\nworkspace: %s\n",
 					found.Name, found.Role, found.Status, dash(found.Task), dash(found.PR), dash(found.Workspace))
+				// engine + the exact runtime instance (id, image, cpus, memory limit, host pid)
+				if inst, err := b.Instance(found.Name); err == nil && inst != "" {
+					fmt.Printf("\n%s\n", inst)
+				}
 				if debug { // explain the status: what each liveness probe actually observes
 					if d, err := b.Diagnose(found.Name); err == nil {
 						fmt.Printf("\nliveness probe (why status is %q):\n%s", found.Status, d)

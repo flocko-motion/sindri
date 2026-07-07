@@ -81,6 +81,24 @@ func (c *HTTP) State() (hub.BoardState, error) {
 	return out, c.get("/state", &out)
 }
 
+// Stats returns the wired engine plus a memory snapshot for every running agent
+// across all repos (the data behind `agent stats`).
+func (c *HTTP) Stats() (hub.StatsReport, error) {
+	var out hub.StatsReport
+	return out, c.get("/stats", &out)
+}
+
+// Instance returns the engine + container instance detail for one agent (engine,
+// container name, state, image, cpus, memory limit, platform, host pid) — the
+// identity behind `agent info`.
+func (c *HTTP) Instance(name string) (string, error) {
+	var ok struct {
+		Out string `json:"ok"`
+	}
+	err := c.get("/agent/pod?agent="+url.QueryEscape(name), &ok)
+	return ok.Out, err
+}
+
 // Watch subscribes to board-state changes over SSE. It returns a channel that
 // yields the current state on connect and a fresh snapshot on every change; the
 // channel closes when ctx is cancelled or the hub goes away.
