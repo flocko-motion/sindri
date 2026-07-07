@@ -28,18 +28,18 @@
 
 ## 5. TUI — global/repo scope toggle
 
-- [ ] 5.1 Add a scope toggle (a key, e.g. `g`) to the Agents and PRs tabs, `global ↔ repo`, default `global`; show the active scope in the footer.
-- [ ] 5.2 In `repo` mode, filter the (already-global) `BoardState.Agents`/`.PRs` to the active repo — a pure view filter, no new hub call.
-- [ ] 5.3 Confirm the Tasks tab stays always-scoped to the active repo regardless of the other tabs' toggle.
+- [x] 5.1 Add a scope toggle (a key, e.g. `g`) to the Agents and PRs tabs, `global ↔ repo`, default `global`; show the active scope in the footer.
+- [x] 5.2 In `repo` mode, filter the (already-global) `BoardState.Agents`/`.PRs` to the active repo — a pure view filter, no new hub call.
+- [x] 5.3 Confirm the Tasks tab stays always-scoped to the active repo regardless of the other tabs' toggle.
 
 ## 6. TUI — repo config form
 
-- [ ] 6.1 Add a config-edit form over the `.sindri/config.yaml` keys (`architecture`, `containerfile`, `review_prompt`, `github.issues`) reusing the task-form field primitives.
-- [ ] 6.2 Save through `WriteRepoConfig`; on a validation error, show it in the form and do not persist.
+- [x] 6.1 Add a config-edit form over the `.sindri/config.yaml` keys (`architecture`, `containerfile`, `review_prompt`, `github.issues`) reusing the task-form field primitives.
+- [x] 6.2 Save through `WriteRepoConfig`; on a validation error, show it in the form and do not persist.
 
 ## 7. Verify
 
-- [ ] 7.1 `make verify` (build + test + lint) green; new files pass the `brokkr` header/comment/loc lint.
-- [ ] 7.2 `brokkr lint openspec` validates this change's specs.
-- [ ] 7.3 End-to-end: `repo init` in a fresh repo scaffolds config + registers; it appears in the switcher and top bar; the Agents/PRs global↔repo toggle narrows/expands; editing config via the form takes effect; `repo forget` on an idle repo drops it (files intact) and it reappears on next use.
-- [ ] 7.4 Confirm the non-goal holds: no `Project` field was added to `store.Task`, no global `AllTasks`, and the task tree is unchanged.
+- [x] 7.1 `make verify` (build + test + lint) green; new files pass the `brokkr` header/comment/loc lint.
+- [x] 7.2 `brokkr lint openspec` validates this change's specs.
+- [~] 7.3 (manual) End-to-end: `repo init` in a fresh repo scaffolds config + registers; it appears in the switcher and top bar; the Agents/PRs global↔repo toggle narrows/expands; editing config via the form takes effect; `repo forget` on an idle repo drops it (files intact) and it reappears on next use.
+- [x] 7.4 Confirm the non-goal holds: no `Project` field was added to `store.Task`, no global `AllTasks`, and the task tree is unchanged.

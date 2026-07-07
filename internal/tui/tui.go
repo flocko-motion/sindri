@@ -87,6 +87,7 @@ type model struct {
 	collapsed  map[string]bool
 	merging    map[string]bool // PR ids the user just triggered a merge on — shown as a transient "merging" on the row until the hub confirms
 	hideDetail bool            // § force-hides the detail pane (else shown when wide enough)
+	scopeRepo  [3]bool         // per-tab global↔repo scope; Agents(1)/PRs(2) narrow to the active repo when true (Tasks always repo-scoped)
 
 	rightFocus  bool // detail (right) column has focus (h/l switch; j/k move within)
 	rightCursor int  // focused actionable item in the right column
@@ -243,6 +244,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reclamp()
 	case taskMsg:
 		m.taskDetail = msg.t
+	case repoConfigMsg:
+		if msg.err != nil {
+			m.errText = msg.err.Error()
+		} else {
+			m.openRepoConfigForm(msg.d)
+		}
 	case errModalMsg:
 		m.errText = msg.err.Error()
 	case errMsg:
@@ -537,6 +544,18 @@ func (m *model) onKey(k string) tea.Cmd {
 	case "P": // switch the selected repo (scopes the Tasks tab; Agents/PRs stay global)
 		m.openSwitcher()
 		return nil
+	case "E": // edit the current repo's .sindri/config.yaml in a form
+		return m.repoConfigCmd()
+	case "s": // agents/prs: toggle this tab's scope between global (all repos) and the active repo
+		if m.tab == 1 || m.tab == 2 {
+			m.scopeRepo[m.tab] = !m.scopeRepo[m.tab]
+			m.cursor[m.tab] = 0
+			if m.scopeRepo[m.tab] {
+				m.flash = "scope: this repo"
+			} else {
+				m.flash = "scope: all repos"
+			}
+		}
 	}
 	m.reclamp()
 	cmd := m.syncDetail()
@@ -603,32 +622,6 @@ func (m *model) syncDetail() tea.Cmd {
 	}
 }
 
-// rows / detailLines dispatch to the active tab (tasks.go / agents.go / prs.go).
-func (m model) rows() []row {
-	switch m.tab {
-	case 0:
-		return m.taskRows()
-	case 1:
-		return m.agentRows()
-	default:
-		return m.prRows()
-	}
-}
-
-func (m model) contextFooter() string {
-	if m.rightFocus { // focused on a detail cross-reference (Tasks/PRs)
-		return "j/k item · enter details · g goto · y copy"
-	}
-	switch m.tab {
-	case 0:
-		return fmt.Sprintf("N new · e edit · p priority · U unassign · C close · A/R approve/reject · f filter: %s · h/l fold", filterNames[m.filter])
-	case 1:
-		return "N new · S start/stop · t tell · a attach · D delete"
-	default:
-		return "V verify · a approve · R reject · A agent-review · L lint · m merge"
-	}
-}
-
 func (m model) selID() string {
 	r := m.rows()
 	if c := m.cursor[m.tab]; c >= 0 && c < len(r) {
@@ -688,7 +681,7 @@ func (m model) View() string {
 	if m.mode != inputNone {
 		foot = dimStyle.Render(padTrunc("enter submit · esc cancel", m.w)) + "\n" + m.input.View()
 	} else {
-		global := "⇥/⇧⇥ tab · C-h/l pane · § detail · j/k move · J/K scroll · r refresh · q quit"
+		global := "⇥/⇧⇥ tab · C-h/l pane · § detail · j/k move · P repo · E config · r refresh · q quit"
 		if m.flash != "" {
 			global = m.flash
 		}

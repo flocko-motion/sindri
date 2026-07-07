@@ -229,8 +229,12 @@ func (m *model) openReviewForm(prID string) {
 const prDetailW = 44
 
 func (m model) prRows() []row {
+	_, tag := m.currentRepo()
 	var out []row
 	for _, p := range m.state.PRs {
+		if m.scopeRepo[2] && p.Project != tag { // repo-scoped: only the active repo's PRs
+			continue
+		}
 		repo := projectStyle(p.Project).Render(fmt.Sprintf("%-10.10s", m.repoName(p.Project)))
 		status := p.Status
 		if m.merging[p.ID] && p.Status != "merged" { // transient: the user triggered a merge, awaiting the hub

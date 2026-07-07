@@ -8,7 +8,11 @@
 //          tab's (-> tab_*.go).
 package tui
 
-import "github.com/flo-at/sindri/internal/hub/store"
+import (
+	"fmt"
+
+	"github.com/flo-at/sindri/internal/hub/store"
+)
 
 // detailLines is the current tab's detail content (the right column / modal body).
 func (m model) detailLines() []string {
@@ -134,6 +138,41 @@ func (m *model) gotoItem(kind, id string) {
 	m.rightFocus = false
 	m.tab = t
 	m.selectRow(id)
+}
+
+// rows dispatches to the active tab's row builder (tasks/agents/prs).
+func (m model) rows() []row {
+	switch m.tab {
+	case 0:
+		return m.taskRows()
+	case 1:
+		return m.agentRows()
+	default:
+		return m.prRows()
+	}
+}
+
+// scopeName labels the global↔repo scope toggle for the footer.
+func scopeName(repoScoped bool) string {
+	if repoScoped {
+		return "repo"
+	}
+	return "global"
+}
+
+// contextFooter is the active tab's action hints (second footer row).
+func (m model) contextFooter() string {
+	if m.rightFocus { // focused on a detail cross-reference (Tasks/PRs)
+		return "j/k item · enter details · g goto · y copy"
+	}
+	switch m.tab {
+	case 0:
+		return fmt.Sprintf("N new · e edit · p priority · U unassign · C close · A/R approve/reject · f filter: %s · h/l fold", filterNames[m.filter])
+	case 1:
+		return "N new · S start/stop · t tell · a attach · D delete · s scope: " + scopeName(m.scopeRepo[1])
+	default:
+		return "V verify · a approve · R reject · A agent-review · L lint · m merge · s scope: " + scopeName(m.scopeRepo[2])
+	}
 }
 
 // actionableItems is the focusable cross-references of the current tab's detail.

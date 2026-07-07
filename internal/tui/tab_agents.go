@@ -302,8 +302,12 @@ func (m model) selAgent() (hub.AgentView, bool) {
 }
 
 func (m model) agentRows() []row {
+	_, tag := m.currentRepo()
 	var out []row
 	for _, a := range m.state.Agents {
+		if m.scopeRepo[1] && a.Project != tag { // repo-scoped: only the active repo's agents
+			continue
+		}
 		// Whole row coloured by lifecycle state (grey down, yellow transitioning,
 		// green running); cells styled independently so resets don't bleed.
 		ac := agentStatusStyle(a.Status)
