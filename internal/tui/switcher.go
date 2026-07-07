@@ -9,10 +9,12 @@ package tui
 
 import (
 	"context"
+	"sort"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/flo-at/sindri/internal/client"
+	"github.com/flo-at/sindri/internal/hub/store"
 )
 
 // switchRepoMsg asks the model to re-scope the board to a repo (by its path).
@@ -25,9 +27,13 @@ func (m *model) openSwitcher() {
 		m.flash = "no repos yet"
 		return
 	}
+	projects := m.switcherOrder()
 	var opts, vals []string
-	for _, p := range m.state.Projects {
+	for _, p := range projects {
 		label := m.repoName(p.Tag)
+		if m.repoHasLiveAgent(p.Tag) {
+			label += " ●" // a repo where work is happening right now
+		}
 		if p.Path == m.root {
 			label += " ✓"
 		}
@@ -38,6 +44,36 @@ func (m *model) openSwitcher() {
 		active: true, title: "Switch repo", options: opts, values: vals,
 		apply: func(path string) tea.Cmd { return func() tea.Msg { return switchRepoMsg(path) } },
 	}
+}
+
+// switcherOrder ranks the known repos for the picker: repos with a live agent first
+// (that's where work is happening), then by recency (most-recently-used), then
+// alphabetically by name — so the relevant repos are always near the top of a
+// possibly-long list.
+func (m *model) switcherOrder() []store.Project {
+	ps := append([]store.Project(nil), m.state.Projects...)
+	sort.SliceStable(ps, func(i, j int) bool {
+		li, lj := m.repoHasLiveAgent(ps[i].Tag), m.repoHasLiveAgent(ps[j].Tag)
+		if li != lj {
+			return li // live agents first
+		}
+		if ps[i].LastUsed != ps[j].LastUsed {
+			return ps[i].LastUsed > ps[j].LastUsed // most recent first
+		}
+		return m.repoName(ps[i].Tag) < m.repoName(ps[j].Tag)
+	})
+	return ps
+}
+
+// repoHasLiveAgent reports whether any agent in the repo is currently running — read
+// from the already-global board snapshot, so ordering needs no extra hub call.
+func (m *model) repoHasLiveAgent(tag string) bool {
+	for _, a := range m.state.Agents {
+		if a.Project == tag && a.Status != "down" {
+			return true
+		}
+	}
+	return false
 }
 
 // switchRepo re-subscribes /events to path so the Tasks tab (and container/attach)

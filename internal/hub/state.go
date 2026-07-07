@@ -87,6 +87,21 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	if err != nil {
 		return BoardState{}, err
 	}
+	// Only registered repos surface in the global views. A forgotten repo's PRs stay
+	// in the db (keyed by its stable tag, so re-adding the repo reactivates them) but
+	// drop out of the fleet PR tab — forgetting a repo means giving up its management,
+	// not surfacing its records. (Its agents are already deleted, so AllAgents is clean.)
+	registered := map[string]bool{}
+	for _, p := range h.knownProjects() {
+		registered[p.Tag] = true
+	}
+	kept := prs[:0]
+	for _, pr := range prs {
+		if registered[pr.Project] {
+			kept = append(kept, pr)
+		}
+	}
+	prs = kept
 	var tasks []store.Task
 	if selected != "" {
 		if tasks, err = h.store.For(selected).AllTasks(); err != nil {

@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/flo-at/sindri/internal/config"
 	"golang.org/x/term"
 )
 
@@ -85,10 +86,20 @@ type NameReq struct {
 	Memory string `json:"memory"` // set an agent's RAM limit (POST /agent/memory)
 }
 
+// RepoReq targets a registered repo by its tag (POST /repo/forget).
+type RepoReq struct {
+	Tag string `json:"tag"`
+}
+
 // globalRoutes are the only control endpoints valid without a repo context: the
 // board reads, which return global agents/PRs (and no tasks when no repo is
 // selected). Everything else is repo-scoped and requires X-Sindri-Project.
-var globalRoutes = map[string]bool{"/state": true, "/events": true, "/stats": true}
+var globalRoutes = map[string]bool{
+	"/state": true, "/events": true, "/stats": true,
+	// Registry management spans repos: listing, inspecting, and forgetting a repo
+	// operate on the registry by tag, not on the caller's cwd.
+	"/repos": true, "/repo": true, "/repo/forget": true,
+}
 
 // requireProject rejects a repo-scoped request that arrives without an
 // X-Sindri-Project header (rather than silently acting on a phantom empty project),
@@ -132,6 +143,36 @@ func (h *Hub) Handler() http.Handler {
 	mux.HandleFunc("GET /events", h.handleEvents)
 	mux.HandleFunc("POST /refresh", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, okMsg{"refreshed"}, h.Refresh(h.reqProject(r)))
+	})
+	mux.HandleFunc("GET /repos", func(w http.ResponseWriter, r *http.Request) {
+		list, err := h.RepoList()
+		writeJSON(w, list, err)
+	})
+	mux.HandleFunc("GET /repo", func(w http.ResponseWriter, r *http.Request) {
+		tag := r.URL.Query().Get("tag")
+		if tag == "" {
+			tag = h.reqProject(r) // default to the caller's repo
+		}
+		d, err := h.RepoInfo(tag)
+		writeJSON(w, d, err)
+	})
+	mux.HandleFunc("POST /repo/init", func(w http.ResponseWriter, r *http.Request) {
+		sum, err := h.RepoInit(r.Header.Get("X-Sindri-Project")) // repo-scoped: header is the root
+		writeJSON(w, sum, err)
+	})
+	mux.HandleFunc("POST /repo/forget", func(w http.ResponseWriter, r *http.Request) {
+		var req RepoReq
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"forgotten"}, h.RepoForget(req.Tag))
+	})
+	mux.HandleFunc("POST /repo/config", func(w http.ResponseWriter, r *http.Request) {
+		var cfg config.Config
+		if !decode(w, r, &cfg) {
+			return
+		}
+		writeJSON(w, okMsg{"saved"}, h.WriteRepoConfig(r.Header.Get("X-Sindri-Project"), cfg))
 	})
 	mux.HandleFunc("GET /log", func(w http.ResponseWriter, r *http.Request) {
 		evs, err := h.Log(h.reqProject(r), r.URL.Query().Get("agent"))

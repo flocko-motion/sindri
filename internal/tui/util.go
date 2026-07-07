@@ -19,6 +19,17 @@ func (m model) repoName(tag string) string {
 	return tag
 }
 
+// currentRepo returns the selected repo's short name and tag (resolved from m.root),
+// or ("","") when nothing matches — the source for the persistent header indicator.
+func (m model) currentRepo() (name, tag string) {
+	for _, p := range m.state.Projects {
+		if p.Path == m.root {
+			return filepath.Base(p.Path), p.Tag
+		}
+	}
+	return "", ""
+}
+
 // row is one selector line: display text + the id it selects ("" = not selectable).
 type row struct {
 	text string

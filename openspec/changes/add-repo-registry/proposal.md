@@ -24,11 +24,13 @@ intentional, and switching is frictionless and visible.
   scaffolds a committed `.sindri/config.yaml` (and seeds `ARCHITECTURE.md`) — a
   clean "this repo is set up" step. A repo you never `init` still self-registers on
   first use, exactly as today. Nothing is required; `init` is a convenience.
-- **`repo forget` gives up management without deleting anything.** It removes the
-  registry row only — the repo, its `.sindri/` files, and its git history are
-  untouched. It is refused while the repo has live agents (stop them first). Because
-  implicit registration stays, `forget` is transient: using the repo again
-  re-registers it. (The name is deliberate — we forget the repo, we don't delete it.)
+- **`repo forget` gives up management without deleting the repo.** It deletes the
+  repo's agents (freeing their pods and worktrees) and removes the registry row, but
+  leaves the repo itself alone — its `.sindri/` config and git history stay, and its
+  passive hub records (cached tasks, priority overrides, approvals, PRs, event log)
+  are retained keyed by the repo's stable tag. Re-adding the same repo reactivates
+  those records; forgotten records don't surface in the global views meanwhile. (The
+  name is deliberate — we forget the repo, we don't delete it.)
 - **The repo switcher becomes first-class** in the TUI: a visible control, with the
   active repo labeled on the Tasks tab so per-repo scoping is obvious, not implicit.
 - **Agents and PRs tabs gain a `global/repo` scope toggle** (default `global`). In

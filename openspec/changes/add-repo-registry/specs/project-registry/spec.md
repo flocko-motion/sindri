@@ -82,26 +82,33 @@ to both the CLI and the TUI.
 
 ### Requirement: Give up management without deleting (`repo forget`)
 
-The hub SHALL let a user drop a repo from the registry (`repo forget`). Forgetting
-SHALL remove only the registry row — the repository, its `.sindri/` files, its
-worktrees, and its git history SHALL NOT be touched. Forgetting SHALL be refused
-while the repo still has agents on its roster; the user must stop or delete those
-agents first. Because implicit registration remains, a forgotten repo SHALL
-re-register on next use — `forget` drops the repo from the current view, it does not
-permanently exclude it.
+The hub SHALL let a user stop managing a repo (`repo forget`). Forgetting SHALL
+delete the repo's agents — freeing their runtime (pods, worktrees) and identities —
+and remove the registry row. It SHALL NOT delete the repository: its `.sindri/`
+config and its git history SHALL be left intact, and the repo's passive hub records
+(cached tasks, priority overrides, approvals, PRs, and the event log) SHALL be left
+in the store keyed by the repo's stable path-derived tag. Because that tag is stable
+and implicit registration remains, re-adding the same repo (via `repo init` or any
+use) SHALL resolve to the same tag and reactivate those records — a soft forget for
+the repo's records, a hard teardown for its running agents. A forgotten repo's
+records SHALL NOT surface in the global fleet views until it is re-added.
 
-#### Scenario: Forget an idle repo
+#### Scenario: Forget tears down agents but keeps the repo
 
-- **WHEN** the user runs `repo forget <repo>` on a repo with no agents
-- **THEN** the registry row is removed and the repo's files on disk are unchanged
+- **WHEN** the user runs `repo forget <repo>` on a repo that has agents
+- **THEN** those agents are deleted (their pods and worktrees removed) and the
+  registry row is dropped, while the repo's `.sindri/` config and git history are
+  left untouched
 
-#### Scenario: Forget refused while agents live
+#### Scenario: Forgotten records do not surface
 
-- **WHEN** the user runs `repo forget <repo>` and that repo still has agents
-- **THEN** the operation is refused with a message telling them to stop or delete the
-  agents first, and the registry row is kept
+- **WHEN** a repo has been forgotten
+- **THEN** its PRs and agents no longer appear in the global fleet views, though its
+  records remain in the store
 
-#### Scenario: Forgotten repo returns on use
+#### Scenario: Re-adding reactivates the records
 
-- **WHEN** a forgotten repo is used again by any sindri command
-- **THEN** it silently re-registers (forget is not a permanent ban)
+- **WHEN** a forgotten repo is re-added (re-run `repo init`, or use it so it
+  self-registers)
+- **THEN** it resolves to the same tag and its retained records (priority overrides,
+  approvals, task cache, PRs) are in effect again

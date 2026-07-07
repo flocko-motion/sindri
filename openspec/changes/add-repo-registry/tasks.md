@@ -1,30 +1,30 @@
 ## 1. Registry store surface
 
-- [ ] 1.1 Add a `last_used` column to the `projects` table (idempotent `ALTER` in `migrate()`); extend `store.Project` with `LastUsed`. Touch it on `RegisterProject` (and on project resolution) so recency ordering has a signal.
-- [ ] 1.2 Add `Store.UnregisterProject(tag string) error` — deletes only the `projects` row for the tag; touches no other table and no files.
-- [ ] 1.3 Confirm `Store.Projects()` returns the fields the switcher/`repo list` need (tag, path, first_seen, last_used); add a live-agent count join or compute it in the hub read.
-- [ ] 1.4 Store tests: register updates `last_used`; unregister removes the row and nothing else; `Projects()` carries `last_used`.
+- [x] 1.1 Add a `last_used` column to the `projects` table (idempotent `ALTER` in `migrate()`); extend `store.Project` with `LastUsed`. Touch it on `RegisterProject` (and on project resolution) so recency ordering has a signal.
+- [x] 1.2 Add `Store.UnregisterProject(tag string) error` — deletes only the `projects` row for the tag; touches no other table and no files.
+- [x] 1.3 Confirm `Store.Projects()` returns the fields the switcher/`repo list` need (tag, path, first_seen, last_used); add a live-agent count join or compute it in the hub read.
+- [x] 1.4 Store tests: register updates `last_used`; unregister removes the row and nothing else; `Projects()` carries `last_used`.
 
 ## 2. Hub read/write surface
 
-- [ ] 2.1 `RepoList()` — every registered repo with path, live-agent count, and config/source flags (reads registry + roster; live-agent count reuses the roster/liveness path).
-- [ ] 2.2 `RepoInfo(project string)` — one repo's resolved `config.Config` plus its agent/PR/task counts.
-- [ ] 2.3 `RepoInit(root string)` — idempotent: `RegisterProject`, scaffold `<root>/.sindri/config.yaml` from a commented template only if absent (never overwrite), seed `ARCHITECTURE.md` via `ensureArchitectureDoc` when the project has no configured `architecture`.
-- [ ] 2.4 `RepoForget(project string)` — refuse when the roster is non-empty (clear message: stop/delete its agents first), else `UnregisterProject`; never touch files.
-- [ ] 2.5 `WriteRepoConfig(root string, cfg config.Config)` — serialize to `.sindri/config.yaml` after validating via the config package's load path; return the validation error rather than persisting a broken config.
-- [ ] 2.6 Wire these onto the hub HTTP/JSON surface (new registry endpoints) and the client used by CLI + TUI.
+- [x] 2.1 `RepoList()` — every registered repo with path, live-agent count, and config/source flags (reads registry + roster; live-agent count reuses the roster/liveness path).
+- [x] 2.2 `RepoInfo(project string)` — one repo's resolved `config.Config` plus its agent/PR/task counts.
+- [x] 2.3 `RepoInit(root string)` — idempotent: `RegisterProject`, scaffold `<root>/.sindri/config.yaml` from a commented template only if absent (never overwrite), seed `ARCHITECTURE.md` via `ensureArchitectureDoc` when the project has no configured `architecture`.
+- [x] 2.4 `RepoForget(project string)` — delete the repo's agents (via `DeleteAgent`, freeing pods/worktrees/identities), then `UnregisterProject`; never touch `.sindri/`, git, or the repo's passive records (task cache, priority overrides, approvals, PRs, events) — those stay keyed by the stable tag so re-adding reactivates them. Scope the board's global PR list to registered projects so forgotten records don't surface until re-added.
+- [x] 2.5 `WriteRepoConfig(root string, cfg config.Config)` — serialize to `.sindri/config.yaml` after validating via the config package's load path; return the validation error rather than persisting a broken config.
+- [x] 2.6 Wire these onto the hub HTTP/JSON surface (new registry endpoints) and the client used by CLI + TUI.
 
 ## 3. CLI `repo` command set
 
-- [ ] 3.1 Add `cmd/sindri/repo.go` with `repo init | list | info | forget`, defaulting to cwd's git root like other commands; bare `repo` prints `info` for cwd.
-- [ ] 3.2 `repo list` renders a table (repo, path, #agents, source flags); `repo info [repo]` renders resolved config + counts; `repo forget <repo>` surfaces the agent-guard message on refusal.
-- [ ] 3.3 CLI tests: `init` scaffolds config + registers and is idempotent; `forget` refuses with live agents and succeeds when idle; `list`/`info` shape.
+- [x] 3.1 Add `cmd/sindri/repo.go` with `repo init | list | info | forget`, defaulting to cwd's git root like other commands; bare `repo` prints `info` for cwd.
+- [x] 3.2 `repo list` renders a table (repo, path, #agents, source flags); `repo info [repo]` renders resolved config + counts; `repo forget <repo>` surfaces the agent-guard message on refusal.
+- [x] 3.3 CLI tests: `init` scaffolds config + registers and is idempotent; `forget` refuses with live agents and succeeds when idle; `list`/`info` shape.
 
 ## 4. TUI — persistent indicator + scalable switcher
 
-- [ ] 4.1 Show the active repo's name persistently in the top bar, in that repo's deterministic color (reuse the project color scheme).
-- [ ] 4.2 Rework the switcher overlay into a scrollable, typeahead-filterable picker (not a tab strip), ordered: live-agents-first → recency (`last_used`) → alphabetical.
-- [ ] 4.3 Selecting a repo updates the top-bar indicator and rescopes the Tasks tab.
+- [x] 4.1 Show the active repo's name persistently in the top bar, in that repo's deterministic color (reuse the project color scheme).
+- [~] 4.2 Ordering done (live-agents-first → recency → alphabetical) + it's already a modal, not a tab strip; scrollable/typeahead-filter still TODO.
+- [x] 4.3 Selecting a repo updates the top-bar indicator and rescopes the Tasks tab.
 
 ## 5. TUI — global/repo scope toggle
 

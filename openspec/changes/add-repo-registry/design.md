@@ -37,15 +37,23 @@ A repo that is never `init`ed still self-registers on first use — `init` only
 front-loads the setup and hands the user a config file to edit. No code path
 requires a repo to be init'ed first.
 
-### forget is registry-only and guarded
+### forget tears down agents, keeps the repo (soft records)
 
-`forget` calls a new `Store.UnregisterProject(tag)` that deletes the registry row
-and nothing else. It is refused when the repo still has agents in the roster
-(`"stop or delete <repo>'s agents first"`) so we never orphan running pods from
-their registry entry. It never removes `.sindri/`, worktrees, or git state — the
-verb is *forget*, not *delete*. Because implicit registration remains, the next
-command run in that repo re-registers it; `forget` is "drop from my view now," not
-a permanent exclusion (explicitly a non-goal).
+`forget` deletes the repo's agents (each via `DeleteAgent` — freeing pods,
+worktrees, identities), then calls a new `Store.UnregisterProject(tag)` that removes
+the registry row. It never touches `.sindri/`, the repo's git state, or the repo's
+**passive hub records** — the cached tasks, `task_priority` overrides,
+`task_approval` gates, PRs, and event log all stay in the store, keyed by the repo's
+stable path-derived `repoTag`. Because that tag is a digest of the absolute path,
+re-adding the same repo resolves to the same tag and every retained record re-links
+automatically: that tag-stability *is* the soft-delete, so no per-row "deleted" flag
+is needed. The verb is *forget*, not *delete* — a hard teardown of the running
+agents, a soft forget of the repo's records.
+
+To keep a forgotten repo out of the **global** views (PRs are read globally via
+`AllPRs`), the board's PR list is scoped to registered projects: forgotten records
+stay in the store but stop surfacing until the repo is re-added. Agents are deleted
+outright, so `AllAgents` is already clean.
 
 ## TUI: switcher + scope toggle + config form
 

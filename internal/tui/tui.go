@@ -669,7 +669,8 @@ func (m model) View() string {
 		}
 		return modal(title, m.modalLines(), m.detail, m.w, m.h)
 	}
-	top := tabStrip(labels, m.tab, m.w)
+	repoName, repoTag := m.currentRepo()
+	top := headerBar(labels, m.tab, m.w, repoName, repoTag)
 	var body string
 	if m.tab == 1 && m.wide() { // bespoke: list + live tmux pane; right detail unless §-hidden
 		body = m.agentsBody()
