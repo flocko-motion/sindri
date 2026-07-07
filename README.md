@@ -360,6 +360,39 @@ openspec/           the spec-driven design (specs + changes)
 
 ---
 
+## Per-project config (`.sindri/config.yaml`)
+
+A repo can declare project-specific settings in a committed `.sindri/config.yaml`, so
+they travel with the repo. It overlays an optional global `config.yaml` in the sindri
+state dir (`~/.local/state/sindri`, or `$SINDRI_HOME`), which overlays the built-in
+defaults — **repo → global → default, per key**. All keys are optional:
+
+```yaml
+# .sindri/config.yaml
+architecture: docs/ARCHITECTURE.md    # doc the reviewer must read (default: ARCHITECTURE.md)
+containerfile: .sindri/Containerfile  # agent image recipe (highest-precedence; see below)
+review_prompt: .sindri/review.md      # file whose contents become the reviewer's prompt
+github:
+  issues: true                        # (reserved) GitHub-issue task source — not wired yet
+```
+
+- **`architecture`** — repo-relative path to the doc the reviewer is told to read
+  before every verdict. When set it must exist; when unset, sindri seeds a placeholder
+  `ARCHITECTURE.md`.
+- **`containerfile`** — repo-relative agent-image recipe (see the next section).
+- **`review_prompt`** — repo-relative file whose contents replace the default reviewer
+  prompt.
+- **`github.issues`** — reserved for the GitHub-issue task source, which isn't
+  implemented yet; the key validates but has no effect today.
+
+**Fail-loud:** a malformed file, an unknown key, a wrong-typed value, or a path that's
+absolute / escapes the repo / (when set) names a missing file makes the operation that
+needs the project (launch, review, image build) fail with a clear error naming the file
+and the problem — never a silent fallback. An **absent** config is fine; every default
+holds.
+
+---
+
 ## Customizing the agent image
 
 Agents run in an image sindri builds from a recipe it carries embedded in the binary
@@ -367,10 +400,11 @@ Agents run in an image sindri builds from a recipe it carries embedded in the bi
 without extra files. To add tools, pin a base, or bake in credentials, drop your own
 `Containerfile` (or `Dockerfile`). It's discovered in this order — first match wins:
 
-1. **Per-repo:** `<repo>/.sindri/Containerfile` — applies to that repo's agents only.
-2. **Global:** `<sindri state dir>/Containerfile` (`~/.local/state/sindri`, or
+1. **Config key:** `containerfile:` in `.sindri/config.yaml` (above) — explicit.
+2. **Per-repo:** `<repo>/.sindri/Containerfile` — applies to that repo's agents only.
+3. **Global:** `<sindri state dir>/Containerfile` (`~/.local/state/sindri`, or
    `$SINDRI_HOME`) — applies to every repo you orchestrate.
-3. Otherwise the **embedded default**.
+4. Otherwise the **embedded default**.
 
 Your recipe fully replaces the embedded Dockerfile, but it builds in the same
 context: the entrypoint, docker shims, and helpers are materialized alongside it, so

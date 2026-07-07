@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
+	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -61,6 +62,17 @@ func (h *Hub) PRInfo(project, id string) (PRDetail, error) {
 // ReviewPrompt returns a project's default agentic-review instruction, read from
 // its central review-prompt.txt — auto-created with a built-in default if absent.
 func (h *Hub) ReviewPrompt(project string) (string, error) {
+	// A repo-committed `review_prompt` in .sindri/config.yaml takes precedence — its
+	// file's contents are the reviewer prompt (the config validated the path exists).
+	if cfg, err := h.projectConfig(project); err != nil {
+		return "", err
+	} else if cfg.ReviewPrompt != "" {
+		data, rerr := os.ReadFile(config.Abs(h.projectRoot(project), cfg.ReviewPrompt))
+		if rerr != nil {
+			return "", fmt.Errorf("read review_prompt %s: %w", cfg.ReviewPrompt, rerr)
+		}
+		return strings.TrimSpace(string(data)), nil
+	}
 	dir := filepath.Join(paths.StateDir(), project)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
@@ -128,7 +140,7 @@ func (h *Hub) RequestReview(project, prID, requirement string) error {
 	}
 	_ = ps.SetState(store.AgentState{Agent: reviewer, Phase: "reviewing"}) // board shows it working, not idle
 	_ = ps.LogPR(prID, "review-requested", "assigned to "+reviewer)
-	go h.injectWhenReady(project, reviewer, msgReview(prID, requirement, pr.Branch, pr.Base, checkedOut)) // async: don't block a worker's submit
+	go h.injectWhenReady(project, reviewer, msgReview(prID, requirement, pr.Branch, pr.Base, h.architectureDoc(project), checkedOut)) // async: don't block a worker's submit
 	h.notify()
 	return nil
 }

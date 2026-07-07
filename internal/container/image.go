@@ -98,10 +98,14 @@ func (p *buildProgress) finish() {
 // embedded (or absent) recipe, or a content-derived sindri-agent:custom-<hash> when
 // a repo/global custom recipe is in play, so repos with different recipes don't
 // clobber each other's tag (or thrash each other's build cache).
-func EnsureImageWith(projectRoot string, out io.Writer, b ImageBuilder) (string, error) {
-	// Precedence: a repo-local .sindri/ recipe, then the global StateDir recipe,
-	// then the embedded default (read once, folded into the build key so edits rebuild).
-	custom := customDockerfile(projectRoot)
+func EnsureImageWith(projectRoot, containerfile string, out io.Writer, b ImageBuilder) (string, error) {
+	// Precedence: an explicit config `containerfile` (resolved by the caller), then a
+	// repo-local .sindri/ recipe, then the global StateDir recipe, then the embedded
+	// default (read once, folded into the build key so edits rebuild).
+	custom := containerfile
+	if custom == "" {
+		custom = customDockerfile(projectRoot)
+	}
 	var customData []byte
 	if custom != "" {
 		data, err := os.ReadFile(custom)

@@ -338,8 +338,8 @@ func (Engine) Healthy() (ok bool, hint string) {
 
 // EnsureImage builds the agent image via `container build` when the recipe is stale,
 // returning the image reference to run.
-func (Engine) EnsureImage(root string, out io.Writer) (string, error) {
-	return container.EnsureImageWith(root, out, appleBuilder{})
+func (Engine) EnsureImage(root, containerfile string, out io.Writer) (string, error) {
+	return container.EnsureImageWith(root, containerfile, out, appleBuilder{})
 }
 
 // appleBuilder is the Apple-`container` slice of image building.

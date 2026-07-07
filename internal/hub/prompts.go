@@ -20,7 +20,11 @@ const defaultReviewPrompt = "Review this PR for correctness, clarity, and fit to
 // (re-)reads the repo's architecture guide before ruling. The hub seeds an
 // ARCHITECTURE.md into every repo it serves (see ensureArchitectureDoc), so there
 // is always one to read.
-const reviewArchitecture = " Read /workspace/ARCHITECTURE.md now (even if you read it before) and confirm the changes follow it."
+// reviewArchitecture builds the reviewer's "read the architecture doc" clause for the
+// project's configured doc path (arch is repo-relative; /workspace is the mounted root).
+func reviewArchitecture(arch string) string {
+	return fmt.Sprintf(" Read /workspace/%s now (even if you read it before) and confirm the changes follow it.", arch)
+}
 
 // architecturePlaceholder seeds a repo's ARCHITECTURE.md when it has none, so the
 // repo gains a home for the rules reviewers enforce. Deliberately minimal — a
@@ -164,9 +168,9 @@ const dirPlanner = "You're planning new features together with the user. Get ori
 // reorients: this is freestyle collaboration in the shared checkout.
 const dirCoauthor = "You're a coauthor working directly with the user in the shared checkout at /workspace — there's no task queue here. Do what the user asks in this terminal; edit files, run the build/tests, and use git yourself. `sindri lint` runs the quality gate, `sindri log \"<note>\"` records a note. When the user goes quiet, wait for their next instruction."
 
-func dirReview(prID, task string) string {
+func dirReview(prID, task, arch string) string {
 	return fmt.Sprintf("Review %s (task %s): the PR branch is checked out fresh in /workspace — review it (or `sindri show %s`), run `sindri lint %s`, then `sindri approve %s` or `sindri reject %s \"<reason>\"`.%s",
-		prID, task, prID, prID, prID, prID, reviewArchitecture)
+		prID, task, prID, prID, prID, prID, reviewArchitecture(arch))
 }
 
 func dirClaimed(id, title, branch string) string {
@@ -238,7 +242,7 @@ func msgRejectedByReviewer(prID, feedback string) string {
 // branch out fresh into the reviewer's /workspace (the reviewer only reads), so it
 // points there. If that checkout failed it says so loudly and falls back to the diff
 // over the socket, so the reviewer never mistakes a stale tree for the PR.
-func msgReview(prID, requirement, branch, base string, checkedOut bool) string {
+func msgReview(prID, requirement, branch, base, arch string, checkedOut bool) string {
 	seeChanges := fmt.Sprintf("`sindri show %s`", prID)
 	loc := ""
 	if checkedOut {
@@ -250,7 +254,7 @@ func msgReview(prID, requirement, branch, base string, checkedOut bool) string {
 		loc = fmt.Sprintf("⚠ %s could NOT be checked out into /workspace — review from the diff only; do NOT trust /workspace. ", branch)
 	}
 	return fmt.Sprintf("[hub] Review %s — %s %s(1) see what changed: %s. (2) check the gate: `sindri lint %s`. (3) decide: `sindri approve %s` or `sindri reject %s \"<findings>\"`.%s",
-		prID, requirement, loc, seeChanges, prID, prID, prID, reviewArchitecture)
+		prID, requirement, loc, seeChanges, prID, prID, prID, reviewArchitecture(arch))
 }
 
 // --- instructive replies to worker verbs ---

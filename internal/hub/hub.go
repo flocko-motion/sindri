@@ -30,6 +30,7 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/adapter/td"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
+	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/paths"
@@ -172,26 +173,14 @@ func New() (*Hub, error) {
 func (h *Hub) repo(root string) *store.ProjectStore {
 	tag := repoTag(root)
 	_ = h.store.RegisterProject(tag, root)
-	ensureGitignore(root)       // keep .worktrees/ out of the repo's git status
-	ensureArchitectureDoc(root) // give the repo a home for the rules reviewers enforce
+	ensureGitignore(root) // keep .worktrees/ out of the repo's git status
+	// Seed the placeholder ARCHITECTURE.md only when the project hasn't configured its
+	// own `architecture` path (and only when the config is valid — a bad config
+	// surfaces at the operation that needs it; we never write to a path the project named).
+	if cfg, err := config.Load(root); err == nil && !cfg.ArchitectureSet {
+		ensureArchitectureDoc(root)
+	}
 	return h.store.For(tag)
-}
-
-// ensureArchitectureDoc seeds a placeholder ARCHITECTURE.md at the repo root when
-// none exists, so every repo the hub serves gains a home for its architecture
-// rules — the file reviewers are told to read before every verdict. Idempotent and
-// best-effort: it only creates a missing file (never overwrites the project's own
-// doc) and never blocks hub startup, but a write error is reported not swallowed.
-func ensureArchitectureDoc(root string) {
-	path := filepath.Join(root, "ARCHITECTURE.md")
-	if _, err := os.Stat(path); err == nil {
-		return // present already — leave the project's doc alone
-	} else if !os.IsNotExist(err) {
-		return // can't tell (permissions, etc.) — don't risk clobbering
-	}
-	if err := os.WriteFile(path, []byte(architecturePlaceholder), 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "hub: WARNING — could not seed %s: %v\n", path, err)
-	}
 }
 
 // hubIgnores are the patterns the hub keeps out of the repo's git: the git-owned
@@ -421,6 +410,12 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 	if !ok {
 		return fmt.Errorf("no such agent %q — run 'sindri new %s' first", name, name)
 	}
+	// Validate the project config up front — a bad .sindri/config.yaml fails the
+	// launch loudly rather than silently reverting to defaults mid-build.
+	cfg, err := h.projectConfig(project)
+	if err != nil {
+		return err
+	}
 	// Tee build/start progress three ways: the launch buffer (TUI live-screen), the
 	// hub log (stderr), and progress — the caller's stream, so `agent start` shows
 	// the image build live instead of a frozen prompt (long ops must be visible).
@@ -444,7 +439,7 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 			h.notify()
 		}
 	}()
-	imageRef, err := container.EnsureImage(root, w)
+	imageRef, err := container.EnsureImage(root, config.Abs(root, cfg.Containerfile), w)
 	if err != nil {
 		return err
 	}

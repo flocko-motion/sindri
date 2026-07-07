@@ -182,11 +182,11 @@ func TestEnsureArchitectureDoc(t *testing.T) {
 // `sindri` directive = dirReview, and the injected = msgReview) always tell the
 // reviewer to read the repo's ARCHITECTURE.md.
 func TestReviewInstructionsCarryArchitecture(t *testing.T) {
-	if !strings.Contains(dirReview("pr-1", "td-1"), "ARCHITECTURE.md") {
-		t.Errorf("dirReview must tell the reviewer to read ARCHITECTURE.md")
+	if !strings.Contains(dirReview("pr-1", "td-1", "ARCHITECTURE.md"), "ARCHITECTURE.md") {
+		t.Errorf("dirReview must tell the reviewer to read the architecture doc")
 	}
-	if !strings.Contains(msgReview("pr-1", "req", "br", "base", true), "ARCHITECTURE.md") {
-		t.Errorf("msgReview must tell the reviewer to read ARCHITECTURE.md")
+	if !strings.Contains(msgReview("pr-1", "req", "br", "base", "ARCHITECTURE.md", true), "ARCHITECTURE.md") {
+		t.Errorf("msgReview must tell the reviewer to read the architecture doc")
 	}
 }
 
