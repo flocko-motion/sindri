@@ -360,6 +360,41 @@ openspec/           the spec-driven design (specs + changes)
 
 ---
 
+## Customizing the agent image
+
+Agents run in an image sindri builds from a recipe it carries embedded in the binary
+(tagged `sindri-agent:latest`) — so a fresh install can build the image for any repo
+without extra files. To add tools, pin a base, or bake in credentials, drop your own
+`Containerfile` (or `Dockerfile`). It's discovered in this order — first match wins:
+
+1. **Per-repo:** `<repo>/.sindri/Containerfile` — applies to that repo's agents only.
+2. **Global:** `<sindri state dir>/Containerfile` (`~/.local/state/sindri`, or
+   `$SINDRI_HOME`) — applies to every repo you orchestrate.
+3. Otherwise the **embedded default**.
+
+Your recipe fully replaces the embedded Dockerfile, but it builds in the same
+context: the entrypoint, docker shims, and helpers are materialized alongside it, so
+`COPY sindri-agent.sh …` etc. still work. Easiest is to start from a copy of the
+embedded recipe (`internal/container/buildctx/Dockerfile` in the source tree) and add
+your layers. Keep the **agent contract** intact:
+
+- a non-root `sindri` user (the recipe ends as `sindri` — write to `/home/sindri`,
+  not `/etc`, unless you `USER root` then switch back);
+- `/usr/local/bin/sindri` pointing at the mounted worker;
+- the `sindri-agent` entrypoint and `WORKDIR /workspace`.
+
+A custom recipe builds a content-derived tag `sindri-agent:custom-<hash>` (repos with
+different recipes never clobber each other's tag or rebuild-thrash); the default stays
+`sindri-agent:latest`. Editing the recipe (or a new ISO week) triggers a rebuild;
+build errors are surfaced, not swallowed. Check which image an agent runs with
+`sindri agent info <name>`.
+
+Commit `.sindri/Containerfile` so the recipe travels with the repo (hub state lives
+centrally under `~/.local/state/sindri`, not in the repo, so `.sindri/` is yours to
+track).
+
+---
+
 ## Building from source
 
 For hacking on sindri (end users just install the `.deb`). Needs Go, plus `td`
