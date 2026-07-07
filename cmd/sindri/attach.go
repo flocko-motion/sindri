@@ -12,8 +12,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/flo-at/sindri/internal/container"
+	"github.com/flo-at/sindri/internal/adapter/herdr"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
+	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub"
 	"github.com/spf13/cobra"
 )
@@ -57,6 +58,12 @@ func agentAttachCmd() *cobra.Command {
 				return fmt.Errorf("agent %q is %s — try again in a moment", name, a.Status)
 			}
 			reportAttach(name, ro, a.Clients)
+			// If we're inside herdr, list this agent in its sidebar (by name, as a
+			// sindri agent) for the duration of the dial-in, then release on detach.
+			if herdr.InPane() {
+				herdr.Report(name, herdr.State(a.Runtime))
+				defer herdr.Release()
+			}
 			return container.ExecInteractive(cname, append([]string{"tmux"}, tmux.Attach(name, ro)...)...)
 		},
 	}

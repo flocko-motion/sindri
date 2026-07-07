@@ -59,13 +59,19 @@ func taskStatusStyle(status string) lipgloss.Style {
 	}
 }
 
-// agentStatusStyle is an agent row's colour: grey down, orange transitioning
-// (launching/stopping), yellow idle, green working (working/submitted).
+// agentStatusStyle is an agent row's colour, tuned to what you should DO: grey down,
+// orange transitioning (launching/stopping), red blocked (it needs your attention
+// now), orange waiting (has a task but stalled — nudge it), yellow idle (no task —
+// give it work), green busy/working (leave it).
 func agentStatusStyle(status string) lipgloss.Style {
 	switch status {
 	case "down":
 		return stDone
 	case "launching", "stopping":
+		return stTrans
+	case "blocked":
+		return stCrit
+	case "waiting":
 		return stTrans
 	case "idle":
 		return stWarn
