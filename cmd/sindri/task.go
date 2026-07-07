@@ -7,15 +7,31 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/spf13/cobra"
 )
 
 // --- task ---
+
+// tasksJSON renders the task rows (their json tags) for machine consumers. It
+// always yields a JSON array — never null — so the output parses even when there
+// are no tasks.
+func tasksJSON(tasks []store.Task) (string, error) {
+	if tasks == nil {
+		tasks = []store.Task{}
+	}
+	out, err := json.MarshalIndent(tasks, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
 
 func newTaskCmd() *cobra.Command {
 	c := &cobra.Command{Use: "task", Short: "Inspect and create tasks (td issues)"}
@@ -103,13 +119,22 @@ func taskPriorityCmd() *cobra.Command {
 }
 
 func taskListCmd() *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	c := &cobra.Command{
 		Use: "list", Short: "List tasks", Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			return withBackend(func(b backend) error {
 				tasks, err := b.Tasks()
 				if err != nil {
 					return err
+				}
+				if asJSON {
+					out, err := tasksJSON(tasks)
+					if err != nil {
+						return err
+					}
+					fmt.Println(out)
+					return nil
 				}
 				for _, t := range tasks {
 					fmt.Printf("%-12s %-8s %-12s %s\n", t.ID, hub.PriorityLabel(t.Priority), t.Status, t.Title)
@@ -121,6 +146,8 @@ func taskListCmd() *cobra.Command {
 			})
 		},
 	}
+	c.Flags().BoolVar(&asJSON, "json", false, "output tasks as JSON (machine-readable) instead of the table")
+	return c
 }
 
 func taskInfoCmd() *cobra.Command {
