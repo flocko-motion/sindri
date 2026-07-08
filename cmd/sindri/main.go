@@ -12,6 +12,7 @@ import (
 	"os"
 
 	"github.com/flo-at/sindri/internal/container"
+	"github.com/flo-at/sindri/internal/debug"
 	"github.com/flo-at/sindri/internal/update"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -25,11 +26,13 @@ var version = "dev"
 func main() {
 	container.Use(chooseRuntime()) // wire the one container backend for this process
 	var projectDir string
+	var dbg bool
 	rootCmd := &cobra.Command{
 		Use:     "sindri",
 		Short:   "Sindri — AI agent orchestrator",
 		Version: version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			debug.SetEnabled(dbg) // flip the process-wide verbosity switch first
 			// Print our build on every run (to stderr, so it never pollutes piped
 			// output) — makes a stale binary obvious at a glance.
 			fmt.Fprintf(os.Stderr, "sindri %s\n", version)
@@ -40,6 +43,7 @@ func main() {
 		},
 	}
 	rootCmd.PersistentFlags().StringVar(&projectDir, "project", "", "Project directory (default: git root from cwd)")
+	rootCmd.PersistentFlags().BoolVar(&dbg, "debug", false, "verbose debug logging to stderr (e.g. the exact GitHub calls behind `upgrade`)")
 
 	// Best-effort, once-a-day upgrade check — only when stderr is a terminal, so it
 	// never corrupts piped output or nags in CI/scripts.

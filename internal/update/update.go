@@ -10,16 +10,22 @@
 package update
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/flo-at/sindri/internal/debug"
 )
 
 // repo is the GitHub repository whose releases are checked and installed.
@@ -180,34 +186,113 @@ func fetchRelease(tag string, timeout time.Duration) (string, error) {
 	return name, err
 }
 
+// errNotFound is a release/tag the API reports as 404 — distinct from a transport or
+// rate-limit failure, so callers can drive the v-prefix fallback / "no such tag".
+var errNotFound = errors.New("not found")
+
 // fetchReleaseExact fetches one release by tag ("" = latest) without any fallback.
 func fetchReleaseExact(tag string, timeout time.Duration) (string, error) {
-	url := "https://api.github.com/repos/" + repo + "/releases/latest"
+	path := "repos/" + repo + "/releases/latest"
 	if tag != "" {
-		url = "https://api.github.com/repos/" + repo + "/releases/tags/" + tag
+		path = "repos/" + repo + "/releases/tags/" + tag
 	}
-	cl := &http.Client{Timeout: timeout}
-	resp, err := cl.Get(url)
+	body, err := githubJSON(path, timeout)
 	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		if tag != "" {
-			return "", fmt.Errorf("no release tagged %q", tag)
+		if errors.Is(err, errNotFound) {
+			if tag != "" {
+				return "", fmt.Errorf("no release tagged %q", tag)
+			}
+			return "", fmt.Errorf("no published release found for %s — or the repo is private (an unauthenticated check 404s private repos; `gh auth login` or set GITHUB_TOKEN)", repo)
 		}
-		return "", fmt.Errorf("no published release found for %s — or the repo is private (this check is unauthenticated, and GitHub 404s private repos)", repo)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("github: %s", resp.Status)
+		return "", err
 	}
 	var rel struct {
 		TagName string `json:"tag_name"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+	if err := json.Unmarshal(body, &rel); err != nil {
 		return "", err
 	}
 	return rel.TagName, nil
+}
+
+// githubJSON fetches a GitHub API path (e.g. "repos/o/r/releases/latest"), preferring
+// the gh CLI — which uses the user's auth and so isn't subject to the low (60/hour
+// per-IP) anonymous rate limit that 403s on shared networks/VPNs. Without gh it falls
+// back to a direct HTTPS GET carrying a User-Agent (GitHub requires one) and any
+// GITHUB_TOKEN/GH_TOKEN from the environment. A 404 comes back as errNotFound.
+func githubJSON(path string, timeout time.Duration) ([]byte, error) {
+	if _, err := exec.LookPath("gh"); err == nil {
+		return ghAPI(path, timeout)
+	}
+	debug.Logf("gh not found on PATH — falling back to a direct GitHub HTTP call")
+	return httpGitHubJSON(path, timeout)
+}
+
+// ghAPI runs `gh api <path>` (auth handled by gh) and returns its JSON body.
+func ghAPI(path string, timeout time.Duration) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	debug.Logf("gh api %s", path)
+	cmd := exec.CommandContext(ctx, "gh", "api", path)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		debug.Logf("gh api %s failed: %v — stderr: %s", path, err, msg)
+		if strings.Contains(msg, "404") || strings.Contains(strings.ToLower(msg), "not found") {
+			return nil, errNotFound
+		}
+		if msg != "" {
+			return nil, fmt.Errorf("gh api: %s", msg)
+		}
+		return nil, fmt.Errorf("gh api %s: %w", path, err)
+	}
+	return stdout.Bytes(), nil
+}
+
+// httpGitHubJSON GETs https://api.github.com/<path> directly, with a User-Agent and
+// any token from the environment; it reports the status (and rate-limit headers)
+// under --debug so a 403 is self-explanatory.
+func httpGitHubJSON(path string, timeout time.Duration) ([]byte, error) {
+	url := "https://api.github.com/" + path
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "sindri")
+	req.Header.Set("Accept", "application/vnd.github+json")
+	if tok := githubToken(); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+		debug.Logf("using a token from the environment for the GitHub call")
+	}
+	resp, err := (&http.Client{Timeout: timeout}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	debug.Logf("GET %s -> %s (RateLimit-Remaining=%s, Reset=%s)", url, resp.Status,
+		resp.Header.Get("X-RateLimit-Remaining"), resp.Header.Get("X-RateLimit-Reset"))
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, errNotFound
+	}
+	if resp.StatusCode == http.StatusForbidden && resp.Header.Get("X-RateLimit-Remaining") == "0" {
+		return nil, fmt.Errorf("github: rate limit exceeded (anonymous is 60/hour per IP) — `gh auth login` or set GITHUB_TOKEN to raise it")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("github: %s", resp.Status)
+	}
+	return io.ReadAll(resp.Body)
+}
+
+// githubToken returns a GitHub token from the environment (GITHUB_TOKEN or GH_TOKEN),
+// or "" if none — used only by the direct-HTTP fallback (gh manages its own auth).
+func githubToken() string {
+	for _, k := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
+		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // togglePrefix flips a leading "v" on a version string, so a user's "0.12.1" and the
@@ -222,19 +307,14 @@ func togglePrefix(tag string) string {
 // fetchReleaseTags lists the repo's release tags, newest first (GitHub returns
 // releases in reverse-chronological order).
 func fetchReleaseTags(timeout time.Duration) ([]string, error) {
-	cl := &http.Client{Timeout: timeout}
-	resp, err := cl.Get("https://api.github.com/repos/" + repo + "/releases?per_page=100")
+	body, err := githubJSON("repos/"+repo+"/releases?per_page=100", timeout)
 	if err != nil {
 		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("github: %s", resp.Status)
 	}
 	var rels []struct {
 		TagName string `json:"tag_name"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&rels); err != nil {
+	if err := json.Unmarshal(body, &rels); err != nil {
 		return nil, err
 	}
 	tags := make([]string, 0, len(rels))
@@ -349,35 +429,39 @@ func updaterScript(goos, goarch, tag string) string {
 	return debUpdaterScript(tag)
 }
 
-// releaseAPIPath is the GitHub releases sub-path a script fetches: the pinned tag
-// when set, else the latest release.
-func releaseAPIPath(tag string) string {
-	if tag == "" {
-		return "latest"
-	}
-	return "tags/" + tag
-}
-
 // debUpdaterScript downloads a release's .deb and installs it (needs sudo). An empty
-// tag installs the latest; a set tag installs exactly that release.
+// tag installs the latest; a set tag installs exactly that release. It prefers `gh
+// release download` (the user's auth, no anonymous rate limit) and falls back to a
+// direct curl of the release API when gh isn't installed.
 func debUpdaterScript(tag string) string {
 	return fmt.Sprintf(`#!/usr/bin/env bash
-# Generated by sindri. Installs the %[2]s sindri .deb.
+# Generated by sindri. Installs the sindri .deb (gh preferred, curl fallback).
 set -euo pipefail
 repo=%[1]q
-rel=%[2]q
-echo "fetching sindri release ($rel)…"
-url=$(curl -fsSL "https://api.github.com/repos/$repo/releases/$rel" \
-  | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*\.deb"' | head -1 | cut -d'"' -f4)
-[ -n "$url" ] || { echo "no .deb asset in the $rel release" >&2; exit 1; }
-tmp="$(mktemp --suffix=.deb)"
-trap 'rm -f "$tmp"' EXIT
-echo "downloading $url"
-curl -fsSL "$url" -o "$tmp"
+tag=%[2]q   # empty = latest
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+if command -v gh >/dev/null 2>&1; then
+	echo "fetching via gh (${tag:-latest})…"
+	args=(--repo "$repo" --pattern '*.deb' --dir "$tmp" --clobber)
+	[ -n "$tag" ] && args=("$tag" "${args[@]}")
+	gh release download "${args[@]}"
+	deb="$(find "$tmp" -maxdepth 1 -name '*.deb' | head -1)"
+else
+	rel="latest"; [ -n "$tag" ] && rel="tags/$tag"
+	echo "fetching via curl ($rel)…"
+	url=$(curl -fsSL "https://api.github.com/repos/$repo/releases/$rel" \
+	  | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*\.deb"' | head -1 | cut -d'"' -f4)
+	[ -n "$url" ] || { echo "no .deb asset in the $rel release" >&2; exit 1; }
+	echo "downloading $url"
+	deb="$tmp/sindri.deb"
+	curl -fsSL "$url" -o "$deb"
+fi
+[ -n "${deb:-}" ] && [ -f "$deb" ] || { echo "no .deb downloaded" >&2; exit 1; }
 echo "installing (sudo dpkg -i)…"
-sudo dpkg -i "$tmp" || sudo apt-get install -f -y
+sudo dpkg -i "$deb" || sudo apt-get install -f -y
 echo "done — run 'sindri --version' to confirm."
-`, repo, releaseAPIPath(tag))
+`, repo, tag)
 }
 
 // darwinUpdaterScript downloads the latest macOS tarball for arch and installs it
@@ -386,25 +470,38 @@ echo "done — run 'sindri --version' to confirm."
 // sindri/hub is swapped atomically, and clears the Gatekeeper quarantine.
 func darwinUpdaterScript(arch, tag string) string {
 	return fmt.Sprintf(`#!/usr/bin/env bash
-# Generated by sindri. Installs the %[3]s macOS tarball (darwin/%[2]s) over the
-# current install — no sudo when it lives in ~/.local/bin.
+# Generated by sindri. Installs the macOS tarball (darwin/%[2]s) over the current
+# install — no sudo when it lives in ~/.local/bin. Prefers gh (the user's auth, no
+# anonymous rate limit); falls back to curl of the release API when gh is absent.
 set -euo pipefail
 repo=%[1]q
 arch=%[2]q
-rel=%[3]q
-echo "fetching sindri release ($rel)…"
-url=$(curl -fsSL "https://api.github.com/repos/$repo/releases/$rel" \
-  | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*_darwin_'"$arch"'\.tar\.gz"' | head -1 | cut -d'"' -f4)
-[ -n "$url" ] || { echo "no darwin_$arch tarball in the $rel release" >&2; exit 1; }
+tag=%[3]q   # empty = latest
+pattern="*_darwin_${arch}.tar.gz"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+if command -v gh >/dev/null 2>&1; then
+	echo "fetching via gh (${tag:-latest})…"
+	args=(--repo "$repo" --pattern "$pattern" --dir "$tmp" --clobber)
+	[ -n "$tag" ] && args=("$tag" "${args[@]}")
+	gh release download "${args[@]}"
+	tarball="$(find "$tmp" -maxdepth 1 -name "$pattern" | head -1)"
+else
+	rel="latest"; [ -n "$tag" ] && rel="tags/$tag"
+	echo "fetching via curl ($rel)…"
+	url=$(curl -fsSL "https://api.github.com/repos/$repo/releases/$rel" \
+	  | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*_darwin_'"$arch"'\.tar\.gz"' | head -1 | cut -d'"' -f4)
+	[ -n "$url" ] || { echo "no darwin_$arch tarball in the $rel release" >&2; exit 1; }
+	echo "downloading $url"
+	tarball="$tmp/sindri.tar.gz"
+	curl -fsSL "$url" -o "$tarball"
+fi
+[ -n "${tarball:-}" ] && [ -f "$tarball" ] || { echo "no darwin_$arch tarball downloaded" >&2; exit 1; }
 # Upgrade wherever the current sindri lives; fall back to ~/.local/bin.
 dest="$(dirname "$(command -v sindri 2>/dev/null || true)")"
 [ -n "$dest" ] && [ -d "$dest" ] || dest="$HOME/.local/bin"
 mkdir -p "$dest"
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
-echo "downloading $url"
-curl -fsSL "$url" -o "$tmp/sindri.tar.gz"
-tar -C "$tmp" -xzf "$tmp/sindri.tar.gz"
+tar -C "$tmp" -xzf "$tarball"
 src="$(find "$tmp" -maxdepth 1 -type d -name 'sindri_*_darwin_*' | head -1)"
 [ -n "$src" ] || { echo "unexpected tarball layout" >&2; exit 1; }
 for bin in sindri sindri-worker brokkr td yq; do
@@ -415,5 +512,5 @@ for bin in sindri sindri-worker brokkr td yq; do
 	mv -f "$dest/.$bin.new" "$dest/$bin" # atomic within $dest; safe while running
 done
 echo "installed to $dest — run 'sindri --version' to confirm."
-`, repo, arch, releaseAPIPath(tag))
+`, repo, arch, tag)
 }
