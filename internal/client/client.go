@@ -224,6 +224,25 @@ func (c *HTTP) Launch(name string, shell, debug bool, out io.Writer) error {
 	return nil
 }
 
+// RebuildImage force-rebuilds the agent's image (re-pulling the base) and relaunches
+// it; the build/restart progress streams to out, the failure (if any) via a trailer.
+func (c *HTTP) RebuildImage(name string, out io.Writer) error {
+	body, err := json.Marshal(hub.NameReq{Name: name})
+	if err != nil {
+		return err
+	}
+	resp, err := c.hc.Post(c.base+"/agent/rebuild", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(out, resp.Body)
+	if e := resp.Trailer.Get("X-Sindri-Error"); e != "" {
+		return fmt.Errorf("%s", e)
+	}
+	return nil
+}
+
 // Tell delivers a provenance-stamped message into an agent's session.
 func (c *HTTP) Tell(name, msg, source string) error {
 	return c.post("/tell", hub.TellReq{Name: name, Msg: msg, Source: source})

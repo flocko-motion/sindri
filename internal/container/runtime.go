@@ -87,6 +87,9 @@ type Runtime interface {
 	Check(w io.Writer) error
 	Healthy() (ok bool, hint string)
 	EnsureImage(root, containerfile string, out io.Writer) (string, error)
+	// RebuildImage forces a rebuild of the agent image, re-pulling the base — for
+	// picking up a newer base (e.g. a new Go) the cache would otherwise keep stale.
+	RebuildImage(root, containerfile string, out io.Writer) (string, error)
 }
 
 // active is the backend this process runs against, wired once at startup by the
@@ -129,6 +132,7 @@ func (noop) ListByLabelContext(context.Context, string, string) ([]string, error
 func (noop) Check(io.Writer) error                                      { return errNoRuntime }
 func (noop) Healthy() (bool, string)                                    { return false, "no container runtime configured" }
 func (noop) EnsureImage(string, string, io.Writer) (string, error)      { return "", errNoRuntime }
+func (noop) RebuildImage(string, string, io.Writer) (string, error)     { return "", errNoRuntime }
 
 // --- package façade: the core calls these; they dispatch to the wired backend ---
 
@@ -194,4 +198,10 @@ func Healthy() (ok bool, hint string) { return active.Healthy() }
 // reference to run (default or a custom per-recipe tag).
 func EnsureImage(root, containerfile string, out io.Writer) (string, error) {
 	return active.EnsureImage(root, containerfile, out)
+}
+
+// RebuildImage forces a rebuild of the agent image (re-pulling the base) and returns
+// the image reference to run.
+func RebuildImage(root, containerfile string, out io.Writer) (string, error) {
+	return active.RebuildImage(root, containerfile, out)
 }

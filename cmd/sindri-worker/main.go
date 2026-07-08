@@ -10,13 +10,26 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 
 	"github.com/flo-at/sindri/internal/client"
 )
 
+// version is the build version, baked in via -ldflags (matches the host binary);
+// "dev" for a plain build.
+var version = "dev"
+
 func main() {
 	c := dialHub()
 	args := os.Args[1:]
+
+	// `sindri version` is answered locally (not forwarded): it reports THIS binary's
+	// build + Go version — the mounted tool the agent actually runs — so a Go-version
+	// mismatch with the container (or the host CLI) is diagnosable from inside the pod.
+	if len(args) == 1 && args[0] == "version" {
+		fmt.Printf("sindri (agent) %s\ngo             %s\n", version, runtime.Version())
+		return
+	}
 
 	// No args → the hub tells you exactly what to do next (one directive, not a
 	// menu). The agent loop is simply: run `sindri`, do what it says. (In the pod

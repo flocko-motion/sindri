@@ -342,6 +342,11 @@ func (Engine) EnsureImage(root, containerfile string, out io.Writer) (string, er
 	return container.EnsureImageWith(root, containerfile, out, appleBuilder{})
 }
 
+// RebuildImage forces a rebuild (re-pulling the base) — for picking up a newer base.
+func (Engine) RebuildImage(root, containerfile string, out io.Writer) (string, error) {
+	return container.RebuildImageWith(root, containerfile, out, appleBuilder{})
+}
+
 // appleBuilder is the Apple-`container` slice of image building.
 type appleBuilder struct{}
 
@@ -362,7 +367,11 @@ func (appleBuilder) ImageExists(ref string) (bool, error) {
 	return false, fmt.Errorf("container image inspect %s: %s: %w", ref, strings.TrimSpace(string(out)), err)
 }
 
-func (appleBuilder) Build(ref, ctxDir, dockerfile string, out io.Writer) error {
+func (appleBuilder) Build(ref, ctxDir, dockerfile string, pull bool, out io.Writer) error {
+	// pull is honored best-effort: `container build` doesn't expose a portable
+	// re-pull flag, so a forced rebuild here still rebuilds the layers but may reuse
+	// the local base. (The Linux/podman path does a real --pull=always.)
+	_ = pull
 	cmd := exec.Command(Binary, "build", "-t", ref, "-f", dockerfile, ctxDir)
 	cmd.Stdout, cmd.Stderr = out, out
 	if err := cmd.Run(); err != nil {

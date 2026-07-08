@@ -26,13 +26,13 @@ sindri:
 # compile on macOS/Windows. Pure Go, so CGO_ENABLED=0 keeps the cross-build
 # hermetic. ARCH is the host's Go arch, which matches the native podman VM.
 worker:
-	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go build -o bin/sindri-worker ./cmd/sindri-worker/
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go build -ldflags "-X main.version=$(VERSION)" -o bin/sindri-worker ./cmd/sindri-worker/
 
 # brokkr — the toolbelt: code map + linters, no orchestration.
 brokkr:
 	go build -ldflags "-X main.version=$(VERSION)" -o bin/brokkr ./cmd/brokkr/
 
-install: build ## build, then install the binaries to ~/.local/bin
+install: check-go build ## build (on the latest Go), then install the binaries to ~/.local/bin
 	mkdir -p $(PREFIX)
 	# Use mv rather than cp so install succeeds even when the previous
 	# binary is currently running (rename unlinks the in-use file; the

@@ -343,6 +343,20 @@ func agentRebaseCmd() *cobra.Command {
 	}
 }
 
+// agentRebuildCmd force-rebuilds the agent's container image (re-pulling the base,
+// e.g. to pick up a newer Go) and relaunches the agent into it. The Claude session
+// resumes from the mounted home, so the conversation isn't lost.
+func agentRebuildCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "rebuild <name>", Short: "Rebuild the agent's image (re-pull the base) and relaunch it (session resumes)", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+				return b.RebuildImage(a.Name, os.Stderr) // streams build + restart progress
+			})
+		},
+	}
+}
+
 // agentRestartCmd stops the agent's pod and starts a fresh one — the way to pick
 // up a rebuilt agent image or clear a wedged session. If the agent wasn't running,
 // it's just a start (no error), so `restart` is always safe to reach for.

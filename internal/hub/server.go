@@ -268,6 +268,23 @@ func (h *Hub) Handler() http.Handler {
 			w.Header().Set("X-Sindri-Error", err.Error())
 		}
 	})
+	mux.HandleFunc("POST /agent/rebuild", func(w http.ResponseWriter, r *http.Request) {
+		var req NameReq
+		if !decode(w, r, &req) {
+			return
+		}
+		// Same streaming shape as /launch — the image rebuild is long.
+		w.Header().Set("Trailer", "X-Sindri-Error")
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		fw := &flushWriter{w: w}
+		if f, ok := w.(http.Flusher); ok {
+			fw.f = f
+		}
+		if err := h.RebuildAgent(h.reqProject(r), req.Name, fw); err != nil {
+			fmt.Fprintf(fw, "error: %v\n", err)
+			w.Header().Set("X-Sindri-Error", err.Error())
+		}
+	})
 	mux.HandleFunc("POST /tell", func(w http.ResponseWriter, r *http.Request) {
 		var req TellReq
 		if !decode(w, r, &req) {
