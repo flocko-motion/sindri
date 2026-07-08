@@ -44,6 +44,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && sed -i 's/# en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && locale-gen \
   && rm -rf /var/lib/apt/lists/*
 
+# ── podman (nested container builds/runs) ─────────────────────────────────────
+# The docker/docker-compose shims exec `podman`, and agents building or running
+# containers as part of a task need it present. Rootless-in-container needs
+# fuse-overlayfs (overlay storage without a privileged kernel mount), uidmap
+# (newuidmap/newgidmap for the user namespace) and slirp4netns (rootless network);
+# containers-common (pulled in by podman) provides the default registries/storage
+# config. NB: actually RUNNING nested containers also needs the pod started with
+# /dev/fuse + a user namespace that allows nesting — see the launch run-flags; the
+# package is installed here regardless so the CLI and the shims resolve.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  podman fuse-overlayfs uidmap slirp4netns \
+  && rm -rf /var/lib/apt/lists/*
+
 # ── yazi (TUI file manager — not in apt; prebuilt release binary) ──────────────
 # Pick the release matching the build arch, so the image is correct whether it's
 # built on amd64 or arm64 (e.g. an Apple Silicon podman VM).
@@ -109,7 +122,12 @@ COPY sindri-agent.sh  /usr/local/bin/sindri-agent
 RUN chmod +x /usr/local/bin/sindri-agent
 
 # ── Non-root user (claude refuses --dangerously-skip-permissions as root) ──
-RUN useradd -m -s /bin/bash sindri
+# Give sindri a subordinate uid/gid range so rootless podman can map a user
+# namespace (newuidmap/newgidmap read these); without it nested podman errors with
+# "no subuid ranges found".
+RUN useradd -m -s /bin/bash sindri \
+  && echo 'sindri:100000:65536' > /etc/subuid \
+  && echo 'sindri:100000:65536' > /etc/subgid
 
 # `y` yazi wrapper, sourced by interactive shells (attach / post-Claude bash).
 COPY yazi.sh /etc/sindri/yazi.sh
