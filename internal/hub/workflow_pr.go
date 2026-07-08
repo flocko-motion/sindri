@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
+	"github.com/flo-at/sindri/internal/adapter/spec"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/registry"
@@ -254,9 +255,13 @@ func (h *Hub) cmdOpenspec(c registry.Caller, args []string, out io.Writer) (int,
 		fmt.Fprintln(out, "Nothing to submit — edit /workspace/openspec first.")
 		return 1, nil
 	}
-	if lintOut, ok := h.runLint(wt); !ok {
-		fmt.Fprintln(out, replyLintFail(strings.TrimSpace(lintOut)))
-		_ = ps.Log(c.Agent, "lint-fail", branch)
+	// Gate on openspec VALIDATION, not the code linter: a planner only edits
+	// /workspace/openspec (the rest of the repo is read-only to it), so blocking its
+	// plan on `brokkr lint` of code it can't touch — and didn't write — is wrong.
+	// Validate the specs it actually authored instead.
+	if ok, valOut := spec.Validate(wt); !ok {
+		fmt.Fprintln(out, replySpecInvalid(strings.TrimSpace(valOut)))
+		_ = ps.Log(c.Agent, "openspec-invalid", branch)
 		return 1, nil
 	}
 	msg := strings.TrimSpace(strings.Join(args[1:], " "))
