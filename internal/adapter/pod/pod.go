@@ -276,6 +276,11 @@ func (Engine) EnsureImage(root, containerfile string, out io.Writer) (string, er
 	return container.EnsureImageWith(root, containerfile, out, podmanBuilder{})
 }
 
+// RebuildImage forces a rebuild (re-pulling the base) — for picking up a newer base.
+func (Engine) RebuildImage(root, containerfile string, out io.Writer) (string, error) {
+	return container.RebuildImageWith(root, containerfile, out, podmanBuilder{})
+}
+
 // podmanBuilder is the podman slice of image building for container.EnsureImageWith.
 type podmanBuilder struct{}
 
@@ -296,11 +301,18 @@ func (podmanBuilder) ImageExists(ref string) (bool, error) {
 	return false, fmt.Errorf("podman image exists %s: %s: %w", ref, strings.TrimSpace(stderr.String()), err)
 }
 
-func (podmanBuilder) Build(ref, ctxDir, dockerfile string, out io.Writer) error {
+func (podmanBuilder) Build(ref, ctxDir, dockerfile string, pull bool, out io.Writer) error {
 	// Capture podman's output alongside streaming it, so a failure carries the actual
 	// diagnostic — not a bare "exit status 125".
 	var captured bytes.Buffer
-	cmd := exec.Command(Binary, "build", "-t", ref, "-f", dockerfile, ctxDir)
+	args := []string{"build", "-t", ref, "-f", dockerfile}
+	if pull {
+		// Re-pull the base (FROM …:latest) so a rebuild actually picks up a newer base
+		// image; without this podman reuses the locally-cached base and Go never moves.
+		args = append(args, "--pull=always")
+	}
+	args = append(args, ctxDir)
+	cmd := exec.Command(Binary, args...)
 	cmd.Stdout = io.MultiWriter(out, &captured)
 	cmd.Stderr = io.MultiWriter(out, &captured)
 	if err := cmd.Run(); err != nil {

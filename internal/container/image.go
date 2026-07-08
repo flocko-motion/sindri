@@ -50,7 +50,9 @@ type ImageBuilder interface {
 	// confident "absent" (false, nil) — so a broken check is never mistaken for
 	// "image missing, rebuild" (a swallowed error here rebuilt on every launch).
 	ImageExists(ref string) (bool, error)
-	Build(ref, ctxDir, dockerfile string, out io.Writer) error
+	// Build builds ref from ctxDir/dockerfile. pull ⇒ re-pull the base image (force
+	// a rebuild that picks up a newer base), else use the local base if present.
+	Build(ref, ctxDir, dockerfile string, pull bool, out io.Writer) error
 }
 
 // buildProgress collapses a build's plain, line-oriented output into a single
@@ -99,6 +101,19 @@ func (p *buildProgress) finish() {
 // a repo/global custom recipe is in play, so repos with different recipes don't
 // clobber each other's tag (or thrash each other's build cache).
 func EnsureImageWith(projectRoot, containerfile string, out io.Writer, b ImageBuilder) (string, error) {
+	return buildImage(projectRoot, containerfile, out, b, false)
+}
+
+// RebuildImageWith forces a rebuild regardless of the cached build key, and re-pulls
+// the base image — the way to pick up a newer base (e.g. a new Go in golang:latest)
+// that the key-based cache and podman's layer cache would otherwise keep stale.
+func RebuildImageWith(projectRoot, containerfile string, out io.Writer, b ImageBuilder) (string, error) {
+	return buildImage(projectRoot, containerfile, out, b, true)
+}
+
+// buildImage is the shared recipe; force skips the up-to-date short-circuit and
+// re-pulls the base (see EnsureImageWith / RebuildImageWith).
+func buildImage(projectRoot, containerfile string, out io.Writer, b ImageBuilder, force bool) (string, error) {
 	// Precedence: an explicit config `containerfile` (resolved by the caller), then a
 	// repo-local .sindri/ recipe, then the global StateDir recipe, then the embedded
 	// default (read once, folded into the build key so edits rebuild).
@@ -148,7 +163,7 @@ func EnsureImageWith(projectRoot, containerfile string, out io.Writer, b ImageBu
 	// Per-ref key file, so alternating between repos with different recipes doesn't
 	// invalidate each other's cache and force a rebuild every switch.
 	keyFile := filepath.Join(cacheDir, "build-key-"+tagOf(ref))
-	if cached, err := os.ReadFile(keyFile); err == nil && strings.TrimSpace(string(cached)) == buildKey {
+	if cached, err := os.ReadFile(keyFile); !force && err == nil && strings.TrimSpace(string(cached)) == buildKey {
 		present, perr := b.ImageExists(ref)
 		if perr != nil {
 			// Couldn't determine presence — surface it rather than silently rebuilding
@@ -182,7 +197,7 @@ func EnsureImageWith(projectRoot, containerfile string, out io.Writer, b ImageBu
 	// Collapse the (verbose) build log into one in-place-updating line, so the caller
 	// sees progress happening without pages of buildkit output.
 	bp := &buildProgress{out: out}
-	buildErr := b.Build(ref, ctxDir, filepath.Join(ctxDir, "Dockerfile"), bp)
+	buildErr := b.Build(ref, ctxDir, filepath.Join(ctxDir, "Dockerfile"), force, bp)
 	bp.finish()
 	if buildErr != nil {
 		return "", buildErr
