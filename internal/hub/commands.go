@@ -47,6 +47,9 @@ func (h *Hub) registry() *registry.Registry {
 		// Always available to a worker — checking whether your branch still merges (and
 		// resolving it if not) does no harm and is useful at any time.
 		registry.Command{Name: "resolve", Help: "check your branch still merges onto its base, and resolve any conflicts: resolve", Roles: []string{"worker"}, Run: h.cmdResolve},
+		// Align with the reference branch any time — harmless, and it surfaces conflicts
+		// (with markers to fix) rather than letting the branch drift.
+		registry.Command{Name: "rebase", Help: "rebase your branch onto the current reference branch (fix any conflicts it surfaces): rebase", Roles: []string{"worker", "planner"}, Run: h.cmdRebase},
 		registry.Command{Name: "checkpoint", Help: "commit the current subtask and move to the next: checkpoint [message]", Roles: []string{"worker"},
 			Hidden: func(c registry.Caller) bool { return !c.InContainer }, Run: h.cmdCheckpoint},
 		registry.Command{Name: "task", Help: "read the backlog: task list (all) or task <id> (full detail)", Roles: []string{"planner"}, Run: h.cmdTasks},

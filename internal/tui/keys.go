@@ -79,6 +79,7 @@ var keymap = []binding{
 	{keyPriority, lbl("priority"), scopeTasks},
 	{keyUnassign, lbl("unassign"), scopeTasks},
 	{keyClose, lbl("close"), scopeTasks},
+	{keyDelete, lbl("scrap"), scopeTasks},
 	{"A/R", lbl("approve/reject"), scopeTasks},
 	{keyFilter, func(m model) string { return "filter: " + filterNames[m.filter] }, scopeTasks},
 
@@ -88,6 +89,7 @@ var keymap = []binding{
 	{keyTell, lbl("tell"), scopeAgents},
 	{keyAttachAp, lbl("attach"), scopeAgents},
 	{keyEdit, lbl("memory"), scopeAgents},
+	{keyReject, lbl("rebase"), scopeAgents}, // R = reBase (onto the reference branch)
 	{keyDelete, lbl("delete"), scopeAgents},
 	{keyScopeTog, func(m model) string { return "scope: " + scopeName(m.scopeRepo[1]) }, scopeAgents},
 

@@ -157,16 +157,6 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func waitForState(ch <-chan hub.BoardState, gen int) tea.Cmd {
-	return func() tea.Msg {
-		st, ok := <-ch
-		if !ok {
-			return errMsg{err: fmt.Errorf("hub connection closed"), gen: gen}
-		}
-		return stateMsg{st: st, gen: gen}
-	}
-}
-
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -436,7 +426,11 @@ func (m *model) onKey(k string) tea.Cmd {
 				return nil
 			}
 		}
-	case keyDelete: // agents: delete the selected agent (or remove an orphan) · repos: forget
+	case keyDelete: // tasks: scrap · agents: delete (or remove an orphan) · repos: forget
+		if m.tab == 0 && m.selID() != "" {
+			m.openScrapChoice(m.selID())
+			return nil
+		}
 		if m.tab == 1 && m.selID() != "" {
 			if m.isOrphan(m.selID()) {
 				m.openRemoveOrphanChoice(m.selID())
@@ -465,7 +459,7 @@ func (m *model) onKey(k string) tea.Cmd {
 				return m.lintCmd(id)
 			}
 		}
-	case keyReject: // prs: reject a PR · tasks: reject a planner-proposed task (with a comment)
+	case keyReject: // prs: reject a PR · tasks: reject a proposal · agents: rebase (R = reBase)
 		if m.tab == 2 && m.selID() != "" {
 			m.openRejectForm(m.selID())
 			return nil
@@ -473,6 +467,9 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 0 && m.taskGated() {
 			m.openTaskRejectForm(m.selID())
 			return nil
+		}
+		if m.tab == 1 && m.selID() != "" && !m.isOrphan(m.selID()) {
+			return m.rebaseAgentCmd(m.selID())
 		}
 	case keyVerify: // prs: verify — materialize the PR into the review workspace + shell in
 		if m.tab == 2 {

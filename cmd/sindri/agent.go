@@ -325,6 +325,24 @@ func agentStopCmd() *cobra.Command {
 	}
 }
 
+// agentRebaseCmd rebases the agent's worktree onto the current base (reference)
+// branch — for when the base moved outside a sindri merge and the agent is on a
+// stale tree. git aborts on conflict, so a failure changes nothing and is reported.
+func agentRebaseCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "rebase <name>", Short: "Rebase the agent's worktree onto the current reference branch", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+				if err := b.RebaseAgent(a.Name); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "rebased %s onto the reference branch\n", a.Name)
+				return nil
+			})
+		},
+	}
+}
+
 // agentRestartCmd stops the agent's pod and starts a fresh one — the way to pick
 // up a rebuilt agent image or clear a wedged session. If the agent wasn't running,
 // it's just a start (no error), so `restart` is always safe to reach for.

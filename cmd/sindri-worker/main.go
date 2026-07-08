@@ -46,7 +46,7 @@ func main() {
 		for _, cmd := range cmds {
 			fmt.Printf("  %-12s %s\n", cmd.Name, cmd.Help)
 		}
-		fmt.Println("\nThis set is contextual — it depends on your role and current state and can\nchange over time. Run `sindri` (no arguments) for the single next step.")
+		fmt.Println("\nThis set is contextual — it depends on your role and current state, so it\nchanges as you work (and may grow over time). Run `sindri help` again whenever\nyou want to see what's available now, and `sindri` (no arguments) for the single\nnext step.")
 		return
 	}
 

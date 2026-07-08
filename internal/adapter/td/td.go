@@ -109,6 +109,12 @@ func Close(root, id, reason string) error {
 	return mutate(root, "close", id, "--self-close-exception", reason)
 }
 
+// Delete soft-deletes a task (scrap) — a write, through the td tool. td's delete is
+// restorable (`td restore`), so this discards without destroying.
+func Delete(root, id string) error {
+	return mutate(root, "delete", id)
+}
+
 // run executes td -w <root> <args...> and returns trimmed combined output. On
 // failure it reports just td's error message, not its whole usage screen (cobra
 // dumps the full --help to stderr on any error — too noisy to surface verbatim).

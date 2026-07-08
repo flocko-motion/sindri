@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // Change is an openspec change from `openspec list --json`.
@@ -46,6 +47,48 @@ func Changes(projectRoot string) ([]Change, error) {
 		return nil, fmt.Errorf("parse openspec list output: %w", e)
 	}
 	return wrap.Changes, nil
+}
+
+// Archive marks a change done: `openspec archive <name> --yes` moves it out of the
+// active set and folds its deltas into the main specs. This is the "done" close for
+// an openspec item. A CLI failure is surfaced.
+func Archive(projectRoot, name string) error {
+	cmd := exec.Command("openspec", "archive", name, "--yes")
+	cmd.Dir = projectRoot
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("openspec archive %s: %s", name, lastLine(string(out)))
+	}
+	return nil
+}
+
+// DeleteChange scraps a change: it removes the change's proposal directory
+// (openspec/changes/<name>) without touching the main specs — the "scrap" close.
+// The dir is git-tracked, so a mistaken scrap is recoverable with git. The name is
+// validated to a single path segment so it can't escape the changes dir.
+func DeleteChange(projectRoot, name string) error {
+	if name == "" || strings.ContainsAny(name, "/\\") || name == "." || name == ".." {
+		return fmt.Errorf("invalid change name %q", name)
+	}
+	dir := filepath.Join(projectRoot, "openspec", "changes", name)
+	if _, err := os.Stat(dir); err != nil {
+		return fmt.Errorf("no such change %q at %s", name, dir)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("scrap change %s: %w", name, err)
+	}
+	return nil
+}
+
+// lastLine returns the last non-empty line of s (an openspec error is usually its
+// final line), so a failure surfaces the reason, not the whole output.
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if l := strings.TrimSpace(lines[i]); l != "" {
+			return l
+		}
+	}
+	return strings.TrimSpace(s)
 }
 
 // Enabled reports whether the project uses openspec (has an openspec/ dir).

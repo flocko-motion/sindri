@@ -61,7 +61,7 @@ func (h *Hub) prepareClaudeHome(project, name, role string, out io.Writer) (home
 	if err = os.WriteFile(filepath.Join(homeDir, "settings.json"), []byte(claudeSettings), 0o644); err != nil {
 		return "", "", false, fmt.Errorf("write claude settings: %w", err)
 	}
-	if err = os.WriteFile(filepath.Join(homeDir, "system-prompt.txt"), []byte(systemPrompt(name, role)), 0o644); err != nil {
+	if err = os.WriteFile(filepath.Join(homeDir, "system-prompt.txt"), []byte(systemPrompt(name, role, h.architectureDoc(project))), 0o644); err != nil {
 		return "", "", false, fmt.Errorf("write system prompt: %w", err)
 	}
 	return homeDir, configPath, hasCreds, nil

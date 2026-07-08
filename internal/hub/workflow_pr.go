@@ -514,6 +514,38 @@ func (h *Hub) cmdReject(c registry.Caller, args []string, out io.Writer) (int, e
 	return 0, nil
 }
 
+// RebaseAgent rebases one agent's worktree onto the current base (reference) branch
+// on demand — for when the base evolved outside a sindri merge (a direct push, a
+// release, an external merge) and the agent is working against a stale tree. git
+// aborts the rebase on conflict (or a dirty tree), so a failure leaves the worktree
+// untouched and is surfaced. A coauthor shares the user's checkout (no worktree of
+// its own), so it's refused — the user drives that tree's git themselves.
+func (h *Hub) RebaseAgent(project, name string) error {
+	ps := h.store.For(project)
+	root := h.projectRoot(project)
+	a, ok, err := ps.GetAgent(name)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("no such agent %q", name)
+	}
+	if a.Workspace == "." {
+		return fmt.Errorf("%s is a coauthor sharing your working checkout — rebase that yourself with git, not through sindri", name)
+	}
+	base, err := h.baseBranch(root)
+	if err != nil {
+		return err
+	}
+	if err := git.Rebase(filepath.Join(root, a.Workspace), base); err != nil {
+		return fmt.Errorf("couldn't rebase %s onto %s — a conflict or uncommitted changes (git aborted, so nothing changed). Have %s resolve it interactively with `sindri rebase` (it surfaces the conflicts to fix). git said: %w", name, base, name, err)
+	}
+	_ = ps.Log(name, "rebase", "onto "+base)
+	_ = h.injectWhenReady(project, name, msgRebased(base))
+	h.notify()
+	return nil
+}
+
 // rebasePlanners rebases every planner's branch in a project onto base after a
 // merge. Best-effort: a dirty or conflicting worktree is logged and skipped.
 func (h *Hub) rebasePlanners(project, base string) {

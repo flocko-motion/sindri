@@ -243,6 +243,13 @@ func (h *Hub) Handler() http.Handler {
 		}
 		writeJSON(w, okMsg{"stopped"}, h.StopAgent(h.reqProject(r), req.Name))
 	})
+	mux.HandleFunc("POST /agent/rebase", func(w http.ResponseWriter, r *http.Request) {
+		var req NameReq
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"rebased"}, h.RebaseAgent(h.reqProject(r), req.Name))
+	})
 	mux.HandleFunc("POST /launch", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
 		if !decode(w, r, &req) {
@@ -383,6 +390,13 @@ func (h *Hub) Handler() http.Handler {
 			return
 		}
 		writeJSON(w, okMsg{"closed"}, h.CloseTask(h.reqProject(r), req.ID))
+	})
+	mux.HandleFunc("POST /task/delete", func(w http.ResponseWriter, r *http.Request) {
+		var req RejectReq // ID (+ unused Feedback)
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"deleted"}, h.DeleteTask(h.reqProject(r), req.ID))
 	})
 	return mux
 }

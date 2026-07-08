@@ -134,30 +134,6 @@ func (h *Hub) UnassignTask(project, id string) error {
 	return nil
 }
 
-// CloseTask marks a task done from the task list (host-only). The task list is a
-// union of several backends, so it dispatches by the task's backend: td tasks
-// close via the td adapter; backends with no close of their own (e.g. openspec
-// changes, whose only lifecycle op is archive) report it unsupported, which the
-// caller surfaces in the standard error modal. Refused if a live agent is working
-// on the task, mirroring UnassignTask.
-func (h *Hub) CloseTask(project, id string) error {
-	ps := h.store.For(project)
-	roster, _ := ps.Roster()
-	for _, a := range roster {
-		if st, _ := ps.GetState(a.Name); st.Task == id && h.agentAlive(project, a.Name) {
-			return fmt.Errorf("%s is alive and working on %s — stop or delete it first", a.Name, id)
-		}
-	}
-	if !strings.HasPrefix(id, "td-") {
-		return fmt.Errorf("%s can't be closed here — closing a task is only supported for td tasks", id)
-	}
-	if err := td.Close(h.projectRoot(project), id, "closed from task list"); err != nil {
-		return err
-	}
-	err := h.SyncTasks(project)
-	h.notify()
-	return err
-}
 
 // ApproveTask clears the approval gate on a planner-proposed task (user-only),
 // making it claimable, and tells any running planner in the project.

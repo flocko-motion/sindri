@@ -407,6 +407,32 @@ func (m *model) closeTaskCmd(id string) tea.Cmd {
 	}
 }
 
+// openScrapChoice confirms scrapping (deleting) the selected task — destructive
+// (a GitHub issue delete is permanent), so it's gated behind a yes/no. The hub
+// dispatches to the backend (td delete / openspec change removal / issue delete).
+func (m *model) openScrapChoice(id string) {
+	cl := m.cl
+	m.choice = choiceModalState{
+		active: true, title: "scrap " + id + "?  (discard — td delete / openspec remove / issue delete)",
+		options: []string{"cancel", "scrap"}, values: []string{"cancel", "scrap"},
+		apply: func(v string) tea.Cmd {
+			if v != "scrap" {
+				return nil
+			}
+			return func() tea.Msg {
+				if cl == nil {
+					return nil
+				}
+				if err := cl.DeleteTask(id); err != nil {
+					return errModalMsg{err}
+				}
+				st, _ := cl.State()
+				return polledMsg(st)
+			}
+		},
+	}
+}
+
 // approveTaskCmd clears the approval gate on the selected task (makes it
 // claimable).
 func (m *model) approveTaskCmd(id string) tea.Cmd {
