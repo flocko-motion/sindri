@@ -559,6 +559,14 @@ func (h *Hub) claimLeaf(project, agent string) (string, bool, error) {
 		}
 		_ = h.refreshTask(project, t.ID)
 	}
+	// Lay the new branch on a CLEAN base. A prior task's leftover WIP — e.g. a task
+	// cancelled out from under this agent while it kept editing — would otherwise
+	// block `checkout -B` or bleed into the new branch. The hub owns git, so it
+	// resets here, at claim time (not at cancel time, since the agent may work on
+	// after the cancel push) — the agent never cleans up its own worktree.
+	if err := git.CheckoutDetachedClean(wt, base); err != nil {
+		return "", false, err
+	}
 	if err := git.CreateBranch(wt, branch, base); err != nil {
 		return "", false, err
 	}

@@ -74,7 +74,10 @@ func (h *Hub) finishTask(project, id string, scrap bool) error {
 		return err
 	}
 	// Free any agent that was on this task and push it to pick up a new one, so a
-	// cancelled task doesn't leave a worker grinding on dead work.
+	// cancelled task doesn't leave a worker grinding on dead work. The worktree is
+	// NOT reset here — the agent may keep editing after the push, so cleanup happens
+	// when it claims its next task (claimLeaf resets to a clean base then), and the
+	// message tells it not to bother cleaning up.
 	roster, _ := ps.Roster()
 	for _, a := range roster {
 		if st, _ := ps.GetState(a.Name); st.Task == id {

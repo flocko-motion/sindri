@@ -228,9 +228,9 @@ func msgMerged(prID string) string {
 }
 
 // msgTaskCancelled tells a worker its task was closed/scrapped out from under it —
-// stop working it and pick up a new one.
+// stop, and don't clean up (the hub already reset the worktree), just get new work.
 func msgTaskCancelled(id string) string {
-	return fmt.Sprintf("[hub] Task %s was cancelled — stop working on it and run `sindri` for a new task.", id)
+	return fmt.Sprintf("[hub] Task %s was cancelled — stop working on it. Don't clean up your workspace; the sindri hub will reset it for you when you pick up your next task. Just run `sindri`.", id)
 }
 
 func msgRebased(base string) string {
