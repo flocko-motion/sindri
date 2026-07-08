@@ -114,6 +114,15 @@ func (m *model) openDeleteChoice(id string) {
 	}
 }
 
+// rebaseAgentCmd rebases the selected agent's worktree onto the current reference
+// branch. A conflict/dirty-tree error surfaces in the modal (git aborts, so nothing
+// changes).
+func (m *model) rebaseAgentCmd(name string) tea.Cmd {
+	cl := m.cl
+	m.flash = "rebasing " + name + "…"
+	return mutateThenRefresh(cl, func() error { return cl.RebaseAgent(name) })
+}
+
 // agentStartStop is the Start/Stop toggle for the selected agent: start it if
 // it's down, stop it if it's running, no-op while it's transitioning.
 func (m *model) agentStartStop() tea.Cmd {

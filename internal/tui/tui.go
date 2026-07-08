@@ -459,7 +459,7 @@ func (m *model) onKey(k string) tea.Cmd {
 				return m.lintCmd(id)
 			}
 		}
-	case keyReject: // prs: reject a PR · tasks: reject a planner-proposed task (with a comment)
+	case keyReject: // prs: reject a PR · tasks: reject a proposal · agents: rebase (R = reBase)
 		if m.tab == 2 && m.selID() != "" {
 			m.openRejectForm(m.selID())
 			return nil
@@ -467,6 +467,9 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 0 && m.taskGated() {
 			m.openTaskRejectForm(m.selID())
 			return nil
+		}
+		if m.tab == 1 && m.selID() != "" && !m.isOrphan(m.selID()) {
+			return m.rebaseAgentCmd(m.selID())
 		}
 	case keyVerify: // prs: verify — materialize the PR into the review workspace + shell in
 		if m.tab == 2 {

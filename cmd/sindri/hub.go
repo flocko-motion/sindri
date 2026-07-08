@@ -31,6 +31,7 @@ type backend interface {
 	SetMemory(name, memory string) error
 	DeleteAgent(name string) error
 	StopAgent(name string) error
+	RebaseAgent(name string) error
 	AgentPane(name string, lines int) (string, error)
 	Diagnose(name string) (string, error)
 	Stats() (hub.StatsReport, error)
@@ -200,7 +201,7 @@ func newHubRestartCmd() *cobra.Command {
 func newAgentCmd() *cobra.Command {
 	c := &cobra.Command{Use: "agent", Short: "Manage agents (workers, reviewers, planners, coauthors)",
 		PersistentPreRun: agentPreflight} // warn up front if podman is down — nothing works without it
-	c.AddCommand(agentListCmd(), agentStatsCmd(), agentNewCmd(), agentDeleteCmd(), agentPaneCmd(), agentStartCmd(), agentStopCmd(), agentRestartCmd(), agentMemoryCmd(), agentTellCmd(), agentAttachCmd(), agentInfoCmd())
+	c.AddCommand(agentListCmd(), agentStatsCmd(), agentNewCmd(), agentDeleteCmd(), agentPaneCmd(), agentStartCmd(), agentStopCmd(), agentRestartCmd(), agentRebaseCmd(), agentMemoryCmd(), agentTellCmd(), agentAttachCmd(), agentInfoCmd())
 	return c
 }
 

@@ -163,6 +163,11 @@ func (c *HTTP) StopAgent(name string) error {
 	return c.post("/agent/stop", hub.NameReq{Name: name})
 }
 
+// RebaseAgent rebases the agent's worktree onto the current base (reference) branch.
+func (c *HTTP) RebaseAgent(name string) error {
+	return c.post("/agent/rebase", hub.NameReq{Name: name})
+}
+
 // AgentPane returns the last `lines` rows of the agent's tmux pane (plain text).
 func (c *HTTP) AgentPane(name string, lines int) (string, error) {
 	var ok struct {
