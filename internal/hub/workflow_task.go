@@ -575,7 +575,7 @@ func (h *Hub) claimLeaf(project, agent string) (string, bool, error) {
 	}
 	_ = ps.Log(agent, "claim", t.ID+" "+t.Title)
 	h.notify()
-	return dirClaimed(t.ID, t.Title, branch), true, nil
+	return dirClaimed(t.ID, t.Title, branch, h.architectureDoc(project)), true, nil
 }
 
 // collabLabel marks a parent task for collaborative assignment.
