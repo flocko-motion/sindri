@@ -10,16 +10,22 @@
 package update
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/flo-at/sindri/internal/debug"
 )
 
 // repo is the GitHub repository whose releases are checked and installed.
@@ -180,34 +186,113 @@ func fetchRelease(tag string, timeout time.Duration) (string, error) {
 	return name, err
 }
 
+// errNotFound is a release/tag the API reports as 404 — distinct from a transport or
+// rate-limit failure, so callers can drive the v-prefix fallback / "no such tag".
+var errNotFound = errors.New("not found")
+
 // fetchReleaseExact fetches one release by tag ("" = latest) without any fallback.
 func fetchReleaseExact(tag string, timeout time.Duration) (string, error) {
-	url := "https://api.github.com/repos/" + repo + "/releases/latest"
+	path := "repos/" + repo + "/releases/latest"
 	if tag != "" {
-		url = "https://api.github.com/repos/" + repo + "/releases/tags/" + tag
+		path = "repos/" + repo + "/releases/tags/" + tag
 	}
-	cl := &http.Client{Timeout: timeout}
-	resp, err := cl.Get(url)
+	body, err := githubJSON(path, timeout)
 	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		if tag != "" {
-			return "", fmt.Errorf("no release tagged %q", tag)
+		if errors.Is(err, errNotFound) {
+			if tag != "" {
+				return "", fmt.Errorf("no release tagged %q", tag)
+			}
+			return "", fmt.Errorf("no published release found for %s — or the repo is private (an unauthenticated check 404s private repos; `gh auth login` or set GITHUB_TOKEN)", repo)
 		}
-		return "", fmt.Errorf("no published release found for %s — or the repo is private (this check is unauthenticated, and GitHub 404s private repos)", repo)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("github: %s", resp.Status)
+		return "", err
 	}
 	var rel struct {
 		TagName string `json:"tag_name"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+	if err := json.Unmarshal(body, &rel); err != nil {
 		return "", err
 	}
 	return rel.TagName, nil
+}
+
+// githubJSON fetches a GitHub API path (e.g. "repos/o/r/releases/latest"), preferring
+// the gh CLI — which uses the user's auth and so isn't subject to the low (60/hour
+// per-IP) anonymous rate limit that 403s on shared networks/VPNs. Without gh it falls
+// back to a direct HTTPS GET carrying a User-Agent (GitHub requires one) and any
+// GITHUB_TOKEN/GH_TOKEN from the environment. A 404 comes back as errNotFound.
+func githubJSON(path string, timeout time.Duration) ([]byte, error) {
+	if _, err := exec.LookPath("gh"); err == nil {
+		return ghAPI(path, timeout)
+	}
+	debug.Logf("gh not found on PATH — falling back to a direct GitHub HTTP call")
+	return httpGitHubJSON(path, timeout)
+}
+
+// ghAPI runs `gh api <path>` (auth handled by gh) and returns its JSON body.
+func ghAPI(path string, timeout time.Duration) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	debug.Logf("gh api %s", path)
+	cmd := exec.CommandContext(ctx, "gh", "api", path)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		debug.Logf("gh api %s failed: %v — stderr: %s", path, err, msg)
+		if strings.Contains(msg, "404") || strings.Contains(strings.ToLower(msg), "not found") {
+			return nil, errNotFound
+		}
+		if msg != "" {
+			return nil, fmt.Errorf("gh api: %s", msg)
+		}
+		return nil, fmt.Errorf("gh api %s: %w", path, err)
+	}
+	return stdout.Bytes(), nil
+}
+
+// httpGitHubJSON GETs https://api.github.com/<path> directly, with a User-Agent and
+// any token from the environment; it reports the status (and rate-limit headers)
+// under --debug so a 403 is self-explanatory.
+func httpGitHubJSON(path string, timeout time.Duration) ([]byte, error) {
+	url := "https://api.github.com/" + path
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "sindri")
+	req.Header.Set("Accept", "application/vnd.github+json")
+	if tok := githubToken(); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+		debug.Logf("using a token from the environment for the GitHub call")
+	}
+	resp, err := (&http.Client{Timeout: timeout}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	debug.Logf("GET %s -> %s (RateLimit-Remaining=%s, Reset=%s)", url, resp.Status,
+		resp.Header.Get("X-RateLimit-Remaining"), resp.Header.Get("X-RateLimit-Reset"))
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, errNotFound
+	}
+	if resp.StatusCode == http.StatusForbidden && resp.Header.Get("X-RateLimit-Remaining") == "0" {
+		return nil, fmt.Errorf("github: rate limit exceeded (anonymous is 60/hour per IP) — `gh auth login` or set GITHUB_TOKEN to raise it")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("github: %s", resp.Status)
+	}
+	return io.ReadAll(resp.Body)
+}
+
+// githubToken returns a GitHub token from the environment (GITHUB_TOKEN or GH_TOKEN),
+// or "" if none — used only by the direct-HTTP fallback (gh manages its own auth).
+func githubToken() string {
+	for _, k := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
+		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // togglePrefix flips a leading "v" on a version string, so a user's "0.12.1" and the
@@ -222,19 +307,14 @@ func togglePrefix(tag string) string {
 // fetchReleaseTags lists the repo's release tags, newest first (GitHub returns
 // releases in reverse-chronological order).
 func fetchReleaseTags(timeout time.Duration) ([]string, error) {
-	cl := &http.Client{Timeout: timeout}
-	resp, err := cl.Get("https://api.github.com/repos/" + repo + "/releases?per_page=100")
+	body, err := githubJSON("repos/"+repo+"/releases?per_page=100", timeout)
 	if err != nil {
 		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("github: %s", resp.Status)
 	}
 	var rels []struct {
 		TagName string `json:"tag_name"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&rels); err != nil {
+	if err := json.Unmarshal(body, &rels); err != nil {
 		return nil, err
 	}
 	tags := make([]string, 0, len(rels))
