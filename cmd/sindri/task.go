@@ -35,7 +35,7 @@ func tasksJSON(tasks []store.Task) (string, error) {
 
 func newTaskCmd() *cobra.Command {
 	c := &cobra.Command{Use: "task", Short: "Inspect and create tasks (td issues)"}
-	c.AddCommand(taskListCmd(), taskInfoCmd(), taskNewCmd(), taskEditCmd(), taskPriorityCmd(), taskApproveCmd(), taskRejectCmd(), taskUnassignCmd(), taskCloseCmd(), taskRefreshCmd())
+	c.AddCommand(taskListCmd(), taskInfoCmd(), taskNewCmd(), taskEditCmd(), taskPriorityCmd(), taskApproveCmd(), taskRejectCmd(), taskUnassignCmd(), taskCloseCmd(), taskDeleteCmd(), taskRefreshCmd())
 	return c
 }
 
@@ -59,17 +59,35 @@ func taskRefreshCmd() *cobra.Command {
 	}
 }
 
-// taskCloseCmd marks a task done from the task list — the CLI counterpart of the
-// TUI Close action. The hub dispatches by backend; only td tasks support close.
+// taskCloseCmd marks a task done — dispatched by backend (td close / openspec archive
+// / GitHub issue close).
 func taskCloseCmd() *cobra.Command {
 	return &cobra.Command{
-		Use: "close <id>", Short: "Close a task from the task list (marks it done; td tasks only)", Args: cobra.ExactArgs(1),
+		Use: "close <id>", Short: "Close a task (done): td close · openspec archive · issue close", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withBackend(func(b backend) error {
 				if err := b.CloseTask(args[0]); err != nil {
 					return err
 				}
 				fmt.Fprintf(os.Stderr, "closed %s\n", args[0])
+				return nil
+			})
+		},
+	}
+}
+
+// taskDeleteCmd scraps a task — dispatched by backend (td delete / openspec change-dir
+// removal / GitHub issue delete).
+func taskDeleteCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "delete <id>", Aliases: []string{"rm", "scrap"},
+		Short: "Scrap a task (discard): td delete · openspec change removal · issue delete", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withBackend(func(b backend) error {
+				if err := b.DeleteTask(args[0]); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "scrapped %s\n", args[0])
 				return nil
 			})
 		},

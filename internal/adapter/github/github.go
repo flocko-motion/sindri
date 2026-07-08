@@ -96,6 +96,18 @@ func Close(ctx context.Context, root string, number int, comment string) error {
 	return nil
 }
 
+// Delete permanently deletes issue number via `gh issue delete <number> --yes`. This
+// is GitHub's hard delete (irreversible, and requires repo-admin/triage rights); it
+// backs the "scrap" close for a gh-* task, as opposed to Close's "done".
+func Delete(ctx context.Context, root string, number int) error {
+	cmd := exec.CommandContext(ctx, "gh", "issue", "delete", strconv.Itoa(number), "--yes")
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("gh issue delete %d in %s: %s", number, root, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // ghError attaches gh's stderr (carried on ExitError) to the error, so an auth or
 // network failure surfaces gh's own message rather than a bare "exit status 1".
 func ghError(err error) error {

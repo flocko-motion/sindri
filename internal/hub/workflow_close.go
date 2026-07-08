@@ -1,0 +1,98 @@
+// package: hub / workflow_close
+// type:    logic (task close/scrap dispatch)
+// job:     the two lifecycle-ending verbs every todo backend distinguishes — "done"
+//          (CloseTask) and "discard" (DeleteTask) — routed by the task's id prefix to
+//          the right backend op: td close/delete, openspec archive/change-removal,
+//          GitHub issue close/delete. Both guard against a live holder first.
+// limits:  dispatch only; each op lives in its adapter (td/spec/github).
+package hub
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/flo-at/sindri/internal/adapter/github"
+	"github.com/flo-at/sindri/internal/adapter/spec"
+	"github.com/flo-at/sindri/internal/adapter/td"
+)
+
+// CloseTask marks a task done from the task list (host-only) — the "done" close,
+// dispatched by backend: a td task closes, an openspec change archives (its deltas
+// fold into the specs), a GitHub issue is closed. Refused if a live agent is working
+// on the task, mirroring UnassignTask.
+func (h *Hub) CloseTask(project, id string) error { return h.finishTask(project, id, false) }
+
+// DeleteTask scraps a task from the task list (host-only) — the "discard" close,
+// dispatched by backend: a td task soft-deletes (restorable), an openspec change's
+// proposal dir is removed (git-recoverable), a GitHub issue is deleted (permanent,
+// needs repo-admin rights). Refused if a live agent is working on the task.
+func (h *Hub) DeleteTask(project, id string) error { return h.finishTask(project, id, true) }
+
+// finishTask is the shared close/scrap path: it guards against a live holder, then
+// dispatches to the id's backend for either "done" (scrap=false) or "scrap"
+// (scrap=true). Every todo backend distinguishes the two, so the hub does too.
+func (h *Hub) finishTask(project, id string, scrap bool) error {
+	ps := h.store.For(project)
+	root := h.projectRoot(project)
+	roster, _ := ps.Roster()
+	for _, a := range roster {
+		if st, _ := ps.GetState(a.Name); st.Task == id && h.agentAlive(project, a.Name) {
+			return fmt.Errorf("%s is alive and working on %s — stop or delete it first", a.Name, id)
+		}
+	}
+	var err error
+	switch {
+	case strings.HasPrefix(id, "td-"):
+		if scrap {
+			err = td.Delete(root, id)
+		} else {
+			err = td.Close(root, id, "closed from task list")
+		}
+	case strings.HasPrefix(id, "os-"):
+		name, ok := h.changeName(root, id)
+		if !ok {
+			return fmt.Errorf("%s: can't resolve its openspec change (re-sync and retry)", id)
+		}
+		if scrap {
+			err = spec.DeleteChange(root, name)
+		} else {
+			err = spec.Archive(root, name)
+		}
+	case strings.HasPrefix(id, "gh-"):
+		n, ok := githubIssueNumber(id)
+		if !ok {
+			return fmt.Errorf("%s: not a valid GitHub id", id)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), githubIssueTimeout)
+		defer cancel()
+		if scrap {
+			err = github.Delete(ctx, root, n)
+		} else {
+			err = github.Close(ctx, root, n, "closed via sindri")
+		}
+	default:
+		return fmt.Errorf("%s: unknown task backend", id)
+	}
+	if err != nil {
+		return err
+	}
+	e := h.SyncTasks(project)
+	h.notify()
+	return e
+}
+
+// changeName resolves an os-<hash> id back to its openspec change name by matching
+// specID over the current changes (the id is a one-way hash of the name).
+func (h *Hub) changeName(root, id string) (string, bool) {
+	changes, err := spec.Changes(root)
+	if err != nil {
+		return "", false
+	}
+	for _, c := range changes {
+		if specID(c.Name) == id {
+			return c.Name, true
+		}
+	}
+	return "", false
+}

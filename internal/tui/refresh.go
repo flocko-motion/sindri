@@ -10,12 +10,27 @@
 package tui
 
 import (
+	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/flo-at/sindri/internal/client"
+	"github.com/flo-at/sindri/internal/hub"
 )
+
+// waitForState blocks on the /events channel for the next board snapshot, tagging it
+// with the subscription generation so a snapshot from a stream abandoned by a repo
+// switch can be ignored. A closed channel surfaces as a fatal errMsg.
+func waitForState(ch <-chan hub.BoardState, gen int) tea.Cmd {
+	return func() tea.Msg {
+		st, ok := <-ch
+		if !ok {
+			return errMsg{err: fmt.Errorf("hub connection closed"), gen: gen}
+		}
+		return stateMsg{st: st, gen: gen}
+	}
+}
 
 // tickCmd fires a tickMsg every refreshInterval — the heartbeat behind the
 // agents-tab auto-refresh.

@@ -251,14 +251,15 @@ func hasTaskTitled(tasks []store.Task, title string) bool {
 	return false
 }
 
-// TestCloseTaskUnsupportedBackend covers the agnostic dispatch: closing is
-// routed by the task's backend, and a backend with no close of its own (here an
-// openspec-change row, os-…) is refused with an error the caller surfaces in the
-// standard error modal — rather than silently doing nothing.
-func TestCloseTaskUnsupportedBackend(t *testing.T) {
+// TestCloseUnresolvableOpenspec covers the agnostic dispatch's failure path: closing
+// is routed by the task's backend, and an os- id that resolves to no known openspec
+// change (here a bogus one, with no openspec/ dir) errors clearly rather than
+// silently doing nothing. (A real os- close archives the change; that needs the
+// openspec CLI + a change, so it's exercised end-to-end, not here.)
+func TestCloseUnresolvableOpenspec(t *testing.T) {
 	h := newHub(t)
 	if err := h.CloseTask(testProject, "os-abc123"); err == nil {
-		t.Fatalf("closing a non-td (openspec) row should be refused")
+		t.Fatalf("closing an unresolvable openspec row should error")
 	}
 }
 

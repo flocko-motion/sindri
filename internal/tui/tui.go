@@ -157,16 +157,6 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func waitForState(ch <-chan hub.BoardState, gen int) tea.Cmd {
-	return func() tea.Msg {
-		st, ok := <-ch
-		if !ok {
-			return errMsg{err: fmt.Errorf("hub connection closed"), gen: gen}
-		}
-		return stateMsg{st: st, gen: gen}
-	}
-}
-
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -436,7 +426,11 @@ func (m *model) onKey(k string) tea.Cmd {
 				return nil
 			}
 		}
-	case keyDelete: // agents: delete the selected agent (or remove an orphan) · repos: forget
+	case keyDelete: // tasks: scrap · agents: delete (or remove an orphan) · repos: forget
+		if m.tab == 0 && m.selID() != "" {
+			m.openScrapChoice(m.selID())
+			return nil
+		}
 		if m.tab == 1 && m.selID() != "" {
 			if m.isOrphan(m.selID()) {
 				m.openRemoveOrphanChoice(m.selID())
