@@ -556,8 +556,13 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 		Env:        env,
 		Mounts:     mounts,
 		Workdir:    "/workspace",
-		Entrypoint: []string{"sindri-agent", name},
-		Memory:     memoryOrDefault(a.Memory),
+		Entrypoint:  []string{"sindri-agent", name},
+		Memory:      memoryOrDefault(a.Memory),
+		SecurityOpt: []string{"label=disable"}, // don't let SELinux block the agent's nested containers
+	}
+	// /dev/fuse backs rootless podman-in-podman; add only when present (missing → run fails).
+	if _, e := os.Stat("/dev/fuse"); e == nil {
+		opts.Devices = []string{"/dev/fuse"}
 	}
 	if err := container.Run(opts); err != nil {
 		return err

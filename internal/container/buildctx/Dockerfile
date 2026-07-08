@@ -55,7 +55,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # package is installed here regardless so the CLI and the shims resolve.
 RUN apt-get update && apt-get install -y --no-install-recommends \
   podman fuse-overlayfs uidmap slirp4netns \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/* \
+  # Rootless storage must use fuse-overlayfs (the kernel overlay mount needs privilege
+  # the nested container doesn't have); needs /dev/fuse at run time.
+  && mkdir -p /etc/containers \
+  && printf '[storage]\ndriver = "overlay"\n[storage.options.overlay]\nmount_program = "/usr/bin/fuse-overlayfs"\n' > /etc/containers/storage.conf \
+  # Debian ships no default search registry, so `podman build FROM golang` (short
+  # name) would error — add docker.io so the shims and short names resolve.
+  && printf 'unqualified-search-registries = ["docker.io"]\n' > /etc/containers/registries.conf
 
 # ── yazi (TUI file manager — not in apt; prebuilt release binary) ──────────────
 # Pick the release matching the build arch, so the image is correct whether it's
@@ -122,12 +129,14 @@ COPY sindri-agent.sh  /usr/local/bin/sindri-agent
 RUN chmod +x /usr/local/bin/sindri-agent
 
 # ── Non-root user (claude refuses --dangerously-skip-permissions as root) ──
-# Give sindri a subordinate uid/gid range so rootless podman can map a user
-# namespace (newuidmap/newgidmap read these); without it nested podman errors with
-# "no subuid ranges found".
-RUN useradd -m -s /bin/bash sindri \
-  && echo 'sindri:100000:65536' > /etc/subuid \
-  && echo 'sindri:100000:65536' > /etc/subgid
+# Give sindri subordinate uid/gid ranges for rootless podman-in-podman. The ranges
+# must fit INSIDE the outer container's user namespace (keep-id maps ~65k ids), so —
+# following the podman/stable recipe — split around the user's own uid (1000) rather
+# than the host-scale 100000+ block, which would exceed the mapping and fail
+# newuidmap with "invalid argument".
+RUN useradd -m -u 1000 -s /bin/bash sindri \
+  && printf 'sindri:1:999\nsindri:1001:64535\n' > /etc/subuid \
+  && printf 'sindri:1:999\nsindri:1001:64535\n' > /etc/subgid
 
 # `y` yazi wrapper, sourced by interactive shells (attach / post-Claude bash).
 COPY yazi.sh /etc/sindri/yazi.sh
