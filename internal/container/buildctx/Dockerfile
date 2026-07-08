@@ -44,26 +44,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && sed -i 's/# en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && locale-gen \
   && rm -rf /var/lib/apt/lists/*
 
-# ── podman (nested container builds/runs) ─────────────────────────────────────
-# The docker/docker-compose shims exec `podman`, and agents building or running
-# containers as part of a task need it present. Rootless-in-container needs
-# fuse-overlayfs (overlay storage without a privileged kernel mount), uidmap
-# (newuidmap/newgidmap for the user namespace) and slirp4netns (rootless network);
-# containers-common (pulled in by podman) provides the default registries/storage
-# config. NB: actually RUNNING nested containers also needs the pod started with
-# /dev/fuse + a user namespace that allows nesting — see the launch run-flags; the
-# package is installed here regardless so the CLI and the shims resolve.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-  podman fuse-overlayfs uidmap slirp4netns \
-  && rm -rf /var/lib/apt/lists/* \
-  # Rootless storage must use fuse-overlayfs (the kernel overlay mount needs privilege
-  # the nested container doesn't have); needs /dev/fuse at run time.
-  && mkdir -p /etc/containers \
-  && printf '[storage]\ndriver = "overlay"\n[storage.options.overlay]\nmount_program = "/usr/bin/fuse-overlayfs"\n' > /etc/containers/storage.conf \
-  # Debian ships no default search registry, so `podman build FROM golang` (short
-  # name) would error — add docker.io so the shims and short names resolve.
-  && printf 'unqualified-search-registries = ["docker.io"]\n' > /etc/containers/registries.conf
-
 # ── yazi (TUI file manager — not in apt; prebuilt release binary) ──────────────
 # Pick the release matching the build arch, so the image is correct whether it's
 # built on amd64 or arm64 (e.g. an Apple Silicon podman VM).
@@ -129,14 +109,7 @@ COPY sindri-agent.sh  /usr/local/bin/sindri-agent
 RUN chmod +x /usr/local/bin/sindri-agent
 
 # ── Non-root user (claude refuses --dangerously-skip-permissions as root) ──
-# Give sindri subordinate uid/gid ranges for rootless podman-in-podman. The ranges
-# must fit INSIDE the outer container's user namespace (keep-id maps ~65k ids), so —
-# following the podman/stable recipe — split around the user's own uid (1000) rather
-# than the host-scale 100000+ block, which would exceed the mapping and fail
-# newuidmap with "invalid argument".
-RUN useradd -m -u 1000 -s /bin/bash sindri \
-  && printf 'sindri:1:999\nsindri:1001:64535\n' > /etc/subuid \
-  && printf 'sindri:1:999\nsindri:1001:64535\n' > /etc/subgid
+RUN useradd -m -s /bin/bash sindri
 
 # `y` yazi wrapper, sourced by interactive shells (attach / post-Claude bash).
 COPY yazi.sh /etc/sindri/yazi.sh
