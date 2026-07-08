@@ -119,16 +119,17 @@ type model struct {
 	noticeText  string    // when set, a startup warning modal is shown (any key dismisses)
 }
 
-// detailMinWidth is the narrowest terminal that still shows the inline detail
-// pane; below it the selector goes full-width and detail is ENTER-only.
-const detailMinWidth = 135
+// detailMinWidth is the floor below which a side detail column can't usefully
+// coexist with the main content — genuinely too little room, not a preference. Above
+// it the user controls the column with § (it shows by default). The main pane (task
+// list / live screen / diff) is NEVER gated on width; only this secondary column is.
+const detailMinWidth = 80
 
-// wide reports whether the terminal is wide enough for a side detail column.
+// wide reports whether there's room for a side detail column at all.
 func (m model) wide() bool { return m.w >= detailMinWidth }
 
-// showDetail reports whether the right detail column should be shown (wide
-// enough and not §-hidden). The Agents/PRs left split still renders when wide
-// even if the detail is hidden — § only drops the right column there.
+// showDetail reports whether the right detail column is shown: on by default when
+// there's room, off when the user hides it with §. Never hides the main pane.
 func (m model) showDetail() bool { return m.wide() && !m.hideDetail }
 
 func newModel(cl *client.HTTP, ch <-chan hub.BoardState, root string) model {
@@ -584,20 +585,18 @@ func (m *model) reclamp() {
 	n := len(m.rows())
 	m.cursor[m.tab] = clampInt(m.cursor[m.tab], 0, max(0, n-1))
 	listH := m.bodyHeight()
-	if m.wide() { // agents/prs: the list is the short top region of a split
-		switch m.tab {
-		case 1:
-			listH = m.agentListHeight()
-		case 2:
-			listH = m.prListHeight()
-		}
+	switch m.tab { // agents/prs: the list is the short top region of a split (any width)
+	case 1:
+		listH = m.agentListHeight()
+	case 2:
+		listH = m.prListHeight()
 	}
 	m.list.SetHeight(listH)
 	m.list.SetTotal(n)
 	m.list.SetCursor(m.cursor[m.tab])
 	// Offset-driven scroll (J/K), preserved across re-layouts; reset to top only
 	// when the selection changes (syncDetail).
-	if m.tab == 2 && m.wide() { // PRs: detail pane is the big bottom-left content
+	if m.tab == 2 { // PRs: detail pane is the big bottom-left content (any width)
 		m.detail.Resize(max(1, m.bodyHeight()-m.prListHeight()-1), len(m.prContentLines()))
 	} else {
 		m.detail.Resize(m.bodyHeight(), len(m.detailLines()))
