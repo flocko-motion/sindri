@@ -2,6 +2,7 @@ package update
 
 import (
 	"io"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -74,20 +75,20 @@ func TestCacheRoundTrip(t *testing.T) {
 }
 
 func TestUpdaterScript(t *testing.T) {
-	// Linux, no tag: installs the .deb via dpkg from the latest release.
+	// Every generated script prefers gh with a curl fallback, and must be valid bash.
+	// Linux installs the .deb (no tarball); macOS installs the darwin tarball (no dpkg).
 	linux := updaterScript("linux", "amd64", "")
-	for _, want := range []string{"#!/usr/bin/env bash", repo, "dpkg -i", `rel="latest"`} {
+	for _, want := range []string{"#!/usr/bin/env bash", repo, "dpkg -i", "gh release download", `rel="latest"`, `tag=""`} {
 		if !strings.Contains(linux, want) {
 			t.Errorf("linux updater script missing %q", want)
 		}
 	}
-	if strings.Contains(linux, "tar") {
+	if strings.Contains(linux, "tar -C") {
 		t.Error("linux updater must not use the tarball path")
 	}
 
-	// macOS, no tag: installs the darwin tarball for the baked arch, not a .deb.
 	mac := updaterScript("darwin", "arm64", "")
-	for _, want := range []string{"#!/usr/bin/env bash", repo, "_darwin_", "arch=\"arm64\"", "tar -C", "com.apple.quarantine"} {
+	for _, want := range []string{"#!/usr/bin/env bash", repo, "_darwin_", `arch="arm64"`, "tar -C", "com.apple.quarantine", "gh release download", `tag=""`} {
 		if !strings.Contains(mac, want) {
 			t.Errorf("darwin updater script missing %q", want)
 		}
@@ -96,10 +97,22 @@ func TestUpdaterScript(t *testing.T) {
 		t.Error("darwin updater must not use dpkg")
 	}
 
-	// A pinned tag targets that exact release (tags/<tag>), on both platforms.
+	// A pinned tag is baked so both the gh and curl branches target that release.
 	for _, s := range []string{updaterScript("linux", "amd64", "v0.12.0"), updaterScript("darwin", "arm64", "v0.12.0")} {
-		if !strings.Contains(s, `rel="tags/v0.12.0"`) {
-			t.Errorf("pinned updater script should target tags/v0.12.0:\n%s", s)
+		if !strings.Contains(s, `tag="v0.12.0"`) {
+			t.Errorf("pinned updater script should bake tag=v0.12.0:\n%s", s)
+		}
+	}
+
+	// The scripts must be syntactically valid bash (they use arrays + parameter
+	// expansion), so a botched generation can't ship a broken updater.
+	if _, err := exec.LookPath("bash"); err == nil {
+		for _, s := range []string{linux, mac, updaterScript("linux", "amd64", "v1.2.3")} {
+			cmd := exec.Command("bash", "-n")
+			cmd.Stdin = strings.NewReader(s)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Errorf("generated script is not valid bash: %v\n%s", err, out)
+			}
 		}
 	}
 }
