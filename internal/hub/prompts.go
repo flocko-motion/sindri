@@ -46,9 +46,17 @@ That floor is enforced automatically.
 _(none documented yet)_
 `
 
+// architectureBrief tells any agent to read the project's architecture doc before
+// working. EVERY role needs to know how the project is built — not just the reviewer
+// — or it can't produce work that fits. arch is the repo-relative doc path
+// (/workspace is the mounted root); the hub always ensures one exists.
+func architectureBrief(arch string) string {
+	return fmt.Sprintf("\n\nBefore you start, read /workspace/%s — it describes how this project is built and how your work must fit it. Treat it as binding, and re-read it whenever you're unsure.", arch)
+}
+
 // systemPrompt is the agent's durable identity + how-to-work brief. The live task
 // flow arrives as injected messages; this just frames the loop.
-func systemPrompt(name, role string) string {
+func systemPrompt(name, role, arch string) string {
 	if role == "coauthor" {
 		// A coauthor is NOT on the run-`sindri`-in-a-loop rails the other roles ride.
 		// It shares the user's checkout and is driven directly, like an ordinary
@@ -70,7 +78,7 @@ the project's quality gate, `+"`sindri status`"+` shows who you are, and
 it to get work — the user gives you that here.
 
 When the user goes quiet, stop and wait for their next instruction rather than
-inventing work. Never poll or guess.`, name)
+inventing work. Never poll or guess.`, name) + architectureBrief(arch)
 	}
 
 	common := fmt.Sprintf(`You are %q, a Sindri %s agent running in a sandboxed container.
@@ -87,7 +95,7 @@ lists it, but that set is contextual and changes as you go.)
 Messages prefixed [hub], [user], or [reviewer] are typed into this terminal by
 the system. Act on them. When `+"`sindri`"+` tells you to wait for a verdict,
 stop and wait quietly — it will appear here, and that may take a long time. Never
-poll, never guess, never invent commands.`, name, role)
+poll, never guess, never invent commands.`, name, role) + architectureBrief(arch)
 
 	switch role {
 	case "planner":
