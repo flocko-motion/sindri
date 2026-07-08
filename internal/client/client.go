@@ -446,6 +446,11 @@ func (c *HTTP) SetRepoColor(tag string, color int) error {
 	return c.post("/repo/color", hub.RepoReq{Tag: tag, Color: color})
 }
 
+// RemoveOrphan removes a stray container by name (a running pod with no roster entry).
+func (c *HTTP) RemoveOrphan(name string) error {
+	return c.post("/orphan/remove", hub.NameReq{Name: name})
+}
+
 // WriteRepoConfig persists the caller's repo's .sindri/config.yaml (validated hub-side).
 func (c *HTTP) WriteRepoConfig(cfg config.Config) error {
 	return c.post("/repo/config", cfg)

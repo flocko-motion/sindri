@@ -64,6 +64,7 @@ type backend interface {
 	RepoInit() (hub.RepoSummary, error)
 	RepoForget(tag string) error
 	SetRepoColor(tag string, color int) error
+	RemoveOrphan(name string) error
 	WriteRepoConfig(cfg config.Config) error
 	Close() error
 }

@@ -324,9 +324,39 @@ func (m model) agentRows() []row {
 		}, " "), a.Name})
 	}
 	for _, o := range m.state.Orphans {
-		out = append(out, row{stWarn.Render("⚠ orphan: " + o), ""})
+		// The id is the orphan's container name so D can remove it. Agent-only actions
+		// (start/stop/tell/attach/edit) key off the roster and skip a non-agent id —
+		// isOrphan gates the ones that read selID directly (tell/delete).
+		out = append(out, row{stWarn.Render("⚠ orphan: " + o), o})
 	}
 	return out
+}
+
+// isOrphan reports whether id is a stray container (an orphan row), not a roster
+// agent — so agent-only actions can skip it and D can route it to orphan removal.
+func (m model) isOrphan(id string) bool {
+	for _, o := range m.state.Orphans {
+		if o == id {
+			return true
+		}
+	}
+	return false
+}
+
+// openRemoveOrphanChoice confirms removing a stray container (an orphan with no
+// roster entry) — a direct container rm, since there's no agent identity to delete.
+func (m *model) openRemoveOrphanChoice(name string) {
+	cl := m.cl
+	m.choice = choiceModalState{
+		active: true, title: "remove orphan container " + name + "?",
+		options: []string{"cancel", "remove"}, values: []string{"cancel", "remove"},
+		apply: func(v string) tea.Cmd {
+			if v != "remove" {
+				return nil
+			}
+			return mutateThenRefresh(cl, func() error { return cl.RemoveOrphan(name) })
+		},
+	}
 }
 
 func (m model) agentDetailLines() []string {

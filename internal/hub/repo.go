@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 
 	"github.com/flo-at/sindri/internal/config"
+	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -165,6 +166,18 @@ func (h *Hub) RepoForget(project string) error {
 // surfaces the validation error instead.
 func (h *Hub) WriteRepoConfig(root string, cfg config.Config) error {
 	return config.Write(root, cfg)
+}
+
+// RemoveOrphan removes a stray container by name — a pod the board flagged as an
+// orphan (running, but with no roster entry). There's no agent identity to delete,
+// so this is a direct container rm; the name is a full container name (globally
+// unique), so no project context is needed.
+func (h *Hub) RemoveOrphan(name string) error {
+	if err := container.Rm(name); err != nil {
+		return fmt.Errorf("remove orphan container %s: %w", name, err)
+	}
+	h.notify()
+	return nil
 }
 
 // SetRepoColor pins a repo's display-colour choice in the registry (0 = the
