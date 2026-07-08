@@ -436,9 +436,13 @@ func (m *model) onKey(k string) tea.Cmd {
 				return nil
 			}
 		}
-	case keyDelete: // agents: delete the selected agent · repos: forget the selected repo
+	case keyDelete: // agents: delete the selected agent (or remove an orphan) · repos: forget
 		if m.tab == 1 && m.selID() != "" {
-			m.openDeleteChoice(m.selID())
+			if m.isOrphan(m.selID()) {
+				m.openRemoveOrphanChoice(m.selID())
+			} else {
+				m.openDeleteChoice(m.selID())
+			}
 			return nil
 		}
 		if m.tab == 3 && m.selID() != "" {
@@ -446,7 +450,7 @@ func (m *model) onKey(k string) tea.Cmd {
 			return nil
 		}
 	case keyTell: // tell the selected agent (agents) / show linked task (prs)
-		if m.tab == 1 && m.selID() != "" {
+		if m.tab == 1 && m.selID() != "" && !m.isOrphan(m.selID()) {
 			m.openInput(inputTell, "tell "+m.selID()+": ")
 			return textinput.Blink
 		} else if m.tab == 2 {

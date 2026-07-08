@@ -100,6 +100,8 @@ var globalRoutes = map[string]bool{
 	// Registry management spans repos: listing, inspecting, and forgetting a repo
 	// operate on the registry by tag, not on the caller's cwd.
 	"/repos": true, "/repo": true, "/repo/forget": true, "/repo/color": true,
+	// Orphan removal targets a container by its (globally-unique) name, not a repo.
+	"/orphan/remove": true,
 }
 
 // requireProject rejects a repo-scoped request that arrives without an
@@ -174,6 +176,13 @@ func (h *Hub) Handler() http.Handler {
 			return
 		}
 		writeJSON(w, okMsg{"ok"}, h.SetRepoColor(req.Tag, req.Color))
+	})
+	mux.HandleFunc("POST /orphan/remove", func(w http.ResponseWriter, r *http.Request) {
+		var req NameReq // Name carries the orphan container name
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"removed"}, h.RemoveOrphan(req.Name))
 	})
 	mux.HandleFunc("POST /repo/config", func(w http.ResponseWriter, r *http.Request) {
 		var cfg config.Config
