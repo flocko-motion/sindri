@@ -538,7 +538,7 @@ func (h *Hub) RebaseAgent(project, name string) error {
 		return err
 	}
 	if err := git.Rebase(filepath.Join(root, a.Workspace), base); err != nil {
-		return fmt.Errorf("couldn't rebase %s onto %s — its worktree likely has uncommitted changes or a conflict (git aborted the rebase, so nothing changed): %w", name, base, err)
+		return fmt.Errorf("couldn't rebase %s onto %s — a conflict or uncommitted changes (git aborted, so nothing changed). Have %s resolve it interactively with `sindri rebase` (it surfaces the conflicts to fix). git said: %w", name, base, name, err)
 	}
 	_ = ps.Log(name, "rebase", "onto "+base)
 	_ = h.injectWhenReady(project, name, msgRebased(base))

@@ -146,6 +146,10 @@ As a worker:
   commits your work when you submit.
 - ` + "`sindri lint`" + ` runs the quality gate on your workspace — use it to
   self-check and fix failures before submitting.
+- ` + "`sindri rebase`" + ` aligns your branch with the current reference branch
+  any time — harmless, and worth doing if it's been a while. If it surfaces
+  conflicts, fix the marked files in /workspace and run ` + "`sindri rebase`" + `
+  again until it reports you're aligned.
 - When done, ` + "`sindri submit \"<one-line summary>\"`" + `. Then wait: the
   reviewer's verdict will be typed here. Run ` + "`sindri`" + ` again for your
   next task.`
@@ -269,6 +273,16 @@ func msgReview(prID, requirement, branch, base, arch string, checkedOut bool) st
 
 func replyRegistered(prID string) string {
 	return fmt.Sprintf("%s registered. You'll be informed when it's reviewed. Please wait — this may take a while.", prID)
+}
+
+// replyRebaseConflicts answers `rebase` when the rebase hit conflicts to edit.
+func replyRebaseConflicts(base string, files []string) string {
+	return fmt.Sprintf("Rebasing onto %s hit conflicts in %s. They're in your /workspace with <<<<<<< markers — edit each file to the intended result (remove the markers), then run `sindri rebase` again to continue. Repeat until it reports you're aligned.", base, fileList(files))
+}
+
+// replyRebased answers `rebase` once the branch is cleanly current with base.
+func replyRebased(base string) string {
+	return fmt.Sprintf("Your branch is rebased onto %s — you're aligned with the current reference state. Carry on.", base)
 }
 
 // replyResolveConflicts answers `resolve` when conflicts remain to edit.
