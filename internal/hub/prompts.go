@@ -311,3 +311,9 @@ func replyTaskProposed(id, title string) string {
 func replyLintFail(out string) string {
 	return fmt.Sprintf("Lint failed — fix the violations and submit again:\n%s", out)
 }
+
+// replySpecInvalid answers `openspec submit` when the change fails openspec's own
+// validation (the planner's gate — the code linter doesn't apply to spec work).
+func replySpecInvalid(out string) string {
+	return fmt.Sprintf("openspec validation failed — fix the specs and submit again:\n%s", out)
+}

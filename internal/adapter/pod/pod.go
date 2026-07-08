@@ -67,12 +67,6 @@ func RunArgs(o container.RunOpts) []string {
 	if o.Workdir != "" {
 		args = append(args, "-w", o.Workdir)
 	}
-	for _, d := range o.Devices {
-		args = append(args, "--device", d)
-	}
-	for _, s := range o.SecurityOpt {
-		args = append(args, "--security-opt", s)
-	}
 	args = append(args, o.Image)
 	args = append(args, o.Entrypoint...)
 	return args

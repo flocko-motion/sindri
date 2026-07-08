@@ -53,11 +53,6 @@ type RunOpts struct {
 	Workdir    string
 	Entrypoint []string
 	Memory     string // memory limit passed to the runtime (-m), e.g. "4g"; "" = runtime default
-	// Devices are host devices to expose (e.g. "/dev/fuse" for rootless
-	// podman-in-podman's fuse-overlayfs storage); SecurityOpt are --security-opt
-	// values (e.g. "label=disable" so nested containers aren't SELinux-blocked).
-	Devices     []string
-	SecurityOpt []string
 }
 
 // Runtime is the port: everything the hub needs from a container backend. Podman
