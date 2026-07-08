@@ -15,32 +15,28 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/github"
 	"github.com/flo-at/sindri/internal/adapter/spec"
 	"github.com/flo-at/sindri/internal/adapter/td"
+	"github.com/flo-at/sindri/internal/hub/store"
 )
 
 // CloseTask marks a task done from the task list (host-only) — the "done" close,
 // dispatched by backend: a td task closes, an openspec change archives (its deltas
-// fold into the specs), a GitHub issue is closed. Refused if a live agent is working
-// on the task, mirroring UnassignTask.
+// fold into the specs), a GitHub issue is closed. Allowed even while an agent works
+// on it — the agent is freed and told to pick up a new task (see finishTask).
 func (h *Hub) CloseTask(project, id string) error { return h.finishTask(project, id, false) }
 
 // DeleteTask scraps a task from the task list (host-only) — the "discard" close,
 // dispatched by backend: a td task soft-deletes (restorable), an openspec change's
 // proposal dir is removed (git-recoverable), a GitHub issue is deleted (permanent,
-// needs repo-admin rights). Refused if a live agent is working on the task.
+// needs repo-admin rights). Also allowed mid-flight (frees the holder).
 func (h *Hub) DeleteTask(project, id string) error { return h.finishTask(project, id, true) }
 
-// finishTask is the shared close/scrap path: it guards against a live holder, then
-// dispatches to the id's backend for either "done" (scrap=false) or "scrap"
-// (scrap=true). Every todo backend distinguishes the two, so the hub does too.
+// finishTask is the shared close/scrap path: it dispatches to the id's backend for
+// either "done" (scrap=false) or "scrap" (scrap=true), then frees any agent that was
+// working on the task and pushes it to pick up a new one — cancelling a task
+// mid-flight is allowed, never a hard refusal that strands the human.
 func (h *Hub) finishTask(project, id string, scrap bool) error {
 	ps := h.store.For(project)
 	root := h.projectRoot(project)
-	roster, _ := ps.Roster()
-	for _, a := range roster {
-		if st, _ := ps.GetState(a.Name); st.Task == id && h.agentAlive(project, a.Name) {
-			return fmt.Errorf("%s is alive and working on %s — stop or delete it first", a.Name, id)
-		}
-	}
 	var err error
 	switch {
 	case strings.HasPrefix(id, "td-"):
@@ -76,6 +72,18 @@ func (h *Hub) finishTask(project, id string, scrap bool) error {
 	}
 	if err != nil {
 		return err
+	}
+	// Free any agent that was on this task and push it to pick up a new one, so a
+	// cancelled task doesn't leave a worker grinding on dead work.
+	roster, _ := ps.Roster()
+	for _, a := range roster {
+		if st, _ := ps.GetState(a.Name); st.Task == id {
+			_ = ps.SetState(store.AgentState{Agent: a.Name, Phase: restPhase(a.Role)})
+			_ = ps.Log(a.Name, "task-cancelled", id)
+			if h.agentAlive(project, a.Name) {
+				_ = h.injectWhenReady(project, a.Name, msgTaskCancelled(id))
+			}
+		}
 	}
 	e := h.SyncTasks(project)
 	h.notify()
