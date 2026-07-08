@@ -227,6 +227,12 @@ func msgMerged(prID string) string {
 	return fmt.Sprintf("[hub] %s merged. Run `sindri` for your next task.", prID)
 }
 
+// msgTaskCancelled tells a worker its task was closed/scrapped out from under it —
+// stop working it and pick up a new one.
+func msgTaskCancelled(id string) string {
+	return fmt.Sprintf("[hub] Task %s was cancelled — stop working on it and run `sindri` for a new task.", id)
+}
+
 func msgRebased(base string) string {
 	return fmt.Sprintf("[hub] %s moved — your branch was rebased onto it, so you're up to date.", base)
 }

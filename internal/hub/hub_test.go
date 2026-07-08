@@ -263,6 +263,38 @@ func TestCloseUnresolvableOpenspec(t *testing.T) {
 	}
 }
 
+// TestCloseFreesWorkingAgent: closing a task an agent is working on is ALLOWED (not
+// refused) — the task closes and the agent is freed (idle, no task) so it picks up
+// new work rather than grinding on a cancelled task. td-gated (needs a real store).
+func TestCloseFreesWorkingAgent(t *testing.T) {
+	if _, err := exec.LookPath("td"); err != nil {
+		t.Skip("td CLI not installed")
+	}
+	h := newHub(t)
+	root := t.TempDir()
+	if out, err := exec.Command("td", "-w", root, "init").CombinedOutput(); err != nil {
+		t.Fatalf("td init: %s", out)
+	}
+	h.repo(root)
+	tag := RepoTag(root)
+	id, err := h.CreateTask(tag, TaskSpec{Title: "implement the widget feature", Type: "task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.NewAgent(tag, "eitri", "worker", ""); err != nil {
+		t.Fatal(err)
+	}
+	ps := h.store.For(tag)
+	_ = ps.SetState(store.AgentState{Agent: "eitri", Task: id, Branch: id, Phase: "working"})
+
+	if err := h.CloseTask(tag, id); err != nil { // must NOT refuse just because eitri holds it
+		t.Fatalf("closing a held task should be allowed: %v", err)
+	}
+	if st, _ := ps.GetState("eitri"); st.Task != "" || st.Phase == "working" {
+		t.Fatalf("agent should be freed after its task was closed, got phase=%q task=%q", st.Phase, st.Task)
+	}
+}
+
 // TestApprovePR covers the human approve path: an open PR reaches "approved"
 // without a reviewer agent, approving a non-open PR is refused (the open-only
 // guard, mirroring the reviewer approve), and an unknown PR errors.
