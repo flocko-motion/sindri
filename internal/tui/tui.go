@@ -670,9 +670,13 @@ func (m model) View() string {
 	repoName, repoTag := m.currentRepo()
 	top := headerBar(labels, m.tab, m.w, repoName, repoTag, m.repoColorIdx(repoTag))
 	var body string
-	if m.tab == 1 && m.wide() { // bespoke: list + live tmux pane; right detail unless §-hidden
+	// Agents/PRs always render their MAIN pane (live tmux screen / diff) — it's the
+	// point of the tab and must never be hidden. agentsBody/prBody handle a narrow or
+	// §-hidden terminal internally (they drop only the RIGHT detail column, keeping
+	// the list + main pane full-width).
+	if m.tab == 1 {
 		body = m.agentsBody()
-	} else if m.tab == 2 && m.wide() { // bespoke: list + diff/lint; right detail unless §-hidden
+	} else if m.tab == 2 {
 		body = m.prBody()
 	} else if m.showDetail() {
 		left := pane(rowTexts(m.rows()), m.list, m.leftWidth(), m.cursor[m.tab])
