@@ -25,7 +25,12 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          # Build releases with the LATEST stable Go, not go.mod's minimum pin —
+          # otherwise every released binary is frozen at that old Go, and its
+          # go/packages (brokkr's deadcode) skews against a newer `go list` on the
+          # target machine ("uses go1.25 … runs go1.26 of go list"). `stable` tracks
+          # the newest release automatically, matching ci.yml.
+          go-version: stable
 
       - name: Stage bundled tools (td, yq) onto PATH
         run: |
