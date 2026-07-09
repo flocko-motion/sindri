@@ -96,6 +96,22 @@ CREATE TABLE IF NOT EXISTS projects (
   last_used  TEXT NOT NULL DEFAULT '',
   color      INTEGER NOT NULL DEFAULT 0
 );
+-- The user's single chatroom (star topology): which agents are members, and the
+-- transcript of everything the hub has forwarded. Hub-global (one room), so no
+-- project column on the log; members carry (project, name) since agents are
+-- project-scoped.
+CREATE TABLE IF NOT EXISTS chat_members (
+  project  TEXT NOT NULL,
+  name     TEXT NOT NULL,
+  added_at TEXT NOT NULL,
+  PRIMARY KEY (project, name)
+);
+CREATE TABLE IF NOT EXISTS chat_log (
+  id     INTEGER PRIMARY KEY AUTOINCREMENT,
+  sender TEXT NOT NULL,
+  body   TEXT NOT NULL,
+  ts     TEXT NOT NULL
+);
 `
 
 // Open opens (creating if needed) the central SQLite DB at path and applies the
@@ -322,6 +338,11 @@ func (p *ProjectStore) DeleteAgent(name string) error {
 	// rehydrate from a stranger's history.
 	if _, err := p.s.db.Exec(`DELETE FROM events WHERE project=? AND agent=?`, p.project, name); err != nil {
 		return fmt.Errorf("delete agent events %s/%s: %w", p.project, name, err)
+	}
+	// And drop any chatroom membership, so a deleted agent doesn't linger as a
+	// phantom member the hub tries to forward to.
+	if _, err := p.s.db.Exec(`DELETE FROM chat_members WHERE project=? AND name=?`, p.project, name); err != nil {
+		return fmt.Errorf("delete agent chat membership %s/%s: %w", p.project, name, err)
 	}
 	return nil
 }

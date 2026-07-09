@@ -666,5 +666,13 @@ func (h *Hub) rehydrate(project, name string) {
 	// Let Claude boot to input-readiness first, or its Enter is eaten by the splash.
 	time.Sleep(8 * time.Second)
 	_ = h.injectWhenReady(project, name, msgKickoff)
+	// A chatroom member that just relaunched has lost the membership cue from its
+	// durable prompt — remind it so it knows it can still talk to the room. Best-
+	// effort: a store hiccup here shouldn't derail the rehydrate.
+	if member, err := h.store.ChatIsMember(project, name); err != nil {
+		fmt.Fprintf(os.Stderr, "hub: chat membership check for %s/%s failed: %v\n", project, name, err)
+	} else if member {
+		_ = h.injectWhenReady(project, name, msgChatReminder)
+	}
 }
 

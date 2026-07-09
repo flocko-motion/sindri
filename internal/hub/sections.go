@@ -88,6 +88,7 @@ var Sections = []Section{
 	{"agents", "Agents", func(b BoardState) int { return len(b.Agents) }}, // the whole roster — down agents are still agents
 	{"prs", "PRs", func(b BoardState) int { return countPRs(b.PRs, prNotMerged) }},
 	{"repos", "Repos", func(b BoardState) int { return len(b.Projects) }}, // every repo the hub tracks
+	{"chat", "Chat", func(b BoardState) int { return len(b.Chat.Members) }}, // agents in the user's chatroom
 }
 
 // --- badge predicates ---

@@ -249,6 +249,14 @@ const replyNothingToCheckpoint = "Nothing to checkpoint — you're not working a
 
 const msgKickoff = "[hub] You're live. Run `sindri` and do exactly what it tells you — it always returns your current job, whether you're new or resuming."
 
+// Chatroom notices. The welcome mirrors what the user asked agents to be told when
+// added: how to speak, that they'll receive, and what the room is for. msgChatReminder
+// re-states membership on relaunch (the durable prompt doesn't carry it); msgChatRemoved
+// closes it out. These are [hub] system pushes; forwarded chat lines are [chat].
+const msgChatWelcome = "[hub] You've been added to the chatroom. Use `sindri chat <message>` to emit a message to everybody in the room; you'll also receive the others' messages here, prefixed [chat]. Use it to coordinate issues with the other agents — tell them what you're working on and listen to what they're working on. The user will lead the discussion to answer an open question as a team."
+const msgChatReminder = "[hub] You're in the chatroom: `sindri chat <message>` talks to everyone in the room, and their messages arrive here prefixed [chat]."
+const msgChatRemoved = "[hub] You've been removed from the chatroom — `sindri chat` is no longer available. Carry on with your work."
+
 func msgMerged(prID string) string {
 	return fmt.Sprintf("[hub] %s merged. Run `sindri` for your next task.", prID)
 }
