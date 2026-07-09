@@ -65,9 +65,19 @@ func architectureBrief(content, arch string) string {
 
 // brokkrBrief points every agent at the brokkr tool — always mounted into the pod.
 // It's the recommended linter and a structured, grep-beating way to get an overview
-// of the code — worth reaching for first.
+// of the code, and it's built for single-command (no compound shell) usage — all of
+// which the agent has to be told, since none of it is obvious from the binary alone.
 func brokkrBrief() string {
-	return "\n\nThe `brokkr` tool is on your PATH — run `brokkr --help` to learn it. Prefer it for two things: linting (`brokkr lint`, the same gate `sindri lint` runs), and getting an overview of the codebase — it maps structure and finds definitions/uses far better than grepping, so reach for it before reading files blind."
+	return "\n\nThe `brokkr` tool is on your PATH — a toolbelt built for you (Claude Code): " +
+		"every feature is a SINGLE self-contained command, so run it WITHOUT compound " +
+		"shell — no pipes, no `&&`/`;`, no `2>&1 | tail`. Anything you'd reach a pipe for, " +
+		"it already has a flag for (e.g. `--tail N` prints the last N lines AND the exit " +
+		"status in one shot). So learn each subcommand from its own `--help` first " +
+		"(`brokkr --help`, then `brokkr <cmd> --help`) — the help lists the flags that make " +
+		"compound commands unnecessary. Prefer brokkr for two things: linting (`brokkr " +
+		"lint`, the same gate `sindri lint` runs), and getting an overview of the codebase " +
+		"— it maps structure and finds definitions/uses far better than grepping, so reach " +
+		"for it before reading files blind."
 }
 
 // systemPrompt is the agent's durable identity + how-to-work brief. The live task
