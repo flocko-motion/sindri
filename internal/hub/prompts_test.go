@@ -5,15 +5,26 @@ import (
 	"testing"
 )
 
-// TestSystemPromptCarriesArchitecture: every role's durable brief points the agent at
-// the project's architecture doc — not just the reviewer. An agent can't produce work
-// that fits the project without knowing how it's built.
+// TestSystemPromptCarriesArchitecture: every role's durable brief has the project
+// architecture INJECTED (full content, not just a path) plus a re-read pointer — not
+// just the reviewer. An agent can't produce work that fits without knowing how it's
+// built. Empty content injects nothing.
 func TestSystemPromptCarriesArchitecture(t *testing.T) {
-	const arch = "docs/ARCH.md"
+	const archPath = "docs/ARCH.md"
+	const archContent = "## Layering\nAdapters never import the hub."
 	for _, role := range []string{"worker", "reviewer", "planner", "coauthor"} {
-		p := systemPrompt("eitri", role, arch)
-		if !strings.Contains(p, "/workspace/"+arch) {
-			t.Errorf("%s system prompt does not tell the agent to read /workspace/%s:\n%s", role, arch, p)
+		p := systemPrompt("eitri", role, archContent, archPath)
+		if !strings.Contains(p, archContent) {
+			t.Errorf("%s: architecture content not injected:\n%s", role, p)
 		}
+		if !strings.Contains(p, "/workspace/"+archPath) {
+			t.Errorf("%s: missing re-read pointer to /workspace/%s", role, archPath)
+		}
+		if !strings.Contains(p, "`brokkr`") {
+			t.Errorf("%s: brief should always recommend brokkr:\n%s", role, p)
+		}
+	}
+	if p := systemPrompt("eitri", "worker", "", "ARCHITECTURE.md"); strings.Contains(p, "Project architecture") {
+		t.Errorf("empty architecture content should inject no section:\n%s", p)
 	}
 }

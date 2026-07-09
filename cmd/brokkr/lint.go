@@ -36,6 +36,10 @@ func newLintCmd() *cobra.Command {
 			"one containing '/' matches the relative path with '*'/'**' wildcards " +
 			"(--ignore='internal/gen/**'), and a 're:' prefix is a Go regexp. Repeat " +
 			"the flag for several patterns. It applies to the Go linters, not openspec.\n\n" +
+			"For permanent exceptions, commit a " + lint.IgnoreFileName + " file at the " +
+			"repo root: one pattern per line (same syntax; '#' comments and blank lines " +
+			"ignored). It's read automatically by every run — the right home for a " +
+			"generated file's exception, since the file itself can't carry a marker.\n\n" +
 			commentsConvention,
 		Args: cobra.MaximumNArgs(1),
 		// lint reports failures itself and signals them with an exitCodeError (empty
@@ -47,7 +51,13 @@ func newLintCmd() *cobra.Command {
 			if len(args) == 1 {
 				which = args[0]
 			}
-			ig, err := lint.NewIgnore(ignore)
+			// Merge the repo's checked-in .brokkrignore (exceptions for generated
+			// files that can't carry an in-file marker) with any --ignore flags.
+			filePats, err := lint.LoadIgnoreFile(".")
+			if err != nil {
+				return err
+			}
+			ig, err := lint.NewIgnore(append(filePats, ignore...))
 			if err != nil {
 				return err
 			}

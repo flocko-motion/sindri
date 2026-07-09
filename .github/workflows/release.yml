@@ -58,6 +58,10 @@ jobs:
             # VM), so it's a linux binary arch-matched to the Mac's VM, not darwin.
             CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
               go build -o "$stage/sindri-worker" ./cmd/sindri-worker/
+            # brokkr also runs INSIDE the pod (mounted so `brokkr` works in agents),
+            # so ship a linux build too — arch-matched to the Mac's VM like the worker.
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
+              go build -ldflags "-X main.version=${ver}" -o "$stage/brokkr-linux" ./cmd/brokkr/
             # Bundled tools, mirroring the .deb: td cross-compiled (its cross output
             # lands in $GOPATH/bin/<os>_<arch>/), yq from its official darwin release.
             GOOS=darwin GOARCH="$arch" go install "github.com/marcus/td@${TD_VERSION}"

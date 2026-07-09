@@ -31,6 +31,10 @@ contents:
     dst: /usr/bin/sindri-worker
   - src: ./bin/brokkr
     dst: /usr/bin/brokkr
+  # brokkr-linux: the linux brokkr mounted into agent pods (on linux it's identical
+  # to brokkr, but the hub always looks for it by this name — see brokkrLinuxBinary).
+  - src: ./bin/brokkr-linux
+    dst: /usr/bin/brokkr-linux
   - src: ./bin/td
     dst: /usr/bin/td
   - src: ./bin/yq

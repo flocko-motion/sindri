@@ -11,7 +11,10 @@
 //	workflow_task.go / workflow_pr.go / hub.go.
 package hub
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // defaultReviewPrompt seeds the project's central review-prompt.txt the first time.
 const defaultReviewPrompt = "Review this PR for correctness, clarity, and fit to the task. Flag bugs, missing tests, and anything that should change."
@@ -46,17 +49,30 @@ That floor is enforced automatically.
 _(none documented yet)_
 `
 
-// architectureBrief tells any agent to read the project's architecture doc before
-// working. EVERY role needs to know how the project is built — not just the reviewer
-// — or it can't produce work that fits. arch is the repo-relative doc path
-// (/workspace is the mounted root); the hub always ensures one exists.
-func architectureBrief(arch string) string {
-	return fmt.Sprintf("\n\nBefore you start, read /workspace/%s — it describes how this project is built and how your work must fit it. Treat it as binding, and re-read it whenever you're unsure.", arch)
+// architectureBrief injects the project's architecture INTO every agent's brief —
+// the full doc content, so the agent always has it in context rather than a path it
+// might never open — with a pointer to re-read the canonical copy. EVERY role needs
+// this, not just the reviewer, or it can't produce work that fits. content is the
+// doc's text; arch is its repo-relative path (/workspace is the mounted root). Empty
+// when there's no architecture content to inject.
+func architectureBrief(content, arch string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+	return fmt.Sprintf("\n\n# Project architecture (binding)\n\nThis is how the project is built and how your work must fit it — treat it as binding. To read it again at any time, refer to /workspace/%s.\n\n%s", arch, content)
+}
+
+// brokkrBrief points every agent at the brokkr tool — always mounted into the pod.
+// It's the recommended linter and a structured, grep-beating way to get an overview
+// of the code — worth reaching for first.
+func brokkrBrief() string {
+	return "\n\nThe `brokkr` tool is on your PATH — run `brokkr --help` to learn it. Prefer it for two things: linting (`brokkr lint`, the same gate `sindri lint` runs), and getting an overview of the codebase — it maps structure and finds definitions/uses far better than grepping, so reach for it before reading files blind."
 }
 
 // systemPrompt is the agent's durable identity + how-to-work brief. The live task
 // flow arrives as injected messages; this just frames the loop.
-func systemPrompt(name, role, arch string) string {
+func systemPrompt(name, role, archContent, archPath string) string {
 	if role == "coauthor" {
 		// A coauthor is NOT on the run-`sindri`-in-a-loop rails the other roles ride.
 		// It shares the user's checkout and is driven directly, like an ordinary
@@ -78,7 +94,7 @@ the project's quality gate, `+"`sindri status`"+` shows who you are, and
 it to get work — the user gives you that here.
 
 When the user goes quiet, stop and wait for their next instruction rather than
-inventing work. Never poll or guess.`, name) + architectureBrief(arch)
+inventing work. Never poll or guess.`, name) + architectureBrief(archContent, archPath) + brokkrBrief()
 	}
 
 	common := fmt.Sprintf(`You are %q, a Sindri %s agent running in a sandboxed container.
@@ -95,7 +111,7 @@ lists it, but that set is contextual and changes as you go.)
 Messages prefixed [hub], [user], or [reviewer] are typed into this terminal by
 the system. Act on them. When `+"`sindri`"+` tells you to wait for a verdict,
 stop and wait quietly — it will appear here, and that may take a long time. Never
-poll, never guess, never invent commands.`, name, role) + architectureBrief(arch)
+poll, never guess, never invent commands.`, name, role) + architectureBrief(archContent, archPath) + brokkrBrief()
 
 	switch role {
 	case "planner":
@@ -185,8 +201,8 @@ func dirReview(prID, task, arch string) string {
 		prID, task, prID, prID, prID, prID, reviewArchitecture(arch))
 }
 
-func dirClaimed(id, title, branch string) string {
-	return fmt.Sprintf("Claimed %s: %s\nBranch %s is ready in your /workspace. Work on it, then run `sindri submit \"<summary>\"`.", id, title, branch)
+func dirClaimed(id, title, branch, arch string) string {
+	return fmt.Sprintf("Claimed %s: %s\nBranch %s is ready in your /workspace. Work on it — follow the project architecture (in your brief; re-read it at /workspace/%s) — then run `sindri submit \"<summary>\"`.", id, title, branch, arch)
 }
 
 const dirNoTasks = "No open tasks. Wait — the hub will tell you when there is work."

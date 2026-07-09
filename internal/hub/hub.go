@@ -19,7 +19,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -514,6 +513,14 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 		// agent's in-pod interface to the hub).
 		{Host: workerBin, Container: "/opt/sindri/sindri-worker", Mode: "ro"},
 	}
+	// Low-friction parity: mount brokkr into every pod so the SAME `brokkr` commands
+	// (map, lint) work inside the agent regardless of host OS. Pods are always linux,
+	// so we mount a cross-built linux brokkr (brokkrLinuxBinary): on a linux host that
+	// is the host binary itself; on macOS it's the shipped brokkr-linux. Runtime mount,
+	// so a restart picks it up — no image rebuild.
+	if bk, berr := brokkrLinuxBinary(); berr == nil {
+		mounts = append(mounts, container.Mount{Host: bk, Container: "/usr/local/bin/brokkr", Mode: "ro"})
+	}
 	if a.Role == "planner" {
 		// A planner sees the whole repo read-only and may only write openspec — so
 		// it plans (specs + tasks) without touching code. /workspace is remounted
@@ -661,35 +668,3 @@ func (h *Hub) rehydrate(project, name string) {
 	_ = h.injectWhenReady(project, name, msgKickoff)
 }
 
-// agentBinary locates the thin browser binary on the host: next to the running
-// sindri binary first, then on PATH.
-func agentBinary() (string, error) {
-	const name = "sindri-worker"
-	if self, err := os.Executable(); err == nil {
-		cand := filepath.Join(filepath.Dir(self), name)
-		if _, err := os.Stat(cand); err == nil {
-			return cand, nil
-		}
-	}
-	if p, err := exec.LookPath(name); err == nil {
-		return p, nil
-	}
-	return "", fmt.Errorf("%s binary not found — run 'make build/install'", name)
-}
-
-// brokkrBinary locates the brokkr toolbelt binary (which runs the linters): next
-// to the running sindri binary first, then on PATH. The lint gate shells out to
-// it (brokkr ships alongside sindri).
-func brokkrBinary() (string, error) {
-	const name = "brokkr"
-	if self, err := os.Executable(); err == nil {
-		cand := filepath.Join(filepath.Dir(self), name)
-		if _, err := os.Stat(cand); err == nil {
-			return cand, nil
-		}
-	}
-	if p, err := exec.LookPath(name); err == nil {
-		return p, nil
-	}
-	return "", fmt.Errorf("brokkr binary not found — it ships with sindri ('make install')")
-}
