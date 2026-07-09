@@ -1,6 +1,10 @@
 package lint
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestIgnoreMatch(t *testing.T) {
 	cases := []struct {
@@ -55,5 +59,40 @@ func TestIgnoreNilMatchesNothing(t *testing.T) {
 func TestIgnoreBadPatternErrors(t *testing.T) {
 	if _, err := NewIgnore([]string{"re:("}); err == nil {
 		t.Error("expected an error for an invalid regexp pattern")
+	}
+}
+
+// LoadIgnoreFile parses one pattern per line, skipping blanks and '#' comments,
+// and the loaded patterns feed NewIgnore just like --ignore flags.
+func TestLoadIgnoreFile(t *testing.T) {
+	dir := t.TempDir()
+	body := "# generated files\n*.gen.go\n\n  internal/gen/**  \n# trailing comment\n"
+	if err := os.WriteFile(filepath.Join(dir, IgnoreFileName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pats, err := LoadIgnoreFile(dir)
+	if err != nil {
+		t.Fatalf("LoadIgnoreFile: %v", err)
+	}
+	if len(pats) != 2 || pats[0] != "*.gen.go" || pats[1] != "internal/gen/**" {
+		t.Fatalf("patterns = %v, want [*.gen.go internal/gen/**]", pats)
+	}
+	ig, err := NewIgnore(pats)
+	if err != nil {
+		t.Fatalf("NewIgnore: %v", err)
+	}
+	if !ig.Match("pkg/foo.gen.go") || !ig.Match("internal/gen/x/y.go") {
+		t.Error("loaded patterns should match the excluded files")
+	}
+}
+
+// A missing .brokkrignore is not an error — most repos won't have one.
+func TestLoadIgnoreFileMissing(t *testing.T) {
+	pats, err := LoadIgnoreFile(t.TempDir())
+	if err != nil {
+		t.Fatalf("missing file should not error: %v", err)
+	}
+	if pats != nil {
+		t.Errorf("missing file should yield no patterns, got %v", pats)
 	}
 }

@@ -1,13 +1,16 @@
 // package: lint / ignore
 // type:    logic
-// job:     compiles the --ignore patterns into a path matcher the linters consult
-//          to skip files they shouldn't flag (generated code we can't fix).
+// job:     compiles --ignore patterns (and a repo's .brokkrignore file) into a path
+//          matcher the linters consult to skip files they shouldn't flag (generated
+//          code we can't fix).
 // limits:  matches paths only — it doesn't read files or know which linter asks;
 //          the pattern syntax is documented on NewIgnore.
 package lint
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -62,6 +65,34 @@ func NewIgnore(patterns []string) (*Ignore, error) {
 		ig.pats = append(ig.pats, ignorePat{re: re, basename: basename})
 	}
 	return ig, nil
+}
+
+// IgnoreFileName is the per-repo ignore file the linters read automatically, so
+// exceptions (generated files that can't carry an in-file marker, vendored code)
+// live in the repo — checked in, applied to every `brokkr lint` — instead of being
+// repeated on the command line or embedded in files that get regenerated.
+const IgnoreFileName = ".brokkrignore"
+
+// LoadIgnoreFile reads ignore patterns from <dir>/.brokkrignore: one pattern per
+// line in the same syntax as NewIgnore, with blank lines and '#' comment lines
+// skipped. A missing file yields no patterns and no error; an unreadable one is a
+// hard error — a silently dropped exception would let violations through unseen.
+func LoadIgnoreFile(dir string) ([]string, error) {
+	data, err := os.ReadFile(filepath.Join(dir, IgnoreFileName))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", IgnoreFileName, err)
+	}
+	var pats []string
+	for _, line := range strings.Split(string(data), "\n") {
+		if line = strings.TrimSpace(line); line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		pats = append(pats, line)
+	}
+	return pats, nil
 }
 
 // Match reports whether path is excluded by any pattern. The path is normalized
