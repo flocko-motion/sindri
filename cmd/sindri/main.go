@@ -56,6 +56,7 @@ func main() {
 	rootCmd.AddCommand(newHubCmd())
 	rootCmd.AddCommand(newCoauthorCmd())
 	rootCmd.AddCommand(newAgentCmd())
+	rootCmd.AddCommand(newChatCmd())
 	rootCmd.AddCommand(newRepoCmd())
 	rootCmd.AddCommand(newTaskCmd())
 	rootCmd.AddCommand(newPrCmd())

@@ -248,6 +248,64 @@ func (c *HTTP) Tell(name, msg, source string) error {
 	return c.post("/tell", hub.TellReq{Name: name, Msg: msg, Source: source})
 }
 
+// ChatAdd adds an agent to the user's chatroom (the hub greets it).
+func (c *HTTP) ChatAdd(name string) error {
+	return c.post("/chat/add", hub.NameReq{Name: name})
+}
+
+// ChatRemove takes an agent out of the chatroom.
+func (c *HTTP) ChatRemove(name string) error {
+	return c.post("/chat/remove", hub.NameReq{Name: name})
+}
+
+// ChatSay posts a message to the chatroom as the user (the discussion leader).
+func (c *HTTP) ChatSay(msg string) error {
+	return c.post("/chat/say", hub.ChatSayReq{Msg: msg})
+}
+
+// Chat returns the current chatroom snapshot (members + recent transcript).
+func (c *HTTP) Chat() (hub.ChatView, error) {
+	var v hub.ChatView
+	return v, c.get("/chat", &v)
+}
+
+// ChatWatch subscribes to the chatroom over SSE: it yields the snapshot on connect
+// and a fresh one on every change, closing when ctx is cancelled or the hub goes
+// away. This is the user's live leg of the star topology (the join CLI, TUI tab).
+func (c *HTTP) ChatWatch(ctx context.Context) (<-chan hub.ChatView, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.base+"/chat/stream", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan hub.ChatView)
+	go func() {
+		defer resp.Body.Close()
+		defer close(out)
+		sc := bufio.NewScanner(resp.Body)
+		sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+		for sc.Scan() {
+			line := sc.Text()
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			var v hub.ChatView
+			if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &v) != nil {
+				continue
+			}
+			select {
+			case out <- v:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out, nil
+}
+
 // Commands fetches the caller's currently-available command surface (the browser
 // menu). Identity is the socket, so no name is sent.
 func (c *HTTP) Commands() ([]hub.CmdInfo, error) {
