@@ -20,6 +20,9 @@ func TestSystemPromptCarriesArchitecture(t *testing.T) {
 		if !strings.Contains(p, "/workspace/"+archPath) {
 			t.Errorf("%s: missing re-read pointer to /workspace/%s", role, archPath)
 		}
+		if !strings.Contains(p, "`brokkr`") {
+			t.Errorf("%s: brief should always recommend brokkr:\n%s", role, p)
+		}
 	}
 	if p := systemPrompt("eitri", "worker", "", "ARCHITECTURE.md"); strings.Contains(p, "Project architecture") {
 		t.Errorf("empty architecture content should inject no section:\n%s", p)

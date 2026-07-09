@@ -1,4 +1,4 @@
-.PHONY: help build sindri worker brokkr image install clean test verify lint check-go check demo diag loop claude-check fullloop screenshot seed deb release major minor patch breaking feature fix
+.PHONY: help build sindri worker brokkr brokkr-linux image install clean test verify lint check-go check demo diag loop claude-check fullloop screenshot seed deb release major minor patch breaking feature fix
 
 .DEFAULT_GOAL := help
 
@@ -15,7 +15,7 @@ help: ## list the available targets
 	@echo "make targets:"
 	@grep -hE '^[a-zA-Z][a-zA-Z_-]*:.*## ' $(MAKEFILE_LIST) | sort | awk 'BEGIN{FS=":.*## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
-build: sindri worker brokkr ## build all binaries (sindri, sindri-worker, brokkr) into bin/
+build: sindri worker brokkr brokkr-linux ## build all binaries (sindri, sindri-worker, brokkr, brokkr-linux) into bin/
 
 sindri:
 	go build -ldflags "-X main.version=$(VERSION)" -o bin/sindri ./cmd/sindri/
@@ -32,6 +32,13 @@ worker:
 brokkr:
 	go build -ldflags "-X main.version=$(VERSION)" -o bin/brokkr ./cmd/brokkr/
 
+# brokkr-linux — a linux/$(ARCH) cross-build of brokkr, mounted into the (always
+# linux) agent pods so `brokkr` works inside agents on any host. On a linux host
+# it's identical to bin/brokkr; on macOS it's the only pod-runnable brokkr. Pure
+# Go, so CGO_ENABLED=0 keeps the cross-build hermetic (mirrors the worker target).
+brokkr-linux:
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go build -ldflags "-X main.version=$(VERSION)" -o bin/brokkr-linux ./cmd/brokkr/
+
 install: check-go build ## build (on the latest Go), then install the binaries to ~/.local/bin
 	mkdir -p $(PREFIX)
 	# Use mv rather than cp so install succeeds even when the previous
@@ -40,6 +47,7 @@ install: check-go build ## build (on the latest Go), then install the binaries t
 	mv bin/sindri $(PREFIX)/sindri
 	mv bin/sindri-worker $(PREFIX)/sindri-worker
 	mv bin/brokkr $(PREFIX)/brokkr
+	mv bin/brokkr-linux $(PREFIX)/brokkr-linux
 
 # Rebuild image when the (now embedded) build context changes. The agent binary
 # is mounted at runtime, not baked in; arch-specific tools (yq, yazi) are
@@ -107,4 +115,4 @@ major minor patch breaking feature fix:
 	@:
 
 clean: ## remove build artifacts (bin/ binaries, .deb, image stamp)
-	rm -rf bin/sindri bin/sindri-worker bin/brokkr bin/td bin/yq bin/*.deb bin/buildctx .image-stamp
+	rm -rf bin/sindri bin/sindri-worker bin/brokkr bin/brokkr-linux bin/td bin/yq bin/*.deb bin/buildctx .image-stamp

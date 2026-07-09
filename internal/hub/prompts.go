@@ -63,6 +63,13 @@ func architectureBrief(content, arch string) string {
 	return fmt.Sprintf("\n\n# Project architecture (binding)\n\nThis is how the project is built and how your work must fit it — treat it as binding. To read it again at any time, refer to /workspace/%s.\n\n%s", arch, content)
 }
 
+// brokkrBrief points every agent at the brokkr tool — always mounted into the pod.
+// It's the recommended linter and a structured, grep-beating way to get an overview
+// of the code — worth reaching for first.
+func brokkrBrief() string {
+	return "\n\nThe `brokkr` tool is on your PATH — run `brokkr --help` to learn it. Prefer it for two things: linting (`brokkr lint`, the same gate `sindri lint` runs), and getting an overview of the codebase — it maps structure and finds definitions/uses far better than grepping, so reach for it before reading files blind."
+}
+
 // systemPrompt is the agent's durable identity + how-to-work brief. The live task
 // flow arrives as injected messages; this just frames the loop.
 func systemPrompt(name, role, archContent, archPath string) string {
@@ -87,7 +94,7 @@ the project's quality gate, `+"`sindri status`"+` shows who you are, and
 it to get work — the user gives you that here.
 
 When the user goes quiet, stop and wait for their next instruction rather than
-inventing work. Never poll or guess.`, name) + architectureBrief(archContent, archPath)
+inventing work. Never poll or guess.`, name) + architectureBrief(archContent, archPath) + brokkrBrief()
 	}
 
 	common := fmt.Sprintf(`You are %q, a Sindri %s agent running in a sandboxed container.
@@ -104,7 +111,7 @@ lists it, but that set is contextual and changes as you go.)
 Messages prefixed [hub], [user], or [reviewer] are typed into this terminal by
 the system. Act on them. When `+"`sindri`"+` tells you to wait for a verdict,
 stop and wait quietly — it will appear here, and that may take a long time. Never
-poll, never guess, never invent commands.`, name, role) + architectureBrief(archContent, archPath)
+poll, never guess, never invent commands.`, name, role) + architectureBrief(archContent, archPath) + brokkrBrief()
 
 	switch role {
 	case "planner":

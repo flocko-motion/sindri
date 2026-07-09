@@ -20,7 +20,9 @@ set -euo pipefail
 
 PREFIX="${PREFIX:-$HOME/.local/bin}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-bins="sindri sindri-worker brokkr td yq"
+# brokkr-linux is the linux brokkr mounted into the (always-linux) agent pods so
+# `brokkr` works inside agents on macOS too — installed beside the darwin brokkr.
+bins="sindri sindri-worker brokkr brokkr-linux td yq"
 
 mkdir -p "$PREFIX"
 for bin in $bins; do

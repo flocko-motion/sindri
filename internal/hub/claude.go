@@ -66,6 +66,8 @@ func (h *Hub) prepareClaudeHome(project, name, role string, out io.Writer) (home
 	// just omits the section (architectureBrief returns "" for empty content).
 	archPath := h.architectureDoc(project)
 	archContent, _ := os.ReadFile(filepath.Join(h.projectRoot(project), archPath))
+	// brokkr is mounted into every pod (a cross-built linux binary, see Launch), so the
+	// brief always recommends it.
 	if err = os.WriteFile(filepath.Join(homeDir, "system-prompt.txt"), []byte(systemPrompt(name, role, string(archContent), archPath)), 0o644); err != nil {
 		return "", "", false, fmt.Errorf("write system prompt: %w", err)
 	}
