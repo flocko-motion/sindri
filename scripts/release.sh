@@ -9,6 +9,8 @@
 # next round) rather than stranded behind. It then returns you to the branch you
 # started on; it never leaves you on, or commits directly to, the default branch.
 # The rebases rewrite history, so the branch pushes are lease-guarded forces.
+# Finally, back on your branch, it blocks on the tag-triggered release workflow and
+# reports success/failure, so the CLI shows when the release is actually done.
 #
 # Usage: make release <major|minor|patch>   (aliases: breaking|feature|fix;
 #        needs gh when run from a feature branch)
@@ -144,4 +146,32 @@ next="v${maj}.${min}.${pat}"
 echo "tagging ${latest} -> ${next} on ${default}"
 git tag -a "$next" "$target" -m "release $next"
 git push origin "$next"
-echo "pushed ${next} — the release workflow will build and attach the .deb (back on '$start')"
+echo "pushed ${next} — triggering the release workflow (back on '$start')"
+
+# 4. Block until the tag-triggered release workflow finishes, so the CLI shows when
+#    the release is ACTUALLY done (built + assets attached), not just tagged. Needs
+#    gh; a default-branch release may not have it (the feature-branch path already
+#    required it above), so guard. The run doesn't exist the instant we push, so poll
+#    briefly for it, then `gh run watch --exit-status` streams its progress and exits
+#    non-zero if it fails. A tag-triggered run's head branch is the tag name, so we
+#    match on that. This is a status wait only — the tag is already pushed, so a
+#    failure here means "inspect the build", not "the release didn't happen".
+if command -v gh >/dev/null; then
+	echo "waiting for the release workflow to finish…"
+	run_id=""
+	for _ in $(seq 1 30); do # ~1 min for GitHub to register the run
+		run_id="$(gh run list --workflow release.yml --branch "$next" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)"
+		[ -n "$run_id" ] && break
+		sleep 2
+	done
+	if [ -z "$run_id" ]; then
+		echo "note: couldn't find the release workflow run — check it with 'gh run list --workflow release.yml'" >&2
+	elif gh run watch "$run_id" --exit-status; then
+		echo "release ${next} is live — workflow succeeded, assets attached."
+	else
+		echo "release workflow for ${next} FAILED — inspect it with 'gh run view ${run_id} --log-failed'" >&2
+		exit 1
+	fi
+else
+	echo "install gh to have future releases wait for the workflow; check it at the repo's Actions tab."
+fi
