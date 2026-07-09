@@ -108,7 +108,7 @@ func (m *model) switchRepo(path string) tea.Cmd {
 	m.ch = ch
 	m.gen++
 	m.root = path
-	m.cursor = [4]int{}
+	m.cursor = [5]int{}
 	m.flash = "switched to " + name
 	return waitForState(m.ch, m.gen)
 }
