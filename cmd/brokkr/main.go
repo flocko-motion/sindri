@@ -24,6 +24,29 @@ import (
 // version is baked in at build time (-X main.version); "dev" for `go run`.
 var version = "dev"
 
+// versionLine is the single source of truth for brokkr's version string, so the
+// bare command, --version, and the `version` subcommand all report identically.
+// It includes the Go toolchain because a linter must run on current Go — a stale
+// toolchain (or, just as easily, a stale brokkr shadowed on PATH) is a real cause
+// of confusing results, and this is how you catch it.
+func versionLine() string {
+	return fmt.Sprintf("%s (built with %s)", version, runtime.Version())
+}
+
+// newVersionCmd wires `brokkr version` — the same string --version prints, but as a
+// discoverable subcommand (people reach for `<tool> version` before `--version`,
+// and checking it is the first step when brokkr behaves like an older build).
+func newVersionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print brokkr's version and the Go toolchain it was built with",
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, _ []string) {
+			fmt.Fprintf(cmd.OutOrStdout(), "brokkr %s\n", versionLine())
+		},
+	}
+}
+
 // --tail state, shared between the root's PersistentPreRunE (which decides whether
 // to buffer and installs the buffer) and run() (which flushes it). tailBuf is
 // non-nil only while --tail is active.
@@ -43,13 +66,13 @@ func main() {
 	root := &cobra.Command{
 		Use:     "brokkr",
 		Short:   "brokkr — sindri's toolbelt: code map + linters",
-		Version: fmt.Sprintf("%s (built with %s)", version, runtime.Version()),
+		Version: versionLine(),
 		// Bare `brokkr` reports its own version and the Go toolchain it was built
 		// with — a linter must run on current Go, so its toolchain is worth seeing
 		// — then shows what it can do. Writes via the command's out writer so --tail
 		// buffers it like everything else.
 		Run: func(cmd *cobra.Command, _ []string) {
-			fmt.Fprintf(cmd.OutOrStdout(), "brokkr %s (built with %s)\n\n", version, runtime.Version())
+			fmt.Fprintf(cmd.OutOrStdout(), "brokkr %s\n\n", versionLine())
 			_ = cmd.Help()
 		},
 		// When --tail is set, redirect all command output into a buffer; run() prints
@@ -72,7 +95,7 @@ func main() {
 			"single command, so you don't need compound shell such as: "+
 			"brokkr <cmd> 2>&1 | tail -N ; echo \"=== exit: $? ===\".")
 	root.SilenceUsage = true // runtime errors report themselves; don't dump usage
-	root.AddCommand(newMapCmd(), newLintCmd())
+	root.AddCommand(newMapCmd(), newLintCmd(), newVersionCmd())
 
 	exit(run(root))
 }
