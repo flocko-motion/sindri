@@ -97,7 +97,7 @@ func chatJoin(cmd *cobra.Command, b backend) error {
 	if v, err := b.Chat(); err == nil {
 		fmt.Print(renderMembers(v))
 	}
-	fmt.Fprintln(cmd.OutOrStdout(), "Joined the chatroom. Type a message + Enter to send to everyone; Ctrl-D or /quit to leave.")
+	fmt.Fprintln(cmd.OutOrStdout(), "Joined the chatroom. Type a message + Enter to send to everyone; /help for commands (/add, /remove, /who); Ctrl-D or /quit to leave.")
 	fmt.Fprintln(cmd.OutOrStdout(), "--- transcript ---")
 
 	ctx, cancel := context.WithCancel(context.Background())

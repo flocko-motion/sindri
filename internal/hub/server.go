@@ -324,8 +324,9 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		_, err := h.ChatSay(req.Msg)
-		writeJSON(w, okMsg{"sent"}, err)
+		// A line starting with "/" is an in-chat command (add/remove/who/help),
+		// executed by the hub; anything else is broadcast as the user.
+		writeJSON(w, okMsg{"sent"}, h.ChatUserMessage(req.Msg))
 	})
 	mux.HandleFunc("GET /chat", func(w http.ResponseWriter, r *http.Request) {
 		v, err := h.chatView()

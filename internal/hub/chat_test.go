@@ -51,6 +51,55 @@ func TestChatAddRemoveAndGate(t *testing.T) {
 	}
 }
 
+// TestChatSlashCommands: a user line starting with "/" is an in-chat command run
+// by the hub (add/remove membership), while a plain line is broadcast as [user].
+func TestChatSlashCommands(t *testing.T) {
+	h := newHub(t)
+	if _, err := h.NewAgent(testProject, "nori", "worker", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := h.ChatUserMessage("/add nori"); err != nil {
+		t.Fatalf("/add: %v", err)
+	}
+	if m, _ := h.store.ChatIsMember(testProject, "nori"); !m {
+		t.Fatalf("/add should make nori a member")
+	}
+
+	if err := h.ChatUserMessage("/remove nori"); err != nil {
+		t.Fatalf("/remove: %v", err)
+	}
+	if m, _ := h.store.ChatIsMember(testProject, "nori"); m {
+		t.Fatalf("/remove should drop nori's membership")
+	}
+
+	// An unknown command and a bad target are reported (system reply), not errors.
+	if err := h.ChatUserMessage("/bogus"); err != nil {
+		t.Fatalf("unknown command should not error: %v", err)
+	}
+	if err := h.ChatUserMessage("/add ghost"); err != nil {
+		t.Fatalf("adding an unknown agent should not error (it replies): %v", err)
+	}
+	if m, _ := h.store.ChatIsMember(testProject, "ghost"); m {
+		t.Fatalf("a typo'd /add must not create a phantom member")
+	}
+
+	// A plain line broadcasts as the user.
+	if err := h.ChatUserMessage("hello team"); err != nil {
+		t.Fatalf("plain message: %v", err)
+	}
+	log, _ := h.ChatTranscript(0)
+	var sawUser bool
+	for _, m := range log {
+		if m.Sender == "user" && m.Body == "hello team" {
+			sawUser = true
+		}
+	}
+	if !sawUser {
+		t.Fatalf("a non-slash line should be broadcast as [user], transcript=%+v", log)
+	}
+}
+
 // TestChatSayRecordsTranscript: a user broadcast is recorded in the room transcript
 // even with no member agents to inject into (the transcript is the durable record;
 // delivery to agents is best-effort on top).
