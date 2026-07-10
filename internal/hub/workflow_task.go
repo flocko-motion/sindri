@@ -37,7 +37,20 @@ func (h *Hub) Tasks(project string) ([]store.Task, error) {
 }
 
 // TaskInfo returns one task in a project, refreshed from the source of truth first.
+// Only real td tasks (td-*) live in td's store; gh-* (GitHub issues) and os-* (spec)
+// ids are synced into the hub's own cache with their description, so those are served
+// from there — hitting td by a non-td id just errors and drops the description.
 func (h *Hub) TaskInfo(project, id string) (store.Task, error) {
+	if !strings.HasPrefix(id, "td-") {
+		t, ok, err := h.store.For(project).GetTask(id)
+		if err != nil {
+			return store.Task{}, err
+		}
+		if !ok {
+			return store.Task{}, fmt.Errorf("unknown task %q", id)
+		}
+		return t, nil
+	}
 	root := h.projectRoot(project)
 	t, err := td.Get(root, id)
 	if err != nil {
