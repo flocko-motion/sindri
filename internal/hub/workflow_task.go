@@ -33,6 +33,9 @@ func (h *Hub) Tasks(project string) ([]store.Task, error) {
 	if err := h.SyncTasks(project); err != nil {
 		return nil, err
 	}
+	// Repair any stale status (in_review with no PR, in_progress with no assignee)
+	// against reality — a listing is a natural, infrequent point to do the sweep.
+	_ = h.ReconcileTasks(project)
 	return h.store.For(project).AllTasks()
 }
 
@@ -51,6 +54,9 @@ func (h *Hub) TaskInfo(project, id string) (store.Task, error) {
 		}
 		return t, nil
 	}
+	// Repair this one task's status against reality before returning it (task info /
+	// detail is a natural single-task check point).
+	_ = h.ReconcileTask(project, id)
 	root := h.projectRoot(project)
 	t, err := td.Get(root, id)
 	if err != nil {
@@ -506,14 +512,6 @@ func (h *Hub) checkParent(project, parent, self string) error {
 func specID(name string) string {
 	sum := sha256.Sum256([]byte(name))
 	return "os-" + hex.EncodeToString(sum[:])[:6]
-}
-
-func (h *Hub) refreshTask(project, id string) error {
-	t, err := td.Get(h.projectRoot(project), id)
-	if err != nil {
-		return err
-	}
-	return h.store.For(project).UpsertTask(toStoreTask(t))
 }
 
 func toStoreTask(t issue.Task) store.Task {

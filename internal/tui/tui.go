@@ -35,6 +35,11 @@ func Run(root string) error {
 	}
 	fmt.Fprintln(os.Stderr, "sindri tui: connecting to /events…")
 	cl := client.Dial(root)
+	// One-shot: repair any stale task statuses (in_review with no PR, in_progress
+	// with no assignee) at startup, so the board opens honest. Best-effort.
+	if err := cl.ReconcileTasks(); err != nil {
+		fmt.Fprintf(os.Stderr, "sindri tui: task reconcile skipped: %v\n", err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ch, err := cl.Watch(ctx)
