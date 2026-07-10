@@ -51,6 +51,23 @@ func TestChatAddRemoveAndGate(t *testing.T) {
 	}
 }
 
+// TestChatPresenceLock: the room is locked until the user heartbeats, and locks
+// again once the last heartbeat ages past the TTL (the required-participant rule).
+func TestChatPresenceLock(t *testing.T) {
+	h := newHub(t)
+	if h.chatPresent() {
+		t.Fatal("no heartbeat yet — the room should be locked")
+	}
+	h.ChatHeartbeat()
+	if !h.chatPresent() {
+		t.Fatal("after a heartbeat the room should be unlocked")
+	}
+	h.chatSeen = h.chatSeen.Add(-2 * chatPresenceTTL) // simulate the user going quiet
+	if h.chatPresent() {
+		t.Fatal("a stale heartbeat should re-lock the room")
+	}
+}
+
 // TestChatSlashCommands: a user line starting with "/" is an in-chat command run
 // by the hub (add/remove membership), while a plain line is broadcast as [user].
 func TestChatSlashCommands(t *testing.T) {

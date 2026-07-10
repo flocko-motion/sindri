@@ -104,6 +104,21 @@ func chatJoin(cmd *cobra.Command, b backend) error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	// Heartbeat while joined: the user is a required participant, so a live join keeps
+	// the room unlocked. Beat now and every few seconds until the session ends.
+	_ = b.ChatHeartbeat()
+	go func() {
+		t := time.NewTicker(5 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				_ = b.ChatHeartbeat()
+			}
+		}
+	}()
 	ch, err := b.ChatWatch(ctx)
 	if err != nil {
 		return err

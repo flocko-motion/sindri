@@ -217,6 +217,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.tab == 1 && m.cl != nil {
 			cmds = append(cmds, pollStateCmd(m.cl))
 		}
+		if m.tab == 4 && m.cl != nil { // Chat tab open: keep the room unlocked (presence)
+			cmds = append(cmds, chatHeartbeatCmd(m.cl))
+		}
 		return m, tea.Batch(cmds...)
 	case logMsg:
 		if msg.key == m.selID() { // ignore a stale fetch from a prior selection
@@ -616,11 +619,14 @@ func (m *model) onKey(k string) tea.Cmd {
 	cmd := m.syncDetail()
 	if m.tab != oldTab { // changing tabs: drop right-column focus, auto-refresh
 		m.rightFocus, m.rightCursor = false, 0
-		return tea.Batch(cmd, m.refreshCmd())
+		cmds := []tea.Cmd{cmd, m.refreshCmd()}
+		if m.tab == 4 && m.cl != nil { // entered Chat: register presence at once (don't wait for the tick)
+			cmds = append(cmds, chatHeartbeatCmd(m.cl))
+		}
+		return tea.Batch(cmds...)
 	}
 	return cmd
 }
-
 
 // View composes the full-height frame: tab strip, master-detail body, footer.
 func (m model) View() string {

@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/flo-at/sindri/internal/container"
@@ -31,6 +32,12 @@ const (
 
 // chatTranscriptLimit bounds how much history a snapshot / live view carries.
 const chatTranscriptLimit = 200
+
+// chatPresenceTTL is how long a chatroom stays unlocked after the user's last
+// heartbeat. The user is a required participant: their `chat join` / TUI chat tab
+// beats every few seconds; once the beats stop for this long the room locks and
+// agents can't post — the discussion is the user's, so it freezes when they leave.
+const chatPresenceTTL = 20 * time.Second
 
 // chatMaxLen caps a single chat message — generous enough for deep, multi-paragraph
 // discussion, but bounded so one message can't be a novel (and a huge tmux inject).
@@ -91,6 +98,24 @@ func (h *Hub) ChatRemove(project, name string) error {
 	return err
 }
 
+// ChatHeartbeat records that the user is present in the chatroom (called
+// periodically by `chat join` and the TUI chat tab while they're open). Presence
+// keeps the room unlocked; see chatPresent.
+func (h *Hub) ChatHeartbeat() {
+	h.chatMu.Lock()
+	h.chatSeen = time.Now()
+	h.chatMu.Unlock()
+}
+
+// chatPresent reports whether the user is currently in the room — a heartbeat
+// within chatPresenceTTL. When false the room is locked and agents can't post.
+func (h *Hub) chatPresent() bool {
+	h.chatMu.Lock()
+	seen := h.chatSeen
+	h.chatMu.Unlock()
+	return !seen.IsZero() && time.Since(seen) < chatPresenceTTL
+}
+
 // ChatMembers returns the current room roster.
 func (h *Hub) ChatMembers() ([]store.ChatMember, error) {
 	return h.store.ChatMembers()
@@ -121,6 +146,7 @@ func (h *Hub) ChatUserMessage(line string) error {
 	if line == "" {
 		return fmt.Errorf("empty message")
 	}
+	h.ChatHeartbeat() // the user just posted — they're present, keep the room unlocked
 	if strings.HasPrefix(line, "/") {
 		return h.chatCommand(line)
 	}
@@ -245,6 +271,12 @@ func (h *Hub) cmdChat(c registry.Caller, args []string, out io.Writer) (int, err
 	if msg == "" {
 		fmt.Fprintln(out, "usage: chat <message...>")
 		return 2, nil
+	}
+	// The user is a required participant: with no one present, the room is locked and
+	// the message goes nowhere. Tell the agent to hold until the user is back.
+	if !h.chatPresent() {
+		fmt.Fprintln(out, "the chatroom is locked — the user has stepped away, so your message wasn't sent. Wait, then send it again once they're back.")
+		return 1, nil
 	}
 	if _, err := h.chatBroadcast(c.Project, c.Agent, msg); err != nil {
 		// "too long" is the agent's to act on (trim + retry), so show it directly —

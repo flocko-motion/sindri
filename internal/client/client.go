@@ -263,6 +263,12 @@ func (c *HTTP) ChatSay(msg string) error {
 	return c.post("/chat/say", hub.ChatSayReq{Msg: msg})
 }
 
+// ChatHeartbeat signals the user is present in the chatroom (sent periodically by
+// `chat join` and the TUI chat tab). Presence keeps the room unlocked for agents.
+func (c *HTTP) ChatHeartbeat() error {
+	return c.post("/chat/heartbeat", struct{}{})
+}
+
 // Chat returns the current chatroom snapshot (members + recent transcript).
 func (c *HTTP) Chat() (hub.ChatView, error) {
 	var v hub.ChatView

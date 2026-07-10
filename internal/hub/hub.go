@@ -58,6 +58,9 @@ type Hub struct {
 
 	launchMu  sync.Mutex               // guards launchBuf
 	launchBuf map[agentKey]*safeBuffer // per-agent image-build/pod-start output
+
+	chatMu   sync.Mutex // guards chatSeen
+	chatSeen time.Time  // last user heartbeat into the chatroom — presence for the required-participant lock
 }
 
 // agentKey identifies an agent within a project — the key for the hub's per-agent

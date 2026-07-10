@@ -331,6 +331,10 @@ func (h *Hub) Handler() http.Handler {
 		// executed by the hub; anything else is broadcast as the user.
 		writeJSON(w, okMsg{"sent"}, h.ChatUserMessage(req.Msg))
 	})
+	mux.HandleFunc("POST /chat/heartbeat", func(w http.ResponseWriter, r *http.Request) {
+		h.ChatHeartbeat()
+		writeJSON(w, okMsg{"ok"}, nil)
+	})
 	mux.HandleFunc("GET /chat", func(w http.ResponseWriter, r *http.Request) {
 		v, err := h.chatView()
 		writeJSON(w, v, err)

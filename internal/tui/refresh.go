@@ -38,6 +38,15 @@ func tickCmd() tea.Cmd {
 	return tea.Tick(refreshInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
+// chatHeartbeatCmd tells the hub the user is present in the chatroom (fired while
+// the Chat tab is open). Presence keeps the room unlocked for agents.
+func chatHeartbeatCmd(cl *client.HTTP) tea.Cmd {
+	return func() tea.Msg {
+		_ = cl.ChatHeartbeat()
+		return nil
+	}
+}
+
 // pollStateCmd fetches a fresh board snapshot (re-evaluating live agent state)
 // without disturbing the SSE waiter.
 func pollStateCmd(cl *client.HTTP) tea.Cmd {
