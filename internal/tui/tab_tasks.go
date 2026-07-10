@@ -331,20 +331,18 @@ func (m model) selTask() (store.Task, bool) {
 	return store.Task{}, false
 }
 
-// openTaskForm opens the new-task (edit=false) or edit-task (edit=true) form —
-// the same fields either way. Edit prefills from the selected task; on a td
-// task every field applies, on an openspec item only priority does (hub-side).
-func (m *model) openTaskForm(edit bool) {
+// openTaskForm opens the new-task (edit=false) or edit-task (edit=true) form — the
+// same fields either way. Edit prefills from t, which must be a freshly-fetched task
+// (its description comes from a detail read, not the board row) so a save doesn't
+// blank fields the board doesn't carry; on a td task every field applies, on an
+// openspec item only priority does (hub-side).
+func (m *model) openTaskForm(edit bool, t store.Task) {
 	prioCodes := make([]string, len(hub.PriorityWords))
 	for i, w := range hub.PriorityWords {
 		prioCodes[i] = hub.PriorityCode(w)
 	}
 	title, typ, prio, parent, labels, desc, id := "", "task", "P2", "", "", "", ""
 	if edit {
-		t, ok := m.selTask()
-		if !ok {
-			return
-		}
 		id, title, prio, parent, labels, desc = t.ID, t.Title, t.Priority, t.ParentID, t.Labels, t.Description
 		if t.Type != "" {
 			typ = t.Type

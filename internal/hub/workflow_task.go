@@ -103,9 +103,7 @@ func (h *Hub) CreateTask(project string, s TaskSpec) (string, error) {
 			break
 		}
 	}
-	if err := h.SyncTasks(project); err != nil {
-		return id, fmt.Errorf("created %s but refreshing the task list failed: %w", id, err)
-	}
+	h.refreshCachedTask(project, id) // targeted: pull just the new task, not a full re-sync
 	h.notify()
 	return id, nil
 }
@@ -281,9 +279,9 @@ func (h *Hub) EditTask(project, id string, s TaskSpec) error {
 			return err
 		}
 	}
-	err := h.SyncTasks(project)
+	h.refreshCachedTask(project, id) // targeted refresh of the edited task
 	h.notify()
-	return err
+	return nil
 }
 
 // workPollInterval re-checks for work while a directive is parked.
@@ -485,9 +483,9 @@ func (h *Hub) SetPriority(project, id, priority string) error {
 			return err
 		}
 	}
-	err := h.SyncTasks(project)
+	h.refreshCachedTask(project, id) // targeted refresh of the reprioritized task
 	h.notify()
-	return err
+	return nil
 }
 
 // checkParent validates a requested parent id within a project.

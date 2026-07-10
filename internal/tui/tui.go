@@ -235,6 +235,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.composer.Reset() // sent OK — clear + close the composer
 		m.composing = false
 		m.composer.Blur()
+	case openEditMsg: // pre-edit sync completed — open the form from the fresh task
+		m.openTaskForm(true, msg.t)
 	case errMsg:
 		if msg.gen != m.gen { // the close of a stream abandoned by a repo switch — not fatal
 			return m, nil
@@ -416,16 +418,15 @@ func (m *model) onKey(k string) tea.Cmd {
 		}
 	case keyNew: // new task (tasks) / new agent (agents)
 		if m.tab == 0 {
-			m.openTaskForm(false)
+			m.openTaskForm(false, store.Task{})
 			return nil
 		} else if m.tab == 1 { // agents: pick the role, then auto-name after a dwarf
 			m.openNewAgentChoice()
 			return nil
 		}
 	case keyEdit: // edit: the selected task's fields (tasks) / the agent's memory limit (agents)
-		if m.tab == 0 && m.selID() != "" {
-			m.openTaskForm(true)
-			return nil
+		if m.tab == 0 && m.selID() != "" && m.cl != nil {
+			return editFetchCmd(m.cl, m.selID()) // pre-edit sync: fetch fresh, then open the form
 		}
 		if m.tab == 1 {
 			if a, ok := m.selAgent(); ok {

@@ -51,6 +51,19 @@ func refreshTaskCommentsCmd(cl *client.HTTP, id string) tea.Cmd {
 	}
 }
 
+// editFetchCmd fetches a task fresh (its description comes from a detail read, not
+// the board row) and opens the edit form from it — the pre-edit sync, so edits go
+// against current data and a save can't blank a field the board didn't carry.
+func editFetchCmd(cl *client.HTTP, id string) tea.Cmd {
+	return func() tea.Msg {
+		t, err := cl.TaskInfo(id)
+		if err != nil {
+			return errModalMsg{err}
+		}
+		return openEditMsg{t}
+	}
+}
+
 // chatHeartbeatCmd tells the hub the user is present in the chatroom (fired while
 // the Chat tab is open). Presence keeps the room unlocked for agents.
 func chatHeartbeatCmd(cl *client.HTTP) tea.Cmd {

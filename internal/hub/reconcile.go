@@ -24,6 +24,35 @@ func (h *Hub) refreshTask(project, id string) error {
 	return h.store.For(project).UpsertTask(toStoreTask(t))
 }
 
+// refreshCachedTask updates one task's cached row after a local mutation, instead
+// of a full multi-source SyncTasks (td + openspec + the GitHub scan): a td task is
+// re-read from td; a gh-/os- task keeps its synced fields and just has its current
+// priority override re-applied — its source fields don't change on a local edit.
+// Best-effort: a failure is logged host-side, never surfaced to the mutation.
+func (h *Hub) refreshCachedTask(project, id string) {
+	if strings.HasPrefix(id, "td-") {
+		if err := h.refreshTask(project, id); err != nil {
+			fmt.Fprintf(os.Stderr, "hub: refresh task %s: %v\n", id, err)
+		}
+		return
+	}
+	ps := h.store.For(project)
+	t, ok, err := ps.GetTask(id)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "hub: refresh cached task %s: %v\n", id, err)
+		return
+	}
+	if !ok {
+		return
+	}
+	if ov, oerr := ps.PriorityOverrides(); oerr == nil {
+		t.Priority = ov[id]
+	}
+	if err := ps.UpsertTask(t); err != nil {
+		fmt.Fprintf(os.Stderr, "hub: refresh cached task %s: %v\n", id, err)
+	}
+}
+
 // reconciledStatus is the pure rule: a task said to be under review with no open PR
 // isn't, and one said to be in progress with no assigned agent isn't. Everything
 // else is left as-is. Returns the status the task should have.

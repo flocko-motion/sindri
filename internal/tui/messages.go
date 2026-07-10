@@ -75,6 +75,7 @@ type errMsg struct { // fatal: hub connection lost (unless a stale generation)
 }
 type errModalMsg struct{ err error } // non-fatal: show the error modal
 type chatSentMsg struct{}            // a chat compose sent OK — clear + close the composer
+type openEditMsg struct{ t store.Task } // a pre-edit sync returned — open the edit form from this fresh task
 
 // tickMsg drives periodic polling; polledMsg carries a state fetched by a poll
 // (distinct from stateMsg so it doesn't re-arm the SSE waiter).
