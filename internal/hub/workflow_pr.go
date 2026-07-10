@@ -28,8 +28,44 @@ import (
 // baseBranch reads a repo's base branch from its main checkout.
 func (h *Hub) baseBranch(root string) (string, error) { return git.CurrentBranch(root) }
 
-// PRs returns a project's merge-intents (newest first).
-func (h *Hub) PRs(project string) ([]store.PR, error) { return h.store.For(project).PRs() }
+// FleetPRs returns every PR across registered projects — the same fleet-wide set the
+// board shows, so `pr list` matches the TUI regardless of the caller's cwd.
+func (h *Hub) FleetPRs() ([]store.PR, error) {
+	prs, err := h.store.AllPRs()
+	if err != nil {
+		return nil, err
+	}
+	reg := map[string]bool{}
+	for _, p := range h.knownProjects() {
+		reg[p.Tag] = true
+	}
+	out := make([]store.PR, 0, len(prs))
+	for _, pr := range prs {
+		if reg[pr.Project] {
+			out = append(out, pr)
+		}
+	}
+	return out, nil
+}
+
+// prProject resolves the project that owns PR id fleet-wide. PRs show on the board
+// globally, so an operation must find its PR by id — not trust the caller's
+// cwd-derived project, which differs from a worktree subdir vs. the repo root.
+// Prefers the caller's project when it already holds the id (disambiguates a rare
+// cross-repo id clash for the common in-repo case); falls back to it when unknown.
+func (h *Hub) prProject(fallback, id string) string {
+	if _, ok, _ := h.store.For(fallback).GetPR(id); ok {
+		return fallback
+	}
+	if prs, err := h.store.AllPRs(); err == nil {
+		for _, p := range prs {
+			if p.ID == id {
+				return p.Project
+			}
+		}
+	}
+	return fallback
+}
 
 // PRDetail is a merge-intent plus its linked task and diff (for `pr info`).
 type PRDetail struct {

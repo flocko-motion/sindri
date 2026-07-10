@@ -341,7 +341,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		pr, err := h.Merge(h.reqProject(r), req.Name)
+		pr, err := h.Merge(h.prProject(h.reqProject(r), req.Name), req.Name)
 		writeJSON(w, pr, err)
 	})
 	mux.HandleFunc("POST /milestone", func(w http.ResponseWriter, r *http.Request) {
@@ -353,11 +353,12 @@ func (h *Hub) Handler() http.Handler {
 		writeJSON(w, pr, err)
 	})
 	mux.HandleFunc("GET /prs", func(w http.ResponseWriter, r *http.Request) {
-		prs, err := h.PRs(h.reqProject(r))
+		prs, err := h.FleetPRs() // fleet-wide, matching the TUI board — not cwd-scoped
 		writeJSON(w, prs, err)
 	})
 	mux.HandleFunc("GET /pr", func(w http.ResponseWriter, r *http.Request) {
-		d, err := h.PRInfo(h.reqProject(r), r.URL.Query().Get("id"))
+		id := r.URL.Query().Get("id")
+		d, err := h.PRInfo(h.prProject(h.reqProject(r), id), id)
 		writeJSON(w, d, err)
 	})
 	mux.HandleFunc("POST /pr/reject", func(w http.ResponseWriter, r *http.Request) {
@@ -365,18 +366,19 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		// The reject endpoint is the human path (TUI/CLI).
-		writeJSON(w, okMsg{"rejected"}, h.RejectPR(h.reqProject(r), req.ID, req.Feedback))
+		// The reject endpoint is the human path (TUI/CLI); resolve the PR fleet-wide.
+		writeJSON(w, okMsg{"rejected"}, h.RejectPR(h.prProject(h.reqProject(r), req.ID), req.ID, req.Feedback))
 	})
 	mux.HandleFunc("POST /pr/approve", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq // Name carries the PR id; the human approve path.
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"approved"}, h.ApprovePR(h.reqProject(r), req.Name))
+		writeJSON(w, okMsg{"approved"}, h.ApprovePR(h.prProject(h.reqProject(r), req.Name), req.Name))
 	})
 	mux.HandleFunc("GET /pr/lint", func(w http.ResponseWriter, r *http.Request) {
-		out, err := h.LintPR(h.reqProject(r), r.URL.Query().Get("id"))
+		id := r.URL.Query().Get("id")
+		out, err := h.LintPR(h.prProject(h.reqProject(r), id), id)
 		writeJSON(w, okMsg{out}, err)
 	})
 	mux.HandleFunc("POST /pr/review", func(w http.ResponseWriter, r *http.Request) {
@@ -384,14 +386,15 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"review requested"}, h.RequestReview(h.reqProject(r), req.ID, req.Feedback))
+		writeJSON(w, okMsg{"review requested"}, h.RequestReview(h.prProject(h.reqProject(r), req.ID), req.ID, req.Feedback))
 	})
 	mux.HandleFunc("GET /review-prompt", func(w http.ResponseWriter, r *http.Request) {
 		p, err := h.ReviewPrompt(h.reqProject(r))
 		writeJSON(w, okMsg{p}, err)
 	})
 	mux.HandleFunc("GET /pr/materialize", func(w http.ResponseWriter, r *http.Request) {
-		path, err := h.MaterializeReview(h.reqProject(r), r.URL.Query().Get("id"))
+		id := r.URL.Query().Get("id")
+		path, err := h.MaterializeReview(h.prProject(h.reqProject(r), id), id)
 		writeJSON(w, okMsg{path}, err)
 	})
 	mux.HandleFunc("GET /tasks", func(w http.ResponseWriter, r *http.Request) {
