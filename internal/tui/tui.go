@@ -386,8 +386,20 @@ func (m *model) onKey(k string) tea.Cmd {
 	case "G":
 		m.cursor[m.tab] = 1 << 30
 	case "ctrl+d":
+		if m.tab == 2 { // PRs: fast-scroll the diff/lint main pane (J/K do fine-grained)
+			for i := 0; i < max(1, m.detail.Height/2); i++ {
+				m.detail.ScrollDown()
+			}
+			return nil
+		}
 		m.cursor[m.tab] += m.bodyHeight() / 2
 	case "ctrl+u":
+		if m.tab == 2 {
+			for i := 0; i < max(1, m.detail.Height/2); i++ {
+				m.detail.ScrollUp()
+			}
+			return nil
+		}
 		m.cursor[m.tab] -= m.bodyHeight() / 2
 	case keyFilter:
 		if m.tab == 0 {
