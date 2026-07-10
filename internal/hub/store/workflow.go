@@ -22,10 +22,11 @@ CREATE TABLE IF NOT EXISTS tasks (
   status     TEXT NOT NULL DEFAULT '',
   priority   TEXT NOT NULL DEFAULT '',
   type       TEXT NOT NULL DEFAULT '',
-  labels     TEXT NOT NULL DEFAULT '',
-  parent_id  TEXT NOT NULL DEFAULT '',
-  updated_at TEXT NOT NULL DEFAULT '',
-  synced_at  TEXT NOT NULL DEFAULT '',
+  labels      TEXT NOT NULL DEFAULT '',
+  parent_id   TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '', -- the body (GitHub issue body, td/spec description)
+  updated_at  TEXT NOT NULL DEFAULT '',
+  synced_at   TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (project, id)
 );
 CREATE TABLE IF NOT EXISTS agent_state (
@@ -169,8 +170,8 @@ func (p *ProjectStore) ReplaceTasks(tasks []Task) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, t := range tasks {
 		if _, err := tx.Exec(
-			`INSERT INTO tasks (project,id,title,status,priority,type,labels,parent_id,synced_at) VALUES (?,?,?,?,?,?,?,?,?)`,
-			p.project, t.ID, t.Title, t.Status, t.Priority, t.Type, t.Labels, t.ParentID, now); err != nil {
+			`INSERT INTO tasks (project,id,title,status,priority,type,labels,parent_id,description,synced_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+			p.project, t.ID, t.Title, t.Status, t.Priority, t.Type, t.Labels, t.ParentID, t.Description, now); err != nil {
 			return err
 		}
 	}
@@ -180,13 +181,13 @@ func (p *ProjectStore) ReplaceTasks(tasks []Task) error {
 // UpsertTask refreshes a single cached task in this project (point-of-use refresh).
 func (p *ProjectStore) UpsertTask(t Task) error {
 	_, err := p.s.db.Exec(`
-		INSERT INTO tasks (project,id,title,status,priority,type,labels,parent_id,synced_at)
-		VALUES (?,?,?,?,?,?,?,?,?)
+		INSERT INTO tasks (project,id,title,status,priority,type,labels,parent_id,description,synced_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(project,id) DO UPDATE SET
 			title=excluded.title, status=excluded.status, priority=excluded.priority,
 			type=excluded.type, labels=excluded.labels, parent_id=excluded.parent_id,
-			synced_at=excluded.synced_at`,
-		p.project, t.ID, t.Title, t.Status, t.Priority, t.Type, t.Labels, t.ParentID,
+			description=excluded.description, synced_at=excluded.synced_at`,
+		p.project, t.ID, t.Title, t.Status, t.Priority, t.Type, t.Labels, t.ParentID, t.Description,
 		time.Now().UTC().Format(time.RFC3339))
 	return err
 }
@@ -201,7 +202,7 @@ func (p *ProjectStore) RemoveTask(id string) error {
 
 // taskCols is the shared SELECT projection: the cached td fields plus the hub-side
 // approval overlay (empty when there's no approval row). The join is project-matched.
-const taskCols = `t.id,t.title,t.status,t.priority,t.type,t.labels,t.parent_id,
+const taskCols = `t.id,t.title,t.status,t.priority,t.type,t.labels,t.parent_id,t.description,
 	COALESCE(a.status,''), COALESCE(a.comment,'')`
 
 const taskFrom = ` FROM tasks t LEFT JOIN task_approval a ON a.task=t.id AND a.project=t.project`
@@ -263,7 +264,7 @@ func (p *ProjectStore) OpenChildren(parentID string) ([]Task, error) {
 func (p *ProjectStore) GetTask(id string) (Task, bool, error) {
 	row := p.s.db.QueryRow(`SELECT `+taskCols+taskFrom+` WHERE t.project=? AND t.id=?`, p.project, id)
 	var t Task
-	err := row.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Type, &t.Labels, &t.ParentID, &t.Approval, &t.ApprovalComment)
+	err := row.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Type, &t.Labels, &t.ParentID, &t.Description, &t.Approval, &t.ApprovalComment)
 	if err == sql.ErrNoRows {
 		return Task{}, false, nil
 	}
@@ -308,7 +309,7 @@ func scanTasks(rows *sql.Rows) ([]Task, error) {
 	var out []Task
 	for rows.Next() {
 		var t Task
-		if err := rows.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Type, &t.Labels, &t.ParentID, &t.Approval, &t.ApprovalComment); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Type, &t.Labels, &t.ParentID, &t.Description, &t.Approval, &t.ApprovalComment); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
