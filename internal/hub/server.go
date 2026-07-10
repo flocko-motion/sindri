@@ -19,12 +19,13 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/config"
+	"github.com/flo-at/sindri/internal/hub/store"
 	"golang.org/x/term"
 )
 
 // streamingPaths are long-lived by design (SSE): they'd hold an access-log run
 // open for the life of the connection, so they're left out of the log entirely.
-var streamingPaths = map[string]bool{"/events": true}
+var streamingPaths = map[string]bool{"/events": true, "/chat/stream": true}
 
 // accessLogger coalesces the access log so high-frequency UI polling collapses to
 // counted lines instead of flooding. It writes to os.Stderr — where log(1) and
@@ -75,6 +76,18 @@ type TellReq struct {
 	Name   string `json:"name"`
 	Msg    string `json:"msg"`
 	Source string `json:"source"`
+}
+
+// ChatSayReq is the body for POST /chat/say — the user posting to the room.
+type ChatSayReq struct {
+	Msg string `json:"msg"`
+}
+
+// ChatView is the chatroom snapshot served by GET /chat and streamed by
+// GET /chat/stream: the current member roster and the recent transcript.
+type ChatView struct {
+	Members []store.ChatMember  `json:"members"`
+	Log     []store.ChatMessage `json:"log"`
 }
 
 // NameReq is the body for operations addressing one agent (POST /launch) or PR
@@ -292,6 +305,34 @@ func (h *Hub) Handler() http.Handler {
 		}
 		writeJSON(w, okMsg{"delivered"}, h.Tell(h.reqProject(r), req.Name, req.Msg, req.Source))
 	})
+	mux.HandleFunc("POST /chat/add", func(w http.ResponseWriter, r *http.Request) {
+		var req NameReq
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"added"}, h.ChatAdd(h.reqProject(r), req.Name))
+	})
+	mux.HandleFunc("POST /chat/remove", func(w http.ResponseWriter, r *http.Request) {
+		var req NameReq
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"removed"}, h.ChatRemove(h.reqProject(r), req.Name))
+	})
+	mux.HandleFunc("POST /chat/say", func(w http.ResponseWriter, r *http.Request) {
+		var req ChatSayReq
+		if !decode(w, r, &req) {
+			return
+		}
+		// A line starting with "/" is an in-chat command (add/remove/who/help),
+		// executed by the hub; anything else is broadcast as the user.
+		writeJSON(w, okMsg{"sent"}, h.ChatUserMessage(req.Msg))
+	})
+	mux.HandleFunc("GET /chat", func(w http.ResponseWriter, r *http.Request) {
+		v, err := h.chatView()
+		writeJSON(w, v, err)
+	})
+	mux.HandleFunc("GET /chat/stream", h.handleChatEvents)
 	mux.HandleFunc("POST /merge", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq // Name carries the PR id
 		if !decode(w, r, &req) {
@@ -510,6 +551,59 @@ func (h *Hub) handleEvents(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 	send() // initial snapshot
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ch:
+			send()
+		}
+	}
+}
+
+// chatView builds the current chatroom snapshot (roster + recent transcript).
+func (h *Hub) chatView() (ChatView, error) {
+	members, err := h.ChatMembers()
+	if err != nil {
+		return ChatView{}, err
+	}
+	log, err := h.ChatTranscript(0)
+	if err != nil {
+		return ChatView{}, err
+	}
+	return ChatView{Members: members, Log: log}, nil
+}
+
+// handleChatEvents streams the chatroom as Server-Sent Events: the snapshot on
+// connect, then a fresh one on every board change (chat included), until the
+// client disconnects. This is how the user's live views (the `chat join` CLI and
+// the TUI chat tab) receive forwarded messages — the star topology's user leg.
+func (h *Hub) handleChatEvents(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	flusher.Flush()
+
+	ch, unsub := h.events.subscribe()
+	defer unsub()
+
+	send := func() {
+		v, err := h.chatView()
+		if err != nil {
+			return
+		}
+		data, err := json.Marshal(v)
+		if err != nil {
+			return
+		}
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	}
+	send()
 	for {
 		select {
 		case <-r.Context().Done():

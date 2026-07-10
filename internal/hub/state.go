@@ -74,6 +74,7 @@ type BoardState struct {
 	PRs      []store.PR      `json:"prs"`
 	Projects []store.Project `json:"projects"`
 	Orphans  []string        `json:"orphans"` // pods with no roster entry (D14)
+	Chat     ChatView        `json:"chat"`    // the user's chatroom: members + transcript
 }
 
 // State assembles the board: agents and PRs across all projects, tasks for the
@@ -176,7 +177,11 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			}
 		}
 	}
-	return BoardState{Agents: agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans}, nil
+	chat, err := h.chatView()
+	if err != nil {
+		return BoardState{}, err
+	}
+	return BoardState{Agents: agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans, Chat: chat}, nil
 }
 
 // AgentStatsView is one agent's resource snapshot for `agent stats`. Err is set

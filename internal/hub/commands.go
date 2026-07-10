@@ -58,6 +58,10 @@ func (h *Hub) registry() *registry.Registry {
 		registry.Command{Name: "state", Help: "set your resting state: state planning | state idle", Roles: []string{"planner"}, Run: h.cmdState},
 		registry.Command{Name: "approve", Help: "approve a pull request: approve [pr-id]", Roles: []string{"reviewer"}, Run: h.cmdApprove},
 		registry.Command{Name: "reject", Help: "reject a pull request: reject <pr-id> <feedback...>", Roles: []string{"reviewer"}, Run: h.cmdReject},
+		// Any agent the user has added to the chatroom can speak to it. Hidden (not
+		// role-gated) until added — the user controls who's in the room.
+		registry.Command{Name: "chat", Help: "say something to everyone in the chatroom: chat <message...>",
+			Hidden: func(c registry.Caller) bool { return !c.InChat }, Run: h.cmdChat},
 	)
 }
 
@@ -80,6 +84,12 @@ func (h *Hub) caller(project, name string) (registry.Caller, error) {
 		return registry.Caller{}, err
 	}
 	inContainer := st.Container != ""
+	// Chatroom membership gates the "chat" verb — invisible unless the user has added
+	// this agent to the room.
+	inChat, err := h.store.ChatIsMember(project, name)
+	if err != nil {
+		return registry.Caller{}, err
+	}
 	return registry.Caller{
 		Project:     project,
 		Agent:       name,
@@ -87,6 +97,7 @@ func (h *Hub) caller(project, name string) (registry.Caller, error) {
 		HasTask:     st.Phase != "idle" || inContainer,
 		InContainer: inContainer,
 		Phase:       st.Phase,
+		InChat:      inChat,
 	}, nil
 }
 

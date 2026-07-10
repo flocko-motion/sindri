@@ -22,6 +22,7 @@ type Caller struct {
 	HasTask     bool   // a worker holding work (a leaf task OR a container) hides "next"
 	InContainer bool   // a worker holding a collaborative container: shows "checkpoint", hides "submit"
 	Phase       string // the agent's current phase (working|submitted|resolving|idle|…), gating phase-specific verbs
+	InChat      bool   // a member of the user's chatroom: shows "chat"
 }
 
 // Command is one hub-side verb the browser can invoke.

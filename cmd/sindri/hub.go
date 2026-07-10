@@ -10,6 +10,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -40,6 +41,11 @@ type backend interface {
 	Clients(name string) ([]hub.ClientView, error)
 	Launch(name string, shell, debug bool, out io.Writer) error
 	Tell(name, msg, source string) error
+	ChatAdd(name string) error
+	ChatRemove(name string) error
+	ChatSay(msg string) error
+	Chat() (hub.ChatView, error)
+	ChatWatch(ctx context.Context) (<-chan hub.ChatView, error)
 	State() (hub.BoardState, error)
 	Log(name string) ([]store.Event, error)
 	Tasks() ([]store.Task, error)

@@ -170,8 +170,10 @@ func (m model) rows() []row {
 		return m.agentRows()
 	case 2:
 		return m.prRows()
-	default:
+	case 3:
 		return m.repoRows()
+	default:
+		return nil // Chat has no selectable rows — it renders its own transcript body
 	}
 }
 

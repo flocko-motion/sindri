@@ -47,6 +47,7 @@ const (
 	scopeAgents
 	scopePRs
 	scopeRepos
+	scopeChat
 )
 
 // binding is one row of help: the key(s) as displayed, a label (may depend on model
@@ -108,6 +109,9 @@ var keymap = []binding{
 	{keyColor, lbl("colour"), scopeRepos},
 	{keyConfig, lbl("config"), scopeRepos},
 	{keyDelete, lbl("forget"), scopeRepos},
+
+	// Chat (membership is curated from the CLI: `sindri chat add/remove`).
+	{"enter", lbl("compose"), scopeChat},
 }
 
 // footerFor renders the "key label · key label" hints for a scope from the keymap.
@@ -130,6 +134,8 @@ func tabScope(tab int) keyScope {
 		return scopeAgents
 	case 2:
 		return scopePRs
+	case 4:
+		return scopeChat
 	default:
 		return scopeRepos
 	}
