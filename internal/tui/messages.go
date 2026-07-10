@@ -74,6 +74,7 @@ type errMsg struct { // fatal: hub connection lost (unless a stale generation)
 	gen int
 }
 type errModalMsg struct{ err error } // non-fatal: show the error modal
+type chatSentMsg struct{}            // a chat compose sent OK — clear + close the composer
 
 // tickMsg drives periodic polling; polledMsg carries a state fetched by a poll
 // (distinct from stateMsg so it doesn't re-arm the SSE waiter).

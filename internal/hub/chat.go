@@ -9,10 +9,12 @@
 package hub
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/registry"
@@ -29,6 +31,17 @@ const (
 
 // chatTranscriptLimit bounds how much history a snapshot / live view carries.
 const chatTranscriptLimit = 200
+
+// chatMaxLen caps a single chat message — generous enough for deep, multi-paragraph
+// discussion, but bounded so one message can't be a novel (and a huge tmux inject).
+// Enforced in chatBroadcast, so every path (agent, CLI, TUI) gets the same limit
+// and the same feedback rather than a silent truncation.
+const chatMaxLen = 4000
+
+// errChatTooLong is returned when a message exceeds chatMaxLen. It's an actionable
+// message meant for whoever sent it (not a hub-internal error), so callers surface
+// it to the sender.
+var errChatTooLong = fmt.Errorf("message too long — keep it under %d characters (split a longer one into parts)", chatMaxLen)
 
 // chatHelpText lists the in-chat slash commands (IRC-style) the user can type into
 // the room — the hub executes them instead of broadcasting them.
@@ -234,6 +247,12 @@ func (h *Hub) cmdChat(c registry.Caller, args []string, out io.Writer) (int, err
 		return 2, nil
 	}
 	if _, err := h.chatBroadcast(c.Project, c.Agent, msg); err != nil {
+		// "too long" is the agent's to act on (trim + retry), so show it directly —
+		// AgentExec would otherwise neutralize a returned error into a generic notice.
+		if errors.Is(err, errChatTooLong) {
+			fmt.Fprintln(out, err.Error())
+			return 1, nil
+		}
 		return 1, err
 	}
 	fmt.Fprintln(out, "sent to the chatroom")
@@ -247,6 +266,9 @@ func (h *Hub) chatBroadcast(senderProject, senderName, body string) (store.ChatM
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return store.ChatMessage{}, fmt.Errorf("empty message")
+	}
+	if utf8.RuneCountInString(body) > chatMaxLen {
+		return store.ChatMessage{}, errChatTooLong
 	}
 	msg, err := h.store.ChatAppend(senderName, body)
 	if err != nil {

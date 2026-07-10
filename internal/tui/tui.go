@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -66,7 +67,6 @@ type inputMode int
 const (
 	inputNone inputMode = iota
 	inputTell
-	inputChat // compose a chatroom message (posted as the user)
 )
 
 type model struct {
@@ -112,6 +112,9 @@ type model struct {
 	mode        inputMode // active text-input modal
 	input       textinput.Model
 	inputTarget string // selection captured when the modal opened
+
+	composing bool          // Chat tab: the multiline composer is open in the main pane
+	composer  textarea.Model // multiline chat compose (a single line can't hold deep talk)
 	modal       bool   // detail modal (full-screen) is open
 	choice      choiceModalState
 	form        formState // active fill-in form (new/edit task)
@@ -139,7 +142,11 @@ func newModel(cl *client.HTTP, ch <-chan hub.BoardState, root string) model {
 	// size late or as 0×0; without a default the view would stick on "loading".)
 	in := textinput.New()
 	in.CharLimit = 0 // no limit — a chat message (or tell) must never be silently truncated on send
-	m := model{cl: cl, ch: ch, root: root, collapsed: map[string]bool{}, merging: map[string]bool{}, w: 80, h: 24, input: in}
+	ta := textarea.New()
+	ta.CharLimit = 0 // the hub enforces the length cap (with feedback); never clip silently here
+	ta.Placeholder = "Type a message to the room…"
+	ta.ShowLineNumbers = false
+	m := model{cl: cl, ch: ch, root: root, collapsed: map[string]bool{}, merging: map[string]bool{}, w: 80, h: 24, input: in, composer: ta}
 	m.reclamp()
 	return m
 }
@@ -167,6 +174,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.mode != inputNone { // keep the compose field sized to the new width
 			m.resizeInput()
+		}
+		if m.composing { // keep the multiline composer sized to the new dimensions
+			m.sizeComposer()
 		}
 		m.reclamp()
 		if m.modal {
@@ -247,7 +257,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.openRepoConfigForm(msg.d)
 		}
 	case errModalMsg:
-		m.errText = msg.err.Error()
+		m.errText = msg.err.Error() // shown over everything; a composing draft stays open beneath it
+	case chatSentMsg:
+		m.composer.Reset() // sent OK — clear + close the composer
+		m.composing = false
+		m.composer.Blur()
 	case errMsg:
 		if msg.gen != m.gen { // the close of a stream abandoned by a repo switch — not fatal
 			return m, nil
@@ -267,6 +281,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.form.active {
 			return m, m.form.update(msg)
+		}
+		if m.composing { // Chat tab: the multiline composer owns the keyboard while open
+			return m.updateComposer(msg)
 		}
 		if m.mode != inputNone {
 			return m.updateInput(msg)
@@ -504,9 +521,8 @@ func (m *model) onKey(k string) tea.Cmd {
 			return m.closeTaskCmd(m.selID())
 		}
 	case "enter":
-		if m.tab == 4 { // Chat: compose a message to the room (posted as the user)
-			m.openInput(inputChat, "say: ")
-			return textinput.Blink
+		if m.tab == 4 { // Chat: open the multiline composer in the main pane
+			return m.startComposing()
 		}
 		if m.rightFocus { // act on the focused detail item
 			if it, ok := m.focusedItem(); ok {
@@ -643,9 +659,13 @@ func (m model) View() string {
 		body = pane(rowTexts(m.rows()), m.list, m.w, m.cursor[m.tab])
 	}
 	var foot string
-	if m.mode != inputNone {
+	switch {
+	case m.mode != inputNone:
 		foot = dimStyle.Render(padTrunc("enter submit · esc cancel", m.w)) + "\n" + m.input.View()
-	} else {
+	case m.composing:
+		foot = dimStyle.Render(padTrunc("ctrl+s send · esc cancel · enter newline", m.w)) + "\n" +
+			dimStyle.Render(padTrunc("composing to the chatroom…", m.w))
+	default:
 		global := m.footerFor(scopeGlobal)
 		if m.flash != "" {
 			global = m.flash

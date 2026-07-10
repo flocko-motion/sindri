@@ -56,17 +56,9 @@ func (m *model) submitInput() tea.Cmd {
 		return nil
 	}
 	cl, target := m.cl, m.inputTarget
-	switch m.mode {
-	case inputTell:
+	if m.mode == inputTell {
 		return func() tea.Msg {
 			if err := cl.Tell(target, v, "user"); err != nil {
-				return errModalMsg{err}
-			}
-			return nil
-		}
-	case inputChat:
-		return func() tea.Msg {
-			if err := cl.ChatSay(v); err != nil {
 				return errModalMsg{err}
 			}
 			return nil
