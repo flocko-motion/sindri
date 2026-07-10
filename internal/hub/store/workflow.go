@@ -118,6 +118,9 @@ type Task struct {
 	// rejected (with ApprovalComment). Workers only ever see "" / approved tasks.
 	Approval        string `json:"approval,omitempty"`
 	ApprovalComment string `json:"approval_comment,omitempty"`
+	// Comments is the task's synced comment thread. Not a tasks-table column —
+	// assembled from task_comments on a detail read (TaskInfo), empty elsewhere.
+	Comments []Comment `json:"comments,omitempty"`
 }
 
 // AgentState is an agent's live workflow state (durable, D11).
@@ -196,8 +199,10 @@ func (p *ProjectStore) UpsertTask(t Task) error {
 // once without a full multi-source re-sync. The next sync rebuilds the cache from
 // the sources anyway, so this is just the intervening truth.
 func (p *ProjectStore) RemoveTask(id string) error {
-	_, err := p.s.db.Exec(`DELETE FROM tasks WHERE project=? AND id=?`, p.project, id)
-	return err
+	if _, err := p.s.db.Exec(`DELETE FROM tasks WHERE project=? AND id=?`, p.project, id); err != nil {
+		return err
+	}
+	return p.DeleteComments(id) // don't strand a scrapped task's comments
 }
 
 // taskCols is the shared SELECT projection: the cached td fields plus the hub-side

@@ -61,6 +61,9 @@ type Hub struct {
 
 	chatMu   sync.Mutex // guards chatSeen
 	chatSeen time.Time  // last user heartbeat into the chatroom — presence for the required-participant lock
+
+	commentMu     sync.Mutex           // guards commentSynced
+	commentSynced map[string]time.Time // per-task last comment sync — the TTL memo (see comments.go)
 }
 
 // agentKey identifies an agent within a project — the key for the hub's per-agent

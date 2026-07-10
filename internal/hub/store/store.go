@@ -112,6 +112,19 @@ CREATE TABLE IF NOT EXISTS chat_log (
   body   TEXT NOT NULL,
   ts     TEXT NOT NULL
 );
+-- Unified task comments, synced from external sources (td, github). source + a
+-- source_ref (the external id/url) key each comment so a re-sync reconciles them
+-- against their origin (add new, drop removed, update changed).
+CREATE TABLE IF NOT EXISTS task_comments (
+  project    TEXT NOT NULL,
+  task_id    TEXT NOT NULL,
+  source     TEXT NOT NULL, -- "td" | "github"
+  source_ref TEXT NOT NULL, -- external id/url, unique within a source
+  author     TEXT NOT NULL DEFAULT '',
+  body       TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (project, task_id, source, source_ref)
+);
 `
 
 // Open opens (creating if needed) the central SQLite DB at path and applies the

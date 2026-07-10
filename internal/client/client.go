@@ -452,6 +452,12 @@ func (c *HTTP) ReconcileTasks() error {
 	return c.post("/tasks/reconcile", struct{}{})
 }
 
+// RefreshTaskComments forces a re-sync of one task's comments from its source
+// (the [r]efresh key), bypassing the TTL.
+func (c *HTTP) RefreshTaskComments(id string) error {
+	return c.post("/task/comments/refresh", hub.NameReq{Name: id})
+}
+
 // CreateTask creates a task from a spec and returns its id.
 func (c *HTTP) CreateTask(s hub.TaskSpec) (string, error) {
 	var ok struct {

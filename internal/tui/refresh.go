@@ -38,6 +38,19 @@ func tickCmd() tea.Cmd {
 	return tea.Tick(refreshInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
+// refreshTaskCommentsCmd force-syncs one task's comments from its source (bypassing
+// the TTL), then re-fetches its detail so the fresh thread shows at once.
+func refreshTaskCommentsCmd(cl *client.HTTP, id string) tea.Cmd {
+	return func() tea.Msg {
+		_ = cl.RefreshTaskComments(id)
+		t, err := cl.TaskInfo(id)
+		if err != nil {
+			return nil
+		}
+		return taskMsg{id, t}
+	}
+}
+
 // chatHeartbeatCmd tells the hub the user is present in the chatroom (fired while
 // the Chat tab is open). Presence keeps the room unlocked for agents.
 func chatHeartbeatCmd(cl *client.HTTP) tea.Cmd {

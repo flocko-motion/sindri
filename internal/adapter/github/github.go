@@ -83,6 +83,35 @@ func Issues(ctx context.Context, root string) ([]Issue, error) {
 	return issues, nil
 }
 
+// Comment is one comment on a GitHub issue. URL is its stable, unique reference
+// (used as the sync key); Author is the commenter's login.
+type Comment struct {
+	Author    struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	Body      string `json:"body"`
+	CreatedAt string `json:"createdAt"`
+	URL       string `json:"url"`
+}
+
+// IssueComments returns an issue's comment thread via
+// `gh issue view <n> --json comments`. Ordered oldest-first (GitHub's order).
+func IssueComments(ctx context.Context, root string, number int) ([]Comment, error) {
+	cmd := exec.CommandContext(ctx, "gh", "issue", "view", strconv.Itoa(number), "--json", "comments")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("gh issue view %d comments in %s: %w", number, root, ghError(err))
+	}
+	var resp struct {
+		Comments []Comment `json:"comments"`
+	}
+	if e := json.Unmarshal(out, &resp); e != nil {
+		return nil, fmt.Errorf("parse gh issue comments: %w", e)
+	}
+	return resp.Comments, nil
+}
+
 // Close closes issue number with a comment via
 // `gh issue close <number> --comment <comment>` — the ONLY outbound write this
 // adapter makes, used by the hub's close-on-merge path (best-effort there).

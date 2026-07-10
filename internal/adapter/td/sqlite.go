@@ -76,6 +76,46 @@ func Detail(root, id string) (description, acceptance string, err error) {
 	return description, acceptance, nil
 }
 
+// Comment is one td comment on a task (td's own comments table). td records a
+// session_id rather than a human author.
+type Comment struct {
+	ID        string
+	Author    string
+	Body      string
+	CreatedAt time.Time
+}
+
+// Comments reads a task's comment thread from td's db. Returns nil (not an error)
+// when td has no comments table (older td) or none for the task — comments are an
+// optional source, absence isn't a failure.
+func Comments(root, id string) ([]Comment, error) {
+	if _, err := os.Stat(DBPath(root)); err != nil {
+		return nil, nil
+	}
+	db, err := sql.Open("sqlite", "file:"+DBPath(root))
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	rows, err := db.Query(`SELECT id, session_id, text, created_at FROM comments WHERE issue_id=? ORDER BY created_at`, id)
+	if err != nil {
+		if strings.Contains(err.Error(), "no such table") {
+			return nil, nil // td build without the comments feature
+		}
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Comment
+	for rows.Next() {
+		var cid, session, text, created string
+		if err := rows.Scan(&cid, &session, &text, &created); err != nil {
+			return nil, err
+		}
+		out = append(out, Comment{ID: cid, Author: session, Body: text, CreatedAt: parseTS(created)})
+	}
+	return out, rows.Err()
+}
+
 // taskFromDB reads a single task by id (live or not — Get is used post-mutation).
 func taskFromDB(root, id string) (issue.Task, error) {
 	db, err := sql.Open("sqlite", "file:"+DBPath(root))

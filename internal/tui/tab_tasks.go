@@ -11,6 +11,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -207,10 +208,12 @@ func (m model) taskItems() []metaItem {
 		}
 	}
 	desc := ""
+	var comments []store.Comment
 	if m.taskDetail.ID == id {
 		desc = m.taskDetail.Description
+		comments = m.taskDetail.Comments
 	}
-	return m.taskItemsFor(t, desc)
+	return m.taskItemsFor(t, desc, comments)
 }
 
 func (m model) taskActionable() []metaItem {
@@ -226,12 +229,12 @@ func (m model) taskActionable() []metaItem {
 // taskDetailFor renders any task's detail block (used for the modal-peek and the
 // PRs tab's linked-task modal). desc is the (possibly empty) description.
 func (m model) taskDetailFor(t store.Task, desc string) []string {
-	return itemTexts(m.taskItemsFor(t, desc))
+	return itemTexts(m.taskItemsFor(t, desc, nil))
 }
 
 // taskItemsFor builds a task's detail metaItems: scalar fields plus the agent,
-// PR, and parent as actionable cross-references.
-func (m model) taskItemsFor(t store.Task, desc string) []metaItem {
+// PR, and parent as actionable cross-references, then the description and comments.
+func (m model) taskItemsFor(t store.Task, desc string, comments []store.Comment) []metaItem {
 	assignee, pr := "", ""
 	for _, a := range m.state.Agents {
 		if a.Task == t.ID {
@@ -268,7 +271,8 @@ func (m model) taskItemsFor(t store.Task, desc string) []metaItem {
 		xref("pr:       ", pr, "pr"),
 		metaItem{text: "labels:   " + dash(t.Labels)},
 	)
-	return append(items, descItems(desc)...)
+	items = append(items, descItems(desc)...)
+	return append(items, commentItems(comments)...)
 }
 
 // descItems renders an optional description block.
@@ -281,6 +285,36 @@ func descItems(desc string) []metaItem {
 		items = append(items, metaItem{text: l})
 	}
 	return items
+}
+
+// commentItems renders the synced comment thread (author + local timestamp, then
+// the body split into lines). The detail pane word-wraps each line, so long
+// comments read in full. Empty when the task has no comments.
+func commentItems(comments []store.Comment) []metaItem {
+	if len(comments) == 0 {
+		return nil
+	}
+	items := []metaItem{{text: ""}, {text: fmt.Sprintf("── comments (%d) ──", len(comments))}}
+	for _, c := range comments {
+		head := c.Author
+		if ts := commentTime(c.CreatedAt); ts != "" {
+			head = ts + "  " + head
+		}
+		items = append(items, metaItem{text: ""}, metaItem{text: dimStyle.Render(head)})
+		for _, l := range strings.Split(strings.TrimRight(c.Body, "\n"), "\n") {
+			items = append(items, metaItem{text: l})
+		}
+	}
+	return items
+}
+
+// commentTime formats a stored RFC3339 timestamp as local "2006-01-02 15:04"
+// ("" if unparseable) — comments span days, so they show the date, not just HH:MM.
+func commentTime(ts string) string {
+	if t, err := time.Parse(time.RFC3339, ts); err == nil {
+		return t.Local().Format("2006-01-02 15:04")
+	}
+	return ""
 }
 
 // taskTypes is the full set of td issue types (display == td value).

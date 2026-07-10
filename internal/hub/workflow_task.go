@@ -52,6 +52,7 @@ func (h *Hub) TaskInfo(project, id string) (store.Task, error) {
 		if !ok {
 			return store.Task{}, fmt.Errorf("unknown task %q", id)
 		}
+		t.Comments = h.taskComments(project, id)
 		return t, nil
 	}
 	// Repair this one task's status against reality before returning it (task info /
@@ -67,6 +68,7 @@ func (h *Hub) TaskInfo(project, id string) (store.Task, error) {
 		st.Description, st.Acceptance = d, a
 	}
 	_ = h.store.For(project).UpsertTask(st)
+	st.Comments = h.taskComments(project, id)
 	return st, nil
 }
 
