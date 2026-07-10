@@ -413,9 +413,15 @@ func (h *Hub) waitForWork(ctx context.Context, check func() (string, bool, error
 	}
 }
 
-// SyncTasks refreshes a project's whole cached task set from its sources — td tasks
-// and openspec changes. Caches all statuses so UIs can filter client-side.
-func (h *Hub) SyncTasks(project string) error {
+// SyncTasks refreshes a project's cached task set from its sources (td + openspec +
+// the TTL-throttled GitHub scan). ForceSyncTasks bypasses the GitHub TTL for an
+// explicit [r]efresh.
+func (h *Hub) SyncTasks(project string) error { return h.syncTasks(project, false) }
+
+// ForceSyncTasks is SyncTasks with the GitHub scan forced past its TTL ([r]efresh).
+func (h *Hub) ForceSyncTasks(project string) error { return h.syncTasks(project, true) }
+
+func (h *Hub) syncTasks(project string, force bool) error {
 	root := h.projectRoot(project)
 	ps := h.store.For(project)
 	tasks, err := td.Tasks(root, issue.FilterAll)
@@ -449,7 +455,7 @@ func (h *Hub) SyncTasks(project string) error {
 	if err != nil {
 		log.Printf("hub: github source skipped for %s (config error): %v", project, err)
 	}
-	rows = append(rows, h.githubRows(project, root, err == nil && cfg.IssuesEnabled(), false)...)
+	rows = append(rows, h.githubRows(project, root, err == nil && cfg.IssuesEnabled(), force)...)
 	if ov, err := ps.PriorityOverrides(); err == nil {
 		for i := range rows {
 			if p, ok := ov[rows[i].ID]; ok {

@@ -485,9 +485,11 @@ func (h *Hub) PodInfo(project, name string) (string, error) {
 	return header + "(no container — agent is down)", nil
 }
 
-// Refresh re-syncs the selected project's tasks and notifies watchers.
+// Refresh re-syncs the selected project's tasks and notifies watchers. It's the
+// [r]efresh hotkey / explicit user refresh, so it forces the GitHub scan past its
+// TTL — the one place we want fresh issues on demand.
 func (h *Hub) Refresh(project string) error {
-	err := h.SyncTasks(project)
+	err := h.ForceSyncTasks(project)
 	h.notify()
 	return err
 }

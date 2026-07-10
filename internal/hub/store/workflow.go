@@ -191,6 +191,14 @@ func (p *ProjectStore) UpsertTask(t Task) error {
 	return err
 }
 
+// RemoveTask drops a single cached task, so a close/scrap shows on the board at
+// once without a full multi-source re-sync. The next sync rebuilds the cache from
+// the sources anyway, so this is just the intervening truth.
+func (p *ProjectStore) RemoveTask(id string) error {
+	_, err := p.s.db.Exec(`DELETE FROM tasks WHERE project=? AND id=?`, p.project, id)
+	return err
+}
+
 // taskCols is the shared SELECT projection: the cached td fields plus the hub-side
 // approval overlay (empty when there's no approval row). The join is project-matched.
 const taskCols = `t.id,t.title,t.status,t.priority,t.type,t.labels,t.parent_id,
