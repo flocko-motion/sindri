@@ -51,6 +51,7 @@ func (h *Hub) prepareClaudeHome(project, name, role string, out io.Writer) (home
 		"hasCompletedOnboarding":        true,
 		"autoUpdates":                   false,
 		"bypassPermissionsModeAccepted": true, // pre-accept --dangerously-skip-permissions
+		"theme":                         "dark-ansi", // built-in ANSI dark — readable in the pod's terminal, unlike the default
 		"projects": map[string]any{
 			"/workspace": map[string]any{"hasTrustDialogAccepted": true},
 		},
