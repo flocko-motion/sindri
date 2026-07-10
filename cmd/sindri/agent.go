@@ -9,6 +9,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -380,6 +381,41 @@ func agentRestartCmd() *cobra.Command {
 	c.Flags().BoolVar(&shell, "shell", false, "run a bare shell instead of Claude (debug/demo)")
 	c.Flags().BoolVar(&debug, "debug", false, "stream the hub's liveness-probe detail while waiting for the agent to come up")
 	return c
+}
+
+// agentCdCmd prints an agent's workspace path. A child process can't change the
+// parent shell's directory, so this is the composable primitive: `cd "$(sindri
+// agent cd <name>)"`, or a shell function wrapping it. Read-only, so no cross-repo
+// prompt — it just resolves the path.
+func agentCdCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "cd <name>",
+		Short: "Print an agent's workspace path — use: cd \"$(sindri agent cd <name>)\"",
+		Long: "Print the absolute path to an agent's workspace. A command can't change " +
+			"your shell's directory itself, so use it in a subshell:\n\n" +
+			"  cd \"$(sindri agent cd <name>)\"\n\n" +
+			"or add a shell function to your rc:\n\n" +
+			"  scd() { cd \"$(sindri agent cd \"$1\")\"; }",
+		Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withBackend(func(b backend) error {
+				st, err := b.State()
+				if err != nil {
+					return err
+				}
+				a := agentByName(st.Agents, args[0])
+				if a == nil {
+					return fmt.Errorf("no such agent %q", args[0])
+				}
+				root := projectRoot(st.Projects, a.Project)
+				if root == "" || a.Workspace == "" {
+					return fmt.Errorf("%s has no workspace yet (launch it / give it a task first)", a.Name)
+				}
+				fmt.Println(filepath.Join(root, a.Workspace))
+				return nil
+			})
+		},
+	}
 }
 
 func agentTellCmd() *cobra.Command {
