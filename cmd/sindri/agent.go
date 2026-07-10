@@ -383,19 +383,19 @@ func agentRestartCmd() *cobra.Command {
 	return c
 }
 
-// agentCdCmd prints an agent's workspace path. A child process can't change the
+// agentDirCmd prints an agent's workspace path. A child process can't change the
 // parent shell's directory, so this is the composable primitive: `cd "$(sindri
-// agent cd <name>)"`, or a shell function wrapping it. Read-only, so no cross-repo
+// agent dir <name>)"`, or a shell function wrapping it. Read-only, so no cross-repo
 // prompt — it just resolves the path.
-func agentCdCmd() *cobra.Command {
+func agentDirCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "cd <name>",
-		Short: "Print an agent's workspace path — use: cd \"$(sindri agent cd <name>)\"",
+		Use:   "dir <name>",
+		Short: "Print an agent's workspace path — use: cd \"$(sindri agent dir <name>)\"",
 		Long: "Print the absolute path to an agent's workspace. A command can't change " +
 			"your shell's directory itself, so use it in a subshell:\n\n" +
-			"  cd \"$(sindri agent cd <name>)\"\n\n" +
+			"  cd \"$(sindri agent dir <name>)\"\n\n" +
 			"or add a shell function to your rc:\n\n" +
-			"  scd() { cd \"$(sindri agent cd \"$1\")\"; }",
+			"  scd() { cd \"$(sindri agent dir \"$1\")\"; }",
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withBackend(func(b backend) error {
