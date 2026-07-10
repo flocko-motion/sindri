@@ -131,6 +131,11 @@ func (h *Hub) chatCommand(line string) error {
 		return h.chatSystemReply(h.chatWhoLine())
 	case "help", "?":
 		return h.chatSystemReply(chatHelpText)
+	case "quit", "q", "leave", "part", "exit":
+		// Recognized so it's never an "unknown command": `chat join` intercepts these
+		// locally to end its loop (a REPL has to); the TUI has no session to quit, so
+		// it lands here with guidance instead.
+		return h.chatSystemReply("to leave: press Ctrl-D or type /quit in `sindri chat join`; in the TUI, just switch tabs.")
 	default:
 		return h.chatSystemReply("unknown command /" + verb + " — type /help for the list")
 	}
