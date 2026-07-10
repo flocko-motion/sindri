@@ -31,6 +31,7 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
+	"github.com/flo-at/sindri/internal/hub/chat"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/paths"
 )
@@ -59,8 +60,7 @@ type Hub struct {
 	launchMu  sync.Mutex               // guards launchBuf
 	launchBuf map[agentKey]*safeBuffer // per-agent image-build/pod-start output
 
-	chatMu   sync.Mutex // guards chatSeen
-	chatSeen time.Time  // last user heartbeat into the chatroom — presence for the required-participant lock
+	chat *chat.Service // the user's chatroom relay (extracted to internal/hub/chat)
 
 	commentMu     sync.Mutex           // guards commentSynced
 	commentSynced map[string]time.Time // per-task last comment sync — the TTL memo (see comments.go)
@@ -165,10 +165,12 @@ func New() (*Hub, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Hub{store: st, events: newBus(),
+	h := &Hub{store: st, events: newBus(),
 		agentLn:   map[agentKey]net.Listener{},
 		lifecycle: map[agentKey]string{},
-		launchBuf: map[agentKey]*safeBuffer{}}, nil
+		launchBuf: map[agentKey]*safeBuffer{}}
+	h.chat = chat.New(h.store, chatDelivery{h})
+	return h, nil
 }
 
 // repo registers a repo (idempotent) and returns its project-scoped store handle.
@@ -675,10 +677,10 @@ func (h *Hub) rehydrate(project, name string) {
 	// A chatroom member that just relaunched has lost the membership cue from its
 	// durable prompt — remind it so it knows it can still talk to the room. Best-
 	// effort: a store hiccup here shouldn't derail the rehydrate.
-	if member, err := h.store.ChatIsMember(project, name); err != nil {
+	if member, err := h.chat.IsMember(project, name); err != nil {
 		fmt.Fprintf(os.Stderr, "hub: chat membership check for %s/%s failed: %v\n", project, name, err)
 	} else if member {
-		_ = h.injectWhenReady(project, name, msgChatReminder)
+		_ = h.injectWhenReady(project, name, chat.MsgReminder)
 	}
 }
 
