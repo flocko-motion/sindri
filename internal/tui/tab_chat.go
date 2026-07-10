@@ -10,6 +10,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/flo-at/sindri/internal/hub"
@@ -89,8 +90,11 @@ func (m model) chatBody() string {
 		msgs = []string{dimStyle.Render("(no messages yet — press enter to say something)")}
 	} else {
 		for _, msg := range v.Log {
-			msgs = append(msgs, chatLine(msg))
+			msgs = append(msgs, chatLines(msg)...)
 		}
+		// Word-wrap to the pane width so long messages are readable in full instead
+		// of running off the edge (the whole point of a chat you can follow).
+		msgs = wrapContent(msgs, max(1, m.w))
 	}
 	if len(msgs) > avail { // keep the newest that fit
 		msgs = msgs[len(msgs)-avail:]
@@ -126,9 +130,31 @@ func chatMembersLine(v hub.ChatView) string {
 	return fmt.Sprintf("Members (%d): %s", len(v.Members), strings.Join(names, ", "))
 }
 
-// chatLine formats one transcript message as "sender: body", collapsing any
-// newlines in the body so a message stays a single row (width is clamped by the
-// caller's padTrunc).
-func chatLine(msg store.ChatMessage) string {
-	return fmt.Sprintf("%s: %s", msg.Sender, strings.ReplaceAll(msg.Body, "\n", " "))
+// chatLines formats one transcript message as "HH:MM sender: body", split on the
+// body's own newlines so a multi-line message keeps its structure (the caller then
+// word-wraps each line to the pane width). The timestamp shows WHEN it was said.
+func chatLines(msg store.ChatMessage) []string {
+	head := msg.Sender + ": "
+	if hm := chatTime(msg.TS); hm != "" {
+		head = hm + " " + head
+	}
+	body := strings.Split(msg.Body, "\n")
+	out := make([]string, 0, len(body))
+	for i, seg := range body {
+		if i == 0 {
+			out = append(out, head+seg)
+		} else {
+			out = append(out, strings.Repeat(" ", len(head))+seg) // indent continuation under the text
+		}
+	}
+	return out
+}
+
+// chatTime renders a stored RFC3339 timestamp as local HH:MM ("" if unparseable).
+func chatTime(ts string) string {
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return ""
+	}
+	return t.Local().Format("15:04")
 }

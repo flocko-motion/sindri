@@ -13,8 +13,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/spf13/cobra"
 )
 
@@ -114,7 +116,7 @@ func chatJoin(cmd *cobra.Command, b backend) error {
 		for v := range ch {
 			for _, m := range v.Log {
 				if m.ID > lastSeen {
-					fmt.Printf("%s: %s\n", m.Sender, m.Body)
+					fmt.Println(chatMsgLine(m))
 					lastSeen = m.ID
 				}
 			}
@@ -147,9 +149,18 @@ func renderChat(v hub.ChatView) string {
 	}
 	sb.WriteString("--- transcript ---\n")
 	for _, m := range v.Log {
-		fmt.Fprintf(&sb, "%s: %s\n", m.Sender, m.Body)
+		sb.WriteString(chatMsgLine(m) + "\n")
 	}
 	return sb.String()
+}
+
+// chatMsgLine formats a transcript message as "HH:MM sender: body" (local time;
+// the timestamp is dropped if unparseable). The terminal soft-wraps long lines.
+func chatMsgLine(m store.ChatMessage) string {
+	if t, err := time.Parse(time.RFC3339, m.TS); err == nil {
+		return fmt.Sprintf("%s %s: %s", t.Local().Format("15:04"), m.Sender, m.Body)
+	}
+	return fmt.Sprintf("%s: %s", m.Sender, m.Body)
 }
 
 // renderMembers formats just the member line (name + role), or a note when empty.
