@@ -32,6 +32,7 @@ import (
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/chat"
+	"github.com/flo-at/sindri/internal/hub/comments"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/paths"
 )
@@ -60,10 +61,8 @@ type Hub struct {
 	launchMu  sync.Mutex               // guards launchBuf
 	launchBuf map[agentKey]*safeBuffer // per-agent image-build/pod-start output
 
-	chat *chat.Service // the user's chatroom relay (extracted to internal/hub/chat)
-
-	commentMu     sync.Mutex           // guards commentSynced
-	commentSynced map[string]time.Time // per-task last comment sync — the TTL memo (see comments.go)
+	chat     *chat.Service     // the user's chatroom relay (internal/hub/chat)
+	comments *comments.Service // task-comment sync (internal/hub/comments)
 }
 
 // agentKey identifies an agent within a project — the key for the hub's per-agent
@@ -170,6 +169,7 @@ func New() (*Hub, error) {
 		lifecycle: map[agentKey]string{},
 		launchBuf: map[agentKey]*safeBuffer{}}
 	h.chat = chat.New(h.store, chatDelivery{h})
+	h.comments = comments.New(h.store, commentsDeps{h})
 	return h, nil
 }
 
