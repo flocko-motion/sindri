@@ -138,7 +138,7 @@ func newModel(cl *client.HTTP, ch <-chan hub.BoardState, root string) model {
 	// arrives via WindowSizeMsg and resizes. (Some terminals send the initial
 	// size late or as 0×0; without a default the view would stick on "loading".)
 	in := textinput.New()
-	in.CharLimit = 200
+	in.CharLimit = 0 // no limit — a chat message (or tell) must never be silently truncated on send
 	m := model{cl: cl, ch: ch, root: root, collapsed: map[string]bool{}, merging: map[string]bool{}, w: 80, h: 24, input: in}
 	m.reclamp()
 	return m
@@ -164,6 +164,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		if msg.Width > 0 && msg.Height > 0 { // ignore bogus 0×0 (keeps the default)
 			m.w, m.h = msg.Width, msg.Height
+		}
+		if m.mode != inputNone { // keep the compose field sized to the new width
+			m.resizeInput()
 		}
 		m.reclamp()
 		if m.modal {
