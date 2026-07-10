@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // updateInput routes a keypress to the open modal: esc cancels, enter submits,
@@ -37,7 +38,15 @@ func (m *model) openInput(mode inputMode, prompt string) {
 	m.mode, m.inputTarget = mode, m.selID()
 	m.input.SetValue("")
 	m.input.Prompt = prompt
+	m.resizeInput()
 	m.input.Focus()
+}
+
+// resizeInput sizes the single-line field to the terminal (minus the prompt), so a
+// longer message stays visible as you type instead of scrolling in a ~20-char box.
+// Called on open and on window resize while the input is up.
+func (m *model) resizeInput() {
+	m.input.Width = max(20, m.w-lipgloss.Width(m.input.Prompt)-1)
 }
 
 // submitInput performs the modal's hub action with the entered value.
@@ -47,17 +56,9 @@ func (m *model) submitInput() tea.Cmd {
 		return nil
 	}
 	cl, target := m.cl, m.inputTarget
-	switch m.mode {
-	case inputTell:
+	if m.mode == inputTell {
 		return func() tea.Msg {
 			if err := cl.Tell(target, v, "user"); err != nil {
-				return errModalMsg{err}
-			}
-			return nil
-		}
-	case inputChat:
-		return func() tea.Msg {
-			if err := cl.ChatSay(v); err != nil {
 				return errModalMsg{err}
 			}
 			return nil

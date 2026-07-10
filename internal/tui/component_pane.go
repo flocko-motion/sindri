@@ -48,14 +48,27 @@ func pane(lines []string, vp scroll.Viewport, width, cursor int) string {
 // across the wrap) and hard-breaks any token longer than width, so no line ever
 // overflows. Returns a flat list of the wrapped lines, ready for pane().
 func wrapContent(lines []string, width int) []string {
+	wrapped, _ := wrapContentMapped(lines, width)
+	return wrapped
+}
+
+// wrapContentMapped is wrapContent that also reports where each source line landed:
+// origAt[i] is the index in the returned slice at which source line i begins. A
+// caller tracking a per-line cursor or highlight (the detail pane's focused
+// cross-reference) uses it to follow that line through the wrap.
+func wrapContentMapped(lines []string, width int) (wrapped []string, origAt []int) {
+	origAt = make([]int, len(lines))
 	if width <= 0 {
-		return lines
+		for i := range lines {
+			origAt[i] = i
+		}
+		return lines, origAt
 	}
-	out := make([]string, 0, len(lines))
-	for _, l := range lines {
-		out = append(out, strings.Split(ansi.Wrap(l, width, ""), "\n")...)
+	for i, l := range lines {
+		origAt[i] = len(wrapped)
+		wrapped = append(wrapped, strings.Split(ansi.Wrap(l, width, ""), "\n")...)
 	}
-	return out
+	return wrapped, origAt
 }
 
 // divider is a vertical rule of h rows.

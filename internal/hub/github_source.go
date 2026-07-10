@@ -19,10 +19,13 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// githubTTL throttles the network source: SyncTasks can fire every workPollInterval
-// (3s) per idle worker, so we reuse the last issue list within this window and skip
-// the gh call. A local td/openspec read is cheap; a gh API call is rate-limited.
-const githubTTL = 45 * time.Second
+// githubTTL throttles the network source: SyncTasks can fire often (every
+// workPollInterval per idle worker, and on task mutations), so we reuse the last
+// issue list within this window and skip the gh call. Scanning for new issues every
+// couple of minutes is plenty — a local td/openspec read is cheap, but a gh API call
+// is slow and rate-limited. The [r]efresh hotkey (ForceSyncTasks) bypasses this when
+// the user wants issues right now.
+const githubTTL = 2 * time.Minute
 
 // githubIssueTimeout bounds a single `gh issue list` so a hung network call can't
 // stall a sync.

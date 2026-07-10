@@ -160,6 +160,9 @@ func (h *Hub) Handler() http.Handler {
 	mux.HandleFunc("POST /refresh", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, okMsg{"refreshed"}, h.Refresh(h.reqProject(r)))
 	})
+	mux.HandleFunc("POST /tasks/reconcile", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, okMsg{"reconciled"}, h.ReconcileTasks(h.reqProject(r)))
+	})
 	mux.HandleFunc("GET /repos", func(w http.ResponseWriter, r *http.Request) {
 		list, err := h.RepoList()
 		writeJSON(w, list, err)

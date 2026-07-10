@@ -33,11 +33,30 @@ func (h *Hub) Tasks(project string) ([]store.Task, error) {
 	if err := h.SyncTasks(project); err != nil {
 		return nil, err
 	}
+	// Repair any stale status (in_review with no PR, in_progress with no assignee)
+	// against reality — a listing is a natural, infrequent point to do the sweep.
+	_ = h.ReconcileTasks(project)
 	return h.store.For(project).AllTasks()
 }
 
 // TaskInfo returns one task in a project, refreshed from the source of truth first.
+// Only real td tasks (td-*) live in td's store; gh-* (GitHub issues) and os-* (spec)
+// ids are synced into the hub's own cache with their description, so those are served
+// from there — hitting td by a non-td id just errors and drops the description.
 func (h *Hub) TaskInfo(project, id string) (store.Task, error) {
+	if !strings.HasPrefix(id, "td-") {
+		t, ok, err := h.store.For(project).GetTask(id)
+		if err != nil {
+			return store.Task{}, err
+		}
+		if !ok {
+			return store.Task{}, fmt.Errorf("unknown task %q", id)
+		}
+		return t, nil
+	}
+	// Repair this one task's status against reality before returning it (task info /
+	// detail is a natural single-task check point).
+	_ = h.ReconcileTask(project, id)
 	root := h.projectRoot(project)
 	t, err := td.Get(root, id)
 	if err != nil {
@@ -400,9 +419,15 @@ func (h *Hub) waitForWork(ctx context.Context, check func() (string, bool, error
 	}
 }
 
-// SyncTasks refreshes a project's whole cached task set from its sources — td tasks
-// and openspec changes. Caches all statuses so UIs can filter client-side.
-func (h *Hub) SyncTasks(project string) error {
+// SyncTasks refreshes a project's cached task set from its sources (td + openspec +
+// the TTL-throttled GitHub scan). ForceSyncTasks bypasses the GitHub TTL for an
+// explicit [r]efresh.
+func (h *Hub) SyncTasks(project string) error { return h.syncTasks(project, false) }
+
+// ForceSyncTasks is SyncTasks with the GitHub scan forced past its TTL ([r]efresh).
+func (h *Hub) ForceSyncTasks(project string) error { return h.syncTasks(project, true) }
+
+func (h *Hub) syncTasks(project string, force bool) error {
 	root := h.projectRoot(project)
 	ps := h.store.For(project)
 	tasks, err := td.Tasks(root, issue.FilterAll)
@@ -436,7 +461,7 @@ func (h *Hub) SyncTasks(project string) error {
 	if err != nil {
 		log.Printf("hub: github source skipped for %s (config error): %v", project, err)
 	}
-	rows = append(rows, h.githubRows(project, root, err == nil && cfg.IssuesEnabled(), false)...)
+	rows = append(rows, h.githubRows(project, root, err == nil && cfg.IssuesEnabled(), force)...)
 	if ov, err := ps.PriorityOverrides(); err == nil {
 		for i := range rows {
 			if p, ok := ov[rows[i].ID]; ok {
@@ -487,14 +512,6 @@ func (h *Hub) checkParent(project, parent, self string) error {
 func specID(name string) string {
 	sum := sha256.Sum256([]byte(name))
 	return "os-" + hex.EncodeToString(sum[:])[:6]
-}
-
-func (h *Hub) refreshTask(project, id string) error {
-	t, err := td.Get(h.projectRoot(project), id)
-	if err != nil {
-		return err
-	}
-	return h.store.For(project).UpsertTask(toStoreTask(t))
 }
 
 func toStoreTask(t issue.Task) store.Task {

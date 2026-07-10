@@ -441,6 +441,11 @@ func (c *HTTP) TaskInfo(id string) (store.Task, error) {
 	return t, c.get("/task?id="+url.QueryEscape(id), &t)
 }
 
+// ReconcileTasks repairs stale task statuses against reality (a startup sweep).
+func (c *HTTP) ReconcileTasks() error {
+	return c.post("/tasks/reconcile", struct{}{})
+}
+
 // CreateTask creates a task from a spec and returns its id.
 func (c *HTTP) CreateTask(s hub.TaskSpec) (string, error) {
 	var ok struct {

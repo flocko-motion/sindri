@@ -10,6 +10,7 @@ package hub
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/github"
@@ -88,9 +89,25 @@ func (h *Hub) finishTask(project, id string, scrap bool) error {
 			}
 		}
 	}
-	e := h.SyncTasks(project)
+	// Reflect the close in the cache directly instead of re-syncing every source. A
+	// close changes exactly one task, but SyncTasks refetches td + openspec + the
+	// GitHub scan (a network call) — so closing a task blocked for many seconds on
+	// work the close didn't need. Update the one row; the next [r]efresh (or the
+	// throttled periodic sync) reconciles everything.
+	if scrap {
+		if derr := ps.RemoveTask(id); derr != nil {
+			fmt.Fprintf(os.Stderr, "hub: dropping scrapped task %s from cache: %v\n", id, derr)
+		}
+	} else if t, ok, gerr := ps.GetTask(id); gerr != nil {
+		fmt.Fprintf(os.Stderr, "hub: reading task %s after close: %v\n", id, gerr)
+	} else if ok {
+		t.Status = "closed"
+		if uerr := ps.UpsertTask(t); uerr != nil {
+			fmt.Fprintf(os.Stderr, "hub: marking task %s closed in cache: %v\n", id, uerr)
+		}
+	}
 	h.notify()
-	return e
+	return nil
 }
 
 // changeName resolves an os-<hash> id back to its openspec change name by matching

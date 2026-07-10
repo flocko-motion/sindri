@@ -91,6 +91,22 @@ func TestReplaceTasksMirrors(t *testing.T) {
 	}
 }
 
+// TestTaskDescriptionPersists guards the fix: the description (a GitHub issue body)
+// must survive ReplaceTasks and come back on GetTask — it used to be dropped because
+// the tasks table had no description column.
+func TestTaskDescriptionPersists(t *testing.T) {
+	p := openTmpProject(t)
+	body := "## Steps\n1. reproduce\n2. fix"
+	p.ReplaceTasks([]Task{{ID: "gh-42", Status: "open", Type: "issue", Description: body}})
+	got, ok, err := p.GetTask("gh-42")
+	if err != nil || !ok {
+		t.Fatalf("GetTask: ok=%v err=%v", ok, err)
+	}
+	if got.Description != body {
+		t.Fatalf("description not persisted: got %q, want %q", got.Description, body)
+	}
+}
+
 func TestAgentStateRoundTrip(t *testing.T) {
 	p := openTmpProject(t)
 	// Absent → idle default.

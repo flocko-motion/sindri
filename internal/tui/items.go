@@ -161,6 +161,19 @@ func (m model) selID() string {
 	return ""
 }
 
+// wrappedDetail returns the side detail pane's lines word-wrapped to the detail
+// column width, plus the wrapped-line index to highlight (-1 for none). Wrapping
+// lets a long title or description show in full — scroll it with J/K — instead of
+// being truncated at the column edge; the highlight is remapped through the wrap so
+// a focused cross-reference still lights the right row.
+func (m model) wrappedDetail() (lines []string, highlight int) {
+	wrapped, origAt := wrapContentMapped(m.detailLines(), m.detailWidth())
+	if h := m.detailHighlight(); h >= 0 && h < len(origAt) {
+		return wrapped, origAt[h]
+	}
+	return wrapped, -1
+}
+
 // rows dispatches to the active tab's row builder (tasks/agents/prs).
 func (m model) rows() []row {
 	switch m.tab {
