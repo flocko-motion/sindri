@@ -31,6 +31,9 @@ func (m *model) reclamp() {
 	// when the selection changes (syncDetail).
 	if m.tab == 2 { // PRs: detail pane is the big bottom-left content (any width)
 		m.detail.Resize(max(1, m.bodyHeight()-m.prListHeight()-1), len(m.prContentLines()))
+	} else if m.tab == 0 || m.tab == 3 { // generic detail pane: size to the WRAPPED count
+		wrapped, _ := wrapContentMapped(m.detailLines(), m.detailWidth())
+		m.detail.Resize(m.bodyHeight(), len(wrapped))
 	} else {
 		m.detail.Resize(m.bodyHeight(), len(m.detailLines()))
 	}

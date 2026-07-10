@@ -652,7 +652,8 @@ func (m model) View() string {
 		body = m.chatBody()
 	} else if m.showDetail() {
 		left := pane(rowTexts(m.rows()), m.list, m.leftWidth(), m.cursor[m.tab])
-		right := pane(m.detailLines(), m.detail, m.detailWidth(), m.detailHighlight())
+		dlines, dhl := m.wrappedDetail()
+		right := pane(dlines, m.detail, m.detailWidth(), dhl)
 		body = lipgloss.JoinHorizontal(lipgloss.Top, left, divider(m.bodyHeight()), right)
 	} else {
 		// Narrow terminal: selector full-width; detail is ENTER-only.
