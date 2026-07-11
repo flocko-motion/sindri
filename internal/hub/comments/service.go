@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/flo-at/sindri/internal/adapter/github"
-	"github.com/flo-at/sindri/internal/adapter/td"
+	"github.com/flo-at/sindri/internal/adapter/tasks/github"
+	"github.com/flo-at/sindri/internal/adapter/tasks/td"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 

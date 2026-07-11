@@ -20,8 +20,8 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
-	"github.com/flo-at/sindri/internal/adapter/spec"
-	"github.com/flo-at/sindri/internal/adapter/td"
+	"github.com/flo-at/sindri/internal/adapter/tasks/spec"
+	"github.com/flo-at/sindri/internal/adapter/tasks/td"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/task"

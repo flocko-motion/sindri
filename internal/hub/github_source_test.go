@@ -4,7 +4,7 @@ import (
 	"os/exec"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/adapter/github"
+	"github.com/flo-at/sindri/internal/adapter/tasks/github"
 )
 
 // TestIssuesToRowsUnrated: imported issues become open "issue" tasks with NO priority,

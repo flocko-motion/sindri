@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
-	"github.com/flo-at/sindri/internal/adapter/td"
+	"github.com/flo-at/sindri/internal/adapter/tasks/td"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 

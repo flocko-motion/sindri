@@ -17,7 +17,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
-	"github.com/flo-at/sindri/internal/adapter/spec"
+	"github.com/flo-at/sindri/internal/adapter/tasks/spec"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/registry"

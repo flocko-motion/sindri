@@ -11,7 +11,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/flo-at/sindri/internal/adapter/td"
+	"github.com/flo-at/sindri/internal/adapter/tasks/td"
 )
 
 // refreshTask re-reads one task from td and updates its cached row — the targeted
