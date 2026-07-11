@@ -1,29 +1,25 @@
 // package: adapter/agent/claude / claude
-// type:    adapter (Claude Code — runtime-state heuristics)
-// job:     classify a Claude Code pane's live runtime state — working, blocked
-//          (waiting for user input), idle (stopped at the prompt), or unknown —
-//          from its rendered screen text. Patterns and precedence are borrowed from
-//          herdr's claude.toml so sindri reports the same runtime states herdr's
-//          sidebar shows.
-// limits:  Claude Code only (the sole agent sindri runs). Pure text classification,
-//          no I/O — the caller supplies the captured pane (tmux capture-pane).
+// type:    adapter (Claude Code — implements adapter/agent.Agent)
+// job:     the Claude Code backend of the coding-agent port: classify a Claude pane's
+//          live runtime state (working/blocked/idle/unknown) from its rendered screen
+//          text. Patterns and precedence borrowed from herdr's claude.toml so sindri
+//          reports the same runtime states herdr's sidebar shows.
+// limits:  Claude Code only. Pure text classification, no I/O — the caller supplies
+//          the captured pane (tmux capture-pane).
 package claude
 
 import (
 	"regexp"
 	"strings"
+
+	"github.com/flo-at/sindri/internal/adapter/agent"
 )
 
-// State is a Claude pane's detected runtime state (distinct from sindri's workflow
-// phase — this is what Claude itself is doing right now).
-type State string
+// Claude implements agent.Agent for Claude Code.
+type Claude struct{}
 
-const (
-	Working State = "working" // actively processing a turn
-	Blocked State = "blocked" // waiting for a user response (permission / question / selection)
-	Idle    State = "idle"    // stopped at the prompt, nothing happening
-	Unknown State = "unknown" // not classifiable (plain shell, transcript viewer, boot, …)
-)
+// New returns the Claude coding-agent backend.
+func New() agent.Agent { return Claude{} }
 
 var (
 	// promptLine matches Claude's empty input box (the ❯ chevron at line start).
@@ -32,11 +28,11 @@ var (
 	yesNoOption = regexp.MustCompile(`(?im)^\s*(❯\s*)?(\d+\.\s*)?(yes|no)\b`)
 )
 
-// Classify reads a Claude Code pane's rendered screen text (as `tmux capture-pane
-// -p` yields) into a runtime State. Precedence mirrors herdr's claude.toml: a hidden
-// transcript view is unknown; a response prompt is blocked; the interrupt hint is
-// working; a bare prompt box is idle. Matching is case-insensitive.
-func Classify(screen string) State {
+// DetectState reads a Claude Code pane's rendered screen text (as `tmux
+// capture-pane -p` yields) into a runtime state. Precedence mirrors herdr's
+// claude.toml: a hidden transcript view is unknown; a response prompt is blocked;
+// the interrupt hint is working; a bare prompt box is idle. Case-insensitive.
+func (Claude) DetectState(screen string) agent.State {
 	s := strings.ToLower(screen)
 	has := func(subs ...string) bool { // every substring present
 		for _, sub := range subs {
@@ -49,36 +45,36 @@ func Classify(screen string) State {
 
 	// A transcript/history viewer hides the live prompt — the real state is unknown.
 	if has("showing detailed transcript") {
-		return Unknown
+		return agent.Unknown
 	}
 
 	// Blocked: Claude is waiting on a human response. Checked before idle because a
 	// prompt box (❯) is also visible while blocked.
 	switch {
 	case has("enter to select", "esc to cancel") && hasNav(s):
-		return Blocked // a selection form
+		return agent.Blocked // a selection form
 	case has("run a dynamic workflow?", "esc to cancel"):
-		return Blocked
+		return agent.Blocked
 	case has("do you want to proceed?"):
-		return Blocked // permission / confirmation prompt
+		return agent.Blocked // permission / confirmation prompt
 	case has("waiting for permission"):
-		return Blocked
+		return agent.Blocked
 	case (has("do you want to") || has("would you like to")) &&
 		(strings.Contains(s, "❯") || yesNoOption.MatchString(screen)):
-		return Blocked
+		return agent.Blocked
 	}
 
 	// Working: Claude shows its interrupt hint while a turn runs.
 	if has("esc to interrupt") {
-		return Working
+		return agent.Working
 	}
 
 	// Idle: the empty prompt box is visible and nothing above needs an answer.
 	if promptLine.MatchString(screen) {
-		return Idle
+		return agent.Idle
 	}
 
-	return Unknown
+	return agent.Unknown
 }
 
 // hasNav reports whether the (lowercased) screen shows a navigation hint of the kind

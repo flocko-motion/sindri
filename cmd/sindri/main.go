@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/flo-at/sindri/internal/adapter/agent"
+	"github.com/flo-at/sindri/internal/adapter/agent/claude"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/debug"
 	"github.com/flo-at/sindri/internal/ui/cli"
@@ -26,6 +28,7 @@ var version = "dev"
 
 func main() {
 	container.Use(chooseRuntime()) // wire the one container backend for this process
+	agent.Use(claude.New())        // wire the one coding-agent backend
 	cli.SetVersion(version)        // mirror the ldflags build version into the CLI package
 	var projectDir string
 	var dbg bool
