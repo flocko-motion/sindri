@@ -1,18 +1,19 @@
-// package: main (sindri) / upgrade
+// package: ui/cli / upgrade
 // type:    command
 // job:     wires `sindri upgrade` — an explicit, on-demand check for a newer
 //          release (no daily throttle). If one exists it points you at the
 //          generated `sindri-do-upgrade` helper, which does the actual install.
 // limits:  only checks + recommends; it can't replace the running binary itself
 //          (-> internal/update writes sindri-do-upgrade for that).
-package main
+package cli
 
 import (
 	"github.com/flo-at/sindri/internal/update"
 	"github.com/spf13/cobra"
 )
 
-func newUpgradeCmd() *cobra.Command {
+// NewUpgradeCmd builds the `upgrade` command (self-update to the latest release).
+func NewUpgradeCmd() *cobra.Command {
 	var list bool
 	c := &cobra.Command{
 		Use:   "upgrade [version]",

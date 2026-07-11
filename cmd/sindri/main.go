@@ -1,10 +1,10 @@
 // package: main (sindri) / main
-// type:    entrypoint
-// job:     wires the host CLI command tree — the hub-era verbs (hub, agent,
-//          task, pr) and the TUI — and dispatches. The generic dev tools (code
-//          map, linters) are the separate `brokkr` binary.
-// limits:  no logic — each command delegates to the hub (in-process or over the
-//          socket).
+// type:    entrypoint (thin)
+// job:     wire the container backend, mirror the build version into the CLI
+//          package, assemble the host CLI command tree (internal/ui/cli) under the
+//          root, and dispatch. The command implementations live in internal/ui/cli;
+//          the dev tools (code map, linters) are the separate `brokkr` binary.
+// limits:  no command logic here — just composition + the version ldflags anchor.
 package main
 
 import (
@@ -13,6 +13,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/debug"
+	"github.com/flo-at/sindri/internal/ui/cli"
 	"github.com/flo-at/sindri/internal/update"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -25,6 +26,7 @@ var version = "dev"
 
 func main() {
 	container.Use(chooseRuntime()) // wire the one container backend for this process
+	cli.SetVersion(version)        // mirror the ldflags build version into the CLI package
 	var projectDir string
 	var dbg bool
 	rootCmd := &cobra.Command{
@@ -53,26 +55,18 @@ func main() {
 
 	// Hierarchical command tree: <category> <action>. The generic dev tools
 	// (code map, linters) live in the separate `brokkr` binary, not here.
-	rootCmd.AddCommand(newHubCmd())
-	rootCmd.AddCommand(newCoauthorCmd())
-	rootCmd.AddCommand(newAgentCmd())
-	rootCmd.AddCommand(newChatCmd())
-	rootCmd.AddCommand(newRepoCmd())
-	rootCmd.AddCommand(newTaskCmd())
-	rootCmd.AddCommand(newPrCmd())
-	rootCmd.AddCommand(newTuiCmd())
-	rootCmd.AddCommand(newUpgradeCmd())
-	rootCmd.AddCommand(newVersionCmd())
+	rootCmd.AddCommand(cli.NewHubCmd())
+	rootCmd.AddCommand(cli.NewCoauthorCmd())
+	rootCmd.AddCommand(cli.NewAgentCmd())
+	rootCmd.AddCommand(cli.NewChatCmd())
+	rootCmd.AddCommand(cli.NewRepoCmd())
+	rootCmd.AddCommand(cli.NewTaskCmd())
+	rootCmd.AddCommand(cli.NewPrCmd())
+	rootCmd.AddCommand(cli.NewTuiCmd())
+	rootCmd.AddCommand(cli.NewUpgradeCmd())
+	rootCmd.AddCommand(cli.NewVersionCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
-}
-
-// dash renders "-" for an empty string in tabular output.
-func dash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
 }

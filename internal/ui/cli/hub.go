@@ -1,4 +1,4 @@
-// package: main (sindri) / commands
+// package: ui/cli / commands
 // type:    command (host CLI)
 // job:     the host command tree — hierarchical <category> <action>: agent
 //          {list,new,launch,tell,attach,info}, task {list,new,info}, pr
@@ -7,7 +7,7 @@
 //          TUI.
 // limits:  no logic — each verb is a thin call into a backend (in-process hub
 //          when none is running, the socket client otherwise).
-package main
+package cli
 
 import (
 	"context"
@@ -112,7 +112,8 @@ func withBackend(fn func(backend) error) error {
 
 // --- first-order: hub ---
 
-func newHubCmd() *cobra.Command {
+// NewHubCmd builds the `hub` command tree (start/stop/status the hub).
+func NewHubCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "hub",
 		Short: "Manage the global hub service (start, restart, status, stop)",
@@ -206,7 +207,8 @@ func newHubRestartCmd() *cobra.Command {
 
 // --- agent ---
 
-func newAgentCmd() *cobra.Command {
+// NewAgentCmd builds the `agent` command tree (manage agents).
+func NewAgentCmd() *cobra.Command {
 	c := &cobra.Command{Use: "agent", Short: "Manage agents (workers, reviewers, planners, coauthors)",
 		PersistentPreRun: agentPreflight} // warn up front if podman is down — nothing works without it
 	c.AddCommand(agentListCmd(), agentStatsCmd(), agentNewCmd(), agentDeleteCmd(), agentPaneCmd(), agentStartCmd(), agentStopCmd(), agentRestartCmd(), agentRebaseCmd(), agentRebuildCmd(), agentMemoryCmd(), agentTellCmd(), agentDirCmd(), agentAttachCmd(), agentInfoCmd())
@@ -215,7 +217,8 @@ func newAgentCmd() *cobra.Command {
 
 // --- pr ---
 
-func newPrCmd() *cobra.Command {
+// NewPrCmd builds the `pr` command tree (review/merge pull requests).
+func NewPrCmd() *cobra.Command {
 	c := &cobra.Command{Use: "pr", Short: "Inspect and merge pull requests (merge-intents)"}
 	c.AddCommand(prListCmd(), prInfoCmd(), prReviewCmd(), prVerifyCmd(), prApproveCmd(), prRejectCmd(), prLintCmd(), prMergeCmd(), prMilestoneCmd())
 	return c

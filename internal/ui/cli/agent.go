@@ -1,10 +1,10 @@
-// package: main (sindri) / agent
+// package: ui/cli / agent
 // type:    command (host CLI)
 // job:     the `sindri agent` subcommands other than attach — list, new, delete,
 //          pane, start, stop, restart, tell, info — each a thin call into the hub
 //          backend. Attach is its own file (attach.go).
 // limits:  no logic; every verb marshals to the hub via the backend port.
-package main
+package cli
 
 import (
 	"fmt"

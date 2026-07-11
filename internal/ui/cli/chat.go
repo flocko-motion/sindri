@@ -1,11 +1,11 @@
-// package: main (sindri) / chat
+// package: ui/cli / chat
 // type:    command (host CLI)
 // job:     the user's control over the one chatroom: `chat add`/`chat remove` to
 //          curate who's in the room, `chat join` to enter it interactively (read
 //          the live feed, type to broadcast as [user]), and bare `chat` for a
 //          one-shot snapshot of members + transcript.
 // limits:  thin calls into the backend; the relay + persistence live in the hub.
-package main
+package cli
 
 import (
 	"bufio"
@@ -20,7 +20,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newChatCmd() *cobra.Command {
+// NewChatCmd builds the `chat` command tree (the user's chatroom).
+func NewChatCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "chat",
 		Short: "The user's chatroom: add/remove agents and join the discussion",

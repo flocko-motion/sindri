@@ -1,4 +1,4 @@
-// package: main (sindri) / coauthor
+// package: ui/cli / coauthor
 // type:    command (host CLI)
 // job:     wires `sindri coauthor` — the one-step pairing entry: ensure a hub is
 //          running (start a detached one if not), reuse or create the single
@@ -6,7 +6,7 @@
 // limits:  composes existing hub/client/pod operations; no new hub behaviour. The
 //          hub it starts is a normal background `sindri hub start`, so `sindri tui` in
 //          another terminal works alongside it.
-package main
+package cli
 
 import (
 	"fmt"
@@ -21,7 +21,8 @@ import (
 	"golang.org/x/term"
 )
 
-func newCoauthorCmd() *cobra.Command {
+// NewCoauthorCmd builds the `coauthor` command (a pair-programming agent).
+func NewCoauthorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "coauthor",
 		Short: "Pair with a coauthor: start the hub if needed, create/reuse one coauthor, and attach",

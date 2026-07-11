@@ -1,11 +1,11 @@
-// package: main (sindri) / hubclient
+// package: ui/cli / hubclient
 // type:    logic (CLI-side hub connection)
 // job:     connect CLI commands to the single global hub through one chokepoint,
 //          dialHub, which reconciles versions (offering a restart on a mismatch).
 //          Also starts/restarts the background hub. One hub per machine; commands
 //          tag their repo via the client's X-Sindri-Project header.
 // limits:  transport is internal/client; the pid/version stamp is internal/hub.
-package main
+package cli
 
 import (
 	"bufio"

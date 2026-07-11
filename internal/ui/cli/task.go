@@ -1,10 +1,10 @@
-// package: main (sindri) / task
+// package: ui/cli / task
 // type:    entrypoint (CLI command group)
 // job:     the `sindri task …` verbs — list/info/new/edit/priority and the
 //          workflow actions (approve/reject/unassign/close). Each delegates to
 //          the hub via the shared backend (in-process or over the socket).
 // limits:  no logic — argument plumbing only; the hub owns task semantics.
-package main
+package cli
 
 import (
 	"encoding/json"
@@ -33,7 +33,8 @@ func tasksJSON(tasks []store.Task) (string, error) {
 	return string(out), nil
 }
 
-func newTaskCmd() *cobra.Command {
+// NewTaskCmd builds the `task` command tree (the backlog).
+func NewTaskCmd() *cobra.Command {
 	c := &cobra.Command{Use: "task", Short: "Inspect and create tasks (td issues)"}
 	c.AddCommand(taskListCmd(), taskInfoCmd(), taskNewCmd(), taskEditCmd(), taskPriorityCmd(), taskApproveCmd(), taskRejectCmd(), taskUnassignCmd(), taskCloseCmd(), taskDeleteCmd(), taskRefreshCmd())
 	return c

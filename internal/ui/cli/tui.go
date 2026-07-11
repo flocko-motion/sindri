@@ -1,9 +1,9 @@
-// package: main (sindri) / tui
+// package: ui/cli / tui
 // type:    command
 // job:     wires `sindri tui`, launching the lean hub-client dashboard —
 //          auto-starting a background hub first if none is running.
 // limits:  the TUI itself lives in internal/tui.
-package main
+package cli
 
 import (
 	"fmt"
@@ -14,7 +14,8 @@ import (
 	"golang.org/x/term"
 )
 
-func newTuiCmd() *cobra.Command {
+// NewTuiCmd builds the `tui` command (launch the dashboard).
+func NewTuiCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "tui",
 		Short: "Launch the Sindri TUI dashboard (a hub client)",

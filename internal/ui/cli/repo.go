@@ -1,10 +1,10 @@
-// package: main (sindri) / repo commands
+// package: ui/cli / repo commands
 // type:    command (host CLI)
 // job:     the `repo` verb group — init (register cwd + scaffold config), list,
 //          info, forget — over the hub's registry. init/bare-info/config act on the
 //          cwd repo; list/info<sel>/forget are global (resolve a repo by name or tag).
 // limits:  thin calls into the backend; no logic of its own.
-package main
+package cli
 
 import (
 	"fmt"
@@ -16,7 +16,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newRepoCmd() *cobra.Command {
+// NewRepoCmd builds the `repo` command tree (the repo registry).
+func NewRepoCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "repo",
 		Short: "Manage the repos the hub tracks (init, list, info, forget)",
