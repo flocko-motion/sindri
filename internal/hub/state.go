@@ -19,7 +19,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
-	"github.com/flo-at/sindri/internal/adapter/claude"
+	"github.com/flo-at/sindri/internal/adapter/agent/claude"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 

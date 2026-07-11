@@ -1,4 +1,4 @@
-// package: adapter/claude / claude
+// package: adapter/agent/claude / claude
 // type:    adapter (Claude Code — runtime-state heuristics)
 // job:     classify a Claude Code pane's live runtime state — working, blocked
 //          (waiting for user input), idle (stopped at the prompt), or unknown —
