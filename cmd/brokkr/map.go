@@ -6,7 +6,7 @@
 package main
 
 import (
-	"github.com/flo-at/sindri/internal/codemap"
+	"github.com/flo-at/sindri/internal/brokkr/codemap"
 	"github.com/spf13/cobra"
 )
 
