@@ -19,7 +19,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/hub/client"
 	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/paths"
+	"github.com/flo-at/sindri/internal/tools/paths"
 	"golang.org/x/term"
 )
 

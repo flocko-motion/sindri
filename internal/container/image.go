@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flo-at/sindri/internal/paths"
+	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
 // imageBase is the image repository; ImageName is the default (embedded-recipe) ref.

@@ -15,7 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/flo-at/sindri/internal/paths"
+	"github.com/flo-at/sindri/internal/tools/paths"
 	"gopkg.in/yaml.v3"
 )
 

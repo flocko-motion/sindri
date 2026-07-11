@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/flo-at/sindri/internal/paths"
+	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
 // SocketPath is the global hub's control socket.

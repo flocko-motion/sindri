@@ -25,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flo-at/sindri/internal/debug"
+	"github.com/flo-at/sindri/internal/tools/debug"
 )
 
 // repo is the GitHub repository whose releases are checked and installed.

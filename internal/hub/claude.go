@@ -17,7 +17,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/flo-at/sindri/internal/paths"
+	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
 // claudeSettings grants the agent the tools it needs without per-call prompts.

@@ -17,7 +17,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/flo-at/sindri/internal/paths"
+	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
 // pidInfo is what hub.pid holds.

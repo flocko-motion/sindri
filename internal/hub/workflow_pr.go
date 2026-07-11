@@ -22,7 +22,7 @@ import (
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/paths"
+	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
 // baseBranch reads a repo's base branch from its main checkout.

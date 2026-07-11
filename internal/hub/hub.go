@@ -34,7 +34,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/chat"
 	"github.com/flo-at/sindri/internal/hub/comments"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/paths"
+	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
 // Hub is the single global coordinator across every repo. It is the only writer

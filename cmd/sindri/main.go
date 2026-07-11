@@ -14,7 +14,7 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/agent"
 	"github.com/flo-at/sindri/internal/adapter/agent/claude"
 	"github.com/flo-at/sindri/internal/container"
-	"github.com/flo-at/sindri/internal/debug"
+	"github.com/flo-at/sindri/internal/tools/debug"
 	"github.com/flo-at/sindri/internal/ui/cli"
 	"github.com/flo-at/sindri/internal/update"
 	"github.com/spf13/cobra"

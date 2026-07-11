@@ -19,7 +19,7 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/flo-at/sindri/internal/paths"
+	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
 // ExecReq is the body for POST /exec on an agent socket.
