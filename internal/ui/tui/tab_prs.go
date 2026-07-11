@@ -18,7 +18,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/tui/scroll"
+	"github.com/flo-at/sindri/internal/ui/tui/scroll"
 )
 
 // defaultReviewPrompt pre-fills the Agentic Review instruction; the user edits

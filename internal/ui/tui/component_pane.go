@@ -13,7 +13,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/flo-at/sindri/internal/tui/scroll"
+	"github.com/flo-at/sindri/internal/ui/tui/scroll"
 )
 
 var (

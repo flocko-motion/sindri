@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/flo-at/sindri/internal/tui"
+	"github.com/flo-at/sindri/internal/ui/tui"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )

@@ -10,7 +10,7 @@ package tui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/flo-at/sindri/internal/tui/scroll"
+	"github.com/flo-at/sindri/internal/ui/tui/scroll"
 )
 
 // updateModal handles keys while the detail modal is open: scroll or close.

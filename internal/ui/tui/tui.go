@@ -20,7 +20,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/client"
 	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/tui/scroll"
+	"github.com/flo-at/sindri/internal/ui/tui/scroll"
 )
 
 const (
