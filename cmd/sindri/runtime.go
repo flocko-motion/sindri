@@ -10,8 +10,8 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/flo-at/sindri/internal/adapter/applecontainer"
-	"github.com/flo-at/sindri/internal/adapter/pod"
+	"github.com/flo-at/sindri/internal/adapter/container/applecontainer"
+	"github.com/flo-at/sindri/internal/adapter/container/pod"
 	"github.com/flo-at/sindri/internal/container"
 )
 

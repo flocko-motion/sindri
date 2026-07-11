@@ -1,12 +1,11 @@
 // package: container / image
-// type:    adapter (podman)
-// job:     the agent image identity (ImageName) and build. The build context
-//          (Dockerfile, entrypoint, shims) is EMBEDDED in the binary, so an
-//          installed sindri can build the image for ANY orchestrated repo, not
-//          just the sindri repo.
-// limits:  worker/reviewer container lifecycle lives in internal/hub. Ensure
-//          materializes the embedded context to a cache dir and builds via podman
-//          when that context or the weekly key is stale.
+// type:    logic (backend-agnostic image-build recipe)
+// job:     the agent image identity (ImageName) and the shared, backend-agnostic
+//          build recipe: hash the EMBEDDED context + week into a key, materialize +
+//          build, delegating exists?/build to an ImageBuilder the pod/apple adapters
+//          supply.
+// limits:  no backend specifics here (-> internal/adapter/container/*); container
+//          lifecycle lives in internal/hub.
 package container
 
 import (
