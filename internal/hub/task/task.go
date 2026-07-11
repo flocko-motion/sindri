@@ -1,15 +1,16 @@
-// package: issue
-// type:    logic (bottom primitive)
-// job:     the task domain model the td adapter produces and the hub consumes —
-//          a td task plus the read filter. The old task/spec view-model union
-//          (Issue/Assemble/gates) lived here too; it was the legacy board's and
-//          was removed with that stack (hub owns the board now).
-// limits:  imports nothing internal; doesn't fetch (-> adapter/td) or render.
-package issue
+// package: hub/task
+// type:    logic (the Task entity)
+// job:     sindri's Task domain entity — the generalization over its underlying
+//          source types (td tasks, GitHub issues, openspec changes) into one unified
+//          task the hub reasons about, plus the read filter. The domain owns the
+//          entity; the task-source adapters translate their world to/from it.
+// limits:  imports nothing internal; doesn't fetch (-> adapter/tasks) or render.
+package task
 
 import "time"
 
-// Task is a td task.
+// Task is a unified sindri task — a td task, GitHub issue, or openspec change,
+// normalized to one shape the hub works with regardless of source.
 type Task struct {
 	ID        string
 	Title     string

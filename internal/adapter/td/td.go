@@ -12,17 +12,17 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/flo-at/sindri/internal/issue"
+	"github.com/flo-at/sindri/internal/hub/task"
 )
 
 // Tasks returns tasks matching the filter, ordered open → active → closed.
 // Reads directly from td's SQLite db.
-func Tasks(root string, f issue.Filter) ([]issue.Task, error) {
+func Tasks(root string, f task.Filter) ([]task.Task, error) {
 	return tasksFromDB(root, f)
 }
 
 // Get loads a single task by ID (direct read).
-func Get(root, id string) (issue.Task, error) {
+func Get(root, id string) (task.Task, error) {
 	return taskFromDB(root, id)
 }
 

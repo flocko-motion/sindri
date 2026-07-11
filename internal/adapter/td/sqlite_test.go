@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/issue"
+	"github.com/flo-at/sindri/internal/hub/task"
 )
 
 // tdInit creates a throwaway td store with the given tasks (each: title, then
@@ -28,13 +28,13 @@ func tdStore(t *testing.T, creates [][]string) string {
 	return root
 }
 
-func find(tasks []issue.Task, titlePrefix string) (issue.Task, bool) {
+func find(tasks []task.Task, titlePrefix string) (task.Task, bool) {
 	for _, t := range tasks {
 		if len(t.Title) >= len(titlePrefix) && t.Title[:len(titlePrefix)] == titlePrefix {
 			return t, true
 		}
 	}
-	return issue.Task{}, false
+	return task.Task{}, false
 }
 
 // The direct DB reader must match what the CLI would return: fields, labels,
@@ -45,7 +45,7 @@ func TestTasksFromDBMatchesCLI(t *testing.T) {
 		{"-t", "bug", "-p", "low", "Fix the annoying glitch bug"},
 	})
 
-	open, err := tasksFromDB(root, issue.FilterOpen)
+	open, err := tasksFromDB(root, task.FilterOpen)
 	if err != nil {
 		t.Fatalf("tasksFromDB: %v", err)
 	}

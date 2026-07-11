@@ -24,7 +24,7 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/td"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/issue"
+	"github.com/flo-at/sindri/internal/hub/task"
 )
 
 // Tasks refreshes from td and returns all cached tasks for a project (for `task
@@ -430,7 +430,7 @@ func (h *Hub) ForceSyncTasks(project string) error { return h.syncTasks(project,
 func (h *Hub) syncTasks(project string, force bool) error {
 	root := h.projectRoot(project)
 	ps := h.store.For(project)
-	tasks, err := td.Tasks(root, issue.FilterAll)
+	tasks, err := td.Tasks(root, task.FilterAll)
 	if err != nil {
 		return err
 	}
@@ -514,7 +514,7 @@ func specID(name string) string {
 	return "os-" + hex.EncodeToString(sum[:])[:6]
 }
 
-func toStoreTask(t issue.Task) store.Task {
+func toStoreTask(t task.Task) store.Task {
 	return store.Task{
 		ID: t.ID, Title: t.Title, Status: t.Status, Priority: t.Priority,
 		Type: t.Type, Labels: strings.Join(t.Labels, ","), ParentID: t.ParentID,

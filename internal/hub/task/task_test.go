@@ -1,4 +1,4 @@
-package issue
+package task
 
 import "testing"
 

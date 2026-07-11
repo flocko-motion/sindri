@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flo-at/sindri/internal/issue"
+	"github.com/flo-at/sindri/internal/hub/task"
 	_ "modernc.org/sqlite"
 )
 
@@ -27,7 +27,7 @@ const dbCols = `id, title, status, type, priority, labels, parent_id, created_at
 
 // tasksFromDB reads all live tasks from td's db, applies the filter, and orders
 // them open → active → closed (matching the CLI path).
-func tasksFromDB(root string, f issue.Filter) ([]issue.Task, error) {
+func tasksFromDB(root string, f task.Filter) ([]task.Task, error) {
 	if _, err := os.Stat(DBPath(root)); err != nil {
 		// The hub reads td's db directly from the repo root (where it launched, and
 		// where .sindri lives). If it isn't there, td's writes (which td may route
@@ -45,7 +45,7 @@ func tasksFromDB(root string, f issue.Filter) ([]issue.Task, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var tasks []issue.Task
+	var tasks []task.Task
 	for rows.Next() {
 		t, err := scanDBTask(rows)
 		if err != nil {
@@ -62,7 +62,7 @@ func tasksFromDB(root string, f issue.Filter) ([]issue.Task, error) {
 }
 
 // Detail reads a task's long-form fields (description, acceptance) — not carried
-// in issue.Task, fetched on demand for a detail view.
+// in task.Task, fetched on demand for a detail view.
 func Detail(root, id string) (description, acceptance string, err error) {
 	db, err := sql.Open("sqlite", "file:"+DBPath(root))
 	if err != nil {
@@ -117,10 +117,10 @@ func Comments(root, id string) ([]Comment, error) {
 }
 
 // taskFromDB reads a single task by id (live or not — Get is used post-mutation).
-func taskFromDB(root, id string) (issue.Task, error) {
+func taskFromDB(root, id string) (task.Task, error) {
 	db, err := sql.Open("sqlite", "file:"+DBPath(root))
 	if err != nil {
-		return issue.Task{}, err
+		return task.Task{}, err
 	}
 	defer db.Close()
 	row := db.QueryRow(`SELECT `+dbCols+` FROM issues WHERE id=?`, id)
@@ -129,24 +129,24 @@ func taskFromDB(root, id string) (issue.Task, error) {
 
 type rowScanner interface{ Scan(...any) error }
 
-func scanDBTask(r rowScanner) (issue.Task, error) {
+func scanDBTask(r rowScanner) (task.Task, error) {
 	var id, title, status, typ, priority, labels, parent, created, updated string
 	if err := r.Scan(&id, &title, &status, &typ, &priority, &labels, &parent, &created, &updated); err != nil {
-		return issue.Task{}, err
+		return task.Task{}, err
 	}
-	return issue.Task{
+	return task.Task{
 		ID: id, Title: title, Status: status, Type: typ, Priority: priority,
 		ParentID: parent, Labels: splitLabels(labels),
 		CreatedAt: parseTS(created), UpdatedAt: parseTS(updated),
 	}, nil
 }
 
-// keep applies a Filter to a task (mirrors issue.Apply / the CLI's --all rule).
-func keep(t issue.Task, f issue.Filter) bool {
+// keep applies a Filter to a task (mirrors task.Apply / the CLI's --all rule).
+func keep(t task.Task, f task.Filter) bool {
 	switch f {
-	case issue.FilterClosed:
+	case task.FilterClosed:
 		return t.IsClosed()
-	case issue.FilterOpen:
+	case task.FilterOpen:
 		return !t.IsClosed()
 	default: // FilterAll
 		return true
@@ -154,8 +154,8 @@ func keep(t issue.Task, f issue.Filter) bool {
 }
 
 // orderTasks sorts open → active → closed (active/closed by most-recently updated).
-func orderTasks(items []issue.Task) []issue.Task {
-	var open, active, closed []issue.Task
+func orderTasks(items []task.Task) []task.Task {
+	var open, active, closed []task.Task
 	for _, t := range items {
 		switch {
 		case t.IsActive():
@@ -166,12 +166,12 @@ func orderTasks(items []issue.Task) []issue.Task {
 			open = append(open, t)
 		}
 	}
-	byUpdatedDesc := func(s []issue.Task) {
+	byUpdatedDesc := func(s []task.Task) {
 		sort.Slice(s, func(i, j int) bool { return s[i].UpdatedAt.After(s[j].UpdatedAt) })
 	}
 	byUpdatedDesc(active)
 	byUpdatedDesc(closed)
-	out := make([]issue.Task, 0, len(items))
+	out := make([]task.Task, 0, len(items))
 	out = append(out, open...)
 	out = append(out, active...)
 	return append(out, closed...)

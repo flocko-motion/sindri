@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flo-at/sindri/internal/issue"
+	"github.com/flo-at/sindri/internal/hub/task"
 )
 
 func TestTdErrorMessage(t *testing.T) {
@@ -36,7 +36,7 @@ func TestTdErrorMessage(t *testing.T) {
 
 func TestOrderTasks(t *testing.T) {
 	ts := func(s string) time.Time { v, _ := time.Parse(time.RFC3339, s); return v }
-	got := orderTasks([]issue.Task{
+	got := orderTasks([]task.Task{
 		{ID: "td-1", Status: "closed", UpdatedAt: ts("2026-05-27T10:00:00Z")},
 		{ID: "td-2", Status: "open"},
 		{ID: "td-3", Status: "in_progress", UpdatedAt: ts("2026-05-28T10:00:00Z")},
