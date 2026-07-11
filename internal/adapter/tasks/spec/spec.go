@@ -34,8 +34,9 @@ type Source struct{}
 func (Source) Enabled(root string) bool { return Enabled(root) }
 
 // Tasks maps the repo's active openspec changes to domain tasks (os-* ids, a
-// progress-annotated title, closed when all the change's tasks are done).
-func (Source) Tasks(root string) ([]task.Task, error) {
+// progress-annotated title, closed when all the change's tasks are done). Local
+// read — force is moot.
+func (Source) Tasks(root string, _ bool) ([]task.Task, error) {
 	changes, err := Changes(root)
 	if err != nil {
 		return nil, err

@@ -11,11 +11,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/hub/task"
 )
 
@@ -44,22 +47,56 @@ func Number(id string) (int, bool) {
 	return n, true
 }
 
+// sourceTTL throttles this network source: the hub resyncs often, so a fetch is
+// reused within this window. force (an explicit user refresh) bypasses it.
+const sourceTTL = 2 * time.Minute
+
+// cacheEntry memoizes one repo's last good issue-tasks with the moment fetched.
+type cacheEntry struct {
+	tasks []task.Task
+	at    time.Time
+}
+
+// cache is the per-repo memo owned by the source (the hub holds no GitHub state).
+var (
+	cacheMu sync.Mutex
+	cache   = map[string]cacheEntry{}
+)
+
 // Source adapts GitHub issues as a task source. Issues import UNRATED (empty
 // priority) so a worker never auto-claims an unvetted issue until a human rates it.
+// The source owns its own gate (opt-in + remote), throttle, and error degradation,
+// so the hub treats it like any other source.
 type Source struct{}
 
-// Enabled reports whether the repo can use the GitHub source (gh on PATH + a GitHub
-// remote). The per-project opt-in is the hub's concern, layered on top.
-func (Source) Enabled(root string) bool { return Enabled(root) }
+// Enabled reports whether the repo uses the GitHub source: gh on PATH + a GitHub
+// remote AND the project's issues opt-in (.sindri config). Reading the opt-in here
+// keeps the hub from knowing this source is config-gated.
+func (Source) Enabled(root string) bool {
+	if !Enabled(root) {
+		return false
+	}
+	cfg, err := config.Load(root)
+	return err == nil && cfg.IssuesEnabled()
+}
 
 // Tasks fetches the repo's open issues as domain tasks (gh-* ids, the body as the
-// description), bounded by its own timeout.
-func (Source) Tasks(root string) ([]task.Task, error) {
+// description), served from a short TTL memo unless force bypasses it. On a fetch
+// error it degrades to the last good list (logged, no error) so a network blip never
+// fails the hub's sync.
+func (Source) Tasks(root string, force bool) ([]task.Task, error) {
+	cacheMu.Lock()
+	entry, cached := cache[root]
+	cacheMu.Unlock()
+	if cached && !force && time.Since(entry.at) < sourceTTL {
+		return entry.tasks, nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), issueTimeout)
 	defer cancel()
 	issues, err := Issues(ctx, root)
 	if err != nil {
-		return nil, err
+		log.Printf("github source for %s degraded (keeping last list): %v", root, err)
+		return entry.tasks, nil // last good (nil when never fetched) — never fail the sync
 	}
 	out := make([]task.Task, 0, len(issues))
 	for _, is := range issues {
@@ -68,6 +105,9 @@ func (Source) Tasks(root string) ([]task.Task, error) {
 			Priority: "", Description: is.Body,
 		})
 	}
+	cacheMu.Lock()
+	cache[root] = cacheEntry{tasks: out, at: time.Now()}
+	cacheMu.Unlock()
 	return out, nil
 }
 

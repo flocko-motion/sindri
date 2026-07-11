@@ -29,8 +29,8 @@ type Source struct{}
 // Enabled reports td is always attempted.
 func (Source) Enabled(string) bool { return true }
 
-// Tasks returns all live td tasks as domain tasks.
-func (Source) Tasks(root string) ([]task.Task, error) { return Tasks(root, task.FilterAll) }
+// Tasks returns all live td tasks as domain tasks (local read — force is moot).
+func (Source) Tasks(root string, _ bool) ([]task.Task, error) { return Tasks(root, task.FilterAll) }
 
 // Get loads a single task by ID (direct read).
 func Get(root, id string) (task.Task, error) {

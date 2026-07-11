@@ -12,13 +12,13 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/adapter/tasks"
+	"github.com/flo-at/sindri/internal/adapter/tasks/github"
 	"github.com/flo-at/sindri/internal/adapter/tasks/spec"
 	"github.com/flo-at/sindri/internal/adapter/tasks/td"
 	"github.com/flo-at/sindri/internal/hub/registry"
@@ -431,29 +431,20 @@ func (h *Hub) syncTasks(project string, force bool) error {
 	ps := h.store.For(project)
 	var rows []store.Task
 
-	// Local sources: td (always attempted — a missing store surfaces as an error) and
-	// openspec (when the repo uses it). Each Source normalizes to task.Task.
-	for _, src := range []tasks.Source{td.Source{}, spec.Source{}} {
+	// Every task source, treated identically — the hub never branches on which one it
+	// is. Each Source self-gates (Enabled), normalizes to task.Task with its own id
+	// scheme, and (for a network source) throttles + degrades internally; force asks
+	// for fresh data. td errors fail the sync (it's the primary store); a network
+	// source degrades to its last good list rather than erroring.
+	for _, src := range []tasks.Source{td.Source{}, spec.Source{}, github.Source{}} {
 		if !src.Enabled(root) {
 			continue
 		}
-		ts, err := src.Tasks(root)
+		ts, err := src.Tasks(root, force)
 		if err != nil {
 			return err
 		}
 		for _, t := range ts {
-			rows = append(rows, toStoreTask(t))
-		}
-	}
-
-	// GitHub issues: the third source, gated by the per-project opt-in and TTL-
-	// throttled. Best-effort — a config or network failure contributes no issues
-	// (never fails the sync); a bad config is logged, not swallowed.
-	cfg, cerr := h.projectConfig(project)
-	if cerr != nil {
-		log.Printf("hub: github source skipped for %s (config error): %v", project, cerr)
-	} else if cfg.IssuesEnabled() {
-		for _, t := range h.githubTasks(project, root, force) {
 			rows = append(rows, toStoreTask(t))
 		}
 	}
