@@ -19,7 +19,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
-	"github.com/flo-at/sindri/internal/detect"
+	"github.com/flo-at/sindri/internal/adapter/claude"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -292,12 +292,12 @@ func (h *Hub) runtimeState(ctx context.Context, project, name string) string {
 	if err != nil {
 		return ""
 	}
-	switch detect.ClaudeState(string(out)) {
-	case detect.Working:
+	switch claude.Classify(string(out)) {
+	case claude.Working:
 		return "working"
-	case detect.Blocked:
+	case claude.Blocked:
 		return "blocked"
-	case detect.Idle:
+	case claude.Idle:
 		return "idle"
 	}
 	return "idle" // a shell (maintenance mode) or unrecognized screen = not doing anything

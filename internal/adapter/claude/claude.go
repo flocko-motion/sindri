@@ -1,5 +1,5 @@
-// package: detect / claude
-// type:    logic (agent runtime-state heuristics)
+// package: adapter/claude / claude
+// type:    adapter (Claude Code — runtime-state heuristics)
 // job:     classify a Claude Code pane's live runtime state — working, blocked
 //          (waiting for user input), idle (stopped at the prompt), or unknown —
 //          from its rendered screen text. Patterns and precedence are borrowed from
@@ -7,7 +7,7 @@
 //          sidebar shows.
 // limits:  Claude Code only (the sole agent sindri runs). Pure text classification,
 //          no I/O — the caller supplies the captured pane (tmux capture-pane).
-package detect
+package claude
 
 import (
 	"regexp"
@@ -32,11 +32,11 @@ var (
 	yesNoOption = regexp.MustCompile(`(?im)^\s*(❯\s*)?(\d+\.\s*)?(yes|no)\b`)
 )
 
-// ClaudeState classifies a Claude Code pane from its rendered screen text (as
-// `tmux capture-pane -p` yields). Precedence mirrors herdr's claude.toml: a hidden
+// Classify reads a Claude Code pane's rendered screen text (as `tmux capture-pane
+// -p` yields) into a runtime State. Precedence mirrors herdr's claude.toml: a hidden
 // transcript view is unknown; a response prompt is blocked; the interrupt hint is
 // working; a bare prompt box is idle. Matching is case-insensitive.
-func ClaudeState(screen string) State {
+func Classify(screen string) State {
 	s := strings.ToLower(screen)
 	has := func(subs ...string) bool { // every substring present
 		for _, sub := range subs {

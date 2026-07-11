@@ -1,4 +1,4 @@
-package detect
+package claude
 
 import "testing"
 
@@ -50,8 +50,8 @@ func TestClaudeState(t *testing.T) {
 		},
 	}
 	for _, c := range cases {
-		if got := ClaudeState(c.screen); got != c.want {
-			t.Errorf("%s: ClaudeState() = %q, want %q", c.name, got, c.want)
+		if got := Classify(c.screen); got != c.want {
+			t.Errorf("%s: Classify() = %q, want %q", c.name, got, c.want)
 		}
 	}
 }
