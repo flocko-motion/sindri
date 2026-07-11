@@ -21,6 +21,17 @@ func Tasks(root string, f task.Filter) ([]task.Task, error) {
 	return tasksFromDB(root, f)
 }
 
+// Source adapts td as a task source (its native td-* tasks). Always enabled — a
+// missing td store surfaces as a Tasks error, matching the hub's expectation that
+// td is the primary backend.
+type Source struct{}
+
+// Enabled reports td is always attempted.
+func (Source) Enabled(string) bool { return true }
+
+// Tasks returns all live td tasks as domain tasks.
+func (Source) Tasks(root string) ([]task.Task, error) { return Tasks(root, task.FilterAll) }
+
 // Get loads a single task by ID (direct read).
 func Get(root, id string) (task.Task, error) {
 	return taskFromDB(root, id)

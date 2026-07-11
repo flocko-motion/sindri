@@ -14,11 +14,62 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/flo-at/sindri/internal/hub/task"
 )
 
 // issueListLimit is passed to `gh issue list` explicitly: gh defaults to 30 and
 // would silently drop the rest, so we ask for a high ceiling to import them all.
 const issueListLimit = 1000
+
+// issueTimeout bounds a single `gh issue list` so a hung network call can't stall
+// the source fetch.
+const issueTimeout = 15 * time.Second
+
+// ID is the stable task id for a GitHub issue: gh-<number>. Number reverses it.
+func ID(number int) string { return "gh-" + strconv.Itoa(number) }
+
+// Number parses a gh-<number> task id back to its issue number (ok=false for a
+// non-gh id).
+func Number(id string) (int, bool) {
+	rest, ok := strings.CutPrefix(id, "gh-")
+	if !ok {
+		return 0, false
+	}
+	n, err := strconv.Atoi(rest)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// Source adapts GitHub issues as a task source. Issues import UNRATED (empty
+// priority) so a worker never auto-claims an unvetted issue until a human rates it.
+type Source struct{}
+
+// Enabled reports whether the repo can use the GitHub source (gh on PATH + a GitHub
+// remote). The per-project opt-in is the hub's concern, layered on top.
+func (Source) Enabled(root string) bool { return Enabled(root) }
+
+// Tasks fetches the repo's open issues as domain tasks (gh-* ids, the body as the
+// description), bounded by its own timeout.
+func (Source) Tasks(root string) ([]task.Task, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), issueTimeout)
+	defer cancel()
+	issues, err := Issues(ctx, root)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]task.Task, 0, len(issues))
+	for _, is := range issues {
+		out = append(out, task.Task{
+			ID: ID(is.Number), Title: is.Title, Status: "open", Type: "issue",
+			Priority: "", Description: is.Body,
+		})
+	}
+	return out, nil
+}
 
 // Label is one GitHub label on an issue (only its name is used).
 type Label struct {

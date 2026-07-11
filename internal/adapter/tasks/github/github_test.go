@@ -169,3 +169,20 @@ func TestCloseSurfacesError(t *testing.T) {
 		t.Fatal("a failed close must return an error")
 	}
 }
+
+func TestID(t *testing.T) {
+	if got := ID(123); got != "gh-123" {
+		t.Fatalf("ID(123) = %q, want gh-123", got)
+	}
+}
+
+func TestNumber(t *testing.T) {
+	if n, ok := Number("gh-42"); !ok || n != 42 {
+		t.Fatalf("Number(gh-42) = %d,%v; want 42,true", n, ok)
+	}
+	for _, id := range []string{"td-abc", "os-123", "gh-", "gh-x", ""} {
+		if _, ok := Number(id); ok {
+			t.Errorf("Number(%q) should not parse", id)
+		}
+	}
+}

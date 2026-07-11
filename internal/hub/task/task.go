@@ -12,15 +12,16 @@ import "time"
 // Task is a unified sindri task — a td task, GitHub issue, or openspec change,
 // normalized to one shape the hub works with regardless of source.
 type Task struct {
-	ID        string
-	Title     string
-	Status    string
-	Type      string
-	Priority  string
-	ParentID  string
-	Labels    []string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID          string
+	Title       string
+	Status      string
+	Type        string
+	Priority    string
+	ParentID    string
+	Labels      []string
+	Description string // the body, when the source carries one up front (e.g. a GitHub issue)
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // IsClosed reports whether the task is in a terminal state.

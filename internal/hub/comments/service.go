@@ -12,7 +12,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -105,7 +104,7 @@ func (s *Service) sync(project, id string, force bool) error {
 		}
 	case strings.HasPrefix(id, "gh-"):
 		source = "github"
-		n, ok := githubNumber(id)
+		n, ok := github.Number(id)
 		if !ok {
 			return fmt.Errorf("%s: not a valid GitHub id", id)
 		}
@@ -144,17 +143,4 @@ func (s *Service) markSynced(project, id string) {
 	s.mu.Lock()
 	s.synced[project+"\x00"+id] = time.Now()
 	s.mu.Unlock()
-}
-
-// githubNumber parses a gh-<number> id into the issue number.
-func githubNumber(id string) (int, bool) {
-	s := strings.TrimPrefix(id, "gh-")
-	if s == id {
-		return 0, false
-	}
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		return 0, false
-	}
-	return n, true
 }

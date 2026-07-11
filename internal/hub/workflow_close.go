@@ -57,11 +57,11 @@ func (h *Hub) finishTask(project, id string, scrap bool) error {
 			err = spec.Archive(root, name)
 		}
 	case strings.HasPrefix(id, "gh-"):
-		n, ok := githubIssueNumber(id)
+		n, ok := github.Number(id)
 		if !ok {
 			return fmt.Errorf("%s: not a valid GitHub id", id)
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), githubIssueTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), githubCloseTimeout)
 		defer cancel()
 		if scrap {
 			err = github.Delete(ctx, root, n)
@@ -111,14 +111,14 @@ func (h *Hub) finishTask(project, id string, scrap bool) error {
 }
 
 // changeName resolves an os-<hash> id back to its openspec change name by matching
-// specID over the current changes (the id is a one-way hash of the name).
+// spec.ID over the current changes (the id is a one-way hash of the name).
 func (h *Hub) changeName(root, id string) (string, bool) {
 	changes, err := spec.Changes(root)
 	if err != nil {
 		return "", false
 	}
 	for _, c := range changes {
-		if specID(c.Name) == id {
+		if spec.ID(c.Name) == id {
 			return c.Name, true
 		}
 	}

@@ -3,43 +3,7 @@ package hub
 import (
 	"os/exec"
 	"testing"
-
-	"github.com/flo-at/sindri/internal/adapter/tasks/github"
 )
-
-// TestIssuesToRowsUnrated: imported issues become open "issue" tasks with NO priority,
-// so they're visible in the backlog but OpenLeaves won't auto-claim them until a human
-// rates one (same posture as openspec items).
-func TestIssuesToRowsUnrated(t *testing.T) {
-	rows := issuesToRows([]github.Issue{
-		{Number: 5, Title: "fix it", Body: "body"},
-		{Number: 8, Title: "add it"},
-	})
-	if len(rows) != 2 {
-		t.Fatalf("want 2 rows, got %d", len(rows))
-	}
-	r := rows[0]
-	if r.ID != "gh-5" || r.Type != "issue" || r.Status != "open" || r.Priority != "" || r.Description != "body" {
-		t.Fatalf("unexpected row (issues must import unrated): %+v", r)
-	}
-}
-
-func TestGithubID(t *testing.T) {
-	if got := githubID(123); got != "gh-123" {
-		t.Fatalf("githubID(123) = %q, want gh-123", got)
-	}
-}
-
-func TestGithubIssueNumber(t *testing.T) {
-	if n, ok := githubIssueNumber("gh-42"); !ok || n != 42 {
-		t.Fatalf("githubIssueNumber(gh-42) = %d,%v; want 42,true", n, ok)
-	}
-	for _, id := range []string{"td-abc", "os-123", "gh-", "gh-x", ""} {
-		if _, ok := githubIssueNumber(id); ok {
-			t.Errorf("githubIssueNumber(%q) should not parse", id)
-		}
-	}
-}
 
 // TestPriorityNoneRename: the lowest tier now reads "none" everywhere, but the old
 // input words still resolve to P4 so muscle memory and stored input keep working.

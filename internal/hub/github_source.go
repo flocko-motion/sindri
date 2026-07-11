@@ -1,39 +1,38 @@
 // package: hub / github_source
-// type:    logic (the GitHub issue source + its throttle)
-// job:     turn a project's open GitHub issues into cached tasks — the third source
-//          merged by SyncTasks — behind a per-project opt-in and a short-TTL memo so
-//          the frequent idle-worker resync never hammers the GitHub API.
-// limits:  read side only; close-on-merge lives in workflow_merge.go. All GitHub
-//          access goes through internal/adapter/github (never the API directly).
+// type:    logic (the GitHub issue source throttle + close-on-merge)
+// job:     the hub-side policy around the github task source — a per-project opt-in
+//          (in SyncTasks) and a short-TTL memo so the frequent idle-worker resync
+//          never hammers the GitHub API — plus close-on-merge for a merged gh-* PR.
+//          The fetch + issue→task mapping live in the adapter (adapter/tasks/github).
+// limits:  read throttle + one outbound close; all GitHub access goes through the
+//          adapter, never the API directly.
 package hub
 
 import (
 	"context"
 	"log"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/tasks/github"
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/task"
 )
 
 // githubTTL throttles the network source: SyncTasks can fire often (every
 // workPollInterval per idle worker, and on task mutations), so we reuse the last
-// issue list within this window and skip the gh call. Scanning for new issues every
-// couple of minutes is plenty — a local td/openspec read is cheap, but a gh API call
-// is slow and rate-limited. The [r]efresh hotkey (ForceSyncTasks) bypasses this when
-// the user wants issues right now.
+// fetch within this window and skip the gh call. Scanning for new issues every
+// couple of minutes is plenty — a local td/openspec read is cheap, a gh API call is
+// slow and rate-limited. The [r]efresh hotkey (ForceSyncTasks) bypasses this.
 const githubTTL = 2 * time.Minute
 
-// githubIssueTimeout bounds a single `gh issue list` so a hung network call can't
-// stall a sync.
-const githubIssueTimeout = 15 * time.Second
+// githubCloseTimeout bounds the outbound close-on-merge call.
+const githubCloseTimeout = 15 * time.Second
 
-// ghCacheEntry is one project's memoized issue list with the moment it was fetched.
+// ghCacheEntry is one project's memoized issue-tasks with the moment it was fetched.
 type ghCacheEntry struct {
-	issues    []github.Issue
+	tasks     []task.Task
 	fetchedAt time.Time
 }
 
@@ -44,83 +43,33 @@ var (
 	ghCache = map[string]ghCacheEntry{}
 )
 
-// githubID is the stable task id for a GitHub issue: gh-<number>.
-func githubID(number int) string { return "gh-" + strconv.Itoa(number) }
-
-// githubIssueNumber parses a gh-<number> task id back to its issue number,
-// reporting ok=false for any non-gh id.
-func githubIssueNumber(id string) (int, bool) {
-	rest, ok := strings.CutPrefix(id, "gh-")
-	if !ok {
-		return 0, false
-	}
-	n, err := strconv.Atoi(rest)
-	if err != nil {
-		return 0, false
-	}
-	return n, true
-}
-
-// githubRows returns the project's open issues as store.Task rows, or nil. It is
-// best-effort by contract: a fetch error degrades to no tasks (logged, never
-// returned) so a network hiccup can't fail the whole sync. Honors the opt-in and
-// the TTL memo; force bypasses the TTL (an explicit user refresh).
-func (h *Hub) githubRows(project, root string, enabled, force bool) []store.Task {
-	if !enabled || !github.Enabled(root) {
+// githubTasks returns the project's open issues as tasks, served from the TTL memo
+// when fresh (no network call) and refetched otherwise via the github source. On a
+// fetch error it warns and falls back to the last good list until it recovers — a
+// stale error never blanks the backlog. Returns nil when the source isn't usable.
+// force bypasses the TTL (an explicit user refresh).
+func (h *Hub) githubTasks(project, root string, force bool) []task.Task {
+	if !(github.Source{}).Enabled(root) {
 		return nil
 	}
-	issues, ok := h.githubIssues(project, root, force)
-	if !ok {
-		return nil
-	}
-	return issuesToRows(issues)
-}
-
-// issuesToRows maps GitHub issues to cached tasks. Issues import UNRATED (no
-// priority): they're visible in the backlog but OpenLeaves skips empty-priority
-// tasks, so a worker never auto-claims an unvetted issue — a human rates one (via
-// the priority override) to release it for assignment, exactly like openspec items.
-func issuesToRows(issues []github.Issue) []store.Task {
-	rows := make([]store.Task, 0, len(issues))
-	for _, is := range issues {
-		rows = append(rows, store.Task{
-			ID:          githubID(is.Number),
-			Title:       is.Title,
-			Status:      "open",
-			Type:        "issue",
-			Priority:    "", // unrated — visible, not auto-claimed until a human rates it
-			Description: is.Body,
-		})
-	}
-	return rows
-}
-
-// githubIssues returns the project's open issues, served from the TTL memo when
-// fresh (no network call) and refetched otherwise. On a fetch error it warns and
-// falls back to the last good list until it recovers — a stale error never blanks
-// the backlog. Returns ok=false only when there's nothing to contribute at all.
-func (h *Hub) githubIssues(project, root string, force bool) ([]github.Issue, bool) {
 	ghMu.Lock()
 	entry, cached := ghCache[project]
 	ghMu.Unlock()
 	if cached && !force && time.Since(entry.fetchedAt) < githubTTL {
-		return entry.issues, true // cache hit — no network call
+		return entry.tasks // cache hit — no network call
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), githubIssueTimeout)
-	defer cancel()
-	issues, err := github.Issues(ctx, root)
+	ts, err := (github.Source{}).Tasks(root)
 	if err != nil {
 		log.Printf("hub: github issue source for %s degraded (keeping last list): %v", project, err)
 		if cached {
-			return entry.issues, true // keep the last good list until it recovers
+			return entry.tasks // keep the last good list until it recovers
 		}
-		return nil, false
+		return nil
 	}
 	ghMu.Lock()
-	ghCache[project] = ghCacheEntry{issues: issues, fetchedAt: time.Now()}
+	ghCache[project] = ghCacheEntry{tasks: ts, fetchedAt: time.Now()}
 	ghMu.Unlock()
-	return issues, true
+	return ts
 }
 
 // closeGitHubIssue closes+comments the GitHub issue behind a merged gh-* PR. It is a
@@ -128,11 +77,11 @@ func (h *Hub) githubIssues(project, root string, force bool) ([]github.Issue, bo
 // landed, so a GitHub failure is logged and recorded on the PR as a warning — never
 // returned, never blocking. This is the ONLY outbound GitHub write in the merge path.
 func (h *Hub) closeGitHubIssue(project, root string, pr store.PR, prID string) {
-	number, ok := githubIssueNumber(pr.Task)
+	number, ok := github.Number(pr.Task)
 	if !ok {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), githubIssueTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), githubCloseTimeout)
 	defer cancel()
 	comment := "merged by sindri: " + pr.Branch + " (" + prID + ")"
 	if err := github.Close(ctx, root, number, comment); err != nil {

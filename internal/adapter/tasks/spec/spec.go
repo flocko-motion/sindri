@@ -7,13 +7,54 @@
 package spec
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/flo-at/sindri/internal/hub/task"
 )
+
+// ID derives a stable os-XXXXXX task id from an openspec change name (the id scheme
+// that namespaces the openspec source; the one-way hash means the hub reverses it by
+// matching over the current change names).
+func ID(name string) string {
+	sum := sha256.Sum256([]byte(name))
+	return "os-" + hex.EncodeToString(sum[:])[:6]
+}
+
+// Source adapts openspec as a task source: each active change becomes a task.
+type Source struct{}
+
+// Enabled reports whether the repo uses openspec.
+func (Source) Enabled(root string) bool { return Enabled(root) }
+
+// Tasks maps the repo's active openspec changes to domain tasks (os-* ids, a
+// progress-annotated title, closed when all the change's tasks are done).
+func (Source) Tasks(root string) ([]task.Task, error) {
+	changes, err := Changes(root)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]task.Task, 0, len(changes))
+	for _, c := range changes {
+		status := "open"
+		if c.Done() {
+			status = "closed"
+		}
+		out = append(out, task.Task{
+			ID:     ID(c.Name),
+			Title:  fmt.Sprintf("%s (%d/%d)", c.Name, c.CompletedTasks, c.TotalTasks),
+			Status: status,
+			Type:   "spec",
+		})
+	}
+	return out, nil
+}
 
 // Change is an openspec change from `openspec list --json`.
 type Change struct {

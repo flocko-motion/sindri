@@ -10,8 +10,6 @@ package hub
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -20,6 +18,7 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
+	"github.com/flo-at/sindri/internal/adapter/tasks"
 	"github.com/flo-at/sindri/internal/adapter/tasks/spec"
 	"github.com/flo-at/sindri/internal/adapter/tasks/td"
 	"github.com/flo-at/sindri/internal/hub/registry"
@@ -430,38 +429,35 @@ func (h *Hub) ForceSyncTasks(project string) error { return h.syncTasks(project,
 func (h *Hub) syncTasks(project string, force bool) error {
 	root := h.projectRoot(project)
 	ps := h.store.For(project)
-	tasks, err := td.Tasks(root, task.FilterAll)
-	if err != nil {
-		return err
-	}
-	rows := make([]store.Task, 0, len(tasks))
-	for _, t := range tasks {
-		rows = append(rows, toStoreTask(t))
-	}
-	changes, err := spec.Changes(root)
-	if err != nil {
-		return err
-	}
-	for _, c := range changes {
-		status := "open"
-		if c.Done() {
-			status = "closed"
+	var rows []store.Task
+
+	// Local sources: td (always attempted — a missing store surfaces as an error) and
+	// openspec (when the repo uses it). Each Source normalizes to task.Task.
+	for _, src := range []tasks.Source{td.Source{}, spec.Source{}} {
+		if !src.Enabled(root) {
+			continue
 		}
-		rows = append(rows, store.Task{
-			ID:     specID(c.Name),
-			Title:  fmt.Sprintf("%s (%d/%d)", c.Name, c.CompletedTasks, c.TotalTasks),
-			Status: status,
-			Type:   "spec",
-		})
+		ts, err := src.Tasks(root)
+		if err != nil {
+			return err
+		}
+		for _, t := range ts {
+			rows = append(rows, toStoreTask(t))
+		}
 	}
-	// Third source: open GitHub issues, gated by the per-project opt-in. Best-effort —
-	// a config or network failure contributes no issues (never fails the sync). A bad
-	// config is the exception the operator should see, so it's logged, not swallowed.
-	cfg, err := h.projectConfig(project)
-	if err != nil {
-		log.Printf("hub: github source skipped for %s (config error): %v", project, err)
+
+	// GitHub issues: the third source, gated by the per-project opt-in and TTL-
+	// throttled. Best-effort — a config or network failure contributes no issues
+	// (never fails the sync); a bad config is logged, not swallowed.
+	cfg, cerr := h.projectConfig(project)
+	if cerr != nil {
+		log.Printf("hub: github source skipped for %s (config error): %v", project, cerr)
+	} else if cfg.IssuesEnabled() {
+		for _, t := range h.githubTasks(project, root, force) {
+			rows = append(rows, toStoreTask(t))
+		}
 	}
-	rows = append(rows, h.githubRows(project, root, err == nil && cfg.IssuesEnabled(), force)...)
+
 	if ov, err := ps.PriorityOverrides(); err == nil {
 		for i := range rows {
 			if p, ok := ov[rows[i].ID]; ok {
@@ -508,16 +504,11 @@ func (h *Hub) checkParent(project, parent, self string) error {
 	return fmt.Errorf("unknown parent %q", parent)
 }
 
-// specID derives a stable os-XXXXXX id from an openspec change name.
-func specID(name string) string {
-	sum := sha256.Sum256([]byte(name))
-	return "os-" + hex.EncodeToString(sum[:])[:6]
-}
-
 func toStoreTask(t task.Task) store.Task {
 	return store.Task{
 		ID: t.ID, Title: t.Title, Status: t.Status, Priority: t.Priority,
 		Type: t.Type, Labels: strings.Join(t.Labels, ","), ParentID: t.ParentID,
+		Description: t.Description,
 	}
 }
 
