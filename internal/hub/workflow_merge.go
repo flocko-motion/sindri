@@ -10,14 +10,15 @@ package hub
 
 import (
 	"fmt"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 	"log"
 	"path/filepath"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/adapter/tasks/td"
+	"github.com/flo-at/sindri/internal/hub/repo"
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // reconcileMergingPRs runs once at hub startup: any PR still in "merging" was being
@@ -79,36 +80,32 @@ func (h *Hub) Merge(project, prID string) (store.PR, error) {
 		h.notify()
 		return store.PR{}, e
 	}
-	// Bring the branch up to the current base first. A merely-stale branch rebases
-	// silently; a CONFLICT is routed into the worker's resolution loop — the hub
-	// leaves the conflict in the worker's workspace to edit (it can't run git) and
-	// the branch returns for review once clean, rather than a dead-end "resubmit".
+	// Bring the branch up to base then merge — the git mechanics live in repo; here we
+	// route the outcome. The rebase runs in the WORKER's worktree (it can't run git
+	// itself); a conflict goes into its resolution loop, not a dead-end "resubmit".
+	wt, workspace := "", ""
 	if a, ok, _ := ps.GetAgent(pr.Agent); ok {
-		wt := filepath.Join(root, a.Workspace)
-		conflicts, done, err := git.RebaseStart(wt, pr.Branch, pr.Base)
-		if err != nil {
-			// The rebase runs in the AGENT's worktree, not your checkout — say so, or
-			// "unstaged changes" sends you hunting in the wrong place. Usually the agent
-			// left uncommitted edits there; it must commit or discard them.
-			return revert(fmt.Errorf("can't rebase %s onto %s in %s's worktree (%s) — most often it has uncommitted changes (NOT your checkout); have the agent commit or discard them, e.g. `sindri agent tell %s \"commit or discard your /workspace changes, then say done\"`. git said: %w",
-				pr.Branch, pr.Base, pr.Agent, a.Workspace, pr.Agent, err))
-		}
-		if !done {
-			pr.Status, pr.Feedback = "open", "" // no longer mergeable; back to review after the worker resolves
-			_ = ps.PutPR(pr)
-			_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "resolving"})
-			_ = ps.LogPR(pr.ID, "conflict", "rebase onto "+pr.Base+" conflicts: "+strings.Join(conflicts, ", "))
-			_ = h.injectWhenReady(project, pr.Agent, workflow.MsgResolveNeeded(pr.Base, conflicts))
-			h.notify()
-			return store.PR{}, fmt.Errorf("%s conflicts with %s — sent to %s to resolve; it returns for review once clean", prID, pr.Base, pr.Agent)
-		}
+		workspace, wt = a.Workspace, filepath.Join(root, a.Workspace)
 	}
-	if err := git.Merge(root, pr.Base, pr.Branch); err != nil {
-		if e := err.Error(); strings.Contains(e, "would be overwritten") || strings.Contains(e, "commit your changes or stash") {
-			files := workflow.FileList(git.BlockingLocalChanges(root, pr.Base, pr.Branch))
-			return revert(fmt.Errorf("merge blocked: commit or stash your local changes to %s in the working checkout, then merge again (the PR is fine and stays approved)", files))
-		}
-		return revert(err)
+	switch res := repo.MergeBranch(root, wt, pr.Branch, pr.Base); res.Status {
+	case repo.MergeConflict:
+		pr.Status, pr.Feedback = "open", "" // no longer mergeable; back to review after the worker resolves
+		_ = ps.PutPR(pr)
+		_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "resolving"})
+		_ = ps.LogPR(pr.ID, "conflict", "rebase onto "+pr.Base+" conflicts: "+strings.Join(res.Files, ", "))
+		_ = h.injectWhenReady(project, pr.Agent, workflow.MsgResolveNeeded(pr.Base, res.Files))
+		h.notify()
+		return store.PR{}, fmt.Errorf("%s conflicts with %s — sent to %s to resolve; it returns for review once clean", prID, pr.Base, pr.Agent)
+	case repo.MergeRebaseErr:
+		// The rebase runs in the AGENT's worktree, not your checkout — say so, or
+		// "unstaged changes" sends you hunting in the wrong place. Usually the agent
+		// left uncommitted edits there; it must commit or discard them.
+		return revert(fmt.Errorf("can't rebase %s onto %s in %s's worktree (%s) — most often it has uncommitted changes (NOT your checkout); have the agent commit or discard them, e.g. `sindri agent tell %s \"commit or discard your /workspace changes, then say done\"`. git said: %w",
+			pr.Branch, pr.Base, pr.Agent, workspace, pr.Agent, res.Err))
+	case repo.MergeBlocked:
+		return revert(fmt.Errorf("merge blocked: commit or stash your local changes to %s in the working checkout, then merge again (the PR is fine and stays approved)", workflow.FileList(res.Files)))
+	case repo.MergeErr:
+		return revert(res.Err)
 	}
 	pr.Status = "merged"
 	if err := ps.PutPR(pr); err != nil {
