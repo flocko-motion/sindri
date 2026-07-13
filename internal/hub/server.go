@@ -171,7 +171,7 @@ func (h *Hub) Handler() http.Handler {
 		writeJSON(w, okMsg{"refreshed"}, h.comments.Refresh(h.reqProject(r), req.Name))
 	})
 	mux.HandleFunc("GET /repos", func(w http.ResponseWriter, r *http.Request) {
-		list, err := h.RepoList()
+		list, err := h.projects.List()
 		writeJSON(w, list, err)
 	})
 	mux.HandleFunc("GET /repo", func(w http.ResponseWriter, r *http.Request) {
@@ -179,11 +179,11 @@ func (h *Hub) Handler() http.Handler {
 		if tag == "" {
 			tag = h.reqProject(r) // default to the caller's repo
 		}
-		d, err := h.RepoInfo(tag)
+		d, err := h.projects.Info(tag)
 		writeJSON(w, d, err)
 	})
 	mux.HandleFunc("POST /repo/init", func(w http.ResponseWriter, r *http.Request) {
-		sum, err := h.RepoInit(r.Header.Get("X-Sindri-Project")) // repo-scoped: header is the root
+		sum, err := h.projects.Init(r.Header.Get("X-Sindri-Project")) // repo-scoped: header is the root
 		writeJSON(w, sum, err)
 	})
 	mux.HandleFunc("POST /repo/forget", func(w http.ResponseWriter, r *http.Request) {
@@ -191,28 +191,28 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"forgotten"}, h.RepoForget(req.Tag))
+		writeJSON(w, okMsg{"forgotten"}, h.projects.Forget(req.Tag))
 	})
 	mux.HandleFunc("POST /repo/color", func(w http.ResponseWriter, r *http.Request) {
 		var req RepoReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"ok"}, h.SetRepoColor(req.Tag, req.Color))
+		writeJSON(w, okMsg{"ok"}, h.projects.SetColor(req.Tag, req.Color))
 	})
 	mux.HandleFunc("POST /orphan/remove", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq // Name carries the orphan container name
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"removed"}, h.RemoveOrphan(req.Name))
+		writeJSON(w, okMsg{"removed"}, h.projects.RemoveOrphan(req.Name))
 	})
 	mux.HandleFunc("POST /repo/config", func(w http.ResponseWriter, r *http.Request) {
 		var cfg config.Config
 		if !decode(w, r, &cfg) {
 			return
 		}
-		writeJSON(w, okMsg{"saved"}, h.WriteRepoConfig(r.Header.Get("X-Sindri-Project"), cfg))
+		writeJSON(w, okMsg{"saved"}, h.projects.WriteConfig(r.Header.Get("X-Sindri-Project"), cfg))
 	})
 	mux.HandleFunc("GET /log", func(w http.ResponseWriter, r *http.Request) {
 		evs, err := h.Log(h.reqProject(r), r.URL.Query().Get("agent"))

@@ -11,6 +11,7 @@ import (
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agent"
+	"github.com/flo-at/sindri/internal/hub/project"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
@@ -34,13 +35,26 @@ type commentsDeps struct{ h *Hub }
 func (c commentsDeps) ProjectRoot(project string) string { return c.h.projectRoot(project) }
 func (c commentsDeps) Notify()                           { c.h.notify() }
 
-// TaskSpec and PRDetail are the workflow module's API DTOs, re-exported so the hub
-// stays the single facade its clients (client/TUI/CLI) import — they get the RPC
+// projectDeps adapts the hub to project.Deps: agent teardown (Forget frees a repo's
+// agents), the filesystem seeders, the repo's display name + stable tag, and notify.
+type projectDeps struct{ h *Hub }
+
+func (d projectDeps) DeleteAgent(project, name string) error { return d.h.DeleteAgent(project, name) }
+func (d projectDeps) EnsureGitignore(root string)           { ensureGitignore(root) }
+func (d projectDeps) EnsureArchitectureDoc(root string)     { ensureArchitectureDoc(root) }
+func (d projectDeps) RepoName(project string) string        { return d.h.repoName(project) }
+func (d projectDeps) RepoTag(root string) string            { return repoTag(root) }
+func (d projectDeps) Notify()                               { d.h.notify() }
+
+// These are the extracted modules' API DTOs, re-exported so the hub stays the single
+// facade its clients (client/TUI/CLI) import — they get the RPC
 // request/response shapes from hub, alongside the other wire types in server.go,
 // without reaching into the workflow package.
 type (
-	TaskSpec = workflow.TaskSpec
-	PRDetail = workflow.PRDetail
+	TaskSpec    = workflow.TaskSpec
+	PRDetail    = workflow.PRDetail
+	RepoSummary = project.Summary
+	RepoDetail  = project.Detail
 )
 
 // workflowDeps adapts the hub to workflow.Deps: it exposes the hub facilities the

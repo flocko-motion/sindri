@@ -35,6 +35,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/chat"
 	"github.com/flo-at/sindri/internal/hub/comments"
+	"github.com/flo-at/sindri/internal/hub/project"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/workflow"
 	"github.com/flo-at/sindri/internal/tools/paths"
@@ -68,6 +69,7 @@ type Hub struct {
 	comments *comments.Service // task-comment sync (internal/hub/comments)
 	agents   *agent.Service    // agent identity/auth/memory (internal/hub/agent)
 	wf       *workflow.Engine  // the PR/task lifecycle orchestrator (internal/hub/workflow)
+	projects *project.Service  // repo-registry management (internal/hub/project)
 }
 
 // agentKey identifies an agent within a project — the key for the hub's per-agent
@@ -155,6 +157,7 @@ func New() (*Hub, error) {
 	h.comments = comments.New(h.store, commentsDeps{h})
 	h.agents = agent.New(h.store, h.notify)
 	h.wf = workflow.New(h.store, workflowDeps{h})
+	h.projects = project.New(h.store, projectDeps{h})
 	return h, nil
 }
 

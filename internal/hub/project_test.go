@@ -13,7 +13,7 @@ func TestRepoInitScaffoldsAndRegisters(t *testing.T) {
 	h := newHub(t)
 	root := t.TempDir()
 
-	if _, err := h.RepoInit(root); err != nil {
+	if _, err := h.projects.Init(root); err != nil {
 		t.Fatalf("init: %v", err)
 	}
 	tag := RepoTag(root)
@@ -29,7 +29,7 @@ func TestRepoInitScaffoldsAndRegisters(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte("github:\n  issues: false\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.RepoInit(root); err != nil {
+	if _, err := h.projects.Init(root); err != nil {
 		t.Fatalf("second init: %v", err)
 	}
 	got, _ := os.ReadFile(cfgPath)
@@ -44,7 +44,7 @@ func TestRepoInitScaffoldsAndRegisters(t *testing.T) {
 func TestRepoForgetDeletesAgentsKeepsRepo(t *testing.T) {
 	h := newHub(t)
 	root := t.TempDir()
-	if _, err := h.RepoInit(root); err != nil {
+	if _, err := h.projects.Init(root); err != nil {
 		t.Fatal(err)
 	}
 	tag := RepoTag(root)
@@ -52,7 +52,7 @@ func TestRepoForgetDeletesAgentsKeepsRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := h.RepoForget(tag); err != nil {
+	if err := h.projects.Forget(tag); err != nil {
 		t.Fatalf("forget: %v", err)
 	}
 	// Agents are deleted.
