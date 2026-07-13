@@ -10,14 +10,15 @@ package hub
 
 import (
 	"fmt"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 	"io"
 	"path/filepath"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/hub/registry"
+	"github.com/flo-at/sindri/internal/hub/repo"
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // cmdRebase is the agent-driven "align with the reference" verb: it rebases the
@@ -39,21 +40,19 @@ func (h *Hub) cmdRebase(c registry.Caller, _ []string, out io.Writer) (int, erro
 	if err != nil {
 		return 1, err
 	}
-	var conflicts []string
-	var done bool
-	if git.RebaseInProgress(wt) { // a previous rebase is mid-conflict — advance it
-		conflicts, done, err = git.RebaseContinue(wt)
-	} else {
-		branch, berr := git.CurrentBranch(wt)
+	branch := ""
+	if !git.RebaseInProgress(wt) { // starting fresh — guard against rebasing base onto itself
+		b, berr := git.CurrentBranch(wt)
 		if berr != nil {
 			return 1, berr
 		}
-		if branch == base {
+		if b == base {
 			fmt.Fprintf(out, "You're on %s (the reference branch itself) — nothing to rebase.\n", base)
 			return 0, nil
 		}
-		conflicts, done, err = git.RebaseStart(wt, branch, base)
+		branch = b
 	}
+	conflicts, done, err := repo.RebaseStep(wt, branch, base)
 	if err != nil {
 		return 1, err
 	}
@@ -104,13 +103,7 @@ func (h *Hub) cmdResolve(c registry.Caller, _ []string, out io.Writer) (int, err
 			return 1, nil
 		}
 	}
-	var conflicts []string
-	var done bool
-	if inProgress { // a resolution already underway — advance it
-		conflicts, done, err = git.RebaseContinue(wt)
-	} else {
-		conflicts, done, err = git.RebaseStart(wt, st.Branch, base)
-	}
+	conflicts, done, err := repo.RebaseStep(wt, st.Branch, base)
 	if err != nil {
 		return 1, err // internal git failure — AgentExec sanitizes it for the agent
 	}
