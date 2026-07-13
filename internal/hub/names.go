@@ -1,12 +1,15 @@
 // package: hub / names
 // type:    headless helper
 // job:     auto-name new agents after Norse dwarves — friends of Sindri the
-//          smith. The binary names "sindri" and "brokkr" are never handed out.
-//          Names are picked at random and are unique across ALL projects, so each
-//          dwarf identifies one agent machine-wide (recognisable on the unified
-//          cross-repo board).
+//
+//	smith. The binary names "sindri" and "brokkr" are never handed out.
+//	Names are picked at random and are unique across ALL projects, so each
+//	dwarf identifies one agent machine-wide (recognisable on the unified
+//	cross-repo board).
+//
 // limits:  only allocates names; registering and launching the agent are the
-//          hub's (-> hub.go).
+//
+//	hub's (-> hub.go).
 package hub
 
 import (

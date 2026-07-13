@@ -1,9 +1,11 @@
 // package: hub / claude
 // type:    logic (agent runtime setup)
 // job:     prepare an agent pod's Claude home — credentials, config, settings —
-//          and build its role-aware system prompt. Claude runs interactively in
-//          the pod's tmux session; its instructions come from the hub (served,
-//          not baked), via this system prompt plus injected messages.
+//
+//	and build its role-aware system prompt. Claude runs interactively in
+//	the pod's tmux session; its instructions come from the hub (served,
+//	not baked), via this system prompt plus injected messages.
+//
 // limits:  no podman/tmux here (-> Launch wires the mounts and entrypoint).
 package hub
 
@@ -11,6 +13,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 	"io"
 	"os"
 	"os/exec"
@@ -50,7 +53,7 @@ func (h *Hub) prepareClaudeHome(project, name, role string, out io.Writer) (home
 	cfg, _ := json.Marshal(map[string]any{
 		"hasCompletedOnboarding":        true,
 		"autoUpdates":                   false,
-		"bypassPermissionsModeAccepted": true, // pre-accept --dangerously-skip-permissions
+		"bypassPermissionsModeAccepted": true,        // pre-accept --dangerously-skip-permissions
 		"theme":                         "dark-ansi", // built-in ANSI dark — readable in the pod's terminal, unlike the default
 		"projects": map[string]any{
 			"/workspace": map[string]any{"hasTrustDialogAccepted": true},
@@ -64,12 +67,12 @@ func (h *Hub) prepareClaudeHome(project, name, role string, out io.Writer) (home
 	}
 	// Inject the project's architecture INTO the system prompt (full content, not just
 	// a path), so every agent has it in context. Best-effort: a missing/unreadable doc
-	// just omits the section (architectureBrief returns "" for empty content).
+	// just omits the section (workflow.ArchitectureBrief returns "" for empty content).
 	archPath := h.architectureDoc(project)
 	archContent, _ := os.ReadFile(filepath.Join(h.projectRoot(project), archPath))
 	// brokkr is mounted into every pod (a cross-built linux binary, see Launch), so the
 	// brief always recommends it.
-	if err = os.WriteFile(filepath.Join(homeDir, "system-prompt.txt"), []byte(systemPrompt(name, role, string(archContent), archPath)), 0o644); err != nil {
+	if err = os.WriteFile(filepath.Join(homeDir, "system-prompt.txt"), []byte(workflow.SystemPrompt(name, role, string(archContent), archPath)), 0o644); err != nil {
 		return "", "", false, fmt.Errorf("write system prompt: %w", err)
 	}
 	return homeDir, configPath, hasCreds, nil

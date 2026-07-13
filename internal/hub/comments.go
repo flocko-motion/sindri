@@ -1,8 +1,10 @@
 // package: hub / comments
 // type:    logic (comments wiring)
 // job:     wire the extracted comments module (internal/hub/comments) into the hub —
-//          provide its Deps seam (project-root resolution + board notify) and the
-//          thin method the server calls. The sync/reconcile logic lives in the module.
+//
+//	provide its Deps seam (project-root resolution + board notify) and the
+//	thin method the server calls. The sync/reconcile logic lives in the module.
+//
 // limits:  no comment logic here (-> internal/hub/comments); just the seam + delegation.
 package hub
 

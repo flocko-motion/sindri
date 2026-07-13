@@ -1,8 +1,10 @@
 // package: hub / accesslog
 // type:    logic (access-log coalescing)
 // job:     keep the hub's access log from flooding: consecutive identical entries
-//          (same label+method+path) collapse into one counted line instead of
-//          being dropped, so high-frequency UI polling stays visible but compact.
+//
+//	(same label+method+path) collapse into one counted line instead of
+//	being dropped, so high-frequency UI polling stays visible but compact.
+//
 // limits:  formatting + coalescing only; the HTTP wrapper (logRequests) feeds it.
 package hub
 

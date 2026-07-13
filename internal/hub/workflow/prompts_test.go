@@ -1,4 +1,4 @@
-package hub
+package workflow
 
 import (
 	"strings"
@@ -13,7 +13,7 @@ func TestSystemPromptCarriesArchitecture(t *testing.T) {
 	const archPath = "docs/ARCH.md"
 	const archContent = "## Layering\nAdapters never import the hub."
 	for _, role := range []string{"worker", "reviewer", "planner", "coauthor"} {
-		p := systemPrompt("eitri", role, archContent, archPath)
+		p := SystemPrompt("eitri", role, archContent, archPath)
 		if !strings.Contains(p, archContent) {
 			t.Errorf("%s: architecture content not injected:\n%s", role, p)
 		}
@@ -24,7 +24,7 @@ func TestSystemPromptCarriesArchitecture(t *testing.T) {
 			t.Errorf("%s: brief should always recommend brokkr:\n%s", role, p)
 		}
 	}
-	if p := systemPrompt("eitri", "worker", "", "ARCHITECTURE.md"); strings.Contains(p, "Project architecture") {
+	if p := SystemPrompt("eitri", "worker", "", "ARCHITECTURE.md"); strings.Contains(p, "Project architecture") {
 		t.Errorf("empty architecture content should inject no section:\n%s", p)
 	}
 }

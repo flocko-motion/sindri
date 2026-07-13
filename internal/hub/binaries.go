@@ -1,8 +1,10 @@
 // package: hub / binaries
 // type:    logic
 // job:     locate the sibling binaries the hub ships with (sindri-worker, brokkr,
-//          and the linux brokkr mounted into pods) — next to the running sindri
-//          executable first, then on PATH.
+//
+//	and the linux brokkr mounted into pods) — next to the running sindri
+//	executable first, then on PATH.
+//
 // limits:  path resolution only; it doesn't run or mount anything (-> Launch).
 package hub
 

@@ -1,8 +1,10 @@
 // package: hub / agent_memory
 // type:    logic (per-agent memory config)
 // job:     resolve, validate, and set an agent pod's RAM limit — the per-agent value
-//          (store.Agent.Memory) with a modest default when unset. Applied at Launch
-//          (RunOpts.Memory); a change takes effect on the agent's next start.
+//
+//	(store.Agent.Memory) with a modest default when unset. Applied at Launch
+//	(RunOpts.Memory); a change takes effect on the agent's next start.
+//
 // limits:  config only; the limit is enforced by the container runtime, not here.
 package hub
 

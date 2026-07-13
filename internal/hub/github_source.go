@@ -1,9 +1,11 @@
 // package: hub / github_source
 // type:    logic (close-on-merge for GitHub-backed tasks)
 // job:     close+comment the upstream GitHub issue when a gh-* PR merges — the one
-//          outbound GitHub write in the merge path. The issue task source (fetch,
-//          throttle, opt-in) lives entirely in the adapter (adapter/tasks/github);
-//          the hub no longer knows how tasks are sourced.
+//
+//	outbound GitHub write in the merge path. The issue task source (fetch,
+//	throttle, opt-in) lives entirely in the adapter (adapter/tasks/github);
+//	the hub no longer knows how tasks are sourced.
+//
 // limits:  one best-effort outbound write; all GitHub access goes through the adapter.
 package hub
 

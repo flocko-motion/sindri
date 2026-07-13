@@ -1,9 +1,11 @@
 // package: hub / repo
 // type:    logic (repo-registry management)
 // job:     the management surface over the project registry the hub already keeps —
-//          list/inspect registered repos, explicit additive `init` (register +
-//          scaffold .sindri/config.yaml), and `forget` (drop the registry row only,
-//          agent-guarded, files untouched). Backs the `repo` CLI/TUI command set.
+//
+//	list/inspect registered repos, explicit additive `init` (register +
+//	scaffold .sindri/config.yaml), and `forget` (drop the registry row only,
+//	agent-guarded, files untouched). Backs the `repo` CLI/TUI command set.
+//
 // limits:  registry + per-repo config only; never deletes a repo's files or agents.
 package hub
 

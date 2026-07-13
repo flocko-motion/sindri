@@ -1,14 +1,17 @@
 // package: hub / project_config
 // type:    logic (per-project config wiring)
 // job:     load a project's .sindri/config.yaml and expose what the hub acts on — the
-//          architecture-doc path for the reviewer prompt, and ARCHITECTURE.md seeding
-//          (only when the project didn't set its own doc). containerfile/review_prompt
-//          are read at their own call sites.
+//
+//	architecture-doc path for the reviewer prompt, and ARCHITECTURE.md seeding
+//	(only when the project didn't set its own doc). containerfile/review_prompt
+//	are read at their own call sites.
+//
 // limits:  thin adapter between internal/config and the hub; validation lives in config.
 package hub
 
 import (
 	"fmt"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 	"os"
 	"path/filepath"
 
@@ -45,7 +48,7 @@ func ensureArchitectureDoc(root string) {
 	} else if !os.IsNotExist(err) {
 		return // can't tell (permissions, etc.) — don't risk clobbering
 	}
-	if err := os.WriteFile(path, []byte(architecturePlaceholder), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(workflow.ArchitecturePlaceholder), 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "hub: WARNING — could not seed %s: %v\n", path, err)
 	}
 }

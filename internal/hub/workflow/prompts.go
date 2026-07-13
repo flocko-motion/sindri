@@ -1,4 +1,4 @@
-// package: hub / prompts
+// package: hub/workflow / prompts
 // type:    logic (every agent-facing string in one place)
 // job:     the agent's whole world is text the hub feeds it — the system prompt,
 //
@@ -9,31 +9,31 @@
 // limits:  pure strings/builders; the logic that decides WHICH to use lives in
 //
 //	workflow_task.go / workflow_pr.go / hub.go.
-package hub
+package workflow
 
 import (
 	"fmt"
 	"strings"
 )
 
-// defaultReviewPrompt seeds the project's central review-prompt.txt the first time.
-const defaultReviewPrompt = "Review this PR for correctness, clarity, and fit to the task. Flag bugs, missing tests, and anything that should change."
+// DefaultReviewPrompt seeds the project's central review-prompt.txt the first time.
+const DefaultReviewPrompt = "Review this PR for correctness, clarity, and fit to the task. Flag bugs, missing tests, and anything that should change."
 
-// reviewArchitecture is appended to every review instruction so a reviewer always
+// ReviewArchitecture is appended to every review instruction so a reviewer always
 // (re-)reads the repo's architecture guide before ruling. The hub seeds an
 // ARCHITECTURE.md into every repo it serves (see ensureArchitectureDoc), so there
 // is always one to read.
-// reviewArchitecture builds the reviewer's "read the architecture doc" clause for the
+// ReviewArchitecture builds the reviewer's "read the architecture doc" clause for the
 // project's configured doc path (arch is repo-relative; /workspace is the mounted root).
-func reviewArchitecture(arch string) string {
+func ReviewArchitecture(arch string) string {
 	return fmt.Sprintf(" Read /workspace/%s now (even if you read it before) and confirm the changes follow it.", arch)
 }
 
-// architecturePlaceholder seeds a repo's ARCHITECTURE.md when it has none, so the
+// ArchitecturePlaceholder seeds a repo's ARCHITECTURE.md when it has none, so the
 // repo gains a home for the rules reviewers enforce. Deliberately minimal — a
 // prompt to fill in, plus the one rule that already holds: conform to the brokkr
 // linters.
-const architecturePlaceholder = "# Architecture\n" + `
+const ArchitecturePlaceholder = "# Architecture\n" + `
 <!-- Seeded by sindri. Describe how this project is meant to be built so reviewers
      can hold every change to it, then commit this file. Replace this comment. -->
 
@@ -49,13 +49,13 @@ That floor is enforced automatically.
 _(none documented yet)_
 `
 
-// architectureBrief injects the project's architecture INTO every agent's brief —
+// ArchitectureBrief injects the project's architecture INTO every agent's brief —
 // the full doc content, so the agent always has it in context rather than a path it
 // might never open — with a pointer to re-read the canonical copy. EVERY role needs
 // this, not just the reviewer, or it can't produce work that fits. content is the
 // doc's text; arch is its repo-relative path (/workspace is the mounted root). Empty
 // when there's no architecture content to inject.
-func architectureBrief(content, arch string) string {
+func ArchitectureBrief(content, arch string) string {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return ""
@@ -63,11 +63,11 @@ func architectureBrief(content, arch string) string {
 	return fmt.Sprintf("\n\n# Project architecture (binding)\n\nThis is how the project is built and how your work must fit it — treat it as binding. To read it again at any time, refer to /workspace/%s.\n\n%s", arch, content)
 }
 
-// brokkrBrief points every agent at the brokkr tool — always mounted into the pod.
+// BrokkrBrief points every agent at the brokkr tool — always mounted into the pod.
 // It's the recommended linter and a structured, grep-beating way to get an overview
 // of the code, and it's built for single-command (no compound shell) usage — all of
 // which the agent has to be told, since none of it is obvious from the binary alone.
-func brokkrBrief() string {
+func BrokkrBrief() string {
 	return "\n\nThe `brokkr` tool is on your PATH — a toolbelt built for you (Claude Code): " +
 		"every feature is a SINGLE self-contained command, so run it WITHOUT compound " +
 		"shell — no pipes, no `&&`/`;`, no `2>&1 | tail`. Anything you'd reach a pipe for, " +
@@ -80,9 +80,9 @@ func brokkrBrief() string {
 		"for it before reading files blind."
 }
 
-// systemPrompt is the agent's durable identity + how-to-work brief. The live task
+// SystemPrompt is the agent's durable identity + how-to-work brief. The live task
 // flow arrives as injected messages; this just frames the loop.
-func systemPrompt(name, role, archContent, archPath string) string {
+func SystemPrompt(name, role, archContent, archPath string) string {
 	if role == "coauthor" {
 		// A coauthor is NOT on the run-`sindri`-in-a-loop rails the other roles ride.
 		// It shares the user's checkout and is driven directly, like an ordinary
@@ -104,7 +104,7 @@ the project's quality gate, `+"`sindri status`"+` shows who you are, and
 it to get work — the user gives you that here.
 
 When the user goes quiet, stop and wait for their next instruction rather than
-inventing work. Never poll or guess.`, name) + architectureBrief(archContent, archPath) + brokkrBrief()
+inventing work. Never poll or guess.`, name) + ArchitectureBrief(archContent, archPath) + BrokkrBrief()
 	}
 
 	common := fmt.Sprintf(`You are %q, a Sindri %s agent running in a sandboxed container.
@@ -121,7 +121,7 @@ lists it, but that set is contextual and changes as you go.)
 Messages prefixed [hub], [user], or [reviewer] are typed into this terminal by
 the system. Act on them. When `+"`sindri`"+` tells you to wait for a verdict,
 stop and wait quietly — it will appear here, and that may take a long time. Never
-poll, never guess, never invent commands.`, name, role) + architectureBrief(archContent, archPath) + brokkrBrief()
+poll, never guess, never invent commands.`, name, role) + ArchitectureBrief(archContent, archPath) + BrokkrBrief()
 
 	switch role {
 	case "planner":
@@ -184,109 +184,139 @@ As a worker:
 
 // --- directives: the no-arg `sindri` answer (what to do next) ---
 
-func dirWorking(task string) string {
+// FileList renders a blocking/conflicting-files list for an agent message: a plain
+// join up to five, then a "+N more" tail so a huge conflict set stays readable.
+func FileList(files []string) string {
+	switch {
+	case len(files) == 0:
+		return "the conflicting files"
+	case len(files) <= 5:
+		return strings.Join(files, ", ")
+	default:
+		return strings.Join(files[:4], ", ") + fmt.Sprintf(", and %d more", len(files)-4)
+	}
+}
+
+// DirWorking is a worker's directive while it holds a leaf task: implement it, then
+// submit.
+func DirWorking(task string) string {
 	return fmt.Sprintf("Work on task %s. When your change is committed, run `sindri submit \"<summary>\"`.", task)
 }
 
-// dirRejected hands a worker its reviewer's feedback verbatim — pushed every time it
+// DirRejected hands a worker its reviewer's feedback verbatim — pushed every time it
 // asks the hub what to do, so a rejected PR's comments reach it whether or not it saw
 // the moment-of-rejection message, and it never has to go dig them out of `sindri show`.
-func dirRejected(task, feedback string) string {
+func DirRejected(task, feedback string) string {
 	return fmt.Sprintf("Your PR for task %s was REJECTED — address this reviewer feedback, then run `sindri submit \"<summary>\"`:\n\n%s", task, feedback)
 }
 
-const dirSubmitted = "Your pull request is under review. Wait — the hub will tell you the verdict. While you wait, you may run `sindri resolve` any time to check your branch still merges onto its base (and resolve it if the base has moved) — it does no harm and keeps the PR healthy."
+const DirSubmitted = "Your pull request is under review. Wait — the hub will tell you the verdict. While you wait, you may run `sindri resolve` any time to check your branch still merges onto its base (and resolve it if the base has moved) — it does no harm and keeps the PR healthy."
 
-// dirPlanner is the idle planner's directive: orient, then wait for the user. A
+// DirPlanner is the idle planner's directive: orient, then wait for the user. A
 // planner is never auto-assigned work.
-const dirPlanner = "You're planning new features together with the user. Get oriented first: read README.md, read the backlog with `sindri task list` (and `sindri task <id>` for detail), and read the specs under /workspace/openspec. Then wait — the user will tell you what to plan. When you do: propose tasks with `sindri create-task \"<title>\"` (each needs the user's approval), draft specs in /workspace/openspec, and when a draft is ready — or whenever you want it reviewed — open a PR with `sindri openspec submit \"<summary>\"` (that PR is the review; don't ask the user to read your files instead). Only message the user for a concrete question you can't resolve yourself."
+const DirPlanner = "You're planning new features together with the user. Get oriented first: read README.md, read the backlog with `sindri task list` (and `sindri task <id>` for detail), and read the specs under /workspace/openspec. Then wait — the user will tell you what to plan. When you do: propose tasks with `sindri create-task \"<title>\"` (each needs the user's approval), draft specs in /workspace/openspec, and when a draft is ready — or whenever you want it reviewed — open a PR with `sindri openspec submit \"<summary>\"` (that PR is the review; don't ask the user to read your files instead). Only message the user for a concrete question you can't resolve yourself."
 
-// dirCoauthor is the coauthor's no-arg `sindri` answer. It never blocks and never
+// DirCoauthor is the coauthor's no-arg `sindri` answer. It never blocks and never
 // hands out managed work — the user drives a coauthor directly — so it just
 // reorients: this is freestyle collaboration in the shared checkout.
-const dirCoauthor = "You're a coauthor working directly with the user in the shared checkout at /workspace — there's no task queue here. Do what the user asks in this terminal; edit files, run the build/tests, and use git yourself. `sindri lint` runs the quality gate, `sindri log \"<note>\"` records a note. When the user goes quiet, wait for their next instruction."
+const DirCoauthor = "You're a coauthor working directly with the user in the shared checkout at /workspace — there's no task queue here. Do what the user asks in this terminal; edit files, run the build/tests, and use git yourself. `sindri lint` runs the quality gate, `sindri log \"<note>\"` records a note. When the user goes quiet, wait for their next instruction."
 
-func dirReview(prID, task, arch string) string {
+// DirReview is a reviewer's directive: the PR branch is checked out fresh in its
+// /workspace — read it, lint, then approve or reject.
+func DirReview(prID, task, arch string) string {
 	return fmt.Sprintf("Review %s (task %s): the PR branch is checked out fresh in /workspace — review it (or `sindri show %s`), run `sindri lint %s`, then `sindri approve %s` or `sindri reject %s \"<reason>\"`.%s",
-		prID, task, prID, prID, prID, prID, reviewArchitecture(arch))
+		prID, task, prID, prID, prID, prID, ReviewArchitecture(arch))
 }
 
-func dirClaimed(id, title, branch, arch string) string {
+// DirClaimed announces a freshly-claimed leaf task: the branch is ready in the
+// worker's /workspace — work it, follow the architecture, then submit.
+func DirClaimed(id, title, branch, arch string) string {
 	return fmt.Sprintf("Claimed %s: %s\nBranch %s is ready in your /workspace. Work on it — follow the project architecture (in your brief; re-read it at /workspace/%s) — then run `sindri submit \"<summary>\"`.", id, title, branch, arch)
 }
 
-const dirNoTasks = "No open tasks. Wait — the hub will tell you when there is work."
+const DirNoTasks = "No open tasks. Wait — the hub will tell you when there is work."
 
 // --- collaborative (container) workflow ---
 
-// dirContainerClaimed starts an agent on a feature: it works the container's
+// DirContainerClaimed starts an agent on a feature: it works the container's
 // subtasks one at a time on a single standing branch, checkpointing (not
 // submitting) between them. The whole feature lands as one PR when the user opens
 // a milestone.
-func dirContainerClaimed(container, ctitle, child, childTitle string) string {
+func DirContainerClaimed(container, ctitle, child, childTitle string) string {
 	return fmt.Sprintf("You're working feature %s: %s — on a single branch in /workspace. "+
 		"Current subtask %s: %s. Implement it, then run `sindri checkpoint \"<summary>\"` "+
 		"to commit it and move to the next subtask. Do NOT submit per subtask — the whole feature "+
 		"is merged as one PR when you and the user reach a milestone.", container, ctitle, child, childTitle)
 }
 
-func dirContainerWait(container string) string {
+// DirContainerWait is the directive once every open subtask of a feature is
+// checkpointed: wait for the user to open a milestone PR or add subtasks.
+func DirContainerWait(container string) string {
 	return fmt.Sprintf("All open subtasks of feature %s are checkpointed. Wait — the user will open a "+
 		"milestone PR to merge the work so far, or add more subtasks. Don't poll.", container)
 }
 
-func replyCheckpointed(done, next, nextTitle string) string {
+// ReplyCheckpointed acknowledges a checkpoint and hands the worker its next subtask.
+func ReplyCheckpointed(done, next, nextTitle string) string {
 	return fmt.Sprintf("Checkpointed %s. Next subtask %s: %s — implement it, then `sindri checkpoint \"<summary>\"` again.", done, next, nextTitle)
 }
 
-func replyCheckpointedLast(done, container string) string {
+// ReplyCheckpointedLast acknowledges the checkpoint that clears a feature's last open
+// subtask: the worker now waits for a milestone PR or more subtasks.
+func ReplyCheckpointedLast(done, container string) string {
 	return fmt.Sprintf("Checkpointed %s — that was the last open subtask of %s. Wait: the user will open a milestone PR (or add more subtasks).", done, container)
 }
 
-const replyNothingToCheckpoint = "Nothing to checkpoint — you're not working a subtask. Run `sindri` for your current directive."
+const ReplyNothingToCheckpoint = "Nothing to checkpoint — you're not working a subtask. Run `sindri` for your current directive."
 
 // --- injected messages ([hub]/[user]/[reviewer], typed into the agent's tmux) ---
 
-const msgKickoff = "[hub] You're live. Run `sindri` and do exactly what it tells you — it always returns your current job, whether you're new or resuming."
+const MsgKickoff = "[hub] You're live. Run `sindri` and do exactly what it tells you — it always returns your current job, whether you're new or resuming."
 
-func msgMerged(prID string) string {
+// MsgMerged tells a worker its PR merged and to fetch the next task.
+func MsgMerged(prID string) string {
 	return fmt.Sprintf("[hub] %s merged. Run `sindri` for your next task.", prID)
 }
 
-// msgTaskCancelled tells a worker its task was closed/scrapped out from under it —
+// MsgTaskCancelled tells a worker its task was closed/scrapped out from under it —
 // stop, and don't clean up (the hub already reset the worktree), just get new work.
-func msgTaskCancelled(id string) string {
+func MsgTaskCancelled(id string) string {
 	return fmt.Sprintf("[hub] Task %s was cancelled — stop working on it. Don't clean up your workspace; the sindri hub will reset it for you when you pick up your next task. Just run `sindri`.", id)
 }
 
-func msgRebased(base string) string {
+// MsgRebased tells a worker the hub rebased its branch onto a moved base.
+func MsgRebased(base string) string {
 	return fmt.Sprintf("[hub] %s moved — your branch was rebased onto it, so you're up to date.", base)
 }
 
-// msgResolveNeeded is injected when a branch can't merge because it conflicts with
+// MsgResolveNeeded is injected when a branch can't merge because it conflicts with
 // its base: the hub has left the conflicts in the worker's workspace to edit (the
 // worker has no git — the hub drives it), and points at the single verb to retry.
-func msgResolveNeeded(base string, files []string) string {
-	return fmt.Sprintf("[hub] Your branch conflicts with %s and can't be merged yet: %s. The conflicts are in your /workspace with <<<<<<< markers — edit each file to the intended result (remove the markers), then run `sindri resolve`. Repeat until it's clean; it then goes back for review.", base, fileList(files))
+func MsgResolveNeeded(base string, files []string) string {
+	return fmt.Sprintf("[hub] Your branch conflicts with %s and can't be merged yet: %s. The conflicts are in your /workspace with <<<<<<< markers — edit each file to the intended result (remove the markers), then run `sindri resolve`. Repeat until it's clean; it then goes back for review.", base, FileList(files))
 }
 
-func msgMilestoneMerged(prID string) string {
+// MsgMilestoneMerged tells a feature worker its milestone merged and its branch was
+// rebased onto the new base.
+func MsgMilestoneMerged(prID string) string {
 	return fmt.Sprintf("[hub] Milestone %s merged — your feature branch is rebased onto the new base. Run `sindri` to continue.", prID)
 }
 
-func msgRejectedByUser(prID, feedback string) string {
+// MsgRejectedByUser tells a worker the user rejected its PR, with the feedback.
+func MsgRejectedByUser(prID, feedback string) string {
 	return fmt.Sprintf("[user] %s was rejected: %s — address the feedback on your branch and run `sindri submit` again.", prID, feedback)
 }
 
-func msgRejectedByReviewer(prID, feedback string) string {
+// MsgRejectedByReviewer tells a worker its reviewer rejected the PR, with the feedback.
+func MsgRejectedByReviewer(prID, feedback string) string {
 	return fmt.Sprintf("[reviewer] %s rejected: %s — please address the feedback and submit again.", prID, feedback)
 }
 
-// msgReview is the single review instruction — the hub has already checked the PR
+// MsgReview is the single review instruction — the hub has already checked the PR
 // branch out fresh into the reviewer's /workspace (the reviewer only reads), so it
 // points there. If that checkout failed it says so loudly and falls back to the diff
 // over the socket, so the reviewer never mistakes a stale tree for the PR.
-func msgReview(prID, requirement, branch, base, arch string, checkedOut bool) string {
+func MsgReview(prID, requirement, branch, base, arch string, checkedOut bool) string {
 	seeChanges := fmt.Sprintf("`sindri show %s`", prID)
 	loc := ""
 	if checkedOut {
@@ -298,54 +328,57 @@ func msgReview(prID, requirement, branch, base, arch string, checkedOut bool) st
 		loc = fmt.Sprintf("⚠ %s could NOT be checked out into /workspace — review from the diff only; do NOT trust /workspace. ", branch)
 	}
 	return fmt.Sprintf("[hub] Review %s — %s %s(1) see what changed: %s. (2) check the gate: `sindri lint %s`. (3) decide: `sindri approve %s` or `sindri reject %s \"<findings>\"`.%s",
-		prID, requirement, loc, seeChanges, prID, prID, prID, reviewArchitecture(arch))
+		prID, requirement, loc, seeChanges, prID, prID, prID, ReviewArchitecture(arch))
 }
 
 // --- instructive replies to worker verbs ---
 
-func replyRegistered(prID string) string {
+// ReplyRegistered acknowledges a submitted PR and tells the worker to wait for review.
+func ReplyRegistered(prID string) string {
 	return fmt.Sprintf("%s registered. You'll be informed when it's reviewed. Please wait — this may take a while.", prID)
 }
 
-// replyRebaseConflicts answers `rebase` when the rebase hit conflicts to edit.
-func replyRebaseConflicts(base string, files []string) string {
-	return fmt.Sprintf("Rebasing onto %s hit conflicts in %s. They're in your /workspace with <<<<<<< markers — edit each file to the intended result (remove the markers), then run `sindri rebase` again to continue. Repeat until it reports you're aligned.", base, fileList(files))
+// ReplyRebaseConflicts answers `rebase` when the rebase hit conflicts to edit.
+func ReplyRebaseConflicts(base string, files []string) string {
+	return fmt.Sprintf("Rebasing onto %s hit conflicts in %s. They're in your /workspace with <<<<<<< markers — edit each file to the intended result (remove the markers), then run `sindri rebase` again to continue. Repeat until it reports you're aligned.", base, FileList(files))
 }
 
-// replyRebased answers `rebase` once the branch is cleanly current with base.
-func replyRebased(base string) string {
+// ReplyRebased answers `rebase` once the branch is cleanly current with base.
+func ReplyRebased(base string) string {
 	return fmt.Sprintf("Your branch is rebased onto %s — you're aligned with the current reference state. Carry on.", base)
 }
 
-// replyResolveConflicts answers `resolve` when conflicts remain to edit.
-func replyResolveConflicts(base string, files []string) string {
-	return fmt.Sprintf("Rebasing onto %s conflicts in %s. They're in your /workspace with <<<<<<< markers — edit each file to the intended result (remove the markers), then run `sindri resolve` again.", base, fileList(files))
+// ReplyResolveConflicts answers `resolve` when conflicts remain to edit.
+func ReplyResolveConflicts(base string, files []string) string {
+	return fmt.Sprintf("Rebasing onto %s conflicts in %s. They're in your /workspace with <<<<<<< markers — edit each file to the intended result (remove the markers), then run `sindri resolve` again.", base, FileList(files))
 }
 
-// replyResolvedClean answers `resolve` once the branch applies cleanly after a
+// ReplyResolvedClean answers `resolve` once the branch applies cleanly after a
 // conflict was resolved — it's back with the reviewer.
-func replyResolvedClean(base string) string {
+func ReplyResolvedClean(base string) string {
 	return fmt.Sprintf("Your branch is now current with %s and conflict-free — it's back with the reviewer.", base)
 }
 
-// replyAlreadyCurrent answers a proactive `resolve` on a branch that already sits
+// ReplyAlreadyCurrent answers a proactive `resolve` on a branch that already sits
 // cleanly on its base.
-func replyAlreadyCurrent(base string) string {
+func ReplyAlreadyCurrent(base string) string {
 	return fmt.Sprintf("Your branch is already current with %s — nothing to resolve.", base)
 }
 
-const replyNothingToSubmit = "Nothing to submit — run `sindri` to pick up a task first."
+const ReplyNothingToSubmit = "Nothing to submit — run `sindri` to pick up a task first."
 
-func replyTaskProposed(id, title string) string {
+// ReplyTaskProposed acknowledges a planner's proposed task, pending user approval.
+func ReplyTaskProposed(id, title string) string {
 	return fmt.Sprintf("Proposed %s: %s — awaiting the user's approval before any worker can pick it up.", id, title)
 }
 
-func replyLintFail(out string) string {
+// ReplyLintFail answers a failed `sindri lint`, echoing the violations to fix.
+func ReplyLintFail(out string) string {
 	return fmt.Sprintf("Lint failed — fix the violations and submit again:\n%s", out)
 }
 
-// replySpecInvalid answers `openspec submit` when the change fails openspec's own
+// ReplySpecInvalid answers `openspec submit` when the change fails openspec's own
 // validation (the planner's gate — the code linter doesn't apply to spec work).
-func replySpecInvalid(out string) string {
+func ReplySpecInvalid(out string) string {
 	return fmt.Sprintf("openspec validation failed — fix the specs and submit again:\n%s", out)
 }

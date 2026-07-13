@@ -1,16 +1,20 @@
 // package: hub / workflow
 // type:    logic (the act → report → idle loop + PR-as-merge-intent)
 // job:     the worker verbs and task assignment. Tasks are a cached read model
-//          synced from td (D15); `next` claims one and branches; the directive loop
-//          decides the next action. All state is per-project — methods take a
-//          project (repoTag) and work through store.For(project).
+//
+//	synced from td (D15); `next` claims one and branches; the directive loop
+//	decides the next action. All state is per-project — methods take a
+//	project (repoTag) and work through store.For(project).
+//
 // limits:  git is entirely hub-side (the agent edits /workspace, the hub commits
-//          and merges); writes to td go through the td adapter (D15).
+//
+//	and merges); writes to td go through the td adapter (D15).
 package hub
 
 import (
 	"context"
 	"fmt"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 	"io"
 	"path/filepath"
 	"strings"
@@ -152,7 +156,6 @@ func (h *Hub) UnassignTask(project, id string) error {
 	return nil
 }
 
-
 // ApproveTask clears the approval gate on a planner-proposed task (user-only),
 // making it claimable, and tells any running planner in the project.
 func (h *Hub) ApproveTask(project, id string) error {
@@ -220,7 +223,7 @@ func (h *Hub) cmdCreateTask(c registry.Caller, args []string, out io.Writer) (in
 		return 1, err
 	}
 	h.notify()
-	fmt.Fprintln(out, replyTaskProposed(id, title))
+	fmt.Fprintln(out, workflow.ReplyTaskProposed(id, title))
 	return 0, nil
 }
 
@@ -311,9 +314,9 @@ func (h *Hub) workDirective(project, name, task string) (string, error) {
 		return "", err
 	}
 	if rejected {
-		return dirRejected(task, feedback), nil
+		return workflow.DirRejected(task, feedback), nil
 	}
-	return dirWorking(task), nil
+	return workflow.DirWorking(task), nil
 }
 
 // AgentDirective is the single next action the hub wants this agent to take — the
@@ -329,7 +332,7 @@ func (h *Hub) AgentDirective(ctx context.Context, project, name string) (string,
 		return "", fmt.Errorf("unknown agent %q", name)
 	}
 	if a.Role == "coauthor" {
-		return dirCoauthor, nil
+		return workflow.DirCoauthor, nil
 	}
 	if a.Role == "reviewer" {
 		return h.waitForWork(ctx, func() (string, bool, error) {
@@ -339,7 +342,7 @@ func (h *Hub) AgentDirective(ctx context.Context, project, name string) (string,
 			}
 			for _, pr := range prs {
 				if pr.Status == "open" {
-					return dirReview(pr.ID, pr.Task, h.architectureDoc(project)), true, nil
+					return workflow.DirReview(pr.ID, pr.Task, h.architectureDoc(project)), true, nil
 				}
 			}
 			return "", false, nil
@@ -348,9 +351,9 @@ func (h *Hub) AgentDirective(ctx context.Context, project, name string) (string,
 	st, _ := ps.GetState(name)
 	if a.Role == "planner" {
 		if st.Phase == "submitted" {
-			return dirSubmitted, nil
+			return workflow.DirSubmitted, nil
 		}
-		return dirPlanner, nil
+		return workflow.DirPlanner, nil
 	}
 	// A worker holding a container is in the collaborative loop.
 	if st.Container != "" {
@@ -363,16 +366,16 @@ func (h *Hub) AgentDirective(ctx context.Context, project, name string) (string,
 				}
 				if rejected {
 					_ = ps.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "working"})
-					return dirRejected(st.Task, feedback), nil
+					return workflow.DirRejected(st.Task, feedback), nil
 				}
-				return dirSubmitted, nil
+				return workflow.DirSubmitted, nil
 			case "working":
 				return h.workDirective(project, name, st.Task)
 			default:
 				if next, ok := h.advanceContainer(project, name, st.Container); ok {
-					return dirWorking(next.ID), nil
+					return workflow.DirWorking(next.ID), nil
 				}
-				return dirContainerWait(st.Container), nil
+				return workflow.DirContainerWait(st.Container), nil
 			}
 		}
 		_ = ps.SetState(store.AgentState{Agent: name, Phase: "idle"})
@@ -388,9 +391,9 @@ func (h *Hub) AgentDirective(ctx context.Context, project, name string) (string,
 		}
 		if rejected {
 			_ = ps.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Phase: "working"})
-			return dirRejected(st.Task, feedback), nil
+			return workflow.DirRejected(st.Task, feedback), nil
 		}
-		return dirSubmitted, nil
+		return workflow.DirSubmitted, nil
 	default: // idle — claim the next task, blocking until one exists
 		return h.waitForWork(ctx, func() (string, bool, error) { return h.claimNext(project, name) })
 	}
@@ -510,7 +513,7 @@ func (h *Hub) cmdNext(c registry.Caller, _ []string, out io.Writer) (int, error)
 		return 1, err
 	}
 	if !claimed {
-		fmt.Fprintln(out, dirNoTasks)
+		fmt.Fprintln(out, workflow.DirNoTasks)
 		return 0, nil
 	}
 	fmt.Fprintln(out, d)
@@ -528,7 +531,7 @@ func (h *Hub) claimNext(project, agent string) (string, bool, error) {
 }
 
 // claimLeaf claims the highest-priority open leaf for a worker, branching on it.
-func (h *Hub) claimLeaf(project, agent string) (string, bool, error) {
+func (h *Hub) claimLeaf(project, worker string) (string, bool, error) {
 	ps := h.store.For(project)
 	root := h.projectRoot(project)
 	open, err := ps.OpenLeaves()
@@ -543,9 +546,9 @@ func (h *Hub) claimLeaf(project, agent string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	a, ok, err := ps.GetAgent(agent)
+	a, ok, err := ps.GetAgent(worker)
 	if err != nil || !ok {
-		return "", false, fmt.Errorf("agent %s missing: %v", agent, err)
+		return "", false, fmt.Errorf("agent %s missing: %v", worker, err)
 	}
 	wt := filepath.Join(root, a.Workspace)
 	branch := t.ID
@@ -569,12 +572,12 @@ func (h *Hub) claimLeaf(project, agent string) (string, bool, error) {
 	if err := git.CreateBranch(wt, branch, base); err != nil {
 		return "", false, err
 	}
-	if err := ps.SetState(store.AgentState{Agent: agent, Task: t.ID, Branch: branch, Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: worker, Task: t.ID, Branch: branch, Phase: "working"}); err != nil {
 		return "", false, err
 	}
-	_ = ps.Log(agent, "claim", t.ID+" "+t.Title)
+	_ = ps.Log(worker, "claim", t.ID+" "+t.Title)
 	h.notify()
-	return dirClaimed(t.ID, t.Title, branch, h.architectureDoc(project)), true, nil
+	return workflow.DirClaimed(t.ID, t.Title, branch, h.architectureDoc(project)), true, nil
 }
 
 // collabLabel marks a parent task for collaborative assignment.
@@ -582,7 +585,7 @@ const collabLabel = "collab"
 
 // claimContainer assigns the highest-priority marked, unheld container in a project
 // to the agent, starting it on the container's first open child.
-func (h *Hub) claimContainer(project, agent string) (string, bool, error) {
+func (h *Hub) claimContainer(project, worker string) (string, bool, error) {
 	ps := h.store.For(project)
 	root := h.projectRoot(project)
 	containers, err := ps.MarkedContainers(collabLabel)
@@ -601,9 +604,9 @@ func (h *Hub) claimContainer(project, agent string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	a, ok, err := ps.GetAgent(agent)
+	a, ok, err := ps.GetAgent(worker)
 	if err != nil || !ok {
-		return "", false, fmt.Errorf("agent %s missing: %v", agent, err)
+		return "", false, fmt.Errorf("agent %s missing: %v", worker, err)
 	}
 	wt := filepath.Join(root, a.Workspace)
 	if err := git.EnsureBranch(wt, c.ID, base); err != nil {
@@ -614,12 +617,12 @@ func (h *Hub) claimContainer(project, agent string) (string, bool, error) {
 		return "", false, err
 	}
 	_ = h.refreshTask(project, child.ID)
-	if err := ps.SetState(store.AgentState{Agent: agent, Container: c.ID, Branch: c.ID, Task: child.ID, Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: worker, Container: c.ID, Branch: c.ID, Task: child.ID, Phase: "working"}); err != nil {
 		return "", false, err
 	}
-	_ = ps.Log(agent, "claim-container", c.ID+" "+c.Title)
+	_ = ps.Log(worker, "claim-container", c.ID+" "+c.Title)
 	h.notify()
-	return dirContainerClaimed(c.ID, c.Title, child.ID, child.Title), true, nil
+	return workflow.DirContainerClaimed(c.ID, c.Title, child.ID, child.Title), true, nil
 }
 
 // cmdCheckpoint commits the current subtask to the container branch, closes that
@@ -632,7 +635,7 @@ func (h *Hub) cmdCheckpoint(c registry.Caller, args []string, out io.Writer) (in
 		return 1, err
 	}
 	if st.Container == "" || st.Phase != "working" || st.Task == "" {
-		fmt.Fprintln(out, replyNothingToCheckpoint)
+		fmt.Fprintln(out, workflow.ReplyNothingToCheckpoint)
 		return 1, nil
 	}
 	a, _, _ := ps.GetAgent(c.Agent)
@@ -651,12 +654,12 @@ func (h *Hub) cmdCheckpoint(c registry.Caller, args []string, out io.Writer) (in
 	_ = ps.Log(c.Agent, "checkpoint", st.Task)
 	done := st.Task
 	if next, ok := h.advanceContainer(c.Project, c.Agent, st.Container); ok {
-		fmt.Fprintln(out, replyCheckpointed(done, next.ID, next.Title))
+		fmt.Fprintln(out, workflow.ReplyCheckpointed(done, next.ID, next.Title))
 		return 0, nil
 	}
 	_ = ps.SetState(store.AgentState{Agent: c.Agent, Container: st.Container, Branch: st.Container, Phase: "idle"})
 	h.notify()
-	fmt.Fprintln(out, replyCheckpointedLast(done, st.Container))
+	fmt.Fprintln(out, workflow.ReplyCheckpointedLast(done, st.Container))
 	return 0, nil
 }
 

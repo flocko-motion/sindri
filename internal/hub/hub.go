@@ -16,6 +16,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 	"io"
 	"net"
 	"os"
@@ -51,8 +52,8 @@ type Hub struct {
 	// macOS only: a bind-mounted unix socket can't be connected to across the
 	// podman VM boundary, so agents reach the hub over a loopback TCP channel
 	// authenticated by a per-agent token. Zero/nil on Linux (unix sockets suffice).
-	agentTCPLn   net.Listener
-	agentTCPPort int
+	agentTCPLn    net.Listener
+	agentTCPPort  int
 	agentDialHost string // how a pod addresses the host for the TCP channel (runtime-specific)
 
 	lcMu      sync.Mutex          // guards lifecycle
@@ -673,7 +674,7 @@ func (h *Hub) injectWhenReady(project, name, text string) error {
 func (h *Hub) rehydrate(project, name string) {
 	// Let Claude boot to input-readiness first, or its Enter is eaten by the splash.
 	time.Sleep(8 * time.Second)
-	_ = h.injectWhenReady(project, name, msgKickoff)
+	_ = h.injectWhenReady(project, name, workflow.MsgKickoff)
 	// A chatroom member that just relaunched has lost the membership cue from its
 	// durable prompt — remind it so it knows it can still talk to the room. Best-
 	// effort: a store hiccup here shouldn't derail the rehydrate.
@@ -683,4 +684,3 @@ func (h *Hub) rehydrate(project, name string) {
 		_ = h.injectWhenReady(project, name, chat.MsgReminder)
 	}
 }
-

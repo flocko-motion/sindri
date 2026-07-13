@@ -1,9 +1,11 @@
 // package: hub / sections
 // type:    logic (view derivation the UIs render)
 // job:     the single source of truth for the dashboard's sections (their badge
-//          counts) and for arranging tasks into their parent/child tree with a
-//          waiting-PR annotation. UIs render these; they never re-derive counts
-//          or hierarchy.
+//
+//	counts) and for arranging tasks into their parent/child tree with a
+//	waiting-PR annotation. UIs render these; they never re-derive counts
+//	or hierarchy.
+//
 // limits:  pure functions over BoardState/store types; no rendering, no I/O.
 package hub
 
@@ -87,7 +89,7 @@ var Sections = []Section{
 	{"tasks", "Tasks", func(b BoardState) int { return countTasks(b.Tasks, taskOpen) }},
 	{"agents", "Agents", func(b BoardState) int { return len(b.Agents) }}, // the whole roster — down agents are still agents
 	{"prs", "PRs", func(b BoardState) int { return countPRs(b.PRs, prNotMerged) }},
-	{"repos", "Repos", func(b BoardState) int { return len(b.Projects) }}, // every repo the hub tracks
+	{"repos", "Repos", func(b BoardState) int { return len(b.Projects) }},   // every repo the hub tracks
 	{"chat", "Chat", func(b BoardState) int { return len(b.Chat.Members) }}, // agents in the user's chatroom
 }
 

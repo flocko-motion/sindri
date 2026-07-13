@@ -1,15 +1,18 @@
 // package: hub / workflow_close
 // type:    logic (task close/scrap dispatch)
 // job:     the two lifecycle-ending verbs every todo backend distinguishes — "done"
-//          (CloseTask) and "discard" (DeleteTask) — routed by the task's id prefix to
-//          the right backend op: td close/delete, openspec archive/change-removal,
-//          GitHub issue close/delete. Both guard against a live holder first.
+//
+//	(CloseTask) and "discard" (DeleteTask) — routed by the task's id prefix to
+//	the right backend op: td close/delete, openspec archive/change-removal,
+//	GitHub issue close/delete. Both guard against a live holder first.
+//
 // limits:  dispatch only; each op lives in its adapter (td/spec/github).
 package hub
 
 import (
 	"context"
 	"fmt"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 	"os"
 	"strings"
 
@@ -85,7 +88,7 @@ func (h *Hub) finishTask(project, id string, scrap bool) error {
 			_ = ps.SetState(store.AgentState{Agent: a.Name, Phase: restPhase(a.Role)})
 			_ = ps.Log(a.Name, "task-cancelled", id)
 			if h.agentAlive(project, a.Name) {
-				_ = h.injectWhenReady(project, a.Name, msgTaskCancelled(id))
+				_ = h.injectWhenReady(project, a.Name, workflow.MsgTaskCancelled(id))
 			}
 		}
 	}

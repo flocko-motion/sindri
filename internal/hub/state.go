@@ -1,9 +1,11 @@
 // package: hub / state
 // type:    logic (the single read surface + change notifications)
 // job:     assemble the whole board the UIs render — agents across every project
-//          with live workflow state, merge-intents, and orphaned runtime, plus the
-//          tasks of the selected project — and a tiny pub/sub so clients live-update
-//          over /events. The central store is the read model; this is its projection.
+//
+//	with live workflow state, merge-intents, and orphaned runtime, plus the
+//	tasks of the selected project — and a tiny pub/sub so clients live-update
+//	over /events. The central store is the read model; this is its projection.
+//
 // limits:  read-only assembly + notify; mutations live in their own methods.
 package hub
 
@@ -17,9 +19,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/flo-at/sindri/internal/container"
-	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/adapter/agent"
+	"github.com/flo-at/sindri/internal/adapter/tmux"
+	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 

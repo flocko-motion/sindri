@@ -1,8 +1,10 @@
 // package: hub / chat
 // type:    logic (chat wiring)
 // job:     wire the extracted chat relay (internal/hub/chat) into the hub — provide
-//          its Delivery port (tmux injection + board notify) and the thin methods
-//          the server and registry call. The relay itself lives in the chat package.
+//
+//	its Delivery port (tmux injection + board notify) and the thin methods
+//	the server and registry call. The relay itself lives in the chat package.
+//
 // limits:  no chat logic here (-> internal/hub/chat); just the port + delegation.
 package hub
 

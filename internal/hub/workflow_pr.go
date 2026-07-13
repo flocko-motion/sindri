@@ -1,15 +1,19 @@
 // package: hub / workflow (PR, review, merge)
 // type:    logic (PR-as-merge-intent: submit → review → approve → host merge)
 // job:     the reviewer verbs and the host merge; verdicts route to the owning
-//          agent's session by branch (object-mediated, D-routing). git is hub-side.
-//          All state is per-project — methods take a project (repoTag) and work
-//          through store.For(project) + h.projectRoot(project).
+//
+//	agent's session by branch (object-mediated, D-routing). git is hub-side.
+//	All state is per-project — methods take a project (repoTag) and work
+//	through store.For(project) + h.projectRoot(project).
+//
 // limits:  the PR side only; task claim/submit-to-td is workflow_task.go and the
-//          git mechanics are the adapter's (-> adapter/git).
+//
+//	git mechanics are the adapter's (-> adapter/git).
 package hub
 
 import (
 	"fmt"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 	"io"
 	"os"
 	"os/exec"
@@ -120,10 +124,10 @@ func (h *Hub) ReviewPrompt(project string) (string, error) {
 	} else if !os.IsNotExist(err) {
 		return "", err
 	}
-	if err := os.WriteFile(path, []byte(defaultReviewPrompt+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(workflow.DefaultReviewPrompt+"\n"), 0o644); err != nil {
 		return "", err
 	}
-	return defaultReviewPrompt, nil
+	return workflow.DefaultReviewPrompt, nil
 }
 
 // RequestReview is the ONE review path — every trigger (a worker's submit/resubmit,
@@ -177,7 +181,7 @@ func (h *Hub) RequestReview(project, prID, requirement string) error {
 	}
 	_ = ps.SetState(store.AgentState{Agent: reviewer, Phase: "reviewing"}) // board shows it working, not idle
 	_ = ps.LogPR(prID, "review-requested", "assigned to "+reviewer)
-	go h.injectWhenReady(project, reviewer, msgReview(prID, requirement, pr.Branch, pr.Base, h.architectureDoc(project), checkedOut)) // async: don't block a worker's submit
+	go h.injectWhenReady(project, reviewer, workflow.MsgReview(prID, requirement, pr.Branch, pr.Base, h.architectureDoc(project), checkedOut)) // async: don't block a worker's submit
 	h.notify()
 	return nil
 }
@@ -224,13 +228,13 @@ func (h *Hub) cmdSubmit(c registry.Caller, args []string, out io.Writer) (int, e
 		return 1, err
 	}
 	if st.Phase != "working" || st.Task == "" {
-		fmt.Fprintln(out, replyNothingToSubmit)
+		fmt.Fprintln(out, workflow.ReplyNothingToSubmit)
 		return 1, nil
 	}
 	a, _, _ := ps.GetAgent(c.Agent)
 	wt := filepath.Join(root, a.Workspace)
 	if lintOut, ok := h.runLint(wt); !ok {
-		fmt.Fprintln(out, replyLintFail(strings.TrimSpace(lintOut)))
+		fmt.Fprintln(out, workflow.ReplyLintFail(strings.TrimSpace(lintOut)))
 		_ = ps.Log(c.Agent, "lint-fail", st.Task)
 		return 1, nil
 	}
@@ -260,7 +264,7 @@ func (h *Hub) cmdSubmit(c registry.Caller, args []string, out io.Writer) (int, e
 		_ = ps.LogPR(pr.ID, "created", "by "+c.Agent+": "+msg)
 	}
 	_ = h.RequestReview(c.Project, pr.ID, "") // one review path; the hub preps the terrain
-	fmt.Fprintln(out, replyRegistered(pr.ID))
+	fmt.Fprintln(out, workflow.ReplyRegistered(pr.ID))
 	return 0, nil
 }
 
@@ -296,7 +300,7 @@ func (h *Hub) cmdOpenspec(c registry.Caller, args []string, out io.Writer) (int,
 	// plan on `brokkr lint` of code it can't touch — and didn't write — is wrong.
 	// Validate the specs it actually authored instead.
 	if ok, valOut := spec.Validate(wt); !ok {
-		fmt.Fprintln(out, replySpecInvalid(strings.TrimSpace(valOut)))
+		fmt.Fprintln(out, workflow.ReplySpecInvalid(strings.TrimSpace(valOut)))
 		_ = ps.Log(c.Agent, "openspec-invalid", branch)
 		return 1, nil
 	}
@@ -322,7 +326,7 @@ func (h *Hub) cmdOpenspec(c registry.Caller, args []string, out io.Writer) (int,
 		_ = ps.LogPR(pr.ID, "created", "by "+c.Agent+": "+msg)
 	}
 	_ = h.RequestReview(c.Project, pr.ID, "") // one review path; the hub preps the terrain
-	fmt.Fprintln(out, replyRegistered(pr.ID))
+	fmt.Fprintln(out, workflow.ReplyRegistered(pr.ID))
 	return 0, nil
 }
 
@@ -441,18 +445,6 @@ func (h *Hub) RejectPR(project, prID, feedback string) error {
 	return h.reject(project, prID, feedback, true)
 }
 
-// fileList renders a blocking-files list for a user message.
-func fileList(files []string) string {
-	switch {
-	case len(files) == 0:
-		return "the conflicting files"
-	case len(files) <= 5:
-		return strings.Join(files, ", ")
-	default:
-		return strings.Join(files[:4], ", ") + fmt.Sprintf(", and %d more", len(files)-4)
-	}
-}
-
 // reject rejects a project's PR with feedback and routes it to the owning worker
 // (object-addressed). byUser selects the message's voice ([user] vs [reviewer]).
 func (h *Hub) reject(project, prID, feedback string, byUser bool) error {
@@ -478,9 +470,9 @@ func (h *Hub) reject(project, prID, feedback string, byUser bool) error {
 	}
 	_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: phase})
 
-	who, msg := "reviewer", msgRejectedByReviewer(pr.ID, feedback)
+	who, msg := "reviewer", workflow.MsgRejectedByReviewer(pr.ID, feedback)
 	if byUser {
-		who, msg = "user", msgRejectedByUser(pr.ID, feedback)
+		who, msg = "user", workflow.MsgRejectedByUser(pr.ID, feedback)
 	}
 	_ = ps.LogPR(pr.ID, "rejected", "by "+who+": "+feedback)
 	_ = ps.Log(pr.Agent, "reject", pr.ID+" ("+who+"): "+feedback)
@@ -582,7 +574,7 @@ func (h *Hub) RebaseAgent(project, name string) error {
 		return fmt.Errorf("couldn't rebase %s onto %s — a conflict or uncommitted changes (git aborted, so nothing changed). Have %s resolve it interactively with `sindri rebase` (it surfaces the conflicts to fix). git said: %w", name, base, name, err)
 	}
 	_ = ps.Log(name, "rebase", "onto "+base)
-	_ = h.injectWhenReady(project, name, msgRebased(base))
+	_ = h.injectWhenReady(project, name, workflow.MsgRebased(base))
 	h.notify()
 	return nil
 }
@@ -603,7 +595,7 @@ func (h *Hub) rebasePlanners(project, base string) {
 			continue
 		}
 		_ = ps.Log(a.Name, "rebase", "onto "+base)
-		_ = h.injectWhenReady(project, a.Name, msgRebased(base))
+		_ = h.injectWhenReady(project, a.Name, workflow.MsgRebased(base))
 	}
 }
 

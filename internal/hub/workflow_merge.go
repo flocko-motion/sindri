@@ -1,13 +1,16 @@
 // package: hub / workflow_merge
 // type:    logic (merge workflow)
 // job:     the human-gated merge of an approved PR into its base — rebase-first,
-//          conflict routing to the worker, and the transient "merging" status plus
-//          startup reconciliation to "merge-failed" for a merge orphaned by a crash.
+//
+//	conflict routing to the worker, and the transient "merging" status plus
+//	startup reconciliation to "merge-failed" for a merge orphaned by a crash.
+//
 // limits:  merge only; review/submit live in workflow_pr.go (same hub package).
 package hub
 
 import (
 	"fmt"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 	"log"
 	"path/filepath"
 	"strings"
@@ -95,14 +98,14 @@ func (h *Hub) Merge(project, prID string) (store.PR, error) {
 			_ = ps.PutPR(pr)
 			_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "resolving"})
 			_ = ps.LogPR(pr.ID, "conflict", "rebase onto "+pr.Base+" conflicts: "+strings.Join(conflicts, ", "))
-			_ = h.injectWhenReady(project, pr.Agent, msgResolveNeeded(pr.Base, conflicts))
+			_ = h.injectWhenReady(project, pr.Agent, workflow.MsgResolveNeeded(pr.Base, conflicts))
 			h.notify()
 			return store.PR{}, fmt.Errorf("%s conflicts with %s — sent to %s to resolve; it returns for review once clean", prID, pr.Base, pr.Agent)
 		}
 	}
 	if err := git.Merge(root, pr.Base, pr.Branch); err != nil {
 		if e := err.Error(); strings.Contains(e, "would be overwritten") || strings.Contains(e, "commit your changes or stash") {
-			files := fileList(git.BlockingLocalChanges(root, pr.Base, pr.Branch))
+			files := workflow.FileList(git.BlockingLocalChanges(root, pr.Base, pr.Branch))
 			return revert(fmt.Errorf("merge blocked: commit or stash your local changes to %s in the working checkout, then merge again (the PR is fine and stays approved)", files))
 		}
 		return revert(err)
@@ -111,7 +114,7 @@ func (h *Hub) Merge(project, prID string) (store.PR, error) {
 	if err := ps.PutPR(pr); err != nil {
 		return store.PR{}, err
 	}
-	// Milestone PR for a held container: land the work but KEEP the branch/agent.
+	// Milestone PR for a held container: land the work but KEEP the branch/workflow.
 	if holder, _ := ps.GetState(pr.Agent); holder.Container != "" && holder.Container == pr.Branch {
 		if a, ok, _ := ps.GetAgent(pr.Agent); ok {
 			_ = git.RebaseOnto(filepath.Join(root, a.Workspace), pr.Branch, pr.Base) // ff past the merge
@@ -119,7 +122,7 @@ func (h *Hub) Merge(project, prID string) (store.PR, error) {
 		_ = ps.Log(pr.Agent, "merged", prID+" (milestone)")
 		_ = ps.LogPR(prID, "merged", "milestone into "+pr.Base)
 		h.resumeContainer(project, pr.Agent)
-		_ = h.injectWhenReady(project, pr.Agent, msgMilestoneMerged(prID))
+		_ = h.injectWhenReady(project, pr.Agent, workflow.MsgMilestoneMerged(prID))
 		h.rebasePlanners(project, pr.Base)
 		h.notify()
 		return pr, nil
@@ -141,7 +144,7 @@ func (h *Hub) Merge(project, prID string) (store.PR, error) {
 	_ = ps.SetState(store.AgentState{Agent: pr.Agent, Phase: rest})
 	_ = ps.Log(pr.Agent, "merged", prID)
 	_ = ps.LogPR(prID, "merged", "into "+pr.Base)
-	_ = h.injectWhenReady(project, pr.Agent, msgMerged(prID))
+	_ = h.injectWhenReady(project, pr.Agent, workflow.MsgMerged(prID))
 	h.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
 	h.notify()
 	return pr, nil

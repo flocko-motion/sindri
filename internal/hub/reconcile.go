@@ -1,8 +1,10 @@
 // package: hub / reconcile
 // type:    logic (task-status repair)
 // job:     correct a td task's stored status against reality — "in_review" with no
-//          open PR, or "in_progress" with no assignee, is stale. Repairs td (the
-//          source of truth) so it heals, at task list / info / TUI startup.
+//
+//	open PR, or "in_progress" with no assignee, is stale. Repairs td (the
+//	source of truth) so it heals, at task list / info / TUI startup.
+//
 // limits:  td-* tasks only; one td write per real discrepancy, then a no-op.
 package hub
 

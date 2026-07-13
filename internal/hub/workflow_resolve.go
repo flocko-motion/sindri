@@ -1,13 +1,16 @@
 // package: hub / workflow_resolve
 // type:    logic (worker-driven merge-conflict resolution)
 // job:     the `resolve` verb — bring a worker's submitted branch up to its base,
-//          surfacing any conflict into the worker's workspace for it to edit while
-//          the hub drives all git; once clean, renew the PR for review.
+//
+//	surfacing any conflict into the worker's workspace for it to edit while
+//	the hub drives all git; once clean, renew the PR for review.
+//
 // limits:  git mechanics live in adapter/git; the merge gate lives in workflow_pr.
 package hub
 
 import (
 	"fmt"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 	"io"
 	"path/filepath"
 	"strings"
@@ -56,12 +59,12 @@ func (h *Hub) cmdRebase(c registry.Caller, _ []string, out io.Writer) (int, erro
 	}
 	if !done {
 		_ = ps.Log(c.Agent, "rebase", "conflicts: "+strings.Join(conflicts, ", "))
-		fmt.Fprintln(out, replyRebaseConflicts(base, conflicts))
+		fmt.Fprintln(out, workflow.ReplyRebaseConflicts(base, conflicts))
 		return 0, nil
 	}
 	_ = ps.Log(c.Agent, "rebase", "onto "+base)
 	h.notify()
-	fmt.Fprintln(out, replyRebased(base))
+	fmt.Fprintln(out, workflow.ReplyRebased(base))
 	return 0, nil
 }
 
@@ -114,7 +117,7 @@ func (h *Hub) cmdResolve(c registry.Caller, _ []string, out io.Writer) (int, err
 	if !done {
 		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "resolving"})
 		_ = ps.Log(c.Agent, "resolve", "conflicts: "+strings.Join(conflicts, ", "))
-		fmt.Fprintln(out, replyResolveConflicts(base, conflicts))
+		fmt.Fprintln(out, workflow.ReplyResolveConflicts(base, conflicts))
 		return 0, nil
 	}
 	// Clean. Only a completed *conflict* resolution changed the branch and needs the
@@ -128,10 +131,10 @@ func (h *Hub) cmdResolve(c registry.Caller, _ []string, out io.Writer) (int, err
 			_ = h.RequestReview(c.Project, pr.ID, "") // one review path; the hub preps the terrain
 		}
 		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "submitted"})
-		fmt.Fprintln(out, replyResolvedClean(base))
+		fmt.Fprintln(out, workflow.ReplyResolvedClean(base))
 		h.notify()
 		return 0, nil
 	}
-	fmt.Fprintln(out, replyAlreadyCurrent(base))
+	fmt.Fprintln(out, workflow.ReplyAlreadyCurrent(base))
 	return 0, nil
 }

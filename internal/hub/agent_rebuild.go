@@ -1,10 +1,13 @@
 // package: hub / agent_rebuild
 // type:    logic (agent image refresh)
 // job:     RebuildAgent — force-rebuild the agent's image (re-pulling the base, so a
-//          newer Go is picked up) and relaunch into it. The Claude session resumes
-//          from the mounted ~/.claude (`claude --continue`), so nothing is lost.
+//
+//	newer Go is picked up) and relaunch into it. The Claude session resumes
+//	from the mounted ~/.claude (`claude --continue`), so nothing is lost.
+//
 // limits:  orchestration only; the build lives in internal/container, the relaunch
-//          in Launch (hub.go).
+//
+//	in Launch (hub.go).
 package hub
 
 import (

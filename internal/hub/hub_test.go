@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"github.com/flo-at/sindri/internal/hub/workflow"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -179,14 +180,14 @@ func TestEnsureArchitectureDoc(t *testing.T) {
 }
 
 // TestReviewInstructionsCarryArchitecture: both review-instruction paths (the no-arg
-// `sindri` directive = dirReview, and the injected = msgReview) always tell the
+// `sindri` directive = workflow.DirReview, and the injected = workflow.MsgReview) always tell the
 // reviewer to read the repo's ARCHITECTURE.md.
 func TestReviewInstructionsCarryArchitecture(t *testing.T) {
-	if !strings.Contains(dirReview("pr-1", "td-1", "ARCHITECTURE.md"), "ARCHITECTURE.md") {
-		t.Errorf("dirReview must tell the reviewer to read the architecture doc")
+	if !strings.Contains(workflow.DirReview("pr-1", "td-1", "ARCHITECTURE.md"), "ARCHITECTURE.md") {
+		t.Errorf("workflow.DirReview must tell the reviewer to read the architecture doc")
 	}
-	if !strings.Contains(msgReview("pr-1", "req", "br", "base", "ARCHITECTURE.md", true), "ARCHITECTURE.md") {
-		t.Errorf("msgReview must tell the reviewer to read the architecture doc")
+	if !strings.Contains(workflow.MsgReview("pr-1", "req", "br", "base", "ARCHITECTURE.md", true), "ARCHITECTURE.md") {
+		t.Errorf("workflow.MsgReview must tell the reviewer to read the architecture doc")
 	}
 }
 
