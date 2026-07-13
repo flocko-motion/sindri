@@ -20,6 +20,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/registry"
+	"github.com/flo-at/sindri/internal/hub/repo"
 )
 
 // CmdInfo is a command as advertised to a browser (name + help).
@@ -178,7 +179,7 @@ func (h *Hub) cmdLint(c registry.Caller, args []string, out io.Writer) (int, err
 	if !ok {
 		return 1, fmt.Errorf("unknown agent %q", c.Agent)
 	}
-	res, passed := h.runLint(filepath.Join(h.projectRoot(c.Project), a.Workspace))
+	res, passed := repo.Lint(filepath.Join(h.projectRoot(c.Project), a.Workspace), brokkrBinary)
 	if strings.TrimSpace(res) == "" {
 		res = "lint: clean\n"
 	}

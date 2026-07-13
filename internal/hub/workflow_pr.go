@@ -13,10 +13,8 @@ package hub
 
 import (
 	"fmt"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -25,7 +23,9 @@ import (
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/registry"
+	"github.com/flo-at/sindri/internal/hub/repo"
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
@@ -202,22 +202,6 @@ func (h *Hub) runningReviewer(project string) (string, error) {
 	return "", nil
 }
 
-// runLint runs the project's quality gates against a worktree by invoking `brokkr
-// lint` there (a subprocess, so the concurrent hub never chdir's). Go modules only.
-func (h *Hub) runLint(wt string) (output string, ok bool) {
-	if _, err := os.Stat(filepath.Join(wt, "go.mod")); err != nil {
-		return "", true // no Go module — no lint gate applies
-	}
-	bin, err := brokkrBinary()
-	if err != nil {
-		return "lint: " + err.Error(), false
-	}
-	cmd := exec.Command(bin, "lint")
-	cmd.Dir = wt
-	out, err := cmd.CombinedOutput()
-	return string(out), err == nil
-}
-
 // cmdSubmit commits the worker's worktree, records a merge-intent, and returns
 // immediately — the worker then goes idle until the hub injects a verdict (D5).
 func (h *Hub) cmdSubmit(c registry.Caller, args []string, out io.Writer) (int, error) {
@@ -233,7 +217,7 @@ func (h *Hub) cmdSubmit(c registry.Caller, args []string, out io.Writer) (int, e
 	}
 	a, _, _ := ps.GetAgent(c.Agent)
 	wt := filepath.Join(root, a.Workspace)
-	if lintOut, ok := h.runLint(wt); !ok {
+	if lintOut, ok := repo.Lint(wt, brokkrBinary); !ok {
 		fmt.Fprintln(out, workflow.ReplyLintFail(strings.TrimSpace(lintOut)))
 		_ = ps.Log(c.Agent, "lint-fail", st.Task)
 		return 1, nil
@@ -493,12 +477,7 @@ func (h *Hub) MaterializeReview(project, prID string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("no such PR %q", prID)
 	}
-	path := filepath.Join(root, ".worktrees", "review")
-	_ = git.WorktreeRemove(root, path) // fresh checkout each time
-	if err := git.WorktreeAdd(root, path, pr.Branch); err != nil {
-		return "", err
-	}
-	return path, nil
+	return repo.MaterializeReview(root, pr.Branch)
 }
 
 // LintPR runs the quality gate against a project's PR worktree and returns the
@@ -519,7 +498,7 @@ func (h *Hub) LintPR(project, prID string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("no agent %q for %s", pr.Agent, prID)
 	}
-	out, passed := h.runLint(filepath.Join(h.projectRoot(project), a.Workspace))
+	out, passed := repo.Lint(filepath.Join(h.projectRoot(project), a.Workspace), brokkrBinary)
 	status := "FAIL"
 	if passed {
 		status = "PASS"
