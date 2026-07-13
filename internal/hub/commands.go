@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/container"
+	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/repo"
 )
@@ -179,7 +180,7 @@ func (h *Hub) cmdLint(c registry.Caller, args []string, out io.Writer) (int, err
 	if !ok {
 		return 1, fmt.Errorf("unknown agent %q", c.Agent)
 	}
-	res, passed := repo.Lint(filepath.Join(h.projectRoot(c.Project), a.Workspace), brokkrBinary)
+	res, passed := repo.Lint(filepath.Join(h.projectRoot(c.Project), a.Workspace), agent.BrokkrBinary)
 	if strings.TrimSpace(res) == "" {
 		res = "lint: clean\n"
 	}

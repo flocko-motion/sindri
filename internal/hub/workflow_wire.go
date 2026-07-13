@@ -9,6 +9,7 @@ package hub
 
 import (
 	"github.com/flo-at/sindri/internal/config"
+	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
@@ -57,4 +58,4 @@ func (d workflowDeps) Subscribe() (chan struct{}, func()) { return d.h.events.su
 
 func (d workflowDeps) KnownProjects() []store.Project { return d.h.knownProjects() }
 
-func (d workflowDeps) BrokkrBin() (string, error) { return brokkrBinary() }
+func (d workflowDeps) BrokkrBin() (string, error) { return agent.BrokkrBinary() }

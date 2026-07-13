@@ -474,7 +474,7 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 	if err := h.ServeAgent(project, name); err != nil {
 		return err
 	}
-	workerBin, err := agentBinary()
+	workerBin, err := agent.Binary()
 	if err != nil {
 		return err
 	}
@@ -508,10 +508,10 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 	}
 	// Low-friction parity: mount brokkr into every pod so the SAME `brokkr` commands
 	// (map, lint) work inside the agent regardless of host OS. Pods are always linux,
-	// so we mount a cross-built linux brokkr (brokkrLinuxBinary): on a linux host that
+	// so we mount a cross-built linux brokkr (agent.BrokkrLinuxBinary): on a linux host that
 	// is the host binary itself; on macOS it's the shipped brokkr-linux. Runtime mount,
 	// so a restart picks it up — no image rebuild.
-	if bk, berr := brokkrLinuxBinary(); berr == nil {
+	if bk, berr := agent.BrokkrLinuxBinary(); berr == nil {
 		mounts = append(mounts, container.Mount{Host: bk, Container: "/usr/local/bin/brokkr", Mode: "ro"})
 	}
 	if a.Role == "planner" {
