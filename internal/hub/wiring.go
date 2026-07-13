@@ -18,6 +18,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/agentchan"
 	"github.com/flo-at/sindri/internal/hub/project"
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/task"
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
@@ -89,6 +90,17 @@ type (
 	RepoSummary = project.Summary
 	RepoDetail  = project.Detail
 	ExecReq     = agentchan.ExecReq
+	TaskRow     = task.TaskRow
+)
+
+// The task-view helpers live in hub/task; re-exported so the UIs keep getting them
+// from the hub facade they already import.
+var (
+	PriorityLabel = task.PriorityLabel
+	PriorityCode  = task.PriorityCode
+	PriorityWords = task.PriorityWords
+	StateLabel    = task.StateLabel
+	ArrangeTasks  = task.ArrangeTasks
 )
 
 // workflowDeps adapts the hub to workflow.Deps: it exposes the hub facilities the
