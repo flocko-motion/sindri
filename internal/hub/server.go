@@ -11,6 +11,7 @@ package hub
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -508,13 +509,13 @@ func (r TaskReq) spec() TaskSpec {
 func (h *Hub) Serve() error {
 	// Re-serve every rostered agent's socket so a restarted hub recovers all
 	// agent channels (D11).
-	if err := h.ServeAgents(); err != nil {
+	if err := h.agentCh.ServeAgents(); err != nil {
 		return err
 	}
 	// macOS: unix sockets can't cross the podman VM boundary, so also serve the
 	// agent surface over a loopback TCP channel (token-authenticated).
 	if runtime.GOOS == "darwin" {
-		if err := h.serveAgentTCP(); err != nil {
+		if err := h.agentCh.ServeTCP(); err != nil {
 			return err
 		}
 	}
@@ -645,6 +646,21 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 		return false
 	}
 	return true
+}
+
+// flushWriter flushes after every write so streamed control-socket output (the
+// launch / rebuild progress) reaches the client live rather than buffering.
+type flushWriter struct {
+	w io.Writer
+	f http.Flusher
+}
+
+func (fw *flushWriter) Write(p []byte) (int, error) {
+	n, err := fw.w.Write(p)
+	if fw.f != nil {
+		fw.f.Flush()
+	}
+	return n, err
 }
 
 // writeJSON writes v as JSON, or a 400 with the error message if err != nil.

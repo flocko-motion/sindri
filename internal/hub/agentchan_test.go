@@ -17,10 +17,10 @@ func TestAgentTCPChannelAuth(t *testing.T) {
 	if err := h.store.For("proj").PutAgent(store.Agent{Name: "eitri", Role: "coauthor"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.serveAgentTCP(); err != nil {
+	if err := h.agentCh.ServeTCP(); err != nil {
 		t.Fatal(err)
 	}
-	base := fmt.Sprintf("http://127.0.0.1:%d/commands", h.agentTCPPort)
+	base := fmt.Sprintf("http://127.0.0.1:%d/commands", h.agentCh.Port())
 	tok, _ := h.agents.Token("proj", "eitri")
 
 	do := func(token string) int {

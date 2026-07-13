@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/hub/agentchan"
 )
 
 // testTimeout bounds the waits for the hub to come up and for an event to arrive.
@@ -99,7 +100,7 @@ func TestAgentSocketIdentityAndSurface(t *testing.T) {
 	// This exercises the Linux per-agent unix socket (on macOS agents use the TCP
 	// channel — see TestAgentTCPChannelAuth). AF_UNIX paths are capped ~104 chars,
 	// which a deep temp dir can exceed; skip rather than fail on that platform limit.
-	if len(hub.AgentSocketPath(proj, "brokkr")) > 100 {
+	if len(agentchan.SocketPath(proj, "brokkr")) > 100 {
 		t.Skip("agent socket path exceeds the AF_UNIX length limit under this temp dir")
 	}
 
@@ -116,8 +117,8 @@ func TestAgentSocketIdentityAndSurface(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	worker := DialSocket(hub.AgentSocketPath(proj, "brokkr"))
-	rune := DialSocket(hub.AgentSocketPath(proj, "rune"))
+	worker := DialSocket(agentchan.SocketPath(proj, "brokkr"))
+	rune := DialSocket(agentchan.SocketPath(proj, "rune"))
 
 	// Idle worker surface: status/log/next; submit state-gated; approve/reject host-only.
 	wc, err := worker.Commands()

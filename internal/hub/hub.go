@@ -17,7 +17,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -33,6 +32,7 @@ import (
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agent"
+	"github.com/flo-at/sindri/internal/hub/agentchan"
 	"github.com/flo-at/sindri/internal/hub/chat"
 	"github.com/flo-at/sindri/internal/hub/comments"
 	"github.com/flo-at/sindri/internal/hub/project"
@@ -46,27 +46,18 @@ import (
 // by an agentKey (project + name); repos are resolved to a store handle via
 // store.For(repoTag).
 type Hub struct {
-	store *store.Store
-
-	mu      sync.Mutex                // guards agentLn
-	agentLn map[agentKey]net.Listener // per-agent socket listeners (Linux identity-by-socket)
-	events  *bus                      // change notifications for /events
-
-	// macOS only: a bind-mounted unix socket can't be connected to across the
-	// podman VM boundary, so agents reach the hub over a loopback TCP channel
-	// authenticated by a per-agent token. Zero/nil on Linux (unix sockets suffice).
-	agentTCPLn    net.Listener
-	agentTCPPort  int
-	agentDialHost string // how a pod addresses the host for the TCP channel (runtime-specific)
+	store  *store.Store
+	events *bus // change notifications for /events
 
 	lcMu      sync.Mutex          // guards lifecycle
 	lifecycle map[agentKey]string // transient launch/stop intent: "launching"|"stopping"
 
-	chat     *chat.Service     // the user's chatroom relay (internal/hub/chat)
-	comments *comments.Service // task-comment sync (internal/hub/comments)
-	agents   *agent.Service    // agent identity/auth/memory (internal/hub/agent)
-	wf       *workflow.Engine  // the PR/task lifecycle orchestrator (internal/hub/workflow)
-	projects *project.Service  // repo-registry management (internal/hub/project)
+	chat     *chat.Service      // the user's chatroom relay (internal/hub/chat)
+	comments *comments.Service  // task-comment sync (internal/hub/comments)
+	agents   *agent.Service     // agent identity/auth/memory (internal/hub/agent)
+	wf       *workflow.Engine   // the PR/task lifecycle orchestrator (internal/hub/workflow)
+	projects *project.Service   // repo-registry management (internal/hub/project)
+	agentCh  *agentchan.Server  // the inbound agent command channel (internal/hub/agentchan)
 }
 
 // agentKey identifies an agent within a project — the key for the hub's per-agent
@@ -147,13 +138,13 @@ func New() (*Hub, error) {
 		return nil, err
 	}
 	h := &Hub{store: st, events: newBus(),
-		agentLn:   map[agentKey]net.Listener{},
 		lifecycle: map[agentKey]string{}}
 	h.chat = chat.New(h.store, chatDelivery{h})
 	h.comments = comments.New(h.store, commentsDeps{h})
 	h.agents = agent.New(h.store, h.notify)
 	h.wf = workflow.New(h.store, workflowDeps{h})
 	h.projects = project.New(h.store, projectDeps{h})
+	h.agentCh = agentchan.New(h.store, agentchanDeps{h})
 	return h, nil
 }
 
@@ -262,16 +253,18 @@ func (h *Hub) agentStatus(project, name string, running bool, phase string) stri
 
 // Close shuts agent listeners and releases the store.
 func (h *Hub) Close() error {
-	h.closeAgents()
-	if h.agentTCPLn != nil {
-		h.agentTCPLn.Close()
-	}
+	h.agentCh.CloseAll()
 	accessLogger.Flush() // emit any open access-log run before we go quiet
 	return h.store.Close()
 }
 
 // SocketPath is the global hub's control socket.
 func (h *Hub) SocketPath() string { return SocketPath() }
+
+// ServeAgent brings an agent's command channel up (its unix socket) before its pod
+// launches — the pod bind-mounts that socket, and the socket IS the agent's identity.
+// The coordinator op the launch path (and tests) drive; serving lives in agentchan.
+func (h *Hub) ServeAgent(project, name string) error { return h.agentCh.ServeAgent(project, name) }
 
 // NewAgent registers an agent identity in a project (no pod). Identity precedes
 // runtime (D13). An empty name is auto-assigned a Norse dwarf name unused in that
@@ -315,7 +308,7 @@ func (h *Hub) NewAgent(project, name, role, memory string) (string, error) {
 		Name:      name,
 		Role:      role,
 		Workspace: workspace,
-		Socket:    filepath.Join(AgentSocketDir(project, name), "sock"),
+		Socket:    agentchan.SocketPath(project, name),
 		Memory:    strings.TrimSpace(memory),
 	}
 	if err := ps.PutAgent(a); err != nil {
@@ -349,7 +342,7 @@ func (h *Hub) DeleteAgent(project, name string) error {
 		_ = h.wf.RefreshTask(project, st.Task)
 	}
 	_ = container.Rm(h.container(project, name))
-	h.closeAgent(project, name)
+	h.agentCh.CloseAgent(project, name)
 	// A coauthor's workspace is the repo root itself (the shared checkout), not a
 	// disposable worktree — never run `git worktree remove` on it.
 	if a.Workspace != "." {
@@ -485,14 +478,14 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 	// boundary, so point the worker at the loopback TCP channel with its token. On
 	// Linux these are unset and the worker uses /run/sindri/sock (below).
 	if runtime.GOOS == "darwin" {
-		if h.agentTCPPort == 0 {
+		if h.agentCh.Port() == 0 {
 			return fmt.Errorf("agent TCP channel not started — launch needs a persistent hub")
 		}
 		token, terr := h.agents.Token(project, name)
 		if terr != nil {
 			return terr
 		}
-		env["SINDRI_HUB_ADDR"] = fmt.Sprintf("%s:%d", h.agentDialHost, h.agentTCPPort)
+		env["SINDRI_HUB_ADDR"] = fmt.Sprintf("%s:%d", h.agentCh.DialHost(), h.agentCh.Port())
 		env["SINDRI_TOKEN"] = token
 	}
 	mounts := []container.Mount{
@@ -500,7 +493,7 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 		// The agent's own socket — its sole channel to the hub, its identity.
 		// Mount the socket DIRECTORY (not the file) so the agent survives a hub
 		// restart, which recreates the socket file with a new inode.
-		{Host: AgentSocketDir(project, name), Container: "/run/sindri", Mode: "rw"},
+		{Host: agentchan.SocketDir(project, name), Container: "/run/sindri", Mode: "rw"},
 		// The thin browser binary (image symlinks it to /usr/local/bin/sindri — the
 		// agent's in-pod interface to the hub).
 		{Host: workerBin, Container: "/opt/sindri/sindri-worker", Mode: "ro"},

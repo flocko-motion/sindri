@@ -8,9 +8,14 @@
 package hub
 
 import (
+	"context"
+	"io"
+	"net/http"
+
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agent"
+	"github.com/flo-at/sindri/internal/hub/agentchan"
 	"github.com/flo-at/sindri/internal/hub/project"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/workflow"
@@ -46,6 +51,27 @@ func (d projectDeps) RepoName(project string) string        { return d.h.repoNam
 func (d projectDeps) RepoTag(root string) string            { return repoTag(root) }
 func (d projectDeps) Notify()                               { d.h.notify() }
 
+// agentchanDeps adapts the hub to agentchan.Deps: the agent surface (verb set,
+// blocking directive, verb exec), token->identity resolution, and the access-log
+// wrapper. The channel owns transport; behaviour stays in the hub.
+type agentchanDeps struct{ h *Hub }
+
+func (d agentchanDeps) Commands(project, name string) (any, error) {
+	return d.h.AgentCommands(project, name)
+}
+func (d agentchanDeps) Directive(ctx context.Context, project, name string) (string, error) {
+	return d.h.wf.AgentDirective(ctx, project, name)
+}
+func (d agentchanDeps) Exec(project, name string, args []string, out io.Writer) (int, error) {
+	return d.h.AgentExec(project, name, args, out)
+}
+func (d agentchanDeps) TokenAgent(token string) (project, name string, ok bool, err error) {
+	return d.h.agents.ForToken(token)
+}
+func (d agentchanDeps) LogRequests(label string, next http.Handler) http.Handler {
+	return logRequests(label, next)
+}
+
 // These are the extracted modules' API DTOs, re-exported so the hub stays the single
 // facade its clients (client/TUI/CLI) import — they get the RPC
 // request/response shapes from hub, alongside the other wire types in server.go,
@@ -55,6 +81,7 @@ type (
 	PRDetail    = workflow.PRDetail
 	RepoSummary = project.Summary
 	RepoDetail  = project.Detail
+	ExecReq     = agentchan.ExecReq
 )
 
 // workflowDeps adapts the hub to workflow.Deps: it exposes the hub facilities the
