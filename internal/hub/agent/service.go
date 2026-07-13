@@ -8,13 +8,21 @@
 //          coding agent's own behaviour is the adapter's (-> adapter/agent).
 package agent
 
-import "github.com/flo-at/sindri/internal/hub/store"
+import (
+	"sync"
 
-// Service is the agent-actor module: naming, token auth, and memory config over the
-// hub's central store. Constructed once and wired into the hub.
+	"github.com/flo-at/sindri/internal/hub/store"
+)
+
+// Service is the agent-actor module: naming, token auth, memory config, and per-agent
+// launch-output capture over the hub's central store. Constructed once and wired into
+// the hub.
 type Service struct {
 	store  *store.Store
 	notify func()
+
+	launchMu sync.Mutex             // guards launch
+	launch   map[string]*safeBuffer // per-agent launch-output buffers (see launchbuf.go)
 }
 
 // New builds the agent-actor service over the hub's store. notify wakes the board
@@ -23,5 +31,5 @@ func New(st *store.Store, notify func()) *Service {
 	if notify == nil {
 		notify = func() {}
 	}
-	return &Service{store: st, notify: notify}
+	return &Service{store: st, notify: notify, launch: map[string]*safeBuffer{}}
 }

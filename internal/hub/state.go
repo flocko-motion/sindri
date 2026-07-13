@@ -473,7 +473,7 @@ func (h *Hub) AgentPane(project, name string, lines int) (string, error) {
 	if logs := container.Logs(h.container(project, name), lines); logs != "" {
 		return logs, nil
 	}
-	return h.launchOutput(project, name), nil
+	return h.agents.LaunchOutput(project, name), nil
 }
 
 // PodInfo returns a short summary of an agent's podman container for the Agents-tab

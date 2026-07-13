@@ -62,9 +62,6 @@ type Hub struct {
 	lcMu      sync.Mutex          // guards lifecycle
 	lifecycle map[agentKey]string // transient launch/stop intent: "launching"|"stopping"
 
-	launchMu  sync.Mutex               // guards launchBuf
-	launchBuf map[agentKey]*safeBuffer // per-agent image-build/pod-start output
-
 	chat     *chat.Service     // the user's chatroom relay (internal/hub/chat)
 	comments *comments.Service // task-comment sync (internal/hub/comments)
 	agents   *agent.Service    // agent identity/auth/memory (internal/hub/agent)
@@ -151,8 +148,7 @@ func New() (*Hub, error) {
 	}
 	h := &Hub{store: st, events: newBus(),
 		agentLn:   map[agentKey]net.Listener{},
-		lifecycle: map[agentKey]string{},
-		launchBuf: map[agentKey]*safeBuffer{}}
+		lifecycle: map[agentKey]string{}}
 	h.chat = chat.New(h.store, chatDelivery{h})
 	h.comments = comments.New(h.store, commentsDeps{h})
 	h.agents = agent.New(h.store, h.notify)
@@ -414,7 +410,7 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 	// Tee build/start progress three ways: the launch buffer (TUI live-screen), the
 	// hub log (stderr), and progress — the caller's stream, so `agent start` shows
 	// the image build live instead of a frozen prompt (long ops must be visible).
-	buf := h.newLaunchBuf(project, name)
+	buf := h.agents.NewLaunchBuf(project, name)
 	w := io.MultiWriter(os.Stderr, buf, progress)
 	// Pre-flight: podman must be installed and reachable. Fail fast with an
 	// actionable message (before touching status or staging an image build) rather
