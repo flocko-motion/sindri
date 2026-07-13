@@ -1,4 +1,4 @@
-// package: hub / workflow_merge
+// package: hub/workflow / merge
 // type:    logic (merge workflow)
 // job:     the human-gated merge of an approved PR into its base — rebase-first,
 //
@@ -6,7 +6,7 @@
 //	startup reconciliation to "merge-failed" for a merge orphaned by a crash.
 //
 // limits:  merge only; review/submit live in workflow_pr.go (same hub package).
-package hub
+package workflow
 
 import (
 	"fmt"
@@ -15,18 +15,16 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
-	"github.com/flo-at/sindri/internal/adapter/tasks/td"
 	"github.com/flo-at/sindri/internal/hub/repo"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
-// reconcileMergingPRs runs once at hub startup: any PR still in "merging" was being
+// ReconcileMergingPRs runs once at hub startup: any PR still in "merging" was being
 // merged when the previous hub died, so its outcome is unknown (the base may or may
 // not carry the merge). Move it to "merge-failed" — a visible state that asks for a
 // human look — instead of leaving a silent, frozen "merging".
-func (h *Hub) reconcileMergingPRs() {
-	prs, err := h.store.AllPRs()
+func (e *Engine) ReconcileMergingPRs() {
+	prs, err := e.store.AllPRs()
 	if err != nil {
 		log.Printf("hub: reconcile merging PRs: %v", err)
 		return
@@ -36,7 +34,7 @@ func (h *Hub) reconcileMergingPRs() {
 			continue
 		}
 		pr.Status = "merge-failed"
-		ps := h.store.For(pr.Project)
+		ps := e.store.For(pr.Project)
 		if err := ps.PutPR(pr); err != nil {
 			log.Printf("hub: mark %s merge-failed: %v", pr.ID, err)
 			continue
@@ -48,9 +46,9 @@ func (h *Hub) reconcileMergingPRs() {
 
 // Merge merges a project's approved PR into the base branch (host/human-only — the
 // single hard gate), closes the task, frees the worker, and notifies it.
-func (h *Hub) Merge(project, prID string) (store.PR, error) {
-	ps := h.store.For(project)
-	root := h.projectRoot(project)
+func (e *Engine) Merge(project, prID string) (store.PR, error) {
+	ps := e.store.For(project)
+	root := e.deps.ProjectRoot(project)
 	pr, ok, err := ps.GetPR(prID)
 	if err != nil {
 		return store.PR{}, err
@@ -64,21 +62,21 @@ func (h *Hub) Merge(project, prID string) (store.PR, error) {
 	// Persist an explicit in-flight status: the merge is triggered but its outcome
 	// isn't known yet. This keeps the board honest (a moving "merging", not a frozen
 	// "approved") AND makes it recoverable — if the hub dies mid-merge, startup
-	// reconciles any leftover "merging" to "merge-failed" (see reconcileMergingPRs),
+	// reconciles any leftover "merging" to "merge-failed" (see ReconcileMergingPRs),
 	// because a half-applied merge needs a human look, not a silent retry.
 	pr.Status = "merging"
 	if err := ps.PutPR(pr); err != nil {
 		return store.PR{}, err
 	}
-	h.notify()
+	e.deps.Notify()
 	// On a synchronous failure below, revert to approved so the PR stays retryable —
 	// the returned error tells the human what to fix. (A conflict takes its own path
 	// to "open"; a crash mid-merge is caught at startup, not here.)
-	revert := func(e error) (store.PR, error) {
+	revert := func(err error) (store.PR, error) {
 		pr.Status = "approved"
 		_ = ps.PutPR(pr)
-		h.notify()
-		return store.PR{}, e
+		e.deps.Notify()
+		return store.PR{}, err
 	}
 	// Bring the branch up to base then merge — the git mechanics live in repo; here we
 	// route the outcome. The rebase runs in the WORKER's worktree (it can't run git
@@ -93,8 +91,8 @@ func (h *Hub) Merge(project, prID string) (store.PR, error) {
 		_ = ps.PutPR(pr)
 		_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "resolving"})
 		_ = ps.LogPR(pr.ID, "conflict", "rebase onto "+pr.Base+" conflicts: "+strings.Join(res.Files, ", "))
-		_ = h.injectWhenReady(project, pr.Agent, workflow.MsgResolveNeeded(pr.Base, res.Files))
-		h.notify()
+		_ = e.deps.InjectWhenReady(project, pr.Agent, MsgResolveNeeded(pr.Base, res.Files))
+		e.deps.Notify()
 		return store.PR{}, fmt.Errorf("%s conflicts with %s — sent to %s to resolve; it returns for review once clean", prID, pr.Base, pr.Agent)
 	case repo.MergeRebaseErr:
 		// The rebase runs in the AGENT's worktree, not your checkout — say so, or
@@ -103,7 +101,7 @@ func (h *Hub) Merge(project, prID string) (store.PR, error) {
 		return revert(fmt.Errorf("can't rebase %s onto %s in %s's worktree (%s) — most often it has uncommitted changes (NOT your checkout); have the agent commit or discard them, e.g. `sindri agent tell %s \"commit or discard your /workspace changes, then say done\"`. git said: %w",
 			pr.Branch, pr.Base, pr.Agent, workspace, pr.Agent, res.Err))
 	case repo.MergeBlocked:
-		return revert(fmt.Errorf("merge blocked: commit or stash your local changes to %s in the working checkout, then merge again (the PR is fine and stays approved)", workflow.FileList(res.Files)))
+		return revert(fmt.Errorf("merge blocked: commit or stash your local changes to %s in the working checkout, then merge again (the PR is fine and stays approved)", FileList(res.Files)))
 	case repo.MergeErr:
 		return revert(res.Err)
 	}
@@ -111,29 +109,33 @@ func (h *Hub) Merge(project, prID string) (store.PR, error) {
 	if err := ps.PutPR(pr); err != nil {
 		return store.PR{}, err
 	}
-	// Milestone PR for a held container: land the work but KEEP the branch/workflow.
+	// Milestone PR for a held container: land the work but KEEP the branch/
 	if holder, _ := ps.GetState(pr.Agent); holder.Container != "" && holder.Container == pr.Branch {
 		if a, ok, _ := ps.GetAgent(pr.Agent); ok {
 			_ = git.RebaseOnto(filepath.Join(root, a.Workspace), pr.Branch, pr.Base) // ff past the merge
 		}
 		_ = ps.Log(pr.Agent, "merged", prID+" (milestone)")
 		_ = ps.LogPR(prID, "merged", "milestone into "+pr.Base)
-		h.resumeContainer(project, pr.Agent)
-		_ = h.injectWhenReady(project, pr.Agent, workflow.MsgMilestoneMerged(prID))
-		h.rebasePlanners(project, pr.Base)
-		h.notify()
+		e.resumeContainer(project, pr.Agent)
+		_ = e.deps.InjectWhenReady(project, pr.Agent, MsgMilestoneMerged(prID))
+		e.rebasePlanners(project, pr.Base)
+		e.deps.Notify()
 		return pr, nil
 	}
-	if strings.HasPrefix(pr.Task, "td-") { // a planner's openspec PR has no real td task
-		if err := td.Close(root, pr.Task, "merged via "+prID); err != nil {
-			fmt.Printf("warning: td close %s: %v\n", pr.Task, err)
+	// The task's PR merged — notify every task source so it can run its own
+	// consequence (td closes the task, github closes+comments the issue, openspec
+	// no-ops). The workflow stays ignorant of which backend the task uses; each source
+	// acts only on its own ids. Best-effort: it runs AFTER the local merge landed, so a
+	// failure is a warning on the PR (may need a manual upstream follow-up), never a
+	// merge failure.
+	note := "merged via " + prID
+	for _, src := range taskSources() {
+		if err := src.OnMerged(root, pr.Task, note); err != nil {
+			log.Printf("hub: %s merged locally but a task-source close failed: %v", prID, err)
+			_ = ps.LogPR(prID, "warning", "merged locally, but closing the task upstream failed (may need a manual follow-up): "+err.Error())
 		}
-		_ = h.refreshTask(project, pr.Task)
 	}
-	// A gh-* task's only outbound GitHub write: close+comment the issue. Best-effort —
-	// runs AFTER the local merge landed, and a GitHub failure is a warning, never a
-	// merge failure (the issue simply stays open upstream for the next human decision).
-	h.closeGitHubIssue(project, root, pr, prID)
+	e.deps.RefreshCachedTask(project, pr.Task) // reflect the now-closed task in the cache
 	rest := "idle"
 	if a, ok, _ := ps.GetAgent(pr.Agent); ok {
 		rest = restPhase(a.Role)
@@ -141,8 +143,8 @@ func (h *Hub) Merge(project, prID string) (store.PR, error) {
 	_ = ps.SetState(store.AgentState{Agent: pr.Agent, Phase: rest})
 	_ = ps.Log(pr.Agent, "merged", prID)
 	_ = ps.LogPR(prID, "merged", "into "+pr.Base)
-	_ = h.injectWhenReady(project, pr.Agent, workflow.MsgMerged(prID))
-	h.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
-	h.notify()
+	_ = e.deps.InjectWhenReady(project, pr.Agent, MsgMerged(prID))
+	e.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
+	e.deps.Notify()
 	return pr, nil
 }

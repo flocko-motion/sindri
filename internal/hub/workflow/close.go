@@ -1,4 +1,4 @@
-// package: hub / workflow_close
+// package: hub/workflow / close
 // type:    logic (task close/scrap dispatch)
 // job:     the two lifecycle-ending verbs every todo backend distinguishes — "done"
 //
@@ -7,14 +7,14 @@
 //	GitHub issue close/delete. Both guard against a live holder first.
 //
 // limits:  dispatch only; each op lives in its adapter (td/spec/github).
-package hub
+package workflow
 
 import (
 	"context"
 	"fmt"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/tasks/github"
 	"github.com/flo-at/sindri/internal/adapter/tasks/spec"
@@ -22,25 +22,28 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
+// githubCloseTimeout bounds the outbound GitHub close/delete in the close/scrap path.
+const githubCloseTimeout = 15 * time.Second
+
 // CloseTask marks a task done from the task list (host-only) — the "done" close,
 // dispatched by backend: a td task closes, an openspec change archives (its deltas
 // fold into the specs), a GitHub issue is closed. Allowed even while an agent works
 // on it — the agent is freed and told to pick up a new task (see finishTask).
-func (h *Hub) CloseTask(project, id string) error { return h.finishTask(project, id, false) }
+func (e *Engine) CloseTask(project, id string) error { return e.finishTask(project, id, false) }
 
 // DeleteTask scraps a task from the task list (host-only) — the "discard" close,
 // dispatched by backend: a td task soft-deletes (restorable), an openspec change's
 // proposal dir is removed (git-recoverable), a GitHub issue is deleted (permanent,
 // needs repo-admin rights). Also allowed mid-flight (frees the holder).
-func (h *Hub) DeleteTask(project, id string) error { return h.finishTask(project, id, true) }
+func (e *Engine) DeleteTask(project, id string) error { return e.finishTask(project, id, true) }
 
 // finishTask is the shared close/scrap path: it dispatches to the id's backend for
 // either "done" (scrap=false) or "scrap" (scrap=true), then frees any agent that was
 // working on the task and pushes it to pick up a new one — cancelling a task
 // mid-flight is allowed, never a hard refusal that strands the human.
-func (h *Hub) finishTask(project, id string, scrap bool) error {
-	ps := h.store.For(project)
-	root := h.projectRoot(project)
+func (e *Engine) finishTask(project, id string, scrap bool) error {
+	ps := e.store.For(project)
+	root := e.deps.ProjectRoot(project)
 	var err error
 	switch {
 	case strings.HasPrefix(id, "td-"):
@@ -50,7 +53,7 @@ func (h *Hub) finishTask(project, id string, scrap bool) error {
 			err = td.Close(root, id, "closed from task list")
 		}
 	case strings.HasPrefix(id, "os-"):
-		name, ok := h.changeName(root, id)
+		name, ok := e.changeName(root, id)
 		if !ok {
 			return fmt.Errorf("%s: can't resolve its openspec change (re-sync and retry)", id)
 		}
@@ -87,8 +90,8 @@ func (h *Hub) finishTask(project, id string, scrap bool) error {
 		if st, _ := ps.GetState(a.Name); st.Task == id {
 			_ = ps.SetState(store.AgentState{Agent: a.Name, Phase: restPhase(a.Role)})
 			_ = ps.Log(a.Name, "task-cancelled", id)
-			if h.agentAlive(project, a.Name) {
-				_ = h.injectWhenReady(project, a.Name, workflow.MsgTaskCancelled(id))
+			if e.deps.AgentAlive(project, a.Name) {
+				_ = e.deps.InjectWhenReady(project, a.Name, MsgTaskCancelled(id))
 			}
 		}
 	}
@@ -109,13 +112,13 @@ func (h *Hub) finishTask(project, id string, scrap bool) error {
 			fmt.Fprintf(os.Stderr, "hub: marking task %s closed in cache: %v\n", id, uerr)
 		}
 	}
-	h.notify()
+	e.deps.Notify()
 	return nil
 }
 
 // changeName resolves an os-<hash> id back to its openspec change name by matching
 // spec.ID over the current changes (the id is a one-way hash of the name).
-func (h *Hub) changeName(root, id string) (string, bool) {
+func (e *Engine) changeName(root, id string) (string, bool) {
 	changes, err := spec.Changes(root)
 	if err != nil {
 		return "", false

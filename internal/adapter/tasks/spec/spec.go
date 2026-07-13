@@ -57,6 +57,10 @@ func (Source) Tasks(root string, _ bool) ([]task.Task, error) {
 	return out, nil
 }
 
+// OnMerged is a no-op for openspec: a change is archived at close/scrap time (see
+// Archive), not as a side effect of a PR merging.
+func (Source) OnMerged(root, taskID, note string) error { return nil }
+
 // Change is an openspec change from `openspec list --json`.
 type Change struct {
 	Name           string `json:"name"`

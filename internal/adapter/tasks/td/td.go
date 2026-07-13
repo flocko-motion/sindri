@@ -32,6 +32,15 @@ func (Source) Enabled(string) bool { return true }
 // Tasks returns all live td tasks as domain tasks (local read — force is moot).
 func (Source) Tasks(root string, _ bool) ([]task.Task, error) { return Tasks(root, task.FilterAll) }
 
+// OnMerged closes a merged td task via the self-close exception (its "done" close).
+// A non-td id is ignored — this source only acts on td-* tasks.
+func (Source) OnMerged(root, taskID, note string) error {
+	if !strings.HasPrefix(taskID, "td-") {
+		return nil
+	}
+	return Close(root, taskID, note)
+}
+
 // Get loads a single task by ID (direct read).
 func Get(root, id string) (task.Task, error) {
 	return taskFromDB(root, id)

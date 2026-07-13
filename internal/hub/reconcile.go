@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/tasks/td"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // refreshTask re-reads one task from td and updates its cached row — the targeted
@@ -23,7 +24,7 @@ func (h *Hub) refreshTask(project, id string) error {
 	if err != nil {
 		return err
 	}
-	return h.store.For(project).UpsertTask(toStoreTask(t))
+	return h.store.For(project).UpsertTask(workflow.ToStoreTask(t))
 }
 
 // refreshCachedTask updates one task's cached row after a local mutation, instead

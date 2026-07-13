@@ -42,7 +42,7 @@ func TestGitHubTaskPriorityStaysHubSide(t *testing.T) {
 	h.repo(root) // register so projectRoot resolves
 	tag := RepoTag(root)
 
-	if err := h.SetPriority(tag, "gh-9", "P1"); err != nil {
+	if err := h.wf.SetPriority(tag, "gh-9", "P1"); err != nil {
 		t.Fatalf("SetPriority on a gh-* task: %v", err)
 	}
 	ov, err := h.store.For(tag).PriorityOverrides()
@@ -54,7 +54,7 @@ func TestGitHubTaskPriorityStaysHubSide(t *testing.T) {
 	}
 
 	// EditTask with a priority takes the same hub-side path.
-	if err := h.EditTask(tag, "gh-9", TaskSpec{Priority: "P2"}); err != nil {
+	if err := h.wf.EditTask(tag, "gh-9", TaskSpec{Priority: "P2"}); err != nil {
 		t.Fatalf("EditTask on a gh-* task: %v", err)
 	}
 	ov, _ = h.store.For(tag).PriorityOverrides()

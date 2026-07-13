@@ -67,6 +67,7 @@ type Hub struct {
 	chat     *chat.Service     // the user's chatroom relay (internal/hub/chat)
 	comments *comments.Service // task-comment sync (internal/hub/comments)
 	agents   *agent.Service    // agent identity/auth/memory (internal/hub/agent)
+	wf       *workflow.Engine  // the PR/task lifecycle orchestrator (internal/hub/workflow)
 }
 
 // agentKey identifies an agent within a project — the key for the hub's per-agent
@@ -135,28 +136,6 @@ func (h *Hub) projectRoot(project string) string {
 // session is the tmux session name for an agent (named after the agent, D4).
 func session(name string) string { return name }
 
-// plannerBranch is a planner's standing branch — it drafts openspec here and
-// ships it via `openspec submit` (it never grabs a backlog task).
-func plannerBranch(name string) string { return "plan-" + name }
-
-// mockSpecTask is the placeholder todo id on a planner's openspec PR (there's no
-// real backlog task behind it).
-const mockSpecTask = "os-new"
-
-// restPhase is an agent's resting (not-busy) phase: a planner rests in "planning"
-// and a coauthor in "collab" (neither holds a backlog task, so "idle" would
-// mislead — they're standing with the user, not unoccupied); everyone else "idle".
-func restPhase(role string) string {
-	switch role {
-	case "planner":
-		return "planning"
-	case "coauthor":
-		return "collab"
-	default:
-		return "idle"
-	}
-}
-
 // New opens the single global hub: ensures the central state dir exists and opens
 // the one project-keyed store. Repos are registered lazily on first use (repo).
 func New() (*Hub, error) {
@@ -175,6 +154,7 @@ func New() (*Hub, error) {
 	h.chat = chat.New(h.store, chatDelivery{h})
 	h.comments = comments.New(h.store, commentsDeps{h})
 	h.agents = agent.New(h.store, h.notify)
+	h.wf = workflow.New(h.store, workflowDeps{h})
 	return h, nil
 }
 
@@ -477,11 +457,11 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 	if a.Role == "planner" {
 		// Put the planner on its standing branch so it can draft openspec and ship
 		// it via `openspec submit` without ever grabbing a backlog task.
-		base, err := h.baseBranch(root)
+		base, err := git.CurrentBranch(root)
 		if err != nil {
 			return err
 		}
-		if err := git.EnsureBranch(wt, plannerBranch(name), base); err != nil {
+		if err := git.EnsureBranch(wt, workflow.PlannerBranch(name), base); err != nil {
 			return err
 		}
 		// Rest in "planning", not "idle" — unless a PR is already in flight.

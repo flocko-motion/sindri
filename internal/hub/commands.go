@@ -36,29 +36,29 @@ func (h *Hub) registry() *registry.Registry {
 		registry.Command{Name: "status", Help: "show who you are and your current state", Run: h.cmdStatus},
 		registry.Command{Name: "log", Help: "record a note in your activity log: log <message>", Run: h.cmdLog},
 		registry.Command{Name: "prs", Help: "list pull requests and their status", Run: h.cmdListPRs},
-		registry.Command{Name: "show", Help: "show a PR's diff: show <pr-id>", Run: h.cmdShowPR},
+		registry.Command{Name: "show", Help: "show a PR's diff: show <pr-id>", Run: h.wf.CmdShowPR},
 		// Only a worker grabs tasks (next) and submits a task branch (submit). A
 		// reviewer has neither. A planner has neither either — it ships openspec via
 		// its own `openspec submit`, a PR in different dress (mock todo id os-new).
 		registry.Command{Name: "next", Help: "pick up the next task", Roles: []string{"worker"},
-			Hidden: func(c registry.Caller) bool { return c.HasTask }, Run: h.cmdNext},
+			Hidden: func(c registry.Caller) bool { return c.HasTask }, Run: h.wf.CmdNext},
 		registry.Command{Name: "lint", Help: "run the quality gate: lint (your workspace) or lint <pr-id> (a PR)", Run: h.cmdLint},
 		registry.Command{Name: "submit", Help: "request your branch be merged: submit [message]", Roles: []string{"worker"},
-			Hidden: func(c registry.Caller) bool { return !c.HasTask || c.InContainer || c.Phase == "resolving" }, Run: h.cmdSubmit},
+			Hidden: func(c registry.Caller) bool { return !c.HasTask || c.InContainer || c.Phase == "resolving" }, Run: h.wf.CmdSubmit},
 		// Always available to a worker — checking whether your branch still merges (and
 		// resolving it if not) does no harm and is useful at any time.
-		registry.Command{Name: "resolve", Help: "check your branch still merges onto its base, and resolve any conflicts: resolve", Roles: []string{"worker"}, Run: h.cmdResolve},
+		registry.Command{Name: "resolve", Help: "check your branch still merges onto its base, and resolve any conflicts: resolve", Roles: []string{"worker"}, Run: h.wf.CmdResolve},
 		// Align with the reference branch any time — harmless, and it surfaces conflicts
 		// (with markers to fix) rather than letting the branch drift.
-		registry.Command{Name: "rebase", Help: "rebase your branch onto the current reference branch (fix any conflicts it surfaces): rebase", Roles: []string{"worker", "planner"}, Run: h.cmdRebase},
+		registry.Command{Name: "rebase", Help: "rebase your branch onto the current reference branch (fix any conflicts it surfaces): rebase", Roles: []string{"worker", "planner"}, Run: h.wf.CmdRebase},
 		registry.Command{Name: "checkpoint", Help: "commit the current subtask and move to the next: checkpoint [message]", Roles: []string{"worker"},
-			Hidden: func(c registry.Caller) bool { return !c.InContainer }, Run: h.cmdCheckpoint},
-		registry.Command{Name: "task", Help: "read the backlog: task list (all) or task <id> (full detail)", Roles: []string{"planner"}, Run: h.cmdTasks},
-		registry.Command{Name: "create-task", Help: "propose a new task (needs the user's approval): create-task <title...>", Roles: []string{"planner"}, Run: h.cmdCreateTask},
-		registry.Command{Name: "openspec", Help: "ship your openspec changes as a PR: openspec submit [message]", Roles: []string{"planner"}, Run: h.cmdOpenspec},
-		registry.Command{Name: "state", Help: "set your resting state: state planning | state idle", Roles: []string{"planner"}, Run: h.cmdState},
-		registry.Command{Name: "approve", Help: "approve a pull request: approve [pr-id]", Roles: []string{"reviewer"}, Run: h.cmdApprove},
-		registry.Command{Name: "reject", Help: "reject a pull request: reject <pr-id> <feedback...>", Roles: []string{"reviewer"}, Run: h.cmdReject},
+			Hidden: func(c registry.Caller) bool { return !c.InContainer }, Run: h.wf.CmdCheckpoint},
+		registry.Command{Name: "task", Help: "read the backlog: task list (all) or task <id> (full detail)", Roles: []string{"planner"}, Run: h.wf.CmdTasks},
+		registry.Command{Name: "create-task", Help: "propose a new task (needs the user's approval): create-task <title...>", Roles: []string{"planner"}, Run: h.wf.CmdCreateTask},
+		registry.Command{Name: "openspec", Help: "ship your openspec changes as a PR: openspec submit [message]", Roles: []string{"planner"}, Run: h.wf.CmdOpenspec},
+		registry.Command{Name: "state", Help: "set your resting state: state planning | state idle", Roles: []string{"planner"}, Run: h.wf.CmdState},
+		registry.Command{Name: "approve", Help: "approve a pull request: approve [pr-id]", Roles: []string{"reviewer"}, Run: h.wf.CmdApprove},
+		registry.Command{Name: "reject", Help: "reject a pull request: reject <pr-id> <feedback...>", Roles: []string{"reviewer"}, Run: h.wf.CmdReject},
 		// Any agent the user has added to the chatroom can speak to it. Hidden (not
 		// role-gated) until added — the user controls who's in the room.
 		registry.Command{Name: "chat", Help: "say something to everyone in the chatroom: chat <message...>",
@@ -164,7 +164,7 @@ func (h *Hub) cmdStatus(c registry.Caller, _ []string, out io.Writer) (int, erro
 // args it lints the caller's own worktree (the worker's pre-submit self-check).
 func (h *Hub) cmdLint(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) > 0 { // lint a specific PR's worktree
-		res, err := h.LintPR(c.Project, args[0])
+		res, err := h.wf.LintPR(c.Project, args[0])
 		if err != nil {
 			return 1, err
 		}

@@ -491,7 +491,7 @@ func (h *Hub) PodInfo(project, name string) (string, error) {
 // [r]efresh hotkey / explicit user refresh, so it forces the GitHub scan past its
 // TTL — the one place we want fresh issues on demand.
 func (h *Hub) Refresh(project string) error {
-	err := h.ForceSyncTasks(project)
+	err := h.wf.ForceSyncTasks(project)
 	h.notify()
 	return err
 }

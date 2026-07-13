@@ -115,7 +115,7 @@ func (h *Hub) agentHandler(project, name string) http.Handler {
 	})
 	mux.HandleFunc("GET /directive", func(w http.ResponseWriter, r *http.Request) {
 		// Blocks until the agent has something to do (or it disconnects).
-		d, err := h.AgentDirective(r.Context(), project, name)
+		d, err := h.wf.AgentDirective(r.Context(), project, name)
 		writeJSON(w, okMsg{d}, err)
 	})
 	mux.HandleFunc("POST /exec", func(w http.ResponseWriter, r *http.Request) {

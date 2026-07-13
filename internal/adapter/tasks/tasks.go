@@ -23,4 +23,11 @@ type Source interface {
 	// a cheap local source ignores it). A source that fetches over the network
 	// degrades on error to its last good result rather than failing the whole sync.
 	Tasks(root string, force bool) ([]task.Task, error)
+	// OnMerged is the source's consequence when a task's PR merges locally: td closes
+	// the task, github closes+comments the issue, openspec no-ops. Each source acts
+	// only on ITS OWN ids (by id prefix / number parse) and ignores the rest, so the
+	// caller notifies every source blindly. The returned error is for the caller to
+	// log; it is never fatal — the local merge already landed. note is the merge
+	// reason/comment to record upstream.
+	OnMerged(root, taskID, note string) error
 }

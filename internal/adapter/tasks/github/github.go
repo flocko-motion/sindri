@@ -111,6 +111,19 @@ func (Source) Tasks(root string, force bool) ([]task.Task, error) {
 	return out, nil
 }
 
+// OnMerged closes+comments the GitHub issue behind a merged gh-* PR — the one
+// outbound write in the merge path. A non-gh id is ignored. Best-effort from the
+// caller's view: the returned error is logged, never fatal (the local merge landed).
+func (Source) OnMerged(root, taskID, note string) error {
+	number, ok := Number(taskID)
+	if !ok {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), issueTimeout)
+	defer cancel()
+	return Close(ctx, root, number, note)
+}
+
 // Label is one GitHub label on an issue (only its name is used).
 type Label struct {
 	Name string `json:"name"`

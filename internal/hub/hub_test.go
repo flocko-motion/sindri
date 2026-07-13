@@ -253,7 +253,7 @@ func hasTaskTitled(tasks []store.Task, title string) bool {
 // openspec CLI + a change, so it's exercised end-to-end, not here.)
 func TestCloseUnresolvableOpenspec(t *testing.T) {
 	h := newHub(t)
-	if err := h.CloseTask(testProject, "os-abc123"); err == nil {
+	if err := h.wf.CloseTask(testProject, "os-abc123"); err == nil {
 		t.Fatalf("closing an unresolvable openspec row should error")
 	}
 }
@@ -272,7 +272,7 @@ func TestCloseFreesWorkingAgent(t *testing.T) {
 	}
 	h.repo(root)
 	tag := RepoTag(root)
-	id, err := h.CreateTask(tag, TaskSpec{Title: "implement the widget feature", Type: "task"})
+	id, err := h.wf.CreateTask(tag, TaskSpec{Title: "implement the widget feature", Type: "task"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +282,7 @@ func TestCloseFreesWorkingAgent(t *testing.T) {
 	ps := h.store.For(tag)
 	_ = ps.SetState(store.AgentState{Agent: "eitri", Task: id, Branch: id, Phase: "working"})
 
-	if err := h.CloseTask(tag, id); err != nil { // must NOT refuse just because eitri holds it
+	if err := h.wf.CloseTask(tag, id); err != nil { // must NOT refuse just because eitri holds it
 		t.Fatalf("closing a held task should be allowed: %v", err)
 	}
 	if st, _ := ps.GetState("eitri"); st.Task != "" || st.Phase == "working" {
@@ -301,7 +301,7 @@ func TestApprovePR(t *testing.T) {
 	}
 
 	// Human approve moves an open PR to approved, no reviewer agent involved.
-	if err := h.ApprovePR(testProject, "pr-td-1"); err != nil {
+	if err := h.wf.ApprovePR(testProject, "pr-td-1"); err != nil {
 		t.Fatalf("approve open PR: %v", err)
 	}
 	pr, ok, err := ps.GetPR("pr-td-1")
@@ -313,12 +313,12 @@ func TestApprovePR(t *testing.T) {
 	}
 
 	// Open-only guard: an already-approved (non-open) PR cannot be re-approved.
-	if err := h.ApprovePR(testProject, "pr-td-1"); err == nil {
+	if err := h.wf.ApprovePR(testProject, "pr-td-1"); err == nil {
 		t.Fatalf("approving a non-open PR should be refused")
 	}
 
 	// Unknown PR errors.
-	if err := h.ApprovePR(testProject, "pr-nope"); err == nil {
+	if err := h.wf.ApprovePR(testProject, "pr-nope"); err == nil {
 		t.Fatalf("approving an unknown PR should error")
 	}
 }

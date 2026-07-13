@@ -1,4 +1,4 @@
-// package: hub / workflow_resolve
+// package: hub/workflow / resolve
 // type:    logic (worker-driven merge-conflict resolution)
 // job:     the `resolve` verb — bring a worker's submitted branch up to its base,
 //
@@ -6,7 +6,7 @@
 //	the hub drives all git; once clean, renew the PR for review.
 //
 // limits:  git mechanics live in adapter/git; the merge gate lives in workflow_pr.
-package hub
+package workflow
 
 import (
 	"fmt"
@@ -18,25 +18,24 @@ import (
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/repo"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
-// cmdRebase is the agent-driven "align with the reference" verb: it rebases the
+// CmdRebase is the agent-driven "align with the reference" verb: it rebases the
 // agent's own worktree branch onto the current reference branch (whatever the main
 // checkout has checked out), any time the agent likes — there's no harm, it just
 // keeps the agent current. Uncommitted WIP is autostashed around the rebase. On a
 // conflict it leaves the markers in the agent's /workspace and tells it which files
 // to fix, then continues on the next `sindri rebase`; once clean it reports aligned.
 // All git runs host-side (the agent has none).
-func (h *Hub) cmdRebase(c registry.Caller, _ []string, out io.Writer) (int, error) {
-	ps := h.store.For(c.Project)
-	root := h.projectRoot(c.Project)
+func (e *Engine) CmdRebase(c registry.Caller, _ []string, out io.Writer) (int, error) {
+	ps := e.store.For(c.Project)
+	root := e.deps.ProjectRoot(c.Project)
 	a, ok, err := ps.GetAgent(c.Agent)
 	if err != nil || !ok {
 		return 1, fmt.Errorf("agent %s missing: %v", c.Agent, err)
 	}
 	wt := filepath.Join(root, a.Workspace)
-	base, err := h.baseBranch(root)
+	base, err := e.baseBranch(root)
 	if err != nil {
 		return 1, err
 	}
@@ -58,23 +57,23 @@ func (h *Hub) cmdRebase(c registry.Caller, _ []string, out io.Writer) (int, erro
 	}
 	if !done {
 		_ = ps.Log(c.Agent, "rebase", "conflicts: "+strings.Join(conflicts, ", "))
-		fmt.Fprintln(out, workflow.ReplyRebaseConflicts(base, conflicts))
+		fmt.Fprintln(out, ReplyRebaseConflicts(base, conflicts))
 		return 0, nil
 	}
 	_ = ps.Log(c.Agent, "rebase", "onto "+base)
-	h.notify()
-	fmt.Fprintln(out, workflow.ReplyRebased(base))
+	e.deps.Notify()
+	fmt.Fprintln(out, ReplyRebased(base))
 	return 0, nil
 }
 
-// cmdResolve is the worker-driven mergeability loop: it brings the worker's
+// CmdResolve is the worker-driven mergeability loop: it brings the worker's
 // submitted branch up to its base, and when that conflicts it leaves the conflict
 // markers in the worker's workspace for it to edit, then continues on the next
 // call. The worker may run it as often as it likes. All git runs host-side (the
 // worker has none); once the branch applies cleanly the PR is renewed for review.
-func (h *Hub) cmdResolve(c registry.Caller, _ []string, out io.Writer) (int, error) {
-	ps := h.store.For(c.Project)
-	root := h.projectRoot(c.Project)
+func (e *Engine) CmdResolve(c registry.Caller, _ []string, out io.Writer) (int, error) {
+	ps := e.store.For(c.Project)
+	root := e.deps.ProjectRoot(c.Project)
 	st, err := ps.GetState(c.Agent)
 	if err != nil {
 		return 1, err
@@ -85,7 +84,7 @@ func (h *Hub) cmdResolve(c registry.Caller, _ []string, out io.Writer) (int, err
 	}
 	a, _, _ := ps.GetAgent(c.Agent)
 	wt := filepath.Join(root, a.Workspace)
-	base, err := h.baseBranch(root)
+	base, err := e.baseBranch(root)
 	if err != nil {
 		return 1, err
 	}
@@ -110,7 +109,7 @@ func (h *Hub) cmdResolve(c registry.Caller, _ []string, out io.Writer) (int, err
 	if !done {
 		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "resolving"})
 		_ = ps.Log(c.Agent, "resolve", "conflicts: "+strings.Join(conflicts, ", "))
-		fmt.Fprintln(out, workflow.ReplyResolveConflicts(base, conflicts))
+		fmt.Fprintln(out, ReplyResolveConflicts(base, conflicts))
 		return 0, nil
 	}
 	// Clean. Only a completed *conflict* resolution changed the branch and needs the
@@ -121,13 +120,13 @@ func (h *Hub) cmdResolve(c registry.Caller, _ []string, out io.Writer) (int, err
 			pr.Status, pr.Feedback = "open", ""
 			_ = ps.PutPR(pr)
 			_ = ps.LogPR(pr.ID, "renewed", "rebased clean onto "+base)
-			_ = h.RequestReview(c.Project, pr.ID, "") // one review path; the hub preps the terrain
+			_ = e.RequestReview(c.Project, pr.ID, "") // one review path; the hub preps the terrain
 		}
 		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "submitted"})
-		fmt.Fprintln(out, workflow.ReplyResolvedClean(base))
-		h.notify()
+		fmt.Fprintln(out, ReplyResolvedClean(base))
+		e.deps.Notify()
 		return 0, nil
 	}
-	fmt.Fprintln(out, workflow.ReplyAlreadyCurrent(base))
+	fmt.Fprintln(out, ReplyAlreadyCurrent(base))
 	return 0, nil
 }
