@@ -30,4 +30,11 @@ type Source interface {
 	// log; it is never fatal — the local merge already landed. note is the merge
 	// reason/comment to record upstream.
 	OnMerged(root, taskID, note string) error
+	// Finish ends a task's lifecycle from the task list: scrap=false is "done" (td
+	// close, openspec archive, github issue close); scrap=true is "discard" (td
+	// delete, openspec change removal, github issue delete). Like OnMerged, each
+	// source acts only on its own ids; handled reports whether THIS source owned the
+	// id, so the caller can flag a genuinely unknown backend, and err is a real
+	// failure of the op.
+	Finish(root, taskID string, scrap bool) (handled bool, err error)
 }

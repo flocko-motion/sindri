@@ -124,6 +124,22 @@ func (Source) OnMerged(root, taskID, note string) error {
 	return Close(ctx, root, number, note)
 }
 
+// Finish closes (done) or deletes (scrap) the GitHub issue behind a gh- id. handled
+// is false for a non-gh id. Delete is GitHub's irreversible hard delete (needs
+// repo-admin/triage rights); Close is the reversible "done".
+func (Source) Finish(root, taskID string, scrap bool) (bool, error) {
+	number, ok := Number(taskID)
+	if !ok {
+		return false, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), issueTimeout)
+	defer cancel()
+	if scrap {
+		return true, Delete(ctx, root, number)
+	}
+	return true, Close(ctx, root, number, "closed via sindri")
+}
+
 // Label is one GitHub label on an issue (only its name is used).
 type Label struct {
 	Name string `json:"name"`

@@ -41,6 +41,18 @@ func (Source) OnMerged(root, taskID, note string) error {
 	return Close(root, taskID, note)
 }
 
+// Finish closes (done) or deletes (scrap) a td task from the task list. handled is
+// false for a non-td id, so the caller keeps asking the other sources.
+func (Source) Finish(root, taskID string, scrap bool) (bool, error) {
+	if !strings.HasPrefix(taskID, "td-") {
+		return false, nil
+	}
+	if scrap {
+		return true, Delete(root, taskID)
+	}
+	return true, Close(root, taskID, "closed from task list")
+}
+
 // Get loads a single task by ID (direct read).
 func Get(root, id string) (task.Task, error) {
 	return taskFromDB(root, id)

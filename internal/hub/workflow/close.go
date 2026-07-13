@@ -10,20 +10,11 @@
 package workflow
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"strings"
-	"time"
 
-	"github.com/flo-at/sindri/internal/adapter/tasks/github"
-	"github.com/flo-at/sindri/internal/adapter/tasks/spec"
-	"github.com/flo-at/sindri/internal/adapter/tasks/td"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
-
-// githubCloseTimeout bounds the outbound GitHub close/delete in the close/scrap path.
-const githubCloseTimeout = 15 * time.Second
 
 // CloseTask marks a task done from the task list (host-only) — the "done" close,
 // dispatched by backend: a td task closes, an openspec change archives (its deltas
@@ -44,41 +35,22 @@ func (e *Engine) DeleteTask(project, id string) error { return e.finishTask(proj
 func (e *Engine) finishTask(project, id string, scrap bool) error {
 	ps := e.store.For(project)
 	root := e.deps.ProjectRoot(project)
-	var err error
-	switch {
-	case strings.HasPrefix(id, "td-"):
-		if scrap {
-			err = td.Delete(root, id)
-		} else {
-			err = td.Close(root, id, "closed from task list")
+	// Dispatch the close/scrap to the task's own backend — each source acts only on
+	// its own ids, so the workflow never branches on the id scheme. handled flags the
+	// owning source; none owning it is a genuinely unknown backend.
+	handled := false
+	for _, src := range taskSources() {
+		ok, err := src.Finish(root, id, scrap)
+		if err != nil {
+			return err
 		}
-	case strings.HasPrefix(id, "os-"):
-		name, ok := e.changeName(root, id)
-		if !ok {
-			return fmt.Errorf("%s: can't resolve its openspec change (re-sync and retry)", id)
+		if ok {
+			handled = true
+			break
 		}
-		if scrap {
-			err = spec.DeleteChange(root, name)
-		} else {
-			err = spec.Archive(root, name)
-		}
-	case strings.HasPrefix(id, "gh-"):
-		n, ok := github.Number(id)
-		if !ok {
-			return fmt.Errorf("%s: not a valid GitHub id", id)
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), githubCloseTimeout)
-		defer cancel()
-		if scrap {
-			err = github.Delete(ctx, root, n)
-		} else {
-			err = github.Close(ctx, root, n, "closed via sindri")
-		}
-	default:
-		return fmt.Errorf("%s: unknown task backend", id)
 	}
-	if err != nil {
-		return err
+	if !handled {
+		return fmt.Errorf("%s: unknown task backend", id)
 	}
 	// Free any agent that was on this task and push it to pick up a new one, so a
 	// cancelled task doesn't leave a worker grinding on dead work. The worktree is
@@ -114,19 +86,4 @@ func (e *Engine) finishTask(project, id string, scrap bool) error {
 	}
 	e.deps.Notify()
 	return nil
-}
-
-// changeName resolves an os-<hash> id back to its openspec change name by matching
-// spec.ID over the current changes (the id is a one-way hash of the name).
-func (e *Engine) changeName(root, id string) (string, bool) {
-	changes, err := spec.Changes(root)
-	if err != nil {
-		return "", false
-	}
-	for _, c := range changes {
-		if spec.ID(c.Name) == id {
-			return c.Name, true
-		}
-	}
-	return "", false
 }

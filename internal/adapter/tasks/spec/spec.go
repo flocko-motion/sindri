@@ -58,8 +58,40 @@ func (Source) Tasks(root string, _ bool) ([]task.Task, error) {
 }
 
 // OnMerged is a no-op for openspec: a change is archived at close/scrap time (see
-// Archive), not as a side effect of a PR merging.
+// Finish/Archive), not as a side effect of a PR merging.
 func (Source) OnMerged(root, taskID, note string) error { return nil }
+
+// Finish archives (done) or removes (scrap) the openspec change behind an os- id.
+// handled is false for a non-os id; an os id whose change can't be resolved is a
+// real error (the id is a one-way hash, so a stale cache can't be reversed).
+func (Source) Finish(root, taskID string, scrap bool) (bool, error) {
+	if !strings.HasPrefix(taskID, "os-") {
+		return false, nil
+	}
+	name, ok := changeName(root, taskID)
+	if !ok {
+		return true, fmt.Errorf("%s: can't resolve its openspec change (re-sync and retry)", taskID)
+	}
+	if scrap {
+		return true, DeleteChange(root, name)
+	}
+	return true, Archive(root, name)
+}
+
+// changeName resolves an os-<hash> id back to its change name by matching ID over the
+// current changes (the id is a one-way hash of the name).
+func changeName(root, id string) (string, bool) {
+	changes, err := Changes(root)
+	if err != nil {
+		return "", false
+	}
+	for _, c := range changes {
+		if ID(c.Name) == id {
+			return c.Name, true
+		}
+	}
+	return "", false
+}
 
 // Change is an openspec change from `openspec list --json`.
 type Change struct {
