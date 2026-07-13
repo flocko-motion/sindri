@@ -45,14 +45,6 @@ type Deps interface {
 	AgentAlive(project, name string) bool
 	// SessionAlive reports whether an agent's tmux session is live.
 	SessionAlive(project, name string) bool
-	// RefreshTask re-syncs one task's cached row from its source of truth.
-	RefreshTask(project, id string) error
-	// RefreshCachedTask pulls just one task into the cache (targeted, no full sync).
-	RefreshCachedTask(project, id string)
-	// ReconcileTask repairs one task's status against reality.
-	ReconcileTask(project, id string) error
-	// ReconcileTasks repairs stale task statuses across a project.
-	ReconcileTasks(project string) error
 	// TaskComments returns a task's comments for display.
 	TaskComments(project, id string) []store.Comment
 	// Subscribe returns a change-notification channel and an unsubscribe func — how

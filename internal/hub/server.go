@@ -161,7 +161,7 @@ func (h *Hub) Handler() http.Handler {
 		writeJSON(w, okMsg{"refreshed"}, h.Refresh(h.reqProject(r)))
 	})
 	mux.HandleFunc("POST /tasks/reconcile", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, okMsg{"reconciled"}, h.ReconcileTasks(h.reqProject(r)))
+		writeJSON(w, okMsg{"reconciled"}, h.wf.ReconcileTasks(h.reqProject(r)))
 	})
 	mux.HandleFunc("POST /task/comments/refresh", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq // Name carries the task id

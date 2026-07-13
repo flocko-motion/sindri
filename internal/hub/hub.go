@@ -347,7 +347,7 @@ func (h *Hub) DeleteAgent(project, name string) error {
 		if err := td.SetStatus(root, st.Task, "open"); err != nil {
 			fmt.Printf("warning: reopen %s on delete of %s: %v\n", st.Task, name, err)
 		}
-		_ = h.refreshTask(project, st.Task)
+		_ = h.wf.RefreshTask(project, st.Task)
 	}
 	_ = container.Rm(h.container(project, name))
 	h.closeAgent(project, name)

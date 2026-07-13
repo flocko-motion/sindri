@@ -1,4 +1,4 @@
-// package: hub / reconcile
+// package: hub/workflow / reconcile
 // type:    logic (task-status repair)
 // job:     correct a td task's stored status against reality — "in_review" with no
 //
@@ -6,7 +6,7 @@
 //	source of truth) so it heals, at task list / info / TUI startup.
 //
 // limits:  td-* tasks only; one td write per real discrepancy, then a no-op.
-package hub
+package workflow
 
 import (
 	"fmt"
@@ -14,17 +14,16 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/tasks/td"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // refreshTask re-reads one task from td and updates its cached row — the targeted
 // alternative to a full SyncTasks after a single-task change.
-func (h *Hub) refreshTask(project, id string) error {
-	t, err := td.Get(h.projectRoot(project), id)
+func (e *Engine) RefreshTask(project, id string) error {
+	t, err := td.Get(e.deps.ProjectRoot(project), id)
 	if err != nil {
 		return err
 	}
-	return h.store.For(project).UpsertTask(workflow.ToStoreTask(t))
+	return e.store.For(project).UpsertTask(ToStoreTask(t))
 }
 
 // refreshCachedTask updates one task's cached row after a local mutation, instead
@@ -32,14 +31,14 @@ func (h *Hub) refreshTask(project, id string) error {
 // re-read from td; a gh-/os- task keeps its synced fields and just has its current
 // priority override re-applied — its source fields don't change on a local edit.
 // Best-effort: a failure is logged host-side, never surfaced to the mutation.
-func (h *Hub) refreshCachedTask(project, id string) {
+func (e *Engine) refreshCachedTask(project, id string) {
 	if strings.HasPrefix(id, "td-") {
-		if err := h.refreshTask(project, id); err != nil {
+		if err := e.RefreshTask(project, id); err != nil {
 			fmt.Fprintf(os.Stderr, "hub: refresh task %s: %v\n", id, err)
 		}
 		return
 	}
-	ps := h.store.For(project)
+	ps := e.store.For(project)
 	t, ok, err := ps.GetTask(id)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "hub: refresh cached task %s: %v\n", id, err)
@@ -78,8 +77,8 @@ func reconciledStatus(status string, activePR, assigned bool) string {
 
 // taskReality reports whether a task currently has an active (not merged/rejected)
 // PR and whether any agent is assigned to it — the two facts reconciledStatus needs.
-func (h *Hub) taskReality(project, id string) (activePR, assigned bool, err error) {
-	ps := h.store.For(project)
+func (e *Engine) taskReality(project, id string) (activePR, assigned bool, err error) {
+	ps := e.store.For(project)
 	prs, err := ps.PRs()
 	if err != nil {
 		return false, false, err
@@ -106,16 +105,16 @@ func (h *Hub) taskReality(project, id string) (activePR, assigned bool, err erro
 // ReconcileTask repairs one td task's status against reality (a no-op for gh-/os-
 // ids and for a task that's already consistent). Writes the correction to td so it
 // persists through the next sync.
-func (h *Hub) ReconcileTask(project, id string) error {
+func (e *Engine) ReconcileTask(project, id string) error {
 	if !strings.HasPrefix(id, "td-") {
 		return nil
 	}
-	ps := h.store.For(project)
+	ps := e.store.For(project)
 	t, ok, err := ps.GetTask(id)
 	if err != nil || !ok {
 		return err
 	}
-	activePR, assigned, err := h.taskReality(project, id)
+	activePR, assigned, err := e.taskReality(project, id)
 	if err != nil {
 		return err
 	}
@@ -123,16 +122,16 @@ func (h *Hub) ReconcileTask(project, id string) error {
 	if want == t.Status {
 		return nil
 	}
-	if err := td.SetStatus(h.projectRoot(project), id, want); err != nil {
+	if err := td.SetStatus(e.deps.ProjectRoot(project), id, want); err != nil {
 		return err
 	}
-	return h.refreshTask(project, id)
+	return e.RefreshTask(project, id)
 }
 
 // ReconcileTasks repairs every td task in a project in one pass (the task-list /
 // TUI-startup sweep). A per-task failure is logged, never fatal to the sweep.
-func (h *Hub) ReconcileTasks(project string) error {
-	ps := h.store.For(project)
+func (e *Engine) ReconcileTasks(project string) error {
+	ps := e.store.For(project)
 	tasks, err := ps.AllTasks()
 	if err != nil {
 		return err
@@ -163,16 +162,16 @@ func (h *Hub) ReconcileTasks(project string) error {
 			continue
 		}
 		if want := reconciledStatus(t.Status, activePR[t.ID], assigned[t.ID]); want != t.Status {
-			if err := td.SetStatus(h.projectRoot(project), t.ID, want); err != nil {
+			if err := td.SetStatus(e.deps.ProjectRoot(project), t.ID, want); err != nil {
 				fmt.Fprintf(os.Stderr, "hub: reconcile %s (%s->%s): %v\n", t.ID, t.Status, want, err)
 				continue
 			}
-			_ = h.refreshTask(project, t.ID)
+			_ = e.RefreshTask(project, t.ID)
 			changed = true
 		}
 	}
 	if changed {
-		h.notify()
+		e.deps.Notify()
 	}
 	return nil
 }

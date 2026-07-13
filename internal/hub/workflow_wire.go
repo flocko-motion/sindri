@@ -49,14 +49,6 @@ func (d workflowDeps) SessionAlive(project, name string) bool {
 	return d.h.sessionAlive(project, name)
 }
 
-func (d workflowDeps) RefreshTask(project, id string) error { return d.h.refreshTask(project, id) }
-
-func (d workflowDeps) RefreshCachedTask(project, id string) { d.h.refreshCachedTask(project, id) }
-
-func (d workflowDeps) ReconcileTask(project, id string) error { return d.h.ReconcileTask(project, id) }
-
-func (d workflowDeps) ReconcileTasks(project string) error { return d.h.ReconcileTasks(project) }
-
 func (d workflowDeps) TaskComments(project, id string) []store.Comment {
 	return d.h.comments.ForView(project, id)
 }

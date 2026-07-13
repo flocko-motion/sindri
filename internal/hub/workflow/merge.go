@@ -135,7 +135,7 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 			_ = ps.LogPR(prID, "warning", "merged locally, but closing the task upstream failed (may need a manual follow-up): "+err.Error())
 		}
 	}
-	e.deps.RefreshCachedTask(project, pr.Task) // reflect the now-closed task in the cache
+	e.refreshCachedTask(project, pr.Task) // reflect the now-closed task in the cache
 	rest := "idle"
 	if a, ok, _ := ps.GetAgent(pr.Agent); ok {
 		rest = restPhase(a.Role)

@@ -34,7 +34,7 @@ func (e *Engine) Tasks(project string) ([]store.Task, error) {
 	}
 	// Repair any stale status (in_review with no PR, in_progress with no assignee)
 	// against reality — a listing is a natural, infrequent point to do the sweep.
-	_ = e.deps.ReconcileTasks(project)
+	_ = e.ReconcileTasks(project)
 	return e.store.For(project).AllTasks()
 }
 
@@ -56,7 +56,7 @@ func (e *Engine) TaskInfo(project, id string) (store.Task, error) {
 	}
 	// Repair this one task's status against reality before returning it (task info /
 	// detail is a natural single-task check point).
-	_ = e.deps.ReconcileTask(project, id)
+	_ = e.ReconcileTask(project, id)
 	root := e.deps.ProjectRoot(project)
 	t, err := td.Get(root, id)
 	if err != nil {
@@ -102,7 +102,7 @@ func (e *Engine) CreateTask(project string, s TaskSpec) (string, error) {
 			break
 		}
 	}
-	e.deps.RefreshCachedTask(project, id) // targeted: pull just the new task, not a full re-sync
+	e.refreshCachedTask(project, id) // targeted: pull just the new task, not a full re-sync
 	e.deps.Notify()
 	return id, nil
 }
@@ -147,7 +147,7 @@ func (e *Engine) UnassignTask(project, id string) error {
 			return err
 		}
 	}
-	_ = e.deps.RefreshTask(project, id)
+	_ = e.RefreshTask(project, id)
 	e.deps.Notify()
 	return nil
 }
@@ -277,7 +277,7 @@ func (e *Engine) EditTask(project, id string, s TaskSpec) error {
 			return err
 		}
 	}
-	e.deps.RefreshCachedTask(project, id) // targeted refresh of the edited task
+	e.refreshCachedTask(project, id) // targeted refresh of the edited task
 	e.deps.Notify()
 	return nil
 }
@@ -469,7 +469,7 @@ func (e *Engine) SetPriority(project, id, priority string) error {
 			return err
 		}
 	}
-	e.deps.RefreshCachedTask(project, id) // targeted refresh of the reprioritized task
+	e.refreshCachedTask(project, id) // targeted refresh of the reprioritized task
 	e.deps.Notify()
 	return nil
 }
@@ -557,7 +557,7 @@ func (e *Engine) claimLeaf(project, worker string) (string, bool, error) {
 		if err := td.SetStatus(root, t.ID, "in_progress"); err != nil {
 			return "", false, err
 		}
-		_ = e.deps.RefreshTask(project, t.ID)
+		_ = e.RefreshTask(project, t.ID)
 	}
 	// Lay the new branch on a CLEAN base. A prior task's leftover WIP — e.g. a task
 	// cancelled out from under this agent while it kept editing — would otherwise
@@ -614,7 +614,7 @@ func (e *Engine) claimContainer(project, worker string) (string, bool, error) {
 	if err := td.SetStatus(root, child.ID, "in_progress"); err != nil {
 		return "", false, err
 	}
-	_ = e.deps.RefreshTask(project, child.ID)
+	_ = e.RefreshTask(project, child.ID)
 	if err := ps.SetState(store.AgentState{Agent: worker, Container: c.ID, Branch: c.ID, Task: child.ID, Phase: "working"}); err != nil {
 		return "", false, err
 	}
@@ -648,7 +648,7 @@ func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) 
 	if err := td.SetStatus(root, st.Task, "closed"); err != nil {
 		return 1, err
 	}
-	_ = e.deps.RefreshTask(c.Project, st.Task)
+	_ = e.RefreshTask(c.Project, st.Task)
 	_ = ps.Log(c.Agent, "checkpoint", st.Task)
 	done := st.Task
 	if next, ok := e.advanceContainer(c.Project, c.Agent, st.Container); ok {
@@ -673,7 +673,7 @@ func (e *Engine) advanceContainer(project, agent, container string) (store.Task,
 	if err := td.SetStatus(e.deps.ProjectRoot(project), child.ID, "in_progress"); err != nil {
 		return store.Task{}, false
 	}
-	_ = e.deps.RefreshTask(project, child.ID)
+	_ = e.RefreshTask(project, child.ID)
 	_ = ps.SetState(store.AgentState{Agent: agent, Container: container, Branch: container, Task: child.ID, Phase: "working"})
 	e.deps.Notify()
 	return child, true
