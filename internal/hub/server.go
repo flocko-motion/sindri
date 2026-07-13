@@ -250,7 +250,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"ok"}, h.SetAgentMemory(h.reqProject(r), req.Name, req.Memory))
+		writeJSON(w, okMsg{"ok"}, h.agents.SetMemory(h.reqProject(r), req.Name, req.Memory))
 	})
 	mux.HandleFunc("POST /agent/delete", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq

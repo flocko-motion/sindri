@@ -1,16 +1,11 @@
-// package: hub / names
+// package: hub/agent / names
 // type:    headless helper
-// job:     auto-name new agents after Norse dwarves — friends of Sindri the
-//
-//	smith. The binary names "sindri" and "brokkr" are never handed out.
-//	Names are picked at random and are unique across ALL projects, so each
-//	dwarf identifies one agent machine-wide (recognisable on the unified
-//	cross-repo board).
-//
-// limits:  only allocates names; registering and launching the agent are the
-//
-//	hub's (-> hub.go).
-package hub
+// job:     auto-name new agents after Norse dwarves — friends of Sindri the smith.
+//          The binary names "sindri" and "brokkr" are never handed out. Names are
+//          picked at random and are unique across ALL projects, so each dwarf
+//          identifies one agent machine-wide (recognisable on the unified board).
+// limits:  only allocates names; registering and launching the agent are the hub's.
+package agent
 
 import (
 	"fmt"
@@ -28,11 +23,11 @@ var dwarfNames = []string{
 	"frar", "loni", "jari", "hepti", "nar", "lit",
 }
 
-// autoName returns a random dwarf name unused by any agent across all projects, so
+// AutoName returns a random dwarf name unused by any agent across all projects, so
 // names are globally unique and don't always start at "eitri". Once the pool is
 // exhausted it appends a numeric suffix (thorin2, …) so creation never fails.
-func (h *Hub) autoName() (string, error) {
-	agents, err := h.store.AllAgents()
+func (s *Service) AutoName() (string, error) {
+	agents, err := s.store.AllAgents()
 	if err != nil {
 		return "", err
 	}

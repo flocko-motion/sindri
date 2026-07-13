@@ -21,7 +21,7 @@ func TestAgentTCPChannelAuth(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := fmt.Sprintf("http://127.0.0.1:%d/commands", h.agentTCPPort)
-	tok, _ := h.AgentToken("proj", "eitri")
+	tok, _ := h.agents.Token("proj", "eitri")
 
 	do := func(token string) int {
 		req, _ := http.NewRequest("GET", base, nil)

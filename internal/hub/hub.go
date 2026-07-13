@@ -26,12 +26,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/flo-at/sindri/internal/adapter/agent"
+	agentport "github.com/flo-at/sindri/internal/adapter/agent"
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/adapter/tasks/td"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
+	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/chat"
 	"github.com/flo-at/sindri/internal/hub/comments"
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -65,6 +66,7 @@ type Hub struct {
 
 	chat     *chat.Service     // the user's chatroom relay (internal/hub/chat)
 	comments *comments.Service // task-comment sync (internal/hub/comments)
+	agents   *agent.Service    // agent identity/auth/memory (internal/hub/agent)
 }
 
 // agentKey identifies an agent within a project — the key for the hub's per-agent
@@ -172,6 +174,7 @@ func New() (*Hub, error) {
 		launchBuf: map[agentKey]*safeBuffer{}}
 	h.chat = chat.New(h.store, chatDelivery{h})
 	h.comments = comments.New(h.store, commentsDeps{h})
+	h.agents = agent.New(h.store, h.notify)
 	return h, nil
 }
 
@@ -297,7 +300,7 @@ func (h *Hub) SocketPath() string { return SocketPath() }
 func (h *Hub) NewAgent(project, name, role, memory string) (string, error) {
 	ps := h.store.For(project)
 	if name == "" { // auto-name after a dwarf — a friend of Sindri (globally unique)
-		n, err := h.autoName()
+		n, err := h.agents.AutoName()
 		if err != nil {
 			return "", err
 		}
@@ -309,7 +312,7 @@ func (h *Hub) NewAgent(project, name, role, memory string) (string, error) {
 	if role != "worker" && role != "reviewer" && role != "planner" && role != "coauthor" {
 		return "", fmt.Errorf("invalid role %q (worker|reviewer|planner|coauthor)", role)
 	}
-	if !validMemory(memory) {
+	if !agent.ValidMemory(memory) {
 		return "", fmt.Errorf("invalid memory %q (e.g. 2g, 512m)", memory)
 	}
 	// Names are unique across ALL repos — a dwarf identifies one agent machine-wide,
@@ -506,7 +509,7 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 		if h.agentTCPPort == 0 {
 			return fmt.Errorf("agent TCP channel not started — launch needs a persistent hub")
 		}
-		token, terr := h.AgentToken(project, name)
+		token, terr := h.agents.Token(project, name)
 		if terr != nil {
 			return terr
 		}
@@ -552,7 +555,7 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 		archContent, _ := os.ReadFile(filepath.Join(h.projectRoot(project), archPath))
 		sysPrompt := workflow.SystemPrompt(name, a.Role, string(archContent), archPath)
 		homeDir := filepath.Join(paths.StateDir(), project, "agents", name)
-		home, err := agent.PrepareHome(agent.HomeSpec{Dir: homeDir, SystemPrompt: sysPrompt, Out: w})
+		home, err := agentport.PrepareHome(agentport.HomeSpec{Dir: homeDir, SystemPrompt: sysPrompt, Out: w})
 		if err != nil {
 			return err
 		}
@@ -580,7 +583,7 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 		Mounts:     mounts,
 		Workdir:    "/workspace",
 		Entrypoint: []string{"sindri-agent", name},
-		Memory:     memoryOrDefault(a.Memory),
+		Memory:     agent.MemoryOrDefault(a.Memory),
 	}
 	if err := container.Run(opts); err != nil {
 		return err

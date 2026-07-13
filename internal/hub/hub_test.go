@@ -92,14 +92,6 @@ func TestNewAgentValidation(t *testing.T) {
 
 func TestNewAgentAutoName(t *testing.T) {
 	h := newHub(t)
-	isDwarf := func(n string) bool {
-		for _, d := range dwarfNames {
-			if d == n {
-				return true
-			}
-		}
-		return false
-	}
 	n1, err := h.NewAgent(testProject, "", "worker", "")
 	if err != nil {
 		t.Fatal(err)
@@ -109,9 +101,11 @@ func TestNewAgentAutoName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !isDwarf(n1) || !isDwarf(n2) {
-		t.Fatalf("auto-names should be dwarves: %q, %q", n1, n2)
+	if n1 == "" || n2 == "" {
+		t.Fatalf("auto-name should be non-empty: %q, %q", n1, n2)
 	}
+	// The dwarf pool itself is unit-tested in internal/hub/agent; here we assert the
+	// hub-level behaviour: auto-names are globally unique across projects.
 	if n1 == n2 {
 		t.Fatalf("auto-names must be globally unique across projects, got %q twice", n1)
 	}
