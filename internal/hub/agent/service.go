@@ -14,22 +14,25 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// Service is the agent-actor module: naming, token auth, memory config, and per-agent
-// launch-output capture over the hub's central store. Constructed once and wired into
-// the hub.
+// Deps is what the agent module needs back from the hub: wake the board, and resolve
+// an agent's container name (the hub owns the repo-scoped naming scheme).
+type Deps interface {
+	Notify()
+	ContainerName(project, name string) string
+}
+
+// Service is the agent-management module: identity (naming), auth (tokens), memory
+// config, launch-output capture, and message injection into a running agent — the
+// hub-side mechanics of managing an agent, over the central store.
 type Service struct {
-	store  *store.Store
-	notify func()
+	store *store.Store
+	deps  Deps
 
 	launchMu sync.Mutex             // guards launch
 	launch   map[string]*safeBuffer // per-agent launch-output buffers (see launchbuf.go)
 }
 
-// New builds the agent-actor service over the hub's store. notify wakes the board
-// after a state change; a nil notify is treated as a no-op.
-func New(st *store.Store, notify func()) *Service {
-	if notify == nil {
-		notify = func() {}
-	}
-	return &Service{store: st, notify: notify, launch: map[string]*safeBuffer{}}
+// New builds the agent module over the hub's store and its Deps.
+func New(st *store.Store, deps Deps) *Service {
+	return &Service{store: st, deps: deps, launch: map[string]*safeBuffer{}}
 }

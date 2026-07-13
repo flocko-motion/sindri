@@ -58,6 +58,6 @@ func (s *Service) SetMemory(project, name, memory string) error {
 	if err := ps.PutAgent(a); err != nil {
 		return err
 	}
-	defer s.notify()
+	defer s.deps.Notify()
 	return ps.Log(name, "config", "memory="+MemoryOrDefault(a.Memory))
 }

@@ -28,7 +28,6 @@ import (
 	agentport "github.com/flo-at/sindri/internal/adapter/agent"
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/adapter/tasks/td"
-	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agent"
@@ -123,9 +122,6 @@ func (h *Hub) projectRoot(project string) string {
 	return root
 }
 
-// session is the tmux session name for an agent (named after the agent, D4).
-func session(name string) string { return name }
-
 // New opens the single global hub: ensures the central state dir exists and opens
 // the one project-keyed store. Repos are registered lazily on first use (repo).
 func New() (*Hub, error) {
@@ -141,7 +137,7 @@ func New() (*Hub, error) {
 		lifecycle: map[agentKey]string{}}
 	h.chat = chat.New(h.store, chatDelivery{h})
 	h.comments = comments.New(h.store, commentsDeps{h})
-	h.agents = agent.New(h.store, h.notify)
+	h.agents = agent.New(h.store, agentDeps{h})
 	h.wf = workflow.New(h.store, workflowDeps{h})
 	h.projects = project.New(h.store, projectDeps{h})
 	h.agentCh = agentchan.New(h.store, agentchanDeps{h})
@@ -595,58 +591,6 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 // micro-VM/pod boot plus the entrypoint starting tmux can take a bit.
 const launchReadyTimeout = 45 * time.Second
 
-// Tell delivers a message into an agent's session, stamped with its source
-// (provenance, D12). The stamped line is recorded in the activity log.
-func (h *Hub) Tell(project, name, msg, source string) error {
-	ps := h.store.For(project)
-	if _, ok, err := ps.GetAgent(name); err != nil {
-		return err
-	} else if !ok {
-		return fmt.Errorf("no such agent %q", name)
-	}
-	if source == "" {
-		source = "user"
-	}
-	stamped := fmt.Sprintf("[%s] %s", source, msg)
-	if err := h.inject(project, name, stamped); err != nil {
-		return err
-	}
-	defer h.notify()
-	return ps.Log(name, "recv", stamped)
-}
-
-// inject types text into an agent's tmux session via podman exec.
-func (h *Hub) inject(project, name, text string) error {
-	c := h.container(project, name)
-	if !container.Running(c) {
-		return fmt.Errorf("agent %q is not running — launch it first", name)
-	}
-	for _, argv := range tmux.SendText(session(name), text) {
-		full := append([]string{"tmux"}, argv...)
-		if _, err := container.Exec(c, full...); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// injectWhenReady waits (briefly) for an agent's tmux session to exist, then
-// injects. Used for hub-originated messages (verdicts, rehydrate) right after a
-// launch, when the session may not be up yet. A message that never lands is
-// recorded so it is not silently lost.
-func (h *Hub) injectWhenReady(project, name, text string) error {
-	c := h.container(project, name)
-	for i := 0; i < 25; i++ {
-		if container.Running(c) {
-			if _, err := container.Exec(c, "tmux", "has-session", "-t", session(name)); err == nil {
-				return h.inject(project, name, text)
-			}
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	return h.store.For(project).Log(name, "inject-skipped", text)
-}
-
 // rehydrate nudges a (re)launched agent to start once its pod's session is up (D13):
 // it injects one kickoff telling the agent to ask the hub for work. The nudge fits
 // new or resuming agents alike — AgentDirective is idempotent and state-driven, so
@@ -656,13 +600,13 @@ func (h *Hub) injectWhenReady(project, name, text string) error {
 func (h *Hub) rehydrate(project, name string) {
 	// Let Claude boot to input-readiness first, or its Enter is eaten by the splash.
 	time.Sleep(8 * time.Second)
-	_ = h.injectWhenReady(project, name, workflow.MsgKickoff)
+	_ = h.agents.InjectWhenReady(project, name, workflow.MsgKickoff)
 	// A chatroom member that just relaunched has lost the membership cue from its
 	// durable prompt — remind it so it knows it can still talk to the room. Best-
 	// effort: a store hiccup here shouldn't derail the rehydrate.
 	if member, err := h.chat.IsMember(project, name); err != nil {
 		fmt.Fprintf(os.Stderr, "hub: chat membership check for %s/%s failed: %v\n", project, name, err)
 	} else if member {
-		_ = h.injectWhenReady(project, name, chat.MsgReminder)
+		_ = h.agents.InjectWhenReady(project, name, chat.MsgReminder)
 	}
 }

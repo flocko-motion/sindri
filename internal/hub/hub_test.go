@@ -187,7 +187,7 @@ func TestReviewInstructionsCarryArchitecture(t *testing.T) {
 
 func TestTellUnknownAgent(t *testing.T) {
 	h := newHub(t)
-	if err := h.Tell(testProject, "ghost", "hi", "user"); err == nil {
+	if err := h.agents.Tell(testProject, "ghost", "hi", "user"); err == nil {
 		t.Fatalf("telling unknown agent should error")
 	}
 }

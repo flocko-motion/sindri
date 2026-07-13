@@ -21,12 +21,19 @@ import (
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
+// agentDeps adapts the hub to agent.Deps: wake the board, and resolve an agent's
+// (repo-scoped) container name.
+type agentDeps struct{ h *Hub }
+
+func (d agentDeps) Notify()                                 { d.h.notify() }
+func (d agentDeps) ContainerName(project, name string) string { return d.h.container(project, name) }
+
 // chatDelivery adapts the hub to chat.Delivery: agent injection via tmux, a pod
 // liveness check, and board notifications — the only hooks the chat relay needs back.
 type chatDelivery struct{ h *Hub }
 
 func (c chatDelivery) Inject(project, name, text string) error {
-	return c.h.inject(project, name, text)
+	return c.h.agents.Inject(project, name, text)
 }
 func (c chatDelivery) Running(project, name string) bool {
 	return container.Running(c.h.container(project, name))
@@ -102,7 +109,7 @@ func (d workflowDeps) Container(project, name string) string { return d.h.contai
 func (d workflowDeps) Notify() { d.h.notify() }
 
 func (d workflowDeps) InjectWhenReady(project, name, text string) error {
-	return d.h.injectWhenReady(project, name, text)
+	return d.h.agents.InjectWhenReady(project, name, text)
 }
 
 func (d workflowDeps) AgentAlive(project, name string) bool { return d.h.agentAlive(project, name) }
