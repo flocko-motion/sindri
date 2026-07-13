@@ -16,7 +16,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 	"io"
 	"net"
 	"os"
@@ -27,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/flo-at/sindri/internal/adapter/agent"
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/adapter/tasks/td"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
@@ -35,6 +35,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/chat"
 	"github.com/flo-at/sindri/internal/hub/comments"
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
@@ -543,18 +544,24 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 	if shell {
 		env["SINDRI_SHELL"] = "1" // entrypoint runs bash instead of Claude
 	} else {
-		// Set up the agent's Claude home (credentials, config, system prompt) and
-		// mount it so Claude runs authenticated.
-		home, cfg, hasCreds, err := h.prepareClaudeHome(project, name, a.Role, w)
+		// Compose the agent's system prompt (workflow logic: identity + how-to-work,
+		// with the project architecture injected), then hand it to the coding-agent
+		// backend to provision its home (credentials, config, prompt) — the hub owns
+		// only WHERE that home lives.
+		archPath := h.architectureDoc(project)
+		archContent, _ := os.ReadFile(filepath.Join(h.projectRoot(project), archPath))
+		sysPrompt := workflow.SystemPrompt(name, a.Role, string(archContent), archPath)
+		homeDir := filepath.Join(paths.StateDir(), project, "agents", name)
+		home, err := agent.PrepareHome(agent.HomeSpec{Dir: homeDir, SystemPrompt: sysPrompt, Out: w})
 		if err != nil {
 			return err
 		}
-		if !hasCreds {
+		if !home.HasCreds {
 			return fmt.Errorf("no Claude credentials on host (~/.claude/.credentials.json, or the macOS Keychain) — log in with `claude`, or launch with --shell")
 		}
 		mounts = append(mounts,
-			container.Mount{Host: home, Container: "/home/sindri/.claude", Mode: "rw"},
-			container.Mount{Host: cfg, Container: "/home/sindri/.claude.json", Mode: "rw"})
+			container.Mount{Host: home.Dir, Container: "/home/sindri/.claude", Mode: "rw"},
+			container.Mount{Host: home.ConfigPath, Container: "/home/sindri/.claude.json", Mode: "rw"})
 		// Mount the user's Claude skills into the agent's home so it works with the
 		// same skills the user has — read-only and live (edits on the host show up
 		// without a relaunch). Any symlinks inside are the user's to manage.
