@@ -218,3 +218,8 @@ func (h *Hub) cmdListPRs(c registry.Caller, _ []string, out io.Writer) (int, err
 	}
 	return 0, nil
 }
+
+// cmdChat is the agent-facing `chat` verb — it delegates to the chat relay.
+func (h *Hub) cmdChat(c registry.Caller, args []string, out io.Writer) (int, error) {
+	return h.chat.Cmd(c, args, out)
+}

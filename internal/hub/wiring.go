@@ -1,18 +1,38 @@
-// package: hub / workflow_wire
-// type:    logic (workflow wiring)
-// job:     wire the extracted workflow engine (internal/hub/workflow) into the hub —
-//          provide its Deps seam (store access is direct; everything else the
-//          orchestration needs from the hub is delegated here). The state machine
-//          itself lives in the workflow package.
-// limits:  no workflow logic here (-> internal/hub/workflow); just the Deps adapter.
+// package: hub / wiring
+// type:    logic (module wiring)
+// job:     wire the hub's extracted modules into it — the seam adapters each module
+//          needs back to the hub (chat Delivery, comments Deps, workflow Deps) and the
+//          workflow DTO aliases the hub re-exports as its API. Each module's logic
+//          lives in its own package; this is only the glue.
+// limits:  adapters + aliases only — no module logic here.
 package hub
 
 import (
 	"github.com/flo-at/sindri/internal/config"
+	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
+
+// chatDelivery adapts the hub to chat.Delivery: agent injection via tmux, a pod
+// liveness check, and board notifications — the only hooks the chat relay needs back.
+type chatDelivery struct{ h *Hub }
+
+func (c chatDelivery) Inject(project, name, text string) error {
+	return c.h.inject(project, name, text)
+}
+func (c chatDelivery) Running(project, name string) bool {
+	return container.Running(c.h.container(project, name))
+}
+func (c chatDelivery) Notify() { c.h.notify() }
+
+// commentsDeps adapts the hub to comments.Deps: resolve a project's root path and
+// wake the board — the only hooks the comments module needs from the hub.
+type commentsDeps struct{ h *Hub }
+
+func (c commentsDeps) ProjectRoot(project string) string { return c.h.projectRoot(project) }
+func (c commentsDeps) Notify()                           { c.h.notify() }
 
 // TaskSpec and PRDetail are the workflow module's API DTOs, re-exported so the hub
 // stays the single facade its clients (client/TUI/CLI) import — they get the RPC
