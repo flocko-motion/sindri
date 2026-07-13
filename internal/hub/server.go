@@ -168,7 +168,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"refreshed"}, h.RefreshTaskComments(h.reqProject(r), req.Name))
+		writeJSON(w, okMsg{"refreshed"}, h.comments.Refresh(h.reqProject(r), req.Name))
 	})
 	mux.HandleFunc("GET /repos", func(w http.ResponseWriter, r *http.Request) {
 		list, err := h.RepoList()
@@ -320,14 +320,14 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"added"}, h.ChatAdd(h.reqProject(r), req.Name))
+		writeJSON(w, okMsg{"added"}, h.chat.Add(h.reqProject(r), req.Name))
 	})
 	mux.HandleFunc("POST /chat/remove", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"removed"}, h.ChatRemove(h.reqProject(r), req.Name))
+		writeJSON(w, okMsg{"removed"}, h.chat.Remove(h.reqProject(r), req.Name))
 	})
 	mux.HandleFunc("POST /chat/say", func(w http.ResponseWriter, r *http.Request) {
 		var req ChatSayReq
@@ -336,10 +336,10 @@ func (h *Hub) Handler() http.Handler {
 		}
 		// A line starting with "/" is an in-chat command (add/remove/who/help),
 		// executed by the hub; anything else is broadcast as the user.
-		writeJSON(w, okMsg{"sent"}, h.ChatUserMessage(req.Msg))
+		writeJSON(w, okMsg{"sent"}, h.chat.UserMessage(req.Msg))
 	})
 	mux.HandleFunc("POST /chat/heartbeat", func(w http.ResponseWriter, r *http.Request) {
-		h.ChatHeartbeat()
+		h.chat.Heartbeat()
 		writeJSON(w, okMsg{"ok"}, nil)
 	})
 	mux.HandleFunc("GET /chat", func(w http.ResponseWriter, r *http.Request) {
@@ -580,11 +580,11 @@ func (h *Hub) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 // chatView builds the current chatroom snapshot (roster + recent transcript).
 func (h *Hub) chatView() (ChatView, error) {
-	members, err := h.ChatMembers()
+	members, err := h.chat.Members()
 	if err != nil {
 		return ChatView{}, err
 	}
-	log, err := h.ChatTranscript(0)
+	log, err := h.chat.Transcript(0)
 	if err != nil {
 		return ChatView{}, err
 	}

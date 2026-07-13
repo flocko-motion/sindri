@@ -9,7 +9,7 @@ import (
 // silent phantom membership.
 func TestChatAddUnknownAgent(t *testing.T) {
 	h := newHub(t)
-	if err := h.ChatAdd(testProject, "ghost"); err == nil {
+	if err := h.chat.Add(testProject, "ghost"); err == nil {
 		t.Fatalf("adding an unknown agent should error")
 	}
 }
@@ -31,10 +31,10 @@ func TestChatAddRemoveAndGate(t *testing.T) {
 		t.Fatalf("agent should not be in chat before being added")
 	}
 
-	if err := h.ChatAdd(testProject, "nori"); err != nil {
+	if err := h.chat.Add(testProject, "nori"); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	if err := h.ChatAdd(testProject, "nori"); err == nil {
+	if err := h.chat.Add(testProject, "nori"); err == nil {
 		t.Fatalf("re-adding an existing member should error")
 	}
 	if c, err = h.caller(testProject, "nori"); err != nil {
@@ -43,10 +43,10 @@ func TestChatAddRemoveAndGate(t *testing.T) {
 		t.Fatalf("caller should be InChat after add (gates the chat verb)")
 	}
 
-	if err := h.ChatRemove(testProject, "nori"); err != nil {
+	if err := h.chat.Remove(testProject, "nori"); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
-	if err := h.ChatRemove(testProject, "nori"); err == nil {
+	if err := h.chat.Remove(testProject, "nori"); err == nil {
 		t.Fatalf("removing a non-member should error")
 	}
 }
@@ -59,14 +59,14 @@ func TestChatSlashCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := h.ChatUserMessage("/add nori"); err != nil {
+	if err := h.chat.UserMessage("/add nori"); err != nil {
 		t.Fatalf("/add: %v", err)
 	}
 	if m, _ := h.store.ChatIsMember(testProject, "nori"); !m {
 		t.Fatalf("/add should make nori a member")
 	}
 
-	if err := h.ChatUserMessage("/remove nori"); err != nil {
+	if err := h.chat.UserMessage("/remove nori"); err != nil {
 		t.Fatalf("/remove: %v", err)
 	}
 	if m, _ := h.store.ChatIsMember(testProject, "nori"); m {
@@ -74,10 +74,10 @@ func TestChatSlashCommands(t *testing.T) {
 	}
 
 	// An unknown command and a bad target are reported (system reply), not errors.
-	if err := h.ChatUserMessage("/bogus"); err != nil {
+	if err := h.chat.UserMessage("/bogus"); err != nil {
 		t.Fatalf("unknown command should not error: %v", err)
 	}
-	if err := h.ChatUserMessage("/add ghost"); err != nil {
+	if err := h.chat.UserMessage("/add ghost"); err != nil {
 		t.Fatalf("adding an unknown agent should not error (it replies): %v", err)
 	}
 	if m, _ := h.store.ChatIsMember(testProject, "ghost"); m {
@@ -85,10 +85,10 @@ func TestChatSlashCommands(t *testing.T) {
 	}
 
 	// A plain line broadcasts as the user.
-	if err := h.ChatUserMessage("hello team"); err != nil {
+	if err := h.chat.UserMessage("hello team"); err != nil {
 		t.Fatalf("plain message: %v", err)
 	}
-	log, _ := h.ChatTranscript(0)
+	log, _ := h.chat.Transcript(0)
 	var sawUser bool
 	for _, m := range log {
 		if m.Sender == "user" && m.Body == "hello team" {
@@ -105,10 +105,10 @@ func TestChatSlashCommands(t *testing.T) {
 // delivery to agents is best-effort on top).
 func TestChatSayRecordsTranscript(t *testing.T) {
 	h := newHub(t)
-	if _, err := h.ChatSay("why is the API flaky?"); err != nil {
+	if _, err := h.chat.Say("why is the API flaky?"); err != nil {
 		t.Fatalf("say: %v", err)
 	}
-	log, err := h.ChatTranscript(0)
+	log, err := h.chat.Transcript(0)
 	if err != nil {
 		t.Fatalf("transcript: %v", err)
 	}
@@ -117,10 +117,10 @@ func TestChatSayRecordsTranscript(t *testing.T) {
 	}
 
 	// An empty message is refused, not recorded.
-	if _, err := h.ChatSay("   "); err == nil {
+	if _, err := h.chat.Say("   "); err == nil {
 		t.Fatalf("empty message should be refused")
 	}
-	if log, _ = h.ChatTranscript(0); len(log) != 1 {
+	if log, _ = h.chat.Transcript(0); len(log) != 1 {
 		t.Fatalf("empty message must not be recorded, transcript = %+v", log)
 	}
 }
