@@ -150,6 +150,6 @@ func (d workflowDeps) TaskComments(project, id string) []store.Comment {
 
 func (d workflowDeps) Subscribe() (chan struct{}, func()) { return d.h.events.subscribe() }
 
-func (d workflowDeps) KnownProjects() []store.Project { return d.h.knownProjects() }
+func (d workflowDeps) KnownProjects() []store.Project { return d.h.projects.Known() }
 
 func (d workflowDeps) BrokkrBin() (string, error) { return agent.BrokkrBinary() }

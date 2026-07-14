@@ -78,7 +78,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	// drop out of the fleet PR tab — forgetting a repo means giving up its management,
 	// not surfacing its records. (Its agents are already deleted, so AllAgents is clean.)
 	registered := map[string]bool{}
-	for _, p := range h.knownProjects() {
+	for _, p := range h.projects.Known() {
 		registered[p.Tag] = true
 	}
 	kept := prs[:0]
@@ -139,7 +139,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 
 	// Orphans: sindri pods with no roster entry, across every known project. One
 	// podman ps per project, run concurrently and bounded like the liveness probes.
-	projects := h.knownProjects()
+	projects := h.projects.Known()
 	orphanLists := make([][]string, len(projects))
 	for i, proj := range projects {
 		wg.Add(1)
@@ -235,11 +235,6 @@ func (h *Hub) AllStats() ([]AgentStatsView, error) {
 	return out, nil
 }
 
-// knownProjects returns the registry's projects (best-effort; empty on error).
-func (h *Hub) knownProjects() []store.Project {
-	ps, _ := h.store.Projects()
-	return ps
-}
 
 // projectPath resolves a project tag to its path, logging loudly on a real store
 // error (distinct from an unknown project) instead of swallowing it into "". The
