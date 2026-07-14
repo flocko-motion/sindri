@@ -26,8 +26,16 @@ import (
 // (repo-scoped) container name.
 type agentDeps struct{ h *Hub }
 
-func (d agentDeps) Notify()                                 { d.h.notify() }
+func (d agentDeps) Notify()                                   { d.h.notify() }
 func (d agentDeps) ContainerName(project, name string) string { return d.h.container(project, name) }
+func (d agentDeps) ProjectRoot(project string) string         { return d.h.projectRoot(project) }
+func (d agentDeps) ArchitectureDoc(project string) string     { return d.h.architectureDoc(project) }
+func (d agentDeps) RefreshTask(project, id string) error      { return d.h.wf.RefreshTask(project, id) }
+func (d agentDeps) Rehydrate(project, name string)            { d.h.rehydrate(project, name) }
+
+func (d agentDeps) ProjectConfig(project string) (config.Config, error) {
+	return d.h.projectConfig(project)
+}
 
 // chatDelivery adapts the hub to chat.Delivery: agent injection via tmux, a pod
 // liveness check, and board notifications — the only hooks the chat relay needs back.
@@ -52,7 +60,9 @@ func (c commentsDeps) Notify()                           { c.h.notify() }
 // agents), the filesystem seeders, the repo's display name + stable tag, and notify.
 type projectDeps struct{ h *Hub }
 
-func (d projectDeps) DeleteAgent(project, name string) error { return d.h.DeleteAgent(project, name) }
+func (d projectDeps) DeleteAgent(project, name string) error {
+	return d.h.agents.DeleteAgent(project, name)
+}
 func (d projectDeps) EnsureGitignore(root string)           { ensureGitignore(root) }
 func (d projectDeps) EnsureArchitectureDoc(root string)     { ensureArchitectureDoc(root) }
 func (d projectDeps) RepoName(project string) string        { return d.h.repoName(project) }

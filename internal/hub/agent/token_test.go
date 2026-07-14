@@ -57,7 +57,7 @@ func TestTokenStableAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tok1, _ := New(st1, nil).Token("proj", "eitri")
+	tok1, _ := New(st1, nil, nil).Token("proj", "eitri")
 	st1.Close()
 
 	st2, err := store.Open(path)
@@ -65,7 +65,7 @@ func TestTokenStableAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st2.Close()
-	tok2, _ := New(st2, nil).Token("proj", "eitri")
+	tok2, _ := New(st2, nil, nil).Token("proj", "eitri")
 	if tok1 != tok2 {
 		t.Errorf("token changed across restart: %q vs %q", tok1, tok2)
 	}

@@ -130,7 +130,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		st, _ := h.store.For(a.Project).GetState(a.Name)
 		agents = append(agents, AgentView{
 			Project: a.Project, Repo: h.repoName(a.Project), Name: a.Name, Role: a.Role,
-			Status:  overlayRuntime(h.agentStatus(a.Project, a.Name, running[i], st.Phase), runtimes[i]),
+			Status:  overlayRuntime(h.agents.AgentStatus(a.Project, a.Name, running[i], st.Phase), runtimes[i]),
 			Runtime: runtimes[i],
 			Task:    st.Task, Branch: st.Branch, PR: openPRFor(prs, a.Project, a.Name), Workspace: a.Workspace,
 			Clients: clients[i], Container: container, Memory: a.Memory,

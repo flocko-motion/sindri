@@ -19,7 +19,7 @@ func TestChatAddUnknownAgent(t *testing.T) {
 // double add / double remove is reported as an error the operator can see.
 func TestChatAddRemoveAndGate(t *testing.T) {
 	h := newHub(t)
-	if _, err := h.NewAgent(testProject, "nori", "worker", ""); err != nil {
+	if _, err := h.agents.NewAgent(testProject, "nori", "worker", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -55,7 +55,7 @@ func TestChatAddRemoveAndGate(t *testing.T) {
 // by the hub (add/remove membership), while a plain line is broadcast as [user].
 func TestChatSlashCommands(t *testing.T) {
 	h := newHub(t)
-	if _, err := h.NewAgent(testProject, "nori", "worker", ""); err != nil {
+	if _, err := h.agents.NewAgent(testProject, "nori", "worker", ""); err != nil {
 		t.Fatal(err)
 	}
 

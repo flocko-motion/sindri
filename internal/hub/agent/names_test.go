@@ -15,7 +15,9 @@ func newService(t *testing.T) (*Service, *store.Store) {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
-	return New(st, nil), st
+	// nil deps/channel: these tests exercise only store-backed helpers (naming, tokens),
+	// which never reach the deps or the agent channel.
+	return New(st, nil, nil), st
 }
 
 func inPool(name string) bool {

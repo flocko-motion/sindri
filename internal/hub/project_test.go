@@ -48,7 +48,7 @@ func TestRepoForgetDeletesAgentsKeepsRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 	tag := RepoTag(root)
-	if _, err := h.NewAgent(tag, "eitri", "worker", ""); err != nil {
+	if _, err := h.agents.NewAgent(tag, "eitri", "worker", ""); err != nil {
 		t.Fatal(err)
 	}
 

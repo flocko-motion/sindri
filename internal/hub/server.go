@@ -243,7 +243,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		name, err := h.NewAgent(h.reqProject(r), req.Name, req.Role, req.Memory)
+		name, err := h.agents.NewAgent(h.reqProject(r), req.Name, req.Role, req.Memory)
 		writeJSON(w, okMsg{name}, err)
 	})
 	mux.HandleFunc("POST /agent/memory", func(w http.ResponseWriter, r *http.Request) {
@@ -258,14 +258,14 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"deleted"}, h.DeleteAgent(h.reqProject(r), req.Name))
+		writeJSON(w, okMsg{"deleted"}, h.agents.DeleteAgent(h.reqProject(r), req.Name))
 	})
 	mux.HandleFunc("POST /agent/stop", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"stopped"}, h.StopAgent(h.reqProject(r), req.Name))
+		writeJSON(w, okMsg{"stopped"}, h.agents.StopAgent(h.reqProject(r), req.Name))
 	})
 	mux.HandleFunc("POST /agent/rebase", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
@@ -287,7 +287,7 @@ func (h *Hub) Handler() http.Handler {
 		if f, ok := w.(http.Flusher); ok {
 			fw.f = f
 		}
-		if err := h.Launch(h.reqProject(r), req.Name, req.Shell, req.Debug, fw); err != nil {
+		if err := h.agents.Launch(h.reqProject(r), req.Name, req.Shell, req.Debug, fw); err != nil {
 			fmt.Fprintf(fw, "error: %v\n", err)
 			w.Header().Set("X-Sindri-Error", err.Error())
 		}
@@ -304,7 +304,7 @@ func (h *Hub) Handler() http.Handler {
 		if f, ok := w.(http.Flusher); ok {
 			fw.f = f
 		}
-		if err := h.RebuildAgent(h.reqProject(r), req.Name, fw); err != nil {
+		if err := h.agents.RebuildAgent(h.reqProject(r), req.Name, fw); err != nil {
 			fmt.Fprintf(fw, "error: %v\n", err)
 			w.Header().Set("X-Sindri-Error", err.Error())
 		}
