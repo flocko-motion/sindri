@@ -16,6 +16,7 @@ import (
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/agentchan"
+	"github.com/flo-at/sindri/internal/hub/commands"
 	"github.com/flo-at/sindri/internal/hub/project"
 	"github.com/flo-at/sindri/internal/hub/server"
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -103,6 +104,7 @@ type (
 	ExecReq     = agentchan.ExecReq
 	TaskRow     = task.TaskRow
 	ClientView  = agent.ClientView
+	Section     = commands.Section
 )
 
 // The task-view helpers live in hub/task; re-exported so the UIs keep getting them
@@ -114,6 +116,7 @@ var (
 	StateLabel    = task.StateLabel
 	ArrangeTasks  = task.ArrangeTasks
 	FormatClients = agent.FormatClients
+	Sections      = commands.Sections
 )
 
 // The control-socket addressing + pid-file plumbing lives in hub/server; re-exported

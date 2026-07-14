@@ -1,10 +1,10 @@
 // package: hub / sections
-// type:    logic (dashboard badge counts)
-// job:     the single source of truth for the dashboard's sections and their
-//          actionable badge counts, derived from the whole board snapshot. UIs render
-//          these; they never re-derive the counts.
-// limits:  count derivation only — needs the full BoardState, so it lives hub-side.
-//          The task label/ordering helpers moved to hub/task (view.go).
+// type:    logic (board badge counts)
+// job:     BoardState's actionable badge counts — the numbers the dashboard sections
+//          (hub/commands) render. BoardState satisfies commands.Board, so the section
+//          registry lives outside the hub while the counting (which needs the whole
+//          cross-module snapshot) stays here.
+// limits:  count derivation only; the section list + titles live in hub/commands.
 package hub
 
 import (
@@ -12,23 +12,23 @@ import (
 	"github.com/flo-at/sindri/internal/hub/task"
 )
 
-// Section is one dashboard tab: a key, a title, and its actionable badge count
-// derived from board state.
-type Section struct {
-	Key   string
-	Title string
-	Count func(BoardState) int
-}
+// These make BoardState satisfy commands.Board — the badge counts the dashboard
+// sections read.
 
-// Sections is the ordered set of dashboard sections — add one here and every UI
-// picks it up.
-var Sections = []Section{
-	{"tasks", "Tasks", func(b BoardState) int { return countTasks(b.Tasks, task.Open) }},
-	{"agents", "Agents", func(b BoardState) int { return len(b.Agents) }}, // the whole roster — down agents are still agents
-	{"prs", "PRs", func(b BoardState) int { return countPRs(b.PRs, prNotMerged) }},
-	{"repos", "Repos", func(b BoardState) int { return len(b.Projects) }},   // every repo the hub tracks
-	{"chat", "Chat", func(b BoardState) int { return len(b.Chat.Members) }}, // agents in the user's chatroom
-}
+// OpenTaskCount is the number of not-done tasks in the selected project.
+func (b BoardState) OpenTaskCount() int { return countTasks(b.Tasks, task.Open) }
+
+// AgentCount is the whole roster size (down agents are still agents).
+func (b BoardState) AgentCount() int { return len(b.Agents) }
+
+// OpenPRCount is the number of not-yet-merged PRs across the fleet.
+func (b BoardState) OpenPRCount() int { return countPRs(b.PRs, prNotMerged) }
+
+// RepoCount is the number of repos the hub tracks.
+func (b BoardState) RepoCount() int { return len(b.Projects) }
+
+// ChatMemberCount is the number of agents in the user's chatroom.
+func (b BoardState) ChatMemberCount() int { return len(b.Chat.Members) }
 
 func prNotMerged(p store.PR) bool { return p.Status != "merged" }
 
