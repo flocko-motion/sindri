@@ -565,7 +565,7 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 	fmt.Fprintf(w, "Waiting for %s to come up…\n", name)
 	deadline := time.Now().Add(launchReadyTimeout)
 	shown := 0
-	for !h.agentAlive(project, name) {
+	for !h.agents.AgentAlive(project, name) {
 		if full := container.Logs(cName, 1000); len(full) > shown { // follow the container's output during the wait
 			fmt.Fprint(w, full[shown:])
 			shown = len(full)
@@ -575,7 +575,7 @@ func (h *Hub) Launch(project, name string, shell, debug bool, progress io.Writer
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("%s launched but didn't come up within %s: %s (check `sindri agent pane %s`)",
-				name, launchReadyTimeout, h.launchDiagnostic(project, name), name)
+				name, launchReadyTimeout, h.agents.LaunchDiagnostic(project, name), name)
 		}
 		time.Sleep(time.Second)
 	}

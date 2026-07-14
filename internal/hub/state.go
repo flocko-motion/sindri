@@ -11,16 +11,11 @@ package hub
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/flo-at/sindri/internal/adapter/agent"
-	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
@@ -52,18 +47,6 @@ type AgentView struct {
 	Container string `json:"container"` // podman container name (project-resolved, so cross-repo callers target the right pod)
 	Memory    string `json:"memory"`    // configured RAM limit ("" = hub default)
 	Runtime   string `json:"runtime"`   // Claude's live runtime: "working"|"blocked"|"idle"|"" (folded into Status; kept raw for the herdr projection)
-}
-
-// ClientView is one human attached to an agent's tmux session — a live dial-in.
-// Surfaced so the UIs can show who's watching and whether they can type (a
-// read-only client observes but can't send keys). An orphaned client (a dropped
-// `podman exec` that left its tmux attach behind) shows up here too, which is how
-// a session that "sees but can't type" becomes visible instead of mysterious.
-type ClientView struct {
-	TTY      string `json:"tty"`
-	Width    int    `json:"width"`
-	Height   int    `json:"height"`
-	ReadOnly bool   `json:"read_only"`
 }
 
 // BoardState is the whole board in one payload. Agents and PRs are global (across
@@ -130,10 +113,10 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			if !container.RunningContext(ctx, h.container(a.Project, a.Name)) {
 				return
 			}
-			if cs, ok := h.clientsCtx(ctx, a.Project, a.Name); ok {
+			if cs, ok := h.agents.ClientsCtx(ctx, a.Project, a.Name); ok {
 				running[i] = true
 				clients[i] = len(cs)
-				runtimes[i] = h.runtimeState(ctx, a.Project, a.Name) // what Claude is doing now
+				runtimes[i] = h.agents.RuntimeState(ctx, a.Project, a.Name) // what Claude is doing now
 			}
 		}(i, a)
 	}
@@ -285,26 +268,6 @@ func (h *Hub) container(project, name string) string {
 	return Container(root, name)
 }
 
-// runtimeState captures an agent's Claude pane and classifies what Claude is doing
-// right now — "busy" (computing), "blocked" (waiting for user input), "idle" (stopped
-// at the prompt) — or "" when it can't tell (plain shell, transcript view, boot).
-// Bounded by ctx (it reuses the board probe's), so a wedged capture can't stall the read.
-func (h *Hub) runtimeState(ctx context.Context, project, name string) string {
-	out, err := container.ExecContext(ctx, h.container(project, name), append([]string{"tmux"}, tmux.CapturePane(name, 0, false)...)...) // plain: the text is pattern-matched
-	if err != nil {
-		return ""
-	}
-	switch agent.DetectState(string(out)) {
-	case agent.Working:
-		return "working"
-	case agent.Blocked:
-		return "blocked"
-	case agent.Idle:
-		return "idle"
-	}
-	return "idle" // a shell (maintenance mode) or unrecognized screen = not doing anything
-}
-
 // overlayRuntime folds Claude's live runtime (working|blocked|idle|"") into the
 // workflow status, three states in herdr's own vocabulary: "blocked" = needs your
 // attention now (any phase); "working" = busy; "idle" = not doing anything (no task,
@@ -322,169 +285,6 @@ func overlayRuntime(status, runtime string) string {
 		}
 	}
 	return status
-}
-
-// launchDiagnostic reports WHY a just-launched agent isn't observed up, so a
-// timeout is actionable instead of a shrug. It re-runs the two liveness probes
-// through the runtime, capturing their errors: the running check, then the tmux
-// session check inside the container. Whichever fails (and its error) is almost
-// always the real cause — a runtime that can't answer, or a session that never
-// started.
-func (h *Hub) launchDiagnostic(project, name string) string {
-	c := h.container(project, name)
-	if !container.Running(c) {
-		return fmt.Sprintf("the runtime does not report container %s as running [%s]", c,
-			container.Diagnose(context.Background(), c))
-	}
-	if out, err := container.Exec(c, append([]string{"tmux"}, tmux.HasSession(name)...)...); err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg == "" {
-			msg = err.Error()
-		}
-		return fmt.Sprintf("container is running but its tmux session check failed: %s", msg)
-	}
-	return "container and session both answer now — the liveness checks had been failing transiently"
-}
-
-// AgentDiagnostic reports, as one human string, what BOTH liveness probes observe
-// for an agent — the running check and the tmux session check — each with its real
-// result rather than the single "down" the board collapses them into. The session
-// exec is time-bounded, so a WEDGED exec (which otherwise silently reads as "down")
-// is reported as a timeout, not a hang. Behind `agent info --debug`, so a "down"
-// that contradicts a live container is explainable on demand.
-func (h *Hub) AgentDiagnostic(project, name string) string {
-	c := h.container(project, name)
-	var b strings.Builder
-	fmt.Fprintf(&b, "container:      %s\n", c)
-	fmt.Fprintf(&b, "running check:  %s\n", container.Diagnose(context.Background(), c))
-
-	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
-	defer cancel()
-	out, err := container.ExecContext(ctx, c, append([]string{"tmux"}, tmux.HasSession(name)...)...)
-	switch {
-	case ctx.Err() == context.DeadlineExceeded:
-		fmt.Fprintf(&b, "session check:  TIMED OUT after %s — `tmux has-session` in the container did not return (exec is wedged); this is why liveness reads 'down'\n", probeTimeout)
-	case err != nil:
-		msg := strings.TrimSpace(string(out))
-		if msg == "" {
-			msg = err.Error()
-		}
-		fmt.Fprintf(&b, "session check:  FAILED: %s\n", msg)
-	default:
-		fmt.Fprintf(&b, "session check:  ok — tmux session %q answers\n", name)
-	}
-	return b.String()
-}
-
-// agentAlive reports whether an agent is running (pod up and tmux session live).
-func (h *Hub) agentAlive(project, name string) bool {
-	return h.agentAliveCtx(context.Background(), project, name)
-}
-
-// agentAliveCtx is agentAlive with each podman probe bounded by ctx, so a wedged
-// pod times out to "down" instead of blocking. Used by the board read.
-func (h *Hub) agentAliveCtx(ctx context.Context, project, name string) bool {
-	return container.RunningContext(ctx, h.container(project, name)) && h.sessionAliveCtx(ctx, project, name)
-}
-
-// Clients lists the humans attached to an agent's tmux session (dial-ins). Errors
-// when the agent isn't running. The headless read behind both `agent info` and the
-// TUI detail view, so they show the same thing.
-func (h *Hub) Clients(project, name string) ([]ClientView, error) {
-	// Bounded: a wedged `container exec` must not hang the caller forever (it once
-	// hung `agent info` indefinitely). On timeout the probe degrades to "not running".
-	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
-	defer cancel()
-	cs, ok := h.clientsCtx(ctx, project, name)
-	if !ok {
-		return nil, fmt.Errorf("agent %q is not running", name)
-	}
-	return cs, nil
-}
-
-// clientsCtx parses `tmux list-clients` for the agent's session, bounded by ctx.
-// ok=false when the session is absent (so it also serves as a liveness probe).
-func (h *Hub) clientsCtx(ctx context.Context, project, name string) (cs []ClientView, ok bool) {
-	out, err := container.ExecContext(ctx, h.container(project, name), append([]string{"tmux"}, tmux.ListClients(name)...)...)
-	if err != nil {
-		return nil, false
-	}
-	return parseClients(string(out)), true
-}
-
-// parseClients turns list-clients output (one "tty width height readonly" line per
-// client) into ClientViews. Malformed lines are skipped rather than failing the
-// whole read.
-func parseClients(out string) []ClientView {
-	var cs []ClientView
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		f := strings.Fields(line)
-		if len(f) < 4 {
-			continue
-		}
-		w, _ := strconv.Atoi(f[1])
-		ht, _ := strconv.Atoi(f[2])
-		cs = append(cs, ClientView{TTY: f[0], Width: w, Height: ht, ReadOnly: f[3] == "1"})
-	}
-	return cs
-}
-
-// FormatClients renders attached clients for a human — shared by the CLI's
-// `agent info` and the TUI detail view so both read identically. Empty when
-// nobody's attached.
-func FormatClients(cs []ClientView) string {
-	if len(cs) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "clients:   %d attached\n", len(cs))
-	for _, c := range cs {
-		mode := "read-write"
-		if c.ReadOnly {
-			mode = "read-only"
-		}
-		fmt.Fprintf(&b, "  %s  %dx%d  %s\n", c.TTY, c.Width, c.Height, mode)
-	}
-	return b.String()
-}
-
-// sessionAlive reports whether the agent's tmux session is up inside its pod.
-func (h *Hub) sessionAlive(project, name string) bool {
-	return h.sessionAliveCtx(context.Background(), project, name)
-}
-
-// sessionAliveCtx is sessionAlive bounded by ctx.
-func (h *Hub) sessionAliveCtx(ctx context.Context, project, name string) bool {
-	_, err := container.ExecContext(ctx, h.container(project, name), append([]string{"tmux"}, tmux.HasSession(name)...)...)
-	return err == nil
-}
-
-// AgentPane returns the last `lines` rows of what the agent is showing — the live
-// tmux screen once up, else the container's startup logs, else the captured launch
-// output. Empty when truly down.
-func (h *Hub) AgentPane(project, name string, lines int) (string, error) {
-	if h.sessionAlive(project, name) {
-		out, err := container.Exec(h.container(project, name), append([]string{"tmux"}, tmux.CapturePane(name, lines, true)...)...) // colour: the preview renders ANSI
-		if err != nil {
-			return "", err
-		}
-		return string(out), nil
-	}
-	if logs := container.Logs(h.container(project, name), lines); logs != "" {
-		return logs, nil
-	}
-	return h.agents.LaunchOutput(project, name), nil
-}
-
-// PodInfo returns a short summary of an agent's podman container for the Agents-tab
-// pod view.
-func (h *Hub) PodInfo(project, name string) (string, error) {
-	c := h.container(project, name)
-	header := fmt.Sprintf("engine:    %s\ncontainer: %s\n\n", container.Name(), c)
-	if info := container.Info(c); info != "" {
-		return header + info, nil
-	}
-	return header + "(no container — agent is down)", nil
 }
 
 // Refresh re-syncs the selected project's tasks and notifies watchers. It's the

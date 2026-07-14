@@ -91,6 +91,7 @@ type (
 	RepoDetail  = project.Detail
 	ExecReq     = agentchan.ExecReq
 	TaskRow     = task.TaskRow
+	ClientView  = agent.ClientView
 )
 
 // The task-view helpers live in hub/task; re-exported so the UIs keep getting them
@@ -101,6 +102,7 @@ var (
 	PriorityWords = task.PriorityWords
 	StateLabel    = task.StateLabel
 	ArrangeTasks  = task.ArrangeTasks
+	FormatClients = agent.FormatClients
 )
 
 // workflowDeps adapts the hub to workflow.Deps: it exposes the hub facilities the
@@ -124,10 +126,12 @@ func (d workflowDeps) InjectWhenReady(project, name, text string) error {
 	return d.h.agents.InjectWhenReady(project, name, text)
 }
 
-func (d workflowDeps) AgentAlive(project, name string) bool { return d.h.agentAlive(project, name) }
+func (d workflowDeps) AgentAlive(project, name string) bool {
+	return d.h.agents.AgentAlive(project, name)
+}
 
 func (d workflowDeps) SessionAlive(project, name string) bool {
-	return d.h.sessionAlive(project, name)
+	return d.h.agents.SessionAlive(project, name)
 }
 
 func (d workflowDeps) TaskComments(project, id string) []store.Comment {

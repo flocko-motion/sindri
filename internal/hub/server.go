@@ -224,18 +224,18 @@ func (h *Hub) Handler() http.Handler {
 		if lines <= 0 {
 			lines = 40
 		}
-		out, err := h.AgentPane(h.reqProject(r), r.URL.Query().Get("agent"), lines)
+		out, err := h.agents.AgentPane(h.reqProject(r), r.URL.Query().Get("agent"), lines)
 		writeJSON(w, okMsg{out}, err)
 	})
 	mux.HandleFunc("GET /agent/pod", func(w http.ResponseWriter, r *http.Request) {
-		out, err := h.PodInfo(h.reqProject(r), r.URL.Query().Get("agent"))
+		out, err := h.agents.PodInfo(h.reqProject(r), r.URL.Query().Get("agent"))
 		writeJSON(w, okMsg{out}, err)
 	})
 	mux.HandleFunc("GET /agent/diagnose", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, okMsg{h.AgentDiagnostic(h.reqProject(r), r.URL.Query().Get("agent"))}, nil)
+		writeJSON(w, okMsg{h.agents.AgentDiagnostic(h.reqProject(r), r.URL.Query().Get("agent"))}, nil)
 	})
 	mux.HandleFunc("GET /agent/clients", func(w http.ResponseWriter, r *http.Request) {
-		cs, err := h.Clients(h.reqProject(r), r.URL.Query().Get("agent"))
+		cs, err := h.agents.Clients(h.reqProject(r), r.URL.Query().Get("agent"))
 		writeJSON(w, cs, err)
 	})
 	mux.HandleFunc("POST /agents", func(w http.ResponseWriter, r *http.Request) {
