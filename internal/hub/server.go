@@ -17,53 +17,12 @@ import (
 	"os"
 	"runtime"
 	"strconv"
-	"time"
 
 	"github.com/flo-at/sindri/internal/config"
+	"github.com/flo-at/sindri/internal/hub/server"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"golang.org/x/term"
 )
 
-// streamingPaths are long-lived by design (SSE): they'd hold an access-log run
-// open for the life of the connection, so they're left out of the log entirely.
-var streamingPaths = map[string]bool{"/events": true, "/chat/stream": true}
-
-// accessLogger coalesces the access log so high-frequency UI polling collapses to
-// counted lines instead of flooding. It writes to os.Stderr — where log(1) and
-// the background hub's redirected hub.log both go — and rewrites lines in place
-// when that's a terminal (foreground hub).
-var accessLogger = newAccessLog(os.Stderr, term.IsTerminal(int(os.Stderr.Fd())))
-
-// logRequests wraps a handler to record one access-log entry per request — the
-// hub's window onto every action it executes. label is the socket's owner ("hub"
-// or an agent name). Entries are coalesced (see accessLog), so a repeated read
-// shows as one counted line rather than being dropped or flooding the log.
-func logRequests(label string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if streamingPaths[r.URL.Path] {
-			next.ServeHTTP(w, r)
-			return
-		}
-		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		start := time.Now()
-		next.ServeHTTP(rec, r)
-		accessLogger.record(label, r.Method, r.URL.Path, rec.status, time.Since(start))
-	})
-}
-
-// statusRecorder captures the response status while passing flushing through
-// (needed for the streamed /exec and SSE endpoints).
-type statusRecorder struct {
-	http.ResponseWriter
-	status int
-}
-
-func (r *statusRecorder) WriteHeader(code int) { r.status = code; r.ResponseWriter.WriteHeader(code) }
-func (r *statusRecorder) Flush() {
-	if f, ok := r.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
-}
 
 // AgentReq is the body for POST /agents.
 type AgentReq struct {
@@ -536,7 +495,7 @@ func (h *Hub) Serve() error {
 		return err
 	}
 	defer os.Remove(path)
-	return http.Serve(ln, logRequests("hub", requireProject(h.Handler())))
+	return http.Serve(ln, server.LogRequests("hub", requireProject(h.Handler())))
 }
 
 // handleEvents streams board state as Server-Sent Events: the current state on

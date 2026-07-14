@@ -88,7 +88,7 @@ func (d agentchanDeps) TokenAgent(token string) (project, name string, ok bool, 
 	return d.h.agents.ForToken(token)
 }
 func (d agentchanDeps) LogRequests(label string, next http.Handler) http.Handler {
-	return logRequests(label, next)
+	return server.LogRequests(label, next)
 }
 
 // These are the extracted modules' API DTOs, re-exported so the hub stays the single

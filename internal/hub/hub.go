@@ -26,6 +26,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/chat"
 	"github.com/flo-at/sindri/internal/hub/comments"
 	"github.com/flo-at/sindri/internal/hub/project"
+	"github.com/flo-at/sindri/internal/hub/server"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/workflow"
 	"github.com/flo-at/sindri/internal/tools/paths"
@@ -196,7 +197,7 @@ func ensureGitignore(root string) {
 // Close shuts agent listeners and releases the store.
 func (h *Hub) Close() error {
 	h.agentCh.CloseAll()
-	accessLogger.Flush() // emit any open access-log run before we go quiet
+	server.FlushAccessLog() // emit any open access-log run before we go quiet
 	return h.store.Close()
 }
 

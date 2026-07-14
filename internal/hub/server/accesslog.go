@@ -1,4 +1,4 @@
-// package: hub / accesslog
+// package: hub/server / accesslog
 // type:    logic (access-log coalescing)
 // job:     keep the hub's access log from flooding: consecutive identical entries
 //
@@ -6,7 +6,7 @@
 //	being dropped, so high-frequency UI polling stays visible but compact.
 //
 // limits:  formatting + coalescing only; the HTTP wrapper (logRequests) feeds it.
-package hub
+package server
 
 import (
 	"fmt"
