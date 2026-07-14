@@ -17,6 +17,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/agentchan"
 	"github.com/flo-at/sindri/internal/hub/project"
+	"github.com/flo-at/sindri/internal/hub/server"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/task"
 	"github.com/flo-at/sindri/internal/hub/workflow"
@@ -113,6 +114,18 @@ var (
 	StateLabel    = task.StateLabel
 	ArrangeTasks  = task.ArrangeTasks
 	FormatClients = agent.FormatClients
+)
+
+// The control-socket addressing + pid-file plumbing lives in hub/server; re-exported
+// so the daemon management in cmd/ and the clients keep the one hub facade.
+var (
+	SocketPath   = server.SocketPath
+	IsRunning    = server.IsRunning
+	WritePID     = server.WritePID
+	ReadPID      = server.ReadPID
+	RemovePID    = server.RemovePID
+	ProcessAlive = server.ProcessAlive
+	HubPID       = server.HubPID
 )
 
 // workflowDeps adapts the hub to workflow.Deps: it exposes the hub facilities the

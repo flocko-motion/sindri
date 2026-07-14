@@ -1,4 +1,4 @@
-// package: hub / socket
+// package: hub/server / socket
 // type:    logic (transport addressing)
 // job:     the global hub's single control-socket path and a liveness probe,
 //
@@ -9,7 +9,7 @@
 // limits:  path + liveness only; serving the socket (-> server.go) and the verb
 //
 //	set (-> commands.go) live elsewhere.
-package hub
+package server
 
 import (
 	"net"
