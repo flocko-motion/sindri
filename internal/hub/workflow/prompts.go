@@ -345,6 +345,36 @@ func ReplyRegistered(prID string) string {
 	return fmt.Sprintf("%s registered. You'll be informed when it's reviewed. Please wait — this may take a while.", prID)
 }
 
+// ReplyNothingToContribute is the guard reply when `contribute` is run without an
+// active task to contribute from.
+const ReplyNothingToContribute = "Nothing to contribute — run `sindri` to pick up a task first, then `contribute` lands interim work while you keep going."
+
+// ReplyContributed confirms an interim contribution is recorded and gated on the
+// user's approval — the worker then waits until it's merged (and told to continue).
+func ReplyContributed(prID string) string {
+	return fmt.Sprintf("Interim contribution %s recorded — it needs the user's approval before it merges into the reference branch. Wait; you'll be told to keep going once it lands. (This may take a while.)", prID)
+}
+
+// ReplyContributeConflicts tells a worker its contribution doesn't yet rebase cleanly
+// onto base — fix the markers and run `sindri resolve` (which finishes the interim PR
+// once clean).
+func ReplyContributeConflicts(base string, files []string) string {
+	return fmt.Sprintf("Your contribution doesn't rebase cleanly onto %s yet — conflicts in %s. Fix the <<<<<<< markers in /workspace, then run `sindri resolve`; once clean the contribution awaits the user's approval.", base, FileList(files))
+}
+
+// ReplyContributionClean confirms a resolved interim contribution now applies cleanly
+// and is waiting for the user (no reviewer — interim PRs are user-gated).
+func ReplyContributionClean(base string) string {
+	return fmt.Sprintf("Your contribution now applies cleanly onto %s — it awaits the user's approval. You'll be told to keep going once it merges.", base)
+}
+
+// MsgContributionMerged tells a worker its interim contribution landed on the
+// reference branch (its branch was fast-forwarded past the merge) and to keep working
+// the SAME task — the task stays open.
+func MsgContributionMerged(prID, task string) string {
+	return fmt.Sprintf("[hub] Your interim contribution %s merged into the reference branch and your branch was fast-forwarded past it — keep working on task %s. Run `sindri contribute` again to land more, or `sindri submit` when the task is done.", prID, task)
+}
+
 // ReplyRebaseConflicts answers `rebase` when the rebase hit conflicts to edit.
 func ReplyRebaseConflicts(base string, files []string) string {
 	return fmt.Sprintf("Rebasing onto %s hit conflicts in %s. They're in your /workspace with <<<<<<< markers — edit each file to the intended result (remove the markers), then run `sindri rebase` again to continue. Repeat until it reports you're aligned.", base, FileList(files))

@@ -267,9 +267,21 @@ func (m model) prRows() []row {
 		if m.merging[p.ID] && p.Status != "merged" { // transient: the user triggered a merge, awaiting the hub
 			status = "merging"
 		}
+		if p.Kind == "interim" { // ◇ = mid-task contribution (vs a final, task-done PR)
+			status = "◇" + status
+		}
 		out = append(out, row{fmt.Sprintf("%s %-14s %-9s %4s %-10s %s", repo, p.ID, status, shortAge(p.CreatedAt), p.Agent, p.Branch), p.ID})
 	}
 	return out
+}
+
+// prKindLabel renders a PR's kind for humans: an interim (mid-task) contribution
+// vs a final (task-done) PR. "" reads as final (the historical default).
+func prKindLabel(kind string) string {
+	if kind == "interim" {
+		return "interim (mid-task contribution)"
+	}
+	return "final (task done)"
 }
 
 // shortAge renders how long ago an RFC3339 timestamp was, compactly ("3d", "2h",
@@ -405,6 +417,7 @@ func (m model) prMetaItems() []metaItem {
 	items = append(items,
 		metaItem{text: d.PR.ID},
 		metaItem{text: "status: " + d.PR.Status},
+		metaItem{text: "kind:   " + prKindLabel(d.PR.Kind)},
 		metaItem{text: "agent:  " + d.PR.Agent, kind: "agent", value: d.PR.Agent},
 	)
 	if ws := m.agentWorkspace(d.PR.Agent); ws != "" {

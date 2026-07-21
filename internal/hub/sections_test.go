@@ -32,7 +32,11 @@ func TestArrangeTasksTree(t *testing.T) {
 		{ID: "orphan", ParentID: "ghost", Priority: "P3", Status: "open"}, // parent absent → root
 		{ID: "bug", Priority: "P0", Status: "open"},                       // standalone, highest prio
 	}
-	prs := []store.PR{{ID: "pr-f1", Task: "f1", Status: "open"}, {ID: "pr-x", Task: "t1", Status: "merged"}}
+	prs := []store.PR{
+		{ID: "pr-f1", Task: "f1", Status: "open", Kind: "interim"},
+		{ID: "pr-x", Task: "t1", Status: "merged"},
+		{ID: "pr-f2", Task: "f2", Status: "scrapped"}, // terminal → not annotated
+	}
 
 	rows := ArrangeTasks(tasks, prs)
 
@@ -60,16 +64,21 @@ func TestArrangeTasksTree(t *testing.T) {
 		}
 	}
 
-	// PR annotation: f1 has a non-merged PR; t1's PR is merged → not marked.
+	// PR annotation: f1 carries its open interim PR (id + kind); t1's is merged and
+	// f2's is scrapped → neither is marked (both terminal).
 	for _, r := range rows {
 		switch r.ID {
 		case "f1":
-			if r.PR != "pr-f1" {
-				t.Errorf("f1 should carry pr-f1, got %q", r.PR)
+			if r.PR != "pr-f1" || r.PRKind != "interim" {
+				t.Errorf("f1 should carry pr-f1/interim, got %q/%q", r.PR, r.PRKind)
 			}
 		case "t1":
 			if r.PR != "" {
 				t.Errorf("t1 PR is merged, should not be marked, got %q", r.PR)
+			}
+		case "f2":
+			if r.PR != "" {
+				t.Errorf("f2 PR is scrapped, should not be marked, got %q", r.PR)
 			}
 		}
 	}

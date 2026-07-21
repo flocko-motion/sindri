@@ -118,7 +118,7 @@ func (m model) taskRows() []row {
 				sc.Render(fmt.Sprintf("%-5s", typeAbbr(tr.Type))),
 				prio,
 				sc.Render(fmt.Sprintf("%-8s", state)),
-				sc.Render(taskMarks(assigned[tr.ID], tr.PR != "")),
+				sc.Render(taskMarks(assigned[tr.ID], prMarkKind(tr))),
 				sc.Render(tr.Title),
 			}, " "),
 			tr.ID,
@@ -164,16 +164,33 @@ func treeGutter(cont []bool, depth int, last, kids, collapsed bool) string {
 // so the field is padded to a fixed width to keep the title column aligned.
 const marksW = 3
 
-// taskMarks is the status-marker column: 🔨 when a worker is on the task
-// (dwarves at work), ◆ when it has an open PR (merge intent). Padded (ANSI/width
-// aware) to a fixed width so rows line up regardless of which marks are present.
-func taskMarks(assigned, hasPR bool) string {
+// taskMarks is the status-marker column: 🔨 when a worker is on the task (dwarves at
+// work), then a PR marker — ◆ for a final (task-done) PR, ◇ for an interim (mid-task
+// contribution) PR. Padded (ANSI/width aware) to a fixed width so rows line up
+// regardless of which marks are present.
+// prMarkKind maps a task row to the PR marker to draw: "" when the row has no PR (no
+// mark), else the PR's kind — defaulting a kindless PR to "final" (the historical
+// default, so older/plain PRs still show ◆).
+func prMarkKind(tr hub.TaskRow) string {
+	if tr.PR == "" {
+		return ""
+	}
+	if tr.PRKind == "interim" {
+		return "interim"
+	}
+	return "final"
+}
+
+func taskMarks(assigned bool, prKind string) string {
 	s := ""
 	if assigned {
 		s += "🔨"
 	}
-	if hasPR {
+	switch prKind {
+	case "final":
 		s += "◆"
+	case "interim":
+		s += "◇"
 	}
 	return padTrunc(s, marksW)
 }
