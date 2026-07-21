@@ -7,7 +7,23 @@ PREFIX := $(HOME)/.local/bin
 # Packaging. VERSION is derived from the latest git tag (overridden by CI with the
 # exact tag, e.g. `make deb VERSION=1.2.3`); dashes are flattened so a
 # describe-style "0.1.0-3-gabc" stays a valid deb version. ARCH is the Go target.
-VERSION ?= $(shell v=$$(git describe --tags --dirty 2>/dev/null); echo "$${v:-v0.0.0}" | sed 's/^v//; s/-/./g')
+#
+# On a DIRTY tree, git's plain "-dirty" suffix is content-blind: every uncommitted
+# state stamps the SAME version, so the hub's version check (reconcileHubVersion)
+# can't tell a rebuilt binary from the stale one it's already running, and never
+# offers the restart — you edit code, `make install`, and silently keep running the
+# old hub (a real trap: it cost an afternoon chasing a "fix that didn't take"). Append
+# a short hash of the uncommitted changes (tracked diff + untracked file list) so
+# distinct working trees get distinct versions and the mismatch is detected. CI passes
+# VERSION=<exact tag>, so this dev-only path never runs there. `shasum` is used (not
+# sha1sum) for macOS; the `while`-free pipeline can't hang on an empty file list.
+VERSION ?= $(shell \
+	v=$$(git describe --tags --dirty 2>/dev/null); v=$${v:-v0.0.0}; \
+	if [ "$${v%-dirty}" != "$$v" ]; then \
+		h=$$( { git diff HEAD; git status --porcelain --untracked-files=all; } 2>/dev/null | shasum | cut -c1-8); \
+		v="$$v.$$h"; \
+	fi; \
+	echo "$$v" | sed 's/^v//; s/-/./g')
 ARCH    := $(shell go env GOARCH)
 NFPM    := go run github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
 
