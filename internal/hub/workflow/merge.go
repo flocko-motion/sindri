@@ -109,6 +109,22 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 	if err := ps.PutPR(pr); err != nil {
 		return store.PR{}, err
 	}
+	// Interim contribution: land the work but KEEP the task open and put the worker
+	// straight back on the SAME task. Its branch is fast-forwarded past the merge so it
+	// keeps building on top; nothing is closed. (Container milestones take the branch
+	// below; the two never overlap — contribute is hidden inside a container.)
+	if pr.Kind == "interim" {
+		if a, ok, _ := ps.GetAgent(pr.Agent); ok {
+			_ = git.RebaseOnto(filepath.Join(root, a.Workspace), pr.Branch, pr.Base) // ff past the merge
+		}
+		_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "working"})
+		_ = ps.Log(pr.Agent, "merged", prID+" (interim)")
+		_ = ps.LogPR(prID, "merged", "interim contribution into "+pr.Base)
+		_ = e.deps.InjectWhenReady(project, pr.Agent, MsgContributionMerged(prID, pr.Task))
+		e.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
+		e.deps.Notify()
+		return pr, nil
+	}
 	// Milestone PR for a held container: land the work but KEEP the branch/
 	if holder, _ := ps.GetState(pr.Agent); holder.Container != "" && holder.Container == pr.Branch {
 		if a, ok, _ := ps.GetAgent(pr.Agent); ok {

@@ -45,9 +45,10 @@ CREATE TABLE IF NOT EXISTS prs (
   agent      TEXT NOT NULL DEFAULT '',
   branch     TEXT NOT NULL DEFAULT '',
   base       TEXT NOT NULL DEFAULT '',
-  status     TEXT NOT NULL DEFAULT 'open', -- open | approved | rejected | merged
+  status     TEXT NOT NULL DEFAULT 'open', -- open | approved | rejected | merged | scrapped
   feedback   TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT '',
+  kind       TEXT NOT NULL DEFAULT 'final', -- final (task-done) | interim (mid-task contribution to the reference branch)
   PRIMARY KEY (project, id)
 );
 -- Durable priority we assign to tasks in our own db — survives the task-cache
@@ -157,6 +158,10 @@ type PR struct {
 	Status    string `json:"status"`
 	Feedback  string `json:"feedback"`
 	CreatedAt string `json:"created_at"`
+	// Kind distinguishes a final PR (the task is done — merge closes the task) from an
+	// interim contribution (mid-task work landed on the reference branch; merge keeps
+	// the task open and puts the worker straight back on it). "" is read as "final".
+	Kind string `json:"kind"`
 }
 
 // ReplaceTasks refreshes this project's cached task set in one transaction. Tasks
@@ -406,13 +411,16 @@ func (p *ProjectStore) PutPR(pr PR) error {
 	if pr.Status == "" {
 		pr.Status = "open"
 	}
+	if pr.Kind == "" {
+		pr.Kind = "final"
+	}
 	_, err := p.s.db.Exec(`
-		INSERT INTO prs (project,id,task,agent,branch,base,status,feedback,created_at)
-		VALUES (?,?,?,?,?,?,?,?,?)
+		INSERT INTO prs (project,id,task,agent,branch,base,status,feedback,created_at,kind)
+		VALUES (?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(project,id) DO UPDATE SET
 			task=excluded.task, agent=excluded.agent, branch=excluded.branch,
-			base=excluded.base, status=excluded.status, feedback=excluded.feedback`,
-		p.project, pr.ID, pr.Task, pr.Agent, pr.Branch, pr.Base, pr.Status, pr.Feedback, pr.CreatedAt)
+			base=excluded.base, status=excluded.status, feedback=excluded.feedback, kind=excluded.kind`,
+		p.project, pr.ID, pr.Task, pr.Agent, pr.Branch, pr.Base, pr.Status, pr.Feedback, pr.CreatedAt, pr.Kind)
 	if err != nil {
 		return fmt.Errorf("put pr %s: %w", pr.ID, err)
 	}
@@ -453,7 +461,7 @@ func (s *Store) AllPRs(statuses ...string) ([]PR, error) {
 	return queryPRs(s.db, q, args...)
 }
 
-const prCols = `SELECT project,id,task,agent,branch,base,status,feedback,created_at FROM prs`
+const prCols = `SELECT project,id,task,agent,branch,base,status,feedback,created_at,kind FROM prs`
 
 type scanner interface{ Scan(...any) error }
 
@@ -487,7 +495,7 @@ func scanPR(row scanner) (PR, bool, error) {
 
 func scanPRRow(row scanner) (PR, error) {
 	var p PR
-	err := row.Scan(&p.Project, &p.ID, &p.Task, &p.Agent, &p.Branch, &p.Base, &p.Status, &p.Feedback, &p.CreatedAt)
+	err := row.Scan(&p.Project, &p.ID, &p.Task, &p.Agent, &p.Branch, &p.Base, &p.Status, &p.Feedback, &p.CreatedAt, &p.Kind)
 	return p, err
 }
 

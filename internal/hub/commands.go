@@ -46,6 +46,10 @@ func (h *Hub) registry() *registry.Registry {
 		registry.Command{Name: "lint", Help: "run the quality gate: lint (your workspace) or lint <pr-id> (a PR)", Run: h.cmdLint},
 		registry.Command{Name: "submit", Help: "request your branch be merged: submit [message]", Roles: []string{"worker"},
 			Hidden: func(c registry.Caller) bool { return !c.HasTask || c.InContainer || c.Phase == "resolving" }, Run: h.wf.CmdSubmit},
+		// Land interim work mid-task onto the reference branch without finishing the task
+		// (for very large tasks). Same visibility as submit; merge keeps the task open.
+		registry.Command{Name: "contribute", Help: "land an interim contribution mid-task (needs the user's approval): contribute [message]", Roles: []string{"worker"},
+			Hidden: func(c registry.Caller) bool { return !c.HasTask || c.InContainer || c.Phase == "resolving" }, Run: h.wf.CmdContribute},
 		// Always available to a worker — checking whether your branch still merges (and
 		// resolving it if not) does no harm and is useful at any time.
 		registry.Command{Name: "resolve", Help: "check your branch still merges onto its base, and resolve any conflicts: resolve", Roles: []string{"worker"}, Run: h.wf.CmdResolve},

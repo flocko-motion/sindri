@@ -332,7 +332,11 @@ func prListCmd() *cobra.Command {
 					return err
 				}
 				for _, p := range prs {
-					fmt.Printf("%-14s %-12s %4s  %-10s %s\n", p.ID, p.Status, shortAge(p.CreatedAt), p.Agent, p.Branch)
+					status := p.Status
+					if p.Kind == "interim" { // ◇ = mid-task contribution (vs a final, task-done PR)
+						status = "◇" + status
+					}
+					fmt.Printf("%-14s %-13s %4s  %-10s %s\n", p.ID, status, shortAge(p.CreatedAt), p.Agent, p.Branch)
 				}
 				if len(prs) == 0 {
 					fmt.Fprintln(os.Stderr, "no PRs")
@@ -353,7 +357,11 @@ func prInfoCmd() *cobra.Command {
 					return err
 				}
 				p := d.PR
-				fmt.Printf("%s  [%s]  by %s\nbranch %s → %s\n", p.ID, p.Status, p.Agent, p.Branch, p.Base)
+				kind := "final (task done)"
+				if p.Kind == "interim" {
+					kind = "interim (mid-task contribution)"
+				}
+				fmt.Printf("%s  [%s]  %s  by %s\nbranch %s → %s\n", p.ID, p.Status, kind, p.Agent, p.Branch, p.Base)
 				if p.Feedback != "" {
 					fmt.Printf("feedback: %s\n", p.Feedback)
 				}

@@ -116,14 +116,19 @@ func (e *Engine) CmdResolve(c registry.Caller, _ []string, out io.Writer) (int, 
 	// PR renewed for re-review; a proactive check on an already-current branch leaves
 	// the phase (working/submitted) untouched.
 	if st.Phase == "resolving" {
+		reply := ReplyResolvedClean(base)
 		if pr, ok, _ := ps.GetPR("pr-" + st.Task); ok {
 			pr.Status, pr.Feedback = "open", ""
 			_ = ps.PutPR(pr)
 			_ = ps.LogPR(pr.ID, "renewed", "rebased clean onto "+base)
-			_ = e.RequestReview(c.Project, pr.ID, "") // one review path; the hub preps the terrain
+			if pr.Kind == "interim" {
+				reply = ReplyContributionClean(base) // interim PRs are user-gated — no reviewer
+			} else {
+				_ = e.RequestReview(c.Project, pr.ID, "") // one review path; the hub preps the terrain
+			}
 		}
 		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "submitted"})
-		fmt.Fprintln(out, ReplyResolvedClean(base))
+		fmt.Fprintln(out, reply)
 		e.deps.Notify()
 		return 0, nil
 	}

@@ -92,9 +92,10 @@ func Open(t store.Task) bool { return !Done(t) }
 // for it (or "").
 type TaskRow struct {
 	store.Task
-	Depth int    `json:"depth"`
-	Last  bool   `json:"last"`
-	PR    string `json:"pr"`
+	Depth  int    `json:"depth"`
+	Last   bool   `json:"last"`
+	PR     string `json:"pr"`
+	PRKind string `json:"pr_kind"` // "final" | "interim" — how to mark the PR on the row
 }
 
 // ArrangeTasks orders a flat task set into its parent/child tree — roots first (by
@@ -117,10 +118,10 @@ func ArrangeTasks(tasks []store.Task, prs []store.PR) []TaskRow {
 	for p := range byParent {
 		sortTasks(byParent[p])
 	}
-	pr := map[string]string{} // task id -> non-merged PR id
+	pr := map[string]store.PR{} // task id -> its open (non-terminal) PR
 	for _, p := range prs {
-		if p.Status != "merged" {
-			pr[p.Task] = p.ID
+		if p.Status != "merged" && p.Status != "scrapped" {
+			pr[p.Task] = p
 		}
 	}
 
@@ -129,7 +130,7 @@ func ArrangeTasks(tasks []store.Task, prs []store.PR) []TaskRow {
 	walk = func(parent string, depth int) {
 		kids := byParent[parent]
 		for i, t := range kids {
-			out = append(out, TaskRow{Task: t, Depth: depth, Last: i == len(kids)-1, PR: pr[t.ID]})
+			out = append(out, TaskRow{Task: t, Depth: depth, Last: i == len(kids)-1, PR: pr[t.ID].ID, PRKind: pr[t.ID].Kind})
 			walk(t.ID, depth+1)
 		}
 	}
