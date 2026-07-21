@@ -82,6 +82,15 @@ RUN case "$(uname -m)" in \
   curl -Ls "https://micro.mamba.pm/api/micromamba/$mamba/latest" \
   | tar -xvj -C /usr/local/bin --strip-components=1 bin/micromamba
 
+# ── Go dev tools ──────────────────────────────────────────────────────────────
+# gopls (the Go language server) so agents get semantic code intelligence —
+# references/definition/rename — instead of blind text find/replace. `go install`
+# builds it from source, so it's automatically the pod's arch (no download/arch-case).
+# GOBIN=/usr/local/bin drops it where every other agent tool lives (fd/bat/yazi/yq/
+# sindri) — on PATH for ALL shells, incl. a login shell (a dialed-in human) whose
+# /etc/profile would otherwise reset PATH and hide GOPATH/bin.
+RUN GOBIN=/usr/local/bin go install golang.org/x/tools/gopls@latest
+
 # ── claude CLI ────────────────────────────────────────────────────────────────
 RUN npm install -g @anthropic-ai/claude-code@latest
 RUN mkdir -p /opt/sindri && cd /opt/sindri && npm init -y && npm install "@anthropic-ai/claude-agent-sdk@^0.1.59"
