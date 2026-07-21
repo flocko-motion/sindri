@@ -19,6 +19,15 @@ func SendText(session, text string) [][]string {
 	}
 }
 
+// Interrupt builds `tmux send-keys -t <session> Escape` — a bare Escape keypress, the
+// key Claude Code (and most TUIs) treat as "abort the current operation". Sent as a
+// key NAME (not -l literal), so tmux delivers a real ESC rather than the letters
+// "E","s","c". Used to stop an agent's in-flight work before telling it its task is
+// gone, so the message lands on an idle prompt.
+func Interrupt(session string) []string {
+	return []string{"send-keys", "-t", session, "Escape"}
+}
+
 // Attach builds `tmux attach-session -t <session>` — the human dial-in. readOnly
 // adds -r (observe without typing). A read-write attach instead adds -d, which
 // detaches every other client on the way in: these agent sessions are single-

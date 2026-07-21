@@ -239,7 +239,8 @@ const (
 var prFilterNames = [...]string{"unmerged", "merged", "all"}
 
 // prFilterShows reports whether a PR of the given status passes the active f-filter:
-// unmerged hides merged (the default), merged shows only merged, all shows both.
+// unmerged hides the terminal states (merged AND scrapped — both are done, off the
+// working set), merged shows only merged, all shows everything.
 func (m model) prFilterShows(status string) bool {
 	switch m.prFilter {
 	case prFilterMerged:
@@ -247,7 +248,7 @@ func (m model) prFilterShows(status string) bool {
 	case prFilterAll:
 		return true
 	default: // prFilterUnmerged
-		return status != "merged"
+		return status != "merged" && status != "scrapped"
 	}
 }
 

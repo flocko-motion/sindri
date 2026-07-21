@@ -13,9 +13,9 @@ func TestSectionCounts(t *testing.T) {
 			{ID: "c", Status: "closed"}, {ID: "d", Status: "merged"},
 		},
 		Agents: []AgentView{{Name: "x", Status: "idle"}, {Name: "y", Status: "down"}},
-		PRs:    []store.PR{{ID: "p1", Status: "open"}, {ID: "p2", Status: "merged"}},
+		PRs:    []store.PR{{ID: "p1", Status: "open"}, {ID: "p2", Status: "merged"}, {ID: "p3", Status: "scrapped"}},
 	}
-	want := map[string]int{"tasks": 2, "agents": 2, "prs": 1} // non-closed, whole roster, not-merged
+	want := map[string]int{"tasks": 2, "agents": 2, "prs": 1} // non-closed; whole roster; open only (merged AND scrapped excluded)
 	for _, s := range Sections {
 		if got := s.Count(b); got != want[s.Key] {
 			t.Errorf("%s count = %d, want %d", s.Key, got, want[s.Key])

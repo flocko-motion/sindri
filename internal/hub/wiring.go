@@ -152,6 +152,10 @@ func (d workflowDeps) InjectWhenReady(project, name, text string) error {
 	return d.h.agents.InjectWhenReady(project, name, text)
 }
 
+func (d workflowDeps) Interrupt(project, name string) error {
+	return d.h.agents.Interrupt(project, name)
+}
+
 func (d workflowDeps) AgentAlive(project, name string) bool {
 	return d.h.agents.AgentAlive(project, name)
 }

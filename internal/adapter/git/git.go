@@ -87,6 +87,28 @@ func CurrentBranch(dir string) (string, error) {
 	return b, nil
 }
 
+// DetachHead detaches dir's worktree from its current branch (HEAD stays on the same
+// commit; the working tree is untouched), freeing that branch so it can be deleted
+// from another checkout. A teardown helper — a failure is returned for the caller to
+// log, not swallowed.
+func DetachHead(dir string) error {
+	if out, err := exec.Command("git", "-C", dir, "checkout", "--detach").CombinedOutput(); err != nil {
+		return fmt.Errorf("git checkout --detach in %s: %s: %w", dir, strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// DeleteBranch force-deletes a local branch (git branch -D). git refuses when the
+// branch is still checked out in any worktree, so detach that worktree first (see
+// DetachHead). Used to scrap a discarded PR's task branch; unpushed work on it is
+// intentionally discarded.
+func DeleteBranch(repo, name string) error {
+	if out, err := exec.Command("git", "-C", repo, "branch", "-D", name).CombinedOutput(); err != nil {
+		return fmt.Errorf("git branch -D %s: %s: %w", name, strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
 // CreateBranch creates and checks out a new branch from base in dir (an agent's
 // worktree), discarding any prior checkout of that name.
 func CreateBranch(dir, name, base string) error {

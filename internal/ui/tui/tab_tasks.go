@@ -16,6 +16,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/hub/client"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -439,11 +440,45 @@ func (m *model) closeTaskCmd(id string) tea.Cmd {
 	}
 }
 
+// attachedOpenPR returns the id of an open (non-terminal) PR for task id in the active
+// repo, or "" if none. A merged/scrapped PR is already off the board, so it's never
+// offered for scrapping.
+func (m model) attachedOpenPR(taskID string) string {
+	_, tag := m.currentRepo()
+	for _, p := range m.state.PRs {
+		if p.Project == tag && p.Task == taskID && p.Status != "merged" && p.Status != "scrapped" {
+			return p.ID
+		}
+	}
+	return ""
+}
+
 // openScrapChoice confirms scrapping (deleting) the selected task — destructive
 // (a GitHub issue delete is permanent), so it's gated behind a yes/no. The hub
 // dispatches to the backend (td delete / openspec change removal / issue delete).
+// When the task still has an open PR, a third option discards it too — deleting its
+// branch and stopping the working agent — since a scrapped task rarely still wants
+// its PR (see finishTaskCmd for the chained hub calls).
 func (m *model) openScrapChoice(id string) {
 	cl := m.cl
+	if pr := m.attachedOpenPR(id); pr != "" {
+		m.choice = choiceModalState{
+			active: true, title: "scrap " + id + "?  (has open PR " + pr + ")",
+			options: []string{"cancel", "scrap task only", "scrap task + PR " + pr},
+			values:  []string{"cancel", "task", "taskpr"},
+			apply: func(v string) tea.Cmd {
+				switch v {
+				case "task":
+					return finishTaskCmd(cl, cl.DeleteTask, id, pr, false)
+				case "taskpr":
+					return finishTaskCmd(cl, cl.DeleteTask, id, pr, true)
+				default:
+					return nil
+				}
+			},
+		}
+		return
+	}
 	m.choice = choiceModalState{
 		active: true, title: "scrap " + id + "?  (discard — td delete / openspec remove / issue delete)",
 		options: []string{"cancel", "scrap"}, values: []string{"cancel", "scrap"},
@@ -451,17 +486,52 @@ func (m *model) openScrapChoice(id string) {
 			if v != "scrap" {
 				return nil
 			}
-			return func() tea.Msg {
-				if cl == nil {
-					return nil
-				}
-				if err := cl.DeleteTask(id); err != nil {
-					return errModalMsg{err}
-				}
-				st, _ := cl.State()
-				return polledMsg(st)
+			return finishTaskCmd(cl, cl.DeleteTask, id, "", false)
+		},
+	}
+}
+
+// openCloseChoice prompts when closing (marking done) a task that still has an open PR,
+// offering to discard the PR alongside. Closing a task with no PR needs no prompt —
+// keyClose runs it directly.
+func (m *model) openCloseChoice(id, pr string) {
+	cl := m.cl
+	m.choice = choiceModalState{
+		active: true, title: "close " + id + "?  (has open PR " + pr + ")",
+		options: []string{"cancel", "close task only", "close task + scrap PR " + pr},
+		values:  []string{"cancel", "task", "taskpr"},
+		apply: func(v string) tea.Cmd {
+			switch v {
+			case "task":
+				return finishTaskCmd(cl, cl.CloseTask, id, pr, false)
+			case "taskpr":
+				return finishTaskCmd(cl, cl.CloseTask, id, pr, true)
+			default:
+				return nil
 			}
 		},
+	}
+}
+
+// finishTaskCmd runs a task-ending op (close or delete) and, when alsoPR is set,
+// scraps its PR afterward, then refreshes the board once so both land in one snapshot.
+// A task-op failure surfaces in the error modal and skips the PR scrap; a PR-scrap
+// failure surfaces too (the task is already gone — the board reflects that).
+func finishTaskCmd(cl *client.HTTP, taskOp func(string) error, id, prID string, alsoPR bool) tea.Cmd {
+	return func() tea.Msg {
+		if cl == nil {
+			return nil
+		}
+		if err := taskOp(id); err != nil {
+			return errModalMsg{err}
+		}
+		if alsoPR {
+			if err := cl.ScrapPR(prID); err != nil {
+				return errModalMsg{err}
+			}
+		}
+		st, _ := cl.State()
+		return polledMsg(st)
 	}
 }
 

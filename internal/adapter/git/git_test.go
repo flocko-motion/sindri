@@ -90,6 +90,32 @@ func TestRebaseStartLeavesConflictThenContinues(t *testing.T) {
 	}
 }
 
+// TestDeleteBranchRequiresDetach covers the scrap-PR teardown mechanic: git refuses to
+// delete a branch that's checked out in a worktree (the agent's), so DetachHead must
+// free it first — the exact ordering ScrapBranch relies on.
+func TestDeleteBranchRequiresDetach(t *testing.T) {
+	repo := newRepo(t)
+	wt := filepath.Join(t.TempDir(), "wt")
+	if err := WorktreeAdd(repo, wt, "HEAD"); err != nil {
+		t.Fatalf("WorktreeAdd: %v", err)
+	}
+	if err := CreateBranch(wt, "feature", "HEAD"); err != nil { // branch now checked out in wt
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	if err := DeleteBranch(repo, "feature"); err == nil {
+		t.Fatal("DeleteBranch should fail while the branch is checked out in a worktree")
+	}
+	if err := DetachHead(wt); err != nil { // free the branch
+		t.Fatalf("DetachHead: %v", err)
+	}
+	if err := DeleteBranch(repo, "feature"); err != nil {
+		t.Fatalf("DeleteBranch after detach: %v", err)
+	}
+	if out := strings.TrimSpace(gitOut(t, repo, "branch", "--list", "feature")); out != "" {
+		t.Fatalf("branch 'feature' should be gone, got %q", out)
+	}
+}
+
 // newRepo creates a throwaway git repo with one commit and returns its root.
 func newRepo(t *testing.T) string {
 	t.Helper()
