@@ -24,6 +24,15 @@ echo "=== sindri agent '$AGENT' starting ==="
 # Written as ~/.tmux.conf (global options) so the server adopts it at start and
 # nothing — including Claude's pane title — shadows our status-right.
 cat > "$HOME/.tmux.conf" <<'TMUXCONF'
+# Truecolor: Claude's TUI emits 24-bit colour (its orange is an RGB value), so the
+# pane terminal must be 256-colour and every client tmux renders to must be flagged
+# RGB-capable — otherwise tmux downsamples 24-bit to the 16-colour palette and the
+# orange collapses to a plain red. default-terminal makes the in-pane TERM
+# tmux-256color; `terminal-features *:RGB` tells tmux the attaching client can take
+# 24-bit (tmux 3.5 doesn't reliably promote from the forwarded COLORTERM alone). The
+# attach path forwards the host's TERM/COLORTERM so the client identity is real.
+set -g default-terminal "tmux-256color"
+set -as terminal-features ",*:RGB"
 set -g status on
 set -g status-interval 5
 set -g status-justify left

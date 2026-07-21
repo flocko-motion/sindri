@@ -167,8 +167,13 @@ func (Engine) ExecContext(ctx context.Context, name string, args ...string) ([]b
 }
 
 // AttachCmd returns (without running) the interactive `container exec -it` command.
+// It forwards the caller's TERM/COLORTERM (container exec otherwise drops the host
+// env), so the tmux attach client can drive the real terminal — without it the pod's
+// empty TERM leaves cursor addressing/colour broken and the session renders scrambled.
 func (Engine) AttachCmd(name string, args ...string) *exec.Cmd {
-	full := append([]string{"exec", "-it", name}, args...)
+	full := append([]string{"exec", "-it"}, container.TermEnvArgs()...)
+	full = append(full, name)
+	full = append(full, args...)
 	return exec.Command(Binary, full...)
 }
 

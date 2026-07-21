@@ -13,8 +13,27 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"os/exec"
 )
+
+// TermEnvArgs returns the `-e KEY=VALUE` flags that forward the caller's terminal
+// identity (TERM, COLORTERM) into an interactive `exec -it`. Both backends' exec
+// drops the host environment, so an attaching `tmux` client would otherwise come up
+// with an empty TERM and be unable to drive the real terminal's cursor addressing or
+// colour — the session renders as scrambled, mis-positioned text. Only variables set
+// on the host are forwarded (an empty value would be worse than letting the pod keep
+// its own COLORTERM default). Scoped to the interactive attach path; the parsed,
+// non-interactive Exec must NOT carry TERM (it drives capture-pane text, not a TTY).
+func TermEnvArgs() []string {
+	var args []string
+	for _, k := range []string{"TERM", "COLORTERM"} {
+		if v := os.Getenv(k); v != "" {
+			args = append(args, "-e", k+"="+v)
+		}
+	}
+	return args
+}
 
 // Mount is one bind mount into an agent pod.
 type Mount struct {

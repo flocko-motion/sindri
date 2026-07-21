@@ -62,6 +62,33 @@ func TestRunArgsDefaultMountMode(t *testing.T) {
 	}
 }
 
+func TestAttachCmdForwardsTerminalEnv(t *testing.T) {
+	// The interactive attach must carry the caller's TERM/COLORTERM into the pod, or
+	// the tmux attach client comes up with an empty TERM and renders scrambled. It
+	// goes BEFORE the container name (an `-e` after the name would be an arg to the
+	// in-pod command, not to `exec`).
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("COLORTERM", "truecolor")
+
+	args := Engine{}.AttachCmd("pod1", "tmux", "attach").Args
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-e TERM=xterm-256color") || !strings.Contains(joined, "-e COLORTERM=truecolor") {
+		t.Fatalf("attach must forward TERM/COLORTERM, got: %q", joined)
+	}
+	name, cmd := slices.Index(args, "pod1"), slices.Index(args, "tmux")
+	if term := slices.Index(args, "TERM=xterm-256color"); term > name || name > cmd {
+		t.Fatalf("env must precede the pod name, which must precede the command: %q", joined)
+	}
+
+	// With no TERM on the host there's nothing to forward — the pod keeps its own
+	// COLORTERM default rather than being handed an empty value.
+	t.Setenv("TERM", "")
+	t.Setenv("COLORTERM", "")
+	if joined := strings.Join(Engine{}.AttachCmd("pod1", "tmux").Args, " "); strings.Contains(joined, "TERM=") {
+		t.Fatalf("empty host TERM must not be forwarded, got: %q", joined)
+	}
+}
+
 func TestBuildFailureDetail(t *testing.T) {
 	// A connection failure (the macOS "machine not started" case) surfaces the
 	// message AND the podman-machine hint.
