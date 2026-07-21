@@ -107,6 +107,9 @@ func (m model) taskRows() []row {
 		case "rejected":
 			sc, state = stDone, "rejected"
 		}
+		if v := m.busy[tr.ID]; v != "" { // transient: the user triggered a close/scrap, awaiting the hub
+			sc, state = stWarn, v
+		}
 		prio := sc.Render(fmt.Sprintf("%-8s", hub.PriorityLabel(tr.Priority)))
 		if isCriticalPriority(tr.Priority) {
 			prio = stCrit.Render(fmt.Sprintf("%-8s", hub.PriorityLabel(tr.Priority)))
@@ -445,19 +448,52 @@ func (m *model) unassignTaskCmd(id string) tea.Cmd {
 }
 
 // closeTaskCmd marks the selected task done (the hub dispatches to its backend;
-// a backend that can't close surfaces the error in the modal).
+// a backend that can't close surfaces the error in the modal). The row shows a
+// transient "closing" at once, cleared when the hub confirms (see taskOpDone).
 func (m *model) closeTaskCmd(id string) tea.Cmd {
-	cl := m.cl
-	m.flash = "closing " + id + "…"
-	return func() tea.Msg {
-		if cl == nil {
-			return nil
+	m.markBusy(id, "closing")
+	return finishTaskCmd(m.cl, m.cl.CloseTask, id, "", false)
+}
+
+// markBusy flags a task id with a transient verb ("closing"/"deleting") so its row
+// shows it at once (see taskRows), until the hub confirms and it's cleared.
+func (m *model) markBusy(id, verb string) {
+	if m.busy == nil {
+		m.busy = map[string]string{}
+	}
+	m.busy[id] = verb
+}
+
+// taskOpDone finishes a triggered close/scrap: it drops the row's transient verb,
+// then applies the fresh board (success) or surfaces the error and lets the row
+// revert to its real status (failure).
+func (m model) taskOpDone(msg taskOpDoneMsg) (tea.Model, tea.Cmd) {
+	delete(m.busy, msg.id)
+	if msg.err != nil {
+		m.errText = msg.err.Error()
+		return m, nil
+	}
+	m.state = msg.state
+	m.reclamp()
+	return m, tea.Batch(m.syncDetail(), m.agentLiveCmds())
+}
+
+// reconcileBusy drops transient verbs once a fresh board confirms the op: the task
+// is gone (scrapped) or now terminal (closed) — a safety net so a marker can't
+// linger past the real state (e.g. when the change arrives via an SSE push rather
+// than this client's own taskOpDoneMsg).
+func (m *model) reconcileBusy() {
+	if len(m.busy) == 0 {
+		return
+	}
+	present := map[string]string{}
+	for _, t := range m.state.Tasks {
+		present[t.ID] = t.Status
+	}
+	for id := range m.busy {
+		if status, ok := present[id]; !ok || isDone(status) {
+			delete(m.busy, id)
 		}
-		if err := cl.CloseTask(id); err != nil {
-			return errModalMsg{err}
-		}
-		st, _ := cl.State()
-		return polledMsg(st)
 	}
 }
 
@@ -490,9 +526,9 @@ func (m *model) openScrapChoice(id string) {
 			apply: func(v string) tea.Cmd {
 				switch v {
 				case "task":
-					return finishTaskCmd(cl, cl.DeleteTask, id, pr, false)
+					return taskOpTrigger(id, "deleting", finishTaskCmd(cl, cl.DeleteTask, id, pr, false))
 				case "taskpr":
-					return finishTaskCmd(cl, cl.DeleteTask, id, pr, true)
+					return taskOpTrigger(id, "deleting", finishTaskCmd(cl, cl.DeleteTask, id, pr, true))
 				default:
 					return nil
 				}
@@ -507,7 +543,7 @@ func (m *model) openScrapChoice(id string) {
 			if v != "scrap" {
 				return nil
 			}
-			return finishTaskCmd(cl, cl.DeleteTask, id, "", false)
+			return taskOpTrigger(id, "deleting", finishTaskCmd(cl, cl.DeleteTask, id, "", false))
 		},
 	}
 }
@@ -524,14 +560,21 @@ func (m *model) openCloseChoice(id, pr string) {
 		apply: func(v string) tea.Cmd {
 			switch v {
 			case "task":
-				return finishTaskCmd(cl, cl.CloseTask, id, pr, false)
+				return taskOpTrigger(id, "closing", finishTaskCmd(cl, cl.CloseTask, id, pr, false))
 			case "taskpr":
-				return finishTaskCmd(cl, cl.CloseTask, id, pr, true)
+				return taskOpTrigger(id, "closing", finishTaskCmd(cl, cl.CloseTask, id, pr, true))
 			default:
 				return nil
 			}
 		},
 	}
+}
+
+// taskOpTrigger wraps a task-ending op so it flows through Update as a taskOpMsg:
+// the transient verb is marked on the row first, then run fires. Used by the
+// confirm choices, whose apply can't mutate the model directly.
+func taskOpTrigger(id, verb string, run tea.Cmd) tea.Cmd {
+	return func() tea.Msg { return taskOpMsg{id: id, verb: verb, run: run} }
 }
 
 // finishTaskCmd runs a task-ending op (close or delete) and, when alsoPR is set,
@@ -544,15 +587,15 @@ func finishTaskCmd(cl *client.HTTP, taskOp func(string) error, id, prID string, 
 			return nil
 		}
 		if err := taskOp(id); err != nil {
-			return errModalMsg{err}
+			return taskOpDoneMsg{id: id, err: err}
 		}
 		if alsoPR {
 			if err := cl.ScrapPR(prID); err != nil {
-				return errModalMsg{err}
+				return taskOpDoneMsg{id: id, err: err}
 			}
 		}
 		st, _ := cl.State()
-		return polledMsg(st)
+		return taskOpDoneMsg{id: id, state: st}
 	}
 }
 
