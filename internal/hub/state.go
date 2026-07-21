@@ -127,12 +127,20 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	for i, a := range agentsRow {
 		container := h.container(a.Project, a.Name)
 		known[container] = true
-		st, _ := h.store.For(a.Project).GetState(a.Name)
+		ps := h.store.For(a.Project)
+		st, _ := ps.GetState(a.Name)
+		// PR is the agent's own submitted PR (worker); a reviewer authors none, so
+		// fall back to the PR it's currently reviewing — that's what the board should
+		// show it working on.
+		pr := openPRFor(prs, a.Project, a.Name)
+		if pr == "" {
+			pr, _ = ps.ReviewingPR(a.Name)
+		}
 		agents = append(agents, AgentView{
 			Project: a.Project, Repo: h.repoName(a.Project), Name: a.Name, Role: a.Role,
 			Status:  overlayRuntime(h.agents.AgentStatus(a.Project, a.Name, running[i], st.Phase), runtimes[i]),
 			Runtime: runtimes[i],
-			Task:    st.Task, Branch: st.Branch, PR: openPRFor(prs, a.Project, a.Name), Workspace: a.Workspace,
+			Task:    st.Task, Branch: st.Branch, PR: pr, Workspace: a.Workspace,
 			Clients: clients[i], Container: container, Memory: a.Memory,
 		})
 	}

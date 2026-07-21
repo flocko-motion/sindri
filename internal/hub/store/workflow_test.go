@@ -316,3 +316,40 @@ func TestPRLifecycle(t *testing.T) {
 		t.Fatalf("approve not persisted: %+v", got)
 	}
 }
+
+// TestReviewingPR: the store can report which PR a reviewer is currently working
+// on — the most recent review assigned to it with no verdict yet — so the board
+// can show what a reviewer is reviewing. A finished (verdict-recorded) review no
+// longer counts, and an unrelated reviewer sees nothing.
+func TestReviewingPR(t *testing.T) {
+	p := openTmpProject(t)
+
+	// No reviews yet → nothing under review.
+	if pr, err := p.ReviewingPR("dvalin"); err != nil || pr != "" {
+		t.Fatalf("empty case: pr=%q err=%v", pr, err)
+	}
+
+	// A review assigned to dvalin, still open (no verdict) → that's its PR.
+	id, err := p.AddReview("pr-td-1", "check the thing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.AssignReview(id, "dvalin"); err != nil {
+		t.Fatal(err)
+	}
+	if pr, err := p.ReviewingPR("dvalin"); err != nil || pr != "pr-td-1" {
+		t.Fatalf("in-progress review: pr=%q err=%v, want pr-td-1", pr, err)
+	}
+	// A different reviewer isn't reviewing it.
+	if pr, _ := p.ReviewingPR("eitri"); pr != "" {
+		t.Fatalf("unrelated reviewer should see nothing, got %q", pr)
+	}
+
+	// Once a verdict lands, it's no longer "currently reviewing".
+	if err := p.RecordVerdict(id, "pass", "looks good"); err != nil {
+		t.Fatal(err)
+	}
+	if pr, _ := p.ReviewingPR("dvalin"); pr != "" {
+		t.Fatalf("completed review should not count, got %q", pr)
+	}
+}

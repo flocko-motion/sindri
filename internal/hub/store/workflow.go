@@ -597,3 +597,21 @@ func (p *ProjectStore) Reviews(pr string) ([]Review, error) {
 	}
 	return out, rows.Err()
 }
+
+// ReviewingPR returns the PR a reviewer is currently reviewing in this project —
+// the most recent review assigned to author with no verdict yet — or "" when it
+// isn't reviewing anything. Lets the board show what a reviewer is working on
+// (a reviewer authors no PR of its own, so its AgentView.PR is otherwise empty).
+func (p *ProjectStore) ReviewingPR(author string) (string, error) {
+	var pr string
+	err := p.s.db.QueryRow(
+		`SELECT pr FROM reviews WHERE project=? AND author=? AND verdict='' ORDER BY id DESC LIMIT 1`,
+		p.project, author).Scan(&pr)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("reviewing pr for %s: %w", author, err)
+	}
+	return pr, nil
+}
