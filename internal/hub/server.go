@@ -347,6 +347,13 @@ func (h *Hub) Handler() http.Handler {
 		}
 		writeJSON(w, okMsg{"approved"}, h.wf.ApprovePR(h.wf.PRProject(h.reqProject(r), req.Name), req.Name))
 	})
+	mux.HandleFunc("POST /pr/scrap", func(w http.ResponseWriter, r *http.Request) {
+		var req NameReq // Name carries the PR id; the human scrap path (discard with its task).
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"scrapped"}, h.wf.ScrapPR(h.wf.PRProject(h.reqProject(r), req.Name), req.Name))
+	})
 	mux.HandleFunc("GET /pr/lint", func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("id")
 		out, err := h.wf.LintPR(h.wf.PRProject(h.reqProject(r), id), id)

@@ -63,6 +63,10 @@ func (e *Engine) finishTask(project, id string, scrap bool) error {
 			_ = ps.SetState(store.AgentState{Agent: a.Name, Phase: restPhase(a.Role)})
 			_ = ps.Log(a.Name, "task-cancelled", id)
 			if e.deps.AgentAlive(project, a.Name) {
+				// Abort whatever Claude is doing first (ESC), so the cancellation lands
+				// on an idle prompt instead of queuing behind in-flight work — "really
+				// stop", not just "you'll be told once you're done".
+				_ = e.deps.Interrupt(project, a.Name)
 				_ = e.deps.InjectWhenReady(project, a.Name, MsgTaskCancelled(id))
 			}
 		}

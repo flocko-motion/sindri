@@ -75,6 +75,15 @@ type errMsg struct { // fatal: hub connection lost (unless a stale generation)
 }
 type errModalMsg struct{ err error } // non-fatal: show the error modal
 type chatSentMsg struct{}            // a chat compose sent OK — clear + close the composer
+
+// resumedMsg fires when an interactive child process launched via tea.ExecProcess
+// (a tmux attach, a workspace shell) exits and the TUI resumes. Bubble Tea's
+// ExecProcess restore path skips its alt-screen repaint when it was already in the
+// alt screen (the renderer's altScreen flag survives the release), so without a
+// nudge the resumed frame is never redrawn and the bottom row (the footer) is lost.
+// Update answers this with a full tea.ClearScreen — the same remedy the resize path
+// uses — forcing a clean repaint.
+type resumedMsg struct{}
 type openEditMsg struct{ t store.Task } // a pre-edit sync returned — open the edit form from this fresh task
 
 // tickMsg drives periodic polling; polledMsg carries a state fetched by a poll

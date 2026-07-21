@@ -212,8 +212,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case reviewPromptMsg:
 		m.reviewPrompt = string(msg)
+	case resumedMsg: // an interactive child (attach/shell) exited — force a clean repaint (see resumedMsg)
+		return m, tea.ClearScreen
 	case reviewReadyMsg: // PR materialized — drop into a shell in the review workspace
-		return m, tea.ExecProcess(shellAt(string(msg)), func(error) tea.Msg { return nil })
+		return m, tea.ExecProcess(shellAt(string(msg)), resumed)
 	case prMsg:
 		m.prDetail = msg.d
 		// The diff arrives async, well after syncDetail sized the viewport to the
@@ -399,7 +401,7 @@ func (m *model) onKey(k string) tea.Cmd {
 					return nil
 				}
 				if m.cl != nil {
-					return tea.ExecProcess(attachCmd(m.agentContainer(a), a.Name), func(error) tea.Msg { return nil })
+					return tea.ExecProcess(attachCmd(m.agentContainer(a), a.Name), resumed)
 				}
 			}
 		}
@@ -504,6 +506,10 @@ func (m *model) onKey(k string) tea.Cmd {
 		}
 	case keyClose: // tasks: close the selected task (mark it done)
 		if m.tab == 0 && m.selID() != "" {
+			if pr := m.attachedOpenPR(m.selID()); pr != "" { // prompt to discard its PR too
+				m.openCloseChoice(m.selID(), pr)
+				return nil
+			}
 			return m.closeTaskCmd(m.selID())
 		}
 	case "enter":
@@ -528,7 +534,7 @@ func (m *model) onKey(k string) tea.Cmd {
 					m.prView = it.value // PRs: diff ⇄ lint
 					m.detail.Resize(m.detail.Height, len(m.prContentLines()))
 				case "path": // open a shell in the workspace
-					return tea.ExecProcess(shellAt(it.value), func(error) tea.Msg { return nil })
+					return tea.ExecProcess(shellAt(it.value), resumed)
 				default: // cross-reference: open its details modal
 					m.openItemModal(it.kind, it.value)
 				}
@@ -598,6 +604,12 @@ func (m *model) onKey(k string) tea.Cmd {
 	}
 	return cmd
 }
+
+// resumed is the tea.ExecProcess callback for every interactive child (tmux
+// attach, workspace shell): on exit it asks the loop to repaint via resumedMsg. The
+// child's own exit error is intentionally dropped — there's nothing the dashboard
+// can do about a shell that exited non-zero, and a stray modal would just be noise.
+func resumed(error) tea.Msg { return resumedMsg{} }
 
 // View composes the full-height frame: tab strip, master-detail body, footer.
 func (m model) View() string {

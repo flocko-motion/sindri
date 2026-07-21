@@ -48,6 +48,20 @@ func (s *Service) InjectWhenReady(project, name, text string) error {
 	return s.store.For(project).Log(name, "inject-skipped", text)
 }
 
+// Interrupt sends an Escape to the agent's tmux session — Claude's "abort the current
+// operation" key — so a follow-up message lands on an idle prompt instead of being
+// queued behind in-flight work. Errors when the agent isn't running; the caller
+// decides whether that matters (for a scrap it's fine — nothing to interrupt).
+func (s *Service) Interrupt(project, name string) error {
+	c := s.deps.ContainerName(project, name)
+	if !container.Running(c) {
+		return fmt.Errorf("agent %q is not running", name)
+	}
+	full := append([]string{"tmux"}, tmux.Interrupt(name)...)
+	_, err := container.Exec(c, full...)
+	return err
+}
+
 // Tell delivers a message into an agent's session, stamped with its source
 // (provenance, D12). The stamped line is recorded in the activity log.
 func (s *Service) Tell(project, name, msg, source string) error {

@@ -41,6 +41,9 @@ type Deps interface {
 	Notify()
 	// InjectWhenReady delivers a message into an agent's session once it's ready.
 	InjectWhenReady(project, name, text string) error
+	// Interrupt aborts an agent's current operation (sends ESC to its session), so a
+	// scrapped-task notice lands on an idle prompt rather than queuing behind work.
+	Interrupt(project, name string) error
 	// AgentAlive reports whether an agent's pod is currently running.
 	AgentAlive(project, name string) bool
 	// SessionAlive reports whether an agent's tmux session is live.

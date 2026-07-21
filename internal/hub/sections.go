@@ -21,8 +21,9 @@ func (b BoardState) OpenTaskCount() int { return countTasks(b.Tasks, task.Open) 
 // AgentCount is the whole roster size (down agents are still agents).
 func (b BoardState) AgentCount() int { return len(b.Agents) }
 
-// OpenPRCount is the number of not-yet-merged PRs across the fleet.
-func (b BoardState) OpenPRCount() int { return countPRs(b.PRs, prNotMerged) }
+// OpenPRCount is the number of still-open PRs across the fleet — those in neither
+// terminal state (merged or scrapped), matching what the PRs tab shows by default.
+func (b BoardState) OpenPRCount() int { return countPRs(b.PRs, prOpen) }
 
 // RepoCount is the number of repos the hub tracks.
 func (b BoardState) RepoCount() int { return len(b.Projects) }
@@ -30,7 +31,7 @@ func (b BoardState) RepoCount() int { return len(b.Projects) }
 // ChatMemberCount is the number of agents in the user's chatroom.
 func (b BoardState) ChatMemberCount() int { return len(b.Chat.Members) }
 
-func prNotMerged(p store.PR) bool { return p.Status != "merged" }
+func prOpen(p store.PR) bool { return p.Status != "merged" && p.Status != "scrapped" }
 
 func countTasks(ts []store.Task, pred func(store.Task) bool) (n int) {
 	for _, t := range ts {
