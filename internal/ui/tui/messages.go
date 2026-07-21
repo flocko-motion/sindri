@@ -10,6 +10,7 @@ package tui
 import (
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
@@ -61,6 +62,25 @@ type approveMergeMsg struct{ id string }
 // board snapshot; on failure, the error. Either way the row's transient "merging"
 // marker is cleared (replaced by the real status, or reverted on error).
 type mergeDoneMsg struct {
+	id    string
+	state hub.BoardState
+	err   error
+}
+
+// taskOpMsg carries a task-ending op (close/scrap) from a confirm choice back into
+// Update, so the transient verb ("closing"/"deleting") is marked on the model (and
+// rendered on the row) before the async op runs. run is the op to fire next. The
+// indirection is needed because a choice's apply can't mutate the returned model.
+type taskOpMsg struct {
+	id   string
+	verb string
+	run  tea.Cmd
+}
+
+// taskOpDoneMsg reports a close/scrap finished: success carries a fresh board
+// snapshot, failure the error. Either way the row's transient verb is cleared
+// (replaced by the real status, or reverted with an error modal).
+type taskOpDoneMsg struct {
 	id    string
 	state hub.BoardState
 	err   error

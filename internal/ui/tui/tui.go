@@ -57,7 +57,8 @@ type model struct {
 	filter     int // Tasks tab: open/closed/all
 	prFilter   int // PRs tab: unmerged/merged/all (default hides merged)
 	collapsed  map[string]bool
-	merging    map[string]bool // PR ids the user just triggered a merge on — shown as a transient "merging" on the row until the hub confirms
+	merging    map[string]bool   // PR ids the user just triggered a merge on — shown as a transient "merging" on the row until the hub confirms
+	busy       map[string]string // task ids the user just triggered a close/scrap on → the transient verb ("closing"/"deleting") shown on the row until the hub confirms
 	hideDetail bool            // § force-hides the detail pane (else shown when wide enough)
 	scopeRepo  bool            // TUI-wide global↔repo scope (default repo): Agents/PRs narrow to the active repo when true. Tasks is always repo-scoped regardless.
 
@@ -116,7 +117,7 @@ func newModel(cl *client.HTTP, ch <-chan hub.BoardState, root string) model {
 	ta.CharLimit = 0 // the hub enforces the length cap (with feedback); never clip silently here
 	ta.Placeholder = "Type a message to the meeting room…"
 	ta.ShowLineNumbers = false
-	m := model{cl: cl, ch: ch, root: root, collapsed: map[string]bool{}, merging: map[string]bool{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
+	m := model{cl: cl, ch: ch, root: root, collapsed: map[string]bool{}, merging: map[string]bool{}, busy: map[string]string{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
 	m.reclamp()
 	return m
 }
@@ -162,11 +163,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.state = msg.st
 		m.reconcileMerging()
+		m.reconcileBusy()
 		m.reclamp()
 		return m, tea.Batch(waitForState(m.ch, m.gen), m.syncDetail(), m.agentLiveCmds())
 	case polledMsg: // an auto-refresh poll — update the board, don't touch the SSE waiter
 		m.state = hub.BoardState(msg)
 		m.reconcileMerging()
+		m.reconcileBusy()
 		m.reclamp()
 		return m, tea.Batch(m.syncDetail(), m.agentLiveCmds())
 	case approveMergeMsg: // "approve & merge" confirmed — mark the row merging, then run it
@@ -174,6 +177,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.approveMergeCmd(msg.id)
 	case mergeDoneMsg:
 		return m.mergeDone(msg)
+	case taskOpMsg: // close/scrap confirmed — mark the transient verb, then run the op
+		if m.busy == nil {
+			m.busy = map[string]string{}
+		}
+		m.busy[msg.id] = msg.verb
+		return m, msg.run
+	case taskOpDoneMsg:
+		return m.taskOpDone(msg)
 	case tickMsg:
 		// Live agent state (status), screen, and log go stale between hub
 		// notifications; while on the Agents tab, poll every few seconds. The
