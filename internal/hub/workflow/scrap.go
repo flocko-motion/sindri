@@ -1,8 +1,9 @@
 // package: hub/workflow / scrap
 // type:    logic (PR discard)
-// job:     ScrapPR — discard a PR whose task is being closed/scrapped: delete the
-//          task's branch and flip the PR to "scrapped" so it drops off the board. The
-//          working agent is stopped + re-tasked by the paired task close, not here.
+// job:     ScrapPR — discard a PR whose task is being closed/scrapped: stop any
+//          reviewer mid-review, delete the task's branch, and flip the PR to
+//          "scrapped" so it drops off the board. The worker is stopped by the paired
+//          task close, not here.
 // limits:  git mechanics via hub/repo; persistence via the store. No git/tmux here.
 package workflow
 
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 
 	"github.com/flo-at/sindri/internal/hub/repo"
+	"github.com/flo-at/sindri/internal/hub/store"
 )
 
 // ScrapPR discards a PR (host/human-only) — the companion to closing/scrapping its
@@ -27,6 +29,24 @@ func (e *Engine) ScrapPR(project, prID string) error {
 	}
 	if !ok {
 		return fmt.Errorf("no such PR %q", prID)
+	}
+
+	// Stop any reviewer mid-review of this PR — its branch is about to vanish, so the
+	// review is moot. Abort the reviewer's current op (ESC), tell it, close the open
+	// review record so it stops showing as "reviewing", and idle it. (The worker on the
+	// task is handled by the paired task close.) Best-effort per reviewer.
+	revs, _ := ps.Reviews(prID)
+	for _, r := range revs {
+		if r.Verdict != "" {
+			continue // already finished — nothing in flight
+		}
+		if e.deps.AgentAlive(project, r.Author) {
+			_ = e.deps.Interrupt(project, r.Author)
+			_ = e.deps.InjectWhenReady(project, r.Author, MsgReviewCancelled(prID))
+		}
+		_ = ps.RecordVerdict(r.ID, "cancelled", "PR scrapped with its task")
+		_ = ps.SetState(store.AgentState{Agent: r.Author, Phase: "idle"})
+		_ = ps.Log(r.Author, "review-cancelled", prID)
 	}
 
 	// Delete the task's branch. It's usually checked out in the owning agent's

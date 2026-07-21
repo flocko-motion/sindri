@@ -284,6 +284,13 @@ func MsgTaskCancelled(id string) string {
 	return fmt.Sprintf("[hub] Task %s was cancelled — stop working on it. Don't clean up your workspace; the sindri hub will reset it for you when you pick up your next task. Just run `sindri`.", id)
 }
 
+// MsgReviewCancelled tells a reviewer the PR it was reviewing was scrapped, so the
+// review is moot — stop and pick up new work. Its branch is gone, so there's nothing
+// left to read.
+func MsgReviewCancelled(prID string) string {
+	return fmt.Sprintf("[hub] The PR you were reviewing (%s) was scrapped — stop reviewing it; its branch is gone. Just run `sindri` for your next task.", prID)
+}
+
 // MsgRebased tells a worker the hub rebased its branch onto a moved base.
 func MsgRebased(base string) string {
 	return fmt.Sprintf("[hub] %s moved — your branch was rebased onto it, so you're up to date.", base)
