@@ -45,9 +45,9 @@ const (
 // Message notices pushed on membership changes / relaunch. Exported so the hub can
 // re-announce membership when an agent relaunches (MsgReminder).
 const (
-	MsgWelcome  = "[hub] You've been added to the chatroom. Use `sindri chat <message>` to emit a message to everybody in the room; you'll also receive the others' messages here, prefixed [chat]. Use it to coordinate issues with the other agents — tell them what you're working on and listen to what they're working on. The user will lead the discussion to answer an open question as a team."
-	MsgReminder = "[hub] You're in the chatroom: `sindri chat <message>` talks to everyone in the room, and their messages arrive here prefixed [chat]."
-	MsgRemoved  = "[hub] You've been removed from the chatroom — `sindri chat` is no longer available. Carry on with your work."
+	MsgWelcome  = "[hub] You've been added to the meeting room. Use `sindri meeting <message>` to emit a message to everybody in the room; you'll also receive the others' messages here, prefixed [meeting]. Use it to coordinate issues with the other agents — tell them what you're working on and listen to what they're working on. The user will lead the discussion to answer an open question as a team."
+	MsgReminder = "[hub] You're in the meeting room: `sindri meeting <message>` talks to everyone in the room, and their messages arrive here prefixed [meeting]."
+	MsgRemoved  = "[hub] You've been removed from the meeting room — `sindri meeting` is no longer available. Carry on with your work."
 )
 
 // errTooLong is returned when a message exceeds maxLen — actionable feedback for
@@ -80,13 +80,13 @@ func (s *Service) Add(project, name string) error {
 		return err
 	}
 	if member {
-		return fmt.Errorf("%s is already in the chatroom", name)
+		return fmt.Errorf("%s is already in the meeting room", name)
 	}
 	if err := s.store.ChatAdd(project, name); err != nil {
 		return err
 	}
 	s.deliver(project, name, MsgWelcome)
-	_, err = s.broadcast("", system, name+" joined the chatroom") // announce (IRC-style)
+	_, err = s.broadcast("", system, name+" joined the meeting room") // announce (IRC-style)
 	return err
 }
 
@@ -98,10 +98,10 @@ func (s *Service) Remove(project, name string) error {
 		return err
 	}
 	if !was {
-		return fmt.Errorf("%s is not in the chatroom", name)
+		return fmt.Errorf("%s is not in the meeting room", name)
 	}
 	s.deliver(project, name, MsgRemoved)
-	_, err = s.broadcast("", system, name+" left the chatroom")
+	_, err = s.broadcast("", system, name+" left the meeting room")
 	return err
 }
 
@@ -162,11 +162,11 @@ func (s *Service) UserMessage(line string) error {
 func (s *Service) Cmd(c registry.Caller, args []string, out io.Writer) (int, error) {
 	msg := strings.TrimSpace(strings.Join(args, " "))
 	if msg == "" {
-		fmt.Fprintln(out, "usage: chat <message...>")
+		fmt.Fprintln(out, "usage: meeting <message...>")
 		return 2, nil
 	}
 	if !s.Present() {
-		fmt.Fprintln(out, "the chatroom is locked — the user has stepped away, so your message wasn't sent. Wait, then send it again once they're back.")
+		fmt.Fprintln(out, "the meeting room is locked — the user has stepped away, so your message wasn't sent. Wait, then send it again once they're back.")
 		return 1, nil
 	}
 	if _, err := s.broadcast(c.Project, c.Agent, msg); err != nil {
@@ -176,7 +176,7 @@ func (s *Service) Cmd(c registry.Caller, args []string, out io.Writer) (int, err
 		}
 		return 1, err
 	}
-	fmt.Fprintln(out, "sent to the chatroom")
+	fmt.Fprintln(out, "sent to the meeting room")
 	return 0, nil
 }
 
@@ -196,7 +196,7 @@ func (s *Service) command(line string) error {
 	case "help", "?":
 		return s.systemReply(helpText)
 	case "quit", "q", "leave", "part", "exit":
-		return s.systemReply("to leave: press Ctrl-D or type /quit in `sindri chat join`; in the TUI, just switch tabs.")
+		return s.systemReply("to leave: press Ctrl-D or type /quit in `sindri meeting join`; in the TUI, just switch tabs.")
 	default:
 		return s.systemReply("unknown command /" + verb + " — type /help for the list")
 	}
@@ -244,7 +244,7 @@ func (s *Service) whoLine() string {
 		return "couldn't read the member list"
 	}
 	if len(members) == 0 {
-		return "the chatroom is empty — /add <agent> to bring someone in"
+		return "the meeting room is empty — /add <agent> to bring someone in"
 	}
 	parts := make([]string, len(members))
 	for i, m := range members {
@@ -299,7 +299,7 @@ func (s *Service) broadcast(senderProject, senderName, body string) (store.ChatM
 	if err != nil {
 		return store.ChatMessage{}, err
 	}
-	line := fmt.Sprintf("[chat] %s: %s", senderName, body)
+	line := fmt.Sprintf("[meeting] %s: %s", senderName, body)
 	for _, m := range members {
 		if m.Project == senderProject && m.Name == senderName {
 			continue // the sender already has its own words

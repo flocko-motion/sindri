@@ -1,8 +1,8 @@
 // package: ui/cli / chat
 // type:    command (host CLI)
-// job:     the user's control over the one chatroom: `chat add`/`chat remove` to
-//          curate who's in the room, `chat join` to enter it interactively (read
-//          the live feed, type to broadcast as [user]), and bare `chat` for a
+// job:     the user's control over the one meeting room: `meeting add`/`meeting remove`
+//          to curate who's in the room, `meeting join` to enter it interactively (read
+//          the live feed, type to broadcast as [user]), and bare `meeting` for a
 //          one-shot snapshot of members + transcript.
 // limits:  thin calls into the backend; the relay + persistence live in the hub.
 package cli
@@ -23,12 +23,12 @@ import (
 // NewChatCmd builds the `chat` command tree (the user's chatroom).
 func NewChatCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "chat",
-		Short: "The user's chatroom: add/remove agents and join the discussion",
-		Long: "The user's single chatroom — a star-topology relay: any member (an added " +
+		Use:   "meeting",
+		Short: "The user's meeting room: add/remove agents and join the discussion",
+		Long: "The user's single meeting room — a star-topology relay: any member (an added " +
 			"agent, or you) sends a message to the hub, which forwards it to everyone else. " +
-			"Add agents to pull them in, then `chat join` to lead the discussion; agents " +
-			"talk with `sindri chat <message>` from inside their pods.",
+			"Add agents to pull them in, then `meeting join` to lead the discussion; agents " +
+			"talk with `sindri meeting <message>` from inside their pods.",
 		Args: cobra.NoArgs,
 		// Bare `sindri chat`: a one-shot snapshot (members + recent transcript).
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -48,7 +48,7 @@ func NewChatCmd() *cobra.Command {
 
 func chatAddCmd() *cobra.Command {
 	return &cobra.Command{
-		Use: "add <agent...>", Short: "Add one or more agents to the chatroom", Args: cobra.MinimumNArgs(1),
+		Use: "add <agent...>", Short: "Add one or more agents to the meeting room", Args: cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			for _, name := range args {
 				// withAgent resolves the agent's project (re-scoping the client), so an
@@ -58,7 +58,7 @@ func chatAddCmd() *cobra.Command {
 				}); err != nil {
 					return err
 				}
-				fmt.Fprintf(os.Stderr, "added %s to the chatroom\n", name)
+				fmt.Fprintf(os.Stderr, "added %s to the meeting room\n", name)
 			}
 			return nil
 		},
@@ -67,7 +67,7 @@ func chatAddCmd() *cobra.Command {
 
 func chatRemoveCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use: "remove <agent...>", Short: "Remove one or more agents from the chatroom", Args: cobra.MinimumNArgs(1),
+		Use: "remove <agent...>", Short: "Remove one or more agents from the meeting room", Args: cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			for _, name := range args {
 				if err := withAgent(name, func(b backend, a *hub.AgentView) error {
@@ -75,7 +75,7 @@ func chatRemoveCmd() *cobra.Command {
 				}); err != nil {
 					return err
 				}
-				fmt.Fprintf(os.Stderr, "removed %s from the chatroom\n", name)
+				fmt.Fprintf(os.Stderr, "removed %s from the meeting room\n", name)
 			}
 			return nil
 		},
@@ -86,7 +86,7 @@ func chatRemoveCmd() *cobra.Command {
 
 func chatJoinCmd() *cobra.Command {
 	return &cobra.Command{
-		Use: "join", Short: "Enter the chatroom interactively (read live, type to broadcast)", Args: cobra.NoArgs,
+		Use: "join", Short: "Enter the meeting room interactively (read live, type to broadcast)", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return withBackend(func(b backend) error { return chatJoin(cmd, b) })
 		},
@@ -100,7 +100,7 @@ func chatJoin(cmd *cobra.Command, b backend) error {
 	if v, err := b.Chat(); err == nil {
 		fmt.Print(renderMembers(v))
 	}
-	fmt.Fprintln(cmd.OutOrStdout(), "Joined the chatroom. Type a message + Enter to send to everyone; /help for commands (/add, /remove, /who); Ctrl-D or /quit to leave.")
+	fmt.Fprintln(cmd.OutOrStdout(), "Joined the meeting room. Type a message + Enter to send to everyone; /help for commands (/add, /remove, /who); Ctrl-D or /quit to leave.")
 	fmt.Fprintln(cmd.OutOrStdout(), "--- transcript ---")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -182,7 +182,7 @@ func chatMsgLine(m store.ChatMessage) string {
 // renderMembers formats just the member line (name + role), or a note when empty.
 func renderMembers(v hub.ChatView) string {
 	if len(v.Members) == 0 {
-		return "Chatroom is empty — add agents with `sindri chat add <agent>`.\n"
+		return "Meeting room is empty — add agents with `sindri meeting add <agent>`.\n"
 	}
 	names := make([]string, len(v.Members))
 	for i, m := range v.Members {
@@ -192,5 +192,5 @@ func renderMembers(v hub.ChatView) string {
 			names[i] = m.Name
 		}
 	}
-	return fmt.Sprintf("Chatroom — %d member(s): %s\n", len(v.Members), strings.Join(names, ", "))
+	return fmt.Sprintf("Meeting room — %d member(s): %s\n", len(v.Members), strings.Join(names, ", "))
 }

@@ -33,5 +33,5 @@ var Sections = []Section{
 	{"agents", "Agents", func(b Board) int { return b.AgentCount() }}, // whole roster — down agents are still agents
 	{"prs", "PRs", func(b Board) int { return b.OpenPRCount() }},
 	{"repos", "Repos", func(b Board) int { return b.RepoCount() }},
-	{"chat", "Chat", func(b Board) int { return b.ChatMemberCount() }},
+	{"chat", "Meeting", func(b Board) int { return b.ChatMemberCount() }},
 }

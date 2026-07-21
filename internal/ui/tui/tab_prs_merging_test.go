@@ -24,7 +24,8 @@ func prRowText(m model, id string) string {
 // fresh board snapshot lands, and cleared on error — the immediate-feedback path.
 func TestMergingTransient(t *testing.T) {
 	m := newModel(nil, nil, "")
-	m.tab = 2 // PRs
+	m.tab = 2           // PRs
+	m.scopeRepo = false // global scope: this test is about merging state, not repo filtering (which now defaults on)
 	m.state = hub.BoardState{PRs: []store.PR{{ID: "pr-td-1", Status: "approved", Project: "repo", Agent: "brokkr", Branch: "td-1"}}}
 
 	// Baseline: the row shows the real status, not "merging".

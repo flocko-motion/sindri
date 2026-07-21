@@ -117,7 +117,7 @@ func (m model) chatBody() string {
 // to add someone when it's empty.
 func chatMembersLine(v hub.ChatView) string {
 	if len(v.Members) == 0 {
-		return dimStyle.Render("Chatroom is empty — press enter and type /add <agent> to invite someone (/help for commands)")
+		return dimStyle.Render("Meeting room is empty — press enter and type /add <agent> to invite someone (/help for commands)")
 	}
 	names := make([]string, len(v.Members))
 	for i, mem := range v.Members {

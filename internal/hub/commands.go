@@ -60,9 +60,9 @@ func (h *Hub) registry() *registry.Registry {
 		registry.Command{Name: "state", Help: "set your resting state: state planning | state idle", Roles: []string{"planner"}, Run: h.wf.CmdState},
 		registry.Command{Name: "approve", Help: "approve a pull request: approve [pr-id]", Roles: []string{"reviewer"}, Run: h.wf.CmdApprove},
 		registry.Command{Name: "reject", Help: "reject a pull request: reject <pr-id> <feedback...>", Roles: []string{"reviewer"}, Run: h.wf.CmdReject},
-		// Any agent the user has added to the chatroom can speak to it. Hidden (not
+		// Any agent the user has added to the meeting room can speak to it. Hidden (not
 		// role-gated) until added — the user controls who's in the room.
-		registry.Command{Name: "chat", Help: "say something to everyone in the chatroom: chat <message...>",
+		registry.Command{Name: "meeting", Help: "say something to everyone in the meeting room: meeting <message...>",
 			Hidden: func(c registry.Caller) bool { return !c.InChat }, Run: h.cmdChat},
 	)
 }

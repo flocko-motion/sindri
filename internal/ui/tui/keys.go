@@ -65,7 +65,7 @@ func lbl(s string) func(model) string { return func(model) string { return s } }
 // footers. Order here is the order shown.
 var keymap = []binding{
 	// Global (first footer row): the compound nav keys are display-only rows.
-	{"⇥/⇧⇥", lbl("tab"), scopeGlobal},
+	{"⇥/[]", lbl("tab"), scopeGlobal},
 	{"C-h/l", lbl("pane"), scopeGlobal},
 	{"j/k", lbl("move"), scopeGlobal},
 	{keyDetail, lbl("detail"), scopeGlobal},
@@ -92,7 +92,7 @@ var keymap = []binding{
 	{keyEdit, lbl("memory"), scopeAgents},
 	{keyReject, lbl("rebase"), scopeAgents}, // R = reBase (onto the reference branch)
 	{keyDelete, lbl("delete"), scopeAgents},
-	{keyScopeTog, func(m model) string { return "scope: " + scopeName(m.scopeRepo[1]) }, scopeAgents},
+	{keyScopeTog, func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scopeAgents},
 
 	// PRs.
 	{keyVerify, lbl("verify"), scopePRs},
@@ -102,7 +102,7 @@ var keymap = []binding{
 	{keyLint, lbl("lint"), scopePRs},
 	{keyMerge, lbl("merge"), scopePRs},
 	{keyFilter, func(m model) string { return "filter: " + prFilterNames[m.prFilter] }, scopePRs},
-	{keyScopeTog, func(m model) string { return "scope: " + scopeName(m.scopeRepo[2]) }, scopePRs},
+	{keyScopeTog, func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scopePRs},
 
 	// Repos.
 	{"enter", lbl("switch"), scopeRepos},

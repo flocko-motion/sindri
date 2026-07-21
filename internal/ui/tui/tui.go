@@ -59,7 +59,7 @@ type model struct {
 	collapsed  map[string]bool
 	merging    map[string]bool // PR ids the user just triggered a merge on — shown as a transient "merging" on the row until the hub confirms
 	hideDetail bool            // § force-hides the detail pane (else shown when wide enough)
-	scopeRepo  [5]bool         // per-tab global↔repo scope; Agents(1)/PRs(2) narrow to the active repo when true (Tasks always repo-scoped)
+	scopeRepo  bool            // TUI-wide global↔repo scope (default repo): Agents/PRs narrow to the active repo when true. Tasks is always repo-scoped regardless.
 
 	rightFocus  bool // detail (right) column has focus (h/l switch; j/k move within)
 	rightCursor int  // focused actionable item in the right column
@@ -114,9 +114,9 @@ func newModel(cl *client.HTTP, ch <-chan hub.BoardState, root string) model {
 	in.CharLimit = 0 // no limit — a chat message (or tell) must never be silently truncated on send
 	ta := textarea.New()
 	ta.CharLimit = 0 // the hub enforces the length cap (with feedback); never clip silently here
-	ta.Placeholder = "Type a message to the room…"
+	ta.Placeholder = "Type a message to the meeting room…"
 	ta.ShowLineNumbers = false
-	m := model{cl: cl, ch: ch, root: root, collapsed: map[string]bool{}, merging: map[string]bool{}, w: 80, h: 24, input: in, composer: ta}
+	m := model{cl: cl, ch: ch, root: root, collapsed: map[string]bool{}, merging: map[string]bool{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
 	m.reclamp()
 	return m
 }
@@ -310,9 +310,9 @@ func (m *model) onKey(k string) tea.Cmd {
 	case keyQuit, "ctrl+c":
 		m.quit = true
 		return nil
-	case "tab": // the only way to switch tabs (with shift+tab)
+	case "tab", "]": // switch tabs forward (] mirrors tab)
 		m.tab = (m.tab + 1) % len(hub.Sections)
-	case "shift+tab":
+	case "shift+tab", "[": // switch tabs back ([ mirrors shift+tab)
 		m.tab = (m.tab - 1 + len(hub.Sections)) % len(hub.Sections)
 	case "ctrl+l": // the only way to switch panes (with ctrl+h): focus the detail
 		if m.showDetail() && len(m.actionableItems()) > 0 {
@@ -573,11 +573,13 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.openColorChoice(m.selID())
 			return nil
 		}
-	case keyScopeTog: // agents/prs: toggle this tab's scope between global (all repos) and the active repo
+	case keyScopeTog: // agents/prs: toggle the TUI-wide scope between the active repo and all repos
 		if m.tab == 1 || m.tab == 2 {
-			m.scopeRepo[m.tab] = !m.scopeRepo[m.tab]
-			m.cursor[m.tab] = 0
-			if m.scopeRepo[m.tab] {
+			m.scopeRepo = !m.scopeRepo
+			// Both Agents and PRs re-filter, so reset both their cursors (reclamp
+			// keeps them valid, but the lists change out from under the old position).
+			m.cursor[1], m.cursor[2] = 0, 0
+			if m.scopeRepo {
 				m.flash = "scope: this repo"
 			} else {
 				m.flash = "scope: all repos"
@@ -657,7 +659,7 @@ func (m model) View() string {
 		foot = dimStyle.Render(padTrunc("enter submit · esc cancel", m.w)) + "\n" + m.input.View()
 	case m.composing:
 		foot = dimStyle.Render(padTrunc("ctrl+s send · esc cancel · enter newline", m.w)) + "\n" +
-			dimStyle.Render(padTrunc("composing to the chatroom…", m.w))
+			dimStyle.Render(padTrunc("composing to the meeting room…", m.w))
 	default:
 		global := m.footerFor(scopeGlobal)
 		if m.flash != "" {

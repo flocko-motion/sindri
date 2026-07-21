@@ -64,6 +64,16 @@ install: check-go build ## build (on the latest Go), then install the binaries t
 	mv bin/sindri-worker $(PREFIX)/sindri-worker
 	mv bin/brokkr $(PREFIX)/brokkr
 	mv bin/brokkr-linux $(PREFIX)/brokkr-linux
+	# A running hub keeps executing the OLD binary after the mv above (it swapped
+	# the on-disk inode, but the live process is memory-mapped to the previous one).
+	# Restart it so the rebuild actually takes effect — but ONLY when one is already
+	# up; `make install` must never launch a hub the user didn't have. Keying off the
+	# status table's "PID" header fails safe: if it's absent, we skip rather than risk
+	# starting an unwanted hub.
+	@if $(PREFIX)/sindri hub status 2>/dev/null | grep -q '^PID'; then \
+		echo "restarting the running hub to pick up this build…"; \
+		$(PREFIX)/sindri hub restart; \
+	fi
 
 # Rebuild image when the (now embedded) build context changes. The agent binary
 # is mounted at runtime, not baked in; arch-specific tools (yq, yazi) are
