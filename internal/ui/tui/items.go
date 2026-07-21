@@ -67,9 +67,9 @@ func (m model) itemDetailLines(kind, id string) []string {
 	case "task":
 		for _, t := range m.state.Tasks {
 			if t.ID == id {
-				desc := ""
-				if m.taskDetail.ID == id {
-					desc = m.taskDetail.Description
+				desc := t.Description // board row carries it — shown at once
+				if m.taskDetail.ID == id && m.taskDetail.Description != "" {
+					desc = m.taskDetail.Description // refined by the detail read
 				}
 				return m.taskDetailFor(t, desc)
 			}

@@ -208,10 +208,14 @@ func (m model) taskItems() []metaItem {
 			t = x
 		}
 	}
-	desc := ""
+	// The board row already carries the description, so it shows at once while
+	// browsing; the lazy detail read then refines it (fresher body + comments).
+	desc := t.Description
 	var comments []store.Comment
 	if m.taskDetail.ID == id {
-		desc = m.taskDetail.Description
+		if m.taskDetail.Description != "" {
+			desc = m.taskDetail.Description
+		}
 		comments = m.taskDetail.Comments
 	}
 	return m.taskItemsFor(t, desc, comments)
