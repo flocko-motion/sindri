@@ -17,8 +17,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/flo-at/sindri/internal/hub/client"
 	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/hub/client"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/ui/tui/scroll"
 )
@@ -412,7 +412,7 @@ func (m *model) onKey(k string) tea.Cmd {
 					return nil
 				}
 				if m.cl != nil {
-					return tea.ExecProcess(attachCmd(m.agentContainer(a), a.Name), resumed)
+					return attachAgent(m.agentContainer(a), a.Name)
 				}
 			}
 		}

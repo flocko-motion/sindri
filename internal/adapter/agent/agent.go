@@ -64,6 +64,21 @@ func Use(a Agent) { active = a }
 // DetectState classifies a pane via the wired backend.
 func DetectState(screen string) State { return active.DetectState(screen) }
 
+// Runtime classifies a captured pane into the runtime word the board and the herdr
+// sidebar share — "working" | "blocked" | "idle". An unrecognized screen (a shell, a
+// transcript viewer, boot) counts as idle: nothing is happening that needs surfacing.
+// The single source of this mapping, so every reader classifies a pane identically.
+func Runtime(screen string) string {
+	switch DetectState(screen) {
+	case Working:
+		return "working"
+	case Blocked:
+		return "blocked"
+	default: // Idle or Unknown
+		return "idle"
+	}
+}
+
 // PrepareHome provisions an agent home via the wired backend.
 func PrepareHome(spec HomeSpec) (Home, error) { return active.PrepareHome(spec) }
 

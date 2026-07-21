@@ -13,10 +13,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
-	"github.com/flo-at/sindri/internal/hub/client"
+	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/hub/client"
+	"github.com/flo-at/sindri/internal/ui/attach"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -57,8 +58,12 @@ func NewCoauthorCmd() *cobra.Command {
 			if err := ensureCoauthorAlive(cl, proj, name); err != nil {
 				return err
 			}
+			cname := hub.Container(root, name)
 			fmt.Fprintf(os.Stderr, "attaching to %s — detach with your tmux prefix then d\n", name)
-			return container.ExecInteractive(hub.Container(root, name), append([]string{"tmux"}, tmux.Attach(name, false)...)...)
+			// Report the coauthor to herdr for the pairing session, same as every other
+			// attach path — a coauthor is an agent too. No-op outside a herdr pane.
+			defer attach.ReportToHerdr(cname, name)()
+			return container.ExecInteractive(cname, append([]string{"tmux"}, tmux.Attach(name, false)...)...)
 		},
 	}
 }

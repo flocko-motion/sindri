@@ -21,6 +21,7 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/ui/attach"
 )
 
 // attachCmd builds the interactive `<runtime> exec -it … tmux attach` for an agent
@@ -29,6 +30,18 @@ import (
 // the tmux session.
 func attachCmd(cname, name string) *exec.Cmd {
 	return container.AttachCmd(cname, append([]string{"tmux"}, tmux.Attach(name, false)...)...)
+}
+
+// attachAgent launches the interactive attach and, for its duration, lists the agent
+// in herdr's sidebar (a no-op outside a herdr pane) — the same reporting every attach
+// path uses, so a TUI-launched dial-in shows up like the CLI's. herdr is released
+// when the child exits, before the resume repaint.
+func attachAgent(cname, name string) tea.Cmd {
+	stop := attach.ReportToHerdr(cname, name)
+	return tea.ExecProcess(attachCmd(cname, name), func(err error) tea.Msg {
+		stop()
+		return resumed(err)
+	})
 }
 
 // agentContainer is the agent's podman container, preferring the board's

@@ -43,15 +43,7 @@ func (s *Service) RuntimeState(ctx context.Context, project, name string) string
 	if err != nil {
 		return ""
 	}
-	switch agentport.DetectState(string(out)) {
-	case agentport.Working:
-		return "working"
-	case agentport.Blocked:
-		return "blocked"
-	case agentport.Idle:
-		return "idle"
-	}
-	return "idle" // a shell (maintenance mode) or unrecognized screen = not doing anything
+	return agentport.Runtime(string(out)) // shared classifier: board + herdr agree
 }
 
 // LaunchDiagnostic reports WHY a just-launched agent isn't observed up, so a timeout

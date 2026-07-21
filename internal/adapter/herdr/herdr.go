@@ -1,9 +1,9 @@
 // package: adapter/herdr / herdr
 // type:    adapter (external tool: herdr, the agent multiplexer)
 // job:     when `sindri agent attach` runs inside a herdr pane, report the pane to
-//          herdr's sidebar (by the agent's own name, e.g. "austri", sourced as
-//          "sindri" so it's never mislabelled "claude") with a projected state — so
-//          the agent shows up there as if it ran natively.
+//          herdr's sidebar under the agent's own name (e.g. "austri"), sourced as
+//          "sindri" (the reporting tool), with a live state — so the agent shows up
+//          there as if it ran natively.
 // limits:  optional UI nicety, best-effort — a no-op outside herdr, and any failure
 //          is swallowed so it never disturbs the terminal handover. The `herdr`
 //          binary + HERDR_* env are present only inside a herdr pane.
@@ -20,21 +20,40 @@ func InPane() bool {
 	return os.Getenv("HERDR_ENV") == "1" && os.Getenv("HERDR_PANE_ID") != ""
 }
 
-// Report labels the current herdr pane as a sindri agent for the sidebar: the kind
-// is "sindri" (the identity — not "claude", which is just today's config) and the
-// display name is the agent's own name (e.g. "austri", which the user relates to),
-// with the live state (working|blocked|idle|done|unknown). Two calls: report-agent
-// carries the kind + state, report-metadata the display name. Best-effort — a no-op
+// Report labels the current herdr pane as this agent for the sidebar and every
+// notification: the agent field carries the agent's own name (e.g. "austri") — herdr
+// renders it in both the sidebar row AND its attention/finished toasts, so the name
+// must live there, not only in the display override. --source stays "sindri" (the
+// tool reporting it, not "claude"). Two calls: report-agent carries the name + live
+// state; report-metadata re-asserts the display name so it wins even over herdr's own
+// detection (which would otherwise label the pane "claude"). Best-effort — a no-op
 // outside herdr, errors ignored so it never disturbs the attach.
 func Report(name, state string) {
 	pane := os.Getenv("HERDR_PANE_ID")
 	if pane == "" {
 		return
 	}
-	_ = exec.Command("herdr", "pane", "report-agent", pane,
-		"--source", "sindri", "--agent", "sindri", "--state", state).Run()
+	reportAgent(pane, name, state)
 	_ = exec.Command("herdr", "pane", "report-metadata", pane,
-		"--source", "sindri", "--agent", "sindri", "--display-agent", name).Run()
+		"--source", "sindri", "--agent", name, "--display-agent", name).Run()
+}
+
+// ReportState refreshes only the live state (report-agent), for the periodic updates
+// that keep herdr current during a long attach — the display metadata is already set
+// by the initial Report, so there's no need to re-send it each tick. Best-effort.
+func ReportState(name, state string) {
+	pane := os.Getenv("HERDR_PANE_ID")
+	if pane == "" {
+		return
+	}
+	reportAgent(pane, name, state)
+}
+
+// reportAgent tells herdr the pane is this named agent in the given state. The name
+// goes in --agent (herdr's authoritative label for both sidebar and toasts).
+func reportAgent(pane, name, state string) {
+	_ = exec.Command("herdr", "pane", "report-agent", pane,
+		"--source", "sindri", "--agent", name, "--state", state).Run()
 }
 
 // Release drops sindri's sidebar authority over the pane on detach — clearing both
