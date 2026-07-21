@@ -59,3 +59,24 @@ func TestClaudeState(t *testing.T) {
 		}
 	}
 }
+
+// TestRuntime pins the shared classifier the board and the herdr sidebar both read
+// through — working/blocked/idle, with an unrecognized screen counting as idle.
+func TestRuntime(t *testing.T) {
+	agent.Use(New())
+	cases := []struct {
+		name   string
+		screen string
+		want   string
+	}{
+		{"interrupt hint is working", "✳ Cooking… (esc to interrupt)\n  · running tests", "working"},
+		{"permission prompt is blocked", "Do you want to proceed?\n❯ 1. Yes\n  2. No\n(esc to cancel)", "blocked"},
+		{"bare prompt box is idle", "╭─────────────╮\n❯                          \n╰─────────────╯", "idle"},
+		{"unrecognized shell counts as idle", "sindri@austri:/workspace$ ls\nREADME.md  go.mod", "idle"},
+	}
+	for _, c := range cases {
+		if got := agent.Runtime(c.screen); got != c.want {
+			t.Errorf("%s: Runtime() = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
