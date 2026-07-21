@@ -320,7 +320,13 @@ func (m model) agentRows() []row {
 		// Whole row coloured by lifecycle state (grey down, yellow transitioning,
 		// green running); cells styled independently so resets don't bleed.
 		ac := agentStatusStyle(a.Status)
-		task := dash(a.Task)
+		// The work cell: the agent's task, or — for a reviewer, which holds no task —
+		// the PR it's reviewing, so the list tells what each agent is working on.
+		work := a.Task
+		if work == "" {
+			work = a.PR
+		}
+		task := dash(work)
 		if a.Clients > 0 { // dial-ins attached — show the eye like the CLI list
 			task += fmt.Sprintf("  👁%d", a.Clients)
 		}
