@@ -20,7 +20,7 @@ import (
 )
 
 // defaultArchitecture is the architecture doc the reviewer is pointed at when no
-// `architecture` key is set (and the one the hub seeds).
+// `architecture` key is set. The hub looks for it but never creates it.
 const defaultArchitecture = "ARCHITECTURE.md"
 
 // GitHub is the `github:` block.
@@ -38,7 +38,8 @@ type Config struct {
 	GitHub        GitHub `yaml:"github"`
 
 	// ArchitectureSet is true when `architecture` was explicitly configured (at either
-	// layer), so the hub seeds the placeholder ONLY when it's unset.
+	// layer). An explicitly named doc must exist (validate); an unset one need not, and
+	// its absence is a startup recommendation rather than an error.
 	ArchitectureSet bool `yaml:"-"`
 }
 
@@ -85,8 +86,9 @@ func decodeInto(path string, c *Config) error {
 }
 
 // validate rejects path keys that are absolute or escape the repo, and (when a key is
-// set) a target file that doesn't exist. The default architecture (key unset) is
-// exempt: a missing default is seeded by the hub, not an error.
+// set) a target file that doesn't exist. The default architecture (key unset) is exempt:
+// not every repo documents its architecture, and the hub only recommends one at startup
+// (Hub.StartupAdvice) rather than requiring or creating it.
 func (c Config) validate(root string) error {
 	checks := []struct {
 		key, val  string

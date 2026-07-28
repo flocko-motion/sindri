@@ -19,35 +19,11 @@ import (
 // DefaultReviewPrompt seeds the project's central review-prompt.txt the first time.
 const DefaultReviewPrompt = "Review this PR for correctness, clarity, and fit to the task. Flag bugs, missing tests, and anything that should change."
 
-// ReviewArchitecture is appended to every review instruction so a reviewer always
-// (re-)reads the repo's architecture guide before ruling. The hub seeds an
-// ARCHITECTURE.md into every repo it serves (see ensureArchitectureDoc), so there
-// is always one to read.
 // ReviewArchitecture builds the reviewer's "read the architecture doc" clause for the
 // project's configured doc path (arch is repo-relative; /workspace is the mounted root).
 func ReviewArchitecture(arch string) string {
 	return fmt.Sprintf(" Read /workspace/%s now (even if you read it before) and confirm the changes follow it.", arch)
 }
-
-// ArchitecturePlaceholder seeds a repo's ARCHITECTURE.md when it has none, so the
-// repo gains a home for the rules reviewers enforce. Deliberately minimal — a
-// prompt to fill in, plus the one rule that already holds: conform to the brokkr
-// linters.
-const ArchitecturePlaceholder = "# Architecture\n" + `
-<!-- Seeded by sindri. Describe how this project is meant to be built so reviewers
-     can hold every change to it, then commit this file. Replace this comment. -->
-
-## Baseline
-
-All code must conform to the built-in ` + "`brokkr`" + ` linters (` + "`brokkr lint`" + `).
-That floor is enforced automatically.
-
-## Project rules
-
-<!-- Add the rules that matter: layering and boundaries, what belongs where,
-     naming, dependencies, patterns to follow or avoid. -->
-_(none documented yet)_
-`
 
 // ArchitectureBrief injects the project's architecture INTO every agent's brief —
 // the full doc content, so the agent always has it in context rather than a path it

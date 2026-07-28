@@ -52,7 +52,7 @@ precondition for any other operation.
 
 - **WHEN** the user runs `repo init` in a repo with no `.sindri/config.yaml`
 - **THEN** the repo is registered and a commented `.sindri/config.yaml` template is
-  written, plus a seeded `ARCHITECTURE.md` if the project has none
+  written — the only file `init` creates in the repo
 
 #### Scenario: Init is idempotent
 

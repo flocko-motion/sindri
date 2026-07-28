@@ -1,9 +1,11 @@
 // package: hub / wiring
 // type:    logic (module wiring)
 // job:     wire the hub's extracted modules into it — the seam adapters each module
-//          needs back to the hub (chat Delivery, comments Deps, workflow Deps) and the
-//          workflow DTO aliases the hub re-exports as its API. Each module's logic
-//          lives in its own package; this is only the glue.
+//
+//	needs back to the hub (chat Delivery, comments Deps, workflow Deps) and the
+//	workflow DTO aliases the hub re-exports as its API. Each module's logic
+//	lives in its own package; this is only the glue.
+//
 // limits:  adapters + aliases only — no module logic here.
 package hub
 
@@ -59,17 +61,16 @@ func (c commentsDeps) ProjectRoot(project string) string { return c.h.projectRoo
 func (c commentsDeps) Notify()                           { c.h.notify() }
 
 // projectDeps adapts the hub to project.Deps: agent teardown (Forget frees a repo's
-// agents), the filesystem seeders, the repo's display name + stable tag, and notify.
+// agents), .gitignore upkeep, the repo's display name + stable tag, and notify.
 type projectDeps struct{ h *Hub }
 
 func (d projectDeps) DeleteAgent(project, name string) error {
 	return d.h.agents.DeleteAgent(project, name)
 }
-func (d projectDeps) EnsureGitignore(root string)           { ensureGitignore(root) }
-func (d projectDeps) EnsureArchitectureDoc(root string)     { ensureArchitectureDoc(root) }
-func (d projectDeps) RepoName(project string) string        { return d.h.repoName(project) }
-func (d projectDeps) RepoTag(root string) string            { return repoTag(root) }
-func (d projectDeps) Notify()                               { d.h.notify() }
+func (d projectDeps) EnsureGitignore(root string)    { ensureGitignore(root) }
+func (d projectDeps) RepoName(project string) string { return d.h.repoName(project) }
+func (d projectDeps) RepoTag(root string) string     { return repoTag(root) }
+func (d projectDeps) Notify()                        { d.h.notify() }
 
 // agentchanDeps adapts the hub to agentchan.Deps: the agent surface (verb set,
 // blocking directive, verb exec), token->identity resolution, and the access-log

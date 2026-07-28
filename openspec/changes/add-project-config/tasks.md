@@ -14,9 +14,9 @@
 
 ## 3. Architecture-doc path
 
-- [x] 3.1 In `ensureArchitectureDoc`, seed the placeholder ONLY when `cfg.Architecture` is unset (`!cfg.ArchitectureSet`); never write to a project-named path.
+- [x] 3.1 Never write an architecture doc into a repo. `Hub.StartupAdvice()` reports a repo whose doc is unreadable — a recommendation when the key is unset, and the config error when a named path is absent.
 - [x] 3.2 Build the reviewer's architecture line from `cfg.Architecture` (`reviewArchitecture(arch)`, threaded through `dirReview`/`msgReview`) instead of a literal.
-- [x] 3.3 Test: custom path flows into the reviewer prompt (`TestReviewInstructionsCarryArchitecture`); unset path still seeds+reads `ARCHITECTURE.md` (`TestEnsureArchitectureDoc`); configured-but-missing path errors in `config` validation tests.
+- [x] 3.3 Test: custom path flows into the reviewer prompt (`TestReviewInstructionsCarryArchitecture`); an unset path reads `ARCHITECTURE.md` and, when it's absent, is recommended rather than written (`TestHubNeverSeedsArchitectureDoc`, `TestStartupAdvice`); configured-but-missing path errors in `config` validation tests.
 
 ## 4. Containerfile path
 

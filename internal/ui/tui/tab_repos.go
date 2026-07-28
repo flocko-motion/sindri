@@ -13,6 +13,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/flo-at/sindri/internal/hub"
 )
 
 // repoRows lists the registered repos (switcher order: live-agents-first → recency →
@@ -91,8 +93,26 @@ func (m model) repoDetailLines() []string {
 	}
 	ls = append(ls, "", "agents: "+joinOrDash(agents))
 	ls = append(ls, "open prs: "+joinOrDash(prs))
+	ls = append(ls, archLines(m.state.RepoDocs[tag])...)
 	ls = append(ls, "", dimStyle.Render("enter switch · E config · D forget"))
 	return ls
+}
+
+// archLines renders the repo's architecture-doc situation. This tab IS the UI for
+// .sindri/config.yaml, so a repo that never told sindri where its architecture lives
+// should see the gap here — the hub no longer seeds a placeholder to make the point, and
+// a silent detail pane would hide a real quality loss (agents briefed without any
+// architecture). A repo in good shape gets one confirming line and no nagging.
+func archLines(st hub.RepoDocState) []string {
+	switch {
+	case st.Readable && st.Set:
+		return []string{"arch:   " + st.Doc}
+	case st.Readable:
+		return []string{"arch:   " + st.Doc + dimStyle.Render("  (default)")}
+	case st.Advice == "":
+		return nil // no snapshot for this repo (older hub) — say nothing rather than guess
+	}
+	return []string{"", stWarn.Render("⚠ no architecture doc"), dimStyle.Render("agents get no architecture brief — press E to set `architecture`")}
 }
 
 // joinOrDash renders a "-" for an empty list, else the entries one per line-ready

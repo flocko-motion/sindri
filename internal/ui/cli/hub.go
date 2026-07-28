@@ -174,6 +174,12 @@ func newHubStartCmd() *cobra.Command {
 			}
 			defer hub.RemovePID()
 			fmt.Fprintf(os.Stderr, "sindri hub listening at %s\n", h.SocketPath())
+			// Recommend, don't impose: the hub used to seed a placeholder ARCHITECTURE.md into
+			// every repo it served, which littered repos that never wanted one. Now it says so
+			// once, here, and leaves the choice (and the filename) to the user.
+			for _, line := range h.StartupAdvice() {
+				fmt.Fprintf(os.Stderr, "sindri: %s\n", line)
+			}
 			return h.Serve()
 		},
 	}

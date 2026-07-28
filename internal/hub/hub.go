@@ -20,7 +20,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/agentchan"
 	"github.com/flo-at/sindri/internal/hub/chat"
@@ -140,12 +139,6 @@ func (h *Hub) repo(root string) *store.ProjectStore {
 	tag := repoTag(root)
 	_ = h.store.RegisterProject(tag, root)
 	ensureGitignore(root) // keep .worktrees/ out of the repo's git status
-	// Seed the placeholder ARCHITECTURE.md only when the project hasn't configured its
-	// own `architecture` path (and only when the config is valid — a bad config
-	// surfaces at the operation that needs it; we never write to a path the project named).
-	if cfg, err := config.Load(root); err == nil && !cfg.ArchitectureSet {
-		ensureArchitectureDoc(root)
-	}
 	return h.store.For(tag)
 }
 

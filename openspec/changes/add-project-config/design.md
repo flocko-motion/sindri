@@ -46,7 +46,7 @@ func Load(root string) (Config, error)
     repo-relative — reject absolute paths and any `..` that escapes root
     (`filepath.Clean` + prefix check against `root`).
   - a **set** path key whose target file is absent → error. The default
-    `architecture` (key unset) is exempt — a missing default is seeded, not an
+    `architecture` (key unset) is exempt — a missing default is recommended, not an
     error (see below).
 
 ## Load point and failure scoping
@@ -66,8 +66,9 @@ operation that resolves the project.
 
 ## Wiring each key
 
-- **`architecture`** — `ensureArchitectureDoc(root)` (`hub.go:180`) seeds the
-  placeholder **only when the key is unset** (default `ARCHITECTURE.md`). The
+- **`architecture`** — the hub creates no doc. When the key is unset it looks for
+  `ARCHITECTURE.md` and, finding none, surfaces a recommendation via
+  `Hub.StartupAdvice()` (hub startup, and the Repos tab detail). The
   reviewer injection `reviewArchitecture` (`prompts.go:23`), currently the literal
   `" Read /workspace/ARCHITECTURE.md now …"`, is built from the configured path:
   `" Read /workspace/<architecture> now …"`. `/workspace` is the mounted repo

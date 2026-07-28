@@ -48,11 +48,11 @@ to set these, and gives the GitHub-source toggle a real home.
   keeps its current default (reviewer reads `ARCHITECTURE.md`, filename discovery
   finds the Containerfile, the GitHub source stays off) — fully backward
   compatible.
-- **Architecture-doc seeding narrows.** The placeholder `ARCHITECTURE.md` is still
-  auto-seeded only in the default case (no `architecture` key set). When
-  `architecture` names a path, that file MUST exist — a missing configured doc is
-  invalid config and fails loudly; the hub never writes to a path the project
-  named.
+- **The hub never creates an architecture doc.** It reads one, at the default
+  `ARCHITECTURE.md` or the configured path, and recommends one when there is none —
+  seeding a placeholder littered repos that never wanted the file. When
+  `architecture` names a path, that file MUST exist: a missing configured doc is
+  invalid config and fails loudly.
 
 ## Capabilities
 
@@ -73,9 +73,9 @@ to set these, and gives the GitHub-source toggle a real home.
   validation, repo/global/default precedence. New YAML dependency (e.g.
   `gopkg.in/yaml.v3`).
 - **`internal/hub/prompts.go` / `internal/hub/hub.go`**: the reviewer's
-  architecture line (`prompts.go:23`) and the seed target (`hub.go:186`) become
-  the configured path instead of the literal `ARCHITECTURE.md`; seeding runs only
-  when the key is unset.
+  architecture line (`prompts.go:23`) becomes the configured path instead of the
+  literal `ARCHITECTURE.md`. The hub writes no doc; a repo without one gets a
+  recommendation.
 - **`internal/hub/claude.go` / reviewer prompt assembly**: when `review_prompt` is
   set, its contents replace the default reviewer prompt.
 - **`internal/container/image.go`**: `customDockerfile` gains the configured

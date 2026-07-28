@@ -69,11 +69,14 @@ a file that does not exist.
 The path to the architecture document the reviewer is told to read SHALL be
 configurable via the `architecture` key, as a repo-relative path (e.g.
 `openspec/architecture.md`). When the key is unset the default SHALL be
-`ARCHITECTURE.md` at the repo root, and the hub SHALL continue to seed a
-placeholder there when it is missing. When the key is set the reviewer prompt
-SHALL point at the configured path, the file MUST exist (a missing configured doc
-is invalid config), and the hub SHALL NOT write a placeholder to the
-project-named path.
+`ARCHITECTURE.md` at the repo root. When the key is set the reviewer prompt SHALL
+point at the configured path and the file MUST exist (a missing configured doc is
+invalid config).
+
+The hub SHALL NOT create an architecture document in any repo, at either the
+default or a configured path — the doc is the project's to write. A repo with no
+readable doc SHALL be reported as a recommendation (never an error), and agents
+SHALL work without an architecture brief in that case.
 
 #### Scenario: Custom architecture path
 
@@ -81,16 +84,19 @@ project-named path.
 - **WHEN** a reviewer is assigned a PR
 - **THEN** the reviewer prompt tells it to read `/workspace/openspec/architecture.md`
 
-#### Scenario: Default path seeded when unset
+#### Scenario: Missing default doc is recommended, never written
 
 - **WHEN** no `architecture` key is set and the repo has no `ARCHITECTURE.md`
-- **THEN** the hub seeds the placeholder `ARCHITECTURE.md` at the repo root, as today
+- **THEN** the hub writes no file into the repo
+- **AND** it recommends, at hub startup and in the Repos tab detail, that the user
+  point `architecture` at the repo's own doc
+- **AND** agents for that repo are briefed without an architecture section
 
 #### Scenario: Configured path missing is invalid
 
 - **GIVEN** `architecture: docs/arch.md` and that file does not exist
 - **WHEN** the project is resolved
-- **THEN** it is rejected as invalid config (the hub does not seed `docs/arch.md`)
+- **THEN** it is rejected as invalid config (the hub does not create `docs/arch.md`)
 
 ### Requirement: Configurable image recipe path
 

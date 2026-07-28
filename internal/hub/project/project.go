@@ -1,11 +1,14 @@
 // package: hub/project / project
 // type:    logic (repo-registry management)
 // job:     the management surface over the project registry the hub keeps — list/
-//          inspect registered repos, additive Init (register + scaffold config),
-//          Forget (drop the row, agent-guarded, files untouched), config writes,
-//          orphan removal, display colour. Backs the `repo` CLI/TUI commands.
+//
+//	inspect registered repos, additive Init (register + scaffold config),
+//	Forget (drop the row, agent-guarded, files untouched), config writes,
+//	orphan removal, display colour. Backs the `repo` CLI/TUI commands.
+//
 // limits:  registry + per-repo config only; never deletes a repo's files. Agent
-//          teardown, path seeding, and tag derivation come from the hub via Deps.
+//
+//	teardown, .gitignore upkeep, and tag derivation come from the hub via Deps.
 package project
 
 import (
@@ -19,12 +22,11 @@ import (
 )
 
 // Deps is what registry management needs back from the hub: agent teardown (Forget
-// frees a repo's agents), the filesystem seeders, the repo's display name and stable
+// frees a repo's agents), .gitignore upkeep, the repo's display name and stable
 // tag, and the board notify.
 type Deps interface {
 	DeleteAgent(project, name string) error
 	EnsureGitignore(root string)
-	EnsureArchitectureDoc(root string)
 	RepoName(project string) string
 	RepoTag(root string) string
 	Notify()
@@ -152,10 +154,11 @@ func (s *Service) Info(project string) (Detail, error) {
 	return d, nil
 }
 
-// Init is the additive setup for a repo: register it eagerly, scaffold a committed
-// .sindri/config.yaml when absent (never overwriting one), and seed ARCHITECTURE.md
-// when the project hasn't configured its own. Idempotent and never a precondition — a
-// repo that is never init'd still self-registers on first use.
+// Init is the additive setup for a repo: register it eagerly and scaffold a committed
+// .sindri/config.yaml when absent (never overwriting one). Idempotent and never a
+// precondition — a repo that is never init'd still self-registers on first use. It
+// writes nothing else into the repo: an architecture doc is the project's to create,
+// and the hub only recommends one (Hub.ArchitectureAdvice).
 func (s *Service) Init(root string) (Summary, error) {
 	tag := s.deps.RepoTag(root)
 	if err := s.store.RegisterProject(tag, root); err != nil {
@@ -172,9 +175,6 @@ func (s *Service) Init(root string) (Summary, error) {
 		}
 	} else if err != nil {
 		return Summary{}, fmt.Errorf("stat %s: %w", cfgPath, err)
-	}
-	if cfg, err := config.Load(root); err == nil && !cfg.ArchitectureSet {
-		s.deps.EnsureArchitectureDoc(root)
 	}
 	return s.summary(store.Project{Tag: tag, Path: root}), nil
 }

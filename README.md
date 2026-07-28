@@ -402,8 +402,10 @@ github:
 ```
 
 - **`architecture`** — repo-relative path to the doc the reviewer is told to read
-  before every verdict. When set it must exist; when unset, sindri seeds a placeholder
-  `ARCHITECTURE.md`.
+  before every verdict, and which is injected into every agent's brief. When set it must
+  exist. When unset sindri looks for `ARCHITECTURE.md`; if there's none it recommends —
+  at hub startup, and in the Repos tab detail — that you point it at yours. It never
+  creates the file.
 - **`containerfile`** — repo-relative agent-image recipe (see the next section).
 - **`review_prompt`** — repo-relative file whose contents replace the default reviewer
   prompt.

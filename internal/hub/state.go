@@ -54,12 +54,13 @@ type AgentView struct {
 // (td is per-repo, so a merged backlog would mislead); Projects is every repo the
 // hub knows, for the TUI's repo switcher and repo labels.
 type BoardState struct {
-	Agents   []AgentView     `json:"agents"`
-	Tasks    []store.Task    `json:"tasks"`
-	PRs      []store.PR      `json:"prs"`
-	Projects []store.Project `json:"projects"`
-	Orphans  []string        `json:"orphans"` // pods with no roster entry (D14)
-	Chat     ChatView        `json:"chat"`    // the user's chatroom: members + transcript
+	Agents   []AgentView             `json:"agents"`
+	Tasks    []store.Task            `json:"tasks"`
+	PRs      []store.PR              `json:"prs"`
+	Projects []store.Project         `json:"projects"`
+	Orphans  []string                `json:"orphans"`   // pods with no roster entry (D14)
+	Chat     ChatView                `json:"chat"`      // the user's chatroom: members + transcript
+	RepoDocs map[string]RepoDocState `json:"repo_docs"` // per repo tag: its architecture doc + any gap
 }
 
 // State assembles the board: agents and PRs across all projects, tasks for the
@@ -174,7 +175,14 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	if err != nil {
 		return BoardState{}, err
 	}
-	return BoardState{Agents: agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans, Chat: chat}, nil
+	// Carried in the snapshot rather than read at render time: the Repos tab detail is
+	// pure rendering over the board, and this is also what makes the TUI's recommendation
+	// identical to the one hub startup prints (both come from repoDocState).
+	docs := make(map[string]RepoDocState, len(projects))
+	for _, p := range projects {
+		docs[p.Tag] = h.repoDocState(p.Path)
+	}
+	return BoardState{Agents: agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans, Chat: chat, RepoDocs: docs}, nil
 }
 
 // AgentStatsView is one agent's resource snapshot for `agent stats`. Err is set
@@ -242,7 +250,6 @@ func (h *Hub) AllStats() ([]AgentStatsView, error) {
 	}
 	return out, nil
 }
-
 
 // projectPath resolves a project tag to its path, logging loudly on a real store
 // error (distinct from an unknown project) instead of swallowing it into "". The
