@@ -1,9 +1,11 @@
 // package: ui/cli / chat
 // type:    command (host CLI)
 // job:     the user's control over the one meeting room: `meeting add`/`meeting remove`
-//          to curate who's in the room, `meeting join` to enter it interactively (read
-//          the live feed, type to broadcast as [user]), and bare `meeting` for a
-//          one-shot snapshot of members + transcript.
+//
+//	to curate who's in the room, `meeting join` to enter it interactively (read
+//	the live feed, type to broadcast as [user]), `meeting log` for the transcript,
+//	and bare `meeting` for who's in the room plus what you can do.
+//
 // limits:  thin calls into the backend; the relay + persistence live in the hub.
 package cli
 
@@ -17,6 +19,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/ui/theme"
 	"github.com/spf13/cobra"
 )
 
@@ -30,19 +33,50 @@ func NewChatCmd() *cobra.Command {
 			"Add agents to pull them in, then `meeting join` to lead the discussion; agents " +
 			"talk with `sindri meeting <message>` from inside their pods.",
 		Args: cobra.NoArgs,
-		// Bare `sindri chat`: a one-shot snapshot (members + recent transcript).
+		// Bare `sindri meeting`: who's in the room, then what you can do. It used to dump
+		// the whole transcript (up to 200 messages), which buried the one thing a bare
+		// command should answer — what are my options. The transcript moved to `meeting log`,
+		// where asking for it is deliberate.
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_ = withBackend(func(b backend) error {
+				v, err := b.Chat()
+				if err != nil {
+					return err
+				}
+				fmt.Print(renderMembers(v))
+				if n := len(v.Log); n > 0 {
+					fmt.Printf("%d recent message(s) — `sindri meeting log` to read them.\n", n)
+				}
+				return nil
+			}) // a hub that isn't up shouldn't stop the help below from printing
+			fmt.Println()
+			return cmd.Help()
+		},
+	}
+	c.AddCommand(chatAddCmd(), chatRemoveCmd(), chatJoinCmd(), chatLogCmd())
+	return c
+}
+
+// chatLogCmd prints the room transcript — what bare `meeting` used to do unasked.
+func chatLogCmd() *cobra.Command {
+	var n int
+	c := &cobra.Command{
+		Use: "log", Short: "Print the meeting transcript (members + recent messages)", Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return withBackend(func(b backend) error {
 				v, err := b.Chat()
 				if err != nil {
 					return err
 				}
+				if n > 0 && len(v.Log) > n { // keep the newest n
+					v.Log = v.Log[len(v.Log)-n:]
+				}
 				fmt.Print(renderChat(v))
 				return nil
 			})
 		},
 	}
-	c.AddCommand(chatAddCmd(), chatRemoveCmd(), chatJoinCmd())
+	c.Flags().IntVarP(&n, "tail", "n", 0, "print only the newest N messages (0 = the hub's whole window)")
 	return c
 }
 
@@ -100,8 +134,16 @@ func chatJoin(cmd *cobra.Command, b backend) error {
 	if v, err := b.Chat(); err == nil {
 		fmt.Print(renderMembers(v))
 	}
-	fmt.Fprintln(cmd.OutOrStdout(), "Joined the meeting room. Type a message + Enter to send to everyone; /help for commands (/add, /remove, /who); Ctrl-D or /quit to leave.")
-	fmt.Fprintln(cmd.OutOrStdout(), "--- transcript ---")
+	// Spell the interface out on entry. The one-liner this replaces mentioned /help and
+	// left it at that, so the commands that actually matter — pulling agents INTO the room
+	// — were a guess away. Same text the /help reply and the TUI use (hub.ChatHelpText).
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "Joined as %s %s — you lead the discussion; everything you type reaches every member.\n",
+		theme.UserIcon, theme.NameStyle(theme.SenderUser).Render(theme.SenderUser))
+	fmt.Fprintf(out, "  %s\n", theme.HelpLine())
+	fmt.Fprintf(out, "  %s\n", theme.Dim().Render(
+		"Ctrl-D or /quit to leave. Agents ("+theme.AgentIcon+") talk with `sindri meeting <message>` from their pods."))
+	fmt.Fprintln(out, theme.Dim().Render("--- transcript ---"))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -129,11 +171,12 @@ func chatJoin(cmd *cobra.Command, b backend) error {
 	// solely by this goroutine, so no locking.
 	go func() {
 		var lastSeen int64
+		prev := "" // carried across stream pushes so grouping survives a reconnect
 		for v := range ch {
 			for _, m := range v.Log {
 				if m.ID > lastSeen {
-					fmt.Println(chatMsgLine(m))
-					lastSeen = m.ID
+					fmt.Println(chatMsgLine(m, prev))
+					lastSeen, prev = m.ID, m.Sender
 				}
 			}
 		}
@@ -163,34 +206,82 @@ func renderChat(v hub.ChatView) string {
 		sb.WriteString("(no messages yet)\n")
 		return sb.String()
 	}
-	sb.WriteString("--- transcript ---\n")
+	sb.WriteString(theme.Dim().Render("--- transcript ---") + "\n")
+	prev := ""
 	for _, m := range v.Log {
-		sb.WriteString(chatMsgLine(m) + "\n")
+		sb.WriteString(chatMsgLine(m, prev) + "\n")
+		prev = m.Sender
 	}
 	return sb.String()
 }
 
-// chatMsgLine formats a transcript message as "HH:MM sender: body" (local time;
-// the timestamp is dropped if unparseable). The terminal soft-wraps long lines.
-func chatMsgLine(m store.ChatMessage) string {
-	if t, err := time.Parse(time.RFC3339, m.TS); err == nil {
-		return fmt.Sprintf("%s %s: %s", t.Local().Format("15:04"), m.Sender, m.Body)
+// chatMsgLine formats one transcript message as a speaker header (time · icon · name,
+// the name in its own deterministic colour) followed by the indented body. Every line
+// of a multi-line message keeps that indent, so where one person stops and the next
+// starts is obvious at a glance — the flat "HH:MM sender: body" it replaces ran
+// everyone's words together into an unreadable wall.
+//
+// prev is the previous message's sender ("" for the first): a change of speaker gets a
+// blank line before the header, and a run from the same speaker prints body only. That
+// grouping is what makes a long transcript skimmable.
+func chatMsgLine(m store.ChatMessage, prev string) string {
+	body := indentBody(m.Sender, m.Body)
+	if m.Sender == prev {
+		return body
 	}
-	return fmt.Sprintf("%s: %s", m.Sender, m.Body)
+	head := theme.Icon(m.Sender) + " " + theme.NameStyle(m.Sender).Render(m.Sender)
+	if hm := chatTS(m.TS); hm != "" {
+		head = theme.Dim().Render(hm) + " " + head
+	}
+	lead := ""
+	if prev != "" { // a blank line between speakers, but not above the first
+		lead = "\n"
+	}
+	return lead + head + "\n" + body
 }
 
-// renderMembers formats just the member line (name + role), or a note when empty.
-func renderMembers(v hub.ChatView) string {
-	if len(v.Members) == 0 {
-		return "Meeting room is empty — add agents with `sindri meeting add <agent>`.\n"
-	}
-	names := make([]string, len(v.Members))
-	for i, m := range v.Members {
-		if m.Role != "" {
-			names[i] = fmt.Sprintf("%s (%s)", m.Name, m.Role)
-		} else {
-			names[i] = m.Name
+// indentBody indents every line of a message body under its header and paints it in the
+// speaker's colour. Styled per line rather than as one block, so each line carries its own
+// escape codes and survives the terminal's own soft-wrapping intact.
+func indentBody(sender, body string) string {
+	style := theme.BodyStyle(sender)
+	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+	for i, l := range lines {
+		if l == "" {
+			continue // a blank line needs no colour, and no escape codes around nothing
 		}
+		lines[i] = "  " + style.Render(l)
 	}
-	return fmt.Sprintf("Meeting room — %d member(s): %s\n", len(v.Members), strings.Join(names, ", "))
+	return strings.Join(lines, "\n")
+}
+
+// chatTS renders a stored RFC3339 timestamp as local HH:MM ("" if unparseable).
+func chatTS(ts string) string {
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return ""
+	}
+	return t.Local().Format("15:04")
+}
+
+// renderMembers lists who is in the room, the user first. The stored roster holds only
+// AGENTS — the user is a permanent participant (and a required one: presence unlocks the
+// room), never a row in it. So an empty roster meant "no agents yet", and calling that
+// "the meeting room is empty" told the user they weren't somewhere they were standing.
+// Listing them explicitly also shows which name and colour agents will see them under.
+func renderMembers(v hub.ChatView) string {
+	parts := []string{theme.Icon(theme.SenderUser) + " " +
+		theme.NameStyle(theme.SenderUser).Render(theme.SenderUser) + theme.Dim().Render(" (you)")}
+	for _, m := range v.Members {
+		entry := theme.Icon(m.Name) + " " + theme.NameStyle(m.Name).Render(m.Name)
+		if m.Role != "" {
+			entry += theme.Dim().Render(" ("+m.Role+")")
+		}
+		parts = append(parts, entry)
+	}
+	line := "Meeting room — " + strings.Join(parts, " · ")
+	if len(v.Members) == 0 {
+		line += theme.Dim().Render(" — no agents yet; add one with `sindri meeting add <agent>`")
+	}
+	return line + "\n"
 }

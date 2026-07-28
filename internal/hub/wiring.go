@@ -18,6 +18,7 @@ import (
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/agentchan"
+	"github.com/flo-at/sindri/internal/hub/chat"
 	"github.com/flo-at/sindri/internal/hub/commands"
 	"github.com/flo-at/sindri/internal/hub/project"
 	"github.com/flo-at/sindri/internal/hub/server"
@@ -118,6 +119,19 @@ var (
 	ArrangeTasks  = task.ArrangeTasks
 	FormatClients = agent.FormatClients
 	Sections      = commands.Sections
+	ChatIcon      = chat.Icon
+)
+
+// The chat room's participant markers and the one description of its in-room interface.
+// Re-exported so every front-end takes them from the hub facade — the markers travel in
+// the lines agents read, and the help text has to read identically in `meeting join`, the
+// `/help` reply, and the TUI, or the room grows three different accounts of itself.
+const (
+	ChatHelpText   = chat.HelpText
+	ChatUserIcon   = chat.UserIcon
+	ChatAgentIcon  = chat.AgentIcon
+	ChatSystemIcon = chat.SystemIcon
+	ChatSenderUser = chat.SenderUser
 )
 
 // The control-socket addressing + pid-file plumbing lives in hub/server; re-exported

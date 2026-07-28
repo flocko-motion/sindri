@@ -1,11 +1,14 @@
 // package: hub/chat / service
 // type:    logic (the chatroom relay — star topology)
 // job:     the user's one chatroom: membership, the message relay (record + forward
-//          to every participant), the in-chat slash commands, and the required-
-//          participant presence lock. Agent delivery + board notify go through a
-//          Delivery port, so this package doesn't depend on the hub.
+//
+//	to every participant), the in-chat slash commands, and the required-
+//	participant presence lock. Agent delivery + board notify go through a
+//	Delivery port, so this package doesn't depend on the hub.
+//
 // limits:  persistence is store/chat.go; HTTP/CLI/TUI wiring lives in the hub and
-//          cmd/*; no tmux/container/http here.
+//
+//	cmd/*; no tmux/container/http here.
 package chat
 
 import (
@@ -27,8 +30,8 @@ import (
 // the events bus.
 type Delivery interface {
 	Inject(project, name, text string) error // type a line into an agent's session
-	Running(project, name string) bool        // is the agent's pod up?
-	Notify()                                   // wake the board / live views
+	Running(project, name string) bool       // is the agent's pod up?
+	Notify()                                 // wake the board / live views
 }
 
 const (
@@ -39,8 +42,14 @@ const (
 	presenceTTL     = 20 * time.Second // room stays unlocked this long after the last heartbeat
 	maxLen          = 4000             // per-message cap (deep talk, but not a novel / huge inject)
 
-	helpText = "commands: /add <agent> (alias /invite) · /remove <agent> (alias /kick) · /who (list members) · /help. Anything not starting with / is sent to everyone in the room."
 )
+
+// HelpText is the one description of the in-room interface, shared by every surface that
+// offers it: the `/help` reply, the banner `meeting join` prints on entry, and the TUI's
+// chat tab. Exported precisely so those can't drift into three different accounts of the
+// same commands — a user who learns the room in one place knows it in all of them.
+const HelpText = "/add <agent> (alias /invite) · /remove <agent> (alias /kick) · /who (list members) · /help. " +
+	"Anything not starting with / is sent to everyone in the room."
 
 // Message notices pushed on membership changes / relaunch. Exported so the hub can
 // re-announce membership when an agent relaunches (MsgReminder).
@@ -49,6 +58,30 @@ const (
 	MsgReminder = "[hub] You're in the meeting room: `sindri meeting <message>` talks to everyone in the room, and their messages arrive here prefixed [meeting]."
 	MsgRemoved  = "[hub] You've been removed from the meeting room — `sindri meeting` is no longer available. Carry on with your work."
 )
+
+// Participant markers. These live in the core, not in a UI package, because they are
+// part of the message an agent READS — the relay stamps them into the line it types into
+// an agent's session, so the marker is protocol, not decoration. Deliberately plain
+// UTF-8: an ANSI colour would land in an LLM's input as noise, a glyph survives intact.
+// The front-ends add colour on top (-> ui/theme, which defers to these).
+const (
+	SenderUser   = user   // the human — the one participant an agent must never mistake for a peer
+	SenderSystem = system // the hub speaking for itself
+	UserIcon     = "👤"
+	AgentIcon    = "🤖"
+	SystemIcon   = "⚙"
+)
+
+// Icon marks who is speaking: the human, the hub itself, or an agent.
+func Icon(sender string) string {
+	switch sender {
+	case SenderUser:
+		return UserIcon
+	case SenderSystem:
+		return SystemIcon
+	}
+	return AgentIcon
+}
 
 // errTooLong is returned when a message exceeds maxLen — actionable feedback for
 // whoever sent it, so callers surface it to the sender.
@@ -194,7 +227,7 @@ func (s *Service) command(line string) error {
 	case "who", "names", "members":
 		return s.systemReply(s.whoLine())
 	case "help", "?":
-		return s.systemReply(helpText)
+		return s.systemReply("commands: " + HelpText)
 	case "quit", "q", "leave", "part", "exit":
 		return s.systemReply("to leave: press Ctrl-D or type /quit in `sindri meeting join`; in the TUI, just switch tabs.")
 	default:
@@ -299,7 +332,11 @@ func (s *Service) broadcast(senderProject, senderName, body string) (store.ChatM
 	if err != nil {
 		return store.ChatMessage{}, err
 	}
-	line := fmt.Sprintf("[meeting] %s: %s", senderName, body)
+	// The icon, not colour, marks who spoke: this line is TYPED INTO an agent's session,
+	// so ANSI escapes would land in an LLM's input as noise, while a glyph survives the
+	// trip intact. It matters most for the human — an agent must never mistake the user
+	// for a peer, and "👤 user" says so in every message rather than only in the brief.
+	line := fmt.Sprintf("[meeting] %s %s: %s", Icon(senderName), senderName, body)
 	for _, m := range members {
 		if m.Project == senderProject && m.Name == senderName {
 			continue // the sender already has its own words

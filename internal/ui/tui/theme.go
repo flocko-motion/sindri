@@ -9,13 +9,10 @@
 package tui
 
 import (
-	"fmt"
-	"hash/fnv"
-	"math"
-
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
 // The palette. 256-colour codes so it works on basic terminals.
@@ -99,12 +96,9 @@ const nRepoColors = 24
 func paletteHue(choice int) float64 { return float64(((choice - 1) * 360 / nRepoColors) % 360) }
 
 // projectHue maps a repoTag to a stable hue in [0,360) — the default when no colour
-// is pinned.
-func projectHue(tag string) float64 {
-	h := fnv.New32a()
-	h.Write([]byte(tag))
-	return float64(h.Sum32() % 360)
-}
+// is pinned. The derivation lives in ui/theme so a name gets the same hue here, in the
+// CLI, and for chat participants.
+func projectHue(tag string) float64 { return theme.Hue(tag) }
 
 // hueFor is a repo's hue: a pinned palette choice (1..nRepoColors) if set, else the
 // hash-derived default.
@@ -134,27 +128,7 @@ func repoStyleFor(tag string, choice int) lipgloss.Style {
 }
 
 // hslHex converts an HSL colour (h in [0,360), s,l in [0,1]) to a "#rrggbb" string.
-func hslHex(h, s, l float64) string {
-	c := (1 - math.Abs(2*l-1)) * s
-	x := c * (1 - math.Abs(math.Mod(h/60, 2)-1))
-	m := l - c/2
-	var r, g, b float64
-	switch {
-	case h < 60:
-		r, g, b = c, x, 0
-	case h < 120:
-		r, g, b = x, c, 0
-	case h < 180:
-		r, g, b = 0, c, x
-	case h < 240:
-		r, g, b = 0, x, c
-	case h < 300:
-		r, g, b = x, 0, c
-	default:
-		r, g, b = c, 0, x
-	}
-	return fmt.Sprintf("#%02x%02x%02x", int((r+m)*255), int((g+m)*255), int((b+m)*255))
-}
+func hslHex(h, s, l float64) string { return theme.HSLHex(h, s, l) }
 
 // isCriticalPriority reports whether a priority code is the top (critical) band.
 func isCriticalPriority(code string) bool { return hub.PriorityLabel(code) == "critical" }

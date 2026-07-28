@@ -8,13 +8,13 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
 // startComposing opens the multiline composer in the Chat tab's main pane and
@@ -89,8 +89,10 @@ func (m model) chatBody() string {
 	if len(v.Log) == 0 {
 		msgs = []string{dimStyle.Render("(no messages yet — press enter to say something)")}
 	} else {
+		prev := ""
 		for _, msg := range v.Log {
-			msgs = append(msgs, chatLines(msg)...)
+			msgs = append(msgs, chatLines(msg, prev)...)
+			prev = msg.Sender
 		}
 		// Word-wrap to the pane width so long messages are readable in full instead
 		// of running off the edge (the whole point of a chat you can follow).
@@ -116,36 +118,57 @@ func (m model) chatBody() string {
 // chatMembersLine summarizes who's in the room (name + role), or nudges the user
 // to add someone when it's empty.
 func chatMembersLine(v hub.ChatView) string {
-	if len(v.Members) == 0 {
-		return dimStyle.Render("Meeting room is empty — press enter and type /add <agent> to invite someone (/help for commands)")
-	}
-	names := make([]string, len(v.Members))
-	for i, mem := range v.Members {
+	// The user first: the stored roster holds only AGENTS, so an empty one means "no agents
+	// yet", not an empty room — the user is always a participant. Same reasoning (and the
+	// same shape) as the CLI's renderMembers.
+	parts := []string{theme.Icon(theme.SenderUser) + " " +
+		theme.NameStyle(theme.SenderUser).Render(theme.SenderUser) + dimStyle.Render(" (you)")}
+	for _, mem := range v.Members {
+		entry := theme.Icon(mem.Name) + " " + theme.NameStyle(mem.Name).Render(mem.Name)
 		if mem.Role != "" {
-			names[i] = fmt.Sprintf("%s (%s)", mem.Name, mem.Role)
-		} else {
-			names[i] = mem.Name
+			entry += dimStyle.Render(" (" + mem.Role + ")")
 		}
+		parts = append(parts, entry)
 	}
-	return fmt.Sprintf("Members (%d): %s", len(v.Members), strings.Join(names, ", "))
+	line := strings.Join(parts, " · ")
+	if len(v.Members) == 0 {
+		// The same interface description the CLI's join banner and /help print, so the room
+		// reads identically wherever you meet it (-> hub.ChatHelpText).
+		line += dimStyle.Render(" — no agents yet; press enter, then " + theme.HelpText)
+	}
+	return line
 }
 
-// chatLines formats one transcript message as "HH:MM sender: body", split on the
-// body's own newlines so a multi-line message keeps its structure (the caller then
-// word-wraps each line to the pane width). The timestamp shows WHEN it was said.
-func chatLines(msg store.ChatMessage) []string {
-	head := msg.Sender + ": "
-	if hm := chatTime(msg.TS); hm != "" {
-		head = hm + " " + head
-	}
-	body := strings.Split(msg.Body, "\n")
-	out := make([]string, 0, len(body))
-	for i, seg := range body {
-		if i == 0 {
-			out = append(out, head+seg)
-		} else {
-			out = append(out, strings.Repeat(" ", len(head))+seg) // indent continuation under the text
+// chatLines formats one transcript message as a speaker header (time · icon · name, the
+// name in its own deterministic colour from ui/theme — the same colour the CLI gives it)
+// followed by the indented body, split on the body's own newlines so a multi-line message
+// keeps its structure (the caller then word-wraps each line to the pane width).
+//
+// prev is the previous message's sender ("" for the first): a change of speaker gets a
+// blank line above the header, and a run from one speaker repeats neither icon nor name.
+// Grouping is what makes a long transcript skimmable instead of a wall of "name: text".
+func chatLines(msg store.ChatMessage, prev string) []string {
+	body := strings.Split(strings.TrimRight(msg.Body, "\n"), "\n")
+	out := make([]string, 0, len(body)+2)
+	if msg.Sender != prev {
+		if prev != "" {
+			out = append(out, "")
 		}
+		head := theme.Icon(msg.Sender) + " " + theme.NameStyle(msg.Sender).Render(msg.Sender)
+		if hm := chatTime(msg.TS); hm != "" {
+			head = dimStyle.Render(hm) + " " + head
+		}
+		out = append(out, head)
+	}
+	// The words carry the speaker's colour too, not just the name — attribution has to
+	// survive a multi-line message and the pane's word-wrap (ansi.Wrap preserves styles).
+	style := theme.BodyStyle(msg.Sender)
+	for _, seg := range body {
+		if seg == "" {
+			out = append(out, "") // a blank line needs no colour
+			continue
+		}
+		out = append(out, "  "+style.Render(seg))
 	}
 	return out
 }
