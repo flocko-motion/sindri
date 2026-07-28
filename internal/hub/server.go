@@ -490,7 +490,11 @@ func (h *Hub) Serve() error {
 	// Seed each known project's task cache so its board is populated from the start.
 	// A per-project failure (typically no td store at that repo) is not fatal — the
 	// hub still serves agents/PRs — but it must be loud, not silent.
-	for _, p := range h.projects.Known() {
+	known, kerr := h.projects.Known()
+	if kerr != nil {
+		fmt.Fprintf(os.Stderr, "hub: WARNING — could not read the repo registry: %v\n", kerr)
+	}
+	for _, p := range known {
 		if err := h.wf.SyncTasks(p.Tag); err != nil {
 			fmt.Fprintf(os.Stderr, "hub: WARNING — could not load tasks for %s: %v\n", p.Path, err)
 		}

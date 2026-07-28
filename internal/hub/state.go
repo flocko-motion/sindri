@@ -78,8 +78,15 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	// in the db (keyed by its stable tag, so re-adding the repo reactivates them) but
 	// drop out of the fleet PR tab — forgetting a repo means giving up its management,
 	// not surfacing its records. (Its agents are already deleted, so AllAgents is clean.)
+	// Read the registry ONCE per board read. It used to be queried twice (here and again
+	// for the orphan scan), doubling the load on a store the hub serialises through a
+	// single connection — and giving one snapshot two chances to disagree with itself.
+	projects, err := h.projects.Known()
+	if err != nil {
+		return BoardState{}, err // never render "no repos" from an unreadable registry
+	}
 	registered := map[string]bool{}
-	for _, p := range h.projects.Known() {
+	for _, p := range projects {
 		registered[p.Tag] = true
 	}
 	kept := prs[:0]
@@ -96,11 +103,21 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		}
 	}
 
-	// Liveness needs a podman round-trip per agent (inspect + a tmux exec); probe
-	// every agent concurrently and time-bounded, so one wedged pod slows the read
-	// by at most probeTimeout instead of serialising all of them. The same
-	// list-clients probe that confirms the session is up also yields the dial-in
-	// count, so the board shows who's attached at no extra cost.
+	// Liveness needs a podman round-trip per agent; probe every agent concurrently and
+	// time-bounded, so one wedged pod slows the read by at most probeTimeout instead of
+	// serialising all of them.
+	//
+	// Liveness is "the pod is up AND its tmux session exists" — the pod is only a sleep that
+	// outlives Claude, so a running container alone proves nothing (see tmux.HasSession). The
+	// list-clients probe answers both: its exit code proves the session, its output is the
+	// dial-in count.
+	//
+	// Each probe gets its OWN budget. They used to share a single probeTimeout across the
+	// inspect, the list-clients exec and the capture-pane exec, so a slow inspect could leave
+	// the rest none — and a working agent then reported "down" because a probe ran out of
+	// time, not because anything about it had changed. That is what made the status flip
+	// between refreshes. Each podman call is a process spawn (~50ms for inspect, ~200ms for an
+	// exec), so on a machine busy enough to run several agents the shared budget was reachable.
 	var wg sync.WaitGroup
 	running := make([]bool, len(agentsRow))
 	clients := make([]int, len(agentsRow))
@@ -109,16 +126,26 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		wg.Add(1)
 		go func(i int, a store.Agent) {
 			defer wg.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
-			defer cancel()
-			if !container.RunningContext(ctx, h.container(a.Project, a.Name)) {
+			probe := func(fn func(context.Context)) {
+				ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+				defer cancel()
+				fn(ctx)
+			}
+			up := false
+			probe(func(ctx context.Context) { up = container.RunningContext(ctx, h.container(a.Project, a.Name)) })
+			if !up {
 				return
 			}
-			if cs, ok := h.agents.ClientsCtx(ctx, a.Project, a.Name); ok {
-				running[i] = true
-				clients[i] = len(cs)
-				runtimes[i] = h.agents.RuntimeState(ctx, a.Project, a.Name) // what Claude is doing now
+			probe(func(ctx context.Context) {
+				if cs, ok := h.agents.ClientsCtx(ctx, a.Project, a.Name); ok {
+					running[i], clients[i] = true, len(cs)
+				}
+			})
+			if !running[i] {
+				return
 			}
+			// Detail only: the agent stays up even if this one times out.
+			probe(func(ctx context.Context) { runtimes[i] = h.agents.RuntimeState(ctx, a.Project, a.Name) })
 		}(i, a)
 	}
 	wg.Wait()
@@ -148,7 +175,6 @@ func (h *Hub) State(selected string) (BoardState, error) {
 
 	// Orphans: sindri pods with no roster entry, across every known project. One
 	// podman ps per project, run concurrently and bounded like the liveness probes.
-	projects := h.projects.Known()
 	orphanLists := make([][]string, len(projects))
 	for i, proj := range projects {
 		wg.Add(1)

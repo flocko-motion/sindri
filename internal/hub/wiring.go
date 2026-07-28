@@ -185,6 +185,12 @@ func (d workflowDeps) TaskComments(project, id string) []store.Comment {
 
 func (d workflowDeps) Subscribe() (chan struct{}, func()) { return d.h.events.subscribe() }
 
-func (d workflowDeps) KnownProjects() []store.Project { return d.h.projects.Known() }
+// KnownProjects is the workflow's fleet-wide scan list. Best-effort by design — a scan
+// that skips a round is self-correcting on the next tick, unlike the board, where an empty
+// registry is rendered as fact (-> State).
+func (d workflowDeps) KnownProjects() []store.Project {
+	ps, _ := d.h.projects.Known()
+	return ps
+}
 
 func (d workflowDeps) BrokkrBin() (string, error) { return agent.BrokkrBinary() }

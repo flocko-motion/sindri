@@ -84,12 +84,16 @@ func taskOpen(status string) bool {
 	return true
 }
 
-// Known returns the raw registry rows (best-effort; empty on a store error) — the
-// board's repo list and the workflow's fleet-wide PR scan iterate these.
-func (s *Service) Known() []store.Project {
-	ps, _ := s.store.Projects()
-	return ps
-}
+// Known returns the raw registry rows — the board's repo list and the workflow's
+// fleet-wide PR scan iterate these.
+//
+// It returns the error rather than swallowing it, because an empty registry and an
+// unreadable one look identical downstream and mean opposite things. Swallowing it made a
+// transient store error render as "this machine tracks no repos", which cascaded: the
+// board lost its Projects, so the TUI couldn't identify the active repo, so the repo-scope
+// filter matched nothing and every agent and PR vanished from the tabs for one frame. A
+// caller that genuinely tolerates a partial answer must ignore the error explicitly.
+func (s *Service) Known() ([]store.Project, error) { return s.store.Projects() }
 
 // List returns every registered repo with a cheap summary (roster size + whether the
 // GitHub source is on). Live-agent ordering is a UI concern computed from the board.

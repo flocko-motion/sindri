@@ -202,6 +202,14 @@ func (m model) inScope(project string) bool {
 		return true
 	}
 	_, tag := m.currentRepo()
+	if tag == "" {
+		// The active repo isn't identifiable — the board carries no Projects (a snapshot
+		// that lost the registry, or a cwd not yet registered). Scoping to a repo we can't
+		// name would match nothing and blank every row, which is how a momentary registry
+		// hiccup made the whole agent list flicker out. Show everything instead: a wider
+		// view is a far better failure than an empty one.
+		return true
+	}
 	return project == tag
 }
 
