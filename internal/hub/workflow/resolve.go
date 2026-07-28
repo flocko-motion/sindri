@@ -98,7 +98,7 @@ func (e *Engine) CmdResolve(c registry.Caller, _ []string, out io.Writer) (int, 
 			return 1, cerr
 		}
 		if changed {
-			fmt.Fprintln(out, "you have uncommitted changes — run `sindri submit` (or commit) first, then check with `sindri resolve`")
+			fmt.Fprintln(out, ReplyResolveDirty(st.Phase))
 			return 1, nil
 		}
 	}

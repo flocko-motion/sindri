@@ -211,7 +211,7 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 		return 1, err
 	}
 	if st.Phase != "working" || st.Task == "" {
-		fmt.Fprintln(out, ReplyNothingToSubmit)
+		fmt.Fprintln(out, ReplyNotWorking("submit", st.Phase, st.Task))
 		return 1, nil
 	}
 	a, _, _ := ps.GetAgent(c.Agent)

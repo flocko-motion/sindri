@@ -23,7 +23,7 @@ func (b BoardState) AgentCount() int { return len(b.Agents) }
 
 // OpenPRCount is the number of still-open PRs across the fleet — those in neither
 // terminal state (merged or scrapped), matching what the PRs tab shows by default.
-func (b BoardState) OpenPRCount() int { return countPRs(b.PRs, prOpen) }
+func (b BoardState) OpenPRCount() int { return countPRs(b.PRs, PROpen) }
 
 // RepoCount is the number of repos the hub tracks.
 func (b BoardState) RepoCount() int { return len(b.Projects) }
@@ -31,7 +31,11 @@ func (b BoardState) RepoCount() int { return len(b.Projects) }
 // ChatMemberCount is the number of agents in the user's chatroom.
 func (b BoardState) ChatMemberCount() int { return len(b.Chat.Members) }
 
-func prOpen(p store.PR) bool { return p.Status != "merged" && p.Status != "scrapped" }
+// PROpen reports whether a PR is still open — in neither terminal state (merged or
+// scrapped). Exported because a UI that narrows the board to one repo has to apply the
+// SAME open-ness rule to its subset that OpenPRCount applies to the whole fleet; if it
+// reimplemented the rule, a tab badge could disagree with the list beneath it.
+func PROpen(p store.PR) bool { return p.Status != "merged" && p.Status != "scrapped" }
 
 func countTasks(ts []store.Task, pred func(store.Task) bool) (n int) {
 	for _, t := range ts {

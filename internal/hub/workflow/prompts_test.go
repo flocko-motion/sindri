@@ -28,3 +28,82 @@ func TestSystemPromptCarriesArchitecture(t *testing.T) {
 		t.Errorf("empty architecture content should inject no section:\n%s", p)
 	}
 }
+
+// TestGuardRepliesNameTheRealState: the replies an agent hits when a verb doesn't apply
+// must describe its ACTUAL state. The flat "run `sindri` to pick up a task first" was
+// true only when idle — a worker whose PR was under review got told to abandon the task
+// it was holding, and went round in circles.
+func TestGuardRepliesNameTheRealState(t *testing.T) {
+	// Holding a task: never tell it to go get one.
+	for _, phase := range []string{"submitted", "resolving"} {
+		got := ReplyNotWorking("contribute", phase, "td-1")
+		if strings.Contains(got, "pick") {
+			t.Errorf("phase %q must not advise picking up a task: %q", phase, got)
+		}
+		if !strings.Contains(got, "td-1") {
+			t.Errorf("phase %q should name the held task: %q", phase, got)
+		}
+	}
+	// Genuinely idle: picking up a task IS the next step.
+	if got := ReplyNotWorking("submit", "idle", ""); !strings.Contains(got, "no task") {
+		t.Errorf("idle reply should say there's no task: %q", got)
+	}
+}
+
+// TestAgentAdviceNeverPromisesGit: an agent's /workspace is a linked worktree whose .git
+// points at an unmounted host path, so EVERY git command fails there — deliberately; the
+// hub is the gatekeeper for git. Advice that tells an agent to run git is therefore a
+// dead end by construction. The coauthor brief is the one exception: its /workspace is
+// the user's real checkout (see lifecycle.go), where git genuinely works.
+func TestAgentAdviceNeverPromisesGit(t *testing.T) {
+	sandboxed := []string{
+		ReplyResolveDirty("working"),
+		ReplyResolveDirty("submitted"),
+		ReplyResolveDirty("resolving"),
+		ReplyNotWorking("contribute", "submitted", "td-1"),
+		MsgReview("pr-td-1", "do the thing", "td-1", "main", "", true),
+		MsgReview("pr-td-1", "do the thing", "td-1", "main", "", false),
+		SystemPrompt("eitri", "worker", "", ""),
+		SystemPrompt("dvalin", "reviewer", "", ""),
+	}
+	for _, s := range sandboxed {
+		for _, bad := range []string{"`git ", "git commit", "git diff", "git stash"} {
+			if strings.Contains(s, bad) {
+				t.Errorf("advice tells a sandboxed agent to run %q: %q", bad, s)
+			}
+		}
+	}
+	// The coauthor works in the user's own checkout, so git is legitimately available.
+	if !strings.Contains(SystemPrompt("brokk", "coauthor", "", ""), "git") {
+		t.Error("the coauthor brief should still offer git — its /workspace is the real checkout")
+	}
+}
+
+// TestResolveDirtyAdviceIsRunnable: the dirty-worktree reply must not point at a verb the
+// hub will refuse in that phase, or it just relocates the dead end. contribute/submit
+// exist only in phase "working"; under review the branch must not change at all.
+func TestResolveDirtyAdviceIsRunnable(t *testing.T) {
+	// Only from "working" may it name the landing verbs.
+	working := ReplyResolveDirty("working")
+	if !strings.Contains(working, "sindri contribute") || !strings.Contains(working, "sindri submit") {
+		t.Errorf("working advice should offer contribute and submit: %q", working)
+	}
+	for _, phase := range []string{"submitted", "resolving", "idle"} {
+		got := ReplyResolveDirty(phase)
+		for _, verb := range []string{"`sindri contribute", "`sindri submit"} {
+			if strings.Contains(got, verb) {
+				t.Errorf("phase %q can't run %q: %q", phase, verb, got)
+			}
+		}
+	}
+	// Every phase names a runnable next step, and never the verb that never was.
+	for _, phase := range []string{"working", "submitted", "resolving"} {
+		got := ReplyResolveDirty(phase)
+		if strings.Contains(got, "`sindri commit`") {
+			t.Errorf("phase %q must not advertise a sindri commit verb: %q", phase, got)
+		}
+		if !strings.Contains(got, "`sindri") {
+			t.Errorf("phase %q should name a runnable next step: %q", phase, got)
+		}
+	}
+}

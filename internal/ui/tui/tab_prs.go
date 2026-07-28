@@ -253,10 +253,9 @@ func (m model) prFilterShows(status string) bool {
 }
 
 func (m model) prRows() []row {
-	_, tag := m.currentRepo()
 	var out []row
 	for _, p := range m.state.PRs {
-		if m.scopeRepo && p.Project != tag { // repo-scoped: only the active repo's PRs
+		if !m.inScope(p.Project) { // repo-scoped: only the active repo's PRs
 			continue
 		}
 		if !m.prFilterShows(p.Status) { // f-toggle: merged hidden by default

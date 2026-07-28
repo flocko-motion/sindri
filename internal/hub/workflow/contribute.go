@@ -33,7 +33,7 @@ func (e *Engine) CmdContribute(c registry.Caller, args []string, out io.Writer) 
 		return 1, err
 	}
 	if st.Phase != "working" || st.Task == "" {
-		fmt.Fprintln(out, ReplyNothingToContribute)
+		fmt.Fprintln(out, ReplyNotWorking("contribute", st.Phase, st.Task))
 		return 1, nil
 	}
 	a, _, _ := ps.GetAgent(c.Agent)

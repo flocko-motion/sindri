@@ -154,9 +154,9 @@ tasks on your own. Get oriented, then wait for the user to steer you.
 As the reviewer:
 - ` + "`sindri prs`" + ` lists pull requests awaiting review.
 - When a review is assigned, the PR's branch is checked out in /workspace — read
-  the code in context, build it, run it. See what changed with ` + "`git diff <base>`" + `
-  there (the hub tells you the base branch), or ` + "`sindri show <pr-id>`" + `
-  for the diff. ` + "`sindri lint <pr-id>`" + ` runs the quality gate —
+  the code in context, build it, run it. See what changed with ` + "`sindri show <pr-id>`" + `
+  (git can't run in your sandbox — the hub is the gatekeeper for it).
+  ` + "`sindri lint <pr-id>`" + ` runs the quality gate —
   always lint before deciding.
 - Then ` + "`sindri approve <pr-id>`" + ` or
   ` + "`sindri reject <pr-id> <feedback>`" + `. Be specific in rejections —
@@ -327,7 +327,8 @@ func MsgReview(prID, requirement, branch, base, arch string, checkedOut bool) st
 	seeChanges := fmt.Sprintf("`sindri show %s`", prID)
 	loc := ""
 	if checkedOut {
-		seeChanges = fmt.Sprintf("`git diff %s` in /workspace (or `sindri show %s`)", base, prID)
+		// /workspace is a linked worktree with no reachable .git, so `git diff` fails in the
+		// pod — the checkout is for READING the code in context; the diff comes from the hub.
 		loc = fmt.Sprintf("PR branch %s is checked out FRESH in /workspace, based on %s. ", branch, base)
 	} else {
 		// Loud: the checkout failed, so /workspace is NOT this PR. Say so plainly
@@ -345,9 +346,22 @@ func ReplyRegistered(prID string) string {
 	return fmt.Sprintf("%s registered. You'll be informed when it's reviewed. Please wait — this may take a while.", prID)
 }
 
-// ReplyNothingToContribute is the guard reply when `contribute` is run without an
-// active task to contribute from.
-const ReplyNothingToContribute = "Nothing to contribute — run `sindri` to pick up a task first, then `contribute` lands interim work while you keep going."
+// ReplyNotWorking is the guard reply when a work verb (submit/contribute) is run in a
+// phase it doesn't apply to. It must name the ACTUAL state: the flat "run `sindri` to
+// pick up a task first" it replaces was false for every phase except idle — told to a
+// worker whose PR was already under review, it advised abandoning a task it was
+// holding. Each phase gets the one true next step instead.
+func ReplyNotWorking(verb, phase, task string) string {
+	switch {
+	case task == "" || phase == "idle":
+		return fmt.Sprintf("Nothing to %s — you have no task. Run `sindri` to pick one up.", verb)
+	case phase == "submitted":
+		return fmt.Sprintf("Can't %s %s — its PR is under review. Wait for the verdict.", verb, task)
+	case phase == "resolving":
+		return fmt.Sprintf("Can't %s %s while resolving. Fix the <<<<<<< markers in /workspace, then call `sindri resolve`.", verb, task)
+	}
+	return fmt.Sprintf("Can't %s %s from phase %q. Run `sindri` for your directive.", verb, task, phase)
+}
 
 // ReplyContributed confirms an interim contribution is recorded and gated on the
 // user's approval — the worker then waits until it's merged (and told to continue).
@@ -385,6 +399,27 @@ func ReplyRebased(base string) string {
 	return fmt.Sprintf("Your branch is rebased onto %s — you're aligned with the current reference state. Carry on.", base)
 }
 
+// ReplyResolveDirty answers `resolve` when the worktree is dirty. Nothing it says may
+// depend on git: /workspace is a linked worktree whose .git points at a host path the pod
+// deliberately does NOT mount, so every git command inside the sandbox fails with "not a
+// git repository". That's the isolation boundary working, not a bug — the hub owns git.
+//
+// The wording this replaces ("run `sindri submit` (or commit) first") was unrunnable
+// twice over: the parenthetical read as a `sindri commit` verb, which does not exist, and
+// as plain git, which cannot run. It must also be phase-aware, or it relocates the dead
+// end instead of removing it — contribute/submit only exist in phase "working", and while
+// a PR is under review the branch must not change at all.
+func ReplyResolveDirty(phase string) string {
+	const dirty = "Uncommitted changes in /workspace block the rebase. "
+	switch phase {
+	case "working":
+		return dirty + "Call `sindri contribute \"<commit message>\"` for the hub to commit and rebase (the task stays open), or `sindri submit \"<summary>\"` if the task is done."
+	case "submitted":
+		return dirty + "Your PR is under review — leave them and wait for the verdict. Note them with `sindri log \"<note>\"`."
+	}
+	return dirty + "Run `sindri` for your directive."
+}
+
 // ReplyResolveConflicts answers `resolve` when conflicts remain to edit.
 func ReplyResolveConflicts(base string, files []string) string {
 	return fmt.Sprintf("Rebasing onto %s conflicts in %s. They're in your /workspace with <<<<<<< markers — edit each file to the intended result (remove the markers), then run `sindri resolve` again.", base, FileList(files))
@@ -402,7 +437,6 @@ func ReplyAlreadyCurrent(base string) string {
 	return fmt.Sprintf("Your branch is already current with %s — nothing to resolve.", base)
 }
 
-const ReplyNothingToSubmit = "Nothing to submit — run `sindri` to pick up a task first."
 
 // ReplyTaskProposed acknowledges a planner's proposed task, pending user approval.
 func ReplyTaskProposed(id, title string) string {

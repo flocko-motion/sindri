@@ -44,12 +44,16 @@ func (h *Hub) registry() *registry.Registry {
 		registry.Command{Name: "next", Help: "pick up the next task", Roles: []string{"worker"},
 			Hidden: func(c registry.Caller) bool { return c.HasTask }, Run: h.wf.CmdNext},
 		registry.Command{Name: "lint", Help: "run the quality gate: lint (your workspace) or lint <pr-id> (a PR)", Run: h.cmdLint},
+		// Visibility MUST match these commands' own `st.Phase != "working"` guard. When it
+		// didn't, a worker in phase "submitted" was offered submit/contribute, ran one, and
+		// was told "run `sindri` to pick up a task first" — advice to abandon a task it was
+		// holding. An advertised verb has to be a runnable verb.
 		registry.Command{Name: "submit", Help: "request your branch be merged: submit [message]", Roles: []string{"worker"},
-			Hidden: func(c registry.Caller) bool { return !c.HasTask || c.InContainer || c.Phase == "resolving" }, Run: h.wf.CmdSubmit},
+			Hidden: func(c registry.Caller) bool { return c.InContainer || c.Phase != "working" }, Run: h.wf.CmdSubmit},
 		// Land interim work mid-task onto the reference branch without finishing the task
 		// (for very large tasks). Same visibility as submit; merge keeps the task open.
 		registry.Command{Name: "contribute", Help: "land an interim contribution mid-task (needs the user's approval): contribute [message]", Roles: []string{"worker"},
-			Hidden: func(c registry.Caller) bool { return !c.HasTask || c.InContainer || c.Phase == "resolving" }, Run: h.wf.CmdContribute},
+			Hidden: func(c registry.Caller) bool { return c.InContainer || c.Phase != "working" }, Run: h.wf.CmdContribute},
 		// Always available to a worker — checking whether your branch still merges (and
 		// resolving it if not) does no harm and is useful at any time.
 		registry.Command{Name: "resolve", Help: "check your branch still merges onto its base, and resolve any conflicts: resolve", Roles: []string{"worker"}, Run: h.wf.CmdResolve},
@@ -137,7 +141,17 @@ func (h *Hub) AgentExec(project, name string, args []string, out io.Writer) (int
 	// (status/prs/show) are not activity at all.
 	cmd, ok := h.registry().Lookup(args[0], c)
 	if !ok {
-		fmt.Fprintf(out, "unknown or unavailable command: %s\n", args[0])
+		// Name what IS available. A bare "unknown command" leaves the agent guessing, and
+		// each guess costs a turn — this is how a `sindri commit` that never existed got
+		// tried twice. The surface is role- and phase-dependent, so only the hub can
+		// answer it; Available() honours the same gating as Lookup, so this never reveals
+		// a verb the caller couldn't run anyway.
+		avail := h.registry().Available(c)
+		names := make([]string, len(avail))
+		for i, a := range avail {
+			names[i] = a.Name
+		}
+		fmt.Fprintf(out, "unknown or unavailable command: %s\navailable now: %s\n", args[0], strings.Join(names, " "))
 		return 127, nil
 	}
 	exit, err := cmd.Run(c, args[1:], out)

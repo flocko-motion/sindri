@@ -324,10 +324,9 @@ func (m model) selAgent() (hub.AgentView, bool) {
 }
 
 func (m model) agentRows() []row {
-	_, tag := m.currentRepo()
 	var out []row
 	for _, a := range m.state.Agents {
-		if m.scopeRepo && a.Project != tag { // repo-scoped: only the active repo's agents
+		if !m.inScope(a.Project) { // repo-scoped: only the active repo's agents
 			continue
 		}
 		// Whole row coloured by lifecycle state (grey down, yellow transitioning,

@@ -8,7 +8,10 @@
 //          tab's (-> tab_*.go).
 package tui
 
-import "github.com/flo-at/sindri/internal/hub/store"
+import (
+	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/hub/store"
+)
 
 // detailLines is the current tab's detail content (the right column / modal body).
 func (m model) detailLines() []string {
@@ -188,6 +191,47 @@ func (m model) rows() []row {
 	default:
 		return nil // Chat has no selectable rows — it renders its own transcript body
 	}
+}
+
+// inScope reports whether a board item owned by project (a repo tag) is admitted by
+// the active scope: everything when global, only the selected repo's when repo-scoped.
+// This is the single home of that rule — agentRows/prRows filter with it and the tab
+// badges count with it, so a badge can't drift from the list beneath it.
+func (m model) inScope(project string) bool {
+	if !m.scopeRepo {
+		return true
+	}
+	_, tag := m.currentRepo()
+	return project == tag
+}
+
+// tabCount is the badge number for section s. Agents and PRs obey the § scope toggle,
+// so their badge counts only in-scope items — two agents in this repo read "2 Agents"
+// even when the fleet has 17, matching what the list actually shows. The rest are
+// scope-invariant (Tasks is always the selected repo's; Repos and Meeting are global by
+// nature) and defer to the registry's fleet-wide count. Under global scope inScope
+// admits everything, so the two loops reduce to exactly AgentCount/OpenPRCount — one
+// code path, no special-casing of the unscoped view.
+func (m model) tabCount(s hub.Section) int {
+	switch s.Key {
+	case "agents":
+		n := 0
+		for _, a := range m.state.Agents {
+			if m.inScope(a.Project) {
+				n++
+			}
+		}
+		return n
+	case "prs":
+		n := 0
+		for _, p := range m.state.PRs {
+			if m.inScope(p.Project) && hub.PROpen(p) {
+				n++
+			}
+		}
+		return n
+	}
+	return s.Count(m.state)
 }
 
 // scopeName labels the global↔repo scope toggle for the footer.
