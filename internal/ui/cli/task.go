@@ -198,8 +198,16 @@ func taskInfoCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Printf("id:       %s\ntitle:    %s\nstatus:   %s\ntype:     %s\npriority: %s\nlabels:   %s\n",
-					t.ID, t.Title, t.Status, dash(t.Type), hub.PriorityLabel(t.Priority), dash(t.Labels))
+				// The same fields the TUI's detail pane and the agent's `task <id>` show. A
+				// front-end chooses layout, not which facts exist: the parent is how work is
+				// organised here and the description is the task itself, so a reader that omits
+				// them answers a different question than the other two surfaces do.
+				fmt.Printf("id:       %s\ntitle:    %s\nstatus:   %s\ntype:     %s\npriority: %s\nparent:   %s\napproval: %s\nlabels:   %s\n",
+					t.ID, t.Title, t.Status, dash(t.Type), hub.PriorityLabel(t.Priority),
+					dash(t.ParentID), dash(t.Approval), dash(t.Labels))
+				if body := strings.TrimRight(t.Description, "\n"); body != "" {
+					fmt.Printf("\n%s\n", body)
+				}
 				return nil
 			})
 		},

@@ -22,6 +22,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/repo"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // CmdInfo is a command as advertised to a browser (name + help).
@@ -62,8 +63,9 @@ func (h *Hub) registry() *registry.Registry {
 		registry.Command{Name: "rebase", Help: "rebase your branch onto the current reference branch (fix any conflicts it surfaces): rebase", Roles: []string{"worker", "planner"}, Run: h.wf.CmdRebase},
 		registry.Command{Name: "checkpoint", Help: "commit the current subtask and move to the next: checkpoint [message]", Roles: []string{"worker"},
 			Hidden: func(c registry.Caller) bool { return !c.InContainer }, Run: h.wf.CmdCheckpoint},
-		registry.Command{Name: "task", Help: "read the backlog: task list (all) or task <id> (full detail)", Roles: []string{"planner"}, Run: h.wf.CmdTasks},
-		registry.Command{Name: "create-task", Help: "propose a new task (needs the user's approval): create-task <title...>", Roles: []string{"planner"}, Run: h.wf.CmdCreateTask},
+		registry.Command{Name: "task", Help: "read the backlog: `task list` prints every task indented by its place in the parent/child tree; `task <id>` prints one task's detail — status, approval, parent, children, description", Roles: []string{"planner"}, Run: h.wf.CmdTasks},
+		registry.Command{Name: "create-task", Help: workflow.CreateTaskHelp, Roles: []string{"planner"}, Run: h.wf.CmdCreateTask},
+		registry.Command{Name: "edit-task", Help: workflow.EditTaskHelp, Roles: []string{"planner"}, Run: h.wf.CmdEditTask},
 		registry.Command{Name: "openspec", Help: "ship your openspec changes as a PR: openspec submit [message]", Roles: []string{"planner"}, Run: h.wf.CmdOpenspec},
 		registry.Command{Name: "state", Help: "set your resting state: state planning | state idle", Roles: []string{"planner"}, Run: h.wf.CmdState},
 		registry.Command{Name: "approve", Help: "approve a pull request: approve [pr-id]", Roles: []string{"reviewer"}, Run: h.wf.CmdApprove},
@@ -111,6 +113,16 @@ func (h *Hub) caller(project, name string) (registry.Caller, error) {
 	}, nil
 }
 
+// isHelpArg reports whether an argument asks for the verb's own help, in the spellings an
+// agent or a human will try.
+func isHelpArg(s string) bool {
+	switch s {
+	case "--help", "-h", "help", "-help":
+		return true
+	}
+	return false
+}
+
 // AgentCommands returns the command surface currently available to an agent.
 func (h *Hub) AgentCommands(project, name string) ([]CmdInfo, error) {
 	c, err := h.caller(project, name)
@@ -153,6 +165,13 @@ func (h *Hub) AgentExec(project, name string, args []string, out io.Writer) (int
 		}
 		fmt.Fprintf(out, "unknown or unavailable command: %s\navailable now: %s\n", args[0], strings.Join(names, " "))
 		return 127, nil
+	}
+	// `<verb> --help` prints that verb's help, for every verb, from the registry. Handled
+	// before Run so a help request reaches the agent as help rather than as an argument the
+	// verb tries to interpret.
+	if len(args) > 1 && isHelpArg(args[1]) {
+		fmt.Fprintf(out, "%s\n", cmd.Help)
+		return 0, nil
 	}
 	exit, err := cmd.Run(c, args[1:], out)
 	h.notify() // the command may have changed board state

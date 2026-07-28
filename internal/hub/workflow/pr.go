@@ -255,7 +255,8 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 // standing branch (mock todo id os-new).
 func (e *Engine) CmdOpenspec(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) == 0 || args[0] != "submit" {
-		return 1, fmt.Errorf("usage: openspec submit [message]")
+		fmt.Fprintln(out, "usage: openspec submit [message]")
+		return 2, nil
 	}
 	ps := e.store.For(c.Project)
 	root := e.deps.ProjectRoot(c.Project)
@@ -316,7 +317,8 @@ func (e *Engine) CmdOpenspec(c registry.Caller, args []string, out io.Writer) (i
 // CmdShowPR prints a PR's metadata and diff so a reviewer can judge it.
 func (e *Engine) CmdShowPR(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) == 0 {
-		return 1, fmt.Errorf("usage: show <pr-id>")
+		fmt.Fprintln(out, "usage: show <pr-id>")
+		return 2, nil
 	}
 	pr, ok, err := e.store.For(c.Project).GetPR(args[0])
 	if err != nil {
@@ -514,7 +516,8 @@ func (e *Engine) LintPR(project, prID string) (string, error) {
 // records the "changes" verdict on the review, and returns the reviewer to idle.
 func (e *Engine) CmdReject(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) == 0 {
-		return 1, fmt.Errorf("usage: reject <pr-id> <feedback...>")
+		fmt.Fprintln(out, "usage: reject <pr-id> <feedback...>")
+		return 2, nil
 	}
 	feedback := strings.Join(args[1:], " ")
 	if err := e.reject(c.Project, args[0], feedback, false); err != nil {

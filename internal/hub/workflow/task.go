@@ -189,69 +189,7 @@ func (e *Engine) notifyPlanners(project, msg string) {
 	}
 }
 
-// CmdState lets a planner flip its own resting state between "planning" and "idle".
-func (e *Engine) CmdState(c registry.Caller, args []string, out io.Writer) (int, error) {
-	if len(args) != 1 || (args[0] != "planning" && args[0] != "idle") {
-		return 1, fmt.Errorf("usage: state <planning|idle>")
-	}
-	ps := e.store.For(c.Project)
-	st, _ := ps.GetState(c.Agent)
-	st.Agent, st.Phase = c.Agent, args[0]
-	if err := ps.SetState(st); err != nil {
-		return 1, err
-	}
-	e.deps.Notify()
-	fmt.Fprintf(out, "state: %s\n", args[0])
-	return 0, nil
-}
-
-// CmdCreateTask lets a planner propose a task, flagged pending the user's approval.
-func (e *Engine) CmdCreateTask(c registry.Caller, args []string, out io.Writer) (int, error) {
-	title := strings.TrimSpace(strings.Join(args, " "))
-	if title == "" {
-		return 1, fmt.Errorf("usage: create-task <title...>")
-	}
-	id, err := e.CreateTask(c.Project, TaskSpec{Title: title, Type: "task"})
-	if err != nil {
-		return 1, err
-	}
-	if err := e.store.For(c.Project).SetApproval(id, "pending", ""); err != nil {
-		return 1, err
-	}
-	e.deps.Notify()
-	fmt.Fprintln(out, ReplyTaskProposed(id, title))
-	return 0, nil
-}
-
-// CmdTasks lets a planner read the backlog: `task list` lists every task; `task
-// <id>` prints that task's full detail.
-func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int, error) {
-	if err := e.SyncTasks(c.Project); err != nil {
-		return 1, err
-	}
-	ps := e.store.For(c.Project)
-	if len(args) > 0 && args[0] != "list" {
-		t, err := e.TaskInfo(c.Project, args[0])
-		if err != nil {
-			return 1, err
-		}
-		appr, comment := ps.GetApproval(t.ID)
-		if comment != "" {
-			appr += " — " + comment
-		}
-		fmt.Fprintf(out, "%s  [%s]  %s  priority=%s\napproval: %s\n\n%s\n",
-			t.ID, t.Status, t.Title, dash(t.Priority), dash(appr), dash(t.Description))
-		return 0, nil
-	}
-	tasks, err := ps.AllTasks()
-	if err != nil {
-		return 1, err
-	}
-	for _, t := range tasks {
-		fmt.Fprintf(out, "%-12s %-8s %-9s %-3s %s\n", t.ID, t.Status, dash(t.Approval), dash(t.Priority), t.Title)
-	}
-	return 0, nil
-}
+// The planner's verb surface (task/create-task/state) lives in planner.go.
 
 // dash renders "-" for an empty string (agent-facing output helper).
 func dash(s string) string {

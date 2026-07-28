@@ -36,6 +36,10 @@ func newLintCmd() *cobra.Command {
 			"one containing '/' matches the relative path with '*'/'**' wildcards " +
 			"(--ignore='internal/gen/**'), and a 're:' prefix is a Go regexp. Repeat " +
 			"the flag for several patterns. It applies to the Go linters, not openspec.\n\n" +
+			"The openspec linter is not brokkr's own: it runs " + spec.ValidatorName + ", so a " +
+			"green result here is the same green result the submit gate gives — there is no " +
+			"second, stricter validator to satisfy afterwards. Note that `openspec validate " +
+			"--strict` WITHOUT --all validates nothing and exits 0, which reads as a pass.\n\n" +
 			"For permanent exceptions, commit a " + lint.IgnoreFileName + " file at the " +
 			"repo root: one pattern per line (same syntax; '#' comments and blank lines " +
 			"ignored). It's read automatically by every run — the right home for a " +
@@ -209,6 +213,9 @@ Example:
 // lintOpenspec validates the project's OpenSpec specs. It is a no-op (returns
 // false) when openspec isn't used or installed. Returns true on validation
 // failure.
+//
+// It delegates to spec.Validate — the same function `sindri openspec submit` gates on — and
+// names it in the output (spec.ValidatorName), so a caller can trust one verdict for both.
 func lintOpenspec(w io.Writer) bool {
 	root, err := os.Getwd()
 	if err != nil {

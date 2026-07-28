@@ -88,3 +88,39 @@ func TestTasksFromDBMatchesCLI(t *testing.T) {
 		t.Fatalf("taskFromDB mismatch: %+v vs %+v", got, auth)
 	}
 }
+
+// TestTasksFromDBCarriesDescription guards the fix: td stores a task's body in the
+// issues table's `description` column, but the read's column list omitted it — so every
+// td task reached the hub with an empty Description and the TUI's detail pane had nothing
+// to show. The board's whole point is reading a task without opening td.
+func TestTasksFromDBCarriesDescription(t *testing.T) {
+	const body = "Steps:\n1. reproduce\n2. fix"
+	root := tdStore(t, [][]string{
+		{"-t", "bug", "-d", body, "Crash on empty input"},
+		{"-t", "task", "No body on this one"},
+	})
+
+	tasks, err := tasksFromDB(root, task.FilterOpen)
+	if err != nil {
+		t.Fatalf("tasksFromDB: %v", err)
+	}
+	got, ok := find(tasks, "Crash on empty input")
+	if !ok {
+		t.Fatalf("task not found in %v", tasks)
+	}
+	if got.Description != body {
+		t.Errorf("description = %q, want %q", got.Description, body)
+	}
+	// A task with no body must read as empty, not as a scan failure or a stray value.
+	if none, ok := find(tasks, "No body on this one"); !ok || none.Description != "" {
+		t.Errorf("bodyless task should have an empty description, got %q", none.Description)
+	}
+	// The single-task read shares dbCols, so it must agree with the list read.
+	one, err := taskFromDB(root, got.ID)
+	if err != nil {
+		t.Fatalf("taskFromDB: %v", err)
+	}
+	if one.Description != body {
+		t.Errorf("single read description = %q, want %q", one.Description, body)
+	}
+}

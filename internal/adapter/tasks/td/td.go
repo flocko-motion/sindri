@@ -26,8 +26,11 @@ func Tasks(root string, f task.Filter) ([]task.Task, error) {
 // td is the primary backend.
 type Source struct{}
 
-// Enabled reports td is always attempted.
-func (Source) Enabled(string) bool { return true }
+// Enabled reports whether this repo keeps a td store, so td gates on being in use like
+// every other source. A repo that tracks work only in openspec or GitHub issues then lists
+// those: its lack of a td store leaves td with nothing to contribute, rather than failing
+// the sync for every source at once.
+func (Source) Enabled(root string) bool { return HasStore(root) }
 
 // Tasks returns all live td tasks as domain tasks (local read — force is moot).
 func (Source) Tasks(root string, _ bool) ([]task.Task, error) { return Tasks(root, task.FilterAll) }

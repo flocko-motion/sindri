@@ -23,7 +23,18 @@ import (
 // DBPath is td's SQLite database for a project.
 func DBPath(root string) string { return filepath.Join(root, ".todos", "issues.db") }
 
-const dbCols = `id, title, status, type, priority, labels, parent_id, created_at, updated_at`
+// HasStore reports whether root actually has a td store. It is what gates td as a task
+// source: a repo without one contributes no td tasks, the same way a repo without
+// openspec/ contributes no spec changes.
+func HasStore(root string) bool {
+	_, err := os.Stat(DBPath(root))
+	return err == nil
+}
+
+// dbCols is the column list every task read shares, so the two queries below and
+// scanDBTask agree about order. It includes `description` — the task body the board and
+// detail views render. COALESCE keeps a NULL in that column from failing a whole task read.
+const dbCols = `id, title, COALESCE(description,''), status, type, priority, labels, parent_id, created_at, updated_at`
 
 // tasksFromDB reads all live tasks from td's db, applies the filter, and orders
 // them open → active → closed (matching the CLI path).
@@ -130,12 +141,12 @@ func taskFromDB(root, id string) (task.Task, error) {
 type rowScanner interface{ Scan(...any) error }
 
 func scanDBTask(r rowScanner) (task.Task, error) {
-	var id, title, status, typ, priority, labels, parent, created, updated string
-	if err := r.Scan(&id, &title, &status, &typ, &priority, &labels, &parent, &created, &updated); err != nil {
+	var id, title, desc, status, typ, priority, labels, parent, created, updated string
+	if err := r.Scan(&id, &title, &desc, &status, &typ, &priority, &labels, &parent, &created, &updated); err != nil {
 		return task.Task{}, err
 	}
 	return task.Task{
-		ID: id, Title: title, Status: status, Type: typ, Priority: priority,
+		ID: id, Title: title, Description: desc, Status: status, Type: typ, Priority: priority,
 		ParentID: parent, Labels: splitLabels(labels),
 		CreatedAt: parseTS(created), UpdatedAt: parseTS(updated),
 	}, nil
