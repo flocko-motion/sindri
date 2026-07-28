@@ -632,7 +632,7 @@ func (m model) View() string {
 	}
 	labels := make([]string, len(hub.Sections))
 	for i, s := range hub.Sections {
-		labels[i] = fmt.Sprintf("%d %s", s.Count(m.state), s.Title)
+		labels[i] = fmt.Sprintf("%d %s", m.tabCount(s), s.Title)
 	}
 	// Modals take over the whole screen.
 	if m.errText != "" {

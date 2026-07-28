@@ -1,4 +1,4 @@
-.PHONY: help build sindri worker brokkr brokkr-linux image install clean test verify lint check-go check demo diag loop claude-check fullloop screenshot seed deb release major minor patch breaking feature fix
+.PHONY: help build sindri worker brokkr brokkr-linux image install clean test verify lint check-go upgrade-go check demo diag loop claude-check fullloop screenshot seed deb release major minor patch breaking feature fix
 
 .DEFAULT_GOAL := help
 
@@ -105,6 +105,20 @@ verify: check-go brokkr ## build + test + lint (deadcode, loc, comments, openspe
 lint: verify ## alias for verify
 
 check-go: ## fail unless the active Go toolchain is the latest release (linters need current Go)
+	@./scripts/check-go.sh
+
+# The fix for a failing check-go. Deliberately NOT wired into check-go/verify:
+# `go get go@latest` rewrites the `go` directive in go.mod, and a check that
+# silently mutates tracked source produces surprise diffs mid-`make verify` and
+# a dirty tree in CI. Bumping the module's minimum Go is an explicit decision.
+#
+# This does not touch /usr/local/go — with GOTOOLCHAIN=auto the raised `go`
+# directive is enough: the go command downloads the matching toolchain and
+# re-execs into it, so the base install only has to bootstrap the switch.
+upgrade-go: ## bump the go directive to the latest release, tidy, and rebuild
+	go get go@latest
+	go mod tidy
+	go build ./...
 	@./scripts/check-go.sh
 
 check: brokkr ## terse one-shot gate: build + test + lint, stops at the first failure

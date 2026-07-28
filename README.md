@@ -300,14 +300,39 @@ the header plus each type/func with its doc and signature (bodies omitted).
 ```bash
 brokkr map                              # whole tree
 brokkr map internal/hub internal/tui    # several paths at once
-brokkr map --grep "func Merge"          # only decls whose source matches
 brokkr map internal/tui --file tab_prs  # only files whose path matches
 brokkr map --depth 1                    # bound how deep it descends
 brokkr map --full                       # don't reduce, however long
 ```
 
-If the full map runs past a line budget (default 1000, `--max`), it reduces to
-per-file headers only and tells you so — narrow the scope or pass `--full`.
+Two searches, answering two different questions (both take a regex, both are
+mutually exclusive):
+
+```bash
+brokkr map --find "func Merge"   # context: the DECLARATIONS enclosing a match
+brokkr map --grep "func Merge"   # lines: the matching LINES, tagged with their decl
+```
+
+`--find` answers *what is this part of?* — it narrows the map to the types and
+funcs that enclose a hit (plus the `var`/`const` that declares it, and any match
+in the arch header, so a hit is never reported without a location).
+
+`--grep` answers *where exactly is this?* — `path:line: text`, one match per line,
+each tagged with the declaration it sits in:
+
+```
+codemap.go:27: var skipDirs = map[string]bool{…}  « var skipDirs
+codemap.go:162: if skipDirs[d.Name()] {           « func write
+```
+
+That tag is the reason not to pipe a map through grep: you get grep's locations
+*and* the structural context in one pass.
+
+Both are smart-case (a lowercase pattern matches insensitively; any uppercase
+letter makes it case-sensitive). If the full map runs past a line budget (default
+1000, `--max`), it reduces to per-file headers only and tells you so — narrow the
+scope or pass `--full`. Over-budget `--grep` truncates and reports the remainder
+instead, since headers are no answer to a line search.
 
 ---
 
@@ -321,7 +346,7 @@ Orchestration is `sindri <category> <action>`; the toolbelt is the separate
 | `agent` | `list` · `new [name] [--role worker\|reviewer\|planner]` · `start <name>` · `stop <name>` · `delete <name>` · `tell <name> "msg"` · `attach <name>` · `info <name>` · `pane <name>` |
 | `task` | `list` · `new <title> [-t -p -d --labels --parent]` · `info <id>` · `edit <id>` · `priority <id> <P0..P4>` · `approve <id>` · `reject <id> "why"` · `unassign <id>` |
 | `pr` | `list` · `info <id>` · `lint <id>` · `verify <id>` · `review <id> "…"` · `approve <id>` · `reject <id> "…"` · `milestone <agent>` · `merge <id>` |
-| `brokkr` | `map [paths…] [--grep --file --depth]` · `lint [deadcode\|loc\|comments\|openspec]` (none = all) |
+| `brokkr` | `map [paths…] [--find --grep --file --depth]` · `lint [deadcode\|loc\|comments\|openspec]` (none = all) |
 
 Inside a pod the agent talks to the hub through a single command, **`sindri`**
 (the browser binary, presented under that name in the isolated container) — run

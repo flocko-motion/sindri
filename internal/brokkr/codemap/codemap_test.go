@@ -28,7 +28,7 @@ func writeTree(t *testing.T, files map[string]string) string {
 func TestWriteSingleRootLabelsRelativeToRoot(t *testing.T) {
 	root := writeTree(t, map[string]string{"pkg/a.go": "package pkg\n"})
 	var buf bytes.Buffer
-	if err := Write(&buf, []string{filepath.Join(root, "pkg")}, -1, "", ""); err != nil {
+	if err := Write(&buf, []string{filepath.Join(root, "pkg")}, -1, Query{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := buf.String(); !strings.Contains(got, "a.go") || strings.Contains(got, "pkg/a.go") {
@@ -48,7 +48,7 @@ func TestWriteMultiRootLabelsAreUnambiguous(t *testing.T) {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
-	if err := Write(&buf, []string{"one", "two"}, -1, "", ""); err != nil {
+	if err := Write(&buf, []string{"one", "two"}, -1, Query{}); err != nil {
 		t.Fatal(err)
 	}
 	got := buf.String()
@@ -60,7 +60,7 @@ func TestWriteMultiRootLabelsAreUnambiguous(t *testing.T) {
 func TestWriteMissingRootFailsLoud(t *testing.T) {
 	root := writeTree(t, map[string]string{"ok/a.go": "package ok\n"})
 	var buf bytes.Buffer
-	err := Write(&buf, []string{filepath.Join(root, "ok"), filepath.Join(root, "nope")}, -1, "", "")
+	err := Write(&buf, []string{filepath.Join(root, "ok"), filepath.Join(root, "nope")}, -1, Query{})
 	if err == nil {
 		t.Fatal("a missing root must be a loud error, not a silent skip")
 	}
@@ -81,7 +81,7 @@ func TestWriteAdaptiveReducesWhenLong(t *testing.T) {
 
 	// Tiny budget → reduce to headers only, with a note pointing at --full.
 	var small strings.Builder
-	if err := WriteAdaptive(&small, []string{dir}, -1, "", "", false, 3); err != nil {
+	if err := WriteAdaptive(&small, []string{dir}, -1, Query{}, false, 3); err != nil {
 		t.Fatal(err)
 	}
 	out := small.String()
@@ -97,7 +97,7 @@ func TestWriteAdaptiveReducesWhenLong(t *testing.T) {
 
 	// --full prints declarations regardless of the budget.
 	var full strings.Builder
-	if err := WriteAdaptive(&full, []string{dir}, -1, "", "", true, 3); err != nil {
+	if err := WriteAdaptive(&full, []string{dir}, -1, Query{}, true, 3); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(full.String(), "func Foo") || strings.Contains(full.String(), "headers only") {
@@ -106,7 +106,7 @@ func TestWriteAdaptiveReducesWhenLong(t *testing.T) {
 
 	// Under budget → full automatically, no note.
 	var auto strings.Builder
-	if err := WriteAdaptive(&auto, []string{dir}, -1, "", "", false, 1000); err != nil {
+	if err := WriteAdaptive(&auto, []string{dir}, -1, Query{}, false, 1000); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(auto.String(), "func Foo") || strings.Contains(auto.String(), "headers only") {
