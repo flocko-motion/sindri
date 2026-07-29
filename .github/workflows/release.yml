@@ -1,9 +1,13 @@
 name: release
 
 # Build and publish release assets whenever a semver tag (vMAJOR.MINOR.PATCH) is
-# pushed — e.g. by `make release <major|minor|patch>`. Ships a Linux .deb plus
-# macOS tarballs (darwin arm64 + amd64), all cross-compiled on the Linux runner
-# (sindri is pure Go — no cgo — so no macOS runner is needed).
+# pushed — e.g. by `make release <major|minor|patch>`. Ships one artifact shape for
+# every platform: a tarball (linux + darwin, arm64 + amd64) that install.sh unpacks
+# into ~/.local/bin. All cross-compiled on the Linux runner (pure Go, no cgo).
+#
+# There is deliberately NO .deb. A system package lands in /usr/bin, which then
+# shadows or is shadowed by the ~/.local/bin install depending on PATH order, and
+# the two drift apart silently. One install location means one build in play.
 on:
   push:
     tags:
@@ -38,42 +42,48 @@ jobs:
           go install "github.com/mikefarah/yq/v4@${YQ_VERSION}"
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
-      - name: Build the .deb
-        run: make deb VERSION="${GITHUB_REF_NAME#v}"
-
-      - name: Build macOS tarballs (darwin arm64 + amd64)
+      - name: Build tarballs (linux + darwin, arm64 + amd64)
         run: |
           set -euo pipefail
           ver="${GITHUB_REF_NAME#v}"
           gopath="$(go env GOPATH)"
+          # brokkr reports this as its build time. Go's build info carries the COMMIT
+          # time and never the build's own, so an unstamped release binary would tell
+          # the user "not stamped" — stamp it here exactly as the Makefile does.
+          built="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          for os in linux darwin; do
           for arch in arm64 amd64; do
-            stage="dist/sindri_${ver}_darwin_${arch}"
+            stage="dist/sindri_${ver}_${os}_${arch}"
             mkdir -p "$stage"
-            # Host binaries for macOS (CLI/TUI/hub + the lint toolbelt).
-            CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" \
+            # Host binaries (CLI/TUI/hub + the lint toolbelt).
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
               go build -ldflags "-X main.version=${ver}" -o "$stage/sindri" ./cmd/sindri/
-            CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" \
-              go build -ldflags "-X main.version=${ver}" -o "$stage/brokkr" ./cmd/brokkr/
-            # The agent browser runs INSIDE the Linux pod (mounted into the podman
-            # VM), so it's a linux binary arch-matched to the Mac's VM, not darwin.
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
+              go build -ldflags "-X main.version=${ver} -X main.buildTime=${built}" -o "$stage/brokkr" ./cmd/brokkr/
+            # The browser and brokkr-linux run INSIDE the (always linux) pod, so they are
+            # linux builds arch-matched to the host's VM — on linux, the same as above.
             CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
               go build -o "$stage/sindri-worker" ./cmd/sindri-worker/
-            # brokkr also runs INSIDE the pod (mounted so `brokkr` works in agents),
-            # so ship a linux build too — arch-matched to the Mac's VM like the worker.
             CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
-              go build -ldflags "-X main.version=${ver}" -o "$stage/brokkr-linux" ./cmd/brokkr/
-            # Bundled tools, mirroring the .deb: td cross-compiled (its cross output
-            # lands in $GOPATH/bin/<os>_<arch>/), yq from its official darwin release.
-            GOOS=darwin GOARCH="$arch" go install "github.com/marcus/td@${TD_VERSION}"
-            cp "${gopath}/bin/darwin_${arch}/td" "$stage/td"
-            curl -fsSL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_darwin_${arch}" -o "$stage/yq"
+              go build -ldflags "-X main.version=${ver} -X main.buildTime=${built}" -o "$stage/brokkr-linux" ./cmd/brokkr/
+            # Bundled tools: td cross-compiled (its cross output lands in
+            # $GOPATH/bin/<os>_<arch>/, but the native pair lands in bin/), yq from its
+            # official release for that platform.
+            GOOS="$os" GOARCH="$arch" go install "github.com/marcus/td@${TD_VERSION}"
+            if [ -f "${gopath}/bin/${os}_${arch}/td" ]; then
+              cp "${gopath}/bin/${os}_${arch}/td" "$stage/td"
+            else
+              cp "${gopath}/bin/td" "$stage/td"   # native build target
+            fi
+            curl -fsSL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_${os}_${arch}" -o "$stage/yq"
             chmod +x "$stage/yq"
-            # install.sh handles first-install AND in-place upgrades (atomic replace
-            # of a running binary, Gatekeeper quarantine) — the tarball's upgrade path.
-            cp scripts/install-macos.sh "$stage/install.sh"
+            # install.sh handles first-install AND in-place upgrades (atomic replace of a
+            # running binary, Gatekeeper quarantine) — the tarball's upgrade path.
+            cp scripts/install.sh "$stage/install.sh"
             chmod +x "$stage/install.sh"
             cp LICENSE THIRD_PARTY_LICENSES.md "$stage/"
-            tar -C dist -czf "dist/sindri_${ver}_darwin_${arch}.tar.gz" "sindri_${ver}_darwin_${arch}"
+            tar -C dist -czf "dist/sindri_${ver}_${os}_${arch}.tar.gz" "sindri_${ver}_${os}_${arch}"
+          done
           done
           ls -la dist/*.tar.gz
 
@@ -81,6 +91,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            bin/sindri_*_amd64.deb
-            dist/sindri_*_darwin_*.tar.gz
+            dist/sindri_*.tar.gz
           generate_release_notes: true

@@ -119,7 +119,10 @@ func CommentAvg(roots []string, maxAvg float64, ig *Ignore, w io.Writer) (bool, 
 		}
 	}
 	if len(viols) > 0 {
-		fmt.Fprintf(w, "%d file(s) over the comment-length trend. Tune it per repo with `lint: max_comment_avg:` in .sindri/config.yaml.\n", len(viols))
+		fmt.Fprintf(w, "%d file(s) over the comment-length trend — cut words, don't move them. "+
+			"Relocating a comment, splitting one into several, or padding the file with one-liners "+
+			"only shifts the average; the rule is asking for less prose. `lint: max_comment_avg:` "+
+			"in .sindri/config.yaml is the maintainer's setting, not a way past a finding.\n", len(viols))
 	}
 	return len(viols) > 0, nil
 }

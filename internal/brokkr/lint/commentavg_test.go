@@ -180,6 +180,29 @@ func TestDelimitersAreFormattingNotProse(t *testing.T) {
 	}
 }
 
+// TestGoDirectivesAreNotProse: //go:build and friends instruct the toolchain, so a file must not
+// be charged for needing them. A comment that merely mentions one (with a space) is still prose.
+func TestGoDirectivesAreNotProse(t *testing.T) {
+	blocks := ScanComments("//go:build linux\n//go:generate stringer -type=T\n// the real explanation\ncode()\n")
+	if len(blocks) != 1 {
+		t.Fatalf("one block, got %d", len(blocks))
+	}
+	if blocks[0].Lines != 1 {
+		t.Errorf("only the prose line counts, got %d", blocks[0].Lines)
+	}
+	if len(blocks[0].Text) != 1 || blocks[0].Text[0] != "the real explanation" {
+		t.Errorf("the excerpt must be the prose, got %q", blocks[0].Text)
+	}
+	// A block of nothing but directives is not a comment at all.
+	if got := ScanComments("//go:build linux\n\npackage x\n"); len(got) != 0 {
+		t.Errorf("directives alone are not a comment, got %+v", got)
+	}
+	// "// go:build" — with a space — is prose, not a directive.
+	if got := ScanComments("// go:build is how you gate a file\ncode()\n"); len(got) != 1 || got[0].Lines != 1 {
+		t.Errorf("a comment mentioning a directive is still prose, got %+v", got)
+	}
+}
+
 // TestExcerptNamesTheComment: the report's excerpt must quote the offending comment. It used to
 // print the `*` left over from `/**`, which named nothing — worst for TypeScript, where every
 // block comment opens that way.

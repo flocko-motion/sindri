@@ -20,8 +20,7 @@ import (
 	"time"
 )
 
-// jsToolTimeout bounds one delegated tool. A type-check on a large project is slow but not
-// unbounded; past this the run is reported as inconclusive rather than hanging the gate.
+// jsToolTimeout bounds one delegated tool; past it the run is inconclusive, not a hung gate.
 const jsToolTimeout = 5 * time.Minute
 
 // eslintConfigs and tsConfigs are the filenames that mean "this project configures that tool".
@@ -35,15 +34,11 @@ var (
 
 // JSLint runs each JS/TS project's OWN checks and reports whether anything failed.
 //
-// Projects are discovered wherever they sit, not assumed at the repo root: a frontend commonly
-// lives in web/ or ui/, and a monorepo has one per package. A directory is a project when it
-// carries a package.json, tsconfig.json or eslint config, and each source file is checked by the
-// NEAREST such directory above it — the one whose config a compiler or editor would also use.
-//
-// The tools decide what "correct" means, because a linter that imposed its own opinion would
-// disagree with the editor and CI the team already trust. But JS/TS source with no tool
-// configured anywhere above it IS a finding: passing quietly would make a green gate mean
-// "brokkr's own rules held" while the type checker and linter that catch real defects never ran.
+// Projects are found wherever they sit (web/, ui/, one per package), and each source file is
+// checked by the nearest project above it — the config a compiler would resolve. The tools
+// decide what "correct" means, so brokkr never disagrees with the editor and CI. But source
+// with no tool configured above it IS a finding: a green gate must not mean the type checker
+// never ran.
 func JSLint(root string, ig *Ignore, w io.Writer) (bool, error) {
 	if root == "" {
 		root = "."
@@ -162,9 +157,8 @@ func sortedKeys(m map[string]int) []string {
 	return out
 }
 
-// runJSTool runs one delegated tool and relays its output. A tool that is configured but not
-// installed is a failure: the config promises a check the repo cannot currently perform, and
-// silently skipping it would hide that.
+// runJSTool runs one delegated tool and relays its output. Configured but not installed is a
+// failure: the config promises a check the repo cannot perform.
 func runJSTool(root string, w io.Writer, label string, bin string, args ...string) bool {
 	cmd, how := jsCommand(root, bin, args...)
 	if cmd == nil {
@@ -187,20 +181,26 @@ func runJSTool(root string, w io.Writer, label string, bin string, args ...strin
 	fmt.Fprintf(w, "js/%s: failed (%s)\n", label, how)
 	if text != "" {
 		fmt.Fprintln(w, indentLines(text, "    "))
+		return true
 	}
+	// No output means the tool never spoke, and only err says why. A bare "failed" sent a
+	// reader hunting a type error when the fault was the exec itself.
+	fmt.Fprintf(w, "    no output — the tool did not run: %v\n", err)
 	return true
 }
 
-// jsCommand builds the argv for a tool: the repo's pinned copy first, then a global install.
-// Returns nil when neither exists.
-//
-// It deliberately does NOT fall back to `npx <bin>`. npx resolves an uninstalled name against
-// the registry, and the registry has impostors — `npx tsc` finds a stale unrelated package
-// called "tsc" rather than TypeScript's compiler. A check must run the tool the repo means or
-// report that it cannot; fetching something with a matching name is worse than either.
+// jsCommand builds a tool's argv: the repo's pinned copy first, then a global install, nil if
+// neither. Never `npx <bin>` — npx resolves an uninstalled name against the registry, where
+// `tsc` is an unrelated impostor package, so it would run something that is not the compiler.
 func jsCommand(root, bin string, args ...string) (argv []string, how string) {
 	local := filepath.Join(root, "node_modules", ".bin", bin)
 	if _, err := os.Stat(local); err == nil {
+		// ABSOLUTE on purpose: the caller sets Dir to this same directory, and the child
+		// resolves a relative argv[0] AFTER chdir, so "web/node_modules/.bin/tsc" became
+		// "web/web/..." and never started.
+		if abs, err := filepath.Abs(local); err == nil {
+			local = abs
+		}
 		return append([]string{local}, args...), "node_modules/.bin/" + bin
 	}
 	if p, err := exec.LookPath(bin); err == nil {

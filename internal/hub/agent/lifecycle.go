@@ -36,13 +36,12 @@ type lcKey struct{ project, name string }
 
 var nameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
-// launchReadyTimeout bounds how long Launch waits to observe a freshly-launched
-// agent's session come up before reporting the launch failed. Generous: a cold
-// micro-VM/pod boot plus the entrypoint starting tmux can take a bit.
+// launchReadyTimeout bounds the wait for a new agent's session. Generous: a cold pod boot
+// plus the entrypoint starting tmux takes a while.
 const launchReadyTimeout = 45 * time.Second
 
-// setLifecycle records a transient launch/stop intent for an agent (cleared by
-// AgentStatus once observed reality catches up). "" clears it.
+// setLifecycle records a transient launch/stop intent, cleared by AgentStatus once reality
+// catches up. "" clears it.
 func (s *Service) setLifecycle(project, name, state string) {
 	s.lcMu.Lock()
 	defer s.lcMu.Unlock()
@@ -54,9 +53,8 @@ func (s *Service) setLifecycle(project, name, state string) {
 	}
 }
 
-// AgentStatus reconciles transient intent with observed runtime into one status word
-// — and clears the intent once fulfilled (launching→running, stopping→down). The
-// single source of truth for "what is this agent doing"; the board calls it.
+// AgentStatus reconciles intent with observed runtime into one status word, clearing the
+// intent once fulfilled. The single source of truth for "what is this agent doing".
 func (s *Service) AgentStatus(project, name string, running bool, phase string) string {
 	s.lcMu.Lock()
 	defer s.lcMu.Unlock()
@@ -82,9 +80,8 @@ func (s *Service) AgentStatus(project, name string, running bool, phase string) 
 	}
 }
 
-// NewAgent registers an agent identity in a project (no pod). Identity precedes
-// runtime (D13). An empty name is auto-assigned a Norse dwarf name unused in that
-// project. Returns the final name.
+// NewAgent registers an agent identity in a project (no pod) — identity precedes runtime
+// (D13). An empty name gets an unused Norse dwarf name. Returns the final name.
 func (s *Service) NewAgent(project, name, role, memory string) (string, error) {
 	ps := s.store.For(project)
 	if name == "" { // auto-name after a dwarf — a friend of Sindri (globally unique)
@@ -103,8 +100,7 @@ func (s *Service) NewAgent(project, name, role, memory string) (string, error) {
 	if !ValidMemory(memory) {
 		return "", fmt.Errorf("invalid memory %q (e.g. 2g, 512m)", memory)
 	}
-	// Names are unique across ALL repos — a dwarf identifies one agent machine-wide,
-	// so the unified board never shows two agents with the same name.
+	// Unique across ALL repos, so the unified board never shows two agents with one name.
 	agents, err := s.store.AllAgents()
 	if err != nil {
 		return "", err
@@ -114,8 +110,7 @@ func (s *Service) NewAgent(project, name, role, memory string) (string, error) {
 			return "", fmt.Errorf("agent %q already exists (in %s) — names are unique across all repos", name, a.Project)
 		}
 	}
-	// A coauthor shares the user's real checkout (the repo root) rather than an
-	// isolated worktree — it works the SAME material as the user, freestyle.
+	// A coauthor shares the user's real checkout, not a worktree — the SAME material.
 	workspace := filepath.Join(".worktrees", name)
 	if role == "coauthor" {
 		workspace = "."
@@ -134,10 +129,8 @@ func (s *Service) NewAgent(project, name, role, memory string) (string, error) {
 	return name, ps.Log(name, "register", "role="+role)
 }
 
-// DeleteAgent removes an agent entirely: stops its pod, closes its socket listener,
-// removes its worktree, and drops its identity (and activity log) from the roster.
-// Best-effort on the runtime teardown — a missing pod or worktree is fine; the
-// identity is always removed.
+// DeleteAgent removes an agent entirely — pod, socket, worktree, identity, log. Teardown is
+// best-effort (a missing pod or worktree is fine); the identity always goes.
 func (s *Service) DeleteAgent(project, name string) error {
 	ps := s.store.For(project)
 	root := s.deps.ProjectRoot(project)
@@ -148,9 +141,7 @@ func (s *Service) DeleteAgent(project, name string) error {
 	if !ok {
 		return fmt.Errorf("no such agent %q", name)
 	}
-	// Release the agent's task back to the backlog so it isn't stranded in_progress
-	// with no owner. (A planner's os-new sentinel and openspec items aren't real td
-	// tasks — skip those.)
+	// Release the task so it isn't stranded in_progress with no owner. os-* items aren't td.
 	if st, _ := ps.GetState(name); strings.HasPrefix(st.Task, "td-") {
 		if err := td.SetStatus(root, st.Task, "open"); err != nil {
 			fmt.Printf("warning: reopen %s on delete of %s: %v\n", st.Task, name, err)
@@ -159,8 +150,7 @@ func (s *Service) DeleteAgent(project, name string) error {
 	}
 	_ = container.Rm(s.deps.ContainerName(project, name))
 	s.agentCh.CloseAgent(project, name)
-	// A coauthor's workspace is the repo root itself (the shared checkout), not a
-	// disposable worktree — never run `git worktree remove` on it.
+	// A coauthor's workspace IS the repo root — never `git worktree remove` that.
 	if a.Workspace != "." {
 		_ = git.WorktreeRemove(root, filepath.Join(root, a.Workspace))
 	}
@@ -171,9 +161,8 @@ func (s *Service) DeleteAgent(project, name string) error {
 	return nil
 }
 
-// StopAgent is the opposite of Launch: it tears down the agent's pod (killing its
-// tmux session) but keeps the identity, worktree, socket listener, and activity log —
-// so it can be re-launched and resumes where it left off.
+// StopAgent tears down the pod but keeps identity, worktree, socket and log, so a relaunch
+// resumes where it left off.
 func (s *Service) StopAgent(project, name string) error {
 	ps := s.store.For(project)
 	if _, ok, err := ps.GetAgent(name); err != nil {
@@ -196,9 +185,8 @@ func (s *Service) StopAgent(project, name string) error {
 	return nil
 }
 
-// RebuildAgent rebuilds the agent's image (re-pull base) then relaunches it, streaming
-// build/restart progress to w. A bad project config fails loudly before any build; a
-// running agent is stopped first so it comes up on the fresh image.
+// RebuildAgent rebuilds the image (re-pull base) then relaunches, streaming progress to w. A
+// bad config fails before any build; a running agent stops first so it comes up on the new one.
 func (s *Service) RebuildAgent(project, name string, w io.Writer) error {
 	ps := s.store.For(project)
 	root := s.deps.ProjectRoot(project)
@@ -223,10 +211,8 @@ func (s *Service) RebuildAgent(project, name string, w io.Writer) error {
 	return s.Launch(project, name, false, false, w)
 }
 
-// Launch spins a pod that assumes an existing agent's identity. The agent's workspace
-// worktree is created on demand; the pod runs interactive Claude in a tmux session
-// named after the agent (or a bare shell when shell is true — used for deterministic
-// demos and debugging).
+// Launch spins a pod that assumes an existing agent's identity, creating its worktree on
+// demand and running Claude in a tmux session named after it (or a bare shell, for debugging).
 func (s *Service) Launch(project, name string, shell, debug bool, progress io.Writer) (err error) {
 	ps := s.store.For(project)
 	root := s.deps.ProjectRoot(project)
@@ -243,14 +229,12 @@ func (s *Service) Launch(project, name string, shell, debug bool, progress io.Wr
 	if err != nil {
 		return err
 	}
-	// Tee build/start progress three ways: the launch buffer (TUI live-screen), the hub
-	// log (stderr), and progress — the caller's stream, so `agent start` shows the image
-	// build live instead of a frozen prompt (long ops must be visible).
+	// Tee progress three ways — launch buffer (TUI), hub log, caller's stream — so an image
+	// build shows live rather than as a frozen prompt.
 	buf := s.NewLaunchBuf(project, name)
 	w := io.MultiWriter(os.Stderr, buf, progress)
-	// Pre-flight: podman must be installed and reachable. Fail fast with an actionable
-	// message (before touching status or staging an image build). On macOS/Windows this
-	// also auto-starts a stopped podman VM, teeing that progress into the launch buffer.
+	// Pre-flight podman before touching status or staging a build; on macOS this also starts
+	// a stopped VM.
 	if err := container.Check(w); err != nil {
 		return err
 	}
@@ -309,8 +293,13 @@ func (s *Service) Launch(project, name string, shell, debug bool, progress io.Wr
 	if err := s.agentCh.ServeAgent(project, name); err != nil {
 		return err
 	}
-	workerBin, err := Binary()
-	if err != nil {
+	// Fill pod-bin before the pod mounts it. Logged, not fatal — a host may have no brokkr.
+	if updated, serr := SyncPodBin(); serr != nil {
+		fmt.Fprintf(os.Stderr, "hub: pod-bin sync: %v\n", serr)
+	} else if len(updated) > 0 {
+		fmt.Fprintf(os.Stderr, "hub: pod-bin refreshed: %s\n", strings.Join(updated, ", "))
+	}
+	if _, err := Binary(); err != nil { // the worker is required; fail before launching
 		return err
 	}
 	_ = container.Rm(cName) // clear any stale container with this name
@@ -336,13 +325,10 @@ func (s *Service) Launch(project, name string, shell, debug bool, progress io.Wr
 		// socket DIRECTORY (not the file) so the agent survives a hub restart, which
 		// recreates the socket file with a new inode.
 		{Host: agentchan.SocketDir(project, name), Container: "/run/sindri", Mode: "rw"},
-		// The thin browser binary (image symlinks it to /usr/local/bin/sindri).
-		{Host: workerBin, Container: "/opt/sindri/sindri-worker", Mode: "ro"},
-	}
-	// Mount a cross-built linux brokkr into every pod so the SAME `brokkr` commands work
-	// inside the agent regardless of host OS. Runtime mount, so a restart picks it up.
-	if bk, berr := BrokkrLinuxBinary(); berr == nil {
-		mounts = append(mounts, container.Mount{Host: bk, Container: "/usr/local/bin/brokkr", Mode: "ro"})
+		// The host-built tools (brokkr, the browser) as ONE DIRECTORY, for the same reason
+		// as the socket above: a per-file bind pins the inode, so a reinstalled binary
+		// never reached the pod. The image symlinks /usr/local/bin/{brokkr,sindri} in here.
+		{Host: paths.PodBinDir(), Container: paths.PodBinMount, Mode: "ro"},
 	}
 	if a.Role == "planner" {
 		// A planner sees the whole repo read-only and may only write openspec — so it

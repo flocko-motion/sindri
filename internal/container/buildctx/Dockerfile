@@ -98,13 +98,16 @@ RUN mkdir -p /opt/sindri && cd /opt/sindri && npm init -y && npm install "@anthr
 # ── openspec CLI (spec-driven workflow, optional per project) ──────────────────
 RUN npm install -g @fission-ai/openspec@latest
 
-# ── agent browser (mounted from host at runtime) ─────────────────────────────
-# The single, role-agnostic agent binary (built host-side as sindri-worker) is
-# mounted read-only at /opt/sindri/sindri-worker at runtime. Inside the isolated
-# pod it's the agent's interface to the hub, so we present it simply as `sindri`
-# (no host CLI is in the pod to collide with). Role is hub-side, one binary for
-# every agent; the sindri user can't write /usr/local/bin, so symlink here.
-RUN ln -sf /opt/sindri/sindri-worker /usr/local/bin/sindri
+# ── host-built tools (mounted from host at runtime) ──────────────────────────
+# The hub mounts its pod-bin DIRECTORY read-only at /opt/sindri/host-bin. These
+# symlinks resolve on every exec, so a reinstalled binary lands without
+# recreating the container — a per-file bind used to pin the old inode.
+#
+# The browser is presented simply as `sindri` (in the pod it IS the interface to
+# the hub, and no host CLI is here to collide). The sindri user can't write
+# /usr/local/bin, so the links are made at build time.
+RUN ln -sf /opt/sindri/host-bin/sindri-worker /usr/local/bin/sindri \
+  && ln -sf /opt/sindri/host-bin/brokkr       /usr/local/bin/brokkr
 
 # ── Shims ─────────────────────────────────────────────────────────────────────
 COPY shims/docker          /usr/local/bin/docker

@@ -25,12 +25,9 @@ func ReviewArchitecture(arch string) string {
 	return fmt.Sprintf(" Read /workspace/%s now (even if you read it before) and confirm the changes follow it.", arch)
 }
 
-// ArchitectureBrief injects the project's architecture INTO every agent's brief —
-// the full doc content, so the agent always has it in context rather than a path it
-// might never open — with a pointer to re-read the canonical copy. EVERY role needs
-// this, not just the reviewer, or it can't produce work that fits. content is the
-// doc's text; arch is its repo-relative path (/workspace is the mounted root). Empty
-// when there's no architecture content to inject.
+// ArchitectureBrief injects the architecture doc's full CONTENT into every agent's brief, not a
+// path it might never open, plus a pointer to re-read the canonical copy. Every role needs it to
+// produce work that fits. Empty when there is no content.
 func ArchitectureBrief(content, arch string) string {
 	content = strings.TrimSpace(content)
 	if content == "" {
@@ -39,10 +36,8 @@ func ArchitectureBrief(content, arch string) string {
 	return fmt.Sprintf("\n\n# Project architecture (binding)\n\nThis is how the project is built and how your work must fit it — treat it as binding. To read it again at any time, refer to /workspace/%s.\n\n%s", arch, content)
 }
 
-// BrokkrBrief points every agent at the brokkr tool — always mounted into the pod.
-// It's the recommended linter and a structured, grep-beating way to get an overview
-// of the code, and it's built for single-command (no compound shell) usage — all of
-// which the agent has to be told, since none of it is obvious from the binary alone.
+// BrokkrBrief points every agent at brokkr, always mounted into the pod: the recommended linter,
+// a grep-beating overview, and built for single commands. None of that is obvious from the binary.
 func BrokkrBrief() string {
 	return "\n\nThe `brokkr` tool is on your PATH — a toolbelt built for you (Claude Code): " +
 		"every feature is a SINGLE self-contained command, so run it WITHOUT compound " +
@@ -179,9 +174,8 @@ func DirWorking(task string) string {
 	return fmt.Sprintf("Work on task %s. When your change is committed, run `sindri submit \"<summary>\"`.", task)
 }
 
-// DirRejected hands a worker its reviewer's feedback verbatim — pushed every time it
-// asks the hub what to do, so a rejected PR's comments reach it whether or not it saw
-// the moment-of-rejection message, and it never has to go dig them out of `sindri show`.
+// DirRejected hands a worker its reviewer's feedback verbatim, every time it asks what to do, so
+// the comments reach it whether or not it saw the rejection message.
 func DirRejected(task, feedback string) string {
 	return fmt.Sprintf("Your PR for task %s was REJECTED — address this reviewer feedback, then run `sindri submit \"<summary>\"`:\n\n%s", task, feedback)
 }
@@ -214,10 +208,8 @@ const DirNoTasks = "No open tasks. Wait — the hub will tell you when there is 
 
 // --- collaborative (container) workflow ---
 
-// DirContainerClaimed starts an agent on a feature: it works the container's
-// subtasks one at a time on a single standing branch, checkpointing (not
-// submitting) between them. The whole feature lands as one PR when the user opens
-// a milestone.
+// DirContainerClaimed starts an agent on a feature: subtasks one at a time on a single standing
+// branch, checkpointing between them. The whole feature lands as one PR at the user's milestone.
 func DirContainerClaimed(container, ctitle, child, childTitle string) string {
 	return fmt.Sprintf("You're working feature %s: %s — on a single branch in /workspace. "+
 		"Current subtask %s: %s. Implement it, then run `sindri checkpoint \"<summary>\"` "+
@@ -254,10 +246,8 @@ func MsgMerged(prID string) string {
 	return fmt.Sprintf("[hub] %s merged. Run `sindri` for your next task.", prID)
 }
 
-// MsgPRScrapped tells an author the user discarded its PR outright. It is deliberately final:
-// the branch is gone, so there is nothing to fix and nothing to resubmit — unlike a rejection,
-// which asks for another attempt. Without this the author waits in "submitted" for a verdict
-// that will never arrive.
+// MsgPRScrapped tells an author its PR was discarded. Deliberately final — the branch is gone, so
+// unlike a rejection there is nothing to resubmit. Without it the author waits in "submitted".
 func MsgPRScrapped(prID string) string {
 	return fmt.Sprintf("[user] %s was scrapped — the work isn't wanted and its branch is gone. "+
 		"Nothing to fix or resubmit. Run `sindri` for your next directive.", prID)
@@ -304,10 +294,9 @@ func MsgRejectedByReviewer(prID, feedback string) string {
 	return fmt.Sprintf("[reviewer] %s rejected: %s — please address the feedback and submit again.", prID, feedback)
 }
 
-// MsgReview is the single review instruction — the hub has already checked the PR
-// branch out fresh into the reviewer's /workspace (the reviewer only reads), so it
-// points there. If that checkout failed it says so loudly and falls back to the diff
-// over the socket, so the reviewer never mistakes a stale tree for the PR.
+// MsgReview is the single review instruction: the hub has already checked the PR branch out into
+// the reviewer's /workspace, so it points there. A failed checkout says so loudly and falls back
+// to the socket diff, so a stale tree is never mistaken for the PR.
 func MsgReview(prID, requirement, branch, base, arch string, checkedOut bool) string {
 	seeChanges := fmt.Sprintf("`sindri show %s`", prID)
 	loc := ""
@@ -331,11 +320,8 @@ func ReplyRegistered(prID string) string {
 	return fmt.Sprintf("%s registered. You'll be informed when it's reviewed. Please wait — this may take a while.", prID)
 }
 
-// ReplyNotWorking is the guard reply when a work verb (submit/contribute) is run in a
-// phase it doesn't apply to. It must name the ACTUAL state: the flat "run `sindri` to
-// pick up a task first" it replaces was false for every phase except idle — told to a
-// worker whose PR was already under review, it advised abandoning a task it was
-// holding. Each phase gets the one true next step instead.
+// ReplyNotWorking guards a work verb run in a phase it doesn't apply to. It must name the ACTUAL
+// state: a flat "pick up a task first" told a worker under review to abandon the task it held.
 func ReplyNotWorking(verb, phase, task string) string {
 	switch {
 	case task == "" || phase == "idle":
@@ -354,9 +340,8 @@ func ReplyContributed(prID string) string {
 	return fmt.Sprintf("Interim contribution %s recorded — it needs the user's approval before it merges into the reference branch. Wait; you'll be told to keep going once it lands. (This may take a while.)", prID)
 }
 
-// ReplyContributeConflicts tells a worker its contribution doesn't yet rebase cleanly
-// onto base — fix the markers and run `sindri resolve` (which finishes the interim PR
-// once clean).
+// ReplyContributeConflicts tells a worker its contribution doesn't rebase cleanly yet — fix the
+// markers and run `sindri resolve`, which finishes the interim PR once clean.
 func ReplyContributeConflicts(base string, files []string) string {
 	return fmt.Sprintf("Your contribution doesn't rebase cleanly onto %s yet — conflicts in %s. Fix the <<<<<<< markers in /workspace, then run `sindri resolve`; once clean the contribution awaits the user's approval.", base, FileList(files))
 }
@@ -367,9 +352,8 @@ func ReplyContributionClean(base string) string {
 	return fmt.Sprintf("Your contribution now applies cleanly onto %s — it awaits the user's approval. You'll be told to keep going once it merges.", base)
 }
 
-// MsgContributionMerged tells a worker its interim contribution landed on the
-// reference branch (its branch was fast-forwarded past the merge) and to keep working
-// the SAME task — the task stays open.
+// MsgContributionMerged tells a worker its interim contribution landed (branch fast-forwarded)
+// and to keep working the SAME task, which stays open.
 func MsgContributionMerged(prID, task string) string {
 	return fmt.Sprintf("[hub] Your interim contribution %s merged into the reference branch and your branch was fast-forwarded past it — keep working on task %s. Run `sindri contribute` again to land more, or `sindri submit` when the task is done.", prID, task)
 }
@@ -384,16 +368,9 @@ func ReplyRebased(base string) string {
 	return fmt.Sprintf("Your branch is rebased onto %s — you're aligned with the current reference state. Carry on.", base)
 }
 
-// ReplyResolveDirty answers `resolve` when the worktree is dirty. Nothing it says may
-// depend on git: /workspace is a linked worktree whose .git points at a host path the pod
-// deliberately does NOT mount, so every git command inside the sandbox fails with "not a
-// git repository". That's the isolation boundary working, not a bug — the hub owns git.
-//
-// The wording this replaces ("run `sindri submit` (or commit) first") was unrunnable
-// twice over: the parenthetical read as a `sindri commit` verb, which does not exist, and
-// as plain git, which cannot run. It must also be phase-aware, or it relocates the dead
-// end instead of removing it — contribute/submit only exist in phase "working", and while
-// a PR is under review the branch must not change at all.
+// ReplyResolveDirty answers `resolve` on a dirty worktree, suggesting nothing git-based: the pod
+// doesn't mount the real .git, so every git command fails — the isolation boundary working. Also
+// phase-aware, since contribute/submit exist only in "working" and review must not touch it.
 func ReplyResolveDirty(phase string) string {
 	const dirty = "Uncommitted changes in /workspace block the rebase. "
 	switch phase {
@@ -428,9 +405,16 @@ func ReplyTaskProposed(id, title string) string {
 	return fmt.Sprintf("Proposed %s: %s — awaiting the user's approval before any worker can pick it up.", id, title)
 }
 
-// ReplyLintFail answers a failed `sindri lint`, echoing the violations to fix.
+// ReplyLintFail echoes the violations to fix, and spells out that a finding is to be MET rather
+// than evaded — relocating prose, padding with one-liners or widening a limit all clear the
+// report while leaving the problem, and an agent doing that believes it has complied.
 func ReplyLintFail(out string) string {
-	return fmt.Sprintf("Lint failed — fix the violations and submit again:\n%s", out)
+	return fmt.Sprintf("Lint failed — fix the violations and submit again:\n%s\n"+
+		"Meet each finding on its own terms; do NOT work around the linter. If a comment is "+
+		"too long, CUT WORDS — don't move it somewhere the rule doesn't reach, don't split it "+
+		"or pad the file with one-liners to shift an average, don't widen an ignore list, and "+
+		"don't retune limits in .sindri/config.yaml (those are the maintainer's call). The "+
+		"rule is asking for less prose, not for the prose to sit elsewhere.", out)
 }
 
 // ReplySpecInvalid answers `openspec submit` when the change fails openspec's own

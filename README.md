@@ -15,32 +15,32 @@ Download the latest release and install it — a one-time step (after that,
 `sindri upgrade` and the daily check keep you current). Both platforms install the
 same binaries; pick your OS.
 
-### Linux (`.deb`)
+### Linux and macOS (tarball → `~/.local/bin`)
 
-Grab the `.deb` from the
-[releases page](https://github.com/flocko-motion/sindri/releases/latest), or pull
-the latest from the command line:
-
-```bash
-url=$(curl -fsSL https://api.github.com/repos/flocko-motion/sindri/releases/latest | grep -o 'https://[^"]*_amd64\.deb' | head -1)
-curl -fsSL "$url" -o /tmp/sindri.deb && sudo apt install -y /tmp/sindri.deb && rm -f /tmp/sindri.deb
-```
-
-### macOS (tarball → `~/.local/bin`)
-
-Download the tarball for your Mac (Apple Silicon or Intel), extract it, and run the
-bundled `install.sh` — it installs the binaries to `~/.local/bin` and clears the
-Gatekeeper quarantine on the unsigned binaries:
+Download the tarball for your platform, extract it, and run the bundled `install.sh`
+— it installs the binaries to `~/.local/bin` (and clears the Gatekeeper quarantine on
+macOS, where the binaries are unsigned):
 
 ```bash
-arch=$(uname -m); [ "$arch" = x86_64 ] && arch=amd64
-url=$(curl -fsSL https://api.github.com/repos/flocko-motion/sindri/releases/latest | grep -o "https://[^\"]*_darwin_${arch}\.tar\.gz" | head -1)
-curl -fsSL "$url" -o /tmp/sindri.tar.gz && tar -C /tmp -xzf /tmp/sindri.tar.gz && /tmp/sindri_*_darwin_${arch}/install.sh
+os=$(uname -s | tr '[:upper:]' '[:lower:]')
+arch=$(uname -m); [ "$arch" = x86_64 ] && arch=amd64; [ "$arch" = aarch64 ] && arch=arm64
+url=$(curl -fsSL https://api.github.com/repos/flocko-motion/sindri/releases/latest | grep -o "https://[^\"]*_${os}_${arch}\.tar\.gz" | head -1)
+curl -fsSL "$url" -o /tmp/sindri.tar.gz && tar -C /tmp -xzf /tmp/sindri.tar.gz && /tmp/sindri_*_${os}_${arch}/install.sh
 ```
+
+Or grab it from the
+[releases page](https://github.com/flocko-motion/sindri/releases/latest).
 
 Ensure `~/.local/bin` is on your `PATH` (the installer says so if it isn't). podman
 runs in a VM on macOS — `podman machine init` once, then `podman machine start`
 (sindri auto-starts it after that).
+
+**`~/.local/bin` is the only install location, deliberately.** There is no `.deb` or
+other system package: one would land in `/usr/bin` and then shadow — or be shadowed
+by — this install depending on PATH order, leaving two builds that drift apart
+silently while the hub mounts tools from beside whichever it happens to be. Sindri
+warns if it finds a second copy of itself on your PATH. If you installed an older
+`.deb`, remove it once with `sudo apt remove sindri`.
 
 That's it. The release bundles everything sindri ships — the `sindri` CLI/TUI, the
 agent browser `sindri-worker` (it runs as `sindri` inside a pod), the `brokkr` toolbelt (code map + linters),
@@ -62,10 +62,10 @@ spec-driven workflow, and the Go toolchain for the `deadcode` linter.
 
 Sindri checks for a newer release once a day (and on demand via **`sindri
 upgrade`**); when there is one it points you at **`sindri-do-upgrade`** — a
-one-shot script it drops in `~/.local/bin`. On Linux it fetches and installs the
-latest `.deb`; on macOS it fetches the latest tarball and replaces the binaries in
-place. (The check can't replace the running binary itself, so the install is a
-separate script.)
+one-shot script it drops in `~/.local/bin`. It fetches the latest tarball for your
+platform and replaces the binaries in place, next to whichever `sindri` is running,
+needing no elevated privileges. (The check can't replace the running binary itself,
+so the install is a separate script.)
 
 ---
 
@@ -464,7 +464,7 @@ track).
 
 ## Building from source
 
-For hacking on sindri (end users just install the `.deb`). Needs Go, plus `td`
+For hacking on sindri (end users just install the tarball). Needs Go, plus `td`
 and `yq` on `PATH` (they get bundled into the build).
 
 ```bash
@@ -473,7 +473,7 @@ make install   # build sindri + sindri-worker + brokkr, install to ~/.local/bin
 make all       # + build the agent image too (needs podman)
 make verify    # run the linters (the gate; release runs this first)
 make check     # build + test + lint — the quality gate
-make deb       # build the .deb into bin/
+make tarball   # build the release tarball into dist/
 make release <major|minor|patch>   # lint, then release: push, open+merge a PR (gh), tag the merged default branch, return you to your branch (breaking|feature|fix aliases too)
 ```
 

@@ -19,14 +19,14 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
-// backend is the full hub operation set the host CLI uses; satisfied by
-// *client.HTTP (the single global hub over its socket — repo context rides the
-// client's X-Sindri-Project header, so these signatures don't carry a project).
+// backend is the hub operation set the host CLI uses, satisfied by *client.HTTP. Repo context
+// rides the client's X-Sindri-Project header, so these signatures carry no project.
 type backend interface {
 	NewAgent(name, role, memory string) (string, error)
 	SetMemory(name, memory string) error
@@ -88,9 +88,8 @@ func repoRoot() (string, error) {
 	return git.Root(wd)
 }
 
-// open connects to the single global hub for a host command, auto-starting it if
-// needed. There's no ephemeral in-process backend anymore — one hub serves every
-// repo, and it's cheap to keep running.
+// open connects to the single global hub, auto-starting it if needed. One hub serves every repo
+// and is cheap to keep running, so there is no in-process backend.
 func open(root string) (backend, error) {
 	if err := ensureHubRunning(); err != nil {
 		return nil, err
@@ -174,10 +173,19 @@ func newHubStartCmd() *cobra.Command {
 				return err
 			}
 			defer hub.RemovePID()
+			// How a rebuild reaches RUNNING agents. Async because copying tens of MB here
+			// delayed the socket past the caller's readiness poll; Launch also syncs.
+			go func() {
+				if updated, serr := agent.SyncPodBin(); serr != nil {
+					fmt.Fprintf(os.Stderr, "sindri: pod-bin: %v\n", serr)
+				} else if len(updated) > 0 {
+					fmt.Fprintf(os.Stderr, "sindri: pod-bin refreshed: %s\n", strings.Join(updated, ", "))
+				}
+			}()
+			warnShadowedInstall(os.Stderr) // a rival copy on PATH decides which build agents get
 			fmt.Fprintf(os.Stderr, "sindri hub listening at %s\n", h.SocketPath())
-			// Recommend, don't impose: the hub used to seed a placeholder ARCHITECTURE.md into
-			// every repo it served, which littered repos that never wanted one. Now it says so
-			// once, here, and leaves the choice (and the filename) to the user.
+			// Recommend, don't impose: seeding a placeholder ARCHITECTURE.md littered repos
+			// that never wanted one, so the hub says it once and leaves the choice.
 			for _, line := range h.StartupAdvice() {
 				fmt.Fprintf(os.Stderr, "sindri: %s\n", line)
 			}
@@ -188,11 +196,8 @@ func newHubStartCmd() *cobra.Command {
 	return c
 }
 
-// newHubRestartCmd stops the running hub and starts a fresh detached one — the way
-// to pick up a rebuilt binary without a manual stop-then-start. If no hub is
-// running it's just a start, so `restart` is always safe to reach for (mirrors
-// `sindri agent restart`). Agents keep running across the restart; only the
-// coordinator process is replaced.
+// newHubRestartCmd stops the running hub and starts a fresh detached one — how a rebuilt binary
+// is picked up. With no hub up it is just a start. Agents survive; only the coordinator moves.
 func newHubRestartCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "restart",
@@ -248,9 +253,8 @@ func prApproveCmd() *cobra.Command {
 	}
 }
 
-// prMilestoneCmd opens a milestone PR for the container an agent is collaborating
-// on: it captures the feature branch's current state and blocks the agent until
-// you review and merge it; the agent then resumes the same container.
+// prMilestoneCmd opens a milestone PR for the container an agent collaborates on: it captures
+// the feature branch and blocks the agent until you merge, then it resumes the same container.
 func prMilestoneCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "milestone <agent>", Short: "Open a milestone PR for the feature an agent is working (blocks it until merged)", Args: cobra.ExactArgs(1),
@@ -313,15 +317,8 @@ func prRejectCmd() *cobra.Command {
 	}
 }
 
-// prScrapCmd discards a PR outright — the verb for work you simply do not want, such as a
-// proposal a planner produced and you have no use for.
-//
-// "scrap" matches the word the TUI already uses on D, so the same key and the same term mean
-// the same thing in both. delete/rm are aliases, because that is what a hand reaches for.
-//
-// Distinct from reject, which sends the PR BACK to its worker with feedback to address: scrap
-// ends it, the branch goes, and nobody is asked to try again. Unrecoverable, so it takes --yes
-// rather than acting on a bare id.
+// prScrapCmd discards a PR outright (delete/rm alias it), matching the TUI's D. Unlike reject,
+// which sends it BACK for another try, scrap ends it and drops the branch — hence --yes.
 func prScrapCmd() *cobra.Command {
 	var yes bool
 	c := &cobra.Command{

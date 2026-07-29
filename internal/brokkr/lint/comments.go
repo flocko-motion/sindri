@@ -25,10 +25,8 @@ import (
 // carry, per the architecture spec's "File headers" requirement.
 var canonicalHeaderFields = []string{"package", "type", "job", "limits"}
 
-// DefaultMaxHeaderFieldLen bounds how long one header field's content
-// (package/type/job/limits, continuation lines joined) may be, so headers stay
-// compact in `brokkr map`. Free-form comment lines elsewhere in the header are
-// not counted — only the field values.
+// DefaultMaxHeaderFieldLen bounds one header field's content (continuations joined) so headers
+// stay compact in `brokkr map`. Only field values count, not free-form lines.
 const DefaultMaxHeaderFieldLen = 300
 
 // commentViol is one documentation violation: a file (and line, 0 = file-level)
@@ -88,14 +86,9 @@ func Comments(roots []string, ig *Ignore, w io.Writer) (bool, error) {
 	return len(viols) > 0, nil
 }
 
-// checkTSHeader holds a TypeScript/JavaScript file to the same four-field header as a Go one:
-// the file says what it is for before it says how it works, in one place a reader and a code
-// map can both find. The fields are identical across languages so one convention covers the
-// whole repo.
-//
-// Only the header is checked here. Go's per-declaration doc rule leans on go/ast to know what
-// is exported; the equivalent for TS needs a real parser, so that check is left to the
-// ecosystem's own tools (-> the eslint/tsc pass).
+// checkTSHeader holds a TS/JS file to the same four-field header as a Go one, so one
+// convention covers the repo. Header only: the per-declaration doc rule needs a real parser,
+// so that is left to eslint/tsc.
 func checkTSHeader(path string) []commentViol {
 	src, ok := readSource(path)
 	if !ok {
@@ -122,11 +115,20 @@ func checkTSHeader(path string) []commentViol {
 	}
 	for _, f := range canonicalHeaderFields {
 		if n := len(fields[f]); n > DefaultMaxHeaderFieldLen {
-			viols = append(viols, commentViol{path, header.Line,
-				fmt.Sprintf("%s:%d: header field %q is %d chars (max %d) — keep it concise", path, header.Line, f, n, DefaultMaxHeaderFieldLen)})
+			viols = append(viols, commentViol{path, header.Line, headerFieldTooLong(path, header.Line, f, n)})
 		}
 	}
 	return viols
+}
+
+// headerFieldTooLong is the one wording for an over-long header field, shared by the Go and TS
+// checks so the instruction cannot drift. It says what to do because the tempting move is to
+// relocate the prose below the imports, which the rule stops reaching but nobody benefits from.
+func headerFieldTooLong(path string, line int, field string, n int) string {
+	return fmt.Sprintf("%s:%d: header field %q is %d chars (max %d) — cut it down, don't move it. "+
+		"Prose relocated out of the header just lands where a reader has less context and "+
+		"`brokkr map` won't show it; the header is read first, so it has to be brief.",
+		path, line, field, n, DefaultMaxHeaderFieldLen)
 }
 
 // headerFieldsFromLines reads `field: value` entries out of a header's lines, joining a
@@ -183,16 +185,13 @@ func checkFileComments(path string) []commentViol {
 		}
 	}
 
-	// Bound each field's content so headers stay compact in `brokkr map`. Extra
-	// free-form comment lines in the header are allowed and not counted — only the
-	// package/type/job/limits values (continuations joined).
+	// Only the four field values are bounded; extra free-form header lines are free.
 	if f.Doc != nil {
 		ln := fset.Position(f.Doc.Pos()).Line
 		fc := headerFieldContent(f.Doc)
 		for _, field := range canonicalHeaderFields {
 			if n := len(fc[field]); n > DefaultMaxHeaderFieldLen {
-				viols = append(viols, commentViol{path, ln,
-					fmt.Sprintf("%s:%d: header field %q is %d chars (max %d) — keep it concise so `brokkr map` stays compact", path, ln, field, n, DefaultMaxHeaderFieldLen)})
+				viols = append(viols, commentViol{path, ln, headerFieldTooLong(path, ln, field, n)})
 			}
 		}
 	}
@@ -200,10 +199,8 @@ func checkFileComments(path string) []commentViol {
 	for _, decl := range f.Decls {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
-			// A declaration is public only if it is reachable as public API: an
-			// exported plain function, or an exported method on an exported type. An
-			// exported method on an unexported type (e.g. an io.Writer/tea.Model impl
-			// on a package-private struct) is not public, so it's not required here.
+			// Public means reachable as API: an exported func, or an exported method on an
+			// exported type. An exported method on a private struct is not.
 			if !d.Name.IsExported() {
 				continue
 			}
@@ -238,9 +235,8 @@ func checkFileComments(path string) []commentViol {
 	return viols
 }
 
-// missingHeaderFields returns the canonical fields absent from a file header (the
-// package-doc comment block). package and type must also carry a value on their
-// label line; job and limits need only be present (they may wrap onto more lines).
+// missingHeaderFields returns the canonical fields absent from a file header. package and type
+// must carry a value on their label line; job and limits need only be present.
 func missingHeaderFields(doc *ast.CommentGroup) []string {
 	value := map[string]string{}
 	present := map[string]bool{}
@@ -264,10 +260,8 @@ func missingHeaderFields(doc *ast.CommentGroup) []string {
 	return missing
 }
 
-// headerFieldContent maps each present canonical field to its full content — the
-// value after the label plus any aligned continuation lines, joined with spaces.
-// A blank line or an un-aligned (extra, free-form) comment line ends a field, so
-// such lines aren't counted against the field's length.
+// headerFieldContent maps each field to its value plus aligned continuations, joined. A blank
+// or un-aligned line ends the field, so free-form lines aren't charged to it.
 func headerFieldContent(doc *ast.CommentGroup) map[string]string {
 	out := map[string]string{}
 	if doc == nil {

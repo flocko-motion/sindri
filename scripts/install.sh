@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
-# Install — or upgrade — sindri on macOS from an extracted release tarball.
+# Install — or upgrade — sindri from an extracted release tarball, on Linux or macOS.
 #
 # Idempotent: to upgrade, download a newer tarball, extract it, and run this again.
-# It installs the binaries next to each other (the hub finds sindri-worker/brokkr
-# beside the sindri binary) into ~/.local/bin by default — override with PREFIX,
-# e.g. `PREFIX=/usr/local/bin ./install.sh`.
+# The binaries go next to each other (the hub finds sindri-worker/brokkr beside the
+# sindri binary) into ~/.local/bin — the ONE install location, so nothing on PATH can
+# shadow it with a different build. Override with PREFIX if you must.
 #
-# Two macOS specifics it handles so the upgrade path is clean:
+# Two details keep the upgrade path clean:
 #   1. Atomic replace: each binary is staged in PREFIX and rename(2)'d into place, so
 #      a currently-running sindri/hub is swapped safely (the live process keeps its
 #      old inode) instead of failing with "text file busy" — the same reason
 #      `make install` uses mv rather than cp.
-#   2. Gatekeeper: the release binaries are unsigned, so their quarantine attribute
-#      is cleared; otherwise macOS refuses to run a freshly-downloaded binary.
+#   2. Gatekeeper (macOS): release binaries are unsigned, so the quarantine attribute
+#      is cleared; without it macOS refuses to run a freshly-downloaded binary. The
+#      call is a no-op elsewhere.
 #
 # After an upgrade, a hub from the previous version keeps running; the next `sindri`
 # command detects the version mismatch and offers to restart it — no manual step.

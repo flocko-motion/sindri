@@ -75,26 +75,37 @@ func TestCacheRoundTrip(t *testing.T) {
 }
 
 func TestUpdaterScript(t *testing.T) {
-	// Every generated script prefers gh with a curl fallback, and must be valid bash.
-	// Linux installs the .deb (no tarball); macOS installs the darwin tarball (no dpkg).
+	// Every OS takes the SAME tarball path into ~/.local/bin — one install location, so no
+	// second copy can appear elsewhere on PATH and shadow it. Nothing may reach for a system
+	// package manager: that is what put a stale binary in /usr/bin alongside this one.
 	linux := updaterScript("linux", "amd64", "")
-	for _, want := range []string{"#!/usr/bin/env bash", repo, "dpkg -i", "gh release download", `rel="latest"`, `tag=""`} {
+	for _, want := range []string{"#!/usr/bin/env bash", repo, `goos="linux"`, "tar -C", "gh release download", `rel="latest"`, `tag=""`} {
 		if !strings.Contains(linux, want) {
 			t.Errorf("linux updater script missing %q", want)
 		}
 	}
-	if strings.Contains(linux, "tar -C") {
-		t.Error("linux updater must not use the tarball path")
-	}
 
 	mac := updaterScript("darwin", "arm64", "")
-	for _, want := range []string{"#!/usr/bin/env bash", repo, "_darwin_", `arch="arm64"`, "tar -C", "com.apple.quarantine", "gh release download", `tag=""`} {
+	for _, want := range []string{"#!/usr/bin/env bash", repo, `goos="darwin"`, `arch="arm64"`, "tar -C", "com.apple.quarantine", "gh release download", `tag=""`} {
 		if !strings.Contains(mac, want) {
 			t.Errorf("darwin updater script missing %q", want)
 		}
 	}
-	if strings.Contains(mac, "dpkg") {
-		t.Error("darwin updater must not use dpkg")
+	for _, script := range []string{linux, mac} {
+		// No system package manager and no privilege escalation: a root-owned install in
+		// /usr/bin is exactly what shadowed ~/.local/bin with a stale build.
+		for _, banned := range []string{"dpkg", "apt-get", "sudo "} {
+			if strings.Contains(script, banned) {
+				t.Errorf("updater must not use %q — ~/.local/bin only", banned)
+			}
+		}
+		if !strings.Contains(script, `dest="$HOME/.local/bin"`) {
+			t.Error("updater must default its destination to ~/.local/bin")
+		}
+		// brokkr-linux is the pod's brokkr; an updater that skips it leaves pods without one.
+		if !strings.Contains(script, "brokkr-linux") {
+			t.Error("updater must install brokkr-linux")
+		}
 	}
 
 	// A pinned tag is baked so both the gh and curl branches target that release.

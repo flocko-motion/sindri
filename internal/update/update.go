@@ -1,12 +1,10 @@
 // package: update / update
 // type:    logic (self-update check)
 // job:     a once-a-day, best-effort check of the GitHub latest release; if it's
-//          newer, print a one-line notice and drop a `sindri-do-upgrade` script.
-//          The script is generated (not in the .deb) because the running binary
-//          can't overwrite itself — it does the dpkg install in a separate run.
-// limits:  best-effort and silent on failure — an update check must never get in
-//          sindri's way; the actual upgrade is the generated script's job. The
-//          network call is bounded to 2s (the "ping"); past that we forget it.
+//          newer, print a one-line notice and drop a `sindri-do-upgrade` script,
+//          which is generated because a running binary can't overwrite itself.
+// limits:  best-effort and silent on failure — a check must never get in the way.
+//          The network call is bounded to 2s; past that we forget it.
 package update
 
 import (
@@ -31,9 +29,8 @@ import (
 // repo is the GitHub repository whose releases are checked and installed.
 const repo = "flocko-motion/sindri"
 
-// netTimeout bounds the daily background check — the "ping": no answer in this
-// long and we forget about it. explicitTimeout is longer because `sindri upgrade`
-// is a deliberate, blocking request — the user is waiting for an answer.
+// netTimeout bounds the daily background ping; explicitTimeout is longer because `sindri upgrade`
+// is a deliberate request with the user waiting.
 const (
 	netTimeout      = 2 * time.Second
 	explicitTimeout = 10 * time.Second
@@ -46,11 +43,9 @@ type cache struct {
 	Latest    string `json:"latest"`     // latest release tag seen
 }
 
-// MaybeNotify checks (at most once a day) whether a newer sindri release exists
-// and, if so, writes the `sindri-do-upgrade` script and prints a one-line notice to
-// w. It is best-effort: any failure (offline, timeout, parse, fs) is ignored, and
-// it does nothing for a dev build (version "dev"/empty). The caller should only
-// pass an interactive stream (e.g. a terminal stderr).
+// MaybeNotify checks at most once a day for a newer release and, if there is one, writes the
+// `sindri-do-upgrade` script and prints a one-line notice to w. Best-effort: every failure is
+// ignored, and a dev build does nothing. Pass only an interactive stream.
 func MaybeNotify(current string, w io.Writer) {
 	if current == "" || current == "dev" {
 		return // unversioned local build — nothing to compare against
@@ -86,13 +81,9 @@ func MaybeNotify(current string, w io.Writer) {
 		c.Latest, current, hint)
 }
 
-// Upgrade is the explicit, on-demand action behind `sindri upgrade [version]`: it
-// hits GitHub (no daily throttle) with a longer timeout since the user is waiting.
-// With no target it checks the latest release and, if newer, writes the
-// sindri-do-upgrade helper (targeting latest) and recommends it; if up to date it
-// says so. With an explicit target it resolves that exact release (allowing a
-// reinstall or a downgrade) and writes the helper to install THAT version. Returns
-// an error only when the check itself couldn't run (offline, unknown version, etc.).
+// Upgrade backs `sindri upgrade [version]`: no throttle, longer timeout, since the user waits. No
+// target writes the helper if the latest is newer; a target resolves that release exactly (so a
+// reinstall or downgrade works). It errors only when the check couldn't run.
 func Upgrade(current, target string, w io.Writer) error {
 	if current == "" || current == "dev" {
 		fmt.Fprintln(w, "this is a dev build (no baked version) — nothing to compare against a release.")
@@ -123,11 +114,9 @@ func Upgrade(current, target string, w io.Writer) error {
 	return nil
 }
 
-// upgradeTo resolves an explicit release tag and writes the helper to install it —
-// no newer-than check, so it supports reinstalling the current version or moving to
-// an older one (downgrades are allowed). The target must be a semver (optionally
-// v-prefixed), since releases are semver tags — anything else is rejected up front,
-// before any network call.
+// upgradeTo resolves an explicit tag and writes the helper for it, with no newer-than check, so a
+// reinstall or downgrade works. The target must be semver (v-prefix optional), rejected before any
+// network call.
 func upgradeTo(current, target string, w io.Writer) error {
 	if _, _, _, ok := parseSemver(target); !ok {
 		return fmt.Errorf("invalid version %q — use a semver like v1.2.3 or 1.2.3 (see `sindri upgrade --list`)", target)
@@ -170,10 +159,8 @@ func ListReleases(w io.Writer) error {
 	return nil
 }
 
-// fetchRelease resolves a release's canonical tag from GitHub, bounded by timeout.
-// An empty tag means the latest release. For an explicit tag that 404s, it retries
-// once with the "v" prefix toggled (so "0.12.1" finds a "v0.12.1" tag and vice
-// versa) before giving up.
+// fetchRelease resolves a release's canonical tag, bounded by timeout ("" = latest). An explicit
+// tag that 404s is retried once with the "v" prefix toggled, so "0.12.1" finds "v0.12.1".
 func fetchRelease(tag string, timeout time.Duration) (string, error) {
 	name, err := fetchReleaseExact(tag, timeout)
 	if err != nil && tag != "" {
@@ -186,8 +173,8 @@ func fetchRelease(tag string, timeout time.Duration) (string, error) {
 	return name, err
 }
 
-// errNotFound is a release/tag the API reports as 404 — distinct from a transport or
-// rate-limit failure, so callers can drive the v-prefix fallback / "no such tag".
+// errNotFound is a 404 from the API, kept distinct from transport or rate-limit failures so
+// callers can drive the v-prefix fallback.
 var errNotFound = errors.New("not found")
 
 // fetchReleaseExact fetches one release by tag ("" = latest) without any fallback.
@@ -215,11 +202,9 @@ func fetchReleaseExact(tag string, timeout time.Duration) (string, error) {
 	return rel.TagName, nil
 }
 
-// githubJSON fetches a GitHub API path (e.g. "repos/o/r/releases/latest"), preferring
-// the gh CLI — which uses the user's auth and so isn't subject to the low (60/hour
-// per-IP) anonymous rate limit that 403s on shared networks/VPNs. Without gh it falls
-// back to a direct HTTPS GET carrying a User-Agent (GitHub requires one) and any
-// GITHUB_TOKEN/GH_TOKEN from the environment. A 404 comes back as errNotFound.
+// githubJSON fetches a GitHub API path, preferring the gh CLI — its auth escapes the 60/hour
+// anonymous limit that 403s on shared networks. Without gh, a direct GET with a User-Agent and any
+// GITHUB_TOKEN/GH_TOKEN. A 404 comes back as errNotFound.
 func githubJSON(path string, timeout time.Duration) ([]byte, error) {
 	if _, err := exec.LookPath("gh"); err == nil {
 		return ghAPI(path, timeout)
@@ -250,9 +235,8 @@ func ghAPI(path string, timeout time.Duration) ([]byte, error) {
 	return stdout.Bytes(), nil
 }
 
-// httpGitHubJSON GETs https://api.github.com/<path> directly, with a User-Agent and
-// any token from the environment; it reports the status (and rate-limit headers)
-// under --debug so a 403 is self-explanatory.
+// httpGitHubJSON GETs api.github.com directly with a User-Agent and any env token, reporting the
+// status and rate-limit headers under --debug so a 403 explains itself.
 func httpGitHubJSON(path string, timeout time.Duration) ([]byte, error) {
 	url := "https://api.github.com/" + path
 	req, err := http.NewRequest(http.MethodGet, url, nil)
@@ -324,9 +308,8 @@ func fetchReleaseTags(timeout time.Duration) ([]string, error) {
 	return tags, nil
 }
 
-// newer reports whether release tag latest is a higher semver than current. A tag
-// that doesn't parse as vX.Y.Z (a dev/describe build, a pre-release) is never
-// considered newer — we don't nag on versions we can't compare.
+// newer reports whether latest is a higher semver than current. A tag that doesn't parse as vX.Y.Z
+// is never newer — no nagging on versions we can't compare.
 func newer(latest, current string) bool {
 	la, lb, lc, ok1 := parseSemver(latest)
 	ca, cb, cc, ok2 := parseSemver(current)
@@ -343,9 +326,8 @@ func newer(latest, current string) bool {
 	}
 }
 
-// parseSemver pulls major/minor/patch out of a "vX.Y.Z" tag (any pre-release or
-// build-metadata suffix after a "-" or "+" is dropped); ok is false unless it is
-// three dotted integers.
+// parseSemver pulls major/minor/patch out of a "vX.Y.Z" tag, dropping any -pre/+meta suffix; ok is
+// false unless it is three dotted integers.
 func parseSemver(s string) (maj, min, pat int, ok bool) {
 	s = strings.TrimPrefix(strings.TrimSpace(s), "v")
 	if i := strings.IndexAny(s, "-+"); i >= 0 {
@@ -384,11 +366,8 @@ func writeCache(path string, c cache) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
-// writeUpdater drops the `sindri-do-upgrade` script into ~/.local/bin (created if
-// needed) and returns its path. It's generated rather than shipped in the .deb so
-// it can install a new .deb that overwrites the running sindri binary. (Named
-// distinctly from the `sindri upgrade` command, which only checks and recommends
-// running this.)
+// writeUpdater drops `sindri-do-upgrade` into ~/.local/bin and returns its path. Generated rather
+// than shipped so it can replace the running binary; `sindri upgrade` only recommends it.
 func writeUpdater(tag string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -417,67 +396,25 @@ func updaterHint(path string) string {
 	return " (" + path + ")"
 }
 
-// updaterScript is the generated upgrade script for the host OS. The OS/arch are
-// baked in at generation time (this runs on the same machine that generated it),
-// so the script picks the right release asset without runtime detection. Replacing
-// the binaries while sindri/the hub runs is safe — the running process keeps its
-// open inode (dpkg and the atomic mv below both preserve it).
+// updaterScript generates the upgrade script, OS/arch baked in so it needs no detection. One
+// tarball path for every OS: ~/.local/bin only, so no second copy can shadow this one.
 func updaterScript(goos, goarch, tag string) string {
-	if goos == "darwin" {
-		return darwinUpdaterScript(goarch, tag)
-	}
-	return debUpdaterScript(tag)
+	return tarballUpdaterScript(goos, goarch, tag)
 }
 
-// debUpdaterScript downloads a release's .deb and installs it (needs sudo). An empty
-// tag installs the latest; a set tag installs exactly that release. It prefers `gh
-// release download` (the user's auth, no anonymous rate limit) and falls back to a
-// direct curl of the release API when gh isn't installed.
-func debUpdaterScript(tag string) string {
+// tarballUpdaterScript installs the goos/arch tarball over the binaries beside the running sindri,
+// by rename within that dir so a live hub is swapped atomically.
+func tarballUpdaterScript(goos, arch, tag string) string {
 	return fmt.Sprintf(`#!/usr/bin/env bash
-# Generated by sindri. Installs the sindri .deb (gh preferred, curl fallback).
-set -euo pipefail
-repo=%[1]q
-tag=%[2]q   # empty = latest
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
-if command -v gh >/dev/null 2>&1; then
-	echo "fetching via gh (${tag:-latest})…"
-	args=(--repo "$repo" --pattern '*.deb' --dir "$tmp" --clobber)
-	[ -n "$tag" ] && args=("$tag" "${args[@]}")
-	gh release download "${args[@]}"
-	deb="$(find "$tmp" -maxdepth 1 -name '*.deb' | head -1)"
-else
-	rel="latest"; [ -n "$tag" ] && rel="tags/$tag"
-	echo "fetching via curl ($rel)…"
-	url=$(curl -fsSL "https://api.github.com/repos/$repo/releases/$rel" \
-	  | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*\.deb"' | head -1 | cut -d'"' -f4)
-	[ -n "$url" ] || { echo "no .deb asset in the $rel release" >&2; exit 1; }
-	echo "downloading $url"
-	deb="$tmp/sindri.deb"
-	curl -fsSL "$url" -o "$deb"
-fi
-[ -n "${deb:-}" ] && [ -f "$deb" ] || { echo "no .deb downloaded" >&2; exit 1; }
-echo "installing (sudo dpkg -i)…"
-sudo dpkg -i "$deb" || sudo apt-get install -f -y
-echo "done — run 'sindri --version' to confirm."
-`, repo, tag)
-}
-
-// darwinUpdaterScript downloads the latest macOS tarball for arch and installs it
-// over the current binaries. It replaces them next to the running sindri (so it
-// upgrades whichever install is in use), via a rename within that dir so a live
-// sindri/hub is swapped atomically, and clears the Gatekeeper quarantine.
-func darwinUpdaterScript(arch, tag string) string {
-	return fmt.Sprintf(`#!/usr/bin/env bash
-# Generated by sindri. Installs the macOS tarball (darwin/%[2]s) over the current
-# install — no sudo when it lives in ~/.local/bin. Prefers gh (the user's auth, no
+# Generated by sindri. Installs the %[4]s/%[2]s tarball over the current install in
+# ~/.local/bin, so it needs no elevated privileges. Prefers gh (the user's auth, no
 # anonymous rate limit); falls back to curl of the release API when gh is absent.
 set -euo pipefail
 repo=%[1]q
 arch=%[2]q
 tag=%[3]q   # empty = latest
-pattern="*_darwin_${arch}.tar.gz"
+goos=%[4]q
+pattern="*_${goos}_${arch}.tar.gz"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 if command -v gh >/dev/null 2>&1; then
@@ -490,27 +427,28 @@ else
 	rel="latest"; [ -n "$tag" ] && rel="tags/$tag"
 	echo "fetching via curl ($rel)…"
 	url=$(curl -fsSL "https://api.github.com/repos/$repo/releases/$rel" \
-	  | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*_darwin_'"$arch"'\.tar\.gz"' | head -1 | cut -d'"' -f4)
-	[ -n "$url" ] || { echo "no darwin_$arch tarball in the $rel release" >&2; exit 1; }
+	  | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*_'"${goos}_${arch}"'\.tar\.gz"' | head -1 | cut -d'"' -f4)
+	[ -n "$url" ] || { echo "no ${goos}_$arch tarball in the $rel release" >&2; exit 1; }
 	echo "downloading $url"
 	tarball="$tmp/sindri.tar.gz"
 	curl -fsSL "$url" -o "$tarball"
 fi
-[ -n "${tarball:-}" ] && [ -f "$tarball" ] || { echo "no darwin_$arch tarball downloaded" >&2; exit 1; }
-# Upgrade wherever the current sindri lives; fall back to ~/.local/bin.
+[ -n "${tarball:-}" ] && [ -f "$tarball" ] || { echo "no ${goos}_$arch tarball downloaded" >&2; exit 1; }
+# ~/.local/bin is the one install location, so upgrade in place wherever sindri is.
 dest="$(dirname "$(command -v sindri 2>/dev/null || true)")"
 [ -n "$dest" ] && [ -d "$dest" ] || dest="$HOME/.local/bin"
 mkdir -p "$dest"
 tar -C "$tmp" -xzf "$tarball"
-src="$(find "$tmp" -maxdepth 1 -type d -name 'sindri_*_darwin_*' | head -1)"
+src="$(find "$tmp" -maxdepth 1 -type d -name "sindri_*_${goos}_*" | head -1)"
 [ -n "$src" ] || { echo "unexpected tarball layout" >&2; exit 1; }
-for bin in sindri sindri-worker brokkr td yq; do
+# brokkr-linux is the pod's brokkr — the hub publishes it to pod-bin, so it must land too.
+for bin in sindri sindri-worker brokkr brokkr-linux td yq; do
 	[ -f "$src/$bin" ] || continue
-	xattr -d com.apple.quarantine "$src/$bin" 2>/dev/null || true # clear Gatekeeper
+	xattr -d com.apple.quarantine "$src/$bin" 2>/dev/null || true # Gatekeeper; no-op off macOS
 	chmod +x "$src/$bin"
 	cp "$src/$bin" "$dest/.$bin.new"
 	mv -f "$dest/.$bin.new" "$dest/$bin" # atomic within $dest; safe while running
 done
 echo "installed to $dest — run 'sindri --version' to confirm."
-`, repo, arch, tag)
+`, repo, arch, tag, goos)
 }

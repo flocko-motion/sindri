@@ -69,31 +69,18 @@ type CommentBlock struct {
 	Text  []string // the comment's content, markers stripped
 }
 
-// ScanComments splits a file into its comment blocks, in order. A block runs until CODE ends
-// it: comment runs separated only by blank lines are one block, and only the comment lines
-// count toward its length.
-//
-// Blank lines deliberately do not end a block. A long comment broken up by blank lines is
-// still one long comment, and if a gap ended a block then any file could halve its measured
-// comment length by inserting them — the statistic would measure formatting instead of prose.
-//
-// Delimiter-only lines do not count either, for the same reason. `/**` and `*/` on lines of
-// their own are how a block comment is FORMATTED, not something a reader reads, so charging
-// for them would make identical prose cost two lines more in JSDoc than in Go — enough that no
-// idiomatically documented TypeScript file could reach a mean the same Go file reaches easily.
-// A bare `*` (like a bare `//`) INSIDE a block is a paragraph break its author chose, so it
-// still counts, exactly as it does in Go.
-//
-// The scan is lexical, not a parse: a line whose first non-space characters are a comment
-// marker counts. That misreads a marker inside a multi-line string literal, which is rare
-// enough in real source to be worth the simplicity — and both rules using this are statistical
-// or structural, so a stray block changes no verdict on its own.
+// ScanComments splits a file into its comment blocks, in order. Only CODE ends a block, so runs
+// separated by blank lines are one — otherwise any file could halve its measured length by
+// inserting gaps, and the statistic would measure formatting. Delimiter-only lines (`/**`, `*/`)
+// and //go: directives count for nothing, for the same reason; a bare `*` or `//` INSIDE a block
+// is a paragraph break its author chose, so it does count. The scan is lexical, not a parse: it
+// misreads a marker inside a string literal, which is rare and harmless to a statistical rule.
 func ScanComments(src string) []CommentBlock {
 	var out []CommentBlock
 	var cur *CommentBlock
 	inMulti := false
-	// open starts a block at the line the comment OPENS on, even when that line is pure
-	// delimiter: a report should point at `/**`, not at the first line of prose below it.
+	// open starts the block at the line it OPENS on, delimiter or not, so a report points at
+	// `/**` rather than the prose below it.
 	open := func(n int) {
 		if cur == nil {
 			cur = &CommentBlock{Line: n}
@@ -118,8 +105,7 @@ func ScanComments(src string) []CommentBlock {
 			open(n)
 			body, closing := trimClose(line)
 			text := strings.TrimSpace(strings.TrimPrefix(body, "*"))
-			// A closing line contributes only what it says before `*/`; a bare `*` mid-block
-			// is a blank line the author wrote, and counts like one.
+			// A closing line gives only what precedes `*/`; a bare `*` mid-block is a blank.
 			if text != "" || !closing {
 				count(text)
 			}
@@ -140,7 +126,9 @@ func ScanComments(src string) []CommentBlock {
 			}
 		case strings.HasPrefix(line, "//"):
 			open(n)
-			count(strings.TrimSpace(strings.TrimPrefix(line, "//")))
+			if !isGoDirective(line) {
+				count(strings.TrimSpace(strings.TrimPrefix(line, "//")))
+			}
 		case line == "":
 			// A gap holds the block open (see above): the blank line itself is not counted.
 		default:
@@ -151,9 +139,12 @@ func ScanComments(src string) []CommentBlock {
 	return out
 }
 
-// trimClose strips a trailing `*/` from a block-comment line, reporting whether it was there.
-// Removing the terminator BEFORE the leading `*` is what lets a bare `*/` reduce to nothing:
-// stripping the star first would leave a `/` behind and count the line as prose.
+// isGoDirective reports whether a line instructs the toolchain (//go:build, //go:embed) rather
+// than a reader. No space after the slashes is what separates one from prose mentioning it.
+func isGoDirective(line string) bool { return strings.HasPrefix(line, "//go:") }
+
+// trimClose strips a trailing `*/`, reporting whether it was there. Removing it BEFORE the
+// leading `*` is what lets a bare `*/` reduce to nothing rather than a stray `/`.
 func trimClose(s string) (string, bool) {
 	if i := strings.Index(s, "*/"); i >= 0 {
 		return strings.TrimSpace(s[:i]), true

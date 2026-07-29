@@ -1,6 +1,7 @@
 .git/pr/
 .grepai/
 bin/
+dist/
 gh-local/gh
 .td-root
 .worktrees/
