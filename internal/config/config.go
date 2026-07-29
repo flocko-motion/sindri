@@ -30,12 +30,32 @@ type GitHub struct {
 	Issues *bool `yaml:"issues"`
 }
 
+// Lint is the `lint:` block — the quality bar `brokkr lint` holds a repo to. Every field is
+// a pointer so an unset key is distinguishable from a deliberate zero, and zero has meaning
+// here: `max_comment_avg: 0` would demand comment-free code.
+//
+// The bar belongs to the repo because it is a house style, not a universal truth: a codebase
+// of small adapters and one of dense algorithms reasonably disagree about how long a comment
+// should be.
+type Lint struct {
+	// MaxLines bounds a source file's length.
+	MaxLines *int `yaml:"max_lines"`
+
+	// MaxCommentAvg bounds the MEAN lines per comment block in a file, so the rule reads a
+	// trend rather than policing each comment: a ten-line explanation is fine when the
+	// one-liners around it carry the average. The file header is excluded (it is a mandated
+	// multi-line block), and a file with few comments is not judged at all — see
+	// lint.MinCommentBlocks.
+	MaxCommentAvg *float64 `yaml:"max_comment_avg"`
+}
+
 // Config is a project's resolved .sindri/config.yaml (repo over global over default).
 type Config struct {
 	Architecture  string `yaml:"architecture"`  // repo-relative architecture doc (default ARCHITECTURE.md)
 	Containerfile string `yaml:"containerfile"` // repo-relative image recipe ("" = filename discovery)
 	ReviewPrompt  string `yaml:"review_prompt"` // repo-relative reviewer-prompt file ("" = default prompt)
 	GitHub        GitHub `yaml:"github"`
+	Lint          Lint   `yaml:"lint"`
 
 	// ArchitectureSet is true when `architecture` was explicitly configured (at either
 	// layer). An explicitly named doc must exist (validate); an unset one need not, and

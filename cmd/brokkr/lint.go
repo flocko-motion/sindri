@@ -17,18 +17,20 @@ import (
 
 	"github.com/flo-at/sindri/internal/adapter/tasks/spec"
 	"github.com/flo-at/sindri/internal/brokkr/lint"
+	"github.com/flo-at/sindri/internal/config"
 	"github.com/spf13/cobra"
 )
 
 func newLintCmd() *cobra.Command {
 	var tags string
 	var maxLines int
+	var maxAvg float64
 	var ignore []string
 	c := &cobra.Command{
 		Use:   "lint [linter]",
-		Short: "Run the quality gate: lint (all) or lint <deadcode|loc|comments|openspec>",
+		Short: "Run the quality gate: lint (all) or lint <deadcode|loc|comments|comment-length|js|openspec>",
 		Long: "Run the project's static-analysis linters. With no argument, runs them " +
-			"all (deadcode, loc, comments, openspec) with a summary; with a linter " +
+			"all (deadcode, loc, comments, comment-length, js, openspec) with a summary; with a linter " +
 			"name, runs just that one. Exits non-zero on any violation, so it can gate " +
 			"CI (add --tail to also print the exit status inline).\n\n" +
 			"Use --ignore to exclude files you can't fix (e.g. generated code): a " +
@@ -65,20 +67,43 @@ func newLintCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// The repo's own bar, where it set one: a house style belongs to the house. An
+			// explicit flag still wins, so a one-off run can override it.
+			lines, avg := repoLintBar(cmd, maxLines, maxAvg)
 			return runLint(out, func() (bool, error) {
-				return runLinters(out, which, tags, maxLines, ig)
+				return runLinters(out, which, tags, lines, avg, ig)
 			})
 		},
 	}
 	c.Flags().StringVar(&tags, "tags", "", "comma-separated list of extra build tags (deadcode)")
 	c.Flags().IntVar(&maxLines, "max", lint.DefaultMaxLines, "maximum lines per file (loc)")
+	c.Flags().Float64Var(&maxAvg, "max-comment-avg", lint.DefaultMaxCommentAvg, "maximum mean lines per comment block (comment-length)")
 	c.Flags().StringArrayVar(&ignore, "ignore", nil, "skip files matching this glob (no '/' = basename anywhere) or 're:'-prefixed regexp; repeatable")
 	return c
 }
 
+// repoLintBar resolves the quality bar: the repo's `lint:` block from .sindri/config.yaml,
+// unless the caller passed the flag explicitly. An unreadable config falls back to the flag
+// defaults — brokkr is a linter, not the arbiter of a project's config, and the hub reports a
+// broken one already.
+func repoLintBar(cmd *cobra.Command, flagLines int, flagAvg float64) (int, float64) {
+	lines, avg := flagLines, flagAvg
+	cfg, err := config.Load(".")
+	if err != nil {
+		return lines, avg
+	}
+	if cfg.Lint.MaxLines != nil && !cmd.Flags().Changed("max") {
+		lines = *cfg.Lint.MaxLines
+	}
+	if cfg.Lint.MaxCommentAvg != nil && !cmd.Flags().Changed("max-comment-avg") {
+		avg = *cfg.Lint.MaxCommentAvg
+	}
+	return lines, avg
+}
+
 // runLinters runs the named linter, or all of them when which is empty. Returns
 // whether any violation was found.
-func runLinters(out io.Writer, which, tags string, maxLines int, ig *lint.Ignore) (bool, error) {
+func runLinters(out io.Writer, which, tags string, maxLines int, maxAvg float64, ig *lint.Ignore) (bool, error) {
 	switch which {
 	case "deadcode":
 		return lint.Deadcode([]string{"./..."}, tags, ig, out)
@@ -86,12 +111,16 @@ func runLinters(out io.Writer, which, tags string, maxLines int, ig *lint.Ignore
 		return lint.LOC([]string{"."}, maxLines, ig, out)
 	case "comments":
 		return runComments(out, ig)
+	case "comment-length":
+		return lint.CommentAvg([]string{"."}, maxAvg, ig, out)
+	case "js":
+		return lint.JSLint(".", ig, out)
 	case "openspec":
 		return lintOpenspec(out), nil
 	case "":
-		return runAll(out, tags, maxLines, ig)
+		return runAll(out, tags, maxLines, maxAvg, ig)
 	default:
-		return false, fmt.Errorf("unknown linter %q (want deadcode|loc|comments|openspec)", which)
+		return false, fmt.Errorf("unknown linter %q (want deadcode|loc|comments|comment-length|js|openspec)", which)
 	}
 }
 
@@ -113,7 +142,7 @@ func runComments(out io.Writer, ig *lint.Ignore) (bool, error) {
 // findings — so the culprit is obvious even when the live sections scrolled off or
 // `--tail` clipped them (the reason you never have to run a single linter to find
 // out what failed).
-func runAll(out io.Writer, tags string, maxLines int, ig *lint.Ignore) (bool, error) {
+func runAll(out io.Writer, tags string, maxLines int, maxAvg float64, ig *lint.Ignore) (bool, error) {
 	linters := []struct {
 		name string
 		run  func(io.Writer) (bool, error)
@@ -121,6 +150,8 @@ func runAll(out io.Writer, tags string, maxLines int, ig *lint.Ignore) (bool, er
 		{"deadcode", func(w io.Writer) (bool, error) { return lint.Deadcode([]string{"./..."}, tags, ig, w) }},
 		{"loc", func(w io.Writer) (bool, error) { return lint.LOC([]string{"."}, maxLines, ig, w) }},
 		{"comments", func(w io.Writer) (bool, error) { return runComments(w, ig) }},
+		{"comment-length", func(w io.Writer) (bool, error) { return lint.CommentAvg([]string{"."}, maxAvg, ig, w) }},
+		{"js", func(w io.Writer) (bool, error) { return lint.JSLint(".", ig, w) }},
 		{"openspec", func(w io.Writer) (bool, error) { return lintOpenspec(w), nil }},
 	}
 	var failed []string
@@ -130,7 +161,11 @@ func runAll(out io.Writer, tags string, maxLines int, ig *lint.Ignore) (bool, er
 		fmt.Fprintf(out, "== %s ==\n", l.name)
 		bad, err := l.run(io.MultiWriter(out, &buf)) // stream live AND capture for the recap
 		if err != nil {
-			return false, err
+			// One linter breaking does not cancel the others: they are independent checks, and
+			// the findings of the rest are exactly what you need while you fix this one. The
+			// error counts as that linter FAILING, so the gate still goes red.
+			fmt.Fprintf(io.MultiWriter(out, &buf), "%s: %v\n", l.name, err)
+			bad = true
 		}
 		fmt.Fprintln(out)
 		if bad {

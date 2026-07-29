@@ -1,7 +1,7 @@
 // package: lint / loc
 // type:    logic
-// job:     the file-length linter — walks Go sources under the given roots and
-//          reports any file exceeding the line limit.
+// job:     the file-length linter — walks every linted source under the given roots (Go and
+//          the TypeScript/JavaScript family) and reports any file exceeding the line limit.
 // limits:  reports only; the CLI wiring and exit codes live in cmd/sindri/lint.go.
 package lint
 
@@ -13,15 +13,20 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 )
 
 // DefaultMaxLines is the per-file limit from the architecture spec.
 const DefaultMaxLines = 700
 
-// skipDirs are directories never scanned for source length.
+// skipDirs are directories never scanned: code the project did not write, and output it did
+// not hand-author. `.sindri` holds the hub's per-agent homes, which carry whole vendored plugin
+// trees — third-party TypeScript that would otherwise be reported as this project's own.
 var skipDirs = map[string]bool{
-	".git": true, ".worktrees": true, "vendor": true, "node_modules": true,
+	".git": true, ".worktrees": true, ".sindri": true, ".todos": true,
+	"vendor": true, "node_modules": true,
+	// JS/TS build output and coverage: generated, and often shipped in-tree.
+	"dist": true, "build": true, "out": true, ".next": true, ".nuxt": true,
+	".svelte-kit": true, "coverage": true, ".turbo": true,
 }
 
 // LOC walks the given roots (default ".") for .go files and reports each file
@@ -52,7 +57,7 @@ func LOC(roots []string, maxLines int, ig *Ignore, w io.Writer) (bool, error) {
 				}
 				return nil
 			}
-			if !strings.HasSuffix(path, ".go") || ig.Match(path) {
+			if LangOf(path) == LangNone || ig.Match(path) {
 				return nil
 			}
 			n, err := countLines(path)

@@ -61,10 +61,15 @@ func Comments(roots []string, ig *Ignore, w io.Writer) (bool, error) {
 			}
 			// Test files are exempt from the header rule (their subject is the file
 			// they test); their decls are not public API either.
-			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || ig.Match(path) {
+			if IsTestFile(path) || ig.Match(path) {
 				return nil
 			}
-			viols = append(viols, checkFileComments(path)...)
+			switch LangOf(path) {
+			case LangGo:
+				viols = append(viols, checkFileComments(path)...)
+			case LangTS:
+				viols = append(viols, checkTSHeader(path)...)
+			}
 			return nil
 		})
 		if err != nil {
@@ -81,6 +86,78 @@ func Comments(roots []string, ig *Ignore, w io.Writer) (bool, error) {
 		fmt.Fprintln(w, v.msg)
 	}
 	return len(viols) > 0, nil
+}
+
+// checkTSHeader holds a TypeScript/JavaScript file to the same four-field header as a Go one:
+// the file says what it is for before it says how it works, in one place a reader and a code
+// map can both find. The fields are identical across languages so one convention covers the
+// whole repo.
+//
+// Only the header is checked here. Go's per-declaration doc rule leans on go/ast to know what
+// is exported; the equivalent for TS needs a real parser, so that check is left to the
+// ecosystem's own tools (-> the eslint/tsc pass).
+func checkTSHeader(path string) []commentViol {
+	src, ok := readSource(path)
+	if !ok {
+		return nil
+	}
+	if strings.Contains(src, "@generated") || strings.Contains(src, "eslint-disable -- generated") {
+		return nil // generated files are not hand-authored — exempt
+	}
+	header, has := HeaderBlock(ScanComments(src))
+	if !has {
+		return []commentViol{{path, 1, fmt.Sprintf("%s: missing canonical header (a package/type/job/limits comment block at the top of the file)", path)}}
+	}
+	var viols []commentViol
+	fields := headerFieldsFromLines(header.Text)
+	var missing []string
+	for _, f := range canonicalHeaderFields {
+		if _, ok := fields[f]; !ok {
+			missing = append(missing, f)
+		}
+	}
+	if len(missing) > 0 {
+		viols = append(viols, commentViol{path, header.Line,
+			fmt.Sprintf("%s:%d: header missing field(s): %s", path, header.Line, strings.Join(missing, ", "))})
+	}
+	for _, f := range canonicalHeaderFields {
+		if n := len(fields[f]); n > DefaultMaxHeaderFieldLen {
+			viols = append(viols, commentViol{path, header.Line,
+				fmt.Sprintf("%s:%d: header field %q is %d chars (max %d) — keep it concise", path, header.Line, f, n, DefaultMaxHeaderFieldLen)})
+		}
+	}
+	return viols
+}
+
+// headerFieldsFromLines reads `field: value` entries out of a header's lines, joining a
+// continuation (an indented line with no `field:` of its own) onto the field above it.
+func headerFieldsFromLines(lines []string) map[string]string {
+	fields := map[string]string{}
+	current := ""
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		name, rest, found := strings.Cut(line, ":")
+		if found && isHeaderFieldName(name) {
+			current = strings.ToLower(strings.TrimSpace(name))
+			fields[current] = strings.TrimSpace(rest)
+			continue
+		}
+		if current != "" && line != "" {
+			fields[current] += " " + line
+		}
+	}
+	return fields
+}
+
+// isHeaderFieldName reports whether a `name:` prefix is one of the canonical fields.
+func isHeaderFieldName(name string) bool {
+	n := strings.ToLower(strings.TrimSpace(name))
+	for _, f := range canonicalHeaderFields {
+		if n == f {
+			return true
+		}
+	}
+	return false
 }
 
 // checkFileComments parses one file and returns its header and exported-doc

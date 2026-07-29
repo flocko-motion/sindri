@@ -49,6 +49,13 @@ func Deadcode(patterns []string, tags string, ig *Ignore, w io.Writer) (found bo
 		fmt.Fprintln(w, "deadcode: go toolchain not found on PATH — skipping (optional)")
 		return false, nil
 	}
+	// Go is one language brokkr lints, not a precondition for linting. A TypeScript-only
+	// project has no packages for `./...` to match, and loading it would fail the whole gate
+	// before the checks that DO apply to it ever ran.
+	if !hasGoSources(".") {
+		fmt.Fprintln(w, "deadcode: no Go sources here — skipping (not a Go project)")
+		return false, nil
+	}
 	cfg := &packages.Config{
 		BuildFlags: []string{"-tags=" + tags},
 		Mode:       packages.LoadAllSyntax | packages.NeedModule,
