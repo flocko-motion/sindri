@@ -1,9 +1,12 @@
 package workflow
 
 import (
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
@@ -72,6 +75,61 @@ func TestScrapPRStopsReviewer(t *testing.T) {
 	}
 	if got, _ := ps.ReviewingPR("rev"); got != "" {
 		t.Fatalf("reviewer should no longer be reviewing (verdict recorded), got %q", got)
+	}
+}
+
+// TestScrapEmptiesAStandingBranch: a planner's branch is its HOME, created at launch and reused
+// for every proposal. Deleting it meant detaching the worktree to free the name, which left the
+// planner on a HEAD no branch held — it kept committing there and could never rebase again. Scrap
+// must throw the plans away and leave the branch, attached, at the reference branch.
+func TestScrapEmptiesAStandingBranch(t *testing.T) {
+	root := t.TempDir()
+	if err := exec.Command("git", "init", "-q", "-b", "main", root).Run(); err != nil {
+		t.Skipf("git unavailable: %v", err)
+	}
+	run := func(dir string, args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+	}
+	run(root, "config", "user.email", "t@t")
+	run(root, "config", "user.name", "t")
+	run(root, "commit", "-q", "--allow-empty", "-m", "base")
+	wt := filepath.Join(root, ".worktrees", "galar")
+	run(root, "worktree", "add", "-q", "-b", "plan-galar", wt, "HEAD")
+	run(wt, "commit", "-q", "--allow-empty", "-m", "a proposal the user does not want")
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	ps := st.For("proj")
+	if err := ps.PutAgent(store.Agent{Name: "galar", Role: "planner", Workspace: ".worktrees/galar"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutPR(store.PR{ID: "pr-plan-galar", Task: "os-new", Agent: "galar", Branch: "plan-galar", Base: "main", Status: "open"}); err != nil {
+		t.Fatal(err)
+	}
+
+	e := New(st, &stubDeps{root: root, alive: false})
+	if err := e.ScrapPR("proj", "pr-plan-galar"); err != nil {
+		t.Fatalf("ScrapPR: %v", err)
+	}
+
+	// The branch still exists AND the worktree is still on it — the failure was losing both.
+	if out, err := exec.Command("git", "-C", root, "rev-parse", "--verify", "refs/heads/plan-galar").Output(); err != nil {
+		t.Fatalf("a standing branch must survive a scrap: %v %s", err, out)
+	}
+	if b, err := git.CurrentBranch(wt); err != nil || b != "plan-galar" {
+		t.Fatalf("worktree must stay attached to plan-galar, got %q (%v)", b, err)
+	}
+	// And the plans are gone: the branch sits back on base.
+	base, _ := exec.Command("git", "-C", root, "rev-parse", "main").Output()
+	tip, _ := exec.Command("git", "-C", wt, "rev-parse", "HEAD").Output()
+	if strings.TrimSpace(string(tip)) != strings.TrimSpace(string(base)) {
+		t.Errorf("plans should be discarded: tip %s, base %s", tip, base)
 	}
 }
 

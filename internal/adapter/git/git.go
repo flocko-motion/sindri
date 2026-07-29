@@ -167,6 +167,20 @@ func isAncestor(dir, a, b string) bool {
 	return exec.Command("git", "-C", dir, "merge-base", "--is-ancestor", a, b).Run() == nil
 }
 
+// ResetBranchTo empties dir's checked-out branch back to ref: commits, tracked edits and untracked
+// files all go, while the branch itself and dir's attachment to it survive. That is what a STANDING
+// branch needs — deleting one has to detach its worktree first, which leaves the agent homeless.
+func ResetBranchTo(dir, ref string) error {
+	if out, err := exec.Command("git", "-C", dir, "reset", "--hard", ref).CombinedOutput(); err != nil {
+		return fmt.Errorf("reset %s to %s: %s", dir, ref, strings.TrimSpace(string(out)))
+	}
+	// Uncommitted new files are part of the discarded work; ignored paths (td's store) are not.
+	if out, err := exec.Command("git", "-C", dir, "clean", "-fd").CombinedOutput(); err != nil {
+		return fmt.Errorf("clean %s: %s", dir, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // DetachHead detaches dir from its branch, freeing that branch for deletion elsewhere.
 func DetachHead(dir string) error {
 	if out, err := exec.Command("git", "-C", dir, "checkout", "--detach").CombinedOutput(); err != nil {

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/hub/repo"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
@@ -54,12 +55,11 @@ func (e *Engine) DiscardPR(project, prID string) error {
 	return nil
 }
 
-// ScrapPR discards a PR (host/human-only) — the companion to closing/scrapping its
-// task when the human decides the work isn't wanted. It deletes the task's branch
-// (unpushed local work on it is intentionally discarded) and marks the PR "scrapped"
-// so it leaves the board. It does NOT touch the working agent: the paired task close
-// (finishTask) interrupts and frees it, and pairing them here would double-message the
-// worker. A missing PR is an error; a branch that's already gone is fine (logged).
+// ScrapPR discards a PR (host/human-only) — the companion to closing/scrapping its task when the
+// human decides the work isn't wanted. It throws the work away (-> discardBranch) and marks the PR
+// "scrapped" so it leaves the board. It does NOT touch the working agent: the paired task close
+// (finishTask) interrupts and frees it, and pairing them here would double-message the worker. A
+// missing PR is an error; a branch that's already gone is fine (logged).
 func (e *Engine) ScrapPR(project, prID string) error {
 	ps := e.store.For(project)
 	pr, ok, err := ps.GetPR(prID)
@@ -88,15 +88,17 @@ func (e *Engine) ScrapPR(project, prID string) error {
 		_ = ps.Log(r.Author, "review-cancelled", prID)
 	}
 
-	// Delete the task's branch. It's usually checked out in the owning agent's
-	// worktree, so ScrapBranch detaches that first. Best-effort but LOUD: a failure is
-	// recorded on the PR rather than leaving a lingering branch silently.
+	// Discard the work. Best-effort but LOUD: a failure is recorded on the PR rather than
+	// leaving the branch as it was, silently.
+	disposal := ""
 	if pr.Branch != "" {
 		wt := ""
 		if a, ok, _ := ps.GetAgent(pr.Agent); ok && a.Workspace != "" && a.Workspace != "." {
 			wt = filepath.Join(e.deps.ProjectRoot(project), a.Workspace)
 		}
-		if derr := repo.ScrapBranch(e.deps.ProjectRoot(project), wt, pr.Branch); derr != nil {
+		var derr error
+		disposal, derr = e.discardBranch(project, pr, wt)
+		if derr != nil {
 			_ = ps.LogPR(prID, "scrap-branch-failed", derr.Error())
 		}
 	}
@@ -105,7 +107,29 @@ func (e *Engine) ScrapPR(project, prID string) error {
 	if err := ps.PutPR(pr); err != nil {
 		return err
 	}
-	_ = ps.LogPR(prID, "scrapped", "discarded with its task; branch "+pr.Branch+" removed")
+	_ = ps.LogPR(prID, "scrapped", "discarded with its task; "+disposal)
 	e.deps.Notify()
 	return nil
+}
+
+// discardBranch throws away a scrapped PR's work and says what it did.
+//
+// A planner's branch is STANDING — its home, created at launch and reused for every proposal — so
+// scrapping empties it back to the reference branch. Deleting it instead (as this did) meant
+// detaching the worktree to free the name, which left the planner on a HEAD no branch held: it kept
+// committing there and could never rebase again. A worker's branch belongs to one task, so that one
+// is still deleted outright.
+func (e *Engine) discardBranch(project string, pr store.PR, wt string) (string, error) {
+	root := e.deps.ProjectRoot(project)
+	if pr.Branch != PlannerBranch(pr.Agent) {
+		return "branch " + pr.Branch + " removed", repo.ScrapBranch(root, wt, pr.Branch)
+	}
+	base, err := e.baseBranch(root)
+	if err != nil {
+		base = pr.Base // the reference branch moved or is unreadable; the PR's own base still holds
+	}
+	if wt == "" {
+		return "", fmt.Errorf("standing branch %s has no worktree to reset", pr.Branch)
+	}
+	return "branch " + pr.Branch + " reset to " + base, git.ResetBranchTo(wt, base)
 }
