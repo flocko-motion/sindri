@@ -38,10 +38,8 @@ func (e *Engine) Tasks(project string) ([]store.Task, error) {
 	return e.store.For(project).AllTasks()
 }
 
-// TaskInfo returns one task in a project, refreshed from the source of truth first.
-// Only real td tasks (td-*) live in td's store; gh-* (GitHub issues) and os-* (spec)
-// ids are synced into the hub's own cache with their description, so those are served
-// from there — hitting td by a non-td id just errors and drops the description.
+// TaskInfo returns one task, refreshed from its source of truth. Only td-* live in td's store;
+// gh-* and os-* are served from the hub's cache, since asking td by a non-td id only errors.
 func (e *Engine) TaskInfo(project, id string) (store.Task, error) {
 	if !strings.HasPrefix(id, "td-") {
 		t, ok, err := e.store.For(project).GetTask(id)
@@ -104,7 +102,36 @@ func (e *Engine) CreateTask(project string, s TaskSpec) (string, error) {
 	}
 	e.refreshCachedTask(project, id) // targeted: pull just the new task, not a full re-sync
 	e.deps.Notify()
+	e.nudgeIdleWorkers(project, id, s.Priority)
 	return id, nil
+}
+
+// nudgeIdleWorkers tells idle workers rated work exists. Notify only wakes one already blocked in
+// waitForWork; an agent that asked, got nothing and stopped asking would sit beside a claimable task
+// forever. Unrated tasks are skipped — a worker can't claim one, so the nudge would be noise.
+func (e *Engine) nudgeIdleWorkers(project, id, priority string) {
+	if priority == "" {
+		return
+	}
+	ps := e.store.For(project)
+	agents, err := ps.Roster()
+	if err != nil {
+		return
+	}
+	for _, a := range agents {
+		if a.Role != "worker" {
+			continue // only workers claim backlog tasks
+		}
+		st, _ := ps.GetState(a.Name)
+		if st.Task != "" || (st.Phase != "" && st.Phase != "idle") {
+			continue // holding work, or mid-flow — leave it alone
+		}
+		if !e.deps.AgentAlive(project, a.Name) {
+			continue // nothing to inject into
+		}
+		_ = e.deps.InjectWhenReady(project, a.Name, MsgWorkAvailable(id))
+		_ = ps.Log(a.Name, "nudge", "work available: "+id)
+	}
 }
 
 // HealPlannerTasks releases any backlog task a planner is holding — an invalid
@@ -368,11 +395,9 @@ func (e *Engine) syncTasks(project string, force bool) error {
 	ps := e.store.For(project)
 	var rows []store.Task
 
-	// Every task source, treated identically — the hub never branches on which one it
-	// is. Each Source self-gates (Enabled), normalizes to task.Task with its own id
-	// scheme, and (for a network source) throttles + degrades internally; force asks
-	// for fresh data. td errors fail the sync (it's the primary store); a network
-	// source degrades to its last good list rather than erroring.
+	// Every source treated identically — the hub never branches on which it is. Each self-gates,
+	// normalizes to task.Task, and throttles internally. td errors fail the sync (it is primary);
+	// a network source degrades to its last good list.
 	for _, src := range taskSources() {
 		if !src.Enabled(root) {
 			continue
@@ -409,6 +434,9 @@ func (e *Engine) SetPriority(project, id, priority string) error {
 	}
 	e.refreshCachedTask(project, id) // targeted refresh of the reprioritized task
 	e.deps.Notify()
+	// Rating an unrated task is the moment it becomes claimable — a gh-* issue imported without
+	// one, say — so it needs the same nudge as a task created with a priority.
+	e.nudgeIdleWorkers(project, id, priority)
 	return nil
 }
 
@@ -497,11 +525,9 @@ func (e *Engine) claimLeaf(project, worker string) (string, bool, error) {
 		}
 		_ = e.RefreshTask(project, t.ID)
 	}
-	// Lay the new branch on a CLEAN base. A prior task's leftover WIP — e.g. a task
-	// cancelled out from under this agent while it kept editing — would otherwise
-	// block `checkout -B` or bleed into the new branch. The hub owns git, so it
-	// resets here, at claim time (not at cancel time, since the agent may work on
-	// after the cancel push) — the agent never cleans up its own worktree.
+	// Lay the new branch on a CLEAN base: leftover WIP from a cancelled task would block
+	// `checkout -B` or bleed in. Reset at claim time, not at cancel — the agent may work on after
+	// the push, and it never cleans its own worktree.
 	if err := git.CheckoutDetachedClean(wt, base); err != nil {
 		return "", false, err
 	}

@@ -241,6 +241,13 @@ const ReplyNothingToCheckpoint = "Nothing to checkpoint — you're not working a
 
 const MsgKickoff = "[hub] You're live. Run `sindri` and do exactly what it tells you — it always returns your current job, whether you're new or resuming."
 
+// MsgWorkAvailable nudges an idle worker that rated work now exists. Claiming stays a pull —
+// `sindri` runs the one claim path, so two workers can't take the same task — but an agent that has
+// stopped asking will never hear about a new task, and telling it to poll instead is worse.
+func MsgWorkAvailable(id string) string {
+	return fmt.Sprintf("[hub] New work is ready (%s). Run `sindri` to pick up your next task — it may not be this one, whichever is highest priority.", id)
+}
+
 // MsgMerged tells a worker its PR merged and to fetch the next task.
 func MsgMerged(prID string) string {
 	return fmt.Sprintf("[hub] %s merged. Run `sindri` for your next task.", prID)
