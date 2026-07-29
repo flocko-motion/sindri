@@ -92,6 +92,21 @@ func restartHub(pid int) error {
 // ensureHubRunning starts the detached background hub when none is running, so
 // commands like `coauthor` and `tui` just work without a manual `hub start`. A
 // running hub is left as-is (reconcileHubVersion handles a stale one). It narrates
+// startupBudget is how long a starting hub gets to answer its socket, polled every
+// startupPoll. Generous on purpose: the hub opens its store, reconciles state and reads each
+// registered repo's config before it serves, and on a machine already running a fleet of pods
+// that work contends with them. Ten seconds was tight enough that an ordinary busy moment
+// looked like a failed start — and the process was in fact fine, so the error taught nothing
+// and the retry usually worked. A slow start is worth waiting through; a dead one is caught by
+// the liveness check in the loop, which fails fast regardless of this budget.
+const (
+	startupBudget = 45 * time.Second
+	startupPoll   = 100 * time.Millisecond
+	// startupAttempts derives from the two above, so changing the budget cannot drift from the
+	// loop that enforces it.
+	startupAttempts = int(startupBudget / startupPoll)
+)
+
 // each step — probe, health check, any stale record — so a failed start isn't a
 // mystery.
 func ensureHubRunning() error {
@@ -142,21 +157,21 @@ func startHub() error {
 	pid := c.Process.Pid
 	_ = c.Process.Release()
 	fmt.Fprint(os.Stderr, "waiting for it to answer the health check…")
-	for i := 0; i < 100; i++ { // ~10s for the socket to come up
+	for i := 0; i < startupAttempts; i++ {
 		if hub.IsRunning() {
 			fmt.Fprintf(os.Stderr, " up (pid %d, log: %s)\n", pid, logPath)
 			return nil
 		}
 		// Fast-fail: if the detached process already exited it will never answer,
-		// so stop waiting and report why instead of burning the full 10s.
+		// so stop waiting and report why instead of burning the whole budget.
 		if !hub.ProcessAlive(pid) {
 			fmt.Fprintln(os.Stderr, " it exited.")
 			return fmt.Errorf("hub failed to start: %s (see %s)", lastLogLine(logPath), logPath)
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(startupPoll)
 	}
 	fmt.Fprintln(os.Stderr, " timed out.")
-	return fmt.Errorf("hub did not come up within 10s: %s (see %s)", lastLogLine(logPath), logPath)
+	return fmt.Errorf("hub did not come up within %s: %s (see %s)", startupBudget, lastLogLine(logPath), logPath)
 }
 
 // lastLogLine returns the last non-empty line of the hub log, so a failed start
