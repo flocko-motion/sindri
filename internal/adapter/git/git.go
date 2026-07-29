@@ -8,6 +8,7 @@
 package git
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,13 +16,59 @@ import (
 	"strings"
 )
 
-// Root returns the git repository root containing dir.
+// Root returns the git repository root containing dir. Inside a linked worktree it returns the
+// MAIN worktree's root, not the linked one.
+//
+// That distinction is the difference between working and not working from a worktree.
+// `--show-toplevel` answers "this checkout", which for an agent's worktree is a path the hub
+// has never registered — so a command run there addresses a project that does not exist. Every
+// worktree shares one common git dir, and its parent is the repo as the hub knows it, so
+// resolving through `--git-common-dir` makes a worktree behave like the repo it belongs to.
 func Root(dir string) (string, error) {
-	out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output()
+	top, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output()
 	if err != nil {
-		return "", fmt.Errorf("not a git repo: %w", err)
+		// Relay git's own words. "exit status 128" hides the one thing worth knowing, and the
+		// cases behind it need different fixes: a stale worktree whose repo has MOVED reports
+		// the gitdir it can no longer find, which is the whole diagnosis.
+		return "", fmt.Errorf("not a git repo at %s: %s", dir, gitError(err))
 	}
-	return strings.TrimSpace(string(out)), nil
+	toplevel := strings.TrimSpace(string(top))
+	common, err := exec.Command("git", "-C", dir, "rev-parse", "--git-common-dir").Output()
+	if err != nil {
+		return toplevel, nil // older git without the flag: the checkout is the best answer
+	}
+	// The path is relative to the checkout when git feels like it (typically ".git" in a main
+	// worktree), absolute in a linked one.
+	cd := strings.TrimSpace(string(common))
+	if cd == "" {
+		return toplevel, nil
+	}
+	if !filepath.IsAbs(cd) {
+		cd = filepath.Join(toplevel, cd)
+	}
+	// A worktree's common dir is the main checkout's `.git`; its parent is that checkout. Only
+	// trust it when it looks like one, so a bare or unusual layout falls back rather than
+	// resolving to a surprising parent directory.
+	if filepath.Base(cd) != ".git" {
+		return toplevel, nil
+	}
+	main := filepath.Dir(cd)
+	if st, err := os.Stat(main); err != nil || !st.IsDir() {
+		return toplevel, nil
+	}
+	return main, nil
+}
+
+// gitError renders a failed git invocation as its stderr, falling back to the exit status when
+// it said nothing.
+func gitError(err error) string {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		if msg := strings.TrimSpace(string(ee.Stderr)); msg != "" {
+			return msg
+		}
+	}
+	return err.Error()
 }
 
 // WorktreeAdd creates a detached worktree at path pointing at ref (e.g. "HEAD"),
