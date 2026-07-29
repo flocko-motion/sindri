@@ -126,6 +126,7 @@ func checkTSHeader(path string) []commentViol {
 // relocate the prose below the imports, which the rule stops reaching but nobody benefits from.
 func headerFieldTooLong(path string, line int, field string, n int) string {
 	return fmt.Sprintf("%s:%d: header field %q is %d chars (max %d) — cut it down, don't move it. "+
+		"The maximum is a ceiling, not a target: a good field is one short phrase, well under it. "+
 		"Prose relocated out of the header just lands where a reader has less context and "+
 		"`brokkr map` won't show it; the header is read first, so it has to be brief.",
 		path, line, field, n, DefaultMaxHeaderFieldLen)

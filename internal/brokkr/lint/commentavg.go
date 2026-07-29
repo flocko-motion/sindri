@@ -17,10 +17,10 @@ import (
 	"strings"
 )
 
-// DefaultMaxCommentAvg is the mean lines per comment block a file may average once it has
-// enough comments to show a trend. Most comments should be a line or two; one that needs a
-// paragraph is paid for by them, because prose outweighing the code it describes stops being
-// read. Per repo via `lint: max_comment_avg:`.
+// DefaultMaxCommentAvg is the mean lines per comment block a file may average once it has enough
+// comments to show a trend. A CEILING, not a target: one line answers most comments, and the
+// occasional paragraph is paid for by them, because prose outweighing its code stops being read.
+// Per repo via `lint: max_comment_avg:`.
 const DefaultMaxCommentAvg = 2.0
 
 // trendSample is the number of comment blocks at which a file's mean is taken at face value,
@@ -112,17 +112,21 @@ func CommentAvg(roots []string, maxAvg float64, ig *Ignore, w io.Writer) (bool, 
 
 	sort.Slice(viols, func(i, j int) bool { return viols[i].avg > viols[j].avg })
 	for _, v := range viols {
-		fmt.Fprintf(w, "%s: comments average %.1f lines (allowed %.1f over %d blocks) / %d comment lines; longest is %d lines at :%d\n",
+		fmt.Fprintf(w, "%s: comments average %.1f lines (max %.1f over %d blocks) / %d comment lines; longest is %d lines at :%d\n",
 			v.path, v.avg, v.allowed, v.blocks, v.lines, v.worst.Lines, v.worst.Line)
 		if ex := firstProse(v.worst); ex != "" {
 			fmt.Fprintf(w, "    %s…\n", trimTo(ex, 72))
 		}
 	}
 	if len(viols) > 0 {
-		fmt.Fprintf(w, "%d file(s) over the comment-length trend — cut words, don't move them. "+
+		fmt.Fprintf(w, "%d file(s) over the comment-length trend — cut words, don't move them.\n"+
+			"The maximum is a CEILING, not a target. A single line is enough for most comments: "+
+			"name what the thing is for, or why it is not the obvious way. Aim well under the limit "+
+			"— a file trimmed to sit exactly on it fails again the moment anyone adds a comment, and "+
+			"the number passing is not the same as the prose being worth reading.\n"+
 			"Relocating a comment, splitting one into several, or padding the file with one-liners "+
-			"only shifts the average; the rule is asking for less prose. `lint: max_comment_avg:` "+
-			"in .sindri/config.yaml is the maintainer's setting, not a way past a finding.\n", len(viols))
+			"only shifts the average. `lint: max_comment_avg:` in .sindri/config.yaml is the "+
+			"maintainer's setting, not a way past a finding.\n", len(viols))
 	}
 	return len(viols) > 0, nil
 }

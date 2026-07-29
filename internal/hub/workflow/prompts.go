@@ -413,8 +413,11 @@ func ReplyLintFail(out string) string {
 		"Meet each finding on its own terms; do NOT work around the linter. If a comment is "+
 		"too long, CUT WORDS — don't move it somewhere the rule doesn't reach, don't split it "+
 		"or pad the file with one-liners to shift an average, don't widen an ignore list, and "+
-		"don't retune limits in .sindri/config.yaml (those are the maintainer's call). The "+
-		"rule is asking for less prose, not for the prose to sit elsewhere.", out)
+		"don't retune limits in .sindri/config.yaml (those are the maintainer's call).\n"+
+		"Every limit is a CEILING, not a target. Don't trim until the number just passes — "+
+		"trim until the comment earns its lines. A single line suffices for most: say what the "+
+		"thing is for, or why it isn't done the obvious way, and stop. Land well under the "+
+		"limit, or the next comment anyone adds puts the file straight back over it.", out)
 }
 
 // ReplySpecInvalid answers `openspec submit` when the change fails openspec's own
