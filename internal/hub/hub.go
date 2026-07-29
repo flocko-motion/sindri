@@ -45,6 +45,7 @@ type Hub struct {
 	wf       *workflow.Engine  // the PR/task lifecycle orchestrator (internal/hub/workflow)
 	projects *project.Service  // repo-registry management (internal/hub/project)
 	agentCh  *agentchan.Server // the inbound agent command channel (internal/hub/agentchan)
+	watch    *watchdog         // agent liveness, observed on a loop (internal/hub/watchdog.go)
 }
 
 // agentKey identifies an agent within a project — the key for the hub's per-agent
@@ -128,6 +129,9 @@ func New() (*Hub, error) {
 	h.agents = agent.New(h.store, agentDeps{h}, h.agentCh)
 	h.wf = workflow.New(h.store, workflowDeps{h})
 	h.projects = project.New(h.store, projectDeps{h})
+	// Last, and after agents: the watchdog probes through h.agents and takes its first reading
+	// during construction, so the first board read has real observations.
+	h.watch = newWatchdog(h)
 	return h, nil
 }
 
@@ -189,6 +193,7 @@ func ensureGitignore(root string) {
 
 // Close shuts agent listeners and releases the store.
 func (h *Hub) Close() error {
+	h.watch.close()
 	h.agentCh.CloseAll()
 	server.FlushAccessLog() // emit any open access-log run before we go quiet
 	return h.store.Close()

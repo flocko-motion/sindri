@@ -103,54 +103,28 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		}
 	}
 
-	// One cached listing answers "which pods exist" for every agent AND for the orphan scan
-	// below. What sets the cost of a board read is the NUMBER of container commands it
-	// launches, not how they are scheduled: each is a process spawn, and they do not
-	// parallelise — 24 concurrent execs measure ~3.2s where a single one is ~0.2s. Per-agent
-	// inspects plus a listing per project came to 17 spawns before any tmux probe ran.
-	podCtx, podCancel := context.WithTimeout(context.Background(), probeTimeout)
-	existing, listErr := container.ListByLabelCached(podCtx, "sindri.project", "")
-	podCancel()
-	exists := make(map[string]bool, len(existing))
-	for _, p := range existing {
-		exists[p] = true
-	}
-
-	// Liveness is "the pod is up AND its tmux session exists" — the pod is only a sleep that
-	// outlives Claude, so a running container alone proves nothing (see tmux.HasSession). The
-	// list-clients probe answers both: its exit code proves the session, its output is the
-	// dial-in count. It runs per agent, concurrently and time-bounded, so one wedged pod
-	// costs at most probeTimeout. A listing failure leaves every agent's pod unknown, so the
-	// probe still runs rather than reporting a whole fleet down on one failed command.
-	var wg sync.WaitGroup
+	// Liveness comes from the watchdog's last observation — a board read REPORTS it, it does
+	// not take one. Probing per request made the cost scale with the number of readers: the
+	// TUI polls, holds an SSE stream and refetches after every mutation, so requests overlap
+	// and each was fanning out one container exec per agent. Under that contention probes lost
+	// their deadline and the miss was rendered as "down", so a healthy agent flickered between
+	// down and its real state. One observer on a fixed cadence costs the same whether nobody
+	// or ten clients are watching, and its strike rule means a single lost probe changes
+	// nothing (-> watchdog.go).
 	running := make([]bool, len(agentsRow))
 	clients := make([]int, len(agentsRow))
 	runtimes := make([]string, len(agentsRow)) // Claude's live runtime: busy|blocked|idle|""
 	for i, a := range agentsRow {
-		wg.Add(1)
-		go func(i int, a store.Agent) {
-			defer wg.Done()
-			probe := func(fn func(context.Context)) {
-				ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
-				defer cancel()
-				fn(ctx)
-			}
-			if listErr == nil && !exists[h.container(a.Project, a.Name)] {
-				return // no pod for this agent — nothing to probe
-			}
-			probe(func(ctx context.Context) {
-				if cs, ok := h.agents.ClientsCtx(ctx, a.Project, a.Name); ok {
-					running[i], clients[i] = true, len(cs)
-				}
-			})
-			if !running[i] {
-				return
-			}
-			// Detail only: the agent stays up even if this one times out.
-			probe(func(ctx context.Context) { runtimes[i] = h.agents.RuntimeState(ctx, a.Project, a.Name) })
-		}(i, a)
+		if l, ok := h.watch.get(a.Project, a.Name); ok {
+			running[i], clients[i], runtimes[i] = l.up, l.clients, l.runtime
+		}
 	}
-	wg.Wait()
+
+	// The orphan scan needs the pod list itself, not per-agent liveness. Cached, so it shares
+	// the listing the watchdog just took rather than spawning another.
+	podCtx, podCancel := context.WithTimeout(context.Background(), probeTimeout)
+	existing, _ := container.ListByLabelCached(podCtx, "sindri.project", "")
+	podCancel()
 
 	known := map[string]bool{}
 	agents := make([]AgentView, 0, len(agentsRow))
