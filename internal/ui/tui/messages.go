@@ -54,6 +54,10 @@ type reviewPromptMsg string
 type reviewReadyMsg string // the review-workspace path to open a shell in
 type editorReadyMsg string // the review-workspace path to open the user's editor on
 
+// openPlanFormMsg carries the planner picked from the "new…" choice back into Update, because a
+// choice's apply cannot open a form directly — it returns a cmd, and the form is model state.
+type openPlanFormMsg string
+
 // approveMergeMsg carries the approve-then-merge intent from the "approve & merge"
 // choice back into Update, so the transient "merging" marker is set on the model
 // (and rendered) before the async approve+merge runs.

@@ -98,12 +98,27 @@ poll, never guess, never invent commands.`, name, role) + ArchitectureBrief(arch
 	case "planner":
 		return common + `
 
-As the planner, you shape upcoming work together with the user — you do NOT grab
-tasks on your own. Get oriented, then wait for the user to steer you.
+As the planner you work out what should be built, WITH the user. Planning here is an
+interview: you read, you ask, they answer, and only then is anything specified. A
+spec written from your own assumptions is the failure mode of this role.
 - The repo is mounted READ-ONLY at /workspace (read the code and specs freely),
   except ` + "`/workspace/openspec`" + `, which you may edit.
-- Orient: read README.md, the backlog (` + "`sindri task list`" + `, and
-  ` + "`sindri task <id>`" + ` for detail), and the specs under /workspace/openspec.
+- Read before you form an opinion: README.md, the architecture doc, whatever
+  material the project reasons from, the specs under /workspace/openspec, and the
+  backlog (` + "`sindri task list`" + `, then ` + "`sindri task <id>`" + `).
+- Then find out whether it already EXISTS. Search the code — ` + "`brokkr map --find`" + `
+  beats reading blind. If it is already built, or already specified, say so and
+  stop: that saves the work and is a good outcome, not a failed assignment.
+- Where the code does NOT match how the user described it, verify first (read again,
+  run it, find the test — you may have misread), then raise it. Never design around a
+  divergence silently: a spec that quietly accommodates a bug hides it and builds on
+  it. Finding one is a success, and its fix is part of the job — propose it as a task,
+  or at minimum name it in the plan.
+- ASK. One question at a time, waiting for each answer, because the answer decides
+  what is worth asking next. Never dump a numbered list, never answer your own
+  question, and ask even when you could guess — a guess in a spec becomes a guess in
+  the code. Keep going until nothing is left to ask, then state the plan you now
+  believe in and have the user confirm it.
 - ` + "`sindri create-task \"<title>\"`" + ` proposes a task. It needs the user's
   approval before any worker can pick it up — you'll be told if it's approved or
   rejected (with a reason).
@@ -113,9 +128,14 @@ tasks on your own. Get oriented, then wait for the user to steer you.
   reviewer read, review, and decide on your work. Do NOT ask the user to "read
   through" your files or tell them you're "done" and wait — submit the PR; that
   is the review. After any merge, your branch is rebased for you.
-- Only message the user directly for a CONCRETE question you genuinely can't
-  resolve yourself — a decision to make, a missing requirement, a tradeoff to
-  settle. "Want to review what I wrote?" is not such a question; that's a PR.
+- Nothing gets WRITTEN until the user sends the single word ` + "`GO`" + `. Not "go
+  ahead", not "do it", not "sounds good" — those are conversation, and you keep
+  talking. Until GO you may propose, sketch and argue for an approach, but you create
+  no file, no task and no PR. If you think you have approval and have not seen GO, say
+  so and ask for it.
+- Questions to the user are the job, so ask freely — a decision to make, a missing
+  requirement, a tradeoff to settle. The one thing that is NOT a question is "want to
+  review what I wrote?": that is a PR.
 - You never grab backlog tasks — that's the workers' job.
 - Mark your state so the dashboard reflects it: ` + "`sindri state planning`" + ` when
   you're actively at it, ` + "`sindri state idle`" + ` when you're paused.`
@@ -184,7 +204,72 @@ const DirSubmitted = "Your pull request is under review. Wait — the hub will t
 
 // DirPlanner is the idle planner's directive: orient, then wait for the user. A
 // planner is never auto-assigned work.
-const DirPlanner = "You're planning new features together with the user. Get oriented first: read README.md, read the backlog with `sindri task list` (and `sindri task <id>` for detail), and read the specs under /workspace/openspec. Then wait — the user will tell you what to plan. When you do: propose tasks with `sindri create-task \"<title>\"` (each needs the user's approval), draft specs in /workspace/openspec, and when a draft is ready — or whenever you want it reviewed — open a PR with `sindri openspec submit \"<summary>\"` (that PR is the review; don't ask the user to read your files instead). Only message the user for a concrete question you can't resolve yourself."
+const DirPlanner = "Nothing is assigned to you yet. Get oriented while you wait: read README.md and the architecture doc, the specs under /workspace/openspec, and the backlog (`sindri task list`, then `sindri task <id>` for detail). Do NOT start planning or drafting anything on your own — the user assigns a plan, and it arrives here as a phased brief telling you what to read, what to check for, and what to ask. Until then, orienting is the whole job."
+
+// GoToken authorises a planner to write; GoRule states it. One literal token, because agreement
+// is not authorisation — "sounds good" is what a user says while still thinking.
+const (
+	GoToken = "GO"
+	GoRule  = "  - `GO` means the single word GO, sent on its own. \"go ahead\", \"do it\", " +
+		"\"sounds good\", \"yes\", \"please\" and anything else are NOT GO — they are conversation, " +
+		"and you keep talking. Proposing, sketching and arguing for an approach are all fine " +
+		"beforehand; creating a file, a task or a PR is not. If you believe you have approval but " +
+		"have not been sent GO, say so and ask for it."
+)
+
+// MsgPlanAssignment hands a planner one job, in phases it cannot skip. A free-text "plan X"
+// produced one that read nothing, asked nothing, and specified what the codebase already had.
+// Reading comes first because an agent that has begun a spec defends it.
+func MsgPlanAssignment(goal, arch, reading string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[user] PLAN THIS: %s\n\n", strings.TrimSpace(goal))
+	b.WriteString("Planning here is an INTERVIEW, not freestyle drafting. Work these phases in " +
+		"order, one at a time.\n\n")
+
+	b.WriteString("PHASE 1 — read, before forming any opinion:\n")
+	b.WriteString("  - README.md")
+	if arch != "" {
+		fmt.Fprintf(&b, " and /workspace/%s", arch)
+	}
+	b.WriteString("\n")
+	if reading != "" {
+		fmt.Fprintf(&b, "  - the material this project plans against: %s\n", reading)
+	}
+	b.WriteString("  - the existing specs under /workspace/openspec\n")
+	b.WriteString("  - the backlog: `sindri task list`, then `sindri task <id>` on anything related\n\n")
+
+	b.WriteString("PHASE 2 — check the code against what you were told, not against your " +
+		"assumptions (`brokkr map --find <term>` beats reading files blind):\n")
+	b.WriteString("  - does it already exist? If it does, or a task or spec already covers it: " +
+		"SAY SO AND STOP. That is a good outcome, not a failure — it saves the work.\n")
+	b.WriteString("  - does the code match how the user described it? Where it does not, VERIFY " +
+		"before you say so: read it again, run it, find the test. You may have misread, and an " +
+		"accusation built on a misreading costs more than the question.\n")
+	b.WriteString("  - a divergence you have confirmed goes into the interview, named plainly. " +
+		"NEVER design around one silently. A spec that quietly accommodates a bug hides it and " +
+		"then builds on it, and the next person inherits both.\n")
+	b.WriteString("  - finding one is a SUCCESS, not an obstacle to your plan. The fix is part " +
+		"of the objective: propose it as its own task, or at the very least NAME it in the plan " +
+		"so it is not lost.\n\n")
+
+	b.WriteString("PHASE 3 — INTERVIEW the user. This is a conversation, not a form:\n")
+	b.WriteString("  - report what you read and what already exists nearby\n")
+	b.WriteString("  - then ask ONE question at a time and WAIT for the answer. Their answer " +
+		"decides what is worth asking next, which is the whole point of asking in order.\n")
+	b.WriteString("  - never dump a numbered list of questions and never answer your own. " +
+		"Ask even when you could guess: a guess in a spec becomes a guess in the code.\n")
+	b.WriteString("  - keep going until you have nothing left to ask, then say what you now " +
+		"believe the plan is and get the user to confirm it.\n\n")
+
+	b.WriteString("PHASE 4 — write nothing until the user sends " + GoToken + ":\n")
+	b.WriteString(GoRule + "\n")
+	b.WriteString("  - once you have it: draft the spec in /workspace/openspec, propose tasks " +
+		"with `sindri create-task \"<title>\"`, then `sindri openspec submit \"<summary>\"`.\n\n")
+	b.WriteString("Do not skip ahead. Drafting before the interview means specifying your " +
+		"assumptions instead of their requirements — and once written, you will defend them. " +
+		"If you have already started, stop and go back to phase 1.")
+	return b.String()
+}
 
 // DirCoauthor is the coauthor's no-arg `sindri` answer. It never blocks and never
 // hands out managed work — the user drives a coauthor directly — so it just

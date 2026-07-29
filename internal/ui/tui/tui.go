@@ -222,6 +222,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.ClearScreen
 	case reviewReadyMsg: // PR materialized — drop into a shell in the review workspace
 		return m, tea.ExecProcess(shellAt(string(msg)), resumed)
+	case openPlanFormMsg: // "new… → plan" chosen — ask what to plan
+		m.openPlanForm(string(msg))
+		return m, nil
 	case editorReadyMsg: // PR materialized — open the user's editor on the review workspace
 		ed := editorAt(string(msg))
 		if ed == nil {
@@ -449,13 +452,13 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.openNewAgentChoice()
 			return nil
 		}
-	case keyEdit: // edit: the selected task's fields (tasks) / the agent's memory limit (agents)
+	case keyEdit: // edit the selection: a task's fields (tasks) / the agent's options (agents)
 		if m.tab == 0 && m.selID() != "" && m.cl != nil {
 			return editFetchCmd(m.cl, m.selID()) // pre-edit sync: fetch fresh, then open the form
 		}
 		if m.tab == 1 {
 			if a, ok := m.selAgent(); ok {
-				m.openMemoryForm(a.Name, a.Memory)
+				m.openAgentOptionsForm(a.Name, a.Memory)
 				return nil
 			}
 		}

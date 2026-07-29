@@ -30,22 +30,15 @@ type GitHub struct {
 	Issues *bool `yaml:"issues"`
 }
 
-// Lint is the `lint:` block — the quality bar `brokkr lint` holds a repo to. Every field is
-// a pointer so an unset key is distinguishable from a deliberate zero, and zero has meaning
-// here: `max_comment_avg: 0` would demand comment-free code.
-//
-// The bar belongs to the repo because it is a house style, not a universal truth: a codebase
-// of small adapters and one of dense algorithms reasonably disagree about how long a comment
-// should be.
+// Lint is the `lint:` block — the bar `brokkr lint` holds this repo to, since it is a house
+// style rather than a universal truth. Pointers, so an unset key differs from a deliberate zero
+// (`max_comment_avg: 0` would demand comment-free code).
 type Lint struct {
 	// MaxLines bounds a source file's length.
 	MaxLines *int `yaml:"max_lines"`
 
-	// MaxCommentAvg bounds the MEAN lines per comment block in a file, so the rule reads a
-	// trend rather than policing each comment: a ten-line explanation is fine when the
-	// one-liners around it carry the average. The file header is excluded (it is a mandated
-	// multi-line block), and a file with few comments is not judged at all — see
-	// lint.MinCommentBlocks.
+	// MaxCommentAvg bounds the MEAN lines per comment block, so the rule reads a trend rather
+	// than policing each comment: one long explanation is fine when short ones carry the average.
 	MaxCommentAvg *float64 `yaml:"max_comment_avg"`
 }
 
@@ -57,17 +50,19 @@ type Config struct {
 	GitHub        GitHub `yaml:"github"`
 	Lint          Lint   `yaml:"lint"`
 
+	// Reading is what a planner must read before planning — papers, design notes, a protocol
+	// spec. Named here because a planner cannot guess which documents a project reasons from.
+	Reading []string `yaml:"reading"`
+
 	// ArchitectureSet is true when `architecture` was explicitly configured (at either
 	// layer). An explicitly named doc must exist (validate); an unset one need not, and
 	// its absence is a startup recommendation rather than an error.
 	ArchitectureSet bool `yaml:"-"`
 }
 
-// Load reads and validates a project's config: the global config under the hub's
-// state dir first (the base), then the repo's .sindri/config.yaml overlaid on top,
-// then defaults. Absent files are not an error; a malformed file, an unknown key, a
-// wrong-typed value, or a path that is absolute / escapes the repo / (when set) names
-// a missing file all ARE — surfaced with the file and the problem, never defaulted.
+// Load resolves a project's config: the hub's global file, the repo's .sindri/config.yaml over
+// it, then defaults. An absent file is fine; a malformed one, an unknown key, a wrong type, or a
+// path that escapes the repo or names a missing file are errors — never quietly defaulted.
 func Load(root string) (Config, error) {
 	var c Config
 	if err := decodeInto(filepath.Join(paths.StateDir(), "config.yaml"), &c); err != nil {

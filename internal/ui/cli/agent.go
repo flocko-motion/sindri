@@ -434,6 +434,26 @@ func agentTellCmd() *cobra.Command {
 	}
 }
 
+// agentPlanCmd assigns a planner one thing to plan. Unlike `tell`, which delivers what you typed,
+// this sends a phased brief: read the project's material, check it does not already exist, then
+// interview you before specifying anything.
+func agentPlanCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "plan <name> <what to plan...>", Short: "Assign a planner a plan to work out (reads, checks, then interviews you)",
+		Args: cobra.MinimumNArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			goal := strings.Join(args[1:], " ")
+			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+				if err := b.AssignPlan(a.Name, goal); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "assigned to %s — it will read, check for prior work, then interview you\n", a.Name)
+				return nil
+			})
+		},
+	}
+}
+
 func agentInfoCmd() *cobra.Command {
 	var n int
 	var debug bool

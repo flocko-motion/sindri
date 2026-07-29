@@ -44,6 +44,29 @@ func attachAgent(cname, name string) tea.Cmd {
 	})
 }
 
+// openPlanForm asks what to plan, then hands it to the planner as a phased brief.
+//
+// A textarea rather than a one-line prompt: a plan's goal is prose, and the phrasing here is the
+// only thing the planner has to work from. The hub refuses the assignment while that planner has
+// a PR open, and says which one to merge or scrap — so the form does not need to know.
+func (m *model) openPlanForm(name string) {
+	goal := newTextareaField("what to plan", "")
+	cl := m.cl
+	m.form.open("new plan for "+name, []field{goal}, nil, func() tea.Cmd {
+		text := goal.value()
+		return func() tea.Msg {
+			if cl == nil || strings.TrimSpace(text) == "" {
+				return nil
+			}
+			if err := cl.AssignPlan(name, text); err != nil {
+				return errModalMsg{err}
+			}
+			st, _ := cl.State()
+			return polledMsg(st)
+		}
+	})
+}
+
 // agentContainer is the agent's podman container, preferring the board's
 // project-resolved name (correct for any repo) and falling back to the current
 // repo only for an older hub that doesn't report it.
@@ -63,12 +86,12 @@ func memoryLabelTUI(m string) string {
 	return m
 }
 
-// openMemoryForm edits an agent's RAM limit (e.g. "4g", "512m"; empty resets to the
-// hub default). Takes effect on the agent's next start/restart.
-func (m *model) openMemoryForm(name, current string) {
-	mem := newTextField("memory (e.g. 4g, 512m; empty = default)", current)
+// openAgentOptionsForm edits per-agent settings — so far only the RAM limit ("4g", "512m"; empty
+// = hub default), applied on next start. Named for the form, since "memory" read as recollection.
+func (m *model) openAgentOptionsForm(name, current string) {
+	mem := newTextField("memory: container RAM limit (e.g. 4g, 512m; empty = default)", current)
 	cl := m.cl
-	m.form.open("memory "+name, []field{mem}, nil, func() tea.Cmd {
+	m.form.open("options "+name, []field{mem}, nil, func() tea.Cmd {
 		val := strings.TrimSpace(mem.value())
 		return func() tea.Msg {
 			if cl == nil {
@@ -87,10 +110,24 @@ func (m *model) openMemoryForm(name, current string) {
 // is fixed at creation — there is no way to change it later.
 func (m *model) openNewAgentChoice() {
 	cl := m.cl
+	opts := []string{"worker", "reviewer", "planner", "coauthor"}
+	vals := []string{"worker", "reviewer", "planner", "coauthor"}
+	// A plan is the other thing you create from this tab, so it belongs behind the same "new"
+	// key rather than a second binding — offered only with a planner selected, since nobody else
+	// takes one.
+	planner := ""
+	if a, ok := m.selAgent(); ok && a.Role == "planner" {
+		planner = a.Name
+		opts = append(opts, "plan for "+planner)
+		vals = append(vals, "plan")
+	}
 	m.choice = choiceModalState{
-		active: true, title: "new agent role",
-		options: []string{"worker", "reviewer", "planner", "coauthor"}, values: []string{"worker", "reviewer", "planner", "coauthor"},
+		active: true, title: "new…",
+		options: opts, values: vals,
 		apply: func(v string) tea.Cmd {
+			if v == "plan" {
+				return func() tea.Msg { return openPlanFormMsg(planner) }
+			}
 			// Register the identity, then auto-start its pod. Launch runs in the
 			// background (it can build the image) — the hub's lifecycle + /events
 			// reflect "launching" → running without blocking the new row's appearance.
@@ -234,7 +271,7 @@ func (m model) agentItems() []metaItem {
 		{text: "status:    " + a.Status},
 		taskIt, prIt,
 		{text: "workspace: " + dash(a.Workspace)},
-		{text: "memory:    " + memoryLabelTUI(a.Memory) + dimStyle.Render("  (e to edit)")},
+		{text: "memory:    " + memoryLabelTUI(a.Memory) + dimStyle.Render("  (container RAM · e to edit)")},
 		{text: pod, kind: "view", value: "pod"},
 	}
 	for _, line := range clientLines(m.agentClients) { // same dial-in detail as `agent info`

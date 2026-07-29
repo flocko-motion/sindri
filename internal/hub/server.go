@@ -414,6 +414,15 @@ func (h *Hub) Handler() http.Handler {
 		}
 		writeJSON(w, okMsg{"ok"}, h.wf.SetPriority(h.reqProject(r), req.ID, req.Priority))
 	})
+	// Assign a planner one thing to plan, as a phased brief (-> AssignPlan). Refused while that
+	// planner has a PR open, so a new plan can't be drafted over specs still awaiting a verdict.
+	mux.HandleFunc("POST /agent/plan", func(w http.ResponseWriter, r *http.Request) {
+		var req TellReq // Name = the planner, Msg = what to plan
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"assigned"}, h.wf.AssignPlan(h.reqProject(r), req.Name, req.Msg))
+	})
 	mux.HandleFunc("POST /task/approve", func(w http.ResponseWriter, r *http.Request) {
 		var req RejectReq // reuse: ID (+ unused Feedback)
 		if !decode(w, r, &req) {

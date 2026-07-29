@@ -15,7 +15,7 @@ import "strings"
 // tea strings in onKey and appear in the keymap only as display rows.
 const (
 	keyNew      = "N" // new task / new agent
-	keyEdit     = "e" // edit task fields / agent memory
+	keyEdit     = "e" // edit the selection: task fields / agent options
 	keyPriority = "P" // set task priority (mutation → shift)
 	keyUnassign = "U" // release a task to the backlog
 	keyClose    = "C" // close a task
@@ -91,7 +91,7 @@ var keymap = []binding{
 	{keyTell, lbl("tell"), scopeAgents},
 	{keyAttachAp, lbl("attach"), scopeAgents},
 	{keyAttachAp, lbl("attach"), scopeTasks},
-	{keyEdit, lbl("memory"), scopeAgents},
+	{keyEdit, lbl("options"), scopeAgents},
 	{keyReject, lbl("rebase"), scopeAgents}, // R = reBase (onto the reference branch)
 	{keyDelete, lbl("delete"), scopeAgents},
 	{keyDelete, lbl("scrap"), scopePRs},

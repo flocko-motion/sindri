@@ -17,6 +17,79 @@ import (
 	"github.com/flo-at/sindri/internal/hub/task"
 )
 
+// AssignPlan hands a planner one thing to plan, as a phased brief (-> MsgPlanAssignment). Refused
+// while it has a PR open: it drafts on ONE standing branch, so a second plan would pile
+// unreviewed work onto specs awaiting a verdict.
+func (e *Engine) AssignPlan(project, agent, goal string) error {
+	goal = strings.TrimSpace(goal)
+	if goal == "" {
+		return fmt.Errorf("say what to plan: a goal, question or feature to work out")
+	}
+	ps := e.store.For(project)
+	a, ok, err := ps.GetAgent(agent)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("no such agent %q", agent)
+	}
+	if a.Role != "planner" {
+		return fmt.Errorf("%s is a %s — planning is a planner's job (`sindri agent new --role planner`)", agent, a.Role)
+	}
+	if pr, found, perr := e.openPlannerPR(ps, agent); perr != nil {
+		return perr
+	} else if found {
+		return fmt.Errorf("%s still has %s open — merge it (`sindri pr merge %s`) or scrap it "+
+			"(`sindri pr scrap %s --yes`) before assigning a new plan, or the new work would be "+
+			"drafted on top of specs nobody has ruled on yet", agent, pr.ID, pr.ID, pr.ID)
+	}
+
+	// Interrupt first: the directive has to land on an idle prompt, or it queues behind whatever
+	// the agent is already doing and arrives after the work it was meant to redirect.
+	if e.deps.AgentAlive(project, agent) {
+		_ = e.deps.Interrupt(project, agent)
+	}
+	if err := e.deps.InjectWhenReady(project, agent, MsgPlanAssignment(goal, e.deps.ArchitectureDoc(project), e.planReading(project))); err != nil {
+		return err
+	}
+	st, _ := ps.GetState(agent)
+	st.Agent, st.Phase = agent, "planning"
+	_ = ps.SetState(st)
+	_ = ps.Log(agent, "plan", goal)
+	e.deps.Notify()
+	return nil
+}
+
+// planReading is the project's configured reading list, as one /workspace-rooted phrase for the
+// assignment. Empty when unconfigured, and the phase simply drops out.
+func (e *Engine) planReading(project string) string {
+	cfg, err := e.deps.ProjectConfig(project)
+	if err != nil || len(cfg.Reading) == 0 {
+		return ""
+	}
+	paths := make([]string, 0, len(cfg.Reading))
+	for _, p := range cfg.Reading {
+		if p = strings.TrimSpace(p); p != "" {
+			paths = append(paths, "/workspace/"+strings.TrimPrefix(p, "/"))
+		}
+	}
+	return strings.Join(paths, ", ")
+}
+
+// openPlannerPR is the planner's own PR still awaiting a verdict, if any.
+func (e *Engine) openPlannerPR(ps *store.ProjectStore, agent string) (store.PR, bool, error) {
+	prs, err := ps.PRs()
+	if err != nil {
+		return store.PR{}, false, err
+	}
+	for _, pr := range prs {
+		if pr.Agent == agent && pr.Status != "merged" && pr.Status != "scrapped" {
+			return pr, true, nil
+		}
+	}
+	return store.PR{}, false, nil
+}
+
 // CmdState lets a planner flip its own resting state between "planning" and "idle".
 func (e *Engine) CmdState(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) != 1 || (args[0] != "planning" && args[0] != "idle") {
@@ -76,15 +149,10 @@ const createTaskUsage = "usage: create-task [--parent <id>] [--type <task|featur
 // and the verb's own usage describe one surface.
 const CreateTaskHelp = "propose a new task, needing the user's approval. " + createTaskUsage
 
-// parseTaskFlags reads create-task's flags, returning the spec they build and the leftover
-// words that form the title. Both `--flag value` and `--flag=value` are accepted.
-//
-// An unrecognised flag is an error the caller sees: a silently ignored option looks like it
-// took effect, and the task is then created without the parent or body that was asked for.
-//
-// Priority is deliberately absent. store.OpenLeaves hands out only tasks that are approved
-// AND carry a priority, so the priority a human sets at approval time is the signal that
-// releases work to a worker — it belongs to the user, alongside the approval itself.
+// parseTaskFlags splits create-task's flags from the words forming the title, accepting both
+// `--flag value` and `--flag=value`. An unknown flag is an error: silently ignoring one creates
+// the task without the parent or body that was asked for. Priority is absent on purpose — it is
+// what releases work to a worker (-> store.OpenLeaves), so it stays the user's.
 func parseTaskFlags(args []string) (TaskSpec, []string, error) {
 	var s TaskSpec
 	var words []string
@@ -128,12 +196,9 @@ const editTaskUsage = "usage: edit-task <id> [--parent <id>] [--type <task|featu
 // EditTaskHelp is what the command registry advertises for edit-task.
 const EditTaskHelp = "revise a task you proposed, while it still awaits approval. " + editTaskUsage
 
-// CmdEditTask lets a planner repair its own proposal: retitle it, give it a body, or hang it
-// under a parent — the move that turns a set of flat proposals into a tree.
-//
-// It applies only while the task is PENDING. Approval is the user's decision to take the
-// task as it stands, so from that moment the task is theirs: what a worker picks up is what
-// the user read and released.
+// CmdEditTask repairs a planner's own proposal — retitle, body, or a parent, which is how flat
+// proposals become a tree. PENDING only: approval is the user taking the task as it stands, so
+// what a worker picks up is what they read.
 func (e *Engine) CmdEditTask(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) == 0 {
 		fmt.Fprintln(out, editTaskUsage)
@@ -183,13 +248,9 @@ func childIDs(tasks []store.Task, id string) []string {
 const TaskHelp = "read your work: `task` (your own task or package; a planner or coauthor: the whole backlog), " +
 	"`task <id>` (one task in full — description, parent, children), `task list` (every task you can see, indented by tree)"
 
-// CmdTasks is the read surface over the backlog. What it shows depends on the caller's job.
-//
-// A planner or coauthor shapes the whole backlog and sees all of it. A WORKER sees only the
-// package it holds — that task and its descendants. Its job is to finish one piece of work
-// well, and the rest of the backlog is at best a distraction and at worst an invitation to
-// start something nobody assigned it. Bounding the view keeps the agent's attention where the
-// hub put it, and keeps a long backlog out of a context window that has better uses.
+// CmdTasks is the read surface over the backlog, scoped to the caller's job: a planner or
+// coauthor shapes all of it, a worker sees only the package it holds. The rest of the backlog is
+// a distraction to a worker, and an invitation to start what nobody assigned it.
 func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if err := e.SyncTasks(c.Project); err != nil {
 		return 1, err
@@ -248,13 +309,9 @@ func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int,
 	return 0, nil
 }
 
-// visibleTasks is the set of tasks the caller may read, and whether that set is BOUNDED (a
-// subset) rather than the whole backlog.
-//
-// Planners and coauthors work across the backlog, so they are unbounded and the set is nil — a
-// nil map with bounded=false means "no filtering", which keeps the caller's checks trivial. A
-// worker is bounded to the package it holds: the task recorded in its state, plus every
-// descendant, which is exactly the unit the hub assigned it.
+// visibleTasks is what the caller may read, and whether that is BOUNDED rather than everything.
+// A nil set with bounded=false means no filtering, so callers stay simple; a worker is bounded to
+// its held task and every descendant — the unit the hub assigned it.
 func (e *Engine) visibleTasks(c registry.Caller, tasks []store.Task) (map[string]bool, bool, error) {
 	switch c.Role {
 	case "planner", "coauthor":
@@ -275,13 +332,9 @@ func (e *Engine) visibleTasks(c registry.Caller, tasks []store.Task) (map[string
 	return visible, true, nil
 }
 
-// workerTaskView answers bare `task` for a worker: what it currently holds.
-//
-// A standalone task prints in full — there is nothing to choose between, so making the worker
-// ask again would be a wasted step. A package prints as an overview instead: the parent, then
-// every descendant with its status and a marker on the current subtask, ending with the one
-// command that opens any of them. The overview stays small enough to re-read often, and the
-// detail is a request away rather than a wall of text the worker didn't ask for.
+// workerTaskView answers bare `task` for a worker: what it holds. A standalone task prints in
+// full, since there is nothing to choose between; a package prints as an overview small enough to
+// re-read often, with the detail one request away.
 func (e *Engine) workerTaskView(c registry.Caller, tasks []store.Task, out io.Writer) (int, error) {
 	ps := e.store.For(c.Project)
 	st, err := ps.GetState(c.Agent)
