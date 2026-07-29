@@ -112,7 +112,7 @@ func archLines(st hub.RepoDocState) []string {
 	case st.Advice == "":
 		return nil // no snapshot for this repo (older hub) — say nothing rather than guess
 	}
-	return []string{"", stWarn.Render("⚠ no architecture doc"), dimStyle.Render("agents get no architecture brief — press E to set `architecture`")}
+	return []string{"", stWarn.Render(warnGlyph + " no architecture doc"), dimStyle.Render("agents get no architecture brief — press E to set `architecture`")}
 }
 
 // joinOrDash renders a "-" for an empty list, else the entries one per line-ready

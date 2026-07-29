@@ -323,6 +323,19 @@ func (m model) selAgent() (hub.AgentView, bool) {
 	return hub.AgentView{}, false
 }
 
+// eyeGlyph marks an agent with humans attached. It carries U+FE0F (variation selector-16),
+// which pins it to emoji presentation so the width the layout counts is the width the
+// terminal advances — two cells. Without it, U+1F441 counts as ONE while every emoji-capable
+// terminal draws two, and a row one cell wider than its column makes JoinHorizontal widen
+// the whole block past the screen: every row then wraps, the frame grows past the terminal
+// height, and the top bar scrolls out of view. It showed up only on a dialed-into agent, and
+// only intermittently, because the dial-in count comes from a probe that can fail.
+const eyeGlyph = "👁️"
+
+// warnGlyph is the row/notice warning mark, likewise pinned to a width the terminal agrees
+// with rather than left to default text presentation.
+const warnGlyph = "⚠️"
+
 func (m model) agentRows() []row {
 	var out []row
 	for _, a := range m.state.Agents {
@@ -340,7 +353,7 @@ func (m model) agentRows() []row {
 		}
 		task := dash(work)
 		if a.Clients > 0 { // dial-ins attached — show the eye like the CLI list
-			task += fmt.Sprintf("  👁%d", a.Clients)
+			task += fmt.Sprintf("  %s%d", eyeGlyph, a.Clients)
 		}
 		out = append(out, row{strings.Join([]string{
 			m.repoStyle(a.Project).Render(fmt.Sprintf("%-10.10s", a.Repo)),
@@ -354,7 +367,7 @@ func (m model) agentRows() []row {
 		// The id is the orphan's container name so D can remove it. Agent-only actions
 		// (start/stop/tell/attach/edit) key off the roster and skip a non-agent id —
 		// isOrphan gates the ones that read selID directly (tell/delete).
-		out = append(out, row{stWarn.Render("⚠ orphan: " + o), o})
+		out = append(out, row{stWarn.Render(warnGlyph + " orphan: " + o), o})
 	}
 	return out
 }

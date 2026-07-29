@@ -9,6 +9,7 @@
 package tui
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -103,6 +104,17 @@ func padTrunc(s string, w int) string {
 // edge (both common in diffs).
 func sanitize(s string) string {
 	s = strings.ReplaceAll(s, "\t", "    ")
+	// A cell is ONE line, so fold any embedded newline. Text reaching a cell is often not
+	// ours — an agent's activity log carries chat messages verbatim, and one of those ran to
+	// 123 newlines. Measured as a single line but rendered as 124, it pushed the frame past
+	// the terminal, which scrolled the top bar out of view for as long as that entry was in
+	// the window. Folding here covers every cell rather than each caller remembering to.
+	//
+	// Before the ANSI check below, deliberately: a styled string (a dim timestamp, say) took
+	// the early return and skipped this, which is exactly how the log entry got through.
+	if strings.ContainsAny(s, "\n\r") {
+		s = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(s)
+	}
 	if strings.IndexByte(s, 0x1b) >= 0 { // contains ANSI — leave the sequences intact
 		return s
 	}
@@ -112,4 +124,51 @@ func sanitize(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// Escape sequences that act on the TERMINAL rather than on the text: cursor motion, erase,
+// scroll regions, mode switches, OSC strings, charset selection. In CSI form the final byte
+// identifies the function, and only 'm' (SGR) is presentation.
+var (
+	ansiCSINonSGR = regexp.MustCompile(`\x1b\[[0-9;:?!"'$ >=<]*[@-ln-~]`)
+	ansiOSC       = regexp.MustCompile(`\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
+	ansiOther     = regexp.MustCompile(`\x1b(?:[()*+][0-9A-Za-z]|[=>78MDEHZc]|#[0-9])`)
+	ansiSGR       = regexp.MustCompile(`\x1b\[[0-9;:]*m`)
+)
+
+// sgrMark stands in for a colour sequence while control bytes are stripped. A private-use
+// rune, so it cannot collide with pane text.
+const sgrMark = ""
+
+// KeepColour reduces a string to text plus colour, dropping every escape that would command
+// the terminal. Content captured from another program's screen — an agent's tmux pane — is
+// its own full-screen drawing: cursor moves, erase-line and erase-display, scroll regions.
+// Rendered into our frame those execute against OUR screen, wiping or shifting rows that
+// belong to the layout, which is what makes the header appear to flicker or vanish while
+// nothing about the board has changed. Colour is safe and worth keeping, so SGR stays.
+//
+// Apply it where foreign text ENTERS the model, so the renderer only ever sees content that
+// obeys its cells.
+func KeepColour(s string) string {
+	s = ansiOSC.ReplaceAllString(s, "")
+	s = ansiCSINonSGR.ReplaceAllString(s, "")
+	s = ansiOther.ReplaceAllString(s, "")
+	// Park the SGR sequences before the control-byte sweep, which would otherwise take the
+	// ESC that begins them along with the bare BEL/CR/backspace bytes it is there to remove
+	// (those move the cursor just as surely as a CSI does).
+	var kept []string
+	s = ansiSGR.ReplaceAllStringFunc(s, func(seq string) string {
+		kept = append(kept, seq)
+		return sgrMark
+	})
+	s = strings.Map(func(r rune) rune {
+		if r == 0x1b || (r < 0x20 && r != '\n') || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+	for _, seq := range kept {
+		s = strings.Replace(s, sgrMark, seq, 1)
+	}
+	return s
 }

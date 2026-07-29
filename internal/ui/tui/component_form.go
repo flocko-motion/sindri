@@ -114,7 +114,7 @@ func (f formState) view(screenW, screenH int) string {
 
 	footer := dimStyle.Render(padTrunc("tab/⇧tab field · ←/→ choose · ctrl+s save · esc cancel", cw))
 	if f.err != "" {
-		footer = errStyle.Render(padTrunc("⚠ "+f.err, cw))
+		footer = errStyle.Render(padTrunc(warnGlyph+" "+f.err, cw))
 	}
 	return modalFrame(f.title, strings.Join(lines, "\n"), footer, screenW, screenH)
 }

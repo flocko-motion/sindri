@@ -203,7 +203,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case paneMsg:
 		if msg.agent == m.selID() { // ignore a stale capture from a prior selection
-			m.agentPane = msg.text
+			m.agentPane = KeepColour(msg.text) // another program's screen: text + colour only
 		}
 	case agentPodMsg:
 		if msg.agent == m.selID() {
