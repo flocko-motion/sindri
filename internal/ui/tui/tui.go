@@ -227,6 +227,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.ClearScreen
 	case reviewReadyMsg: // PR materialized — drop into a shell in the review workspace
 		return m, tea.ExecProcess(shellAt(string(msg)), resumed)
+	case editorReadyMsg: // PR materialized — open the user's editor on the review workspace
+		ed := editorAt(string(msg))
+		if ed == nil {
+			m.errText = "no editor found — set $EDITOR (or $VISUAL) to the one you want."
+			return m, nil
+		}
+		return m, tea.ExecProcess(ed, resumed)
 	case prMsg:
 		m.prDetail = msg.d
 		// The diff arrives async, well after syncDetail sized the viewport to the
@@ -500,6 +507,12 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 2 {
 			if id := m.selID(); id != "" && m.cl != nil {
 				return m.verifyCmd(id)
+			}
+		}
+	case keyOpen: // prs: materialize the PR, then open $EDITOR on that worktree
+		if m.tab == 2 {
+			if id := m.selID(); id != "" && m.cl != nil {
+				return m.openEditorCmd(id)
 			}
 		}
 	case keyApprove: // prs: request an agentic review · tasks: approve a planner-proposed task

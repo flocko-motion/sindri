@@ -52,6 +52,7 @@ type prLintMsg struct {
 }
 type reviewPromptMsg string
 type reviewReadyMsg string // the review-workspace path to open a shell in
+type editorReadyMsg string // the review-workspace path to open the user's editor on
 
 // approveMergeMsg carries the approve-then-merge intent from the "approve & merge"
 // choice back into Update, so the transient "merging" marker is set on the model

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -520,6 +521,74 @@ func shellAt(dir string) *exec.Cmd {
 	c := exec.Command(sh)
 	c.Dir = dir
 	return c
+}
+
+// openEditorCmd materializes a PR into the review workspace, then signals the loop to open the
+// user's editor on it. Same checkout `verify` gives you a shell in — reviewing a diff usually
+// means reading the code around it, and that wants an editor rather than a pager.
+func (m *model) openEditorCmd(id string) tea.Cmd {
+	cl := m.cl
+	m.flash = "opening " + id + " in " + editorName() + "…"
+	return func() tea.Msg {
+		path, err := cl.MaterializeReview(id)
+		if err != nil {
+			return errModalMsg{err}
+		}
+		return editorReadyMsg(path)
+	}
+}
+
+// editorCandidates is the editor to use, in the order a Unix tool is expected to look: the
+// user's own choice first, then the distribution's configured default, then vi — which POSIX
+// requires, so the list cannot come up empty on a working system.
+func editorCandidates() []string {
+	var out []string
+	for _, env := range []string{"VISUAL", "EDITOR"} {
+		if v := strings.TrimSpace(os.Getenv(env)); v != "" {
+			out = append(out, v)
+		}
+	}
+	return append(out, "sensible-editor", "editor", "vi")
+}
+
+// editorName is the editor that would run, for a flash message.
+func editorName() string {
+	for _, cand := range editorCandidates() {
+		if bin, _, ok := resolveEditor(cand); ok {
+			return filepath.Base(bin)
+		}
+	}
+	return "an editor"
+}
+
+// resolveEditor splits a candidate into its binary and any arguments the user baked in ($EDITOR
+// is often "code --wait" or "nvim -p"), and reports whether that binary is actually on PATH.
+func resolveEditor(cand string) (bin string, args []string, ok bool) {
+	fields := strings.Fields(cand)
+	if len(fields) == 0 {
+		return "", nil, false
+	}
+	p, err := exec.LookPath(fields[0])
+	if err != nil {
+		return "", nil, false
+	}
+	return p, fields[1:], true
+}
+
+// editorAt builds the editor invocation for dir, opening it as the argument so an editor with a
+// file browser (vim, nvim, emacs) lands on the tree rather than an empty buffer. nil when no
+// candidate is installed, which the caller reports rather than silently doing nothing.
+func editorAt(dir string) *exec.Cmd {
+	for _, cand := range editorCandidates() {
+		bin, args, ok := resolveEditor(cand)
+		if !ok {
+			continue
+		}
+		c := exec.Command(bin, append(args, ".")...)
+		c.Dir = dir
+		return c
+	}
+	return nil
 }
 
 // verifyCmd materializes a PR into the review workspace, then signals the loop

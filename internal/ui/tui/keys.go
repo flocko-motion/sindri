@@ -28,6 +28,7 @@ const (
 	keyDelete   = "D" // delete an agent
 	keyLint     = "L" // lint a PR
 	keyVerify   = "V" // verify (materialize) a PR
+	keyOpen     = "o" // open a PR's worktree in $EDITOR (navigation → lowercase)
 	keyFilter   = "f" // cycle the tasks filter
 	keyScopeTog = "s" // toggle a tab's global↔repo scope
 	keyRepo     = "p" // switch the active repo/project (navigation → lowercase)
@@ -97,6 +98,7 @@ var keymap = []binding{
 
 	// PRs.
 	{keyVerify, lbl("verify"), scopePRs},
+	{keyOpen, lbl("editor"), scopePRs},
 	{keyAttachAp, lbl("approve"), scopePRs},
 	{keyReject, lbl("reject"), scopePRs},
 	{keyApprove, lbl("agent-review"), scopePRs},
