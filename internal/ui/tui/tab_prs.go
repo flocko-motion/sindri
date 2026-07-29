@@ -441,7 +441,9 @@ func (m model) prMetaItems() []metaItem {
 		metaItem{text: "kind:   " + prKindLabel(d.PR.Kind)},
 		metaItem{text: "agent:  " + d.PR.Agent, kind: "agent", value: d.PR.Agent},
 	)
-	if ws := m.agentWorkspace(d.PR.Agent); ws != "" {
+	// The absolute path, because `value` is handed to a child process as its working directory:
+	// the repo-relative form only resolves when the TUI happens to be running from the repo root.
+	if ws := m.agentWorkspacePath(d.PR.Agent); ws != "" {
 		items = append(items, metaItem{text: "path:   " + ws, kind: "path", value: ws})
 	}
 	items = append(items,
@@ -502,16 +504,6 @@ func (m model) prActionable() []metaItem {
 	return out
 }
 
-// agentWorkspace returns an agent's (repo-relative) worktree path, or "".
-func (m model) agentWorkspace(name string) string {
-	for _, a := range m.state.Agents {
-		if a.Name == name {
-			return a.Workspace
-		}
-	}
-	return ""
-}
-
 // shellAt builds an interactive shell rooted at dir (for opening a workspace).
 func shellAt(dir string) *exec.Cmd {
 	sh := os.Getenv("SHELL")
@@ -521,6 +513,13 @@ func shellAt(dir string) *exec.Cmd {
 	c := exec.Command(sh)
 	c.Dir = dir
 	return c
+}
+
+// editorAtCmd opens the user's editor on dir — an agent's workspace, straight from the Agents
+// tab. No materialization: that checkout already exists and is the one the agent is working in.
+func (m *model) editorAtCmd(dir string) tea.Cmd {
+	m.flash = "opening " + dir + " in " + editorName() + "…"
+	return func() tea.Msg { return editorReadyMsg(dir) }
 }
 
 // openEditorCmd materializes a PR into the review workspace, then signals the loop to open the

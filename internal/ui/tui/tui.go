@@ -94,10 +94,8 @@ type model struct {
 	noticeText  string    // when set, a startup warning modal is shown (any key dismisses)
 }
 
-// detailMinWidth is the floor below which a side detail column can't usefully
-// coexist with the main content — genuinely too little room, not a preference. Above
-// it the user controls the column with § (it shows by default). The main pane (task
-// list / live screen / diff) is NEVER gated on width; only this secondary column is.
+// detailMinWidth is the floor below which the side detail column cannot coexist with the main
+// content. Only that secondary column is ever gated on width; the main pane never is.
 const detailMinWidth = 80
 
 // wide reports whether there's room for a side detail column at all.
@@ -108,9 +106,8 @@ func (m model) wide() bool { return m.w >= detailMinWidth }
 func (m model) showDetail() bool { return m.wide() && !m.hideDetail }
 
 func newModel(cl *client.HTTP, ch <-chan hub.BoardState, root string) model {
-	// Default to a sane size so a frame renders immediately — the real size
-	// arrives via WindowSizeMsg and resizes. (Some terminals send the initial
-	// size late or as 0×0; without a default the view would stick on "loading".)
+	// A default size renders a frame immediately: some terminals report theirs late, or as 0×0,
+	// and the view would otherwise stick on "loading".
 	in := textinput.New()
 	in.CharLimit = 0 // no limit — a chat message (or tell) must never be silently truncated on send
 	ta := textarea.New()
@@ -153,9 +150,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.modal {
 			m.detail.SetHeight(modalContentHeight(m.h))
 		}
-		// A resize — a shrink especially — leaves stale cells from the old, larger
-		// frame in the alt-screen buffer, so the new frame renders over leftovers
-		// (the "ugly resize"). Force a full clear+repaint so it comes up clean.
+		// A shrink leaves cells of the larger frame behind, so the new one draws over
+		// leftovers. Clear before repainting.
 		return m, tea.ClearScreen
 	case stateMsg:
 		if msg.gen != m.gen { // a snapshot from a stream abandoned by a repo switch
@@ -186,9 +182,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case taskOpDoneMsg:
 		return m.taskOpDone(msg)
 	case tickMsg:
-		// Live agent state (status), screen, and log go stale between hub
-		// notifications; while on the Agents tab, poll every few seconds. The
-		// state poll cascades to log+screen refetches via polledMsg.
+		// An agent's screen and log go stale between hub notifications, so the Agents tab polls;
+		// the state poll cascades to those refetches via polledMsg.
 		cmds := []tea.Cmd{tickCmd()}
 		if m.tab == 1 && m.cl != nil {
 			cmds = append(cmds, pollStateCmd(m.cl))
@@ -236,10 +231,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.ExecProcess(ed, resumed)
 	case prMsg:
 		m.prDetail = msg.d
-		// The diff arrives async, well after syncDetail sized the viewport to the
-		// "(loading…)" placeholder. Resize it to the real content now, or the diff
-		// renders against a stale 1-line window (showing only its header) until some
-		// later event happens to reclamp.
+		// The diff arrives long after syncDetail sized the viewport to "(loading…)", so resize
+		// now or it renders against a stale one-line window.
 		m.reclamp()
 	case taskMsg:
 		m.taskDetail = msg.t
@@ -298,10 +291,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// modalTitle labels the detail modal for the current selection.
-
-// onKey applies a key (by its string form) — shared by the live loop and the
-// headless Screenshot harness. Mutates the model; returns an optional cmd.
+// onKey applies a key by its string form, shared by the live loop and the headless Screenshot
+// harness. Mutates the model; returns an optional cmd.
 func (m *model) onKey(k string) tea.Cmd {
 	oldTab := m.tab
 	m.flash = "" // any keypress clears the previous transient status
@@ -411,7 +402,21 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 1 {
 			return m.agentStartStop()
 		}
-	case keyAttachAp: // agents: attach to the live tmux session · prs: approve (the human gate)
+	case keyAttachAp: // agents/tasks: attach to the live tmux session · prs: approve (the human gate)
+		if m.tab == 0 {
+			// Attach to whoever is working the selected task — the row you are looking at names
+			// the work, so it should reach the agent doing it without a detour via the Agents tab.
+			a, ok := m.agentOnTask(m.selID())
+			switch {
+			case !ok:
+				m.flash = "no agent is working " + m.selID()
+			case a.Status == "down":
+				m.errText = "agent " + a.Name + " is down — start it first ('S' on the Agents tab)"
+			case m.cl != nil:
+				return attachAgent(m.agentContainer(a), a.Name)
+			}
+			return nil
+		}
 		if m.tab == 1 {
 			if a, ok := m.selAgent(); ok {
 				if a.Status == "down" {
@@ -509,7 +514,13 @@ func (m *model) onKey(k string) tea.Cmd {
 				return m.verifyCmd(id)
 			}
 		}
-	case keyOpen: // prs: materialize the PR, then open $EDITOR on that worktree
+	case keyOpen: // open $EDITOR on a workspace: an agent's own, or a PR's review checkout
+		if m.tab == 1 {
+			if dir := m.agentWorkspacePath(m.selID()); dir != "" {
+				return m.editorAtCmd(dir)
+			}
+			return nil
+		}
 		if m.tab == 2 {
 			if id := m.selID(); id != "" && m.cl != nil {
 				return m.openEditorCmd(id)
@@ -633,10 +644,8 @@ func (m *model) onKey(k string) tea.Cmd {
 	return cmd
 }
 
-// resumed is the tea.ExecProcess callback for every interactive child (tmux
-// attach, workspace shell): on exit it asks the loop to repaint via resumedMsg. The
-// child's own exit error is intentionally dropped — there's nothing the dashboard
-// can do about a shell that exited non-zero, and a stray modal would just be noise.
+// resumed asks the loop to repaint after an interactive child exits. Its exit error is dropped:
+// nothing here can act on a shell that exited non-zero, and a modal about it is only noise.
 func resumed(error) tea.Msg { return resumedMsg{} }
 
 // View composes the full-height frame: tab strip, master-detail body, footer.
@@ -674,10 +683,8 @@ func (m model) View() string {
 	repoName, repoTag := m.currentRepo()
 	top := headerBar(labels, m.tab, m.w, repoName, repoTag, m.repoColorIdx(repoTag))
 	var body string
-	// Agents/PRs always render their MAIN pane (live tmux screen / diff) — it's the
-	// point of the tab and must never be hidden. agentsBody/prBody handle a narrow or
-	// §-hidden terminal internally (they drop only the RIGHT detail column, keeping
-	// the list + main pane full-width).
+	// Agents/PRs always render their main pane — it is the point of the tab. Each body drops
+	// only the right detail column when the terminal is narrow or § hid it.
 	if m.tab == 1 {
 		body = m.agentsBody()
 	} else if m.tab == 2 {

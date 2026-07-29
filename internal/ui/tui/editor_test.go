@@ -3,6 +3,9 @@ package tui
 import (
 	"path/filepath"
 	"testing"
+
+	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/hub/store"
 )
 
 // TestEditorPrefersTheUsersChoice: $VISUAL wins over $EDITOR, which wins over any system
@@ -63,5 +66,41 @@ func TestEditorOpensTheDirectory(t *testing.T) {
 	}
 	if cmd.Dir != "/some/worktree" {
 		t.Errorf("Dir = %q", cmd.Dir)
+	}
+}
+
+// TestAgentWorkspacePathIsAbsolute: the path is handed to a child process as its working
+// directory, and AgentView.Workspace is repo-relative — so it must be joined onto the agent's
+// OWN repo. A relative path would resolve against wherever the TUI was launched, and the wrong
+// repo's root would name a directory that exists but holds someone else's work.
+func TestAgentWorkspacePathIsAbsolute(t *testing.T) {
+	m := newModel(nil, nil, "/r/one")
+	m.state = hub.BoardState{
+		Projects: []store.Project{
+			{Tag: "one", Path: "/r/one"},
+			{Tag: "two", Path: "/r/two"},
+		},
+		Agents: []hub.AgentView{
+			{Name: "dvalin", Project: "one", Workspace: ".worktrees/dvalin"},
+			{Name: "alviss", Project: "two", Workspace: ".worktrees/alviss"}, // another repo
+			{Name: "hepti", Project: "one", Workspace: "."},                  // coauthor: the checkout itself
+		},
+	}
+	for _, tc := range []struct{ agent, want string }{
+		{"dvalin", "/r/one/.worktrees/dvalin"},
+		{"alviss", "/r/two/.worktrees/alviss"}, // its own project, not the selected one
+		{"hepti", "/r/one"},
+	} {
+		if got := m.agentWorkspacePath(tc.agent); got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.agent, got, tc.want)
+		}
+	}
+	// An unknown agent, or one whose project the board doesn't carry, has no path to open.
+	if got := m.agentWorkspacePath("nobody"); got != "" {
+		t.Errorf("unknown agent should have no path, got %q", got)
+	}
+	m.state.Agents = append(m.state.Agents, hub.AgentView{Name: "orphan", Project: "gone", Workspace: "x"})
+	if got := m.agentWorkspacePath("orphan"); got != "" {
+		t.Errorf("an agent whose repo is unknown has no resolvable path, got %q", got)
 	}
 }

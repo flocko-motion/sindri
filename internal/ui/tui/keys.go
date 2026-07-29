@@ -90,6 +90,7 @@ var keymap = []binding{
 	{keyStartS, lbl("start/stop"), scopeAgents},
 	{keyTell, lbl("tell"), scopeAgents},
 	{keyAttachAp, lbl("attach"), scopeAgents},
+	{keyAttachAp, lbl("attach"), scopeTasks},
 	{keyEdit, lbl("memory"), scopeAgents},
 	{keyReject, lbl("rebase"), scopeAgents}, // R = reBase (onto the reference branch)
 	{keyDelete, lbl("delete"), scopeAgents},
@@ -99,6 +100,7 @@ var keymap = []binding{
 	// PRs.
 	{keyVerify, lbl("verify"), scopePRs},
 	{keyOpen, lbl("editor"), scopePRs},
+	{keyOpen, lbl("editor"), scopeAgents},
 	{keyAttachAp, lbl("approve"), scopePRs},
 	{keyReject, lbl("reject"), scopePRs},
 	{keyApprove, lbl("agent-review"), scopePRs},
