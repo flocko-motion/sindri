@@ -447,9 +447,13 @@ func (m *model) onKey(k string) tea.Cmd {
 				return nil
 			}
 		}
-	case keyDelete: // tasks: scrap · agents: delete (or remove an orphan) · repos: forget
+	case keyDelete: // tasks: scrap · agents: delete (or remove an orphan) · prs: scrap · repos: forget
 		if m.tab == 0 && m.selID() != "" {
 			m.openScrapChoice(m.selID())
+			return nil
+		}
+		if m.tab == 2 && m.selID() != "" {
+			m.openScrapPRChoice(m.selID())
 			return nil
 		}
 		if m.tab == 1 && m.selID() != "" {

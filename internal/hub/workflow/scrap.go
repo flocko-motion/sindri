@@ -15,6 +15,45 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
+// DiscardPR scraps a PR ON ITS OWN, for work the user simply does not want — a proposal a
+// planner produced and there is no use for. It scraps the PR, then releases its author.
+//
+// The release is the whole difference from ScrapPR. That one is the companion to closing a
+// task, and leaves the author to the paired close so the worker is not messaged twice. With no
+// close alongside it, nobody would tell the author anything: it would sit in "submitted"
+// waiting for a verdict on a PR that no longer exists. Its branch is deleted, so there is
+// nothing to resume — the author goes idle and asks for new work.
+func (e *Engine) DiscardPR(project, prID string) error {
+	ps := e.store.For(project)
+	pr, ok, err := ps.GetPR(prID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("no such PR %q", prID)
+	}
+	author := pr.Agent
+	if err := e.ScrapPR(project, prID); err != nil {
+		return err
+	}
+	if author == "" {
+		return nil
+	}
+	// Only release an author still waiting on THIS PR. One that has moved on (or never
+	// blocked) must not be interrupted for a verdict it isn't expecting.
+	st, _ := ps.GetState(author)
+	if st.Phase == "submitted" || st.Phase == "resolving" {
+		if e.deps.AgentAlive(project, author) {
+			_ = e.deps.Interrupt(project, author)
+			_ = e.deps.InjectWhenReady(project, author, MsgPRScrapped(prID))
+		}
+		_ = ps.SetState(store.AgentState{Agent: author, Phase: "idle"})
+	}
+	_ = ps.Log(author, "pr-scrapped", prID)
+	e.deps.Notify()
+	return nil
+}
+
 // ScrapPR discards a PR (host/human-only) — the companion to closing/scrapping its
 // task when the human decides the work isn't wanted. It deletes the task's branch
 // (unpushed local work on it is intentionally discarded) and marks the PR "scrapped"

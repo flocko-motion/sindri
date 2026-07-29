@@ -64,6 +64,7 @@ type backend interface {
 	PRInfo(id string) (hub.PRDetail, error)
 	RejectPR(id, feedback string) error
 	ApprovePR(id string) error
+	DiscardPR(id string) error
 	LintPR(id string) (string, error)
 	RequestReview(id, requirement string) error
 	MaterializeReview(id string) (string, error)
@@ -226,7 +227,7 @@ func NewAgentCmd() *cobra.Command {
 // NewPrCmd builds the `pr` command tree (review/merge pull requests).
 func NewPrCmd() *cobra.Command {
 	c := &cobra.Command{Use: "pr", Short: "Inspect and merge pull requests (merge-intents)"}
-	c.AddCommand(prListCmd(), prInfoCmd(), prReviewCmd(), prVerifyCmd(), prApproveCmd(), prRejectCmd(), prLintCmd(), prMergeCmd(), prMilestoneCmd())
+	c.AddCommand(prListCmd(), prInfoCmd(), prReviewCmd(), prVerifyCmd(), prApproveCmd(), prRejectCmd(), prScrapCmd(), prLintCmd(), prMergeCmd(), prMilestoneCmd())
 	return c
 }
 
@@ -310,6 +311,38 @@ func prRejectCmd() *cobra.Command {
 			})
 		},
 	}
+}
+
+// prScrapCmd discards a PR outright — the verb for work you simply do not want, such as a
+// proposal a planner produced and you have no use for.
+//
+// "scrap" matches the word the TUI already uses on D, so the same key and the same term mean
+// the same thing in both. delete/rm are aliases, because that is what a hand reaches for.
+//
+// Distinct from reject, which sends the PR BACK to its worker with feedback to address: scrap
+// ends it, the branch goes, and nobody is asked to try again. Unrecoverable, so it takes --yes
+// rather than acting on a bare id.
+func prScrapCmd() *cobra.Command {
+	var yes bool
+	c := &cobra.Command{
+		Use: "scrap <pr-id>", Aliases: []string{"delete", "rm", "discard"},
+		Short: "Scrap a PR and delete its branch (no feedback, nobody retries)", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if !yes {
+				return fmt.Errorf("scrapping %s deletes its branch and cannot be undone — pass --yes to confirm.\n"+
+					"To send it back for another attempt instead, use `sindri pr reject %s \"<what to fix>\"`", args[0], args[0])
+			}
+			return withBackend(func(b backend) error {
+				if err := b.DiscardPR(args[0]); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "scrapped %s — branch deleted\n", args[0])
+				return nil
+			})
+		},
+	}
+	c.Flags().BoolVar(&yes, "yes", false, "confirm: scrap the PR and delete its branch")
+	return c
 }
 
 func prLintCmd() *cobra.Command {

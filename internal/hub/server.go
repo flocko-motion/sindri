@@ -354,6 +354,15 @@ func (h *Hub) Handler() http.Handler {
 		}
 		writeJSON(w, okMsg{"scrapped"}, h.wf.ScrapPR(h.wf.PRProject(h.reqProject(r), req.Name), req.Name))
 	})
+	// Discarding a PR on its own is a DIFFERENT operation from scrapping one alongside its
+	// task: with no close to free the author, this path has to release it (-> DiscardPR).
+	mux.HandleFunc("POST /pr/discard", func(w http.ResponseWriter, r *http.Request) {
+		var req NameReq
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"scrapped"}, h.wf.DiscardPR(h.wf.PRProject(h.reqProject(r), req.Name), req.Name))
+	})
 	mux.HandleFunc("GET /pr/lint", func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("id")
 		out, err := h.wf.LintPR(h.wf.PRProject(h.reqProject(r), id), id)

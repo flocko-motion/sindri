@@ -74,3 +74,80 @@ func TestScrapPRStopsReviewer(t *testing.T) {
 		t.Fatalf("reviewer should no longer be reviewing (verdict recorded), got %q", got)
 	}
 }
+
+// TestDiscardPRReleasesItsAuthor: scrapping a PR on its own has no paired task close to free
+// the author, so DiscardPR must — otherwise a planner whose proposal the user discards waits in
+// "submitted" for a verdict on a PR that no longer exists.
+func TestDiscardPRReleasesItsAuthor(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	root := t.TempDir()
+	if err := st.RegisterProject("proj", root); err != nil {
+		t.Fatal(err)
+	}
+	ps := st.For("proj")
+	if err := ps.PutAgent(store.Agent{Name: "galar", Role: "planner", Workspace: "."}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutPR(store.PR{ID: "pr-os-new", Task: "os-new", Agent: "galar", Status: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: "galar", Task: "os-new", Phase: "submitted"}); err != nil {
+		t.Fatal(err)
+	}
+	deps := &stubDeps{root: root, alive: true}
+	e := New(st, deps)
+
+	if err := e.DiscardPR("proj", "pr-os-new"); err != nil {
+		t.Fatalf("DiscardPR: %v", err)
+	}
+	if pr, _, _ := ps.GetPR("pr-os-new"); pr.Status != "scrapped" {
+		t.Errorf("PR status = %q, want scrapped", pr.Status)
+	}
+	if got, _ := ps.GetState("galar"); got.Phase != "idle" {
+		t.Errorf("author phase = %q, want idle — it must not wait on a PR that is gone", got.Phase)
+	}
+	if len(deps.injected) == 0 {
+		t.Error("the author must be told its PR was scrapped")
+	}
+}
+
+// TestDiscardPRLeavesAnUninvolvedAgentAlone: an author that has moved on must not be
+// interrupted for a verdict it is not expecting.
+func TestDiscardPRLeavesAnUninvolvedAgentAlone(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	root := t.TempDir()
+	if err := st.RegisterProject("proj", root); err != nil {
+		t.Fatal(err)
+	}
+	ps := st.For("proj")
+	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker", Workspace: "."}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutPR(store.PR{ID: "pr-td-1", Task: "td-1", Agent: "eitri", Status: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	// Already working something else — not waiting on this PR.
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-9", Phase: "working"}); err != nil {
+		t.Fatal(err)
+	}
+	deps := &stubDeps{root: root, alive: true}
+	e := New(st, deps)
+
+	if err := e.DiscardPR("proj", "pr-td-1"); err != nil {
+		t.Fatalf("DiscardPR: %v", err)
+	}
+	if got, _ := ps.GetState("eitri"); got.Phase != "working" {
+		t.Errorf("phase = %q, want working left untouched", got.Phase)
+	}
+	if len(deps.interrupted) != 0 {
+		t.Errorf("an agent not waiting on the PR must not be interrupted, got %v", deps.interrupted)
+	}
+}

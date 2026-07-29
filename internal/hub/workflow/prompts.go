@@ -254,6 +254,15 @@ func MsgMerged(prID string) string {
 	return fmt.Sprintf("[hub] %s merged. Run `sindri` for your next task.", prID)
 }
 
+// MsgPRScrapped tells an author the user discarded its PR outright. It is deliberately final:
+// the branch is gone, so there is nothing to fix and nothing to resubmit — unlike a rejection,
+// which asks for another attempt. Without this the author waits in "submitted" for a verdict
+// that will never arrive.
+func MsgPRScrapped(prID string) string {
+	return fmt.Sprintf("[user] %s was scrapped — the work isn't wanted and its branch is gone. "+
+		"Nothing to fix or resubmit. Run `sindri` for your next directive.", prID)
+}
+
 // MsgTaskCancelled tells a worker its task was closed/scrapped out from under it —
 // stop, and don't clean up (the hub already reset the worktree), just get new work.
 func MsgTaskCancelled(id string) string {

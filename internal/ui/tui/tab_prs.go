@@ -274,6 +274,27 @@ func (m model) prRows() []row {
 	return out
 }
 
+// openScrapPRChoice confirms scrapping a PR: the branch goes and the PR drops off the board,
+// with nobody asked to try again. That is the action for work you simply do not want — a
+// proposal a planner produced that you have no use for.
+//
+// The confirm names the alternative, because the two are easy to confuse and only one of them
+// is recoverable: reject sends the PR BACK with feedback, scrap ends it.
+func (m *model) openScrapPRChoice(id string) {
+	cl := m.cl
+	m.choice = choiceModalState{
+		active: true, title: "scrap " + id + "? (deletes its branch; reject instead to send it back for another try)",
+		options: []string{"cancel", "scrap " + id},
+		values:  []string{"cancel", "scrap"},
+		apply: func(v string) tea.Cmd {
+			if v != "scrap" {
+				return nil
+			}
+			return mutateThenRefresh(cl, func() error { return cl.DiscardPR(id) })
+		},
+	}
+}
+
 // prKindLabel renders a PR's kind for humans: an interim (mid-task) contribution
 // vs a final (task-done) PR. "" reads as final (the historical default).
 func prKindLabel(kind string) string {

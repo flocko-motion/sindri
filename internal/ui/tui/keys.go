@@ -92,6 +92,7 @@ var keymap = []binding{
 	{keyEdit, lbl("memory"), scopeAgents},
 	{keyReject, lbl("rebase"), scopeAgents}, // R = reBase (onto the reference branch)
 	{keyDelete, lbl("delete"), scopeAgents},
+	{keyDelete, lbl("scrap"), scopePRs},
 	{keyScopeTog, func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scopeAgents},
 
 	// PRs.

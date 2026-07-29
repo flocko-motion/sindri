@@ -407,8 +407,16 @@ func (c *HTTP) ApprovePR(id string) error {
 
 // ScrapPR discards a PR alongside scrapping/closing its task (the human path): it
 // deletes the task's branch and flips the PR to "scrapped" so it drops off the board.
+// The paired task close frees the agent, so this does not.
 func (c *HTTP) ScrapPR(id string) error {
 	return c.post("/pr/scrap", hub.NameReq{Name: id})
+}
+
+// DiscardPR scraps a PR ON ITS OWN — for work that simply isn't wanted, with no task being
+// closed alongside it. Use this rather than ScrapPR whenever the PR is the only thing going
+// away: it also releases the author, which would otherwise wait for a verdict forever.
+func (c *HTTP) DiscardPR(id string) error {
+	return c.post("/pr/discard", hub.NameReq{Name: id})
 }
 
 // LintPR runs the quality gate against a PR's worktree and returns the output.
