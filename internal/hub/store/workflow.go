@@ -240,16 +240,21 @@ func (p *ProjectStore) OpenTasks() ([]Task, error) {
 // A task with no priority is left out — no priority, no assignment: an unprioritized
 // task stays in the backlog (visible, editable) until a human sets a priority, which
 // is the signal that it's ready to be worked.
+//
+// A standalone task, then: no children of its own (those are packages -> OpenContainers)
+// and no open parent. A child belongs to its package and is worked inside it, on the
+// package's branch, so handing one out on its own would split a tree across agents and
+// strip exactly the context the hierarchy was built to give.
 func (p *ProjectStore) OpenLeaves() ([]Task, error) {
 	rows, err := p.s.db.Query(`
 		SELECT `+taskCols+taskFrom+`
 		WHERE t.project=? AND t.status='open' AND (a.status IS NULL OR a.status='approved')
 		  AND t.priority != ''
 		  AND t.id NOT IN (SELECT parent_id FROM tasks WHERE project=? AND parent_id != '')
-		  AND t.parent_id NOT IN (SELECT container FROM agent_state WHERE project=? AND container != '')
+		  AND NOT EXISTS (SELECT 1 FROM tasks pp WHERE pp.project=t.project AND pp.id=t.parent_id AND pp.status='open')
 		  AND t.id NOT IN (SELECT task FROM agent_state WHERE project=? AND task != '')
 		ORDER BY t.priority, t.id`,
-		p.project, p.project, p.project, p.project)
+		p.project, p.project, p.project)
 	if err != nil {
 		return nil, fmt.Errorf("open leaves: %w", err)
 	}
@@ -284,19 +289,31 @@ func (p *ProjectStore) GetTask(id string) (Task, bool, error) {
 	return t, true, nil
 }
 
-// MarkedContainers returns this project's tasks eligible for collaborative
-// assignment: not closed, carrying the mark label, with an open child, unheld.
-func (p *ProjectStore) MarkedContainers(label string) ([]Task, error) {
+// OpenContainers returns the task packages claimable in this project: a task with an open
+// child, approved, prioritised, unheld, and not itself inside a bigger open package.
+//
+// A hierarchy IS the unit of work — a parent is organised that way so one agent takes the
+// whole thing with the context that comes with it, and works the children in turn
+// (checkpoint) on the parent's branch. So every parent with open children is a package;
+// OpenLeaves correspondingly leaves their children alone.
+//
+// The gates match OpenLeaves exactly: approved AND carrying a priority. The priority a human
+// sets at approval is what releases work, and a package must not be the one path around that.
+//
+// "Not inside a bigger package" keeps a deep tree from being claimed at two levels at once:
+// the topmost open ancestor is the package, and its descendants come with it.
+func (p *ProjectStore) OpenContainers() ([]Task, error) {
 	rows, err := p.s.db.Query(`
 		SELECT `+taskCols+taskFrom+`
 		WHERE t.project=? AND t.status NOT IN ('closed','approved','merged')
 		  AND (a.status IS NULL OR a.status='approved')
-		  AND (',' || t.labels || ',') LIKE '%,' || ? || ',%'
+		  AND t.priority != ''
 		  AND EXISTS (SELECT 1 FROM tasks c WHERE c.project=t.project AND c.parent_id=t.id AND c.status='open')
+		  AND NOT EXISTS (SELECT 1 FROM tasks pp WHERE pp.project=t.project AND pp.id=t.parent_id AND pp.status='open')
 		  AND t.id NOT IN (SELECT container FROM agent_state WHERE project=? AND container != '')
-		ORDER BY CASE WHEN t.priority='' THEN 1 ELSE 0 END, t.priority, t.id`, p.project, label, p.project)
+		ORDER BY t.priority, t.id`, p.project, p.project)
 	if err != nil {
-		return nil, fmt.Errorf("marked containers: %w", err)
+		return nil, fmt.Errorf("open containers: %w", err)
 	}
 	defer rows.Close()
 	return scanTasks(rows)

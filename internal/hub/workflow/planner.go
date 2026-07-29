@@ -179,9 +179,17 @@ func childIDs(tasks []store.Task, id string) []string {
 	return out
 }
 
-// CmdTasks lets a planner read the backlog: `task list` prints every task indented by its
-// place in the parent/child tree; `task <id>` prints that task's full detail, including its
-// parent and children.
+// TaskHelp is what the registry advertises for `task`.
+const TaskHelp = "read your work: `task` (your own task or package; a planner or coauthor: the whole backlog), " +
+	"`task <id>` (one task in full — description, parent, children), `task list` (every task you can see, indented by tree)"
+
+// CmdTasks is the read surface over the backlog. What it shows depends on the caller's job.
+//
+// A planner or coauthor shapes the whole backlog and sees all of it. A WORKER sees only the
+// package it holds — that task and its descendants. Its job is to finish one piece of work
+// well, and the rest of the backlog is at best a distraction and at worst an invitation to
+// start something nobody assigned it. Bounding the view keeps the agent's attention where the
+// hub put it, and keeps a long backlog out of a context window that has better uses.
 func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if err := e.SyncTasks(c.Project); err != nil {
 		return 1, err
@@ -191,8 +199,20 @@ func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int,
 	if err != nil {
 		return 1, err
 	}
+	visible, bounded, err := e.visibleTasks(c, tasks)
+	if err != nil {
+		return 1, err
+	}
+
 	if len(args) > 0 && args[0] != "list" {
-		t, err := e.TaskInfo(c.Project, args[0])
+		id := args[0]
+		if bounded && !visible[id] {
+			// Naming what it CAN read keeps the refusal actionable, and a worker that wandered
+			// here was usually looking for its own package anyway.
+			fmt.Fprintf(out, "%s is not part of your work. Run `sindri task` for the package you hold.\n", id)
+			return 1, nil
+		}
+		t, err := e.TaskInfo(c.Project, id)
 		if err != nil {
 			return 1, err
 		}
@@ -205,13 +225,131 @@ func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int,
 			dash(t.ParentID), dash(strings.Join(childIDs(tasks, t.ID), ", ")), dash(t.Description))
 		return 0, nil
 	}
+	if bounded && len(args) == 0 {
+		return e.workerTaskView(c, tasks, out)
+	}
+
 	// Indent by depth so the parent/child structure is visible in the listing itself —
 	// hierarchy is how work is organised here (an openspec change parents its tasks), and a
 	// planner reads and repairs it from this view.
 	prs, _ := ps.PRs()
+	shown := 0
 	for _, r := range task.ArrangeTasks(tasks, prs) {
+		if bounded && !visible[r.ID] {
+			continue
+		}
+		shown++
 		fmt.Fprintf(out, "%-12s %-8s %-9s %-3s %s%s\n",
 			r.ID, r.Status, dash(r.Approval), dash(r.Priority), strings.Repeat("  ", r.Depth), r.Title)
 	}
+	if bounded && shown == 0 {
+		fmt.Fprintln(out, "You hold no task. Run `sindri` to pick up your next one.")
+	}
 	return 0, nil
+}
+
+// visibleTasks is the set of tasks the caller may read, and whether that set is BOUNDED (a
+// subset) rather than the whole backlog.
+//
+// Planners and coauthors work across the backlog, so they are unbounded and the set is nil — a
+// nil map with bounded=false means "no filtering", which keeps the caller's checks trivial. A
+// worker is bounded to the package it holds: the task recorded in its state, plus every
+// descendant, which is exactly the unit the hub assigned it.
+func (e *Engine) visibleTasks(c registry.Caller, tasks []store.Task) (map[string]bool, bool, error) {
+	switch c.Role {
+	case "planner", "coauthor":
+		return nil, false, nil
+	}
+	st, err := e.store.For(c.Project).GetState(c.Agent)
+	if err != nil {
+		return nil, true, err
+	}
+	held := st.Container
+	if held == "" {
+		held = st.Task
+	}
+	visible := map[string]bool{}
+	for _, r := range subtreeRows(tasks, held) {
+		visible[r.ID] = true
+	}
+	return visible, true, nil
+}
+
+// workerTaskView answers bare `task` for a worker: what it currently holds.
+//
+// A standalone task prints in full — there is nothing to choose between, so making the worker
+// ask again would be a wasted step. A package prints as an overview instead: the parent, then
+// every descendant with its status and a marker on the current subtask, ending with the one
+// command that opens any of them. The overview stays small enough to re-read often, and the
+// detail is a request away rather than a wall of text the worker didn't ask for.
+func (e *Engine) workerTaskView(c registry.Caller, tasks []store.Task, out io.Writer) (int, error) {
+	ps := e.store.For(c.Project)
+	st, err := ps.GetState(c.Agent)
+	if err != nil {
+		return 1, err
+	}
+	held := st.Container // a package…
+	if held == "" {
+		held = st.Task // …else the single task
+	}
+	if held == "" {
+		fmt.Fprintln(out, "You hold no task. Run `sindri` to pick up your next one.")
+		return 0, nil
+	}
+	root, ok, err := ps.GetTask(held)
+	if err != nil {
+		return 1, err
+	}
+	if !ok {
+		fmt.Fprintf(out, "You hold %s, but it is no longer in the backlog. Run `sindri` for your current directive.\n", held)
+		return 0, nil
+	}
+
+	rows := subtreeRows(tasks, root.ID)
+	if len(rows) <= 1 { // a standalone task: show it whole
+		fmt.Fprintf(out, "Your task %s  [%s]  %s\n\n%s\n", root.ID, root.Status, root.Title, dash(root.Description))
+		return 0, nil
+	}
+	fmt.Fprintf(out, "Your package %s: %s\n", root.ID, root.Title)
+	if body := strings.TrimSpace(root.Description); body != "" {
+		fmt.Fprintf(out, "\n%s\n", body)
+	}
+	fmt.Fprintf(out, "\n%d subtasks:\n", len(rows)-1)
+	for _, r := range rows[1:] {
+		marker := "  "
+		if r.ID == st.Task {
+			marker = "→ " // the subtask you are on now
+		}
+		fmt.Fprintf(out, "%s%-12s %-8s %s%s\n", marker, r.ID, r.Status, strings.Repeat("  ", r.Depth-1), r.Title)
+	}
+	fmt.Fprintln(out, "\n`sindri task <id>` shows any of them in full (description included).")
+	return 0, nil
+}
+
+// subtreeRows is rootID and its descendants, depth-tagged in tree order — the shape an
+// overview prints. Built from the cached task set, so it needs no extra read.
+func subtreeRows(tasks []store.Task, rootID string) []task.TaskRow {
+	byParent := map[string][]store.Task{}
+	var root *store.Task
+	for i, t := range tasks {
+		if t.ID == rootID {
+			root = &tasks[i]
+		}
+		if t.ParentID != "" {
+			byParent[t.ParentID] = append(byParent[t.ParentID], t)
+		}
+	}
+	if root == nil {
+		return nil
+	}
+	var rows []task.TaskRow
+	var walk func(t store.Task, depth int)
+	walk = func(t store.Task, depth int) {
+		rows = append(rows, task.TaskRow{Task: t, Depth: depth})
+		for _, ch := range byParent[t.ID] {
+			walk(ch, depth+1)
+		}
+	}
+	walk(*root, 0)
+	return rows
 }

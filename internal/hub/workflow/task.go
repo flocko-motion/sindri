@@ -516,15 +516,14 @@ func (e *Engine) claimLeaf(project, worker string) (string, bool, error) {
 	return DirClaimed(t.ID, t.Title, branch, e.deps.ArchitectureDoc(project)), true, nil
 }
 
-// collabLabel marks a parent task for collaborative assignment.
-const collabLabel = "collab"
-
-// claimContainer assigns the highest-priority marked, unheld container in a project
-// to the agent, starting it on the container's first open child.
+// claimContainer assigns the highest-priority unheld package in a project to the agent,
+// starting it on the package's first open child. A package is any task with open children
+// (-> store.OpenContainers): a hierarchy is organised so that one agent takes the whole
+// thing, with the context that comes with it.
 func (e *Engine) claimContainer(project, worker string) (string, bool, error) {
 	ps := e.store.For(project)
 	root := e.deps.ProjectRoot(project)
-	containers, err := ps.MarkedContainers(collabLabel)
+	containers, err := ps.OpenContainers()
 	if err != nil || len(containers) == 0 {
 		return "", false, err
 	}

@@ -63,7 +63,11 @@ func (h *Hub) registry() *registry.Registry {
 		registry.Command{Name: "rebase", Help: "rebase your branch onto the current reference branch (fix any conflicts it surfaces): rebase", Roles: []string{"worker", "planner"}, Run: h.wf.CmdRebase},
 		registry.Command{Name: "checkpoint", Help: "commit the current subtask and move to the next: checkpoint [message]", Roles: []string{"worker"},
 			Hidden: func(c registry.Caller) bool { return !c.InContainer }, Run: h.wf.CmdCheckpoint},
-		registry.Command{Name: "task", Help: "read the backlog: `task list` prints every task indented by its place in the parent/child tree; `task <id>` prints one task's detail — status, approval, parent, children, description", Roles: []string{"planner"}, Run: h.wf.CmdTasks},
+		// A worker reads too: it holds a package claimed whole for its context, so that context
+		// has to be re-readable rather than delivered once at claim time. What each role SEES
+		// differs — a worker is bounded to its own package (-> CmdTasks) — but the verb is the
+		// same, so nobody has to learn a second name for reading their work.
+		registry.Command{Name: "task", Help: workflow.TaskHelp, Roles: []string{"planner", "coauthor", "worker"}, Run: h.wf.CmdTasks},
 		registry.Command{Name: "create-task", Help: workflow.CreateTaskHelp, Roles: []string{"planner"}, Run: h.wf.CmdCreateTask},
 		registry.Command{Name: "edit-task", Help: workflow.EditTaskHelp, Roles: []string{"planner"}, Run: h.wf.CmdEditTask},
 		registry.Command{Name: "openspec", Help: "ship your openspec changes as a PR: openspec submit [message]", Roles: []string{"planner"}, Run: h.wf.CmdOpenspec},

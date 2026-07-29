@@ -198,8 +198,8 @@ review gate between them. The *same* flow covers two styles:
 - **Interactive** — feed subtasks live and ask for a PR at milestone moments.
 
 ```bash
-# Build the feature: a parent (marked `collab`) with children.
-sindri task new "Login feature" -t epic --labels collab          # → td-LOGIN
+# Build the feature: a parent with children. One agent takes the whole package.
+sindri task new "Login feature" -t epic                          # → td-LOGIN
 sindri task new "Form UI"   --parent td-LOGIN
 sindri task new "Validation" --parent td-LOGIN
 ```
@@ -252,8 +252,8 @@ sindri task new "Fix the parser" -t bug -p P1      # type: bug|feature|task|epic
 sindri task new "Sub-thing" --parent td-abc123     # a child (subtask)
 sindri task list
 sindri task info td-abc123
-sindri task edit td-abc123 --labels collab         # mark a parent for the collaborative flow
-sindri task priority td-abc123 P0
+sindri task edit td-abc123 --parent td-LOGIN       # move a task into a package
+sindri task priority td-abc123 P0                  # a priority is what releases it to a worker
 ```
 
 A **planner** proposes tasks that you gate: a proposed task is *pending* until you

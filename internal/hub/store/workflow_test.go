@@ -179,7 +179,7 @@ func TestOpenLeavesExcludesHeldLeaf(t *testing.T) {
 
 func TestOpenLeavesAndChildren(t *testing.T) {
 	p := openTmpProject(t)
-	// A container P with two open children; a standalone leaf L.
+	// A package P with two open children; a standalone leaf L.
 	if err := p.ReplaceTasks([]Task{
 		{ID: "P", Status: "open", Priority: "P1"},
 		{ID: "C1", Status: "open", Priority: "P1", ParentID: "P"},
@@ -189,16 +189,17 @@ func TestOpenLeavesAndChildren(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Leaves exclude the parent P; children are leaves until reserved.
-	if got := ids(mustLeaves(t, p)); !eq(got, []string{"C1", "C2", "L"}) {
-		t.Fatalf("OpenLeaves before reservation: got %v", got)
+	// The leaf pool is standalone tasks only: P is a package (-> OpenContainers) and its
+	// children are worked inside it, so L is the whole pool — before any reservation.
+	if got := ids(mustLeaves(t, p)); !eq(got, []string{"L"}) {
+		t.Fatalf("OpenLeaves: want [L] (standalone only), got %v", got)
 	}
-	// Children of a container are its subtask stream regardless of reservation.
+	// Children remain the package's subtask stream, which is how the holder works them.
 	if got := ids(mustChildren(t, p, "P")); !eq(got, []string{"C1", "C2"}) {
 		t.Fatalf("OpenChildren: got %v", got)
 	}
 
-	// Once an agent holds P, its children are reserved out of the leaf pool.
+	// Holding P changes nothing for the leaf pool: its children were never in it.
 	if err := p.SetState(AgentState{Agent: "brokkr", Container: "P", Branch: "P", Task: "C1", Phase: "working"}); err != nil {
 		t.Fatal(err)
 	}
@@ -210,25 +211,34 @@ func TestOpenLeavesAndChildren(t *testing.T) {
 	}
 }
 
-func TestMarkedContainersAndGetTask(t *testing.T) {
+// TestOpenContainersAndGetTask: every parent with an open child is a package — a hierarchy
+// is organised that way so one agent takes the whole thing, so no label is needed to opt in.
+// A package needs the same release gates as a standalone task (approved, prioritised), and
+// the topmost open ancestor is the one claimed.
+func TestOpenContainersAndGetTask(t *testing.T) {
 	p := openTmpProject(t)
 	if err := p.ReplaceTasks([]Task{
-		{ID: "P", Status: "open", Priority: "P1", Labels: "feature,collab"},     // marked, has open child
-		{ID: "C1", Status: "open", Priority: "P1", ParentID: "P"},                // open child of P
-		{ID: "Q", Status: "open", Priority: "P1", Labels: "collab"},              // marked but no children
-		{ID: "R", Status: "open", Priority: "P1", Labels: "other", ParentID: ""}, // not marked
-		{ID: "RC", Status: "open", Priority: "P1", ParentID: "R"},                // R has a child but isn't marked
+		{ID: "P", Status: "open", Priority: "P1", Labels: "feature"}, // has an open child
+		{ID: "C1", Status: "open", Priority: "P1", ParentID: "P"},    // its child
+		{ID: "Q", Status: "open", Priority: "P1"},                    // no children — a standalone task
+		{ID: "N", Status: "open"},                                    // has a child but NO priority
+		{ID: "NC", Status: "open", Priority: "P1", ParentID: "N"},
+		{ID: "G", Status: "open", Priority: "P1"}, // grandparent
+		{ID: "GP", Status: "open", Priority: "P1", ParentID: "G"},
+		{ID: "GC", Status: "open", Priority: "P1", ParentID: "GP"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got := ids(mustMarked(t, p)); !eq(got, []string{"P"}) {
-		t.Fatalf("MarkedContainers: want [P] (marked + has open child + unheld), got %v", got)
+	// P is a package; G is one too, but GP is inside G so it isn't claimed separately. N has
+	// no priority, so nothing about it is released yet.
+	if got := ids(mustContainers(t, p)); !eq(got, []string{"G", "P"}) {
+		t.Fatalf("OpenContainers: want [G P], got %v", got)
 	}
 	// Holding P removes it from the candidates.
 	if err := p.SetState(AgentState{Agent: "brokkr", Container: "P", Branch: "P", Task: "C1", Phase: "working"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := ids(mustMarked(t, p)); len(got) != 0 {
+	if got := ids(mustContainers(t, p)); !eq(got, []string{"G"}) {
 		t.Fatalf("a held container must drop out of candidates, got %v", got)
 	}
 
@@ -241,9 +251,29 @@ func TestMarkedContainersAndGetTask(t *testing.T) {
 	}
 }
 
-func mustMarked(t *testing.T, p *ProjectStore) []Task {
+// TestOpenLeavesLeavesPackagesAlone: a child is worked inside its package, on the package's
+// branch, so it must never be handed out on its own — that would split one tree across
+// agents and strip the context the hierarchy was built to provide.
+func TestOpenLeavesLeavesPackagesAlone(t *testing.T) {
+	p := openTmpProject(t)
+	if err := p.ReplaceTasks([]Task{
+		{ID: "P", Status: "open", Priority: "P1"},
+		{ID: "C1", Status: "open", Priority: "P0", ParentID: "P"}, // higher priority, still not standalone
+		{ID: "C2", Status: "open", Priority: "P1", ParentID: "P"},
+		{ID: "S", Status: "open", Priority: "P2"},                  // standalone
+		{ID: "D", Status: "closed", Priority: "P1"},                // done parent…
+		{ID: "DC", Status: "open", Priority: "P1", ParentID: "D"},  // …so its child stands alone
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(mustLeaves(t, p)); !eq(got, []string{"DC", "S"}) {
+		t.Fatalf("OpenLeaves: want [DC S] (standalone only), got %v", got)
+	}
+}
+
+func mustContainers(t *testing.T, p *ProjectStore) []Task {
 	t.Helper()
-	v, err := p.MarkedContainers("collab")
+	v, err := p.OpenContainers()
 	if err != nil {
 		t.Fatal(err)
 	}
