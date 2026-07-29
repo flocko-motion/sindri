@@ -301,6 +301,9 @@ func (Engine) Rm(name string) error {
 
 // ListByLabelContext lists containers carrying label=value. Apple `container ls` has
 // no `--filter`, so we list all as JSON and match the label client-side.
+//
+// An empty value matches ANY value for that label, which is what lets one call answer for
+// every project at once instead of one call per project.
 func (Engine) ListByLabelContext(ctx context.Context, label, value string) ([]string, error) {
 	out, err := exec.CommandContext(ctx, Binary, "ls", "--all", "--format", "json").Output()
 	if err != nil {
@@ -312,7 +315,8 @@ func (Engine) ListByLabelContext(ctx context.Context, label, value string) ([]st
 	}
 	var names []string
 	for _, e := range entries {
-		if e.Configuration.Labels[label] == value {
+		got, ok := e.Configuration.Labels[label]
+		if ok && (value == "" || got == value) {
 			names = append(names, e.Configuration.ID)
 		}
 	}

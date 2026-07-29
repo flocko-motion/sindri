@@ -260,9 +260,16 @@ func (Engine) Rm(name string) error {
 
 // ListByLabelContext returns the names of containers carrying label=value — used to
 // find sindri pods for orphan detection. Bounded by ctx.
+//
+// An empty value matches ANY value for that label, which is what lets one call answer for
+// every project at once instead of one call per project.
 func (Engine) ListByLabelContext(ctx context.Context, label, value string) ([]string, error) {
+	filter := "label=" + label
+	if value != "" {
+		filter += "=" + value
+	}
 	out, err := exec.CommandContext(ctx, Binary, "ps", "-a",
-		"--filter", "label="+label+"="+value, "--format", "{{.Names}}").Output()
+		"--filter", filter, "--format", "{{.Names}}").Output()
 	if err != nil {
 		return nil, fmt.Errorf("podman ps: %w", err)
 	}

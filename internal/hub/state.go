@@ -103,21 +103,25 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		}
 	}
 
-	// Liveness needs a podman round-trip per agent; probe every agent concurrently and
-	// time-bounded, so one wedged pod slows the read by at most probeTimeout instead of
-	// serialising all of them.
-	//
+	// One cached listing answers "which pods exist" for every agent AND for the orphan scan
+	// below. What sets the cost of a board read is the NUMBER of container commands it
+	// launches, not how they are scheduled: each is a process spawn, and they do not
+	// parallelise — 24 concurrent execs measure ~3.2s where a single one is ~0.2s. Per-agent
+	// inspects plus a listing per project came to 17 spawns before any tmux probe ran.
+	podCtx, podCancel := context.WithTimeout(context.Background(), probeTimeout)
+	existing, listErr := container.ListByLabelCached(podCtx, "sindri.project", "")
+	podCancel()
+	exists := make(map[string]bool, len(existing))
+	for _, p := range existing {
+		exists[p] = true
+	}
+
 	// Liveness is "the pod is up AND its tmux session exists" — the pod is only a sleep that
 	// outlives Claude, so a running container alone proves nothing (see tmux.HasSession). The
 	// list-clients probe answers both: its exit code proves the session, its output is the
-	// dial-in count.
-	//
-	// Each probe gets its OWN budget. They used to share a single probeTimeout across the
-	// inspect, the list-clients exec and the capture-pane exec, so a slow inspect could leave
-	// the rest none — and a working agent then reported "down" because a probe ran out of
-	// time, not because anything about it had changed. That is what made the status flip
-	// between refreshes. Each podman call is a process spawn (~50ms for inspect, ~200ms for an
-	// exec), so on a machine busy enough to run several agents the shared budget was reachable.
+	// dial-in count. It runs per agent, concurrently and time-bounded, so one wedged pod
+	// costs at most probeTimeout. A listing failure leaves every agent's pod unknown, so the
+	// probe still runs rather than reporting a whole fleet down on one failed command.
 	var wg sync.WaitGroup
 	running := make([]bool, len(agentsRow))
 	clients := make([]int, len(agentsRow))
@@ -131,10 +135,8 @@ func (h *Hub) State(selected string) (BoardState, error) {
 				defer cancel()
 				fn(ctx)
 			}
-			up := false
-			probe(func(ctx context.Context) { up = container.RunningContext(ctx, h.container(a.Project, a.Name)) })
-			if !up {
-				return
+			if listErr == nil && !exists[h.container(a.Project, a.Name)] {
+				return // no pod for this agent — nothing to probe
 			}
 			probe(func(ctx context.Context) {
 				if cs, ok := h.agents.ClientsCtx(ctx, a.Project, a.Name); ok {
@@ -173,28 +175,13 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		})
 	}
 
-	// Orphans: sindri pods with no roster entry, across every known project. One
-	// podman ps per project, run concurrently and bounded like the liveness probes.
-	orphanLists := make([][]string, len(projects))
-	for i, proj := range projects {
-		wg.Add(1)
-		go func(i int, proj store.Project) {
-			defer wg.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
-			defer cancel()
-			if pods, err := container.ListByLabelContext(ctx, "sindri.project", proj.Path); err == nil {
-				orphanLists[i] = pods
-			}
-		}(i, proj)
-	}
-	wg.Wait()
-
+	// Orphans: sindri pods with no roster entry. The same listing the liveness probe used —
+	// it already covers every project, and the per-project results were flattened and
+	// filtered against one global roster map anyway, so grouping them bought nothing.
 	var orphans []string
-	for _, pods := range orphanLists {
-		for _, p := range pods {
-			if !known[p] {
-				orphans = append(orphans, p)
-			}
+	for _, p := range existing {
+		if !known[p] {
+			orphans = append(orphans, p)
 		}
 	}
 	chat, err := h.chatView()

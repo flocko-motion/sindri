@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	agentport "github.com/flo-at/sindri/internal/adapter/agent"
@@ -35,15 +36,44 @@ type ClientView struct {
 	ReadOnly bool   `json:"read_only"`
 }
 
+// runtimeTTL is how long a classified runtime is reused. It decorates a status the board
+// already derives from liveness and phase, so a second-old answer costs nothing — while a
+// fresh capture-pane per agent costs a process spawn on every board read, and those do not
+// parallelise (see container.ListByLabelCached).
+const runtimeTTL = 2 * time.Second
+
+var runtimeMemo struct {
+	mu  sync.Mutex
+	at  map[string]time.Time
+	val map[string]string
+}
+
 // RuntimeState captures an agent's Claude pane and classifies what Claude is doing
 // right now — "working", "blocked" (waiting on input), "idle" — or "" when it can't
-// tell. Bounded by ctx so a wedged capture can't stall the read.
+// tell. Bounded by ctx so a wedged capture can't stall the read, and memoized for
+// runtimeTTL so a burst of board reads shares one capture per agent.
 func (s *Service) RuntimeState(ctx context.Context, project, name string) string {
-	out, err := container.ExecContext(ctx, s.deps.ContainerName(project, name), append([]string{"tmux"}, tmux.CapturePane(name, 0, false)...)...) // plain: the text is pattern-matched
-	if err != nil {
-		return ""
+	key := project + "/" + name
+	runtimeMemo.mu.Lock()
+	if at, ok := runtimeMemo.at[key]; ok && time.Since(at) < runtimeTTL {
+		v := runtimeMemo.val[key]
+		runtimeMemo.mu.Unlock()
+		return v
 	}
-	return agentport.Runtime(string(out)) // shared classifier: board + herdr agree
+	runtimeMemo.mu.Unlock()
+
+	var state string
+	out, err := container.ExecContext(ctx, s.deps.ContainerName(project, name), append([]string{"tmux"}, tmux.CapturePane(name, 0, false)...)...) // plain: the text is pattern-matched
+	if err == nil {
+		state = agentport.Runtime(string(out)) // shared classifier: board + herdr agree
+	}
+	runtimeMemo.mu.Lock()
+	if runtimeMemo.at == nil {
+		runtimeMemo.at, runtimeMemo.val = map[string]time.Time{}, map[string]string{}
+	}
+	runtimeMemo.at[key], runtimeMemo.val[key] = time.Now(), state
+	runtimeMemo.mu.Unlock()
+	return state
 }
 
 // LaunchDiagnostic reports WHY a just-launched agent isn't observed up, so a timeout

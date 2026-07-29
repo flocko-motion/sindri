@@ -15,6 +15,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sync"
+	"time"
 )
 
 // TermEnvArgs returns the `-e KEY=VALUE` flags that forward the caller's terminal
@@ -202,9 +204,37 @@ func Info(name string) string { return active.Info(name) }
 // Rm force-removes a pod.
 func Rm(name string) error { return active.Rm(name) }
 
-// ListByLabelContext lists pods carrying label=value (orphan detection).
-func ListByLabelContext(ctx context.Context, label, value string) ([]string, error) {
-	return active.ListByLabelContext(ctx, label, value)
+// ListTTL is how long ListByLabelCached serves a previous answer. Short enough that a
+// board read a few seconds later sees current pods, long enough that a burst of reads —
+// the poll tick landing on top of a mutation's refetch and a keystroke's fetches — costs
+// one listing between them.
+const ListTTL = 1500 * time.Millisecond
+
+var listMemo struct {
+	mu   sync.Mutex
+	at   time.Time
+	key  string
+	pods []string
+	err  error
+}
+
+// ListByLabelCached lists pods carrying label=value, memoized for ListTTL. An empty value
+// matches any value for that label, so one call covers every project.
+//
+// Every container listing on a hot path goes through it, because each call is a process
+// spawn and those do not run concurrently for free: 24 at once measure ~3.2s where a single
+// one is ~0.2s. The cost of a board read is set by how many commands it launches, not by
+// how they are scheduled.
+func ListByLabelCached(ctx context.Context, label, value string) ([]string, error) {
+	listMemo.mu.Lock()
+	defer listMemo.mu.Unlock()
+	key := label + "=" + value
+	if listMemo.key == key && !listMemo.at.IsZero() && time.Since(listMemo.at) < ListTTL {
+		return listMemo.pods, listMemo.err
+	}
+	pods, err := active.ListByLabelContext(ctx, label, value)
+	listMemo.at, listMemo.key, listMemo.pods, listMemo.err = time.Now(), key, pods, err
+	return pods, err
 }
 
 // Check pre-flights the runtime (installed + reachable), auto-starting where it can.
