@@ -73,7 +73,7 @@ func TestCommentAvgCoversTypeScript(t *testing.T) {
 	})
 
 	var out bytes.Buffer
-	found, err := CommentAvg([]string{root}, 2.0, mustIgnore(t), &out)
+	found, err := CommentAvg([]string{root}, 2.0, false, mustIgnore(t), &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestCommentAvgExcludesHeaderAndTests(t *testing.T) {
 	})
 
 	var out bytes.Buffer
-	found, err := CommentAvg([]string{root}, 2.0, mustIgnore(t), &out)
+	found, err := CommentAvg([]string{root}, 2.0, false, mustIgnore(t), &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestCommentAvgThinSampleIsForgiven(t *testing.T) {
 		"src/thin.tsx": tsHeader + eight + "export const a = 1;\n\n" + eight + "export const b = 2;\n",
 	})
 	var out bytes.Buffer
-	found, err := CommentAvg([]string{root}, 2.0, mustIgnore(t), &out)
+	found, err := CommentAvg([]string{root}, 2.0, false, mustIgnore(t), &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,6 +203,53 @@ func TestGoDirectivesAreNotProse(t *testing.T) {
 	}
 }
 
+// TestBlocksListsEveryOffender: --blocks exists so fixing a file is one edit rather than a
+// read-guess-recheck loop, which means naming EVERY comment over the limit with the range to go
+// edit, and how many lines have to go. The range is physical (Line-End), not the prose count.
+func TestBlocksListsEveryOffender(t *testing.T) {
+	// Ten blocks, so the configured maximum applies exactly: three long, seven one-liners.
+	body := tsHeader
+	for i := 0; i < 3; i++ {
+		body += fmt.Sprintf("/**\n * long comment %d needs cutting\n * second line\n * third line\n */\nexport const w%d = %d;\n\n", i, i, i)
+	}
+	for i := 0; i < 7; i++ {
+		body += fmt.Sprintf("// terse %d\nexport const v%d = %d;\n\n", i, i, i)
+	}
+	root := writeTree(t, map[string]string{"src/Mixed.tsx": body})
+
+	var out bytes.Buffer
+	found, err := CommentAvg([]string{root}, 1.0, true, mustIgnore(t), &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatalf("expected a violation:\n%s", out.String())
+	}
+	got := out.String()
+	// Every long block is listed, not just the longest.
+	for i := 0; i < 3; i++ {
+		if !strings.Contains(got, fmt.Sprintf("long comment %d", i)) {
+			t.Errorf("block %d missing from the --blocks listing:\n%s", i, got)
+		}
+	}
+	if !strings.Contains(got, "block(s) run over") {
+		t.Errorf("the listing must say how many lines to cut:\n%s", got)
+	}
+	// A range, not a bare start line — the physical span is what you go and edit.
+	if !strings.Contains(got, "-") || !strings.Contains(got, " lines  ") {
+		t.Errorf("each block needs a line range and length:\n%s", got)
+	}
+
+	// Without --blocks the report stays the one-line summary it always was.
+	var plain bytes.Buffer
+	if _, err := CommentAvg([]string{root}, 1.0, false, mustIgnore(t), &plain); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plain.String(), "block(s) run over") {
+		t.Errorf("the block listing must be opt-in:\n%s", plain.String())
+	}
+}
+
 // TestExcerptNamesTheComment: the report's excerpt must quote the offending comment. It used to
 // print the `*` left over from `/**`, which named nothing — worst for TypeScript, where every
 // block comment opens that way.
@@ -213,7 +260,7 @@ func TestExcerptNamesTheComment(t *testing.T) {
 	// A deliberately strict maximum, so this test turns on the excerpt rather than on where the
 	// thin-sample allowance happens to fall.
 	var out bytes.Buffer
-	found, err := CommentAvg([]string{root}, 0.5, mustIgnore(t), &out)
+	found, err := CommentAvg([]string{root}, 0.5, false, mustIgnore(t), &out)
 	if err != nil {
 		t.Fatal(err)
 	}

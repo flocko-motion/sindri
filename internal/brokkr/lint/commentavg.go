@@ -44,12 +44,14 @@ func allowanceFor(base float64, n int) float64 {
 	return base * (1 + bonusPerBlock*float64(trendSample-n))
 }
 
-// CommentAvg walks the given roots (default ".") and reports each file whose mean comment
-// block runs longer than maxAvg lines. A non-positive maxAvg uses DefaultMaxCommentAvg.
+// CommentAvg walks the given roots (default ".") and reports each file whose mean comment block
+// runs longer than maxAvg lines. A non-positive maxAvg uses DefaultMaxCommentAvg. With blocks set,
+// each reported file also lists every comment over the limit — line range, length and excerpt —
+// so a fix is one pass instead of read, guess, edit, re-run.
 //
 // The file header is excluded from the statistic: it is a REQUIRED multi-line block (see
 // Comments), so counting it would charge every file for obeying the header rule.
-func CommentAvg(roots []string, maxAvg float64, ig *Ignore, w io.Writer) (bool, error) {
+func CommentAvg(roots []string, maxAvg float64, blocks bool, ig *Ignore, w io.Writer) (bool, error) {
 	if len(roots) == 0 {
 		roots = []string{"."}
 	}
@@ -64,6 +66,7 @@ func CommentAvg(roots []string, maxAvg float64, ig *Ignore, w io.Writer) (bool, 
 		blocks  int
 		lines   int
 		worst   CommentBlock
+		over    []CommentBlock // above the limit, longest first — what to cut
 	}
 	var viols []viol
 
@@ -85,24 +88,35 @@ func CommentAvg(roots []string, maxAvg float64, ig *Ignore, w io.Writer) (bool, 
 			if !ok {
 				return nil
 			}
-			blocks := ScanComments(src)
-			if _, hasHeader := HeaderBlock(blocks); hasHeader {
-				blocks = blocks[1:] // the header is mandated; it is not evidence of a trend
+			bs := ScanComments(src)
+			if _, hasHeader := HeaderBlock(bs); hasHeader {
+				bs = bs[1:] // the header is mandated; it is not evidence of a trend
 			}
-			if len(blocks) == 0 {
+			if len(bs) == 0 {
 				return nil
 			}
 			total, worst := 0, CommentBlock{}
-			for _, b := range blocks {
+			for _, b := range bs {
 				total += b.Lines
 				if b.Lines > worst.Lines {
 					worst = b
 				}
 			}
-			allowed := allowanceFor(maxAvg, len(blocks))
-			if avg := float64(total) / float64(len(blocks)); avg > allowed {
-				viols = append(viols, viol{path, avg, allowed, len(blocks), total, worst})
+			allowed := allowanceFor(maxAvg, len(bs))
+			avg := float64(total) / float64(len(bs))
+			if avg <= allowed {
+				return nil
 			}
+			v := viol{path: path, avg: avg, allowed: allowed, blocks: len(bs), lines: total, worst: worst}
+			if blocks {
+				for _, b := range bs {
+					if float64(b.Lines) > allowed {
+						v.over = append(v.over, b)
+					}
+				}
+				sort.Slice(v.over, func(i, j int) bool { return v.over[i].Lines > v.over[j].Lines })
+			}
+			viols = append(viols, v)
 			return nil
 		})
 		if err != nil {
@@ -114,8 +128,19 @@ func CommentAvg(roots []string, maxAvg float64, ig *Ignore, w io.Writer) (bool, 
 	for _, v := range viols {
 		fmt.Fprintf(w, "%s: comments average %.1f lines (max %.1f over %d blocks) / %d comment lines; longest is %d lines at :%d\n",
 			v.path, v.avg, v.allowed, v.blocks, v.lines, v.worst.Lines, v.worst.Line)
-		if ex := firstProse(v.worst); ex != "" {
-			fmt.Fprintf(w, "    %s…\n", trimTo(ex, 72))
+		if !blocks {
+			if ex := firstProse(v.worst); ex != "" {
+				fmt.Fprintf(w, "    %s…\n", trimTo(ex, 72))
+			}
+			continue
+		}
+		// The budget is allowed × blocks, so this is exactly how many comment lines have to go.
+		// Printing it turns "trim and re-run until it passes" into one edit.
+		fmt.Fprintf(w, "    cut %d comment line(s); %d block(s) run over the %.1f limit:\n",
+			v.lines-int(v.allowed*float64(v.blocks)), len(v.over), v.allowed)
+		for _, b := range v.over {
+			fmt.Fprintf(w, "      %-11s %2d lines  %s\n",
+				fmt.Sprintf(":%d-%d", b.Line, b.End), b.Lines, trimTo(firstProse(b), 58))
 		}
 	}
 	if len(viols) > 0 {

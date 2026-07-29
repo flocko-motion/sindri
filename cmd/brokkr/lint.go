@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 
@@ -25,14 +26,22 @@ func newLintCmd() *cobra.Command {
 	var tags string
 	var maxLines int
 	var maxAvg float64
+	var blocks bool
 	var ignore []string
 	c := &cobra.Command{
-		Use:   "lint [linter]",
-		Short: "Run the quality gate: lint (all) or lint <deadcode|loc|comments|comment-length|js|openspec>",
+		Use:   "lint [linter] [paths...]",
+		Short: "Run the quality gate: lint (all) or lint <deadcode|loc|comments|comment-length|js|openspec> [paths]",
 		Long: "Run the project's static-analysis linters. With no argument, runs them " +
 			"all (deadcode, loc, comments, comment-length, js, openspec) with a summary; with a linter " +
 			"name, runs just that one. Exits non-zero on any violation, so it can gate " +
 			"CI (add --tail to also print the exit status inline).\n\n" +
+			"Trailing paths scope the run to those files or directories, so you can work on one " +
+			"file instead of grepping a whole-repo report: `brokkr lint comment-length " +
+			"internal/hub/state.go`. A first argument that isn't a linter name is read as a path, " +
+			"so `brokkr lint internal/hub` runs every linter over that tree.\n\n" +
+			"For comment-length, --blocks lists every comment over the limit with its line range, " +
+			"length and opening words, plus how many comment lines have to go — so a file is one " +
+			"edit rather than a read-guess-recheck loop.\n\n" +
 			"Use --ignore to exclude files you can't fix (e.g. generated code): a " +
 			"pattern with no '/' matches a basename at any depth (--ignore='*.gen.go'), " +
 			"one containing '/' matches the relative path with '*'/'**' wildcards " +
@@ -47,16 +56,13 @@ func newLintCmd() *cobra.Command {
 			"ignored). It's read automatically by every run — the right home for a " +
 			"generated file's exception, since the file itself can't carry a marker.\n\n" +
 			commentsConvention,
-		Args: cobra.MaximumNArgs(1),
+		Args: cobra.ArbitraryArgs,
 		// lint reports failures itself and signals them with an exitCodeError (empty
 		// message); silence cobra's own error echo for it.
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := cmd.OutOrStdout()
-			which := ""
-			if len(args) == 1 {
-				which = args[0]
-			}
+			which, paths := splitLintArgs(args)
 			// Merge the repo's checked-in .brokkrignore (exceptions for generated
 			// files that can't carry an in-file marker) with any --ignore flags.
 			filePats, err := lint.LoadIgnoreFile(".")
@@ -71,21 +77,60 @@ func newLintCmd() *cobra.Command {
 			// explicit flag still wins, so a one-off run can override it.
 			lines, avg := repoLintBar(cmd, maxLines, maxAvg)
 			return runLint(out, func() (bool, error) {
-				return runLinters(out, which, tags, lines, avg, ig)
+				return runLinters(out, which, tags, lines, avg, blocks, paths, ig)
 			})
 		},
 	}
 	c.Flags().StringVar(&tags, "tags", "", "comma-separated list of extra build tags (deadcode)")
 	c.Flags().IntVar(&maxLines, "max", lint.DefaultMaxLines, "maximum lines per file (loc)")
 	c.Flags().Float64Var(&maxAvg, "max-comment-avg", lint.DefaultMaxCommentAvg, "maximum mean lines per comment block (comment-length)")
+	c.Flags().BoolVar(&blocks, "blocks", false, "list every comment over the limit — line range, length, excerpt (comment-length)")
 	c.Flags().StringArrayVar(&ignore, "ignore", nil, "skip files matching this glob (no '/' = basename anywhere) or 're:'-prefixed regexp; repeatable")
 	return c
 }
 
-// repoLintBar resolves the quality bar: the repo's `lint:` block from .sindri/config.yaml,
-// unless the caller passed the flag explicitly. An unreadable config falls back to the flag
-// defaults — brokkr is a linter, not the arbiter of a project's config, and the hub reports a
-// broken one already.
+// lintNames are the linters `lint` dispatches to, and what tells a linter name from a path in the
+// arguments — so `lint comment-length internal/hub` and `lint internal/hub` both read correctly.
+var lintNames = map[string]bool{
+	"deadcode": true, "loc": true, "comments": true,
+	"comment-length": true, "js": true, "openspec": true,
+}
+
+// splitLintArgs reads an optional linter name followed by paths, so scoping to a file needs no
+// flag and no placeholder standing in for "all linters".
+func splitLintArgs(args []string) (which string, paths []string) {
+	if len(args) > 0 && lintNames[args[0]] {
+		return args[0], args[1:]
+	}
+	return "", args
+}
+
+// orDot defaults a path list to the whole tree, so every linter keeps its unscoped behaviour.
+func orDot(paths []string) []string {
+	if len(paths) == 0 {
+		return []string{"."}
+	}
+	return paths
+}
+
+// pkgPatterns turns paths into Go package patterns for deadcode, which analyses packages rather
+// than files: a file scopes to its directory, and each directory covers its subtree.
+func pkgPatterns(paths []string) []string {
+	if len(paths) == 0 {
+		return []string{"./..."}
+	}
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if filepath.Ext(p) != "" {
+			p = filepath.Dir(p)
+		}
+		out = append(out, "./"+filepath.ToSlash(filepath.Clean(p))+"/...")
+	}
+	return out
+}
+
+// repoLintBar resolves the quality bar from the repo's `lint:` config, unless a flag was passed
+// explicitly. An unreadable config falls back to the defaults; the hub already reports a broken one.
 func repoLintBar(cmd *cobra.Command, flagLines int, flagAvg float64) (int, float64) {
 	lines, avg := flagLines, flagAvg
 	cfg, err := config.Load(".")
@@ -101,33 +146,47 @@ func repoLintBar(cmd *cobra.Command, flagLines int, flagAvg float64) (int, float
 	return lines, avg
 }
 
-// runLinters runs the named linter, or all of them when which is empty. Returns
-// whether any violation was found.
-func runLinters(out io.Writer, which, tags string, maxLines int, maxAvg float64, ig *lint.Ignore) (bool, error) {
+// runLinters runs the named linter, or all of them when which is empty, scoped to paths (the whole
+// tree when none are given). Returns whether any violation was found.
+func runLinters(out io.Writer, which, tags string, maxLines int, maxAvg float64, blocks bool, paths []string, ig *lint.Ignore) (bool, error) {
 	switch which {
 	case "deadcode":
-		return lint.Deadcode([]string{"./..."}, tags, ig, out)
+		return lint.Deadcode(pkgPatterns(paths), tags, ig, out)
 	case "loc":
-		return lint.LOC([]string{"."}, maxLines, ig, out)
+		return lint.LOC(orDot(paths), maxLines, ig, out)
 	case "comments":
-		return runComments(out, ig)
+		return runComments(out, paths, ig)
 	case "comment-length":
-		return lint.CommentAvg([]string{"."}, maxAvg, ig, out)
+		return lint.CommentAvg(orDot(paths), maxAvg, blocks, ig, out)
 	case "js":
-		return lint.JSLint(".", ig, out)
+		return runJS(out, paths, ig)
 	case "openspec":
 		return lintOpenspec(out), nil
 	case "":
-		return runAll(out, tags, maxLines, maxAvg, ig)
+		return runAll(out, tags, maxLines, maxAvg, blocks, paths, ig)
 	default:
 		return false, fmt.Errorf("unknown linter %q (want deadcode|loc|comments|comment-length|js|openspec)", which)
 	}
 }
 
+// runJS runs the delegated JS/TS checks over each scoped path. JSLint takes one root, so several
+// paths are separate runs whose findings are OR'd — one failure is enough to fail the gate.
+func runJS(out io.Writer, paths []string, ig *lint.Ignore) (bool, error) {
+	found := false
+	for _, root := range orDot(paths) {
+		bad, err := lint.JSLint(root, ig, out)
+		if err != nil {
+			return found, err
+		}
+		found = found || bad
+	}
+	return found, nil
+}
+
 // runComments runs the documentation linter and, on a violation, follows it with
 // the convention so the fix is obvious without leaving the terminal.
-func runComments(out io.Writer, ig *lint.Ignore) (bool, error) {
-	found, err := lint.Comments([]string{"."}, ig, out)
+func runComments(out io.Writer, paths []string, ig *lint.Ignore) (bool, error) {
+	found, err := lint.Comments(orDot(paths), ig, out)
 	if err != nil {
 		return false, err
 	}
@@ -137,21 +196,18 @@ func runComments(out io.Writer, ig *lint.Ignore) (bool, error) {
 	return found, nil
 }
 
-// runAll runs every linter in turn, streaming each section live, then ends with a
-// summary. On failure the summary NAMES the failing linters and re-surfaces their
-// findings — so the culprit is obvious even when the live sections scrolled off or
-// `--tail` clipped them (the reason you never have to run a single linter to find
-// out what failed).
-func runAll(out io.Writer, tags string, maxLines int, maxAvg float64, ig *lint.Ignore) (bool, error) {
+// runAll runs every linter, streaming each section live, then ends with a summary that NAMES the
+// failures and re-surfaces their findings — so the culprit survives scrollback and --tail.
+func runAll(out io.Writer, tags string, maxLines int, maxAvg float64, blocks bool, paths []string, ig *lint.Ignore) (bool, error) {
 	linters := []struct {
 		name string
 		run  func(io.Writer) (bool, error)
 	}{
-		{"deadcode", func(w io.Writer) (bool, error) { return lint.Deadcode([]string{"./..."}, tags, ig, w) }},
-		{"loc", func(w io.Writer) (bool, error) { return lint.LOC([]string{"."}, maxLines, ig, w) }},
-		{"comments", func(w io.Writer) (bool, error) { return runComments(w, ig) }},
-		{"comment-length", func(w io.Writer) (bool, error) { return lint.CommentAvg([]string{"."}, maxAvg, ig, w) }},
-		{"js", func(w io.Writer) (bool, error) { return lint.JSLint(".", ig, w) }},
+		{"deadcode", func(w io.Writer) (bool, error) { return lint.Deadcode(pkgPatterns(paths), tags, ig, w) }},
+		{"loc", func(w io.Writer) (bool, error) { return lint.LOC(orDot(paths), maxLines, ig, w) }},
+		{"comments", func(w io.Writer) (bool, error) { return runComments(w, paths, ig) }},
+		{"comment-length", func(w io.Writer) (bool, error) { return lint.CommentAvg(orDot(paths), maxAvg, blocks, ig, w) }},
+		{"js", func(w io.Writer) (bool, error) { return runJS(w, paths, ig) }},
 		{"openspec", func(w io.Writer) (bool, error) { return lintOpenspec(w), nil }},
 	}
 	var failed []string
@@ -186,10 +242,8 @@ func runAll(out io.Writer, tags string, maxLines int, maxAvg float64, ig *lint.I
 	return true, nil
 }
 
-// runLint runs one linter's body, recovering a panic into a loud failure with its
-// stack rather than an opaque crash. On failure it returns an exitCodeError so main
-// exits non-zero (never os.Exit here — that would bypass the --tail flush); on
-// success it returns nil. Use --tail to get the exit status printed inline.
+// runLint runs one linter's body, turning a panic into a loud failure with its stack. Failure
+// returns an exitCodeError, never os.Exit — that would bypass the --tail flush.
 func runLint(out io.Writer, fn func() (bool, error)) error {
 	if code := lintOutcome(out, fn); code != 0 {
 		return exitCodeError{code}
@@ -197,10 +251,8 @@ func runLint(out io.Writer, fn func() (bool, error)) error {
 	return nil
 }
 
-// lintOutcome runs fn under a panic recover, reports the failure reason (a hard
-// error or a panic with its stack) to out, and returns the exit code (1 if
-// violations were found, an error occurred, or fn panicked; else 0). Split from
-// runLint so it's testable in isolation.
+// lintOutcome runs fn under a panic recover, reports why it failed, and returns the exit code.
+// Split from runLint so it is testable in isolation.
 func lintOutcome(out io.Writer, fn func() (bool, error)) int {
 	code := func() (code int) {
 		defer func() {
@@ -222,9 +274,8 @@ func lintOutcome(out io.Writer, fn func() (bool, error)) int {
 	return code
 }
 
-// commentsConvention explains what the comments linter expects, shown both in
-// --help and after its violations so the fix is obvious without leaving the
-// terminal.
+// commentsConvention explains what the comments linter expects, shown in --help and after a
+// violation so the fix needs no trip elsewhere.
 const commentsConvention = `Expected (architecture spec "File headers", plus documented exports):
 
   - Every non-test .go file opens with a four-field header comment block,
@@ -245,12 +296,8 @@ Example:
     // Build assembles a Widget from the given parts.
     func Build(parts ...Part) *Widget { return nil }`
 
-// lintOpenspec validates the project's OpenSpec specs. It is a no-op (returns
-// false) when openspec isn't used or installed. Returns true on validation
-// failure.
-//
-// It delegates to spec.Validate — the same function `sindri openspec submit` gates on — and
-// names it in the output (spec.ValidatorName), so a caller can trust one verdict for both.
+// lintOpenspec validates the project's specs, a no-op when openspec isn't used or installed. It
+// delegates to spec.Validate and names it, so this verdict is the submit gate's verdict.
 func lintOpenspec(w io.Writer) bool {
 	root, err := os.Getwd()
 	if err != nil {

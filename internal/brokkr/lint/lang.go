@@ -61,10 +61,12 @@ func IsTestFile(path string) bool {
 	return false
 }
 
-// CommentBlock is one run of comment lines: the line it starts on and how many lines it
-// spans.
+// CommentBlock is one run of comment lines. Line/End are where it physically sits, which is what
+// a reader needs to go edit it; Lines counts only the lines that carry prose, so the two differ
+// wherever delimiters or directives are in play.
 type CommentBlock struct {
 	Line  int
+	End   int
 	Lines int
 	Text  []string // the comment's content, markers stripped
 }
@@ -80,11 +82,12 @@ func ScanComments(src string) []CommentBlock {
 	var cur *CommentBlock
 	inMulti := false
 	// open starts the block at the line it OPENS on, delimiter or not, so a report points at
-	// `/**` rather than the prose below it.
+	// `/**` rather than the prose below it, and carries End to the last comment line seen.
 	open := func(n int) {
 		if cur == nil {
 			cur = &CommentBlock{Line: n}
 		}
+		cur.End = n
 	}
 	count := func(text string) {
 		cur.Lines++
