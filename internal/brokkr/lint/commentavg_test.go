@@ -73,7 +73,7 @@ func TestCommentAvgCoversTypeScript(t *testing.T) {
 	})
 
 	var out bytes.Buffer
-	found, err := CommentAvg([]string{root}, 2.0, false, mustIgnore(t), &out)
+	found, err := CommentAvg([]string{root}, 2.0, false, nil, mustIgnore(t), &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestCommentAvgExcludesHeaderAndTests(t *testing.T) {
 	})
 
 	var out bytes.Buffer
-	found, err := CommentAvg([]string{root}, 2.0, false, mustIgnore(t), &out)
+	found, err := CommentAvg([]string{root}, 2.0, false, nil, mustIgnore(t), &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestCommentAvgThinSampleIsForgiven(t *testing.T) {
 		"src/thin.tsx": tsHeader + eight + "export const a = 1;\n\n" + eight + "export const b = 2;\n",
 	})
 	var out bytes.Buffer
-	found, err := CommentAvg([]string{root}, 2.0, false, mustIgnore(t), &out)
+	found, err := CommentAvg([]string{root}, 2.0, false, nil, mustIgnore(t), &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestBlocksListsEveryOffender(t *testing.T) {
 	root := writeTree(t, map[string]string{"src/Mixed.tsx": body})
 
 	var out bytes.Buffer
-	found, err := CommentAvg([]string{root}, 1.0, true, mustIgnore(t), &out)
+	found, err := CommentAvg([]string{root}, 1.0, true, nil, mustIgnore(t), &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +242,7 @@ func TestBlocksListsEveryOffender(t *testing.T) {
 
 	// Without --blocks the report stays the one-line summary it always was.
 	var plain bytes.Buffer
-	if _, err := CommentAvg([]string{root}, 1.0, false, mustIgnore(t), &plain); err != nil {
+	if _, err := CommentAvg([]string{root}, 1.0, false, nil, mustIgnore(t), &plain); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(plain.String(), "block(s) run over") {
@@ -260,7 +260,7 @@ func TestExcerptNamesTheComment(t *testing.T) {
 	// A deliberately strict maximum, so this test turns on the excerpt rather than on where the
 	// thin-sample allowance happens to fall.
 	var out bytes.Buffer
-	found, err := CommentAvg([]string{root}, 0.5, false, mustIgnore(t), &out)
+	found, err := CommentAvg([]string{root}, 0.5, false, nil, mustIgnore(t), &out)
 	if err != nil {
 		t.Fatal(err)
 	}

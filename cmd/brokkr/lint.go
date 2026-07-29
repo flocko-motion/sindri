@@ -27,6 +27,7 @@ func newLintCmd() *cobra.Command {
 	var maxLines int
 	var maxAvg float64
 	var blocks bool
+	var limit int
 	var ignore []string
 	c := &cobra.Command{
 		Use:   "lint [linter] [paths...]",
@@ -76,8 +77,11 @@ func newLintCmd() *cobra.Command {
 			// The repo's own bar, where it set one: a house style belongs to the house. An
 			// explicit flag still wins, so a one-off run can override it.
 			lines, avg := repoLintBar(cmd, maxLines, maxAvg)
+			// ONE budget for the whole run: six linters each printing "only" their share is
+			// the wall this bounds. It is why `brokkr lint` needs no --tail.
+			cap := lint.NewCap(limit)
 			return runLint(out, func() (bool, error) {
-				return runLinters(out, which, tags, lines, avg, blocks, paths, ig)
+				return runLinters(out, which, tags, lines, avg, blocks, cap, paths, ig)
 			})
 		},
 	}
@@ -85,6 +89,7 @@ func newLintCmd() *cobra.Command {
 	c.Flags().IntVar(&maxLines, "max", lint.DefaultMaxLines, "maximum lines per file (loc)")
 	c.Flags().Float64Var(&maxAvg, "max-comment-avg", lint.DefaultMaxCommentAvg, "maximum mean lines per comment block (comment-length)")
 	c.Flags().BoolVar(&blocks, "blocks", false, "list every comment over the limit — line range, length, excerpt (comment-length)")
+	c.Flags().IntVar(&limit, "limit", lint.DefaultLimit, "stop after this many findings, then say how many were withheld (0 = all)")
 	c.Flags().StringArrayVar(&ignore, "ignore", nil, "skip files matching this glob (no '/' = basename anywhere) or 're:'-prefixed regexp; repeatable")
 	return c
 }
@@ -148,22 +153,22 @@ func repoLintBar(cmd *cobra.Command, flagLines int, flagAvg float64) (int, float
 
 // runLinters runs the named linter, or all of them when which is empty, scoped to paths (the whole
 // tree when none are given). Returns whether any violation was found.
-func runLinters(out io.Writer, which, tags string, maxLines int, maxAvg float64, blocks bool, paths []string, ig *lint.Ignore) (bool, error) {
+func runLinters(out io.Writer, which, tags string, maxLines int, maxAvg float64, blocks bool, cap *lint.Cap, paths []string, ig *lint.Ignore) (bool, error) {
 	switch which {
 	case "deadcode":
-		return lint.Deadcode(pkgPatterns(paths), tags, ig, out)
+		return lint.Deadcode(pkgPatterns(paths), tags, cap, ig, out)
 	case "loc":
-		return lint.LOC(orDot(paths), maxLines, ig, out)
+		return lint.LOC(orDot(paths), maxLines, cap, ig, out)
 	case "comments":
-		return runComments(out, paths, ig)
+		return runComments(out, paths, cap, ig)
 	case "comment-length":
-		return lint.CommentAvg(orDot(paths), maxAvg, blocks, ig, out)
+		return lint.CommentAvg(orDot(paths), maxAvg, blocks, cap, ig, out)
 	case "js":
 		return runJS(out, paths, ig)
 	case "openspec":
 		return lintOpenspec(out), nil
 	case "":
-		return runAll(out, tags, maxLines, maxAvg, blocks, paths, ig)
+		return runAll(out, tags, maxLines, maxAvg, blocks, cap, paths, ig)
 	default:
 		return false, fmt.Errorf("unknown linter %q (want deadcode|loc|comments|comment-length|js|openspec)", which)
 	}
@@ -185,8 +190,8 @@ func runJS(out io.Writer, paths []string, ig *lint.Ignore) (bool, error) {
 
 // runComments runs the documentation linter and, on a violation, follows it with
 // the convention so the fix is obvious without leaving the terminal.
-func runComments(out io.Writer, paths []string, ig *lint.Ignore) (bool, error) {
-	found, err := lint.Comments(orDot(paths), ig, out)
+func runComments(out io.Writer, paths []string, cap *lint.Cap, ig *lint.Ignore) (bool, error) {
+	found, err := lint.Comments(orDot(paths), cap, ig, out)
 	if err != nil {
 		return false, err
 	}
@@ -196,49 +201,41 @@ func runComments(out io.Writer, paths []string, ig *lint.Ignore) (bool, error) {
 	return found, nil
 }
 
-// runAll runs every linter, streaming each section live, then ends with a summary that NAMES the
-// failures and re-surfaces their findings — so the culprit survives scrollback and --tail.
-func runAll(out io.Writer, tags string, maxLines int, maxAvg float64, blocks bool, paths []string, ig *lint.Ignore) (bool, error) {
+// runAll runs every linter in its own section and ends by NAMING the failures. It used to re-print
+// their findings underneath so they survived --tail, which doubled every run's output — the wall
+// `--limit` exists to prevent.
+func runAll(out io.Writer, tags string, maxLines int, maxAvg float64, blocks bool, cap *lint.Cap, paths []string, ig *lint.Ignore) (bool, error) {
 	linters := []struct {
 		name string
 		run  func(io.Writer) (bool, error)
 	}{
-		{"deadcode", func(w io.Writer) (bool, error) { return lint.Deadcode(pkgPatterns(paths), tags, ig, w) }},
-		{"loc", func(w io.Writer) (bool, error) { return lint.LOC(orDot(paths), maxLines, ig, w) }},
-		{"comments", func(w io.Writer) (bool, error) { return runComments(w, paths, ig) }},
-		{"comment-length", func(w io.Writer) (bool, error) { return lint.CommentAvg(orDot(paths), maxAvg, blocks, ig, w) }},
+		{"deadcode", func(w io.Writer) (bool, error) { return lint.Deadcode(pkgPatterns(paths), tags, cap, ig, w) }},
+		{"loc", func(w io.Writer) (bool, error) { return lint.LOC(orDot(paths), maxLines, cap, ig, w) }},
+		{"comments", func(w io.Writer) (bool, error) { return runComments(w, paths, cap, ig) }},
+		{"comment-length", func(w io.Writer) (bool, error) { return lint.CommentAvg(orDot(paths), maxAvg, blocks, cap, ig, w) }},
 		{"js", func(w io.Writer) (bool, error) { return runJS(w, paths, ig) }},
 		{"openspec", func(w io.Writer) (bool, error) { return lintOpenspec(w), nil }},
 	}
 	var failed []string
-	captured := map[string]string{}
 	for _, l := range linters {
-		var buf strings.Builder
 		fmt.Fprintf(out, "== %s ==\n", l.name)
-		bad, err := l.run(io.MultiWriter(out, &buf)) // stream live AND capture for the recap
+		bad, err := l.run(out)
 		if err != nil {
-			// One linter breaking does not cancel the others: they are independent checks, and
-			// the findings of the rest are exactly what you need while you fix this one. The
-			// error counts as that linter FAILING, so the gate still goes red.
-			fmt.Fprintf(io.MultiWriter(out, &buf), "%s: %v\n", l.name, err)
+			// One linter breaking does not cancel the others — the rest of the findings are what
+			// you want while fixing this one. It still counts as FAILING, so the gate goes red.
+			fmt.Fprintf(out, "%s: %v\n", l.name, err)
 			bad = true
 		}
 		fmt.Fprintln(out)
 		if bad {
 			failed = append(failed, l.name)
-			captured[l.name] = strings.TrimSpace(buf.String())
 		}
 	}
 	if len(failed) == 0 {
 		fmt.Fprintln(out, "OK: all linters passed")
 		return false, nil
 	}
-	fmt.Fprintf(out, "FAIL: %s\n", strings.Join(failed, ", "))
-	for _, name := range failed {
-		if c := captured[name]; c != "" {
-			fmt.Fprintf(out, "\n--- %s ---\n%s\n", name, c)
-		}
-	}
+	fmt.Fprintf(out, "FAIL: %s — findings are in the section(s) above.\n", strings.Join(failed, ", "))
 	return true, nil
 }
 

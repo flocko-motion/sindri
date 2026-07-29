@@ -41,7 +41,7 @@ type commentViol struct {
 // documentation violations: a missing or incomplete canonical header, or an
 // exported func or type with no doc comment. Paths matched by ig are skipped.
 // Returns true if any was found.
-func Comments(roots []string, ig *Ignore, w io.Writer) (bool, error) {
+func Comments(roots []string, cap *Cap, ig *Ignore, w io.Writer) (bool, error) {
 	if len(roots) == 0 {
 		roots = []string{"."}
 	}
@@ -81,8 +81,12 @@ func Comments(roots []string, ig *Ignore, w io.Writer) (bool, error) {
 		return viols[i].line < viols[j].line
 	})
 	for _, v := range viols {
+		if !cap.Allow() {
+			continue
+		}
 		fmt.Fprintln(w, v.msg)
 	}
+	cap.Note(w)
 	return len(viols) > 0, nil
 }
 

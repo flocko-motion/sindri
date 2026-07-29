@@ -35,7 +35,7 @@ func runInDir(t *testing.T, dir string, patterns ...string) (string, bool) {
 	t.Cleanup(func() { _ = os.Chdir(orig) })
 
 	var sb strings.Builder
-	found, err := Deadcode(patterns, "", nil, &sb)
+	found, err := Deadcode(patterns, "", nil, nil, &sb)
 	if err != nil {
 		t.Fatalf("Deadcode: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestDeadcodeCleanProgram(t *testing.T) {
 func TestDeadcodeSkipsWithoutGoToolchain(t *testing.T) {
 	t.Setenv("PATH", "") // hide the go toolchain
 	var sb strings.Builder
-	found, err := Deadcode([]string{"./..."}, "", nil, &sb)
+	found, err := Deadcode([]string{"./..."}, "", nil, nil, &sb)
 	if err != nil {
 		t.Fatalf("a missing go toolchain must degrade, not error: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestDeadcodeNoMainPackage(t *testing.T) {
 		_ = os.Chdir(dir)
 		defer os.Chdir(orig)
 		var sb strings.Builder
-		f, e := Deadcode([]string{"./..."}, "", nil, &sb)
+		f, e := Deadcode([]string{"./..."}, "", nil, nil, &sb)
 		return sb.String(), f, e
 	}(); err == nil {
 		t.Fatal("expected an error when no main package is present")

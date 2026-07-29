@@ -21,17 +21,10 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// CmdRebase is the agent-driven "align with the reference" verb: it rebases the
-// agent's own worktree branch onto the current reference branch (whatever the main
-// checkout has checked out), any time the agent likes — there's no harm, it just
-// keeps the agent current. Uncommitted WIP is autostashed around the rebase. On a
-// conflict it leaves the markers in the agent's /workspace and tells it which files
-// to fix, then continues on the next `sindri rebase`; once clean it reports aligned.
-// All git runs host-side (the agent has none).
-// reattach puts a detached worktree back on the branch the hub records for the agent, and returns
-// it. A detach is how a branch is freed for deletion, and nothing used to put the worktree back —
-// so a rebase dead-ended on "detached HEAD" and the agent was told to try again later, forever.
-// Healing beats reporting: the hub knows which branch this agent owns, so it restores it.
+// reattach puts a detached worktree back on the branch the hub records for the agent. Detaching
+// is how a branch is freed for deletion, and nothing put the worktree back — so a rebase
+// dead-ended on "detached HEAD" forever. The hub knows which branch this agent owns, so it heals
+// it rather than reporting it.
 func (e *Engine) reattach(ps *store.ProjectStore, agent, wt string) (string, error) {
 	st, _ := ps.GetState(agent)
 	if st.Branch == "" {
@@ -51,6 +44,9 @@ func (e *Engine) reattach(ps *store.ProjectStore, agent, wt string) (string, err
 	return st.Branch, nil
 }
 
+// CmdRebase is the agent-driven "align with the reference" verb, safe to run any time: it rebases
+// the agent's branch onto the reference branch, autostashing WIP. A conflict leaves the markers in
+// /workspace and names the files, continuing on the next `sindri rebase`.
 func (e *Engine) CmdRebase(c registry.Caller, _ []string, out io.Writer) (int, error) {
 	ps := e.store.For(c.Project)
 	root := e.deps.ProjectRoot(c.Project)

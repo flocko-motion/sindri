@@ -51,7 +51,7 @@ func allowanceFor(base float64, n int) float64 {
 //
 // The file header is excluded from the statistic: it is a REQUIRED multi-line block (see
 // Comments), so counting it would charge every file for obeying the header rule.
-func CommentAvg(roots []string, maxAvg float64, blocks bool, ig *Ignore, w io.Writer) (bool, error) {
+func CommentAvg(roots []string, maxAvg float64, blocks bool, cap *Cap, ig *Ignore, w io.Writer) (bool, error) {
 	if len(roots) == 0 {
 		roots = []string{"."}
 	}
@@ -124,8 +124,12 @@ func CommentAvg(roots []string, maxAvg float64, blocks bool, ig *Ignore, w io.Wr
 		}
 	}
 
+	// Worst mean first, so a capped run withholds the files that need it least.
 	sort.Slice(viols, func(i, j int) bool { return viols[i].avg > viols[j].avg })
 	for _, v := range viols {
+		if !cap.Allow() {
+			continue
+		}
 		fmt.Fprintf(w, "%s: comments average %.1f lines (max %.1f over %d blocks) / %d comment lines; longest is %d lines at :%d\n",
 			v.path, v.avg, v.allowed, v.blocks, v.lines, v.worst.Lines, v.worst.Line)
 		if !blocks {
@@ -144,6 +148,7 @@ func CommentAvg(roots []string, maxAvg float64, blocks bool, ig *Ignore, w io.Wr
 		}
 	}
 	if len(viols) > 0 {
+		cap.Note(w)
 		fmt.Fprintf(w, "%d file(s) over the comment-length trend — cut words, don't move them.\n"+
 			"The maximum is a CEILING, not a target. A single line is enough for most comments: "+
 			"name what the thing is for, or why it is not the obvious way. Aim well under the limit "+

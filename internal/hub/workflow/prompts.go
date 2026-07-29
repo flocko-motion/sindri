@@ -326,9 +326,8 @@ const ReplyNothingToCheckpoint = "Nothing to checkpoint — you're not working a
 
 const MsgKickoff = "[hub] You're live. Run `sindri` and do exactly what it tells you — it always returns your current job, whether you're new or resuming."
 
-// MsgWorkAvailable nudges an idle worker that rated work now exists. Claiming stays a pull —
-// `sindri` runs the one claim path, so two workers can't take the same task — but an agent that has
-// stopped asking will never hear about a new task, and telling it to poll instead is worse.
+// MsgWorkAvailable nudges an idle worker that rated work exists. Claiming stays a pull, so two
+// workers can't take one task — but an agent that stopped asking would never hear about it.
 func MsgWorkAvailable(id string) string {
 	return fmt.Sprintf("[hub] New work is ready (%s). Run `sindri` to pick up your next task — it may not be this one, whichever is highest priority.", id)
 }
@@ -497,9 +496,8 @@ func ReplyTaskProposed(id, title string) string {
 	return fmt.Sprintf("Proposed %s: %s — awaiting the user's approval before any worker can pick it up.", id, title)
 }
 
-// ReplyLintFail echoes the violations to fix, and spells out that a finding is to be MET rather
-// than evaded — relocating prose, padding with one-liners or widening a limit all clear the
-// report while leaving the problem, and an agent doing that believes it has complied.
+// ReplyLintFail echoes the violations, and says a finding is to be MET, not evaded: relocating
+// prose or widening a limit clears the report while leaving the problem the rule exists for.
 func ReplyLintFail(out string) string {
 	return fmt.Sprintf("Lint failed — fix the violations and submit again:\n%s\n"+
 		"Meet each finding on its own terms; do NOT work around the linter. If a comment is "+

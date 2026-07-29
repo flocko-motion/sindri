@@ -32,7 +32,7 @@ var skipDirs = map[string]bool{
 // LOC walks the given roots (default ".") for .go files and reports each file
 // whose line count exceeds maxLines, skipping any path matched by ig. Returns
 // true if any violation was found.
-func LOC(roots []string, maxLines int, ig *Ignore, w io.Writer) (bool, error) {
+func LOC(roots []string, maxLines int, cap *Cap, ig *Ignore, w io.Writer) (bool, error) {
 	if len(roots) == 0 {
 		roots = []string{"."}
 	}
@@ -74,10 +74,15 @@ func LOC(roots []string, maxLines int, ig *Ignore, w io.Writer) (bool, error) {
 		}
 	}
 
+	// Longest first, so a capped run withholds the files nearest the limit.
 	sort.Slice(viols, func(i, j int) bool { return viols[i].lines > viols[j].lines })
 	for _, v := range viols {
+		if !cap.Allow() {
+			continue
+		}
 		fmt.Fprintf(w, "%s: %d lines (limit %d)\n", v.path, v.lines, maxLines)
 	}
+	cap.Note(w)
 	return len(viols) > 0, nil
 }
 

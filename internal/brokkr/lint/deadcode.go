@@ -26,20 +26,17 @@ import (
 	"golang.org/x/tools/go/ssa/ssautil"
 )
 
-// Deadcode reports every function unreachable from a main package's init+main, one per line,
-// limited to the loaded modules so dependencies are never flagged.
-//
-// Generated files, marker interface methods, //deadcode:keep functions and ig matches are
-// excluded. Tests are analysed too: a helper reachable only from a _test.go is live, not dead.
-func Deadcode(patterns []string, tags string, ig *Ignore, w io.Writer) (found bool, err error) {
+// Deadcode reports every function unreachable from a main package's init+main, limited to the
+// loaded modules. Generated files, marker methods, //deadcode:keep and ig matches are excluded;
+// tests count, since a helper reachable only from a _test.go is live.
+func Deadcode(patterns []string, tags string, cap *Cap, ig *Ignore, w io.Writer) (found bool, err error) {
 	// The Go toolchain is optional, so its absence is a visible skip rather than a failure.
 	if _, err := exec.LookPath("go"); err != nil {
 		fmt.Fprintln(w, "deadcode: go toolchain not found on PATH — skipping (optional)")
 		return false, nil
 	}
-	// Go is one language brokkr lints, not a precondition for linting. A TypeScript-only
-	// project has no packages for `./...` to match, and loading it would fail the whole gate
-	// before the checks that DO apply to it ever ran.
+	// Go is one language brokkr lints, not a precondition. A TypeScript-only project matches no
+	// packages, and loading it would fail the gate before the checks that DO apply ever ran.
 	if !hasGoSources(".") {
 		fmt.Fprintln(w, "deadcode: no Go sources here — skipping (not a Go project)")
 		return false, nil
@@ -79,10 +76,9 @@ func Deadcode(patterns []string, tags string, ig *Ignore, w io.Writer) (found bo
 		roots = append(roots, main.Func("init"), main.Func("main"))
 	}
 
-	// Gather source-level functions and note generated files and the
-	// interfaces declared per package (for marker-method detection). We ignore
-	// synthetic wrappers and nested functions: an unreachable literal is always
-	// a consequence of its parent being unreachable.
+	// Source-level functions, generated files, and each package's interfaces (for marker-method
+	// detection). Synthetic wrappers and nested funcs are skipped: an unreachable literal is
+	// only ever a consequence of its parent being unreachable.
 	var (
 		sourceFuncs    []*ssa.Function
 		generated      = make(map[string]bool)
@@ -168,11 +164,15 @@ func Deadcode(patterns []string, tags string, ig *Ignore, w io.Writer) (found bo
 			if hasKeepDirective(fn) {
 				continue // explicitly kept by the author
 			}
+			count++ // counted even when withheld, so the total below stays honest
+			if !cap.Allow() {
+				continue
+			}
 			fmt.Fprintf(w, "%s: unreachable func: %s\n", relPosition(posn), prettyName(fn))
-			count++
 		}
 	}
 	if count > 0 {
+		cap.Note(w)
 		fmt.Fprintf(w, "\n%d unreachable function(s) found.\n", count)
 		fmt.Fprintln(w, "note: add a //deadcode:keep comment directly above a function to keep it (excludes it from this report).")
 	}
@@ -251,11 +251,9 @@ func isMarkerMethod(fn *ssa.Function, interfaceTypes []*types.Interface) bool {
 	})
 }
 
-// hasKeepDirective reports whether fn's declaration carries a //deadcode:keep
-// directive, used to intentionally exclude an unreachable function from the
-// report (e.g. it is called only via reflection, or kept as future API). The
-// directive must sit directly above the func declaration, like other Go
-// tool directives.
+// hasKeepDirective reports whether fn carries a //deadcode:keep directive — for a function
+// reached only by reflection, or kept as future API. Directly above the declaration, as Go's own
+// directives are.
 func hasKeepDirective(fn *ssa.Function) bool {
 	decl, ok := fn.Syntax().(*ast.FuncDecl)
 	if !ok || decl.Doc == nil {
