@@ -1,9 +1,7 @@
 // package: adapter/git / git
 // type:    adapter (external tool: git)
-// job:     wrap the git operations the hub needs — locate the repo root, add a
-//          detached worktree for an agent's workspace, read the current branch.
-//          The only place git is invoked (fuller surface — rebase, merge —
-//          lands in Phase 3).
+// job:     wrap the git operations the hub needs — repo root, agent worktrees, branches,
+//          commits, rebase and merge. The only place git is invoked.
 // limits:  no podman, no task/PR logic; pure git.
 package git
 
@@ -16,20 +14,13 @@ import (
 	"strings"
 )
 
-// Root returns the git repository root containing dir. Inside a linked worktree it returns the
-// MAIN worktree's root, not the linked one.
-//
-// That distinction is the difference between working and not working from a worktree.
-// `--show-toplevel` answers "this checkout", which for an agent's worktree is a path the hub
-// has never registered — so a command run there addresses a project that does not exist. Every
-// worktree shares one common git dir, and its parent is the repo as the hub knows it, so
-// resolving through `--git-common-dir` makes a worktree behave like the repo it belongs to.
+// Root is the repository root containing dir — the MAIN worktree's root even from a linked one,
+// because that is the path the hub registered.
 func Root(dir string) (string, error) {
 	top, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output()
 	if err != nil {
-		// Relay git's own words. "exit status 128" hides the one thing worth knowing, and the
-		// cases behind it need different fixes: a stale worktree whose repo has MOVED reports
-		// the gitdir it can no longer find, which is the whole diagnosis.
+		// Relay git's own words: "exit status 128" hides the diagnosis, and a stale worktree
+		// names the gitdir it can no longer find.
 		return "", fmt.Errorf("not a git repo at %s: %s", dir, gitError(err))
 	}
 	toplevel := strings.TrimSpace(string(top))
@@ -41,11 +32,8 @@ func Root(dir string) (string, error) {
 	if cd == "" {
 		return toplevel, nil
 	}
-	// A relative answer is relative to DIR — the directory git ran in — not to the toplevel.
-	// Joining it onto the toplevel resolves correctly only when the two are the same place: from
-	// `<repo>/.worktrees` git says "../.git", which against the toplevel climbs out of the repo
-	// and names its PARENT as the project. Every command then addressed a repo the hub had never
-	// heard of, with an empty backlog to match.
+	// Relative to DIR, the directory git ran in — not to the toplevel. From `<repo>/.worktrees`
+	// git says "../.git", which against the toplevel climbs out and names the repo's PARENT.
 	if !filepath.IsAbs(cd) {
 		base, aerr := filepath.Abs(dir)
 		if aerr != nil {
@@ -53,9 +41,8 @@ func Root(dir string) (string, error) {
 		}
 		cd = filepath.Join(base, cd)
 	}
-	// A worktree's common dir is the main checkout's `.git`; its parent is that checkout. Only
-	// trust it when it looks like one, so a bare or unusual layout falls back rather than
-	// resolving to a surprising parent directory.
+	// The common dir is the main checkout's `.git`, so its parent is that checkout — trusted
+	// only when it looks like one, or an unusual layout resolves somewhere surprising.
 	if filepath.Base(cd) != ".git" {
 		return toplevel, nil
 	}
@@ -78,9 +65,7 @@ func gitError(err error) string {
 	return err.Error()
 }
 
-// WorktreeAdd creates a detached worktree at path pointing at ref (e.g. "HEAD"),
-// creating the parent directory and pruning any stale registration first. It is
-// safe to call when the worktree already exists for a fresh path.
+// WorktreeAdd creates a detached worktree at path on ref, pruning any stale registration first.
 func WorktreeAdd(repo, path, ref string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("mkdir worktree parent: %w", err)
@@ -113,9 +98,8 @@ func WorktreeRemove(repo, path string) error {
 	return nil
 }
 
-// HasCommits reports whether the repo has at least one commit. An unborn HEAD (no
-// commits yet) is a legitimate false; a real git failure (not a repo, etc.) is
-// returned rather than collapsed into "no commits".
+// HasCommits reports whether the repo has a commit. An unborn HEAD is a legitimate false; a
+// real git failure is returned rather than collapsed into one.
 func HasCommits(repo string) (bool, error) {
 	err := exec.Command("git", "-C", repo, "rev-parse", "--verify", "-q", "HEAD").Run()
 	if err == nil {
@@ -141,10 +125,7 @@ func CurrentBranch(dir string) (string, error) {
 	return b, nil
 }
 
-// DetachHead detaches dir's worktree from its current branch (HEAD stays on the same
-// commit; the working tree is untouched), freeing that branch so it can be deleted
-// from another checkout. A teardown helper — a failure is returned for the caller to
-// log, not swallowed.
+// DetachHead detaches dir from its branch, freeing that branch for deletion elsewhere.
 func DetachHead(dir string) error {
 	if out, err := exec.Command("git", "-C", dir, "checkout", "--detach").CombinedOutput(); err != nil {
 		return fmt.Errorf("git checkout --detach in %s: %s: %w", dir, strings.TrimSpace(string(out)), err)
@@ -152,10 +133,8 @@ func DetachHead(dir string) error {
 	return nil
 }
 
-// DeleteBranch force-deletes a local branch (git branch -D). git refuses when the
-// branch is still checked out in any worktree, so detach that worktree first (see
-// DetachHead). Used to scrap a discarded PR's task branch; unpushed work on it is
-// intentionally discarded.
+// DeleteBranch force-deletes a local branch. git refuses while it is checked out anywhere, so
+// detach that worktree first (-> DetachHead); unpushed work on it is intentionally discarded.
 func DeleteBranch(repo, name string) error {
 	if out, err := exec.Command("git", "-C", repo, "branch", "-D", name).CombinedOutput(); err != nil {
 		return fmt.Errorf("git branch -D %s: %s: %w", name, strings.TrimSpace(string(out)), err)
@@ -172,13 +151,8 @@ func CreateBranch(dir, name, base string) error {
 	return nil
 }
 
-// CheckoutDetachedClean force-checks-out ref in detached HEAD (no branch claimed, so
-// it can hold a branch checked out in another worktree) and removes untracked files,
-// landing the worktree EXACTLY on ref's tip regardless of prior state. It's for the
-// disposable review worktree: a reviewer only reads (and runs `sindri lint`, which
-// builds and drops artifacts), so it produces nothing worth keeping — discarding is
-// always safe, and forcing guarantees the reviewer sees the latest branch, never a
-// stale checkout that a plain `git checkout` would refuse over local changes.
+// CheckoutDetachedClean lands dir exactly on ref's tip, detached and free of untracked files.
+// For the disposable review worktree, where nothing is worth keeping and a stale read is worse.
 func CheckoutDetachedClean(dir, ref string) error {
 	if out, err := exec.Command("git", "-C", dir, "checkout", "--detach", "--force", ref).CombinedOutput(); err != nil {
 		return fmt.Errorf("checkout %s: %s: %w", ref, strings.TrimSpace(string(out)), err)
@@ -189,9 +163,8 @@ func CheckoutDetachedClean(dir, ref string) error {
 	return nil
 }
 
-// EnsureBranch puts dir's worktree on branch name, creating it from base if it
-// doesn't exist yet — and preserving it (and any work on it) if it does. Used to
-// give a planner a standing branch to draft openspec on.
+// EnsureBranch puts dir on name, creating it from base if absent and preserving any work on it
+// if not — a planner's standing branch.
 func EnsureBranch(dir, name, base string) error {
 	if cur, _ := CurrentBranch(dir); cur == name {
 		return nil
@@ -208,9 +181,8 @@ func EnsureBranch(dir, name, base string) error {
 	return nil
 }
 
-// Ahead reports whether dir's HEAD has any commit not in base (i.e. there's
-// something to submit even with a clean worktree). A rev-list failure is returned,
-// not collapsed into "not ahead" — that would silently skip a submit.
+// Ahead reports whether dir has a commit not in base — something to submit even when the
+// worktree is clean. A failure is returned, since "not ahead" would silently skip a submit.
 func Ahead(dir, base string) (bool, error) {
 	out, err := exec.Command("git", "-C", dir, "rev-list", "--count", base+"..HEAD").Output()
 	if err != nil {
@@ -220,9 +192,7 @@ func Ahead(dir, base string) (bool, error) {
 	return n != "" && n != "0", nil
 }
 
-// Rebase rebases dir's current branch onto onto. It aborts a rebase that hits
-// conflicts (rather than leaving the worktree mid-rebase) and reports the error,
-// so the caller can treat it as best-effort.
+// Rebase rebases dir's branch onto onto, aborting on conflict rather than leaving it mid-rebase.
 func Rebase(dir, onto string) error {
 	if out, err := exec.Command("git", "-C", dir, "rebase", onto).CombinedOutput(); err != nil {
 		_ = exec.Command("git", "-C", dir, "rebase", "--abort").Run()
@@ -231,9 +201,8 @@ func Rebase(dir, onto string) error {
 	return nil
 }
 
-// HasChanges reports whether dir's worktree has uncommitted changes. A status
-// failure is returned, not collapsed into "clean" — that would let CommitAll
-// silently drop an agent's work.
+// HasChanges reports whether dir has uncommitted changes. A failure is returned, since "clean"
+// would let CommitAll silently drop an agent's work.
 func HasChanges(dir string) (bool, error) {
 	out, err := exec.Command("git", "-C", dir, "status", "--porcelain").Output()
 	if err != nil {
@@ -242,11 +211,8 @@ func HasChanges(dir string) (bool, error) {
 	return len(strings.TrimSpace(string(out))) > 0, nil
 }
 
-// CommitAll stages and commits everything in dir's worktree. A no-op (nil) when
-// there is nothing to commit. It stages honestly (`git add -A`): an agent that
-// reaches the task tracker only through the hub never touches `.todos/` in its
-// worktree, so nothing churns it here — and if something ever does, it surfaces
-// (a noisy diff, a loud merge failure) rather than being silently dropped.
+// CommitAll stages everything in dir and commits it, or does nothing if there is nothing to
+// commit. `git add -A` on purpose: anything unexpected should surface, not be filtered away.
 func CommitAll(dir, msg string) error {
 	changed, err := HasChanges(dir)
 	if err != nil {
@@ -264,10 +230,8 @@ func CommitAll(dir, msg string) error {
 	return nil
 }
 
-// RebaseOnto checks branch out in dir and rebases it onto onto. A conflict is
-// reported (the rebase is aborted, leaving the worktree clean) so the caller can
-// route it back to the owning worker. Used to bring a PR branch up to the current
-// base before merging, so a merely-stale branch merges without human help.
+// RebaseOnto rebases branch onto onto, aborting on conflict so the worktree stays clean and the
+// caller can route the conflict back to its worker. Lets a merely-stale branch merge unaided.
 func RebaseOnto(dir, branch, onto string) error {
 	if out, err := exec.Command("git", "-C", dir, "checkout", branch).CombinedOutput(); err != nil {
 		return fmt.Errorf("checkout %s: %s: %w", branch, strings.TrimSpace(string(out)), err)
@@ -310,14 +274,9 @@ func unmergedFiles(dir string) []string {
 	return nameOnly(dir, "diff", "--name-only", "--diff-filter=U")
 }
 
-// RebaseStart checks branch out in dir and begins rebasing it onto onto WITHOUT
-// aborting on conflict — the opposite of Rebase. It returns:
-//   - done=true when the branch rebased cleanly (nothing to resolve);
-//   - conflicts (the unmerged files) with done=false when it stopped on a conflict,
-//     leaving the rebase in progress so a worker can resolve the file content and
-//     the hub can continue it;
-//   - a non-nil err only for a genuine failure (bad ref, etc.), with no rebase left
-//     in progress.
+// RebaseStart rebases branch onto onto WITHOUT aborting on conflict: done when it landed
+// clean, else the unmerged files with the rebase left in progress for a worker to resolve. An
+// error means a genuine failure, with nothing in progress.
 func RebaseStart(dir, branch, onto string) (conflicts []string, done bool, err error) {
 	if out, e := exec.Command("git", "-C", dir, "checkout", branch).CombinedOutput(); e != nil {
 		return nil, false, fmt.Errorf("checkout %s: %s: %w", branch, strings.TrimSpace(string(out)), e)
@@ -340,10 +299,8 @@ func RebaseContinue(dir string) (conflicts []string, done bool, err error) {
 	return settleRebase(dir, out, e)
 }
 
-// settleRebase interprets the state after a rebase step (start/continue/skip) and
-// drives past commits that became empty (already present in the base — e.g. a
-// commit the base superseded): it --skips them so a redundant commit needs no
-// worker action. It returns the next conflict set, done, or a hard error.
+// settleRebase reads the state after a rebase step and skips commits the base already contains,
+// so a redundant commit needs no worker action. Returns the next conflicts, done, or an error.
 func settleRebase(dir, stepOut string, stepErr error) (conflicts []string, done bool, err error) {
 	for {
 		if !RebaseInProgress(dir) {
@@ -371,11 +328,8 @@ func Diff(repo, base, branch string) (string, error) {
 	return string(out), nil
 }
 
-// BlockingLocalChanges returns the tracked files in repo that a merge of branch
-// (relative to base) would overwrite — git's "your local changes would be
-// overwritten" set. Computed as the working-tree changes vs HEAD that also lie in
-// the files the merge touches, so unrelated dirt (e.g. .todos churn the merge
-// never touches) is excluded. Best-effort: returns nil on any git error.
+// BlockingLocalChanges returns the tracked files a merge of branch would overwrite: working-tree
+// changes that also lie in what the merge touches, so unrelated dirt is excluded.
 func BlockingLocalChanges(repo, base, branch string) []string {
 	touched := make(map[string]bool)
 	for _, f := range nameOnly(repo, "diff", "--name-only", base+".."+branch) {

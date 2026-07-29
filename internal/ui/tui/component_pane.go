@@ -1,11 +1,9 @@
 // package: tui / component_pane
 // type:    ui component (generic)
-// job:     render text lines into a fixed width×height scrollable block via a
-//          scroll.Viewport — the shared primitive behind the selector and the
-//          detail pane. Each line is padded/truncated to width and the block
-//          padded to the viewport height, so panes always fill their box.
-// limits:  renders the given lines only; scroll state belongs to the
-//          scroll.Viewport (-> scroll) and the content to the caller.
+// job:     render lines into a fixed width×height scrollable block via a scroll.Viewport —
+//          the primitive behind the selector and the detail pane. Every line is fitted to
+//          width and the block padded to height, so a pane always fills its box exactly.
+// limits:  renders the given lines only; scroll state is the Viewport's, content the caller's.
 package tui
 
 import (
@@ -30,8 +28,7 @@ func pane(lines []string, vp scroll.Viewport, width, cursor int) string {
 	out := make([]string, 0, vp.Height)
 	for i := start; i < end && i < len(lines); i++ {
 		if i == cursor {
-			// Strip any per-cell colour first so the highlight bar is a clean,
-			// uninterrupted block (nested styles would otherwise reset its bg).
+			// Strip per-cell colour: a nested style would reset the highlight bar's background.
 			out = append(out, selStyle.Render(padTrunc(ansi.Strip(lines[i]), width)))
 			continue
 		}
@@ -44,19 +41,15 @@ func pane(lines []string, vp scroll.Viewport, width, cursor int) string {
 	return strings.Join(out, "\n")
 }
 
-// wrapContent word-wraps each line to width so a pane shows the full text instead
-// of truncating it with an ellipsis. ANSI-aware (a coloured diff keeps its colour
-// across the wrap) and hard-breaks any token longer than width, so no line ever
-// overflows. Returns a flat list of the wrapped lines, ready for pane().
+// wrapContent word-wraps each line to width, so a pane shows full text rather than an
+// ellipsis. ANSI-aware, and hard-breaks an over-long token so no line overflows.
 func wrapContent(lines []string, width int) []string {
 	wrapped, _ := wrapContentMapped(lines, width)
 	return wrapped
 }
 
-// wrapContentMapped is wrapContent that also reports where each source line landed:
-// origAt[i] is the index in the returned slice at which source line i begins. A
-// caller tracking a per-line cursor or highlight (the detail pane's focused
-// cross-reference) uses it to follow that line through the wrap.
+// wrapContentMapped is wrapContent that also reports where each source line landed, so a
+// caller tracking a cursor or highlight can follow its line through the wrap.
 func wrapContentMapped(lines []string, width int) (wrapped []string, origAt []int) {
 	origAt = make([]int, len(lines))
 	if width <= 0 {
@@ -81,10 +74,8 @@ func divider(h int) string {
 	return strings.Join(rows, "\n")
 }
 
-// padTrunc fits s to exactly w display cells: too long is truncated with an
-// ellipsis, too short is right-padded with spaces. ANSI-aware (lipgloss-styled
-// lines keep their colour and count by display width), with tabs expanded and
-// stray control chars dropped from plain lines first.
+// padTrunc fits s to exactly w display cells — truncated with an ellipsis, or space-padded.
+// ANSI-aware, and sanitized first so nothing in it can escape its cell.
 func padTrunc(s string, w int) string {
 	if w <= 0 {
 		return ""
@@ -97,21 +88,12 @@ func padTrunc(s string, w int) string {
 	}
 }
 
-// sanitize makes a line safe to render in a fixed-width cell. A line carrying an
-// ANSI escape is lipgloss-styled and already well-formed — only its tabs are
-// expanded. A plain line additionally has stray control chars (CR, …) dropped,
-// since a raw tab overflows/wraps and a carriage return bleeds over the left
-// edge (both common in diffs).
+// sanitize makes a line safe for a fixed-width cell: tabs expanded, and control chars dropped
+// from a plain line (a CR bleeds past the left edge). A styled line keeps its escapes.
 func sanitize(s string) string {
 	s = strings.ReplaceAll(s, "\t", "    ")
-	// A cell is ONE line, so fold any embedded newline. Text reaching a cell is often not
-	// ours — an agent's activity log carries chat messages verbatim, and one of those ran to
-	// 123 newlines. Measured as a single line but rendered as 124, it pushed the frame past
-	// the terminal, which scrolled the top bar out of view for as long as that entry was in
-	// the window. Folding here covers every cell rather than each caller remembering to.
-	//
-	// Before the ANSI check below, deliberately: a styled string (a dim timestamp, say) took
-	// the early return and skipped this, which is exactly how the log entry got through.
+	// A cell is ONE line: a newline in foreign text (an activity log quotes chat verbatim)
+	// renders as a row the layout never counted. Folded before the ANSI early exit below.
 	if strings.ContainsAny(s, "\n\r") {
 		s = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(s)
 	}
@@ -136,26 +118,19 @@ var (
 	ansiSGR       = regexp.MustCompile(`\x1b\[[0-9;:]*m`)
 )
 
-// sgrMark stands in for a colour sequence while control bytes are stripped. A private-use
+// sgrMark stands in for a colour sequence while control bytes are stripped — a private-use
 // rune, so it cannot collide with pane text.
 const sgrMark = ""
 
-// KeepColour reduces a string to text plus colour, dropping every escape that would command
-// the terminal. Content captured from another program's screen — an agent's tmux pane — is
-// its own full-screen drawing: cursor moves, erase-line and erase-display, scroll regions.
-// Rendered into our frame those execute against OUR screen, wiping or shifting rows that
-// belong to the layout, which is what makes the header appear to flicker or vanish while
-// nothing about the board has changed. Colour is safe and worth keeping, so SGR stays.
-//
-// Apply it where foreign text ENTERS the model, so the renderer only ever sees content that
-// obeys its cells.
+// KeepColour reduces foreign text to text plus colour. A captured screen is another program's
+// full-screen drawing, and its cursor moves and erases would execute against OUR frame. Apply
+// it where such text enters the model.
 func KeepColour(s string) string {
 	s = ansiOSC.ReplaceAllString(s, "")
 	s = ansiCSINonSGR.ReplaceAllString(s, "")
 	s = ansiOther.ReplaceAllString(s, "")
-	// Park the SGR sequences before the control-byte sweep, which would otherwise take the
-	// ESC that begins them along with the bare BEL/CR/backspace bytes it is there to remove
-	// (those move the cursor just as surely as a CSI does).
+	// Park the colour sequences: the sweep below drops the ESC that begins them along with the
+	// bare control bytes it is there to remove.
 	var kept []string
 	s = ansiSGR.ReplaceAllStringFunc(s, func(seq string) string {
 		kept = append(kept, seq)

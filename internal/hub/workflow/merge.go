@@ -59,11 +59,8 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 	if pr.Status != "approved" {
 		return store.PR{}, fmt.Errorf("%s is %s — only an approved PR may be merged", prID, pr.Status)
 	}
-	// Persist an explicit in-flight status: the merge is triggered but its outcome
-	// isn't known yet. This keeps the board honest (a moving "merging", not a frozen
-	// "approved") AND makes it recoverable — if the hub dies mid-merge, startup
-	// reconciles any leftover "merging" to "merge-failed" (see ReconcileMergingPRs),
-	// because a half-applied merge needs a human look, not a silent retry.
+	// An explicit in-flight status keeps the board honest and makes a crash recoverable: startup
+	// reconciles a leftover "merging" to "merge-failed", since half a merge needs a human.
 	pr.Status = "merging"
 	if err := ps.PutPR(pr); err != nil {
 		return store.PR{}, err
@@ -138,12 +135,8 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 		e.deps.Notify()
 		return pr, nil
 	}
-	// The task's PR merged — notify every task source so it can run its own
-	// consequence (td closes the task, github closes+comments the issue, openspec
-	// no-ops). The workflow stays ignorant of which backend the task uses; each source
-	// acts only on its own ids. Best-effort: it runs AFTER the local merge landed, so a
-	// failure is a warning on the PR (may need a manual upstream follow-up), never a
-	// merge failure.
+	// Tell every task source, so each runs its own consequence on its own ids and the workflow
+	// need not know the backend. After the local merge, so a failure warns rather than fails it.
 	note := "merged via " + prID
 	for _, src := range taskSources() {
 		if err := src.OnMerged(root, pr.Task, note); err != nil {

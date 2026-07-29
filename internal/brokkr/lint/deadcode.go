@@ -26,25 +26,13 @@ import (
 	"golang.org/x/tools/go/ssa/ssautil"
 )
 
-// Deadcode loads the given package patterns, computes reachability from every
-// main package's init+main via Rapid Type Analysis, and writes one
-// "file:line:col: unreachable func: Name" line per unreachable source function
-// to w (sorted by package, then file, then line). Reporting is limited to the
-// module(s) of the loaded packages so dependencies are never flagged.
+// Deadcode reports every function unreachable from a main package's init+main, one per line,
+// limited to the loaded modules so dependencies are never flagged.
 //
-// Generated files, marker interface methods, functions annotated with a
-// //deadcode:keep directive, and files whose path matches ig (--ignore) are
-// excluded. When anything is reported, a trailing note reminds the reader that
-// the directive exists.
-//
-// Test packages are always analysed: tests are live code, so a function reachable
-// only from a _test.go (a helper, a fixture) is reachable, not dead.
-//
-// It returns true if any unreachable function was reported, which callers can
-// use as a non-zero exit gate.
+// Generated files, marker interface methods, //deadcode:keep functions and ig matches are
+// excluded. Tests are analysed too: a helper reachable only from a _test.go is live, not dead.
 func Deadcode(patterns []string, tags string, ig *Ignore, w io.Writer) (found bool, err error) {
-	// The Go toolchain is optional: deadcode loads packages via `go`, so without it
-	// on PATH we degrade gracefully (a visible skip), rather than hard-failing.
+	// The Go toolchain is optional, so its absence is a visible skip rather than a failure.
 	if _, err := exec.LookPath("go"); err != nil {
 		fmt.Fprintln(w, "deadcode: go toolchain not found on PATH — skipping (optional)")
 		return false, nil
