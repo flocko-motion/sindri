@@ -11,6 +11,7 @@ package workflow
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -27,6 +28,29 @@ import (
 // conflict it leaves the markers in the agent's /workspace and tells it which files
 // to fix, then continues on the next `sindri rebase`; once clean it reports aligned.
 // All git runs host-side (the agent has none).
+// reattach puts a detached worktree back on the branch the hub records for the agent, and returns
+// it. A detach is how a branch is freed for deletion, and nothing used to put the worktree back —
+// so a rebase dead-ended on "detached HEAD" and the agent was told to try again later, forever.
+// Healing beats reporting: the hub knows which branch this agent owns, so it restores it.
+func (e *Engine) reattach(ps *store.ProjectStore, agent, wt string) (string, error) {
+	st, _ := ps.GetState(agent)
+	if st.Branch == "" {
+		return "", fmt.Errorf("%s is on a detached HEAD and the hub has no branch recorded for it", agent)
+	}
+	rescue, err := git.AttachBranch(wt, st.Branch)
+	if err != nil {
+		return "", err
+	}
+	note := "reattached to " + st.Branch
+	if rescue != "" {
+		// Loud: the branch had diverged, so the commits HEAD carried live under another name now.
+		note += " — commits from the detached HEAD saved on " + rescue
+		fmt.Fprintf(os.Stderr, "hub: %s %s\n", agent, note)
+	}
+	_ = ps.Log(agent, "rebase", note)
+	return st.Branch, nil
+}
+
 func (e *Engine) CmdRebase(c registry.Caller, _ []string, out io.Writer) (int, error) {
 	ps := e.store.For(c.Project)
 	root := e.deps.ProjectRoot(c.Project)
@@ -43,7 +67,9 @@ func (e *Engine) CmdRebase(c registry.Caller, _ []string, out io.Writer) (int, e
 	if !git.RebaseInProgress(wt) { // starting fresh — guard against rebasing base onto itself
 		b, berr := git.CurrentBranch(wt)
 		if berr != nil {
-			return 1, berr
+			if b, berr = e.reattach(ps, c.Agent, wt); berr != nil {
+				return 1, berr
+			}
 		}
 		if b == base {
 			fmt.Fprintf(out, "You're on %s (the reference branch itself) — nothing to rebase.\n", base)

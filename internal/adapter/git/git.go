@@ -125,6 +125,48 @@ func CurrentBranch(dir string) (string, error) {
 	return b, nil
 }
 
+// AttachBranch reattaches a detached worktree to branch, reporting a rescue ref if it made one.
+// Detaching frees a branch for deletion (-> DetachHead) and nothing put the worktree back, so an
+// agent could commit onto a HEAD no branch named. Whatever HEAD holds survives: the branch is
+// created there when missing, fast-forwarded when HEAD is ahead, and on divergence the branch
+// stays put while HEAD's commits are named by the rescue ref. No case discards a commit.
+func AttachBranch(dir, branch string) (rescue string, err error) {
+	head, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
+	if err != nil {
+		return "", fmt.Errorf("attach %s: read HEAD: %s", branch, gitError(err))
+	}
+	at := strings.TrimSpace(string(head))
+	tip, tipErr := exec.Command("git", "-C", dir, "rev-parse", "--verify", "refs/heads/"+branch).Output()
+	switch {
+	case tipErr != nil: // no such branch — the deletion case; name HEAD and carry on
+		return "", checkoutArgs(dir, branch, "-b", branch)
+	case strings.TrimSpace(string(tip)) == at:
+		return "", checkoutArgs(dir, branch, branch)
+	case isAncestor(dir, strings.TrimSpace(string(tip)), at):
+		return "", checkoutArgs(dir, branch, "-B", branch) // fast-forward; nothing to lose
+	}
+	// Diverged: moving the branch would drop its commits, attaching would drop HEAD's. Keep both.
+	rescue = fmt.Sprintf("%s-detached-%s", branch, at[:7])
+	if out, err := exec.Command("git", "-C", dir, "branch", "-f", rescue, at).CombinedOutput(); err != nil {
+		return "", fmt.Errorf("rescue %s: %s", rescue, strings.TrimSpace(string(out)))
+	}
+	return rescue, checkoutArgs(dir, branch, branch)
+}
+
+// checkoutArgs runs a checkout, naming the branch in any failure.
+func checkoutArgs(dir, branch string, args ...string) error {
+	full := append([]string{"-C", dir, "checkout"}, args...)
+	if out, err := exec.Command("git", full...).CombinedOutput(); err != nil {
+		return fmt.Errorf("attach %s: %s", branch, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// isAncestor reports whether commit a is reachable from b, so a branch can be fast-forwarded.
+func isAncestor(dir, a, b string) bool {
+	return exec.Command("git", "-C", dir, "merge-base", "--is-ancestor", a, b).Run() == nil
+}
+
 // DetachHead detaches dir from its branch, freeing that branch for deletion elsewhere.
 func DetachHead(dir string) error {
 	if out, err := exec.Command("git", "-C", dir, "checkout", "--detach").CombinedOutput(); err != nil {
