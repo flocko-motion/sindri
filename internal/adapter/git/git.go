@@ -37,14 +37,21 @@ func Root(dir string) (string, error) {
 	if err != nil {
 		return toplevel, nil // older git without the flag: the checkout is the best answer
 	}
-	// The path is relative to the checkout when git feels like it (typically ".git" in a main
-	// worktree), absolute in a linked one.
 	cd := strings.TrimSpace(string(common))
 	if cd == "" {
 		return toplevel, nil
 	}
+	// A relative answer is relative to DIR — the directory git ran in — not to the toplevel.
+	// Joining it onto the toplevel resolves correctly only when the two are the same place: from
+	// `<repo>/.worktrees` git says "../.git", which against the toplevel climbs out of the repo
+	// and names its PARENT as the project. Every command then addressed a repo the hub had never
+	// heard of, with an empty backlog to match.
 	if !filepath.IsAbs(cd) {
-		cd = filepath.Join(toplevel, cd)
+		base, aerr := filepath.Abs(dir)
+		if aerr != nil {
+			return toplevel, nil
+		}
+		cd = filepath.Join(base, cd)
 	}
 	// A worktree's common dir is the main checkout's `.git`; its parent is that checkout. Only
 	// trust it when it looks like one, so a bare or unusual layout falls back rather than

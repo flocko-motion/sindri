@@ -1,6 +1,7 @@
 package git
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -27,12 +28,23 @@ func TestRootResolvesWorktreeToMainRepo(t *testing.T) {
 	wt := filepath.Join(main, ".worktrees", "dvalin")
 	run(main, "worktree", "add", "-q", wt, "HEAD")
 
-	// Both the main checkout and a nested subdirectory of the worktree resolve to the repo.
+	// Every vantage point inside the repo must name the same project: the main checkout, a
+	// subdirectory of it, the directory that HOLDS the worktrees, a linked worktree, and a
+	// subdirectory of that one.
+	//
+	// `<repo>/.worktrees` is the case that regressed. git answers `--git-common-dir` relative to
+	// the directory it ran in, so from there it says "../.git"; resolved against the toplevel
+	// instead, that climbed out of the repo and named its parent — an unregistered path, so the
+	// TUI opened with no repo and an empty backlog.
 	sub := filepath.Join(wt, "src")
-	if err := exec.Command("mkdir", "-p", sub).Run(); err != nil {
+	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, dir := range []string{main, wt, sub} {
+	inner := filepath.Join(main, "internal", "pkg")
+	if err := os.MkdirAll(inner, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{main, inner, filepath.Join(main, ".worktrees"), wt, sub} {
 		got, err := Root(dir)
 		if err != nil {
 			t.Fatalf("Root(%s): %v", dir, err)
