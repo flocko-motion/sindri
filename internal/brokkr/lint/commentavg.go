@@ -114,14 +114,25 @@ func CommentAvg(roots []string, maxAvg float64, ig *Ignore, w io.Writer) (bool, 
 	for _, v := range viols {
 		fmt.Fprintf(w, "%s: comments average %.1f lines (allowed %.1f over %d blocks) / %d comment lines; longest is %d lines at :%d\n",
 			v.path, v.avg, v.allowed, v.blocks, v.lines, v.worst.Lines, v.worst.Line)
-		if len(v.worst.Text) > 0 {
-			fmt.Fprintf(w, "    %s…\n", trimTo(v.worst.Text[0], 72))
+		if ex := firstProse(v.worst); ex != "" {
+			fmt.Fprintf(w, "    %s…\n", trimTo(ex, 72))
 		}
 	}
 	if len(viols) > 0 {
 		fmt.Fprintf(w, "%d file(s) over the comment-length trend. Tune it per repo with `lint: max_comment_avg:` in .sindri/config.yaml.\n", len(viols))
 	}
 	return len(viols) > 0, nil
+}
+
+// firstProse returns a block's first line that says something, for the excerpt that names which
+// comment is the long one. A block can open on a blank line, and "…" tells the reader nothing.
+func firstProse(b CommentBlock) string {
+	for _, t := range b.Text {
+		if strings.TrimSpace(t) != "" {
+			return t
+		}
+	}
+	return ""
 }
 
 // trimTo shortens s to at most n characters, for a one-line excerpt.

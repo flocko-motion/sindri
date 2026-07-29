@@ -149,6 +149,63 @@ func TestBlankLinesCannotSplitAComment(t *testing.T) {
 	}
 }
 
+// TestDelimitersAreFormattingNotProse: the rule keeps comments SHORT, so it must let them be
+// formatted properly. `/**` and `*/` on their own lines are formatting; counting them charged
+// JSDoc two lines that Go's `//` never pays, so the same prose failed in TypeScript and passed
+// in Go. A bare `*` inside the block is a paragraph break the author wrote, and still counts.
+func TestDelimitersAreFormattingNotProse(t *testing.T) {
+	jsdoc := "/**\n * one\n *\n * two\n */\ncode()\n"
+	golike := "// one\n//\n// two\ncode()\n"
+
+	js, slashes := ScanComments(jsdoc), ScanComments(golike)
+	if len(js) != 1 || len(slashes) != 1 {
+		t.Fatalf("each source is one block, got %d and %d", len(js), len(slashes))
+	}
+	if js[0].Lines != slashes[0].Lines {
+		t.Errorf("identical prose must measure the same: JSDoc %d lines, Go %d", js[0].Lines, slashes[0].Lines)
+	}
+	if js[0].Lines != 3 {
+		t.Errorf("three content lines (one, blank, two), got %d", js[0].Lines)
+	}
+	// The block is still reported at the line it opens on, not at its first prose line.
+	if js[0].Line != 1 {
+		t.Errorf("block should start at the `/**` line 1, got %d", js[0].Line)
+	}
+	// A one-line block comment carries its prose; a block of pure delimiters is not a comment.
+	if got := ScanComments("/** just this */\ncode()\n"); len(got) != 1 || got[0].Lines != 1 {
+		t.Errorf("a one-line /** … */ is one line, got %+v", got)
+	}
+	if got := ScanComments("/**\n */\ncode()\n"); len(got) != 0 {
+		t.Errorf("delimiters alone are not a comment, got %+v", got)
+	}
+}
+
+// TestExcerptNamesTheComment: the report's excerpt must quote the offending comment. It used to
+// print the `*` left over from `/**`, which named nothing — worst for TypeScript, where every
+// block comment opens that way.
+func TestExcerptNamesTheComment(t *testing.T) {
+	long := "/**\n * the offending explanation\n * b\n * c\n * d\n * e\n * f\n * g\n * h\n * i\n */\n"
+	root := writeTree(t, map[string]string{"src/Wordy.tsx": tsHeader + long + "export const a = 1;\n"})
+
+	// A deliberately strict maximum, so this test turns on the excerpt rather than on where the
+	// thin-sample allowance happens to fall.
+	var out bytes.Buffer
+	found, err := CommentAvg([]string{root}, 0.5, mustIgnore(t), &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatalf("a 9-line comment must trip a 0.5 maximum:\n%s", out.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "the offending explanation") {
+		t.Errorf("the excerpt should quote the comment:\n%s", got)
+	}
+	if strings.Contains(got, "    *…") {
+		t.Errorf("the excerpt must not be a bare delimiter:\n%s", got)
+	}
+}
+
 func mustIgnore(t *testing.T) *Ignore {
 	t.Helper()
 	ig, err := NewIgnore(nil)

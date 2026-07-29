@@ -77,6 +77,13 @@ type CommentBlock struct {
 // still one long comment, and if a gap ended a block then any file could halve its measured
 // comment length by inserting them — the statistic would measure formatting instead of prose.
 //
+// Delimiter-only lines do not count either, for the same reason. `/**` and `*/` on lines of
+// their own are how a block comment is FORMATTED, not something a reader reads, so charging
+// for them would make identical prose cost two lines more in JSDoc than in Go — enough that no
+// idiomatically documented TypeScript file could reach a mean the same Go file reaches easily.
+// A bare `*` (like a bare `//`) INSIDE a block is a paragraph break its author chose, so it
+// still counts, exactly as it does in Go.
+//
 // The scan is lexical, not a parse: a line whose first non-space characters are a comment
 // marker counts. That misreads a marker inside a multi-line string literal, which is rare
 // enough in real source to be worth the simplicity — and both rules using this are statistical
@@ -85,17 +92,22 @@ func ScanComments(src string) []CommentBlock {
 	var out []CommentBlock
 	var cur *CommentBlock
 	inMulti := false
-	add := func(n int, text string) {
+	// open starts a block at the line the comment OPENS on, even when that line is pure
+	// delimiter: a report should point at `/**`, not at the first line of prose below it.
+	open := func(n int) {
 		if cur == nil {
-			cur = &CommentBlock{Line: n, Lines: 1, Text: []string{text}}
-			return
+			cur = &CommentBlock{Line: n}
 		}
+	}
+	count := func(text string) {
 		cur.Lines++
 		cur.Text = append(cur.Text, text)
 	}
 	flush := func() {
 		if cur != nil {
-			out = append(out, *cur)
+			if cur.Lines > 0 { // nothing but delimiters is not a comment, and earns no credit
+				out = append(out, *cur)
+			}
 			cur = nil
 		}
 	}
@@ -103,21 +115,32 @@ func ScanComments(src string) []CommentBlock {
 		line, n := strings.TrimSpace(raw), i+1
 		switch {
 		case inMulti:
-			add(n, strings.TrimSpace(strings.TrimPrefix(line, "*")))
-			if strings.Contains(line, "*/") {
+			open(n)
+			body, closing := trimClose(line)
+			text := strings.TrimSpace(strings.TrimPrefix(body, "*"))
+			// A closing line contributes only what it says before `*/`; a bare `*` mid-block
+			// is a blank line the author wrote, and counts like one.
+			if text != "" || !closing {
+				count(text)
+			}
+			if closing {
 				inMulti = false
 				flush()
 			}
 		case strings.HasPrefix(line, "/*"):
-			body := strings.TrimPrefix(line, "/*")
-			add(n, strings.TrimSpace(body))
-			if strings.Contains(body, "*/") {
+			open(n)
+			body, closing := trimClose(strings.TrimPrefix(line, "/*"))
+			if text := strings.TrimSpace(strings.TrimLeft(body, "*")); text != "" {
+				count(text) // `/* text`, or a whole one-line `/** text */`
+			}
+			if closing {
 				flush()
 			} else {
 				inMulti = true
 			}
 		case strings.HasPrefix(line, "//"):
-			add(n, strings.TrimSpace(strings.TrimPrefix(line, "//")))
+			open(n)
+			count(strings.TrimSpace(strings.TrimPrefix(line, "//")))
 		case line == "":
 			// A gap holds the block open (see above): the blank line itself is not counted.
 		default:
@@ -126,6 +149,16 @@ func ScanComments(src string) []CommentBlock {
 	}
 	flush()
 	return out
+}
+
+// trimClose strips a trailing `*/` from a block-comment line, reporting whether it was there.
+// Removing the terminator BEFORE the leading `*` is what lets a bare `*/` reduce to nothing:
+// stripping the star first would leave a `/` behind and count the line as prose.
+func trimClose(s string) (string, bool) {
+	if i := strings.Index(s, "*/"); i >= 0 {
+		return strings.TrimSpace(s[:i]), true
+	}
+	return s, false
 }
 
 // HeaderBlock is the file's header: the first comment block, provided nothing but blank lines
