@@ -15,10 +15,11 @@ import (
 // enough to drive ScrapPR without a real hub. (First workflow Engine test harness;
 // extend as more Engine methods get covered.)
 type stubDeps struct {
-	root        string
-	alive       bool
-	interrupted []string
-	injected    []string
+	root         string
+	alive        bool
+	interrupted  []string
+	injected     []string
+	injectedText []string // the message bodies too, for tests that assert what an agent was told
 }
 
 func (d *stubDeps) ProjectRoot(string) string                   { return d.root }
@@ -26,8 +27,9 @@ func (d *stubDeps) ProjectConfig(string) (config.Config, error) { return config.
 func (d *stubDeps) ArchitectureDoc(string) string               { return "" }
 func (d *stubDeps) Container(_, name string) string             { return name }
 func (d *stubDeps) Notify()                                     {}
-func (d *stubDeps) InjectWhenReady(_, name, _ string) error {
+func (d *stubDeps) InjectWhenReady(_, name, text string) error {
 	d.injected = append(d.injected, name)
+	d.injectedText = append(d.injectedText, text)
 	return nil
 }
 func (d *stubDeps) Interrupt(_, name string) error {

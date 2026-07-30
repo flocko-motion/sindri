@@ -363,6 +363,24 @@ func MsgRebased(base string) string {
 	return fmt.Sprintf("[hub] %s moved — your branch was rebased onto it, so you're up to date.", base)
 }
 
+// MsgReferenceAdvanced tells an agent the reference gained commits and the hub replayed its work
+// onto them, naming what arrived so it can re-check anything of its own that builds on it.
+func MsgReferenceAdvanced(incoming []string) string {
+	return fmt.Sprintf("[hub] %s moved on and your work was rebased onto it — you're aligned, and nothing of yours was lost.%s\nIf any of your work builds on what changed, check it before carrying on (`sindri git change` shows yours).", refName, commitList(incoming))
+}
+
+// MsgReferenceNeedsRebase is the same movement when the hub could NOT replay the agent's work —
+// usually its own uncommitted edits. It says what is waiting and leaves the move to the agent.
+func MsgReferenceNeedsRebase(incoming []string) string {
+	return fmt.Sprintf("[hub] %s moved on, but your work couldn't be rebased onto it automatically — most often because of uncommitted edits in /workspace.%s\nRun `sindri rebase` when you're at a clean point; it will tell you about any conflicts to fix.", refName, commitList(incoming))
+}
+
+// MsgReferenceRewritten is the dangerous case: the reference's history was REPLACED, so conclusions
+// an agent drew about code it doesn't own may describe commits that no longer exist.
+func MsgReferenceRewritten() string {
+	return fmt.Sprintf("[hub] %s was REWRITTEN — its history was replaced, not just extended. Your own commits are intact and nothing of yours was discarded, but anything you concluded about code you don't own may now be out of date, including gate failures you attributed to other people's files. Re-check such a finding against the current tree before acting on it or arguing from it. Run `sindri rebase` when you're at a clean point, then `sindri git incoming` to see where you stand.", refName)
+}
+
 // MsgResolveNeeded is injected when a branch can't merge because it conflicts with
 // its base: the hub has left the conflicts in the worker's workspace to edit (the
 // worker has no git — the hub drives it), and points at the single verb to retry.

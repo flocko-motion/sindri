@@ -542,7 +542,10 @@ func (e *Engine) RebaseAgent(project, name string) error {
 }
 
 // rebasePlanners is best-effort after a merge: a dirty or conflicting worktree is logged, skipped.
+// It also settles the reference tip, since a merge moves it and the hub already handled that here —
+// leaving it unrecorded would have SyncReference report the hub's own merge as an outside change.
 func (e *Engine) rebasePlanners(project, base string) {
+	defer e.noteReference(project)
 	ps := e.store.For(project)
 	root := e.deps.ProjectRoot(project)
 	roster, _ := ps.Roster()

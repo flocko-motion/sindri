@@ -40,6 +40,7 @@ type Hub struct {
 	projects *project.Service  // repo-registry management (internal/hub/project)
 	agentCh  *agentchan.Server // the inbound agent command channel (internal/hub/agentchan)
 	watch    *watchdog         // agent liveness, observed on a loop (internal/hub/watchdog.go)
+	refs     *refwatch         // reference-branch drift, on a slow loop (internal/hub/refwatch.go)
 }
 
 // agentKey identifies an agent within a project (a repoTag), one hub serving many repos.
@@ -114,6 +115,8 @@ func New() (*Hub, error) {
 	// Last, after agents: the watchdog probes through h.agents and reads once here, so the first
 	// board read has real observations.
 	h.watch = newWatchdog(h)
+	// After wf: it drives SyncReference, whose first pass only records where each reference stands.
+	h.refs = newRefwatch(h)
 	return h, nil
 }
 
@@ -167,6 +170,7 @@ func ensureGitignore(root string) {
 // Close shuts agent listeners and releases the store.
 func (h *Hub) Close() error {
 	h.watch.close()
+	h.refs.close()
 	h.agentCh.CloseAll()
 	server.FlushAccessLog() // emit any open access-log run before we go quiet
 	return h.store.Close()

@@ -131,6 +131,19 @@ func BranchExists(dir, branch string) bool {
 	return exec.Command("git", "-C", dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch).Run() == nil
 }
 
+// BranchTip is branch's current commit — what a moved reference is detected against.
+func BranchTip(dir, branch string) (string, error) {
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "--verify", "refs/heads/"+branch).Output()
+	if err != nil {
+		return "", fmt.Errorf("read tip of %s: %s", branch, gitError(err))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// IsAncestor reports whether a is reachable from b. False for a branch that moved means its history
+// was REWRITTEN (rebased, reset, force-moved), not merely advanced.
+func IsAncestor(dir, a, b string) bool { return isAncestor(dir, a, b) }
+
 // AttachBranch reattaches a detached worktree to branch, reporting a rescue ref if it made one.
 // Detaching frees a branch for deletion (-> DetachHead), so an agent could commit onto a HEAD no
 // branch named. Nothing is discarded: the branch is created when missing, fast-forwarded when HEAD
