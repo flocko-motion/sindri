@@ -72,6 +72,23 @@ func writeGrep(w io.Writer, rel, path string, re *regexp.Regexp, units []unit) {
 	}
 }
 
+// selectSymbol keeps the units declaring the exact identifier name — case-sensitive, no regex, no
+// substring ("Foo" never matches "FooBar"), the one thing --symbol and `brokkr refs` must agree on
+// so a name means the same thing to both. Every unit whose names include an exact match is kept,
+// since two receivers can share a method name, and a grouped const/var block is one unit for more
+// than one symbol (its display label only ever shows the first — that's cosmetic, not identity).
+func selectSymbol(units []unit, name string) (kept []unit, ok bool) {
+	for _, u := range units {
+		for _, n := range u.names {
+			if n == name {
+				kept = append(kept, u)
+				break
+			}
+		}
+	}
+	return kept, len(kept) > 0
+}
+
 // selectFind keeps the units enclosing a match and returns separately the hits no declaration covers
 // (the arch header, the imports) — dropping those silently let a file match and then render empty.
 // ok is false when nothing matched, so the caller skips the file.

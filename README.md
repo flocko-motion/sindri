@@ -338,6 +338,20 @@ letter makes it case-sensitive). If the full map runs past a line budget (defaul
 scope or pass `--full`. Over-budget `--grep` truncates and reports the remainder
 instead, since headers are no answer to a line search.
 
+A third mode answers a third question — *where exactly is this declared?* — and
+deliberately isn't a regex:
+
+```bash
+brokkr map --symbol Container   # just that func/type/var/const, wherever it's declared
+```
+
+`--symbol` is an exact Go identifier, always case-sensitive, never a substring
+(`Foo` never matches `FooBar`) — a lookup, not a text search, mutually exclusive
+with `--find`/`--grep`. Two receivers sharing a method name both come back; a
+name declared inside a grouped `const (...)`/`var (...)` block is found even when
+it isn't the first one. For where a symbol is *used* rather than declared, see
+`brokkr refs`.
+
 ---
 
 ## Command reference
@@ -350,7 +364,7 @@ Orchestration is `sindri <category> <action>`; the toolbelt is the separate
 | `agent` | `list` · `new [name] [--role worker\|reviewer\|planner]` · `start <name>` · `stop <name>` · `delete <name>` · `tell <name> "msg"` · `attach <name>` · `info <name>` · `pane <name>` |
 | `task` | `list [--json]` · `new <title> [-t -p -d --labels --parent]` · `info <id>` · `edit <id>` · `priority <id> <P0..P4>` · `approve <id>` · `reject <id> "why"` · `unassign <id>` |
 | `pr` | `list` · `info <id>` · `lint <id>` · `verify <id>` · `review <id> "…"` · `approve <id>` · `reject <id> "…"` · `milestone <agent>` · `merge <id>` |
-| `brokkr` | `map [paths…] [--find --grep --file --depth]` · `lint [deadcode\|loc\|comments\|openspec]` (none = all) |
+| `brokkr` | `map [paths…] [--find --grep --symbol --file --depth]` · `lint [deadcode\|loc\|comments\|openspec]` (none = all) |
 
 Inside a pod the agent talks to the hub through a single command, **`sindri`**
 (the browser binary, presented under that name in the isolated container) — run
