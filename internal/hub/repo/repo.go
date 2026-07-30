@@ -28,11 +28,8 @@ func MaterializeReview(root, branch string) (string, error) {
 	return path, nil
 }
 
-// ScrapBranch removes a discarded PR's branch. It's normally checked out in the owning
-// agent's worktree, and git won't delete a checked-out branch, so the worktree (when
-// known and present) is detached from it first. The detach is best-effort — the branch
-// may already be free — but the delete's outcome is returned so the caller can log a
-// failure loudly rather than leave a lingering branch silently.
+// ScrapBranch removes a discarded PR's branch, detaching the owning worktree first since git will
+// not delete a checked-out one. The detach is best-effort; the delete's outcome is returned.
 func ScrapBranch(root, worktree, branch string) error {
 	if worktree != "" {
 		if _, err := os.Stat(worktree); err == nil {
@@ -42,11 +39,8 @@ func ScrapBranch(root, worktree, branch string) error {
 	return git.DeleteBranch(root, branch)
 }
 
-// Lint runs the project's quality gate against a worktree by invoking `brokkr lint`
-// there as a subprocess (so the concurrent hub never chdir's). Go modules only — a
-// worktree with no go.mod has no gate and passes without needing the binary at all.
-// resolveBin locates the brokkr toolbelt (the caller owns that lookup); a resolution
-// failure surfaces as a loud lint failure rather than a silent pass.
+// Lint runs the quality gate in a worktree as a subprocess, so the concurrent hub never chdir's. Go
+// modules only. A binary that cannot be resolved is a loud lint failure, never a silent pass.
 func Lint(wt string, resolveBin func() (string, error)) (output string, ok bool) {
 	if _, err := os.Stat(filepath.Join(wt, "go.mod")); err != nil {
 		return "", true // no Go module — no lint gate applies

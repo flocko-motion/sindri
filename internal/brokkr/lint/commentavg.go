@@ -22,12 +22,9 @@ const DefaultMaxCommentAvg = 2.0
 // direction that reads worst: fewer, longer lines pass a per-LINE budget while the prose grows.
 const DefaultMaxCommentLine = 110
 
-// trendSample is where a mean is taken at face value; bonusPerBlock is the slack each block short
-// of it earns. Two comments are not a trend. Linear, so the rule is predictable before you write.
-const (
-	trendSample   = 10
-	bonusPerBlock = 0.5
-)
+// baseBudgetPerMax sets the lines a file gets before the per-block allowance, as a multiple of the
+// configured maximum: two comments are not a trend, and lowering that maximum must still bite here.
+const baseBudgetPerMax = 3.0
 
 // systemicFiles is where long comments stop being a list of slips and become a house-style problem.
 const systemicFiles = 10
@@ -62,12 +59,13 @@ func aimFor(allowed float64) float64 {
 	return aim
 }
 
-// allowanceFor is the mean a file with n comment blocks may reach, given the configured maximum.
+// allowanceFor is the mean n blocks may reach: base per block, plus baseBudget spread over them.
+// Continuous, so adding a comment never shrinks the total budget the way a sample step did.
 func allowanceFor(base float64, n int) float64 {
-	if n >= trendSample {
+	if n <= 0 {
 		return base
 	}
-	return base * (1 + bonusPerBlock*float64(trendSample-n))
+	return base + (baseBudgetPerMax*base)/float64(n)
 }
 
 // CommentAvg reports each file whose mean comment exceeds maxAvg; blocks adds the per-comment
@@ -183,12 +181,10 @@ func CommentAvg(roots []string, maxAvg float64, maxLine int, blocks bool, cap *C
 	}
 	if len(viols) > 0 {
 		cap.Note(w)
-		// The band between target and ceiling is a judgement about whether prose earns its length,
-		// which no mean can make — so name it as a choice with a reason owed, not as spare room.
+		// Name the band as a claim with a reason owed, not as spare room; no mean can judge prose.
 		fmt.Fprintf(w, "%d file(s) over the comment-length trend — cut words, don't move them.\n"+
-			"  Cut to %.1f unless these comments genuinely earn their length. Stopping between %.1f and %.1f\n"+
-			"  is a claim that they do, and this check cannot judge that for you — so say which you chose\n"+
-			"  and why. \"It passes\" is not that answer.\n", len(viols), aim, aim, maxAvg)
+			"  Cut to %.1f; stopping short claims the prose earns its length, which this check cannot judge — say why.\n",
+			len(viols), aim)
 		if len(viols) >= systemicFiles && !cap.Quiet() {
 			fmt.Fprint(w, systemicBanner)
 		}

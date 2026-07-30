@@ -16,14 +16,10 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// DiscardPR scraps a PR ON ITS OWN, for work the user simply does not want — a proposal a
-// planner produced and there is no use for. It scraps the PR, then releases its author.
-//
-// The release is the whole difference from ScrapPR. That one is the companion to closing a
-// task, and leaves the author to the paired close so the worker is not messaged twice. With no
-// close alongside it, nobody would tell the author anything: it would sit in "submitted"
-// waiting for a verdict on a PR that no longer exists. Its branch is deleted, so there is
-// nothing to resume — the author goes idle and asks for new work.
+// DiscardPR scraps a PR on its own, for work the user simply does not want, and releases its
+// author. The release is the whole difference from ScrapPR, which leaves that to the paired task
+// close: with no close alongside, the author would sit in "submitted" awaiting a verdict on a PR
+// that no longer exists.
 func (e *Engine) DiscardPR(project, prID string) error {
 	ps := e.store.For(project)
 	pr, ok, err := ps.GetPR(prID)
@@ -55,11 +51,8 @@ func (e *Engine) DiscardPR(project, prID string) error {
 	return nil
 }
 
-// ScrapPR discards a PR (host/human-only) — the companion to closing/scrapping its task when the
-// human decides the work isn't wanted. It throws the work away (-> discardBranch) and marks the PR
-// "scrapped" so it leaves the board. It does NOT touch the working agent: the paired task close
-// (finishTask) interrupts and frees it, and pairing them here would double-message the worker. A
-// missing PR is an error; a branch that's already gone is fine (logged).
+// ScrapPR discards a PR (host-only), the companion to closing its task. It does NOT touch the
+// working agent — the paired finishTask frees it, and doing both would double-message the worker.
 func (e *Engine) ScrapPR(project, prID string) error {
 	ps := e.store.For(project)
 	pr, ok, err := ps.GetPR(prID)
@@ -70,10 +63,8 @@ func (e *Engine) ScrapPR(project, prID string) error {
 		return fmt.Errorf("no such PR %q", prID)
 	}
 
-	// Stop any reviewer mid-review of this PR — its branch is about to vanish, so the
-	// review is moot. Abort the reviewer's current op (ESC), tell it, close the open
-	// review record so it stops showing as "reviewing", and idle it. (The worker on the
-	// task is handled by the paired task close.) Best-effort per reviewer.
+	// Stop any reviewer mid-review: the branch is about to vanish, so the review is moot. Abort,
+	// tell it, close the review record so it stops showing as "reviewing", idle it. Best-effort.
 	revs, _ := ps.Reviews(prID)
 	for _, r := range revs {
 		if r.Verdict != "" {
@@ -112,13 +103,9 @@ func (e *Engine) ScrapPR(project, prID string) error {
 	return nil
 }
 
-// discardBranch throws away a scrapped PR's work and says what it did.
-//
-// A planner's branch is STANDING — its home, created at launch and reused for every proposal — so
-// scrapping empties it back to the reference branch. Deleting it instead (as this did) meant
-// detaching the worktree to free the name, which left the planner on a HEAD no branch held: it kept
-// committing there and could never rebase again. A worker's branch belongs to one task, so that one
-// is still deleted outright.
+// discardBranch throws away a scrapped PR's work and says what it did. A planner's branch is
+// STANDING, so scrapping empties it instead: deleting it detached the worktree to free the name,
+// leaving the planner on a HEAD no branch held, committing there and unable to rebase ever again.
 func (e *Engine) discardBranch(project string, pr store.PR, wt string) (string, error) {
 	root := e.deps.ProjectRoot(project)
 	if pr.Branch != PlannerBranch(pr.Agent) {

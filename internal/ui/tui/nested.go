@@ -13,11 +13,8 @@ import (
 	"github.com/flo-at/sindri/internal/hub/server"
 )
 
-// tuiPIDEnv marks a shell or editor the TUI suspended itself for, carrying that TUI's pid.
-//
-// A pid rather than a flag: a bare flag that outlives its TUI — exported by accident, or left
-// behind by one that died in this shell — would refuse every TUI in this terminal from then on,
-// with nothing to check the claim against. A pid can be tested for liveness first.
+// tuiPIDEnv marks a shell or editor the TUI suspended itself for, carrying that TUI's pid. A pid,
+// not a flag: a flag outliving its TUI would refuse every later one here, with nothing to check.
 const tuiPIDEnv = "SINDRI_TUI_PID"
 
 // marked hands a child the marker, so anything started from it can tell where it is. Env is set
@@ -31,12 +28,9 @@ func marked(c *exec.Cmd) *exec.Cmd {
 	return c
 }
 
-// ParentTUI reports the TUI this process runs under: its pid, and whether it is really there.
-//
-// Our own pid does not count — the TUI inherits the variable it exports for its children — and
-// neither does a dead or defunct one. server.ProcessAlive is what decides, because a raw
-// Kill(pid, 0) succeeds on a zombie: an unreaped TUI would read as alive and reinstate exactly
-// the permanent lockout the pid is here to avoid.
+// ParentTUI reports the live TUI this process runs under, if any. Our own pid does not count — the
+// TUI inherits what it exports — and ProcessAlive decides the rest, since a raw Kill(pid, 0)
+// succeeds on a zombie and an unreaped TUI would reinstate the lockout the pid exists to avoid.
 func ParentTUI() (int, bool) {
 	pid, err := strconv.Atoi(os.Getenv(tuiPIDEnv))
 	if err != nil || pid <= 0 || pid == os.Getpid() {

@@ -15,16 +15,9 @@ import (
 	"github.com/flo-at/sindri/internal/container"
 )
 
-// macDefaultRuntime is the container backend used on macOS when SINDRI_RUNTIME is
-// unset. macOS defaults to Apple `container` — one micro-VM per agent, so one
-// agent's crash or OOM can't take the others down. That isolation is the whole
-// reason sindri moved off the shared podman VM on macOS; podman is the fallback,
-// opt in with SINDRI_RUNTIME=podman. Flip this one constant to change the default:
-//
-//	"container" — Apple `container`, one micro-VM per agent (macOS default)
-//	"podman"    — the shared podman VM
-//
-// (Linux always uses podman — Apple `container` needs macOS.)
+// macDefaultRuntime is macOS's backend when SINDRI_RUNTIME is unset: Apple "container" gives one
+// micro-VM per agent, so one crash or OOM cannot take the others down as the shared podman VM did.
+// "podman" is the fallback. Linux always uses podman — Apple container needs macOS.
 const macDefaultRuntime = "container"
 
 // runtimeName resolves which container backend to use from the SINDRI_RUNTIME

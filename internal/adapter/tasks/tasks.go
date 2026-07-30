@@ -9,32 +9,18 @@ package tasks
 
 import "github.com/flo-at/sindri/internal/hub/task"
 
-// Source is a place tasks come from (td, openspec, GitHub). Each adapter implements
-// it, mapping its own world onto task.Task — including the id scheme that namespaces
-// the source (td-*, os-*, gh-*). The hub treats every source identically: it never
-// knows or branches on which concrete source is underneath.
+// Source is a place tasks come from (td, openspec, GitHub), mapping its own world onto task.Task
+// and namespacing its ids (td-*, os-*, gh-*). The hub never branches on which one is underneath.
 type Source interface {
-	// Enabled reports whether this source is usable for the repo at root — the
-	// source's OWN gate (repo uses openspec; a GitHub remote + gh + the project's
-	// issues opt-in). A disabled source is skipped.
+	// Enabled is the source's OWN gate for this repo; a disabled source is skipped.
 	Enabled(root string) bool
-	// Tasks fetches the source's tasks for the repo, normalized to task.Task. force
-	// asks for fresh data, bypassing any internal cache (a caching source honors it;
-	// a cheap local source ignores it). A source that fetches over the network
-	// degrades on error to its last good result rather than failing the whole sync.
+	// Tasks fetches this source's tasks; force bypasses any internal cache. A network source
+	// degrades to its last good result rather than failing the whole sync.
 	Tasks(root string, force bool) ([]task.Task, error)
-	// OnMerged is the source's consequence when a task's PR merges locally: td closes
-	// the task, github closes+comments the issue, openspec no-ops. Each source acts
-	// only on ITS OWN ids (by id prefix / number parse) and ignores the rest, so the
-	// caller notifies every source blindly. The returned error is for the caller to
-	// log; it is never fatal — the local merge already landed. note is the merge
-	// reason/comment to record upstream.
+	// OnMerged is the source's consequence when a task's PR merges locally. Callers notify every
+	// source blindly, so each acts only on its own ids; the error is for logging, never fatal.
 	OnMerged(root, taskID, note string) error
-	// Finish ends a task's lifecycle from the task list: scrap=false is "done" (td
-	// close, openspec archive, github issue close); scrap=true is "discard" (td
-	// delete, openspec change removal, github issue delete). Like OnMerged, each
-	// source acts only on its own ids; handled reports whether THIS source owned the
-	// id, so the caller can flag a genuinely unknown backend, and err is a real
-	// failure of the op.
+	// Finish ends a task from the task list: scrap=false is "done", true is "discard". handled
+	// reports whether THIS source owned the id, so an unknown backend can be flagged.
 	Finish(root, taskID string, scrap bool) (handled bool, err error)
 }

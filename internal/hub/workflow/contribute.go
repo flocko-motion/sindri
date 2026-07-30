@@ -19,12 +19,9 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// CmdContribute lands an interim contribution: it commits the worktree, rebases the
-// branch onto base (so the PR is immediately mergeable — a conflict drops the worker
-// into the resolve loop, same as a merge conflict), and records a gated INTERIM PR the
-// user approves like any other. Unlike submit it neither finishes the task nor spins a
-// reviewer: on approval the merge keeps the task open and resumes the worker (see
-// Merge's interim branch). The worker then waits (phase "submitted") until then.
+// CmdContribute lands an interim contribution: commit, rebase onto base so the PR is immediately
+// mergeable, and record a user-gated INTERIM PR. Unlike submit it neither finishes the task nor
+// spins a reviewer — on approval the merge keeps the task open and resumes the worker.
 func (e *Engine) CmdContribute(c registry.Caller, args []string, out io.Writer) (int, error) {
 	ps := e.store.For(c.Project)
 	root := e.deps.ProjectRoot(c.Project)

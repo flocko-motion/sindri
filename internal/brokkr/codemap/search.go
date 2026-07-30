@@ -16,11 +16,9 @@ import (
 	"unicode"
 )
 
-// smartCase compiles pat as a regexp, case-insensitively unless it carries an
-// uppercase letter — the ripgrep convention. A lowercase query stays the loose search
-// the old substring --grep was, while deliberate capitalisation means you meant it.
-// Patterns are regexps now, so a literal with metacharacters needs regexp.QuoteMeta
-// treatment by the caller (or backslashes on the command line).
+// smartCase compiles pat as a regexp, case-insensitively unless it carries an uppercase letter —
+// the ripgrep convention, where deliberate capitalisation means you meant it. Being a regexp, a
+// literal with metacharacters is the caller's to quote.
 func smartCase(pat string) (*regexp.Regexp, error) {
 	if !strings.ContainsFunc(pat, unicode.IsUpper) {
 		pat = "(?i)" + pat
@@ -61,10 +59,8 @@ func enclosing(units []unit, line int) string {
 	return ""
 }
 
-// writeGrep renders the line search for one file: `path:line: text` — a prefix that
-// stays parseable by the usual editor/jump tooling — with the enclosing declaration
-// appended. That suffix is the whole point: plain grep tells you a line matched,
-// this tells you which function or type you just landed in.
+// writeGrep renders one file's hits as `path:line: text`, parseable by editor jump tooling, plus the
+// enclosing declaration — the point being that grep says a line matched, this says where you landed.
 func writeGrep(w io.Writer, rel, path string, re *regexp.Regexp, units []unit) {
 	for _, h := range matchingLines(path, re) {
 		text := strings.TrimSpace(h.text)
@@ -76,12 +72,9 @@ func writeGrep(w io.Writer, rel, path string, re *regexp.Regexp, units []unit) {
 	}
 }
 
-// selectFind narrows units to those enclosing a match and reports the matches that no
-// declaration covers (a hit in the arch header or the imports). Returning those
-// separately is what keeps the context search honest: the old behaviour silently
-// dropped them, so a file could match the query and then render with nothing in it —
-// you saw a hit existed but never where. ok is false when the file has no match at
-// all, so the caller skips it entirely.
+// selectFind keeps the units enclosing a match and returns separately the hits no declaration covers
+// (the arch header, the imports) — dropping those silently let a file match and then render empty.
+// ok is false when nothing matched, so the caller skips the file.
 func selectFind(path string, re *regexp.Regexp, units []unit) (kept []unit, loose []hit, ok bool) {
 	hits := matchingLines(path, re)
 	if len(hits) == 0 {

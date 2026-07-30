@@ -32,20 +32,10 @@ func (h *Hub) architectureDoc(project string) string {
 	return "ARCHITECTURE.md"
 }
 
-// StartupAdvice reports what the user should know about each tracked repo, once, when the
-// hub starts. It exists because the hub used to SEED a placeholder ARCHITECTURE.md into
-// every repo it served, which littered repos that never wanted one — recommending is the
-// hub's business, writing into someone's repo is not.
-//
-// Two things get reported, and a repo in good shape produces neither:
-//
-//   - A config that won't load. Otherwise this only surfaces at the first operation
-//     needing that repo, which may be days later. Note this subsumes an architecture doc
-//     that IS configured but absent: config.validate rejects a named path that isn't
-//     there, so the error already names it.
-//   - No architecture doc at the default path, with none configured. Nothing breaks —
-//     SystemPrompt injects nothing for empty content — but agents then work with no
-//     architecture brief, which is a quality loss the user should choose knowingly.
+// StartupAdvice says once, per repo, what the user should know: a config that won't load (which
+// otherwise surfaces days later, at the first operation needing that repo), and a missing
+// architecture doc, which breaks nothing but leaves agents with no brief. Recommending is the hub's
+// business; it used to SEED a placeholder ARCHITECTURE.md, which littered repos that never wanted one.
 func (h *Hub) StartupAdvice() []string {
 	projects, err := h.store.Projects()
 	if err != nil {
