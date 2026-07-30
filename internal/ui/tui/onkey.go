@@ -135,7 +135,7 @@ func (m *model) onKey(k string) tea.Cmd {
 			case !ok:
 				m.flash = "no agent is working " + m.selID()
 			case a.Status == "down":
-				m.errText = "agent " + a.Name + " is down — start it first ('S' on the Agents tab)"
+				m.errText = "agent " + a.Name + " is down — start it first ('" + keyStartS + "' on the Agents tab)"
 			case m.cl != nil:
 				return attachAgent(m.agentContainer(a), a.Name)
 			}
