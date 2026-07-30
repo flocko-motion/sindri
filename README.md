@@ -352,6 +352,46 @@ name declared inside a grouped `const (...)`/`var (...)` block is found even whe
 it isn't the first one. For where a symbol is *used* rather than declared, see
 `brokkr refs`.
 
+### Symbol references — `brokkr refs`
+
+*Who calls this?* — the question that otherwise sends you back to `grep -rn`.
+
+```bash
+brokkr refs ProcessAlive              # whole tree
+brokkr refs Tasks internal/hub        # scoped to a path
+brokkr refs Merge --comments          # also where it's named in prose (ranked last)
+brokkr refs Ref --limit 0             # no cap (default 200, tail-trimmed)
+```
+
+Each hit is classified by what the symbol is *doing* there, and the report is
+**ranked, not file-ordered** — the definition first, then calls, then plain
+references, with test files one step behind their own kind. So the top is the part
+you asked about, and `--limit` trims the least relevant tail rather than the answer:
+
+```
+Tasks: 2 definitions · 1 call · 1 reference
+
+── definitions ──
+internal/hub/client/client.go:460:16: func (c *HTTP) Tasks() ([]store.Task, error) {  « hub/client / client · func (HTTP) Tasks
+internal/ui/cli/hub.go:53:2: Tasks() ([]store.Task, error)  « ui/cli / commands · type backend
+
+── calls ──
+internal/ui/cli/task.go:180:21: tasks, err := b.Tasks()  « ui/cli / task · func taskListCmd
+
+── references ──
+internal/ui/cli/repo.go:198:28: d.Agents, d.OpenTasks, d.Tasks, …  « ui/cli / repo commands · func printRepoDetail
+```
+
+That classification is what a line search can't do: the interface declaration, the
+method implementing it, a call, and a struct field read all match the same text.
+Every hit carries where you landed — the file's arch-header `package:` and the
+enclosing declaration.
+
+The symbol is an **exact, case-sensitive identifier**, not a regex: `refs Foo`
+never answers for `FooBar`. For patterns, use `map --grep` / `map --find` above.
+Matching is syntactic (`go/ast`, no type checking), so two packages declaring the
+same name both answer — scope it with a path or `--file`.
+
 ---
 
 ## Command reference
@@ -364,7 +404,7 @@ Orchestration is `sindri <category> <action>`; the toolbelt is the separate
 | `agent` | `list` · `new [name] [--role worker\|reviewer\|planner]` · `start <name>` · `stop <name>` · `delete <name>` · `tell <name> "msg"` · `attach <name>` · `info <name>` · `pane <name>` |
 | `task` | `list [--json]` · `new <title> [-t -p -d --labels --parent]` · `info <id>` · `edit <id>` · `priority <id> <P0..P4>` · `approve <id>` · `reject <id> "why"` · `unassign <id>` |
 | `pr` | `list` · `info <id>` · `lint <id>` · `verify <id>` · `review <id> "…"` · `approve <id>` · `reject <id> "…"` · `milestone <agent>` · `merge <id>` |
-| `brokkr` | `map [paths…] [--find --grep --symbol --file --depth]` · `lint [deadcode\|loc\|comments\|openspec]` (none = all) |
+| `brokkr` | `map [paths…] [--find --grep --symbol --file --depth]` · `refs <symbol> [paths…] [--comments --file --limit]` · `lint [deadcode\|loc\|comments\|openspec]` (none = all) |
 
 Inside a pod the agent talks to the hub through a single command, **`sindri`**
 (the browser binary, presented under that name in the isolated container) — run
