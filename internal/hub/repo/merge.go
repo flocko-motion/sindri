@@ -48,7 +48,9 @@ type MergeResult struct {
 // agent worktree). The workflow interprets the result and drives the consequences.
 func MergeBranch(root, worktree, branch, base string) MergeResult {
 	if worktree != "" {
-		conflicts, done, err := git.RebaseStart(worktree, branch, base)
+		// RebaseStep, not RebaseStart: a worktree stranded in an autostash conflict cannot be
+		// checked out, and that is a conflict to route back to its worker, not a hub error.
+		conflicts, done, err := RebaseStep(worktree, branch, base)
 		if err != nil {
 			return MergeResult{Status: MergeRebaseErr, Err: err}
 		}

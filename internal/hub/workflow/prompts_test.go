@@ -52,9 +52,9 @@ func TestGuardRepliesNameTheRealState(t *testing.T) {
 
 // TestAgentAdviceNeverPromisesGit: an agent's /workspace is a linked worktree whose .git
 // points at an unmounted host path, so EVERY git command fails there — deliberately; the
-// hub is the gatekeeper for git. Advice that tells an agent to run git is therefore a
-// dead end by construction. The coauthor brief is the one exception: its /workspace is
-// the user's real checkout (see lifecycle.go), where git genuinely works.
+// hub is the gatekeeper for git. Advice naming BARE git is therefore a dead end. `sindri git`
+// is the sanctioned path (the hub runs it), so it is stripped before the check rather than
+// banned. The coauthor brief is the exception: its /workspace is the user's real checkout.
 func TestAgentAdviceNeverPromisesGit(t *testing.T) {
 	sandboxed := []string{
 		ReplyResolveDirty("working"),
@@ -65,10 +65,13 @@ func TestAgentAdviceNeverPromisesGit(t *testing.T) {
 		MsgReview("pr-td-1", "do the thing", "td-1", "main", "", false),
 		SystemPrompt("eitri", "worker", "", ""),
 		SystemPrompt("dvalin", "reviewer", "", ""),
+		DirWorking("td-1"),
+		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
 	}
 	for _, s := range sandboxed {
+		bare := strings.ReplaceAll(s, "sindri git", "«hub-run»")
 		for _, bad := range []string{"`git ", "git commit", "git diff", "git stash"} {
-			if strings.Contains(s, bad) {
+			if strings.Contains(bare, bad) {
 				t.Errorf("advice tells a sandboxed agent to run %q: %q", bad, s)
 			}
 		}
@@ -76,6 +79,27 @@ func TestAgentAdviceNeverPromisesGit(t *testing.T) {
 	// The coauthor works in the user's own checkout, so git is legitimately available.
 	if !strings.Contains(SystemPrompt("brokk", "coauthor", "", ""), "git") {
 		t.Error("the coauthor brief should still offer git — its /workspace is the real checkout")
+	}
+}
+
+// TestAgentAdviceNeverAsksForACommit: an agent contributes or submits; the hub does the
+// committing. Advice that says "commit" names an action the agent has no verb for — the
+// worker directive used to require it ("when your change is committed, run submit") four
+// lines under "do NOT run git", which is the same dead end in different words.
+func TestAgentAdviceNeverAsksForACommit(t *testing.T) {
+	for _, s := range []string{
+		DirWorking("td-1"),
+		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
+		ReplyResolveDirty("working"),
+		ReplyResolveDirty("submitted"),
+		SystemPrompt("eitri", "worker", "", ""),
+		GitHelp,
+	} {
+		for _, bad := range []string{"commit", "Commit", "uncommitted", "Uncommitted"} {
+			if strings.Contains(s, bad) {
+				t.Errorf("advice puts %q on the agent — it contributes or submits, the hub commits: %q", bad, s)
+			}
+		}
 	}
 }
 

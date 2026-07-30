@@ -6,6 +6,7 @@
 package git
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -126,10 +127,9 @@ func CurrentBranch(dir string) (string, error) {
 }
 
 // AttachBranch reattaches a detached worktree to branch, reporting a rescue ref if it made one.
-// Detaching frees a branch for deletion (-> DetachHead) and nothing put the worktree back, so an
-// agent could commit onto a HEAD no branch named. Whatever HEAD holds survives: the branch is
-// created there when missing, fast-forwarded when HEAD is ahead, and on divergence the branch
-// stays put while HEAD's commits are named by the rescue ref. No case discards a commit.
+// Detaching frees a branch for deletion (-> DetachHead), so an agent could commit onto a HEAD no
+// branch named. Nothing is discarded: the branch is created when missing, fast-forwarded when HEAD
+// is ahead, and on divergence it stays put while the rescue ref names HEAD's commits.
 func AttachBranch(dir, branch string) (rescue string, err error) {
 	head, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
 	if err != nil {
@@ -167,9 +167,9 @@ func isAncestor(dir, a, b string) bool {
 	return exec.Command("git", "-C", dir, "merge-base", "--is-ancestor", a, b).Run() == nil
 }
 
-// ResetBranchTo empties dir's checked-out branch back to ref: commits, tracked edits and untracked
-// files all go, while the branch itself and dir's attachment to it survive. That is what a STANDING
-// branch needs — deleting one has to detach its worktree first, which leaves the agent homeless.
+// ResetBranchTo empties dir's checked-out branch back to ref — commits, tracked edits and untracked
+// files go; the branch and dir's attachment to it survive. What a STANDING branch needs: deleting
+// one would detach its worktree first, leaving the agent homeless.
 func ResetBranchTo(dir, ref string) error {
 	if out, err := exec.Command("git", "-C", dir, "reset", "--hard", ref).CombinedOutput(); err != nil {
 		return fmt.Errorf("reset %s to %s: %s", dir, ref, strings.TrimSpace(string(out)))
@@ -295,9 +295,8 @@ func RebaseOnto(dir, branch, onto string) error {
 	return Rebase(dir, onto)
 }
 
-// RebaseInProgress reports whether dir has a rebase stopped mid-flight (conflict or
-// an empty patch awaiting --skip). Resolves the real state path via git, since a
-// worktree's .git is a file pointing elsewhere.
+// RebaseInProgress reports whether dir has a rebase stopped mid-flight (conflict, or an empty patch
+// awaiting --skip). Asks git for the state path, since a worktree's .git is a file pointing away.
 func RebaseInProgress(dir string) bool {
 	for _, p := range []string{"rebase-merge", "rebase-apply"} {
 		out, err := exec.Command("git", "-C", dir, "rev-parse", "--git-path", p).Output()
@@ -315,9 +314,8 @@ func RebaseInProgress(dir string) bool {
 	return false
 }
 
-// gitEditless runs a git command in dir with editors forced non-interactive, so a
-// `rebase --continue`/`--skip` that would otherwise open $EDITOR (for a commit
-// message) never blocks the hub.
+// gitEditless runs a git command in dir with editors forced non-interactive, so a `rebase
+// --continue`/`--skip` needing a commit message never opens $EDITOR and blocks the hub.
 func gitEditless(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
 	cmd.Env = append(os.Environ(), "GIT_EDITOR=true", "GIT_SEQUENCE_EDITOR=true")
@@ -328,6 +326,74 @@ func gitEditless(dir string, args ...string) (string, error) {
 // unmergedFiles lists the conflicted (unmerged) paths in dir's worktree.
 func unmergedFiles(dir string) []string {
 	return nameOnly(dir, "diff", "--name-only", "--diff-filter=U")
+}
+
+// StashConflict reports unmerged entries with no rebase in progress — the state `rebase
+// --autostash` leaves when the commits land but re-applying the stash clashes: git exits 0 saying
+// "Successfully rebased", so only the index shows it, and it refuses every later checkout.
+func StashConflict(dir string) bool {
+	return !RebaseInProgress(dir) && len(unmergedFiles(dir)) > 0
+}
+
+// ResolveStashConflict accepts the worker's resolution of a StashConflict — staging is what clears
+// the index, and the stash is then spent. Files still marked come back as conflicts, so a premature
+// call re-prompts instead of staging "<<<<<<<". Returns as RebaseStart does.
+func ResolveStashConflict(dir string) (conflicts []string, done bool, err error) {
+	unmerged := unmergedFiles(dir)
+	if marked := markedFiles(dir, unmerged); len(marked) > 0 {
+		return marked, false, nil
+	}
+	if out, e := exec.Command("git", "-C", dir, "add", "-A").CombinedOutput(); e != nil {
+		return nil, false, fmt.Errorf("stage stash resolution in %s: %s: %w", dir, strings.TrimSpace(string(out)), e)
+	}
+	if still := unmergedFiles(dir); len(still) > 0 {
+		return nil, false, fmt.Errorf("index in %s still unmerged after staging: %s", dir, strings.Join(still, ", "))
+	}
+	dropSpentAutostash(dir)
+	return nil, true, nil
+}
+
+// markedFiles returns those of files that still carry a conflict marker, so a resolution nobody
+// finished is never staged as though it were done.
+func markedFiles(dir string, files []string) []string {
+	var out []string
+	for _, f := range files {
+		b, err := os.ReadFile(filepath.Join(dir, f))
+		if err != nil {
+			out = append(out, f) // unreadable: unresolved is the safe reading, not "fine"
+			continue
+		}
+		if bytes.HasPrefix(b, []byte(marker)) || bytes.Contains(b, []byte("\n"+marker)) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// marker is git's conflict start line, the one the workers are told to look for.
+const marker = "<<<<<<< "
+
+// dropSpentAutostash removes the stash entry `rebase --autostash` leaves behind when re-applying it
+// conflicted — once the resolution is staged that entry is spent, and left in place every later
+// rebase piles another one on. Only an entry git itself labelled "autostash" is dropped, never a
+// stash anything else made. Best-effort: a leaked entry is cruft, not a reason to fail the rebase.
+func dropSpentAutostash(dir string) {
+	out, err := exec.Command("git", "-C", dir, "stash", "list", "--format=%gd %gs").Output()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "hub: git: list stashes in %s: %s\n", dir, gitError(err))
+		return
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		ref, subject, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if !ok || strings.TrimSpace(subject) != "autostash" {
+			continue
+		}
+		// Newest first, and dropping renumbers the rest — take this one and stop.
+		if o, e := exec.Command("git", "-C", dir, "stash", "drop", ref).CombinedOutput(); e != nil {
+			fmt.Fprintf(os.Stderr, "hub: git: drop spent autostash %s in %s: %s\n", ref, dir, strings.TrimSpace(string(o)))
+		}
+		return
+	}
 }
 
 // RebaseStart rebases branch onto onto WITHOUT aborting on conflict: done when it landed
@@ -363,6 +429,13 @@ func settleRebase(dir, stepOut string, stepErr error) (conflicts []string, done 
 			if stepErr != nil { // rebase not in progress AND the step errored → genuine failure
 				return nil, false, fmt.Errorf("rebase: %s: %w", strings.TrimSpace(stepOut), stepErr)
 			}
+			// The rebase landed, but --autostash re-applying the loose edits can conflict AFTER it,
+			// and git reports that as success (-> StashConflict). Only the index shows it, so read
+			// the index: calling this "done" told a worker it was aligned and left every later
+			// checkout refusing on the dirty index, with no verb able to clear it.
+			if u := unmergedFiles(dir); len(u) > 0 {
+				return u, false, nil
+			}
 			return nil, true, nil // rebase finished cleanly
 		}
 		if u := unmergedFiles(dir); len(u) > 0 {
@@ -382,6 +455,84 @@ func Diff(repo, base, branch string) (string, error) {
 		return "", fmt.Errorf("git diff: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return string(out), nil
+}
+
+// WorkingDiff returns dir's uncommitted changes (staged and unstaged) against HEAD, limited to
+// paths when given. What an agent needs to see what it has actually touched but not yet committed.
+func WorkingDiff(dir string, paths []string) (string, error) {
+	return diffOut(dir, append([]string{"diff", "HEAD", "--"}, paths...)...)
+}
+
+// BranchDiff returns everything branch introduces over base (merge-base three-dot), limited to
+// paths when given — the whole of an agent's change, committed work included.
+func BranchDiff(dir, base, branch string, paths []string) (string, error) {
+	return diffOut(dir, append([]string{"diff", base + "..." + branch, "--"}, paths...)...)
+}
+
+// diffOut runs a diff-shaped command, relaying git's own words on failure.
+func diffOut(dir string, args ...string) (string, error) {
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git %s: %s: %w", args[0], strings.TrimSpace(string(out)), err)
+	}
+	return string(out), nil
+}
+
+// ChangedNames lists the paths dir has uncommitted changes in, with git's status codes — the
+// bounded answer to "what have I touched", where a full diff would be thousands of lines.
+func ChangedNames(dir string) ([]string, error) {
+	out, err := exec.Command("git", "-C", dir, "status", "--porcelain").Output()
+	if err != nil {
+		return nil, fmt.Errorf("git status in %s: %s", dir, gitError(err))
+	}
+	var lines []string
+	for _, l := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, l)
+		}
+	}
+	return lines, nil
+}
+
+// LogRange lists "<short-sha> <subject>" for the commits in from..to (newest first), capped at
+// max. Reused for both directions: a branch's own commits, and what its base has moved on by.
+func LogRange(dir, from, to string, max int) ([]string, error) {
+	args := []string{"-C", dir, "log", "--format=%h %s", "--no-merges"}
+	if max > 0 {
+		args = append(args, fmt.Sprintf("-%d", max))
+	}
+	out, err := exec.Command("git", append(args, from+".."+to)...).CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("git log %s..%s: %s: %w", from, to, strings.TrimSpace(string(out)), err)
+	}
+	var lines []string
+	for _, l := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, l)
+		}
+	}
+	return lines, nil
+}
+
+// RestoreFromHEAD discards uncommitted changes to paths, putting them back as HEAD has them.
+// Untracked files are left alone: they are not "changes to a file" and a silent delete is worse.
+func RestoreFromHEAD(dir string, paths []string) error {
+	args := append([]string{"-C", dir, "checkout", "HEAD", "--"}, paths...)
+	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+		return fmt.Errorf("restore from HEAD: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// RestoreFromRef puts paths back to ref's content and stages that, so it lands as a commit and so
+// leaves the agent's change. This is how churn in files a task never needed drops OUT of a PR —
+// reverting committed work, which restoring from HEAD cannot do.
+func RestoreFromRef(dir, ref string, paths []string) error {
+	args := append([]string{"-C", dir, "checkout", ref, "--"}, paths...)
+	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+		return fmt.Errorf("restore from %s: %s: %w", ref, strings.TrimSpace(string(out)), err)
+	}
+	return nil
 }
 
 // BlockingLocalChanges returns the tracked files a merge of branch would overwrite: working-tree

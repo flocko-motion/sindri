@@ -51,7 +51,11 @@ func (h *Hub) registry() *registry.Registry {
 		registry.Command{Name: "resolve", Help: "check your branch still merges onto its base, and resolve any conflicts: resolve", Roles: []string{"worker"}, Run: h.wf.CmdResolve},
 		// Align any time — harmless, and it surfaces conflicts to fix rather than letting drift.
 		registry.Command{Name: "rebase", Help: "rebase your branch onto the current reference branch (fix any conflicts it surfaces): rebase", Roles: []string{"worker", "planner"}, Run: h.wf.CmdRebase},
-		registry.Command{Name: "checkpoint", Help: "commit the current subtask and move to the next: checkpoint [message]", Roles: []string{"worker"},
+		// The agents have no git of their own — that isolation is the point. So the hub runs a
+		// curated read/restore subset for them (-> workflow.CmdGit): without it, an agent cannot
+		// see what it changed or put a file back, and reconstructs both from memory.
+		registry.Command{Name: "git", Help: workflow.GitHelp, Roles: []string{"worker", "planner", "coauthor"}, Run: h.wf.CmdGit},
+		registry.Command{Name: "checkpoint", Help: "record the current subtask and move to the next: checkpoint [summary]", Roles: []string{"worker"},
 			Hidden: func(c registry.Caller) bool { return !c.InContainer }, Run: h.wf.CmdCheckpoint},
 		// A worker reads too: it holds a whole package for context, so that context must stay
 		// re-readable. Roles see different scopes (-> CmdTasks) but share one verb name.

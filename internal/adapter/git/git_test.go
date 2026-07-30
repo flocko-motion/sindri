@@ -90,6 +90,73 @@ func TestRebaseStartLeavesConflictThenContinues(t *testing.T) {
 	}
 }
 
+// TestAutostashConflictIsReportedNotCalledClean covers the trap that stranded agent dain: a rebase
+// whose COMMITS apply cleanly, while --autostash re-applying the loose edits then clashes with the
+// new base. git calls that a success (exit 0, "Successfully rebased") and owns no rebase
+// afterwards, so reading only RebaseInProgress reported "aligned" and left an unmerged index that
+// made every later checkout — the first thing RebaseStart does — fail for good.
+func TestAutostashConflictIsReportedNotCalledClean(t *testing.T) {
+	repo := newRepo(t)
+	def := strings.TrimSpace(gitOut(t, repo, "rev-parse", "--abbrev-ref", "HEAD"))
+
+	// The branch's own commit touches a different file, so the rebase itself cannot conflict.
+	gitOut(t, repo, "checkout", "-q", "-b", "feat")
+	mustWrite(t, repo, "other", "feat\n")
+	gitOut(t, repo, "add", "-A")
+	gitOut(t, repo, "commit", "-qm", "feat change")
+
+	mustCommitOn(t, repo, def, "f", "base\n") // base moves f
+	gitOut(t, repo, "checkout", "-q", "feat")
+	mustWrite(t, repo, "f", "loose\n") // uncommitted, and it clashes with base's f
+
+	conflicts, done, err := RebaseStart(repo, "feat", def)
+	if err != nil {
+		t.Fatalf("RebaseStart: %v", err)
+	}
+	if done {
+		t.Fatal("an autostash that failed to re-apply must not be reported as a clean rebase")
+	}
+	if len(conflicts) != 1 || conflicts[0] != "f" {
+		t.Fatalf("conflicts = %v, want [f]", conflicts)
+	}
+	// git owns nothing here — which is exactly why the plain rebase-in-progress check missed it.
+	if RebaseInProgress(repo) {
+		t.Fatal("no rebase should be in progress: the rebase itself finished")
+	}
+	if !StashConflict(repo) {
+		t.Fatal("StashConflict must recognise the unmerged index the autostash left")
+	}
+
+	// Calling again before resolving must re-prompt, not stage the markers as a resolution.
+	again, done, err := ResolveStashConflict(repo)
+	if err != nil {
+		t.Fatalf("ResolveStashConflict with markers still in place: %v", err)
+	}
+	if done || len(again) != 1 || again[0] != "f" {
+		t.Fatalf("unresolved markers must come back as conflicts, got done=%v conflicts=%v", done, again)
+	}
+
+	mustWrite(t, repo, "f", "resolved\n") // the worker resolves
+	conflicts, done, err = ResolveStashConflict(repo)
+	if err != nil {
+		t.Fatalf("ResolveStashConflict: %v", err)
+	}
+	if !done || len(conflicts) > 0 {
+		t.Fatalf("expected done with no conflicts, got done=%v conflicts=%v", done, conflicts)
+	}
+	if StashConflict(repo) {
+		t.Fatal("the unmerged index should be cleared")
+	}
+	// The blocker was the checkout, so prove that works again — and that nothing was lost.
+	gitOut(t, repo, "checkout", "feat")
+	if b, err := os.ReadFile(filepath.Join(repo, "f")); err != nil || string(b) != "resolved\n" {
+		t.Fatalf("f = %q (err %v), want the worker's resolution", b, err)
+	}
+	if s := strings.TrimSpace(gitOut(t, repo, "stash", "list")); s != "" {
+		t.Fatalf("the spent autostash entry should be dropped, got %q", s)
+	}
+}
+
 // TestDeleteBranchRequiresDetach covers the scrap-PR teardown mechanic: git refuses to
 // delete a branch that's checked out in a worktree (the agent's), so DetachHead must
 // free it first — the exact ordering ScrapBranch relies on.

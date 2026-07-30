@@ -110,9 +110,14 @@ RUN ln -sf /opt/sindri/host-bin/sindri-worker /usr/local/bin/sindri \
   && ln -sf /opt/sindri/host-bin/brokkr       /usr/local/bin/brokkr
 
 # ── Shims ─────────────────────────────────────────────────────────────────────
+# git: /usr/local/bin precedes /usr/bin, so this fronts the real git without replacing it.
+# It passes everything through and only adds the `sindri git` pointer when a repo-touching
+# command fails for want of a reachable repo — the sandbox dead end. A coauthor, whose
+# /workspace IS the user's checkout, never sees it.
 COPY shims/docker          /usr/local/bin/docker
 COPY shims/docker-compose  /usr/local/bin/docker-compose
-RUN chmod +x /usr/local/bin/docker /usr/local/bin/docker-compose
+COPY shims/git             /usr/local/bin/git
+RUN chmod +x /usr/local/bin/docker /usr/local/bin/docker-compose /usr/local/bin/git
 
 # ── Sindri agent entrypoint ───────────────────────────────────────────────────
 # The agent is a thin browser driven by the hub; its instructions come from the

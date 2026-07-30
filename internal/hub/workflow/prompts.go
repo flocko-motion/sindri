@@ -156,8 +156,12 @@ As the reviewer:
 As a worker:
 - Run ` + "`sindri`" + ` (no arguments) to get your task — it puts you on a
   branch in /workspace, waiting until a task is available.
-- Implement it by editing files in /workspace. Do NOT run git yourself — the hub
-  commits your work when you submit.
+- Implement it by editing files in /workspace. The hub records your work for you
+  when you contribute or submit — you never do that yourself.
+- You do NOT have ` + "`git`" + ` — use ` + "`sindri git`" + `, which the hub runs
+  for you: what you have changed, your change as a diff, what came in from the
+  reference branch, and putting files back. Run ` + "`sindri git`" + ` for the list.
+  Never guess at any of that, and never hand-write a script to do it.
 - ` + "`sindri lint`" + ` runs the quality gate on your workspace — use it to
   self-check and fix failures before submitting.
 - ` + "`sindri rebase`" + ` aligns your branch with the current reference branch
@@ -188,7 +192,7 @@ func FileList(files []string) string {
 // DirWorking is a worker's directive while it holds a leaf task: implement it, then
 // submit.
 func DirWorking(task string) string {
-	return fmt.Sprintf("Work on task %s. When your change is committed, run `sindri submit \"<summary>\"`.", task)
+	return fmt.Sprintf("Work on task %s. When it's done, run `sindri submit \"<summary>\"` — that records your work and puts it up for review.", task)
 }
 
 // DirRejected hands a worker its reviewer's feedback verbatim, every time it asks what to do, so
@@ -295,7 +299,7 @@ const DirNoTasks = "No open tasks. Wait — the hub will tell you when there is 
 func DirContainerClaimed(container, ctitle, child, childTitle string) string {
 	return fmt.Sprintf("You're working feature %s: %s — on a single branch in /workspace. "+
 		"Current subtask %s: %s. Implement it, then run `sindri checkpoint \"<summary>\"` "+
-		"to commit it and move to the next subtask. Do NOT submit per subtask — the whole feature "+
+		"to record it and move to the next subtask. Do NOT submit per subtask — the whole feature "+
 		"is merged as one PR when you and the user reach a milestone.", container, ctitle, child, childTitle)
 }
 
@@ -447,23 +451,38 @@ func MsgContributionMerged(prID, task string) string {
 }
 
 // ReplyRebaseConflicts answers `rebase` when the rebase hit conflicts to edit.
-func ReplyRebaseConflicts(base string, files []string) string {
-	return fmt.Sprintf("Rebasing onto %s hit conflicts in %s. They're in your /workspace with <<<<<<< markers — edit each file to the intended result (remove the markers), then run `sindri rebase` again to continue. Repeat until it reports you're aligned.", base, FileList(files))
+func ReplyRebaseConflicts(files []string) string {
+	return fmt.Sprintf("Rebasing onto %s hit conflicts in %s. They're in your /workspace with <<<<<<< markers — edit each file to the intended result (remove the markers), then run `sindri rebase` again to continue. Repeat until it reports you're aligned.", refName, FileList(files))
 }
 
-// ReplyRebased answers `rebase` once the branch is cleanly current with base.
-func ReplyRebased(base string) string {
-	return fmt.Sprintf("Your branch is rebased onto %s — you're aligned with the current reference state. Carry on.", base)
+// ReplyRebaseStashConflicts answers `rebase` when the commits rebased but the worker's uncommitted
+// edits then clashed. Says which, so it resolves those edits without doubting its commits.
+func ReplyRebaseStashConflicts(files []string) string {
+	return fmt.Sprintf("Your recorded work is rebased onto %s — only your loose edits to %s clash with it. They're in your /workspace with <<<<<<< markers — edit each file to the intended result (remove the markers), then run `sindri rebase` again to finish. Nothing is lost, and none of the work you've already handed over is in question.", refName, FileList(files))
+}
+
+// ReplyRebased answers `rebase` once the branch is current, listing what came in: those commits
+// changed the code under the agent unseen, and only `rebase` is placed to say what they were.
+func ReplyRebased(incoming []string) string {
+	s := fmt.Sprintf("Your branch is rebased onto %s — you're aligned with the current reference state.", refName)
+	if len(incoming) == 0 {
+		return s + " Nothing new came in. Carry on."
+	}
+	s += fmt.Sprintf("\n\nIt brought in %d commit(s), which changed the code under you:\n", len(incoming))
+	for _, l := range incoming {
+		s += "  " + l + "\n"
+	}
+	return s + "\nCheck anything of yours that builds on them (`sindri git change` shows your own change). Carry on."
 }
 
 // ReplyResolveDirty answers `resolve` on a dirty worktree, suggesting nothing git-based: the pod
 // doesn't mount the real .git, so every git command fails — the isolation boundary working. Also
 // phase-aware, since contribute/submit exist only in "working" and review must not touch it.
 func ReplyResolveDirty(phase string) string {
-	const dirty = "Uncommitted changes in /workspace block the rebase. "
+	const dirty = "Changes in /workspace the hub hasn't recorded yet block the rebase. "
 	switch phase {
 	case "working":
-		return dirty + "Call `sindri contribute \"<commit message>\"` for the hub to commit and rebase (the task stays open), or `sindri submit \"<summary>\"` if the task is done."
+		return dirty + "Call `sindri contribute \"<summary>\"` for the hub to record them and rebase (the task stays open), or `sindri submit \"<summary>\"` if the task is done."
 	case "submitted":
 		return dirty + "Your PR is under review — leave them and wait for the verdict. Note them with `sindri log \"<note>\"`."
 	}

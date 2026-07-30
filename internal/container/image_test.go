@@ -17,6 +17,7 @@ func TestEmbeddedBuildContextHasRecipe(t *testing.T) {
 		"buildctx/shell.sh",
 		"buildctx/shims/docker",
 		"buildctx/shims/docker-compose",
+		"buildctx/shims/git",
 	}
 	for _, p := range want {
 		if _, err := buildContext.ReadFile(p); err != nil {

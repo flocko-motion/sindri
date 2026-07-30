@@ -20,9 +20,8 @@ import (
 )
 
 // reattach puts a detached worktree back on the branch the hub records for the agent. Detaching
-// is how a branch is freed for deletion, and nothing put the worktree back — so a rebase
-// dead-ended on "detached HEAD" forever. The hub knows which branch this agent owns, so it heals
-// it rather than reporting it.
+// frees a branch for deletion and nothing put the worktree back, so a rebase dead-ended on
+// "detached HEAD" forever. The hub knows which branch the agent owns, so it heals rather than reports.
 func (e *Engine) reattach(ps *store.ProjectStore, agent, wt string) (string, error) {
 	st, _ := ps.GetState(agent)
 	if st.Branch == "" {
@@ -66,10 +65,17 @@ func (e *Engine) CmdRebase(c registry.Caller, _ []string, out io.Writer) (int, e
 			}
 		}
 		if b == base {
-			fmt.Fprintf(out, "You're on %s (the reference branch itself) — nothing to rebase.\n", base)
+			fmt.Fprintf(out, "You're on %s itself — nothing to rebase.\n", refName)
 			return 0, nil
 		}
 		branch = b
+	}
+	// Read what this rebase will bring in BEFORE it runs — afterwards those commits are ancestors
+	// and indistinguishable from the agent's own history. Only meaningful on a fresh start; a
+	// continuation reported it on the call that began the rebase.
+	var incoming []string
+	if branch != "" {
+		incoming, _ = git.LogRange(wt, branch, base, logCap)
 	}
 	conflicts, done, err := repo.RebaseStep(wt, branch, base)
 	if err != nil {
@@ -77,20 +83,25 @@ func (e *Engine) CmdRebase(c registry.Caller, _ []string, out io.Writer) (int, e
 	}
 	if !done {
 		_ = ps.Log(c.Agent, "rebase", "conflicts: "+strings.Join(conflicts, ", "))
-		fmt.Fprintln(out, ReplyRebaseConflicts(base, conflicts))
+		// Asked AFTER the step, so it reads the state the step produced: a stopped rebase is still
+		// in progress, while a clashing autostash leaves only the index — the commits are aligned
+		// there, and calling that "the rebase hit conflicts" sent a worker after the wrong thing.
+		if git.StashConflict(wt) {
+			fmt.Fprintln(out, ReplyRebaseStashConflicts(conflicts))
+		} else {
+			fmt.Fprintln(out, ReplyRebaseConflicts(conflicts))
+		}
 		return 0, nil
 	}
 	_ = ps.Log(c.Agent, "rebase", "onto "+base)
 	e.deps.Notify()
-	fmt.Fprintln(out, ReplyRebased(base))
+	fmt.Fprintln(out, ReplyRebased(incoming))
 	return 0, nil
 }
 
-// CmdResolve is the worker-driven mergeability loop: it brings the worker's
-// submitted branch up to its base, and when that conflicts it leaves the conflict
-// markers in the worker's workspace for it to edit, then continues on the next
-// call. The worker may run it as often as it likes. All git runs host-side (the
-// worker has none); once the branch applies cleanly the PR is renewed for review.
+// CmdResolve is the worker-driven mergeability loop: it brings the submitted branch up to its base,
+// leaving any conflict's markers in the workspace to edit and continuing on the next call (run as
+// often as you like). Git runs host-side; once the branch applies cleanly the PR is renewed.
 func (e *Engine) CmdResolve(c registry.Caller, _ []string, out io.Writer) (int, error) {
 	ps := e.store.For(c.Project)
 	root := e.deps.ProjectRoot(c.Project)
@@ -108,7 +119,10 @@ func (e *Engine) CmdResolve(c registry.Caller, _ []string, out io.Writer) (int, 
 	if err != nil {
 		return 1, err
 	}
-	inProgress := git.RebaseInProgress(wt)
+	// A stranded autostash conflict counts as mid-resolution too (-> git.StashConflict): its
+	// unmerged entries read as "uncommitted work", and sending the worker to commit them was a
+	// dead end — git refuses to commit an unmerged index, so the advice could not be followed.
+	inProgress := git.RebaseInProgress(wt) || git.StashConflict(wt)
 	// A rebase needs a clean worktree. If the worker has uncommitted work (and isn't
 	// mid-resolution, where the edits ARE the resolution), tell it to commit first —
 	// don't touch its changes.
