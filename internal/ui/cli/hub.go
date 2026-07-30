@@ -124,9 +124,10 @@ func NewHubCmd() *cobra.Command {
 			"  sindri hub start --bg   run it in the background (same as `sindri hub start &`)\n" +
 			"  sindri hub restart      stop it and start a fresh detached one (pick up a rebuild)\n" +
 			"  sindri hub status       show the running hub (pid, version, uptime)\n" +
-			"  sindri hub stop         stop the running hub",
+			"  sindri hub stop         stop the running hub\n" +
+			"  sindri hub logs         show its log (--agent/--grep to filter, --follow to stream)",
 	}
-	c.AddCommand(newHubStartCmd(), newHubRestartCmd(), newHubStatusCmd(), newHubStopCmd())
+	c.AddCommand(newHubStartCmd(), newHubRestartCmd(), newHubStatusCmd(), newHubStopCmd(), newHubLogsCmd())
 	return c
 }
 
