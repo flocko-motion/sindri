@@ -1,8 +1,8 @@
 // package: ui/cli / hubstatus
 // type:    command
 // job:     wire `sindri hub status` (show the one running hub — pid, version,
-//          uptime, socket) and `sindri hub stop` (stop it). There is a single
-//          global hub per machine, so these operate on it directly.
+// uptime, socket) and `sindri hub stop` (stop it). There is a single
+// global hub per machine, so these operate on it directly.
 // limits:  status/stop only; the pid/version/socket helpers live in internal/hub.
 package cli
 

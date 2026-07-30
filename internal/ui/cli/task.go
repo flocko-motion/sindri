@@ -1,8 +1,8 @@
 // package: ui/cli / task
 // type:    entrypoint (CLI command group)
 // job:     the `sindri task …` verbs — list/info/new/edit/priority and the
-//          workflow actions (approve/reject/unassign/close). Each delegates to
-//          the hub via the shared backend (in-process or over the socket).
+// workflow actions (approve/reject/unassign/close). Each delegates to
+// the hub via the shared backend (in-process or over the socket).
 // limits:  no logic — argument plumbing only; the hub owns task semantics.
 package cli
 

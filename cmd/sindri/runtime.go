@@ -1,9 +1,9 @@
 // package: main (sindri) / runtime
 // type:    composition root (wires the container backend)
 // job:     pick the ONE container runtime this process uses and inject it into the
-//          container port. This is the only place that imports the adapters.
+// container port. This is the only place that imports the adapters.
 // limits:  selection only — the backends live in internal/adapter/*, the port in
-//          internal/container.
+// internal/container.
 package main
 
 import (

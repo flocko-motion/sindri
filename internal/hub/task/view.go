@@ -1,11 +1,11 @@
 // package: hub/task / view
 // type:    logic (task presentation + ordering)
 // job:     the shared, UI-agnostic view helpers over cached tasks: the priority/state
-//          label mappings (CLI and TUI agree via these), the open/done predicate, and
-//          arranging a flat task set into its parent/child tree (roots by priority
-//          then id, each followed by its descendants, PR-annotated).
+// label mappings (CLI and TUI agree via these), the open/done predicate, and
+// arranging a flat task set into its parent/child tree (roots by priority
+// then id, each followed by its descendants, PR-annotated).
 // limits:  pure functions over store rows; no rendering, no I/O. Board-badge counts
-//          that need the whole BoardState live in the hub (sections.go).
+// that need the whole BoardState live in the hub (sections.go).
 package task
 
 import (

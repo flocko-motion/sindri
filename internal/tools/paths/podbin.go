@@ -1,7 +1,7 @@
 // package: paths / podbin
 // type:    logic (filesystem locations)
 // job:     locate the pod-bin directory mounted into every agent pod, and name the
-//          host-built tools it carries.
+// host-built tools it carries.
 // limits:  paths and names only; filling it is the hub's (-> hub/agent/podbin.go).
 package paths
 

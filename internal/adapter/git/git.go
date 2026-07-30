@@ -1,7 +1,7 @@
 // package: adapter/git / git
 // type:    adapter (external tool: git)
 // job:     wrap the git operations the hub needs — repo root, agent worktrees, branches,
-//          commits, rebase and merge. The only place git is invoked.
+// commits, rebase and merge. The only place git is invoked.
 // limits:  no podman, no task/PR logic; pure git.
 package git
 

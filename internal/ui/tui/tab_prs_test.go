@@ -11,8 +11,8 @@ func TestWrapMetaWrapsPlainKeepsActionable(t *testing.T) {
 	long := "this is a long history payload that should wrap across several lines rather than truncate"
 	items := []metaItem{
 		{text: "agent:  brokkr", kind: "agent", value: "brokkr"}, // actionable: stays one line
-		{text: ""},        // spacer: stays one line
-		{text: long},      // plain: must wrap
+		{text: ""},   // spacer: stays one line
+		{text: long}, // plain: must wrap
 	}
 	out := wrapMeta(items, 20)
 

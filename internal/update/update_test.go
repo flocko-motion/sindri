@@ -36,7 +36,7 @@ func TestNewer(t *testing.T) {
 		{"v2.0.0", "v1.9.9", true},
 		{"v1.2.3", "v1.2.3", false},
 		{"v1.2.2", "v1.2.3", false},
-		{"1.2.4", "1.2.3", true},      // no 'v' prefix
+		{"1.2.4", "1.2.3", true},       // no 'v' prefix
 		{"v1.0.0-rc1", "v0.9.0", true}, // prerelease suffix dropped
 		{"dev", "v1.0.0", false},       // unparseable latest → never newer
 		{"v1.0.0", "dev", false},       // unparseable current → never newer

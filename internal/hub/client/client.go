@@ -1,9 +1,9 @@
 // package: hub/client / client
 // type:    logic (the hub's wire client)
 // job:     the thin client every host-side caller (CLI, TUI) uses to talk to a
-//          running hub over its unix socket. Mirrors the hub's operation set so
-//          it is interchangeable with an in-process hub. Lives under hub/ as the
-//          client side of the hub's own API.
+// running hub over its unix socket. Mirrors the hub's operation set so
+// it is interchangeable with an in-process hub. Lives under hub/ as the
+// client side of the hub's own API.
 // limits:  no domain logic; just marshals calls to the hub's HTTP API.
 package client
 

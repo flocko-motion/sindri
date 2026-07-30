@@ -1,10 +1,8 @@
 // package: hub/workflow / merge
 // type:    logic (merge workflow)
 // job:     the human-gated merge of an approved PR into its base — rebase-first,
-//
-//	conflict routing to the worker, and the transient "merging" status plus
-//	startup reconciliation to "merge-failed" for a merge orphaned by a crash.
-//
+// conflict routing to the worker, and the transient "merging" status plus
+// startup reconciliation to "merge-failed" for a merge orphaned by a crash.
 // limits:  merge only; review/submit live in workflow_pr.go (same hub package).
 package workflow
 

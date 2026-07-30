@@ -1,12 +1,12 @@
 // package: ui/cli / commands
 // type:    command (host CLI)
 // job:     the host command tree — hierarchical <category> <action>: agent
-//          {list,new,launch,tell,attach,info}, task {list,new,info}, pr
-//          {list,info,merge}; plus first-order hub. Every hub capability has a
-//          CLI verb so functionality is verifiable from the shell, not only the
-//          TUI.
+// {list,new,launch,tell,attach,info}, task {list,new,info}, pr
+// {list,info,merge}; plus first-order hub. Every hub capability has a
+// CLI verb so functionality is verifiable from the shell, not only the
+// TUI.
 // limits:  no logic — each verb is a thin call into a backend (in-process hub
-//          when none is running, the socket client otherwise).
+// when none is running, the socket client otherwise).
 package cli
 
 import (

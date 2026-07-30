@@ -1,11 +1,11 @@
 // package: tui / tasks
 // type:    ui (Tasks tab)
 // job:     the Tasks tab content — the hierarchical tree selector (filtered
-//          open/closed/all, collapsible, PR-marked) and the task detail pane.
-//          Tree arrangement + PR annotation come from the hub (ArrangeTasks);
-//          this renders rows and folds.
+// open/closed/all, collapsible, PR-marked) and the task detail pane.
+// Tree arrangement + PR annotation come from the hub (ArrangeTasks);
+// this renders rows and folds.
 // limits:  renders rows and folds only; tree arrangement + PR annotation are the
-//          hub's (-> ArrangeTasks).
+// hub's (-> ArrangeTasks).
 package tui
 
 import (

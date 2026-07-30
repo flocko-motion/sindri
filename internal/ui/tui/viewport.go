@@ -1,10 +1,10 @@
 // package: tui / viewport
 // type:    ui (viewport sync)
 // job:     keep the active tab's cursor and its list/detail viewports in range as
-//          the model changes, and fetch the selected item's rich detail when the
-//          selection changes — the bridge between navigation and what's on screen.
+// the model changes, and fetch the selected item's rich detail when the
+// selection changes — the bridge between navigation and what's on screen.
 // limits:  mutates viewport/cursor state and issues detail fetches; the geometry
-//          it consults is layout.go, the rows it clamps to are items.go.
+// it consults is layout.go, the rows it clamps to are items.go.
 package tui
 
 import (

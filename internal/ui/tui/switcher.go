@@ -1,9 +1,9 @@
 // package: tui / switcher
 // type:    ui (repo switcher)
 // job:     the repo picker — choose which repo the board scopes to. Agents and PRs
-//          stay global; the Tasks tab (and container/attach) follow the selected
-//          repo. Selecting re-subscribes /events with the chosen repo so its tasks
-//          stream in, bumping the generation so the old stream's messages are dropped.
+// stay global; the Tasks tab (and container/attach) follow the selected
+// repo. Selecting re-subscribes /events with the chosen repo so its tasks
+// stream in, bumping the generation so the old stream's messages are dropped.
 // limits:  just the switch; the generic pick-one chrome is component_choice.
 package tui
 

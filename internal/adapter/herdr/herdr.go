@@ -1,12 +1,12 @@
 // package: adapter/herdr / herdr
 // type:    adapter (external tool: herdr, the agent multiplexer)
 // job:     when `sindri agent attach` runs inside a herdr pane, report the pane to
-//          herdr's sidebar under the agent's own name (e.g. "austri"), sourced as
-//          "sindri" (the reporting tool), with a live state — so the agent shows up
-//          there as if it ran natively.
+// herdr's sidebar under the agent's own name (e.g. "austri"), sourced as
+// "sindri" (the reporting tool), with a live state — so the agent shows up
+// there as if it ran natively.
 // limits:  optional UI nicety, best-effort — a no-op outside herdr, and any failure
-//          is swallowed so it never disturbs the terminal handover. The `herdr`
-//          binary + HERDR_* env are present only inside a herdr pane.
+// is swallowed so it never disturbs the terminal handover. The `herdr`
+// binary + HERDR_* env are present only inside a herdr pane.
 package herdr
 
 import (

@@ -1,11 +1,11 @@
 // package: hub/repo / repo
 // type:    logic (git/PR mechanics)
 // job:     the git-backed operations the workflow orchestrates — materialize a PR
-//          branch for inspection, run the lint gate against a worktree. Stateless:
-//          each takes explicit paths/refs and returns a result or error; the workflow
-//          resolves PR records and decides consequences.
+// branch for inspection, run the lint gate against a worktree. Stateless:
+// each takes explicit paths/refs and returns a result or error; the workflow
+// resolves PR records and decides consequences.
 // limits:  no store, no orchestration, no agent messaging. git primitives live in
-//          adapter/git; this drives them for the PR lifecycle.
+// adapter/git; this drives them for the PR lifecycle.
 package repo
 
 import (

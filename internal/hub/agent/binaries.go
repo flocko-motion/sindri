@@ -1,10 +1,10 @@
 // package: hub/agent / binaries
 // type:    logic
 // job:     locate the sibling binaries an agent pod needs (sindri-worker, brokkr,
-//          and the linux brokkr mounted into pods) — next to the running sindri
-//          executable first, then on PATH.
+// and the linux brokkr mounted into pods) — next to the running sindri
+// executable first, then on PATH.
 // limits:  path resolution only; it doesn't run or mount anything (-> the hub's
-//          launch path wires the mounts and entrypoint).
+// launch path wires the mounts and entrypoint).
 package agent
 
 import (

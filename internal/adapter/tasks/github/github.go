@@ -1,10 +1,10 @@
 // package: github
 // type:    adapter (external tool)
 // job:     wraps the gh CLI so the hub can import a repo's open GitHub issues as a
-//          todo source and close+comment one when its local PR merges — reusing the
-//          user's existing gh auth, the same shell-out shape as the td/spec adapters.
+// todo source and close+comment one when its local PR merges — reusing the
+// user's existing gh auth, the same shell-out shape as the td/spec adapters.
 // limits:  read issues + close-on-merge only; imports nothing from hub/store/issue,
-//          and never touches PRs (the local workflow owns those).
+// and never touches PRs (the local workflow owns those).
 package github
 
 import (
@@ -22,19 +22,16 @@ import (
 	"github.com/flo-at/sindri/internal/hub/task"
 )
 
-// issueListLimit is passed to `gh issue list` explicitly: gh defaults to 30 and
-// would silently drop the rest, so we ask for a high ceiling to import them all.
+// issueListLimit must be explicit: gh defaults to 30 and silently drops the rest.
 const issueListLimit = 1000
 
-// issueTimeout bounds a single `gh issue list` so a hung network call can't stall
-// the source fetch.
+// issueTimeout keeps a hung network call from stalling the source fetch.
 const issueTimeout = 15 * time.Second
 
 // ID is the stable task id for a GitHub issue: gh-<number>. Number reverses it.
 func ID(number int) string { return "gh-" + strconv.Itoa(number) }
 
-// Number parses a gh-<number> task id back to its issue number (ok=false for a
-// non-gh id).
+// Number reverses ID; ok=false for a non-gh id.
 func Number(id string) (int, bool) {
 	rest, ok := strings.CutPrefix(id, "gh-")
 	if !ok {
@@ -47,8 +44,7 @@ func Number(id string) (int, bool) {
 	return n, true
 }
 
-// sourceTTL throttles this network source: the hub resyncs often, so a fetch is
-// reused within this window. force (an explicit user refresh) bypasses it.
+// sourceTTL throttles this network source against the hub's frequent resyncs; force bypasses it.
 const sourceTTL = 2 * time.Minute
 
 // cacheEntry memoizes one repo's last good issue-tasks with the moment fetched.
@@ -63,15 +59,11 @@ var (
 	cache   = map[string]cacheEntry{}
 )
 
-// Source adapts GitHub issues as a task source. Issues import UNRATED (empty
-// priority) so a worker never auto-claims an unvetted issue until a human rates it.
-// The source owns its own gate (opt-in + remote), throttle, and error degradation,
-// so the hub treats it like any other source.
+// Source adapts GitHub issues as a task source. They import UNRATED, so no worker
+// auto-claims an unvetted issue before a human rates it.
 type Source struct{}
 
-// Enabled reports whether the repo uses the GitHub source: gh on PATH + a GitHub
-// remote AND the project's issues opt-in (.sindri config). Reading the opt-in here
-// keeps the hub from knowing this source is config-gated.
+// Enabled adds the config opt-in to the package gate, so the hub needn't know of it.
 func (Source) Enabled(root string) bool {
 	if !Enabled(root) {
 		return false
@@ -80,10 +72,8 @@ func (Source) Enabled(root string) bool {
 	return err == nil && cfg.IssuesEnabled()
 }
 
-// Tasks fetches the repo's open issues as domain tasks (gh-* ids, the body as the
-// description), served from a short TTL memo unless force bypasses it. On a fetch
-// error it degrades to the last good list (logged, no error) so a network blip never
-// fails the hub's sync.
+// Tasks serves open issues from the TTL memo; a fetch error degrades to the last good list,
+// so a network blip never fails the hub's sync.
 func (Source) Tasks(root string, force bool) ([]task.Task, error) {
 	cacheMu.Lock()
 	entry, cached := cache[root]
@@ -111,9 +101,7 @@ func (Source) Tasks(root string, force bool) ([]task.Task, error) {
 	return out, nil
 }
 
-// OnMerged closes+comments the GitHub issue behind a merged gh-* PR — the one
-// outbound write in the merge path. A non-gh id is ignored. Best-effort from the
-// caller's view: the returned error is logged, never fatal (the local merge landed).
+// OnMerged closes the issue behind a merged gh-* PR; best-effort, the local merge already landed.
 func (Source) OnMerged(root, taskID, note string) error {
 	number, ok := Number(taskID)
 	if !ok {
@@ -124,9 +112,7 @@ func (Source) OnMerged(root, taskID, note string) error {
 	return Close(ctx, root, number, note)
 }
 
-// Finish closes (done) or deletes (scrap) the GitHub issue behind a gh- id. handled
-// is false for a non-gh id. Delete is GitHub's irreversible hard delete (needs
-// repo-admin/triage rights); Close is the reversible "done".
+// Finish closes (done) or hard-deletes (scrap, irreversible) a gh- issue.
 func (Source) Finish(root, taskID string, scrap bool) (bool, error) {
 	number, ok := Number(taskID)
 	if !ok {
@@ -145,9 +131,7 @@ type Label struct {
 	Name string `json:"name"`
 }
 
-// Issue is an open GitHub issue as returned by `gh issue list --json`. It is the
-// adapter's own type — the hub maps it to store.Task, keeping this package
-// ignorant of the task model.
+// Issue mirrors `gh issue list --json`; the hub maps it, so this package stays task-model free.
 type Issue struct {
 	Number    int     `json:"number"`
 	Title     string  `json:"title"`
@@ -156,11 +140,8 @@ type Issue struct {
 	UpdatedAt string  `json:"updatedAt"`
 }
 
-// Enabled reports whether the GitHub source can even be attempted: the gh CLI is
-// on PATH and the repo has a GitHub remote. It is cheap, local, and
-// side-effect-free — it does NOT probe the network or check auth. An
-// unauthenticated/offline gh is handled at call time (Issues returns an error and
-// the caller degrades to no tasks).
+// Enabled is the cheap local gate (gh on PATH + a GitHub remote); it never probes network or auth,
+// which is handled at call time.
 func Enabled(root string) bool {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return false
@@ -168,8 +149,7 @@ func Enabled(root string) bool {
 	return hasGitHubRemote(root)
 }
 
-// hasGitHubRemote reports whether the repo at root has any remote pointing at
-// github.com — the local signal that this is a GitHub-backed repo.
+// hasGitHubRemote looks for any github.com remote.
 func hasGitHubRemote(root string) bool {
 	cmd := exec.Command("git", "-C", root, "remote", "-v")
 	out, err := cmd.Output()
@@ -179,12 +159,8 @@ func hasGitHubRemote(root string) bool {
 	return strings.Contains(string(out), "github.com")
 }
 
-// Issues lists the repo's open issues via
-// `gh issue list --state open --limit <high> --json number,title,body,labels,updatedAt`.
-// gh issue list already excludes pull requests. The explicit high --limit is
-// required — gh defaults to 30. After Enabled() is true, a failure here is a real
-// error (gh missing auth / offline / rate-limited), surfaced so the caller can
-// degrade to contributing no tasks this cycle.
+// Issues lists open issues (gh already excludes PRs). Past Enabled(), a failure here is real —
+// no auth, offline, rate-limited — and is surfaced for the caller to degrade on.
 func Issues(ctx context.Context, root string) ([]Issue, error) {
 	cmd := exec.CommandContext(ctx, "gh", "issue", "list",
 		"--state", "open",
@@ -203,10 +179,9 @@ func Issues(ctx context.Context, root string) ([]Issue, error) {
 	return issues, nil
 }
 
-// Comment is one comment on a GitHub issue. URL is its stable, unique reference
-// (used as the sync key); Author is the commenter's login.
+// Comment is one issue comment; its URL is the stable sync key.
 type Comment struct {
-	Author    struct {
+	Author struct {
 		Login string `json:"login"`
 	} `json:"author"`
 	Body      string `json:"body"`
@@ -214,8 +189,7 @@ type Comment struct {
 	URL       string `json:"url"`
 }
 
-// IssueComments returns an issue's comment thread via
-// `gh issue view <n> --json comments`. Ordered oldest-first (GitHub's order).
+// IssueComments returns an issue's thread, oldest-first (GitHub's order).
 func IssueComments(ctx context.Context, root string, number int) ([]Comment, error) {
 	cmd := exec.CommandContext(ctx, "gh", "issue", "view", strconv.Itoa(number), "--json", "comments")
 	cmd.Dir = root
@@ -232,9 +206,7 @@ func IssueComments(ctx context.Context, root string, number int) ([]Comment, err
 	return resp.Comments, nil
 }
 
-// Close closes issue number with a comment via
-// `gh issue close <number> --comment <comment>` — the ONLY outbound write this
-// adapter makes, used by the hub's close-on-merge path (best-effort there).
+// Close closes an issue with a comment — the adapter's only outbound write.
 func Close(ctx context.Context, root string, number int, comment string) error {
 	cmd := exec.CommandContext(ctx, "gh", "issue", "close",
 		strconv.Itoa(number), "--comment", comment)
@@ -245,9 +217,7 @@ func Close(ctx context.Context, root string, number int, comment string) error {
 	return nil
 }
 
-// Delete permanently deletes issue number via `gh issue delete <number> --yes`. This
-// is GitHub's hard delete (irreversible, and requires repo-admin/triage rights); it
-// backs the "scrap" close for a gh-* task, as opposed to Close's "done".
+// Delete is GitHub's irreversible hard delete (needs admin/triage rights); it backs "scrap".
 func Delete(ctx context.Context, root string, number int) error {
 	cmd := exec.CommandContext(ctx, "gh", "issue", "delete", strconv.Itoa(number), "--yes")
 	cmd.Dir = root
@@ -257,8 +227,7 @@ func Delete(ctx context.Context, root string, number int) error {
 	return nil
 }
 
-// ghError attaches gh's stderr (carried on ExitError) to the error, so an auth or
-// network failure surfaces gh's own message rather than a bare "exit status 1".
+// ghError surfaces gh's stderr instead of a bare "exit status 1".
 func ghError(err error) error {
 	if ee, ok := err.(*exec.ExitError); ok {
 		if msg := strings.TrimSpace(string(ee.Stderr)); msg != "" {

@@ -1,11 +1,11 @@
 // package: hub/agent / token
 // type:    logic (agent authentication for the TCP channel)
 // job:     derive each agent's bearer token from one hub-global secret over its
-//          (project, name), and resolve an incoming token back to that pair. Used
-//          only by the macOS TCP agent channel (agenttcp.go), where — unlike a
-//          per-agent unix socket — the endpoint can't be the identity.
+// (project, name), and resolve an incoming token back to that pair. Used
+// only by the macOS TCP agent channel (agenttcp.go), where — unlike a
+// per-agent unix socket — the endpoint can't be the identity.
 // limits:  no transport here; the hub serves the channel and hands the token to the
-//          pod. The secret lives in the central store (hub.db), outside any repo.
+// pod. The secret lives in the central store (hub.db), outside any repo.
 package agent
 
 import (

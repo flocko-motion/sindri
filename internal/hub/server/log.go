@@ -1,9 +1,9 @@
 // package: hub/server / log
 // type:    logic (HTTP access logging)
 // job:     the access-log middleware for the hub's sockets — wrap a handler so every
-//          request records one coalesced access-log line (see accesslog.go), skipping
-//          the long-lived SSE streams. The single access log is shared by the control
-//          socket and every agent socket, so it lives here, not with the routes.
+// request records one coalesced access-log line (see accesslog.go), skipping
+// the long-lived SSE streams. The single access log is shared by the control
+// socket and every agent socket, so it lives here, not with the routes.
 // limits:  transport plumbing only; what each route does is the hub's (routes).
 package server
 

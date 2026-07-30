@@ -1,11 +1,11 @@
 // package: tui / theme
 // type:    ui (global colour scheme)
 // job:     the one place colours live. Status drives row colour: tasks are pink
-//          when active, green when open, grey when done; agents are grey when
-//          down, yellow while transitioning, green when running. Critical
-//          priority is red. Everything else renders in the terminal's default.
+// when active, green when open, grey when done; agents are grey when
+// down, yellow while transitioning, green when running. Critical
+// priority is red. Everything else renders in the terminal's default.
 // limits:  colours only; no layout or data logic (-> the component/tab that
-//          uses them).
+// uses them).
 package tui
 
 import (
@@ -83,7 +83,7 @@ func agentStatusStyle(status string) lipgloss.Style {
 // repo always reads the same; two shades → a guaranteed dark/bright contrast pair,
 // none at full intensity. Derived in truecolour (HSL) so lightness is controllable.
 const (
-	repoDarkSat,   repoDarkLight   = 0.32, 0.22 // muted, dark: for filled backgrounds
+	repoDarkSat, repoDarkLight     = 0.32, 0.22 // muted, dark: for filled backgrounds
 	repoBrightSat, repoBrightLight = 0.55, 0.72 // bright: for text on a dark background
 )
 

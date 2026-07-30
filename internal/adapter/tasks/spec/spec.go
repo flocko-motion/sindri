@@ -1,9 +1,9 @@
 // package: spec
 // type:    adapter (external tool)
 // job:     wraps the openspec CLI for the lint gate — detect whether a project
-//          uses openspec and validate its specs via `openspec validate`.
+// uses openspec and validate its specs via `openspec validate`.
 // limits:  read-only; the propose/apply/archive workflow runs via the openspec
-//          CLI in agent containers, not here.
+// CLI in agent containers, not here.
 package spec
 
 import (
@@ -19,9 +19,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/task"
 )
 
-// ID derives a stable os-XXXXXX task id from an openspec change name (the id scheme
-// that namespaces the openspec source; the one-way hash means the hub reverses it by
-// matching over the current change names).
+// ID derives a stable os-XXXXXX task id from a change name. One-way — reversed by changeName.
 func ID(name string) string {
 	sum := sha256.Sum256([]byte(name))
 	return "os-" + hex.EncodeToString(sum[:])[:6]
@@ -33,9 +31,7 @@ type Source struct{}
 // Enabled reports whether the repo uses openspec.
 func (Source) Enabled(root string) bool { return Enabled(root) }
 
-// Tasks maps the repo's active openspec changes to domain tasks (os-* ids, a
-// progress-annotated title, closed when all the change's tasks are done). Local
-// read — force is moot.
+// Tasks maps active changes to os-* tasks, closed once all of a change's own tasks are done.
 func (Source) Tasks(root string, _ bool) ([]task.Task, error) {
 	changes, err := Changes(root)
 	if err != nil {
@@ -58,14 +54,8 @@ func (Source) Tasks(root string, _ bool) ([]task.Task, error) {
 	return out, nil
 }
 
-// Proposal is a change's proposal.md — its description. An openspec change is a prose
-// document, and the proposal is the part that says what the change is for, so it is what a
-// board or detail view should show. (`openspec list --json` carries only a name and task
-// counts, hence reading the file.)
-//
-// The leading `# Heading` is skipped: the title column already carries the change's name.
-// Best-effort — design.md and tasks.md can stand alone, so a change with no proposal yields
-// an empty description and the task listing still succeeds.
+// Proposal is a change's proposal.md — what the change is FOR, so it's what a board or detail view
+// shows (`openspec list --json` has only name and counts). Leading `# Heading` dropped; missing → "".
 func Proposal(projectRoot, name string) string {
 	if name == "" || strings.ContainsAny(name, "/\\") || name == "." || name == ".." {
 		return "" // never let a change name walk out of the changes directory
@@ -83,13 +73,11 @@ func Proposal(projectRoot, name string) string {
 	return body
 }
 
-// OnMerged is a no-op for openspec: a change is archived at close/scrap time (see
-// Finish/Archive), not as a side effect of a PR merging.
+// OnMerged is a no-op: a change is archived at close/scrap time, not as a side effect of a merge.
 func (Source) OnMerged(root, taskID, note string) error { return nil }
 
-// Finish archives (done) or removes (scrap) the openspec change behind an os- id.
-// handled is false for a non-os id; an os id whose change can't be resolved is a
-// real error (the id is a one-way hash, so a stale cache can't be reversed).
+// Finish archives (done) or removes (scrap) the change behind an os- id; handled is false for a
+// non-os id. An os id whose change can't be resolved is a real error (the id is a one-way hash).
 func (Source) Finish(root, taskID string, scrap bool) (bool, error) {
 	if !strings.HasPrefix(taskID, "os-") {
 		return false, nil
@@ -104,8 +92,7 @@ func (Source) Finish(root, taskID string, scrap bool) (bool, error) {
 	return true, Archive(root, name)
 }
 
-// changeName resolves an os-<hash> id back to its change name by matching ID over the
-// current changes (the id is a one-way hash of the name).
+// changeName reverses an os-<hash> id by matching ID over the current changes (the hash is one-way).
 func changeName(root, id string) (string, bool) {
 	changes, err := Changes(root)
 	if err != nil {
@@ -130,10 +117,8 @@ type Change struct {
 // Done reports whether a change's tasks are all complete.
 func (c Change) Done() bool { return c.TotalTasks > 0 && c.CompletedTasks == c.TotalTasks }
 
-// Changes lists the project's active openspec changes. Returns (nil, nil) when
-// openspec isn't used (an optional source), but a CLI failure or unparseable output
-// is returned as an error — after Enabled() is true, those are real failures, not a
-// legitimate "no changes".
+// Changes lists the project's active openspec changes; (nil, nil) when openspec isn't used. Once
+// Enabled is true, a CLI or parse failure is a real error, not a legitimate "no changes".
 func Changes(projectRoot string) ([]Change, error) {
 	if !Enabled(projectRoot) {
 		return nil, nil
@@ -153,9 +138,7 @@ func Changes(projectRoot string) ([]Change, error) {
 	return wrap.Changes, nil
 }
 
-// Archive marks a change done: `openspec archive <name> --yes` moves it out of the
-// active set and folds its deltas into the main specs. This is the "done" close for
-// an openspec item. A CLI failure is surfaced.
+// Archive is the "done" close: `openspec archive --yes` folds the change's deltas into the specs.
 func Archive(projectRoot, name string) error {
 	cmd := exec.Command("openspec", "archive", name, "--yes")
 	cmd.Dir = projectRoot
@@ -165,10 +148,8 @@ func Archive(projectRoot, name string) error {
 	return nil
 }
 
-// DeleteChange scraps a change: it removes the change's proposal directory
-// (openspec/changes/<name>) without touching the main specs — the "scrap" close.
-// The dir is git-tracked, so a mistaken scrap is recoverable with git. The name is
-// validated to a single path segment so it can't escape the changes dir.
+// DeleteChange is the "scrap" close: it removes openspec/changes/<name>, leaving the main specs
+// alone. The dir is git-tracked, so a mistaken scrap is recoverable. The name must be one segment.
 func DeleteChange(projectRoot, name string) error {
 	if name == "" || strings.ContainsAny(name, "/\\") || name == "." || name == ".." {
 		return fmt.Errorf("invalid change name %q", name)
@@ -183,8 +164,7 @@ func DeleteChange(projectRoot, name string) error {
 	return nil
 }
 
-// lastLine returns the last non-empty line of s (an openspec error is usually its
-// final line), so a failure surfaces the reason, not the whole output.
+// lastLine is the last non-empty line of s — where openspec puts the reason for a failure.
 func lastLine(s string) string {
 	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -207,9 +187,8 @@ func CLIInstalled() bool {
 	return err == nil
 }
 
-// ValidatorName names the check Validate performs, for any surface that reports its
-// verdict. `brokkr lint openspec` and `sindri openspec submit` both call Validate, so
-// naming it tells an agent that one green light stands for both gates.
+// ValidatorName names the check Validate performs. `brokkr lint openspec` and `sindri openspec
+// submit` both call it, so naming it tells an agent one green light stands for both gates.
 const ValidatorName = "openspec validate --all (the same check `brokkr lint openspec` and `sindri openspec submit` both run)"
 
 // report is openspec's `--json` shape, reduced to the fields worth surfacing.
@@ -226,15 +205,9 @@ type report struct {
 	} `json:"items"`
 }
 
-// Validate runs `openspec validate --all --json`. A non-zero exit is a validation failure
-// (ok=false); everything else is a non-failing skip (ok=true). openspec is OPTIONAL: a
-// project with no openspec/ skips silently, but one that uses openspec yet lacks the CLI
-// degrades with a visible note (in output) rather than vanishing — so a skipped validation
-// is never mistaken for a passed one.
-//
-// It asks for --json because that is the format carrying the REASONS: per item, each
-// issue's file and the rule it broke (e.g. `ADDED "A thing" must contain SHALL or MUST`),
-// which is what a caller needs to fix the spec.
+// Validate runs `openspec validate --all --json` (--json carries the REASONS: each issue's file and
+// the rule it broke). Non-zero exit is a failure (ok=false), anything else a skip (ok=true) — and a
+// project using openspec without the CLI says so, so a skip is never mistaken for a pass.
 func Validate(projectRoot string) (ok bool, output string) {
 	if !Enabled(projectRoot) {
 		return true, "" // project doesn't use openspec — nothing to validate
@@ -255,10 +228,8 @@ func Validate(projectRoot string) (ok bool, output string) {
 	return !failed, formatReport(out, failed)
 }
 
-// formatReport renders openspec's JSON report as the lines a human or an agent acts on:
-// one line per item, and beneath a failing one every issue with its file and the rule it
-// broke. Unparseable JSON falls back to the raw output rather than swallowing it — a
-// verdict with no explanation is still better than no verdict.
+// formatReport renders the JSON report: a line per item, and under a failing one every issue with
+// its file and rule. Unparseable JSON falls back to raw output rather than swallowing the verdict.
 func formatReport(raw []byte, failed bool) string {
 	var r report
 	if err := json.Unmarshal(raw, &r); err != nil || len(r.Items) == 0 {

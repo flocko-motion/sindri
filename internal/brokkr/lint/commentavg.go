@@ -1,10 +1,8 @@
 // package: lint / commentavg
 // type:    logic (comment-length trend)
 // job:     hold each file's comments to a length TREND rather than a per-comment limit — the
-//
-//	mean lines per comment block must stay at or under a configured maximum, so a long
-//	explanation is paid for by the short ones around it.
-//
+// mean lines per comment block must stay at or under a configured maximum, so a long
+// explanation is paid for by the short ones around it.
 // limits:  reports only; comment scanning is lang.go's and the CLI wiring cmd/brokkr's.
 package lint
 
@@ -19,6 +17,10 @@ import (
 
 // DefaultMaxCommentAvg is the mean lines per comment a file may average. A ceiling, not a target.
 const DefaultMaxCommentAvg = 2.0
+
+// DefaultMaxCommentLine caps one comment line's width. Without it the mean is gameable in the one
+// direction that reads worst: fewer, longer lines pass a per-LINE budget while the prose grows.
+const DefaultMaxCommentLine = 110
 
 // trendSample is where a mean is taken at face value; bonusPerBlock is the slack each block short
 // of it earns. Two comments are not a trend. Linear, so the rule is predictable before you write.
@@ -46,6 +48,8 @@ What does NOT count as fixing it:
   - Moving prose out of a header, splitting one comment in two, padding with one-liners.
   - Raising ` + "`lint: max_comment_avg:`" + `. That is the maintainer's call, not a way past a finding.
 `
+
+// aimFor is the mean a fix should TARGET, below the ceiling it must clear: a file trimmed to the
 // limit exactly fails again on the next comment added, so half a line of headroom is the goal.
 func aimFor(allowed float64) float64 {
 	aim := allowed - 0.5
@@ -68,12 +72,15 @@ func allowanceFor(base float64, n int) float64 {
 
 // CommentAvg reports each file whose mean comment exceeds maxAvg; blocks adds the per-comment
 // listing. The header is excluded: it MUST be multi-line, so counting it would charge everyone.
-func CommentAvg(roots []string, maxAvg float64, blocks bool, cap *Cap, ig *Ignore, w io.Writer) (bool, error) {
+func CommentAvg(roots []string, maxAvg float64, maxLine int, blocks bool, cap *Cap, ig *Ignore, w io.Writer) (bool, error) {
 	if len(roots) == 0 {
 		roots = []string{"."}
 	}
 	if maxAvg <= 0 {
 		maxAvg = DefaultMaxCommentAvg
+	}
+	if maxLine <= 0 {
+		maxLine = DefaultMaxCommentLine
 	}
 
 	type viol struct {
@@ -86,6 +93,7 @@ func CommentAvg(roots []string, maxAvg float64, blocks bool, cap *Cap, ig *Ignor
 		over    []CommentBlock // above the limit, longest first — what to cut
 	}
 	var viols []viol
+	var wide []string // over-wide comment lines, reported alongside the trend
 
 	for _, root := range roots {
 		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -105,6 +113,7 @@ func CommentAvg(roots []string, maxAvg float64, blocks bool, cap *Cap, ig *Ignor
 			if !ok {
 				return nil
 			}
+			wide = append(wide, wideLines(path, src, maxLine)...)
 			bs := ScanComments(src)
 			if _, hasHeader := HeaderBlock(bs); hasHeader {
 				bs = bs[1:] // the header is mandated; it is not evidence of a trend
@@ -173,7 +182,34 @@ func CommentAvg(roots []string, maxAvg float64, blocks bool, cap *Cap, ig *Ignor
 			fmt.Fprint(w, systemicBanner)
 		}
 	}
-	return len(viols) > 0, nil
+	// Over-wide lines share the budget: they are findings in the same report, not a second pass.
+	for _, msg := range wide {
+		if !cap.Allow() {
+			continue
+		}
+		fmt.Fprintln(w, msg)
+	}
+	if len(wide) > 0 {
+		fmt.Fprintf(w, "%d comment line(s) over %d chars — wrap them; a long line is not a short comment.\n",
+			len(wide), maxLine)
+	}
+	return len(viols) > 0 || len(wide) > 0, nil
+}
+
+// wideLines reports comment lines wider than max, headers included — a long header field is as hard
+// to read as any other long line, and the trend rule excuses the header entirely.
+func wideLines(path, src string, max int) []string {
+	var out []string
+	for i, raw := range strings.Split(src, "\n") {
+		line := strings.TrimSpace(raw)
+		if !strings.HasPrefix(line, "//") && !strings.HasPrefix(line, "/*") && !strings.HasPrefix(line, "*") {
+			continue
+		}
+		if n := len([]rune(raw)); n > max {
+			out = append(out, fmt.Sprintf("%s:%d: comment line is %d chars (max %d) — wrap it", path, i+1, n, max))
+		}
+	}
+	return out
 }
 
 // blockRanges lists the line ranges to go and edit, longest first, up to max. Line numbers are what

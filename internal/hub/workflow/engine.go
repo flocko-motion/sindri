@@ -1,11 +1,11 @@
 // package: hub/workflow / engine
 // type:    logic (the workflow state machine — orchestration)
 // job:     the explicit orchestrator of sindri's PR/task lifecycle: claim → work →
-//          submit → review → approve → merge, plus task create/edit/close and the
-//          worker directive loop. It sequences the steps and triggers the actions in
-//          the other modules (repo, store, agent messaging) via a narrow Deps seam.
+// submit → review → approve → merge, plus task create/edit/close and the
+// worker directive loop. It sequences the steps and triggers the actions in
+// the other modules (repo, store, agent messaging) via a narrow Deps seam.
 // limits:  git/PR mechanics live in hub/repo; persistence in hub/store; the hub owns
-//          the Deps implementation, pods, and transport. No git or tmux here.
+// the Deps implementation, pods, and transport. No git or tmux here.
 package workflow
 
 import (

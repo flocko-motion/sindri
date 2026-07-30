@@ -1,10 +1,10 @@
 // package: tui / diff
 // type:    ui (diff rendering)
 // job:     turn a unified git diff into display lines for the PRs content pane —
-//          a right-aligned line-number gutter, a +/-/· marker, and the content,
-//          with additions on a green background and removals on red.
+// a right-aligned line-number gutter, a +/-/· marker, and the content,
+// with additions on a green background and removals on red.
 // limits:  pure formatting of a diff string; the colours live in theme.go and
-//          the scroll/clip is the pane's job (-> component_pane.go).
+// the scroll/clip is the pane's job (-> component_pane.go).
 package tui
 
 import (

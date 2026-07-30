@@ -1,14 +1,11 @@
 // package: hub/workflow / pr
 // type:    logic (PR-as-merge-intent: submit → review → approve → host merge)
 // job:     the reviewer verbs and the host merge; verdicts route to the owning
-//
-//	agent's session by branch (object-mediated, D-routing). git is hub-side.
-//	All state is per-project — methods take a project (repoTag) and work
-//	through store.For(project) + e.deps.ProjectRoot(project).
-//
+// agent's session by branch (object-mediated, D-routing). git is hub-side.
+// All state is per-project — methods take a project (repoTag) and work
+// through store.For(project) + e.deps.ProjectRoot(project).
 // limits:  the PR side only; task claim/submit-to-td is workflow_task.go and the
-//
-//	git mechanics are the adapter's (-> adapter/git).
+// git mechanics are the adapter's (-> adapter/git).
 package workflow
 
 import (
@@ -31,8 +28,7 @@ import (
 // baseBranch reads a repo's base branch from its main checkout.
 func (e *Engine) baseBranch(root string) (string, error) { return git.CurrentBranch(root) }
 
-// FleetPRs returns every PR across registered projects — the same fleet-wide set the
-// board shows, so `pr list` matches the TUI regardless of the caller's cwd.
+// FleetPRs is fleet-wide, so `pr list` matches the TUI regardless of the caller's cwd.
 func (e *Engine) FleetPRs() ([]store.PR, error) {
 	prs, err := e.store.AllPRs()
 	if err != nil {
@@ -51,11 +47,8 @@ func (e *Engine) FleetPRs() ([]store.PR, error) {
 	return out, nil
 }
 
-// PRProject resolves the project that owns PR id fleet-wide. PRs show on the board
-// globally, so an operation must find its PR by id — not trust the caller's
-// cwd-derived project, which differs from a worktree subdir vs. the repo root.
-// Prefers the caller's project when it already holds the id (disambiguates a rare
-// cross-repo id clash for the common in-repo case); falls back to it when unknown.
+// PRProject finds a PR's owner by id, because a cwd-derived project differs between a
+// worktree subdir and the repo root. The caller's own project wins any id clash.
 func (e *Engine) PRProject(fallback, id string) string {
 	if _, ok, _ := e.store.For(fallback).GetPR(id); ok {
 		return fallback
@@ -99,11 +92,9 @@ func (e *Engine) PRInfo(project, id string) (PRDetail, error) {
 	return PRDetail{PR: pr, Task: task, Diff: diff, Reviews: reviews, Lint: lint, LintAt: lintAt, History: history}, nil
 }
 
-// ReviewPrompt returns a project's default agentic-review instruction, read from
-// its central review-prompt.txt — auto-created with a built-in default if absent.
+// ReviewPrompt reads review-prompt.txt, auto-created from a built-in default if absent.
 func (e *Engine) ReviewPrompt(project string) (string, error) {
-	// A repo-committed `review_prompt` in .sindri/config.yaml takes precedence — its
-	// file's contents are the reviewer prompt (the config validated the path exists).
+	// A repo-committed `review_prompt` wins; config already validated the path exists.
 	if cfg, err := e.deps.ProjectConfig(project); err != nil {
 		return "", err
 	} else if cfg.ReviewPrompt != "" {
@@ -129,14 +120,8 @@ func (e *Engine) ReviewPrompt(project string) (string, error) {
 	return DefaultReviewPrompt, nil
 }
 
-// RequestReview is the ONE review path — every trigger (a worker's submit/resubmit,
-// a resolve that lands clean, or an explicit `sindri pr review`) funnels through it,
-// so a review is always the same thing. It records the review, finds a running
-// reviewer, PREPARES THE TERRAIN — force-checks-out the PR branch fresh into the
-// reviewer's workspace so the reviewer only ever reads, never a stale tree it must
-// refresh itself — marks it "reviewing", and sends one instruction. No reviewer
-// running → recorded unassigned for one to pick up later. requirement "" uses the
-// project's default review prompt.
+// RequestReview is the ONE review path: every trigger funnels here, so a review is always
+// the same thing. No reviewer running → recorded unassigned; requirement "" uses the default.
 func (e *Engine) RequestReview(project, prID, requirement string) error {
 	ps := e.store.For(project)
 	pr, ok, err := ps.GetPR(prID)
@@ -166,10 +151,8 @@ func (e *Engine) RequestReview(project, prID, requirement string) error {
 	if err := ps.AssignReview(id, reviewer); err != nil {
 		return err
 	}
-	// The hub prepares the terrain so the reviewer just reviews: force-checkout the PR
-	// branch fresh into its workspace (it only reads + lints, so discarding any prior
-	// state is always safe). A failure is loud, and the reviewer is told not to trust
-	// /workspace.
+	// The hub preps the terrain so the reviewer never faces a stale tree: force-checkout is
+	// safe because it only reads + lints. On failure it is told not to trust /workspace.
 	checkedOut := true
 	if a, ok, gerr := ps.GetAgent(reviewer); gerr != nil || !ok {
 		checkedOut = false
@@ -185,9 +168,8 @@ func (e *Engine) RequestReview(project, prID, requirement string) error {
 	return nil
 }
 
-// runningReviewer returns the name of a live reviewer agent in a project, or "". A
-// roster read failure is returned, not disguised as "no reviewer running" (which
-// would silently drop the review request).
+// runningReviewer returns a roster read failure rather than disguising it as "no reviewer",
+// which would silently drop the review request.
 func (e *Engine) runningReviewer(project string) (string, error) {
 	roster, err := e.store.For(project).Roster()
 	if err != nil {
@@ -201,8 +183,7 @@ func (e *Engine) runningReviewer(project string) (string, error) {
 	return "", nil
 }
 
-// CmdSubmit commits the worker's worktree, records a merge-intent, and returns
-// immediately — the worker then goes idle until the hub injects a verdict (D5).
+// CmdSubmit returns immediately; the worker idles until the hub injects a verdict (D5).
 func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int, error) {
 	ps := e.store.For(c.Project)
 	root := e.deps.ProjectRoot(c.Project)
@@ -251,8 +232,7 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 	return 0, nil
 }
 
-// CmdOpenspec is the planner's ship verb: turns its openspec edits into a PR on its
-// standing branch (mock todo id os-new).
+// CmdOpenspec is the planner's ship verb: openspec edits become a PR on its standing branch.
 func (e *Engine) CmdOpenspec(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) == 0 || args[0] != "submit" {
 		fmt.Fprintln(out, "usage: openspec submit [message]")
@@ -279,10 +259,8 @@ func (e *Engine) CmdOpenspec(c registry.Caller, args []string, out io.Writer) (i
 		fmt.Fprintln(out, "Nothing to submit — edit /workspace/openspec first.")
 		return 1, nil
 	}
-	// Gate on openspec VALIDATION, not the code linter: a planner only edits
-	// /workspace/openspec (the rest of the repo is read-only to it), so blocking its
-	// plan on `brokkr lint` of code it can't touch — and didn't write — is wrong.
-	// Validate the specs it actually authored instead.
+	// Gate on openspec VALIDATION, not the code linter: a planner may only edit
+	// /workspace/openspec, so failing its plan on code it cannot touch would be wrong.
 	if ok, valOut := spec.Validate(wt); !ok {
 		fmt.Fprintln(out, ReplySpecInvalid(strings.TrimSpace(valOut)))
 		_ = ps.Log(c.Agent, "openspec-invalid", branch)
@@ -339,8 +317,7 @@ func (e *Engine) CmdShowPR(c registry.Caller, args []string, out io.Writer) (int
 	return 0, nil
 }
 
-// openPR resolves the PR a reviewer verb targets in a project: an explicit id, or
-// the single oldest open PR when none is given.
+// openPR takes an explicit id, else the oldest open PR.
 func (e *Engine) openPR(project string, args []string) (store.PR, error) {
 	ps := e.store.For(project)
 	if len(args) > 0 {
@@ -386,9 +363,8 @@ func (e *Engine) CmdApprove(c registry.Caller, args []string, out io.Writer) (in
 	return 0, nil
 }
 
-// completeReview records the reviewer's verdict on its open review record for prID
-// (if one is assigned to it — a human approve/reject has none) and returns the
-// reviewer to idle, so a finished review no longer shows as "reviewing".
+// completeReview stamps the verdict (a human verdict has no record) and returns the
+// reviewer to idle, so a finished review stops showing as "reviewing".
 func (e *Engine) completeReview(project, prID, agent, verdict, findings string) {
 	ps := e.store.For(project)
 	if revs, err := ps.Reviews(prID); err == nil {
@@ -424,14 +400,12 @@ func (e *Engine) ApprovePR(project, prID string) error {
 	return nil
 }
 
-// RejectPR is the human reject path (TUI/CLI): sends the owning worker back to its
-// branch to address the feedback and resubmit, with the [user] voice.
+// RejectPR is the human reject path: the owning worker resubmits, told in the [user] voice.
 func (e *Engine) RejectPR(project, prID, feedback string) error {
 	return e.reject(project, prID, feedback, true)
 }
 
-// reject rejects a project's PR with feedback and routes it to the owning worker
-// (object-addressed). byUser selects the message's voice ([user] vs [reviewer]).
+// reject routes feedback to the owning worker; byUser picks the [user]/[reviewer] voice.
 func (e *Engine) reject(project, prID, feedback string, byUser bool) error {
 	ps := e.store.For(project)
 	pr, ok, err := ps.GetPR(prID)
@@ -466,8 +440,7 @@ func (e *Engine) reject(project, prID, feedback string, byUser bool) error {
 	return nil
 }
 
-// MaterializeReview checks out a project's PR branch (detached) into its reserved
-// .worktrees/review workspace, so a human can inspect it. Returns the path.
+// MaterializeReview detaches the PR branch into .worktrees/review for a human to inspect.
 func (e *Engine) MaterializeReview(project, prID string) (string, error) {
 	ps := e.store.For(project)
 	root := e.deps.ProjectRoot(project)
@@ -481,8 +454,7 @@ func (e *Engine) MaterializeReview(project, prID string) (string, error) {
 	return repo.MaterializeReview(root, pr.Branch)
 }
 
-// LintPR runs the quality gate against a project's PR worktree and returns the
-// output, headed with PASS/FAIL.
+// LintPR runs the quality gate on a PR worktree, headed with PASS/FAIL.
 func (e *Engine) LintPR(project, prID string) (string, error) {
 	ps := e.store.For(project)
 	pr, ok, err := ps.GetPR(prID)
@@ -512,8 +484,7 @@ func (e *Engine) LintPR(project, prID string) (string, error) {
 	return result, nil
 }
 
-// CmdReject is the agent-reviewer reject command — rejects with the [reviewer] voice,
-// records the "changes" verdict on the review, and returns the reviewer to idle.
+// CmdReject is the agent-reviewer reject: [reviewer] voice, "changes" verdict, back to idle.
 func (e *Engine) CmdReject(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) == 0 {
 		fmt.Fprintln(out, "usage: reject <pr-id> <feedback...>")
@@ -528,12 +499,8 @@ func (e *Engine) CmdReject(c registry.Caller, args []string, out io.Writer) (int
 	return 0, nil
 }
 
-// RebaseAgent rebases one agent's worktree onto the current base (reference) branch
-// on demand — for when the base evolved outside a sindri merge (a direct push, a
-// release, an external merge) and the agent is working against a stale tree. git
-// aborts the rebase on conflict (or a dirty tree), so a failure leaves the worktree
-// untouched and is surfaced. A coauthor shares the user's checkout (no worktree of
-// its own), so it's refused — the user drives that tree's git themselves.
+// RebaseAgent recovers a stale tree after the base moved outside a sindri merge; git aborts
+// on conflict, so nothing changes. A coauthor shares the user's checkout, so it is refused.
 func (e *Engine) RebaseAgent(project, name string) error {
 	ps := e.store.For(project)
 	root := e.deps.ProjectRoot(project)
@@ -560,8 +527,7 @@ func (e *Engine) RebaseAgent(project, name string) error {
 	return nil
 }
 
-// rebasePlanners rebases every planner's branch in a project onto base after a
-// merge. Best-effort: a dirty or conflicting worktree is logged and skipped.
+// rebasePlanners is best-effort after a merge: a dirty or conflicting worktree is logged, skipped.
 func (e *Engine) rebasePlanners(project, base string) {
 	ps := e.store.For(project)
 	root := e.deps.ProjectRoot(project)
@@ -580,8 +546,7 @@ func (e *Engine) rebasePlanners(project, base string) {
 	}
 }
 
-// MilestonePR opens (or refreshes) a milestone PR for the container an agent holds
-// in a project, blocking the agent until the human merges.
+// MilestonePR opens (or refreshes) a container milestone, blocking the agent until a human merges.
 func (e *Engine) MilestonePR(project, agent string) (store.PR, error) {
 	ps := e.store.For(project)
 	root := e.deps.ProjectRoot(project)

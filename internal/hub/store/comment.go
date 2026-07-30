@@ -1,9 +1,9 @@
 // package: hub/store / comment
 // type:    logic (persistence for unified task comments)
 // job:     store task comments synced from external sources (td, github) in one
-//          place, keyed by (source, source_ref) so a re-sync reconciles them
-//          against their origin. Reads/writes only; fetching + reconcile live in
-//          the hub, rendering in the UIs.
+// place, keyed by (source, source_ref) so a re-sync reconciles them
+// against their origin. Reads/writes only; fetching + reconcile live in
+// the hub, rendering in the UIs.
 // limits:  no fetching, no source knowledge — just rows keyed for sync.
 package store
 

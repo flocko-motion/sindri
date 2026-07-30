@@ -1,11 +1,11 @@
 // package: hub/comments / service
 // type:    logic (unified task-comment sync — a hub module, not an adapter)
 // job:     keep a task's comment thread fresh in the store from its source — td
-//          comments for td-*, GitHub issue comments for gh-*. Reconciles by
-//          re-fetching the source's current set (store.ReplaceComments), TTL-
-//          throttled so a view is cheap, with a forced path for the refresh key.
+// comments for td-*, GitHub issue comments for gh-*. Reconciles by
+// re-fetching the source's current set (store.ReplaceComments), TTL-
+// throttled so a view is cheap, with a forced path for the refresh key.
 // limits:  td-*/gh-* only (os-* has no comments); external calls go through the td
-//          + github adapters; the hub wires ProjectRoot/Notify via a small seam.
+// + github adapters; the hub wires ProjectRoot/Notify via a small seam.
 package comments
 
 import (

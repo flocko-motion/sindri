@@ -1,10 +1,10 @@
 // package: update / update
 // type:    logic (self-update check)
 // job:     a once-a-day, best-effort check of the GitHub latest release; if it's
-//          newer, print a one-line notice and drop a `sindri-do-upgrade` script,
-//          which is generated because a running binary can't overwrite itself.
+// newer, print a one-line notice and drop a `sindri-do-upgrade` script,
+// which is generated because a running binary can't overwrite itself.
 // limits:  best-effort and silent on failure — a check must never get in the way.
-//          The network call is bounded to 2s; past that we forget it.
+// The network call is bounded to 2s; past that we forget it.
 package update
 
 import (

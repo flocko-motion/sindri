@@ -1,11 +1,9 @@
 // package: hub / state
 // type:    logic (the single read surface + change notifications)
 // job:     assemble the whole board the UIs render — agents across every project
-//
-//	with live workflow state, merge-intents, and orphaned runtime, plus the
-//	tasks of the selected project — and a tiny pub/sub so clients live-update
-//	over /events. The central store is the read model; this is its projection.
-//
+// with live workflow state, merge-intents, and orphaned runtime, plus the
+// tasks of the selected project — and a tiny pub/sub so clients live-update
+// over /events. The central store is the read model; this is its projection.
 // limits:  read-only assembly + notify; mutations live in their own methods.
 package hub
 
@@ -20,19 +18,14 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// probeTimeout bounds each podman probe during a board read. A container that
-// can't answer within this window is reported "down" rather than stalling the
-// whole read — the board must stay responsive even when a pod is wedged.
+// probeTimeout bounds each podman probe; a container that can't answer is "down", not a stalled read.
 const probeTimeout = 3 * time.Second
 
-// statsTimeout bounds a single `stats` sample, which is slower than a liveness
-// probe (the runtime samples over a short window before returning).
+// statsTimeout bounds one `stats` sample, slower than a probe (the runtime samples over a window).
 const statsTimeout = 8 * time.Second
 
-// AgentView is an agent as the UIs see it: identity + live workflow + runtime.
-// Status collapses runtime + workflow into one word: down | idle | working |
-// submitted. Project (repoTag) and Repo (human path) tag which repo it belongs to,
-// so the global Agents tab can show — and color — rows by repo.
+// AgentView is an agent as the UIs see it; Status collapses runtime + workflow into one word:
+// down | idle | working | submitted.
 type AgentView struct {
 	Project   string `json:"project"`
 	Repo      string `json:"repo"`
@@ -49,10 +42,7 @@ type AgentView struct {
 	Runtime   string `json:"runtime"`   // Claude's live runtime: "working"|"blocked"|"idle"|"" (folded into Status; kept raw for the herdr projection)
 }
 
-// BoardState is the whole board in one payload. Agents and PRs are global (across
-// every project, each row tagged with its repo); Tasks are the selected project's
-// (td is per-repo, so a merged backlog would mislead); Projects is every repo the
-// hub knows, for the TUI's repo switcher and repo labels.
+// BoardState is the whole board: Agents and PRs global, Tasks only the selected project's.
 type BoardState struct {
 	Agents   []AgentView             `json:"agents"`
 	Tasks    []store.Task            `json:"tasks"`
@@ -63,8 +53,7 @@ type BoardState struct {
 	RepoDocs map[string]RepoDocState `json:"repo_docs"` // per repo tag: its architecture doc + any gap
 }
 
-// State assembles the board: agents and PRs across all projects, tasks for the
-// selected project (empty tag = none selected → no tasks).
+// State assembles the board; an empty selected tag means no project is chosen, so no tasks.
 func (h *Hub) State(selected string) (BoardState, error) {
 	agentsRow, err := h.store.AllAgents()
 	if err != nil {
@@ -74,13 +63,9 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	if err != nil {
 		return BoardState{}, err
 	}
-	// Only registered repos surface in the global views. A forgotten repo's PRs stay
-	// in the db (keyed by its stable tag, so re-adding the repo reactivates them) but
-	// drop out of the fleet PR tab — forgetting a repo means giving up its management,
-	// not surfacing its records. (Its agents are already deleted, so AllAgents is clean.)
-	// Read the registry ONCE per board read. It used to be queried twice (here and again
-	// for the orphan scan), doubling the load on a store the hub serialises through a
-	// single connection — and giving one snapshot two chances to disagree with itself.
+	// Only registered repos surface in the global views: a forgotten repo's PRs stay in the db (keyed
+	// by its stable tag, so re-adding reactivates them) but drop off the fleet tab. Read the registry
+	// ONCE — twice doubled load on the single store connection and let one snapshot disagree with itself.
 	projects, err := h.projects.Known()
 	if err != nil {
 		return BoardState{}, err // never render "no repos" from an unreadable registry
@@ -103,14 +88,9 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		}
 	}
 
-	// Liveness comes from the watchdog's last observation — a board read REPORTS it, it does
-	// not take one. Probing per request made the cost scale with the number of readers: the
-	// TUI polls, holds an SSE stream and refetches after every mutation, so requests overlap
-	// and each was fanning out one container exec per agent. Under that contention probes lost
-	// their deadline and the miss was rendered as "down", so a healthy agent flickered between
-	// down and its real state. One observer on a fixed cadence costs the same whether nobody
-	// or ten clients are watching, and its strike rule means a single lost probe changes
-	// nothing (-> watchdog.go).
+	// Liveness comes from the watchdog's last observation — a board read REPORTS it, never takes one.
+	// Probing per request scaled cost with readers (overlapping polls, SSE, post-mutation refetches);
+	// probes then lost their deadline and rendered as "down", flickering healthy agents (-> watchdog.go).
 	running := make([]bool, len(agentsRow))
 	clients := make([]int, len(agentsRow))
 	runtimes := make([]string, len(agentsRow)) // Claude's live runtime: busy|blocked|idle|""
@@ -120,8 +100,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		}
 	}
 
-	// The orphan scan needs the pod list itself, not per-agent liveness. Cached, so it shares
-	// the listing the watchdog just took rather than spawning another.
+	// The orphan scan needs the pod list, not per-agent liveness; cached, so it reuses the watchdog's.
 	podCtx, podCancel := context.WithTimeout(context.Background(), probeTimeout)
 	existing, _ := container.ListByLabelCached(podCtx, "sindri.project", "")
 	podCancel()
@@ -133,9 +112,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		known[container] = true
 		ps := h.store.For(a.Project)
 		st, _ := ps.GetState(a.Name)
-		// PR is the agent's own submitted PR (worker); a reviewer authors none, so
-		// fall back to the PR it's currently reviewing — that's what the board should
-		// show it working on.
+		// A reviewer authors no PR, so fall back to the one it's reviewing — that's what it works on.
 		pr := openPRFor(prs, a.Project, a.Name)
 		if pr == "" {
 			pr, _ = ps.ReviewingPR(a.Name)
@@ -149,9 +126,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		})
 	}
 
-	// Orphans: sindri pods with no roster entry. The same listing the liveness probe used —
-	// it already covers every project, and the per-project results were flattened and
-	// filtered against one global roster map anyway, so grouping them bought nothing.
+	// Orphans: sindri pods with no roster entry, from the listing the liveness probe already took.
 	var orphans []string
 	for _, p := range existing {
 		if !known[p] {
@@ -162,9 +137,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	if err != nil {
 		return BoardState{}, err
 	}
-	// Carried in the snapshot rather than read at render time: the Repos tab detail is
-	// pure rendering over the board, and this is also what makes the TUI's recommendation
-	// identical to the one hub startup prints (both come from repoDocState).
+	// Carried in the snapshot so the TUI's recommendation matches the one hub startup prints.
 	docs := make(map[string]RepoDocState, len(projects))
 	for _, p := range projects {
 		docs[p.Tag] = h.repoDocState(p.Path)
@@ -172,9 +145,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	return BoardState{Agents: agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans, Chat: chat, RepoDocs: docs}, nil
 }
 
-// AgentStatsView is one agent's resource snapshot for `agent stats`. Err is set
-// (not swallowed) when the sample couldn't be read, so the row shows why instead
-// of a misleading zero.
+// AgentStatsView is one agent's resource snapshot; Err is set, not swallowed into a misleading zero.
 type AgentStatsView struct {
 	Name          string `json:"name"`
 	Repo          string `json:"repo"`
@@ -183,9 +154,8 @@ type AgentStatsView struct {
 	Err           string `json:"err,omitempty"`
 }
 
-// StatsReport is the `agent stats` payload: which runtime is wired, plus a memory
-// snapshot per running agent. Engine is included so the numbers are read in the
-// right context (podman shares one VM; apple container is one micro-VM per agent).
+// StatsReport is the `agent stats` payload. Engine is included so the numbers are read in context:
+// podman shares one VM, apple container is one micro-VM per agent.
 type StatsReport struct {
 	Engine string           `json:"engine"`
 	Agents []AgentStatsView `json:"agents"`
@@ -197,10 +167,8 @@ func (h *Hub) Stats() (StatsReport, error) {
 	return StatsReport{Engine: container.Name(), Agents: views}, err
 }
 
-// AllStats returns a resource snapshot for every RUNNING agent, gathered
-// concurrently — each `stats` sample is slow (the runtime samples over a window),
-// so serial would be N×that. Down agents are omitted (no VM to sample). A per-agent
-// stats failure is reported in that row's Err, never silently dropped.
+// AllStats snapshots every RUNNING agent concurrently — each sample is slow, so serial would be N×that.
+// Down agents are omitted; a per-agent failure lands in that row's Err rather than being dropped.
 func (h *Hub) AllStats() ([]AgentStatsView, error) {
 	agentsRow, err := h.store.AllAgents()
 	if err != nil {
@@ -238,10 +206,8 @@ func (h *Hub) AllStats() ([]AgentStatsView, error) {
 	return out, nil
 }
 
-// projectPath resolves a project tag to its path, logging loudly on a real store
-// error (distinct from an unknown project) instead of swallowing it into "". The
-// string-returning callers (projectRoot/repoName/container) can't thread an error,
-// so this is where the DB failure is surfaced.
+// projectPath resolves a project tag to its path, logging loudly on a real store error (as opposed to
+// an unknown project) — the string-returning callers can't thread one, so it must surface here.
 func (h *Hub) projectPath(project string) (string, bool) {
 	path, ok, err := h.store.ProjectPath(project)
 	if err != nil {
@@ -250,8 +216,7 @@ func (h *Hub) projectPath(project string) (string, bool) {
 	return path, ok
 }
 
-// repoName is a project's short human label (its directory name), resolved from the
-// registry; falls back to the tag when the path is unknown.
+// repoName is a project's directory name from the registry, falling back to the tag.
 func (h *Hub) repoName(project string) string {
 	if path, ok := h.projectPath(project); ok {
 		return filepath.Base(path)
@@ -265,13 +230,9 @@ func (h *Hub) container(project, name string) string {
 	return Container(root, name)
 }
 
-// overlayRuntime folds Claude's live runtime (working|blocked|idle|"") into the
-// workflow status, three states in herdr's own vocabulary: "blocked" = needs your
-// attention now (any phase); "working" = busy; "idle" = not doing anything (no task,
-// stalled at the prompt, or dropped to the maintenance shell). The live state
-// replaces a plain working/idle phase; the meaningful workflow phases
-// (submitted/collab/resolving/reviewing/planning) are kept, unless Claude is blocked.
-// runtime "" (probe failed) leaves the phase untouched.
+// overlayRuntime folds Claude's live runtime into the workflow status: "blocked" = needs you now (any
+// phase), "working" = busy, "idle" = nothing doing. It replaces a plain working/idle phase but keeps
+// the meaningful ones; runtime "" (probe failed) changes nothing.
 func overlayRuntime(status, runtime string) string {
 	switch runtime {
 	case "blocked":
@@ -284,9 +245,8 @@ func overlayRuntime(status, runtime string) string {
 	return status
 }
 
-// Refresh re-syncs the selected project's tasks and notifies watchers. It's the
-// [r]efresh hotkey / explicit user refresh, so it forces the GitHub scan past its
-// TTL — the one place we want fresh issues on demand.
+// Refresh re-syncs tasks and notifies watchers; being the user's explicit refresh it forces the
+// GitHub scan past its TTL.
 func (h *Hub) Refresh(project string) error {
 	err := h.wf.ForceSyncTasks(project)
 	h.notify()
@@ -317,8 +277,7 @@ type bus struct {
 
 func newBus() *bus { return &bus{subs: map[chan struct{}]bool{}} }
 
-// subscribe returns a buffered channel that ticks on every notify, plus an
-// unsubscribe func.
+// subscribe returns a buffered channel that ticks on every notify, plus an unsubscribe func.
 func (b *bus) subscribe() (chan struct{}, func()) {
 	ch := make(chan struct{}, 1)
 	b.mu.Lock()
@@ -332,8 +291,7 @@ func (b *bus) subscribe() (chan struct{}, func()) {
 	}
 }
 
-// publish wakes every subscriber (non-blocking; a full buffer already means
-// "refresh pending").
+// publish wakes every subscriber (non-blocking; a full buffer already means "refresh pending").
 func (b *bus) publish() {
 	b.mu.Lock()
 	defer b.mu.Unlock()

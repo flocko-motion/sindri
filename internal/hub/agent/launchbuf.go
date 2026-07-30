@@ -1,11 +1,11 @@
 // package: hub/agent / launchbuf
 // type:    logic (launch output capture)
 // job:     a per-agent, concurrency-safe buffer that the hub's launch path tees the
-//          image-build and pod-start output into, so the TUI's live-screen region can
-//          show launch progress while the pod is still coming up (the agent pane
-//          returns its tail until the container has logs of its own).
+// image-build and pod-start output into, so the TUI's live-screen region can
+// show launch progress while the pod is still coming up (the agent pane
+// returns its tail until the container has logs of its own).
 // limits:  just buffers bytes; deciding what to tee in is the launch path's and
-//          showing it is the TUI's.
+// showing it is the TUI's.
 package agent
 
 import (

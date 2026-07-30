@@ -1,11 +1,11 @@
 // package: hub/agentchan / agentchan
 // type:    logic (the inbound agent command channel)
 // job:     serve the agent surface (GET /commands, GET /directive, POST /exec) to
-//          each agent — on Linux via its own unix socket (the socket path IS the
-//          agent's identity), on macOS via a token-authenticated TCP channel (tcp.go).
-//          Owns the listener lifecycle: serve at boot / launch, close on shutdown.
+// each agent — on Linux via its own unix socket (the socket path IS the
+// agent's identity), on macOS via a token-authenticated TCP channel (tcp.go).
+// Owns the listener lifecycle: serve at boot / launch, close on shutdown.
 // limits:  transport only; the surface's behaviour comes from the hub via Deps, and
-//          host-control endpoints live on the control socket (hub/server.go).
+// host-control endpoints live on the control socket (hub/server.go).
 package agentchan
 
 import (
@@ -40,7 +40,7 @@ type Server struct {
 	store *store.Store
 	deps  Deps
 
-	mu   sync.Mutex               // guards unix
+	mu   sync.Mutex                // guards unix
 	unix map[agentKey]net.Listener // per-agent unix listeners (Linux)
 
 	tcpLn    net.Listener // macOS TCP channel

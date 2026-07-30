@@ -1,11 +1,11 @@
 // package: ui/cli / attach
 // type:    command (host CLI)
 // job:     `sindri agent attach` — hand the caller's terminal to an agent's live
-//          tmux session. Multi-repo like the TUI: resolves the agent from the
-//          global roster and narrates the dial-in (cross-repo, other clients,
-//          read-only) so a session never silently swallows keystrokes.
+// tmux session. Multi-repo like the TUI: resolves the agent from the
+// global roster and narrates the dial-in (cross-repo, other clients,
+// read-only) so a session never silently swallows keystrokes.
 // limits:  roster + container name come from the hub; only the terminal handover
-//          is local (adapter/pod), since it can't travel over the socket.
+// is local (adapter/pod), since it can't travel over the socket.
 package cli
 
 import (

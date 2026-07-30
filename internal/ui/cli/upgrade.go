@@ -1,10 +1,10 @@
 // package: ui/cli / upgrade
 // type:    command
 // job:     wires `sindri upgrade` — an explicit, on-demand check for a newer
-//          release (no daily throttle). If one exists it points you at the
-//          generated `sindri-do-upgrade` helper, which does the actual install.
+// release (no daily throttle). If one exists it points you at the
+// generated `sindri-do-upgrade` helper, which does the actual install.
 // limits:  only checks + recommends; it can't replace the running binary itself
-//          (-> internal/update writes sindri-do-upgrade for that).
+// (-> internal/update writes sindri-do-upgrade for that).
 package cli
 
 import (

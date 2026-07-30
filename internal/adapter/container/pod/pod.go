@@ -1,10 +1,10 @@
 // package: adapter/pod / pod
 // type:    adapter (external tool: podman) — implements container.Runtime
 // job:     the podman backend for the container-runtime port: run a detached agent
-//          pod, exec/attach, liveness, logs, remove, orphan-list, VM pre-flight, and
-//          build the agent image via `podman build`. The only place podman is run.
+// pod, exec/attach, liveness, logs, remove, orphan-list, VM pre-flight, and
+// build the agent image via `podman build`. The only place podman is run.
 // limits:  knows nothing of agents, roles, or the hub; it implements the
-//          container.Runtime interface and is wired in at the composition root.
+// container.Runtime interface and is wired in at the composition root.
 package pod
 
 import (

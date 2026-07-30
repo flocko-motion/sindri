@@ -1,8 +1,8 @@
 // package: tui / component_pane
 // type:    ui component (generic)
 // job:     render lines into a fixed width×height scrollable block via a scroll.Viewport —
-//          the primitive behind the selector and the detail pane. Every line is fitted to
-//          width and the block padded to height, so a pane always fills its box exactly.
+// the primitive behind the selector and the detail pane. Every line is fitted to
+// width and the block padded to height, so a pane always fills its box exactly.
 // limits:  renders the given lines only; scroll state is the Viewport's, content the caller's.
 package tui
 
@@ -16,9 +16,9 @@ import (
 )
 
 var (
-	selStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Background(lipgloss.Color("238"))
-	dimStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	divStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+	selStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Background(lipgloss.Color("238"))
+	dimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	divStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
 )
 
 // pane renders lines through vp into a width×vp.Height block. cursor is the

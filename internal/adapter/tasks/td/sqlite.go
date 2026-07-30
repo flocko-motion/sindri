@@ -1,10 +1,10 @@
 // package: td / sqlite
 // type:    adapter (external tool — direct read path)
 // job:     read tasks straight from td's SQLite db (.todos/issues.db) for speed,
-//          bypassing the `td` CLI on the hot read path (D15). Writes still go
-//          through the CLI (td.go); this is the encapsulated read-fast exception.
+// bypassing the `td` CLI on the hot read path (D15). Writes still go
+// through the CLI (td.go); this is the encapsulated read-fast exception.
 // limits:  read-only; couples to td's `issues` schema (id/title/status/type/
-//          priority/labels/parent_id/timestamps, soft-deleted via deleted_at).
+// priority/labels/parent_id/timestamps, soft-deleted via deleted_at).
 package td
 
 import (
@@ -23,27 +23,21 @@ import (
 // DBPath is td's SQLite database for a project.
 func DBPath(root string) string { return filepath.Join(root, ".todos", "issues.db") }
 
-// HasStore reports whether root actually has a td store. It is what gates td as a task
-// source: a repo without one contributes no td tasks, the same way a repo without
-// openspec/ contributes no spec changes.
+// HasStore gates td as a task source: a repo without one contributes no td tasks.
 func HasStore(root string) bool {
 	_, err := os.Stat(DBPath(root))
 	return err == nil
 }
 
-// dbCols is the column list every task read shares, so the two queries below and
-// scanDBTask agree about order. It includes `description` — the task body the board and
-// detail views render. COALESCE keeps a NULL in that column from failing a whole task read.
+// dbCols is shared by both queries and scanDBTask so they agree about order. COALESCE
+// keeps a NULL description from failing a whole task read.
 const dbCols = `id, title, COALESCE(description,''), status, type, priority, labels, parent_id, created_at, updated_at`
 
-// tasksFromDB reads all live tasks from td's db, applies the filter, and orders
-// them open → active → closed (matching the CLI path).
+// tasksFromDB reads live tasks, filters, and orders open → active → closed like the CLI.
 func tasksFromDB(root string, f task.Filter) ([]task.Task, error) {
 	if _, err := os.Stat(DBPath(root)); err != nil {
-		// The hub reads td's db directly from the repo root (where it launched, and
-		// where .sindri lives). If it isn't there, td's writes (which td may route
-		// to a .todos found elsewhere) would diverge from these reads — fail loud
-		// rather than silently report zero tasks.
+		// Reads come from the repo root. Absent it, td's writes may route to a .todos
+		// found elsewhere and diverge — fail loud rather than report zero tasks.
 		return nil, fmt.Errorf("no td store at %s — the hub expects td's database at the repo root where it was launched; run `td` there to create one", DBPath(root))
 	}
 	db, err := sql.Open("sqlite", "file:"+DBPath(root))
@@ -72,8 +66,7 @@ func tasksFromDB(root string, f task.Filter) ([]task.Task, error) {
 	return orderTasks(tasks), nil
 }
 
-// Detail reads a task's long-form fields (description, acceptance) — not carried
-// in task.Task, fetched on demand for a detail view.
+// Detail fetches long-form fields on demand; task.Task doesn't carry them.
 func Detail(root, id string) (description, acceptance string, err error) {
 	db, err := sql.Open("sqlite", "file:"+DBPath(root))
 	if err != nil {
@@ -87,8 +80,7 @@ func Detail(root, id string) (description, acceptance string, err error) {
 	return description, acceptance, nil
 }
 
-// Comment is one td comment on a task (td's own comments table). td records a
-// session_id rather than a human author.
+// Comment is one td comment; Author is td's session_id, not a human.
 type Comment struct {
 	ID        string
 	Author    string
@@ -96,9 +88,8 @@ type Comment struct {
 	CreatedAt time.Time
 }
 
-// Comments reads a task's comment thread from td's db. Returns nil (not an error)
-// when td has no comments table (older td) or none for the task — comments are an
-// optional source, absence isn't a failure.
+// Comments reads a task's thread. nil, not an error, when older td has no comments
+// table or the task has none: an optional source's absence isn't a failure.
 func Comments(root, id string) ([]Comment, error) {
 	if _, err := os.Stat(DBPath(root)); err != nil {
 		return nil, nil

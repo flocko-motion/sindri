@@ -1,9 +1,9 @@
 // package: codemap / search
 // type:    logic (pattern matching)
 // job:     the two ways to search a mapped tree — --find keeps the declarations
-//          ENCLOSING a match (what the hit is part of), --grep emits the matching
-//          LINES tagged with the decl they sit in (where the hit is), so grep-shaped
-//          output never needs piping through grep.
+// ENCLOSING a match (what the hit is part of), --grep emits the matching
+// LINES tagged with the decl they sit in (where the hit is), so grep-shaped
+// output never needs piping through grep.
 // limits:  matching only; the walk and the map rendering are codemap.go's.
 package codemap
 

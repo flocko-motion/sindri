@@ -1,12 +1,12 @@
 // package: lint / comments
 // type:    logic
 // job:     the documentation linter — checks every non-test Go file opens with
-//          the canonical four-field header (package/type/job/limits, the same
-//          block code map reads) and that every exported func and type carries
-//          at least one line of doc comment.
+// the canonical four-field header (package/type/job/limits, the same
+// block code map reads) and that every exported func and type carries
+// at least one line of doc comment.
 // limits:  reports only; CLI wiring and exit codes live in cmd/sindri/lint.go.
-//          It checks the header's fields are PRESENT, not that the type value is
-//          one of the canonical kinds.
+// It checks the header's fields are PRESENT, not that the type value is
+// one of the canonical kinds.
 package lint
 
 import (
@@ -259,8 +259,13 @@ func missingHeaderFields(doc *ast.CommentGroup) []string {
 	return missing
 }
 
-// headerFieldContent maps each field to its value plus aligned continuations, joined. A blank
-// or un-aligned line ends the field, so free-form lines aren't charged to it.
+// headerFieldContent maps each field to its value plus continuations, joined; a BLANK line ends it,
+// so free-form prose after one isn't charged to the field.
+//
+// Indentation is not what marks a continuation. It used to be, which tied the rule to headers
+// gofmt rewrites: a wrapped line indented under the field's text column reads as a code block, so
+// gofmt replaces it with a tab and blank `//` separators. Continuations must start at column 3 to
+// survive the formatter, and this counts them either way.
 func headerFieldContent(doc *ast.CommentGroup) map[string]string {
 	out := map[string]string{}
 	if doc == nil {
@@ -269,18 +274,16 @@ func headerFieldContent(doc *ast.CommentGroup) map[string]string {
 	current := ""
 	for _, c := range doc.List {
 		for _, raw := range strings.Split(c.Text, "\n") {
-			body := strings.TrimPrefix(raw, "//") // keep leading indentation
-			trimmed := strings.TrimSpace(body)
+			trimmed := strings.TrimSpace(strings.TrimPrefix(raw, "//"))
 			if field, val, ok := matchField(trimmed); ok {
 				current = field
 				out[field] = val
 				continue
 			}
-			indent := len(body) - len(strings.TrimLeft(body, " \t"))
-			if current != "" && trimmed != "" && indent >= 4 { // aligned continuation
+			if current != "" && trimmed != "" {
 				out[current] = strings.TrimSpace(out[current] + " " + trimmed)
 			} else {
-				current = "" // blank or un-aligned comment — the field's content ends
+				current = "" // a blank line ends the field; what follows is free-form
 			}
 		}
 	}

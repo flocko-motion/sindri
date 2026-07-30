@@ -1,11 +1,11 @@
 // package: adapter/applecontainer / applecontainer
 // type:    adapter (external tool: Apple `container`) — implements container.Runtime
 // job:     the Apple-`container` backend for the container-runtime port (macOS 26):
-//          each agent pod is its OWN micro-VM, so one agent's crash/OOM can't take
-//          down the others. Maps run/exec/attach/liveness/logs/remove/orphan-list/
-//          image-build onto the `container` CLI.
+// each agent pod is its OWN micro-VM, so one agent's crash/OOM can't take
+// down the others. Maps run/exec/attach/liveness/logs/remove/orphan-list/
+// image-build onto the `container` CLI.
 // limits:  implements container.Runtime; wired in at the composition root. macOS
-//          only (needs the `container` service + a Linux kernel per micro-VM).
+// only (needs the `container` service + a Linux kernel per micro-VM).
 package applecontainer
 
 import (
@@ -31,11 +31,8 @@ type Engine struct{}
 // Name identifies this backend for humans.
 func (Engine) Name() string { return "apple container" }
 
-// AgentChannel: apple-container micro-VMs have no host.containers.internal; a pod
-// reaches the host directly at the network gateway (e.g. 192.168.64.1). The hub
-// therefore binds and advertises that gateway IP. The gateway is read from the
-// runtime rather than assumed to be .1, and a failure to determine it is returned
-// (never defaulted silently) — the agent channel is unusable without it.
+// AgentChannel advertises the gateway (micro-VMs have no host.containers.internal),
+// read from the runtime, never assumed to be .1, and never defaulted on failure.
 func (Engine) AgentChannel() (container.NetChannel, error) {
 	out, err := exec.Command(Binary, "network", "inspect", "default").Output()
 	if err != nil {
@@ -56,11 +53,8 @@ func (Engine) AgentChannel() (container.NetChannel, error) {
 	return container.NetChannel{BindAddr: gw, DialHost: gw}, nil
 }
 
-// inspectEntry is the slice of `container inspect`/`ls --format json` we read.
-// NOTE: configuration.image is an OBJECT ({reference, descriptor}), not a string —
-// modelling it as a string made json.Unmarshal fail on the whole entry, and because
-// the callers swallowed that error as "false", a live container read as down. Keep
-// this shape faithful to `container inspect`'s real output.
+// inspectEntry must stay faithful to `container inspect`: configuration.image is an
+// OBJECT, and typing it as a string failed the unmarshal, so live pods read as down.
 type inspectEntry struct {
 	ID     string `json:"id"`
 	Status struct {
@@ -83,9 +77,8 @@ type inspectEntry struct {
 	} `json:"configuration"`
 }
 
-// hostPID finds the macOS pid of the micro-VM's runtime process for a container by
-// matching the `container-runtime-linux … --uuid <name>` argv — the concrete host
-// process backing this exact instance. "" if not found.
+// hostPID finds the micro-VM's macOS runtime process by matching the
+// `container-runtime-linux … --uuid <name>` argv. "" if not found.
 func hostPID(name string) string {
 	out, err := exec.Command("pgrep", "-fl", "container-runtime-linux").Output()
 	if err != nil {
@@ -101,10 +94,8 @@ func hostPID(name string) string {
 	return ""
 }
 
-// parseInspect unmarshals `container inspect`/`ls` JSON. A shape mismatch here is a
-// BUG in our model of the tool's output — never a normal "not present" — so it is
-// logged loudly instead of being swallowed into a misleading false/empty. (A silent
-// return-false on exactly this kind of error once cost hours of misdiagnosis.)
+// parseInspect unmarshals `container inspect`/`ls` JSON. A shape mismatch is an adapter
+// bug, never a "not present", so it is logged loudly rather than swallowed as false.
 func parseInspect(what string, raw []byte) ([]inspectEntry, error) {
 	var entries []inspectEntry
 	if err := json.Unmarshal(raw, &entries); err != nil {
@@ -114,8 +105,8 @@ func parseInspect(what string, raw []byte) ([]inspectEntry, error) {
 	return entries, nil
 }
 
-// runArgs builds `container run -d …`. Unlike podman there is no `--userns` (each
-// micro-VM maps mounts itself) and no `--replace` (Run removes any stale first).
+// runArgs builds `container run -d …`: no `--userns` (micro-VMs map mounts themselves)
+// and no `--replace` (Run removes any stale first).
 func runArgs(o container.RunOpts) []string {
 	args := []string{"run", "-d", "--name", o.Name}
 	if o.Memory != "" {
@@ -166,10 +157,8 @@ func (Engine) ExecContext(ctx context.Context, name string, args ...string) ([]b
 	return out, nil
 }
 
-// AttachCmd returns (without running) the interactive `container exec -it` command.
-// It forwards the caller's TERM/COLORTERM (container exec otherwise drops the host
-// env), so the tmux attach client can drive the real terminal — without it the pod's
-// empty TERM leaves cursor addressing/colour broken and the session renders scrambled.
+// AttachCmd returns the interactive `container exec -it` unrun. It forwards
+// TERM/COLORTERM, which exec drops: an empty TERM renders tmux scrambled.
 func (Engine) AttachCmd(name string, args ...string) *exec.Cmd {
 	full := append([]string{"exec", "-it"}, container.TermEnvArgs()...)
 	full = append(full, name)
@@ -200,10 +189,8 @@ func (Engine) RunningContext(ctx context.Context, name string) bool {
 	return entries[0].Status.State == "running"
 }
 
-// Diagnose reports exactly what the running probe sees: the `inspect` exit/stderr,
-// how many entries parsed, and the state string — so a "not running" verdict is
-// explainable (tool missing, apiserver error, unexpected state) rather than a
-// silent false. It mirrors RunningContext's command so it reflects the real probe.
+// Diagnose reports the `inspect` exit/stderr, entry count and state, so a "not running"
+// verdict is explainable. Mirrors RunningContext's command to reflect the real probe.
 func (Engine) Diagnose(ctx context.Context, name string) string {
 	out, err := exec.CommandContext(ctx, Binary, "inspect", name).Output()
 	msg := fmt.Sprintf("`%s inspect %s`: exit=%v, stdout=%dB", Binary, name, err, len(out))
@@ -226,9 +213,8 @@ type statsEntry struct {
 	MemoryLimitBytes int64  `json:"memoryLimitBytes"`
 }
 
-// Stats returns a memory snapshot for a running pod via `container stats`. Uses
-// --no-stream (one sample, ~2s) so it returns rather than streaming forever; the
-// caller bounds it with ctx.
+// Stats snapshots memory via `container stats --no-stream` (one ~2s sample), which
+// otherwise streams forever; the caller bounds it with ctx.
 func (Engine) Stats(ctx context.Context, name string) (container.Usage, error) {
 	out, err := exec.CommandContext(ctx, Binary, "stats", "--no-stream", "--format", "json", name).Output()
 	if err != nil {
@@ -247,8 +233,7 @@ func (Engine) Stats(ctx context.Context, name string) (container.Usage, error) {
 	return container.Usage{MemoryUsageBytes: entries[0].MemoryUsageBytes, MemoryLimitBytes: entries[0].MemoryLimitBytes}, nil
 }
 
-// Logs returns the last `tail` lines of a container's output. Apple `container logs`
-// has no --tail, so we trim client-side. Best-effort.
+// Logs returns the last `tail` lines; `container logs` has no --tail, so trim here.
 func (Engine) Logs(name string, tail int) string {
 	out, err := exec.Command(Binary, "logs", name).CombinedOutput()
 	if err != nil {
@@ -299,11 +284,8 @@ func (Engine) Rm(name string) error {
 	return nil
 }
 
-// ListByLabelContext lists containers carrying label=value. Apple `container ls` has
-// no `--filter`, so we list all as JSON and match the label client-side.
-//
-// An empty value matches ANY value for that label, which is what lets one call answer for
-// every project at once instead of one call per project.
+// ListByLabelContext lists containers carrying label=value (empty value: any value, so
+// one call covers every project). `container ls` has no `--filter`; we match client-side.
 func (Engine) ListByLabelContext(ctx context.Context, label, value string) ([]string, error) {
 	out, err := exec.CommandContext(ctx, Binary, "ls", "--all", "--format", "json").Output()
 	if err != nil {
@@ -334,8 +316,7 @@ func (Engine) Check(w io.Writer) error {
 	return nil
 }
 
-// Healthy is a fast, time-bounded probe: `container ls` fails quickly when the
-// service isn't started.
+// Healthy probes with `container ls`, which fails fast when the service is down.
 func (Engine) Healthy() (ok bool, hint string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -345,8 +326,7 @@ func (Engine) Healthy() (ok bool, hint string) {
 	return false, "Apple `container` service isn't running — start it with `container system start`, then verify with `container ls`."
 }
 
-// EnsureImage builds the agent image via `container build` when the recipe is stale,
-// returning the image reference to run.
+// EnsureImage builds the agent image via `container build` when the recipe is stale.
 func (Engine) EnsureImage(root, containerfile string, out io.Writer) (string, error) {
 	return container.EnsureImageWith(root, containerfile, out, appleBuilder{})
 }
@@ -360,16 +340,14 @@ func (Engine) RebuildImage(root, containerfile string, out io.Writer) (string, e
 type appleBuilder struct{}
 
 func (appleBuilder) ImageExists(ref string) (bool, error) {
-	// NB: the subcommand is `image` (singular); `images` is not a valid subcommand and
-	// exits non-zero, which — when this returned a bare bool — silently read as "absent"
-	// and rebuilt on every launch.
+	// NB: the subcommand is `image` (singular); `images` exits non-zero, which once read
+	// as "absent" and rebuilt on every launch.
 	out, err := exec.Command(Binary, "image", "inspect", ref).CombinedOutput()
 	if err == nil {
 		return true, nil
 	}
-	// A genuinely-missing image is a legitimate "absent", not a failure: `container
-	// image inspect` prints "image not found" and exits 1. Anything else (service
-	// down, bad args) is a real error we surface instead of masquerading as "absent".
+	// "image not found" + exit 1 is a legitimate absent; anything else (service down,
+	// bad args) is a real error, surfaced rather than masqueraded as "absent".
 	if strings.Contains(string(out), "not found") {
 		return false, nil
 	}
@@ -377,9 +355,8 @@ func (appleBuilder) ImageExists(ref string) (bool, error) {
 }
 
 func (appleBuilder) Build(ref, ctxDir, dockerfile string, pull bool, out io.Writer) error {
-	// pull is honored best-effort: `container build` doesn't expose a portable
-	// re-pull flag, so a forced rebuild here still rebuilds the layers but may reuse
-	// the local base. (The Linux/podman path does a real --pull=always.)
+	// pull is best-effort: `container build` has no re-pull flag, so a forced rebuild
+	// may reuse the local base. (podman does a real --pull=always.)
 	_ = pull
 	cmd := exec.Command(Binary, "build", "-t", ref, "-f", dockerfile, ctxDir)
 	cmd.Stdout, cmd.Stderr = out, out

@@ -1,12 +1,12 @@
 // package: tui / refresh
 // type:    ui (live-update plumbing)
 // job:     keep the board fresh between hub notifications — a periodic poll
-//          while on the Agents tab, and an immediate post-mutation refetch so
-//          actions (delete/role/new) reflect at once. All fetch via /state and
-//          deliver polledMsg, which updates the board without re-arming the SSE
-//          waiter.
+// while on the Agents tab, and an immediate post-mutation refetch so
+// actions (delete/role/new) reflect at once. All fetch via /state and
+// deliver polledMsg, which updates the board without re-arming the SSE
+// waiter.
 // limits:  scheduling and fetch only; rendering the refreshed board is the tabs'
-//          and the data is the hub's (-> client).
+// and the data is the hub's (-> client).
 package tui
 
 import (
@@ -15,8 +15,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/flo-at/sindri/internal/hub/client"
 	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/hub/client"
 )
 
 // waitForState blocks on the /events channel for the next board snapshot, tagging it

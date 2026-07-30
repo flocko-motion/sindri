@@ -1,11 +1,11 @@
 // package: hub/agentchan / tcp
 // type:    logic (macOS agent channel over TCP)
 // job:     on macOS, where a bind-mounted unix socket can't cross the VM boundary,
-//          serve the agent surface over a loopback TCP listener instead,
-//          authenticated by a per-agent bearer token. Where it binds and how a pod
-//          reaches it come from the wired runtime's AgentChannel (podman vs apple).
+// serve the agent surface over a loopback TCP listener instead,
+// authenticated by a per-agent bearer token. Where it binds and how a pod
+// reaches it come from the wired runtime's AgentChannel (podman vs apple).
 // limits:  Linux keeps per-agent unix sockets (agentchan.go); this is the darwin
-//          path. Same handler surface, token-resolved caller.
+// path. Same handler surface, token-resolved caller.
 package agentchan
 
 import (

@@ -1,11 +1,11 @@
 // package: hub/agent / service
 // type:    logic (the agent as an actor — identity, auth, resource config)
 // job:     the hub-side facts about an agent that are NOT the coding tool itself
-//          (that's the adapter/agent port): allocate its machine-unique name, derive
-//          and resolve its bearer token, and read/set its pod memory limit. Backed by
-//          the central store; wakes the board on a change.
+// (that's the adapter/agent port): allocate its machine-unique name, derive
+// and resolve its bearer token, and read/set its pod memory limit. Backed by
+// the central store; wakes the board on a change.
 // limits:  no transport or launch here (-> the hub wires listeners and pods); the
-//          coding agent's own behaviour is the adapter's (-> adapter/agent).
+// coding agent's own behaviour is the adapter's (-> adapter/agent).
 package agent
 
 import (
@@ -43,8 +43,8 @@ type Service struct {
 	launchMu sync.Mutex             // guards launch
 	launch   map[string]*safeBuffer // per-agent launch-output buffers (see launchbuf.go)
 
-	lcMu      sync.Mutex        // guards lifecycle
-	lifecycle map[lcKey]string  // transient launch/stop intent: "launching"|"stopping"
+	lcMu      sync.Mutex       // guards lifecycle
+	lifecycle map[lcKey]string // transient launch/stop intent: "launching"|"stopping"
 }
 
 // New builds the agent module over the hub's store, its Deps, and the agent channel

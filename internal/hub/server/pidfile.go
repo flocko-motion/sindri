@@ -1,13 +1,10 @@
 // package: hub/server / pidfile
 // type:    logic (single-instance guard + version stamp)
 // job:     record the running global hub's pid and build version under the runtime
-//
-//	dir, so a second hub can't start and clients can tell whether the hub
-//	they'd talk to matches their own build.
-//
+// dir, so a second hub can't start and clients can tell whether the hub
+// they'd talk to matches their own build.
 // limits:  just the file; deciding what to do on a version mismatch is the CLI's
-//
-//	(-> cmd/sindri, which offers a restart).
+// (-> cmd/sindri, which offers a restart).
 package server
 
 import (

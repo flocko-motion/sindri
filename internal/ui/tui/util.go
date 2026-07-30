@@ -1,9 +1,9 @@
 // package: tui / util
 // type:    small shared helpers
 // job:     the selector row type and tiny generic helpers used across the
-//          tab/component files.
+// tab/component files.
 // limits:  tiny generic helpers only; no domain logic and no rendering of its
-//          own (-> the tabs/components).
+// own (-> the tabs/components).
 package tui
 
 import (

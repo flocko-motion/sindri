@@ -73,7 +73,7 @@ func TestCommentAvgCoversTypeScript(t *testing.T) {
 	})
 
 	var out bytes.Buffer
-	found, err := CommentAvg([]string{root}, 2.0, false, nil, mustIgnore(t), &out)
+	found, err := CommentAvg([]string{root}, 2.0, 0, false, nil, mustIgnore(t), &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestCommentAvgExcludesHeaderAndTests(t *testing.T) {
 	})
 
 	var out bytes.Buffer
-	found, err := CommentAvg([]string{root}, 2.0, false, nil, mustIgnore(t), &out)
+	found, err := CommentAvg([]string{root}, 2.0, 0, false, nil, mustIgnore(t), &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestCommentAvgThinSampleIsForgiven(t *testing.T) {
 		"src/thin.tsx": tsHeader + eight + "export const a = 1;\n\n" + eight + "export const b = 2;\n",
 	})
 	var out bytes.Buffer
-	found, err := CommentAvg([]string{root}, 2.0, false, nil, mustIgnore(t), &out)
+	found, err := CommentAvg([]string{root}, 2.0, 0, false, nil, mustIgnore(t), &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestBlocksListsEveryOffender(t *testing.T) {
 	root := writeTree(t, map[string]string{"src/Mixed.tsx": body})
 
 	var out bytes.Buffer
-	found, err := CommentAvg([]string{root}, 1.0, true, nil, mustIgnore(t), &out)
+	found, err := CommentAvg([]string{root}, 1.0, 0, true, nil, mustIgnore(t), &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +242,7 @@ func TestBlocksListsEveryOffender(t *testing.T) {
 
 	// Without --blocks the report stays the one-line summary it always was.
 	var plain bytes.Buffer
-	if _, err := CommentAvg([]string{root}, 1.0, false, nil, mustIgnore(t), &plain); err != nil {
+	if _, err := CommentAvg([]string{root}, 1.0, 0, false, nil, mustIgnore(t), &plain); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(plain.String(), "block(s) run over") {
@@ -250,26 +250,23 @@ func TestBlocksListsEveryOffender(t *testing.T) {
 	}
 }
 
-// TestRawStringContentsAreNotComments: a raw string can hold anything, including comment markers.
-// Counting them charged the file that DOCUMENTS the comment convention for containing an example of
-// it — and paying that with real prose is the gaming the rule warns against.
-func TestRawStringContentsAreNotComments(t *testing.T) {
-	src := "// the real comment\nconst example = `\n// package: widget / build\n// type:    logic\n`\ncode()\n"
+// TestBacktickCodeDoesNotHideComments guards a regression that was shipped and reverted: tracking
+// raw strings by backtick parity to stop counting examples inside them. Backtick-heavy code (SQL
+// spanning lines) flipped the state and left 27 real comment lines in one file UNMEASURED — the
+// gate quietly weakened. Over-counting an example is the safer error; never stop counting.
+func TestBacktickCodeDoesNotHideComments(t *testing.T) {
+	src := "q := `SELECT a\nFROM b WHERE c = `+x+`\nORDER BY d`\n// a real comment below backtick-heavy code\ncode()\n"
 	blocks := ScanComments(src)
 	if len(blocks) != 1 {
-		t.Fatalf("one real comment, got %d blocks: %+v", len(blocks), blocks)
+		t.Fatalf("the comment must still be seen, got %d blocks: %+v", len(blocks), blocks)
 	}
 	if blocks[0].Lines != 1 {
-		t.Errorf("only the real comment counts, got %d lines", blocks[0].Lines)
+		t.Errorf("one comment line, got %d", blocks[0].Lines)
 	}
-	// Backticks inside comments are everywhere in this repo; they must not open a raw string.
-	quoted := ScanComments("// use `sindri` for this\n// and `brokkr` for that\ncode()\n")
-	if len(quoted) != 1 || quoted[0].Lines != 2 {
-		t.Errorf("quoted words in comments must stay comments, got %+v", quoted)
-	}
-	// A raw string opened and closed on one line leaves the scanner where it started.
-	if got := ScanComments("const x = `one line`\n// after\ncode()\n"); len(got) != 1 || got[0].Lines != 1 {
-		t.Errorf("a single-line raw string must not swallow what follows, got %+v", got)
+	// Backticks are everywhere in this repo's own comments; they must not change what follows.
+	quoted := ScanComments("// use `sindri` for this\n// and `brokkr`\ncode()\n// after\ncode()\n")
+	if len(quoted) != 2 {
+		t.Errorf("quoted words must not swallow later comments, got %+v", quoted)
 	}
 }
 
@@ -283,7 +280,7 @@ func TestExcerptNamesTheComment(t *testing.T) {
 	// blocks=true: the excerpt lives in the detail listing now. The default line carries line
 	// RANGES instead — you open the file either way, so truncated prose found nothing for you.
 	var out bytes.Buffer
-	found, err := CommentAvg([]string{root}, 0.5, true, nil, mustIgnore(t), &out)
+	found, err := CommentAvg([]string{root}, 0.5, 0, true, nil, mustIgnore(t), &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +304,7 @@ func TestDefaultLineNamesLinesNotProse(t *testing.T) {
 	root := writeTree(t, map[string]string{"src/Wordy.tsx": tsHeader + long + "export const a = 1;\n"})
 
 	var out bytes.Buffer
-	if _, err := CommentAvg([]string{root}, 0.5, false, nil, mustIgnore(t), &out); err != nil {
+	if _, err := CommentAvg([]string{root}, 0.5, 0, false, nil, mustIgnore(t), &out); err != nil {
 		t.Fatal(err)
 	}
 	got := out.String()

@@ -241,7 +241,6 @@ func TestWorkerWithNoTaskIsToldWhatToDo(t *testing.T) {
 	}
 }
 
-
 // visibleFor is the boundary under test: which tasks a caller may read, and whether that set is
 // bounded at all. Exercised directly rather than through CmdTasks, which syncs first — and a
 // temp repo has no task source, so the sync would replace the seeded cache with nothing.

@@ -1,9 +1,9 @@
 // package: hub / sections
 // type:    logic (board badge counts)
 // job:     BoardState's actionable badge counts — the numbers the dashboard sections
-//          (hub/commands) render. BoardState satisfies commands.Board, so the section
-//          registry lives outside the hub while the counting (which needs the whole
-//          cross-module snapshot) stays here.
+// (hub/commands) render. BoardState satisfies commands.Board, so the section
+// registry lives outside the hub while the counting (which needs the whole
+// cross-module snapshot) stays here.
 // limits:  count derivation only; the section list + titles live in hub/commands.
 package hub
 

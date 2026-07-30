@@ -1,9 +1,9 @@
 // package: tui / repo config form
 // type:    ui (repo configuration editor)
 // job:     edit the active repo's .sindri/config.yaml through a form over its keys
-//          (architecture, containerfile, review_prompt, github.issues) instead of
-//          hand-editing YAML — fetch the resolved config, prefill, save via the hub
-//          (which validates, so a broken config is surfaced, never persisted).
+// (architecture, containerfile, review_prompt, github.issues) instead of
+// hand-editing YAML — fetch the resolved config, prefill, save via the hub
+// (which validates, so a broken config is surfaced, never persisted).
 // limits:  form wiring only; the fields/frame are component_form/_field.
 package tui
 

@@ -1,11 +1,11 @@
 // package: tui / agents
 // type:    ui (Agents tab)
 // job:     the Agents tab content — the agent list (status, role, task) with
-//          orphan warnings, and the agent detail pane (state + the lazily-
-//          fetched activity timeline). Status is one word: down|idle|working|
-//          submitted (down ⇒ not running).
+// orphan warnings, and the agent detail pane (state + the lazily-
+// fetched activity timeline). Status is one word: down|idle|working|
+// submitted (down ⇒ not running).
 // limits:  renders agent state only; mutations go through the hub (-> client)
-//          and assembly is the hub's (-> State).
+// and assembly is the hub's (-> State).
 package tui
 
 import (

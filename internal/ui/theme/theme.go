@@ -1,10 +1,8 @@
 // package: ui/theme / theme
 // type:    logic (shared presentation primitives)
 // job:     the deterministic name→colour mapping and the participant markers both
-//
-//	front-ends share, so one name is the same colour and glyph in the CLI and
-//	the TUI instead of each package inventing its own.
-//
+// front-ends share, so one name is the same colour and glyph in the CLI and
+// the TUI instead of each package inventing its own.
 // limits:  colour + glyph derivation only — no layout, no I/O, no widgets.
 package theme
 

@@ -1,14 +1,11 @@
 // package: hub/chat / service
 // type:    logic (the chatroom relay — star topology)
 // job:     the user's one chatroom: membership, the message relay (record + forward
-//
-//	to every participant), the in-chat slash commands, and the required-
-//	participant presence lock. Agent delivery + board notify go through a
-//	Delivery port, so this package doesn't depend on the hub.
-//
+// to every participant), the in-chat slash commands, and the required-
+// participant presence lock. Agent delivery + board notify go through a
+// Delivery port, so this package doesn't depend on the hub.
 // limits:  persistence is store/chat.go; HTTP/CLI/TUI wiring lives in the hub and
-//
-//	cmd/*; no tmux/container/http here.
+// cmd/*; no tmux/container/http here.
 package chat
 
 import (
@@ -25,9 +22,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// Delivery is the hub-provided port for reaching agents and waking live views —
-// the only coupling back to the hub, so chat logic stays independent of tmux and
-// the events bus.
+// Delivery is the only coupling back to the hub, keeping chat off tmux and the bus.
 type Delivery interface {
 	Inject(project, name, text string) error // type a line into an agent's session
 	Running(project, name string) bool       // is the agent's pod up?
@@ -44,26 +39,20 @@ const (
 
 )
 
-// HelpText is the one description of the in-room interface, shared by every surface that
-// offers it: the `/help` reply, the banner `meeting join` prints on entry, and the TUI's
-// chat tab. Exported precisely so those can't drift into three different accounts of the
-// same commands — a user who learns the room in one place knows it in all of them.
+// HelpText is exported so `/help`, the `meeting join` banner and the TUI chat tab can't
+// drift into three different accounts of the same commands.
 const HelpText = "/add <agent> (alias /invite) · /remove <agent> (alias /kick) · /who (list members) · /help. " +
 	"Anything not starting with / is sent to everyone in the room."
 
-// Message notices pushed on membership changes / relaunch. Exported so the hub can
-// re-announce membership when an agent relaunches (MsgReminder).
+// Notices pushed on membership change; exported so the hub can re-announce on relaunch.
 const (
 	MsgWelcome  = "[hub] You've been added to the meeting room. Use `sindri meeting <message>` to emit a message to everybody in the room; you'll also receive the others' messages here, prefixed [meeting]. Use it to coordinate issues with the other agents — tell them what you're working on and listen to what they're working on. The user will lead the discussion to answer an open question as a team."
 	MsgReminder = "[hub] You're in the meeting room: `sindri meeting <message>` talks to everyone in the room, and their messages arrive here prefixed [meeting]."
 	MsgRemoved  = "[hub] You've been removed from the meeting room — `sindri meeting` is no longer available. Carry on with your work."
 )
 
-// Participant markers. These live in the core, not in a UI package, because they are
-// part of the message an agent READS — the relay stamps them into the line it types into
-// an agent's session, so the marker is protocol, not decoration. Deliberately plain
-// UTF-8: an ANSI colour would land in an LLM's input as noise, a glyph survives intact.
-// The front-ends add colour on top (-> ui/theme, which defers to these).
+// Participant markers live in the core, not a UI package: they are stamped into the line
+// an agent READS, so they are protocol. Plain UTF-8 because ANSI would land as noise.
 const (
 	SenderUser   = user   // the human — the one participant an agent must never mistake for a peer
 	SenderSystem = system // the hub speaking for itself
@@ -83,8 +72,7 @@ func Icon(sender string) string {
 	return AgentIcon
 }
 
-// errTooLong is returned when a message exceeds maxLen — actionable feedback for
-// whoever sent it, so callers surface it to the sender.
+// errTooLong is actionable for whoever sent it, so callers must surface it to the sender.
 var errTooLong = fmt.Errorf("message too long — keep it under %d characters (split a longer one into parts)", maxLen)
 
 // Service is the chatroom relay. Construct with New; the hub owns the instance.
@@ -99,9 +87,8 @@ type Service struct {
 // New builds the chat service over the store and a delivery port.
 func New(st *store.Store, d Delivery) *Service { return &Service{store: st, d: d} }
 
-// Add puts an agent in the chatroom and greets it. Errors if the agent doesn't
-// exist or is already a member. The greeting is best-effort (a stopped agent gets
-// reminded on relaunch).
+// Add puts an agent in the room and greets it. The greeting is best-effort: a stopped
+// agent gets reminded on relaunch instead.
 func (s *Service) Add(project, name string) error {
 	if _, ok, err := s.store.For(project).GetAgent(name); err != nil {
 		return err
@@ -123,8 +110,7 @@ func (s *Service) Add(project, name string) error {
 	return err
 }
 
-// Remove takes an agent out of the chatroom and tells it so. Errors if it wasn't a
-// member.
+// Remove takes an agent out of the chatroom and tells it so.
 func (s *Service) Remove(project, name string) error {
 	was, err := s.store.ChatRemove(project, name)
 	if err != nil {
@@ -146,8 +132,7 @@ func (s *Service) IsMember(project, name string) (bool, error) {
 // Members returns the current room roster.
 func (s *Service) Members() ([]store.ChatMember, error) { return s.store.ChatMembers() }
 
-// Transcript returns the recent room transcript (oldest first); a non-positive
-// limit uses the default window.
+// Transcript returns recent messages oldest-first; a non-positive limit uses the default.
 func (s *Service) Transcript(limit int) ([]store.ChatMessage, error) {
 	if limit <= 0 {
 		limit = transcriptLimit
@@ -155,8 +140,7 @@ func (s *Service) Transcript(limit int) ([]store.ChatMessage, error) {
 	return s.store.ChatTranscript(limit)
 }
 
-// Heartbeat records that the user is present (called periodically by `chat join`
-// and the TUI chat tab). Presence keeps the room unlocked.
+// Heartbeat records the user as present, which keeps the room unlocked.
 func (s *Service) Heartbeat() {
 	s.mu.Lock()
 	s.seen = time.Now()
@@ -174,9 +158,8 @@ func (s *Service) Present() bool {
 // Say forwards a message from the user (the discussion leader) to the room.
 func (s *Service) Say(msg string) (store.ChatMessage, error) { return s.broadcast("", user, msg) }
 
-// UserMessage handles one line the user submits: a "/command" the hub executes,
-// else a broadcast. Only this (the user's) path interprets commands, so agents
-// (via Cmd) can never change membership.
+// UserMessage runs a "/command" or broadcasts. Only the user's path interprets commands,
+// so agents (via Cmd) can never change membership.
 func (s *Service) UserMessage(line string) error {
 	line = strings.TrimSpace(line)
 	if line == "" {
@@ -190,8 +173,7 @@ func (s *Service) UserMessage(line string) error {
 	return err
 }
 
-// Cmd is the agent-facing `chat` verb: forward the agent's message to the room.
-// The registry hides it from non-members; here we enforce the presence lock.
+// Cmd is the agent-facing verb; the registry hides it from non-members, this gates presence.
 func (s *Service) Cmd(c registry.Caller, args []string, out io.Writer) (int, error) {
 	msg := strings.TrimSpace(strings.Join(args, " "))
 	if msg == "" {
@@ -213,8 +195,7 @@ func (s *Service) Cmd(c registry.Caller, args []string, out io.Writer) (int, err
 	return 0, nil
 }
 
-// command parses and runs a "/command"; its result is a system line in the
-// transcript (visible to the user, not injected into agents).
+// command runs a "/command"; the result is a transcript line, never injected into agents.
 func (s *Service) command(line string) error {
 	fields := strings.Fields(line)
 	verb := strings.ToLower(strings.TrimPrefix(fields[0], "/"))
@@ -235,8 +216,7 @@ func (s *Service) command(line string) error {
 	}
 }
 
-// membershipCmd runs /add or /remove for one or more agents, resolving each by its
-// globally-unique name. Add/Remove announce the join/leave; only failures reply.
+// membershipCmd runs /add or /remove; Add/Remove announce, so only failures reply here.
 func (s *Service) membershipCmd(args []string, add bool) error {
 	if len(args) == 0 {
 		if add {
@@ -290,8 +270,7 @@ func (s *Service) whoLine() string {
 	return fmt.Sprintf("members (%d): %s", len(members), strings.Join(parts, ", "))
 }
 
-// systemReply records a hub reply in the transcript (not injected into agents) and
-// wakes the user's live views.
+// systemReply records a hub reply for the user only; agents never see it.
 func (s *Service) systemReply(text string) error {
 	if _, err := s.store.ChatAppend(system, text); err != nil {
 		return err
@@ -314,8 +293,7 @@ func (s *Service) findAgentProject(name string) (string, bool, error) {
 	return "", false, nil
 }
 
-// broadcast is the star centre: record the message, forward it to every member
-// agent (skipping the sender), and wake the user's live views.
+// broadcast is the star centre: record, forward to every member but the sender, notify.
 func (s *Service) broadcast(senderProject, senderName, body string) (store.ChatMessage, error) {
 	body = strings.TrimSpace(body)
 	if body == "" {
@@ -332,10 +310,8 @@ func (s *Service) broadcast(senderProject, senderName, body string) (store.ChatM
 	if err != nil {
 		return store.ChatMessage{}, err
 	}
-	// The icon, not colour, marks who spoke: this line is TYPED INTO an agent's session,
-	// so ANSI escapes would land in an LLM's input as noise, while a glyph survives the
-	// trip intact. It matters most for the human — an agent must never mistake the user
-	// for a peer, and "👤 user" says so in every message rather than only in the brief.
+	// An icon, not colour: this line is TYPED INTO a session, where ANSI would be noise.
+	// It also marks the human in every message, so no agent mistakes them for a peer.
 	line := fmt.Sprintf("[meeting] %s %s: %s", Icon(senderName), senderName, body)
 	for _, m := range members {
 		if m.Project == senderProject && m.Name == senderName {
@@ -347,9 +323,8 @@ func (s *Service) broadcast(senderProject, senderName, body string) (store.ChatM
 	return msg, nil
 }
 
-// deliver injects one chat line into an agent's session and logs it. Best-effort:
-// an offline agent is skipped, an injection error is logged upstream via the port's
-// own reporting — a chat line never fails a broadcast (it stays in the transcript).
+// deliver injects one line into an agent's session. Best-effort: offline agents are
+// skipped and errors only logged, because a delivery must never fail a broadcast.
 func (s *Service) deliver(project, name, line string) {
 	if !s.d.Running(project, name) {
 		return

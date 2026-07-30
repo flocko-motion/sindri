@@ -1,7 +1,7 @@
 // package: main (brokkr) / map
 // type:    command
 // job:     wires `brokkr map` — a structured overview of a Go tree to navigate by
-//          (per file: the arch header + each type/func with its doc and signature).
+// (per file: the arch header + each type/func with its doc and signature).
 // limits:  logic lives in internal/codemap; this only wires flags.
 package main
 

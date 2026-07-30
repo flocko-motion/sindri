@@ -1,9 +1,9 @@
 // package: hub/commands / sections
 // type:    logic (dashboard section registry)
 // job:     the ordered dashboard tabs every UI renders and how each derives its
-//          actionable badge count. The count reads from an injected Board — the hub
-//          owns the cross-module snapshot (its BoardState) and satisfies this
-//          interface, so the section registry lives here without importing the hub.
+// actionable badge count. The count reads from an injected Board — the hub
+// owns the cross-module snapshot (its BoardState) and satisfies this
+// interface, so the section registry lives here without importing the hub.
 // limits:  the section list + count rule only; the data comes from the injected Board.
 package commands
 

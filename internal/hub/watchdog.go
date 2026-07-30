@@ -1,10 +1,10 @@
 // package: hub / watchdog
 // type:    logic (agent liveness observer)
 // job:     own what the hub believes about every agent's liveness — one loop probing on a
-//          fixed cadence, so a board read reports the last observation instead of taking
-//          one, and a single lost probe never flips an agent to "down".
+// fixed cadence, so a board read reports the last observation instead of taking
+// one, and a single lost probe never flips an agent to "down".
 // limits:  liveness and dial-in counts only; how a status word is chosen from liveness +
-//          phase stays in agent.AgentStatus, and the board assembly in state.go.
+// phase stays in agent.AgentStatus, and the board assembly in state.go.
 package hub
 
 import (
@@ -17,19 +17,15 @@ import (
 )
 
 const (
-	// watchInterval is how often the fleet is observed. Under the TUI's 3s poll, so the board
-	// is never showing an observation the next poll would have replaced anyway.
+	// watchInterval is the observation cadence — under the TUI's 3s poll, so no reading is wasted.
 	watchInterval = 2 * time.Second
 
-	// watchProbeParallel bounds concurrent container commands. Each is a process spawn, and
-	// spawns do not parallelise — 24 at once measure ~3.2s where one is ~0.2s — so a small
-	// window finishes a sweep sooner than a full fan-out does.
+	// watchProbeParallel bounds concurrent container commands: process spawns do not parallelise
+	// (24 at once ~3.2s, one ~0.2s), so a small window finishes a sweep sooner than a fan-out.
 	watchProbeParallel = 4
 
-	// downStrikes is how many consecutive failed probes declare an agent down. A probe that
-	// loses a race is not evidence: the previous ones said the agent was up, and one
-	// contended exec cannot outweigh them. This is the hysteresis a per-request probe could
-	// never have, because each request started with no history.
+	// downStrikes is how many consecutive failed probes declare an agent down: one contended exec
+	// is not evidence. Hysteresis a per-request probe could never have, starting with no history.
 	downStrikes = 3
 )
 
@@ -42,8 +38,7 @@ type liveness struct {
 	seen    time.Time
 }
 
-// watchdog observes agent liveness on a loop. One instance per hub, started by New and
-// stopped by Close.
+// watchdog observes agent liveness on a loop; one per hub, started by New, stopped by Close.
 type watchdog struct {
 	h *Hub
 
@@ -53,14 +48,9 @@ type watchdog struct {
 	done chan struct{}
 }
 
-// newWatchdog builds the observer and starts it. It must not block: New runs before Serve
-// answers the socket, so a full sweep here delayed the hub's own startup past the health check
-// — 14 agents at two container commands each, behind a 4-wide gate, is seconds of podman.
-//
-// A listing-only first pass is the compromise. One command (~50ms) is cheap enough to wait for
-// and settles most of the fleet correctly: a pod that is absent is conclusively down. Pods that
-// exist are taken as up provisionally, which the first real sweep confirms or corrects within a
-// tick — better than reporting a running fleet as down for the first two seconds.
+// newWatchdog builds and starts the observer. It must not block — New runs before Serve answers
+// the socket, and a full sweep (14 agents × 2 commands, 4-wide) delayed startup past the health
+// check — so the first pass only lists: absent pods are down, existing ones provisionally up.
 func newWatchdog(h *Hub) *watchdog {
 	w := &watchdog{h: h, obs: map[agentKey]liveness{}, stop: make(chan struct{}), done: make(chan struct{})}
 	w.seed()
@@ -123,12 +113,8 @@ func (w *watchdog) get(project, name string) (liveness, bool) {
 	return l, ok
 }
 
-// sweep takes one reading of the whole fleet: one listing for "which pods exist", then a tmux
-// probe per agent that has one.
-//
-// The listing is what makes this cheap — it answers for every container at once, so the
-// per-agent cost applies only to agents whose pod is actually there. An agent with no pod is
-// down immediately, with no probe and no strikes: absence is conclusive.
+// sweep reads the fleet: one listing of which pods exist — cheap, it answers for every container
+// at once — then a tmux probe per agent that has one. No pod is down at once; absence is conclusive.
 func (w *watchdog) sweep() {
 	agents, err := w.h.store.AllAgents()
 	if err != nil {
@@ -160,8 +146,7 @@ func (w *watchdog) sweep() {
 	wg.Wait()
 }
 
-// probe observes one agent: its tmux session (liveness plus the dial-in count in one command)
-// and, when up, what Claude is doing. A failure records a strike rather than a verdict.
+// probe reads one agent's tmux session and, when up, Claude's state; a failure is a strike only.
 func (w *watchdog) probe(a store.Agent) {
 	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
 	defer cancel()
@@ -174,13 +159,8 @@ func (w *watchdog) probe(a store.Agent) {
 	w.record(a, true, len(cs), rt, false)
 }
 
-// record folds one observation into the agent's liveness, applying the strike rule.
-//
-// conclusive marks a verdict that needs no corroboration — the pod is absent from the listing,
-// so there is nothing to be racing. Everything else builds or clears strikes: a success clears
-// them at once, while a failure only reports down once downStrikes have accumulated. Until
-// then the agent keeps its previous state, and keeps its dial-in count and runtime with it,
-// so a contended probe does not blank the row it failed to read.
+// record folds one observation in: a conclusive verdict (pod absent, nothing raced) stands alone, a
+// success clears strikes, a failure holds the previous state and its counts until downStrikes.
 func (w *watchdog) record(a store.Agent, up bool, clients int, runtime string, conclusive bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()

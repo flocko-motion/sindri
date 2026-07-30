@@ -1,9 +1,9 @@
 // package: tui / repos tab
 // type:    ui (the Repos tab — the registry surface)
 // job:     list the repos the hub tracks (the TUI counterpart of `sindri repo …`):
-//          each in its colour, with agent count and live/current markers; enter
-//          switches to a repo, D forgets it (agent-guarded, files kept). Detail shows
-//          the repo's path, agents, and PRs.
+// each in its colour, with agent count and live/current markers; enter
+// switches to a repo, D forgets it (agent-guarded, files kept). Detail shows
+// the repo's path, agents, and PRs.
 // limits:  rendering + action wiring; the registry lives in the hub (repo.go).
 package tui
 

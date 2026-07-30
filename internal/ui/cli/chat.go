@@ -1,11 +1,9 @@
 // package: ui/cli / chat
 // type:    command (host CLI)
 // job:     the user's control over the one meeting room: `meeting add`/`meeting remove`
-//
-//	to curate who's in the room, `meeting join` to enter it interactively (read
-//	the live feed, type to broadcast as [user]), `meeting log` for the transcript,
-//	and bare `meeting` for who's in the room plus what you can do.
-//
+// to curate who's in the room, `meeting join` to enter it interactively (read
+// the live feed, type to broadcast as [user]), `meeting log` for the transcript,
+// and bare `meeting` for who's in the room plus what you can do.
 // limits:  thin calls into the backend; the relay + persistence live in the hub.
 package cli
 
@@ -33,10 +31,8 @@ func NewChatCmd() *cobra.Command {
 			"Add agents to pull them in, then `meeting join` to lead the discussion; agents " +
 			"talk with `sindri meeting <message>` from inside their pods.",
 		Args: cobra.NoArgs,
-		// Bare `sindri meeting`: who's in the room, then what you can do. It used to dump
-		// the whole transcript (up to 200 messages), which buried the one thing a bare
-		// command should answer — what are my options. The transcript moved to `meeting log`,
-		// where asking for it is deliberate.
+		// Bare `sindri meeting`: who's in the room, then your options. The transcript moved to
+		// `meeting log`, where asking for it is deliberate.
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			_ = withBackend(func(b backend) error {
 				v, err := b.Chat()
@@ -85,8 +81,7 @@ func chatAddCmd() *cobra.Command {
 		Use: "add <agent...>", Short: "Add one or more agents to the meeting room", Args: cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			for _, name := range args {
-				// withAgent resolves the agent's project (re-scoping the client), so an
-				// agent in another repo is added under its own project.
+				// withAgent re-scopes the client to the agent's project, so a cross-repo agent is added under its own.
 				if err := withAgent(name, func(b backend, a *hub.AgentView) error {
 					return b.ChatAdd(a.Name)
 				}); err != nil {
@@ -127,16 +122,13 @@ func chatJoinCmd() *cobra.Command {
 	}
 }
 
-// chatJoin runs the interactive session: a background reader prints every new
-// message from the hub's live stream, while the foreground reads the user's lines
-// and posts them as [user]. Ends on Ctrl-D (EOF) or /quit.
+// chatJoin runs the interactive session: a background reader prints the hub's live stream while the
+// foreground posts the user's lines as [user]. Ends on Ctrl-D or /quit.
 func chatJoin(cmd *cobra.Command, b backend) error {
 	if v, err := b.Chat(); err == nil {
 		fmt.Print(renderMembers(v))
 	}
-	// Spell the interface out on entry. The one-liner this replaces mentioned /help and
-	// left it at that, so the commands that actually matter — pulling agents INTO the room
-	// — were a guess away. Same text the /help reply and the TUI use (hub.ChatHelpText).
+	// Spell the interface out on entry — the same text the /help reply and the TUI use (hub.ChatHelpText).
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "Joined as %s %s — you lead the discussion; everything you type reaches every member.\n",
 		theme.UserIcon, theme.NameStyle(theme.SenderUser).Render(theme.SenderUser))
@@ -147,8 +139,7 @@ func chatJoin(cmd *cobra.Command, b backend) error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// Heartbeat while joined: the user is a required participant, so a live join keeps
-	// the room unlocked. Beat now and every few seconds until the session ends.
+	// Heartbeat while joined: the user is a required participant, so a live join keeps the room unlocked.
 	_ = b.ChatHeartbeat()
 	go func() {
 		t := time.NewTicker(5 * time.Second)
@@ -166,9 +157,8 @@ func chatJoin(cmd *cobra.Command, b backend) error {
 	if err != nil {
 		return err
 	}
-	// The stream re-sends the whole recent transcript on connect and on every
-	// change; print only messages we haven't shown yet (monotonic ids). Owned
-	// solely by this goroutine, so no locking.
+	// The stream re-sends the whole transcript on every change; print only unseen ids. No locking:
+	// this goroutine owns them.
 	go func() {
 		var lastSeen int64
 		prev := "" // carried across stream pushes so grouping survives a reconnect
@@ -215,15 +205,9 @@ func renderChat(v hub.ChatView) string {
 	return sb.String()
 }
 
-// chatMsgLine formats one transcript message as a speaker header (time · icon · name,
-// the name in its own deterministic colour) followed by the indented body. Every line
-// of a multi-line message keeps that indent, so where one person stops and the next
-// starts is obvious at a glance — the flat "HH:MM sender: body" it replaces ran
-// everyone's words together into an unreadable wall.
-//
-// prev is the previous message's sender ("" for the first): a change of speaker gets a
-// blank line before the header, and a run from the same speaker prints body only. That
-// grouping is what makes a long transcript skimmable.
+// chatMsgLine formats one message as a speaker header (time · icon · coloured name) plus an indented
+// body, so where one speaker stops and the next starts is obvious. prev is the previous sender: a new
+// speaker gets a blank line and a header, a run from the same speaker prints body only.
 func chatMsgLine(m store.ChatMessage, prev string) string {
 	body := indentBody(m.Sender, m.Body)
 	if m.Sender == prev {
@@ -240,9 +224,8 @@ func chatMsgLine(m store.ChatMessage, prev string) string {
 	return lead + head + "\n" + body
 }
 
-// indentBody indents every line of a message body under its header and paints it in the
-// speaker's colour. Styled per line rather than as one block, so each line carries its own
-// escape codes and survives the terminal's own soft-wrapping intact.
+// indentBody indents a body under its header in the speaker's colour. Styled per line, so each line
+// carries its own escape codes and survives the terminal's soft-wrapping intact.
 func indentBody(sender, body string) string {
 	style := theme.BodyStyle(sender)
 	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
@@ -264,18 +247,15 @@ func chatTS(ts string) string {
 	return t.Local().Format("15:04")
 }
 
-// renderMembers lists who is in the room, the user first. The stored roster holds only
-// AGENTS — the user is a permanent participant (and a required one: presence unlocks the
-// room), never a row in it. So an empty roster meant "no agents yet", and calling that
-// "the meeting room is empty" told the user they weren't somewhere they were standing.
-// Listing them explicitly also shows which name and colour agents will see them under.
+// renderMembers lists who is in the room, the user first: the roster stores only AGENTS, so an empty
+// one means "no agents yet", not an empty room — the user is a permanent, required participant.
 func renderMembers(v hub.ChatView) string {
 	parts := []string{theme.Icon(theme.SenderUser) + " " +
 		theme.NameStyle(theme.SenderUser).Render(theme.SenderUser) + theme.Dim().Render(" (you)")}
 	for _, m := range v.Members {
 		entry := theme.Icon(m.Name) + " " + theme.NameStyle(m.Name).Render(m.Name)
 		if m.Role != "" {
-			entry += theme.Dim().Render(" ("+m.Role+")")
+			entry += theme.Dim().Render(" (" + m.Role + ")")
 		}
 		parts = append(parts, entry)
 	}

@@ -1,8 +1,8 @@
 // package: tui / layout
 // type:    ui (geometry)
 // job:     the dashboard's size arithmetic — body height under the tab strip and
-//          footer, and the master/detail column split — shared by every tab's
-//          render so the panes line up.
+// footer, and the master/detail column split — shared by every tab's
+// render so the panes line up.
 // limits:  pure geometry off the model's width/height; no state, no rendering.
 package tui
 

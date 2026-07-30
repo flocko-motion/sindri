@@ -1,9 +1,9 @@
 // package: tui / tab_chat
 // type:    ui (the Chat tab body)
 // job:     render the user's chatroom — a members header plus the live transcript
-//          (latest at the bottom), streamed in via BoardState.Chat. Composing is
-//          enter -> a one-line input posted as the user (-> component_input); who's
-//          in the room is curated from the CLI (`sindri chat add/remove`).
+// (latest at the bottom), streamed in via BoardState.Chat. Composing is
+// enter -> a one-line input posted as the user (-> component_input); who's
+// in the room is curated from the CLI (`sindri chat add/remove`).
 // limits:  view only; no membership editing, no scrollback (shows the tail).
 package tui
 
@@ -17,8 +17,7 @@ import (
 	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
-// startComposing opens the multiline composer in the Chat tab's main pane and
-// focuses it. Returns the cursor-blink cmd.
+// startComposing opens the multiline composer in the Chat tab's main pane and focuses it.
 func (m *model) startComposing() tea.Cmd {
 	m.sizeComposer()
 	m.composer.Reset()
@@ -26,18 +25,15 @@ func (m *model) startComposing() tea.Cmd {
 	return m.composer.Focus()
 }
 
-// sizeComposer sizes the composer to the terminal width and a modest slice of the
-// body height (so the transcript stays readable above it).
+// sizeComposer fits the composer to the width and a slice of the body, leaving the transcript room.
 func (m *model) sizeComposer() {
 	m.composer.SetWidth(m.w)
 	h := clampInt(m.bodyHeight()/3, 3, 8)
 	m.composer.SetHeight(h)
 }
 
-// updateComposer routes a keypress while the composer is open: esc cancels, ctrl+s
-// sends (enter inserts a newline — this is multiline), ctrl+c still quits; anything
-// else edits. Sending goes through the hub, which enforces the length cap and hands
-// back "too long" feedback rather than truncating.
+// updateComposer routes a keypress while composing: esc cancels, ctrl+s sends (enter is a newline —
+// this is multiline), ctrl+c quits. The hub caps length and says "too long" rather than truncating.
 func (m model) updateComposer(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
@@ -67,15 +63,12 @@ func (m model) updateComposer(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// chatBody renders the Chat tab: a fixed members header, a divider, then as much
-// of the transcript tail as fits (newest at the bottom, like a chat log). The
-// footer's "enter compose" hint drives posting.
+// chatBody renders the Chat tab: members header, divider, then the transcript tail, newest last.
 func (m model) chatBody() string {
 	v := m.state.Chat
 	h := m.bodyHeight()
 
-	// When composing, the multiline editor occupies the bottom of the pane (with a
-	// divider above it); the transcript takes what's left.
+	// When composing, the editor takes the bottom of the pane; the transcript takes what's left.
 	var composerLines []string
 	transcriptH := h
 	if m.composing {
@@ -94,8 +87,7 @@ func (m model) chatBody() string {
 			msgs = append(msgs, chatLines(msg, prev)...)
 			prev = msg.Sender
 		}
-		// Word-wrap to the pane width so long messages are readable in full instead
-		// of running off the edge (the whole point of a chat you can follow).
+		// Word-wrap to the pane width: a long message must read in full, not run off the edge.
 		msgs = wrapContent(msgs, max(1, m.w))
 	}
 	if len(msgs) > avail { // keep the newest that fit
@@ -110,17 +102,14 @@ func (m model) chatBody() string {
 	for i := range tlines {
 		tlines[i] = padTrunc(tlines[i], m.w)
 	}
-	// The composer lines render themselves (textarea manages its own width/cursor),
-	// so they're appended raw — not run through padTrunc.
+	// The textarea manages its own width/cursor, so its lines go in raw — not through padTrunc.
 	return strings.Join(append(tlines, composerLines...), "\n")
 }
 
-// chatMembersLine summarizes who's in the room (name + role), or nudges the user
-// to add someone when it's empty.
+// chatMembersLine summarizes who's in the room, or nudges the user to add someone when empty.
 func chatMembersLine(v hub.ChatView) string {
-	// The user first: the stored roster holds only AGENTS, so an empty one means "no agents
-	// yet", not an empty room — the user is always a participant. Same reasoning (and the
-	// same shape) as the CLI's renderMembers.
+	// The user first: the roster holds only AGENTS, so an empty one means "no agents yet", not an
+	// empty room — the user is always a participant. Same shape as the CLI's renderMembers.
 	parts := []string{theme.Icon(theme.SenderUser) + " " +
 		theme.NameStyle(theme.SenderUser).Render(theme.SenderUser) + dimStyle.Render(" (you)")}
 	for _, mem := range v.Members {
@@ -132,21 +121,15 @@ func chatMembersLine(v hub.ChatView) string {
 	}
 	line := strings.Join(parts, " · ")
 	if len(v.Members) == 0 {
-		// The same interface description the CLI's join banner and /help print, so the room
-		// reads identically wherever you meet it (-> hub.ChatHelpText).
+		// The same description the CLI's join banner and /help print (-> hub.ChatHelpText).
 		line += dimStyle.Render(" — no agents yet; press enter, then " + theme.HelpText)
 	}
 	return line
 }
 
-// chatLines formats one transcript message as a speaker header (time · icon · name, the
-// name in its own deterministic colour from ui/theme — the same colour the CLI gives it)
-// followed by the indented body, split on the body's own newlines so a multi-line message
-// keeps its structure (the caller then word-wraps each line to the pane width).
-//
-// prev is the previous message's sender ("" for the first): a change of speaker gets a
-// blank line above the header, and a run from one speaker repeats neither icon nor name.
-// Grouping is what makes a long transcript skimmable instead of a wall of "name: text".
+// chatLines formats one message as a speaker header (time · icon · name, the name in its own
+// deterministic ui/theme colour, as in the CLI) plus the body, split on its own newlines. prev
+// groups a speaker's run — no repeated header, a blank line on a change — so a transcript skims.
 func chatLines(msg store.ChatMessage, prev string) []string {
 	body := strings.Split(strings.TrimRight(msg.Body, "\n"), "\n")
 	out := make([]string, 0, len(body)+2)
@@ -160,8 +143,7 @@ func chatLines(msg store.ChatMessage, prev string) []string {
 		}
 		out = append(out, head)
 	}
-	// The words carry the speaker's colour too, not just the name — attribution has to
-	// survive a multi-line message and the pane's word-wrap (ansi.Wrap preserves styles).
+	// The body carries the speaker's colour too, so attribution survives wrap (ansi.Wrap keeps it).
 	style := theme.BodyStyle(msg.Sender)
 	for _, seg := range body {
 		if seg == "" {

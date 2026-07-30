@@ -1,10 +1,10 @@
 // package: lint / ignore
 // type:    logic
 // job:     compiles --ignore patterns (and a repo's .brokkrignore file) into a path
-//          matcher the linters consult to skip files they shouldn't flag (generated
-//          code we can't fix).
+// matcher the linters consult to skip files they shouldn't flag (generated
+// code we can't fix).
 // limits:  matches paths only — it doesn't read files or know which linter asks;
-//          the pattern syntax is documented on NewIgnore.
+// the pattern syntax is documented on NewIgnore.
 package lint
 
 import (

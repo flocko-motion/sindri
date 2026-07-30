@@ -85,7 +85,7 @@ func TestCommentAvgHonoursTheCap(t *testing.T) {
 	root := writeTree(t, files)
 
 	var out bytes.Buffer
-	found, err := CommentAvg([]string{root}, 2.0, false, NewCap(3), mustIgnore(t), &out)
+	found, err := CommentAvg([]string{root}, 2.0, 0, false, NewCap(3), mustIgnore(t), &out)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,9 +1,9 @@
 // package: adapter/tasks / tasks
 // type:    logic (the task-source PORT)
 // job:     the generic interface a task source implements — is it usable for a repo,
-//          and fetch its tasks normalized to the domain Task entity (owning its id
-//          scheme). td, spec, github each implement it; the hub iterates sources and
-//          layers its own policy (GitHub opt-in + TTL, priority overrides) on top.
+// and fetch its tasks normalized to the domain Task entity (owning its id
+// scheme). td, spec, github each implement it; the hub iterates sources and
+// layers its own policy (GitHub opt-in + TTL, priority overrides) on top.
 // limits:  no hub policy here — a Source just fetches + normalizes.
 package tasks
 

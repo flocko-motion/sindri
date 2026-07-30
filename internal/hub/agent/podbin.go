@@ -1,7 +1,7 @@
 // package: hub/agent / podbin
 // type:    logic
 // job:     keep pod-bin holding current copies of the host-built tools agents run, so a
-//          rebuild reaches running agents without recreating their containers.
+// rebuild reaches running agents without recreating their containers.
 // limits:  copies and reports; mounting is the launch path's, building the Makefile's.
 package agent
 

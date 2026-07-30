@@ -1,10 +1,10 @@
 // package: hub/workflow / planner
 // type:    logic (the planner's verb surface)
 // job:     the verbs a planner drives the backlog with — read it as a tree (task list,
-//          task <id>), propose work into it (create-task, parented so a proposal joins an
-//          existing change or task), and set its own resting state.
+// task <id>), propose work into it (create-task, parented so a proposal joins an
+// existing change or task), and set its own resting state.
 // limits:  command surface only; task creation itself is task.go's (CreateTask) and
-//          persistence the store's.
+// persistence the store's.
 package workflow
 
 import (

@@ -1,12 +1,12 @@
 // package: hub/agent / lifecycle
 // type:    logic (the agent pod lifecycle)
 // job:     the mechanics of managing an agent's pod — register (New), Launch a pod
-//          that assumes its identity, Stop (keep identity), Delete (full teardown),
-//          Rebuild (fresh image + relaunch), plus the transient launching/stopping
-//          intent the board reconciles. Triggers come from outside; this does the work.
+// that assumes its identity, Stop (keep identity), Delete (full teardown),
+// Rebuild (fresh image + relaunch), plus the transient launching/stopping
+// intent the board reconciles. Triggers come from outside; this does the work.
 // limits:  git/container/tmux go through the adapters; the system prompt + branch
-//          names come from workflow, the coding agent's home from adapter/agent, the
-//          socket from agentchan. What to inject on rehydrate is the hub's (via Deps).
+// names come from workflow, the coding agent's home from adapter/agent, the
+// socket from agentchan. What to inject on rehydrate is the hub's (via Deps).
 package agent
 
 import (

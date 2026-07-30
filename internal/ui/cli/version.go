@@ -1,9 +1,9 @@
 // package: ui/cli / version
 // type:    command (host CLI)
 // job:     `sindri version` — print the build version AND the Go version the binary
-//          was compiled with. The Go version is the diagnostic that matters: the
-//          agent's mounted tools (brokkr/worker) run the Go this binary was built
-//          with, so a stale toolchain here shows up as stale Go in the agents.
+// was compiled with. The Go version is the diagnostic that matters: the
+// agent's mounted tools (brokkr/worker) run the Go this binary was built
+// with, so a stale toolchain here shows up as stale Go in the agents.
 // limits:  read-only; just prints.
 package cli
 

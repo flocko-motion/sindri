@@ -1,10 +1,8 @@
 // package: hub/workflow / resolve
 // type:    logic (worker-driven merge-conflict resolution)
 // job:     the `resolve` verb — bring a worker's submitted branch up to its base,
-//
-//	surfacing any conflict into the worker's workspace for it to edit while
-//	the hub drives all git; once clean, renew the PR for review.
-//
+// surfacing any conflict into the worker's workspace for it to edit while
+// the hub drives all git; once clean, renew the PR for review.
 // limits:  git mechanics live in adapter/git; the merge gate lives in workflow_pr.
 package workflow
 

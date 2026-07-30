@@ -1,7 +1,7 @@
 // package: lint / deadcode
 // type:    logic
 // job:     the dead-code linter — a library port of x/tools/cmd/deadcode that
-//          reports source functions unreachable from any main (via RTA).
+// reports source functions unreachable from any main (via RTA).
 // limits:  reports only; CLI wiring and exit codes live in cmd/sindri/lint.go.
 package lint
 

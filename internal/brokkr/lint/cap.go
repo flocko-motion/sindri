@@ -1,7 +1,7 @@
 // package: lint / cap
 // type:    logic (output budget)
 // job:     bound how many findings a run prints, so a repo-wide failure arrives as a
-//          list someone can work off rather than a wall that scrolls away.
+// list someone can work off rather than a wall that scrolls away.
 // limits:  counts and writes the closing note; each linter decides what one finding is.
 package lint
 

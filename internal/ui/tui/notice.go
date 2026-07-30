@@ -1,9 +1,9 @@
 // package: tui / notice
 // type:    ui (startup notices)
 // job:     the text of the one-off warning shown at startup when the project
-//          expects a tool that isn't installed (currently: openspec).
+// expects a tool that isn't installed (currently: openspec).
 // limits:  just the message; detection is in Run (-> tui.go) and rendering is the
-//          warning modal (-> component_modal.go).
+// warning modal (-> component_modal.go).
 package tui
 
 // openspecMissingNotice warns at startup when the project uses openspec (it has

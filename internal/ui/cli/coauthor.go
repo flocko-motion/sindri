@@ -1,11 +1,11 @@
 // package: ui/cli / coauthor
 // type:    command (host CLI)
 // job:     wires `sindri coauthor` — the one-step pairing entry: ensure a hub is
-//          running (start a detached one if not), reuse or create the single
-//          coauthor agent, launch it if down, and attach to its live session.
+// running (start a detached one if not), reuse or create the single
+// coauthor agent, launch it if down, and attach to its live session.
 // limits:  composes existing hub/client/pod operations; no new hub behaviour. The
-//          hub it starts is a normal background `sindri hub start`, so `sindri tui` in
-//          another terminal works alongside it.
+// hub it starts is a normal background `sindri hub start`, so `sindri tui` in
+// another terminal works alongside it.
 package cli
 
 import (

@@ -1,15 +1,12 @@
 // package: adapter/agent/claude / home
 // type:    adapter (Claude Code — provisions a pod's Claude home)
 // job:     write a per-agent Claude home the pod mounts — seed host credentials
-//
-//	(file, or the macOS Keychain), the config that pre-accepts onboarding +
-//	the /workspace trust dialog, the tool-permission settings, and the
-//	workflow-composed system prompt. The mechanics behind agent.PrepareHome.
-//
+// (file, or the macOS Keychain), the config that pre-accepts onboarding +
+// the /workspace trust dialog, the tool-permission settings, and the
+// workflow-composed system prompt. The mechanics behind agent.PrepareHome.
 // limits:  Claude-specific files only; the system prompt is handed in already
-//
-//	composed (the workflow owns that logic), and WHERE the home lives is the
-//	hub's call (spec.Dir). No podman/tmux (-> the hub wires the mounts).
+// composed (the workflow owns that logic), and WHERE the home lives is the
+// hub's call (spec.Dir). No podman/tmux (-> the hub wires the mounts).
 package claude
 
 import (

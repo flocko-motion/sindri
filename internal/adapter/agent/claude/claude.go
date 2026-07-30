@@ -1,11 +1,11 @@
 // package: adapter/agent/claude / claude
 // type:    adapter (Claude Code — implements adapter/agent.Agent)
 // job:     the Claude Code backend of the coding-agent port: classify a Claude pane's
-//          live runtime state (working/blocked/idle/unknown) from its rendered screen
-//          text. Patterns and precedence borrowed from herdr's claude.toml so sindri
-//          reports the same runtime states herdr's sidebar shows.
+// live runtime state (working/blocked/idle/unknown) from its rendered screen
+// text. Patterns and precedence borrowed from herdr's claude.toml so sindri
+// reports the same runtime states herdr's sidebar shows.
 // limits:  Claude Code only. Pure text classification, no I/O — the caller supplies
-//          the captured pane (tmux capture-pane).
+// the captured pane (tmux capture-pane).
 package claude
 
 import (

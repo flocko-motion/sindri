@@ -1,8 +1,8 @@
 // package: ui/cli / agent
 // type:    command (host CLI)
 // job:     the `sindri agent` subcommands other than attach — list, new, delete,
-//          pane, start, stop, restart, tell, info — each a thin call into the hub
-//          backend. Attach is its own file (attach.go).
+// pane, start, stop, restart, tell, info — each a thin call into the hub
+// backend. Attach is its own file (attach.go).
 // limits:  no logic; every verb marshals to the hub via the backend port.
 package cli
 
@@ -20,11 +20,8 @@ import (
 	"golang.org/x/term"
 )
 
-// agentPreflight warns — without blocking — when podman is unreachable. Every
-// agent subcommand ultimately needs pods, so infrastructure being offline is the
-// likeliest reason nothing works; say so up front (e.g. "all agents down") instead
-// of leaving the user to infer it. The probe is time-bounded (see container.Healthy) so
-// a wedged VM can't hang the command.
+// agentPreflight warns without blocking when podman is unreachable: it is the likeliest
+// reason nothing works, so say so rather than let the user infer it from "all agents down".
 func agentPreflight(*cobra.Command, []string) {
 	if ok, hint := container.Healthy(); !ok {
 		fmt.Fprintf(os.Stderr, "warning: %s\n", hint)
@@ -51,12 +48,8 @@ func projectRoot(projects []store.Project, tag string) string {
 	return ""
 }
 
-// warnCrossRepo raises awareness when the target agent lives in a different repo
-// than the caller's cwd — the CLI manages agents globally, like the TUI, so this
-// never fails, it just makes the context switch conscious. On a terminal it asks
-// to proceed (declining returns false); non-interactively it proceeds after the
-// note. cwdRoot=="" (outside any repo), or an unknown/matching project, means
-// there's nothing to cross. Shared by every agent subcommand, incl. attach.
+// warnCrossRepo makes reaching into another repo conscious without ever failing: the CLI is
+// global like the TUI. A terminal is asked to confirm; non-interactive proceeds after the note.
 func warnCrossRepo(a *hub.AgentView, cwdRoot, agentRoot string) bool {
 	if cwdRoot == "" || agentRoot == "" || agentRoot == cwdRoot {
 		return true
@@ -68,11 +61,8 @@ func warnCrossRepo(a *hub.AgentView, cwdRoot, agentRoot string) bool {
 	return promptYesNo(fmt.Sprintf("act on it in %s's context?", a.Repo))
 }
 
-// withAgent runs a hub operation on the agent named `name`, resolved from the
-// global roster and scoped to its own project — so any agent is manageable from
-// any cwd (the CLI is global, like the TUI), not just those in the current repo.
-// It warns on a cross-repo reach instead of failing with "no such agent". fn gets
-// a backend scoped to the agent's project.
+// withAgent resolves name in the global roster and hands fn a backend scoped to the agent's
+// own project, so any agent is manageable from any cwd instead of erroring "no such agent".
 func withAgent(name string, fn func(b backend, a *hub.AgentView) error) error {
 	root, _ := repoRoot() // "" outside any repo — then there's no cwd context to cross
 	b, err := open(root)
@@ -132,9 +122,7 @@ func agentListCmd() *cobra.Command {
 	}
 }
 
-// agentStatsCmd shows each running agent's VM memory usage against its limit — the
-// view for tuning per-agent memory (how close each micro-VM is to its ceiling).
-// Optional name arg narrows to one agent. Down agents are omitted (no VM to sample).
+// agentStatsCmd is the view for tuning per-agent memory; down agents have no VM to sample.
 func agentStatsCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "stats [name]", Short: "Show each running agent's VM memory usage vs its limit", Args: cobra.MaximumNArgs(1),
@@ -182,8 +170,7 @@ func memLine(usage, limit int64) string {
 	return fmt.Sprintf("%9s / %-9s %3.0f%% %s", humanBytes(usage), humanBytes(limit), pct, memBar(pct))
 }
 
-// humanBytes formats a byte count in binary units (matches how memory limits are
-// configured — 1024 MiB == the 1 GiB default).
+// humanBytes uses binary units, matching how memory limits are configured.
 func humanBytes(n int64) string {
 	const u = 1024
 	if n < u {
@@ -233,8 +220,7 @@ func agentNewCmd() *cobra.Command {
 	return c
 }
 
-// agentMemoryCmd sets (or resets) an agent's RAM limit. Takes effect on the agent's
-// next start/restart — a running container's limit is fixed when it's created.
+// agentMemoryCmd applies on next start: a running container's limit is fixed at creation.
 func agentMemoryCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "memory <name> <size>", Short: "Set an agent's container RAM limit (e.g. 4g, 512m; 'default' to reset)", Args: cobra.ExactArgs(2),
@@ -299,9 +285,7 @@ func agentStartCmd() *cobra.Command {
 		Use: "start <name>", Short: "Start the agent: spin a container that assumes its identity (runs Claude)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
-				// Launch streams its build/start progress to stderr and ends with a
-				// "launched — coming up" line; don't print a second, contradicting
-				// "started" (the agent isn't live until the board says so).
+				// Launch already ends with "launched — coming up"; a "started" here would contradict it.
 				return b.Launch(a.Name, shell, debug, os.Stderr)
 			})
 		},
@@ -326,9 +310,8 @@ func agentStopCmd() *cobra.Command {
 	}
 }
 
-// agentRebaseCmd rebases the agent's worktree onto the current base (reference)
-// branch — for when the base moved outside a sindri merge and the agent is on a
-// stale tree. git aborts on conflict, so a failure changes nothing and is reported.
+// agentRebaseCmd recovers a stale tree after the base moved outside a sindri merge;
+// git aborts on conflict, so a failure changes nothing.
 func agentRebaseCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "rebase <name>", Short: "Rebase the agent's worktree onto the current reference branch", Args: cobra.ExactArgs(1),
@@ -344,9 +327,8 @@ func agentRebaseCmd() *cobra.Command {
 	}
 }
 
-// agentRebuildCmd force-rebuilds the agent's container image (re-pulling the base,
-// e.g. to pick up a newer Go) and relaunches the agent into it. The Claude session
-// resumes from the mounted home, so the conversation isn't lost.
+// agentRebuildCmd re-pulls the base image and relaunches; the session resumes from the
+// mounted home, so no conversation is lost.
 func agentRebuildCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "rebuild <name>", Short: "Rebuild the agent's image (re-pull the base) and relaunch it (session resumes)", Args: cobra.ExactArgs(1),
@@ -358,9 +340,7 @@ func agentRebuildCmd() *cobra.Command {
 	}
 }
 
-// agentRestartCmd stops the agent's pod and starts a fresh one — the way to pick
-// up a rebuilt agent image or clear a wedged session. If the agent wasn't running,
-// it's just a start (no error), so `restart` is always safe to reach for.
+// agentRestartCmd clears a wedged session; a down agent is just started, so it never errors.
 func agentRestartCmd() *cobra.Command {
 	var shell, debug bool
 	c := &cobra.Command{
@@ -383,10 +363,7 @@ func agentRestartCmd() *cobra.Command {
 	return c
 }
 
-// agentDirCmd prints an agent's workspace path. A child process can't change the
-// parent shell's directory, so this is the composable primitive: `cd "$(sindri
-// agent dir <name>)"`, or a shell function wrapping it. Read-only, so no cross-repo
-// prompt — it just resolves the path.
+// agentDirCmd exists because a child can't cd the parent shell: `cd "$(sindri agent dir x)"`.
 func agentDirCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "dir <name>",
@@ -434,9 +411,7 @@ func agentTellCmd() *cobra.Command {
 	}
 }
 
-// agentPlanCmd assigns a planner one thing to plan. Unlike `tell`, which delivers what you typed,
-// this sends a phased brief: read the project's material, check it does not already exist, then
-// interview you before specifying anything.
+// agentPlanCmd sends a phased brief — read, check for prior work, interview — not your raw text.
 func agentPlanCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "plan <name> <what to plan...>", Short: "Assign a planner a plan to work out (reads, checks, then interviews you)",
@@ -479,8 +454,7 @@ func agentInfoCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				// Status, not a log dump: show the last n events, each on one
-				// timestamped, length-capped line. `-n 0` shows all.
+				// Status, not a log dump: the last n events, one capped line each (0 = all).
 				total := len(evs)
 				if n > 0 && total > n {
 					evs = evs[total-n:]
@@ -498,8 +472,7 @@ func agentInfoCmd() *cobra.Command {
 	return c
 }
 
-// eventTime renders an activity timestamp (UTC RFC3339) as a local HH:MM:SS,
-// falling back to the raw value if it doesn't parse.
+// eventTime renders a UTC RFC3339 stamp as local HH:MM:SS, or raw if it won't parse.
 func eventTime(ts string) string {
 	t, err := time.Parse(time.RFC3339, ts)
 	if err != nil {
@@ -508,8 +481,7 @@ func eventTime(ts string) string {
 	return t.Local().Format("15:04:05")
 }
 
-// memoryLabel renders an agent's configured RAM limit, marking the hub fallback when
-// none is set (the "2g" here mirrors the hub's defaultAgentMemory — display only).
+// memoryLabel marks the fallback when unset; "2g" mirrors hub defaultAgentMemory, display only.
 func memoryLabel(m string) string {
 	if strings.TrimSpace(m) == "" {
 		return "2g (default)"
@@ -517,8 +489,7 @@ func memoryLabel(m string) string {
 	return m
 }
 
-// shortAge renders how long ago an RFC3339 timestamp was, compactly ("3d", "2h",
-// "5m", "now"); "-" when empty or unparseable.
+// shortAge renders an RFC3339 stamp's age as "3d"/"2h"/"5m"/"now"; "-" when unparseable.
 func shortAge(ts string) string {
 	t, err := time.Parse(time.RFC3339, ts)
 	if err != nil {
@@ -537,8 +508,7 @@ func shortAge(ts string) string {
 	}
 }
 
-// oneLine collapses a possibly-multi-line payload to its first line, capped to max
-// runes with an ellipsis — so `info` stays one line per event, not a log dump.
+// oneLine caps a payload to its first line and max runes, keeping `info` one line per event.
 func oneLine(s string, max int) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		s = strings.TrimRight(s[:i], " ") + " …"

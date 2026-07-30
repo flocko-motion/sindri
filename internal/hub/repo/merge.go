@@ -1,11 +1,11 @@
 // package: hub/repo / merge
 // type:    logic (git merge mechanics)
 // job:     the rebase-first merge of a PR branch into its base, as a pure mechanic:
-//          rebase the branch onto base (in the agent's worktree) then merge it into
-//          base, classifying the outcome (done / conflict / blocked / error) so the
-//          workflow orchestrator can route the consequences.
+// rebase the branch onto base (in the agent's worktree) then merge it into
+// base, classifying the outcome (done / conflict / blocked / error) so the
+// workflow orchestrator can route the consequences.
 // limits:  git only — no store, no messaging, no status writes. It reports what
-//          happened; the workflow decides what to do about it.
+// happened; the workflow decides what to do about it.
 package repo
 
 import (

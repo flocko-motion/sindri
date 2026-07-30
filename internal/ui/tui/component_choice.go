@@ -1,11 +1,11 @@
 // package: tui / component_choice
 // type:    ui component (generic, reusable)
 // job:     a centered multiple-choice modal — a titled bordered box listing
-//          options with a cursor. Reusable for any pick-one prompt (priority,
-//          status, role, repo switcher). Long lists scroll; a `filterable` prompt
-//          (the repo switcher) narrows by typeahead.
+// options with a cursor. Reusable for any pick-one prompt (priority,
+// status, role, repo switcher). Long lists scroll; a `filterable` prompt
+// (the repo switcher) narrows by typeahead.
 // limits:  generic chrome + keys; what the options mean and what a pick does
-//          belong to the caller (-> the tab that opens it).
+// belong to the caller (-> the tab that opens it).
 package tui
 
 import (

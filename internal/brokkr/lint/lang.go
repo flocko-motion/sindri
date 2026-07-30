@@ -1,11 +1,7 @@
 // package: lint / lang
 // type:    logic (source-language recognition)
-// job:     decide which files the linters read and how to find their comments — Go plus the
-//
-//	TypeScript/JavaScript family (.ts .tsx .js .jsx .mjs .cjs, React components
-//	included) — and split a file into its header block and its remaining comment
-//	blocks, which is what the header and comment-average rules both work from.
-//
+// job:     decide which files the linters read — Go plus the TypeScript/JavaScript family — and
+// split each into its header block and remaining comment blocks.
 // limits:  lexical scanning only; Go's semantic checks stay on go/ast (-> comments.go).
 package lint
 
@@ -69,7 +65,11 @@ type CommentBlock struct {
 }
 
 // ScanComments splits a file into comment blocks; only CODE ends one, so gaps can't halve a
-// measurement. Delimiters, //go: directives and raw strings aren't prose; a bare `*` or `//` is.
+// measurement. Delimiters and //go: directives aren't prose; a bare `*` or `//` is.
+//
+// Lexical, so a comment marker inside a string literal counts as a comment. Tracking raw strings by
+// backtick parity was tried and reverted: backtick-heavy code (SQL) flipped the state and left 27
+// real comment lines in one file unmeasured. Over-counting an example is the safer error.
 func ScanComments(src string) []CommentBlock {
 	var out []CommentBlock
 	var cur *CommentBlock
@@ -93,16 +93,8 @@ func ScanComments(src string) []CommentBlock {
 			cur = nil
 		}
 	}
-	inRaw := false
 	for i, raw := range strings.Split(src, "\n") {
 		line, n := strings.TrimSpace(raw), i+1
-		// A raw string literal can contain anything, including comment markers. Counting those
-		// charged this very file for the example inside commentsConvention — the file documenting
-		// the convention penalised for showing one.
-		if inRaw {
-			inRaw = !strings.Contains(line, "`")
-			continue
-		}
 		switch {
 		case inMulti:
 			open(n)
@@ -136,9 +128,6 @@ func ScanComments(src string) []CommentBlock {
 			// A gap holds the block open (see above): the blank line itself is not counted.
 		default:
 			flush() // code — this is where a comment block genuinely ends
-			// An odd number of backticks opens a raw string that runs past this line. Counted on
-			// CODE lines only: comments here are full of `quoted` words and would flip it.
-			inRaw = strings.Count(line, "`")%2 == 1
 		}
 	}
 	flush()

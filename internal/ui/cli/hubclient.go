@@ -1,9 +1,9 @@
 // package: ui/cli / hubclient
 // type:    logic (CLI-side hub connection)
 // job:     connect CLI commands to the single global hub through one chokepoint,
-//          dialHub, which reconciles versions (offering a restart on a mismatch).
-//          Also starts/restarts the background hub. One hub per machine; commands
-//          tag their repo via the client's X-Sindri-Project header.
+// dialHub, which reconciles versions (offering a restart on a mismatch).
+// Also starts/restarts the background hub. One hub per machine; commands
+// tag their repo via the client's X-Sindri-Project header.
 // limits:  transport is internal/client; the pid/version stamp is internal/hub.
 package cli
 
@@ -17,15 +17,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/flo-at/sindri/internal/hub/client"
 	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/hub/client"
 	"github.com/flo-at/sindri/internal/tools/paths"
 	"golang.org/x/term"
 )
 
-// dialHub reconciles the running hub's version with this CLI (offering a restart on
-// a mismatch), then returns a client tagged with root (the repo this command
-// concerns). Every command that talks to the hub should dial through here.
+// dialHub reconciles the hub's version, then returns a client tagged with root. Dial through here.
 func dialHub(root string) (*client.HTTP, error) {
 	if err := reconcileHubVersion(); err != nil {
 		return nil, err
@@ -33,9 +31,7 @@ func dialHub(root string) (*client.HTTP, error) {
 	return client.Dial(root), nil
 }
 
-// reconcileHubVersion warns when the running hub was built from a different sindri
-// version than this CLI and, on an interactive terminal, offers to restart it. A
-// no-op when no hub is running or the versions already match.
+// reconcileHubVersion warns on a hub/CLI version mismatch and, on a terminal, offers a restart.
 func reconcileHubVersion() error {
 	if !hub.IsRunning() {
 		return nil // nothing to reconcile
@@ -65,8 +61,7 @@ func reconcileHubVersion() error {
 	return restartHub(pid)
 }
 
-// stopHub sends SIGTERM to the hub with the given pid and waits for its control
-// socket to go down.
+// stopHub SIGTERMs the hub with the given pid and waits for its control socket to go down.
 func stopHub(pid int) error {
 	fmt.Fprintf(os.Stderr, "stopping hub (pid %d)…\n", pid)
 	if p, err := os.FindProcess(pid); err == nil {
@@ -89,26 +84,18 @@ func restartHub(pid int) error {
 	return startHub()
 }
 
-// ensureHubRunning starts the detached background hub when none is running, so
-// commands like `coauthor` and `tui` just work without a manual `hub start`. A
-// running hub is left as-is (reconcileHubVersion handles a stale one). It narrates
-// startupBudget is how long a starting hub gets to answer its socket, polled every
-// startupPoll. Generous on purpose: the hub opens its store, reconciles state and reads each
-// registered repo's config before it serves, and on a machine already running a fleet of pods
-// that work contends with them. Ten seconds was tight enough that an ordinary busy moment
-// looked like a failed start — and the process was in fact fine, so the error taught nothing
-// and the retry usually worked. A slow start is worth waiting through; a dead one is caught by
-// the liveness check in the loop, which fails fast regardless of this budget.
+// startupBudget is how long a starting hub gets to answer its socket, polled every startupPoll.
+// Generous on purpose: 10s read as a failed start on any busy machine, and a dead hub fails fast
+// anyway via the loop's liveness check.
 const (
 	startupBudget = 45 * time.Second
 	startupPoll   = 100 * time.Millisecond
-	// startupAttempts derives from the two above, so changing the budget cannot drift from the
-	// loop that enforces it.
+	// startupAttempts derives from the two above so the budget can't drift from the loop enforcing it.
 	startupAttempts = int(startupBudget / startupPoll)
 )
 
-// each step — probe, health check, any stale record — so a failed start isn't a
-// mystery.
+// ensureHubRunning starts the detached hub when none answers, narrating each step so a failed start
+// isn't a mystery. A running hub is left as-is (reconcileHubVersion handles a stale one).
 func ensureHubRunning() error {
 	fmt.Fprint(os.Stderr, "looking for a running hub… ")
 	if hub.IsRunning() {
@@ -116,9 +103,7 @@ func ensureHubRunning() error {
 		return nil
 	}
 	fmt.Fprintln(os.Stderr, "none answering.")
-	// Nothing is serving the socket. A leftover pid record is common — a hub that
-	// died or was killed without cleaning up (including a zombie held by its
-	// parent). Say what we find so the restart is transparent.
+	// A leftover pid record is common — a hub killed without cleanup, or a zombie held by its parent.
 	if pid, _, ok := hub.ReadPID(); ok {
 		if hub.ProcessAlive(pid) {
 			fmt.Fprintf(os.Stderr, "a hub (pid %d) is recorded and alive but not answering — it may be hung; will try to start a fresh one.\n", pid)
@@ -129,10 +114,8 @@ func ensureHubRunning() error {
 	return startHub()
 }
 
-// startHub launches the detached background `sindri hub start` and waits until its
-// control socket answers. The hub outlives this command (own session via Setsid),
-// so agents — and `sindri tui` in another terminal — keep working after we exit.
-// Its output goes to the central state dir's hub.log.
+// startHub launches a detached `sindri hub start` (own session, so agents and a `sindri tui` elsewhere
+// survive this command exiting) and waits for its socket, logging to the state dir's hub.log.
 func startHub() error {
 	self, err := os.Executable()
 	if err != nil {
@@ -162,8 +145,7 @@ func startHub() error {
 			fmt.Fprintf(os.Stderr, " up (pid %d, log: %s)\n", pid, logPath)
 			return nil
 		}
-		// Fast-fail: if the detached process already exited it will never answer,
-		// so stop waiting and report why instead of burning the whole budget.
+		// Fast-fail: an exited process will never answer, so report why instead of burning the budget.
 		if !hub.ProcessAlive(pid) {
 			fmt.Fprintln(os.Stderr, " it exited.")
 			return fmt.Errorf("hub failed to start: %s (see %s)", lastLogLine(logPath), logPath)
@@ -174,9 +156,7 @@ func startHub() error {
 	return fmt.Errorf("hub did not come up within %s: %s (see %s)", startupBudget, lastLogLine(logPath), logPath)
 }
 
-// lastLogLine returns the last non-empty line of the hub log, so a failed start
-// surfaces the hub's own error (e.g. "a hub is already running") instead of just
-// pointing at a file. Falls back to a hint when the log can't be read.
+// lastLogLine returns the hub log's last non-empty line, so a failed start surfaces the hub's own error.
 func lastLogLine(path string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {

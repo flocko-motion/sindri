@@ -1,9 +1,9 @@
 // package: config / config
 // type:    logic (per-project config loader + validator)
 // job:     read and validate a repo's .sindri/config.yaml (overlaid on an optional
-//          global config + defaults): the one declarative place a project sets its
-//          architecture-doc path, image recipe, reviewer prompt, and GitHub toggle.
-//          Fail-loud — any invalid config is an error; an absent file keeps defaults.
+// global config + defaults): the one declarative place a project sets its
+// architecture-doc path, image recipe, reviewer prompt, and GitHub toggle.
+// Fail-loud — any invalid config is an error; an absent file keeps defaults.
 // limits:  pure loader/validator, no hub/adapter/UI deps — callers wire the values.
 package config
 
@@ -19,26 +19,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// defaultArchitecture is the architecture doc the reviewer is pointed at when no
-// `architecture` key is set. The hub looks for it but never creates it.
+// defaultArchitecture is looked for when `architecture` is unset, but never created.
 const defaultArchitecture = "ARCHITECTURE.md"
 
 // GitHub is the `github:` block.
 type GitHub struct {
-	// Issues toggles the GitHub issue source. nil (key unset) means the default —
-	// ON (opt-out): a repo imports its open issues unless it sets `issues: false`.
+	// Issues toggles the GitHub issue source; nil (unset) means ON — opt-out.
 	Issues *bool `yaml:"issues"`
 }
 
-// Lint is the `lint:` block — the bar `brokkr lint` holds this repo to, since it is a house
-// style rather than a universal truth. Pointers, so an unset key differs from a deliberate zero
-// (`max_comment_avg: 0` would demand comment-free code).
+// Lint is the `lint:` block. Pointers: an unset key must differ from a deliberate zero.
 type Lint struct {
 	// MaxLines bounds a source file's length.
 	MaxLines *int `yaml:"max_lines"`
 
-	// MaxCommentAvg bounds the MEAN lines per comment block, so the rule reads a trend rather
-	// than policing each comment: one long explanation is fine when short ones carry the average.
+	// MaxCommentAvg bounds the MEAN lines per comment block — a trend, not a per-comment cap.
 	MaxCommentAvg *float64 `yaml:"max_comment_avg"`
 }
 
@@ -50,19 +45,14 @@ type Config struct {
 	GitHub        GitHub `yaml:"github"`
 	Lint          Lint   `yaml:"lint"`
 
-	// Reading is what a planner must read before planning — papers, design notes, a protocol
-	// spec. Named here because a planner cannot guess which documents a project reasons from.
+	// Reading names the documents a planner must read first; it cannot guess them.
 	Reading []string `yaml:"reading"`
 
-	// ArchitectureSet is true when `architecture` was explicitly configured (at either
-	// layer). An explicitly named doc must exist (validate); an unset one need not, and
-	// its absence is a startup recommendation rather than an error.
+	// ArchitectureSet marks an explicitly configured doc: only then must it exist (validate).
 	ArchitectureSet bool `yaml:"-"`
 }
 
-// Load resolves a project's config: the hub's global file, the repo's .sindri/config.yaml over
-// it, then defaults. An absent file is fine; a malformed one, an unknown key, a wrong type, or a
-// path that escapes the repo or names a missing file are errors — never quietly defaulted.
+// Load layers repo config over global over defaults. Absent is fine; malformed is an error.
 func Load(root string) (Config, error) {
 	var c Config
 	if err := decodeInto(filepath.Join(paths.StateDir(), "config.yaml"), &c); err != nil {
@@ -81,8 +71,7 @@ func Load(root string) (Config, error) {
 	return c, nil
 }
 
-// decodeInto overlays the config file at path onto c if it exists (absent = no-op).
-// KnownFields(true) makes an unrecognized key a decode error — fail-loud for free.
+// decodeInto overlays path onto c (absent = no-op); KnownFields makes a stray key fail loud.
 func decodeInto(path string, c *Config) error {
 	f, err := os.Open(path)
 	if err != nil {
@@ -100,10 +89,8 @@ func decodeInto(path string, c *Config) error {
 	return nil
 }
 
-// validate rejects path keys that are absolute or escape the repo, and (when a key is
-// set) a target file that doesn't exist. The default architecture (key unset) is exempt:
-// not every repo documents its architecture, and the hub only recommends one at startup
-// (Hub.StartupAdvice) rather than requiring or creating it.
+// validate rejects escaping paths and missing set files; the default architecture is exempt
+// because the hub only recommends one (Hub.StartupAdvice).
 func (c Config) validate(root string) error {
 	checks := []struct {
 		key, val  string
@@ -130,18 +117,12 @@ func (c Config) validate(root string) error {
 	return nil
 }
 
-// IssuesEnabled reports whether the GitHub issue source is on. It defaults to ON
-// (opt-out): a repo imports its open issues unless it explicitly sets
-// `github.issues: false`. The source still degrades to absent whenever gh is
-// missing / unauthenticated / offline or the repo has no GitHub remote.
+// IssuesEnabled defaults to ON; the source still degrades to absent without gh or a remote.
 func (c Config) IssuesEnabled() bool {
 	return c.GitHub.Issues == nil || *c.GitHub.Issues
 }
 
-// Write serializes c to <root>/.sindri/config.yaml, first validating it against
-// root so a broken config is never persisted (the caller surfaces the error). Only
-// keys the caller set are written — empty paths and an unset github toggle are
-// omitted — so the file stays clean and unset keys keep defaulting.
+// Write persists c, validating first so a broken config never lands; unset keys stay omitted.
 func Write(root string, c Config) error {
 	c.ArchitectureSet = c.Architecture != "" && c.Architecture != defaultArchitecture
 	if err := c.validate(root); err != nil {
@@ -183,8 +164,7 @@ func Abs(root, rel string) string {
 	return filepath.Join(root, rel)
 }
 
-// repoRel validates that rel is a repo-relative path resolving inside root, returning
-// the cleaned absolute path. Absolute paths and any ".." that escapes root are errors.
+// repoRel cleans rel against root; absolute paths and any escaping ".." are errors.
 func repoRel(root, rel string) (string, error) {
 	if filepath.IsAbs(rel) {
 		return "", errors.New("absolute path")

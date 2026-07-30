@@ -1,11 +1,11 @@
 // package: tui / items
 // type:    ui (cross-reference navigation)
 // job:     the global item convention — ENTER opens an item's details in the
-//          big modal (using that item's own home-tab renderer), and g goes to
-//          where the item lives (its home tab, selected). Shared by the
-//          focusable detail columns on every tab.
+// big modal (using that item's own home-tab renderer), and g goes to
+// where the item lives (its home tab, selected). Shared by the
+// focusable detail columns on every tab.
 // limits:  routing and opening only; each item's detail rendering is its home
-//          tab's (-> tab_*.go).
+// tab's (-> tab_*.go).
 package tui
 
 import (

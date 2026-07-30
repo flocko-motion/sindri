@@ -1,7 +1,7 @@
 // package: lint / loc
 // type:    logic
 // job:     the file-length linter — walks every linted source under the given roots (Go and
-//          the TypeScript/JavaScript family) and reports any file exceeding the line limit.
+// the TypeScript/JavaScript family) and reports any file exceeding the line limit.
 // limits:  reports only; the CLI wiring and exit codes live in cmd/sindri/lint.go.
 package lint
 
@@ -80,9 +80,19 @@ func LOC(roots []string, maxLines int, cap *Cap, ig *Ignore, w io.Writer) (bool,
 		if !cap.Allow() {
 			continue
 		}
-		fmt.Fprintf(w, "%s: %d lines (limit %d)\n", v.path, v.lines, maxLines)
+		// Say how far over AND what to do. "721 lines (limit 700)" reads as "delete 21 lines",
+		// which is the wrong fix: the file is over because it holds more than one job, and
+		// shaving it lands on the limit until the next function arrives.
+		fmt.Fprintf(w, "%s: %d lines (max %d, %d over) — SPLIT it, don't shave it: move a "+
+			"cohesive group out to its own file.\n", v.path, v.lines, maxLines, v.lines-maxLines)
 	}
 	cap.Note(w)
+	if len(viols) > 0 {
+		fmt.Fprintf(w, "%d file(s) over %d lines. A file this long is doing more than one job — "+
+			"`brokkr map <file>` shows its declarations; lift the biggest cohesive group into a new "+
+			"file with its own four-field header. Trimming to just under the limit is not a fix.\n",
+			len(viols), maxLines)
+	}
 	return len(viols) > 0, nil
 }
 

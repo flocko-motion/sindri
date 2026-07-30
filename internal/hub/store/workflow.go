@@ -1,9 +1,9 @@
 // package: hub/store / workflow
 // type:    persistence (SQLite, hub-owned)
 // job:     the durable workflow state — the cached task read model (D15), each
-//          agent's live workflow state, and merge-intents (PRs) — all write-through
-//          so a crash loses nothing committed (D11). Every table is project-keyed;
-//          the methods hang off ProjectStore (scoped) except AllPRs (global board).
+// agent's live workflow state, and merge-intents (PRs) — all write-through
+// so a crash loses nothing committed (D11). Every table is project-keyed;
+// the methods hang off ProjectStore (scoped) except AllPRs (global board).
 // limits:  primitive columns only; mapping to/from issue.Task lives in the hub.
 package store
 
@@ -102,8 +102,7 @@ CREATE TABLE IF NOT EXISTS task_approval (
 );
 `
 
-// Task is the cached read-model row for a td task. Description/Acceptance are not
-// cached (they can be large) — populated only on a detail read.
+// Task is the cached read-model row; large fields land only on a detail read.
 type Task struct {
 	ID          string `json:"id"`
 	Title       string `json:"title"`
@@ -114,13 +113,11 @@ type Task struct {
 	ParentID    string `json:"parent_id"`
 	Description string `json:"description,omitempty"`
 	Acceptance  string `json:"acceptance,omitempty"`
-	// Approval is the hub-side gate on planner-created tasks: "" = none (a normal
-	// task, claimable), pending (awaiting the user), approved (claimable), or
-	// rejected (with ApprovalComment). Workers only ever see "" / approved tasks.
+	// Approval gates planner-created tasks: "" (none), pending, approved, rejected.
+	// Workers only ever see "" and approved tasks.
 	Approval        string `json:"approval,omitempty"`
 	ApprovalComment string `json:"approval_comment,omitempty"`
-	// Comments is the task's synced comment thread. Not a tasks-table column —
-	// assembled from task_comments on a detail read (TaskInfo), empty elsewhere.
+	// Comments is not a tasks column: TaskInfo assembles it, so it's empty elsewhere.
 	Comments []Comment `json:"comments,omitempty"`
 }
 
@@ -146,8 +143,7 @@ type Review struct {
 	VerdictAt   string `json:"verdict_at"`
 }
 
-// PR is a merge-intent: a branch its owner would like merged, plus a verdict. It
-// carries its project so the global board can tag which repo it belongs to.
+// PR is a merge-intent; it carries its project so the global board can tag the repo.
 type PR struct {
 	Project   string `json:"project"`
 	ID        string `json:"id"`
@@ -158,14 +154,12 @@ type PR struct {
 	Status    string `json:"status"`
 	Feedback  string `json:"feedback"`
 	CreatedAt string `json:"created_at"`
-	// Kind distinguishes a final PR (the task is done — merge closes the task) from an
-	// interim contribution (mid-task work landed on the reference branch; merge keeps
-	// the task open and puts the worker straight back on it). "" is read as "final".
+	// Kind: a final PR's merge closes the task, an interim one keeps it open and puts
+	// the worker straight back on it. "" is read as "final".
 	Kind string `json:"kind"`
 }
 
-// ReplaceTasks refreshes this project's cached task set in one transaction. Tasks
-// absent from the new set are dropped so the cache mirrors td.
+// ReplaceTasks swaps the cached set in one transaction; absent tasks are dropped.
 func (p *ProjectStore) ReplaceTasks(tasks []Task) error {
 	tx, err := p.s.db.Begin()
 	if err != nil {
@@ -200,9 +194,8 @@ func (p *ProjectStore) UpsertTask(t Task) error {
 	return err
 }
 
-// RemoveTask drops a single cached task, so a close/scrap shows on the board at
-// once without a full multi-source re-sync. The next sync rebuilds the cache from
-// the sources anyway, so this is just the intervening truth.
+// RemoveTask shows a close/scrap on the board without a full re-sync; the next sync
+// rebuilds from the sources anyway, so this is only the intervening truth.
 func (p *ProjectStore) RemoveTask(id string) error {
 	if _, err := p.s.db.Exec(`DELETE FROM tasks WHERE project=? AND id=?`, p.project, id); err != nil {
 		return err
@@ -210,15 +203,13 @@ func (p *ProjectStore) RemoveTask(id string) error {
 	return p.DeleteComments(id) // don't strand a scrapped task's comments
 }
 
-// taskCols is the shared SELECT projection: the cached td fields plus the hub-side
-// approval overlay (empty when there's no approval row). The join is project-matched.
+// taskCols is the shared projection: cached td fields plus the hub's approval overlay.
 const taskCols = `t.id,t.title,t.status,t.priority,t.type,t.labels,t.parent_id,t.description,
 	COALESCE(a.status,''), COALESCE(a.comment,'')`
 
 const taskFrom = ` FROM tasks t LEFT JOIN task_approval a ON a.task=t.id AND a.project=t.project`
 
-// OpenTasks returns this project's claimable tasks: status "open" and not gated by
-// an unresolved approval, highest priority first.
+// OpenTasks returns open, un-gated tasks, highest priority first.
 func (p *ProjectStore) OpenTasks() ([]Task, error) {
 	rows, err := p.s.db.Query(`
 		SELECT `+taskCols+taskFrom+`
@@ -289,19 +280,10 @@ func (p *ProjectStore) GetTask(id string) (Task, bool, error) {
 	return t, true, nil
 }
 
-// OpenContainers returns the task packages claimable in this project: a task with an open
-// child, approved, prioritised, unheld, and not itself inside a bigger open package.
-//
-// A hierarchy IS the unit of work — a parent is organised that way so one agent takes the
-// whole thing with the context that comes with it, and works the children in turn
-// (checkpoint) on the parent's branch. So every parent with open children is a package;
-// OpenLeaves correspondingly leaves their children alone.
-//
-// The gates match OpenLeaves exactly: approved AND carrying a priority. The priority a human
-// sets at approval is what releases work, and a package must not be the one path around that.
-//
-// "Not inside a bigger package" keeps a deep tree from being claimed at two levels at once:
-// the topmost open ancestor is the package, and its descendants come with it.
+// OpenContainers returns claimable packages: approved, prioritised, unheld tasks with an
+// open child and no open ancestor. A hierarchy IS the unit of work — one agent takes the
+// whole tree on the parent's branch, so OpenLeaves leaves them alone. Gates match
+// OpenLeaves, and excluding nested trees stops a claim at two levels at once.
 func (p *ProjectStore) OpenContainers() ([]Task, error) {
 	rows, err := p.s.db.Query(`
 		SELECT `+taskCols+taskFrom+`
@@ -623,10 +605,8 @@ func (p *ProjectStore) Reviews(pr string) ([]Review, error) {
 	return out, rows.Err()
 }
 
-// ReviewingPR returns the PR a reviewer is currently reviewing in this project —
-// the most recent review assigned to author with no verdict yet — or "" when it
-// isn't reviewing anything. Lets the board show what a reviewer is working on
-// (a reviewer authors no PR of its own, so its AgentView.PR is otherwise empty).
+// ReviewingPR is the newest verdict-less review assigned to author, "" if none. The board
+// needs it because a reviewer authors no PR, leaving its AgentView.PR empty.
 func (p *ProjectStore) ReviewingPR(author string) (string, error) {
 	var pr string
 	err := p.s.db.QueryRow(

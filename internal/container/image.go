@@ -1,8 +1,8 @@
 // package: container / image
 // type:    logic (backend-agnostic image-build recipe)
 // job:     the agent image's identity (ImageName) and the backend-agnostic build recipe: hash
-//          the EMBEDDED context plus the week into a key, materialize, build — delegating
-//          exists?/build to an ImageBuilder the pod and apple adapters supply.
+// the EMBEDDED context plus the week into a key, materialize, build — delegating
+// exists?/build to an ImageBuilder the pod and apple adapters supply.
 // limits:  no backend specifics (-> adapter/container/*); pod lifecycle is the hub's.
 package container
 
@@ -253,4 +253,3 @@ func materialize(dir string) error {
 		return os.WriteFile(dst, data, 0o755)
 	})
 }
-

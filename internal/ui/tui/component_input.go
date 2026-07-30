@@ -1,10 +1,10 @@
 // package: tui / component_input
 // type:    ui component (single-line input modal)
 // job:     the one-line text prompt used for "tell <agent>" and new-agent name
-//          entry — open it with openInput, route keys through updateInput, and
-//          submitInput runs the captured action.
+// entry — open it with openInput, route keys through updateInput, and
+// submitInput runs the captured action.
 // limits:  captures one line; what the submitted text does is the action the
-//          caller set (-> tui.go).
+// caller set (-> tui.go).
 package tui
 
 import (

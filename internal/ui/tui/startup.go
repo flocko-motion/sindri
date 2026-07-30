@@ -1,9 +1,9 @@
 // package: tui / startup
 // type:    ui (entrypoint)
 // job:     Run — connect to the repo's hub, do the one-shot startup work (status
-//          reconcile), open the /events subscription, and hand off to the Bubble
-//          Tea program. Split from the model/update loop (tui.go) to keep that file
-//          focused.
+// reconcile), open the /events subscription, and hand off to the Bubble
+// Tea program. Split from the model/update loop (tui.go) to keep that file
+// focused.
 // limits:  wiring only; the model + update loop live in tui.go.
 package tui
 
@@ -14,8 +14,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/flo-at/sindri/internal/adapter/tasks/spec"
-	"github.com/flo-at/sindri/internal/hub/client"
 	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/hub/client"
 )
 
 // Run starts the dashboard against the repo's hub (refuses without one).

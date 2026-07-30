@@ -1,11 +1,11 @@
 // package: hub/repo / rebase
 // type:    logic (git rebase mechanics)
 // job:     the worker-driven incremental rebase step — advance an in-progress rebase
-//          or start a fresh one of a branch onto its base — reporting conflicts,
-//          completion, or a git error so the workflow can loop the worker through
-//          conflict resolution.
+// or start a fresh one of a branch onto its base — reporting conflicts,
+// completion, or a git error so the workflow can loop the worker through
+// conflict resolution.
 // limits:  git only; the policy (dirty-tree guard, phase transitions, the messages
-//          shown to the worker) is the workflow's.
+// shown to the worker) is the workflow's.
 package repo
 
 import "github.com/flo-at/sindri/internal/adapter/git"

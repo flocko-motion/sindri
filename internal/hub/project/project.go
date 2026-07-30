@@ -1,14 +1,11 @@
 // package: hub/project / project
 // type:    logic (repo-registry management)
 // job:     the management surface over the project registry the hub keeps — list/
-//
-//	inspect registered repos, additive Init (register + scaffold config),
-//	Forget (drop the row, agent-guarded, files untouched), config writes,
-//	orphan removal, display colour. Backs the `repo` CLI/TUI commands.
-//
+// inspect registered repos, additive Init (register + scaffold config),
+// Forget (drop the row, agent-guarded, files untouched), config writes,
+// orphan removal, display colour. Backs the `repo` CLI/TUI commands.
 // limits:  registry + per-repo config only; never deletes a repo's files. Agent
-//
-//	teardown, .gitignore upkeep, and tag derivation come from the hub via Deps.
+// teardown, .gitignore upkeep, and tag derivation come from the hub via Deps.
 package project
 
 import (

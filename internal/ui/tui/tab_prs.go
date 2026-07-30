@@ -1,11 +1,11 @@
 // package: tui / prs
 // type:    ui (PRs tab)
 // job:     the PRs tab content. Mirrors the Agents layout: a short PR list over
-//          a big content pane (diff, or lint output after L) on the left, with
-//          the fixed-width detail (metadata + linked task + reviews) on the
-//          right. Detail is lazily fetched.
+// a big content pane (diff, or lint output after L) on the left, with
+// the fixed-width detail (metadata + linked task + reviews) on the
+// right. Detail is lazily fetched.
 // limits:  renders PR state and actions; verdict/merge logic is the hub's
-//          (-> client / workflow_pr.go).
+// (-> client / workflow_pr.go).
 package tui
 
 import (

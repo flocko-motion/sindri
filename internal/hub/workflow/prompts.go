@@ -1,14 +1,11 @@
 // package: hub/workflow / prompts
 // type:    logic (every agent-facing string in one place)
 // job:     the agent's whole world is text the hub feeds it — the system prompt,
-//
-//	the no-arg `sindri` directives, the [hub]/[user]/[reviewer] injected
-//	messages, and the replies to its verbs. Centralised here so the
-//	agent's voice is tuned in one file, not scattered across the workflow.
-//
+// the no-arg `sindri` directives, the [hub]/[user]/[reviewer] injected
+// messages, and the replies to its verbs. Centralised here so the
+// agent's voice is tuned in one file, not scattered across the workflow.
 // limits:  pure strings/builders; the logic that decides WHICH to use lives in
-//
-//	workflow_task.go / workflow_pr.go / hub.go.
+// workflow_task.go / workflow_pr.go / hub.go.
 package workflow
 
 import (
@@ -489,7 +486,6 @@ func ReplyResolvedClean(base string) string {
 func ReplyAlreadyCurrent(base string) string {
 	return fmt.Sprintf("Your branch is already current with %s — nothing to resolve.", base)
 }
-
 
 // ReplyTaskProposed acknowledges a planner's proposed task, pending user approval.
 func ReplyTaskProposed(id, title string) string {

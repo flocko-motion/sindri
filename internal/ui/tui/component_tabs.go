@@ -1,9 +1,9 @@
 // package: tui / component_tabs
 // type:    ui component (generic)
 // job:     render the top header — the tab labels plus a current-repo indicator. When
-//          a repo is active the WHOLE bar is background-filled with that repo's colour
-//          (a loud, always-visible "which repo am I in"); with no repo it falls back
-//          to the plain tab strip.
+// a repo is active the WHOLE bar is background-filled with that repo's colour
+// (a loud, always-visible "which repo am I in"); with no repo it falls back
+// to the plain tab strip.
 // limits:  pure rendering; which tab is active is the model's (-> tui.go).
 package tui
 

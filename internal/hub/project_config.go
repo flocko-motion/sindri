@@ -1,11 +1,9 @@
 // package: hub / project_config
 // type:    logic (per-project config wiring)
 // job:     load a project's .sindri/config.yaml and expose what the hub acts on — the
-//
-//	architecture-doc path for the reviewer prompt, and the startup advice about a
-//	repo that hasn't named one. containerfile/review_prompt are read at their own
-//	call sites.
-//
+// architecture-doc path for the reviewer prompt, and the startup advice about a
+// repo that hasn't named one. containerfile/review_prompt are read at their own
+// call sites.
 // limits:  thin adapter between internal/config and the hub; validation lives in config.
 package hub
 

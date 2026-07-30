@@ -1,9 +1,9 @@
 // package: adapter/tmux / tmux
 // type:    adapter (external tool: tmux)
 // job:     construct tmux command argv — new-session, send-keys (the inbound
-//          injection primitive), attach, capture-pane. Pure argv builders:
-//          tmux runs *inside* an agent's pod, so execution is the pod adapter's
-//          job (host composes pod.Exec(pod, tmux.X(...)...)).
+// injection primitive), attach, capture-pane. Pure argv builders:
+// tmux runs *inside* an agent's pod, so execution is the pod adapter's
+// job (host composes pod.Exec(pod, tmux.X(...)...)).
 // limits:  no execution here; knows nothing of pods, agents, or the hub.
 package tmux
 

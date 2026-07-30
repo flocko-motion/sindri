@@ -1,9 +1,9 @@
 // package: td
 // type:    adapter (external tool)
 // job:     the td integration the hub needs. Reads (list/get) go straight to
-//          td's SQLite for speed (sqlite.go); writes (set-status, close) go
-//          through the `td` CLI so td's invariants hold (D15). Both encapsulated
-//          here so callers see one adapter.
+// td's SQLite for speed (sqlite.go); writes (set-status, close) go
+// through the `td` CLI so td's invariants hold (D15). Both encapsulated
+// here so callers see one adapter.
 // limits:  knows nothing of openspec or rendering.
 package td
 

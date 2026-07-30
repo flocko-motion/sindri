@@ -1,9 +1,9 @@
 // package: hub/task
 // type:    logic (the Task entity)
 // job:     sindri's Task domain entity — the generalization over its underlying
-//          source types (td tasks, GitHub issues, openspec changes) into one unified
-//          task the hub reasons about, plus the read filter. The domain owns the
-//          entity; the task-source adapters translate their world to/from it.
+// source types (td tasks, GitHub issues, openspec changes) into one unified
+// task the hub reasons about, plus the read filter. The domain owns the
+// entity; the task-source adapters translate their world to/from it.
 // limits:  imports nothing internal; doesn't fetch (-> adapter/tasks) or render.
 package task
 

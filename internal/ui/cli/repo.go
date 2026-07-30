@@ -1,8 +1,8 @@
 // package: ui/cli / repo commands
 // type:    command (host CLI)
 // job:     the `repo` verb group — init (register cwd + scaffold config), list,
-//          info, forget — over the hub's registry. init/bare-info/config act on the
-//          cwd repo; list/info<sel>/forget are global (resolve a repo by name or tag).
+// info, forget — over the hub's registry. init/bare-info/config act on the
+// cwd repo; list/info<sel>/forget are global (resolve a repo by name or tag).
 // limits:  thin calls into the backend; no logic of its own.
 package cli
 

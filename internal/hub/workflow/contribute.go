@@ -1,9 +1,9 @@
 // package: hub/workflow / contribute
 // type:    logic (mid-task contribution: interim PR)
 // job:     CmdContribute — a worker lands work MID-task onto the reference branch
-//          without finishing the task (for very large tasks). Commits, rebases onto
-//          base to prove mergeability (conflicts hand off to resolve), records a gated
-//          INTERIM PR; the user's merge keeps the task open and resumes the worker.
+// without finishing the task (for very large tasks). Commits, rebases onto
+// base to prove mergeability (conflicts hand off to resolve), records a gated
+// INTERIM PR; the user's merge keeps the task open and resumes the worker.
 // limits:  no git here (-> adapter/git via hub/repo); persistence via the store.
 package workflow
 

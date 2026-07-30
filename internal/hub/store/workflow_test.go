@@ -260,9 +260,9 @@ func TestOpenLeavesLeavesPackagesAlone(t *testing.T) {
 		{ID: "P", Status: "open", Priority: "P1"},
 		{ID: "C1", Status: "open", Priority: "P0", ParentID: "P"}, // higher priority, still not standalone
 		{ID: "C2", Status: "open", Priority: "P1", ParentID: "P"},
-		{ID: "S", Status: "open", Priority: "P2"},                  // standalone
-		{ID: "D", Status: "closed", Priority: "P1"},                // done parent…
-		{ID: "DC", Status: "open", Priority: "P1", ParentID: "D"},  // …so its child stands alone
+		{ID: "S", Status: "open", Priority: "P2"},                 // standalone
+		{ID: "D", Status: "closed", Priority: "P1"},               // done parent…
+		{ID: "DC", Status: "open", Priority: "P1", ParentID: "D"}, // …so its child stands alone
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -1,9 +1,9 @@
 // package: hub/workflow / scrap
 // type:    logic (PR discard)
 // job:     ScrapPR — discard a PR whose task is being closed/scrapped: stop any
-//          reviewer mid-review, delete the task's branch, and flip the PR to
-//          "scrapped" so it drops off the board. The worker is stopped by the paired
-//          task close, not here.
+// reviewer mid-review, delete the task's branch, and flip the PR to
+// "scrapped" so it drops off the board. The worker is stopped by the paired
+// task close, not here.
 // limits:  git mechanics via hub/repo; persistence via the store. No git/tmux here.
 package workflow
 

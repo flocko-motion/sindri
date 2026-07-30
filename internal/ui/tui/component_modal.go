@@ -1,10 +1,10 @@
 // package: tui / component_modal
 // type:    ui component (generic, reusable)
 // job:     an almost-full-screen modal — a bordered frame centered on the screen
-//          with a title and scrollable content (via a scroll.Viewport). Used for
-//          the detail overlay; reusable for any "expand to full screen" view.
+// with a title and scrollable content (via a scroll.Viewport). Used for
+// the detail overlay; reusable for any "expand to full screen" view.
 // limits:  just the frame and scroll; the content shown is the caller's
-//          (-> detailLines / the tabs).
+// (-> detailLines / the tabs).
 package tui
 
 import (

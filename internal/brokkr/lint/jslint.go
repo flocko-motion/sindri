@@ -1,10 +1,10 @@
 // package: lint / jslint
 // type:    logic (delegating to the JS/TS toolchain)
 // job:     run the project's OWN TypeScript/JavaScript checks — `tsc --noEmit` and eslint —
-//          when the repo has them, and say so loudly when a JS/TS project has neither, so a
-//          green `brokkr lint` never stands for an unchecked front end.
+// when the repo has them, and say so loudly when a JS/TS project has neither, so a
+// green `brokkr lint` never stands for an unchecked front end.
 // limits:  shells out and relays; brokkr's own rules (headers, length, comment trend) are the
-//          other files' work.
+// other files' work.
 package lint
 
 import (

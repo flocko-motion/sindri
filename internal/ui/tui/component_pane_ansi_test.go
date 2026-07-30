@@ -10,18 +10,18 @@ import (
 // wiping rows that belong to the layout — the header appearing to vanish mid-render.
 func TestKeepColourDropsFrameCommands(t *testing.T) {
 	for _, seq := range []string{
-		"\x1b[2J",     // erase display — clears our screen
-		"\x1b[H",      // cursor home
-		"\x1b[K",      // erase to end of line
-		"\x1b[3;10H",  // absolute cursor position
-		"\x1b[1;40r",  // scroll region
-		"\x1b[?25l",   // hide cursor
-		"\x1b[2A",     // cursor up
+		"\x1b[2J",        // erase display — clears our screen
+		"\x1b[H",         // cursor home
+		"\x1b[K",         // erase to end of line
+		"\x1b[3;10H",     // absolute cursor position
+		"\x1b[1;40r",     // scroll region
+		"\x1b[?25l",      // hide cursor
+		"\x1b[2A",        // cursor up
 		"\x1b]0;ttl\x07", // OSC title
-		"\x1b(B",      // charset
-		"\x1bM",       // reverse index
-		"\r",          // bleeds over the left edge
-		"\x07",        // bell
+		"\x1b(B",         // charset
+		"\x1bM",          // reverse index
+		"\r",             // bleeds over the left edge
+		"\x07",           // bell
 	} {
 		got := KeepColour("before" + seq + "after")
 		if got != "beforeafter" {

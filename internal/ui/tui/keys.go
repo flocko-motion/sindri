@@ -1,9 +1,9 @@
 // package: tui / keys
 // type:    ui (keymap — single source of truth)
 // job:     the one place every hotkey is declared: its key, its help label, and the
-//          scope it belongs to. onKey dispatches on the key constants defined here,
-//          and the footers are generated from the keymap table — so a binding and
-//          its help can never drift apart.
+// scope it belongs to. onKey dispatches on the key constants defined here,
+// and the footers are generated from the keymap table — so a binding and
+// its help can never drift apart.
 // limits:  declaration + help rendering only; what each action does lives in onKey.
 package tui
 

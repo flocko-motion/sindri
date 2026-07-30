@@ -1,21 +1,14 @@
 // package: adapter/agent / agent
 // type:    logic (the coding-agent PORT — hexagonal abstraction)
-// job:     the contract sindri needs from a coding agent, abstracting the tool
-//
-//	(Claude Code today): classify a rendered pane's runtime state, and
-//	provision an agent's home from a workflow-composed prompt. The hub
-//	talks to this port; a backend (adapter/agent/claude, future others)
-//	implements it, wired once via Use.
-//
+// job:     the contract sindri needs from a coding agent (Claude Code today): classify a pane's
+// runtime state, and provision an agent's home from a composed prompt. A backend implements it.
 // limits:  no agent specifics here (-> adapter/agent/claude, which depends on this
-//
-//	package, never the reverse).
+// package, never the reverse).
 package agent
 
 import "io"
 
-// State is a coding agent's detected runtime state (distinct from sindri's workflow
-// phase — this is what the agent tool itself is doing right now).
+// State is what the agent tool is doing now, not sindri's workflow phase.
 type State string
 
 const (
@@ -25,19 +18,16 @@ const (
 	Unknown State = "unknown" // not classifiable (shell, transcript viewer, boot, …)
 )
 
-// HomeSpec is what a backend needs to provision one agent's home: where it lives and
-// the already-composed system prompt to persist. The workflow composes the prompt
-// (it's high-level logic); the backend only writes the tool-specific files it needs
-// (credentials, config, settings) around it.
+// HomeSpec is what a backend needs to provision one agent's home. The workflow composes
+// the prompt (high-level logic); the backend only writes tool-specific files around it.
 type HomeSpec struct {
 	Dir          string    // host home dir to create + populate (mounted into the pod)
 	SystemPrompt string    // composed by the workflow; the backend persists it verbatim
 	Out          io.Writer // setup announcements (e.g. a one-time credential-access prompt)
 }
 
-// Home is a provisioned agent home ready to mount: the home dir and its sibling
-// config file (host paths), plus whether host credentials were found — no creds means
-// the caller can't run the agent authenticated.
+// Home is a provisioned home ready to mount (host paths); without HasCreds the caller
+// can't run the agent authenticated.
 type Home struct {
 	Dir        string
 	ConfigPath string
@@ -46,16 +36,13 @@ type Home struct {
 
 // Agent is the port: what the hub needs from a coding-agent backend.
 type Agent interface {
-	// DetectState classifies the agent's runtime state from its rendered pane text
-	// (as `tmux capture-pane -p` yields).
+	// DetectState classifies pane text as `tmux capture-pane -p` yields it.
 	DetectState(screen string) State
-	// PrepareHome provisions the agent's home under spec.Dir (credentials, config,
-	// and the composed system prompt) and returns the host paths to mount.
+	// PrepareHome provisions spec.Dir and returns the host paths to mount.
 	PrepareHome(spec HomeSpec) (Home, error)
 }
 
-// active is the backend this process runs against, wired once at startup by the
-// composition root via Use. Defaults to a no-op so the port is safe before Use.
+// active is wired once at startup via Use; the no-op default keeps the port safe before.
 var active Agent = noop{}
 
 // Use selects the coding-agent backend for this process. Called once at startup.
@@ -64,10 +51,8 @@ func Use(a Agent) { active = a }
 // DetectState classifies a pane via the wired backend.
 func DetectState(screen string) State { return active.DetectState(screen) }
 
-// Runtime classifies a captured pane into the runtime word the board and the herdr
-// sidebar share — "working" | "blocked" | "idle". An unrecognized screen (a shell, a
-// transcript viewer, boot) counts as idle: nothing is happening that needs surfacing.
-// The single source of this mapping, so every reader classifies a pane identically.
+// Runtime is the single source of the "working"|"blocked"|"idle" word every reader
+// shares. An unrecognized screen counts as idle: nothing needs surfacing.
 func Runtime(screen string) string {
 	switch DetectState(screen) {
 	case Working:
@@ -82,8 +67,7 @@ func Runtime(screen string) string {
 // PrepareHome provisions an agent home via the wired backend.
 func PrepareHome(spec HomeSpec) (Home, error) { return active.PrepareHome(spec) }
 
-// noop is the default until Use wires a real backend: state is always Unknown and
-// no home can be provisioned.
+// noop is the default until Use: state is Unknown, no home is provisioned.
 type noop struct{}
 
 func (noop) DetectState(string) State { return Unknown }

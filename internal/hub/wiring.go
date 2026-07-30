@@ -1,11 +1,9 @@
 // package: hub / wiring
 // type:    logic (module wiring)
 // job:     wire the hub's extracted modules into it — the seam adapters each module
-//
-//	needs back to the hub (chat Delivery, comments Deps, workflow Deps) and the
-//	workflow DTO aliases the hub re-exports as its API. Each module's logic
-//	lives in its own package; this is only the glue.
-//
+// needs back to the hub (chat Delivery, comments Deps, workflow Deps) and the
+// workflow DTO aliases the hub re-exports as its API. Each module's logic
+// lives in its own package; this is only the glue.
 // limits:  adapters + aliases only — no module logic here.
 package hub
 
@@ -27,8 +25,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
-// agentDeps adapts the hub to agent.Deps: wake the board, and resolve an agent's
-// (repo-scoped) container name.
+// agentDeps adapts the hub to agent.Deps.
 type agentDeps struct{ h *Hub }
 
 func (d agentDeps) Notify()                                   { d.h.notify() }
@@ -42,8 +39,7 @@ func (d agentDeps) ProjectConfig(project string) (config.Config, error) {
 	return d.h.projectConfig(project)
 }
 
-// chatDelivery adapts the hub to chat.Delivery: agent injection via tmux, a pod
-// liveness check, and board notifications — the only hooks the chat relay needs back.
+// chatDelivery adapts the hub to chat.Delivery.
 type chatDelivery struct{ h *Hub }
 
 func (c chatDelivery) Inject(project, name, text string) error {
@@ -54,15 +50,13 @@ func (c chatDelivery) Running(project, name string) bool {
 }
 func (c chatDelivery) Notify() { c.h.notify() }
 
-// commentsDeps adapts the hub to comments.Deps: resolve a project's root path and
-// wake the board — the only hooks the comments module needs from the hub.
+// commentsDeps adapts the hub to comments.Deps.
 type commentsDeps struct{ h *Hub }
 
 func (c commentsDeps) ProjectRoot(project string) string { return c.h.projectRoot(project) }
 func (c commentsDeps) Notify()                           { c.h.notify() }
 
-// projectDeps adapts the hub to project.Deps: agent teardown (Forget frees a repo's
-// agents), .gitignore upkeep, the repo's display name + stable tag, and notify.
+// projectDeps adapts the hub to project.Deps.
 type projectDeps struct{ h *Hub }
 
 func (d projectDeps) DeleteAgent(project, name string) error {
@@ -73,9 +67,7 @@ func (d projectDeps) RepoName(project string) string { return d.h.repoName(proje
 func (d projectDeps) RepoTag(root string) string     { return repoTag(root) }
 func (d projectDeps) Notify()                        { d.h.notify() }
 
-// agentchanDeps adapts the hub to agentchan.Deps: the agent surface (verb set,
-// blocking directive, verb exec), token->identity resolution, and the access-log
-// wrapper. The channel owns transport; behaviour stays in the hub.
+// agentchanDeps adapts the hub to agentchan.Deps: the channel owns transport, the hub behaviour.
 type agentchanDeps struct{ h *Hub }
 
 func (d agentchanDeps) Commands(project, name string) (any, error) {
@@ -94,10 +86,7 @@ func (d agentchanDeps) LogRequests(label string, next http.Handler) http.Handler
 	return server.LogRequests(label, next)
 }
 
-// These are the extracted modules' API DTOs, re-exported so the hub stays the single
-// facade its clients (client/TUI/CLI) import — they get the RPC
-// request/response shapes from hub, alongside the other wire types in server.go,
-// without reaching into the workflow package.
+// Module DTOs re-exported so hub stays the single facade its clients import.
 type (
 	TaskSpec    = workflow.TaskSpec
 	PRDetail    = workflow.PRDetail
@@ -109,8 +98,7 @@ type (
 	Section     = commands.Section
 )
 
-// The task-view helpers live in hub/task; re-exported so the UIs keep getting them
-// from the hub facade they already import.
+// Task-view helpers from hub/task, re-exported for the UIs.
 var (
 	PriorityLabel = task.PriorityLabel
 	PriorityCode  = task.PriorityCode
@@ -122,10 +110,7 @@ var (
 	ChatIcon      = chat.Icon
 )
 
-// The chat room's participant markers and the one description of its in-room interface.
-// Re-exported so every front-end takes them from the hub facade — the markers travel in
-// the lines agents read, and the help text has to read identically in `meeting join`, the
-// `/help` reply, and the TUI, or the room grows three different accounts of itself.
+// Chat markers + help text, re-exported: every front-end must show the identical room.
 const (
 	ChatHelpText   = chat.HelpText
 	ChatUserIcon   = chat.UserIcon
@@ -134,8 +119,7 @@ const (
 	ChatSenderUser = chat.SenderUser
 )
 
-// The control-socket addressing + pid-file plumbing lives in hub/server; re-exported
-// so the daemon management in cmd/ and the clients keep the one hub facade.
+// Control-socket + pid-file plumbing from hub/server, re-exported for cmd/ and clients.
 var (
 	SocketPath   = server.SocketPath
 	IsRunning    = server.IsRunning
@@ -146,9 +130,7 @@ var (
 	HubPID       = server.HubPID
 )
 
-// workflowDeps adapts the hub to workflow.Deps: it exposes the hub facilities the
-// orchestration reaches for (project resolution, agent liveness + messaging, the task
-// cache refreshers, the change bus) without the workflow package depending on the hub.
+// workflowDeps adapts the hub to workflow.Deps, so workflow need not import the hub.
 type workflowDeps struct{ h *Hub }
 
 func (d workflowDeps) ProjectRoot(project string) string { return d.h.projectRoot(project) }
@@ -185,9 +167,7 @@ func (d workflowDeps) TaskComments(project, id string) []store.Comment {
 
 func (d workflowDeps) Subscribe() (chan struct{}, func()) { return d.h.events.subscribe() }
 
-// KnownProjects is the workflow's fleet-wide scan list. Best-effort by design — a scan
-// that skips a round is self-correcting on the next tick, unlike the board, where an empty
-// registry is rendered as fact (-> State).
+// KnownProjects is best-effort: a skipped scan self-corrects next tick (unlike the board -> State).
 func (d workflowDeps) KnownProjects() []store.Project {
 	ps, _ := d.h.projects.Known()
 	return ps

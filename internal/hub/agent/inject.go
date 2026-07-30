@@ -1,9 +1,9 @@
 // package: hub/agent / inject
 // type:    logic (message delivery into a running agent)
 // job:     the mechanics of putting text into an agent's live tmux session (via the
-//          container runtime) — Inject, InjectWhenReady (wait briefly, for messages
-//          right after a launch), and Tell (a source-stamped, logged message). WHAT
-//          to send and WHEN is the caller's; this just delivers.
+// container runtime) — Inject, InjectWhenReady (wait briefly, for messages
+// right after a launch), and Tell (a source-stamped, logged message). WHAT
+// to send and WHEN is the caller's; this just delivers.
 // limits:  no decision-making; the tmux session is named after the agent.
 package agent
 

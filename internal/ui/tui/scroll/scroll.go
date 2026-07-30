@@ -1,13 +1,7 @@
 // package: tui/scroll / scroll
 // type:    ui primitive (pure, no Bubble Tea coupling)
-// job:     a fixed-height scrollable pane. Given a Height and Total line count,
-//
-//	it tracks the visible window (and an optional cursor that the window
-//	follows), clamped against every edge, and renders content of any
-//	length into exactly Height rows — padding when shorter, scrolling
-//	when longer. The single home for viewport arithmetic so no pane
-//	reimplements (and re-breaks) it.
-//
+// job:     a fixed-height scrollable pane: track the visible window and optional cursor, clamped,
+// and render any length into exactly Height rows. One home for viewport arithmetic.
 // limits:  width/styling is the caller's job; this owns vertical geometry only.
 package scroll
 

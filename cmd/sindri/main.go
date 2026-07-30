@@ -1,9 +1,9 @@
 // package: main (sindri) / main
 // type:    entrypoint (thin)
 // job:     wire the container backend, mirror the build version into the CLI
-//          package, assemble the host CLI command tree (internal/ui/cli) under the
-//          root, and dispatch. The command implementations live in internal/ui/cli;
-//          the dev tools (code map, linters) are the separate `brokkr` binary.
+// package, assemble the host CLI command tree (internal/ui/cli) under the
+// root, and dispatch. The command implementations live in internal/ui/cli;
+// the dev tools (code map, linters) are the separate `brokkr` binary.
 // limits:  no command logic here — just composition + the version ldflags anchor.
 package main
 

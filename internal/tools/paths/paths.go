@@ -1,8 +1,8 @@
 // package: paths / paths
 // type:    logic (filesystem locations)
 // job:     resolve sindri's machine-level directories — central state, runtime,
-//          cache — honoring XDG on Linux and a SINDRI_HOME override, so the global
-//          hub's state lives outside any repo.
+// cache — honoring XDG on Linux and a SINDRI_HOME override, so the global
+// hub's state lives outside any repo.
 // limits:  pure path resolution; creating and using the dirs is the caller's job.
 package paths
 

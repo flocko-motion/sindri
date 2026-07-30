@@ -1,9 +1,9 @@
 // package: ui/cli / cli
 // type:    ui (host CLI shared bits)
 // job:     package-shared state for the host CLI command tree — the build version
-//          (set by the thin main via SetVersion, since -ldflags targets main) and
-//          small shared render helpers. The commands live in the sibling files;
-//          cmd/sindri/main.go assembles them via the exported New*Cmd constructors.
+// (set by the thin main via SetVersion, since -ldflags targets main) and
+// small shared render helpers. The commands live in the sibling files;
+// cmd/sindri/main.go assembles them via the exported New*Cmd constructors.
 // limits:  no domain logic — each command delegates to the hub (client or in-process).
 package cli
 

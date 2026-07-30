@@ -1,11 +1,11 @@
 // package: tui / component_field
 // type:    ui components (generic, reusable form elements)
 // job:     the building blocks a form is made of. Each field owns its own
-//          editing, value, and rendering (a 1+ line block); the form
-//          (component_form.go) handles only focus, layout, and the frame.
-//          Text/choice are edited manually; the textarea wraps bubbles/textarea.
+// editing, value, and rendering (a 1+ line block); the form
+// (component_form.go) handles only focus, layout, and the frame.
+// Text/choice are edited manually; the textarea wraps bubbles/textarea.
 // limits:  a field edits and renders only itself; focus, layout, and the frame
-//          are the form's (-> component_form.go).
+// are the form's (-> component_form.go).
 package tui
 
 import (
@@ -55,10 +55,10 @@ type textField struct {
 func newTextField(name, val string) *textField { return &textField{name: name, val: []rune(val)} }
 
 func (f *textField) value() string   { return string(f.val) }
-func (f *textField) focus()           { f.foc = true }
-func (f *textField) blur()            { f.foc = false }
-func (f *textField) grows() bool      { return false }
-func (f *textField) resize(w, _ int)  { f.w = w }
+func (f *textField) focus()          { f.foc = true }
+func (f *textField) blur()           { f.foc = false }
+func (f *textField) grows() bool     { return false }
+func (f *textField) resize(w, _ int) { f.w = w }
 
 func (f *textField) update(msg tea.KeyMsg) tea.Cmd {
 	switch msg.Type {
