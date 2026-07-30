@@ -61,6 +61,7 @@ type CommentBlock struct {
 	End   int
 	Lines int
 	Text  []string // the comment's content, markers stripped
+	At    []int    // source line of each Text entry, so a block can be split and still report honestly
 }
 
 // ScanComments splits a file into comment blocks; only CODE ends one, so gaps can't halve a
@@ -78,9 +79,10 @@ func ScanComments(src string) []CommentBlock {
 		}
 		cur.End = n
 	}
-	count := func(text string) {
+	count := func(n int, text string) {
 		cur.Lines++
 		cur.Text = append(cur.Text, text)
+		cur.At = append(cur.At, n)
 	}
 	flush := func() {
 		if cur != nil {
@@ -99,7 +101,7 @@ func ScanComments(src string) []CommentBlock {
 			text := strings.TrimSpace(strings.TrimPrefix(body, "*"))
 			// A closing line gives only what precedes `*/`; a bare `*` mid-block is a blank.
 			if text != "" || !closing {
-				count(text)
+				count(n, text)
 			}
 			if closing {
 				inMulti = false
@@ -109,7 +111,7 @@ func ScanComments(src string) []CommentBlock {
 			open(n)
 			body, closing := trimClose(strings.TrimPrefix(line, "/*"))
 			if text := strings.TrimSpace(strings.TrimLeft(body, "*")); text != "" {
-				count(text) // `/* text`, or a whole one-line `/** text */`
+				count(n, text) // `/* text`, or a whole one-line `/** text */`
 			}
 			if closing {
 				flush()
@@ -119,7 +121,7 @@ func ScanComments(src string) []CommentBlock {
 		case strings.HasPrefix(line, "//"):
 			open(n)
 			if !isGoDirective(line) {
-				count(strings.TrimSpace(strings.TrimPrefix(line, "//")))
+				count(n, strings.TrimSpace(strings.TrimPrefix(line, "//")))
 			}
 		case line == "":
 			// A gap holds the block open (see above): the blank line itself is not counted.
@@ -149,6 +151,68 @@ func HeaderBlock(blocks []CommentBlock) (CommentBlock, bool) {
 		return CommentBlock{}, false
 	}
 	return blocks[0], true
+}
+
+// SplitHeader divides the first comment block into the four-field header and any free-form prose
+// below it. A blank comment line after the fields ends the header — the fields and their wrapped
+// continuations are contiguous, so nothing past that gap is header.
+//
+// The split exists because the header is EXEMPT from the length rules (it must be multi-line), and
+// an exemption that covers the whole block pays anyone who parks a paragraph above `package`: the
+// prose reads as documentation, escapes the trend, and no rule can see it. Split out, it is
+// measured wherever the author puts it (-> CommentAvg), so moving prose in or out of the header
+// changes nothing about what it costs.
+func SplitHeader(b CommentBlock) (header, prose CommentBlock, hasProse bool) {
+	cut := -1
+	fields := false
+	for i, t := range b.Text {
+		if isHeaderFieldLine(t) {
+			fields = true
+			continue
+		}
+		// The gap only ends the header once a field has opened it, so a file whose first block is
+		// ordinary prose (no header at all) is left whole for the caller to reject as missing.
+		if fields && t == "" {
+			cut = i
+			break
+		}
+	}
+	if cut < 0 {
+		return b, CommentBlock{}, false
+	}
+	rest := sliceBlock(b, cut+1)
+	if rest.Lines == 0 {
+		return b, CommentBlock{}, false // a trailing blank line is not prose
+	}
+	return sliceBlock(b, 0, cut), rest, true
+}
+
+// sliceBlock rebuilds a block from Text[from:to] (to defaults to the end), carrying the real source
+// lines across so a split part still reports where it actually sits.
+func sliceBlock(b CommentBlock, from int, to ...int) CommentBlock {
+	end := len(b.Text)
+	if len(to) > 0 {
+		end = to[0]
+	}
+	out := CommentBlock{Text: b.Text[from:end], At: b.At[from:end]}
+	// Trailing blanks belong to the gap, not to either part, so they set neither the count nor End.
+	for i, t := range out.Text {
+		if t != "" {
+			out.Lines++
+			out.End = out.At[i]
+		}
+		if out.Line == 0 && t != "" {
+			out.Line = out.At[i]
+		}
+	}
+	return out
+}
+
+// isHeaderFieldLine spots a `field:` opener — one of the four, so an invented label is prose (and
+// strayFields rejects it) rather than something that silently extends the header.
+func isHeaderFieldLine(text string) bool {
+	name, _, found := strings.Cut(text, ":")
+	return found && isHeaderFieldName(name)
 }
 
 // hasGoSources lets a Go-only analysis skip another language's project instead of failing it.

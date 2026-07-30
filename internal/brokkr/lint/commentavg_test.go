@@ -113,6 +113,54 @@ func TestCommentAvgExcludesHeaderAndTests(t *testing.T) {
 	}
 }
 
+// smuggledHeader is a valid four-field header followed by a blank comment line and a paragraph
+// that carries none of the four fields — the shape reported as a cheat: park a long explanation
+// above `package` and the header's own exemption used to hide it from the trend for free.
+const smuggledHeader = "// package: seq / coordination\n" +
+	"// type:    factory\n" +
+	"// job:     build the backend named in config\n" +
+	"// limits:  wiring only\n" +
+	"//\n" +
+	"// The single writer advances the head and keeps past heads for rollback. That mechanism\n" +
+	"// belongs entirely to the backend: the merge steps, the write barrier, and the retained\n" +
+	"// history a rollback reads from. This package only resolves a name to a constructor.\n" +
+	"// Nothing about the sequencing logic itself lives here, by design, deliberately so.\n" +
+	"import {x} from './x';\n\n"
+
+// TestCommentAvgMeasuresProseSmuggledIntoTheHeader: a paragraph parked below the four fields, past
+// a blank comment line, must count toward the trend like any other comment — otherwise the
+// header's mandated exemption becomes a place to hide an unlimited explanation for free.
+//
+// Same body (nine 2-line comments) in both variants: honest-header passes at the generous n=9
+// allowance (avg 2.0 <= 3.0); with the paragraph counted as a tenth block, the sample crosses into
+// the tight n=10 allowance and the extra lines both push the average over it (avg 2.6 > 2.0).
+func TestCommentAvgMeasuresProseSmuggledIntoTheHeader(t *testing.T) {
+	nineTwoLiners := ""
+	for i := 0; i < 9; i++ {
+		nineTwoLiners += fmt.Sprintf("// note %d\n// still %d\nexport const v%d = %d;\n", i, i, i, i)
+	}
+	honest := writeTree(t, map[string]string{"src/Honest.tsx": tsHeader + nineTwoLiners})
+	cheating := writeTree(t, map[string]string{"src/Cheating.tsx": smuggledHeader + nineTwoLiners})
+
+	var honestOut, cheatingOut bytes.Buffer
+	if found, err := CommentAvg([]string{honest}, 2.0, 0, false, nil, mustIgnore(t), &honestOut); err != nil {
+		t.Fatal(err)
+	} else if found {
+		t.Errorf("the honest header (no smuggled paragraph) must not trip the rule:\n%s", honestOut.String())
+	}
+
+	found, err := CommentAvg([]string{cheating}, 2.0, 0, true, nil, mustIgnore(t), &cheatingOut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatalf("a paragraph smuggled below the header fields must trip the rule; it did not:\n%s", cheatingOut.String())
+	}
+	if !strings.Contains(cheatingOut.String(), "single writer advances") {
+		t.Errorf("the report should name the smuggled paragraph as what to cut:\n%s", cheatingOut.String())
+	}
+}
+
 // TestCommentAvgThinSampleIsForgiven: two long comments are not a trend, and the report says
 // which allowance applied so the verdict is checkable rather than mysterious.
 func TestCommentAvgThinSampleIsForgiven(t *testing.T) {

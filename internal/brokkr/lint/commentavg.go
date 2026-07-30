@@ -71,7 +71,9 @@ func allowanceFor(base float64, n int) float64 {
 }
 
 // CommentAvg reports each file whose mean comment exceeds maxAvg; blocks adds the per-comment
-// listing. The header is excluded: it MUST be multi-line, so counting it would charge everyone.
+// listing. Only the four-field header proper is excluded (it MUST be multi-line, so counting it
+// would charge everyone) — free-form prose parked after it is measured like any other comment,
+// so hiding a long explanation there no longer escapes the trend (-> SplitHeader).
 func CommentAvg(roots []string, maxAvg float64, maxLine int, blocks bool, cap *Cap, ig *Ignore, w io.Writer) (bool, error) {
 	if len(roots) == 0 {
 		roots = []string{"."}
@@ -115,8 +117,14 @@ func CommentAvg(roots []string, maxAvg float64, maxLine int, blocks bool, cap *C
 			}
 			wide = append(wide, wideLines(path, src, maxLine)...)
 			bs := ScanComments(src)
-			if _, hasHeader := HeaderBlock(bs); hasHeader {
-				bs = bs[1:] // the header is mandated; it is not evidence of a trend
+			if h, hasHeader := HeaderBlock(bs); hasHeader {
+				// The header is mandated, so it is not evidence of a trend — but only the header
+				// itself. Free-form prose parked below the fields is measured like the ordinary
+				// comment it is, or the exemption would pay for hiding prose there (-> SplitHeader).
+				bs = bs[1:]
+				if _, prose, hasProse := SplitHeader(h); hasProse {
+					bs = append([]CommentBlock{prose}, bs...)
+				}
 			}
 			if len(bs) == 0 {
 				return nil

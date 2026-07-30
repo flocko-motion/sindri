@@ -100,6 +100,7 @@ func checkTSHeader(path string) []commentViol {
 	if !has {
 		return []commentViol{{path, 1, fmt.Sprintf("%s: missing canonical header (a package/type/job/limits comment block at the top of the file)", path)}}
 	}
+	header, _, _ = SplitHeader(header) // prose below the fields is measured, not folded into limits
 	var viols []commentViol
 	for _, stray := range strayFields(header.Text) {
 		viols = append(viols, commentViol{path, header.Line, strayFieldMsg(path, header.Line, stray)})
@@ -238,7 +239,10 @@ func checkFileComments(path string) []commentViol {
 			viols = append(viols, commentViol{path, ln, strayFieldMsg(path, ln, stray)})
 		}
 	}
-	// Only the four field values are bounded; extra free-form header lines are free.
+	// Only the four field values are bounded here — free-form prose after a blank line is not a
+	// field, so headerFieldContent already stops folding at the gap. It is not exempt from
+	// anything else, though: the comment-length average measures it like any other prose
+	// (-> SplitHeader), so parking it above `package` no longer escapes that check.
 	if f.Doc != nil {
 		ln := fset.Position(f.Doc.Pos()).Line
 		fc := headerFieldContent(f.Doc)
