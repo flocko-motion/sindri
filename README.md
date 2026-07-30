@@ -392,6 +392,25 @@ never answers for `FooBar`. For patterns, use `map --grep` / `map --find` above.
 Matching is syntactic (`go/ast`, no type checking), so two packages declaring the
 same name both answer — scope it with a path or `--file`.
 
+### An empty answer says which emptiness it is
+
+`map`, its three searches and `refs` all read **Go only**, and they now say what they
+actually scanned rather than going quiet — because "found nothing" and "read nothing"
+are different answers, and only one of them is evidence:
+
+```
+$ brokkr refs Target ./a-typescript-repo
+no Go files under ./a-typescript-repo — brokkr map and refs read Go only.
+
+$ brokkr refs Nonexistent internal/hub
+scanned 214 Go files, no match for Nonexistent.
+note: refs matches an exact, case-sensitive identifier — …
+```
+
+The first is not absence: the tool never read those files. The second is, and it says
+how much it read to earn the claim. `--find`, `--grep` and `--symbol` report the same
+way (naming the pattern that missed) instead of exiting 0 in silence.
+
 ---
 
 ## Command reference

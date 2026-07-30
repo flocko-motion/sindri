@@ -16,8 +16,6 @@ import (
 	"go/printer"
 	"go/token"
 	"io"
-	"io/fs"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -131,43 +129,22 @@ func truncate(w io.Writer, out []byte, max int) error {
 	return err
 }
 
-// write walks each root and renders to w; headersOnly keeps only each file's arch header.
+// write walks each root through the shared walk and renders to w; headersOnly keeps only each
+// file's arch header. An empty result reports what was scanned instead of printing nothing:
+// silence read the same whether the tree held no Go at all or simply no match.
 func write(w io.Writer, roots []string, maxDepth int, c compiled, headersOnly bool) error {
-	cwd, _ := os.Getwd()
-	multi := len(roots) > 1
-	// Fail loud before emitting anything, so a typo in a later root can't print a half-map.
-	for _, root := range roots {
-		if _, err := os.Stat(root); err != nil {
-			return fmt.Errorf("brokkr map %q: %w", root, err)
-		}
+	visited, matched, err := walkGoFiles(roots, maxDepth, c.file, func(disp, path string) bool {
+		return writeFile(w, disp, path, c, headersOnly)
+	})
+	if err != nil {
+		return fmt.Errorf("brokkr map: %w", err)
 	}
-	for _, root := range roots {
-		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() {
-				if skipDirs[d.Name()] {
-					return fs.SkipDir
-				}
-				if maxDepth >= 0 && dirDepth(root, path) > maxDepth {
-					return fs.SkipDir
-				}
-				return nil
-			}
-			if !strings.HasSuffix(path, ".go") {
-				return nil
-			}
-			disp := displayPath(root, cwd, path, multi)
-			if c.file != "" && !strings.Contains(strings.ToLower(disp), c.file) {
-				return nil // filename filter
-			}
-			writeFile(w, disp, path, c, headersOnly)
-			return nil
-		})
-		if err != nil {
-			return fmt.Errorf("brokkr map %q: %w", root, err)
-		}
+	// A plain map answers with every file it read, so only "read nothing" can leave it empty; a
+	// search has a pattern to name when the tree WAS read in full and still said nothing.
+	if c.searching() {
+		reportScan(w, visited, matched, roots, c.what())
+	} else if visited == 0 {
+		reportScan(w, 0, 0, roots, "")
 	}
 	return nil
 }
@@ -205,20 +182,22 @@ type unit struct {
 	mapped     bool
 }
 
-func writeFile(w io.Writer, rel, path string, c compiled, headersOnly bool) {
+// writeFile renders one file and reports whether it emitted anything — the signal that separates
+// "read in full, no match" from "read nothing at all".
+func writeFile(w io.Writer, rel, path string, c compiled, headersOnly bool) bool {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, nil, parser.ParseComments|parser.SkipObjectResolution)
 	if err != nil {
 		if !c.searching() { // a search reports matches, not the state of files it can't read
 			fmt.Fprintf(w, "\n%s\n  // parse error: %v\n", rel, err)
+			return true
 		}
-		return
+		return false
 	}
 	units := collectUnits(fset, f)
 
 	if c.grep != nil { // line search: no map framing, the matches ARE the output
-		writeGrep(w, rel, path, c.grep, units)
-		return
+		return writeGrep(w, rel, path, c.grep, units)
 	}
 
 	show, loose := mappedOnly(units), []hit(nil)
@@ -226,12 +205,12 @@ func writeFile(w io.Writer, rel, path string, c compiled, headersOnly bool) {
 	case c.find != nil:
 		var ok bool
 		if show, loose, ok = selectFind(path, c.find, units); !ok {
-			return
+			return false
 		}
 	case c.symbol != "":
 		var ok bool
 		if show, ok = selectSymbol(units, c.symbol); !ok {
-			return
+			return false
 		}
 	}
 
@@ -242,7 +221,7 @@ func writeFile(w io.Writer, rel, path string, c compiled, headersOnly bool) {
 		}
 	}
 	if headersOnly {
-		return // reduced view: the arch header, none of the declarations
+		return true // reduced view: the arch header, none of the declarations
 	}
 	// Matches no decl covers (arch header, imports); without these --find could render empty.
 	for _, h := range loose {
@@ -253,6 +232,7 @@ func writeFile(w io.Writer, rel, path string, c compiled, headersOnly bool) {
 			fmt.Fprintln(w, l)
 		}
 	}
+	return true
 }
 
 // collectUnits turns every top-level decl into a unit. Types and funcs are `mapped` — the map

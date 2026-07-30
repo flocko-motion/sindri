@@ -13,9 +13,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io"
-	"io/fs"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -75,21 +73,31 @@ type RefQuery struct {
 // would silently return nothing, which reads like "unused" instead of "wrong question".
 var validIdent = regexp.MustCompile(`^[\p{L}_][\p{L}\p{Nd}_]*$`)
 
+// RefScan is a completed search: the ranked hits, and how much Go source was actually read. The
+// second number is what separates "nothing uses this" from "nothing was read".
+type RefScan struct {
+	Refs    []Ref
+	GoFiles int
+}
+
 // Refs finds every reference to q.Symbol under roots, ranked. maxDepth bounds descent below each
 // root (0 = root only, negative = unlimited). A root that cannot be walked is a loud error.
-func Refs(roots []string, maxDepth int, q RefQuery) ([]Ref, error) {
+func Refs(roots []string, maxDepth int, q RefQuery) (RefScan, error) {
 	if !validIdent.MatchString(q.Symbol) {
-		return nil, fmt.Errorf("brokkr refs %q: not an identifier — refs takes an exact symbol name, "+
-			"not a pattern (for a regexp search use `brokkr map --grep`)", q.Symbol)
+		return RefScan{}, fmt.Errorf("brokkr refs %q: not an identifier — refs takes an exact symbol "+
+			"name, not a pattern (for a regexp search use `brokkr map --grep`)", q.Symbol)
 	}
 	var out []Ref
-	if err := walkGo(roots, maxDepth, strings.ToLower(q.File), func(disp, path string) {
-		out = append(out, fileRefs(disp, path, q)...)
-	}); err != nil {
-		return nil, err
+	visited, _, err := walkGoFiles(roots, maxDepth, strings.ToLower(q.File), func(disp, path string) bool {
+		found := fileRefs(disp, path, q)
+		out = append(out, found...)
+		return len(found) > 0
+	})
+	if err != nil {
+		return RefScan{}, err
 	}
 	rank(out)
-	return out, nil
+	return RefScan{Refs: out, GoFiles: visited}, nil
 }
 
 // fileRefs collects one file's references. A file that will not parse yields none: a search
@@ -313,17 +321,22 @@ func tier(r Ref) int {
 // relevant first. limit caps the hits printed (0 = all) and says how many were withheld, so an
 // over-broad symbol still answers instead of flooding the terminal.
 func WriteRefs(w io.Writer, roots []string, maxDepth int, q RefQuery, limit int) error {
-	refs, err := Refs(roots, maxDepth, q)
+	scan, err := Refs(roots, maxDepth, q)
 	if err != nil {
 		return err
 	}
+	refs := scan.Refs
 	if len(refs) == 0 {
-		fmt.Fprintf(w, "no references to %s under %s\n", q.Symbol, strings.Join(roots, " "))
-		fmt.Fprintf(w, "note: refs matches an exact, case-sensitive identifier — for a pattern use `brokkr map --grep`")
-		if !q.Comments {
-			fmt.Fprint(w, ", and --comments also searches prose")
+		// The same message map's searches use, so "read nothing" reads identically everywhere. The
+		// exact-identifier hint follows only when Go WAS read: it explains a miss, not an unread tree.
+		reportScan(w, scan.GoFiles, 0, roots, q.Symbol)
+		if scan.GoFiles > 0 {
+			fmt.Fprintf(w, "note: refs matches an exact, case-sensitive identifier — for a pattern use `brokkr map --grep`")
+			if !q.Comments {
+				fmt.Fprint(w, ", and --comments also searches prose")
+			}
+			fmt.Fprintln(w, ".")
 		}
-		fmt.Fprintln(w, ".")
 		return nil
 	}
 	shown := refs
@@ -411,44 +424,4 @@ func context(r Ref) string {
 		return ""
 	}
 	return "  « " + strings.Join(parts, " · ")
-}
-
-// walkGo calls fn for every .go file under each root, with the display path the map would use.
-//
-// codemap.go walks the same trees, but that walk is inlined inside write() and a concurrent task
-// is editing it; folding the two together is a follow-up rather than a conflict today.
-func walkGo(roots []string, maxDepth int, fileFilter string, fn func(disp, path string)) error {
-	cwd, _ := os.Getwd()
-	multi := len(roots) > 1
-	for _, root := range roots { // fail loud before emitting anything, as the map does
-		if _, err := os.Stat(root); err != nil {
-			return err
-		}
-	}
-	for _, root := range roots {
-		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() {
-				if skipDirs[d.Name()] || (maxDepth >= 0 && dirDepth(root, path) > maxDepth) {
-					return fs.SkipDir
-				}
-				return nil
-			}
-			if !strings.HasSuffix(path, ".go") {
-				return nil
-			}
-			disp := displayPath(root, cwd, path, multi)
-			if fileFilter != "" && !strings.Contains(strings.ToLower(disp), fileFilter) {
-				return nil
-			}
-			fn(disp, path)
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }

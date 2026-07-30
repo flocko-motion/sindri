@@ -65,15 +65,24 @@ func TestFindLocatesHeaderOnlyMatch(t *testing.T) {
 	}
 }
 
-// TestFindSkipsNonMatchingFiles keeps the narrowing property: a file with no match is
-// absent entirely, not present-but-empty.
+// TestFindSkipsNonMatchingFiles keeps the narrowing property: a file with no match is absent
+// entirely, not present-but-empty.
+//
+// It used to assert the whole RUN printed nothing, which conflated two separate things: the file
+// being absent (still true, and the property worth keeping) and the run saying nothing at all —
+// which made "read nothing" and "read everything, matched nothing" indistinguishable. The run now
+// reports what it scanned; no file section appears either way.
 func TestFindSkipsNonMatchingFiles(t *testing.T) {
 	var b strings.Builder
 	if err := Write(&b, []string{searchTree(t)}, -1, Query{Find: "nothinghere"}); err != nil {
 		t.Fatal(err)
 	}
-	if out := b.String(); strings.TrimSpace(out) != "" {
-		t.Errorf("a query with no matches should print nothing, got:\n%s", out)
+	out := b.String()
+	if strings.Contains(out, "// job:") || strings.Contains(out, "func ") {
+		t.Errorf("a non-matching file must not appear at all, got:\n%s", out)
+	}
+	if !strings.Contains(out, "no match for --find") {
+		t.Errorf("the run should report that it scanned and matched nothing, got:\n%s", out)
 	}
 }
 
@@ -235,8 +244,13 @@ func TestSymbolIsExactNotSubstring(t *testing.T) {
 	if err := Write(&b, []string{symbolTree(t)}, -1, Query{Symbol: "Spen"}); err != nil {
 		t.Fatal(err)
 	}
-	if out := strings.TrimSpace(b.String()); out != "" {
+	// The run reports what it scanned, so the property is "Spend was not returned".
+	out := b.String()
+	if strings.Contains(out, "Spend") || strings.Contains(out, ".go") {
 		t.Errorf("a partial name must not match, got:\n%s", out)
+	}
+	if !strings.Contains(out, "no match for --symbol Spen") {
+		t.Errorf("the run should report the miss, got:\n%s", out)
 	}
 }
 
@@ -248,8 +262,14 @@ func TestSymbolIsCaseSensitive(t *testing.T) {
 	if err := Write(&b, []string{symbolTree(t)}, -1, Query{Symbol: "spend"}); err != nil {
 		t.Fatal(err)
 	}
-	if out := strings.TrimSpace(b.String()); out != "" {
+	// The run now reports what it scanned, so the property is "Spend was not returned" rather
+	// than "nothing was printed" — no file section, and no declaration.
+	out := b.String()
+	if strings.Contains(out, "Spend") || strings.Contains(out, ".go") {
 		t.Errorf("a lowercase query must not match Spend, got:\n%s", out)
+	}
+	if !strings.Contains(out, "no match for --symbol spend") {
+		t.Errorf("the run should report the miss, got:\n%s", out)
 	}
 }
 
@@ -317,14 +337,19 @@ func TestSymbolFindsType(t *testing.T) {
 }
 
 // TestSymbolSkipsNonMatchingFiles: the narrowing property --find already has — a file with no
-// match is absent entirely, not present-but-empty.
+// match is absent entirely, not present-but-empty. The RUN still reports what it scanned, so an
+// unmatched lookup can't be confused with a tree that was never read.
 func TestSymbolSkipsNonMatchingFiles(t *testing.T) {
 	var b strings.Builder
 	if err := Write(&b, []string{symbolTree(t)}, -1, Query{Symbol: "NoSuchSymbol"}); err != nil {
 		t.Fatal(err)
 	}
-	if out := strings.TrimSpace(b.String()); out != "" {
-		t.Errorf("an unmatched symbol should print nothing, got:\n%s", out)
+	out := b.String()
+	if strings.Contains(out, ".go") {
+		t.Errorf("an unmatched symbol must not print a file section, got:\n%s", out)
+	}
+	if !strings.Contains(out, "no match for --symbol NoSuchSymbol") {
+		t.Errorf("the run should report the miss, got:\n%s", out)
 	}
 }
 

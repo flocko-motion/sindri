@@ -108,10 +108,11 @@ func find(refs []Ref, pathSuffix string, line int) []Ref {
 // TestRefsClassifies is the heart of it: the same identifier means different things in different
 // places, and telling them apart is what a regex line search cannot do.
 func TestRefsClassifies(t *testing.T) {
-	refs, err := Refs([]string{refTree(t)}, -1, RefQuery{Symbol: "Target"})
+	scan, err := Refs([]string{refTree(t)}, -1, RefQuery{Symbol: "Target"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	refs := scan.Refs
 	cases := []struct {
 		what string
 		path string
@@ -140,10 +141,11 @@ func TestRefsClassifies(t *testing.T) {
 // `var Target = Target` would — the point is that one line can hold two different kinds, which is
 // why the report carries columns.
 func TestRefsSeparatesTwoHitsOnOneLine(t *testing.T) {
-	refs, err := Refs([]string{refTree(t)}, -1, RefQuery{Symbol: "Target"})
+	scan, err := Refs([]string{refTree(t)}, -1, RefQuery{Symbol: "Target"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	refs := scan.Refs
 	got := find(refs, "lib/lib.go", 17) // var Aliased = Target
 	if len(got) != 1 || got[0].Kind != RefOther {
 		t.Fatalf("the RHS of an alias var is a plain reference, got %+v", got)
@@ -157,10 +159,11 @@ func TestRefsSeparatesTwoHitsOnOneLine(t *testing.T) {
 // not a pattern. TargetSuffix/prefixTarget share the substring and must never answer.
 func TestRefsIsExactAndCaseSensitive(t *testing.T) {
 	dir := refTree(t)
-	refs, err := Refs([]string{dir}, -1, RefQuery{Symbol: "Target"})
+	scan, err := Refs([]string{dir}, -1, RefQuery{Symbol: "Target"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	refs := scan.Refs
 	for _, r := range refs {
 		if strings.Contains(filepath.ToSlash(r.Path), "noise/") {
 			t.Errorf("substring match leaked in: %s:%d %s", r.Path, r.Line, r.Text)
@@ -171,18 +174,19 @@ func TestRefsIsExactAndCaseSensitive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(lower) != 0 {
-		t.Errorf("case-insensitive match leaked in: %+v", lower)
+	if len(lower.Refs) != 0 {
+		t.Errorf("case-insensitive match leaked in: %+v", lower.Refs)
 	}
 }
 
 // TestRefsLocalIsNotADefinition: a local `Target := 2` is a use of the name. Calling it a
 // definition would rank it above the call sites that were actually asked for.
 func TestRefsLocalIsNotADefinition(t *testing.T) {
-	refs, err := Refs([]string{refTree(t)}, -1, RefQuery{Symbol: "Target"})
+	scan, err := Refs([]string{refTree(t)}, -1, RefQuery{Symbol: "Target"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	refs := scan.Refs
 	for _, r := range find(refs, "lib/lib.go", 21) { // Target := 2
 		if r.Kind == RefDef {
 			t.Errorf("a local declaration must not rank as a definition: %+v", r)
@@ -193,10 +197,11 @@ func TestRefsLocalIsNotADefinition(t *testing.T) {
 // TestRefsRanksDefsThenCallsThenTests: the ordering IS the feature — a file-ordered list is what
 // grep already gives.
 func TestRefsRanksDefsThenCallsThenTests(t *testing.T) {
-	refs, err := Refs([]string{refTree(t)}, -1, RefQuery{Symbol: "Use"})
+	scan, err := Refs([]string{refTree(t)}, -1, RefQuery{Symbol: "Use"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	refs := scan.Refs
 	if len(refs) != 3 { // the definition, the production call, the test call
 		t.Fatalf("expected 3 hits for Use, got %d: %+v", len(refs), refs)
 	}
@@ -227,10 +232,11 @@ func TestRefsRanksDefsThenCallsThenTests(t *testing.T) {
 // TestRefsCarriesContext: each hit names where you landed — the arch header's package and the
 // enclosing declaration — which is the context brokkr already parses and grep cannot.
 func TestRefsCarriesContext(t *testing.T) {
-	refs, err := Refs([]string{refTree(t)}, -1, RefQuery{Symbol: "Target"})
+	scan, err := Refs([]string{refTree(t)}, -1, RefQuery{Symbol: "Target"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	refs := scan.Refs
 	got := find(refs, "app/app.go", 12)
 	if len(got) != 1 {
 		t.Fatalf("want the selector call, got %d hits", len(got))
@@ -307,8 +313,12 @@ func TestWriteRefsReport(t *testing.T) {
 	if err := WriteRefs(&sb, []string{dir}, -1, RefQuery{Symbol: "Absent"}, 0); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(sb.String(), "no references to Absent") || !strings.Contains(sb.String(), "case-sensitive") {
-		t.Errorf("an empty result must say so and why, got:\n%s", sb.String())
+	// An empty answer says what was READ, then why a miss is possible — the two halves of an
+	// honest "nothing found".
+	for _, want := range []string{"scanned ", " Go files", "no match for Absent", "case-sensitive"} {
+		if !strings.Contains(sb.String(), want) {
+			t.Errorf("an empty result must mention %q, got:\n%s", want, sb.String())
+		}
 	}
 }
 
@@ -338,9 +348,9 @@ func TestRefsBadRoot(t *testing.T) {
 // mustRefs is Refs or a fatal — the tests below care about the results, not the plumbing.
 func mustRefs(t *testing.T, dir string, q RefQuery) []Ref {
 	t.Helper()
-	refs, err := Refs([]string{dir}, -1, q)
+	scan, err := Refs([]string{dir}, -1, q)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return refs
+	return scan.Refs
 }

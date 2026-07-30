@@ -26,6 +26,18 @@ func smartCase(pat string) (*regexp.Regexp, error) {
 	return regexp.Compile(pat)
 }
 
+// what names the active search, so an empty answer can be acted on rather than just believed.
+func (c compiled) what() string {
+	switch {
+	case c.find != nil:
+		return "--find " + c.find.String()
+	case c.grep != nil:
+		return "--grep " + c.grep.String()
+	default:
+		return "--symbol " + c.symbol
+	}
+}
+
 // hit is one matching source line: its 1-based number and its text.
 type hit struct {
 	line int
@@ -61,8 +73,9 @@ func enclosing(units []unit, line int) string {
 
 // writeGrep renders one file's hits as `path:line: text`, parseable by editor jump tooling, plus the
 // enclosing declaration — the point being that grep says a line matched, this says where you landed.
-func writeGrep(w io.Writer, rel, path string, re *regexp.Regexp, units []unit) {
-	for _, h := range matchingLines(path, re) {
+func writeGrep(w io.Writer, rel, path string, re *regexp.Regexp, units []unit) bool {
+	lines := matchingLines(path, re)
+	for _, h := range lines {
 		text := strings.TrimSpace(h.text)
 		if name := enclosing(units, h.line); name != "" {
 			fmt.Fprintf(w, "%s:%d: %s  « %s\n", rel, h.line, text, name)
@@ -70,6 +83,7 @@ func writeGrep(w io.Writer, rel, path string, re *regexp.Regexp, units []unit) {
 		}
 		fmt.Fprintf(w, "%s:%d: %s\n", rel, h.line, text)
 	}
+	return len(lines) > 0
 }
 
 // selectSymbol keeps the units declaring the exact identifier name — case-sensitive, no regex, no
