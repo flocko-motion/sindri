@@ -9,6 +9,9 @@
 # next round) rather than stranded behind. It then returns you to the branch you
 # started on; it never leaves you on, or commits directly to, the default branch.
 # The rebases rewrite history, so the branch pushes are lease-guarded forces.
+# Every wait here is a wait with a verdict: a failed PR check (or a conflict) aborts
+# at once, naming it, rather than sitting out the merge timeout on something that can
+# never go green — the timeout then means only "still running", as it says.
 # Finally, back on your branch, it blocks on the tag-triggered release workflow and
 # reports success/failure, so the CLI shows when the release is actually done.
 #
@@ -88,9 +91,28 @@ if [ "$start" != "$default" ]; then
 	echo "waiting for the PR to merge — CI must pass first…"
 	state=""
 	for _ in $(seq 1 180); do # up to ~30 min for CI + merge
-		read -r state mergeable <<<"$(gh pr view "$start" --json state,mergeable --jq '.state + " " + .mergeable' 2>/dev/null)"
+		# One request per poll for all three verdicts, '|'-joined (a check name can
+		# contain spaces, so a space-separated read would split it): the PR state, its
+		# mergeability, and the names of any checks that came back definitively
+		# not-green. A CheckRun reports `conclusion` (null while it runs), a legacy
+		# StatusContext reports `state`; PENDING/QUEUED/IN_PROGRESS/SUCCESS/NEUTRAL/
+		# SKIPPED are all still hopeful, so only the listed verdicts count as failed.
+		IFS='|' read -r state mergeable failed <<<"$(gh pr view "$start" --json state,mergeable,statusCheckRollup --jq '
+			[ .state, .mergeable,
+			  ([ .statusCheckRollup[]?
+			     | select((.conclusion // .state // "") | test("^(FAILURE|ERROR|TIMED_OUT|CANCELLED|ACTION_REQUIRED|STARTUP_FAILURE)$"))
+			     | (.name // .context) ] | join(", "))
+			] | join("|")' 2>/dev/null)"
 		[ "$state" = "MERGED" ] && break
 		[ "$state" = "CLOSED" ] && { echo "PR was closed without merging" >&2; exit 1; }
+		# A failed check is THE common reason auto-merge never fires, and it will not go
+		# green by itself — so say so now instead of sitting out the full 30 minutes and
+		# then reporting a timeout, which reads like slow CI rather than a broken build.
+		if [ -n "$failed" ]; then
+			echo "PR check(s) failed: $failed — inspect with 'gh pr checks $start'" >&2
+			echo "auto-merge stays armed, so pushing a fix (or re-running the job) merges it; then re-run 'make release $bump' to tag." >&2
+			exit 1
+		fi
 		# Don't spin the full 30 min on a PR that can never merge: a definitive
 		# CONFLICTING verdict (rare here, since we rebased above, but master can move)
 		# means auto-merge is stuck. Bail now with a fix. UNKNOWN = GitHub still
@@ -102,7 +124,9 @@ if [ "$start" != "$default" ]; then
 		sleep 10
 	done
 	if [ "$state" != "MERGED" ]; then
-		echo "PR hasn't merged yet (CI still running or failing) — merge it once green, then re-run to tag" >&2
+		# Failed checks and conflicts bailed above, so reaching here means nothing ever
+		# reached a verdict: checks still running after 30 min, or never reported at all.
+		echo "PR hasn't merged after ~30 min (checks still running, or none reported) — check 'gh pr checks $start', then re-run to tag" >&2
 		exit 1
 	fi
 	git fetch origin "$default" >/dev/null 2>&1
