@@ -28,7 +28,7 @@ const (
 	keyReject   = "R" // reject a PR / a proposed task
 	keyStartS   = "S" // agent start/stop
 	keyTell     = "t" // tell an agent / show a PR's task
-	keyAttach   = "a" // attach to an agent's session (agents, tasks)
+	keyAttach   = "a" // attach to an agent's session (agents, tasks, prs)
 	keyMerge    = "m" // merge a PR
 	keyDelete   = "D" // delete an agent
 	keyLint     = "L" // lint a PR
@@ -108,6 +108,7 @@ var keymap = []binding{
 	{keyVerify, lbl("verify"), scopePRs},
 	{keyEdit, lbl("editor"), scopePRs},
 	{keyOpen, lbl("open"), scopePRs},
+	{keyAttach, lbl("attach"), scopePRs},
 	{keyLint, lbl("lint"), scopePRs},
 	{keyApprove, lbl("approve"), scopePRs},
 	{keyReject, lbl("reject"), scopePRs},

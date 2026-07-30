@@ -117,6 +117,25 @@ func (m model) agentOnTask(id string) (hub.AgentView, bool) {
 	return hub.AgentView{}, false
 }
 
+// agentOnPR is the agent that authored PR id, and whether one is — the PR's own Agent field,
+// resolved to its live AgentView so attach gets status and container, not just a name.
+func (m model) agentOnPR(id string) (hub.AgentView, bool) {
+	if id == "" {
+		return hub.AgentView{}, false
+	}
+	for _, p := range m.state.PRs {
+		if p.ID != id {
+			continue
+		}
+		for _, a := range m.state.Agents {
+			if a.Name == p.Agent {
+				return a, true
+			}
+		}
+	}
+	return hub.AgentView{}, false
+}
+
 // repoColorIdx is a repo's pinned colour choice from the registry (0 = default).
 func (m model) repoColorIdx(tag string) int {
 	for _, p := range m.state.Projects {
