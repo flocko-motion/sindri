@@ -429,6 +429,19 @@ func agentPlanCmd() *cobra.Command {
 	}
 }
 
+// agentTaskLabel is a task id with its title alongside it when known, else the bare id — so
+// `agent info` says what an agent is working on, not just an id nobody recognizes. A lookup
+// failure (another repo, task since scrapped) degrades to the bare id, not a command error.
+func agentTaskLabel(b backend, id string) string {
+	if id == "" {
+		return dash(id)
+	}
+	if t, err := b.TaskInfo(id); err == nil && t.Title != "" {
+		return id + "  " + t.Title
+	}
+	return id
+}
+
 func agentInfoCmd() *cobra.Command {
 	var n int
 	var debug bool
@@ -437,7 +450,7 @@ func agentInfoCmd() *cobra.Command {
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, found *hub.AgentView) error {
 				fmt.Printf("agent:     %s\nrole:      %s\nstatus:    %s\ntask:      %s\npr:        %s\nworkspace: %s\nmemory:    %s\n",
-					found.Name, found.Role, found.Status, dash(found.Task), dash(found.PR), dash(found.Workspace), memoryLabel(found.Memory))
+					found.Name, found.Role, found.Status, agentTaskLabel(b, found.Task), dash(found.PR), dash(found.Workspace), memoryLabel(found.Memory))
 				// engine + the exact runtime instance (id, image, cpus, memory limit, host pid)
 				if inst, err := b.Instance(found.Name); err == nil && inst != "" {
 					fmt.Printf("\n%s\n", inst)

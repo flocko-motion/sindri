@@ -232,7 +232,7 @@ func (m model) agentItems() []metaItem {
 	if !ok {
 		return []metaItem{{text: dimStyle.Render("(orphan — no roster entry; 'podman rm -f' it)")}}
 	}
-	taskIt := metaItem{text: "task:      " + dash(a.Task)}
+	taskIt := metaItem{text: "task:      " + m.taskLabel(a.Task)}
 	if a.Task != "" {
 		taskIt.kind, taskIt.value = "task", a.Task
 	}
@@ -417,7 +417,7 @@ func (m model) agentDetailFor(a hub.AgentView) []string {
 		"agent:     " + a.Name,
 		"role:      " + a.Role,
 		"status:    " + a.Status,
-		"task:      " + dash(a.Task),
+		"task:      " + m.taskLabel(a.Task),
 		"pr:        " + dash(a.PR),
 		"workspace: " + dash(a.Workspace),
 		"container: " + m.agentContainer(a),

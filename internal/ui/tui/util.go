@@ -35,6 +35,29 @@ func (m model) repoPath(tag string) string {
 	return ""
 }
 
+// taskTitle maps a task id to its cached title, or "" — a task from another project (the board
+// only carries the selected one), or one closed/scrapped since the cache was built.
+func (m model) taskTitle(id string) string {
+	for _, t := range m.state.Tasks {
+		if t.ID == id {
+			return t.Title
+		}
+	}
+	return ""
+}
+
+// taskLabel is a task id with its title alongside it ("id  title") when known, else the bare id,
+// else "-". Used where a task shows only as an id today, leaving no clue what it actually is.
+func (m model) taskLabel(id string) string {
+	if id == "" {
+		return dash(id)
+	}
+	if title := m.taskTitle(id); title != "" {
+		return id + "  " + title
+	}
+	return id
+}
+
 // agentWorkspacePath is an agent's workspace as an ABSOLUTE path, or "". Workspace is
 // repo-relative, so it is joined to the agent's OWN project — the Agents tab can show a fleet
 // spanning repos — and absolute because it becomes a child process's working directory.
