@@ -87,6 +87,35 @@ func Done(t store.Task) bool {
 // Open reports whether a task still counts as open (not done).
 func Open(t store.Task) bool { return !Done(t) }
 
+// Descendants returns everything under id — children, grandchildren, … — deepest
+// first, the order a cascading scrap deletes in (a looping parent chain walks once).
+func Descendants(tasks []store.Task, id string) []store.Task {
+	byParent := map[string][]store.Task{}
+	for _, t := range tasks {
+		if t.ParentID != "" && t.ID != t.ParentID {
+			byParent[t.ParentID] = append(byParent[t.ParentID], t)
+		}
+	}
+	for p := range byParent {
+		sortTasks(byParent[p])
+	}
+	seen := map[string]bool{id: true}
+	var out []store.Task
+	var walk func(parent string)
+	walk = func(parent string) {
+		for _, t := range byParent[parent] {
+			if seen[t.ID] {
+				continue
+			}
+			seen[t.ID] = true
+			walk(t.ID)
+			out = append(out, t) // after its own subtree: deepest first
+		}
+	}
+	walk(id)
+	return out
+}
+
 // TaskRow is a task placed in the hierarchy: its tree depth, whether it is the last
 // child of its parent (for drawing tree connectors), and the id of a non-merged PR
 // for it (or "").

@@ -523,10 +523,11 @@ func (c *HTTP) CloseTask(id string) error {
 	return c.post("/task/close", hub.RejectReq{ID: id})
 }
 
-// DeleteTask scraps a task from the task list (the "discard" close). The hub
-// dispatches to the backend (td delete / openspec change-dir removal / issue delete).
-func (c *HTTP) DeleteTask(id string) error {
-	return c.post("/task/delete", hub.RejectReq{ID: id})
+// ScrapTask scraps a task from the task list (the "discard" close). The hub dispatches
+// to the backend (td delete / openspec change-dir removal / issue delete). subtree takes
+// the task's children with it; withPRs takes the open PR of everything it scraps.
+func (c *HTTP) ScrapTask(id string, subtree, withPRs bool) error {
+	return c.post("/task/delete", hub.ScrapTaskReq{ID: id, Subtree: subtree, PRs: withPRs})
 }
 
 // Refresh asks the hub to re-sync tasks from the source of truth.

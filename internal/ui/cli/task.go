@@ -78,21 +78,40 @@ func taskCloseCmd() *cobra.Command {
 }
 
 // taskDeleteCmd scraps a task — dispatched by backend (td delete / openspec change-dir
-// removal / GitHub issue delete).
+// removal / GitHub issue delete). --subtasks widens the discard down the task's tree and
+// --prs takes the open PRs of what it scraps, the same two shapes the TUI's scrap modal
+// offers, so either front-end can throw away a whole task hierarchy.
 func taskDeleteCmd() *cobra.Command {
-	return &cobra.Command{
+	var subtasks, prs bool
+	c := &cobra.Command{
 		Use: "delete <id>", Aliases: []string{"rm", "scrap"},
 		Short: "Scrap a task (discard): td delete · openspec change removal · issue delete", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withBackend(func(b backend) error {
-				if err := b.DeleteTask(args[0]); err != nil {
+				if err := b.ScrapTask(args[0], subtasks, prs); err != nil {
 					return err
 				}
-				fmt.Fprintf(os.Stderr, "scrapped %s\n", args[0])
+				fmt.Fprintf(os.Stderr, "scrapped %s%s\n", args[0], scrapExtent(subtasks, prs))
 				return nil
 			})
 		},
 	}
+	c.Flags().BoolVar(&subtasks, "subtasks", false, "scrap everything under the task too (children, theirs, …)")
+	c.Flags().BoolVar(&prs, "prs", false, "scrap the open PR of every task scrapped")
+	return c
+}
+
+// scrapExtent names how far a scrap reached, for the confirmation line.
+func scrapExtent(subtasks, prs bool) string {
+	switch {
+	case subtasks && prs:
+		return " with its subtasks and their PRs"
+	case subtasks:
+		return " with its subtasks"
+	case prs:
+		return " and its PR"
+	}
+	return ""
 }
 
 func taskUnassignCmd() *cobra.Command {

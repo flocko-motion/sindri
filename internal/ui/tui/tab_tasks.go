@@ -171,6 +171,8 @@ func prMarkKind(tr hub.TaskRow) string {
 	return "final"
 }
 
+// taskMarks is the status-marker column: 🔨 when a worker is on the task, then ◆ for a final PR
+// or ◇ for an interim one, padded to a fixed width so rows line up whatever they carry.
 func taskMarks(assigned bool, prKind string) string {
 	s := ""
 	if assigned {
@@ -461,51 +463,6 @@ func (m *model) reconcileBusy() {
 		if status, ok := present[id]; !ok || isDone(status) {
 			delete(m.busy, id)
 		}
-	}
-}
-
-// attachedOpenPR is the task's open PR in the active repo, or "": terminal ones are off the board.
-func (m model) attachedOpenPR(taskID string) string {
-	_, tag := m.currentRepo()
-	for _, p := range m.state.PRs {
-		if p.Project == tag && p.Task == taskID && p.Status != "merged" && p.Status != "scrapped" {
-			return p.ID
-		}
-	}
-	return ""
-}
-
-// openScrapChoice gates the delete behind a yes/no: a GitHub issue delete is permanent. With an
-// open PR a third option discards that too, since a scrapped task rarely still wants it.
-func (m *model) openScrapChoice(id string) {
-	cl := m.cl
-	if pr := m.attachedOpenPR(id); pr != "" {
-		m.choice = choiceModalState{
-			active: true, title: "scrap " + id + "?  (has open PR " + pr + ")",
-			options: []string{"cancel", "scrap task only", "scrap task + PR " + pr},
-			values:  []string{"cancel", "task", "taskpr"},
-			apply: func(v string) tea.Cmd {
-				switch v {
-				case "task":
-					return taskOpTrigger(id, "deleting", finishTaskCmd(cl, cl.DeleteTask, id, pr, false))
-				case "taskpr":
-					return taskOpTrigger(id, "deleting", finishTaskCmd(cl, cl.DeleteTask, id, pr, true))
-				default:
-					return nil
-				}
-			},
-		}
-		return
-	}
-	m.choice = choiceModalState{
-		active: true, title: "scrap " + id + "?  (discard — td delete / openspec remove / issue delete)",
-		options: []string{"cancel", "scrap"}, values: []string{"cancel", "scrap"},
-		apply: func(v string) tea.Cmd {
-			if v != "scrap" {
-				return nil
-			}
-			return taskOpTrigger(id, "deleting", finishTaskCmd(cl, cl.DeleteTask, id, "", false))
-		},
 	}
 }
 

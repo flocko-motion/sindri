@@ -59,7 +59,7 @@ type backend interface {
 	RejectTask(id, comment string) error
 	UnassignTask(id string) error
 	CloseTask(id string) error
-	DeleteTask(id string) error
+	ScrapTask(id string, subtree, withPRs bool) error
 	Refresh() error
 	PRs() ([]store.PR, error)
 	PRInfo(id string) (hub.PRDetail, error)

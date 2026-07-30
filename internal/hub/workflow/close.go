@@ -1,9 +1,10 @@
 // package: hub/workflow / close
 // type:    logic (task close/scrap dispatch)
 // job:     the two lifecycle-ending verbs every todo backend distinguishes — "done"
-// (CloseTask) and "discard" (DeleteTask) — routed by the task's id prefix to
-// the right backend op: td close/delete, openspec archive/change-removal,
-// GitHub issue close/delete. Both guard against a live holder first.
+// (CloseTask) and "discard" (ScrapTask, optionally down the whole subtree and taking
+// the PRs with it) — routed by the task's id prefix to the right backend op: td
+// close/delete, openspec archive/change-removal, GitHub issue close/delete. Both
+// guard against a live holder first.
 // limits:  dispatch only; each op lives in its adapter (td/spec/github).
 package workflow
 
@@ -12,6 +13,7 @@ import (
 	"os"
 
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/task"
 )
 
 // CloseTask marks a task done from the task list (host-only) — the "done" close,
@@ -20,11 +22,50 @@ import (
 // on it — the agent is freed and told to pick up a new task (see finishTask).
 func (e *Engine) CloseTask(project, id string) error { return e.finishTask(project, id, false) }
 
-// DeleteTask scraps a task from the task list (host-only) — the "discard" close,
-// dispatched by backend: a td task soft-deletes (restorable), an openspec change's
-// proposal dir is removed (git-recoverable), a GitHub issue is deleted (permanent,
-// needs repo-admin rights). Also allowed mid-flight (frees the holder).
-func (e *Engine) DeleteTask(project, id string) error { return e.finishTask(project, id, true) }
+// ScrapTask discards a task (host-only) — the "discard" close: a td task soft-deletes,
+// an openspec change's dir is removed, a GitHub issue is deleted for good. Allowed
+// mid-flight (frees the holder). subtree takes everything under the task, done children
+// included, since a scrapped parent otherwise strands its subtasks as roots; withPRs
+// takes the open PR of each task that goes, so no branch outlives its task. It runs
+// deepest first (-> task.Descendants) and stops at the first failure, so a partial
+// scrap is a smaller tree, never an orphan under a deleted parent.
+func (e *Engine) ScrapTask(project, id string, subtree, withPRs bool) error {
+	ps := e.store.For(project)
+	var scrapping []string
+	if subtree {
+		all, err := ps.AllTasks()
+		if err != nil {
+			return err
+		}
+		for _, d := range task.Descendants(all, id) {
+			scrapping = append(scrapping, d.ID)
+		}
+	}
+	scrapping = append(scrapping, id) // the task itself last, under its own subtree
+	var prs []store.PR                // left empty (so the PR pass is a no-op) unless asked for
+	if withPRs {
+		found, err := ps.PRs()
+		if err != nil {
+			return err
+		}
+		prs = found
+	}
+	for _, victim := range scrapping {
+		if err := e.finishTask(project, victim, true); err != nil {
+			return fmt.Errorf("scrap %s: %w", victim, err)
+		}
+		// The PR after its task: ScrapPR leaves the author to the paired close.
+		for _, pr := range prs {
+			if pr.Task != victim || pr.Status == "merged" || pr.Status == "scrapped" {
+				continue
+			}
+			if err := e.ScrapPR(project, pr.ID); err != nil {
+				return fmt.Errorf("scrap PR %s: %w", pr.ID, err)
+			}
+		}
+	}
+	return nil
+}
 
 // finishTask is the shared close/scrap path: it dispatches to the id's backend for
 // either "done" (scrap=false) or "scrap" (scrap=true), then frees any agent that was

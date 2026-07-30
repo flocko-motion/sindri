@@ -449,11 +449,11 @@ func (h *Hub) Handler() http.Handler {
 		writeJSON(w, okMsg{"closed"}, h.wf.CloseTask(h.reqProject(r), req.ID))
 	})
 	mux.HandleFunc("POST /task/delete", func(w http.ResponseWriter, r *http.Request) {
-		var req RejectReq // ID (+ unused Feedback)
+		var req ScrapTaskReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"deleted"}, h.wf.DeleteTask(h.reqProject(r), req.ID))
+		writeJSON(w, okMsg{"deleted"}, h.wf.ScrapTask(h.reqProject(r), req.ID, req.Subtree, req.PRs))
 	})
 	return mux
 }
@@ -468,6 +468,14 @@ type PriorityReq struct {
 type RejectReq struct {
 	ID       string `json:"id"`
 	Feedback string `json:"feedback"`
+}
+
+// ScrapTaskReq is the body for POST /task/delete: the task, and how far the discard
+// reaches — down its subtree, and over the open PRs of what it scraps.
+type ScrapTaskReq struct {
+	ID      string `json:"id"`
+	Subtree bool   `json:"subtree"`
+	PRs     bool   `json:"prs"`
 }
 
 // TaskReq is the body for POST /tasks (create) and POST /task/edit (ID set).

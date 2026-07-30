@@ -105,6 +105,7 @@ var (
 	PriorityWords = task.PriorityWords
 	StateLabel    = task.StateLabel
 	ArrangeTasks  = task.ArrangeTasks
+	Descendants   = task.Descendants
 	FormatClients = agent.FormatClients
 	Sections      = commands.Sections
 	ChatIcon      = chat.Icon
