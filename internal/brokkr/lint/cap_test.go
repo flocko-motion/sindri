@@ -93,7 +93,7 @@ func TestCommentAvgHonoursTheCap(t *testing.T) {
 		t.Fatalf("expected findings:\n%s", out.String())
 	}
 	got := out.String()
-	if n := strings.Count(got, ".tsx: comments average"); n != 3 {
+	if n := strings.Count(got, ".tsx: 3.0 avg"); n != 3 {
 		t.Errorf("printed %d files, want 3:\n%s", n, got)
 	}
 	if !strings.Contains(got, "5 more") {

@@ -17,26 +17,48 @@ import (
 	"strings"
 )
 
-// DefaultMaxCommentAvg is the mean lines per comment block a file may average once it has enough
-// comments to show a trend. A CEILING, not a target: one line answers most comments, and the
-// occasional paragraph is paid for by them, because prose outweighing its code stops being read.
-// Per repo via `lint: max_comment_avg:`.
+// DefaultMaxCommentAvg is the mean lines per comment a file may average. A ceiling, not a target.
 const DefaultMaxCommentAvg = 2.0
 
-// trendSample is the number of comment blocks at which a file's mean is taken at face value,
-// and bonusPerBlock is how much slack each block short of that earns.
-//
-// A mean over two comments is not evidence of a trend, so a thin sample is forgiven and the
-// limit tightens as the sample grows: at ten blocks the configured maximum applies exactly, at
-// two it is five times as generous. Linear on purpose — a rule people have to predict before
-// they write is worth more than a curve that fits a nicer shape.
+// trendSample is where a mean is taken at face value; bonusPerBlock is the slack each block short
+// of it earns. Two comments are not a trend. Linear, so the rule is predictable before you write.
 const (
 	trendSample   = 10
 	bonusPerBlock = 0.5
 )
 
-// allowanceFor is the mean length a file with n comment blocks may reach, given the configured
-// maximum.
+// systemicFiles is where long comments stop being a list of slips and become a house-style problem.
+const systemicFiles = 10
+
+// systemicBanner teaches the practice rather than restating the rule, which at this scale is
+// plainly understood and plainly not followed. Rare, so it stays worth reading.
+const systemicBanner = `
+!! WARNING: comment length is a HOUSE-STYLE problem here, not a few long comments.
+
+How to write them:
+  - One line. Say what the thing is FOR, or why it is not done the obvious way.
+  - Do not restate the signature, the types, or the control flow — the code has those.
+  - A paragraph is for a decision a reader would otherwise undo: name the trap, once.
+  - Delete rather than compress. Prose nobody reads costs more than prose that is missing.
+
+What does NOT count as fixing it:
+  - Trimming to land exactly on the limit. The next comment added fails again.
+  - Moving prose out of a header, splitting one comment in two, padding with one-liners.
+  - Raising ` + "`lint: max_comment_avg:`" + `. That is the maintainer's call, not a way past a finding.
+`
+// limit exactly fails again on the next comment added, so half a line of headroom is the goal.
+func aimFor(allowed float64) float64 {
+	aim := allowed - 0.5
+	if aim < 1 {
+		aim = 1 // one line per comment is the floor; below that there is nothing to aim at
+	}
+	if aim > allowed {
+		return allowed // a ceiling already under a line leaves no room for margin
+	}
+	return aim
+}
+
+// allowanceFor is the mean a file with n comment blocks may reach, given the configured maximum.
 func allowanceFor(base float64, n int) float64 {
 	if n >= trendSample {
 		return base
@@ -44,13 +66,8 @@ func allowanceFor(base float64, n int) float64 {
 	return base * (1 + bonusPerBlock*float64(trendSample-n))
 }
 
-// CommentAvg walks the given roots (default ".") and reports each file whose mean comment block
-// runs longer than maxAvg lines. A non-positive maxAvg uses DefaultMaxCommentAvg. With blocks set,
-// each reported file also lists every comment over the limit — line range, length and excerpt —
-// so a fix is one pass instead of read, guess, edit, re-run.
-//
-// The file header is excluded from the statistic: it is a REQUIRED multi-line block (see
-// Comments), so counting it would charge every file for obeying the header rule.
+// CommentAvg reports each file whose mean comment exceeds maxAvg; blocks adds the per-comment
+// listing. The header is excluded: it MUST be multi-line, so counting it would charge everyone.
 func CommentAvg(roots []string, maxAvg float64, blocks bool, cap *Cap, ig *Ignore, w io.Writer) (bool, error) {
 	if len(roots) == 0 {
 		roots = []string{"."}
@@ -108,14 +125,12 @@ func CommentAvg(roots []string, maxAvg float64, blocks bool, cap *Cap, ig *Ignor
 				return nil
 			}
 			v := viol{path: path, avg: avg, allowed: allowed, blocks: len(bs), lines: total, worst: worst}
-			if blocks {
-				for _, b := range bs {
-					if float64(b.Lines) > allowed {
-						v.over = append(v.over, b)
-					}
+			for _, b := range bs { // longest first: the default line names where to start
+				if float64(b.Lines) > allowed {
+					v.over = append(v.over, b)
 				}
-				sort.Slice(v.over, func(i, j int) bool { return v.over[i].Lines > v.over[j].Lines })
 			}
+			sort.Slice(v.over, func(i, j int) bool { return v.over[i].Lines > v.over[j].Lines })
 			viols = append(viols, v)
 			return nil
 		})
@@ -124,24 +139,27 @@ func CommentAvg(roots []string, maxAvg float64, blocks bool, cap *Cap, ig *Ignor
 		}
 	}
 
+	// The ideal comes from the CONFIGURED maximum, so it is one number for the whole run. Only the
+	// max adapts per file (a thin sample earns slack) — an ideal that moved with it would read as
+	// "ideal 10.5" on a two-comment file.
+	aim := aimFor(maxAvg)
 	// Worst mean first, so a capped run withholds the files that need it least.
 	sort.Slice(viols, func(i, j int) bool { return viols[i].avg > viols[j].avg })
 	for _, v := range viols {
 		if !cap.Allow() {
 			continue
 		}
-		fmt.Fprintf(w, "%s: comments average %.1f lines (max %.1f over %d blocks) / %d comment lines; longest is %d lines at :%d\n",
-			v.path, v.avg, v.allowed, v.blocks, v.lines, v.worst.Lines, v.worst.Line)
+		// Cut toward the IDEAL, never the max: the bare number needed to pass anchored people to
+		// the ceiling, so it is deliberately not shown.
+		cut := v.lines - int(aim*float64(v.blocks))
+		// One actionable line: how far over, how much to cut, and WHERE. No excerpt — you are
+		// going to open the file regardless, and truncated prose does not help you find anything.
+		fmt.Fprintf(w, "%s: %.1f avg over %d blocks (ideal %.1f, max %.1f) — cut %d line(s); fix %s\n",
+			v.path, v.avg, v.blocks, aim, v.allowed, cut, blockRanges(v.over, 8))
 		if !blocks {
-			if ex := firstProse(v.worst); ex != "" {
-				fmt.Fprintf(w, "    %s…\n", trimTo(ex, 72))
-			}
 			continue
 		}
-		// The budget is allowed × blocks, so this is exactly how many comment lines have to go.
-		// Printing it turns "trim and re-run until it passes" into one edit.
-		fmt.Fprintf(w, "    cut %d comment line(s); %d block(s) run over the %.1f limit:\n",
-			v.lines-int(v.allowed*float64(v.blocks)), len(v.over), v.allowed)
+		fmt.Fprintf(w, "    %d block(s) run over %.1f:\n", len(v.over), v.allowed)
 		for _, b := range v.over {
 			fmt.Fprintf(w, "      %-11s %2d lines  %s\n",
 				fmt.Sprintf(":%d-%d", b.Line, b.End), b.Lines, trimTo(firstProse(b), 58))
@@ -149,16 +167,30 @@ func CommentAvg(roots []string, maxAvg float64, blocks bool, cap *Cap, ig *Ignor
 	}
 	if len(viols) > 0 {
 		cap.Note(w)
-		fmt.Fprintf(w, "%d file(s) over the comment-length trend — cut words, don't move them.\n"+
-			"The maximum is a CEILING, not a target. A single line is enough for most comments: "+
-			"name what the thing is for, or why it is not the obvious way. Aim well under the limit "+
-			"— a file trimmed to sit exactly on it fails again the moment anyone adds a comment, and "+
-			"the number passing is not the same as the prose being worth reading.\n"+
-			"Relocating a comment, splitting one into several, or padding the file with one-liners "+
-			"only shifts the average. `lint: max_comment_avg:` in .sindri/config.yaml is the "+
-			"maintainer's setting, not a way past a finding.\n", len(viols))
+		fmt.Fprintf(w, "%d file(s) over the comment-length trend — cut words, don't move them. "+
+			"Ideal %.1f; the max is a ceiling, not the goal.\n", len(viols), aim)
+		if len(viols) >= systemicFiles {
+			fmt.Fprint(w, systemicBanner)
+		}
 	}
 	return len(viols) > 0, nil
+}
+
+// blockRanges lists the line ranges to go and edit, longest first, up to max. Line numbers are what
+// you act on; the report used to print truncated prose instead, which found nothing for you.
+func blockRanges(over []CommentBlock, max int) string {
+	var b strings.Builder
+	for i, blk := range over {
+		if i == max {
+			fmt.Fprintf(&b, " (+%d more)", len(over)-i)
+			break
+		}
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		fmt.Fprintf(&b, ":%d-%d", blk.Line, blk.End)
+	}
+	return b.String()
 }
 
 // firstProse returns a block's first line that says something, for the excerpt that names which

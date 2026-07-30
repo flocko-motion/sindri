@@ -21,26 +21,22 @@ import (
 	"strings"
 )
 
-// canonicalHeaderFields are the four fields every source file's header must
-// carry, per the architecture spec's "File headers" requirement.
+// canonicalHeaderFields are the four every header must carry (architecture spec, "File headers").
 var canonicalHeaderFields = []string{"package", "type", "job", "limits"}
 
-// DefaultMaxHeaderFieldLen bounds one header field's content (continuations joined) so headers
-// stay compact in `brokkr map`. Only field values count, not free-form lines.
+// DefaultMaxHeaderFieldLen bounds one field's content (continuations joined) so `brokkr map` stays
+// compact. Only field values count, not free-form lines.
 const DefaultMaxHeaderFieldLen = 300
 
-// commentViol is one documentation violation: a file (and line, 0 = file-level)
-// and the message describing what's missing.
+// commentViol is one violation: where it is (line 0 = file-level) and what is missing.
 type commentViol struct {
 	path string
 	line int
 	msg  string
 }
 
-// Comments walks the given roots (default ".") for non-test .go files and reports
-// documentation violations: a missing or incomplete canonical header, or an
-// exported func or type with no doc comment. Paths matched by ig are skipped.
-// Returns true if any was found.
+// Comments reports documentation violations in non-test source: a missing or incomplete canonical
+// header, or an exported func or type with no doc comment.
 func Comments(roots []string, cap *Cap, ig *Ignore, w io.Writer) (bool, error) {
 	if len(roots) == 0 {
 		roots = []string{"."}
@@ -90,9 +86,8 @@ func Comments(roots []string, cap *Cap, ig *Ignore, w io.Writer) (bool, error) {
 	return len(viols) > 0, nil
 }
 
-// checkTSHeader holds a TS/JS file to the same four-field header as a Go one, so one
-// convention covers the repo. Header only: the per-declaration doc rule needs a real parser,
-// so that is left to eslint/tsc.
+// checkTSHeader holds TS/JS to the same four-field header, so one convention covers the repo.
+// Header only: the per-declaration rule needs a real parser, so eslint/tsc own that.
 func checkTSHeader(path string) []commentViol {
 	src, ok := readSource(path)
 	if !ok {
@@ -125,9 +120,8 @@ func checkTSHeader(path string) []commentViol {
 	return viols
 }
 
-// headerFieldTooLong is the one wording for an over-long header field, shared by the Go and TS
-// checks so the instruction cannot drift. It says what to do because the tempting move is to
-// relocate the prose below the imports, which the rule stops reaching but nobody benefits from.
+// headerFieldTooLong is the one wording, shared by the Go and TS checks so it cannot drift. It says
+// what to do, because the tempting move is relocating the prose where the rule can't reach it.
 func headerFieldTooLong(path string, line int, field string, n int) string {
 	return fmt.Sprintf("%s:%d: header field %q is %d chars (max %d) — cut it down, don't move it. "+
 		"The maximum is a ceiling, not a target: a good field is one short phrase, well under it. "+
@@ -312,8 +306,7 @@ func fieldValue(line, field string) (string, bool) {
 	return "", false
 }
 
-// docLinesNorm returns a comment group's lines with their comment markers (//,
-// /* */, leading *) and surrounding whitespace stripped.
+// docLinesNorm strips comment markers (//, /* */, leading *) and surrounding whitespace.
 func docLinesNorm(doc *ast.CommentGroup) []string {
 	if doc == nil {
 		return nil
@@ -342,8 +335,7 @@ func hasDocText(doc *ast.CommentGroup) bool {
 	return false
 }
 
-// isGenerated reports whether a file is machine-generated (a `// Code generated …
-// DO NOT EDIT.` line before the package clause), which exempts it.
+// isGenerated finds the `Code generated … DO NOT EDIT.` line that exempts a file.
 func isGenerated(f *ast.File) bool {
 	for _, cg := range f.Comments {
 		if cg.Pos() >= f.Package {
@@ -377,8 +369,7 @@ func funcName(d *ast.FuncDecl) string {
 	return d.Name.Name
 }
 
-// recvTypeName extracts the bare receiver type name from T, *T, or a generic
-// T[P] / T[P, Q] receiver.
+// recvTypeName is the bare type name from a T, *T, or generic T[P] receiver.
 func recvTypeName(e ast.Expr) string {
 	switch t := e.(type) {
 	case *ast.StarExpr:

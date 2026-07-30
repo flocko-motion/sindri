@@ -25,8 +25,7 @@ const (
 	LangTS // the TypeScript/JavaScript family, including .tsx/.jsx React components
 )
 
-// LangOf classifies a path by extension. Declaration files (.d.ts) are generated interface
-// surfaces rather than hand-authored source, so they are not linted.
+// LangOf classifies a path by extension; .d.ts is generated surface, not hand-authored source.
 func LangOf(path string) Lang {
 	if strings.HasSuffix(path, ".d.ts") {
 		return LangNone
@@ -61,9 +60,7 @@ func IsTestFile(path string) bool {
 	return false
 }
 
-// CommentBlock is one run of comment lines. Line/End are where it physically sits, which is what
-// a reader needs to go edit it; Lines counts only the lines that carry prose, so the two differ
-// wherever delimiters or directives are in play.
+// CommentBlock is one run of comment lines: Line/End is where it sits, Lines counts only prose.
 type CommentBlock struct {
 	Line  int
 	End   int
@@ -71,18 +68,13 @@ type CommentBlock struct {
 	Text  []string // the comment's content, markers stripped
 }
 
-// ScanComments splits a file into its comment blocks, in order. Only CODE ends a block, so runs
-// separated by blank lines are one — otherwise any file could halve its measured length by
-// inserting gaps, and the statistic would measure formatting. Delimiter-only lines (`/**`, `*/`)
-// and //go: directives count for nothing, for the same reason; a bare `*` or `//` INSIDE a block
-// is a paragraph break its author chose, so it does count. The scan is lexical, not a parse: it
-// misreads a marker inside a string literal, which is rare and harmless to a statistical rule.
+// ScanComments splits a file into comment blocks; only CODE ends one, so gaps can't halve a
+// measurement. Delimiters, //go: directives and raw strings aren't prose; a bare `*` or `//` is.
 func ScanComments(src string) []CommentBlock {
 	var out []CommentBlock
 	var cur *CommentBlock
 	inMulti := false
-	// open starts the block at the line it OPENS on, delimiter or not, so a report points at
-	// `/**` rather than the prose below it, and carries End to the last comment line seen.
+	// Open on the line the comment OPENS on, so a report points at `/**`, not the prose below.
 	open := func(n int) {
 		if cur == nil {
 			cur = &CommentBlock{Line: n}
@@ -101,8 +93,16 @@ func ScanComments(src string) []CommentBlock {
 			cur = nil
 		}
 	}
+	inRaw := false
 	for i, raw := range strings.Split(src, "\n") {
 		line, n := strings.TrimSpace(raw), i+1
+		// A raw string literal can contain anything, including comment markers. Counting those
+		// charged this very file for the example inside commentsConvention — the file documenting
+		// the convention penalised for showing one.
+		if inRaw {
+			inRaw = !strings.Contains(line, "`")
+			continue
+		}
 		switch {
 		case inMulti:
 			open(n)
@@ -136,6 +136,9 @@ func ScanComments(src string) []CommentBlock {
 			// A gap holds the block open (see above): the blank line itself is not counted.
 		default:
 			flush() // code — this is where a comment block genuinely ends
+			// An odd number of backticks opens a raw string that runs past this line. Counted on
+			// CODE lines only: comments here are full of `quoted` words and would flip it.
+			inRaw = strings.Count(line, "`")%2 == 1
 		}
 	}
 	flush()

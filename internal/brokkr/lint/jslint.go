@@ -32,13 +32,8 @@ var (
 	tsConfigs = []string{"tsconfig.json"}
 )
 
-// JSLint runs each JS/TS project's OWN checks and reports whether anything failed.
-//
-// Projects are found wherever they sit (web/, ui/, one per package), and each source file is
-// checked by the nearest project above it — the config a compiler would resolve. The tools
-// decide what "correct" means, so brokkr never disagrees with the editor and CI. But source
-// with no tool configured above it IS a finding: a green gate must not mean the type checker
-// never ran.
+// JSLint runs each JS/TS project's OWN checks, so brokkr never disagrees with the editor and CI.
+// Source with NO tool above it is itself a finding: a green gate must not mean tsc never ran.
 func JSLint(root string, ig *Ignore, w io.Writer) (bool, error) {
 	if root == "" {
 		root = "."
@@ -91,8 +86,7 @@ func JSLint(root string, ig *Ignore, w io.Writer) (bool, error) {
 	return failed, nil
 }
 
-// scanJSTree walks root once, collecting the JS/TS sources to account for and the directories
-// that declare a JS/TS project.
+// scanJSTree walks root once for both the JS/TS sources and the dirs that declare a project.
 func scanJSTree(root string, ig *Ignore) (sources []string, projects map[string]bool, err error) {
 	projects = map[string]bool{}
 	markers := append(append([]string{"package.json"}, tsConfigs...), eslintConfigs...)
@@ -189,15 +183,13 @@ func runJSTool(root string, w io.Writer, label string, bin string, args ...strin
 	return true
 }
 
-// jsCommand builds a tool's argv: the repo's pinned copy first, then a global install, nil if
-// neither. Never `npx <bin>` — npx resolves an uninstalled name against the registry, where
-// `tsc` is an unrelated impostor package, so it would run something that is not the compiler.
+// jsCommand prefers the repo's pinned tool, then a global one, nil if neither. Never `npx`: on the
+// registry `tsc` is an unrelated impostor, so it would run something that is not the compiler.
 func jsCommand(root, bin string, args ...string) (argv []string, how string) {
 	local := filepath.Join(root, "node_modules", ".bin", bin)
 	if _, err := os.Stat(local); err == nil {
-		// ABSOLUTE on purpose: the caller sets Dir to this same directory, and the child
-		// resolves a relative argv[0] AFTER chdir, so "web/node_modules/.bin/tsc" became
-		// "web/web/..." and never started.
+		// ABSOLUTE: the child resolves a relative argv[0] AFTER chdir into Dir, so
+		// "web/node_modules/.bin/tsc" became "web/web/…" and never started.
 		if abs, err := filepath.Abs(local); err == nil {
 			local = abs
 		}

@@ -26,9 +26,8 @@ import (
 	"golang.org/x/tools/go/ssa/ssautil"
 )
 
-// Deadcode reports every function unreachable from a main package's init+main, limited to the
-// loaded modules. Generated files, marker methods, //deadcode:keep and ig matches are excluded;
-// tests count, since a helper reachable only from a _test.go is live.
+// Deadcode reports functions unreachable from a main's init+main, within the loaded modules only.
+// Generated files, marker methods, //deadcode:keep and ig matches are excluded; tests count.
 func Deadcode(patterns []string, tags string, cap *Cap, ig *Ignore, w io.Writer) (found bool, err error) {
 	// The Go toolchain is optional, so its absence is a visible skip rather than a failure.
 	if _, err := exec.LookPath("go"); err != nil {
@@ -76,9 +75,8 @@ func Deadcode(patterns []string, tags string, cap *Cap, ig *Ignore, w io.Writer)
 		roots = append(roots, main.Func("init"), main.Func("main"))
 	}
 
-	// Source-level functions, generated files, and each package's interfaces (for marker-method
-	// detection). Synthetic wrappers and nested funcs are skipped: an unreachable literal is
-	// only ever a consequence of its parent being unreachable.
+	// Source funcs, generated files, per-package interfaces. Wrappers and nested funcs are skipped:
+	// an unreachable literal is only ever a consequence of its parent.
 	var (
 		sourceFuncs    []*ssa.Function
 		generated      = make(map[string]bool)
@@ -196,8 +194,7 @@ func moduleFilter(initial []*packages.Package) (*regexp.Regexp, error) {
 	return regexp.Compile("^(" + strings.Join(patterns, "|") + ")\\b")
 }
 
-// prettyName renders a function's name without go/ssa's punctuation, e.g.
-// "(*pkg.T).F" becomes "T.F".
+// prettyName drops go/ssa's punctuation: "(*pkg.T).F" becomes "T.F".
 func prettyName(fn *ssa.Function) string {
 	var buf strings.Builder
 	var format func(*ssa.Function)
@@ -219,8 +216,7 @@ func prettyName(fn *ssa.Function) string {
 	return buf.String()
 }
 
-// receiverNamed returns the named type associated with a method receiver of
-// the form N or *N (or an alias thereof), and whether a pointer was present.
+// receiverNamed unwraps a receiver of the form N or *N (or an alias) to its named type.
 func receiverNamed(recv *types.Var) (isPtr bool, named *types.Named) {
 	t := recv.Type()
 	if ptr, ok := types.Unalias(t).(*types.Pointer); ok {
@@ -231,10 +227,8 @@ func receiverNamed(recv *types.Var) (isPtr bool, named *types.Named) {
 	return
 }
 
-// isMarkerMethod reports whether fn is a marker method: an unexported,
-// empty-bodied method with no params or results that implements some named
-// interface declared in the same package. These are intentionally never
-// called directly, so reporting them as dead would be misleading.
+// isMarkerMethod reports whether fn is an unexported empty method implementing a local interface.
+// Nothing calls one directly, so reporting it as dead would mislead.
 func isMarkerMethod(fn *ssa.Function, interfaceTypes []*types.Interface) bool {
 	if !(fn.Signature.Recv() != nil &&
 		!ast.IsExported(fn.Name()) &&
@@ -251,9 +245,8 @@ func isMarkerMethod(fn *ssa.Function, interfaceTypes []*types.Interface) bool {
 	})
 }
 
-// hasKeepDirective reports whether fn carries a //deadcode:keep directive — for a function
-// reached only by reflection, or kept as future API. Directly above the declaration, as Go's own
-// directives are.
+// hasKeepDirective reports whether fn carries //deadcode:keep — reached only by reflection, or
+// kept as future API. Directly above the declaration, as Go's own directives are.
 func hasKeepDirective(fn *ssa.Function) bool {
 	decl, ok := fn.Syntax().(*ast.FuncDecl)
 	if !ok || decl.Doc == nil {
@@ -274,8 +267,7 @@ func relPosition(posn token.Position) string {
 	return fmt.Sprintf("%s:%d:%d", relFilename(posn.Filename), posn.Line, posn.Column)
 }
 
-// relFilename renders filename relative to the working dir when it sits inside
-// it, else unchanged — the form both the report and --ignore matching use.
+// relFilename is the cwd-relative form the report and --ignore matching both use.
 func relFilename(filename string) string {
 	if rel, err := filepath.Rel(cwd, filename); err == nil && !strings.HasPrefix(rel, "..") {
 		return rel

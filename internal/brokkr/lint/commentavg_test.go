@@ -250,6 +250,29 @@ func TestBlocksListsEveryOffender(t *testing.T) {
 	}
 }
 
+// TestRawStringContentsAreNotComments: a raw string can hold anything, including comment markers.
+// Counting them charged the file that DOCUMENTS the comment convention for containing an example of
+// it — and paying that with real prose is the gaming the rule warns against.
+func TestRawStringContentsAreNotComments(t *testing.T) {
+	src := "// the real comment\nconst example = `\n// package: widget / build\n// type:    logic\n`\ncode()\n"
+	blocks := ScanComments(src)
+	if len(blocks) != 1 {
+		t.Fatalf("one real comment, got %d blocks: %+v", len(blocks), blocks)
+	}
+	if blocks[0].Lines != 1 {
+		t.Errorf("only the real comment counts, got %d lines", blocks[0].Lines)
+	}
+	// Backticks inside comments are everywhere in this repo; they must not open a raw string.
+	quoted := ScanComments("// use `sindri` for this\n// and `brokkr` for that\ncode()\n")
+	if len(quoted) != 1 || quoted[0].Lines != 2 {
+		t.Errorf("quoted words in comments must stay comments, got %+v", quoted)
+	}
+	// A raw string opened and closed on one line leaves the scanner where it started.
+	if got := ScanComments("const x = `one line`\n// after\ncode()\n"); len(got) != 1 || got[0].Lines != 1 {
+		t.Errorf("a single-line raw string must not swallow what follows, got %+v", got)
+	}
+}
+
 // TestExcerptNamesTheComment: the report's excerpt must quote the offending comment. It used to
 // print the `*` left over from `/**`, which named nothing — worst for TypeScript, where every
 // block comment opens that way.
@@ -257,10 +280,10 @@ func TestExcerptNamesTheComment(t *testing.T) {
 	long := "/**\n * the offending explanation\n * b\n * c\n * d\n * e\n * f\n * g\n * h\n * i\n */\n"
 	root := writeTree(t, map[string]string{"src/Wordy.tsx": tsHeader + long + "export const a = 1;\n"})
 
-	// A deliberately strict maximum, so this test turns on the excerpt rather than on where the
-	// thin-sample allowance happens to fall.
+	// blocks=true: the excerpt lives in the detail listing now. The default line carries line
+	// RANGES instead — you open the file either way, so truncated prose found nothing for you.
 	var out bytes.Buffer
-	found, err := CommentAvg([]string{root}, 0.5, false, nil, mustIgnore(t), &out)
+	found, err := CommentAvg([]string{root}, 0.5, true, nil, mustIgnore(t), &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,6 +296,42 @@ func TestExcerptNamesTheComment(t *testing.T) {
 	}
 	if strings.Contains(got, "    *…") {
 		t.Errorf("the excerpt must not be a bare delimiter:\n%s", got)
+	}
+}
+
+// TestDefaultLineNamesLinesNotProse: the default report is one line per file, and what makes it
+// actionable is the line RANGES to go and edit. It used to print a truncated excerpt, which told you
+// nothing you could act on.
+func TestDefaultLineNamesLinesNotProse(t *testing.T) {
+	long := "/**\n * the offending explanation\n * b\n * c\n * d\n */\n"
+	root := writeTree(t, map[string]string{"src/Wordy.tsx": tsHeader + long + "export const a = 1;\n"})
+
+	var out bytes.Buffer
+	if _, err := CommentAvg([]string{root}, 0.5, false, nil, mustIgnore(t), &out); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "fix :") {
+		t.Errorf("the default line must name the ranges to edit:\n%s", got)
+	}
+	if !strings.Contains(got, "ideal") {
+		t.Errorf("the default line must name the ideal, not just the max:\n%s", got)
+	}
+	if strings.Contains(got, "the offending explanation") {
+		t.Errorf("no excerpt in the default output — that is what --blocks is for:\n%s", got)
+	}
+}
+
+// TestAimNeverExceedsTheMax: the ideal is the max less a margin, but a max already under one line
+// leaves no room — reporting "ideal 1.0, max 0.5" would ask for something the rule forbids.
+func TestAimNeverExceedsTheMax(t *testing.T) {
+	for _, max := range []float64{0.2, 0.5, 1.0, 1.5, 2.0, 8.0} {
+		if aim := aimFor(max); aim > max {
+			t.Errorf("aimFor(%.1f) = %.1f, must not exceed the max", max, aim)
+		}
+	}
+	if aim := aimFor(2.0); aim != 1.5 {
+		t.Errorf("the default max should give an ideal of 1.5, got %.1f", aim)
 	}
 }
 

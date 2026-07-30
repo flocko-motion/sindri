@@ -58,14 +58,12 @@ func newLintCmd() *cobra.Command {
 			"generated file's exception, since the file itself can't carry a marker.\n\n" +
 			commentsConvention,
 		Args: cobra.ArbitraryArgs,
-		// lint reports failures itself and signals them with an exitCodeError (empty
-		// message); silence cobra's own error echo for it.
+		// Failures report themselves via exitCodeError, so cobra must not echo them too.
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := cmd.OutOrStdout()
 			which, paths := splitLintArgs(args)
-			// Merge the repo's checked-in .brokkrignore (exceptions for generated
-			// files that can't carry an in-file marker) with any --ignore flags.
+			// The checked-in .brokkrignore, for generated files that can't carry a marker.
 			filePats, err := lint.LoadIgnoreFile(".")
 			if err != nil {
 				return err
@@ -94,15 +92,13 @@ func newLintCmd() *cobra.Command {
 	return c
 }
 
-// lintNames are the linters `lint` dispatches to, and what tells a linter name from a path in the
-// arguments — so `lint comment-length internal/hub` and `lint internal/hub` both read correctly.
+// lintNames are the linters, and what tells a name from a path in the arguments.
 var lintNames = map[string]bool{
 	"deadcode": true, "loc": true, "comments": true,
 	"comment-length": true, "js": true, "openspec": true,
 }
 
-// splitLintArgs reads an optional linter name followed by paths, so scoping to a file needs no
-// flag and no placeholder standing in for "all linters".
+// splitLintArgs reads an optional linter name then paths, so scoping needs no flag or placeholder.
 func splitLintArgs(args []string) (which string, paths []string) {
 	if len(args) > 0 && lintNames[args[0]] {
 		return args[0], args[1:]
@@ -118,8 +114,7 @@ func orDot(paths []string) []string {
 	return paths
 }
 
-// pkgPatterns turns paths into Go package patterns for deadcode, which analyses packages rather
-// than files: a file scopes to its directory, and each directory covers its subtree.
+// pkgPatterns turns paths into package patterns for deadcode; a file scopes to its directory.
 func pkgPatterns(paths []string) []string {
 	if len(paths) == 0 {
 		return []string{"./..."}
@@ -134,8 +129,7 @@ func pkgPatterns(paths []string) []string {
 	return out
 }
 
-// repoLintBar resolves the quality bar from the repo's `lint:` config, unless a flag was passed
-// explicitly. An unreadable config falls back to the defaults; the hub already reports a broken one.
+// repoLintBar reads the repo's `lint:` config unless a flag overrides it; an unreadable one defaults.
 func repoLintBar(cmd *cobra.Command, flagLines int, flagAvg float64) (int, float64) {
 	lines, avg := flagLines, flagAvg
 	cfg, err := config.Load(".")
@@ -151,8 +145,7 @@ func repoLintBar(cmd *cobra.Command, flagLines int, flagAvg float64) (int, float
 	return lines, avg
 }
 
-// runLinters runs the named linter, or all of them when which is empty, scoped to paths (the whole
-// tree when none are given). Returns whether any violation was found.
+// runLinters runs the named linter, or all of them when which is empty, scoped to paths.
 func runLinters(out io.Writer, which, tags string, maxLines int, maxAvg float64, blocks bool, cap *lint.Cap, paths []string, ig *lint.Ignore) (bool, error) {
 	switch which {
 	case "deadcode":
@@ -174,8 +167,7 @@ func runLinters(out io.Writer, which, tags string, maxLines int, maxAvg float64,
 	}
 }
 
-// runJS runs the delegated JS/TS checks over each scoped path. JSLint takes one root, so several
-// paths are separate runs whose findings are OR'd — one failure is enough to fail the gate.
+// runJS runs the delegated checks per scoped path — JSLint takes one root, so findings are OR'd.
 func runJS(out io.Writer, paths []string, ig *lint.Ignore) (bool, error) {
 	found := false
 	for _, root := range orDot(paths) {
@@ -188,8 +180,7 @@ func runJS(out io.Writer, paths []string, ig *lint.Ignore) (bool, error) {
 	return found, nil
 }
 
-// runComments runs the documentation linter and, on a violation, follows it with
-// the convention so the fix is obvious without leaving the terminal.
+// runComments follows a violation with the convention, so the fix needs no trip elsewhere.
 func runComments(out io.Writer, paths []string, cap *lint.Cap, ig *lint.Ignore) (bool, error) {
 	found, err := lint.Comments(orDot(paths), cap, ig, out)
 	if err != nil {
