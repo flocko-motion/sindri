@@ -34,10 +34,8 @@ var (
 	stTrans  = lipgloss.NewStyle().Foreground(cOrange)
 )
 
-// Diff colours — the classic editor look: additions on a dark green background,
-// removals on dark red, both with a forced light foreground so they stay legible
-// regardless of the terminal's own theme. Hunk and file headers are tinted, not
-// backgrounded, so they read as structure rather than content.
+// Diff colours, with a FORCED light foreground so they survive any terminal theme. Headers are
+// tinted, not backgrounded, so they read as structure rather than content.
 var (
 	diffAddStyle  = lipgloss.NewStyle().Background(lipgloss.Color("22")).Foreground(lipgloss.Color("231"))
 	diffDelStyle  = lipgloss.NewStyle().Background(lipgloss.Color("52")).Foreground(lipgloss.Color("231"))
@@ -45,8 +43,7 @@ var (
 	diffMetaStyle = lipgloss.NewStyle().Foreground(cGrey).Bold(true)
 )
 
-// taskStatusStyle is a task row's colour: pink active, grey done, green otherwise
-// (open, in_review, …).
+// taskStatusStyle: pink active, grey done, green otherwise.
 func taskStatusStyle(status string) lipgloss.Style {
 	switch status {
 	case "in_progress":
@@ -58,10 +55,8 @@ func taskStatusStyle(status string) lipgloss.Style {
 	}
 }
 
-// agentStatusStyle is an agent row's colour, tuned to what you should DO: grey down,
-// orange transitioning (launching/stopping), red blocked (it needs your attention
-// now), yellow idle (not doing anything — your move), green working (leave it) and
-// the workflow phases (submitted/collab/…).
+// agentStatusStyle colours by what you should DO: red blocked (needs you now), yellow idle (your
+// move), green working (leave it), orange transitioning, grey down.
 func agentStatusStyle(status string) lipgloss.Style {
 	switch status {
 	case "down":
@@ -77,31 +72,25 @@ func agentStatusStyle(status string) lipgloss.Style {
 	}
 }
 
-// A project's colour is one hue (deterministic from its repoTag) rendered in two
-// shades: a bright shade for text/labels on the terminal's dark background, and a
-// muted dark shade for a filled background (the header bar). Same hue → the same
-// repo always reads the same; two shades → a guaranteed dark/bright contrast pair,
-// none at full intensity. Derived in truecolour (HSL) so lightness is controllable.
+// One hue per project in two shades, so a repo always reads the same AND the pair is guaranteed to
+// contrast. HSL, because lightness has to be controllable.
 const (
 	repoDarkSat, repoDarkLight     = 0.32, 0.22 // muted, dark: for filled backgrounds
 	repoBrightSat, repoBrightLight = 0.55, 0.72 // bright: for text on a dark background
 )
 
-// nRepoColors is the size of the pickable colour palette: evenly-spaced hues around
-// the wheel, so a repo can be pinned to a chosen colour (1..nRepoColors) instead of
-// the hash-derived default (0).
+// nRepoColors is the pickable palette: evenly-spaced hues, so a repo can be pinned instead of
+// taking the hash-derived default (0).
 const nRepoColors = 24
 
 // paletteHue is the hue (degrees) for a 1-based palette choice.
 func paletteHue(choice int) float64 { return float64(((choice - 1) * 360 / nRepoColors) % 360) }
 
-// projectHue maps a repoTag to a stable hue in [0,360) — the default when no colour
-// is pinned. The derivation lives in ui/theme so a name gets the same hue here, in the
-// CLI, and for chat participants.
+// projectHue is the default hue for a tag. Derived in ui/theme so a name gets the same hue here,
+// in the CLI, and in chat.
 func projectHue(tag string) float64 { return theme.Hue(tag) }
 
-// hueFor is a repo's hue: a pinned palette choice (1..nRepoColors) if set, else the
-// hash-derived default.
+// hueFor prefers a pinned palette choice, else the hash-derived default.
 func hueFor(tag string, choice int) float64 {
 	if choice >= 1 && choice <= nRepoColors {
 		return paletteHue(choice)
@@ -109,16 +98,14 @@ func hueFor(tag string, choice int) float64 {
 	return projectHue(tag)
 }
 
-// repoColorsFor returns a repo's (dark, bright) shades for a colour choice — the same
-// hue at two lightnesses, a ready contrast pair for a filled bar (dark bg + bright fg).
+// repoColorsFor is the (dark, bright) pair for a filled bar: one hue at two lightnesses.
 func repoColorsFor(tag string, choice int) (dark, bright lipgloss.Color) {
 	hue := hueFor(tag, choice)
 	return lipgloss.Color(hslHex(hue, repoDarkSat, repoDarkLight)),
 		lipgloss.Color(hslHex(hue, repoBrightSat, repoBrightLight))
 }
 
-// repoStyleFor colours text in a repo's bright shade for a colour choice. Empty tag
-// → plain.
+// repoStyleFor colours text in a repo's bright shade; an empty tag stays plain.
 func repoStyleFor(tag string, choice int) lipgloss.Style {
 	if tag == "" {
 		return lipgloss.NewStyle()

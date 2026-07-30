@@ -63,8 +63,7 @@ func itemTexts(items []metaItem) []string {
 	return out
 }
 
-// itemDetailLines renders an item's detail with its home-tab renderer, so the
-// modal-peek (ENTER) is identical to the item's own detail view.
+// itemDetailLines renders via the item's home-tab renderer, so ENTER-peek matches its own view.
 func (m model) itemDetailLines(kind, id string) []string {
 	switch kind {
 	case "task":
@@ -108,8 +107,7 @@ func (m model) itemTitle(kind, id string) string {
 	return id
 }
 
-// prMetaFromPR is the basic PR detail from board state (when it isn't the
-// fetched selection, so there's no diff/reviews yet).
+// prMetaFromPR is the basic PR detail from board state — no diff/reviews fetched yet.
 func prMetaFromPR(p store.PR) []string {
 	ls := []string{
 		p.ID,
@@ -164,11 +162,8 @@ func (m model) selID() string {
 	return ""
 }
 
-// wrappedDetail returns the side detail pane's lines word-wrapped to the detail
-// column width, plus the wrapped-line index to highlight (-1 for none). Wrapping
-// lets a long title or description show in full — scroll it with J/K — instead of
-// being truncated at the column edge; the highlight is remapped through the wrap so
-// a focused cross-reference still lights the right row.
+// wrappedDetail wraps the detail pane to column width (long titles scroll with J/K
+// rather than truncate), remapping the highlight index through the wrap (-1 for none).
 func (m model) wrappedDetail() (lines []string, highlight int) {
 	wrapped, origAt := wrapContentMapped(m.detailLines(), m.detailWidth())
 	if h := m.detailHighlight(); h >= 0 && h < len(origAt) {
@@ -193,33 +188,23 @@ func (m model) rows() []row {
 	}
 }
 
-// inScope reports whether a board item owned by project (a repo tag) is admitted by
-// the active scope: everything when global, only the selected repo's when repo-scoped.
-// This is the single home of that rule — agentRows/prRows filter with it and the tab
-// badges count with it, so a badge can't drift from the list beneath it.
+// inScope admits a board item under the active scope. Single home of that rule, so tab
+// badges can't drift from the lists beneath them.
 func (m model) inScope(project string) bool {
 	if !m.scopeRepo {
 		return true
 	}
 	_, tag := m.currentRepo()
 	if tag == "" {
-		// The active repo isn't identifiable — the board carries no Projects (a snapshot
-		// that lost the registry, or a cwd not yet registered). Scoping to a repo we can't
-		// name would match nothing and blank every row, which is how a momentary registry
-		// hiccup made the whole agent list flicker out. Show everything instead: a wider
-		// view is a far better failure than an empty one.
+		// No nameable repo (registry hiccup, unregistered cwd): scoping would blank every
+		// row, so show everything — a wider view beats an empty one.
 		return true
 	}
 	return project == tag
 }
 
-// tabCount is the badge number for section s. Agents and PRs obey the § scope toggle,
-// so their badge counts only in-scope items — two agents in this repo read "2 Agents"
-// even when the fleet has 17, matching what the list actually shows. The rest are
-// scope-invariant (Tasks is always the selected repo's; Repos and Meeting are global by
-// nature) and defer to the registry's fleet-wide count. Under global scope inScope
-// admits everything, so the two loops reduce to exactly AgentCount/OpenPRCount — one
-// code path, no special-casing of the unscoped view.
+// tabCount is section s's badge. Agents/PRs obey the § scope toggle so the badge matches
+// the list; the rest are scope-invariant and use the registry's fleet-wide count.
 func (m model) tabCount(s hub.Section) int {
 	switch s.Key {
 	case "agents":
@@ -250,9 +235,7 @@ func scopeName(repoScoped bool) string {
 	return "global"
 }
 
-// contextFooter is the active tab's action hints (second footer row), generated from
-// the keymap (keys.go) so the help never drifts from the bindings. The right-column
-// focus is a distinct mode with its own item-navigation hints.
+// contextFooter is the tab's action hints, generated from the keymap so help can't drift.
 func (m model) contextFooter() string {
 	if m.rightFocus { // focused on a detail cross-reference (Tasks/PRs)
 		return "j/k item · enter details · g goto · y copy"
@@ -282,8 +265,7 @@ func (m model) focusedItem() (metaItem, bool) {
 	return metaItem{}, false
 }
 
-// detailHighlight is the line index in the Tasks detail pane to highlight (the
-// focused cross-reference when right-focused), or -1. (PRs highlight in prBody.)
+// detailHighlight is the Tasks detail line to highlight, or -1. (PRs highlight in prBody.)
 func (m model) detailHighlight() int {
 	if !m.rightFocus || m.tab != 0 {
 		return -1

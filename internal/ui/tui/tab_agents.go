@@ -24,18 +24,14 @@ import (
 	"github.com/flo-at/sindri/internal/ui/attach"
 )
 
-// attachCmd builds the interactive `<runtime> exec -it … tmux attach` for an agent
-// through the container port, so it works whatever backend is wired. cname is the
-// agent's project-resolved pod (from the board — the board is multi-repo); name is
-// the tmux session.
+// attachCmd builds the interactive tmux attach through the container port, so any backend works.
+// cname is the board's project-resolved pod (the board is multi-repo); name is the tmux session.
 func attachCmd(cname, name string) *exec.Cmd {
 	return container.AttachCmd(cname, append([]string{"tmux"}, tmux.Attach(name, false)...)...)
 }
 
-// attachAgent launches the interactive attach and, for its duration, lists the agent
-// in herdr's sidebar (a no-op outside a herdr pane) — the same reporting every attach
-// path uses, so a TUI-launched dial-in shows up like the CLI's. herdr is released
-// when the child exits, before the resume repaint.
+// attachAgent attaches and reports to herdr's sidebar for the duration, like every other attach
+// path (no-op outside a herdr pane). Released when the child exits, before the resume repaint.
 func attachAgent(cname, name string) tea.Cmd {
 	stop := attach.ReportToHerdr(cname, name)
 	return tea.ExecProcess(attachCmd(cname, name), func(err error) tea.Msg {
@@ -44,11 +40,8 @@ func attachAgent(cname, name string) tea.Cmd {
 	})
 }
 
-// openPlanForm asks what to plan, then hands it to the planner as a phased brief.
-//
-// A textarea rather than a one-line prompt: a plan's goal is prose, and the phrasing here is the
-// only thing the planner has to work from. The hub refuses the assignment while that planner has
-// a PR open, and says which one to merge or scrap — so the form does not need to know.
+// openPlanForm hands a phased brief to the planner. A textarea, not a prompt: the phrasing is all
+// the planner gets. The hub refuses while that planner has a PR open, so the form needn't check.
 func (m *model) openPlanForm(name string) {
 	goal := newTextareaField("what to plan", "")
 	cl := m.cl
@@ -67,9 +60,8 @@ func (m *model) openPlanForm(name string) {
 	})
 }
 
-// agentContainer is the agent's podman container, preferring the board's
-// project-resolved name (correct for any repo) and falling back to the current
-// repo only for an older hub that doesn't report it.
+// agentContainer prefers the board's project-resolved name (right for any repo), falling back to
+// the current repo only for an older hub that doesn't report it.
 func (m model) agentContainer(a hub.AgentView) string {
 	if a.Container != "" {
 		return a.Container
@@ -77,8 +69,7 @@ func (m model) agentContainer(a hub.AgentView) string {
 	return hub.Container(m.root, a.Name)
 }
 
-// memoryLabelTUI renders an agent's configured RAM limit, marking the hub fallback
-// when unset (the "2g" mirrors the hub's defaultAgentMemory — display only).
+// memoryLabelTUI shows the RAM limit; the "2g" mirrors the hub's defaultAgentMemory (display only).
 func memoryLabelTUI(m string) string {
 	if strings.TrimSpace(m) == "" {
 		return "2g (default)"
@@ -86,8 +77,7 @@ func memoryLabelTUI(m string) string {
 	return m
 }
 
-// openAgentOptionsForm edits per-agent settings — so far only the RAM limit ("4g", "512m"; empty
-// = hub default), applied on next start. Named for the form, since "memory" read as recollection.
+// openAgentOptionsForm edits per-agent settings — so far only the RAM limit, applied on next start.
 func (m *model) openAgentOptionsForm(name, current string) {
 	mem := newTextField("memory: container RAM limit (e.g. 4g, 512m; empty = default)", current)
 	cl := m.cl
@@ -106,15 +96,12 @@ func (m *model) openAgentOptionsForm(name, current string) {
 	})
 }
 
-// openNewAgentChoice opens the worker|reviewer picker for a new agent. The role
-// is fixed at creation — there is no way to change it later.
+// openNewAgentChoice picks the role for a new agent; the role is fixed at creation.
 func (m *model) openNewAgentChoice() {
 	cl := m.cl
 	opts := []string{"worker", "reviewer", "planner", "coauthor"}
 	vals := []string{"worker", "reviewer", "planner", "coauthor"}
-	// A plan is the other thing you create from this tab, so it belongs behind the same "new"
-	// key rather than a second binding — offered only with a planner selected, since nobody else
-	// takes one.
+	// Plans share the "new" key rather than a second binding; only planners take one.
 	planner := ""
 	if a, ok := m.selAgent(); ok && a.Role == "planner" {
 		planner = a.Name
@@ -128,9 +115,8 @@ func (m *model) openNewAgentChoice() {
 			if v == "plan" {
 				return func() tea.Msg { return openPlanFormMsg(planner) }
 			}
-			// Register the identity, then auto-start its pod. Launch runs in the
-			// background (it can build the image) — the hub's lifecycle + /events
-			// reflect "launching" → running without blocking the new row's appearance.
+			// Register, then launch in the background (it can build the image) so the
+			// new row appears at once; /events reports launching → running.
 			return func() tea.Msg {
 				if cl == nil {
 					return nil
@@ -164,17 +150,14 @@ func (m *model) openDeleteChoice(id string) {
 	}
 }
 
-// rebaseAgentCmd rebases the selected agent's worktree onto the current reference
-// branch. A conflict/dirty-tree error surfaces in the modal (git aborts, so nothing
-// changes).
+// rebaseAgentCmd rebases the agent's worktree onto the reference branch; git aborts on conflict.
 func (m *model) rebaseAgentCmd(name string) tea.Cmd {
 	cl := m.cl
 	m.flash = "rebasing " + name + "…"
 	return mutateThenRefresh(cl, func() error { return cl.RebaseAgent(name) })
 }
 
-// agentStartStop is the Start/Stop toggle for the selected agent: start it if
-// it's down, stop it if it's running, no-op while it's transitioning.
+// agentStartStop toggles the selected agent; a no-op while it's transitioning.
 func (m *model) agentStartStop() tea.Cmd {
 	a, ok := m.selAgent()
 	if !ok {
@@ -193,12 +176,10 @@ func (m *model) agentStartStop() tea.Cmd {
 	}
 }
 
-// agentDetailW is the fixed width of the Agents tab's right detail column —
-// wide enough that activity payloads (task ids + titles) aren't chopped.
+// agentDetailW is wide enough that activity payloads (task ids + titles) aren't chopped.
 const agentDetailW = 62
 
-// agentListHeight is the height of the short agent-list region (top-left); the
-// live tmux pane gets the rest of the left column.
+// agentListHeight sizes the short list; the live tmux pane gets the rest of the left column.
 func (m model) agentListHeight() int {
 	n := len(m.rows())
 	if n < 1 {
@@ -210,8 +191,7 @@ func (m model) agentListHeight() int {
 	return n
 }
 
-// agentsBody renders the Agents tab: a short agent list over the live tmux pane
-// on the left (main), and the fixed-width agent detail on the right.
+// agentsBody lays out list over live pane on the left, fixed-width agent detail on the right.
 func (m model) agentsBody() string {
 	h := m.bodyHeight()
 	leftW := m.w
@@ -245,10 +225,8 @@ func (m model) agentsBody() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftCol, divider(h), right)
 }
 
-// agentItems is the selected agent's detail as metaItems: the agent's fields
-// (task/PR are cross-references, the pod is a focusable view toggle) followed by
-// the activity log. Selecting the pod field flips the main pane between the live
-// tmux screen and the container's pod info.
+// agentItems is the selected agent's fields plus activity log; task/PR are cross-references and
+// the pod item is a toggle flipping the main pane between the live tmux screen and pod info.
 func (m model) agentItems() []metaItem {
 	a, ok := m.selAgent()
 	if !ok {
@@ -285,8 +263,7 @@ func (m model) agentItems() []metaItem {
 	return items
 }
 
-// agentActionable is the focusable subset of the agent detail (view selectors +
-// task/PR cross-refs).
+// agentActionable is the focusable subset of the agent detail.
 func (m model) agentActionable() []metaItem {
 	var out []metaItem
 	for _, it := range m.agentItems() {
@@ -297,8 +274,7 @@ func (m model) agentActionable() []metaItem {
 	return out
 }
 
-// paneLines is the live-screen region: the captured tmux screen when running,
-// otherwise a message reflecting the hub's lifecycle status.
+// paneLines is the captured tmux screen when running, else the hub's lifecycle status.
 func (m model) paneLines() []string {
 	a, ok := m.selAgent()
 	if !ok { // nothing selected — usually because there are no agents yet
@@ -360,17 +336,11 @@ func (m model) selAgent() (hub.AgentView, bool) {
 	return hub.AgentView{}, false
 }
 
-// eyeGlyph marks an agent with humans attached. It carries U+FE0F (variation selector-16),
-// which pins it to emoji presentation so the width the layout counts is the width the
-// terminal advances — two cells. Without it, U+1F441 counts as ONE while every emoji-capable
-// terminal draws two, and a row one cell wider than its column makes JoinHorizontal widen
-// the whole block past the screen: every row then wraps, the frame grows past the terminal
-// height, and the top bar scrolls out of view. It showed up only on a dialed-into agent, and
-// only intermittently, because the dial-in count comes from a probe that can fail.
+// eyeGlyph marks attached humans. The U+FE0F is load-bearing: bare U+1F441 measures one cell but
+// draws two, and one cell of overflow makes JoinHorizontal push the whole frame off-screen.
 const eyeGlyph = "👁️"
 
-// warnGlyph is the row/notice warning mark, likewise pinned to a width the terminal agrees
-// with rather than left to default text presentation.
+// warnGlyph is the warning mark, likewise width-pinned.
 const warnGlyph = "⚠️"
 
 func (m model) agentRows() []row {
@@ -379,11 +349,9 @@ func (m model) agentRows() []row {
 		if !m.inScope(a.Project) { // repo-scoped: only the active repo's agents
 			continue
 		}
-		// Whole row coloured by lifecycle state (grey down, yellow transitioning,
-		// green running); cells styled independently so resets don't bleed.
+		// Row coloured by lifecycle; cells styled independently so resets don't bleed.
 		ac := agentStatusStyle(a.Status)
-		// The work cell: the agent's task, or — for a reviewer, which holds no task —
-		// the PR it's reviewing, so the list tells what each agent is working on.
+		// Work cell: the task, or the reviewed PR since a reviewer holds no task.
 		work := a.Task
 		if work == "" {
 			work = a.PR
@@ -401,16 +369,14 @@ func (m model) agentRows() []row {
 		}, " "), a.Name})
 	}
 	for _, o := range m.state.Orphans {
-		// The id is the orphan's container name so D can remove it. Agent-only actions
-		// (start/stop/tell/attach/edit) key off the roster and skip a non-agent id —
-		// isOrphan gates the ones that read selID directly (tell/delete).
+		// The id is the container name so D can remove it; agent-only actions skip
+		// non-roster ids, and isOrphan gates the ones reading selID directly.
 		out = append(out, row{stWarn.Render(warnGlyph + " orphan: " + o), o})
 	}
 	return out
 }
 
-// isOrphan reports whether id is a stray container (an orphan row), not a roster
-// agent — so agent-only actions can skip it and D can route it to orphan removal.
+// isOrphan reports a stray container rather than a roster agent, routing D to orphan removal.
 func (m model) isOrphan(id string) bool {
 	for _, o := range m.state.Orphans {
 		if o == id {
@@ -420,8 +386,7 @@ func (m model) isOrphan(id string) bool {
 	return false
 }
 
-// openRemoveOrphanChoice confirms removing a stray container (an orphan with no
-// roster entry) — a direct container rm, since there's no agent identity to delete.
+// openRemoveOrphanChoice confirms a direct container rm; there's no agent identity to delete.
 func (m *model) openRemoveOrphanChoice(name string) {
 	cl := m.cl
 	m.choice = choiceModalState{
@@ -444,9 +409,7 @@ func (m model) agentDetailLines() []string {
 	return m.agentDetailFor(a)
 }
 
-// agentDetailFor renders an agent's detail (used for the Agents tab and, via the
-// item convention, the modal-peek). The activity log is only shown for the
-// currently-selected agent (it's lazily fetched for that one).
+// agentDetailFor renders an agent's detail; the activity log only for the selected one (lazy fetch).
 func (m model) agentDetailFor(a hub.AgentView) []string {
 	ls := []string{
 		"agent:     " + a.Name,
@@ -471,9 +434,7 @@ func (m model) agentDetailFor(a hub.AgentView) []string {
 	return ls
 }
 
-// clientLines renders attached dial-ins as detail lines, reusing the hub's shared
-// formatter so the TUI shows exactly what `sindri agent info` prints. Empty when
-// nobody's attached.
+// clientLines formats dial-ins via the hub's formatter, so this matches `sindri agent info`.
 func clientLines(cs []hub.ClientView) []string {
 	s := hub.FormatClients(cs)
 	if s == "" {
@@ -482,8 +443,7 @@ func clientLines(cs []hub.ClientView) []string {
 	return strings.Split(strings.TrimRight(s, "\n"), "\n")
 }
 
-// eventTime renders an activity-log timestamp (stored UTC RFC3339) as a local
-// HH:MM:SS, falling back to the raw value if it doesn't parse.
+// eventTime shows a stored UTC RFC3339 stamp as local HH:MM:SS, or raw if it won't parse.
 func eventTime(ts string) string {
 	t, err := time.Parse(time.RFC3339, ts)
 	if err != nil {

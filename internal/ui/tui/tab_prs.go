@@ -22,12 +22,10 @@ import (
 	"github.com/flo-at/sindri/internal/ui/tui/scroll"
 )
 
-// defaultReviewPrompt pre-fills the Agentic Review instruction; the user edits
-// it before dispatching.
+// defaultReviewPrompt pre-fills the Agentic Review instruction; the user edits it before dispatch.
 const defaultReviewPrompt = "Review this PR for correctness, clarity, and fit to the task. Flag bugs, missing tests, and anything that should change."
 
-// lintCmd runs the quality gate against the selected PR's worktree, showing the
-// result in the big content pane.
+// lintCmd runs the quality gate against the selected PR's worktree, into the big content pane.
 func (m *model) lintCmd(id string) tea.Cmd {
 	cl := m.cl
 	m.flash = "linting " + id + "…"
@@ -78,10 +76,8 @@ func (m model) selPRApproved() bool {
 	return false
 }
 
-// openApproveMergeChoice handles pressing merge on a not-yet-approved PR: rather
-// than failing the merge, offer to approve (the human gate) and merge in one step.
-// On confirm it emits approveMergeMsg so Update can set the transient "merging"
-// marker (and render it) before the async approve+merge runs.
+// openApproveMergeChoice offers approve (the human gate) then merge instead of failing an
+// unapproved PR's merge; confirming emits approveMergeMsg so Update marks the row before the work.
 func (m *model) openApproveMergeChoice(id string) {
 	m.choice = choiceModalState{
 		active: true, title: id + " isn't approved yet — approve and merge?",
@@ -95,8 +91,7 @@ func (m *model) openApproveMergeChoice(id string) {
 	}
 }
 
-// markMerging flags a PR id as mid-merge so its row shows a transient "merging"
-// (see prRows) until the hub confirms the real status.
+// markMerging shows a transient "merging" on the row (see prRows) until the hub confirms a status.
 func (m *model) markMerging(id string) {
 	if m.merging == nil {
 		m.merging = map[string]bool{}
@@ -104,8 +99,7 @@ func (m *model) markMerging(id string) {
 	m.merging[id] = true
 }
 
-// mergeCmd merges an already-approved PR, then fetches fresh state. Success and
-// failure both come back as mergeDoneMsg, which clears the transient marker.
+// mergeCmd merges an approved PR; both outcomes return mergeDoneMsg, which clears the marker.
 func (m *model) mergeCmd(id string) tea.Cmd {
 	cl := m.cl
 	if cl == nil || id == "" {
@@ -120,8 +114,7 @@ func (m *model) mergeCmd(id string) tea.Cmd {
 	}
 }
 
-// approveMergeCmd approves an open PR then merges it (the "approve & merge" path),
-// reporting the outcome as mergeDoneMsg.
+// approveMergeCmd approves then merges (the "approve & merge" path), reporting via mergeDoneMsg.
 func (m *model) approveMergeCmd(id string) tea.Cmd {
 	cl := m.cl
 	if cl == nil || id == "" {
@@ -139,9 +132,7 @@ func (m *model) approveMergeCmd(id string) tea.Cmd {
 	}
 }
 
-// mergeDone finishes a triggered merge: it drops the row's transient "merging"
-// marker, then either applies the fresh board snapshot (success) or surfaces the
-// error in the modal and leaves the row to revert to its real status (failure).
+// mergeDone drops the row's "merging" marker, then applies the fresh snapshot or shows the error.
 func (m model) mergeDone(msg mergeDoneMsg) (tea.Model, tea.Cmd) {
 	delete(m.merging, msg.id)
 	if msg.err != nil {
@@ -153,10 +144,8 @@ func (m model) mergeDone(msg mergeDoneMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(m.syncDetail(), m.agentLiveCmds())
 }
 
-// reconcileMerging drops transient "merging" markers once a fresh board snapshot
-// confirms the merge (status merged) or the PR is gone — a safety net so a marker
-// can't linger past the real status (e.g. if the merge lands via an SSE push
-// rather than this client's own mergeDoneMsg).
+// reconcileMerging clears a "merging" marker once a snapshot shows merged or the PR gone: a safety
+// net for merges landing via SSE push rather than this client's own mergeDoneMsg.
 func (m *model) reconcileMerging() {
 	if len(m.merging) == 0 {
 		return
@@ -172,8 +161,7 @@ func (m *model) reconcileMerging() {
 	}
 }
 
-// openTaskModal shows a PR's linked task in the full-screen detail modal —
-// identical to the Tasks-tab detail.
+// openTaskModal shows a PR's linked task in the full-screen modal, identical to the Tasks tab's.
 func (m *model) openTaskModal(t store.Task) {
 	m.modalOverride = m.taskDetailFor(t, t.Description)
 	m.modalOverrideTitle = "Task " + t.ID
@@ -202,8 +190,7 @@ func (m *model) openRejectForm(prID string) {
 	})
 }
 
-// openReviewForm opens a textarea (pre-filled, editable) to request an agentic
-// review of a PR.
+// openReviewForm opens a pre-filled, editable textarea to request an agentic review of a PR.
 func (m *model) openReviewForm(prID string) {
 	prompt := m.reviewPrompt // the editable default from the hub's review-prompt.txt
 	if strings.TrimSpace(prompt) == "" {
@@ -229,8 +216,7 @@ func (m *model) openReviewForm(prID string) {
 // prDetailW is the fixed width of the PRs tab's right detail column.
 const prDetailW = 44
 
-// PR filter states (the PRs tab's f-toggle): unmerged (hide merged, the default),
-// merged only, or all — mirroring the Tasks tab's open/closed/all.
+// PR filter states for the f-toggle: unmerged (the default), merged only, or all.
 const (
 	prFilterUnmerged = iota
 	prFilterMerged
@@ -239,9 +225,7 @@ const (
 
 var prFilterNames = [...]string{"unmerged", "merged", "all"}
 
-// prFilterShows reports whether a PR of the given status passes the active f-filter:
-// unmerged hides the terminal states (merged AND scrapped — both are done, off the
-// working set), merged shows only merged, all shows everything.
+// prFilterShows applies the f-filter; unmerged hides both terminal states (merged and scrapped).
 func (m model) prFilterShows(status string) bool {
 	switch m.prFilter {
 	case prFilterMerged:
@@ -275,12 +259,8 @@ func (m model) prRows() []row {
 	return out
 }
 
-// openScrapPRChoice confirms scrapping a PR: the branch goes and the PR drops off the board,
-// with nobody asked to try again. That is the action for work you simply do not want — a
-// proposal a planner produced that you have no use for.
-//
-// The confirm names the alternative, because the two are easy to confuse and only one of them
-// is recoverable: reject sends the PR BACK with feedback, scrap ends it.
+// openScrapPRChoice confirms scrapping a PR: branch gone, off the board, nobody asked to try again.
+// The prompt names reject too, since the two are easy to confuse and only reject is recoverable.
 func (m *model) openScrapPRChoice(id string) {
 	cl := m.cl
 	m.choice = choiceModalState{
@@ -296,8 +276,7 @@ func (m *model) openScrapPRChoice(id string) {
 	}
 }
 
-// prKindLabel renders a PR's kind for humans: an interim (mid-task) contribution
-// vs a final (task-done) PR. "" reads as final (the historical default).
+// prKindLabel names a PR's kind for humans; "" reads as final, the historical default.
 func prKindLabel(kind string) string {
 	if kind == "interim" {
 		return "interim (mid-task contribution)"
@@ -305,9 +284,7 @@ func prKindLabel(kind string) string {
 	return "final (task done)"
 }
 
-// shortAge renders how long ago an RFC3339 timestamp was, compactly ("3d", "2h",
-// "5m", "now"); "-" when it's empty or unparseable, so a missing timestamp reads as
-// unknown rather than a bogus age.
+// shortAge renders an RFC3339 timestamp compactly ("3d", "now"); "-" when missing, not a fake age.
 func shortAge(ts string) string {
 	t, err := time.Parse(time.RFC3339, ts)
 	if err != nil {
@@ -326,8 +303,7 @@ func shortAge(ts string) string {
 	}
 }
 
-// prListHeight is the height of the short PR-list region (top-left); the big
-// content pane gets the rest.
+// prListHeight is the height of the top-left PR list; the big content pane gets the rest.
 func (m model) prListHeight() int {
 	n := len(m.rows())
 	if n < 1 {
@@ -339,8 +315,7 @@ func (m model) prListHeight() int {
 	return n
 }
 
-// prBody renders the PRs tab: a short PR list over the big content pane (diff /
-// lint) on the left, with the metadata + task + reviews detail on the right.
+// prBody renders the PRs tab: PR list over the diff/lint pane, with the detail column right.
 func (m model) prBody() string {
 	h := m.bodyHeight()
 	leftW := m.prContentWidth()
@@ -371,9 +346,7 @@ func (m model) prBody() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftCol, divider(h), right)
 }
 
-// prContentWidth is the display width of the big content pane — the left column,
-// narrowed by the detail column when it's shown. The diff/lint text is wrapped to
-// this so nothing overflows off the right edge.
+// prContentWidth is the left pane's width, narrowed by the detail column; content wraps to it.
 func (m model) prContentWidth() int {
 	if m.showDetail() {
 		return m.w - clampInt(prDetailW, 20, max(20, m.w-30)) - 1
@@ -381,14 +354,12 @@ func (m model) prContentWidth() int {
 	return m.w
 }
 
-// prContentLines is the big left pane, driven by the selected view (diff/lint),
-// word-wrapped to the pane width so the full PR is readable (no truncation).
+// prContentLines is the left pane for the selected view, word-wrapped rather than truncated.
 func (m model) prContentLines() []string {
 	return wrapContent(m.prRawContentLines(), m.prContentWidth())
 }
 
-// prRawContentLines builds the unwrapped content: lint output if one was just
-// run, otherwise the diff.
+// prRawContentLines is the unwrapped content: lint output if one was just run, otherwise the diff.
 func (m model) prRawContentLines() []string {
 	d := m.prDetail
 	if d.PR.ID != m.selID() {
@@ -407,16 +378,14 @@ func (m model) prRawContentLines() []string {
 	return append([]string{dimStyle.Render("── diff ──"), ""}, renderDiff(d.Diff)...)
 }
 
-// metaItem is one line of the right detail column. An actionable item (kind
-// set) can be focused (h/l, then j/k) and acted on (ENTER) or yanked (y).
+// metaItem is one right-column line; with kind set it can be focused, acted on (ENTER) or yanked.
 type metaItem struct {
 	text  string
 	kind  string // "" plain · "agent" · "task" · "path"
 	value string
 }
 
-// prMetaItems is the right detail column: PR metadata (with the agent, its
-// workspace, and the linked task as actionable cross-references), then reviews.
+// prMetaItems is the right detail column: metadata, actionable cross-references, then reviews.
 func (m model) prMetaItems() []metaItem {
 	d := m.prDetail
 	if d.PR.ID != m.selID() {
@@ -441,8 +410,7 @@ func (m model) prMetaItems() []metaItem {
 		metaItem{text: "kind:   " + prKindLabel(d.PR.Kind)},
 		metaItem{text: "agent:  " + d.PR.Agent, kind: "agent", value: d.PR.Agent},
 	)
-	// The absolute path, because `value` is handed to a child process as its working directory:
-	// the repo-relative form only resolves when the TUI happens to be running from the repo root.
+	// Absolute: `value` becomes a child process's working directory, so a relative one would break.
 	if ws := m.agentWorkspacePath(d.PR.Agent); ws != "" {
 		items = append(items, metaItem{text: "path:   " + ws, kind: "path", value: ws})
 	}
@@ -471,10 +439,8 @@ func (m model) prMetaItems() []metaItem {
 	return items
 }
 
-// wrapMeta word-wraps each plain detail line to the column width, so long text
-// (history payloads, feedback) is readable in full rather than truncated with an
-// ellipsis. Actionable items (and blank spacers) are passed through untouched so
-// the right-column focus cursor still maps 1:1 to its actionable rows.
+// wrapMeta wraps plain detail lines to the column width, so history and feedback read in full.
+// Actionable and blank items pass through, keeping the focus cursor 1:1 with its actionable rows.
 func wrapMeta(items []metaItem, width int) []metaItem {
 	if width <= 0 {
 		return items
@@ -515,16 +481,13 @@ func shellAt(dir string) *exec.Cmd {
 	return c
 }
 
-// editorAtCmd opens the user's editor on dir — an agent's workspace, straight from the Agents
-// tab. No materialization: that checkout already exists and is the one the agent is working in.
+// editorAtCmd opens the editor on an agent's live workspace; no materialization, it already exists.
 func (m *model) editorAtCmd(dir string) tea.Cmd {
 	m.flash = "opening " + dir + " in " + editorName() + "…"
 	return func() tea.Msg { return editorReadyMsg(dir) }
 }
 
-// openEditorCmd materializes a PR into the review workspace, then signals the loop to open the
-// user's editor on it. Same checkout `verify` gives you a shell in — reviewing a diff usually
-// means reading the code around it, and that wants an editor rather than a pager.
+// openEditorCmd materializes a PR (the same checkout `verify` shells into) and opens the editor.
 func (m *model) openEditorCmd(id string) tea.Cmd {
 	cl := m.cl
 	m.flash = "opening " + id + " in " + editorName() + "…"
@@ -537,9 +500,8 @@ func (m *model) openEditorCmd(id string) tea.Cmd {
 	}
 }
 
-// editorCandidates is the editor to use, in the order a Unix tool is expected to look: the
-// user's own choice first, then the distribution's configured default, then vi — which POSIX
-// requires, so the list cannot come up empty on a working system.
+// editorCandidates lists editors in the order a Unix tool looks: the user's choice, the
+// distribution default, then vi, which POSIX requires, so the list can never come up empty.
 func editorCandidates() []string {
 	var out []string
 	for _, env := range []string{"VISUAL", "EDITOR"} {
@@ -560,8 +522,7 @@ func editorName() string {
 	return "an editor"
 }
 
-// resolveEditor splits a candidate into its binary and any arguments the user baked in ($EDITOR
-// is often "code --wait" or "nvim -p"), and reports whether that binary is actually on PATH.
+// resolveEditor splits a candidate ($EDITOR is often "code --wait") and checks PATH for the binary.
 func resolveEditor(cand string) (bin string, args []string, ok bool) {
 	fields := strings.Fields(cand)
 	if len(fields) == 0 {
@@ -574,9 +535,8 @@ func resolveEditor(cand string) (bin string, args []string, ok bool) {
 	return p, fields[1:], true
 }
 
-// editorAt builds the editor invocation for dir, opening it as the argument so an editor with a
-// file browser (vim, nvim, emacs) lands on the tree rather than an empty buffer. nil when no
-// candidate is installed, which the caller reports rather than silently doing nothing.
+// editorAt passes dir as the argument, so a file-browser editor (vim, emacs) lands on the tree
+// rather than an empty buffer. nil when nothing is installed, for the caller to report.
 func editorAt(dir string) *exec.Cmd {
 	for _, cand := range editorCandidates() {
 		bin, args, ok := resolveEditor(cand)
@@ -590,8 +550,7 @@ func editorAt(dir string) *exec.Cmd {
 	return nil
 }
 
-// verifyCmd materializes a PR into the review workspace, then signals the loop
-// to open a shell there.
+// verifyCmd materializes a PR for review, then signals the loop to open a shell there.
 func (m *model) verifyCmd(id string) tea.Cmd {
 	cl := m.cl
 	m.flash = "materializing " + id + " for review…"
@@ -616,8 +575,7 @@ func reviewLine(r store.Review) string {
 	}
 }
 
-// prDetailLines is the full PR detail (for the ENTER modal): metadata, reviews
-// (with their requirement + findings), then the diff.
+// prDetailLines is the full PR detail for the ENTER modal: metadata, reviews, then the diff.
 func (m model) prDetailLines() []string {
 	id := m.selID()
 	if id == "" {

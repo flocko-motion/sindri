@@ -16,11 +16,25 @@ const DefaultLimit = 15
 
 // Cap is one budget for a WHOLE run, not per linter: six linters each printing "only" their share
 // is exactly the wall this exists to prevent.
+// Cap also carries whether to print explanatory prose. Both answer "how much should this run say",
+// so they travel together rather than threading a second flag through every linter.
 type Cap struct {
 	max    int
 	shown  int
 	hidden int
+	quiet  bool
 }
+
+// SetQuiet suppresses the teaching text — the conventions, the ceiling paragraph, the banner. It is
+// worth reading once and is noise on the twentieth run of the same fix loop.
+func (c *Cap) SetQuiet(q bool) {
+	if c != nil {
+		c.quiet = q
+	}
+}
+
+// Quiet reports whether explanatory prose should be withheld. Findings never are.
+func (c *Cap) Quiet() bool { return c != nil && c.quiet }
 
 // NewCap bounds a run to max findings; max <= 0 means print everything.
 func NewCap(max int) *Cap { return &Cap{max: max} }

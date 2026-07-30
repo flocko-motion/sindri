@@ -28,13 +28,14 @@ func newLintCmd() *cobra.Command {
 	var maxAvg float64
 	var maxLine int
 	var blocks bool
+	var quiet bool
 	var limit int
 	var ignore []string
 	c := &cobra.Command{
 		Use:   "lint [linter] [paths...]",
-		Short: "Run the quality gate: lint (all) or lint <deadcode|loc|comments|comment-length|js|openspec> [paths]",
+		Short: "Run the quality gate: lint (all) or lint <deadcode|loc|comments|comment-length|gofmt|js|openspec> [paths]",
 		Long: "Run the project's static-analysis linters. With no argument, runs them " +
-			"all (deadcode, loc, comments, comment-length, js, openspec) with a summary; with a linter " +
+			"all (deadcode, loc, comments, comment-length, gofmt, js, openspec) with a summary; with a linter " +
 			"name, runs just that one. Exits non-zero on any violation, so it can gate " +
 			"CI (add --tail to also print the exit status inline).\n\n" +
 			"Trailing paths scope the run to those files or directories, so you can work on one " +
@@ -73,16 +74,16 @@ func newLintCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// The repo's own bar, where it set one: a house style belongs to the house. An
-			// explicit flag still wins, so a one-off run can override it.
+			// The repo's own bar where it set one; an explicit flag still wins.
 			lines, avg := repoLintBar(cmd, maxLines, maxAvg)
 			o := lintOpts{
 				tags: tags, maxLines: lines, maxAvg: avg, maxLine: maxLine,
 				blocks: blocks, paths: paths, ig: ig,
-				// ONE budget for the whole run: six linters each printing "only" their share is
-				// the wall this bounds. It is why `brokkr lint` needs no --tail.
+				// ONE budget for the whole run — every linter printing its own share is the
+				// wall this bounds, and why `brokkr lint` needs no --tail.
 				cap: lint.NewCap(limit),
 			}
+			o.cap.SetQuiet(quiet)
 			return runLint(out, func() (bool, error) { return runLinters(out, which, o) })
 		},
 	}
@@ -91,6 +92,7 @@ func newLintCmd() *cobra.Command {
 	c.Flags().Float64Var(&maxAvg, "max-comment-avg", lint.DefaultMaxCommentAvg, "maximum mean lines per comment block (comment-length)")
 	c.Flags().IntVar(&maxLine, "max-comment-line", lint.DefaultMaxCommentLine, "maximum width of one comment line (comment-length)")
 	c.Flags().BoolVar(&blocks, "blocks", false, "list every comment over the limit — line range, length, excerpt (comment-length)")
+	c.Flags().BoolVarP(&quiet, "quiet", "q", false, "findings only — drop the conventions, banners and how-to prose")
 	c.Flags().IntVar(&limit, "limit", lint.DefaultLimit, "stop after this many findings, then say how many were withheld (0 = all)")
 	c.Flags().StringArrayVar(&ignore, "ignore", nil, "skip files matching this glob (no '/' = basename anywhere) or 're:'-prefixed regexp; repeatable")
 	return c
@@ -98,8 +100,8 @@ func newLintCmd() *cobra.Command {
 
 // lintNames are the linters, and what tells a name from a path in the arguments.
 var lintNames = map[string]bool{
-	"deadcode": true, "loc": true, "comments": true,
-	"comment-length": true, "js": true, "openspec": true,
+	"deadcode": true, "loc": true, "comments": true, "comment-length": true,
+	"gofmt": true, "js": true, "openspec": true,
 }
 
 // splitLintArgs reads an optional linter name then paths, so scoping needs no flag or placeholder.
@@ -173,6 +175,8 @@ func runLinters(out io.Writer, which string, o lintOpts) (bool, error) {
 		return runComments(out, o)
 	case "comment-length":
 		return lint.CommentAvg(orDot(o.paths), o.maxAvg, o.maxLine, o.blocks, o.cap, o.ig, out)
+	case "gofmt":
+		return lint.Gofmt(orDot(o.paths), o.cap, o.ig, out)
 	case "js":
 		return runJS(out, o)
 	case "openspec":
@@ -180,7 +184,7 @@ func runLinters(out io.Writer, which string, o lintOpts) (bool, error) {
 	case "":
 		return runAll(out, o)
 	default:
-		return false, fmt.Errorf("unknown linter %q (want deadcode|loc|comments|comment-length|js|openspec)", which)
+		return false, fmt.Errorf("unknown linter %q (want deadcode|loc|comments|comment-length|gofmt|js|openspec)", which)
 	}
 }
 
@@ -203,15 +207,14 @@ func runComments(out io.Writer, o lintOpts) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if found {
+	if found && !o.cap.Quiet() {
 		fmt.Fprintf(out, "\n%s\n", commentsConvention)
 	}
 	return found, nil
 }
 
-// runAll runs every linter in its own section and ends by NAMING the failures. It used to re-print
-// their findings underneath so they survived --tail, which doubled every run's output — the wall
-// `--limit` exists to prevent.
+// runAll runs every linter in its own section, then NAMES the failures. It used to re-print their
+// findings too, which doubled every run's output — the wall `--limit` exists to prevent.
 func runAll(out io.Writer, o lintOpts) (bool, error) {
 	linters := []struct {
 		name string
@@ -223,6 +226,7 @@ func runAll(out io.Writer, o lintOpts) (bool, error) {
 		{"comment-length", func(w io.Writer) (bool, error) {
 			return lint.CommentAvg(orDot(o.paths), o.maxAvg, o.maxLine, o.blocks, o.cap, o.ig, w)
 		}},
+		{"gofmt", func(w io.Writer) (bool, error) { return lint.Gofmt(orDot(o.paths), o.cap, o.ig, w) }},
 		{"js", func(w io.Writer) (bool, error) { return runJS(w, o) }},
 		{"openspec", func(w io.Writer) (bool, error) { return lintOpenspec(w), nil }},
 	}

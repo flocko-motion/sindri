@@ -178,7 +178,7 @@ func CommentAvg(roots []string, maxAvg float64, maxLine int, blocks bool, cap *C
 		cap.Note(w)
 		fmt.Fprintf(w, "%d file(s) over the comment-length trend — cut words, don't move them. "+
 			"Ideal %.1f; the max is a ceiling, not the goal.\n", len(viols), aim)
-		if len(viols) >= systemicFiles {
+		if len(viols) >= systemicFiles && !cap.Quiet() {
 			fmt.Fprint(w, systemicBanner)
 		}
 	}
@@ -206,7 +206,12 @@ func wideLines(path, src string, max int) []string {
 			continue
 		}
 		if n := len([]rune(raw)); n > max {
-			out = append(out, fmt.Sprintf("%s:%d: comment line is %d chars (max %d) — wrap it", path, i+1, n, max))
+			// Say HOW to wrap. An aligned continuation is the obvious-looking choice and the wrong
+			// one: gofmt reads an indented comment line as a code block and rewrites it with a tab
+			// plus blank `//` separators. The tool's advice and gofmt must not disagree.
+			out = append(out, fmt.Sprintf("%s:%d: comment line is %d chars (max %d) — wrap it, "+
+				"continuation FLUSH LEFT at column 3 (indenting it makes gofmt rewrite the comment)",
+				path, i+1, n, max))
 		}
 	}
 	return out

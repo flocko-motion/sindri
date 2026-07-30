@@ -16,17 +16,14 @@ import (
 	"github.com/flo-at/sindri/internal/hub/chat"
 )
 
-// Saturation/lightness pairs for a derived hue: Dark* for filled backgrounds, Bright*
-// for text on a dark terminal. Exported so callers pick a shade without re-tuning.
+// Sat/lightness pairs for a derived hue, exported so callers pick a shade without re-tuning.
 const (
 	DarkSat, DarkLight     = 0.32, 0.22
 	BrightSat, BrightLight = 0.55, 0.72
 )
 
-// The participant markers and reserved sender labels come from the chat core, which
-// stamps the same glyphs into the lines it types into agents' sessions. Re-exported here
-// so a front-end needs only this package for presentation, while there is still exactly
-// one definition — and it lives with the domain, not with the styling.
+// Re-exported from the chat core, which stamps these same glyphs into agents' sessions: a
+// front-end needs only this package, and there is still exactly one definition.
 const (
 	UserIcon     = chat.UserIcon
 	AgentIcon    = chat.AgentIcon
@@ -42,21 +39,18 @@ func Icon(sender string) string { return chat.Icon(sender) }
 // HelpLine is the in-room interface description, dimmed for a banner or hint line.
 func HelpLine() string { return Dim().Render(HelpText) }
 
-// Hue maps any string to a stable hue in [0,360) — same name, same colour, every run
-// and every front-end, with no palette to assign or store.
+// Hue maps a string to a stable hue: same name, same colour everywhere, with no palette to store.
 func Hue(s string) float64 {
 	h := fnv.New32a()
 	h.Write([]byte(s))
 	return float64(h.Sum32() % 360)
 }
 
-// userHue is fixed rather than derived: the human is the one participant whose colour
-// must never depend on what they happen to be called, so agents (and the eye) can find
-// them instantly. A warm amber, away from the cool end most names land in.
+// userHue is FIXED, not derived: the human's colour must not depend on what they are called. A warm
+// amber, away from the cool end most names land in.
 const userHue = 35.0
 
-// NameColor is a participant's text colour. Agents get a hash-derived hue; the user is
-// pinned (see userHue) and the hub's own lines stay grey.
+// NameColor: agents get a hash-derived hue, the user is pinned (userHue), the hub stays grey.
 func NameColor(sender string) lipgloss.Color {
 	switch sender {
 	case SenderUser:
@@ -67,17 +61,13 @@ func NameColor(sender string) lipgloss.Color {
 	return lipgloss.Color(HSLHex(Hue(sender), BrightSat, BrightLight))
 }
 
-// NameStyle renders a participant's name in its own colour, bold so the speaker reads
-// as a heading above what they said.
+// NameStyle bolds the name, so a speaker reads as a heading above what they said.
 func NameStyle(sender string) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(NameColor(sender)).Bold(true)
 }
 
-// BodyStyle renders what a participant SAID in their colour too — the same hue as their
-// name, unbolded so the name still reads as the heading. Colouring only the name leaves
-// the words themselves an undifferentiated block, which is exactly what makes a long
-// transcript hard to follow: the colour has to run through the text to attribute it at a
-// glance, especially once a message spans several lines.
+// BodyStyle colours the WORDS too, unbolded. Colouring only names leaves the text an
+// undifferentiated block — the hue has to run through it to attribute a multi-line message.
 func BodyStyle(sender string) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(NameColor(sender))
 }

@@ -54,8 +54,7 @@ func (m model) taskRows() []row {
 		}
 	}
 
-	// A node has children if a later row is exactly one level deeper before the
-	// depth returns to its level.
+	// Children: a later row one level deeper, before the depth returns to this level.
 	hasKids := map[string]bool{}
 	for i, tr := range arranged {
 		for _, c := range arranged[i+1:] {
@@ -83,9 +82,7 @@ func (m model) taskRows() []row {
 		}
 	}
 
-	// Columns: fixed tree gutter (│ ├ └ connectors) · id · type · prio · state ·
-	// title. The gutter is fixed-width so id and the rest stay aligned; the tree
-	// lives entirely in the gutter.
+	// The tree lives entirely in a fixed-width gutter, so the id and later columns stay aligned.
 	out := make([]row, len(visible))
 	cont := []bool{} // cont[i]: ancestor at depth i has a later sibling (draw │)
 	for i, tr := range visible {
@@ -95,10 +92,8 @@ func (m model) taskRows() []row {
 		gutter := treeGutter(cont, tr.Depth, tr.Last, hasKids[tr.ID], m.collapsed[tr.ID])
 		cont = append(cont, !tr.Last)
 
-		// Each cell is styled independently (no nesting) so a colour reset never
-		// bleeds across the row: status colour throughout, red for a critical
-		// priority cell. The tree gutter stays uncoloured. A planner proposal under
-		// the approval gate overrides the colour — yellow pending, grey rejected.
+		// Cells styled independently (never nested) so a colour reset can't bleed
+		// across the row. An approval gate overrides the status colour.
 		sc := taskStatusStyle(tr.Status)
 		state := hub.StateLabel(tr.Status)
 		switch approval[tr.ID] { // the approval gate overrides both colour and state word
@@ -132,15 +127,13 @@ func (m model) taskRows() []row {
 
 const treeGutterW = 6 // fits ~3 levels of "│ "/"├─" connectors
 
-// treeGutter draws the fixed-width tree connectors for a node: ancestor pipes,
-// the branch into this node, and a fold marker for collapsible nodes.
+// treeGutter draws ancestor pipes, the branch into this node, and any fold marker.
 func treeGutter(cont []bool, depth int, last, kids, collapsed bool) string {
 	var b strings.Builder
 	for i := 0; i < depth; i++ {
 		switch {
 		case i < depth-1:
-			// pipe if the path node at depth i+1 is a non-last child (its parent's
-			// child-list continues below this row)
+			// pipe while the path node at depth i+1 has siblings below this row
 			if i+1 < len(cont) && cont[i+1] {
 				b.WriteString("│ ")
 			} else {
@@ -163,17 +156,11 @@ func treeGutter(cont []bool, depth int, last, kids, collapsed bool) string {
 	return padTrunc(s, treeGutterW)
 }
 
-// marksW is the display width of the status-marker column. 🔨 is two cells wide,
-// so the field is padded to a fixed width to keep the title column aligned.
+// marksW pads the marker column: 🔨 is two cells, so a fixed width keeps titles aligned.
 const marksW = 3
 
-// taskMarks is the status-marker column: 🔨 when a worker is on the task (dwarves at
-// work), then a PR marker — ◆ for a final (task-done) PR, ◇ for an interim (mid-task
-// contribution) PR. Padded (ANSI/width aware) to a fixed width so rows line up
-// regardless of which marks are present.
-// prMarkKind maps a task row to the PR marker to draw: "" when the row has no PR (no
-// mark), else the PR's kind — defaulting a kindless PR to "final" (the historical
-// default, so older/plain PRs still show ◆).
+// prMarkKind picks the PR marker: ◆ final, ◇ interim, "" none. A kindless PR defaults to
+// final, the historical default, so older PRs still show ◆.
 func prMarkKind(tr hub.TaskRow) string {
 	if tr.PR == "" {
 		return ""
@@ -209,8 +196,7 @@ func typeAbbr(t string) string {
 	return t
 }
 
-// taskDetailLines renders the selected task: board fields + assignee + PR, plus
-// the description once the lazy detail fetch has filled it.
+// taskDetailLines renders the selected task, description included once the lazy fetch lands.
 func (m model) taskDetailLines() []string {
 	if m.selID() == "" {
 		return []string{dimStyle.Render("(no task)")}
@@ -218,8 +204,7 @@ func (m model) taskDetailLines() []string {
 	return itemTexts(m.taskItems())
 }
 
-// taskItems is the selected task's detail as metaItems (parent/agent/pr are
-// focusable cross-references).
+// taskItems is the selected task's detail; parent/agent/pr are focusable cross-references.
 func (m model) taskItems() []metaItem {
 	id := m.selID()
 	var t store.Task
@@ -228,8 +213,7 @@ func (m model) taskItems() []metaItem {
 			t = x
 		}
 	}
-	// The board row already carries the description, so it shows at once while
-	// browsing; the lazy detail read then refines it (fresher body + comments).
+	// The board row's description shows at once; the lazy read then refines it.
 	desc := t.Description
 	var comments []store.Comment
 	if m.taskDetail.ID == id {
@@ -251,14 +235,12 @@ func (m model) taskActionable() []metaItem {
 	return out
 }
 
-// taskDetailFor renders any task's detail block (used for the modal-peek and the
-// PRs tab's linked-task modal). desc is the (possibly empty) description.
+// taskDetailFor renders any task's detail block, for the modal-peek and PRs' linked-task modal.
 func (m model) taskDetailFor(t store.Task, desc string) []string {
 	return itemTexts(m.taskItemsFor(t, desc, nil))
 }
 
-// taskItemsFor builds a task's detail metaItems: scalar fields plus the agent,
-// PR, and parent as actionable cross-references, then the description and comments.
+// taskItemsFor builds the fields, the agent/PR/parent cross-references, then desc and comments.
 func (m model) taskItemsFor(t store.Task, desc string, comments []store.Comment) []metaItem {
 	assignee, pr := "", ""
 	for _, a := range m.state.Agents {
@@ -312,9 +294,7 @@ func descItems(desc string) []metaItem {
 	return items
 }
 
-// commentItems renders the synced comment thread (author + local timestamp, then
-// the body split into lines). The detail pane word-wraps each line, so long
-// comments read in full. Empty when the task has no comments.
+// commentItems renders the synced thread as author + local timestamp, then body lines.
 func commentItems(comments []store.Comment) []metaItem {
 	if len(comments) == 0 {
 		return nil
@@ -333,8 +313,7 @@ func commentItems(comments []store.Comment) []metaItem {
 	return items
 }
 
-// commentTime formats a stored RFC3339 timestamp as local "2006-01-02 15:04"
-// ("" if unparseable) — comments span days, so they show the date, not just HH:MM.
+// commentTime formats local date + time ("" if unparseable); threads span days, so HH:MM won't do.
 func commentTime(ts string) string {
 	if t, err := time.Parse(time.RFC3339, ts); err == nil {
 		return t.Local().Format("2006-01-02 15:04")
@@ -356,11 +335,8 @@ func (m model) selTask() (store.Task, bool) {
 	return store.Task{}, false
 }
 
-// openTaskForm opens the new-task (edit=false) or edit-task (edit=true) form — the
-// same fields either way. Edit prefills from t, which must be a freshly-fetched task
-// (its description comes from a detail read, not the board row) so a save doesn't
-// blank fields the board doesn't carry; on a td task every field applies, on an
-// openspec item only priority does (hub-side).
+// openTaskForm opens the new/edit task form. t must be freshly fetched, not a board row, or a
+// save blanks the fields the board doesn't carry. Openspec items honour priority only (hub-side).
 func (m *model) openTaskForm(edit bool, t store.Task) {
 	prioCodes := make([]string, len(hub.PriorityWords))
 	for i, w := range hub.PriorityWords {
@@ -423,15 +399,13 @@ func (m *model) openTaskForm(edit bool, t store.Task) {
 	})
 }
 
-// taskGated reports whether the selected task is a planner proposal still under
-// the approval gate (pending or rejected) — the only state A/R act on.
+// taskGated reports a proposal still under the approval gate — the only state A/R act on.
 func (m model) taskGated() bool {
 	t, ok := m.selTask()
 	return ok && (t.Approval == "pending" || t.Approval == "rejected")
 }
 
-// unassignTaskCmd releases the selected task back to the backlog (the hub
-// refuses if a live agent is working on it — surfaced in the error modal).
+// unassignTaskCmd returns the task to the backlog; the hub refuses if a live agent holds it.
 func (m *model) unassignTaskCmd(id string) tea.Cmd {
 	cl := m.cl
 	m.flash = "unassigning " + id + "…"
@@ -447,16 +421,13 @@ func (m *model) unassignTaskCmd(id string) tea.Cmd {
 	}
 }
 
-// closeTaskCmd marks the selected task done (the hub dispatches to its backend;
-// a backend that can't close surfaces the error in the modal). The row shows a
-// transient "closing" at once, cleared when the hub confirms (see taskOpDone).
+// closeTaskCmd marks the task done, showing a transient "closing" until the hub confirms.
 func (m *model) closeTaskCmd(id string) tea.Cmd {
 	m.markBusy(id, "closing")
 	return finishTaskCmd(m.cl, m.cl.CloseTask, id, "", false)
 }
 
-// markBusy flags a task id with a transient verb ("closing"/"deleting") so its row
-// shows it at once (see taskRows), until the hub confirms and it's cleared.
+// markBusy sets a transient verb so the row reflects the op before the hub confirms.
 func (m *model) markBusy(id, verb string) {
 	if m.busy == nil {
 		m.busy = map[string]string{}
@@ -464,9 +435,7 @@ func (m *model) markBusy(id, verb string) {
 	m.busy[id] = verb
 }
 
-// taskOpDone finishes a triggered close/scrap: it drops the row's transient verb,
-// then applies the fresh board (success) or surfaces the error and lets the row
-// revert to its real status (failure).
+// taskOpDone drops the transient verb, then applies the fresh board or surfaces the error.
 func (m model) taskOpDone(msg taskOpDoneMsg) (tea.Model, tea.Cmd) {
 	delete(m.busy, msg.id)
 	if msg.err != nil {
@@ -478,10 +447,8 @@ func (m model) taskOpDone(msg taskOpDoneMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(m.syncDetail(), m.agentLiveCmds())
 }
 
-// reconcileBusy drops transient verbs once a fresh board confirms the op: the task
-// is gone (scrapped) or now terminal (closed) — a safety net so a marker can't
-// linger past the real state (e.g. when the change arrives via an SSE push rather
-// than this client's own taskOpDoneMsg).
+// reconcileBusy clears verbs a fresh board already confirms, so a marker can't linger when the
+// change arrives by SSE push instead of this client's own taskOpDoneMsg.
 func (m *model) reconcileBusy() {
 	if len(m.busy) == 0 {
 		return
@@ -497,9 +464,7 @@ func (m *model) reconcileBusy() {
 	}
 }
 
-// attachedOpenPR returns the id of an open (non-terminal) PR for task id in the active
-// repo, or "" if none. A merged/scrapped PR is already off the board, so it's never
-// offered for scrapping.
+// attachedOpenPR is the task's open PR in the active repo, or "": terminal ones are off the board.
 func (m model) attachedOpenPR(taskID string) string {
 	_, tag := m.currentRepo()
 	for _, p := range m.state.PRs {
@@ -510,12 +475,8 @@ func (m model) attachedOpenPR(taskID string) string {
 	return ""
 }
 
-// openScrapChoice confirms scrapping (deleting) the selected task — destructive
-// (a GitHub issue delete is permanent), so it's gated behind a yes/no. The hub
-// dispatches to the backend (td delete / openspec change removal / issue delete).
-// When the task still has an open PR, a third option discards it too — deleting its
-// branch and stopping the working agent — since a scrapped task rarely still wants
-// its PR (see finishTaskCmd for the chained hub calls).
+// openScrapChoice gates the delete behind a yes/no: a GitHub issue delete is permanent. With an
+// open PR a third option discards that too, since a scrapped task rarely still wants it.
 func (m *model) openScrapChoice(id string) {
 	cl := m.cl
 	if pr := m.attachedOpenPR(id); pr != "" {
@@ -548,9 +509,7 @@ func (m *model) openScrapChoice(id string) {
 	}
 }
 
-// openCloseChoice prompts when closing (marking done) a task that still has an open PR,
-// offering to discard the PR alongside. Closing a task with no PR needs no prompt —
-// keyClose runs it directly.
+// openCloseChoice offers to discard an open PR alongside; with no PR, keyClose closes directly.
 func (m *model) openCloseChoice(id, pr string) {
 	cl := m.cl
 	m.choice = choiceModalState{
@@ -570,17 +529,14 @@ func (m *model) openCloseChoice(id, pr string) {
 	}
 }
 
-// taskOpTrigger wraps a task-ending op so it flows through Update as a taskOpMsg:
-// the transient verb is marked on the row first, then run fires. Used by the
-// confirm choices, whose apply can't mutate the model directly.
+// taskOpTrigger routes an op through Update so the verb gets marked first — a choice's apply
+// can't mutate the model itself.
 func taskOpTrigger(id, verb string, run tea.Cmd) tea.Cmd {
 	return func() tea.Msg { return taskOpMsg{id: id, verb: verb, run: run} }
 }
 
-// finishTaskCmd runs a task-ending op (close or delete) and, when alsoPR is set,
-// scraps its PR afterward, then refreshes the board once so both land in one snapshot.
-// A task-op failure surfaces in the error modal and skips the PR scrap; a PR-scrap
-// failure surfaces too (the task is already gone — the board reflects that).
+// finishTaskCmd closes or deletes, optionally scraps the PR, then refreshes once so both
+// changes land in one snapshot. A failed task op skips the PR scrap.
 func finishTaskCmd(cl *client.HTTP, taskOp func(string) error, id, prID string, alsoPR bool) tea.Cmd {
 	return func() tea.Msg {
 		if cl == nil {
@@ -599,16 +555,14 @@ func finishTaskCmd(cl *client.HTTP, taskOp func(string) error, id, prID string, 
 	}
 }
 
-// approveTaskCmd clears the approval gate on the selected task (makes it
-// claimable).
+// approveTaskCmd clears the approval gate, making the task claimable.
 func (m *model) approveTaskCmd(id string) tea.Cmd {
 	cl := m.cl
 	m.flash = "approving " + id + "…"
 	return mutateThenRefresh(cl, func() error { return cl.ApproveTask(id) })
 }
 
-// openTaskRejectForm opens a multiline textarea to reject a proposed task with a
-// comment (delivered to the planner).
+// openTaskRejectForm rejects a proposal with a comment, delivered to the planner.
 func (m *model) openTaskRejectForm(id string) {
 	reason := newTextareaField("reason", "")
 	cl := m.cl

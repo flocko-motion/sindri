@@ -18,9 +18,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// Deps is what registry management needs back from the hub: agent teardown (Forget
-// frees a repo's agents), .gitignore upkeep, the repo's display name and stable
-// tag, and the board notify.
+// Deps is what registry management needs from the hub: agent teardown, .gitignore upkeep, naming.
 type Deps interface {
 	DeleteAgent(project, name string) error
 	EnsureGitignore(root string)
@@ -38,9 +36,7 @@ type Service struct {
 // New builds the registry-management service over the hub's store + its Deps.
 func New(st *store.Store, deps Deps) *Service { return &Service{store: st, deps: deps} }
 
-// configTemplate is the commented .sindri/config.yaml scaffolded by Init. It is all
-// comments, so it parses as an empty doc (every key defaults) until the user
-// uncomments what they want.
+// configTemplate is Init's scaffold: all comments, so it parses as an empty doc until uncommented.
 const configTemplate = `# sindri per-project config — see the README "Per-project config" section.
 # All keys are optional; repo overrides global overrides the built-in default.
 
@@ -71,8 +67,7 @@ type Detail struct {
 	PRs       int           `json:"prs"`
 }
 
-// taskOpen reports whether a cached task still counts as open (not done). Kept local:
-// a tiny domain predicate, not worth a dependency.
+// taskOpen reports whether a cached task still counts as open. Local: too small for a dependency.
 func taskOpen(status string) bool {
 	switch status {
 	case "closed", "approved", "merged":
@@ -81,19 +76,11 @@ func taskOpen(status string) bool {
 	return true
 }
 
-// Known returns the raw registry rows — the board's repo list and the workflow's
-// fleet-wide PR scan iterate these.
-//
-// It returns the error rather than swallowing it, because an empty registry and an
-// unreadable one look identical downstream and mean opposite things. Swallowing it made a
-// transient store error render as "this machine tracks no repos", which cascaded: the
-// board lost its Projects, so the TUI couldn't identify the active repo, so the repo-scope
-// filter matched nothing and every agent and PR vanished from the tabs for one frame. A
-// caller that genuinely tolerates a partial answer must ignore the error explicitly.
+// Known returns the rows AND the error: swallowed, an unreadable registry reads as "no repos" and
+// blanked every agent and PR from the board for a frame.
 func (s *Service) Known() ([]store.Project, error) { return s.store.Projects() }
 
-// List returns every registered repo with a cheap summary (roster size + whether the
-// GitHub source is on). Live-agent ordering is a UI concern computed from the board.
+// List returns every registered repo with a cheap summary; live-agent ordering is the UI's concern.
 func (s *Service) List() ([]Summary, error) {
 	projects, err := s.store.Projects()
 	if err != nil {
@@ -106,8 +93,7 @@ func (s *Service) List() ([]Summary, error) {
 	return out, nil
 }
 
-// summary builds a summary for one registry row (best-effort on roster/config — a
-// broken config just reports issues-off rather than failing the whole listing).
+// summary is best-effort: a broken config reports issues-off rather than failing the whole listing.
 func (s *Service) summary(p store.Project) Summary {
 	roster, _ := s.store.For(p.Tag).Roster()
 	issues := false
@@ -120,9 +106,7 @@ func (s *Service) summary(p store.Project) Summary {
 	}
 }
 
-// Info returns a repo's resolved config and its agent/PR/task counts. A config error
-// IS returned here (unlike List) — `repo info` is where the user asks to see the
-// config, so a broken one must surface, not hide.
+// Info returns config + counts. Unlike List, a config error IS returned — the user asked to see it.
 func (s *Service) Info(project string) (Detail, error) {
 	path, ok, err := s.store.ProjectPath(project)
 	if err != nil {
@@ -155,11 +139,8 @@ func (s *Service) Info(project string) (Detail, error) {
 	return d, nil
 }
 
-// Init is the additive setup for a repo: register it eagerly and scaffold a committed
-// .sindri/config.yaml when absent (never overwriting one). Idempotent and never a
-// precondition — a repo that is never init'd still self-registers on first use. It
-// writes nothing else into the repo: an architecture doc is the project's to create,
-// and the hub only recommends one (Hub.ArchitectureAdvice).
+// Init registers a repo and scaffolds config.yaml if absent, never overwriting. Not a precondition:
+// an un-init'd repo self-registers on first use. It writes nothing else into the repo.
 func (s *Service) Init(root string) (Summary, error) {
 	tag := s.deps.RepoTag(root)
 	if err := s.store.RegisterProject(tag, root); err != nil {
@@ -180,12 +161,8 @@ func (s *Service) Init(root string) (Summary, error) {
 	return s.summary(store.Project{Tag: tag, Path: root}), nil
 }
 
-// Forget stops managing a repo: it deletes the repo's agents (freeing their pods,
-// worktrees, and identities) and drops the registry row. It does NOT delete the repo
-// — its .sindri/ config and git history stay, and all passive project data (task
-// cache, priority overrides, approvals, PRs, event log) is LEFT in place keyed by the
-// repo's stable path-derived tag. So re-adding the same repo resolves to the same tag
-// and reactivates that data — a soft forget for records, a hard teardown for agents.
+// Forget deletes the repo's agents and its registry row, nothing else: passive data stays keyed by
+// the stable tag, so re-adding the repo reactivates it. Hard on agents, soft on records.
 func (s *Service) Forget(project string) error {
 	roster, err := s.store.For(project).Roster()
 	if err != nil {
@@ -199,17 +176,14 @@ func (s *Service) Forget(project string) error {
 	return s.store.UnregisterProject(project)
 }
 
-// WriteConfig persists a repo's .sindri/config.yaml through the hub (the single
-// writer), validating it first so a broken config is never written — the caller
-// surfaces the validation error instead.
+// WriteConfig persists config.yaml through the hub, the single writer, validating first so a broken
+// config is never written.
 func (s *Service) WriteConfig(root string, cfg config.Config) error {
 	return config.Write(root, cfg)
 }
 
-// RemoveOrphan removes a stray container by name — a pod the board flagged as an
-// orphan (running, but with no roster entry). There's no agent identity to delete, so
-// this is a direct container rm; the name is a full container name (globally unique),
-// so no project context is needed.
+// RemoveOrphan rm's a pod with no roster entry. No identity to delete, and the container name is
+// globally unique, so no project context is needed.
 func (s *Service) RemoveOrphan(name string) error {
 	if err := container.Rm(name); err != nil {
 		return fmt.Errorf("remove orphan container %s: %w", name, err)
@@ -218,10 +192,8 @@ func (s *Service) RemoveOrphan(name string) error {
 	return nil
 }
 
-// SetColor pins a repo's display-colour choice in the registry (0 = the hash-derived
-// default; a positive value is a palette index the UI maps to a hue). Colour is a
-// per-machine display preference, so it lives in the central registry, not the
-// committed .sindri/config.yaml.
+// SetColor pins a palette index (0 = hash-derived default). A per-machine display preference, so it
+// lives in the registry, not the committed config.
 func (s *Service) SetColor(project string, color int) error {
 	if color < 0 {
 		return fmt.Errorf("colour choice must be >= 0 (0 = default), got %d", color)
