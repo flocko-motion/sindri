@@ -117,11 +117,13 @@ func HasCommits(repo string) (bool, error) {
 func CurrentBranch(dir string) (string, error) {
 	out, err := exec.Command("git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD").Output()
 	if err != nil {
-		return "", fmt.Errorf("current branch: %w", err)
+		// Relay git's own words and the dir: "exit status 128" alone named neither what failed
+		// nor where, which is all a caller logging this had to go on.
+		return "", fmt.Errorf("read current branch of %s: %s", dir, gitError(err))
 	}
 	b := strings.TrimSpace(string(out))
 	if b == "" || b == "HEAD" {
-		return "", fmt.Errorf("detached HEAD")
+		return "", fmt.Errorf("%s is on a detached HEAD", dir)
 	}
 	return b, nil
 }

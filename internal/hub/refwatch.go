@@ -21,11 +21,14 @@ type refwatch struct {
 	h    *Hub
 	stop chan struct{}
 	done chan struct{}
+	// lastErr is the failure already reported per project. A root that isn't a git repo fails
+	// every pass, and on a 30s loop that buried the log — report a change, not a drip.
+	lastErr map[string]string
 }
 
 // newRefwatch starts the loop. It must not block: New runs before Serve answers the socket.
 func newRefwatch(h *Hub) *refwatch {
-	r := &refwatch{h: h, stop: make(chan struct{}), done: make(chan struct{})}
+	r := &refwatch{h: h, stop: make(chan struct{}), done: make(chan struct{}), lastErr: map[string]string{}}
 	go r.loop()
 	return r
 }
@@ -56,8 +59,19 @@ func (r *refwatch) sweep() {
 		return
 	}
 	for _, p := range projects {
-		if err := r.h.wf.SyncReference(p.Tag); err != nil {
-			log.Printf("hub: reference check for %s: %v", p.Tag, err)
+		err := r.h.wf.SyncReference(p.Tag)
+		msg := ""
+		if err != nil {
+			msg = err.Error()
+		}
+		// Log a failure once, and again only when it changes or clears — loud without a drip.
+		if msg != r.lastErr[p.Tag] {
+			if msg != "" {
+				log.Printf("hub: reference check for %s (%s): %s", p.Tag, p.Path, msg)
+			} else {
+				log.Printf("hub: reference check for %s recovered", p.Tag)
+			}
+			r.lastErr[p.Tag] = msg
 		}
 	}
 }
