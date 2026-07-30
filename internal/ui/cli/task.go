@@ -221,9 +221,9 @@ func taskInfoCmd() *cobra.Command {
 				// front-end chooses layout, not which facts exist: the parent is how work is
 				// organised here and the description is the task itself, so a reader that omits
 				// them answers a different question than the other two surfaces do.
-				fmt.Printf("id:       %s\ntitle:    %s\nstatus:   %s\ntype:     %s\npriority: %s\nparent:   %s\napproval: %s\nlabels:   %s\n",
+				fmt.Printf("id:       %s\ntitle:    %s\nstatus:   %s\ntype:     %s\npriority: %s\nparent:   %s\napproval: %s\nlabels:   %s\nurl:      %s\n",
 					t.ID, t.Title, t.Status, dash(t.Type), hub.PriorityLabel(t.Priority),
-					dash(t.ParentID), dash(t.Approval), dash(t.Labels))
+					dash(t.ParentID), dash(t.Approval), dash(t.Labels), dash(t.URL))
 				if body := strings.TrimRight(t.Description, "\n"); body != "" {
 					fmt.Printf("\n%s\n", body)
 				}

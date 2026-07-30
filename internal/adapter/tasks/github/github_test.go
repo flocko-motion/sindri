@@ -93,7 +93,8 @@ func TestIssuesParses(t *testing.T) {
 	fakeGH(t)
 	root := gitHubRepo(t)
 	writeIssues(t, []Issue{
-		{Number: 12, Title: "Fix the thing", Body: "details", Labels: []Label{{Name: "bug"}}, UpdatedAt: "2026-01-01T00:00:00Z"},
+		{Number: 12, Title: "Fix the thing", Body: "details", Labels: []Label{{Name: "bug"}},
+			UpdatedAt: "2026-01-01T00:00:00Z", URL: "https://github.com/acme/widgets/issues/12"},
 		{Number: 7, Title: "Add a feature"},
 	})
 
@@ -103,6 +104,33 @@ func TestIssuesParses(t *testing.T) {
 	}
 	if len(got) != 2 || got[0].Number != 12 || got[0].Title != "Fix the thing" || got[0].Labels[0].Name != "bug" {
 		t.Fatalf("unexpected parse: %+v", got)
+	}
+	if want := "https://github.com/acme/widgets/issues/12"; got[0].URL != want {
+		t.Errorf("URL = %q, want %q", got[0].URL, want)
+	}
+}
+
+// TestTasksMapsURL: Source.Tasks is what the hub actually syncs from, so the URL has to survive
+// THAT mapping too, not just the raw Issues() parse — a board task with no URL to copy is exactly
+// the bug this field exists to fix.
+func TestTasksMapsURL(t *testing.T) {
+	fakeGH(t)
+	root := gitHubRepo(t)
+	url := "https://github.com/acme/widgets/issues/12"
+	writeIssues(t, []Issue{{Number: 12, Title: "Fix the thing", URL: url}})
+
+	got, err := (Source{}).Tasks(root, true) // force: skip the TTL memo
+	if err != nil {
+		t.Fatalf("Tasks: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d tasks, want 1", len(got))
+	}
+	if got[0].ID != ID(12) {
+		t.Errorf("ID = %q, want %q", got[0].ID, ID(12))
+	}
+	if got[0].URL != url {
+		t.Errorf("URL = %q, want %q", got[0].URL, url)
 	}
 }
 

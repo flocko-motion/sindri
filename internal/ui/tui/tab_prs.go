@@ -381,7 +381,7 @@ func (m model) prRawContentLines() []string {
 // metaItem is one right-column line; with kind set it can be focused, acted on (ENTER) or yanked.
 type metaItem struct {
 	text  string
-	kind  string // "" plain · "agent" · "task" · "path"
+	kind  string // "" plain · "agent" · "task" · "pr" · "path" · "view" · "url"
 	value string
 }
 

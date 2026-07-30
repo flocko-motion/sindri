@@ -463,7 +463,7 @@ func ToStoreTask(t task.Task) store.Task {
 	return store.Task{
 		ID: t.ID, Title: t.Title, Status: t.Status, Priority: t.Priority,
 		Type: t.Type, Labels: strings.Join(t.Labels, ","), ParentID: t.ParentID,
-		Description: t.Description,
+		Description: t.Description, URL: t.URL,
 	}
 }
 

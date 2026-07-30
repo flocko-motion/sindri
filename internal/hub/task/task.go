@@ -20,6 +20,7 @@ type Task struct {
 	ParentID    string
 	Labels      []string
 	Description string // the body, when the source carries one up front (e.g. a GitHub issue)
+	URL         string // an external permalink (e.g. the GitHub issue); "" when the source has none
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
