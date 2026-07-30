@@ -1,10 +1,10 @@
 // package: tui / scrap choice
 // type:    ui (Tasks tab confirm modal)
-// job:     the scrap (discard) confirm for the selected task — it measures what the
-//          discard can reach (the task's open PR, the tasks under it, their PRs) and
-//          offers one option per shape, then hands the chosen shape to the hub.
+// job:     the scrap (discard) confirm for the selected task: it measures what the discard
+// can reach — the task's open PR, the tasks under it, their PRs — and offers one option per
+// shape, then hands the chosen one to the hub.
 // limits:  labels and key-to-call plumbing only; the subtree walk is the hub's
-//          (-> hub.Descendants) and the cascade itself is ScrapTask's.
+// (-> hub.Descendants) and the cascade itself is ScrapTask's.
 package tui
 
 import (

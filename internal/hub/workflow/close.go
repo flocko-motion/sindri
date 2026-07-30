@@ -1,10 +1,9 @@
 // package: hub/workflow / close
 // type:    logic (task close/scrap dispatch)
 // job:     the two lifecycle-ending verbs every todo backend distinguishes — "done"
-// (CloseTask) and "discard" (ScrapTask, optionally down the whole subtree and taking
-// the PRs with it) — routed by the task's id prefix to the right backend op: td
-// close/delete, openspec archive/change-removal, GitHub issue close/delete. Both
-// guard against a live holder first.
+// (CloseTask) and "discard" (ScrapTask, optionally down a whole subtree) — routed by the
+// task's id prefix to td close/delete, openspec archive/removal, or GitHub issue
+// close/delete. Both guard against a live holder first.
 // limits:  dispatch only; each op lives in its adapter (td/spec/github).
 package workflow
 
