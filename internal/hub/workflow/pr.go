@@ -25,8 +25,22 @@ import (
 	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
-// baseBranch reads a repo's base branch from its main checkout.
-func (e *Engine) baseBranch(root string) (string, error) { return git.CurrentBranch(root) }
+// baseBranch is the branch agents work against: the configured `reference:`, else the main
+// checkout's current branch. Configured-but-absent is fatal — substituting one would corrupt every
+// claim, submit and merge measured against it.
+func (e *Engine) baseBranch(root string) (string, error) {
+	cfg, err := config.Load(root)
+	if err != nil {
+		return "", err
+	}
+	if cfg.Reference == "" {
+		return git.CurrentBranch(root)
+	}
+	if !git.BranchExists(root, cfg.Reference) {
+		return "", fmt.Errorf("the configured reference branch %q doesn't exist in %s — create it or fix `reference:` in .sindri/config.yaml", cfg.Reference, root)
+	}
+	return cfg.Reference, nil
+}
 
 // FleetPRs is fleet-wide, so `pr list` matches the TUI regardless of the caller's cwd.
 func (e *Engine) FleetPRs() ([]store.PR, error) {

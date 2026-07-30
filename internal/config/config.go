@@ -45,6 +45,10 @@ type Config struct {
 	GitHub        GitHub `yaml:"github"`
 	Lint          Lint   `yaml:"lint"`
 
+	// Reference pins the branch agents branch from and merge into. Unset reads the main
+	// checkout's current branch, so switching branches redefines it for the whole fleet.
+	Reference string `yaml:"reference"`
+
 	// Reading names the documents a planner must read first; it cannot guess them.
 	Reading []string `yaml:"reading"`
 

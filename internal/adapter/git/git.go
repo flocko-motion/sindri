@@ -126,6 +126,11 @@ func CurrentBranch(dir string) (string, error) {
 	return b, nil
 }
 
+// BranchExists reports whether dir has a local branch of that name.
+func BranchExists(dir, branch string) bool {
+	return exec.Command("git", "-C", dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch).Run() == nil
+}
+
 // AttachBranch reattaches a detached worktree to branch, reporting a rescue ref if it made one.
 // Detaching frees a branch for deletion (-> DetachHead), so an agent could commit onto a HEAD no
 // branch named. Nothing is discarded: the branch is created when missing, fast-forwarded when HEAD
