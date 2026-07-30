@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -21,11 +22,10 @@ func TestJSLintSilentWithoutJSSource(t *testing.T) {
 	}
 }
 
-// TestJSLintFindsProjectsInSubdirs: a frontend usually lives in web/ or ui/, and a monorepo has
-// a project per package — so discovery cannot assume the repo root. Source is attributed to the
-// nearest project above it, the config a compiler would resolve.
-func TestJSLintFindsProjectsInSubdirs(t *testing.T) {
-	root := writeTree(t, map[string]string{
+// subdirTree is the discovery fixture: a frontend in web/, a monorepo package, and stray source.
+func subdirTree(t *testing.T) string {
+	t.Helper()
+	return writeTree(t, map[string]string{
 		"web/package.json":          `{"name":"web"}`,
 		"web/tsconfig.json":         `{"compilerOptions":{}}`,
 		"web/src/a.ts":              "export const a = 1;\n",
@@ -33,27 +33,97 @@ func TestJSLintFindsProjectsInSubdirs(t *testing.T) {
 		"packages/lib/src/b.ts":     "export const b = 2;\n",
 		"stray/src/c.ts":            "export const c = 3;\n", // no config anywhere above
 	})
-	var out bytes.Buffer
-	found, err := JSLint(root, mustIgnore(t), &out)
-	if err != nil {
+}
+
+// stubToolPath puts an executable `name` that exits with code on a PATH containing nothing else, so
+// the delegated tool's presence is the test's choice rather than the machine's.
+func stubToolPath(t *testing.T, name string, code int) {
+	t.Helper()
+	dir := t.TempDir()
+	script := "#!/bin/sh\nexit " + strconv.Itoa(code) + "\n"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if !found {
-		t.Fatalf("expected findings, got none:\n%s", out.String())
+	t.Setenv("PATH", dir)
+}
+
+// TestJSLintFindsProjectsInSubdirs: a frontend usually lives in web/ or ui/, and a monorepo has
+// a project per package — so discovery cannot assume the repo root. Source is attributed to the
+// nearest project above it, the config a compiler would resolve.
+//
+// The delegated tool is stubbed rather than inherited from the machine. Asserting on "tsc is not
+// installed here" passed only where it was absent, so this failed in CI, which has it.
+func TestJSLintFindsProjectsInSubdirs(t *testing.T) {
+	// Findings that hold however the toolchain is provisioned: discovery itself.
+	assertDiscovery := func(t *testing.T, got string) {
+		t.Helper()
+		// The unconfigured tree, named by its directory rather than file by file.
+		if !strings.Contains(got, "stray") {
+			t.Errorf("source with no config above it must be reported:\n%s", got)
+		}
+		// A package.json with no checker configured is itself the finding.
+		if !strings.Contains(got, "packages/lib") {
+			t.Errorf("a declared project with no tsconfig/eslint must be reported:\n%s", got)
+		}
 	}
-	got := out.String()
-	// The unconfigured tree, named by its directory rather than file by file.
-	if !strings.Contains(got, "stray") {
-		t.Errorf("source with no config above it must be reported:\n%s", got)
-	}
-	// A package.json with no checker configured is itself the finding.
-	if !strings.Contains(got, "packages/lib") {
-		t.Errorf("a declared project with no tsconfig/eslint must be reported:\n%s", got)
-	}
-	// web/ has a tsconfig, so it is delegated to (and reports tsc missing in this environment).
-	if !strings.Contains(got, "web") {
-		t.Errorf("the configured project should be acted on:\n%s", got)
-	}
+
+	t.Run("tool missing is itself a finding", func(t *testing.T) {
+		stubToolPath(t, "unrelated", 0) // a PATH with no tsc on it
+		root := subdirTree(t)
+		var out bytes.Buffer
+		found, err := JSLint(root, mustIgnore(t), &out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := out.String()
+		if !found {
+			t.Fatalf("expected findings, got none:\n%s", got)
+		}
+		assertDiscovery(t, got)
+		// web/ configures tsc, so a missing tsc is a broken promise, not a pass.
+		if !strings.Contains(got, "web") || !strings.Contains(got, "not installed") {
+			t.Errorf("a configured project whose tool is absent must be reported:\n%s", got)
+		}
+		// This PATH has no node either, so the advice must say so — `npm install` cannot help.
+		if !strings.Contains(got, "node itself is not on PATH") {
+			t.Errorf("with no node, the advice must name that rather than suggest npm install:\n%s", got)
+		}
+	})
+
+	t.Run("tool present and clean is silent about that project", func(t *testing.T) {
+		stubToolPath(t, "tsc", 0) // a tsc that type-checks everything happily
+		root := subdirTree(t)
+		var out bytes.Buffer
+		found, err := JSLint(root, mustIgnore(t), &out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := out.String()
+		if !found {
+			t.Fatalf("stray and packages/lib are still findings:\n%s", got)
+		}
+		assertDiscovery(t, got)
+		if strings.Contains(got, "not installed") {
+			t.Errorf("tsc was on PATH, so nothing may claim it is missing:\n%s", got)
+		}
+	})
+
+	t.Run("tool present and failing is reported", func(t *testing.T) {
+		stubToolPath(t, "tsc", 2) // a tsc that rejects the project
+		root := subdirTree(t)
+		var out bytes.Buffer
+		found, err := JSLint(root, mustIgnore(t), &out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := out.String()
+		if !found {
+			t.Fatalf("expected findings, got none:\n%s", got)
+		}
+		if !strings.Contains(got, "web") || !strings.Contains(got, "failed") {
+			t.Errorf("a failing type-check must be reported against its project:\n%s", got)
+		}
+	})
 }
 
 // TestJSLintIgnoresAgentWorktrees: the hub checks agent worktrees out under .worktrees/, each a

@@ -156,7 +156,7 @@ func sortedKeys(m map[string]int) []string {
 func runJSTool(root string, w io.Writer, label string, bin string, args ...string) bool {
 	cmd, how := jsCommand(root, bin, args...)
 	if cmd == nil {
-		fmt.Fprintf(w, "js/%s: configured, but %s is not installed — run `npm install` (or add it) so the check can actually run.\n", label, bin)
+		fmt.Fprintf(w, "js/%s: configured, but %s is not installed — %s\n", label, bin, missingToolAdvice(root, bin))
 		return true
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), jsToolTimeout)
@@ -181,6 +181,26 @@ func runJSTool(root string, w io.Writer, label string, bin string, args ...strin
 	// reader hunting a type error when the fault was the exec itself.
 	fmt.Fprintf(w, "    no output — the tool did not run: %v\n", err)
 	return true
+}
+
+// toolPackage is the npm package that provides a binary, for advice that names what to install.
+var toolPackage = map[string]string{"tsc": "typescript", "eslint": "eslint"}
+
+// missingToolAdvice probes what is actually present before advising, since "run `npm install`" is
+// wrong when there is no node at all and useless when node_modules is already populated.
+func missingToolAdvice(root, bin string) string {
+	pkg := toolPackage[bin]
+	if pkg == "" {
+		pkg = bin
+	}
+	if _, err := exec.LookPath("node"); err != nil {
+		return "node itself is not on PATH, so no JS tooling can run here — install Node.js, then `npm install`."
+	}
+	if _, err := os.Stat(filepath.Join(root, "node_modules")); err != nil {
+		return fmt.Sprintf("no node_modules here yet — run `npm install` in this project, or `npm install -D %s` if it isn't a dependency.", pkg)
+	}
+	// Dependencies are installed yet the binary is absent, so it was never declared.
+	return fmt.Sprintf("node_modules is present but has no %s — add it with `npm install -D %s`.", bin, pkg)
 }
 
 // jsCommand prefers the repo's pinned tool, then a global one, nil if neither. Never `npx`: on the
