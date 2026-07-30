@@ -251,6 +251,7 @@ Tasks live in `td` (the source of truth), cached into the hub.
 sindri task new "Fix the parser" -t bug -p P1      # type: bug|feature|task|epic|chore
 sindri task new "Sub-thing" --parent td-abc123     # a child (subtask)
 sindri task list
+sindri task list --json                            # the same rows as JSON, for scripts (always an array)
 sindri task info td-abc123
 sindri task edit td-abc123 --parent td-LOGIN       # move a task into a package
 sindri task priority td-abc123 P0                  # a priority is what releases it to a worker
@@ -347,7 +348,7 @@ Orchestration is `sindri <category> <action>`; the toolbelt is the separate
 | Category | Actions |
 |---|---|
 | `agent` | `list` · `new [name] [--role worker\|reviewer\|planner]` · `start <name>` · `stop <name>` · `delete <name>` · `tell <name> "msg"` · `attach <name>` · `info <name>` · `pane <name>` |
-| `task` | `list` · `new <title> [-t -p -d --labels --parent]` · `info <id>` · `edit <id>` · `priority <id> <P0..P4>` · `approve <id>` · `reject <id> "why"` · `unassign <id>` |
+| `task` | `list [--json]` · `new <title> [-t -p -d --labels --parent]` · `info <id>` · `edit <id>` · `priority <id> <P0..P4>` · `approve <id>` · `reject <id> "why"` · `unassign <id>` |
 | `pr` | `list` · `info <id>` · `lint <id>` · `verify <id>` · `review <id> "…"` · `approve <id>` · `reject <id> "…"` · `milestone <agent>` · `merge <id>` |
 | `brokkr` | `map [paths…] [--find --grep --file --depth]` · `lint [deadcode\|loc\|comments\|openspec]` (none = all) |
 
