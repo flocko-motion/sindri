@@ -15,6 +15,7 @@ func TestEmbeddedBuildContextHasRecipe(t *testing.T) {
 		"buildctx/sindri-agent.sh",
 		"buildctx/yazi.sh",
 		"buildctx/shell.sh",
+		"buildctx/go-upgrade.sh",
 		"buildctx/shims/docker",
 		"buildctx/shims/docker-compose",
 		"buildctx/shims/git",

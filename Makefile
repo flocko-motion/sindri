@@ -123,6 +123,11 @@ check-go: ## fail unless the active Go toolchain is the latest release (linters 
 # This does not touch /usr/local/go — with GOTOOLCHAIN=auto the raised `go`
 # directive is enough: the go command downloads the matching toolchain and
 # re-execs into it, so the base install only has to bootstrap the switch.
+#
+# Agent pods do NOT get that for free: the golang base image pins
+# GOTOOLCHAIN=local, so raising the directive past the image's Go breaks every go
+# command in the pod until it runs `go-upgrade` (in the image) or gets a newer base
+# via `sindri agent rebuild`. `brokkr lint deadcode` says as much when it hits it.
 upgrade-go: ## bump the go directive to the latest release, tidy, and rebuild
 	go get go@latest
 	go mod tidy

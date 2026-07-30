@@ -91,6 +91,16 @@ RUN case "$(uname -m)" in \
 # /etc/profile would otherwise reset PATH and hide GOPATH/bin.
 RUN GOBIN=/usr/local/bin go install golang.org/x/tools/gopls@latest
 
+# go-upgrade: install the Go toolchain a project's go.mod requires.
+# The base image pins GOTOOLCHAIN=local, so a go.mod newer than the image's Go makes
+# every go command refuse ("go.mod requires go >= X") rather than fetch what it needs
+# — and /usr/local/go is root-owned, so the agent can't replace it. This fetches the
+# right toolchain into the agent's own tree and links it into ~/.local/bin, which the
+# PATH below puts first. brokkr's deadcode linter names this command when it hits that
+# refusal, so the fix arrives with the failure.
+COPY go-upgrade.sh /usr/local/bin/go-upgrade
+RUN chmod +x /usr/local/bin/go-upgrade
+
 # ── claude CLI ────────────────────────────────────────────────────────────────
 RUN npm install -g @anthropic-ai/claude-code@latest
 RUN mkdir -p /opt/sindri && cd /opt/sindri && npm init -y && npm install "@anthropic-ai/claude-agent-sdk@^0.1.59"
@@ -139,6 +149,9 @@ RUN echo '. /etc/sindri/shell.sh' >> /home/sindri/.bashrc
 
 USER sindri
 ENV GOMODCACHE=/home/sindri/go/pkg/mod
+# ~/.local/bin ahead of /usr/local/go/bin is what lets `go-upgrade` take effect without
+# root: a newer toolchain linked there shadows the base install for every later command.
+ENV PATH=/home/sindri/.local/bin:${PATH}
 # UTF-8 locale so Claude's box-drawing/bullet glyphs render instead of "_"
 # (Debian's default C locale mangles multibyte output). C.UTF-8 is built in.
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8

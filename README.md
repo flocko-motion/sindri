@@ -284,7 +284,10 @@ brokkr lint openspec       # validate openspec specs (skips if unused/uninstalle
   only its last N lines, and end with a **`=== exit: <code> ===`** marker — the
   exit status inline, so you (or an agent) never append `echo "$?"`.
 - **`deadcode`** always analyses test packages (tests are live code), and skips
-  with a note if the `go` toolchain isn't on PATH.
+  with a note if the `go` toolchain isn't on PATH. If the toolchain is *older* than
+  `go.mod` requires — the go command then refuses to load anything — it says so and
+  names the fix instead of reporting a broken build: in an agent pod that's
+  **`go-upgrade`**, which installs the toolchain `go.mod` asks for (see below).
 - **`comments`** enforces the project convention: every non-test `.go` file opens
   with a four-field header (`package` / `type` / `job` / `limits`, the block
   `brokkr map` reads), and every exported function and type has a doc comment. On
@@ -449,6 +452,16 @@ your layers. Keep the **agent contract** intact:
   not `/etc`, unless you `USER root` then switch back);
 - `/usr/local/bin/sindri` pointing at the mounted worker;
 - the `sindri-agent` entrypoint and `WORKDIR /workspace`.
+
+**Go toolchain in the pod.** The image's Go is whatever `golang:latest` had when it was
+built, and that base pins `GOTOOLCHAIN=local` — so a repo whose `go.mod` moves ahead of
+it makes every go command in the pod refuse to run ("go.mod requires go >= X"), which
+looks like a broken build and isn't one. The image carries **`go-upgrade`** for exactly
+that: it fetches the toolchain `go.mod` asks for (through go's own checksum-verified
+module path, no root needed) and links it into `~/.local/bin`, which the recipe puts
+first on `PATH`. Run it bare (`go-upgrade`), or with `latest` or an explicit `1.26.5`.
+`brokkr lint deadcode` names it when it hits the refusal, so an agent gets the fix with
+the failure; `sindri agent rebuild` is the other way out (a newer base image).
 
 A custom recipe builds a content-derived tag `sindri-agent:custom-<hash>` (repos with
 different recipes never clobber each other's tag or rebuild-thrash); the default stays
