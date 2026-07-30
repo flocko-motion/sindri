@@ -1,11 +1,11 @@
 // package: main (brokkr) / main
 // type:    entrypoint
 // job:     wires brokkr — sindri's toolbelt: the generic, hub-less developer
-//          tools (`brokkr map`, `brokkr lint`) that work on any Go repo, with no
-//          orchestration power. Named for Sindri's brother, who works the bellows
-//          alongside the smith.
+// tools (`brokkr map`, `brokkr lint`) that work on any Go repo, with no
+// orchestration power. Named for Sindri's brother, who works the bellows
+// alongside the smith.
 // limits:  no hub, no agents, no podman — just the tools; the linters live in
-//          internal/lint and the map in internal/codemap.
+// internal/lint and the map in internal/codemap.
 package main
 
 import (
@@ -24,61 +24,103 @@ import (
 // version is baked in at build time (-X main.version); "dev" for `go run`.
 var version = "dev"
 
-// versionLine is the single source of truth for brokkr's version string, so the
-// bare command, --version, and the `version` subcommand all report identically.
-// It includes the Go toolchain because a linter must run on current Go — a stale
-// toolchain (or, just as easily, a stale brokkr shadowed on PATH) is a real cause
-// of confusing results, and this is how you catch it.
+// buildTime is when the binary was LINKED (-X main.buildTime); Go records only the COMMIT time.
+// Kept out of version, which the hub compares — a timestamp would always look new.
+var buildTime = ""
+
+// versionLine heads the help output, so it stays one line; `brokkr version` prints versionDetail.
 func versionLine() string {
 	return fmt.Sprintf("%s (built with %s)", version, runtime.Version())
 }
 
-// newVersionCmd wires `brokkr version` — the same string --version prints, but as a
-// discoverable subcommand (people reach for `<tool> version` before `--version`,
-// and checking it is the first step when brokkr behaves like an older build).
+// versionDetail answers "which build is this, exactly?". A field the toolchain never recorded is
+// printed as missing with the reason, never omitted.
+func versionDetail() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "brokkr %s\n", version)
+	row := func(label, value string) { fmt.Fprintf(&b, "  %-11s %s\n", label, value) }
+	row("go", runtime.Version())
+	row("platform", runtime.GOOS+"/"+runtime.GOARCH)
+	if buildTime != "" {
+		row("built", buildTime)
+	} else {
+		row("built", "not stamped (`go run`, or a build that bypassed the Makefile)")
+	}
+	rev, when, dirty, ok := vcsInfo()
+	if !ok {
+		row("commit", "not recorded (built without VCS stamping)")
+		return b.String()
+	}
+	if dirty {
+		rev += " (uncommitted changes at build time)"
+	}
+	row("commit", rev)
+	if when != "" {
+		row("commit time", when)
+	}
+	return b.String()
+}
+
+// vcsInfo reads Go's embedded git stamp; ok is false when absent (`go run`, -buildvcs=false).
+func vcsInfo() (rev, when string, dirty, ok bool) {
+	info, avail := debug.ReadBuildInfo()
+	if !avail {
+		return "", "", false, false
+	}
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.time":
+			when = s.Value
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		}
+	}
+	return rev, when, dirty, rev != ""
+}
+
+// newVersionCmd wires `brokkr version`, since a hand reaches for that before `--version`.
 func newVersionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
-		Short: "Print brokkr's version and the Go toolchain it was built with",
+		Short: "Print brokkr's build identity: version, Go toolchain, platform, commit, build time",
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, _ []string) {
-			fmt.Fprintf(cmd.OutOrStdout(), "brokkr %s\n", versionLine())
+			fmt.Fprint(cmd.OutOrStdout(), versionDetail())
 		},
 	}
 }
 
-// --tail state, shared between the root's PersistentPreRunE (which decides whether
-// to buffer and installs the buffer) and run() (which flushes it). tailBuf is
-// non-nil only while --tail is active.
+// --tail state, shared between PersistentPreRunE (installs the buffer) and run() (flushes it).
 var (
 	tailN   int
 	tailBuf *bytes.Buffer
 )
 
-// exitCodeError lets a command request a specific process exit code after it has
-// already printed its own explanation (e.g. lint's error/panic report), so main
-// exits with that code without cobra echoing a redundant error or usage.
+// exitCodeError pins an exit code for a command that already explained itself, so cobra stays quiet.
 type exitCodeError struct{ code int }
 
 func (e exitCodeError) Error() string { return "" }
 
 func main() {
 	root := &cobra.Command{
-		Use:     "brokkr",
-		Short:   "brokkr — sindri's toolbelt: code map + linters",
+		Use:   "brokkr",
+		Short: "brokkr — sindri's toolbelt: code map + linters",
+		Long: "brokkr — sindri's toolbelt: code map + linters.\n\n" +
+			"Built for AI coding agents: one self-contained command per feature. You should never " +
+			"need a compound command — no pipes, no `&&`, no grepping or awk-ing what it prints. " +
+			"The urge to reach for one is a SYMPTOM of a missing feature, not a problem to route " +
+			"around: say so, and it gets fixed.",
 		Version: versionLine(),
-		// Bare `brokkr` reports its own version and the Go toolchain it was built
-		// with — a linter must run on current Go, so its toolchain is worth seeing
-		// — then shows what it can do. Writes via the command's out writer so --tail
-		// buffers it like everything else.
+		// Bare `brokkr` states its build, then what it can do. Via the command's writer, so
+		// --tail buffers it like everything else.
 		Run: func(cmd *cobra.Command, _ []string) {
 			fmt.Fprintf(cmd.OutOrStdout(), "brokkr %s\n\n", versionLine())
 			_ = cmd.Help()
 		},
-		// When --tail is set, redirect all command output into a buffer; run() prints
-		// its tail and the exit marker once the command is done. Runs for whichever
-		// subcommand executes (they define no hook of their own, so this root one is
-		// used).
+		// Under --tail, buffer output; run() prints the tail. This root hook covers every
+		// subcommand, since none defines its own.
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			if tailN > 0 {
 				tailBuf = &bytes.Buffer{}
@@ -100,12 +142,8 @@ func main() {
 	exit(run(root))
 }
 
-// exit is brokkr's ONLY process-exit path: it flushes the --tail buffer (its last
-// N lines plus the "=== exit: <code>" marker) and then terminates with code. A raw
-// os.Exit anywhere else would terminate before that flush and silently swallow the
-// buffered output, so os.Exit is banned outside this function (enforced by
-// TestNoRawOsExit). Commands must return their error/exit code up to run() rather
-// than exiting themselves.
+// exit is brokkr's ONLY process-exit path — it flushes the --tail buffer first. A raw os.Exit
+// elsewhere would swallow that output, so it is banned (TestNoRawOsExit).
 func exit(code int) {
 	if tailBuf != nil {
 		flushTail(os.Stdout, tailBuf.String(), tailN)
@@ -114,10 +152,8 @@ func exit(code int) {
 	os.Exit(code)
 }
 
-// run executes the command tree and returns the process exit code, recovering a
-// panic into a non-zero code (its stack goes to the tail buffer under --tail, so
-// it survives into the printed tail; else to stderr). Subcommands signal failure
-// by returning an error — an exitCodeError to pin a specific code — never os.Exit.
+// run executes the command tree and returns the exit code, recovering a panic into a non-zero one
+// (its stack goes to the tail buffer, so it survives). Failure travels as an error, never os.Exit.
 func run(root *cobra.Command) (code int) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -136,8 +172,7 @@ func run(root *cobra.Command) (code int) {
 	return 1 // a real error; cobra has already printed it to the (buffered) err writer
 }
 
-// errSink is where run() reports a recovered panic: the tail buffer when --tail is
-// active (so it lands in the printed tail), else stderr.
+// errSink puts a recovered panic in the tail buffer when --tail is active, else on stderr.
 func errSink() io.Writer {
 	if tailBuf != nil {
 		return tailBuf
@@ -145,8 +180,7 @@ func errSink() io.Writer {
 	return os.Stderr
 }
 
-// flushTail prints the last n lines of s to w (all of it when it has fewer), used
-// to emit the buffered output under --tail.
+// flushTail prints the last n lines of s (all of it when fewer) — the --tail buffer's output.
 func flushTail(w io.Writer, s string, n int) {
 	s = strings.TrimRight(s, "\n")
 	if s == "" {

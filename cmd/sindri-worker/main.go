@@ -1,9 +1,9 @@
 // package: main (sindri-worker) / main
 // type:    entrypoint (the agent's thin "browser")
 // job:     a role-agnostic client with NO built-in subcommands. It dials the hub
-//          (a mounted unix socket on Linux, or a token-authed loopback TCP channel
-//          on macOS — see dialHub); with no args the hub says what to do next (GET
-//          /directive), else it forwards a verb (POST /exec) and streams output.
+// (a mounted unix socket on Linux, or a token-authed loopback TCP channel
+// on macOS — see dialHub); with no args the hub says what to do next (GET
+// /directive), else it forwards a verb (POST /exec) and streams output.
 // limits:  knows no domain logic and no command tree.
 package main
 
@@ -12,7 +12,7 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/flo-at/sindri/internal/client"
+	"github.com/flo-at/sindri/internal/hub/client"
 )
 
 // version is the build version, baked in via -ldflags (matches the host binary);

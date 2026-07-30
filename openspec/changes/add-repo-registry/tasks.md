@@ -9,7 +9,7 @@
 
 - [x] 2.1 `RepoList()` — every registered repo with path, live-agent count, and config/source flags (reads registry + roster; live-agent count reuses the roster/liveness path).
 - [x] 2.2 `RepoInfo(project string)` — one repo's resolved `config.Config` plus its agent/PR/task counts.
-- [x] 2.3 `RepoInit(root string)` — idempotent: `RegisterProject`, scaffold `<root>/.sindri/config.yaml` from a commented template only if absent (never overwrite), seed `ARCHITECTURE.md` via `ensureArchitectureDoc` when the project has no configured `architecture`.
+- [x] 2.3 `RepoInit(root string)` — idempotent: `RegisterProject`, scaffold `<root>/.sindri/config.yaml` from a commented template only if absent (never overwrite). It creates nothing else in the repo — an architecture doc is the project's to write, and the hub only recommends one.
 - [x] 2.4 `RepoForget(project string)` — delete the repo's agents (via `DeleteAgent`, freeing pods/worktrees/identities), then `UnregisterProject`; never touch `.sindri/`, git, or the repo's passive records (task cache, priority overrides, approvals, PRs, events) — those stay keyed by the stable tag so re-adding reactivates them. Scope the board's global PR list to registered projects so forgotten records don't surface until re-added.
 - [x] 2.5 `WriteRepoConfig(root string, cfg config.Config)` — serialize to `.sindri/config.yaml` after validating via the config package's load path; return the validation error rather than persisting a broken config.
 - [x] 2.6 Wire these onto the hub HTTP/JSON surface (new registry endpoints) and the client used by CLI + TUI.

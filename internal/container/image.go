@@ -1,12 +1,9 @@
 // package: container / image
-// type:    adapter (podman)
-// job:     the agent image identity (ImageName) and build. The build context
-//          (Dockerfile, entrypoint, shims) is EMBEDDED in the binary, so an
-//          installed sindri can build the image for ANY orchestrated repo, not
-//          just the sindri repo.
-// limits:  worker/reviewer container lifecycle lives in internal/hub. Ensure
-//          materializes the embedded context to a cache dir and builds via podman
-//          when that context or the weekly key is stale.
+// type:    logic (backend-agnostic image-build recipe)
+// job:     the agent image's identity (ImageName) and the backend-agnostic build recipe: hash
+// the EMBEDDED context plus the week into a key, materialize, build — delegating
+// exists?/build to an ImageBuilder the pod and apple adapters supply.
+// limits:  no backend specifics (-> adapter/container/*); pod lifecycle is the hub's.
 package container
 
 import (
@@ -20,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flo-at/sindri/internal/paths"
+	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
 // imageBase is the image repository; ImageName is the default (embedded-recipe) ref.
@@ -28,38 +25,20 @@ import (
 const imageBase = "sindri-agent"
 const ImageName = imageBase + ":latest"
 
-// buildContext is the agent image's whole build context — Dockerfile, the
-// entrypoint, the yazi helper, and the docker shims — embedded so the binary
-// carries its own image recipe and never depends on files in the orchestrated
-// repo. Arch-specific tools (yq, yazi) are downloaded in-container by the
-// Dockerfile for the pod's own OS/arch, not copied from the (possibly macOS) host.
+// buildContext is the image's whole build context, embedded so the binary carries its own recipe.
 //
 //go:embed all:buildctx
 var buildContext embed.FS
 
-// Ensure builds the container image if the embedded build context changed or the
-// weekly cache key is stale. Build progress is written to out (so the hub can
-// tee it into an agent's live-screen region during launch). It is independent of
-// projectRoot — the recipe is embedded — so it works for any orchestrated repo.
-// ImageBuilder is the backend-specific slice of image building that the shared
-// recipe delegates to: whether the image is already present, and how to build it.
-// The podman and apple-container adapters each provide one.
+// ImageBuilder is the backend-specific half of image building: presence, and build.
 type ImageBuilder interface {
-	// ImageExists reports whether image ref is present. A non-nil error means
-	// presence could NOT be determined (tool/service failure) — distinct from a
-	// confident "absent" (false, nil) — so a broken check is never mistaken for
-	// "image missing, rebuild" (a swallowed error here rebuilt on every launch).
+	// ImageExists reports whether ref is present; an error means UNKNOWN, not absent.
 	ImageExists(ref string) (bool, error)
-	// Build builds ref from ctxDir/dockerfile. pull ⇒ re-pull the base image (force
-	// a rebuild that picks up a newer base), else use the local base if present.
+	// Build builds ref from ctxDir/dockerfile; pull re-fetches the base image.
 	Build(ref, ctxDir, dockerfile string, pull bool, out io.Writer) error
 }
 
-// buildProgress collapses a build's plain, line-oriented output into a single
-// in-place status line (carriage-return overwrite, padded to erase the previous
-// one), so a build — cached or fresh — shows one moving line instead of scrolling
-// the whole buildkit log. finish() ends the line. A non-TTY consumer just sees the
-// last state each CR yields; the surrounding messages are written separately.
+// buildProgress collapses a build's output into one in-place status line; finish() ends it.
 type buildProgress struct {
 	out  io.Writer
 	line []byte
@@ -93,20 +72,14 @@ func (p *buildProgress) finish() {
 	fmt.Fprint(p.out, "\n")
 }
 
-// EnsureImageWith runs the shared build recipe — hash the embedded context + ISO
-// week (+ any custom recipe) into a key, skip when it's unchanged and the image is
-// present, else materialize and build — delegating the backend-specific steps to b.
-// It returns the image REFERENCE to run: the shared sindri-agent:latest for the
-// embedded (or absent) recipe, or a content-derived sindri-agent:custom-<hash> when
-// a repo/global custom recipe is in play, so repos with different recipes don't
-// clobber each other's tag (or thrash each other's build cache).
+// EnsureImageWith runs the build recipe and returns the image reference to run. A custom recipe
+// gets a content-derived tag, so repos with different recipes don't clobber each other's.
 func EnsureImageWith(projectRoot, containerfile string, out io.Writer, b ImageBuilder) (string, error) {
 	return buildImage(projectRoot, containerfile, out, b, false)
 }
 
-// RebuildImageWith forces a rebuild regardless of the cached build key, and re-pulls
-// the base image — the way to pick up a newer base (e.g. a new Go in golang:latest)
-// that the key-based cache and podman's layer cache would otherwise keep stale.
+// RebuildImageWith forces a rebuild and re-pulls the base — the way to pick up a newer base
+// (a new Go in golang:latest) that both caches would otherwise keep stale.
 func RebuildImageWith(projectRoot, containerfile string, out io.Writer, b ImageBuilder) (string, error) {
 	return buildImage(projectRoot, containerfile, out, b, true)
 }
@@ -166,8 +139,7 @@ func buildImage(projectRoot, containerfile string, out io.Writer, b ImageBuilder
 	if cached, err := os.ReadFile(keyFile); !force && err == nil && strings.TrimSpace(string(cached)) == buildKey {
 		present, perr := b.ImageExists(ref)
 		if perr != nil {
-			// Couldn't determine presence — surface it rather than silently rebuilding
-			// (or worse, silently skipping). The caller needs the real reason.
+			// Presence unknown: surface it rather than silently rebuilding or skipping.
 			return "", fmt.Errorf("check whether image %s already exists: %w", ref, perr)
 		}
 		if present {
@@ -175,10 +147,7 @@ func buildImage(projectRoot, containerfile string, out io.Writer, b ImageBuilder
 		}
 	}
 
-	// Materialize the embedded context into a writable staging dir. Tools that
-	// must match the pod's OS/arch (yq, yazi) are downloaded in-container by the
-	// Dockerfile, not copied from the host — the host may be macOS/arm64 while the
-	// pod is Linux.
+	// Materialize the embedded context into a writable staging dir.
 	ctxDir := filepath.Join(cacheDir, "buildctx")
 	if err := materialize(ctxDir); err != nil {
 		return "", err
@@ -227,14 +196,9 @@ func tagOf(ref string) string {
 	return ref
 }
 
-// customDockerfile returns the path to a user-provided image recipe, or "" if none.
-// Precedence: the orchestrated repo's own .sindri/{Containerfile,Dockerfile} first
-// (per-repo toolchains), then the global one in the central sindri home
-// (paths.StateDir, applies to every repo). Either fully replaces the embedded recipe
-// — maximum customization (extra tools, private base images) without editing the
-// binary. The recipe must still honor the agent contract: a non-root `sindri` user,
-// /usr/local/bin/sindri pointing at the mounted worker, the sindri-agent entrypoint,
-// and WORKDIR /workspace — easiest by starting from a copy of the embedded Dockerfile.
+// customDockerfile is the user's image recipe, or "" — the repo's .sindri/ first, then the
+// global one. It fully replaces the embedded recipe, so it must still honour the agent contract
+// (non-root `sindri` user, the sindri-agent entrypoint, WORKDIR /workspace).
 func customDockerfile(projectRoot string) string {
 	dirs := []string{}
 	if projectRoot != "" {
@@ -289,4 +253,3 @@ func materialize(dir string) error {
 		return os.WriteFile(dst, data, 0o755)
 	})
 }
-

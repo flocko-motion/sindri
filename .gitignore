@@ -1,10 +1,11 @@
 .git/pr/
 .grepai/
 bin/
+dist/
 gh-local/gh
 .td-root
 .worktrees/
 .todos/
 CLAUDE.md
 /gh
-/sindri
+/.sindri

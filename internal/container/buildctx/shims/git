@@ -1,0 +1,54 @@
+#!/bin/sh
+# A sandboxed agent's /workspace is a linked worktree whose .git points at a host path the
+# container never mounts, so every repo-touching git command fails there — by design; the hub
+# is the gatekeeper for git. The raw failure ("not a git repository", a path that isn't there)
+# reads like a broken setup, and agents have answered it by reconstructing diffs from memory
+# and hand-writing scripts to revert files. This shim names the real answer instead.
+#
+# It never blocks anything. Real git runs first, with stdio untouched, and keeps its exit code:
+#   - a coauthor's /workspace IS the user's checkout, where git genuinely works → silent
+#   - repo-less commands (git --version, git config --global) → silent, so the image build
+#     that runs `git config --global` through this shim is unaffected
+#   - a repo-touching command in a sandboxed worktree → git's own error, then the way out
+REAL_GIT=/usr/bin/git
+
+# A command aimed at an explicit directory is not an agent poking at /workspace — it is tooling
+# or a test driving a repo it made itself (this project's own suite does exactly that, in temp
+# dirs, and several of its cases EXPECT git to fail). Those must stay silent: the reachability
+# probe below runs in the CWD, so without this it would blame /workspace for their failures.
+targeted=no
+for arg in "$@"; do
+  case "$arg" in
+  -C | --git-dir | --git-dir=* | --work-tree | --work-tree=*) targeted=yes ;;
+  esac
+done
+
+"$REAL_GIT" "$@"
+code=$?
+
+# Only speak up when git failed, the command was about here, AND there is no reachable repo here:
+# that trio is the sandbox dead end, not an ordinary git error (a bad flag, a conflict, a merge).
+if [ "$code" -ne 0 ] && [ "$targeted" = no ] && ! "$REAL_GIT" rev-parse --git-dir >/dev/null 2>&1; then
+  cat >&2 <<'EOF'
+
+── sindri ──────────────────────────────────────────────────────────────────────
+You do not have git here. /workspace is isolated on purpose: the repository lives
+on the host and the hub is the only thing that touches it.
+
+Use `sindri git` instead — the hub runs it for you and returns the result:
+
+  sindri git status            what you have changed since the hub last recorded it
+  sindri git diff [<paths>]    those changes, as a diff
+  sindri git change [<paths>]  your WHOLE change vs the reference branch
+  sindri git history           the work you have already handed over
+  sindri git incoming          what has landed on the reference branch
+  sindri git restore <paths>   throw away your unrecorded changes to those paths
+  sindri git drop <paths>      remove those paths from your change entirely
+
+Run `sindri git` for the current list. Do NOT script around this — if what you
+need isn't there, say so and it gets added.
+────────────────────────────────────────────────────────────────────────────────
+EOF
+fi
+
+exit $code

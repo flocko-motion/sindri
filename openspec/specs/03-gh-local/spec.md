@@ -9,9 +9,7 @@ so they are never mistaken for the GitHub CLI); PRs are records under `.git/`,
 and each task is developed on its own branch in an isolated worktree. This is
 the spec for the local PR/worktree machinery; the agent loop that uses it is in
 workers, and the human review flow is a separate action spec.
-
 ## Requirements
-
 ### Requirement: Local-only, not GitHub
 
 The agent CLIs (`sindri-worker`, `sindri-review`) SHALL be sindri-local,
@@ -73,14 +71,30 @@ by another worktree; the shared base branch is used via detached HEAD.
 
 ### Requirement: Merge into base, on approval only
 
-Merging a PR SHALL fast-forward-free merge its branch into the base branch and
+Merging a PR SHALL first bring its branch up to the current base by rebasing the
+branch onto base, then fast-forward-free merge the branch into the base branch and
 mark the PR merged. A PR SHALL only be merged after it is approved, and merging
-SHALL be gated by the task's review gates.
+SHALL be gated by the task's review gates. When the rebase hits conflicts — a
+genuine divergence from base — the merge SHALL NOT proceed: the PR SHALL be routed
+back to the owning worker to resolve and resubmit, and the conflict SHALL be
+reported rather than silently swallowed.
 
 #### Scenario: Gated merge
 
 - **WHEN** a merge is attempted while the task has an unmet review gate
 - **THEN** the merge is refused until the gate is satisfied
+
+#### Scenario: Stale branch merges after auto-rebase
+
+- **WHEN** an approved PR whose branch has fallen behind the base is merged
+- **THEN** the hub rebases the branch onto the current base and, the rebase being
+  clean, completes the merge with no human step
+
+#### Scenario: Conflict returns to the worker
+
+- **WHEN** rebasing the branch onto the current base conflicts
+- **THEN** the merge stops, the PR returns to its owning worker with the conflict
+  reported, and the worker resolves and resubmits
 
 ### Requirement: Role-scoped commands; merge is human-only
 
@@ -105,13 +119,32 @@ surface SHALL ever include merge.
 
 ### Requirement: Self-contained, no remote dependency
 
-The whole PR/worktree workflow SHALL function with no network and no GitHub
-account; everything lives in the local git repository.
+The PR/worktree/merge workflow SHALL function with no network and no GitHub
+account; branches, PRs, review, and the human merge gate all live in the local
+git repository and never contact a remote. This offline guarantee covers the
+*core loop*. It does NOT preclude sindri from having *separate, optional* network
+integrations layered beside it — specifically, the GitHub *issue source* (see the
+`github-issues` capability), which reads open issues inbound and closes an issue
+on merge. Such an integration SHALL be optional and SHALL degrade to absent when
+the network or GitHub is unavailable, so its absence never breaks the offline
+core: with no network, create, review, and merge of local PRs all still work, and
+merge SHALL never block on a GitHub write-back.
 
 #### Scenario: Offline
 
 - **WHEN** sindri runs with no network
 - **THEN** create, review, and merge of local PRs all still work
+
+#### Scenario: Merge does not block on GitHub
+
+- **WHEN** a `gh-*` task's local PR is merged while GitHub is unreachable
+- **THEN** the merge completes locally and the GitHub close/comment is skipped with
+  a warning — the local merge is never blocked on the remote
+
+#### Scenario: Issue source absent, core unaffected
+
+- **WHEN** the GitHub issue source is disabled or unavailable
+- **THEN** the local PR/worktree/merge workflow is unchanged and fully functional
 
 ### Requirement: td reads are direct, writes go through the tool
 
@@ -130,6 +163,48 @@ sees a single adapter interface.
 
 - **WHEN** a td task is created or mutated
 - **THEN** the change goes through the `td` tool, never a direct write to td's DB
+
+### Requirement: Container branches persist across subtasks
+
+A held container's worktree branch SHALL be named for the container and persist
+across all its subtasks, decoupled from the agent's current subtask: completing
+one subtask and starting the next SHALL land both as commits on the one container
+branch and SHALL NOT create or rename a branch. (This is the collaborative
+exception to one-branch-per-leaf; a structured leaf task still gets its own
+branch.)
+
+#### Scenario: One branch, many subtasks
+
+- **WHEN** an agent completes a subtask and moves to the next within the same
+  container
+- **THEN** both land as commits on the single container branch, which is neither
+  recreated nor renamed between them
+
+#### Scenario: Branch outlives the current subtask
+
+- **WHEN** the agent's current subtask changes
+- **THEN** the branch name does not, because it tracks the container, not the
+  subtask
+
+### Requirement: Milestone merge does not retire the branch
+
+A container branch MAY be merged at a milestone: the merge SHALL land the branch's
+current state into the base, rebase the branch onto the new base, and leave the
+branch in place for continued work — distinct from a terminal merge, which retires
+the branch and frees the agent. A milestone merge stays human-only and gated on an
+approved PR (the human may approve it directly). The branch is retired only when
+its container is closed.
+
+#### Scenario: Milestone merge keeps the branch
+
+- **WHEN** a container branch is merged at a milestone
+- **THEN** its current state lands on base, the branch is rebased onto the new
+  base, and it remains checked out for the agent to keep working
+
+#### Scenario: Terminal merge on container completion
+
+- **WHEN** a container is closed (all its children done) and its branch is merged
+- **THEN** the branch is retired and the agent is freed to take new work
 
 ## Structure
 

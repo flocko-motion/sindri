@@ -82,6 +82,25 @@ RUN case "$(uname -m)" in \
   curl -Ls "https://micro.mamba.pm/api/micromamba/$mamba/latest" \
   | tar -xvj -C /usr/local/bin --strip-components=1 bin/micromamba
 
+# ── Go dev tools ──────────────────────────────────────────────────────────────
+# gopls (the Go language server) so agents get semantic code intelligence —
+# references/definition/rename — instead of blind text find/replace. `go install`
+# builds it from source, so it's automatically the pod's arch (no download/arch-case).
+# GOBIN=/usr/local/bin drops it where every other agent tool lives (fd/bat/yazi/yq/
+# sindri) — on PATH for ALL shells, incl. a login shell (a dialed-in human) whose
+# /etc/profile would otherwise reset PATH and hide GOPATH/bin.
+RUN GOBIN=/usr/local/bin go install golang.org/x/tools/gopls@latest
+
+# go-upgrade: install the Go toolchain a project's go.mod requires.
+# The base image pins GOTOOLCHAIN=local, so a go.mod newer than the image's Go makes
+# every go command refuse ("go.mod requires go >= X") rather than fetch what it needs
+# — and /usr/local/go is root-owned, so the agent can't replace it. This fetches the
+# right toolchain into the agent's own tree and links it into ~/.local/bin, which the
+# PATH below puts first. brokkr's deadcode linter names this command when it hits that
+# refusal, so the fix arrives with the failure.
+COPY go-upgrade.sh /usr/local/bin/go-upgrade
+RUN chmod +x /usr/local/bin/go-upgrade
+
 # ── claude CLI ────────────────────────────────────────────────────────────────
 RUN npm install -g @anthropic-ai/claude-code@latest
 RUN mkdir -p /opt/sindri && cd /opt/sindri && npm init -y && npm install "@anthropic-ai/claude-agent-sdk@^0.1.59"
@@ -89,18 +108,26 @@ RUN mkdir -p /opt/sindri && cd /opt/sindri && npm init -y && npm install "@anthr
 # ── openspec CLI (spec-driven workflow, optional per project) ──────────────────
 RUN npm install -g @fission-ai/openspec@latest
 
-# ── agent browser (mounted from host at runtime) ─────────────────────────────
-# The single, role-agnostic agent binary (built host-side as sindri-worker) is
-# mounted read-only at /opt/sindri/sindri-worker at runtime. Inside the isolated
-# pod it's the agent's interface to the hub, so we present it simply as `sindri`
-# (no host CLI is in the pod to collide with). Role is hub-side, one binary for
-# every agent; the sindri user can't write /usr/local/bin, so symlink here.
-RUN ln -sf /opt/sindri/sindri-worker /usr/local/bin/sindri
+# ── host-built tools (mounted from host at runtime) ──────────────────────────
+# The hub mounts its pod-bin DIRECTORY read-only at /opt/sindri/host-bin. These
+# symlinks resolve on every exec, so a reinstalled binary lands without
+# recreating the container — a per-file bind used to pin the old inode.
+#
+# The browser is presented simply as `sindri` (in the pod it IS the interface to
+# the hub, and no host CLI is here to collide). The sindri user can't write
+# /usr/local/bin, so the links are made at build time.
+RUN ln -sf /opt/sindri/host-bin/sindri-worker /usr/local/bin/sindri \
+  && ln -sf /opt/sindri/host-bin/brokkr       /usr/local/bin/brokkr
 
 # ── Shims ─────────────────────────────────────────────────────────────────────
+# git: /usr/local/bin precedes /usr/bin, so this fronts the real git without replacing it.
+# It passes everything through and only adds the `sindri git` pointer when a repo-touching
+# command fails for want of a reachable repo — the sandbox dead end. A coauthor, whose
+# /workspace IS the user's checkout, never sees it.
 COPY shims/docker          /usr/local/bin/docker
 COPY shims/docker-compose  /usr/local/bin/docker-compose
-RUN chmod +x /usr/local/bin/docker /usr/local/bin/docker-compose
+COPY shims/git             /usr/local/bin/git
+RUN chmod +x /usr/local/bin/docker /usr/local/bin/docker-compose /usr/local/bin/git
 
 # ── Sindri agent entrypoint ───────────────────────────────────────────────────
 # The agent is a thin browser driven by the hub; its instructions come from the
@@ -122,6 +149,9 @@ RUN echo '. /etc/sindri/shell.sh' >> /home/sindri/.bashrc
 
 USER sindri
 ENV GOMODCACHE=/home/sindri/go/pkg/mod
+# ~/.local/bin ahead of /usr/local/go/bin is what lets `go-upgrade` take effect without
+# root: a newer toolchain linked there shadows the base install for every later command.
+ENV PATH=/home/sindri/.local/bin:${PATH}
 # UTF-8 locale so Claude's box-drawing/bullet glyphs render instead of "_"
 # (Debian's default C locale mangles multibyte output). C.UTF-8 is built in.
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8

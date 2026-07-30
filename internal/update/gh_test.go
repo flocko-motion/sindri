@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flo-at/sindri/internal/debug"
+	"github.com/flo-at/sindri/internal/tools/debug"
 )
 
 // fakeGH puts a stub `gh` on PATH: `gh api …/releases/latest` returns a tag,

@@ -1,11 +1,11 @@
 // package: hub/store / store
 // type:    persistence (SQLite, hub-owned)
 // job:     the global hub's durable source of truth — roster + activity log — in
-//          one central SQLite DB. Every per-repo row is tagged by a `project` key;
-//          a `*Store` owns the DB and cross-project reads, and `Store.For(project)`
-//          returns a project-scoped `*ProjectStore`.
+// one central SQLite DB. Every per-repo row is tagged by a `project` key;
+// a `*Store` owns the DB and cross-project reads, and `Store.For(project)`
+// returns a project-scoped `*ProjectStore`.
 // limits:  single-owner (only the hub touches it); SQLite is a linked library,
-//          not an external tool, so this is NOT an internal/adapter package.
+// not an external tool, so this is NOT an internal/adapter package.
 package store
 
 import (
@@ -112,6 +112,19 @@ CREATE TABLE IF NOT EXISTS chat_log (
   body   TEXT NOT NULL,
   ts     TEXT NOT NULL
 );
+-- Unified task comments, synced from external sources (td, github). source + a
+-- source_ref (the external id/url) key each comment so a re-sync reconciles them
+-- against their origin (add new, drop removed, update changed).
+CREATE TABLE IF NOT EXISTS task_comments (
+  project    TEXT NOT NULL,
+  task_id    TEXT NOT NULL,
+  source     TEXT NOT NULL, -- "td" | "github"
+  source_ref TEXT NOT NULL, -- external id/url, unique within a source
+  author     TEXT NOT NULL DEFAULT '',
+  body       TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (project, task_id, source, source_ref)
+);
 `
 
 // Open opens (creating if needed) the central SQLite DB at path and applies the
@@ -146,6 +159,7 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE projects ADD COLUMN last_used TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE projects ADD COLUMN color INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE tasks ADD COLUMN description TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE prs ADD COLUMN kind TEXT NOT NULL DEFAULT 'final'`,
 	}
 	for _, a := range alters {
 		if _, err := db.Exec(a); err != nil && !strings.Contains(err.Error(), "duplicate column") {

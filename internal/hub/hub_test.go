@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"github.com/flo-at/sindri/internal/hub/workflow"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,42 +76,36 @@ func TestEnsureGitignore(t *testing.T) {
 
 func TestNewAgentValidation(t *testing.T) {
 	h := newHub(t)
-	if _, err := h.NewAgent(testProject, "Brokkr", "worker", ""); err == nil {
+	if _, err := h.agents.NewAgent(testProject, "Brokkr", "worker", ""); err == nil {
 		t.Fatalf("uppercase name should be rejected")
 	}
-	if _, err := h.NewAgent(testProject, "brokkr", "boss", ""); err == nil {
+	if _, err := h.agents.NewAgent(testProject, "brokkr", "boss", ""); err == nil {
 		t.Fatalf("bad role should be rejected")
 	}
-	if _, err := h.NewAgent(testProject, "brokkr", "worker", ""); err != nil {
+	if _, err := h.agents.NewAgent(testProject, "brokkr", "worker", ""); err != nil {
 		t.Fatalf("valid agent: %v", err)
 	}
-	if _, err := h.NewAgent(testProject, "brokkr", "worker", ""); err == nil {
+	if _, err := h.agents.NewAgent(testProject, "brokkr", "worker", ""); err == nil {
 		t.Fatalf("duplicate agent should be rejected")
 	}
 }
 
 func TestNewAgentAutoName(t *testing.T) {
 	h := newHub(t)
-	isDwarf := func(n string) bool {
-		for _, d := range dwarfNames {
-			if d == n {
-				return true
-			}
-		}
-		return false
-	}
-	n1, err := h.NewAgent(testProject, "", "worker", "")
+	n1, err := h.agents.NewAgent(testProject, "", "worker", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// A different project must still get a globally-unique name (not reuse n1).
-	n2, err := h.NewAgent("other", "", "worker", "")
+	n2, err := h.agents.NewAgent("other", "", "worker", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !isDwarf(n1) || !isDwarf(n2) {
-		t.Fatalf("auto-names should be dwarves: %q, %q", n1, n2)
+	if n1 == "" || n2 == "" {
+		t.Fatalf("auto-name should be non-empty: %q, %q", n1, n2)
 	}
+	// The dwarf pool itself is unit-tested in internal/hub/agent; here we assert the
+	// hub-level behaviour: auto-names are globally unique across projects.
 	if n1 == n2 {
 		t.Fatalf("auto-names must be globally unique across projects, got %q twice", n1)
 	}
@@ -121,18 +116,18 @@ func TestNewAgentAutoName(t *testing.T) {
 
 func TestNewAgentNameGloballyUnique(t *testing.T) {
 	h := newHub(t)
-	if _, err := h.NewAgent("repoA", "eitri", "worker", ""); err != nil {
+	if _, err := h.agents.NewAgent("repoA", "eitri", "worker", ""); err != nil {
 		t.Fatal(err)
 	}
 	// The same name in a DIFFERENT repo is refused — names are unique machine-wide.
-	if _, err := h.NewAgent("repoB", "eitri", "worker", ""); err == nil {
+	if _, err := h.agents.NewAgent("repoB", "eitri", "worker", ""); err == nil {
 		t.Fatalf("same name in another repo should be rejected (global uniqueness)")
 	}
 }
 
 func TestNewAgentRecordsIdentityAndLog(t *testing.T) {
 	h := newHub(t)
-	if _, err := h.NewAgent(testProject, "dvalin", "reviewer", ""); err != nil {
+	if _, err := h.agents.NewAgent(testProject, "dvalin", "reviewer", ""); err != nil {
 		t.Fatal(err)
 	}
 	st, err := h.State(testProject)
@@ -151,48 +146,90 @@ func TestNewAgentRecordsIdentityAndLog(t *testing.T) {
 	}
 }
 
-// TestEnsureArchitectureDoc: the hub seeds a placeholder ARCHITECTURE.md into a
-// repo that has none (pointing the user at the brokkr baseline), and never
-// overwrites an existing one.
-func TestEnsureArchitectureDoc(t *testing.T) {
+// TestHubNeverSeedsArchitectureDoc: registering a repo must not write an
+// ARCHITECTURE.md into it. The hub used to seed a placeholder, which littered every repo
+// it touched; an architecture doc is the project's to create, and the hub only advises.
+func TestHubNeverSeedsArchitectureDoc(t *testing.T) {
+	h := newHub(t)
 	root := t.TempDir()
-	path := filepath.Join(root, "ARCHITECTURE.md")
+	_ = h.repo(root)
 
-	ensureArchitectureDoc(root)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("expected a seeded ARCHITECTURE.md: %v", err)
+	if _, err := os.Stat(filepath.Join(root, "ARCHITECTURE.md")); !os.IsNotExist(err) {
+		t.Errorf("registering a repo must not create ARCHITECTURE.md (stat err: %v)", err)
 	}
-	if !strings.Contains(string(data), "brokkr") {
-		t.Errorf("seed should mention the brokkr linter baseline:\n%s", data)
+	// The one file the hub does maintain, for its own artifacts, is still written.
+	if _, err := os.Stat(filepath.Join(root, ".gitignore")); err != nil {
+		t.Errorf(".gitignore should still be maintained: %v", err)
+	}
+}
+
+// TestStartupAdvice: instead of seeding, the hub recommends once at startup — and says
+// nothing about a repo that's in good shape.
+func TestStartupAdvice(t *testing.T) {
+	h := newHub(t)
+
+	// Unconfigured, no doc → recommend, naming the key and the file to put it in.
+	repo := t.TempDir()
+	_ = h.repo(repo)
+	advice := strings.Join(h.StartupAdvice(), "\n")
+	if !strings.Contains(advice, "no architecture doc") || !strings.Contains(advice, "architecture: <path>") {
+		t.Errorf("expected a recommendation naming the config key, got:\n%s", advice)
+	}
+	if !strings.Contains(advice, filepath.Base(repo)) {
+		t.Errorf("advice should name the repo, got:\n%s", advice)
 	}
 
-	// Idempotent + non-destructive: an existing doc is left untouched.
-	if err := os.WriteFile(path, []byte("# mine\n"), 0o644); err != nil {
+	// Present at the default path → silent.
+	if err := os.WriteFile(filepath.Join(repo, "ARCHITECTURE.md"), []byte("# arch\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ensureArchitectureDoc(root)
-	again, _ := os.ReadFile(path)
-	if string(again) != "# mine\n" {
-		t.Errorf("existing ARCHITECTURE.md must not be overwritten, got:\n%s", again)
+	if got := h.StartupAdvice(); len(got) != 0 {
+		t.Errorf("a repo with a readable doc needs no advice, got %v", got)
+	}
+
+	// Configured elsewhere and present → also silent (no nagging about the default name).
+	if err := os.MkdirAll(filepath.Join(repo, ".sindri", "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".sindri", "docs", "ARCH.md"), []byte("# arch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".sindri", "config.yaml"), []byte("architecture: .sindri/docs/ARCH.md\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(repo, "ARCHITECTURE.md")); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.StartupAdvice(); len(got) != 0 {
+		t.Errorf("a repo that configured its own doc needs no advice, got %v", got)
+	}
+
+	// A config that won't load is surfaced here rather than days later, at first use.
+	// A configured-but-absent architecture path lands in this bucket: validate rejects it.
+	if err := os.WriteFile(filepath.Join(repo, ".sindri", "config.yaml"), []byte("architecture: docs/GONE.md\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	advice = strings.Join(h.StartupAdvice(), "\n")
+	if !strings.Contains(advice, "GONE.md") {
+		t.Errorf("a broken config should be reported and name the path, got:\n%s", advice)
 	}
 }
 
 // TestReviewInstructionsCarryArchitecture: both review-instruction paths (the no-arg
-// `sindri` directive = dirReview, and the injected = msgReview) always tell the
+// `sindri` directive = workflow.DirReview, and the injected = workflow.MsgReview) always tell the
 // reviewer to read the repo's ARCHITECTURE.md.
 func TestReviewInstructionsCarryArchitecture(t *testing.T) {
-	if !strings.Contains(dirReview("pr-1", "td-1", "ARCHITECTURE.md"), "ARCHITECTURE.md") {
-		t.Errorf("dirReview must tell the reviewer to read the architecture doc")
+	if !strings.Contains(workflow.DirReview("pr-1", "td-1", "ARCHITECTURE.md"), "ARCHITECTURE.md") {
+		t.Errorf("workflow.DirReview must tell the reviewer to read the architecture doc")
 	}
-	if !strings.Contains(msgReview("pr-1", "req", "br", "base", "ARCHITECTURE.md", true), "ARCHITECTURE.md") {
-		t.Errorf("msgReview must tell the reviewer to read the architecture doc")
+	if !strings.Contains(workflow.MsgReview("pr-1", "req", "br", "base", "ARCHITECTURE.md", true), "ARCHITECTURE.md") {
+		t.Errorf("workflow.MsgReview must tell the reviewer to read the architecture doc")
 	}
 }
 
 func TestTellUnknownAgent(t *testing.T) {
 	h := newHub(t)
-	if err := h.Tell(testProject, "ghost", "hi", "user"); err == nil {
+	if err := h.agents.Tell(testProject, "ghost", "hi", "user"); err == nil {
 		t.Fatalf("telling unknown agent should error")
 	}
 }
@@ -258,7 +295,7 @@ func hasTaskTitled(tasks []store.Task, title string) bool {
 // openspec CLI + a change, so it's exercised end-to-end, not here.)
 func TestCloseUnresolvableOpenspec(t *testing.T) {
 	h := newHub(t)
-	if err := h.CloseTask(testProject, "os-abc123"); err == nil {
+	if err := h.wf.CloseTask(testProject, "os-abc123"); err == nil {
 		t.Fatalf("closing an unresolvable openspec row should error")
 	}
 }
@@ -277,17 +314,17 @@ func TestCloseFreesWorkingAgent(t *testing.T) {
 	}
 	h.repo(root)
 	tag := RepoTag(root)
-	id, err := h.CreateTask(tag, TaskSpec{Title: "implement the widget feature", Type: "task"})
+	id, err := h.wf.CreateTask(tag, TaskSpec{Title: "implement the widget feature", Type: "task"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.NewAgent(tag, "eitri", "worker", ""); err != nil {
+	if _, err := h.agents.NewAgent(tag, "eitri", "worker", ""); err != nil {
 		t.Fatal(err)
 	}
 	ps := h.store.For(tag)
 	_ = ps.SetState(store.AgentState{Agent: "eitri", Task: id, Branch: id, Phase: "working"})
 
-	if err := h.CloseTask(tag, id); err != nil { // must NOT refuse just because eitri holds it
+	if err := h.wf.CloseTask(tag, id); err != nil { // must NOT refuse just because eitri holds it
 		t.Fatalf("closing a held task should be allowed: %v", err)
 	}
 	if st, _ := ps.GetState("eitri"); st.Task != "" || st.Phase == "working" {
@@ -306,7 +343,7 @@ func TestApprovePR(t *testing.T) {
 	}
 
 	// Human approve moves an open PR to approved, no reviewer agent involved.
-	if err := h.ApprovePR(testProject, "pr-td-1"); err != nil {
+	if err := h.wf.ApprovePR(testProject, "pr-td-1"); err != nil {
 		t.Fatalf("approve open PR: %v", err)
 	}
 	pr, ok, err := ps.GetPR("pr-td-1")
@@ -318,12 +355,12 @@ func TestApprovePR(t *testing.T) {
 	}
 
 	// Open-only guard: an already-approved (non-open) PR cannot be re-approved.
-	if err := h.ApprovePR(testProject, "pr-td-1"); err == nil {
+	if err := h.wf.ApprovePR(testProject, "pr-td-1"); err == nil {
 		t.Fatalf("approving a non-open PR should be refused")
 	}
 
 	// Unknown PR errors.
-	if err := h.ApprovePR(testProject, "pr-nope"); err == nil {
+	if err := h.wf.ApprovePR(testProject, "pr-nope"); err == nil {
 		t.Fatalf("approving an unknown PR should error")
 	}
 }

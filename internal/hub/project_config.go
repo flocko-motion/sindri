@@ -1,9 +1,9 @@
 // package: hub / project_config
 // type:    logic (per-project config wiring)
 // job:     load a project's .sindri/config.yaml and expose what the hub acts on — the
-//          architecture-doc path for the reviewer prompt, and ARCHITECTURE.md seeding
-//          (only when the project didn't set its own doc). containerfile/review_prompt
-//          are read at their own call sites.
+// architecture-doc path for the reviewer prompt, and the startup advice about a
+// repo that hasn't named one. containerfile/review_prompt are read at their own
+// call sites.
 // limits:  thin adapter between internal/config and the hub; validation lives in config.
 package hub
 
@@ -32,20 +32,59 @@ func (h *Hub) architectureDoc(project string) string {
 	return "ARCHITECTURE.md"
 }
 
-// ensureArchitectureDoc seeds a placeholder ARCHITECTURE.md at the repo root when none
-// exists, so every repo the hub serves gains a home for its architecture rules — the
-// file reviewers are told to read before every verdict. Only called when the project
-// hasn't configured its own `architecture` path. Idempotent and best-effort: it only
-// creates a missing file (never overwrites the project's own doc) and never blocks hub
-// startup, but a write error is reported, not swallowed.
-func ensureArchitectureDoc(root string) {
-	path := filepath.Join(root, "ARCHITECTURE.md")
-	if _, err := os.Stat(path); err == nil {
-		return // present already — leave the project's doc alone
-	} else if !os.IsNotExist(err) {
-		return // can't tell (permissions, etc.) — don't risk clobbering
+// StartupAdvice reports what the user should know about each tracked repo, once, when the
+// hub starts. It exists because the hub used to SEED a placeholder ARCHITECTURE.md into
+// every repo it served, which littered repos that never wanted one — recommending is the
+// hub's business, writing into someone's repo is not.
+//
+// Two things get reported, and a repo in good shape produces neither:
+//
+//   - A config that won't load. Otherwise this only surfaces at the first operation
+//     needing that repo, which may be days later. Note this subsumes an architecture doc
+//     that IS configured but absent: config.validate rejects a named path that isn't
+//     there, so the error already names it.
+//   - No architecture doc at the default path, with none configured. Nothing breaks —
+//     SystemPrompt injects nothing for empty content — but agents then work with no
+//     architecture brief, which is a quality loss the user should choose knowingly.
+func (h *Hub) StartupAdvice() []string {
+	projects, err := h.store.Projects()
+	if err != nil {
+		return nil
 	}
-	if err := os.WriteFile(path, []byte(architecturePlaceholder), 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "hub: WARNING — could not seed %s: %v\n", path, err)
+	var out []string
+	for _, p := range projects {
+		if st := h.repoDocState(p.Path); st.Advice != "" {
+			out = append(out, fmt.Sprintf("%s: %s", filepath.Base(p.Path), st.Advice))
+		}
 	}
+	return out
+}
+
+// RepoDocState is a repo's architecture-doc situation: the path in effect and, when the
+// hub can't read a doc there, what the user should do about it. Advice is "" for a repo in
+// good shape, which is what every UI keys off to stay quiet.
+type RepoDocState struct {
+	Doc      string `json:"doc"`      // the path in effect: configured, else the default
+	Set      bool   `json:"set"`      // the project named it (vs falling back to the default)
+	Readable bool   `json:"readable"` // a doc exists at Doc
+	Advice   string `json:"advice"`   // "" when nothing to say
+}
+
+// repoDocState resolves one repo's architecture-doc situation — the single place the rule
+// lives, so the hub's startup line and the TUI's Repos detail can't drift apart.
+func (h *Hub) repoDocState(root string) RepoDocState {
+	cfg, err := config.Load(root)
+	if err != nil {
+		// Includes a configured doc that isn't there: validate rejects a named path whose
+		// target is missing, so the error already names it. Reported here because otherwise
+		// a broken config stays silent until the first operation that needs this repo.
+		return RepoDocState{Advice: err.Error()}
+	}
+	st := RepoDocState{Doc: cfg.Architecture, Set: cfg.ArchitectureSet}
+	if _, serr := os.Stat(filepath.Join(root, st.Doc)); serr == nil {
+		st.Readable = true
+		return st
+	}
+	st.Advice = fmt.Sprintf("no architecture doc — agents get no architecture brief. Point sindri at yours with `architecture: <path>` in %s/.sindri/config.yaml", root)
+	return st
 }

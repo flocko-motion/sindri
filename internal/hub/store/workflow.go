@@ -1,9 +1,9 @@
 // package: hub/store / workflow
 // type:    persistence (SQLite, hub-owned)
 // job:     the durable workflow state — the cached task read model (D15), each
-//          agent's live workflow state, and merge-intents (PRs) — all write-through
-//          so a crash loses nothing committed (D11). Every table is project-keyed;
-//          the methods hang off ProjectStore (scoped) except AllPRs (global board).
+// agent's live workflow state, and merge-intents (PRs) — all write-through
+// so a crash loses nothing committed (D11). Every table is project-keyed;
+// the methods hang off ProjectStore (scoped) except AllPRs (global board).
 // limits:  primitive columns only; mapping to/from issue.Task lives in the hub.
 package store
 
@@ -45,9 +45,10 @@ CREATE TABLE IF NOT EXISTS prs (
   agent      TEXT NOT NULL DEFAULT '',
   branch     TEXT NOT NULL DEFAULT '',
   base       TEXT NOT NULL DEFAULT '',
-  status     TEXT NOT NULL DEFAULT 'open', -- open | approved | rejected | merged
+  status     TEXT NOT NULL DEFAULT 'open', -- open | approved | rejected | merged | scrapped
   feedback   TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT '',
+  kind       TEXT NOT NULL DEFAULT 'final', -- final (task-done) | interim (mid-task contribution to the reference branch)
   PRIMARY KEY (project, id)
 );
 -- Durable priority we assign to tasks in our own db — survives the task-cache
@@ -101,8 +102,7 @@ CREATE TABLE IF NOT EXISTS task_approval (
 );
 `
 
-// Task is the cached read-model row for a td task. Description/Acceptance are not
-// cached (they can be large) — populated only on a detail read.
+// Task is the cached read-model row; large fields land only on a detail read.
 type Task struct {
 	ID          string `json:"id"`
 	Title       string `json:"title"`
@@ -113,11 +113,12 @@ type Task struct {
 	ParentID    string `json:"parent_id"`
 	Description string `json:"description,omitempty"`
 	Acceptance  string `json:"acceptance,omitempty"`
-	// Approval is the hub-side gate on planner-created tasks: "" = none (a normal
-	// task, claimable), pending (awaiting the user), approved (claimable), or
-	// rejected (with ApprovalComment). Workers only ever see "" / approved tasks.
+	// Approval gates planner-created tasks: "" (none), pending, approved, rejected.
+	// Workers only ever see "" and approved tasks.
 	Approval        string `json:"approval,omitempty"`
 	ApprovalComment string `json:"approval_comment,omitempty"`
+	// Comments is not a tasks column: TaskInfo assembles it, so it's empty elsewhere.
+	Comments []Comment `json:"comments,omitempty"`
 }
 
 // AgentState is an agent's live workflow state (durable, D11).
@@ -142,8 +143,7 @@ type Review struct {
 	VerdictAt   string `json:"verdict_at"`
 }
 
-// PR is a merge-intent: a branch its owner would like merged, plus a verdict. It
-// carries its project so the global board can tag which repo it belongs to.
+// PR is a merge-intent; it carries its project so the global board can tag the repo.
 type PR struct {
 	Project   string `json:"project"`
 	ID        string `json:"id"`
@@ -154,10 +154,12 @@ type PR struct {
 	Status    string `json:"status"`
 	Feedback  string `json:"feedback"`
 	CreatedAt string `json:"created_at"`
+	// Kind: a final PR's merge closes the task, an interim one keeps it open and puts
+	// the worker straight back on it. "" is read as "final".
+	Kind string `json:"kind"`
 }
 
-// ReplaceTasks refreshes this project's cached task set in one transaction. Tasks
-// absent from the new set are dropped so the cache mirrors td.
+// ReplaceTasks swaps the cached set in one transaction; absent tasks are dropped.
 func (p *ProjectStore) ReplaceTasks(tasks []Task) error {
 	tx, err := p.s.db.Begin()
 	if err != nil {
@@ -192,23 +194,22 @@ func (p *ProjectStore) UpsertTask(t Task) error {
 	return err
 }
 
-// RemoveTask drops a single cached task, so a close/scrap shows on the board at
-// once without a full multi-source re-sync. The next sync rebuilds the cache from
-// the sources anyway, so this is just the intervening truth.
+// RemoveTask shows a close/scrap on the board without a full re-sync; the next sync
+// rebuilds from the sources anyway, so this is only the intervening truth.
 func (p *ProjectStore) RemoveTask(id string) error {
-	_, err := p.s.db.Exec(`DELETE FROM tasks WHERE project=? AND id=?`, p.project, id)
-	return err
+	if _, err := p.s.db.Exec(`DELETE FROM tasks WHERE project=? AND id=?`, p.project, id); err != nil {
+		return err
+	}
+	return p.DeleteComments(id) // don't strand a scrapped task's comments
 }
 
-// taskCols is the shared SELECT projection: the cached td fields plus the hub-side
-// approval overlay (empty when there's no approval row). The join is project-matched.
+// taskCols is the shared projection: cached td fields plus the hub's approval overlay.
 const taskCols = `t.id,t.title,t.status,t.priority,t.type,t.labels,t.parent_id,t.description,
 	COALESCE(a.status,''), COALESCE(a.comment,'')`
 
 const taskFrom = ` FROM tasks t LEFT JOIN task_approval a ON a.task=t.id AND a.project=t.project`
 
-// OpenTasks returns this project's claimable tasks: status "open" and not gated by
-// an unresolved approval, highest priority first.
+// OpenTasks returns open, un-gated tasks, highest priority first.
 func (p *ProjectStore) OpenTasks() ([]Task, error) {
 	rows, err := p.s.db.Query(`
 		SELECT `+taskCols+taskFrom+`
@@ -230,16 +231,21 @@ func (p *ProjectStore) OpenTasks() ([]Task, error) {
 // A task with no priority is left out — no priority, no assignment: an unprioritized
 // task stays in the backlog (visible, editable) until a human sets a priority, which
 // is the signal that it's ready to be worked.
+//
+// A standalone task, then: no children of its own (those are packages -> OpenContainers)
+// and no open parent. A child belongs to its package and is worked inside it, on the
+// package's branch, so handing one out on its own would split a tree across agents and
+// strip exactly the context the hierarchy was built to give.
 func (p *ProjectStore) OpenLeaves() ([]Task, error) {
 	rows, err := p.s.db.Query(`
 		SELECT `+taskCols+taskFrom+`
 		WHERE t.project=? AND t.status='open' AND (a.status IS NULL OR a.status='approved')
 		  AND t.priority != ''
 		  AND t.id NOT IN (SELECT parent_id FROM tasks WHERE project=? AND parent_id != '')
-		  AND t.parent_id NOT IN (SELECT container FROM agent_state WHERE project=? AND container != '')
+		  AND NOT EXISTS (SELECT 1 FROM tasks pp WHERE pp.project=t.project AND pp.id=t.parent_id AND pp.status='open')
 		  AND t.id NOT IN (SELECT task FROM agent_state WHERE project=? AND task != '')
 		ORDER BY t.priority, t.id`,
-		p.project, p.project, p.project, p.project)
+		p.project, p.project, p.project)
 	if err != nil {
 		return nil, fmt.Errorf("open leaves: %w", err)
 	}
@@ -274,19 +280,22 @@ func (p *ProjectStore) GetTask(id string) (Task, bool, error) {
 	return t, true, nil
 }
 
-// MarkedContainers returns this project's tasks eligible for collaborative
-// assignment: not closed, carrying the mark label, with an open child, unheld.
-func (p *ProjectStore) MarkedContainers(label string) ([]Task, error) {
+// OpenContainers returns claimable packages: approved, prioritised, unheld tasks with an
+// open child and no open ancestor. A hierarchy IS the unit of work — one agent takes the
+// whole tree on the parent's branch, so OpenLeaves leaves them alone. Gates match
+// OpenLeaves, and excluding nested trees stops a claim at two levels at once.
+func (p *ProjectStore) OpenContainers() ([]Task, error) {
 	rows, err := p.s.db.Query(`
 		SELECT `+taskCols+taskFrom+`
 		WHERE t.project=? AND t.status NOT IN ('closed','approved','merged')
 		  AND (a.status IS NULL OR a.status='approved')
-		  AND (',' || t.labels || ',') LIKE '%,' || ? || ',%'
+		  AND t.priority != ''
 		  AND EXISTS (SELECT 1 FROM tasks c WHERE c.project=t.project AND c.parent_id=t.id AND c.status='open')
+		  AND NOT EXISTS (SELECT 1 FROM tasks pp WHERE pp.project=t.project AND pp.id=t.parent_id AND pp.status='open')
 		  AND t.id NOT IN (SELECT container FROM agent_state WHERE project=? AND container != '')
-		ORDER BY CASE WHEN t.priority='' THEN 1 ELSE 0 END, t.priority, t.id`, p.project, label, p.project)
+		ORDER BY t.priority, t.id`, p.project, p.project)
 	if err != nil {
-		return nil, fmt.Errorf("marked containers: %w", err)
+		return nil, fmt.Errorf("open containers: %w", err)
 	}
 	defer rows.Close()
 	return scanTasks(rows)
@@ -401,13 +410,16 @@ func (p *ProjectStore) PutPR(pr PR) error {
 	if pr.Status == "" {
 		pr.Status = "open"
 	}
+	if pr.Kind == "" {
+		pr.Kind = "final"
+	}
 	_, err := p.s.db.Exec(`
-		INSERT INTO prs (project,id,task,agent,branch,base,status,feedback,created_at)
-		VALUES (?,?,?,?,?,?,?,?,?)
+		INSERT INTO prs (project,id,task,agent,branch,base,status,feedback,created_at,kind)
+		VALUES (?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(project,id) DO UPDATE SET
 			task=excluded.task, agent=excluded.agent, branch=excluded.branch,
-			base=excluded.base, status=excluded.status, feedback=excluded.feedback`,
-		p.project, pr.ID, pr.Task, pr.Agent, pr.Branch, pr.Base, pr.Status, pr.Feedback, pr.CreatedAt)
+			base=excluded.base, status=excluded.status, feedback=excluded.feedback, kind=excluded.kind`,
+		p.project, pr.ID, pr.Task, pr.Agent, pr.Branch, pr.Base, pr.Status, pr.Feedback, pr.CreatedAt, pr.Kind)
 	if err != nil {
 		return fmt.Errorf("put pr %s: %w", pr.ID, err)
 	}
@@ -448,7 +460,7 @@ func (s *Store) AllPRs(statuses ...string) ([]PR, error) {
 	return queryPRs(s.db, q, args...)
 }
 
-const prCols = `SELECT project,id,task,agent,branch,base,status,feedback,created_at FROM prs`
+const prCols = `SELECT project,id,task,agent,branch,base,status,feedback,created_at,kind FROM prs`
 
 type scanner interface{ Scan(...any) error }
 
@@ -482,7 +494,7 @@ func scanPR(row scanner) (PR, bool, error) {
 
 func scanPRRow(row scanner) (PR, error) {
 	var p PR
-	err := row.Scan(&p.Project, &p.ID, &p.Task, &p.Agent, &p.Branch, &p.Base, &p.Status, &p.Feedback, &p.CreatedAt)
+	err := row.Scan(&p.Project, &p.ID, &p.Task, &p.Agent, &p.Branch, &p.Base, &p.Status, &p.Feedback, &p.CreatedAt, &p.Kind)
 	return p, err
 }
 
@@ -591,4 +603,20 @@ func (p *ProjectStore) Reviews(pr string) ([]Review, error) {
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// ReviewingPR is the newest verdict-less review assigned to author, "" if none. The board
+// needs it because a reviewer authors no PR, leaving its AgentView.PR empty.
+func (p *ProjectStore) ReviewingPR(author string) (string, error) {
+	var pr string
+	err := p.s.db.QueryRow(
+		`SELECT pr FROM reviews WHERE project=? AND author=? AND verdict='' ORDER BY id DESC LIMIT 1`,
+		p.project, author).Scan(&pr)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("reviewing pr for %s: %w", author, err)
+	}
+	return pr, nil
 }

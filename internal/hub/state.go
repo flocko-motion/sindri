@@ -1,41 +1,31 @@
 // package: hub / state
 // type:    logic (the single read surface + change notifications)
 // job:     assemble the whole board the UIs render — agents across every project
-//          with live workflow state, merge-intents, and orphaned runtime, plus the
-//          tasks of the selected project — and a tiny pub/sub so clients live-update
-//          over /events. The central store is the read model; this is its projection.
+// with live workflow state, merge-intents, and orphaned runtime, plus the
+// tasks of the selected project — and a tiny pub/sub so clients live-update
+// over /events. The central store is the read model; this is its projection.
 // limits:  read-only assembly + notify; mutations live in their own methods.
 package hub
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/flo-at/sindri/internal/container"
-	"github.com/flo-at/sindri/internal/adapter/tmux"
-	"github.com/flo-at/sindri/internal/detect"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// probeTimeout bounds each podman probe during a board read. A container that
-// can't answer within this window is reported "down" rather than stalling the
-// whole read — the board must stay responsive even when a pod is wedged.
+// probeTimeout bounds each podman probe; a container that can't answer is "down", not a stalled read.
 const probeTimeout = 3 * time.Second
 
-// statsTimeout bounds a single `stats` sample, which is slower than a liveness
-// probe (the runtime samples over a short window before returning).
+// statsTimeout bounds one `stats` sample, slower than a probe (the runtime samples over a window).
 const statsTimeout = 8 * time.Second
 
-// AgentView is an agent as the UIs see it: identity + live workflow + runtime.
-// Status collapses runtime + workflow into one word: down | idle | working |
-// submitted. Project (repoTag) and Repo (human path) tag which repo it belongs to,
-// so the global Agents tab can show — and color — rows by repo.
+// AgentView is an agent as the UIs see it; Status collapses runtime + workflow into one word:
+// down | idle | working | submitted.
 type AgentView struct {
 	Project   string `json:"project"`
 	Repo      string `json:"repo"`
@@ -52,33 +42,18 @@ type AgentView struct {
 	Runtime   string `json:"runtime"`   // Claude's live runtime: "working"|"blocked"|"idle"|"" (folded into Status; kept raw for the herdr projection)
 }
 
-// ClientView is one human attached to an agent's tmux session — a live dial-in.
-// Surfaced so the UIs can show who's watching and whether they can type (a
-// read-only client observes but can't send keys). An orphaned client (a dropped
-// `podman exec` that left its tmux attach behind) shows up here too, which is how
-// a session that "sees but can't type" becomes visible instead of mysterious.
-type ClientView struct {
-	TTY      string `json:"tty"`
-	Width    int    `json:"width"`
-	Height   int    `json:"height"`
-	ReadOnly bool   `json:"read_only"`
-}
-
-// BoardState is the whole board in one payload. Agents and PRs are global (across
-// every project, each row tagged with its repo); Tasks are the selected project's
-// (td is per-repo, so a merged backlog would mislead); Projects is every repo the
-// hub knows, for the TUI's repo switcher and repo labels.
+// BoardState is the whole board: Agents and PRs global, Tasks only the selected project's.
 type BoardState struct {
-	Agents   []AgentView     `json:"agents"`
-	Tasks    []store.Task    `json:"tasks"`
-	PRs      []store.PR      `json:"prs"`
-	Projects []store.Project `json:"projects"`
-	Orphans  []string        `json:"orphans"` // pods with no roster entry (D14)
-	Chat     ChatView        `json:"chat"`    // the user's chatroom: members + transcript
+	Agents   []AgentView             `json:"agents"`
+	Tasks    []store.Task            `json:"tasks"`
+	PRs      []store.PR              `json:"prs"`
+	Projects []store.Project         `json:"projects"`
+	Orphans  []string                `json:"orphans"`   // pods with no roster entry (D14)
+	Chat     ChatView                `json:"chat"`      // the user's chatroom: members + transcript
+	RepoDocs map[string]RepoDocState `json:"repo_docs"` // per repo tag: its architecture doc + any gap
 }
 
-// State assembles the board: agents and PRs across all projects, tasks for the
-// selected project (empty tag = none selected → no tasks).
+// State assembles the board; an empty selected tag means no project is chosen, so no tasks.
 func (h *Hub) State(selected string) (BoardState, error) {
 	agentsRow, err := h.store.AllAgents()
 	if err != nil {
@@ -88,12 +63,15 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	if err != nil {
 		return BoardState{}, err
 	}
-	// Only registered repos surface in the global views. A forgotten repo's PRs stay
-	// in the db (keyed by its stable tag, so re-adding the repo reactivates them) but
-	// drop out of the fleet PR tab — forgetting a repo means giving up its management,
-	// not surfacing its records. (Its agents are already deleted, so AllAgents is clean.)
+	// Only registered repos surface in the global views: a forgotten repo's PRs stay in the db (keyed
+	// by its stable tag, so re-adding reactivates them) but drop off the fleet tab. Read the registry
+	// ONCE — twice doubled load on the single store connection and let one snapshot disagree with itself.
+	projects, err := h.projects.Known()
+	if err != nil {
+		return BoardState{}, err // never render "no repos" from an unreadable registry
+	}
 	registered := map[string]bool{}
-	for _, p := range h.knownProjects() {
+	for _, p := range projects {
 		registered[p.Tag] = true
 	}
 	kept := prs[:0]
@@ -110,83 +88,64 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		}
 	}
 
-	// Liveness needs a podman round-trip per agent (inspect + a tmux exec); probe
-	// every agent concurrently and time-bounded, so one wedged pod slows the read
-	// by at most probeTimeout instead of serialising all of them. The same
-	// list-clients probe that confirms the session is up also yields the dial-in
-	// count, so the board shows who's attached at no extra cost.
-	var wg sync.WaitGroup
+	// Liveness comes from the watchdog's last observation — a board read REPORTS it, never takes one.
+	// Probing per request scaled cost with readers (overlapping polls, SSE, post-mutation refetches);
+	// probes then lost their deadline and rendered as "down", flickering healthy agents (-> watchdog.go).
 	running := make([]bool, len(agentsRow))
 	clients := make([]int, len(agentsRow))
 	runtimes := make([]string, len(agentsRow)) // Claude's live runtime: busy|blocked|idle|""
 	for i, a := range agentsRow {
-		wg.Add(1)
-		go func(i int, a store.Agent) {
-			defer wg.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
-			defer cancel()
-			if !container.RunningContext(ctx, h.container(a.Project, a.Name)) {
-				return
-			}
-			if cs, ok := h.clientsCtx(ctx, a.Project, a.Name); ok {
-				running[i] = true
-				clients[i] = len(cs)
-				runtimes[i] = h.runtimeState(ctx, a.Project, a.Name) // what Claude is doing now
-			}
-		}(i, a)
+		if l, ok := h.watch.get(a.Project, a.Name); ok {
+			running[i], clients[i], runtimes[i] = l.up, l.clients, l.runtime
+		}
 	}
-	wg.Wait()
+
+	// The orphan scan needs the pod list, not per-agent liveness; cached, so it reuses the watchdog's.
+	podCtx, podCancel := context.WithTimeout(context.Background(), probeTimeout)
+	existing, _ := container.ListByLabelCached(podCtx, "sindri.project", "")
+	podCancel()
 
 	known := map[string]bool{}
 	agents := make([]AgentView, 0, len(agentsRow))
 	for i, a := range agentsRow {
 		container := h.container(a.Project, a.Name)
 		known[container] = true
-		st, _ := h.store.For(a.Project).GetState(a.Name)
+		ps := h.store.For(a.Project)
+		st, _ := ps.GetState(a.Name)
+		// A reviewer authors no PR, so fall back to the one it's reviewing — that's what it works on.
+		pr := openPRFor(prs, a.Project, a.Name)
+		if pr == "" {
+			pr, _ = ps.ReviewingPR(a.Name)
+		}
 		agents = append(agents, AgentView{
 			Project: a.Project, Repo: h.repoName(a.Project), Name: a.Name, Role: a.Role,
-			Status:  overlayRuntime(h.agentStatus(a.Project, a.Name, running[i], st.Phase), runtimes[i]),
+			Status:  overlayRuntime(h.agents.AgentStatus(a.Project, a.Name, running[i], st.Phase), runtimes[i]),
 			Runtime: runtimes[i],
-			Task:    st.Task, Branch: st.Branch, PR: openPRFor(prs, a.Project, a.Name), Workspace: a.Workspace,
+			Task:    st.Task, Branch: st.Branch, PR: pr, Workspace: a.Workspace,
 			Clients: clients[i], Container: container, Memory: a.Memory,
 		})
 	}
 
-	// Orphans: sindri pods with no roster entry, across every known project. One
-	// podman ps per project, run concurrently and bounded like the liveness probes.
-	projects := h.knownProjects()
-	orphanLists := make([][]string, len(projects))
-	for i, proj := range projects {
-		wg.Add(1)
-		go func(i int, proj store.Project) {
-			defer wg.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
-			defer cancel()
-			if pods, err := container.ListByLabelContext(ctx, "sindri.project", proj.Path); err == nil {
-				orphanLists[i] = pods
-			}
-		}(i, proj)
-	}
-	wg.Wait()
-
+	// Orphans: sindri pods with no roster entry, from the listing the liveness probe already took.
 	var orphans []string
-	for _, pods := range orphanLists {
-		for _, p := range pods {
-			if !known[p] {
-				orphans = append(orphans, p)
-			}
+	for _, p := range existing {
+		if !known[p] {
+			orphans = append(orphans, p)
 		}
 	}
 	chat, err := h.chatView()
 	if err != nil {
 		return BoardState{}, err
 	}
-	return BoardState{Agents: agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans, Chat: chat}, nil
+	// Carried in the snapshot so the TUI's recommendation matches the one hub startup prints.
+	docs := make(map[string]RepoDocState, len(projects))
+	for _, p := range projects {
+		docs[p.Tag] = h.repoDocState(p.Path)
+	}
+	return BoardState{Agents: agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans, Chat: chat, RepoDocs: docs}, nil
 }
 
-// AgentStatsView is one agent's resource snapshot for `agent stats`. Err is set
-// (not swallowed) when the sample couldn't be read, so the row shows why instead
-// of a misleading zero.
+// AgentStatsView is one agent's resource snapshot; Err is set, not swallowed into a misleading zero.
 type AgentStatsView struct {
 	Name          string `json:"name"`
 	Repo          string `json:"repo"`
@@ -195,9 +154,8 @@ type AgentStatsView struct {
 	Err           string `json:"err,omitempty"`
 }
 
-// StatsReport is the `agent stats` payload: which runtime is wired, plus a memory
-// snapshot per running agent. Engine is included so the numbers are read in the
-// right context (podman shares one VM; apple container is one micro-VM per agent).
+// StatsReport is the `agent stats` payload. Engine is included so the numbers are read in context:
+// podman shares one VM, apple container is one micro-VM per agent.
 type StatsReport struct {
 	Engine string           `json:"engine"`
 	Agents []AgentStatsView `json:"agents"`
@@ -209,10 +167,8 @@ func (h *Hub) Stats() (StatsReport, error) {
 	return StatsReport{Engine: container.Name(), Agents: views}, err
 }
 
-// AllStats returns a resource snapshot for every RUNNING agent, gathered
-// concurrently — each `stats` sample is slow (the runtime samples over a window),
-// so serial would be N×that. Down agents are omitted (no VM to sample). A per-agent
-// stats failure is reported in that row's Err, never silently dropped.
+// AllStats snapshots every RUNNING agent concurrently — each sample is slow, so serial would be N×that.
+// Down agents are omitted; a per-agent failure lands in that row's Err rather than being dropped.
 func (h *Hub) AllStats() ([]AgentStatsView, error) {
 	agentsRow, err := h.store.AllAgents()
 	if err != nil {
@@ -250,16 +206,8 @@ func (h *Hub) AllStats() ([]AgentStatsView, error) {
 	return out, nil
 }
 
-// knownProjects returns the registry's projects (best-effort; empty on error).
-func (h *Hub) knownProjects() []store.Project {
-	ps, _ := h.store.Projects()
-	return ps
-}
-
-// projectPath resolves a project tag to its path, logging loudly on a real store
-// error (distinct from an unknown project) instead of swallowing it into "". The
-// string-returning callers (projectRoot/repoName/container) can't thread an error,
-// so this is where the DB failure is surfaced.
+// projectPath resolves a project tag to its path, logging loudly on a real store error (as opposed to
+// an unknown project) — the string-returning callers can't thread one, so it must surface here.
 func (h *Hub) projectPath(project string) (string, bool) {
 	path, ok, err := h.store.ProjectPath(project)
 	if err != nil {
@@ -268,8 +216,7 @@ func (h *Hub) projectPath(project string) (string, bool) {
 	return path, ok
 }
 
-// repoName is a project's short human label (its directory name), resolved from the
-// registry; falls back to the tag when the path is unknown.
+// repoName is a project's directory name from the registry, falling back to the tag.
 func (h *Hub) repoName(project string) string {
 	if path, ok := h.projectPath(project); ok {
 		return filepath.Base(path)
@@ -283,33 +230,9 @@ func (h *Hub) container(project, name string) string {
 	return Container(root, name)
 }
 
-// runtimeState captures an agent's Claude pane and classifies what Claude is doing
-// right now — "busy" (computing), "blocked" (waiting for user input), "idle" (stopped
-// at the prompt) — or "" when it can't tell (plain shell, transcript view, boot).
-// Bounded by ctx (it reuses the board probe's), so a wedged capture can't stall the read.
-func (h *Hub) runtimeState(ctx context.Context, project, name string) string {
-	out, err := container.ExecContext(ctx, h.container(project, name), append([]string{"tmux"}, tmux.CapturePane(name, 0, false)...)...) // plain: the text is pattern-matched
-	if err != nil {
-		return ""
-	}
-	switch detect.ClaudeState(string(out)) {
-	case detect.Working:
-		return "working"
-	case detect.Blocked:
-		return "blocked"
-	case detect.Idle:
-		return "idle"
-	}
-	return "idle" // a shell (maintenance mode) or unrecognized screen = not doing anything
-}
-
-// overlayRuntime folds Claude's live runtime (working|blocked|idle|"") into the
-// workflow status, three states in herdr's own vocabulary: "blocked" = needs your
-// attention now (any phase); "working" = busy; "idle" = not doing anything (no task,
-// stalled at the prompt, or dropped to the maintenance shell). The live state
-// replaces a plain working/idle phase; the meaningful workflow phases
-// (submitted/collab/resolving/reviewing/planning) are kept, unless Claude is blocked.
-// runtime "" (probe failed) leaves the phase untouched.
+// overlayRuntime folds Claude's live runtime into the workflow status: "blocked" = needs you now (any
+// phase), "working" = busy, "idle" = nothing doing. It replaces a plain working/idle phase but keeps
+// the meaningful ones; runtime "" (probe failed) changes nothing.
 func overlayRuntime(status, runtime string) string {
 	switch runtime {
 	case "blocked":
@@ -322,174 +245,10 @@ func overlayRuntime(status, runtime string) string {
 	return status
 }
 
-// launchDiagnostic reports WHY a just-launched agent isn't observed up, so a
-// timeout is actionable instead of a shrug. It re-runs the two liveness probes
-// through the runtime, capturing their errors: the running check, then the tmux
-// session check inside the container. Whichever fails (and its error) is almost
-// always the real cause — a runtime that can't answer, or a session that never
-// started.
-func (h *Hub) launchDiagnostic(project, name string) string {
-	c := h.container(project, name)
-	if !container.Running(c) {
-		return fmt.Sprintf("the runtime does not report container %s as running [%s]", c,
-			container.Diagnose(context.Background(), c))
-	}
-	if out, err := container.Exec(c, append([]string{"tmux"}, tmux.HasSession(name)...)...); err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg == "" {
-			msg = err.Error()
-		}
-		return fmt.Sprintf("container is running but its tmux session check failed: %s", msg)
-	}
-	return "container and session both answer now — the liveness checks had been failing transiently"
-}
-
-// AgentDiagnostic reports, as one human string, what BOTH liveness probes observe
-// for an agent — the running check and the tmux session check — each with its real
-// result rather than the single "down" the board collapses them into. The session
-// exec is time-bounded, so a WEDGED exec (which otherwise silently reads as "down")
-// is reported as a timeout, not a hang. Behind `agent info --debug`, so a "down"
-// that contradicts a live container is explainable on demand.
-func (h *Hub) AgentDiagnostic(project, name string) string {
-	c := h.container(project, name)
-	var b strings.Builder
-	fmt.Fprintf(&b, "container:      %s\n", c)
-	fmt.Fprintf(&b, "running check:  %s\n", container.Diagnose(context.Background(), c))
-
-	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
-	defer cancel()
-	out, err := container.ExecContext(ctx, c, append([]string{"tmux"}, tmux.HasSession(name)...)...)
-	switch {
-	case ctx.Err() == context.DeadlineExceeded:
-		fmt.Fprintf(&b, "session check:  TIMED OUT after %s — `tmux has-session` in the container did not return (exec is wedged); this is why liveness reads 'down'\n", probeTimeout)
-	case err != nil:
-		msg := strings.TrimSpace(string(out))
-		if msg == "" {
-			msg = err.Error()
-		}
-		fmt.Fprintf(&b, "session check:  FAILED: %s\n", msg)
-	default:
-		fmt.Fprintf(&b, "session check:  ok — tmux session %q answers\n", name)
-	}
-	return b.String()
-}
-
-// agentAlive reports whether an agent is running (pod up and tmux session live).
-func (h *Hub) agentAlive(project, name string) bool {
-	return h.agentAliveCtx(context.Background(), project, name)
-}
-
-// agentAliveCtx is agentAlive with each podman probe bounded by ctx, so a wedged
-// pod times out to "down" instead of blocking. Used by the board read.
-func (h *Hub) agentAliveCtx(ctx context.Context, project, name string) bool {
-	return container.RunningContext(ctx, h.container(project, name)) && h.sessionAliveCtx(ctx, project, name)
-}
-
-// Clients lists the humans attached to an agent's tmux session (dial-ins). Errors
-// when the agent isn't running. The headless read behind both `agent info` and the
-// TUI detail view, so they show the same thing.
-func (h *Hub) Clients(project, name string) ([]ClientView, error) {
-	// Bounded: a wedged `container exec` must not hang the caller forever (it once
-	// hung `agent info` indefinitely). On timeout the probe degrades to "not running".
-	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
-	defer cancel()
-	cs, ok := h.clientsCtx(ctx, project, name)
-	if !ok {
-		return nil, fmt.Errorf("agent %q is not running", name)
-	}
-	return cs, nil
-}
-
-// clientsCtx parses `tmux list-clients` for the agent's session, bounded by ctx.
-// ok=false when the session is absent (so it also serves as a liveness probe).
-func (h *Hub) clientsCtx(ctx context.Context, project, name string) (cs []ClientView, ok bool) {
-	out, err := container.ExecContext(ctx, h.container(project, name), append([]string{"tmux"}, tmux.ListClients(name)...)...)
-	if err != nil {
-		return nil, false
-	}
-	return parseClients(string(out)), true
-}
-
-// parseClients turns list-clients output (one "tty width height readonly" line per
-// client) into ClientViews. Malformed lines are skipped rather than failing the
-// whole read.
-func parseClients(out string) []ClientView {
-	var cs []ClientView
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		f := strings.Fields(line)
-		if len(f) < 4 {
-			continue
-		}
-		w, _ := strconv.Atoi(f[1])
-		ht, _ := strconv.Atoi(f[2])
-		cs = append(cs, ClientView{TTY: f[0], Width: w, Height: ht, ReadOnly: f[3] == "1"})
-	}
-	return cs
-}
-
-// FormatClients renders attached clients for a human — shared by the CLI's
-// `agent info` and the TUI detail view so both read identically. Empty when
-// nobody's attached.
-func FormatClients(cs []ClientView) string {
-	if len(cs) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "clients:   %d attached\n", len(cs))
-	for _, c := range cs {
-		mode := "read-write"
-		if c.ReadOnly {
-			mode = "read-only"
-		}
-		fmt.Fprintf(&b, "  %s  %dx%d  %s\n", c.TTY, c.Width, c.Height, mode)
-	}
-	return b.String()
-}
-
-// sessionAlive reports whether the agent's tmux session is up inside its pod.
-func (h *Hub) sessionAlive(project, name string) bool {
-	return h.sessionAliveCtx(context.Background(), project, name)
-}
-
-// sessionAliveCtx is sessionAlive bounded by ctx.
-func (h *Hub) sessionAliveCtx(ctx context.Context, project, name string) bool {
-	_, err := container.ExecContext(ctx, h.container(project, name), append([]string{"tmux"}, tmux.HasSession(name)...)...)
-	return err == nil
-}
-
-// AgentPane returns the last `lines` rows of what the agent is showing — the live
-// tmux screen once up, else the container's startup logs, else the captured launch
-// output. Empty when truly down.
-func (h *Hub) AgentPane(project, name string, lines int) (string, error) {
-	if h.sessionAlive(project, name) {
-		out, err := container.Exec(h.container(project, name), append([]string{"tmux"}, tmux.CapturePane(name, lines, true)...)...) // colour: the preview renders ANSI
-		if err != nil {
-			return "", err
-		}
-		return string(out), nil
-	}
-	if logs := container.Logs(h.container(project, name), lines); logs != "" {
-		return logs, nil
-	}
-	return h.launchOutput(project, name), nil
-}
-
-// PodInfo returns a short summary of an agent's podman container for the Agents-tab
-// pod view.
-func (h *Hub) PodInfo(project, name string) (string, error) {
-	c := h.container(project, name)
-	header := fmt.Sprintf("engine:    %s\ncontainer: %s\n\n", container.Name(), c)
-	if info := container.Info(c); info != "" {
-		return header + info, nil
-	}
-	return header + "(no container — agent is down)", nil
-}
-
-// Refresh re-syncs the selected project's tasks and notifies watchers. It's the
-// [r]efresh hotkey / explicit user refresh, so it forces the GitHub scan past its
-// TTL — the one place we want fresh issues on demand.
+// Refresh re-syncs tasks and notifies watchers; being the user's explicit refresh it forces the
+// GitHub scan past its TTL.
 func (h *Hub) Refresh(project string) error {
-	err := h.ForceSyncTasks(project)
+	err := h.wf.ForceSyncTasks(project)
 	h.notify()
 	return err
 }
@@ -518,8 +277,7 @@ type bus struct {
 
 func newBus() *bus { return &bus{subs: map[chan struct{}]bool{}} }
 
-// subscribe returns a buffered channel that ticks on every notify, plus an
-// unsubscribe func.
+// subscribe returns a buffered channel that ticks on every notify, plus an unsubscribe func.
 func (b *bus) subscribe() (chan struct{}, func()) {
 	ch := make(chan struct{}, 1)
 	b.mu.Lock()
@@ -533,8 +291,7 @@ func (b *bus) subscribe() (chan struct{}, func()) {
 	}
 }
 
-// publish wakes every subscriber (non-blocking; a full buffer already means
-// "refresh pending").
+// publish wakes every subscriber (non-blocking; a full buffer already means "refresh pending").
 func (b *bus) publish() {
 	b.mu.Lock()
 	defer b.mu.Unlock()

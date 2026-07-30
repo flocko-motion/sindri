@@ -1,11 +1,11 @@
 // package: hub/registry / registry
 // type:    logic (the state-filtered command surface — the "browser" menu)
 // job:     define the set of hub-side verbs an agent may run and filter them by
-//          the caller's role and state, so a command that is not currently valid
-//          is invisible rather than rejected. This filter is the heart of the
-//          browser design (D-hub): `GET /commands` returns Available(caller).
+// the caller's role and state, so a command that is not currently valid
+// is invisible rather than rejected. This filter is the heart of the
+// browser design (D-hub): `GET /commands` returns Available(caller).
 // limits:  single-owner (only the hub builds/serves a Registry); pure types +
-//          filtering. The Run closures are supplied by the hub (no hub import).
+// filtering. The Run closures are supplied by the hub (no hub import).
 package registry
 
 import (

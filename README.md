@@ -15,32 +15,32 @@ Download the latest release and install it — a one-time step (after that,
 `sindri upgrade` and the daily check keep you current). Both platforms install the
 same binaries; pick your OS.
 
-### Linux (`.deb`)
+### Linux and macOS (tarball → `~/.local/bin`)
 
-Grab the `.deb` from the
-[releases page](https://github.com/flocko-motion/sindri/releases/latest), or pull
-the latest from the command line:
-
-```bash
-url=$(curl -fsSL https://api.github.com/repos/flocko-motion/sindri/releases/latest | grep -o 'https://[^"]*_amd64\.deb' | head -1)
-curl -fsSL "$url" -o /tmp/sindri.deb && sudo apt install -y /tmp/sindri.deb && rm -f /tmp/sindri.deb
-```
-
-### macOS (tarball → `~/.local/bin`)
-
-Download the tarball for your Mac (Apple Silicon or Intel), extract it, and run the
-bundled `install.sh` — it installs the binaries to `~/.local/bin` and clears the
-Gatekeeper quarantine on the unsigned binaries:
+Download the tarball for your platform, extract it, and run the bundled `install.sh`
+— it installs the binaries to `~/.local/bin` (and clears the Gatekeeper quarantine on
+macOS, where the binaries are unsigned):
 
 ```bash
-arch=$(uname -m); [ "$arch" = x86_64 ] && arch=amd64
-url=$(curl -fsSL https://api.github.com/repos/flocko-motion/sindri/releases/latest | grep -o "https://[^\"]*_darwin_${arch}\.tar\.gz" | head -1)
-curl -fsSL "$url" -o /tmp/sindri.tar.gz && tar -C /tmp -xzf /tmp/sindri.tar.gz && /tmp/sindri_*_darwin_${arch}/install.sh
+os=$(uname -s | tr '[:upper:]' '[:lower:]')
+arch=$(uname -m); [ "$arch" = x86_64 ] && arch=amd64; [ "$arch" = aarch64 ] && arch=arm64
+url=$(curl -fsSL https://api.github.com/repos/flocko-motion/sindri/releases/latest | grep -o "https://[^\"]*_${os}_${arch}\.tar\.gz" | head -1)
+curl -fsSL "$url" -o /tmp/sindri.tar.gz && tar -C /tmp -xzf /tmp/sindri.tar.gz && /tmp/sindri_*_${os}_${arch}/install.sh
 ```
+
+Or grab it from the
+[releases page](https://github.com/flocko-motion/sindri/releases/latest).
 
 Ensure `~/.local/bin` is on your `PATH` (the installer says so if it isn't). podman
 runs in a VM on macOS — `podman machine init` once, then `podman machine start`
 (sindri auto-starts it after that).
+
+**`~/.local/bin` is the only install location, deliberately.** There is no `.deb` or
+other system package: one would land in `/usr/bin` and then shadow — or be shadowed
+by — this install depending on PATH order, leaving two builds that drift apart
+silently while the hub mounts tools from beside whichever it happens to be. Sindri
+warns if it finds a second copy of itself on your PATH. If you installed an older
+`.deb`, remove it once with `sudo apt remove sindri`.
 
 That's it. The release bundles everything sindri ships — the `sindri` CLI/TUI, the
 agent browser `sindri-worker` (it runs as `sindri` inside a pod), the `brokkr` toolbelt (code map + linters),
@@ -62,10 +62,10 @@ spec-driven workflow, and the Go toolchain for the `deadcode` linter.
 
 Sindri checks for a newer release once a day (and on demand via **`sindri
 upgrade`**); when there is one it points you at **`sindri-do-upgrade`** — a
-one-shot script it drops in `~/.local/bin`. On Linux it fetches and installs the
-latest `.deb`; on macOS it fetches the latest tarball and replaces the binaries in
-place. (The check can't replace the running binary itself, so the install is a
-separate script.)
+one-shot script it drops in `~/.local/bin`. It fetches the latest tarball for your
+platform and replaces the binaries in place, next to whichever `sindri` is running,
+needing no elevated privileges. (The check can't replace the running binary itself,
+so the install is a separate script.)
 
 ---
 
@@ -198,8 +198,8 @@ review gate between them. The *same* flow covers two styles:
 - **Interactive** — feed subtasks live and ask for a PR at milestone moments.
 
 ```bash
-# Build the feature: a parent (marked `collab`) with children.
-sindri task new "Login feature" -t epic --labels collab          # → td-LOGIN
+# Build the feature: a parent with children. One agent takes the whole package.
+sindri task new "Login feature" -t epic                          # → td-LOGIN
 sindri task new "Form UI"   --parent td-LOGIN
 sindri task new "Validation" --parent td-LOGIN
 ```
@@ -252,8 +252,8 @@ sindri task new "Fix the parser" -t bug -p P1      # type: bug|feature|task|epic
 sindri task new "Sub-thing" --parent td-abc123     # a child (subtask)
 sindri task list
 sindri task info td-abc123
-sindri task edit td-abc123 --labels collab         # mark a parent for the collaborative flow
-sindri task priority td-abc123 P0
+sindri task edit td-abc123 --parent td-LOGIN       # move a task into a package
+sindri task priority td-abc123 P0                  # a priority is what releases it to a worker
 ```
 
 A **planner** proposes tasks that you gate: a proposed task is *pending* until you
@@ -284,7 +284,10 @@ brokkr lint openspec       # validate openspec specs (skips if unused/uninstalle
   only its last N lines, and end with a **`=== exit: <code> ===`** marker — the
   exit status inline, so you (or an agent) never append `echo "$?"`.
 - **`deadcode`** always analyses test packages (tests are live code), and skips
-  with a note if the `go` toolchain isn't on PATH.
+  with a note if the `go` toolchain isn't on PATH. If the toolchain is *older* than
+  `go.mod` requires — the go command then refuses to load anything — it says so and
+  names the fix instead of reporting a broken build: in an agent pod that's
+  **`go-upgrade`**, which installs the toolchain `go.mod` asks for (see below).
 - **`comments`** enforces the project convention: every non-test `.go` file opens
   with a four-field header (`package` / `type` / `job` / `limits`, the block
   `brokkr map` reads), and every exported function and type has a doc comment. On
@@ -300,14 +303,39 @@ the header plus each type/func with its doc and signature (bodies omitted).
 ```bash
 brokkr map                              # whole tree
 brokkr map internal/hub internal/tui    # several paths at once
-brokkr map --grep "func Merge"          # only decls whose source matches
 brokkr map internal/tui --file tab_prs  # only files whose path matches
 brokkr map --depth 1                    # bound how deep it descends
 brokkr map --full                       # don't reduce, however long
 ```
 
-If the full map runs past a line budget (default 1000, `--max`), it reduces to
-per-file headers only and tells you so — narrow the scope or pass `--full`.
+Two searches, answering two different questions (both take a regex, both are
+mutually exclusive):
+
+```bash
+brokkr map --find "func Merge"   # context: the DECLARATIONS enclosing a match
+brokkr map --grep "func Merge"   # lines: the matching LINES, tagged with their decl
+```
+
+`--find` answers *what is this part of?* — it narrows the map to the types and
+funcs that enclose a hit (plus the `var`/`const` that declares it, and any match
+in the arch header, so a hit is never reported without a location).
+
+`--grep` answers *where exactly is this?* — `path:line: text`, one match per line,
+each tagged with the declaration it sits in:
+
+```
+codemap.go:27: var skipDirs = map[string]bool{…}  « var skipDirs
+codemap.go:162: if skipDirs[d.Name()] {           « func write
+```
+
+That tag is the reason not to pipe a map through grep: you get grep's locations
+*and* the structural context in one pass.
+
+Both are smart-case (a lowercase pattern matches insensitively; any uppercase
+letter makes it case-sensitive). If the full map runs past a line budget (default
+1000, `--max`), it reduces to per-file headers only and tells you so — narrow the
+scope or pass `--full`. Over-budget `--grep` truncates and reports the remainder
+instead, since headers are no answer to a line search.
 
 ---
 
@@ -321,7 +349,7 @@ Orchestration is `sindri <category> <action>`; the toolbelt is the separate
 | `agent` | `list` · `new [name] [--role worker\|reviewer\|planner]` · `start <name>` · `stop <name>` · `delete <name>` · `tell <name> "msg"` · `attach <name>` · `info <name>` · `pane <name>` |
 | `task` | `list` · `new <title> [-t -p -d --labels --parent]` · `info <id>` · `edit <id>` · `priority <id> <P0..P4>` · `approve <id>` · `reject <id> "why"` · `unassign <id>` |
 | `pr` | `list` · `info <id>` · `lint <id>` · `verify <id>` · `review <id> "…"` · `approve <id>` · `reject <id> "…"` · `milestone <agent>` · `merge <id>` |
-| `brokkr` | `map [paths…] [--grep --file --depth]` · `lint [deadcode\|loc\|comments\|openspec]` (none = all) |
+| `brokkr` | `map [paths…] [--find --grep --file --depth]` · `lint [deadcode\|loc\|comments\|openspec]` (none = all) |
 
 Inside a pod the agent talks to the hub through a single command, **`sindri`**
 (the browser binary, presented under that name in the isolated container) — run
@@ -377,8 +405,10 @@ github:
 ```
 
 - **`architecture`** — repo-relative path to the doc the reviewer is told to read
-  before every verdict. When set it must exist; when unset, sindri seeds a placeholder
-  `ARCHITECTURE.md`.
+  before every verdict, and which is injected into every agent's brief. When set it must
+  exist. When unset sindri looks for `ARCHITECTURE.md`; if there's none it recommends —
+  at hub startup, and in the Repos tab detail — that you point it at yours. It never
+  creates the file.
 - **`containerfile`** — repo-relative agent-image recipe (see the next section).
 - **`review_prompt`** — repo-relative file whose contents replace the default reviewer
   prompt.
@@ -423,6 +453,16 @@ your layers. Keep the **agent contract** intact:
 - `/usr/local/bin/sindri` pointing at the mounted worker;
 - the `sindri-agent` entrypoint and `WORKDIR /workspace`.
 
+**Go toolchain in the pod.** The image's Go is whatever `golang:latest` had when it was
+built, and that base pins `GOTOOLCHAIN=local` — so a repo whose `go.mod` moves ahead of
+it makes every go command in the pod refuse to run ("go.mod requires go >= X"), which
+looks like a broken build and isn't one. The image carries **`go-upgrade`** for exactly
+that: it fetches the toolchain `go.mod` asks for (through go's own checksum-verified
+module path, no root needed) and links it into `~/.local/bin`, which the recipe puts
+first on `PATH`. Run it bare (`go-upgrade`), or with `latest` or an explicit `1.26.5`.
+`brokkr lint deadcode` names it when it hits the refusal, so an agent gets the fix with
+the failure; `sindri agent rebuild` is the other way out (a newer base image).
+
 A custom recipe builds a content-derived tag `sindri-agent:custom-<hash>` (repos with
 different recipes never clobber each other's tag or rebuild-thrash); the default stays
 `sindri-agent:latest`. Editing the recipe (or a new ISO week) triggers a rebuild;
@@ -437,7 +477,7 @@ track).
 
 ## Building from source
 
-For hacking on sindri (end users just install the `.deb`). Needs Go, plus `td`
+For hacking on sindri (end users just install the tarball). Needs Go, plus `td`
 and `yq` on `PATH` (they get bundled into the build).
 
 ```bash
@@ -446,7 +486,7 @@ make install   # build sindri + sindri-worker + brokkr, install to ~/.local/bin
 make all       # + build the agent image too (needs podman)
 make verify    # run the linters (the gate; release runs this first)
 make check     # build + test + lint — the quality gate
-make deb       # build the .deb into bin/
+make tarball   # build the release tarball into dist/
 make release <major|minor|patch>   # lint, then release: push, open+merge a PR (gh), tag the merged default branch, return you to your branch (breaking|feature|fix aliases too)
 ```
 

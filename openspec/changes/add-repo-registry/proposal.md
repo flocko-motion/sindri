@@ -21,7 +21,7 @@ intentional, and switching is frictionless and visible.
 - **A `repo` command set** — `sindri repo init | list | info | forget`, on both the
   CLI and the TUI, to manage the registry the hub already keeps.
 - **`repo init` is additive, not a gate.** It registers cwd's repo eagerly and
-  scaffolds a committed `.sindri/config.yaml` (and seeds `ARCHITECTURE.md`) — a
+  scaffolds a committed `.sindri/config.yaml` — a
   clean "this repo is set up" step. A repo you never `init` still self-registers on
   first use, exactly as today. Nothing is required; `init` is a convenience.
 - **`repo forget` gives up management without deleting the repo.** It deletes the

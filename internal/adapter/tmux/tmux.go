@@ -1,9 +1,9 @@
 // package: adapter/tmux / tmux
 // type:    adapter (external tool: tmux)
 // job:     construct tmux command argv — new-session, send-keys (the inbound
-//          injection primitive), attach, capture-pane. Pure argv builders:
-//          tmux runs *inside* an agent's pod, so execution is the pod adapter's
-//          job (host composes pod.Exec(pod, tmux.X(...)...)).
+// injection primitive), attach, capture-pane. Pure argv builders:
+// tmux runs *inside* an agent's pod, so execution is the pod adapter's
+// job (host composes pod.Exec(pod, tmux.X(...)...)).
 // limits:  no execution here; knows nothing of pods, agents, or the hub.
 package tmux
 
@@ -17,6 +17,15 @@ func SendText(session, text string) [][]string {
 		{"send-keys", "-t", session, "-l", "--", text},
 		{"send-keys", "-t", session, "Enter"},
 	}
+}
+
+// Interrupt builds `tmux send-keys -t <session> Escape` — a bare Escape keypress, the
+// key Claude Code (and most TUIs) treat as "abort the current operation". Sent as a
+// key NAME (not -l literal), so tmux delivers a real ESC rather than the letters
+// "E","s","c". Used to stop an agent's in-flight work before telling it its task is
+// gone, so the message lands on an idle prompt.
+func Interrupt(session string) []string {
+	return []string{"send-keys", "-t", session, "Escape"}
 }
 
 // Attach builds `tmux attach-session -t <session>` — the human dial-in. readOnly
