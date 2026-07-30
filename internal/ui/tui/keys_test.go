@@ -199,3 +199,25 @@ func footerOf(t *testing.T, scope keyScope) string {
 	t.Helper()
 	return newModel(nil, nil, "/r/one").footerFor(scope)
 }
+
+// TestNewMeetingKeyIsOfferedAndConfirmed: N means "new" on every tab that has one, and on the
+// Meeting tab it clears history for everyone — so it must be advertised, and it must ask first.
+func TestNewMeetingKeyIsOfferedAndConfirmed(t *testing.T) {
+	if got := footerOf(t, scopeChat); !strings.Contains(got, keyNew+" new meeting") {
+		t.Errorf("the Meeting footer should offer %q:\n%s", keyNew, got)
+	}
+
+	m := newModel(nil, nil, "")
+	m.tab = 4 // Meeting
+	m.onKey(keyNew)
+	if !m.choice.active {
+		t.Fatal("N must confirm before clearing the shared history, not act immediately")
+	}
+	if !strings.Contains(m.choice.title, "new meeting") {
+		t.Errorf("the confirm should name what it does, got %q", m.choice.title)
+	}
+	// Cancel is first, so a stray Enter on the modal cannot wipe the room.
+	if len(m.choice.values) == 0 || m.choice.values[0] != "cancel" {
+		t.Errorf("cancel must be the default option, got %v", m.choice.values)
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +37,7 @@ const (
 	transcriptLimit = 200              // how much history a snapshot / live view carries
 	presenceTTL     = 20 * time.Second // room stays unlocked this long after the last heartbeat
 	maxLen          = 4000             // per-message cap (deep talk, but not a novel / huge inject)
+	sep             = " ⏎ "            // between messages of a one-line catch-up (a real newline would submit)
 
 )
 
@@ -49,6 +51,9 @@ const (
 	MsgWelcome  = "[hub] You've been added to the meeting room. Use `sindri meeting <message>` to emit a message to everybody in the room; you'll also receive the others' messages here, prefixed [meeting]. Use it to coordinate issues with the other agents — tell them what you're working on and listen to what they're working on. The user will lead the discussion to answer an open question as a team."
 	MsgReminder = "[hub] You're in the meeting room: `sindri meeting <message>` talks to everyone in the room, and their messages arrive here prefixed [meeting]."
 	MsgRemoved  = "[hub] You've been removed from the meeting room — `sindri meeting` is no longer available. Carry on with your work."
+	// MsgNewMeeting is announced, not silent: members hold the old discussion in their own context,
+	// so being told the shared slate is clean is what stops them answering the previous meeting.
+	MsgNewMeeting = "a new meeting started — the shared history was cleared. Earlier messages are gone from the room, so restate anything that still matters instead of assuming it carried over."
 )
 
 // Participant markers live in the core, not a UI package: they are stamped into the line
@@ -106,7 +111,60 @@ func (s *Service) Add(project, name string) error {
 		return err
 	}
 	s.deliver(project, name, MsgWelcome)
+	// Before the join is announced, so the newcomer reads the room in order: what was already
+	// said, then its own arrival.
+	if line, ok := s.catchUp(); ok {
+		s.deliver(project, name, line)
+	}
 	_, err = s.broadcast("", system, name+" joined the meeting room") // announce (IRC-style)
+	return err
+}
+
+// catchUp renders the room's history for a newcomer, oldest first, and reports whether there was
+// any. Without it a joiner restarts a discussion the room already had — the reason to hand it the
+// transcript rather than just a welcome.
+//
+// ONE line, because a delivery is typed into a session: embedded newlines would submit each line
+// as its own prompt. Bounded by the same cap a single message has, dropping the OLDEST first —
+// what was said most recently is what the newcomer is about to be asked about.
+func (s *Service) catchUp() (string, bool) {
+	msgs, err := s.store.ChatTranscript(transcriptLimit)
+	if err != nil || len(msgs) == 0 {
+		return "", false
+	}
+	const head = "[hub] Catching you up on the meeting so far — "
+	var (
+		kept    []string
+		budget  = maxLen - utf8.RuneCountInString(head)
+		omitted int
+	)
+	for i := len(msgs) - 1; i >= 0; i-- {
+		entry := fmt.Sprintf("%s %s: %s", Icon(msgs[i].Sender), msgs[i].Sender, msgs[i].Body)
+		if n := utf8.RuneCountInString(entry) + len(sep); n > budget && len(kept) > 0 {
+			omitted = i + 1 // everything at or before i never made it in
+			break
+		}
+		budget -= utf8.RuneCountInString(entry) + len(sep)
+		kept = append(kept, entry)
+	}
+	slices.Reverse(kept) // walked newest-first for the budget; read oldest-first
+	line := head + fmt.Sprintf("%d earlier message(s)", len(msgs)) + ". "
+	if omitted > 0 {
+		line += fmt.Sprintf("(%d oldest omitted for length.) ", omitted)
+	}
+	return line + strings.Join(kept, sep), true
+}
+
+// NewMeeting clears the transcript and announces the fresh start.
+//
+// Membership is deliberately kept: "new meeting" is about the history everyone shares, and
+// dropping the roster would inject a removal notice into every agent and leave the user re-adding
+// them by hand. Clearing is irreversible, so the caller is the one that confirms.
+func (s *Service) NewMeeting() error {
+	if _, err := s.store.ChatClearTranscript(); err != nil {
+		return err
+	}
+	_, err := s.broadcast("", system, MsgNewMeeting)
 	return err
 }
 

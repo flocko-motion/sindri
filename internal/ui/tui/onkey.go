@@ -162,12 +162,15 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.markMerging(id) // show "merging" on the row at once, before the hub confirms
 			return m.mergeCmd(id)
 		}
-	case keyNew: // new task (tasks) / new agent (agents)
+	case keyNew: // new task (tasks) / new agent (agents) / new meeting (meeting)
 		if m.tab == 0 {
 			m.openTaskForm(false, store.Task{})
 			return nil
 		} else if m.tab == 1 { // agents: pick the role, then auto-name after a dwarf
 			m.openNewAgentChoice()
+			return nil
+		} else if m.tab == 4 { // meeting: clear the shared history and start fresh
+			m.openNewMeetingChoice()
 			return nil
 		}
 	case keyEdit: // edit what is selected, each tab in its own natural way

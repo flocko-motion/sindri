@@ -123,8 +123,9 @@ var keymap = []binding{
 	{keyConfig, lbl("config"), scopeRepos},
 	{keyDelete, lbl("forget"), scopeRepos},
 
-	// Chat (membership is curated from the CLI: `sindri chat add/remove`).
+	// Chat (membership is curated from the CLI: `sindri meeting add/remove`).
 	{"enter", lbl("compose"), scopeChat},
+	{keyNew, lbl("new meeting"), scopeChat},
 }
 
 // footerFor renders the "key label · key label" hints for a scope from the keymap.

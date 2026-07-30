@@ -45,6 +45,7 @@ type backend interface {
 	ChatAdd(name string) error
 	ChatRemove(name string) error
 	ChatSay(msg string) error
+	NewMeeting() error
 	ChatHeartbeat() error
 	Chat() (hub.ChatView, error)
 	ChatWatch(ctx context.Context) (<-chan hub.ChatView, error)

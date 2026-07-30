@@ -108,6 +108,21 @@ func (s *Store) ChatAppend(sender, body string) (ChatMessage, error) {
 	return ChatMessage{ID: id, Sender: sender, Body: body, TS: ts}, nil
 }
 
+// ChatClearTranscript deletes the room transcript, leaving membership alone: a new meeting resets
+// the shared history, not who is in the room. Reports how many lines were dropped, so the caller
+// can say whether there was anything to clear.
+func (s *Store) ChatClearTranscript() (int, error) {
+	res, err := s.db.Exec(`DELETE FROM chat_log`)
+	if err != nil {
+		return 0, fmt.Errorf("chat clear: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("chat clear: %w", err)
+	}
+	return int(n), nil
+}
+
 // ChatTranscript returns the most recent limit messages in chronological order
 // (oldest first). A non-positive limit returns the whole transcript.
 func (s *Store) ChatTranscript(limit int) ([]ChatMessage, error) {
