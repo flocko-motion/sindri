@@ -104,6 +104,33 @@ func TestCommentsHeaderExtraCommentsNotCounted(t *testing.T) {
 	}
 }
 
+// TestCommentsRejectsAnInventedField: the header is exactly four fields. A fifth would be somewhere
+// to park prose the length rules cannot see — and it already misreports, because brokkr folds an
+// unknown `name:` into the field above it: one 427-char `limits` was really limits plus a `dev:`.
+func TestCommentsRejectsAnInventedField(t *testing.T) {
+	out := runComments(t, map[string]string{
+		"x.go": "// package: x\n// type:    logic\n// job:     does a thing.\n// limits:  none.\n" +
+			"// dev:     notes that belong nowhere.\npackage x\n",
+	})
+	if !strings.Contains(out, `non-standard header field "dev:"`) {
+		t.Fatalf("an invented fifth field must be rejected, got:\n%s", out)
+	}
+}
+
+// TestCommentsAllowsAColonMidSentence guards the false positive the first version shipped with: prose
+// wrapped so that a lowercase word plus colon lands at the start of a line. "…the attach. Client /
+// side: it captures…" read as a fifth field named `side:` in a real file.
+func TestCommentsAllowsAColonMidSentence(t *testing.T) {
+	out := runComments(t, map[string]string{
+		"x.go": "// package: x\n// type:    logic\n// job:     does a thing.\n" +
+			"// limits:  best-effort, and probe failures keep the last state. Client\n" +
+			"// side: it captures the pane directly, not over the socket.\npackage x\n",
+	})
+	if strings.Contains(out, "non-standard header field") {
+		t.Fatalf("a wrapped sentence is not a field, got:\n%s", out)
+	}
+}
+
 func TestCommentsMethodReceiverVisibility(t *testing.T) {
 	out := runComments(t, map[string]string{
 		"x.go": goodHeader + `

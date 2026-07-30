@@ -101,6 +101,9 @@ func checkTSHeader(path string) []commentViol {
 		return []commentViol{{path, 1, fmt.Sprintf("%s: missing canonical header (a package/type/job/limits comment block at the top of the file)", path)}}
 	}
 	var viols []commentViol
+	for _, stray := range strayFields(header.Text) {
+		viols = append(viols, commentViol{path, header.Line, strayFieldMsg(path, header.Line, stray)})
+	}
 	fields := headerFieldsFromLines(header.Text)
 	var missing []string
 	for _, f := range canonicalHeaderFields {
@@ -150,6 +153,51 @@ func headerFieldsFromLines(lines []string) map[string]string {
 	return fields
 }
 
+// strayFieldMsg rejects an invented field: a fifth is prose the length rules cannot see.
+func strayFieldMsg(path string, line int, field string) string {
+	return fmt.Sprintf("%s:%d: non-standard header field %q — the header is exactly %s. Fold it into "+
+		"one of those or drop it; an extra field is prose the length rules cannot see.",
+		path, line, field, strings.Join(canonicalHeaderFields, "/"))
+}
+
+// strayFields finds labels that are not one of the four. An unknown `name:` folds into the field
+// above and inflates its length: a 427-char `limits` was limits plus a `dev:`.
+func strayFields(lines []string) []string {
+	var out []string
+	for i, l := range lines {
+		name, _, found := strings.Cut(strings.TrimSpace(l), ":")
+		if !found || name == "" || isHeaderFieldName(name) || !lowerWord(name) {
+			continue
+		}
+		// A real field opens an entry, so the line above finishes one. Without this, "…the attach.
+		// Client / side: it captures…" read `side:` as a fifth field.
+		if i > 0 && !endsClause(lines[i-1]) {
+			continue
+		}
+		out = append(out, name+":")
+	}
+	return out
+}
+
+// endsClause reports whether a line finishes what it was saying, so the next can open a new entry.
+func endsClause(line string) bool {
+	t := strings.TrimSpace(line)
+	if t == "" {
+		return true
+	}
+	return strings.HasSuffix(t, ".") || strings.HasSuffix(t, ")") || strings.HasSuffix(t, ":")
+}
+
+// lowerWord reports whether s is a single lowercase identifier — the shape a field label has.
+func lowerWord(s string) bool {
+	for _, r := range s {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' && r != '-' {
+			return false
+		}
+	}
+	return s != ""
+}
+
 // isHeaderFieldName reports whether a `name:` prefix is one of the canonical fields.
 func isHeaderFieldName(name string) bool {
 	n := strings.ToLower(strings.TrimSpace(name))
@@ -184,6 +232,12 @@ func checkFileComments(path string) []commentViol {
 		}
 	}
 
+	if f.Doc != nil {
+		ln := fset.Position(f.Doc.Pos()).Line
+		for _, stray := range strayFields(docLinesNorm(f.Doc)) {
+			viols = append(viols, commentViol{path, ln, strayFieldMsg(path, ln, stray)})
+		}
+	}
 	// Only the four field values are bounded; extra free-form header lines are free.
 	if f.Doc != nil {
 		ln := fset.Position(f.Doc.Pos()).Line
@@ -259,13 +313,8 @@ func missingHeaderFields(doc *ast.CommentGroup) []string {
 	return missing
 }
 
-// headerFieldContent maps each field to its value plus continuations, joined; a BLANK line ends it,
-// so free-form prose after one isn't charged to the field.
-//
-// Indentation is not what marks a continuation. It used to be, which tied the rule to headers
-// gofmt rewrites: a wrapped line indented under the field's text column reads as a code block, so
-// gofmt replaces it with a tab and blank `//` separators. Continuations must start at column 3 to
-// survive the formatter, and this counts them either way.
+// headerFieldContent joins each field with its continuations; a BLANK line ends it. Indentation does
+// NOT mark a continuation — an indented one is what gofmt rewrites, so the style is flush-left.
 func headerFieldContent(doc *ast.CommentGroup) map[string]string {
 	out := map[string]string{}
 	if doc == nil {

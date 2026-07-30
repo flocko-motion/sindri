@@ -105,8 +105,13 @@ func (e exitCodeError) Error() string { return "" }
 
 func main() {
 	root := &cobra.Command{
-		Use:     "brokkr",
-		Short:   "brokkr — sindri's toolbelt: code map + linters",
+		Use:   "brokkr",
+		Short: "brokkr — sindri's toolbelt: code map + linters",
+		Long: "brokkr — sindri's toolbelt: code map + linters.\n\n" +
+			"Built for AI coding agents: one self-contained command per feature. You should never " +
+			"need a compound command — no pipes, no `&&`, no grepping or awk-ing what it prints. " +
+			"The urge to reach for one is a SYMPTOM of a missing feature, not a problem to route " +
+			"around: say so, and it gets fixed.",
 		Version: versionLine(),
 		// Bare `brokkr` states its build, then what it can do. Via the command's writer, so
 		// --tail buffers it like everything else.

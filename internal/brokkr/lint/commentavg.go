@@ -148,9 +148,8 @@ func CommentAvg(roots []string, maxAvg float64, maxLine int, blocks bool, cap *C
 		}
 	}
 
-	// The ideal comes from the CONFIGURED maximum, so it is one number for the whole run. Only the
-	// max adapts per file (a thin sample earns slack) — an ideal that moved with it would read as
-	// "ideal 10.5" on a two-comment file.
+	// From the CONFIGURED max, so it is one number per run. Only the max adapts per file; an ideal
+	// that moved with it would read "ideal 10.5" on a two-comment file.
 	aim := aimFor(maxAvg)
 	// Worst mean first, so a capped run withholds the files that need it least.
 	sort.Slice(viols, func(i, j int) bool { return viols[i].avg > viols[j].avg })
@@ -196,8 +195,7 @@ func CommentAvg(roots []string, maxAvg float64, maxLine int, blocks bool, cap *C
 	return len(viols) > 0 || len(wide) > 0, nil
 }
 
-// wideLines reports comment lines wider than max, headers included — a long header field is as hard
-// to read as any other long line, and the trend rule excuses the header entirely.
+// wideLines reports lines wider than max, headers included — the trend rule excuses those entirely.
 func wideLines(path, src string, max int) []string {
 	var out []string
 	for i, raw := range strings.Split(src, "\n") {
@@ -206,9 +204,8 @@ func wideLines(path, src string, max int) []string {
 			continue
 		}
 		if n := len([]rune(raw)); n > max {
-			// Say HOW to wrap. An aligned continuation is the obvious-looking choice and the wrong
-			// one: gofmt reads an indented comment line as a code block and rewrites it with a tab
-			// plus blank `//` separators. The tool's advice and gofmt must not disagree.
+			// Say HOW to wrap: an aligned continuation looks right and is what gofmt rewrites, so
+			// the tool's advice would otherwise contradict the formatter.
 			out = append(out, fmt.Sprintf("%s:%d: comment line is %d chars (max %d) — wrap it, "+
 				"continuation FLUSH LEFT at column 3 (indenting it makes gofmt rewrite the comment)",
 				path, i+1, n, max))
@@ -217,8 +214,7 @@ func wideLines(path, src string, max int) []string {
 	return out
 }
 
-// blockRanges lists the line ranges to go and edit, longest first, up to max. Line numbers are what
-// you act on; the report used to print truncated prose instead, which found nothing for you.
+// blockRanges lists the ranges to edit, longest first — line numbers are what you act on.
 func blockRanges(over []CommentBlock, max int) string {
 	var b strings.Builder
 	for i, blk := range over {
@@ -234,8 +230,7 @@ func blockRanges(over []CommentBlock, max int) string {
 	return b.String()
 }
 
-// firstProse returns a block's first line that says something, for the excerpt that names which
-// comment is the long one. A block can open on a blank line, and "…" tells the reader nothing.
+// firstProse is a block's first line that says something; it can open on a blank one.
 func firstProse(b CommentBlock) string {
 	for _, t := range b.Text {
 		if strings.TrimSpace(t) != "" {

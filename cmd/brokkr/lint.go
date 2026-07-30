@@ -182,7 +182,7 @@ func runLinters(out io.Writer, which string, o lintOpts) (bool, error) {
 	case "js":
 		return runJS(out, o)
 	case "openspec":
-		return lintOpenspec(out), nil
+		return lintOpenspec(out, o.cap.Quiet()), nil
 	case "":
 		return runAll(out, o)
 	default:
@@ -230,7 +230,7 @@ func runAll(out io.Writer, o lintOpts) (bool, error) {
 		}},
 		{"gofmt", func(w io.Writer) (bool, error) { return lint.Gofmt(orDot(o.paths), o.cap, o.ig, w) }},
 		{"js", func(w io.Writer) (bool, error) { return runJS(w, o) }},
-		{"openspec", func(w io.Writer) (bool, error) { return lintOpenspec(w), nil }},
+		{"openspec", func(w io.Writer) (bool, error) { return lintOpenspec(w, o.cap.Quiet()), nil }},
 	}
 	var failed []string
 	for _, l := range linters {
@@ -311,13 +311,16 @@ Example:
 
 // lintOpenspec validates the project's specs, a no-op when openspec isn't used or installed. It
 // delegates to spec.Validate and names it, so this verdict is the submit gate's verdict.
-func lintOpenspec(w io.Writer) bool {
+func lintOpenspec(w io.Writer, quiet bool) bool {
 	root, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(w, "openspec: cannot determine working dir: %v\n", err)
 		return true
 	}
 	ok, out := spec.Validate(root)
+	if ok && quiet {
+		return false // a pass says nothing under -q; the delegated tool's summary is its own voice
+	}
 	if out != "" {
 		fmt.Fprint(w, out)
 		if !strings.HasSuffix(out, "\n") {

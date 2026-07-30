@@ -35,8 +35,7 @@ func LangOf(path string) Lang {
 	return LangNone
 }
 
-// IsTestFile reports whether a path is a test, by each ecosystem's convention. Tests are
-// exempt from the header rule: their subject is the file they test.
+// IsTestFile spots a test by each ecosystem's convention; its subject is the file it tests.
 func IsTestFile(path string) bool {
 	base := filepath.Base(path)
 	if strings.HasSuffix(base, "_test.go") {
@@ -65,11 +64,9 @@ type CommentBlock struct {
 }
 
 // ScanComments splits a file into comment blocks; only CODE ends one, so gaps can't halve a
-// measurement. Delimiters and //go: directives aren't prose; a bare `*` or `//` is.
-//
-// Lexical, so a comment marker inside a string literal counts as a comment. Tracking raw strings by
-// backtick parity was tried and reverted: backtick-heavy code (SQL) flipped the state and left 27
-// real comment lines in one file unmeasured. Over-counting an example is the safer error.
+// measurement. Delimiters and //go: directives aren't prose; a bare `*` or `//` is. Lexical, so a
+// marker inside a string counts: tracking raw strings by backtick parity was tried and reverted
+// after it left 27 real comment lines unmeasured. Over-counting an example is the safer error.
 func ScanComments(src string) []CommentBlock {
 	var out []CommentBlock
 	var cur *CommentBlock
@@ -134,8 +131,7 @@ func ScanComments(src string) []CommentBlock {
 	return out
 }
 
-// isGoDirective reports whether a line instructs the toolchain (//go:build, //go:embed) rather
-// than a reader. No space after the slashes is what separates one from prose mentioning it.
+// isGoDirective spots //go:build and friends; no space after the slashes separates one from prose.
 func isGoDirective(line string) bool { return strings.HasPrefix(line, "//go:") }
 
 // trimClose strips a trailing `*/`, reporting whether it was there. Removing it BEFORE the
@@ -147,8 +143,7 @@ func trimClose(s string) (string, bool) {
 	return s, false
 }
 
-// HeaderBlock is the file's header: the first comment block, provided nothing but blank lines
-// and imports/directives precede it. Returns false when the file opens with code instead.
+// HeaderBlock is the file's first comment block, or false when the file opens with code.
 func HeaderBlock(blocks []CommentBlock) (CommentBlock, bool) {
 	if len(blocks) == 0 {
 		return CommentBlock{}, false
@@ -156,8 +151,7 @@ func HeaderBlock(blocks []CommentBlock) (CommentBlock, bool) {
 	return blocks[0], true
 }
 
-// hasGoSources reports whether root contains any Go source, so a Go-specific analysis can skip
-// a project written in another language instead of failing it.
+// hasGoSources lets a Go-only analysis skip another language's project instead of failing it.
 func hasGoSources(root string) bool {
 	found := false
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
