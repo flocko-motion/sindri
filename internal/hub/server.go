@@ -295,6 +295,10 @@ func (h *Hub) Handler() http.Handler {
 		// executed by the hub; anything else is broadcast as the user.
 		writeJSON(w, okMsg{"sent"}, h.chat.UserMessage(req.Msg))
 	})
+	mux.HandleFunc("POST /chat/new", func(w http.ResponseWriter, r *http.Request) {
+		// Clears the shared history and announces it; membership survives.
+		writeJSON(w, okMsg{"new meeting"}, h.chat.NewMeeting())
+	})
 	mux.HandleFunc("POST /chat/heartbeat", func(w http.ResponseWriter, r *http.Request) {
 		h.chat.Heartbeat()
 		writeJSON(w, okMsg{"ok"}, nil)

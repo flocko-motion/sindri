@@ -16,16 +16,26 @@ import (
 	"unicode"
 )
 
-// smartCase compiles pat as a regexp, case-insensitively unless it carries an
-// uppercase letter — the ripgrep convention. A lowercase query stays the loose search
-// the old substring --grep was, while deliberate capitalisation means you meant it.
-// Patterns are regexps now, so a literal with metacharacters needs regexp.QuoteMeta
-// treatment by the caller (or backslashes on the command line).
+// smartCase compiles pat as a regexp, case-insensitively unless it carries an uppercase letter —
+// the ripgrep convention, where deliberate capitalisation means you meant it. Being a regexp, a
+// literal with metacharacters is the caller's to quote.
 func smartCase(pat string) (*regexp.Regexp, error) {
 	if !strings.ContainsFunc(pat, unicode.IsUpper) {
 		pat = "(?i)" + pat
 	}
 	return regexp.Compile(pat)
+}
+
+// what names the active search, so an empty answer can be acted on rather than just believed.
+func (c compiled) what() string {
+	switch {
+	case c.find != nil:
+		return "--find " + c.find.String()
+	case c.grep != nil:
+		return "--grep " + c.grep.String()
+	default:
+		return "--symbol " + c.symbol
+	}
 }
 
 // hit is one matching source line: its 1-based number and its text.
@@ -61,12 +71,11 @@ func enclosing(units []unit, line int) string {
 	return ""
 }
 
-// writeGrep renders the line search for one file: `path:line: text` — a prefix that
-// stays parseable by the usual editor/jump tooling — with the enclosing declaration
-// appended. That suffix is the whole point: plain grep tells you a line matched,
-// this tells you which function or type you just landed in.
-func writeGrep(w io.Writer, rel, path string, re *regexp.Regexp, units []unit) {
-	for _, h := range matchingLines(path, re) {
+// writeGrep renders one file's hits as `path:line: text`, parseable by editor jump tooling, plus the
+// enclosing declaration — the point being that grep says a line matched, this says where you landed.
+func writeGrep(w io.Writer, rel, path string, re *regexp.Regexp, units []unit) bool {
+	lines := matchingLines(path, re)
+	for _, h := range lines {
 		text := strings.TrimSpace(h.text)
 		if name := enclosing(units, h.line); name != "" {
 			fmt.Fprintf(w, "%s:%d: %s  « %s\n", rel, h.line, text, name)
@@ -74,14 +83,29 @@ func writeGrep(w io.Writer, rel, path string, re *regexp.Regexp, units []unit) {
 		}
 		fmt.Fprintf(w, "%s:%d: %s\n", rel, h.line, text)
 	}
+	return len(lines) > 0
 }
 
-// selectFind narrows units to those enclosing a match and reports the matches that no
-// declaration covers (a hit in the arch header or the imports). Returning those
-// separately is what keeps the context search honest: the old behaviour silently
-// dropped them, so a file could match the query and then render with nothing in it —
-// you saw a hit existed but never where. ok is false when the file has no match at
-// all, so the caller skips it entirely.
+// selectSymbol keeps the units declaring the exact identifier name — case-sensitive, no regex, no
+// substring ("Foo" never matches "FooBar"), the one thing --symbol and `brokkr refs` must agree on
+// so a name means the same thing to both. Every unit whose names include an exact match is kept,
+// since two receivers can share a method name, and a grouped const/var block is one unit for more
+// than one symbol (its display label only ever shows the first — that's cosmetic, not identity).
+func selectSymbol(units []unit, name string) (kept []unit, ok bool) {
+	for _, u := range units {
+		for _, n := range u.names {
+			if n == name {
+				kept = append(kept, u)
+				break
+			}
+		}
+	}
+	return kept, len(kept) > 0
+}
+
+// selectFind keeps the units enclosing a match and returns separately the hits no declaration covers
+// (the arch header, the imports) — dropping those silently let a file match and then render empty.
+// ok is false when nothing matched, so the caller skips the file.
 func selectFind(path string, re *regexp.Regexp, units []unit) (kept []unit, loose []hit, ok bool) {
 	hits := matchingLines(path, re)
 	if len(hits) == 0 {

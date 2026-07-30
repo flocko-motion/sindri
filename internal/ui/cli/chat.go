@@ -49,8 +49,30 @@ func NewChatCmd() *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	c.AddCommand(chatAddCmd(), chatRemoveCmd(), chatJoinCmd(), chatLogCmd())
+	c.AddCommand(chatAddCmd(), chatRemoveCmd(), chatJoinCmd(), chatLogCmd(), chatNewCmd())
 	return c
+}
+
+// chatNewCmd starts a fresh meeting: the CLI half of the TUI's `N`, so the same operation is
+// reachable from either front-end. No prompt, like every other destructive verb here — the CLI
+// stays scriptable and the TUI is where a human gets the confirm modal.
+func chatNewCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "new", Short: "Start a new meeting: clear the shared history (members stay)", Args: cobra.NoArgs,
+		Long: "Clear the meeting's shared history and announce the fresh start to everyone in the " +
+			"room. Membership is kept — this resets what the room remembers, not who is in it.\n\n" +
+			"Agents are told the slate is clean, because they still hold the old discussion in their " +
+			"own context. Anyone added afterwards is caught up with whatever has been said since.",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return withBackend(func(b backend) error {
+				if err := b.NewMeeting(); err != nil {
+					return err
+				}
+				fmt.Fprintln(os.Stderr, "new meeting — history cleared, members kept")
+				return nil
+			})
+		},
+	}
 }
 
 // chatLogCmd prints the room transcript — what bare `meeting` used to do unasked.

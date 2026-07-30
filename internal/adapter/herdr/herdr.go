@@ -20,14 +20,9 @@ func InPane() bool {
 	return os.Getenv("HERDR_ENV") == "1" && os.Getenv("HERDR_PANE_ID") != ""
 }
 
-// Report labels the current herdr pane as this agent for the sidebar and every
-// notification: the agent field carries the agent's own name (e.g. "austri") — herdr
-// renders it in both the sidebar row AND its attention/finished toasts, so the name
-// must live there, not only in the display override. --source stays "sindri" (the
-// tool reporting it, not "claude"). Two calls: report-agent carries the name + live
-// state; report-metadata re-asserts the display name so it wins even over herdr's own
-// detection (which would otherwise label the pane "claude"). Best-effort — a no-op
-// outside herdr, errors ignored so it never disturbs the attach.
+// Report labels the current herdr pane as this agent, in the sidebar and its toasts, so the name
+// must sit in the agent field rather than only the display override. report-metadata then re-asserts
+// it, or herdr's own detection labels the pane "claude". Best-effort: never disturbs the attach.
 func Report(name, state string) {
 	pane := os.Getenv("HERDR_PANE_ID")
 	if pane == "" {

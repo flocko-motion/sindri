@@ -381,7 +381,7 @@ func (m model) prRawContentLines() []string {
 // metaItem is one right-column line; with kind set it can be focused, acted on (ENTER) or yanked.
 type metaItem struct {
 	text  string
-	kind  string // "" plain · "agent" · "task" · "path"
+	kind  string // "" plain · "agent" · "task" · "pr" · "path" · "view" · "url"
 	value string
 }
 
@@ -425,7 +425,8 @@ func (m model) prMetaItems() []metaItem {
 	}
 	items = append(items, metaItem{text: ""}, metaItem{text: dimStyle.Render("── reviews ──")})
 	if len(d.Reviews) == 0 {
-		items = append(items, metaItem{text: dimStyle.Render("(none — A to request)")})
+		// From the constant, so a rebinding can't leave this hint pointing at the old key.
+		items = append(items, metaItem{text: dimStyle.Render("(none — " + keyReview + " to request)")})
 	}
 	for _, r := range d.Reviews {
 		items = append(items, metaItem{text: reviewLine(r)})
@@ -478,7 +479,7 @@ func shellAt(dir string) *exec.Cmd {
 	}
 	c := exec.Command(sh)
 	c.Dir = dir
-	return c
+	return marked(c)
 }
 
 // editorAtCmd opens the editor on an agent's live workspace; no materialization, it already exists.
@@ -545,7 +546,7 @@ func editorAt(dir string) *exec.Cmd {
 		}
 		c := exec.Command(bin, append(args, ".")...)
 		c.Dir = dir
-		return c
+		return marked(c) // an editor with a built-in terminal is the same door as a shell
 	}
 	return nil
 }

@@ -19,23 +19,15 @@ func SendText(session, text string) [][]string {
 	}
 }
 
-// Interrupt builds `tmux send-keys -t <session> Escape` — a bare Escape keypress, the
-// key Claude Code (and most TUIs) treat as "abort the current operation". Sent as a
-// key NAME (not -l literal), so tmux delivers a real ESC rather than the letters
-// "E","s","c". Used to stop an agent's in-flight work before telling it its task is
-// gone, so the message lands on an idle prompt.
+// Interrupt builds a bare Escape keypress — "abort the current operation" to Claude and most TUIs.
+// A key NAME, not -l literal, or tmux would deliver the letters "E","s","c".
 func Interrupt(session string) []string {
 	return []string{"send-keys", "-t", session, "Escape"}
 }
 
-// Attach builds `tmux attach-session -t <session>` — the human dial-in. readOnly
-// adds -r (observe without typing). A read-write attach instead adds -d, which
-// detaches every other client on the way in: these agent sessions are single-
-// driver (the hub injects via send-keys, not a client), and a dropped `podman
-// exec` can leave an orphaned client wedged on a dead pty — sharing the session
-// with it is what makes a fresh attach "see it but can't type". -d evicts it so
-// the human always gets sole, clean control. Read-only observers skip -d so they
-// don't kick the actual driver.
+// Attach builds the human dial-in; readOnly observes with -r. A read-write attach adds -d to evict
+// other clients, because a dropped `podman exec` leaves one wedged on a dead pty, and sharing the
+// session with it is what made a fresh attach "see it but can't type". Observers skip -d.
 func Attach(session string, readOnly bool) []string {
 	args := []string{"attach-session", "-t", session}
 	if readOnly {
@@ -44,11 +36,8 @@ func Attach(session string, readOnly bool) []string {
 	return append(args, "-d")
 }
 
-// ListClients builds `tmux list-clients -t <session> -F <fmt>`, one line per
-// client currently attached to the session: tty, width, height, and readonly
-// (0/1), space-separated (a tty never contains spaces). Callers use it both to
-// count attachers and to describe them; it also errors when the session is
-// absent, so it doubles as a liveness probe.
+// ListClients lists each attached client as "tty width height readonly", space-separated since a
+// tty never contains spaces. Errors when the session is absent, so it doubles as a liveness probe.
 func ListClients(session string) []string {
 	return []string{"list-clients", "-t", session, "-F", "#{client_tty} #{client_width} #{client_height} #{client_readonly}"}
 }
@@ -60,12 +49,8 @@ func HasSession(session string) []string {
 	return []string{"has-session", "-t", session}
 }
 
-// CapturePane builds `tmux capture-pane -p` to dump a session's pane — a
-// read-only peek at what the agent is showing. lines>0 reaches that many rows
-// back into the scrollback (-S -<lines>); 0 captures the visible screen only.
-// color adds -e so the dump keeps the pane's escape sequences (colour), for the
-// TUI preview; leave it off when the text is parsed (the escapes would corrupt
-// pattern matching).
+// CapturePane dumps a session's pane; lines>0 reaches that far back into the scrollback. color
+// keeps the escape sequences for the TUI preview — leave it off when parsing, or they corrupt it.
 func CapturePane(session string, lines int, color bool) []string {
 	args := []string{"capture-pane", "-t", session, "-p"}
 	if color {

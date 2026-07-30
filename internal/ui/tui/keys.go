@@ -13,22 +13,27 @@ import "strings"
 // changing a key (or discovering a conflict) is a single edit here. Navigation keys
 // that are compound in the help (tab, pane, move) are dispatched by their literal
 // tea strings in onKey and appear in the keymap only as display rows.
+//
+// CASE IS THE CONVENTION: lowercase looks or navigates, uppercase changes something.
+// A mistyped lowercase key must never mutate — which is why approve is A, not a.
 const (
 	keyNew      = "N" // new task / new agent
-	keyEdit     = "e" // edit the selection: task fields / agent options
+	keyEdit     = "e" // edit the selection: task fields (tasks) / open the workspace in $EDITOR (agents, prs)
+	keyOptions  = "O" // an agent's options (mutation → shift)
 	keyPriority = "P" // set task priority (mutation → shift)
 	keyUnassign = "U" // release a task to the backlog
 	keyClose    = "C" // close a task
-	keyApprove  = "A" // agentic review (prs) / approve proposed task (tasks)
+	keyApprove  = "A" // approve: a PR (prs) / a proposed task (tasks) — one letter, one meaning
+	keyReview   = "I" // invite an agentic review of a PR (A is approve, R is reject)
 	keyReject   = "R" // reject a PR / a proposed task
 	keyStartS   = "S" // agent start/stop
 	keyTell     = "t" // tell an agent / show a PR's task
-	keyAttachAp = "a" // attach (agents) / approve PR (prs)
+	keyAttach   = "a" // attach to an agent's session (agents, tasks)
 	keyMerge    = "m" // merge a PR
 	keyDelete   = "D" // delete an agent
 	keyLint     = "L" // lint a PR
 	keyVerify   = "V" // verify (materialize) a PR
-	keyOpen     = "o" // open a PR's worktree in $EDITOR (navigation → lowercase)
+	keyOpen     = "o" // open the row's worktree in a shell (navigation → lowercase)
 	keyFilter   = "f" // cycle the tasks filter
 	keyScopeTog = "s" // toggle a tab's global↔repo scope
 	keyRepo     = "p" // switch the active repo/project (navigation → lowercase)
@@ -75,8 +80,10 @@ var keymap = []binding{
 	{keyRefresh, lbl("refresh"), scopeGlobal},
 	{keyQuit, lbl("quit"), scopeGlobal},
 
-	// Tasks.
+	// Tasks: each scope's rows are grouped and ordered look-first, so the footer reads left to
+	// right from the harmless to the decisive.
 	{keyNew, lbl("new"), scopeTasks},
+	{keyAttach, lbl("attach"), scopeTasks},
 	{keyEdit, lbl("edit"), scopeTasks},
 	{keyPriority, lbl("priority"), scopeTasks},
 	{keyUnassign, lbl("unassign"), scopeTasks},
@@ -87,25 +94,26 @@ var keymap = []binding{
 
 	// Agents.
 	{keyNew, lbl("new"), scopeAgents},
-	{keyStartS, lbl("start/stop"), scopeAgents},
 	{keyTell, lbl("tell"), scopeAgents},
-	{keyAttachAp, lbl("attach"), scopeAgents},
-	{keyAttachAp, lbl("attach"), scopeTasks},
-	{keyEdit, lbl("options"), scopeAgents},
+	{keyAttach, lbl("attach"), scopeAgents},
+	{keyEdit, lbl("editor"), scopeAgents},
+	{keyOpen, lbl("open"), scopeAgents},
+	{keyStartS, lbl("start/stop"), scopeAgents},
+	{keyOptions, lbl("options"), scopeAgents},
 	{keyReject, lbl("rebase"), scopeAgents}, // R = reBase (onto the reference branch)
 	{keyDelete, lbl("delete"), scopeAgents},
-	{keyDelete, lbl("scrap"), scopePRs},
 	{keyScopeTog, func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scopeAgents},
 
-	// PRs.
+	// PRs: look (verify/editor/open/lint), then the verdicts, then merge.
 	{keyVerify, lbl("verify"), scopePRs},
-	{keyOpen, lbl("editor"), scopePRs},
-	{keyOpen, lbl("editor"), scopeAgents},
-	{keyAttachAp, lbl("approve"), scopePRs},
-	{keyReject, lbl("reject"), scopePRs},
-	{keyApprove, lbl("agent-review"), scopePRs},
+	{keyEdit, lbl("editor"), scopePRs},
+	{keyOpen, lbl("open"), scopePRs},
 	{keyLint, lbl("lint"), scopePRs},
+	{keyApprove, lbl("approve"), scopePRs},
+	{keyReject, lbl("reject"), scopePRs},
+	{keyReview, lbl("agent-review"), scopePRs},
 	{keyMerge, lbl("merge"), scopePRs},
+	{keyDelete, lbl("scrap"), scopePRs},
 	{keyFilter, func(m model) string { return "filter: " + prFilterNames[m.prFilter] }, scopePRs},
 	{keyScopeTog, func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scopePRs},
 
@@ -115,8 +123,9 @@ var keymap = []binding{
 	{keyConfig, lbl("config"), scopeRepos},
 	{keyDelete, lbl("forget"), scopeRepos},
 
-	// Chat (membership is curated from the CLI: `sindri chat add/remove`).
+	// Chat (membership is curated from the CLI: `sindri meeting add/remove`).
 	{"enter", lbl("compose"), scopeChat},
+	{keyNew, lbl("new meeting"), scopeChat},
 }
 
 // footerFor renders the "key label · key label" hints for a scope from the keymap.

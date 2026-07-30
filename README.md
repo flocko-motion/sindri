@@ -251,6 +251,7 @@ Tasks live in `td` (the source of truth), cached into the hub.
 sindri task new "Fix the parser" -t bug -p P1      # type: bug|feature|task|epic|chore
 sindri task new "Sub-thing" --parent td-abc123     # a child (subtask)
 sindri task list
+sindri task list --json                            # the same rows as JSON, for scripts (always an array)
 sindri task info td-abc123
 sindri task edit td-abc123 --parent td-LOGIN       # move a task into a package
 sindri task priority td-abc123 P0                  # a priority is what releases it to a worker
@@ -337,6 +338,79 @@ letter makes it case-sensitive). If the full map runs past a line budget (defaul
 scope or pass `--full`. Over-budget `--grep` truncates and reports the remainder
 instead, since headers are no answer to a line search.
 
+A third mode answers a third question — *where exactly is this declared?* — and
+deliberately isn't a regex:
+
+```bash
+brokkr map --symbol Container   # just that func/type/var/const, wherever it's declared
+```
+
+`--symbol` is an exact Go identifier, always case-sensitive, never a substring
+(`Foo` never matches `FooBar`) — a lookup, not a text search, mutually exclusive
+with `--find`/`--grep`. Two receivers sharing a method name both come back; a
+name declared inside a grouped `const (...)`/`var (...)` block is found even when
+it isn't the first one. For where a symbol is *used* rather than declared, see
+`brokkr refs`.
+
+### Symbol references — `brokkr refs`
+
+*Who calls this?* — the question that otherwise sends you back to `grep -rn`.
+
+```bash
+brokkr refs ProcessAlive              # whole tree
+brokkr refs Tasks internal/hub        # scoped to a path
+brokkr refs Merge --comments          # also where it's named in prose (ranked last)
+brokkr refs Ref --limit 0             # no cap (default 200, tail-trimmed)
+```
+
+Each hit is classified by what the symbol is *doing* there, and the report is
+**ranked, not file-ordered** — the definition first, then calls, then plain
+references, with test files one step behind their own kind. So the top is the part
+you asked about, and `--limit` trims the least relevant tail rather than the answer:
+
+```
+Tasks: 2 definitions · 1 call · 1 reference
+
+── definitions ──
+internal/hub/client/client.go:460:16: func (c *HTTP) Tasks() ([]store.Task, error) {  « hub/client / client · func (HTTP) Tasks
+internal/ui/cli/hub.go:53:2: Tasks() ([]store.Task, error)  « ui/cli / commands · type backend
+
+── calls ──
+internal/ui/cli/task.go:180:21: tasks, err := b.Tasks()  « ui/cli / task · func taskListCmd
+
+── references ──
+internal/ui/cli/repo.go:198:28: d.Agents, d.OpenTasks, d.Tasks, …  « ui/cli / repo commands · func printRepoDetail
+```
+
+That classification is what a line search can't do: the interface declaration, the
+method implementing it, a call, and a struct field read all match the same text.
+Every hit carries where you landed — the file's arch-header `package:` and the
+enclosing declaration.
+
+The symbol is an **exact, case-sensitive identifier**, not a regex: `refs Foo`
+never answers for `FooBar`. For patterns, use `map --grep` / `map --find` above.
+Matching is syntactic (`go/ast`, no type checking), so two packages declaring the
+same name both answer — scope it with a path or `--file`.
+
+### An empty answer says which emptiness it is
+
+`map`, its three searches and `refs` all read **Go only**, and they now say what they
+actually scanned rather than going quiet — because "found nothing" and "read nothing"
+are different answers, and only one of them is evidence:
+
+```
+$ brokkr refs Target ./a-typescript-repo
+no Go files under ./a-typescript-repo — brokkr map and refs read Go only.
+
+$ brokkr refs Nonexistent internal/hub
+scanned 214 Go files, no match for Nonexistent.
+note: refs matches an exact, case-sensitive identifier — …
+```
+
+The first is not absence: the tool never read those files. The second is, and it says
+how much it read to earn the claim. `--find`, `--grep` and `--symbol` report the same
+way (naming the pattern that missed) instead of exiting 0 in silence.
+
 ---
 
 ## Command reference
@@ -347,9 +421,9 @@ Orchestration is `sindri <category> <action>`; the toolbelt is the separate
 | Category | Actions |
 |---|---|
 | `agent` | `list` · `new [name] [--role worker\|reviewer\|planner]` · `start <name>` · `stop <name>` · `delete <name>` · `tell <name> "msg"` · `attach <name>` · `info <name>` · `pane <name>` |
-| `task` | `list` · `new <title> [-t -p -d --labels --parent]` · `info <id>` · `edit <id>` · `priority <id> <P0..P4>` · `approve <id>` · `reject <id> "why"` · `unassign <id>` |
+| `task` | `list [--json]` · `new <title> [-t -p -d --labels --parent]` · `info <id>` · `edit <id>` · `priority <id> <P0..P4>` · `approve <id>` · `reject <id> "why"` · `unassign <id>` |
 | `pr` | `list` · `info <id>` · `lint <id>` · `verify <id>` · `review <id> "…"` · `approve <id>` · `reject <id> "…"` · `milestone <agent>` · `merge <id>` |
-| `brokkr` | `map [paths…] [--find --grep --file --depth]` · `lint [deadcode\|loc\|comments\|openspec]` (none = all) |
+| `brokkr` | `map [paths…] [--find --grep --symbol --file --depth]` · `refs <symbol> [paths…] [--comments --file --limit]` · `lint [deadcode\|loc\|comments\|openspec]` (none = all) |
 
 Inside a pod the agent talks to the hub through a single command, **`sindri`**
 (the browser binary, presented under that name in the isolated container) — run

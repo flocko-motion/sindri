@@ -32,6 +32,25 @@ func (m *model) sizeComposer() {
 	m.composer.SetHeight(h)
 }
 
+// openNewMeetingChoice confirms the reset before it happens: clearing the shared history cannot be
+// undone, and N sits next to the keys that send messages. The CLI's `meeting new` has no prompt —
+// scripts shouldn't block — so this modal is where a human gets the guard.
+func (m *model) openNewMeetingChoice() {
+	cl := m.cl
+	m.choice = choiceModalState{
+		active:  true,
+		title:   "start a new meeting? (clears the shared history for everyone; members stay)",
+		options: []string{"cancel", "new meeting — clear the history"},
+		values:  []string{"cancel", "new"},
+		apply: func(v string) tea.Cmd {
+			if v != "new" {
+				return nil
+			}
+			return mutateThenRefresh(cl, cl.NewMeeting)
+		},
+	}
+}
+
 // updateComposer routes a keypress while composing: esc cancels, ctrl+s sends (enter is a newline —
 // this is multiline), ctrl+c quits. The hub caps length and says "too long" rather than truncating.
 func (m model) updateComposer(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

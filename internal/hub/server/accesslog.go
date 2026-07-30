@@ -13,18 +13,9 @@ import (
 	"time"
 )
 
-// accessLog coalesces repeated identical access-log entries. A "run" is a maximal
-// streak of entries sharing the same label+method+path; a run ends when a
-// different entry arrives. Each run surfaces as a single line whose counter and
-// timestamp advance as repeats come in.
-//
-// The rendering differs by sink, because one can rewrite a line and the other
-// can't:
-//   - terminal (foreground hub): the run's line is rewritten in place (\r), so
-//     the count and timestamp tick up live on one line.
-//   - file (background hub → hub.log): append-only, so the first hit of a run is
-//     printed immediately (transparency), and when the run ends a one-line
-//     "(×N)" summary is appended if it repeated.
+// accessLog coalesces a run of identical entries (same label+method+path) into one line. Rendering
+// differs by sink because only one can rewrite: a terminal updates the line in place, while the
+// append-only log prints the first hit at once and appends a "(×N)" summary when the run ends.
 type accessLog struct {
 	mu  sync.Mutex
 	out io.Writer

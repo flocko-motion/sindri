@@ -17,9 +17,8 @@ import (
 	"github.com/flo-at/sindri/internal/hub/client"
 )
 
-// attachedOpenPR returns the id of an open (non-terminal) PR for task id in the active
-// repo, or "" if none. A merged/scrapped PR is already off the board, so it's never
-// offered for scrapping.
+// attachedOpenPR is the id of a non-terminal PR for the task, or "". A merged or scrapped one is
+// already off the board, so it is never offered for scrapping.
 func (m model) attachedOpenPR(taskID string) string {
 	_, tag := m.currentRepo()
 	for _, p := range m.state.PRs {
@@ -38,9 +37,8 @@ type scrapReach struct {
 	prs  int
 }
 
-// measureScrapReach reads the reach off the current board. Subtasks count whatever their
-// status: a done one is still left dangling by a scrapped parent, so the cascade takes it
-// and the label has to say so.
+// measureScrapReach reads the reach off the current board. Subtasks count whatever their status —
+// a done one is still left dangling by a scrapped parent, so the cascade takes it.
 func (m model) measureScrapReach(id string) scrapReach {
 	r := scrapReach{pr: m.attachedOpenPR(id)}
 	if r.pr != "" {
@@ -55,14 +53,9 @@ func (m model) measureScrapReach(id string) scrapReach {
 	return r
 }
 
-// openScrapChoice confirms scrapping (deleting) the selected task — destructive (a
-// GitHub issue delete is permanent), so it's gated behind a yes/no. The hub dispatches
-// to the backend (td delete / openspec change removal / issue delete).
-//
-// Anything the discard could reach past the task itself becomes its own option, so the
-// wider scrap is never implied: its open PR (branch deleted, working agent stopped),
-// the tasks under it — which a task-only scrap would leave behind as roots of work
-// nobody asked for — and the open PRs of that whole set.
+// openScrapChoice gates a scrap behind yes/no, since a GitHub issue delete is permanent. Everything
+// the discard could reach becomes its own option, so the wider scrap is never implied: the open PR,
+// the tasks under it — which a task-only scrap strands as roots — and their PRs in turn.
 func (m *model) openScrapChoice(id string) {
 	cl := m.cl
 	r := m.measureScrapReach(id)

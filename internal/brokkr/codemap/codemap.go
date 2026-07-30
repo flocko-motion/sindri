@@ -16,8 +16,6 @@ import (
 	"go/printer"
 	"go/token"
 	"io"
-	"io/fs"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -30,23 +28,36 @@ var skipDirs = map[string]bool{".git": true, "vendor": true, "node_modules": tru
 // (insensitive unless the pattern has an uppercase letter), mutually exclusive: Find keeps
 // the decls ENCLOSING a match (structure), Grep emits the matching LINES (locations). Split
 // so that wanting the lines doesn't mean piping the map through grep.
+//
+// Symbol is a third, different kind of search: an exact Go identifier, case-sensitive, never a
+// regex or a substring ("Foo" never matches "FooBar") — a lookup, not a text search, and mutually
+// exclusive with the other two. Shares that exact-identifier convention with `brokkr refs`, so a
+// name means the same thing to both.
 type Query struct {
-	File string
-	Find string
-	Grep string
+	File   string
+	Find   string
+	Grep   string
+	Symbol string
 }
 
 // compiled is a Query with its patterns built once per run rather than per file.
 type compiled struct {
 	file       string
 	find, grep *regexp.Regexp
+	symbol     string
 }
 
 // compile validates a Query and builds its matchers.
 func (q Query) compile() (compiled, error) {
-	c := compiled{file: strings.ToLower(q.File)}
-	if q.Find != "" && q.Grep != "" {
-		return c, fmt.Errorf("brokkr map: --find and --grep are different searches; pass one")
+	c := compiled{file: strings.ToLower(q.File), symbol: q.Symbol}
+	set := 0
+	for _, s := range []string{q.Find, q.Grep, q.Symbol} {
+		if s != "" {
+			set++
+		}
+	}
+	if set > 1 {
+		return c, fmt.Errorf("brokkr map: --find, --grep and --symbol are different searches; pass one")
 	}
 	var err error
 	if q.Find != "" {
@@ -63,7 +74,7 @@ func (q Query) compile() (compiled, error) {
 }
 
 // searching reports whether the query is a search rather than a plain map.
-func (c compiled) searching() bool { return c.find != nil || c.grep != nil }
+func (c compiled) searching() bool { return c.find != nil || c.grep != nil || c.symbol != "" }
 
 // Write maps every .go file under each of roots to w. maxDepth bounds descent below each
 // root (0 = root only, negative = unlimited). A root that cannot be walked is a loud error.
@@ -118,43 +129,22 @@ func truncate(w io.Writer, out []byte, max int) error {
 	return err
 }
 
-// write walks each root and renders to w; headersOnly keeps only each file's arch header.
+// write walks each root through the shared walk and renders to w; headersOnly keeps only each
+// file's arch header. An empty result reports what was scanned instead of printing nothing:
+// silence read the same whether the tree held no Go at all or simply no match.
 func write(w io.Writer, roots []string, maxDepth int, c compiled, headersOnly bool) error {
-	cwd, _ := os.Getwd()
-	multi := len(roots) > 1
-	// Fail loud before emitting anything, so a typo in a later root can't print a half-map.
-	for _, root := range roots {
-		if _, err := os.Stat(root); err != nil {
-			return fmt.Errorf("brokkr map %q: %w", root, err)
-		}
+	visited, matched, err := walkGoFiles(roots, maxDepth, c.file, func(disp, path string) bool {
+		return writeFile(w, disp, path, c, headersOnly)
+	})
+	if err != nil {
+		return fmt.Errorf("brokkr map: %w", err)
 	}
-	for _, root := range roots {
-		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() {
-				if skipDirs[d.Name()] {
-					return fs.SkipDir
-				}
-				if maxDepth >= 0 && dirDepth(root, path) > maxDepth {
-					return fs.SkipDir
-				}
-				return nil
-			}
-			if !strings.HasSuffix(path, ".go") {
-				return nil
-			}
-			disp := displayPath(root, cwd, path, multi)
-			if c.file != "" && !strings.Contains(strings.ToLower(disp), c.file) {
-				return nil // filename filter
-			}
-			writeFile(w, disp, path, c, headersOnly)
-			return nil
-		})
-		if err != nil {
-			return fmt.Errorf("brokkr map %q: %w", root, err)
-		}
+	// A plain map answers with every file it read, so only "read nothing" can leave it empty; a
+	// search has a pattern to name when the tree WAS read in full and still said nothing.
+	if c.searching() {
+		reportScan(w, visited, matched, roots, c.what())
+	} else if visited == 0 {
+		reportScan(w, 0, 0, roots, "")
 	}
 	return nil
 }
@@ -180,36 +170,47 @@ func dirDepth(root, path string) int {
 	return strings.Count(rel, string(filepath.Separator)) + 1
 }
 
-// unit is one declaration: the lines to print, its source range (doc through closing brace)
-// for match tests, the label a search annotates hits with, and whether the map prints it.
+// unit is one declaration: the lines to print, its source range (doc through closing brace) for
+// match tests, the label a search annotates hits with, whether the map prints it, and the exact
+// identifier(s) it declares — names, plural, because a grouped `const ( A; B )` is one unit for
+// more than one symbol, and label only ever shows the first (-> selectSymbol).
 type unit struct {
 	lines      []string
 	start, end int
 	name       string
+	names      []string
 	mapped     bool
 }
 
-func writeFile(w io.Writer, rel, path string, c compiled, headersOnly bool) {
+// writeFile renders one file and reports whether it emitted anything — the signal that separates
+// "read in full, no match" from "read nothing at all".
+func writeFile(w io.Writer, rel, path string, c compiled, headersOnly bool) bool {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, nil, parser.ParseComments|parser.SkipObjectResolution)
 	if err != nil {
 		if !c.searching() { // a search reports matches, not the state of files it can't read
 			fmt.Fprintf(w, "\n%s\n  // parse error: %v\n", rel, err)
+			return true
 		}
-		return
+		return false
 	}
 	units := collectUnits(fset, f)
 
 	if c.grep != nil { // line search: no map framing, the matches ARE the output
-		writeGrep(w, rel, path, c.grep, units)
-		return
+		return writeGrep(w, rel, path, c.grep, units)
 	}
 
 	show, loose := mappedOnly(units), []hit(nil)
-	if c.find != nil {
+	switch {
+	case c.find != nil:
 		var ok bool
 		if show, loose, ok = selectFind(path, c.find, units); !ok {
-			return
+			return false
+		}
+	case c.symbol != "":
+		var ok bool
+		if show, ok = selectSymbol(units, c.symbol); !ok {
+			return false
 		}
 	}
 
@@ -220,7 +221,7 @@ func writeFile(w io.Writer, rel, path string, c compiled, headersOnly bool) {
 		}
 	}
 	if headersOnly {
-		return // reduced view: the arch header, none of the declarations
+		return true // reduced view: the arch header, none of the declarations
 	}
 	// Matches no decl covers (arch header, imports); without these --find could render empty.
 	for _, h := range loose {
@@ -231,6 +232,7 @@ func writeFile(w io.Writer, rel, path string, c compiled, headersOnly bool) {
 			fmt.Fprintln(w, l)
 		}
 	}
+	return true
 }
 
 // collectUnits turns every top-level decl into a unit. Types and funcs are `mapped` — the map
@@ -238,9 +240,9 @@ func writeFile(w io.Writer, rel, path string, c compiled, headersOnly bool) {
 // line that DECLARES a var rather than only the funcs using it.
 func collectUnits(fset *token.FileSet, f *ast.File) []unit {
 	var units []unit
-	add := func(lines []string, name string, mapped bool, doc *ast.CommentGroup, d ast.Decl) {
+	add := func(lines []string, name string, names []string, mapped bool, doc *ast.CommentGroup, d ast.Decl) {
 		units = append(units, unit{
-			lines: lines, name: name, mapped: mapped,
+			lines: lines, name: name, names: names, mapped: mapped,
 			start: startLine(fset, doc, d.Pos()), end: fset.Position(d.End()).Line,
 		})
 	}
@@ -248,13 +250,13 @@ func collectUnits(fset *token.FileSet, f *ast.File) []unit {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
 			sig := fmt.Sprintf("  %s  %s", lineCol(fset.Position(d.Pos()).Line), signature(fset, d))
-			add(append(docLines(d.Doc), sig), funcLabel(fset, d), true, d.Doc, d)
+			add(append(docLines(d.Doc), sig), funcLabel(fset, d), []string{d.Name.Name}, true, d.Doc, d)
 		case *ast.GenDecl:
 			switch d.Tok {
 			case token.TYPE:
-				add(typeUnit(fset, d), declLabel(d, "type"), true, d.Doc, d)
+				add(typeUnit(fset, d), declLabel(d, "type"), declNames(d), true, d.Doc, d)
 			case token.VAR, token.CONST:
-				add(valueUnit(fset, d), declLabel(d, d.Tok.String()), false, d.Doc, d)
+				add(valueUnit(fset, d), declLabel(d, d.Tok.String()), declNames(d), false, d.Doc, d)
 			}
 		}
 	}
@@ -316,6 +318,20 @@ func funcLabel(fset *token.FileSet, fn *ast.FuncDecl) string {
 
 // declLabel names a type/var/const block for a search — its first name, "…" if there are more.
 func declLabel(d *ast.GenDecl, kw string) string {
+	names := declNames(d)
+	switch len(names) {
+	case 0:
+		return kw
+	case 1:
+		return kw + " " + names[0]
+	}
+	return fmt.Sprintf("%s %s…", kw, names[0])
+}
+
+// declNames lists every identifier a type/var/const block declares — every name, unlike
+// declLabel's display string, which only ever shows the first: a grouped `const ( A; B )` is
+// still one unit, but a search for B must still find it (-> selectSymbol).
+func declNames(d *ast.GenDecl) []string {
 	var names []string
 	for _, spec := range d.Specs {
 		switch s := spec.(type) {
@@ -327,13 +343,7 @@ func declLabel(d *ast.GenDecl, kw string) string {
 			}
 		}
 	}
-	switch len(names) {
-	case 0:
-		return kw
-	case 1:
-		return kw + " " + names[0]
-	}
-	return fmt.Sprintf("%s %s…", kw, names[0])
+	return names
 }
 
 // typeUnit renders a type declaration: doc + one `type Name kind` line per spec.

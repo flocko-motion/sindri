@@ -92,7 +92,7 @@ func (Source) Tasks(root string, force bool) ([]task.Task, error) {
 	for _, is := range issues {
 		out = append(out, task.Task{
 			ID: ID(is.Number), Title: is.Title, Status: "open", Type: "issue",
-			Priority: "", Description: is.Body,
+			Priority: "", Description: is.Body, URL: is.URL,
 		})
 	}
 	cacheMu.Lock()
@@ -138,6 +138,7 @@ type Issue struct {
 	Body      string  `json:"body"`
 	Labels    []Label `json:"labels"`
 	UpdatedAt string  `json:"updatedAt"`
+	URL       string  `json:"url"`
 }
 
 // Enabled is the cheap local gate (gh on PATH + a GitHub remote); it never probes network or auth,
@@ -165,7 +166,7 @@ func Issues(ctx context.Context, root string) ([]Issue, error) {
 	cmd := exec.CommandContext(ctx, "gh", "issue", "list",
 		"--state", "open",
 		"--limit", strconv.Itoa(issueListLimit),
-		"--json", "number,title,body,labels,updatedAt",
+		"--json", "number,title,body,labels,updatedAt,url",
 	)
 	cmd.Dir = root
 	out, err := cmd.Output()

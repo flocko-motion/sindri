@@ -107,6 +107,59 @@ func TestTaskDescriptionPersists(t *testing.T) {
 	}
 }
 
+// TestTaskURLPersists: a GitHub issue's URL round-trips through both write paths — the bulk
+// ReplaceTasks a sync does, and the point UpsertTask a single-task refresh does — and survives
+// the read paths (GetTask, AllTasks) a plain task with no URL leaves it "" through either.
+func TestTaskURLPersists(t *testing.T) {
+	p := openTmpProject(t)
+	url := "https://github.com/flo-at/sindri/issues/42"
+	if err := p.ReplaceTasks([]Task{
+		{ID: "gh-42", Status: "open", Type: "issue", URL: url},
+		{ID: "td-1", Status: "open"}, // a plain task never has one
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := p.GetTask("gh-42")
+	if err != nil || !ok {
+		t.Fatalf("GetTask: ok=%v err=%v", ok, err)
+	}
+	if got.URL != url {
+		t.Fatalf("ReplaceTasks: URL not persisted: got %q, want %q", got.URL, url)
+	}
+	if plain, _, _ := p.GetTask("td-1"); plain.URL != "" {
+		t.Errorf("a task with no URL must read back \"\", got %q", plain.URL)
+	}
+
+	// UpsertTask (the single-task refresh path) must persist and update it too.
+	if err := p.UpsertTask(Task{ID: "gh-42", Status: "open", Type: "issue", URL: url + "?x=1"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err = p.GetTask("gh-42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := url + "?x=1"; got.URL != want {
+		t.Fatalf("UpsertTask: URL not updated: got %q, want %q", got.URL, want)
+	}
+
+	all, err := p.AllTasks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, tk := range all {
+		if tk.ID == "gh-42" {
+			found = true
+			if tk.URL == "" {
+				t.Error("AllTasks must carry the URL too, not just GetTask")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("gh-42 missing from AllTasks")
+	}
+}
+
 func TestAgentStateRoundTrip(t *testing.T) {
 	p := openTmpProject(t)
 	// Absent → idle default.

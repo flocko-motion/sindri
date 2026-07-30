@@ -30,15 +30,9 @@ type ignorePat struct {
 	basename bool
 }
 
-// NewIgnore compiles the given --ignore patterns. Each is one of:
-//   - a glob with no "/" — matched against a file's basename at any depth
-//     (e.g. "*.gen.go" ignores every generated file);
-//   - a glob containing "/" — matched against the slash-relative path, where
-//     "*" spans one path segment and "**" spans several (e.g. "internal/gen/**");
-//   - "re:<expr>" — the remainder is a Go regexp searched against the path.
-//
-// A malformed pattern is a hard error: a bad --ignore must fail loudly, never
-// silently match nothing.
+// NewIgnore compiles --ignore patterns: a glob without "/" matches a basename at any depth, one
+// with "/" matches the relative path ("*" one segment, "**" several), and "re:" prefixes a Go
+// regexp. A malformed pattern is a hard error — a bad --ignore must never silently match nothing.
 func NewIgnore(patterns []string) (*Ignore, error) {
 	ig := &Ignore{}
 	for _, p := range patterns {
@@ -67,16 +61,12 @@ func NewIgnore(patterns []string) (*Ignore, error) {
 	return ig, nil
 }
 
-// IgnoreFileName is the per-repo ignore file the linters read automatically, so
-// exceptions (generated files that can't carry an in-file marker, vendored code)
-// live in the repo — checked in, applied to every `brokkr lint` — instead of being
-// repeated on the command line or embedded in files that get regenerated.
+// IgnoreFileName is the per-repo ignore file, so an exception lives checked in rather than repeated
+// on the command line or embedded in a file that gets regenerated.
 const IgnoreFileName = ".brokkrignore"
 
-// LoadIgnoreFile reads ignore patterns from <dir>/.brokkrignore: one pattern per
-// line in the same syntax as NewIgnore, with blank lines and '#' comment lines
-// skipped. A missing file yields no patterns and no error; an unreadable one is a
-// hard error — a silently dropped exception would let violations through unseen.
+// LoadIgnoreFile reads NewIgnore-syntax patterns one per line, skipping blanks and '#'. Missing is
+// no patterns and no error; unreadable is fatal, since a dropped exception hides violations.
 func LoadIgnoreFile(dir string) ([]string, error) {
 	data, err := os.ReadFile(filepath.Join(dir, IgnoreFileName))
 	if errors.Is(err, os.ErrNotExist) {
@@ -115,9 +105,8 @@ func (ig *Ignore) Match(p string) bool {
 	return false
 }
 
-// globToRegexp translates a path glob into an anchored regexp: "**/" matches zero
-// or more leading directories, a bare "**" any run of characters (including "/"),
-// "*" any run except "/", "?" one non-"/" char; every other character is literal.
+// globToRegexp anchors a path glob: "**/" is zero or more leading dirs, "**" any run including "/",
+// "*" any run except "/", "?" one non-"/" char, everything else literal.
 func globToRegexp(glob string) string {
 	var b strings.Builder
 	b.WriteString("^")

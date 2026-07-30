@@ -126,7 +126,7 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 1 {
 			return m.agentStartStop()
 		}
-	case keyAttachAp: // agents/tasks: attach to the live tmux session · prs: approve (the human gate)
+	case keyAttach: // agents/tasks: attach to the live tmux session
 		if m.tab == 0 {
 			// Attach to whoever is working the selected task — the row you are looking at names
 			// the work, so it should reach the agent doing it without a detour via the Agents tab.
@@ -152,9 +152,6 @@ func (m *model) onKey(k string) tea.Cmd {
 				}
 			}
 		}
-		if m.tab == 2 && m.selID() != "" { // approve the PR yourself, so it can be merged
-			return m.action(func(id string) error { return m.cl.ApprovePR(id) })
-		}
 	case keyMerge: // prs: merge (the human gate) — if it isn't approved, offer to approve first
 		if m.tab == 2 && m.selID() != "" {
 			if !m.selPRApproved() {
@@ -165,18 +162,43 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.markMerging(id) // show "merging" on the row at once, before the hub confirms
 			return m.mergeCmd(id)
 		}
-	case keyNew: // new task (tasks) / new agent (agents)
+	case keyNew: // new task (tasks) / new agent (agents) / new meeting (meeting)
 		if m.tab == 0 {
 			m.openTaskForm(false, store.Task{})
 			return nil
 		} else if m.tab == 1 { // agents: pick the role, then auto-name after a dwarf
 			m.openNewAgentChoice()
 			return nil
+		} else if m.tab == 4 { // meeting: clear the shared history and start fresh
+			m.openNewMeetingChoice()
+			return nil
 		}
-	case keyEdit: // edit the selection: a task's fields (tasks) / the agent's options (agents)
+	case keyEdit: // edit what is selected, each tab in its own natural way
 		if m.tab == 0 && m.selID() != "" && m.cl != nil {
-			return editFetchCmd(m.cl, m.selID()) // pre-edit sync: fetch fresh, then open the form
+			return editFetchCmd(m.cl, m.selID()) // a task's fields: pre-edit sync, then the form
 		}
+		if m.tab == 1 { // an agent's own workspace, in $EDITOR
+			if dir := m.agentWorkspacePath(m.selID()); dir != "" {
+				return m.editorAtCmd(dir)
+			}
+			return nil
+		}
+		if m.tab == 2 { // a PR's review checkout, in $EDITOR
+			if id := m.selID(); id != "" && m.cl != nil {
+				return m.openEditorCmd(id)
+			}
+		}
+	case keyOpen: // agents/prs: open the row's worktree in a shell, the same one ENTER on its path gives
+		if m.tab == 1 || m.tab == 2 {
+			if dir := m.selWorktree(); dir != "" {
+				return tea.ExecProcess(shellAt(dir), resumed)
+			}
+			if id := m.selID(); id != "" {
+				m.flash = "no worktree for " + id // a PR whose agent is gone has none left
+			}
+			return nil
+		}
+	case keyOptions: // agents: the selected agent's options
 		if m.tab == 1 {
 			if a, ok := m.selAgent(); ok {
 				m.openAgentOptionsForm(a.Name, a.Memory)
@@ -238,25 +260,17 @@ func (m *model) onKey(k string) tea.Cmd {
 				return m.verifyCmd(id)
 			}
 		}
-	case keyOpen: // open $EDITOR on a workspace: an agent's own, or a PR's review checkout
-		if m.tab == 1 {
-			if dir := m.agentWorkspacePath(m.selID()); dir != "" {
-				return m.editorAtCmd(dir)
-			}
-			return nil
-		}
-		if m.tab == 2 {
-			if id := m.selID(); id != "" && m.cl != nil {
-				return m.openEditorCmd(id)
-			}
-		}
-	case keyApprove: // prs: request an agentic review · tasks: approve a planner-proposed task
-		if m.tab == 2 && m.selID() != "" {
-			m.openReviewForm(m.selID())
-			return nil
+	case keyApprove: // approve, the human gate: a PR (prs) / a planner-proposed task (tasks)
+		if m.tab == 2 && m.selID() != "" { // approve the PR yourself, so it can be merged
+			return m.action(func(id string) error { return m.cl.ApprovePR(id) })
 		}
 		if m.tab == 0 && m.taskGated() {
 			return m.approveTaskCmd(m.selID())
+		}
+	case keyReview: // prs: hand the PR to a reviewer agent
+		if m.tab == 2 && m.selID() != "" {
+			m.openReviewForm(m.selID())
+			return nil
 		}
 	case keyPriority: // set the selected task's priority (shift = a modifying action)
 		if m.tab == 0 && m.selID() != "" {
@@ -298,6 +312,9 @@ func (m *model) onKey(k string) tea.Cmd {
 					m.detail.Resize(m.detail.Height, len(m.prContentLines()))
 				case "path": // open a shell in the workspace
 					return tea.ExecProcess(shellAt(it.value), resumed)
+				case "url": // e.g. a GitHub issue: no browser in the pod's TUI, so copy it instead
+					_ = clipboard.WriteAll(it.value)
+					m.flash = "copied URL: " + it.value
 				default: // cross-reference: open its details modal
 					m.openItemModal(it.kind, it.value)
 				}

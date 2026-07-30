@@ -242,7 +242,7 @@ func (m model) taskDetailFor(t store.Task, desc string) []string {
 	return itemTexts(m.taskItemsFor(t, desc, nil))
 }
 
-// taskItemsFor builds the fields, the agent/PR/parent cross-references, then desc and comments.
+// taskItemsFor builds the fields, the agent/PR/parent/url cross-references, then desc and comments.
 func (m model) taskItemsFor(t store.Task, desc string, comments []store.Comment) []metaItem {
 	assignee, pr := "", ""
 	for _, a := range m.state.Agents {
@@ -278,6 +278,7 @@ func (m model) taskItemsFor(t store.Task, desc string, comments []store.Comment)
 		xref("parent:   ", t.ParentID, "task"),
 		xref("agent:    ", assignee, "agent"),
 		xref("pr:       ", pr, "pr"),
+		xref("url:      ", t.URL, "url"), // e.g. the GitHub issue; enter copies it (onkey.go)
 		metaItem{text: "labels:   " + dash(t.Labels)},
 	)
 	items = append(items, descItems(desc)...)

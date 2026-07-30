@@ -270,6 +270,12 @@ func (c *HTTP) ChatSay(msg string) error {
 	return c.post("/chat/say", hub.ChatSayReq{Msg: msg})
 }
 
+// NewMeeting clears the meeting's shared history and announces the fresh start to the room.
+// Membership is untouched.
+func (c *HTTP) NewMeeting() error {
+	return c.post("/chat/new", struct{}{})
+}
+
 // ChatHeartbeat signals the user is present in the chatroom (sent periodically by
 // `chat join` and the TUI chat tab). Presence keeps the room unlocked for agents.
 func (c *HTTP) ChatHeartbeat() error {

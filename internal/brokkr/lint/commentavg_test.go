@@ -10,20 +10,29 @@ import (
 	"testing"
 )
 
-// TestAllowanceMatchesSpec pins the rule to its formula: with n comment blocks under the trend
-// sample, a file may average ((10-n)*0.5+1) × the configured maximum. A sparsely-commented file
-// earns room for longer comments; a well-commented one answers for its trend.
+// TestAllowanceMatchesSpec pins the rule to its formula: a file may spend a base budget of
+// baseBudgetPerMax × the maximum, plus that maximum per block — a mean of x + 3x/n.
 func TestAllowanceMatchesSpec(t *testing.T) {
 	const x = 2.0
 	for n := 1; n <= 14; n++ {
-		want := x
-		if n < 10 {
-			want = (float64(10-n)*0.5 + 1) * x
-		}
+		want := x + (baseBudgetPerMax*x)/float64(n)
 		if got := allowanceFor(x, n); math.Abs(got-want) > 1e-9 {
 			t.Errorf("n=%d: allowance %.2f, want %.2f", n, got, want)
 		}
-		fmt.Printf("  n=%2d  allowed mean = %5.2f lines\n", n, allowanceFor(x, n))
+		fmt.Printf("  n=%2d  allowed mean = %5.2f lines (total %5.1f)\n", n, allowanceFor(x, n), allowanceFor(x, n)*float64(n))
+	}
+}
+
+// TestAllowanceTotalNeverShrinks is what the old sample step got wrong: 9 blocks were allowed 27
+// lines and 10 were allowed 20, so adding a comment cut the budget and read as a punishment.
+func TestAllowanceTotalNeverShrinks(t *testing.T) {
+	const x = 2.0
+	for n := 2; n <= 60; n++ {
+		prev := allowanceFor(x, n-1) * float64(n-1)
+		cur := allowanceFor(x, n) * float64(n)
+		if cur < prev-1e-9 {
+			t.Errorf("n=%d: total allowance %.1f is below n=%d's %.1f — adding a comment must never cost budget", n, cur, n-1, prev)
+		}
 	}
 }
 
@@ -125,6 +134,12 @@ const smuggledHeader = "// package: seq / coordination\n" +
 	"// belongs entirely to the backend: the merge steps, the write barrier, and the retained\n" +
 	"// history a rollback reads from. This package only resolves a name to a constructor.\n" +
 	"// Nothing about the sequencing logic itself lives here, by design, deliberately so.\n" +
+	"// The backend chooses how many heads to retain, and the policy is its own to change.\n" +
+	"// A caller that needs the older heads asks the backend for them rather than reaching\n" +
+	"// past it, so this file never learns the shape of the history it is not responsible for.\n" +
+	"// None of which needs saying here, which is the point of the fixture.\n" +
+	"// Two further lines of padding, so the mean clears the ceiling with room to spare and the\n" +
+	"// test is not pinned to the exact boundary it happens to sit on today.\n" +
 	"import {x} from './x';\n\n"
 
 // TestCommentAvgMeasuresProseSmuggledIntoTheHeader: a paragraph parked below the four fields, past
@@ -164,10 +179,11 @@ func TestCommentAvgMeasuresProseSmuggledIntoTheHeader(t *testing.T) {
 // TestCommentAvgThinSampleIsForgiven: two long comments are not a trend, and the report says
 // which allowance applied so the verdict is checkable rather than mysterious.
 func TestCommentAvgThinSampleIsForgiven(t *testing.T) {
-	eight := "// a\n// b\n// c\n// d\n// e\n// f\n// g\n// h\n"
+	four := "// a\n// b\n// c\n// d\n"
 	root := writeTree(t, map[string]string{
-		// Two 8-line comments → mean 8.0, allowance at n=2 is (1+0.5*8)*2.0 = 10.0.
-		"src/thin.tsx": tsHeader + eight + "export const a = 1;\n\n" + eight + "export const b = 2;\n",
+		// Two 4-line comments → mean 4.0, twice the maximum, yet allowed: at n=2 the base budget
+		// puts the ceiling at 2.0 + (3×2.0)/2 = 5.0.
+		"src/thin.tsx": tsHeader + four + "export const a = 1;\n\n" + four + "export const b = 2;\n",
 	})
 	var out bytes.Buffer
 	found, err := CommentAvg([]string{root}, 2.0, 0, false, nil, mustIgnore(t), &out)
@@ -175,7 +191,7 @@ func TestCommentAvgThinSampleIsForgiven(t *testing.T) {
 		t.Fatal(err)
 	}
 	if found {
-		t.Errorf("a two-comment file should be forgiven at 2.0 (allowance 10.0):\n%s", out.String())
+		t.Errorf("a two-comment file should be forgiven at 2.0 (allowance 5.0):\n%s", out.String())
 	}
 }
 
@@ -359,11 +375,46 @@ func TestDefaultLineNamesLinesNotProse(t *testing.T) {
 	if !strings.Contains(got, "fix :") {
 		t.Errorf("the default line must name the ranges to edit:\n%s", got)
 	}
-	if !strings.Contains(got, "ideal") {
-		t.Errorf("the default line must name the ideal, not just the max:\n%s", got)
+	if !strings.Contains(got, "target") {
+		t.Errorf("the default line must measure against the target, not just the ceiling:\n%s", got)
 	}
 	if strings.Contains(got, "the offending explanation") {
 		t.Errorf("no excerpt in the default output — that is what --blocks is for:\n%s", got)
+	}
+}
+
+// TestReportAsksForTheJudgementNotJustTheNumber: "ideal 1.5, max 2.0" read as spare room, so readers
+// trimmed to 1.9 and stopped. Three obligations are pinned; the wording around them is free.
+func TestReportAsksForTheJudgementNotJustTheNumber(t *testing.T) {
+	// Past trendSample blocks, so the small-file bonus is gone and the real 2.0 ceiling applies —
+	// only then do the default target and ceiling appear as themselves.
+	var src strings.Builder
+	src.WriteString(tsHeader)
+	for i := 0; i < 12; i++ {
+		fmt.Fprintf(&src, "// explanation %d\n// continued\n// and on\nexport const a%d = %d;\n\n", i, i, i)
+	}
+	root := writeTree(t, map[string]string{"src/Wordy.tsx": src.String()})
+
+	var out bytes.Buffer
+	if _, err := CommentAvg([]string{root}, DefaultMaxCommentAvg, 0, false, nil, mustIgnore(t), &out); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	// Both ends of the band, so the reader knows what is being chosen between.
+	if !strings.Contains(got, "1.5 target") || !strings.Contains(got, "is the ceiling") {
+		t.Errorf("the report must name the target and the ceiling:\n%s", got)
+	}
+	// That the band is a claim about the prose, not permission to stop early.
+	if !strings.Contains(got, "earns its length") {
+		t.Errorf("the summary must say stopping short claims the prose earns its length:\n%s", got)
+	}
+	// That the check disclaims the judgement rather than implying the number settled it.
+	if !strings.Contains(got, "cannot judge") {
+		t.Errorf("the summary must admit it cannot make this judgement:\n%s", got)
+	}
+	// And that a reason is owed — the only thing that separates valuable prose from padding.
+	if !strings.Contains(got, "why") {
+		t.Errorf("the summary must ask why, not only how much:\n%s", got)
 	}
 }
 

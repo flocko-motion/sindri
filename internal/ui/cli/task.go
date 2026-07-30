@@ -40,11 +40,8 @@ func NewTaskCmd() *cobra.Command {
 	return c
 }
 
-// taskRefreshCmd re-syncs the hub's task cache from td (the source of truth) and
-// notifies watchers — the shell counterpart of the TUI's refresh, so the sync is
-// reachable from the CLI too, not only the dashboard. Reads (list/info) already
-// sync on their own; this is for forcing a refresh (e.g. to push fresh state to a
-// running TUI) without listing.
+// taskRefreshCmd re-syncs the task cache and notifies watchers. Reads sync on their own, so this is
+// for forcing one without listing — e.g. pushing fresh state to a running TUI.
 func taskRefreshCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "refresh", Short: "Re-sync tasks from td (the source of truth) and notify watchers", Args: cobra.NoArgs,
@@ -77,10 +74,8 @@ func taskCloseCmd() *cobra.Command {
 	}
 }
 
-// taskDeleteCmd scraps a task — dispatched by backend (td delete / openspec change-dir
-// removal / GitHub issue delete). --subtasks widens the discard down the task's tree and
-// --prs takes the open PRs of what it scraps, the same two shapes the TUI's scrap modal
-// offers, so either front-end can throw away a whole task hierarchy.
+// taskDeleteCmd scraps a task, dispatched by backend. --subtasks widens it down the tree and --prs
+// takes the open PRs, the same two shapes the TUI's scrap modal offers.
 func taskDeleteCmd() *cobra.Command {
 	var subtasks, prs bool
 	c := &cobra.Command{
@@ -217,13 +212,11 @@ func taskInfoCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				// The same fields the TUI's detail pane and the agent's `task <id>` show. A
-				// front-end chooses layout, not which facts exist: the parent is how work is
-				// organised here and the description is the task itself, so a reader that omits
-				// them answers a different question than the other two surfaces do.
-				fmt.Printf("id:       %s\ntitle:    %s\nstatus:   %s\ntype:     %s\npriority: %s\nparent:   %s\napproval: %s\nlabels:   %s\n",
+				// The same fields the TUI pane and the agent's `task <id>` show: a front-end
+				// chooses layout, not which facts exist, or it answers a different question.
+				fmt.Printf("id:       %s\ntitle:    %s\nstatus:   %s\ntype:     %s\npriority: %s\nparent:   %s\napproval: %s\nlabels:   %s\nurl:      %s\n",
 					t.ID, t.Title, t.Status, dash(t.Type), hub.PriorityLabel(t.Priority),
-					dash(t.ParentID), dash(t.Approval), dash(t.Labels))
+					dash(t.ParentID), dash(t.Approval), dash(t.Labels), dash(t.URL))
 				if body := strings.TrimRight(t.Description, "\n"); body != "" {
 					fmt.Printf("\n%s\n", body)
 				}

@@ -137,7 +137,7 @@ func main() {
 			"single command, so you don't need compound shell such as: "+
 			"brokkr <cmd> 2>&1 | tail -N ; echo \"=== exit: $? ===\".")
 	root.SilenceUsage = true // runtime errors report themselves; don't dump usage
-	root.AddCommand(newMapCmd(), newLintCmd(), newVersionCmd())
+	root.AddCommand(newMapCmd(), newRefsCmd(), newLintCmd(), newVersionCmd())
 
 	exit(run(root))
 }

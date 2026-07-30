@@ -22,12 +22,9 @@ const DefaultMaxCommentAvg = 2.0
 // direction that reads worst: fewer, longer lines pass a per-LINE budget while the prose grows.
 const DefaultMaxCommentLine = 110
 
-// trendSample is where a mean is taken at face value; bonusPerBlock is the slack each block short
-// of it earns. Two comments are not a trend. Linear, so the rule is predictable before you write.
-const (
-	trendSample   = 10
-	bonusPerBlock = 0.5
-)
+// baseBudgetPerMax sets the lines a file gets before the per-block allowance, as a multiple of the
+// configured maximum: two comments are not a trend, and lowering that maximum must still bite here.
+const baseBudgetPerMax = 3.0
 
 // systemicFiles is where long comments stop being a list of slips and become a house-style problem.
 const systemicFiles = 10
@@ -62,12 +59,13 @@ func aimFor(allowed float64) float64 {
 	return aim
 }
 
-// allowanceFor is the mean a file with n comment blocks may reach, given the configured maximum.
+// allowanceFor is the mean n blocks may reach: base per block, plus baseBudget spread over them.
+// Continuous, so adding a comment never shrinks the total budget the way a sample step did.
 func allowanceFor(base float64, n int) float64 {
-	if n >= trendSample {
+	if n <= 0 {
 		return base
 	}
-	return base * (1 + bonusPerBlock*float64(trendSample-n))
+	return base + (baseBudgetPerMax*base)/float64(n)
 }
 
 // CommentAvg reports each file whose mean comment exceeds maxAvg; blocks adds the per-comment
@@ -165,13 +163,13 @@ func CommentAvg(roots []string, maxAvg float64, maxLine int, blocks bool, cap *C
 		if !cap.Allow() {
 			continue
 		}
-		// Cut toward the IDEAL, never the max: the bare number needed to pass anchored people to
-		// the ceiling, so it is deliberately not shown.
+		// Measured against the TARGET, not the ceiling: the bare number needed to pass anchors
+		// people to the ceiling, so it is deliberately not shown.
 		cut := v.lines - int(aim*float64(v.blocks))
-		// One actionable line: how far over, how much to cut, and WHERE. No excerpt — you are
-		// going to open the file regardless, and truncated prose does not help you find anything.
-		fmt.Fprintf(w, "%s: %.1f avg over %d blocks (ideal %.1f, max %.1f) — cut %d line(s); fix %s\n",
-			v.path, v.avg, v.blocks, aim, v.allowed, cut, blockRanges(v.over, 8))
+		// One actionable line: how far over the target, what the ceiling is, and WHERE to edit. No
+		// excerpt — you are going to open the file regardless, and truncated prose finds nothing.
+		fmt.Fprintf(w, "%s: %.1f avg over %d blocks — %d line(s) over the %.1f target (%.1f is the ceiling); fix %s\n",
+			v.path, v.avg, v.blocks, cut, aim, v.allowed, blockRanges(v.over, 8))
 		if !blocks {
 			continue
 		}
@@ -183,8 +181,10 @@ func CommentAvg(roots []string, maxAvg float64, maxLine int, blocks bool, cap *C
 	}
 	if len(viols) > 0 {
 		cap.Note(w)
-		fmt.Fprintf(w, "%d file(s) over the comment-length trend — cut words, don't move them. "+
-			"Ideal %.1f; the max is a ceiling, not the goal.\n", len(viols), aim)
+		// Name the band as a claim with a reason owed, not as spare room; no mean can judge prose.
+		fmt.Fprintf(w, "%d file(s) over the comment-length trend — cut words, don't move them.\n"+
+			"  Cut to %.1f; stopping short claims the prose earns its length, which this check cannot judge — say why.\n",
+			len(viols), aim)
 		if len(viols) >= systemicFiles && !cap.Quiet() {
 			fmt.Fprint(w, systemicBanner)
 		}

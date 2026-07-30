@@ -35,13 +35,32 @@ func (m model) repoPath(tag string) string {
 	return ""
 }
 
-// agentWorkspacePath is an agent's workspace as an ABSOLUTE path, or "".
-//
-// AgentView.Workspace is repo-relative (".worktrees/<name>", or "." for a coauthor sharing the
-// checkout), so it only names a real directory alongside its own repo — and it is resolved
-// against the agent's OWN project, not the selected one, since the Agents tab can show a fleet
-// spanning several repos. A relative path handed to a child process would instead resolve
-// against wherever the TUI happens to have been launched.
+// taskTitle maps a task id to its cached title, or "" — a task from another project (the board
+// only carries the selected one), or one closed/scrapped since the cache was built.
+func (m model) taskTitle(id string) string {
+	for _, t := range m.state.Tasks {
+		if t.ID == id {
+			return t.Title
+		}
+	}
+	return ""
+}
+
+// taskLabel is a task id with its title alongside it ("id  title") when known, else the bare id,
+// else "-". Used where a task shows only as an id today, leaving no clue what it actually is.
+func (m model) taskLabel(id string) string {
+	if id == "" {
+		return dash(id)
+	}
+	if title := m.taskTitle(id); title != "" {
+		return id + "  " + title
+	}
+	return id
+}
+
+// agentWorkspacePath is an agent's workspace as an ABSOLUTE path, or "". Workspace is
+// repo-relative, so it is joined to the agent's OWN project — the Agents tab can show a fleet
+// spanning repos — and absolute because it becomes a child process's working directory.
 func (m model) agentWorkspacePath(name string) string {
 	for _, a := range m.state.Agents {
 		if a.Name != name {
@@ -56,12 +75,25 @@ func (m model) agentWorkspacePath(name string) string {
 	return ""
 }
 
-// agentOnTask is the agent working task id, and whether one is.
-//
-// It matches a package too, not just the exact row: a hierarchy is claimed whole and the agent's
-// state names the SUBTASK it is on, so selecting the parent — the row that represents the work —
-// would otherwise find nobody. Walking up from each agent's task means the epic and every task
-// beneath it all lead to the one agent holding that tree.
+// selWorktree is the tree the selected row stands for: an agent's own, or on the PRs tab its
+// author's. Empty once that agent is gone — a PR outlives the tree behind it.
+func (m model) selWorktree() string {
+	switch m.tab {
+	case 1:
+		return m.agentWorkspacePath(m.selID())
+	case 2:
+		for _, p := range m.state.PRs {
+			if p.ID == m.selID() {
+				return m.agentWorkspacePath(p.Agent)
+			}
+		}
+	}
+	return ""
+}
+
+// agentOnTask is the agent working task id, and whether one is. It matches a package too: a
+// hierarchy is claimed whole and the agent's state names the SUBTASK, so walking up from each
+// agent's task is what makes the epic — and everything under it — reach the agent holding it.
 func (m model) agentOnTask(id string) (hub.AgentView, bool) {
 	if id == "" {
 		return hub.AgentView{}, false
