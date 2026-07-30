@@ -41,11 +41,9 @@ type MergeResult struct {
 	Err    error
 }
 
-// MergeBranch brings branch up to base then merges it into base in root, reporting
-// the outcome without touching any state. When worktree is non-empty the branch is
-// rebased onto base there first (a stale branch rebases silently; a conflict stops
-// with MergeConflict); an empty worktree skips the rebase (e.g. a planner PR with no
-// agent worktree). The workflow interprets the result and drives the consequences.
+// MergeBranch brings branch up to base then merges it into base in root, reporting the outcome
+// without touching state. A non-empty worktree is rebased onto base first (stale rebases silently,
+// a conflict stops with MergeConflict); an empty one skips that, as a planner PR has no worktree.
 func MergeBranch(root, worktree, branch, base string) MergeResult {
 	if worktree != "" {
 		// RebaseStep, not RebaseStart: a worktree stranded in an autostash conflict cannot be
@@ -59,6 +57,8 @@ func MergeBranch(root, worktree, branch, base string) MergeResult {
 		}
 	}
 	if err := git.Merge(root, base, branch); err != nil {
+		// git.Merge pins these messages to English: translated, the match missed and a one-command
+		// fix read as an opaque hub failure. Tracked and untracked both say "would be overwritten".
 		if e := err.Error(); strings.Contains(e, "would be overwritten") || strings.Contains(e, "commit your changes or stash") {
 			return MergeResult{Status: MergeBlocked, Files: git.BlockingLocalChanges(root, base, branch)}
 		}

@@ -17,10 +17,8 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// ReconcileMergingPRs runs once at hub startup: any PR still in "merging" was being
-// merged when the previous hub died, so its outcome is unknown (the base may or may
-// not carry the merge). Move it to "merge-failed" — a visible state that asks for a
-// human look — instead of leaving a silent, frozen "merging".
+// ReconcileMergingPRs runs at hub startup: a PR still "merging" was mid-merge when the last hub
+// died, so nobody knows whether base carries it. "merge-failed" asks for a look; "merging" wouldn't.
 func (e *Engine) ReconcileMergingPRs() {
 	prs, err := e.store.AllPRs()
 	if err != nil {
@@ -64,18 +62,16 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 		return store.PR{}, err
 	}
 	e.deps.Notify()
-	// On a synchronous failure below, revert to approved so the PR stays retryable —
-	// the returned error tells the human what to fix. (A conflict takes its own path
-	// to "open"; a crash mid-merge is caught at startup, not here.)
+	// On a synchronous failure below, revert to approved so the PR stays retryable and the error
+	// says what to fix. A conflict goes its own way to "open"; a crash is caught at startup.
 	revert := func(err error) (store.PR, error) {
 		pr.Status = "approved"
 		_ = ps.PutPR(pr)
 		e.deps.Notify()
 		return store.PR{}, err
 	}
-	// Bring the branch up to base then merge — the git mechanics live in repo; here we
-	// route the outcome. The rebase runs in the WORKER's worktree (it can't run git
-	// itself); a conflict goes into its resolution loop, not a dead-end "resubmit".
+	// Mechanics live in repo; here we route the outcome. The rebase runs in the WORKER's worktree,
+	// and a conflict goes into its resolution loop rather than a dead-end "resubmit".
 	wt, workspace := "", ""
 	if a, ok, _ := ps.GetAgent(pr.Agent); ok {
 		workspace, wt = a.Workspace, filepath.Join(root, a.Workspace)
@@ -90,13 +86,13 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 		e.deps.Notify()
 		return store.PR{}, fmt.Errorf("%s conflicts with %s — sent to %s to resolve; it returns for review once clean", prID, pr.Base, pr.Agent)
 	case repo.MergeRebaseErr:
-		// The rebase runs in the AGENT's worktree, not your checkout — say so, or
-		// "unstaged changes" sends you hunting in the wrong place. Usually the agent
-		// left uncommitted edits there; it must commit or discard them.
+		// Name the worktree: it is the AGENT's, and "unstaged changes" otherwise sends you
+		// hunting through your own checkout for edits the agent left in its.
 		return revert(fmt.Errorf("can't rebase %s onto %s in %s's worktree (%s) — most often it has uncommitted changes (NOT your checkout); have the agent commit or discard them, e.g. `sindri agent tell %s \"commit or discard your /workspace changes, then say done\"`. git said: %w",
 			pr.Branch, pr.Base, pr.Agent, workspace, pr.Agent, res.Err))
 	case repo.MergeBlocked:
-		return revert(fmt.Errorf("merge blocked: commit or stash your local changes to %s in the working checkout, then merge again (the PR is fine and stays approved)", FileList(res.Files)))
+		// "commit or stash" alone dead-ends an untracked collision: you cannot stash an untracked file.
+		return revert(fmt.Errorf("merge blocked by your working checkout: %s. Commit or stash them (or move/remove them, if untracked), then merge again — the PR is fine and stays approved", FileList(res.Files)))
 	case repo.MergeErr:
 		return revert(res.Err)
 	}
@@ -104,10 +100,9 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 	if err := ps.PutPR(pr); err != nil {
 		return store.PR{}, err
 	}
-	// Interim contribution: land the work but KEEP the task open and put the worker
-	// straight back on the SAME task. Its branch is fast-forwarded past the merge so it
-	// keeps building on top; nothing is closed. (Container milestones take the branch
-	// below; the two never overlap — contribute is hidden inside a container.)
+	// Interim contribution: land the work, keep the task open, put the worker back on the SAME
+	// task with its branch fast-forwarded past the merge. Container milestones take the branch
+	// below and never overlap, since contribute is hidden inside a container.
 	if pr.Kind == "interim" {
 		if a, ok, _ := ps.GetAgent(pr.Agent); ok {
 			_ = git.RebaseOnto(filepath.Join(root, a.Workspace), pr.Branch, pr.Base) // ff past the merge

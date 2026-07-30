@@ -566,15 +566,24 @@ func nameOnly(repo string, args ...string) []string {
 	return files
 }
 
-// Merge merges branch into base in repo with a merge commit (no fast-forward),
-// leaving base checked out. Returns the combined output on conflict.
+// gitEnglish runs a git command whose OUTPUT the hub matches on, with git's messages pinned to
+// English — a translated "would be overwritten" made the match miss (-> repo.MergeBranch).
+func gitEnglish(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	// Both: gettext consults LANGUAGE first, and ignores it only once the locale is already C.
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANGUAGE=C")
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// Merge merges branch into base in repo with a merge commit (no fast-forward), leaving base
+// checked out. Returns the combined output on conflict, in English since the caller reads it.
 func Merge(repo, base, branch string) error {
-	if out, err := exec.Command("git", "-C", repo, "checkout", base).CombinedOutput(); err != nil {
-		return fmt.Errorf("checkout %s: %s: %w", base, strings.TrimSpace(string(out)), err)
+	if out, err := gitEnglish(repo, "checkout", base); err != nil {
+		return fmt.Errorf("checkout %s: %s: %w", base, strings.TrimSpace(out), err)
 	}
-	if out, err := exec.Command("git", "-C", repo, "merge", "--no-ff", "-m",
-		"merge "+branch, branch).CombinedOutput(); err != nil {
-		return fmt.Errorf("merge %s: %s: %w", branch, strings.TrimSpace(string(out)), err)
+	if out, err := gitEnglish(repo, "merge", "--no-ff", "-m", "merge "+branch, branch); err != nil {
+		return fmt.Errorf("merge %s: %s: %w", branch, strings.TrimSpace(out), err)
 	}
 	return nil
 }
