@@ -45,6 +45,8 @@ func newLintCmd() *cobra.Command {
 			"For comment-length, --blocks lists every comment over the limit with its line range, " +
 			"length and opening words, plus how many comment lines have to go — so a file is one " +
 			"edit rather than a read-guess-recheck loop.\n\n" +
+			"No --fix by design: wrapping adds a line and pushes the mean up, trading one finding " +
+			"for another. A long comment is usually too wordy, not badly wrapped.\n\n" +
 			"Use --ignore to exclude files you can't fix (e.g. generated code): a " +
 			"pattern with no '/' matches a basename at any depth (--ignore='*.gen.go'), " +
 			"one containing '/' matches the relative path with '*'/'**' wildcards " +
