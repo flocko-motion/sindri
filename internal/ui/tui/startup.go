@@ -18,8 +18,14 @@ import (
 	"github.com/flo-at/sindri/internal/hub/client"
 )
 
-// Run starts the dashboard against the repo's hub (refuses without one).
+// Run starts the dashboard against the repo's hub (refuses without one, or inside one).
 func Run(root string) error {
+	// Checked before anything else: a second TUI in this terminal would fight the first for the
+	// screen, and the shell it is asking from is one the first TUI is suspended waiting on.
+	if pid, nested := ParentTUI(); nested {
+		return fmt.Errorf("a sindri TUI (pid %d) is already running in this terminal and is "+
+			"waiting for this shell — type `exit` to return to it", pid)
+	}
 	// Startup breadcrumbs to stderr (before the alt screen takes over) so a hang
 	// is attributable to a step rather than silent.
 	fmt.Fprintf(os.Stderr, "sindri tui: hub at %s\n", hub.SocketPath())
