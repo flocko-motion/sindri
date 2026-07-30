@@ -165,13 +165,13 @@ func CommentAvg(roots []string, maxAvg float64, maxLine int, blocks bool, cap *C
 		if !cap.Allow() {
 			continue
 		}
-		// Cut toward the IDEAL, never the max: the bare number needed to pass anchored people to
-		// the ceiling, so it is deliberately not shown.
+		// Measured against the TARGET, not the ceiling: the bare number needed to pass anchors
+		// people to the ceiling, so it is deliberately not shown.
 		cut := v.lines - int(aim*float64(v.blocks))
-		// One actionable line: how far over, how much to cut, and WHERE. No excerpt — you are
-		// going to open the file regardless, and truncated prose does not help you find anything.
-		fmt.Fprintf(w, "%s: %.1f avg over %d blocks (ideal %.1f, max %.1f) — cut %d line(s); fix %s\n",
-			v.path, v.avg, v.blocks, aim, v.allowed, cut, blockRanges(v.over, 8))
+		// One actionable line: how far over the target, what the ceiling is, and WHERE to edit. No
+		// excerpt — you are going to open the file regardless, and truncated prose finds nothing.
+		fmt.Fprintf(w, "%s: %.1f avg over %d blocks — %d line(s) over the %.1f target (%.1f is the ceiling); fix %s\n",
+			v.path, v.avg, v.blocks, cut, aim, v.allowed, blockRanges(v.over, 8))
 		if !blocks {
 			continue
 		}
@@ -183,8 +183,12 @@ func CommentAvg(roots []string, maxAvg float64, maxLine int, blocks bool, cap *C
 	}
 	if len(viols) > 0 {
 		cap.Note(w)
-		fmt.Fprintf(w, "%d file(s) over the comment-length trend — cut words, don't move them. "+
-			"Ideal %.1f; the max is a ceiling, not the goal.\n", len(viols), aim)
+		// The band between target and ceiling is a judgement about whether prose earns its length,
+		// which no mean can make — so name it as a choice with a reason owed, not as spare room.
+		fmt.Fprintf(w, "%d file(s) over the comment-length trend — cut words, don't move them.\n"+
+			"  Cut to %.1f unless these comments genuinely earn their length. Stopping between %.1f and %.1f\n"+
+			"  is a claim that they do, and this check cannot judge that for you — so say which you chose\n"+
+			"  and why. \"It passes\" is not that answer.\n", len(viols), aim, aim, maxAvg)
 		if len(viols) >= systemicFiles && !cap.Quiet() {
 			fmt.Fprint(w, systemicBanner)
 		}

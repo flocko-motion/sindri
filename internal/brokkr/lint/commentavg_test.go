@@ -359,11 +359,50 @@ func TestDefaultLineNamesLinesNotProse(t *testing.T) {
 	if !strings.Contains(got, "fix :") {
 		t.Errorf("the default line must name the ranges to edit:\n%s", got)
 	}
-	if !strings.Contains(got, "ideal") {
-		t.Errorf("the default line must name the ideal, not just the max:\n%s", got)
+	if !strings.Contains(got, "target") {
+		t.Errorf("the default line must measure against the target, not just the ceiling:\n%s", got)
 	}
 	if strings.Contains(got, "the offending explanation") {
 		t.Errorf("no excerpt in the default output — that is what --blocks is for:\n%s", got)
+	}
+}
+
+// TestReportAsksForTheJudgementNotJustTheNumber: reporting "ideal 1.5, max 2.0" let every reader
+// treat the band as spare room — trim to 1.9, declare the bar cleared, done. Whether prose earns
+// its length is not something a mean can decide, so the summary has to name the choice, say the
+// check cannot make it, and ask for the reason. Wording is free; those three obligations are not.
+func TestReportAsksForTheJudgementNotJustTheNumber(t *testing.T) {
+	// Past trendSample blocks, so the small-file bonus is gone and the real 2.0 ceiling applies —
+	// only then do the default target and ceiling appear as themselves.
+	var src strings.Builder
+	src.WriteString(tsHeader)
+	for i := 0; i < 12; i++ {
+		fmt.Fprintf(&src, "// explanation %d\n// continued\n// and on\nexport const a%d = %d;\n\n", i, i, i)
+	}
+	root := writeTree(t, map[string]string{"src/Wordy.tsx": src.String()})
+
+	var out bytes.Buffer
+	if _, err := CommentAvg([]string{root}, DefaultMaxCommentAvg, 0, false, nil, mustIgnore(t), &out); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	// Both ends of the band, so the reader knows what is being chosen between.
+	for _, want := range []string{"1.5", "2.0"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the summary must name %s so the choice is visible:\n%s", want, got)
+		}
+	}
+	// That the band is a claim about the prose, not permission to stop early.
+	if !strings.Contains(got, "earn their length") {
+		t.Errorf("the summary must say the band is a claim that the prose earns its length:\n%s", got)
+	}
+	// That the check disclaims the judgement rather than implying the number settled it.
+	if !strings.Contains(got, "cannot judge") {
+		t.Errorf("the summary must admit it cannot make this judgement:\n%s", got)
+	}
+	// And that a reason is owed — the only thing that separates valuable prose from padding.
+	if !strings.Contains(got, "why") {
+		t.Errorf("the summary must ask why, not only how much:\n%s", got)
 	}
 }
 
