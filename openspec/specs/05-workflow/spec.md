@@ -7,9 +7,7 @@ how a unit of work travels from a planned task to merged code. Humans plan and
 review; agents build. The individual human actions are the `action-*` specs; the
 agent's verbs are `sindri-worker issue next`, `sindri-worker submit`, `sindri-worker done`, `sindri-worker issue comment`.
 This chapter is the integration.
-
 ## Requirements
-
 ### Requirement: Plan / build / review separation
 
 Humans SHALL plan (author tasks and specs) and merge; the worker agent SHALL
@@ -49,7 +47,13 @@ A task SHALL travel: open → claimed (in_progress, set by `sindri-worker issue 
 `td start`) → submitted (in_review with a PR, set by `sindri-worker submit` via `td
 review`) → merged (task closed, by action-merge) or rejected (task back to open,
 by action-reject). A claimed task left over from a crashed run SHALL be reset on
-the next `sindri-worker issue next`.
+the next `sindri-worker issue next`. Before merging, the PR branch SHALL be rebased
+onto the current base; a rebase CONFLICT SHALL return the work to its owning worker
+(as a rejection does, with the conflict reported) rather than landing or failing
+silently. A merge that cannot be applied because the base checkout has uncommitted
+local changes is NOT the worker's to fix — it SHALL NOT reject the PR (which stays
+approved) but SHALL report a clear, actionable message naming the files to commit
+or stash before retrying.
 
 #### Scenario: Happy path
 
@@ -67,6 +71,20 @@ the next `sindri-worker issue next`.
 
 - **WHEN** `sindri-worker issue next` runs with a stale in_progress task from a prior run
 - **THEN** that task is unstarted before a new one is claimed
+
+#### Scenario: Rebase conflict returns to the worker
+
+- **WHEN** the pre-merge rebase of an approved PR's branch onto the current base
+  conflicts
+- **THEN** the work is routed back to the owning worker to resolve and resubmit,
+  just as a rejection would, with the conflict reported
+
+#### Scenario: Dirty base checkout is reported to the human
+
+- **WHEN** merging an approved PR fails because the base checkout has uncommitted
+  local changes the merge would overwrite
+- **THEN** the PR is NOT rejected (it stays approved) and the human is shown a
+  clear message naming the files to commit or stash before retrying the merge
 
 ### Requirement: Spec-driven when present
 
@@ -115,6 +133,96 @@ matching `approved-review-*`.
 
 - **WHEN** a merge is attempted before a required review is approved
 - **THEN** the merge is refused and the missing gate is named
+
+### Requirement: Leaf-only auto-assignment
+
+The automatic assigner SHALL claim only leaf tasks — those with no children. A
+task that has children SHALL NOT be auto-assigned; its leaves are the unit of
+automatic work. This holds for both the structured loop and the container
+workflow below.
+
+#### Scenario: Parent skipped by the assigner
+
+- **WHEN** the next task to auto-assign would be one that has children
+- **THEN** the assigner skips it and claims a leaf instead, never branching a
+  parent on its own
+
+### Requirement: Collaborative assignment of a marked container
+
+A free agent SHALL be assignable a whole container as a unit: any task with
+children MAY be marked as collaboratively assignable, and once marked its open
+leaf children become that agent's reserved subtask stream — and SHALL NOT be
+independently auto-assigned to other agents while the container is held. An
+unmarked parent is never assigned (only its leaves are, independently).
+
+#### Scenario: Marked container handed to one agent
+
+- **WHEN** a marked container is picked up by a free agent
+- **THEN** the agent holds the container and its open children are reserved to that
+  agent, not auto-claimed elsewhere
+
+#### Scenario: Subtask source spans bulk and interactive
+
+- **WHEN** a container's children are pre-filled and the agent is left to run, OR a
+  human feeds children to the agent live
+- **THEN** the same loop applies — the difference is only who supplies the subtasks
+  and when a PR is taken
+
+### Requirement: Non-blocking checkpoints
+
+In the container workflow, completing a subtask SHALL be a non-blocking
+checkpoint: the hub commits the work to the container branch, closes that child,
+and advances the agent to the next open child. The agent SHALL NOT block waiting
+for a review verdict between subtasks.
+
+#### Scenario: Checkpoint and continue
+
+- **WHEN** an agent finishes a subtask of its container
+- **THEN** the work is committed, the child is closed, and the agent immediately
+  receives the next open child without waiting for a verdict
+
+#### Scenario: Subtask stream exhausted
+
+- **WHEN** a container has no open children left
+- **THEN** the agent goes idle (awaiting more children or a milestone PR), rather
+  than blocking on a verdict
+
+### Requirement: Milestone PRs
+
+A milestone PR SHALL capture the current state of a container branch for the
+human to review and merge, and SHALL block the agent until that merge lands —
+which keeps the worktree quiet so the merge and the rebase are safe. The merge
+SHALL land the current state on base, rebase the branch onto the new base, and
+then the agent SHALL resume the same container — it is NOT freed to take new work
+and the branch is NOT retired. A milestone PR MAY be triggered on request (the
+human, at a checkpoint) or automatically when the container's open children are
+exhausted. Merge stays human-only and no agent merges its own work; an agent
+reviewer's opinion is advisory and optional — the human's review-and-merge is the
+gate.
+
+#### Scenario: Blocking milestone, then resume
+
+- **WHEN** a milestone PR is opened for a held container
+- **THEN** the agent waits while the human reviews and merges it, and once merged
+  the branch is rebased onto the new base and the agent resumes the same container
+
+#### Scenario: PR on request (interactive)
+
+- **WHEN** a human requests a PR for a held container at a checkpoint
+- **THEN** a milestone PR is opened for the branch's current state and the agent
+  waits for the human to review and merge it
+
+#### Scenario: PR on completion (bulk)
+
+- **WHEN** a container's last open child is closed
+- **THEN** a milestone PR may be opened automatically for the human to review and
+  merge
+
+#### Scenario: Advisory reviewer
+
+- **WHEN** an agent review is requested in the container workflow
+- **THEN** the reviewer's opinion is delivered as feedback and is not a gate — the
+  human's review and merge is what lands the work
 
 ## Structure
 

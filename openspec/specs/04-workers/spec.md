@@ -7,9 +7,7 @@ and produce PRs. Each worker is a Claude Code agent running in its own Podman
 container against its own git worktree. This spec covers the container/worktree
 lifecycle and how a worker maps to the board; the agent's task loop uses the
 gh-local workflow.
-
 ## Requirements
-
 ### Requirement: One sandboxed container per worker
 
 Each agent SHALL run as a Claude agent inside its own Podman pod, launched by the
@@ -83,6 +81,55 @@ be separate worker and reviewer binaries.
 - **WHEN** an agent pod starts
 - **THEN** the role-agnostic client and tmux are present, and the client's command
   surface is whatever the hub currently permits
+
+### Requirement: An agent may hold a container plus a rolling current subtask
+
+In the container workflow an agent's assignment SHALL be a container task together
+with a *current subtask* drawn from the container's open children. The current
+subtask rolls forward as each one is checkpointed; the agent SHALL NOT block
+between subtasks. The one deliberate pause is a milestone PR, which parks the
+agent until the human merges, after which it resumes the same container. The hub
+owns both the container assignment and the current subtask as durable state
+(recoverable after a restart, like all worker-to-task mapping). When the container
+closes, the agent is freed and rejoins normal (leaf) assignment.
+
+#### Scenario: Working state spans subtasks
+
+- **WHEN** an agent finishes one subtask of its container and takes the next
+- **THEN** it stays in a working state throughout, never parking in a blocked
+  "submitted" state between subtasks
+
+#### Scenario: Recovered after restart
+
+- **WHEN** the hub restarts while an agent holds a container
+- **THEN** the container assignment and the current subtask are reloaded from
+  durable state, not guessed from branch or worktree position
+
+#### Scenario: Freed on container completion
+
+- **WHEN** an agent's container is closed
+- **THEN** the agent is freed and becomes eligible for normal leaf assignment again
+
+### Requirement: No direct task-tracker access in the pod
+
+The agent pod image SHALL NOT include the task-tracker CLI (`td`). An agent SHALL
+reach task state — reads and writes alike — only through the hub over its socket;
+the hub is the single writer of task state, operating on the main checkout. This
+keeps the task tracker's runtime files (`.todos/`) from ever being written in, and
+committed from, an agent's worktree, so a PR branch carries only the agent's own
+changes.
+
+#### Scenario: No td in the pod
+
+- **WHEN** an agent pod starts
+- **THEN** no `td` binary is present, and the agent can read or change task state
+  only via the hub over its socket
+
+#### Scenario: Branch stays free of task-tracker churn
+
+- **WHEN** an agent's work is committed
+- **THEN** the commit contains only the agent's changes and never `.todos/`
+  runtime churn, because nothing in the worktree can write the tracker
 
 ## Structure
 
