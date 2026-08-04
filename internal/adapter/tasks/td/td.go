@@ -138,9 +138,22 @@ func Update(root, id string, o UpdateOpts) error {
 	return mutate(root, args...)
 }
 
-// Close closes a task via the self-close exception (used after a PR merge) — a
-// write, through the td tool.
+// Close closes a task via the self-close exception (used after a PR merge). td declines while an
+// issue sits in review and points at `td approve`, which sindri can never use: it created and
+// started the task, so td counts it as involved and refuses to let it review its own work. The way
+// through is to leave review and close again — retried only when td still reports in_review, so any
+// other refusal is reported as it stands.
 func Close(root, id, reason string) error {
+	err := mutate(root, "close", id, "--self-close-exception", reason)
+	if err == nil {
+		return nil
+	}
+	if t, gerr := Get(root, id); gerr != nil || t.Status != "in_review" {
+		return err
+	}
+	if serr := SetStatus(root, id, "in_progress"); serr != nil {
+		return fmt.Errorf("%w (and leaving review to retry failed: %v)", err, serr)
+	}
 	return mutate(root, "close", id, "--self-close-exception", reason)
 }
 
@@ -160,7 +173,23 @@ func run(root string, args ...string) (string, error) {
 	if err != nil {
 		return s, fmt.Errorf("td %s: %s", args[0], tdErrorMessage(s))
 	}
+	// td declines a mutation it considers out of policy and still exits 0, so the output decides.
+	// A merge trusted that exit code, believed a refused close, and reopened finished work.
+	if msg := refusal(s); msg != "" {
+		return s, fmt.Errorf("td %s refused: %s", args[0], msg)
+	}
 	return s, nil
+}
+
+// refusal is the message from an ERROR line td printed while exiting 0, or "" when it printed none.
+// Matched as a substring: the output is colourised, so the marker never starts the line.
+func refusal(out string) string {
+	for _, l := range strings.Split(out, "\n") {
+		if _, after, found := strings.Cut(l, "ERROR:"); found {
+			return strings.TrimSpace(after)
+		}
+	}
+	return ""
 }
 
 // tdErrorMessage distills td's combined output down to its actual error: the

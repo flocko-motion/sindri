@@ -126,7 +126,7 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 1 {
 			return m.agentStartStop()
 		}
-	case keyAttach: // agents/tasks: attach to the live tmux session
+	case keyAttach: // agents/tasks/prs: attach to the live tmux session
 		if m.tab == 0 {
 			// Attach to whoever is working the selected task — the row you are looking at names
 			// the work, so it should reach the agent doing it without a detour via the Agents tab.
@@ -151,6 +151,20 @@ func (m *model) onKey(k string) tea.Cmd {
 					return attachAgent(m.agentContainer(a), a.Name)
 				}
 			}
+		}
+		if m.tab == 2 {
+			// Same reasoning as tasks: the PR names the work, so attach reaches its author
+			// without a detour via the Agents tab.
+			a, ok := m.agentOnPR(m.selID())
+			switch {
+			case !ok:
+				m.flash = "no agent is working " + m.selID()
+			case a.Status == "down":
+				m.errText = "agent " + a.Name + " is down — start it first ('" + keyStartS + "' on the Agents tab)"
+			case m.cl != nil:
+				return attachAgent(m.agentContainer(a), a.Name)
+			}
+			return nil
 		}
 	case keyMerge: // prs: merge (the human gate) — if it isn't approved, offer to approve first
 		if m.tab == 2 && m.selID() != "" {

@@ -30,11 +30,9 @@ const settings = `{
   }
 }`
 
-// PrepareHome sets up a per-agent Claude home under spec.Dir (mounted at
-// /home/sindri/.claude) and a sibling config file (spec.Dir+".json", mounted at
-// /home/sindri/.claude.json), seeding host credentials so the agent is authenticated.
-// The system prompt is persisted verbatim (the workflow already composed it). HasCreds
-// is false when no host credentials were found — the caller then falls back to a shell.
+// PrepareHome writes a per-agent Claude home under spec.Dir (mounted at /home/sindri/.claude) and a
+// sibling config at spec.Dir+".json" (/home/sindri/.claude.json), seeding host credentials so the
+// agent is authenticated. HasCreds is false when the host has none — the caller falls back to a shell.
 func (Claude) PrepareHome(spec agent.HomeSpec) (agent.Home, error) {
 	if err := os.MkdirAll(spec.Dir, 0o755); err != nil {
 		return agent.Home{}, fmt.Errorf("create claude home: %w", err)
@@ -66,14 +64,40 @@ func (Claude) PrepareHome(spec agent.HomeSpec) (agent.Home, error) {
 	if err := os.WriteFile(filepath.Join(spec.Dir, "system-prompt.txt"), []byte(spec.SystemPrompt), 0o644); err != nil {
 		return agent.Home{}, fmt.Errorf("write system prompt: %w", err)
 	}
+	stageKeybindings(spec.Dir, spec.Out)
 	return agent.Home{Dir: spec.Dir, ConfigPath: configPath, HasCreds: hasCreds}, nil
 }
 
-// hostCredentials returns the user's Claude Code OAuth credentials (the JSON the pod
-// expects at ~/.claude/.credentials.json), or ok=false when none exist. Claude Code
-// keeps them in a file on Linux but in the macOS Keychain (a "Claude Code-credentials"
-// generic-password item), so on macOS we fall back to reading the Keychain —
-// announcing that on w, since it may pop a one-time "Allow" prompt.
+// stageKeybindings copies the user's ~/.claude/keybindings.json in; absence removes a copy from an
+// earlier launch, which this per-agent home would otherwise keep once the host file is gone.
+//
+// Copied rather than bind-mounted like skills: a per-file bind pins the inode and editors save by
+// rename, so the pod would keep serving the pre-edit file (as the socket and pod-bin mounts warn).
+func stageKeybindings(dir string, out io.Writer) {
+	dst := filepath.Join(dir, "keybindings.json")
+	data, found := hostClaudeFile("keybindings.json")
+	if !found {
+		_ = os.Remove(dst)
+		return
+	}
+	if err := os.WriteFile(dst, data, 0o644); err != nil {
+		fmt.Fprintf(out, "could not stage keybindings.json: %v\n", err)
+	}
+}
+
+// hostClaudeFile reads a file from the user's own ~/.claude; ok is false when there is none.
+func hostClaudeFile(name string) (data []byte, ok bool) {
+	host, err := os.UserHomeDir()
+	if err != nil {
+		return nil, false
+	}
+	data, err = os.ReadFile(filepath.Join(host, ".claude", name))
+	return data, err == nil
+}
+
+// hostCredentials returns the user's Claude Code OAuth credentials, or ok=false when none exist.
+// Linux keeps them at ~/.claude/.credentials.json, macOS in the Keychain ("Claude Code-credentials",
+// a generic-password item), so darwin falls back to that — announced on w: it may prompt for access.
 func hostCredentials(w io.Writer) (data []byte, ok bool) {
 	if host, err := os.UserHomeDir(); err == nil {
 		if data, err := os.ReadFile(filepath.Join(host, ".claude", ".credentials.json")); err == nil {

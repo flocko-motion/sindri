@@ -45,24 +45,72 @@ func TestNoTwoActionsShareAKeyOnATab(t *testing.T) {
 	}
 }
 
-// TestMutationsAreUppercase pins the convention: a lowercase key looks or navigates, so it can
-// never be the one that changes something. Approve is the case that prompted it — it used to be
-// `a`, one slip away from attach. Merge is the standing exception (long-standing muscle memory),
-// so it is named here rather than silently tolerated.
-func TestMutationsAreUppercase(t *testing.T) {
-	mutations := map[string]bool{
-		"approve": true, "reject": true, "agent-review": true, "scrap": true,
-		"delete": true, "new": true, "priority": true, "unassign": true,
-		"close": true, "options": true, "rebase": true, "forget": true,
+// TestLowercaseKeysNeverMutate pins the convention from the safe side. Every lowercase letter
+// binding must be listed here with why it is harmless; anything else must be uppercase.
+//
+// The previous version allowlisted mutation LABELS and checked those were uppercase, which is
+// fail-open: `merge` was never in the list, so `m` merging a PR on one keystroke passed for months.
+// Inverted, a new binding is a violation until someone justifies it here.
+func TestLowercaseKeysNeverMutate(t *testing.T) {
+	safe := map[string]string{
+		"a": "attach — hands the terminal to a session, changes nothing",
+		"e": "edit — opens a form ($EDITOR on agents/prs); the form is what commits",
+		"o": "open — a shell in the row's worktree",
+		"t": "tell — opens a prompt you must submit",
+		"c": "colour — opens a chooser",
+		"f": "filter — narrows the view",
+		"s": "scope — narrows the view",
+		"p": "repo — switches the active repo",
+		"r": "refresh — re-reads the board",
+		"q": "quit",
 	}
 	m := newModel(nil, nil, "/r/one")
 	for _, b := range keymap {
-		label := b.label(m)
-		if !mutations[label] || len([]rune(b.keys)) != 1 {
+		r := []rune(b.keys)
+		if len(r) != 1 || !unicode.IsLower(r[0]) || !unicode.IsLetter(r[0]) {
 			continue
 		}
-		if r := []rune(b.keys)[0]; !unicode.IsUpper(r) {
-			t.Errorf("%q mutates but is bound to lowercase %q", label, b.keys)
+		if _, ok := safe[b.keys]; !ok {
+			t.Errorf("%q is lowercase but not declared harmless — either bind it uppercase or say why here (label: %q)", b.keys, b.label(m))
+		}
+	}
+}
+
+// TestMergeIsUppercase is the headline: merge commits on the keystroke — no form, no chooser —
+// so it is the one action that most needs the shift. Spelled out, not read back from the constant.
+func TestMergeIsUppercase(t *testing.T) {
+	if keyMerge != "M" {
+		t.Errorf("merge should be M, got %q", keyMerge)
+	}
+	if got := footerOf(t, scopePRs); !strings.Contains(got, "M merge") {
+		t.Errorf("the PRs footer should offer \"M merge\":\n%s", got)
+	}
+}
+
+// TestConfirmModalsDefaultToCancel: the cursor opens on the first option, so a destructive one
+// there turns a stray Enter into the action. The approve-and-merge modal did exactly that.
+func TestConfirmModalsDefaultToCancel(t *testing.T) {
+	for _, tc := range []struct {
+		what string
+		open func(*model)
+	}{
+		{"approve & merge", func(m *model) { m.openApproveMergeChoice("pr-td-1") }},
+		{"scrap PR", func(m *model) { m.openScrapPRChoice("pr-td-1") }},
+		{"scrap task", func(m *model) { m.openScrapChoice("td-1") }},
+		{"close task", func(m *model) { m.openCloseChoice("td-1", "pr-td-1") }},
+		{"delete agent", func(m *model) { m.openDeleteChoice("dvalin") }},
+		{"remove orphan", func(m *model) { m.openRemoveOrphanChoice("dvalin") }},
+		{"forget repo", func(m *model) { m.openForgetChoice("one", "one") }},
+		{"new meeting", func(m *model) { m.openNewMeetingChoice() }},
+	} {
+		m := newModel(nil, nil, "/r/one")
+		tc.open(&m)
+		if !m.choice.active {
+			t.Errorf("%s: expected a modal", tc.what)
+			continue
+		}
+		if len(m.choice.values) == 0 || m.choice.values[0] != "cancel" {
+			t.Errorf("%s: cancel must be the default option, got %v", tc.what, m.choice.values)
 		}
 	}
 }
