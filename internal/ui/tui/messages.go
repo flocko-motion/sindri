@@ -91,6 +91,14 @@ type errMsg struct { // fatal: hub connection lost (unless a stale generation)
 type errModalMsg struct{ err error } // non-fatal: show the error modal
 type chatSentMsg struct{}            // a chat compose sent OK — clear the kept draft
 
+// formFailedMsg is a form submit the hub refused: shown in the form's own footer, with every field
+// left as typed so the reported value can be fixed and sent again.
+type formFailedMsg struct{ err error }
+
+// formAppliedMsg is a form submit the hub took. inner is the apply's own message (a fresh board,
+// usually), forwarded so accepting a form still updates what it changed.
+type formAppliedMsg struct{ inner tea.Msg }
+
 // chatFailedMsg carries the draft back after a rejected send (e.g. over the length cap), so the
 // composer reopens with the text to trim rather than losing it.
 type chatFailedMsg struct {

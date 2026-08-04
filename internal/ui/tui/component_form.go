@@ -21,13 +21,14 @@ var errStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 // the field pointers) and returns the hub action to run on submit; validate (if
 // set) returns a non-empty message to block submit and show an error.
 type formState struct {
-	active   bool
-	title    string
-	fields   []field
-	cur      int
-	apply    func() tea.Cmd
-	validate func() string
-	err      string
+	active     bool
+	submitting bool // a submit is in flight; the form stays open in case the hub refuses it
+	title      string
+	fields     []field
+	cur        int
+	apply      func() tea.Cmd
+	validate   func() string
+	err        string
 }
 
 func (f *formState) open(title string, fields []field, validate func() string, apply func() tea.Cmd) {
@@ -56,14 +57,18 @@ func (f *formState) update(msg tea.KeyMsg) tea.Cmd {
 		f.active = false
 		return nil
 	case "ctrl+s":
+		if f.submitting {
+			return nil // a second ctrl+s mid-flight would create a second task
+		}
 		if f.validate != nil {
 			if e := f.validate(); e != "" {
 				f.err = e
 				return nil
 			}
 		}
-		f.active = false
-		return f.apply()
+		f.err = ""
+		f.submitting = true
+		return submitForm(f.apply())
 	case "tab":
 		f.err = ""
 		f.move(1)
@@ -75,6 +80,24 @@ func (f *formState) update(msg tea.KeyMsg) tea.Cmd {
 	}
 	f.err = "" // editing clears a stale validation error
 	return f.fields[f.cur].update(msg)
+}
+
+// submitForm runs a form's apply and tags the outcome, so the form can survive a rejection.
+//
+// Only the client-side rules are known before the round trip; the rest — td's title length, a parent
+// the hub can't resolve — come back as an error, and closing the form before then discarded
+// everything the user had typed.
+func submitForm(apply tea.Cmd) tea.Cmd {
+	if apply == nil {
+		return func() tea.Msg { return formAppliedMsg{} }
+	}
+	return func() tea.Msg {
+		msg := apply()
+		if e, ok := msg.(errModalMsg); ok {
+			return formFailedMsg{err: e.err}
+		}
+		return formAppliedMsg{inner: msg}
+	}
 }
 
 func (f formState) view(screenW, screenH int) string {
@@ -113,6 +136,9 @@ func (f formState) view(screenW, screenH int) string {
 	lines = lines[:innerH]
 
 	footer := dimStyle.Render(padTrunc("tab/⇧tab field · ←/→ choose · ctrl+s save · esc cancel", cw))
+	if f.submitting {
+		footer = dimStyle.Render(padTrunc("saving…", cw))
+	}
 	if f.err != "" {
 		footer = errStyle.Render(padTrunc(warnGlyph+" "+f.err, cw))
 	}

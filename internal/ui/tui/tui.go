@@ -244,6 +244,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.openRepoConfigForm(msg.d)
 		}
+	case formFailedMsg: // the form keeps the typing; the reason goes in its own footer
+		m.form.submitting = false
+		m.form.err = msg.err.Error()
+		return m, nil
+	case formAppliedMsg:
+		m.form.active, m.form.submitting = false, false
+		if msg.inner == nil {
+			return m, nil
+		}
+		inner := msg.inner // forward the apply's own message, so the board still updates
+		return m, func() tea.Msg { return inner }
 	case errModalMsg:
 		m.errText = msg.err.Error() // shown over everything; a composing draft stays open beneath it
 	case chatSentMsg:
