@@ -52,6 +52,23 @@ CREATE TABLE IF NOT EXISTS prs (
   kind       TEXT NOT NULL DEFAULT 'final', -- final (task-done) | interim (mid-task contribution to the reference branch)
   PRIMARY KEY (project, id)
 );
+-- The tasks sindri owns, and the authority for them. The tasks table above is a read model the
+-- sync rebuilds from every source including this one, so durable state belongs here. Ids keep the
+-- td- prefix, which PR ids, branch names and agent state all embed.
+CREATE TABLE IF NOT EXISTS owned_tasks (
+  project     TEXT NOT NULL,
+  id          TEXT NOT NULL,
+  title       TEXT NOT NULL DEFAULT '',
+  status      TEXT NOT NULL DEFAULT 'open', -- open | in_progress | in_review | closed
+  priority    TEXT NOT NULL DEFAULT '',
+  type        TEXT NOT NULL DEFAULT 'task',
+  labels      TEXT NOT NULL DEFAULT '',
+  parent_id   TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL DEFAULT '',
+  updated_at  TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (project, id)
+);
 -- Durable priority we assign to tasks in our own db — survives the task-cache
 -- rebuild. Used mainly for openspec items, which have no source priority.
 CREATE TABLE IF NOT EXISTS task_priority (
