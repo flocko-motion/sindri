@@ -69,7 +69,7 @@ func (e *Engine) finishTask(project, id string, scrap bool) error {
 	// Each source acts only on its own ids, so this never branches on the id scheme; nothing
 	// owning it means a genuinely unknown backend.
 	handled := false
-	for _, src := range taskSources() {
+	for _, src := range e.taskSources(project) {
 		ok, err := src.Finish(root, id, scrap)
 		if err != nil {
 			return err

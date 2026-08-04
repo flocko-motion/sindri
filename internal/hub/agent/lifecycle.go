@@ -22,7 +22,6 @@ import (
 
 	agentport "github.com/flo-at/sindri/internal/adapter/agent"
 	"github.com/flo-at/sindri/internal/adapter/git"
-	"github.com/flo-at/sindri/internal/adapter/tasks/td"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agentchan"
@@ -141,9 +140,10 @@ func (s *Service) DeleteAgent(project, name string) error {
 	if !ok {
 		return fmt.Errorf("no such agent %q", name)
 	}
-	// Release the task so it isn't stranded in_progress with no owner. os-* items aren't td.
-	if st, _ := ps.GetState(name); strings.HasPrefix(st.Task, "td-") {
-		if err := td.SetStatus(root, st.Task, "open"); err != nil {
+	// Release the task so it isn't stranded in_progress with no owner. Only a task sindri owns has
+	// a status to release; a gh-/os- item's is inferred from agent_state.
+	if st, _ := ps.GetState(name); ps.OwnsTask(st.Task) {
+		if err := ps.SetOwnedStatus(st.Task, "open"); err != nil {
 			fmt.Printf("warning: reopen %s on delete of %s: %v\n", st.Task, name, err)
 		}
 		_ = s.deps.RefreshTask(project, st.Task)

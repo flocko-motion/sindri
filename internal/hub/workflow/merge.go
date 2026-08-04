@@ -131,7 +131,7 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 	// Tell every task source, so each runs its own consequence on its own ids and the workflow
 	// need not know the backend. After the local merge, so a failure warns rather than fails it.
 	note := "merged via " + prID
-	for _, src := range taskSources() {
+	for _, src := range e.taskSources(project) {
 		if err := src.OnMerged(root, pr.Task, note); err != nil {
 			log.Printf("hub: %s merged locally but a task-source close failed: %v", prID, err)
 			_ = ps.LogPR(prID, "warning", "merged locally, but closing the task upstream failed (may need a manual follow-up): "+err.Error())

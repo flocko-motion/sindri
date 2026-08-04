@@ -12,16 +12,16 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/tasks"
 	"github.com/flo-at/sindri/internal/adapter/tasks/github"
 	"github.com/flo-at/sindri/internal/adapter/tasks/spec"
-	"github.com/flo-at/sindri/internal/adapter/tasks/td"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// taskSources is the ordered set of task backends the workflow syncs from and
-// notifies on merge. Each self-filters by id scheme, so the workflow treats them
-// uniformly and never branches on which concrete source is underneath a task.
-func taskSources() []tasks.Source {
-	return []tasks.Source{td.Source{}, spec.Source{}, github.Source{}}
+// taskSources is the ordered set of task backends the workflow syncs from and notifies on merge.
+// Each self-filters by id scheme, so the workflow treats them uniformly and never branches on which
+// concrete source is underneath a task. Project-scoped, because the source sindri owns reads the
+// hub's own store rather than a tool in the repo.
+func (e *Engine) taskSources(project string) []tasks.Source {
+	return []tasks.Source{ownedSource{e.store.For(project)}, spec.Source{}, github.Source{}}
 }
 
 // Deps is the seam the workflow needs back into the hub — everything the

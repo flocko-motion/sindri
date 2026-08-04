@@ -79,14 +79,6 @@ func TestTasksFromDBMatchesCLI(t *testing.T) {
 		t.Errorf("expected no labels, got %#v", bug.Labels)
 	}
 
-	// taskFromDB returns the same single task.
-	got, err := taskFromDB(root, auth.ID)
-	if err != nil {
-		t.Fatalf("taskFromDB: %v", err)
-	}
-	if got.ID != auth.ID || got.Title != auth.Title {
-		t.Fatalf("taskFromDB mismatch: %+v vs %+v", got, auth)
-	}
 }
 
 // TestTasksFromDBCarriesDescription guards the fix: td stores a task's body in the
@@ -114,13 +106,5 @@ func TestTasksFromDBCarriesDescription(t *testing.T) {
 	// A task with no body must read as empty, not as a scan failure or a stray value.
 	if none, ok := find(tasks, "No body on this one"); !ok || none.Description != "" {
 		t.Errorf("bodyless task should have an empty description, got %q", none.Description)
-	}
-	// The single-task read shares dbCols, so it must agree with the list read.
-	one, err := taskFromDB(root, got.ID)
-	if err != nil {
-		t.Fatalf("taskFromDB: %v", err)
-	}
-	if one.Description != body {
-		t.Errorf("single read description = %q, want %q", one.Description, body)
 	}
 }

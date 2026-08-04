@@ -1,11 +1,11 @@
 // package: hub/comments / service
 // type:    logic (unified task-comment sync — a hub module, not an adapter)
-// job:     keep a task's comment thread fresh in the store from its source — td
-// comments for td-*, GitHub issue comments for gh-*. Reconciles by
-// re-fetching the source's current set (store.ReplaceComments), TTL-
-// throttled so a view is cheap, with a forced path for the refresh key.
-// limits:  td-*/gh-* only (os-* has no comments); external calls go through the td
-// + github adapters; the hub wires ProjectRoot/Notify via a small seam.
+// job:     keep a task's comment thread fresh in the store from its source — GitHub
+// issue comments for gh-*. Reconciles by re-fetching the source's current set
+// (store.ReplaceComments), TTL-throttled so a view is cheap, with a forced path
+// for the refresh key.
+// limits:  gh-* only; a task sindri owns holds its comments here already, and os-*
+// carries none. The hub wires ProjectRoot/Notify via a small seam.
 package comments
 
 import (
@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/tasks/github"
-	"github.com/flo-at/sindri/internal/adapter/tasks/td"
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // ttl throttles re-fetches: a view re-syncs a task's comments at most this often (a
@@ -90,18 +90,10 @@ func (s *Service) sync(project, id string, force bool) error {
 		comments []store.Comment
 	)
 	switch {
-	case strings.HasPrefix(id, "td-"):
-		source = "td"
-		tc, err := td.Comments(root, id)
-		if err != nil {
-			return err
-		}
-		for _, c := range tc {
-			comments = append(comments, store.Comment{
-				Source: source, SourceRef: c.ID, Author: c.Author, Body: c.Body,
-				CreatedAt: c.CreatedAt.UTC().Format(time.RFC3339),
-			})
-		}
+	case strings.HasPrefix(id, workflow.OwnedPrefix):
+		// A task sindri owns has no upstream to reconcile against — the store IS the origin, so
+		// syncing it would drop what is only held here.
+		return nil
 	case strings.HasPrefix(id, "gh-"):
 		source = "github"
 		n, ok := github.Number(id)

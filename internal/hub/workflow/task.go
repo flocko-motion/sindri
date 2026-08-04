@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
-	"github.com/flo-at/sindri/internal/adapter/tasks/td"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/task"
@@ -52,16 +51,20 @@ func (e *Engine) TaskInfo(project, id string) (store.Task, error) {
 	// Repair this one task's status against reality before returning it (task info /
 	// detail is a natural single-task check point).
 	_ = e.ReconcileTask(project, id)
-	root := e.deps.ProjectRoot(project)
-	t, err := td.Get(root, id)
+	ps := e.store.For(project)
+	owned, ok, err := ps.OwnedTask(id)
 	if err != nil {
 		return store.Task{}, err
 	}
-	st := ToStoreTask(t)
-	if d, a, derr := td.Detail(root, id); derr == nil {
-		st.Description, st.Acceptance = d, a
+	if !ok {
+		return store.Task{}, fmt.Errorf("no such task %q", id)
 	}
-	_ = e.store.For(project).UpsertTask(st)
+	st := store.Task{
+		ID: owned.ID, Title: owned.Title, Status: owned.Status, Priority: owned.Priority,
+		Type: owned.Type, Labels: owned.Labels, ParentID: owned.ParentID,
+		Description: owned.Description,
+	}
+	_ = ps.UpsertTask(st)
 	st.Comments = e.deps.TaskComments(project, id)
 	return st, nil
 }
@@ -82,20 +85,19 @@ func (e *Engine) CreateTask(project string, s TaskSpec) (string, error) {
 	if err := e.checkParent(project, s.Parent, ""); err != nil {
 		return "", err
 	}
-	root := e.deps.ProjectRoot(project)
-	out, err := td.Create(root, s.Title, td.CreateOpts{
-		Type: s.Type, Priority: s.Priority, Body: s.Description, Labels: s.Labels, Parent: s.Parent,
-	})
+	id, err := NewOwnedID()
 	if err != nil {
 		return "", err
 	}
-	// td prints e.g. "CREATED td-1add0f" — return just the id.
-	id := strings.TrimSpace(out)
-	for _, f := range strings.Fields(out) {
-		if strings.HasPrefix(f, "td-") {
-			id = f
-			break
-		}
+	typ := s.Type
+	if typ == "" {
+		typ = "task"
+	}
+	if err := e.store.For(project).PutOwnedTask(store.OwnedTask{
+		ID: id, Title: s.Title, Status: "open", Priority: s.Priority, Type: typ,
+		Labels: strings.Join(s.Labels, ","), ParentID: s.Parent, Description: s.Description,
+	}); err != nil {
+		return "", err
 	}
 	e.refreshCachedTask(project, id) // targeted: pull just the new task, not a full re-sync
 	e.deps.Notify()
@@ -144,7 +146,7 @@ func (e *Engine) HealPlannerTasks() {
 		if !strings.HasPrefix(st.Task, "td-") {
 			continue
 		}
-		_ = td.SetStatus(e.deps.ProjectRoot(a.Project), st.Task, "open")
+		_ = ps.SetOwnedStatus(st.Task, "open")
 		_ = ps.SetState(store.AgentState{Agent: a.Name, Phase: "planning"})
 		_ = ps.Log(a.Name, "unassign", st.Task+" (planners don't hold tasks)")
 	}
@@ -166,8 +168,8 @@ func (e *Engine) UnassignTask(project, id string) error {
 		_ = ps.SetState(store.AgentState{Agent: a.Name, Phase: "idle"})
 		_ = ps.Log(a.Name, "unassign", id)
 	}
-	if strings.HasPrefix(id, "td-") {
-		if err := td.SetStatus(e.deps.ProjectRoot(project), id, "open"); err != nil {
+	if ps.OwnsTask(id) {
+		if err := ps.SetOwnedStatus(id, "open"); err != nil {
 			return err
 		}
 	}
@@ -228,14 +230,17 @@ func (e *Engine) EditTask(project, id string, s TaskSpec) error {
 	if err := e.checkParent(project, s.Parent, id); err != nil {
 		return err
 	}
-	if strings.HasPrefix(id, "td-") {
-		if err := td.Update(e.deps.ProjectRoot(project), id, td.UpdateOpts{
-			Title: s.Title, Type: s.Type, Priority: s.Priority, Body: s.Description, Labels: s.Labels, Parent: s.Parent,
-		}); err != nil {
+	ps := e.store.For(project)
+	if owned, ok, oerr := ps.OwnedTask(id); oerr != nil {
+		return oerr
+	} else if ok {
+		// Only what the spec carries changes; an empty field leaves the stored one as it is.
+		applySpec(&owned, s)
+		if err := ps.PutOwnedTask(owned); err != nil {
 			return err
 		}
 	} else if s.Priority != "" {
-		if err := e.store.For(project).SetPriorityOverride(id, s.Priority); err != nil {
+		if err := ps.SetPriorityOverride(id, s.Priority); err != nil {
 			return err
 		}
 	}
@@ -390,12 +395,17 @@ func (e *Engine) ForceSyncTasks(project string) error { return e.syncTasks(proje
 func (e *Engine) syncTasks(project string, force bool) error {
 	root := e.deps.ProjectRoot(project)
 	ps := e.store.For(project)
+	// Before reading any source: a repo arriving with a td backlog gets it once, or its tasks
+	// would simply be absent from the moment td stopped being a source.
+	if err := e.importTdOnce(project, root); err != nil {
+		return err
+	}
 	var rows []store.Task
 
 	// Every source treated identically — the hub never branches on which it is. Each self-gates,
 	// normalizes to task.Task, and throttles internally. td errors fail the sync (it is primary);
 	// a network source degrades to its last good list.
-	for _, src := range taskSources() {
+	for _, src := range e.taskSources(project) {
 		if !src.Enabled(root) {
 			continue
 		}
@@ -420,12 +430,12 @@ func (e *Engine) syncTasks(project string, force bool) error {
 
 // SetPriority assigns a task's priority (a P-code) in a project.
 func (e *Engine) SetPriority(project, id, priority string) error {
-	if strings.HasPrefix(id, "td-") {
-		if err := td.SetPriority(e.deps.ProjectRoot(project), id, priority); err != nil {
+	if ps := e.store.For(project); ps.OwnsTask(id) {
+		if err := ps.SetOwnedPriority(id, priority); err != nil {
 			return err
 		}
 	} else {
-		if err := e.store.For(project).SetPriorityOverride(id, priority); err != nil {
+		if err := ps.SetPriorityOverride(id, priority); err != nil {
 			return err
 		}
 	}
@@ -513,11 +523,10 @@ func (e *Engine) claimLeaf(project, worker string) (string, bool, error) {
 	}
 	wt := filepath.Join(root, a.Workspace)
 	branch := t.ID
-	// Only td owns a task's status. A gh-* issue's "in_progress" lives in agent_state
-	// (which OpenLeaves honors) — GitHub isn't told a worker started; the issue is
-	// touched only on merge (close+comment). Calling td for a gh-/os- id would error.
-	if strings.HasPrefix(t.ID, "td-") {
-		if err := td.SetStatus(root, t.ID, "in_progress"); err != nil {
+	// Only a task sindri owns carries a status of its own. A gh-* issue's "in_progress" lives in
+	// agent_state (which OpenLeaves honours) — GitHub is told nothing until the merge closes it.
+	if ps.OwnsTask(t.ID) {
+		if err := ps.SetOwnedStatus(t.ID, "in_progress"); err != nil {
 			return "", false, err
 		}
 		_ = e.RefreshTask(project, t.ID)
@@ -571,7 +580,7 @@ func (e *Engine) claimContainer(project, worker string) (string, bool, error) {
 		return "", false, err
 	}
 	child := children[0]
-	if err := td.SetStatus(root, child.ID, "in_progress"); err != nil {
+	if err := ps.SetOwnedStatus(child.ID, "in_progress"); err != nil {
 		return "", false, err
 	}
 	_ = e.RefreshTask(project, child.ID)
@@ -605,7 +614,7 @@ func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) 
 	if err := git.CommitAll(wt, msg); err != nil {
 		return 1, err
 	}
-	if err := td.SetStatus(root, st.Task, "closed"); err != nil {
+	if err := ps.SetOwnedStatus(st.Task, "closed"); err != nil {
 		return 1, err
 	}
 	_ = e.RefreshTask(c.Project, st.Task)
@@ -630,7 +639,7 @@ func (e *Engine) advanceContainer(project, agent, container string) (store.Task,
 		return store.Task{}, false
 	}
 	child := children[0]
-	if err := td.SetStatus(e.deps.ProjectRoot(project), child.ID, "in_progress"); err != nil {
+	if err := ps.SetOwnedStatus(child.ID, "in_progress"); err != nil {
 		return store.Task{}, false
 	}
 	_ = e.RefreshTask(project, child.ID)
