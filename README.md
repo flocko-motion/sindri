@@ -51,6 +51,11 @@ The one thing you bring yourself: **Claude credentials** at `~/.claude` (sindri
 seeds them into the agent pods). The agent container image is built automatically
 on first `sindri agent start` (needs network that once).
 
+Agents also inherit what you've set up for yourself in `~/.claude`: your **skills**
+(mounted live and read-only — host edits land without a relaunch) and your
+**`keybindings.json`** (copied in at launch, so an edit applies to the next launch).
+Both are optional; without them the agent runs Claude's defaults.
+
 Then, in any repo, `sindri coauthor` gets you going in one command (see the Quick
 start below) — it starts the per-repo hub for you, so you rarely launch one by hand.
 
