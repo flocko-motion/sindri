@@ -133,3 +133,51 @@ func TestEscAbandonsAStuckSubmit(t *testing.T) {
 		t.Error("esc must close a form waiting on the hub")
 	}
 }
+
+// TestFixTheTitleAndSubmitAgain is the third thing the report asked for: after a refusal you edit
+// the offending field and send it again, and the second attempt carries the edit.
+func TestFixTheTitleAndSubmitAgain(t *testing.T) {
+	var sent []string
+	outcome := tea.Msg(errModalMsg{errors.New("title too short (5 chars, need 15)")})
+	m := newModel(nil, nil, "")
+	m.w, m.h = 100, 40
+	title := newTextField("title", "short")
+	desc := newTextareaField("description", "hard-won prose")
+	m.form.open("new task", []field{title, desc}, nil, func() tea.Cmd {
+		v := title.value()
+		return func() tea.Msg { sent = append(sent, v); return outcome }
+	})
+
+	// First attempt: refused.
+	cmd := m.form.update(keyMsg("ctrl+s"))
+	next, _ := m.Update(cmd())
+	m = next.(model)
+	if !m.form.active {
+		t.Fatal("form should still be open")
+	}
+
+	// Type a longer title into the focused field, then send again.
+	for _, r := range " but now much longer" {
+		m.form.update(keyMsg(string(r)))
+	}
+	outcome = resumedMsg{} // the hub accepts this time
+	cmd2 := m.form.update(keyMsg("ctrl+s"))
+	if cmd2 == nil {
+		t.Fatal("a corrected form must be submittable again")
+	}
+	next2, _ := m.Update(cmd2())
+	m = next2.(model)
+
+	if len(sent) != 2 {
+		t.Fatalf("expected two attempts, got %v", sent)
+	}
+	if !strings.Contains(sent[1], "much longer") {
+		t.Errorf("the second attempt should carry the edit, sent %q", sent[1])
+	}
+	if m.form.active {
+		t.Error("an accepted resubmit must close the form")
+	}
+	if got := m.form.fields[1].value(); !strings.Contains(got, "hard-won prose") {
+		t.Errorf("the description must have survived both attempts, got %q", got)
+	}
+}
