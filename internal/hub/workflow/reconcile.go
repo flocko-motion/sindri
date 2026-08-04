@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/tasks/td"
+	"github.com/flo-at/sindri/internal/hub/task"
 )
 
 // refreshTask re-reads one task from td and updates its cached row — the targeted
@@ -107,17 +108,19 @@ func (e *Engine) ReconcileTask(project, id string) error {
 	if !strings.HasPrefix(id, "td-") {
 		return nil
 	}
-	ps := e.store.For(project)
-	t, ok, err := ps.GetTask(id)
-	if err != nil || !ok {
+	// Status read from td, never the cache: the cache lags every write, and a correction computed
+	// from a stale row overwrites whatever changed since. A merge closed a task, this reopened it
+	// 1.7s later from a cached "in_progress", and the worker re-claimed work it had just finished.
+	live, err := td.Get(e.deps.ProjectRoot(project), id)
+	if err != nil {
 		return err
 	}
 	activePR, assigned, err := e.taskReality(project, id)
 	if err != nil {
 		return err
 	}
-	want := reconciledStatus(t.Status, activePR, assigned)
-	if want == t.Status {
+	want := reconciledStatus(live.Status, activePR, assigned)
+	if want == live.Status {
 		return nil
 	}
 	if err := td.SetStatus(e.deps.ProjectRoot(project), id, want); err != nil {
@@ -130,7 +133,9 @@ func (e *Engine) ReconcileTask(project, id string) error {
 // TUI-startup sweep). A per-task failure is logged, never fatal to the sweep.
 func (e *Engine) ReconcileTasks(project string) error {
 	ps := e.store.For(project)
-	tasks, err := ps.AllTasks()
+	// One read of td for the whole sweep, for the reason ReconcileTask reads it per task: deciding
+	// from cached rows let this sweep undo writes newer than the cache.
+	tasks, err := td.Tasks(e.deps.ProjectRoot(project), task.FilterAll)
 	if err != nil {
 		return err
 	}
