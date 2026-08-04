@@ -81,7 +81,9 @@ func (m model) selPRApproved() bool {
 func (m *model) openApproveMergeChoice(id string) {
 	m.choice = choiceModalState{
 		active: true, title: id + " isn't approved yet — approve and merge?",
-		options: []string{"approve & merge", "cancel"}, values: []string{"merge", "cancel"},
+		// Cancel first, as every other confirm here: the cursor opens on the first option, so
+		// leading with the merge made Enter approve AND merge a PR nobody had reviewed.
+		options: []string{"cancel", "approve & merge"}, values: []string{"cancel", "merge"},
 		apply: func(v string) tea.Cmd {
 			if v != "merge" {
 				return nil

@@ -14,8 +14,12 @@ import "strings"
 // that are compound in the help (tab, pane, move) are dispatched by their literal
 // tea strings in onKey and appear in the keymap only as display rows.
 //
-// CASE IS THE CONVENTION: lowercase looks or navigates, uppercase changes something.
-// A mistyped lowercase key must never mutate — which is why approve is A, not a.
+// CASE IS THE CONVENTION: lowercase looks or navigates, uppercase changes something. The binding
+// direction that carries the safety is lowercase: a mistyped one must never commit a change. It may
+// OPEN a form, chooser or prompt that then commits, since that flow is confirmable and esc cancels.
+//
+// The vim-family view keys (J/K scroll, G bottom, Y yank) are uppercase and mutate nothing; they
+// keep the shape a terminal user already has in their fingers.
 const (
 	keyNew      = "N" // new task / new agent
 	keyEdit     = "e" // edit the selection: task fields (tasks) / open the workspace in $EDITOR (agents, prs)
@@ -29,7 +33,7 @@ const (
 	keyStartS   = "S" // agent start/stop
 	keyTell     = "t" // tell an agent / show a PR's task
 	keyAttach   = "a" // attach to an agent's session (agents, tasks, prs)
-	keyMerge    = "m" // merge a PR
+	keyMerge    = "M" // merge a PR — commits on the keystroke, so it takes the mutation case
 	keyDelete   = "D" // delete an agent
 	keyLint     = "L" // lint a PR
 	keyVerify   = "V" // verify (materialize) a PR
