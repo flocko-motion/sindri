@@ -116,13 +116,21 @@ spec written from your own assumptions is the failure mode of this role.
   question, and ask even when you could guess — a guess in a spec becomes a guess in
   the code. Keep going until nothing is left to ask, then state the plan you now
   believe in and have the user confirm it.
-- ` + "`sindri create-task \"<title>\"`" + ` proposes a task. It needs the user's
-  approval before any worker can pick it up — you'll be told if it's approved or
-  rejected (with a reason).
-- Draft specs in /workspace/openspec. When a draft is ready — OR whenever you
-  want it judged as a whole ("is this good?") — open a PR with
+- ` + "`sindri create-task \"<title>\"`" + ` proposes a task — a complete outcome
+  the interview can end in on its own. It needs the user's approval before any
+  worker can pick it up; you'll be told if it's approved or rejected (with a
+  reason). ` + "`--parent <id>`" + ` hangs it under another task or an openspec
+  change, so a feature that is really several pieces of backlog work becomes a
+  hierarchy: propose the container first (` + "`--type epic`" + ` reads well for
+  it), then each piece with ` + "`--parent`" + ` pointed at it. Backlog work with
+  nothing worth writing down ends here: propose the tasks, then
+  ` + "`sindri state idle`" + ` — no spec, no PR required.
+- Draft specs in /workspace/openspec for work that needs one — a design worth
+  recording, a tradeoff a future reader would otherwise have to reconstruct.
+  When a draft is ready — OR whenever you want it judged as a whole
+  ("is this good?") — open a PR with
   ` + "`sindri openspec submit \"<summary>\"`" + `. The PR IS how the user and
-  reviewer read, review, and decide on your work. Do NOT ask the user to "read
+  reviewer read, review, and decide on that work. Do NOT ask the user to "read
   through" your files or tell them you're "done" and wait — submit the PR; that
   is the review. After any merge, your branch is rebased for you.
 - Nothing gets WRITTEN until the user sends the single word ` + "`GO`" + `. Not "go
@@ -264,8 +272,13 @@ func MsgPlanAssignment(goal, arch, reading string) string {
 
 	b.WriteString("PHASE 4 — write nothing until the user sends " + GoToken + ":\n")
 	b.WriteString(GoRule + "\n")
-	b.WriteString("  - once you have it: draft the spec in /workspace/openspec, propose tasks " +
-		"with `sindri create-task \"<title>\"`, then `sindri openspec submit \"<summary>\"`.\n\n")
+	b.WriteString("  - decide which of these the interview settled — ask if it's still unclear, " +
+		"don't default to one:\n")
+	b.WriteString("  - just backlog work, nothing worth writing down: `sindri create-task " +
+		"\"<title>\"` for each piece — `--parent` hangs children under a container " +
+		"(`--type epic` reads well for that one) — then `sindri state idle`. No spec, no PR.\n")
+	b.WriteString("  - work with a design worth recording: draft the spec in /workspace/openspec, " +
+		"propose its tasks the same way, then `sindri openspec submit \"<summary>\"`.\n\n")
 	b.WriteString("Do not skip ahead. Drafting before the interview means specifying your " +
 		"assumptions instead of their requirements — and once written, you will defend them. " +
 		"If you have already started, stop and go back to phase 1.")

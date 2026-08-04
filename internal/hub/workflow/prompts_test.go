@@ -29,6 +29,31 @@ func TestSystemPromptCarriesArchitecture(t *testing.T) {
 	}
 }
 
+// TestPlannerBriefOffersTaskOnlyPath: create-task and --parent hierarchies already worked, but
+// the durable brief framed openspec as the only way a plan concludes. It must now say a plan can
+// end in nothing but approved backlog tasks — no spec, no PR — and give the hierarchy vocabulary
+// (--parent, --type epic) hierarchies need. Other roles never see planner-only guidance.
+func TestPlannerBriefOffersTaskOnlyPath(t *testing.T) {
+	p := SystemPrompt("galar", "planner", "", "ARCHITECTURE.md")
+	for _, want := range []string{
+		"a complete outcome",
+		"--parent",
+		"--type epic",
+		"sindri state idle",
+		"no spec, no PR required",
+		"for work that needs one",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("the planner brief must offer the task-only path, missing %q:\n%s", want, p)
+		}
+	}
+	for _, role := range []string{"worker", "reviewer", "coauthor"} {
+		if p := SystemPrompt("x", role, "", "ARCHITECTURE.md"); strings.Contains(p, "create-task") {
+			t.Errorf("%s should not see the planner's create-task guidance:\n%s", role, p)
+		}
+	}
+}
+
 // TestGuardRepliesNameTheRealState: the replies an agent hits when a verb doesn't apply
 // must describe its ACTUAL state. The flat "run `sindri` to pick up a task first" was
 // true only when idle — a worker whose PR was under review got told to abandon the task

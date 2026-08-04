@@ -85,6 +85,28 @@ func TestPlanAssignmentDropsUnconfiguredReading(t *testing.T) {
 	}
 }
 
+// TestPlanAssignmentOffersTaskOnlyPath: Phase 4 used to present one unconditional sequence —
+// draft a spec, then submit it — which left "just create the backlog tasks, no spec needed" out
+// of the brief entirely, even though create-task and --parent hierarchies already worked. The
+// brief must now name that as a first-class outcome, alongside the spec path, and hand it the
+// vocabulary (--parent, --type epic) a multi-piece backlog needs.
+func TestPlanAssignmentOffersTaskOnlyPath(t *testing.T) {
+	msg := MsgPlanAssignment("a query API", "docs/ARCH.md", "")
+	for _, want := range []string{
+		"just backlog work, nothing worth writing down",
+		"--parent",
+		"--type epic",
+		"sindri state idle",
+		"No spec, no PR",
+		"work with a design worth recording",
+		"openspec submit", // the spec path still ends here when the interview calls for one
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the brief must offer the task-only path, missing %q:\n%s", want, msg)
+		}
+	}
+}
+
 // TestAssignPlanRefusedWithAnOpenPR: a planner drafts on ONE standing branch, so a second plan
 // would pile unreviewed work onto specs still awaiting a verdict — and merging that PR would land
 // two decisions the user agreed to one of.
