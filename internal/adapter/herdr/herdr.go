@@ -1,12 +1,9 @@
 // package: adapter/herdr / herdr
-// type:    adapter (external tool: herdr, the agent multiplexer)
-// job:     when `sindri agent attach` runs inside a herdr pane, report the pane to
-// herdr's sidebar under the agent's own name (e.g. "austri"), sourced as
-// "sindri" (the reporting tool), with a live state — so the agent shows up
-// there as if it ran natively.
-// limits:  optional UI nicety, best-effort — a no-op outside herdr, and any failure
-// is swallowed so it never disturbs the terminal handover. The `herdr`
-// binary + HERDR_* env are present only inside a herdr pane.
+// type:    adapter (external tool: herdr)
+// job:     tell herdr which agent occupies the current pane, and drop that claim on
+// detach — argv built pure (like adapter/tmux) so the flags each herdr
+// subcommand requires are covered by tests rather than discovered in use.
+// limits:  builds and runs; WHEN to report is ui/attach's. Best-effort by design.
 package herdr
 
 import (
@@ -14,58 +11,68 @@ import (
 	"os/exec"
 )
 
-// InPane reports whether we're running inside a herdr-managed pane — HERDR_ENV=1 plus
-// a pane id to target (both are set by herdr on every pane).
+// source identifies sindri's claims to herdr; release must name the same source that reported.
+const source = "sindri"
+
+// InPane reports whether we run inside a herdr-managed pane. Both vars are set on every pane, and
+// the id is what every command targets.
 func InPane() bool {
 	return os.Getenv("HERDR_ENV") == "1" && os.Getenv("HERDR_PANE_ID") != ""
 }
 
-// Report labels the current herdr pane as this agent, in the sidebar and its toasts, so the name
-// must sit in the agent field rather than only the display override. report-metadata then re-asserts
-// it, or herdr's own detection labels the pane "claude". Best-effort: never disturbs the attach.
-func Report(name, state string) {
-	pane := os.Getenv("HERDR_PANE_ID")
-	if pane == "" {
+// ReportArgv claims the pane for name. report-metadata pins the display name too, or herdr's own
+// detection labels the pane "claude" — the agent field alone drives the sidebar and toasts.
+func ReportArgv(pane, name, state string) [][]string {
+	return [][]string{
+		reportAgentArgv(pane, name, state),
+		{"pane", "report-metadata", pane, "--source", source, "--agent", name, "--display-agent", name},
+	}
+}
+
+// StateArgv refreshes the live state during a long attach; ReportArgv already pinned the display.
+func StateArgv(pane, name, state string) [][]string {
+	return [][]string{reportAgentArgv(pane, name, state)}
+}
+
+// ReleaseArgv gives the pane back to herdr's own detection. release-agent REQUIRES --agent, so the
+// name has to be carried here from the report: without it herdr exits 2 and the claim survives,
+// which left every pane ever attached from still reporting an agent that had long since detached.
+func ReleaseArgv(pane, name string) [][]string {
+	return [][]string{
+		{"pane", "release-agent", pane, "--source", source, "--agent", name},
+		{"pane", "report-metadata", pane, "--source", source, "--clear-display-agent"},
+	}
+}
+
+func reportAgentArgv(pane, name, state string) []string {
+	return []string{"pane", "report-agent", pane, "--source", source, "--agent", name, "--state", state}
+}
+
+// Report claims the current pane for name.
+func Report(name, state string) { run(ReportArgv(pane(), name, state)) }
+
+// ReportState refreshes only the live state.
+func ReportState(name, state string) { run(StateArgv(pane(), name, state)) }
+
+// Release drops the claim on name. Takes the name because herdr will not release without it.
+func Release(name string) { run(ReleaseArgv(pane(), name)) }
+
+func pane() string { return os.Getenv("HERDR_PANE_ID") }
+
+// run executes each argv, skipping everything when there is no pane to target. Failures are
+// swallowed on purpose: a caller is mid-attach and often owns the screen, so writing there would
+// corrupt it. Argv correctness is a test's job (-> herdr_test.go), not a runtime discovery.
+func run(argvs [][]string) {
+	if pane() == "" {
 		return
 	}
-	reportAgent(pane, name, state)
-	_ = exec.Command("herdr", "pane", "report-metadata", pane,
-		"--source", "sindri", "--agent", name, "--display-agent", name).Run()
-}
-
-// ReportState refreshes only the live state (report-agent), for the periodic updates
-// that keep herdr current during a long attach — the display metadata is already set
-// by the initial Report, so there's no need to re-send it each tick. Best-effort.
-func ReportState(name, state string) {
-	pane := os.Getenv("HERDR_PANE_ID")
-	if pane == "" {
-		return
+	for _, argv := range argvs {
+		_ = exec.Command("herdr", argv...).Run()
 	}
-	reportAgent(pane, name, state)
 }
 
-// reportAgent tells herdr the pane is this named agent in the given state. The name
-// goes in --agent (herdr's authoritative label for both sidebar and toasts).
-func reportAgent(pane, name, state string) {
-	_ = exec.Command("herdr", "pane", "report-agent", pane,
-		"--source", "sindri", "--agent", name, "--state", state).Run()
-}
-
-// Release drops sindri's sidebar authority over the pane on detach — clearing both
-// the agent report and the display name — so herdr falls back to its own detection
-// for what is now a plain shell. Best-effort.
-func Release() {
-	pane := os.Getenv("HERDR_PANE_ID")
-	if pane == "" {
-		return
-	}
-	_ = exec.Command("herdr", "pane", "release-agent", pane, "--source", "sindri").Run()
-	_ = exec.Command("herdr", "pane", "report-metadata", pane,
-		"--source", "sindri", "--clear-display-agent").Run()
-}
-
-// State projects sindri's runtime substate (busy|blocked|idle|"") onto herdr's agent
-// vocabulary. On attach the agent is live, so an unknown runtime maps to "working".
+// State projects sindri's runtime substate onto herdr's vocabulary. On attach the agent is live, so
+// an unknown runtime means working.
 func State(runtime string) string {
 	switch runtime {
 	case "blocked":

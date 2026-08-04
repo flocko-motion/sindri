@@ -54,7 +54,7 @@ func ReportToHerdr(cname, name string) (stop func()) {
 	return func() {
 		once.Do(func() {
 			close(done)
-			herdr.Release()
+			herdr.Release(name)
 		})
 	}
 }
