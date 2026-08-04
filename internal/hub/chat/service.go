@@ -224,11 +224,18 @@ func (s *Service) UserMessage(line string) error {
 		return fmt.Errorf("empty message")
 	}
 	s.Heartbeat() // the user just posted — they're present
-	if strings.HasPrefix(line, "/") {
+	if IsCommand(line) {
 		return s.command(line)
 	}
 	_, err := s.Say(line)
 	return err
+}
+
+// IsCommand reports whether a line is an in-chat command rather than a message. Exported so a
+// front-end can tell the two apart — a composer submits a command on Enter — without a second
+// copy of the rule that would drift from this one.
+func IsCommand(line string) bool {
+	return strings.HasPrefix(strings.TrimSpace(line), "/")
 }
 
 // Cmd is the agent-facing verb; the registry hides it from non-members, this gates presence.
@@ -371,12 +378,21 @@ func (s *Service) broadcast(senderProject, senderName, body string) (store.ChatM
 	// An icon, not colour: this line is TYPED INTO a session, where ANSI would be noise.
 	// It also marks the human in every message, so no agent mistakes them for a peer.
 	line := fmt.Sprintf("[meeting] %s %s: %s", Icon(senderName), senderName, body)
+	// Concurrently: each delivery is a container exec into one agent's tmux, so serial fan-out cost
+	// the sender the SUM of them — seconds of dead keyboard in a room of four. Each agent still
+	// receives this message exactly once, and ordering within one agent is unaffected.
+	var wg sync.WaitGroup
 	for _, m := range members {
 		if m.Project == senderProject && m.Name == senderName {
 			continue // the sender already has its own words
 		}
-		s.deliver(m.Project, m.Name, line)
+		wg.Add(1)
+		go func(project, name string) {
+			defer wg.Done()
+			s.deliver(project, name, line)
+		}(m.Project, m.Name)
 	}
+	wg.Wait() // the caller's verdict still means "delivered", so a failure is still reported
 	s.d.Notify()
 	return msg, nil
 }

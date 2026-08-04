@@ -89,7 +89,14 @@ type errMsg struct { // fatal: hub connection lost (unless a stale generation)
 	gen int
 }
 type errModalMsg struct{ err error } // non-fatal: show the error modal
-type chatSentMsg struct{}            // a chat compose sent OK — clear + close the composer
+type chatSentMsg struct{}            // a chat compose sent OK — clear the kept draft
+
+// chatFailedMsg carries the draft back after a rejected send (e.g. over the length cap), so the
+// composer reopens with the text to trim rather than losing it.
+type chatFailedMsg struct {
+	err   error
+	draft string
+}
 
 // resumedMsg fires when a tea.ExecProcess child exits: ExecProcess skips its repaint when already
 // in the alt screen, losing the footer, so Update answers with a full tea.ClearScreen.

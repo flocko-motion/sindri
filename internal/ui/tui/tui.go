@@ -247,9 +247,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case errModalMsg:
 		m.errText = msg.err.Error() // shown over everything; a composing draft stays open beneath it
 	case chatSentMsg:
-		m.composer.Reset() // sent OK — clear + close the composer
-		m.composing = false
-		m.composer.Blur()
+		m.composer.Reset() // the hub has it; the kept draft is no longer needed
+		m.flash = "sent"
+	case chatFailedMsg: // reopen on the draft, so the reason and the text are in front of you
+		m.errText = msg.err.Error()
+		m.composer.SetValue(msg.draft)
+		m.composing = true
+		return m, m.composer.Focus()
 	case openEditMsg: // pre-edit sync completed — open the form from the fresh task
 		m.openTaskForm(true, msg.t)
 	case errMsg:
@@ -350,7 +354,7 @@ func (m model) View() string {
 	case m.mode != inputNone:
 		foot = dimStyle.Render(padTrunc("enter submit · esc cancel", m.w)) + "\n" + m.input.View()
 	case m.composing:
-		foot = dimStyle.Render(padTrunc("ctrl+s send · esc cancel · enter newline", m.w)) + "\n" +
+		foot = dimStyle.Render(padTrunc("ctrl+s send · enter newline (sends a /command) · esc cancel", m.w)) + "\n" +
 			dimStyle.Render(padTrunc("composing to the meeting room…", m.w))
 	default:
 		global := m.footerFor(scopeGlobal)

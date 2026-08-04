@@ -13,6 +13,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/hub/chat"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/ui/theme"
 )
@@ -30,6 +31,31 @@ func (m *model) sizeComposer() {
 	m.composer.SetWidth(m.w)
 	h := clampInt(m.bodyHeight()/3, 3, 8)
 	m.composer.SetHeight(h)
+}
+
+// sendComposed closes the composer and posts in the background, so the keyboard comes back on the
+// keystroke rather than after the hub has typed the line into every agent's session.
+//
+// The draft is kept, not cleared: a rejected message (over the length cap) is restored so the text
+// can be trimmed instead of retyped. chatSentMsg clears it once the hub has taken it.
+func (m model) sendComposed() (tea.Model, tea.Cmd) {
+	v := strings.TrimSpace(m.composer.Value())
+	m.composing = false
+	m.composer.Blur()
+	if v == "" {
+		return m, nil
+	}
+	m.flash = "sending…" // acknowledges the keystroke, which is what the reporter could not see
+	cl := m.cl
+	if cl == nil {
+		return m, nil
+	}
+	return m, func() tea.Msg {
+		if err := cl.ChatSay(v); err != nil {
+			return chatFailedMsg{err: err, draft: v}
+		}
+		return chatSentMsg{}
+	}
 }
 
 // openNewMeetingChoice confirms the reset before it happens: clearing the shared history cannot be
@@ -51,8 +77,8 @@ func (m *model) openNewMeetingChoice() {
 	}
 }
 
-// updateComposer routes a keypress while composing: esc cancels, ctrl+s sends (enter is a newline —
-// this is multiline), ctrl+c quits. The hub caps length and says "too long" rather than truncating.
+// updateComposer routes a keypress while composing: esc cancels, ctrl+s sends, ctrl+c quits. Enter
+// is a newline for a message but submits a command — a one-line "/add nori" should not need ctrl+s.
 func (m model) updateComposer(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
@@ -62,20 +88,13 @@ func (m model) updateComposer(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		m.quit = true
 		return m, tea.Quit
+	case "enter":
+		if !chat.IsCommand(m.composer.Value()) {
+			break // a message is multiline; only a command submits on enter
+		}
+		return m.sendComposed()
 	case "ctrl+s":
-		v := strings.TrimSpace(m.composer.Value())
-		if v == "" || m.cl == nil {
-			m.composing = false
-			m.composer.Blur()
-			return m, nil
-		}
-		cl := m.cl
-		return m, func() tea.Msg {
-			if err := cl.ChatSay(v); err != nil {
-				return errModalMsg{err} // e.g. "too long" — shown; the draft stays open to trim
-			}
-			return chatSentMsg{}
-		}
+		return m.sendComposed()
 	}
 	var cmd tea.Cmd
 	m.composer, cmd = m.composer.Update(msg)
