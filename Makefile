@@ -102,7 +102,7 @@ test: ## run the Go test suite
 screenshot: ## render the TUI headlessly (mock data) to eyeball its layout
 	go test ./internal/tui/ -run Screenshot -v
 
-seed: ## seed a mock task hierarchy into the current repo's td store
+seed: ## seed a mock task hierarchy into the current repo (via sindri task new)
 	./scripts/seed.sh
 
 verify: check-go brokkr ## build + test + lint (deadcode, loc, comments, openspec) — the quality gate
@@ -160,12 +160,11 @@ all: build image install ## build everything (binaries + agent image) and instal
 # There is deliberately no .deb — a system package installs to /usr/bin, which then
 # shadows (or is shadowed by) the ~/.local/bin install depending on PATH order, and the
 # two drift apart silently. One location means one build can ever be in play.
-tarball: build ## build the release tarball into dist/ (binaries + bundled td/yq + install.sh)
-	cp "$$(command -v td)" bin/td
+tarball: build ## build the release tarball into dist/ (binaries + bundled yq + install.sh)
 	cp "$$(command -v yq)" bin/yq
 	rm -rf "dist/sindri_$(VERSION)_$(GOOS)_$(ARCH)"
 	mkdir -p "dist/sindri_$(VERSION)_$(GOOS)_$(ARCH)"
-	cp bin/sindri bin/sindri-worker bin/brokkr bin/brokkr-linux bin/td bin/yq \
+	cp bin/sindri bin/sindri-worker bin/brokkr bin/brokkr-linux bin/yq \
 	   LICENSE THIRD_PARTY_LICENSES.md "dist/sindri_$(VERSION)_$(GOOS)_$(ARCH)/"
 	cp scripts/install.sh "dist/sindri_$(VERSION)_$(GOOS)_$(ARCH)/install.sh"
 	chmod +x "dist/sindri_$(VERSION)_$(GOOS)_$(ARCH)/install.sh"
@@ -178,4 +177,4 @@ major minor patch breaking feature fix:
 	@:
 
 clean: ## remove build artifacts (bin/ binaries, dist/ tarballs, image stamp)
-	rm -rf bin/sindri bin/sindri-worker bin/brokkr bin/brokkr-linux bin/td bin/yq bin/buildctx dist .image-stamp
+	rm -rf bin/sindri bin/sindri-worker bin/brokkr bin/brokkr-linux bin/yq bin/buildctx dist .image-stamp

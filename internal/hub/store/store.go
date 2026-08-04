@@ -118,7 +118,7 @@ CREATE TABLE IF NOT EXISTS chat_log (
 CREATE TABLE IF NOT EXISTS task_comments (
   project    TEXT NOT NULL,
   task_id    TEXT NOT NULL,
-  source     TEXT NOT NULL, -- "td" | "github"
+  source     TEXT NOT NULL, -- "github", or "td" on a thread synced before the import
   source_ref TEXT NOT NULL, -- external id/url, unique within a source
   author     TEXT NOT NULL DEFAULT '',
   body       TEXT NOT NULL DEFAULT '',

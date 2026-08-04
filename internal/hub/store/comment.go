@@ -12,7 +12,7 @@ import "fmt"
 // Comment is one task comment, tagged with the source it came from and the
 // external reference that identifies it there (so a re-sync can match it).
 type Comment struct {
-	Source    string `json:"source"`     // "td" | "github"
+	Source    string `json:"source"`     // "github", or "td" on a thread synced before the import
 	SourceRef string `json:"source_ref"` // external id / url, unique within the source
 	Author    string `json:"author"`
 	Body      string `json:"body"`

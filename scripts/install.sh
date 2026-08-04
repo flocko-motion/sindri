@@ -23,7 +23,7 @@ PREFIX="${PREFIX:-$HOME/.local/bin}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # brokkr-linux is the linux brokkr mounted into the (always-linux) agent pods so
 # `brokkr` works inside agents on macOS too — installed beside the darwin brokkr.
-bins="sindri sindri-worker brokkr brokkr-linux td yq"
+bins="sindri sindri-worker brokkr brokkr-linux yq"
 
 mkdir -p "$PREFIX"
 for bin in $bins; do

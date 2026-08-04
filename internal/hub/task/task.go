@@ -1,16 +1,16 @@
 // package: hub/task
 // type:    logic (the Task entity)
 // job:     sindri's Task domain entity — the generalization over its underlying
-// source types (td tasks, GitHub issues, openspec changes) into one unified
-// task the hub reasons about, plus the read filter. The domain owns the
-// entity; the task-source adapters translate their world to/from it.
+// source types (the hub's own tasks, GitHub issues, openspec changes) into one
+// unified task the hub reasons about, plus the read filter. The domain owns
+// the entity; each source translates its world to/from it.
 // limits:  imports nothing internal; doesn't fetch (-> adapter/tasks) or render.
 package task
 
 import "time"
 
-// Task is a unified sindri task — a td task, GitHub issue, or openspec change,
-// normalized to one shape the hub works with regardless of source.
+// Task is a unified sindri task — one the hub owns, a GitHub issue, or an openspec
+// change, normalized to one shape the hub works with regardless of source.
 type Task struct {
 	ID          string
 	Title       string

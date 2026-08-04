@@ -44,8 +44,7 @@ warns if it finds a second copy of itself on your PATH. If you installed an olde
 
 That's it. The release bundles everything sindri ships — the `sindri` CLI/TUI, the
 agent browser `sindri-worker` (it runs as `sindri` inside a pod), the `brokkr` toolbelt (code map + linters),
-and the `td` task backend (plus `yq`) — and needs the system tools **git** and
-**podman** present.
+and `yq` — and needs the system tools **git** and **podman** present.
 
 The one thing you bring yourself: **Claude credentials** at `~/.claude` (sindri
 seeds them into the agent pods). The agent container image is built automatically
@@ -132,7 +131,7 @@ can add workers alongside a coauthor.
 │            ┌──────────────────────────────────┐                │
 │            │  sindri hub   (single writer)     │                │
 │            │  .sindri/hub.db  (SQLite)         │                │
-│            │  td · git · openspec · podman     │                │
+│            │  tasks · git · openspec · podman  │                │
 │            └───────┬───────────────┬──────────┘                │
 │         per-agent  │ unix socket   │ tmux send-keys             │
 │            ┌───────▼───────┐   ┌───▼───────────┐                │
@@ -142,7 +141,7 @@ can add workers alongside a coauthor.
 └──────────────────────────────────────────────────────────────┘
 ```
 
-- **Single writer.** The hub is the only thing that touches td, git, and
+- **Single writer.** The hub is the only thing that touches tasks, git, and
   `.sindri/`. Every UI reads `GET /state` and live-updates over `GET /events`.
 - **Identity is the socket.** Each pod mounts one socket; the hub knows who's
   calling by which socket accepted the connection — no names on the wire.
@@ -250,7 +249,9 @@ A worker's PR reaches `approved` via a reviewer agent **or** your own
 
 ## Tasks
 
-Tasks live in `td` (the source of truth), cached into the hub.
+Tasks live in the hub, which owns them. It also mirrors openspec changes and GitHub
+issues, so a backlog can span all three; a repo carrying an existing `td` database
+has it imported once, on first use.
 
 ```bash
 sindri task new "Fix the parser" -t bug -p P1      # type: bug|feature|task|epic|chore

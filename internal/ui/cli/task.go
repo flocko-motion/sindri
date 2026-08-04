@@ -35,7 +35,7 @@ func tasksJSON(tasks []store.Task) (string, error) {
 
 // NewTaskCmd builds the `task` command tree (the backlog).
 func NewTaskCmd() *cobra.Command {
-	c := &cobra.Command{Use: "task", Short: "Inspect and create tasks (td issues)"}
+	c := &cobra.Command{Use: "task", Short: "Inspect and create tasks"}
 	c.AddCommand(taskListCmd(), taskInfoCmd(), taskNewCmd(), taskEditCmd(), taskPriorityCmd(), taskApproveCmd(), taskRejectCmd(), taskUnassignCmd(), taskCloseCmd(), taskDeleteCmd(), taskRefreshCmd())
 	return c
 }
@@ -44,13 +44,13 @@ func NewTaskCmd() *cobra.Command {
 // for forcing one without listing — e.g. pushing fresh state to a running TUI.
 func taskRefreshCmd() *cobra.Command {
 	return &cobra.Command{
-		Use: "refresh", Short: "Re-sync tasks from td (the source of truth) and notify watchers", Args: cobra.NoArgs,
+		Use: "refresh", Short: "Re-sync tasks from every source and notify watchers", Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return withBackend(func(b backend) error {
 				if err := b.Refresh(); err != nil {
 					return err
 				}
-				fmt.Fprintln(os.Stderr, "synced tasks from td")
+				fmt.Fprintln(os.Stderr, "synced tasks")
 				return nil
 			})
 		},
@@ -157,7 +157,7 @@ func taskRejectCmd() *cobra.Command {
 func taskPriorityCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "priority <id> <critical|high|mid|low|none>",
-		Short: "Set a task's priority (td tasks → td; openspec items → our db)",
+		Short: "Set a task's priority (a P-code; openspec and GitHub items keep theirs in our db)",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withBackend(func(b backend) error {
@@ -229,7 +229,7 @@ func taskInfoCmd() *cobra.Command {
 func taskNewCmd() *cobra.Command {
 	var typ, priority, parent, labels, desc string
 	c := &cobra.Command{
-		Use: "new <title...>", Short: "Create a task (a td issue)", Args: cobra.MinimumNArgs(1),
+		Use: "new <title...>", Short: "Create a task", Args: cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withBackend(func(b backend) error {
 				id, err := b.CreateTask(hub.TaskSpec{

@@ -12,8 +12,10 @@ does not care who calls them.
 
 ## The outside world is reached only through adapters
 
-Every interaction with something outside the process — git, podman, tmux, the
-task tracker (td), the spec tool — goes through an adapter in `internal/adapter/`.
+Every interaction with something outside the process — git, podman, tmux, GitHub,
+the spec tool — goes through an adapter in `internal/adapter/`. Tasks are the
+exception by ownership rather than by layering: sindri holds its own in the hub's
+store, and adapters cover only the trackers it mirrors.
 The core calls adapters; it never shells out, dials a socket, or touches an
 external tool directly. Swapping or mocking an external tool is a change to one
 adapter and nothing else.
