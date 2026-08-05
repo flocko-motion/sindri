@@ -84,3 +84,56 @@ func TestUnobservedAgentIsNotReportedUp(t *testing.T) {
 		t.Errorf("an unobserved agent must report no observation, got %+v ok=%v", l, ok)
 	}
 }
+
+// TestIdleDwellStartsAndClears: the dwell is what separates a thinking pause from a stall, so it
+// must start when idle begins and reset the moment the agent does anything.
+func TestIdleDwellStartsAndClears(t *testing.T) {
+	h := newHub(t)
+	w := h.watch
+	a := store.Agent{Project: "proj", Name: "dvalin"}
+
+	w.record(a, true, 0, "working", false)
+	if l, _ := w.get("proj", "dvalin"); !l.idleSince.IsZero() {
+		t.Error("a working agent has no idle dwell")
+	}
+
+	w.record(a, true, 0, "idle", false)
+	first, _ := w.get("proj", "dvalin")
+	if first.idleSince.IsZero() {
+		t.Fatal("going idle must start the dwell")
+	}
+
+	// Still idle: the clock keeps running from when it started, not from the latest probe.
+	w.record(a, true, 0, "idle", false)
+	again, _ := w.get("proj", "dvalin")
+	if !again.idleSince.Equal(first.idleSince) {
+		t.Errorf("a continuing idle spell must keep its start: %v then %v", first.idleSince, again.idleSince)
+	}
+
+	// Back to work: the spell is over, and a later stall is a new one.
+	w.record(a, true, 0, "working", false)
+	if l, _ := w.get("proj", "dvalin"); !l.idleSince.IsZero() {
+		t.Error("working again must clear the dwell")
+	}
+}
+
+// TestALostProbeDoesNotRestartTheDwell: a failed probe holds the previous runtime, so it must hold
+// the dwell too. Restarting the clock on every miss would hide a stall for another full dwell each
+// time a probe lost a race — and the agent that stalls is often the one whose pod is contended.
+func TestALostProbeDoesNotRestartTheDwell(t *testing.T) {
+	h := newHub(t)
+	w := h.watch
+	a := store.Agent{Project: "proj", Name: "dvalin"}
+
+	w.record(a, true, 0, "idle", false)
+	started, _ := w.get("proj", "dvalin")
+
+	w.record(a, false, 0, "", false) // one lost probe, short of downStrikes
+	held, _ := w.get("proj", "dvalin")
+	if held.runtime != "idle" {
+		t.Fatalf("a lost probe should hold the last runtime, got %q", held.runtime)
+	}
+	if !held.idleSince.Equal(started.idleSince) {
+		t.Errorf("the dwell restarted on a lost probe: %v then %v", started.idleSince, held.idleSince)
+	}
+}

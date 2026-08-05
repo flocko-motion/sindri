@@ -36,6 +36,10 @@ type liveness struct {
 	runtime string // Claude's live runtime: working|blocked|idle|""
 	strikes int    // consecutive failed probes; up is held until downStrikes
 	seen    time.Time
+	// idleSince is when the runtime first read "idle" and has read nothing else since; zero
+	// whenever it isn't idle. A dwell rather than a flag: thinking pauses read idle for a
+	// moment, a stall reads idle for minutes, and only the length tells them apart.
+	idleSince time.Time
 }
 
 // watchdog observes agent liveness on a loop; one per hub, started by New, stopped by Close.
@@ -177,6 +181,13 @@ func (w *watchdog) record(a store.Agent, up bool, clients int, runtime string, c
 		if next.strikes < downStrikes && prev.up {
 			// Not yet convinced: keep what the last good probe saw.
 			next.up, next.clients, next.runtime = true, prev.clients, prev.runtime
+		}
+	}
+	// After the switch, so a held-over runtime carries its dwell too — a lost probe mid-stall
+	// must not restart the clock and hide the stall for another full dwell.
+	if next.runtime == "idle" {
+		if next.idleSince = prev.idleSince; next.idleSince.IsZero() {
+			next.idleSince = next.seen
 		}
 	}
 	w.obs[key] = next

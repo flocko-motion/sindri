@@ -63,8 +63,8 @@ func agentStatusStyle(status string) lipgloss.Style {
 		return stDone
 	case "launching", "stopping":
 		return stTrans
-	case "blocked":
-		return stCrit
+	case "blocked", "stalled":
+		return stCrit // both need a human; a stall needs one MORE, since nothing else will move it
 	case "idle":
 		return stWarn
 	default:

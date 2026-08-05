@@ -11,6 +11,7 @@ package workflow
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // DefaultReviewPrompt seeds the project's central review-prompt.txt the first time.
@@ -389,6 +390,15 @@ const MsgKickoff = "[hub] You're live. Run `sindri` and do exactly what it tells
 // workers can't take one task — but an agent that stopped asking would never hear about it.
 func MsgWorkAvailable(id string) string {
 	return fmt.Sprintf("[hub] New work is ready (%s). Run `sindri` to pick up your next task — it may not be this one, whichever is highest priority.", id)
+}
+
+// MsgStalled prods an agent that holds work but has gone quiet. It names the task, because a stalled
+// agent has usually lost the thread rather than the will, and it offers the other honest answer —
+// saying what blocks it — so a genuine blocker surfaces instead of being sat on.
+func MsgStalled(task string, idleFor time.Duration) string {
+	return fmt.Sprintf("[hub] You still hold %s and have been idle for %s. Carry on with it — run `sindri` "+
+		"if you need your directive again. If something blocks you, say what it is rather than waiting: "+
+		"nothing is coming unless you ask.", task, idleFor.Round(time.Minute))
 }
 
 // MsgMerged tells a worker its PR merged and to fetch the next task.
