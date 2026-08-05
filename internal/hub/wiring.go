@@ -100,15 +100,16 @@ type (
 
 // Task-view helpers from hub/task, re-exported for the UIs.
 var (
-	PriorityLabel = task.PriorityLabel
-	PriorityCode  = task.PriorityCode
-	PriorityWords = task.PriorityWords
-	StateLabel    = task.StateLabel
-	ArrangeTasks  = task.ArrangeTasks
-	Descendants   = task.Descendants
-	FormatClients = agent.FormatClients
-	Sections      = commands.Sections
-	ChatIcon      = chat.Icon
+	PriorityLabel   = task.PriorityLabel
+	PriorityCode    = task.PriorityCode
+	PriorityWords   = task.PriorityWords
+	StateLabel      = task.StateLabel
+	ArrangeTasks    = task.ArrangeTasks
+	Descendants     = task.Descendants
+	PendingApproval = task.PendingApproval
+	FormatClients   = agent.FormatClients
+	Sections        = commands.Sections
+	ChatIcon        = chat.Icon
 )
 
 // Chat markers + help text, re-exported: every front-end must show the identical room.

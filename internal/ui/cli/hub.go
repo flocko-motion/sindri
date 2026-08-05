@@ -56,7 +56,7 @@ type backend interface {
 	CreateTask(s hub.TaskSpec) (string, error)
 	EditTask(id string, s hub.TaskSpec) error
 	SetPriority(id, priority string) error
-	ApproveTask(id string) error
+	ApproveTask(id string, subtree bool) error
 	RejectTask(id, comment string) error
 	AddTaskComment(id, body string) error
 	UnassignTask(id string) error

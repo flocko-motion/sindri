@@ -515,7 +515,7 @@ func taskOpTrigger(id, verb string, run tea.Cmd) tea.Cmd {
 	return func() tea.Msg { return taskOpMsg{id: id, verb: verb, run: run} }
 }
 
-// finishTaskCmd closes or deletes, optionally scraps the PR, then refreshes once so both
+// finishTaskCmd runs one task op, optionally scraps the PR alongside, then refreshes once so both
 // changes land in one snapshot. A failed task op skips the PR scrap.
 func finishTaskCmd(cl *client.HTTP, taskOp func(string) error, id, prID string, alsoPR bool) tea.Cmd {
 	return func() tea.Msg {
@@ -535,11 +535,11 @@ func finishTaskCmd(cl *client.HTTP, taskOp func(string) error, id, prID string, 
 	}
 }
 
-// approveTaskCmd clears the approval gate, making the task claimable.
-func (m *model) approveTaskCmd(id string) tea.Cmd {
-	cl := m.cl
-	m.flash = "approving " + id + "…"
-	return mutateThenRefresh(cl, func() error { return cl.ApproveTask(id) })
+// approveTaskCmd clears the approval gate, making the task claimable; subtree carries the verdict
+// to the proposals under it (-> openApproveChoice).
+func approveTaskCmd(cl *client.HTTP, id string, subtree bool) tea.Cmd {
+	approve := func(string) error { return cl.ApproveTask(id, subtree) }
+	return finishTaskCmd(cl, approve, id, "", false)
 }
 
 // openTaskRejectForm rejects a proposal with a comment, delivered to the planner.

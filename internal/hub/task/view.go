@@ -116,6 +116,19 @@ func Descendants(tasks []store.Task, id string) []store.Task {
 	return out
 }
 
+// PendingApproval returns the tasks under id still waiting on the user's verdict, deepest first.
+// A rejected one is a verdict already given, and one that has ended decides nothing — so a
+// cascading approve reaches neither, and both keep the state a human put them in.
+func PendingApproval(tasks []store.Task, id string) []store.Task {
+	var out []store.Task
+	for _, d := range Descendants(tasks, id) {
+		if Open(d) && d.Approval == "pending" {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // TaskRow is a task placed in the hierarchy: its tree depth, whether it is the last
 // child of its parent (for drawing tree connectors), and the id of a non-merged PR
 // for it (or "").

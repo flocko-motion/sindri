@@ -144,18 +144,51 @@ func taskUnassignCmd() *cobra.Command {
 }
 
 func taskApproveCmd() *cobra.Command {
-	return &cobra.Command{
+	var subtasks bool
+	c := &cobra.Command{
 		Use: "approve <id>", Short: "Approve a planner-proposed task (makes it claimable)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withBackend(func(b backend) error {
-				if err := b.ApproveTask(args[0]); err != nil {
+				id := args[0]
+				// Counted before the write, so the number names what this call decided.
+				pending := pendingBelow(b, id)
+				if err := b.ApproveTask(id, subtasks); err != nil {
 					return err
 				}
-				fmt.Fprintf(os.Stderr, "approved %s\n", args[0])
+				switch {
+				case subtasks && pending > 0:
+					fmt.Fprintf(os.Stderr, "approved %s and %s below it\n", id, plural(pending, "task", "tasks"))
+				case pending > 0:
+					// The TUI offers the wider approve in a modal; here the flag is the way to it.
+					fmt.Fprintf(os.Stderr, "approved %s — %s below it still await approval (--subtasks takes them too)\n",
+						id, plural(pending, "task", "tasks"))
+				default:
+					fmt.Fprintf(os.Stderr, "approved %s\n", id)
+				}
 				return nil
 			})
 		},
 	}
+	c.Flags().BoolVar(&subtasks, "subtasks", false, "approve every task below it that still awaits a verdict")
+	return c
+}
+
+// pendingBelow counts the tasks under id still awaiting a verdict; 0 if the backlog can't be read,
+// since a missing count must not turn an approve into a failure.
+func pendingBelow(b backend, id string) int {
+	all, err := b.Tasks()
+	if err != nil {
+		return 0
+	}
+	return len(hub.PendingApproval(all, id))
+}
+
+// plural renders a counted noun for the confirmation lines.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }
 
 func taskRejectCmd() *cobra.Command {

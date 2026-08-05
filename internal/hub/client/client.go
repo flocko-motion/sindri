@@ -515,9 +515,10 @@ func (c *HTTP) SetPriority(id, priority string) error {
 	return c.post("/priority", hub.PriorityReq{ID: id, Priority: priority})
 }
 
-// ApproveTask clears the approval gate on a planner-proposed task.
-func (c *HTTP) ApproveTask(id string) error {
-	return c.post("/task/approve", hub.RejectReq{ID: id})
+// ApproveTask clears the approval gate on a planner-proposed task; subtree carries the verdict to
+// every task below it that still awaits one.
+func (c *HTTP) ApproveTask(id string, subtree bool) error {
+	return c.post("/task/approve", hub.ApproveTaskReq{ID: id, Subtree: subtree})
 }
 
 // RejectTask rejects a planner-proposed task with a comment.

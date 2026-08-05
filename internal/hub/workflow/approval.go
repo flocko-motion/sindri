@@ -9,17 +9,50 @@ package workflow
 import (
 	"fmt"
 	"strings"
+
+	"github.com/flo-at/sindri/internal/hub/task"
 )
 
 // ApproveTask clears the approval gate on a proposed task (user-only), making it claimable, and
-// tells any running planner in the project.
-func (e *Engine) ApproveTask(project, id string) error {
-	if err := e.store.For(project).SetApproval(id, "approved", ""); err != nil {
+// tells any running planner in the project. subtree takes every task below it that still awaits a
+// verdict — a proposal usually arrives as a tree, and approving one node at a time is busywork.
+func (e *Engine) ApproveTask(project, id string, subtree bool) error {
+	ps := e.store.For(project)
+	var below []string
+	if subtree {
+		all, err := ps.AllTasks()
+		if err != nil {
+			return err
+		}
+		for _, d := range task.PendingApproval(all, id) {
+			below = append(below, d.ID)
+		}
+	}
+	// Children before the parent: the parent turning claimable is what releases the package, and a
+	// worker claiming between the two writes would find a package half of which it cannot see.
+	for _, child := range below {
+		if err := ps.SetApproval(child, "approved", ""); err != nil {
+			return fmt.Errorf("approve %s: %w", child, err)
+		}
+	}
+	if err := ps.SetApproval(id, "approved", ""); err != nil {
 		return err
 	}
-	e.notifyPlanners(project, fmt.Sprintf("[user] task %s was approved — it's now in the backlog for a worker.", id))
+	e.notifyPlanners(project, fmt.Sprintf("[user] task %s%s was approved — it's now in the backlog for a worker.",
+		id, withSubtasks(len(below))))
 	e.deps.Notify()
 	return nil
+}
+
+// withSubtasks names how far an approval reached, for the planner's message.
+func withSubtasks(n int) string {
+	switch n {
+	case 0:
+		return ""
+	case 1:
+		return " and its 1 subtask"
+	}
+	return fmt.Sprintf(" and its %d subtasks", n)
 }
 
 // RejectTask rejects a proposed task with a comment (user-only); it stays hidden from workers, and

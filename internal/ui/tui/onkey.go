@@ -289,7 +289,13 @@ func (m *model) onKey(k string) tea.Cmd {
 			return m.action(func(id string) error { return m.cl.ApprovePR(id) })
 		}
 		if m.tab == 0 && m.taskGated() {
-			return m.approveTaskCmd(m.selID())
+			id := m.selID()
+			if pending := m.pendingBelow(id); pending > 0 { // ask how far the verdict carries
+				m.openApproveChoice(id, pending)
+				return nil
+			}
+			m.flash = "approving " + id + "…"
+			return approveTaskCmd(m.cl, id, false)
 		}
 	case keyReview: // prs: hand the PR to a reviewer agent
 		if m.tab == 2 && m.selID() != "" {

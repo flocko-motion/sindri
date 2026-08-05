@@ -442,11 +442,11 @@ func (h *Hub) Handler() http.Handler {
 		writeJSON(w, okMsg{"assigned"}, h.wf.AssignPlan(h.reqProject(r), req.Name, req.Goal, req.Task))
 	})
 	mux.HandleFunc("POST /task/approve", func(w http.ResponseWriter, r *http.Request) {
-		var req RejectReq // reuse: ID (+ unused Feedback)
+		var req ApproveTaskReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"approved"}, h.wf.ApproveTask(h.reqProject(r), req.ID))
+		writeJSON(w, okMsg{"approved"}, h.wf.ApproveTask(h.reqProject(r), req.ID, req.Subtree))
 	})
 	mux.HandleFunc("POST /task/reject", func(w http.ResponseWriter, r *http.Request) {
 		var req RejectReq // ID + Feedback (the rejection comment)
@@ -489,6 +489,13 @@ type PriorityReq struct {
 type RejectReq struct {
 	ID       string `json:"id"`
 	Feedback string `json:"feedback"`
+}
+
+// ApproveTaskReq is the body for POST /task/approve: the task, and whether the verdict
+// carries down to the tasks below it that still await one.
+type ApproveTaskReq struct {
+	ID      string `json:"id"`
+	Subtree bool   `json:"subtree"`
 }
 
 // ScrapTaskReq is the body for POST /task/delete: the task, and how far the discard
