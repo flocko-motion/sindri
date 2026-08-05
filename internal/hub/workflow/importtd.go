@@ -39,9 +39,12 @@ func (e *Engine) importTdOnce(project, root string) error {
 		}
 		if err := ps.PutOwnedTask(store.OwnedTask{
 			ID: t.ID, Title: t.Title, Status: t.Status, Priority: t.Priority, Type: t.Type,
-			Labels: strings.Join(t.Labels, ","), ParentID: t.ParentID, Description: t.Description,
+			Labels: strings.Join(t.Labels, ","), Description: t.Description,
 		}); err != nil {
 			return fmt.Errorf("import %s: %w", t.ID, err)
+		}
+		if err := ps.SetParent(t.ID, t.ParentID); err != nil {
+			return fmt.Errorf("import parent of %s: %w", t.ID, err)
 		}
 	}
 	fmt.Fprintf(os.Stderr, "hub: imported %d td task(s) into sindri's own store for %s\n", len(existing), project)

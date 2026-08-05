@@ -16,7 +16,8 @@ import (
 )
 
 // OwnedTask is one task sindri owns. Status carries the lifecycle the workflow drives; the mirror
-// in `tasks` is rebuilt from these rows and never written back.
+// in `tasks` is rebuilt from these rows and never written back. Parentage is deliberately absent:
+// it belongs to every task, not only these, so it lives in task_parent (-> SetParent).
 type OwnedTask struct {
 	ID          string
 	Title       string
@@ -24,13 +25,12 @@ type OwnedTask struct {
 	Priority    string
 	Type        string
 	Labels      string
-	ParentID    string
 	Description string
 	CreatedAt   string
 	UpdatedAt   string
 }
 
-const ownedCols = `id,title,status,priority,type,labels,parent_id,description,created_at,updated_at`
+const ownedCols = `id,title,status,priority,type,labels,description,created_at,updated_at`
 
 // PutOwnedTask writes a task sindri owns, stamping updated_at and preserving created_at.
 func (p *ProjectStore) PutOwnedTask(t OwnedTask) error {
@@ -40,12 +40,12 @@ func (p *ProjectStore) PutOwnedTask(t OwnedTask) error {
 	}
 	_, err := p.s.db.Exec(`
 		INSERT INTO owned_tasks (project,`+ownedCols+`)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?)
+		VALUES (?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(project,id) DO UPDATE SET
 			title=excluded.title, status=excluded.status, priority=excluded.priority,
-			type=excluded.type, labels=excluded.labels, parent_id=excluded.parent_id,
+			type=excluded.type, labels=excluded.labels,
 			description=excluded.description, updated_at=excluded.updated_at`,
-		p.project, t.ID, t.Title, t.Status, t.Priority, t.Type, t.Labels, t.ParentID, t.Description,
+		p.project, t.ID, t.Title, t.Status, t.Priority, t.Type, t.Labels, t.Description,
 		t.CreatedAt, now)
 	if err != nil {
 		return fmt.Errorf("put owned task %s: %w", t.ID, err)
@@ -126,7 +126,7 @@ func (p *ProjectStore) OwnsTask(id string) bool {
 
 func scanOwned(r rowScanner) (OwnedTask, error) {
 	var t OwnedTask
-	err := r.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Type, &t.Labels, &t.ParentID,
+	err := r.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Type, &t.Labels,
 		&t.Description, &t.CreatedAt, &t.UpdatedAt)
 	return t, err
 }

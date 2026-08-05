@@ -46,9 +46,10 @@ func (s ownedSource) Tasks(string, bool) ([]task.Task, error) {
 	}
 	out := make([]task.Task, 0, len(owned))
 	for _, t := range owned {
+		// Parentage is left to the sync, which lays task_parent over every source's rows alike.
 		out = append(out, task.Task{
 			ID: t.ID, Title: t.Title, Status: t.Status, Type: t.Type, Priority: t.Priority,
-			ParentID: t.ParentID, Labels: store.LabelList(t.Labels), Description: t.Description,
+			Labels: store.LabelList(t.Labels), Description: t.Description,
 		})
 	}
 	return out, nil
@@ -95,9 +96,6 @@ func applySpec(t *store.OwnedTask, s TaskSpec) {
 	}
 	if s.Description != "" {
 		t.Description = s.Description
-	}
-	if s.Parent != "" {
-		t.ParentID = s.Parent
 	}
 	if len(s.Labels) > 0 {
 		t.Labels = strings.Join(s.Labels, ",")

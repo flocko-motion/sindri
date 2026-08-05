@@ -167,6 +167,15 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("migrate (%s): %w", a, err)
 		}
 	}
+	// Parentage moved out of owned_tasks into task_parent, which holds it for every task. Carry the
+	// links a store written before that still has in the old column; a database created since has
+	// no such column, and the copy simply finds nothing to do.
+	if _, err := db.Exec(
+		`INSERT OR IGNORE INTO task_parent (project,id,parent_id)
+		 SELECT project,id,parent_id FROM owned_tasks WHERE parent_id != ''`); err != nil &&
+		!strings.Contains(err.Error(), "no such column") {
+		return fmt.Errorf("migrate (parentage): %w", err)
+	}
 	return nil
 }
 

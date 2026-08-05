@@ -25,7 +25,7 @@ func TestOwnedTaskRoundTrip(t *testing.T) {
 	ps := ownedStore(t)
 	want := OwnedTask{
 		ID: "td-abc123", Title: "wire the thing", Status: "open", Priority: "P2",
-		Type: "task", Labels: "spec,ui", ParentID: "td-parent", Description: "the body",
+		Type: "task", Labels: "spec,ui", Description: "the body",
 	}
 	if err := ps.PutOwnedTask(want); err != nil {
 		t.Fatalf("put: %v", err)
@@ -40,7 +40,6 @@ func TestOwnedTaskRoundTrip(t *testing.T) {
 		{"priority", got.Priority, want.Priority},
 		{"type", got.Type, want.Type},
 		{"labels", got.Labels, want.Labels},
-		{"parent", got.ParentID, want.ParentID},
 		{"description", got.Description, want.Description},
 	} {
 		if c.got != c.want {

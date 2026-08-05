@@ -61,7 +61,7 @@ func (e *Engine) TaskInfo(project, id string) (store.Task, error) {
 	}
 	st := store.Task{
 		ID: owned.ID, Title: owned.Title, Status: owned.Status, Priority: owned.Priority,
-		Type: owned.Type, Labels: owned.Labels, ParentID: owned.ParentID,
+		Type: owned.Type, Labels: owned.Labels, ParentID: ps.ParentOf(id),
 		Description: owned.Description,
 	}
 	_ = ps.UpsertTask(st)
@@ -93,10 +93,14 @@ func (e *Engine) CreateTask(project string, s TaskSpec) (string, error) {
 	if typ == "" {
 		typ = "task"
 	}
-	if err := e.store.For(project).PutOwnedTask(store.OwnedTask{
+	ps := e.store.For(project)
+	if err := ps.PutOwnedTask(store.OwnedTask{
 		ID: id, Title: s.Title, Status: "open", Priority: s.Priority, Type: typ,
-		Labels: strings.Join(s.Labels, ","), ParentID: s.Parent, Description: s.Description,
+		Labels: strings.Join(s.Labels, ","), Description: s.Description,
 	}); err != nil {
+		return "", err
+	}
+	if err := ps.SetParent(id, s.Parent); err != nil {
 		return "", err
 	}
 	e.refreshCachedTask(project, id) // targeted: pull just the new task, not a full re-sync
@@ -231,6 +235,13 @@ func (e *Engine) EditTask(project, id string, s TaskSpec) error {
 		return err
 	}
 	ps := e.store.For(project)
+	// Parentage first, and for any task: the hierarchy is sindri's own, so re-parenting an openspec
+	// change or a GitHub issue is as ordinary as re-parenting one of its own.
+	if s.Parent != "" {
+		if err := ps.SetParent(id, s.Parent); err != nil {
+			return err
+		}
+	}
 	if owned, ok, oerr := ps.OwnedTask(id); oerr != nil {
 		return oerr
 	} else if ok {
@@ -422,6 +433,15 @@ func (e *Engine) syncTasks(project string, force bool) error {
 		for i := range rows {
 			if p, ok := ov[rows[i].ID]; ok {
 				rows[i].Priority = p
+			}
+		}
+	}
+	// Parentage is the hub's for every task, so it goes on after the sources rather than coming
+	// from them: no source but sindri's own carries the notion at all.
+	if links, err := ps.ParentLinks(); err == nil {
+		for i := range rows {
+			if parent, ok := links[rows[i].ID]; ok {
+				rows[i].ParentID = parent
 			}
 		}
 	}

@@ -63,10 +63,18 @@ CREATE TABLE IF NOT EXISTS owned_tasks (
   priority    TEXT NOT NULL DEFAULT '',
   type        TEXT NOT NULL DEFAULT 'task',
   labels      TEXT NOT NULL DEFAULT '',
-  parent_id   TEXT NOT NULL DEFAULT '',
   description TEXT NOT NULL DEFAULT '',
   created_at  TEXT NOT NULL DEFAULT '',
   updated_at  TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (project, id)
+);
+-- Parentage for EVERY task, whatever owns its text. The hierarchy is sindri's own reading of how
+-- work relates, so an openspec change or a GitHub issue can be a parent or a child even though
+-- neither carries the notion upstream. One home, so no task has two answers.
+CREATE TABLE IF NOT EXISTS task_parent (
+  project   TEXT NOT NULL,
+  id        TEXT NOT NULL,
+  parent_id TEXT NOT NULL,
   PRIMARY KEY (project, id)
 );
 -- Durable priority we assign to tasks in our own db — survives the task-cache

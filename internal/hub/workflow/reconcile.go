@@ -9,7 +9,6 @@ package workflow
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/flo-at/sindri/internal/hub/store"
 )
@@ -27,24 +26,24 @@ func (e *Engine) RefreshTask(project, id string) error {
 	}
 	return ps.UpsertTask(store.Task{
 		ID: owned.ID, Title: owned.Title, Status: owned.Status, Priority: owned.Priority,
-		Type: owned.Type, Labels: owned.Labels, ParentID: owned.ParentID,
+		Type: owned.Type, Labels: owned.Labels, ParentID: ps.ParentOf(id),
 		Description: owned.Description,
 	})
 }
 
 // refreshCachedTask updates one task's cached row after a local mutation, instead
-// of a full multi-source SyncTasks (td + openspec + the GitHub scan): a td task is
-// re-read from td; a gh-/os- task keeps its synced fields and just has its current
-// priority override re-applied — its source fields don't change on a local edit.
+// of a full multi-source SyncTasks: a task sindri owns is re-read from its own table; a gh-/os- one
+// keeps its synced fields and has the hub's own — priority, parent — laid back over them, since a
+// local edit changes those and not what the source holds.
 // Best-effort: a failure is logged host-side, never surfaced to the mutation.
 func (e *Engine) refreshCachedTask(project, id string) {
-	if strings.HasPrefix(id, "td-") {
+	ps := e.store.For(project)
+	if ps.OwnsTask(id) {
 		if err := e.RefreshTask(project, id); err != nil {
 			fmt.Fprintf(os.Stderr, "hub: refresh task %s: %v\n", id, err)
 		}
 		return
 	}
-	ps := e.store.For(project)
 	t, ok, err := ps.GetTask(id)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "hub: refresh cached task %s: %v\n", id, err)
@@ -56,6 +55,9 @@ func (e *Engine) refreshCachedTask(project, id string) {
 	if ov, oerr := ps.PriorityOverrides(); oerr == nil {
 		t.Priority = ov[id]
 	}
+	// The parent too, for the reason the priority is here: both are the hub's, so a targeted refresh
+	// that skipped one showed a re-parented task as a root until some later full sync.
+	t.ParentID = ps.ParentOf(id)
 	if err := ps.UpsertTask(t); err != nil {
 		fmt.Fprintf(os.Stderr, "hub: refresh cached task %s: %v\n", id, err)
 	}
