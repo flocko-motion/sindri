@@ -5,14 +5,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // approvalBoard is an epic with a pending child, a pending grandchild, a rejected child and a
 // closed one — so the count reflects only what a verdict would still decide.
-func approvalBoard() hub.BoardState {
-	return hub.BoardState{Tasks: []store.Task{
+func approvalBoard() api.BoardState {
+	return api.BoardState{Tasks: []api.Task{
 		{ID: "td-epic", Status: "open", Approval: "pending"},
 		{ID: "td-a", Status: "open", ParentID: "td-epic", Approval: "pending"},
 		{ID: "td-b", Status: "open", ParentID: "td-a", Approval: "pending"},

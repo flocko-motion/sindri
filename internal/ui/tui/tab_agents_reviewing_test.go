@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // TestAgentRowShowsReviewedPR: a reviewer holds no task, so its work cell would be
@@ -13,7 +13,7 @@ import (
 func TestAgentRowShowsReviewedPR(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.scopeRepo = false // global scope, so the row isn't filtered out by repo tag
-	m.state = hub.BoardState{Agents: []hub.AgentView{
+	m.state = api.BoardState{Agents: []api.AgentView{
 		{Name: "dvalin", Role: "reviewer", Status: "reviewing", Task: "", PR: "pr-td-9"},
 		{Name: "eitri", Role: "worker", Status: "working", Task: "td-3"},
 	}}

@@ -13,8 +13,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/client"
-	"github.com/flo-at/sindri/internal/hub/store"
 )
 
 // switchRepoMsg asks the model to re-scope the board to a repo (by its path).
@@ -53,8 +53,8 @@ func (m *model) openSwitcher() {
 // (that's where work is happening), then by recency (most-recently-used), then
 // alphabetically by name — so the relevant repos are always near the top of a
 // possibly-long list.
-func (m *model) switcherOrder() []store.Project {
-	ps := append([]store.Project(nil), m.state.Projects...)
+func (m *model) switcherOrder() []api.Project {
+	ps := append([]api.Project(nil), m.state.Projects...)
 	sort.SliceStable(ps, func(i, j int) bool {
 		li, lj := m.repoHasLiveAgent(ps[i].Tag), m.repoHasLiveAgent(ps[j].Tag)
 		if li != lj {

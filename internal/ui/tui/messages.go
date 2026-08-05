@@ -11,26 +11,25 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // stateMsg is a board snapshot from /events; gen lets a stream abandoned by a repo switch be ignored.
 type stateMsg struct {
-	st  hub.BoardState
+	st  api.BoardState
 	gen int
 }
 type logMsg struct {
 	key string
-	evs []store.Event
+	evs []api.Event
 }
 type prMsg struct {
 	key string
-	d   hub.PRDetail
+	d   api.PRDetail
 }
 type taskMsg struct {
 	key string
-	t   store.Task
+	t   api.Task
 }
 type paneMsg struct {
 	agent string
@@ -42,7 +41,7 @@ type agentPodMsg struct {
 }
 type clientsMsg struct {
 	agent   string
-	clients []hub.ClientView
+	clients []api.ClientView
 }
 type prLintMsg struct {
 	pr   string
@@ -66,7 +65,7 @@ type approveMergeMsg struct{ id string }
 // mergeDoneMsg reports a finished merge; either way the transient "merging" marker is cleared.
 type mergeDoneMsg struct {
 	id    string
-	state hub.BoardState
+	state api.BoardState
 	err   error
 }
 
@@ -81,7 +80,7 @@ type taskOpMsg struct {
 // taskOpDoneMsg reports a finished close/scrap; either way the transient verb is cleared.
 type taskOpDoneMsg struct {
 	id    string
-	state hub.BoardState
+	state api.BoardState
 	err   error
 }
 
@@ -113,11 +112,11 @@ type chatFailedMsg struct {
 // resumedMsg fires when a tea.ExecProcess child exits: ExecProcess skips its repaint when already
 // in the alt screen, losing the footer, so Update answers with a full tea.ClearScreen.
 type resumedMsg struct{}
-type openEditMsg struct{ t store.Task } // a pre-edit sync returned — open the edit form from this fresh task
+type openEditMsg struct{ t api.Task } // a pre-edit sync returned — open the edit form from this fresh task
 
 // tickMsg drives polling; polledMsg is a polled state, kept distinct so it doesn't re-arm the SSE waiter.
 type tickMsg time.Time
-type polledMsg hub.BoardState
+type polledMsg api.BoardState
 
 const refreshInterval = 3 * time.Second
 

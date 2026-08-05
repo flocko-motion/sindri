@@ -18,7 +18,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/ui/tui/scroll"
 )
 
@@ -164,7 +164,7 @@ func (m *model) reconcileMerging() {
 }
 
 // openTaskModal shows a PR's linked task in the full-screen modal, identical to the Tasks tab's.
-func (m *model) openTaskModal(t store.Task) {
+func (m *model) openTaskModal(t api.Task) {
 	m.modalOverride = m.taskDetailFor(t, t.Description)
 	m.modalOverrideTitle = "Task " + t.ID
 	m.modal = true
@@ -567,7 +567,7 @@ func (m *model) verifyCmd(id string) tea.Cmd {
 }
 
 // reviewLine summarizes a review item: its state, verdict, and author.
-func reviewLine(r store.Review) string {
+func reviewLine(r api.Review) string {
 	switch {
 	case r.Verdict != "":
 		return fmt.Sprintf("• %s by %s", r.Verdict, r.Author)

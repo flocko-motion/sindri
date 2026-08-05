@@ -65,6 +65,19 @@ func Done(t Task) bool {
 // Open reports whether a task still counts as open (not done).
 func Open(t Task) bool { return !Done(t) }
 
+// PendingApproval returns the tasks under id still waiting on the user's verdict, deepest first.
+// A rejected one is a verdict already given, and one that has ended decides nothing — so a
+// cascading approve reaches neither, and both keep the state a human put them in.
+func PendingApproval(tasks []Task, id string) []Task {
+	var out []Task
+	for _, d := range Descendants(tasks, id) {
+		if Open(d) && d.Approval == "pending" {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // Descendants returns everything under id — children, grandchildren, … — deepest
 // first, the order a cascading scrap deletes in (a looping parent chain walks once).
 func Descendants(tasks []Task, id string) []Task {

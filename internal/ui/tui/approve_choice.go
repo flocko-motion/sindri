@@ -4,18 +4,18 @@
 // tasks below still awaiting a verdict and offers the wider approve, so a package reaches the
 // backlog whole in one keypress.
 // limits:  labels and key-to-call plumbing only; which tasks a verdict may reach is the hub's
-// (-> hub.PendingApproval) and the cascade itself is ApproveTask's.
+// (-> api.PendingApproval) and the cascade itself is ApproveTask's.
 package tui
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // pendingBelow counts the tasks under id that still await the user's verdict.
 func (m model) pendingBelow(id string) int {
-	return len(hub.PendingApproval(m.state.Tasks, id))
+	return len(api.PendingApproval(m.state.Tasks, id))
 }
 
 // openApproveChoice asks how far the verdict carries when the task has proposals under it. With

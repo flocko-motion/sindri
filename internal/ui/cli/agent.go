@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/ui/theme"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -29,7 +29,7 @@ func agentPreflight(*cobra.Command, []string) {
 }
 
 // agentByName finds an agent by name in the global roster, nil when absent.
-func agentByName(agents []hub.AgentView, name string) *hub.AgentView {
+func agentByName(agents []api.AgentView, name string) *api.AgentView {
 	for i := range agents {
 		if agents[i].Name == name {
 			return &agents[i]
@@ -39,7 +39,7 @@ func agentByName(agents []hub.AgentView, name string) *hub.AgentView {
 }
 
 // projectRoot maps an agent's project tag to its on-disk repo root, "" if unknown.
-func projectRoot(projects []store.Project, tag string) string {
+func projectRoot(projects []api.Project, tag string) string {
 	for _, p := range projects {
 		if p.Tag == tag {
 			return p.Path
@@ -50,7 +50,7 @@ func projectRoot(projects []store.Project, tag string) string {
 
 // warnCrossRepo makes reaching into another repo conscious without ever failing: the CLI is
 // global like the TUI. A terminal is asked to confirm; non-interactive proceeds after the note.
-func warnCrossRepo(a *hub.AgentView, cwdRoot, agentRoot string) bool {
+func warnCrossRepo(a *api.AgentView, cwdRoot, agentRoot string) bool {
 	if cwdRoot == "" || agentRoot == "" || agentRoot == cwdRoot {
 		return true
 	}
@@ -63,7 +63,7 @@ func warnCrossRepo(a *hub.AgentView, cwdRoot, agentRoot string) bool {
 
 // withAgent resolves name in the global roster and hands fn a backend scoped to the agent's
 // own project, so any agent is manageable from any cwd instead of erroring "no such agent".
-func withAgent(name string, fn func(b backend, a *hub.AgentView) error) error {
+func withAgent(name string, fn func(b backend, a *api.AgentView) error) error {
 	root, _ := repoRoot() // "" outside any repo — then there's no cwd context to cross
 	b, err := open(root)
 	if err != nil {
@@ -134,7 +134,7 @@ func agentStatsCmd() *cobra.Command {
 				}
 				views := report.Agents
 				if len(args) == 1 { // narrow to one agent
-					var only []hub.AgentStatsView
+					var only []api.AgentStatsView
 					for _, v := range views {
 						if v.Name == args[0] {
 							only = append(only, v)
@@ -229,7 +229,7 @@ func agentMemoryCmd() *cobra.Command {
 			if size == "default" {
 				size = "" // reset to the hub default
 			}
-			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				if err := b.SetMemory(a.Name, size); err != nil {
 					return err
 				}
@@ -245,7 +245,7 @@ func agentDeleteCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "delete <name>", Aliases: []string{"rm"}, Short: "Delete an agent (container, socket, worktree, identity)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				if err := b.DeleteAgent(a.Name); err != nil {
 					return err
 				}
@@ -261,7 +261,7 @@ func agentPaneCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use: "pane <name>", Short: "Print the agent's live tmux screen (capture-pane)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				out, err := b.AgentPane(a.Name, lines)
 				if err != nil {
 					return err
@@ -284,7 +284,7 @@ func agentStartCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use: "start <name>", Short: "Start the agent: spin a container that assumes its identity (runs Claude)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				// Launch already ends with "launched — coming up"; a "started" here would contradict it.
 				return b.Launch(a.Name, shell, debug, os.Stderr)
 			})
@@ -299,7 +299,7 @@ func agentStopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "stop <name>", Short: "Tear down the agent's container (keeps its identity)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				if err := b.StopAgent(a.Name); err != nil {
 					return err
 				}
@@ -316,7 +316,7 @@ func agentRebaseCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "rebase <name>", Short: "Rebase the agent's worktree onto the current reference branch", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				if err := b.RebaseAgent(a.Name); err != nil {
 					return err
 				}
@@ -333,7 +333,7 @@ func agentRebuildCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "rebuild <name>", Short: "Rebuild the agent's image (re-pull the base) and relaunch it (session resumes)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				return b.RebuildImage(a.Name, os.Stderr) // streams build + restart progress
 			})
 		},
@@ -346,7 +346,7 @@ func agentRestartCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use: "restart <name>", Short: "Restart the agent's container (starts it if it wasn't running)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				if a.Status != "down" { // tear down the running container first
 					if err := b.StopAgent(a.Name); err != nil {
 						return err
@@ -400,7 +400,7 @@ func agentTellCmd() *cobra.Command {
 		Use: "tell <name> <message...>", Short: "Send a message into an agent's session ([user])", Args: cobra.MinimumNArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
 			msg := strings.Join(args[1:], " ")
-			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				if err := b.Tell(a.Name, msg, "user"); err != nil {
 					return err
 				}
@@ -426,7 +426,7 @@ func agentPlanCmd() *cobra.Command {
 			if goal == "" && taskID == "" {
 				return fmt.Errorf("say what to plan, or name a task with --task")
 			}
-			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				if err := b.AssignPlan(a.Name, goal, taskID); err != nil {
 					return err
 				}
@@ -458,7 +458,7 @@ func agentInfoCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use: "info <name>", Short: "Show an agent's status (state, task, PR, clients, recent activity)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return withAgent(args[0], func(b backend, found *hub.AgentView) error {
+			return withAgent(args[0], func(b backend, found *api.AgentView) error {
 				fmt.Printf("agent:     %s\nrole:      %s\nstatus:    %s\ntask:      %s\npr:        %s\nworkspace: %s\nmemory:    %s\n",
 					found.Name, found.Role, found.Status, agentTaskLabel(b, found.Task), dash(found.PR), dash(found.Workspace), memoryLabel(found.Memory))
 				// engine + the exact runtime instance (id, image, cpus, memory limit, host pid)
@@ -471,7 +471,7 @@ func agentInfoCmd() *cobra.Command {
 					}
 				}
 				if cs, err := b.Clients(found.Name); err == nil {
-					fmt.Print(hub.FormatClients(cs))
+					fmt.Print(theme.FormatClients(cs))
 				}
 				evs, err := b.Log(found.Name)
 				if err != nil {

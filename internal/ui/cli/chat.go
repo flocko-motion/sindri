@@ -15,8 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/ui/theme"
 	"github.com/spf13/cobra"
 )
@@ -104,7 +103,7 @@ func chatAddCmd() *cobra.Command {
 		RunE: func(_ *cobra.Command, args []string) error {
 			for _, name := range args {
 				// withAgent re-scopes the client to the agent's project, so a cross-repo agent is added under its own.
-				if err := withAgent(name, func(b backend, a *hub.AgentView) error {
+				if err := withAgent(name, func(b backend, a *api.AgentView) error {
 					return b.ChatAdd(a.Name)
 				}); err != nil {
 					return err
@@ -121,7 +120,7 @@ func chatRemoveCmd() *cobra.Command {
 		Use: "remove <agent...>", Short: "Remove one or more agents from the meeting room", Args: cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			for _, name := range args {
-				if err := withAgent(name, func(b backend, a *hub.AgentView) error {
+				if err := withAgent(name, func(b backend, a *api.AgentView) error {
 					return b.ChatRemove(a.Name)
 				}); err != nil {
 					return err
@@ -150,7 +149,7 @@ func chatJoin(cmd *cobra.Command, b backend) error {
 	if v, err := b.Chat(); err == nil {
 		fmt.Print(renderMembers(v))
 	}
-	// Spell the interface out on entry — the same text the /help reply and the TUI use (hub.ChatHelpText).
+	// Spell the interface out on entry — the same text the /help reply and the TUI use (theme.HelpText).
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "Joined as %s %s — you lead the discussion; everything you type reaches every member.\n",
 		theme.UserIcon, theme.NameStyle(theme.SenderUser).Render(theme.SenderUser))
@@ -211,7 +210,7 @@ func chatJoin(cmd *cobra.Command, b backend) error {
 }
 
 // renderChat formats a chatroom snapshot: the member roster then the transcript.
-func renderChat(v hub.ChatView) string {
+func renderChat(v api.ChatView) string {
 	var sb strings.Builder
 	sb.WriteString(renderMembers(v))
 	if len(v.Log) == 0 {
@@ -230,7 +229,7 @@ func renderChat(v hub.ChatView) string {
 // chatMsgLine formats one message as a speaker header (time · icon · coloured name) plus an indented
 // body, so where one speaker stops and the next starts is obvious. prev is the previous sender: a new
 // speaker gets a blank line and a header, a run from the same speaker prints body only.
-func chatMsgLine(m store.ChatMessage, prev string) string {
+func chatMsgLine(m api.ChatMessage, prev string) string {
 	body := indentBody(m.Sender, m.Body)
 	if m.Sender == prev {
 		return body
@@ -271,7 +270,7 @@ func chatTS(ts string) string {
 
 // renderMembers lists who is in the room, the user first: the roster stores only AGENTS, so an empty
 // one means "no agents yet", not an empty room — the user is a permanent, required participant.
-func renderMembers(v hub.ChatView) string {
+func renderMembers(v api.ChatView) string {
 	parts := []string{theme.Icon(theme.SenderUser) + " " +
 		theme.NameStyle(theme.SenderUser).Render(theme.SenderUser) + theme.Dim().Render(" (you)")}
 	for _, m := range v.Members {

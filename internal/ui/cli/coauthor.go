@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/tmux"
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/container"
-	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/ui/attach"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -50,7 +50,7 @@ func NewCoauthorCmd() *cobra.Command {
 			}
 			defer cl.Close()
 
-			proj := hub.RepoTag(root)
+			proj := api.RepoTag(root)
 			name, err := ensureCoauthor(cl, proj)
 			if err != nil {
 				return err
@@ -58,7 +58,7 @@ func NewCoauthorCmd() *cobra.Command {
 			if err := ensureCoauthorAlive(cl, proj, name); err != nil {
 				return err
 			}
-			cname := hub.Container(root, name)
+			cname := container.AgentContainer(root, name)
 			fmt.Fprintf(os.Stderr, "attaching to %s — detach with your tmux prefix then d\n", name)
 			// Report the coauthor to herdr for the pairing session, same as every other
 			// attach path — a coauthor is an agent too. No-op outside a herdr pane.
@@ -124,7 +124,7 @@ func ensureCoauthorAlive(cl *client.HTTP, proj, name string) error {
 
 // statusOf returns the named agent's status word from a board snapshot, or "".
 // Matches on project too: agent names are unique per project, not globally.
-func statusOf(st hub.BoardState, proj, name string) string {
+func statusOf(st api.BoardState, proj, name string) string {
 	for _, a := range st.Agents {
 		if a.Project == proj && a.Name == name {
 			return a.Status

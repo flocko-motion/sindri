@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/flo-at/sindri/internal/adapter/tasks/spec"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -62,10 +63,13 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	}
 	prs = kept
 	var tasks []store.Task
+	var specMissing bool
 	if selected != "" {
 		if tasks, err = h.store.For(selected).AllTasks(); err != nil {
 			return BoardState{}, err
 		}
+		root := h.projectRoot(selected)
+		specMissing = spec.Enabled(root) && !spec.CLIInstalled()
 	}
 
 	// Liveness comes from the watchdog's last observation — a board read REPORTS it, never takes one.
@@ -127,7 +131,10 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	for _, p := range projects {
 		docs[p.Tag] = h.repoDocState(p.Path)
 	}
-	return BoardState{Agents: agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans, Chat: chat, RepoDocs: docs}, nil
+	return BoardState{
+		Agents: agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans, Chat: chat,
+		RepoDocs: docs, SpecCLIMissing: specMissing, StartedAt: h.startedAt.UTC().Format(time.RFC3339),
+	}, nil
 }
 
 // AgentStatsView is one agent's resource snapshot; it crosses the wire, so it is

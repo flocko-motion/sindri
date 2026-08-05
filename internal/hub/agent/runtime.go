@@ -152,23 +152,6 @@ func parseClients(out string) []ClientView {
 	return cs
 }
 
-// FormatClients is shared by CLI `agent info` and the TUI detail view, so both read alike.
-func FormatClients(cs []ClientView) string {
-	if len(cs) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "clients:   %d attached\n", len(cs))
-	for _, c := range cs {
-		mode := "read-write"
-		if c.ReadOnly {
-			mode = "read-only"
-		}
-		fmt.Fprintf(&b, "  %s  %dx%d  %s\n", c.TTY, c.Width, c.Height, mode)
-	}
-	return b.String()
-}
-
 // SessionAlive reports whether the agent's tmux session is up inside its pod.
 func (s *Service) SessionAlive(project, name string) bool {
 	return s.SessionAliveCtx(context.Background(), project, name)

@@ -4,8 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // TestEditorPrefersTheUsersChoice: $VISUAL wins over $EDITOR, which wins over any system
@@ -75,12 +74,12 @@ func TestEditorOpensTheDirectory(t *testing.T) {
 // repo's root would name a directory that exists but holds someone else's work.
 func TestAgentWorkspacePathIsAbsolute(t *testing.T) {
 	m := newModel(nil, nil, "/r/one")
-	m.state = hub.BoardState{
-		Projects: []store.Project{
+	m.state = api.BoardState{
+		Projects: []api.Project{
 			{Tag: "one", Path: "/r/one"},
 			{Tag: "two", Path: "/r/two"},
 		},
-		Agents: []hub.AgentView{
+		Agents: []api.AgentView{
 			{Name: "dvalin", Project: "one", Workspace: ".worktrees/dvalin"},
 			{Name: "alviss", Project: "two", Workspace: ".worktrees/alviss"}, // another repo
 			{Name: "hepti", Project: "one", Workspace: "."},                  // coauthor: the checkout itself
@@ -99,7 +98,7 @@ func TestAgentWorkspacePathIsAbsolute(t *testing.T) {
 	if got := m.agentWorkspacePath("nobody"); got != "" {
 		t.Errorf("unknown agent should have no path, got %q", got)
 	}
-	m.state.Agents = append(m.state.Agents, hub.AgentView{Name: "orphan", Project: "gone", Workspace: "x"})
+	m.state.Agents = append(m.state.Agents, api.AgentView{Name: "orphan", Project: "gone", Workspace: "x"})
 	if got := m.agentWorkspacePath("orphan"); got != "" {
 		t.Errorf("an agent whose repo is unknown has no resolvable path, got %q", got)
 	}

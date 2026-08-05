@@ -10,7 +10,7 @@ import (
 	"os/exec"
 	"strconv"
 
-	"github.com/flo-at/sindri/internal/hub/server"
+	"github.com/flo-at/sindri/internal/client"
 )
 
 // tuiPIDEnv marks a shell or editor the TUI suspended itself for, carrying that TUI's pid. A pid,
@@ -36,7 +36,7 @@ func ParentTUI() (int, bool) {
 	if err != nil || pid <= 0 || pid == os.Getpid() {
 		return 0, false
 	}
-	if !server.ProcessAlive(pid) {
+	if !client.ProcessAlive(pid) {
 		return 0, false
 	}
 	return pid, true

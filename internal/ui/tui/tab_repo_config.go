@@ -10,13 +10,13 @@ package tui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/config"
-	"github.com/flo-at/sindri/internal/hub"
 )
 
 // repoConfigMsg carries the fetched config for the active repo, to open the form.
 type repoConfigMsg struct {
-	d   hub.RepoDetail
+	d   api.RepoDetail
 	err error
 }
 
@@ -38,7 +38,7 @@ func (m *model) repoConfigCmd() tea.Cmd {
 // from the resolved config. Saving writes through the hub, which validates first — a
 // bad value (e.g. a path that escapes the repo) comes back as an error modal rather
 // than persisting a broken config.
-func (m *model) openRepoConfigForm(d hub.RepoDetail) {
+func (m *model) openRepoConfigForm(d api.RepoDetail) {
 	archF := newTextField("architecture", d.Config.Architecture)
 	cfF := newTextField("containerfile", d.Config.Containerfile)
 	rpF := newTextField("review_prompt", d.Config.ReviewPrompt)

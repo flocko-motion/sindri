@@ -1,47 +1,9 @@
-package hub
+package api
 
-import (
-	"testing"
-
-	"github.com/flo-at/sindri/internal/hub/store"
-)
-
-func TestSectionCounts(t *testing.T) {
-	b := BoardState{
-		Tasks: []store.Task{
-			{ID: "a", Status: "open"}, {ID: "b", Status: "in_progress"},
-			{ID: "c", Status: "closed"}, {ID: "d", Status: "merged"},
-		},
-		Agents: []AgentView{{Name: "x", Status: "idle"}, {Name: "y", Status: "down"}},
-		PRs:    []store.PR{{ID: "p1", Status: "open"}, {ID: "p2", Status: "merged"}, {ID: "p3", Status: "scrapped"}},
-	}
-	want := map[string]int{"tasks": 2, "agents": 2, "prs": 1} // non-closed; whole roster; open only (merged AND scrapped excluded)
-	for _, s := range Sections {
-		if got := s.Count(b); got != want[s.Key] {
-			t.Errorf("%s count = %d, want %d", s.Key, got, want[s.Key])
-		}
-	}
-}
-
-// TestAgentPRMatchesThePRsTab: the PR the Agents tab shows against an author is one the PRs tab
-// lists, so the two tabs never disagree about whether that agent has a PR at all. A scrapped one
-// used to stick to its author on the Agents tab and be absent from the PRs tab.
-func TestAgentPRMatchesThePRsTab(t *testing.T) {
-	prs := []store.PR{
-		{ID: "pr-1", Project: "p", Agent: "bombur", Status: "scrapped"},
-		{ID: "pr-2", Project: "p", Agent: "dain", Status: "merged"},
-		{ID: "pr-3", Project: "p", Agent: "jari", Status: "open"},
-		{ID: "pr-4", Project: "p", Agent: "nori", Status: "rejected"},
-	}
-	for agent, want := range map[string]string{"bombur": "", "dain": "", "jari": "pr-3", "nori": "pr-4"} {
-		if got := openPRFor(prs, "p", agent); got != want {
-			t.Errorf("openPRFor(%s) = %q, want %q", agent, got, want)
-		}
-	}
-}
+import "testing"
 
 func TestArrangeTasksTree(t *testing.T) {
-	tasks := []store.Task{
+	tasks := []Task{
 		{ID: "ep", Priority: "P1", Status: "open"},
 		{ID: "f1", ParentID: "ep", Priority: "P1", Status: "open"},
 		{ID: "t1", ParentID: "f1", Priority: "P2", Status: "open"},
@@ -49,7 +11,7 @@ func TestArrangeTasksTree(t *testing.T) {
 		{ID: "orphan", ParentID: "ghost", Priority: "P3", Status: "open"}, // parent absent → root
 		{ID: "bug", Priority: "P0", Status: "open"},                       // standalone, highest prio
 	}
-	prs := []store.PR{
+	prs := []PR{
 		{ID: "pr-f1", Task: "f1", Status: "open", Kind: "interim"},
 		{ID: "pr-x", Task: "t1", Status: "merged"},
 		{ID: "pr-f2", Task: "f2", Status: "scrapped"}, // terminal → not annotated

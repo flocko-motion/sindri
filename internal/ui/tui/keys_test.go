@@ -6,8 +6,7 @@ import (
 	"testing"
 	"unicode"
 
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // scopeLabels is what a tab's footer effectively offers: its own bindings plus the global ones,
@@ -170,10 +169,10 @@ func TestOldKeysLostTheirOldJobs(t *testing.T) {
 // Agents tab, and on the PRs tab the tree of the agent that AUTHORED the PR (not the selection on
 // some other tab). A PR outlives its agent, so the case with no tree left has to say so.
 func TestOpenShellTargetsTheWorktree(t *testing.T) {
-	fleet := func() hub.BoardState {
-		return hub.BoardState{
-			Projects: []store.Project{{Tag: "repo", Path: "/r/one"}},
-			Agents:   []hub.AgentView{{Name: "dvalin", Project: "repo", Status: "idle", Workspace: ".worktrees/dvalin"}},
+	fleet := func() api.BoardState {
+		return api.BoardState{
+			Projects: []api.Project{{Tag: "repo", Path: "/r/one"}},
+			Agents:   []api.AgentView{{Name: "dvalin", Project: "repo", Status: "idle", Workspace: ".worktrees/dvalin"}},
 		}
 	}
 	want := filepath.Join("/r/one", ".worktrees", "dvalin")
@@ -189,7 +188,7 @@ func TestOpenShellTargetsTheWorktree(t *testing.T) {
 	t.Run("prs tab: the authoring agent's tree", func(t *testing.T) {
 		m := newModel(nil, nil, "")
 		st := fleet()
-		st.PRs = []store.PR{{ID: "pr-td-1", Status: "open", Project: "repo", Agent: "dvalin", Branch: "td-1"}}
+		st.PRs = []api.PR{{ID: "pr-td-1", Status: "open", Project: "repo", Agent: "dvalin", Branch: "td-1"}}
 		m.tab, m.scopeRepo, m.state = 2, false, st
 		if got := m.selWorktree(); got != want {
 			t.Errorf("selWorktree() = %q, want %q", got, want)
@@ -199,7 +198,7 @@ func TestOpenShellTargetsTheWorktree(t *testing.T) {
 	t.Run("prs tab: the agent is gone", func(t *testing.T) {
 		m := newModel(nil, nil, "")
 		st := fleet()
-		st.PRs = []store.PR{{ID: "pr-td-9", Status: "open", Project: "repo", Agent: "vanished", Branch: "td-9"}}
+		st.PRs = []api.PR{{ID: "pr-td-9", Status: "open", Project: "repo", Agent: "vanished", Branch: "td-9"}}
 		m.tab, m.scopeRepo, m.state = 2, false, st
 		if got := m.selWorktree(); got != "" {
 			t.Errorf("a vanished agent leaves no tree, got %q", got)
@@ -218,7 +217,7 @@ func TestNewKeysReachTheirActions(t *testing.T) {
 	t.Run("agent-review on the PRs tab", func(t *testing.T) {
 		m := newModel(nil, nil, "")
 		m.tab, m.scopeRepo = 2, false
-		m.state = hub.BoardState{PRs: []store.PR{{ID: "pr-td-1", Status: "open", Project: "repo", Branch: "td-1"}}}
+		m.state = api.BoardState{PRs: []api.PR{{ID: "pr-td-1", Status: "open", Project: "repo", Branch: "td-1"}}}
 		if id := m.selID(); id != "pr-td-1" {
 			t.Fatalf("expected pr-td-1 selected, got %q", id)
 		}
@@ -231,7 +230,7 @@ func TestNewKeysReachTheirActions(t *testing.T) {
 	t.Run("options on the Agents tab", func(t *testing.T) {
 		m := newModel(nil, nil, "")
 		m.tab, m.scopeRepo = 1, false
-		m.state = hub.BoardState{Agents: []hub.AgentView{{Name: "dvalin", Project: "repo", Status: "idle"}}}
+		m.state = api.BoardState{Agents: []api.AgentView{{Name: "dvalin", Project: "repo", Status: "idle"}}}
 		if id := m.selID(); id != "dvalin" {
 			t.Fatalf("expected dvalin selected, got %q", id)
 		}

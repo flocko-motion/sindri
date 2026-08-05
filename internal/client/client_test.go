@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/hub/agentchan"
 )
@@ -29,7 +30,7 @@ func serveTestHub(t *testing.T) *hub.Hub {
 	}
 	t.Cleanup(func() { h.Close() })
 	go h.Serve()
-	for deadline := time.Now().Add(testTimeout); !hub.IsRunning(); {
+	for deadline := time.Now().Add(testTimeout); !IsRunning(); {
 		if time.Now().After(deadline) {
 			t.Fatal("hub never came up")
 		}
@@ -68,7 +69,7 @@ func TestWatchStreamsChanges(t *testing.T) {
 	}
 }
 
-func cmdNames(cmds []hub.CmdInfo) []string {
+func cmdNames(cmds []api.CmdInfo) []string {
 	out := make([]string, len(cmds))
 	for i, c := range cmds {
 		out[i] = c.Name

@@ -12,8 +12,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/theme"
 	"github.com/spf13/cobra"
 )
 
@@ -22,9 +22,9 @@ import (
 // tasksJSON renders the task rows (their json tags) for machine consumers. It
 // always yields a JSON array — never null — so the output parses even when there
 // are no tasks.
-func tasksJSON(tasks []store.Task) (string, error) {
+func tasksJSON(tasks []api.Task) (string, error) {
 	if tasks == nil {
-		tasks = []store.Task{}
+		tasks = []api.Task{}
 	}
 	out, err := json.MarshalIndent(tasks, "", "  ")
 	if err != nil {
@@ -180,7 +180,7 @@ func pendingBelow(b backend, id string) int {
 	if err != nil {
 		return 0
 	}
-	return len(hub.PendingApproval(all, id))
+	return len(api.PendingApproval(all, id))
 }
 
 // plural renders a counted noun for the confirmation lines.
@@ -213,7 +213,7 @@ func taskPriorityCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withBackend(func(b backend) error {
-				if err := b.SetPriority(args[0], hub.PriorityCode(args[1])); err != nil {
+				if err := b.SetPriority(args[0], theme.PriorityCode(args[1])); err != nil {
 					return err
 				}
 				fmt.Fprintf(os.Stderr, "set %s priority %s\n", args[0], args[1])
@@ -242,7 +242,7 @@ func taskListCmd() *cobra.Command {
 					return nil
 				}
 				for _, t := range tasks {
-					fmt.Printf("%-12s %-8s %-12s %s\n", t.ID, hub.PriorityLabel(t.Priority), t.Status, t.Title)
+					fmt.Printf("%-12s %-8s %-12s %s\n", t.ID, theme.PriorityLabel(t.Priority), t.Status, t.Title)
 				}
 				if len(tasks) == 0 {
 					fmt.Fprintln(os.Stderr, "no tasks")
@@ -267,7 +267,7 @@ func taskInfoCmd() *cobra.Command {
 				// The same fields the TUI pane and the agent's `task <id>` show: a front-end
 				// chooses layout, not which facts exist, or it answers a different question.
 				fmt.Printf("id:       %s\ntitle:    %s\nstatus:   %s\ntype:     %s\npriority: %s\nparent:   %s\napproval: %s\nlabels:   %s\nurl:      %s\n",
-					t.ID, t.Title, t.Status, dash(t.Type), hub.PriorityLabel(t.Priority),
+					t.ID, t.Title, t.Status, dash(t.Type), theme.PriorityLabel(t.Priority),
 					dash(t.ParentID), dash(t.Approval), dash(t.Labels), dash(t.URL))
 				if body := strings.TrimRight(t.Description, "\n"); body != "" {
 					fmt.Printf("\n%s\n", body)
@@ -290,7 +290,7 @@ func taskNewCmd() *cobra.Command {
 		Use: "new <title...>", Short: "Create a task", Args: cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withBackend(func(b backend) error {
-				id, err := b.CreateTask(hub.TaskSpec{
+				id, err := b.CreateTask(api.TaskSpec{
 					Title: strings.Join(args, " "), Type: typ, Priority: priority,
 					Parent: parent, Description: desc, Labels: splitCSV(labels),
 				})
@@ -312,7 +312,7 @@ func taskEditCmd() *cobra.Command {
 		Use: "edit <id>", Short: "Edit a task (only the flags you pass are changed)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withBackend(func(b backend) error {
-				if err := b.EditTask(args[0], hub.TaskSpec{
+				if err := b.EditTask(args[0], api.TaskSpec{
 					Title: title, Type: typ, Priority: priority,
 					Parent: parent, Description: desc, Labels: splitCSV(labels),
 				}); err != nil {

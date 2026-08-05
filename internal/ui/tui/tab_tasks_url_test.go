@@ -4,8 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // TestTaskURLMakesTheDetailReachable: ctrl+l only focuses the detail pane when it has at least one
@@ -16,7 +15,7 @@ func TestTaskURLMakesTheDetailReachable(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.tab = 0          // Tasks
 	m.w, m.h = 120, 40 // wide enough for showDetail()
-	m.state = hub.BoardState{Tasks: []store.Task{
+	m.state = api.BoardState{Tasks: []api.Task{
 		{ID: "gh-12", Title: "an issue with no xrefs", Status: "open"},
 	}}
 	m.cursor[0] = 0
@@ -49,7 +48,7 @@ func TestTaskURLMakesTheDetailReachable(t *testing.T) {
 func TestTaskURLLineIsADashWhenAbsent(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.tab = 0
-	m.state = hub.BoardState{Tasks: []store.Task{{ID: "td-1", Title: "plain", Status: "open"}}}
+	m.state = api.BoardState{Tasks: []api.Task{{ID: "td-1", Title: "plain", Status: "open"}}}
 	m.cursor[0] = 0
 	m.reclamp()
 
@@ -71,7 +70,7 @@ func TestEnterCopiesTheTaskURL(t *testing.T) {
 	m.tab = 0
 	m.w, m.h = 120, 40
 	url := "https://github.com/acme/widgets/issues/12"
-	m.state = hub.BoardState{Tasks: []store.Task{
+	m.state = api.BoardState{Tasks: []api.Task{
 		{ID: "gh-12", Title: "an issue", Status: "open", URL: url},
 	}}
 	m.cursor[0] = 0

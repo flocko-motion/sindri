@@ -4,22 +4,22 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
 // view builds a transcript snapshot for the renderer. lipgloss strips styling when stdout
 // isn't a terminal, so these assertions see the plain layout — exactly the structure under
 // test (colour is ui/theme's business, covered there).
-func view(msgs ...store.ChatMessage) hub.ChatView {
-	return hub.ChatView{
-		Members: []store.ChatMember{{Name: "eitri", Role: "worker"}},
+func view(msgs ...api.ChatMessage) api.ChatView {
+	return api.ChatView{
+		Members: []api.ChatMember{{Name: "eitri", Role: "worker"}},
 		Log:     msgs,
 	}
 }
 
-func msg(id int64, sender, body string) store.ChatMessage {
-	return store.ChatMessage{ID: id, Sender: sender, Body: body, TS: "2026-07-28T09:00:00Z"}
+func msg(id int64, sender, body string) api.ChatMessage {
+	return api.ChatMessage{ID: id, Sender: sender, Body: body, TS: "2026-07-28T09:00:00Z"}
 }
 
 // TestTranscriptSeparatesSpeakers: a change of speaker gets a blank line and a fresh
@@ -80,8 +80,8 @@ func TestMultilineBodyKeepsIndent(t *testing.T) {
 // permanent participant and must always be listed — and an empty roster must say what is
 // actually missing (agents) plus how to fix it.
 func TestRosterAlwaysIncludesUser(t *testing.T) {
-	empty := renderMembers(hub.ChatView{})
-	if !strings.Contains(empty, "user") || !strings.Contains(empty, hub.ChatUserIcon) {
+	empty := renderMembers(api.ChatView{})
+	if !strings.Contains(empty, "user") || !strings.Contains(empty, theme.UserIcon) {
 		t.Errorf("the user must be listed even with no agents, got: %q", empty)
 	}
 	if strings.Contains(empty, "is empty") {
@@ -92,7 +92,7 @@ func TestRosterAlwaysIncludesUser(t *testing.T) {
 	}
 
 	// With agents: the user first, then each agent with its role.
-	full := renderMembers(hub.ChatView{Members: []store.ChatMember{
+	full := renderMembers(api.ChatView{Members: []api.ChatMember{
 		{Name: "eitri", Role: "worker"}, {Name: "dvalin", Role: "reviewer"},
 	}})
 	if strings.Index(full, "user") > strings.Index(full, "eitri") {
@@ -112,10 +112,10 @@ func TestRosterAlwaysIncludesUser(t *testing.T) {
 // visibly not another agent.
 func TestHumanIsMarked(t *testing.T) {
 	got := renderChat(view(msg(1, "user", "hello"), msg(2, "eitri", "hi")))
-	if !strings.Contains(got, hub.ChatUserIcon+" user") {
+	if !strings.Contains(got, theme.UserIcon+" user") {
 		t.Errorf("the user needs the human icon, got:\n%s", got)
 	}
-	if !strings.Contains(got, hub.ChatAgentIcon+" eitri") {
+	if !strings.Contains(got, theme.AgentIcon+" eitri") {
 		t.Errorf("an agent needs the robot icon, got:\n%s", got)
 	}
 }

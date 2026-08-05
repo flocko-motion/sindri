@@ -4,23 +4,22 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // taskFleet: one agent working a subtask inside an epic, another on a standalone task, and an
 // epic nobody is working.
-func taskFleet() hub.BoardState {
-	return hub.BoardState{
-		Projects: []store.Project{{Tag: "one", Path: "/r/one"}},
-		Tasks: []store.Task{
+func taskFleet() api.BoardState {
+	return api.BoardState{
+		Projects: []api.Project{{Tag: "one", Path: "/r/one"}},
+		Tasks: []api.Task{
 			{ID: "td-EPIC", Title: "Login feature"},
 			{ID: "td-1", Title: "Form UI", ParentID: "td-EPIC"},
 			{ID: "td-2", Title: "Session store", ParentID: "td-1"}, // nested
 			{ID: "td-SOLO", Title: "Fix the glitch"},
 			{ID: "td-COLD", Title: "Nobody's work"},
 		},
-		Agents: []hub.AgentView{
+		Agents: []api.AgentView{
 			{Name: "dvalin", Project: "one", Status: "working", Task: "td-2"}, // deep in the epic
 			{Name: "nori", Project: "one", Status: "idle", Task: "td-SOLO"},
 			{Name: "galar", Project: "one", Status: "planning", Task: ""}, // holds nothing
@@ -64,12 +63,12 @@ func TestAttachFromTaskFindsNobodyWhenIdle(t *testing.T) {
 // contain a loop. Resolving one must not hang the UI.
 func TestAgentOnTaskSurvivesACycle(t *testing.T) {
 	m := newModel(nil, nil, "/r/one")
-	m.state = hub.BoardState{
-		Tasks: []store.Task{
+	m.state = api.BoardState{
+		Tasks: []api.Task{
 			{ID: "a", ParentID: "b"},
 			{ID: "b", ParentID: "a"},
 		},
-		Agents: []hub.AgentView{{Name: "dvalin", Task: "a"}},
+		Agents: []api.AgentView{{Name: "dvalin", Task: "a"}},
 	}
 	if _, ok := m.agentOnTask("unrelated"); ok {
 		t.Error("a cyclic chain must not match an unrelated task")

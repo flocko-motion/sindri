@@ -19,6 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
@@ -31,8 +32,8 @@ type Delivery interface {
 }
 
 const (
-	user   = "user"   // sender label for the human's messages
-	system = "system" // sender label for the hub's own lines (join/leave, command replies)
+	user   = api.SenderUser   // sender label for the human's messages
+	system = api.SenderSystem // sender label for the hub's own lines (join/leave, command replies)
 
 	transcriptLimit = 200              // how much history a snapshot / live view carries
 	presenceTTL     = 20 * time.Second // room stays unlocked this long after the last heartbeat
@@ -42,9 +43,9 @@ const (
 )
 
 // HelpText is exported so `/help`, the `meeting join` banner and the TUI chat tab can't
-// drift into three different accounts of the same commands.
-const HelpText = "/add <agent> (alias /invite) · /remove <agent> (alias /kick) · /who (list members) · /help. " +
-	"Anything not starting with / is sent to everyone in the room."
+// drift into three different accounts of the same commands. It crosses the wire (every
+// front-end shows it), so its text lives in internal/api under the same name.
+const HelpText = api.ChatHelpText
 
 // Notices pushed on membership change; exported so the hub can re-announce on relaunch.
 const (
@@ -56,26 +57,19 @@ const (
 	MsgNewMeeting = "a new meeting started — the shared history was cleared. Earlier messages are gone from the room, so restate anything that still matters instead of assuming it carried over."
 )
 
-// Participant markers live in the core, not a UI package: they are stamped into the line
-// an agent READS, so they are protocol. Plain UTF-8 because ANSI would land as noise.
+// Participant markers are stamped into the line an agent READS, so they are protocol,
+// crossing the wire the same as every front-end's rendering of them; that is why
+// they live in internal/api rather than being defined here.
 const (
-	SenderUser   = user   // the human — the one participant an agent must never mistake for a peer
-	SenderSystem = system // the hub speaking for itself
-	UserIcon     = "👤"
-	AgentIcon    = "🤖"
-	SystemIcon   = "⚙"
+	SenderUser   = api.SenderUser
+	SenderSystem = api.SenderSystem
+	UserIcon     = api.UserIcon
+	AgentIcon    = api.AgentIcon
+	SystemIcon   = api.SystemIcon
 )
 
 // Icon marks who is speaking: the human, the hub itself, or an agent.
-func Icon(sender string) string {
-	switch sender {
-	case SenderUser:
-		return UserIcon
-	case SenderSystem:
-		return SystemIcon
-	}
-	return AgentIcon
-}
+func Icon(sender string) string { return api.ChatIcon(sender) }
 
 // errTooLong is actionable for whoever sent it, so callers must surface it to the sender.
 var errTooLong = fmt.Errorf("message too long — keep it under %d characters (split a longer one into parts)", maxLen)
@@ -231,12 +225,10 @@ func (s *Service) UserMessage(line string) error {
 	return err
 }
 
-// IsCommand reports whether a line is an in-chat command rather than a message. Exported so a
-// front-end can tell the two apart — a composer submits a command on Enter — without a second
-// copy of the rule that would drift from this one.
-func IsCommand(line string) bool {
-	return strings.HasPrefix(strings.TrimSpace(line), "/")
-}
+// IsCommand reports whether a line is an in-chat command rather than a message; it crosses to
+// every front-end's composer, so it is internal/api.IsChatCommand under the name every existing
+// caller here already uses.
+var IsCommand = api.IsChatCommand
 
 // Cmd is the agent-facing verb; the registry hides it from non-members, this gates presence.
 func (s *Service) Cmd(c registry.Caller, args []string, out io.Writer) (int, error) {

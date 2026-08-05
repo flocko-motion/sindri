@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
 func taskRowText(m model, id string) string {
@@ -23,7 +23,7 @@ func taskRowText(m model, id string) string {
 func TestTaskBusyTransient(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.tab = 0
-	m.state = hub.BoardState{Tasks: []store.Task{{ID: "td-1", Title: "thing", Status: "open", Priority: "P1"}}}
+	m.state = api.BoardState{Tasks: []api.Task{{ID: "td-1", Title: "thing", Status: "open", Priority: "P1"}}}
 	m.cursor[0] = 0
 	m.reclamp()
 
@@ -40,7 +40,7 @@ func TestTaskBusyTransient(t *testing.T) {
 
 	// A fresh board showing it closed clears the transient (reconcile), and the row
 	// shows the real state.
-	m.state = hub.BoardState{Tasks: []store.Task{{ID: "td-1", Title: "thing", Status: "closed", Priority: "P1"}}}
+	m.state = api.BoardState{Tasks: []api.Task{{ID: "td-1", Title: "thing", Status: "closed", Priority: "P1"}}}
 	m.reconcileBusy()
 	if m.busy["td-1"] != "" {
 		t.Fatalf("marker should clear once the board confirms the task closed")
@@ -56,12 +56,12 @@ func TestTaskBusyTransient(t *testing.T) {
 func TestDoneTaskShowsItsStatusNotItsGate(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.tab, m.filter = 0, filterAll
-	m.state = hub.BoardState{Tasks: []store.Task{
+	m.state = api.BoardState{Tasks: []api.Task{
 		{ID: "td-1", Title: "worked up", Status: "closed", Approval: "pending"},
 		{ID: "td-2", Title: "still proposed", Status: "open", Approval: "pending"},
 	}}
 	m.reclamp()
-	if txt := taskRowText(m, "td-1"); !strings.Contains(txt, hub.StateLabel("closed")) || strings.Contains(txt, "pending") {
+	if txt := taskRowText(m, "td-1"); !strings.Contains(txt, theme.StateLabel("closed")) || strings.Contains(txt, "pending") {
 		t.Errorf("closed row = %q, want its closed label and not pending", txt)
 	}
 	if txt := taskRowText(m, "td-2"); !strings.Contains(txt, "pending") {
@@ -74,7 +74,7 @@ func TestDoneTaskShowsItsStatusNotItsGate(t *testing.T) {
 func TestReconcileBusyScrapped(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.markBusy("td-9", "deleting")
-	m.state = hub.BoardState{Tasks: []store.Task{}} // td-9 gone
+	m.state = api.BoardState{Tasks: []api.Task{}} // td-9 gone
 	m.reconcileBusy()
 	if m.busy["td-9"] != "" {
 		t.Fatalf("marker for a vanished (scrapped) task should be dropped")
@@ -87,7 +87,7 @@ func TestTaskOpDoneClearsTransient(t *testing.T) {
 	// Success.
 	m := newModel(nil, nil, "")
 	m.markBusy("td-1", "closing")
-	done := hub.BoardState{Tasks: []store.Task{{ID: "td-1", Status: "closed"}}}
+	done := api.BoardState{Tasks: []api.Task{{ID: "td-1", Status: "closed"}}}
 	tm, _ := m.Update(taskOpDoneMsg{id: "td-1", state: done})
 	got := tm.(model)
 	if got.busy["td-1"] != "" {

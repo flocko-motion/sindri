@@ -12,9 +12,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/chat"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
@@ -89,7 +87,7 @@ func (m model) updateComposer(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.quit = true
 		return m, tea.Quit
 	case "enter":
-		if !chat.IsCommand(m.composer.Value()) {
+		if !api.IsChatCommand(m.composer.Value()) {
 			break // a message is multiline; only a command submits on enter
 		}
 		return m.sendComposed()
@@ -145,7 +143,7 @@ func (m model) chatBody() string {
 }
 
 // chatMembersLine summarizes who's in the room, or nudges the user to add someone when empty.
-func chatMembersLine(v hub.ChatView) string {
+func chatMembersLine(v api.ChatView) string {
 	// The user first: the roster holds only AGENTS, so an empty one means "no agents yet", not an
 	// empty room — the user is always a participant. Same shape as the CLI's renderMembers.
 	parts := []string{theme.Icon(theme.SenderUser) + " " +
@@ -159,7 +157,7 @@ func chatMembersLine(v hub.ChatView) string {
 	}
 	line := strings.Join(parts, " · ")
 	if len(v.Members) == 0 {
-		// The same description the CLI's join banner and /help print (-> hub.ChatHelpText).
+		// The same description the CLI's join banner and /help print (-> theme.HelpText).
 		line += dimStyle.Render(" — no agents yet; press enter, then " + theme.HelpText)
 	}
 	return line
@@ -168,7 +166,7 @@ func chatMembersLine(v hub.ChatView) string {
 // chatLines formats one message as a speaker header (time · icon · name, the name in its own
 // deterministic ui/theme colour, as in the CLI) plus the body, split on its own newlines. prev
 // groups a speaker's run — no repeated header, a blank line on a change — so a transcript skims.
-func chatLines(msg store.ChatMessage, prev string) []string {
+func chatLines(msg api.ChatMessage, prev string) []string {
 	body := strings.Split(strings.TrimRight(msg.Body, "\n"), "\n")
 	out := make([]string, 0, len(body)+2)
 	if msg.Sender != prev {

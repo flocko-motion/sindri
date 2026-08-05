@@ -15,9 +15,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/client"
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
 func isDone(status string) bool {
@@ -31,14 +31,14 @@ func isDone(status string) bool {
 // recentlyChanged reports whether a task's last known change falls inside activeWindow; a task
 // with no timestamp (an openspec change, say) is never recent, so it needs the open half of the
 // filter to show.
-func recentlyChanged(t store.Task) bool {
+func recentlyChanged(t api.Task) bool {
 	at, err := time.Parse(time.RFC3339, t.UpdatedAt)
 	return err == nil && time.Since(at) < activeWindow
 }
 
 // taskRows builds the filtered, folded, depth-indented task tree.
 func (m model) taskRows() []row {
-	var filtered []store.Task
+	var filtered []api.Task
 	for _, t := range m.state.Tasks {
 		done := isDone(t.Status)
 		switch m.filter {
@@ -58,7 +58,7 @@ func (m model) taskRows() []row {
 			}
 		}
 	}
-	arranged := hub.ArrangeTasks(filtered, m.state.PRs)
+	arranged := api.ArrangeTasks(filtered, m.state.PRs)
 
 	// Which tasks have a worker on them right now (drives the 🔨 marker).
 	assigned := map[string]bool{}
@@ -91,7 +91,7 @@ func (m model) taskRows() []row {
 	}
 
 	// Visible set after applying folds.
-	var visible []hub.TaskRow
+	var visible []api.TaskRow
 	hideAbove := -1 // depth of a collapsed ancestor; rows deeper than this are hidden
 	for _, tr := range arranged {
 		if hideAbove >= 0 && tr.Depth > hideAbove {
@@ -117,7 +117,7 @@ func (m model) taskRows() []row {
 		// Cells styled independently (never nested) so a colour reset can't bleed
 		// across the row. An approval gate overrides the status colour.
 		sc := taskStatusStyle(tr.Status)
-		state := hub.StateLabel(tr.Status)
+		state := theme.StateLabel(tr.Status)
 		switch approval[tr.ID] { // the approval gate overrides both colour and state word
 		case "pending":
 			sc, state = stWarn, "pending"
@@ -127,9 +127,9 @@ func (m model) taskRows() []row {
 		if v := m.busy[tr.ID]; v != "" { // transient: the user triggered a close/scrap, awaiting the hub
 			sc, state = stWarn, v
 		}
-		prio := sc.Render(fmt.Sprintf("%-8s", hub.PriorityLabel(tr.Priority)))
+		prio := sc.Render(fmt.Sprintf("%-8s", theme.PriorityLabel(tr.Priority)))
 		if isCriticalPriority(tr.Priority) {
-			prio = stCrit.Render(fmt.Sprintf("%-8s", hub.PriorityLabel(tr.Priority)))
+			prio = stCrit.Render(fmt.Sprintf("%-8s", theme.PriorityLabel(tr.Priority)))
 		}
 		out[i] = row{
 			strings.Join([]string{
@@ -183,7 +183,7 @@ const marksW = 3
 
 // prMarkKind picks the PR marker: ◆ final, ◇ interim, "" none. A kindless PR defaults to
 // final, the historical default, so older PRs still show ◆.
-func prMarkKind(tr hub.TaskRow) string {
+func prMarkKind(tr api.TaskRow) string {
 	if tr.PR == "" {
 		return ""
 	}
@@ -231,7 +231,7 @@ func (m model) taskDetailLines() []string {
 // taskItems is the selected task's detail; parent/agent/pr are focusable cross-references.
 func (m model) taskItems() []metaItem {
 	id := m.selID()
-	var t store.Task
+	var t api.Task
 	for _, x := range m.state.Tasks {
 		if x.ID == id {
 			t = x
@@ -239,7 +239,7 @@ func (m model) taskItems() []metaItem {
 	}
 	// The board row's description shows at once; the lazy read then refines it.
 	desc := t.Description
-	var comments []store.Comment
+	var comments []api.Comment
 	if m.taskDetail.ID == id {
 		if m.taskDetail.Description != "" {
 			desc = m.taskDetail.Description
@@ -260,12 +260,12 @@ func (m model) taskActionable() []metaItem {
 }
 
 // taskDetailFor renders any task's detail block, for the modal-peek and PRs' linked-task modal.
-func (m model) taskDetailFor(t store.Task, desc string) []string {
+func (m model) taskDetailFor(t api.Task, desc string) []string {
 	return itemTexts(m.taskItemsFor(t, desc, nil))
 }
 
 // taskItemsFor builds the fields, the agent/PR/parent/url cross-references, then desc and comments.
-func (m model) taskItemsFor(t store.Task, desc string, comments []store.Comment) []metaItem {
+func (m model) taskItemsFor(t api.Task, desc string, comments []api.Comment) []metaItem {
 	assignee, pr := "", ""
 	for _, a := range m.state.Agents {
 		if a.Task == t.ID {
@@ -286,7 +286,7 @@ func (m model) taskItemsFor(t store.Task, desc string, comments []store.Comment)
 	items := []metaItem{
 		{text: t.Title}, {text: ""},
 		{text: "type:     " + dash(t.Type)},
-		{text: "priority: " + hub.PriorityLabel(t.Priority)},
+		{text: "priority: " + theme.PriorityLabel(t.Priority)},
 		{text: "status:   " + t.Status},
 	}
 	if t.Approval != "" { // a planner proposal under the approval gate
@@ -320,7 +320,7 @@ func descItems(desc string) []metaItem {
 }
 
 // commentItems renders the synced thread as author + local timestamp, then body lines.
-func commentItems(comments []store.Comment) []metaItem {
+func commentItems(comments []api.Comment) []metaItem {
 	if len(comments) == 0 {
 		return nil
 	}
@@ -350,22 +350,22 @@ func commentTime(ts string) string {
 var taskTypes = []string{"task", "feature", "bug", "epic", "chore"}
 
 // selTask returns the currently-selected task from the board snapshot.
-func (m model) selTask() (store.Task, bool) {
+func (m model) selTask() (api.Task, bool) {
 	id := m.selID()
 	for _, t := range m.state.Tasks {
 		if t.ID == id {
 			return t, true
 		}
 	}
-	return store.Task{}, false
+	return api.Task{}, false
 }
 
 // openTaskForm opens the new/edit task form. t must be freshly fetched, not a board row, or a
 // save blanks the fields the board doesn't carry. Openspec items honour priority only (hub-side).
-func (m *model) openTaskForm(edit bool, t store.Task) {
-	prioCodes := make([]string, len(hub.PriorityWords))
-	for i, w := range hub.PriorityWords {
-		prioCodes[i] = hub.PriorityCode(w)
+func (m *model) openTaskForm(edit bool, t api.Task) {
+	prioCodes := make([]string, len(theme.PriorityWords))
+	for i, w := range theme.PriorityWords {
+		prioCodes[i] = theme.PriorityCode(w)
 	}
 	title, typ, prio, parent, labels, desc, id := "", "task", "P2", "", "", "", ""
 	if edit {
@@ -379,7 +379,7 @@ func (m *model) openTaskForm(edit bool, t store.Task) {
 	}
 	titleF := newTextField("title", title)
 	typeF := newChoiceField("type", taskTypes, taskTypes, typ)
-	prioF := newChoiceField("priority", hub.PriorityWords, prioCodes, prio)
+	prioF := newChoiceField("priority", theme.PriorityWords, prioCodes, prio)
 	parentF := newTextField("parent", parent)
 	labelsF := newTextField("labels", labels)
 	descF := newTextareaField("description", desc)
@@ -401,7 +401,7 @@ func (m *model) openTaskForm(edit bool, t store.Task) {
 		return ""
 	}
 	m.form.open(heading, []field{titleF, typeF, prioF, parentF, labelsF, descF}, validate, func() tea.Cmd {
-		spec := hub.TaskSpec{
+		spec := api.TaskSpec{
 			Title: titleF.value(), Type: typeF.value(), Priority: prioF.value(),
 			Parent: strings.TrimSpace(parentF.value()), Description: descF.value(), Labels: csv(labelsF.value()),
 		}
@@ -587,13 +587,13 @@ func (m *model) openTaskRejectForm(id string) {
 // openPriorityChoice opens the priority picker for a task.
 func (m *model) openPriorityChoice(id string) {
 	cl := m.cl
-	vals := make([]string, len(hub.PriorityWords))
-	for i, w := range hub.PriorityWords {
-		vals[i] = hub.PriorityCode(w)
+	vals := make([]string, len(theme.PriorityWords))
+	for i, w := range theme.PriorityWords {
+		vals[i] = theme.PriorityCode(w)
 	}
 	m.choice = choiceModalState{
 		active: true, title: "priority for " + id,
-		options: hub.PriorityWords, values: vals,
+		options: theme.PriorityWords, values: vals,
 		apply: func(code string) tea.Cmd {
 			if cl == nil {
 				return nil

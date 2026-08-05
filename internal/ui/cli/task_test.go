@@ -5,14 +5,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // TestTasksJSON: `task list --json` renders the task rows as a JSON array using
 // their json tags, and yields an empty array (not null) when there are no tasks.
 func TestTasksJSON(t *testing.T) {
 	// Empty/nil input → "[]", never "null", so consumers can always parse an array.
-	for _, in := range [][]store.Task{nil, {}} {
+	for _, in := range [][]api.Task{nil, {}} {
 		got, err := tasksJSON(in)
 		if err != nil {
 			t.Fatalf("tasksJSON(%v): %v", in, err)
@@ -22,7 +22,7 @@ func TestTasksJSON(t *testing.T) {
 		}
 	}
 
-	tasks := []store.Task{
+	tasks := []api.Task{
 		{ID: "td-1", Title: "first", Status: "open", Priority: "P1", Type: "feature", Labels: "a,b"},
 		{ID: "td-2", Title: "second", Status: "closed"},
 	}
@@ -32,7 +32,7 @@ func TestTasksJSON(t *testing.T) {
 	}
 
 	// It round-trips back to the same rows (json tags carry the field names).
-	var back []store.Task
+	var back []api.Task
 	if err := json.Unmarshal([]byte(got), &back); err != nil {
 		t.Fatalf("output is not valid JSON: %v\n%s", err, got)
 	}

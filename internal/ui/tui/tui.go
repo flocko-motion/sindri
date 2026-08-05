@@ -17,9 +17,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/client"
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/ui/tui/scroll"
 )
 
@@ -31,6 +30,21 @@ const (
 )
 
 var filterNames = [...]string{"open", "closed", "all", "active"}
+
+// tuiSection is one dashboard tab: a key and a title. Unlike hub/commands' registry
+// (which pairs a key with a Count func — necessary hub-side, but a func can't cross
+// the wire), the front-end computes each badge itself, straight off the board it
+// already has (-> tabCount): Agents and PRs need the § scope toggle the hub knows
+// nothing about, so the count could never have been a value the hub resolved once.
+var tuiSections = []tuiSection{
+	{"tasks", "Tasks"},
+	{"agents", "Agents"},
+	{"prs", "PRs"},
+	{"repos", "Repos"},
+	{"chat", "Meeting"},
+}
+
+type tuiSection struct{ Key, Title string }
 
 // activeWindow is how recently a task must have changed to count as "active" alongside every
 // open task — wide enough that a task closed just before you glanced over doesn't vanish.
@@ -47,11 +61,11 @@ const (
 
 type model struct {
 	cl     *client.HTTP
-	ch     <-chan hub.BoardState
+	ch     <-chan api.BoardState
 	cancel context.CancelFunc // cancels the current /events subscription (re-created on repo switch)
 	gen    int                // subscription generation; bumped on switch so stale /events msgs are ignored
 	root   string             // the selected repo — scopes the Tasks tab and container names
-	state  hub.BoardState
+	state  api.BoardState
 	err    error
 	w, h   int
 
@@ -72,15 +86,15 @@ type model struct {
 	rightCursor int  // focused actionable item in the right column
 
 	detailKey    string
-	agentLog     []store.Event
+	agentLog     []api.Event
 	agentPane    string           // captured tmux screen of the selected agent (live)
 	agentView    string           // Agents main pane: "screen" (tmux, default) | "pod" (podman info)
 	agentPod     string           // fetched podman pod-info for the selected agent
-	agentClients []hub.ClientView // dial-ins attached to the selected agent's session
-	prDetail     hub.PRDetail
+	agentClients []api.ClientView // dial-ins attached to the selected agent's session
+	prDetail     api.PRDetail
 	prView       string // which content the PR big pane shows: "diff" (default) | "lint"
 	reviewPrompt string // editable default review instruction (from the hub)
-	taskDetail   store.Task
+	taskDetail   api.Task
 	quit         bool
 
 	modalOverride      []string // when set, the detail modal shows these instead of the tab detail
@@ -111,7 +125,7 @@ func (m model) wide() bool { return m.w >= detailMinWidth }
 // there's room, off when the user hides it with §. Never hides the main pane.
 func (m model) showDetail() bool { return m.wide() && !m.hideDetail }
 
-func newModel(cl *client.HTTP, ch <-chan hub.BoardState, root string) model {
+func newModel(cl *client.HTTP, ch <-chan api.BoardState, root string) model {
 	// A default size renders a frame immediately: some terminals report theirs late, or as 0×0,
 	// and the view would otherwise stick on "loading".
 	in := textinput.New()
@@ -169,7 +183,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reclamp()
 		return m, tea.Batch(waitForState(m.ch, m.gen), m.syncDetail(), m.agentLiveCmds())
 	case polledMsg: // an auto-refresh poll — update the board, don't touch the SSE waiter
-		m.state = hub.BoardState(msg)
+		m.state = api.BoardState(msg)
 		m.reconcileMerging()
 		m.reconcileBusy()
 		m.reclamp()
@@ -326,8 +340,8 @@ func (m model) View() string {
 	if m.w == 0 || m.h == 0 {
 		return "loading…"
 	}
-	labels := make([]string, len(hub.Sections))
-	for i, s := range hub.Sections {
+	labels := make([]string, len(tuiSections))
+	for i, s := range tuiSections {
 		labels[i] = fmt.Sprintf("%d %s", m.tabCount(s), s.Title)
 	}
 	// Modals take over the whole screen.

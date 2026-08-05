@@ -5,8 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // prRowText returns the rendered PRs-tab row for a PR id (empty if absent).
@@ -26,7 +25,7 @@ func TestMergingTransient(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.tab = 2           // PRs
 	m.scopeRepo = false // global scope: this test is about merging state, not repo filtering (which now defaults on)
-	m.state = hub.BoardState{PRs: []store.PR{{ID: "pr-td-1", Status: "approved", Project: "repo", Agent: "brokkr", Branch: "td-1"}}}
+	m.state = api.BoardState{PRs: []api.PR{{ID: "pr-td-1", Status: "approved", Project: "repo", Agent: "brokkr", Branch: "td-1"}}}
 
 	// Baseline: the row shows the real status, not "merging".
 	if txt := prRowText(m, "pr-td-1"); !strings.Contains(txt, "approved") || strings.Contains(txt, "merging") {
@@ -40,7 +39,7 @@ func TestMergingTransient(t *testing.T) {
 	}
 
 	// Confirm: a fresh snapshot showing it merged clears the transient (reconcile).
-	m.state = hub.BoardState{PRs: []store.PR{{ID: "pr-td-1", Status: "merged", Project: "repo"}}}
+	m.state = api.BoardState{PRs: []api.PR{{ID: "pr-td-1", Status: "merged", Project: "repo"}}}
 	m.reconcileMerging()
 	if m.merging["pr-td-1"] {
 		t.Fatalf("marker should clear once the board confirms merged")
@@ -63,7 +62,7 @@ func TestMergeDoneClearsTransient(t *testing.T) {
 	// Success.
 	m := newModel(nil, nil, "")
 	m.markMerging("pr-td-1")
-	merged := hub.BoardState{PRs: []store.PR{{ID: "pr-td-1", Status: "merged", Project: "repo"}}}
+	merged := api.BoardState{PRs: []api.PR{{ID: "pr-td-1", Status: "merged", Project: "repo"}}}
 	tm, _ := m.Update(mergeDoneMsg{id: "pr-td-1", state: merged})
 	got := tm.(model)
 	if got.merging["pr-td-1"] {

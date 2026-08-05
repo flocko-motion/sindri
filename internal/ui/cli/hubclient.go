@@ -4,7 +4,7 @@
 // dialHub, which reconciles versions (offering a restart on a mismatch).
 // Also starts/restarts the background hub. One hub per machine; commands
 // tag their repo via the client's X-Sindri-Project header.
-// limits:  transport is internal/client; the pid/version stamp is internal/hub.
+// limits:  transport + pid/version discovery are internal/client's.
 package cli
 
 import (
@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/client"
-	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/tools/paths"
 	"golang.org/x/term"
 )
@@ -33,10 +32,10 @@ func dialHub(root string) (*client.HTTP, error) {
 
 // reconcileHubVersion warns on a hub/CLI version mismatch and, on a terminal, offers a restart.
 func reconcileHubVersion() error {
-	if !hub.IsRunning() {
+	if !client.IsRunning() {
 		return nil // nothing to reconcile
 	}
-	_, hubVer, ok := hub.ReadPID()
+	_, hubVer, ok := client.ReadPID()
 	if ok && hubVer == version {
 		return nil // hub matches this CLI
 	}
@@ -54,7 +53,7 @@ func reconcileHubVersion() error {
 		fmt.Fprintln(os.Stderr, "  continuing against the running hub.")
 		return nil
 	}
-	pid, havePID := hub.HubPID() // pid file, or the socket's owner via lsof
+	pid, havePID := client.HubPID() // pid file, or the socket's owner via lsof
 	if !havePID {
 		return fmt.Errorf("couldn't find the running hub's pid — stop it with `sindri hub stop`, then re-run")
 	}
@@ -68,7 +67,7 @@ func stopHub(pid int) error {
 		_ = p.Signal(syscall.SIGTERM)
 	}
 	for i := 0; i < 50; i++ { // ~5s for it to release the socket
-		if !hub.IsRunning() {
+		if !client.IsRunning() {
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -98,14 +97,14 @@ const (
 // isn't a mystery. A running hub is left as-is (reconcileHubVersion handles a stale one).
 func ensureHubRunning() error {
 	fmt.Fprint(os.Stderr, "looking for a running hub… ")
-	if hub.IsRunning() {
+	if client.IsRunning() {
 		fmt.Fprintln(os.Stderr, "found one, answering its socket.")
 		return nil
 	}
 	fmt.Fprintln(os.Stderr, "none answering.")
 	// A leftover pid record is common — a hub killed without cleanup, or a zombie held by its parent.
-	if pid, _, ok := hub.ReadPID(); ok {
-		if hub.ProcessAlive(pid) {
+	if pid, _, ok := client.ReadPID(); ok {
+		if client.ProcessAlive(pid) {
 			fmt.Fprintf(os.Stderr, "a hub (pid %d) is recorded and alive but not answering — it may be hung; will try to start a fresh one.\n", pid)
 		} else {
 			fmt.Fprintf(os.Stderr, "found a stale hub record (pid %d, no longer serving); replacing it.\n", pid)
@@ -114,12 +113,29 @@ func ensureHubRunning() error {
 	return startHub()
 }
 
-// startHub launches a detached `sindri hub start` (own session, so agents and a `sindri tui` elsewhere
+// hubBinary locates the sindri-hub binary: beside the running sindri binary first, then on PATH —
+// the same rule hub/agent/binaries.go uses for the pod binaries, and the reason shadow.go warns
+// about a second copy on PATH.
+func hubBinary() (string, error) {
+	const name = "sindri-hub"
+	if self, err := os.Executable(); err == nil {
+		cand := filepath.Join(filepath.Dir(self), name)
+		if _, err := os.Stat(cand); err == nil {
+			return cand, nil
+		}
+	}
+	if p, err := exec.LookPath(name); err == nil {
+		return p, nil
+	}
+	return "", fmt.Errorf("%s binary not found — run 'make build/install'", name)
+}
+
+// startHub launches a detached sindri-hub (own session, so agents and a `sindri tui` elsewhere
 // survive this command exiting) and waits for its socket, logging to the state dir's hub.log.
 func startHub() error {
-	self, err := os.Executable()
+	bin, err := hubBinary()
 	if err != nil {
-		return fmt.Errorf("locate the sindri binary: %w", err)
+		return err
 	}
 	fmt.Fprintln(os.Stderr, "starting a new hub in the background…")
 	if err := os.MkdirAll(paths.StateDir(), 0o755); err != nil {
@@ -131,7 +147,7 @@ func startHub() error {
 		return fmt.Errorf("open hub log: %w", err)
 	}
 	defer logf.Close()
-	c := exec.Command(self, "hub", "start")
+	c := exec.Command(bin)
 	c.Stdout, c.Stderr = logf, logf
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // detach: own session, survives us
 	if err := c.Start(); err != nil {
@@ -141,12 +157,12 @@ func startHub() error {
 	_ = c.Process.Release()
 	fmt.Fprint(os.Stderr, "waiting for it to answer the health check…")
 	for i := 0; i < startupAttempts; i++ {
-		if hub.IsRunning() {
+		if client.IsRunning() {
 			fmt.Fprintf(os.Stderr, " up (pid %d, log: %s)\n", pid, logPath)
 			return nil
 		}
 		// Fast-fail: an exited process will never answer, so report why instead of burning the budget.
-		if !hub.ProcessAlive(pid) {
+		if !client.ProcessAlive(pid) {
 			fmt.Fprintln(os.Stderr, " it exited.")
 			return fmt.Errorf("hub failed to start: %s (see %s)", lastLogLine(logPath), logPath)
 		}

@@ -4,8 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // TestTaskDescriptionShownWhileBrowsing: the board row already carries a task's
@@ -15,7 +14,7 @@ import (
 func TestTaskDescriptionShownWhileBrowsing(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.tab = 0 // Tasks
-	m.state = hub.BoardState{Tasks: []store.Task{
+	m.state = api.BoardState{Tasks: []api.Task{
 		{ID: "td-1", Title: "do the thing", Status: "open", Priority: "P1", Description: "BODY_FROM_BOARD"},
 	}}
 	m.cursor[0] = 0
@@ -28,7 +27,7 @@ func TestTaskDescriptionShownWhileBrowsing(t *testing.T) {
 	}
 
 	// A later detail fetch with a fresher body overrides the board row's copy.
-	m.taskDetail = store.Task{ID: "td-1", Description: "FRESHER_BODY"}
+	m.taskDetail = api.Task{ID: "td-1", Description: "FRESHER_BODY"}
 	lines = strings.Join(m.taskDetailLines(), "\n")
 	if !strings.Contains(lines, "FRESHER_BODY") || strings.Contains(lines, "BODY_FROM_BOARD") {
 		t.Fatalf("detail read should refine the description:\n%s", lines)

@@ -14,7 +14,6 @@ import (
 
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/container"
-	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/ui/attach"
 	"github.com/spf13/cobra"
 )
@@ -44,7 +43,7 @@ func agentAttachCmd() *cobra.Command {
 			}
 			cname := a.Container
 			if cname == "" && root != "" { // older hub without the field — current-repo scope
-				cname = hub.Container(root, name)
+				cname = container.AgentContainer(root, name)
 			}
 			if cname == "" {
 				return fmt.Errorf("can't resolve %q's container — restart the hub to pick up this build", name)

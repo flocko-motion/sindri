@@ -4,13 +4,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // TestResolveRepo: a selector resolves by repo name or tag; a miss and an ambiguous
 // name both error (the latter tells the user to use the tag).
 func TestResolveRepo(t *testing.T) {
-	repos := []hub.RepoSummary{
+	repos := []api.RepoSummary{
 		{Tag: "aaa111", Name: "sindri", Path: "/repos/sindri"},
 		{Tag: "bbb222", Name: "herdr", Path: "/repos/herdr"},
 		{Tag: "ccc333", Name: "herdr", Path: "/other/herdr"}, // same basename, different repo

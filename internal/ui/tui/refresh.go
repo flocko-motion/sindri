@@ -15,14 +15,14 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/client"
-	"github.com/flo-at/sindri/internal/hub"
 )
 
 // waitForState blocks on the /events channel for the next board snapshot, tagging it
 // with the subscription generation so a snapshot from a stream abandoned by a repo
 // switch can be ignored. A closed channel surfaces as a fatal errMsg.
-func waitForState(ch <-chan hub.BoardState, gen int) tea.Cmd {
+func waitForState(ch <-chan api.BoardState, gen int) tea.Cmd {
 	return func() tea.Msg {
 		st, ok := <-ch
 		if !ok {

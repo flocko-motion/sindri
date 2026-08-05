@@ -4,21 +4,20 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // prFleet: one PR with a live author, one whose author has since gone (deleted/renamed), and one
 // whose author is down.
-func prFleet() hub.BoardState {
-	return hub.BoardState{
-		Projects: []store.Project{{Tag: "one", Path: "/r/one"}},
-		PRs: []store.PR{
+func prFleet() api.BoardState {
+	return api.BoardState{
+		Projects: []api.Project{{Tag: "one", Path: "/r/one"}},
+		PRs: []api.PR{
 			{ID: "pr-td-1", Task: "td-1", Agent: "dvalin", Project: "one", Status: "open"},
 			{ID: "pr-td-2", Task: "td-2", Agent: "nori", Project: "one", Status: "open"},
 			{ID: "pr-td-GONE", Task: "td-3", Agent: "vanished", Project: "one", Status: "open"},
 		},
-		Agents: []hub.AgentView{
+		Agents: []api.AgentView{
 			{Name: "dvalin", Project: "one", Status: "working", Task: "td-1"},
 			{Name: "nori", Project: "one", Status: "down", Task: "td-2"},
 		},

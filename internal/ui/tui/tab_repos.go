@@ -14,7 +14,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
 // repoRows lists the registered repos (switcher order: live-agents-first → recency →
@@ -103,7 +104,7 @@ func (m model) repoDetailLines() []string {
 // should see the gap here — the hub no longer seeds a placeholder to make the point, and
 // a silent detail pane would hide a real quality loss (agents briefed without any
 // architecture). A repo in good shape gets one confirming line and no nagging.
-func archLines(st hub.RepoDocState) []string {
+func archLines(st api.RepoDocState) []string {
 	switch {
 	case st.Readable && st.Set:
 		return []string{"arch:   " + st.Doc}
@@ -138,7 +139,7 @@ func (m *model) openColorChoice(tag string) {
 	cl := m.cl
 	opts := []string{"default (auto)"}
 	vals := []string{"0"}
-	for i := 1; i <= nRepoColors; i++ {
+	for i := 1; i <= theme.NRepoColors; i++ {
 		swatch := repoStyleFor(tag, i).Render("████")
 		opts = append(opts, fmt.Sprintf("%s  colour %d", swatch, i))
 		vals = append(vals, strconv.Itoa(i))

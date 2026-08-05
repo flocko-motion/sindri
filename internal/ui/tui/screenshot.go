@@ -10,7 +10,7 @@ package tui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // Screenshot renders the dashboard at w×h with the given board state and a
@@ -18,7 +18,7 @@ import (
 // calls), so detail panes show their synchronous content only.
 //
 //deadcode:keep — dev/test harness for headless rendering
-func Screenshot(st hub.BoardState, w, h int, keys ...string) string {
+func Screenshot(st api.BoardState, w, h int, keys ...string) string {
 	var tm tea.Model = newModel(nil, nil, "")
 	m := tm.(model)
 	m.w, m.h = w, h

@@ -19,9 +19,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/config"
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
 // HTTP talks to a hub over its repo unix socket.
@@ -42,7 +42,7 @@ func DialSocket(socketPath string) *HTTP {
 // it through each method.
 func Dial(root string) *HTTP {
 	return &HTTP{base: "http://unix", hc: &http.Client{Transport: &headerRT{
-		key: "X-Sindri-Project", val: root, rt: unixTransport(hub.SocketPath())}}}
+		key: "X-Sindri-Project", val: root, rt: unixTransport(paths.HubSocket())}}}
 }
 
 // DialTCP returns a client that talks to the hub over TCP, presenting token on
@@ -77,15 +77,15 @@ func (t *headerRT) RoundTrip(r *http.Request) (*http.Response, error) {
 func (c *HTTP) Close() error { return nil }
 
 // State fetches the whole board (agents, tasks, PRs, orphans).
-func (c *HTTP) State() (hub.BoardState, error) {
-	var out hub.BoardState
+func (c *HTTP) State() (api.BoardState, error) {
+	var out api.BoardState
 	return out, c.get("/state", &out)
 }
 
 // Stats returns the wired engine plus a memory snapshot for every running agent
 // across all repos (the data behind `agent stats`).
-func (c *HTTP) Stats() (hub.StatsReport, error) {
-	var out hub.StatsReport
+func (c *HTTP) Stats() (api.StatsReport, error) {
+	var out api.StatsReport
 	return out, c.get("/stats", &out)
 }
 
@@ -103,7 +103,7 @@ func (c *HTTP) Instance(name string) (string, error) {
 // Watch subscribes to board-state changes over SSE. It returns a channel that
 // yields the current state on connect and a fresh snapshot on every change; the
 // channel closes when ctx is cancelled or the hub goes away.
-func (c *HTTP) Watch(ctx context.Context) (<-chan hub.BoardState, error) {
+func (c *HTTP) Watch(ctx context.Context) (<-chan api.BoardState, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", c.base+"/events", nil)
 	if err != nil {
 		return nil, err
@@ -112,7 +112,7 @@ func (c *HTTP) Watch(ctx context.Context) (<-chan hub.BoardState, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make(chan hub.BoardState)
+	out := make(chan api.BoardState)
 	go func() {
 		defer resp.Body.Close()
 		defer close(out)
@@ -123,7 +123,7 @@ func (c *HTTP) Watch(ctx context.Context) (<-chan hub.BoardState, error) {
 			if !strings.HasPrefix(line, "data: ") {
 				continue
 			}
-			var st hub.BoardState
+			var st api.BoardState
 			if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &st) != nil {
 				continue
 			}
@@ -143,29 +143,29 @@ func (c *HTTP) NewAgent(name, role, memory string) (string, error) {
 	var ok struct {
 		Name string `json:"ok"`
 	}
-	err := c.postResult("/agents", hub.AgentReq{Name: name, Role: role, Memory: memory}, &ok)
+	err := c.postResult("/agents", api.AgentReq{Name: name, Role: role, Memory: memory}, &ok)
 	return ok.Name, err
 }
 
 // SetMemory sets an agent's RAM limit (e.g. "4g"; "" resets to the hub default).
 // Takes effect on the agent's next start/restart.
 func (c *HTTP) SetMemory(name, memory string) error {
-	return c.post("/agent/memory", hub.NameReq{Name: name, Memory: memory})
+	return c.post("/agent/memory", api.NameReq{Name: name, Memory: memory})
 }
 
 // DeleteAgent removes an agent (pod, socket, worktree, identity).
 func (c *HTTP) DeleteAgent(name string) error {
-	return c.post("/agent/delete", hub.NameReq{Name: name})
+	return c.post("/agent/delete", api.NameReq{Name: name})
 }
 
 // StopAgent tears down the agent's pod but keeps its identity.
 func (c *HTTP) StopAgent(name string) error {
-	return c.post("/agent/stop", hub.NameReq{Name: name})
+	return c.post("/agent/stop", api.NameReq{Name: name})
 }
 
 // RebaseAgent rebases the agent's worktree onto the current base (reference) branch.
 func (c *HTTP) RebaseAgent(name string) error {
-	return c.post("/agent/rebase", hub.NameReq{Name: name})
+	return c.post("/agent/rebase", api.NameReq{Name: name})
 }
 
 // AgentPane returns the last `lines` rows of the agent's tmux pane (plain text).
@@ -189,8 +189,8 @@ func (c *HTTP) Diagnose(name string) (string, error) {
 }
 
 // Clients returns the humans attached to an agent's tmux session (dial-ins).
-func (c *HTTP) Clients(name string) ([]hub.ClientView, error) {
-	var out []hub.ClientView
+func (c *HTTP) Clients(name string) ([]api.ClientView, error) {
+	var out []api.ClientView
 	return out, c.get("/agent/clients?agent="+url.QueryEscape(name), &out)
 }
 
@@ -208,7 +208,7 @@ func (c *HTTP) PodInfo(name string) (string, error) {
 // build isn't a frozen prompt. debug=true streams the hub's liveness-probe detail
 // during the wait. The failure, if any, rides back in a trailer.
 func (c *HTTP) Launch(name string, shell, debug bool, out io.Writer) error {
-	body, err := json.Marshal(hub.NameReq{Name: name, Shell: shell, Debug: debug})
+	body, err := json.Marshal(api.NameReq{Name: name, Shell: shell, Debug: debug})
 	if err != nil {
 		return err
 	}
@@ -227,7 +227,7 @@ func (c *HTTP) Launch(name string, shell, debug bool, out io.Writer) error {
 // RebuildImage force-rebuilds the agent's image (re-pulling the base) and relaunches
 // it; the build/restart progress streams to out, the failure (if any) via a trailer.
 func (c *HTTP) RebuildImage(name string, out io.Writer) error {
-	body, err := json.Marshal(hub.NameReq{Name: name})
+	body, err := json.Marshal(api.NameReq{Name: name})
 	if err != nil {
 		return err
 	}
@@ -245,29 +245,29 @@ func (c *HTTP) RebuildImage(name string, out io.Writer) error {
 
 // Tell delivers a provenance-stamped message into an agent's session.
 func (c *HTTP) Tell(name, msg, source string) error {
-	return c.post("/tell", hub.TellReq{Name: name, Msg: msg, Source: source})
+	return c.post("/tell", api.TellReq{Name: name, Msg: msg, Source: source})
 }
 
 // AssignPlan gives a planner one thing to plan, as a phased brief. taskID works up an existing task,
 // which becomes the parent of what the planning produces; goal alone plans free text. Refused while
 // that planner has a PR open — the answer says to merge or scrap it first.
 func (c *HTTP) AssignPlan(name, goal, taskID string) error {
-	return c.post("/agent/plan", hub.PlanReq{Name: name, Goal: goal, Task: taskID})
+	return c.post("/agent/plan", api.PlanReq{Name: name, Goal: goal, Task: taskID})
 }
 
 // ChatAdd adds an agent to the user's chatroom (the hub greets it).
 func (c *HTTP) ChatAdd(name string) error {
-	return c.post("/chat/add", hub.NameReq{Name: name})
+	return c.post("/chat/add", api.NameReq{Name: name})
 }
 
 // ChatRemove takes an agent out of the chatroom.
 func (c *HTTP) ChatRemove(name string) error {
-	return c.post("/chat/remove", hub.NameReq{Name: name})
+	return c.post("/chat/remove", api.NameReq{Name: name})
 }
 
 // ChatSay posts a message to the chatroom as the user (the discussion leader).
 func (c *HTTP) ChatSay(msg string) error {
-	return c.post("/chat/say", hub.ChatSayReq{Msg: msg})
+	return c.post("/chat/say", api.ChatSayReq{Msg: msg})
 }
 
 // NewMeeting clears the meeting's shared history and announces the fresh start to the room.
@@ -283,15 +283,15 @@ func (c *HTTP) ChatHeartbeat() error {
 }
 
 // Chat returns the current chatroom snapshot (members + recent transcript).
-func (c *HTTP) Chat() (hub.ChatView, error) {
-	var v hub.ChatView
+func (c *HTTP) Chat() (api.ChatView, error) {
+	var v api.ChatView
 	return v, c.get("/chat", &v)
 }
 
 // ChatWatch subscribes to the chatroom over SSE: it yields the snapshot on connect
 // and a fresh one on every change, closing when ctx is cancelled or the hub goes
 // away. This is the user's live leg of the star topology (the join CLI, TUI tab).
-func (c *HTTP) ChatWatch(ctx context.Context) (<-chan hub.ChatView, error) {
+func (c *HTTP) ChatWatch(ctx context.Context) (<-chan api.ChatView, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", c.base+"/chat/stream", nil)
 	if err != nil {
 		return nil, err
@@ -300,7 +300,7 @@ func (c *HTTP) ChatWatch(ctx context.Context) (<-chan hub.ChatView, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make(chan hub.ChatView)
+	out := make(chan api.ChatView)
 	go func() {
 		defer resp.Body.Close()
 		defer close(out)
@@ -311,7 +311,7 @@ func (c *HTTP) ChatWatch(ctx context.Context) (<-chan hub.ChatView, error) {
 			if !strings.HasPrefix(line, "data: ") {
 				continue
 			}
-			var v hub.ChatView
+			var v api.ChatView
 			if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &v) != nil {
 				continue
 			}
@@ -327,8 +327,8 @@ func (c *HTTP) ChatWatch(ctx context.Context) (<-chan hub.ChatView, error) {
 
 // Commands fetches the caller's currently-available command surface (the browser
 // menu). Identity is the socket, so no name is sent.
-func (c *HTTP) Commands() ([]hub.CmdInfo, error) {
-	var out []hub.CmdInfo
+func (c *HTTP) Commands() ([]api.CmdInfo, error) {
+	var out []api.CmdInfo
 	return out, c.get("/commands", &out)
 }
 
@@ -343,7 +343,7 @@ func (c *HTTP) Directive() (string, error) {
 // Exec runs a verb on the hub, streaming output to out, and returns the
 // command's exit code (carried back in the X-Sindri-Exit trailer).
 func (c *HTTP) Exec(args []string, out io.Writer) (int, error) {
-	buf, err := json.Marshal(hub.ExecReq{Args: args})
+	buf, err := json.Marshal(api.ExecReq{Args: args})
 	if err != nil {
 		return 1, err
 	}
@@ -364,9 +364,9 @@ func (c *HTTP) Exec(args []string, out io.Writer) (int, error) {
 }
 
 // Merge merges an approved PR (host/human-only gate). Returns the merged PR.
-func (c *HTTP) Merge(id string) (store.PR, error) {
-	var pr store.PR
-	buf, err := json.Marshal(hub.NameReq{Name: id})
+func (c *HTTP) Merge(id string) (api.PR, error) {
+	var pr api.PR
+	buf, err := json.Marshal(api.NameReq{Name: id})
 	if err != nil {
 		return pr, err
 	}
@@ -380,9 +380,9 @@ func (c *HTTP) Merge(id string) (store.PR, error) {
 
 // MilestonePR opens a milestone PR for the container an agent is collaborating
 // on — blocking that agent until the human merges.
-func (c *HTTP) MilestonePR(agent string) (store.PR, error) {
-	var pr store.PR
-	buf, err := json.Marshal(hub.NameReq{Name: agent})
+func (c *HTTP) MilestonePR(agent string) (api.PR, error) {
+	var pr api.PR
+	buf, err := json.Marshal(api.NameReq{Name: agent})
 	if err != nil {
 		return pr, err
 	}
@@ -395,40 +395,40 @@ func (c *HTTP) MilestonePR(agent string) (store.PR, error) {
 }
 
 // PRs lists all merge-intents.
-func (c *HTTP) PRs() ([]store.PR, error) {
-	var out []store.PR
+func (c *HTTP) PRs() ([]api.PR, error) {
+	var out []api.PR
 	return out, c.get("/prs", &out)
 }
 
 // PRInfo returns a PR with its diff.
-func (c *HTTP) PRInfo(id string) (hub.PRDetail, error) {
-	var d hub.PRDetail
+func (c *HTTP) PRInfo(id string) (api.PRDetail, error) {
+	var d api.PRDetail
 	return d, c.get("/pr?id="+url.QueryEscape(id), &d)
 }
 
 // RejectPR rejects a PR with feedback, routed to the owning worker.
 func (c *HTTP) RejectPR(id, feedback string) error {
-	return c.post("/pr/reject", hub.RejectReq{ID: id, Feedback: feedback})
+	return c.post("/pr/reject", api.RejectReq{ID: id, Feedback: feedback})
 }
 
 // ApprovePR marks an open PR approved (the human path), so it can be merged
 // without a reviewer agent.
 func (c *HTTP) ApprovePR(id string) error {
-	return c.post("/pr/approve", hub.NameReq{Name: id})
+	return c.post("/pr/approve", api.NameReq{Name: id})
 }
 
 // ScrapPR discards a PR alongside scrapping/closing its task (the human path): it
 // deletes the task's branch and flips the PR to "scrapped" so it drops off the board.
 // The paired task close frees the agent, so this does not.
 func (c *HTTP) ScrapPR(id string) error {
-	return c.post("/pr/scrap", hub.NameReq{Name: id})
+	return c.post("/pr/scrap", api.NameReq{Name: id})
 }
 
 // DiscardPR scraps a PR ON ITS OWN — for work that simply isn't wanted, with no task being
 // closed alongside it. Use this rather than ScrapPR whenever the PR is the only thing going
 // away: it also releases the author, which would otherwise wait for a verdict forever.
 func (c *HTTP) DiscardPR(id string) error {
-	return c.post("/pr/discard", hub.NameReq{Name: id})
+	return c.post("/pr/discard", api.NameReq{Name: id})
 }
 
 // LintPR runs the quality gate against a PR's worktree and returns the output.
@@ -442,7 +442,7 @@ func (c *HTTP) LintPR(id string) (string, error) {
 // RequestReview attaches a review requirement to a PR and dispatches it to a
 // reviewer agent.
 func (c *HTTP) RequestReview(id, requirement string) error {
-	return c.post("/pr/review", hub.RejectReq{ID: id, Feedback: requirement})
+	return c.post("/pr/review", api.RejectReq{ID: id, Feedback: requirement})
 }
 
 // ReviewPrompt returns the editable default agentic-review instruction.
@@ -463,14 +463,14 @@ func (c *HTTP) MaterializeReview(id string) (string, error) {
 }
 
 // Tasks lists all cached tasks (refreshed from the source of truth).
-func (c *HTTP) Tasks() ([]store.Task, error) {
-	var out []store.Task
+func (c *HTTP) Tasks() ([]api.Task, error) {
+	var out []api.Task
 	return out, c.get("/tasks", &out)
 }
 
 // TaskInfo returns one task (refreshed first).
-func (c *HTTP) TaskInfo(id string) (store.Task, error) {
-	var t store.Task
+func (c *HTTP) TaskInfo(id string) (api.Task, error) {
+	var t api.Task
 	return t, c.get("/task?id="+url.QueryEscape(id), &t)
 }
 
@@ -482,17 +482,17 @@ func (c *HTTP) ReconcileTasks() error {
 // RefreshTaskComments forces a re-sync of one task's comments from its source
 // (the [r]efresh key), bypassing the TTL.
 func (c *HTTP) RefreshTaskComments(id string) error {
-	return c.post("/task/comments/refresh", hub.NameReq{Name: id})
+	return c.post("/task/comments/refresh", api.NameReq{Name: id})
 }
 
 // AddTaskComment comments on a task. A GitHub issue receives it upstream and the thread is re-read;
 // every other kind of task keeps its thread in the hub.
 func (c *HTTP) AddTaskComment(id, body string) error {
-	return c.post("/task/comments/add", hub.TellReq{Name: id, Msg: body})
+	return c.post("/task/comments/add", api.TellReq{Name: id, Msg: body})
 }
 
 // CreateTask creates a task from a spec and returns its id.
-func (c *HTTP) CreateTask(s hub.TaskSpec) (string, error) {
+func (c *HTTP) CreateTask(s api.TaskSpec) (string, error) {
 	var ok struct {
 		ID string `json:"ok"`
 	}
@@ -501,67 +501,67 @@ func (c *HTTP) CreateTask(s hub.TaskSpec) (string, error) {
 }
 
 // EditTask applies a spec to an existing task.
-func (c *HTTP) EditTask(id string, s hub.TaskSpec) error {
+func (c *HTTP) EditTask(id string, s api.TaskSpec) error {
 	return c.post("/task/edit", specReq(id, s))
 }
 
-func specReq(id string, s hub.TaskSpec) hub.TaskReq {
-	return hub.TaskReq{ID: id, Title: s.Title, Type: s.Type, Priority: s.Priority, Parent: s.Parent, Description: s.Description, Labels: s.Labels}
+func specReq(id string, s api.TaskSpec) api.TaskReq {
+	return api.TaskReq{ID: id, Title: s.Title, Type: s.Type, Priority: s.Priority, Parent: s.Parent, Description: s.Description, Labels: s.Labels}
 }
 
 // SetPriority assigns a task's priority (P-code) — to td or our own db.
 func (c *HTTP) SetPriority(id, priority string) error {
-	return c.post("/priority", hub.PriorityReq{ID: id, Priority: priority})
+	return c.post("/priority", api.PriorityReq{ID: id, Priority: priority})
 }
 
 // ApproveTask clears the approval gate on a planner-proposed task; subtree carries the verdict to
 // every task below it that still awaits one.
 func (c *HTTP) ApproveTask(id string, subtree bool) error {
-	return c.post("/task/approve", hub.ApproveTaskReq{ID: id, Subtree: subtree})
+	return c.post("/task/approve", api.ApproveTaskReq{ID: id, Subtree: subtree})
 }
 
 // RejectTask rejects a planner-proposed task with a comment.
 func (c *HTTP) RejectTask(id, comment string) error {
-	return c.post("/task/reject", hub.RejectReq{ID: id, Feedback: comment})
+	return c.post("/task/reject", api.RejectReq{ID: id, Feedback: comment})
 }
 
 // UnassignTask releases a task back to the backlog (refused if a live agent holds it).
 func (c *HTTP) UnassignTask(id string) error {
-	return c.post("/task/unassign", hub.RejectReq{ID: id})
+	return c.post("/task/unassign", api.RejectReq{ID: id})
 }
 
 // CloseTask marks a task done from the task list (the "done" close). The hub
 // dispatches to the task's backend (td close / openspec archive / issue close).
 func (c *HTTP) CloseTask(id string) error {
-	return c.post("/task/close", hub.RejectReq{ID: id})
+	return c.post("/task/close", api.RejectReq{ID: id})
 }
 
 // ScrapTask scraps a task from the task list (the "discard" close). The hub dispatches
 // to the backend (td delete / openspec change-dir removal / issue delete). subtree takes
 // the task's children with it; withPRs takes the open PR of everything it scraps.
 func (c *HTTP) ScrapTask(id string, subtree, withPRs bool) error {
-	return c.post("/task/delete", hub.ScrapTaskReq{ID: id, Subtree: subtree, PRs: withPRs})
+	return c.post("/task/delete", api.ScrapTaskReq{ID: id, Subtree: subtree, PRs: withPRs})
 }
 
 // Refresh asks the hub to re-sync tasks from the source of truth.
 func (c *HTTP) Refresh() error { return c.post("/refresh", struct{}{}) }
 
 // Log fetches an agent's recent activity-log entries (the timeline).
-func (c *HTTP) Log(name string) ([]store.Event, error) {
-	var out []store.Event
+func (c *HTTP) Log(name string) ([]api.Event, error) {
+	var out []api.Event
 	return out, c.get("/log?agent="+url.QueryEscape(name), &out)
 }
 
 // Repos lists every registered repo (the registry overview / TUI switcher source).
-func (c *HTTP) Repos() ([]hub.RepoSummary, error) {
-	var out []hub.RepoSummary
+func (c *HTTP) Repos() ([]api.RepoSummary, error) {
+	var out []api.RepoSummary
 	return out, c.get("/repos", &out)
 }
 
 // RepoInfo returns one repo's resolved config + counts; an empty tag defaults to the
 // caller's repo (the client's X-Sindri-Project).
-func (c *HTTP) RepoInfo(tag string) (hub.RepoDetail, error) {
-	var out hub.RepoDetail
+func (c *HTTP) RepoInfo(tag string) (api.RepoDetail, error) {
+	var out api.RepoDetail
 	path := "/repo"
 	if tag != "" {
 		path += "?tag=" + url.QueryEscape(tag)
@@ -570,24 +570,24 @@ func (c *HTTP) RepoInfo(tag string) (hub.RepoDetail, error) {
 }
 
 // RepoInit registers the caller's repo and scaffolds its .sindri/config.yaml.
-func (c *HTTP) RepoInit() (hub.RepoSummary, error) {
-	var out hub.RepoSummary
+func (c *HTTP) RepoInit() (api.RepoSummary, error) {
+	var out api.RepoSummary
 	return out, c.postResult("/repo/init", struct{}{}, &out)
 }
 
 // RepoForget drops a repo from the registry by tag (files untouched, agent-guarded).
 func (c *HTTP) RepoForget(tag string) error {
-	return c.post("/repo/forget", hub.RepoReq{Tag: tag})
+	return c.post("/repo/forget", api.RepoReq{Tag: tag})
 }
 
 // SetRepoColor pins a repo's colour choice by tag (0 = hash-derived default).
 func (c *HTTP) SetRepoColor(tag string, color int) error {
-	return c.post("/repo/color", hub.RepoReq{Tag: tag, Color: color})
+	return c.post("/repo/color", api.RepoReq{Tag: tag, Color: color})
 }
 
 // RemoveOrphan removes a stray container by name (a running pod with no roster entry).
 func (c *HTTP) RemoveOrphan(name string) error {
-	return c.post("/orphan/remove", hub.NameReq{Name: name})
+	return c.post("/orphan/remove", api.NameReq{Name: name})
 }
 
 // WriteRepoConfig persists the caller's repo's .sindri/config.yaml (validated hub-side).

@@ -4,8 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // TestAgentDetailShowsTaskTitle: the agent detail pane used to show only a task's bare id ("what
@@ -15,9 +14,9 @@ import (
 func TestAgentDetailShowsTaskTitle(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.tab = 1 // Agents
-	m.state = hub.BoardState{
-		Agents: []hub.AgentView{{Name: "brokkr", Role: "worker", Status: "working", Task: "td-42"}},
-		Tasks:  []store.Task{{ID: "td-42", Title: "fix the flaky test"}},
+	m.state = api.BoardState{
+		Agents: []api.AgentView{{Name: "brokkr", Role: "worker", Status: "working", Task: "td-42"}},
+		Tasks:  []api.Task{{ID: "td-42", Title: "fix the flaky test"}},
 	}
 	m.cursor[1] = 0
 	m.reclamp()
@@ -44,9 +43,9 @@ func TestAgentDetailShowsTaskTitle(t *testing.T) {
 func TestAgentTaskCrossRefStillNavigable(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.tab = 1
-	m.state = hub.BoardState{
-		Agents: []hub.AgentView{{Name: "brokkr", Role: "worker", Task: "td-42"}},
-		Tasks:  []store.Task{{ID: "td-42", Title: "fix the flaky test"}},
+	m.state = api.BoardState{
+		Agents: []api.AgentView{{Name: "brokkr", Role: "worker", Task: "td-42"}},
+		Tasks:  []api.Task{{ID: "td-42", Title: "fix the flaky test"}},
 	}
 	m.cursor[1] = 0
 	m.reclamp()
@@ -71,8 +70,8 @@ func TestAgentTaskCrossRefStillNavigable(t *testing.T) {
 func TestAgentDetailFallsBackToBareID(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.tab = 1
-	m.state = hub.BoardState{
-		Agents: []hub.AgentView{{Name: "brokkr", Role: "worker", Task: "td-99"}},
+	m.state = api.BoardState{
+		Agents: []api.AgentView{{Name: "brokkr", Role: "worker", Task: "td-99"}},
 		// No matching task in m.state.Tasks.
 	}
 	m.cursor[1] = 0
@@ -94,7 +93,7 @@ func TestAgentDetailFallsBackToBareID(t *testing.T) {
 func TestAgentDetailNoTaskShowsDash(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.tab = 1
-	m.state = hub.BoardState{Agents: []hub.AgentView{{Name: "brokkr", Role: "worker", Status: "idle"}}}
+	m.state = api.BoardState{Agents: []api.AgentView{{Name: "brokkr", Role: "worker", Status: "idle"}}}
 	m.cursor[1] = 0
 	m.reclamp()
 

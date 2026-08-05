@@ -4,8 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // TestFilterCyclesThroughFour: "f" used to wrap open->closed->all->open (mod 3); active is a
@@ -30,7 +29,7 @@ func TestActiveFilterIncludesOpenAndRecentlyChanged(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.tab = 0
 	m.filter = filterActive
-	m.state = hub.BoardState{Tasks: []store.Task{
+	m.state = api.BoardState{Tasks: []api.Task{
 		{ID: "td-1", Title: "open, no timestamp", Status: "open"},
 		{ID: "td-2", Title: "closed just now", Status: "closed", UpdatedAt: now.Format(time.RFC3339)},
 		{ID: "td-3", Title: "closed long ago", Status: "closed", UpdatedAt: now.Add(-3 * time.Hour).Format(time.RFC3339)},

@@ -19,9 +19,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/flo-at/sindri/internal/adapter/tmux"
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
-	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/ui/attach"
+	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
 // attachCmd builds the interactive tmux attach through the container port, so any backend works.
@@ -82,11 +83,11 @@ func (m *model) openTaskPlanForm(planner, taskID string) {
 
 // agentContainer prefers the board's project-resolved name (right for any repo), falling back to
 // the current repo only for an older hub that doesn't report it.
-func (m model) agentContainer(a hub.AgentView) string {
+func (m model) agentContainer(a api.AgentView) string {
 	if a.Container != "" {
 		return a.Container
 	}
-	return hub.Container(m.root, a.Name)
+	return container.AgentContainer(m.root, a.Name)
 }
 
 // memoryLabelTUI shows the RAM limit; the "2g" mirrors the hub's defaultAgentMemory (display only).
@@ -348,14 +349,14 @@ func tailPane(lines []string, w, h int) string {
 func hdivider(w int) string { return divStyle.Render(strings.Repeat("─", w)) }
 
 // selAgent returns the currently-selected agent from the board snapshot.
-func (m model) selAgent() (hub.AgentView, bool) {
+func (m model) selAgent() (api.AgentView, bool) {
 	id := m.selID()
 	for _, a := range m.state.Agents {
 		if a.Name == id {
 			return a, true
 		}
 	}
-	return hub.AgentView{}, false
+	return api.AgentView{}, false
 }
 
 // eyeGlyph marks attached humans. The U+FE0F is load-bearing: bare U+1F441 measures one cell but
@@ -432,7 +433,7 @@ func (m model) agentDetailLines() []string {
 }
 
 // agentDetailFor renders an agent's detail; the activity log only for the selected one (lazy fetch).
-func (m model) agentDetailFor(a hub.AgentView) []string {
+func (m model) agentDetailFor(a api.AgentView) []string {
 	ls := []string{
 		"agent:     " + a.Name,
 		"role:      " + a.Role,
@@ -457,8 +458,8 @@ func (m model) agentDetailFor(a hub.AgentView) []string {
 }
 
 // clientLines formats dial-ins via the hub's formatter, so this matches `sindri agent info`.
-func clientLines(cs []hub.ClientView) []string {
-	s := hub.FormatClients(cs)
+func clientLines(cs []api.ClientView) []string {
+	s := theme.FormatClients(cs)
 	if s == "" {
 		return nil
 	}

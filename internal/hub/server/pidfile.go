@@ -35,7 +35,7 @@ func WritePID(version string) error {
 	if err := os.MkdirAll(paths.RuntimeDir(), 0o755); err != nil {
 		return err
 	}
-	if pid, _, ok := ReadPID(); ok && pid != os.Getpid() && ProcessAlive(pid) {
+	if pid, _, ok := ReadPID(); ok && pid != os.Getpid() && processAlive(pid) {
 		return fmt.Errorf("a hub is already running (pid %d)", pid)
 	}
 	data, err := json.Marshal(pidInfo{PID: os.Getpid(), Version: version})
@@ -62,13 +62,14 @@ func ReadPID() (pid int, version string, ok bool) {
 // RemovePID clears the hub's pid file (best-effort, on shutdown).
 func RemovePID() { _ = os.Remove(pidPath()) }
 
-// ProcessAlive reports whether pid is a live process that could still be serving
-// — not merely one that occupies a slot in the process table. Signal 0 probes
-// existence (EPERM means it exists but isn't ours to signal), but a zombie (a dead
-// child not yet reaped by its parent) also answers signal 0 while being unable to
-// do anything. A zombie hub is a dead hub, so it must not count as alive or it
-// would wedge every restart; we reject it explicitly.
-func ProcessAlive(pid int) bool {
+// processAlive reports whether pid is a live process that could still be serving —
+// not merely one that occupies a slot in the process table. Signal 0 probes existence
+// (EPERM means it exists but isn't ours to signal), but a zombie (a dead child not yet
+// reaped by its parent) also answers signal 0 while being unable to do anything. A
+// zombie hub is a dead hub, so it must not count as alive or it would wedge every
+// restart; we reject it explicitly. Unexported: only WritePID's own race guard needs
+// it here — internal/client carries the copy front-ends use to find/stop a hub.
+func processAlive(pid int) bool {
 	if err := syscall.Kill(pid, 0); err != nil && err != syscall.EPERM {
 		return false
 	}
@@ -85,22 +86,4 @@ func isZombie(pid int) bool {
 		return false
 	}
 	return strings.HasPrefix(strings.TrimSpace(string(out)), "Z")
-}
-
-// HubPID returns the pid of the running hub, preferring the pid file and falling
-// back to whoever holds the control socket (via lsof). ok=false when none found.
-func HubPID() (pid int, ok bool) {
-	if p, _, isok := ReadPID(); isok && ProcessAlive(p) {
-		return p, true
-	}
-	out, err := exec.Command("lsof", "-t", SocketPath()).Output()
-	if err != nil {
-		return 0, false
-	}
-	for _, f := range strings.Fields(string(out)) {
-		if p, err := strconv.Atoi(f); err == nil && ProcessAlive(p) {
-			return p, true
-		}
-	}
-	return 0, false
 }

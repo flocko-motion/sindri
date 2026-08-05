@@ -1,10 +1,28 @@
 // package: api / misc
-// type:    data (wire types)
-// job:     small standalone wire types that don't warrant their own file: a task
-// comment, an activity-log row, a command as advertised to a browser, a
-// terminal client's dimensions, and an agent's raw exec request.
-// limits:  data only.
+// type:    data (wire types + a pure function)
+// job:     small standalone wire types that don't warrant their own file, plus
+// RepoTag: the protocol's project key, derived from a path so either side
+// can compute it without asking the other.
+// limits:  data and a pure function only.
 package api
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"path/filepath"
+)
+
+// RepoTag is a short, stable per-repo id derived from its absolute path — the key
+// (AgentView.Project, BoardState.Tasks's scope) every request and view carries to
+// name a repo without relying on its basename, which two repos can share.
+func RepoTag(root string) string {
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		abs = root
+	}
+	sum := sha256.Sum256([]byte(abs))
+	return hex.EncodeToString(sum[:4]) // 8 hex chars — plenty to separate repos
+}
 
 // Comment is one task comment, tagged with the source it came from and the
 // external reference that identifies it there (so a re-sync can match it).

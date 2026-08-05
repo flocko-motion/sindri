@@ -11,8 +11,7 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // onKey applies a key by its string form, shared by the live loop and the headless Screenshot
@@ -46,9 +45,9 @@ func (m *model) onKey(k string) tea.Cmd {
 		m.quit = true
 		return nil
 	case "tab", "]": // switch tabs forward (] mirrors tab)
-		m.tab = (m.tab + 1) % len(hub.Sections)
+		m.tab = (m.tab + 1) % len(tuiSections)
 	case "shift+tab", "[": // switch tabs back ([ mirrors shift+tab)
-		m.tab = (m.tab - 1 + len(hub.Sections)) % len(hub.Sections)
+		m.tab = (m.tab - 1 + len(tuiSections)) % len(tuiSections)
 	case "ctrl+l": // the only way to switch panes (with ctrl+h): focus the detail
 		if m.showDetail() && len(m.actionableItems()) > 0 {
 			m.rightFocus = true
@@ -178,7 +177,7 @@ func (m *model) onKey(k string) tea.Cmd {
 		}
 	case keyNew: // new task (tasks) / new agent (agents) / new meeting (meeting)
 		if m.tab == 0 {
-			m.openTaskForm(false, store.Task{})
+			m.openTaskForm(false, api.Task{})
 			return nil
 		} else if m.tab == 1 { // agents: pick the role, then auto-name after a dwarf
 			m.openNewAgentChoice()

@@ -43,8 +43,9 @@ warns if it finds a second copy of itself on your PATH. If you installed an olde
 `.deb`, remove it once with `sudo apt remove sindri`.
 
 That's it. The release bundles everything sindri ships — the `sindri` CLI/TUI, the
-agent browser `sindri-worker` (it runs as `sindri` inside a pod), the `brokkr` toolbelt (code map + linters),
-and `yq` — and needs the system tools **git** and **podman** present.
+hub itself (`sindri-hub`, which `sindri hub start` runs), the agent browser
+`sindri-worker` (it runs as `sindri` inside a pod), the `brokkr` toolbelt (code map +
+linters), and `yq` — and needs the system tools **git** and **podman** present.
 
 The one thing you bring yourself: **Claude credentials** at `~/.claude` (sindri
 seeds them into the agent pods). The agent container image is built automatically
@@ -454,7 +455,8 @@ Throw a pod away freely; relaunch resumes from the activity log. Restart the hub
 freely; nothing committed is lost.
 
 ```
-cmd/sindri/         host CLI (agent/task/pr + hub + tui)
+cmd/sindri/         host CLI (agent/task/pr + tui); `sindri hub start` execs sindri-hub
+cmd/sindri-hub/     the hub, as its own process (thin entrypoint over internal/hub)
 cmd/sindri-worker/  the agent's thin browser (no command tree; `sindri` in a pod)
 cmd/brokkr/         the toolbelt: code map + linters (no orchestration)
 internal/hub/       the hub: service, SQLite store, command registry, workflows
@@ -562,7 +564,7 @@ and `yq` on `PATH` (they get bundled into the build).
 
 ```bash
 make           # (or make help) list all targets
-make install   # build sindri + sindri-worker + brokkr, install to ~/.local/bin
+make install   # build sindri + sindri-hub + sindri-worker + brokkr, install to ~/.local/bin
 make all       # + build the agent image too (needs podman)
 make verify    # run the linters (the gate; release runs this first)
 make check     # build + test + lint — the quality gate

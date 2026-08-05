@@ -3,29 +3,9 @@ package hub
 import (
 	"os/exec"
 	"testing"
-)
 
-// TestPriorityNoneRename: the lowest tier now reads "none" everywhere, but the old
-// input words still resolve to P4 so muscle memory and stored input keep working.
-func TestPriorityNoneRename(t *testing.T) {
-	if got := PriorityLabel("P4"); got != "none" {
-		t.Errorf("PriorityLabel(P4) = %q, want none", got)
-	}
-	for _, w := range []string{"none", "trivial", "minor"} {
-		if got := PriorityCode(w); got != "P4" {
-			t.Errorf("PriorityCode(%q) = %q, want P4", w, got)
-		}
-	}
-	last := PriorityWords[len(PriorityWords)-1]
-	if last != "none" {
-		t.Errorf("PriorityWords should end in none, got %q", last)
-	}
-	for _, w := range PriorityWords {
-		if w == "trivial" {
-			t.Error("PriorityWords must not advertise the old word trivial")
-		}
-	}
-}
+	"github.com/flo-at/sindri/internal/api"
+)
 
 // TestGitHubTaskPriorityStaysHubSide: re-rating a gh-* task records a hub-side
 // priority override (like os-*), never routing through td or GitHub — a gh-* task's
@@ -54,7 +34,7 @@ func TestGitHubTaskPriorityStaysHubSide(t *testing.T) {
 	}
 
 	// EditTask with a priority takes the same hub-side path.
-	if err := h.wf.EditTask(tag, "gh-9", TaskSpec{Priority: "P2"}); err != nil {
+	if err := h.wf.EditTask(tag, "gh-9", api.TaskSpec{Priority: "P2"}); err != nil {
 		t.Fatalf("EditTask on a gh-* task: %v", err)
 	}
 	ov, _ = h.store.For(tag).PriorityOverrides()

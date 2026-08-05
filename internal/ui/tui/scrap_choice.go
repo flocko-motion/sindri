@@ -4,7 +4,7 @@
 // can reach — the task's open PR, the tasks under it, their PRs — and offers one option per
 // shape, then hands the chosen one to the hub.
 // limits:  labels and key-to-call plumbing only; the subtree walk is the hub's
-// (-> hub.Descendants) and the cascade itself is ScrapTask's.
+// (-> api.Descendants) and the cascade itself is ScrapTask's.
 package tui
 
 import (
@@ -13,8 +13,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/client"
-	"github.com/flo-at/sindri/internal/hub"
 )
 
 // attachedOpenPR is the id of a non-terminal PR for the task, or "". A merged or scrapped one is
@@ -44,7 +44,7 @@ func (m model) measureScrapReach(id string) scrapReach {
 	if r.pr != "" {
 		r.prs++
 	}
-	for _, d := range hub.Descendants(m.state.Tasks, id) {
+	for _, d := range api.Descendants(m.state.Tasks, id) {
 		r.kids++
 		if m.attachedOpenPR(d.ID) != "" {
 			r.prs++

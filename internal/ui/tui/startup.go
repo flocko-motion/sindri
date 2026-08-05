@@ -13,9 +13,8 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/flo-at/sindri/internal/adapter/tasks/spec"
 	"github.com/flo-at/sindri/internal/client"
-	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
 // Run starts the dashboard against the repo's hub (refuses without one, or inside one).
@@ -28,8 +27,8 @@ func Run(root string) error {
 	}
 	// Startup breadcrumbs to stderr (before the alt screen takes over) so a hang
 	// is attributable to a step rather than silent.
-	fmt.Fprintf(os.Stderr, "sindri tui: hub at %s\n", hub.SocketPath())
-	if !hub.IsRunning() {
+	fmt.Fprintf(os.Stderr, "sindri tui: hub at %s\n", paths.HubSocket())
+	if !client.IsRunning() {
 		return fmt.Errorf("no hub running — start one first: 'sindri hub start --bg'")
 	}
 	fmt.Fprintln(os.Stderr, "sindri tui: connecting to /events…")
@@ -48,9 +47,11 @@ func Run(root string) error {
 	fmt.Fprintln(os.Stderr, "sindri tui: connected — starting dashboard")
 	m := newModel(cl, ch, root)
 	m.cancel = cancel
-	// A project with an openspec/ folder expects the openspec CLI; warn (once, at
-	// startup) if it's absent rather than letting spec features quietly do nothing.
-	if spec.Enabled(root) && !spec.CLIInstalled() {
+	// A project with an openspec/ folder expects the openspec CLI; warn (once, at startup) if the
+	// hub — the process that would actually run it — found it absent, rather than the TUI probing
+	// its own PATH (which need not even be the hub's, let alone match it).
+	st, serr := cl.State()
+	if serr == nil && st.SpecCLIMissing {
 		m.noticeText = openspecMissingNotice
 	}
 	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()

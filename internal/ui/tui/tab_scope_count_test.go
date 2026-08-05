@@ -4,21 +4,20 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // scopeBoard: two agents and one open PR in the selected repo ("sin"), the rest of the
 // fleet elsewhere — 17 agents and 3 open PRs in total. One merged PR in the selected
 // repo checks that the scoped PR badge still honours open-ness, not just the repo tag.
-func scopeBoard() (model, hub.BoardState) {
+func scopeBoard() (model, api.BoardState) {
 	m := newModel(nil, nil, "/r/sindri")
-	b := hub.BoardState{
-		Projects: []store.Project{
+	b := api.BoardState{
+		Projects: []api.Project{
 			{Tag: "sin", Path: "/r/sindri"},
 			{Tag: "oth", Path: "/r/other"},
 		},
-		PRs: []store.PR{
+		PRs: []api.PR{
 			{ID: "pr-1", Project: "sin", Status: "open"},
 			{ID: "pr-2", Project: "sin", Status: "merged"}, // in scope but terminal
 			{ID: "pr-3", Project: "oth", Status: "open"},
@@ -26,11 +25,11 @@ func scopeBoard() (model, hub.BoardState) {
 		},
 	}
 	b.Agents = append(b.Agents,
-		hub.AgentView{Name: "eitri", Project: "sin", Status: "working"},
-		hub.AgentView{Name: "dvalin", Project: "sin", Status: "down"}, // down agents still count
+		api.AgentView{Name: "eitri", Project: "sin", Status: "working"},
+		api.AgentView{Name: "dvalin", Project: "sin", Status: "down"}, // down agents still count
 	)
 	for i := 0; i < 15; i++ {
-		b.Agents = append(b.Agents, hub.AgentView{Name: fmt.Sprintf("far-%d", i), Project: "oth", Status: "working"})
+		b.Agents = append(b.Agents, api.AgentView{Name: fmt.Sprintf("far-%d", i), Project: "oth", Status: "working"})
 	}
 	return m, b
 }
@@ -42,14 +41,14 @@ func TestTabCountFollowsScope(t *testing.T) {
 	m, b := scopeBoard()
 	m.state = b
 
-	section := func(key string) hub.Section {
-		for _, s := range hub.Sections {
+	section := func(key string) tuiSection {
+		for _, s := range tuiSections {
 			if s.Key == key {
 				return s
 			}
 		}
 		t.Fatalf("no %q section", key)
-		return hub.Section{}
+		return tuiSection{}
 	}
 	agents, prs := section("agents"), section("prs")
 
@@ -69,13 +68,13 @@ func TestTabCountFollowsScope(t *testing.T) {
 		t.Errorf("global PRs badge = %d, want 3 (open, fleet-wide)", got)
 	}
 
-	// Global scope must reproduce the registry's fleet-wide counts exactly — tabCount
+	// Global scope must reproduce the board's own fleet-wide counts exactly — tabCount
 	// is not allowed to invent a second definition of "how many".
-	if got, want := m.tabCount(agents), agents.Count(m.state); got != want {
-		t.Errorf("global Agents badge = %d, registry says %d", got, want)
+	if got, want := m.tabCount(agents), m.state.AgentCount(); got != want {
+		t.Errorf("global Agents badge = %d, board says %d", got, want)
 	}
-	if got, want := m.tabCount(prs), prs.Count(m.state); got != want {
-		t.Errorf("global PRs badge = %d, registry says %d", got, want)
+	if got, want := m.tabCount(prs), m.state.OpenPRCount(); got != want {
+		t.Errorf("global PRs badge = %d, board says %d", got, want)
 	}
 }
 
@@ -91,7 +90,7 @@ func TestTabCountMatchesRows(t *testing.T) {
 
 	for _, scoped := range []bool{true, false} {
 		m.scopeRepo = scoped
-		for _, s := range hub.Sections {
+		for _, s := range tuiSections {
 			var rows int
 			switch s.Key {
 			case "agents":
@@ -112,10 +111,10 @@ func TestTabCountMatchesRows(t *testing.T) {
 // Meeting are global by nature, so the § toggle must not move their badges.
 func TestTabCountScopeInvariantSections(t *testing.T) {
 	m, b := scopeBoard()
-	b.Tasks = []store.Task{{ID: "a", Status: "open"}, {ID: "b", Status: "closed"}}
+	b.Tasks = []api.Task{{ID: "a", Status: "open"}, {ID: "b", Status: "closed"}}
 	m.state = b
 
-	for _, s := range hub.Sections {
+	for _, s := range tuiSections {
 		if s.Key == "agents" || s.Key == "prs" {
 			continue
 		}

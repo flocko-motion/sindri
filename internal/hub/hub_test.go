@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -323,7 +324,7 @@ func TestCloseFreesWorkingAgent(t *testing.T) {
 	}
 	h.repo(root)
 	tag := RepoTag(root)
-	id, err := h.wf.CreateTask(tag, TaskSpec{Title: "implement the widget feature", Type: "task"})
+	id, err := h.wf.CreateTask(tag, api.TaskSpec{Title: "implement the widget feature", Type: "task"})
 	if err != nil {
 		t.Fatal(err)
 	}

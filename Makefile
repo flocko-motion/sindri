@@ -1,4 +1,4 @@
-.PHONY: help build sindri worker brokkr brokkr-linux image install clean test verify lint check-go upgrade-go check demo diag loop claude-check fullloop screenshot seed tarball release major minor patch breaking feature fix
+.PHONY: help build sindri sindri-hub worker brokkr brokkr-linux image install clean test verify lint check-go upgrade-go check demo diag loop claude-check fullloop screenshot seed tarball release major minor patch breaking feature fix
 
 .DEFAULT_GOAL := help
 
@@ -39,10 +39,15 @@ help: ## list the available targets
 	@echo "make targets:"
 	@grep -hE '^[a-zA-Z][a-zA-Z_-]*:.*## ' $(MAKEFILE_LIST) | sort | awk 'BEGIN{FS=":.*## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
-build: sindri worker brokkr brokkr-linux ## build all binaries (sindri, sindri-worker, brokkr, brokkr-linux) into bin/
+build: sindri sindri-hub worker brokkr brokkr-linux ## build all binaries (sindri, sindri-hub, sindri-worker, brokkr, brokkr-linux) into bin/
 
 sindri:
 	go build -ldflags "-X main.version=$(VERSION)" -o bin/sindri ./cmd/sindri/
+
+# The hub, as its own process: cmd/sindri's `hub start` execs this directly (foreground)
+# or spawns it detached (--bg). Same version stamp as the CLI, so a mismatch is detectable.
+sindri-hub:
+	go build -ldflags "-X main.version=$(VERSION)" -o bin/sindri-hub ./cmd/sindri-hub/
 
 # The single, role-agnostic agent browser (was sindri-worker + sindri-review).
 # It runs ONLY inside the Linux pod (mounted read-only at runtime), never on the
@@ -69,6 +74,7 @@ install: check-go build ## build (on the latest Go), then install the binaries t
 	# binary is currently running (rename unlinks the in-use file; the
 	# running process keeps executing the memory-mapped inode unharmed).
 	mv bin/sindri $(PREFIX)/sindri
+	mv bin/sindri-hub $(PREFIX)/sindri-hub
 	mv bin/sindri-worker $(PREFIX)/sindri-worker
 	mv bin/brokkr $(PREFIX)/brokkr
 	mv bin/brokkr-linux $(PREFIX)/brokkr-linux
@@ -164,7 +170,7 @@ tarball: build ## build the release tarball into dist/ (binaries + bundled yq + 
 	cp "$$(command -v yq)" bin/yq
 	rm -rf "dist/sindri_$(VERSION)_$(GOOS)_$(ARCH)"
 	mkdir -p "dist/sindri_$(VERSION)_$(GOOS)_$(ARCH)"
-	cp bin/sindri bin/sindri-worker bin/brokkr bin/brokkr-linux bin/yq \
+	cp bin/sindri bin/sindri-hub bin/sindri-worker bin/brokkr bin/brokkr-linux bin/yq \
 	   LICENSE THIRD_PARTY_LICENSES.md "dist/sindri_$(VERSION)_$(GOOS)_$(ARCH)/"
 	cp scripts/install.sh "dist/sindri_$(VERSION)_$(GOOS)_$(ARCH)/install.sh"
 	chmod +x "dist/sindri_$(VERSION)_$(GOOS)_$(ARCH)/install.sh"
@@ -177,4 +183,4 @@ major minor patch breaking feature fix:
 	@:
 
 clean: ## remove build artifacts (bin/ binaries, dist/ tarballs, image stamp)
-	rm -rf bin/sindri bin/sindri-worker bin/brokkr bin/brokkr-linux bin/yq bin/buildctx dist .image-stamp
+	rm -rf bin/sindri bin/sindri-hub bin/sindri-worker bin/brokkr bin/brokkr-linux bin/yq bin/buildctx dist .image-stamp

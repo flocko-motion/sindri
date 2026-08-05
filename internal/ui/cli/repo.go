@@ -12,7 +12,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/theme"
 	"github.com/spf13/cobra"
 )
 
@@ -114,7 +115,7 @@ func repoForgetCmd() *cobra.Command {
 func repoColorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "color <repo> <n>",
-		Short: "Pin a repo's display colour (0 = default; 1..24 = palette index)",
+		Short: fmt.Sprintf("Pin a repo's display colour (0 = default; 1..%d = palette index)", theme.NRepoColors),
 		Args:  cobra.ExactArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
 			n, err := strconv.Atoi(args[1])
@@ -167,8 +168,8 @@ func repoInfo(sel string) error {
 
 // resolveRepo maps a user-supplied selector (repo name or tag) to a registry tag,
 // erroring on no match or an ambiguous name (in which case the caller uses the tag).
-func resolveRepo(repos []hub.RepoSummary, sel string) (string, error) {
-	var matches []hub.RepoSummary
+func resolveRepo(repos []api.RepoSummary, sel string) (string, error) {
+	var matches []api.RepoSummary
 	for _, r := range repos {
 		if r.Tag == sel || r.Name == sel {
 			matches = append(matches, r)
@@ -188,7 +189,7 @@ func resolveRepo(repos []hub.RepoSummary, sel string) (string, error) {
 	}
 }
 
-func printRepoDetail(d hub.RepoDetail) {
+func printRepoDetail(d api.RepoDetail) {
 	issues := "off"
 	if d.IssuesEnabled {
 		issues = "on"

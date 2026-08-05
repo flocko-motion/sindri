@@ -43,6 +43,12 @@ type BoardState struct {
 	Orphans  []string                `json:"orphans"`   // pods with no roster entry (D14)
 	Chat     ChatView                `json:"chat"`      // the user's chatroom: members + transcript
 	RepoDocs map[string]RepoDocState `json:"repo_docs"` // per repo tag: its architecture doc + any gap
+	// SpecCLIMissing: the selected project has an openspec/ folder but the hub — the process that
+	// would actually run it — found no openspec CLI on its PATH.
+	SpecCLIMissing bool `json:"spec_cli_missing"`
+	// StartedAt is when this hub process came up (RFC3339), so `hub status` reads uptime from the
+	// board rather than shelling out to `ps`.
+	StartedAt string `json:"started_at"`
 }
 
 // AgentStatsView is one agent's resource snapshot; Err is set, not swallowed into a misleading zero.
