@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/task"
@@ -75,15 +76,9 @@ func (e *Engine) TaskInfo(project, id string) (store.Task, error) {
 }
 
 // TaskSpec is the full editable shape of a task — the payload of both create and
-// edit. Empty fields mean "unset" (create) or "leave unchanged" (edit).
-type TaskSpec struct {
-	Title       string
-	Type        string
-	Priority    string // a P-code (P0…P4)
-	Parent      string // parent task id (a child of this task)
-	Description string
-	Labels      []string
-}
+// edit. It crosses the wire, so it is internal/api.TaskSpec under the name every
+// existing caller here already uses.
+type TaskSpec = api.TaskSpec
 
 // CreateTask creates a task via the td tool in a project and returns its id.
 func (e *Engine) CreateTask(project string, s TaskSpec) (string, error) {

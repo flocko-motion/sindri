@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/tools/paths"
 )
@@ -56,10 +57,9 @@ func New(st *store.Store, deps Deps) *Server {
 	return &Server{store: st, deps: deps, unix: map[agentKey]net.Listener{}}
 }
 
-// ExecReq is the body for POST /exec on an agent channel.
-type ExecReq struct {
-	Args []string `json:"args"`
-}
+// ExecReq is the body for POST /exec on an agent channel; it crosses the wire, so it
+// is internal/api.ExecReq under the name every existing caller here already uses.
+type ExecReq = api.ExecReq
 
 // SocketDir is an agent's own socket directory under the central state dir, keyed by
 // project (repoTag). The pod bind-mounts this DIRECTORY (not the socket file), so the

@@ -12,7 +12,7 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/flo-at/sindri/internal/hub/client"
+	"github.com/flo-at/sindri/internal/client"
 )
 
 // version is the build version, baked in via -ldflags (matches the host binary);

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/tools/paths"
 	"gopkg.in/yaml.v3"
 )
@@ -22,39 +23,19 @@ import (
 // defaultArchitecture is looked for when `architecture` is unset, but never created.
 const defaultArchitecture = "ARCHITECTURE.md"
 
-// GitHub is the `github:` block.
-type GitHub struct {
-	// Issues toggles the GitHub issue source; nil (unset) means ON — opt-out.
-	Issues *bool `yaml:"issues"`
-}
+// GitHub is the `github:` block. It crosses the wire in its own right (Config does),
+// so it is internal/api.GitHub under the name every existing caller here already uses.
+type GitHub = api.GitHub
 
-// Lint is the `lint:` block. Pointers: an unset key must differ from a deliberate zero.
-type Lint struct {
-	// MaxLines bounds a source file's length.
-	MaxLines *int `yaml:"max_lines"`
+// Lint is the `lint:` block; it crosses the wire, so it is internal/api.Lint under
+// the name every existing caller here already uses.
+type Lint = api.Lint
 
-	// MaxCommentAvg bounds the MEAN lines per comment block — a trend, not a per-comment cap.
-	MaxCommentAvg *float64 `yaml:"max_comment_avg"`
-}
-
-// Config is a project's resolved .sindri/config.yaml (repo over global over default).
-type Config struct {
-	Architecture  string `yaml:"architecture"`  // repo-relative architecture doc (default ARCHITECTURE.md)
-	Containerfile string `yaml:"containerfile"` // repo-relative image recipe ("" = filename discovery)
-	ReviewPrompt  string `yaml:"review_prompt"` // repo-relative reviewer-prompt file ("" = default prompt)
-	GitHub        GitHub `yaml:"github"`
-	Lint          Lint   `yaml:"lint"`
-
-	// Reference pins the branch agents branch from and merge into. Unset reads the main
-	// checkout's current branch, so switching branches redefines it for the whole fleet.
-	Reference string `yaml:"reference"`
-
-	// Reading names the documents a planner must read first; it cannot guess them.
-	Reading []string `yaml:"reading"`
-
-	// ArchitectureSet marks an explicitly configured doc: only then must it exist (validate).
-	ArchitectureSet bool `yaml:"-"`
-}
+// Config is a project's resolved .sindri/config.yaml (repo over global over
+// default). It crosses the wire (the TUI's repo-config editor reads and writes it),
+// so it is internal/api.Config under the name every existing caller here already
+// uses; Load/Write/validate/Abs stay here since they touch disk.
+type Config = api.Config
 
 // Load layers repo config over global over defaults. Absent is fine; malformed is an error.
 func Load(root string) (Config, error) {
@@ -69,7 +50,7 @@ func Load(root string) (Config, error) {
 	if c.Architecture == "" {
 		c.Architecture = defaultArchitecture
 	}
-	if err := c.validate(root); err != nil {
+	if err := validate(c, root); err != nil {
 		return Config{}, err
 	}
 	return c, nil
@@ -95,7 +76,7 @@ func decodeInto(path string, c *Config) error {
 
 // validate rejects escaping paths and missing set files; the default architecture is exempt
 // because the hub only recommends one (Hub.StartupAdvice).
-func (c Config) validate(root string) error {
+func validate(c Config, root string) error {
 	checks := []struct {
 		key, val  string
 		mustExist bool
@@ -121,15 +102,10 @@ func (c Config) validate(root string) error {
 	return nil
 }
 
-// IssuesEnabled defaults to ON; the source still degrades to absent without gh or a remote.
-func (c Config) IssuesEnabled() bool {
-	return c.GitHub.Issues == nil || *c.GitHub.Issues
-}
-
 // Write persists c, validating first so a broken config never lands; unset keys stay omitted.
 func Write(root string, c Config) error {
 	c.ArchitectureSet = c.Architecture != "" && c.Architecture != defaultArchitecture
-	if err := c.validate(root); err != nil {
+	if err := validate(c, root); err != nil {
 		return err
 	}
 	out := map[string]any{}

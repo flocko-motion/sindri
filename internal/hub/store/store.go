@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flo-at/sindri/internal/api"
 	_ "modernc.org/sqlite"
 )
 
@@ -28,27 +29,13 @@ type Agent struct {
 	Memory    string `json:"memory"` // per-agent RAM limit (e.g. "4g"); "" = hub default
 }
 
-// Event is one row of the append-only activity log.
-type Event struct {
-	ID      int64  `json:"id"`
-	Project string `json:"project"`
-	Agent   string `json:"agent"`
-	TS      string `json:"ts"`
-	Type    string `json:"type"`
-	Payload string `json:"payload"`
-}
+// Event is one row of the append-only activity log; it crosses the wire, so it is
+// internal/api.Event under the name every existing caller here already uses.
+type Event = api.Event
 
-// Project is one row of the registry: a repo the hub knows, keyed by its stable
-// repoTag (a digest of the abs path), with the on-disk path, when first seen, and
-// when last used (touched on every register/use, so the repo switcher can order by
-// recency).
-type Project struct {
-	Tag       string `json:"tag"`
-	Path      string `json:"path"`
-	FirstSeen string `json:"first_seen"`
-	LastUsed  string `json:"last_used"`
-	Color     int    `json:"color"` // repo colour choice: 0 = hash-derived default, 1..N = palette index
-}
+// Project is one row of the registry; it crosses the wire, so it is
+// internal/api.Project under the name every existing caller here already uses.
+type Project = api.Project
 
 // Store wraps the one central SQLite database. Per-project work goes through a
 // ProjectStore from For; cross-project reads and the registry live here.

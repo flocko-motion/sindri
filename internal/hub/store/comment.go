@@ -7,17 +7,15 @@
 // limits:  no fetching, no source knowledge — just rows keyed for sync.
 package store
 
-import "fmt"
+import (
+	"fmt"
 
-// Comment is one task comment, tagged with the source it came from and the
-// external reference that identifies it there (so a re-sync can match it).
-type Comment struct {
-	Source    string `json:"source"`     // "github", or "td" on a thread synced before the import
-	SourceRef string `json:"source_ref"` // external id / url, unique within the source
-	Author    string `json:"author"`
-	Body      string `json:"body"`
-	CreatedAt string `json:"created_at"` // RFC3339
-}
+	"github.com/flo-at/sindri/internal/api"
+)
+
+// Comment is one task comment; it crosses the wire, so it is internal/api.Comment
+// under the name every existing caller here already uses.
+type Comment = api.Comment
 
 // ReplaceComments reconciles a task's comments FROM ONE SOURCE: it drops the
 // source's existing comments for the task and inserts the given set, so a comment

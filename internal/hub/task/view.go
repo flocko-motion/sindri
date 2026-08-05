@@ -1,18 +1,14 @@
 // package: hub/task / view
-// type:    logic (task presentation + ordering)
-// job:     the shared, UI-agnostic view helpers over cached tasks: the priority/state
-// label mappings (CLI and TUI agree via these), the open/done predicate, and
-// arranging a flat task set into its parent/child tree (roots by priority
-// then id, each followed by its descendants, PR-annotated).
+// type:    logic (task presentation)
+// job:     the shared, UI-agnostic priority/state label mappings (CLI and TUI agree
+// via these) and the pending-approval query. Arranging a flat task set into its
+// tree, its descendants, and the open/done predicate cross the wire, so they live
+// in internal/api; this package keeps its own names as aliases to them.
 // limits:  pure functions over store rows; no rendering, no I/O. Board-badge counts
 // that need the whole BoardState live in the hub (sections.go).
 package task
 
-import (
-	"sort"
-
-	"github.com/flo-at/sindri/internal/hub/store"
-)
+import "github.com/flo-at/sindri/internal/api"
 
 // PriorityLabel maps td's P0…P4 priority codes to readable words for display (sorting
 // still uses the codes). Shared by the CLI and the TUI so they agree.
@@ -75,52 +71,22 @@ func StateLabel(s string) string {
 }
 
 // Done reports whether a task is in a terminal (done) state — the "closed" segment of
-// the open/closed filter.
-func Done(t store.Task) bool {
-	switch t.Status {
-	case "closed", "approved", "merged":
-		return true
-	}
-	return false
-}
+// the open/closed filter. It crosses the wire, so it lives in internal/api; this is
+// that function, under the name every existing caller here already uses.
+var Done = api.Done
 
 // Open reports whether a task still counts as open (not done).
-func Open(t store.Task) bool { return !Done(t) }
+var Open = api.Open
 
 // Descendants returns everything under id — children, grandchildren, … — deepest
 // first, the order a cascading scrap deletes in (a looping parent chain walks once).
-func Descendants(tasks []store.Task, id string) []store.Task {
-	byParent := map[string][]store.Task{}
-	for _, t := range tasks {
-		if t.ParentID != "" && t.ID != t.ParentID {
-			byParent[t.ParentID] = append(byParent[t.ParentID], t)
-		}
-	}
-	for p := range byParent {
-		sortTasks(byParent[p])
-	}
-	seen := map[string]bool{id: true}
-	var out []store.Task
-	var walk func(parent string)
-	walk = func(parent string) {
-		for _, t := range byParent[parent] {
-			if seen[t.ID] {
-				continue
-			}
-			seen[t.ID] = true
-			walk(t.ID)
-			out = append(out, t) // after its own subtree: deepest first
-		}
-	}
-	walk(id)
-	return out
-}
+var Descendants = api.Descendants
 
 // PendingApproval returns the tasks under id still waiting on the user's verdict, deepest first.
 // A rejected one is a verdict already given, and one that has ended decides nothing — so a
 // cascading approve reaches neither, and both keep the state a human put them in.
-func PendingApproval(tasks []store.Task, id string) []store.Task {
-	var out []store.Task
+func PendingApproval(tasks []api.Task, id string) []api.Task {
+	var out []api.Task
 	for _, d := range Descendants(tasks, id) {
 		if Open(d) && d.Approval == "pending" {
 			out = append(out, d)
@@ -131,65 +97,12 @@ func PendingApproval(tasks []store.Task, id string) []store.Task {
 
 // TaskRow is a task placed in the hierarchy: its tree depth, whether it is the last
 // child of its parent (for drawing tree connectors), and the id of a non-merged PR
-// for it (or "").
-type TaskRow struct {
-	store.Task
-	Depth  int    `json:"depth"`
-	Last   bool   `json:"last"`
-	PR     string `json:"pr"`
-	PRKind string `json:"pr_kind"` // "final" | "interim" — how to mark the PR on the row
-}
+// for it (or ""). It crosses the wire, so it is internal/api.TaskRow under the name
+// every existing caller here already uses.
+type TaskRow = api.TaskRow
 
 // ArrangeTasks orders a flat task set into its parent/child tree — roots first (by
 // priority then id), each immediately followed by its descendants, depth tagged — and
 // annotates each row with a non-merged PR id if one exists. A task whose parent is
 // absent from the set is treated as a root so nothing is hidden.
-func ArrangeTasks(tasks []store.Task, prs []store.PR) []TaskRow {
-	byParent := map[string][]store.Task{}
-	present := map[string]bool{}
-	for _, t := range tasks {
-		present[t.ID] = true
-	}
-	for _, t := range tasks {
-		p := t.ParentID
-		if p == "" || !present[p] {
-			p = "" // root (no parent, or parent not in the set)
-		}
-		byParent[p] = append(byParent[p], t)
-	}
-	for p := range byParent {
-		sortTasks(byParent[p])
-	}
-	pr := map[string]store.PR{} // task id -> its open (non-terminal) PR
-	for _, p := range prs {
-		if p.Status != "merged" && p.Status != "scrapped" {
-			pr[p.Task] = p
-		}
-	}
-
-	var out []TaskRow
-	var walk func(parent string, depth int)
-	walk = func(parent string, depth int) {
-		kids := byParent[parent]
-		for i, t := range kids {
-			out = append(out, TaskRow{Task: t, Depth: depth, Last: i == len(kids)-1, PR: pr[t.ID].ID, PRKind: pr[t.ID].Kind})
-			walk(t.ID, depth+1)
-		}
-	}
-	walk("", 0)
-	return out
-}
-
-// sortTasks orders siblings: highest priority first (P0…P4, unset last), then id.
-func sortTasks(ts []store.Task) {
-	sort.SliceStable(ts, func(i, j int) bool {
-		pi, pj := ts[i].Priority, ts[j].Priority
-		if (pi == "") != (pj == "") {
-			return pj == "" // non-empty before empty
-		}
-		if pi != pj {
-			return pi < pj
-		}
-		return ts[i].ID < ts[j].ID
-	})
-}
+var ArrangeTasks = api.ArrangeTasks

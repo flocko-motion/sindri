@@ -18,6 +18,7 @@ import (
 
 	agentport "github.com/flo-at/sindri/internal/adapter/agent"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
 )
 
@@ -25,12 +26,9 @@ import (
 const probeTimeout = 3 * time.Second
 
 // ClientView is one dial-in on an agent's tmux session; orphaned attaches show up here too.
-type ClientView struct {
-	TTY      string `json:"tty"`
-	Width    int    `json:"width"`
-	Height   int    `json:"height"`
-	ReadOnly bool   `json:"read_only"`
-}
+// It crosses the wire, so it is internal/api.ClientView under the name every existing
+// caller here already uses.
+type ClientView = api.ClientView
 
 // runtimeTTL: a stale runtime label costs nothing, a capture-pane spawn per board read does
 // (they don't parallelise — see container.ListByLabelCached).

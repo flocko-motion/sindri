@@ -16,59 +16,41 @@ import (
 	"runtime"
 	"strconv"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/hub/server"
-	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// AgentReq is the body for POST /agents.
-type AgentReq struct {
-	Name   string `json:"name"`
-	Role   string `json:"role"`
-	Memory string `json:"memory"` // optional per-agent RAM limit (e.g. "4g"); "" = hub default
-}
+// AgentReq is the body for POST /agents; it crosses the wire, so it is
+// internal/api.AgentReq under the name every existing caller here already uses.
+type AgentReq = api.AgentReq
 
-// TellReq is the body for POST /tell.
-type TellReq struct {
-	Name   string `json:"name"`
-	Msg    string `json:"msg"`
-	Source string `json:"source"`
-}
+// TellReq is the body for POST /tell; it crosses the wire, so it is internal/api.TellReq
+// under the name every existing caller here already uses.
+type TellReq = api.TellReq
 
-// PlanReq is the body for POST /agent/plan. Task names an existing task to work up, whose title and
-// body become the brief; Goal is free text, and may accompany a task to add something it lacks.
-type PlanReq struct {
-	Name string `json:"name"`
-	Goal string `json:"goal"`
-	Task string `json:"task"`
-}
+// PlanReq is the body for POST /agent/plan; it crosses the wire, so it is
+// internal/api.PlanReq under the name every existing caller here already uses.
+type PlanReq = api.PlanReq
 
-// ChatSayReq is the body for POST /chat/say — the user posting to the room.
-type ChatSayReq struct {
-	Msg string `json:"msg"`
-}
+// ChatSayReq is the body for POST /chat/say; it crosses the wire, so it is
+// internal/api.ChatSayReq under the name every existing caller here already uses.
+type ChatSayReq = api.ChatSayReq
 
 // ChatView is the chatroom snapshot served by GET /chat and streamed by
-// GET /chat/stream: the current member roster and the recent transcript.
-type ChatView struct {
-	Members []store.ChatMember  `json:"members"`
-	Log     []store.ChatMessage `json:"log"`
-}
+// GET /chat/stream; it crosses the wire, so it is internal/api.ChatView under the
+// name every existing caller here already uses.
+type ChatView = api.ChatView
 
 // NameReq is the body for operations addressing one agent (POST /launch) or PR
-// (POST /merge). Shell and Debug apply to /launch only.
-type NameReq struct {
-	Name   string `json:"name"`
-	Shell  bool   `json:"shell"`
-	Debug  bool   `json:"debug"`  // stream the hub's liveness-probe detail during the launch wait
-	Memory string `json:"memory"` // set an agent's RAM limit (POST /agent/memory)
-}
+// (POST /merge); it crosses the wire, so it is internal/api.NameReq under the name
+// every existing caller here already uses.
+type NameReq = api.NameReq
 
-// RepoReq targets a registered repo by its tag (POST /repo/forget, /repo/color).
-type RepoReq struct {
-	Tag   string `json:"tag"`
-	Color int    `json:"color"` // colour choice for /repo/color
-}
+// RepoReq targets a registered repo by its tag (POST /repo/forget, /repo/color); it
+// crosses the wire, so it is internal/api.RepoReq under the name every existing
+// caller here already uses.
+type RepoReq = api.RepoReq
 
 // globalRoutes are the only control endpoints valid without a repo context: the
 // board reads, which return global agents/PRs (and no tasks when no repo is
@@ -415,7 +397,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		id, err := h.wf.CreateTask(h.reqProject(r), req.spec())
+		id, err := h.wf.CreateTask(h.reqProject(r), req.Spec())
 		writeJSON(w, okMsg{id}, err)
 	})
 	mux.HandleFunc("POST /task/edit", func(w http.ResponseWriter, r *http.Request) {
@@ -423,7 +405,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{req.ID}, h.wf.EditTask(h.reqProject(r), req.ID, req.spec()))
+		writeJSON(w, okMsg{req.ID}, h.wf.EditTask(h.reqProject(r), req.ID, req.Spec()))
 	})
 	mux.HandleFunc("POST /priority", func(w http.ResponseWriter, r *http.Request) {
 		var req PriorityReq
@@ -479,47 +461,26 @@ func (h *Hub) Handler() http.Handler {
 	return mux
 }
 
-// PriorityReq is the body for POST /priority.
-type PriorityReq struct {
-	ID       string `json:"id"`
-	Priority string `json:"priority"`
-}
+// PriorityReq is the body for POST /priority; it crosses the wire, so it is
+// internal/api.PriorityReq under the name every existing caller here already uses.
+type PriorityReq = api.PriorityReq
 
-// RejectReq is the body for POST /pr/reject.
-type RejectReq struct {
-	ID       string `json:"id"`
-	Feedback string `json:"feedback"`
-}
+// RejectReq is the body for POST /pr/reject; it crosses the wire, so it is
+// internal/api.RejectReq under the name every existing caller here already uses.
+type RejectReq = api.RejectReq
 
-// ApproveTaskReq is the body for POST /task/approve: the task, and whether the verdict
-// carries down to the tasks below it that still await one.
-type ApproveTaskReq struct {
-	ID      string `json:"id"`
-	Subtree bool   `json:"subtree"`
-}
+// ApproveTaskReq is the body for POST /task/approve; it crosses the wire, so it is
+// internal/api.ApproveTaskReq under the name every existing caller here already uses.
+type ApproveTaskReq = api.ApproveTaskReq
 
-// ScrapTaskReq is the body for POST /task/delete: the task, and how far the discard
-// reaches — down its subtree, and over the open PRs of what it scraps.
-type ScrapTaskReq struct {
-	ID      string `json:"id"`
-	Subtree bool   `json:"subtree"`
-	PRs     bool   `json:"prs"`
-}
+// ScrapTaskReq is the body for POST /task/delete; it crosses the wire, so it is
+// internal/api.ScrapTaskReq under the name every existing caller here already uses.
+type ScrapTaskReq = api.ScrapTaskReq
 
-// TaskReq is the body for POST /tasks (create) and POST /task/edit (ID set).
-type TaskReq struct {
-	ID          string   `json:"id"`
-	Title       string   `json:"title"`
-	Type        string   `json:"type"`
-	Priority    string   `json:"priority"`
-	Parent      string   `json:"parent"`
-	Description string   `json:"description"`
-	Labels      []string `json:"labels"`
-}
-
-func (r TaskReq) spec() TaskSpec {
-	return TaskSpec{Title: r.Title, Type: r.Type, Priority: r.Priority, Parent: r.Parent, Description: r.Description, Labels: r.Labels}
-}
+// TaskReq is the body for POST /tasks (create) and POST /task/edit (ID set); it
+// crosses the wire, so it is internal/api.TaskReq under the name every existing
+// caller here already uses.
+type TaskReq = api.TaskReq
 
 // Serve binds the repo's unix socket and serves until the listener closes. A
 // stale socket file from a previous run is removed first.

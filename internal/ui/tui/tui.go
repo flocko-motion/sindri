@@ -17,8 +17,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/client"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/ui/tui/scroll"
 )

@@ -1,55 +1,14 @@
 // package: hub / sections
 // type:    logic (board badge counts)
-// job:     BoardState's actionable badge counts — the numbers the dashboard sections
-// (hub/commands) render. BoardState satisfies commands.Board, so the section
-// registry lives outside the hub while the counting (which needs the whole
-// cross-module snapshot) stays here.
-// limits:  count derivation only; the section list + titles live in hub/commands.
+// job:     BoardState's badge counts cross the wire, so they are now its own methods
+// in internal/api. PROpen stays visible here under its existing name.
+// limits:  the section list + titles live in hub/commands; counting lives in internal/api.
 package hub
 
-import (
-	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/task"
-)
-
-// These make BoardState satisfy commands.Board — the badge counts the dashboard
-// sections read.
-
-// OpenTaskCount is the number of not-done tasks in the selected project.
-func (b BoardState) OpenTaskCount() int { return countTasks(b.Tasks, task.Open) }
-
-// AgentCount is the whole roster size (down agents are still agents).
-func (b BoardState) AgentCount() int { return len(b.Agents) }
-
-// OpenPRCount is the number of still-open PRs across the fleet — those in neither
-// terminal state (merged or scrapped), matching what the PRs tab shows by default.
-func (b BoardState) OpenPRCount() int { return countPRs(b.PRs, PROpen) }
-
-// RepoCount is the number of repos the hub tracks.
-func (b BoardState) RepoCount() int { return len(b.Projects) }
-
-// ChatMemberCount is the number of agents in the user's chatroom.
-func (b BoardState) ChatMemberCount() int { return len(b.Chat.Members) }
+import "github.com/flo-at/sindri/internal/api"
 
 // PROpen reports whether a PR is still open — in neither terminal state (merged or
 // scrapped). Exported because a UI that narrows the board to one repo has to apply the
 // SAME open-ness rule to its subset that OpenPRCount applies to the whole fleet; if it
 // reimplemented the rule, a tab badge could disagree with the list beneath it.
-func PROpen(p store.PR) bool { return p.Status != "merged" && p.Status != "scrapped" }
-
-func countTasks(ts []store.Task, pred func(store.Task) bool) (n int) {
-	for _, t := range ts {
-		if pred(t) {
-			n++
-		}
-	}
-	return
-}
-func countPRs(ps []store.PR, pred func(store.PR) bool) (n int) {
-	for _, p := range ps {
-		if pred(p) {
-			n++
-		}
-	}
-	return
-}
+var PROpen = api.PROpen

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/registry"
@@ -22,11 +23,9 @@ import (
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
-// CmdInfo is a command as advertised to a browser (name + help).
-type CmdInfo struct {
-	Name string `json:"name"`
-	Help string `json:"help"`
-}
+// CmdInfo is a command as advertised to a browser; it crosses the wire, so it is
+// internal/api.CmdInfo under the name every existing caller here already uses.
+type CmdInfo = api.CmdInfo
 
 // registry builds the command surface, rebuilt per call; Run closures capture the hub.
 func (h *Hub) registry() *registry.Registry {

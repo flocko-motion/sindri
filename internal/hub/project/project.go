@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -47,25 +48,15 @@ const configTemplate = `# sindri per-project config — see the README "Per-proj
 #   issues: false                       # import open GitHub issues as tasks (default: true)
 `
 
-// Summary is one row of the registry overview (`repo list`, the TUI switcher).
-type Summary struct {
-	Tag           string `json:"tag"`
-	Name          string `json:"name"` // repo directory basename
-	Path          string `json:"path"`
-	Agents        int    `json:"agents"` // roster size (registered agents, not liveness)
-	IssuesEnabled bool   `json:"issues_enabled"`
-	LastUsed      string `json:"last_used"`
-}
+// Summary is one row of the registry overview (`repo list`, the TUI switcher). It
+// crosses the wire, so it is internal/api.RepoSummary under the name every existing
+// caller here already uses.
+type Summary = api.RepoSummary
 
-// Detail is the resolved config plus counts behind `repo info`.
-type Detail struct {
-	Summary
-	Config    config.Config `json:"config"`
-	OpenTasks int           `json:"open_tasks"`
-	Tasks     int           `json:"tasks"`
-	OpenPRs   int           `json:"open_prs"`
-	PRs       int           `json:"prs"`
-}
+// Detail is the resolved config plus counts behind `repo info`. It crosses the wire,
+// so it is internal/api.RepoDetail under the name every existing caller here already
+// uses.
+type Detail = api.RepoDetail
 
 // taskOpen reports whether a cached task still counts as open. Local: too small for a dependency.
 func taskOpen(status string) bool {
@@ -123,8 +114,8 @@ func (s *Service) Info(project string) (Detail, error) {
 	tasks, _ := ps.AllTasks()
 	prs, _ := ps.PRs()
 	d := Detail{
-		Summary: s.summary(store.Project{Tag: project, Path: path}),
-		Config:  cfg, Tasks: len(tasks), PRs: len(prs),
+		RepoSummary: s.summary(store.Project{Tag: project, Path: path}),
+		Config:      cfg, Tasks: len(tasks), PRs: len(prs),
 	}
 	for _, t := range tasks {
 		if taskOpen(t.Status) {

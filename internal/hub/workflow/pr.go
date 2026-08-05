@@ -17,6 +17,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/adapter/tasks/spec"
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/registry"
@@ -77,16 +78,10 @@ func (e *Engine) PRProject(fallback, id string) string {
 	return fallback
 }
 
-// PRDetail is a merge-intent plus its linked task and diff (for `pr info`).
-type PRDetail struct {
-	PR      store.PR       `json:"pr"`
-	Task    store.Task     `json:"task"`
-	Diff    string         `json:"diff"`
-	Reviews []store.Review `json:"reviews"`
-	Lint    string         `json:"lint"`    // latest stored lint output ("" = never run)
-	LintAt  string         `json:"lint_at"` // when it was run
-	History []store.Event  `json:"history"` // lifecycle log (oldest-first)
-}
+// PRDetail is a merge-intent plus its linked task and diff (for `pr info`). It
+// crosses the wire, so it is internal/api.PRDetail under the name every existing
+// caller here already uses.
+type PRDetail = api.PRDetail
 
 // PRInfo returns a project's PR with its linked task and diff.
 func (e *Engine) PRInfo(project, id string) (PRDetail, error) {

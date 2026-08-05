@@ -14,8 +14,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/flo-at/sindri/internal/adapter/tasks/spec"
+	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/client"
 )
 
 // Run starts the dashboard against the repo's hub (refuses without one, or inside one).

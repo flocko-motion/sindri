@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
@@ -24,34 +25,13 @@ const probeTimeout = 3 * time.Second
 // statsTimeout bounds one `stats` sample, slower than a probe (the runtime samples over a window).
 const statsTimeout = 8 * time.Second
 
-// AgentView is an agent as the UIs see it; Status collapses runtime + workflow into one word:
-// down | idle | working | submitted.
-type AgentView struct {
-	Project   string `json:"project"`
-	Repo      string `json:"repo"`
-	Name      string `json:"name"`
-	Role      string `json:"role"`
-	Status    string `json:"status"`
-	Task      string `json:"task"`
-	Branch    string `json:"branch"`
-	PR        string `json:"pr"`
-	Workspace string `json:"workspace"` // the agent's git worktree path (repo-relative)
-	Clients   int    `json:"clients"`   // humans attached to its tmux session (dial-ins)
-	Container string `json:"container"` // podman container name (project-resolved, so cross-repo callers target the right pod)
-	Memory    string `json:"memory"`    // configured RAM limit ("" = hub default)
-	Runtime   string `json:"runtime"`   // Claude's live runtime: "working"|"blocked"|"idle"|"" (folded into Status; kept raw for the herdr projection)
-}
+// AgentView is an agent as the UIs see it; it crosses the wire, so it is
+// internal/api.AgentView under the name every existing caller here already uses.
+type AgentView = api.AgentView
 
-// BoardState is the whole board: Agents and PRs global, Tasks only the selected project's.
-type BoardState struct {
-	Agents   []AgentView             `json:"agents"`
-	Tasks    []store.Task            `json:"tasks"`
-	PRs      []store.PR              `json:"prs"`
-	Projects []store.Project         `json:"projects"`
-	Orphans  []string                `json:"orphans"`   // pods with no roster entry (D14)
-	Chat     ChatView                `json:"chat"`      // the user's chatroom: members + transcript
-	RepoDocs map[string]RepoDocState `json:"repo_docs"` // per repo tag: its architecture doc + any gap
-}
+// BoardState is the whole board; it crosses the wire, so it is internal/api.BoardState
+// under the name every existing caller here already uses.
+type BoardState = api.BoardState
 
 // State assembles the board; an empty selected tag means no project is chosen, so no tasks.
 func (h *Hub) State(selected string) (BoardState, error) {
@@ -150,21 +130,13 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	return BoardState{Agents: agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans, Chat: chat, RepoDocs: docs}, nil
 }
 
-// AgentStatsView is one agent's resource snapshot; Err is set, not swallowed into a misleading zero.
-type AgentStatsView struct {
-	Name          string `json:"name"`
-	Repo          string `json:"repo"`
-	MemUsageBytes int64  `json:"memUsageBytes"`
-	MemLimitBytes int64  `json:"memLimitBytes"`
-	Err           string `json:"err,omitempty"`
-}
+// AgentStatsView is one agent's resource snapshot; it crosses the wire, so it is
+// internal/api.AgentStatsView under the name every existing caller here already uses.
+type AgentStatsView = api.AgentStatsView
 
-// StatsReport is the `agent stats` payload. Engine is included so the numbers are read in context:
-// podman shares one VM, apple container is one micro-VM per agent.
-type StatsReport struct {
-	Engine string           `json:"engine"`
-	Agents []AgentStatsView `json:"agents"`
-}
+// StatsReport is the `agent stats` payload; it crosses the wire, so it is
+// internal/api.StatsReport under the name every existing caller here already uses.
+type StatsReport = api.StatsReport
 
 // Stats returns the engine name and a resource snapshot for every running agent.
 func (h *Hub) Stats() (StatsReport, error) {

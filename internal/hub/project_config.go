@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/config"
 )
 
@@ -50,15 +51,9 @@ func (h *Hub) StartupAdvice() []string {
 	return out
 }
 
-// RepoDocState is a repo's architecture-doc situation: the path in effect and, when the
-// hub can't read a doc there, what the user should do about it. Advice is "" for a repo in
-// good shape, which is what every UI keys off to stay quiet.
-type RepoDocState struct {
-	Doc      string `json:"doc"`      // the path in effect: configured, else the default
-	Set      bool   `json:"set"`      // the project named it (vs falling back to the default)
-	Readable bool   `json:"readable"` // a doc exists at Doc
-	Advice   string `json:"advice"`   // "" when nothing to say
-}
+// RepoDocState is a repo's architecture-doc situation; it crosses the wire, so it is
+// internal/api.RepoDocState under the name every existing caller here already uses.
+type RepoDocState = api.RepoDocState
 
 // repoDocState resolves one repo's architecture-doc situation — the single place the rule
 // lives, so the hub's startup line and the TUI's Repos detail can't drift apart.

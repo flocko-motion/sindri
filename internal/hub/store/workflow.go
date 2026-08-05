@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/flo-at/sindri/internal/api"
 )
 
 const workflowSchema = `
@@ -129,25 +131,9 @@ CREATE TABLE IF NOT EXISTS task_approval (
 `
 
 // Task is the cached read-model row; large fields land only on a detail read.
-type Task struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Status      string `json:"status"`
-	Priority    string `json:"priority"`
-	Type        string `json:"type"`
-	Labels      string `json:"labels"` // comma-joined
-	ParentID    string `json:"parent_id"`
-	Description string `json:"description,omitempty"`
-	Acceptance  string `json:"acceptance,omitempty"`
-	URL         string `json:"url,omitempty"`        // an external permalink (e.g. a GitHub issue); "" if none
-	UpdatedAt   string `json:"updated_at,omitempty"` // last status/field change at the source; "" if unknown
-	// Approval gates planner-created tasks: "" (none), pending, approved, rejected.
-	// Workers only ever see "" and approved tasks.
-	Approval        string `json:"approval,omitempty"`
-	ApprovalComment string `json:"approval_comment,omitempty"`
-	// Comments is not a tasks column: TaskInfo assembles it, so it's empty elsewhere.
-	Comments []Comment `json:"comments,omitempty"`
-}
+// It crosses the wire, so its definition lives in internal/api; this is that type,
+// under the name every existing caller here already uses.
+type Task = api.Task
 
 // AgentState is an agent's live workflow state (durable, D11).
 type AgentState struct {
@@ -158,34 +144,13 @@ type AgentState struct {
 	Container string `json:"container,omitempty"`
 }
 
-// Review is one review item attached to a PR.
-type Review struct {
-	ID          int64  `json:"id"`
-	PR          string `json:"pr"`
-	Requirement string `json:"requirement"`
-	Author      string `json:"author"`
-	Verdict     string `json:"verdict"`
-	Result      string `json:"result"`
-	CreatedAt   string `json:"created_at"`
-	ReviewAt    string `json:"review_at"`
-	VerdictAt   string `json:"verdict_at"`
-}
+// Review is one review item attached to a PR; it crosses the wire, so it is
+// internal/api.Review under the name every existing caller here already uses.
+type Review = api.Review
 
-// PR is a merge-intent; it carries its project so the global board can tag the repo.
-type PR struct {
-	Project   string `json:"project"`
-	ID        string `json:"id"`
-	Task      string `json:"task"`
-	Agent     string `json:"agent"`
-	Branch    string `json:"branch"`
-	Base      string `json:"base"`
-	Status    string `json:"status"`
-	Feedback  string `json:"feedback"`
-	CreatedAt string `json:"created_at"`
-	// Kind: a final PR's merge closes the task, an interim one keeps it open and puts
-	// the worker straight back on it. "" is read as "final".
-	Kind string `json:"kind"`
-}
+// PR is a merge-intent; it crosses the wire, so it is internal/api.PR under the name
+// every existing caller here already uses.
+type PR = api.PR
 
 // ReplaceTasks swaps the cached set in one transaction; absent tasks are dropped.
 func (p *ProjectStore) ReplaceTasks(tasks []Task) error {

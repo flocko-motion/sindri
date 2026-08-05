@@ -11,25 +11,17 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/flo-at/sindri/internal/api"
 )
 
-// ChatMember is one agent in the chatroom. Role is filled from the agents table
-// (empty if the agent no longer exists — a stale membership pending cleanup).
-type ChatMember struct {
-	Project string `json:"project"`
-	Name    string `json:"name"`
-	Role    string `json:"role"`
-}
+// ChatMember is one agent in the chatroom; it crosses the wire, so it is
+// internal/api.ChatMember under the name every existing caller here already uses.
+type ChatMember = api.ChatMember
 
-// ChatMessage is one line of the room transcript. Sender is an agent name or
-// "user" (the human leading the discussion). ID is monotonic, so a live viewer can
-// print only messages newer than the last it saw.
-type ChatMessage struct {
-	ID     int64  `json:"id"`
-	Sender string `json:"sender"`
-	Body   string `json:"body"`
-	TS     string `json:"ts"`
-}
+// ChatMessage is one line of the room transcript; it crosses the wire, so it is
+// internal/api.ChatMessage under the name every existing caller here already uses.
+type ChatMessage = api.ChatMessage
 
 // ChatAdd adds an agent to the chatroom. Idempotent: re-adding an existing member
 // is a no-op (the caller checks ChatIsMember first to decide whether to greet).
