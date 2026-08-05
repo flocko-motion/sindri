@@ -10,6 +10,7 @@ package workflow
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/task"
@@ -113,6 +114,7 @@ func (e *Engine) finishTask(project, id string, scrap bool) error {
 		fmt.Fprintf(os.Stderr, "hub: reading task %s after close: %v\n", id, gerr)
 	} else if ok {
 		t.Status = "closed"
+		t.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		if uerr := ps.UpsertTask(t); uerr != nil {
 			fmt.Fprintf(os.Stderr, "hub: marking task %s closed in cache: %v\n", id, uerr)
 		}

@@ -108,7 +108,7 @@ func (m *model) onKey(k string) tea.Cmd {
 		m.cursor[m.tab] -= m.bodyHeight() / 2
 	case keyFilter:
 		if m.tab == 0 {
-			m.filter = (m.filter + 1) % 3
+			m.filter = (m.filter + 1) % 4
 		} else if m.tab == 2 {
 			m.prFilter = (m.prFilter + 1) % 3
 		}

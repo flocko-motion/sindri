@@ -28,13 +28,34 @@ func isDone(status string) bool {
 	return false
 }
 
+// recentlyChanged reports whether a task's last known change falls inside activeWindow; a task
+// with no timestamp (an openspec change, say) is never recent, so it needs the open half of the
+// filter to show.
+func recentlyChanged(t store.Task) bool {
+	at, err := time.Parse(time.RFC3339, t.UpdatedAt)
+	return err == nil && time.Since(at) < activeWindow
+}
+
 // taskRows builds the filtered, folded, depth-indented task tree.
 func (m model) taskRows() []row {
 	var filtered []store.Task
 	for _, t := range m.state.Tasks {
 		done := isDone(t.Status)
-		if m.filter == filterAll || (m.filter == filterOpen && !done) || (m.filter == filterClosed && done) {
+		switch m.filter {
+		case filterAll:
 			filtered = append(filtered, t)
+		case filterOpen:
+			if !done {
+				filtered = append(filtered, t)
+			}
+		case filterClosed:
+			if done {
+				filtered = append(filtered, t)
+			}
+		case filterActive:
+			if !done || recentlyChanged(t) {
+				filtered = append(filtered, t)
+			}
 		}
 	}
 	arranged := hub.ArrangeTasks(filtered, m.state.PRs)

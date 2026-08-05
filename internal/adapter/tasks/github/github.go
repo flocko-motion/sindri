@@ -90,9 +90,10 @@ func (Source) Tasks(root string, force bool) ([]task.Task, error) {
 	}
 	out := make([]task.Task, 0, len(issues))
 	for _, is := range issues {
+		updatedAt, _ := time.Parse(time.RFC3339, is.UpdatedAt) // zero value if unset or malformed
 		out = append(out, task.Task{
 			ID: ID(is.Number), Title: is.Title, Status: "open", Type: "issue",
-			Priority: "", Description: is.Body, URL: is.URL,
+			Priority: "", Description: is.Body, URL: is.URL, UpdatedAt: updatedAt,
 		})
 	}
 	cacheMu.Lock()

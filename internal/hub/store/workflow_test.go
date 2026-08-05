@@ -160,6 +160,54 @@ func TestTaskURLPersists(t *testing.T) {
 	}
 }
 
+// TestTaskUpdatedAtPersists: the "active" tasks filter reads this off the cached row, so both
+// write paths (a full sync and the single-task refresh) must carry it through, same as URL above.
+func TestTaskUpdatedAtPersists(t *testing.T) {
+	p := openTmpProject(t)
+	at := "2026-07-30T12:00:00Z"
+	if err := p.ReplaceTasks([]Task{
+		{ID: "td-1", Status: "closed", UpdatedAt: at},
+		{ID: "td-2", Status: "open"}, // no known change time
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := p.GetTask("td-1")
+	if err != nil || !ok {
+		t.Fatalf("GetTask: ok=%v err=%v", ok, err)
+	}
+	if got.UpdatedAt != at {
+		t.Fatalf("ReplaceTasks: UpdatedAt not persisted: got %q, want %q", got.UpdatedAt, at)
+	}
+	if plain, _, _ := p.GetTask("td-2"); plain.UpdatedAt != "" {
+		t.Errorf("a task with no known change time must read back \"\", got %q", plain.UpdatedAt)
+	}
+
+	later := "2026-07-30T13:00:00Z"
+	if err := p.UpsertTask(Task{ID: "td-1", Status: "closed", UpdatedAt: later}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, _ := p.GetTask("td-1"); got.UpdatedAt != later {
+		t.Fatalf("UpsertTask: UpdatedAt not updated: got %q, want %q", got.UpdatedAt, later)
+	}
+
+	all, err := p.AllTasks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, tk := range all {
+		if tk.ID == "td-1" {
+			found = true
+			if tk.UpdatedAt != later {
+				t.Error("AllTasks must carry UpdatedAt too, not just GetTask")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("td-1 missing from AllTasks")
+	}
+}
+
 func TestAgentStateRoundTrip(t *testing.T) {
 	p := openTmpProject(t)
 	// Absent → idle default.

@@ -62,7 +62,7 @@ func (e *Engine) TaskInfo(project, id string) (store.Task, error) {
 	_ = ps.UpsertTask(store.Task{
 		ID: owned.ID, Title: owned.Title, Status: owned.Status, Priority: owned.Priority,
 		Type: owned.Type, Labels: owned.Labels, ParentID: ps.ParentOf(id),
-		Description: owned.Description,
+		Description: owned.Description, UpdatedAt: owned.UpdatedAt,
 	})
 	// Read the row back rather than returning what was just written: the approval gate lives in its
 	// own table and reaches a task only through that join, so a hand-built row reports none.
@@ -496,10 +496,14 @@ func (e *Engine) checkParent(project, parent, self string) error {
 // ToStoreTask maps a source-normalized domain task onto the hub's cached store row.
 // Exported because the hub's targeted single-task refresh reuses the same mapping.
 func ToStoreTask(t task.Task) store.Task {
+	var updatedAt string
+	if !t.UpdatedAt.IsZero() {
+		updatedAt = t.UpdatedAt.UTC().Format(time.RFC3339)
+	}
 	return store.Task{
 		ID: t.ID, Title: t.Title, Status: t.Status, Priority: t.Priority,
 		Type: t.Type, Labels: strings.Join(t.Labels, ","), ParentID: t.ParentID,
-		Description: t.Description, URL: t.URL,
+		Description: t.Description, URL: t.URL, UpdatedAt: updatedAt,
 	}
 }
 

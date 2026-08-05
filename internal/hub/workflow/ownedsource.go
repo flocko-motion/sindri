@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/task"
@@ -47,9 +48,10 @@ func (s ownedSource) Tasks(string, bool) ([]task.Task, error) {
 	out := make([]task.Task, 0, len(owned))
 	for _, t := range owned {
 		// Parentage is left to the sync, which lays task_parent over every source's rows alike.
+		updatedAt, _ := time.Parse(time.RFC3339, t.UpdatedAt) // zero value if unset or malformed
 		out = append(out, task.Task{
 			ID: t.ID, Title: t.Title, Status: t.Status, Type: t.Type, Priority: t.Priority,
-			Labels: store.LabelList(t.Labels), Description: t.Description,
+			Labels: store.LabelList(t.Labels), Description: t.Description, UpdatedAt: updatedAt,
 		})
 	}
 	return out, nil

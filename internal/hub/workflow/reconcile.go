@@ -27,7 +27,7 @@ func (e *Engine) RefreshTask(project, id string) error {
 	return ps.UpsertTask(store.Task{
 		ID: owned.ID, Title: owned.Title, Status: owned.Status, Priority: owned.Priority,
 		Type: owned.Type, Labels: owned.Labels, ParentID: ps.ParentOf(id),
-		Description: owned.Description,
+		Description: owned.Description, UpdatedAt: owned.UpdatedAt,
 	})
 }
 

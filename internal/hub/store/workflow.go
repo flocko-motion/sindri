@@ -139,7 +139,8 @@ type Task struct {
 	ParentID    string `json:"parent_id"`
 	Description string `json:"description,omitempty"`
 	Acceptance  string `json:"acceptance,omitempty"`
-	URL         string `json:"url,omitempty"` // an external permalink (e.g. a GitHub issue); "" if none
+	URL         string `json:"url,omitempty"`        // an external permalink (e.g. a GitHub issue); "" if none
+	UpdatedAt   string `json:"updated_at,omitempty"` // last status/field change at the source; "" if unknown
 	// Approval gates planner-created tasks: "" (none), pending, approved, rejected.
 	// Workers only ever see "" and approved tasks.
 	Approval        string `json:"approval,omitempty"`
@@ -199,8 +200,8 @@ func (p *ProjectStore) ReplaceTasks(tasks []Task) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, t := range tasks {
 		if _, err := tx.Exec(
-			`INSERT INTO tasks (project,id,title,status,priority,type,labels,parent_id,description,url,synced_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-			p.project, t.ID, t.Title, t.Status, t.Priority, t.Type, t.Labels, t.ParentID, t.Description, t.URL, now); err != nil {
+			`INSERT INTO tasks (project,id,title,status,priority,type,labels,parent_id,description,url,updated_at,synced_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+			p.project, t.ID, t.Title, t.Status, t.Priority, t.Type, t.Labels, t.ParentID, t.Description, t.URL, t.UpdatedAt, now); err != nil {
 			return err
 		}
 	}
@@ -210,14 +211,15 @@ func (p *ProjectStore) ReplaceTasks(tasks []Task) error {
 // UpsertTask refreshes a single cached task in this project (point-of-use refresh).
 func (p *ProjectStore) UpsertTask(t Task) error {
 	_, err := p.s.db.Exec(`
-		INSERT INTO tasks (project,id,title,status,priority,type,labels,parent_id,description,url,synced_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?)
+		INSERT INTO tasks (project,id,title,status,priority,type,labels,parent_id,description,url,updated_at,synced_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(project,id) DO UPDATE SET
 			title=excluded.title, status=excluded.status, priority=excluded.priority,
 			type=excluded.type, labels=excluded.labels, parent_id=excluded.parent_id,
-			description=excluded.description, url=excluded.url, synced_at=excluded.synced_at`,
+			description=excluded.description, url=excluded.url, updated_at=excluded.updated_at,
+			synced_at=excluded.synced_at`,
 		p.project, t.ID, t.Title, t.Status, t.Priority, t.Type, t.Labels, t.ParentID, t.Description, t.URL,
-		time.Now().UTC().Format(time.RFC3339))
+		t.UpdatedAt, time.Now().UTC().Format(time.RFC3339))
 	return err
 }
 
@@ -231,7 +233,7 @@ func (p *ProjectStore) RemoveTask(id string) error {
 }
 
 // taskCols is the shared projection: cached td fields plus the hub's approval overlay.
-const taskCols = `t.id,t.title,t.status,t.priority,t.type,t.labels,t.parent_id,t.description,t.url,
+const taskCols = `t.id,t.title,t.status,t.priority,t.type,t.labels,t.parent_id,t.description,t.url,t.updated_at,
 	COALESCE(a.status,''), COALESCE(a.comment,'')`
 
 const taskFrom = ` FROM tasks t LEFT JOIN task_approval a ON a.task=t.id AND a.project=t.project`
@@ -297,7 +299,7 @@ func (p *ProjectStore) OpenChildren(parentID string) ([]Task, error) {
 func (p *ProjectStore) GetTask(id string) (Task, bool, error) {
 	row := p.s.db.QueryRow(`SELECT `+taskCols+taskFrom+` WHERE t.project=? AND t.id=?`, p.project, id)
 	var t Task
-	err := row.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Type, &t.Labels, &t.ParentID, &t.Description, &t.URL, &t.Approval, &t.ApprovalComment)
+	err := row.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Type, &t.Labels, &t.ParentID, &t.Description, &t.URL, &t.UpdatedAt, &t.Approval, &t.ApprovalComment)
 	if err == sql.ErrNoRows {
 		return Task{}, false, nil
 	}
@@ -345,7 +347,7 @@ func scanTasks(rows *sql.Rows) ([]Task, error) {
 	var out []Task
 	for rows.Next() {
 		var t Task
-		if err := rows.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Type, &t.Labels, &t.ParentID, &t.Description, &t.URL, &t.Approval, &t.ApprovalComment); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Type, &t.Labels, &t.ParentID, &t.Description, &t.URL, &t.UpdatedAt, &t.Approval, &t.ApprovalComment); err != nil {
 			return nil, err
 		}
 		out = append(out, t)

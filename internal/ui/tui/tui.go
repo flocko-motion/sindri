@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -26,9 +27,14 @@ const (
 	filterOpen = iota
 	filterClosed
 	filterAll
+	filterActive
 )
 
-var filterNames = [...]string{"open", "closed", "all"}
+var filterNames = [...]string{"open", "closed", "all", "active"}
+
+// activeWindow is how recently a task must have changed to count as "active" alongside every
+// open task — wide enough that a task closed just before you glanced over doesn't vanish.
+const activeWindow = 2 * time.Hour
 
 // inputMode is the active text-input modal (none = normal navigation).
 type inputMode int
