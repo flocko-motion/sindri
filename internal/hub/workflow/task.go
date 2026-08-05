@@ -187,44 +187,7 @@ func (e *Engine) UnassignTask(project, id string) error {
 	return nil
 }
 
-// ApproveTask clears the approval gate on a planner-proposed task (user-only),
-// making it claimable, and tells any running planner in the project.
-func (e *Engine) ApproveTask(project, id string) error {
-	if err := e.store.For(project).SetApproval(id, "approved", ""); err != nil {
-		return err
-	}
-	e.notifyPlanners(project, fmt.Sprintf("[user] task %s was approved — it's now in the backlog for a worker.", id))
-	e.deps.Notify()
-	return nil
-}
-
-// RejectTask rejects a planner-proposed task with a comment (user-only); it stays
-// hidden from workers, and the comment is delivered to any running planner.
-func (e *Engine) RejectTask(project, id, comment string) error {
-	comment = strings.TrimSpace(comment)
-	if comment == "" {
-		comment = "rejected"
-	}
-	if err := e.store.For(project).SetApproval(id, "rejected", comment); err != nil {
-		return err
-	}
-	e.notifyPlanners(project, fmt.Sprintf("[user] task %s was rejected: %s", id, comment))
-	e.deps.Notify()
-	return nil
-}
-
-// notifyPlanners injects a message into every running planner's session in a project.
-func (e *Engine) notifyPlanners(project, msg string) {
-	roster, _ := e.store.For(project).Roster()
-	for _, a := range roster {
-		if a.Role == "planner" {
-			name := a.Name
-			go func() { _ = e.deps.InjectWhenReady(project, name, msg) }()
-		}
-	}
-}
-
-// The planner's verb surface (task/create-task/state) lives in planner.go.
+// The approval gate (approve/reject) lives in approval.go; the planner's verb surface in planner.go.
 
 // dash renders "-" for an empty string (agent-facing output helper).
 func dash(s string) string {
@@ -472,7 +435,9 @@ func (e *Engine) SetPriority(project, id, priority string) error {
 	return nil
 }
 
-// checkParent validates a requested parent id within a project.
+// checkParent validates a requested parent before anything is written: it must exist, and it must
+// not already sit below the task being re-parented. A loop is unreachable from any root, so the task
+// list would simply stop showing every task inside it.
 func (e *Engine) checkParent(project, parent, self string) error {
 	if parent == "" {
 		return nil
@@ -480,16 +445,44 @@ func (e *Engine) checkParent(project, parent, self string) error {
 	if parent == self {
 		return fmt.Errorf("a task can't be its own parent")
 	}
-	tasks, err := e.store.For(project).AllTasks()
+	ps := e.store.For(project)
+	tasks, err := ps.AllTasks()
 	if err != nil {
 		return err
 	}
+	known := false
 	for _, t := range tasks {
 		if t.ID == parent {
-			return nil
+			known = true
+			break
 		}
 	}
-	return fmt.Errorf("unknown parent %q", parent)
+	if !known {
+		return fmt.Errorf("unknown parent %q", parent)
+	}
+	if self == "" {
+		return nil // a task being created has nothing below it yet
+	}
+	// Walk up from the proposed parent, reading the links themselves rather than the read model
+	// they are laid over. Reaching self means self is already an ancestor.
+	links, err := ps.ParentLinks()
+	if err != nil {
+		return err
+	}
+	chain := []string{parent}
+	for at := links[parent]; at != ""; at = links[at] {
+		if at == self {
+			return fmt.Errorf("%s already sits above %s (%s) — parenting it there would close a loop, "+
+				"and everything inside a loop drops off the task list", self, parent,
+				strings.Join(append(chain, self), " → "))
+		}
+		chain = append(chain, at)
+		if len(chain) > len(links)+1 {
+			return fmt.Errorf("the parent chain above %q doesn't terminate — a loop is already stored (%s)",
+				parent, strings.Join(chain, " → "))
+		}
+	}
+	return nil
 }
 
 // ToStoreTask maps a source-normalized domain task onto the hub's cached store row.
