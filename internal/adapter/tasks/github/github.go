@@ -207,6 +207,17 @@ func IssueComments(ctx context.Context, root string, number int) ([]Comment, err
 	return resp.Comments, nil
 }
 
+// AddComment posts to an issue's thread. GitHub owns that thread, so a comment on one of its issues
+// is written there and read back, rather than kept here where the issue's readers would never see it.
+func AddComment(ctx context.Context, root string, number int, body string) error {
+	cmd := exec.CommandContext(ctx, "gh", "issue", "comment", strconv.Itoa(number), "--body", body)
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("gh issue comment %d in %s: %s", number, root, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // Close closes an issue with a comment — the adapter's only outbound write.
 func Close(ctx context.Context, root string, number int, comment string) error {
 	cmd := exec.CommandContext(ctx, "gh", "issue", "close",

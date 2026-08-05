@@ -10,6 +10,8 @@ package comments
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
@@ -65,6 +67,55 @@ func (s *Service) ForView(project, id string) []store.Comment {
 		fmt.Fprintf(os.Stderr, "hub: read comments for %s: %v\n", id, err)
 	}
 	return cs
+}
+
+// LocalSource marks a comment this store owns, as against one mirrored from an issue tracker.
+const LocalSource = "sindri"
+
+// Add posts a comment on a task. Where the source keeps a thread of its own, the comment is written
+// there and read straight back, so the issue's own readers see it and the canonical author, id and
+// timestamp come from the source rather than being guessed here. Everywhere else this store is the
+// thread, and the comment is simply recorded.
+func (s *Service) Add(project, id, body string) error {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return fmt.Errorf("say something: an empty comment is not a comment")
+	}
+	if n, ok := github.Number(id); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), githubTimeout)
+		defer cancel()
+		if err := github.AddComment(ctx, s.d.ProjectRoot(project), n, body); err != nil {
+			return err
+		}
+		// Forced, because the TTL would otherwise hide the comment just posted.
+		if err := s.sync(project, id, true); err != nil {
+			return err
+		}
+		s.d.Notify()
+		return nil
+	}
+	ref, err := commentRef()
+	if err != nil {
+		return err
+	}
+	if err := s.store.For(project).AddComment(id, store.Comment{
+		Source: LocalSource, SourceRef: ref, Author: "user", Body: body,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		return err
+	}
+	s.d.Notify()
+	return nil
+}
+
+// commentRef mints the per-source id the primary key needs. Random rather than a count, so two
+// comments written in the same second cannot collide on it.
+func commentRef() (string, error) {
+	var b [6]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("generate comment id: %w", err)
+	}
+	return hex.EncodeToString(b[:]), nil
 }
 
 // Refresh forces a comment re-sync for one task (the [r]efresh key), bypassing the

@@ -57,6 +57,7 @@ func TestLowercaseKeysNeverMutate(t *testing.T) {
 		"e": "edit — opens a form ($EDITOR on agents/prs); the form is what commits",
 		"o": "open — a shell in the row's worktree",
 		"t": "tell — opens a prompt you must submit",
+		"i": "comment — opens a prompt you must submit; an empty one is refused",
 		"c": "colour — opens a chooser",
 		"f": "filter — narrows the view",
 		"s": "scope — narrows the view",

@@ -33,6 +33,7 @@ const (
 	keyReject   = "R" // reject a PR / a proposed task
 	keyStartS   = "S" // agent start/stop
 	keyTell     = "t" // tell an agent / show a PR's task
+	keyComment  = "i" // comment on a task (opens a prompt, so lowercase)
 	keyAttach   = "a" // attach to an agent's session (agents, tasks, prs)
 	keyMerge    = "M" // merge a PR — commits on the keystroke, so it takes the mutation case
 	keyDelete   = "D" // delete an agent
@@ -89,6 +90,7 @@ var keymap = []binding{
 	// right from the harmless to the decisive.
 	{keyNew, lbl("new"), scopeTasks},
 	{keyBrief, lbl("brief a planner"), scopeTasks},
+	{keyComment, lbl("comment"), scopeTasks},
 	{keyAttach, lbl("attach"), scopeTasks},
 	{keyEdit, lbl("edit"), scopeTasks},
 	{keyPriority, lbl("priority"), scopeTasks},

@@ -135,6 +135,15 @@ func (h *Hub) Handler() http.Handler {
 		}
 		writeJSON(w, okMsg{"refreshed"}, h.comments.Refresh(h.reqProject(r), req.Name))
 	})
+	// Comment on a task. An issue tracker that owns the thread receives it; everything else is
+	// recorded here, where the thread lives (-> comments.Add).
+	mux.HandleFunc("POST /task/comments/add", func(w http.ResponseWriter, r *http.Request) {
+		var req TellReq // Name = the task id, Msg = the comment
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"commented"}, h.comments.Add(h.reqProject(r), req.Name, req.Msg))
+	})
 	mux.HandleFunc("GET /repos", func(w http.ResponseWriter, r *http.Request) {
 		list, err := h.projects.List()
 		writeJSON(w, list, err)

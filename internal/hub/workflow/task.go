@@ -59,12 +59,17 @@ func (e *Engine) TaskInfo(project, id string) (store.Task, error) {
 	if !ok {
 		return store.Task{}, fmt.Errorf("no such task %q", id)
 	}
-	st := store.Task{
+	_ = ps.UpsertTask(store.Task{
 		ID: owned.ID, Title: owned.Title, Status: owned.Status, Priority: owned.Priority,
 		Type: owned.Type, Labels: owned.Labels, ParentID: ps.ParentOf(id),
 		Description: owned.Description,
+	})
+	// Read the row back rather than returning what was just written: the approval gate lives in its
+	// own table and reaches a task only through that join, so a hand-built row reports none.
+	st, ok, err := ps.GetTask(id)
+	if err != nil || !ok {
+		return store.Task{}, err
 	}
-	_ = ps.UpsertTask(st)
 	st.Comments = e.deps.TaskComments(project, id)
 	return st, nil
 }

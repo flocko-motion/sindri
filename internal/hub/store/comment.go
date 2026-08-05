@@ -44,6 +44,19 @@ func (p *ProjectStore) ReplaceComments(taskID, source string, comments []Comment
 	return tx.Commit()
 }
 
+// AddComment records one comment. Used for the sources that keep no thread of their own, where this
+// table is where a comment lives rather than a cache of somewhere else.
+func (p *ProjectStore) AddComment(taskID string, c Comment) error {
+	_, err := p.s.db.Exec(
+		`INSERT INTO task_comments (project,task_id,source,source_ref,author,body,created_at)
+		 VALUES (?,?,?,?,?,?,?)`,
+		p.project, taskID, c.Source, c.SourceRef, c.Author, c.Body, c.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("add comment on %s: %w", taskID, err)
+	}
+	return nil
+}
+
 // Comments returns a task's comments across all sources, oldest first.
 func (p *ProjectStore) Comments(taskID string) ([]Comment, error) {
 	rows, err := p.s.db.Query(

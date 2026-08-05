@@ -212,6 +212,11 @@ func (m *model) onKey(k string) tea.Cmd {
 			}
 			return nil
 		}
+	case keyComment: // tasks: comment on the selected task
+		if m.tab == 0 && m.selID() != "" {
+			m.openInput(inputComment, "comment on "+m.selID()+": ")
+			return textinput.Blink
+		}
 	case keyBrief: // tasks: hand this task to a planner to work up
 		if m.tab == 0 && m.selID() != "" {
 			m.openBriefChoice(m.selID())

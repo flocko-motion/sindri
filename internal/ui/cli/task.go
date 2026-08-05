@@ -36,12 +36,31 @@ func tasksJSON(tasks []store.Task) (string, error) {
 // NewTaskCmd builds the `task` command tree (the backlog).
 func NewTaskCmd() *cobra.Command {
 	c := &cobra.Command{Use: "task", Short: "Inspect and create tasks"}
-	c.AddCommand(taskListCmd(), taskInfoCmd(), taskNewCmd(), taskEditCmd(), taskPriorityCmd(), taskApproveCmd(), taskRejectCmd(), taskUnassignCmd(), taskCloseCmd(), taskDeleteCmd(), taskRefreshCmd())
+	c.AddCommand(taskListCmd(), taskInfoCmd(), taskNewCmd(), taskEditCmd(), taskPriorityCmd(), taskApproveCmd(), taskRejectCmd(), taskUnassignCmd(), taskCloseCmd(), taskDeleteCmd(), taskRefreshCmd(), taskCommentCmd())
 	return c
 }
 
 // taskRefreshCmd re-syncs the task cache and notifies watchers. Reads sync on their own, so this is
 // for forcing one without listing — e.g. pushing fresh state to a running TUI.
+// taskCommentCmd comments on a task. A GitHub issue gets it upstream, so its own readers see it;
+// every other kind keeps the thread in the hub.
+func taskCommentCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "comment <id> <text...>", Short: "Comment on a task (a GitHub issue is commented upstream)",
+		Args: cobra.MinimumNArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			body := strings.Join(args[1:], " ")
+			return withBackend(func(b backend) error {
+				if err := b.AddTaskComment(args[0], body); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "commented on %s\n", args[0])
+				return nil
+			})
+		},
+	}
+}
+
 func taskRefreshCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "refresh", Short: "Re-sync tasks from every source and notify watchers", Args: cobra.NoArgs,
@@ -219,6 +238,12 @@ func taskInfoCmd() *cobra.Command {
 					dash(t.ParentID), dash(t.Approval), dash(t.Labels), dash(t.URL))
 				if body := strings.TrimRight(t.Description, "\n"); body != "" {
 					fmt.Printf("\n%s\n", body)
+				}
+				// The thread too, for the same reason the fields above are all here: the TUI's pane
+				// shows it, so a CLI that omitted it answered a different question.
+				for _, c := range t.Comments {
+					fmt.Printf("\n— %s (%s, %s)\n%s\n", dash(c.Author), c.Source, c.CreatedAt,
+						strings.TrimRight(c.Body, "\n"))
 				}
 				return nil
 			})

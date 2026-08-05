@@ -36,6 +36,7 @@ type inputMode int
 const (
 	inputNone inputMode = iota
 	inputTell
+	inputComment
 )
 
 type model struct {

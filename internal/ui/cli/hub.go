@@ -58,6 +58,7 @@ type backend interface {
 	SetPriority(id, priority string) error
 	ApproveTask(id string) error
 	RejectTask(id, comment string) error
+	AddTaskComment(id, body string) error
 	UnassignTask(id string) error
 	CloseTask(id string) error
 	ScrapTask(id string, subtree, withPRs bool) error
