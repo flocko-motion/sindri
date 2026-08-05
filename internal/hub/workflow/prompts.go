@@ -84,12 +84,22 @@ your whole loop is: run `+"`sindri`"+`, do exactly what it says, repeat.
 Trust it over any memory; it knows your situation, and every instruction it gives
 names the exact command to run — you never have to discover or guess one. (If you
 ever want to see what you can do in your current state, `+"`sindri help`"+`
-lists it, but that set is contextual and changes as you go.)
+lists it, but that set is contextual and changes as you go. A verb it doesn't
+list, run anyway, will tell you why not and which one to use instead.)
 
 Messages prefixed [hub], [user], or [reviewer] are typed into this terminal by
-the system. Act on them. When `+"`sindri`"+` tells you to wait for a verdict,
-stop and wait quietly — it will appear here, and that may take a long time. Never
-poll, never guess, never invent commands.`, name, role) + ArchitectureBrief(archContent, archPath) + BrokkrBrief()
+the system. Act on them.
+
+WAITING IS ALWAYS NAMED. When you are meant to stop, the hub says so in those
+words — "wait for the verdict", "the user will open the milestone PR" — and then
+you wait quietly, however long it takes, without polling. Everything else it
+hands you is yours to begin the moment you read it: the work reached you because
+it was already decided and released, so there is no further permission to collect
+and nobody is expecting to be asked. Telling the user what you are about to do
+and then stopping is the same as stopping. If something genuinely prevents you
+from starting — a missing dependency, a decision only they can make — say what
+you need in one line and carry on with whatever part you can. Never poll, never
+guess, never invent commands.`, name, role) + ArchitectureBrief(archContent, archPath) + BrokkrBrief()
 
 	switch role {
 	case "planner":
@@ -164,6 +174,9 @@ As the reviewer:
 As a worker:
 - Run ` + "`sindri`" + ` (no arguments) to get your task — it puts you on a
   branch in /workspace, waiting until a task is available.
+- Every task you are handed is already authorised — the user rated and released it
+  before it reached you, and a feature's subtasks come to you one after another the
+  same way. Start each one as it arrives.
 - Implement it by editing files in /workspace. The hub records your work for you
   when you contribute or submit — you never do that yourself.
 - You do NOT have ` + "`git`" + ` — use ` + "`sindri git`" + `, which the hub runs
@@ -176,9 +189,11 @@ As a worker:
   any time — harmless, and worth doing if it's been a while. If it surfaces
   conflicts, fix the marked files in /workspace and run ` + "`sindri rebase`" + `
   again until it reports you're aligned.
-- When done, ` + "`sindri submit \"<one-line summary>\"`" + `. Then wait: the
-  reviewer's verdict will be typed here. Run ` + "`sindri`" + ` again for your
-  next task.`
+- When it's done, record it with the verb your directive named — a task of your own
+  ends with ` + "`sindri submit \"<one-line summary>\"`" + `, a subtask of a feature
+  with ` + "`sindri checkpoint \"<one-line summary>\"`" + `. Both are worker verbs,
+  but you hold only one of them at a time and ` + "`sindri help`" + ` lists which.
+  Then wait: the verdict, or your next subtask, will be typed here.`
 	}
 }
 
@@ -325,6 +340,23 @@ func DirContainerClaimed(container, ctitle, child, childTitle string) string {
 		"is merged as one PR when you and the user reach a milestone.", container, ctitle, child, childTitle)
 }
 
+// DirContainerWorking is the working directive inside a feature. Claiming used to be the only place
+// the collaborative loop named its verb; every later `sindri` fell through to DirWorking and asked
+// for a submit the container surface hides.
+func DirContainerWorking(container, task string) string {
+	return fmt.Sprintf("Subtask %s of feature %s. Implement it, then run `sindri checkpoint \"<summary>\"` "+
+		"to record it and move to the next subtask. Do NOT submit per subtask — the whole feature is "+
+		"merged as one PR when you and the user reach a milestone.", task, container)
+}
+
+// DirContainerRejected is the verdict on a feature's milestone PR. The milestone is the user's to
+// re-open, so the worker fixes the branch it is on rather than resubmitting.
+func DirContainerRejected(container, task, feedback string) string {
+	return fmt.Sprintf("The milestone PR for feature %s was REJECTED — address this feedback on your "+
+		"branch (you're back on subtask %s; `sindri checkpoint \"<summary>\"` records the fix). The user "+
+		"re-opens the milestone PR when it's ready:\n\n%s", container, task, feedback)
+}
+
 // DirContainerWait is the directive once every open subtask of a feature is
 // checkpointed: wait for the user to open a milestone PR or add subtasks.
 func DirContainerWait(container string) string {
@@ -332,9 +364,13 @@ func DirContainerWait(container string) string {
 		"milestone PR to merge the work so far, or add more subtasks. Don't poll.", container)
 }
 
-// ReplyCheckpointed acknowledges a checkpoint and hands the worker its next subtask.
+// ReplyCheckpointed acknowledges a checkpoint and hands over the next subtask. Alone among the
+// hand-offs it comes back from a command the worker ran itself, and read as a report it left agents
+// waiting for a go-ahead the workflow never sends — hence "starts now".
 func ReplyCheckpointed(done, next, nextTitle string) string {
-	return fmt.Sprintf("Checkpointed %s. Next subtask %s: %s — implement it, then `sindri checkpoint \"<summary>\"` again.", done, next, nextTitle)
+	return fmt.Sprintf("Checkpointed %s. Next subtask %s: %s — it is assigned to you and starts now. "+
+		"Implement it, then `sindri checkpoint \"<summary>\"` again. Don't wait for the user to confirm "+
+		"this one; if something blocks you, say what you need.", done, next, nextTitle)
 }
 
 // ReplyCheckpointedLast acknowledges the checkpoint that clears a feature's last open
@@ -414,6 +450,16 @@ func MsgResolveNeeded(base string, files []string) string {
 // rebased onto the new base.
 func MsgMilestoneMerged(prID string) string {
 	return fmt.Sprintf("[hub] Milestone %s merged — your feature branch is rebased onto the new base. Run `sindri` to continue.", prID)
+}
+
+// MsgMilestoneRejected is the rejection a feature worker gets: it stays on its container, and the
+// milestone is the user's to re-open, so the resubmit the other two messages name would send it to a
+// verb a container worker does not hold. voice is who ruled ("user" or "reviewer").
+func MsgMilestoneRejected(container, voice, feedback string) string {
+	return fmt.Sprintf("[%s] The milestone PR for feature %s was rejected: %s — address it on the branch "+
+		"you're already on and carry on with your subtasks (`sindri checkpoint \"<summary>\"` records each). "+
+		"The user re-opens the milestone when it's ready; there's nothing for you to resubmit.",
+		voice, container, feedback)
 }
 
 // MsgRejectedByUser tells a worker the user rejected its PR, with the feedback.
@@ -516,12 +562,16 @@ func ReplyRebased(incoming []string) string {
 }
 
 // ReplyResolveDirty answers `resolve` on a dirty worktree, suggesting nothing git-based: the pod
-// doesn't mount the real .git, so every git command fails — the isolation boundary working. Also
-// phase-aware, since contribute/submit exist only in "working" and review must not touch it.
-func ReplyResolveDirty(phase string) string {
+// doesn't mount the real .git, so every git command fails — the isolation boundary working. The verb
+// it names tracks the caller's surface: contribute/submit exist only in "working", and a feature
+// worker holds checkpoint in place of both.
+func ReplyResolveDirty(phase string, inContainer bool) string {
 	const dirty = "Changes in /workspace the hub hasn't recorded yet block the rebase. "
 	switch phase {
 	case "working":
+		if inContainer {
+			return dirty + "Call `sindri checkpoint \"<summary>\"` for the hub to record them and move to your next subtask."
+		}
 		return dirty + "Call `sindri contribute \"<summary>\"` for the hub to record them and rebase (the task stays open), or `sindri submit \"<summary>\"` if the task is done."
 	case "submitted":
 		return dirty + "Your PR is under review — leave them and wait for the verdict. Note them with `sindri log \"<note>\"`."

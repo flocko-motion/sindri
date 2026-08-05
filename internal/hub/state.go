@@ -258,10 +258,12 @@ func (h *Hub) Log(project, name string) ([]store.Event, error) {
 	return h.store.For(project).Events(name, 50)
 }
 
-// openPRFor returns the id of an agent's not-yet-merged PR in its project, if any.
+// openPRFor returns the id of an agent's still-open PR in its project, if any. Open-ness is PROpen's
+// to define, the same rule the PRs tab lists by — deciding it here instead left a scrapped PR
+// attributed to its author on the Agents tab while the PRs tab, correctly, showed nothing.
 func openPRFor(prs []store.PR, project, agent string) string {
 	for _, p := range prs {
-		if p.Project == project && p.Agent == agent && p.Status != "merged" {
+		if p.Project == project && p.Agent == agent && PROpen(p) {
 			return p.ID
 		}
 	}

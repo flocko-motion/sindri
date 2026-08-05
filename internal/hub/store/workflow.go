@@ -376,6 +376,16 @@ func (p *ProjectStore) SetApproval(task, status, comment string) error {
 	return nil
 }
 
+// ClearApproval drops a task's approval gate. A gate is a question awaiting the user, so it is
+// removed rather than answered when the task it asks about ends.
+func (p *ProjectStore) ClearApproval(task string) error {
+	_, err := p.s.db.Exec(`DELETE FROM task_approval WHERE project=? AND task=?`, p.project, task)
+	if err != nil {
+		return fmt.Errorf("clear approval %s: %w", task, err)
+	}
+	return nil
+}
+
 // GetApproval returns a task's approval status and comment in this project.
 func (p *ProjectStore) GetApproval(task string) (status, comment string) {
 	_ = p.s.db.QueryRow(`SELECT status, comment FROM task_approval WHERE project=? AND task=?`, p.project, task).Scan(&status, &comment)

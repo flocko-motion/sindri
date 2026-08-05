@@ -51,6 +51,24 @@ func TestHandingATaskOverOpensTheApprovalGate(t *testing.T) {
 	}
 }
 
+// TestClosingATaskClosesItsGate: the gate the hand-over opens must not outlive the task. The board
+// reads the gate over the status, so a closed task whose gate still said "pending" rendered as
+// pending — the close looked as though it had done nothing, however often it was repeated.
+func TestClosingATaskClosesItsGate(t *testing.T) {
+	for _, scrap := range []bool{false, true} {
+		e, ps, _, id := plannerWithTask(t)
+		if err := e.AssignPlan("proj", "galar", "", id); err != nil {
+			t.Fatalf("AssignPlan: %v", err)
+		}
+		if err := e.finishTask("proj", id, scrap); err != nil {
+			t.Fatalf("finishTask(scrap=%v): %v", scrap, err)
+		}
+		if appr, _ := ps.GetApproval(id); appr != "" {
+			t.Errorf("scrap=%v: approval = %q, want it gone with the task", scrap, appr)
+		}
+	}
+}
+
 // TestTheTaskCarriesTheBrief: the point of handing over a task rather than retyping it. Its title and
 // body reach the planner, and the brief names it as the parent everything hangs under.
 func TestTheTaskCarriesTheBrief(t *testing.T) {

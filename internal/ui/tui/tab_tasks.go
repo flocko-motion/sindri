@@ -46,10 +46,11 @@ func (m model) taskRows() []row {
 			assigned[a.Task] = true
 		}
 	}
-	// Hub-side approval per task (drives the row colour for planner proposals).
+	// Hub-side approval per task (drives the row colour for planner proposals). A gate on a task
+	// that has ended is spent, and the state word below is the status's to give.
 	approval := map[string]string{}
 	for _, t := range m.state.Tasks {
-		if t.Approval != "" {
+		if t.Approval != "" && !isDone(t.Status) {
 			approval[t.ID] = t.Approval
 		}
 	}
@@ -402,10 +403,11 @@ func (m *model) openTaskForm(edit bool, t store.Task) {
 	})
 }
 
-// taskGated reports a proposal still under the approval gate — the only state A/R act on.
+// taskGated reports a proposal still under the approval gate — the only state A/R act on. "Still"
+// includes being live: a verdict on a task that has already ended decides nothing.
 func (m model) taskGated() bool {
 	t, ok := m.selTask()
-	return ok && (t.Approval == "pending" || t.Approval == "rejected")
+	return ok && !isDone(t.Status) && (t.Approval == "pending" || t.Approval == "rejected")
 }
 
 // unassignTaskCmd returns the task to the backlog; the hub refuses if a live agent holds it.

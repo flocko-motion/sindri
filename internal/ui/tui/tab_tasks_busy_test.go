@@ -50,6 +50,25 @@ func TestTaskBusyTransient(t *testing.T) {
 	}
 }
 
+// TestDoneTaskShowsItsStatusNotItsGate: the approval override is for a proposal still awaiting the
+// user. A task that has ended shows what became of it, so a gate outliving it (a hub predating the
+// clear, or one left by a merge) cannot make a closed task read "pending" forever.
+func TestDoneTaskShowsItsStatusNotItsGate(t *testing.T) {
+	m := newModel(nil, nil, "")
+	m.tab, m.filter = 0, filterAll
+	m.state = hub.BoardState{Tasks: []store.Task{
+		{ID: "td-1", Title: "worked up", Status: "closed", Approval: "pending"},
+		{ID: "td-2", Title: "still proposed", Status: "open", Approval: "pending"},
+	}}
+	m.reclamp()
+	if txt := taskRowText(m, "td-1"); !strings.Contains(txt, hub.StateLabel("closed")) || strings.Contains(txt, "pending") {
+		t.Errorf("closed row = %q, want its closed label and not pending", txt)
+	}
+	if txt := taskRowText(m, "td-2"); !strings.Contains(txt, "pending") {
+		t.Errorf("open proposal row = %q, want pending", txt)
+	}
+}
+
 // TestReconcileBusyScrapped: a scrapped task vanishes from the board, so its
 // transient marker is dropped too.
 func TestReconcileBusyScrapped(t *testing.T) {

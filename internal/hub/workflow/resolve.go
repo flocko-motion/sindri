@@ -125,7 +125,7 @@ func (e *Engine) CmdResolve(c registry.Caller, _ []string, out io.Writer) (int, 
 			return 1, cerr
 		}
 		if changed {
-			fmt.Fprintln(out, ReplyResolveDirty(st.Phase))
+			fmt.Fprintln(out, ReplyResolveDirty(st.Phase, st.Container != ""))
 			return 1, nil
 		}
 	}

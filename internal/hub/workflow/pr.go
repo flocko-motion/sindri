@@ -441,11 +441,20 @@ func (e *Engine) reject(project, prID, feedback string, byUser bool) error {
 	if a, ok, _ := ps.GetAgent(pr.Agent); ok && a.Role == "planner" {
 		phase = restPhase(a.Role)
 	}
-	_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: phase})
+	// The held container is carried through the rejection: SetState writes the whole row, so leaving
+	// it out dropped a feature worker out of the collaborative loop on a rejected milestone — it went
+	// idle and claimed unrelated work, abandoning the feature branch its subtasks were on.
+	prior, _ := ps.GetState(pr.Agent)
+	_ = ps.SetState(store.AgentState{
+		Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Container: prior.Container, Phase: phase,
+	})
 
 	who, msg := "reviewer", MsgRejectedByReviewer(pr.ID, feedback)
 	if byUser {
 		who, msg = "user", MsgRejectedByUser(pr.ID, feedback)
+	}
+	if prior.Container != "" { // the milestone is the user's to re-open; there is nothing to re-submit
+		msg = MsgMilestoneRejected(prior.Container, who, feedback)
 	}
 	_ = ps.LogPR(pr.ID, "rejected", "by "+who+": "+feedback)
 	_ = ps.Log(pr.Agent, "reject", pr.ID+" ("+who+"): "+feedback)

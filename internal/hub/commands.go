@@ -38,15 +38,20 @@ func (h *Hub) registry() *registry.Registry {
 		// Only a worker grabs tasks and submits a branch. A planner has neither: it ships openspec
 		// via its own `openspec submit`, a PR in different dress (mock todo id os-new).
 		registry.Command{Name: "next", Help: "pick up the next task", Roles: []string{"worker"},
-			Hidden: func(c registry.Caller) bool { return c.HasTask }, Run: h.wf.CmdNext},
+			Blocked: func(c registry.Caller) string {
+				if c.HasTask {
+					return "You already hold work — run `sindri` to be told what to do with it."
+				}
+				return ""
+			}, Run: h.wf.CmdNext},
 		registry.Command{Name: "lint", Help: "run the quality gate: lint (your workspace) or lint <pr-id> (a PR)", Run: h.cmdLint},
 		// Visibility MUST match these commands' own `st.Phase != "working"` guard. When it didn't, a
 		// worker in "submitted" was offered submit, ran it, and was told to abandon the task it held.
 		registry.Command{Name: "submit", Help: "request your branch be merged: submit [message]", Roles: []string{"worker"},
-			Hidden: func(c registry.Caller) bool { return c.InContainer || c.Phase != "working" }, Run: h.wf.CmdSubmit},
+			Blocked: landingBlocked("submit"), Run: h.wf.CmdSubmit},
 		// Land interim work mid-task without finishing it; same visibility as submit, task stays open.
 		registry.Command{Name: "contribute", Help: "land an interim contribution mid-task (needs the user's approval): contribute [message]", Roles: []string{"worker"},
-			Hidden: func(c registry.Caller) bool { return c.InContainer || c.Phase != "working" }, Run: h.wf.CmdContribute},
+			Blocked: landingBlocked("contribute"), Run: h.wf.CmdContribute},
 		// Always available to a worker — checking your branch still merges is harmless at any time.
 		registry.Command{Name: "resolve", Help: "check your branch still merges onto its base, and resolve any conflicts: resolve", Roles: []string{"worker"}, Run: h.wf.CmdResolve},
 		// Align any time — harmless, and it surfaces conflicts to fix rather than letting drift.
@@ -56,7 +61,13 @@ func (h *Hub) registry() *registry.Registry {
 		// see what it changed or put a file back, and reconstructs both from memory.
 		registry.Command{Name: "git", Help: workflow.GitHelp, Roles: []string{"worker", "planner", "coauthor"}, Run: h.wf.CmdGit},
 		registry.Command{Name: "checkpoint", Help: "record the current subtask and move to the next: checkpoint [summary]", Roles: []string{"worker"},
-			Hidden: func(c registry.Caller) bool { return !c.InContainer }, Run: h.wf.CmdCheckpoint},
+			Blocked: func(c registry.Caller) string {
+				if c.Container == "" {
+					return "Checkpoint records one subtask of a feature, and you hold a task of your own — " +
+						"`sindri submit \"<summary>\"` puts it up for review when it's done."
+				}
+				return ""
+			}, Run: h.wf.CmdCheckpoint},
 		// A worker reads too: it holds a whole package for context, so that context must stay
 		// re-readable. Roles see different scopes (-> CmdTasks) but share one verb name.
 		registry.Command{Name: "task", Help: workflow.TaskHelp, Roles: []string{"planner", "coauthor", "worker"}, Run: h.wf.CmdTasks},
@@ -66,10 +77,33 @@ func (h *Hub) registry() *registry.Registry {
 		registry.Command{Name: "state", Help: "set your resting state: state planning | state idle", Roles: []string{"planner"}, Run: h.wf.CmdState},
 		registry.Command{Name: "approve", Help: "approve a pull request: approve [pr-id]", Roles: []string{"reviewer"}, Run: h.wf.CmdApprove},
 		registry.Command{Name: "reject", Help: "reject a pull request: reject <pr-id> <feedback...>", Roles: []string{"reviewer"}, Run: h.wf.CmdReject},
-		// Hidden rather than role-gated: the user controls who is in the meeting room.
+		// State-gated rather than role-gated: the user controls who is in the meeting room.
 		registry.Command{Name: "meeting", Help: "say something to everyone in the meeting room: meeting <message...>",
-			Hidden: func(c registry.Caller) bool { return !c.InChat }, Run: h.cmdChat},
+			Blocked: func(c registry.Caller) string {
+				if !c.InChat {
+					return "You're not in the meeting room — the user adds agents to it, so there's nobody to say this to yet."
+				}
+				return ""
+			}, Run: h.cmdChat},
 	)
+}
+
+// landingBlocked is the shared gate on the two verbs that put a branch up (submit, contribute): a
+// feature worker lands its work at a milestone instead, and outside "working" there is nothing to
+// land. The wrong-phase wording is the same the verb's own guard uses, so an agent hears one story
+// whichever gate it meets first.
+func landingBlocked(verb string) func(registry.Caller) string {
+	return func(c registry.Caller) string {
+		if c.Container != "" {
+			return fmt.Sprintf("You're working the subtasks of feature %s, which lands as ONE PR at a "+
+				"milestone — record each subtask with `sindri checkpoint \"<summary>\"` instead; the user "+
+				"opens the milestone PR when you two reach one.", c.Container)
+		}
+		if c.Phase != "working" {
+			return workflow.ReplyNotWorking(verb, c.Phase, c.Task)
+		}
+		return ""
+	}
 }
 
 // caller resolves an agent's identity and role within its project.
@@ -88,20 +122,20 @@ func (h *Hub) caller(project, name string) (registry.Caller, error) {
 	if err != nil {
 		return registry.Caller{}, err
 	}
-	inContainer := st.Container != ""
 	// Chatroom membership gates the "chat" verb — invisible until the user adds this agent.
 	inChat, err := h.store.ChatIsMember(project, name)
 	if err != nil {
 		return registry.Caller{}, err
 	}
 	return registry.Caller{
-		Project:     project,
-		Agent:       name,
-		Role:        a.Role,
-		HasTask:     st.Phase != "idle" || inContainer,
-		InContainer: inContainer,
-		Phase:       st.Phase,
-		InChat:      inChat,
+		Project:   project,
+		Agent:     name,
+		Role:      a.Role,
+		HasTask:   st.Phase != "idle" || st.Container != "",
+		Container: st.Container,
+		Task:      st.Task,
+		Phase:     st.Phase,
+		InChat:    inChat,
 	}, nil
 }
 
@@ -139,14 +173,21 @@ func (h *Hub) AgentExec(project, name string, args []string, out io.Writer) (int
 	}
 	// Invocations aren't logged as activity — the meaningful ones record their own outcome
 	// (claim/submit/note/approve/reject/merged), and reads aren't activity at all.
-	cmd, ok := h.registry().Lookup(args[0], c)
+	cmd, blocked, ok := h.registry().Resolve(args[0], c)
 	if !ok {
 		// Name what IS available: a bare "unknown command" costs a turn per guess (a `sindri commit`
-		// that never existed got tried twice). Available() gates as Lookup does, so nothing leaks.
+		// that never existed got tried twice). Available() gates as Resolve does, so nothing leaks.
 		avail := h.registry().Available(c)
 		names := make([]string, len(avail))
 		for i, a := range avail {
 			names[i] = a.Name
+		}
+		// A real verb held back by the state machine gets its reason and its replacement, rather than
+		// the vanishing act that left an agent to reverse-engineer the workflow from an empty list.
+		if blocked != "" {
+			fmt.Fprintf(out, "`sindri %s` isn't available right now.\n%s\navailable now: %s\n",
+				args[0], blocked, strings.Join(names, " "))
+			return 1, nil
 		}
 		fmt.Fprintf(out, "unknown or unavailable command: %s\navailable now: %s\n", args[0], strings.Join(names, " "))
 		return 127, nil

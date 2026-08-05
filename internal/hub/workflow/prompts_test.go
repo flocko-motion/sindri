@@ -82,9 +82,10 @@ func TestGuardRepliesNameTheRealState(t *testing.T) {
 // banned. The coauthor brief is the exception: its /workspace is the user's real checkout.
 func TestAgentAdviceNeverPromisesGit(t *testing.T) {
 	sandboxed := []string{
-		ReplyResolveDirty("working"),
-		ReplyResolveDirty("submitted"),
-		ReplyResolveDirty("resolving"),
+		ReplyResolveDirty("working", false),
+		ReplyResolveDirty("working", true),
+		ReplyResolveDirty("submitted", false),
+		ReplyResolveDirty("resolving", false),
 		ReplyNotWorking("contribute", "submitted", "td-1"),
 		MsgReview("pr-td-1", "do the thing", "td-1", "main", "", true),
 		MsgReview("pr-td-1", "do the thing", "td-1", "main", "", false),
@@ -92,6 +93,10 @@ func TestAgentAdviceNeverPromisesGit(t *testing.T) {
 		SystemPrompt("dvalin", "reviewer", "", ""),
 		DirWorking("td-1"),
 		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
+		DirContainerWorking("td-EPIC", "td-1"),
+		DirContainerRejected("td-EPIC", "td-1", "not yet"),
+		MsgMilestoneRejected("td-EPIC", "user", "not yet"),
+		ReplyCheckpointed("td-1", "td-2", "the next subtask"),
 	}
 	for _, s := range sandboxed {
 		bare := strings.ReplaceAll(s, "sindri git", "«hub-run»")
@@ -115,8 +120,10 @@ func TestAgentAdviceNeverAsksForACommit(t *testing.T) {
 	for _, s := range []string{
 		DirWorking("td-1"),
 		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
-		ReplyResolveDirty("working"),
-		ReplyResolveDirty("submitted"),
+		DirContainerWorking("td-EPIC", "td-1"),
+		ReplyResolveDirty("working", false),
+		ReplyResolveDirty("working", true),
+		ReplyResolveDirty("submitted", false),
 		SystemPrompt("eitri", "worker", "", ""),
 		GitHelp,
 	} {
@@ -133,12 +140,12 @@ func TestAgentAdviceNeverAsksForACommit(t *testing.T) {
 // exist only in phase "working"; under review the branch must not change at all.
 func TestResolveDirtyAdviceIsRunnable(t *testing.T) {
 	// Only from "working" may it name the landing verbs.
-	working := ReplyResolveDirty("working")
+	working := ReplyResolveDirty("working", false)
 	if !strings.Contains(working, "sindri contribute") || !strings.Contains(working, "sindri submit") {
 		t.Errorf("working advice should offer contribute and submit: %q", working)
 	}
 	for _, phase := range []string{"submitted", "resolving", "idle"} {
-		got := ReplyResolveDirty(phase)
+		got := ReplyResolveDirty(phase, false)
 		for _, verb := range []string{"`sindri contribute", "`sindri submit"} {
 			if strings.Contains(got, verb) {
 				t.Errorf("phase %q can't run %q: %q", phase, verb, got)
@@ -147,12 +154,87 @@ func TestResolveDirtyAdviceIsRunnable(t *testing.T) {
 	}
 	// Every phase names a runnable next step, and never the verb that never was.
 	for _, phase := range []string{"working", "submitted", "resolving"} {
-		got := ReplyResolveDirty(phase)
+		got := ReplyResolveDirty(phase, false)
 		if strings.Contains(got, "`sindri commit`") {
 			t.Errorf("phase %q must not advertise a sindri commit verb: %q", phase, got)
 		}
 		if !strings.Contains(got, "`sindri") {
 			t.Errorf("phase %q should name a runnable next step: %q", phase, got)
+		}
+	}
+	// A feature worker holds checkpoint in place of contribute and submit, so the same reply must
+	// swap the verb rather than send it to two it cannot run.
+	inContainer := ReplyResolveDirty("working", true)
+	if !strings.Contains(inContainer, "`sindri checkpoint") {
+		t.Errorf("a feature worker's advice should offer checkpoint: %q", inContainer)
+	}
+	for _, verb := range []string{"`sindri contribute", "`sindri submit"} {
+		if strings.Contains(inContainer, verb) {
+			t.Errorf("a feature worker can't run %q: %q", verb, inContainer)
+		}
+	}
+}
+
+// TestAssignedWorkSaysItStartsNow: a hand-off that assigns work has to say the work is the agent's
+// to start, and the ones that genuinely block have to name the wait. A worker read the checkpoint
+// hand-off as a report, announced its next subtask, and then waited for a go-ahead from the user
+// that the workflow never sends — the reply named the subtask but never said to begin it.
+func TestAssignedWorkSaysItStartsNow(t *testing.T) {
+	for _, s := range []string{
+		ReplyCheckpointed("td-1", "td-2", "the next subtask"),
+		DirContainerWorking("td-EPIC", "td-1"),
+	} {
+		if !strings.Contains(s, "starts now") && !strings.Contains(s, "Implement it") {
+			t.Errorf("a hand-off that assigns work must say to start it: %q", s)
+		}
+	}
+	for _, s := range []string{
+		ReplyCheckpointedLast("td-2", "td-EPIC"),
+		DirContainerWait("td-EPIC"),
+	} {
+		if !strings.Contains(s, "Wait") {
+			t.Errorf("a hand-off with nothing to do must name the wait: %q", s)
+		}
+	}
+	// The briefs carry the rule the individual hand-offs then rely on, since they are read before any
+	// directive arrives: every managed role learns that a wait is always named as one, and a worker
+	// that its assigned work needs no further go-ahead.
+	for _, role := range []string{"worker", "reviewer", "planner"} {
+		brief := SystemPrompt("dvalin", role, "", "")
+		if !strings.Contains(brief, "WAITING IS ALWAYS NAMED") {
+			t.Errorf("the %s brief should say a wait is always named as one:\n%s", role, brief)
+		}
+	}
+	if brief := SystemPrompt("dvalin", "worker", "", ""); !strings.Contains(brief, "already authorised") {
+		t.Errorf("the worker brief should state that assigned work needs no further go-ahead:\n%s", brief)
+	}
+	// The planner is the one role with a real standing wait, and it must still be named as one so the
+	// rule above doesn't read as licence to start writing.
+	if planner := SystemPrompt("galar", "planner", "", ""); !strings.Contains(planner, GoToken) {
+		t.Errorf("the planner brief must still name its own wait (%s):\n%s", GoToken, planner)
+	}
+}
+
+// TestContainerAdviceNeverNamesSubmit is the rule dvalin's report exposed: every instruction a
+// feature worker can receive must name only verbs the command registry offers it. submit and
+// contribute are hidden while it holds a container (-> hub/commands.go), so an instruction naming
+// either leaves the agent to work out the flow for itself — which is the one thing the directive
+// exists to prevent.
+func TestContainerAdviceNeverNamesSubmit(t *testing.T) {
+	for _, s := range []string{
+		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
+		DirContainerWorking("td-EPIC", "td-1"),
+		DirContainerRejected("td-EPIC", "td-1", "not yet"),
+		DirContainerWait("td-EPIC"),
+		ReplyCheckpointed("td-1", "td-2", "the next subtask"),
+		ReplyCheckpointedLast("td-2", "td-EPIC"),
+		MsgMilestoneRejected("td-EPIC", "reviewer", "not yet"),
+		ReplyResolveDirty("working", true),
+	} {
+		for _, bad := range []string{"`sindri submit", "`sindri contribute", "`sindri next"} {
+			if strings.Contains(s, bad) {
+				t.Errorf("advice to a feature worker names %q, which its surface hides: %q", bad, s)
+			}
 		}
 	}
 }

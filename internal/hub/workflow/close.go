@@ -97,6 +97,12 @@ func (e *Engine) finishTask(project, id string, scrap bool) error {
 			}
 		}
 	}
+	// The approval gate goes with the task: a gate left standing outlives what it asked about, and
+	// the board reads it over the status — so a closed proposal kept rendering as "pending" and the
+	// close looked as though it had not happened.
+	if aerr := ps.ClearApproval(id); aerr != nil {
+		fmt.Fprintf(os.Stderr, "hub: clearing the approval gate on %s: %v\n", id, aerr)
+	}
 	// Update the one row rather than re-syncing: SyncTasks refetches every source including a
 	// GitHub call, so closing one task used to block for seconds on work it did not need.
 	if scrap {

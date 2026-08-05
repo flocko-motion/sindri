@@ -250,13 +250,21 @@ func (e *Engine) prRejected(project, agent string) (feedback string, rejected bo
 // workDirective is what a working agent is told: if its PR was rejected, the
 // reviewer's feedback is PUSHED (every time it asks — it never has to go hunting for
 // why the PR bounced); otherwise the plain "work on the task" directive.
-func (e *Engine) workDirective(project, name, task string) (string, error) {
+// container is the feature it holds, if any: it decides which verb the directive names, and MUST
+// match what the command registry shows that caller — a directive is an instruction to obey, so one
+// naming a hidden verb leaves the agent to improvise the workflow.
+func (e *Engine) workDirective(project, name, task, container string) (string, error) {
 	feedback, rejected, err := e.prRejected(project, name)
 	if err != nil {
 		return "", err
 	}
-	if rejected {
+	switch {
+	case rejected && container != "":
+		return DirContainerRejected(container, task, feedback), nil
+	case rejected:
 		return DirRejected(task, feedback), nil
+	case container != "":
+		return DirContainerWorking(container, task), nil
 	}
 	return DirWorking(task), nil
 }
@@ -308,14 +316,14 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 				}
 				if rejected {
 					_ = ps.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "working"})
-					return DirRejected(st.Task, feedback), nil
+					return DirContainerRejected(st.Container, st.Task, feedback), nil
 				}
 				return DirSubmitted, nil
 			case "working":
-				return e.workDirective(project, name, st.Task)
+				return e.workDirective(project, name, st.Task, st.Container)
 			default:
 				if next, ok := e.advanceContainer(project, name, st.Container); ok {
-					return DirWorking(next.ID), nil
+					return DirContainerWorking(st.Container, next.ID), nil
 				}
 				return DirContainerWait(st.Container), nil
 			}
@@ -325,7 +333,7 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 	}
 	switch st.Phase {
 	case "working":
-		return e.workDirective(project, name, st.Task)
+		return e.workDirective(project, name, st.Task, "")
 	case "submitted":
 		feedback, rejected, err := e.prRejected(project, name)
 		if err != nil {
