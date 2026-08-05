@@ -224,6 +224,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case openPlanFormMsg: // "new… → plan" chosen — ask what to plan
 		m.openPlanForm(string(msg))
 		return m, nil
+	case openTaskPlanFormMsg: // a planner was chosen for a task — ask what to add, then hand it over
+		m.openTaskPlanForm(msg.planner, msg.task)
+		return m, nil
 	case editorReadyMsg: // PR materialized — open the user's editor on the review workspace
 		ed := editorAt(string(msg))
 		if ed == nil {

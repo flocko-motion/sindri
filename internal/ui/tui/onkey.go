@@ -212,6 +212,11 @@ func (m *model) onKey(k string) tea.Cmd {
 			}
 			return nil
 		}
+	case keyBrief: // tasks: hand this task to a planner to work up
+		if m.tab == 0 && m.selID() != "" {
+			m.openBriefChoice(m.selID())
+			return nil
+		}
 	case keyOptions: // agents: the selected agent's options
 		if m.tab == 1 {
 			if a, ok := m.selAgent(); ok {

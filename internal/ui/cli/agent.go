@@ -413,13 +413,21 @@ func agentTellCmd() *cobra.Command {
 
 // agentPlanCmd sends a phased brief — read, check for prior work, interview — not your raw text.
 func agentPlanCmd() *cobra.Command {
-	return &cobra.Command{
-		Use: "plan <name> <what to plan...>", Short: "Assign a planner a plan to work out (reads, checks, then interviews you)",
-		Args: cobra.MinimumNArgs(2),
+	var taskID string
+	c := &cobra.Command{
+		Use: "plan <name> [what to plan...]", Short: "Assign a planner a plan to work out (reads, checks, then interviews you)",
+		Long: "Assign a planner something to work out. It reads, checks for prior work, then interviews you.\n\n" +
+			"--task hands it an existing task instead: the task's title and body are the brief, it\n" +
+			"becomes the parent of every piece the planning produces, and it is held back from workers\n" +
+			"until you rule on the result. Free text may accompany a task to add what the task omits.",
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			goal := strings.Join(args[1:], " ")
+			if goal == "" && taskID == "" {
+				return fmt.Errorf("say what to plan, or name a task with --task")
+			}
 			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
-				if err := b.AssignPlan(a.Name, goal); err != nil {
+				if err := b.AssignPlan(a.Name, goal, taskID); err != nil {
 					return err
 				}
 				fmt.Fprintf(os.Stderr, "assigned to %s — it will read, check for prior work, then interview you\n", a.Name)
@@ -427,6 +435,8 @@ func agentPlanCmd() *cobra.Command {
 			})
 		},
 	}
+	c.Flags().StringVar(&taskID, "task", "", "work up this existing task: it becomes the brief and the parent of what follows")
+	return c
 }
 
 // agentTaskLabel is a task id with its title alongside it when known, else the bare id — so

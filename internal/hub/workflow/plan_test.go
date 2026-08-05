@@ -12,7 +12,7 @@ import (
 // a planner that read nothing, asked nothing, and specified what the codebase already had. Each
 // of those has to be answered explicitly, in order, or the brief is just more prose to skim.
 func TestPlanAssignmentGatesEveryFailureMode(t *testing.T) {
-	msg := MsgPlanAssignment("a query API", "docs/ARCH.md", "/workspace/papers/ranke.pdf")
+	msg := MsgPlanAssignment("a query API", "", "docs/ARCH.md", "/workspace/papers/ranke.pdf")
 
 	for _, want := range []string{
 		"PLAN THIS: a query API", // the assignment is restated, not assumed
@@ -42,7 +42,7 @@ func TestPlanAssignmentGatesEveryFailureMode(t *testing.T) {
 // than a question), then disclosure, and treat the finding as a success whose fix is part of the
 // job rather than an obstacle to the plan.
 func TestPlanAssignmentHandlesDivergence(t *testing.T) {
-	msg := MsgPlanAssignment("a query API", "docs/ARCH.md", "")
+	msg := MsgPlanAssignment("a query API", "", "docs/ARCH.md", "")
 	for _, want := range []string{
 		"does the code match how the user described it", // look for it at all
 		"VERIFY",              // before accusing
@@ -76,7 +76,7 @@ func TestGoRuleRejectsThePolitePhrases(t *testing.T) {
 // TestPlanAssignmentDropsUnconfiguredReading: a project with no reading list gets no dangling
 // phrase about material it does not have.
 func TestPlanAssignmentDropsUnconfiguredReading(t *testing.T) {
-	msg := MsgPlanAssignment("something", "", "")
+	msg := MsgPlanAssignment("something", "", "", "")
 	if strings.Contains(msg, "plans against") {
 		t.Errorf("no reading configured should mean no reading line:\n%s", msg)
 	}
@@ -91,7 +91,7 @@ func TestPlanAssignmentDropsUnconfiguredReading(t *testing.T) {
 // brief must now name that as a first-class outcome, alongside the spec path, and hand it the
 // vocabulary (--parent, --type epic) a multi-piece backlog needs.
 func TestPlanAssignmentOffersTaskOnlyPath(t *testing.T) {
-	msg := MsgPlanAssignment("a query API", "docs/ARCH.md", "")
+	msg := MsgPlanAssignment("a query API", "", "docs/ARCH.md", "")
 	for _, want := range []string{
 		"just backlog work, nothing worth writing down",
 		"--parent",
@@ -129,7 +129,7 @@ func TestAssignPlanRefusedWithAnOpenPR(t *testing.T) {
 	}
 	e := New(st, &stubDeps{root: root, alive: true})
 
-	err = e.AssignPlan("proj", "galar", "another thing")
+	err = e.AssignPlan("proj", "galar", "another thing", "")
 	if err == nil {
 		t.Fatal("expected a refusal while a PR is open")
 	}
@@ -143,7 +143,7 @@ func TestAssignPlanRefusedWithAnOpenPR(t *testing.T) {
 	if err := ps.PutPR(store.PR{ID: "pr-os-new", Agent: "galar", Status: "merged"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.AssignPlan("proj", "galar", "another thing"); err != nil {
+	if err := e.AssignPlan("proj", "galar", "another thing", ""); err != nil {
 		t.Fatalf("a planner with no open PR should take an assignment: %v", err)
 	}
 	if got, _ := ps.GetState("galar"); got.Phase != "planning" {
@@ -168,14 +168,14 @@ func TestAssignPlanRejectsNonPlanners(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := New(st, &stubDeps{root: root})
-	if err := e.AssignPlan("proj", "eitri", "x"); err == nil || !strings.Contains(err.Error(), "worker") {
+	if err := e.AssignPlan("proj", "eitri", "x", ""); err == nil || !strings.Contains(err.Error(), "worker") {
 		t.Errorf("a worker must be refused, naming its role: %v", err)
 	}
-	if err := e.AssignPlan("proj", "nobody", "x"); err == nil {
+	if err := e.AssignPlan("proj", "nobody", "x", ""); err == nil {
 		t.Error("an unknown agent must be refused")
 	}
 	// An empty goal is refused too: the brief would name nothing to plan.
-	if err := e.AssignPlan("proj", "eitri", "   "); err == nil {
+	if err := e.AssignPlan("proj", "eitri", "   ", ""); err == nil {
 		t.Error("an empty goal must be refused")
 	}
 }

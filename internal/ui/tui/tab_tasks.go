@@ -424,6 +424,28 @@ func (m *model) unassignTaskCmd(id string) tea.Cmd {
 	}
 }
 
+// openBriefChoice picks which planner works up the selected task. Named for what it hands over: the
+// task carries the brief, so this chooses the reader rather than what to read.
+func (m *model) openBriefChoice(taskID string) {
+	var names []string
+	for _, a := range m.state.Agents {
+		if a.Role == "planner" && m.inScope(a.Project) {
+			names = append(names, a.Name)
+		}
+	}
+	if len(names) == 0 {
+		m.errText = "no planner in this repo — `sindri agent new --role planner` first"
+		return
+	}
+	m.choice = choiceModalState{
+		active: true, title: "work up " + taskID + " with…",
+		options: names, values: names,
+		apply: func(v string) tea.Cmd {
+			return func() tea.Msg { return openTaskPlanFormMsg{planner: v, task: taskID} }
+		},
+	}
+}
+
 // closeTaskCmd marks the task done, showing a transient "closing" until the hub confirms.
 func (m *model) closeTaskCmd(id string) tea.Cmd {
 	m.markBusy(id, "closing")

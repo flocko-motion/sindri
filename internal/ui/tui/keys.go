@@ -22,6 +22,7 @@ import "strings"
 // keep the shape a terminal user already has in their fingers.
 const (
 	keyNew      = "N" // new task / new agent
+	keyBrief    = "B" // hand a task to a planner to work up (brief)
 	keyEdit     = "e" // edit the selection: task fields (tasks) / open the workspace in $EDITOR (agents, prs)
 	keyOptions  = "O" // an agent's options (mutation → shift)
 	keyPriority = "P" // set task priority (mutation → shift)
@@ -87,6 +88,7 @@ var keymap = []binding{
 	// Tasks: each scope's rows are grouped and ordered look-first, so the footer reads left to
 	// right from the harmless to the decisive.
 	{keyNew, lbl("new"), scopeTasks},
+	{keyBrief, lbl("brief a planner"), scopeTasks},
 	{keyAttach, lbl("attach"), scopeTasks},
 	{keyEdit, lbl("edit"), scopeTasks},
 	{keyPriority, lbl("priority"), scopeTasks},

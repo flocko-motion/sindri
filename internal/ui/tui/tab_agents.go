@@ -51,7 +51,27 @@ func (m *model) openPlanForm(name string) {
 			if cl == nil || strings.TrimSpace(text) == "" {
 				return nil
 			}
-			if err := cl.AssignPlan(name, text); err != nil {
+			if err := cl.AssignPlan(name, text, ""); err != nil {
+				return errModalMsg{err}
+			}
+			st, _ := cl.State()
+			return polledMsg(st)
+		}
+	})
+}
+
+// openTaskPlanForm hands an existing task to a planner to work up. The task carries the brief, so
+// the textarea is for whatever it does not already say, and may be left empty.
+func (m *model) openTaskPlanForm(planner, taskID string) {
+	extra := newTextareaField("anything to add (optional)", "")
+	cl := m.cl
+	m.form.open("work up "+taskID+" with "+planner, []field{extra}, nil, func() tea.Cmd {
+		text := extra.value()
+		return func() tea.Msg {
+			if cl == nil {
+				return nil
+			}
+			if err := cl.AssignPlan(planner, text, taskID); err != nil {
 				return errModalMsg{err}
 			}
 			st, _ := cl.State()

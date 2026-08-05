@@ -249,10 +249,11 @@ func (c *HTTP) Tell(name, msg, source string) error {
 	return c.post("/tell", hub.TellReq{Name: name, Msg: msg, Source: source})
 }
 
-// AssignPlan gives a planner one thing to plan, as a phased brief. Refused while that planner
-// has a PR open — the answer says to merge or scrap it first.
-func (c *HTTP) AssignPlan(name, goal string) error {
-	return c.post("/agent/plan", hub.TellReq{Name: name, Msg: goal})
+// AssignPlan gives a planner one thing to plan, as a phased brief. taskID works up an existing task,
+// which becomes the parent of what the planning produces; goal alone plans free text. Refused while
+// that planner has a PR open — the answer says to merge or scrap it first.
+func (c *HTTP) AssignPlan(name, goal, taskID string) error {
+	return c.post("/agent/plan", hub.PlanReq{Name: name, Goal: goal, Task: taskID})
 }
 
 // ChatAdd adds an agent to the user's chatroom (the hub greets it).

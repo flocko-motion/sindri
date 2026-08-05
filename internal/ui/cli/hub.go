@@ -41,7 +41,7 @@ type backend interface {
 	Clients(name string) ([]hub.ClientView, error)
 	Launch(name string, shell, debug bool, out io.Writer) error
 	Tell(name, msg, source string) error
-	AssignPlan(name, goal string) error
+	AssignPlan(name, goal, taskID string) error
 	ChatAdd(name string) error
 	ChatRemove(name string) error
 	ChatSay(msg string) error

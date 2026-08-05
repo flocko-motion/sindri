@@ -35,6 +35,14 @@ type TellReq struct {
 	Source string `json:"source"`
 }
 
+// PlanReq is the body for POST /agent/plan. Task names an existing task to work up, whose title and
+// body become the brief; Goal is free text, and may accompany a task to add something it lacks.
+type PlanReq struct {
+	Name string `json:"name"`
+	Goal string `json:"goal"`
+	Task string `json:"task"`
+}
+
 // ChatSayReq is the body for POST /chat/say — the user posting to the room.
 type ChatSayReq struct {
 	Msg string `json:"msg"`
@@ -418,11 +426,11 @@ func (h *Hub) Handler() http.Handler {
 	// Assign a planner one thing to plan, as a phased brief (-> AssignPlan). Refused while that
 	// planner has a PR open, so a new plan can't be drafted over specs still awaiting a verdict.
 	mux.HandleFunc("POST /agent/plan", func(w http.ResponseWriter, r *http.Request) {
-		var req TellReq // Name = the planner, Msg = what to plan
+		var req PlanReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"assigned"}, h.wf.AssignPlan(h.reqProject(r), req.Name, req.Msg))
+		writeJSON(w, okMsg{"assigned"}, h.wf.AssignPlan(h.reqProject(r), req.Name, req.Goal, req.Task))
 	})
 	mux.HandleFunc("POST /task/approve", func(w http.ResponseWriter, r *http.Request) {
 		var req RejectReq // reuse: ID (+ unused Feedback)

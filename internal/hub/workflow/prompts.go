@@ -229,9 +229,18 @@ const (
 // MsgPlanAssignment hands a planner one job, in phases it cannot skip. A free-text "plan X"
 // produced one that read nothing, asked nothing, and specified what the codebase already had.
 // Reading comes first because an agent that has begun a spec defends it.
-func MsgPlanAssignment(goal, arch, reading string) string {
+func MsgPlanAssignment(goal, taskID, arch, reading string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "[user] PLAN THIS: %s\n\n", strings.TrimSpace(goal))
+	if taskID != "" {
+		fmt.Fprintf(&b, "[user] WORK UP TASK %s: %s\n\n", taskID, strings.TrimSpace(goal))
+		fmt.Fprintf(&b, "That task is the parent of everything this produces. Read it with "+
+			"`sindri task %s`; it is yours to revise (`sindri edit-task %s`) until the user rules "+
+			"on it, and it is hidden from workers until they do. Hang each piece under it with "+
+			"`sindri create-task --parent %s`, so nothing you propose floats beside the task that "+
+			"asked for it.\n\n", taskID, taskID, taskID)
+	} else {
+		fmt.Fprintf(&b, "[user] PLAN THIS: %s\n\n", strings.TrimSpace(goal))
+	}
 	b.WriteString("Planning here is an INTERVIEW, not freestyle drafting. Work these phases in " +
 		"order, one at a time.\n\n")
 

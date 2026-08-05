@@ -56,6 +56,10 @@ type editorReadyMsg string // the review-workspace path to open the user's edito
 // form is model state.
 type openPlanFormMsg string
 
+// openTaskPlanFormMsg carries the chosen planner and the task it works up, for the same reason
+// openPlanFormMsg exists: a chooser's apply returns a cmd, and opening a form is Update's to do.
+type openTaskPlanFormMsg struct{ planner, task string }
+
 // approveMergeMsg routes the intent through Update so the "merging" marker renders before the async work.
 type approveMergeMsg struct{ id string }
 

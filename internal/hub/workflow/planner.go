@@ -20,10 +20,10 @@ import (
 // AssignPlan hands a planner one thing to plan, as a phased brief (-> MsgPlanAssignment). Refused
 // while it has a PR open: it drafts on ONE standing branch, so a second plan would pile
 // unreviewed work onto specs awaiting a verdict.
-func (e *Engine) AssignPlan(project, agent, goal string) error {
-	goal = strings.TrimSpace(goal)
-	if goal == "" {
-		return fmt.Errorf("say what to plan: a goal, question or feature to work out")
+func (e *Engine) AssignPlan(project, agent, goal, taskID string) error {
+	goal, taskID = strings.TrimSpace(goal), strings.TrimSpace(taskID)
+	if goal == "" && taskID == "" {
+		return fmt.Errorf("say what to plan: a goal, question or feature to work out, or a task to work up")
 	}
 	ps := e.store.For(project)
 	a, ok, err := ps.GetAgent(agent)
@@ -44,20 +44,53 @@ func (e *Engine) AssignPlan(project, agent, goal string) error {
 			"drafted on top of specs nobody has ruled on yet", agent, pr.ID, pr.ID, pr.ID)
 	}
 
+	subject, err := e.planSubject(ps, taskID, goal)
+	if err != nil {
+		return err
+	}
 	// Interrupt first: the directive has to land on an idle prompt, or it queues behind whatever
 	// the agent is already doing and arrives after the work it was meant to redirect.
 	if e.deps.AgentAlive(project, agent) {
 		_ = e.deps.Interrupt(project, agent)
 	}
-	if err := e.deps.InjectWhenReady(project, agent, MsgPlanAssignment(goal, e.deps.ArchitectureDoc(project), e.planReading(project))); err != nil {
+	brief := MsgPlanAssignment(subject, taskID, e.deps.ArchitectureDoc(project), e.planReading(project))
+	if err := e.deps.InjectWhenReady(project, agent, brief); err != nil {
 		return err
 	}
 	st, _ := ps.GetState(agent)
 	st.Agent, st.Phase = agent, "planning"
 	_ = ps.SetState(st)
-	_ = ps.Log(agent, "plan", goal)
+	_ = ps.Log(agent, "plan", subject)
 	e.deps.Notify()
 	return nil
+}
+
+// planSubject resolves what the planner is being handed. A task carries its own title and body, so
+// the brief quotes those rather than asking the user to retype them, and the task moves to "pending
+// approval" — which is what lets the planner revise it (-> CmdEditTask), keeps it away from workers
+// while it is still being worked out, and returns it to the user for a verdict when it is done.
+func (e *Engine) planSubject(ps *store.ProjectStore, taskID, goal string) (string, error) {
+	if taskID == "" {
+		return goal, nil
+	}
+	t, ok, err := ps.OwnedTask(taskID)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("%s is not a task this project owns — a planner works up sindri's own tasks", taskID)
+	}
+	if err := ps.SetApproval(taskID, "pending", ""); err != nil {
+		return "", err
+	}
+	subject := t.Title
+	if body := strings.TrimSpace(t.Description); body != "" {
+		subject += "\n\n" + body
+	}
+	if goal != "" {
+		subject += "\n\nThe user adds: " + goal
+	}
+	return subject, nil
 }
 
 // planReading is the project's configured reading list, as one /workspace-rooted phrase for the
