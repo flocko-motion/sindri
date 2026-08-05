@@ -40,6 +40,10 @@ type Agent interface {
 	DetectState(screen string) State
 	// PrepareHome provisions spec.Dir and returns the host paths to mount.
 	PrepareHome(spec HomeSpec) (Home, error)
+	// RestageCredentials carries the host's credentials into an already-provisioned home when the
+	// host's reach further, so a re-login on the host reaches a pod that is already running.
+	// Reports whether it wrote.
+	RestageCredentials(dir string) (bool, error)
 }
 
 // active is wired once at startup via Use; the no-op default keeps the port safe before.
@@ -67,9 +71,14 @@ func Runtime(screen string) string {
 // PrepareHome provisions an agent home via the wired backend.
 func PrepareHome(spec HomeSpec) (Home, error) { return active.PrepareHome(spec) }
 
+// RestageCredentials refreshes one home's credentials from the host via the wired backend.
+func RestageCredentials(dir string) (bool, error) { return active.RestageCredentials(dir) }
+
 // noop is the default until Use: state is Unknown, no home is provisioned.
 type noop struct{}
 
 func (noop) DetectState(string) State { return Unknown }
 
 func (noop) PrepareHome(HomeSpec) (Home, error) { return Home{}, nil }
+
+func (noop) RestageCredentials(string) (bool, error) { return false, nil }

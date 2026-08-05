@@ -15,6 +15,13 @@ func PodBinDir() string { return filepath.Join(StateDir(), "pod-bin") }
 // point here, so a refreshed tool resolves on the next exec.
 const PodBinMount = "/opt/sindri/host-bin"
 
+// AgentHomeDir is one agent's coding-agent home, mounted into its pod. Named here because the
+// launcher writes it and the credential upkeep reads it, and a second spelling would silently
+// refresh a directory nothing mounts.
+func AgentHomeDir(project, agent string) string {
+	return filepath.Join(StateDir(), project, "agents", agent)
+}
+
 // PodTool names one tool: the host filename to copy from, and the name the agent invokes.
 type PodTool struct {
 	HostName string
