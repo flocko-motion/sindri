@@ -106,13 +106,14 @@ func (m model) taskRows() []row {
 
 	// The tree lives entirely in a fixed-width gutter, so the id and later columns stay aligned.
 	out := make([]row, len(visible))
+	last := lastSiblings(visible)
 	cont := []bool{} // cont[i]: ancestor at depth i has a later sibling (draw │)
 	for i, tr := range visible {
 		if len(cont) > tr.Depth {
 			cont = cont[:tr.Depth]
 		}
-		gutter := treeGutter(cont, tr.Depth, tr.Last, hasKids[tr.ID], m.collapsed[tr.ID])
-		cont = append(cont, !tr.Last)
+		gutter := treeGutter(cont, tr.Depth, last[i], hasKids[tr.ID], m.collapsed[tr.ID])
+		cont = append(cont, !last[i])
 
 		// Cells styled independently (never nested) so a colour reset can't bleed
 		// across the row. An approval gate overrides the status colour.
@@ -148,6 +149,26 @@ func (m model) taskRows() []row {
 }
 
 const treeGutterW = 6 // fits ~3 levels of "│ "/"├─" connectors
+
+// lastSiblings marks each row that has no later sibling — what the tree connectors are drawn from.
+//
+// Derived here rather than carried on the wire: it is a fact about the rows as ARRANGED, and the
+// arrangement the TUI draws is the visible one, with collapsed subtrees removed. Hiding a subtree
+// never removes a sibling, so the answer is the same either way — and only the drawing needs it.
+func lastSiblings(rows []api.TaskRow) []bool {
+	out := make([]bool, len(rows))
+	var later []bool // later[d]: a row at depth d follows, with no shallower row between
+	for i := len(rows) - 1; i >= 0; i-- {
+		d := rows[i].Depth
+		for len(later) <= d {
+			later = append(later, false)
+		}
+		out[i] = !later[d]
+		later[d] = true
+		later = later[:d+1] // rows below this one at greater depth are its own subtree
+	}
+	return out
+}
 
 // treeGutter draws ancestor pipes, the branch into this node, and any fold marker.
 func treeGutter(cont []bool, depth int, last, kids, collapsed bool) string {

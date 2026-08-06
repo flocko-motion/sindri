@@ -42,10 +42,10 @@ const (
 
 )
 
-// HelpText is exported so `/help`, the `meeting join` banner and the TUI chat tab can't
-// drift into three different accounts of the same commands. It crosses the wire (every
-// front-end shows it), so its text lives in internal/api under the same name.
-const HelpText = api.ChatHelpText
+// commandVerbs is what /help answers with — the vocabulary this service dispatches, kept next to it
+// so the reply can never describe a command the hub does not have. The prose a front-end shows is
+// its own call (-> internal/ui/theme).
+var commandVerbs = []string{"/add <agent>", "/remove <agent>", "/who", "/help"}
 
 // Notices pushed on membership change; exported so the hub can re-announce on relaunch.
 const (
@@ -57,19 +57,12 @@ const (
 	MsgNewMeeting = "a new meeting started — the shared history was cleared. Earlier messages are gone from the room, so restate anything that still matters instead of assuming it carried over."
 )
 
-// Participant markers are stamped into the line an agent READS, so they are protocol,
-// crossing the wire the same as every front-end's rendering of them; that is why
-// they live in internal/api rather than being defined here.
+// The sender values the transcript carries. Glyphs are not here: what a marker LOOKS like is a
+// front-end's call (-> internal/ui/theme), and the hub composes rows from data.
 const (
 	SenderUser   = api.SenderUser
 	SenderSystem = api.SenderSystem
-	UserIcon     = api.UserIcon
-	AgentIcon    = api.AgentIcon
-	SystemIcon   = api.SystemIcon
 )
-
-// Icon marks who is speaking: the human, the hub itself, or an agent.
-func Icon(sender string) string { return api.ChatIcon(sender) }
 
 // errTooLong is actionable for whoever sent it, so callers must surface it to the sender.
 var errTooLong = fmt.Errorf("message too long — keep it under %d characters (split a longer one into parts)", maxLen)
@@ -133,7 +126,7 @@ func (s *Service) catchUp() (string, bool) {
 		omitted int
 	)
 	for i := len(msgs) - 1; i >= 0; i-- {
-		entry := fmt.Sprintf("%s %s: %s", Icon(msgs[i].Sender), msgs[i].Sender, msgs[i].Body)
+		entry := fmt.Sprintf("%s: %s", msgs[i].Sender, msgs[i].Body)
 		if n := utf8.RuneCountInString(entry) + len(sep); n > budget && len(kept) > 0 {
 			omitted = i + 1 // everything at or before i never made it in
 			break
@@ -265,7 +258,8 @@ func (s *Service) command(line string) error {
 	case "who", "names", "members":
 		return s.systemReply(s.whoLine())
 	case "help", "?":
-		return s.systemReply("commands: " + HelpText)
+		return s.systemReply("commands: " + strings.Join(commandVerbs, " · ") +
+			". Anything not starting with / is sent to everyone in the room.")
 	case "quit", "q", "leave", "part", "exit":
 		return s.systemReply("to leave: press Ctrl-D or type /quit in `sindri meeting join`; in the TUI, just switch tabs.")
 	default:
@@ -369,7 +363,7 @@ func (s *Service) broadcast(senderProject, senderName, body string) (store.ChatM
 	}
 	// An icon, not colour: this line is TYPED INTO a session, where ANSI would be noise.
 	// It also marks the human in every message, so no agent mistakes them for a peer.
-	line := fmt.Sprintf("[meeting] %s %s: %s", Icon(senderName), senderName, body)
+	line := fmt.Sprintf("[meeting] %s: %s", senderName, body)
 	// Concurrently: each delivery is a container exec into one agent's tmux, so serial fan-out cost
 	// the sender the SUM of them — seconds of dead keyboard in a room of four. Each agent still
 	// receives this message exactly once, and ordering within one agent is unaffected.

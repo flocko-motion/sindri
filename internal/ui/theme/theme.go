@@ -1,5 +1,5 @@
 // package: ui/theme / theme
-// type:    logic (shared presentation primitives)
+// type:    rendering (shared presentation primitives)
 // job:     the deterministic name→colour mapping and the participant markers both
 // front-ends share, so one name is the same colour and glyph in the CLI and
 // the TUI instead of each package inventing its own.
@@ -22,19 +22,35 @@ const (
 	BrightSat, BrightLight = 0.55, 0.72
 )
 
-// Re-exported from internal/api, which the hub also stamps these same glyphs from: a
-// front-end needs only this package, and there is still exactly one definition.
+// Chat participant glyphs. Plain UTF-8, so a pane that cannot take ANSI still shows them.
 const (
-	UserIcon     = api.UserIcon
-	AgentIcon    = api.AgentIcon
-	SystemIcon   = api.SystemIcon
-	SenderUser   = api.SenderUser
-	SenderSystem = api.SenderSystem
-	HelpText     = api.ChatHelpText
+	UserIcon   = "👤"
+	AgentIcon  = "🤖"
+	SystemIcon = "⚙"
 )
 
+// The sender values a message carries; data, so they stay in the API and are named here only so a
+// front-end needs one import to render a transcript.
+const (
+	SenderUser   = api.SenderUser
+	SenderSystem = api.SenderSystem
+)
+
+// HelpText describes the in-room commands. Shown by the `meeting join` banner and the TUI's chat
+// tab, which is why it is one string: two accounts of the same commands drift.
+const HelpText = "/add <agent> (alias /invite) · /remove <agent> (alias /kick) · /who (list members) · /help. " +
+	"Anything not starting with / is sent to everyone in the room."
+
 // Icon marks who is speaking: the human, the hub itself, or an agent.
-func Icon(sender string) string { return api.ChatIcon(sender) }
+func Icon(sender string) string {
+	switch sender {
+	case SenderUser:
+		return UserIcon
+	case SenderSystem:
+		return SystemIcon
+	}
+	return AgentIcon
+}
 
 // HelpLine is the in-room interface description, dimmed for a banner or hint line.
 func HelpLine() string { return Dim().Render(HelpText) }

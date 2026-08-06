@@ -1,10 +1,9 @@
 // package: api / chat
 // type:    data (wire types + pure predicates)
-// job:     the chatroom as it crosses the wire: its snapshot (roster + transcript),
-// the two row shapes behind it, and the Sender vocabulary + glyphs — protocol,
-// not decoration: the hub stamps them into the line an agent reads, and every
-// front-end renders the identical marker for the identical sender.
-// limits:  data and pure derivation only; the relay lives in hub/chat.
+// job:     the chatroom as it crosses the wire: its snapshot (roster + transcript), the two row
+// shapes behind it, and the sender vocabulary those rows carry.
+// limits:  data and pure derivation only — glyphs and help text are a front-end's call
+// (-> internal/ui/theme); the relay lives in hub/chat.
 package api
 
 import "strings"
@@ -39,30 +38,6 @@ const (
 	SenderUser   = "user"   // the human — the one participant an agent must never mistake for a peer
 	SenderSystem = "system" // the hub speaking for itself
 )
-
-// Chat participant glyphs, plain UTF-8 (ANSI would land as noise once stamped into
-// the line an agent reads).
-const (
-	UserIcon   = "👤"
-	AgentIcon  = "🤖"
-	SystemIcon = "⚙"
-)
-
-// ChatIcon marks who is speaking: the human, the hub itself, or an agent.
-func ChatIcon(sender string) string {
-	switch sender {
-	case SenderUser:
-		return UserIcon
-	case SenderSystem:
-		return SystemIcon
-	}
-	return AgentIcon
-}
-
-// ChatHelpText is exported so `/help`, the `meeting join` banner and the TUI chat tab can't
-// drift into three different accounts of the same commands.
-const ChatHelpText = "/add <agent> (alias /invite) · /remove <agent> (alias /kick) · /who (list members) · /help. " +
-	"Anything not starting with / is sent to everyone in the room."
 
 // IsChatCommand reports whether a line is an in-room slash command rather than a message —
 // the hub dispatches on it, and a front-end's composer needs the identical rule to decide

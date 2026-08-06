@@ -36,7 +36,6 @@ type Task struct {
 type TaskRow struct {
 	Task
 	Depth  int    `json:"depth"`
-	Last   bool   `json:"last"`
 	PR     string `json:"pr"`
 	PRKind string `json:"pr_kind"` // "final" | "interim" — how to mark the PR on the row
 }
@@ -137,9 +136,8 @@ func ArrangeTasks(tasks []Task, prs []PR) []TaskRow {
 	var out []TaskRow
 	var walk func(parent string, depth int)
 	walk = func(parent string, depth int) {
-		kids := byParent[parent]
-		for i, t := range kids {
-			out = append(out, TaskRow{Task: t, Depth: depth, Last: i == len(kids)-1, PR: pr[t.ID].ID, PRKind: pr[t.ID].Kind})
+		for _, t := range byParent[parent] {
+			out = append(out, TaskRow{Task: t, Depth: depth, PR: pr[t.ID].ID, PRKind: pr[t.ID].Kind})
 			walk(t.ID, depth+1)
 		}
 	}
