@@ -16,6 +16,7 @@ import (
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub"
 	hubagent "github.com/flo-at/sindri/internal/hub/agent"
+	"github.com/flo-at/sindri/internal/hub/server"
 )
 
 // version is the build version, baked in via -ldflags "-X main.version=…" (matches
@@ -40,10 +41,10 @@ func run() error {
 	defer h.Close()
 	// Stamp this process (pid + build version) as the hub, so a second hub can't
 	// start and clients can detect a stale-version hub.
-	if err := hub.WritePID(version); err != nil {
+	if err := server.WritePID(version); err != nil {
 		return err
 	}
-	defer hub.RemovePID()
+	defer server.RemovePID()
 
 	// How a rebuild reaches RUNNING agents. Async because copying tens of MB here
 	// delayed the socket past the caller's readiness poll; Launch also syncs.

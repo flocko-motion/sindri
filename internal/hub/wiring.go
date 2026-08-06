@@ -80,14 +80,6 @@ func (d agentchanDeps) LogRequests(label string, next http.Handler) http.Handler
 	return server.LogRequests(label, next)
 }
 
-// pid-file writes, re-exported for cmd/sindri-hub (the only caller now that discovery —
-// SocketPath, IsRunning, ReadPID, ProcessAlive, HubPID — lives in internal/tools/paths
-// and internal/client, which front-ends use directly).
-var (
-	WritePID  = server.WritePID
-	RemovePID = server.RemovePID
-)
-
 // workflowDeps adapts the hub to workflow.Deps, so workflow need not import the hub.
 type workflowDeps struct{ h *Hub }
 

@@ -29,7 +29,25 @@ func TestFrontEndsDoNotImportHub(t *testing.T) {
 	if err != nil {
 		t.Fatalf("go list -deps ./...: %v", err)
 	}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	deps := strings.Split(strings.TrimSpace(string(out)), "\n")
+
+	// Prove the graph was actually read before trusting a clean sweep of it. A pattern that
+	// matched nothing, or front-ends that moved out from under this test, would otherwise leave
+	// the loop below with nothing to find and report that as the invariant holding.
+	seen := map[string]bool{}
+	for _, line := range deps {
+		seen[line] = true
+	}
+	for _, want := range []string{
+		"github.com/flo-at/sindri/internal/ui/cli",
+		"github.com/flo-at/sindri/internal/ui/tui",
+	} {
+		if !seen[want] {
+			t.Fatalf("%s is not in the graph this test walked (%d packages) — the guard is not looking at the front-ends", want, len(deps))
+		}
+	}
+
+	for _, line := range deps {
 		if line == "github.com/flo-at/sindri/internal/hub" || strings.HasPrefix(line, "github.com/flo-at/sindri/internal/hub/") {
 			t.Errorf("internal/ui depends on %s — front-ends reach the hub only through internal/api and internal/client", line)
 		}
