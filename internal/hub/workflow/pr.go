@@ -220,7 +220,7 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 	}
 	a, _, _ := ps.GetAgent(c.Agent)
 	wt := filepath.Join(root, a.Workspace)
-	if lintOut, ok := repo.Lint(wt, e.deps.BrokkrBin); !ok {
+	if lintOut, ok := repo.Gate(wt, e.deps.BrokkrBin, e.verifyCmd(c.Project)); !ok {
 		fmt.Fprintln(out, ReplyLintFail(strings.TrimSpace(lintOut)))
 		_ = ps.Log(c.Agent, "lint-fail", target)
 		return 1, nil
@@ -505,7 +505,7 @@ func (e *Engine) LintPR(project, prID string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("no agent %q for %s", pr.Agent, prID)
 	}
-	out, passed := repo.Lint(filepath.Join(e.deps.ProjectRoot(project), a.Workspace), e.deps.BrokkrBin)
+	out, passed := repo.Gate(filepath.Join(e.deps.ProjectRoot(project), a.Workspace), e.deps.BrokkrBin, e.verifyCmd(project))
 	status := "FAIL"
 	if passed {
 		status = "PASS"

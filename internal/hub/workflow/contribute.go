@@ -35,7 +35,7 @@ func (e *Engine) CmdContribute(c registry.Caller, args []string, out io.Writer) 
 	}
 	a, _, _ := ps.GetAgent(c.Agent)
 	wt := filepath.Join(root, a.Workspace)
-	if lintOut, ok := repo.Lint(wt, e.deps.BrokkrBin); !ok {
+	if lintOut, ok := repo.Gate(wt, e.deps.BrokkrBin, e.verifyCmd(c.Project)); !ok {
 		fmt.Fprintln(out, ReplyLintFail(strings.TrimSpace(lintOut)))
 		_ = ps.Log(c.Agent, "lint-fail", st.Task)
 		return 1, nil

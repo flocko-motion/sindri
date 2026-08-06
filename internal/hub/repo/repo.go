@@ -1,7 +1,7 @@
 // package: hub/repo / repo
 // type:    logic (git/PR mechanics)
 // job:     the git-backed operations the workflow orchestrates — materialize a PR
-// branch for inspection, run the lint gate against a worktree. Stateless:
+// branch for inspection, run the submit gate against a worktree. Stateless:
 // each takes explicit paths/refs and returns a result or error; the workflow
 // resolves PR records and decides consequences.
 // limits:  no store, no orchestration, no agent messaging. git primitives live in
@@ -9,9 +9,13 @@
 package repo
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 )
@@ -39,11 +43,37 @@ func ScrapBranch(root, worktree, branch string) error {
 	return git.DeleteBranch(root, branch)
 }
 
-// Lint runs the quality gate in a worktree as a subprocess, so the concurrent hub never chdir's. Go
-// modules only. A binary that cannot be resolved is a loud lint failure, never a silent pass.
-func Lint(wt string, resolveBin func() (string, error)) (output string, ok bool) {
+// GateTimeout bounds the project's own verify command. Generous, because a real gate builds and
+// runs a test suite; bounded, because an agent waiting forever on a hung gate reports nothing at all.
+const GateTimeout = 15 * time.Minute
+
+// gateOutputLines caps stored gate output, the way the diff commands cap theirs.
+const gateOutputLines = 400
+
+// Gate runs the submit gate in a worktree as a subprocess, so the concurrent hub never chdir's: the
+// built-in lint, then the project's own verify command when it declares one. Named for what it now
+// is — a gate — since it may build and test, not only lint.
+//
+// verify is repo-relative and already validated by config; "" means the project declares none, and
+// then the built-in behaviour is exactly what it was, including the silent pass for a non-Go tree.
+// A declared gate runs whatever the language, because the project asked for it.
+func Gate(wt string, resolveBin func() (string, error), verify string) (output string, ok bool) {
+	if out, passed := builtinLint(wt, resolveBin, verify != ""); !passed {
+		return out, false
+	} else if verify == "" {
+		return out, true
+	}
+	return runVerify(wt, verify)
+}
+
+// builtinLint is the gate brokkr provides. skipGoCheck keeps a non-Go tree in play when the project
+// has declared its own gate — otherwise a project in another language would still gate on nothing.
+func builtinLint(wt string, resolveBin func() (string, error), declared bool) (string, bool) {
 	if _, err := os.Stat(filepath.Join(wt, "go.mod")); err != nil {
-		return "", true // no Go module — no lint gate applies
+		if declared {
+			return "", true // not a Go tree: nothing for the built-in to say, the declared gate decides
+		}
+		return "", true // no Go module and no declared gate — as before
 	}
 	bin, err := resolveBin()
 	if err != nil {
@@ -53,4 +83,40 @@ func Lint(wt string, resolveBin func() (string, error)) (output string, ok bool)
 	cmd.Dir = wt
 	out, err := cmd.CombinedOutput()
 	return string(out), err == nil
+}
+
+// runVerify executes the project's own gate, bounded and with its output capped. A timeout is a
+// refusal, not a hang: the agent is told the gate ran out of time and how long it had.
+func runVerify(wt, verify string) (string, bool) {
+	bin := filepath.Join(wt, filepath.FromSlash(verify))
+	if _, err := os.Stat(bin); err != nil {
+		return "verify: " + verify + " not found in the worktree — the project declares it in .sindri/config.yaml\n", false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), GateTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin)
+	cmd.Dir = wt
+	out, err := cmd.CombinedOutput()
+	body := capLines(string(out), gateOutputLines)
+	if ctx.Err() != nil {
+		return body + fmt.Sprintf("verify: %s ran past %s and was stopped — the gate refuses rather than waiting.\n", verify, GateTimeout), false
+	}
+	if err != nil {
+		return body + "verify: " + verify + " failed (" + err.Error() + ")\n", false
+	}
+	return body, true
+}
+
+// capLines truncates long output and says what was cut, because silent truncation reads as a
+// complete answer — the same reason the diff commands cap theirs.
+func capLines(s string, max int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) <= max {
+		if len(s) == 0 {
+			return ""
+		}
+		return strings.Join(lines, "\n") + "\n"
+	}
+	return fmt.Sprintf("%s\n… truncated: last %d of %d lines shown — re-run the gate locally for the rest.\n",
+		strings.Join(lines[len(lines)-max:], "\n"), max, len(lines))
 }

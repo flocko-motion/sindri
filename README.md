@@ -482,6 +482,7 @@ defaults — **repo → global → default, per key**. All keys are optional:
 architecture: docs/ARCHITECTURE.md    # doc the reviewer must read (default: ARCHITECTURE.md)
 containerfile: .sindri/Containerfile  # agent image recipe (highest-precedence; see below)
 review_prompt: .sindri/review.md      # file whose contents become the reviewer's prompt
+verify: scripts/verify.sh             # your own submit gate: an agent can't submit past it
 github:
   issues: false                       # import open GitHub issues as tasks (default: true)
 ```
@@ -494,6 +495,14 @@ github:
 - **`containerfile`** — repo-relative agent-image recipe (see the next section).
 - **`review_prompt`** — repo-relative file whose contents replace the default reviewer
   prompt.
+- **`verify`** — repo-relative executable the submit gate runs in the agent's worktree,
+  after the rebase and **before the PR exists**, alongside the built-in checks. A
+  non-zero exit refuses the submit and reports the output, so a PR that fails your build,
+  your tests or your architecture tests is never created. It's a path rather than a
+  command line so it can be validated before it runs — wrap a build tool in a script
+  (this repo uses `scripts/verify.sh`, which runs `make verify`). A declared gate runs
+  **whatever the language**; with no `verify` key the built-in Go checks apply exactly as
+  they do today. Bounded by a timeout, with long output capped and the cut announced.
 - **`github.issues`** — the repo's open GitHub issues are imported as `gh-<number>`
   tasks (via the `gh` CLI, reusing your `gh` auth). **On by default** (opt-out — set
   `false` to disable). Imported issues arrive **unrated**: they show in the backlog

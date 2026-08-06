@@ -91,3 +91,14 @@ func restPhase(role string) string {
 		return "idle"
 	}
 }
+
+// verifyCmd is the project's declared gate command, or "" when it declares none (or the config
+// cannot be read — an unreadable config must not silently disable a project's own gate, so the
+// built-ins still run and the config error surfaces where configs are loaded).
+func (e *Engine) verifyCmd(project string) string {
+	cfg, err := e.deps.ProjectConfig(project)
+	if err != nil {
+		return ""
+	}
+	return cfg.Verify
+}

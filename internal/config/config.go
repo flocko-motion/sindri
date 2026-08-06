@@ -84,6 +84,7 @@ func validate(c Config, root string) error {
 		{"architecture", c.Architecture, c.ArchitectureSet},
 		{"containerfile", c.Containerfile, c.Containerfile != ""},
 		{"review_prompt", c.ReviewPrompt, c.ReviewPrompt != ""},
+		{"verify", c.Verify, c.Verify != ""},
 	}
 	for _, ch := range checks {
 		if ch.val == "" {
@@ -117,6 +118,9 @@ func Write(root string, c Config) error {
 	}
 	if c.ReviewPrompt != "" {
 		out["review_prompt"] = c.ReviewPrompt
+	}
+	if c.Verify != "" {
+		out["verify"] = c.Verify
 	}
 	if c.GitHub.Issues != nil {
 		out["github"] = map[string]any{"issues": *c.GitHub.Issues}

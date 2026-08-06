@@ -257,7 +257,11 @@ func (h *Hub) cmdLint(c registry.Caller, args []string, out io.Writer) (int, err
 	if !ok {
 		return 1, fmt.Errorf("unknown agent %q", c.Agent)
 	}
-	res, passed := repo.Lint(filepath.Join(h.projectRoot(c.Project), a.Workspace), agent.BrokkrBinary)
+	verify := ""
+	if cfg, cerr := h.projectConfig(c.Project); cerr == nil {
+		verify = cfg.Verify
+	}
+	res, passed := repo.Gate(filepath.Join(h.projectRoot(c.Project), a.Workspace), agent.BrokkrBinary, verify)
 	if strings.TrimSpace(res) == "" {
 		res = "lint: clean\n"
 	}

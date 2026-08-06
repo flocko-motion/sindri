@@ -26,8 +26,14 @@ type Config struct {
 	Architecture  string `yaml:"architecture"`  // repo-relative architecture doc (default ARCHITECTURE.md)
 	Containerfile string `yaml:"containerfile"` // repo-relative image recipe ("" = filename discovery)
 	ReviewPrompt  string `yaml:"review_prompt"` // repo-relative reviewer-prompt file ("" = default prompt)
-	GitHub        GitHub `yaml:"github"`
-	Lint          Lint   `yaml:"lint"`
+
+	// Verify is a repo-relative executable the submit gate runs in the worktree — the project's
+	// own checks, which no generic toolbelt can know. A path, not a command line, so it can be
+	// validated before it runs; wrap a build tool in a script. "" = the built-in gates alone.
+	Verify string `yaml:"verify"`
+
+	GitHub GitHub `yaml:"github"`
+	Lint   Lint   `yaml:"lint"`
 
 	// Reference pins the branch agents branch from and merge into. Unset reads the main
 	// checkout's current branch, so switching branches redefines it for the whole fleet.
