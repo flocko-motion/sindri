@@ -218,30 +218,30 @@ A shared domain entity's model and its pure logic SHALL live in its own package 
 
 The layered structure that realizes the rules above:
 
-- `internal/issue/` — **logic / bottom primitive.** The domain model (`Issue` =
-  a task and/or an openspec change, with worker name and PRs) and all state and
-  label logic. Pure: imports no other internal package, no UI, no rendering.
-- `internal/board/` — **assembly / refresh.** The single data path that gathers
-  the fractured sources (td tasks, openspec changes, workers, PRs) and derives
-  one coherent `[]issue.Issue` via the pure `issue.Assemble`. Sits above
-  `issue` and depends on the adapters it must not.
-- `internal/render/` — **UI-neutral rendering.** Maps state to styling (status
-  colors, gate marks). Shared by every interface; contains no interface code.
-- `internal/adapter/td/`, `internal/adapter/spec/` — **adapters.** Wrap the td
-  task CLI and the openspec CLI. Internal logic reaches those tools only here.
-- `internal/ghlocal/store/` — **adapter.** The local PR record store and the git
-  checkout/merge/branch operations.
-- `internal/worker/` — **adapter + lifecycle.** Wraps podman/git worktrees for
-  agent containers.
-- `internal/container/` — **adapter.** The agent container image identity/build.
-- `internal/lint/` — **logic.** The loc + deadcode linters, used by `sindri
-  lint` and the submit lint gate.
-- `internal/agentcli/` — **command.** The shared agent command set
-  (issue/submit/done/pr…); wired into the two agent binaries below.
-- `cmd/sindri/` — **CLI interface (host, human).** Thin Cobra wrappers that call
-  `board`/`issue` and render via `render`; owns the human-only `pr merge`.
-- `internal/tui/` — **TUI interface.** Thin Bubble Tea wrappers over the same
-  `board`/`issue` state, rendering via `render`.
-- `cmd/sindri-worker/`, `cmd/sindri-review/` — **agent entrypoints.** Thin mains
-  wiring the worker / reviewer subset of `internal/agentcli` (sindri-local, NOT
-  GitHub), the CLIs agents drive inside containers.
+- `internal/api/` — **data.** The exchange format: every type that crosses the
+  wire, plus the pure derivations over them. It imports nothing else internal, so
+  both sides of the socket depend on it without depending on each other.
+- `internal/hub/` — **the core.** The only process with domain logic, split by
+  concern: `workflow` (the task/PR lifecycle), `task`, `comments`, `project`,
+  `registry`, `chat`, `agent` (pod lifecycle), `agentchan` (the per-agent
+  socket), `commands` (the role-filtered surface), `repo` (git/PR mechanics and
+  the submit gate), `server` (HTTP over the socket) and `store` (SQLite).
+- `internal/client/` — **transport.** The wire client every front-end reaches the
+  hub through; it holds no domain logic of its own.
+- `internal/adapter/` — **adapters.** The only code that touches the outside
+  world: `git`, `container`, `tmux`, `agent` (the coding-agent backend, with
+  `agent/claude`), `tasks` (the trackers) and `herdr`.
+- `internal/ui/` — **front-ends.** `cli` and `tui` are interchangeable thin
+  layers over the client; `theme` is the UI-neutral rendering both share; `attach`
+  composes what an interactive attach needs. Nothing here imports `internal/hub`,
+  and a test walks the import graph to keep it that way.
+- `internal/config/`, `internal/container/`, `internal/update/`,
+  `internal/tools/` (`paths`, `debug`) — shared support: the project config, the
+  container-runtime port and image build, the release check, and the filesystem
+  and diagnostic helpers.
+- `internal/brokkr/` (`codemap`, `lint`) — the toolbelt's logic, kept out of the
+  product: the code map and the linters.
+- `cmd/sindri/` — the host CLI and TUI launcher. `cmd/sindri-hub/` — the hub
+  binary. `cmd/sindri-worker/` — the thin browser an agent drives inside its pod.
+  `cmd/brokkr/` — the separate dev-tooling binary.
+

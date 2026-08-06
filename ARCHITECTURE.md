@@ -22,7 +22,8 @@ adapter and nothing else.
 
 ## CLI and TUI are interchangeable front-ends
 
-The CLI (`cmd/sindri`) and the TUI (`internal/tui`) are **thin interface layers**.
+The CLI and the TUI (both under `internal/ui`, launched by `cmd/sindri`) are **thin
+interface layers**.
 They must always execute the **same** core logic — they translate user intent into
 core operations and render the result. Nothing more.
 
@@ -45,6 +46,8 @@ else is a front-end or a pod.
 ## Tooling
 
 - `cmd/sindri` — the product: the host CLI and the TUI launcher.
+- `cmd/sindri-hub` — the hub itself: the single writer, run in the foreground or
+  spawned detached by `sindri hub start`.
 - `cmd/sindri-worker` — the in-pod worker that runs the agent inside its pod.
 - `cmd/brokkr` — a **separate** binary for generic dev tooling (code map, linters),
   kept out of the product.

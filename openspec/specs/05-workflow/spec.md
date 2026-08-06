@@ -301,10 +301,9 @@ proposed task SHALL require the user's approval before any worker can claim it.
 
 ## Structure
 
-The agent loops live in `container/skills/td-next` (worker) and
-`container/skills/td-review` (reviewer); the agents' verbs are implemented in
-`internal/agentcli` (issue/submit/done/pr…), wired into the `sindri-worker` and
-`sindri-review` binaries, with PR records in `internal/ghlocal/store`. The
-human-only merge and the host review flow are the `action-*` specs driven from
-`cmd/sindri` and the TUI. Task state transitions go through the td CLI
-(in-container) and the td adapter (on host).
+The loops are the hub's, not the agents': `internal/hub/workflow/` decides what each
+role is told to do next, and `cmd/sindri-worker/` is the thin browser that renders it
+— one binary for every role, its surface filtered by `internal/hub/commands/`. PR
+records and task state live in `internal/hub/store/`, and the trackers are reached
+through `internal/adapter/tasks/` (`td`, `spec`, `github`). The human-only merge and
+the host review flow are driven from `cmd/sindri` and the TUI in `internal/ui/`.

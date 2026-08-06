@@ -191,7 +191,14 @@ suffix SHALL be appended (brokkr2, eitri2, …) so creation never fails.
 
 ## Structure
 
-- `internal/worker/` (`type: adapter`) — worker discovery/status
-  (`worker.go`) and the container/worktree lifecycle (`lifecycle.go`).
-- `container/` — the agent image (Dockerfile), skills, and CLAUDE.md.
-- `cmd/sindri/` (`type: command`) — `worker`/`work`/`review` wiring.
+- `internal/hub/agent/` (`type: logic`) — the agent lifecycle: launch and stop, the
+  worktree and pod per agent, message injection, and the per-agent memory limit.
+- `internal/adapter/container/` (`type: adapter`) — the container runtime behind a
+  single port, with `pod` (podman) and `applecontainer` backends.
+- `internal/container/` (`type: adapter`) — the agent image: the embedded build
+  context (Dockerfile, entrypoint, shims) and the build itself.
+- `internal/adapter/tmux/` (`type: adapter`) — the session an agent runs in, and how
+  the hub types into it.
+- `cmd/sindri/` (`type: command`) — the `agent` verbs; the TUI's Agents tab drives the
+  same operations through `internal/ui/tui`.
+

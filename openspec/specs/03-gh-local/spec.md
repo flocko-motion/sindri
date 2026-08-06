@@ -186,7 +186,7 @@ merge SHALL never block on a GitHub write-back.
 For the td backend, the td adapter SHALL read tasks directly from td's own SQLite
 database for speed, but SHALL perform every write action (create, start, comment,
 review, …) only through the `td` tool — never by writing td's database directly.
-Both strategies SHALL be encapsulated in `internal/adapter/td` so internal logic
+Both strategies SHALL be encapsulated in `internal/adapter/tasks/td` so internal logic
 sees a single adapter interface.
 
 #### Scenario: Fast read
@@ -272,11 +272,12 @@ current.
 
 ## Structure
 
-- `internal/ghlocal/store/` (`type: adapter`) — the PR record store and the
-  git checkout/merge/branch operations.
-- `internal/agentcli/` (`type: command`) — the shared agent command set
-  (issue/submit/done/pr create/list/view, plus pr approve/reject for review),
-  wrapping the store, td, git, and the lint gate. Two thin entrypoints wire role
-  subsets: `cmd/sindri-worker/` (worker) and `cmd/sindri-review/` (reviewer).
-- `internal/worker/` (`type: adapter`) — creates and tends the worktrees the
-  branches live in (see workers).
+- `internal/hub/repo/` (`type: logic`) — the git mechanics behind a PR:
+  materializing a branch for review, scrapping one, and running the submit gate.
+- `internal/hub/workflow/` (`type: logic`) — the PR lifecycle: submit, contribute,
+  review verdicts, merge, and the directive each role is given.
+- `internal/hub/store/` (`type: logic`) — the PR records, task cache and event log,
+  in the hub's SQLite database.
+- `internal/hub/commands/` (`type: logic`) — the role-filtered command surface an
+  agent sees; `cmd/sindri-worker/` is the thin browser that renders it.
+
