@@ -228,8 +228,9 @@ func Validate(projectRoot string) (ok bool, output string) {
 	return !failed, formatReport(out, failed)
 }
 
-// formatReport renders the JSON report: a line per item, and under a failing one every issue with
-// its file and rule. Unparseable JSON falls back to raw output rather than swallowing the verdict.
+// formatReport renders the JSON report at the length its verdict deserves: a pass is one line, an
+// empty project says so, and a failure lists each bad item with its file and rule. Unparseable JSON
+// falls back to raw output rather than swallowing the verdict.
 func formatReport(raw []byte, failed bool) string {
 	var r report
 	if err := json.Unmarshal(raw, &r); err != nil {

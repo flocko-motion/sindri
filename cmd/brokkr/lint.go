@@ -237,7 +237,9 @@ func runAll(out io.Writer, o lintOpts) (bool, error) {
 	var failed, names []string
 	for _, l := range linters {
 		names = append(names, l.name)
-		// Buffered, because whether a section is worth a banner is only known once it has run.
+		// Buffered because a banner depends on the VERDICT, which only exists once the linter has
+		// returned. The cost is that one linter's findings appear when it finishes rather than as it
+		// goes; the wait is bounded by a single linter, and the run is far shorter to read for it.
 		var buf bytes.Buffer
 		bad, err := l.run(&buf)
 		if err != nil {
