@@ -75,6 +75,61 @@ func (m *model) openNewMeetingChoice() {
 	}
 }
 
+// openAddMemberChoice picks an agent — from the whole fleet, not just this repo, since membership
+// spans projects — to add to the meeting room. Agents already in the room are left off the list.
+func (m *model) openAddMemberChoice() {
+	cl := m.cl
+	inRoom := map[string]bool{}
+	for _, mem := range m.state.Chat.Members {
+		inRoom[mem.Name] = true
+	}
+	var opts, vals []string
+	for _, a := range m.state.Agents {
+		if inRoom[a.Name] {
+			continue
+		}
+		opts = append(opts, a.Name+" ("+a.Role+")")
+		vals = append(vals, a.Name)
+	}
+	if len(opts) == 0 {
+		m.flash = "no agents to add — every agent is already in the room"
+		return
+	}
+	m.choice = choiceModalState{
+		active: true, title: "add to the meeting room…", filterable: true,
+		options: opts, values: vals,
+		apply: func(v string) tea.Cmd {
+			return mutateThenRefresh(cl, func() error { return cl.ChatAdd(v) })
+		},
+	}
+}
+
+// openRemoveMemberChoice picks a current room member to remove.
+func (m *model) openRemoveMemberChoice() {
+	cl := m.cl
+	members := m.state.Chat.Members
+	if len(members) == 0 {
+		m.flash = "the meeting room is empty — nothing to remove"
+		return
+	}
+	opts := make([]string, len(members))
+	vals := make([]string, len(members))
+	for i, mem := range members {
+		label := mem.Name
+		if mem.Role != "" {
+			label += " (" + mem.Role + ")"
+		}
+		opts[i], vals[i] = label, mem.Name
+	}
+	m.choice = choiceModalState{
+		active: true, title: "remove from the meeting room…", filterable: true,
+		options: opts, values: vals,
+		apply: func(v string) tea.Cmd {
+			return mutateThenRefresh(cl, func() error { return cl.ChatRemove(v) })
+		},
+	}
+}
+
 // updateComposer routes a keypress while composing: esc cancels, ctrl+s sends, ctrl+c quits. Enter
 // is a newline for a message but submits a command — a one-line "/add nori" should not need ctrl+s.
 func (m model) updateComposer(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

@@ -132,8 +132,10 @@ var keymap = []binding{
 	{keyConfig, lbl("config"), scopeRepos},
 	{keyDelete, lbl("forget"), scopeRepos},
 
-	// Chat (membership is curated from the CLI: `sindri meeting add/remove`).
+	// Chat.
 	{"enter", lbl("compose"), scopeChat},
+	{keyApprove, lbl("add member"), scopeChat},
+	{keyReject, lbl("remove member"), scopeChat},
 	{keyNew, lbl("new meeting"), scopeChat},
 }
 

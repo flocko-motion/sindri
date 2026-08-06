@@ -265,7 +265,7 @@ func (m *model) onKey(k string) tea.Cmd {
 				return m.lintCmd(id)
 			}
 		}
-	case keyReject: // prs: reject a PR · tasks: reject a proposal · agents: rebase (R = reBase)
+	case keyReject: // prs: reject a PR · tasks: reject a proposal · agents: rebase (R = reBase) · meeting: remove a member
 		if m.tab == 2 && m.selID() != "" {
 			m.openRejectForm(m.selID())
 			return nil
@@ -277,13 +277,17 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 1 && m.selID() != "" && !m.isOrphan(m.selID()) {
 			return m.rebaseAgentCmd(m.selID())
 		}
+		if m.tab == 4 {
+			m.openRemoveMemberChoice()
+			return nil
+		}
 	case keyVerify: // prs: verify — materialize the PR into the review workspace + shell in
 		if m.tab == 2 {
 			if id := m.selID(); id != "" && m.cl != nil {
 				return m.verifyCmd(id)
 			}
 		}
-	case keyApprove: // approve, the human gate: a PR (prs) / a planner-proposed task (tasks)
+	case keyApprove: // approve, the human gate: a PR (prs) / a planner-proposed task (tasks) / meeting: add a member
 		if m.tab == 2 && m.selID() != "" { // approve the PR yourself, so it can be merged
 			return m.action(func(id string) error { return m.cl.ApprovePR(id) })
 		}
@@ -295,6 +299,10 @@ func (m *model) onKey(k string) tea.Cmd {
 			}
 			m.flash = "approving " + id + "…"
 			return approveTaskCmd(m.cl, id, false)
+		}
+		if m.tab == 4 {
+			m.openAddMemberChoice()
+			return nil
 		}
 	case keyReview: // prs: hand the PR to a reviewer agent
 		if m.tab == 2 && m.selID() != "" {

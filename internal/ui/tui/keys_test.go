@@ -239,6 +239,72 @@ func TestNewKeysReachTheirActions(t *testing.T) {
 			t.Errorf("%q should open dvalin's options, got active=%v title=%q", keyOptions, m.form.active, m.form.title)
 		}
 	})
+
+	t.Run("add member on the Meeting tab", func(t *testing.T) {
+		m := newModel(nil, nil, "")
+		m.tab = 4 // Meeting
+		m.state = api.BoardState{
+			Agents: []api.AgentView{{Name: "dvalin", Role: "worker"}, {Name: "nori", Role: "reviewer"}},
+			Chat:   api.ChatView{Members: []api.ChatMember{{Name: "nori", Role: "reviewer"}}},
+		}
+		m.onKey(keyApprove)
+		if !m.choice.active {
+			t.Fatal("A should open the add-member chooser")
+		}
+		if len(m.choice.values) != 1 || m.choice.values[0] != "dvalin" {
+			t.Errorf("the add-member chooser should offer only agents not already in the room, got %v", m.choice.values)
+		}
+	})
+
+	t.Run("remove member on the Meeting tab", func(t *testing.T) {
+		m := newModel(nil, nil, "")
+		m.tab = 4 // Meeting
+		m.state = api.BoardState{Chat: api.ChatView{Members: []api.ChatMember{{Name: "nori", Role: "reviewer"}}}}
+		m.onKey(keyReject)
+		if !m.choice.active {
+			t.Fatal("R should open the remove-member chooser")
+		}
+		if len(m.choice.values) != 1 || m.choice.values[0] != "nori" {
+			t.Errorf("the remove-member chooser should offer the current roster, got %v", m.choice.values)
+		}
+	})
+}
+
+// TestMeetingMembershipKeysHaveNothingToOffer: A/R degrade to a flash rather than an empty
+// chooser when there is nobody to add or remove — a modal with zero rows is a dead end.
+func TestMeetingMembershipKeysHaveNothingToOffer(t *testing.T) {
+	m := newModel(nil, nil, "")
+	m.tab = 4 // Meeting
+	m.state = api.BoardState{Agents: []api.AgentView{{Name: "nori"}}, Chat: api.ChatView{Members: []api.ChatMember{{Name: "nori"}}}}
+	m.onKey(keyApprove) // every agent is already a member
+	if m.choice.active {
+		t.Error("A should not open a chooser with nothing to add")
+	}
+	if m.flash == "" {
+		t.Error("A should flash why there was nothing to add")
+	}
+
+	m = newModel(nil, nil, "")
+	m.tab = 4
+	m.onKey(keyReject) // empty room
+	if m.choice.active {
+		t.Error("R should not open a chooser with nothing to remove")
+	}
+	if m.flash == "" {
+		t.Error("R should flash why there was nothing to remove")
+	}
+}
+
+// TestMeetingMembershipKeysAreAdvertised: the Chat footer must offer A/R now that the gap the
+// old comment described ("membership is curated from the CLI") is closed.
+func TestMeetingMembershipKeysAreAdvertised(t *testing.T) {
+	got := footerOf(t, scopeChat)
+	if !strings.Contains(got, keyApprove+" add member") {
+		t.Errorf("the Meeting footer should offer %q add member:\n%s", keyApprove, got)
+	}
+	if !strings.Contains(got, keyReject+" remove member") {
+		t.Errorf("the Meeting footer should offer %q remove member:\n%s", keyReject, got)
+	}
 }
 
 // footerOf renders one scope's footer for assertions — the string the user actually reads, and

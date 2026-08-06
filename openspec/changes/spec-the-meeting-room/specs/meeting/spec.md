@@ -32,19 +32,20 @@ Adding and removing members SHALL be the user's action alone, available as an ex
 command and as an in-room command. An agent SHALL NOT be able to change membership —
 neither its own nor another's — even though it can speak in the room.
 
-Adding an agent already present SHALL be a no-op rather than an error. Removing an agent
-SHALL tell that agent it has been removed. Deleting an agent SHALL drop its membership,
-so the roster never names an agent that no longer exists.
+Adding an agent already present SHALL be refused with an error naming the agent, not
+silently accepted — the roster does not change, and the user is told why. Removing an
+agent SHALL tell that agent it has been removed. Deleting an agent SHALL drop its
+membership, so the roster never names an agent that no longer exists.
 
 #### Scenario: Agent cannot add or remove
 
 - **WHEN** an agent attempts to change the room's membership
 - **THEN** it cannot: only the user's path interprets membership commands
 
-#### Scenario: Adding twice changes nothing
+#### Scenario: Adding twice is refused
 
 - **WHEN** the user adds an agent that is already a member
-- **THEN** the roster is unchanged and no notice is sent
+- **THEN** the roster is unchanged and the user is told the agent is already present
 
 #### Scenario: A removed agent is told
 
@@ -95,8 +96,9 @@ first — what was said most recently is what the newcomer is about to be asked 
 
 Starting a new meeting SHALL clear the shared transcript and announce the fresh start to
 the room, and SHALL leave membership intact — a new meeting is about the history everyone
-shares, not about who is in the room. Because clearing cannot be undone, the interface
-SHALL confirm before it happens, and SHALL report whether there was anything to clear.
+shares, not about who is in the room. Because clearing cannot be undone, an interactive
+front-end SHALL confirm before it happens; the CLI's equivalent command runs immediately,
+consistent with its other destructive verbs, and says so in its own help text instead.
 
 #### Scenario: History cleared, members kept
 
@@ -104,10 +106,12 @@ SHALL confirm before it happens, and SHALL report whether there was anything to 
 - **THEN** the transcript is emptied, the room is told, and every member is still a
   member
 
-#### Scenario: Confirmed before clearing
+#### Scenario: Confirmed in the TUI, immediate in the CLI
 
-- **WHEN** the user triggers a new meeting from either front-end
+- **WHEN** the user starts a new meeting from the TUI
 - **THEN** the action is confirmed first, since it is irreversible
+- **WHEN** the user runs the CLI's equivalent command
+- **THEN** it runs immediately, matching every other destructive CLI verb here
 
 ### Requirement: In-room commands and hub replies belong to the user
 
@@ -117,15 +121,16 @@ marker. A front-end SHALL determine whether a line is a command by asking the sh
 rule rather than reimplementing it, so a composer and the hub never disagree about what
 was typed.
 
-A hub reply to such a command SHALL be recorded for the user only and SHALL NOT be
-forwarded to the members, so the room's transcript is a conversation and not an audit of
-the user's tooling.
+A hub reply to such a command SHALL NOT be forwarded live to any member — no currently
+connected agent receives the command or the reply as a delivery. The reply lands in the
+same transcript a message would, so the user's own view shows it in place, and it can
+resurface later in a newcomer's catch-up alongside real conversation.
 
 #### Scenario: A command is not broadcast
 
 - **WHEN** the user types an in-room command
-- **THEN** the hub acts on it and replies to the user, and no member receives the command
-  or the reply
+- **THEN** the hub acts on it and records a reply, and no currently connected member
+  receives the command or the reply as a live delivery
 
 #### Scenario: One rule for what a command is
 
