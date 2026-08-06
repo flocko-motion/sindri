@@ -9,6 +9,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -215,8 +216,9 @@ func runComments(out io.Writer, o lintOpts) (bool, error) {
 	return found, nil
 }
 
-// runAll runs every linter in its own section, then NAMES the failures. It used to re-print their
-// findings too, which doubled every run's output — the wall `--limit` exists to prevent.
+// runAll runs every linter and NAMES the failures. A section banner marks findings, so a linter with
+// none contributes nothing to read: a clean run is its last line. Anything a PASSING linter says (an
+// openspec verdict, a skip note) prints plainly — it is evidence, not a finding.
 func runAll(out io.Writer, o lintOpts) (bool, error) {
 	linters := []struct {
 		name string
@@ -232,27 +234,45 @@ func runAll(out io.Writer, o lintOpts) (bool, error) {
 		{"js", func(w io.Writer) (bool, error) { return runJS(w, o) }},
 		{"openspec", func(w io.Writer) (bool, error) { return lintOpenspec(w, o.cap.Quiet()), nil }},
 	}
-	var failed []string
+	var failed, names []string
 	for _, l := range linters {
-		fmt.Fprintf(out, "== %s ==\n", l.name)
-		bad, err := l.run(out)
+		names = append(names, l.name)
+		// Buffered, because whether a section is worth a banner is only known once it has run.
+		var buf bytes.Buffer
+		bad, err := l.run(&buf)
 		if err != nil {
 			// One linter breaking does not cancel the others — the rest of the findings are what
 			// you want while fixing this one. It still counts as FAILING, so the gate goes red.
-			fmt.Fprintf(out, "%s: %v\n", l.name, err)
+			fmt.Fprintf(&buf, "%s: %v\n", l.name, err)
 			bad = true
 		}
-		fmt.Fprintln(out)
 		if bad {
 			failed = append(failed, l.name)
 		}
+		writeSection(out, l.name, buf.Bytes(), bad)
 	}
 	if len(failed) == 0 {
-		fmt.Fprintln(out, "OK: all linters passed")
+		fmt.Fprintf(out, "OK: all %d linters passed (%s)\n", len(names), strings.Join(names, ", "))
 		return false, nil
 	}
 	fmt.Fprintf(out, "FAIL: %s — findings are in the section(s) above.\n", strings.Join(failed, ", "))
 	return true, nil
+}
+
+// writeSection frames one linter's output. The banner marks FINDINGS, so a passing linter that has
+// something to say — an openspec verdict, a "no Go toolchain" skip — prints it plainly, and a clean
+// run is its own last line.
+func writeSection(out io.Writer, name string, body []byte, bad bool) {
+	if bad {
+		fmt.Fprintf(out, "== %s ==\n", name)
+	}
+	if len(body) == 0 {
+		return
+	}
+	_, _ = out.Write(body)
+	if bad {
+		fmt.Fprintln(out)
+	}
 }
 
 // runLint runs one linter's body, turning a panic into a loud failure with its stack. Failure

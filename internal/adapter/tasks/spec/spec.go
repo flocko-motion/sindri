@@ -232,8 +232,17 @@ func Validate(projectRoot string) (ok bool, output string) {
 // its file and rule. Unparseable JSON falls back to raw output rather than swallowing the verdict.
 func formatReport(raw []byte, failed bool) string {
 	var r report
-	if err := json.Unmarshal(raw, &r); err != nil || len(r.Items) == 0 {
+	if err := json.Unmarshal(raw, &r); err != nil {
 		return string(raw)
+	}
+	// A project with an openspec/ directory but nothing in it yet is a valid, passing, EMPTY report.
+	// It used to take the unparseable branch above and dump the whole JSON blob.
+	if len(r.Items) == 0 {
+		return "openspec: no specs or changes to validate\n"
+	}
+	if !failed {
+		// A pass needs its verdict, not a report: one line proving the delegated validator ran.
+		return fmt.Sprintf("openspec: %d passed (openspec validate --all)\n", len(r.Items))
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n", ValidatorName)
