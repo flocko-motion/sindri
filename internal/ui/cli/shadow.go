@@ -1,5 +1,5 @@
 // package: ui/cli / shadow
-// type:    logic (install-conflict detection)
+// type:    command (install-conflict detection)
 // job:     warn when a second sindri or brokkr sits elsewhere on PATH than the one
 // running. The one deliberate exception to "ask the hub, don't probe yourself":
 // the question is about this CLI process's own PATH, which only it can see.

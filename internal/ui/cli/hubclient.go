@@ -1,5 +1,5 @@
 // package: ui/cli / hubclient
-// type:    logic (CLI-side hub connection)
+// type:    command (CLI-side hub connection)
 // job:     connect CLI commands to the single global hub through one chokepoint,
 // dialHub, which reconciles versions (offering a restart on a mismatch).
 // Also starts/restarts the background hub. One hub per machine; commands
