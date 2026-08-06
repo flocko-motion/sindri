@@ -247,17 +247,49 @@ func (p *ProjectStore) OpenLeaves() ([]Task, error) {
 	return scanTasks(rows)
 }
 
-// OpenChildren returns a container's open, approved children in this project.
-func (p *ProjectStore) OpenChildren(parentID string) ([]Task, error) {
+// OpenSubtasks returns the work left inside a feature: its open, approved descendants at ANY depth
+// that have no open children of their own. Depth matters because a hierarchy is not always two
+// levels — a direct child can itself be an epic, and handing one out as though it were a piece of
+// work got it closed on the next checkpoint with its own children still open. Leaves only, for the
+// reason OpenLeaves gives: the hierarchy is the unit of work, and its parents are not work.
+func (p *ProjectStore) OpenSubtasks(parentID string) ([]Task, error) {
 	rows, err := p.s.db.Query(`
+		WITH RECURSIVE descendant(id) AS (
+			SELECT id FROM tasks WHERE project=?1 AND parent_id=?2
+			UNION
+			SELECT t.id FROM tasks t JOIN descendant d ON t.parent_id=d.id WHERE t.project=?1
+		)
 		SELECT `+taskCols+taskFrom+`
-		WHERE t.project=? AND t.status='open' AND (a.status IS NULL OR a.status='approved') AND t.parent_id=?
+		WHERE t.project=?1 AND t.id IN (SELECT id FROM descendant)
+		  AND t.status='open' AND (a.status IS NULL OR a.status='approved')
+		  AND NOT EXISTS (SELECT 1 FROM tasks c WHERE c.project=t.project AND c.parent_id=t.id AND c.status='open')
 		ORDER BY CASE WHEN t.priority='' THEN 1 ELSE 0 END, t.priority, t.id`, p.project, parentID)
+	if err != nil {
+		return nil, fmt.Errorf("open subtasks of %s: %w", parentID, err)
+	}
+	defer rows.Close()
+	return scanTasks(rows)
+}
+
+// OpenChildIDs lists the DIRECT children of a task that are still open — what makes closing it a
+// lie. Ids only: every caller either refuses on the count or names them back to a human.
+func (p *ProjectStore) OpenChildIDs(parentID string) ([]string, error) {
+	rows, err := p.s.db.Query(
+		`SELECT id FROM tasks WHERE project=? AND parent_id=? AND status='open' ORDER BY id`,
+		p.project, parentID)
 	if err != nil {
 		return nil, fmt.Errorf("open children of %s: %w", parentID, err)
 	}
 	defer rows.Close()
-	return scanTasks(rows)
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // GetTask returns a single cached task in this project (with its approval overlay).

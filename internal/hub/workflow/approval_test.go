@@ -110,17 +110,20 @@ func TestApprovedPackageIsClaimableAsOne(t *testing.T) {
 			if len(containers) != 1 {
 				t.Fatalf("subtree=true: want the epic claimable, got %d containers", len(containers))
 			}
-			children, err := ps.OpenChildren("td-epic")
+			// td-b, not td-a: this fixture's tree nests, and td-a is a parent of an open child, so
+			// the work inside the package is the leaf beneath it. Serving td-a here is what let a
+			// checkpoint close it over td-b.
+			children, err := ps.OpenSubtasks("td-epic")
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(children) != 1 || children[0].ID != "td-a" {
-				t.Errorf("children of a released package: got %d, want [td-a]", len(children))
+			if len(children) != 1 || children[0].ID != "td-b" {
+				t.Errorf("work inside a released package: got %d task(s), want [td-b]", len(children))
 			}
 			continue
 		}
 		// Narrow approve: the epic has no approved open child, so there is nothing to work.
-		children, err := ps.OpenChildren("td-epic")
+		children, err := ps.OpenSubtasks("td-epic")
 		if err != nil {
 			t.Fatal(err)
 		}

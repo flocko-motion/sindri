@@ -296,8 +296,8 @@ func TestOpenLeavesAndChildren(t *testing.T) {
 		t.Fatalf("OpenLeaves: want [L] (standalone only), got %v", got)
 	}
 	// Children remain the package's subtask stream, which is how the holder works them.
-	if got := ids(mustChildren(t, p, "P")); !eq(got, []string{"C1", "C2"}) {
-		t.Fatalf("OpenChildren: got %v", got)
+	if got := ids(mustSubtasks(t, p, "P")); !eq(got, []string{"C1", "C2"}) {
+		t.Fatalf("OpenSubtasks: got %v", got)
 	}
 
 	// Holding P changes nothing for the leaf pool: its children were never in it.
@@ -307,8 +307,8 @@ func TestOpenLeavesAndChildren(t *testing.T) {
 	if got := ids(mustLeaves(t, p)); !eq(got, []string{"L"}) {
 		t.Fatalf("OpenLeaves after reserving P: got %v", got)
 	}
-	if got := ids(mustChildren(t, p, "P")); !eq(got, []string{"C1", "C2"}) {
-		t.Fatalf("OpenChildren still serves the holder: got %v", got)
+	if got := ids(mustSubtasks(t, p, "P")); !eq(got, []string{"C1", "C2"}) {
+		t.Fatalf("OpenSubtasks still serves the holder: got %v", got)
 	}
 }
 
@@ -401,9 +401,9 @@ func mustLeaves(t *testing.T, p *ProjectStore) []Task {
 	return v
 }
 
-func mustChildren(t *testing.T, p *ProjectStore, parent string) []Task {
+func mustSubtasks(t *testing.T, p *ProjectStore, parent string) []Task {
 	t.Helper()
-	v, err := p.OpenChildren(parent)
+	v, err := p.OpenSubtasks(parent)
 	if err != nil {
 		t.Fatal(err)
 	}

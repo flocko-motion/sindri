@@ -124,21 +124,28 @@ func TestSyncTasksCarriesOwnedUpdatedAt(t *testing.T) {
 // TestReconciledStatusRule pins the pure rule the sweep applies.
 func TestReconciledStatusRule(t *testing.T) {
 	for _, c := range []struct {
-		status             string
-		activePR, assigned bool
-		want               string
+		status                           string
+		activePR, assigned, openChildren bool
+		want                             string
 	}{
-		{"in_progress", false, false, "open"},       // nobody holds it
-		{"in_progress", false, true, "in_progress"}, // its worker still does
-		{"in_review", false, false, "open"},         // no PR, nobody holds it
-		{"in_review", false, true, "in_progress"},   // no PR, but still assigned
-		{"in_review", true, false, "in_review"},     // a live PR justifies it
-		{"closed", false, false, "closed"},          // a finished task is left alone
-		{"open", false, false, "open"},
+		{"in_progress", false, false, false, "open"},       // nobody holds it
+		{"in_progress", false, true, false, "in_progress"}, // its worker still does
+		{"in_review", false, false, false, "open"},         // no PR, nobody holds it
+		{"in_review", false, true, false, "in_progress"},   // no PR, but still assigned
+		{"in_review", true, false, false, "in_review"},     // a live PR justifies it
+		{"closed", false, false, false, "closed"},          // a finished task is left alone
+		{"open", false, false, false, "open"},
+		// A parent is finished exactly when its children are, so a done one with work still open
+		// under it is stale in the same way the others are — and is reopened, which is what heals a
+		// tree an earlier build broke by closing the middle of it.
+		{"closed", false, false, true, "open"},
+		{"merged", false, false, true, "open"},
+		{"approved", false, false, true, "open"},
+		{"open", false, false, true, "open"}, // already open: having children changes nothing
 	} {
-		if got := reconciledStatus(c.status, c.activePR, c.assigned); got != c.want {
-			t.Errorf("reconciledStatus(%q, pr=%v, assigned=%v) = %q, want %q",
-				c.status, c.activePR, c.assigned, got, c.want)
+		if got := reconciledStatus(c.status, c.activePR, c.assigned, c.openChildren); got != c.want {
+			t.Errorf("reconciledStatus(%q, pr=%v, assigned=%v, openChildren=%v) = %q, want %q",
+				c.status, c.activePR, c.assigned, c.openChildren, got, c.want)
 		}
 	}
 }

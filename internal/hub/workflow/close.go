@@ -10,6 +10,7 @@ package workflow
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -62,26 +63,44 @@ func (e *Engine) ScrapTask(project, id string, subtree, withPRs bool) error {
 	return nil
 }
 
-// finishTask is the shared close/scrap path: dispatch to the id's backend, then free whoever held
-// the task. Cancelling mid-flight is allowed, never a refusal that strands the human.
-func (e *Engine) finishTask(project, id string, scrap bool) error {
-	ps := e.store.For(project)
-	root := e.deps.ProjectRoot(project)
-	// Each source acts only on its own ids, so this never branches on the id scheme; nothing
-	// owning it means a genuinely unknown backend.
-	handled := false
+// finishAtSource ends a task where its status actually lives. Each source acts only on its own ids,
+// so this never branches on the id scheme; nothing owning it means a genuinely unknown backend.
+// Shared with the checkpoint, which finishes a subtask the same way: writing owned_tasks directly
+// works only for the ids sindri owns, and an os-/gh- subtask needs its own source told.
+func (e *Engine) finishAtSource(project, root, id string, scrap bool) error {
 	for _, src := range e.taskSources(project) {
 		ok, err := src.Finish(root, id, scrap)
 		if err != nil {
 			return err
 		}
 		if ok {
-			handled = true
-			break
+			return nil
 		}
 	}
-	if !handled {
-		return fmt.Errorf("%s: unknown task backend", id)
+	return fmt.Errorf("%s: unknown task backend", id)
+}
+
+// finishTask is the shared close/scrap path: dispatch to the id's backend, then free whoever held
+// the task. Cancelling mid-flight is allowed, never a refusal that strands the human.
+func (e *Engine) finishTask(project, id string, scrap bool) error {
+	ps := e.store.For(project)
+	root := e.deps.ProjectRoot(project)
+	// A parent is done exactly when its children are, so "done" is refused over open work — it would
+	// state something untrue about the tree and hide those children from every view that walks it.
+	// Only the done close: a scrap discards deepest-first, and stranding subtasks as roots is its
+	// documented behaviour rather than a lie about them.
+	if !scrap {
+		open, err := ps.OpenChildIDs(id)
+		if err != nil {
+			return err
+		}
+		if len(open) > 0 {
+			return fmt.Errorf("%s has open subtasks (%s) — close those first, or discard the whole tree with scrap --subtree",
+				id, strings.Join(open, ", "))
+		}
+	}
+	if err := e.finishAtSource(project, root, id, scrap); err != nil {
+		return err
 	}
 	// Free whoever held it, so nobody grinds on dead work. The worktree is NOT reset here — the
 	// agent may keep editing, so claimLeaf cleans up when it takes its next task.

@@ -115,18 +115,27 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 		e.deps.Notify()
 		return pr, nil
 	}
-	// Milestone PR for a held container: land the work but KEEP the branch/
+	// A PARTIAL milestone on a held feature: land the work but KEEP the branch and the agent on it,
+	// since subtasks remain. A feature with none left is finished by this merge, so it takes the
+	// ordinary path below — closing the task and releasing the agent. Keeping it here left a worker
+	// holding a feature that had already landed, with its task still reading open.
 	if holder, _ := ps.GetState(pr.Agent); holder.Container != "" && holder.Container == pr.Branch {
-		if a, ok, _ := ps.GetAgent(pr.Agent); ok {
-			_ = git.RebaseOnto(filepath.Join(root, a.Workspace), pr.Branch, pr.Base) // ff past the merge
+		open, oerr := ps.OpenSubtasks(holder.Container)
+		if oerr != nil {
+			return store.PR{}, oerr
 		}
-		_ = ps.Log(pr.Agent, "merged", prID+" (milestone)")
-		_ = ps.LogPR(prID, "merged", "milestone into "+pr.Base)
-		e.resumeContainer(project, pr.Agent)
-		_ = e.deps.InjectWhenReady(project, pr.Agent, MsgMilestoneMerged(prID))
-		e.rebasePlanners(project, pr.Base)
-		e.deps.Notify()
-		return pr, nil
+		if len(open) > 0 {
+			if a, ok, _ := ps.GetAgent(pr.Agent); ok {
+				_ = git.RebaseOnto(filepath.Join(root, a.Workspace), pr.Branch, pr.Base) // ff past the merge
+			}
+			_ = ps.Log(pr.Agent, "merged", prID+" (milestone)")
+			_ = ps.LogPR(prID, "merged", "milestone into "+pr.Base)
+			e.resumeContainer(project, pr.Agent)
+			_ = e.deps.InjectWhenReady(project, pr.Agent, MsgMilestoneMerged(prID))
+			e.rebasePlanners(project, pr.Base)
+			e.deps.Notify()
+			return pr, nil
+		}
 	}
 	// Tell every task source, so each runs its own consequence on its own ids and the workflow
 	// need not know the backend. After the local merge, so a failure warns rather than fails it.

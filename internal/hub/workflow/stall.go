@@ -12,11 +12,16 @@ import "time"
 // that a thinking model, a human reading the pane, or a build under a prompt all expire first.
 const StallDwell = 5 * time.Minute
 
-// Stalled reports whether an agent holds work it has stopped doing. Only phase "working" qualifies,
-// which is what excludes the phases that exist to wait: "submitted" awaits a verdict, and an
-// all-checkpointed container awaits its next subtask (-> DirContainerWait). Neither reports working.
-func Stalled(phase, runtime string, idleFor time.Duration) bool {
-	return phase == "working" && runtime == "idle" && idleFor >= StallDwell
+// Stalled reports whether an agent holds work it has stopped doing: a subtask or task in "working",
+// or a feature whose subtasks are all checkpointed and which is therefore due to be submitted. The
+// phase that is left out is the one that exists to wait — "submitted" awaits a verdict, and waiting
+// is the whole of its job. A finished feature used to belong in that group, back when only a human
+// could open its milestone PR; now the worker submits it, so sitting there is a stall like any other.
+func Stalled(phase, container, runtime string, idleFor time.Duration) bool {
+	if runtime != "idle" || idleFor < StallDwell {
+		return false
+	}
+	return phase == "working" || (container != "" && phase != "submitted")
 }
 
 // NudgeStalled prods an agent holding work to continue or say what blocks it, reporting whether it
@@ -25,18 +30,24 @@ func Stalled(phase, runtime string, idleFor time.Duration) bool {
 func (e *Engine) NudgeStalled(project, name, runtime string, idleFor time.Duration) bool {
 	ps := e.store.For(project)
 	st, err := ps.GetState(name)
-	if err != nil || !Stalled(st.Phase, runtime, idleFor) {
+	if err != nil || !Stalled(st.Phase, st.Container, runtime, idleFor) {
 		return false
 	}
-	if st.Task == "" {
+	// The subtask if it is on one, else the feature it holds — a worker between subtasks still has
+	// something to be getting on with, and naming it is the point of the nudge.
+	held := st.Task
+	if held == "" {
+		held = st.Container
+	}
+	if held == "" {
 		return false // nothing to name, so nothing useful to say
 	}
 	if !e.deps.AgentAlive(project, name) {
 		return false
 	}
-	if err := e.deps.InjectWhenReady(project, name, MsgStalled(st.Task, idleFor)); err != nil {
+	if err := e.deps.InjectWhenReady(project, name, MsgStalled(held, idleFor)); err != nil {
 		return false
 	}
-	_ = ps.Log(name, "nudge", "stalled on "+st.Task+" — idle for "+idleFor.Round(time.Minute).String())
+	_ = ps.Log(name, "nudge", "stalled on "+held+" — idle for "+idleFor.Round(time.Minute).String())
 	return true
 }

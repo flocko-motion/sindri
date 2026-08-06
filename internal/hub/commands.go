@@ -140,7 +140,7 @@ func (h *Hub) caller(project, name string) (registry.Caller, error) {
 	// nothing left to check point, and a phase proxy would have blocked the resubmit.
 	subtasksOpen := false
 	if st.Container != "" {
-		open, oerr := ps.OpenChildren(st.Container)
+		open, oerr := ps.OpenSubtasks(st.Container)
 		if oerr != nil {
 			return registry.Caller{}, oerr
 		}

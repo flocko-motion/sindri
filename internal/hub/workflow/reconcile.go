@@ -1,9 +1,9 @@
 // package: hub/workflow / reconcile
 // type:    logic (task-status repair)
-// job:     correct a td task's stored status against reality — "in_review" with no
-// open PR, or "in_progress" with no assignee, is stale. Repairs td (the
-// source of truth) so it heals, at task list / info / TUI startup.
-// limits:  td-* tasks only; one td write per real discrepancy, then a no-op.
+// job:     correct a task's stored status against reality — "in_review" with no open
+// PR, "in_progress" with no assignee, or "closed" over open subtasks is stale.
+// Repairs the owning store so it heals, at task list / info / TUI startup.
+// limits:  owned tasks only; one write per real discrepancy, then a no-op.
 package workflow
 
 import (
@@ -11,6 +11,7 @@ import (
 	"os"
 
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/task"
 )
 
 // refreshTask re-reads one task from td and updates its cached row — the targeted
@@ -63,10 +64,14 @@ func (e *Engine) refreshCachedTask(project, id string) {
 	}
 }
 
-// reconciledStatus is the pure rule: a task said to be under review with no open PR
-// isn't, and one said to be in progress with no assigned agent isn't. Everything
-// else is left as-is. Returns the status the task should have.
-func reconciledStatus(status string, activePR, assigned bool) string {
+// reconciledStatus is the pure rule: a task said to be under review with no open PR isn't, one said
+// to be in progress with no assigned agent isn't, and one said to be DONE with open work under it
+// isn't either — a parent is finished exactly when its children are. Everything else is left as-is.
+// Returns the status the task should have.
+func reconciledStatus(status string, activePR, assigned, openChildren bool) string {
+	if openChildren && (task.Task{Status: status}).IsClosed() {
+		return "open" // reopened rather than left lying: the work beneath it is real and unfinished
+	}
 	switch status {
 	case "in_review":
 		if !activePR {
@@ -123,7 +128,11 @@ func (e *Engine) ReconcileTask(project, id string) error {
 	if err != nil {
 		return err
 	}
-	want := reconciledStatus(live.Status, activePR, assigned)
+	open, err := ps.OpenChildIDs(id)
+	if err != nil {
+		return err
+	}
+	want := reconciledStatus(live.Status, activePR, assigned, len(open) > 0)
 	if want == live.Status {
 		return nil
 	}
@@ -161,9 +170,21 @@ func (e *Engine) ReconcileTasks(project string) error {
 			assigned[st.Task] = true
 		}
 	}
+	// Which tasks still have open work under them, from the cache in one pass rather than a query
+	// per task: the sweep runs at every task list and TUI start.
+	all, err := ps.AllTasks()
+	if err != nil {
+		return err
+	}
+	hasOpenChild := map[string]bool{}
+	for _, t := range all {
+		if t.ParentID != "" && t.Status == "open" {
+			hasOpenChild[t.ParentID] = true
+		}
+	}
 	changed := false
 	for _, t := range tasks {
-		if want := reconciledStatus(t.Status, activePR[t.ID], assigned[t.ID]); want != t.Status {
+		if want := reconciledStatus(t.Status, activePR[t.ID], assigned[t.ID], hasOpenChild[t.ID]); want != t.Status {
 			if err := ps.SetOwnedStatus(t.ID, want); err != nil {
 				fmt.Fprintf(os.Stderr, "hub: reconcile %s (%s->%s): %v\n", t.ID, t.Status, want, err)
 				continue

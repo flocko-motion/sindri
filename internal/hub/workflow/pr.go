@@ -205,7 +205,7 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 	// built it submits it, exactly as it would a task of its own.
 	target, branch := st.Task, st.Branch
 	if st.Container != "" {
-		open, oerr := ps.OpenChildren(st.Container)
+		open, oerr := ps.OpenSubtasks(st.Container)
 		if oerr != nil {
 			return 1, oerr
 		}
@@ -638,7 +638,12 @@ func (e *Engine) resumeContainer(project, agent string) {
 			return
 		}
 	}
-	if _, ok := e.advanceContainer(project, agent, st.Container); !ok {
+	_, ok, err := e.advanceContainer(project, agent, st.Container)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "hub: advancing %s within %s: %v\n", agent, st.Container, err)
+		return // leave the state as it is rather than parking it on a failure it can't see
+	}
+	if !ok {
 		_ = ps.SetState(store.AgentState{Agent: agent, Container: st.Container, Branch: st.Container, Phase: "idle"})
 		e.deps.Notify()
 	}

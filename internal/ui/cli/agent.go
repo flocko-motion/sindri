@@ -459,8 +459,9 @@ func agentInfoCmd() *cobra.Command {
 		Use: "info <name>", Short: "Show an agent's status (state, task, PR, clients, recent activity)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, found *api.AgentView) error {
-				fmt.Printf("agent:     %s\nrole:      %s\nstatus:    %s\ntask:      %s\npr:        %s\nworkspace: %s\nmemory:    %s\n",
-					found.Name, found.Role, found.Status, agentTaskLabel(b, found.Task), dash(found.PR), dash(found.Workspace), memoryLabel(found.Memory))
+				fmt.Printf("agent:     %s\nrole:      %s\nstatus:    %s\ntask:      %s\nfeature:   %s\npr:        %s\nworkspace: %s\nmemory:    %s\n",
+					found.Name, found.Role, found.Status, agentTaskLabel(b, found.Task),
+					agentTaskLabel(b, found.Feature), dash(found.PR), dash(found.Workspace), memoryLabel(found.Memory))
 				// engine + the exact runtime instance (id, image, cpus, memory limit, host pid)
 				if inst, err := b.Instance(found.Name); err == nil && inst != "" {
 					fmt.Printf("\n%s\n", inst)

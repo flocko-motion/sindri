@@ -17,13 +17,13 @@ func TestStalledForIsWhatTheBoardAndTheNudgeShare(t *testing.T) {
 
 	// Working: not stalled, whatever the phase says.
 	h.watch.record(a, true, 0, "working", false)
-	if _, stalled := h.stalledFor("proj", "dvalin", "working"); stalled {
+	if _, stalled := h.stalledFor("proj", "dvalin", "working", ""); stalled {
 		t.Error("an agent that is working is not stalled")
 	}
 
 	// Idle, but the dwell has only just begun.
 	h.watch.record(a, true, 0, "idle", false)
-	idleFor, stalled := h.stalledFor("proj", "dvalin", "working")
+	idleFor, stalled := h.stalledFor("proj", "dvalin", "working", "")
 	if stalled {
 		t.Errorf("a fresh idle spell is a pause, not a stall (idle for %v)", idleFor)
 	}
@@ -35,7 +35,7 @@ func TestStalledForIsWhatTheBoardAndTheNudgeShare(t *testing.T) {
 	h.watch.obs[agentKey{"proj", "dvalin"}] = l
 	h.watch.mu.Unlock()
 
-	idleFor, stalled = h.stalledFor("proj", "dvalin", "working")
+	idleFor, stalled = h.stalledFor("proj", "dvalin", "working", "")
 	if !stalled {
 		t.Errorf("a working agent idle for %v past the dwell should be stalled", idleFor)
 	}
@@ -43,8 +43,18 @@ func TestStalledForIsWhatTheBoardAndTheNudgeShare(t *testing.T) {
 		t.Errorf("idleFor should report the whole spell, got %v", idleFor)
 	}
 	// The same observation, on a phase that exists to wait, is not a stall.
-	if _, stalled := h.stalledFor("proj", "dvalin", "submitted"); stalled {
+	if _, stalled := h.stalledFor("proj", "dvalin", "submitted", ""); stalled {
 		t.Error("waiting on a verdict must never read as stalled")
+	}
+	// A worker between subtasks of a feature it still holds has work to be getting on with — either
+	// the next subtask or the submit — so sitting there IS a stall. This was excluded back when a
+	// finished feature genuinely had to wait for a human to open its milestone PR.
+	if _, stalled := h.stalledFor("proj", "dvalin", "idle", "td-EPIC"); !stalled {
+		t.Error("a worker parked on a feature it holds should read as stalled")
+	}
+	// Holding nothing is idle, which is a state of its own and already shows as itself.
+	if _, stalled := h.stalledFor("proj", "dvalin", "idle", ""); stalled {
+		t.Error("an agent holding no work is idle, not stalled")
 	}
 }
 
@@ -52,7 +62,7 @@ func TestStalledForIsWhatTheBoardAndTheNudgeShare(t *testing.T) {
 // not stalled — it is unknown or stopped, and both already show as themselves.
 func TestStalledForNeedsAnObservation(t *testing.T) {
 	h := newHub(t)
-	if _, stalled := h.stalledFor("proj", "never-probed", "working"); stalled {
+	if _, stalled := h.stalledFor("proj", "never-probed", "working", ""); stalled {
 		t.Error("an unobserved agent must not read as stalled")
 	}
 
@@ -60,7 +70,7 @@ func TestStalledForNeedsAnObservation(t *testing.T) {
 	for i := 0; i <= downStrikes; i++ {
 		h.watch.record(a, false, 0, "", true) // conclusively down
 	}
-	if _, stalled := h.stalledFor("proj", "gone", "working"); stalled {
+	if _, stalled := h.stalledFor("proj", "gone", "working", ""); stalled {
 		t.Error("a down agent must not read as stalled")
 	}
 }

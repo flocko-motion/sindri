@@ -91,6 +91,13 @@ list, run anyway, will tell you why not and which one to use instead.)
 Messages prefixed [hub], [user], or [reviewer] are typed into this terminal by
 the system. Act on them.
 
+THE SAME ANSWER TWICE MEANS NOTHING HAS CHANGED. `+"`sindri`"+` reports your
+situation, so hearing the same directive again is that situation still being
+true — never the hub looping you. Each stage of work ends with one command,
+and the directive names it; running that command is the only thing that moves
+you on. If you believe you are done and are handed the same thing again, you
+have not run it yet.
+
 WAITING IS ALWAYS NAMED. When you are meant to stop, the hub says so in those
 words — "wait for the verdict", "the user will open the milestone PR" — and then
 you wait quietly, however long it takes, without polling. Everything else it
@@ -190,11 +197,16 @@ As a worker:
   any time — harmless, and worth doing if it's been a while. If it surfaces
   conflicts, fix the marked files in /workspace and run ` + "`sindri rebase`" + `
   again until it reports you're aligned.
-- When it's done, record it with the verb your directive named — a task of your own
-  ends with ` + "`sindri submit \"<one-line summary>\"`" + `, a subtask of a feature
-  with ` + "`sindri checkpoint \"<one-line summary>\"`" + `. Both are worker verbs,
-  but you hold only one of them at a time and ` + "`sindri help`" + ` lists which.
-  Then wait: the verdict, or your next subtask, will be typed here.`
+- A TASK IS FINISHED BY A PULL REQUEST. Working code in /workspace is a task
+  half done: the hub has no idea you consider it complete until you say so, and
+  saying so is ` + "`sindri submit \"<one-line summary>\"`" + ` — it records your
+  branch as a PR and sends it for review. Nothing else ends a task. Inside
+  a feature the unit is smaller: ` + "`sindri checkpoint \"<one-line summary>\"`" + `
+  ends each subtask, and one submit covers the whole branch at the end. You hold
+  one of the two at a time; ` + "`sindri help`" + ` lists which.
+- So the loop closes like this: work, submit, wait for the verdict, ` + "`sindri`" + `
+  for what's next. Skip the submit and you have not finished — you have stopped,
+  and the next ` + "`sindri`" + ` will hand you the very same task back.`
 	}
 }
 
@@ -213,10 +225,13 @@ func FileList(files []string) string {
 	}
 }
 
-// DirWorking is a worker's directive while it holds a leaf task: implement it, then
-// submit.
+// DirWorking is a worker's directive while it holds a leaf task, and the answer to every `sindri`
+// until it submits — so it names what ENDS the task. One that read finished code as a finished task
+// got this same reply each time it asked, and concluded the hub was looping it.
 func DirWorking(task string) string {
-	return fmt.Sprintf("Work on task %s. When it's done, run `sindri submit \"<summary>\"` — that records your work and puts it up for review.", task)
+	return fmt.Sprintf("Work on task %s. A task is finished by a PULL REQUEST, not by finished code: "+
+		"run `sindri submit \"<summary>\"` and the hub records your branch as a PR and sends it for "+
+		"review. Until you do, %s stays yours — being handed it again means exactly that.", task, task)
 }
 
 // DirRejected hands a worker its reviewer's feedback verbatim, every time it asks what to do, so
@@ -325,7 +340,10 @@ func DirReview(prID, task, arch string) string {
 // DirClaimed announces a freshly-claimed leaf task: the branch is ready in the
 // worker's /workspace — work it, follow the architecture, then submit.
 func DirClaimed(id, title, branch, arch string) string {
-	return fmt.Sprintf("Claimed %s: %s\nBranch %s is ready in your /workspace. Work on it — follow the project architecture (in your brief; re-read it at /workspace/%s) — then run `sindri submit \"<summary>\"`.", id, title, branch, arch)
+	return fmt.Sprintf("Claimed %s: %s\nBranch %s is ready in your /workspace. Work on it — follow the "+
+		"project architecture (in your brief; re-read it at /workspace/%s) — then finish it the only way "+
+		"a task is finished: `sindri submit \"<summary>\"`, which turns your branch into a pull request "+
+		"and sends it for review.", id, title, branch, arch)
 }
 
 const DirNoTasks = "No open tasks. Wait — the hub will tell you when there is work."
@@ -346,8 +364,10 @@ func DirContainerClaimed(container, ctitle, child, childTitle string) string {
 // submit that was held back mid-feature.
 func DirContainerWorking(container, task string) string {
 	return fmt.Sprintf("Subtask %s of feature %s. Implement it, then run `sindri checkpoint \"<summary>\"` "+
-		"to record it and move to the next subtask. One PR covers the whole feature, so submit once "+
-		"every subtask is checkpointed, never per subtask.", task, container)
+		"— that is what ends a subtask and hands you the next one; until you run it, %s stays yours and "+
+		"you'll be given it again. The feature itself ends in ONE pull request covering the whole branch: "+
+		"`sindri submit \"<summary>\"` once every subtask is checkpointed, never per subtask.",
+		task, container, task)
 }
 
 // DirContainerRejected is the verdict on a feature's PR: the worker fixes the branch it is already on
@@ -365,6 +385,23 @@ func DirContainerDone(container string) string {
 	return fmt.Sprintf("Every subtask of feature %s is checkpointed, so the feature is finished. Put "+
 		"the whole branch up with `sindri submit \"<summary>\"` — one PR for the feature, summarising "+
 		"what it does rather than listing the subtasks.", container)
+}
+
+// ReplyHasOpenChildren refuses to finish a task that still has work under it, naming what is open.
+// A parent is done exactly when its children are, so marking one done over open children states
+// something untrue about the tree and hides that work from everything that reads it.
+func ReplyHasOpenChildren(verb, id string, open []string) string {
+	return fmt.Sprintf("Can't %s %s — it's a parent, and %s %s still open under it. Its children are "+
+		"the work; %s closes on its own once they're all done.", verb, id, FileList(open),
+		plural(len(open), "is", "are"), id)
+}
+
+// plural picks a verb form for a count, so a refusal reads as English either way.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 // ReplySubtasksRemain refuses a feature submitted early, naming what is left. A feature is one PR, so
@@ -582,9 +619,8 @@ func ReplyRebased(incoming []string) string {
 }
 
 // ReplyResolveDirty answers `resolve` on a dirty worktree, suggesting nothing git-based: the pod
-// doesn't mount the real .git, so every git command fails — the isolation boundary working. The verb
-// it names tracks the caller's surface: contribute/submit exist only in "working", and a feature
-// worker holds checkpoint in place of both.
+// doesn't mount the real .git, so every git command fails. The verb it names tracks the caller's
+// surface — contribute/submit exist only in "working", and a feature worker holds checkpoint.
 func ReplyResolveDirty(phase string, inContainer bool) string {
 	const dirty = "Changes in /workspace the hub hasn't recorded yet block the rebase. "
 	switch phase {

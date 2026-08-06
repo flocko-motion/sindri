@@ -47,8 +47,11 @@ func TestContainerDirectiveNamesCheckpoint(t *testing.T) {
 	if !strings.Contains(dir, "`sindri checkpoint") {
 		t.Errorf("a feature worker's directive should name checkpoint: %q", dir)
 	}
-	if strings.Contains(dir, "`sindri submit") {
-		t.Errorf("a feature worker cannot run submit: %q", dir)
+	// It may say where the branch is headed — an agent that doesn't know a feature ends in a PR
+	// stops when the code is written — but the submit must be pinned to its condition, or it reads
+	// as something to do now and the surface refuses it.
+	if strings.Contains(dir, "`sindri submit") && !strings.Contains(dir, "never per subtask") {
+		t.Errorf("mid-feature, a submit must be qualified rather than offered: %q", dir)
 	}
 	if !strings.Contains(dir, "td-1") || !strings.Contains(dir, "td-EPIC") {
 		t.Errorf("the directive should name both the subtask and the feature: %q", dir)

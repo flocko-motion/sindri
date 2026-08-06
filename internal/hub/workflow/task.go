@@ -300,9 +300,11 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 		}
 		return DirPlanner, nil
 	}
-	// A worker holding a container is in the collaborative loop.
+	// A worker holding a feature is in the subtask loop — unless that feature has already landed.
+	// Its PR being merged says so as plainly as its status does, and covers a feature left held by a
+	// merge that took the partial-milestone path when it was in fact the last one.
 	if st.Container != "" {
-		if t, ok, _ := ps.GetTask(st.Container); ok && t.Status != "closed" && t.Status != "approved" && t.Status != "merged" {
+		if t, ok, _ := ps.GetTask(st.Container); ok && !featureLanded(ps, t) {
 			switch st.Phase {
 			case "submitted":
 				feedback, rejected, err := e.prRejected(project, name)
@@ -317,7 +319,13 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 			case "working":
 				return e.workDirective(project, name, st.Task, st.Container)
 			default:
-				if next, ok := e.advanceContainer(project, name, st.Container); ok {
+				// A failure here is surfaced, never read as "finished": the feature is only done
+				// when the store says there is nothing under it, not when assignment went wrong.
+				next, ok, aerr := e.advanceContainer(project, name, st.Container)
+				if aerr != nil {
+					return "", aerr
+				}
+				if ok {
 					return DirContainerWorking(st.Container, next.ID), nil
 				}
 				return DirContainerDone(st.Container), nil
@@ -571,104 +579,4 @@ func (e *Engine) claimLeaf(project, worker string) (string, bool, error) {
 	_ = ps.Log(worker, "claim", t.ID+" "+t.Title)
 	e.deps.Notify()
 	return DirClaimed(t.ID, t.Title, branch, e.deps.ArchitectureDoc(project)), true, nil
-}
-
-// claimContainer assigns the highest-priority unheld package in a project to the agent,
-// starting it on the package's first open child. A package is any task with open children
-// (-> store.OpenContainers): a hierarchy is organised so that one agent takes the whole
-// thing, with the context that comes with it.
-func (e *Engine) claimContainer(project, worker string) (string, bool, error) {
-	ps := e.store.For(project)
-	root := e.deps.ProjectRoot(project)
-	containers, err := ps.OpenContainers()
-	if err != nil || len(containers) == 0 {
-		return "", false, err
-	}
-	c := containers[0]
-	children, err := ps.OpenChildren(c.ID)
-	if err != nil {
-		return "", false, err
-	}
-	if len(children) == 0 {
-		return "", false, nil // marked but nothing open to work
-	}
-	base, err := e.baseBranch(root)
-	if err != nil {
-		return "", false, err
-	}
-	a, ok, err := ps.GetAgent(worker)
-	if err != nil || !ok {
-		return "", false, fmt.Errorf("agent %s missing: %v", worker, err)
-	}
-	wt := filepath.Join(root, a.Workspace)
-	if err := git.EnsureBranch(wt, c.ID, base); err != nil {
-		return "", false, err
-	}
-	child := children[0]
-	if err := ps.SetOwnedStatus(child.ID, "in_progress"); err != nil {
-		return "", false, err
-	}
-	_ = e.RefreshTask(project, child.ID)
-	if err := ps.SetState(store.AgentState{Agent: worker, Container: c.ID, Branch: c.ID, Task: child.ID, Phase: "working"}); err != nil {
-		return "", false, err
-	}
-	_ = ps.Log(worker, "claim-container", c.ID+" "+c.Title)
-	e.deps.Notify()
-	return DirContainerClaimed(c.ID, c.Title, child.ID, child.Title), true, nil
-}
-
-// CmdCheckpoint commits the current subtask to the container branch, closes that
-// child, and advances to the next — staying working, never blocking for review.
-func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) (int, error) {
-	ps := e.store.For(c.Project)
-	root := e.deps.ProjectRoot(c.Project)
-	st, err := ps.GetState(c.Agent)
-	if err != nil {
-		return 1, err
-	}
-	if st.Container == "" || st.Phase != "working" || st.Task == "" {
-		fmt.Fprintln(out, ReplyNothingToCheckpoint)
-		return 1, nil
-	}
-	a, _, _ := ps.GetAgent(c.Agent)
-	wt := filepath.Join(root, a.Workspace)
-	msg := strings.TrimSpace(strings.Join(args, " "))
-	if msg == "" {
-		msg = "work on " + st.Task
-	}
-	if err := git.CommitAll(wt, msg); err != nil {
-		return 1, err
-	}
-	if err := ps.SetOwnedStatus(st.Task, "closed"); err != nil {
-		return 1, err
-	}
-	_ = e.RefreshTask(c.Project, st.Task)
-	_ = ps.Log(c.Agent, "checkpoint", st.Task)
-	done := st.Task
-	if next, ok := e.advanceContainer(c.Project, c.Agent, st.Container); ok {
-		fmt.Fprintln(out, ReplyCheckpointed(done, next.ID, next.Title))
-		return 0, nil
-	}
-	_ = ps.SetState(store.AgentState{Agent: c.Agent, Container: st.Container, Branch: st.Container, Phase: "idle"})
-	e.deps.Notify()
-	fmt.Fprintln(out, ReplyCheckpointedLast(done, st.Container))
-	return 0, nil
-}
-
-// advanceContainer moves a held container's agent onto its next open child in a
-// project, returning (child, true) when one was assigned or (zero, false) if none.
-func (e *Engine) advanceContainer(project, agent, container string) (store.Task, bool) {
-	ps := e.store.For(project)
-	children, err := ps.OpenChildren(container)
-	if err != nil || len(children) == 0 {
-		return store.Task{}, false
-	}
-	child := children[0]
-	if err := ps.SetOwnedStatus(child.ID, "in_progress"); err != nil {
-		return store.Task{}, false
-	}
-	_ = e.RefreshTask(project, child.ID)
-	_ = ps.SetState(store.AgentState{Agent: agent, Container: container, Branch: container, Task: child.ID, Phase: "working"})
-	e.deps.Notify()
-	return child, true
 }

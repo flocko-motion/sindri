@@ -80,11 +80,11 @@ func (s *stallwatch) sweep() {
 // stalledFor is how long an agent has held work without doing any, and whether it counts as stalled.
 // The board and the nudge read the same observation through it, so what the user sees and what the
 // agent is told can never disagree.
-func (h *Hub) stalledFor(project, name, phase string) (time.Duration, bool) {
+func (h *Hub) stalledFor(project, name, phase, container string) (time.Duration, bool) {
 	l, ok := h.watch.get(project, name)
 	if !ok || !l.up || l.idleSince.IsZero() {
 		return 0, false
 	}
 	idleFor := time.Since(l.idleSince)
-	return idleFor, workflow.Stalled(phase, l.runtime, idleFor)
+	return idleFor, workflow.Stalled(phase, container, l.runtime, idleFor)
 }

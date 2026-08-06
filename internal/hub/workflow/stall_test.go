@@ -14,22 +14,27 @@ import (
 func TestStalledOnlyCountsHeldWork(t *testing.T) {
 	past, under := StallDwell+time.Minute, StallDwell-time.Minute
 	for _, c := range []struct {
-		what           string
-		phase, runtime string
-		idleFor        time.Duration
-		want           bool
+		what                      string
+		phase, container, runtime string
+		idleFor                   time.Duration
+		want                      bool
 	}{
-		{"holding work and gone quiet", "working", "idle", past, true},
-		{"quiet, but not for long enough", "working", "idle", under, false},
-		{"thinking, not stalled", "working", "working", past, false},
-		{"asking for input — that is 'blocked', already visible", "working", "blocked", past, false},
-		{"waiting for a verdict on a submitted PR", "submitted", "idle", past, false},
-		{"a container whose subtasks are all checkpointed", "", "idle", past, false},
-		{"between assignments", "idle", "idle", past, false},
-		{"probe told us nothing", "working", "", past, false},
+		{"holding work and gone quiet", "working", "", "idle", past, true},
+		{"quiet, but not for long enough", "working", "", "idle", under, false},
+		{"thinking, not stalled", "working", "working", "", past, false},
+		{"asking for input — that is 'blocked', already visible", "working", "", "blocked", past, false},
+		{"waiting for a verdict on a submitted PR", "submitted", "", "idle", past, false},
+		{"waiting for a verdict on a feature's PR", "submitted", "td-EPIC", "idle", past, false},
+		// A finished feature is the worker's to submit, so parking on one is a stall. It was excluded
+		// while only a human could open the milestone PR, and that wait no longer exists.
+		{"a feature whose subtasks are all checkpointed", "idle", "td-EPIC", "idle", past, true},
+		{"mid-feature, on a subtask, gone quiet", "working", "td-EPIC", "idle", past, true},
+		{"between assignments, holding nothing", "idle", "", "idle", past, false},
+		{"probe told us nothing", "working", "", "", past, false},
 	} {
-		if got := Stalled(c.phase, c.runtime, c.idleFor); got != c.want {
-			t.Errorf("%s: Stalled(%q, %q, %v) = %v, want %v", c.what, c.phase, c.runtime, c.idleFor, got, c.want)
+		if got := Stalled(c.phase, c.container, c.runtime, c.idleFor); got != c.want {
+			t.Errorf("%s: Stalled(%q, %q, %q, %v) = %v, want %v",
+				c.what, c.phase, c.container, c.runtime, c.idleFor, got, c.want)
 		}
 	}
 }

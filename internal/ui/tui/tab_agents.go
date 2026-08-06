@@ -374,10 +374,18 @@ func (m model) agentRows() []row {
 		}
 		// Row coloured by lifecycle; cells styled independently so resets don't bleed.
 		ac := agentStatusStyle(a.Status)
-		// Work cell: the task, or the reviewed PR since a reviewer holds no task.
+		// Work cell: the task, or the reviewed PR since a reviewer holds no task. A held feature is
+		// named either way — as the subtask's parent, or alone between subtasks, where showing
+		// nothing made an agent that refused every verb look plainly idle.
 		work := a.Task
 		if work == "" {
 			work = a.PR
+		}
+		switch {
+		case a.Feature != "" && work != "":
+			work = a.Feature + " › " + work
+		case a.Feature != "":
+			work = a.Feature
 		}
 		task := dash(work)
 		if a.Clients > 0 { // dial-ins attached — show the eye like the CLI list

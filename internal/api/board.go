@@ -9,12 +9,16 @@ package api
 // AgentView is an agent as the UIs see it; Status collapses runtime + workflow into one word:
 // down | idle | working | submitted.
 type AgentView struct {
-	Project   string `json:"project"`
-	Repo      string `json:"repo"`
-	Name      string `json:"name"`
-	Role      string `json:"role"`
-	Status    string `json:"status"`
-	Task      string `json:"task"`
+	Project string `json:"project"`
+	Repo    string `json:"repo"`
+	Name    string `json:"name"`
+	Role    string `json:"role"`
+	Status  string `json:"status"`
+	Task    string `json:"task"`
+	// Feature is the parent task whose subtasks it is working, if any. Shown wherever Task is,
+	// because it is what gates the agent's verbs: holding one and showing nothing read as an idle
+	// agent that nevertheless refused every command.
+	Feature   string `json:"feature,omitempty"`
 	Branch    string `json:"branch"`
 	PR        string `json:"pr"`
 	Workspace string `json:"workspace"` // the agent's git worktree path (repo-relative)
