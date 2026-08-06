@@ -55,11 +55,11 @@ func TestContainerDirectiveNamesCheckpoint(t *testing.T) {
 	}
 }
 
-// TestRejectedMilestoneKeepsTheFeature: SetState writes the whole row, so the rejection used to drop
-// the container — the worker fell out of the collaborative loop, went idle and claimed unrelated
-// work, leaving the feature branch its checkpointed subtasks were on. It stays on the feature, and
-// is told to fix it there rather than to resubmit something only the user can re-open.
-func TestRejectedMilestoneKeepsTheFeature(t *testing.T) {
+// TestRejectedFeatureKeepsTheFeature: SetState writes the whole row, so the rejection used to drop
+// the container — the worker fell out of the feature loop, went idle and claimed unrelated work,
+// leaving the branch its checkpointed subtasks were on. It stays on the feature, and is sent round
+// the same loop a rejected leaf task follows: fix the branch you're on, submit it again.
+func TestRejectedFeatureKeepsTheFeature(t *testing.T) {
 	e, ps, deps := containerWorker(t, "submitted")
 	if err := ps.PutPR(store.PR{
 		ID: "pr-td-EPIC", Task: "td-EPIC", Agent: "dvalin", Branch: "td-EPIC", Status: "open",
@@ -77,18 +77,17 @@ func TestRejectedMilestoneKeepsTheFeature(t *testing.T) {
 		t.Fatalf("want one message to the author, got %d", len(deps.injectedText))
 	}
 	msg := deps.injectedText[0]
-	if strings.Contains(msg, "`sindri submit") {
-		t.Errorf("the rejection must not name submit to a feature worker: %q", msg)
+	for _, want := range []string{"td-EPIC", "not yet", "`sindri submit"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the rejection should carry %q: %q", want, msg)
+		}
 	}
-	if !strings.Contains(msg, "not yet") {
-		t.Errorf("the rejection must carry the feedback: %q", msg)
-	}
-	// And the directive it gets next keeps it on the feature rather than sending it to submit.
+	// And the directive it gets next keeps it on the feature, pointed at the same resubmit.
 	dir, err := e.AgentDirective(context.Background(), "repo", "dvalin")
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if strings.Contains(dir, "`sindri submit") {
-		t.Errorf("the post-rejection directive must not name submit: %q", dir)
+	if !strings.Contains(dir, "`sindri submit") {
+		t.Errorf("the post-rejection directive should point at the resubmit: %q", dir)
 	}
 }

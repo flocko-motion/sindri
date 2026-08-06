@@ -325,7 +325,7 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 				if next, ok := e.advanceContainer(project, name, st.Container); ok {
 					return DirContainerWorking(st.Container, next.ID), nil
 				}
-				return DirContainerWait(st.Container), nil
+				return DirContainerDone(st.Container), nil
 			}
 		}
 		_ = ps.SetState(store.AgentState{Agent: name, Phase: "idle"})

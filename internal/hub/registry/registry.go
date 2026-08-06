@@ -20,10 +20,13 @@ type Caller struct {
 	Agent     string
 	Role      string // "worker" | "reviewer"
 	HasTask   bool   // a worker holding work (a leaf task OR a container) hides "next"
-	Container string // the collaborative feature it holds, if any: shows "checkpoint", holds back "submit"
-	Task      string // the task or subtask it holds; carried so a blocked verb can name the work
-	Phase     string // the agent's current phase (working|submitted|resolving|idle|…), gating phase-specific verbs
-	InChat    bool   // a member of the user's chatroom: shows "chat"
+	Container string // the feature (parent task) it holds, if any: shows "checkpoint" alongside submit
+	// SubtasksOpen: the held feature still has children to work, which is what holds "submit" back —
+	// a feature goes up when its last subtask is checkpointed, not when a human decides to cut it.
+	SubtasksOpen bool
+	Task         string // the task or subtask it holds; carried so a blocked verb can name the work
+	Phase        string // the agent's current phase (working|submitted|resolving|idle|…), gating phase-specific verbs
+	InChat       bool   // a member of the user's chatroom: shows "chat"
 }
 
 // Command is one hub-side verb the browser can invoke.

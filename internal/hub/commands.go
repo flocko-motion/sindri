@@ -88,16 +88,25 @@ func (h *Hub) registry() *registry.Registry {
 	)
 }
 
-// landingBlocked is the shared gate on the two verbs that put a branch up (submit, contribute): a
-// feature worker lands its work at a milestone instead, and outside "working" there is nothing to
-// land. The wrong-phase wording is the same the verb's own guard uses, so an agent hears one story
-// whichever gate it meets first.
+// landingBlocked is the shared gate on the two verbs that put a branch up (submit, contribute).
+// Inside a feature the unit that goes up is the whole branch, so submit waits for the last subtask
+// and contribute has no role at all — checkpoint is the interim landing there. Outside one, there is
+// nothing to land except from "working", worded exactly as the verb's own guard words it so an agent
+// hears one story whichever gate it meets first.
 func landingBlocked(verb string) func(registry.Caller) string {
 	return func(c registry.Caller) string {
 		if c.Container != "" {
-			return fmt.Sprintf("You're working the subtasks of feature %s, which lands as ONE PR at a "+
-				"milestone — record each subtask with `sindri checkpoint \"<summary>\"` instead; the user "+
-				"opens the milestone PR when you two reach one.", c.Container)
+			switch {
+			case verb == "contribute":
+				return fmt.Sprintf("Inside feature %s, `sindri checkpoint \"<summary>\"` is how you land "+
+					"work as you go — it records the subtask on the feature branch without ending anything.",
+					c.Container)
+			case c.SubtasksOpen:
+				return fmt.Sprintf("Feature %s still has open subtasks, and it goes up as ONE PR — "+
+					"record the one you're on with `sindri checkpoint \"<summary>\"` and it will hand you "+
+					"the next. Submit once they're all done.", c.Container)
+			}
+			return ""
 		}
 		if c.Phase != "working" {
 			return workflow.ReplyNotWorking(verb, c.Phase, c.Task)
@@ -127,15 +136,27 @@ func (h *Hub) caller(project, name string) (registry.Caller, error) {
 	if err != nil {
 		return registry.Caller{}, err
 	}
+	// Whether the held feature has subtasks left is what decides submit, so it is read here rather
+	// than inferred from the phase: after a rejected feature PR the worker is back to "working" with
+	// nothing left to check point, and a phase proxy would have blocked the resubmit.
+	subtasksOpen := false
+	if st.Container != "" {
+		open, oerr := ps.OpenChildren(st.Container)
+		if oerr != nil {
+			return registry.Caller{}, oerr
+		}
+		subtasksOpen = len(open) > 0
+	}
 	return registry.Caller{
-		Project:   project,
-		Agent:     name,
-		Role:      a.Role,
-		HasTask:   st.Phase != "idle" || st.Container != "",
-		Container: st.Container,
-		Task:      st.Task,
-		Phase:     st.Phase,
-		InChat:    inChat,
+		Project:      project,
+		Agent:        name,
+		Role:         a.Role,
+		HasTask:      st.Phase != "idle" || st.Container != "",
+		Container:    st.Container,
+		SubtasksOpen: subtasksOpen,
+		Task:         st.Task,
+		Phase:        st.Phase,
+		InChat:       inChat,
 	}, nil
 }
 

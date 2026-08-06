@@ -188,13 +188,22 @@ func TestAssignedWorkSaysItStartsNow(t *testing.T) {
 			t.Errorf("a hand-off that assigns work must say to start it: %q", s)
 		}
 	}
+	// Clearing a feature's last subtask is a hand-off too — to the submit — so it must read as an
+	// instruction rather than as leave to stop.
 	for _, s := range []string{
 		ReplyCheckpointedLast("td-2", "td-EPIC"),
-		DirContainerWait("td-EPIC"),
+		DirContainerDone("td-EPIC"),
 	} {
-		if !strings.Contains(s, "Wait") {
-			t.Errorf("a hand-off with nothing to do must name the wait: %q", s)
+		if !strings.Contains(s, "`sindri submit") {
+			t.Errorf("a finished feature must be told to put itself up: %q", s)
 		}
+		if strings.Contains(s, "Wait") {
+			t.Errorf("nothing waits once a feature is built: %q", s)
+		}
+	}
+	// The one hand-off that really does block still names the wait.
+	if s := DirSubmitted; !strings.Contains(s, "Wait") {
+		t.Errorf("a PR under review must name the wait: %q", s)
 	}
 	// The briefs carry the rule the individual hand-offs then rely on, since they are read before any
 	// directive arrives: every managed role learns that a wait is always named as one, and a worker
@@ -215,26 +224,47 @@ func TestAssignedWorkSaysItStartsNow(t *testing.T) {
 	}
 }
 
-// TestContainerAdviceNeverNamesSubmit is the rule dvalin's report exposed: every instruction a
-// feature worker can receive must name only verbs the command registry offers it. submit and
-// contribute are hidden while it holds a container (-> hub/commands.go), so an instruction naming
-// either leaves the agent to work out the flow for itself — which is the one thing the directive
-// exists to prevent.
-func TestContainerAdviceNeverNamesSubmit(t *testing.T) {
+// TestMidFeatureAdviceNamesCheckpoint is the rule dvalin's report exposed, in the form it takes now
+// that a finished feature submits itself: every instruction reaching a worker with subtasks still to
+// do must name only verbs open to it there. While the branch is incomplete that is checkpoint —
+// submit is held back until the last subtask, and contribute has no role inside a feature at all.
+func TestMidFeatureAdviceNamesCheckpoint(t *testing.T) {
 	for _, s := range []string{
 		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
 		DirContainerWorking("td-EPIC", "td-1"),
-		DirContainerRejected("td-EPIC", "td-1", "not yet"),
-		DirContainerWait("td-EPIC"),
 		ReplyCheckpointed("td-1", "td-2", "the next subtask"),
-		ReplyCheckpointedLast("td-2", "td-EPIC"),
-		MsgMilestoneRejected("td-EPIC", "reviewer", "not yet"),
+		ReplySubtasksRemain("td-EPIC", "td-2", 3),
 		ReplyResolveDirty("working", true),
 	} {
-		for _, bad := range []string{"`sindri submit", "`sindri contribute", "`sindri next"} {
+		if !strings.Contains(s, "`sindri checkpoint") {
+			t.Errorf("mid-feature advice must name checkpoint: %q", s)
+		}
+		for _, bad := range []string{"`sindri contribute", "`sindri next"} {
 			if strings.Contains(s, bad) {
 				t.Errorf("advice to a feature worker names %q, which its surface hides: %q", bad, s)
 			}
+		}
+	}
+	// Where a feature's advice DOES name submit, it must be about the whole branch — never something
+	// to do per subtask, which is the confusion the checkpoint flow exists to prevent.
+	for _, s := range []string{
+		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
+		DirContainerWorking("td-EPIC", "td-1"),
+	} {
+		if !strings.Contains(s, "never per subtask") {
+			t.Errorf("mid-feature advice must rule out a per-subtask submit: %q", s)
+		}
+	}
+	// Once the branch is complete, submit is exactly the verb — including after a rejection, which
+	// puts the worker back on the same branch to fix and resubmit.
+	for _, s := range []string{
+		DirContainerDone("td-EPIC"),
+		ReplyCheckpointedLast("td-2", "td-EPIC"),
+		DirContainerRejected("td-EPIC", "td-1", "not yet"),
+		MsgMilestoneRejected("td-EPIC", "reviewer", "not yet"),
+	} {
+		if !strings.Contains(s, "`sindri submit") {
+			t.Errorf("a complete feature must be told to submit: %q", s)
 		}
 	}
 }

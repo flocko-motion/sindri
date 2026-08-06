@@ -5,8 +5,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
+
+// callerFor resolves an agent's command-surface identity, for asserting on the surface itself
+// rather than on the output of running something.
+func callerFor(t *testing.T, h *Hub, agent string) registry.Caller {
+	t.Helper()
+	c, err := h.caller(testProject, agent)
+	if err != nil {
+		t.Fatalf("caller %s: %v", agent, err)
+	}
+	return c
+}
 
 // exec runs a verb as an agent and returns what the agent would see, plus the exit code.
 func execAs(t *testing.T, h *Hub, agent string, args ...string) (string, int) {
@@ -29,6 +41,15 @@ func TestBlockedVerbExplainsItself(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "dvalin", Role: "worker", Workspace: ".worktrees/dvalin"}); err != nil {
 		t.Fatalf("put agent: %v", err)
 	}
+	// Mid-feature: one subtask still open, so the branch is incomplete and submit waits for it.
+	for _, task := range []store.Task{
+		{ID: "td-EPIC", Title: "a feature", Status: "open", Priority: "P1", Type: "epic"},
+		{ID: "td-1", Title: "a subtask", Status: "open", Priority: "P1", ParentID: "td-EPIC"},
+	} {
+		if err := ps.UpsertTask(task); err != nil {
+			t.Fatalf("seed %s: %v", task.ID, err)
+		}
+	}
 	if err := ps.SetState(store.AgentState{
 		Agent: "dvalin", Container: "td-EPIC", Branch: "td-EPIC", Task: "td-1", Phase: "working",
 	}); err != nil {
@@ -37,7 +58,7 @@ func TestBlockedVerbExplainsItself(t *testing.T) {
 
 	out, code := execAs(t, h, "dvalin", "submit", "done with it")
 	if code == 0 {
-		t.Error("submit must not run for a worker holding a feature")
+		t.Error("submit must not run while the feature has subtasks left")
 	}
 	for _, want := range []string{"isn't available right now", "td-EPIC", "`sindri checkpoint"} {
 		if !strings.Contains(out, want) {
@@ -46,6 +67,17 @@ func TestBlockedVerbExplainsItself(t *testing.T) {
 	}
 	if strings.Contains(out, "unknown") {
 		t.Errorf("a real verb held back by state must not read as unknown:\n%s", out)
+	}
+
+	// Close that subtask and submit opens up: a finished feature is put up by the worker that built
+	// it, the same as any task. This is the whole of what a human used to have to do by hand.
+	if err := ps.UpsertTask(store.Task{
+		ID: "td-1", Title: "a subtask", Status: "closed", Priority: "P1", ParentID: "td-EPIC",
+	}); err != nil {
+		t.Fatalf("close subtask: %v", err)
+	}
+	if _, _, ok := h.registry().Resolve("submit", callerFor(t, h, "dvalin")); !ok {
+		t.Error("submit must be open once every subtask is checkpointed")
 	}
 
 	// The mirror case: the same explanation runs the other way for a worker on a task of its own.

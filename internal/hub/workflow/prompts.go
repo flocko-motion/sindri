@@ -330,39 +330,49 @@ func DirClaimed(id, title, branch, arch string) string {
 
 const DirNoTasks = "No open tasks. Wait — the hub will tell you when there is work."
 
-// --- collaborative (container) workflow ---
+// --- features: a task with subtasks, worked on one branch ---
 
 // DirContainerClaimed starts an agent on a feature: subtasks one at a time on a single standing
-// branch, checkpointing between them. The whole feature lands as one PR at the user's milestone.
+// branch, checkpointing between them, and the branch goes up as one PR when they are all done.
 func DirContainerClaimed(container, ctitle, child, childTitle string) string {
 	return fmt.Sprintf("You're working feature %s: %s — on a single branch in /workspace. "+
 		"Current subtask %s: %s. Implement it, then run `sindri checkpoint \"<summary>\"` "+
-		"to record it and move to the next subtask. Do NOT submit per subtask — the whole feature "+
-		"is merged as one PR when you and the user reach a milestone.", container, ctitle, child, childTitle)
+		"to record it and move to the next subtask. One PR covers the whole feature, so submit "+
+		"once every subtask is checkpointed, never per subtask.", container, ctitle, child, childTitle)
 }
 
 // DirContainerWorking is the working directive inside a feature. Claiming used to be the only place
-// the collaborative loop named its verb; every later `sindri` fell through to DirWorking and asked
-// for a submit the container surface hides.
+// the feature loop named its verb; every later `sindri` fell through to DirWorking and asked for a
+// submit that was held back mid-feature.
 func DirContainerWorking(container, task string) string {
 	return fmt.Sprintf("Subtask %s of feature %s. Implement it, then run `sindri checkpoint \"<summary>\"` "+
-		"to record it and move to the next subtask. Do NOT submit per subtask — the whole feature is "+
-		"merged as one PR when you and the user reach a milestone.", task, container)
+		"to record it and move to the next subtask. One PR covers the whole feature, so submit once "+
+		"every subtask is checkpointed, never per subtask.", task, container)
 }
 
-// DirContainerRejected is the verdict on a feature's milestone PR. The milestone is the user's to
-// re-open, so the worker fixes the branch it is on rather than resubmitting.
+// DirContainerRejected is the verdict on a feature's PR: the worker fixes the branch it is already on
+// and submits it again, the same loop a rejected leaf task follows.
 func DirContainerRejected(container, task, feedback string) string {
-	return fmt.Sprintf("The milestone PR for feature %s was REJECTED — address this feedback on your "+
-		"branch (you're back on subtask %s; `sindri checkpoint \"<summary>\"` records the fix). The user "+
-		"re-opens the milestone PR when it's ready:\n\n%s", container, task, feedback)
+	return fmt.Sprintf("The PR for feature %s was REJECTED — address this feedback on the branch you're "+
+		"already on (subtask %s is yours again; `sindri checkpoint \"<summary>\"` records a fix that "+
+		"completes it), then `sindri submit \"<summary>\"` to put the feature up again:\n\n%s",
+		container, task, feedback)
 }
 
-// DirContainerWait is the directive once every open subtask of a feature is
-// checkpointed: wait for the user to open a milestone PR or add subtasks.
-func DirContainerWait(container string) string {
-	return fmt.Sprintf("All open subtasks of feature %s are checkpointed. Wait — the user will open a "+
-		"milestone PR to merge the work so far, or add more subtasks. Don't poll.", container)
+// DirContainerDone is the directive once every subtask of a feature is checkpointed: the branch is
+// complete, so the worker puts it up itself.
+func DirContainerDone(container string) string {
+	return fmt.Sprintf("Every subtask of feature %s is checkpointed, so the feature is finished. Put "+
+		"the whole branch up with `sindri submit \"<summary>\"` — one PR for the feature, summarising "+
+		"what it does rather than listing the subtasks.", container)
+}
+
+// ReplySubtasksRemain refuses a feature submitted early, naming what is left. A feature is one PR, so
+// submitting halfway would put an incomplete branch under review.
+func ReplySubtasksRemain(container, next string, open int) string {
+	return fmt.Sprintf("Feature %s still has %d open subtask(s) and goes up as ONE PR. You're on %s — "+
+		"`sindri checkpoint \"<summary>\"` records it and hands you the next; submit when they're done.",
+		container, open, next)
 }
 
 // ReplyCheckpointed acknowledges a checkpoint and hands over the next subtask. Alone among the
@@ -374,10 +384,11 @@ func ReplyCheckpointed(done, next, nextTitle string) string {
 		"this one; if something blocks you, say what you need.", done, next, nextTitle)
 }
 
-// ReplyCheckpointedLast acknowledges the checkpoint that clears a feature's last open
-// subtask: the worker now waits for a milestone PR or more subtasks.
+// ReplyCheckpointedLast acknowledges the checkpoint that clears a feature's last open subtask: the
+// feature is built, so the worker puts the branch up rather than waiting to be let through.
 func ReplyCheckpointedLast(done, container string) string {
-	return fmt.Sprintf("Checkpointed %s — that was the last open subtask of %s. Wait: the user will open a milestone PR (or add more subtasks).", done, container)
+	return fmt.Sprintf("Checkpointed %s — the last open subtask of %s, so the feature is done. Put the "+
+		"whole branch up now with `sindri submit \"<summary>\"`.", done, container)
 }
 
 const ReplyNothingToCheckpoint = "Nothing to checkpoint — you're not working a subtask. Run `sindri` for your current directive."
@@ -462,13 +473,12 @@ func MsgMilestoneMerged(prID string) string {
 	return fmt.Sprintf("[hub] Milestone %s merged — your feature branch is rebased onto the new base. Run `sindri` to continue.", prID)
 }
 
-// MsgMilestoneRejected is the rejection a feature worker gets: it stays on its container, and the
-// milestone is the user's to re-open, so the resubmit the other two messages name would send it to a
-// verb a container worker does not hold. voice is who ruled ("user" or "reviewer").
+// MsgMilestoneRejected is the rejection a feature worker gets. It names the feature rather than the
+// subtask the worker happens to be holding, since the PR covers the whole branch. voice is who ruled
+// ("user" or "reviewer").
 func MsgMilestoneRejected(container, voice, feedback string) string {
-	return fmt.Sprintf("[%s] The milestone PR for feature %s was rejected: %s — address it on the branch "+
-		"you're already on and carry on with your subtasks (`sindri checkpoint \"<summary>\"` records each). "+
-		"The user re-opens the milestone when it's ready; there's nothing for you to resubmit.",
+	return fmt.Sprintf("[%s] The PR for feature %s was rejected: %s — address it on the branch you're "+
+		"already on, then `sindri submit \"<summary>\"` to put the feature up again.",
 		voice, container, feedback)
 }
 

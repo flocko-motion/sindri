@@ -205,7 +205,21 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 	if err != nil {
 		return 1, err
 	}
-	if st.Phase != "working" || st.Task == "" {
+	// What goes up: a whole feature branch when the worker holds one, otherwise the leaf task it is
+	// working. A hierarchy changes the unit under review, never who puts it up — so the worker that
+	// built it submits it, exactly as it would a task of its own.
+	target, branch := st.Task, st.Branch
+	if st.Container != "" {
+		open, oerr := ps.OpenChildren(st.Container)
+		if oerr != nil {
+			return 1, oerr
+		}
+		if len(open) > 0 {
+			fmt.Fprintln(out, ReplySubtasksRemain(st.Container, open[0].ID, len(open)))
+			return 1, nil
+		}
+		target, branch = st.Container, st.Container
+	} else if st.Phase != "working" || st.Task == "" {
 		fmt.Fprintln(out, ReplyNotWorking("submit", st.Phase, st.Task))
 		return 1, nil
 	}
@@ -213,12 +227,12 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 	wt := filepath.Join(root, a.Workspace)
 	if lintOut, ok := repo.Lint(wt, e.deps.BrokkrBin); !ok {
 		fmt.Fprintln(out, ReplyLintFail(strings.TrimSpace(lintOut)))
-		_ = ps.Log(c.Agent, "lint-fail", st.Task)
+		_ = ps.Log(c.Agent, "lint-fail", target)
 		return 1, nil
 	}
 	msg := strings.TrimSpace(strings.Join(args, " "))
 	if msg == "" {
-		msg = "work on " + st.Task
+		msg = "work on " + target
 	}
 	if err := git.CommitAll(wt, msg); err != nil {
 		return 1, err
@@ -227,12 +241,14 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 	if err != nil {
 		return 1, err
 	}
-	pr := store.PR{ID: "pr-" + st.Task, Task: st.Task, Agent: c.Agent, Branch: st.Branch, Base: base, Status: "open"}
+	pr := store.PR{ID: "pr-" + target, Task: target, Agent: c.Agent, Branch: branch, Base: base, Status: "open"}
 	_, existed, _ := ps.GetPR(pr.ID) // first submit vs a resubmit after rejection
 	if err := ps.PutPR(pr); err != nil {
 		return 1, err
 	}
-	if err := ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Phase: "submitted"}); err != nil {
+	if err := ps.SetState(store.AgentState{
+		Agent: c.Agent, Task: st.Task, Branch: branch, Container: st.Container, Phase: "submitted",
+	}); err != nil {
 		return 1, err
 	}
 	_ = ps.Log(c.Agent, "submit", pr.ID)
