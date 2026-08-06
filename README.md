@@ -2,8 +2,9 @@
 
 A sandboxed AI-agent orchestrator. You hand work to agents that run inside
 containers; they write code and open pull requests; **you approve the merge** —
-the one hard gate. A single per-repo **hub** owns all state and mediates
-everything, so the CLI, the TUI, and every agent are just thin clients of it.
+the one hard gate. A single global **hub** — one per machine, serving every repo —
+owns all state and mediates everything, so the CLI, the TUI, and every agent are
+just thin clients of it.
 
 This README is about *using* sindri. For the internal design, see `openspec/`.
 
@@ -57,7 +58,7 @@ Agents also inherit what you've set up for yourself in `~/.claude`: your **skill
 Both are optional; without them the agent runs Claude's defaults.
 
 Then, in any repo, `sindri coauthor` gets you going in one command (see the Quick
-start below) — it starts the per-repo hub for you, so you rarely launch one by hand.
+start below) — it starts the hub for you, so you rarely launch one by hand.
 
 **Optional extras** (sindri degrades gracefully without them, with a visible
 note — never a hard failure): `openspec` (`npm i -g @fission-ai/openspec`) for the
@@ -83,7 +84,7 @@ yourself, but sandboxed in a container. One command, in any git repo:
 sindri coauthor
 ```
 
-It starts everything it needs (the per-repo hub, a sandboxed pod, an agent
+It starts everything it needs (the hub, a sandboxed pod, an agent
 auto-named after a Norse dwarf) and drops you into its terminal. The coauthor
 works on your **actual checkout** — you share the same files and drive it
 directly, with no task queue and no PR gate. Detach with your tmux prefix then
@@ -96,7 +97,7 @@ When you'd rather hand off work than pair: put **one worker** on a task and merg
 what it produces — you're the reviewer, no second agent needed.
 
 ```bash
-sindri hub start --bg                       # start the per-repo hub in the background
+sindri hub start --bg                       # start the global hub in the background
                                             # (foreground: `sindri hub start`; see also `sindri hub list` / `sindri hub stop`)
 
 sindri task new "Add a /healthz endpoint"   # describe a task
@@ -130,8 +131,8 @@ can add workers alongside a coauthor.
 │   sindri CLI ─┐                          ┌─ sindri tui         │
 │   (you)       ▼                          ▼  (live board)       │
 │            ┌──────────────────────────────────┐                │
-│            │  sindri hub   (single writer)     │                │
-│            │  .sindri/hub.db  (SQLite)         │                │
+│            │  sindri hub  (one, all repos)     │                │
+│            │  <state>/hub.db  (SQLite)         │                │
 │            │  tasks · git · openspec · podman  │                │
 │            └───────┬───────────────┬──────────┘                │
 │         per-agent  │ unix socket   │ tmux send-keys             │
@@ -155,10 +156,12 @@ can add workers alongside a coauthor.
 
 ## Roles
 
-Three roles — start more agents as you need them (`sindri agent new --role <role>`,
+Four roles — start more agents as you need them (`sindri agent new --role <role>`,
 auto-named after Norse dwarves):
 
-- **worker** — builds: claims tasks, writes code, opens PRs. (The quick-start agent.)
+- **coauthor** — pairs with you in your own checkout, outside the task queue and the
+  PR gate. What `sindri coauthor` starts, and the quickest way in.
+- **worker** — builds: claims tasks, writes code, opens PRs.
 - **reviewer** — reviews a worker's PR. Optional — you can approve/reject yourself
   on the host instead.
 - **planner** — plans *with you*: reads the repo and specs, proposes tasks (you
@@ -310,8 +313,8 @@ the header plus each type/func with its doc and signature (bodies omitted).
 
 ```bash
 brokkr map                              # whole tree
-brokkr map internal/hub internal/tui    # several paths at once
-brokkr map internal/tui --file tab_prs  # only files whose path matches
+brokkr map internal/hub internal/ui     # several paths at once
+brokkr map internal/ui --file tab_prs   # only files whose path matches
 brokkr map --depth 1                    # bound how deep it descends
 brokkr map --full                       # don't reduce, however long
 ```
@@ -427,9 +430,12 @@ Orchestration is `sindri <category> <action>`; the toolbelt is the separate
 
 | Category | Actions |
 |---|---|
-| `agent` | `list` · `new [name] [--role worker\|reviewer\|planner]` · `start <name>` · `stop <name>` · `delete <name>` · `tell <name> "msg"` · `attach <name>` · `info <name>` · `pane <name>` |
-| `task` | `list [--json]` · `new <title> [-t -p -d --labels --parent]` · `info <id>` · `edit <id>` · `priority <id> <P0..P4>` · `approve <id>` · `reject <id> "why"` · `unassign <id>` |
-| `pr` | `list` · `info <id>` · `lint <id>` · `verify <id>` · `review <id> "…"` · `approve <id>` · `reject <id> "…"` · `milestone <agent>` · `merge <id>` |
+| `agent` | `list` · `new [name] [--role worker\|reviewer\|planner\|coauthor]` · `start` · `stop` · `restart` · `delete` · `tell <name> "msg"` · `attach` · `info` · `pane` · `dir` · `stats` · `memory <name> [size]` · `rebase` · `rebuild` · `plan <name> "goal"` |
+| `task` | `list [--json]` · `new <title> [-t -p -d --labels --parent]` · `info <id>` · `edit <id>` · `priority <id> <P0..P4>` · `approve <id>` · `reject <id> "why"` · `unassign <id>` · `close <id>` · `delete <id>` · `comment <id> "text"` · `refresh` |
+| `pr` | `list` · `info <id>` · `lint <id>` · `verify <id>` · `review <id> "…"` · `approve <id>` · `reject <id> "…"` · `scrap <id>` · `milestone <agent>` · `merge <id>` |
+| `meeting` | `add <agent…>` · `remove <agent…>` · `join` · `log [-n]` · `new` |
+| `repo` | `init` · `list` · `info [tag]` · `forget <tag>` · `color <tag> <n>` |
+| `hub` | `start [--bg]` · `status` · `restart` · `stop` · `logs` · `list` |
 | `brokkr` | `map [paths…] [--find --grep --symbol --file --depth]` · `refs <symbol> [paths…] [--comments --file --limit]` · `lint [deadcode\|loc\|comments\|openspec]` (none = all) |
 
 Inside a pod the agent talks to the hub through a single command, **`sindri`**
@@ -445,11 +451,16 @@ get `status`/`log`/`prs`.
 
 | What | Where |
 |---|---|
-| Roster, workflow state, PRs, activity log | `.sindri/hub.db` (SQLite, gitignored) |
-| Per-agent socket | `.sindri/sockets/<name>.sock` |
-| Agent Claude home | `.sindri/claude/<name>/` |
-| Code / commits | `.worktrees/<name>` (host) |
-| Tasks (source of truth) | `td` (cached into `hub.db`) |
+| Roster, workflow state, PRs, activity log | `<state>/hub.db` (SQLite) |
+| Per-agent socket | `<state>/<project>/sockets/<name>/` |
+| Agent Claude home | `<state>/<project>/agents/<name>/` |
+| Code / commits | `.worktrees/<name>` (in the repo, host side) |
+| Tasks | sindri's own store; `td` is imported once, then sindri owns them |
+| Project config | `.sindri/config.yaml` (in the repo, yours to commit) |
+
+`<state>` is `~/.local/state/sindri`, overridden by `$SINDRI_HOME` or
+`$XDG_STATE_HOME`. Hub state is **central, not in your repo**: one hub serves every
+repo, so nothing of its own lands in a checkout.
 
 Throw a pod away freely; relaunch resumes from the activity log. Restart the hub
 freely; nothing committed is lost.
@@ -459,12 +470,13 @@ cmd/sindri/         host CLI (agent/task/pr + tui); `sindri hub start` execs sin
 cmd/sindri-hub/     the hub, as its own process (thin entrypoint over internal/hub)
 cmd/sindri-worker/  the agent's thin browser (no command tree; `sindri` in a pod)
 cmd/brokkr/         the toolbelt: code map + linters (no orchestration)
-internal/hub/       the hub: service, SQLite store, command registry, workflows
+internal/api/       the exchange format: everything that crosses the wire
+internal/hub/       the hub: workflow, store, command registry, agent lifecycle
 internal/client/    thin hub client (CLI + TUI share it)
-internal/adapter/   one package per external tool: git, pod (podman), tmux, td, spec
-internal/tui/       lean Bubble Tea dashboard (a hub client)
-internal/lint/      the linters; internal/codemap/ the code map
-container/          the agent image (Dockerfile) + tmux entrypoint
+internal/adapter/   one package per external tool: git, container, tmux, tasks, herdr
+internal/ui/        the front-ends: cli, tui, theme (shared rendering), attach
+internal/brokkr/    the toolbelt's logic: lint + codemap
+internal/container/ the agent image (embedded Dockerfile) + the runtime port
 openspec/           the spec-driven design (specs + changes)
 ```
 
