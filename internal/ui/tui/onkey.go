@@ -165,7 +165,13 @@ func (m *model) onKey(k string) tea.Cmd {
 			}
 			return nil
 		}
-	case keyMerge: // prs: merge (the human gate) — if it isn't approved, offer to approve first
+	case keyMerge: // agents: milestone PR · prs: merge (the human gate)
+		if m.tab == 1 {
+			if a, ok := m.selAgent(); ok {
+				m.openMilestoneChoice(a.Name)
+			}
+			return nil
+		}
 		if m.tab == 2 && m.selID() != "" {
 			if !m.selPRApproved() {
 				m.openApproveMergeChoice(m.selID())
@@ -216,10 +222,20 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.openInput(inputComment, "comment on "+m.selID()+": ")
 			return textinput.Blink
 		}
-	case keyBrief: // tasks: hand this task to a planner to work up
+	case keyBrief: // tasks: brief a planner · agents: reBuild the agent image
 		if m.tab == 0 && m.selID() != "" {
 			m.openBriefChoice(m.selID())
 			return nil
+		}
+		if m.tab == 1 {
+			if a, ok := m.selAgent(); ok {
+				m.openRebuildChoice(a.Name)
+			}
+			return nil
+		}
+	case keyStats: // agents: the fleet's memory use against its limits (a view)
+		if m.tab == 1 {
+			return m.statsCmd()
 		}
 	case keyOptions: // agents: the selected agent's options
 		if m.tab == 1 {

@@ -7,6 +7,7 @@ import (
 	"unicode"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/client"
 )
 
 // scopeLabels is what a tab's footer effectively offers: its own bindings plus the global ones,
@@ -61,6 +62,7 @@ func TestLowercaseKeysNeverMutate(t *testing.T) {
 		"f": "filter — narrows the view",
 		"s": "scope — narrows the view",
 		"p": "repo — switches the active repo",
+		"m": "stats — samples memory use and shows it; mutates nothing",
 		"r": "refresh — re-reads the board",
 		"q": "quit",
 	}
@@ -333,5 +335,78 @@ func TestNewMeetingKeyIsOfferedAndConfirmed(t *testing.T) {
 	// Cancel is first, so a stray Enter on the modal cannot wipe the room.
 	if len(m.choice.values) == 0 || m.choice.values[0] != "cancel" {
 		t.Errorf("cancel must be the default option, got %v", m.choice.values)
+	}
+}
+
+// TestAgentsTabReachesMilestoneRebuildAndStats pins the three actions that used to be CLI-only. It
+// asserts the whole path, not just the constant: the key is advertised on the Agents footer, and
+// pressing it there gets somewhere — a cancel-first chooser for the two mutations, a command for the
+// view. The client is a zero-value one so the branches are not short-circuited by a nil check; the
+// commands are never run, so nothing dials.
+func TestAgentsTabReachesMilestoneRebuildAndStats(t *testing.T) {
+	footer := footerOf(t, scopeAgents)
+	for _, tc := range []struct {
+		key, label string
+		mutates    bool
+	}{
+		{keyMilestone, "milestone PR", true},
+		{keyRebuild, "rebuild image", true},
+		{keyStats, "stats", false},
+	} {
+		if !strings.Contains(footer, tc.key+" "+tc.label) {
+			t.Errorf("%q (%s) is not advertised on the Agents footer: %s", tc.key, tc.label, footer)
+		}
+		m := newModel(&client.HTTP{}, nil, "")
+		m.tab, m.scopeRepo = 1, false
+		m.state = api.BoardState{Agents: []api.AgentView{{Name: "dvalin", Project: "repo", Status: "idle"}}}
+		cmd := m.onKey(tc.key)
+
+		if !tc.mutates {
+			if m.choice.active {
+				t.Errorf("%q is a view; it should not ask for confirmation", tc.key)
+			}
+			if cmd == nil {
+				t.Errorf("%q produced no command — the binding reaches nothing", tc.key)
+			}
+			continue
+		}
+		// A mutation must land on a chooser and never fire off the keystroke itself.
+		if !m.choice.active {
+			t.Fatalf("%q did not open a confirmation", tc.key)
+		}
+		if cmd != nil {
+			t.Errorf("%q returned a command as well as a confirmation — it should wait for the answer", tc.key)
+		}
+		if !strings.Contains(m.choice.title, "dvalin") {
+			t.Errorf("%q asks about no agent in particular: %q", tc.key, m.choice.title)
+		}
+		if m.choice.values[0] != "cancel" {
+			t.Errorf("%q defaults to %q, want cancel first", tc.key, m.choice.values[0])
+		}
+		if m.choice.apply("cancel") != nil {
+			t.Errorf("%q acts on cancel", tc.key)
+		}
+		if m.choice.apply(m.choice.values[1]) == nil {
+			t.Errorf("%q confirmed but produced no command", tc.key)
+		}
+	}
+}
+
+// TestStatsLinesReportTheReasonNotAZero guards the failure this whole family of views keeps getting
+// wrong: an agent the engine could not sample must say so, not render 0 B and read as idle.
+func TestStatsLinesReportTheReasonNotAZero(t *testing.T) {
+	out := strings.Join(statsLines(api.StatsReport{
+		Engine: "podman",
+		Agents: []api.AgentStatsView{{Name: "bombur", Repo: "sindri", Err: "container not found"}},
+	}), "\n")
+	if !strings.Contains(out, "container not found") {
+		t.Errorf("the sampling error is not shown:\n%s", out)
+	}
+	if strings.Contains(out, "0 B") {
+		t.Errorf("an unsampled agent renders as 0 B, which reads as idle:\n%s", out)
+	}
+	// An empty fleet must say it is empty rather than print a bare header.
+	if empty := strings.Join(statsLines(api.StatsReport{Engine: "podman"}), "\n"); !strings.Contains(empty, "no running agents") {
+		t.Errorf("an empty report says nothing:\n%s", empty)
 	}
 }

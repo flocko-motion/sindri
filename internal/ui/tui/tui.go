@@ -236,6 +236,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.rightCursor = m.viewCursor("lint")
 			m.detail.Resize(m.detail.Height, len(m.prContentLines()))
 		}
+	case milestoneMsg:
+		m.flash = "milestone " + string(msg) + " opened — the agent waits for the merge"
+	case rebuiltMsg:
+		title := "rebuild: " + msg.name
+		if msg.err != nil {
+			title = "rebuild FAILED: " + msg.name
+			m.flash = ""
+		} else {
+			m.flash = msg.name + " rebuilt"
+		}
+		m.openTextModal(title, msg.log)
+	case statsMsg:
+		m.flash = ""
+		m.openTextModal("agent memory", strings.Join(statsLines(api.StatsReport(msg)), "\n"))
 	case reviewPromptMsg:
 		m.reviewPrompt = string(msg)
 	case resumedMsg: // an interactive child (attach/shell) exited — force a clean repaint (see resumedMsg)

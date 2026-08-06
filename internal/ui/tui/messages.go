@@ -47,6 +47,22 @@ type prLintMsg struct {
 	pr   string
 	text string
 }
+
+// milestoneMsg names the PR that was opened. The board itself arrives on the state stream, as it
+// does after a merge, so it is not refetched here.
+type milestoneMsg string
+
+// rebuiltMsg carries the build log, and the error if the build failed — the log is worth showing
+// either way, so it is not discarded on success.
+type rebuiltMsg struct {
+	name string
+	log  string
+	err  error
+}
+
+// statsMsg is the fleet's sampled memory use.
+type statsMsg api.StatsReport
+
 type reviewPromptMsg string
 type reviewReadyMsg string // the review-workspace path to open a shell in
 type editorReadyMsg string // the review-workspace path to open the user's editor on

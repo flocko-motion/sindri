@@ -21,33 +21,36 @@ import "strings"
 // The vim-family view keys (J/K scroll, G bottom, Y yank) are uppercase and mutate nothing; they
 // keep the shape a terminal user already has in their fingers.
 const (
-	keyNew      = "N" // new task / new agent
-	keyBrief    = "B" // hand a task to a planner to work up (brief)
-	keyEdit     = "e" // edit the selection: task fields (tasks) / open the workspace in $EDITOR (agents, prs)
-	keyOptions  = "O" // an agent's options (mutation → shift)
-	keyPriority = "P" // set task priority (mutation → shift)
-	keyUnassign = "U" // release a task to the backlog
-	keyClose    = "C" // close a task
-	keyApprove  = "A" // approve: a PR (prs) / a proposed task (tasks) — one letter, one meaning
-	keyReview   = "I" // invite an agentic review of a PR (A is approve, R is reject)
-	keyReject   = "R" // reject a PR / a proposed task
-	keyStartS   = "S" // agent start/stop
-	keyTell     = "t" // tell an agent / show a PR's task
-	keyComment  = "i" // comment on a task (opens a prompt, so lowercase)
-	keyAttach   = "a" // attach to an agent's session (agents, tasks, prs)
-	keyMerge    = "M" // merge a PR — commits on the keystroke, so it takes the mutation case
-	keyDelete   = "D" // delete an agent
-	keyLint     = "L" // lint a PR
-	keyVerify   = "V" // verify (materialize) a PR
-	keyOpen     = "o" // open the row's worktree in a shell (navigation → lowercase)
-	keyFilter   = "f" // cycle the tasks filter
-	keyScopeTog = "s" // toggle a tab's global↔repo scope
-	keyRepo     = "p" // switch the active repo/project (navigation → lowercase)
-	keyConfig   = "E" // edit the repo's config (mutation → shift)
-	keyColor    = "c" // pick a repo's colour (opens a chooser → lowercase)
-	keyRefresh  = "r" // refresh the board
-	keyDetail   = "§" // toggle the detail pane
-	keyQuit     = "q" // quit
+	keyNew       = "N" // new task / new agent
+	keyBrief     = "B" // hand a task to a planner to work up (brief)
+	keyEdit      = "e" // edit the selection: task fields (tasks) / open the workspace in $EDITOR (agents, prs)
+	keyOptions   = "O" // an agent's options (mutation → shift)
+	keyPriority  = "P" // set task priority (mutation → shift)
+	keyUnassign  = "U" // release a task to the backlog
+	keyClose     = "C" // close a task
+	keyApprove   = "A" // approve: a PR (prs) / a proposed task (tasks) — one letter, one meaning
+	keyReview    = "I" // invite an agentic review of a PR (A is approve, R is reject)
+	keyReject    = "R" // reject a PR / a proposed task
+	keyStartS    = "S" // agent start/stop
+	keyMilestone = "M" // capture an agent's container branch as a PR (mutation → shift)
+	keyRebuild   = "B" // reBuild the agent image and relaunch (mutation → shift)
+	keyStats     = "m" // an agent's memory against its limit (a view → lowercase)
+	keyTell      = "t" // tell an agent / show a PR's task
+	keyComment   = "i" // comment on a task (opens a prompt, so lowercase)
+	keyAttach    = "a" // attach to an agent's session (agents, tasks, prs)
+	keyMerge     = "M" // merge a PR — commits on the keystroke, so it takes the mutation case
+	keyDelete    = "D" // delete an agent
+	keyLint      = "L" // lint a PR
+	keyVerify    = "V" // verify (materialize) a PR
+	keyOpen      = "o" // open the row's worktree in a shell (navigation → lowercase)
+	keyFilter    = "f" // cycle the tasks filter
+	keyScopeTog  = "s" // toggle a tab's global↔repo scope
+	keyRepo      = "p" // switch the active repo/project (navigation → lowercase)
+	keyConfig    = "E" // edit the repo's config (mutation → shift)
+	keyColor     = "c" // pick a repo's colour (opens a chooser → lowercase)
+	keyRefresh   = "r" // refresh the board
+	keyDetail    = "§" // toggle the detail pane
+	keyQuit      = "q" // quit
 )
 
 // keyScope selects where a binding applies and is shown.
@@ -108,6 +111,9 @@ var keymap = []binding{
 	{keyOpen, lbl("open"), scopeAgents},
 	{keyStartS, lbl("start/stop"), scopeAgents},
 	{keyOptions, lbl("options"), scopeAgents},
+	{keyStats, lbl("stats"), scopeAgents},
+	{keyMilestone, lbl("milestone PR"), scopeAgents},
+	{keyRebuild, lbl("rebuild image"), scopeAgents},
 	{keyReject, lbl("rebase"), scopeAgents}, // R = reBase (onto the reference branch)
 	{keyDelete, lbl("delete"), scopeAgents},
 	{keyScopeTog, func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scopeAgents},

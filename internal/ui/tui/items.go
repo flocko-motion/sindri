@@ -9,6 +9,8 @@
 package tui
 
 import (
+	"strings"
+
 	"github.com/flo-at/sindri/internal/api"
 )
 
@@ -119,6 +121,17 @@ func prMetaFromPR(p api.PR) []string {
 		ls = append(ls, "feedback: "+p.Feedback)
 	}
 	return ls
+}
+
+// openTextModal shows arbitrary command output — a build log, a stats table — in the same scrollable
+// modal the item details use, so long output is readable rather than a flash that scrolls past.
+func (m *model) openTextModal(title, body string) {
+	m.modalOverride = strings.Split(strings.TrimRight(body, "\n"), "\n")
+	m.modalOverrideTitle = title
+	m.modal = true
+	m.detail.SetHeight(modalContentHeight(m.h))
+	m.detail.SetTotal(len(m.modalLines()))
+	m.detail.ScrollTop()
 }
 
 // openItemModal opens the big detail modal for any item, via its home renderer.
