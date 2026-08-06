@@ -1,0 +1,3 @@
+# The project's own submit gate. The hub runs it in the agent's worktree after the rebase and
+# before the PR record exists, so a refused submit never creates one.
+verify: scripts/verify.sh
