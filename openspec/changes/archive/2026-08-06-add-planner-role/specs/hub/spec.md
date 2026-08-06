@@ -30,6 +30,12 @@ registers and inspects merge-intents (`next`/`submit`); a reviewer judges them
 - **THEN** it sees `task`, `create-task`, and `openspec` but never the worker's
   `next`/`submit` nor the reviewer's `approve`/`reject`
 
+#### Scenario: Coauthor surface is helpers only
+
+- **WHEN** a coauthor queries its command surface
+- **THEN** it sees only the generic helpers (status, log, lint, read-only PR views)
+  and none of the worker, reviewer, or planner workflow verbs
+
 ## ADDED Requirements
 
 ### Requirement: Planner task proposals are gated on user approval

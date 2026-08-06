@@ -49,3 +49,8 @@ on the row) rather than appearing to hang until the hub's board event lands.
 - **WHEN** the user rejects a gated planner-proposed task with a comment
 - **THEN** the hub records the rejection, the comment is delivered to the planner,
   and the task stays hidden from workers
+#### Scenario: New-agent picker offers the coauthor role
+
+- **WHEN** the user creates a new agent from the Agents tab
+- **THEN** the role picker offers coauthor alongside worker, reviewer, and planner
+

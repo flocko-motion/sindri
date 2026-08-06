@@ -49,3 +49,9 @@ SHALL ever include merge.
 - **WHEN** any agent queries its command surface
 - **THEN** no merge command appears; only the host `sindri pr merge` can merge,
   after human confirmation
+#### Scenario: Coauthor has only helpers
+
+- **WHEN** a coauthor asks the hub what it can run
+- **THEN** it is offered the generic helpers only — no `next`/`submit`, no
+  `approve`/`reject`
+

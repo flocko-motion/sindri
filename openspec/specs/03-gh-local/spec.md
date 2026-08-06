@@ -101,9 +101,20 @@ reported rather than silently swallowed.
 The agent client SHALL be a single role-agnostic browser whose available commands
 are filtered by the hub from the caller's role and state. A worker's surface SHALL
 expose registering and inspecting merge-intents but never approve/reject/merge; a
-reviewer's surface SHALL expose approve/reject but never submit. Merge SHALL be
-human-only, exposed only on the host and requiring explicit confirmation; no agent
-surface SHALL ever include merge.
+reviewer's surface SHALL expose approve/reject but never submit; a coauthor's
+surface SHALL expose only the generic helpers (status, log, lint, and the
+read-only PR views) and none of the build or review verbs — a coauthor commits
+with git directly rather than through a hub verb; a planner's
+surface SHALL expose reading the backlog, proposing tasks, and shipping openspec
+(`task`/`create-task`/`openspec`) but never the worker's `next`/`submit` nor the
+reviewer's `approve`/`reject`. Approval SHALL NOT be the reviewer agent's
+exclusive power: the host SHALL also expose a human approve (`sindri pr approve`),
+the positive counterpart of the existing human reject, so a PR can reach
+`approved` without a reviewer agent in the loop. A human approve SHALL mark the PR
+approved and satisfy its review gates exactly as a reviewer approve does, and SHALL
+apply only to an open PR (one awaiting a verdict). Merge SHALL be human-only,
+exposed only on the host and requiring explicit confirmation; no agent surface
+SHALL ever include merge.
 
 #### Scenario: Reviewer approves, human merges
 
@@ -111,11 +122,35 @@ surface SHALL ever include merge.
 - **THEN** the hub marks it approved and its gates satisfied, but it is merged only
   later by a human on the host
 
+#### Scenario: Human approves without a reviewer
+
+- **WHEN** no reviewer agent has approved a PR and the user approves it on the host
+- **THEN** the hub marks it approved and its gates satisfied, so the user can then
+  merge it — a reviewer agent is not required to reach `approved`
+
+#### Scenario: Approve only an open PR
+
+- **WHEN** a human approve targets a PR that is not open (already approved, merged,
+  or rejected)
+- **THEN** the approve is refused and the PR's current status is reported, mirroring
+  the reviewer approve's open-only guard
+
+#### Scenario: Planner ships, not builds
+
+- **WHEN** a planner queries its surface
+- **THEN** it can read the backlog, propose tasks, and ship openspec, but it has no
+  `next`/`submit`/`approve`/`reject`, and no merge
+
 #### Scenario: No agent merge
 
 - **WHEN** any agent queries its command surface
 - **THEN** no merge command appears; only the host `sindri pr merge` can merge,
   after human confirmation
+#### Scenario: Coauthor has only helpers
+
+- **WHEN** a coauthor asks the hub what it can run
+- **THEN** it is offered the generic helpers only — no `next`/`submit`, no
+  `approve`/`reject`
 
 ### Requirement: Self-contained, no remote dependency
 
@@ -205,6 +240,35 @@ its container is closed.
 
 - **WHEN** a container is closed (all its children done) and its branch is merged
 - **THEN** the branch is retired and the agent is freed to take new work
+
+### Requirement: Planner ships openspec changes as a PR
+
+A planner SHALL turn its openspec edits into a merge-intent with `openspec submit`,
+reviewed and merged through the same cycle as a worker's PR. The planner SHALL work
+on a standing branch (`plan-<name>`) rather than a per-task branch, and its PR SHALL
+carry no real backlog task (a placeholder task id stands in for it). Submitting
+SHALL run the same lint gate as a worker's submit — including openspec validation —
+and refuse the PR if a gate fails. On reviewer rejection the planner SHALL drop to
+idle with the feedback injected; after any merge moves the base branch, every
+planner's standing branch SHALL be rebased onto the new base so planners stay
+current.
+
+#### Scenario: Shipping a plan
+
+- **WHEN** a planner runs `openspec submit` with openspec edits that pass the gate
+- **THEN** its standing branch is committed and a merge-intent is registered,
+  reviewed like a worker's PR, with no backlog task behind it
+
+#### Scenario: Plan fails the gate
+
+- **WHEN** a planner submits openspec that fails the lint gate (e.g. invalid spec)
+- **THEN** no PR is created and the violations are reported for the planner to fix
+
+#### Scenario: Planner rebased after a merge
+
+- **WHEN** a PR merges and moves the base branch
+- **THEN** each planner's standing branch is rebased onto the new base so it sees
+  the latest code
 
 ## Structure
 

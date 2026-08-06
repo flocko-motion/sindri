@@ -27,6 +27,17 @@ neither read nor corrupt hub state in the shared checkout.
   shared with the user), yet `.sindri/` is still hidden, so it cannot read or
   write hub state
 
+#### Scenario: Role invisible to the agent
+
+- **WHEN** an agent inspects its environment
+- **THEN** it cannot determine whether it is a worker or a reviewer; only the hub
+  knows the role
+
+#### Scenario: Other projects invisible
+
+- **WHEN** an agent tries to observe or address agents, tasks, or PRs of another repo
+- **THEN** it cannot; its channel is scoped to its own project
+
 ## ADDED Requirements
 
 ### Requirement: The coauthor is a fourth role driven directly by the user

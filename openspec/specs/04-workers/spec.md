@@ -11,11 +11,17 @@ gh-local workflow.
 ### Requirement: One sandboxed container per worker
 
 Each agent SHALL run as a Claude agent inside its own Podman pod, launched by the
-hub, with an identical mount topology regardless of role: its git workspace
-(named after the agent) and exactly one unix socket — its own channel to the hub.
-The agent SHALL NOT have the task database, the roster, or other agents'
+hub, mounting its workspace and exactly one unix socket — its own channel to the
+hub. The agent SHALL NOT have the task database, the roster, or other agents'
 workspaces mounted; all such state is reached only through the hub over the
-socket.
+socket. A worker or reviewer SHALL mount an isolated per-agent git worktree
+(named after the agent) read-write. A coauthor SHALL differ: because it works the
+same material as the user, its workspace SHALL be the user's own repository
+checkout (the repo root) mounted read-write, with the `.sindri/` directory
+overlaid by an empty read-only directory so the agent can neither read nor corrupt
+hub state in the shared tree. A planner SHALL differ again: its workspace SHALL be
+mounted read-only with `openspec/` overlaid read-write, so it plans (specs +
+tasks) without touching code.
 
 #### Scenario: Starting an agent
 
@@ -26,17 +32,21 @@ socket.
 #### Scenario: Same mounts for every role
 
 - **WHEN** a worker and a reviewer are launched
-- **THEN** their mounts are identical; only the hub-side role differs
+- **THEN** their mounts are identical — a read-write workspace plus the hub socket;
+  only the hub-side role differs
 
-### Requirement: Norse-named workers
+#### Scenario: Coauthor shares the user's checkout with .sindri shielded
 
-Workers SHALL be identified by Norse dwarf names (brokkr, dvalin, …). The review
-agent SHALL be distinct from the dwarf workers and SHALL not take a dwarf name.
+- **WHEN** a coauthor is launched
+- **THEN** its `/workspace` is the user's repository checkout mounted read-write,
+  and `.sindri/` is overlaid by an empty read-only directory so hub state is
+  neither readable nor writable from the shared tree
 
-#### Scenario: Reusing a name
+#### Scenario: Planner workspace is read-only except openspec
 
-- **WHEN** an idle worker worktree exists
-- **THEN** it is reused rather than allocating a new dwarf name
+- **WHEN** a planner is launched
+- **THEN** its `/workspace` is mounted read-only with `openspec/` overlaid
+  read-write, so it can edit specs but not the rest of the code
 
 ### Requirement: Worker-to-task mapping
 
@@ -130,6 +140,54 @@ changes.
 - **WHEN** an agent's work is committed
 - **THEN** the commit contains only the agent's changes and never `.todos/`
   runtime churn, because nothing in the worktree can write the tracker
+
+### Requirement: Agents share the user's Claude skills
+
+When the hub launches an agent that runs Claude, it SHALL make the user's Claude
+skills available inside the agent's Claude home by mounting the host's skills
+directory read-only, so the agent works with the same skills the user has. The
+mount SHALL be live — edits to a skill on the host are reflected inside the pod
+without relaunching the agent — and read-only, so the agent cannot alter the
+user's skills. When the host has no skills directory, the launch SHALL proceed
+without it rather than failing.
+
+#### Scenario: Agent has the user's skills
+
+- **WHEN** an agent that runs Claude is launched and the user has a skills directory
+- **THEN** those skills are present in the agent's Claude home, read-only
+
+#### Scenario: Skill edits are live
+
+- **WHEN** the user edits a skill on the host while an agent is running
+- **THEN** the agent sees the updated skill without being relaunched
+
+#### Scenario: No skills directory
+
+- **WHEN** an agent is launched and the host has no Claude skills directory
+- **THEN** the launch proceeds normally, simply without any mounted skills
+
+### Requirement: Norse-named agents
+
+Agents SHALL be auto-named from a pool of Norse dwarf names (brokkr, dvalin, …) —
+the smith Sindri's own name is never handed out. The pool is role-agnostic: a
+worker, reviewer, or planner each receives the next unused dwarf name unless an
+explicit name is supplied at registration. When the pool is exhausted a numeric
+suffix SHALL be appended (brokkr2, eitri2, …) so creation never fails.
+
+#### Scenario: Auto-named from the pool
+
+- **WHEN** an agent is registered without an explicit name
+- **THEN** it receives the first unused dwarf name, regardless of its role
+
+#### Scenario: Pool exhausted
+
+- **WHEN** every dwarf name is already taken
+- **THEN** a numeric suffix is appended so a new agent can still be named
+
+#### Scenario: Reusing a name
+
+- **WHEN** an idle worker worktree exists
+- **THEN** it is reused rather than allocating a new dwarf name
 
 ## Structure
 

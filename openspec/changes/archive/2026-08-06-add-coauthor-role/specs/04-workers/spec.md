@@ -21,7 +21,7 @@ hub state in the shared tree.
 - **THEN** a pod starts with the agent's workspace and its single hub socket
   mounted, and the task database and roster are not
 
-#### Scenario: Same mounts for worker and reviewer
+#### Scenario: Same mounts for every role
 
 - **WHEN** a worker and a reviewer are launched
 - **THEN** their mounts are identical — an isolated read-write worktree plus the

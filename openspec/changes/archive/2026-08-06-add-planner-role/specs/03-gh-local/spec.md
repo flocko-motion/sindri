@@ -7,8 +7,11 @@
 The agent client SHALL be a single role-agnostic browser whose available commands
 are filtered by the hub from the caller's role and state. A worker's surface SHALL
 expose registering and inspecting merge-intents but never approve/reject/merge; a
-reviewer's surface SHALL expose approve/reject but never submit; a planner's
-surface SHALL expose reading the backlog, proposing tasks, and shipping openspec
+reviewer's surface SHALL expose approve/reject but never submit; a coauthor's
+surface SHALL expose only the generic helpers (status, log, lint, and the
+read-only PR views) and none of the build or review verbs — a coauthor commits
+with git directly rather than through a hub verb; a planner's surface SHALL expose
+reading the backlog, proposing tasks, and shipping openspec
 (`task`/`create-task`/`openspec`) but never the worker's `next`/`submit` nor the
 reviewer's `approve`/`reject`. Merge SHALL be human-only, exposed only on the host
 and requiring explicit confirmation; no agent surface SHALL ever include merge.
@@ -24,6 +27,12 @@ and requiring explicit confirmation; no agent surface SHALL ever include merge.
 - **WHEN** a planner queries its surface
 - **THEN** it can read the backlog, propose tasks, and ship openspec, but it has no
   `next`/`submit`/`approve`/`reject`, and no merge
+
+#### Scenario: Coauthor has only helpers
+
+- **WHEN** a coauthor asks the hub what it can run
+- **THEN** it is offered the generic helpers only — no `next`/`submit`, no
+  `approve`/`reject`
 
 #### Scenario: No agent merge
 

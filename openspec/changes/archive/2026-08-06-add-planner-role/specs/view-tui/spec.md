@@ -34,6 +34,11 @@ view SHALL reflect the change (live, via board events).
 - **THEN** the hub records the rejection, the comment is delivered to the planner,
   and the task stays hidden from workers
 
+#### Scenario: New-agent picker offers the coauthor role
+
+- **WHEN** the user creates a new agent from the Agents tab
+- **THEN** the role picker offers coauthor alongside worker, reviewer, and planner
+
 ## ADDED Requirements
 
 ### Requirement: Planner proposals are marked under the approval gate

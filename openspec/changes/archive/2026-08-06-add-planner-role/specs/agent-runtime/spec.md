@@ -4,11 +4,18 @@
 
 ### Requirement: Agent sees only its own workspace
 
-An agent SHALL see only its git workspace, named after the agent. The roster, the
-`.sindri/` directory, and other agents' workspaces SHALL NOT be visible to it. The
-hub MAY tell an agent its own role — it briefs the agent in a role-specific way
-and the `status` verb reports the role — but an agent SHALL NOT be able to
-enumerate the roster, address or observe another agent, or read `.sindri/`.
+An agent SHALL see only its own git workspace and the single hub socket that is
+its channel to the hub; the roster, the `.sindri/` directory, and other agents'
+workspaces SHALL NOT be visible to it. For a worker or reviewer the workspace is
+an isolated per-agent worktree named after the agent. The coauthor is the
+deliberate exception: because it works the same material as the user, its
+workspace IS the user's own working checkout (the repo root), so it is NOT
+isolated from the user's tree — but even then the `.sindri/` directory SHALL
+remain hidden from it (overlaid by an empty read-only directory), so it can
+neither read nor corrupt hub state in the shared checkout. The hub MAY tell an
+agent its own role — it briefs the agent in a role-specific way and the `status`
+verb reports the role — but an agent SHALL NOT be able to enumerate the roster,
+address or observe another agent, or read `.sindri/`.
 
 #### Scenario: Agent knows its own role but not the roster
 
@@ -20,6 +27,31 @@ enumerate the roster, address or observe another agent, or read `.sindri/`.
 
 - **WHEN** an agent tries to discover or address another agent
 - **THEN** it cannot — only the hub holds the roster and the routing tables
+
+
+#### Scenario: Isolated agent sees only its own worktree
+
+- **WHEN** a worker or reviewer inspects its filesystem
+- **THEN** it finds its own worktree and its hub socket, and neither the roster,
+  `.sindri/`, nor another agent's workspace
+
+#### Scenario: Coauthor shares the user's checkout but not .sindri
+
+- **WHEN** a coauthor inspects its filesystem
+- **THEN** its `/workspace` is the user's actual repository checkout (edits are
+  shared with the user), yet `.sindri/` is still hidden, so it cannot read or
+  write hub state
+
+#### Scenario: Role invisible to the agent
+
+- **WHEN** an agent inspects its environment
+- **THEN** it cannot determine whether it is a worker or a reviewer; only the hub
+  knows the role
+
+#### Scenario: Other projects invisible
+
+- **WHEN** an agent tries to observe or address agents, tasks, or PRs of another repo
+- **THEN** it cannot; its channel is scoped to its own project
 
 ## ADDED Requirements
 

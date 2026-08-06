@@ -20,3 +20,9 @@ never assigned a backlog task, its status SHALL be one of down, idle, or submitt
 - **WHEN** a planner is listed alongside workers and a reviewer
 - **THEN** it is shown with the planner role, and its status is idle/submitted/down
   rather than working
+#### Scenario: Listing with a coauthor
+
+- **WHEN** a coauthor is listed alongside workers and a reviewer
+- **THEN** it is shown with the coauthor role, and its status is down/idle/collab
+  rather than working or submitted
+
