@@ -124,28 +124,37 @@ func TestSyncTasksCarriesOwnedUpdatedAt(t *testing.T) {
 // TestReconciledStatusRule pins the pure rule the sweep applies.
 func TestReconciledStatusRule(t *testing.T) {
 	for _, c := range []struct {
-		status                           string
-		activePR, assigned, openChildren bool
-		want                             string
+		what   string
+		status string
+		facts  taskFacts
+		want   string
 	}{
-		{"in_progress", false, false, false, "open"},       // nobody holds it
-		{"in_progress", false, true, false, "in_progress"}, // its worker still does
-		{"in_review", false, false, false, "open"},         // no PR, nobody holds it
-		{"in_review", false, true, false, "in_progress"},   // no PR, but still assigned
-		{"in_review", true, false, false, "in_review"},     // a live PR justifies it
-		{"closed", false, false, false, "closed"},          // a finished task is left alone
-		{"open", false, false, false, "open"},
+		{"nobody holds it", "in_progress", taskFacts{}, "open"},
+		{"its worker still does", "in_progress", taskFacts{assigned: true}, "in_progress"},
+		{"no PR, nobody holds it", "in_review", taskFacts{}, "open"},
+		{"no PR, but still assigned", "in_review", taskFacts{assigned: true}, "in_progress"},
+		{"a live PR justifies it", "in_review", taskFacts{activePR: true}, "in_review"},
+		{"a finished task is left alone", "closed", taskFacts{}, "closed"},
+		{"an open task with nothing to say about it", "open", taskFacts{}, "open"},
 		// A parent is finished exactly when its children are, so a done one with work still open
 		// under it is stale in the same way the others are — and is reopened, which is what heals a
 		// tree an earlier build broke by closing the middle of it.
-		{"closed", false, false, true, "open"},
-		{"merged", false, false, true, "open"},
-		{"approved", false, false, true, "open"},
-		{"open", false, false, true, "open"}, // already open: having children changes nothing
+		{"closed over open work", "closed", taskFacts{openChildren: true}, "open"},
+		{"merged over open work", "merged", taskFacts{openChildren: true}, "open"},
+		{"approved over open work", "approved", taskFacts{openChildren: true}, "open"},
+		{"already open, children change nothing", "open", taskFacts{openChildren: true}, "open"},
+		// A merge is the end of a task, so one left open behind its own landed PR is stale — this is
+		// what heals a tree merged by a build that took the wrong path and closed nothing.
+		{"open behind a landed PR", "open", taskFacts{mergedFinalPR: true}, "closed"},
+		{"in_review behind a landed PR", "in_review", taskFacts{mergedFinalPR: true}, "closed"},
+		// Except with work still under it: the merge was a partial milestone, and the tree goes on.
+		{"landed, but children remain", "open", taskFacts{mergedFinalPR: true, openChildren: true}, "open"},
+		// And an INTERIM contribution merging is not the end of anything — that is its whole point,
+		// so it never sets mergedFinalPR and the task keeps running.
+		{"an interim contribution landed", "in_progress", taskFacts{assigned: true}, "in_progress"},
 	} {
-		if got := reconciledStatus(c.status, c.activePR, c.assigned, c.openChildren); got != c.want {
-			t.Errorf("reconciledStatus(%q, pr=%v, assigned=%v, openChildren=%v) = %q, want %q",
-				c.status, c.activePR, c.assigned, c.openChildren, got, c.want)
+		if got := reconciledStatus(c.status, c.facts); got != c.want {
+			t.Errorf("%s: reconciledStatus(%q, %+v) = %q, want %q", c.what, c.status, c.facts, got, c.want)
 		}
 	}
 }

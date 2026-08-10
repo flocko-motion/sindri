@@ -257,6 +257,12 @@ func (m model) agentItems() []metaItem {
 	if a.Task != "" {
 		taskIt.kind, taskIt.value = "task", a.Task
 	}
+	// The feature reads alongside the subtask, and carries the pane on its own between subtasks —
+	// where the task line is a dash and the agent otherwise looks like it holds nothing at all.
+	featIt := metaItem{text: "feature:   " + m.taskLabel(a.Feature)}
+	if a.Feature != "" {
+		featIt.kind, featIt.value = "task", a.Feature
+	}
 	prIt := metaItem{text: "pr:        " + dash(a.PR)}
 	if a.PR != "" {
 		prIt.kind, prIt.value = "pr", a.PR
@@ -268,7 +274,7 @@ func (m model) agentItems() []metaItem {
 	items := []metaItem{
 		{text: "role:      " + a.Role},
 		{text: "status:    " + a.Status},
-		taskIt, prIt,
+		taskIt, featIt, prIt,
 		{text: "workspace: " + dash(a.Workspace)},
 		{text: "memory:    " + memoryLabelTUI(a.Memory) + dimStyle.Render("  (container RAM · e to edit)")},
 		{text: pod, kind: "view", value: "pod"},
@@ -365,6 +371,10 @@ const eyeGlyph = "👁️"
 
 // warnGlyph is the warning mark, likewise width-pinned.
 const warnGlyph = "⚠️"
+
+// gateGlyph marks work held back by the approval gate. Plain ASCII: it sits inside the header bar,
+// where an emoji's two drawn cells against one measured would shear the whole strip.
+const gateGlyph = "!"
 
 func (m model) agentRows() []row {
 	var out []row

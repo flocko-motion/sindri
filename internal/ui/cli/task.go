@@ -223,6 +223,16 @@ func taskPriorityCmd() *cobra.Command {
 	}
 }
 
+// taskState is the word a listing shows for a task: the approval gate where one is set, since that
+// is what decides whether the task can be worked, and the status otherwise. A pending task printed
+// as plain "open" claimed to be available when no worker could see it.
+func taskState(t api.Task) string {
+	if t.Approval == "pending" || t.Approval == "rejected" {
+		return t.Approval
+	}
+	return t.Status
+}
+
 func taskListCmd() *cobra.Command {
 	var asJSON bool
 	c := &cobra.Command{
@@ -242,10 +252,16 @@ func taskListCmd() *cobra.Command {
 					return nil
 				}
 				for _, t := range tasks {
-					fmt.Printf("%-12s %-8s %-12s %s\n", t.ID, theme.PriorityLabel(t.Priority), t.Status, t.Title)
+					fmt.Printf("%-12s %-8s %-12s %s\n", t.ID, theme.PriorityLabel(t.Priority), taskState(t), t.Title)
 				}
 				if len(tasks) == 0 {
 					fmt.Fprintln(os.Stderr, "no tasks")
+				}
+				// The gate hides these from every worker, so a list that ended here read as a full
+				// backlog while nothing in it could be claimed.
+				if n := api.CountAwaitingVerdict(tasks); n > 0 {
+					fmt.Fprintf(os.Stderr, "\n%d task(s) await your verdict and no worker can claim them: "+
+						"`sindri task approve <id>` (--subtasks clears the tree below it), or `sindri task reject <id> <why>`.\n", n)
 				}
 				return nil
 			})

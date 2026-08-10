@@ -64,6 +64,44 @@ func Done(t Task) bool {
 // Open reports whether a task still counts as open (not done).
 func Open(t Task) bool { return !Done(t) }
 
+// ReleasedByPriority maps each task to whether a priority has released it for assignment — its own,
+// or one on an ancestor. Rating an epic releases its whole tree (children are deliberately left
+// unrated), so a bare "has no priority" would condemn nearly every subtask; only a task with no
+// rated ancestor anywhere above it is actually unassignable.
+func ReleasedByPriority(tasks []Task) map[string]bool {
+	byID := make(map[string]Task, len(tasks))
+	for _, t := range tasks {
+		byID[t.ID] = t
+	}
+	out := make(map[string]bool, len(tasks))
+	for _, t := range tasks {
+		seen := map[string]bool{}
+		for cur, ok := t, true; ok && !seen[cur.ID]; cur, ok = byID[cur.ParentID] {
+			seen[cur.ID] = true
+			if cur.Priority != "" {
+				out[t.ID] = true
+				break
+			}
+		}
+	}
+	return out
+}
+
+// AwaitingVerdict reports an open task the user has not ruled on. Such a task is hidden from every
+// worker, so a backlog full of them looks busy while nothing can be claimed — which is why the
+// count is surfaced rather than left for someone to work out from the rows.
+func AwaitingVerdict(t Task) bool { return Open(t) && t.Approval == "pending" }
+
+// CountAwaitingVerdict is how many of these tasks are waiting on the user.
+func CountAwaitingVerdict(tasks []Task) (n int) {
+	for _, t := range tasks {
+		if AwaitingVerdict(t) {
+			n++
+		}
+	}
+	return n
+}
+
 // PendingApproval returns the tasks under id still waiting on the user's verdict, deepest first.
 // A rejected one is a verdict already given, and one that has ended decides nothing — so a
 // cascading approve reaches neither, and both keep the state a human put them in.

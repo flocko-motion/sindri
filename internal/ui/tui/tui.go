@@ -343,6 +343,14 @@ func (m model) View() string {
 	labels := make([]string, len(tuiSections))
 	for i, s := range tuiSections {
 		labels[i] = fmt.Sprintf("%d %s", m.tabCount(s), s.Title)
+		// Tasks awaiting a verdict ride on the Tasks label so the count is in view from every tab:
+		// they are hidden from workers, so a backlog of them reads as plenty of work beside an idle
+		// agent, and nothing said the two were connected.
+		if s.Key == "tasks" {
+			if n := api.CountAwaitingVerdict(m.state.Tasks); n > 0 {
+				labels[i] += fmt.Sprintf(" (%d%s)", n, gateGlyph)
+			}
+		}
 	}
 	// Modals take over the whole screen.
 	if m.errText != "" {

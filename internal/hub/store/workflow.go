@@ -306,10 +306,16 @@ func (p *ProjectStore) GetTask(id string) (Task, bool, error) {
 	return t, true, nil
 }
 
-// OpenContainers returns claimable packages: approved, prioritised, unheld tasks with an
-// open child and no open ancestor. A hierarchy IS the unit of work — one agent takes the
-// whole tree on the parent's branch, so OpenLeaves leaves them alone. Gates match
-// OpenLeaves, and excluding nested trees stops a claim at two levels at once.
+// OpenContainers returns claimable packages: approved, prioritised, unheld tasks with a workable
+// descendant and no open ancestor. A hierarchy IS the unit of work — one agent takes the whole tree
+// on the parent's branch, so OpenLeaves leaves them alone. Gates match OpenLeaves, and excluding
+// nested trees stops a claim at two levels at once.
+//
+// "Workable" is OpenSubtasks' answer, not a second opinion in SQL: a package whose only open child
+// is itself gated, or is a parent of gated work, has nothing to hand an agent. Judged by an open
+// child alone, two such packages sat in the claimable pool while every claim of them came back
+// empty — the same two-queries-disagreeing shape that had the directive and the submit gate
+// contradicting each other.
 func (p *ProjectStore) OpenContainers() ([]Task, error) {
 	rows, err := p.s.db.Query(`
 		SELECT `+taskCols+taskFrom+`
@@ -324,7 +330,21 @@ func (p *ProjectStore) OpenContainers() ([]Task, error) {
 		return nil, fmt.Errorf("open containers: %w", err)
 	}
 	defer rows.Close()
-	return scanTasks(rows)
+	candidates, err := scanTasks(rows)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Task, 0, len(candidates))
+	for _, c := range candidates {
+		work, err := p.OpenSubtasks(c.ID)
+		if err != nil {
+			return nil, err
+		}
+		if len(work) > 0 {
+			out = append(out, c)
+		}
+	}
+	return out, nil
 }
 
 // AllTasks returns every cached task in this project with its approval overlay.

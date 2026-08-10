@@ -9,6 +9,7 @@
 package hub
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/registry"
@@ -226,6 +228,14 @@ func (h *Hub) AgentExec(project, name string, args []string, out io.Writer) (int
 		fmt.Fprintf(os.Stderr, "hub: agent %q command %q failed: %v\n", name, args[0], err)
 		if exit == 0 {
 			exit = 1
+		}
+		// "Try again later" is only true of a fault that might pass. A broken project config never
+		// will, and telling an agent otherwise bought hours of retries against a one-line fix: the
+		// project is misconfigured, every verb that reads it is down, and only a human can end it.
+		if errors.Is(err, config.ErrConfig) {
+			return exit, fmt.Errorf("this project's .sindri/config.yaml can't be read, so %q and anything "+
+				"else needing it will keep failing. Retrying won't help and there's nothing in /workspace "+
+				"to fix — tell the user, and carry on with whatever doesn't need it", args[0])
 		}
 		return exit, fmt.Errorf("the hub hit an internal error running %q — it's logged for the operator; nothing for you to fix, try again later", args[0])
 	}

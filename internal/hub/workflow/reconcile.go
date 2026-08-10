@@ -32,11 +32,9 @@ func (e *Engine) RefreshTask(project, id string) error {
 	})
 }
 
-// refreshCachedTask updates one task's cached row after a local mutation, instead
-// of a full multi-source SyncTasks: a task sindri owns is re-read from its own table; a gh-/os- one
-// keeps its synced fields and has the hub's own — priority, parent — laid back over them, since a
-// local edit changes those and not what the source holds.
-// Best-effort: a failure is logged host-side, never surfaced to the mutation.
+// refreshCachedTask updates one task's cached row after a local mutation instead of a full
+// multi-source SyncTasks: an owned task is re-read from its own table, a gh-/os- one keeps its
+// synced fields under the hub's own priority and parent. Best-effort, logged host-side.
 func (e *Engine) refreshCachedTask(project, id string) {
 	ps := e.store.For(project)
 	if ps.OwnsTask(id) {
@@ -64,14 +62,27 @@ func (e *Engine) refreshCachedTask(project, id string) {
 	}
 }
 
-// reconciledStatus is the pure rule: a task said to be under review with no open PR isn't, one said
-// to be in progress with no assigned agent isn't, and one said to be DONE with open work under it
-// isn't either — a parent is finished exactly when its children are. Everything else is left as-is.
-// Returns the status the task should have.
-func reconciledStatus(status string, activePR, assigned, openChildren bool) string {
-	if openChildren && (task.Task{Status: status}).IsClosed() {
+// taskFacts is what the sweep knows about one task's reality — the four things reconciledStatus
+// weighs against what the task claims about itself.
+type taskFacts struct {
+	activePR      bool // a PR neither merged nor rejected: the task really is out for review
+	assigned      bool // an agent holds it
+	openChildren  bool // work remains beneath it
+	mergedFinalPR bool // its work has landed; an interim contribution does NOT count (the task goes on)
+}
+
+// reconciledStatus is the pure rule, weighing what a task claims against taskFacts and returning the
+// status it should have. Everything it has no opinion on is left alone.
+func reconciledStatus(status string, f taskFacts) string {
+	if f.openChildren && (task.Task{Status: status}).IsClosed() {
 		return "open" // reopened rather than left lying: the work beneath it is real and unfinished
 	}
+	// Landed work outranks a stale "open": a merge is the end of a task, so a tree left open by one
+	// that took the wrong path is closed here rather than waiting on someone to notice it.
+	if f.mergedFinalPR && !f.openChildren && !(task.Task{Status: status}).IsClosed() {
+		return "closed"
+	}
+	activePR, assigned := f.activePR, f.assigned
 	switch status {
 	case "in_review":
 		if !activePR {
@@ -88,51 +99,57 @@ func reconciledStatus(status string, activePR, assigned, openChildren bool) stri
 	return status
 }
 
-// taskReality reports whether a task currently has an active (not merged/rejected)
-// PR and whether any agent is assigned to it — the two facts reconciledStatus needs.
-func (e *Engine) taskReality(project, id string) (activePR, assigned bool, err error) {
+// taskReality gathers what is actually true of one task, for reconciledStatus to judge its claim
+// against.
+func (e *Engine) taskReality(project, id string) (taskFacts, error) {
 	ps := e.store.For(project)
+	var f taskFacts
 	prs, err := ps.PRs()
 	if err != nil {
-		return false, false, err
+		return f, err
 	}
 	for _, p := range prs {
-		if p.Task == id && p.Status != "merged" && p.Status != "rejected" {
-			activePR = true
-			break
+		if p.Task != id {
+			continue
+		}
+		switch {
+		case p.Status == "merged" && p.Kind != "interim":
+			f.mergedFinalPR = true
+		case p.Status != "merged" && p.Status != "rejected":
+			f.activePR = true
 		}
 	}
 	roster, err := ps.Roster()
 	if err != nil {
-		return false, false, err
+		return f, err
 	}
 	for _, a := range roster {
 		if st, _ := ps.GetState(a.Name); st.Task == id {
-			assigned = true
+			f.assigned = true
 			break
 		}
 	}
-	return activePR, assigned, nil
+	open, err := ps.OpenChildIDs(id)
+	if err != nil {
+		return f, err
+	}
+	f.openChildren = len(open) > 0
+	return f, nil
 }
 
-// ReconcileTask repairs one td task's status against reality (a no-op for gh-/os-
-// ids and for a task that's already consistent). Writes the correction to td so it
-// persists through the next sync.
+// ReconcileTask repairs one owned task's status against reality, writing the correction to the
+// owning table so it survives the next sync. A no-op for an id owned elsewhere.
 func (e *Engine) ReconcileTask(project, id string) error {
 	ps := e.store.For(project)
 	live, ok, err := ps.OwnedTask(id)
 	if err != nil || !ok {
 		return err // an id owned elsewhere carries its own status; nothing here to repair
 	}
-	activePR, assigned, err := e.taskReality(project, id)
+	facts, err := e.taskReality(project, id)
 	if err != nil {
 		return err
 	}
-	open, err := ps.OpenChildIDs(id)
-	if err != nil {
-		return err
-	}
-	want := reconciledStatus(live.Status, activePR, assigned, len(open) > 0)
+	want := reconciledStatus(live.Status, facts)
 	if want == live.Status {
 		return nil
 	}
@@ -154,37 +171,46 @@ func (e *Engine) ReconcileTasks(project string) error {
 	if err != nil {
 		return err
 	}
-	activePR := map[string]bool{}
+	// The same facts taskReality gathers per task, collected once for the whole project: the sweep
+	// runs at every task list and TUI start, so a query per task would be paid on every one of them.
+	facts := map[string]*taskFacts{}
+	factsFor := func(id string) *taskFacts {
+		if f := facts[id]; f != nil {
+			return f
+		}
+		f := &taskFacts{}
+		facts[id] = f
+		return f
+	}
 	for _, p := range prs {
-		if p.Status != "merged" && p.Status != "rejected" {
-			activePR[p.Task] = true
+		switch {
+		case p.Status == "merged" && p.Kind != "interim":
+			factsFor(p.Task).mergedFinalPR = true
+		case p.Status != "merged" && p.Status != "rejected":
+			factsFor(p.Task).activePR = true
 		}
 	}
-	assigned := map[string]bool{}
 	roster, err := ps.Roster()
 	if err != nil {
 		return err
 	}
 	for _, a := range roster {
 		if st, _ := ps.GetState(a.Name); st.Task != "" {
-			assigned[st.Task] = true
+			factsFor(st.Task).assigned = true
 		}
 	}
-	// Which tasks still have open work under them, from the cache in one pass rather than a query
-	// per task: the sweep runs at every task list and TUI start.
 	all, err := ps.AllTasks()
 	if err != nil {
 		return err
 	}
-	hasOpenChild := map[string]bool{}
 	for _, t := range all {
 		if t.ParentID != "" && t.Status == "open" {
-			hasOpenChild[t.ParentID] = true
+			factsFor(t.ParentID).openChildren = true
 		}
 	}
 	changed := false
 	for _, t := range tasks {
-		if want := reconciledStatus(t.Status, activePR[t.ID], assigned[t.ID], hasOpenChild[t.ID]); want != t.Status {
+		if want := reconciledStatus(t.Status, *factsFor(t.ID)); want != t.Status {
 			if err := ps.SetOwnedStatus(t.ID, want); err != nil {
 				fmt.Fprintf(os.Stderr, "hub: reconcile %s (%s->%s): %v\n", t.ID, t.Status, want, err)
 				continue

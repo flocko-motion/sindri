@@ -75,6 +75,9 @@ func (m model) taskRows() []row {
 			approval[t.ID] = t.Approval
 		}
 	}
+	// Read from the WHOLE board, never the filtered set: an ancestor that releases the tree may be
+	// closed and out of view, and its children would otherwise read as held back.
+	released := api.ReleasedByPriority(m.state.Tasks)
 
 	// Children: a later row one level deeper, before the depth returns to this level.
 	hasKids := map[string]bool{}
@@ -124,6 +127,13 @@ func (m model) taskRows() []row {
 			sc, state = stWarn, "pending"
 		case "rejected":
 			sc, state = stDone, "rejected"
+		default:
+			// Unrated reads like ungated: both mean no worker can be given this, and the row that
+			// showed a plain "open" claimed otherwise. A rated ancestor releases the whole tree, so
+			// only a task with none anywhere above it is really held back.
+			if !isDone(tr.Status) && !released[tr.ID] {
+				sc, state = stWarn, "unrated"
+			}
 		}
 		if v := m.busy[tr.ID]; v != "" { // transient: the user triggered a close/scrap, awaiting the hub
 			sc, state = stWarn, v

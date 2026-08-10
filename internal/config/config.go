@@ -37,8 +37,21 @@ type Lint = api.Lint
 // uses; Load/Write/validate/Abs stay here since they touch disk.
 type Config = api.Config
 
+// ErrConfig marks a failure to read a project's configuration, so callers can tell it apart from a
+// fault that might pass on its own. It never will: a human edits the file or nothing changes, and
+// anything told to "try again later" instead waits forever.
+var ErrConfig = errors.New("project configuration")
+
 // Load layers repo config over global over defaults. Absent is fine; malformed is an error.
 func Load(root string) (Config, error) {
+	c, err := load(root)
+	if err != nil {
+		return Config{}, fmt.Errorf("%w: %w", ErrConfig, err)
+	}
+	return c, nil
+}
+
+func load(root string) (Config, error) {
 	var c Config
 	if err := decodeInto(filepath.Join(paths.StateDir(), "config.yaml"), &c); err != nil {
 		return Config{}, err
@@ -69,9 +82,21 @@ func decodeInto(path string, c *Config) error {
 	dec := yaml.NewDecoder(f)
 	dec.KnownFields(true)
 	if err := dec.Decode(c); err != nil && !errors.Is(err, io.EOF) { // EOF = empty file, fine
-		return fmt.Errorf("%s: %w", path, err)
+		return fmt.Errorf("%s: %w%s", path, err, staleBinaryHint(err))
 	}
 	return nil
+}
+
+// staleBinaryHint names the likeliest cause of an unknown key, which is not a typo: a config that
+// gained a setting a LONGER-RUNNING process does not know yet. The hub holds a config open for its
+// whole life, so a key added by an upgrade or a merge reads as invalid until it restarts — and
+// without saying so, a strict parse looks like a broken file nobody edited.
+func staleBinaryHint(err error) string {
+	if !strings.Contains(err.Error(), "not found in type") {
+		return ""
+	}
+	return "\nIf that key was added recently, the process reading this config predates it — restart it" +
+		" (`sindri hub stop`, then `sindri hub start --bg`) so it knows the setting."
 }
 
 // validate rejects escaping paths and missing set files; the default architecture is exempt
