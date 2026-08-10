@@ -114,8 +114,8 @@ own sandbox and opens a PR; review and land it:
 
 ```bash
 sindri pr list
-sindri pr approve pr-td-abc123              # sign off (you're the reviewer)
-sindri pr merge   pr-td-abc123              # the one hard gate — human only
+sindri pr approve pr-sd-abc123              # sign off (you're the reviewer)
+sindri pr merge   pr-sd-abc123              # the one hard gate — human only
 ```
 
 Everything beyond this — a reviewer agent, a planner, the collaborative "work a
@@ -209,9 +209,9 @@ review gate between them. The *same* flow covers two styles:
 
 ```bash
 # Build the feature: a parent with children. One agent takes the whole package.
-sindri task new "Login feature" -t epic                          # → td-LOGIN
-sindri task new "Form UI"   --parent td-LOGIN
-sindri task new "Validation" --parent td-LOGIN
+sindri task new "Login feature" -t epic                          # → sd-LOGIN
+sindri task new "Form UI"   --parent sd-LOGIN
+sindri task new "Validation" --parent sd-LOGIN
 ```
 
 A free agent picks up the marked container automatically: it goes on a standing
@@ -222,8 +222,8 @@ branch named for the container and starts on the first child. Then:
   between subtasks.
 - When you reach a milestone, **`sindri pr milestone <agent>`** captures the
   branch's current state as one PR and **blocks** the agent.
-- You review it, then **`sindri pr approve pr-td-LOGIN`** and
-  **`sindri pr merge pr-td-LOGIN`**. The merge lands, the branch is rebased onto
+- You review it, then **`sindri pr approve pr-sd-LOGIN`** and
+  **`sindri pr merge pr-sd-LOGIN`**. The merge lands, the branch is rebased onto
   the new base, and the agent **resumes the same feature** — the branch isn't
   retired.
 - The agent is freed only when the container task itself is closed.
@@ -238,14 +238,14 @@ here — you own the merge.
 
 ```bash
 sindri pr list                       # pending merge-intents
-sindri pr info pr-td-abc123          # metadata + diff
-sindri pr lint pr-td-abc123          # run the quality gate against the PR
-sindri pr verify pr-td-abc123        # check it out into a workspace to run by hand
+sindri pr info pr-sd-abc123          # metadata + diff
+sindri pr lint pr-sd-abc123          # run the quality gate against the PR
+sindri pr verify pr-sd-abc123        # check it out into a workspace to run by hand
 
-sindri pr review pr-td-abc123 "…"    # request an agentic review (assigns a reviewer)
-sindri pr approve pr-td-abc123       # approve it yourself (no reviewer needed)
-sindri pr reject  pr-td-abc123 "…"   # reject with feedback (routed to the worker)
-sindri pr merge   pr-td-abc123       # the hard gate — human only, requires approved
+sindri pr review pr-sd-abc123 "…"    # request an agentic review (assigns a reviewer)
+sindri pr approve pr-sd-abc123       # approve it yourself (no reviewer needed)
+sindri pr reject  pr-sd-abc123 "…"   # reject with feedback (routed to the worker)
+sindri pr merge   pr-sd-abc123       # the hard gate — human only, requires approved
 ```
 
 A worker's PR reaches `approved` via a reviewer agent **or** your own
@@ -261,12 +261,12 @@ has it imported once, on first use.
 
 ```bash
 sindri task new "Fix the parser" -t bug -p P1      # type: bug|feature|task|epic|chore
-sindri task new "Sub-thing" --parent td-abc123     # a child (subtask)
+sindri task new "Sub-thing" --parent sd-abc123     # a child (subtask)
 sindri task list
 sindri task list --json                            # the same rows as JSON, for scripts (always an array)
-sindri task info td-abc123
-sindri task edit td-abc123 --parent td-LOGIN       # move a task into a package
-sindri task priority td-abc123 P0                  # a priority is what releases it to a worker
+sindri task info sd-abc123
+sindri task edit sd-abc123 --parent sd-LOGIN       # move a task into a package
+sindri task priority sd-abc123 P0                  # a priority is what releases it to a worker
 ```
 
 A **planner** proposes tasks that you gate: a proposed task is *pending* until you

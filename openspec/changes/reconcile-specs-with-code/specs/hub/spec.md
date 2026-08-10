@@ -7,10 +7,10 @@
 The hub SHALL hold abstract tasks in its store as one read model, drawn from more than one
 source. **Sindri owns tasks of its own** — the primary source, held in the hub's own store
 — and MAY additionally mirror tasks from external sources: openspec changes and GitHub
-issues. Each row's id prefix records which source owns it: `td-` a task sindri owns (the
-prefix kept for continuity with the tool sindri's own store replaced), `os-` an openspec
-change, `gh-` a GitHub issue. Browsing reads — lists and the board — SHALL be served from
-this model.
+issues. Each row's id prefix records which source owns it: `sd-` a task sindri owns, `os-`
+an openspec change, `gh-` a GitHub issue. `td-` is the recognised legacy form of sindri's
+own ownership, minted before `sd-` and never rewritten (-> mint-sd-task-ids). Browsing
+reads — lists and the board — SHALL be served from this model.
 
 A write SHALL reach whatever owns the task. For a task sindri owns, the hub's own store is
 the source of truth and the write lands there directly. For a mirrored task, the write
@@ -61,7 +61,8 @@ tasks when it is unavailable, without failing the sync of the other sources.
 #### Scenario: The prefix names the owner
 
 - **WHEN** a task id is read
-- **THEN** `td-` means sindri owns it, `os-` an openspec change, `gh-` a GitHub issue
+- **THEN** `sd-` means sindri owns it, `os-` an openspec change, `gh-` a GitHub issue, and
+  `td-` means sindri owns it too — the legacy form, still honoured
 
 #### Scenario: Network source is throttled
 

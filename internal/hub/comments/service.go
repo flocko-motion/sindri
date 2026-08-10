@@ -53,7 +53,8 @@ func New(st *store.Store, d Deps, sources ...tasks.Source) *Service {
 
 // ForView returns a task's comments for a detail read: the cached set, after a
 // re-sync if it's stale. The sync is TTL-gated to once an hour and the detail read
-// runs in a background command UI-side, so a view stays responsive. td-*/gh- only.
+// runs in a background command UI-side, so a view stays responsive. Sindri-owned and
+// gh- ids only (task.OwnerOf decides).
 func (s *Service) ForView(project, id string) []store.Comment {
 	if s.due(project, id) {
 		if err := s.sync(project, id, false); err != nil {

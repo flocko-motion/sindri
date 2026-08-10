@@ -36,7 +36,10 @@ func (e *Engine) importTdOnce(project, root string) error {
 	}
 	ps := e.store.For(project)
 	for _, t := range existing {
-		if !strings.HasPrefix(t.ID, OwnedPrefix) {
+		// IsLegacyTD, deliberately: these rows come OUT of td, so the question is whether the row
+		// is a td one — not what sindri mints today, which would import nothing the moment the
+		// mint prefix moved on.
+		if !task.IsLegacyTD(t.ID) {
 			continue
 		}
 		if err := ps.PutOwnedTask(store.OwnedTask{

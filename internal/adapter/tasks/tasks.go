@@ -10,7 +10,8 @@ package tasks
 import "github.com/flo-at/sindri/internal/hub/task"
 
 // Source is a place tasks come from (td, openspec, GitHub), mapping its own world onto task.Task
-// and namespacing its ids (td-*, os-*, gh-*). The hub never branches on which one is underneath.
+// and namespacing its ids (the scheme is hub/task/ids.go's; no caller compares a
+// prefix). The hub never branches on which one is underneath.
 type Source interface {
 	// Name identifies the source for storage that must distinguish comment threads by origin —
 	// not user-facing, so it owes nothing to display conventions.

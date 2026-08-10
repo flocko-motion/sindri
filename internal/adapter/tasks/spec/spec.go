@@ -22,7 +22,7 @@ import (
 // ID derives a stable os-XXXXXX task id from a change name. One-way — reversed by changeName.
 func ID(name string) string {
 	sum := sha256.Sum256([]byte(name))
-	return "os-" + hex.EncodeToString(sum[:])[:6]
+	return task.SpecID(hex.EncodeToString(sum[:])[:6])
 }
 
 // Source adapts openspec as a task source: each active change becomes a task.
@@ -90,7 +90,7 @@ func (Source) OnMerged(root, taskID, note string) error { return nil }
 // Finish archives (done) or removes (scrap) the change behind an os- id; handled is false for a
 // non-os id. An os id whose change can't be resolved is a real error (the id is a one-way hash).
 func (Source) Finish(root, taskID string, scrap bool) (bool, error) {
-	if !strings.HasPrefix(taskID, "os-") {
+	if task.OwnerOf(taskID) != task.OwnerOpenSpec {
 		return false, nil
 	}
 	name, ok := changeName(root, taskID)

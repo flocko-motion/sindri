@@ -7,30 +7,12 @@
 package workflow
 
 import (
-	"crypto/rand"
-	"encoding/hex"
-	"fmt"
 	"strings"
 	"time"
 
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/task"
 )
-
-// OwnedPrefix marks the ids sindri owns. Inherited from td, whose ids are embedded in PR ids,
-// branch names and agent state.
-const OwnedPrefix = "td-"
-
-// NewOwnedID mints an id for a task sindri owns: the prefix plus six hex characters, the shape td
-// used and openspec still uses. Random rather than sequential, so two repos never collide and an id
-// carries no ordering anyone could read meaning into.
-func NewOwnedID() (string, error) {
-	var b [3]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", fmt.Errorf("generate task id: %w", err)
-	}
-	return OwnedPrefix + hex.EncodeToString(b[:]), nil
-}
 
 // ownedSource adapts the owned_tasks table to tasks.Source. It holds the project's store rather
 // than deriving one from a root, which is what separates it from a source over an external tool.
@@ -95,7 +77,7 @@ func (s ownedSource) AddComment(_, _, _ string) (bool, error) { return false, ni
 // owns gates every mutation on both the prefix and the row, so an id this project never had is
 // left to the other sources rather than reported as handled.
 func (s ownedSource) owns(id string) bool {
-	return strings.HasPrefix(id, OwnedPrefix) && s.ps.OwnsTask(id)
+	return task.IsOwned(id) && s.ps.OwnsTask(id)
 }
 
 // applySpec overlays the non-empty fields of an edit onto a stored task, which is what makes an

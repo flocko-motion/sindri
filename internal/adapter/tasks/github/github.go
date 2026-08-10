@@ -35,17 +35,14 @@ func (Source) Name() string { return "github" }
 // ToolMissing is always false: Enabled already folds the `gh` CLI check in.
 func (Source) ToolMissing(root string) bool { return false }
 
-// ID is the stable task id for a GitHub issue: gh-<number>. Number reverses it.
-func ID(number int) string { return "gh-" + strconv.Itoa(number) }
+// ID is the stable task id for a GitHub issue. Number reverses it. Both defer to hub/task, which
+// owns the id scheme — this adapter knows issues, not prefixes.
+func ID(number int) string { return task.GitHubID(number) }
 
-// Number reverses ID; ok=false for a non-gh id.
+// Number reverses ID; ok=false for an id belonging to another source.
 func Number(id string) (int, bool) {
-	rest, ok := strings.CutPrefix(id, "gh-")
+	n, ok := task.GitHubNumber(id)
 	if !ok {
-		return 0, false
-	}
-	n, err := strconv.Atoi(rest)
-	if err != nil {
 		return 0, false
 	}
 	return n, true

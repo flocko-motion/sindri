@@ -35,10 +35,11 @@ func (e *Engine) Tasks(project string) ([]store.Task, error) {
 	return e.store.For(project).AllTasks()
 }
 
-// TaskInfo returns one task, refreshed from its source of truth. Only td-* live in td's store;
-// gh-* and os-* are served from the hub's cache, since asking td by a non-td id only errors.
+// TaskInfo returns one task, refreshed from its source of truth. Only sindri's own tasks live in
+// the hub's store as authoritative; a mirrored id is served from the cache, since asking the owned
+// store by a foreign id only errors.
 func (e *Engine) TaskInfo(project, id string) (store.Task, error) {
-	if !strings.HasPrefix(id, "td-") {
+	if !task.IsOwned(id) {
 		t, ok, err := e.store.For(project).GetTask(id)
 		if err != nil {
 			return store.Task{}, err
@@ -85,7 +86,7 @@ func (e *Engine) CreateTask(project string, s TaskSpec) (string, error) {
 	if err := e.checkParent(project, s.Parent, ""); err != nil {
 		return "", err
 	}
-	id, err := NewOwnedID()
+	id, err := task.MintID()
 	if err != nil {
 		return "", err
 	}
@@ -147,7 +148,7 @@ func (e *Engine) HealPlannerTasks() {
 		}
 		ps := e.store.For(a.Project)
 		st, _ := ps.GetState(a.Name)
-		if !strings.HasPrefix(st.Task, "td-") {
+		if !task.IsOwned(st.Task) {
 			continue
 		}
 		_ = ps.SetOwnedStatus(st.Task, "open")
