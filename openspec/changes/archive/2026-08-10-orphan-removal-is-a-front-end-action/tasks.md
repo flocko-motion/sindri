@@ -12,6 +12,10 @@
 
 ## 2. Confirm the specs match
 
-- [ ] 2.1 `openspec validate --all` passes.
-- [ ] 2.2 The hub still never removes an orphan unprompted — this change adds no sweep; the
-      only caller of `RemoveOrphan` is a confirmed front-end action.
+- [x] 2.1 `openspec validate --all` passes.
+- [x] 2.2 The hub still never removes an orphan unprompted — this change adds no sweep. Audited
+      every caller of `container.Rm`, which is the only thing that actually removes a container:
+      `DeleteAgent`, `StopAgent` and `Launch` (clearing a stale container of the same name) all
+      act on a DECLARED agent, so by the requirement's own definition none of them touches an
+      orphan; `RemoveOrphan` is reached only from `POST /orphan/remove`, which only a front end
+      calls, and both front ends confirm first. No timer, watchdog or sweep calls any of them.
