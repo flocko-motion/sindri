@@ -13,6 +13,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -144,7 +145,7 @@ func (s *Service) DeleteAgent(project, name string) error {
 	// a status to release; a gh-/os- item's is inferred from agent_state.
 	if st, _ := ps.GetState(name); ps.OwnsTask(st.Task) {
 		if err := ps.SetOwnedStatus(st.Task, "open"); err != nil {
-			fmt.Printf("warning: reopen %s on delete of %s: %v\n", st.Task, name, err)
+			log.Printf("hub: reopen %s on delete of %s: %v", st.Task, name, err)
 		}
 		_ = s.deps.RefreshTask(project, st.Task)
 	}

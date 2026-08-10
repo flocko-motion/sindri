@@ -8,7 +8,6 @@
 package update
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,13 +15,13 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/flo-at/sindri/internal/adapter/gh"
 	"github.com/flo-at/sindri/internal/tools/debug"
 )
 
@@ -206,23 +205,21 @@ func fetchReleaseExact(tag string, timeout time.Duration) (string, error) {
 // anonymous limit that 403s on shared networks. Without gh, a direct GET with a User-Agent and any
 // GITHUB_TOKEN/GH_TOKEN. A 404 comes back as errNotFound.
 func githubJSON(path string, timeout time.Duration) ([]byte, error) {
-	if _, err := exec.LookPath("gh"); err == nil {
+	if gh.Installed() {
 		return ghAPI(path, timeout)
 	}
 	debug.Logf("gh not found on PATH — falling back to a direct GitHub HTTP call")
 	return httpGitHubJSON(path, timeout)
 }
 
-// ghAPI runs `gh api <path>` (auth handled by gh) and returns its JSON body.
+// ghAPI runs `gh api <path>` through the shared GitHub adapter (auth handled by gh) — this package's
+// only gh call site, rather than a second one shelling out for itself — and returns its JSON body.
 func ghAPI(path string, timeout time.Duration) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	debug.Logf("gh api %s", path)
-	cmd := exec.CommandContext(ctx, "gh", "api", path)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
+	out, msg, err := gh.API(ctx, path)
+	if err != nil {
 		debug.Logf("gh api %s failed: %v — stderr: %s", path, err, msg)
 		if strings.Contains(msg, "404") || strings.Contains(strings.ToLower(msg), "not found") {
 			return nil, errNotFound
@@ -232,7 +229,7 @@ func ghAPI(path string, timeout time.Duration) ([]byte, error) {
 		}
 		return nil, fmt.Errorf("gh api %s: %w", path, err)
 	}
-	return stdout.Bytes(), nil
+	return out, nil
 }
 
 // httpGitHubJSON GETs api.github.com directly with a User-Agent and any env token, reporting the

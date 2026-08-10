@@ -11,12 +11,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"syscall"
 
+	"github.com/flo-at/sindri/internal/adapter/process"
 	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
@@ -73,17 +71,5 @@ func processAlive(pid int) bool {
 	if err := syscall.Kill(pid, 0); err != nil && err != syscall.EPERM {
 		return false
 	}
-	return !isZombie(pid)
-}
-
-// isZombie reports whether pid is a zombie (defunct): still in the process table,
-// holding its exit status until the parent reaps it, but dead. Best-effort — if we
-// can't read the state we assume it's not a zombie, so we never discard a hub that
-// might be live.
-func isZombie(pid int) bool {
-	out, err := exec.Command("ps", "-o", "state=", "-p", strconv.Itoa(pid)).Output()
-	if err != nil {
-		return false
-	}
-	return strings.HasPrefix(strings.TrimSpace(string(out)), "Z")
+	return !process.IsZombie(pid)
 }

@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"testing"
 	"time"
+
+	"github.com/flo-at/sindri/internal/adapter/process"
 )
 
 // tmpRuntime points the runtime dir (where the pid file lives) at a temp dir for
@@ -92,7 +94,7 @@ func TestProcessAliveRejectsZombie(t *testing.T) {
 
 	var sawZombie bool
 	for i := 0; i < 200; i++ { // up to ~2s for it to exit into zombie state
-		if isZombie(pid) {
+		if process.IsZombie(pid) {
 			sawZombie = true
 			break
 		}

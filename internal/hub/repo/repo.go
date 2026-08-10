@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
+	"github.com/flo-at/sindri/internal/adapter/lintgate"
 )
 
 // MaterializeReview checks out branch (detached) into the repo's reserved
@@ -75,18 +76,14 @@ func builtinLint(wt string, resolveBin func() (string, error), declared bool) (s
 		}
 		return "", true // no Go module and no declared gate — as before
 	}
-	bin, err := resolveBin()
-	if err != nil {
-		return "lint: " + err.Error(), false
-	}
-	cmd := exec.Command(bin, "lint")
-	cmd.Dir = wt
-	out, err := cmd.CombinedOutput()
-	return string(out), err == nil
+	ok, out := lintgate.Adapter{ResolveBin: resolveBin}.Validate(wt)
+	return out, ok
 }
 
 // runVerify executes the project's own gate, bounded and with its output capped. A timeout is a
-// refusal, not a hang: the agent is told the gate ran out of time and how long it had.
+// refusal, not a hang: the agent is told the gate ran out of time and how long it had. Its
+// exec.CommandContext runs a path the PROJECT declares, not a tool sindri depends on and wraps
+// (git, brokkr, ...) — no adapter applies to running a caller-supplied command; that's the feature.
 func runVerify(wt, verify string) (string, bool) {
 	bin := filepath.Join(wt, filepath.FromSlash(verify))
 	if _, err := os.Stat(bin); err != nil {

@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/flo-at/sindri/internal/adapter/gh"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/hub/task"
 )
@@ -181,7 +182,7 @@ type Issue struct {
 // Enabled is the cheap local gate (gh on PATH + a GitHub remote); it never probes network or auth,
 // which is handled at call time.
 func Enabled(root string) bool {
-	if _, err := exec.LookPath("gh"); err != nil {
+	if !gh.Installed() {
 		return false
 	}
 	return hasGitHubRemote(root)
