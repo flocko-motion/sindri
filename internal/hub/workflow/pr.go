@@ -16,7 +16,6 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
-	"github.com/flo-at/sindri/internal/adapter/tasks/spec"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
@@ -284,9 +283,9 @@ func (e *Engine) CmdOpenspec(c registry.Caller, args []string, out io.Writer) (i
 		fmt.Fprintln(out, "Nothing to submit — edit /workspace/openspec first.")
 		return 1, nil
 	}
-	// Gate on openspec VALIDATION, not the code linter: a planner may only edit
-	// /workspace/openspec, so failing its plan on code it cannot touch would be wrong.
-	if ok, valOut := spec.Validate(wt); !ok {
+	// Gate on the installed quality gates (openspec validation, not the code linter: a planner may
+	// only edit /workspace/openspec, so failing its plan on code it cannot touch would be wrong).
+	if ok, valOut := e.qualityGate(wt); !ok {
 		fmt.Fprintln(out, ReplySpecInvalid(strings.TrimSpace(valOut)))
 		_ = ps.Log(c.Agent, "openspec-invalid", branch)
 		return 1, nil

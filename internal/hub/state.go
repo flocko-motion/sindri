@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/flo-at/sindri/internal/adapter/tasks/spec"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -69,7 +68,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			return BoardState{}, err
 		}
 		root := h.projectRoot(selected)
-		specMissing = spec.Enabled(root) && !spec.CLIInstalled()
+		specMissing = h.wf.TaskSourceToolMissing(root)
 	}
 
 	// Liveness comes from the watchdog's last observation — a board read REPORTS it, never takes one.

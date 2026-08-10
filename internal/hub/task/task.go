@@ -47,3 +47,12 @@ const (
 	FilterAll                  // every task
 	FilterClosed               // only closed tasks
 )
+
+// Comment is one comment on a task's thread, normalized the same way Task is: a source maps its own
+// world onto this shape rather than the hub knowing the source's.
+type Comment struct {
+	SourceRef string // external id/url, unique within the source
+	Author    string
+	Body      string
+	CreatedAt string // RFC3339
+}

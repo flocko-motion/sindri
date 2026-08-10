@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flo-at/sindri/internal/adapter/tasks/github"
+	"github.com/flo-at/sindri/internal/adapter/tasks/spec"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agent"
@@ -86,12 +88,12 @@ func New() (*Hub, error) {
 	}
 	h := &Hub{store: st, events: newBus(), startedAt: time.Now()}
 	h.chat = chat.New(h.store, chatDelivery{h})
-	h.comments = comments.New(h.store, commentsDeps{h})
+	h.comments = comments.New(h.store, commentsDeps{h}, spec.Source{}, github.Source{})
 	// agentCh before agents: the lifecycle serves sockets through it, and agentchanDeps only
 	// reaches h.agents at request time.
 	h.agentCh = agentchan.New(h.store, agentchanDeps{h})
 	h.agents = agent.New(h.store, agentDeps{h}, h.agentCh)
-	h.wf = workflow.New(h.store, workflowDeps{h})
+	h.wf = workflow.New(h.store, workflowDeps{h}, spec.Source{}, github.Source{}).WithGates(spec.Source{})
 	h.projects = project.New(h.store, projectDeps{h})
 	// Last, after agents: the watchdog probes through h.agents and reads once here, so the first
 	// board read has real observations.

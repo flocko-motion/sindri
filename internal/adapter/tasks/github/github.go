@@ -28,6 +28,12 @@ const issueListLimit = 1000
 // issueTimeout keeps a hung network call from stalling the source fetch.
 const issueTimeout = 15 * time.Second
 
+// Name identifies this source for comment-thread storage.
+func (Source) Name() string { return "github" }
+
+// ToolMissing is always false: Enabled already folds the `gh` CLI check in.
+func (Source) ToolMissing(root string) bool { return false }
+
 // ID is the stable task id for a GitHub issue: gh-<number>. Number reverses it.
 func ID(number int) string { return "gh-" + strconv.Itoa(number) }
 
@@ -125,6 +131,36 @@ func (Source) Finish(root, taskID string, scrap bool) (bool, error) {
 		return true, Delete(ctx, root, number)
 	}
 	return true, Close(ctx, root, number, "closed via sindri")
+}
+
+// Comments fetches an issue's comment thread; ok=false for a non-gh id.
+func (Source) Comments(root, taskID string) ([]task.Comment, bool, error) {
+	number, ok := Number(taskID)
+	if !ok {
+		return nil, false, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), issueTimeout)
+	defer cancel()
+	gc, err := IssueComments(ctx, root, number)
+	if err != nil {
+		return nil, true, err
+	}
+	out := make([]task.Comment, 0, len(gc))
+	for _, c := range gc {
+		out = append(out, task.Comment{SourceRef: c.URL, Author: c.Author.Login, Body: c.Body, CreatedAt: c.CreatedAt})
+	}
+	return out, true, nil
+}
+
+// AddComment posts to an issue's thread; handled=false for a non-gh id.
+func (Source) AddComment(root, taskID, body string) (bool, error) {
+	number, ok := Number(taskID)
+	if !ok {
+		return false, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), issueTimeout)
+	defer cancel()
+	return true, AddComment(ctx, root, number, body)
 }
 
 // Label is one GitHub label on an issue (only its name is used).

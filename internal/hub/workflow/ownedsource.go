@@ -36,6 +36,12 @@ func NewOwnedID() (string, error) {
 // than deriving one from a root, which is what separates it from a source over an external tool.
 type ownedSource struct{ ps *store.ProjectStore }
 
+// Name identifies this source for comment-thread storage.
+func (ownedSource) Name() string { return "owned" }
+
+// ToolMissing is always false: sindri's own store needs no external tool.
+func (ownedSource) ToolMissing(string) bool { return false }
+
 // Enabled is always true: the table is sindri's own, so there is nothing to detect.
 func (ownedSource) Enabled(string) bool { return true }
 
@@ -77,6 +83,14 @@ func (s ownedSource) Finish(_, taskID string, scrap bool) (bool, error) {
 	}
 	return true, s.ps.SetOwnedStatus(taskID, "closed")
 }
+
+// Comments: a task sindri owns has no upstream thread — the hub's own comment store already IS the
+// thread for it, which is the generic fallback every source shares, not something owned specifically
+// provides. ok is always false.
+func (s ownedSource) Comments(_, _ string) ([]task.Comment, bool, error) { return nil, false, nil }
+
+// AddComment: same reason as Comments — handled is always false.
+func (s ownedSource) AddComment(_, _, _ string) (bool, error) { return false, nil }
 
 // owns gates every mutation on both the prefix and the row, so an id this project never had is
 // left to the other sources rather than reported as handled.

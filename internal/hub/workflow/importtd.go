@@ -2,7 +2,9 @@
 // job:     carry a repo's existing td backlog into owned_tasks, once, the first time
 // the hub syncs that project — so taking td out costs nobody their tasks.
 // type:    logic (one-way migration)
-// limits:  reads td's SQLite and writes owned rows; the td CLI is never invoked.
+// limits:  reads td's SQLite and writes owned rows; the td CLI is never invoked. Names td
+// concretely on purpose, not a reach-around: it IS a one-way migration FROM td, and naming what
+// you migrate from is honest — do not "fix" this into an injected tasks.Source.
 package workflow
 
 import (

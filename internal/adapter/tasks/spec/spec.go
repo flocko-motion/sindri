@@ -28,8 +28,19 @@ func ID(name string) string {
 // Source adapts openspec as a task source: each active change becomes a task.
 type Source struct{}
 
+// Name identifies this source for comment-thread storage.
+func (Source) Name() string { return "openspec" }
+
 // Enabled reports whether the repo uses openspec.
 func (Source) Enabled(root string) bool { return Enabled(root) }
+
+// ToolMissing: the repo has an openspec/ dir but the openspec CLI isn't on PATH.
+func (Source) ToolMissing(root string) bool { return Enabled(root) && !CLIInstalled() }
+
+// Validate is this source doubling as a quality gate (-> adapter/gate.Gate): openspec's own
+// validation, run wherever a submit path needs one. Delegates to the package's Validate so every
+// caller agrees on what "passing" means.
+func (Source) Validate(wt string) (bool, string) { return Validate(wt) }
 
 // Tasks maps active changes to os-* tasks, closed once all of a change's own tasks are done.
 func (Source) Tasks(root string, _ bool) ([]task.Task, error) {
@@ -91,6 +102,12 @@ func (Source) Finish(root, taskID string, scrap bool) (bool, error) {
 	}
 	return true, Archive(root, name)
 }
+
+// Comments: an openspec change keeps no thread of its own — ok is always false.
+func (Source) Comments(root, taskID string) ([]task.Comment, bool, error) { return nil, false, nil }
+
+// AddComment: same reason as Comments — handled is always false.
+func (Source) AddComment(root, taskID, body string) (bool, error) { return false, nil }
 
 // changeName reverses an os-<hash> id by matching ID over the current changes (the hash is one-way).
 func changeName(root, id string) (string, bool) {

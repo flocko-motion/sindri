@@ -9,19 +9,31 @@
 package workflow
 
 import (
+	"github.com/flo-at/sindri/internal/adapter/gate"
 	"github.com/flo-at/sindri/internal/adapter/tasks"
-	"github.com/flo-at/sindri/internal/adapter/tasks/github"
-	"github.com/flo-at/sindri/internal/adapter/tasks/spec"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
 // taskSources is the ordered set of task backends the workflow syncs from and notifies on merge.
 // Each self-filters by id scheme, so the workflow treats them uniformly and never branches on which
-// concrete source is underneath a task. Project-scoped, because the source sindri owns reads the
-// hub's own store rather than a tool in the repo.
+// concrete source is underneath a task. ownedSource always leads, project-scoped, because the source
+// sindri owns reads the hub's own store rather than a tool in the repo; the rest are whatever the
+// composition root wired in at New (github, openspec, ...) — the engine learns nothing about them.
 func (e *Engine) taskSources(project string) []tasks.Source {
-	return []tasks.Source{ownedSource{e.store.For(project)}, spec.Source{}, github.Source{}}
+	return append([]tasks.Source{ownedSource{e.store.For(project)}}, e.sources...)
+}
+
+// TaskSourceToolMissing reports whether any task source wants a tool the repo's content calls for
+// but that isn't on PATH — e.g. an openspec/ dir with no openspec CLI installed. Project-agnostic
+// sources only (ownedSource never has one), so it does not need a project to scope by.
+func (e *Engine) TaskSourceToolMissing(root string) bool {
+	for _, src := range e.sources {
+		if src.ToolMissing(root) {
+			return true
+		}
+	}
+	return false
 }
 
 // Deps is the seam the workflow needs back into the hub — everything the
@@ -62,12 +74,36 @@ type Deps interface {
 // Engine is the workflow orchestrator: it owns the store and drives the lifecycle
 // steps, reaching the rest of the hub through Deps.
 type Engine struct {
-	store *store.Store
-	deps  Deps
+	store   *store.Store
+	deps    Deps
+	sources []tasks.Source // external task sources, wired in at New; ownedSource is always added per-project
+	gates   []gate.Gate    // submit-path quality gates, wired in via WithGates; openspec today
 }
 
-// New builds the workflow engine over the hub's store and its Deps implementation.
-func New(st *store.Store, deps Deps) *Engine { return &Engine{store: st, deps: deps} }
+// New builds the workflow engine over the hub's store, its Deps implementation, and the external
+// task sources the composition root wires in (github, openspec, ...) — the engine never names them.
+func New(st *store.Store, deps Deps, sources ...tasks.Source) *Engine {
+	return &Engine{store: st, deps: deps, sources: sources}
+}
+
+// WithGates installs the submit path's quality gates — openspec validation today, the built-in
+// lint gate once its own adapter task lands (the same seam, a second Gate). Chainable, so the
+// composition root wires it in alongside New in one line. An engine with none runs no gate.
+func (e *Engine) WithGates(gates ...gate.Gate) *Engine {
+	e.gates = gates
+	return e
+}
+
+// qualityGate runs every installed gate against wt, stopping at the first failure. A gate whose
+// domain doesn't apply to this repo (e.g. openspec with no openspec/ dir) reports ok=true itself.
+func (e *Engine) qualityGate(wt string) (ok bool, output string) {
+	for _, g := range e.gates {
+		if ok, out := g.Validate(wt); !ok {
+			return false, out
+		}
+	}
+	return true, ""
+}
 
 // mockSpecTask is the placeholder todo id on a planner's openspec PR (there's no
 // real backlog task behind it).
