@@ -24,6 +24,10 @@ type HomeSpec struct {
 	Dir          string    // host home dir to create + populate (mounted into the pod)
 	SystemPrompt string    // composed by the workflow; the backend persists it verbatim
 	Out          io.Writer // setup announcements (e.g. a one-time credential-access prompt)
+	// Workspace is the host path of the tree the pod mounts at /workspace. The backend reads it to
+	// decide which language tooling is worth declaring — a pod with no Go project should get no Go
+	// language server.
+	Workspace string
 }
 
 // Home is a provisioned home ready to mount (host paths); without HasCreds the caller

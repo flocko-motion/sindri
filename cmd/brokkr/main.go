@@ -19,6 +19,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/flo-at/sindri/internal/brokkr/goplsmcp"
 )
 
 // version is baked in at build time (-X main.version); "dev" for `go run`.
@@ -81,6 +83,39 @@ func vcsInfo() (rev, when string, dirty, ok bool) {
 }
 
 // newVersionCmd wires `brokkr version`, since a hand reaches for that before `--version`.
+// newGoplsMCPCmd serves gopls' type-aware Go tools over MCP. Hidden: it speaks JSON-RPC on stdio
+// and is meant for Claude to spawn, not for a human to run — it appears in the pod's Claude config,
+// not in the help.
+//
+// It lives in brokkr because brokkr already reaches every pod through the hub's mounted pod-bin,
+// so a change here needs no image rebuild — and because it is the type-aware counterpart to
+// `brokkr refs`, which is deliberately syntactic (go/ast, no type checking, so two packages
+// declaring the same name both answer). gopls resolves the shadowed name, finds implementations of
+// an interface, and renames safely. Complementary, not duplicate: neither replaces the other.
+func newGoplsMCPCmd() *cobra.Command {
+	var dir string
+	c := &cobra.Command{
+		Use:    "gopls-mcp",
+		Short:  "Serve gopls' Go tools over MCP (stdio; spawned by the coding agent, not by hand)",
+		Args:   cobra.NoArgs,
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if dir == "" {
+				wd, err := os.Getwd()
+				if err != nil {
+					return err
+				}
+				dir = wd
+			}
+			// Straight to the real stdio: the --tail buffer would corrupt the JSON-RPC stream,
+			// and this command's output is a protocol, not a report.
+			return goplsmcp.Run(dir, os.Stdin, os.Stdout, os.Stderr)
+		},
+	}
+	c.Flags().StringVar(&dir, "dir", "", "workspace to serve (default: the working directory)")
+	return c
+}
+
 func newVersionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
@@ -137,7 +172,7 @@ func main() {
 			"single command, so you don't need compound shell such as: "+
 			"brokkr <cmd> 2>&1 | tail -N ; echo \"=== exit: $? ===\".")
 	root.SilenceUsage = true // runtime errors report themselves; don't dump usage
-	root.AddCommand(newMapCmd(), newRefsCmd(), newLintCmd(), newVersionCmd())
+	root.AddCommand(newMapCmd(), newRefsCmd(), newLintCmd(), newVersionCmd(), newGoplsMCPCmd())
 
 	exit(run(root))
 }

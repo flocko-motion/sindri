@@ -49,7 +49,7 @@ func Deadcode(patterns []string, tags string, cap *Cap, ig *Ignore, w io.Writer)
 	initial, err := packages.Load(cfg, patterns...)
 	if err != nil {
 		// A toolchain behind go.mod fails the load for a reason that is not in the code: say so.
-		if old := toolchainTooOld(err.Error()); old != "" {
+		if old := ToolchainAdvice(err.Error()); old != "" {
 			return false, errors.New(old)
 		}
 		return false, fmt.Errorf("load: %w", err)
@@ -58,7 +58,7 @@ func Deadcode(patterns []string, tags string, cap *Cap, ig *Ignore, w io.Writer)
 		return false, fmt.Errorf("no packages match %v", patterns)
 	}
 	if packages.PrintErrors(initial) > 0 {
-		if old := toolchainTooOld(loadErrorText(initial)); old != "" {
+		if old := ToolchainAdvice(loadErrorText(initial)); old != "" {
 			return false, errors.New(old)
 		}
 		return false, fmt.Errorf("packages contain errors")

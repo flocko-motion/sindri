@@ -349,7 +349,7 @@ func (s *Service) Launch(project, name string, shell, debug bool, progress io.Wr
 		archContent, _ := os.ReadFile(filepath.Join(root, archPath))
 		sysPrompt := workflow.SystemPrompt(name, a.Role, string(archContent), archPath)
 		homeDir := paths.AgentHomeDir(project, name)
-		home, err := agentport.PrepareHome(agentport.HomeSpec{Dir: homeDir, SystemPrompt: sysPrompt, Out: w})
+		home, err := agentport.PrepareHome(agentport.HomeSpec{Dir: homeDir, SystemPrompt: sysPrompt, Out: w, Workspace: wt})
 		if err != nil {
 			return err
 		}
