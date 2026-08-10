@@ -221,6 +221,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.agent == m.selID() { // ignore a stale capture from a prior selection
 			m.agentPane = KeepColour(msg.text) // another program's screen: text + colour only
 		}
+	case agentCreatedMsg:
+		return m, m.launchCmd(string(msg))
+	case launchedMsg:
+		if msg.err != nil {
+			// The log is the diagnosis — a failed image build says why in its output, and the
+			// error alone ("exit status 1") would not.
+			body := msg.log
+			if strings.TrimSpace(body) == "" {
+				body = "(the launch produced no output)"
+			}
+			m.flash = ""
+			m.openTextModal("launch FAILED: "+msg.name+" — "+msg.err.Error(), body)
+			return m, nil
+		}
+		m.flash = msg.name + " launched"
+		if m.cl == nil {
+			return m, nil
+		}
+		return m, pollStateCmd(m.cl)
 	case agentDiagMsg:
 		if msg.agent == m.selID() { // ignore a stale fetch from a prior selection
 			m.agentDiag = msg.text

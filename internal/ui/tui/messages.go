@@ -36,6 +36,17 @@ type paneMsg struct {
 	text  string
 }
 
+// agentCreatedMsg names a freshly registered agent, so Update can start it — registration and
+// launch are two hub calls, and the second one needs to report for itself.
+type agentCreatedMsg string
+
+// launchedMsg is a finished launch: the log either way, and the error if it failed.
+type launchedMsg struct {
+	name string
+	log  string
+	err  error
+}
+
 // agentDiagMsg carries the liveness-probe explanation for an agent.
 type agentDiagMsg struct {
 	agent string

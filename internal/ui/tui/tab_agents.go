@@ -11,7 +11,6 @@ package tui
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -138,8 +137,10 @@ func (m *model) openNewAgentChoice() {
 			if v == "plan" {
 				return func() tea.Msg { return openPlanFormMsg(planner) }
 			}
-			// Register, then launch in the background (it can build the image) so the
-			// new row appears at once; /events reports launching → running.
+			// Register, then launch. The launch is a separate step so the new row appears at
+			// once, but its result is collected rather than dropped: a launch can fail (no
+			// image, no engine, a build that breaks) and the row would otherwise just sit at
+			// "down" with nothing said.
 			return func() tea.Msg {
 				if cl == nil {
 					return nil
@@ -148,13 +149,29 @@ func (m *model) openNewAgentChoice() {
 				if err != nil {
 					return errModalMsg{err}
 				}
-				if name != "" {
-					go func() { _ = cl.Launch(name, false, false, io.Discard) }()
+				if name == "" {
+					st, _ := cl.State()
+					return polledMsg(st)
 				}
-				st, _ := cl.State()
-				return polledMsg(st)
+				return agentCreatedMsg(name)
 			}
 		},
+	}
+}
+
+// launchCmd starts a registered agent and keeps what the launch says. A first run builds the
+// image, which is slow enough that silence reads as "nothing happened", and the build log is the
+// only account of a failure — so it is captured either way and shown when the launch fails.
+func (m *model) launchCmd(name string) tea.Cmd {
+	cl := m.cl
+	if cl == nil {
+		return nil
+	}
+	m.flash = "launching " + name + "… (a first run builds the image, which takes a while)"
+	return func() tea.Msg {
+		var buf bytes.Buffer
+		err := cl.Launch(name, false, false, &buf)
+		return launchedMsg{name: name, log: buf.String(), err: err}
 	}
 }
 
@@ -188,8 +205,9 @@ func (m *model) agentStartStop() tea.Cmd {
 	}
 	switch a.Status {
 	case "down":
-		m.flash = "starting " + a.Name + "…" // status (hub) drives the rest
-		return m.action(func(id string) error { return m.cl.Launch(id, false, false, io.Discard) })
+		// Same path as a freshly created agent: the launch keeps its output, so a failed image
+		// build shows what broke rather than a bare "exit status 1".
+		return m.launchCmd(a.Name)
 	case "launching", "stopping":
 		m.flash = a.Name + " is " + a.Status + "…"
 		return nil

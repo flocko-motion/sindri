@@ -163,8 +163,13 @@ func agentStatsCmd() *cobra.Command {
 
 func agentNewCmd() *cobra.Command {
 	var role, memory string
+	var noStart bool
 	c := &cobra.Command{
-		Use: "new [name]", Short: "Register an agent identity (no container; name optional — auto dwarf name)", Args: cobra.MaximumNArgs(1),
+		Use: "new [name]", Short: "Create an agent and start it (name optional — auto dwarf name)", Args: cobra.MaximumNArgs(1),
+		Long: "Register an agent identity and start its container, which is what you almost always want —\n" +
+			"the same thing the TUI's 'new' does.\n\n" +
+			"--no-start registers the identity alone, for pre-declaring an agent you will start later.\n" +
+			"An agent exists independently of any container, so this is a supported state, not a failure.",
 		RunE: func(_ *cobra.Command, args []string) error {
 			var want string
 			if len(args) == 1 {
@@ -175,13 +180,26 @@ func agentNewCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(os.Stderr, "registered %s (%s) — start with 'sindri agent start %s'\n", name, role, name)
+				if noStart {
+					fmt.Fprintf(os.Stderr, "registered %s (%s) — start with 'sindri agent start %s'\n", name, role, name)
+					return nil
+				}
+				fmt.Fprintf(os.Stderr, "registered %s (%s) — starting it\n", name, role)
+				// The launch streams (a first run builds the image, which is slow), and its own
+				// output is the account of a failure. Registration already succeeded, so a
+				// failed start is reported as exactly that — the agent exists and can be
+				// started again, which a bare error would not convey.
+				if err := b.Launch(name, false, false, os.Stderr); err != nil {
+					return fmt.Errorf("%s was registered but did not start: %w\n"+
+						"it exists as a stopped agent — retry with 'sindri agent start %s'", name, err, name)
+				}
 				return nil
 			})
 		},
 	}
 	c.Flags().StringVar(&role, "role", "worker", "agent role: worker|reviewer|planner|coauthor")
 	c.Flags().StringVar(&memory, "memory", "", "RAM limit for this agent's container (e.g. 4g, 512m; default 2g)")
+	c.Flags().BoolVar(&noStart, "no-start", false, "register the identity only, without starting a container")
 	return c
 }
 

@@ -101,14 +101,16 @@ sindri hub start --bg                       # start the global hub in the backgr
                                             # (foreground: `sindri hub start`; see also `sindri hub list` / `sindri hub stop`)
 
 sindri task new "Add a /healthz endpoint"   # describe a task
-sindri agent new                            # create a worker — auto-named (e.g. dvalin)
-sindri agent start dvalin                   # start it: it claims the task and starts coding
+sindri agent new                            # create a worker and start it — auto-named (e.g. dvalin)
+                                            # it claims the task and starts coding
+                                            # (--no-start to register the identity alone)
 
 sindri tui                                  # watch the board live
 ```
 
-Use the name `agent new` printed (or `sindri agent list` to see it). The worker
-writes code in its own sandbox and opens a PR; review and land it:
+Use the name `agent new` printed (or `sindri agent list` to see it). The first
+start builds the agent image, so it takes a while. The worker writes code in its
+own sandbox and opens a PR; review and land it:
 
 ```bash
 sindri pr list
