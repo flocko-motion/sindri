@@ -90,6 +90,7 @@ type model struct {
 	agentPane    string           // captured tmux screen of the selected agent (live)
 	agentView    string           // Agents main pane: "screen" (tmux, default) | "pod" (podman info)
 	agentPod     string           // fetched podman pod-info for the selected agent
+	agentDiag    string           // fetched liveness-probe explanation for the selected agent
 	agentClients []api.ClientView // dial-ins attached to the selected agent's session
 	prDetail     api.PRDetail
 	prView       string // which content the PR big pane shows: "diff" (default) | "lint"
@@ -219,6 +220,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case paneMsg:
 		if msg.agent == m.selID() { // ignore a stale capture from a prior selection
 			m.agentPane = KeepColour(msg.text) // another program's screen: text + colour only
+		}
+	case agentDiagMsg:
+		if msg.agent == m.selID() { // ignore a stale fetch from a prior selection
+			m.agentDiag = msg.text
 		}
 	case agentPodMsg:
 		if msg.agent == m.selID() {

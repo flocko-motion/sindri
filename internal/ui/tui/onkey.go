@@ -350,16 +350,19 @@ func (m *model) onKey(k string) tea.Cmd {
 			if it, ok := m.focusedItem(); ok {
 				switch it.kind {
 				case "view": // switch the big content pane
-					if m.tab == 1 { // Agents: toggle live screen ⇄ pod info
-						if m.agentView == "pod" {
+					if m.tab == 1 { // Agents: live screen ⇄ pod info ⇄ liveness probe
+						if m.agentView == it.value { // selecting the shown view returns to the screen
 							m.agentView = "screen"
 							return nil
 						}
-						m.agentView = "pod"
-						if m.cl != nil {
-							return podFetchCmd(m.cl, m.selID())
+						m.agentView = it.value
+						if m.cl == nil {
+							return nil
 						}
-						return nil
+						if it.value == "diag" {
+							return diagFetchCmd(m.cl, m.selID())
+						}
+						return podFetchCmd(m.cl, m.selID())
 					}
 					m.prView = it.value // PRs: diff ⇄ lint
 					m.detail.Resize(m.detail.Height, len(m.prContentLines()))

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -252,7 +253,7 @@ func (m model) agentsBody() string {
 func (m model) agentItems() []metaItem {
 	a, ok := m.selAgent()
 	if !ok {
-		return []metaItem{{text: dimStyle.Render("(orphan — no roster entry; 'podman rm -f' it)")}}
+		return []metaItem{{text: dimStyle.Render("(orphan — no roster entry; '" + keyDelete + "' removes it)")}}
 	}
 	taskIt := metaItem{text: "task:      " + m.taskLabel(a.Task)}
 	if a.Task != "" {
@@ -272,9 +273,15 @@ func (m model) agentItems() []metaItem {
 	if m.agentView == "pod" { // mark which view the main pane is showing
 		pod += dimStyle.Render("  ◂ shown")
 	}
+	status := "status:    " + a.Status
+	if m.agentView == "diag" {
+		status += dimStyle.Render("  ◂ shown")
+	} else {
+		status += dimStyle.Render("  (⏎ why)")
+	}
 	items := []metaItem{
 		{text: "role:      " + a.Role},
-		{text: "status:    " + a.Status},
+		{text: status, kind: "view", value: "diag"},
 		taskIt, featIt, prIt,
 		{text: "workspace: " + dash(a.Workspace)},
 		{text: "memory:    " + memoryLabelTUI(a.Memory) + dimStyle.Render("  (container RAM · e to edit)")},
@@ -313,6 +320,13 @@ func (m model) paneLines() []string {
 			return []string{dimStyle.Render("(fetching container info…)")}
 		}
 		return strings.Split(strings.TrimRight(m.agentPod, "\n"), "\n")
+	}
+	if m.agentView == "diag" { // what the hub's liveness probes actually observe
+		if strings.TrimSpace(m.agentDiag) == "" {
+			return []string{dimStyle.Render("(asking the hub why…)")}
+		}
+		head := dimStyle.Render("liveness probe — why status is " + strconv.Quote(a.Status) + ":")
+		return append([]string{head}, strings.Split(strings.TrimRight(m.agentDiag, "\n"), "\n")...)
 	}
 	body := strings.Split(strings.TrimRight(m.agentPane, "\n"), "\n")
 	hasBody := strings.TrimSpace(m.agentPane) != ""
@@ -446,7 +460,7 @@ func (m *model) openRemoveOrphanChoice(name string) {
 func (m model) agentDetailLines() []string {
 	a, ok := m.selAgent()
 	if !ok {
-		return []string{dimStyle.Render("(orphan — no roster entry; 'podman rm -f' it)")}
+		return []string{dimStyle.Render("(orphan — no roster entry; '" + keyDelete + "' removes it)")}
 	}
 	return m.agentDetailFor(a)
 }
@@ -458,6 +472,7 @@ func (m model) agentDetailFor(a api.AgentView) []string {
 		"role:      " + a.Role,
 		"status:    " + a.Status,
 		"task:      " + m.taskLabel(a.Task),
+		"feature:   " + m.taskLabel(a.Feature),
 		"pr:        " + dash(a.PR),
 		"workspace: " + dash(a.Workspace),
 		"container: " + m.agentContainer(a),

@@ -57,8 +57,8 @@ func (m *model) syncDetail() tea.Cmd {
 	case 0:
 		return func() tea.Msg { t, _ := cl.TaskInfo(id); return taskMsg{id, t} }
 	case 1:
-		m.agentPane, m.agentPod, m.agentClients = "", "", nil // selection changed — drop the previous agent's screen/pod/clients
-		m.agentView = "screen"                                // default back to the live screen
+		m.agentPane, m.agentPod, m.agentDiag, m.agentClients = "", "", "", nil // selection changed — drop the previous agent's screen/pod/clients
+		m.agentView = "screen"                                                 // default back to the live screen
 		return tea.Batch(
 			func() tea.Msg { evs, _ := cl.Log(id); return logMsg{id, evs} },
 			paneFetchCmd(cl, id),

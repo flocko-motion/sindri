@@ -111,7 +111,7 @@ func agentListCmd() *cobra.Command {
 					fmt.Println(line)
 				}
 				for _, o := range st.Orphans {
-					fmt.Printf("⚠  orphan: %s — no roster entry; remove with 'podman rm -f %s'\n", o, o)
+					fmt.Printf("⚠  orphan: %s — no roster entry; remove with 'sindri agent delete %s'\n", o, o)
 				}
 				if len(st.Agents) == 0 && len(st.Orphans) == 0 {
 					fmt.Fprintln(os.Stderr, "no agents — register one with 'sindri agent new <name>'")
@@ -208,8 +208,15 @@ func agentMemoryCmd() *cobra.Command {
 
 func agentDeleteCmd() *cobra.Command {
 	return &cobra.Command{
-		Use: "delete <name>", Aliases: []string{"rm"}, Short: "Delete an agent (container, socket, worktree, identity)", Args: cobra.ExactArgs(1),
+		Use: "delete <name>", Aliases: []string{"rm"}, Short: "Delete an agent (container, socket, worktree, identity), or remove an orphan", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			// An orphan is runtime with no roster entry, so there is no agent to look up and
+			// withAgent would fail on it. Same command either way: the user sees one stray name
+			// in `agent list` and should not have to know which kind of stray it is.
+			removed, err := removeIfOrphan(args[0])
+			if err != nil || removed {
+				return err
+			}
 			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				if err := b.DeleteAgent(a.Name); err != nil {
 					return err
@@ -219,6 +226,31 @@ func agentDeleteCmd() *cobra.Command {
 			})
 		},
 	}
+}
+
+// removeIfOrphan removes name if the board lists it as an orphan, reporting whether it did. The
+// board is what decides: an orphan is defined by having no roster entry, which only the hub knows.
+func removeIfOrphan(name string) (bool, error) {
+	done := false
+	err := withBackend(func(b backend) error {
+		st, err := b.State()
+		if err != nil {
+			return err
+		}
+		for _, o := range st.Orphans {
+			if o != name {
+				continue
+			}
+			if err := b.RemoveOrphan(name); err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stderr, "removed orphan %s — it had no roster entry, so no agent was deleted\n", name)
+			done = true
+			return nil
+		}
+		return nil
+	})
+	return done, err
 }
 
 func agentPaneCmd() *cobra.Command {

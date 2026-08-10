@@ -35,6 +35,13 @@ type paneMsg struct {
 	agent string
 	text  string
 }
+
+// agentDiagMsg carries the liveness-probe explanation for an agent.
+type agentDiagMsg struct {
+	agent string
+	text  string
+}
+
 type agentPodMsg struct {
 	agent string
 	text  string

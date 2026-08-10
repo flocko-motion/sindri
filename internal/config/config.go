@@ -128,7 +128,22 @@ func validate(c Config, root string) error {
 	return nil
 }
 
+// lintOut emits only the lint keys that are actually set. The pointers are the point: an unset
+// bound must stay absent so the default still applies, rather than being written out as a zero.
+func lintOut(l Lint) map[string]any {
+	out := map[string]any{}
+	if l.MaxLines != nil {
+		out["max_lines"] = *l.MaxLines
+	}
+	if l.MaxCommentAvg != nil {
+		out["max_comment_avg"] = *l.MaxCommentAvg
+	}
+	return out
+}
+
 // Write persists c, validating first so a broken config never lands; unset keys stay omitted.
+// It rewrites the whole file from c, so c must be a config that was LOADED and then modified —
+// handing it a freshly built struct silently drops every key that struct left unset.
 func Write(root string, c Config) error {
 	c.ArchitectureSet = c.Architecture != "" && c.Architecture != defaultArchitecture
 	if err := validate(c, root); err != nil {
@@ -149,6 +164,15 @@ func Write(root string, c Config) error {
 	}
 	if c.GitHub.Issues != nil {
 		out["github"] = map[string]any{"issues": *c.GitHub.Issues}
+	}
+	if c.Reference != "" {
+		out["reference"] = c.Reference
+	}
+	if len(c.Reading) > 0 {
+		out["reading"] = c.Reading
+	}
+	if lint := lintOut(c.Lint); len(lint) > 0 {
+		out["lint"] = lint
 	}
 	data, err := yaml.Marshal(out)
 	if err != nil {

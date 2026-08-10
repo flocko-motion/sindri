@@ -26,11 +26,12 @@ func NewRepoCmd() *cobra.Command {
 			"  sindri repo init          register the current repo + scaffold .sindri/config.yaml\n" +
 			"  sindri repo list          list every repo the hub tracks\n" +
 			"  sindri repo info [repo]   show a repo's config + counts (default: current repo)\n" +
-			"  sindri repo forget <repo> stop tracking a repo (registry only — files untouched)",
+			"  sindri repo forget <repo> stop tracking a repo (registry only — files untouched)\n" +
+			"  sindri repo config [k [v]] show or set a key in the current repo's config",
 		Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error { return repoInfo("") }, // bare `repo` → current repo
 	}
-	c.AddCommand(repoInitCmd(), repoListCmd(), repoInfoCmd(), repoForgetCmd(), repoColorCmd())
+	c.AddCommand(repoInitCmd(), repoListCmd(), repoInfoCmd(), repoForgetCmd(), repoColorCmd(), repoConfigCmd())
 	return c
 }
 

@@ -101,6 +101,20 @@ func podFetchCmd(cl *client.HTTP, agent string) tea.Cmd {
 	}
 }
 
+// diagFetchCmd asks the hub what its liveness probes observe for an agent — the same explanation
+// `sindri agent info --debug` prints, which is why a puzzling status is worth asking about.
+func diagFetchCmd(cl *client.HTTP, agent string) tea.Cmd {
+	return func() tea.Msg {
+		out, err := cl.Diagnose(agent)
+		if err != nil {
+			// The probe's whole job is explaining a state, so a failure to reach it must say so
+			// rather than render as an agent with nothing wrong.
+			out = "the hub could not run the liveness probe: " + err.Error()
+		}
+		return agentDiagMsg{agent, out}
+	}
+}
+
 // logFetchCmd refetches an agent's activity log.
 func logFetchCmd(cl *client.HTTP, agent string) tea.Cmd {
 	return func() tea.Msg {
@@ -131,6 +145,9 @@ func (m model) agentLiveCmds() tea.Cmd {
 	cmds := []tea.Cmd{logFetchCmd(m.cl, id), paneFetchCmd(m.cl, id), clientsFetchCmd(m.cl, id)}
 	if m.agentView == "pod" { // keep the pod view live too
 		cmds = append(cmds, podFetchCmd(m.cl, id))
+	}
+	if m.agentView == "diag" {
+		cmds = append(cmds, diagFetchCmd(m.cl, id))
 	}
 	return tea.Batch(cmds...)
 }
