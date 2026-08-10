@@ -325,6 +325,25 @@ func agentStopCmd() *cobra.Command {
 	}
 }
 
+// agentClearContextCmd sends /clear into a full agent's session — the confirmed remedy for
+// retirement; the user typing this command IS the confirmation (the same convention `agent
+// delete` uses for its own irreversible action, no extra prompt on top of it). The hub still
+// refuses if the agent holds a task: clearing is only safe at a leaf boundary.
+func agentClearContextCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "clear-context <name>", Short: "Send /clear into the agent's session and re-serve its directive (leaf boundary only)", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
+				if err := b.ClearContext(a.Name); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "cleared %s's context — it will pick up its directive fresh\n", a.Name)
+				return nil
+			})
+		},
+	}
+}
+
 // agentRebaseCmd recovers a stale tree after the base moved outside a sindri merge;
 // git aborts on conflict, so a failure changes nothing.
 func agentRebaseCmd() *cobra.Command {
@@ -474,9 +493,10 @@ func agentInfoCmd() *cobra.Command {
 		Use: "info <name>", Short: "Show an agent's status (state, task, PR, clients, recent activity)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, found *api.AgentView) error {
-				fmt.Printf("agent:     %s\nrole:      %s\nstatus:    %s\ntask:      %s\nfeature:   %s\npr:        %s\nworkspace: %s\nmemory:    %s\n",
+				fmt.Printf("agent:     %s\nrole:      %s\nstatus:    %s\ntask:      %s\nfeature:   %s\npr:        %s\nworkspace: %s\nmemory:    %s\ncontext:   %s\n",
 					found.Name, found.Role, found.Status, agentTaskLabel(b, found.Task),
-					agentTaskLabel(b, found.Feature), dash(found.PR), dash(found.Workspace), memoryLabel(found.Memory))
+					agentTaskLabel(b, found.Feature), dash(found.PR), dash(found.Workspace), memoryLabel(found.Memory),
+					theme.ContextLine(found.ContextTokens))
 				// engine + the exact runtime instance (id, image, cpus, memory limit, host pid)
 				if inst, err := b.Instance(found.Name); err == nil && inst != "" {
 					fmt.Printf("\n%s\n", inst)

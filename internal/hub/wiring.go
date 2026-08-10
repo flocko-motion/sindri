@@ -124,3 +124,7 @@ func (d workflowDeps) KnownProjects() []store.Project {
 }
 
 func (d workflowDeps) BrokkrBin() (string, error) { return agent.BrokkrBinary() }
+
+func (d workflowDeps) ContextTokens(project, name string) (int, bool) {
+	return d.h.agents.ContextTokens(project, name)
+}

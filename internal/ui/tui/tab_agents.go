@@ -303,6 +303,7 @@ func (m model) agentItems() []metaItem {
 		taskIt, featIt, prIt,
 		{text: "workspace: " + dash(a.Workspace)},
 		{text: "memory:    " + memoryLabelTUI(a.Memory) + dimStyle.Render("  (container RAM · e to edit)")},
+		{text: "context:   " + theme.ContextLine(a.ContextTokens)},
 		{text: pod, kind: "view", value: "pod"},
 	}
 	for _, line := range clientLines(m.agentClients) { // same dial-in detail as `agent info`

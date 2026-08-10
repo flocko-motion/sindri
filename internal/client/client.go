@@ -163,6 +163,12 @@ func (c *HTTP) StopAgent(name string) error {
 	return c.post("/agent/stop", api.NameReq{Name: name})
 }
 
+// ClearContext sends /clear into the agent's live session and re-serves its directive — only
+// valid at a leaf boundary (idle, holding no task); the hub refuses otherwise.
+func (c *HTTP) ClearContext(name string) error {
+	return c.post("/agent/clear-context", api.NameReq{Name: name})
+}
+
 // RebaseAgent rebases the agent's worktree onto the current base (reference) branch.
 func (c *HTTP) RebaseAgent(name string) error {
 	return c.post("/agent/rebase", api.NameReq{Name: name})

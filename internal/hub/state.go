@@ -105,12 +105,18 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		if _, stalled := h.stalledFor(a.Project, a.Name, st.Phase, st.Container); stalled {
 			status = "stalled"
 		}
+		tokens, _ := h.agents.ContextTokens(a.Project, a.Name)
+		// A full agent reads as full rather than as idle-and-ignored — claimNext has already
+		// stopped handing it work; this is the board saying why.
+		if h.wf.ContextFull(a.Project, a.Name) {
+			status = "full"
+		}
 		agents = append(agents, AgentView{
 			Project: a.Project, Repo: h.repoName(a.Project), Name: a.Name, Role: a.Role,
 			Status:  status,
 			Runtime: runtimes[i],
 			Task:    st.Task, Feature: st.Container, Branch: st.Branch, PR: pr, Workspace: a.Workspace,
-			Clients: clients[i], Container: container, Memory: a.Memory,
+			Clients: clients[i], Container: container, Memory: a.Memory, ContextTokens: tokens,
 		})
 	}
 

@@ -26,6 +26,10 @@ type AgentView struct {
 	Container string `json:"container"` // podman container name (project-resolved, so cross-repo callers target the right pod)
 	Memory    string `json:"memory"`    // configured RAM limit ("" = hub default)
 	Runtime   string `json:"runtime"`   // Claude's live runtime: "working"|"blocked"|"idle"|"" (folded into Status; kept raw for the herdr projection)
+	// ContextTokens is the agent's live session context size, read off its transcript (0 = not
+	// measured yet). Past workflow.ContextFullThreshold, Status reads "full" — retired from
+	// assignment until a human clears it.
+	ContextTokens int `json:"contextTokens"`
 }
 
 // RepoDocState is a repo's architecture-doc situation: the path in effect and, when the

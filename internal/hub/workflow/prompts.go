@@ -348,6 +348,13 @@ func DirClaimed(id, title, branch, arch string) string {
 
 const DirNoTasks = "No open tasks. Wait — the hub will tell you when there is work."
 
+// DirFull tells a worker why it isn't getting the next task even with plenty in the queue: its own
+// context is full. Distinct from DirNoTasks so a retired agent never reads it as "nothing to do".
+func DirFull(tokens int) string {
+	return fmt.Sprintf("[hub] Your context is ~%dk tokens — past the point of taking on new work. "+
+		"You're retired from assignment until a human clears you; don't ask again, just wait.", tokens/1000)
+}
+
 // --- features: a task with subtasks, worked on one branch ---
 
 // DirContainerClaimed starts an agent on a feature: subtasks one at a time on a single standing

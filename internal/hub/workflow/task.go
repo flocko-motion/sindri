@@ -332,7 +332,7 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 			}
 		}
 		_ = ps.SetState(store.AgentState{Agent: name, Phase: "idle"})
-		return e.waitForWork(ctx, func() (string, bool, error) { return e.claimNext(project, name) })
+		return e.waitForNextTask(ctx, project, name)
 	}
 	switch st.Phase {
 	case "working":
@@ -348,8 +348,16 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 		}
 		return DirSubmitted, nil
 	default: // idle — claim the next task, blocking until one exists
-		return e.waitForWork(ctx, func() (string, bool, error) { return e.claimNext(project, name) })
+		return e.waitForNextTask(ctx, project, name)
 	}
+}
+
+// waitForNextTask is the idle-agent path: a full agent is told so immediately, not left hanging.
+func (e *Engine) waitForNextTask(ctx context.Context, project, name string) (string, error) {
+	if tokens, full := e.contextFull(project, name); full {
+		return DirFull(tokens), nil
+	}
+	return e.waitForWork(ctx, func() (string, bool, error) { return e.claimNext(project, name) })
 }
 
 // waitForWork blocks until check reports work is ready (returning its directive) or
@@ -512,6 +520,10 @@ func ToStoreTask(t task.Task) store.Task {
 
 // CmdNext claims the highest-priority open task for a worker and branches for it.
 func (e *Engine) CmdNext(c registry.Caller, _ []string, out io.Writer) (int, error) {
+	if tokens, full := e.contextFull(c.Project, c.Agent); full {
+		fmt.Fprintln(out, DirFull(tokens))
+		return 0, nil
+	}
 	d, claimed, err := e.claimNext(c.Project, c.Agent)
 	if err != nil {
 		return 1, err
@@ -524,9 +536,29 @@ func (e *Engine) CmdNext(c registry.Caller, _ []string, out io.Writer) (int, err
 	return 0, nil
 }
 
-// claimNext claims the highest-priority open LEAF task (or a marked container) for a
-// worker in a project. Returns (directive, true) on a claim, ("", false) when idle.
+// ContextFullThreshold is where a worker stops being handed new work: comfortably under a
+// 200k-token window, leaving room to finish its current reply before retirement takes effect.
+const ContextFullThreshold = 170_000
+
+// contextFull is the one fact both the assignment gate and the board's status read. No recorded
+// usage yet (ok=false from ContextTokens) is never full.
+func (e *Engine) contextFull(project, worker string) (tokens int, full bool) {
+	tokens, ok := e.deps.ContextTokens(project, worker)
+	return tokens, ok && tokens >= ContextFullThreshold
+}
+
+// ContextFull is contextFull's bool half, for the board's status word.
+func (e *Engine) ContextFull(project, worker string) bool {
+	_, full := e.contextFull(project, worker)
+	return full
+}
+
+// claimNext claims the highest-priority open LEAF task (or a marked container) for a worker in a
+// project. Returns (directive, true) on a claim, ("", false) when idle or retired (full).
 func (e *Engine) claimNext(project, agent string) (string, bool, error) {
+	if _, full := e.contextFull(project, agent); full {
+		return "", false, nil // retired: a full worker is not handed new work
+	}
 	_ = e.SyncTasks(project) // best-effort refresh; cached set on failure
 	if d, ok, err := e.claimContainer(project, agent); ok || err != nil {
 		return d, ok, err

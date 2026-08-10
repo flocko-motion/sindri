@@ -20,6 +20,7 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
+	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
 // probeTimeout bounds each probe: a container that can't answer reads "down", it doesn't stall.
@@ -63,6 +64,41 @@ func (s *Service) RuntimeState(ctx context.Context, project, name string) string
 	runtimeMemo.at[key], runtimeMemo.val[key] = time.Now(), state
 	runtimeMemo.mu.Unlock()
 	return state
+}
+
+// contextTTL: the transcript grows with every turn, not every board read, so a read straight off
+// disk per request buys nothing over a short memo (same reasoning as runtimeTTL, longer window
+// because a session file changes far less often than the tmux pane does).
+const contextTTL = 15 * time.Second
+
+var contextMemo struct {
+	mu  sync.Mutex
+	at  map[string]time.Time
+	val map[string]int
+	ok  map[string]bool
+}
+
+// ContextTokens reads name's live session context size off disk (never the tmux pane — that's
+// pattern-matched text, this is exact usage from the transcript itself). ok=false when no session
+// has recorded usage yet.
+func (s *Service) ContextTokens(project, name string) (int, bool) {
+	key := project + "/" + name
+	contextMemo.mu.Lock()
+	if at, cached := contextMemo.at[key]; cached && time.Since(at) < contextTTL {
+		v, ok := contextMemo.val[key], contextMemo.ok[key]
+		contextMemo.mu.Unlock()
+		return v, ok
+	}
+	contextMemo.mu.Unlock()
+
+	tokens, ok := agentport.ContextTokens(paths.AgentHomeDir(project, name))
+	contextMemo.mu.Lock()
+	if contextMemo.at == nil {
+		contextMemo.at, contextMemo.val, contextMemo.ok = map[string]time.Time{}, map[string]int{}, map[string]bool{}
+	}
+	contextMemo.at[key], contextMemo.val[key], contextMemo.ok[key] = time.Now(), tokens, ok
+	contextMemo.mu.Unlock()
+	return tokens, ok
 }
 
 // LaunchDiagnostic re-runs both liveness probes so a launch timeout says which one failed.
