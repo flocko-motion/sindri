@@ -1,5 +1,5 @@
 // package: api / project
-// type:    data (wire types)
+// type:    logic (wire types)
 // job:     a registered repo as it crosses the wire: the registry row (Project),
 // its listing summary (RepoSummary), and the resolved-config-plus-counts
 // behind `repo info` (RepoDetail).

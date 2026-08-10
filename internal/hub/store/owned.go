@@ -1,5 +1,5 @@
 // package: hub/store / owned
-// type:    persistence (SQLite, hub-owned)
+// type:    adapter (SQLite, hub-owned)
 // job:     read and write the tasks sindri owns outright — the authoritative rows the
 // task sync reads as one of its sources, and the only task table a mutation
 // writes to.

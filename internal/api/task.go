@@ -1,5 +1,5 @@
 // package: api / task
-// type:    data (wire types + pure functions)
+// type:    logic (wire types + pure functions)
 // job:     the task as it crosses the wire (Task), placed in its hierarchy (TaskRow),
 // and the spec a create/edit carries (TaskSpec) — plus the pure functions over
 // them: arranging a flat set into a tree (ArrangeTasks), everything under an

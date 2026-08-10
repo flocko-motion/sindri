@@ -1,11 +1,11 @@
 // package: hub/store / store
-// type:    persistence (SQLite, hub-owned)
+// type:    adapter (SQLite, hub-owned)
 // job:     the global hub's durable source of truth — roster + activity log — in
 // one central SQLite DB. Every per-repo row is tagged by a `project` key;
 // a `*Store` owns the DB and cross-project reads, and `Store.For(project)`
 // returns a project-scoped `*ProjectStore`.
-// limits:  single-owner (only the hub touches it); SQLite is a linked library,
-// not an external tool, so this is NOT an internal/adapter package.
+// limits:  single-owner (only the hub touches it); wraps the external SQLite
+// store, holding no domain rules of its own.
 package store
 
 import (

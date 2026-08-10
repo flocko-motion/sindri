@@ -1,5 +1,5 @@
 // package: api / requests
-// type:    data (wire types)
+// type:    logic (wire types)
 // job:     the request bodies the hub's HTTP endpoints decode — one type per shape
 // they share, named for what they carry rather than any one route.
 // limits:  data only; decoding and dispatch stay in internal/hub.

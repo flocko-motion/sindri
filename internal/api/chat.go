@@ -1,5 +1,5 @@
 // package: api / chat
-// type:    data (wire types + pure predicates)
+// type:    logic (wire types + pure predicates)
 // job:     the chatroom as it crosses the wire: its snapshot (roster + transcript), the two row
 // shapes behind it, and the sender vocabulary those rows carry.
 // limits:  data and pure derivation only — glyphs and help text are a front-end's call

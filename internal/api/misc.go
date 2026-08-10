@@ -1,5 +1,5 @@
 // package: api / misc
-// type:    data (wire types + a pure function)
+// type:    logic (wire types + a pure function)
 // job:     small standalone wire types that don't warrant their own file, plus
 // RepoTag: the protocol's project key, derived from a path so either side
 // can compute it without asking the other.

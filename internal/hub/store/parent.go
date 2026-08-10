@@ -1,5 +1,5 @@
 // package: hub/store / parent
-// type:    persistence (SQLite, hub-owned)
+// type:    adapter (SQLite, hub-owned)
 // job:     record which task is whose parent, for every task whatever owns its text —
 // the hierarchy is sindri's own, so an openspec change or a GitHub issue takes
 // part in it like any other.

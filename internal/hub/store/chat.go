@@ -1,5 +1,5 @@
 // package: hub/store / chat
-// type:    logic (persistence for the user's chatroom)
+// type:    adapter (persistence for the user's chatroom)
 // job:     store chatroom membership (which agents are in the room) and the room
 // transcript (every message the hub has forwarded), hub-global — there is
 // exactly one room. Reads/writes only; the relay + delivery live in the hub.

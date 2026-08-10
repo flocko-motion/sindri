@@ -1,5 +1,5 @@
 // package: tui / screenshot
-// type:    dev/test harness
+// type:    ui
 // job:     render the dashboard headlessly (no terminal, no hub) so layout can
 // be eyeballed and asserted from tests, replaying keypresses through
 // the real update path so modals and forms are driven exactly as live.

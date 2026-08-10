@@ -1,5 +1,5 @@
 // package: api / pr
-// type:    data (wire types + a pure predicate)
+// type:    logic (wire types + a pure predicate)
 // job:     a PR (merge-intent) as it crosses the wire, its detail view, the review
 // items attached to it, and the open-ness rule every PR list applies.
 // limits:  data and a pure predicate only; no persistence, no rendering.

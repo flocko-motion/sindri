@@ -1,5 +1,5 @@
 // package: main (sindri-hub) / runtime
-// type:    composition root (wires the container backend)
+// type:    assembly (wires the container backend)
 // job:     pick the ONE container runtime this process uses and inject it into the
 // container port — the hub's own copy of cmd/sindri's choice, since the hub is
 // what launches pods now and cmd/ binaries don't import one another.

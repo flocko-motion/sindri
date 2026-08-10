@@ -1,5 +1,5 @@
 // package: api / config
-// type:    data (wire types + a pure predicate)
+// type:    logic (wire types + a pure predicate)
 // job:     a project's resolved .sindri/config.yaml as it crosses the wire (the TUI's
 // repo-config editor reads and writes it) and the blocks nested inside it.
 // limits:  data and a pure predicate only; loading, writing and validating a config

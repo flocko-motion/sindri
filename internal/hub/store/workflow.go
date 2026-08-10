@@ -1,5 +1,5 @@
 // package: hub/store / workflow
-// type:    persistence (SQLite, hub-owned)
+// type:    adapter (SQLite, hub-owned)
 // job:     the durable workflow state — the cached task read model (D15), each
 // agent's live workflow state, and merge-intents (PRs) — all write-through
 // so a crash loses nothing committed (D11). Every table is project-keyed;
