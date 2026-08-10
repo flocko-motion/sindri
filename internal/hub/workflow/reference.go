@@ -47,7 +47,7 @@ func (e *Engine) SyncReference(project string) error {
 	}
 	// Advanced = the old tip is still in the new history. Otherwise it was replaced, and every
 	// agent's branch is forked from commits the reference no longer contains.
-	e.referenceMoved(project, root, base, prev, git.IsAncestor(root, prev, tip))
+	e.referenceMoved(project, root, base, prev, tip, git.IsAncestor(root, prev, tip))
 	return nil
 }
 
@@ -69,7 +69,7 @@ func (e *Engine) noteReference(project string) {
 
 // referenceMoved brings each agent into line with a moved reference. Best-effort per agent, as
 // rebasePlanners is: one dirty worktree must not stop the rest being told.
-func (e *Engine) referenceMoved(project, root, base, prevTip string, advanced bool) {
+func (e *Engine) referenceMoved(project, root, base, prevTip, tip string, advanced bool) {
 	ps := e.store.For(project)
 	roster, err := ps.Roster()
 	if err != nil {
@@ -93,22 +93,37 @@ func (e *Engine) referenceMoved(project, root, base, prevTip string, advanced bo
 		case underReview:
 			continue // the merge rebases it when the time comes; saying so now is noise
 		default:
-			e.advanceAgent(project, root, base, prevTip, a)
+			e.advanceAgent(project, root, base, prevTip, tip, a)
 		}
 	}
 	e.deps.Notify()
 }
 
 // advanceAgent rebases one agent onto the advanced reference and tells it what arrived. A rebase it
-// cannot do cleanly is reported to the agent, not swallowed — it owns the conflict.
-func (e *Engine) advanceAgent(project, root, base, prevTip string, a store.Agent) {
+// cannot do cleanly is reported to the agent, not swallowed — it owns the conflict. A move that
+// brought nothing is still rebased, but not spoken about: a message that reliably says nothing
+// teaches an agent to skim the channel the hub also uses for verdicts and assignments.
+func (e *Engine) advanceAgent(project, root, base, prevTip, tip string, a store.Agent) {
 	ps := e.store.For(project)
 	wt := filepath.Join(root, a.Workspace)
-	// Read what is arriving BEFORE the rebase: afterwards those commits are indistinguishable
-	// from the agent's own history.
-	incoming, _ := git.LogRange(wt, prevTip, base, logCap)
-	if err := git.Rebase(wt, base); err != nil {
-		_ = ps.Log(a.Name, "reference-rebase-skip", base+": "+err.Error())
+	// Measure against the tip the move was DECIDED FROM, not the branch name: refwatch polls, so
+	// the branch can move again in between and re-resolving here reports a range nobody compared.
+	// Read before the rebase, which makes those commits indistinguishable from the agent's own.
+	arrived, countErr := git.CountRange(wt, prevTip, tip)
+	incoming, _ := git.LogRange(wt, prevTip, tip, logCap)
+	rebaseErr := git.Rebase(wt, base)
+
+	// Silence only when it is KNOWN that nothing arrived: a failed count is not evidence of
+	// nothing, and quiet there would leave an agent never hearing the reference moved at all.
+	if countErr == nil && arrived == 0 {
+		_ = ps.Log(a.Name, "reference-advanced-quiet", base+": moved, but nothing arrived here")
+		return
+	}
+	if countErr != nil {
+		_ = ps.Log(a.Name, "reference-count-failed", base+": "+countErr.Error())
+	}
+	if rebaseErr != nil {
+		_ = ps.Log(a.Name, "reference-rebase-skip", base+": "+rebaseErr.Error())
 		_ = e.deps.InjectWhenReady(project, a.Name, MsgReferenceNeedsRebase(incoming))
 		return
 	}

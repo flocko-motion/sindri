@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -512,6 +513,22 @@ func ChangedNames(dir string) ([]string, error) {
 		}
 	}
 	return lines, nil
+}
+
+// CountRange counts every commit in from..to, merges included. LogRange hides merges because they
+// read as noise in a list, which makes an empty LIST a bad test for "nothing arrived" — an advance
+// made only of merge commits produces one. Callers deciding whether anything moved ask this; callers
+// showing a human what moved ask LogRange.
+func CountRange(dir, from, to string) (int, error) {
+	out, err := exec.Command("git", "-C", dir, "rev-list", "--count", from+".."+to).CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("git rev-list --count %s..%s: %s: %w", from, to, strings.TrimSpace(string(out)), err)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0, fmt.Errorf("git rev-list --count %s..%s: unreadable count %q: %w", from, to, strings.TrimSpace(string(out)), err)
+	}
+	return n, nil
 }
 
 // LogRange lists "<short-sha> <subject>" for the commits in from..to (newest first), capped at

@@ -198,3 +198,132 @@ func TestSyncReferenceLeavesABranchUnderReviewAlone(t *testing.T) {
 		t.Errorf("an advance during review needs no message — the merge handles it: %q", got)
 	}
 }
+
+// TestAdvanceIsSilentWhenNothingArrived is the fix: a reference that moved for somebody else must
+// not produce a message that says nothing. The agent is still rebased — that is harmless and keeps
+// the branch current — but its input stream is finite attention, and a message that reliably says
+// nothing teaches it to skim the channel the hub also uses for verdicts and assignments.
+func TestAdvanceIsSilentWhenNothingArrived(t *testing.T) {
+	f := newSyncFixture(t)
+	tip := strings.TrimSpace(gitOut(t, f.root, "rev-parse", "refs/heads/main"))
+	a, ok, err := f.ps.GetAgent("eitri")
+	if err != nil || !ok {
+		t.Fatalf("get agent: ok=%v err=%v", ok, err)
+	}
+	// prevTip == tip: the range is empty, so nothing arrived for this branch.
+	f.e.advanceAgent("proj", f.root, "main", tip, tip, a)
+	if got := f.told(); got != "" {
+		t.Errorf("a no-op advance spoke: %q", got)
+	}
+	// It is recorded, so the trail exists without interrupting the agent.
+	if !strings.Contains(agentLog(t, f.ps, "eitri"), "reference-advanced-quiet") {
+		t.Error("the quiet advance left no trail in the log")
+	}
+}
+
+// TestAdvanceSpeaksWhenOnlyMergesArrived guards the trap in the obvious fix. LogRange passes
+// --no-merges, so an advance made only of merge commits produces an EMPTY list while the reference
+// genuinely moved. Keying silence on that list would mean the agent is never told.
+func TestAdvanceSpeaksWhenOnlyMergesArrived(t *testing.T) {
+	f := newSyncFixture(t)
+	// Build a range whose only new commit is a merge: branch off main, commit there, then merge
+	// back. Measured from the SIDE commit, the merge is the one thing main gained — the shape a
+	// reference picks up whenever it was last seen at a commit the merge already contains.
+	f.runIn(f.root, "checkout", "-q", "-b", "sidebranch")
+	if e := os.WriteFile(filepath.Join(f.root, "side.txt"), []byte("side\n"), 0o644); e != nil {
+		t.Fatal(e)
+	}
+	f.runIn(f.root, "add", "-A")
+	f.runIn(f.root, "commit", "-qm", "side work")
+	prev := strings.TrimSpace(gitOut(t, f.root, "rev-parse", "HEAD")) // the side commit
+	f.runIn(f.root, "checkout", "-q", "main")
+	f.runIn(f.root, "merge", "--no-ff", "-q", "-m", "merge sidebranch", "sidebranch")
+	tip := strings.TrimSpace(gitOut(t, f.root, "rev-parse", "refs/heads/main"))
+
+	// The premise this test rests on: main moved, and the readable list really is empty.
+	if prev == tip {
+		t.Fatal("main did not move — the fixture proves nothing")
+	}
+	if lines := strings.TrimSpace(gitOut(t, f.root, "log", "--no-merges", "--format=%h", prev+".."+tip)); lines != "" {
+		t.Fatalf("this advance was meant to be merge-only, got %q", lines)
+	}
+	a, ok, err := f.ps.GetAgent("eitri")
+	if err != nil || !ok {
+		t.Fatalf("get agent: ok=%v err=%v", ok, err)
+	}
+	f.e.advanceAgent("proj", f.root, "main", prev, tip, a)
+	if got := f.told(); !strings.Contains(got, "moved on") {
+		t.Errorf("a merge-only advance was silenced, so the agent never hears it: %q", got)
+	}
+}
+
+// TestAdvanceSpeaksWhenItCannotTell: an unreadable range is not evidence that nothing arrived.
+// Silence there would convert a git failure into an agent that never learns the reference moved,
+// which is the worse of the two failures — so the doubt is resolved towards speaking.
+func TestAdvanceSpeaksWhenItCannotTell(t *testing.T) {
+	f := newSyncFixture(t)
+	tip := strings.TrimSpace(gitOut(t, f.root, "rev-parse", "refs/heads/main"))
+	a, ok, err := f.ps.GetAgent("eitri")
+	if err != nil || !ok {
+		t.Fatalf("get agent: ok=%v err=%v", ok, err)
+	}
+	// A prevTip no longer in the repo: rev-list fails rather than reporting zero.
+	f.e.advanceAgent("proj", f.root, "main", "0000000000000000000000000000000000000000", tip, a)
+	if got := f.told(); !strings.Contains(got, "moved on") {
+		t.Errorf("an unreadable range was treated as 'nothing arrived': %q", got)
+	}
+	if !strings.Contains(agentLog(t, f.ps, "eitri"), "reference-count-failed") {
+		t.Error("the failure that forced the fallback was not recorded")
+	}
+}
+
+// gitOut runs a git command and returns its stdout.
+func gitOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+	if err != nil {
+		t.Fatalf("git -C %s %v: %v", dir, args, err)
+	}
+	return string(out)
+}
+
+// agentLog joins an agent's recorded events, for asserting the trail a silent path still leaves.
+func agentLog(t *testing.T, ps *store.ProjectStore, agent string) string {
+	t.Helper()
+	evs, err := ps.Events(agent, 0)
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	var b strings.Builder
+	for _, e := range evs {
+		b.WriteString(e.Type + " " + e.Payload + "\n")
+	}
+	return b.String()
+}
+
+// TestAdvanceMeasuresTheTipTheMoveWasDecidedFrom: refwatch polls, so the branch can move again
+// between the tip SyncReference compared and this rebase. Re-resolving the branch name here would
+// report a range nobody decided on — naming commits the move was not about, and (when the branch
+// moved back) inventing an advance out of nothing.
+func TestAdvanceMeasuresTheTipTheMoveWasDecidedFrom(t *testing.T) {
+	f := newSyncFixture(t)
+	prev := strings.TrimSpace(gitOut(t, f.root, "rev-parse", "refs/heads/main"))
+	f.moveReference(t, "two\n", "the commit the move was decided from")
+	decided := strings.TrimSpace(gitOut(t, f.root, "rev-parse", "refs/heads/main"))
+	// The branch keeps moving while the hub works through the roster.
+	f.moveReference(t, "three\n", "landed after the decision")
+
+	a, ok, err := f.ps.GetAgent("eitri")
+	if err != nil || !ok {
+		t.Fatalf("get agent: ok=%v err=%v", ok, err)
+	}
+	f.e.advanceAgent("proj", f.root, "main", prev, decided, a)
+
+	got := f.told()
+	if !strings.Contains(got, "the commit the move was decided from") {
+		t.Errorf("the decided range was not reported: %q", got)
+	}
+	if strings.Contains(got, "landed after the decision") {
+		t.Errorf("a commit from after the decision was reported as part of this move: %q", got)
+	}
+}
