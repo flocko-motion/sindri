@@ -9,8 +9,6 @@ package gate
 
 // Gate is a quality check the submit path runs against a worktree before accepting its changes.
 type Gate interface {
-	// Name identifies the gate for logging/output.
-	Name() string
 	// Validate checks wt; ok=false fails the submit, with output explaining why. A gate whose
 	// domain doesn't apply to this repo (no openspec/ dir, nothing declared, ...) passes silently.
 	Validate(wt string) (ok bool, output string)

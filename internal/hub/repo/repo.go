@@ -80,10 +80,8 @@ func builtinLint(wt string, resolveBin func() (string, error), declared bool) (s
 	return out, ok
 }
 
-// runVerify executes the project's own gate, bounded and with its output capped. A timeout is a
-// refusal, not a hang: the agent is told the gate ran out of time and how long it had. Its
-// exec.CommandContext runs a path the PROJECT declares, not a tool sindri depends on and wraps
-// (git, brokkr, ...) — no adapter applies to running a caller-supplied command; that's the feature.
+// runVerify executes the project's own declared command (not a tool sindri wraps, so no adapter
+// applies), bounded and with its output capped. A timeout is a refusal, not a hang.
 func runVerify(wt, verify string) (string, bool) {
 	bin := filepath.Join(wt, filepath.FromSlash(verify))
 	if _, err := os.Stat(bin); err != nil {

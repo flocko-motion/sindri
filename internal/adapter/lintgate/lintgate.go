@@ -1,13 +1,10 @@
 // package: adapter/lintgate / lintgate
 // type:    adapter (external tool: brokkr)
-// job:     runs `brokkr lint` in a worktree — the built-in half of the submit gate.
-// Single implementation (brokkr is sindri's own toolbelt; nothing else fills
-// this role), imported directly by rule, but still its own adapter package so
-// no logic package shells out to the binary itself. Also a gate.Gate — the
-// same seam openspec validation plugs into (-> adapter/gate).
+// job:     runs `brokkr lint` in a worktree, the built-in half of the submit gate —
+// single implementation, imported directly by rule, but its own adapter
+// package so no logic package shells out to the binary itself.
 // limits:  runs the binary and reports its output; resolving its path is the
-// caller's, and the project's own declared verify command is a separate
-// step (-> hub/repo.Gate).
+// caller's (-> hub/repo.Gate, which also runs the project's own verify).
 package lintgate
 
 import (
@@ -17,15 +14,13 @@ import (
 )
 
 // Adapter runs `brokkr lint`, resolving the binary's path however the caller wants — the hub
-// locates its own toolbelt binary; a test can stub ResolveBin to point at a fake one.
+// locates its own toolbelt binary; a test can stub ResolveBin to point at a fake one. Also a
+// gate.Gate, the same seam openspec validation plugs into.
 type Adapter struct {
 	ResolveBin func() (string, error)
 }
 
 var _ gate.Gate = Adapter{}
-
-// Name identifies this gate for logging/output.
-func (Adapter) Name() string { return "lint" }
 
 // Validate runs `brokkr lint` in wt; ok=false means either the binary couldn't be resolved or the
 // lint itself failed — output carries which.

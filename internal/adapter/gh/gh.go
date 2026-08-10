@@ -1,10 +1,8 @@
 // package: adapter/gh / gh
 // type:    adapter (external tool: gh)
-// job:     the thin low-level wrapper around the gh CLI itself: is it installed, and
-// run `gh api <path>`. internal/adapter/tasks/github builds the task-source
-// domain on top of this; internal/update calls straight through here for its
-// own release-check API calls, so a front-end that imports update is never
-// pulled into hub/task by a shared adapter neither of them needed whole.
+// job:     the thin low-level wrapper around the gh CLI: is it installed, and run
+// `gh api <path>`. adapter/tasks/github builds the task-source domain on top;
+// update calls straight through, so importing it never drags hub/task in.
 // limits:  no issue/task semantics — that domain lives in adapter/tasks/github.
 package gh
 
