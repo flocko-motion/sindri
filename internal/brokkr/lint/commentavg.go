@@ -94,6 +94,7 @@ func CommentAvg(roots []string, maxAvg float64, maxLine int, blocks bool, cap *C
 	}
 	var viols []viol
 	var wide []string // over-wide comment lines, reported alongside the trend
+	shellSeen := false
 
 	for _, root := range roots {
 		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -106,24 +107,19 @@ func CommentAvg(roots []string, maxAvg float64, maxLine int, blocks bool, cap *C
 				}
 				return nil
 			}
-			if LangOf(path) == LangNone || IsTestFile(path) || ig.Match(path) {
+			lang := LangOfFile(path)
+			if lang == LangNone || IsTestFile(path) || ig.Match(path) {
 				return nil
 			}
 			src, ok := readSource(path)
 			if !ok {
 				return nil
 			}
-			wide = append(wide, wideLines(path, src, maxLine)...)
-			bs := ScanComments(src)
-			if h, hasHeader := HeaderBlock(bs); hasHeader {
-				// The header is mandated, so it is not evidence of a trend — but only the header
-				// itself. Free-form prose parked below the fields is measured like the ordinary
-				// comment it is, or the exemption would pay for hiding prose there (-> SplitHeader).
-				bs = bs[1:]
-				if _, prose, hasProse := SplitHeader(h); hasProse {
-					bs = append([]CommentBlock{prose}, bs...)
-				}
+			if lang == LangShell {
+				shellSeen = true
 			}
+			wide = append(wide, wideLines(path, src, lang, maxLine)...)
+			bs := commentBlocksFor(lang, src)
 			if len(bs) == 0 {
 				return nil
 			}
@@ -189,6 +185,11 @@ func CommentAvg(roots []string, maxAvg float64, maxLine int, blocks bool, cap *C
 			fmt.Fprint(w, systemicBanner)
 		}
 	}
+	if !shellSeen {
+		// Named rather than silent, the way deadcode reports a project with no Go sources: a rule
+		// that measured nothing must not read as a rule that passed.
+		fmt.Fprintln(w, "comment-length: no shell scripts here — skipping those (not a shell project)")
+	}
 	// Over-wide lines share the budget: they are findings in the same report, not a second pass.
 	for _, msg := range wide {
 		if !cap.Allow() {
@@ -203,12 +204,52 @@ func CommentAvg(roots []string, maxAvg float64, maxLine int, blocks bool, cap *C
 	return len(viols) > 0 || len(wide) > 0, nil
 }
 
+// commentBlocksFor returns the blocks a file is measured on.
+//
+// Shell exempts its first comment block, which is the same deal Go and TS get from HeaderBlock and
+// for the same reason: a file's opening comment is its header. Nine of this repo's eleven scripts
+// carry one without being told to, and charging for the thing they got right would make this a
+// header sweep rather than a length rule. It is not pinned to line 1 — a script that opens with
+// `set -euo pipefail` has its header at line 4, and that is good practice, not evasion. Every block
+// below it is measured, so the exemption buys one header, not a habit.
+func commentBlocksFor(lang Lang, src string) []CommentBlock {
+	if lang == LangShell {
+		if bs := ScanShellComments(src); len(bs) > 0 {
+			return bs[1:]
+		}
+		return nil
+	}
+	bs := ScanComments(src)
+	h, hasHeader := HeaderBlock(bs)
+	if !hasHeader {
+		return bs
+	}
+	// The header is mandated, so it is not evidence of a trend — but only the header itself.
+	// Free-form prose parked below the fields is measured like the ordinary comment it is, or the
+	// exemption would pay for hiding prose there (-> SplitHeader).
+	bs = bs[1:]
+	if _, prose, hasProse := SplitHeader(h); hasProse {
+		bs = append([]CommentBlock{prose}, bs...)
+	}
+	return bs
+}
+
+// isCommentLine spots a comment opener in the language at hand. Per-language on purpose: `*` opens a
+// continuation in a C block comment but a case pattern in shell, and `#` is a comment in shell but
+// ordinary text elsewhere — reading either across languages invents findings.
+func isCommentLine(line string, lang Lang) bool {
+	if lang == LangShell {
+		return strings.HasPrefix(line, "#")
+	}
+	return strings.HasPrefix(line, "//") || strings.HasPrefix(line, "/*") || strings.HasPrefix(line, "*")
+}
+
 // wideLines reports lines wider than max, headers included — the trend rule excuses those entirely.
-func wideLines(path, src string, max int) []string {
+func wideLines(path, src string, lang Lang, max int) []string {
 	var out []string
 	for i, raw := range strings.Split(src, "\n") {
 		line := strings.TrimSpace(raw)
-		if !strings.HasPrefix(line, "//") && !strings.HasPrefix(line, "/*") && !strings.HasPrefix(line, "*") {
+		if !isCommentLine(line, lang) {
 			continue
 		}
 		if n := len([]rune(raw)); n > max {

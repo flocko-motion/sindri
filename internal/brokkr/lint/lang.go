@@ -1,7 +1,7 @@
 // package: lint / lang
 // type:    logic (source-language recognition)
-// job:     decide which files the linters read — Go plus the TypeScript/JavaScript family — and
-// split each into its header block and remaining comment blocks.
+// job:     decide which files the linters read — Go, the TypeScript/JavaScript family, and shell —
+// and split each into its header block and remaining comment blocks.
 // limits:  lexical scanning only; Go's semantic checks stay on go/ast (-> comments.go).
 package lint
 
@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -18,10 +19,12 @@ type Lang int
 const (
 	LangNone Lang = iota // not a linted source file
 	LangGo
-	LangTS // the TypeScript/JavaScript family, including .tsx/.jsx React components
+	LangTS    // the TypeScript/JavaScript family, including .tsx/.jsx React components
+	LangShell // sh/bash and friends — measured for comment length only, never for headers
 )
 
 // LangOf classifies a path by extension; .d.ts is generated surface, not hand-authored source.
+// A script often has no extension at all, so LangOfFile is what callers walking a tree should use.
 func LangOf(path string) Lang {
 	if strings.HasSuffix(path, ".d.ts") {
 		return LangNone
@@ -31,8 +34,44 @@ func LangOf(path string) Lang {
 		return LangGo
 	case ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs":
 		return LangTS
+	case ".sh", ".bash", ".zsh":
+		return LangShell
 	}
 	return LangNone
+}
+
+// LangOfFile is LangOf plus a shebang probe, so a hook or wrapper with no extension is still
+// recognised. Only extensionless files are read: a .py or .md carries its own answer in its name,
+// and probing every file in a tree would cost a read per asset to learn nothing.
+func LangOfFile(path string) Lang {
+	if l := LangOf(path); l != LangNone {
+		return l
+	}
+	if filepath.Ext(path) != "" {
+		return LangNone
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return LangNone
+	}
+	defer f.Close()
+	buf := make([]byte, 64) // a shebang is the first line or it is not one
+	n, _ := f.Read(buf)
+	if isShellShebang(string(buf[:n])) {
+		return LangShell
+	}
+	return LangNone
+}
+
+// shellShebangRE matches an interpreter line naming a shell, directly or through env. Restricted to
+// shells on purpose: python and perl also comment with `#`, but measuring them is a different
+// decision than the one this recognises.
+var shellShebangRE = regexp.MustCompile(`^#!\s*\S*/(?:env\s+)?(?:ba|da|k|z|a)?sh\b`)
+
+// isShellShebang reports whether src opens with a shell interpreter line.
+func isShellShebang(src string) bool {
+	line, _, _ := strings.Cut(src, "\n")
+	return shellShebangRE.MatchString(strings.TrimSpace(line))
 }
 
 // IsTestFile spots a test by each ecosystem's convention; its subject is the file it tests.
@@ -64,34 +103,78 @@ type CommentBlock struct {
 	At    []int    // source line of each Text entry, so a block can be split and still report honestly
 }
 
-// ScanComments splits a file into comment blocks; only CODE ends one, so gaps can't halve a
-// measurement. Delimiters and //go: directives aren't prose; a bare `*` or `//` is. Lexical, so a
-// marker inside a string counts: tracking raw strings by backtick parity was tried and reverted
-// after it left 27 real comment lines unmeasured. Over-counting an example is the safer error.
-func ScanComments(src string) []CommentBlock {
-	var out []CommentBlock
-	var cur *CommentBlock
-	inMulti := false
-	// Open on the line the comment OPENS on, so a report points at `/**`, not the prose below.
-	open := func(n int) {
-		if cur == nil {
-			cur = &CommentBlock{Line: n}
+// blockAcc assembles comment blocks. Both scanners drive it, so the block rules — only code ends a
+// block, a gap holds it open — cannot drift apart between languages.
+type blockAcc struct {
+	out []CommentBlock
+	cur *CommentBlock
+}
+
+// open starts or extends a block on the line the comment OPENS on, so a report points at `/**`,
+// not the prose below.
+func (a *blockAcc) open(n int) {
+	if a.cur == nil {
+		a.cur = &CommentBlock{Line: n}
+	}
+	a.cur.End = n
+}
+
+func (a *blockAcc) count(n int, text string) {
+	a.cur.Lines++
+	a.cur.Text = append(a.cur.Text, text)
+	a.cur.At = append(a.cur.At, n)
+}
+
+func (a *blockAcc) flush() {
+	if a.cur != nil {
+		if a.cur.Lines > 0 { // nothing but delimiters is not a comment, and earns no credit
+			a.out = append(a.out, *a.cur)
 		}
-		cur.End = n
+		a.cur = nil
 	}
-	count := func(n int, text string) {
-		cur.Lines++
-		cur.Text = append(cur.Text, text)
-		cur.At = append(cur.At, n)
-	}
-	flush := func() {
-		if cur != nil {
-			if cur.Lines > 0 { // nothing but delimiters is not a comment, and earns no credit
-				out = append(out, *cur)
+}
+
+// ScanShellComments splits a shell script into `#` comment blocks, under the same block rules as
+// ScanComments: only code ends a block, so a gap cannot halve a measurement. The interpreter line
+// and shellcheck pragmas are directives, not prose — the shell counterpart of //go:build.
+func ScanShellComments(src string) []CommentBlock {
+	var a blockAcc
+	for i, raw := range strings.Split(src, "\n") {
+		line, n := strings.TrimSpace(raw), i+1
+		switch {
+		case strings.HasPrefix(line, "#"):
+			a.open(n)
+			if !isShellDirective(line, n) {
+				a.count(n, strings.TrimSpace(strings.TrimLeft(line, "#")))
 			}
-			cur = nil
+		case line == "":
+			// A gap holds the block open; the blank line itself is not counted.
+		default:
+			a.flush() // code — this is where a comment block genuinely ends
 		}
 	}
+	a.flush()
+	return a.out
+}
+
+// isShellDirective spots the lines a shell script addresses to a tool rather than to a reader: the
+// interpreter line (only on line 1, where it means anything) and shellcheck pragmas.
+func isShellDirective(line string, n int) bool {
+	if n == 1 && strings.HasPrefix(line, "#!") {
+		return true
+	}
+	return strings.HasPrefix(line, "# shellcheck ") || strings.HasPrefix(line, "#shellcheck ")
+}
+
+// ScanComments splits a Go or TS file into comment blocks; only CODE ends one, so gaps can't halve
+// a measurement. Delimiters and //go: directives aren't prose; a bare `*` or `//` is. Lexical, so a
+// marker inside a string counts: tracking raw strings by backtick parity was tried and reverted
+// after it left 27 real comment lines unmeasured. Over-counting an example is the safer error, and
+// ScanShellComments inherits that trade — a `#` inside a heredoc counts too.
+func ScanComments(src string) []CommentBlock {
+	var a blockAcc
+	inMulti := false
+	open, count, flush := a.open, a.count, a.flush
 	for i, raw := range strings.Split(src, "\n") {
 		line, n := strings.TrimSpace(raw), i+1
 		switch {
@@ -130,7 +213,7 @@ func ScanComments(src string) []CommentBlock {
 		}
 	}
 	flush()
-	return out
+	return a.out
 }
 
 // isGoDirective spots //go:build and friends; no space after the slashes separates one from prose.

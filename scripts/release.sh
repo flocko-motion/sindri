@@ -60,11 +60,9 @@ if [ "$start" != "$default" ]; then
 		echo "on '$start' — releasing needs it merged to '$default'. Install gh (https://cli.github.com) or merge manually, then re-run." >&2
 		exit 1
 	fi
-	# Rebase onto the current default branch FIRST. A branch that has merely fallen
-	# behind is brought current (so the PR merges cleanly), and a real conflict is
-	# caught here — locally, where you can fix it — instead of after a push and a
-	# 30-minute auto-merge wait that can never complete. Rebasing rewrites history,
-	# so the push below must be a (lease-guarded) force.
+	# Rebase onto the default FIRST: a branch merely behind is brought current, and a
+	# real conflict surfaces locally instead of after a 30-minute auto-merge wait that
+	# can never complete. This rewrites history, so the push below is a leased force.
 	echo "rebasing '$start' onto '$default'…"
 	git fetch origin "$default" >/dev/null 2>&1 || true
 	if ! git rebase "origin/$default"; then
@@ -81,22 +79,16 @@ if [ "$start" != "$default" ]; then
 		echo "opening a pull request…"
 		gh pr create --base "$default" --head "$start" --fill
 	fi
-	# master's branch protection requires the CI check to pass before a merge, so an
-	# immediate `--merge` is refused. --auto queues the merge for when checks pass;
-	# we then wait for it, so the tag below comes off the truly-merged tip (not the
-	# pre-merge commit). Needs auto-merge enabled on the repo (Settings → Pull
-	# Requests → Allow auto-merge).
+	# Branch protection refuses an immediate `--merge`, so --auto queues it for when
+	# checks pass and we wait, letting the tag come off the truly-merged tip. Needs
+	# auto-merge enabled (Settings → Pull Requests → Allow auto-merge).
 	echo "enabling auto-merge (merges once CI passes)…"
 	gh pr merge "$start" --merge --auto
 	echo "waiting for the PR to merge — CI must pass first…"
 	state=""
 	for _ in $(seq 1 180); do # up to ~30 min for CI + merge
-		# One request per poll for all three verdicts, '|'-joined (a check name can
-		# contain spaces, so a space-separated read would split it): the PR state, its
-		# mergeability, and the names of any checks that came back definitively
-		# not-green. A CheckRun reports `conclusion` (null while it runs), a legacy
-		# StatusContext reports `state`; PENDING/QUEUED/IN_PROGRESS/SUCCESS/NEUTRAL/
-		# SKIPPED are all still hopeful, so only the listed verdicts count as failed.
+		# One request per poll, '|'-joined because a check name can contain spaces. Only
+		# the listed verdicts count as failed; a null CheckRun conclusion is still running.
 		IFS='|' read -r state mergeable failed <<<"$(gh pr view "$start" --json state,mergeable,statusCheckRollup --jq '
 			[ .state, .mergeable,
 			  ([ .statusCheckRollup[]?
@@ -113,10 +105,8 @@ if [ "$start" != "$default" ]; then
 			echo "auto-merge stays armed, so pushing a fix (or re-running the job) merges it; then re-run 'make release $bump' to tag." >&2
 			exit 1
 		fi
-		# Don't spin the full 30 min on a PR that can never merge: a definitive
-		# CONFLICTING verdict (rare here, since we rebased above, but master can move)
-		# means auto-merge is stuck. Bail now with a fix. UNKNOWN = GitHub still
-		# computing mergeability, so we keep waiting.
+		# A definitive CONFLICTING verdict means auto-merge is stuck, so bail with a fix
+		# rather than spin the full 30 min. UNKNOWN is GitHub still computing it: wait.
 		if [ "$mergeable" = "CONFLICTING" ]; then
 			echo "PR conflicts with '$default' — run 'git rebase origin/$default', resolve, then re-run." >&2
 			exit 1
@@ -130,13 +120,9 @@ if [ "$start" != "$default" ]; then
 		exit 1
 	fi
 	git fetch origin "$default" >/dev/null 2>&1
-	# The PR merged, so everything on '$start' now lives on '$default' — but the local
-	# branch still points at its pre-merge tip, stranded behind. Rebase it onto the
-	# updated default and push, so the release branch ends the cycle current with main
-	# (its merged commits collapse away, ready for new work). The --merge (not squash)
-	# preserves the commits, so this replays cleanly; it's best-effort — a hiccup here
-	# warns but never fails an already-merged release (the tag still comes off the
-	# merged default tip below).
+	# The branch is stranded at its pre-merge tip once the PR lands: rebase onto the
+	# updated default and push, so it ends the cycle current. Best-effort — a hiccup
+	# warns rather than failing an already-merged release.
 	echo "rebasing '$start' onto the updated '$default'…"
 	if git rebase "origin/$default"; then
 		git push --force-with-lease origin "$start" >/dev/null 2>&1 ||
@@ -172,14 +158,9 @@ git tag -a "$next" "$target" -m "release $next"
 git push origin "$next"
 echo "pushed ${next} — triggering the release workflow (back on '$start')"
 
-# 4. Block until the tag-triggered release workflow finishes, so the CLI shows when
-#    the release is ACTUALLY done (built + assets attached), not just tagged. Needs
-#    gh; a default-branch release may not have it (the feature-branch path already
-#    required it above), so guard. The run doesn't exist the instant we push, so poll
-#    briefly for it, then `gh run watch --exit-status` streams its progress and exits
-#    non-zero if it fails. A tag-triggered run's head branch is the tag name, so we
-#    match on that. This is a status wait only — the tag is already pushed, so a
-#    failure here means "inspect the build", not "the release didn't happen".
+# 4. Wait for the tag-triggered workflow, so "done" means built with assets attached.
+#    Needs gh, so guard. The run lags the push: poll, then `gh run watch` streams it,
+#    matching on the tag name. The tag is already pushed — a failure means inspect it.
 if command -v gh >/dev/null; then
 	echo "waiting for the release workflow to finish…"
 	run_id=""
