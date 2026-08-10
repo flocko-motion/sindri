@@ -17,8 +17,18 @@ the spec tool — goes through an adapter in `internal/adapter/`. Tasks are the
 exception by ownership rather than by layering: sindri holds its own in the hub's
 store, and adapters cover only the trackers it mirrors.
 The core calls adapters; it never shells out, dials a socket, or touches an
-external tool directly. Swapping or mocking an external tool is a change to one
-adapter and nothing else.
+external tool directly.
+
+**Name the port, not the tool.** Where a family of implementations exists for one
+job — the container runtime, the coding agent, the task source — the core depends on
+the **port**, the interface naming that job, and never names a concrete adapter.
+Choosing the implementation is the composition root's work: the core is handed one
+and never constructs it.
+
+Where a tool has exactly one implementation and no plausible second — git, tmux —
+the core imports its adapter directly. The abstraction earns its place by making an
+implementation swappable or fakeable; requiring one where nothing can vary buys
+nothing and hides which tool is in use.
 
 ## CLI and TUI are interchangeable front-ends
 
@@ -33,6 +43,13 @@ core operations and render the result. Nothing more.
   both drive the same operations.
 - A front-end reaches the core through the client (`internal/client`), which talks
   to the single hub — so the CLI and TUI are literally running the same code.
+- **A front-end links no hub code.** It carries the exchange format (`internal/api`)
+  and the client, and no hub package, persistence driver, or adapter that only the hub
+  needs. An adapter the front-end itself needs is fine — it attaches to tmux and runs
+  git locally. A front-end that needs a hub running starts it by executing that
+  binary, rather than constructing one in its own process.
+  `internal/ui/importguard_test.go` enforces the `internal/hub` half of this over the
+  real import graph, so an indirect import fails too; the rest is review's to hold.
 
 ## Topology
 
