@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/flo-at/sindri/internal/adapter/agent"
@@ -70,6 +71,22 @@ func TestClaudeState(t *testing.T) {
 			name:   "the banner quoted in source text is not the state",
 			screen: "✳ Editing… (esc to interrupt)\n  regexp.MustCompile(`· please run /login$`) // the banner",
 			want:   agent.Working,
+		},
+		{
+			// eitri, one minute after it was logged back in: the banner was still on screen while it
+			// answered the user below it. An interrupt hint is happening NOW; the banner may be history.
+			name: "a recovered agent working below an old banner is working",
+			screen: "● Login expired · Please run /login\n" +
+				strings.Repeat("  more output since then\n", 14) + "✳ Crunching… (esc to interrupt)\n❯ ",
+			want: agent.Working,
+		},
+		{
+			// Same pane at rest: the banner has scrolled out of the live region, so what is true now is
+			// an idle prompt. Read as signed-out it would have sent the user to fix a working agent.
+			name: "a banner scrolled out of the live region is history",
+			screen: "● Login expired · Please run /login\n" +
+				strings.Repeat("  more output since then\n", 14) + "❯ ",
+			want: agent.Idle,
 		},
 	}
 	for _, c := range cases {
