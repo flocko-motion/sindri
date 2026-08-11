@@ -6,8 +6,9 @@
 // limits:  data and pure counts only; assembling a BoardState is the hub's.
 package api
 
-// AgentView is an agent as the UIs see it; Status collapses runtime + workflow into one word:
-// down | idle | working | submitted.
+// AgentView is an agent as the UIs see it; Status collapses runtime + workflow into one word: the
+// agent's own phase (idle, working, submitted, …) once it has been observed running, else what the
+// runtime says instead — launching, stopping, down, or "unknown" where nothing has looked yet.
 type AgentView struct {
 	Project string `json:"project"`
 	Repo    string `json:"repo"`

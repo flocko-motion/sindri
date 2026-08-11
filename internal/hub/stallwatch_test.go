@@ -16,13 +16,13 @@ func TestStalledForIsWhatTheBoardAndTheNudgeShare(t *testing.T) {
 	a := store.Agent{Project: "proj", Name: "dvalin"}
 
 	// Working: not stalled, whatever the phase says.
-	h.watch.record(a, true, 0, "working", false)
+	h.watch.record(a, true, 0, "working")
 	if _, stalled := h.stalledFor("proj", "dvalin", "working", ""); stalled {
 		t.Error("an agent that is working is not stalled")
 	}
 
 	// Idle, but the dwell has only just begun.
-	h.watch.record(a, true, 0, "idle", false)
+	h.watch.record(a, true, 0, "idle")
 	idleFor, stalled := h.stalledFor("proj", "dvalin", "working", "")
 	if stalled {
 		t.Errorf("a fresh idle spell is a pause, not a stall (idle for %v)", idleFor)
@@ -68,7 +68,7 @@ func TestStalledForNeedsAnObservation(t *testing.T) {
 
 	a := store.Agent{Project: "proj", Name: "gone"}
 	for i := 0; i <= downStrikes; i++ {
-		h.watch.record(a, false, 0, "", true) // conclusively down
+		h.watch.record(a, false, 0, "") // past the strike threshold: down
 	}
 	if _, stalled := h.stalledFor("proj", "gone", "working", ""); stalled {
 		t.Error("a down agent must not read as stalled")

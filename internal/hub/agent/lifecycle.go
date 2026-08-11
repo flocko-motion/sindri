@@ -55,15 +55,19 @@ func (s *Service) setLifecycle(project, name, state string) {
 
 // AgentStatus reconciles intent with observed runtime into one status word, clearing the
 // intent once fulfilled. The single source of truth for "what is this agent doing".
-func (s *Service) AgentStatus(project, name string, running bool, phase string) string {
+//
+// observed is whether the runtime has been LOOKED AT at all. "down" is a claim, and an agent the
+// watchdog has not reached yet supports no claim — so running=false alone must never produce one,
+// nor retire an intent as fulfilled. Unobserved implies not running; the two are not the same fact.
+func (s *Service) AgentStatus(project, name string, running, observed bool, phase string) string {
 	s.lcMu.Lock()
 	defer s.lcMu.Unlock()
 	key := lcKey{project, name}
 	intent := s.lifecycle[key]
 	switch {
 	case intent == "stopping":
-		if running {
-			return "stopping" // stop requested, pod still up
+		if running || !observed {
+			return "stopping" // stop requested; the pod is still up, or nothing has looked yet
 		}
 		delete(s.lifecycle, key) // down now — stop intent fulfilled
 		return "down"
@@ -75,6 +79,8 @@ func (s *Service) AgentStatus(project, name string, running bool, phase string) 
 		return phase
 	case intent == "launching":
 		return "launching" // requested, pod not up yet
+	case !observed:
+		return "unknown" // registered since the last sweep; the next one answers
 	default:
 		return "down"
 	}

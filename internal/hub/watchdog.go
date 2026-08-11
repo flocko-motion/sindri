@@ -2,7 +2,8 @@
 // type:    logic (agent liveness observer)
 // job:     own what the hub believes about every agent's liveness — one loop probing on a
 // fixed cadence, so a board read reports the last observation instead of taking
-// one, and a single lost probe never flips an agent to "down".
+// one, and no single reading — a lost probe, or a listing taken a moment ago —
+// flips an agent to "down".
 // limits:  liveness and dial-in counts only; how a status word is chosen from liveness +
 // phase stays in agent.AgentStatus, and the board assembly in state.go.
 package hub
@@ -54,7 +55,7 @@ type watchdog struct {
 
 // newWatchdog builds and starts the observer. It must not block — New runs before Serve answers
 // the socket, and a full sweep (14 agents × 2 commands, 4-wide) delayed startup past the health
-// check — so the first pass only lists: absent pods are down, existing ones provisionally up.
+// check — so the first pass only lists, provisionally, and the first sweep refines it.
 func newWatchdog(h *Hub) *watchdog {
 	w := &watchdog{h: h, obs: map[agentKey]liveness{}, stop: make(chan struct{}), done: make(chan struct{})}
 	w.seed()
@@ -69,7 +70,7 @@ func (w *watchdog) seed() {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
-	existing, listErr := container.ListByLabelCached(ctx, "sindri.project", "")
+	existing, listErr := container.ListByLabelFresh(ctx, "sindri.project", "")
 	cancel()
 	if listErr != nil {
 		return // nothing observed; the first sweep will fill it in
@@ -79,11 +80,9 @@ func (w *watchdog) seed() {
 		exists[p] = true
 	}
 	for _, a := range agents {
-		if up := exists[w.h.container(a.Project, a.Name)]; up {
-			w.record(a, true, 0, "", false) // provisional: the sweep refines it
-		} else {
-			w.record(a, false, 0, "", true) // absent is conclusive
-		}
+		// Both provisional: the sweep refines them. Absence is a reading like any other, and one
+		// reading never settles anything on its own.
+		w.record(a, exists[w.h.container(a.Project, a.Name)], 0, "")
 	}
 }
 
@@ -117,15 +116,16 @@ func (w *watchdog) get(project, name string) (liveness, bool) {
 	return l, ok
 }
 
-// sweep reads the fleet: one listing of which pods exist — cheap, it answers for every container
-// at once — then a tmux probe per agent that has one. No pod is down at once; absence is conclusive.
+// sweep reads the fleet: one listing of which pods exist — cheap, it answers for every container at
+// once — then a tmux probe per agent that has one. The listing is taken fresh: this is the caller
+// whose question is about now, and a memoized answer predating a launch reports the new pod absent.
 func (w *watchdog) sweep() {
 	agents, err := w.h.store.AllAgents()
 	if err != nil {
 		return // a store hiccup is not evidence about any agent; keep the last observations
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
-	existing, listErr := container.ListByLabelCached(ctx, "sindri.project", "")
+	existing, listErr := container.ListByLabelFresh(ctx, "sindri.project", "")
 	cancel()
 	exists := make(map[string]bool, len(existing))
 	for _, p := range existing {
@@ -136,7 +136,7 @@ func (w *watchdog) sweep() {
 	var wg sync.WaitGroup
 	for _, a := range agents {
 		if listErr == nil && !exists[w.h.container(a.Project, a.Name)] {
-			w.record(a, false, 0, "", true)
+			w.record(a, false, 0, "")
 			continue
 		}
 		wg.Add(1)
@@ -156,16 +156,17 @@ func (w *watchdog) probe(a store.Agent) {
 	defer cancel()
 	cs, ok := w.h.agents.ClientsCtx(ctx, a.Project, a.Name)
 	if !ok {
-		w.record(a, false, 0, "", false)
+		w.record(a, false, 0, "")
 		return
 	}
 	rt := w.h.agents.RuntimeState(ctx, a.Project, a.Name)
-	w.record(a, true, len(cs), rt, false)
+	w.record(a, true, len(cs), rt)
 }
 
-// record folds one observation in: a conclusive verdict (pod absent, nothing raced) stands alone, a
-// success clears strikes, a failure holds the previous state and its counts until downStrikes.
-func (w *watchdog) record(a store.Agent, up bool, clients int, runtime string, conclusive bool) {
+// record folds one observation in: a success clears strikes, a failure holds the previous state and
+// its counts until downStrikes. No single reading settles anything, whatever its source — a missing
+// pod and a failed probe are both one observation, and a listing can be a moment out of date.
+func (w *watchdog) record(a store.Agent, up bool, clients int, runtime string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	key := agentKey{a.Project, a.Name}
@@ -174,8 +175,6 @@ func (w *watchdog) record(a store.Agent, up bool, clients int, runtime string, c
 	switch {
 	case up:
 		next.strikes = 0
-	case conclusive:
-		next.strikes = downStrikes
 	default:
 		next.strikes = prev.strikes + 1
 		if next.strikes < downStrikes && prev.up {

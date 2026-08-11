@@ -218,6 +218,18 @@ func ListByLabelCached(ctx context.Context, label, value string) ([]string, erro
 	return pods, err
 }
 
+// ListByLabelFresh lists without consulting the memo, and primes it with the result. For a caller
+// whose question is about NOW: a listing taken before a container was created does not mention it,
+// and absence from a listing is the evidence an agent is gone. Priming rather than bypassing keeps
+// the following board reads on this newer answer instead of the one it just overtook.
+func ListByLabelFresh(ctx context.Context, label, value string) ([]string, error) {
+	pods, err := active.ListByLabelContext(ctx, label, value)
+	listMemo.mu.Lock()
+	listMemo.at, listMemo.key, listMemo.pods, listMemo.err = time.Now(), label+"="+value, pods, err
+	listMemo.mu.Unlock()
+	return pods, err
+}
+
 // Check pre-flights the runtime (installed + reachable), auto-starting where it can.
 func Check(w io.Writer) error { return active.Check(w) }
 

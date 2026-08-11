@@ -79,9 +79,13 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	running := make([]bool, len(agentsRow))
 	clients := make([]int, len(agentsRow))
 	runtimes := make([]string, len(agentsRow)) // Claude's live runtime: busy|blocked|idle|""
+	// observed is carried separately because the zero value of running is a CLAIM: an agent
+	// registered since the last sweep has been looked at by nothing, and reading its absent
+	// observation as "not running" is the same error as trusting a stale listing.
+	observed := make([]bool, len(agentsRow))
 	for i, a := range agentsRow {
 		if l, ok := h.watch.get(a.Project, a.Name); ok {
-			running[i], clients[i], runtimes[i] = l.up, l.clients, l.runtime
+			running[i], clients[i], runtimes[i], observed[i] = l.up, l.clients, l.runtime, true
 		}
 	}
 
@@ -102,7 +106,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		if pr == "" {
 			pr, _ = ps.ReviewingPR(a.Name)
 		}
-		status := overlayRuntime(h.agents.AgentStatus(a.Project, a.Name, running[i], st.Phase), runtimes[i])
+		status := overlayRuntime(h.agents.AgentStatus(a.Project, a.Name, running[i], observed[i], st.Phase), runtimes[i])
 		// A stall reads as plain "idle" otherwise, which is what let one hold a task unnoticed.
 		if _, stalled := h.stalledFor(a.Project, a.Name, st.Phase, st.Container); stalled {
 			status = "stalled"

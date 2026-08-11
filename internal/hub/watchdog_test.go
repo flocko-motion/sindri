@@ -15,7 +15,7 @@ func TestOneLostProbeDoesNotFlipAnAgentDown(t *testing.T) {
 	w := h.watch
 	a := store.Agent{Project: "proj", Name: "galar"}
 
-	w.record(a, true, 1, "working", false) // a good reading first
+	w.record(a, true, 1, "working") // a good reading first
 	if l, _ := w.get("proj", "galar"); !l.up {
 		t.Fatal("a successful probe must report up")
 	}
@@ -23,7 +23,7 @@ func TestOneLostProbeDoesNotFlipAnAgentDown(t *testing.T) {
 	// Failures short of the threshold hold the previous state, dial-in count and runtime
 	// included: a probe that could not read the agent must not blank what the last one did.
 	for i := 1; i < downStrikes; i++ {
-		w.record(a, false, 0, "", false)
+		w.record(a, false, 0, "")
 		l, _ := w.get("proj", "galar")
 		if !l.up {
 			t.Errorf("strike %d of %d already reported down", i, downStrikes)
@@ -34,7 +34,7 @@ func TestOneLostProbeDoesNotFlipAnAgentDown(t *testing.T) {
 	}
 
 	// The threshold reached, it is no longer one bad reading but a pattern.
-	w.record(a, false, 0, "", false)
+	w.record(a, false, 0, "")
 	if l, _ := w.get("proj", "galar"); l.up {
 		t.Errorf("%d consecutive failures should report down", downStrikes)
 	}
@@ -47,32 +47,48 @@ func TestSuccessClearsStrikes(t *testing.T) {
 	w := h.watch
 	a := store.Agent{Project: "proj", Name: "galar"}
 
-	w.record(a, true, 0, "idle", false)
-	w.record(a, false, 0, "", false) // one strike
-	w.record(a, true, 2, "working", false)
+	w.record(a, true, 0, "idle")
+	w.record(a, false, 0, "") // one strike
+	w.record(a, true, 2, "working")
 	if l, _ := w.get("proj", "galar"); l.strikes != 0 || l.clients != 2 || l.runtime != "working" {
 		t.Errorf("a success must reset strikes and take the fresh reading, got %+v", l)
 	}
 	// From clean, it again takes the full threshold to go down.
 	for i := 1; i < downStrikes; i++ {
-		w.record(a, false, 0, "", false)
+		w.record(a, false, 0, "")
 		if l, _ := w.get("proj", "galar"); !l.up {
 			t.Errorf("strike %d after a success reported down too early", i)
 		}
 	}
 }
 
-// TestAbsentPodIsConclusive: no pod in the listing needs no corroboration — there is nothing to
-// be racing, so waiting three sweeps would just show a stopped agent as running.
-func TestAbsentPodIsConclusive(t *testing.T) {
+// TestAbsentPodIsAStrikeLikeAnyOther: absence from a listing used to be conclusive, on the
+// reasoning that a missing pod has nothing to be racing. It does: a listing describes the moment it
+// was taken, so one that predates a launch reports the new pod absent and declared a running agent
+// down from the weakest evidence available. A reading is a reading, whatever its source.
+//
+// The cost is deliberate — a genuinely stopped agent reads up for downStrikes sweeps rather than
+// one. That is the same hysteresis a failed probe already gets, and it errs toward the state that
+// self-corrects: a stale "up" is fixed by the next sweep, a false "down" is read by a human first.
+func TestAbsentPodIsAStrikeLikeAnyOther(t *testing.T) {
 	h := newHub(t)
 	w := h.watch
 	a := store.Agent{Project: "proj", Name: "galar"}
 
-	w.record(a, true, 0, "working", false)
-	w.record(a, false, 0, "", true) // conclusive: the pod is gone
+	w.record(a, true, 1, "working")
+	w.record(a, false, 0, "") // absent from one listing — not yet a verdict
+	l, _ := w.get("proj", "galar")
+	if !l.up {
+		t.Error("one listing that missed the pod must not declare the agent down")
+	}
+	if l.clients != 1 || l.runtime != "working" {
+		t.Errorf("the last good detail should be held, got clients=%d runtime=%q", l.clients, l.runtime)
+	}
+	for i := 2; i <= downStrikes; i++ {
+		w.record(a, false, 0, "")
+	}
 	if l, _ := w.get("proj", "galar"); l.up {
-		t.Error("an agent with no pod is down at once, not after three strikes")
+		t.Errorf("%d consecutive absences are a pattern and must report down", downStrikes)
 	}
 }
 
@@ -92,26 +108,26 @@ func TestIdleDwellStartsAndClears(t *testing.T) {
 	w := h.watch
 	a := store.Agent{Project: "proj", Name: "dvalin"}
 
-	w.record(a, true, 0, "working", false)
+	w.record(a, true, 0, "working")
 	if l, _ := w.get("proj", "dvalin"); !l.idleSince.IsZero() {
 		t.Error("a working agent has no idle dwell")
 	}
 
-	w.record(a, true, 0, "idle", false)
+	w.record(a, true, 0, "idle")
 	first, _ := w.get("proj", "dvalin")
 	if first.idleSince.IsZero() {
 		t.Fatal("going idle must start the dwell")
 	}
 
 	// Still idle: the clock keeps running from when it started, not from the latest probe.
-	w.record(a, true, 0, "idle", false)
+	w.record(a, true, 0, "idle")
 	again, _ := w.get("proj", "dvalin")
 	if !again.idleSince.Equal(first.idleSince) {
 		t.Errorf("a continuing idle spell must keep its start: %v then %v", first.idleSince, again.idleSince)
 	}
 
 	// Back to work: the spell is over, and a later stall is a new one.
-	w.record(a, true, 0, "working", false)
+	w.record(a, true, 0, "working")
 	if l, _ := w.get("proj", "dvalin"); !l.idleSince.IsZero() {
 		t.Error("working again must clear the dwell")
 	}
@@ -125,10 +141,10 @@ func TestALostProbeDoesNotRestartTheDwell(t *testing.T) {
 	w := h.watch
 	a := store.Agent{Project: "proj", Name: "dvalin"}
 
-	w.record(a, true, 0, "idle", false)
+	w.record(a, true, 0, "idle")
 	started, _ := w.get("proj", "dvalin")
 
-	w.record(a, false, 0, "", false) // one lost probe, short of downStrikes
+	w.record(a, false, 0, "") // one lost probe, short of downStrikes
 	held, _ := w.get("proj", "dvalin")
 	if held.runtime != "idle" {
 		t.Fatalf("a lost probe should hold the last runtime, got %q", held.runtime)
