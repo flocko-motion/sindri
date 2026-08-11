@@ -1,5 +1,9 @@
 .git/pr/
 .grepai/
+# The hub's runtime state in a project it manages: its db, agent homes (which hold
+# live Claude credentials), sockets. Only the project config belongs in the repo.
+.sindri/*
+!.sindri/config.yaml
 bin/
 dist/
 gh-local/gh

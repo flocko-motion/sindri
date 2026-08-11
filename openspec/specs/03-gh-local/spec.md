@@ -37,11 +37,21 @@ record store.
 ### Requirement: Lint gate before submit
 
 Submitting (and creating a PR) SHALL run the project's quality gates after the
-rebase and before the PR record is written — the same gates as `sindri lint all`
-(file length, dead code, and OpenSpec validation). If any violation is found, or
-a gate cannot run (e.g. the code does not compile), the submit SHALL be refused
-and the violations reported, so a failing PR is never created. OpenSpec
-validation SHALL be skipped when the project doesn't use openspec.
+rebase and before the PR record is written — the built-in gates (file length, dead
+code, and OpenSpec validation) together with the project's own declared verify command
+(see `project-config`). If any violation is found, or a gate cannot run (e.g. the code
+does not compile), the submit SHALL be refused and the violations reported, so a
+failing PR is never created. OpenSpec validation SHALL be skipped when the project
+doesn't use openspec.
+
+A project that declares a verify command SHALL have it run whatever the project's
+language: the absence of a Go module SHALL NOT be treated as the absence of a gate. A
+project that declares none SHALL be gated by the built-in checks alone, as before.
+
+The gate SHALL be bounded — a timeout, and output capped in a way that names what was
+cut and how much, since silent truncation reads as a complete answer. Its output SHALL
+be retained on the PR record and surfaced to the human, so a refused submit explains
+itself without the check being re-run.
 
 #### Scenario: Clean submit
 
@@ -52,6 +62,30 @@ validation SHALL be skipped when the project doesn't use openspec.
 
 - **WHEN** an agent submits work that fails a gate (lint or an invalid spec)
 - **THEN** no PR is created and the violations are shown for the agent to fix
+
+#### Scenario: The project's own gate refuses a submit
+
+- **WHEN** a project declares a verify command and it exits non-zero for an agent's
+  work
+- **THEN** the submit is refused, no PR is created, and the command's output is
+  reported to the agent
+
+#### Scenario: A declared gate is not skipped for a non-Go project
+
+- **WHEN** a project with no Go module declares a verify command and an agent submits
+- **THEN** the command runs and its result decides the submit, rather than the gate
+  passing because no Go module was found
+
+#### Scenario: A refused submit explains itself later
+
+- **WHEN** a human inspects a PR whose gate failed
+- **THEN** the retained gate output is shown, without the gate being run again
+
+#### Scenario: A hanging gate does not hang the submit
+
+- **WHEN** a project's verify command does not finish within the gate's timeout
+- **THEN** the gate reports the timeout and refuses the submit, rather than blocking
+  the agent indefinitely
 
 ### Requirement: Per-task branches in worktrees
 
@@ -181,24 +215,6 @@ merge SHALL never block on a GitHub write-back.
 - **WHEN** the GitHub issue source is disabled or unavailable
 - **THEN** the local PR/worktree/merge workflow is unchanged and fully functional
 
-### Requirement: td reads are direct, writes go through the tool
-
-For the td backend, the td adapter SHALL read tasks directly from td's own SQLite
-database for speed, but SHALL perform every write action (create, start, comment,
-review, …) only through the `td` tool — never by writing td's database directly.
-Both strategies SHALL be encapsulated in `internal/adapter/tasks/td` so internal logic
-sees a single adapter interface.
-
-#### Scenario: Fast read
-
-- **WHEN** the hub syncs td tasks into its cache
-- **THEN** it reads td's SQLite directly rather than invoking the td CLI per query
-
-#### Scenario: Write through the tool
-
-- **WHEN** a td task is created or mutated
-- **THEN** the change goes through the `td` tool, never a direct write to td's DB
-
 ### Requirement: Container branches persist across subtasks
 
 A held container's worktree branch SHALL be named for the container and persist
@@ -269,6 +285,35 @@ current.
 - **WHEN** a PR merges and moves the base branch
 - **THEN** each planner's standing branch is rebased onto the new base so it sees
   the latest code
+
+### Requirement: td is a one-way import, not a backend
+
+Sindri SHALL own its tasks in the hub's own store, and SHALL NOT depend on the td tool at
+runtime. Where a repository carries an existing td database, the hub SHALL import that
+backlog **once**, the first time it syncs the project, so adopting sindri costs nobody their
+tasks. That import SHALL read td's own SQLite directly, and SHALL be the only way td is
+touched: the td CLI SHALL NOT be invoked, and td's database SHALL NOT be written.
+
+Because the import happens once, a task that arrives this way SHALL thereafter be an
+ordinary task sindri owns, indistinguishable from one created in sindri — including its
+`td-` prefix, which records sindri's ownership rather than a live backend (see `hub`).
+
+#### Scenario: Existing backlog imported once
+
+- **WHEN** the hub syncs a project whose repository has a td database for the first time
+- **THEN** that backlog is imported into the hub's own store, and subsequent syncs import
+  nothing further
+
+#### Scenario: td is never written
+
+- **WHEN** a task imported from td is created, changed, or closed
+- **THEN** the change lands in the hub's own store, and neither td's database nor the td CLI
+  is touched
+
+#### Scenario: No td, no problem
+
+- **WHEN** a repository has never used td
+- **THEN** nothing is imported and the hub's own tasks are the whole backlog
 
 ## Structure
 

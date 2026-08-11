@@ -13,47 +13,65 @@ command surface.
 ## Requirements
 ### Requirement: Abstract tasks are a cached read model
 
-The hub SHALL hold abstract tasks in `hub.db` as a fast local read model, synced
-from their sources of truth. Tasks MAY come from more than one source — the task
-backend, openspec changes, and GitHub issues — merged into the one cache; each
-row's id prefix (`td-`, `os-`, `gh-`) records which source owns it. Browsing reads
-— lists and the board — SHALL be served from the cache. To bound staleness where
-it would mislead or cause a wrong decision, the hub SHALL refresh from the source
-of truth: **all tasks at startup**; **a task immediately before it is assigned**
-to an agent; and **a task immediately before its detail is shown**. Periodic
-background sync and explicit user refresh MAY additionally run. A **network-backed
-source** (e.g. GitHub issues) SHALL be throttled — served from a short-lived cache
-so the frequent idle-worker resync does not exceed the remote's rate limits — and
-SHALL degrade to contributing no tasks when it is unavailable, without failing the
-sync of the other sources. Every write SHALL go to the source of truth through
-that source's tool, and the hub SHALL update the cache to reflect it.
+The hub SHALL hold abstract tasks in its store as one read model, drawn from more than one
+source. **Sindri owns tasks of its own** — the primary source, held in the hub's own store
+— and MAY additionally mirror tasks from external sources: openspec changes and GitHub
+issues. Each row's id prefix records which source owns it: `sd-` a task sindri owns, `os-`
+an openspec change, `gh-` a GitHub issue. `td-` is the recognised legacy form of sindri's
+own ownership, minted before `sd-` and never rewritten (-> mint-sd-task-ids). Browsing
+reads — lists and the board — SHALL be served from this model.
 
-#### Scenario: Browsing served from cache
+A write SHALL reach whatever owns the task. For a task sindri owns, the hub's own store is
+the source of truth and the write lands there directly. For a mirrored task, the write
+SHALL go through that source's tool and the cached copy SHALL be updated to match.
+
+To bound staleness where it would mislead or cause a wrong decision, the hub SHALL refresh
+**mirrored** tasks from their sources: **all at startup**; **one immediately before it is
+assigned** to an agent; and **one immediately before its detail is shown**. A task sindri
+owns needs no such refresh, being already authoritative. Periodic background sync and
+explicit user refresh MAY additionally run. A **network-backed source** (e.g. GitHub
+issues) SHALL be throttled — served from a short-lived cache so the frequent idle-worker
+resync does not exceed the remote's rate limits — and SHALL degrade to contributing no
+tasks when it is unavailable, without failing the sync of the other sources.
+
+#### Scenario: Browsing served from the read model
 
 - **WHEN** the board or a UI lists tasks
-- **THEN** they are read from `hub.db`, not by querying the backend per query
+- **THEN** they are read from the hub's store, not by querying each source per query
 
 #### Scenario: Refresh all at startup
 
 - **WHEN** the hub starts
-- **THEN** it refreshes every task from the sources of truth into `hub.db`
+- **THEN** it refreshes every mirrored task from its source
 
 #### Scenario: Refresh before assignment
 
-- **WHEN** a task is about to be assigned to an agent
-- **THEN** the hub refreshes that task from the source of truth first, so an already
-  changed or closed task is never handed out
+- **WHEN** a mirrored task is about to be assigned to an agent
+- **THEN** the hub refreshes it from its source first, so an already changed or closed task
+  is never handed out
 
 #### Scenario: Refresh before detail
 
-- **WHEN** a task's detail is shown
-- **THEN** the hub refreshes that task from the source of truth before presenting it
+- **WHEN** a mirrored task's detail is shown
+- **THEN** the hub refreshes it from its source before presenting it
 
-#### Scenario: Write reaches the source of truth
+#### Scenario: An owned task is written directly
 
-- **WHEN** a task is created or changed
-- **THEN** the change is written through the backend's tool and the cached copy is
-  updated to match
+- **WHEN** a task sindri owns is created or changed
+- **THEN** the hub writes its own store, which is the source of truth, with no external tool
+  involved and no refresh needed
+
+#### Scenario: A mirrored write reaches its source
+
+- **WHEN** a mirrored task is changed
+- **THEN** the change goes through that source's tool and the cached copy is updated to
+  match
+
+#### Scenario: The prefix names the owner
+
+- **WHEN** a task id is read
+- **THEN** `sd-` means sindri owns it, `os-` an openspec change, `gh-` a GitHub issue, and
+  `td-` means sindri owns it too — the legacy form, still honoured
 
 #### Scenario: Network source is throttled
 
@@ -65,8 +83,8 @@ that source's tool, and the hub SHALL update the cache to reflect it.
 #### Scenario: One source unavailable, others still sync
 
 - **WHEN** the GitHub source is unavailable during a sync
-- **THEN** td and openspec tasks still sync and the cache updates; the GitHub source
-  simply contributes no tasks
+- **THEN** sindri's own tasks and openspec tasks are unaffected and the read model updates;
+  the GitHub source simply contributes no tasks
 
 ### Requirement: Orphans are runtime the roster does not account for
 
@@ -187,6 +205,11 @@ truth for which views exist and the badge each shows. The counts SHALL be the
 actionable subset: non-closed tasks, running agents, and not-merged PRs. UIs
 SHALL render these counts rather than computing their own.
 
+What crosses to a client SHALL be the **resolved** section: a key, a title and a
+number. The recipe that derives a count from board state SHALL stay inside the hub,
+because a function cannot cross the boundary; the hub SHALL resolve every count
+against the board it is already serving.
+
 #### Scenario: A UI renders section counts
 
 - **WHEN** a UI draws its tabs
@@ -198,13 +221,24 @@ SHALL render these counts rather than computing their own.
 - **THEN** it is added to the hub's section model and UIs pick it up without
   re-deriving counts
 
+#### Scenario: Counts arrive resolved
+
+- **WHEN** the board is served
+- **THEN** each section carries its key, title and computed count, and no part of the
+  derivation crosses to the client
+
 ### Requirement: Task hierarchy arrangement
 
-The hub SHALL arrange a flat set of tasks into their parent/child tree — roots
+A flat set of tasks SHALL be arrangeable into their parent/child tree — roots
 ordered by priority, each followed by its descendants, with a depth per node —
-and annotate each with the id of a non-merged PR for that task, if any. A task
-whose parent is absent from the set SHALL be arranged as a root. This arrangement
-SHALL be a logic-layer function so every UI renders the same tree.
+and annotated with the id of a non-merged PR for that task, if any. A task
+whose parent is absent from the set SHALL be arranged as a root.
+
+This arrangement SHALL be a function of the exchange format, so the hub and every
+front-end obtain the same tree from the same code, and no interface derives its own.
+The arrangement SHALL carry data rather than drawing instructions: depth, the PR id
+and its kind are data; a hint that exists only to draw a tree connector belongs to
+the interface drawing it.
 
 #### Scenario: Tree with depth
 
@@ -216,6 +250,12 @@ SHALL be a logic-layer function so every UI renders the same tree.
 
 - **WHEN** a task has a non-merged PR
 - **THEN** its arranged row carries that PR's id
+
+#### Scenario: One arrangement, every caller
+
+- **WHEN** the hub and a front-end both arrange the same task set
+- **THEN** both call the same function from the exchange package and produce the
+  same tree
 
 ### Requirement: Board carries all tasks with hierarchy
 
@@ -287,12 +327,16 @@ enumerate any roster, or address another pod — in its own project or any other
 
 ### Requirement: Hub lifecycle — one persistent global daemon
 
-The hub SHALL be a single long-lived daemon serving all repos. Interactive entry
-points (`sindri coauthor`, `sindri tui`) SHALL auto-start it in the background when
-none is running; `sindri hub start` runs it explicitly (foreground, or `--bg`).
-Once running it SHALL persist across individual CLI commands and for as long as any
-agent in any repo exists. When the hub is not running, an agent's call SHALL fail
-loudly.
+The hub SHALL be a single long-lived daemon serving all repos, running as its own
+program rather than inside a front-end's process. Interactive entry points (`sindri
+coauthor`, `sindri tui`) SHALL auto-start it in the background when none is running,
+by executing the hub binary; `sindri hub start` runs it explicitly (foreground, or
+`--bg`) and SHALL likewise hand off to that binary rather than constructing the hub
+in the calling process. The hub binary SHALL be resolved beside the running
+front-end before any search of `PATH`, so a second installed copy cannot be started
+by accident. Once running it SHALL persist across individual CLI commands and for as
+long as any agent in any repo exists. When the hub is not running, an agent's call
+SHALL fail loudly.
 
 #### Scenario: Interactive command with no hub
 
@@ -303,6 +347,18 @@ loudly.
 
 - **WHEN** agents are running in any repo
 - **THEN** the single hub persists rather than exiting
+
+#### Scenario: Foreground start hands off to the hub binary
+
+- **WHEN** a user runs `sindri hub start` in the foreground
+- **THEN** the hub binary takes over the process, so signals reach the hub directly
+  with no wrapper process between the terminal and the daemon
+
+#### Scenario: The hub beside this build is the one that starts
+
+- **WHEN** the hub binary is resolved for a start
+- **THEN** it is taken from beside the running front-end binary before `PATH` is
+  consulted, so a second installed copy is never started in its place
 
 ### Requirement: Protocol is HTTP/JSON carrying repo context
 
