@@ -108,11 +108,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			status = "stalled"
 		}
 		tokens, window, _ := h.agents.ContextUsage(a.Project, a.Name)
-		// A full agent reads as full rather than as idle-and-ignored — claimNext has already
-		// stopped handing it work; this is the board saying why.
-		if h.wf.ContextFull(a.Project, a.Name) {
-			status = "full"
-		}
+		status = overlayFullness(status, h.wf.ContextFull(a.Project, a.Name), st.Task, st.Container, pr)
 		agents = append(agents, AgentView{
 			Project: a.Project, Repo: h.repoName(a.Project), Name: a.Name, Role: a.Role,
 			Status:  status,
@@ -253,6 +249,21 @@ func overlayRuntime(status, runtime string) string {
 		if status == "working" || status == "idle" {
 			return runtime
 		}
+	}
+	return status
+}
+
+// overlayFullness shows "full" only where it EXPLAINS something: an agent holding nothing, which
+// claimNext is passing over for exactly this reason. Fullness is not an activity, so anywhere else
+// it would replace the one fact the column exists to carry — and the fill is on the board as
+// ContextTokens for anyone who wants the number.
+//
+// Held work is checked directly rather than trusted to the word: a quiet runtime probe reads a
+// task-holder as "idle" (-> overlayRuntime) before it has been still long enough to say "stalled",
+// and "full" on an agent mid-task invites clearing a context the hub refuses to clear anyway.
+func overlayFullness(status string, full bool, task, feature, pr string) string {
+	if full && status == "idle" && task == "" && feature == "" && pr == "" {
+		return "full"
 	}
 	return status
 }
