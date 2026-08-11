@@ -590,6 +590,33 @@ func reviewLine(r api.Review) string {
 	}
 }
 
+// prIdentity says WHICH PR this is and where its work lives — the block you paste into a message
+// or a ticket. Shared by the list yank and the full detail below so the two cannot drift: the
+// workspace path was already in the interactive item column and in neither of these.
+func (m model) prIdentity(d api.PRDetail) []string {
+	ls := []string{
+		fmt.Sprintf("%s   [%s]   by %s", d.PR.ID, d.PR.Status, d.PR.Agent),
+		fmt.Sprintf("task: %s  %s (%s)", d.Task.ID, d.Task.Title, d.Task.Status),
+		fmt.Sprintf("branch %s → %s", d.PR.Branch, d.PR.Base),
+	}
+	// The field the yank was asked for, and the one nobody retypes. Absent once its author is
+	// gone — a PR outlives the tree behind it.
+	if ws := m.agentWorkspacePath(d.PR.Agent); ws != "" {
+		ls = append(ls, "path: "+ws)
+	}
+	return ls
+}
+
+// prYankBlock is what `y` copies from the PRs list. Empty while the lazily-fetched detail is still
+// another PR's, so the caller falls back to the id rather than pasting the wrong PR's fields.
+func (m model) prYankBlock() []string {
+	id := m.selID()
+	if id == "" || m.prDetail.PR.ID != id {
+		return nil
+	}
+	return m.prIdentity(m.prDetail)
+}
+
 // prDetailLines is the full PR detail for the ENTER modal: metadata, reviews, then the diff.
 func (m model) prDetailLines() []string {
 	id := m.selID()
@@ -600,11 +627,7 @@ func (m model) prDetailLines() []string {
 	if d.PR.ID != id {
 		return []string{id, dimStyle.Render("(loading…)")}
 	}
-	ls := []string{
-		fmt.Sprintf("%s   [%s]   by %s", d.PR.ID, d.PR.Status, d.PR.Agent),
-		fmt.Sprintf("task: %s  %s (%s)", d.Task.ID, d.Task.Title, d.Task.Status),
-		fmt.Sprintf("branch %s → %s", d.PR.Branch, d.PR.Base),
-	}
+	ls := m.prIdentity(d)
 	if d.PR.Feedback != "" {
 		ls = append(ls, "feedback: "+d.PR.Feedback)
 	}

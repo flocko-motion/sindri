@@ -28,6 +28,15 @@ func (m *model) onKey(k string) tea.Cmd {
 			}
 			return nil
 		}
+		// From the PRs list, the id alone rarely says enough to paste anywhere — the block naming
+		// the PR, its task and its worktree does. The detail pane keeps yanking one field.
+		if m.tab == 2 {
+			if block := m.prYankBlock(); len(block) > 0 {
+				_ = clipboard.WriteAll(strings.Join(block, "\n"))
+				m.flash = "copied PR details"
+				return nil
+			}
+		}
 		if id := m.selID(); id != "" {
 			_ = clipboard.WriteAll(id)
 			m.flash = "copied id: " + id
