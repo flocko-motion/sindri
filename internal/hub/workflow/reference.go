@@ -94,7 +94,7 @@ func (e *Engine) referenceMoved(project, root, base, prevTip, tip string, advanc
 			// Not moving it is correct — the reviewer is reading the diff that was submitted — but
 			// the decision itself must leave a trace, or the drift it lets stand is unmeasurable
 			// afterwards. The count is the useful part: how stale a review-time PR actually gets.
-			e.logReviewSkip(project, root, base, prevTip, tip, a)
+			e.logReviewSkip(project, root, base, a)
 			continue
 		default:
 			e.advanceAgent(project, root, base, prevTip, tip, a)
@@ -104,12 +104,13 @@ func (e *Engine) referenceMoved(project, root, base, prevTip, tip string, advanc
 }
 
 // logReviewSkip records the one decision referenceMoved makes with no other trace: leaving a
-// submitted/resolving agent's branch unmoved. Measured the same way advanceAgent measures an
-// advance — against the tip the move was decided from — so the count means the same thing in both
-// logs even though only one of them ever reaches the agent.
-func (e *Engine) logReviewSkip(project, root, base, prevTip, tip string, a store.Agent) {
+// submitted/resolving agent's branch unmoved. Measures the STANDING drift — the branch against
+// base, the same question refuseIfBehind asks before a submit — not this move's own delta: the
+// agent is never rebased here, so each unrebased sweep adds to the same drift, and only the
+// standing figure still means anything once it has happened more than once.
+func (e *Engine) logReviewSkip(project, root, base string, a store.Agent) {
 	wt := filepath.Join(root, a.Workspace)
-	behind, err := git.CountRange(wt, prevTip, tip)
+	behind, err := git.CountRange(wt, "HEAD", base)
 	msg := base + ": under review, left unmoved"
 	if err == nil {
 		msg += fmt.Sprintf(" — %d commit(s) behind", behind)

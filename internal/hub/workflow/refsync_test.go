@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -207,10 +208,12 @@ func TestSyncReferenceLeavesABranchUnderReviewAlone(t *testing.T) {
 	}
 }
 
-// TestUnderReviewSkipCountsEveryArrivedCommit: the count is the useful part of the log line — it
-// answers how stale a review-time PR actually gets — so it must track multiple arrivals, not just
-// report "something moved".
-func TestUnderReviewSkipCountsEveryArrivedCommit(t *testing.T) {
+// TestUnderReviewSkipReportsStandingDriftAcrossSweeps is the case that actually distinguishes a
+// standing count from a per-move delta: three sweeps, each arriving one commit, with no rebase
+// between (the agent is never moved while under review). A delta of "this move" would read "1
+// commit(s) behind" three times on a branch that is really 3 behind by the third sweep — the exact
+// failure the count exists to avoid. The standing figure (branch vs base) must grow 1, 2, 3.
+func TestUnderReviewSkipReportsStandingDriftAcrossSweeps(t *testing.T) {
 	f := newSyncFixture(t)
 	if err := f.ps.SetState(store.AgentState{Agent: "eitri", Branch: "work", Phase: "submitted"}); err != nil {
 		t.Fatal(err)
@@ -218,15 +221,32 @@ func TestUnderReviewSkipCountsEveryArrivedCommit(t *testing.T) {
 	if err := f.e.SyncReference("proj"); err != nil {
 		t.Fatalf("SyncReference: %v", err)
 	}
-	f.moveReference(t, "one\ntwo\n", "first commit while under review")
-	f.moveReference(t, "one\ntwo\nthree\n", "second commit while under review")
-	f.moveReference(t, "one\ntwo\nthree\nfour\n", "third commit while under review")
-	if err := f.e.SyncReference("proj"); err != nil {
-		t.Fatalf("SyncReference: %v", err)
+	// "one\n" is the fixture's own initial content — starting there would be a no-op write with
+	// nothing for `git commit -a` to pick up, so each body here is new relative to the last.
+	for i, body := range []string{"one\ntwo\n", "one\ntwo\nthree\n", "one\ntwo\nthree\nfour\n"} {
+		f.moveReference(t, body, fmt.Sprintf("sweep %d while under review", i+1))
+		if err := f.e.SyncReference("proj"); err != nil {
+			t.Fatalf("SyncReference (sweep %d): %v", i+1, err)
+		}
 	}
-	log := agentLog(t, f.ps, "eitri")
-	if !strings.Contains(log, "3 commit(s) behind") {
-		t.Errorf("all three arrivals should be counted in one skip, got %q", log)
+	evs, err := f.ps.Events("eitri", 0)
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	var got []string
+	for _, e := range evs {
+		if e.Type == "reference-review-skip" {
+			got = append(got, e.Payload)
+		}
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected one skip logged per sweep, got %d: %v", len(got), got)
+	}
+	for i, want := range []string{"1 commit(s) behind", "2 commit(s) behind", "3 commit(s) behind"} {
+		if !strings.Contains(got[i], want) {
+			t.Errorf("sweep %d = %q, want it to contain %q — the standing drift, not this move's own delta",
+				i+1, got[i], want)
+		}
 	}
 }
 
