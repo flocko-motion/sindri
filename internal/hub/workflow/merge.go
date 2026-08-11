@@ -100,6 +100,10 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 	if err := ps.PutPR(pr); err != nil {
 		return store.PR{}, err
 	}
+	// Any review still out on it is moot, and its reviewer is released and told so — the same thing
+	// ScrapPR does. Left open, the reviewer kept being handed a merged PR, read an empty diff, and
+	// its rejection overwrote the merge in the record.
+	e.releaseReviewers(project, prID, "overtaken: merged before a verdict")
 	// Interim contribution: land the work, keep the task open, put the worker back on the SAME
 	// task with its branch fast-forwarded past the merge. Container milestones take the branch
 	// below and never overlap, since contribute is hidden inside a container.

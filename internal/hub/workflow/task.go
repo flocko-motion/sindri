@@ -279,18 +279,7 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 		return DirCoauthor, nil
 	}
 	if a.Role == "reviewer" {
-		return e.waitForWork(ctx, func() (string, bool, error) {
-			prs, err := ps.PRs()
-			if err != nil {
-				return "", false, err
-			}
-			for _, pr := range prs {
-				if pr.Status == "open" {
-					return DirReview(pr.ID, pr.Task, e.deps.ArchitectureDoc(project)), true, nil
-				}
-			}
-			return "", false, nil
-		})
+		return e.waitForWork(ctx, func() (string, bool, error) { return e.reviewDirective(project, name) })
 	}
 	st, _ := ps.GetState(name)
 	if a.Role == "planner" {

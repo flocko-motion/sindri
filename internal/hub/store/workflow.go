@@ -349,6 +349,35 @@ func (p *ProjectStore) AssignReview(id int64, author string) error {
 	return nil
 }
 
+// UnclaimedReview returns the oldest review nobody is doing, for a PR that is still open — what a
+// reviewer picks up when it finishes one and is free again, and what covers a review requested
+// while no reviewer was running. (0, "", false) when there is none.
+func (p *ProjectStore) UnclaimedReview(id *int64, pr *string) (bool, error) {
+	err := p.s.db.QueryRow(`
+		SELECT r.id, r.pr FROM reviews r JOIN prs pp ON pp.project=r.project AND pp.id=r.pr
+		WHERE r.project=? AND r.author='' AND r.verdict='' AND pp.status='open'
+		ORDER BY r.id LIMIT 1`, p.project).Scan(id, pr)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("unclaimed review: %w", err)
+	}
+	return true, nil
+}
+
+// CloseReviews ends every open review of a PR without a verdict — what a merge or a scrap does to a
+// review that has been overtaken: the thing it was about is settled, so nobody should still hold it.
+func (p *ProjectStore) CloseReviews(pr, why string) error {
+	_, err := p.s.db.Exec(
+		`UPDATE reviews SET verdict='moot', result=? WHERE project=? AND pr=? AND verdict=''`,
+		why, p.project, pr)
+	if err != nil {
+		return fmt.Errorf("close reviews of %s: %w", pr, err)
+	}
+	return nil
+}
+
 // RecordVerdict completes a review with a verdict and the reviewer's findings.
 func (p *ProjectStore) RecordVerdict(id int64, verdict, result string) error {
 	_, err := p.s.db.Exec(`UPDATE reviews SET verdict=?, result=?, verdict_at=? WHERE id=? AND project=?`,

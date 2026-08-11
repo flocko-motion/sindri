@@ -8,11 +8,15 @@ import (
 )
 
 // TestFilterCyclesThroughFour: "f" used to wrap open->closed->all->open (mod 3); active is a
-// fourth stop, so the cycle must wrap at 4 without skipping or repeating a state.
+// fourth stop, so the cycle must wrap at 4 without skipping or repeating a state. It starts from
+// "active", which is where the tab opens.
 func TestFilterCyclesThroughFour(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.tab = 0
-	want := []int{filterClosed, filterAll, filterActive, filterOpen}
+	if m.filter != filterActive {
+		t.Fatalf("the Tasks tab opens on %q, want active", filterNames[m.filter])
+	}
+	want := []int{filterOpen, filterClosed, filterAll, filterActive}
 	for _, w := range want {
 		m.onKey(keyFilter)
 		if m.filter != w {

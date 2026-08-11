@@ -47,9 +47,9 @@ func TestScreenshot(t *testing.T) {
 		name string
 		keys []string
 	}{
-		{"Tasks tab (default: open filter)", nil},
+		{"Tasks tab (default: active filter)", nil},
 		{"Tasks tab — cursor on the feature", []string{"j", "j"}},
-		{"Tasks tab — filter=all (shows closed)", []string{"f", "f"}},
+		{"Tasks tab — filter=all (shows closed)", []string{"f", "f", "f"}},
 		{"Agents tab", []string{"tab"}},
 		{"PRs tab", []string{"tab", "tab"}},
 	}

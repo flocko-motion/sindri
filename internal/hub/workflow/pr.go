@@ -18,11 +18,9 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/config"
-	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/repo"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
 // baseBranch is the branch agents work against: the configured `reference:`, else the main
@@ -98,97 +96,6 @@ func (e *Engine) PRInfo(project, id string) (PRDetail, error) {
 	lint, lintAt := ps.GetPRLint(id)
 	history, _ := ps.PREvents(id)
 	return PRDetail{PR: pr, Task: task, Diff: diff, Reviews: reviews, Lint: lint, LintAt: lintAt, History: history}, nil
-}
-
-// ReviewPrompt reads review-prompt.txt, auto-created from a built-in default if absent.
-func (e *Engine) ReviewPrompt(project string) (string, error) {
-	// A repo-committed `review_prompt` wins; config already validated the path exists.
-	if cfg, err := e.deps.ProjectConfig(project); err != nil {
-		return "", err
-	} else if cfg.ReviewPrompt != "" {
-		data, rerr := os.ReadFile(config.Abs(e.deps.ProjectRoot(project), cfg.ReviewPrompt))
-		if rerr != nil {
-			return "", fmt.Errorf("read review_prompt %s: %w", cfg.ReviewPrompt, rerr)
-		}
-		return strings.TrimSpace(string(data)), nil
-	}
-	dir := filepath.Join(paths.StateDir(), project)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	path := filepath.Join(dir, "review-prompt.txt")
-	if data, err := os.ReadFile(path); err == nil {
-		return strings.TrimSpace(string(data)), nil
-	} else if !os.IsNotExist(err) {
-		return "", err
-	}
-	if err := os.WriteFile(path, []byte(DefaultReviewPrompt+"\n"), 0o644); err != nil {
-		return "", err
-	}
-	return DefaultReviewPrompt, nil
-}
-
-// RequestReview is the ONE review path: every trigger funnels here, so a review is always
-// the same thing. No reviewer running → recorded unassigned; requirement "" uses the default.
-func (e *Engine) RequestReview(project, prID, requirement string) error {
-	ps := e.store.For(project)
-	pr, ok, err := ps.GetPR(prID)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("no such PR %q", prID)
-	}
-	requirement = strings.TrimSpace(requirement)
-	if requirement == "" {
-		requirement, _ = e.ReviewPrompt(project)
-	}
-	id, err := ps.AddReview(prID, requirement)
-	if err != nil {
-		return err
-	}
-	reviewer, err := e.runningReviewer(project)
-	if err != nil {
-		return err
-	}
-	if reviewer == "" {
-		_ = ps.LogPR(prID, "review-requested", "unassigned (no reviewer running)")
-		e.deps.Notify()
-		return nil
-	}
-	if err := ps.AssignReview(id, reviewer); err != nil {
-		return err
-	}
-	// The hub preps the terrain so the reviewer never faces a stale tree: force-checkout is
-	// safe because it only reads + lints. On failure it is told not to trust /workspace.
-	checkedOut := true
-	if a, ok, gerr := ps.GetAgent(reviewer); gerr != nil || !ok {
-		checkedOut = false
-		_ = ps.LogPR(prID, "checkout-failed", "reviewer "+reviewer+" not on roster")
-	} else if coErr := git.CheckoutDetachedClean(filepath.Join(e.deps.ProjectRoot(project), a.Workspace), pr.Branch); coErr != nil {
-		checkedOut = false
-		_ = ps.LogPR(prID, "checkout-failed", fmt.Sprintf("%s into %s: %v", pr.Branch, a.Workspace, coErr))
-	}
-	_ = ps.SetState(store.AgentState{Agent: reviewer, Phase: "reviewing"}) // board shows it working, not idle
-	_ = ps.LogPR(prID, "review-requested", "assigned to "+reviewer)
-	go e.deps.InjectWhenReady(project, reviewer, MsgReview(prID, requirement, pr.Branch, pr.Base, e.deps.ArchitectureDoc(project), checkedOut)) // async: don't block a worker's submit
-	e.deps.Notify()
-	return nil
-}
-
-// runningReviewer returns a roster read failure rather than disguising it as "no reviewer",
-// which would silently drop the review request.
-func (e *Engine) runningReviewer(project string) (string, error) {
-	roster, err := e.store.For(project).Roster()
-	if err != nil {
-		return "", fmt.Errorf("load roster for %s: %w", project, err)
-	}
-	for _, a := range roster {
-		if a.Role == "reviewer" && container.Running(e.deps.Container(project, a.Name)) && e.deps.SessionAlive(project, a.Name) {
-			return a.Name, nil
-		}
-	}
-	return "", nil
 }
 
 // CmdSubmit returns immediately; the worker idles until the hub injects a verdict (D5).
@@ -438,6 +345,12 @@ func (e *Engine) reject(project, prID, feedback string, byUser bool) error {
 	}
 	if !ok {
 		return fmt.Errorf("no such PR %q", prID)
+	}
+	// A verdict decides nothing once the PR is settled, and writing one anyway UNDID a merge in the
+	// record: a reviewer rejected an already-merged PR, its author was sent back to a branch whose
+	// work had landed, resubmitted an empty diff, and the pair looped three times.
+	if pr.Status != "open" {
+		return fmt.Errorf("%s is %s — a verdict on it decides nothing; its review is closed", prID, pr.Status)
 	}
 	feedback = strings.TrimSpace(feedback)
 	if feedback == "" {

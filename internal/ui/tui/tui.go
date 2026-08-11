@@ -135,7 +135,10 @@ func newModel(cl *client.HTTP, ch <-chan api.BoardState, root string) model {
 	ta.CharLimit = 0 // the hub enforces the length cap (with feedback); never clip silently here
 	ta.Placeholder = "Type a message to the meeting room…"
 	ta.ShowLineNumbers = false
-	m := model{cl: cl, ch: ch, root: root, collapsed: map[string]bool{}, merging: map[string]bool{}, busy: map[string]string{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
+	// Tasks open on "active" — the open backlog plus whatever changed in the last couple of hours.
+	// Plain "open" hid a task the moment it closed, so the work just finished left no trace on the
+	// board and the tab read as though nothing had happened.
+	m := model{cl: cl, ch: ch, root: root, filter: filterActive, collapsed: map[string]bool{}, merging: map[string]bool{}, busy: map[string]string{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
 	m.reclamp()
 	return m
 }
