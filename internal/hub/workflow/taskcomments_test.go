@@ -30,9 +30,9 @@ func TestAgentSeesCommentsOnTaskInfo(t *testing.T) {
 	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-9", Phase: "working"}); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	deps := &stubDeps{root: root, comments: []store.Comment{
+	deps := &stubDeps{root: root, comments: map[string][]store.Comment{"td-9": {
 		{Source: "sindri", SourceRef: "abc", Author: "eitri", Body: "found a blocker", CreatedAt: "2026-01-01T00:00:00Z"},
-	}}
+	}}}
 	e := New(st, deps)
 	c := registry.Caller{Project: "proj", Agent: "eitri", Role: "worker"}
 

@@ -319,10 +319,7 @@ func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int,
 			dash(t.ParentID), dash(strings.Join(childIDs(tasks, t.ID), ", ")), dash(t.Description))
 		// The same thread the TUI pane and `task info` show: an agent that just filed a finding
 		// (-> the comment verb) has to be able to read it back here, or the verb is worse than none.
-		for _, cm := range t.Comments {
-			fmt.Fprintf(out, "\n— %s (%s, %s)\n%s\n", dash(cm.Author), cm.Source, cm.CreatedAt,
-				strings.TrimRight(cm.Body, "\n"))
-		}
+		fmt.Fprint(out, commentBlock(t.Comments))
 		return 0, nil
 	}
 	if bounded && len(args) == 0 {
@@ -397,15 +394,24 @@ func (e *Engine) workerTaskView(c registry.Caller, tasks []store.Task, out io.Wr
 		return 0, nil
 	}
 
+	// GetTask reads the row; the thread lives in its own table and is fetched separately, the same
+	// way TaskInfo attaches it. Bare `task` is where an agent looks first, so a comment addressed
+	// to it has to arrive here — not only on the fuller `task <id>`.
+	comments := e.deps.TaskComments(c.Project, root.ID)
+
 	rows := subtreeRows(tasks, root.ID)
 	if len(rows) <= 1 { // a standalone task: show it whole
 		fmt.Fprintf(out, "Your task %s  [%s]  %s\n\n%s\n", root.ID, root.Status, root.Title, dash(root.Description))
+		fmt.Fprint(out, commentBlock(comments))
 		return 0, nil
 	}
 	fmt.Fprintf(out, "Your package %s: %s\n", root.ID, root.Title)
 	if body := strings.TrimSpace(root.Description); body != "" {
 		fmt.Fprintf(out, "\n%s\n", body)
 	}
+	// The package's own thread, not its subtasks' — a comment on the package is addressed to
+	// whoever holds it, which is the reader. Each subtask carries its own to `task <id>`.
+	fmt.Fprint(out, commentBlock(comments))
 	fmt.Fprintf(out, "\n%d subtasks:\n", len(rows)-1)
 	for _, r := range rows[1:] {
 		marker := "  "

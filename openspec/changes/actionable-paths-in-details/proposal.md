@@ -1,4 +1,4 @@
-# A path shown in an item's detail is somewhere you can go
+# An agent's workspace is somewhere you can go
 
 ## Why
 
@@ -9,15 +9,19 @@ the agent — printed the same tree as plain text. The one place a user goes to 
 this agent working?" was the one place the answer could not be taken anywhere.
 
 The Agents detail also showed the repo-relative form (`.worktrees/dvalin`), which names the
-tree without locating it. `agent info` prints the same relative string, so neither front-end
-gave a path a user could paste.
+tree without locating it.
+
+The gap is the TUI's Agents detail specifically. On the host, `sindri agent dir <name>` prints
+the absolute path and documents the `cd "$(sindri agent dir <name>)"` idiom, so a pasteable
+path is available from the CLI — behind a separate command from the one that shows the agent's
+fields, but available.
 
 ## What changes
 
 - An agent's detail shows its workspace as an ABSOLUTE path, and as an actionable item: it
   takes right-column focus, ENTER opens a shell there, `y` copies it.
-- The rule is written down for item details generally, so the next detail that names a
-  filesystem path is not a third case decided from scratch.
+- The rule is written down for the agent workspace wherever a detail names it, which is the
+  Agents detail and the PRs detail, so those two do not stay a matched pair by accident.
 - The path shows whenever it resolves, rather than only while the agent has an open PR. It
   is the agent's workspace: it exists as long as the workspace does, and a field that comes
   and goes with review state reads as a bug.
@@ -31,3 +35,7 @@ gave a path a user could paste.
   unchanged and now specified.
 - Code: `internal/ui/tui/tab_agents.go` only. No new key and no new action — the existing
   `y`, ENTER and `o` handlers already act on a `path` item.
+- The Repos detail also names a path (`tab_repos.go`) and cannot focus, open or yank it: that
+  detail is built as plain strings, with no actionable items at all. The requirement here is
+  deliberately scoped to the agent workspace rather than claiming a general rule the product
+  does not yet obey; the Repos gap is left to its own change.

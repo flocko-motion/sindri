@@ -145,6 +145,13 @@ func TestSyncToleratesRepoWithoutTd(t *testing.T) {
 // engine plus the caller a worker arrives as.
 func workerEngine(t *testing.T, tasks []store.Task, container, current string) (*Engine, registry.Caller) {
 	t.Helper()
+	return workerEngineComments(t, tasks, container, current, nil)
+}
+
+// workerEngineComments is workerEngine with a seeded comment thread per task id — the thread lives
+// outside the task row, so it is served by deps rather than upserted with the task.
+func workerEngineComments(t *testing.T, tasks []store.Task, container, current string, comments map[string][]store.Comment) (*Engine, registry.Caller) {
+	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -163,7 +170,7 @@ func workerEngine(t *testing.T, tasks []store.Task, container, current string) (
 	if err := ps.SetState(store.AgentState{Agent: "eitri", Container: container, Task: current, Phase: "working"}); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	return New(st, &stubDeps{root: root}), registry.Caller{Project: "proj", Agent: "eitri", Role: "worker"}
+	return New(st, &stubDeps{root: root, comments: comments}), registry.Caller{Project: "proj", Agent: "eitri", Role: "worker"}
 }
 
 // TestWorkerSeesItsPackage: a package is claimed whole for the context it carries, so that

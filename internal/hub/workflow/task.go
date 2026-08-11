@@ -191,6 +191,17 @@ func dash(s string) string {
 	return s
 }
 
+// commentBlock renders a task's thread oldest-first, shaped like the CLI's `task info` so the two
+// read alike. Source is on the head line: it says who else has already seen the comment.
+func commentBlock(comments []store.Comment) string {
+	var b strings.Builder
+	for _, c := range comments {
+		fmt.Fprintf(&b, "\n— %s (%s, %s)\n%s\n", dash(c.Author), c.Source, c.CreatedAt,
+			strings.TrimRight(c.Body, "\n"))
+	}
+	return b.String()
+}
+
 // EditTask applies a spec to an existing task in a project.
 func (e *Engine) EditTask(project, id string, s TaskSpec) error {
 	if err := e.checkParent(project, s.Parent, id); err != nil {

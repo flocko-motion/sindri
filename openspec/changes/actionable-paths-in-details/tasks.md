@@ -10,6 +10,9 @@
 
 - [x] 2.1 `view-tui` gains the requirement, covering the PRs behaviour that was already
       implemented and unspecified alongside the new Agents one.
+- [x] 2.2 Scope it to the agent workspace. A general "any path in a detail" rule would be false
+      on landing: the Repos detail names a path and is built from plain strings, so it has no
+      actionable item to reach.
 
 ## 3. Pin it
 

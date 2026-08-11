@@ -357,7 +357,9 @@ func commentItems(comments []api.Comment) []metaItem {
 	}
 	items := []metaItem{{text: ""}, {text: fmt.Sprintf("── comments (%d) ──", len(comments))}}
 	for _, c := range comments {
-		head := c.Author
+		// The source too: "github" means the comment came from or went to the upstream issue, so
+		// it says who else has already seen it — which a reply is written differently for.
+		head := c.Author + " (" + c.Source + ")"
 		if ts := commentTime(c.CreatedAt); ts != "" {
 			head = ts + "  " + head
 		}
