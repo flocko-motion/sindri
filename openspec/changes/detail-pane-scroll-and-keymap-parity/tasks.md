@@ -14,6 +14,11 @@
       the footer budget in check.
 - [x] 2.2 Fix `C-h/l`'s silent double meaning (it also registered bare `l`) by
       writing it `C-h/C-l`.
+- [x] 2.3 Corrected in review: `ctrl+d`/`ctrl+u` do not scroll the detail pane
+      on every tab — only PRs special-cases them that way (`onkey.go`'s
+      `tab == 2` branch); elsewhere they half-page the LIST. Split into its
+      own `{"C-d/C-u", "page"}` row rather than folding it into `J`/`K`'s
+      "scroll detail" label, which would have been wrong on four of five tabs.
 
 ## 3. Make the guarantee real
 

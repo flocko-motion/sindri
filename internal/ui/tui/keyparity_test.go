@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"strings"
 	"testing"
 )
 
@@ -14,27 +15,13 @@ import (
 func declaredSingleKeys() map[string]bool {
 	out := map[string]bool{}
 	for _, b := range keymap {
-		for _, part := range splitKeys(b.keys) {
+		for _, part := range strings.Split(b.keys, "/") {
 			if len([]rune(part)) == 1 {
 				out[part] = true
 			}
 		}
 	}
 	return out
-}
-
-// splitKeys is strings.Split(s, "/") without importing strings twice for one call — matches
-// scopeLabels' own splitting convention exactly.
-func splitKeys(s string) []string {
-	var out []string
-	start := 0
-	for i, r := range s {
-		if r == '/' {
-			out = append(out, s[start:i])
-			start = i + 1
-		}
-	}
-	return append(out, s[start:])
 }
 
 // handledLetterKeys parses onkey.go's switch statements and keys.go's key constants, and returns

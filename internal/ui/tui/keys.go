@@ -87,7 +87,11 @@ var keymap = []binding{
 	{"⇥/[]", lbl("tab"), scopeGlobal},
 	{"C-h/C-l", lbl("pane"), scopeGlobal},
 	{"j/k/g/G", lbl("move/top/bot"), scopeGlobal},
-	{"J/K/C-d/C-u", lbl("scroll detail"), scopeGlobal},
+	{"J/K", lbl("scroll detail"), scopeGlobal},
+	// "page", not "scroll detail": ctrl+d/ctrl+u half-page the LIST on every tab except PRs
+	// (onkey.go's ctrl+d/ctrl+u cases special-case tab==2 to scroll the diff instead) — a label
+	// naming one pane would be wrong on the other four.
+	{"C-d/C-u", lbl("page"), scopeGlobal},
 	{"y/Y", lbl("yank/all"), scopeGlobal},
 	{keyDetail, lbl("detail"), scopeGlobal},
 	{keyRepo, lbl("repo"), scopeGlobal},
