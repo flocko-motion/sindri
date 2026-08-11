@@ -123,22 +123,22 @@ func (h *Hub) registry() *registry.Registry {
 }
 
 // landingBlocked is the shared gate on the two verbs that put a branch up (submit, contribute).
-// Inside a feature the unit that goes up is the whole branch, so submit waits for the last subtask
-// and contribute has no role at all — checkpoint is the interim landing there. Outside one, there is
-// nothing to land except from "working", worded exactly as the verb's own guard words it so an agent
-// hears one story whichever gate it meets first.
+// Inside a feature submit is the FINISHED branch, so it waits for the last subtask, while contribute
+// puts up what stands — a milestone, which needs nothing finished. Outside one, there is nothing to
+// land except from "working", worded exactly as the verb's own guard words it so an agent hears one
+// story whichever gate it meets first.
 func landingBlocked(verb string) func(registry.Caller) string {
 	return func(c registry.Caller) string {
 		if c.Container != "" {
 			switch {
-			case verb == "contribute":
-				return fmt.Sprintf("Inside feature %s, `sindri checkpoint \"<summary>\"` is how you land "+
-					"work as you go — it records the subtask on the feature branch without ending anything.",
-					c.Container)
-			case c.SubtasksOpen:
+			case verb == "contribute" && c.Phase == "submitted":
+				return fmt.Sprintf("Feature %s is already up for the user to merge — wait for that, or "+
+					"`sindri revoke` to take it back and keep working.", c.Container)
+			case verb == "submit" && c.SubtasksOpen:
 				return fmt.Sprintf("Feature %s still has open subtasks, and it goes up as ONE PR — "+
 					"record the one you're on with `sindri checkpoint \"<summary>\"` and it will hand you "+
-					"the next. Submit once they're all done.", c.Container)
+					"the next. Submit once they're all done; `sindri contribute` puts the branch up "+
+					"meanwhile if what's on it is already useful.", c.Container)
 			}
 			return ""
 		}

@@ -226,8 +226,8 @@ func TestAssignedWorkSaysItStartsNow(t *testing.T) {
 
 // TestMidFeatureAdviceNamesCheckpoint is the rule dvalin's report exposed, in the form it takes now
 // that a finished feature submits itself: every instruction reaching a worker with subtasks still to
-// do must name only verbs open to it there. While the branch is incomplete that is checkpoint —
-// submit is held back until the last subtask, and contribute has no role inside a feature at all.
+// do must name only verbs open to it there. While the branch is incomplete that is checkpoint, and
+// contribute for a branch worth sharing early; submit is held back until the last subtask.
 func TestMidFeatureAdviceNamesCheckpoint(t *testing.T) {
 	for _, s := range []string{
 		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
@@ -239,10 +239,8 @@ func TestMidFeatureAdviceNamesCheckpoint(t *testing.T) {
 		if !strings.Contains(s, "`sindri checkpoint") {
 			t.Errorf("mid-feature advice must name checkpoint: %q", s)
 		}
-		for _, bad := range []string{"`sindri contribute", "`sindri next"} {
-			if strings.Contains(s, bad) {
-				t.Errorf("advice to a feature worker names %q, which its surface hides: %q", bad, s)
-			}
+		if strings.Contains(s, "`sindri next") {
+			t.Errorf("advice to a feature worker names `sindri next`, which its surface hides: %q", s)
 		}
 	}
 	// Where a feature's advice DOES name submit, it must be about the whole branch — never something

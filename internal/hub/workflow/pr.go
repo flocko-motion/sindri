@@ -569,6 +569,14 @@ func (e *Engine) rebasePlanners(project, base string) {
 
 // MilestonePR opens (or refreshes) a container milestone, blocking the agent until a human merges.
 func (e *Engine) MilestonePR(project, agent string) (store.PR, error) {
+	return e.openMilestone(project, agent, "")
+}
+
+// openMilestone puts a feature branch up as it stands: commit, record it as an interim PR the user
+// merges, and keep the agent on the feature across the landing. One operation behind two doors — the
+// human's milestone trigger and a worker's own `contribute` inside a feature — since partly landing a
+// feature is the same act however it is asked for.
+func (e *Engine) openMilestone(project, agent, msg string) (store.PR, error) {
 	ps := e.store.For(project)
 	root := e.deps.ProjectRoot(project)
 	st, err := ps.GetState(agent)
@@ -576,21 +584,27 @@ func (e *Engine) MilestonePR(project, agent string) (store.PR, error) {
 		return store.PR{}, err
 	}
 	if st.Container == "" {
-		return store.PR{}, fmt.Errorf("%s isn't working a container — no milestone to open", agent)
+		return store.PR{}, fmt.Errorf("%s isn't working a feature — no milestone to open", agent)
 	}
 	a, ok, err := ps.GetAgent(agent)
 	if err != nil || !ok {
 		return store.PR{}, fmt.Errorf("no such agent %q", agent)
 	}
+	if msg == "" {
+		msg = "milestone: " + st.Container
+	}
 	wt := filepath.Join(root, a.Workspace)
-	if err := git.CommitAll(wt, "milestone: "+st.Container); err != nil { // capture current state
+	if err := git.CommitAll(wt, msg); err != nil { // capture current state
 		return store.PR{}, err
 	}
 	base, err := e.baseBranch(root)
 	if err != nil {
 		return store.PR{}, err
 	}
-	pr := store.PR{ID: "pr-" + st.Container, Task: st.Container, Agent: agent, Branch: st.Container, Base: base, Status: "open"}
+	// Named for the FEATURE: the branch carries every checkpointed subtask, so naming it for the
+	// subtask in hand would misdescribe what is in it. Interim, so nothing reads the merge as the
+	// feature having landed — it is one instalment of a branch that goes on.
+	pr := store.PR{ID: "pr-" + st.Container, Task: st.Container, Agent: agent, Branch: st.Container, Base: base, Status: "open", Kind: "interim"}
 	_, existed, _ := ps.GetPR(pr.ID)
 	if err := ps.PutPR(pr); err != nil {
 		return store.PR{}, err

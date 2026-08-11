@@ -380,8 +380,11 @@ func DirContainerClaimed(container, ctitle, child, childTitle string) string {
 func DirContainerWorking(container, task string) string {
 	return fmt.Sprintf("Subtask %s of feature %s. Implement it, then run `sindri checkpoint \"<summary>\"` "+
 		"— that is what ends a subtask and hands you the next one; until you run it, %s stays yours and "+
-		"you'll be given it again. The feature itself ends in ONE pull request covering the whole branch: "+
-		"`sindri submit \"<summary>\"` once every subtask is checkpointed, never per subtask.",
+		"you'll be given it again. Checkpointing records work on the feature branch and nothing more: "+
+		"nothing of yours reaches the reference branch until a PR merges. The feature itself ends in ONE "+
+		"pull request covering the whole branch — `sindri submit \"<summary>\"` once every subtask is "+
+		"checkpointed, never per subtask. If what's on the branch is already useful to others, "+
+		"`sindri contribute \"<summary>\"` puts it up for the user to merge without ending the feature.",
 		task, container, task)
 }
 
@@ -470,6 +473,12 @@ func ReplyNotWorking(verb, phase, task string) string {
 // user's approval — the worker then waits until it's merged (and told to continue).
 func ReplyContributed(prID string) string {
 	return fmt.Sprintf("Interim contribution %s recorded — it needs the user's approval before it merges into the reference branch. Wait; you'll be told to keep going once it lands. (This may take a while.)", prID)
+}
+
+// ReplyMilestoneContributed confirms a feature branch is up as it stands. It names the FEATURE,
+// since that is what the PR contains — a worker told its subtask went up would misread what landed.
+func ReplyMilestoneContributed(prID, feature string) string {
+	return fmt.Sprintf("Feature %s is up as %s — everything recorded on the branch so far, waiting on the user to merge it. Wait; you'll be told to carry on with the next subtask once it lands. (This may take a while.)", feature, prID)
 }
 
 // ReplyContributeConflicts tells a worker its contribution doesn't rebase cleanly yet — fix the
