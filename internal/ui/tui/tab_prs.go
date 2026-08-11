@@ -18,6 +18,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/ui/tui/scroll"
 )
@@ -448,20 +449,25 @@ func (m model) prMetaItems() []metaItem {
 	return items
 }
 
-// wrapMeta wraps plain detail lines to the column width, so history and feedback read in full.
-// Actionable and blank items pass through, keeping the focus cursor 1:1 with its actionable rows.
+// wrapMeta wraps detail lines to the column width, so history, feedback and a long task/PR title
+// read in full rather than losing their tail to the pane's ellipsis. Blank items, and any item
+// already within width — the common case for the short actionable ones — pass through untouched,
+// keeping their exact text so `y`/ENTER still act on what's shown. An item that overflows is
+// word-wrapped; if it was actionable, only its first line keeps the kind/value, so the right-column
+// cursor still lands on exactly one entry per source item.
 func wrapMeta(items []metaItem, width int) []metaItem {
 	if width <= 0 {
 		return items
 	}
-	wrap := lipgloss.NewStyle().Width(width)
 	out := make([]metaItem, 0, len(items))
 	for _, it := range items {
-		if it.kind != "" || it.text == "" {
+		if it.text == "" || ansi.StringWidth(it.text) <= width {
 			out = append(out, it)
 			continue
 		}
-		for _, s := range strings.Split(wrap.Render(it.text), "\n") {
+		lines := strings.Split(ansi.Wrap(it.text, width, ""), "\n")
+		out = append(out, metaItem{text: lines[0], kind: it.kind, value: it.value})
+		for _, s := range lines[1:] {
 			out = append(out, metaItem{text: s})
 		}
 	}

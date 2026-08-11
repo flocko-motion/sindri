@@ -34,6 +34,8 @@ func (m *model) reclamp() {
 	} else if m.tab == 0 || m.tab == 3 { // generic detail pane: size to the WRAPPED count
 		wrapped, _ := wrapContentMapped(m.detailLines(), m.detailWidth())
 		m.detail.Resize(m.bodyHeight(), len(wrapped))
+	} else if m.tab == 1 { // Agents: right column wraps like PRs' meta column (agentsBody)
+		m.detail.Resize(m.bodyHeight(), len(wrapMeta(m.agentItems(), m.agentDetailWidth())))
 	} else {
 		m.detail.Resize(m.bodyHeight(), len(m.detailLines()))
 	}

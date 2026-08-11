@@ -250,12 +250,19 @@ func (m model) agentListHeight() int {
 	return n
 }
 
+// agentDetailWidth is the right detail column's width — the same clamp agentsBody renders at,
+// shared so reclamp can size the viewport to the same wrapped line count.
+func (m model) agentDetailWidth() int {
+	return clampInt(agentDetailW, 20, max(20, m.w-30))
+}
+
 // agentsBody lays out list over live pane on the left, fixed-width agent detail on the right.
 func (m model) agentsBody() string {
 	h := m.bodyHeight()
 	leftW := m.w
+	rightW := m.agentDetailWidth()
 	if m.showDetail() { // leave room for the right detail column
-		leftW = m.w - clampInt(agentDetailW, 20, max(20, m.w-30)) - 1
+		leftW = m.w - rightW - 1
 	}
 	listH := m.agentListHeight()
 	paneH := max(1, h-listH-1) // minus the horizontal divider
@@ -267,8 +274,10 @@ func (m model) agentsBody() string {
 	if !m.showDetail() { // § hid the right column — left split takes the full width
 		return leftCol
 	}
-	// Right column from metaItems, highlighting the focused actionable item.
-	items := m.agentItems()
+	// Right column from metaItems, word-wrapped like the PRs tab so a long task title or
+	// activity payload reads in full rather than losing its tail to an ellipsis. Highlight
+	// the focused actionable item.
+	items := wrapMeta(m.agentItems(), rightW)
 	lines := make([]string, len(items))
 	hl, ai := -1, 0
 	for i, it := range items {
@@ -280,7 +289,7 @@ func (m model) agentsBody() string {
 			ai++
 		}
 	}
-	right := pane(lines, m.detail, m.w-leftW-1, hl)
+	right := pane(lines, m.detail, rightW, hl)
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftCol, divider(h), right)
 }
 

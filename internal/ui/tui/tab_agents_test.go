@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/flo-at/sindri/internal/api"
 )
 
@@ -139,5 +140,37 @@ func TestAgentWorkspaceWithoutAProjectRootStaysPlain(t *testing.T) {
 	}
 	if ws.kind != "" {
 		t.Errorf("a workspace with no root to join to was offered as a %q to open", ws.kind)
+	}
+}
+
+// TestAgentsBodyWrapsTheTaskLine: the right column truncated everything with an ellipsis, unlike
+// its PRs-tab counterpart which word-wraps via wrapMeta. A task label long enough to overflow the
+// column must still read in full, split across lines, not lose its tail.
+func TestAgentsBodyWrapsTheTaskLine(t *testing.T) {
+	long := "a task title long enough that it cannot possibly fit within the detail column's width"
+	m := newModel(nil, nil, "/r/sindri")
+	m.tab, m.scopeRepo = 1, false
+	m.w, m.h = 120, 30
+	m.state = api.BoardState{
+		Projects: []api.Project{{Tag: "sin", Path: "/r/sindri"}},
+		Agents:   []api.AgentView{{Name: "dvalin", Role: "worker", Status: "idle", Task: "td-1"}},
+		Tasks:    []api.Task{{ID: "td-1", Title: long}},
+	}
+	m.reclamp()
+
+	rightW := m.agentDetailWidth()
+	items := wrapMeta(m.agentItems(), rightW)
+	for _, it := range items {
+		if w := ansi.StringWidth(strings.TrimRight(it.text, " ")); w > rightW {
+			t.Errorf("wrapped line exceeds the column width %d (%d): %q", rightW, w, it.text)
+		}
+	}
+	// Reassemble words across the wrap so the check doesn't care where the line breaks: a genuine
+	// word survives whitespace-collapsing whole; a truncated one comes back as "poss…" rather than
+	// "possibly", which fails the containment check below.
+	flat := strings.Join(strings.Fields(strings.Join(itemTexts(items), " ")), " ")
+	wantFlat := strings.Join(strings.Fields(long), " ")
+	if !strings.Contains(flat, wantFlat) {
+		t.Errorf("the long task title should read in full (wrapped, not truncated):\nwant substring: %q\ngot:            %q", wantFlat, flat)
 	}
 }
