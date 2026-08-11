@@ -197,6 +197,37 @@ func TestSyncReferenceLeavesABranchUnderReviewAlone(t *testing.T) {
 	if got := f.told(); got != "" {
 		t.Errorf("an advance during review needs no message — the merge handles it: %q", got)
 	}
+	// The skip is silent to the agent, but must not be silent in the log — that is the whole task.
+	log := agentLog(t, f.ps, "eitri")
+	if !strings.Contains(log, "reference-review-skip") {
+		t.Errorf("the under-review skip left no log entry: %q", log)
+	}
+	if !strings.Contains(log, "1 commit(s) behind") {
+		t.Errorf("the skip should record how far behind the agent now is, got %q", log)
+	}
+}
+
+// TestUnderReviewSkipCountsEveryArrivedCommit: the count is the useful part of the log line — it
+// answers how stale a review-time PR actually gets — so it must track multiple arrivals, not just
+// report "something moved".
+func TestUnderReviewSkipCountsEveryArrivedCommit(t *testing.T) {
+	f := newSyncFixture(t)
+	if err := f.ps.SetState(store.AgentState{Agent: "eitri", Branch: "work", Phase: "submitted"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.e.SyncReference("proj"); err != nil {
+		t.Fatalf("SyncReference: %v", err)
+	}
+	f.moveReference(t, "one\ntwo\n", "first commit while under review")
+	f.moveReference(t, "one\ntwo\nthree\n", "second commit while under review")
+	f.moveReference(t, "one\ntwo\nthree\nfour\n", "third commit while under review")
+	if err := f.e.SyncReference("proj"); err != nil {
+		t.Fatalf("SyncReference: %v", err)
+	}
+	log := agentLog(t, f.ps, "eitri")
+	if !strings.Contains(log, "3 commit(s) behind") {
+		t.Errorf("all three arrivals should be counted in one skip, got %q", log)
+	}
 }
 
 // TestAdvanceIsSilentWhenNothingArrived is the fix: a reference that moved for somebody else must

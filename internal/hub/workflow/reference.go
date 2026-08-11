@@ -91,12 +91,32 @@ func (e *Engine) referenceMoved(project, root, base, prevTip, tip string, advanc
 			_ = ps.Log(a.Name, "reference-rewritten", base)
 			_ = e.deps.InjectWhenReady(project, a.Name, MsgReferenceRewritten())
 		case underReview:
-			continue // the merge rebases it when the time comes; saying so now is noise
+			// Not moving it is correct — the reviewer is reading the diff that was submitted — but
+			// the decision itself must leave a trace, or the drift it lets stand is unmeasurable
+			// afterwards. The count is the useful part: how stale a review-time PR actually gets.
+			e.logReviewSkip(project, root, base, prevTip, tip, a)
+			continue
 		default:
 			e.advanceAgent(project, root, base, prevTip, tip, a)
 		}
 	}
 	e.deps.Notify()
+}
+
+// logReviewSkip records the one decision referenceMoved makes with no other trace: leaving a
+// submitted/resolving agent's branch unmoved. Measured the same way advanceAgent measures an
+// advance — against the tip the move was decided from — so the count means the same thing in both
+// logs even though only one of them ever reaches the agent.
+func (e *Engine) logReviewSkip(project, root, base, prevTip, tip string, a store.Agent) {
+	wt := filepath.Join(root, a.Workspace)
+	behind, err := git.CountRange(wt, prevTip, tip)
+	msg := base + ": under review, left unmoved"
+	if err == nil {
+		msg += fmt.Sprintf(" — %d commit(s) behind", behind)
+	} else {
+		msg += " — how far behind is unknown: " + err.Error()
+	}
+	_ = e.store.For(project).Log(a.Name, "reference-review-skip", msg)
 }
 
 // advanceAgent rebases one agent onto the advanced reference and tells it what arrived. A rebase it
