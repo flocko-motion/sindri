@@ -139,6 +139,15 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 	}
 	a, _, _ := ps.GetAgent(c.Agent)
 	wt := filepath.Join(root, a.Workspace)
+	base, err := e.baseBranch(root)
+	if err != nil {
+		return 1, err
+	}
+	// Before the gate, not after: a branch that must rebase will be gated again on the rebased tree,
+	// so running it now is a build and a test suite spent on a result nobody will keep.
+	if refused, rerr := e.refuseIfBehind(ps, c.Agent, wt, base, target, out); rerr != nil || refused {
+		return 1, rerr
+	}
 	if lintOut, ok := repo.Gate(wt, e.deps.BrokkrBin, e.verifyCmd(c.Project)); !ok {
 		fmt.Fprintln(out, ReplyLintFail(strings.TrimSpace(lintOut)))
 		_ = ps.Log(c.Agent, "lint-fail", target)
@@ -149,10 +158,6 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 		msg = "work on " + target
 	}
 	if err := git.CommitAll(wt, msg); err != nil {
-		return 1, err
-	}
-	base, err := e.baseBranch(root)
-	if err != nil {
 		return 1, err
 	}
 	pr := store.PR{ID: "pr-" + target, Task: target, Agent: c.Agent, Branch: branch, Base: base, Status: "open"}
@@ -174,6 +179,25 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 	_ = e.RequestReview(c.Project, pr.ID, "") // one review path; the hub preps the terrain
 	fmt.Fprintln(out, ReplyRegistered(pr.ID))
 	return 0, nil
+}
+
+// refuseIfBehind stops a PR being recorded on a base the reference has moved past. It refuses rather
+// than rebasing on the agent's behalf: the gate runs BEFORE the PR is written, so a silent rebase
+// here would attach a gate result that never saw the merged state — passed against the old base,
+// while the code that actually merges was never gated together. Sending the agent through `rebase`
+// and a fresh submit re-runs the gate on the tree that will land.
+//
+// A failure to count is not a refusal. The count is the evidence, and blocking a submit on a git
+// command that did not answer would strand an agent with finished work and nothing to fix.
+func (e *Engine) refuseIfBehind(ps *store.ProjectStore, agent, wt, base, target string, out io.Writer) (refused bool, err error) {
+	behind, cerr := git.CountRange(wt, "HEAD", base)
+	if cerr != nil || behind == 0 {
+		return false, nil
+	}
+	incoming, _ := git.LogRange(wt, "HEAD", base, logCap)
+	fmt.Fprintln(out, ReplyBehindBase(base, behind, incoming))
+	_ = ps.Log(agent, "submit-behind", fmt.Sprintf("%s: %d behind %s", target, behind, base))
+	return true, nil
 }
 
 // CmdOpenspec is the planner's ship verb: openspec edits become a PR on its standing branch.
@@ -202,6 +226,9 @@ func (e *Engine) CmdOpenspec(c registry.Caller, args []string, out io.Writer) (i
 	if !changed && !ahead {
 		fmt.Fprintln(out, "Nothing to submit — edit /workspace/openspec first.")
 		return 1, nil
+	}
+	if refused, rerr := e.refuseIfBehind(ps, c.Agent, wt, base, branch, out); rerr != nil || refused {
+		return 1, rerr
 	}
 	// Gate on the installed quality gates (openspec validation, not the code linter: a planner may
 	// only edit /workspace/openspec, so failing its plan on code it cannot touch would be wrong).

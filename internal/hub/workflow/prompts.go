@@ -563,6 +563,17 @@ func ReplyTaskProposed(id, title string) string {
 	return fmt.Sprintf("Proposed %s: %s — awaiting the user's approval before any worker can pick it up.", id, title)
 }
 
+// ReplyBehindBase refuses a submit whose branch the reference has moved past, naming how far behind
+// and what arrived — the commits are what tell an agent whether its work still makes sense.
+func ReplyBehindBase(base string, behind int, incoming []string) string {
+	return fmt.Sprintf("Not submitted: your branch is %d commit(s) behind %s, so the PR would be "+
+		"reviewed and merged against a base that has moved.\n"+
+		"Run `sindri rebase` (it resolves conflicts step by step if there are any), then `sindri "+
+		"submit` again — the quality gate re-runs on the rebased tree, so what you put up is "+
+		"verified against the state it will actually merge into.%s",
+		behind, base, commitList(incoming))
+}
+
 // ReplyLintFail echoes the violations, and says a finding is to be MET, not evaded: relocating
 // prose or widening a limit clears the report while leaving the problem the rule exists for.
 func ReplyLintFail(out string) string {
