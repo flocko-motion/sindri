@@ -26,12 +26,17 @@ var (
 	promptLine = regexp.MustCompile(`(?m)^\s*❯`)
 	// yesNoOption matches a selectable yes/no line ("❯ 1. Yes", "2. No", "❯ Yes").
 	yesNoOption = regexp.MustCompile(`(?im)^\s*(❯\s*)?(\d+\.\s*)?(yes|no)\b`)
+	// signedOut matches Claude's auth banner ("● Login expired · Please run /login"). Anchored to a
+	// line ENDING in the instruction: sindri's agents edit this file, and a pane showing the pattern
+	// as source text is not a signed-out agent.
+	signedOut = regexp.MustCompile(`(?im)^[^\n]*·\s*please run /login\s*$`)
 )
 
 // DetectState reads a Claude Code pane's rendered screen text (as `tmux
 // capture-pane -p` yields) into a runtime state. Precedence mirrors herdr's
-// claude.toml: a hidden transcript view is unknown; a response prompt is blocked;
-// the interrupt hint is working; a bare prompt box is idle. Case-insensitive.
+// claude.toml, with the authentication banner above all of it: signed out is
+// unreachable; a hidden transcript view is unknown; a response prompt is
+// blocked; the interrupt hint is working; a bare prompt box is idle.
 func (Claude) DetectState(screen string) agent.State {
 	s := strings.ToLower(screen)
 	has := func(subs ...string) bool { // every substring present
@@ -41,6 +46,12 @@ func (Claude) DetectState(screen string) agent.State {
 			}
 		}
 		return true
+	}
+
+	// Signed out first: it is the reason no state below can advance. The prompt box is still drawn,
+	// so read as idle this agent looks rested while being unreachable.
+	if signedOut.MatchString(screen) {
+		return agent.SignedOut
 	}
 
 	// A transcript/history viewer hides the live prompt — the real state is unknown.

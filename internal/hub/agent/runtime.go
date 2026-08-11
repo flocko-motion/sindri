@@ -145,6 +145,14 @@ func (s *Service) AgentDiagnostic(project, name string) string {
 	default:
 		fmt.Fprintf(&b, "session check:  ok — tmux session %q answers\n", name)
 	}
+	// Both probes pass on an agent that cannot run a turn — everything up, nothing moving, which is
+	// the case a diagnostic gets asked about.
+	if s.RuntimeState(ctx, project, name) == string(agentport.SignedOut) {
+		fmt.Fprintf(&b, "runtime:        SIGNED OUT — the pane says to run /login, so it cannot run a turn "+
+			"and nothing typed into it is sent. The hub keeps the host's credentials staged in its home; "+
+			"`sindri agent restart %s` makes the process re-read them (the session resumes). If the host is "+
+			"signed out too, log in there first.\n", name)
+	}
 	return b.String()
 }
 

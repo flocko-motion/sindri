@@ -15,7 +15,10 @@ const (
 	Working State = "working" // actively processing a turn
 	Blocked State = "blocked" // waiting for a user response
 	Idle    State = "idle"    // stopped at the prompt, nothing happening
-	Unknown State = "unknown" // not classifiable (shell, transcript viewer, boot, …)
+	// SignedOut: the tool has no valid credentials, so it cannot run a turn at all. Distinct from
+	// Blocked, which a message answers — nothing typed at a signed-out prompt is ever sent.
+	SignedOut State = "signed-out"
+	Unknown   State = "unknown" // not classifiable (shell, transcript viewer, boot, …)
 )
 
 // HomeSpec is what a backend needs to provision one agent's home. The workflow composes
@@ -64,14 +67,12 @@ func Use(a Agent) { active = a }
 // DetectState classifies a pane via the wired backend.
 func DetectState(screen string) State { return active.DetectState(screen) }
 
-// Runtime is the single source of the "working"|"blocked"|"idle" word every reader
+// Runtime is the single source of the "working"|"blocked"|"idle"|"signed-out" word every reader
 // shares. An unrecognized screen counts as idle: nothing needs surfacing.
 func Runtime(screen string) string {
-	switch DetectState(screen) {
-	case Working:
-		return "working"
-	case Blocked:
-		return "blocked"
+	switch s := DetectState(screen); s {
+	case Working, Blocked, SignedOut:
+		return string(s)
 	default: // Idle or Unknown
 		return "idle"
 	}

@@ -20,7 +20,7 @@ import (
 )
 
 func agentAttachCmd() *cobra.Command {
-	var ro bool
+	var ro, anyway bool
 	c := &cobra.Command{
 		Use: "attach <name>", Short: "Attach to an agent's live tmux session (out-of-band)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -50,14 +50,18 @@ func agentAttachCmd() *cobra.Command {
 				return fmt.Errorf("can't resolve %q's container — restart the hub to pick up this build", name)
 			}
 			// Trust the board's status (the same source `info`/`list` use) so the three
-			// commands never contradict each other.
-			switch {
-			case a.Status == "down":
-				return fmt.Errorf("agent %q is not running (status: down)", name)
-			case a.Status == api.StatusUnknown:
-				return fmt.Errorf("agent %q has not been observed yet — try again in a moment", name)
-			case api.AgentNotUp(a.Status):
-				return fmt.Errorf("agent %q is %s — try again in a moment", name, a.Status)
+			// commands never contradict each other — unless the caller overrides it, since that
+			// status is the last sweep's and a loaded host makes a live agent read down.
+			if !anyway {
+				const hint = " (--anyway attaches regardless)"
+				switch {
+				case a.Status == "down":
+					return fmt.Errorf("agent %q is not running (status: down)%s", name, hint)
+				case a.Status == api.StatusUnknown:
+					return fmt.Errorf("agent %q has not been observed yet — try again in a moment%s", name, hint)
+				case api.AgentNotUp(a.Status):
+					return fmt.Errorf("agent %q is %s — try again in a moment%s", name, a.Status, hint)
+				}
 			}
 			reportAttach(name, ro, a.Clients)
 			// List this agent in herdr's sidebar (by name, with a live state) for the
@@ -67,6 +71,7 @@ func agentAttachCmd() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&ro, "read-only", false, "observe without typing")
+	c.Flags().BoolVar(&anyway, "anyway", false, "attach even if the board says the agent isn't up (the status can be stale)")
 	return c
 }
 

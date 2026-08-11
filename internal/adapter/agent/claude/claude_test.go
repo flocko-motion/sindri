@@ -52,6 +52,25 @@ func TestClaudeState(t *testing.T) {
 			screen: "Do you want to proceed?\n❯ 1. Yes\n  2. No\n(esc to cancel)\n❯ ",
 			want:   agent.Blocked,
 		},
+		{
+			// eitri's pane, verbatim: a hub message sat unsent IN the input box while the board read
+			// "idle" for hours. The box is drawn, so signed-out has to be decided before idle.
+			name:   "expired login outranks the prompt box",
+			screen: "❯ [hub] feat-macos-release moved — your branch was rebased onto it.\n\n● Login expired · Please run /login\n\n────────\n❯ \n────────",
+			want:   agent.SignedOut,
+		},
+		{
+			name:   "an invalid key is the same banner",
+			screen: "● Invalid API key · Please run /login\n❯ ",
+			want:   agent.SignedOut,
+		},
+		{
+			// The pattern lives in a file sindri's own agents edit. Matching the words wherever they
+			// appear would have every pane showing this source read as an agent that cannot work.
+			name:   "the banner quoted in source text is not the state",
+			screen: "✳ Editing… (esc to interrupt)\n  regexp.MustCompile(`· please run /login$`) // the banner",
+			want:   agent.Working,
+		},
 	}
 	for _, c := range cases {
 		if got := (Claude{}).DetectState(c.screen); got != c.want {

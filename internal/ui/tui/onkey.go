@@ -141,40 +141,26 @@ func (m *model) onKey(k string) tea.Cmd {
 			// Attach to whoever is working the selected task — the row you are looking at names
 			// the work, so it should reach the agent doing it without a detour via the Agents tab.
 			a, ok := m.agentOnTask(m.selID())
-			switch {
-			case !ok:
+			if !ok {
 				m.flash = "no agent is working " + m.selID()
-			case api.AgentNotUp(a.Status):
-				m.errText = attachRefusal(a.Name, a.Status, "'"+keyStartS+"' on the Agents tab")
-			case m.cl != nil:
-				return attachAgent(m.agentContainer(a), a.Name)
+				return nil
 			}
-			return nil
+			return m.attachOrArm(a, "'"+keyStartS+"' on the Agents tab")
 		}
 		if m.tab == 1 {
 			if a, ok := m.selAgent(); ok {
-				if api.AgentNotUp(a.Status) {
-					m.errText = attachRefusal(a.Name, a.Status, "'"+keyStartS+"'")
-					return nil
-				}
-				if m.cl != nil {
-					return attachAgent(m.agentContainer(a), a.Name)
-				}
+				return m.attachOrArm(a, "'"+keyStartS+"'")
 			}
 		}
 		if m.tab == 2 {
 			// Same reasoning as tasks: the PR names the work, so attach reaches its author
 			// without a detour via the Agents tab.
 			a, ok := m.agentOnPR(m.selID())
-			switch {
-			case !ok:
+			if !ok {
 				m.flash = "no agent is working " + m.selID()
-			case api.AgentNotUp(a.Status):
-				m.errText = attachRefusal(a.Name, a.Status, "'"+keyStartS+"' on the Agents tab")
-			case m.cl != nil:
-				return attachAgent(m.agentContainer(a), a.Name)
+				return nil
 			}
-			return nil
+			return m.attachOrArm(a, "'"+keyStartS+"' on the Agents tab")
 		}
 	case keyMerge: // agents: milestone PR · prs: merge (the human gate)
 		if m.tab == 1 {

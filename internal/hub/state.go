@@ -242,11 +242,15 @@ func (h *Hub) container(project, name string) string {
 	return Container(root, name)
 }
 
-// overlayRuntime folds Claude's live runtime into the workflow status: "blocked" = needs you now (any
-// phase), "working" = busy, "idle" = nothing doing. It replaces a plain working/idle phase but keeps
-// the meaningful ones; runtime "" (probe failed) changes nothing.
+// overlayRuntime folds Claude's live runtime into the workflow status: "signed-out" = unreachable
+// until a human acts, "blocked" = needs you now (any phase), "working" = busy, "idle" = nothing
+// doing. It replaces a plain working/idle phase but keeps the meaningful ones; runtime "" (probe
+// failed) changes nothing.
 func overlayRuntime(status, runtime string) string {
 	switch runtime {
+	case "signed-out":
+		// Outranks every phase: whatever was asked of it, nothing is happening and nothing can reach it.
+		return "signed-out"
 	case "blocked":
 		return "blocked"
 	case "working", "idle":

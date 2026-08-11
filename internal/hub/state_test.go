@@ -23,6 +23,22 @@ func TestAgentPRMatchesThePRsTab(t *testing.T) {
 	}
 }
 
+// TestSignedOutOutranksEveryPhase: eitri sat signed out for hours reading "idle" on the board,
+// indistinguishable from a planner at rest, while hub messages piled into an input box that could
+// not send them. Whatever the hub last asked of an agent, a signed-out one is not doing it — and
+// unlike every other status here, it cannot even be told so.
+func TestSignedOutOutranksEveryPhase(t *testing.T) {
+	for _, status := range []string{"idle", "working", "planning", "collab", "reviewing", "submitted", "stalled"} {
+		if got := overlayRuntime(status, "signed-out"); got != "signed-out" {
+			t.Errorf("overlayRuntime(%q, signed-out) = %q, want signed-out", status, got)
+		}
+	}
+	// A phase the runtime says nothing about is still the phase: a failed probe reports "".
+	if got := overlayRuntime("planning", ""); got != "planning" {
+		t.Errorf("a silent probe must change nothing, got %q", got)
+	}
+}
+
 // TestFullnessOnlyExplainsAnIdleAgent: "full" is a REASON an idle agent is passed over, not an
 // activity. Applied unconditionally it overwrote the one fact the status column carries, so an
 // agent mid-task read "full" — inviting the user to clear a context the hub refuses to clear at a

@@ -74,8 +74,35 @@ func TestAttachStillRefusesADownAgentTheSameWay(t *testing.T) {
 // cannot drift, and every status that is not up must produce a sentence rather than fall through.
 func TestAttachRefusalWordsEveryNonRunningStatus(t *testing.T) {
 	for _, s := range []string{"down", api.StatusUnknown, "launching", "stopping"} {
-		if got := attachRefusal("dvalin", s, "'S'"); got == "" || !strings.Contains(got, "dvalin") {
+		got := attachRefusal("dvalin", s, "'S'")
+		if got == "" || !strings.Contains(got, "dvalin") {
 			t.Errorf("attachRefusal(%q) = %q, want a sentence naming the agent", s, got)
 		}
+		// A refusal the user cannot get past is the trap: the status is the last sweep's.
+		if !strings.Contains(got, "again") {
+			t.Errorf("attachRefusal(%q) should offer the override: %q", s, got)
+		}
+	}
+}
+
+// TestSecondAttachPressGoesThroughAnyway: eitri read "down" on a host loaded enough that the
+// liveness probe timed out, while its session was answering fine. A cached verdict must cost a
+// keystroke, never the access itself.
+func TestSecondAttachPressGoesThroughAnyway(t *testing.T) {
+	m := agentAt("down")
+	if cmd := m.onKey(keyAttach); cmd != nil {
+		t.Fatal("the first press should refuse, so a mistaken key does not hijack the terminal")
+	}
+	if m.attachAnyway != "dvalin" {
+		t.Fatalf("the refusal should arm the retry, got %q", m.attachAnyway)
+	}
+	if cmd := m.onKey(keyAttach); cmd == nil {
+		t.Error("the second press must attach despite the status")
+	}
+	// Armed for THAT agent only: moving the cursor and pressing once must refuse again.
+	m2 := agentAt("down")
+	m2.attachAnyway = "someone-else"
+	if cmd := m2.onKey(keyAttach); cmd != nil {
+		t.Error("an override armed on another agent must not carry over")
 	}
 }

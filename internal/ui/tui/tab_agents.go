@@ -237,17 +237,34 @@ func (m *model) agentStartStop() tea.Cmd {
 	}
 }
 
+// attachOrArm attaches, or refuses ONCE on a status that says the agent isn't up and lets the next
+// press through. Board liveness is the watchdog's last observation, minutes stale on a loaded host,
+// so the user watching a pane can be right where the sweep that timed out is wrong.
+func (m *model) attachOrArm(a api.AgentView, startHint string) tea.Cmd {
+	if api.AgentNotUp(a.Status) && m.attachAnyway != a.Name {
+		m.attachAnyway = a.Name
+		m.errText = attachRefusal(a.Name, a.Status, startHint)
+		return nil
+	}
+	m.attachAnyway = ""
+	if m.cl == nil {
+		return nil
+	}
+	return attachAgent(m.agentContainer(a), a.Name)
+}
+
 // attachRefusal says why an attach cannot happen, in one place for the three tabs that offer it.
 // Not-yet-observed gets its own wording: telling the user to start an agent that may already be
 // running sends them to fix the wrong thing, when the next sweep answers within seconds.
 func attachRefusal(name, status, startHint string) string {
+	const anyway = " Press '" + keyAttach + "' again to attach anyway — this status is the last sweep's, not a fresh look."
 	switch status {
 	case api.StatusUnknown:
-		return "agent " + name + " hasn't been observed yet — try again in a moment"
+		return "agent " + name + " hasn't been observed yet — try again in a moment." + anyway
 	case "launching", "stopping":
-		return "agent " + name + " is " + status + " — try again in a moment"
+		return "agent " + name + " is " + status + " — try again in a moment." + anyway
 	}
-	return "agent " + name + " is down — start it first (" + startHint + ")"
+	return "agent " + name + " is down — start it first (" + startHint + ")." + anyway
 }
 
 // agentDetailW is wide enough that activity payloads (task ids + titles) aren't chopped.

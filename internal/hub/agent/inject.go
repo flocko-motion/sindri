@@ -8,19 +8,28 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"time"
 
+	agentport "github.com/flo-at/sindri/internal/adapter/agent"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/container"
 )
 
-// Inject types text into an agent's tmux session via the container runtime. Fails if
-// the agent isn't running (the caller decides whether that's an error or to wait).
+// Inject types text into an agent's tmux session via the container runtime. Fails if the agent isn't
+// running (the caller decides whether that's an error or to wait), or if it is signed out: text
+// typed at that prompt is never sent, it piles up in the input box unread.
 func (s *Service) Inject(project, name, text string) error {
 	c := s.deps.ContainerName(project, name)
 	if !container.Running(c) {
 		return fmt.Errorf("agent %q is not running — launch it first", name)
+	}
+	if s.RuntimeState(context.Background(), project, name) == string(agentport.SignedOut) {
+		return fmt.Errorf("agent %q is signed out — its pane says to run /login, and nothing typed there is sent. "+
+			"Its credentials come from the host and the hub keeps them staged, so the running process just has to "+
+			"re-read them: `sindri agent restart %s` (the session resumes). If the host is signed out too, log in "+
+			"there first", name, name)
 	}
 	for _, argv := range tmux.SendText(name, text) { // the tmux session is the agent name
 		full := append([]string{"tmux"}, argv...)
@@ -40,7 +49,13 @@ func (s *Service) InjectWhenReady(project, name, text string) error {
 	for i := 0; i < 25; i++ {
 		if container.Running(c) {
 			if _, err := container.Exec(c, "tmux", "has-session", "-t", name); err == nil {
-				return s.Inject(project, name, text)
+				err := s.Inject(project, name, text)
+				if err != nil {
+					// Recorded, not dropped: the reason belongs to the agent, and the log is where a
+					// user reconstructs what it was never told.
+					_ = s.store.For(project).Log(name, "inject-skipped", text)
+				}
+				return err
 			}
 		}
 		time.Sleep(200 * time.Millisecond)
