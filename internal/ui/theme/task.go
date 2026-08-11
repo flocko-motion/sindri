@@ -57,6 +57,47 @@ func PriorityCode(word string) string {
 // PriorityWords are the assignable priorities, highest first (for choice menus).
 var PriorityWords = []string{"critical", "high", "mid", "low", "none"}
 
+// Plural renders a counted noun ("1 task", "3 tasks"), so a confirmation line and the modal it
+// mirrors count the same way.
+func Plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %s", n, many)
+}
+
+// PriorityScopeNote states what carrying a rating below this task would actually do, "" when there is
+// nothing below to carry it to. Shared, because a user offered the wider scope has to be told which of
+// the two answers applies (-> api.PriorityEffect): under an open parent a child's rating only orders
+// the package's subtasks, and a menu silent about that reads as releasing work it merely reordered.
+func PriorityScopeNote(c api.PriorityCascade) string {
+	one := c.Children == 1
+	switch {
+	case c.Children == 0:
+		return ""
+	case c.Independent && one:
+		return "the 1 task below will be claimed on its own — a priority is what makes it claimable"
+	case c.Independent:
+		return Plural(c.Children, "task", "tasks") +
+			" below will be claimed on their own — a priority is what makes each claimable"
+	case one:
+		return "the 1 task below comes with this package — rating it sets the ORDER it is worked in, " +
+			"not whether it is released"
+	}
+	return Plural(c.Children, "task", "tasks") +
+		" below come with this package — rating them sets the ORDER they're worked, not whether they're released"
+}
+
+// PriorityScopeLabels are the menu labels for api.PriorityScopes, in that order, each carrying the
+// count it would touch so the choice is made against the real number rather than a category.
+func PriorityScopeLabels(c api.PriorityCascade) []string {
+	return []string{
+		"this task only",
+		"+ the " + Plural(c.Unrated, "task", "tasks") + " below with no priority set",
+		"+ all " + Plural(c.Children, "task", "tasks") + " below (overwrite)",
+	}
+}
+
 // StateLabel maps a task status to a short, fixed-ish word for compact display (so the
 // column doesn't need room for "in_progress"). Shared by CLI and TUI.
 func StateLabel(s string) string {

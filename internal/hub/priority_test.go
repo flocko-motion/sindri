@@ -22,7 +22,7 @@ func TestGitHubTaskPriorityStaysHubSide(t *testing.T) {
 	h.repo(root) // register so projectRoot resolves
 	tag := RepoTag(root)
 
-	if err := h.wf.SetPriority(tag, "gh-9", "P1"); err != nil {
+	if err := h.wf.SetPriority(tag, "gh-9", "P1", api.ScopeTask); err != nil {
 		t.Fatalf("SetPriority on a gh-* task: %v", err)
 	}
 	ov, err := h.store.For(tag).PriorityOverrides()

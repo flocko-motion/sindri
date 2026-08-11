@@ -533,7 +533,8 @@ func (m *model) markBusy(id, verb string) {
 	m.busy[id] = verb
 }
 
-// taskOpDone drops the transient verb, then applies the fresh board or surfaces the error.
+// taskOpDone drops the transient verb, then applies the fresh board or surfaces the error. A chained
+// follow-up runs last, so whatever it opens reads the board this op produced.
 func (m model) taskOpDone(msg taskOpDoneMsg) (tea.Model, tea.Cmd) {
 	delete(m.busy, msg.id)
 	if msg.err != nil {
@@ -542,7 +543,7 @@ func (m model) taskOpDone(msg taskOpDoneMsg) (tea.Model, tea.Cmd) {
 	}
 	m.state = msg.state
 	m.reclamp()
-	return m, tea.Batch(m.syncDetail(), m.agentLiveCmds())
+	return m, tea.Batch(m.syncDetail(), m.agentLiveCmds(), msg.then)
 }
 
 // reconcileBusy clears verbs a fresh board already confirms, so a marker can't linger when the
@@ -609,10 +610,28 @@ func finishTaskCmd(cl *client.HTTP, taskOp func(string) error, id, prID string, 
 }
 
 // approveTaskCmd clears the approval gate, making the task claimable; subtree carries the verdict
-// to the proposals under it (-> openApproveChoice).
-func approveTaskCmd(cl *client.HTTP, id string, subtree bool) tea.Cmd {
+// to the proposals under it (-> openApproveChoice), and then runs next (-> priorityAfterApprove).
+func approveTaskCmd(cl *client.HTTP, id string, subtree bool, then tea.Cmd) tea.Cmd {
 	approve := func(string) error { return cl.ApproveTask(id, subtree) }
-	return finishTaskCmd(cl, approve, id, "", false)
+	return afterTaskOp(finishTaskCmd(cl, approve, id, "", false), then)
+}
+
+// afterTaskOp chains a follow-up onto a task op: the op's own result still travels, so the board
+// refreshes and a failure still surfaces, and the follow-up rides along to be run once it has landed.
+// Chaining the two actions rather than combining them keeps one approve path and one priority path.
+func afterTaskOp(op tea.Cmd, then tea.Cmd) tea.Cmd {
+	if then == nil {
+		return op
+	}
+	return func() tea.Msg {
+		msg := op()
+		done, ok := msg.(taskOpDoneMsg)
+		if !ok || done.err != nil {
+			return msg // a failed approve releases nothing, so there is nothing to rate
+		}
+		done.then = then
+		return done
+	}
 }
 
 // openTaskRejectForm rejects a proposal with a comment, delivered to the planner.
@@ -632,25 +651,6 @@ func (m *model) openTaskRejectForm(id string) {
 			return polledMsg(st)
 		}
 	})
-}
-
-// openPriorityChoice opens the priority picker for a task.
-func (m *model) openPriorityChoice(id string) {
-	cl := m.cl
-	vals := make([]string, len(theme.PriorityWords))
-	for i, w := range theme.PriorityWords {
-		vals[i] = theme.PriorityCode(w)
-	}
-	m.choice = choiceModalState{
-		active: true, title: "priority for " + id,
-		options: theme.PriorityWords, values: vals,
-		apply: func(code string) tea.Cmd {
-			if cl == nil {
-				return nil
-			}
-			return mutateThenRefresh(cl, func() error { return cl.SetPriority(id, code) })
-		},
-	}
 }
 
 // taskIDs is the set of known task ids (for parent validation).

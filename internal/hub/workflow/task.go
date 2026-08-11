@@ -252,12 +252,10 @@ func (e *Engine) prRejected(project, agent string) (feedback string, rejected bo
 	return "", false, nil
 }
 
-// workDirective is what a working agent is told: if its PR was rejected, the
-// reviewer's feedback is PUSHED (every time it asks — it never has to go hunting for
-// why the PR bounced); otherwise the plain "work on the task" directive.
-// container is the feature it holds, if any: it decides which verb the directive names, and MUST
-// match what the command registry shows that caller — a directive is an instruction to obey, so one
-// naming a hidden verb leaves the agent to improvise the workflow.
+// workDirective is what a working agent is told: a rejected PR's feedback is PUSHED every time it
+// asks, so it never hunts for why the PR bounced; otherwise the plain "work on the task". container,
+// the feature it holds, decides which verb the directive names, and MUST match what the registry shows
+// that caller — a directive naming a hidden verb leaves the agent to improvise the workflow.
 func (e *Engine) workDirective(project, name, task, container string) (string, error) {
 	feedback, rejected, err := e.prRejected(project, name)
 	if err != nil {
@@ -299,9 +297,8 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 		}
 		return DirPlanner, nil
 	}
-	// A worker holding a feature is in the subtask loop — unless that feature has already landed.
-	// Its PR being merged says so as plainly as its status does, and covers a feature left held by a
-	// merge that took the partial-milestone path when it was in fact the last one.
+	// A worker holding a feature is in the subtask loop — unless that feature has already landed. A
+	// merged PR says so as plainly as its status, and covers one left held by a partial-milestone merge.
 	if st.Container != "" {
 		if t, ok, _ := ps.GetTask(st.Container); ok && !featureLanded(ps, t) {
 			switch st.Phase {
@@ -434,23 +431,55 @@ func (e *Engine) syncTasks(project string, force bool) error {
 	return ps.ReplaceTasks(rows)
 }
 
-// SetPriority assigns a task's priority (a P-code) in a project.
-func (e *Engine) SetPriority(project, id, priority string) error {
-	if ps := e.store.For(project); ps.OwnsTask(id) {
-		if err := ps.SetOwnedPriority(id, priority); err != nil {
-			return err
-		}
-	} else {
-		if err := ps.SetPriorityOverride(id, priority); err != nil {
-			return err
-		}
+// SetPriority assigns a task's priority (a P-code), reaching as far below it as scope asks. What
+// reaching there does differs by case, and api.PriorityEffect is where that is set out.
+func (e *Engine) SetPriority(project, id, priority string, scope api.PriorityScope) error {
+	targets, err := e.priorityTargets(project, id, scope)
+	if err != nil {
+		return err
 	}
-	e.refreshCachedTask(project, id) // targeted refresh of the reprioritized task
+	for _, t := range targets {
+		if err := e.writePriority(project, t, priority); err != nil {
+			return err
+		}
+		e.refreshCachedTask(project, t) // targeted refresh of each reprioritized task
+	}
 	e.deps.Notify()
-	// Rating an unrated task is the moment it becomes claimable — a gh-* issue imported without
-	// one, say — so it needs the same nudge as a task created with a priority.
+	// Rating an unrated task is the moment it becomes claimable, so it needs the same nudge as a task
+	// created with a priority. ONE, however far the cascade reached: it only has to wake a worker up.
 	e.nudgeIdleWorkers(project, id, priority)
 	return nil
+}
+
+// priorityTargets is which tasks a scoped rating writes to, CHILDREN FIRST — the parent's rating is
+// what releases a package, so no worker can claim one half-rated. Open descendants only: a finished
+// task's rating decides nothing, and overwriting it would edit the record of work already done.
+func (e *Engine) priorityTargets(project, id string, scope api.PriorityScope) ([]string, error) {
+	if scope == api.ScopeTask {
+		return []string{id}, nil
+	}
+	all, err := e.store.For(project).AllTasks()
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, d := range api.Descendants(all, id) {
+		if !api.Open(d) || (scope == api.ScopeUnrated && d.Priority != "") {
+			continue
+		}
+		out = append(out, d.ID)
+	}
+	return append(out, id), nil
+}
+
+// writePriority records one rating where that task's priority lives: its own row when sindri owns the
+// task, the hub's overlay when the task is mirrored.
+func (e *Engine) writePriority(project, id, priority string) error {
+	ps := e.store.For(project)
+	if ps.OwnsTask(id) {
+		return ps.SetOwnedPriority(id, priority)
+	}
+	return ps.SetPriorityOverride(id, priority)
 }
 
 // checkParent validates a requested parent before anything is written: it must exist, and it must

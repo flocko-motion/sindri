@@ -167,50 +167,68 @@ func taskUnassignCmd() *cobra.Command {
 
 func taskApproveCmd() *cobra.Command {
 	var subtasks bool
+	var priority, scope string
 	c := &cobra.Command{
 		Use: "approve <id>", Short: "Approve a planner-proposed task (makes it claimable)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			sc, ok := api.ParsePriorityScope(scope)
+			if !ok {
+				return fmt.Errorf("unknown --scope %q (task, unrated, all)", scope)
+			}
 			return withBackend(func(b backend) error {
 				id := args[0]
-				// Counted before the write, so the number names what this call decided.
-				pending := pendingBelow(b, id)
+				// Read before the write, so both numbers name what this call decided on.
+				all, _ := b.Tasks()
+				pending := len(api.PendingApproval(all, id))
 				if err := b.ApproveTask(id, subtasks); err != nil {
 					return err
 				}
 				switch {
 				case subtasks && pending > 0:
-					fmt.Fprintf(os.Stderr, "approved %s and %s below it\n", id, plural(pending, "task", "tasks"))
+					fmt.Fprintf(os.Stderr, "approved %s and %s below it\n", id, theme.Plural(pending, "task", "tasks"))
 				case pending > 0:
 					// The TUI offers the wider approve in a modal; here the flag is the way to it.
 					fmt.Fprintf(os.Stderr, "approved %s — %s below it still await approval (--subtasks takes them too)\n",
-						id, plural(pending, "task", "tasks"))
+						id, theme.Plural(pending, "task", "tasks"))
 				default:
 					fmt.Fprintf(os.Stderr, "approved %s\n", id)
 				}
-				return nil
+				return approvedPriority(b, id, priority, sc, all)
 			})
 		},
 	}
 	c.Flags().BoolVar(&subtasks, "subtasks", false, "approve every task below it that still awaits a verdict")
+	c.Flags().StringVar(&priority, "priority", "",
+		"rate it in the same call (critical|high|mid|low|none) — an approve alone leaves an unrated task inert")
+	c.Flags().StringVar(&scope, "scope", string(api.ScopeTask), "how far --priority reaches: task, unrated, all")
 	return c
 }
 
-// pendingBelow counts the tasks under id still awaiting a verdict; 0 if the backlog can't be read,
-// since a missing count must not turn an approve into a failure.
-func pendingBelow(b backend, id string) int {
-	all, err := b.Tasks()
-	if err != nil {
-		return 0
+// approvedPriority is the second gate, in the same call. Approving FEELS like releasing work, and it
+// is not: an unrated task is claimable by nobody, which is how a dozen approved tasks came to sit in
+// the backlog doing nothing. So the rating is either given here or its absence is said out loud — the
+// TUI asks in a modal, and this is the same offer where there is nobody to ask.
+func approvedPriority(b backend, id, priority string, scope api.PriorityScope, all []api.Task) error {
+	if priority != "" {
+		cascade := api.PriorityEffect(all, id)
+		if err := b.SetPriority(id, theme.PriorityCode(priority), scope); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "set %s priority %s%s\n", id, priority, scopeExtent(scope, cascade))
+		if note := theme.PriorityScopeNote(cascade); note != "" {
+			fmt.Fprintf(os.Stderr, "%s\n", note)
+		}
+		return nil
 	}
-	return len(api.PendingApproval(all, id))
-}
-
-// plural renders a counted noun for the confirmation lines.
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return "1 " + one
+	if len(all) == 0 {
+		return nil // the backlog didn't read; silence beats being wrong about what is owed
 	}
-	return fmt.Sprintf("%d %s", n, many)
+	if api.ReleasedByPriority(all)[id] {
+		return nil // already rated, or under something that is — nothing is owed
+	}
+	fmt.Fprintf(os.Stderr, "%s has no priority, so no worker can claim it yet — "+
+		"`task priority %s <critical|high|mid|low|none>`, or --priority does both in one call\n", id, id)
+	return nil
 }
 
 func taskRejectCmd() *cobra.Command {
@@ -229,20 +247,61 @@ func taskRejectCmd() *cobra.Command {
 }
 
 func taskPriorityCmd() *cobra.Command {
-	return &cobra.Command{
+	var scope string
+	c := &cobra.Command{
 		Use:   "priority <id> <critical|high|mid|low|none>",
 		Short: "Set a task's priority (a P-code; openspec and GitHub items keep theirs in our db)",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
+			sc, ok := api.ParsePriorityScope(scope)
+			if !ok {
+				return fmt.Errorf("unknown --scope %q (task, unrated, all)", scope)
+			}
 			return withBackend(func(b backend) error {
-				if err := b.SetPriority(args[0], theme.PriorityCode(args[1])); err != nil {
+				id := args[0]
+				// Read before the write, so the account below describes the tree this call decided on.
+				cascade := priorityReach(b, id)
+				if err := b.SetPriority(id, theme.PriorityCode(args[1]), sc); err != nil {
 					return err
 				}
-				fmt.Fprintf(os.Stderr, "set %s priority %s\n", args[0], args[1])
+				fmt.Fprintf(os.Stderr, "set %s priority %s%s\n", id, args[1], scopeExtent(sc, cascade))
+				// The same note the TUI's scope modal carries, for the same reason: a rating that
+				// reached the children of an open package ordered them, and did not release them.
+				if note := theme.PriorityScopeNote(cascade); note != "" {
+					fmt.Fprintf(os.Stderr, "%s\n", note)
+					if sc == api.ScopeTask {
+						fmt.Fprintf(os.Stderr, "--scope unrated|all carries the rating down to them\n")
+					}
+				}
 				return nil
 			})
 		},
 	}
+	c.Flags().StringVar(&scope, "scope", string(api.ScopeTask),
+		"how far the rating reaches: task (this one), unrated (+ the open tasks below with none set), all (+ every open task below)")
+	return c
+}
+
+// priorityReach is what a rating on id could carry to; a backlog that can't be read yields nothing to
+// say about the tree, which must not turn the rating itself into a failure.
+func priorityReach(b backend, id string) api.PriorityCascade {
+	all, err := b.Tasks()
+	if err != nil {
+		return api.PriorityCascade{}
+	}
+	return api.PriorityEffect(all, id)
+}
+
+// scopeExtent names how far a rating reached, for the confirmation line.
+func scopeExtent(scope api.PriorityScope, c api.PriorityCascade) string {
+	n := c.Children
+	if scope == api.ScopeUnrated {
+		n = c.Unrated
+	}
+	if scope == api.ScopeTask || n == 0 {
+		return ""
+	}
+	return " and " + theme.Plural(n, "task", "tasks") + " below it"
 }
 
 // taskState is the word a listing shows for a task: the approval gate where one is set, since that

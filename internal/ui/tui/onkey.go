@@ -314,7 +314,7 @@ func (m *model) onKey(k string) tea.Cmd {
 				return nil
 			}
 			m.flash = "approving " + id + "…"
-			return approveTaskCmd(m.cl, id, false)
+			return approveTaskCmd(m.cl, id, false, m.priorityAfterApprove(id))
 		}
 		if m.tab == 4 {
 			m.openAddMemberChoice()

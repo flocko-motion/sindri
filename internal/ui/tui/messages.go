@@ -114,12 +114,22 @@ type taskOpMsg struct {
 	run  tea.Cmd
 }
 
-// taskOpDoneMsg reports a finished close/scrap; either way the transient verb is cleared.
+// taskOpDoneMsg reports a finished close/scrap; either way the transient verb is cleared. then is a
+// follow-up the op earned (-> afterTaskOp): it runs after the fresh board has been applied, so what it
+// opens sees the state the op produced.
 type taskOpDoneMsg struct {
 	id    string
 	state api.BoardState
 	err   error
+	then  tea.Cmd
 }
+
+// openPriorityChoiceMsg routes the priority picker through Update — a cmd cannot open a modal itself —
+// which is how an approve hands on to the rating that actually releases the task.
+type openPriorityChoiceMsg string
+
+// openPriorityScopeMsg carries the picked P-code to the scope step, for the same reason.
+type openPriorityScopeMsg struct{ id, code string }
 
 // paneLines is how many rows of an agent's tmux scrollback the detail shows.
 const paneLines = 200

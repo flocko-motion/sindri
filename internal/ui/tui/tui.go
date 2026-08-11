@@ -291,6 +291,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case openTaskPlanFormMsg: // a planner was chosen for a task — ask what to add, then hand it over
 		m.openTaskPlanForm(msg.planner, msg.task)
 		return m, nil
+	case openPriorityChoiceMsg: // the task was approved and nothing rates it yet — ask for the priority
+		m.openPriorityChoice(string(msg))
+		return m, nil
+	case openPriorityScopeMsg: // a priority was picked over a tree — ask how far it carries
+		m.openPriorityScopeChoice(msg.id, msg.code)
+		return m, nil
 	case editorReadyMsg: // PR materialized — open the user's editor on the review workspace
 		ed := editorAt(string(msg))
 		if ed == nil {

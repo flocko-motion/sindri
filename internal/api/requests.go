@@ -48,10 +48,12 @@ type RepoReq struct {
 	Color int    `json:"color"` // colour choice for /repo/color
 }
 
-// PriorityReq is the body for POST /priority.
+// PriorityReq is the body for POST /priority: the task, the P-code, and how far the rating reaches
+// below it (a PriorityScope; empty means the named task alone).
 type PriorityReq struct {
 	ID       string `json:"id"`
 	Priority string `json:"priority"`
+	Scope    string `json:"scope"`
 }
 
 // RejectReq is the body for POST /pr/reject.

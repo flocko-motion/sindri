@@ -56,7 +56,7 @@ type backend interface {
 	TaskInfo(id string) (api.Task, error)
 	CreateTask(s api.TaskSpec) (string, error)
 	EditTask(id string, s api.TaskSpec) error
-	SetPriority(id, priority string) error
+	SetPriority(id, priority string, scope api.PriorityScope) error
 	ApproveTask(id string, subtree bool) error
 	RejectTask(id, comment string) error
 	AddTaskComment(id, body string) error

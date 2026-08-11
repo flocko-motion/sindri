@@ -522,9 +522,10 @@ func specReq(id string, s api.TaskSpec) api.TaskReq {
 	return api.TaskReq{ID: id, Title: s.Title, Type: s.Type, Priority: s.Priority, Parent: s.Parent, Description: s.Description, Labels: s.Labels}
 }
 
-// SetPriority assigns a task's priority (P-code) — to td or our own db.
-func (c *HTTP) SetPriority(id, priority string) error {
-	return c.post("/priority", api.PriorityReq{ID: id, Priority: priority})
+// SetPriority assigns a task's priority (P-code) — to td or our own db. scope carries the rating to
+// the open tasks below it (api.ScopeTask for the named task alone).
+func (c *HTTP) SetPriority(id, priority string, scope api.PriorityScope) error {
+	return c.post("/priority", api.PriorityReq{ID: id, Priority: priority, Scope: string(scope)})
 }
 
 // ApproveTask clears the approval gate on a planner-proposed task; subtree carries the verdict to

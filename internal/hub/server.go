@@ -423,7 +423,14 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"ok"}, h.wf.SetPriority(h.reqProject(r), req.ID, req.Priority))
+		// An unrecognised scope is refused rather than narrowed: a caller that asked to rate a whole
+		// tree and got one task would read the "ok" as having done it.
+		scope, ok := api.ParsePriorityScope(req.Scope)
+		if !ok {
+			writeJSON(w, okMsg{"ok"}, fmt.Errorf("unknown priority scope %q (task, unrated, all)", req.Scope))
+			return
+		}
+		writeJSON(w, okMsg{"ok"}, h.wf.SetPriority(h.reqProject(r), req.ID, req.Priority, scope))
 	})
 	// Assign a planner one thing to plan, as a phased brief (-> AssignPlan). Refused while that
 	// planner has a PR open, so a new plan can't be drafted over specs still awaiting a verdict.
