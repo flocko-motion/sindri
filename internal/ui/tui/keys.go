@@ -81,10 +81,14 @@ func lbl(s string) func(model) string { return func(model) string { return s } }
 // keymap is the single source of truth for the actionable hotkeys shown in the
 // footers. Order here is the order shown.
 var keymap = []binding{
-	// Global (first footer row): the compound nav keys are display-only rows.
+	// Global (first footer row): the compound nav keys are display-only rows. "C-h/C-l", not
+	// "C-h/l" — the trailing bare "l" would otherwise be misread as the plain letter, which IS a
+	// real, different binding (tasks: expand a fold) and must not share this row's label.
 	{"⇥/[]", lbl("tab"), scopeGlobal},
-	{"C-h/l", lbl("pane"), scopeGlobal},
-	{"j/k", lbl("move"), scopeGlobal},
+	{"C-h/C-l", lbl("pane"), scopeGlobal},
+	{"j/k/g/G", lbl("move/top/bot"), scopeGlobal},
+	{"J/K/C-d/C-u", lbl("scroll detail"), scopeGlobal},
+	{"y/Y", lbl("yank/all"), scopeGlobal},
 	{keyDetail, lbl("detail"), scopeGlobal},
 	{keyRepo, lbl("repo"), scopeGlobal},
 	{keyConfig, lbl("config"), scopeGlobal},
@@ -94,6 +98,7 @@ var keymap = []binding{
 	// Tasks: each scope's rows are grouped and ordered look-first, so the footer reads left to
 	// right from the harmless to the decisive.
 	{keyNew, lbl("new"), scopeTasks},
+	{"h/l", lbl("fold"), scopeTasks},
 	{keyBrief, lbl("brief a planner"), scopeTasks},
 	{keyComment, lbl("comment"), scopeTasks},
 	{keyAttach, lbl("attach"), scopeTasks},
