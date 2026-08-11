@@ -359,11 +359,13 @@ func (e *Engine) reject(project, prID, feedback string, byUser bool) error {
 	if !ok {
 		return fmt.Errorf("no such PR %q", prID)
 	}
-	// A verdict decides nothing once the PR is settled, and writing one anyway UNDID a merge in the
-	// record: a reviewer rejected an already-merged PR, its author was sent back to a branch whose
-	// work had landed, resubmitted an empty diff, and the pair looped three times.
-	if pr.Status != "open" {
-		return fmt.Errorf("%s is %s — a verdict on it decides nothing; its review is closed", prID, pr.Status)
+	// Only a LANDED or discarded PR refuses a verdict, which is api.PROpen's own line. An approved
+	// one still takes a rejection: approval is the state before a merge, not a settled outcome, and
+	// overruling a reviewer to stop something merging is the point of a human verdict. What must not
+	// happen is a verdict on work already in the reference branch — writing one UNDID a merge in the
+	// record, sent the author back to a landed branch, and looped the pair on an empty diff.
+	if !api.PROpen(pr) {
+		return fmt.Errorf("%s is %s — its work is already settled, so a verdict cannot change it", prID, pr.Status)
 	}
 	feedback = strings.TrimSpace(feedback)
 	if feedback == "" {

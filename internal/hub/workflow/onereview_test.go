@@ -100,26 +100,55 @@ func TestASettledPRReleasesItsReviewer(t *testing.T) {
 	}
 }
 
-// TestAVerdictOnASettledPRIsRefused is the write that undid a merge: a reviewer rejected an
+// TestAVerdictOnLandedWorkIsRefused is the write that undid a merge: a reviewer rejected an
 // already-merged PR, the record read "rejected", its author was sent back to a landed branch, and
-// the two looped on an empty diff three times over.
-func TestAVerdictOnASettledPRIsRefused(t *testing.T) {
-	e, ps, _ := reviewFixture(t)
+// the two looped on an empty diff three times over. Only LANDED work refuses a verdict.
+func TestAVerdictOnLandedWorkIsRefused(t *testing.T) {
+	for _, settled := range []string{"merged", "scrapped"} {
+		e, ps, _ := reviewFixture(t)
+		pr, _, _ := ps.GetPR("pr-a")
+		pr.Status = settled
+		if err := ps.PutPR(pr); err != nil {
+			t.Fatal(err)
+		}
+		err := e.RejectPR("repo", "pr-a", "too late")
+		if err == nil {
+			t.Fatalf("rejecting a %s PR must be refused", settled)
+		}
+		if !strings.Contains(err.Error(), settled) {
+			t.Errorf("the refusal should say what state it is in: %v", err)
+		}
+		if got, _, _ := ps.GetPR("pr-a"); got.Status != settled {
+			t.Errorf("status = %q — a refused verdict must not rewrite it", got.Status)
+		}
+	}
+}
+
+// TestAnApprovedPRCanStillBeRejected: approval is the state BEFORE a merge, not an outcome. A
+// reviewer sets it, and overruling that to stop something merging is what a human verdict is for —
+// so this is the one transition the settled-work guard must not catch.
+func TestAnApprovedPRCanStillBeRejected(t *testing.T) {
+	e, ps, deps := reviewFixture(t)
 	pr, _, _ := ps.GetPR("pr-a")
-	pr.Status = "merged"
+	pr.Status = "approved"
 	if err := ps.PutPR(pr); err != nil {
 		t.Fatal(err)
 	}
-	err := e.RejectPR("repo", "pr-a", "too late")
-	if err == nil {
-		t.Fatal("rejecting a merged PR must be refused")
+	if err := e.RejectPR("repo", "pr-a", "not going in like that"); err != nil {
+		t.Fatalf("rejecting an approved PR must be allowed: %v", err)
 	}
-	if !strings.Contains(err.Error(), "merged") {
-		t.Errorf("the refusal should say what state it is in: %v", err)
+	got, _, _ := ps.GetPR("pr-a")
+	if got.Status != "rejected" {
+		t.Errorf("status = %q, want rejected", got.Status)
 	}
-	if got, _, _ := ps.GetPR("pr-a"); got.Status != "merged" {
-		t.Errorf("status = %q — a refused verdict must not rewrite it", got.Status)
+	if got.Feedback != "not going in like that" {
+		t.Errorf("feedback = %q, want the reason to reach the author", got.Feedback)
 	}
+	// And the author is put back to work on it, as with any rejection.
+	if st, _ := ps.GetState("bombur"); st.Phase != "working" {
+		t.Errorf("author phase = %q, want working", st.Phase)
+	}
+	_ = deps
 }
 
 // TestAmendingAReviewGoesToTheAgentOnIt: asking again while a reviewer holds the PR adds to what it
