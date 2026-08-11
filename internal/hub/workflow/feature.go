@@ -150,10 +150,10 @@ func (e *Engine) closeCompletedAncestors(project, from, stopAt string) {
 		if len(open) > 0 {
 			return // work remains under it, so it is not finished
 		}
-		if !ps.OwnsTask(parent) {
-			return // an os-/gh- parent's status is its source's to set
-		}
-		if err := ps.SetOwnedStatus(parent, "closed"); err != nil {
+		// Through the source, whatever kind of task this is. Skipping the ones sindri does not own
+		// left an openspec parent open over a finished tree, and it is that leak — every site having
+		// to remember which tasks it may finish — that put the same bug in four places.
+		if err := e.finishAtSource(project, e.deps.ProjectRoot(project), parent, false); err != nil {
 			fmt.Fprintf(os.Stderr, "hub: closing completed parent %s: %v\n", parent, err)
 			return
 		}
@@ -180,16 +180,13 @@ func (e *Engine) advanceContainer(project, agent, container string) (store.Task,
 	return child, true, nil
 }
 
-// startSubtask puts an agent on one subtask of the feature it holds. Only a task sindri owns carries
-// a status of its own; an os-/gh- one is held in agent_state alone, as claimLeaf holds it.
+// startSubtask puts an agent on one subtask of the feature it holds.
 func (e *Engine) startSubtask(project, agent, container string, child store.Task) error {
 	ps := e.store.For(project)
-	if ps.OwnsTask(child.ID) {
-		if err := ps.SetOwnedStatus(child.ID, "in_progress"); err != nil {
-			return err
-		}
-		_ = e.RefreshTask(project, child.ID)
+	if err := e.SetStatus(project, child.ID, "in_progress"); err != nil {
+		return err
 	}
+	_ = e.RefreshTask(project, child.ID)
 	if err := ps.SetState(store.AgentState{
 		Agent: agent, Container: container, Branch: container, Task: child.ID, Phase: "working",
 	}); err != nil {

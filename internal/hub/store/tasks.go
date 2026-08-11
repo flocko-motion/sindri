@@ -168,6 +168,10 @@ func (p *ProjectStore) GetTask(id string) (Task, bool, error) {
 // gated, or gone entirely is OpenSubtasks'/HasOpenDescendant's answer below, not a second opinion
 // in SQL: a package with only a gated child stays excluded (the gate releases it later), while
 // one whose every child has closed is offered anyway (nothing will EVER release it otherwise).
+//
+// "Have not landed" is the merged-PR clause, and it is load-bearing: without it a feature whose PR
+// merged but whose status was never written kept being offered, and whoever took it was told to
+// submit work already in the reference branch. An agent refused the instruction and was right to.
 func (p *ProjectStore) OpenContainers() ([]Task, error) {
 	rows, err := p.s.db.Query(`
 		SELECT `+taskCols+taskFrom+`
@@ -176,6 +180,8 @@ func (p *ProjectStore) OpenContainers() ([]Task, error) {
 		  AND t.priority != ''
 		  AND EXISTS (SELECT 1 FROM tasks c WHERE c.project=t.project AND c.parent_id=t.id)
 		  AND NOT EXISTS (SELECT 1 FROM tasks pp WHERE pp.project=t.project AND pp.id=t.parent_id AND pp.status='open')
+		  AND NOT EXISTS (SELECT 1 FROM prs pr WHERE pr.project=t.project AND pr.task=t.id
+		                    AND pr.status='merged' AND pr.kind != 'interim')
 		  AND t.id NOT IN (SELECT container FROM agent_state WHERE project=? AND container != '')
 		ORDER BY t.priority, t.id`, p.project, p.project)
 	if err != nil {

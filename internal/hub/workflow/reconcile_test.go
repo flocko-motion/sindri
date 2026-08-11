@@ -24,6 +24,11 @@ func ownedEngine(t *testing.T, status string) (*Engine, *store.ProjectStore, str
 	if err := ps.PutOwnedTask(store.OwnedTask{ID: id, Title: "a task", Status: status, Priority: "P2"}); err != nil {
 		t.Fatalf("seed task: %v", err)
 	}
+	// The cache too, as a sync would leave it: the sweep reads the tasks EVERY source contributes,
+	// which is what lets it repair an openspec change as readily as one of sindri's own.
+	if err := ps.UpsertTask(store.Task{ID: id, Title: "a task", Status: status, Priority: "P2"}); err != nil {
+		t.Fatalf("seed cache row: %v", err)
+	}
 	return New(st, &stubDeps{root: root}), ps, id
 }
 

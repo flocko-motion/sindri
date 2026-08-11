@@ -137,13 +137,14 @@ func (e *Engine) taskReality(project, id string) (taskFacts, error) {
 	return f, nil
 }
 
-// ReconcileTask repairs one owned task's status against reality, writing the correction to the
-// owning table so it survives the next sync. A no-op for an id owned elsewhere.
+// ReconcileTask repairs one task's status against reality, for any task: SetStatus knows where each
+// kind's status lives, so this does not. Repairing only the ones sindri owned is what left five
+// openspec changes open behind merged PRs, invisible to the sweep that existed to catch exactly that.
 func (e *Engine) ReconcileTask(project, id string) error {
 	ps := e.store.For(project)
-	live, ok, err := ps.OwnedTask(id)
+	live, ok, err := ps.GetTask(id)
 	if err != nil || !ok {
-		return err // an id owned elsewhere carries its own status; nothing here to repair
+		return err
 	}
 	facts, err := e.taskReality(project, id)
 	if err != nil {
@@ -153,17 +154,17 @@ func (e *Engine) ReconcileTask(project, id string) error {
 	if want == live.Status {
 		return nil
 	}
-	if err := ps.SetOwnedStatus(id, want); err != nil {
+	if err := e.SetStatus(project, id, want); err != nil {
 		return err
 	}
 	return e.RefreshTask(project, id)
 }
 
-// ReconcileTasks repairs every td task in a project in one pass (the task-list /
-// TUI-startup sweep). A per-task failure is logged, never fatal to the sweep.
+// ReconcileTasks repairs EVERY task in a project in one pass (the task-list / TUI-startup sweep),
+// whatever source it came from. A per-task failure is logged, never fatal to the sweep.
 func (e *Engine) ReconcileTasks(project string) error {
 	ps := e.store.For(project)
-	tasks, err := ps.OwnedTasks()
+	tasks, err := ps.AllTasks()
 	if err != nil {
 		return err
 	}
@@ -199,11 +200,7 @@ func (e *Engine) ReconcileTasks(project string) error {
 			factsFor(st.Task).assigned = true
 		}
 	}
-	all, err := ps.AllTasks()
-	if err != nil {
-		return err
-	}
-	for _, t := range all {
+	for _, t := range tasks {
 		if t.ParentID != "" && t.Status == "open" {
 			factsFor(t.ParentID).openChildren = true
 		}
@@ -211,7 +208,7 @@ func (e *Engine) ReconcileTasks(project string) error {
 	changed := false
 	for _, t := range tasks {
 		if want := reconciledStatus(t.Status, *factsFor(t.ID)); want != t.Status {
-			if err := ps.SetOwnedStatus(t.ID, want); err != nil {
+			if err := e.SetStatus(project, t.ID, want); err != nil {
 				fmt.Fprintf(os.Stderr, "hub: reconcile %s (%s->%s): %v\n", t.ID, t.Status, want, err)
 				continue
 			}

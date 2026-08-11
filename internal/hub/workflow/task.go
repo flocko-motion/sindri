@@ -148,10 +148,10 @@ func (e *Engine) HealPlannerTasks() {
 		}
 		ps := e.store.For(a.Project)
 		st, _ := ps.GetState(a.Name)
-		if !task.IsOwned(st.Task) {
+		if st.Task == "" {
 			continue
 		}
-		_ = ps.SetOwnedStatus(st.Task, "open")
+		_ = e.SetStatus(a.Project, st.Task, "open")
 		_ = ps.SetState(store.AgentState{Agent: a.Name, Phase: "planning"})
 		_ = ps.Log(a.Name, "unassign", st.Task+" (planners don't hold tasks)")
 	}
@@ -173,10 +173,8 @@ func (e *Engine) UnassignTask(project, id string) error {
 		_ = ps.SetState(store.AgentState{Agent: a.Name, Phase: "idle"})
 		_ = ps.Log(a.Name, "unassign", id)
 	}
-	if ps.OwnsTask(id) {
-		if err := ps.SetOwnedStatus(id, "open"); err != nil {
-			return err
-		}
+	if err := e.SetStatus(project, id, "open"); err != nil {
+		return err
 	}
 	_ = e.RefreshTask(project, id)
 	e.deps.Notify()
@@ -594,14 +592,10 @@ func (e *Engine) claimLeaf(project, worker string) (string, bool, error) {
 	}
 	wt := filepath.Join(root, a.Workspace)
 	branch := t.ID
-	// Only a task sindri owns carries a status of its own. A gh-* issue's "in_progress" lives in
-	// agent_state (which OpenLeaves honours) — GitHub is told nothing until the merge closes it.
-	if ps.OwnsTask(t.ID) {
-		if err := ps.SetOwnedStatus(t.ID, "in_progress"); err != nil {
-			return "", false, err
-		}
-		_ = e.RefreshTask(project, t.ID)
+	if err := e.SetStatus(project, t.ID, "in_progress"); err != nil {
+		return "", false, err
 	}
+	_ = e.RefreshTask(project, t.ID)
 	// Lay the new branch on a CLEAN base: leftover WIP from a cancelled task would block
 	// `checkout -B` or bleed in. Reset at claim time, not at cancel — the agent may work on after
 	// the push, and it never cleans its own worktree.

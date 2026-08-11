@@ -21,10 +21,9 @@ import (
 // the issue. Allowed mid-flight — the agent is freed and told to take a new task.
 func (e *Engine) CloseTask(project, id string) error { return e.finishTask(project, id, false) }
 
-// ScrapTask is the "discard" close: td soft-deletes, an openspec change's dir goes, a GitHub issue
-// is deleted. subtree takes everything under the task, or a scrapped parent strands its subtasks as
-// roots; withPRs takes each one's open PR. Deepest first, stopping at the first failure, so a
-// partial scrap is a smaller tree rather than an orphan under a deleted parent.
+// ScrapTask is the "discard" close, each source deleting its own. subtree takes everything under the
+// task (a scrapped parent otherwise strands its subtasks as roots) and withPRs each one's open PR.
+// Deepest first, stopping at the first failure, so a partial scrap is a smaller tree.
 func (e *Engine) ScrapTask(project, id string, subtree, withPRs bool) error {
 	ps := e.store.For(project)
 	var scrapping []string
@@ -65,8 +64,6 @@ func (e *Engine) ScrapTask(project, id string, subtree, withPRs bool) error {
 
 // finishAtSource ends a task where its status actually lives. Each source acts only on its own ids,
 // so this never branches on the id scheme; nothing owning it means a genuinely unknown backend.
-// Shared with the checkpoint, which finishes a subtask the same way: writing owned_tasks directly
-// works only for the ids sindri owns, and an os-/gh- subtask needs its own source told.
 func (e *Engine) finishAtSource(project, root, id string, scrap bool) error {
 	for _, src := range e.taskSources(project) {
 		ok, err := src.Finish(root, id, scrap)
@@ -80,15 +77,35 @@ func (e *Engine) finishAtSource(project, root, id string, scrap bool) error {
 	return fmt.Errorf("%s: unknown task backend", id)
 }
 
+// SetStatus moves a task to want without the caller knowing where that status lives: done goes
+// through the owning source, anything else is sindri's own scheduling. Every site remembering for
+// itself is what left openspec tasks open over finished work, four times.
+func (e *Engine) SetStatus(project, id, want string) error {
+	if (task.Task{Status: want}).IsClosed() {
+		return e.finishAtSource(project, e.deps.ProjectRoot(project), id, false)
+	}
+	ps := e.store.For(project)
+	if ps.OwnsTask(id) {
+		return ps.SetOwnedStatus(id, want)
+	}
+	// The cache only, which the next sync overwrites — what an agent HOLDS lives in agent_state, so
+	// no non-owned task ever depended on this to be scheduled.
+	t, ok, err := ps.GetTask(id)
+	if err != nil || !ok {
+		return err
+	}
+	t.Status = want
+	return ps.UpsertTask(t)
+}
+
 // finishTask is the shared close/scrap path: dispatch to the id's backend, then free whoever held
 // the task. Cancelling mid-flight is allowed, never a refusal that strands the human.
 func (e *Engine) finishTask(project, id string, scrap bool) error {
 	ps := e.store.For(project)
 	root := e.deps.ProjectRoot(project)
 	// A parent is done exactly when its children are, so "done" is refused over open work — it would
-	// state something untrue about the tree and hide those children from every view that walks it.
-	// Only the done close: a scrap discards deepest-first, and stranding subtasks as roots is its
-	// documented behaviour rather than a lie about them.
+	// hide those children from every view that walks the tree. The done close only: a scrap goes
+	// deepest-first, and stranding subtasks as roots is its documented behaviour.
 	if !scrap {
 		open, err := ps.OpenChildIDs(id)
 		if err != nil {
