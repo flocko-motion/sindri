@@ -71,11 +71,13 @@ func (s *Service) ForView(project, id string) []store.Comment {
 // LocalSource marks a comment this store owns, as against one mirrored from an issue tracker.
 const LocalSource = "sindri"
 
-// Add posts a comment on a task. Where the source keeps a thread of its own, the comment is written
-// there and read straight back, so the issue's own readers see it and the canonical author, id and
-// timestamp come from the source rather than being guessed here. Everywhere else this store is the
-// thread, and the comment is simply recorded.
-func (s *Service) Add(project, id, body string) error {
+// Add posts a comment on a task, attributed to author. Where the source keeps a thread of its own,
+// the comment is written there and read straight back, so the issue's own readers see it and the
+// canonical author, id and timestamp come from the source rather than being guessed here (a
+// tracker's own AddComment carries no author — it posts as whichever identity the adapter
+// authenticates with, so author is unused on that path). Everywhere else this store is the thread,
+// and author is recorded as given: the human ("user") or the agent that wrote it, by name.
+func (s *Service) Add(project, id, author, body string) error {
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return fmt.Errorf("say something: an empty comment is not a comment")
@@ -101,7 +103,7 @@ func (s *Service) Add(project, id, body string) error {
 		return err
 	}
 	if err := s.store.For(project).AddComment(id, store.Comment{
-		Source: LocalSource, SourceRef: ref, Author: "user", Body: body,
+		Source: LocalSource, SourceRef: ref, Author: author, Body: body,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	}); err != nil {
 		return err

@@ -76,6 +76,24 @@ func (h *Hub) registry() *registry.Registry {
 		registry.Command{Name: "edit-task", Help: workflow.EditTaskHelp, Roles: []string{"planner"}, Run: h.wf.CmdEditTask},
 		registry.Command{Name: "openspec", Help: "ship your openspec changes as a PR: openspec submit [message]", Roles: []string{"planner"}, Run: h.wf.CmdOpenspec},
 		registry.Command{Name: "state", Help: "set your resting state: state planning | state idle", Roles: []string{"planner"}, Run: h.wf.CmdState},
+		// Scoped to what the role already sees (-> cmdComment): a worker its own task or held
+		// container, a reviewer the task of the PR it's reviewing, a planner/coauthor any task —
+		// they already read the whole backlog. Findings belong on the task, not the activity log.
+		registry.Command{Name: "comment", Help: "comment on a task: comment <id> <text...>",
+			Roles: []string{"worker", "reviewer", "planner", "coauthor"},
+			Blocked: func(c registry.Caller) string {
+				switch c.Role {
+				case "worker":
+					if !c.HasTask {
+						return "You hold no task to comment on."
+					}
+				case "reviewer":
+					if pr, _ := h.store.For(c.Project).ReviewingPR(c.Agent); pr == "" {
+						return "You aren't reviewing a PR, so there's no task to comment on."
+					}
+				}
+				return ""
+			}, Run: h.cmdComment},
 		registry.Command{Name: "approve", Help: "approve a pull request: approve [pr-id]", Roles: []string{"reviewer"}, Run: h.wf.CmdApprove},
 		registry.Command{Name: "reject", Help: "reject a pull request: reject <pr-id> <feedback...>", Roles: []string{"reviewer"}, Run: h.wf.CmdReject},
 		// State-gated rather than role-gated: the user controls who is in the meeting room.
@@ -292,6 +310,53 @@ func (h *Hub) cmdLog(c registry.Caller, args []string, out io.Writer) (int, erro
 		return 1, err
 	}
 	fmt.Fprintln(out, "logged")
+	return 0, nil
+}
+
+// cmdComment posts a comment on a task, reusing the same service the front-ends' `task comment`
+// writes through. Scope is enforced here rather than trusted from the argument: a worker or
+// reviewer names an id already implied by its state, but nothing stops it typing another project's
+// or another agent's — checked against what caller() resolved, not what was asked for.
+func (h *Hub) cmdComment(c registry.Caller, args []string, out io.Writer) (int, error) {
+	if len(args) < 2 {
+		fmt.Fprintln(out, "usage: comment <id> <text...>")
+		return 2, nil
+	}
+	id := args[0]
+	body := strings.Join(args[1:], " ")
+	ps := h.store.For(c.Project)
+	switch c.Role {
+	case "worker":
+		if id != c.Task && id != c.Container {
+			fmt.Fprintf(out, "%s isn't the task you hold — you can only comment on that\n", id)
+			return 1, nil
+		}
+	case "reviewer":
+		pr, err := ps.ReviewingPR(c.Agent)
+		if err != nil {
+			return 1, err
+		}
+		p, ok, err := ps.GetPR(pr)
+		if err != nil {
+			return 1, err
+		}
+		if !ok || id != p.Task {
+			fmt.Fprintf(out, "%s isn't the task of the PR you're reviewing — you can only comment on that\n", id)
+			return 1, nil
+		}
+	default: // planner, coauthor: any task in this project — they already read the whole backlog
+		if _, ok, err := ps.GetTask(id); err != nil {
+			return 1, err
+		} else if !ok {
+			fmt.Fprintf(out, "no such task %q\n", id)
+			return 1, nil
+		}
+	}
+	if err := h.comments.Add(c.Project, id, c.Agent, body); err != nil {
+		fmt.Fprintf(out, "%v\n", err) // an empty body, say, is the agent's to fix, not a hub fault
+		return 1, nil
+	}
+	fmt.Fprintln(out, "commented")
 	return 0, nil
 }
 

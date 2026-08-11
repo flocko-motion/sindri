@@ -193,6 +193,10 @@ As a worker:
   Never guess at any of that, and never hand-write a script to do it.
 - ` + "`sindri lint`" + ` runs the quality gate on your workspace — use it to
   self-check and fix failures before submitting.
+- A finding worth the next reader knowing — the task body is wrong, you hit a
+  blocker, you made a call worth recording — goes ON THE TASK:
+  ` + "`sindri comment <id> \"<text>\"`" + `. That is what a human or the next
+  agent will actually read; your activity log (` + "`sindri log`" + `) is not.
 - ` + "`sindri rebase`" + ` aligns your branch with the current reference branch
   any time — harmless, and worth doing if it's been a while. If it surfaces
   conflicts, fix the marked files in /workspace and run ` + "`sindri rebase`" + `

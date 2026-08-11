@@ -498,10 +498,10 @@ func (c *HTTP) RefreshTaskComments(id string) error {
 	return c.post("/task/comments/refresh", api.NameReq{Name: id})
 }
 
-// AddTaskComment comments on a task. A GitHub issue receives it upstream and the thread is re-read;
-// every other kind of task keeps its thread in the hub.
+// AddTaskComment comments on a task as the human. A GitHub issue receives it upstream and the
+// thread is re-read; every other kind of task keeps its thread in the hub.
 func (c *HTTP) AddTaskComment(id, body string) error {
-	return c.post("/task/comments/add", api.TellReq{Name: id, Msg: body})
+	return c.post("/task/comments/add", api.TellReq{Name: id, Msg: body, Source: "user"})
 }
 
 // CreateTask creates a task from a spec and returns its id.
