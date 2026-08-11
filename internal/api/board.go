@@ -27,12 +27,10 @@ type AgentView struct {
 	Container string `json:"container"` // podman container name (project-resolved, so cross-repo callers target the right pod)
 	Memory    string `json:"memory"`    // configured RAM limit ("" = hub default)
 	Runtime   string `json:"runtime"`   // Claude's live runtime: "working"|"blocked"|"idle"|"" (folded into Status; kept raw for the herdr projection)
-	// ContextTokens is the agent's live session context size and ContextWindow the window it fills,
-	// both read off its transcript (0 = not measured). Past workflow.ContextFullFraction of that
-	// window an agent is retired from assignment until a human clears it; Status reads "full" only
-	// where that explains an agent holding nothing, since elsewhere the word it would replace is the
-	// one the column exists for. The window is per agent because it is the model's: one number for
-	// the fleet retired 1M agents at 17%.
+	// ContextTokens is the agent's live session size and ContextWindow the window it fills, both off
+	// its transcript (0 = not measured). Past workflow.ContextFullFraction an agent is retired from
+	// assignment; Status reads "full" only where that explains an agent holding nothing. The window
+	// is per agent because it is the model's: one number for the fleet retired 1M agents at 17%.
 	ContextTokens int `json:"contextTokens"`
 	ContextWindow int `json:"contextWindow"`
 }
@@ -82,6 +80,28 @@ type AgentStatsView struct {
 type StatsReport struct {
 	Engine string           `json:"engine"`
 	Agents []AgentStatsView `json:"agents"`
+}
+
+// StatusUnknown is an agent the hub has not observed yet — registered since the last liveness
+// sweep, with nothing yet looked at. It is not "down": down is a claim, this is the absence of one.
+const StatusUnknown = "unknown"
+
+// AgentNotUp reports whether a status rules out acting on a live pod. THE ONE PLACE these words
+// are enumerated: four call sites each listed them and defaulted to "running", so StatusUnknown
+// joined the running branch of all four and `sindri coauthor` attached to a pod never launched.
+func AgentNotUp(status string) bool {
+	switch status {
+	case "", "down", StatusUnknown, "launching", "stopping":
+		return true
+	}
+	return false
+}
+
+// AgentNeedsLaunch reports whether an agent has no pod and none on the way — narrower than
+// AgentNotUp, which also covers one in flight. StatusUnknown belongs here because it is where
+// "down" used to be, so grouping them leaves every caller's behaviour as it was.
+func AgentNeedsLaunch(status string) bool {
+	return status == "down" || status == StatusUnknown
 }
 
 // These make BoardState satisfy commands.Board — the badge counts the dashboard

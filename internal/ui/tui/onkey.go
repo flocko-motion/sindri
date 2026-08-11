@@ -142,8 +142,8 @@ func (m *model) onKey(k string) tea.Cmd {
 			switch {
 			case !ok:
 				m.flash = "no agent is working " + m.selID()
-			case a.Status == "down":
-				m.errText = "agent " + a.Name + " is down — start it first ('" + keyStartS + "' on the Agents tab)"
+			case api.AgentNotUp(a.Status):
+				m.errText = attachRefusal(a.Name, a.Status, "'"+keyStartS+"' on the Agents tab")
 			case m.cl != nil:
 				return attachAgent(m.agentContainer(a), a.Name)
 			}
@@ -151,8 +151,8 @@ func (m *model) onKey(k string) tea.Cmd {
 		}
 		if m.tab == 1 {
 			if a, ok := m.selAgent(); ok {
-				if a.Status == "down" {
-					m.errText = "agent " + a.Name + " is down — start it first ('S') before attaching"
+				if api.AgentNotUp(a.Status) {
+					m.errText = attachRefusal(a.Name, a.Status, "'"+keyStartS+"'")
 					return nil
 				}
 				if m.cl != nil {
@@ -167,8 +167,8 @@ func (m *model) onKey(k string) tea.Cmd {
 			switch {
 			case !ok:
 				m.flash = "no agent is working " + m.selID()
-			case a.Status == "down":
-				m.errText = "agent " + a.Name + " is down — start it first ('" + keyStartS + "' on the Agents tab)"
+			case api.AgentNotUp(a.Status):
+				m.errText = attachRefusal(a.Name, a.Status, "'"+keyStartS+"' on the Agents tab")
 			case m.cl != nil:
 				return attachAgent(m.agentContainer(a), a.Name)
 			}

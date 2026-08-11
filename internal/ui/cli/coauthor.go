@@ -101,7 +101,11 @@ func ensureCoauthorAlive(cl *client.HTTP, proj, name string) error {
 	if err != nil {
 		return err
 	}
-	if statusOf(st, proj, name) == "down" {
+	// Not-yet-observed counts as needing a launch: the agent was created moments ago and the
+	// watchdog only looks every couple of seconds, so this is the ordinary state of a coauthor
+	// created by the line above. Reading it as "already running" skips the launch and attaches
+	// to a pod that was never started.
+	if api.AgentNeedsLaunch(statusOf(st, proj, name)) {
 		fmt.Fprintf(os.Stderr, "launching agent '%s' (first run builds the agent image — may take a few minutes)…\n", name)
 		if err := cl.Launch(name, false, false, os.Stderr); err != nil {
 			return err
@@ -112,12 +116,11 @@ func ensureCoauthorAlive(cl *client.HTTP, proj, name string) error {
 		if err != nil {
 			return err
 		}
-		switch statusOf(st, proj, name) {
-		case "", "down", "launching", "stopping":
+		if api.AgentNotUp(statusOf(st, proj, name)) {
 			time.Sleep(100 * time.Millisecond)
-		default: // a running phase (collab/idle/…): the session is alive
-			return nil
+			continue
 		}
+		return nil // a running phase (collab/idle/…): the session is alive
 	}
 	return fmt.Errorf("%s did not become ready in time", name)
 }

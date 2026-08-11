@@ -46,6 +46,13 @@ observation.
   one, about six seconds. That is the hysteresis a failed probe already had, and it errs toward
   the error that self-corrects — a stale "up" is fixed by the next sweep, whereas a false "down"
   is read by a human and acted on.
-- `unknown` is a status word the front-ends had not seen. They render the hub's word as given, so
-  neither needed a change; the two stale enumerations in their doc comments were corrected, both
-  of which already omitted `blocked`, `stalled`, `full`, `launching` and `stopping`.
+- `unknown` is a status word the front-ends had not seen, and four call sites DECIDE with a status
+  rather than rendering it: `ensureCoauthorAlive` (launch, and its readiness loop), `agent attach`,
+  the TUI's start/stop toggle, and the TUI's three attach guards. Each ended in a default meaning
+  "running", so the new word joined the running branch of all four — `sindri coauthor` skipped the
+  launch and attached to a pod that never existed. `api.AgentNotUp` and `api.AgentNeedsLaunch` now
+  hold that enumeration once, and every deciding site asks them.
+- Grouping `unknown` with `down` restores each of those sites to exactly its previous behaviour:
+  before the hub could say "not observed", an unobserved agent read `down` and was handled there.
+- The two stale status enumerations in the doc comments were corrected; both already omitted
+  `blocked`, `stalled`, `full`, `launching` and `stopping`.

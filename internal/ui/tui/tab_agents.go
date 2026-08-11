@@ -221,18 +221,33 @@ func (m *model) agentStartStop() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	switch a.Status {
-	case "down":
+	switch {
+	case api.AgentNeedsLaunch(a.Status):
 		// Same path as a freshly created agent: the launch keeps its output, so a failed image
-		// build shows what broke rather than a bare "exit status 1".
+		// build shows what broke rather than a bare "exit status 1". Not-yet-observed lands here
+		// too — there is nothing to stop, and this is where such an agent went before the hub
+		// could say so.
 		return m.launchCmd(a.Name)
-	case "launching", "stopping":
+	case api.AgentNotUp(a.Status):
 		m.flash = a.Name + " is " + a.Status + "…"
 		return nil
 	default: // running
 		m.flash = "stopping " + a.Name + "…"
 		return m.action(func(id string) error { return m.cl.StopAgent(id) })
 	}
+}
+
+// attachRefusal says why an attach cannot happen, in one place for the three tabs that offer it.
+// Not-yet-observed gets its own wording: telling the user to start an agent that may already be
+// running sends them to fix the wrong thing, when the next sweep answers within seconds.
+func attachRefusal(name, status, startHint string) string {
+	switch status {
+	case api.StatusUnknown:
+		return "agent " + name + " hasn't been observed yet — try again in a moment"
+	case "launching", "stopping":
+		return "agent " + name + " is " + status + " — try again in a moment"
+	}
+	return "agent " + name + " is down — start it first (" + startHint + ")"
 }
 
 // agentDetailW is wide enough that activity payloads (task ids + titles) aren't chopped.

@@ -30,3 +30,15 @@
       down. Replaces the test that asserted the old conclusive rule, stating why it was wrong.
 - [x] 4.3 Unobserved reads `unknown`, observed-and-absent still reads `down`, an intent survives a
       non-observation, and `launching` still outranks `unknown`.
+
+## 5. The word reaches callers that decide, not only render
+
+- [x] 5.1 `api.AgentNotUp` and `api.AgentNeedsLaunch` hold the enumeration once, where both
+      front-ends already read. The two predicates differ over a launch in flight: it is not ready,
+      and it must not be launched a second time.
+- [x] 5.2 `ensureCoauthorAlive` launches on it and its readiness loop keeps waiting — the flow that
+      broke, since a coauthor is unobserved for the seconds right after it is created.
+- [x] 5.3 `agent attach`, the TUI's three attach guards, and the start/stop toggle. One shared
+      `attachRefusal` so the three tabs cannot drift, wording not-yet-observed as itself rather
+      than telling the user to start an agent that may already be running.
+- [x] 5.4 Tests at each site, and a spec scenario that a caller may not read it as running.

@@ -13,6 +13,7 @@ import (
 	"os"
 
 	"github.com/flo-at/sindri/internal/adapter/tmux"
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/ui/attach"
 	"github.com/spf13/cobra"
@@ -50,10 +51,12 @@ func agentAttachCmd() *cobra.Command {
 			}
 			// Trust the board's status (the same source `info`/`list` use) so the three
 			// commands never contradict each other.
-			switch a.Status {
-			case "down":
+			switch {
+			case a.Status == "down":
 				return fmt.Errorf("agent %q is not running (status: down)", name)
-			case "launching", "stopping":
+			case a.Status == api.StatusUnknown:
+				return fmt.Errorf("agent %q has not been observed yet — try again in a moment", name)
+			case api.AgentNotUp(a.Status):
 				return fmt.Errorf("agent %q is %s — try again in a moment", name, a.Status)
 			}
 			reportAttach(name, ro, a.Clients)

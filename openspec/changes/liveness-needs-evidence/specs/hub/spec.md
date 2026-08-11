@@ -20,6 +20,10 @@ An agent the observer has not yet reached SHALL NOT be reported down, since that
 observation supports. It SHALL be reported as not yet known, and such a non-observation SHALL NOT
 retire a pending launch or stop intent as fulfilled.
 
+A caller acting on a status SHALL NOT treat "not yet known" as running. It reports the absence of
+evidence, so an interface deciding whether to launch, attach to, or stop an agent SHALL group it
+with the agent being down rather than letting it fall through to the running case.
+
 #### Scenario: A pod created after the last listing
 
 - **WHEN** an agent's pod is created between one observation and the next
@@ -39,6 +43,18 @@ retire a pending launch or stop intent as fulfilled.
 
 - **WHEN** an agent has been registered but no observation has been taken of it
 - **THEN** its status reports that it is not yet known, rather than down
+
+#### Scenario: A front-end does not treat not-yet-known as running
+
+- **WHEN** an interface decides whether to launch, attach to or stop an agent whose status is not
+  yet known
+- **THEN** it acts as it would for an agent that is down — it launches rather than stops, and
+  refuses to attach — rather than acting on a container that may not exist
+
+#### Scenario: A coauthor created moments ago is still launched
+
+- **WHEN** a coauthor is created and its readiness is checked before any observation of it
+- **THEN** it is launched, and the wait continues until an observation reports it running
 
 #### Scenario: An intent outlives a non-observation
 
