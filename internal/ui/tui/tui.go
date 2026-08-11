@@ -297,6 +297,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case openPriorityChoiceMsg: // the task was approved and nothing rates it yet — ask for the priority
 		m.openPriorityChoice(string(msg))
+	case openApproveAfterPriorityMsg: // the task was rated and the gate still holds it — offer the approve
+		m.openApproveAfterPriorityChoice(string(msg))
 		return m, nil
 	case openPriorityScopeMsg: // a priority was picked over a tree — ask how far it carries
 		m.openPriorityScopeChoice(msg.id, msg.code)

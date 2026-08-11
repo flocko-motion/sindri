@@ -131,6 +131,10 @@ type openPriorityChoiceMsg string
 // openPriorityScopeMsg carries the picked P-code to the scope step, for the same reason.
 type openPriorityScopeMsg struct{ id, code string }
 
+// openApproveAfterPriorityMsg is the mirror of openPriorityChoiceMsg: a rating landed on a task
+// still awaiting a verdict, so the gate it did NOT open is offered next.
+type openApproveAfterPriorityMsg string
+
 // paneLines is how many rows of an agent's tmux scrollback the detail shows.
 const paneLines = 200
 

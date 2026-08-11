@@ -19,6 +19,7 @@ import (
 // reach them, so the pick is followed by the scope; with nothing below there is only the one task.
 func (m *model) openPriorityChoice(id string) {
 	cl := m.cl
+	then := m.approveAfterPriority(id)
 	cascade := api.PriorityEffect(m.state.Tasks, id)
 	vals := make([]string, len(theme.PriorityWords))
 	for i, w := range theme.PriorityWords {
@@ -36,7 +37,7 @@ func (m *model) openPriorityChoice(id string) {
 			if cl == nil {
 				return nil
 			}
-			return setPriorityCmd(cl, id, code, api.ScopeTask)
+			return setPriorityCmd(cl, id, code, api.ScopeTask, then)
 		},
 	}
 }
@@ -46,6 +47,7 @@ func (m *model) openPriorityChoice(id string) {
 // package, so a rating orders them rather than releasing them.
 func (m *model) openPriorityScopeChoice(id, code string) {
 	cl := m.cl
+	then := m.approveAfterPriority(id)
 	cascade := api.PriorityEffect(m.state.Tasks, id)
 	vals := make([]string, len(api.PriorityScopes))
 	for i, s := range api.PriorityScopes {
@@ -59,12 +61,26 @@ func (m *model) openPriorityScopeChoice(id, code string) {
 			if cl == nil {
 				return nil
 			}
-			return setPriorityCmd(cl, id, code, api.PriorityScope(scope))
+			return setPriorityCmd(cl, id, code, api.PriorityScope(scope), then)
 		},
 	}
 }
 
-// setPriorityCmd writes the rating and refreshes the board once.
-func setPriorityCmd(cl *client.HTTP, id, code string, scope api.PriorityScope) tea.Cmd {
-	return mutateThenRefresh(cl, func() error { return cl.SetPriority(id, code, scope) })
+// setPriorityCmd writes the rating, refreshes the board once, and hands on to `then`. It reports a
+// taskOpDoneMsg rather than a plain refresh so the follow-up runs against the board the write
+// produced — the same carrier the approve path uses, for the same reason.
+func setPriorityCmd(cl *client.HTTP, id, code string, scope api.PriorityScope, then tea.Cmd) tea.Cmd {
+	return func() tea.Msg {
+		if cl == nil {
+			return nil
+		}
+		if err := cl.SetPriority(id, code, scope); err != nil {
+			return errModalMsg{err}
+		}
+		st, err := cl.State()
+		if err != nil {
+			return errModalMsg{err}
+		}
+		return taskOpDoneMsg{id: id, state: st, then: then}
+	}
 }

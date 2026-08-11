@@ -9,6 +9,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -231,6 +232,37 @@ func approvedPriority(b backend, id, priority string, scope api.PriorityScope, a
 	return nil
 }
 
+// taskLister is the slice of the backend this needs: what the backlog says, so the advice can be
+// about the tree as it stands rather than the one call that just happened.
+type taskLister interface{ Tasks() ([]api.Task, error) }
+
+// ratedApproval is the mirror of approvedPriority: a rating on a task the approval gate still holds
+// releases nothing, and reporting only success leaves the user to wonder why no worker took it.
+// It names the act that would release it rather than performing one — approving is the user's.
+func ratedApproval(w io.Writer, b taskLister, id string) {
+	all, err := b.Tasks()
+	if err != nil || len(all) == 0 {
+		return // the backlog didn't read; silence beats being wrong about what is owed
+	}
+	pending := false
+	for _, t := range all {
+		if t.ID == id {
+			pending = t.Approval == "pending"
+			break
+		}
+	}
+	if !pending {
+		return
+	}
+	fmt.Fprintf(w, "%s still awaits approval, so no worker can claim it yet — "+
+		"`task approve %s` releases it\n", id, id)
+	// Children a scope reached can be pending too, and each is its own verdict to give.
+	if below := len(api.PendingApproval(all, id)); below > 0 {
+		fmt.Fprintf(w, "%s below it also await approval (`task approve %s --subtasks` takes them too)\n",
+			theme.Plural(below, "task", "tasks"), id)
+	}
+}
+
 func taskRejectCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "reject <id> <comment...>", Short: "Reject a planner-proposed task with a comment", Args: cobra.MinimumNArgs(2),
@@ -273,6 +305,7 @@ func taskPriorityCmd() *cobra.Command {
 						fmt.Fprintf(os.Stderr, "--scope unrated|all carries the rating down to them\n")
 					}
 				}
+				ratedApproval(os.Stderr, b, id)
 				return nil
 			})
 		},
