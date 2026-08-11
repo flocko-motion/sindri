@@ -344,6 +344,63 @@ func (e *Engine) ApprovePR(project, prID string) error {
 	return nil
 }
 
+// CmdRevoke withdraws the caller's own PR so it can keep working on the same branch. A worker that
+// realises mid-review that something is missing had no way to say so: the only route out of
+// "submitted" was somebody else's verdict, so it waited for a decision on work it already knew was
+// incomplete — and since submit is the only thing that commits, whatever it wrote meanwhile was
+// never recorded anywhere. This is a rejection the author issues, and it keeps the history.
+func (e *Engine) CmdRevoke(c registry.Caller, args []string, out io.Writer) (int, error) {
+	ps := e.store.For(c.Project)
+	st, err := ps.GetState(c.Agent)
+	if err != nil {
+		return 1, err
+	}
+	pr, ok, err := e.livePR(c.Project, c.Agent)
+	if err != nil {
+		return 1, err
+	}
+	if !ok {
+		fmt.Fprintln(out, ReplyNothingToRevoke)
+		return 1, nil
+	}
+	reason := strings.TrimSpace(strings.Join(args, " "))
+	if reason == "" {
+		reason = "the author withdrew it"
+	}
+	pr.Status, pr.Feedback = "rejected", "withdrawn by "+c.Agent+": "+reason
+	if err := ps.PutPR(pr); err != nil {
+		return 1, err
+	}
+	// Back on the branch, exactly where submitting took it from — the container too, so a feature
+	// worker returns to its own tree rather than falling out of the loop.
+	if err := ps.SetState(store.AgentState{
+		Agent: c.Agent, Task: st.Task, Branch: pr.Branch, Container: st.Container, Phase: "working",
+	}); err != nil {
+		return 1, err
+	}
+	// Whoever was reading it is reading a branch about to change under them.
+	e.releaseReviewers(c.Project, pr.ID, "withdrawn by its author before a verdict")
+	_ = ps.LogPR(pr.ID, "withdrawn", "by "+c.Agent+": "+reason)
+	_ = ps.Log(c.Agent, "revoke", pr.ID+": "+reason)
+	e.deps.Notify()
+	fmt.Fprintln(out, ReplyRevoked(pr.ID, st.Task))
+	return 0, nil
+}
+
+// livePR finds the PR an agent has out that has not landed or been discarded.
+func (e *Engine) livePR(project, agent string) (store.PR, bool, error) {
+	prs, err := e.store.For(project).PRs()
+	if err != nil {
+		return store.PR{}, false, err
+	}
+	for _, p := range prs {
+		if p.Agent == agent && api.PROpen(p) {
+			return p, true, nil
+		}
+	}
+	return store.PR{}, false, nil
+}
+
 // RejectPR is the human reject path: the owning worker resubmits, told in the [user] voice.
 func (e *Engine) RejectPR(project, prID, feedback string) error {
 	return e.reject(project, prID, feedback, true)

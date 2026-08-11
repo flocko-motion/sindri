@@ -54,6 +54,17 @@ func (h *Hub) registry() *registry.Registry {
 		// Land interim work mid-task without finishing it; same visibility as submit, task stays open.
 		registry.Command{Name: "contribute", Help: "land an interim contribution mid-task (needs the user's approval): contribute [message]", Roles: []string{"worker"},
 			Blocked: landingBlocked("contribute"), Run: h.wf.CmdContribute},
+		// The author's own reject: it withdraws its PR to keep working. Available exactly while one is
+		// out, which is the state where realising something is missing had no way out but somebody
+		// else's verdict.
+		registry.Command{Name: "revoke", Help: "withdraw your pull request and keep working on it: revoke [why]",
+			Roles: []string{"worker", "planner"},
+			Blocked: func(c registry.Caller) string {
+				if c.Phase != "submitted" {
+					return "You have no pull request out to withdraw — `sindri` tells you where you are."
+				}
+				return ""
+			}, Run: h.wf.CmdRevoke},
 		// Always available to a worker — checking your branch still merges is harmless at any time.
 		registry.Command{Name: "resolve", Help: "check your branch still merges onto its base, and resolve any conflicts: resolve", Roles: []string{"worker"}, Run: h.wf.CmdResolve},
 		// Align any time — harmless, and it surfaces conflicts to fix rather than letting drift.
