@@ -317,6 +317,12 @@ func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int,
 		fmt.Fprintf(out, "%s  [%s]  %s  priority=%s\napproval: %s\nparent:   %s\nchildren: %s\n\n%s\n",
 			t.ID, t.Status, t.Title, dash(t.Priority), dash(appr),
 			dash(t.ParentID), dash(strings.Join(childIDs(tasks, t.ID), ", ")), dash(t.Description))
+		// The same thread the TUI pane and `task info` show: an agent that just filed a finding
+		// (-> the comment verb) has to be able to read it back here, or the verb is worse than none.
+		for _, cm := range t.Comments {
+			fmt.Fprintf(out, "\n— %s (%s, %s)\n%s\n", dash(cm.Author), cm.Source, cm.CreatedAt,
+				strings.TrimRight(cm.Body, "\n"))
+		}
 		return 0, nil
 	}
 	if bounded && len(args) == 0 {

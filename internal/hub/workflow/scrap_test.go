@@ -23,6 +23,7 @@ type stubDeps struct {
 	ctxTokens    int      // TestContextFull* set these to simulate a worker's session usage
 	ctxWindow    int      // 0 with ctxOK true means "measured, but the window is unknown"
 	ctxOK        bool
+	comments     []store.Comment // TestTaskCommentsAreVisible* set this to simulate an attached thread
 }
 
 func (d *stubDeps) ProjectRoot(string) string                   { return d.root }
@@ -41,7 +42,7 @@ func (d *stubDeps) Interrupt(_, name string) error {
 }
 func (d *stubDeps) AgentAlive(_, _ string) bool              { return d.alive }
 func (d *stubDeps) SessionAlive(_, _ string) bool            { return false }
-func (d *stubDeps) TaskComments(_, _ string) []store.Comment { return nil }
+func (d *stubDeps) TaskComments(_, _ string) []store.Comment { return d.comments }
 func (d *stubDeps) Subscribe() (chan struct{}, func())       { return make(chan struct{}), func() {} }
 func (d *stubDeps) KnownProjects() []store.Project           { return nil }
 func (d *stubDeps) BrokkrBin() (string, error)               { return "", nil }
