@@ -500,6 +500,23 @@ func (m *model) openBriefChoice(taskID string) {
 	}
 }
 
+// whyNextCmd asks the hub what it would assign next and why nothing else, shown as a notice — the
+// same account `sindri task next` prints, since the reasoning is the hub's and neither front-end
+// gets to have its own version of it.
+func (m *model) whyNextCmd() tea.Cmd {
+	cl := m.cl
+	if cl == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		x, err := cl.NextTask("")
+		if err != nil {
+			return taskOpDoneMsg{err: err}
+		}
+		return noticeMsg(theme.FormatNext(x))
+	}
+}
+
 // closeTaskCmd marks the task done, showing a transient "closing" until the hub confirms.
 func (m *model) closeTaskCmd(id string) tea.Cmd {
 	m.markBusy(id, "closing")

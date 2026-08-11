@@ -45,6 +45,7 @@ const (
 	keyVerify    = "V" // verify (materialize) a PR
 	keyOpen      = "o" // open the row's worktree in a shell (navigation → lowercase)
 	keyFilter    = "f" // cycle the tasks filter
+	keyWhyNext   = "n" // what would be assigned next, and why nothing else would be (a view → lowercase)
 	keyScopeTog  = "s" // toggle a tab's global↔repo scope
 	keyRepo      = "p" // switch the active repo/project (navigation → lowercase)
 	keyConfig    = "E" // edit the repo's config (mutation → shift)
@@ -102,6 +103,7 @@ var keymap = []binding{
 	{keyClose, lbl("close"), scopeTasks},
 	{keyDelete, lbl("scrap"), scopeTasks},
 	{"A/R", lbl("approve/reject"), scopeTasks},
+	{keyWhyNext, lbl("why next"), scopeTasks},
 	{keyFilter, func(m model) string { return "filter: " + filterNames[m.filter] }, scopeTasks},
 
 	// Agents.

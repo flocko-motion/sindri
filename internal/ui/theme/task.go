@@ -90,3 +90,30 @@ func FormatClients(cs []api.ClientView) string {
 	}
 	return b.String()
 }
+
+// FormatNext renders the assignment explanation, shared by `task next` and the TUI so both give the
+// same account. Claimable rows first — the answer to "what happens next" is at the top.
+func FormatNext(x api.NextExplain) string {
+	var b strings.Builder
+	switch {
+	case x.AgentNote != "":
+		fmt.Fprintf(&b, "%s takes nothing right now: %s\n\n", x.Agent, x.AgentNote)
+	case x.Pick != nil:
+		fmt.Fprintf(&b, "next: %s  %s  (%s)\n\n", x.Pick.ID, x.Pick.Title, x.Pick.Why)
+	default:
+		fmt.Fprintf(&b, "next: nothing — no open task can be handed to anyone\n\n")
+	}
+	for _, pass := range []bool{true, false} {
+		for _, t := range x.Tasks {
+			if t.Claimable() != pass {
+				continue
+			}
+			fmt.Fprintf(&b, "%-12s %-8s %-42s %s", t.ID, PriorityLabel(t.Priority), t.Why, t.Title)
+			if t.Note != "" {
+				fmt.Fprintf(&b, "\n%-12s %-8s %s", "", "", t.Note)
+			}
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}

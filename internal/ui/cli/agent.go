@@ -105,7 +105,7 @@ func agentListCmd() *cobra.Command {
 				}
 				for _, a := range st.Agents {
 					line := fmt.Sprintf("%-10.10s %-12s %-8s %-10s %4s %-14s %s", a.Repo, a.Name, a.Role, a.Status,
-						theme.ContextPercent(a.ContextTokens, st.ContextFullThreshold), dash(a.Task), dash(a.PR))
+						theme.ContextPercent(a.ContextTokens, a.ContextWindow), dash(a.Task), dash(a.PR))
 					if a.Clients > 0 {
 						line += fmt.Sprintf("  👁%d", a.Clients)
 					}

@@ -63,6 +63,7 @@ func TestLowercaseKeysNeverMutate(t *testing.T) {
 		"s": "scope — narrows the view",
 		"p": "repo — switches the active repo",
 		"m": "stats — samples memory use and shows it; mutates nothing",
+		"n": "why next — asks the hub what it would assign and prints the answer; assigns nothing",
 		"r": "refresh — re-reads the board",
 		"q": "quit",
 	}

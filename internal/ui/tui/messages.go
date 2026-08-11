@@ -70,6 +70,9 @@ type prLintMsg struct {
 // does after a merge, so it is not refetched here.
 type milestoneMsg string
 
+// noticeMsg is read-only text to put in front of the user until they dismiss it.
+type noticeMsg string
+
 // rebuiltMsg carries the build log, and the error if the build failed — the log is worth showing
 // either way, so it is not discarded on success.
 type rebuiltMsg struct {

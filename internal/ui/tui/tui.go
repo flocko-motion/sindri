@@ -262,6 +262,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case milestoneMsg:
 		m.flash = "milestone " + string(msg) + " opened — the agent waits for the merge"
+	case noticeMsg:
+		m.noticeText = string(msg)
 	case rebuiltMsg:
 		title := "rebuild: " + msg.name
 		if msg.err != nil {

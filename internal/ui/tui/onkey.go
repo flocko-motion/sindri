@@ -334,6 +334,10 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 0 && m.selID() != "" {
 			return m.unassignTaskCmd(m.selID())
 		}
+	case keyWhyNext: // tasks: what the assigner would hand out next, and why not everything else
+		if m.tab == 0 {
+			return m.whyNextCmd()
+		}
 	case keyClose: // tasks: close the selected task (mark it done) · agents: clear a full context
 		if m.tab == 0 && m.selID() != "" {
 			if pr := m.attachedOpenPR(m.selID()); pr != "" { // prompt to discard its PR too

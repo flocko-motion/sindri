@@ -17,7 +17,6 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // probeTimeout bounds each podman probe; a container that can't answer is "down", not a stalled read.
@@ -106,7 +105,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		if _, stalled := h.stalledFor(a.Project, a.Name, st.Phase, st.Container); stalled {
 			status = "stalled"
 		}
-		tokens, _, _ := h.agents.ContextUsage(a.Project, a.Name)
+		tokens, window, _ := h.agents.ContextUsage(a.Project, a.Name)
 		// A full agent reads as full rather than as idle-and-ignored — claimNext has already
 		// stopped handing it work; this is the board saying why.
 		if h.wf.ContextFull(a.Project, a.Name) {
@@ -117,7 +116,8 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			Status:  status,
 			Runtime: runtimes[i],
 			Task:    st.Task, Feature: st.Container, Branch: st.Branch, PR: pr, Workspace: a.Workspace,
-			Clients: clients[i], Container: container, Memory: a.Memory, ContextTokens: tokens,
+			Clients: clients[i], Container: container, Memory: a.Memory,
+			ContextTokens: tokens, ContextWindow: window,
 		})
 	}
 
@@ -140,7 +140,6 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	return BoardState{
 		Agents: agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans, Chat: chat,
 		RepoDocs: docs, SpecCLIMissing: specMissing, StartedAt: h.startedAt.UTC().Format(time.RFC3339),
-		ContextFullThreshold: workflow.ContextFullThreshold,
 	}, nil
 }
 

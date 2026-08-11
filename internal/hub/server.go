@@ -399,6 +399,10 @@ func (h *Hub) Handler() http.Handler {
 		t, err := h.wf.TaskInfo(h.reqProject(r), r.URL.Query().Get("id"))
 		writeJSON(w, t, err)
 	})
+	mux.HandleFunc("GET /task/next", func(w http.ResponseWriter, r *http.Request) {
+		x, err := h.wf.ExplainNext(h.reqProject(r), r.URL.Query().Get("agent"))
+		writeJSON(w, x, err)
+	})
 	mux.HandleFunc("POST /tasks", func(w http.ResponseWriter, r *http.Request) {
 		var req TaskReq
 		if !decode(w, r, &req) {

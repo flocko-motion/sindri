@@ -61,6 +61,7 @@ type backend interface {
 	RejectTask(id, comment string) error
 	AddTaskComment(id, body string) error
 	RefreshTaskComments(id string) error
+	NextTask(agent string) (api.NextExplain, error)
 	UnassignTask(id string) error
 	CloseTask(id string) error
 	ScrapTask(id string, subtree, withPRs bool) error

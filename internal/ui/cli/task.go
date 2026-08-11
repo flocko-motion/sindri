@@ -36,7 +36,7 @@ func tasksJSON(tasks []api.Task) (string, error) {
 // NewTaskCmd builds the `task` command tree (the backlog).
 func NewTaskCmd() *cobra.Command {
 	c := &cobra.Command{Use: "task", Short: "Inspect and create tasks"}
-	c.AddCommand(taskListCmd(), taskInfoCmd(), taskNewCmd(), taskEditCmd(), taskPriorityCmd(), taskApproveCmd(), taskRejectCmd(), taskUnassignCmd(), taskCloseCmd(), taskDeleteCmd(), taskRefreshCmd(), taskCommentCmd())
+	c.AddCommand(taskListCmd(), taskInfoCmd(), taskNewCmd(), taskEditCmd(), taskPriorityCmd(), taskApproveCmd(), taskRejectCmd(), taskUnassignCmd(), taskCloseCmd(), taskDeleteCmd(), taskRefreshCmd(), taskCommentCmd(), taskNextCmd())
 	return c
 }
 
@@ -59,6 +59,28 @@ func taskCommentCmd() *cobra.Command {
 			})
 		},
 	}
+}
+
+// taskNextCmd answers "why is nothing being assigned" without anyone reading the queries: what an
+// agent would be handed, and where every other open task stands.
+func taskNextCmd() *cobra.Command {
+	var agent string
+	c := &cobra.Command{
+		Use: "next", Short: "Show what would be assigned next, and why each open task would not be",
+		Args: cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			return withBackend(func(b backend) error {
+				x, err := b.NextTask(agent)
+				if err != nil {
+					return err
+				}
+				fmt.Print(theme.FormatNext(x))
+				return nil
+			})
+		},
+	}
+	c.Flags().StringVar(&agent, "agent", "", "ask on behalf of this agent (its own state can rule everything out)")
+	return c
 }
 
 func taskRefreshCmd() *cobra.Command {

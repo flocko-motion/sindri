@@ -412,6 +412,13 @@ func (c *HTTP) PRInfo(id string) (api.PRDetail, error) {
 	return d, c.get("/pr?id="+url.QueryEscape(id), &d)
 }
 
+// NextTask explains what would be assigned next and why every other open task would not be. agent
+// may be empty to ask about the backlog alone.
+func (c *HTTP) NextTask(agent string) (api.NextExplain, error) {
+	var x api.NextExplain
+	return x, c.get("/task/next?agent="+url.QueryEscape(agent), &x)
+}
+
 // RejectPR rejects a PR with feedback, routed to the owning worker.
 func (c *HTTP) RejectPR(id, feedback string) error {
 	return c.post("/pr/reject", api.RejectReq{ID: id, Feedback: feedback})

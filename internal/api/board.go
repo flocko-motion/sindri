@@ -26,10 +26,12 @@ type AgentView struct {
 	Container string `json:"container"` // podman container name (project-resolved, so cross-repo callers target the right pod)
 	Memory    string `json:"memory"`    // configured RAM limit ("" = hub default)
 	Runtime   string `json:"runtime"`   // Claude's live runtime: "working"|"blocked"|"idle"|"" (folded into Status; kept raw for the herdr projection)
-	// ContextTokens is the agent's live session context size, read off its transcript (0 = not
-	// measured yet). Past workflow.ContextFullThreshold, Status reads "full" — retired from
-	// assignment until a human clears it.
+	// ContextTokens is the agent's live session context size and ContextWindow the window it fills,
+	// both read off its transcript (0 = not measured). Past workflow.ContextFullFraction of that
+	// window, Status reads "full" — retired from assignment until a human clears it. The window is
+	// per agent because it is the model's: one number for the fleet retired 1M agents at 17%.
 	ContextTokens int `json:"contextTokens"`
+	ContextWindow int `json:"contextWindow"`
 }
 
 // RepoDocState is a repo's architecture-doc situation: the path in effect and, when the
@@ -57,9 +59,6 @@ type BoardState struct {
 	// StartedAt is when this hub process came up (RFC3339), so `hub status` reads uptime from the
 	// board rather than shelling out to `ps`.
 	StartedAt string `json:"started_at"`
-	// ContextFullThreshold is the token count past which AgentView.Status reads "full" — carried
-	// here so a front-end can render each agent's fill against it without hardcoding a duplicate.
-	ContextFullThreshold int `json:"contextFullThreshold"`
 }
 
 // AgentStatsView is one agent's resource snapshot; Err is set, not swallowed into a misleading zero.
