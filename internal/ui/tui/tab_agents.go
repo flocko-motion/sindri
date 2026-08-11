@@ -315,9 +315,15 @@ func (m model) agentItems() []metaItem {
 	if !ok {
 		return []metaItem{{text: dimStyle.Render("(orphan — no roster entry; '" + keyDelete + "' removes it)")}}
 	}
-	taskIt := metaItem{text: "task:      " + m.taskLabel(a.Task)}
-	if a.Task != "" {
-		taskIt.kind, taskIt.value = "task", a.Task
+	// A reviewer's own Task is always "" — the task belongs to the agent that wrote the PR — so
+	// fall back to what that PR is for, or the line reads as an agent holding nothing at all.
+	taskID := a.Task
+	if taskID == "" {
+		taskID = m.prTask(a.PR)
+	}
+	taskIt := metaItem{text: "task:      " + m.taskLabel(taskID)}
+	if taskID != "" {
+		taskIt.kind, taskIt.value = "task", taskID
 	}
 	// The feature reads alongside the subtask, and carries the pane on its own between subtasks —
 	// where the task line is a dash and the agent otherwise looks like it holds nothing at all.
@@ -467,12 +473,16 @@ func (m model) agentRows() []row {
 		}
 		// Row coloured by lifecycle; cells styled independently so resets don't bleed.
 		ac := agentStatusStyle(a.Status)
-		// Work cell: the task, or the reviewed PR since a reviewer holds no task. A held feature is
-		// named either way — as the subtask's parent, or alone between subtasks, where showing
-		// nothing made an agent that refused every verb look plainly idle.
+		// Work cell: the task, or the reviewed PR since a reviewer holds no task — named alongside
+		// the task that PR is FOR, since the PR id alone says nothing a human recognizes. A held
+		// feature is named either way — as the subtask's parent, or alone between subtasks, where
+		// showing nothing made an agent that refused every verb look plainly idle.
 		work := a.Task
 		if work == "" {
 			work = a.PR
+			if t := m.prTask(a.PR); t != "" {
+				work += " › " + m.taskLabel(t)
+			}
 		}
 		switch {
 		case a.Feature != "" && work != "":
@@ -536,11 +546,17 @@ func (m model) agentDetailLines() []string {
 
 // agentDetailFor renders an agent's detail; the activity log only for the selected one (lazy fetch).
 func (m model) agentDetailFor(a api.AgentView) []string {
+	// A reviewer's own Task is always "" — the task belongs to the agent that wrote the PR — so
+	// fall back to what that PR is for, matching agentItems.
+	taskID := a.Task
+	if taskID == "" {
+		taskID = m.prTask(a.PR)
+	}
 	ls := []string{
 		"agent:     " + a.Name,
 		"role:      " + a.Role,
 		"status:    " + a.Status,
-		"task:      " + m.taskLabel(a.Task),
+		"task:      " + m.taskLabel(taskID),
 		"feature:   " + m.taskLabel(a.Feature),
 		"pr:        " + dash(a.PR),
 		"workspace: " + dash(a.Workspace),

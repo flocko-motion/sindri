@@ -58,6 +58,21 @@ func (m model) taskLabel(id string) string {
 	return id
 }
 
+// prTask is PR id's underlying task, or "" — a reviewer's AgentView carries no task of its own
+// (the task belongs to the agent that wrote the PR), so this is how the Agents tab still says
+// what a reviewer's PR is for.
+func (m model) prTask(id string) string {
+	if id == "" {
+		return ""
+	}
+	for _, p := range m.state.PRs {
+		if p.ID == id {
+			return p.Task
+		}
+	}
+	return ""
+}
+
 // agentWorkspacePath is an agent's workspace as an ABSOLUTE path, or "". Workspace is
 // repo-relative, so it is joined to the agent's OWN project — the Agents tab can show a fleet
 // spanning repos — and absolute because it becomes a child process's working directory.
