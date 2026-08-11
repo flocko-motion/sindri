@@ -292,8 +292,11 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 	}
 	st, _ := ps.GetState(name)
 	if a.Role == "planner" {
-		if st.Phase == "submitted" {
+		switch st.Phase {
+		case "submitted":
 			return DirSubmitted, nil
+		case "planning": // set by AssignPlan and by `state planning` — it HAS work in hand
+			return DirPlanning, nil
 		}
 		return DirPlanner, nil
 	}

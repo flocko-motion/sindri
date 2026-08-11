@@ -250,9 +250,12 @@ const DirSubmitted = "Your pull request is under review. Wait — the hub will t
 	"is NOT finished after all, don't sit on it: `sindri revoke \"<why>\"` withdraws the PR and hands " +
 	"the task back to you on the same branch, so you can finish it and submit again."
 
-// DirPlanner is the idle planner's directive: orient, then wait for the user. A
-// planner is never auto-assigned work.
-const DirPlanner = "Nothing is assigned to you yet. Get oriented while you wait: read README.md and the architecture doc, the specs under /workspace/openspec, and the backlog (`sindri task list`, then `sindri task <id>` for detail). Do NOT start planning or drafting anything on your own — the user assigns a plan, and it arrives here as a phased brief telling you what to read, what to check for, and what to ask. Until then, orienting is the whole job."
+// DirPlanner answers a planner with nothing in hand. Its old "nothing is assigned to you" read as
+// "only a hub-delivered brief counts": one handed work in its terminal asked for it to be re-sent.
+const DirPlanner = "Nothing has come to you through the hub — which is not the same as having nothing to do. Work reaches a planner as a CONVERSATION: anything the user has said in this terminal is yours to act on now, and a phased brief from `sindri agent plan` is one route to you rather than the only one. If they've asked you for something, get on with it; never ask them to re-send it some other way. With nothing asked of you, orient: read README.md and the architecture doc, the specs under /workspace/openspec, and the backlog (`sindri task list`, then `sindri task <id>` for detail). The thing you must not do is invent an assignment nobody asked for — and nothing is written down before the user sends GO."
+
+// DirPlanning answers a planner mid-plan: the interview is the user's, so the hub has nothing to add.
+const DirPlanning = "You're working out a plan with the user — carry on with that conversation. The hub is not waiting on a command from you and has nothing to add: read, search, ask one question at a time. Nothing is written down until they send GO; after it, `sindri create-task` files each piece and `sindri openspec submit \"<summary>\"` ships spec edits as a PR (that PR IS the review — never ask them to read your files instead). If you're waiting on an answer, ask again in one line rather than sitting silently. `sindri state idle` when you're done."
 
 // GoToken authorises a planner to write; GoRule states it. One literal token, because agreement
 // is not authorisation — "sounds good" is what a user says while still thinking.
