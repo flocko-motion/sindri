@@ -487,6 +487,14 @@ func MsgReviewCancelled(prID string) string {
 	return fmt.Sprintf("[hub] The PR you were reviewing (%s) was scrapped — stop reviewing it; its branch is gone. Just run `sindri` for your next task.", prID)
 }
 
+// MsgReviewAmended adds instructions to a review already under way. The same PR and the same branch
+// — so it says to carry on rather than restart, and that the verdict now answers both.
+func MsgReviewAmended(prID, requirement string) string {
+	return fmt.Sprintf("[user] More to check on %s, which you're already reviewing — same PR, same "+
+		"branch in /workspace, carry on from where you are and let your verdict cover this too:\n\n%s",
+		prID, requirement)
+}
+
 // MsgRebased tells a worker the hub rebased its branch onto a moved base.
 func MsgRebased(base string) string {
 	return fmt.Sprintf("[hub] %s moved — your branch was rebased onto it, so you're up to date.", base)

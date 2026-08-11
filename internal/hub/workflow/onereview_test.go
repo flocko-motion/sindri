@@ -121,3 +121,86 @@ func TestAVerdictOnASettledPRIsRefused(t *testing.T) {
 		t.Errorf("status = %q — a refused verdict must not rewrite it", got.Status)
 	}
 }
+
+// TestAmendingAReviewGoesToTheAgentOnIt: asking again while a reviewer holds the PR adds to what it
+// was told, rather than opening a second review — it has the branch checked out, so the instructions
+// belong to it. A second reviewer would check that branch out from under the first.
+func TestAmendingAReviewGoesToTheAgentOnIt(t *testing.T) {
+	e, ps, _ := reviewFixture(t)
+	if _, ok, err := e.reviewDirective("repo", "fili"); err != nil || !ok {
+		t.Fatalf("reviewDirective: ok=%v err=%v", ok, err)
+	}
+	held, _ := ps.ReviewingPR("fili")
+	before, _ := ps.Reviews(held)
+
+	if err := e.RequestReview("repo", held, "also check the error paths"); err != nil {
+		t.Fatalf("RequestReview: %v", err)
+	}
+	after, _ := ps.Reviews(held)
+	if len(after) != len(before) {
+		t.Errorf("a second review was opened (%d -> %d) — the agent on it should just be told more",
+			len(before), len(after))
+	}
+	var open int
+	for _, r := range after {
+		if r.Verdict == "" {
+			open++
+			if r.Requirement != "also check the error paths" {
+				t.Errorf("requirement = %q, want the new instructions", r.Requirement)
+			}
+			if r.Author != "fili" {
+				t.Errorf("author = %q, want it to stay with fili", r.Author)
+			}
+		}
+	}
+	if open != 1 {
+		t.Errorf("%d open reviews, want exactly 1 — one reviewer, one review", open)
+	}
+	if now, _ := ps.ReviewingPR("fili"); now != held {
+		t.Errorf("the hold moved to %q; it must stay on %q", now, held)
+	}
+}
+
+// TestANewRequestUnmakesAnApproval: the verdict answered the previous question. Asking a new one
+// reopens the PR, or nothing could be handed the reviewer and the approval would stand over
+// instructions nobody had carried out.
+func TestANewRequestUnmakesAnApproval(t *testing.T) {
+	e, ps, _ := reviewFixture(t)
+	pr, _, _ := ps.GetPR("pr-a")
+	pr.Status = "approved"
+	if err := ps.PutPR(pr); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.RequestReview("repo", "pr-a", "one more thing"); err != nil {
+		t.Fatalf("RequestReview: %v", err)
+	}
+	got, _, _ := ps.GetPR("pr-a")
+	if got.Status != "open" {
+		t.Errorf("status = %q, want open — a fresh question cannot sit behind an old answer", got.Status)
+	}
+	// And it is now claimable again, with the new requirement.
+	dir, ok, err := e.reviewDirective("repo", "fili")
+	if err != nil || !ok {
+		t.Fatalf("reviewDirective after reopening: ok=%v err=%v", ok, err)
+	}
+	if !strings.Contains(dir, "pr-a") {
+		t.Errorf("directive = %q, want the reopened PR", dir)
+	}
+}
+
+// TestAMergedPRIsNotReopenedByAReviewRequest: only an approval is unmade. Merged and scrapped are
+// settled for good, and reopening one would put a reviewer on work already in the reference branch.
+func TestAMergedPRIsNotReopenedByAReviewRequest(t *testing.T) {
+	e, ps, _ := reviewFixture(t)
+	pr, _, _ := ps.GetPR("pr-a")
+	pr.Status = "merged"
+	if err := ps.PutPR(pr); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.RequestReview("repo", "pr-a", "have another look"); err != nil {
+		t.Fatalf("RequestReview: %v", err)
+	}
+	if got, _, _ := ps.GetPR("pr-a"); got.Status != "merged" {
+		t.Errorf("status = %q — a merged PR stays merged", got.Status)
+	}
+}

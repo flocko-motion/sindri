@@ -51,14 +51,36 @@ func (e *Engine) ReviewPrompt(project string) (string, error) {
 // the same thing. No reviewer running → recorded unassigned; requirement "" uses the default.
 func (e *Engine) RequestReview(project, prID, requirement string) error {
 	ps := e.store.For(project)
-	if _, ok, err := ps.GetPR(prID); err != nil {
+	pr, ok, err := ps.GetPR(prID)
+	if err != nil {
 		return err
-	} else if !ok {
+	}
+	if !ok {
 		return fmt.Errorf("no such PR %q", prID)
 	}
 	requirement = strings.TrimSpace(requirement)
 	if requirement == "" {
 		requirement, _ = e.ReviewPrompt(project)
+	}
+	// Asking again with new instructions unmakes an approval: the verdict answered the previous
+	// question, and the PR has to be open for anyone to be handed it.
+	if pr.Status == "approved" {
+		pr.Status = "open"
+		if err := ps.PutPR(pr); err != nil {
+			return err
+		}
+		_ = ps.LogPR(prID, "reopened", "a fresh review was requested, so the approval no longer stands")
+	}
+	// A reviewer already on this PR is told MORE, rather than a second review being opened: it holds
+	// the branch, so the instructions belong to the agent looking at it.
+	if id, holder := e.reviewerHolding(project, prID); holder != "" {
+		if err := ps.AmendReview(id, requirement); err != nil {
+			return err
+		}
+		_ = ps.LogPR(prID, "review-amended", "further instructions to "+holder)
+		go e.deps.InjectWhenReady(project, holder, MsgReviewAmended(prID, requirement))
+		e.deps.Notify()
+		return nil
 	}
 	id, err := ps.AddReview(prID, requirement)
 	if err != nil {
@@ -169,6 +191,20 @@ func (e *Engine) releaseReviewers(project, prID, why string) {
 		_ = e.deps.InjectWhenReady(project, r.Author, MsgReviewCancelled(prID))
 	}
 	e.deps.Notify()
+}
+
+// reviewerHolding returns the open review of prID and who is doing it, or (0, "") if nobody is.
+func (e *Engine) reviewerHolding(project, prID string) (int64, string) {
+	revs, err := e.store.For(project).Reviews(prID)
+	if err != nil {
+		return 0, ""
+	}
+	for _, r := range revs {
+		if r.Verdict == "" && r.Author != "" {
+			return r.ID, r.Author
+		}
+	}
+	return 0, ""
 }
 
 // freeReviewer returns a running reviewer that is holding no review. A roster read failure is

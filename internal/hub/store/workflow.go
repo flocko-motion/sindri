@@ -366,6 +366,18 @@ func (p *ProjectStore) UnclaimedReview(id *int64, pr *string) (bool, error) {
 	return true, nil
 }
 
+// AmendReview replaces an open review's requirement, for a second instruction arriving while the
+// first is still being carried out. The review is the same one: the reviewer keeps the branch it
+// has checked out and is simply told more.
+func (p *ProjectStore) AmendReview(id int64, requirement string) error {
+	_, err := p.s.db.Exec(`UPDATE reviews SET requirement=? WHERE id=? AND project=?`,
+		requirement, id, p.project)
+	if err != nil {
+		return fmt.Errorf("amend review %d: %w", id, err)
+	}
+	return nil
+}
+
 // CloseReviews ends every open review of a PR without a verdict — what a merge or a scrap does to a
 // review that has been overtaken: the thing it was about is settled, so nobody should still hold it.
 func (p *ProjectStore) CloseReviews(pr, why string) error {
