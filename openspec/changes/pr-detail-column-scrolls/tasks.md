@@ -18,7 +18,9 @@
 ## 3. Reach it with the keys that already exist
 
 - [x] 3.1 `scrollTarget` picks the focused region on the PRs tab, the detail pane everywhere else.
-- [x] 3.2 Record that this supersedes sd-ac8831's "not focus-relative" for this tab, and why.
+- [x] 3.2 MODIFY the vi-navigation requirement so the absolute "never gated by focus" claim is
+      narrowed in the SPEC, not just in this proposal. Both deltas archive into the same file, so
+      prose here would have left the spec contradicting the product either way round.
 
 ## 4. Pin it
 

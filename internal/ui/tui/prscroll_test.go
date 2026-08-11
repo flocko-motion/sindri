@@ -196,3 +196,21 @@ func TestPRsMetaScrollSurvivesAPoll(t *testing.T) {
 		t.Errorf("a poll moved the column from %d to %d", scrolled, got)
 	}
 }
+
+// TestSingleRegionViewIsStillUngatedByFocus: the focus rule is scoped to a view with TWO
+// scrollable regions. Everywhere else the pinned behaviour stands unchanged — J/K reach the detail
+// pane from either side — and the narrowed requirement says so, so it needs holding.
+func TestSingleRegionViewIsStillUngatedByFocus(t *testing.T) {
+	for _, tab := range []int{0, 1} { // Tasks and Agents: one scrollable region each
+		for _, rightFocus := range []bool{false, true} {
+			m := newModel(nil, nil, "")
+			m.tab, m.scopeRepo, m.rightFocus = tab, false, rightFocus
+			m.w, m.h = 120, 24
+			m.detail.Resize(5, 500) // a pane far shorter than its content
+			m.onKey("J")
+			if m.detail.Offset == 0 {
+				t.Errorf("tab %d rightFocus=%v: J must scroll the detail pane from either side", tab, rightFocus)
+			}
+		}
+	}
+}
