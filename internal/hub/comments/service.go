@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/tasks"
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -72,19 +73,24 @@ func (s *Service) ForView(project, id string) []store.Comment {
 const LocalSource = "sindri"
 
 // Add posts a comment on a task, attributed to author. Where the source keeps a thread of its own,
-// the comment is written there and read straight back, so the issue's own readers see it and the
-// canonical author, id and timestamp come from the source rather than being guessed here (a
-// tracker's own AddComment carries no author — it posts as whichever identity the adapter
-// authenticates with, so author is unused on that path). Everywhere else this store is the thread,
-// and author is recorded as given: the human ("user") or the agent that wrote it, by name.
+// the comment is written there too, so the issue's own readers see it — but that thread has no
+// per-author field of its own: a tracker's AddComment posts as whichever identity the adapter
+// authenticates with, so an agent's comment (author anything but api.SenderUser) carries its name
+// IN THE BODY, prefixed, or it would silently read as the human's upstream, and stay that way once
+// re-synced back (a sync overwrites the local Author with whatever the source recorded). Everywhere
+// else this store IS the thread, and author is recorded as given, in its own field.
 func (s *Service) Add(project, id, author, body string) error {
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return fmt.Errorf("say something: an empty comment is not a comment")
 	}
 	root := s.d.ProjectRoot(project)
+	posted := body
+	if author != api.SenderUser {
+		posted = agentSignature(author) + body
+	}
 	for _, src := range s.sources {
-		handled, err := src.AddComment(root, id, body)
+		handled, err := src.AddComment(root, id, posted)
 		if err != nil {
 			return err
 		}
@@ -110,6 +116,13 @@ func (s *Service) Add(project, id, author, body string) error {
 	}
 	s.d.Notify()
 	return nil
+}
+
+// agentSignature prefixes an agent's identity onto a comment posted upstream — the only place its
+// name survives once the tracker's own thread, and the local copy re-synced from it, have no field
+// for who within sindri actually wrote it.
+func agentSignature(author string) string {
+	return fmt.Sprintf("**%s** (sindri agent):\n\n", author)
 }
 
 // commentRef mints the per-source id the primary key needs. Random rather than a count, so two

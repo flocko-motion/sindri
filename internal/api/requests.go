@@ -12,7 +12,8 @@ type AgentReq struct {
 	Memory string `json:"memory"` // optional per-agent RAM limit (e.g. "4g"); "" = hub default
 }
 
-// TellReq is the body for POST /tell.
+// TellReq is the body for POST /tell (Name = agent, Msg = the message, Source = who sent it) and
+// for POST /task/comments/add (Name = task id, Msg = the comment, Source = its author).
 type TellReq struct {
 	Name   string `json:"name"`
 	Msg    string `json:"msg"`

@@ -88,7 +88,10 @@ func (h *Hub) registry() *registry.Registry {
 						return "You hold no task to comment on."
 					}
 				case "reviewer":
-					if pr, _ := h.store.For(c.Project).ReviewingPR(c.Agent); pr == "" {
+					// A store fault must not read as the settled "nothing to review" — err != nil
+					// leaves the verb unblocked so cmdComment hits ReviewingPR again and returns the
+					// error properly, rather than the agent being told a false reason to stop.
+					if pr, err := h.store.For(c.Project).ReviewingPR(c.Agent); err == nil && pr == "" {
 						return "You aren't reviewing a PR, so there's no task to comment on."
 					}
 				}

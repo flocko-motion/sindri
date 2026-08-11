@@ -35,7 +35,11 @@ comment thread a human's `task comment` writes to and reads from. This is
 distinct from session injection (above) and from the activity log: a comment is
 discussion attached to the task itself, read by whoever next opens it, not a
 message delivered into a session and not a private audit trail. Each comment
-SHALL be attributed to the agent that wrote it.
+SHALL be attributed to the agent that wrote it: in its own field for a task
+sindri owns the thread of, and — where the thread instead belongs to an
+external tracker with no such field, posting under whichever identity the
+tracker adapter authenticates with — named in the comment's own text instead,
+so the attribution is never silently lost or misread as the human's.
 
 Scope SHALL match what the agent's role already sees: a worker MAY comment only
 on the task it holds or the container it is working inside; a reviewer MAY
@@ -61,10 +65,17 @@ An agent SHALL NOT be offered the capability when it has nothing to comment on
 - **WHEN** a reviewer comments while reviewing a PR
 - **THEN** the comment is recorded against the task that PR belongs to
 
-#### Scenario: A gh- task's comment reaches the issue
+#### Scenario: A gh- task's comment reaches the issue, naming its real author
 
 - **WHEN** an agent comments on a task backed by a GitHub issue
-- **THEN** the comment is posted to that issue, the same as a human's would be
+- **THEN** the comment is posted to that issue under whichever account the `gh`
+  adapter authenticates with, its text naming the agent that actually wrote
+  it — never silently read as the human's
+
+#### Scenario: A human's comment on a gh- task is posted unchanged
+
+- **WHEN** a human comments on a task backed by a GitHub issue
+- **THEN** the comment is posted verbatim, with no agent identity to name
 
 #### Scenario: The verb is absent with nothing to comment on
 
