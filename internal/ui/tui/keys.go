@@ -24,7 +24,7 @@ const (
 	keyNew       = "N" // new task / new agent
 	keyBrief     = "B" // hand a task to a planner to work up (brief)
 	keyEdit      = "e" // edit the selection: task fields (tasks) / open the workspace in $EDITOR (agents, prs)
-	keyOptions   = "O" // an agent's options (mutation → shift)
+	keyOptions   = "O" // agents: an agent's options · tasks: reOpen a closed task, with a reason (mutation → shift)
 	keyPriority  = "P" // set task priority (mutation → shift)
 	keyUnassign  = "U" // release a task to the backlog
 	keyClose     = "C" // close a task
@@ -110,6 +110,7 @@ var keymap = []binding{
 	{keyPriority, lbl("priority"), scopeTasks},
 	{keyUnassign, lbl("unassign"), scopeTasks},
 	{keyClose, lbl("close"), scopeTasks},
+	{keyOptions, lbl("reopen"), scopeTasks},
 	{keyDelete, lbl("scrap"), scopeTasks},
 	{"A/R", lbl("approve/reject"), scopeTasks},
 	{keyWhyNext, lbl("why next"), scopeTasks},

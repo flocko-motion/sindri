@@ -86,6 +86,9 @@ func (h *Hub) registry() *registry.Registry {
 		registry.Command{Name: "task", Help: workflow.TaskHelp, Roles: []string{"planner", "coauthor", "worker"}, Run: h.wf.CmdTasks},
 		registry.Command{Name: "create-task", Help: workflow.CreateTaskHelp, Roles: []string{"planner"}, Run: h.wf.CmdCreateTask},
 		registry.Command{Name: "edit-task", Help: workflow.EditTaskHelp, Roles: []string{"planner"}, Run: h.wf.CmdEditTask},
+		// Planner only, never a worker, which could undo a human's verdict on its own task
+		// (-> h.ReopenTask, which needs both h.wf and h.comments, so it lives here, not workflow).
+		registry.Command{Name: "reopen-task", Help: reopenTaskHelp, Roles: []string{"planner"}, Run: h.cmdReopenTask},
 		registry.Command{Name: "openspec", Help: "ship your openspec changes as a PR: openspec submit [message]", Roles: []string{"planner"}, Run: h.wf.CmdOpenspec},
 		registry.Command{Name: "state", Help: "set your resting state: state planning | state idle", Roles: []string{"planner"}, Run: h.wf.CmdState},
 		// Scoped to what the role already sees (-> cmdComment): a worker its own task or held
@@ -461,4 +464,53 @@ func (h *Hub) cmdListPRs(c registry.Caller, _ []string, out io.Writer) (int, err
 // cmdChat is the agent-facing `chat` verb — it delegates to the chat relay.
 func (h *Hub) cmdChat(c registry.Caller, args []string, out io.Writer) (int, error) {
 	return h.chat.Cmd(c, args, out)
+}
+
+// reopenTaskUsage is the one description of reopen-task's surface, shown for a missing reason and
+// (via reopenTaskHelp) `reopen-task --help`.
+const reopenTaskUsage = "usage: reopen-task <id> <reason...>\n" +
+	"  Restores a closed task sindri owns (sd-/td-) to open. The reason is required — it is\n" +
+	"  recorded as a comment on the task, and is the whole point: it is what tells the next\n" +
+	"  reader this was a failed verification rather than a change of mind.\n" +
+	"  Refused for a task whose status comes from its own source (an openspec change os-*, a\n" +
+	"  GitHub issue gh-*) — reopen those there.\n" +
+	"  No new approval is created: reopening restores the release the task already had, so a\n" +
+	"  task that still carries a priority becomes claimable again immediately."
+
+// reopenTaskHelp is what the command registry advertises for reopen-task.
+const reopenTaskHelp = "reopen a closed task, with a reason. " + reopenTaskUsage
+
+// cmdReopenTask is the planner-facing `reopen-task <id> <reason...>` verb.
+func (h *Hub) cmdReopenTask(c registry.Caller, args []string, out io.Writer) (int, error) {
+	if len(args) < 2 {
+		fmt.Fprintln(out, reopenTaskUsage)
+		return 2, nil
+	}
+	id, reason := args[0], strings.Join(args[1:], " ")
+	if err := h.ReopenTask(c.Project, id, c.Agent, reason); err != nil {
+		fmt.Fprintf(out, "could not reopen %s: %v\n", id, err)
+		return 1, nil
+	}
+	fmt.Fprintf(out, "%s reopened.\n", id)
+	// The one thing the caller must be told rather than discover: a priority left standing from
+	// before the close is enough on its own to make this immediately claimable by a worker.
+	if t, ok, terr := h.store.For(c.Project).GetTask(id); terr == nil && ok && t.Priority != "" {
+		fmt.Fprintln(out, "It still carries a priority, so a worker may claim it immediately.")
+	}
+	return 0, nil
+}
+
+// ReopenTask restores a closed sindri-owned task (-> workflow.Engine.ReopenTask) and records reason
+// as a comment on it, attributed to author — the "this did not hold" signal a fresh duplicate task
+// would otherwise lose. Both cmdReopenTask and server.go's /task/reopen route through here, so the
+// reason is required, and recorded exactly once, however it was asked for.
+func (h *Hub) ReopenTask(project, id, author, reason string) error {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return fmt.Errorf("say why %s is being reopened — an unstated reason is exactly what gets lost otherwise", id)
+	}
+	if err := h.wf.ReopenTask(project, id); err != nil {
+		return err
+	}
+	return h.comments.Add(project, id, author, "reopened: "+reason)
 }

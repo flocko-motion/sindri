@@ -550,6 +550,13 @@ func (c *HTTP) CloseTask(id string) error {
 	return c.post("/task/close", api.RejectReq{ID: id})
 }
 
+// ReopenTask restores a closed sindri-owned task to "open", with a required reason recorded as a
+// task comment. Refused for a task whose status comes from its own source (an openspec change,
+// a GitHub issue) — reopen those there.
+func (c *HTTP) ReopenTask(id, reason string) error {
+	return c.post("/task/reopen", api.RejectReq{ID: id, Feedback: reason})
+}
+
 // ScrapTask scraps a task from the task list (the "discard" close). The hub dispatches
 // to the backend (td delete / openspec change-dir removal / issue delete). subtree takes
 // the task's children with it; withPRs takes the open PR of everything it scraps.

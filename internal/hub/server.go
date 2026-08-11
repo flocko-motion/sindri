@@ -469,6 +469,15 @@ func (h *Hub) Handler() http.Handler {
 		}
 		writeJSON(w, okMsg{"closed"}, h.wf.CloseTask(h.reqProject(r), req.ID))
 	})
+	// The host's counterpart to close: restores a closed sindri-owned task, with a reason
+	// (-> Hub.ReopenTask, which also records it as a task comment).
+	mux.HandleFunc("POST /task/reopen", func(w http.ResponseWriter, r *http.Request) {
+		var req RejectReq // ID + Feedback (the reopen reason)
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"reopened"}, h.ReopenTask(h.reqProject(r), req.ID, api.SenderUser, req.Feedback))
+	})
 	mux.HandleFunc("POST /task/delete", func(w http.ResponseWriter, r *http.Request) {
 		var req ScrapTaskReq
 		if !decode(w, r, &req) {

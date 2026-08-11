@@ -37,7 +37,7 @@ func tasksJSON(tasks []api.Task) (string, error) {
 // NewTaskCmd builds the `task` command tree (the backlog).
 func NewTaskCmd() *cobra.Command {
 	c := &cobra.Command{Use: "task", Short: "Inspect and create tasks"}
-	c.AddCommand(taskListCmd(), taskInfoCmd(), taskNewCmd(), taskEditCmd(), taskPriorityCmd(), taskApproveCmd(), taskRejectCmd(), taskUnassignCmd(), taskCloseCmd(), taskDeleteCmd(), taskRefreshCmd(), taskCommentCmd(), taskNextCmd())
+	c.AddCommand(taskListCmd(), taskInfoCmd(), taskNewCmd(), taskEditCmd(), taskPriorityCmd(), taskApproveCmd(), taskRejectCmd(), taskUnassignCmd(), taskCloseCmd(), taskReopenCmd(), taskDeleteCmd(), taskRefreshCmd(), taskCommentCmd(), taskNextCmd())
 	return c
 }
 
@@ -110,6 +110,31 @@ func taskCloseCmd() *cobra.Command {
 					return err
 				}
 				fmt.Fprintf(os.Stderr, "closed %s\n", args[0])
+				return nil
+			})
+		},
+	}
+}
+
+// taskReopenCmd restores a closed sindri-owned task to open, with a required reason — the host's
+// counterpart to `task close` (ARCHITECTURE.md's interchangeable-front-ends rule) and a planner's
+// `reopen-task`. Refused for a task whose status comes from its own source (openspec, GitHub).
+func taskReopenCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "reopen <id> <reason...>", Short: "Reopen a closed task, with a reason (sindri-owned tasks only)", Args: cobra.MinimumNArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			id, reason := args[0], strings.Join(args[1:], " ")
+			return withBackend(func(b backend) error {
+				if err := b.ReopenTask(id, reason); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "reopened %s\n", id)
+				// The one thing to be told rather than discover: a priority left standing from
+				// before the close is enough on its own to make this immediately claimable.
+				if t, terr := b.TaskInfo(id); terr == nil && t.Priority != "" {
+					fmt.Fprintf(os.Stderr, "%s still carries priority %s, so a worker may claim it immediately\n",
+						id, theme.PriorityLabel(t.Priority))
+				}
 				return nil
 			})
 		},

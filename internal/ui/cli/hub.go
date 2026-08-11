@@ -64,6 +64,7 @@ type backend interface {
 	NextTask(agent string) (api.NextExplain, error)
 	UnassignTask(id string) error
 	CloseTask(id string) error
+	ReopenTask(id, reason string) error
 	ScrapTask(id string, subtree, withPRs bool) error
 	Refresh() error
 	PRs() ([]api.PR, error)

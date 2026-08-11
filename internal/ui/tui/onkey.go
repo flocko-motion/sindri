@@ -234,12 +234,16 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 1 {
 			return m.statsCmd()
 		}
-	case keyOptions: // agents: the selected agent's options
+	case keyOptions: // agents: the selected agent's options · tasks: reopen a closed task
 		if m.tab == 1 {
 			if a, ok := m.selAgent(); ok {
 				m.openAgentOptionsForm(a.Name, a.Memory)
 				return nil
 			}
+		}
+		if m.tab == 0 && m.taskReopenable() {
+			m.openTaskReopenForm(m.selID())
+			return nil
 		}
 	case keyDelete: // tasks: scrap · agents: delete (or remove an orphan) · prs: scrap · repos: forget
 		if m.tab == 0 && m.selID() != "" {
