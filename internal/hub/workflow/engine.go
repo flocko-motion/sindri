@@ -81,12 +81,13 @@ type Engine struct {
 	deps    Deps
 	sources []tasks.Source // external task sources, wired in at New; ownedSource is always added per-project
 	gates   []gate.Gate    // submit-path quality gates, wired in via WithGates; openspec today
+	pre     preflight      // serialises the reference-move PR checks (-> prcheck.go)
 }
 
 // New builds the workflow engine over the hub's store, its Deps implementation, and the external
 // task sources the composition root wires in (github, openspec, ...) — the engine never names them.
 func New(st *store.Store, deps Deps, sources ...tasks.Source) *Engine {
-	return &Engine{store: st, deps: deps, sources: sources}
+	return &Engine{store: st, deps: deps, sources: sources, pre: preflight{seen: map[string]string{}}}
 }
 
 // WithGates installs the submit path's quality gates — openspec validation today, the built-in

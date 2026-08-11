@@ -2,7 +2,8 @@
 // type:    logic (the tick behind reference-branch drift)
 // job:     ask the workflow to re-check every project's reference branch on a slow
 // loop, so a branch the user moves outside the hub is noticed rather than
-// silently left under the agents working against it.
+// silently left under the agents working against it — and to keep the open PRs
+// honest against it (-> workflow/prcheck.go).
 // limits:  just the cadence and lifecycle; the comparison and what agents are told
 // live in workflow/reference.go. Agent liveness is the watchdog's, not this.
 package hub
@@ -60,6 +61,9 @@ func (r *refwatch) sweep() {
 	}
 	for _, p := range projects {
 		err := r.h.wf.SyncReference(p.Tag)
+		// Whether or not the reference moved this pass: a PR can also fall behind because its own
+		// branch moved, and the check is filtered on being behind rather than on this tick.
+		r.h.wf.CheckOpenPRs(p.Tag)
 		msg := ""
 		if err != nil {
 			msg = err.Error()

@@ -21,9 +21,8 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/lintgate"
 )
 
-// MaterializeReview checks out branch (detached) into the repo's reserved
-// .worktrees/review workspace — fresh each time — and returns the path, so a human or
-// reviewer can inspect a PR branch without disturbing any agent's own worktree.
+// MaterializeReview checks branch out detached into the reserved .worktrees/review workspace, fresh
+// each time, so a PR can be inspected without disturbing any agent's own worktree.
 func MaterializeReview(root, branch string) (string, error) {
 	path := filepath.Join(root, ".worktrees", "review")
 	_ = git.WorktreeRemove(root, path) // fresh checkout each time
@@ -31,6 +30,40 @@ func MaterializeReview(root, branch string) (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+// combinedName is the preflight's throwaway worktree and branch: one reserved name, so a crash
+// leaves at most one stale tree rather than accumulating them.
+const combinedName = "precheck"
+
+// MaterializeCombined builds what a merge WOULD produce, in a throwaway worktree: its own branch at
+// the PR tip, replayed onto base. Never the author's tree — replaying base where an agent is working
+// moves the ground under it. The caller removes it either way (-> RemoveCombined).
+func MaterializeCombined(root, branch, base string) (path string, conflicts []string, err error) {
+	path = filepath.Join(root, ".worktrees", combinedName)
+	RemoveCombined(root) // a previous run that died mid-flight leaves this behind
+	if err := git.WorktreeAddOnBranch(root, path, combinedBranch(), branch); err != nil {
+		return "", nil, err
+	}
+	conflicts, done, err := git.RebaseHere(path, base)
+	if err != nil {
+		return path, nil, err
+	}
+	if !done {
+		return path, conflicts, nil
+	}
+	return path, nil, nil
+}
+
+// combinedBranch is the throwaway branch name. Prefixed so it is recognisable as the hub's own if
+// one is ever left behind by a crash.
+func combinedBranch() string { return "sindri-" + combinedName }
+
+// RemoveCombined drops the throwaway worktree and its branch. Best-effort: it runs after the check
+// has its answer, and failing here must not turn a finding into an error.
+func RemoveCombined(root string) {
+	_ = git.WorktreeRemove(root, filepath.Join(root, ".worktrees", combinedName))
+	_ = git.DeleteBranch(root, combinedBranch())
 }
 
 // ScrapBranch removes a discarded PR's branch, detaching the owning worktree first since git will

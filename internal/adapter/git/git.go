@@ -86,6 +86,32 @@ func WorktreeAdd(repo, path, ref string) error {
 	return nil
 }
 
+// WorktreeAddOnBranch adds a worktree on a NEW branch created at start. The new branch is the point:
+// a worktree cannot check out a branch another worktree holds, and the branch under test is held by
+// its author's tree.
+func WorktreeAddOnBranch(repo, path, branch, start string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("mkdir worktree parent: %w", err)
+	}
+	out, err := exec.Command("git", "-C", repo, "worktree", "add", "-b", branch, path, start).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git worktree add -b %s: %s: %w", branch, strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// RebaseHere replays dir's current branch onto onto, in place, reporting the conflicting paths or
+// done. It skips commits base already contains, as the merge path does (-> settleRebase), since that
+// is the question asked. Checks nothing out first, and aborts a conflict before returning.
+func RebaseHere(dir, onto string) (conflicts []string, done bool, err error) {
+	out, e := gitEditless(dir, "rebase", onto)
+	conflicts, done, err = settleRebase(dir, out, e)
+	if !done {
+		_ = exec.Command("git", "-C", dir, "rebase", "--abort").Run()
+	}
+	return conflicts, done, err
+}
+
 // WorktreeRemove force-removes a worktree and prunes its registration. Safe to
 // call when the worktree was never created (e.g. the agent never launched).
 func WorktreeRemove(repo, path string) error {
