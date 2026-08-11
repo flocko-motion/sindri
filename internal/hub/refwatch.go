@@ -11,6 +11,8 @@ package hub
 import (
 	"log"
 	"time"
+
+	"github.com/flo-at/sindri/internal/hub/store"
 )
 
 // refInterval is slow on purpose: a reference branch moves when a human does something, not on a
@@ -61,9 +63,6 @@ func (r *refwatch) sweep() {
 	}
 	for _, p := range projects {
 		err := r.h.wf.SyncReference(p.Tag)
-		// Whether or not the reference moved this pass: a PR can also fall behind because its own
-		// branch moved, and the check is filtered on being behind rather than on this tick.
-		r.h.wf.CheckOpenPRs(p.Tag)
 		msg := ""
 		if err != nil {
 			msg = err.Error()
@@ -78,6 +77,32 @@ func (r *refwatch) sweep() {
 			r.lastErr[p.Tag] = msg
 		}
 	}
+	r.preflight(projects)
+}
+
+// preflight keeps the open PRs honest against their bases, OFF this loop. Its tier 2 runs the project
+// gate, which may build and test for minutes; inline it would hold the drift check for that long and
+// make every later project wait behind an earlier project's gate. The engine serialises the work
+// itself and skips a sweep whose predecessor is still running, so this fires and forgets.
+//
+// Not waited on at shutdown: it only appends advisory PR history, and a write against a closed store
+// fails harmlessly — whereas close() blocking on a gate run would hang the hub's exit for minutes.
+func (r *refwatch) preflight(projects []store.Project) {
+	select {
+	case <-r.stop:
+		return // shutting down; do not start a fresh gate run
+	default:
+	}
+	go func() {
+		for _, p := range projects {
+			select {
+			case <-r.stop:
+				return
+			default:
+			}
+			r.h.wf.CheckOpenPRs(p.Tag)
+		}
+	}()
 }
 
 // close stops the loop and waits for the sweep in flight.

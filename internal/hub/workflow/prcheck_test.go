@@ -51,6 +51,14 @@ func prCheckEngine(t *testing.T) (*Engine, *store.ProjectStore, string) {
 	return New(st, &stubDeps{root: root}), ps, root
 }
 
+// run is a git command that must succeed.
+func run(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %s", args, out)
+	}
+}
+
 // commitIn writes and commits a file, so a test can move either side.
 func commitIn(t *testing.T, dir, name, body, msg string) {
 	t.Helper()
@@ -201,5 +209,103 @@ func TestNoWorktreeIsLeftBehind(t *testing.T) {
 	e.CheckOpenPRs("proj")
 	if _, err := os.Stat(filepath.Join(root, ".worktrees", "precheck")); err == nil {
 		t.Error("the throwaway worktree was left behind")
+	}
+}
+
+// TestTheCheckUsesThePRsOwnBase is the base the MERGE will use. repo.MergeBranch replays onto
+// pr.Base and names it in every conflict; a check that used the project's current reference instead
+// would answer about an operation nobody performs — and this check is triggered by the very event
+// that makes the two diverge, a reference being moved or re-pointed. Worse than a wrong label: a PR
+// that conflicts with its real base can come back clean.
+func TestTheCheckUsesThePRsOwnBase(t *testing.T) {
+	e, ps, root := prCheckEngine(t)
+	// A second base, which is what the PR is recorded against — while the project reference (the
+	// repo's current branch, main) is something else entirely.
+	run(t, root, "branch", "release", "HEAD")
+	if err := ps.PutPR(store.PR{ID: "pr-sd-1", Task: "sd-1", Agent: "bombur", Branch: "sd-1", Base: "release", Status: "submitted"}); err != nil {
+		t.Fatal(err)
+	}
+	// Only the PR's real base moves, and it conflicts. main stays where it was.
+	run(t, root, "checkout", "-q", "release")
+	commitIn(t, root, "shared.txt", "release's line\n", "release edits shared")
+	run(t, root, "checkout", "-q", "main")
+	commitIn(t, filepath.Join(root, ".worktrees", "bombur"), "shared.txt", "the PR's line\n", "PR edits shared")
+
+	e.CheckOpenPRs("proj")
+	got := strings.Join(prEventTypes(t, ps, "pr-sd-1"), "\n")
+	if !strings.Contains(got, "precheck-conflict") {
+		t.Fatalf("the conflict is with the PR's own base, and must be found: %q", got)
+	}
+	if !strings.Contains(got, "release") {
+		t.Errorf("the finding must name the PR's base, got %q", got)
+	}
+	if strings.Contains(got, "main") {
+		t.Errorf("the finding names a base this PR will not be merged onto: %q", got)
+	}
+}
+
+// TestAPRIsRecheckedWhenItsBaseChanges: the memo carries the base NAME, not just tips. Re-pointing a
+// PR at another branch is a new question even when nothing has moved, and a memo keyed on tips alone
+// would answer it with the verdict from the old base.
+func TestAPRIsRecheckedWhenItsBaseChanges(t *testing.T) {
+	e, ps, root := prCheckEngine(t)
+	// Both bases move past the PR, so it is behind either one — otherwise the second check would be
+	// skipped for being level, and the test would pass without exercising the memo at all.
+	run(t, root, "branch", "release", "HEAD")
+	run(t, root, "checkout", "-q", "release")
+	commitIn(t, root, "release-moved.txt", "later\n", "release moves")
+	run(t, root, "checkout", "-q", "main")
+	commitIn(t, root, "base-moved.txt", "later\n", "main moves")
+
+	e.CheckOpenPRs("proj")
+	first := len(prEventTypes(t, ps, "pr-sd-1"))
+	if first == 0 {
+		t.Fatal("precondition: the first check should record a finding")
+	}
+	// Re-point the PR at a different base. Nothing moved; the question is new.
+	pr, _, err := ps.GetPR("pr-sd-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pr.Base = "release"
+	if err := ps.PutPR(pr); err != nil {
+		t.Fatal(err)
+	}
+	e.CheckOpenPRs("proj")
+	if got := len(prEventTypes(t, ps, "pr-sd-1")); got <= first {
+		t.Errorf("a PR re-pointed at another base should be re-checked, still %d findings", got)
+	}
+}
+
+// TestARepointedPRIsRecheckedEvenAtTheSameTip is the narrow case the base NAME in the memo key
+// exists for. Two branches can sit on the same commit, so re-pointing a PR between them changes no
+// tip at all — but the finding names the base, so a memo keyed on tips alone would suppress the
+// re-check and leave the PR carrying a verdict about a branch it is no longer aimed at.
+func TestARepointedPRIsRecheckedEvenAtTheSameTip(t *testing.T) {
+	e, ps, root := prCheckEngine(t)
+	commitIn(t, root, "base-moved.txt", "later\n", "main moves")
+	run(t, root, "branch", "release", "main") // a second name for the same commit
+
+	e.CheckOpenPRs("proj")
+	got := strings.Join(prEventTypes(t, ps, "pr-sd-1"), "\n")
+	if !strings.Contains(got, "main") {
+		t.Fatalf("precondition: the first finding should name main, got %q", got)
+	}
+	first := len(prEventTypes(t, ps, "pr-sd-1"))
+
+	pr, _, err := ps.GetPR("pr-sd-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pr.Base = "release" // same commit, different branch
+	if err := ps.PutPR(pr); err != nil {
+		t.Fatal(err)
+	}
+	e.CheckOpenPRs("proj")
+	if len(prEventTypes(t, ps, "pr-sd-1")) <= first {
+		t.Fatal("a PR aimed at a different base must be re-checked, even at an identical tip")
+	}
+	if latest := prEventTypes(t, ps, "pr-sd-1"); !strings.Contains(latest[len(latest)-1], "release") {
+		t.Errorf("the new finding should name the new base, got %q", latest[len(latest)-1])
 	}
 }

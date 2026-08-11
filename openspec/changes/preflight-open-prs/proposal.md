@@ -21,6 +21,14 @@ Two tiers, hung off the reference-branch sweep that already fires on every move.
   replayed onto base — and runs the project gate on it. That single operation answers both
   questions: the replay is the applies-verdict, and the gate on what it produced is the other half.
 
+**The base is the PR's own.** `repo.MergeBranch` replays onto `pr.Base` and names it in every
+conflict, so the check takes the base from the PR — falling back to the project reference only for
+rows old enough to carry none. Using the project reference project-wide would answer about an
+operation nobody performs, and this check is triggered by refwatch, whose job is noticing that very
+reference moving or being re-pointed: the two diverge exactly when it matters. The memo carries the
+base name as well as the tips, so a PR re-aimed at another branch is a new question even when no tip
+moved.
+
 ## Decisions the task asked for, and how they went
 
 **The cheap tier does not simulate a merge.** The task offered two routes and asked for a deliberate
@@ -50,6 +58,12 @@ rather than once per merge.
 
 - Specs: `hub` gains the requirement. Complementary to `sd-9f2cad`, which stops a PR being CREATED
   on a stale base — that closes the window before submission, this one the window during review.
+- The check runs off the drift loop, in its own goroutine. Tier 2 may build and test for minutes,
+  and inline it would hold reference detection for that long and make each project wait behind an
+  earlier one's gate. The engine already serialises the work and skips a sweep whose predecessor is
+  still running, so this fires and forgets; shutdown does not wait on it, since it only appends
+  advisory history and a write against a closed store fails harmlessly, whereas blocking close() on
+  a gate run would hang the hub's exit.
 - Code: `internal/adapter/git` (`WorktreeAddOnBranch`, `RebaseHere`), `internal/hub/repo`
   (`MaterializeCombined`/`RemoveCombined`), `internal/hub/workflow/prcheck.go` (the tiers and the
   bounding), and one call from `internal/hub/refwatch.go`.

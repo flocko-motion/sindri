@@ -27,7 +27,7 @@ const prCheckPaths = 10
 // leave the host permanently busy.
 type preflight struct {
 	mu   sync.Mutex
-	seen map[string]string // PR id -> the base+branch tips already checked
+	seen map[string]string // PR id -> the base and tips already checked (-> prCheckKey)
 }
 
 // CheckOpenPRs answers, per open PR, whether it still applies and whether the combined result would
@@ -43,26 +43,42 @@ func (e *Engine) CheckOpenPRs(project string) {
 	if root == "" {
 		return
 	}
-	base, err := e.baseBranch(root)
-	if err != nil {
-		return
-	}
-	baseTip, err := git.BranchTip(root, base)
-	if err != nil {
-		return
-	}
+	// The project reference is only the FALLBACK, for PR rows old enough to carry no base of their
+	// own. Its failure is not fatal here: a PR that names its own base needs nothing from it.
+	fallback, _ := e.baseBranch(root)
 	ps := e.store.For(project)
 	prs, err := ps.PRs()
 	if err != nil {
 		return
 	}
 	for _, pr := range prs {
-		if !e.preflightWanted(pr, root, base, baseTip) {
+		base, baseTip, ok := e.prBase(root, pr, fallback)
+		if !ok || !e.preflightWanted(pr, root, base, baseTip) {
 			continue
 		}
 		e.preflightPR(project, ps, pr, root, base, baseTip)
 		return // one per sweep: the next moves on the next tick
 	}
+}
+
+// prBase is the base THIS PR will be merged onto, and its tip. Per PR, never project-wide: the merge
+// replays onto pr.Base (-> repo.MergeBranch) and names it in every conflict, so a check that used
+// the current project reference would answer about an operation nobody will perform — and could
+// report clean a PR that conflicts with its real base. Re-pointing `reference:` is exactly the event
+// this check runs on, so the two diverge precisely when it matters.
+func (e *Engine) prBase(root string, pr store.PR, fallback string) (base, tip string, ok bool) {
+	base = pr.Base
+	if base == "" {
+		base = fallback // an older row, recorded before a PR carried its own base
+	}
+	if base == "" {
+		return "", "", false
+	}
+	tip, err := git.BranchTip(root, base)
+	if err != nil {
+		return "", "", false // the base is gone; nothing to check against
+	}
+	return base, tip, true
 }
 
 // preflightWanted is tier 1: the cheap filter, no checkout, nothing disturbed. It asks only whether
@@ -81,7 +97,7 @@ func (e *Engine) preflightWanted(pr store.PR, root, base, baseTip string) bool {
 		// A failed count is not evidence of "up to date", but it is no basis for a finding either.
 		return false
 	}
-	if e.pre.seen[pr.ID] == baseTip+":"+branchTip {
+	if e.pre.seen[pr.ID] == prCheckKey(base, baseTip, branchTip) {
 		return false // already answered at these tips; a burst of merges re-answers once, not per merge
 	}
 	return true
@@ -94,7 +110,7 @@ func (e *Engine) preflightPR(project string, ps *store.ProjectStore, pr store.PR
 	if err != nil {
 		return
 	}
-	e.pre.seen[pr.ID] = baseTip + ":" + branchTip
+	e.pre.seen[pr.ID] = prCheckKey(base, baseTip, branchTip)
 
 	path, conflicts, err := repo.MaterializeCombined(root, pr.Branch, base)
 	defer repo.RemoveCombined(root)
@@ -118,6 +134,12 @@ func (e *Engine) preflightPR(project string, ps *store.ProjectStore, pr store.PR
 	// out what it was, and the combined tree it failed in no longer exists by then.
 	_ = ps.LogPR(pr.ID, "precheck-gate-fail", "combined with "+base+" the gate fails:\n"+trimTo(out, 1200))
 	e.deps.Notify()
+}
+
+// prCheckKey is what a PR has already been answered at. The base NAME is in it, not just its tip:
+// re-pointing a PR at a different branch is a new question even when both tips are unchanged.
+func prCheckKey(base, baseTip, branchTip string) string {
+	return base + ":" + baseTip + ":" + branchTip
 }
 
 // conflictNote names the paths, which is what makes the finding actionable — a verdict without them
