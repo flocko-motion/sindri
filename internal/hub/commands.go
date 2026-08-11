@@ -512,5 +512,9 @@ func (h *Hub) ReopenTask(project, id, author, reason string) error {
 	if err := h.wf.ReopenTask(project, id); err != nil {
 		return err
 	}
-	return h.comments.Add(project, id, author, "reopened: "+reason)
+	// The task is already open by this point: say so, or the error alone reads as "neither happened".
+	if err := h.comments.Add(project, id, author, "reopened: "+reason); err != nil {
+		return fmt.Errorf("%s was reopened, but recording the reason failed: %w", id, err)
+	}
+	return nil
 }

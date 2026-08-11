@@ -20,14 +20,21 @@ func (m model) taskReopenable() bool {
 }
 
 // openTaskReopenForm restores a closed task to open, with a required reason recorded as a task
-// comment — the counterpart to openTaskRejectForm, for the verdict going the other way.
+// comment — the counterpart to openTaskRejectForm, for the verdict going the other way. Validated,
+// not just guarded on submit: closing on an empty reason would read as a successful reopen.
 func (m *model) openTaskReopenForm(id string) {
 	reason := newTextareaField("reason (recorded as a comment on the task)", "")
+	validate := func() string {
+		if strings.TrimSpace(reason.value()) == "" {
+			return "say why — the reason is recorded as a comment on the task"
+		}
+		return ""
+	}
 	cl := m.cl
-	m.form.open("reopen task "+id, []field{reason}, nil, func() tea.Cmd {
+	m.form.open("reopen task "+id, []field{reason}, validate, func() tea.Cmd {
 		text := reason.value()
 		return func() tea.Msg {
-			if cl == nil || strings.TrimSpace(text) == "" {
+			if cl == nil {
 				return nil
 			}
 			if err := cl.ReopenTask(id, text); err != nil {

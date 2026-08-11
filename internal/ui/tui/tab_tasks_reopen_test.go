@@ -51,3 +51,21 @@ func TestTaskReopenable(t *testing.T) {
 		}
 	}
 }
+
+// TestReopenFormRequiresAReason: an empty reason must not close the form and read as a successful
+// reopen — the same silent-empty shape the reject-PR form has, deliberately not copied here.
+func TestReopenFormRequiresAReason(t *testing.T) {
+	m := newModel(nil, nil, "")
+	m.w, m.h = 100, 40
+	m.openTaskReopenForm("sd-abc123")
+
+	if cmd := m.form.update(keyMsg("ctrl+s")); cmd != nil {
+		t.Fatal("an empty reason should not submit")
+	}
+	if !m.form.active {
+		t.Error("the form must stay open on an empty reason")
+	}
+	if !strings.Contains(m.form.err, "say why") {
+		t.Errorf("the form should say why it refused, got %q", m.form.err)
+	}
+}
