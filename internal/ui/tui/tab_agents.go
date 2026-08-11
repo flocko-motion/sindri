@@ -190,6 +190,23 @@ func (m *model) openDeleteChoice(id string) {
 	}
 }
 
+// openClearContextChoice confirms clearing a full agent's context. Confirmed rather than done on
+// the keystroke because it destroys everything the session remembers, including whatever the user
+// typed into that pane — the hub refuses mid-task, so what is left to lose here is the reasoning.
+func (m *model) openClearContextChoice(name string) {
+	cl := m.cl
+	m.choice = choiceModalState{
+		active: true, title: "clear " + name + "'s context?  (its session starts empty)",
+		options: []string{"cancel", "clear"}, values: []string{"cancel", "clear"},
+		apply: func(v string) tea.Cmd {
+			if v != "clear" {
+				return nil
+			}
+			return mutateThenRefresh(cl, func() error { return cl.ClearContext(name) })
+		},
+	}
+}
+
 // rebaseAgentCmd rebases the agent's worktree onto the reference branch; git aborts on conflict.
 func (m *model) rebaseAgentCmd(name string) tea.Cmd {
 	cl := m.cl

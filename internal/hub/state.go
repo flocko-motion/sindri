@@ -105,7 +105,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		if _, stalled := h.stalledFor(a.Project, a.Name, st.Phase, st.Container); stalled {
 			status = "stalled"
 		}
-		tokens, _ := h.agents.ContextTokens(a.Project, a.Name)
+		tokens, _, _ := h.agents.ContextUsage(a.Project, a.Name)
 		// A full agent reads as full rather than as idle-and-ignored — claimNext has already
 		// stopped handing it work; this is the board saying why.
 		if h.wf.ContextFull(a.Project, a.Name) {

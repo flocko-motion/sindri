@@ -71,34 +71,39 @@ func (s *Service) RuntimeState(ctx context.Context, project, name string) string
 // because a session file changes far less often than the tmux pane does).
 const contextTTL = 15 * time.Second
 
+// contextSample is one reading: what the session carries, and the window it has to fill.
+type contextSample struct {
+	tokens, window int
+	ok             bool
+}
+
 var contextMemo struct {
 	mu  sync.Mutex
 	at  map[string]time.Time
-	val map[string]int
-	ok  map[string]bool
+	val map[string]contextSample
 }
 
-// ContextTokens reads name's live session context size off disk (never the tmux pane — that's
-// pattern-matched text, this is exact usage from the transcript itself). ok=false when no session
-// has recorded usage yet.
-func (s *Service) ContextTokens(project, name string) (int, bool) {
+// ContextUsage reads name's live session context size and window off disk (never the tmux pane —
+// that's pattern-matched text, this is exact usage from the transcript itself). ok=false when no
+// session has recorded usage yet.
+func (s *Service) ContextUsage(project, name string) (tokens, window int, ok bool) {
 	key := project + "/" + name
 	contextMemo.mu.Lock()
 	if at, cached := contextMemo.at[key]; cached && time.Since(at) < contextTTL {
-		v, ok := contextMemo.val[key], contextMemo.ok[key]
+		v := contextMemo.val[key]
 		contextMemo.mu.Unlock()
-		return v, ok
+		return v.tokens, v.window, v.ok
 	}
 	contextMemo.mu.Unlock()
 
-	tokens, ok := agentport.ContextTokens(paths.AgentHomeDir(project, name))
+	t, w, found := agentport.ContextUsage(paths.AgentHomeDir(project, name))
 	contextMemo.mu.Lock()
 	if contextMemo.at == nil {
-		contextMemo.at, contextMemo.val, contextMemo.ok = map[string]time.Time{}, map[string]int{}, map[string]bool{}
+		contextMemo.at, contextMemo.val = map[string]time.Time{}, map[string]contextSample{}
 	}
-	contextMemo.at[key], contextMemo.val[key], contextMemo.ok[key] = time.Now(), tokens, ok
+	contextMemo.at[key], contextMemo.val[key] = time.Now(), contextSample{t, w, found}
 	contextMemo.mu.Unlock()
-	return tokens, ok
+	return t, w, found
 }
 
 // LaunchDiagnostic re-runs both liveness probes so a launch timeout says which one failed.

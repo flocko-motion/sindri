@@ -20,7 +20,8 @@ type stubDeps struct {
 	interrupted  []string
 	injected     []string
 	injectedText []string // the message bodies too, for tests that assert what an agent was told
-	ctxTokens    int      // TestContextFull* set this to simulate a worker's session usage
+	ctxTokens    int      // TestContextFull* set these to simulate a worker's session usage
+	ctxWindow    int      // 0 with ctxOK true means "measured, but the window is unknown"
 	ctxOK        bool
 }
 
@@ -44,7 +45,9 @@ func (d *stubDeps) TaskComments(_, _ string) []store.Comment { return nil }
 func (d *stubDeps) Subscribe() (chan struct{}, func())       { return make(chan struct{}), func() {} }
 func (d *stubDeps) KnownProjects() []store.Project           { return nil }
 func (d *stubDeps) BrokkrBin() (string, error)               { return "", nil }
-func (d *stubDeps) ContextTokens(_, _ string) (int, bool)    { return d.ctxTokens, d.ctxOK }
+func (d *stubDeps) ContextUsage(_, _ string) (int, int, bool) {
+	return d.ctxTokens, d.ctxWindow, d.ctxOK
+}
 
 // TestScrapPRStopsReviewer: scrapping a PR under review flips it to "scrapped",
 // interrupts the reviewer and closes its open review record, so the reviewer no

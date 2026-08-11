@@ -537,15 +537,20 @@ func (e *Engine) CmdNext(c registry.Caller, _ []string, out io.Writer) (int, err
 	return 0, nil
 }
 
-// ContextFullThreshold is where a worker stops being handed new work: comfortably under a
-// 200k-token window, leaving room to finish its current reply before retirement takes effect.
-const ContextFullThreshold = 170_000
+// ContextFullFraction is how much of its window a worker may fill before it stops being handed new
+// work. A fraction, not a token count: a flat 170k written for a 200k window retired workers on a
+// 1M one with most of it unused.
+const ContextFullFraction = 0.85
 
 // contextFull is the one fact both the assignment gate and the board's status read. No recorded
-// usage yet (ok=false from ContextTokens) is never full.
+// usage yet (ok=false from ContextUsage) is never full, and neither is a window of 0 — an unknown
+// window must not retire anybody, since guessing one is what this replaced.
 func (e *Engine) contextFull(project, worker string) (tokens int, full bool) {
-	tokens, ok := e.deps.ContextTokens(project, worker)
-	return tokens, ok && tokens >= ContextFullThreshold
+	tokens, window, ok := e.deps.ContextUsage(project, worker)
+	if !ok || window <= 0 {
+		return tokens, false
+	}
+	return tokens, float64(tokens) >= float64(window)*ContextFullFraction
 }
 
 // ContextFull is contextFull's bool half, for the board's status word.

@@ -21,14 +21,43 @@ import (
 // session whole on every probe.
 const tailBytes = 4 << 20
 
-// ContextTokens implements agent.Agent: the current context size of the session under home, or
-// ok=false when no session there has recorded usage yet.
-func (Claude) ContextTokens(home string) (int, bool) {
-	path, ok := latestTranscript(home)
-	if !ok {
-		return 0, false
+// defaultWindow is assumed for an unrecognised model: the smallest any current Claude carries, so
+// it retires early rather than never.
+const defaultWindow = 200_000
+
+// windows maps a model id fragment to its context window — the one place a window is stated. Any
+// threshold hard-coded elsewhere is a guess about a model nobody checked.
+var windows = []struct {
+	match  string
+	window int
+}{
+	{"opus-5", 1_000_000},
+	{"sonnet-5", 1_000_000},
+	{"haiku", 200_000},
+}
+
+// ContextUsage implements agent.Agent: what the session under home carries and the window it fills.
+// ok=false when nothing there has recorded usage yet.
+func (Claude) ContextUsage(home string) (tokens, window int, ok bool) {
+	path, found := latestTranscript(home)
+	if !found {
+		return 0, 0, false
 	}
-	return lastUsage(path)
+	tokens, model, ok := lastUsage(path)
+	if !ok {
+		return 0, 0, false
+	}
+	return tokens, windowFor(model), true
+}
+
+// windowFor resolves a model id to its context window, conservatively when it is unrecognised.
+func windowFor(model string) int {
+	for _, w := range windows {
+		if strings.Contains(model, w.match) {
+			return w.window
+		}
+	}
+	return defaultWindow
 }
 
 // latestTranscript finds home's most recently written *.jsonl under projects/*/ — Claude Code
@@ -57,6 +86,7 @@ func latestTranscript(home string) (string, bool) {
 type transcriptLine struct {
 	Type    string `json:"type"`
 	Message struct {
+		Model string `json:"model"`
 		Usage struct {
 			InputTokens              int `json:"input_tokens"`
 			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
@@ -65,12 +95,17 @@ type transcriptLine struct {
 	} `json:"message"`
 }
 
-// lastUsage scans path's tail backward for the last assistant message carrying usage and sums the
-// three fields that make up its context size.
-func lastUsage(path string) (int, bool) {
+// syntheticModel marks a message Claude Code wrote itself — an interrupt or an error notice. It
+// names no model, so it can say nothing about the window.
+const syntheticModel = "<synthetic>"
+
+// lastUsage scans path's tail backward for the size the session carries and the model carrying it,
+// each from the newest line that can answer for it — not necessarily the same line, since a real
+// transcript often ends on a synthetic one.
+func lastUsage(path string) (tokens int, model string, ok bool) {
 	tail, err := readTail(path, tailBytes)
 	if err != nil {
-		return 0, false
+		return 0, "", false
 	}
 	lines := strings.Split(string(tail), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -82,13 +117,18 @@ func lastUsage(path string) (int, bool) {
 		if json.Unmarshal([]byte(line), &l) != nil || l.Type != "assistant" {
 			continue // malformed, a truncated first line from the tail seek, or not an assistant turn
 		}
-		u := l.Message.Usage
-		if u.InputTokens == 0 && u.CacheReadInputTokens == 0 && u.CacheCreationInputTokens == 0 {
-			continue // no usage on this line — keep scanning backward for one that has it
+		if model == "" && l.Message.Model != "" && l.Message.Model != syntheticModel {
+			model = l.Message.Model
 		}
-		return u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens, true
+		u := l.Message.Usage
+		if !ok && (u.InputTokens != 0 || u.CacheReadInputTokens != 0 || u.CacheCreationInputTokens != 0) {
+			tokens, ok = u.InputTokens+u.CacheReadInputTokens+u.CacheCreationInputTokens, true
+		}
+		if ok && model != "" {
+			return tokens, model, true
+		}
 	}
-	return 0, false
+	return tokens, model, ok
 }
 
 // readTail returns path's last max bytes (or the whole file, if smaller).

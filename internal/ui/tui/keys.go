@@ -28,6 +28,7 @@ const (
 	keyPriority  = "P" // set task priority (mutation → shift)
 	keyUnassign  = "U" // release a task to the backlog
 	keyClose     = "C" // close a task
+	keyClearCtx  = "C" // clear a full agent's context — C ends what is in front of you, as it does on a task
 	keyApprove   = "A" // approve: a PR (prs) / a proposed task (tasks) — one letter, one meaning
 	keyReview    = "I" // invite an agentic review of a PR (A is approve, R is reject)
 	keyReject    = "R" // reject a PR / a proposed task
@@ -115,6 +116,7 @@ var keymap = []binding{
 	{keyMilestone, lbl("milestone PR"), scopeAgents},
 	{keyRebuild, lbl("rebuild image"), scopeAgents},
 	{keyReject, lbl("rebase"), scopeAgents}, // R = reBase (onto the reference branch)
+	{keyClearCtx, lbl("clear context"), scopeAgents},
 	{keyDelete, lbl("delete"), scopeAgents},
 	{keyScopeTog, func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scopeAgents},
 

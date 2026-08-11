@@ -60,6 +60,7 @@ type backend interface {
 	ApproveTask(id string, subtree bool) error
 	RejectTask(id, comment string) error
 	AddTaskComment(id, body string) error
+	RefreshTaskComments(id string) error
 	UnassignTask(id string) error
 	CloseTask(id string) error
 	ScrapTask(id string, subtree, withPRs bool) error

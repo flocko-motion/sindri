@@ -69,9 +69,9 @@ type Deps interface {
 	KnownProjects() []store.Project
 	// BrokkrBin locates the brokkr toolbelt binary (the lint gate shells out to it).
 	BrokkrBin() (string, error)
-	// ContextTokens reports an agent's current session context size, read off its transcript.
-	// ok=false when nothing has been recorded yet.
-	ContextTokens(project, name string) (tokens int, ok bool)
+	// ContextUsage reports an agent's current session context size and the window it fills, both
+	// read off its transcript. ok=false when nothing has been recorded yet.
+	ContextUsage(project, name string) (tokens, window int, ok bool)
 }
 
 // Engine is the workflow orchestrator: it owns the store and drives the lifecycle

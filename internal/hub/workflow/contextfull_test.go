@@ -40,7 +40,7 @@ func idleWorkerWithOpenTask(t *testing.T, deps *stubDeps) (*Engine, *store.Proje
 // TestAFullWorkerIsNotHandedTheNextTask is RETIRE's whole point: past the threshold, an open leaf
 // sits there unclaimed rather than landing on a worker who has no room left for it.
 func TestAFullWorkerIsNotHandedTheNextTask(t *testing.T) {
-	deps := &stubDeps{ctxTokens: ContextFullThreshold, ctxOK: true}
+	deps := &stubDeps{ctxTokens: 900_000, ctxWindow: 1_000_000, ctxOK: true}
 	e, ps := idleWorkerWithOpenTask(t, deps)
 
 	dir, err := e.AgentDirective(context.Background(), "repo", "dvalin")
@@ -58,7 +58,7 @@ func TestAFullWorkerIsNotHandedTheNextTask(t *testing.T) {
 // TestAWorkerUnderTheThresholdIsHandedWork is the control: nothing about the fullness gate should
 // stop an ordinary claim from working exactly as it always has.
 func TestAWorkerUnderTheThresholdIsHandedWork(t *testing.T) {
-	deps := &stubDeps{ctxTokens: 1000, ctxOK: true}
+	deps := &stubDeps{ctxTokens: 1000, ctxWindow: 200_000, ctxOK: true}
 	e, ps := idleWorkerWithOpenTask(t, deps)
 
 	dir, err := e.AgentDirective(context.Background(), "repo", "dvalin")
@@ -74,7 +74,7 @@ func TestAWorkerUnderTheThresholdIsHandedWork(t *testing.T) {
 }
 
 // TestNoRecordedUsageIsNeverFull: an agent that has never replied has ok=false from
-// ContextTokens, which must read as "not full" rather than as full-by-default.
+// ContextUsage, which must read as "not full" rather than as full-by-default.
 func TestNoRecordedUsageIsNeverFull(t *testing.T) {
 	deps := &stubDeps{ctxOK: false}
 	e, ps := idleWorkerWithOpenTask(t, deps)
@@ -88,5 +88,72 @@ func TestNoRecordedUsageIsNeverFull(t *testing.T) {
 	}
 	if st, _ := ps.GetState("dvalin"); st.Task != "td-abc123" {
 		t.Errorf("state.Task = %q, want td-abc123", st.Task)
+	}
+}
+
+// TestFullnessIsRelativeToTheWindow is the bug this replaced: 480k fills a 200k window and is half
+// a 1M one, so the same count must answer differently. Against a flat 170k the whole fleet read full.
+func TestFullnessIsRelativeToTheWindow(t *testing.T) {
+	for _, c := range []struct {
+		what           string
+		tokens, window int
+		wantFull       bool
+	}{
+		{"half of a 1M window", 480_000, 1_000_000, false},
+		{"the same count against 200k", 480_000, 200_000, true},
+		{"just under the fraction", 840_000, 1_000_000, false},
+		{"just over it", 860_000, 1_000_000, true},
+		// A window nobody could resolve must not retire anyone: guessing one is what this replaced.
+		{"measured, but no window known", 480_000, 0, false},
+	} {
+		e := New(nil, &stubDeps{ctxTokens: c.tokens, ctxWindow: c.window, ctxOK: true})
+		if _, full := e.contextFull("repo", "dvalin"); full != c.wantFull {
+			t.Errorf("%s: %d of %d full=%v, want %v", c.what, c.tokens, c.window, full, c.wantFull)
+		}
+	}
+}
+
+// TestFullnessGatesNewWorkOnly is the boundary the gate must respect: it withholds the NEXT task,
+// never the one already held. Retiring a worker whose PR bounced would strand finished work behind
+// a review nobody could answer.
+func TestFullnessGatesNewWorkOnly(t *testing.T) {
+	full := &stubDeps{ctxTokens: 990_000, ctxWindow: 1_000_000, ctxOK: true}
+	e, ps := idleWorkerWithOpenTask(t, full)
+
+	// Holding a task: the directive is the task's, not a retirement notice.
+	if err := ps.SetState(store.AgentState{
+		Agent: "dvalin", Task: "td-abc123", Branch: "td-abc123", Phase: "working",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := e.AgentDirective(context.Background(), "repo", "dvalin")
+	if err != nil {
+		t.Fatalf("AgentDirective: %v", err)
+	}
+	if strings.Contains(dir, "retired") || !strings.Contains(dir, "td-abc123") {
+		t.Errorf("a full worker mid-task must keep working on it, got: %q", dir)
+	}
+
+	// Its PR then bounces. The feedback must reach it, full or not.
+	if err := ps.PutPR(store.PR{
+		ID: "pr-td-abc123", Task: "td-abc123", Agent: "dvalin", Branch: "td-abc123",
+		Status: "rejected", Feedback: "needs a test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetState(store.AgentState{
+		Agent: "dvalin", Task: "td-abc123", Branch: "td-abc123", Phase: "submitted",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dir, err = e.AgentDirective(context.Background(), "repo", "dvalin")
+	if err != nil {
+		t.Fatalf("AgentDirective: %v", err)
+	}
+	if strings.Contains(dir, "retired") {
+		t.Errorf("a rejection must reach a full worker — it is the work it already holds: %q", dir)
+	}
+	if !strings.Contains(dir, "needs a test") {
+		t.Errorf("the directive should carry the reviewer's feedback: %q", dir)
 	}
 }

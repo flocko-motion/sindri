@@ -272,10 +272,18 @@ func taskListCmd() *cobra.Command {
 }
 
 func taskInfoCmd() *cobra.Command {
-	return &cobra.Command{
+	var refresh bool
+	c := &cobra.Command{
 		Use: "info <id>", Short: "Show a task", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withBackend(func(b backend) error {
+				// The TUI re-pulls a thread on demand, so the CLI can too: an upstream comment
+				// added since the last sync is otherwise unreachable from here.
+				if refresh {
+					if err := b.RefreshTaskComments(args[0]); err != nil {
+						return err
+					}
+				}
 				t, err := b.TaskInfo(args[0])
 				if err != nil {
 					return err
@@ -298,6 +306,8 @@ func taskInfoCmd() *cobra.Command {
 			})
 		},
 	}
+	c.Flags().BoolVar(&refresh, "refresh", false, "re-pull the comment thread from its source first (a GitHub issue's upstream replies)")
+	return c
 }
 
 func taskNewCmd() *cobra.Command {

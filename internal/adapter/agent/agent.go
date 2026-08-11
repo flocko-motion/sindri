@@ -48,10 +48,11 @@ type Agent interface {
 	// host's reach further, so a re-login on the host reaches a pod that is already running.
 	// Reports whether it wrote.
 	RestageCredentials(dir string) (bool, error)
-	// ContextTokens reports how much context the live session under home is currently carrying,
-	// read from wherever the backend persists its own transcript. ok=false when nothing has been
-	// recorded yet (a freshly launched agent with no reply).
-	ContextTokens(home string) (tokens int, ok bool)
+	// ContextUsage reports what the live session under home carries and the window it fills, both
+	// from the backend's own transcript. The window comes from here because only the backend knows
+	// which model answers; a caller that assumed one retired workers with most of 1M unused.
+	// ok=false when nothing has been recorded yet.
+	ContextUsage(home string) (tokens, window int, ok bool)
 }
 
 // active is wired once at startup via Use; the no-op default keeps the port safe before.
@@ -82,8 +83,8 @@ func PrepareHome(spec HomeSpec) (Home, error) { return active.PrepareHome(spec) 
 // RestageCredentials refreshes one home's credentials from the host via the wired backend.
 func RestageCredentials(dir string) (bool, error) { return active.RestageCredentials(dir) }
 
-// ContextTokens reports the wired backend's current context size for the session under home.
-func ContextTokens(home string) (int, bool) { return active.ContextTokens(home) }
+// ContextUsage reports the wired backend's context size and window for the session under home.
+func ContextUsage(home string) (int, int, bool) { return active.ContextUsage(home) }
 
 // noop is the default until Use: state is Unknown, no home is provisioned.
 type noop struct{}
@@ -94,4 +95,4 @@ func (noop) PrepareHome(HomeSpec) (Home, error) { return Home{}, nil }
 
 func (noop) RestageCredentials(string) (bool, error) { return false, nil }
 
-func (noop) ContextTokens(string) (int, bool) { return 0, false }
+func (noop) ContextUsage(string) (int, int, bool) { return 0, 0, false }
