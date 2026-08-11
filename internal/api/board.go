@@ -57,6 +57,9 @@ type BoardState struct {
 	// StartedAt is when this hub process came up (RFC3339), so `hub status` reads uptime from the
 	// board rather than shelling out to `ps`.
 	StartedAt string `json:"started_at"`
+	// ContextFullThreshold is the token count past which AgentView.Status reads "full" — carried
+	// here so a front-end can render each agent's fill against it without hardcoding a duplicate.
+	ContextFullThreshold int `json:"contextFullThreshold"`
 }
 
 // AgentStatsView is one agent's resource snapshot; Err is set, not swallowed into a misleading zero.

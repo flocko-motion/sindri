@@ -9,6 +9,8 @@
       transcript grows with every turn, not every board read).
 - [x] 1.3 `AgentView.ContextTokens` carries it to every front-end; the TUI detail pane
       and `agent info` show it next to memory.
+- [x] 1.4 `BoardState.ContextFullThreshold` carries the threshold so a front-end can
+      render fill against it; the TUI and CLI agents list show a percentage column.
 
 ## 2. Retire
 

@@ -37,8 +37,11 @@ boundary and is explicitly out of scope here.
 - A coding-agent backend reports its live session's context size, read from its own
   transcript (`adapter/agent.Agent.ContextTokens`); Claude Code's implementation reads
   the last assistant message's usage from the newest `*.jsonl` under its home.
-- `AgentView` carries `contextTokens`; the board's `status` reads `full` once a worker
-  is retired, alongside the existing `down`/`stalled`/etc.
+- `AgentView` carries `contextTokens`; `BoardState` carries `contextFullThreshold` so a
+  front-end can render fill against it without hardcoding a duplicate. The board's
+  `status` reads `full` once a worker is retired, alongside the existing
+  `down`/`stalled`/etc. Both the TUI and CLI agents list show a fill percentage
+  column; the detail views show the raw token count.
 - `workflow.Engine.claimNext` (and the two `AgentDirective` paths that block on it)
   skip a worker whose context is past `ContextFullThreshold` (170k tokens) — the
   worker is told directly (`DirFull`) rather than left hanging in the wait loop.

@@ -457,6 +457,7 @@ func (m model) agentRows() []row {
 			ac.Render(fmt.Sprintf("%-9s", a.Status)),
 			ac.Render(fmt.Sprintf("%-12s", a.Name)),
 			ac.Render(fmt.Sprintf("%-8s", a.Role)),
+			ac.Render(fmt.Sprintf("%4s", theme.ContextPercent(a.ContextTokens, m.state.ContextFullThreshold))),
 			ac.Render(task),
 		}, " "), a.Name})
 	}

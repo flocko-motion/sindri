@@ -23,6 +23,12 @@ zero.
 - **WHEN** an agent has not yet replied once in its current session
 - **THEN** its context size is reported as unmeasured, not as zero tokens used
 
+#### Scenario: A fill percentage is shown wherever agents are listed
+
+- **WHEN** a front-end renders its agents list
+- **THEN** each measured agent's context size is shown as a percentage of the
+  retirement threshold, not only in its own detail view
+
 ### Requirement: A human can clear a full worker's session at a leaf boundary
 
 Sindri SHALL provide a way to send Claude Code's own `/clear` into an agent's

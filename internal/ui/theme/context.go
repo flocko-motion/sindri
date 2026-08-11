@@ -16,3 +16,12 @@ func ContextLine(tokens int) string {
 	}
 	return fmt.Sprintf("%dk tokens", tokens/1000)
 }
+
+// ContextPercent renders an agent's fill against threshold ("62%"), for the compact list column;
+// "--" for an agent with no recorded usage yet, the same sentinel ContextLine reads.
+func ContextPercent(tokens, threshold int) string {
+	if tokens == 0 || threshold <= 0 {
+		return " --"
+	}
+	return fmt.Sprintf("%2d%%", tokens*100/threshold)
+}

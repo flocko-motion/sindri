@@ -17,6 +17,7 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // probeTimeout bounds each podman probe; a container that can't answer is "down", not a stalled read.
@@ -139,6 +140,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	return BoardState{
 		Agents: agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans, Chat: chat,
 		RepoDocs: docs, SpecCLIMissing: specMissing, StartedAt: h.startedAt.UTC().Format(time.RFC3339),
+		ContextFullThreshold: workflow.ContextFullThreshold,
 	}, nil
 }
 

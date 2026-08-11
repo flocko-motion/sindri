@@ -39,9 +39,9 @@ func featureLanded(ps *store.ProjectStore, t store.Task) bool {
 	return false
 }
 
-// claimContainer assigns the highest-priority unheld package to an agent and starts it on the
-// package's first open subtask. A package is any task with open children (-> store.OpenContainers):
-// a hierarchy is organised so one agent takes the whole thing, with the context that comes with it.
+// claimContainer assigns the highest-priority unheld package, starting its first open subtask —
+// or, with nothing left under it, holding it anyway so the agent finishes it on the SAME branch
+// (git.EnsureBranch), never a fresh one.
 func (e *Engine) claimContainer(project, worker string) (string, bool, error) {
 	ps := e.store.For(project)
 	root := e.deps.ProjectRoot(project)
@@ -54,9 +54,6 @@ func (e *Engine) claimContainer(project, worker string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	if len(children) == 0 {
-		return "", false, nil // marked but nothing open to work
-	}
 	base, err := e.baseBranch(root)
 	if err != nil {
 		return "", false, err
@@ -68,6 +65,13 @@ func (e *Engine) claimContainer(project, worker string) (string, bool, error) {
 	wt := filepath.Join(root, a.Workspace)
 	if err := git.EnsureBranch(wt, c.ID, base); err != nil {
 		return "", false, err
+	}
+	if len(children) == 0 {
+		if err := ps.SetState(store.AgentState{Agent: worker, Container: c.ID, Branch: c.ID, Phase: "idle"}); err != nil {
+			return "", false, err
+		}
+		_ = ps.Log(worker, "claim-container", c.ID+" "+c.Title+" (nothing left — finishing it)")
+		return DirContainerDone(c.ID), true, nil
 	}
 	child := children[0]
 	if err := e.startSubtask(project, worker, c.ID, child); err != nil {
