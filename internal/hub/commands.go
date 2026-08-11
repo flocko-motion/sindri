@@ -22,6 +22,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/repo"
+	"github.com/flo-at/sindri/internal/hub/task"
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
@@ -79,7 +80,7 @@ func (h *Hub) registry() *registry.Registry {
 		// Scoped to what the role already sees (-> cmdComment): a worker its own task or held
 		// container, a reviewer the task of the PR it's reviewing, a planner/coauthor any task —
 		// they already read the whole backlog. Findings belong on the task, not the activity log.
-		registry.Command{Name: "comment", Help: "comment on a task: comment <id> <text...>",
+		registry.Command{Name: "comment", Help: commentHelp(registry.Caller{}), HelpFor: commentHelp,
 			Roles: []string{"worker", "reviewer", "planner", "coauthor"},
 			Blocked: func(c registry.Caller) string {
 				switch c.Role {
@@ -200,7 +201,7 @@ func (h *Hub) AgentCommands(project, name string) ([]CmdInfo, error) {
 	avail := h.registry().Available(c)
 	out := make([]CmdInfo, len(avail))
 	for i, cmd := range avail {
-		out[i] = CmdInfo{Name: cmd.Name, Help: cmd.Help}
+		out[i] = CmdInfo{Name: cmd.Name, Help: cmd.HelpText(c)}
 	}
 	return out, nil
 }
@@ -238,7 +239,7 @@ func (h *Hub) AgentExec(project, name string, args []string, out io.Writer) (int
 	// `<verb> --help` comes from the registry, handled before Run so a help request reaches the
 	// agent as help rather than as an argument the verb tries to interpret.
 	if len(args) > 1 && isHelpArg(args[1]) {
-		fmt.Fprintf(out, "%s\n", cmd.Help)
+		fmt.Fprintf(out, "%s\n", cmd.HelpText(c))
 		return 0, nil
 	}
 	exit, err := cmd.Run(c, args[1:], out)
@@ -316,17 +317,80 @@ func (h *Hub) cmdLog(c registry.Caller, args []string, out io.Writer) (int, erro
 	return 0, nil
 }
 
-// cmdComment posts a comment on a task, reusing the same service the front-ends' `task comment`
-// writes through. Scope is enforced here rather than trusted from the argument: a worker or
-// reviewer names an id already implied by its state, but nothing stops it typing another project's
-// or another agent's — checked against what caller() resolved, not what was asked for.
+// commentUsage is the argument form for this caller: no id where the caller's own state already names
+// the task, both forms for a worker inside a feature, and the id required of a planner or coauthor,
+// who address the whole backlog. A container is spelled out as the literal id to type.
+func commentUsage(c registry.Caller) string {
+	switch c.Role {
+	case "worker":
+		if c.Container != "" && c.Task != "" { // two in reach only once a subtask is actually assigned
+			return fmt.Sprintf("comment <text...> (the subtask you're on), or comment %s <text...> (the feature)", c.Container)
+		}
+		return "comment <text...>"
+	case "reviewer":
+		return "comment <text...>"
+	}
+	return "comment <id> <text...>"
+}
+
+// commentHelp is the verb's help line. A caller with no role yields the general form, which is what
+// the registry carries as the static Help.
+func commentHelp(c registry.Caller) string {
+	switch c.Role {
+	case "worker":
+		return "comment on your current task: " + commentUsage(c)
+	case "reviewer":
+		return "comment on the task of the PR you're reviewing: " + commentUsage(c)
+	}
+	return "comment on a task: " + commentUsage(c)
+}
+
+// commentTarget is the task a caller's own state already names, "" for a role where nothing does. A
+// worker inside a feature has two, and the subtask wins — that is what it has open when it finds
+// something. The container stays reachable by its id, and the reply says which one was written to.
+func (h *Hub) commentTarget(c registry.Caller) (string, error) {
+	switch c.Role {
+	case "worker":
+		if c.Task != "" {
+			return c.Task, nil
+		}
+		return c.Container, nil
+	case "reviewer":
+		ps := h.store.For(c.Project)
+		pr, err := ps.ReviewingPR(c.Agent)
+		if err != nil {
+			return "", err
+		}
+		p, ok, err := ps.GetPR(pr)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			// A missing row for an assigned PR is a hub fault, not something the agent can act on.
+			return "", fmt.Errorf("agent %q is reviewing PR %q, which is not in the store", c.Agent, pr)
+		}
+		return p.Task, nil
+	}
+	return "", nil // planner, coauthor: the whole backlog is in reach, so no single task is implied
+}
+
+// cmdComment posts a comment through the same service the front-ends' `task comment` writes to. The
+// id is OPTIONAL wherever the caller's state names a task (-> commentTarget); a first argument shaped
+// like an id is the explicit form, anything else starts the text. Scope is checked against what
+// caller() resolved, never trusted from the argument.
 func (h *Hub) cmdComment(c registry.Caller, args []string, out io.Writer) (int, error) {
-	if len(args) < 2 {
-		fmt.Fprintln(out, "usage: comment <id> <text...>")
+	target, err := h.commentTarget(c)
+	if err != nil {
+		return 1, err
+	}
+	id, body := target, strings.Join(args, " ")
+	if len(args) > 0 && task.IsID(args[0]) {
+		id, body = args[0], strings.Join(args[1:], " ")
+	}
+	if id == "" || strings.TrimSpace(body) == "" {
+		fmt.Fprintf(out, "usage: %s\n", commentUsage(c))
 		return 2, nil
 	}
-	id := args[0]
-	body := strings.Join(args[1:], " ")
 	ps := h.store.For(c.Project)
 	switch c.Role {
 	case "worker":
@@ -335,15 +399,7 @@ func (h *Hub) cmdComment(c registry.Caller, args []string, out io.Writer) (int, 
 			return 1, nil
 		}
 	case "reviewer":
-		pr, err := ps.ReviewingPR(c.Agent)
-		if err != nil {
-			return 1, err
-		}
-		p, ok, err := ps.GetPR(pr)
-		if err != nil {
-			return 1, err
-		}
-		if !ok || id != p.Task {
+		if id != target {
 			fmt.Fprintf(out, "%s isn't the task of the PR you're reviewing — you can only comment on that\n", id)
 			return 1, nil
 		}
@@ -359,7 +415,18 @@ func (h *Hub) cmdComment(c registry.Caller, args []string, out io.Writer) (int, 
 		fmt.Fprintf(out, "%v\n", err) // an empty body, say, is the agent's to fix, not a hub fault
 		return 1, nil
 	}
-	fmt.Fprintln(out, "commented")
+	// With the id optional the agent may not have typed the target, and inside a feature two are in
+	// reach — so name it, and say which of the two.
+	which := ""
+	if c.Container != "" {
+		switch id {
+		case c.Task:
+			which = " (the subtask you're on)"
+		case c.Container:
+			which = " (the feature you hold)"
+		}
+	}
+	fmt.Fprintf(out, "commented on %s%s\n", id, which)
 	return 0, nil
 }
 

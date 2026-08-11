@@ -24,10 +24,28 @@
       error — matching `AgentExec`'s convention that a returned `error` means a
       hub fault, not something the agent did.
 
+## 2b. The id is optional where the hub can resolve it
+
+- [x] 2b.1 A worker's and a reviewer's comment defaults to the task their state
+      already names — the worker's current task (the SUBTASK, inside a feature),
+      the reviewer's the task of the PR under review. A planner's and a
+      coauthor's id stays required: neither has a single current task.
+- [x] 2b.2 The first argument is read as an id only when it is a whole,
+      well-shaped task id (`task.IsID`); anything else starts the text. So
+      `comment <text...>` and `comment <id> <text...>` are both accepted, and a
+      body that happens to begin with a prefix is not mistaken for an id.
+- [x] 2b.3 Help is per-caller (`registry.Command.HelpFor`): a worker sees
+      `comment <text...>`, a planner `comment <id> <text...>`, and a worker
+      holding a feature sees both forms with the container's literal id. The
+      same wording serves the usage message.
+- [x] 2b.4 The reply names the task written to, and for a worker holding a
+      feature says which of its two it was.
+
 ## 3. Prompts
 
-- [x] 3.1 The worker's system prompt names `sindri comment` as where a finding
-      belongs, ahead of `sindri log`.
+- [x] 3.1 The worker's system prompt names `sindri comment "<text>"` as where a
+      finding belongs, ahead of `sindri log`, in the bare form it actually types,
+      and says that inside a feature the bare form writes to the subtask.
 
 ## 4. Spec
 

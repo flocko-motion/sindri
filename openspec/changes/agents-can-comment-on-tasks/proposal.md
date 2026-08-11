@@ -39,6 +39,13 @@ title and the content disagree, and neither covers an agent writing a comment.
   verb is state-filtered (absent from a worker's surface with no assignment,
   from a reviewer's with nothing to review) and enforces the same scope inside
   its handler, independent of what the caller claims.
+- The id is optional wherever that scope resolves to one task: a worker writes
+  `comment <text...>` and it lands on the task it is working, a reviewer's on the
+  task under review. A planner and a coauthor still name one. Since the surface
+  is state-filtered, the help is too — a role is shown only the arguments it
+  supplies — so `registry.Command` gains a per-caller `HelpFor`. Inside a feature
+  the bare form means the subtask, the container is reached by its id, and the
+  reply names which of the two it wrote to.
 - `comments.Add` gains an `author` parameter, threaded from the caller's own
   identity rather than a hardcoded `"user"` — fixing the local-comment
   attribution bug for the human path too (it now sends `"user"` explicitly
@@ -53,7 +60,10 @@ title and the content disagree, and neither covers an agent writing a comment.
 ## Impact
 
 - **Source of truth:** `internal/hub/comments/service.go` (`Add`'s new
-  `author` param), `internal/hub/commands.go` (`comment` verb + scope check),
+  `author` param), `internal/hub/commands.go` (`comment` verb + scope check +
+  per-role argument form), `internal/hub/registry/registry.go` (`HelpFor`),
+  `internal/hub/task/ids.go` (`IsID`, the whole-string id check the optional
+  argument needs),
   `internal/hub/server.go` and `internal/client/client.go` (the human path now
   threads `"user"` explicitly through the same field).
 - No wire format change beyond `TellReq.Source` now being read on this route

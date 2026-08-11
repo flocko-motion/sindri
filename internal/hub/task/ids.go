@@ -77,6 +77,27 @@ func IsOwned(id string) bool {
 	return false
 }
 
+// IsID reports whether s is a whole task id, rather than prose that merely starts like one — the
+// question asked of an argument that MIGHT be an id, where OwnerOf's prefix match is too loose.
+// `comment` takes an optional id ahead of free text, and "sd-1c3041 is the task this corrects"
+// carries the mint prefix while being a sentence.
+func IsID(s string) bool {
+	if OwnerOf(s) == OwnerUnknown {
+		return false
+	}
+	_, rest, _ := strings.Cut(s, "-") // every prefix ends in "-", so OwnerOf matching guarantees the cut
+	if rest == "" {
+		return false
+	}
+	return !strings.ContainsFunc(rest, func(r rune) bool {
+		switch {
+		case r >= '0' && r <= '9', r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r == '-', r == '_':
+			return false
+		}
+		return true
+	})
+}
+
 // IsLegacyTD reports whether an id came from the td tool's own numbering.
 //
 // This is NOT "does sindri own it", and the two must not be swapped. The td import reads rows out

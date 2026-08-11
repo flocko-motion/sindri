@@ -104,6 +104,29 @@ func TestOwnedAndLegacyTDAreDifferentQuestions(t *testing.T) {
 	}
 }
 
+// TestIsIDClaimsOnlyAWholeID is what lets an id be OPTIONAL in front of free text: `comment` reads
+// its first argument as the task to comment on only if that argument IS one, so the check has to
+// refuse a sentence that merely opens with a prefix. OwnerOf alone would claim every line below.
+func TestIsIDClaimsOnlyAWholeID(t *testing.T) {
+	for _, id := range []string{"sd-abc123", "td-abc123", "os-abc123", "gh-42", "sd-a_b-c"} {
+		if !IsID(id) {
+			t.Errorf("IsID(%q) = false, want true", id)
+		}
+	}
+	for _, prose := range []string{
+		"sd-1c3041 is the task this corrects", // the case that made the id look mandatory
+		"td- ",
+		"sd-",
+		"the body is stale",
+		"gh-42, and the one before it",
+		"",
+	} {
+		if IsID(prose) {
+			t.Errorf("IsID(%q) = true — prose would be eaten as the comment's target", prose)
+		}
+	}
+}
+
 // TestGitHubIDRoundTrips: the adapter builds and reverses issue ids through here, so the pair must
 // agree, and must refuse an id belonging to another source rather than returning a plausible zero.
 func TestGitHubIDRoundTrips(t *testing.T) {

@@ -33,6 +33,11 @@ type Caller struct {
 type Command struct {
 	Name string
 	Help string
+	// HelpFor tailors the help line to the caller, for a verb whose ARGUMENTS differ by role or
+	// state — what a worker types for `comment` is not what a planner types. The surface is already
+	// filtered to what a caller can do, and by the same reasoning an argument a caller never supplies
+	// does not belong in the one line it reads to learn the verb. nil means Help serves everyone.
+	HelpFor func(Caller) string
 	// Roles allowed to see/run this command; empty means all roles.
 	Roles []string
 	// Blocked reports why the state machine holds this command back from a caller right now, or ""
@@ -44,6 +49,16 @@ type Command struct {
 	// Run executes the command, streaming to out, returning a process-style exit
 	// code. Supplied by the hub so it can reach the store/adapters.
 	Run func(c Caller, args []string, out io.Writer) (int, error)
+}
+
+// HelpText is the help this caller should read: the tailored line where the verb has one, else Help.
+// Every reader of a command's help goes through here, so a tailored verb cannot be listed with one
+// wording and answer `--help` with another.
+func (cmd Command) HelpText(c Caller) string {
+	if cmd.HelpFor != nil {
+		return cmd.HelpFor(c)
+	}
+	return cmd.Help
 }
 
 // Available reports whether cmd is offered to caller right now.

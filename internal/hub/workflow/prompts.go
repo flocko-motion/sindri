@@ -195,8 +195,10 @@ As a worker:
   self-check and fix failures before submitting.
 - A finding worth the next reader knowing — the task body is wrong, you hit a
   blocker, you made a call worth recording — goes ON THE TASK:
-  ` + "`sindri comment <id> \"<text>\"`" + `. That is what a human or the next
-  agent will actually read; your activity log (` + "`sindri log`" + `) is not.
+  ` + "`sindri comment \"<text>\"`" + ` — no id, it goes on what you're working
+  on. That is what a human or the next agent will actually read; your activity
+  log (` + "`sindri log`" + `) is not. Inside a feature the bare form writes to
+  the SUBTASK you're on; to reach the feature itself, name its id.
 - ` + "`sindri rebase`" + ` aligns your branch with the current reference branch
   any time — harmless, and worth doing if it's been a while. If it surfaces
   conflicts, fix the marked files in /workspace and run ` + "`sindri rebase`" + `
