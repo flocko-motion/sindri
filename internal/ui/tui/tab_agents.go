@@ -314,11 +314,18 @@ func (m model) agentItems() []metaItem {
 	} else {
 		status += dimStyle.Render("  (⏎ why)")
 	}
+	// Absolute: `value` is a child process's working directory and what `y` copies, so the text
+	// shows that same string. With no project root to join to, the relative form still shows — the
+	// field holds its place — but plain, since a shell opened at a relative path lands anywhere.
+	wsIt := metaItem{text: "workspace: " + dash(a.Workspace)}
+	if ws := m.agentWorkspacePath(a.Name); ws != "" {
+		wsIt = metaItem{text: "workspace: " + ws, kind: "path", value: ws}
+	}
 	items := []metaItem{
 		{text: "role:      " + a.Role},
 		{text: status, kind: "view", value: "diag"},
 		taskIt, featIt, prIt,
-		{text: "workspace: " + dash(a.Workspace)},
+		wsIt,
 		{text: "memory:    " + memoryLabelTUI(a.Memory) + dimStyle.Render("  (container RAM · e to edit)")},
 		{text: "context:   " + theme.ContextLine(a.ContextTokens)},
 		{text: pod, kind: "view", value: "pod"},

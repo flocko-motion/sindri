@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -65,5 +66,78 @@ func TestStatusOpensTheLivenessProbe(t *testing.T) {
 	}
 	if !strings.Contains(body, "idle") {
 		t.Errorf("the probe should say which status it explains: %q", body)
+	}
+}
+
+// TestAgentWorkspaceIsAFocusablePath: the PRs tab has long offered the authoring agent's tree as a
+// "path" item, which is the single classification that makes it focusable, openable with ENTER and
+// copyable with `y`. The Agents tab named the same tree in plain text, so the tab that is ABOUT the
+// agent was the one place you could not take its path anywhere.
+func TestAgentWorkspaceIsAFocusablePath(t *testing.T) {
+	m := newModel(nil, nil, "")
+	m.tab, m.scopeRepo = 1, false
+	m.state = api.BoardState{
+		Projects: []api.Project{{Tag: "repo", Path: "/r/one"}},
+		Agents:   []api.AgentView{{Name: "dvalin", Project: "repo", Status: "idle", Workspace: ".worktrees/dvalin"}},
+	}
+	want := filepath.Join("/r/one", ".worktrees", "dvalin")
+
+	var ws metaItem
+	for _, it := range m.agentItems() {
+		if strings.HasPrefix(it.text, "workspace:") {
+			ws = it
+		}
+	}
+	if ws.kind != "path" || ws.value != want {
+		t.Fatalf("the workspace line should be an openable path, got kind=%q value=%q", ws.kind, ws.value)
+	}
+	// Absolute in the text too: `y` copies the value, so a shorter text would copy something the
+	// screen never showed.
+	if !strings.Contains(ws.text, want) {
+		t.Errorf("the workspace line shows %q, but %q is what it copies and opens", ws.text, want)
+	}
+	// Focusable means present in the actionable subset — that list is what the right cursor walks.
+	var found bool
+	for _, it := range m.agentActionable() {
+		if it.kind == "path" && it.value == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the workspace path is not reachable by the right-column cursor")
+	}
+
+	// And `y` on it copies the path rather than the row id, which is the whole point of the ask.
+	for i, it := range m.agentActionable() {
+		if it.kind == "path" {
+			m.rightFocus, m.rightCursor = true, i
+		}
+	}
+	m.onKey("y")
+	if m.flash != "copied: "+want {
+		t.Errorf("`y` on the workspace reported %q, want the path copied", m.flash)
+	}
+}
+
+// TestAgentWorkspaceWithoutAProjectRootStaysPlain: the absolute path is built by joining the agent's
+// repo-relative workspace to its project, so an unregistered project leaves nothing to join. The
+// field still shows — a field that vanishes reads as a bug — but not as somewhere to open, since a
+// shell started at a relative path lands wherever the TUI happens to be running.
+func TestAgentWorkspaceWithoutAProjectRootStaysPlain(t *testing.T) {
+	m := newModel(nil, nil, "")
+	m.tab, m.scopeRepo = 1, false
+	m.state = api.BoardState{Agents: []api.AgentView{{Name: "dvalin", Status: "idle", Workspace: ".worktrees/dvalin"}}}
+
+	var ws metaItem
+	for _, it := range m.agentItems() {
+		if strings.HasPrefix(it.text, "workspace:") {
+			ws = it
+		}
+	}
+	if !strings.Contains(ws.text, ".worktrees/dvalin") {
+		t.Errorf("the workspace field disappeared when its project root was unknown: %q", ws.text)
+	}
+	if ws.kind != "" {
+		t.Errorf("a workspace with no root to join to was offered as a %q to open", ws.kind)
 	}
 }
