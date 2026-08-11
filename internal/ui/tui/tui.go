@@ -73,6 +73,10 @@ type model struct {
 	cursor [5]int // one per section (Tasks/Agents/PRs/Repos/Chat)
 	list   scroll.Viewport
 	detail scroll.Viewport
+	// prMeta is the PRs tab's right column. It needs its own viewport because `detail` is spent on
+	// that tab's big diff pane, and a column built fresh each render can only ever show its top —
+	// which is what put the reviews and history below the fold out of reach entirely.
+	prMeta scroll.Viewport
 
 	filter     int // Tasks tab: open/closed/all
 	prFilter   int // PRs tab: unmerged/merged/all (default hides merged)

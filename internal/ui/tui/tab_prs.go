@@ -20,7 +20,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/ui/tui/scroll"
 )
 
 // defaultReviewPrompt pre-fills the Agentic Review instruction; the user edits it before dispatch.
@@ -334,7 +333,16 @@ func (m model) prBody() string {
 		return leftCol
 	}
 	rightW := m.w - leftW - 1
-	items := wrapMeta(m.prMetaItems(), rightW)
+	lines, hl := m.prMetaLines(rightW)
+	right := pane(lines, m.prMeta, rightW, hl)
+	return lipgloss.JoinHorizontal(lipgloss.Top, leftCol, divider(h), right)
+}
+
+// prMetaLines is the right column's wrapped text and the line to highlight, or -1. Returned
+// together because the highlight is an index INTO these lines: reclamp sizes the column and
+// scrolls that line into view, and prBody draws it, so the two must be counting the same rows.
+func (m model) prMetaLines(width int) ([]string, int) {
+	items := wrapMeta(m.prMetaItems(), width)
 	lines := make([]string, len(items))
 	hl, ai := -1, 0 // highlight the focused actionable item when the right column has focus
 	for i, it := range items {
@@ -346,10 +354,7 @@ func (m model) prBody() string {
 			ai++
 		}
 	}
-	var rv scroll.Viewport
-	rv.Resize(h, len(lines))
-	right := pane(lines, rv, rightW, hl)
-	return lipgloss.JoinHorizontal(lipgloss.Top, leftCol, divider(h), right)
+	return lines, hl
 }
 
 // prContentWidth is the left pane's width, narrowed by the detail column; content wraps to it.

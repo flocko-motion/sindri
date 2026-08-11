@@ -77,13 +77,15 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.cursor[m.tab]--
 		}
 	case "J": // scroll the detail pane down (yazi-style secondary-pane scroll)
+		vp := m.scrollTarget()
 		for i := 0; i < detailScrollStep; i++ {
-			m.detail.ScrollDown()
+			vp.ScrollDown()
 		}
 		return nil
 	case "K": // scroll the detail pane up
+		vp := m.scrollTarget()
 		for i := 0; i < detailScrollStep; i++ {
-			m.detail.ScrollUp()
+			vp.ScrollUp()
 		}
 		return nil
 	case "g": // goto the focused cross-reference's home, else jump the list to top

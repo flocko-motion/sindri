@@ -11,6 +11,8 @@ import (
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/flo-at/sindri/internal/ui/tui/scroll"
 )
 
 // reclamp keeps the active tab's cursor + both viewports in range.
@@ -31,6 +33,12 @@ func (m *model) reclamp() {
 	// when the selection changes (syncDetail).
 	if m.tab == 2 { // PRs: detail pane is the big bottom-left content (any width)
 		m.detail.Resize(max(1, m.bodyHeight()-m.prListHeight()-1), len(m.prContentLines()))
+		// The right column is a second scrollable region on this tab. Resize, not SetCursor: it is
+		// offset-driven like the diff pane, and re-following a cursor here would drag the view back
+		// on every poll — the way a scroll that does not survive a tick reads as one that never
+		// happened.
+		lines, _ := m.prMetaLines(max(1, m.w-m.prContentWidth()-1))
+		m.prMeta.Resize(m.bodyHeight(), len(lines))
 	} else if m.tab == 0 || m.tab == 3 { // generic detail pane: size to the WRAPPED count
 		wrapped, _ := wrapContentMapped(m.detailLines(), m.detailWidth())
 		m.detail.Resize(m.bodyHeight(), len(wrapped))
@@ -39,6 +47,18 @@ func (m *model) reclamp() {
 	} else {
 		m.detail.Resize(m.bodyHeight(), len(m.detailLines()))
 	}
+}
+
+// scrollTarget is the viewport J/K move. Every tab has one detail pane and J/K drive it from
+// either side, which is the pinned rule. The PRs tab is the exception the rule did not foresee: it
+// has TWO scrollable regions — the diff and the metadata column — and one pair of keys, so there
+// they follow the focus. Without this the column's reviews, findings and history had no key at all
+// and everything past the first screenful was unreachable.
+func (m *model) scrollTarget() *scroll.Viewport {
+	if m.tab == 2 && m.rightFocus {
+		return &m.prMeta
+	}
+	return &m.detail
 }
 
 // syncDetail fetches the selected item's rich detail when the selection changes.
