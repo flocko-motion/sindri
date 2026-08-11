@@ -256,7 +256,10 @@ func (m model) prRows() []row {
 		if p.Kind == "interim" { // ◇ = mid-task contribution (vs a final, task-done PR)
 			status = "◇" + status
 		}
-		out = append(out, row{fmt.Sprintf("%s %-14s %-9s %4s %-10s %s", repo, p.ID, status, shortAge(p.CreatedAt), p.Agent, p.Branch), p.ID})
+		// Who is reviewing it, from the board — a dash where nobody is, so the column reads as
+		// "waiting for a reviewer" rather than as missing.
+		out = append(out, row{fmt.Sprintf("%s %-14s %-9s %4s %-10s %-10s %s",
+			repo, p.ID, status, shortAge(p.CreatedAt), p.Agent, dash(p.Reviewer), p.Branch), p.ID})
 	}
 	return out
 }
@@ -412,6 +415,9 @@ func (m model) prMetaItems() []metaItem {
 		metaItem{text: "kind:   " + prKindLabel(d.PR.Kind)},
 		metaItem{text: "agent:  " + d.PR.Agent, kind: "agent", value: d.PR.Agent},
 	)
+	if d.PR.Reviewer != "" { // only when somebody holds it: an empty line here would read as a gap
+		items = append(items, metaItem{text: "review: " + d.PR.Reviewer, kind: "agent", value: d.PR.Reviewer})
+	}
 	// Absolute: `value` becomes a child process's working directory, so a relative one would break.
 	if ws := m.agentWorkspacePath(d.PR.Agent); ws != "" {
 		items = append(items, metaItem{text: "path:   " + ws, kind: "path", value: ws})

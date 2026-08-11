@@ -61,6 +61,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		}
 	}
 	prs = kept
+	h.fillReviewers(prs)
 	var tasks []store.Task
 	var specMissing bool
 	if selected != "" {
@@ -141,6 +142,25 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		Agents: agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans, Chat: chat,
 		RepoDocs: docs, SpecCLIMissing: specMissing, StartedAt: h.startedAt.UTC().Format(time.RFC3339),
 	}, nil
+}
+
+// fillReviewers stamps each PR with the agent holding an open review of it. Whether a PR is being
+// looked at, and by whom, is the hub's answer: a front-end deriving it from the reviews would be
+// deciding rather than rendering, and the two would drift the first time the rule moved.
+func (h *Hub) fillReviewers(prs []api.PR) {
+	byProject := map[string]map[string]string{}
+	for i, pr := range prs {
+		active, ok := byProject[pr.Project]
+		if !ok {
+			var err error
+			if active, err = h.store.For(pr.Project).ActiveReviewers(); err != nil {
+				log.Printf("hub: active reviewers for %s: %v", pr.Project, err)
+				active = map[string]string{}
+			}
+			byProject[pr.Project] = active
+		}
+		prs[i].Reviewer = active[pr.ID]
+	}
 }
 
 // AgentStatsView is one agent's resource snapshot; it crosses the wire, so it is

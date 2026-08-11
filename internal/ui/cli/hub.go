@@ -360,7 +360,10 @@ func prListCmd() *cobra.Command {
 					if p.Kind == "interim" { // ◇ = mid-task contribution (vs a final, task-done PR)
 						status = "◇" + status
 					}
-					fmt.Printf("%-14s %-13s %4s  %-10s %s\n", p.ID, status, shortAge(p.CreatedAt), p.Agent, p.Branch)
+					// Who is reviewing it, alongside who wrote it — the same column the PRs tab shows,
+					// from the same field, so the two front-ends cannot answer differently.
+					fmt.Printf("%-14s %-13s %4s  %-10s %-10s %s\n",
+						p.ID, status, shortAge(p.CreatedAt), p.Agent, dash(p.Reviewer), p.Branch)
 				}
 				if len(prs) == 0 {
 					fmt.Fprintln(os.Stderr, "no PRs")

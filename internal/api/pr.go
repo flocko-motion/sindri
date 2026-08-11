@@ -19,6 +19,11 @@ type PR struct {
 	// Kind: a final PR's merge closes the task, an interim one keeps it open and puts
 	// the worker straight back on it. "" is read as "final".
 	Kind string `json:"kind"`
+	// Reviewer is the agent holding an open review of this PR, "" when nobody is. Derived from the
+	// reviews table by the hub rather than stored on the row, and carried here because whether a PR
+	// is being looked at is the hub's answer to give — a front-end that worked it out for itself
+	// would be deciding, not rendering.
+	Reviewer string `json:"reviewer,omitempty"`
 }
 
 // Review is one review item attached to a PR.

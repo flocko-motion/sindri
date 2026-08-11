@@ -51,10 +51,20 @@ func (e *Engine) FleetPRs() ([]store.PR, error) {
 		reg[p.Tag] = true
 	}
 	out := make([]store.PR, 0, len(prs))
+	active := map[string]map[string]string{}
 	for _, pr := range prs {
-		if reg[pr.Project] {
-			out = append(out, pr)
+		if !reg[pr.Project] {
+			continue
 		}
+		if _, ok := active[pr.Project]; !ok {
+			byPR, err := e.store.For(pr.Project).ActiveReviewers()
+			if err != nil {
+				return nil, err
+			}
+			active[pr.Project] = byPR
+		}
+		pr.Reviewer = active[pr.Project][pr.ID] // who is looking at it, for any list that shows PRs
+		out = append(out, pr)
 	}
 	return out, nil
 }
@@ -89,6 +99,9 @@ func (e *Engine) PRInfo(project, id string) (PRDetail, error) {
 	}
 	if !ok {
 		return PRDetail{}, fmt.Errorf("no such PR %q", id)
+	}
+	if active, aerr := ps.ActiveReviewers(); aerr == nil {
+		pr.Reviewer = active[id] // the same fact the lists carry, so the detail cannot disagree
 	}
 	diff, _ := git.Diff(e.deps.ProjectRoot(project), pr.Base, pr.Branch)
 	task, _ := e.TaskInfo(project, pr.Task) // linked task; zero value if unreadable

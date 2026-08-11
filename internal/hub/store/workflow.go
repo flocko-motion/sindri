@@ -366,6 +366,27 @@ func (p *ProjectStore) UnclaimedReview(id *int64, pr *string) (bool, error) {
 	return true, nil
 }
 
+// ActiveReviewers maps each PR in this project to the agent holding an open review of it. One query
+// for the whole project, since every PR list wants it and a lookup per row would be paid per render.
+func (p *ProjectStore) ActiveReviewers() (map[string]string, error) {
+	rows, err := p.s.db.Query(
+		`SELECT pr, author FROM reviews WHERE project=? AND verdict='' AND author!='' ORDER BY id`,
+		p.project)
+	if err != nil {
+		return nil, fmt.Errorf("active reviewers: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var pr, author string
+		if err := rows.Scan(&pr, &author); err != nil {
+			return nil, err
+		}
+		out[pr] = author
+	}
+	return out, rows.Err()
+}
+
 // AmendReview replaces an open review's requirement, for a second instruction arriving while the
 // first is still being carried out. The review is the same one: the reviewer keeps the branch it
 // has checked out and is simply told more.
