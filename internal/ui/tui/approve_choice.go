@@ -76,6 +76,18 @@ func (m *model) openApproveAfterPriorityChoice(id string) {
 	}
 }
 
+// proposedOrder names the priority the task already carries, since approving is the moment that
+// rating starts handing work out — and a planner may have proposed it. Empty when it has none, and
+// then priorityAfterApprove asks for one instead.
+func (m model) proposedOrder(id string) string {
+	for _, t := range m.state.Tasks {
+		if t.ID == id && t.Priority != "" {
+			return "It is rated " + theme.PriorityLabel(t.Priority) + "; approving releases it at that order."
+		}
+	}
+	return ""
+}
+
 // openApproveChoice asks how far the verdict carries when the task has proposals under it. With
 // nothing waiting below, keyApprove approves directly — there is nothing to choose between.
 func (m *model) openApproveChoice(id string, pending int) {
@@ -84,6 +96,7 @@ func (m *model) openApproveChoice(id string, pending int) {
 	kids := theme.Plural(pending, "subtask", "subtasks")
 	m.choice = choiceModalState{
 		active: true, title: "approve " + id + "?  (" + kids + " below await approval)",
+		note:    m.proposedOrder(id),
 		options: []string{"cancel", "approve this task only", "approve task + " + kids},
 		values:  []string{"cancel", "task", "tree"},
 		apply: func(v string) tea.Cmd {

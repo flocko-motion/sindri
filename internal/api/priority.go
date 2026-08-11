@@ -3,9 +3,47 @@
 // job:     how far a priority setting reaches (PriorityScope), and what reaching below a task
 // would ACTUALLY do to the tasks down there (PriorityEffect) — the fact both front-ends
 // state before offering the choice.
-// limits:  data and pure derivation only; applying a scope is the hub's (-> workflow.SetPriority)
-// and the wording is a front-end's (-> internal/ui/theme).
+// limits:  data and pure derivation only; applying a scope is the hub's (-> workflow.SetPriority).
+// How a priority is styled is a front-end's (-> internal/ui/theme); the vocabulary is here,
+// since the hub parses the same words off an agent's command.
 package api
+
+// PriorityWords are the assignable priorities, highest first. THE ONE TABLE: a front-end keeping its
+// own would drift from what the hub parses, and the two meet only in a user's typo.
+var PriorityWords = []string{"critical", "high", "mid", "low", "none"}
+
+// priorityCodes maps each word to the P-code stored and sorted on.
+var priorityCodes = map[string]string{
+	"critical": "P0",
+	"high":     "P1",
+	"mid":      "P2",
+	"low":      "P3",
+	"none":     "P4", // the lowest rating, NOT unrated — unrated is the empty string
+	// Input-only aliases, kept because earlier callers accepted them.
+	"medium":  "P2",
+	"trivial": "P4",
+	"minor":   "P4",
+}
+
+// ParsePriority reads a priority off a flag or an agent's command; a stored P-code passes through.
+// ok is false for anything else, since the nearest wrong guess re-orders someone's backlog silently.
+// Note "none" is P4, the lowest RATING — unrated (no worker can claim it) has no word on purpose.
+func ParsePriority(word string) (code string, ok bool) {
+	if c, found := priorityCodes[word]; found {
+		return c, true
+	}
+	if _, found := priorityLabels[word]; found {
+		return word, true // already a P-code
+	}
+	return "", false
+}
+
+// priorityLabels is the inverse, for the front-ends that display a stored code.
+var priorityLabels = map[string]string{"P0": "critical", "P1": "high", "P2": "mid", "P3": "low", "P4": "none"}
+
+// PriorityLabel maps a stored P-code to its word; "" for anything unrecognised, so a caller decides
+// what to show rather than being handed a code dressed as a word.
+func PriorityLabel(code string) string { return priorityLabels[code] }
 
 // PriorityScope is how far a priority setting reaches below the task it names.
 type PriorityScope string

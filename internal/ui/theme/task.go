@@ -17,45 +17,28 @@ import (
 // PriorityLabel maps td's P0…P4 priority codes to readable words for display (sorting
 // still uses the codes). Shared by the CLI and the TUI so they agree.
 func PriorityLabel(p string) string {
-	switch p {
-	case "P0":
-		return "critical"
-	case "P1":
-		return "high"
-	case "P2":
-		return "mid"
-	case "P3":
-		return "low"
-	case "P4":
-		return "none" // "came in unrated" — GitHub issues import here by default
-	case "":
-		return "-"
-	default:
-		return p
-	}
-}
-
-// PriorityCode maps a readable word to td's P-code (the inverse of PriorityLabel). A
-// value already in P-code form passes through.
-func PriorityCode(word string) string {
-	switch word {
-	case "critical":
-		return "P0"
-	case "high":
-		return "P1"
-	case "mid", "medium":
-		return "P2"
-	case "low":
-		return "P3"
-	case "none", "trivial", "minor": // trivial/minor kept as back-compat input aliases
-		return "P4"
-	default:
+	if word := api.PriorityLabel(p); word != "" {
 		return word
 	}
+	if p == "" {
+		return "-" // unrated, which is a different fact from P4 ("none", the lowest rating)
+	}
+	return p
 }
 
-// PriorityWords are the assignable priorities, highest first (for choice menus).
-var PriorityWords = []string{"critical", "high", "mid", "low", "none"}
+// PriorityCode maps a readable word to td's P-code (the inverse of PriorityLabel). A value already
+// in P-code form passes through, and so does anything unrecognised — this is the lenient front-end
+// door onto api's table, which is where the vocabulary itself lives.
+func PriorityCode(word string) string {
+	if code, ok := api.ParsePriority(word); ok {
+		return code
+	}
+	return word
+}
+
+// PriorityWords are the assignable priorities, highest first (for choice menus) — api's list, not a
+// copy: a menu offering a word the hub cannot parse is a bug nobody sees until someone picks it.
+var PriorityWords = api.PriorityWords
 
 // Plural renders a counted noun ("1 task", "3 tasks"), so a confirmation line and the modal it
 // mirrors count the same way.

@@ -74,17 +74,35 @@ func TestEditTaskUsageIsVisible(t *testing.T) {
 	}
 }
 
-// TestPlannerCannotSetPriority: OpenLeaves hands out only tasks that are approved AND carry a
-// priority, so the priority a human sets at approval is what releases work. A planner setting
-// it would hand itself the release switch.
-func TestPlannerCannotSetPriority(t *testing.T) {
+// TestPlannerProposesAPriority replaces the rule that a planner may set none at all. That rule
+// conflated two things: a priority is intent and ORDER, approval is authorisation, and only the
+// second releases work. A proposal is created pending, so a rating on it can never make it
+// claimable — which is why the planner may express the sequence it planned.
+func TestPlannerProposesAPriority(t *testing.T) {
 	for _, flag := range []string{"--priority", "-p"} {
-		if _, _, err := parseTaskFlags([]string{flag, "P0", "urgent thing"}); err == nil {
-			t.Errorf("%s should be refused, not accepted", flag)
+		spec, words, err := parseTaskFlags([]string{flag, "high", "urgent thing"})
+		if err != nil {
+			t.Fatalf("%s should be accepted: %v", flag, err)
+		}
+		if spec.Priority != "P1" {
+			t.Errorf("%s high should parse to P1, got %q", flag, spec.Priority)
+		}
+		if strings.Join(words, " ") != "urgent thing" {
+			t.Errorf("%s consumed the title: %v", flag, words)
 		}
 	}
-	if strings.Contains(createTaskUsage, "--priority") {
-		t.Error("create-task usage should not advertise --priority")
+	// An unrecognised word is refused rather than guessed at — the nearest wrong guess silently
+	// re-orders the backlog.
+	if _, _, err := parseTaskFlags([]string{"--priority", "urgentish", "a thing"}); err == nil {
+		t.Error("an unknown priority should be refused")
+	}
+	if !strings.Contains(createTaskUsage, "--priority") {
+		t.Error("create-task usage should advertise --priority now that it exists")
+	}
+	// And the usage must no longer say prioritisation is a human decision, which is the half of the
+	// old rule that changed.
+	if strings.Contains(createTaskUsage, "two human decisions") {
+		t.Error("the usage still describes prioritisation as the user's alone")
 	}
 }
 

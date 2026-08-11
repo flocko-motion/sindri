@@ -12,6 +12,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/task"
@@ -155,6 +156,11 @@ func (e *Engine) CmdCreateTask(c registry.Caller, args []string, out io.Writer) 
 	if spec.Type == "" {
 		spec.Type = "task"
 	}
+	// The priority is applied AFTER the approval row, never with the task: a task carrying a rating
+	// and no approval row is claimable, so writing them the other way round would open a window in
+	// which a worker could take work the user has not seen.
+	proposed := spec.Priority
+	spec.Priority = ""
 	id, err := e.CreateTask(c.Project, spec)
 	if err != nil {
 		// A rejected parent is the caller's to fix, so it goes to them rather than to the
@@ -165,6 +171,12 @@ func (e *Engine) CmdCreateTask(c registry.Caller, args []string, out io.Writer) 
 	if err := e.store.For(c.Project).SetApproval(id, "pending", ""); err != nil {
 		return 1, err
 	}
+	if proposed != "" {
+		if err := e.writePriority(c.Project, id, proposed); err != nil {
+			return 1, err
+		}
+		e.refreshCachedTask(c.Project, id)
+	}
 	e.deps.Notify()
 	fmt.Fprintln(out, ReplyTaskProposed(id, spec.Title))
 	return 0, nil
@@ -172,11 +184,12 @@ func (e *Engine) CmdCreateTask(c registry.Caller, args []string, out io.Writer) 
 
 // createTaskUsage is the one description of create-task's surface, shown for a bad flag, a
 // missing title, and (via CreateTaskHelp) `create-task --help`.
-const createTaskUsage = "usage: create-task [--parent <id>] [--type <task|feature|bug|epic>] [--body <text>] [--labels a,b] <title...>\n" +
-	"  --parent  hang the task under an existing task or openspec change (os-*), so it joins that tree\n" +
-	"  --body    the task's description — what a worker needs in order to start\n" +
-	"The user sets the priority when they approve: a task without one is never handed to a worker,\n" +
-	"so approval and prioritisation are the two human decisions that release work."
+const createTaskUsage = "usage: create-task [--parent <id>] [--type <task|feature|bug|epic>] [--body <text>] [--labels a,b] [--priority <critical|high|mid|low|none>] <title...>\n" +
+	"  --parent    hang the task under an existing task or openspec change (os-*), so it joins that tree\n" +
+	"  --body      the task's description — what a worker needs in order to start\n" +
+	"  --priority  the order you propose this is worked in; `prioritise-task` changes it afterwards\n" +
+	"Approval is what releases work, and it is the user's alone. A priority you set is a proposed\n" +
+	"ordering: the task stays unclaimable until the user approves it."
 
 // CreateTaskHelp is what the command registry advertises for create-task, so the verb list
 // and the verb's own usage describe one surface.
@@ -184,8 +197,8 @@ const CreateTaskHelp = "propose a new task, needing the user's approval. " + cre
 
 // parseTaskFlags splits create-task's flags from the words forming the title, accepting both
 // `--flag value` and `--flag=value`. An unknown flag is an error: silently ignoring one creates
-// the task without the parent or body that was asked for. Priority is absent on purpose — it is
-// what releases work to a worker (-> store.OpenLeaves), so it stays the user's.
+// the task without the parent or body that was asked for. A priority is a proposed ORDER and is
+// accepted; what releases the task is the user's approval, which no flag here can reach.
 func parseTaskFlags(args []string) (TaskSpec, []string, error) {
 	var s TaskSpec
 	var words []string
@@ -213,6 +226,12 @@ func parseTaskFlags(args []string) (TaskSpec, []string, error) {
 			s.Description = val
 		case "--labels", "-l":
 			s.Labels = strings.Split(val, ",")
+		case "--priority", "-p":
+			code, known := api.ParsePriority(val)
+			if !known {
+				return s, nil, fmt.Errorf("unknown priority %q — one of: %s", val, strings.Join(api.PriorityWords, ", "))
+			}
+			s.Priority = code
 		default:
 			return s, nil, fmt.Errorf("unknown flag %q", name)
 		}

@@ -250,7 +250,13 @@ func approvedPriority(b backend, id, priority string, scope api.PriorityScope, a
 		return nil // the backlog didn't read; silence beats being wrong about what is owed
 	}
 	if api.ReleasedByPriority(all)[id] {
-		return nil // already rated, or under something that is — nothing is owed
+		// Name the rating being authorised. A planner may have proposed the sequence, and the
+		// approve is the moment it takes effect — silence here would land work in a worker's lap
+		// at an order the user never consciously agreed to.
+		if word := priorityOf(all, id); word != "" {
+			fmt.Fprintf(os.Stderr, "%s is %s and now claimable\n", id, word)
+		}
+		return nil
 	}
 	fmt.Fprintf(os.Stderr, "%s has no priority, so no worker can claim it yet — "+
 		"`task priority %s <critical|high|mid|low|none>`, or --priority does both in one call\n", id, id)
@@ -286,6 +292,17 @@ func ratedApproval(w io.Writer, b taskLister, id string) {
 		fmt.Fprintf(w, "%s below it also await approval (`task approve %s --subtasks` takes them too)\n",
 			theme.Plural(below, "task", "tasks"), id)
 	}
+}
+
+// priorityOf is the readable priority a task carries itself, or "" — the ancestor's rating that
+// also releases it is not this task's sequence to state.
+func priorityOf(all []api.Task, id string) string {
+	for _, t := range all {
+		if t.ID == id && t.Priority != "" {
+			return theme.PriorityLabel(t.Priority)
+		}
+	}
+	return ""
 }
 
 func taskRejectCmd() *cobra.Command {

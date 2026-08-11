@@ -86,6 +86,7 @@ func (h *Hub) registry() *registry.Registry {
 		registry.Command{Name: "task", Help: workflow.TaskHelp, Roles: []string{"planner", "coauthor", "worker"}, Run: h.wf.CmdTasks},
 		registry.Command{Name: "create-task", Help: workflow.CreateTaskHelp, Roles: []string{"planner"}, Run: h.wf.CmdCreateTask},
 		registry.Command{Name: "edit-task", Help: workflow.EditTaskHelp, Roles: []string{"planner"}, Run: h.wf.CmdEditTask},
+		registry.Command{Name: "prioritise-task", Help: workflow.PrioritiseTaskHelp, Roles: []string{"planner"}, Run: h.wf.CmdPrioritiseTask},
 		// Planner only, never a worker, which could undo a human's verdict on its own task
 		// (-> h.ReopenTask, which needs both h.wf and h.comments, so it lives here, not workflow).
 		registry.Command{Name: "reopen-task", Help: reopenTaskHelp, Roles: []string{"planner"}, Run: h.cmdReopenTask},
