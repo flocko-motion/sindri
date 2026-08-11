@@ -70,6 +70,10 @@ type RunOpts struct {
 type Runtime interface {
 	// Name identifies the backend for humans (e.g. "podman", "apple container").
 	Name() string
+	// DefaultMemory is the limit an agent gets when none is configured. The backend answers it
+	// because the right number is a property of how it runs a container: a shared-kernel container
+	// takes what it uses from the host, a micro-VM reserves its whole limit up front.
+	DefaultMemory() string
 	Run(o RunOpts) error
 	Exec(name string, args ...string) ([]byte, error)
 	ExecContext(ctx context.Context, name string, args ...string) ([]byte, error)
@@ -111,6 +115,7 @@ var errNoRuntime = errors.New("no container runtime configured")
 type noop struct{}
 
 func (noop) Name() string                                                   { return "none (no runtime configured)" }
+func (noop) DefaultMemory() string                                          { return "" }
 func (noop) Run(RunOpts) error                                              { return errNoRuntime }
 func (noop) Exec(string, ...string) ([]byte, error)                         { return nil, errNoRuntime }
 func (noop) ExecContext(context.Context, string, ...string) ([]byte, error) { return nil, errNoRuntime }
@@ -139,6 +144,9 @@ func (noop) RebuildImage(string, string, io.Writer) (string, error)             
 
 // Name identifies the wired backend for humans (e.g. "podman", "apple container").
 func Name() string { return active.Name() }
+
+// DefaultMemory is the wired backend's per-agent memory default.
+func DefaultMemory() string { return active.DefaultMemory() }
 
 // Run launches a detached agent pod on the wired backend.
 func Run(o RunOpts) error { return active.Run(o) }

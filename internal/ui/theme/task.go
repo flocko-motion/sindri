@@ -117,3 +117,13 @@ func FormatNext(x api.NextExplain) string {
 	}
 	return b.String()
 }
+
+// MemoryDefaultLabel names an agent's unset RAM limit with the figure actually in force, shared so
+// the CLI and the TUI cannot print different defaults. Empty (no runtime wired) says so rather than
+// inventing a number.
+func MemoryDefaultLabel(dflt string) string {
+	if strings.TrimSpace(dflt) == "" {
+		return "(hub default)"
+	}
+	return dflt + " (default)"
+}

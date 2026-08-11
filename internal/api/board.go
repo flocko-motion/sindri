@@ -59,6 +59,10 @@ type BoardState struct {
 	// StartedAt is when this hub process came up (RFC3339), so `hub status` reads uptime from the
 	// board rather than shelling out to `ps`.
 	StartedAt string `json:"started_at"`
+	// DefaultMemory is the RAM an agent gets with none configured — the wired runtime's answer, since
+	// a container ceiling and a micro-VM reservation do not want the same number. Carried so a
+	// front-end renders "(default)" with the figure actually in force rather than a copy of it.
+	DefaultMemory string `json:"defaultMemory"`
 }
 
 // AgentStatsView is one agent's resource snapshot; Err is set, not swallowed into a misleading zero.

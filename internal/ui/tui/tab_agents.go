@@ -91,10 +91,11 @@ func (m model) agentContainer(a api.AgentView) string {
 	return container.AgentContainer(m.root, a.Name)
 }
 
-// memoryLabelTUI shows the RAM limit; the "2g" mirrors the hub's defaultAgentMemory (display only).
-func memoryLabelTUI(m string) string {
+// memoryLabelTUI shows the RAM limit, naming the hub's own default where none is configured — the
+// figure comes off the board rather than being copied here, since it is the runtime's to state.
+func memoryLabelTUI(m, dflt string) string {
 	if strings.TrimSpace(m) == "" {
-		return "2g (default)"
+		return theme.MemoryDefaultLabel(dflt)
 	}
 	return m
 }
@@ -326,7 +327,7 @@ func (m model) agentItems() []metaItem {
 		{text: status, kind: "view", value: "diag"},
 		taskIt, featIt, prIt,
 		wsIt,
-		{text: "memory:    " + memoryLabelTUI(a.Memory) + dimStyle.Render("  (container RAM · e to edit)")},
+		{text: "memory:    " + memoryLabelTUI(a.Memory, m.state.DefaultMemory) + dimStyle.Render("  (container RAM · e to edit)")},
 		{text: "context:   " + theme.ContextLine(a.ContextTokens)},
 		{text: pod, kind: "view", value: "pod"},
 	}

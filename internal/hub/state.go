@@ -16,6 +16,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
+	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -141,6 +142,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	return BoardState{
 		Agents: agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans, Chat: chat,
 		RepoDocs: docs, SpecCLIMissing: specMissing, StartedAt: h.startedAt.UTC().Format(time.RFC3339),
+		DefaultMemory: agent.MemoryOrDefault(""),
 	}, nil
 }
 

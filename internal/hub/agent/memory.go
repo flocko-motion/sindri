@@ -10,23 +10,27 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/flo-at/sindri/internal/container"
 )
 
-// defaultAgentMemory caps an agent pod's RAM when it has none configured. The
-// runtime default (1GiB) is too little for a worker running the Go compiler,
-// linters, and Claude Code at once; but each apple micro-VM takes its RAM from the
-// host, so this stays modest — on a small Mac a few agents at once shouldn't crowd
-// it out. It's per-agent configurable (store.Agent.Memory) via `agent new --memory`
-// / `agent memory` / the TUI; this is only the fallback.
-const defaultAgentMemory = "2g"
+// fallbackMemory is used only when no runtime is wired (a worker-only process, a test): the hub
+// must still print a number rather than an empty cell.
+const fallbackMemory = "2g"
 
-// MemoryOrDefault resolves an agent's configured memory limit, falling back to the
-// hub default when unset.
+// MemoryOrDefault resolves an agent's configured memory limit, falling back to the RUNTIME's
+// default when unset. The right default is the backend's to state, not the hub's: a shared-kernel
+// container's limit is a ceiling it grows into, a micro-VM's is a reservation taken from the host
+// whether used or not, so the same number does not suit both. Per-agent config still wins
+// (store.Agent.Memory, via `agent new --memory` / `agent memory` / the TUI).
 func MemoryOrDefault(m string) string {
 	if strings.TrimSpace(m) != "" {
 		return strings.TrimSpace(m)
 	}
-	return defaultAgentMemory
+	if d := container.DefaultMemory(); d != "" {
+		return d
+	}
+	return fallbackMemory
 }
 
 // memoryRe validates a memory limit like "2g", "512m", "2048", "1gb".

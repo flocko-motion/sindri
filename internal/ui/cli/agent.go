@@ -199,7 +199,7 @@ func agentNewCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&role, "role", "worker", "agent role: worker|reviewer|planner|coauthor")
-	c.Flags().StringVar(&memory, "memory", "", "RAM limit for this agent's container (e.g. 4g, 512m; default 2g)")
+	c.Flags().StringVar(&memory, "memory", "", "RAM limit for this agent's container (e.g. 4g, 512m; unset = the runtime's default)")
 	c.Flags().BoolVar(&noStart, "no-start", false, "register the identity only, without starting a container")
 	return c
 }
@@ -494,9 +494,15 @@ func agentInfoCmd() *cobra.Command {
 		Use: "info <name>", Short: "Show an agent's status (state, task, PR, clients, recent activity)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, found *api.AgentView) error {
+				// The hub's own default, for the "(default)" note — read rather than assumed, since
+				// it is the wired runtime's answer and differs between a container and a micro-VM.
+				var dflt string
+				if st, err := b.State(); err == nil {
+					dflt = st.DefaultMemory
+				}
 				fmt.Printf("agent:     %s\nrole:      %s\nstatus:    %s\ntask:      %s\nfeature:   %s\npr:        %s\nworkspace: %s\nmemory:    %s\ncontext:   %s\n",
 					found.Name, found.Role, found.Status, agentTaskLabel(b, found.Task),
-					agentTaskLabel(b, found.Feature), dash(found.PR), dash(found.Workspace), memoryLabel(found.Memory),
+					agentTaskLabel(b, found.Feature), dash(found.PR), dash(found.Workspace), memoryLabel(found.Memory, dflt),
 					theme.ContextLine(found.ContextTokens))
 				// engine + the exact runtime instance (id, image, cpus, memory limit, host pid)
 				if inst, err := b.Instance(found.Name); err == nil && inst != "" {
@@ -541,10 +547,10 @@ func eventTime(ts string) string {
 	return t.Local().Format("15:04:05")
 }
 
-// memoryLabel marks the fallback when unset; "2g" mirrors hub defaultAgentMemory, display only.
-func memoryLabel(m string) string {
+// memoryLabel marks the fallback when unset, with the hub's own figure rather than a copy of it.
+func memoryLabel(m, dflt string) string {
 	if strings.TrimSpace(m) == "" {
-		return "2g (default)"
+		return theme.MemoryDefaultLabel(dflt)
 	}
 	return m
 }
