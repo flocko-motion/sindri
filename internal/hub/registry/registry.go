@@ -97,6 +97,31 @@ func (r *Registry) Available(c Caller) []Command {
 	return out
 }
 
+// Offered is one verb of the caller's role and, when the state machine is holding it back, why.
+type Offered struct {
+	Command
+	Blocked string // "" when it can be run now
+}
+
+// Surface is every verb of the caller's ROLE, each with the reason it cannot be run yet. Listed
+// rather than hidden: an agent reads this as what EXISTS, so a missing verb reads as one the system
+// never had — one shown a list without submit concluded the hub was broken. Role isolation still
+// applies, so another role's verbs are absent entirely rather than blocked.
+func (r *Registry) Surface(c Caller) []Offered {
+	var out []Offered
+	for _, cmd := range r.cmds {
+		if len(cmd.Roles) > 0 && !slices.Contains(cmd.Roles, c.Role) {
+			continue
+		}
+		var why string
+		if cmd.Blocked != nil {
+			why = cmd.Blocked(c)
+		}
+		out = append(out, Offered{Command: cmd, Blocked: why})
+	}
+	return out
+}
+
 // Resolve answers what a caller may do with a verb: the command when it is open to it, otherwise the
 // reason the state machine is holding it back. A ROLE mismatch reports no reason and so reads as an
 // unknown name — a worker learns nothing of the reviewer's surface — but a verb of its own role at

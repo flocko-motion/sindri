@@ -12,6 +12,7 @@ import (
 	"os"
 	"runtime"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/client"
 )
 
@@ -44,22 +45,37 @@ func main() {
 		return
 	}
 
-	// `sindri help` lists the verbs available to you RIGHT NOW. The set is
-	// computed by the hub from your role and current state, so it changes as you
-	// move through the workflow (and may change over time as the system evolves).
-	// You normally don't need this — running `sindri` tells you the next step
-	// directly.
+	// `sindri help` shows your role's verbs: what you can run now, and what the workflow is holding
+	// back with the reason. Running `sindri` tells you the next step directly, so this is for
+	// working out where you stand rather than what to do.
 	if args[0] == "commands" || args[0] == "help" {
 		cmds, err := c.Commands()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "cannot reach the hub — is it running?", err)
 			os.Exit(1)
 		}
-		fmt.Println("Commands available to you right now:")
+		fmt.Println("Available to you right now:")
 		for _, cmd := range cmds {
-			fmt.Printf("  %-12s %s\n", cmd.Name, cmd.Help)
+			if cmd.Unavailable == "" {
+				fmt.Printf("  %-12s %s\n", cmd.Name, cmd.Help)
+			}
 		}
-		fmt.Println("\nThis set is contextual — it depends on your role and current state, so it\nchanges as you work (and may grow over time). Run `sindri help` again whenever\nyou want to see what's available now, and `sindri` (no arguments) for the single\nnext step.")
+		// The rest of your verbs, with the reason each is held back. They are shown because they
+		// exist and will become available again — a verb missing from a list reads as one that was
+		// never there, which is not the same thing and leads somewhere else entirely.
+		var blocked []api.CmdInfo
+		for _, cmd := range cmds {
+			if cmd.Unavailable != "" {
+				blocked = append(blocked, cmd)
+			}
+		}
+		if len(blocked) > 0 {
+			fmt.Println("\nNot right now — these are yours, but the workflow is holding them back:")
+			for _, cmd := range blocked {
+				fmt.Printf("  %-12s %s\n", cmd.Name, cmd.Unavailable)
+			}
+		}
+		fmt.Println("\nThis set is contextual — it depends on your role and current state, so it\nchanges as you work. Run `sindri help` again whenever you want to see where you\nstand, and `sindri` (no arguments) for the single next step.")
 		return
 	}
 

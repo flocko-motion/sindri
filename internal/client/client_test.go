@@ -121,7 +121,10 @@ func TestAgentSocketIdentityAndSurface(t *testing.T) {
 	worker := DialSocket(agentchan.SocketPath(proj, "brokkr"))
 	rune := DialSocket(agentchan.SocketPath(proj, "rune"))
 
-	// Idle worker surface: status/log/next; submit state-gated; approve/reject host-only.
+	// An idle worker's surface draws two different lines, and the difference is the point. A verb of
+	// ANOTHER role is absent outright — role isolation, so a worker learns nothing of the reviewer's
+	// surface. A verb of its OWN role that the state machine holds back is listed WITH the reason:
+	// an agent reads this list as what exists, so dropping submit taught one that submit was gone.
 	wc, err := worker.Commands()
 	if err != nil {
 		t.Fatalf("worker commands: %v", err)
@@ -132,9 +135,26 @@ func TestAgentSocketIdentityAndSurface(t *testing.T) {
 			t.Fatalf("idle worker surface missing %q: %v", want, wn)
 		}
 	}
-	for _, bad := range []string{"approve", "reject", "merge", "submit"} {
+	for _, bad := range []string{"approve", "reject", "merge"} {
 		if has(wn, bad) {
-			t.Fatalf("idle worker surface must not include %q: %v", bad, wn)
+			t.Fatalf("another role's verb must not appear at all: %q in %v", bad, wn)
+		}
+	}
+	var submit *api.CmdInfo
+	for i := range wc {
+		if wc[i].Name == "submit" {
+			submit = &wc[i]
+		}
+	}
+	if submit == nil {
+		t.Fatalf("submit is the worker's own verb and must be listed even when held back: %v", wn)
+	}
+	if submit.Unavailable == "" {
+		t.Error("an idle worker cannot submit — the listing must say why, or it reads as runnable")
+	}
+	for _, cmd := range wc {
+		if cmd.Name == "status" && cmd.Unavailable != "" {
+			t.Errorf("status is runnable now; it must not be marked unavailable (%q)", cmd.Unavailable)
 		}
 	}
 

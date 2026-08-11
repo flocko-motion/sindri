@@ -192,16 +192,18 @@ func isHelpArg(s string) bool {
 	return false
 }
 
-// AgentCommands returns the command surface currently available to an agent.
+// AgentCommands returns an agent's whole role surface: what it can run now, and what it cannot
+// along with why. A blocked verb is listed rather than dropped — an agent reads this as the set of
+// things that EXIST, so omitting one it was told to run reads as a broken hub.
 func (h *Hub) AgentCommands(project, name string) ([]CmdInfo, error) {
 	c, err := h.caller(project, name)
 	if err != nil {
 		return nil, err
 	}
-	avail := h.registry().Available(c)
-	out := make([]CmdInfo, len(avail))
-	for i, cmd := range avail {
-		out[i] = CmdInfo{Name: cmd.Name, Help: cmd.HelpText(c)}
+	surface := h.registry().Surface(c)
+	out := make([]CmdInfo, len(surface))
+	for i, o := range surface {
+		out[i] = CmdInfo{Name: o.Name, Help: o.HelpText(c), Unavailable: o.Blocked}
 	}
 	return out, nil
 }

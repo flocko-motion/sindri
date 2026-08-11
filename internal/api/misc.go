@@ -48,6 +48,10 @@ type Event struct {
 type CmdInfo struct {
 	Name string `json:"name"`
 	Help string `json:"help"`
+	// Unavailable is why this verb cannot be run right now, "" when it can. Listed rather than
+	// omitted: a verb absent from the list reads as one that does not exist, and an agent that
+	// concludes that improvises instead of asking.
+	Unavailable string `json:"unavailable,omitempty"`
 }
 
 // ClientView is one dial-in on an agent's tmux session; orphaned attaches show up here too.
