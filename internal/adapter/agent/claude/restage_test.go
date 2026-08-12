@@ -159,3 +159,80 @@ func TestAnEqualExpiryIsNotRewritten(t *testing.T) {
 		t.Error("an unchanged credential must not be rewritten")
 	}
 }
+
+// blankCreds writes what an agent's own Claude Code leaves behind when its refresh fails: the file
+// is present and well-formed, and worthless — an empty token with a zero expiry.
+func blankCreds(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"claudeAiOauth":{"accessToken":"","refreshToken":"ref","expiresAt":0}}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestABlankedAgentIsRestaged is what five agents were stuck in: the shared token lapsed, each pod's
+// own refresh failed and rewrote its credentials empty, and the board read them as signed out. A
+// blank file is not a fresher token — it is not in the comparison at all.
+func TestABlankedAgentIsRestaged(t *testing.T) {
+	hostDir := hostHome(t)
+	creds(t, filepath.Join(hostDir, credFile), 6*time.Hour)
+	dir := t.TempDir()
+	agentPath := filepath.Join(dir, credFile)
+	blankCreds(t, agentPath)
+
+	wrote, err := Claude{}.RestageCredentials(dir)
+	if err != nil {
+		t.Fatalf("RestageCredentials: %v", err)
+	}
+	if !wrote {
+		t.Fatal("an agent holding an empty token must be restaged")
+	}
+	if expiryOf(t, agentPath) <= 0 {
+		t.Error("the agent should now carry the host's working token")
+	}
+}
+
+// TestABlankHostTokenIsNotDistributed: the host's file is briefly empty while its own Claude Code
+// re-logs in. Copying it then would push a dead token onto every agent at once — the fleet-wide
+// outage this exists to end, caused by the thing meant to fix it.
+func TestABlankHostTokenIsNotDistributed(t *testing.T) {
+	hostDir := hostHome(t)
+	blankCreds(t, filepath.Join(hostDir, credFile))
+	dir := t.TempDir()
+	agentPath := filepath.Join(dir, credFile)
+	creds(t, agentPath, 6*time.Hour)
+	before := expiryOf(t, agentPath)
+
+	wrote, err := Claude{}.RestageCredentials(dir)
+	if err == nil {
+		t.Error("an unusable host token must be reported, not passed over in silence")
+	}
+	if wrote {
+		t.Fatal("an unusable host token must never be distributed")
+	}
+	if after := expiryOf(t, agentPath); after != before {
+		t.Errorf("the agent's working token was overwritten with a blank one: %d then %d", before, after)
+	}
+}
+
+// TestHostTokenExpiryIsWhatTheHubWatches: the fleet shares one token, so the hub needs its expiry to
+// know when a redistribution is due rather than discovering it from agents going quiet.
+func TestHostTokenExpiryIsWhatTheHubWatches(t *testing.T) {
+	hostDir := hostHome(t)
+	creds(t, filepath.Join(hostDir, credFile), 90*time.Minute)
+	expires, usable := Claude{}.HostTokenExpiry()
+	if !usable {
+		t.Fatal("a working host token should report usable")
+	}
+	if left := time.Until(time.UnixMilli(expires)); left < 80*time.Minute || left > 100*time.Minute {
+		t.Errorf("expiry reads %v away, want ~90m", left)
+	}
+	// Blank means unusable, which is the state a human has to act on.
+	blankCreds(t, filepath.Join(hostDir, credFile))
+	if _, stillUsable := (Claude{}).HostTokenExpiry(); stillUsable {
+		t.Error("an empty host token must not report usable")
+	}
+}

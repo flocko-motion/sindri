@@ -16,12 +16,24 @@ import (
 // credFile is the name Claude reads its OAuth credentials from, in both homes.
 const credFile = ".credentials.json"
 
-// oauthEnvelope is the shape of that file, read for the one field this needs.
+// oauthEnvelope is the shape of that file, read for the fields that decide usability.
 type oauthEnvelope struct {
 	ClaudeAiOauth struct {
-		ExpiresAt int64 `json:"expiresAt"`
+		AccessToken string `json:"accessToken"`
+		ExpiresAt   int64  `json:"expiresAt"`
 	} `json:"claudeAiOauth"`
 }
+
+// tokenState is what one credential file says about its own usability.
+type tokenState struct {
+	token   string
+	expires int64 // epoch ms; 0 when the file carries no expiry
+}
+
+// usable reports whether these credentials could authenticate anything. A file can be present,
+// well-formed and worthless: an agent whose own refresh fails rewrites it with an EMPTY token and a
+// zero expiry, which is what five agents were holding while the board called them signed out.
+func (c tokenState) usable() bool { return c.token != "" && c.expires > 0 }
 
 // RestageCredentials copies the host's credentials into dir when the host's access token outlasts
 // the one already there, and reports whether it wrote.
@@ -39,13 +51,20 @@ func (Claude) RestageCredentials(dir string) (bool, error) {
 	if !found {
 		return false, nil // nothing to carry; the host has no credentials to offer
 	}
-	hostExp, err := accessExpiry(hostData)
+	host, err := parseCreds(hostData)
 	if err != nil {
-		return false, fmt.Errorf("read host credential expiry: %w", err)
+		return false, fmt.Errorf("read host credentials: %w", err)
+	}
+	// Never hand out what cannot work. The host's file is briefly blank while its own Claude Code
+	// re-logs in, and copying it then would push a dead token onto every agent at once.
+	if !host.usable() {
+		return false, fmt.Errorf("the host's Claude credentials are not usable (no access token) — log in on the host")
 	}
 	dst := filepath.Join(dir, credFile)
 	if have, rerr := os.ReadFile(dst); rerr == nil {
-		if mine, perr := accessExpiry(have); perr == nil && mine >= hostExp {
+		// An unusable file is replaced whatever its expiry claims: the comparison below is about which
+		// of two working tokens reaches further, and a blank one is not in that race.
+		if mine, perr := parseCreds(have); perr == nil && mine.usable() && mine.expires >= host.expires {
 			return false, nil // the agent's own is at least as fresh
 		}
 	}
@@ -56,14 +75,28 @@ func (Claude) RestageCredentials(dir string) (bool, error) {
 	return true, nil
 }
 
-// accessExpiry is the access token's expiry in epoch milliseconds.
-func accessExpiry(data []byte) (int64, error) {
+// parseCreds reads a credential file's token and expiry. A file missing them parses fine and reports
+// unusable — that IS the state to detect, so it is not an error.
+func parseCreds(data []byte) (tokenState, error) {
 	var env oauthEnvelope
 	if err := json.Unmarshal(data, &env); err != nil {
-		return 0, err
+		return tokenState{}, err
 	}
-	if env.ClaudeAiOauth.ExpiresAt == 0 {
-		return 0, fmt.Errorf("no claudeAiOauth.expiresAt")
+	return tokenState{token: env.ClaudeAiOauth.AccessToken, expires: env.ClaudeAiOauth.ExpiresAt}, nil
+}
+
+// HostTokenExpiry is when the host's own access token runs out, in epoch milliseconds, and whether
+// the host has a usable one at all. The hub watches this to know when a redistribution is due:
+// every agent shares this one token, so they all fall out of service the moment it lapses, and what
+// decides whether they come back is how quickly its replacement reaches them.
+func (Claude) HostTokenExpiry() (expiresAtMS int64, usable bool) {
+	data, found := hostCredentials(io.Discard)
+	if !found {
+		return 0, false
 	}
-	return env.ClaudeAiOauth.ExpiresAt, nil
+	c, err := parseCreds(data)
+	if err != nil || !c.usable() {
+		return 0, false
+	}
+	return c.expires, true
 }

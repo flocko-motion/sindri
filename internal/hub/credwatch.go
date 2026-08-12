@@ -7,22 +7,34 @@
 package hub
 
 import (
+	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	agentport "github.com/flo-at/sindri/internal/adapter/agent"
 	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
-// credInterval paces the upkeep. An access token lasts hours and a re-login is a human act, so a
-// few minutes is prompt enough, and each pass is a couple of small file reads per agent.
-const credInterval = 5 * time.Minute
+// credInterval paces the upkeep. It is the whole fleet's outage window, not a housekeeping cadence:
+// every agent runs on ONE shared token, so when it lapses they ALL stop at once and stay stopped
+// until the replacement reaches them. Five minutes of that was measured — the token expired at
+// 17:45, five agents had rewritten their own credentials blank by 17:43, and the board read them as
+// signed out. A pass is a couple of small file reads per agent, so paying it often is cheap.
+const credInterval = 15 * time.Second
+
+// expiryLead is how long before the token lapses the hub starts saying so. The renewal is the host's
+// Claude Code to make; the hub can only pass it on, so the useful act is naming what is coming.
+const expiryLead = 2 * time.Minute
 
 // credwatch re-stages agent credentials until stopped; one per hub, started by New.
 type credwatch struct {
 	h    *Hub
 	stop chan struct{}
 	done chan struct{}
+	// said is the last thing reported about the host token, so a 15s loop describes a change once
+	// rather than filling the log with the same sentence.
+	said string
 }
 
 // newCredwatch starts the loop. It must not block: New runs before Serve answers the socket.
@@ -47,23 +59,65 @@ func (c *credwatch) loop() {
 	}
 }
 
-// sweep offers every agent the host's credentials. Announced when one is taken, because a token
-// changing under a running agent explains behaviour that is otherwise hard to place.
+// sweep watches the shared token and offers every agent the host's credentials. Announced when one
+// is taken, because a token changing under a running agent explains behaviour that is otherwise hard
+// to place.
 func (c *credwatch) sweep() {
+	c.watchToken()
 	agents, err := c.h.store.AllAgents()
 	if err != nil {
 		log.Printf("hub: credential upkeep: roster: %v", err)
 		return
 	}
+	var took []string
 	for _, a := range agents {
 		wrote, err := agentport.RestageCredentials(paths.AgentHomeDir(a.Project, a.Name))
 		if err != nil {
-			log.Printf("hub: credential upkeep for %s: %v", a.Name, err)
+			c.say(fmt.Sprintf("hub: credential upkeep for %s: %v", a.Name, err))
 			continue
 		}
 		if wrote {
-			log.Printf("hub: refreshed %s's Claude credentials from the host", a.Name)
+			took = append(took, a.Name)
 		}
+	}
+	// One line for the round rather than one per agent: they share a token, so they are refreshed
+	// together, and twenty separate lines hide that it was a single event.
+	if len(took) > 0 {
+		log.Printf("hub: redistributed the host's Claude credentials to %d agent(s): %s",
+			len(took), strings.Join(took, ", "))
+	}
+}
+
+// watchToken reports the shared token's state as it changes: gone, lapsed, or about to lapse. Only
+// the host can renew it, so the hub's job is to make the coming outage legible rather than let a
+// fleet of "signed out" agents be the first news of it.
+func (c *credwatch) watchToken() {
+	expires, usable := agentport.HostTokenExpiry()
+	if !usable {
+		c.say("hub: the host has no usable Claude credentials — agents cannot be re-authenticated until you log in on the host")
+		return
+	}
+	left := time.Until(time.UnixMilli(expires))
+	switch {
+	case left <= 0:
+		c.say(fmt.Sprintf("hub: the shared Claude token lapsed %s ago — every agent is signed out until the host renews it",
+			left.Abs().Round(time.Second)))
+	case left <= expiryLead:
+		c.say(fmt.Sprintf("hub: the shared Claude token lapses in %s; the fleet stops until the host renews it",
+			left.Round(time.Second)))
+	default:
+		c.say("") // healthy: forget the last complaint so the next one is reported afresh
+	}
+}
+
+// say logs a message once, until it changes.
+func (c *credwatch) say(msg string) {
+	if msg == c.said {
+		return
+	}
+	c.said = msg
+	if msg != "" {
+		log.Print(msg)
 	}
 }
 
