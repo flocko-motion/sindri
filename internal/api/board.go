@@ -32,6 +32,10 @@ type AgentView struct {
 	// the fleet retired 1M agents at 17%.
 	ContextTokens int `json:"contextTokens"`
 	ContextWindow int `json:"contextWindow"`
+	// Retired: a human has wound it down, so it is handed no new work while it finishes what it
+	// holds. Carried beside Status rather than inside it, because it is true of a busy agent too —
+	// that is the whole point of setting it — and Status can only say one thing at a time.
+	Retired bool `json:"retired,omitempty"`
 }
 
 // RepoDocState is a repo's architecture-doc situation: the path in effect, and Advice ("" when fine).

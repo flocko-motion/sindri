@@ -351,8 +351,12 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 	}
 }
 
-// waitForNextTask is the idle-agent path: a full agent is told so immediately, not left hanging.
+// waitForNextTask is the idle-agent path: an agent that will get no more work is told so
+// immediately, not left blocking on a queue it is no longer served from.
 func (e *Engine) waitForNextTask(ctx context.Context, project, name string) (string, error) {
+	if a, ok, _ := e.store.For(project).GetAgent(name); ok && a.Retired {
+		return DirRetired, nil
+	}
 	if tokens, full := e.contextFull(project, name); full {
 		return DirFull(tokens), nil
 	}
@@ -551,6 +555,10 @@ func ToStoreTask(t task.Task) store.Task {
 
 // CmdNext claims the highest-priority open task for a worker and branches for it.
 func (e *Engine) CmdNext(c registry.Caller, _ []string, out io.Writer) (int, error) {
+	if a, ok, _ := e.store.For(c.Project).GetAgent(c.Agent); ok && a.Retired {
+		fmt.Fprintln(out, DirRetired)
+		return 0, nil
+	}
 	if tokens, full := e.contextFull(c.Project, c.Agent); full {
 		fmt.Fprintln(out, DirFull(tokens))
 		return 0, nil
@@ -592,6 +600,11 @@ func (e *Engine) ContextFull(project, worker string) bool {
 // claimNext claims the highest-priority open LEAF task (or a marked container) for a worker in a
 // project. Returns (directive, true) on a claim, ("", false) when idle or retired (full).
 func (e *Engine) claimNext(project, agent string) (string, bool, error) {
+	// Retired by a human, or by its own context filling: either way it is being wound down, and the
+	// gate is here rather than at the task queries so it holds however the work would have arrived.
+	if a, ok, _ := e.store.For(project).GetAgent(agent); ok && a.Retired {
+		return "", false, nil
+	}
 	if _, full := e.contextFull(project, agent); full {
 		return "", false, nil // retired: a full worker is not handed new work
 	}

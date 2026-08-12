@@ -175,6 +175,13 @@ func (h *Hub) Handler() http.Handler {
 		}
 		writeJSON(w, okMsg{"ok"}, h.agents.SetMemory(h.agentReq(r, req.Name), req.Name, req.Memory))
 	})
+	mux.HandleFunc("POST /agent/retire", func(w http.ResponseWriter, r *http.Request) {
+		var req NameReq
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"ok"}, h.agents.SetRetired(h.agentReq(r, req.Name), req.Name, req.Retired))
+	})
 	mux.HandleFunc("POST /agent/delete", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
 		if !decode(w, r, &req) {

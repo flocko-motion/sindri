@@ -106,6 +106,9 @@ func agentListCmd() *cobra.Command {
 				for _, a := range api.SortedAgents(st.Agents, st.Projects) {
 					line := fmt.Sprintf("%-10.10s %-12s %-8s %-10s %4s %-14s %s", a.Repo, a.Name, a.Role, a.Status,
 						theme.ContextPercent(a.ContextTokens, a.ContextWindow), dash(a.Task), dash(a.PR))
+					if a.Retired {
+						line += "  ⏹ retired" // beside the status, which still shows what it is doing
+					}
 					if a.Clients > 0 {
 						line += fmt.Sprintf("  👁%d", a.Clients)
 					}
@@ -223,6 +226,35 @@ func agentMemoryCmd() *cobra.Command {
 			})
 		},
 	}
+}
+
+// agentRetireCmd winds an agent down without interrupting it: the point is to stop it AFTER the work
+// in hand, so the pod keeps running and only the next assignment is withheld.
+func agentRetireCmd() *cobra.Command {
+	var back bool
+	c := &cobra.Command{
+		Use: "retire <name>", Short: "Assign this agent no further work (it finishes what it holds)", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
+				if err := b.SetRetired(a.Name, !back); err != nil {
+					return err
+				}
+				if back {
+					fmt.Fprintf(os.Stderr, "%s takes work again\n", a.Name)
+					return nil
+				}
+				held := "it holds nothing, so it is done now"
+				if a.Task != "" || a.Feature != "" || a.PR != "" {
+					held = "it will finish what it holds first"
+				}
+				fmt.Fprintf(os.Stderr, "%s retired: no new work — %s. Stop it with 'sindri agent stop %s', "+
+					"or bring it back with 'sindri agent retire %s --back'\n", a.Name, held, a.Name, a.Name)
+				return nil
+			})
+		},
+	}
+	c.Flags().BoolVar(&back, "back", false, "put the agent back in service")
+	return c
 }
 
 func agentDeleteCmd() *cobra.Command {

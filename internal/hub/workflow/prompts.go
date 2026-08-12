@@ -368,6 +368,12 @@ func DirClaimed(id, title, branch, arch string) string {
 
 const DirNoTasks = "No open tasks. Wait — the hub will tell you when there is work."
 
+// DirRetired answers an agent a human has wound down. It is told the reason, so it neither asks
+// again nor reads an empty queue into it — "no tasks" would have it waiting for work that is coming.
+const DirRetired = "[hub] You've been retired by the user: no further work will be assigned to you. " +
+	"Whatever you were holding you have already finished. Don't ask again and don't look for something " +
+	"to do — just wait quietly; they'll either bring you back or stop you."
+
 // DirFull tells a worker why it isn't getting the next task even with plenty in the queue: its own
 // context is full. Distinct from DirNoTasks so a retired agent never reads it as "nothing to do".
 func DirFull(tokens int) string {

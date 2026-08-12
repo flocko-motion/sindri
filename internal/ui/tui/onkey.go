@@ -136,6 +136,17 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 1 {
 			return m.agentStartStop()
 		}
+	case keyRetire: // agents: wind down / put back in service
+		if m.tab == 1 {
+			if a, ok := m.selAgent(); ok && m.cl != nil {
+				cl, name, back := m.cl, a.Name, a.Retired
+				m.flash = name + ": no new work — it finishes what it holds"
+				if back {
+					m.flash = name + " takes work again"
+				}
+				return mutateThenRefresh(cl, func() error { return cl.SetRetired(name, !back) })
+			}
+		}
 	case keyAttach: // agents/tasks/prs: attach to the live tmux session
 		if m.tab == 0 {
 			// Attach to whoever is working the selected task — the row you are looking at names

@@ -35,6 +35,7 @@ const (
 	keyStartS    = "S" // agent start/stop
 	keyMilestone = "M" // capture an agent's container branch as a PR (mutation → shift)
 	keyRebuild   = "B" // reBuild the agent image and relaunch (mutation → shift)
+	keyRetire    = "X" // wind an agent down: no new work (mutation → shift). R is rebase here, S stops it outright
 	keyStats     = "m" // an agent's memory against its limit (a view → lowercase)
 	keyTell      = "t" // tell an agent / show a PR's task
 	keyComment   = "i" // comment on a task (opens a prompt, so lowercase)
@@ -128,6 +129,14 @@ var keymap = []binding{
 	{keyMilestone, lbl("milestone PR"), scopeAgents},
 	{keyRebuild, lbl("rebuild image"), scopeAgents},
 	{keyReject, lbl("rebase"), scopeAgents}, // R = reBase (onto the reference branch)
+	// The label tracks the selection, since the key toggles and "retire" on an already-retired
+	// agent reads as a no-op the user would not press.
+	{keyRetire, func(m model) string {
+		if a, ok := m.selAgent(); ok && a.Retired {
+			return "unretire"
+		}
+		return "retire"
+	}, scopeAgents},
 	{keyClearCtx, lbl("clear context"), scopeAgents},
 	{keyDelete, lbl("delete"), scopeAgents},
 	{keyScopeTog, func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scopeAgents},

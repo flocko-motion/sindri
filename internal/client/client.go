@@ -153,6 +153,12 @@ func (c *HTTP) SetMemory(name, memory string) error {
 	return c.post("/agent/memory", api.NameReq{Name: name, Memory: memory})
 }
 
+// SetRetired winds an agent down (retired=true): it finishes what it holds and is handed nothing
+// new. false puts it back in service.
+func (c *HTTP) SetRetired(name string, retired bool) error {
+	return c.post("/agent/retire", api.NameReq{Name: name, Retired: retired})
+}
+
 // DeleteAgent removes an agent (pod, socket, worktree, identity).
 func (c *HTTP) DeleteAgent(name string) error {
 	return c.post("/agent/delete", api.NameReq{Name: name})

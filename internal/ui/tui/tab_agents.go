@@ -482,6 +482,9 @@ const warnGlyph = "⚠️"
 // where an emoji's two drawn cells against one measured would shear the whole strip.
 const gateGlyph = "!"
 
+// retiredGlyph marks an agent being wound down. Width-pinned like the others.
+const retiredGlyph = "⏹️"
+
 func (m model) agentRows() []row {
 	var visible []api.AgentView
 	for _, a := range m.state.Agents {
@@ -516,6 +519,11 @@ func (m model) agentRows() []row {
 		task := dash(work)
 		if a.Clients > 0 { // dial-ins attached — show the eye like the CLI list
 			task += fmt.Sprintf("  %s%d", eyeGlyph, a.Clients)
+		}
+		// Retirement rides beside the status, never in it: it is true of a busy agent too, and what
+		// that agent is doing right now is the one thing the status column exists to say.
+		if a.Retired {
+			task += "  " + stDone.Render(retiredGlyph+" retired")
 		}
 		out = append(out, row{strings.Join([]string{
 			m.repoStyle(a.Project).Render(fmt.Sprintf("%-10.10s", a.Repo)),
