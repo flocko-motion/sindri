@@ -73,6 +73,22 @@ func TestClaudeState(t *testing.T) {
 			want:   agent.Working,
 		},
 		{
+			// gloin, verbatim: the API cut the turn off, and the footer went on advertising a live turn.
+			// Measured on it, the pane's digest still changed every few seconds — so neither the words
+			// nor a still screen could see this, which is why it is matched by name.
+			name:   "a cut-off turn outranks the interrupt hint it leaves behind",
+			screen: "● API Error: Response stalled mid-stream. The response above may be incomplete.\n\n❯ \n  ⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt · ← for agents",
+			want:   agent.Failed,
+		},
+		{
+			// Once it really resumes, the error scrolls up out of the live region and the pane is a
+			// working pane again. Matched anywhere, it would keep reporting a turn that already retried.
+			name: "an API error scrolled out of the live region is history",
+			screen: "● API Error: Response stalled mid-stream.\n" +
+				strings.Repeat("  output since the retry\n", 14) + "✳ Working… (esc to interrupt)",
+			want: agent.Working,
+		},
+		{
 			// eitri, one minute after it was logged back in: the banner was still on screen while it
 			// answered the user below it. An interrupt hint is happening NOW; the banner may be history.
 			name: "a recovered agent working below an old banner is working",

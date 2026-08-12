@@ -44,6 +44,10 @@ type liveness struct {
 	// screen still for its duration (measured: 12s+ on a working agent), a stall holds it still
 	// indefinitely, and only the length tells them apart.
 	stillSince time.Time
+	// runtimeSince is when the runtime word last changed. A cut-off turn needs this rather than
+	// stillSince: its spinner keeps animating, so the screen never stands still even though nothing
+	// is happening — measured on gloin, two different digests 12s apart with a dead turn.
+	runtimeSince time.Time
 }
 
 // watchdog observes agent liveness on a loop; one per hub, started by New, stopped by Close.
@@ -225,6 +229,10 @@ func (w *watchdog) record(a store.Agent, up bool, clients int, obs agent.Observa
 	// an unfamiliar pane look stopped.
 	if next.runtime == "idle" && next.digest != "" && next.digest != prev.digest && prev.digest != "" {
 		next.runtime = "working"
+	}
+	// Set after the word is final, so it measures the state as reported rather than as read.
+	if next.runtimeSince = prev.runtimeSince; next.runtime != prev.runtime || next.runtimeSince.IsZero() {
+		next.runtimeSince = next.seen
 	}
 	w.obs[key] = next
 }

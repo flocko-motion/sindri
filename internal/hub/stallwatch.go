@@ -64,15 +64,21 @@ func (s *stallwatch) sweep() {
 	for _, a := range agents {
 		key := agentKey{a.Project, a.Name}
 		l, ok := s.h.watch.get(a.Project, a.Name)
-		if !ok || !l.up || l.stillSince.IsZero() {
+		// The spell is keyed on whichever clock this state is judged by, so a cut-off turn that
+		// resumes and dies again is a new spell rather than one already prodded for.
+		since := l.stillSince
+		if l.runtime == "api-error" {
+			since = l.runtimeSince
+		}
+		if !ok || !l.up || since.IsZero() {
 			delete(s.nudged, key) // moving again (or gone): the next stall is a new one
 			continue
 		}
-		if s.nudged[key].Equal(l.stillSince) {
+		if s.nudged[key].Equal(since) {
 			continue // already prodded for this spell
 		}
-		if s.h.wf.NudgeStalled(a.Project, a.Name, l.runtime, time.Since(l.stillSince)) {
-			s.nudged[key] = l.stillSince
+		if s.h.wf.NudgeStalled(a.Project, a.Name, l.runtime, time.Since(since)) {
+			s.nudged[key] = since
 		}
 	}
 }
@@ -85,6 +91,11 @@ func (h *Hub) stalledFor(project, name, phase, container string) (time.Duration,
 	if !ok || !l.up || l.stillSince.IsZero() {
 		return 0, false
 	}
-	stillFor := time.Since(l.stillSince)
-	return stillFor, workflow.Stalled(phase, container, l.runtime, stillFor)
+	// A cut-off turn is timed from when it started saying so, not from the screen going quiet: its
+	// spinner keeps redrawing, so stillSince would restart for ever and the retry never fire.
+	dwell := time.Since(l.stillSince)
+	if l.runtime == "api-error" {
+		dwell = time.Since(l.runtimeSince)
+	}
+	return dwell, workflow.Stalled(phase, container, l.runtime, dwell)
 }

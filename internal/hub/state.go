@@ -255,6 +255,10 @@ func overlayRuntime(status, runtime string, holds bool) string {
 		return "signed-out"
 	case "blocked":
 		return "blocked"
+	case "api-error":
+		// Outranks the phase for the same reason signed-out does: whatever it was doing, the turn
+		// that was doing it is dead. The hub retries, and the word says why it went quiet meanwhile.
+		return "api-error"
 	case "working", "idle":
 		// A pane in motion is not work in hand. An agent reading a broadcast, or answering the user,
 		// moves its screen while holding nothing — and "working" is a claim about the workflow, so

@@ -62,7 +62,7 @@ func agentStatusStyle(status string) lipgloss.Style {
 		return stDone
 	case "launching", "stopping":
 		return stTrans
-	case "blocked", "stalled", "full", "signed-out":
+	case "blocked", "stalled", "full", "signed-out", "api-error":
 		return stCrit // all need a human; a signed-out agent cannot even be told anything
 	case "idle":
 		return stWarn

@@ -142,3 +142,23 @@ func TestNudgeStalledIsLogged(t *testing.T) {
 	}
 	t.Errorf("expected a logged nudge naming the task, got %+v", events)
 }
+
+// TestACutOffTurnIsRetriedInAnyPhase is gloin's case: the API stalled its response mid-stream, the
+// pane kept its "esc to interrupt" footer and kept redrawing, and every other signal read a live
+// turn. Nothing resumes on its own, so this is not a judgement about idleness — it counts wherever
+// the agent is, including waiting on a verdict it could not act on anyway.
+func TestACutOffTurnIsRetriedInAnyPhase(t *testing.T) {
+	for _, phase := range []string{"working", "submitted", "idle", "resolving"} {
+		if !Stalled(phase, "", "api-error", RetryDwell+time.Second) {
+			t.Errorf("phase %q: a cut-off turn must be retried", phase)
+		}
+		// Not instantly, though: a retry already in flight gets to finish first.
+		if Stalled(phase, "", "api-error", RetryDwell-time.Second) {
+			t.Errorf("phase %q: retried before the dwell elapsed", phase)
+		}
+	}
+	// And it is quicker than a stall, which needs evidence rather than a stated fact.
+	if RetryDwell >= StallDwell {
+		t.Errorf("RetryDwell %v should be shorter than StallDwell %v", RetryDwell, StallDwell)
+	}
+}

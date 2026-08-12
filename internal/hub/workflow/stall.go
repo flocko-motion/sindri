@@ -13,11 +13,21 @@ import "time"
 // working normally — so the dwell has to outlast an ordinary build or test run, not a redraw.
 const StallDwell = 3 * time.Minute
 
+// RetryDwell is how long a cut-off turn is left before the agent is told to resume. Short because
+// the pane STATES the failure — no evidence has to accumulate — and long enough only that a retry
+// already in flight finishes first.
+const RetryDwell = time.Minute
+
 // Stalled reports whether an agent holds work it has stopped doing. The evidence is the SCREEN
 // standing still — a pane frozen mid-turn keeps SAYING "working" forever. Two words still veto it,
 // both meaning the agent is correctly motionless: "blocked" waits on a human, "signed-out" cannot
 // act. Which work counts: "working", or a feature due to be submitted; "submitted" exists to wait.
 func Stalled(phase, container, runtime string, stillFor time.Duration) bool {
+	// A cut-off turn counts in ANY phase: nothing resumes on its own, and an agent that could not
+	// finish its own sentence will not act on a verdict either.
+	if runtime == "api-error" {
+		return stillFor >= RetryDwell
+	}
 	if runtime == "blocked" || runtime == "signed-out" || stillFor < StallDwell {
 		return false
 	}
@@ -33,6 +43,18 @@ func (e *Engine) NudgeStalled(project, name, runtime string, idleFor time.Durati
 	if err != nil || !Stalled(st.Phase, st.Container, runtime, idleFor) {
 		return false
 	}
+	if !e.deps.AgentAlive(project, name) {
+		return false
+	}
+	// A cut-off turn is answered on its own terms: it is not idling and has nothing to explain, it
+	// simply stopped mid-sentence. Sent whatever it holds, since the retry is about the turn.
+	if runtime == "api-error" {
+		if err := e.deps.InjectWhenReady(project, name, MsgRetryTurn); err != nil {
+			return false
+		}
+		_ = ps.Log(name, "nudge", "api error cut the turn off — asked it to resume")
+		return true
+	}
 	// The subtask if it is on one, else the feature it holds — a worker between subtasks still has
 	// something to be getting on with, and naming it is the point of the nudge.
 	held := st.Task
@@ -41,9 +63,6 @@ func (e *Engine) NudgeStalled(project, name, runtime string, idleFor time.Durati
 	}
 	if held == "" {
 		return false // nothing to name, so nothing useful to say
-	}
-	if !e.deps.AgentAlive(project, name) {
-		return false
 	}
 	if err := e.deps.InjectWhenReady(project, name, MsgStalled(held, idleFor)); err != nil {
 		return false

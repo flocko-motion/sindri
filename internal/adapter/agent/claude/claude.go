@@ -30,6 +30,10 @@ var (
 	// line ENDING in the instruction: sindri's agents edit this file, and a pane showing the pattern
 	// as source text is not a signed-out agent.
 	signedOut = regexp.MustCompile(`(?im)^[^\n]*·\s*please run /login\s*$`)
+	// apiError matches a turn the API cut off ("API Error: Response stalled mid-stream."). The pane
+	// keeps its "esc to interrupt" footer afterwards and its spinner keeps animating, so this reads as
+	// a live turn to every other signal — neither the words nor a still screen can see it.
+	apiError = regexp.MustCompile(`(?im)^\s*[^\n]{0,4}api error[:\s]`)
 )
 
 // statusTail is how many trailing lines count as the live status region: Claude draws what is true
@@ -80,6 +84,12 @@ func (Claude) DetectState(screen string) agent.State {
 	case (has("do you want to") || has("would you like to")) &&
 		(strings.Contains(s, "❯") || yesNoOption.MatchString(screen)):
 		return agent.Blocked
+	}
+
+	// A cut-off turn outranks the interrupt hint, because that hint is exactly what survives it. Read
+	// only in the live region: once the agent really resumes, the error scrolls up into transcript.
+	if apiError.MatchString(paneTail(screen, statusTail)) {
+		return agent.Failed
 	}
 
 	// Working: Claude shows its interrupt hint while a turn runs.

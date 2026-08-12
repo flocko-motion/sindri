@@ -18,7 +18,10 @@ const (
 	// SignedOut: the tool has no valid credentials, so it cannot run a turn at all. Distinct from
 	// Blocked, which a message answers — nothing typed at a signed-out prompt is ever sent.
 	SignedOut State = "signed-out"
-	Unknown   State = "unknown" // not classifiable (shell, transcript viewer, boot, …)
+	// Failed: the turn was cut off by the API, so nothing is running however the pane looks. It says
+	// so in words and nothing else can tell — the interrupt hint and the spinner both survive it.
+	Failed  State = "api-error"
+	Unknown State = "unknown" // not classifiable (shell, transcript viewer, boot, …)
 )
 
 // HomeSpec is what a backend needs to provision one agent's home. The workflow composes
@@ -75,7 +78,7 @@ func DetectState(screen string) State { return active.DetectState(screen) }
 // shares. An unrecognized screen counts as idle: nothing needs surfacing.
 func Runtime(screen string) string {
 	switch s := DetectState(screen); s {
-	case Working, Blocked, SignedOut:
+	case Working, Blocked, SignedOut, Failed:
 		return string(s)
 	default: // Idle or Unknown
 		return "idle"

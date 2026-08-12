@@ -29,6 +29,14 @@ func MsgStalled(task string, idleFor time.Duration) string {
 		"nothing is coming unless you ask.", task, idleFor.Round(time.Minute))
 }
 
+// MsgRetryTurn restarts a turn the API cut off. It names the cause, because the agent's own last
+// output is truncated and it would otherwise reason from a half-finished thought as if it were
+// complete — and it says to re-check the work rather than assume the interrupted step landed.
+const MsgRetryTurn = "[hub] Your last response was cut off mid-stream by an API error, so nothing " +
+	"resumed on its own. Pick up where you left off: check whether the step you were on actually " +
+	"completed (`sindri git change` shows what is written) before carrying on, since your own last " +
+	"message is truncated and may describe work that never happened."
+
 // MsgMerged tells a worker its PR merged and to fetch the next task.
 func MsgMerged(prID string) string {
 	return fmt.Sprintf("[hub] %s merged. Run `sindri` for your next task.", prID)
