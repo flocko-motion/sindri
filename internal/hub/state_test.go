@@ -29,13 +29,36 @@ func TestAgentPRMatchesThePRsTab(t *testing.T) {
 // unlike every other status here, it cannot even be told so.
 func TestSignedOutOutranksEveryPhase(t *testing.T) {
 	for _, status := range []string{"idle", "working", "planning", "collab", "reviewing", "submitted", "stalled"} {
-		if got := overlayRuntime(status, "signed-out"); got != "signed-out" {
+		if got := overlayRuntime(status, "signed-out", true); got != "signed-out" {
 			t.Errorf("overlayRuntime(%q, signed-out) = %q, want signed-out", status, got)
 		}
 	}
 	// A phase the runtime says nothing about is still the phase: a failed probe reports "".
-	if got := overlayRuntime("planning", ""); got != "planning" {
+	if got := overlayRuntime("planning", "", true); got != "planning" {
 		t.Errorf("a silent probe must change nothing, got %q", got)
+	}
+}
+
+// TestAMovingPaneIsNotWorkInHand: bombur read "working" against an empty task column. It was
+// reacting to a "there may be new work" broadcast — its screen moved, which is all the runtime can
+// see, but a worker holding nothing cannot be working. Activity decides the runtime word; whether
+// that word may claim the status is the workflow's to say.
+func TestAMovingPaneIsNotWorkInHand(t *testing.T) {
+	if got := overlayRuntime("idle", "working", false); got != "idle" {
+		t.Errorf("an agent holding nothing must not read as working, got %q", got)
+	}
+	if got := overlayRuntime("idle", "working", true); got != "working" {
+		t.Errorf("holding work, a moving pane IS working, got %q", got)
+	}
+	// The states that need a human are about the agent, not its workload, so they still apply.
+	for _, rt := range []string{"blocked", "signed-out"} {
+		if got := overlayRuntime("idle", rt, false); got != rt {
+			t.Errorf("%s must show even with nothing held, got %q", rt, got)
+		}
+	}
+	// And going quiet still reads idle either way — that claims nothing that could be untrue.
+	if got := overlayRuntime("working", "idle", false); got != "idle" {
+		t.Errorf("a still pane is idle, got %q", got)
 	}
 }
 
