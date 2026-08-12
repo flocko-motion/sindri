@@ -1,14 +1,16 @@
 // package: api / board
 // type:    logic (the whole-board wire type + its badge counts)
-// job:     the board every UI renders (BoardState), the views it carries, and its
+// job:     the board every UI renders (BoardState), the views it carries, its
 // pure count methods — these make it satisfy hub/commands' Board interface
-// without either side importing the other.
-// limits:  data and pure counts only; assembling a BoardState is the hub's.
+// without either side importing the other — and SortedAgents, the one
+// order both front-ends must show the roster in.
+// limits:  data and pure functions only; assembling a BoardState is the hub's.
 package api
 
-// AgentView is an agent as the UIs see it; Status collapses runtime + workflow into one word: the
-// agent's own phase (idle, working, submitted, …) once it has been observed running, else what the
-// runtime says instead — launching, stopping, down, or "unknown" where nothing has looked yet.
+import "sort"
+
+// AgentView is an agent as the UIs see it. Status folds runtime and workflow into one word: the
+// observed phase (idle, working, submitted, …), else launching/stopping/down/"unknown".
 type AgentView struct {
 	Project string `json:"project"`
 	Repo    string `json:"repo"`
@@ -16,9 +18,7 @@ type AgentView struct {
 	Role    string `json:"role"`
 	Status  string `json:"status"`
 	Task    string `json:"task"`
-	// Feature is the parent task whose subtasks it is working, if any. Shown wherever Task is,
-	// because it is what gates the agent's verbs: holding one and showing nothing read as an idle
-	// agent that nevertheless refused every command.
+	// Feature is the parent task whose subtasks it is working, if any (gates the agent's verbs).
 	Feature   string `json:"feature,omitempty"`
 	Branch    string `json:"branch"`
 	PR        string `json:"pr"`
@@ -27,17 +27,56 @@ type AgentView struct {
 	Container string `json:"container"` // podman container name (project-resolved, so cross-repo callers target the right pod)
 	Memory    string `json:"memory"`    // configured RAM limit ("" = hub default)
 	Runtime   string `json:"runtime"`   // Claude's live runtime: "working"|"blocked"|"idle"|"" (folded into Status; kept raw for the herdr projection)
-	// ContextTokens is the agent's live session size and ContextWindow the window it fills, both off
-	// its transcript (0 = not measured). Past workflow.ContextFullFraction an agent is retired from
-	// assignment; Status reads "full" only where that explains an agent holding nothing. The window
-	// is per agent because it is the model's: one number for the fleet retired 1M agents at 17%.
+	// ContextTokens/ContextWindow are the agent's live session size and the window it fills (0 = not
+	// measured); past workflow.ContextFullFraction it is retired from assignment until cleared.
 	ContextTokens int `json:"contextTokens"`
 	ContextWindow int `json:"contextWindow"`
 }
 
-// RepoDocState is a repo's architecture-doc situation: the path in effect and, when the
-// hub can't read a doc there, what the user should do about it. Advice is "" for a repo in
-// good shape, which is what every UI keys off to stay quiet.
+// agentRoleRank orders roles by the path work takes through them, not alphabetically (worker,
+// reviewer, planner, coauthor); an unrecognised role sorts last.
+func agentRoleRank(role string) int {
+	switch role {
+	case "worker":
+		return 0
+	case "reviewer":
+		return 1
+	case "planner":
+		return 2
+	case "coauthor":
+		return 3
+	default:
+		return 4
+	}
+}
+
+// SortedAgents orders a roster for display: by repo path (matching the Repos list), then role
+// (agentRoleRank), then name — stably, and into a new slice rather than mutating the caller's.
+func SortedAgents(agents []AgentView, projects []Project) []AgentView {
+	path := make(map[string]string, len(projects))
+	for _, p := range projects {
+		path[p.Tag] = p.Path
+	}
+	out := make([]AgentView, len(agents))
+	copy(out, agents)
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if pa, pb := path[a.Project], path[b.Project]; pa != pb {
+			// An unregistered project (empty path) sorts last, not first — "" < x would put it ahead.
+			if pa == "" || pb == "" {
+				return pb == ""
+			}
+			return pa < pb
+		}
+		if ra, rb := agentRoleRank(a.Role), agentRoleRank(b.Role); ra != rb {
+			return ra < rb
+		}
+		return a.Name < b.Name
+	})
+	return out
+}
+
+// RepoDocState is a repo's architecture-doc situation: the path in effect, and Advice ("" when fine).
 type RepoDocState struct {
 	Doc      string `json:"doc"`      // the path in effect: configured, else the default
 	Set      bool   `json:"set"`      // the project named it (vs falling back to the default)
@@ -54,15 +93,11 @@ type BoardState struct {
 	Orphans  []string                `json:"orphans"`   // pods with no roster entry (D14)
 	Chat     ChatView                `json:"chat"`      // the user's chatroom: members + transcript
 	RepoDocs map[string]RepoDocState `json:"repo_docs"` // per repo tag: its architecture doc + any gap
-	// SpecCLIMissing: the selected project has an openspec/ folder but the hub — the process that
-	// would actually run it — found no openspec CLI on its PATH.
+	// SpecCLIMissing: an openspec/ folder exists but the hub found no openspec CLI on its PATH.
 	SpecCLIMissing bool `json:"spec_cli_missing"`
-	// StartedAt is when this hub process came up (RFC3339), so `hub status` reads uptime from the
-	// board rather than shelling out to `ps`.
+	// StartedAt is when this hub process came up (RFC3339), so `hub status` reads uptime from the board.
 	StartedAt string `json:"started_at"`
-	// DefaultMemory is the RAM an agent gets with none configured — the wired runtime's answer, since
-	// a container ceiling and a micro-VM reservation do not want the same number. Carried so a
-	// front-end renders "(default)" with the figure actually in force rather than a copy of it.
+	// DefaultMemory is the RAM an agent gets with none configured — the runtime's own current default.
 	DefaultMemory string `json:"defaultMemory"`
 }
 
@@ -75,20 +110,17 @@ type AgentStatsView struct {
 	Err           string `json:"err,omitempty"`
 }
 
-// StatsReport is the `agent stats` payload. Engine is included so the numbers are read in context:
-// podman shares one VM, apple container is one micro-VM per agent.
+// StatsReport is the `agent stats` payload; Engine is included so the numbers read in context.
 type StatsReport struct {
 	Engine string           `json:"engine"`
 	Agents []AgentStatsView `json:"agents"`
 }
 
-// StatusUnknown is an agent the hub has not observed yet — registered since the last liveness
-// sweep, with nothing yet looked at. It is not "down": down is a claim, this is the absence of one.
+// StatusUnknown is an agent not yet observed — absence of a claim, not the claim "down" makes.
 const StatusUnknown = "unknown"
 
-// AgentNotUp reports whether a status rules out acting on a live pod. THE ONE PLACE these words
-// are enumerated: four call sites each listed them and defaulted to "running", so StatusUnknown
-// joined the running branch of all four and `sindri coauthor` attached to a pod never launched.
+// AgentNotUp reports whether a status rules out acting on a live pod — the one place these words
+// are enumerated, so nothing else defaults an unknown status to "running".
 func AgentNotUp(status string) bool {
 	switch status {
 	case "", "down", StatusUnknown, "launching", "stopping":
@@ -98,14 +130,12 @@ func AgentNotUp(status string) bool {
 }
 
 // AgentNeedsLaunch reports whether an agent has no pod and none on the way — narrower than
-// AgentNotUp, which also covers one in flight. StatusUnknown belongs here because it is where
-// "down" used to be, so grouping them leaves every caller's behaviour as it was.
+// AgentNotUp, which also covers one already in flight.
 func AgentNeedsLaunch(status string) bool {
 	return status == "down" || status == StatusUnknown
 }
 
-// These make BoardState satisfy commands.Board — the badge counts the dashboard
-// sections read.
+// These satisfy commands.Board — the dashboard's badge counts.
 
 // OpenTaskCount is the number of not-done tasks in the selected project.
 func (b BoardState) OpenTaskCount() int { return countTasks(b.Tasks, Open) }
@@ -113,8 +143,7 @@ func (b BoardState) OpenTaskCount() int { return countTasks(b.Tasks, Open) }
 // AgentCount is the whole roster size (down agents are still agents).
 func (b BoardState) AgentCount() int { return len(b.Agents) }
 
-// OpenPRCount is the number of still-open PRs across the fleet — those in neither
-// terminal state (merged or scrapped), matching what the PRs tab shows by default.
+// OpenPRCount is open PRs across the fleet (neither merged nor scrapped), matching the PRs tab default.
 func (b BoardState) OpenPRCount() int { return countPRs(b.PRs, PROpen) }
 
 // RepoCount is the number of repos the hub tracks.
