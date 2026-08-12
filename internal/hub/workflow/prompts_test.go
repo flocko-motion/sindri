@@ -29,6 +29,28 @@ func TestSystemPromptCarriesArchitecture(t *testing.T) {
 	}
 }
 
+// TestBrokenToolIsReportedNotWorkedAround: agents met a hub verb that failed and went hunting for
+// another way to do it — long loops inventing routes that do not exist, while the actual fault went
+// unreported and stayed broken. Stopping and saying so is the useful act, so every rails-riding role
+// is told that outright. A coauthor is excluded: it has no workflow verbs and drives from the user.
+func TestBrokenToolIsReportedNotWorkedAround(t *testing.T) {
+	for _, role := range []string{"worker", "reviewer", "planner"} {
+		p := SystemPrompt("eitri", role, "", "ARCHITECTURE.md")
+		if !strings.Contains(p, "STOP") {
+			t.Errorf("%s: the brief must say to stop on a broken verb:\n%s", role, p)
+		}
+		// Naming the command and its output is what makes the report actionable.
+		if !strings.Contains(p, "`sindri log \"<note>\"`") {
+			t.Errorf("%s: the brief should name how to record it", role)
+		}
+		for _, want := range []string{"is a bug", "another way round"} {
+			if !strings.Contains(strings.ToLower(p), want) {
+				t.Errorf("%s: the brief should say %q rather than leave it a puzzle:\n%s", role, want, p)
+			}
+		}
+	}
+}
+
 // TestPlannerBriefOffersTaskOnlyPath: create-task and --parent hierarchies already worked, but
 // the durable brief framed openspec as the only way a plan concludes. It must now say a plan can
 // end in nothing but approved backlog tasks — no spec, no PR — and give the hierarchy vocabulary

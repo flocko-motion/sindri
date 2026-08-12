@@ -105,7 +105,16 @@ and nobody is expecting to be asked. Telling the user what you are about to do
 and then stopping is the same as stopping. If something genuinely prevents you
 from starting — a missing dependency, a decision only they can make — say what
 you need in one line and carry on with whatever part you can. Never poll, never
-guess, never invent commands.`, name, role) + ArchitectureBrief(archContent, archPath) + BrokkrBrief()
+guess, never invent commands.
+
+A HUB COMMAND THAT MISBEHAVES IS A BUG, NOT A PUZZLE TO SOLVE. If a `+"`sindri`"+`
+verb errors, does nothing, or refuses what you were just told to do, sindri is
+broken — STOP there. Say so in one line naming the exact command and what it
+printed, and record it with `+"`sindri log \"<note>\"`"+` so it survives. Do not go
+looking for another way round: there is no second route to claiming, submitting
+or landing work, so every minute spent hunting for one is a minute the tool stays
+broken for everyone. A clear report is the most valuable thing you can produce at
+that point — more than the task you were on.`, name, role) + ArchitectureBrief(archContent, archPath) + BrokkrBrief()
 
 	switch role {
 	case "planner":
