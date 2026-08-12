@@ -52,44 +52,6 @@ type NameReq = api.NameReq
 // caller here already uses.
 type RepoReq = api.RepoReq
 
-// globalRoutes are the only control endpoints valid without a repo context: the
-// board reads, which return global agents/PRs (and no tasks when no repo is
-// selected). Everything else is repo-scoped and requires X-Sindri-Project.
-var globalRoutes = map[string]bool{
-	"/state": true, "/events": true, "/stats": true,
-	// Registry management spans repos: listing, inspecting, and forgetting a repo
-	// operate on the registry by tag, not on the caller's cwd.
-	"/repos": true, "/repo": true, "/repo/forget": true, "/repo/color": true,
-	// Orphan removal targets a container by its (globally-unique) name, not a repo.
-	"/orphan/remove": true,
-}
-
-// requireProject rejects a repo-scoped request that arrives without an
-// X-Sindri-Project header (rather than silently acting on a phantom empty project),
-// with a clear message. The board reads are exempt (see globalRoutes).
-func requireProject(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !globalRoutes[r.URL.Path] && r.Header.Get("X-Sindri-Project") == "" {
-			writeJSON(w, nil, fmt.Errorf("missing repo context (X-Sindri-Project) — run this inside a repo"))
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// reqProject resolves (and registers) the repo a host request concerns, from the
-// X-Sindri-Project header (the client sends its repo root). Returns the repoTag; ""
-// when no header is present (a repo-agnostic request, e.g. the board with no repo
-// selected). This is the single place a host request's project is derived.
-func (h *Hub) reqProject(r *http.Request) string {
-	root := r.Header.Get("X-Sindri-Project")
-	if root == "" {
-		return ""
-	}
-	h.repo(root) // register (idempotent) + ensure .worktrees gitignore
-	return repoTag(root)
-}
-
 // Handler builds the HTTP mux over a hub. Every repo-scoped handler resolves its
 // project from the request header (reqProject); the board endpoints scope tasks to
 // the selected repo while keeping agents/PRs global.
@@ -171,7 +133,8 @@ func (h *Hub) Handler() http.Handler {
 		writeJSON(w, okMsg{"saved"}, h.projects.WriteConfig(r.Header.Get("X-Sindri-Project"), cfg))
 	})
 	mux.HandleFunc("GET /log", func(w http.ResponseWriter, r *http.Request) {
-		evs, err := h.Log(h.reqProject(r), r.URL.Query().Get("agent"))
+		name := r.URL.Query().Get("agent")
+		evs, err := h.Log(h.agentReq(r, name), name)
 		writeJSON(w, evs, err)
 	})
 	mux.HandleFunc("GET /agent/pane", func(w http.ResponseWriter, r *http.Request) {
@@ -179,18 +142,22 @@ func (h *Hub) Handler() http.Handler {
 		if lines <= 0 {
 			lines = 40
 		}
-		out, err := h.agents.AgentPane(h.reqProject(r), r.URL.Query().Get("agent"), lines)
+		name := r.URL.Query().Get("agent")
+		out, err := h.agents.AgentPane(h.agentReq(r, name), name, lines)
 		writeJSON(w, okMsg{out}, err)
 	})
 	mux.HandleFunc("GET /agent/pod", func(w http.ResponseWriter, r *http.Request) {
-		out, err := h.agents.PodInfo(h.reqProject(r), r.URL.Query().Get("agent"))
+		name := r.URL.Query().Get("agent")
+		out, err := h.agents.PodInfo(h.agentReq(r, name), name)
 		writeJSON(w, okMsg{out}, err)
 	})
 	mux.HandleFunc("GET /agent/diagnose", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, okMsg{h.agents.AgentDiagnostic(h.reqProject(r), r.URL.Query().Get("agent"))}, nil)
+		name := r.URL.Query().Get("agent")
+		writeJSON(w, okMsg{h.agents.AgentDiagnostic(h.agentReq(r, name), name)}, nil)
 	})
 	mux.HandleFunc("GET /agent/clients", func(w http.ResponseWriter, r *http.Request) {
-		cs, err := h.agents.Clients(h.reqProject(r), r.URL.Query().Get("agent"))
+		name := r.URL.Query().Get("agent")
+		cs, err := h.agents.Clients(h.agentReq(r, name), name)
 		writeJSON(w, cs, err)
 	})
 	mux.HandleFunc("POST /agents", func(w http.ResponseWriter, r *http.Request) {
@@ -206,35 +173,35 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"ok"}, h.agents.SetMemory(h.reqProject(r), req.Name, req.Memory))
+		writeJSON(w, okMsg{"ok"}, h.agents.SetMemory(h.agentReq(r, req.Name), req.Name, req.Memory))
 	})
 	mux.HandleFunc("POST /agent/delete", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"deleted"}, h.agents.DeleteAgent(h.reqProject(r), req.Name))
+		writeJSON(w, okMsg{"deleted"}, h.agents.DeleteAgent(h.agentReq(r, req.Name), req.Name))
 	})
 	mux.HandleFunc("POST /agent/stop", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"stopped"}, h.agents.StopAgent(h.reqProject(r), req.Name))
+		writeJSON(w, okMsg{"stopped"}, h.agents.StopAgent(h.agentReq(r, req.Name), req.Name))
 	})
 	mux.HandleFunc("POST /agent/clear-context", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"cleared"}, h.agents.ClearContext(h.reqProject(r), req.Name))
+		writeJSON(w, okMsg{"cleared"}, h.agents.ClearContext(h.agentReq(r, req.Name), req.Name))
 	})
 	mux.HandleFunc("POST /agent/rebase", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"rebased"}, h.wf.RebaseAgent(h.reqProject(r), req.Name))
+		writeJSON(w, okMsg{"rebased"}, h.wf.RebaseAgent(h.agentReq(r, req.Name), req.Name))
 	})
 	mux.HandleFunc("POST /launch", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
@@ -249,7 +216,7 @@ func (h *Hub) Handler() http.Handler {
 		if f, ok := w.(http.Flusher); ok {
 			fw.f = f
 		}
-		if err := h.agents.Launch(h.reqProject(r), req.Name, req.Shell, req.Debug, fw); err != nil {
+		if err := h.agents.Launch(h.agentReq(r, req.Name), req.Name, req.Shell, req.Debug, fw); err != nil {
 			fmt.Fprintf(fw, "error: %v\n", err)
 			w.Header().Set("X-Sindri-Error", err.Error())
 		}
@@ -266,7 +233,7 @@ func (h *Hub) Handler() http.Handler {
 		if f, ok := w.(http.Flusher); ok {
 			fw.f = f
 		}
-		if err := h.agents.RebuildAgent(h.reqProject(r), req.Name, fw); err != nil {
+		if err := h.agents.RebuildAgent(h.agentReq(r, req.Name), req.Name, fw); err != nil {
 			fmt.Fprintf(fw, "error: %v\n", err)
 			w.Header().Set("X-Sindri-Error", err.Error())
 		}
@@ -276,21 +243,21 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"delivered"}, h.agents.Tell(h.reqProject(r), req.Name, req.Msg, req.Source))
+		writeJSON(w, okMsg{"delivered"}, h.agents.Tell(h.agentReq(r, req.Name), req.Name, req.Msg, req.Source))
 	})
 	mux.HandleFunc("POST /chat/add", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"added"}, h.chat.Add(h.reqProject(r), req.Name))
+		writeJSON(w, okMsg{"added"}, h.chat.Add(h.agentReq(r, req.Name), req.Name))
 	})
 	mux.HandleFunc("POST /chat/remove", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"removed"}, h.chat.Remove(h.reqProject(r), req.Name))
+		writeJSON(w, okMsg{"removed"}, h.chat.Remove(h.agentReq(r, req.Name), req.Name))
 	})
 	mux.HandleFunc("POST /chat/say", func(w http.ResponseWriter, r *http.Request) {
 		var req ChatSayReq
@@ -327,7 +294,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		pr, err := h.wf.MilestonePR(h.reqProject(r), req.Name)
+		pr, err := h.wf.MilestonePR(h.agentReq(r, req.Name), req.Name)
 		writeJSON(w, pr, err)
 	})
 	mux.HandleFunc("GET /prs", func(w http.ResponseWriter, r *http.Request) {
@@ -400,7 +367,8 @@ func (h *Hub) Handler() http.Handler {
 		writeJSON(w, t, err)
 	})
 	mux.HandleFunc("GET /task/next", func(w http.ResponseWriter, r *http.Request) {
-		x, err := h.wf.ExplainNext(h.reqProject(r), r.URL.Query().Get("agent"))
+		name := r.URL.Query().Get("agent")
+		x, err := h.wf.ExplainNext(h.agentReq(r, name), name)
 		writeJSON(w, x, err)
 	})
 	mux.HandleFunc("POST /tasks", func(w http.ResponseWriter, r *http.Request) {
@@ -439,7 +407,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"assigned"}, h.wf.AssignPlan(h.reqProject(r), req.Name, req.Goal, req.Task))
+		writeJSON(w, okMsg{"assigned"}, h.wf.AssignPlan(h.agentReq(r, req.Name), req.Name, req.Goal, req.Task))
 	})
 	mux.HandleFunc("POST /task/approve", func(w http.ResponseWriter, r *http.Request) {
 		var req ApproveTaskReq
