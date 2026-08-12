@@ -8,17 +8,17 @@ package workflow
 
 import "time"
 
-// StallDwell is how long a working agent must read idle before the hub calls it stalled. Long enough
-// that a thinking model, a human reading the pane, or a build under a prompt all expire first.
-const StallDwell = 5 * time.Minute
+// StallDwell is how long an agent's screen must stand completely still before the hub calls it
+// stalled. A tool call freezes the pane for its duration — measured at 12s+ on an agent that was
+// working normally — so the dwell has to outlast an ordinary build or test run, not a redraw.
+const StallDwell = 3 * time.Minute
 
-// Stalled reports whether an agent holds work it has stopped doing: a subtask or task in "working",
-// or a feature whose subtasks are all checkpointed and which is therefore due to be submitted. The
-// phase that is left out is the one that exists to wait — "submitted" awaits a verdict, and waiting
-// is the whole of its job. A finished feature used to belong in that group, back when only a human
-// could open its milestone PR; now the worker submits it, so sitting there is a stall like any other.
-func Stalled(phase, container, runtime string, idleFor time.Duration) bool {
-	if runtime != "idle" || idleFor < StallDwell {
+// Stalled reports whether an agent holds work it has stopped doing. The evidence is the SCREEN
+// standing still — a pane frozen mid-turn keeps SAYING "working" forever. Two words still veto it,
+// both meaning the agent is correctly motionless: "blocked" waits on a human, "signed-out" cannot
+// act. Which work counts: "working", or a feature due to be submitted; "submitted" exists to wait.
+func Stalled(phase, container, runtime string, stillFor time.Duration) bool {
+	if runtime == "blocked" || runtime == "signed-out" || stillFor < StallDwell {
 		return false
 	}
 	return phase == "working" || (container != "" && phase != "submitted")

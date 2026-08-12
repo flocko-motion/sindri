@@ -10,6 +10,7 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"strconv"
 	"strings"
@@ -35,14 +36,27 @@ type ClientView = api.ClientView
 // (they don't parallelise — see container.ListByLabelCached).
 const runtimeTTL = 2 * time.Second
 
+// Observation is one look at an agent's pane: what the text says, and a digest of the whole screen.
+// Both come from ONE capture — the digest is what tells activity from stillness, and taking it
+// separately would double the exec cost of every sweep.
+type Observation struct {
+	Runtime string // "working" | "blocked" | "idle" | "signed-out" | "" when the capture failed
+	Digest  string // "" when the capture failed, so a lost probe never reads as "nothing changed"
+}
+
 var runtimeMemo struct {
 	mu  sync.Mutex
 	at  map[string]time.Time
-	val map[string]string
+	val map[string]Observation
 }
 
 // RuntimeState classifies Claude's pane: "working", "blocked", "idle", or "" when unknown.
 func (s *Service) RuntimeState(ctx context.Context, project, name string) string {
+	return s.Observe(ctx, project, name).Runtime
+}
+
+// Observe captures an agent's pane once and reports both what it says and what it looks like.
+func (s *Service) Observe(ctx context.Context, project, name string) Observation {
 	key := project + "/" + name
 	runtimeMemo.mu.Lock()
 	if at, ok := runtimeMemo.at[key]; ok && time.Since(at) < runtimeTTL {
@@ -52,18 +66,19 @@ func (s *Service) RuntimeState(ctx context.Context, project, name string) string
 	}
 	runtimeMemo.mu.Unlock()
 
-	var state string
+	var obs Observation
 	out, err := container.ExecContext(ctx, s.deps.ContainerName(project, name), append([]string{"tmux"}, tmux.CapturePane(name, 0, false)...)...) // plain: the text is pattern-matched
 	if err == nil {
-		state = agentport.Runtime(string(out)) // shared classifier: board + herdr agree
+		obs.Runtime = agentport.Runtime(string(out)) // shared classifier: board + herdr agree
+		obs.Digest = fmt.Sprintf("%x", sha256.Sum256(out))
 	}
 	runtimeMemo.mu.Lock()
 	if runtimeMemo.at == nil {
-		runtimeMemo.at, runtimeMemo.val = map[string]time.Time{}, map[string]string{}
+		runtimeMemo.at, runtimeMemo.val = map[string]time.Time{}, map[string]Observation{}
 	}
-	runtimeMemo.at[key], runtimeMemo.val[key] = time.Now(), state
+	runtimeMemo.at[key], runtimeMemo.val[key] = time.Now(), obs
 	runtimeMemo.mu.Unlock()
-	return state
+	return obs
 }
 
 // contextTTL: the transcript grows with every turn, not every board read, so a read straight off

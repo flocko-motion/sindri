@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
@@ -15,32 +16,33 @@ func TestStalledForIsWhatTheBoardAndTheNudgeShare(t *testing.T) {
 	h := newHub(t)
 	a := store.Agent{Project: "proj", Name: "dvalin"}
 
-	// Working: not stalled, whatever the phase says.
-	h.watch.record(a, true, 0, "working")
+	// A screen that just changed: not stalled, whatever the phase says.
+	h.watch.record(a, true, 0, seen("working", "d1"))
+	h.watch.record(a, true, 0, seen("working", "d2"))
 	if _, stalled := h.stalledFor("proj", "dvalin", "working", ""); stalled {
-		t.Error("an agent that is working is not stalled")
+		t.Error("an agent whose pane is moving is not stalled")
 	}
 
-	// Idle, but the dwell has only just begun.
-	h.watch.record(a, true, 0, "idle")
-	idleFor, stalled := h.stalledFor("proj", "dvalin", "working", "")
+	// It has stopped moving, but the dwell has only just begun.
+	h.watch.record(a, true, 0, seen("idle", "d2"))
+	stillFor, stalled := h.stalledFor("proj", "dvalin", "working", "")
 	if stalled {
-		t.Errorf("a fresh idle spell is a pause, not a stall (idle for %v)", idleFor)
+		t.Errorf("a fresh quiet spell is a pause, not a stall (still for %v)", stillFor)
 	}
 
 	// Backdate the spell past the dwell: now it is a stall.
 	h.watch.mu.Lock()
 	l := h.watch.obs[agentKey{"proj", "dvalin"}]
-	l.idleSince = time.Now().Add(-workflow.StallDwell - time.Minute)
+	l.stillSince = time.Now().Add(-workflow.StallDwell - time.Minute)
 	h.watch.obs[agentKey{"proj", "dvalin"}] = l
 	h.watch.mu.Unlock()
 
-	idleFor, stalled = h.stalledFor("proj", "dvalin", "working", "")
+	stillFor, stalled = h.stalledFor("proj", "dvalin", "working", "")
 	if !stalled {
-		t.Errorf("a working agent idle for %v past the dwell should be stalled", idleFor)
+		t.Errorf("a worker whose screen stood still for %v past the dwell should be stalled", stillFor)
 	}
-	if idleFor < workflow.StallDwell {
-		t.Errorf("idleFor should report the whole spell, got %v", idleFor)
+	if stillFor < workflow.StallDwell {
+		t.Errorf("stillFor should report the whole spell, got %v", stillFor)
 	}
 	// The same observation, on a phase that exists to wait, is not a stall.
 	if _, stalled := h.stalledFor("proj", "dvalin", "submitted", ""); stalled {
@@ -68,7 +70,7 @@ func TestStalledForNeedsAnObservation(t *testing.T) {
 
 	a := store.Agent{Project: "proj", Name: "gone"}
 	for i := 0; i <= downStrikes; i++ {
-		h.watch.record(a, false, 0, "") // past the strike threshold: down
+		h.watch.record(a, false, 0, agent.Observation{}) // past the strike threshold: down
 	}
 	if _, stalled := h.stalledFor("proj", "gone", "working", ""); stalled {
 		t.Error("a down agent must not read as stalled")

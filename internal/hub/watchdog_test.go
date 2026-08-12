@@ -3,8 +3,15 @@ package hub
 import (
 	"testing"
 
+	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
+
+// seen builds the pair one capture yields: what the pane said, and what it looked like. A distinct
+// digest per call stands for a screen that changed since the last look.
+func seen(runtime, digest string) agent.Observation {
+	return agent.Observation{Runtime: runtime, Digest: digest}
+}
 
 // TestOneLostProbeDoesNotFlipAnAgentDown is the bug the watchdog exists for. A probe that loses
 // a race is not evidence: the readings before it said the agent was up, and one contended exec
@@ -15,7 +22,7 @@ func TestOneLostProbeDoesNotFlipAnAgentDown(t *testing.T) {
 	w := h.watch
 	a := store.Agent{Project: "proj", Name: "galar"}
 
-	w.record(a, true, 1, "working") // a good reading first
+	w.record(a, true, 1, seen("working", "d1")) // a good reading first
 	if l, _ := w.get("proj", "galar"); !l.up {
 		t.Fatal("a successful probe must report up")
 	}
@@ -23,7 +30,7 @@ func TestOneLostProbeDoesNotFlipAnAgentDown(t *testing.T) {
 	// Failures short of the threshold hold the previous state, dial-in count and runtime
 	// included: a probe that could not read the agent must not blank what the last one did.
 	for i := 1; i < downStrikes; i++ {
-		w.record(a, false, 0, "")
+		w.record(a, false, 0, agent.Observation{})
 		l, _ := w.get("proj", "galar")
 		if !l.up {
 			t.Errorf("strike %d of %d already reported down", i, downStrikes)
@@ -34,7 +41,7 @@ func TestOneLostProbeDoesNotFlipAnAgentDown(t *testing.T) {
 	}
 
 	// The threshold reached, it is no longer one bad reading but a pattern.
-	w.record(a, false, 0, "")
+	w.record(a, false, 0, agent.Observation{})
 	if l, _ := w.get("proj", "galar"); l.up {
 		t.Errorf("%d consecutive failures should report down", downStrikes)
 	}
@@ -47,15 +54,15 @@ func TestSuccessClearsStrikes(t *testing.T) {
 	w := h.watch
 	a := store.Agent{Project: "proj", Name: "galar"}
 
-	w.record(a, true, 0, "idle")
-	w.record(a, false, 0, "") // one strike
-	w.record(a, true, 2, "working")
+	w.record(a, true, 0, seen("idle", "d1"))
+	w.record(a, false, 0, agent.Observation{}) // one strike
+	w.record(a, true, 2, seen("working", "d2"))
 	if l, _ := w.get("proj", "galar"); l.strikes != 0 || l.clients != 2 || l.runtime != "working" {
 		t.Errorf("a success must reset strikes and take the fresh reading, got %+v", l)
 	}
 	// From clean, it again takes the full threshold to go down.
 	for i := 1; i < downStrikes; i++ {
-		w.record(a, false, 0, "")
+		w.record(a, false, 0, agent.Observation{})
 		if l, _ := w.get("proj", "galar"); !l.up {
 			t.Errorf("strike %d after a success reported down too early", i)
 		}
@@ -75,8 +82,8 @@ func TestAbsentPodIsAStrikeLikeAnyOther(t *testing.T) {
 	w := h.watch
 	a := store.Agent{Project: "proj", Name: "galar"}
 
-	w.record(a, true, 1, "working")
-	w.record(a, false, 0, "") // absent from one listing — not yet a verdict
+	w.record(a, true, 1, seen("working", "d1"))
+	w.record(a, false, 0, agent.Observation{}) // absent from one listing — not yet a verdict
 	l, _ := w.get("proj", "galar")
 	if !l.up {
 		t.Error("one listing that missed the pod must not declare the agent down")
@@ -85,7 +92,7 @@ func TestAbsentPodIsAStrikeLikeAnyOther(t *testing.T) {
 		t.Errorf("the last good detail should be held, got clients=%d runtime=%q", l.clients, l.runtime)
 	}
 	for i := 2; i <= downStrikes; i++ {
-		w.record(a, false, 0, "")
+		w.record(a, false, 0, agent.Observation{})
 	}
 	if l, _ := w.get("proj", "galar"); l.up {
 		t.Errorf("%d consecutive absences are a pattern and must report down", downStrikes)
@@ -101,35 +108,57 @@ func TestUnobservedAgentIsNotReportedUp(t *testing.T) {
 	}
 }
 
-// TestIdleDwellStartsAndClears: the dwell is what separates a thinking pause from a stall, so it
-// must start when idle begins and reset the moment the agent does anything.
-func TestIdleDwellStartsAndClears(t *testing.T) {
+// TestStillnessDwellRunsFromTheLastChange: the dwell separates a pause from a stall, and it measures
+// the SCREEN. A tool call leaves the pane untouched for as long as it runs, so "nothing changed
+// since" is the fact to keep — and any change at all ends the spell, whatever the words say.
+func TestStillnessDwellRunsFromTheLastChange(t *testing.T) {
 	h := newHub(t)
 	w := h.watch
 	a := store.Agent{Project: "proj", Name: "dvalin"}
 
-	w.record(a, true, 0, "working")
-	if l, _ := w.get("proj", "dvalin"); !l.idleSince.IsZero() {
-		t.Error("a working agent has no idle dwell")
-	}
-
-	w.record(a, true, 0, "idle")
+	w.record(a, true, 0, seen("working", "d1"))
 	first, _ := w.get("proj", "dvalin")
-	if first.idleSince.IsZero() {
-		t.Fatal("going idle must start the dwell")
+	if first.stillSince.IsZero() {
+		t.Fatal("the first reading has to start the clock — it is the last time the pane was known to change")
 	}
 
-	// Still idle: the clock keeps running from when it started, not from the latest probe.
-	w.record(a, true, 0, "idle")
+	// The same screen again: the clock keeps running from when it stopped moving, not from this probe.
+	w.record(a, true, 0, seen("working", "d1"))
 	again, _ := w.get("proj", "dvalin")
-	if !again.idleSince.Equal(first.idleSince) {
-		t.Errorf("a continuing idle spell must keep its start: %v then %v", first.idleSince, again.idleSince)
+	if !again.stillSince.Equal(first.stillSince) {
+		t.Errorf("an unchanged pane must keep the dwell's start: %v then %v", first.stillSince, again.stillSince)
 	}
 
-	// Back to work: the spell is over, and a later stall is a new one.
-	w.record(a, true, 0, "working")
-	if l, _ := w.get("proj", "dvalin"); !l.idleSince.IsZero() {
-		t.Error("working again must clear the dwell")
+	// It moved: the spell is over and a later stall is a new one, even though the word is unchanged.
+	w.record(a, true, 0, seen("working", "d2"))
+	moved, _ := w.get("proj", "dvalin")
+	if !moved.stillSince.After(first.stillSince) {
+		t.Error("a changed pane must restart the dwell")
+	}
+}
+
+// TestActivityDecidesWorkingWhenTheWordsDoNot: any screen the classifier does not recognise reads
+// "idle", which made a busy agent with an unfamiliar pane look stopped. A pane that just changed is
+// an agent doing something, whatever is written on it.
+func TestActivityDecidesWorkingWhenTheWordsDoNot(t *testing.T) {
+	h := newHub(t)
+	w := h.watch
+	a := store.Agent{Project: "proj", Name: "dvalin"}
+
+	w.record(a, true, 0, seen("idle", "d1"))
+	w.record(a, true, 0, seen("idle", "d2")) // same word, different screen
+	if l, _ := w.get("proj", "dvalin"); l.runtime != "working" {
+		t.Errorf("a changing pane is a working agent, got runtime %q", l.runtime)
+	}
+	// Standing still, it is idle again — and "blocked" is never overwritten, since a pane that
+	// changes while asking a question is still asking it.
+	w.record(a, true, 0, seen("idle", "d2"))
+	if l, _ := w.get("proj", "dvalin"); l.runtime != "idle" {
+		t.Errorf("an unchanged pane is idle, got %q", l.runtime)
+	}
+	w.record(a, true, 0, seen("blocked", "d3"))
+	if l, _ := w.get("proj", "dvalin"); l.runtime != "blocked" {
+		t.Errorf("activity must not overwrite a definite state, got %q", l.runtime)
 	}
 }
 
@@ -141,15 +170,16 @@ func TestALostProbeDoesNotRestartTheDwell(t *testing.T) {
 	w := h.watch
 	a := store.Agent{Project: "proj", Name: "dvalin"}
 
-	w.record(a, true, 0, "idle")
+	w.record(a, true, 0, seen("idle", "d1"))
 	started, _ := w.get("proj", "dvalin")
 
-	w.record(a, false, 0, "") // one lost probe, short of downStrikes
+	w.record(a, false, 0, agent.Observation{}) // one lost probe, short of downStrikes
 	held, _ := w.get("proj", "dvalin")
 	if held.runtime != "idle" {
 		t.Fatalf("a lost probe should hold the last runtime, got %q", held.runtime)
 	}
-	if !held.idleSince.Equal(started.idleSince) {
-		t.Errorf("the dwell restarted on a lost probe: %v then %v", started.idleSince, held.idleSince)
+	// A capture that failed saw no screen, so it is not evidence the screen changed either.
+	if !held.stillSince.Equal(started.stillSince) {
+		t.Errorf("the dwell restarted on a lost probe: %v then %v", started.stillSince, held.stillSince)
 	}
 }

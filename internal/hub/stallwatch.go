@@ -64,27 +64,27 @@ func (s *stallwatch) sweep() {
 	for _, a := range agents {
 		key := agentKey{a.Project, a.Name}
 		l, ok := s.h.watch.get(a.Project, a.Name)
-		if !ok || !l.up || l.idleSince.IsZero() {
-			delete(s.nudged, key) // working again (or gone): the next stall is a new one
+		if !ok || !l.up || l.stillSince.IsZero() {
+			delete(s.nudged, key) // moving again (or gone): the next stall is a new one
 			continue
 		}
-		if s.nudged[key].Equal(l.idleSince) {
+		if s.nudged[key].Equal(l.stillSince) {
 			continue // already prodded for this spell
 		}
-		if s.h.wf.NudgeStalled(a.Project, a.Name, l.runtime, time.Since(l.idleSince)) {
-			s.nudged[key] = l.idleSince
+		if s.h.wf.NudgeStalled(a.Project, a.Name, l.runtime, time.Since(l.stillSince)) {
+			s.nudged[key] = l.stillSince
 		}
 	}
 }
 
-// stalledFor is how long an agent has held work without doing any, and whether it counts as stalled.
-// The board and the nudge read the same observation through it, so what the user sees and what the
-// agent is told can never disagree.
+// stalledFor is how long an agent's screen has stood still, and whether that counts as stalled. The
+// board and the nudge read the same observation through it, so what the user sees and what the agent
+// is told can never disagree.
 func (h *Hub) stalledFor(project, name, phase, container string) (time.Duration, bool) {
 	l, ok := h.watch.get(project, name)
-	if !ok || !l.up || l.idleSince.IsZero() {
+	if !ok || !l.up || l.stillSince.IsZero() {
 		return 0, false
 	}
-	idleFor := time.Since(l.idleSince)
-	return idleFor, workflow.Stalled(phase, container, l.runtime, idleFor)
+	stillFor := time.Since(l.stillSince)
+	return stillFor, workflow.Stalled(phase, container, l.runtime, stillFor)
 }

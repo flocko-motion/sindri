@@ -10,19 +10,23 @@ import (
 )
 
 // TestStalledOnlyCountsHeldWork is the whole rule. The phases that exist to wait must never read as
-// stalled, or the nudge becomes noise on exactly the agents behaving correctly.
+// stalled, or the nudge becomes noise on exactly the agents behaving correctly — and the evidence is
+// the screen standing still, not the word printed on it.
 func TestStalledOnlyCountsHeldWork(t *testing.T) {
 	past, under := StallDwell+time.Minute, StallDwell-time.Minute
 	for _, c := range []struct {
 		what                      string
 		phase, container, runtime string
-		idleFor                   time.Duration
+		stillFor                  time.Duration
 		want                      bool
 	}{
 		{"holding work and gone quiet", "working", "", "idle", past, true},
 		{"quiet, but not for long enough", "working", "", "idle", under, false},
-		{"thinking, not stalled", "working", "working", "", past, false},
+		// The case the old rule could not see: a turn that wedged leaves "esc to interrupt" on screen
+		// forever, so the classifier says "working" while not one byte changes for minutes.
+		{"still saying 'working', with a frozen screen", "working", "working", "working", past, true},
 		{"asking for input — that is 'blocked', already visible", "working", "", "blocked", past, false},
+		{"signed out: motionless because it cannot act, and no prod reaches it", "working", "", "signed-out", past, false},
 		{"waiting for a verdict on a submitted PR", "submitted", "", "idle", past, false},
 		{"waiting for a verdict on a feature's PR", "submitted", "td-EPIC", "idle", past, false},
 		// A finished feature is the worker's to submit, so parking on one is a stall. It was excluded
@@ -30,11 +34,13 @@ func TestStalledOnlyCountsHeldWork(t *testing.T) {
 		{"a feature whose subtasks are all checkpointed", "idle", "td-EPIC", "idle", past, true},
 		{"mid-feature, on a subtask, gone quiet", "working", "td-EPIC", "idle", past, true},
 		{"between assignments, holding nothing", "idle", "", "idle", past, false},
-		{"probe told us nothing", "working", "", "", past, false},
+		// An unreadable pane is not a reading, so the words are empty — but the dwell it carries is
+		// still time in which nothing was seen to change, and holding work through that is a stall.
+		{"unreadable pane, work held, nothing seen to move", "working", "", "", past, true},
 	} {
-		if got := Stalled(c.phase, c.container, c.runtime, c.idleFor); got != c.want {
+		if got := Stalled(c.phase, c.container, c.runtime, c.stillFor); got != c.want {
 			t.Errorf("%s: Stalled(%q, %q, %q, %v) = %v, want %v",
-				c.what, c.phase, c.container, c.runtime, c.idleFor, got, c.want)
+				c.what, c.phase, c.container, c.runtime, c.stillFor, got, c.want)
 		}
 	}
 }
