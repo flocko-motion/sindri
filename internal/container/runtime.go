@@ -94,8 +94,10 @@ type Runtime interface {
 	Info(name string) string
 	Rm(name string) error
 	ListByLabelContext(ctx context.Context, label, value string) ([]string, error)
+	// Check pre-flights the runtime, narrating to w. There is no separate reachability probe: the
+	// hub learns that from the pod listing its liveness sweep already takes, so a caller asking
+	// again paid seconds for an answer it had (-> hub/watchdog.runtimeHint).
 	Check(w io.Writer) error
-	Healthy() (ok bool, hint string)
 	EnsureImage(root, containerfile string, out io.Writer) (string, error)
 	// RebuildImage rebuilds re-pulling the base, to pick up one the cache keeps stale.
 	RebuildImage(root, containerfile string, out io.Writer) (string, error)
@@ -136,7 +138,6 @@ func (noop) Info(string) string                                                 
 func (noop) Rm(string) error                                                      { return errNoRuntime }
 func (noop) ListByLabelContext(context.Context, string, string) ([]string, error) { return nil, nil }
 func (noop) Check(io.Writer) error                                                { return errNoRuntime }
-func (noop) Healthy() (bool, string)                                              { return false, "no container runtime configured" }
 func (noop) EnsureImage(string, string, io.Writer) (string, error)                { return "", errNoRuntime }
 func (noop) RebuildImage(string, string, io.Writer) (string, error)               { return "", errNoRuntime }
 
@@ -232,9 +233,6 @@ func ListByLabelFresh(ctx context.Context, label, value string) ([]string, error
 
 // Check pre-flights the runtime (installed + reachable), auto-starting where it can.
 func Check(w io.Writer) error { return active.Check(w) }
-
-// Healthy is a fast, time-bounded reachability probe.
-func Healthy() (ok bool, hint string) { return active.Healthy() }
 
 // EnsureImage builds the agent image if the recipe is stale, returning the reference.
 func EnsureImage(root, containerfile string, out io.Writer) (string, error) {

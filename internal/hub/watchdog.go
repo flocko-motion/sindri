@@ -10,6 +10,7 @@ package hub
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -49,10 +50,26 @@ type liveness struct {
 type watchdog struct {
 	h *Hub
 
-	mu   sync.RWMutex
-	obs  map[agentKey]liveness
-	stop chan struct{}
-	done chan struct{}
+	mu  sync.RWMutex
+	obs map[agentKey]liveness
+	// runtimeErr is the last pod-listing failure, which is what an unreachable container runtime
+	// looks like from here. nil once one succeeds.
+	runtimeErr error
+	stop       chan struct{}
+	done       chan struct{}
+}
+
+// runtimeHint reports why the container runtime looks unreachable, "" when it answers. Read off the
+// sweep the hub already runs, so asking costs nothing.
+func (w *watchdog) runtimeHint() string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	if w.runtimeErr == nil {
+		return ""
+	}
+	// Worded from the failure in hand rather than by asking the backend again: Healthy() spawns its
+	// own probe, which is the cost this exists to avoid.
+	return fmt.Sprintf("%s isn't answering (%v) — agents can't run until it is", container.Name(), w.runtimeErr)
 }
 
 // newWatchdog builds and starts the observer. It must not block — New runs before Serve answers
@@ -129,6 +146,12 @@ func (w *watchdog) sweep() {
 	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
 	existing, listErr := container.ListByLabelFresh(ctx, "sindri.project", "")
 	cancel()
+	// This listing IS the runtime health check, so nobody has to pay for a second one. A CLI that
+	// spawned `podman info` per command was answering, in 3.8s, a question already answered here
+	// every 2 seconds — and on a loaded host its own timeout misreported a slow podman as absent.
+	w.mu.Lock()
+	w.runtimeErr = listErr
+	w.mu.Unlock()
 	exists := make(map[string]bool, len(existing))
 	for _, p := range existing {
 		exists[p] = true

@@ -141,7 +141,8 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		docs[p.Tag] = h.repoDocState(p.Path)
 	}
 	return BoardState{
-		Agents: agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans, Chat: chat,
+		RuntimeHint: h.watch.runtimeHint(),
+		Agents:      agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans, Chat: chat,
 		RepoDocs: docs, SpecCLIMissing: specMissing, StartedAt: h.startedAt.UTC().Format(time.RFC3339),
 		DefaultMemory: agent.MemoryOrDefault(""),
 	}, nil

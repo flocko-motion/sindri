@@ -55,6 +55,10 @@ type BoardState struct {
 	Orphans  []string                `json:"orphans"`   // pods with no roster entry (D14)
 	Chat     ChatView                `json:"chat"`      // the user's chatroom: members + transcript
 	RepoDocs map[string]RepoDocState `json:"repo_docs"` // per repo tag: its architecture doc + any gap
+	// RuntimeHint explains an unreachable container runtime, "" when it answers. It rides on the
+	// board because the hub already knows: its liveness sweep lists pods every couple of seconds, so
+	// a front-end that probed for itself paid seconds to learn what this says for free.
+	RuntimeHint string `json:"runtime_hint,omitempty"`
 	// SpecCLIMissing: an openspec/ folder exists but the hub found no openspec CLI on its PATH.
 	SpecCLIMissing bool `json:"spec_cli_missing"`
 	// StartedAt is when this hub process came up (RFC3339), so `hub status` reads uptime from the board.

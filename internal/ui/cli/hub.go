@@ -211,8 +211,9 @@ func newHubRestartCmd() *cobra.Command {
 
 // NewAgentCmd builds the `agent` command tree (manage agents).
 func NewAgentCmd() *cobra.Command {
-	c := &cobra.Command{Use: "agent", Short: "Manage agents (workers, reviewers, planners, coauthors)",
-		PersistentPreRun: agentPreflight} // warn up front if podman is down — nothing works without it
+	// No PersistentPreRun: the runtime warning comes off the board (-> warnRuntime), which the
+	// commands that need it already fetch. Probing here cost every agent verb a `podman info`.
+	c := &cobra.Command{Use: "agent", Short: "Manage agents (workers, reviewers, planners, coauthors)"}
 	c.AddCommand(agentListCmd(), agentStatsCmd(), agentNewCmd(), agentDeleteCmd(), agentPaneCmd(), agentStartCmd(), agentStopCmd(), agentRestartCmd(), agentRebaseCmd(), agentRebuildCmd(), agentMemoryCmd(), agentRetireCmd(), agentClearContextCmd(), agentTellCmd(), agentPlanCmd(), agentDirCmd(), agentAttachCmd(), agentInfoCmd())
 	return c
 }

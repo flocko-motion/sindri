@@ -14,17 +14,20 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/api"
-	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/ui/theme"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
-// agentPreflight warns without blocking when podman is unreachable: it is the likeliest
-// reason nothing works, so say so rather than let the user infer it from "all agents down".
-func agentPreflight(*cobra.Command, []string) {
-	if ok, hint := container.Healthy(); !ok {
-		fmt.Fprintf(os.Stderr, "warning: %s\n", hint)
+// warnRuntime passes on the hub's own verdict on the container runtime: it is the likeliest reason
+// nothing works, so say so rather than let the user infer it from "all agents down".
+//
+// Read off the board, never probed here. Every `sindri agent …` used to spawn `podman info` first,
+// which costs 3.8s on a loaded host — so `agent dir`, printing one path, took three and a half
+// seconds, and the probe's own 3s timeout reported a slow-but-working podman as unreachable.
+func warnRuntime(st api.BoardState) {
+	if st.RuntimeHint != "" {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", st.RuntimeHint)
 	}
 }
 
@@ -74,6 +77,7 @@ func withAgent(name string, fn func(b backend, a *api.AgentView) error) error {
 		b.Close()
 		return err
 	}
+	warnRuntime(st)
 	a := agentByName(st.Agents, name)
 	if a == nil {
 		b.Close()
@@ -103,6 +107,7 @@ func agentListCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				warnRuntime(st) // a whole roster reading "down" has one likely cause
 				for _, a := range api.SortedAgents(st.Agents, st.Projects) {
 					line := fmt.Sprintf("%-10.10s %-12s %-8s %-10s %4s %-14s %s", a.Repo, a.Name, a.Role, a.Status,
 						theme.ContextPercent(a.ContextTokens, a.ContextWindow), dash(a.Task), dash(a.PR))
