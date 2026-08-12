@@ -11,14 +11,14 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/client"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/ui/tui/scroll"
 )
 
@@ -26,9 +26,29 @@ const (
 	filterOpen = iota
 	filterClosed
 	filterAll
+	filterActive
 )
 
-var filterNames = [...]string{"open", "closed", "all"}
+var filterNames = [...]string{"open", "closed", "all", "active"}
+
+// tuiSection is one dashboard tab: a key and a title. Unlike hub/commands' registry
+// (which pairs a key with a Count func — necessary hub-side, but a func can't cross
+// the wire), the front-end computes each badge itself, straight off the board it
+// already has (-> tabCount): Agents and PRs need the § scope toggle the hub knows
+// nothing about, so the count could never have been a value the hub resolved once.
+var tuiSections = []tuiSection{
+	{"tasks", "Tasks"},
+	{"agents", "Agents"},
+	{"prs", "PRs"},
+	{"repos", "Repos"},
+	{"chat", "Meeting"},
+}
+
+type tuiSection struct{ Key, Title string }
+
+// activeWindow is how recently a task must have changed to count as "active" alongside every
+// open task — wide enough that a task closed just before you glanced over doesn't vanish.
+const activeWindow = 2 * time.Hour
 
 // inputMode is the active text-input modal (none = normal navigation).
 type inputMode int
@@ -36,15 +56,16 @@ type inputMode int
 const (
 	inputNone inputMode = iota
 	inputTell
+	inputComment
 )
 
 type model struct {
 	cl     *client.HTTP
-	ch     <-chan hub.BoardState
+	ch     <-chan api.BoardState
 	cancel context.CancelFunc // cancels the current /events subscription (re-created on repo switch)
 	gen    int                // subscription generation; bumped on switch so stale /events msgs are ignored
 	root   string             // the selected repo — scopes the Tasks tab and container names
-	state  hub.BoardState
+	state  api.BoardState
 	err    error
 	w, h   int
 
@@ -52,6 +73,10 @@ type model struct {
 	cursor [5]int // one per section (Tasks/Agents/PRs/Repos/Chat)
 	list   scroll.Viewport
 	detail scroll.Viewport
+	// prMeta is the PRs tab's right column. It needs its own viewport because `detail` is spent on
+	// that tab's big diff pane, and a column built fresh each render can only ever show its top —
+	// which is what put the reviews and history below the fold out of reach entirely.
+	prMeta scroll.Viewport
 
 	filter     int // Tasks tab: open/closed/all
 	prFilter   int // PRs tab: unmerged/merged/all (default hides merged)
@@ -65,15 +90,16 @@ type model struct {
 	rightCursor int  // focused actionable item in the right column
 
 	detailKey    string
-	agentLog     []store.Event
+	agentLog     []api.Event
 	agentPane    string           // captured tmux screen of the selected agent (live)
 	agentView    string           // Agents main pane: "screen" (tmux, default) | "pod" (podman info)
 	agentPod     string           // fetched podman pod-info for the selected agent
-	agentClients []hub.ClientView // dial-ins attached to the selected agent's session
-	prDetail     hub.PRDetail
+	agentDiag    string           // fetched liveness-probe explanation for the selected agent
+	agentClients []api.ClientView // dial-ins attached to the selected agent's session
+	prDetail     api.PRDetail
 	prView       string // which content the PR big pane shows: "diff" (default) | "lint"
 	reviewPrompt string // editable default review instruction (from the hub)
-	taskDetail   store.Task
+	taskDetail   api.Task
 	quit         bool
 
 	modalOverride      []string // when set, the detail modal shows these instead of the tab detail
@@ -104,7 +130,7 @@ func (m model) wide() bool { return m.w >= detailMinWidth }
 // there's room, off when the user hides it with §. Never hides the main pane.
 func (m model) showDetail() bool { return m.wide() && !m.hideDetail }
 
-func newModel(cl *client.HTTP, ch <-chan hub.BoardState, root string) model {
+func newModel(cl *client.HTTP, ch <-chan api.BoardState, root string) model {
 	// A default size renders a frame immediately: some terminals report theirs late, or as 0×0,
 	// and the view would otherwise stick on "loading".
 	in := textinput.New()
@@ -113,7 +139,10 @@ func newModel(cl *client.HTTP, ch <-chan hub.BoardState, root string) model {
 	ta.CharLimit = 0 // the hub enforces the length cap (with feedback); never clip silently here
 	ta.Placeholder = "Type a message to the meeting room…"
 	ta.ShowLineNumbers = false
-	m := model{cl: cl, ch: ch, root: root, collapsed: map[string]bool{}, merging: map[string]bool{}, busy: map[string]string{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
+	// Tasks open on "active" — the open backlog plus whatever changed in the last couple of hours.
+	// Plain "open" hid a task the moment it closed, so the work just finished left no trace on the
+	// board and the tab read as though nothing had happened.
+	m := model{cl: cl, ch: ch, root: root, filter: filterActive, collapsed: map[string]bool{}, merging: map[string]bool{}, busy: map[string]string{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
 	m.reclamp()
 	return m
 }
@@ -162,7 +191,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reclamp()
 		return m, tea.Batch(waitForState(m.ch, m.gen), m.syncDetail(), m.agentLiveCmds())
 	case polledMsg: // an auto-refresh poll — update the board, don't touch the SSE waiter
-		m.state = hub.BoardState(msg)
+		m.state = api.BoardState(msg)
 		m.reconcileMerging()
 		m.reconcileBusy()
 		m.reclamp()
@@ -199,6 +228,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.agent == m.selID() { // ignore a stale capture from a prior selection
 			m.agentPane = KeepColour(msg.text) // another program's screen: text + colour only
 		}
+	case agentCreatedMsg:
+		return m, m.launchCmd(string(msg))
+	case launchedMsg:
+		if msg.err != nil {
+			// The log is the diagnosis — a failed image build says why in its output, and the
+			// error alone ("exit status 1") would not.
+			body := msg.log
+			if strings.TrimSpace(body) == "" {
+				body = "(the launch produced no output)"
+			}
+			m.flash = ""
+			m.openTextModal("launch FAILED: "+msg.name+" — "+msg.err.Error(), body)
+			return m, nil
+		}
+		m.flash = msg.name + " launched"
+		if m.cl == nil {
+			return m, nil
+		}
+		return m, pollStateCmd(m.cl)
+	case agentDiagMsg:
+		if msg.agent == m.selID() { // ignore a stale fetch from a prior selection
+			m.agentDiag = msg.text
+		}
 	case agentPodMsg:
 		if msg.agent == m.selID() {
 			m.agentPod = msg.text
@@ -215,6 +267,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.rightCursor = m.viewCursor("lint")
 			m.detail.Resize(m.detail.Height, len(m.prContentLines()))
 		}
+	case milestoneMsg:
+		m.flash = "milestone " + string(msg) + " opened — the agent waits for the merge"
+	case noticeMsg:
+		m.noticeText = string(msg)
+	case rebuiltMsg:
+		title := "rebuild: " + msg.name
+		if msg.err != nil {
+			title = "rebuild FAILED: " + msg.name
+			m.flash = ""
+		} else {
+			m.flash = msg.name + " rebuilt"
+		}
+		m.openTextModal(title, msg.log)
+	case statsMsg:
+		m.flash = ""
+		m.openTextModal("agent memory", strings.Join(statsLines(api.StatsReport(msg)), "\n"))
 	case reviewPromptMsg:
 		m.reviewPrompt = string(msg)
 	case resumedMsg: // an interactive child (attach/shell) exited — force a clean repaint (see resumedMsg)
@@ -223,6 +291,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.ExecProcess(shellAt(string(msg)), resumed)
 	case openPlanFormMsg: // "new… → plan" chosen — ask what to plan
 		m.openPlanForm(string(msg))
+		return m, nil
+	case openTaskPlanFormMsg: // a planner was chosen for a task — ask what to add, then hand it over
+		m.openTaskPlanForm(msg.planner, msg.task)
+		return m, nil
+	case openPriorityChoiceMsg: // the task was approved and nothing rates it yet — ask for the priority
+		m.openPriorityChoice(string(msg))
+	case openApproveAfterPriorityMsg: // the task was rated and the gate still holds it — offer the approve
+		m.openApproveAfterPriorityChoice(string(msg))
+		return m, nil
+	case openPriorityScopeMsg: // a priority was picked over a tree — ask how far it carries
+		m.openPriorityScopeChoice(msg.id, msg.code)
 		return m, nil
 	case editorReadyMsg: // PR materialized — open the user's editor on the review workspace
 		ed := editorAt(string(msg))
@@ -316,9 +395,17 @@ func (m model) View() string {
 	if m.w == 0 || m.h == 0 {
 		return "loading…"
 	}
-	labels := make([]string, len(hub.Sections))
-	for i, s := range hub.Sections {
+	labels := make([]string, len(tuiSections))
+	for i, s := range tuiSections {
 		labels[i] = fmt.Sprintf("%d %s", m.tabCount(s), s.Title)
+		// Tasks awaiting a verdict ride on the Tasks label so the count is in view from every tab:
+		// they are hidden from workers, so a backlog of them reads as plenty of work beside an idle
+		// agent, and nothing said the two were connected.
+		if s.Key == "tasks" {
+			if n := api.CountAwaitingVerdict(m.state.Tasks); n > 0 {
+				labels[i] += fmt.Sprintf(" (%d%s)", n, gateGlyph)
+			}
+		}
 	}
 	// Modals take over the whole screen.
 	if m.errText != "" {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // TestPRKindMarkers: the task-tree PR marker distinguishes a final (task-done) PR from
@@ -12,13 +12,13 @@ import (
 // historical default) reads as final.
 func TestPRKindMarkers(t *testing.T) {
 	cases := []struct {
-		row  hub.TaskRow
+		row  api.TaskRow
 		want string // substring the marker column must contain ("" = neither ◆ nor ◇)
 	}{
-		{hub.TaskRow{PR: "pr-1", PRKind: "final"}, "◆"},
-		{hub.TaskRow{PR: "pr-1", PRKind: "interim"}, "◇"},
-		{hub.TaskRow{PR: "pr-1", PRKind: ""}, "◆"}, // kindless → final
-		{hub.TaskRow{PR: "", PRKind: ""}, ""},      // no PR → no marker
+		{api.TaskRow{PR: "pr-1", PRKind: "final"}, "◆"},
+		{api.TaskRow{PR: "pr-1", PRKind: "interim"}, "◇"},
+		{api.TaskRow{PR: "pr-1", PRKind: ""}, "◆"}, // kindless → final
+		{api.TaskRow{PR: "", PRKind: ""}, ""},      // no PR → no marker
 	}
 	for _, c := range cases {
 		got := taskMarks(false, prMarkKind(c.row))

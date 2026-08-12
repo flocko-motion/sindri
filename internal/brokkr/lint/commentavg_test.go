@@ -439,3 +439,127 @@ func mustIgnore(t *testing.T) *Ignore {
 	}
 	return ig
 }
+
+// TestShellDirectivesAreNotProse is the shell counterpart of TestGoDirectivesAreNotProse: the
+// interpreter line and shellcheck pragmas address a tool, not a reader, so a script must not be
+// charged for carrying them. A `#!` below line 1 is an ordinary comment — only line 1 is a shebang.
+func TestShellDirectivesAreNotProse(t *testing.T) {
+	blocks := ScanShellComments("#!/usr/bin/env bash\n# shellcheck disable=SC2086\n# the real explanation\ncode\n")
+	if len(blocks) != 1 {
+		t.Fatalf("one block, got %d", len(blocks))
+	}
+	if blocks[0].Lines != 1 {
+		t.Errorf("only the prose line counts, got %d", blocks[0].Lines)
+	}
+	if len(blocks[0].Text) != 1 || blocks[0].Text[0] != "the real explanation" {
+		t.Errorf("the excerpt must be the prose, got %q", blocks[0].Text)
+	}
+	// A block of nothing but directives is not a comment at all.
+	if got := ScanShellComments("#!/bin/sh\n\ncode\n"); len(got) != 0 {
+		t.Errorf("a shebang alone is not a comment, got %+v", got)
+	}
+	// Below line 1 it is prose: a script may legitimately discuss a shebang.
+	if got := ScanShellComments("code\n\n#!not-a-shebang\n"); len(got) != 1 || got[0].Lines != 1 {
+		t.Errorf("a `#!` off line 1 is an ordinary comment, got %+v", got)
+	}
+}
+
+// TestShellBlocksFollowTheSameRules: shell reuses the block machinery, so a gap must hold a block
+// open and only code may end one — the property that stops a long comment being split in two to
+// halve its measurement.
+func TestShellBlocksFollowTheSameRules(t *testing.T) {
+	gapped := "# one\n\n# two\n\n# three\ncode\n"
+	if got := ScanShellComments(gapped); len(got) != 1 || got[0].Lines != 3 {
+		t.Errorf("a blank line split a shell comment: %+v", got)
+	}
+	if got := ScanShellComments("# one\ncode\n# two\n"); len(got) != 2 {
+		t.Errorf("code must end a block, got %d", len(got))
+	}
+}
+
+// TestShellIsMeasuredForLengthOnly pins the boundary the whole change turns on: comment-length
+// reads shell, and no other linter does. loc is the one that bites silently — its filter is written
+// as "any language we know", so a new Lang value joins it unless excluded by name.
+func TestShellIsMeasuredForLengthOnly(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "long.sh")
+	// A script with a long body comment and enough lines to exceed a small loc budget.
+	body := "#!/usr/bin/env bash\n# header\ncode\n\n# a\n# b\n# c\n# d\n# e\n# f\n"
+	for i := 0; i < 30; i++ {
+		body += "echo line\n"
+	}
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	bad, err := CommentAvg([]string{dir}, 1.0, 200, false, &Cap{}, &Ignore{}, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bad || !strings.Contains(buf.String(), "long.sh") {
+		t.Errorf("comment-length did not measure the script:\n%s", buf.String())
+	}
+
+	// loc must not: shell is out of scope for file length.
+	buf.Reset()
+	if _, err := LOC([]string{dir}, 5, &Cap{}, &Ignore{}, &buf); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "long.sh") {
+		t.Errorf("loc measured a shell script, which is out of scope:\n%s", buf.String())
+	}
+
+	// comments must not: no four-field header is required of a script.
+	buf.Reset()
+	if _, err := Comments([]string{dir}, &Cap{}, &Ignore{}, &buf); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "long.sh") {
+		t.Errorf("the comments linter demanded a header of a script:\n%s", buf.String())
+	}
+}
+
+// TestScriptHeaderIsExemptButTheBodyIsNot: nine of this repo's scripts carry a header nobody asked
+// them for, so charging for it would make a length rule into a header sweep. One block is exempt —
+// not a habit of them.
+func TestScriptHeaderIsExemptButTheBodyIsNot(t *testing.T) {
+	header := "#!/usr/bin/env bash\nset -euo pipefail\n\n# a long header\n# that runs on\n# for several lines\n# and then some\n\ncode\n"
+	if got := commentBlocksFor(LangShell, header); len(got) != 0 {
+		t.Errorf("the script's header was measured: %+v", got)
+	}
+	// The exemption is the FIRST block only; a second essay is measured.
+	both := header + "\n# a second essay\n# that also runs on\n# and on\nmore\n"
+	got := commentBlocksFor(LangShell, both)
+	if len(got) != 1 || got[0].Lines != 3 {
+		t.Errorf("a second block must be measured in full, got %+v", got)
+	}
+}
+
+// TestShebangDetectionFindsExtensionlessScripts: a hook or wrapper often has neither a .sh name nor
+// an obvious one, and buildctx/shims/git is exactly that.
+func TestShebangDetectionFindsExtensionlessScripts(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		name, body string
+		want       Lang
+	}{
+		{"hook", "#!/usr/bin/env bash\necho hi\n", LangShell},
+		{"plain", "#!/bin/sh\necho hi\n", LangShell},
+		{"zshy", "#!/usr/bin/zsh\necho hi\n", LangShell},
+		{"pyscript", "#!/usr/bin/env python3\nprint(1)\n", LangNone}, // # comments, but not this rule's business
+		{"notascript", "just text\n", LangNone},
+	} {
+		p := filepath.Join(dir, tc.name)
+		if err := os.WriteFile(p, []byte(tc.body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if got := LangOfFile(p); got != tc.want {
+			t.Errorf("%s: LangOfFile = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	// A named extension is answered without reading the file at all.
+	if got := LangOf("x.sh"); got != LangShell {
+		t.Errorf("LangOf(x.sh) = %v", got)
+	}
+}

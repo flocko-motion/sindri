@@ -7,7 +7,7 @@ TBD - created by archiving change add-github-issue-source. Update Purpose after 
 
 Sindri SHALL be able to import a repository's open GitHub issues as tasks in the
 hub's cached backlog, alongside td tasks and openspec changes. All access to
-GitHub SHALL go through a dedicated adapter (`internal/adapter/github`) that
+GitHub SHALL go through a dedicated adapter (`internal/adapter/tasks/github`) that
 shells out to the `gh` CLI — reusing the user's existing `gh` authentication —
 and the adapter SHALL be stateless package-level functions that import nothing
 from the hub, store, or issue-model packages (the same adapter shape as `td` and
@@ -22,7 +22,7 @@ from the hub, store, or issue-model packages (the same adapter shape as `td` and
 #### Scenario: All access via the adapter
 
 - **WHEN** the hub reads issues or closes one
-- **THEN** it calls the `internal/adapter/github` package, which invokes `gh` —
+- **THEN** it calls the `internal/adapter/tasks/github` package, which invokes `gh` —
   the hub never contacts the GitHub API directly
 
 ### Requirement: All open issues are imported; pull requests excluded

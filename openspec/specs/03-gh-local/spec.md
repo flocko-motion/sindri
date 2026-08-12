@@ -37,11 +37,21 @@ record store.
 ### Requirement: Lint gate before submit
 
 Submitting (and creating a PR) SHALL run the project's quality gates after the
-rebase and before the PR record is written — the same gates as `sindri lint all`
-(file length, dead code, and OpenSpec validation). If any violation is found, or
-a gate cannot run (e.g. the code does not compile), the submit SHALL be refused
-and the violations reported, so a failing PR is never created. OpenSpec
-validation SHALL be skipped when the project doesn't use openspec.
+rebase and before the PR record is written — the built-in gates (file length, dead
+code, and OpenSpec validation) together with the project's own declared verify command
+(see `project-config`). If any violation is found, or a gate cannot run (e.g. the code
+does not compile), the submit SHALL be refused and the violations reported, so a
+failing PR is never created. OpenSpec validation SHALL be skipped when the project
+doesn't use openspec.
+
+A project that declares a verify command SHALL have it run whatever the project's
+language: the absence of a Go module SHALL NOT be treated as the absence of a gate. A
+project that declares none SHALL be gated by the built-in checks alone, as before.
+
+The gate SHALL be bounded — a timeout, and output capped in a way that names what was
+cut and how much, since silent truncation reads as a complete answer. Its output SHALL
+be retained on the PR record and surfaced to the human, so a refused submit explains
+itself without the check being re-run.
 
 #### Scenario: Clean submit
 
@@ -52,6 +62,30 @@ validation SHALL be skipped when the project doesn't use openspec.
 
 - **WHEN** an agent submits work that fails a gate (lint or an invalid spec)
 - **THEN** no PR is created and the violations are shown for the agent to fix
+
+#### Scenario: The project's own gate refuses a submit
+
+- **WHEN** a project declares a verify command and it exits non-zero for an agent's
+  work
+- **THEN** the submit is refused, no PR is created, and the command's output is
+  reported to the agent
+
+#### Scenario: A declared gate is not skipped for a non-Go project
+
+- **WHEN** a project with no Go module declares a verify command and an agent submits
+- **THEN** the command runs and its result decides the submit, rather than the gate
+  passing because no Go module was found
+
+#### Scenario: A refused submit explains itself later
+
+- **WHEN** a human inspects a PR whose gate failed
+- **THEN** the retained gate output is shown, without the gate being run again
+
+#### Scenario: A hanging gate does not hang the submit
+
+- **WHEN** a project's verify command does not finish within the gate's timeout
+- **THEN** the gate reports the timeout and refuses the submit, rather than blocking
+  the agent indefinitely
 
 ### Requirement: Per-task branches in worktrees
 
@@ -101,9 +135,20 @@ reported rather than silently swallowed.
 The agent client SHALL be a single role-agnostic browser whose available commands
 are filtered by the hub from the caller's role and state. A worker's surface SHALL
 expose registering and inspecting merge-intents but never approve/reject/merge; a
-reviewer's surface SHALL expose approve/reject but never submit. Merge SHALL be
-human-only, exposed only on the host and requiring explicit confirmation; no agent
-surface SHALL ever include merge.
+reviewer's surface SHALL expose approve/reject but never submit; a coauthor's
+surface SHALL expose only the generic helpers (status, log, lint, and the
+read-only PR views) and none of the build or review verbs — a coauthor commits
+with git directly rather than through a hub verb; a planner's
+surface SHALL expose reading the backlog, proposing tasks, and shipping openspec
+(`task`/`create-task`/`openspec`) but never the worker's `next`/`submit` nor the
+reviewer's `approve`/`reject`. Approval SHALL NOT be the reviewer agent's
+exclusive power: the host SHALL also expose a human approve (`sindri pr approve`),
+the positive counterpart of the existing human reject, so a PR can reach
+`approved` without a reviewer agent in the loop. A human approve SHALL mark the PR
+approved and satisfy its review gates exactly as a reviewer approve does, and SHALL
+apply only to an open PR (one awaiting a verdict). Merge SHALL be human-only,
+exposed only on the host and requiring explicit confirmation; no agent surface
+SHALL ever include merge.
 
 #### Scenario: Reviewer approves, human merges
 
@@ -111,11 +156,35 @@ surface SHALL ever include merge.
 - **THEN** the hub marks it approved and its gates satisfied, but it is merged only
   later by a human on the host
 
+#### Scenario: Human approves without a reviewer
+
+- **WHEN** no reviewer agent has approved a PR and the user approves it on the host
+- **THEN** the hub marks it approved and its gates satisfied, so the user can then
+  merge it — a reviewer agent is not required to reach `approved`
+
+#### Scenario: Approve only an open PR
+
+- **WHEN** a human approve targets a PR that is not open (already approved, merged,
+  or rejected)
+- **THEN** the approve is refused and the PR's current status is reported, mirroring
+  the reviewer approve's open-only guard
+
+#### Scenario: Planner ships, not builds
+
+- **WHEN** a planner queries its surface
+- **THEN** it can read the backlog, propose tasks, and ship openspec, but it has no
+  `next`/`submit`/`approve`/`reject`, and no merge
+
 #### Scenario: No agent merge
 
 - **WHEN** any agent queries its command surface
 - **THEN** no merge command appears; only the host `sindri pr merge` can merge,
   after human confirmation
+#### Scenario: Coauthor has only helpers
+
+- **WHEN** a coauthor asks the hub what it can run
+- **THEN** it is offered the generic helpers only — no `next`/`submit`, no
+  `approve`/`reject`
 
 ### Requirement: Self-contained, no remote dependency
 
@@ -145,24 +214,6 @@ merge SHALL never block on a GitHub write-back.
 
 - **WHEN** the GitHub issue source is disabled or unavailable
 - **THEN** the local PR/worktree/merge workflow is unchanged and fully functional
-
-### Requirement: td reads are direct, writes go through the tool
-
-For the td backend, the td adapter SHALL read tasks directly from td's own SQLite
-database for speed, but SHALL perform every write action (create, start, comment,
-review, …) only through the `td` tool — never by writing td's database directly.
-Both strategies SHALL be encapsulated in `internal/adapter/td` so internal logic
-sees a single adapter interface.
-
-#### Scenario: Fast read
-
-- **WHEN** the hub syncs td tasks into its cache
-- **THEN** it reads td's SQLite directly rather than invoking the td CLI per query
-
-#### Scenario: Write through the tool
-
-- **WHEN** a td task is created or mutated
-- **THEN** the change goes through the `td` tool, never a direct write to td's DB
 
 ### Requirement: Container branches persist across subtasks
 
@@ -206,13 +257,72 @@ its container is closed.
 - **WHEN** a container is closed (all its children done) and its branch is merged
 - **THEN** the branch is retired and the agent is freed to take new work
 
+### Requirement: Planner ships openspec changes as a PR
+
+A planner SHALL turn its openspec edits into a merge-intent with `openspec submit`,
+reviewed and merged through the same cycle as a worker's PR. The planner SHALL work
+on a standing branch (`plan-<name>`) rather than a per-task branch, and its PR SHALL
+carry no real backlog task (a placeholder task id stands in for it). Submitting
+SHALL run the same lint gate as a worker's submit — including openspec validation —
+and refuse the PR if a gate fails. On reviewer rejection the planner SHALL drop to
+idle with the feedback injected; after any merge moves the base branch, every
+planner's standing branch SHALL be rebased onto the new base so planners stay
+current.
+
+#### Scenario: Shipping a plan
+
+- **WHEN** a planner runs `openspec submit` with openspec edits that pass the gate
+- **THEN** its standing branch is committed and a merge-intent is registered,
+  reviewed like a worker's PR, with no backlog task behind it
+
+#### Scenario: Plan fails the gate
+
+- **WHEN** a planner submits openspec that fails the lint gate (e.g. invalid spec)
+- **THEN** no PR is created and the violations are reported for the planner to fix
+
+#### Scenario: Planner rebased after a merge
+
+- **WHEN** a PR merges and moves the base branch
+- **THEN** each planner's standing branch is rebased onto the new base so it sees
+  the latest code
+
+### Requirement: td is a one-way import, not a backend
+
+Sindri SHALL own its tasks in the hub's own store, and SHALL NOT depend on the td tool at
+runtime. Where a repository carries an existing td database, the hub SHALL import that
+backlog **once**, the first time it syncs the project, so adopting sindri costs nobody their
+tasks. That import SHALL read td's own SQLite directly, and SHALL be the only way td is
+touched: the td CLI SHALL NOT be invoked, and td's database SHALL NOT be written.
+
+Because the import happens once, a task that arrives this way SHALL thereafter be an
+ordinary task sindri owns, indistinguishable from one created in sindri — including its
+`td-` prefix, which records sindri's ownership rather than a live backend (see `hub`).
+
+#### Scenario: Existing backlog imported once
+
+- **WHEN** the hub syncs a project whose repository has a td database for the first time
+- **THEN** that backlog is imported into the hub's own store, and subsequent syncs import
+  nothing further
+
+#### Scenario: td is never written
+
+- **WHEN** a task imported from td is created, changed, or closed
+- **THEN** the change lands in the hub's own store, and neither td's database nor the td CLI
+  is touched
+
+#### Scenario: No td, no problem
+
+- **WHEN** a repository has never used td
+- **THEN** nothing is imported and the hub's own tasks are the whole backlog
+
 ## Structure
 
-- `internal/ghlocal/store/` (`type: adapter`) — the PR record store and the
-  git checkout/merge/branch operations.
-- `internal/agentcli/` (`type: command`) — the shared agent command set
-  (issue/submit/done/pr create/list/view, plus pr approve/reject for review),
-  wrapping the store, td, git, and the lint gate. Two thin entrypoints wire role
-  subsets: `cmd/sindri-worker/` (worker) and `cmd/sindri-review/` (reviewer).
-- `internal/worker/` (`type: adapter`) — creates and tends the worktrees the
-  branches live in (see workers).
+- `internal/hub/repo/` (`type: logic`) — the git mechanics behind a PR:
+  materializing a branch for review, scrapping one, and running the submit gate.
+- `internal/hub/workflow/` (`type: logic`) — the PR lifecycle: submit, contribute,
+  review verdicts, merge, and the directive each role is given.
+- `internal/hub/store/` (`type: logic`) — the PR records, task cache and event log,
+  in the hub's SQLite database.
+- `internal/hub/commands/` (`type: logic`) — the role-filtered command surface an
+  agent sees; `cmd/sindri-worker/` is the thin browser that renders it.
+

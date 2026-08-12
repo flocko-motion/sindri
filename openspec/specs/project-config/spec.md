@@ -139,20 +139,64 @@ prompt SHALL be used.
 
 ### Requirement: GitHub issue source toggle
 
-The GitHub issue source (see the `github-issues` capability) SHALL be enabled per
-project via the `github.issues` boolean key, defaulting to `false`. This key is
-the per-project opt-in surface that capability defers to: when `true` the source
-is active for the project (still subject to `gh` availability and graceful
-absence); when `false` or unset no issues are imported.
+The GitHub issue source (see the `github-issues` capability) SHALL be configurable per
+project via the `github.issues` boolean key, defaulting to **on**. This key is the
+per-project surface that capability defers to: when unset or `true` the source is active for
+the project (still subject to `gh` availability and graceful absence); when `false` no issues
+are imported. The opt-out direction is deliberate — a repository shows its issues without the
+user first discovering a flag, and the unrated-import rule keeps that from becoming surprise
+work.
 
-#### Scenario: Source enabled by config
+#### Scenario: Source on by default
+
+- **WHEN** `github.issues` is unset and `gh` is available with a GitHub remote
+- **THEN** the project's open GitHub issues are imported
+
+#### Scenario: Source disabled explicitly
+
+- **WHEN** `github.issues: false`
+- **THEN** no issues are imported, regardless of `gh` availability
+
+#### Scenario: Enabled explicitly
 
 - **GIVEN** `github.issues: true` in `.sindri/config.yaml`
 - **WHEN** the hub syncs tasks and `gh` is available with a GitHub remote
-- **THEN** the project's open GitHub issues are imported as todos
+- **THEN** the project's open GitHub issues are imported
 
-#### Scenario: Source off by default
+### Requirement: Configurable submit-gate command
 
-- **WHEN** `github.issues` is unset or `false`
-- **THEN** no GitHub issues are imported, regardless of `gh` availability
+A project SHALL be able to declare its own quality gate through a `verify` key: a
+repo-relative path to an executable that the submit gate runs in the agent's worktree,
+in addition to the built-in checks (see `03-gh-local`). The key SHALL be validated like
+every other path key — absolute, escaping the repository root, or naming a file that
+does not exist is invalid config, and fails loudly rather than falling back.
+
+When the key is unset the built-in gates apply alone, so an existing project's
+behaviour is unchanged. The value SHALL be a path rather than a command line, so it can
+be validated before it is run and so the project owns its invocation: a project whose
+gate is a build tool wraps it in a script.
+
+#### Scenario: Declared gate runs at submit
+
+- **GIVEN** `verify: scripts/verify.sh` and that file exists
+- **WHEN** an agent submits work
+- **THEN** the script runs in the agent's worktree and its exit status decides whether
+  the PR is created
+
+#### Scenario: Unset key keeps today's behaviour
+
+- **WHEN** no `verify` key is set
+- **THEN** the submit gate runs the built-in checks only, as it does today
+
+#### Scenario: Missing gate file is invalid config
+
+- **GIVEN** `verify: scripts/verify.sh` and that file does not exist
+- **WHEN** the project is resolved
+- **THEN** it is rejected as invalid config naming the key and the path, and no submit
+  silently proceeds ungated
+
+#### Scenario: Path escaping the repo is rejected
+
+- **WHEN** the `verify` value is absolute or escapes the repository root
+- **THEN** it is rejected as invalid config, like every other path key
 

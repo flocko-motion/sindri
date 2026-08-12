@@ -5,16 +5,15 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/muesli/termenv"
 )
 
 // mockBoard is a representative board: a task tree (epic→feature→tasks) with a
 // standalone bug, agents (running/stopped) + an orphan, and an open PR.
-func mockBoard() hub.BoardState {
-	return hub.BoardState{
-		Tasks: []store.Task{
+func mockBoard() api.BoardState {
+	return api.BoardState{
+		Tasks: []api.Task{
 			{ID: "td-ep01", Title: "Authentication epic", Status: "open", Priority: "P1", Type: "epic"},
 			{ID: "td-feat1", Title: "Login feature", Status: "in_progress", Priority: "P1", Type: "feature", ParentID: "td-ep01"},
 			{ID: "td-t1", Title: "Wire the login form", Status: "open", Priority: "P2", Type: "task", ParentID: "td-feat1"},
@@ -25,13 +24,13 @@ func mockBoard() hub.BoardState {
 			{ID: "os-a1b2c3", Title: "hub-architecture (15/15)", Status: "open", Type: "spec"},
 			{ID: "os-d4e5f6", Title: "tui-dashboard (22/23)", Status: "open", Type: "spec"},
 		},
-		Agents: []hub.AgentView{
+		Agents: []api.AgentView{
 			{Name: "brokkr", Role: "worker", Status: "working", Task: "td-feat1", PR: "pr-td-feat1", Workspace: ".worktrees/brokkr"},
 			{Name: "rune", Role: "reviewer", Status: "idle", Workspace: ".worktrees/rune"},
 			{Name: "dvalin", Role: "worker", Status: "down", Workspace: ".worktrees/dvalin"},
 			{Name: "nabbi", Role: "planner", Status: "idle", Workspace: ".worktrees/nabbi"},
 		},
-		PRs: []store.PR{
+		PRs: []api.PR{
 			{ID: "pr-td-feat1", Task: "td-feat1", Agent: "brokkr", Branch: "td-feat1", Base: "master", Status: "open"},
 		},
 		Orphans: []string{"sindri-ghost"},
@@ -48,9 +47,9 @@ func TestScreenshot(t *testing.T) {
 		name string
 		keys []string
 	}{
-		{"Tasks tab (default: open filter)", nil},
+		{"Tasks tab (default: active filter)", nil},
 		{"Tasks tab — cursor on the feature", []string{"j", "j"}},
-		{"Tasks tab — filter=all (shows closed)", []string{"f", "f"}},
+		{"Tasks tab — filter=all (shows closed)", []string{"f", "f", "f"}},
 		{"Agents tab", []string{"tab"}},
 		{"PRs tab", []string{"tab", "tab"}},
 	}

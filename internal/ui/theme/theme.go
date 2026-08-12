@@ -1,5 +1,5 @@
 // package: ui/theme / theme
-// type:    logic (shared presentation primitives)
+// type:    rendering (shared presentation primitives)
 // job:     the deterministic name→colour mapping and the participant markers both
 // front-ends share, so one name is the same colour and glyph in the CLI and
 // the TUI instead of each package inventing its own.
@@ -13,7 +13,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/flo-at/sindri/internal/hub/chat"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // Sat/lightness pairs for a derived hue, exported so callers pick a shade without re-tuning.
@@ -22,19 +22,35 @@ const (
 	BrightSat, BrightLight = 0.55, 0.72
 )
 
-// Re-exported from the chat core, which stamps these same glyphs into agents' sessions: a
-// front-end needs only this package, and there is still exactly one definition.
+// Chat participant glyphs. Plain UTF-8, so a pane that cannot take ANSI still shows them.
 const (
-	UserIcon     = chat.UserIcon
-	AgentIcon    = chat.AgentIcon
-	SystemIcon   = chat.SystemIcon
-	SenderUser   = chat.SenderUser
-	SenderSystem = chat.SenderSystem
-	HelpText     = chat.HelpText
+	UserIcon   = "👤"
+	AgentIcon  = "🤖"
+	SystemIcon = "⚙"
 )
 
+// The sender values a message carries; data, so they stay in the API and are named here only so a
+// front-end needs one import to render a transcript.
+const (
+	SenderUser   = api.SenderUser
+	SenderSystem = api.SenderSystem
+)
+
+// HelpText describes the in-room commands. Shown by the `meeting join` banner and the TUI's chat
+// tab, which is why it is one string: two accounts of the same commands drift.
+const HelpText = "/add <agent> (alias /invite) · /remove <agent> (alias /kick) · /who (list members) · /help. " +
+	"Anything not starting with / is sent to everyone in the room."
+
 // Icon marks who is speaking: the human, the hub itself, or an agent.
-func Icon(sender string) string { return chat.Icon(sender) }
+func Icon(sender string) string {
+	switch sender {
+	case SenderUser:
+		return UserIcon
+	case SenderSystem:
+		return SystemIcon
+	}
+	return AgentIcon
+}
 
 // HelpLine is the in-room interface description, dimmed for a banner or hint line.
 func HelpLine() string { return Dim().Render(HelpText) }
@@ -74,6 +90,36 @@ func BodyStyle(sender string) lipgloss.Style {
 
 // Dim is the muted style for secondary text (timestamps, hints).
 func Dim() lipgloss.Style { return lipgloss.NewStyle().Foreground(lipgloss.Color("245")) }
+
+// One hue per project in two shades, so a repo always reads the same AND the pair is guaranteed to
+// contrast. HSL, because lightness has to be controllable.
+const (
+	RepoDarkSat, RepoDarkLight     = 0.32, 0.22 // muted, dark: for filled backgrounds
+	RepoBrightSat, RepoBrightLight = 0.55, 0.72 // bright: for text on a dark background
+)
+
+// NRepoColors is the pickable palette: evenly-spaced hues, so a repo can be pinned instead of
+// taking the hash-derived default (0).
+const NRepoColors = 24
+
+// PaletteHue is the hue (degrees) for a 1-based palette choice.
+func PaletteHue(choice int) float64 { return float64(((choice - 1) * 360 / NRepoColors) % 360) }
+
+// RepoHue prefers a pinned palette choice, else the hash-derived default (same Hue every front-end
+// derives a name's colour from, so an unpinned repo's default agrees with everything else).
+func RepoHue(tag string, choice int) float64 {
+	if choice >= 1 && choice <= NRepoColors {
+		return PaletteHue(choice)
+	}
+	return Hue(tag)
+}
+
+// RepoColors is the (dark, bright) pair for a filled bar: one hue at two lightnesses.
+func RepoColors(tag string, choice int) (dark, bright lipgloss.Color) {
+	hue := RepoHue(tag, choice)
+	return lipgloss.Color(HSLHex(hue, RepoDarkSat, RepoDarkLight)),
+		lipgloss.Color(HSLHex(hue, RepoBrightSat, RepoBrightLight))
+}
 
 // HSLHex converts an HSL colour (h in [0,360), s,l in [0,1]) to a "#rrggbb" string.
 func HSLHex(h, s, l float64) string {

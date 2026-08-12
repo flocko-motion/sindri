@@ -5,8 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // TestAttachedOpenPR: a task's open PR (same project) is detected, while merged and
@@ -14,7 +13,7 @@ import (
 func TestAttachedOpenPR(t *testing.T) {
 	m := newModel(nil, nil, "")
 	_, tag := m.currentRepo() // match the active-repo tag attachedOpenPR filters on
-	m.state = hub.BoardState{PRs: []store.PR{
+	m.state = api.BoardState{PRs: []api.PR{
 		{ID: "pr-td-1", Task: "td-1", Project: tag, Status: "approved"},
 		{ID: "pr-td-2", Task: "td-2", Project: tag, Status: "merged"},
 		{ID: "pr-td-3", Task: "td-3", Project: tag, Status: "scrapped"},
@@ -33,7 +32,7 @@ func TestAttachedOpenPR(t *testing.T) {
 func TestScrapChoiceOffersPR(t *testing.T) {
 	m := newModel(nil, nil, "")
 	_, tag := m.currentRepo()
-	m.state = hub.BoardState{PRs: []store.PR{{ID: "pr-td-1", Task: "td-1", Project: tag, Status: "approved"}}}
+	m.state = api.BoardState{PRs: []api.PR{{ID: "pr-td-1", Task: "td-1", Project: tag, Status: "approved"}}}
 
 	m.openScrapChoice("td-1")
 	if !m.choice.active || len(m.choice.options) != 3 {
@@ -51,13 +50,13 @@ func TestScrapChoiceOffersPR(t *testing.T) {
 func TestScrapChoiceOffersTheSubtasks(t *testing.T) {
 	m := newModel(nil, nil, "")
 	_, tag := m.currentRepo()
-	m.state = hub.BoardState{
-		Tasks: []store.Task{
+	m.state = api.BoardState{
+		Tasks: []api.Task{
 			{ID: "td-1"},
 			{ID: "td-2", ParentID: "td-1"},
 			{ID: "td-3", ParentID: "td-2"},
 		},
-		PRs: []store.PR{{ID: "pr-td-3", Task: "td-3", Project: tag, Status: "submitted"}},
+		PRs: []api.PR{{ID: "pr-td-3", Task: "td-3", Project: tag, Status: "submitted"}},
 	}
 
 	m.openScrapChoice("td-1")

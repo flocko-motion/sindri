@@ -55,9 +55,11 @@ jobs:
           for arch in arm64 amd64; do
             stage="dist/sindri_${ver}_${os}_${arch}"
             mkdir -p "$stage"
-            # Host binaries (CLI/TUI/hub + the lint toolbelt).
+            # Host binaries (CLI/TUI + the lint toolbelt); the hub is its own binary now.
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
               go build -ldflags "-X main.version=${ver}" -o "$stage/sindri" ./cmd/sindri/
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
+              go build -ldflags "-X main.version=${ver}" -o "$stage/sindri-hub" ./cmd/sindri-hub/
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
               go build -ldflags "-X main.version=${ver} -X main.buildTime=${built}" -o "$stage/brokkr" ./cmd/brokkr/
             # The browser and brokkr-linux run INSIDE the (always linux) pod, so they are

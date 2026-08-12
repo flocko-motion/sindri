@@ -1,10 +1,10 @@
 // package: hub / wiring
 // type:    logic (module wiring)
 // job:     wire the hub's extracted modules into it — the seam adapters each module
-// needs back to the hub (chat Delivery, comments Deps, workflow Deps) and the
-// workflow DTO aliases the hub re-exports as its API. Each module's logic
-// lives in its own package; this is only the glue.
-// limits:  adapters + aliases only — no module logic here.
+// needs back to the hub (chat Delivery, comments Deps, workflow Deps). Each
+// module's logic lives in its own package; this is only the glue.
+// limits:  adapters only — no module logic here. The DTOs these modules exchange
+// live in internal/api, which the hub and every front-end import directly.
 package hub
 
 import (
@@ -15,14 +15,8 @@ import (
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agent"
-	"github.com/flo-at/sindri/internal/hub/agentchan"
-	"github.com/flo-at/sindri/internal/hub/chat"
-	"github.com/flo-at/sindri/internal/hub/commands"
-	"github.com/flo-at/sindri/internal/hub/project"
 	"github.com/flo-at/sindri/internal/hub/server"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/task"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // agentDeps adapts the hub to agent.Deps.
@@ -86,51 +80,6 @@ func (d agentchanDeps) LogRequests(label string, next http.Handler) http.Handler
 	return server.LogRequests(label, next)
 }
 
-// Module DTOs re-exported so hub stays the single facade its clients import.
-type (
-	TaskSpec    = workflow.TaskSpec
-	PRDetail    = workflow.PRDetail
-	RepoSummary = project.Summary
-	RepoDetail  = project.Detail
-	ExecReq     = agentchan.ExecReq
-	TaskRow     = task.TaskRow
-	ClientView  = agent.ClientView
-	Section     = commands.Section
-)
-
-// Task-view helpers from hub/task, re-exported for the UIs.
-var (
-	PriorityLabel = task.PriorityLabel
-	PriorityCode  = task.PriorityCode
-	PriorityWords = task.PriorityWords
-	StateLabel    = task.StateLabel
-	ArrangeTasks  = task.ArrangeTasks
-	Descendants   = task.Descendants
-	FormatClients = agent.FormatClients
-	Sections      = commands.Sections
-	ChatIcon      = chat.Icon
-)
-
-// Chat markers + help text, re-exported: every front-end must show the identical room.
-const (
-	ChatHelpText   = chat.HelpText
-	ChatUserIcon   = chat.UserIcon
-	ChatAgentIcon  = chat.AgentIcon
-	ChatSystemIcon = chat.SystemIcon
-	ChatSenderUser = chat.SenderUser
-)
-
-// Control-socket + pid-file plumbing from hub/server, re-exported for cmd/ and clients.
-var (
-	SocketPath   = server.SocketPath
-	IsRunning    = server.IsRunning
-	WritePID     = server.WritePID
-	ReadPID      = server.ReadPID
-	RemovePID    = server.RemovePID
-	ProcessAlive = server.ProcessAlive
-	HubPID       = server.HubPID
-)
-
 // workflowDeps adapts the hub to workflow.Deps, so workflow need not import the hub.
 type workflowDeps struct{ h *Hub }
 
@@ -175,3 +124,7 @@ func (d workflowDeps) KnownProjects() []store.Project {
 }
 
 func (d workflowDeps) BrokkrBin() (string, error) { return agent.BrokkrBinary() }
+
+func (d workflowDeps) ContextUsage(project, name string) (tokens, window int, ok bool) {
+	return d.h.agents.ContextUsage(project, name)
+}

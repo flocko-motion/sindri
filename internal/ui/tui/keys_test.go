@@ -6,8 +6,8 @@ import (
 	"testing"
 	"unicode"
 
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/client"
 )
 
 // scopeLabels is what a tab's footer effectively offers: its own bindings plus the global ones,
@@ -57,10 +57,13 @@ func TestLowercaseKeysNeverMutate(t *testing.T) {
 		"e": "edit — opens a form ($EDITOR on agents/prs); the form is what commits",
 		"o": "open — a shell in the row's worktree",
 		"t": "tell — opens a prompt you must submit",
+		"i": "comment — opens a prompt you must submit; an empty one is refused",
 		"c": "colour — opens a chooser",
 		"f": "filter — narrows the view",
 		"s": "scope — narrows the view",
 		"p": "repo — switches the active repo",
+		"m": "stats — samples memory use and shows it; mutates nothing",
+		"n": "why next — asks the hub what it would assign and prints the answer; assigns nothing",
 		"r": "refresh — re-reads the board",
 		"q": "quit",
 	}
@@ -169,10 +172,10 @@ func TestOldKeysLostTheirOldJobs(t *testing.T) {
 // Agents tab, and on the PRs tab the tree of the agent that AUTHORED the PR (not the selection on
 // some other tab). A PR outlives its agent, so the case with no tree left has to say so.
 func TestOpenShellTargetsTheWorktree(t *testing.T) {
-	fleet := func() hub.BoardState {
-		return hub.BoardState{
-			Projects: []store.Project{{Tag: "repo", Path: "/r/one"}},
-			Agents:   []hub.AgentView{{Name: "dvalin", Project: "repo", Status: "idle", Workspace: ".worktrees/dvalin"}},
+	fleet := func() api.BoardState {
+		return api.BoardState{
+			Projects: []api.Project{{Tag: "repo", Path: "/r/one"}},
+			Agents:   []api.AgentView{{Name: "dvalin", Project: "repo", Status: "idle", Workspace: ".worktrees/dvalin"}},
 		}
 	}
 	want := filepath.Join("/r/one", ".worktrees", "dvalin")
@@ -188,7 +191,7 @@ func TestOpenShellTargetsTheWorktree(t *testing.T) {
 	t.Run("prs tab: the authoring agent's tree", func(t *testing.T) {
 		m := newModel(nil, nil, "")
 		st := fleet()
-		st.PRs = []store.PR{{ID: "pr-td-1", Status: "open", Project: "repo", Agent: "dvalin", Branch: "td-1"}}
+		st.PRs = []api.PR{{ID: "pr-td-1", Status: "open", Project: "repo", Agent: "dvalin", Branch: "td-1"}}
 		m.tab, m.scopeRepo, m.state = 2, false, st
 		if got := m.selWorktree(); got != want {
 			t.Errorf("selWorktree() = %q, want %q", got, want)
@@ -198,7 +201,7 @@ func TestOpenShellTargetsTheWorktree(t *testing.T) {
 	t.Run("prs tab: the agent is gone", func(t *testing.T) {
 		m := newModel(nil, nil, "")
 		st := fleet()
-		st.PRs = []store.PR{{ID: "pr-td-9", Status: "open", Project: "repo", Agent: "vanished", Branch: "td-9"}}
+		st.PRs = []api.PR{{ID: "pr-td-9", Status: "open", Project: "repo", Agent: "vanished", Branch: "td-9"}}
 		m.tab, m.scopeRepo, m.state = 2, false, st
 		if got := m.selWorktree(); got != "" {
 			t.Errorf("a vanished agent leaves no tree, got %q", got)
@@ -217,7 +220,7 @@ func TestNewKeysReachTheirActions(t *testing.T) {
 	t.Run("agent-review on the PRs tab", func(t *testing.T) {
 		m := newModel(nil, nil, "")
 		m.tab, m.scopeRepo = 2, false
-		m.state = hub.BoardState{PRs: []store.PR{{ID: "pr-td-1", Status: "open", Project: "repo", Branch: "td-1"}}}
+		m.state = api.BoardState{PRs: []api.PR{{ID: "pr-td-1", Status: "open", Project: "repo", Branch: "td-1"}}}
 		if id := m.selID(); id != "pr-td-1" {
 			t.Fatalf("expected pr-td-1 selected, got %q", id)
 		}
@@ -230,7 +233,7 @@ func TestNewKeysReachTheirActions(t *testing.T) {
 	t.Run("options on the Agents tab", func(t *testing.T) {
 		m := newModel(nil, nil, "")
 		m.tab, m.scopeRepo = 1, false
-		m.state = hub.BoardState{Agents: []hub.AgentView{{Name: "dvalin", Project: "repo", Status: "idle"}}}
+		m.state = api.BoardState{Agents: []api.AgentView{{Name: "dvalin", Project: "repo", Status: "idle"}}}
 		if id := m.selID(); id != "dvalin" {
 			t.Fatalf("expected dvalin selected, got %q", id)
 		}
@@ -239,6 +242,72 @@ func TestNewKeysReachTheirActions(t *testing.T) {
 			t.Errorf("%q should open dvalin's options, got active=%v title=%q", keyOptions, m.form.active, m.form.title)
 		}
 	})
+
+	t.Run("add member on the Meeting tab", func(t *testing.T) {
+		m := newModel(nil, nil, "")
+		m.tab = 4 // Meeting
+		m.state = api.BoardState{
+			Agents: []api.AgentView{{Name: "dvalin", Role: "worker"}, {Name: "nori", Role: "reviewer"}},
+			Chat:   api.ChatView{Members: []api.ChatMember{{Name: "nori", Role: "reviewer"}}},
+		}
+		m.onKey(keyApprove)
+		if !m.choice.active {
+			t.Fatal("A should open the add-member chooser")
+		}
+		if len(m.choice.values) != 1 || m.choice.values[0] != "dvalin" {
+			t.Errorf("the add-member chooser should offer only agents not already in the room, got %v", m.choice.values)
+		}
+	})
+
+	t.Run("remove member on the Meeting tab", func(t *testing.T) {
+		m := newModel(nil, nil, "")
+		m.tab = 4 // Meeting
+		m.state = api.BoardState{Chat: api.ChatView{Members: []api.ChatMember{{Name: "nori", Role: "reviewer"}}}}
+		m.onKey(keyReject)
+		if !m.choice.active {
+			t.Fatal("R should open the remove-member chooser")
+		}
+		if len(m.choice.values) != 1 || m.choice.values[0] != "nori" {
+			t.Errorf("the remove-member chooser should offer the current roster, got %v", m.choice.values)
+		}
+	})
+}
+
+// TestMeetingMembershipKeysHaveNothingToOffer: A/R degrade to a flash rather than an empty
+// chooser when there is nobody to add or remove — a modal with zero rows is a dead end.
+func TestMeetingMembershipKeysHaveNothingToOffer(t *testing.T) {
+	m := newModel(nil, nil, "")
+	m.tab = 4 // Meeting
+	m.state = api.BoardState{Agents: []api.AgentView{{Name: "nori"}}, Chat: api.ChatView{Members: []api.ChatMember{{Name: "nori"}}}}
+	m.onKey(keyApprove) // every agent is already a member
+	if m.choice.active {
+		t.Error("A should not open a chooser with nothing to add")
+	}
+	if m.flash == "" {
+		t.Error("A should flash why there was nothing to add")
+	}
+
+	m = newModel(nil, nil, "")
+	m.tab = 4
+	m.onKey(keyReject) // empty room
+	if m.choice.active {
+		t.Error("R should not open a chooser with nothing to remove")
+	}
+	if m.flash == "" {
+		t.Error("R should flash why there was nothing to remove")
+	}
+}
+
+// TestMeetingMembershipKeysAreAdvertised: the Chat footer must offer A/R now that the gap the
+// old comment described ("membership is curated from the CLI") is closed.
+func TestMeetingMembershipKeysAreAdvertised(t *testing.T) {
+	got := footerOf(t, scopeChat)
+	if !strings.Contains(got, keyApprove+" add member") {
+		t.Errorf("the Meeting footer should offer %q add member:\n%s", keyApprove, got)
+	}
+	if !strings.Contains(got, keyReject+" remove member") {
+		t.Errorf("the Meeting footer should offer %q remove member:\n%s", keyReject, got)
+	}
 }
 
 // footerOf renders one scope's footer for assertions — the string the user actually reads, and
@@ -267,5 +336,78 @@ func TestNewMeetingKeyIsOfferedAndConfirmed(t *testing.T) {
 	// Cancel is first, so a stray Enter on the modal cannot wipe the room.
 	if len(m.choice.values) == 0 || m.choice.values[0] != "cancel" {
 		t.Errorf("cancel must be the default option, got %v", m.choice.values)
+	}
+}
+
+// TestAgentsTabReachesMilestoneRebuildAndStats pins the three actions that used to be CLI-only. It
+// asserts the whole path, not just the constant: the key is advertised on the Agents footer, and
+// pressing it there gets somewhere — a cancel-first chooser for the two mutations, a command for the
+// view. The client is a zero-value one so the branches are not short-circuited by a nil check; the
+// commands are never run, so nothing dials.
+func TestAgentsTabReachesMilestoneRebuildAndStats(t *testing.T) {
+	footer := footerOf(t, scopeAgents)
+	for _, tc := range []struct {
+		key, label string
+		mutates    bool
+	}{
+		{keyMilestone, "milestone PR", true},
+		{keyRebuild, "rebuild image", true},
+		{keyStats, "stats", false},
+	} {
+		if !strings.Contains(footer, tc.key+" "+tc.label) {
+			t.Errorf("%q (%s) is not advertised on the Agents footer: %s", tc.key, tc.label, footer)
+		}
+		m := newModel(&client.HTTP{}, nil, "")
+		m.tab, m.scopeRepo = 1, false
+		m.state = api.BoardState{Agents: []api.AgentView{{Name: "dvalin", Project: "repo", Status: "idle"}}}
+		cmd := m.onKey(tc.key)
+
+		if !tc.mutates {
+			if m.choice.active {
+				t.Errorf("%q is a view; it should not ask for confirmation", tc.key)
+			}
+			if cmd == nil {
+				t.Errorf("%q produced no command — the binding reaches nothing", tc.key)
+			}
+			continue
+		}
+		// A mutation must land on a chooser and never fire off the keystroke itself.
+		if !m.choice.active {
+			t.Fatalf("%q did not open a confirmation", tc.key)
+		}
+		if cmd != nil {
+			t.Errorf("%q returned a command as well as a confirmation — it should wait for the answer", tc.key)
+		}
+		if !strings.Contains(m.choice.title, "dvalin") {
+			t.Errorf("%q asks about no agent in particular: %q", tc.key, m.choice.title)
+		}
+		if m.choice.values[0] != "cancel" {
+			t.Errorf("%q defaults to %q, want cancel first", tc.key, m.choice.values[0])
+		}
+		if m.choice.apply("cancel") != nil {
+			t.Errorf("%q acts on cancel", tc.key)
+		}
+		if m.choice.apply(m.choice.values[1]) == nil {
+			t.Errorf("%q confirmed but produced no command", tc.key)
+		}
+	}
+}
+
+// TestStatsLinesReportTheReasonNotAZero guards the failure this whole family of views keeps getting
+// wrong: an agent the engine could not sample must say so, not render 0 B and read as idle.
+func TestStatsLinesReportTheReasonNotAZero(t *testing.T) {
+	out := strings.Join(statsLines(api.StatsReport{
+		Engine: "podman",
+		Agents: []api.AgentStatsView{{Name: "bombur", Repo: "sindri", Err: "container not found"}},
+	}), "\n")
+	if !strings.Contains(out, "container not found") {
+		t.Errorf("the sampling error is not shown:\n%s", out)
+	}
+	if strings.Contains(out, "0 B") {
+		t.Errorf("an unsampled agent renders as 0 B, which reads as idle:\n%s", out)
+	}
+	// An empty fleet must say it is empty rather than print a bare header.
+	if empty := strings.Join(statsLines(api.StatsReport{Engine: "podman"}), "\n"); !strings.Contains(empty, "no running agents") {
+		t.Errorf("an empty report says nothing:\n%s", empty)
 	}
 }

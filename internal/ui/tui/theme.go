@@ -11,7 +11,6 @@ package tui
 import (
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
@@ -63,8 +62,8 @@ func agentStatusStyle(status string) lipgloss.Style {
 		return stDone
 	case "launching", "stopping":
 		return stTrans
-	case "blocked":
-		return stCrit
+	case "blocked", "stalled", "full", "signed-out", "api-error":
+		return stCrit // all need a human; a signed-out agent cannot even be told anything
 	case "idle":
 		return stWarn
 	default:
@@ -72,50 +71,15 @@ func agentStatusStyle(status string) lipgloss.Style {
 	}
 }
 
-// One hue per project in two shades, so a repo always reads the same AND the pair is guaranteed to
-// contrast. HSL, because lightness has to be controllable.
-const (
-	repoDarkSat, repoDarkLight     = 0.32, 0.22 // muted, dark: for filled backgrounds
-	repoBrightSat, repoBrightLight = 0.55, 0.72 // bright: for text on a dark background
-)
-
-// nRepoColors is the pickable palette: evenly-spaced hues, so a repo can be pinned instead of
-// taking the hash-derived default (0).
-const nRepoColors = 24
-
-// paletteHue is the hue (degrees) for a 1-based palette choice.
-func paletteHue(choice int) float64 { return float64(((choice - 1) * 360 / nRepoColors) % 360) }
-
-// projectHue is the default hue for a tag. Derived in ui/theme so a name gets the same hue here,
-// in the CLI, and in chat.
-func projectHue(tag string) float64 { return theme.Hue(tag) }
-
-// hueFor prefers a pinned palette choice, else the hash-derived default.
-func hueFor(tag string, choice int) float64 {
-	if choice >= 1 && choice <= nRepoColors {
-		return paletteHue(choice)
-	}
-	return projectHue(tag)
-}
-
-// repoColorsFor is the (dark, bright) pair for a filled bar: one hue at two lightnesses.
-func repoColorsFor(tag string, choice int) (dark, bright lipgloss.Color) {
-	hue := hueFor(tag, choice)
-	return lipgloss.Color(hslHex(hue, repoDarkSat, repoDarkLight)),
-		lipgloss.Color(hslHex(hue, repoBrightSat, repoBrightLight))
-}
-
-// repoStyleFor colours text in a repo's bright shade; an empty tag stays plain.
+// repoStyleFor colours text in a repo's bright shade; an empty tag stays plain. The palette and
+// the index→colour mapping live in ui/theme, shared with the CLI.
 func repoStyleFor(tag string, choice int) lipgloss.Style {
 	if tag == "" {
 		return lipgloss.NewStyle()
 	}
-	_, bright := repoColorsFor(tag, choice)
+	_, bright := theme.RepoColors(tag, choice)
 	return lipgloss.NewStyle().Foreground(bright)
 }
 
-// hslHex converts an HSL colour (h in [0,360), s,l in [0,1]) to a "#rrggbb" string.
-func hslHex(h, s, l float64) string { return theme.HSLHex(h, s, l) }
-
 // isCriticalPriority reports whether a priority code is the top (critical) band.
-func isCriticalPriority(code string) bool { return hub.PriorityLabel(code) == "critical" }
+func isCriticalPriority(code string) bool { return theme.PriorityLabel(code) == "critical" }

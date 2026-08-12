@@ -5,17 +5,16 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/muesli/termenv"
 )
 
 // heptiBoard reproduces the board from the report: three agents in one repo, two orphan pods,
 // and a coauthor (hepti) whose workspace is the repo root itself.
-func heptiBoard() hub.BoardState {
-	return hub.BoardState{
-		Projects: []store.Project{{Tag: "rdb", Path: "/r/ranke-db"}},
-		Agents: []hub.AgentView{
+func heptiBoard() api.BoardState {
+	return api.BoardState{
+		Projects: []api.Project{{Tag: "rdb", Path: "/r/ranke-db"}},
+		Agents: []api.AgentView{
 			{Project: "rdb", Repo: "ranke-db", Name: "galar", Role: "planner", Status: "planning", Task: "os-new"},
 			{Project: "rdb", Repo: "ranke-db", Name: "hepti", Role: "coauthor", Status: "collab", Workspace: ".", Memory: "2g", Container: "sindri-ranke-db-984c491b-hepti"},
 			{Project: "rdb", Repo: "ranke-db", Name: "nori", Role: "worker", Status: "idle", Task: "os-adc678"},
@@ -70,7 +69,7 @@ func TestFrameHeightWithMultilineLogEntry(t *testing.T) {
 	m.w, m.h = 100, 24
 	m.state = heptiBoard()
 	m.cursor[1] = 1 // hepti, the coauthor in the meeting room
-	m.agentLog = []store.Event{
+	m.agentLog = []api.Event{
 		{TS: "2026-07-28T09:02:25Z", Type: "chat", Payload: "[chat] alviss: one\ntwo\nthree\nfour"},
 		{TS: "2026-07-28T09:04:27Z", Type: "chat", Payload: "[chat] alviss: " + strings.Repeat("line\n", 123)},
 		{TS: "2026-07-28T12:29:51Z", Type: "launch", Payload: "requested"},

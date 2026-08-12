@@ -1,5 +1,5 @@
 // package: codemap
-// type:    dev tool (codebase introspection)
+// type:    logic (codebase introspection)
 // job:     print a high-signal overview of a Go tree — per file, the structured
 // arch header (the comment block above `package`) plus each type and
 // function with its doc comment and signature, bodies omitted. A map

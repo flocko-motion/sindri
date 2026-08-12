@@ -72,3 +72,54 @@ func TestProposalRejectsPathEscape(t *testing.T) {
 		}
 	}
 }
+
+// TestFormatReportEmptyProjectSaysSo is the reported bug: an openspec/ directory with nothing in it
+// yet is a valid, passing, EMPTY report — and it took the unparseable branch, dumping the raw JSON
+// blob into every `brokkr lint` run.
+func TestFormatReportEmptyProjectSaysSo(t *testing.T) {
+	raw := []byte(`{"items":[],"summary":{"totals":{"items":0,"passed":0,"failed":0}},"version":"1.0"}`)
+	got := formatReport(raw, false)
+	if strings.Contains(got, "{") || strings.Contains(got, "totals") {
+		t.Errorf("a valid empty report must not dump its JSON, got:\n%s", got)
+	}
+	if !strings.Contains(got, "no specs or changes") {
+		t.Errorf("it should say there was nothing to validate, got: %q", got)
+	}
+}
+
+// TestFormatReportPassIsOneLine: a pass needs its verdict — proof the delegated validator ran — not
+// a report of everything that was fine.
+func TestFormatReportPassIsOneLine(t *testing.T) {
+	raw := []byte(`{"items":[{"id":"a","type":"spec","valid":true},{"id":"b","type":"change","valid":true}]}`)
+	got := formatReport(raw, false)
+	if lines := strings.Count(strings.TrimSpace(got), "\n") + 1; lines != 1 {
+		t.Errorf("a pass should be one line, got %d:\n%s", lines, got)
+	}
+	if !strings.Contains(got, "2 passed") {
+		t.Errorf("the verdict should carry the count, got: %q", got)
+	}
+}
+
+// TestFormatReportFailureKeepsTheDetail: the compact pass must not have cost the report you need
+// when something is actually wrong — the failing item, its file and the rule.
+func TestFormatReportFailureKeepsTheDetail(t *testing.T) {
+	raw := []byte(`{"items":[
+		{"id":"good","type":"spec","valid":true},
+		{"id":"bad","type":"change","valid":false,"issues":[{"path":"openspec/changes/bad/proposal.md","message":"missing Why","level":"ERROR"}]}
+	]}`)
+	got := formatReport(raw, true)
+	for _, want := range []string{"bad", "missing Why", "openspec/changes/bad/proposal.md", "1 passed, 1 failed"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("a failing report should mention %q, got:\n%s", want, got)
+		}
+	}
+}
+
+// TestFormatReportUnparseableStillShows: an unexpected shape is shown rather than swallowed — that
+// branch is why the empty report was being dumped, and it still has to work for its real case.
+func TestFormatReportUnparseableStillShows(t *testing.T) {
+	raw := []byte(`not json at all`)
+	if got := formatReport(raw, true); !strings.Contains(got, "not json at all") {
+		t.Errorf("unparseable output must survive, got: %q", got)
+	}
+}

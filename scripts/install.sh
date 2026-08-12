@@ -2,9 +2,10 @@
 # Install — or upgrade — sindri from an extracted release tarball, on Linux or macOS.
 #
 # Idempotent: to upgrade, download a newer tarball, extract it, and run this again.
-# The binaries go next to each other (the hub finds sindri-worker/brokkr beside the
-# sindri binary) into ~/.local/bin — the ONE install location, so nothing on PATH can
-# shadow it with a different build. Override with PREFIX if you must.
+# The binaries go next to each other (the hub finds sindri-worker/brokkr beside
+# itself, and the CLI finds the hub the same way) into ~/.local/bin — the ONE
+# install location, so nothing on PATH can shadow it with a different build.
+# Override with PREFIX if you must.
 #
 # Two details keep the upgrade path clean:
 #   1. Atomic replace: each binary is staged in PREFIX and rename(2)'d into place, so
@@ -23,7 +24,7 @@ PREFIX="${PREFIX:-$HOME/.local/bin}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # brokkr-linux is the linux brokkr mounted into the (always-linux) agent pods so
 # `brokkr` works inside agents on macOS too — installed beside the darwin brokkr.
-bins="sindri sindri-worker brokkr brokkr-linux td yq"
+bins="sindri sindri-hub sindri-worker brokkr brokkr-linux yq"
 
 mkdir -p "$PREFIX"
 for bin in $bins; do
@@ -44,6 +45,6 @@ case ":$PATH:" in
 *) echo "note: $PREFIX is not on your PATH — add it, e.g.:  echo 'export PATH=\"$PREFIX:\$PATH\"' >> ~/.zshrc" ;;
 esac
 
-if pgrep -qf 'sindri hub' 2>/dev/null; then
+if pgrep -qf 'sindri-hub' 2>/dev/null; then
 	echo "a hub from the previous version is running — your next 'sindri' command will offer to restart it."
 fi

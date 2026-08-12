@@ -1,5 +1,5 @@
 // package: tui / util
-// type:    small shared helpers
+// type:    ui
 // job:     the selector row type and tiny generic helpers used across the
 // tab/component files.
 // limits:  tiny generic helpers only; no domain logic and no rendering of its
@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // repoName maps a project's repoTag to its short repo name (its path's basename),
@@ -58,6 +58,21 @@ func (m model) taskLabel(id string) string {
 	return id
 }
 
+// prTask is PR id's underlying task, or "" — a reviewer's AgentView carries no task of its own
+// (the task belongs to the agent that wrote the PR), so this is how the Agents tab still says
+// what a reviewer's PR is for.
+func (m model) prTask(id string) string {
+	if id == "" {
+		return ""
+	}
+	for _, p := range m.state.PRs {
+		if p.ID == id {
+			return p.Task
+		}
+	}
+	return ""
+}
+
 // agentWorkspacePath is an agent's workspace as an ABSOLUTE path, or "". Workspace is
 // repo-relative, so it is joined to the agent's OWN project — the Agents tab can show a fleet
 // spanning repos — and absolute because it becomes a child process's working directory.
@@ -94,9 +109,9 @@ func (m model) selWorktree() string {
 // agentOnTask is the agent working task id, and whether one is. It matches a package too: a
 // hierarchy is claimed whole and the agent's state names the SUBTASK, so walking up from each
 // agent's task is what makes the epic — and everything under it — reach the agent holding it.
-func (m model) agentOnTask(id string) (hub.AgentView, bool) {
+func (m model) agentOnTask(id string) (api.AgentView, bool) {
 	if id == "" {
-		return hub.AgentView{}, false
+		return api.AgentView{}, false
 	}
 	parent := make(map[string]string, len(m.state.Tasks))
 	for _, t := range m.state.Tasks {
@@ -114,14 +129,14 @@ func (m model) agentOnTask(id string) (hub.AgentView, bool) {
 			}
 		}
 	}
-	return hub.AgentView{}, false
+	return api.AgentView{}, false
 }
 
 // agentOnPR is the agent that authored PR id, and whether one is — the PR's own Agent field,
 // resolved to its live AgentView so attach gets status and container, not just a name.
-func (m model) agentOnPR(id string) (hub.AgentView, bool) {
+func (m model) agentOnPR(id string) (api.AgentView, bool) {
 	if id == "" {
-		return hub.AgentView{}, false
+		return api.AgentView{}, false
 	}
 	for _, p := range m.state.PRs {
 		if p.ID != id {
@@ -133,7 +148,7 @@ func (m model) agentOnPR(id string) (hub.AgentView, bool) {
 			}
 		}
 	}
-	return hub.AgentView{}, false
+	return api.AgentView{}, false
 }
 
 // repoColorIdx is a repo's pinned colour choice from the registry (0 = default).

@@ -9,8 +9,9 @@
 package tui
 
 import (
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"strings"
+
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // detailLines is the current tab's detail content (the right column / modal body).
@@ -108,7 +109,7 @@ func (m model) itemTitle(kind, id string) string {
 }
 
 // prMetaFromPR is the basic PR detail from board state — no diff/reviews fetched yet.
-func prMetaFromPR(p store.PR) []string {
+func prMetaFromPR(p api.PR) []string {
 	ls := []string{
 		p.ID,
 		"status: " + p.Status,
@@ -120,6 +121,17 @@ func prMetaFromPR(p store.PR) []string {
 		ls = append(ls, "feedback: "+p.Feedback)
 	}
 	return ls
+}
+
+// openTextModal shows arbitrary command output — a build log, a stats table — in the same scrollable
+// modal the item details use, so long output is readable rather than a flash that scrolls past.
+func (m *model) openTextModal(title, body string) {
+	m.modalOverride = strings.Split(strings.TrimRight(body, "\n"), "\n")
+	m.modalOverrideTitle = title
+	m.modal = true
+	m.detail.SetHeight(modalContentHeight(m.h))
+	m.detail.SetTotal(len(m.modalLines()))
+	m.detail.ScrollTop()
 }
 
 // openItemModal opens the big detail modal for any item, via its home renderer.
@@ -204,8 +216,8 @@ func (m model) inScope(project string) bool {
 }
 
 // tabCount is section s's badge. Agents/PRs obey the § scope toggle so the badge matches
-// the list; the rest are scope-invariant and use the registry's fleet-wide count.
-func (m model) tabCount(s hub.Section) int {
+// the list; the rest are scope-invariant and read straight off the board.
+func (m model) tabCount(s tuiSection) int {
 	switch s.Key {
 	case "agents":
 		n := 0
@@ -218,13 +230,19 @@ func (m model) tabCount(s hub.Section) int {
 	case "prs":
 		n := 0
 		for _, p := range m.state.PRs {
-			if m.inScope(p.Project) && hub.PROpen(p) {
+			if m.inScope(p.Project) && api.PROpen(p) {
 				n++
 			}
 		}
 		return n
+	case "tasks":
+		return m.state.OpenTaskCount()
+	case "repos":
+		return m.state.RepoCount()
+	case "chat":
+		return m.state.ChatMemberCount()
 	}
-	return s.Count(m.state)
+	return 0
 }
 
 // scopeName labels the global↔repo scope toggle for the footer.

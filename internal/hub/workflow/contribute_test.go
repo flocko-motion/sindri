@@ -32,6 +32,10 @@ func newWorkRepo(t *testing.T, agent, branch string) (root, base string) {
 	}
 	run(root, "add", ".")
 	run(root, "commit", "-qm", "init")
+	// Named rather than inherited from the machine's init.defaultBranch: a test that hardcodes its
+	// base passed locally on "main" and failed CI on "master", which is a fixture reporting the
+	// runner instead of the code. Renamed after the first commit, so it needs no particular git.
+	run(root, "branch", "-M", "main")
 	base, err := git.CurrentBranch(root)
 	if err != nil {
 		t.Fatal(err)

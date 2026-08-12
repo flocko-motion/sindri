@@ -21,7 +21,12 @@ func fixture() *Registry {
 		Command{Name: "approve", Help: "approve a PR", Roles: []string{"reviewer"}, Run: noop},
 		Command{Name: "reject", Help: "reject a PR", Roles: []string{"reviewer"}, Run: noop},
 		Command{Name: "next", Help: "next task", Roles: []string{"worker"},
-			Hidden: func(c Caller) bool { return c.HasTask }, Run: noop},
+			Blocked: func(c Caller) string {
+				if c.HasTask {
+					return "you already hold work"
+				}
+				return ""
+			}, Run: noop},
 	)
 }
 
@@ -64,18 +69,36 @@ func TestStateHidesNext(t *testing.T) {
 	}
 }
 
-// An out-of-surface verb is indistinguishable from unknown (invisible, not
-// rejected).
-func TestLookupRespectsSurface(t *testing.T) {
+// A verb of ANOTHER role is indistinguishable from unknown — role isolation, so a worker learns
+// nothing of the reviewer's surface.
+func TestResolveRespectsRoles(t *testing.T) {
 	r := fixture()
-	if _, ok := r.Lookup("approve", Caller{Role: "worker"}); ok {
-		t.Fatalf("worker must not resolve reviewer-only 'approve'")
+	if _, reason, ok := r.Resolve("approve", Caller{Role: "worker"}); ok || reason != "" {
+		t.Fatalf("reviewer-only 'approve' must read as unknown to a worker, got reason %q", reason)
 	}
-	if _, ok := r.Lookup("submit", Caller{Role: "worker"}); !ok {
+	if _, _, ok := r.Resolve("submit", Caller{Role: "worker"}); !ok {
 		t.Fatalf("worker should resolve 'submit'")
 	}
-	if _, ok := r.Lookup("nope", Caller{Role: "worker"}); ok {
-		t.Fatalf("unknown command must not resolve")
+	if _, reason, ok := r.Resolve("nope", Caller{Role: "worker"}); ok || reason != "" {
+		t.Fatalf("unknown command must not resolve, got reason %q", reason)
+	}
+}
+
+// TestResolveExplainsAStateGate is the point of holding the reason rather than a boolean: a verb of
+// the caller's OWN role, blocked by the state machine, must come back with why. Vanishing from the
+// surface left an agent that had been told to run it with no way to learn what to run instead.
+func TestResolveExplainsAStateGate(t *testing.T) {
+	r := fixture()
+	busy := Caller{Role: "worker", HasTask: true}
+	if contains(names(r.Available(busy)), "next") {
+		t.Fatal("a busy worker should not be OFFERED next")
+	}
+	cmd, reason, ok := r.Resolve("next", busy)
+	if ok || cmd.Name != "" {
+		t.Fatal("a busy worker must not be able to run next")
+	}
+	if reason == "" {
+		t.Fatal("a state-blocked verb must explain itself rather than read as unknown")
 	}
 }
 

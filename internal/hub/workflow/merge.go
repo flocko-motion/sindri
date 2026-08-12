@@ -100,38 +100,48 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 	if err := ps.PutPR(pr); err != nil {
 		return store.PR{}, err
 	}
-	// Interim contribution: land the work, keep the task open, put the worker back on the SAME
-	// task with its branch fast-forwarded past the merge. Container milestones take the branch
-	// below and never overlap, since contribute is hidden inside a container.
-	if pr.Kind == "interim" {
-		if a, ok, _ := ps.GetAgent(pr.Agent); ok {
-			_ = git.RebaseOnto(filepath.Join(root, a.Workspace), pr.Branch, pr.Base) // ff past the merge
+	// Any review still out on it is moot, and its reviewer is released and told so — the same thing
+	// ScrapPR does. Left open, the reviewer kept being handed a merged PR, read an empty diff, and
+	// its rejection overwrote the merge in the record.
+	e.releaseReviewers(project, prID, "overtaken: merged before a verdict")
+	// A landing that does not finish the work: the task stays open and its author stays on it, with
+	// the branch fast-forwarded past the merge. Two shapes arrive here — a mid-task contribution, and
+	// a milestone on a held feature that still has subtasks. A feature with none left IS finished by
+	// this merge and takes the ordinary path below; keeping it here left a worker holding a feature
+	// that had already landed, with its task still reading open.
+	holder, _ := ps.GetState(pr.Agent)
+	onFeature := holder.Container != "" && holder.Container == pr.Branch
+	partial := pr.Kind == "interim"
+	if onFeature {
+		open, oerr := ps.OpenSubtasks(holder.Container)
+		if oerr != nil {
+			return store.PR{}, oerr
 		}
-		_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "working"})
-		_ = ps.Log(pr.Agent, "merged", prID+" (interim)")
-		_ = ps.LogPR(prID, "merged", "interim contribution into "+pr.Base)
-		_ = e.deps.InjectWhenReady(project, pr.Agent, MsgContributionMerged(prID, pr.Task))
-		e.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
-		e.deps.Notify()
-		return pr, nil
+		partial = len(open) > 0
 	}
-	// Milestone PR for a held container: land the work but KEEP the branch/
-	if holder, _ := ps.GetState(pr.Agent); holder.Container != "" && holder.Container == pr.Branch {
+	if partial {
 		if a, ok, _ := ps.GetAgent(pr.Agent); ok {
 			_ = git.RebaseOnto(filepath.Join(root, a.Workspace), pr.Branch, pr.Base) // ff past the merge
 		}
-		_ = ps.Log(pr.Agent, "merged", prID+" (milestone)")
-		_ = ps.LogPR(prID, "merged", "milestone into "+pr.Base)
-		e.resumeContainer(project, pr.Agent)
-		_ = e.deps.InjectWhenReady(project, pr.Agent, MsgMilestoneMerged(prID))
-		e.rebasePlanners(project, pr.Base)
+		if onFeature {
+			_ = ps.Log(pr.Agent, "merged", prID+" (milestone)")
+			_ = ps.LogPR(prID, "merged", "milestone into "+pr.Base)
+			e.resumeContainer(project, pr.Agent)
+			_ = e.deps.InjectWhenReady(project, pr.Agent, MsgMilestoneMerged(prID))
+		} else {
+			_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "working"})
+			_ = ps.Log(pr.Agent, "merged", prID+" (interim)")
+			_ = ps.LogPR(prID, "merged", "interim contribution into "+pr.Base)
+			_ = e.deps.InjectWhenReady(project, pr.Agent, MsgContributionMerged(prID, pr.Task))
+		}
+		e.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
 		e.deps.Notify()
 		return pr, nil
 	}
 	// Tell every task source, so each runs its own consequence on its own ids and the workflow
 	// need not know the backend. After the local merge, so a failure warns rather than fails it.
 	note := "merged via " + prID
-	for _, src := range taskSources() {
+	for _, src := range e.taskSources(project) {
 		if err := src.OnMerged(root, pr.Task, note); err != nil {
 			log.Printf("hub: %s merged locally but a task-source close failed: %v", prID, err)
 			_ = ps.LogPR(prID, "warning", "merged locally, but closing the task upstream failed (may need a manual follow-up): "+err.Error())

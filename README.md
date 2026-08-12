@@ -2,8 +2,9 @@
 
 A sandboxed AI-agent orchestrator. You hand work to agents that run inside
 containers; they write code and open pull requests; **you approve the merge** —
-the one hard gate. A single per-repo **hub** owns all state and mediates
-everything, so the CLI, the TUI, and every agent are just thin clients of it.
+the one hard gate. A single global **hub** — one per machine, serving every repo —
+owns all state and mediates everything, so the CLI, the TUI, and every agent are
+just thin clients of it.
 
 This README is about *using* sindri. For the internal design, see `openspec/`.
 
@@ -43,9 +44,9 @@ warns if it finds a second copy of itself on your PATH. If you installed an olde
 `.deb`, remove it once with `sudo apt remove sindri`.
 
 That's it. The release bundles everything sindri ships — the `sindri` CLI/TUI, the
-agent browser `sindri-worker` (it runs as `sindri` inside a pod), the `brokkr` toolbelt (code map + linters),
-and the `td` task backend (plus `yq`) — and needs the system tools **git** and
-**podman** present.
+hub itself (`sindri-hub`, which `sindri hub start` runs), the agent browser
+`sindri-worker` (it runs as `sindri` inside a pod), the `brokkr` toolbelt (code map +
+linters), and `yq` — and needs the system tools **git** and **podman** present.
 
 The one thing you bring yourself: **Claude credentials** at `~/.claude` (sindri
 seeds them into the agent pods). The agent container image is built automatically
@@ -57,7 +58,7 @@ Agents also inherit what you've set up for yourself in `~/.claude`: your **skill
 Both are optional; without them the agent runs Claude's defaults.
 
 Then, in any repo, `sindri coauthor` gets you going in one command (see the Quick
-start below) — it starts the per-repo hub for you, so you rarely launch one by hand.
+start below) — it starts the hub for you, so you rarely launch one by hand.
 
 **Optional extras** (sindri degrades gracefully without them, with a visible
 note — never a hard failure): `openspec` (`npm i -g @fission-ai/openspec`) for the
@@ -83,7 +84,7 @@ yourself, but sandboxed in a container. One command, in any git repo:
 sindri coauthor
 ```
 
-It starts everything it needs (the per-repo hub, a sandboxed pod, an agent
+It starts everything it needs (the hub, a sandboxed pod, an agent
 auto-named after a Norse dwarf) and drops you into its terminal. The coauthor
 works on your **actual checkout** — you share the same files and drive it
 directly, with no task queue and no PR gate. Detach with your tmux prefix then
@@ -96,23 +97,25 @@ When you'd rather hand off work than pair: put **one worker** on a task and merg
 what it produces — you're the reviewer, no second agent needed.
 
 ```bash
-sindri hub start --bg                       # start the per-repo hub in the background
+sindri hub start --bg                       # start the global hub in the background
                                             # (foreground: `sindri hub start`; see also `sindri hub list` / `sindri hub stop`)
 
 sindri task new "Add a /healthz endpoint"   # describe a task
-sindri agent new                            # create a worker — auto-named (e.g. dvalin)
-sindri agent start dvalin                   # start it: it claims the task and starts coding
+sindri agent new                            # create a worker and start it — auto-named (e.g. dvalin)
+                                            # it claims the task and starts coding
+                                            # (--no-start to register the identity alone)
 
 sindri tui                                  # watch the board live
 ```
 
-Use the name `agent new` printed (or `sindri agent list` to see it). The worker
-writes code in its own sandbox and opens a PR; review and land it:
+Use the name `agent new` printed (or `sindri agent list` to see it). The first
+start builds the agent image, so it takes a while. The worker writes code in its
+own sandbox and opens a PR; review and land it:
 
 ```bash
 sindri pr list
-sindri pr approve pr-td-abc123              # sign off (you're the reviewer)
-sindri pr merge   pr-td-abc123              # the one hard gate — human only
+sindri pr approve pr-sd-abc123              # sign off (you're the reviewer)
+sindri pr merge   pr-sd-abc123              # the one hard gate — human only
 ```
 
 Everything beyond this — a reviewer agent, a planner, the collaborative "work a
@@ -130,9 +133,9 @@ can add workers alongside a coauthor.
 │   sindri CLI ─┐                          ┌─ sindri tui         │
 │   (you)       ▼                          ▼  (live board)       │
 │            ┌──────────────────────────────────┐                │
-│            │  sindri hub   (single writer)     │                │
-│            │  .sindri/hub.db  (SQLite)         │                │
-│            │  td · git · openspec · podman     │                │
+│            │  sindri hub  (one, all repos)     │                │
+│            │  <state>/hub.db  (SQLite)         │                │
+│            │  tasks · git · openspec · podman  │                │
 │            └───────┬───────────────┬──────────┘                │
 │         per-agent  │ unix socket   │ tmux send-keys             │
 │            ┌───────▼───────┐   ┌───▼───────────┐                │
@@ -142,7 +145,7 @@ can add workers alongside a coauthor.
 └──────────────────────────────────────────────────────────────┘
 ```
 
-- **Single writer.** The hub is the only thing that touches td, git, and
+- **Single writer.** The hub is the only thing that touches tasks, git, and
   `.sindri/`. Every UI reads `GET /state` and live-updates over `GET /events`.
 - **Identity is the socket.** Each pod mounts one socket; the hub knows who's
   calling by which socket accepted the connection — no names on the wire.
@@ -155,10 +158,12 @@ can add workers alongside a coauthor.
 
 ## Roles
 
-Three roles — start more agents as you need them (`sindri agent new --role <role>`,
+Four roles — start more agents as you need them (`sindri agent new --role <role>`,
 auto-named after Norse dwarves):
 
-- **worker** — builds: claims tasks, writes code, opens PRs. (The quick-start agent.)
+- **coauthor** — pairs with you in your own checkout, outside the task queue and the
+  PR gate. What `sindri coauthor` starts, and the quickest way in.
+- **worker** — builds: claims tasks, writes code, opens PRs.
 - **reviewer** — reviews a worker's PR. Optional — you can approve/reject yourself
   on the host instead.
 - **planner** — plans *with you*: reads the repo and specs, proposes tasks (you
@@ -204,9 +209,9 @@ review gate between them. The *same* flow covers two styles:
 
 ```bash
 # Build the feature: a parent with children. One agent takes the whole package.
-sindri task new "Login feature" -t epic                          # → td-LOGIN
-sindri task new "Form UI"   --parent td-LOGIN
-sindri task new "Validation" --parent td-LOGIN
+sindri task new "Login feature" -t epic                          # → sd-LOGIN
+sindri task new "Form UI"   --parent sd-LOGIN
+sindri task new "Validation" --parent sd-LOGIN
 ```
 
 A free agent picks up the marked container automatically: it goes on a standing
@@ -217,8 +222,8 @@ branch named for the container and starts on the first child. Then:
   between subtasks.
 - When you reach a milestone, **`sindri pr milestone <agent>`** captures the
   branch's current state as one PR and **blocks** the agent.
-- You review it, then **`sindri pr approve pr-td-LOGIN`** and
-  **`sindri pr merge pr-td-LOGIN`**. The merge lands, the branch is rebased onto
+- You review it, then **`sindri pr approve pr-sd-LOGIN`** and
+  **`sindri pr merge pr-sd-LOGIN`**. The merge lands, the branch is rebased onto
   the new base, and the agent **resumes the same feature** — the branch isn't
   retired.
 - The agent is freed only when the container task itself is closed.
@@ -233,14 +238,14 @@ here — you own the merge.
 
 ```bash
 sindri pr list                       # pending merge-intents
-sindri pr info pr-td-abc123          # metadata + diff
-sindri pr lint pr-td-abc123          # run the quality gate against the PR
-sindri pr verify pr-td-abc123        # check it out into a workspace to run by hand
+sindri pr info pr-sd-abc123          # metadata + diff
+sindri pr lint pr-sd-abc123          # run the quality gate against the PR
+sindri pr verify pr-sd-abc123        # check it out into a workspace to run by hand
 
-sindri pr review pr-td-abc123 "…"    # request an agentic review (assigns a reviewer)
-sindri pr approve pr-td-abc123       # approve it yourself (no reviewer needed)
-sindri pr reject  pr-td-abc123 "…"   # reject with feedback (routed to the worker)
-sindri pr merge   pr-td-abc123       # the hard gate — human only, requires approved
+sindri pr review pr-sd-abc123 "…"    # request an agentic review (assigns a reviewer)
+sindri pr approve pr-sd-abc123       # approve it yourself (no reviewer needed)
+sindri pr reject  pr-sd-abc123 "…"   # reject with feedback (routed to the worker)
+sindri pr merge   pr-sd-abc123       # the hard gate — human only, requires approved
 ```
 
 A worker's PR reaches `approved` via a reviewer agent **or** your own
@@ -250,16 +255,18 @@ A worker's PR reaches `approved` via a reviewer agent **or** your own
 
 ## Tasks
 
-Tasks live in `td` (the source of truth), cached into the hub.
+Tasks live in the hub, which owns them. It also mirrors openspec changes and GitHub
+issues, so a backlog can span all three; a repo carrying an existing `td` database
+has it imported once, on first use.
 
 ```bash
 sindri task new "Fix the parser" -t bug -p P1      # type: bug|feature|task|epic|chore
-sindri task new "Sub-thing" --parent td-abc123     # a child (subtask)
+sindri task new "Sub-thing" --parent sd-abc123     # a child (subtask)
 sindri task list
 sindri task list --json                            # the same rows as JSON, for scripts (always an array)
-sindri task info td-abc123
-sindri task edit td-abc123 --parent td-LOGIN       # move a task into a package
-sindri task priority td-abc123 P0                  # a priority is what releases it to a worker
+sindri task info sd-abc123
+sindri task edit sd-abc123 --parent sd-LOGIN       # move a task into a package
+sindri task priority sd-abc123 P0                  # a priority is what releases it to a worker
 ```
 
 A **planner** proposes tasks that you gate: a proposed task is *pending* until you
@@ -308,8 +315,8 @@ the header plus each type/func with its doc and signature (bodies omitted).
 
 ```bash
 brokkr map                              # whole tree
-brokkr map internal/hub internal/tui    # several paths at once
-brokkr map internal/tui --file tab_prs  # only files whose path matches
+brokkr map internal/hub internal/ui     # several paths at once
+brokkr map internal/ui --file tab_prs   # only files whose path matches
 brokkr map --depth 1                    # bound how deep it descends
 brokkr map --full                       # don't reduce, however long
 ```
@@ -425,9 +432,12 @@ Orchestration is `sindri <category> <action>`; the toolbelt is the separate
 
 | Category | Actions |
 |---|---|
-| `agent` | `list` · `new [name] [--role worker\|reviewer\|planner]` · `start <name>` · `stop <name>` · `delete <name>` · `tell <name> "msg"` · `attach <name>` · `info <name>` · `pane <name>` |
-| `task` | `list [--json]` · `new <title> [-t -p -d --labels --parent]` · `info <id>` · `edit <id>` · `priority <id> <P0..P4>` · `approve <id>` · `reject <id> "why"` · `unassign <id>` |
-| `pr` | `list` · `info <id>` · `lint <id>` · `verify <id>` · `review <id> "…"` · `approve <id>` · `reject <id> "…"` · `milestone <agent>` · `merge <id>` |
+| `agent` | `list` · `new [name] [--role worker\|reviewer\|planner\|coauthor]` · `start` · `stop` · `restart` · `delete` · `tell <name> "msg"` · `attach` · `info` · `pane` · `dir` · `stats` · `memory <name> [size]` · `rebase` · `rebuild` · `plan <name> "goal"` |
+| `task` | `list [--json]` · `new <title> [-t -p -d --labels --parent]` · `info <id>` · `edit <id>` · `priority <id> <P0..P4>` · `approve <id>` · `reject <id> "why"` · `unassign <id>` · `close <id>` · `delete <id>` · `comment <id> "text"` · `refresh` |
+| `pr` | `list` · `info <id>` · `lint <id>` · `verify <id>` · `review <id> "…"` · `approve <id>` · `reject <id> "…"` · `scrap <id>` · `milestone <agent>` · `merge <id>` |
+| `meeting` | `add <agent…>` · `remove <agent…>` · `join` · `log [-n]` · `new` |
+| `repo` | `init` · `list` · `info [tag]` · `forget <tag>` · `color <tag> <n>` |
+| `hub` | `start [--bg]` · `status` · `restart` · `stop` · `logs` · `list` |
 | `brokkr` | `map [paths…] [--find --grep --symbol --file --depth]` · `refs <symbol> [paths…] [--comments --file --limit]` · `lint [deadcode\|loc\|comments\|openspec]` (none = all) |
 
 Inside a pod the agent talks to the hub through a single command, **`sindri`**
@@ -443,25 +453,32 @@ get `status`/`log`/`prs`.
 
 | What | Where |
 |---|---|
-| Roster, workflow state, PRs, activity log | `.sindri/hub.db` (SQLite, gitignored) |
-| Per-agent socket | `.sindri/sockets/<name>.sock` |
-| Agent Claude home | `.sindri/claude/<name>/` |
-| Code / commits | `.worktrees/<name>` (host) |
-| Tasks (source of truth) | `td` (cached into `hub.db`) |
+| Roster, workflow state, PRs, activity log | `<state>/hub.db` (SQLite) |
+| Per-agent socket | `<state>/<project>/sockets/<name>/` |
+| Agent Claude home | `<state>/<project>/agents/<name>/` |
+| Code / commits | `.worktrees/<name>` (in the repo, host side) |
+| Tasks | sindri's own store; `td` is imported once, then sindri owns them |
+| Project config | `.sindri/config.yaml` (in the repo, yours to commit) |
+
+`<state>` is `~/.local/state/sindri`, overridden by `$SINDRI_HOME` or
+`$XDG_STATE_HOME`. Hub state is **central, not in your repo**: one hub serves every
+repo, so nothing of its own lands in a checkout.
 
 Throw a pod away freely; relaunch resumes from the activity log. Restart the hub
 freely; nothing committed is lost.
 
 ```
-cmd/sindri/         host CLI (agent/task/pr + hub + tui)
+cmd/sindri/         host CLI (agent/task/pr + tui); `sindri hub start` execs sindri-hub
+cmd/sindri-hub/     the hub, as its own process (thin entrypoint over internal/hub)
 cmd/sindri-worker/  the agent's thin browser (no command tree; `sindri` in a pod)
 cmd/brokkr/         the toolbelt: code map + linters (no orchestration)
-internal/hub/       the hub: service, SQLite store, command registry, workflows
+internal/api/       the exchange format: everything that crosses the wire
+internal/hub/       the hub: workflow, store, command registry, agent lifecycle
 internal/client/    thin hub client (CLI + TUI share it)
-internal/adapter/   one package per external tool: git, pod (podman), tmux, td, spec
-internal/tui/       lean Bubble Tea dashboard (a hub client)
-internal/lint/      the linters; internal/codemap/ the code map
-container/          the agent image (Dockerfile) + tmux entrypoint
+internal/adapter/   one package per external tool: git, container, tmux, tasks, herdr
+internal/ui/        the front-ends: cli, tui, theme (shared rendering), attach
+internal/brokkr/    the toolbelt's logic: lint + codemap
+internal/container/ the agent image (embedded Dockerfile) + the runtime port
 openspec/           the spec-driven design (specs + changes)
 ```
 
@@ -479,6 +496,7 @@ defaults — **repo → global → default, per key**. All keys are optional:
 architecture: docs/ARCHITECTURE.md    # doc the reviewer must read (default: ARCHITECTURE.md)
 containerfile: .sindri/Containerfile  # agent image recipe (highest-precedence; see below)
 review_prompt: .sindri/review.md      # file whose contents become the reviewer's prompt
+verify: scripts/verify.sh             # your own submit gate: an agent can't submit past it
 github:
   issues: false                       # import open GitHub issues as tasks (default: true)
 ```
@@ -491,6 +509,14 @@ github:
 - **`containerfile`** — repo-relative agent-image recipe (see the next section).
 - **`review_prompt`** — repo-relative file whose contents replace the default reviewer
   prompt.
+- **`verify`** — repo-relative executable the submit gate runs in the agent's worktree,
+  after the rebase and **before the PR exists**, alongside the built-in checks. A
+  non-zero exit refuses the submit and reports the output, so a PR that fails your build,
+  your tests or your architecture tests is never created. It's a path rather than a
+  command line so it can be validated before it runs — wrap a build tool in a script
+  (this repo uses `scripts/verify.sh`, which runs `make verify`). A declared gate runs
+  **whatever the language**; with no `verify` key the built-in Go checks apply exactly as
+  they do today. Bounded by a timeout, with long output capped and the cut announced.
 - **`github.issues`** — the repo's open GitHub issues are imported as `gh-<number>`
   tasks (via the `gh` CLI, reusing your `gh` auth). **On by default** (opt-out — set
   `false` to disable). Imported issues arrive **unrated**: they show in the backlog
@@ -561,7 +587,7 @@ and `yq` on `PATH` (they get bundled into the build).
 
 ```bash
 make           # (or make help) list all targets
-make install   # build sindri + sindri-worker + brokkr, install to ~/.local/bin
+make install   # build sindri + sindri-hub + sindri-worker + brokkr, install to ~/.local/bin
 make all       # + build the agent image too (needs podman)
 make verify    # run the linters (the gate; release runs this first)
 make check     # build + test + lint — the quality gate

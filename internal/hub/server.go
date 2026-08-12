@@ -16,89 +16,41 @@ import (
 	"runtime"
 	"strconv"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/hub/server"
-	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// AgentReq is the body for POST /agents.
-type AgentReq struct {
-	Name   string `json:"name"`
-	Role   string `json:"role"`
-	Memory string `json:"memory"` // optional per-agent RAM limit (e.g. "4g"); "" = hub default
-}
+// AgentReq is the body for POST /agents; it crosses the wire, so it is
+// internal/api.AgentReq under the name every existing caller here already uses.
+type AgentReq = api.AgentReq
 
-// TellReq is the body for POST /tell.
-type TellReq struct {
-	Name   string `json:"name"`
-	Msg    string `json:"msg"`
-	Source string `json:"source"`
-}
+// TellReq is the body for POST /tell; it crosses the wire, so it is internal/api.TellReq
+// under the name every existing caller here already uses.
+type TellReq = api.TellReq
 
-// ChatSayReq is the body for POST /chat/say — the user posting to the room.
-type ChatSayReq struct {
-	Msg string `json:"msg"`
-}
+// PlanReq is the body for POST /agent/plan; it crosses the wire, so it is
+// internal/api.PlanReq under the name every existing caller here already uses.
+type PlanReq = api.PlanReq
+
+// ChatSayReq is the body for POST /chat/say; it crosses the wire, so it is
+// internal/api.ChatSayReq under the name every existing caller here already uses.
+type ChatSayReq = api.ChatSayReq
 
 // ChatView is the chatroom snapshot served by GET /chat and streamed by
-// GET /chat/stream: the current member roster and the recent transcript.
-type ChatView struct {
-	Members []store.ChatMember  `json:"members"`
-	Log     []store.ChatMessage `json:"log"`
-}
+// GET /chat/stream; it crosses the wire, so it is internal/api.ChatView under the
+// name every existing caller here already uses.
+type ChatView = api.ChatView
 
 // NameReq is the body for operations addressing one agent (POST /launch) or PR
-// (POST /merge). Shell and Debug apply to /launch only.
-type NameReq struct {
-	Name   string `json:"name"`
-	Shell  bool   `json:"shell"`
-	Debug  bool   `json:"debug"`  // stream the hub's liveness-probe detail during the launch wait
-	Memory string `json:"memory"` // set an agent's RAM limit (POST /agent/memory)
-}
+// (POST /merge); it crosses the wire, so it is internal/api.NameReq under the name
+// every existing caller here already uses.
+type NameReq = api.NameReq
 
-// RepoReq targets a registered repo by its tag (POST /repo/forget, /repo/color).
-type RepoReq struct {
-	Tag   string `json:"tag"`
-	Color int    `json:"color"` // colour choice for /repo/color
-}
-
-// globalRoutes are the only control endpoints valid without a repo context: the
-// board reads, which return global agents/PRs (and no tasks when no repo is
-// selected). Everything else is repo-scoped and requires X-Sindri-Project.
-var globalRoutes = map[string]bool{
-	"/state": true, "/events": true, "/stats": true,
-	// Registry management spans repos: listing, inspecting, and forgetting a repo
-	// operate on the registry by tag, not on the caller's cwd.
-	"/repos": true, "/repo": true, "/repo/forget": true, "/repo/color": true,
-	// Orphan removal targets a container by its (globally-unique) name, not a repo.
-	"/orphan/remove": true,
-}
-
-// requireProject rejects a repo-scoped request that arrives without an
-// X-Sindri-Project header (rather than silently acting on a phantom empty project),
-// with a clear message. The board reads are exempt (see globalRoutes).
-func requireProject(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !globalRoutes[r.URL.Path] && r.Header.Get("X-Sindri-Project") == "" {
-			writeJSON(w, nil, fmt.Errorf("missing repo context (X-Sindri-Project) — run this inside a repo"))
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// reqProject resolves (and registers) the repo a host request concerns, from the
-// X-Sindri-Project header (the client sends its repo root). Returns the repoTag; ""
-// when no header is present (a repo-agnostic request, e.g. the board with no repo
-// selected). This is the single place a host request's project is derived.
-func (h *Hub) reqProject(r *http.Request) string {
-	root := r.Header.Get("X-Sindri-Project")
-	if root == "" {
-		return ""
-	}
-	h.repo(root) // register (idempotent) + ensure .worktrees gitignore
-	return repoTag(root)
-}
+// RepoReq targets a registered repo by its tag (POST /repo/forget, /repo/color); it
+// crosses the wire, so it is internal/api.RepoReq under the name every existing
+// caller here already uses.
+type RepoReq = api.RepoReq
 
 // Handler builds the HTTP mux over a hub. Every repo-scoped handler resolves its
 // project from the request header (reqProject); the board endpoints scope tasks to
@@ -126,6 +78,15 @@ func (h *Hub) Handler() http.Handler {
 			return
 		}
 		writeJSON(w, okMsg{"refreshed"}, h.comments.Refresh(h.reqProject(r), req.Name))
+	})
+	// Comment on a task. An issue tracker that owns the thread receives it; everything else is
+	// recorded here, where the thread lives (-> comments.Add).
+	mux.HandleFunc("POST /task/comments/add", func(w http.ResponseWriter, r *http.Request) {
+		var req TellReq // Name = the task id, Msg = the comment, Source = its author
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"commented"}, h.comments.Add(h.reqProject(r), req.Name, req.Source, req.Msg))
 	})
 	mux.HandleFunc("GET /repos", func(w http.ResponseWriter, r *http.Request) {
 		list, err := h.projects.List()
@@ -172,7 +133,8 @@ func (h *Hub) Handler() http.Handler {
 		writeJSON(w, okMsg{"saved"}, h.projects.WriteConfig(r.Header.Get("X-Sindri-Project"), cfg))
 	})
 	mux.HandleFunc("GET /log", func(w http.ResponseWriter, r *http.Request) {
-		evs, err := h.Log(h.reqProject(r), r.URL.Query().Get("agent"))
+		name := r.URL.Query().Get("agent")
+		evs, err := h.Log(h.agentReq(r, name), name)
 		writeJSON(w, evs, err)
 	})
 	mux.HandleFunc("GET /agent/pane", func(w http.ResponseWriter, r *http.Request) {
@@ -180,18 +142,22 @@ func (h *Hub) Handler() http.Handler {
 		if lines <= 0 {
 			lines = 40
 		}
-		out, err := h.agents.AgentPane(h.reqProject(r), r.URL.Query().Get("agent"), lines)
+		name := r.URL.Query().Get("agent")
+		out, err := h.agents.AgentPane(h.agentReq(r, name), name, lines)
 		writeJSON(w, okMsg{out}, err)
 	})
 	mux.HandleFunc("GET /agent/pod", func(w http.ResponseWriter, r *http.Request) {
-		out, err := h.agents.PodInfo(h.reqProject(r), r.URL.Query().Get("agent"))
+		name := r.URL.Query().Get("agent")
+		out, err := h.agents.PodInfo(h.agentReq(r, name), name)
 		writeJSON(w, okMsg{out}, err)
 	})
 	mux.HandleFunc("GET /agent/diagnose", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, okMsg{h.agents.AgentDiagnostic(h.reqProject(r), r.URL.Query().Get("agent"))}, nil)
+		name := r.URL.Query().Get("agent")
+		writeJSON(w, okMsg{h.agents.AgentDiagnostic(h.agentReq(r, name), name)}, nil)
 	})
 	mux.HandleFunc("GET /agent/clients", func(w http.ResponseWriter, r *http.Request) {
-		cs, err := h.agents.Clients(h.reqProject(r), r.URL.Query().Get("agent"))
+		name := r.URL.Query().Get("agent")
+		cs, err := h.agents.Clients(h.agentReq(r, name), name)
 		writeJSON(w, cs, err)
 	})
 	mux.HandleFunc("POST /agents", func(w http.ResponseWriter, r *http.Request) {
@@ -207,28 +173,42 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"ok"}, h.agents.SetMemory(h.reqProject(r), req.Name, req.Memory))
+		writeJSON(w, okMsg{"ok"}, h.agents.SetMemory(h.agentReq(r, req.Name), req.Name, req.Memory))
+	})
+	mux.HandleFunc("POST /agent/retire", func(w http.ResponseWriter, r *http.Request) {
+		var req NameReq
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"ok"}, h.agents.SetRetired(h.agentReq(r, req.Name), req.Name, req.Retired))
 	})
 	mux.HandleFunc("POST /agent/delete", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"deleted"}, h.agents.DeleteAgent(h.reqProject(r), req.Name))
+		writeJSON(w, okMsg{"deleted"}, h.agents.DeleteAgent(h.agentReq(r, req.Name), req.Name))
 	})
 	mux.HandleFunc("POST /agent/stop", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"stopped"}, h.agents.StopAgent(h.reqProject(r), req.Name))
+		writeJSON(w, okMsg{"stopped"}, h.agents.StopAgent(h.agentReq(r, req.Name), req.Name))
+	})
+	mux.HandleFunc("POST /agent/clear-context", func(w http.ResponseWriter, r *http.Request) {
+		var req NameReq
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"cleared"}, h.agents.ClearContext(h.agentReq(r, req.Name), req.Name))
 	})
 	mux.HandleFunc("POST /agent/rebase", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"rebased"}, h.wf.RebaseAgent(h.reqProject(r), req.Name))
+		writeJSON(w, okMsg{"rebased"}, h.wf.RebaseAgent(h.agentReq(r, req.Name), req.Name))
 	})
 	mux.HandleFunc("POST /launch", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
@@ -243,7 +223,7 @@ func (h *Hub) Handler() http.Handler {
 		if f, ok := w.(http.Flusher); ok {
 			fw.f = f
 		}
-		if err := h.agents.Launch(h.reqProject(r), req.Name, req.Shell, req.Debug, fw); err != nil {
+		if err := h.agents.Launch(h.agentReq(r, req.Name), req.Name, req.Shell, req.Debug, fw); err != nil {
 			fmt.Fprintf(fw, "error: %v\n", err)
 			w.Header().Set("X-Sindri-Error", err.Error())
 		}
@@ -260,7 +240,7 @@ func (h *Hub) Handler() http.Handler {
 		if f, ok := w.(http.Flusher); ok {
 			fw.f = f
 		}
-		if err := h.agents.RebuildAgent(h.reqProject(r), req.Name, fw); err != nil {
+		if err := h.agents.RebuildAgent(h.agentReq(r, req.Name), req.Name, fw); err != nil {
 			fmt.Fprintf(fw, "error: %v\n", err)
 			w.Header().Set("X-Sindri-Error", err.Error())
 		}
@@ -270,21 +250,21 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"delivered"}, h.agents.Tell(h.reqProject(r), req.Name, req.Msg, req.Source))
+		writeJSON(w, okMsg{"delivered"}, h.agents.Tell(h.agentReq(r, req.Name), req.Name, req.Msg, req.Source))
 	})
 	mux.HandleFunc("POST /chat/add", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"added"}, h.chat.Add(h.reqProject(r), req.Name))
+		writeJSON(w, okMsg{"added"}, h.chat.Add(h.agentReq(r, req.Name), req.Name))
 	})
 	mux.HandleFunc("POST /chat/remove", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"removed"}, h.chat.Remove(h.reqProject(r), req.Name))
+		writeJSON(w, okMsg{"removed"}, h.chat.Remove(h.agentReq(r, req.Name), req.Name))
 	})
 	mux.HandleFunc("POST /chat/say", func(w http.ResponseWriter, r *http.Request) {
 		var req ChatSayReq
@@ -321,7 +301,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		pr, err := h.wf.MilestonePR(h.reqProject(r), req.Name)
+		pr, err := h.wf.MilestonePR(h.agentReq(r, req.Name), req.Name)
 		writeJSON(w, pr, err)
 	})
 	mux.HandleFunc("GET /prs", func(w http.ResponseWriter, r *http.Request) {
@@ -393,12 +373,17 @@ func (h *Hub) Handler() http.Handler {
 		t, err := h.wf.TaskInfo(h.reqProject(r), r.URL.Query().Get("id"))
 		writeJSON(w, t, err)
 	})
+	mux.HandleFunc("GET /task/next", func(w http.ResponseWriter, r *http.Request) {
+		name := r.URL.Query().Get("agent")
+		x, err := h.wf.ExplainNext(h.agentReq(r, name), name)
+		writeJSON(w, x, err)
+	})
 	mux.HandleFunc("POST /tasks", func(w http.ResponseWriter, r *http.Request) {
 		var req TaskReq
 		if !decode(w, r, &req) {
 			return
 		}
-		id, err := h.wf.CreateTask(h.reqProject(r), req.spec())
+		id, err := h.wf.CreateTask(h.reqProject(r), req.Spec())
 		writeJSON(w, okMsg{id}, err)
 	})
 	mux.HandleFunc("POST /task/edit", func(w http.ResponseWriter, r *http.Request) {
@@ -406,30 +391,37 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{req.ID}, h.wf.EditTask(h.reqProject(r), req.ID, req.spec()))
+		writeJSON(w, okMsg{req.ID}, h.wf.EditTask(h.reqProject(r), req.ID, req.Spec()))
 	})
 	mux.HandleFunc("POST /priority", func(w http.ResponseWriter, r *http.Request) {
 		var req PriorityReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"ok"}, h.wf.SetPriority(h.reqProject(r), req.ID, req.Priority))
+		// An unrecognised scope is refused rather than narrowed: a caller that asked to rate a whole
+		// tree and got one task would read the "ok" as having done it.
+		scope, ok := api.ParsePriorityScope(req.Scope)
+		if !ok {
+			writeJSON(w, okMsg{"ok"}, fmt.Errorf("unknown priority scope %q (task, unrated, all)", req.Scope))
+			return
+		}
+		writeJSON(w, okMsg{"ok"}, h.wf.SetPriority(h.reqProject(r), req.ID, req.Priority, scope))
 	})
 	// Assign a planner one thing to plan, as a phased brief (-> AssignPlan). Refused while that
 	// planner has a PR open, so a new plan can't be drafted over specs still awaiting a verdict.
 	mux.HandleFunc("POST /agent/plan", func(w http.ResponseWriter, r *http.Request) {
-		var req TellReq // Name = the planner, Msg = what to plan
+		var req PlanReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"assigned"}, h.wf.AssignPlan(h.reqProject(r), req.Name, req.Msg))
+		writeJSON(w, okMsg{"assigned"}, h.wf.AssignPlan(h.agentReq(r, req.Name), req.Name, req.Goal, req.Task))
 	})
 	mux.HandleFunc("POST /task/approve", func(w http.ResponseWriter, r *http.Request) {
-		var req RejectReq // reuse: ID (+ unused Feedback)
+		var req ApproveTaskReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"approved"}, h.wf.ApproveTask(h.reqProject(r), req.ID))
+		writeJSON(w, okMsg{"approved"}, h.wf.ApproveTask(h.reqProject(r), req.ID, req.Subtree))
 	})
 	mux.HandleFunc("POST /task/reject", func(w http.ResponseWriter, r *http.Request) {
 		var req RejectReq // ID + Feedback (the rejection comment)
@@ -452,6 +444,15 @@ func (h *Hub) Handler() http.Handler {
 		}
 		writeJSON(w, okMsg{"closed"}, h.wf.CloseTask(h.reqProject(r), req.ID))
 	})
+	// The host's counterpart to close: restores a closed sindri-owned task, with a reason
+	// (-> Hub.ReopenTask, which also records it as a task comment).
+	mux.HandleFunc("POST /task/reopen", func(w http.ResponseWriter, r *http.Request) {
+		var req RejectReq // ID + Feedback (the reopen reason)
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"reopened"}, h.ReopenTask(h.reqProject(r), req.ID, api.SenderUser, req.Feedback))
+	})
 	mux.HandleFunc("POST /task/delete", func(w http.ResponseWriter, r *http.Request) {
 		var req ScrapTaskReq
 		if !decode(w, r, &req) {
@@ -462,40 +463,26 @@ func (h *Hub) Handler() http.Handler {
 	return mux
 }
 
-// PriorityReq is the body for POST /priority.
-type PriorityReq struct {
-	ID       string `json:"id"`
-	Priority string `json:"priority"`
-}
+// PriorityReq is the body for POST /priority; it crosses the wire, so it is
+// internal/api.PriorityReq under the name every existing caller here already uses.
+type PriorityReq = api.PriorityReq
 
-// RejectReq is the body for POST /pr/reject.
-type RejectReq struct {
-	ID       string `json:"id"`
-	Feedback string `json:"feedback"`
-}
+// RejectReq is the body for POST /pr/reject; it crosses the wire, so it is
+// internal/api.RejectReq under the name every existing caller here already uses.
+type RejectReq = api.RejectReq
 
-// ScrapTaskReq is the body for POST /task/delete: the task, and how far the discard
-// reaches — down its subtree, and over the open PRs of what it scraps.
-type ScrapTaskReq struct {
-	ID      string `json:"id"`
-	Subtree bool   `json:"subtree"`
-	PRs     bool   `json:"prs"`
-}
+// ApproveTaskReq is the body for POST /task/approve; it crosses the wire, so it is
+// internal/api.ApproveTaskReq under the name every existing caller here already uses.
+type ApproveTaskReq = api.ApproveTaskReq
 
-// TaskReq is the body for POST /tasks (create) and POST /task/edit (ID set).
-type TaskReq struct {
-	ID          string   `json:"id"`
-	Title       string   `json:"title"`
-	Type        string   `json:"type"`
-	Priority    string   `json:"priority"`
-	Parent      string   `json:"parent"`
-	Description string   `json:"description"`
-	Labels      []string `json:"labels"`
-}
+// ScrapTaskReq is the body for POST /task/delete; it crosses the wire, so it is
+// internal/api.ScrapTaskReq under the name every existing caller here already uses.
+type ScrapTaskReq = api.ScrapTaskReq
 
-func (r TaskReq) spec() TaskSpec {
-	return TaskSpec{Title: r.Title, Type: r.Type, Priority: r.Priority, Parent: r.Parent, Description: r.Description, Labels: r.Labels}
-}
+// TaskReq is the body for POST /tasks (create) and POST /task/edit (ID set); it
+// crosses the wire, so it is internal/api.TaskReq under the name every existing
+// caller here already uses.
+type TaskReq = api.TaskReq
 
 // Serve binds the repo's unix socket and serves until the listener closes. A
 // stale socket file from a previous run is removed first.

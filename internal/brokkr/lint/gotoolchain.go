@@ -22,13 +22,15 @@ const UpgradeCommand = "go-upgrade"
 // go 1.26.4; GOTOOLCHAIN=local)". A required module can raise the floor too, hence not just go.mod.
 var tooOldRE = regexp.MustCompile(`requires go >= ([0-9][^ )]*) \(running go ([0-9][^;) ]*)`)
 
-// toolchainTooOld turns a go-command failure caused by an outdated toolchain into the fix, or
-// returns "" for any other failure, leaving the linter's own errors alone.
+// ToolchainAdvice turns a go-command failure caused by an outdated toolchain into the fix, or
+// returns "" for any other failure, leaving the caller's own errors alone. Exported because the
+// gopls MCP shim answers the same refusal — one definition, so the two cannot drift into giving
+// different advice for the same failure.
 //
 // Worth special-casing because the raw failure reads like a broken build: nothing in "load: err:
 // exit status 1: stderr: go: go.mod requires go >= …" says the code is fine and the environment is
 // behind, so the natural next move is to go looking for a defect that isn't there.
-func toolchainTooOld(text string) string {
+func ToolchainAdvice(text string) string {
 	m := tooOldRE.FindStringSubmatch(text)
 	if m == nil {
 		return ""

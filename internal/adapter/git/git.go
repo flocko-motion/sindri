@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -83,6 +84,32 @@ func WorktreeAdd(repo, path, ref string) error {
 		return fmt.Errorf("git worktree add: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
+}
+
+// WorktreeAddOnBranch adds a worktree on a NEW branch created at start. The new branch is the point:
+// a worktree cannot check out a branch another worktree holds, and the branch under test is held by
+// its author's tree.
+func WorktreeAddOnBranch(repo, path, branch, start string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("mkdir worktree parent: %w", err)
+	}
+	out, err := exec.Command("git", "-C", repo, "worktree", "add", "-b", branch, path, start).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git worktree add -b %s: %s: %w", branch, strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// RebaseHere replays dir's current branch onto onto, in place, reporting the conflicting paths or
+// done. It skips commits base already contains, as the merge path does (-> settleRebase), since that
+// is the question asked. Checks nothing out first, and aborts a conflict before returning.
+func RebaseHere(dir, onto string) (conflicts []string, done bool, err error) {
+	out, e := gitEditless(dir, "rebase", onto)
+	conflicts, done, err = settleRebase(dir, out, e)
+	if !done {
+		_ = exec.Command("git", "-C", dir, "rebase", "--abort").Run()
+	}
+	return conflicts, done, err
 }
 
 // WorktreeRemove force-removes a worktree and prunes its registration. Safe to
@@ -512,6 +539,22 @@ func ChangedNames(dir string) ([]string, error) {
 		}
 	}
 	return lines, nil
+}
+
+// CountRange counts every commit in from..to, merges included. LogRange hides merges because they
+// read as noise in a list, which makes an empty LIST a bad test for "nothing arrived" — an advance
+// made only of merge commits produces one. Callers deciding whether anything moved ask this; callers
+// showing a human what moved ask LogRange.
+func CountRange(dir, from, to string) (int, error) {
+	out, err := exec.Command("git", "-C", dir, "rev-list", "--count", from+".."+to).CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("git rev-list --count %s..%s: %s: %w", from, to, strings.TrimSpace(string(out)), err)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0, fmt.Errorf("git rev-list --count %s..%s: unreadable count %q: %w", from, to, strings.TrimSpace(string(out)), err)
+	}
+	return n, nil
 }
 
 // LogRange lists "<short-sha> <subject>" for the commits in from..to (newest first), capped at

@@ -57,7 +57,10 @@ func LOC(roots []string, maxLines int, cap *Cap, ig *Ignore, w io.Writer) (bool,
 				}
 				return nil
 			}
-			if LangOf(path) == LangNone || ig.Match(path) {
+			// Shell is linted for comment length only. It is excluded here by name rather than by
+			// falling out of LangOf, because this filter is written as "any language we know" —
+			// so every language added to Lang joins this rule silently unless it says otherwise.
+			if l := LangOf(path); l == LangNone || l == LangShell || ig.Match(path) {
 				return nil
 			}
 			n, err := countLines(path)

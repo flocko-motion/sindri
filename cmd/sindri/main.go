@@ -1,9 +1,9 @@
 // package: main (sindri) / main
 // type:    entrypoint (thin)
-// job:     wire the container backend, mirror the build version into the CLI
-// package, assemble the host CLI command tree (internal/ui/cli) under the
-// root, and dispatch. The command implementations live in internal/ui/cli;
-// the dev tools (code map, linters) are the separate `brokkr` binary.
+// job:     wire the container backend (agent.go's preflight healthcheck needs it;
+// the hub itself is a separate process now — see cmd/sindri-hub), mirror the
+// build version into the CLI package, assemble the host CLI command tree
+// (internal/ui/cli) under the root, and dispatch.
 // limits:  no command logic here — just composition + the version ldflags anchor.
 package main
 
@@ -11,8 +11,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/flo-at/sindri/internal/adapter/agent"
-	"github.com/flo-at/sindri/internal/adapter/agent/claude"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/tools/debug"
 	"github.com/flo-at/sindri/internal/ui/cli"
@@ -28,7 +26,6 @@ var version = "dev"
 
 func main() {
 	container.Use(chooseRuntime()) // wire the one container backend for this process
-	agent.Use(claude.New())        // wire the one coding-agent backend
 	cli.SetVersion(version)        // mirror the ldflags build version into the CLI package
 	var projectDir string
 	var dbg bool

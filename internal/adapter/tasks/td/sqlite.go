@@ -1,10 +1,10 @@
 // package: td / sqlite
-// type:    adapter (external tool — direct read path)
-// job:     read tasks straight from td's SQLite db (.todos/issues.db) for speed,
-// bypassing the `td` CLI on the hot read path (D15). Writes still go
-// through the CLI (td.go); this is the encapsulated read-fast exception.
-// limits:  read-only; couples to td's `issues` schema (id/title/status/type/
-// priority/labels/parent_id/timestamps, soft-deleted via deleted_at).
+// type:    adapter (external tool — one-way import)
+// job:     read a repo's existing td tasks out of .todos/issues.db, so a backlog
+// predating sindri's own task store is carried over once
+// (-> hub/workflow.importTdOnce). All that remains of the td integration.
+// limits:  read-only, and the td CLI is never invoked; couples to td's issues
+// schema (id/title/status/type/priority/labels/parent_id/timestamps).
 package td
 
 import (
@@ -23,11 +23,14 @@ import (
 // DBPath is td's SQLite database for a project.
 func DBPath(root string) string { return filepath.Join(root, ".todos", "issues.db") }
 
-// HasStore gates td as a task source: a repo without one contributes no td tasks.
+// HasStore gates the import: a repo without a td database has no backlog to carry over.
 func HasStore(root string) bool {
 	_, err := os.Stat(DBPath(root))
 	return err == nil
 }
+
+// Tasks reads every task in the repo's td store, for the import to hand to sindri's own.
+func Tasks(root string, f task.Filter) ([]task.Task, error) { return tasksFromDB(root, f) }
 
 // dbCols is shared by both queries and scanDBTask so they agree about order. COALESCE
 // keeps a NULL description from failing a whole task read.
@@ -64,69 +67,6 @@ func tasksFromDB(root string, f task.Filter) ([]task.Task, error) {
 		return nil, err
 	}
 	return orderTasks(tasks), nil
-}
-
-// Detail fetches long-form fields on demand; task.Task doesn't carry them.
-func Detail(root, id string) (description, acceptance string, err error) {
-	db, err := sql.Open("sqlite", "file:"+DBPath(root))
-	if err != nil {
-		return "", "", err
-	}
-	defer db.Close()
-	row := db.QueryRow(`SELECT description, acceptance FROM issues WHERE id=?`, id)
-	if err := row.Scan(&description, &acceptance); err != nil && err != sql.ErrNoRows {
-		return "", "", err
-	}
-	return description, acceptance, nil
-}
-
-// Comment is one td comment; Author is td's session_id, not a human.
-type Comment struct {
-	ID        string
-	Author    string
-	Body      string
-	CreatedAt time.Time
-}
-
-// Comments reads a task's thread. nil, not an error, when older td has no comments
-// table or the task has none: an optional source's absence isn't a failure.
-func Comments(root, id string) ([]Comment, error) {
-	if _, err := os.Stat(DBPath(root)); err != nil {
-		return nil, nil
-	}
-	db, err := sql.Open("sqlite", "file:"+DBPath(root))
-	if err != nil {
-		return nil, err
-	}
-	defer db.Close()
-	rows, err := db.Query(`SELECT id, session_id, text, created_at FROM comments WHERE issue_id=? ORDER BY created_at`, id)
-	if err != nil {
-		if strings.Contains(err.Error(), "no such table") {
-			return nil, nil // td build without the comments feature
-		}
-		return nil, err
-	}
-	defer rows.Close()
-	var out []Comment
-	for rows.Next() {
-		var cid, session, text, created string
-		if err := rows.Scan(&cid, &session, &text, &created); err != nil {
-			return nil, err
-		}
-		out = append(out, Comment{ID: cid, Author: session, Body: text, CreatedAt: parseTS(created)})
-	}
-	return out, rows.Err()
-}
-
-// taskFromDB reads a single task by id (live or not — Get is used post-mutation).
-func taskFromDB(root, id string) (task.Task, error) {
-	db, err := sql.Open("sqlite", "file:"+DBPath(root))
-	if err != nil {
-		return task.Task{}, err
-	}
-	defer db.Close()
-	row := db.QueryRow(`SELECT `+dbCols+` FROM issues WHERE id=?`, id)
-	return scanDBTask(row)
 }
 
 type rowScanner interface{ Scan(...any) error }

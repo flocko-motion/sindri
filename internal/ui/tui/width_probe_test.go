@@ -6,8 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // TestGlyphsCountAsTerminalsDrawThem: every glyph the TUI places inside a width-counted cell
@@ -36,8 +35,8 @@ func TestGlyphsCountAsTerminalsDrawThem(t *testing.T) {
 func TestAgentRowFitsItsColumn(t *testing.T) {
 	m := newModel(nil, nil, "/r/sindri")
 	m.scopeRepo = false
-	m.state = hub.BoardState{
-		Agents: []hub.AgentView{
+	m.state = api.BoardState{
+		Agents: []api.AgentView{
 			{Name: "hepti", Role: "coauthor", Status: "collab", Task: "td-3", Clients: 1},
 			{Name: "eitri", Role: "worker", Status: "working", Task: "td-4"},
 		},
@@ -61,9 +60,9 @@ func TestAgentsBodyNeverExceedsWidth(t *testing.T) {
 		m.tab = 1
 		m.scopeRepo = false
 		m.w, m.h = w, 30
-		m.state = hub.BoardState{
-			Projects: []store.Project{{Tag: "sin", Path: "/r/sindri"}},
-			Agents: []hub.AgentView{
+		m.state = api.BoardState{
+			Projects: []api.Project{{Tag: "sin", Path: "/r/sindri"}},
+			Agents: []api.AgentView{
 				{Name: "hepti", Role: "coauthor", Status: "collab", Task: "td-3", Clients: 2},
 				{Name: "eitri", Role: "worker", Status: "working", Task: "td-4"},
 			},

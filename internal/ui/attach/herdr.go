@@ -1,5 +1,5 @@
 // package: ui/attach / herdr
-// type:    application helper (composes adapters for the UIs)
+// type:    assembly (composes adapters for the UIs)
 // job:     the single place that lists an agent in herdr's sidebar for the lifetime
 // of an interactive attach — used by every attach path (`agent attach`,
 // `coauthor`, the TUI): reports the agent by name with a live state,

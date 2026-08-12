@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/tools/paths"
 	"gopkg.in/yaml.v3"
 )
@@ -22,42 +23,35 @@ import (
 // defaultArchitecture is looked for when `architecture` is unset, but never created.
 const defaultArchitecture = "ARCHITECTURE.md"
 
-// GitHub is the `github:` block.
-type GitHub struct {
-	// Issues toggles the GitHub issue source; nil (unset) means ON — opt-out.
-	Issues *bool `yaml:"issues"`
-}
+// GitHub is the `github:` block. It crosses the wire in its own right (Config does),
+// so it is internal/api.GitHub under the name every existing caller here already uses.
+type GitHub = api.GitHub
 
-// Lint is the `lint:` block. Pointers: an unset key must differ from a deliberate zero.
-type Lint struct {
-	// MaxLines bounds a source file's length.
-	MaxLines *int `yaml:"max_lines"`
+// Lint is the `lint:` block; it crosses the wire, so it is internal/api.Lint under
+// the name every existing caller here already uses.
+type Lint = api.Lint
 
-	// MaxCommentAvg bounds the MEAN lines per comment block — a trend, not a per-comment cap.
-	MaxCommentAvg *float64 `yaml:"max_comment_avg"`
-}
+// Config is a project's resolved .sindri/config.yaml (repo over global over
+// default). It crosses the wire (the TUI's repo-config editor reads and writes it),
+// so it is internal/api.Config under the name every existing caller here already
+// uses; Load/Write/validate/Abs stay here since they touch disk.
+type Config = api.Config
 
-// Config is a project's resolved .sindri/config.yaml (repo over global over default).
-type Config struct {
-	Architecture  string `yaml:"architecture"`  // repo-relative architecture doc (default ARCHITECTURE.md)
-	Containerfile string `yaml:"containerfile"` // repo-relative image recipe ("" = filename discovery)
-	ReviewPrompt  string `yaml:"review_prompt"` // repo-relative reviewer-prompt file ("" = default prompt)
-	GitHub        GitHub `yaml:"github"`
-	Lint          Lint   `yaml:"lint"`
-
-	// Reference pins the branch agents branch from and merge into. Unset reads the main
-	// checkout's current branch, so switching branches redefines it for the whole fleet.
-	Reference string `yaml:"reference"`
-
-	// Reading names the documents a planner must read first; it cannot guess them.
-	Reading []string `yaml:"reading"`
-
-	// ArchitectureSet marks an explicitly configured doc: only then must it exist (validate).
-	ArchitectureSet bool `yaml:"-"`
-}
+// ErrConfig marks a failure to read a project's configuration, so callers can tell it apart from a
+// fault that might pass on its own. It never will: a human edits the file or nothing changes, and
+// anything told to "try again later" instead waits forever.
+var ErrConfig = errors.New("project configuration")
 
 // Load layers repo config over global over defaults. Absent is fine; malformed is an error.
 func Load(root string) (Config, error) {
+	c, err := load(root)
+	if err != nil {
+		return Config{}, fmt.Errorf("%w: %w", ErrConfig, err)
+	}
+	return c, nil
+}
+
+func load(root string) (Config, error) {
 	var c Config
 	if err := decodeInto(filepath.Join(paths.StateDir(), "config.yaml"), &c); err != nil {
 		return Config{}, err
@@ -69,7 +63,7 @@ func Load(root string) (Config, error) {
 	if c.Architecture == "" {
 		c.Architecture = defaultArchitecture
 	}
-	if err := c.validate(root); err != nil {
+	if err := validate(c, root); err != nil {
 		return Config{}, err
 	}
 	return c, nil
@@ -88,14 +82,26 @@ func decodeInto(path string, c *Config) error {
 	dec := yaml.NewDecoder(f)
 	dec.KnownFields(true)
 	if err := dec.Decode(c); err != nil && !errors.Is(err, io.EOF) { // EOF = empty file, fine
-		return fmt.Errorf("%s: %w", path, err)
+		return fmt.Errorf("%s: %w%s", path, err, staleBinaryHint(err))
 	}
 	return nil
 }
 
+// staleBinaryHint names the likeliest cause of an unknown key, which is not a typo: a config that
+// gained a setting a LONGER-RUNNING process does not know yet. The hub holds a config open for its
+// whole life, so a key added by an upgrade or a merge reads as invalid until it restarts — and
+// without saying so, a strict parse looks like a broken file nobody edited.
+func staleBinaryHint(err error) string {
+	if !strings.Contains(err.Error(), "not found in type") {
+		return ""
+	}
+	return "\nIf that key was added recently, the process reading this config predates it — restart it" +
+		" (`sindri hub stop`, then `sindri hub start --bg`) so it knows the setting."
+}
+
 // validate rejects escaping paths and missing set files; the default architecture is exempt
 // because the hub only recommends one (Hub.StartupAdvice).
-func (c Config) validate(root string) error {
+func validate(c Config, root string) error {
 	checks := []struct {
 		key, val  string
 		mustExist bool
@@ -103,6 +109,7 @@ func (c Config) validate(root string) error {
 		{"architecture", c.Architecture, c.ArchitectureSet},
 		{"containerfile", c.Containerfile, c.Containerfile != ""},
 		{"review_prompt", c.ReviewPrompt, c.ReviewPrompt != ""},
+		{"verify", c.Verify, c.Verify != ""},
 	}
 	for _, ch := range checks {
 		if ch.val == "" {
@@ -121,15 +128,25 @@ func (c Config) validate(root string) error {
 	return nil
 }
 
-// IssuesEnabled defaults to ON; the source still degrades to absent without gh or a remote.
-func (c Config) IssuesEnabled() bool {
-	return c.GitHub.Issues == nil || *c.GitHub.Issues
+// lintOut emits only the lint keys that are actually set. The pointers are the point: an unset
+// bound must stay absent so the default still applies, rather than being written out as a zero.
+func lintOut(l Lint) map[string]any {
+	out := map[string]any{}
+	if l.MaxLines != nil {
+		out["max_lines"] = *l.MaxLines
+	}
+	if l.MaxCommentAvg != nil {
+		out["max_comment_avg"] = *l.MaxCommentAvg
+	}
+	return out
 }
 
 // Write persists c, validating first so a broken config never lands; unset keys stay omitted.
+// It rewrites the whole file from c, so c must be a config that was LOADED and then modified —
+// handing it a freshly built struct silently drops every key that struct left unset.
 func Write(root string, c Config) error {
 	c.ArchitectureSet = c.Architecture != "" && c.Architecture != defaultArchitecture
-	if err := c.validate(root); err != nil {
+	if err := validate(c, root); err != nil {
 		return err
 	}
 	out := map[string]any{}
@@ -142,8 +159,20 @@ func Write(root string, c Config) error {
 	if c.ReviewPrompt != "" {
 		out["review_prompt"] = c.ReviewPrompt
 	}
+	if c.Verify != "" {
+		out["verify"] = c.Verify
+	}
 	if c.GitHub.Issues != nil {
 		out["github"] = map[string]any{"issues": *c.GitHub.Issues}
+	}
+	if c.Reference != "" {
+		out["reference"] = c.Reference
+	}
+	if len(c.Reading) > 0 {
+		out["reading"] = c.Reading
+	}
+	if lint := lintOut(c.Lint); len(lint) > 0 {
+		out["lint"] = lint
 	}
 	data, err := yaml.Marshal(out)
 	if err != nil {

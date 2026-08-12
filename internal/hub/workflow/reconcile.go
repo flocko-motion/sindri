@@ -1,43 +1,48 @@
 // package: hub/workflow / reconcile
 // type:    logic (task-status repair)
-// job:     correct a td task's stored status against reality — "in_review" with no
-// open PR, or "in_progress" with no assignee, is stale. Repairs td (the
-// source of truth) so it heals, at task list / info / TUI startup.
-// limits:  td-* tasks only; one td write per real discrepancy, then a no-op.
+// job:     correct a task's stored status against reality — "in_review" with no open
+// PR, "in_progress" with no assignee, or "closed" over open subtasks is stale.
+// Repairs the owning store so it heals, at task list / info / TUI startup.
+// limits:  owned tasks only; one write per real discrepancy, then a no-op.
 package workflow
 
 import (
 	"fmt"
 	"os"
-	"strings"
 
-	"github.com/flo-at/sindri/internal/adapter/tasks/td"
+	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/task"
 )
 
 // refreshTask re-reads one task from td and updates its cached row — the targeted
 // alternative to a full SyncTasks after a single-task change.
 func (e *Engine) RefreshTask(project, id string) error {
-	t, err := td.Get(e.deps.ProjectRoot(project), id)
+	ps := e.store.For(project)
+	owned, ok, err := ps.OwnedTask(id)
 	if err != nil {
 		return err
 	}
-	return e.store.For(project).UpsertTask(ToStoreTask(t))
+	if !ok {
+		return fmt.Errorf("refresh %s: this project owns no such task", id)
+	}
+	return ps.UpsertTask(store.Task{
+		ID: owned.ID, Title: owned.Title, Status: owned.Status, Priority: owned.Priority,
+		Type: owned.Type, Labels: owned.Labels, ParentID: ps.ParentOf(id),
+		Description: owned.Description, UpdatedAt: owned.UpdatedAt,
+	})
 }
 
-// refreshCachedTask updates one task's cached row after a local mutation, instead
-// of a full multi-source SyncTasks (td + openspec + the GitHub scan): a td task is
-// re-read from td; a gh-/os- task keeps its synced fields and just has its current
-// priority override re-applied — its source fields don't change on a local edit.
-// Best-effort: a failure is logged host-side, never surfaced to the mutation.
+// refreshCachedTask updates one task's cached row after a local mutation instead of a full
+// multi-source SyncTasks: an owned task is re-read from its own table, a gh-/os- one keeps its
+// synced fields under the hub's own priority and parent. Best-effort, logged host-side.
 func (e *Engine) refreshCachedTask(project, id string) {
-	if strings.HasPrefix(id, "td-") {
+	ps := e.store.For(project)
+	if ps.OwnsTask(id) {
 		if err := e.RefreshTask(project, id); err != nil {
 			fmt.Fprintf(os.Stderr, "hub: refresh task %s: %v\n", id, err)
 		}
 		return
 	}
-	ps := e.store.For(project)
 	t, ok, err := ps.GetTask(id)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "hub: refresh cached task %s: %v\n", id, err)
@@ -49,15 +54,35 @@ func (e *Engine) refreshCachedTask(project, id string) {
 	if ov, oerr := ps.PriorityOverrides(); oerr == nil {
 		t.Priority = ov[id]
 	}
+	// The parent too, for the reason the priority is here: both are the hub's, so a targeted refresh
+	// that skipped one showed a re-parented task as a root until some later full sync.
+	t.ParentID = ps.ParentOf(id)
 	if err := ps.UpsertTask(t); err != nil {
 		fmt.Fprintf(os.Stderr, "hub: refresh cached task %s: %v\n", id, err)
 	}
 }
 
-// reconciledStatus is the pure rule: a task said to be under review with no open PR
-// isn't, and one said to be in progress with no assigned agent isn't. Everything
-// else is left as-is. Returns the status the task should have.
-func reconciledStatus(status string, activePR, assigned bool) string {
+// taskFacts is what the sweep knows about one task's reality — the four things reconciledStatus
+// weighs against what the task claims about itself.
+type taskFacts struct {
+	activePR      bool // a PR neither merged nor rejected: the task really is out for review
+	assigned      bool // an agent holds it
+	openChildren  bool // work remains beneath it
+	mergedFinalPR bool // its work has landed; an interim contribution does NOT count (the task goes on)
+}
+
+// reconciledStatus is the pure rule, weighing what a task claims against taskFacts and returning the
+// status it should have. Everything it has no opinion on is left alone.
+func reconciledStatus(status string, f taskFacts) string {
+	if f.openChildren && (task.Task{Status: status}).IsClosed() {
+		return "open" // reopened rather than left lying: the work beneath it is real and unfinished
+	}
+	// Landed work outranks a stale "open": a merge is the end of a task, so a tree left open by one
+	// that took the wrong path is closed here rather than waiting on someone to notice it.
+	if f.mergedFinalPR && !f.openChildren && !(task.Task{Status: status}).IsClosed() {
+		return "closed"
+	}
+	activePR, assigned := f.activePR, f.assigned
 	switch status {
 	case "in_review":
 		if !activePR {
@@ -74,68 +99,72 @@ func reconciledStatus(status string, activePR, assigned bool) string {
 	return status
 }
 
-// taskReality reports whether a task currently has an active (not merged/rejected)
-// PR and whether any agent is assigned to it — the two facts reconciledStatus needs.
-func (e *Engine) taskReality(project, id string) (activePR, assigned bool, err error) {
+// taskReality gathers what is actually true of one task, for reconciledStatus to judge its claim
+// against.
+func (e *Engine) taskReality(project, id string) (taskFacts, error) {
 	ps := e.store.For(project)
+	var f taskFacts
 	prs, err := ps.PRs()
 	if err != nil {
-		return false, false, err
+		return f, err
 	}
 	for _, p := range prs {
-		if p.Task == id && p.Status != "merged" && p.Status != "rejected" {
-			activePR = true
-			break
+		if p.Task != id {
+			continue
+		}
+		switch {
+		case p.Status == "merged" && p.Kind != "interim":
+			f.mergedFinalPR = true
+		case p.Status != "merged" && p.Status != "rejected":
+			f.activePR = true
 		}
 	}
 	roster, err := ps.Roster()
 	if err != nil {
-		return false, false, err
+		return f, err
 	}
 	for _, a := range roster {
 		if st, _ := ps.GetState(a.Name); st.Task == id {
-			assigned = true
+			f.assigned = true
 			break
 		}
 	}
-	return activePR, assigned, nil
+	open, err := ps.OpenChildIDs(id)
+	if err != nil {
+		return f, err
+	}
+	f.openChildren = len(open) > 0
+	return f, nil
 }
 
-// ReconcileTask repairs one td task's status against reality (a no-op for gh-/os-
-// ids and for a task that's already consistent). Writes the correction to td so it
-// persists through the next sync.
+// ReconcileTask repairs one task's status against reality, for any task: SetStatus knows where each
+// kind's status lives, so this does not. Repairing only the ones sindri owned is what left five
+// openspec changes open behind merged PRs, invisible to the sweep that existed to catch exactly that.
 func (e *Engine) ReconcileTask(project, id string) error {
-	if !strings.HasPrefix(id, "td-") {
-		return nil
+	ps := e.store.For(project)
+	live, ok, err := ps.GetTask(id)
+	if err != nil || !ok {
+		return err
 	}
-	// Status read from td, never the cache: the cache lags every write, and a correction computed
-	// from a stale row overwrites whatever changed since. A merge closed a task, this reopened it
-	// 1.7s later from a cached "in_progress", and the worker re-claimed work it had just finished.
-	live, err := td.Get(e.deps.ProjectRoot(project), id)
+	facts, err := e.taskReality(project, id)
 	if err != nil {
 		return err
 	}
-	activePR, assigned, err := e.taskReality(project, id)
-	if err != nil {
-		return err
-	}
-	want := reconciledStatus(live.Status, activePR, assigned)
+	want := reconciledStatus(live.Status, facts)
 	if want == live.Status {
 		return nil
 	}
-	if err := td.SetStatus(e.deps.ProjectRoot(project), id, want); err != nil {
+	if err := e.SetStatus(project, id, want); err != nil {
 		return err
 	}
 	return e.RefreshTask(project, id)
 }
 
-// ReconcileTasks repairs every td task in a project in one pass (the task-list /
-// TUI-startup sweep). A per-task failure is logged, never fatal to the sweep.
+// ReconcileTasks repairs EVERY task in a project in one pass (the task-list / TUI-startup sweep),
+// whatever source it came from. A per-task failure is logged, never fatal to the sweep.
 func (e *Engine) ReconcileTasks(project string) error {
 	ps := e.store.For(project)
-	// One read of td for the whole sweep, for the reason ReconcileTask reads it per task: deciding
-	// from cached rows let this sweep undo writes newer than the cache.
-	tasks, err := td.Tasks(e.deps.ProjectRoot(project), task.FilterAll)
+	tasks, err := ps.AllTasks()
 	if err != nil {
 		return err
 	}
@@ -143,29 +172,43 @@ func (e *Engine) ReconcileTasks(project string) error {
 	if err != nil {
 		return err
 	}
-	activePR := map[string]bool{}
+	// The same facts taskReality gathers per task, collected once for the whole project: the sweep
+	// runs at every task list and TUI start, so a query per task would be paid on every one of them.
+	facts := map[string]*taskFacts{}
+	factsFor := func(id string) *taskFacts {
+		if f := facts[id]; f != nil {
+			return f
+		}
+		f := &taskFacts{}
+		facts[id] = f
+		return f
+	}
 	for _, p := range prs {
-		if p.Status != "merged" && p.Status != "rejected" {
-			activePR[p.Task] = true
+		switch {
+		case p.Status == "merged" && p.Kind != "interim":
+			factsFor(p.Task).mergedFinalPR = true
+		case p.Status != "merged" && p.Status != "rejected":
+			factsFor(p.Task).activePR = true
 		}
 	}
-	assigned := map[string]bool{}
 	roster, err := ps.Roster()
 	if err != nil {
 		return err
 	}
 	for _, a := range roster {
 		if st, _ := ps.GetState(a.Name); st.Task != "" {
-			assigned[st.Task] = true
+			factsFor(st.Task).assigned = true
+		}
+	}
+	for _, t := range tasks {
+		if t.ParentID != "" && t.Status == "open" {
+			factsFor(t.ParentID).openChildren = true
 		}
 	}
 	changed := false
 	for _, t := range tasks {
-		if !strings.HasPrefix(t.ID, "td-") {
-			continue
-		}
-		if want := reconciledStatus(t.Status, activePR[t.ID], assigned[t.ID]); want != t.Status {
-			if err := td.SetStatus(e.deps.ProjectRoot(project), t.ID, want); err != nil {
+		if want := reconciledStatus(t.Status, *factsFor(t.ID)); want != t.Status {
+			if err := e.SetStatus(project, t.ID, want); err != nil {
 				fmt.Fprintf(os.Stderr, "hub: reconcile %s (%s->%s): %v\n", t.ID, t.Status, want, err)
 				continue
 			}

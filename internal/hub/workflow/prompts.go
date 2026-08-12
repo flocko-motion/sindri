@@ -1,11 +1,10 @@
 // package: hub/workflow / prompts
 // type:    logic (every agent-facing string in one place)
-// job:     the agent's whole world is text the hub feeds it — the system prompt,
-// the no-arg `sindri` directives, the [hub]/[user]/[reviewer] injected
-// messages, and the replies to its verbs. Centralised here so the
-// agent's voice is tuned in one file, not scattered across the workflow.
-// limits:  pure strings/builders; the logic that decides WHICH to use lives in
-// workflow_task.go / workflow_pr.go / hub.go.
+// job:     the agent's whole world is text the hub feeds it — the durable brief, the
+// no-arg `sindri` directives, and the replies to its verbs. Centralised so the
+// agent's voice is tuned in one place rather than scattered across the workflow.
+// limits:  pure strings/builders; what the hub says UNPROMPTED is injected.go's, and
+// which string to use is the workflow's.
 package workflow
 
 import (
@@ -84,12 +83,38 @@ your whole loop is: run `+"`sindri`"+`, do exactly what it says, repeat.
 Trust it over any memory; it knows your situation, and every instruction it gives
 names the exact command to run — you never have to discover or guess one. (If you
 ever want to see what you can do in your current state, `+"`sindri help`"+`
-lists it, but that set is contextual and changes as you go.)
+lists it, but that set is contextual and changes as you go. A verb it doesn't
+list, run anyway, will tell you why not and which one to use instead.)
 
 Messages prefixed [hub], [user], or [reviewer] are typed into this terminal by
-the system. Act on them. When `+"`sindri`"+` tells you to wait for a verdict,
-stop and wait quietly — it will appear here, and that may take a long time. Never
-poll, never guess, never invent commands.`, name, role) + ArchitectureBrief(archContent, archPath) + BrokkrBrief()
+the system. Act on them.
+
+THE SAME ANSWER TWICE MEANS NOTHING HAS CHANGED. `+"`sindri`"+` reports your
+situation, so hearing the same directive again is that situation still being
+true — never the hub looping you. Each stage of work ends with one command,
+and the directive names it; running that command is the only thing that moves
+you on. If you believe you are done and are handed the same thing again, you
+have not run it yet.
+
+WAITING IS ALWAYS NAMED. When you are meant to stop, the hub says so in those
+words — "wait for the verdict", "the user will open the milestone PR" — and then
+you wait quietly, however long it takes, without polling. Everything else it
+hands you is yours to begin the moment you read it: the work reached you because
+it was already decided and released, so there is no further permission to collect
+and nobody is expecting to be asked. Telling the user what you are about to do
+and then stopping is the same as stopping. If something genuinely prevents you
+from starting — a missing dependency, a decision only they can make — say what
+you need in one line and carry on with whatever part you can. Never poll, never
+guess, never invent commands.
+
+A HUB COMMAND THAT MISBEHAVES IS A BUG, NOT A PUZZLE TO SOLVE. If a `+"`sindri`"+`
+verb errors, does nothing, or refuses what you were just told to do, sindri is
+broken — STOP there. Say so in one line naming the exact command and what it
+printed, and record it with `+"`sindri log \"<note>\"`"+` so it survives. Do not go
+looking for another way round: there is no second route to claiming, submitting
+or landing work, so every minute spent hunting for one is a minute the tool stays
+broken for everyone. A clear report is the most valuable thing you can produce at
+that point — more than the task you were on.`, name, role) + ArchitectureBrief(archContent, archPath) + BrokkrBrief()
 
 	switch role {
 	case "planner":
@@ -164,6 +189,9 @@ As the reviewer:
 As a worker:
 - Run ` + "`sindri`" + ` (no arguments) to get your task — it puts you on a
   branch in /workspace, waiting until a task is available.
+- Every task you are handed is already authorised — the user rated and released it
+  before it reached you, and a feature's subtasks come to you one after another the
+  same way. Start each one as it arrives.
 - Implement it by editing files in /workspace. The hub records your work for you
   when you contribute or submit — you never do that yourself.
 - You do NOT have ` + "`git`" + ` — use ` + "`sindri git`" + `, which the hub runs
@@ -172,13 +200,26 @@ As a worker:
   Never guess at any of that, and never hand-write a script to do it.
 - ` + "`sindri lint`" + ` runs the quality gate on your workspace — use it to
   self-check and fix failures before submitting.
+- A finding worth the next reader knowing — the task body is wrong, you hit a
+  blocker, you made a call worth recording — goes ON THE TASK:
+  ` + "`sindri comment \"<text>\"`" + ` — no id, it goes on what you're working
+  on. That is what a human or the next agent will actually read; your activity
+  log (` + "`sindri log`" + `) is not. Inside a feature the bare form writes to
+  the SUBTASK you're on; to reach the feature itself, name its id.
 - ` + "`sindri rebase`" + ` aligns your branch with the current reference branch
   any time — harmless, and worth doing if it's been a while. If it surfaces
   conflicts, fix the marked files in /workspace and run ` + "`sindri rebase`" + `
   again until it reports you're aligned.
-- When done, ` + "`sindri submit \"<one-line summary>\"`" + `. Then wait: the
-  reviewer's verdict will be typed here. Run ` + "`sindri`" + ` again for your
-  next task.`
+- A TASK IS FINISHED BY A PULL REQUEST. Working code in /workspace is a task
+  half done: the hub has no idea you consider it complete until you say so, and
+  saying so is ` + "`sindri submit \"<one-line summary>\"`" + ` — it records your
+  branch as a PR and sends it for review. Nothing else ends a task. Inside
+  a feature the unit is smaller: ` + "`sindri checkpoint \"<one-line summary>\"`" + `
+  ends each subtask, and one submit covers the whole branch at the end. You hold
+  one of the two at a time; ` + "`sindri help`" + ` lists which.
+- So the loop closes like this: work, submit, wait for the verdict, ` + "`sindri`" + `
+  for what's next. Skip the submit and you have not finished — you have stopped,
+  and the next ` + "`sindri`" + ` will hand you the very same task back.`
 	}
 }
 
@@ -197,10 +238,13 @@ func FileList(files []string) string {
 	}
 }
 
-// DirWorking is a worker's directive while it holds a leaf task: implement it, then
-// submit.
+// DirWorking is a worker's directive while it holds a leaf task, and the answer to every `sindri`
+// until it submits — so it names what ENDS the task. One that read finished code as a finished task
+// got this same reply each time it asked, and concluded the hub was looping it.
 func DirWorking(task string) string {
-	return fmt.Sprintf("Work on task %s. When it's done, run `sindri submit \"<summary>\"` — that records your work and puts it up for review.", task)
+	return fmt.Sprintf("Work on task %s. A task is finished by a PULL REQUEST, not by finished code: "+
+		"run `sindri submit \"<summary>\"` and the hub records your branch as a PR and sends it for "+
+		"review. Until you do, %s stays yours — being handed it again means exactly that.", task, task)
 }
 
 // DirRejected hands a worker its reviewer's feedback verbatim, every time it asks what to do, so
@@ -209,11 +253,18 @@ func DirRejected(task, feedback string) string {
 	return fmt.Sprintf("Your PR for task %s was REJECTED — address this reviewer feedback, then run `sindri submit \"<summary>\"`:\n\n%s", task, feedback)
 }
 
-const DirSubmitted = "Your pull request is under review. Wait — the hub will tell you the verdict. While you wait, you may run `sindri resolve` any time to check your branch still merges onto its base (and resolve it if the base has moved) — it does no harm and keeps the PR healthy."
+const DirSubmitted = "Your pull request is under review. Wait — the hub will tell you the verdict. " +
+	"While you wait, `sindri resolve` checks your branch still merges onto its base (and resolves it " +
+	"if the base has moved); it does no harm and keeps the PR healthy. And if you realise the work " +
+	"is NOT finished after all, don't sit on it: `sindri revoke \"<why>\"` withdraws the PR and hands " +
+	"the task back to you on the same branch, so you can finish it and submit again."
 
-// DirPlanner is the idle planner's directive: orient, then wait for the user. A
-// planner is never auto-assigned work.
-const DirPlanner = "Nothing is assigned to you yet. Get oriented while you wait: read README.md and the architecture doc, the specs under /workspace/openspec, and the backlog (`sindri task list`, then `sindri task <id>` for detail). Do NOT start planning or drafting anything on your own — the user assigns a plan, and it arrives here as a phased brief telling you what to read, what to check for, and what to ask. Until then, orienting is the whole job."
+// DirPlanner answers a planner with nothing in hand. Its old "nothing is assigned to you" read as
+// "only a hub-delivered brief counts": one handed work in its terminal asked for it to be re-sent.
+const DirPlanner = "Nothing has come to you through the hub — which is not the same as having nothing to do. Work reaches a planner as a CONVERSATION: anything the user has said in this terminal is yours to act on now, and a phased brief from `sindri agent plan` is one route to you rather than the only one. If they've asked you for something, get on with it; never ask them to re-send it some other way. With nothing asked of you, orient: read README.md and the architecture doc, the specs under /workspace/openspec, and the backlog (`sindri task list`, then `sindri task <id>` for detail). The thing you must not do is invent an assignment nobody asked for — and nothing is written down before the user sends GO."
+
+// DirPlanning answers a planner mid-plan: the interview is the user's, so the hub has nothing to add.
+const DirPlanning = "You're working out a plan with the user — carry on with that conversation. The hub is not waiting on a command from you and has nothing to add: read, search, ask one question at a time. Nothing is written down until they send GO; after it, `sindri create-task` files each piece and `sindri openspec submit \"<summary>\"` ships spec edits as a PR (that PR IS the review — never ask them to read your files instead). If you're waiting on an answer, ask again in one line rather than sitting silently. `sindri state idle` when you're done."
 
 // GoToken authorises a planner to write; GoRule states it. One literal token, because agreement
 // is not authorisation — "sounds good" is what a user says while still thinking.
@@ -229,9 +280,18 @@ const (
 // MsgPlanAssignment hands a planner one job, in phases it cannot skip. A free-text "plan X"
 // produced one that read nothing, asked nothing, and specified what the codebase already had.
 // Reading comes first because an agent that has begun a spec defends it.
-func MsgPlanAssignment(goal, arch, reading string) string {
+func MsgPlanAssignment(goal, taskID, arch, reading string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "[user] PLAN THIS: %s\n\n", strings.TrimSpace(goal))
+	if taskID != "" {
+		fmt.Fprintf(&b, "[user] WORK UP TASK %s: %s\n\n", taskID, strings.TrimSpace(goal))
+		fmt.Fprintf(&b, "That task is the parent of everything this produces. Read it with "+
+			"`sindri task %s`; it is yours to revise (`sindri edit-task %s`) until the user rules "+
+			"on it, and it is hidden from workers until they do. Hang each piece under it with "+
+			"`sindri create-task --parent %s`, so nothing you propose floats beside the task that "+
+			"asked for it.\n\n", taskID, taskID, taskID)
+	} else {
+		fmt.Fprintf(&b, "[user] PLAN THIS: %s\n\n", strings.TrimSpace(goal))
+	}
 	b.WriteString("Planning here is an INTERVIEW, not freestyle drafting. Work these phases in " +
 		"order, one at a time.\n\n")
 
@@ -300,141 +360,111 @@ func DirReview(prID, task, arch string) string {
 // DirClaimed announces a freshly-claimed leaf task: the branch is ready in the
 // worker's /workspace — work it, follow the architecture, then submit.
 func DirClaimed(id, title, branch, arch string) string {
-	return fmt.Sprintf("Claimed %s: %s\nBranch %s is ready in your /workspace. Work on it — follow the project architecture (in your brief; re-read it at /workspace/%s) — then run `sindri submit \"<summary>\"`.", id, title, branch, arch)
+	return fmt.Sprintf("Claimed %s: %s\nBranch %s is ready in your /workspace. Work on it — follow the "+
+		"project architecture (in your brief; re-read it at /workspace/%s) — then finish it the only way "+
+		"a task is finished: `sindri submit \"<summary>\"`, which turns your branch into a pull request "+
+		"and sends it for review.", id, title, branch, arch)
 }
 
 const DirNoTasks = "No open tasks. Wait — the hub will tell you when there is work."
 
-// --- collaborative (container) workflow ---
+// DirRetired answers an agent a human has wound down. It is told the reason, so it neither asks
+// again nor reads an empty queue into it — "no tasks" would have it waiting for work that is coming.
+const DirRetired = "[hub] You've been retired by the user: no further work will be assigned to you. " +
+	"Whatever you were holding you have already finished. Don't ask again and don't look for something " +
+	"to do — just wait quietly; they'll either bring you back or stop you."
+
+// DirFull tells a worker why it isn't getting the next task even with plenty in the queue: its own
+// context is full. Distinct from DirNoTasks so a retired agent never reads it as "nothing to do".
+func DirFull(tokens int) string {
+	return fmt.Sprintf("[hub] Your context is ~%dk tokens — past the point of taking on new work. "+
+		"You're retired from assignment until a human clears you; don't ask again, just wait.", tokens/1000)
+}
+
+// --- features: a task with subtasks, worked on one branch ---
 
 // DirContainerClaimed starts an agent on a feature: subtasks one at a time on a single standing
-// branch, checkpointing between them. The whole feature lands as one PR at the user's milestone.
+// branch, checkpointing between them, and the branch goes up as one PR when they are all done.
 func DirContainerClaimed(container, ctitle, child, childTitle string) string {
 	return fmt.Sprintf("You're working feature %s: %s — on a single branch in /workspace. "+
 		"Current subtask %s: %s. Implement it, then run `sindri checkpoint \"<summary>\"` "+
-		"to record it and move to the next subtask. Do NOT submit per subtask — the whole feature "+
-		"is merged as one PR when you and the user reach a milestone.", container, ctitle, child, childTitle)
+		"to record it and move to the next subtask. One PR covers the whole feature, so submit "+
+		"once every subtask is checkpointed, never per subtask.", container, ctitle, child, childTitle)
 }
 
-// DirContainerWait is the directive once every open subtask of a feature is
-// checkpointed: wait for the user to open a milestone PR or add subtasks.
-func DirContainerWait(container string) string {
-	return fmt.Sprintf("All open subtasks of feature %s are checkpointed. Wait — the user will open a "+
-		"milestone PR to merge the work so far, or add more subtasks. Don't poll.", container)
+// DirContainerWorking is the working directive inside a feature. Claiming used to be the only place
+// the feature loop named its verb; every later `sindri` fell through to DirWorking and asked for a
+// submit that was held back mid-feature.
+func DirContainerWorking(container, task string) string {
+	return fmt.Sprintf("Subtask %s of feature %s. Implement it, then run `sindri checkpoint \"<summary>\"` "+
+		"— that is what ends a subtask and hands you the next one; until you run it, %s stays yours and "+
+		"you'll be given it again. Checkpointing records work on the feature branch and nothing more: "+
+		"nothing of yours reaches the reference branch until a PR merges. The feature itself ends in ONE "+
+		"pull request covering the whole branch — `sindri submit \"<summary>\"` once every subtask is "+
+		"checkpointed, never per subtask. If what's on the branch is already useful to others, "+
+		"`sindri contribute \"<summary>\"` puts it up for the user to merge without ending the feature.",
+		task, container, task)
 }
 
-// ReplyCheckpointed acknowledges a checkpoint and hands the worker its next subtask.
+// DirContainerRejected is the verdict on a feature's PR: the worker fixes the branch it is already on
+// and submits it again, the same loop a rejected leaf task follows.
+func DirContainerRejected(container, task, feedback string) string {
+	return fmt.Sprintf("The PR for feature %s was REJECTED — address this feedback on the branch you're "+
+		"already on (subtask %s is yours again; `sindri checkpoint \"<summary>\"` records a fix that "+
+		"completes it), then `sindri submit \"<summary>\"` to put the feature up again:\n\n%s",
+		container, task, feedback)
+}
+
+// DirContainerDone is the directive once every subtask of a feature is checkpointed: the branch is
+// complete, so the worker puts it up itself.
+func DirContainerDone(container string) string {
+	return fmt.Sprintf("Every subtask of feature %s is checkpointed, so the feature is finished. Put "+
+		"the whole branch up with `sindri submit \"<summary>\"` — one PR for the feature, summarising "+
+		"what it does rather than listing the subtasks.", container)
+}
+
+// ReplyHasOpenChildren refuses to finish a task that still has work under it, naming what is open.
+// A parent is done exactly when its children are, so marking one done over open children states
+// something untrue about the tree and hides that work from everything that reads it.
+func ReplyHasOpenChildren(verb, id string, open []string) string {
+	return fmt.Sprintf("Can't %s %s — it's a parent, and %s %s still open under it. Its children are "+
+		"the work; %s closes on its own once they're all done.", verb, id, FileList(open),
+		plural(len(open), "is", "are"), id)
+}
+
+// plural picks a verb form for a count, so a refusal reads as English either way.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
+// ReplySubtasksRemain refuses a feature submitted early, naming what is left. A feature is one PR, so
+// submitting halfway would put an incomplete branch under review.
+func ReplySubtasksRemain(container, next string, open int) string {
+	return fmt.Sprintf("Feature %s still has %d open subtask(s) and goes up as ONE PR. You're on %s — "+
+		"`sindri checkpoint \"<summary>\"` records it and hands you the next; submit when they're done.",
+		container, open, next)
+}
+
+// ReplyCheckpointed acknowledges a checkpoint and hands over the next subtask. Alone among the
+// hand-offs it comes back from a command the worker ran itself, and read as a report it left agents
+// waiting for a go-ahead the workflow never sends — hence "starts now".
 func ReplyCheckpointed(done, next, nextTitle string) string {
-	return fmt.Sprintf("Checkpointed %s. Next subtask %s: %s — implement it, then `sindri checkpoint \"<summary>\"` again.", done, next, nextTitle)
+	return fmt.Sprintf("Checkpointed %s. Next subtask %s: %s — it is assigned to you and starts now. "+
+		"Implement it, then `sindri checkpoint \"<summary>\"` again. Don't wait for the user to confirm "+
+		"this one; if something blocks you, say what you need.", done, next, nextTitle)
 }
 
-// ReplyCheckpointedLast acknowledges the checkpoint that clears a feature's last open
-// subtask: the worker now waits for a milestone PR or more subtasks.
+// ReplyCheckpointedLast acknowledges the checkpoint that clears a feature's last open subtask: the
+// feature is built, so the worker puts the branch up rather than waiting to be let through.
 func ReplyCheckpointedLast(done, container string) string {
-	return fmt.Sprintf("Checkpointed %s — that was the last open subtask of %s. Wait: the user will open a milestone PR (or add more subtasks).", done, container)
+	return fmt.Sprintf("Checkpointed %s — the last open subtask of %s, so the feature is done. Put the "+
+		"whole branch up now with `sindri submit \"<summary>\"`.", done, container)
 }
 
 const ReplyNothingToCheckpoint = "Nothing to checkpoint — you're not working a subtask. Run `sindri` for your current directive."
-
-// --- injected messages ([hub]/[user]/[reviewer], typed into the agent's tmux) ---
-
-const MsgKickoff = "[hub] You're live. Run `sindri` and do exactly what it tells you — it always returns your current job, whether you're new or resuming."
-
-// MsgWorkAvailable nudges an idle worker that rated work exists. Claiming stays a pull, so two
-// workers can't take one task — but an agent that stopped asking would never hear about it.
-func MsgWorkAvailable(id string) string {
-	return fmt.Sprintf("[hub] New work is ready (%s). Run `sindri` to pick up your next task — it may not be this one, whichever is highest priority.", id)
-}
-
-// MsgMerged tells a worker its PR merged and to fetch the next task.
-func MsgMerged(prID string) string {
-	return fmt.Sprintf("[hub] %s merged. Run `sindri` for your next task.", prID)
-}
-
-// MsgPRScrapped tells an author its PR was discarded. Deliberately final — the branch is gone, so
-// unlike a rejection there is nothing to resubmit. Without it the author waits in "submitted".
-func MsgPRScrapped(prID string) string {
-	return fmt.Sprintf("[user] %s was scrapped — the work isn't wanted and its branch is gone. "+
-		"Nothing to fix or resubmit. Run `sindri` for your next directive.", prID)
-}
-
-// MsgTaskCancelled tells a worker its task was closed/scrapped out from under it —
-// stop, and don't clean up (the hub already reset the worktree), just get new work.
-func MsgTaskCancelled(id string) string {
-	return fmt.Sprintf("[hub] Task %s was cancelled — stop working on it. Don't clean up your workspace; the sindri hub will reset it for you when you pick up your next task. Just run `sindri`.", id)
-}
-
-// MsgReviewCancelled tells a reviewer the PR it was reviewing was scrapped, so the
-// review is moot — stop and pick up new work. Its branch is gone, so there's nothing
-// left to read.
-func MsgReviewCancelled(prID string) string {
-	return fmt.Sprintf("[hub] The PR you were reviewing (%s) was scrapped — stop reviewing it; its branch is gone. Just run `sindri` for your next task.", prID)
-}
-
-// MsgRebased tells a worker the hub rebased its branch onto a moved base.
-func MsgRebased(base string) string {
-	return fmt.Sprintf("[hub] %s moved — your branch was rebased onto it, so you're up to date.", base)
-}
-
-// MsgReferenceAdvanced tells an agent the reference gained commits and the hub replayed its work
-// onto them, naming what arrived so it can re-check anything of its own that builds on it.
-func MsgReferenceAdvanced(incoming []string) string {
-	return fmt.Sprintf("[hub] %s moved on and your work was rebased onto it — you're aligned, and nothing of yours was lost.%s\nIf any of your work builds on what changed, check it before carrying on (`sindri git change` shows yours).", refName, commitList(incoming))
-}
-
-// MsgReferenceNeedsRebase is the same movement when the hub could NOT replay the agent's work —
-// usually its own uncommitted edits. It says what is waiting and leaves the move to the agent.
-func MsgReferenceNeedsRebase(incoming []string) string {
-	return fmt.Sprintf("[hub] %s moved on, but your work couldn't be rebased onto it automatically — most often because of uncommitted edits in /workspace.%s\nRun `sindri rebase` when you're at a clean point; it will tell you about any conflicts to fix.", refName, commitList(incoming))
-}
-
-// MsgReferenceRewritten is the dangerous case: the reference's history was REPLACED, so conclusions
-// an agent drew about code it doesn't own may describe commits that no longer exist.
-func MsgReferenceRewritten() string {
-	return fmt.Sprintf("[hub] %s was REWRITTEN — its history was replaced, not just extended. Your own commits are intact and nothing of yours was discarded, but anything you concluded about code you don't own may now be out of date, including gate failures you attributed to other people's files. Re-check such a finding against the current tree before acting on it or arguing from it. Run `sindri rebase` when you're at a clean point, then `sindri git incoming` to see where you stand.", refName)
-}
-
-// MsgResolveNeeded is injected when a branch can't merge because it conflicts with
-// its base: the hub has left the conflicts in the worker's workspace to edit (the
-// worker has no git — the hub drives it), and points at the single verb to retry.
-func MsgResolveNeeded(base string, files []string) string {
-	return fmt.Sprintf("[hub] Your branch conflicts with %s and can't be merged yet: %s. The conflicts are in your /workspace with <<<<<<< markers — edit each file to the intended result (remove the markers), then run `sindri resolve`. Repeat until it's clean; it then goes back for review.", base, FileList(files))
-}
-
-// MsgMilestoneMerged tells a feature worker its milestone merged and its branch was
-// rebased onto the new base.
-func MsgMilestoneMerged(prID string) string {
-	return fmt.Sprintf("[hub] Milestone %s merged — your feature branch is rebased onto the new base. Run `sindri` to continue.", prID)
-}
-
-// MsgRejectedByUser tells a worker the user rejected its PR, with the feedback.
-func MsgRejectedByUser(prID, feedback string) string {
-	return fmt.Sprintf("[user] %s was rejected: %s — address the feedback on your branch and run `sindri submit` again.", prID, feedback)
-}
-
-// MsgRejectedByReviewer tells a worker its reviewer rejected the PR, with the feedback.
-func MsgRejectedByReviewer(prID, feedback string) string {
-	return fmt.Sprintf("[reviewer] %s rejected: %s — please address the feedback and submit again.", prID, feedback)
-}
-
-// MsgReview is the single review instruction: the hub has already checked the PR branch out into
-// the reviewer's /workspace, so it points there. A failed checkout says so loudly and falls back
-// to the socket diff, so a stale tree is never mistaken for the PR.
-func MsgReview(prID, requirement, branch, base, arch string, checkedOut bool) string {
-	seeChanges := fmt.Sprintf("`sindri show %s`", prID)
-	loc := ""
-	if checkedOut {
-		// /workspace is a linked worktree with no reachable .git, so `git diff` fails in the
-		// pod — the checkout is for READING the code in context; the diff comes from the hub.
-		loc = fmt.Sprintf("PR branch %s is checked out FRESH in /workspace, based on %s. ", branch, base)
-	} else {
-		// Loud: the checkout failed, so /workspace is NOT this PR. Say so plainly
-		// rather than letting the reviewer assume /workspace holds the change.
-		loc = fmt.Sprintf("⚠ %s could NOT be checked out into /workspace — review from the diff only; do NOT trust /workspace. ", branch)
-	}
-	return fmt.Sprintf("[hub] Review %s — %s %s(1) see what changed: %s. (2) check the gate: `sindri lint %s`. (3) decide: `sindri approve %s` or `sindri reject %s \"<findings>\"`.%s",
-		prID, requirement, loc, seeChanges, prID, prID, prID, ReviewArchitecture(arch))
-}
 
 // --- instructive replies to worker verbs ---
 
@@ -461,6 +491,12 @@ func ReplyNotWorking(verb, phase, task string) string {
 // user's approval — the worker then waits until it's merged (and told to continue).
 func ReplyContributed(prID string) string {
 	return fmt.Sprintf("Interim contribution %s recorded — it needs the user's approval before it merges into the reference branch. Wait; you'll be told to keep going once it lands. (This may take a while.)", prID)
+}
+
+// ReplyMilestoneContributed confirms a feature branch is up as it stands. It names the FEATURE,
+// since that is what the PR contains — a worker told its subtask went up would misread what landed.
+func ReplyMilestoneContributed(prID, feature string) string {
+	return fmt.Sprintf("Feature %s is up as %s — everything recorded on the branch so far, waiting on the user to merge it. Wait; you'll be told to carry on with the next subtask once it lands. (This may take a while.)", feature, prID)
 }
 
 // ReplyContributeConflicts tells a worker its contribution doesn't rebase cleanly yet — fix the
@@ -507,12 +543,15 @@ func ReplyRebased(incoming []string) string {
 }
 
 // ReplyResolveDirty answers `resolve` on a dirty worktree, suggesting nothing git-based: the pod
-// doesn't mount the real .git, so every git command fails — the isolation boundary working. Also
-// phase-aware, since contribute/submit exist only in "working" and review must not touch it.
-func ReplyResolveDirty(phase string) string {
+// doesn't mount the real .git, so every git command fails. The verb it names tracks the caller's
+// surface — contribute/submit exist only in "working", and a feature worker holds checkpoint.
+func ReplyResolveDirty(phase string, inContainer bool) string {
 	const dirty = "Changes in /workspace the hub hasn't recorded yet block the rebase. "
 	switch phase {
 	case "working":
+		if inContainer {
+			return dirty + "Call `sindri checkpoint \"<summary>\"` for the hub to record them and move to your next subtask."
+		}
 		return dirty + "Call `sindri contribute \"<summary>\"` for the hub to record them and rebase (the task stays open), or `sindri submit \"<summary>\"` if the task is done."
 	case "submitted":
 		return dirty + "Your PR is under review — leave them and wait for the verdict. Note them with `sindri log \"<note>\"`."
@@ -540,6 +579,17 @@ func ReplyAlreadyCurrent(base string) string {
 // ReplyTaskProposed acknowledges a planner's proposed task, pending user approval.
 func ReplyTaskProposed(id, title string) string {
 	return fmt.Sprintf("Proposed %s: %s — awaiting the user's approval before any worker can pick it up.", id, title)
+}
+
+// ReplyBehindBase refuses a submit whose branch the reference has moved past, naming how far behind
+// and what arrived — the commits are what tell an agent whether its work still makes sense.
+func ReplyBehindBase(base string, behind int, incoming []string) string {
+	return fmt.Sprintf("Not submitted: your branch is %d commit(s) behind %s, so the PR would be "+
+		"reviewed and merged against a base that has moved.\n"+
+		"Run `sindri rebase` (it resolves conflicts step by step if there are any), then `sindri "+
+		"submit` again — the quality gate re-runs on the rebased tree, so what you put up is "+
+		"verified against the state it will actually merge into.%s",
+		behind, base, commitList(incoming))
 }
 
 // ReplyLintFail echoes the violations, and says a finding is to be MET, not evaded: relocating

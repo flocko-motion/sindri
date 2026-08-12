@@ -1,11 +1,11 @@
 // package: hub/store / store
-// type:    persistence (SQLite, hub-owned)
+// type:    adapter (SQLite, hub-owned)
 // job:     the global hub's durable source of truth — roster + activity log — in
 // one central SQLite DB. Every per-repo row is tagged by a `project` key;
 // a `*Store` owns the DB and cross-project reads, and `Store.For(project)`
 // returns a project-scoped `*ProjectStore`.
-// limits:  single-owner (only the hub touches it); SQLite is a linked library,
-// not an external tool, so this is NOT an internal/adapter package.
+// limits:  single-owner (only the hub touches it); wraps the external SQLite
+// store, holding no domain rules of its own.
 package store
 
 import (
@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flo-at/sindri/internal/api"
 	_ "modernc.org/sqlite"
 )
 
@@ -26,29 +27,19 @@ type Agent struct {
 	Socket    string `json:"socket"`
 	CreatedAt string `json:"created_at"`
 	Memory    string `json:"memory"` // per-agent RAM limit (e.g. "4g"); "" = hub default
+	// Retired: hand it no NEW work. What it already holds it finishes, so this is how an agent is
+	// wound down without interrupting it — the flag a human sets, distinct from the automatic
+	// retirement a full context causes.
+	Retired bool `json:"retired"`
 }
 
-// Event is one row of the append-only activity log.
-type Event struct {
-	ID      int64  `json:"id"`
-	Project string `json:"project"`
-	Agent   string `json:"agent"`
-	TS      string `json:"ts"`
-	Type    string `json:"type"`
-	Payload string `json:"payload"`
-}
+// Event is one row of the append-only activity log; it crosses the wire, so it is
+// internal/api.Event under the name every existing caller here already uses.
+type Event = api.Event
 
-// Project is one row of the registry: a repo the hub knows, keyed by its stable
-// repoTag (a digest of the abs path), with the on-disk path, when first seen, and
-// when last used (touched on every register/use, so the repo switcher can order by
-// recency).
-type Project struct {
-	Tag       string `json:"tag"`
-	Path      string `json:"path"`
-	FirstSeen string `json:"first_seen"`
-	LastUsed  string `json:"last_used"`
-	Color     int    `json:"color"` // repo colour choice: 0 = hash-derived default, 1..N = palette index
-}
+// Project is one row of the registry; it crosses the wire, so it is
+// internal/api.Project under the name every existing caller here already uses.
+type Project = api.Project
 
 // Store wraps the one central SQLite database. Per-project work goes through a
 // ProjectStore from For; cross-project reads and the registry live here.
@@ -72,6 +63,7 @@ CREATE TABLE IF NOT EXISTS agents (
   socket     TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   memory     TEXT NOT NULL DEFAULT '',
+  retired    INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (project, name)
 );
 CREATE TABLE IF NOT EXISTS events (
@@ -118,7 +110,7 @@ CREATE TABLE IF NOT EXISTS chat_log (
 CREATE TABLE IF NOT EXISTS task_comments (
   project    TEXT NOT NULL,
   task_id    TEXT NOT NULL,
-  source     TEXT NOT NULL, -- "td" | "github"
+  source     TEXT NOT NULL, -- "github", or "td" on a thread synced before the import
   source_ref TEXT NOT NULL, -- external id/url, unique within a source
   author     TEXT NOT NULL DEFAULT '',
   body       TEXT NOT NULL DEFAULT '',
@@ -156,16 +148,27 @@ func Open(path string) (*Store, error) {
 func migrate(db *sql.DB) error {
 	alters := []string{
 		`ALTER TABLE agents ADD COLUMN memory TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agents ADD COLUMN retired INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE projects ADD COLUMN last_used TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE projects ADD COLUMN color INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE tasks ADD COLUMN description TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE tasks ADD COLUMN url TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tasks ADD COLUMN created_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE prs ADD COLUMN kind TEXT NOT NULL DEFAULT 'final'`,
 	}
 	for _, a := range alters {
 		if _, err := db.Exec(a); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return fmt.Errorf("migrate (%s): %w", a, err)
 		}
+	}
+	// Parentage moved out of owned_tasks into task_parent, which holds it for every task. Carry the
+	// links a store written before that still has in the old column; a database created since has
+	// no such column, and the copy simply finds nothing to do.
+	if _, err := db.Exec(
+		`INSERT OR IGNORE INTO task_parent (project,id,parent_id)
+		 SELECT project,id,parent_id FROM owned_tasks WHERE parent_id != ''`); err != nil &&
+		!strings.Contains(err.Error(), "no such column") {
+		return fmt.Errorf("migrate (parentage): %w", err)
 	}
 	return nil
 }
@@ -278,7 +281,7 @@ func (s *Store) SetMeta(key, value string) error {
 // the canonical set backing the global board and token resolution.
 func (s *Store) AllAgents() ([]Agent, error) {
 	rows, err := s.db.Query(
-		`SELECT project, name, role, workspace, socket, created_at, memory FROM agents ORDER BY project, name`)
+		`SELECT project, name, role, workspace, socket, created_at, memory, retired FROM agents ORDER BY project, name`)
 	if err != nil {
 		return nil, fmt.Errorf("all agents: %w", err)
 	}
@@ -290,7 +293,7 @@ func scanAgents(rows *sql.Rows) ([]Agent, error) {
 	var agents []Agent
 	for rows.Next() {
 		var a Agent
-		if err := rows.Scan(&a.Project, &a.Name, &a.Role, &a.Workspace, &a.Socket, &a.CreatedAt, &a.Memory); err != nil {
+		if err := rows.Scan(&a.Project, &a.Name, &a.Role, &a.Workspace, &a.Socket, &a.CreatedAt, &a.Memory, &a.Retired); err != nil {
 			return nil, fmt.Errorf("scan agent: %w", err)
 		}
 		agents = append(agents, a)
@@ -307,11 +310,12 @@ func (p *ProjectStore) PutAgent(a Agent) error {
 		a.CreatedAt = time.Now().UTC().Format(time.RFC3339)
 	}
 	_, err := p.s.db.Exec(`
-		INSERT INTO agents (project, name, role, workspace, socket, created_at, memory)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO agents (project, name, role, workspace, socket, created_at, memory, retired)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(project, name) DO UPDATE SET
-			role=excluded.role, workspace=excluded.workspace, socket=excluded.socket, memory=excluded.memory`,
-		a.Project, a.Name, a.Role, a.Workspace, a.Socket, a.CreatedAt, a.Memory)
+			role=excluded.role, workspace=excluded.workspace, socket=excluded.socket,
+			memory=excluded.memory, retired=excluded.retired`,
+		a.Project, a.Name, a.Role, a.Workspace, a.Socket, a.CreatedAt, a.Memory, a.Retired)
 	if err != nil {
 		return fmt.Errorf("put agent %s/%s: %w", a.Project, a.Name, err)
 	}
@@ -321,9 +325,9 @@ func (p *ProjectStore) PutAgent(a Agent) error {
 // GetAgent returns an agent by name within this project; ok is false if absent.
 func (p *ProjectStore) GetAgent(name string) (a Agent, ok bool, err error) {
 	row := p.s.db.QueryRow(
-		`SELECT project, name, role, workspace, socket, created_at, memory FROM agents WHERE project=? AND name=?`,
+		`SELECT project, name, role, workspace, socket, created_at, memory, retired FROM agents WHERE project=? AND name=?`,
 		p.project, name)
-	err = row.Scan(&a.Project, &a.Name, &a.Role, &a.Workspace, &a.Socket, &a.CreatedAt, &a.Memory)
+	err = row.Scan(&a.Project, &a.Name, &a.Role, &a.Workspace, &a.Socket, &a.CreatedAt, &a.Memory, &a.Retired)
 	if err == sql.ErrNoRows {
 		return Agent{}, false, nil
 	}
@@ -336,7 +340,7 @@ func (p *ProjectStore) GetAgent(name string) (a Agent, ok bool, err error) {
 // Roster returns this project's agents, ordered by name.
 func (p *ProjectStore) Roster() ([]Agent, error) {
 	rows, err := p.s.db.Query(
-		`SELECT project, name, role, workspace, socket, created_at, memory FROM agents WHERE project=? ORDER BY name`,
+		`SELECT project, name, role, workspace, socket, created_at, memory, retired FROM agents WHERE project=? ORDER BY name`,
 		p.project)
 	if err != nil {
 		return nil, fmt.Errorf("roster %s: %w", p.project, err)

@@ -11,8 +11,7 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // onKey applies a key by its string form, shared by the live loop and the headless Screenshot
@@ -28,6 +27,15 @@ func (m *model) onKey(k string) tea.Cmd {
 				m.flash = "copied: " + it.value
 			}
 			return nil
+		}
+		// From the PRs list, the id alone rarely says enough to paste anywhere — the block naming
+		// the PR, its task and its worktree does. The detail pane keeps yanking one field.
+		if m.tab == 2 {
+			if block := m.prYankBlock(); len(block) > 0 {
+				_ = clipboard.WriteAll(strings.Join(block, "\n"))
+				m.flash = "copied PR details"
+				return nil
+			}
 		}
 		if id := m.selID(); id != "" {
 			_ = clipboard.WriteAll(id)
@@ -46,9 +54,9 @@ func (m *model) onKey(k string) tea.Cmd {
 		m.quit = true
 		return nil
 	case "tab", "]": // switch tabs forward (] mirrors tab)
-		m.tab = (m.tab + 1) % len(hub.Sections)
+		m.tab = (m.tab + 1) % len(tuiSections)
 	case "shift+tab", "[": // switch tabs back ([ mirrors shift+tab)
-		m.tab = (m.tab - 1 + len(hub.Sections)) % len(hub.Sections)
+		m.tab = (m.tab - 1 + len(tuiSections)) % len(tuiSections)
 	case "ctrl+l": // the only way to switch panes (with ctrl+h): focus the detail
 		if m.showDetail() && len(m.actionableItems()) > 0 {
 			m.rightFocus = true
@@ -69,13 +77,15 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.cursor[m.tab]--
 		}
 	case "J": // scroll the detail pane down (yazi-style secondary-pane scroll)
+		vp := m.scrollTarget()
 		for i := 0; i < detailScrollStep; i++ {
-			m.detail.ScrollDown()
+			vp.ScrollDown()
 		}
 		return nil
 	case "K": // scroll the detail pane up
+		vp := m.scrollTarget()
 		for i := 0; i < detailScrollStep; i++ {
-			m.detail.ScrollUp()
+			vp.ScrollUp()
 		}
 		return nil
 	case "g": // goto the focused cross-reference's home, else jump the list to top
@@ -108,7 +118,7 @@ func (m *model) onKey(k string) tea.Cmd {
 		m.cursor[m.tab] -= m.bodyHeight() / 2
 	case keyFilter:
 		if m.tab == 0 {
-			m.filter = (m.filter + 1) % 3
+			m.filter = (m.filter + 1) % 4
 		} else if m.tab == 2 {
 			m.prFilter = (m.prFilter + 1) % 3
 		}
@@ -126,47 +136,50 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 1 {
 			return m.agentStartStop()
 		}
+	case keyRetire: // agents: wind down / put back in service
+		if m.tab == 1 {
+			if a, ok := m.selAgent(); ok && m.cl != nil {
+				cl, name, back := m.cl, a.Name, a.Retired
+				m.flash = name + ": no new work — it finishes what it holds"
+				if back {
+					m.flash = name + " takes work again"
+				}
+				return mutateThenRefresh(cl, func() error { return cl.SetRetired(name, !back) })
+			}
+		}
 	case keyAttach: // agents/tasks/prs: attach to the live tmux session
 		if m.tab == 0 {
 			// Attach to whoever is working the selected task — the row you are looking at names
 			// the work, so it should reach the agent doing it without a detour via the Agents tab.
 			a, ok := m.agentOnTask(m.selID())
-			switch {
-			case !ok:
+			if !ok {
 				m.flash = "no agent is working " + m.selID()
-			case a.Status == "down":
-				m.errText = "agent " + a.Name + " is down — start it first ('" + keyStartS + "' on the Agents tab)"
-			case m.cl != nil:
-				return attachAgent(m.agentContainer(a), a.Name)
+				return nil
 			}
-			return nil
+			return m.attachTo(a)
 		}
 		if m.tab == 1 {
 			if a, ok := m.selAgent(); ok {
-				if a.Status == "down" {
-					m.errText = "agent " + a.Name + " is down — start it first ('S') before attaching"
-					return nil
-				}
-				if m.cl != nil {
-					return attachAgent(m.agentContainer(a), a.Name)
-				}
+				return m.attachTo(a)
 			}
 		}
 		if m.tab == 2 {
 			// Same reasoning as tasks: the PR names the work, so attach reaches its author
 			// without a detour via the Agents tab.
 			a, ok := m.agentOnPR(m.selID())
-			switch {
-			case !ok:
+			if !ok {
 				m.flash = "no agent is working " + m.selID()
-			case a.Status == "down":
-				m.errText = "agent " + a.Name + " is down — start it first ('" + keyStartS + "' on the Agents tab)"
-			case m.cl != nil:
-				return attachAgent(m.agentContainer(a), a.Name)
+				return nil
+			}
+			return m.attachTo(a)
+		}
+	case keyMerge: // agents: milestone PR · prs: merge (the human gate)
+		if m.tab == 1 {
+			if a, ok := m.selAgent(); ok {
+				m.openMilestoneChoice(a.Name)
 			}
 			return nil
 		}
-	case keyMerge: // prs: merge (the human gate) — if it isn't approved, offer to approve first
 		if m.tab == 2 && m.selID() != "" {
 			if !m.selPRApproved() {
 				m.openApproveMergeChoice(m.selID())
@@ -178,7 +191,7 @@ func (m *model) onKey(k string) tea.Cmd {
 		}
 	case keyNew: // new task (tasks) / new agent (agents) / new meeting (meeting)
 		if m.tab == 0 {
-			m.openTaskForm(false, store.Task{})
+			m.openTaskForm(false, api.Task{})
 			return nil
 		} else if m.tab == 1 { // agents: pick the role, then auto-name after a dwarf
 			m.openNewAgentChoice()
@@ -212,12 +225,36 @@ func (m *model) onKey(k string) tea.Cmd {
 			}
 			return nil
 		}
-	case keyOptions: // agents: the selected agent's options
+	case keyComment: // tasks: comment on the selected task
+		if m.tab == 0 && m.selID() != "" {
+			m.openInput(inputComment, "comment on "+m.selID()+": ")
+			return textinput.Blink
+		}
+	case keyBrief: // tasks: brief a planner · agents: reBuild the agent image
+		if m.tab == 0 && m.selID() != "" {
+			m.openBriefChoice(m.selID())
+			return nil
+		}
+		if m.tab == 1 {
+			if a, ok := m.selAgent(); ok {
+				m.openRebuildChoice(a.Name)
+			}
+			return nil
+		}
+	case keyStats: // agents: the fleet's memory use against its limits (a view)
+		if m.tab == 1 {
+			return m.statsCmd()
+		}
+	case keyOptions: // agents: the selected agent's options · tasks: reopen a closed task
 		if m.tab == 1 {
 			if a, ok := m.selAgent(); ok {
 				m.openAgentOptionsForm(a.Name, a.Memory)
 				return nil
 			}
+		}
+		if m.tab == 0 && m.taskReopenable() {
+			m.openTaskReopenForm(m.selID())
+			return nil
 		}
 	case keyDelete: // tasks: scrap · agents: delete (or remove an orphan) · prs: scrap · repos: forget
 		if m.tab == 0 && m.selID() != "" {
@@ -256,7 +293,7 @@ func (m *model) onKey(k string) tea.Cmd {
 				return m.lintCmd(id)
 			}
 		}
-	case keyReject: // prs: reject a PR · tasks: reject a proposal · agents: rebase (R = reBase)
+	case keyReject: // prs: reject a PR · tasks: reject a proposal · agents: rebase (R = reBase) · meeting: remove a member
 		if m.tab == 2 && m.selID() != "" {
 			m.openRejectForm(m.selID())
 			return nil
@@ -268,18 +305,32 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 1 && m.selID() != "" && !m.isOrphan(m.selID()) {
 			return m.rebaseAgentCmd(m.selID())
 		}
+		if m.tab == 4 {
+			m.openRemoveMemberChoice()
+			return nil
+		}
 	case keyVerify: // prs: verify — materialize the PR into the review workspace + shell in
 		if m.tab == 2 {
 			if id := m.selID(); id != "" && m.cl != nil {
 				return m.verifyCmd(id)
 			}
 		}
-	case keyApprove: // approve, the human gate: a PR (prs) / a planner-proposed task (tasks)
+	case keyApprove: // approve, the human gate: a PR (prs) / a planner-proposed task (tasks) / meeting: add a member
 		if m.tab == 2 && m.selID() != "" { // approve the PR yourself, so it can be merged
 			return m.action(func(id string) error { return m.cl.ApprovePR(id) })
 		}
 		if m.tab == 0 && m.taskGated() {
-			return m.approveTaskCmd(m.selID())
+			id := m.selID()
+			if pending := m.pendingBelow(id); pending > 0 { // ask how far the verdict carries
+				m.openApproveChoice(id, pending)
+				return nil
+			}
+			m.flash = "approving " + id + "…"
+			return approveTaskCmd(m.cl, id, false, m.priorityAfterApprove(id))
+		}
+		if m.tab == 4 {
+			m.openAddMemberChoice()
+			return nil
 		}
 	case keyReview: // prs: hand the PR to a reviewer agent
 		if m.tab == 2 && m.selID() != "" {
@@ -295,13 +346,21 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 0 && m.selID() != "" {
 			return m.unassignTaskCmd(m.selID())
 		}
-	case keyClose: // tasks: close the selected task (mark it done)
+	case keyWhyNext: // tasks: what the assigner would hand out next, and why not everything else
+		if m.tab == 0 {
+			return m.whyNextCmd()
+		}
+	case keyClose: // tasks: close the selected task (mark it done) · agents: clear a full context
 		if m.tab == 0 && m.selID() != "" {
 			if pr := m.attachedOpenPR(m.selID()); pr != "" { // prompt to discard its PR too
 				m.openCloseChoice(m.selID(), pr)
 				return nil
 			}
 			return m.closeTaskCmd(m.selID())
+		}
+		if m.tab == 1 && m.selID() != "" && !m.isOrphan(m.selID()) {
+			m.openClearContextChoice(m.selID())
+			return nil
 		}
 	case "enter":
 		if m.tab == 4 { // Chat: open the multiline composer in the main pane
@@ -311,16 +370,19 @@ func (m *model) onKey(k string) tea.Cmd {
 			if it, ok := m.focusedItem(); ok {
 				switch it.kind {
 				case "view": // switch the big content pane
-					if m.tab == 1 { // Agents: toggle live screen ⇄ pod info
-						if m.agentView == "pod" {
+					if m.tab == 1 { // Agents: live screen ⇄ pod info ⇄ liveness probe
+						if m.agentView == it.value { // selecting the shown view returns to the screen
 							m.agentView = "screen"
 							return nil
 						}
-						m.agentView = "pod"
-						if m.cl != nil {
-							return podFetchCmd(m.cl, m.selID())
+						m.agentView = it.value
+						if m.cl == nil {
+							return nil
 						}
-						return nil
+						if it.value == "diag" {
+							return diagFetchCmd(m.cl, m.selID())
+						}
+						return podFetchCmd(m.cl, m.selID())
 					}
 					m.prView = it.value // PRs: diff ⇄ lint
 					m.detail.Resize(m.detail.Height, len(m.prContentLines()))

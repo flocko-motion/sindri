@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/flo-at/sindri/internal/adapter/gh"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/hub/task"
 )
@@ -28,17 +29,20 @@ const issueListLimit = 1000
 // issueTimeout keeps a hung network call from stalling the source fetch.
 const issueTimeout = 15 * time.Second
 
-// ID is the stable task id for a GitHub issue: gh-<number>. Number reverses it.
-func ID(number int) string { return "gh-" + strconv.Itoa(number) }
+// Name identifies this source for comment-thread storage.
+func (Source) Name() string { return "github" }
 
-// Number reverses ID; ok=false for a non-gh id.
+// ToolMissing is always false: Enabled already folds the `gh` CLI check in.
+func (Source) ToolMissing(root string) bool { return false }
+
+// ID is the stable task id for a GitHub issue. Number reverses it. Both defer to hub/task, which
+// owns the id scheme — this adapter knows issues, not prefixes.
+func ID(number int) string { return task.GitHubID(number) }
+
+// Number reverses ID; ok=false for an id belonging to another source.
 func Number(id string) (int, bool) {
-	rest, ok := strings.CutPrefix(id, "gh-")
+	n, ok := task.GitHubNumber(id)
 	if !ok {
-		return 0, false
-	}
-	n, err := strconv.Atoi(rest)
-	if err != nil {
 		return 0, false
 	}
 	return n, true
@@ -90,9 +94,10 @@ func (Source) Tasks(root string, force bool) ([]task.Task, error) {
 	}
 	out := make([]task.Task, 0, len(issues))
 	for _, is := range issues {
+		updatedAt, _ := time.Parse(time.RFC3339, is.UpdatedAt) // zero value if unset or malformed
 		out = append(out, task.Task{
 			ID: ID(is.Number), Title: is.Title, Status: "open", Type: "issue",
-			Priority: "", Description: is.Body, URL: is.URL,
+			Priority: "", Description: is.Body, URL: is.URL, UpdatedAt: updatedAt,
 		})
 	}
 	cacheMu.Lock()
@@ -126,6 +131,36 @@ func (Source) Finish(root, taskID string, scrap bool) (bool, error) {
 	return true, Close(ctx, root, number, "closed via sindri")
 }
 
+// Comments fetches an issue's comment thread; ok=false for a non-gh id.
+func (Source) Comments(root, taskID string) ([]task.Comment, bool, error) {
+	number, ok := Number(taskID)
+	if !ok {
+		return nil, false, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), issueTimeout)
+	defer cancel()
+	gc, err := IssueComments(ctx, root, number)
+	if err != nil {
+		return nil, true, err
+	}
+	out := make([]task.Comment, 0, len(gc))
+	for _, c := range gc {
+		out = append(out, task.Comment{SourceRef: c.URL, Author: c.Author.Login, Body: c.Body, CreatedAt: c.CreatedAt})
+	}
+	return out, true, nil
+}
+
+// AddComment posts to an issue's thread; handled=false for a non-gh id.
+func (Source) AddComment(root, taskID, body string) (bool, error) {
+	number, ok := Number(taskID)
+	if !ok {
+		return false, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), issueTimeout)
+	defer cancel()
+	return true, AddComment(ctx, root, number, body)
+}
+
 // Label is one GitHub label on an issue (only its name is used).
 type Label struct {
 	Name string `json:"name"`
@@ -144,7 +179,7 @@ type Issue struct {
 // Enabled is the cheap local gate (gh on PATH + a GitHub remote); it never probes network or auth,
 // which is handled at call time.
 func Enabled(root string) bool {
-	if _, err := exec.LookPath("gh"); err != nil {
+	if !gh.Installed() {
 		return false
 	}
 	return hasGitHubRemote(root)
@@ -205,6 +240,17 @@ func IssueComments(ctx context.Context, root string, number int) ([]Comment, err
 		return nil, fmt.Errorf("parse gh issue comments: %w", e)
 	}
 	return resp.Comments, nil
+}
+
+// AddComment posts to an issue's thread. GitHub owns that thread, so a comment on one of its issues
+// is written there and read back, rather than kept here where the issue's readers would never see it.
+func AddComment(ctx context.Context, root string, number int, body string) error {
+	cmd := exec.CommandContext(ctx, "gh", "issue", "comment", strconv.Itoa(number), "--body", body)
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("gh issue comment %d in %s: %s", number, root, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // Close closes an issue with a comment — the adapter's only outbound write.

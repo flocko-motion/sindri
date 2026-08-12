@@ -18,8 +18,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/ui/tui/scroll"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // defaultReviewPrompt pre-fills the Agentic Review instruction; the user edits it before dispatch.
@@ -164,7 +164,7 @@ func (m *model) reconcileMerging() {
 }
 
 // openTaskModal shows a PR's linked task in the full-screen modal, identical to the Tasks tab's.
-func (m *model) openTaskModal(t store.Task) {
+func (m *model) openTaskModal(t api.Task) {
 	m.modalOverride = m.taskDetailFor(t, t.Description)
 	m.modalOverrideTitle = "Task " + t.ID
 	m.modal = true
@@ -256,7 +256,10 @@ func (m model) prRows() []row {
 		if p.Kind == "interim" { // ◇ = mid-task contribution (vs a final, task-done PR)
 			status = "◇" + status
 		}
-		out = append(out, row{fmt.Sprintf("%s %-14s %-9s %4s %-10s %s", repo, p.ID, status, shortAge(p.CreatedAt), p.Agent, p.Branch), p.ID})
+		// Who is reviewing it, from the board — a dash where nobody is, so the column reads as
+		// "waiting for a reviewer" rather than as missing.
+		out = append(out, row{fmt.Sprintf("%s %-14s %-9s %4s %-10s %-10s %s",
+			repo, p.ID, status, shortAge(p.CreatedAt), p.Agent, dash(p.Reviewer), p.Branch), p.ID})
 	}
 	return out
 }
@@ -330,7 +333,16 @@ func (m model) prBody() string {
 		return leftCol
 	}
 	rightW := m.w - leftW - 1
-	items := wrapMeta(m.prMetaItems(), rightW)
+	lines, hl := m.prMetaLines(rightW)
+	right := pane(lines, m.prMeta, rightW, hl)
+	return lipgloss.JoinHorizontal(lipgloss.Top, leftCol, divider(h), right)
+}
+
+// prMetaLines is the right column's wrapped text and the line to highlight, or -1. Returned
+// together because the highlight is an index INTO these lines: reclamp sizes the column and
+// scrolls that line into view, and prBody draws it, so the two must be counting the same rows.
+func (m model) prMetaLines(width int) ([]string, int) {
+	items := wrapMeta(m.prMetaItems(), width)
 	lines := make([]string, len(items))
 	hl, ai := -1, 0 // highlight the focused actionable item when the right column has focus
 	for i, it := range items {
@@ -342,10 +354,7 @@ func (m model) prBody() string {
 			ai++
 		}
 	}
-	var rv scroll.Viewport
-	rv.Resize(h, len(lines))
-	right := pane(lines, rv, rightW, hl)
-	return lipgloss.JoinHorizontal(lipgloss.Top, leftCol, divider(h), right)
+	return lines, hl
 }
 
 // prContentWidth is the left pane's width, narrowed by the detail column; content wraps to it.
@@ -412,6 +421,9 @@ func (m model) prMetaItems() []metaItem {
 		metaItem{text: "kind:   " + prKindLabel(d.PR.Kind)},
 		metaItem{text: "agent:  " + d.PR.Agent, kind: "agent", value: d.PR.Agent},
 	)
+	if d.PR.Reviewer != "" { // only when somebody holds it: an empty line here would read as a gap
+		items = append(items, metaItem{text: "review: " + d.PR.Reviewer, kind: "agent", value: d.PR.Reviewer})
+	}
 	// Absolute: `value` becomes a child process's working directory, so a relative one would break.
 	if ws := m.agentWorkspacePath(d.PR.Agent); ws != "" {
 		items = append(items, metaItem{text: "path:   " + ws, kind: "path", value: ws})
@@ -442,20 +454,25 @@ func (m model) prMetaItems() []metaItem {
 	return items
 }
 
-// wrapMeta wraps plain detail lines to the column width, so history and feedback read in full.
-// Actionable and blank items pass through, keeping the focus cursor 1:1 with its actionable rows.
+// wrapMeta wraps detail lines to the column width, so history, feedback and a long task/PR title
+// read in full rather than losing their tail to the pane's ellipsis. Blank items, and any item
+// already within width — the common case for the short actionable ones — pass through untouched,
+// keeping their exact text so `y`/ENTER still act on what's shown. An item that overflows is
+// word-wrapped; if it was actionable, only its first line keeps the kind/value, so the right-column
+// cursor still lands on exactly one entry per source item.
 func wrapMeta(items []metaItem, width int) []metaItem {
 	if width <= 0 {
 		return items
 	}
-	wrap := lipgloss.NewStyle().Width(width)
 	out := make([]metaItem, 0, len(items))
 	for _, it := range items {
-		if it.kind != "" || it.text == "" {
+		if it.text == "" || ansi.StringWidth(it.text) <= width {
 			out = append(out, it)
 			continue
 		}
-		for _, s := range strings.Split(wrap.Render(it.text), "\n") {
+		lines := strings.Split(ansi.Wrap(it.text, width, ""), "\n")
+		out = append(out, metaItem{text: lines[0], kind: it.kind, value: it.value})
+		for _, s := range lines[1:] {
 			out = append(out, metaItem{text: s})
 		}
 	}
@@ -567,7 +584,7 @@ func (m *model) verifyCmd(id string) tea.Cmd {
 }
 
 // reviewLine summarizes a review item: its state, verdict, and author.
-func reviewLine(r store.Review) string {
+func reviewLine(r api.Review) string {
 	switch {
 	case r.Verdict != "":
 		return fmt.Sprintf("• %s by %s", r.Verdict, r.Author)
@@ -576,6 +593,33 @@ func reviewLine(r store.Review) string {
 	default:
 		return "• unassigned"
 	}
+}
+
+// prIdentity says WHICH PR this is and where its work lives — the block you paste into a message
+// or a ticket. Shared by the list yank and the full detail below so the two cannot drift: the
+// workspace path was already in the interactive item column and in neither of these.
+func (m model) prIdentity(d api.PRDetail) []string {
+	ls := []string{
+		fmt.Sprintf("%s   [%s]   by %s", d.PR.ID, d.PR.Status, d.PR.Agent),
+		fmt.Sprintf("task: %s  %s (%s)", d.Task.ID, d.Task.Title, d.Task.Status),
+		fmt.Sprintf("branch %s → %s", d.PR.Branch, d.PR.Base),
+	}
+	// The field the yank was asked for, and the one nobody retypes. Absent once its author is
+	// gone — a PR outlives the tree behind it.
+	if ws := m.agentWorkspacePath(d.PR.Agent); ws != "" {
+		ls = append(ls, "path: "+ws)
+	}
+	return ls
+}
+
+// prYankBlock is what `y` copies from the PRs list. Empty while the lazily-fetched detail is still
+// another PR's, so the caller falls back to the id rather than pasting the wrong PR's fields.
+func (m model) prYankBlock() []string {
+	id := m.selID()
+	if id == "" || m.prDetail.PR.ID != id {
+		return nil
+	}
+	return m.prIdentity(m.prDetail)
 }
 
 // prDetailLines is the full PR detail for the ENTER modal: metadata, reviews, then the diff.
@@ -588,11 +632,7 @@ func (m model) prDetailLines() []string {
 	if d.PR.ID != id {
 		return []string{id, dimStyle.Render("(loading…)")}
 	}
-	ls := []string{
-		fmt.Sprintf("%s   [%s]   by %s", d.PR.ID, d.PR.Status, d.PR.Agent),
-		fmt.Sprintf("task: %s  %s (%s)", d.Task.ID, d.Task.Title, d.Task.Status),
-		fmt.Sprintf("branch %s → %s", d.PR.Branch, d.PR.Base),
-	}
+	ls := m.prIdentity(d)
 	if d.PR.Feedback != "" {
 		ls = append(ls, "feedback: "+d.PR.Feedback)
 	}

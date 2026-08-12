@@ -61,9 +61,8 @@ RUN case "$(uname -m)" in \
 # ── yq (prebuilt release binary, arch-matched) ────────────────────────────────
 # Downloaded in-container for the build arch rather than copied from the host:
 # the host may be a different OS/arch (e.g. macOS) than the Linux pod, so a copied
-# host binary wouldn't run. td is deliberately absent: agents reach the task
-# tracker only via the hub (the in-pod `sindri` command → hub), never a local td
-# that could write .todos.
+# host binary wouldn't run. No task tool is present at all: an agent reaches tasks
+# only through the hub, via the in-pod `sindri` command.
 RUN case "$(uname -m)" in \
   x86_64)  arch=amd64 ;; \
   aarch64) arch=arm64 ;; \

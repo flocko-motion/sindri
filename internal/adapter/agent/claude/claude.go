@@ -26,12 +26,34 @@ var (
 	promptLine = regexp.MustCompile(`(?m)^\s*❯`)
 	// yesNoOption matches a selectable yes/no line ("❯ 1. Yes", "2. No", "❯ Yes").
 	yesNoOption = regexp.MustCompile(`(?im)^\s*(❯\s*)?(\d+\.\s*)?(yes|no)\b`)
+	// signedOut matches Claude's auth banner ("● Login expired · Please run /login"). Anchored to a
+	// line ENDING in the instruction: sindri's agents edit this file, and a pane showing the pattern
+	// as source text is not a signed-out agent.
+	signedOut = regexp.MustCompile(`(?im)^[^\n]*·\s*please run /login\s*$`)
+	// apiError matches a turn the API cut off ("API Error: Response stalled mid-stream."). The pane
+	// keeps its "esc to interrupt" footer afterwards and its spinner keeps animating, so this reads as
+	// a live turn to every other signal — neither the words nor a still screen can see it.
+	apiError = regexp.MustCompile(`(?im)^\s*[^\n]{0,4}api error[:\s]`)
 )
+
+// statusTail is how many trailing lines count as the live status region: Claude draws what is true
+// NOW just above the input box, and everything higher is transcript describing what WAS.
+const statusTail = 12
+
+// paneTail returns the last n lines of a captured pane.
+func paneTail(screen string, n int) string {
+	lines := strings.Split(screen, "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
+}
 
 // DetectState reads a Claude Code pane's rendered screen text (as `tmux
 // capture-pane -p` yields) into a runtime state. Precedence mirrors herdr's
-// claude.toml: a hidden transcript view is unknown; a response prompt is blocked;
-// the interrupt hint is working; a bare prompt box is idle. Case-insensitive.
+// claude.toml: a hidden transcript view is unknown; a response prompt is
+// blocked; the interrupt hint is working; the auth banner at the bottom is
+// signed out; a bare prompt box is idle.
 func (Claude) DetectState(screen string) agent.State {
 	s := strings.ToLower(screen)
 	has := func(subs ...string) bool { // every substring present
@@ -64,9 +86,23 @@ func (Claude) DetectState(screen string) agent.State {
 		return agent.Blocked
 	}
 
+	// A cut-off turn outranks the interrupt hint, because that hint is exactly what survives it. Read
+	// only in the live region: once the agent really resumes, the error scrolls up into transcript.
+	if apiError.MatchString(paneTail(screen, statusTail)) {
+		return agent.Failed
+	}
+
 	// Working: Claude shows its interrupt hint while a turn runs.
 	if has("esc to interrupt") {
 		return agent.Working
+	}
+
+	// Signed out: nothing is running and nothing is being asked, and the banner is in the live region
+	// at the bottom. Both conditions are the fix to a bad reading — an interrupt hint or a prompt
+	// happens NOW, while the banner stays in the transcript long after a re-login, so matched first
+	// and anywhere it described agents that had already recovered.
+	if signedOut.MatchString(paneTail(screen, statusTail)) {
+		return agent.SignedOut
 	}
 
 	// Idle: the empty prompt box is visible and nothing above needs an answer.

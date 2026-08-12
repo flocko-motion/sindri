@@ -15,9 +15,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/client"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/client"
+	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
 func isDone(status string) bool {
@@ -28,16 +28,37 @@ func isDone(status string) bool {
 	return false
 }
 
+// recentlyChanged reports whether a task's last known change falls inside activeWindow; a task
+// with no timestamp (an openspec change, say) is never recent, so it needs the open half of the
+// filter to show.
+func recentlyChanged(t api.Task) bool {
+	at, err := time.Parse(time.RFC3339, t.UpdatedAt)
+	return err == nil && time.Since(at) < activeWindow
+}
+
 // taskRows builds the filtered, folded, depth-indented task tree.
 func (m model) taskRows() []row {
-	var filtered []store.Task
+	var filtered []api.Task
 	for _, t := range m.state.Tasks {
 		done := isDone(t.Status)
-		if m.filter == filterAll || (m.filter == filterOpen && !done) || (m.filter == filterClosed && done) {
+		switch m.filter {
+		case filterAll:
 			filtered = append(filtered, t)
+		case filterOpen:
+			if !done {
+				filtered = append(filtered, t)
+			}
+		case filterClosed:
+			if done {
+				filtered = append(filtered, t)
+			}
+		case filterActive:
+			if !done || recentlyChanged(t) {
+				filtered = append(filtered, t)
+			}
 		}
 	}
-	arranged := hub.ArrangeTasks(filtered, m.state.PRs)
+	arranged := api.ArrangeTasks(filtered, m.state.PRs)
 
 	// Which tasks have a worker on them right now (drives the 🔨 marker).
 	assigned := map[string]bool{}
@@ -46,13 +67,17 @@ func (m model) taskRows() []row {
 			assigned[a.Task] = true
 		}
 	}
-	// Hub-side approval per task (drives the row colour for planner proposals).
+	// Hub-side approval per task (drives the row colour for planner proposals). A gate on a task
+	// that has ended is spent, and the state word below is the status's to give.
 	approval := map[string]string{}
 	for _, t := range m.state.Tasks {
-		if t.Approval != "" {
+		if t.Approval != "" && !isDone(t.Status) {
 			approval[t.ID] = t.Approval
 		}
 	}
+	// Read from the WHOLE board, never the filtered set: an ancestor that releases the tree may be
+	// closed and out of view, and its children would otherwise read as held back.
+	released := api.ReleasedByPriority(m.state.Tasks)
 
 	// Children: a later row one level deeper, before the depth returns to this level.
 	hasKids := map[string]bool{}
@@ -69,7 +94,7 @@ func (m model) taskRows() []row {
 	}
 
 	// Visible set after applying folds.
-	var visible []hub.TaskRow
+	var visible []api.TaskRow
 	hideAbove := -1 // depth of a collapsed ancestor; rows deeper than this are hidden
 	for _, tr := range arranged {
 		if hideAbove >= 0 && tr.Depth > hideAbove {
@@ -84,30 +109,38 @@ func (m model) taskRows() []row {
 
 	// The tree lives entirely in a fixed-width gutter, so the id and later columns stay aligned.
 	out := make([]row, len(visible))
+	last := lastSiblings(visible)
 	cont := []bool{} // cont[i]: ancestor at depth i has a later sibling (draw │)
 	for i, tr := range visible {
 		if len(cont) > tr.Depth {
 			cont = cont[:tr.Depth]
 		}
-		gutter := treeGutter(cont, tr.Depth, tr.Last, hasKids[tr.ID], m.collapsed[tr.ID])
-		cont = append(cont, !tr.Last)
+		gutter := treeGutter(cont, tr.Depth, last[i], hasKids[tr.ID], m.collapsed[tr.ID])
+		cont = append(cont, !last[i])
 
 		// Cells styled independently (never nested) so a colour reset can't bleed
 		// across the row. An approval gate overrides the status colour.
 		sc := taskStatusStyle(tr.Status)
-		state := hub.StateLabel(tr.Status)
+		state := theme.StateLabel(tr.Status)
 		switch approval[tr.ID] { // the approval gate overrides both colour and state word
 		case "pending":
 			sc, state = stWarn, "pending"
 		case "rejected":
 			sc, state = stDone, "rejected"
+		default:
+			// Unrated reads like ungated: both mean no worker can be given this, and the row that
+			// showed a plain "open" claimed otherwise. A rated ancestor releases the whole tree, so
+			// only a task with none anywhere above it is really held back.
+			if !isDone(tr.Status) && !released[tr.ID] {
+				sc, state = stWarn, "unrated"
+			}
 		}
 		if v := m.busy[tr.ID]; v != "" { // transient: the user triggered a close/scrap, awaiting the hub
 			sc, state = stWarn, v
 		}
-		prio := sc.Render(fmt.Sprintf("%-8s", hub.PriorityLabel(tr.Priority)))
+		prio := sc.Render(fmt.Sprintf("%-8s", theme.PriorityLabel(tr.Priority)))
 		if isCriticalPriority(tr.Priority) {
-			prio = stCrit.Render(fmt.Sprintf("%-8s", hub.PriorityLabel(tr.Priority)))
+			prio = stCrit.Render(fmt.Sprintf("%-8s", theme.PriorityLabel(tr.Priority)))
 		}
 		out[i] = row{
 			strings.Join([]string{
@@ -116,6 +149,9 @@ func (m model) taskRows() []row {
 				sc.Render(fmt.Sprintf("%-5s", typeAbbr(tr.Type))),
 				prio,
 				sc.Render(fmt.Sprintf("%-8s", state)),
+				// Age, right-aligned so the units line up under each other; the exact moment is in
+				// the detail pane, which is where a question about one task gets asked.
+				sc.Render(fmt.Sprintf("%4s", theme.Age(tr.CreatedAt))),
 				sc.Render(taskMarks(assigned[tr.ID], prMarkKind(tr))),
 				sc.Render(tr.Title),
 			}, " "),
@@ -126,6 +162,26 @@ func (m model) taskRows() []row {
 }
 
 const treeGutterW = 6 // fits ~3 levels of "│ "/"├─" connectors
+
+// lastSiblings marks each row that has no later sibling — what the tree connectors are drawn from.
+//
+// Derived here rather than carried on the wire: it is a fact about the rows as ARRANGED, and the
+// arrangement the TUI draws is the visible one, with collapsed subtrees removed. Hiding a subtree
+// never removes a sibling, so the answer is the same either way — and only the drawing needs it.
+func lastSiblings(rows []api.TaskRow) []bool {
+	out := make([]bool, len(rows))
+	var later []bool // later[d]: a row at depth d follows, with no shallower row between
+	for i := len(rows) - 1; i >= 0; i-- {
+		d := rows[i].Depth
+		for len(later) <= d {
+			later = append(later, false)
+		}
+		out[i] = !later[d]
+		later[d] = true
+		later = later[:d+1] // rows below this one at greater depth are its own subtree
+	}
+	return out
+}
 
 // treeGutter draws ancestor pipes, the branch into this node, and any fold marker.
 func treeGutter(cont []bool, depth int, last, kids, collapsed bool) string {
@@ -161,7 +217,7 @@ const marksW = 3
 
 // prMarkKind picks the PR marker: ◆ final, ◇ interim, "" none. A kindless PR defaults to
 // final, the historical default, so older PRs still show ◆.
-func prMarkKind(tr hub.TaskRow) string {
+func prMarkKind(tr api.TaskRow) string {
 	if tr.PR == "" {
 		return ""
 	}
@@ -209,7 +265,7 @@ func (m model) taskDetailLines() []string {
 // taskItems is the selected task's detail; parent/agent/pr are focusable cross-references.
 func (m model) taskItems() []metaItem {
 	id := m.selID()
-	var t store.Task
+	var t api.Task
 	for _, x := range m.state.Tasks {
 		if x.ID == id {
 			t = x
@@ -217,7 +273,7 @@ func (m model) taskItems() []metaItem {
 	}
 	// The board row's description shows at once; the lazy read then refines it.
 	desc := t.Description
-	var comments []store.Comment
+	var comments []api.Comment
 	if m.taskDetail.ID == id {
 		if m.taskDetail.Description != "" {
 			desc = m.taskDetail.Description
@@ -238,12 +294,12 @@ func (m model) taskActionable() []metaItem {
 }
 
 // taskDetailFor renders any task's detail block, for the modal-peek and PRs' linked-task modal.
-func (m model) taskDetailFor(t store.Task, desc string) []string {
+func (m model) taskDetailFor(t api.Task, desc string) []string {
 	return itemTexts(m.taskItemsFor(t, desc, nil))
 }
 
 // taskItemsFor builds the fields, the agent/PR/parent/url cross-references, then desc and comments.
-func (m model) taskItemsFor(t store.Task, desc string, comments []store.Comment) []metaItem {
+func (m model) taskItemsFor(t api.Task, desc string, comments []api.Comment) []metaItem {
 	assignee, pr := "", ""
 	for _, a := range m.state.Agents {
 		if a.Task == t.ID {
@@ -264,9 +320,16 @@ func (m model) taskItemsFor(t store.Task, desc string, comments []store.Comment)
 	items := []metaItem{
 		{text: t.Title}, {text: ""},
 		{text: "type:     " + dash(t.Type)},
-		{text: "priority: " + hub.PriorityLabel(t.Priority)},
+		{text: "priority: " + theme.PriorityLabel(t.Priority)},
 		{text: "status:   " + t.Status},
 	}
+	// The exact moment, in local time — the list column rounds it, and rounding is what a question
+	// about one particular task is asking past.
+	created := theme.Stamp(t.CreatedAt)
+	if created != theme.Unknown {
+		created += " (" + theme.Age(t.CreatedAt) + " ago)"
+	}
+	items = append(items, metaItem{text: "created:  " + created})
 	if t.Approval != "" { // a planner proposal under the approval gate
 		line := "approval: " + t.Approval
 		if t.ApprovalComment != "" {
@@ -298,13 +361,15 @@ func descItems(desc string) []metaItem {
 }
 
 // commentItems renders the synced thread as author + local timestamp, then body lines.
-func commentItems(comments []store.Comment) []metaItem {
+func commentItems(comments []api.Comment) []metaItem {
 	if len(comments) == 0 {
 		return nil
 	}
 	items := []metaItem{{text: ""}, {text: fmt.Sprintf("── comments (%d) ──", len(comments))}}
 	for _, c := range comments {
-		head := c.Author
+		// The source too: "github" means the comment came from or went to the upstream issue, so
+		// it says who else has already seen it — which a reply is written differently for.
+		head := c.Author + " (" + c.Source + ")"
 		if ts := commentTime(c.CreatedAt); ts != "" {
 			head = ts + "  " + head
 		}
@@ -328,22 +393,22 @@ func commentTime(ts string) string {
 var taskTypes = []string{"task", "feature", "bug", "epic", "chore"}
 
 // selTask returns the currently-selected task from the board snapshot.
-func (m model) selTask() (store.Task, bool) {
+func (m model) selTask() (api.Task, bool) {
 	id := m.selID()
 	for _, t := range m.state.Tasks {
 		if t.ID == id {
 			return t, true
 		}
 	}
-	return store.Task{}, false
+	return api.Task{}, false
 }
 
 // openTaskForm opens the new/edit task form. t must be freshly fetched, not a board row, or a
 // save blanks the fields the board doesn't carry. Openspec items honour priority only (hub-side).
-func (m *model) openTaskForm(edit bool, t store.Task) {
-	prioCodes := make([]string, len(hub.PriorityWords))
-	for i, w := range hub.PriorityWords {
-		prioCodes[i] = hub.PriorityCode(w)
+func (m *model) openTaskForm(edit bool, t api.Task) {
+	prioCodes := make([]string, len(theme.PriorityWords))
+	for i, w := range theme.PriorityWords {
+		prioCodes[i] = theme.PriorityCode(w)
 	}
 	title, typ, prio, parent, labels, desc, id := "", "task", "P2", "", "", "", ""
 	if edit {
@@ -357,7 +422,7 @@ func (m *model) openTaskForm(edit bool, t store.Task) {
 	}
 	titleF := newTextField("title", title)
 	typeF := newChoiceField("type", taskTypes, taskTypes, typ)
-	prioF := newChoiceField("priority", hub.PriorityWords, prioCodes, prio)
+	prioF := newChoiceField("priority", theme.PriorityWords, prioCodes, prio)
 	parentF := newTextField("parent", parent)
 	labelsF := newTextField("labels", labels)
 	descF := newTextareaField("description", desc)
@@ -379,7 +444,7 @@ func (m *model) openTaskForm(edit bool, t store.Task) {
 		return ""
 	}
 	m.form.open(heading, []field{titleF, typeF, prioF, parentF, labelsF, descF}, validate, func() tea.Cmd {
-		spec := hub.TaskSpec{
+		spec := api.TaskSpec{
 			Title: titleF.value(), Type: typeF.value(), Priority: prioF.value(),
 			Parent: strings.TrimSpace(parentF.value()), Description: descF.value(), Labels: csv(labelsF.value()),
 		}
@@ -402,10 +467,11 @@ func (m *model) openTaskForm(edit bool, t store.Task) {
 	})
 }
 
-// taskGated reports a proposal still under the approval gate — the only state A/R act on.
+// taskGated reports a proposal still under the approval gate — the only state A/R act on. "Still"
+// includes being live: a verdict on a task that has already ended decides nothing.
 func (m model) taskGated() bool {
 	t, ok := m.selTask()
-	return ok && (t.Approval == "pending" || t.Approval == "rejected")
+	return ok && !isDone(t.Status) && (t.Approval == "pending" || t.Approval == "rejected")
 }
 
 // unassignTaskCmd returns the task to the backlog; the hub refuses if a live agent holds it.
@@ -424,6 +490,45 @@ func (m *model) unassignTaskCmd(id string) tea.Cmd {
 	}
 }
 
+// openBriefChoice picks which planner works up the selected task. Named for what it hands over: the
+// task carries the brief, so this chooses the reader rather than what to read.
+func (m *model) openBriefChoice(taskID string) {
+	var names []string
+	for _, a := range m.state.Agents {
+		if a.Role == "planner" && m.inScope(a.Project) {
+			names = append(names, a.Name)
+		}
+	}
+	if len(names) == 0 {
+		m.errText = "no planner in this repo — `sindri agent new --role planner` first"
+		return
+	}
+	m.choice = choiceModalState{
+		active: true, title: "work up " + taskID + " with…",
+		options: names, values: names,
+		apply: func(v string) tea.Cmd {
+			return func() tea.Msg { return openTaskPlanFormMsg{planner: v, task: taskID} }
+		},
+	}
+}
+
+// whyNextCmd asks the hub what it would assign next and why nothing else, shown as a notice — the
+// same account `sindri task next` prints, since the reasoning is the hub's and neither front-end
+// gets to have its own version of it.
+func (m *model) whyNextCmd() tea.Cmd {
+	cl := m.cl
+	if cl == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		x, err := cl.NextTask("")
+		if err != nil {
+			return taskOpDoneMsg{err: err}
+		}
+		return noticeMsg(theme.FormatNext(x))
+	}
+}
+
 // closeTaskCmd marks the task done, showing a transient "closing" until the hub confirms.
 func (m *model) closeTaskCmd(id string) tea.Cmd {
 	m.markBusy(id, "closing")
@@ -438,7 +543,8 @@ func (m *model) markBusy(id, verb string) {
 	m.busy[id] = verb
 }
 
-// taskOpDone drops the transient verb, then applies the fresh board or surfaces the error.
+// taskOpDone drops the transient verb, then applies the fresh board or surfaces the error. A chained
+// follow-up runs last, so whatever it opens reads the board this op produced.
 func (m model) taskOpDone(msg taskOpDoneMsg) (tea.Model, tea.Cmd) {
 	delete(m.busy, msg.id)
 	if msg.err != nil {
@@ -447,7 +553,7 @@ func (m model) taskOpDone(msg taskOpDoneMsg) (tea.Model, tea.Cmd) {
 	}
 	m.state = msg.state
 	m.reclamp()
-	return m, tea.Batch(m.syncDetail(), m.agentLiveCmds())
+	return m, tea.Batch(m.syncDetail(), m.agentLiveCmds(), msg.then)
 }
 
 // reconcileBusy clears verbs a fresh board already confirms, so a marker can't linger when the
@@ -493,7 +599,7 @@ func taskOpTrigger(id, verb string, run tea.Cmd) tea.Cmd {
 	return func() tea.Msg { return taskOpMsg{id: id, verb: verb, run: run} }
 }
 
-// finishTaskCmd closes or deletes, optionally scraps the PR, then refreshes once so both
+// finishTaskCmd runs one task op, optionally scraps the PR alongside, then refreshes once so both
 // changes land in one snapshot. A failed task op skips the PR scrap.
 func finishTaskCmd(cl *client.HTTP, taskOp func(string) error, id, prID string, alsoPR bool) tea.Cmd {
 	return func() tea.Msg {
@@ -513,11 +619,29 @@ func finishTaskCmd(cl *client.HTTP, taskOp func(string) error, id, prID string, 
 	}
 }
 
-// approveTaskCmd clears the approval gate, making the task claimable.
-func (m *model) approveTaskCmd(id string) tea.Cmd {
-	cl := m.cl
-	m.flash = "approving " + id + "…"
-	return mutateThenRefresh(cl, func() error { return cl.ApproveTask(id) })
+// approveTaskCmd clears the approval gate, making the task claimable; subtree carries the verdict
+// to the proposals under it (-> openApproveChoice), and then runs next (-> priorityAfterApprove).
+func approveTaskCmd(cl *client.HTTP, id string, subtree bool, then tea.Cmd) tea.Cmd {
+	approve := func(string) error { return cl.ApproveTask(id, subtree) }
+	return afterTaskOp(finishTaskCmd(cl, approve, id, "", false), then)
+}
+
+// afterTaskOp chains a follow-up onto a task op: the op's own result still travels, so the board
+// refreshes and a failure still surfaces, and the follow-up rides along to be run once it has landed.
+// Chaining the two actions rather than combining them keeps one approve path and one priority path.
+func afterTaskOp(op tea.Cmd, then tea.Cmd) tea.Cmd {
+	if then == nil {
+		return op
+	}
+	return func() tea.Msg {
+		msg := op()
+		done, ok := msg.(taskOpDoneMsg)
+		if !ok || done.err != nil {
+			return msg // a failed approve releases nothing, so there is nothing to rate
+		}
+		done.then = then
+		return done
+	}
 }
 
 // openTaskRejectForm rejects a proposal with a comment, delivered to the planner.
@@ -537,25 +661,6 @@ func (m *model) openTaskRejectForm(id string) {
 			return polledMsg(st)
 		}
 	})
-}
-
-// openPriorityChoice opens the priority picker for a task.
-func (m *model) openPriorityChoice(id string) {
-	cl := m.cl
-	vals := make([]string, len(hub.PriorityWords))
-	for i, w := range hub.PriorityWords {
-		vals[i] = hub.PriorityCode(w)
-	}
-	m.choice = choiceModalState{
-		active: true, title: "priority for " + id,
-		options: hub.PriorityWords, values: vals,
-		apply: func(code string) tea.Cmd {
-			if cl == nil {
-				return nil
-			}
-			return mutateThenRefresh(cl, func() error { return cl.SetPriority(id, code) })
-		},
-	}
 }
 
 // taskIDs is the set of known task ids (for parent validation).

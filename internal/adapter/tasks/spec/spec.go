@@ -22,14 +22,25 @@ import (
 // ID derives a stable os-XXXXXX task id from a change name. One-way — reversed by changeName.
 func ID(name string) string {
 	sum := sha256.Sum256([]byte(name))
-	return "os-" + hex.EncodeToString(sum[:])[:6]
+	return task.SpecID(hex.EncodeToString(sum[:])[:6])
 }
 
 // Source adapts openspec as a task source: each active change becomes a task.
 type Source struct{}
 
+// Name identifies this source for comment-thread storage.
+func (Source) Name() string { return "openspec" }
+
 // Enabled reports whether the repo uses openspec.
 func (Source) Enabled(root string) bool { return Enabled(root) }
+
+// ToolMissing: the repo has an openspec/ dir but the openspec CLI isn't on PATH.
+func (Source) ToolMissing(root string) bool { return Enabled(root) && !CLIInstalled() }
+
+// Validate is this source doubling as a quality gate (-> adapter/gate.Gate): openspec's own
+// validation, run wherever a submit path needs one. Delegates to the package's Validate so every
+// caller agrees on what "passing" means.
+func (Source) Validate(wt string) (bool, string) { return Validate(wt) }
 
 // Tasks maps active changes to os-* tasks, closed once all of a change's own tasks are done.
 func (Source) Tasks(root string, _ bool) ([]task.Task, error) {
@@ -79,7 +90,7 @@ func (Source) OnMerged(root, taskID, note string) error { return nil }
 // Finish archives (done) or removes (scrap) the change behind an os- id; handled is false for a
 // non-os id. An os id whose change can't be resolved is a real error (the id is a one-way hash).
 func (Source) Finish(root, taskID string, scrap bool) (bool, error) {
-	if !strings.HasPrefix(taskID, "os-") {
+	if task.OwnerOf(taskID) != task.OwnerOpenSpec {
 		return false, nil
 	}
 	name, ok := changeName(root, taskID)
@@ -91,6 +102,12 @@ func (Source) Finish(root, taskID string, scrap bool) (bool, error) {
 	}
 	return true, Archive(root, name)
 }
+
+// Comments: an openspec change keeps no thread of its own — ok is always false.
+func (Source) Comments(root, taskID string) ([]task.Comment, bool, error) { return nil, false, nil }
+
+// AddComment: same reason as Comments — handled is always false.
+func (Source) AddComment(root, taskID, body string) (bool, error) { return false, nil }
 
 // changeName reverses an os-<hash> id by matching ID over the current changes (the hash is one-way).
 func changeName(root, id string) (string, bool) {
@@ -228,12 +245,22 @@ func Validate(projectRoot string) (ok bool, output string) {
 	return !failed, formatReport(out, failed)
 }
 
-// formatReport renders the JSON report: a line per item, and under a failing one every issue with
-// its file and rule. Unparseable JSON falls back to raw output rather than swallowing the verdict.
+// formatReport renders the JSON report at the length its verdict deserves: a pass is one line, an
+// empty project says so, and a failure lists each bad item with its file and rule. Unparseable JSON
+// falls back to raw output rather than swallowing the verdict.
 func formatReport(raw []byte, failed bool) string {
 	var r report
-	if err := json.Unmarshal(raw, &r); err != nil || len(r.Items) == 0 {
+	if err := json.Unmarshal(raw, &r); err != nil {
 		return string(raw)
+	}
+	// A project with an openspec/ directory but nothing in it yet is a valid, passing, EMPTY report.
+	// It used to take the unparseable branch above and dump the whole JSON blob.
+	if len(r.Items) == 0 {
+		return "openspec: no specs or changes to validate\n"
+	}
+	if !failed {
+		// A pass needs its verdict, not a report: one line proving the delegated validator ran.
+		return fmt.Sprintf("openspec: %d passed (openspec validate --all)\n", len(r.Items))
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n", ValidatorName)

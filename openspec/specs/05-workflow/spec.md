@@ -10,16 +10,35 @@ This chapter is the integration.
 ## Requirements
 ### Requirement: Plan / build / review separation
 
-Humans SHALL plan (author tasks and specs) and merge; the worker agent SHALL
-build (implement tasks, open PRs); the reviewer agent SHALL review (approve or
-reject the worker's PRs). No agent SHALL approve or merge its OWN work — review
-is performed by the separate reviewer agent, and merge is human-only.
+Work SHALL be separated into planning, building, and reviewing. The planner agent
+SHALL shape upcoming work *with* the user — reading the repo and specs, proposing
+backlog tasks, and drafting openspec — but the user SHALL retain the gates: only
+the user approves a proposed task into the backlog, and only the user merges. The
+worker agent SHALL build (implement tasks, open PRs); the reviewer agent SHALL
+review (approve or reject the worker's PRs). A human MAY also approve or reject a
+worker's PR directly from the host — review approval is not the reviewer agent's
+exclusive power. No agent SHALL approve or merge its OWN work — review of a
+worker's PR is performed by the separate reviewer agent or by a human on the host
+— and merge is human-only.
 
 #### Scenario: Roles
 
 - **WHEN** work moves through the loop
-- **THEN** tasks/specs are authored by humans, implemented by the worker agent,
-  reviewed (approved/rejected) by the reviewer agent, and merged by a human
+- **THEN** the planner drafts specs and proposes tasks with the user, the user
+  approves tasks and merges, the worker implements approved tasks and opens PRs,
+  and the reviewer (or a human on the host) approves or rejects those PRs
+
+#### Scenario: Human approves a worker's PR
+
+- **WHEN** a human approves a worker's PR from the host
+- **THEN** it is marked approved and may be merged, without requiring a reviewer
+  agent to have approved it first
+
+#### Scenario: Planner cannot self-serve work
+
+- **WHEN** a planner proposes a task
+- **THEN** the task is not claimable until the user approves it, so the planner
+  cannot inject work into the backlog unilaterally
 
 ### Requirement: The worker loop
 
@@ -224,12 +243,67 @@ gate.
 - **THEN** the reviewer's opinion is delivered as feedback and is not a gate — the
   human's review and merge is what lands the work
 
+### Requirement: The coauthor works outside the managed loop
+
+A coauthor SHALL work directly with the user, outside the managed
+plan/build/review loop. It SHALL NOT claim backlog tasks, SHALL NOT open managed
+PRs, and SHALL NOT pass through a review gate. It shares the user's checkout, so
+the user steers and reviews its work directly in the same tree, and the coauthor
+SHALL use git itself — the hub does not commit on its behalf as it does for a
+worker, and there is no merge-intent to approve. This is the freestyle
+counterpart to the gated worker loop; the two coexist, and the user chooses per
+agent which mode they want.
+
+#### Scenario: Coauthor takes no managed task
+
+- **WHEN** a coauthor is working with the user
+- **THEN** it never claims a backlog task or registers a merge-intent; the work is
+  driven entirely by the user in the shared checkout
+
+#### Scenario: Coauthor work is not gated by review
+
+- **WHEN** a coauthor changes code in the shared checkout
+- **THEN** the change is not routed through a reviewer or a merge gate; the user
+  reviews it directly, since they share the tree
+
+#### Scenario: Coauthor commits with git itself
+
+- **WHEN** a coauthor needs to commit
+- **THEN** it runs git directly in `/workspace`, rather than asking the hub to
+  commit and submit a branch the way a worker does
+
+### Requirement: The planner loop
+
+A planner SHALL run a loop of: orient (read README, the backlog, the specs) → wait
+for the user to steer it → with the user, propose tasks (`create-task`) and draft
+openspec → ship the specs for review (`openspec submit`) → go idle. A planner
+SHALL NOT claim backlog tasks and SHALL NOT block; like a worker, it goes idle
+after shipping and is woken by the hub injecting a verdict or user steering. A
+proposed task SHALL require the user's approval before any worker can claim it.
+
+#### Scenario: Orient then wait
+
+- **WHEN** a planner is launched or has nothing in flight
+- **THEN** it is directed to read the repo and specs and then wait for the user,
+  rather than being assigned a backlog task
+
+#### Scenario: Propose and ship
+
+- **WHEN** a planner, working with the user, has drafted specs and proposed tasks
+- **THEN** the tasks await the user's approval and the specs are shipped via
+  `openspec submit` for review, after which the planner goes idle
+
+#### Scenario: Rejected plan
+
+- **WHEN** a planner's shipped openspec PR is rejected by the reviewer
+- **THEN** the planner drops to idle and the feedback is injected so it can revise
+  and submit again
+
 ## Structure
 
-The agent loops live in `container/skills/td-next` (worker) and
-`container/skills/td-review` (reviewer); the agents' verbs are implemented in
-`internal/agentcli` (issue/submit/done/pr…), wired into the `sindri-worker` and
-`sindri-review` binaries, with PR records in `internal/ghlocal/store`. The
-human-only merge and the host review flow are the `action-*` specs driven from
-`cmd/sindri` and the TUI. Task state transitions go through the td CLI
-(in-container) and the td adapter (on host).
+The loops are the hub's, not the agents': `internal/hub/workflow/` decides what each
+role is told to do next, and `cmd/sindri-worker/` is the thin browser that renders it
+— one binary for every role, its surface filtered by `internal/hub/commands/`. PR
+records and task state live in `internal/hub/store/`, and the trackers are reached
+through `internal/adapter/tasks/` (`td`, `spec`, `github`). The human-only merge and
+the host review flow are driven from `cmd/sindri` and the TUI in `internal/ui/`.

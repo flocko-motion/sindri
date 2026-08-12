@@ -13,23 +13,26 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flo-at/sindri/internal/container"
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/theme"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
-// agentPreflight warns without blocking when podman is unreachable: it is the likeliest
-// reason nothing works, so say so rather than let the user infer it from "all agents down".
-func agentPreflight(*cobra.Command, []string) {
-	if ok, hint := container.Healthy(); !ok {
-		fmt.Fprintf(os.Stderr, "warning: %s\n", hint)
+// warnRuntime passes on the hub's own verdict on the container runtime: it is the likeliest reason
+// nothing works, so say so rather than let the user infer it from "all agents down".
+//
+// Read off the board, never probed here. Every `sindri agent …` used to spawn `podman info` first,
+// which costs 3.8s on a loaded host — so `agent dir`, printing one path, took three and a half
+// seconds, and the probe's own 3s timeout reported a slow-but-working podman as unreachable.
+func warnRuntime(st api.BoardState) {
+	if st.RuntimeHint != "" {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", st.RuntimeHint)
 	}
 }
 
 // agentByName finds an agent by name in the global roster, nil when absent.
-func agentByName(agents []hub.AgentView, name string) *hub.AgentView {
+func agentByName(agents []api.AgentView, name string) *api.AgentView {
 	for i := range agents {
 		if agents[i].Name == name {
 			return &agents[i]
@@ -39,7 +42,7 @@ func agentByName(agents []hub.AgentView, name string) *hub.AgentView {
 }
 
 // projectRoot maps an agent's project tag to its on-disk repo root, "" if unknown.
-func projectRoot(projects []store.Project, tag string) string {
+func projectRoot(projects []api.Project, tag string) string {
 	for _, p := range projects {
 		if p.Tag == tag {
 			return p.Path
@@ -50,7 +53,7 @@ func projectRoot(projects []store.Project, tag string) string {
 
 // warnCrossRepo makes reaching into another repo conscious without ever failing: the CLI is
 // global like the TUI. A terminal is asked to confirm; non-interactive proceeds after the note.
-func warnCrossRepo(a *hub.AgentView, cwdRoot, agentRoot string) bool {
+func warnCrossRepo(a *api.AgentView, cwdRoot, agentRoot string) bool {
 	if cwdRoot == "" || agentRoot == "" || agentRoot == cwdRoot {
 		return true
 	}
@@ -63,7 +66,7 @@ func warnCrossRepo(a *hub.AgentView, cwdRoot, agentRoot string) bool {
 
 // withAgent resolves name in the global roster and hands fn a backend scoped to the agent's
 // own project, so any agent is manageable from any cwd instead of erroring "no such agent".
-func withAgent(name string, fn func(b backend, a *hub.AgentView) error) error {
+func withAgent(name string, fn func(b backend, a *api.AgentView) error) error {
 	root, _ := repoRoot() // "" outside any repo — then there's no cwd context to cross
 	b, err := open(root)
 	if err != nil {
@@ -74,6 +77,7 @@ func withAgent(name string, fn func(b backend, a *hub.AgentView) error) error {
 		b.Close()
 		return err
 	}
+	warnRuntime(st)
 	a := agentByName(st.Agents, name)
 	if a == nil {
 		b.Close()
@@ -103,15 +107,20 @@ func agentListCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				for _, a := range st.Agents {
-					line := fmt.Sprintf("%-10.10s %-12s %-8s %-10s %-14s %s", a.Repo, a.Name, a.Role, a.Status, dash(a.Task), dash(a.PR))
+				warnRuntime(st) // a whole roster reading "down" has one likely cause
+				for _, a := range api.SortedAgents(st.Agents, st.Projects) {
+					line := fmt.Sprintf("%-10.10s %-12s %-8s %-10s %4s %-14s %s", a.Repo, a.Name, a.Role, a.Status,
+						theme.ContextPercent(a.ContextTokens, a.ContextWindow), dash(a.Task), dash(a.PR))
+					if a.Retired {
+						line += "  ⏹ retired" // beside the status, which still shows what it is doing
+					}
 					if a.Clients > 0 {
 						line += fmt.Sprintf("  👁%d", a.Clients)
 					}
 					fmt.Println(line)
 				}
 				for _, o := range st.Orphans {
-					fmt.Printf("⚠  orphan: %s — no roster entry; remove with 'podman rm -f %s'\n", o, o)
+					fmt.Printf("⚠  orphan: %s — no roster entry; remove with 'sindri agent delete %s'\n", o, o)
 				}
 				if len(st.Agents) == 0 && len(st.Orphans) == 0 {
 					fmt.Fprintln(os.Stderr, "no agents — register one with 'sindri agent new <name>'")
@@ -134,7 +143,7 @@ func agentStatsCmd() *cobra.Command {
 				}
 				views := report.Agents
 				if len(args) == 1 { // narrow to one agent
-					var only []hub.AgentStatsView
+					var only []api.AgentStatsView
 					for _, v := range views {
 						if v.Name == args[0] {
 							only = append(only, v)
@@ -153,7 +162,7 @@ func agentStatsCmd() *cobra.Command {
 						fmt.Printf("%-10.10s %-12s stats unavailable: %s\n", v.Repo, v.Name, v.Err)
 						continue
 					}
-					fmt.Printf("%-10.10s %-12s %s\n", v.Repo, v.Name, memLine(v.MemUsageBytes, v.MemLimitBytes))
+					fmt.Printf("%-10.10s %-12s %s\n", v.Repo, v.Name, theme.MemLine(v.MemUsageBytes, v.MemLimitBytes))
 				}
 				return nil
 			})
@@ -161,45 +170,15 @@ func agentStatsCmd() *cobra.Command {
 	}
 }
 
-// memLine renders "544 MiB / 1024 MiB  53% [█████·····]" for a usage/limit pair.
-func memLine(usage, limit int64) string {
-	pct := 0.0
-	if limit > 0 {
-		pct = float64(usage) / float64(limit) * 100
-	}
-	return fmt.Sprintf("%9s / %-9s %3.0f%% %s", humanBytes(usage), humanBytes(limit), pct, memBar(pct))
-}
-
-// humanBytes uses binary units, matching how memory limits are configured.
-func humanBytes(n int64) string {
-	const u = 1024
-	if n < u {
-		return fmt.Sprintf("%d B", n)
-	}
-	f, units, i := float64(n), []string{"KiB", "MiB", "GiB", "TiB"}, -1
-	for f >= u && i < len(units)-1 {
-		f, i = f/u, i+1
-	}
-	return fmt.Sprintf("%.0f %s", f, units[i])
-}
-
-// memBar is a 10-cell usage meter; fuller = closer to the limit.
-func memBar(pct float64) string {
-	const w = 10
-	fill := int(pct/100*w + 0.5)
-	if fill > w {
-		fill = w
-	}
-	if fill < 0 {
-		fill = 0
-	}
-	return "[" + strings.Repeat("█", fill) + strings.Repeat("·", w-fill) + "]"
-}
-
 func agentNewCmd() *cobra.Command {
 	var role, memory string
+	var noStart bool
 	c := &cobra.Command{
-		Use: "new [name]", Short: "Register an agent identity (no container; name optional — auto dwarf name)", Args: cobra.MaximumNArgs(1),
+		Use: "new [name]", Short: "Create an agent and start it (name optional — auto dwarf name)", Args: cobra.MaximumNArgs(1),
+		Long: "Register an agent identity and start its container, which is what you almost always want —\n" +
+			"the same thing the TUI's 'new' does.\n\n" +
+			"--no-start registers the identity alone, for pre-declaring an agent you will start later.\n" +
+			"An agent exists independently of any container, so this is a supported state, not a failure.",
 		RunE: func(_ *cobra.Command, args []string) error {
 			var want string
 			if len(args) == 1 {
@@ -210,13 +189,26 @@ func agentNewCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(os.Stderr, "registered %s (%s) — start with 'sindri agent start %s'\n", name, role, name)
+				if noStart {
+					fmt.Fprintf(os.Stderr, "registered %s (%s) — start with 'sindri agent start %s'\n", name, role, name)
+					return nil
+				}
+				fmt.Fprintf(os.Stderr, "registered %s (%s) — starting it\n", name, role)
+				// The launch streams (a first run builds the image, which is slow), and its own
+				// output is the account of a failure. Registration already succeeded, so a
+				// failed start is reported as exactly that — the agent exists and can be
+				// started again, which a bare error would not convey.
+				if err := b.Launch(name, false, false, os.Stderr); err != nil {
+					return fmt.Errorf("%s was registered but did not start: %w\n"+
+						"it exists as a stopped agent — retry with 'sindri agent start %s'", name, err, name)
+				}
 				return nil
 			})
 		},
 	}
 	c.Flags().StringVar(&role, "role", "worker", "agent role: worker|reviewer|planner|coauthor")
-	c.Flags().StringVar(&memory, "memory", "", "RAM limit for this agent's container (e.g. 4g, 512m; default 2g)")
+	c.Flags().StringVar(&memory, "memory", "", "RAM limit for this agent's container (e.g. 4g, 512m; unset = the runtime's default)")
+	c.Flags().BoolVar(&noStart, "no-start", false, "register the identity only, without starting a container")
 	return c
 }
 
@@ -229,7 +221,7 @@ func agentMemoryCmd() *cobra.Command {
 			if size == "default" {
 				size = "" // reset to the hub default
 			}
-			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				if err := b.SetMemory(a.Name, size); err != nil {
 					return err
 				}
@@ -241,11 +233,47 @@ func agentMemoryCmd() *cobra.Command {
 	}
 }
 
+// agentRetireCmd winds an agent down without interrupting it: the point is to stop it AFTER the work
+// in hand, so the pod keeps running and only the next assignment is withheld.
+func agentRetireCmd() *cobra.Command {
+	var back bool
+	c := &cobra.Command{
+		Use: "retire <name>", Short: "Assign this agent no further work (it finishes what it holds)", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
+				if err := b.SetRetired(a.Name, !back); err != nil {
+					return err
+				}
+				if back {
+					fmt.Fprintf(os.Stderr, "%s takes work again\n", a.Name)
+					return nil
+				}
+				held := "it holds nothing, so it is done now"
+				if a.Task != "" || a.Feature != "" || a.PR != "" {
+					held = "it will finish what it holds first"
+				}
+				fmt.Fprintf(os.Stderr, "%s retired: no new work — %s. Stop it with 'sindri agent stop %s', "+
+					"or bring it back with 'sindri agent retire %s --back'\n", a.Name, held, a.Name, a.Name)
+				return nil
+			})
+		},
+	}
+	c.Flags().BoolVar(&back, "back", false, "put the agent back in service")
+	return c
+}
+
 func agentDeleteCmd() *cobra.Command {
 	return &cobra.Command{
-		Use: "delete <name>", Aliases: []string{"rm"}, Short: "Delete an agent (container, socket, worktree, identity)", Args: cobra.ExactArgs(1),
+		Use: "delete <name>", Aliases: []string{"rm"}, Short: "Delete an agent (container, socket, worktree, identity), or remove an orphan", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+			// An orphan is runtime with no roster entry, so there is no agent to look up and
+			// withAgent would fail on it. Same command either way: the user sees one stray name
+			// in `agent list` and should not have to know which kind of stray it is.
+			removed, err := removeIfOrphan(args[0])
+			if err != nil || removed {
+				return err
+			}
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				if err := b.DeleteAgent(a.Name); err != nil {
 					return err
 				}
@@ -256,12 +284,37 @@ func agentDeleteCmd() *cobra.Command {
 	}
 }
 
+// removeIfOrphan removes name if the board lists it as an orphan, reporting whether it did. The
+// board is what decides: an orphan is defined by having no roster entry, which only the hub knows.
+func removeIfOrphan(name string) (bool, error) {
+	done := false
+	err := withBackend(func(b backend) error {
+		st, err := b.State()
+		if err != nil {
+			return err
+		}
+		for _, o := range st.Orphans {
+			if o != name {
+				continue
+			}
+			if err := b.RemoveOrphan(name); err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stderr, "removed orphan %s — it had no roster entry, so no agent was deleted\n", name)
+			done = true
+			return nil
+		}
+		return nil
+	})
+	return done, err
+}
+
 func agentPaneCmd() *cobra.Command {
 	var lines int
 	c := &cobra.Command{
 		Use: "pane <name>", Short: "Print the agent's live tmux screen (capture-pane)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				out, err := b.AgentPane(a.Name, lines)
 				if err != nil {
 					return err
@@ -284,7 +337,7 @@ func agentStartCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use: "start <name>", Short: "Start the agent: spin a container that assumes its identity (runs Claude)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				// Launch already ends with "launched — coming up"; a "started" here would contradict it.
 				return b.Launch(a.Name, shell, debug, os.Stderr)
 			})
@@ -299,11 +352,30 @@ func agentStopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "stop <name>", Short: "Tear down the agent's container (keeps its identity)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				if err := b.StopAgent(a.Name); err != nil {
 					return err
 				}
 				fmt.Fprintf(os.Stderr, "stopped %s\n", a.Name)
+				return nil
+			})
+		},
+	}
+}
+
+// agentClearContextCmd sends /clear into a full agent's session — the confirmed remedy for
+// retirement; the user typing this command IS the confirmation (the same convention `agent
+// delete` uses for its own irreversible action, no extra prompt on top of it). The hub still
+// refuses if the agent holds a task: clearing is only safe at a leaf boundary.
+func agentClearContextCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "clear-context <name>", Short: "Send /clear into the agent's session and re-serve its directive (leaf boundary only)", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
+				if err := b.ClearContext(a.Name); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "cleared %s's context — it will pick up its directive fresh\n", a.Name)
 				return nil
 			})
 		},
@@ -316,7 +388,7 @@ func agentRebaseCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "rebase <name>", Short: "Rebase the agent's worktree onto the current reference branch", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				if err := b.RebaseAgent(a.Name); err != nil {
 					return err
 				}
@@ -333,7 +405,7 @@ func agentRebuildCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "rebuild <name>", Short: "Rebuild the agent's image (re-pull the base) and relaunch it (session resumes)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				return b.RebuildImage(a.Name, os.Stderr) // streams build + restart progress
 			})
 		},
@@ -346,7 +418,7 @@ func agentRestartCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use: "restart <name>", Short: "Restart the agent's container (starts it if it wasn't running)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				if a.Status != "down" { // tear down the running container first
 					if err := b.StopAgent(a.Name); err != nil {
 						return err
@@ -400,7 +472,7 @@ func agentTellCmd() *cobra.Command {
 		Use: "tell <name> <message...>", Short: "Send a message into an agent's session ([user])", Args: cobra.MinimumNArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
 			msg := strings.Join(args[1:], " ")
-			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				if err := b.Tell(a.Name, msg, "user"); err != nil {
 					return err
 				}
@@ -413,13 +485,21 @@ func agentTellCmd() *cobra.Command {
 
 // agentPlanCmd sends a phased brief — read, check for prior work, interview — not your raw text.
 func agentPlanCmd() *cobra.Command {
-	return &cobra.Command{
-		Use: "plan <name> <what to plan...>", Short: "Assign a planner a plan to work out (reads, checks, then interviews you)",
-		Args: cobra.MinimumNArgs(2),
+	var taskID string
+	c := &cobra.Command{
+		Use: "plan <name> [what to plan...]", Short: "Assign a planner a plan to work out (reads, checks, then interviews you)",
+		Long: "Assign a planner something to work out. It reads, checks for prior work, then interviews you.\n\n" +
+			"--task hands it an existing task instead: the task's title and body are the brief, it\n" +
+			"becomes the parent of every piece the planning produces, and it is held back from workers\n" +
+			"until you rule on the result. Free text may accompany a task to add what the task omits.",
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			goal := strings.Join(args[1:], " ")
-			return withAgent(args[0], func(b backend, a *hub.AgentView) error {
-				if err := b.AssignPlan(a.Name, goal); err != nil {
+			if goal == "" && taskID == "" {
+				return fmt.Errorf("say what to plan, or name a task with --task")
+			}
+			return withAgent(args[0], func(b backend, a *api.AgentView) error {
+				if err := b.AssignPlan(a.Name, goal, taskID); err != nil {
 					return err
 				}
 				fmt.Fprintf(os.Stderr, "assigned to %s — it will read, check for prior work, then interview you\n", a.Name)
@@ -427,6 +507,8 @@ func agentPlanCmd() *cobra.Command {
 			})
 		},
 	}
+	c.Flags().StringVar(&taskID, "task", "", "work up this existing task: it becomes the brief and the parent of what follows")
+	return c
 }
 
 // agentTaskLabel is a task id with its title alongside it when known, else the bare id — so
@@ -448,9 +530,17 @@ func agentInfoCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use: "info <name>", Short: "Show an agent's status (state, task, PR, clients, recent activity)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return withAgent(args[0], func(b backend, found *hub.AgentView) error {
-				fmt.Printf("agent:     %s\nrole:      %s\nstatus:    %s\ntask:      %s\npr:        %s\nworkspace: %s\nmemory:    %s\n",
-					found.Name, found.Role, found.Status, agentTaskLabel(b, found.Task), dash(found.PR), dash(found.Workspace), memoryLabel(found.Memory))
+			return withAgent(args[0], func(b backend, found *api.AgentView) error {
+				// The hub's own default, for the "(default)" note — read rather than assumed, since
+				// it is the wired runtime's answer and differs between a container and a micro-VM.
+				var dflt string
+				if st, err := b.State(); err == nil {
+					dflt = st.DefaultMemory
+				}
+				fmt.Printf("agent:     %s\nrole:      %s\nstatus:    %s\ntask:      %s\nfeature:   %s\npr:        %s\nworkspace: %s\nmemory:    %s\ncontext:   %s\n",
+					found.Name, found.Role, found.Status, agentTaskLabel(b, found.Task),
+					agentTaskLabel(b, found.Feature), dash(found.PR), dash(found.Workspace), memoryLabel(found.Memory, dflt),
+					theme.ContextLine(found.ContextTokens))
 				// engine + the exact runtime instance (id, image, cpus, memory limit, host pid)
 				if inst, err := b.Instance(found.Name); err == nil && inst != "" {
 					fmt.Printf("\n%s\n", inst)
@@ -461,7 +551,7 @@ func agentInfoCmd() *cobra.Command {
 					}
 				}
 				if cs, err := b.Clients(found.Name); err == nil {
-					fmt.Print(hub.FormatClients(cs))
+					fmt.Print(theme.FormatClients(cs))
 				}
 				evs, err := b.Log(found.Name)
 				if err != nil {
@@ -494,10 +584,10 @@ func eventTime(ts string) string {
 	return t.Local().Format("15:04:05")
 }
 
-// memoryLabel marks the fallback when unset; "2g" mirrors hub defaultAgentMemory, display only.
-func memoryLabel(m string) string {
+// memoryLabel marks the fallback when unset, with the hub's own figure rather than a copy of it.
+func memoryLabel(m, dflt string) string {
 	if strings.TrimSpace(m) == "" {
-		return "2g (default)"
+		return theme.MemoryDefaultLabel(dflt)
 	}
 	return m
 }

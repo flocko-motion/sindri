@@ -32,6 +32,11 @@ type Engine struct{}
 // Name identifies this backend for humans.
 func (Engine) Name() string { return "podman" }
 
+// DefaultMemory: -m on a shared-kernel container is a CEILING, so headroom costs nothing until it
+// is used. 3g rather than the runtime's 1GiB, which a worker running a compiler, the linters and
+// Claude Code at once exhausts — an OOM kill there reads as an agent that died for no stated reason.
+func (Engine) DefaultMemory() string { return "3g" }
+
 // AgentChannel: podman resolves the magic name host.containers.internal to a
 // forwarded route to host services, so pods dial that name and the hub binds
 // loopback.

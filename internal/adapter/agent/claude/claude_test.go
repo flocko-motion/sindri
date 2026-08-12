@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/flo-at/sindri/internal/adapter/agent"
@@ -51,6 +52,57 @@ func TestClaudeState(t *testing.T) {
 			name:   "blocked wins over the visible prompt box",
 			screen: "Do you want to proceed?\n❯ 1. Yes\n  2. No\n(esc to cancel)\n❯ ",
 			want:   agent.Blocked,
+		},
+		{
+			// eitri's pane, verbatim: a hub message sat unsent IN the input box while the board read
+			// "idle" for hours. The box is drawn, so signed-out has to be decided before idle.
+			name:   "expired login outranks the prompt box",
+			screen: "❯ [hub] feat-macos-release moved — your branch was rebased onto it.\n\n● Login expired · Please run /login\n\n────────\n❯ \n────────",
+			want:   agent.SignedOut,
+		},
+		{
+			name:   "an invalid key is the same banner",
+			screen: "● Invalid API key · Please run /login\n❯ ",
+			want:   agent.SignedOut,
+		},
+		{
+			// The pattern lives in a file sindri's own agents edit. Matching the words wherever they
+			// appear would have every pane showing this source read as an agent that cannot work.
+			name:   "the banner quoted in source text is not the state",
+			screen: "✳ Editing… (esc to interrupt)\n  regexp.MustCompile(`· please run /login$`) // the banner",
+			want:   agent.Working,
+		},
+		{
+			// gloin, verbatim: the API cut the turn off, and the footer went on advertising a live turn.
+			// Measured on it, the pane's digest still changed every few seconds — so neither the words
+			// nor a still screen could see this, which is why it is matched by name.
+			name:   "a cut-off turn outranks the interrupt hint it leaves behind",
+			screen: "● API Error: Response stalled mid-stream. The response above may be incomplete.\n\n❯ \n  ⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt · ← for agents",
+			want:   agent.Failed,
+		},
+		{
+			// Once it really resumes, the error scrolls up out of the live region and the pane is a
+			// working pane again. Matched anywhere, it would keep reporting a turn that already retried.
+			name: "an API error scrolled out of the live region is history",
+			screen: "● API Error: Response stalled mid-stream.\n" +
+				strings.Repeat("  output since the retry\n", 14) + "✳ Working… (esc to interrupt)",
+			want: agent.Working,
+		},
+		{
+			// eitri, one minute after it was logged back in: the banner was still on screen while it
+			// answered the user below it. An interrupt hint is happening NOW; the banner may be history.
+			name: "a recovered agent working below an old banner is working",
+			screen: "● Login expired · Please run /login\n" +
+				strings.Repeat("  more output since then\n", 14) + "✳ Crunching… (esc to interrupt)\n❯ ",
+			want: agent.Working,
+		},
+		{
+			// Same pane at rest: the banner has scrolled out of the live region, so what is true now is
+			// an idle prompt. Read as signed-out it would have sent the user to fix a working agent.
+			name: "a banner scrolled out of the live region is history",
+			screen: "● Login expired · Please run /login\n" +
+				strings.Repeat("  more output since then\n", 14) + "❯ ",
+			want: agent.Idle,
 		},
 	}
 	for _, c := range cases {

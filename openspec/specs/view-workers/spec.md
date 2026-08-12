@@ -41,13 +41,27 @@ from inferring container or worktree position.
 
 ### Requirement: Reviewer distinct
 
-The review agent SHALL appear distinctly from the dwarf workers (a separate
-role), not as one of them.
+Each agent SHALL appear with its own role — worker, reviewer, or planner — taken
+from the hub's state. The review agent and the planner SHALL each be shown with
+their own role and SHALL NOT be rendered as dwarf workers. Because a planner is
+never assigned a backlog task, its status SHALL be one of down, idle, or submitted
+(it is never "working").
 
 #### Scenario: Listing with a reviewer
 
 - **WHEN** the reviewer and dwarf workers are listed together
 - **THEN** the reviewer is shown with the reviewer role, not as a dwarf worker
+
+#### Scenario: Listing with a planner
+
+- **WHEN** a planner is listed alongside workers and a reviewer
+- **THEN** it is shown with the planner role, and its status is idle/submitted/down
+  rather than working
+#### Scenario: Listing with a coauthor
+
+- **WHEN** a coauthor is listed alongside workers and a reviewer
+- **THEN** it is shown with the coauthor role, and its status is down/idle/collab
+  rather than working or submitted
 
 ### Requirement: Loading state distinct from empty
 
@@ -71,15 +85,19 @@ thinking there are no workers before the data has arrived.
 ### Requirement: Orphaned runtime is flagged
 
 The workers view SHALL flag orphaned runtime — a pod or worktree with no roster
-entry — as a warning distinct from any agent row, and SHALL show the proposed
-shell command to remove it. Orphans SHALL NOT be rendered as if they were declared
-agents.
+entry — as a warning distinct from any agent row, and SHALL offer to remove it,
+confirming first. Orphans SHALL NOT be rendered as if they were declared agents.
 
 #### Scenario: Orphan warning
 
 - **WHEN** a pod exists with no matching roster entry
-- **THEN** the view shows an "orphaned agent" warning with a suggested removal
-  command, not a normal agent row
+- **THEN** the view shows an "orphaned agent" warning, not a normal agent row
+
+#### Scenario: Removal is offered, not merely described
+
+- **WHEN** the user acts on a flagged orphan
+- **THEN** the view asks for confirmation and then removes it, rather than printing a
+  command for the user to run themselves
 
 ### Requirement: Per-worker activity timeline
 

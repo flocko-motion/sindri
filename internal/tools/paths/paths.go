@@ -43,3 +43,9 @@ func RuntimeDir() string {
 	}
 	return StateDir()
 }
+
+// HubSocket is the global hub's control socket: the server binds it, clients dial it.
+// There is one hub for the whole machine, so it lives under the runtime dir, not any repo.
+func HubSocket() string {
+	return filepath.Join(RuntimeDir(), "hub.sock")
+}

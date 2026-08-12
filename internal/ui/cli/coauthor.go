@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/tmux"
+	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/container"
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/client"
 	"github.com/flo-at/sindri/internal/ui/attach"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -50,7 +50,7 @@ func NewCoauthorCmd() *cobra.Command {
 			}
 			defer cl.Close()
 
-			proj := hub.RepoTag(root)
+			proj := api.RepoTag(root)
 			name, err := ensureCoauthor(cl, proj)
 			if err != nil {
 				return err
@@ -58,7 +58,7 @@ func NewCoauthorCmd() *cobra.Command {
 			if err := ensureCoauthorAlive(cl, proj, name); err != nil {
 				return err
 			}
-			cname := hub.Container(root, name)
+			cname := container.AgentContainer(root, name)
 			fmt.Fprintf(os.Stderr, "attaching to %s — detach with your tmux prefix then d\n", name)
 			// Report the coauthor to herdr for the pairing session, same as every other
 			// attach path — a coauthor is an agent too. No-op outside a herdr pane.
@@ -101,7 +101,11 @@ func ensureCoauthorAlive(cl *client.HTTP, proj, name string) error {
 	if err != nil {
 		return err
 	}
-	if statusOf(st, proj, name) == "down" {
+	// Not-yet-observed counts as needing a launch: the agent was created moments ago and the
+	// watchdog only looks every couple of seconds, so this is the ordinary state of a coauthor
+	// created by the line above. Reading it as "already running" skips the launch and attaches
+	// to a pod that was never started.
+	if api.AgentNeedsLaunch(statusOf(st, proj, name)) {
 		fmt.Fprintf(os.Stderr, "launching agent '%s' (first run builds the agent image — may take a few minutes)…\n", name)
 		if err := cl.Launch(name, false, false, os.Stderr); err != nil {
 			return err
@@ -112,19 +116,18 @@ func ensureCoauthorAlive(cl *client.HTTP, proj, name string) error {
 		if err != nil {
 			return err
 		}
-		switch statusOf(st, proj, name) {
-		case "", "down", "launching", "stopping":
+		if api.AgentNotUp(statusOf(st, proj, name)) {
 			time.Sleep(100 * time.Millisecond)
-		default: // a running phase (collab/idle/…): the session is alive
-			return nil
+			continue
 		}
+		return nil // a running phase (collab/idle/…): the session is alive
 	}
 	return fmt.Errorf("%s did not become ready in time", name)
 }
 
 // statusOf returns the named agent's status word from a board snapshot, or "".
 // Matches on project too: agent names are unique per project, not globally.
-func statusOf(st hub.BoardState, proj, name string) string {
+func statusOf(st api.BoardState, proj, name string) string {
 	for _, a := range st.Agents {
 		if a.Project == proj && a.Name == name {
 			return a.Status

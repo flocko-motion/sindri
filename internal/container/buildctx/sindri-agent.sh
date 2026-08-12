@@ -18,19 +18,13 @@ HOME="${HOME:-/home/sindri}"
 
 echo "=== sindri agent '$AGENT' starting ==="
 
-# Reserve the bottom row as a help/status line so the Claude pane no longer
-# fills the whole screen: it shows the hotkeys a dialed-in human needs — chiefly
-# how to detach again (C-b d leaves the agent running; do NOT C-c or `exit`).
-# Written as ~/.tmux.conf (global options) so the server adopts it at start and
-# nothing — including Claude's pane title — shadows our status-right.
+# Reserve the bottom row for the hotkeys a dialed-in human needs — chiefly how to
+# detach (C-b d leaves the agent running; do NOT C-c or `exit`). Global options in
+# ~/.tmux.conf, so the server adopts them at start and nothing shadows status-right.
 cat > "$HOME/.tmux.conf" <<'TMUXCONF'
-# Truecolor: Claude's TUI emits 24-bit colour (its orange is an RGB value), so the
-# pane terminal must be 256-colour and every client tmux renders to must be flagged
-# RGB-capable — otherwise tmux downsamples 24-bit to the 16-colour palette and the
-# orange collapses to a plain red. default-terminal makes the in-pane TERM
-# tmux-256color; `terminal-features *:RGB` tells tmux the attaching client can take
-# 24-bit (tmux 3.5 doesn't reliably promote from the forwarded COLORTERM alone). The
-# attach path forwards the host's TERM/COLORTERM so the client identity is real.
+# Truecolor: Claude's TUI emits 24-bit colour, so the pane must be 256-colour AND the
+# attaching client flagged RGB-capable, or tmux downsamples and its orange goes red.
+# tmux 3.5 won't promote from the forwarded COLORTERM alone, hence terminal-features.
 set -g default-terminal "tmux-256color"
 set -as terminal-features ",*:RGB"
 set -g status on
@@ -61,20 +55,11 @@ TMUXCONF
 if [ -n "${SINDRI_SHELL:-}" ]; then
 	tmux new-session -d -s "$SESSION" bash
 else
-	# --continue resumes the most recent Claude session for this workspace, so an
-	# agent picks up its full conversation after a pod restart or a machine reboot
-	# — the transcripts live under ~/.claude (a persistent host bind-mount) and the
-	# cwd is always /workspace, so the lookup is stable. But `claude --continue`
-	# EXITS NON-ZERO when there's nothing to resume (a first launch), so we fall
-	# back to a fresh `claude` on failure rather than dropping straight to bash.
-	# --append-system-prompt is re-applied every launch (harmless if the resumed
-	# session already has it, and it must never be silently dropped, or the agent
-	# would lose its role). Single-quote the command so $() is evaluated by tmux's
-	# shell at session start, not here — the system prompt is multi-line. When
-	# Claude exits, `stty sane` restores the line discipline (Claude leaves the
-	# terminal raw with echo off) before we drop into an interactive shell (exec
-	# bash) — otherwise a dialed-in human would type into a shell that never echoes.
-	# The session lives on so they land at a prompt instead of the pane dying.
+	# --continue resumes this workspace's session across a restart, but EXITS NON-ZERO
+	# with nothing to resume, so a first launch falls back to a fresh `claude`, not bash.
+	# --append-system-prompt every launch: dropping it costs the agent its role.
+	# Single-quoted so tmux's shell evaluates the multi-line $() at session start.
+	# `stty sane` undoes Claude's raw, echo-off terminal so a dial-in lands at a prompt.
 	tmux new-session -d -s "$SESSION" \
 		'SP="$(cat /home/sindri/.claude/system-prompt.txt)"; claude --continue --dangerously-skip-permissions --append-system-prompt "$SP" || claude --dangerously-skip-permissions --append-system-prompt "$SP"; stty sane; exec bash -i'
 fi

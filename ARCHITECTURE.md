@@ -1,7 +1,9 @@
 # Architecture
 
 Sindri follows a **strict hexagonal architecture** (ports & adapters). These rules
-are not aspirational — they are enforced in review.
+are not aspirational. Several are enforced by tests that fail the build (each named
+below where it applies); the rest are enforced in review. A rule you can break
+without a test failing is still a rule.
 
 ## The core is headless
 
@@ -12,24 +14,61 @@ does not care who calls them.
 
 ## The outside world is reached only through adapters
 
-Every interaction with something outside the process — git, podman, tmux, the
-task tracker (td), the spec tool — goes through an adapter in `internal/adapter/`.
-The core calls adapters; it never shells out, dials a socket, or touches an
-external tool directly. Swapping or mocking an external tool is a change to one
-adapter and nothing else.
+Every interaction with something outside the process — git, podman, tmux, GitHub,
+the spec tool — goes through an adapter in `internal/adapter/`. The core calls
+adapters; it never shells out, dials a socket, or touches an external tool directly.
+
+**Name the port, not the tool.** Where a family of implementations exists for one
+job — the container runtime, the coding agent, the task source — the core depends on
+the **port**, the interface naming that job, and never names a concrete adapter.
+Choosing the implementation is the composition root's work: the core is handed one
+and never constructs it.
+
+Where a tool has exactly one implementation and no plausible second — git, tmux —
+the core imports its adapter directly. The abstraction earns its place by making an
+implementation swappable or fakeable; requiring one where nothing can vary buys
+nothing and hides which tool is in use.
+
+**A port hides its differences, or it is not a port.** Sindri's own tasks, openspec
+changes and GitHub issues are all tasks: each is worked, closed, submitted and
+reviewed identically, and no caller may branch on which kind it holds. Where the
+kinds genuinely differ — a task sindri owns keeps its status in the hub's store, a
+mirrored one keeps it at its source — that difference lives behind one operation
+(`workflow.Engine.SetStatus`) and stops there. A caller that has to ask what kind of
+task it has is a caller that will one day forget to; four of them did, each leaving a
+finished openspec change reading open. `internal/hub/workflow/onehome_test.go` holds
+the line for status specifically: only the owned source may write `owned_tasks`.
 
 ## CLI and TUI are interchangeable front-ends
 
-The CLI (`cmd/sindri`) and the TUI (`internal/tui`) are **thin interface layers**.
+The CLI and the TUI (both under `internal/ui`, launched by `cmd/sindri`) are **thin
+interface layers**.
 They must always execute the **same** core logic — they translate user intent into
 core operations and render the result. Nothing more.
 
 - **No business logic in the CLI or TUI.** Only interface logic belongs there:
   argument parsing, key handling, layout, rendering, formatting.
 - Any behaviour offered by one front-end must be reachable from the other, because
-  both drive the same operations.
+  both drive the same operations. `internal/ui/parity_test.go` enforces it over the
+  client's method set; a deliberate exception goes in that test's allowlist with the
+  reason it is not a gap, so the argument is on record rather than assumed.
 - A front-end reaches the core through the client (`internal/client`), which talks
   to the single hub — so the CLI and TUI are literally running the same code.
+- **A front-end links no hub code.** It carries the exchange format (`internal/api`)
+  and the client, and no hub package, persistence driver, or adapter that only the hub
+  needs. An adapter the front-end itself needs is fine — it attaches to tmux and runs
+  git locally. A front-end that needs a hub running starts it by executing that
+  binary, rather than constructing one in its own process.
+  `internal/ui/importguard_test.go` enforces the `internal/hub` half of this over the
+  real import graph, so an indirect import fails too.
+
+## Every file declares its layer
+
+Each non-test `.go` file opens with the four-field header `brokkr map` reads, and its
+`type:` names the layer from a **closed set**: `logic`, `adapter`, `assembly`,
+`rendering`, `ui`, `command`, `entrypoint`. Closed on purpose — a vocabulary anyone
+may extend describes nothing, and a file that fits none of the seven is usually a
+file doing two jobs. `internal/arch/vocab_test.go` fails the build on an eighth.
 
 ## Topology
 
@@ -43,6 +82,8 @@ else is a front-end or a pod.
 ## Tooling
 
 - `cmd/sindri` — the product: the host CLI and the TUI launcher.
+- `cmd/sindri-hub` — the hub itself: the single writer, run in the foreground or
+  spawned detached by `sindri hub start`.
 - `cmd/sindri-worker` — the in-pod worker that runs the agent inside its pod.
 - `cmd/brokkr` — a **separate** binary for generic dev tooling (code map, linters),
   kept out of the product.

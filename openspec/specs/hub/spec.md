@@ -13,47 +13,65 @@ command surface.
 ## Requirements
 ### Requirement: Abstract tasks are a cached read model
 
-The hub SHALL hold abstract tasks in `hub.db` as a fast local read model, synced
-from their sources of truth. Tasks MAY come from more than one source — the task
-backend, openspec changes, and GitHub issues — merged into the one cache; each
-row's id prefix (`td-`, `os-`, `gh-`) records which source owns it. Browsing reads
-— lists and the board — SHALL be served from the cache. To bound staleness where
-it would mislead or cause a wrong decision, the hub SHALL refresh from the source
-of truth: **all tasks at startup**; **a task immediately before it is assigned**
-to an agent; and **a task immediately before its detail is shown**. Periodic
-background sync and explicit user refresh MAY additionally run. A **network-backed
-source** (e.g. GitHub issues) SHALL be throttled — served from a short-lived cache
-so the frequent idle-worker resync does not exceed the remote's rate limits — and
-SHALL degrade to contributing no tasks when it is unavailable, without failing the
-sync of the other sources. Every write SHALL go to the source of truth through
-that source's tool, and the hub SHALL update the cache to reflect it.
+The hub SHALL hold abstract tasks in its store as one read model, drawn from more than one
+source. **Sindri owns tasks of its own** — the primary source, held in the hub's own store
+— and MAY additionally mirror tasks from external sources: openspec changes and GitHub
+issues. Each row's id prefix records which source owns it: `sd-` a task sindri owns, `os-`
+an openspec change, `gh-` a GitHub issue. `td-` is the recognised legacy form of sindri's
+own ownership, minted before `sd-` and never rewritten (-> mint-sd-task-ids). Browsing
+reads — lists and the board — SHALL be served from this model.
 
-#### Scenario: Browsing served from cache
+A write SHALL reach whatever owns the task. For a task sindri owns, the hub's own store is
+the source of truth and the write lands there directly. For a mirrored task, the write
+SHALL go through that source's tool and the cached copy SHALL be updated to match.
+
+To bound staleness where it would mislead or cause a wrong decision, the hub SHALL refresh
+**mirrored** tasks from their sources: **all at startup**; **one immediately before it is
+assigned** to an agent; and **one immediately before its detail is shown**. A task sindri
+owns needs no such refresh, being already authoritative. Periodic background sync and
+explicit user refresh MAY additionally run. A **network-backed source** (e.g. GitHub
+issues) SHALL be throttled — served from a short-lived cache so the frequent idle-worker
+resync does not exceed the remote's rate limits — and SHALL degrade to contributing no
+tasks when it is unavailable, without failing the sync of the other sources.
+
+#### Scenario: Browsing served from the read model
 
 - **WHEN** the board or a UI lists tasks
-- **THEN** they are read from `hub.db`, not by querying the backend per query
+- **THEN** they are read from the hub's store, not by querying each source per query
 
 #### Scenario: Refresh all at startup
 
 - **WHEN** the hub starts
-- **THEN** it refreshes every task from the sources of truth into `hub.db`
+- **THEN** it refreshes every mirrored task from its source
 
 #### Scenario: Refresh before assignment
 
-- **WHEN** a task is about to be assigned to an agent
-- **THEN** the hub refreshes that task from the source of truth first, so an already
-  changed or closed task is never handed out
+- **WHEN** a mirrored task is about to be assigned to an agent
+- **THEN** the hub refreshes it from its source first, so an already changed or closed task
+  is never handed out
 
 #### Scenario: Refresh before detail
 
-- **WHEN** a task's detail is shown
-- **THEN** the hub refreshes that task from the source of truth before presenting it
+- **WHEN** a mirrored task's detail is shown
+- **THEN** the hub refreshes it from its source before presenting it
 
-#### Scenario: Write reaches the source of truth
+#### Scenario: An owned task is written directly
 
-- **WHEN** a task is created or changed
-- **THEN** the change is written through the backend's tool and the cached copy is
-  updated to match
+- **WHEN** a task sindri owns is created or changed
+- **THEN** the hub writes its own store, which is the source of truth, with no external tool
+  involved and no refresh needed
+
+#### Scenario: A mirrored write reaches its source
+
+- **WHEN** a mirrored task is changed
+- **THEN** the change goes through that source's tool and the cached copy is updated to
+  match
+
+#### Scenario: The prefix names the owner
+
+- **WHEN** a task id is read
+- **THEN** `sd-` means sindri owns it, `os-` an openspec change, `gh-` a GitHub issue, and
+  `td-` means sindri owns it too — the legacy form, still honoured
 
 #### Scenario: Network source is throttled
 
@@ -65,22 +83,29 @@ that source's tool, and the hub SHALL update the cache to reflect it.
 #### Scenario: One source unavailable, others still sync
 
 - **WHEN** the GitHub source is unavailable during a sync
-- **THEN** td and openspec tasks still sync and the cache updates; the GitHub source
-  simply contributes no tasks
+- **THEN** sindri's own tasks and openspec tasks are unaffected and the read model updates;
+  the GitHub source simply contributes no tasks
 
 ### Requirement: Orphans are runtime the roster does not account for
 
 The roster in `hub.db` SHALL be the declaration of which agents exist; reality SHALL
 be checked against it, not the other way round. A pod or worktree running with no
-matching roster entry SHALL be reported as an orphan. The hub SHALL NOT silently
-kill orphans; it SHALL surface them as a warning and propose a shell command the
-user can run to remove them.
+matching roster entry SHALL be reported as an orphan. The hub SHALL NOT kill an orphan
+on its own initiative — no sweep, no reaping, nothing dies unasked. It SHALL surface the
+orphan as a warning and SHALL offer removal as an explicit user-initiated action, which
+every front end can invoke; the front end SHALL confirm before it is carried out. The
+mechanism is the hub's own, not a container-engine command the user is asked to run.
 
 #### Scenario: Orphan detected
 
 - **WHEN** a pod is running with no matching roster entry
-- **THEN** it is reported as an orphan with a proposed removal command, and nothing
-  is killed automatically
+- **THEN** it is reported as an orphan the user may remove, and nothing is killed
+  automatically
+
+#### Scenario: Orphan removed on request
+
+- **WHEN** a user confirms removal of a reported orphan from either front end
+- **THEN** the hub removes that runtime, and no roster entry is touched — there was none
 
 #### Scenario: Declared agent with no pod is not an orphan
 
@@ -142,7 +167,12 @@ is observed separately. The log SHALL survive hub restarts.
 The hub SHALL compute the set of commands available to a caller from its role and
 current state, and the commands endpoint SHALL return only what is possible right
 now. A command that is not currently valid SHALL NOT appear, so an out-of-order
-action is invisible rather than rejected.
+action is invisible rather than rejected. The hub SHALL recognise four roles —
+worker, reviewer, planner, and coauthor — and the surface SHALL be scoped to each:
+a worker registers and inspects merge-intents (`next`/`submit`); a reviewer judges
+them (`approve`/`reject`/`review`); a planner reads the backlog and proposes work
+(`task`/`create-task`/`openspec`); a coauthor gets the generic helpers only, since
+it commits with git directly. No role SHALL ever see merge.
 
 #### Scenario: Blocked-on-PR worker
 
@@ -155,6 +185,18 @@ action is invisible rather than rejected.
 - **WHEN** a reviewer queries its command surface
 - **THEN** worker-only verbs such as submit are absent from it
 
+#### Scenario: Planner surface is propose-and-ship
+
+- **WHEN** a planner queries its command surface
+- **THEN** it sees `task`, `create-task`, and `openspec` but never the worker's
+  `next`/`submit` nor the reviewer's `approve`/`reject`
+
+#### Scenario: Coauthor surface is helpers only
+
+- **WHEN** a coauthor queries its command surface
+- **THEN** it sees only the generic helpers (status, log, lint, read-only PR views)
+  and none of the worker, reviewer, or planner workflow verbs
+
 ### Requirement: Sections with actionable counts
 
 The hub SHALL expose a section model — an ordered set of sections, each with a
@@ -162,6 +204,11 @@ key, a title, and a count derived from board state — as the single source of
 truth for which views exist and the badge each shows. The counts SHALL be the
 actionable subset: non-closed tasks, running agents, and not-merged PRs. UIs
 SHALL render these counts rather than computing their own.
+
+What crosses to a client SHALL be the **resolved** section: a key, a title and a
+number. The recipe that derives a count from board state SHALL stay inside the hub,
+because a function cannot cross the boundary; the hub SHALL resolve every count
+against the board it is already serving.
 
 #### Scenario: A UI renders section counts
 
@@ -174,13 +221,24 @@ SHALL render these counts rather than computing their own.
 - **THEN** it is added to the hub's section model and UIs pick it up without
   re-deriving counts
 
+#### Scenario: Counts arrive resolved
+
+- **WHEN** the board is served
+- **THEN** each section carries its key, title and computed count, and no part of the
+  derivation crosses to the client
+
 ### Requirement: Task hierarchy arrangement
 
-The hub SHALL arrange a flat set of tasks into their parent/child tree — roots
+A flat set of tasks SHALL be arrangeable into their parent/child tree — roots
 ordered by priority, each followed by its descendants, with a depth per node —
-and annotate each with the id of a non-merged PR for that task, if any. A task
-whose parent is absent from the set SHALL be arranged as a root. This arrangement
-SHALL be a logic-layer function so every UI renders the same tree.
+and annotated with the id of a non-merged PR for that task, if any. A task
+whose parent is absent from the set SHALL be arranged as a root.
+
+This arrangement SHALL be a function of the exchange format, so the hub and every
+front-end obtain the same tree from the same code, and no interface derives its own.
+The arrangement SHALL carry data rather than drawing instructions: depth, the PR id
+and its kind are data; a hint that exists only to draw a tree connector belongs to
+the interface drawing it.
 
 #### Scenario: Tree with depth
 
@@ -192,6 +250,12 @@ SHALL be a logic-layer function so every UI renders the same tree.
 
 - **WHEN** a task has a non-merged PR
 - **THEN** its arranged row carries that PR's id
+
+#### Scenario: One arrangement, every caller
+
+- **WHEN** the hub and a front-end both arrange the same task set
+- **THEN** both call the same function from the exchange package and produce the
+  same tree
 
 ### Requirement: Board carries all tasks with hierarchy
 
@@ -263,12 +327,16 @@ enumerate any roster, or address another pod — in its own project or any other
 
 ### Requirement: Hub lifecycle — one persistent global daemon
 
-The hub SHALL be a single long-lived daemon serving all repos. Interactive entry
-points (`sindri coauthor`, `sindri tui`) SHALL auto-start it in the background when
-none is running; `sindri hub start` runs it explicitly (foreground, or `--bg`).
-Once running it SHALL persist across individual CLI commands and for as long as any
-agent in any repo exists. When the hub is not running, an agent's call SHALL fail
-loudly.
+The hub SHALL be a single long-lived daemon serving all repos, running as its own
+program rather than inside a front-end's process. Interactive entry points (`sindri
+coauthor`, `sindri tui`) SHALL auto-start it in the background when none is running,
+by executing the hub binary; `sindri hub start` runs it explicitly (foreground, or
+`--bg`) and SHALL likewise hand off to that binary rather than constructing the hub
+in the calling process. The hub binary SHALL be resolved beside the running
+front-end before any search of `PATH`, so a second installed copy cannot be started
+by accident. Once running it SHALL persist across individual CLI commands and for as
+long as any agent in any repo exists. When the hub is not running, an agent's call
+SHALL fail loudly.
 
 #### Scenario: Interactive command with no hub
 
@@ -279,6 +347,18 @@ loudly.
 
 - **WHEN** agents are running in any repo
 - **THEN** the single hub persists rather than exiting
+
+#### Scenario: Foreground start hands off to the hub binary
+
+- **WHEN** a user runs `sindri hub start` in the foreground
+- **THEN** the hub binary takes over the process, so signals reach the hub directly
+  with no wrapper process between the terminal and the daemon
+
+#### Scenario: The hub beside this build is the one that starts
+
+- **WHEN** the hub binary is resolved for a start
+- **THEN** it is taken from beside the running front-end binary before `PATH` is
+  consulted, so a second installed copy is never started in its place
 
 ### Requirement: Protocol is HTTP/JSON carrying repo context
 
@@ -397,4 +477,33 @@ The hub SHALL NOT hand a branch that conflicts with its base to the human merge.
 
 - **WHEN** a worker's branch has been rebased cleanly onto base
 - **THEN** the local PR is renewed and re-offered for review, after which the human merge applies without conflict
+
+### Requirement: Planner task proposals are gated on user approval
+
+A planner SHALL propose backlog tasks with `create-task`, but a proposed task
+SHALL NOT be claimable by any worker until the user approves it. The hub SHALL
+record a per-task approval state — pending, approved, or rejected — held in
+`hub.db` separate from the task's own status. A task with no approval row is a
+normal, claimable task; a task flagged pending or rejected SHALL be hidden from
+the work an agent can claim. Approval and rejection SHALL be user-only actions
+(`sindri task approve`/`reject`), and the hub SHALL inject the verdict into every
+running planner's session.
+
+#### Scenario: Proposed task is withheld until approved
+
+- **WHEN** a planner runs `create-task`
+- **THEN** the task is created in the backend flagged pending the user's approval,
+  and no worker can claim it while it is pending
+
+#### Scenario: User approves a proposal
+
+- **WHEN** the user approves a planner-proposed task
+- **THEN** the approval gate clears, the task becomes claimable by a worker, and
+  any running planner is told it was approved
+
+#### Scenario: User rejects a proposal
+
+- **WHEN** the user rejects a planner-proposed task with a comment
+- **THEN** the task stays hidden from workers and the comment is injected into any
+  running planner's session
 

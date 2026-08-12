@@ -1,5 +1,5 @@
 // package: hub/store / comment
-// type:    logic (persistence for unified task comments)
+// type:    adapter (persistence for unified task comments)
 // job:     store task comments synced from external sources (td, github) in one
 // place, keyed by (source, source_ref) so a re-sync reconciles them
 // against their origin. Reads/writes only; fetching + reconcile live in
@@ -7,17 +7,15 @@
 // limits:  no fetching, no source knowledge — just rows keyed for sync.
 package store
 
-import "fmt"
+import (
+	"fmt"
 
-// Comment is one task comment, tagged with the source it came from and the
-// external reference that identifies it there (so a re-sync can match it).
-type Comment struct {
-	Source    string `json:"source"`     // "td" | "github"
-	SourceRef string `json:"source_ref"` // external id / url, unique within the source
-	Author    string `json:"author"`
-	Body      string `json:"body"`
-	CreatedAt string `json:"created_at"` // RFC3339
-}
+	"github.com/flo-at/sindri/internal/api"
+)
+
+// Comment is one task comment; it crosses the wire, so it is internal/api.Comment
+// under the name every existing caller here already uses.
+type Comment = api.Comment
 
 // ReplaceComments reconciles a task's comments FROM ONE SOURCE: it drops the
 // source's existing comments for the task and inserts the given set, so a comment
@@ -42,6 +40,19 @@ func (p *ProjectStore) ReplaceComments(taskID, source string, comments []Comment
 		}
 	}
 	return tx.Commit()
+}
+
+// AddComment records one comment. Used for the sources that keep no thread of their own, where this
+// table is where a comment lives rather than a cache of somewhere else.
+func (p *ProjectStore) AddComment(taskID string, c Comment) error {
+	_, err := p.s.db.Exec(
+		`INSERT INTO task_comments (project,task_id,source,source_ref,author,body,created_at)
+		 VALUES (?,?,?,?,?,?,?)`,
+		p.project, taskID, c.Source, c.SourceRef, c.Author, c.Body, c.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("add comment on %s: %w", taskID, err)
+	}
+	return nil
 }
 
 // Comments returns a task's comments across all sources, oldest first.

@@ -74,17 +74,35 @@ func TestEditTaskUsageIsVisible(t *testing.T) {
 	}
 }
 
-// TestPlannerCannotSetPriority: OpenLeaves hands out only tasks that are approved AND carry a
-// priority, so the priority a human sets at approval is what releases work. A planner setting
-// it would hand itself the release switch.
-func TestPlannerCannotSetPriority(t *testing.T) {
+// TestPlannerProposesAPriority replaces the rule that a planner may set none at all. That rule
+// conflated two things: a priority is intent and ORDER, approval is authorisation, and only the
+// second releases work. A proposal is created pending, so a rating on it can never make it
+// claimable — which is why the planner may express the sequence it planned.
+func TestPlannerProposesAPriority(t *testing.T) {
 	for _, flag := range []string{"--priority", "-p"} {
-		if _, _, err := parseTaskFlags([]string{flag, "P0", "urgent thing"}); err == nil {
-			t.Errorf("%s should be refused, not accepted", flag)
+		spec, words, err := parseTaskFlags([]string{flag, "high", "urgent thing"})
+		if err != nil {
+			t.Fatalf("%s should be accepted: %v", flag, err)
+		}
+		if spec.Priority != "P1" {
+			t.Errorf("%s high should parse to P1, got %q", flag, spec.Priority)
+		}
+		if strings.Join(words, " ") != "urgent thing" {
+			t.Errorf("%s consumed the title: %v", flag, words)
 		}
 	}
-	if strings.Contains(createTaskUsage, "--priority") {
-		t.Error("create-task usage should not advertise --priority")
+	// An unrecognised word is refused rather than guessed at — the nearest wrong guess silently
+	// re-orders the backlog.
+	if _, _, err := parseTaskFlags([]string{"--priority", "urgentish", "a thing"}); err == nil {
+		t.Error("an unknown priority should be refused")
+	}
+	if !strings.Contains(createTaskUsage, "--priority") {
+		t.Error("create-task usage should advertise --priority now that it exists")
+	}
+	// And the usage must no longer say prioritisation is a human decision, which is the half of the
+	// old rule that changed.
+	if strings.Contains(createTaskUsage, "two human decisions") {
+		t.Error("the usage still describes prioritisation as the user's alone")
 	}
 }
 
@@ -145,6 +163,13 @@ func TestSyncToleratesRepoWithoutTd(t *testing.T) {
 // engine plus the caller a worker arrives as.
 func workerEngine(t *testing.T, tasks []store.Task, container, current string) (*Engine, registry.Caller) {
 	t.Helper()
+	return workerEngineComments(t, tasks, container, current, nil)
+}
+
+// workerEngineComments is workerEngine with a seeded comment thread per task id — the thread lives
+// outside the task row, so it is served by deps rather than upserted with the task.
+func workerEngineComments(t *testing.T, tasks []store.Task, container, current string, comments map[string][]store.Comment) (*Engine, registry.Caller) {
+	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -163,7 +188,7 @@ func workerEngine(t *testing.T, tasks []store.Task, container, current string) (
 	if err := ps.SetState(store.AgentState{Agent: "eitri", Container: container, Task: current, Phase: "working"}); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	return New(st, &stubDeps{root: root}), registry.Caller{Project: "proj", Agent: "eitri", Role: "worker"}
+	return New(st, &stubDeps{root: root, comments: comments}), registry.Caller{Project: "proj", Agent: "eitri", Role: "worker"}
 }
 
 // TestWorkerSeesItsPackage: a package is claimed whole for the context it carries, so that

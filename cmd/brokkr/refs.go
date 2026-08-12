@@ -32,7 +32,13 @@ func newRefsCmd() *cobra.Command {
 			"declaration in context, `brokkr map --symbol <name>`.\n\n" +
 			"Comments are prose, not references, so they are excluded unless you pass --comments; " +
 			"they then rank last. Matching is syntactic (go/ast, no type checking), so two packages " +
-			"declaring the same name both answer — scope it with a path or --file.",
+			"declaring the same name both answer — scope it with a path or --file.\n\n" +
+			"That syntactic limit is deliberate: refs needs no build, so it answers on code that " +
+			"does not compile and on a tree it cannot type-check. When you need the type-aware " +
+			"answer instead — which types implement an interface, which of two same-named methods " +
+			"a call actually resolves to, a rename that is safe rather than textual — a Go agent " +
+			"has gopls' tools (go_symbol_references, go_search, go_diagnostics) served over MCP. " +
+			"The two are complementary; neither replaces the other.",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			roots := args[1:]

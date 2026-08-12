@@ -1,5 +1,5 @@
 // package: hub/agent / names
-// type:    headless helper
+// type:    logic
 // job:     auto-name new agents after Norse dwarves — friends of Sindri the smith.
 // The binary names "sindri" and "brokkr" are never handed out. Names are
 // picked at random and are unique across ALL projects, so each dwarf

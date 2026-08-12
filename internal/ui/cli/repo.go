@@ -12,7 +12,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/flo-at/sindri/internal/hub"
+	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/theme"
 	"github.com/spf13/cobra"
 )
 
@@ -25,11 +26,12 @@ func NewRepoCmd() *cobra.Command {
 			"  sindri repo init          register the current repo + scaffold .sindri/config.yaml\n" +
 			"  sindri repo list          list every repo the hub tracks\n" +
 			"  sindri repo info [repo]   show a repo's config + counts (default: current repo)\n" +
-			"  sindri repo forget <repo> stop tracking a repo (registry only — files untouched)",
+			"  sindri repo forget <repo> stop tracking a repo (registry only — files untouched)\n" +
+			"  sindri repo config [k [v]] show or set a key in the current repo's config",
 		Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error { return repoInfo("") }, // bare `repo` → current repo
 	}
-	c.AddCommand(repoInitCmd(), repoListCmd(), repoInfoCmd(), repoForgetCmd(), repoColorCmd())
+	c.AddCommand(repoInitCmd(), repoListCmd(), repoInfoCmd(), repoForgetCmd(), repoColorCmd(), repoConfigCmd())
 	return c
 }
 
@@ -114,7 +116,7 @@ func repoForgetCmd() *cobra.Command {
 func repoColorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "color <repo> <n>",
-		Short: "Pin a repo's display colour (0 = default; 1..24 = palette index)",
+		Short: fmt.Sprintf("Pin a repo's display colour (0 = default; 1..%d = palette index)", theme.NRepoColors),
 		Args:  cobra.ExactArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
 			n, err := strconv.Atoi(args[1])
@@ -167,8 +169,8 @@ func repoInfo(sel string) error {
 
 // resolveRepo maps a user-supplied selector (repo name or tag) to a registry tag,
 // erroring on no match or an ambiguous name (in which case the caller uses the tag).
-func resolveRepo(repos []hub.RepoSummary, sel string) (string, error) {
-	var matches []hub.RepoSummary
+func resolveRepo(repos []api.RepoSummary, sel string) (string, error) {
+	var matches []api.RepoSummary
 	for _, r := range repos {
 		if r.Tag == sel || r.Name == sel {
 			matches = append(matches, r)
@@ -188,7 +190,7 @@ func resolveRepo(repos []hub.RepoSummary, sel string) (string, error) {
 	}
 }
 
-func printRepoDetail(d hub.RepoDetail) {
+func printRepoDetail(d api.RepoDetail) {
 	issues := "off"
 	if d.IssuesEnabled {
 		issues = "on"

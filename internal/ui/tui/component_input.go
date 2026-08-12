@@ -56,12 +56,23 @@ func (m *model) submitInput() tea.Cmd {
 		return nil
 	}
 	cl, target := m.cl, m.inputTarget
-	if m.mode == inputTell {
+	switch m.mode {
+	case inputTell:
 		return func() tea.Msg {
 			if err := cl.Tell(target, v, "user"); err != nil {
 				return errModalMsg{err}
 			}
 			return nil
+		}
+	case inputComment:
+		// Refreshed after: a GitHub issue's thread is re-read on the way back, so the comment
+		// appears with the author and timestamp the source gave it.
+		return func() tea.Msg {
+			if err := cl.AddTaskComment(target, v); err != nil {
+				return errModalMsg{err}
+			}
+			st, _ := cl.State()
+			return polledMsg(st)
 		}
 	}
 	return nil

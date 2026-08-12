@@ -12,9 +12,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/chat"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
@@ -77,6 +75,61 @@ func (m *model) openNewMeetingChoice() {
 	}
 }
 
+// openAddMemberChoice picks an agent — from the whole fleet, not just this repo, since membership
+// spans projects — to add to the meeting room. Agents already in the room are left off the list.
+func (m *model) openAddMemberChoice() {
+	cl := m.cl
+	inRoom := map[string]bool{}
+	for _, mem := range m.state.Chat.Members {
+		inRoom[mem.Name] = true
+	}
+	var opts, vals []string
+	for _, a := range m.state.Agents {
+		if inRoom[a.Name] {
+			continue
+		}
+		opts = append(opts, a.Name+" ("+a.Role+")")
+		vals = append(vals, a.Name)
+	}
+	if len(opts) == 0 {
+		m.flash = "no agents to add — every agent is already in the room"
+		return
+	}
+	m.choice = choiceModalState{
+		active: true, title: "add to the meeting room…", filterable: true,
+		options: opts, values: vals,
+		apply: func(v string) tea.Cmd {
+			return mutateThenRefresh(cl, func() error { return cl.ChatAdd(v) })
+		},
+	}
+}
+
+// openRemoveMemberChoice picks a current room member to remove.
+func (m *model) openRemoveMemberChoice() {
+	cl := m.cl
+	members := m.state.Chat.Members
+	if len(members) == 0 {
+		m.flash = "the meeting room is empty — nothing to remove"
+		return
+	}
+	opts := make([]string, len(members))
+	vals := make([]string, len(members))
+	for i, mem := range members {
+		label := mem.Name
+		if mem.Role != "" {
+			label += " (" + mem.Role + ")"
+		}
+		opts[i], vals[i] = label, mem.Name
+	}
+	m.choice = choiceModalState{
+		active: true, title: "remove from the meeting room…", filterable: true,
+		options: opts, values: vals,
+		apply: func(v string) tea.Cmd {
+			return mutateThenRefresh(cl, func() error { return cl.ChatRemove(v) })
+		},
+	}
+}
+
 // updateComposer routes a keypress while composing: esc cancels, ctrl+s sends, ctrl+c quits. Enter
 // is a newline for a message but submits a command — a one-line "/add nori" should not need ctrl+s.
 func (m model) updateComposer(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -89,7 +142,7 @@ func (m model) updateComposer(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.quit = true
 		return m, tea.Quit
 	case "enter":
-		if !chat.IsCommand(m.composer.Value()) {
+		if !api.IsChatCommand(m.composer.Value()) {
 			break // a message is multiline; only a command submits on enter
 		}
 		return m.sendComposed()
@@ -145,7 +198,7 @@ func (m model) chatBody() string {
 }
 
 // chatMembersLine summarizes who's in the room, or nudges the user to add someone when empty.
-func chatMembersLine(v hub.ChatView) string {
+func chatMembersLine(v api.ChatView) string {
 	// The user first: the roster holds only AGENTS, so an empty one means "no agents yet", not an
 	// empty room — the user is always a participant. Same shape as the CLI's renderMembers.
 	parts := []string{theme.Icon(theme.SenderUser) + " " +
@@ -159,7 +212,7 @@ func chatMembersLine(v hub.ChatView) string {
 	}
 	line := strings.Join(parts, " · ")
 	if len(v.Members) == 0 {
-		// The same description the CLI's join banner and /help print (-> hub.ChatHelpText).
+		// The same description the CLI's join banner and /help print (-> theme.HelpText).
 		line += dimStyle.Render(" — no agents yet; press enter, then " + theme.HelpText)
 	}
 	return line
@@ -168,7 +221,7 @@ func chatMembersLine(v hub.ChatView) string {
 // chatLines formats one message as a speaker header (time · icon · name, the name in its own
 // deterministic ui/theme colour, as in the CLI) plus the body, split on its own newlines. prev
 // groups a speaker's run — no repeated header, a blank line on a change — so a transcript skims.
-func chatLines(msg store.ChatMessage, prev string) []string {
+func chatLines(msg api.ChatMessage, prev string) []string {
 	body := strings.Split(strings.TrimRight(msg.Body, "\n"), "\n")
 	out := make([]string, 0, len(body)+2)
 	if msg.Sender != prev {

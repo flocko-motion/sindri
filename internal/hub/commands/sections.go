@@ -5,7 +5,10 @@
 // owns the cross-module snapshot (its BoardState) and satisfies this
 // interface, so the section registry lives here without importing the hub.
 // limits:  the section list + count rule only; the data comes from the injected Board.
+// A func can't cross the wire, so Resolved is what a client actually receives.
 package commands
+
+import "github.com/flo-at/sindri/internal/api"
 
 // Board is the snapshot a section's badge count reads from — injected by the hub,
 // which assembles it across every module (its BoardState satisfies this interface).
@@ -34,4 +37,14 @@ var Sections = []Section{
 	{"prs", "PRs", func(b Board) int { return b.OpenPRCount() }},
 	{"repos", "Repos", func(b Board) int { return b.RepoCount() }},
 	{"chat", "Meeting", func(b Board) int { return b.ChatMemberCount() }},
+}
+
+// Resolved reads every section's count against b and returns the wire shape: the
+// recipe (Count) stays here, only the number it produces crosses.
+func Resolved(b Board) []api.Section {
+	out := make([]api.Section, len(Sections))
+	for i, s := range Sections {
+		out[i] = api.Section{Key: s.Key, Title: s.Title, Count: s.Count(b)}
+	}
+	return out
 }

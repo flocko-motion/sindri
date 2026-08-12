@@ -5,8 +5,7 @@
 // {list,info,merge}; plus first-order hub. Every hub capability has a
 // CLI verb so functionality is verifiable from the shell, not only the
 // TUI.
-// limits:  no logic — each verb is a thin call into a backend (in-process hub
-// when none is running, the socket client otherwise).
+// limits:  no logic — each verb is a thin call into the socket client.
 package cli
 
 import (
@@ -15,12 +14,13 @@ import (
 	"io"
 	"os"
 	"strings"
+	"syscall"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
+	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/config"
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/agent"
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/tools/paths"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -30,51 +30,57 @@ import (
 type backend interface {
 	NewAgent(name, role, memory string) (string, error)
 	SetMemory(name, memory string) error
+	SetRetired(name string, retired bool) error
 	DeleteAgent(name string) error
 	StopAgent(name string) error
+	ClearContext(name string) error
 	RebaseAgent(name string) error
 	RebuildImage(name string, out io.Writer) error
 	AgentPane(name string, lines int) (string, error)
 	Diagnose(name string) (string, error)
-	Stats() (hub.StatsReport, error)
+	Stats() (api.StatsReport, error)
 	Instance(name string) (string, error)
-	Clients(name string) ([]hub.ClientView, error)
+	Clients(name string) ([]api.ClientView, error)
 	Launch(name string, shell, debug bool, out io.Writer) error
 	Tell(name, msg, source string) error
-	AssignPlan(name, goal string) error
+	AssignPlan(name, goal, taskID string) error
 	ChatAdd(name string) error
 	ChatRemove(name string) error
 	ChatSay(msg string) error
 	NewMeeting() error
 	ChatHeartbeat() error
-	Chat() (hub.ChatView, error)
-	ChatWatch(ctx context.Context) (<-chan hub.ChatView, error)
-	State() (hub.BoardState, error)
-	Log(name string) ([]store.Event, error)
-	Tasks() ([]store.Task, error)
-	TaskInfo(id string) (store.Task, error)
-	CreateTask(s hub.TaskSpec) (string, error)
-	EditTask(id string, s hub.TaskSpec) error
-	SetPriority(id, priority string) error
-	ApproveTask(id string) error
+	Chat() (api.ChatView, error)
+	ChatWatch(ctx context.Context) (<-chan api.ChatView, error)
+	State() (api.BoardState, error)
+	Log(name string) ([]api.Event, error)
+	Tasks() ([]api.Task, error)
+	TaskInfo(id string) (api.Task, error)
+	CreateTask(s api.TaskSpec) (string, error)
+	EditTask(id string, s api.TaskSpec) error
+	SetPriority(id, priority string, scope api.PriorityScope) error
+	ApproveTask(id string, subtree bool) error
 	RejectTask(id, comment string) error
+	AddTaskComment(id, body string) error
+	RefreshTaskComments(id string) error
+	NextTask(agent string) (api.NextExplain, error)
 	UnassignTask(id string) error
 	CloseTask(id string) error
+	ReopenTask(id, reason string) error
 	ScrapTask(id string, subtree, withPRs bool) error
 	Refresh() error
-	PRs() ([]store.PR, error)
-	PRInfo(id string) (hub.PRDetail, error)
+	PRs() ([]api.PR, error)
+	PRInfo(id string) (api.PRDetail, error)
 	RejectPR(id, feedback string) error
 	ApprovePR(id string) error
 	DiscardPR(id string) error
 	LintPR(id string) (string, error)
 	RequestReview(id, requirement string) error
 	MaterializeReview(id string) (string, error)
-	Merge(id string) (store.PR, error)
-	MilestonePR(agent string) (store.PR, error)
-	Repos() ([]hub.RepoSummary, error)
-	RepoInfo(tag string) (hub.RepoDetail, error)
-	RepoInit() (hub.RepoSummary, error)
+	Merge(id string) (api.PR, error)
+	MilestonePR(agent string) (api.PR, error)
+	Repos() ([]api.RepoSummary, error)
+	RepoInfo(tag string) (api.RepoDetail, error)
+	RepoInit() (api.RepoSummary, error)
 	RepoForget(tag string) error
 	SetRepoColor(tag string, color int) error
 	RemoveOrphan(name string) error
@@ -139,12 +145,12 @@ func newHubStartCmd() *cobra.Command {
 		Short: "Run this repo's hub in the foreground (--bg to run it in the background)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if hub.IsRunning() {
+			if client.IsRunning() {
 				// A hub is already up. Same build → nothing to do; a different (or
 				// unknown, pre-stamp) build → offer to take over.
-				_, ver, ok := hub.ReadPID()
+				_, ver, ok := client.ReadPID()
 				if ok && ver == version {
-					return fmt.Errorf("a hub is already running (%s)", hub.SocketPath())
+					return fmt.Errorf("a hub is already running (%s)", paths.HubSocket())
 				}
 				desc := "an older build (predates version stamping)"
 				if ok {
@@ -152,9 +158,9 @@ func newHubStartCmd() *cobra.Command {
 				}
 				fmt.Fprintf(os.Stderr, "a hub (%s) is already running; this CLI is %s.\n", desc, version)
 				if !term.IsTerminal(int(os.Stdin.Fd())) || !promptYesNo("stop it and start this one?") {
-					return fmt.Errorf("a hub is already running (%s)", hub.SocketPath())
+					return fmt.Errorf("a hub is already running (%s)", paths.HubSocket())
 				}
-				pid, havePID := hub.HubPID()
+				pid, havePID := client.HubPID()
 				if !havePID {
 					return fmt.Errorf("couldn't find the running hub's pid to stop it — stop it manually, then re-run")
 				}
@@ -165,34 +171,15 @@ func newHubStartCmd() *cobra.Command {
 			if bg {
 				return startHub() // detached; returns once the socket answers
 			}
-			h, err := hub.New()
+			warnShadowedInstall(os.Stderr) // a rival copy on PATH decides which build agents get
+			bin, err := hubBinary()
 			if err != nil {
 				return err
 			}
-			defer h.Close()
-			// Stamp this process (pid + build version) as the hub, so a second hub
-			// can't start and clients can detect a stale-version hub.
-			if err := hub.WritePID(version); err != nil {
-				return err
-			}
-			defer hub.RemovePID()
-			// How a rebuild reaches RUNNING agents. Async because copying tens of MB here
-			// delayed the socket past the caller's readiness poll; Launch also syncs.
-			go func() {
-				if updated, serr := agent.SyncPodBin(); serr != nil {
-					fmt.Fprintf(os.Stderr, "sindri: pod-bin: %v\n", serr)
-				} else if len(updated) > 0 {
-					fmt.Fprintf(os.Stderr, "sindri: pod-bin refreshed: %s\n", strings.Join(updated, ", "))
-				}
-			}()
-			warnShadowedInstall(os.Stderr) // a rival copy on PATH decides which build agents get
-			fmt.Fprintf(os.Stderr, "sindri hub listening at %s\n", h.SocketPath())
-			// Recommend, don't impose: seeding a placeholder ARCHITECTURE.md littered repos
-			// that never wanted one, so the hub says it once and leaves the choice.
-			for _, line := range h.StartupAdvice() {
-				fmt.Fprintf(os.Stderr, "sindri: %s\n", line)
-			}
-			return h.Serve()
+			// Exec, not spawn: the hub takes over this process outright, so signals (a
+			// terminal's ctrl-C, a service manager's SIGTERM) land on it directly, with no
+			// wrapper process in between.
+			return syscall.Exec(bin, []string{bin}, os.Environ())
 		},
 	}
 	c.Flags().BoolVar(&bg, "bg", false, "run the hub detached in the background instead of the foreground")
@@ -207,11 +194,11 @@ func newHubRestartCmd() *cobra.Command {
 		Short: "Restart the hub in the background (starts one if none is running)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !hub.IsRunning() {
+			if !client.IsRunning() {
 				fmt.Fprintln(os.Stderr, "no hub running — starting a fresh one.")
 				return startHub()
 			}
-			pid, ok := hub.HubPID()
+			pid, ok := client.HubPID()
 			if !ok {
 				return fmt.Errorf("couldn't find the running hub's pid to restart it — stop it manually, then `sindri hub start --bg`")
 			}
@@ -224,9 +211,10 @@ func newHubRestartCmd() *cobra.Command {
 
 // NewAgentCmd builds the `agent` command tree (manage agents).
 func NewAgentCmd() *cobra.Command {
-	c := &cobra.Command{Use: "agent", Short: "Manage agents (workers, reviewers, planners, coauthors)",
-		PersistentPreRun: agentPreflight} // warn up front if podman is down — nothing works without it
-	c.AddCommand(agentListCmd(), agentStatsCmd(), agentNewCmd(), agentDeleteCmd(), agentPaneCmd(), agentStartCmd(), agentStopCmd(), agentRestartCmd(), agentRebaseCmd(), agentRebuildCmd(), agentMemoryCmd(), agentTellCmd(), agentPlanCmd(), agentDirCmd(), agentAttachCmd(), agentInfoCmd())
+	// No PersistentPreRun: the runtime warning comes off the board (-> warnRuntime), which the
+	// commands that need it already fetch. Probing here cost every agent verb a `podman info`.
+	c := &cobra.Command{Use: "agent", Short: "Manage agents (workers, reviewers, planners, coauthors)"}
+	c.AddCommand(agentListCmd(), agentStatsCmd(), agentNewCmd(), agentDeleteCmd(), agentPaneCmd(), agentStartCmd(), agentStopCmd(), agentRestartCmd(), agentRebaseCmd(), agentRebuildCmd(), agentMemoryCmd(), agentRetireCmd(), agentClearContextCmd(), agentTellCmd(), agentPlanCmd(), agentDirCmd(), agentAttachCmd(), agentInfoCmd())
 	return c
 }
 
@@ -375,7 +363,10 @@ func prListCmd() *cobra.Command {
 					if p.Kind == "interim" { // ◇ = mid-task contribution (vs a final, task-done PR)
 						status = "◇" + status
 					}
-					fmt.Printf("%-14s %-13s %4s  %-10s %s\n", p.ID, status, shortAge(p.CreatedAt), p.Agent, p.Branch)
+					// Who is reviewing it, alongside who wrote it — the same column the PRs tab shows,
+					// from the same field, so the two front-ends cannot answer differently.
+					fmt.Printf("%-14s %-13s %4s  %-10s %-10s %s\n",
+						p.ID, status, shortAge(p.CreatedAt), p.Agent, dash(p.Reviewer), p.Branch)
 				}
 				if len(prs) == 0 {
 					fmt.Fprintln(os.Stderr, "no PRs")

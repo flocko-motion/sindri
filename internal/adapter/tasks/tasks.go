@@ -10,8 +10,12 @@ package tasks
 import "github.com/flo-at/sindri/internal/hub/task"
 
 // Source is a place tasks come from (td, openspec, GitHub), mapping its own world onto task.Task
-// and namespacing its ids (td-*, os-*, gh-*). The hub never branches on which one is underneath.
+// and namespacing its ids (the scheme is hub/task/ids.go's; no caller compares a
+// prefix). The hub never branches on which one is underneath.
 type Source interface {
+	// Name identifies the source for storage that must distinguish comment threads by origin —
+	// not user-facing, so it owes nothing to display conventions.
+	Name() string
 	// Enabled is the source's OWN gate for this repo; a disabled source is skipped.
 	Enabled(root string) bool
 	// Tasks fetches this source's tasks; force bypasses any internal cache. A network source
@@ -23,4 +27,16 @@ type Source interface {
 	// Finish ends a task from the task list: scrap=false is "done", true is "discard". handled
 	// reports whether THIS source owned the id, so an unknown backend can be flagged.
 	Finish(root, taskID string, scrap bool) (handled bool, err error)
+	// Comments fetches taskID's comment thread. ok=false means this source keeps no thread of its
+	// own for this id — not merely "no comments yet" — so the caller leaves what it already has
+	// alone rather than reconcile against an empty result.
+	Comments(root, taskID string) (cs []task.Comment, ok bool, err error)
+	// AddComment posts to taskID's thread where the source keeps one of its own. handled=false
+	// means this source has no such thread, so the caller records the comment itself instead.
+	AddComment(root, taskID, body string) (handled bool, err error)
+	// ToolMissing reports whether the repo's content calls for this source (independent of whether
+	// its external tool happens to be installed) but that tool is not on PATH — the signal behind
+	// "you'll want this, but it isn't set up." A source with no such split folds the check into
+	// Enabled instead and always answers false here.
+	ToolMissing(root string) bool
 }

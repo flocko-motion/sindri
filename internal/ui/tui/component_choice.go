@@ -15,12 +15,19 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// noteWidth is how wide a modal grows to read a note at — prose wants a comfortable measure, and a
+// note squeezed to the width of the options would wrap every few words.
+const noteWidth = 76
+
 // choiceModalState is a generic pick-one prompt: options, parallel values, and
 // what to do with the chosen value. When filterable, typing narrows the list by a
 // case-insensitive substring match (for a long list like the repo switcher).
 type choiceModalState struct {
-	active     bool
-	title      string
+	active bool
+	title  string
+	// note is a fact the choice cannot be made honestly without, shown under the title and wrapped
+	// rather than squeezed into it — a sentence in a title makes the box as wide as the sentence.
+	note       string
 	options    []string
 	values     []string
 	cursor     int
@@ -120,10 +127,21 @@ func choiceModal(c choiceModalState, screenW, screenH int) string {
 			cw = w
 		}
 	}
+	// A note is a sentence, so it sets the width it can be read at rather than the width it happens to
+	// be — then everything is held inside the screen, since a box wider than the terminal renders as
+	// neither centred nor complete.
+	var note []string
+	if c.note != "" {
+		cw = max(cw, noteWidth)
+	}
+	cw = clampInt(cw, 1, max(screenW-4, 1))
 	blank := strings.Repeat(" ", cw)
+	if c.note != "" {
+		note = wrapContent([]string{c.note}, cw)
+	}
 
 	// Scroll window: bound the option rows to what fits, keeping the cursor visible.
-	maxRows := screenH - 6 // title, two blanks, hint, border top/bottom
+	maxRows := screenH - 6 - len(note) // title, note, two blanks, hint, border top/bottom
 	if maxRows < 3 {
 		maxRows = 3
 	}
@@ -133,7 +151,11 @@ func choiceModal(c choiceModalState, screenW, screenH int) string {
 		end = start + maxRows
 	}
 
-	lines := []string{modalTitleStyle.Render(padTrunc(title, cw)), blank}
+	lines := []string{modalTitleStyle.Render(padTrunc(title, cw))}
+	for _, l := range note {
+		lines = append(lines, dimStyle.Render(padTrunc(l, cw)))
+	}
+	lines = append(lines, blank)
 	if start > 0 {
 		lines = append(lines, dimStyle.Render(padTrunc("  ↑ more", cw)))
 	}

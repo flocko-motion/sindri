@@ -4,17 +4,17 @@
 // can reach — the task's open PR, the tasks under it, their PRs — and offers one option per
 // shape, then hands the chosen one to the hub.
 // limits:  labels and key-to-call plumbing only; the subtree walk is the hub's
-// (-> hub.Descendants) and the cascade itself is ScrapTask's.
+// (-> api.Descendants) and the cascade itself is ScrapTask's.
 package tui
 
 import (
-	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/flo-at/sindri/internal/hub"
-	"github.com/flo-at/sindri/internal/hub/client"
+	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/client"
+	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
 // attachedOpenPR is the id of a non-terminal PR for the task, or "". A merged or scrapped one is
@@ -44,7 +44,7 @@ func (m model) measureScrapReach(id string) scrapReach {
 	if r.pr != "" {
 		r.prs++
 	}
-	for _, d := range hub.Descendants(m.state.Tasks, id) {
+	for _, d := range api.Descendants(m.state.Tasks, id) {
 		r.kids++
 		if m.attachedOpenPR(d.ID) != "" {
 			r.prs++
@@ -72,10 +72,10 @@ func (m *model) openScrapChoice(id string) {
 		add("scrap task + PR "+r.pr, "taskpr")
 	}
 	if r.kids > 0 {
-		kids := plural(r.kids, "subtask", "subtasks")
+		kids := theme.Plural(r.kids, "subtask", "subtasks")
 		add("scrap task + "+kids, "tree")
 		if r.prs > 0 {
-			add("scrap task + "+kids+" + "+plural(r.prs, "PR", "PRs"), "treepr")
+			add("scrap task + "+kids+" + "+theme.Plural(r.prs, "PR", "PRs"), "treepr")
 		}
 	}
 	m.choice = choiceModalState{
@@ -99,20 +99,12 @@ func scrapTitleTail(r scrapReach) string {
 		has = append(has, "open PR "+r.pr)
 	}
 	if r.kids > 0 {
-		has = append(has, plural(r.kids, "subtask", "subtasks"))
+		has = append(has, theme.Plural(r.kids, "subtask", "subtasks"))
 	}
 	if len(has) == 0 {
 		return "(discard — td delete / openspec remove / issue delete)"
 	}
 	return "(has " + strings.Join(has, ", ") + ")"
-}
-
-// plural renders a counted noun ("1 subtask", "3 subtasks") for the labels.
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return "1 " + one
-	}
-	return strconv.Itoa(n) + " " + many
 }
 
 // scrapTaskCmd runs the chosen scrap through the hub — the task, optionally its

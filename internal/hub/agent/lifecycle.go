@@ -13,6 +13,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -22,7 +23,6 @@ import (
 
 	agentport "github.com/flo-at/sindri/internal/adapter/agent"
 	"github.com/flo-at/sindri/internal/adapter/git"
-	"github.com/flo-at/sindri/internal/adapter/tasks/td"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agentchan"
@@ -55,15 +55,19 @@ func (s *Service) setLifecycle(project, name, state string) {
 
 // AgentStatus reconciles intent with observed runtime into one status word, clearing the
 // intent once fulfilled. The single source of truth for "what is this agent doing".
-func (s *Service) AgentStatus(project, name string, running bool, phase string) string {
+//
+// observed is whether the runtime has been LOOKED AT at all. "down" is a claim, and an agent the
+// watchdog has not reached yet supports no claim — so running=false alone must never produce one,
+// nor retire an intent as fulfilled. Unobserved implies not running; the two are not the same fact.
+func (s *Service) AgentStatus(project, name string, running, observed bool, phase string) string {
 	s.lcMu.Lock()
 	defer s.lcMu.Unlock()
 	key := lcKey{project, name}
 	intent := s.lifecycle[key]
 	switch {
 	case intent == "stopping":
-		if running {
-			return "stopping" // stop requested, pod still up
+		if running || !observed {
+			return "stopping" // stop requested; the pod is still up, or nothing has looked yet
 		}
 		delete(s.lifecycle, key) // down now — stop intent fulfilled
 		return "down"
@@ -75,6 +79,8 @@ func (s *Service) AgentStatus(project, name string, running bool, phase string) 
 		return phase
 	case intent == "launching":
 		return "launching" // requested, pod not up yet
+	case !observed:
+		return "unknown" // registered since the last sweep; the next one answers
 	default:
 		return "down"
 	}
@@ -141,10 +147,11 @@ func (s *Service) DeleteAgent(project, name string) error {
 	if !ok {
 		return fmt.Errorf("no such agent %q", name)
 	}
-	// Release the task so it isn't stranded in_progress with no owner. os-* items aren't td.
-	if st, _ := ps.GetState(name); strings.HasPrefix(st.Task, "td-") {
-		if err := td.SetStatus(root, st.Task, "open"); err != nil {
-			fmt.Printf("warning: reopen %s on delete of %s: %v\n", st.Task, name, err)
+	// Release the task so it isn't stranded in_progress with no owner. Only a task sindri owns has
+	// a status to release; a gh-/os- item's is inferred from agent_state.
+	if st, _ := ps.GetState(name); ps.OwnsTask(st.Task) {
+		if err := ps.SetOwnedStatus(st.Task, "open"); err != nil {
+			log.Printf("hub: reopen %s on delete of %s: %v", st.Task, name, err)
 		}
 		_ = s.deps.RefreshTask(project, st.Task)
 	}
@@ -348,8 +355,8 @@ func (s *Service) Launch(project, name string, shell, debug bool, progress io.Wr
 		archPath := s.deps.ArchitectureDoc(project)
 		archContent, _ := os.ReadFile(filepath.Join(root, archPath))
 		sysPrompt := workflow.SystemPrompt(name, a.Role, string(archContent), archPath)
-		homeDir := filepath.Join(paths.StateDir(), project, "agents", name)
-		home, err := agentport.PrepareHome(agentport.HomeSpec{Dir: homeDir, SystemPrompt: sysPrompt, Out: w})
+		homeDir := paths.AgentHomeDir(project, name)
+		home, err := agentport.PrepareHome(agentport.HomeSpec{Dir: homeDir, SystemPrompt: sysPrompt, Out: w, Workspace: wt})
 		if err != nil {
 			return err
 		}

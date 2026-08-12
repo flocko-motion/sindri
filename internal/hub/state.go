@@ -14,7 +14,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
+	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -24,34 +26,13 @@ const probeTimeout = 3 * time.Second
 // statsTimeout bounds one `stats` sample, slower than a probe (the runtime samples over a window).
 const statsTimeout = 8 * time.Second
 
-// AgentView is an agent as the UIs see it; Status collapses runtime + workflow into one word:
-// down | idle | working | submitted.
-type AgentView struct {
-	Project   string `json:"project"`
-	Repo      string `json:"repo"`
-	Name      string `json:"name"`
-	Role      string `json:"role"`
-	Status    string `json:"status"`
-	Task      string `json:"task"`
-	Branch    string `json:"branch"`
-	PR        string `json:"pr"`
-	Workspace string `json:"workspace"` // the agent's git worktree path (repo-relative)
-	Clients   int    `json:"clients"`   // humans attached to its tmux session (dial-ins)
-	Container string `json:"container"` // podman container name (project-resolved, so cross-repo callers target the right pod)
-	Memory    string `json:"memory"`    // configured RAM limit ("" = hub default)
-	Runtime   string `json:"runtime"`   // Claude's live runtime: "working"|"blocked"|"idle"|"" (folded into Status; kept raw for the herdr projection)
-}
+// AgentView is an agent as the UIs see it; it crosses the wire, so it is
+// internal/api.AgentView under the name every existing caller here already uses.
+type AgentView = api.AgentView
 
-// BoardState is the whole board: Agents and PRs global, Tasks only the selected project's.
-type BoardState struct {
-	Agents   []AgentView             `json:"agents"`
-	Tasks    []store.Task            `json:"tasks"`
-	PRs      []store.PR              `json:"prs"`
-	Projects []store.Project         `json:"projects"`
-	Orphans  []string                `json:"orphans"`   // pods with no roster entry (D14)
-	Chat     ChatView                `json:"chat"`      // the user's chatroom: members + transcript
-	RepoDocs map[string]RepoDocState `json:"repo_docs"` // per repo tag: its architecture doc + any gap
-}
+// BoardState is the whole board; it crosses the wire, so it is internal/api.BoardState
+// under the name every existing caller here already uses.
+type BoardState = api.BoardState
 
 // State assembles the board; an empty selected tag means no project is chosen, so no tasks.
 func (h *Hub) State(selected string) (BoardState, error) {
@@ -81,11 +62,15 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		}
 	}
 	prs = kept
+	h.fillReviewers(prs)
 	var tasks []store.Task
+	var specMissing bool
 	if selected != "" {
 		if tasks, err = h.store.For(selected).AllTasks(); err != nil {
 			return BoardState{}, err
 		}
+		root := h.projectRoot(selected)
+		specMissing = h.wf.TaskSourceToolMissing(root)
 	}
 
 	// Liveness comes from the watchdog's last observation — a board read REPORTS it, never takes one.
@@ -94,9 +79,13 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	running := make([]bool, len(agentsRow))
 	clients := make([]int, len(agentsRow))
 	runtimes := make([]string, len(agentsRow)) // Claude's live runtime: busy|blocked|idle|""
+	// observed is carried separately because the zero value of running is a CLAIM: an agent
+	// registered since the last sweep has been looked at by nothing, and reading its absent
+	// observation as "not running" is the same error as trusting a stale listing.
+	observed := make([]bool, len(agentsRow))
 	for i, a := range agentsRow {
 		if l, ok := h.watch.get(a.Project, a.Name); ok {
-			running[i], clients[i], runtimes[i] = l.up, l.clients, l.runtime
+			running[i], clients[i], runtimes[i], observed[i] = l.up, l.clients, l.runtime, true
 		}
 	}
 
@@ -117,12 +106,21 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		if pr == "" {
 			pr, _ = ps.ReviewingPR(a.Name)
 		}
+		holds := st.Task != "" || st.Container != "" || pr != ""
+		status := overlayRuntime(h.agents.AgentStatus(a.Project, a.Name, running[i], observed[i], st.Phase), runtimes[i], holds)
+		// A stall reads as plain "idle" otherwise, which is what let one hold a task unnoticed.
+		if _, stalled := h.stalledFor(a.Project, a.Name, st.Phase, st.Container); stalled {
+			status = "stalled"
+		}
+		tokens, window, _ := h.agents.ContextUsage(a.Project, a.Name)
+		status = overlayFullness(status, h.wf.ContextFull(a.Project, a.Name), st.Task, st.Container, pr)
 		agents = append(agents, AgentView{
 			Project: a.Project, Repo: h.repoName(a.Project), Name: a.Name, Role: a.Role,
-			Status:  overlayRuntime(h.agents.AgentStatus(a.Project, a.Name, running[i], st.Phase), runtimes[i]),
+			Status:  status,
 			Runtime: runtimes[i],
-			Task:    st.Task, Branch: st.Branch, PR: pr, Workspace: a.Workspace,
-			Clients: clients[i], Container: container, Memory: a.Memory,
+			Task:    st.Task, Feature: st.Container, Branch: st.Branch, PR: pr, Workspace: a.Workspace,
+			Clients: clients[i], Container: container, Memory: a.Memory, Retired: a.Retired,
+			ContextTokens: tokens, ContextWindow: window,
 		})
 	}
 
@@ -142,24 +140,40 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	for _, p := range projects {
 		docs[p.Tag] = h.repoDocState(p.Path)
 	}
-	return BoardState{Agents: agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans, Chat: chat, RepoDocs: docs}, nil
+	return BoardState{
+		RuntimeHint: h.watch.runtimeHint(),
+		Agents:      agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans, Chat: chat,
+		RepoDocs: docs, SpecCLIMissing: specMissing, StartedAt: h.startedAt.UTC().Format(time.RFC3339),
+		DefaultMemory: agent.MemoryOrDefault(""),
+	}, nil
 }
 
-// AgentStatsView is one agent's resource snapshot; Err is set, not swallowed into a misleading zero.
-type AgentStatsView struct {
-	Name          string `json:"name"`
-	Repo          string `json:"repo"`
-	MemUsageBytes int64  `json:"memUsageBytes"`
-	MemLimitBytes int64  `json:"memLimitBytes"`
-	Err           string `json:"err,omitempty"`
+// fillReviewers stamps each PR with the agent holding an open review of it. Whether a PR is being
+// looked at, and by whom, is the hub's answer: a front-end deriving it from the reviews would be
+// deciding rather than rendering, and the two would drift the first time the rule moved.
+func (h *Hub) fillReviewers(prs []api.PR) {
+	byProject := map[string]map[string]string{}
+	for i, pr := range prs {
+		active, ok := byProject[pr.Project]
+		if !ok {
+			var err error
+			if active, err = h.store.For(pr.Project).ActiveReviewers(); err != nil {
+				log.Printf("hub: active reviewers for %s: %v", pr.Project, err)
+				active = map[string]string{}
+			}
+			byProject[pr.Project] = active
+		}
+		prs[i].Reviewer = active[pr.ID]
+	}
 }
 
-// StatsReport is the `agent stats` payload. Engine is included so the numbers are read in context:
-// podman shares one VM, apple container is one micro-VM per agent.
-type StatsReport struct {
-	Engine string           `json:"engine"`
-	Agents []AgentStatsView `json:"agents"`
-}
+// AgentStatsView is one agent's resource snapshot; it crosses the wire, so it is
+// internal/api.AgentStatsView under the name every existing caller here already uses.
+type AgentStatsView = api.AgentStatsView
+
+// StatsReport is the `agent stats` payload; it crosses the wire, so it is
+// internal/api.StatsReport under the name every existing caller here already uses.
+type StatsReport = api.StatsReport
 
 // Stats returns the engine name and a resource snapshot for every running agent.
 func (h *Hub) Stats() (StatsReport, error) {
@@ -230,17 +244,46 @@ func (h *Hub) container(project, name string) string {
 	return Container(root, name)
 }
 
-// overlayRuntime folds Claude's live runtime into the workflow status: "blocked" = needs you now (any
-// phase), "working" = busy, "idle" = nothing doing. It replaces a plain working/idle phase but keeps
-// the meaningful ones; runtime "" (probe failed) changes nothing.
-func overlayRuntime(status, runtime string) string {
+// overlayRuntime folds Claude's live runtime into the workflow status: "signed-out" = unreachable
+// until a human acts, "blocked" = needs you now (any phase), "working" = busy, "idle" = nothing
+// doing. It replaces a plain working/idle phase but keeps the meaningful ones; runtime "" (probe
+// failed) changes nothing. holds says whether the agent has work in hand.
+func overlayRuntime(status, runtime string, holds bool) string {
 	switch runtime {
+	case "signed-out":
+		// Outranks every phase: whatever was asked of it, nothing is happening and nothing can reach it.
+		return "signed-out"
 	case "blocked":
 		return "blocked"
+	case "api-error":
+		// Outranks the phase for the same reason signed-out does: whatever it was doing, the turn
+		// that was doing it is dead. The hub retries, and the word says why it went quiet meanwhile.
+		return "api-error"
 	case "working", "idle":
+		// A pane in motion is not work in hand. An agent reading a broadcast, or answering the user,
+		// moves its screen while holding nothing — and "working" is a claim about the workflow, so
+		// against an empty task column it states something that cannot be true.
+		if runtime == "working" && !holds {
+			return status
+		}
 		if status == "working" || status == "idle" {
 			return runtime
 		}
+	}
+	return status
+}
+
+// overlayFullness shows "full" only where it EXPLAINS something: an agent holding nothing, which
+// claimNext is passing over for exactly this reason. Fullness is not an activity, so anywhere else
+// it would replace the one fact the column exists to carry — and the fill is on the board as
+// ContextTokens for anyone who wants the number.
+//
+// Held work is checked directly rather than trusted to the word: a quiet runtime probe reads a
+// task-holder as "idle" (-> overlayRuntime) before it has been still long enough to say "stalled",
+// and "full" on an agent mid-task invites clearing a context the hub refuses to clear anyway.
+func overlayFullness(status string, full bool, task, feature, pr string) string {
+	if full && status == "idle" && task == "" && feature == "" && pr == "" {
+		return "full"
 	}
 	return status
 }
@@ -258,10 +301,12 @@ func (h *Hub) Log(project, name string) ([]store.Event, error) {
 	return h.store.For(project).Events(name, 50)
 }
 
-// openPRFor returns the id of an agent's not-yet-merged PR in its project, if any.
+// openPRFor returns the id of an agent's still-open PR in its project, if any. Open-ness is PROpen's
+// to define, the same rule the PRs tab lists by — deciding it here instead left a scrapped PR
+// attributed to its author on the Agents tab while the PRs tab, correctly, showed nothing.
 func openPRFor(prs []store.PR, project, agent string) string {
 	for _, p := range prs {
-		if p.Project == project && p.Agent == agent && p.Status != "merged" {
+		if p.Project == project && p.Agent == agent && PROpen(p) {
 			return p.ID
 		}
 	}

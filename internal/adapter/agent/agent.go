@@ -15,6 +15,12 @@ const (
 	Working State = "working" // actively processing a turn
 	Blocked State = "blocked" // waiting for a user response
 	Idle    State = "idle"    // stopped at the prompt, nothing happening
+	// SignedOut: the tool has no valid credentials, so it cannot run a turn at all. Distinct from
+	// Blocked, which a message answers — nothing typed at a signed-out prompt is ever sent.
+	SignedOut State = "signed-out"
+	// Failed: the turn was cut off by the API, so nothing is running however the pane looks. It says
+	// so in words and nothing else can tell — the interrupt hint and the spinner both survive it.
+	Failed  State = "api-error"
 	Unknown State = "unknown" // not classifiable (shell, transcript viewer, boot, …)
 )
 
@@ -24,6 +30,10 @@ type HomeSpec struct {
 	Dir          string    // host home dir to create + populate (mounted into the pod)
 	SystemPrompt string    // composed by the workflow; the backend persists it verbatim
 	Out          io.Writer // setup announcements (e.g. a one-time credential-access prompt)
+	// Workspace is the host path of the tree the pod mounts at /workspace. The backend reads it to
+	// decide which language tooling is worth declaring — a pod with no Go project should get no Go
+	// language server.
+	Workspace string
 }
 
 // Home is a provisioned home ready to mount (host paths); without HasCreds the caller
@@ -40,6 +50,19 @@ type Agent interface {
 	DetectState(screen string) State
 	// PrepareHome provisions spec.Dir and returns the host paths to mount.
 	PrepareHome(spec HomeSpec) (Home, error)
+	// RestageCredentials carries the host's credentials into an already-provisioned home when the
+	// host's reach further, so a re-login on the host reaches a pod that is already running.
+	// Reports whether it wrote.
+	RestageCredentials(dir string) (bool, error)
+	// HostTokenExpiry is when the host's access token lapses (epoch ms), and whether there is a
+	// usable one. Every agent runs on this single token, so its expiry is the moment the whole fleet
+	// needs the replacement — the hub watches it to redistribute then rather than on a slow tick.
+	HostTokenExpiry() (expiresAtMS int64, usable bool)
+	// ContextUsage reports what the live session under home carries and the window it fills, both
+	// from the backend's own transcript. The window comes from here because only the backend knows
+	// which model answers; a caller that assumed one retired workers with most of 1M unused.
+	// ok=false when nothing has been recorded yet.
+	ContextUsage(home string) (tokens, window int, ok bool)
 }
 
 // active is wired once at startup via Use; the no-op default keeps the port safe before.
@@ -51,14 +74,12 @@ func Use(a Agent) { active = a }
 // DetectState classifies a pane via the wired backend.
 func DetectState(screen string) State { return active.DetectState(screen) }
 
-// Runtime is the single source of the "working"|"blocked"|"idle" word every reader
+// Runtime is the single source of the "working"|"blocked"|"idle"|"signed-out" word every reader
 // shares. An unrecognized screen counts as idle: nothing needs surfacing.
 func Runtime(screen string) string {
-	switch DetectState(screen) {
-	case Working:
-		return "working"
-	case Blocked:
-		return "blocked"
+	switch s := DetectState(screen); s {
+	case Working, Blocked, SignedOut, Failed:
+		return string(s)
 	default: // Idle or Unknown
 		return "idle"
 	}
@@ -67,9 +88,24 @@ func Runtime(screen string) string {
 // PrepareHome provisions an agent home via the wired backend.
 func PrepareHome(spec HomeSpec) (Home, error) { return active.PrepareHome(spec) }
 
+// RestageCredentials refreshes one home's credentials from the host via the wired backend.
+func RestageCredentials(dir string) (bool, error) { return active.RestageCredentials(dir) }
+
+// HostTokenExpiry reports the wired backend's host token expiry and whether it is usable.
+func HostTokenExpiry() (int64, bool) { return active.HostTokenExpiry() }
+
+// ContextUsage reports the wired backend's context size and window for the session under home.
+func ContextUsage(home string) (int, int, bool) { return active.ContextUsage(home) }
+
 // noop is the default until Use: state is Unknown, no home is provisioned.
 type noop struct{}
 
 func (noop) DetectState(string) State { return Unknown }
 
 func (noop) PrepareHome(HomeSpec) (Home, error) { return Home{}, nil }
+
+func (noop) RestageCredentials(string) (bool, error) { return false, nil }
+
+func (noop) HostTokenExpiry() (int64, bool) { return 0, false }
+
+func (noop) ContextUsage(string) (int, int, bool) { return 0, 0, false }

@@ -14,7 +14,6 @@ import (
 
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/container"
-	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/ui/attach"
 	"github.com/spf13/cobra"
 )
@@ -44,24 +43,24 @@ func agentAttachCmd() *cobra.Command {
 			}
 			cname := a.Container
 			if cname == "" && root != "" { // older hub without the field — current-repo scope
-				cname = hub.Container(root, name)
+				cname = container.AgentContainer(root, name)
 			}
 			if cname == "" {
 				return fmt.Errorf("can't resolve %q's container — restart the hub to pick up this build", name)
-			}
-			// Trust the board's status (the same source `info`/`list` use) so the three
-			// commands never contradict each other.
-			switch a.Status {
-			case "down":
-				return fmt.Errorf("agent %q is not running (status: down)", name)
-			case "launching", "stopping":
-				return fmt.Errorf("agent %q is %s — try again in a moment", name, a.Status)
 			}
 			reportAttach(name, ro, a.Clients)
 			// List this agent in herdr's sidebar (by name, with a live state) for the
 			// duration of the dial-in, releasing on detach. No-op outside a herdr pane.
 			defer attach.ReportToHerdr(cname, name)()
-			return container.ExecInteractive(cname, append([]string{"tmux"}, tmux.Attach(name, ro)...)...)
+			// Attempted whatever the board says. That status is the watchdog's last sweep, and on a
+			// loaded host it calls a live agent down — refusing on it costs the access, while trying
+			// costs a moment. The failure below is what a genuinely absent pod looks like.
+			if err := container.ExecInteractive(cname, append([]string{"tmux"}, tmux.Attach(name, ro)...)...); err != nil {
+				return fmt.Errorf("couldn't attach to %q (the board last saw it %q) — its container or tmux "+
+					"session may not be up: `sindri agent start %s`, or `sindri agent info %s --debug` for "+
+					"what the hub's probes see. %w", name, a.Status, name, name, err)
+			}
+			return nil
 		},
 	}
 	c.Flags().BoolVar(&ro, "read-only", false, "observe without typing")

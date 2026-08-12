@@ -116,3 +116,47 @@ func TestRepoOverridesGlobal(t *testing.T) {
 		t.Errorf("review_prompt: got %q", c.ReviewPrompt)
 	}
 }
+
+// TestVerifyKeyIsValidatedLikeEveryOtherPath: the gate command is a path the hub will execute, so a
+// bad one has to be refused when the config is read, not discovered mid-submit.
+func TestVerifyKeyIsValidatedLikeEveryOtherPath(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".sindri"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(body string) error {
+		if err := os.WriteFile(filepath.Join(root, ".sindri", "config.yaml"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(root)
+		return err
+	}
+
+	if err := write("verify: /etc/passwd\n"); err == nil {
+		t.Error("an absolute verify path must be refused")
+	}
+	if err := write("verify: ../escape.sh\n"); err == nil {
+		t.Error("a verify path escaping the repo must be refused")
+	}
+	if err := write("verify: scripts/absent.sh\n"); err == nil {
+		t.Error("a verify path that does not exist must be refused")
+	}
+
+	if err := os.MkdirAll(filepath.Join(root, "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "scripts", "verify.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := write("verify: scripts/verify.sh\n"); err != nil {
+		t.Errorf("a real repo-relative gate must be accepted: %v", err)
+	}
+
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Verify != "scripts/verify.sh" {
+		t.Errorf("Verify = %q, want the declared path", cfg.Verify)
+	}
+}

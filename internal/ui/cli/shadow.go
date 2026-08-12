@@ -1,7 +1,8 @@
 // package: ui/cli / shadow
-// type:    logic (install-conflict detection)
-// job:     warn when a second sindri or brokkr sits elsewhere on PATH than the one running,
-// so a stale copy is named instead of silently deciding behaviour.
+// type:    command (install-conflict detection)
+// job:     warn when a second sindri or brokkr sits elsewhere on PATH than the one
+// running. The one deliberate exception to "ask the hub, don't probe yourself":
+// the question is about this CLI process's own PATH, which only it can see.
 // limits:  reports only; it never removes or reorders anything.
 package cli
 

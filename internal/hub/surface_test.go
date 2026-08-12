@@ -8,8 +8,9 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// surfaceFor seeds a worker in the given phase and returns the verbs the hub currently
-// advertises to it.
+// surfaceFor seeds a worker in the given phase and returns the verbs it can RUN right now. The
+// listing also carries the ones it cannot, each with its reason (-> runnableFor's counterpart), so
+// presence in the list is no longer the same question as being able to run it.
 func surfaceFor(t *testing.T, phase string) (*Hub, []string) {
 	t.Helper()
 	h := newHub(t)
@@ -28,11 +29,41 @@ func surfaceFor(t *testing.T, phase string) (*Hub, []string) {
 	if err != nil {
 		t.Fatalf("agent commands: %v", err)
 	}
-	names := make([]string, len(cmds))
-	for i, c := range cmds {
-		names[i] = c.Name
+	var names []string
+	for _, c := range cmds {
+		if c.Unavailable == "" {
+			names = append(names, c.Name)
+		}
 	}
 	return h, names
+}
+
+// blockedReason returns why a worker in phase cannot run verb, "" when it can.
+func blockedReason(t *testing.T, phase, verb string) string {
+	t.Helper()
+	h := newHub(t)
+	ps := h.store.For(testProject)
+	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker", Workspace: "ws"}); err != nil {
+		t.Fatalf("put agent: %v", err)
+	}
+	task := "td-1"
+	if phase == "idle" {
+		task = ""
+	}
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: task, Branch: task, Phase: phase}); err != nil {
+		t.Fatalf("set state: %v", err)
+	}
+	cmds, err := h.AgentCommands(testProject, "eitri")
+	if err != nil {
+		t.Fatalf("agent commands: %v", err)
+	}
+	for _, c := range cmds {
+		if c.Name == verb {
+			return c.Unavailable
+		}
+	}
+	t.Fatalf("%q is a worker verb and must be listed in any phase, blocked or not", verb)
+	return ""
 }
 
 func has(names []string, v string) bool {
@@ -62,7 +93,12 @@ func TestWorkVerbsOnlyOfferedWhileWorking(t *testing.T) {
 		_, names := surfaceFor(t, tc.phase)
 		for _, verb := range []string{"submit", "contribute"} {
 			if got := has(names, verb); got != tc.want {
-				t.Errorf("phase %q: %s offered=%v, want %v (surface: %v)", tc.phase, verb, got, tc.want, names)
+				t.Errorf("phase %q: %s runnable=%v, want %v (runnable: %v)", tc.phase, verb, got, tc.want, names)
+			}
+			// Held back, it is still LISTED and says why. Dropping it taught an agent mid-review
+			// that submit did not exist, so it stopped rather than asking.
+			if !tc.want && blockedReason(t, tc.phase, verb) == "" {
+				t.Errorf("phase %q: %s is held back but the listing gives no reason", tc.phase, verb)
 			}
 		}
 	}

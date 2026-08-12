@@ -1,7 +1,7 @@
 // package: hub/repo / repo
 // type:    logic (git/PR mechanics)
 // job:     the git-backed operations the workflow orchestrates — materialize a PR
-// branch for inspection, run the lint gate against a worktree. Stateless:
+// branch for inspection, run the submit gate against a worktree. Stateless:
 // each takes explicit paths/refs and returns a result or error; the workflow
 // resolves PR records and decides consequences.
 // limits:  no store, no orchestration, no agent messaging. git primitives live in
@@ -9,16 +9,20 @@
 package repo
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
+	"github.com/flo-at/sindri/internal/adapter/lintgate"
 )
 
-// MaterializeReview checks out branch (detached) into the repo's reserved
-// .worktrees/review workspace — fresh each time — and returns the path, so a human or
-// reviewer can inspect a PR branch without disturbing any agent's own worktree.
+// MaterializeReview checks branch out detached into the reserved .worktrees/review workspace, fresh
+// each time, so a PR can be inspected without disturbing any agent's own worktree.
 func MaterializeReview(root, branch string) (string, error) {
 	path := filepath.Join(root, ".worktrees", "review")
 	_ = git.WorktreeRemove(root, path) // fresh checkout each time
@@ -26,6 +30,40 @@ func MaterializeReview(root, branch string) (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+// combinedName is the preflight's throwaway worktree and branch: one reserved name, so a crash
+// leaves at most one stale tree rather than accumulating them.
+const combinedName = "precheck"
+
+// MaterializeCombined builds what a merge WOULD produce, in a throwaway worktree: its own branch at
+// the PR tip, replayed onto base. Never the author's tree — replaying base where an agent is working
+// moves the ground under it. The caller removes it either way (-> RemoveCombined).
+func MaterializeCombined(root, branch, base string) (path string, conflicts []string, err error) {
+	path = filepath.Join(root, ".worktrees", combinedName)
+	RemoveCombined(root) // a previous run that died mid-flight leaves this behind
+	if err := git.WorktreeAddOnBranch(root, path, combinedBranch(), branch); err != nil {
+		return "", nil, err
+	}
+	conflicts, done, err := git.RebaseHere(path, base)
+	if err != nil {
+		return path, nil, err
+	}
+	if !done {
+		return path, conflicts, nil
+	}
+	return path, nil, nil
+}
+
+// combinedBranch is the throwaway branch name. Prefixed so it is recognisable as the hub's own if
+// one is ever left behind by a crash.
+func combinedBranch() string { return "sindri-" + combinedName }
+
+// RemoveCombined drops the throwaway worktree and its branch. Best-effort: it runs after the check
+// has its answer, and failing here must not turn a finding into an error.
+func RemoveCombined(root string) {
+	_ = git.WorktreeRemove(root, filepath.Join(root, ".worktrees", combinedName))
+	_ = git.DeleteBranch(root, combinedBranch())
 }
 
 // ScrapBranch removes a discarded PR's branch, detaching the owning worktree first since git will
@@ -39,18 +77,74 @@ func ScrapBranch(root, worktree, branch string) error {
 	return git.DeleteBranch(root, branch)
 }
 
-// Lint runs the quality gate in a worktree as a subprocess, so the concurrent hub never chdir's. Go
-// modules only. A binary that cannot be resolved is a loud lint failure, never a silent pass.
-func Lint(wt string, resolveBin func() (string, error)) (output string, ok bool) {
+// GateTimeout bounds the project's own verify command. Generous, because a real gate builds and
+// runs a test suite; bounded, because an agent waiting forever on a hung gate reports nothing at all.
+const GateTimeout = 15 * time.Minute
+
+// gateOutputLines caps stored gate output, the way the diff commands cap theirs.
+const gateOutputLines = 400
+
+// Gate runs the submit gate in a worktree as a subprocess, so the concurrent hub never chdir's: the
+// built-in lint, then the project's own verify command when it declares one. Named for what it now
+// is — a gate — since it may build and test, not only lint.
+//
+// verify is repo-relative and already validated by config; "" means the project declares none, and
+// then the built-in behaviour is exactly what it was, including the silent pass for a non-Go tree.
+// A declared gate runs whatever the language, because the project asked for it.
+func Gate(wt string, resolveBin func() (string, error), verify string) (output string, ok bool) {
+	if out, passed := builtinLint(wt, resolveBin, verify != ""); !passed {
+		return out, false
+	} else if verify == "" {
+		return out, true
+	}
+	return runVerify(wt, verify)
+}
+
+// builtinLint is the gate brokkr provides. skipGoCheck keeps a non-Go tree in play when the project
+// has declared its own gate — otherwise a project in another language would still gate on nothing.
+func builtinLint(wt string, resolveBin func() (string, error), declared bool) (string, bool) {
 	if _, err := os.Stat(filepath.Join(wt, "go.mod")); err != nil {
-		return "", true // no Go module — no lint gate applies
+		if declared {
+			return "", true // not a Go tree: nothing for the built-in to say, the declared gate decides
+		}
+		return "", true // no Go module and no declared gate — as before
 	}
-	bin, err := resolveBin()
-	if err != nil {
-		return "lint: " + err.Error(), false
+	ok, out := lintgate.Adapter{ResolveBin: resolveBin}.Validate(wt)
+	return out, ok
+}
+
+// runVerify executes the project's own declared command (not a tool sindri wraps, so no adapter
+// applies), bounded and with its output capped. A timeout is a refusal, not a hang.
+func runVerify(wt, verify string) (string, bool) {
+	bin := filepath.Join(wt, filepath.FromSlash(verify))
+	if _, err := os.Stat(bin); err != nil {
+		return "verify: " + verify + " not found in the worktree — the project declares it in .sindri/config.yaml\n", false
 	}
-	cmd := exec.Command(bin, "lint")
+	ctx, cancel := context.WithTimeout(context.Background(), GateTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin)
 	cmd.Dir = wt
 	out, err := cmd.CombinedOutput()
-	return string(out), err == nil
+	body := capLines(string(out), gateOutputLines)
+	if ctx.Err() != nil {
+		return body + fmt.Sprintf("verify: %s ran past %s and was stopped — the gate refuses rather than waiting.\n", verify, GateTimeout), false
+	}
+	if err != nil {
+		return body + "verify: " + verify + " failed (" + err.Error() + ")\n", false
+	}
+	return body, true
+}
+
+// capLines truncates long output and says what was cut, because silent truncation reads as a
+// complete answer — the same reason the diff commands cap theirs.
+func capLines(s string, max int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) <= max {
+		if len(s) == 0 {
+			return ""
+		}
+		return strings.Join(lines, "\n") + "\n"
+	}
+	return fmt.Sprintf("%s\n… truncated: last %d of %d lines shown — re-run the gate locally for the rest.\n",
+		strings.Join(lines[len(lines)-max:], "\n"), max, len(lines))
 }

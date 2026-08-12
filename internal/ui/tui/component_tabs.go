@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
 var (
@@ -26,7 +28,7 @@ func headerBar(labels []string, active, width int, repoName, repoTag string, rep
 	if repoName == "" {
 		return plainTabStrip(labels, active, width)
 	}
-	dark, bright := repoColorsFor(repoTag, repoColor)
+	dark, bright := theme.RepoColors(repoTag, repoColor)
 	base := lipgloss.NewStyle().Background(dark).Foreground(bright)
 	activeSeg := lipgloss.NewStyle().Background(bright).Foreground(dark).Bold(true) // inverted block
 

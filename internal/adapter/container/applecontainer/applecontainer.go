@@ -31,6 +31,11 @@ type Engine struct{}
 // Name identifies this backend for humans.
 func (Engine) Name() string { return "apple container" }
 
+// DefaultMemory: a micro-VM takes its limit from the host as a RESERVATION, used or not, so the
+// number is what each agent costs the machine simply by running. It stays modest for that reason —
+// on a small Mac a few agents at once must not crowd it out — and is raised per agent when needed.
+func (Engine) DefaultMemory() string { return "2g" }
+
 // AgentChannel advertises the gateway (micro-VMs have no host.containers.internal),
 // read from the runtime, never assumed to be .1, and never defaulted on failure.
 func (Engine) AgentChannel() (container.NetChannel, error) {

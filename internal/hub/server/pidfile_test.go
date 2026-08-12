@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"testing"
 	"time"
+
+	"github.com/flo-at/sindri/internal/adapter/process"
 )
 
 // tmpRuntime points the runtime dir (where the pid file lives) at a temp dir for
@@ -79,7 +81,8 @@ func TestWritePIDRefusesLiveOwner(t *testing.T) {
 // TestProcessAliveRejectsZombie guards the restart-wedging bug: a hub that died
 // but was never reaped by its parent lingers as a zombie. It still answers signal
 // 0 (kill 0 succeeds), so the old check counted it as alive and refused every
-// restart. ProcessAlive must treat it as dead.
+// restart. processAlive (WritePID's own race guard) must treat it as dead —
+// internal/client carries the equivalent test for the copy front-ends use.
 func TestProcessAliveRejectsZombie(t *testing.T) {
 	// A child that exits immediately and is never Wait()ed becomes a zombie.
 	c := exec.Command("true")
@@ -91,7 +94,7 @@ func TestProcessAliveRejectsZombie(t *testing.T) {
 
 	var sawZombie bool
 	for i := 0; i < 200; i++ { // up to ~2s for it to exit into zombie state
-		if isZombie(pid) {
+		if process.IsZombie(pid) {
 			sawZombie = true
 			break
 		}
@@ -100,8 +103,8 @@ func TestProcessAliveRejectsZombie(t *testing.T) {
 	if !sawZombie {
 		t.Skip("could not observe a zombie state on this platform")
 	}
-	if ProcessAlive(pid) {
-		t.Fatal("ProcessAlive counted a zombie as alive — a dead hub would wedge every restart")
+	if processAlive(pid) {
+		t.Fatal("processAlive counted a zombie as alive — a dead hub would wedge every restart")
 	}
 }
 

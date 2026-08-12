@@ -12,6 +12,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/task"
@@ -20,10 +21,10 @@ import (
 // AssignPlan hands a planner one thing to plan, as a phased brief (-> MsgPlanAssignment). Refused
 // while it has a PR open: it drafts on ONE standing branch, so a second plan would pile
 // unreviewed work onto specs awaiting a verdict.
-func (e *Engine) AssignPlan(project, agent, goal string) error {
-	goal = strings.TrimSpace(goal)
-	if goal == "" {
-		return fmt.Errorf("say what to plan: a goal, question or feature to work out")
+func (e *Engine) AssignPlan(project, agent, goal, taskID string) error {
+	goal, taskID = strings.TrimSpace(goal), strings.TrimSpace(taskID)
+	if goal == "" && taskID == "" {
+		return fmt.Errorf("say what to plan: a goal, question or feature to work out, or a task to work up")
 	}
 	ps := e.store.For(project)
 	a, ok, err := ps.GetAgent(agent)
@@ -44,20 +45,53 @@ func (e *Engine) AssignPlan(project, agent, goal string) error {
 			"drafted on top of specs nobody has ruled on yet", agent, pr.ID, pr.ID, pr.ID)
 	}
 
+	subject, err := e.planSubject(ps, taskID, goal)
+	if err != nil {
+		return err
+	}
 	// Interrupt first: the directive has to land on an idle prompt, or it queues behind whatever
 	// the agent is already doing and arrives after the work it was meant to redirect.
 	if e.deps.AgentAlive(project, agent) {
 		_ = e.deps.Interrupt(project, agent)
 	}
-	if err := e.deps.InjectWhenReady(project, agent, MsgPlanAssignment(goal, e.deps.ArchitectureDoc(project), e.planReading(project))); err != nil {
+	brief := MsgPlanAssignment(subject, taskID, e.deps.ArchitectureDoc(project), e.planReading(project))
+	if err := e.deps.InjectWhenReady(project, agent, brief); err != nil {
 		return err
 	}
 	st, _ := ps.GetState(agent)
 	st.Agent, st.Phase = agent, "planning"
 	_ = ps.SetState(st)
-	_ = ps.Log(agent, "plan", goal)
+	_ = ps.Log(agent, "plan", subject)
 	e.deps.Notify()
 	return nil
+}
+
+// planSubject resolves what the planner is being handed. A task carries its own title and body, so
+// the brief quotes those rather than asking the user to retype them, and the task moves to "pending
+// approval" — which is what lets the planner revise it (-> CmdEditTask), keeps it away from workers
+// while it is still being worked out, and returns it to the user for a verdict when it is done.
+func (e *Engine) planSubject(ps *store.ProjectStore, taskID, goal string) (string, error) {
+	if taskID == "" {
+		return goal, nil
+	}
+	t, ok, err := ps.OwnedTask(taskID)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("%s is not a task this project owns — a planner works up sindri's own tasks", taskID)
+	}
+	if err := ps.SetApproval(taskID, "pending", ""); err != nil {
+		return "", err
+	}
+	subject := t.Title
+	if body := strings.TrimSpace(t.Description); body != "" {
+		subject += "\n\n" + body
+	}
+	if goal != "" {
+		subject += "\n\nThe user adds: " + goal
+	}
+	return subject, nil
 }
 
 // planReading is the project's configured reading list, as one /workspace-rooted phrase for the
@@ -122,6 +156,11 @@ func (e *Engine) CmdCreateTask(c registry.Caller, args []string, out io.Writer) 
 	if spec.Type == "" {
 		spec.Type = "task"
 	}
+	// The priority is applied AFTER the approval row, never with the task: a task carrying a rating
+	// and no approval row is claimable, so writing them the other way round would open a window in
+	// which a worker could take work the user has not seen.
+	proposed := spec.Priority
+	spec.Priority = ""
 	id, err := e.CreateTask(c.Project, spec)
 	if err != nil {
 		// A rejected parent is the caller's to fix, so it goes to them rather than to the
@@ -132,6 +171,12 @@ func (e *Engine) CmdCreateTask(c registry.Caller, args []string, out io.Writer) 
 	if err := e.store.For(c.Project).SetApproval(id, "pending", ""); err != nil {
 		return 1, err
 	}
+	if proposed != "" {
+		if err := e.writePriority(c.Project, id, proposed); err != nil {
+			return 1, err
+		}
+		e.refreshCachedTask(c.Project, id)
+	}
 	e.deps.Notify()
 	fmt.Fprintln(out, ReplyTaskProposed(id, spec.Title))
 	return 0, nil
@@ -139,11 +184,12 @@ func (e *Engine) CmdCreateTask(c registry.Caller, args []string, out io.Writer) 
 
 // createTaskUsage is the one description of create-task's surface, shown for a bad flag, a
 // missing title, and (via CreateTaskHelp) `create-task --help`.
-const createTaskUsage = "usage: create-task [--parent <id>] [--type <task|feature|bug|epic>] [--body <text>] [--labels a,b] <title...>\n" +
-	"  --parent  hang the task under an existing task or openspec change (os-*), so it joins that tree\n" +
-	"  --body    the task's description — what a worker needs in order to start\n" +
-	"The user sets the priority when they approve: a task without one is never handed to a worker,\n" +
-	"so approval and prioritisation are the two human decisions that release work."
+const createTaskUsage = "usage: create-task [--parent <id>] [--type <task|feature|bug|epic>] [--body <text>] [--labels a,b] [--priority <critical|high|mid|low|none>] <title...>\n" +
+	"  --parent    hang the task under an existing task or openspec change (os-*), so it joins that tree\n" +
+	"  --body      the task's description — what a worker needs in order to start\n" +
+	"  --priority  the order you propose this is worked in; `prioritise-task` changes it afterwards\n" +
+	"Approval is what releases work, and it is the user's alone. A priority you set is a proposed\n" +
+	"ordering: the task stays unclaimable until the user approves it."
 
 // CreateTaskHelp is what the command registry advertises for create-task, so the verb list
 // and the verb's own usage describe one surface.
@@ -151,8 +197,8 @@ const CreateTaskHelp = "propose a new task, needing the user's approval. " + cre
 
 // parseTaskFlags splits create-task's flags from the words forming the title, accepting both
 // `--flag value` and `--flag=value`. An unknown flag is an error: silently ignoring one creates
-// the task without the parent or body that was asked for. Priority is absent on purpose — it is
-// what releases work to a worker (-> store.OpenLeaves), so it stays the user's.
+// the task without the parent or body that was asked for. A priority is a proposed ORDER and is
+// accepted; what releases the task is the user's approval, which no flag here can reach.
 func parseTaskFlags(args []string) (TaskSpec, []string, error) {
 	var s TaskSpec
 	var words []string
@@ -180,6 +226,12 @@ func parseTaskFlags(args []string) (TaskSpec, []string, error) {
 			s.Description = val
 		case "--labels", "-l":
 			s.Labels = strings.Split(val, ",")
+		case "--priority", "-p":
+			code, known := api.ParsePriority(val)
+			if !known {
+				return s, nil, fmt.Errorf("unknown priority %q — one of: %s", val, strings.Join(api.PriorityWords, ", "))
+			}
+			s.Priority = code
 		default:
 			return s, nil, fmt.Errorf("unknown flag %q", name)
 		}
@@ -284,6 +336,9 @@ func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int,
 		fmt.Fprintf(out, "%s  [%s]  %s  priority=%s\napproval: %s\nparent:   %s\nchildren: %s\n\n%s\n",
 			t.ID, t.Status, t.Title, dash(t.Priority), dash(appr),
 			dash(t.ParentID), dash(strings.Join(childIDs(tasks, t.ID), ", ")), dash(t.Description))
+		// The same thread the TUI pane and `task info` show: an agent that just filed a finding
+		// (-> the comment verb) has to be able to read it back here, or the verb is worse than none.
+		fmt.Fprint(out, commentBlock(t.Comments))
 		return 0, nil
 	}
 	if bounded && len(args) == 0 {
@@ -358,15 +413,24 @@ func (e *Engine) workerTaskView(c registry.Caller, tasks []store.Task, out io.Wr
 		return 0, nil
 	}
 
+	// GetTask reads the row; the thread lives in its own table and is fetched separately, the same
+	// way TaskInfo attaches it. Bare `task` is where an agent looks first, so a comment addressed
+	// to it has to arrive here — not only on the fuller `task <id>`.
+	comments := e.deps.TaskComments(c.Project, root.ID)
+
 	rows := subtreeRows(tasks, root.ID)
 	if len(rows) <= 1 { // a standalone task: show it whole
 		fmt.Fprintf(out, "Your task %s  [%s]  %s\n\n%s\n", root.ID, root.Status, root.Title, dash(root.Description))
+		fmt.Fprint(out, commentBlock(comments))
 		return 0, nil
 	}
 	fmt.Fprintf(out, "Your package %s: %s\n", root.ID, root.Title)
 	if body := strings.TrimSpace(root.Description); body != "" {
 		fmt.Fprintf(out, "\n%s\n", body)
 	}
+	// The package's own thread, not its subtasks' — a comment on the package is addressed to
+	// whoever holds it, which is the reader. Each subtask carries its own to `task <id>`.
+	fmt.Fprint(out, commentBlock(comments))
 	fmt.Fprintf(out, "\n%d subtasks:\n", len(rows)-1)
 	for _, r := range rows[1:] {
 		marker := "  "

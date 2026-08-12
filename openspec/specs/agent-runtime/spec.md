@@ -99,16 +99,42 @@ also be possible for observation.
 
 ### Requirement: Agent sees only its own workspace
 
-An agent SHALL see only its git workspace, named after the agent. Its role, any
-roster, the hub's state directory, and other agents' workspaces — in its own project
-or any other — SHALL NOT be visible to it. Its sole channel to the hub resolves only
-to its own `(project, agent)` identity.
+An agent SHALL see only its own git workspace and the single hub socket that is
+its channel to the hub; the roster, the `.sindri/` directory, and other agents'
+workspaces SHALL NOT be visible to it. For a worker or reviewer the workspace is
+an isolated per-agent worktree named after the agent. The coauthor is the
+deliberate exception: because it works the same material as the user, its
+workspace IS the user's own working checkout (the repo root), so it is NOT
+isolated from the user's tree — but even then the `.sindri/` directory SHALL
+remain hidden from it (overlaid by an empty read-only directory), so it can
+neither read nor corrupt hub state in the shared checkout. The hub MAY tell an
+agent its own role — it briefs the agent in a role-specific way and the `status`
+verb reports the role — but an agent SHALL NOT be able to enumerate the roster,
+address or observe another agent, or read `.sindri/`.
 
-#### Scenario: Role invisible to the agent
+#### Scenario: Agent knows its own role but not the roster
 
 - **WHEN** an agent inspects its environment
-- **THEN** it cannot determine whether it is a worker or a reviewer; only the hub
-  knows the role
+- **THEN** it knows its own role from the hub's briefing, but it cannot enumerate
+  the roster, see other agents' workspaces, or read `.sindri/`
+
+#### Scenario: No cross-agent visibility
+
+- **WHEN** an agent tries to discover or address another agent
+- **THEN** it cannot — only the hub holds the roster and the routing tables
+
+#### Scenario: Isolated agent sees only its own worktree
+
+- **WHEN** a worker or reviewer inspects its filesystem
+- **THEN** it finds its own worktree and its hub socket, and neither the roster,
+  `.sindri/`, nor another agent's workspace
+
+#### Scenario: Coauthor shares the user's checkout but not .sindri
+
+- **WHEN** a coauthor inspects its filesystem
+- **THEN** its `/workspace` is the user's actual repository checkout (edits are
+  shared with the user), yet `.sindri/` is still hidden, so it cannot read or
+  write hub state
 
 #### Scenario: Other projects invisible
 
@@ -170,4 +196,159 @@ An agent SHALL run in its own runtime instance such that the crash, out-of-memor
 
 - **WHEN** the shared-VM backend (podman) is in use and its VM fails
 - **THEN** the fleet-wide failure is understood as that backend's limitation — the per-container-VM backend exists to avoid it
+
+### Requirement: The coauthor is a fourth role driven directly by the user
+
+Sindri SHALL support a fourth agent role, the coauthor, alongside worker,
+reviewer, and planner. A coauthor SHALL run with the same runtime shape as any
+agent — interactive Claude in a named tmux session, driven by the same thin
+browser client — but it SHALL NOT be assigned backlog tasks and SHALL NOT be
+driven by the managed act-report-idle loop. It works directly with the user in
+the shared checkout: the user steers it through its terminal (provenance-stamped
+messages), and it edits files and uses git itself. Its briefing SHALL tell it it
+is the coauthor and that there is no task queue and no review gate.
+
+#### Scenario: Coauthor registered as a distinct role
+
+- **WHEN** an agent is registered with the coauthor role
+- **THEN** it is accepted as a valid role distinct from worker, reviewer, and
+  planner, and launches with the same tmux/browser runtime as any agent
+
+#### Scenario: Coauthor is never handed a task
+
+- **WHEN** open backlog tasks exist and a coauthor asks the hub for its next action
+- **THEN** the hub does not assign it a task; only workers claim backlog tasks
+
+### Requirement: Coauthor next-action is freestyle and never blocks
+
+A coauthor SHALL NOT block waiting for assigned work. Its next-action directive
+SHALL be a freestyle brief — work with the user in the shared checkout, editing
+files and using git directly — returned immediately rather than blocking on a
+work queue. The user drives the coauthor by injecting messages into its session;
+when the user is quiet the coauthor SHALL wait rather than invent work.
+
+#### Scenario: Next action returns immediately
+
+- **WHEN** a coauthor asks the hub for its next action
+- **THEN** the hub returns the freestyle brief at once, without blocking on a queue
+  or assigning a task
+
+#### Scenario: Driven by the user, not the loop
+
+- **WHEN** the user types an instruction into the coauthor's session
+- **THEN** the coauthor acts on it directly, committing with git itself rather than
+  through a hub submit verb
+
+### Requirement: The planner is a third role that plans, never builds
+
+Sindri SHALL support a third agent role, the planner, alongside worker and
+reviewer. A planner SHALL run with the same runtime shape as any agent —
+interactive Claude in a named tmux session, driven by the same thin browser
+client, woken only by hub injection — but it SHALL NOT be auto-assigned backlog
+tasks. The planner's job is to shape upcoming work with the user: read the repo
+and specs, propose tasks, and draft openspec. Its briefing SHALL tell it it is
+the planner and how its loop differs from a worker's.
+
+#### Scenario: Planner registered as a distinct role
+
+- **WHEN** an agent is registered with the planner role
+- **THEN** it is accepted as a valid role distinct from worker and reviewer, and
+  launches with the same tmux/browser runtime as any agent
+
+#### Scenario: Planner is never handed a task
+
+- **WHEN** open backlog tasks exist and a planner asks the hub for its next action
+- **THEN** the hub does not assign it a task; planners build nothing — only workers
+  claim backlog tasks
+
+### Requirement: Planner rests in an orient-and-wait directive
+
+A planner SHALL NOT block waiting for work to be assigned. When it has no
+in-flight plan under review, its next-action directive SHALL be to orient — read
+README, the backlog, and the specs — and then wait for the user to steer it.
+Only an in-flight openspec PR (submitted and awaiting a verdict) SHALL put the
+planner into the wait-for-verdict state; everything else returns the orient brief.
+
+#### Scenario: Idle planner is told to orient and wait
+
+- **WHEN** a planner with no submitted plan asks the hub for its next action
+- **THEN** the hub returns the orient-and-wait brief rather than a task or a block
+
+#### Scenario: Planner awaiting a verdict
+
+- **WHEN** a planner has shipped an openspec PR that is still under review
+- **THEN** its next-action directive is to wait for the verdict, like a worker that
+  has submitted
+
+### Requirement: An agent's memory limit is declarable and its usage observable
+
+Each agent SHALL have a container memory limit: a per-agent value where one is set, and a
+modest hub default where it is not. The limit SHALL be validated when it is set, so a
+malformed size is refused at that point rather than at launch. Because a running container's
+limit is fixed when the container is created, a change SHALL take effect on the agent's next
+start rather than being applied to a running pod, and this SHALL be stated when the change is
+made.
+
+Usage against the limit SHALL be observable per agent — the memory in use and the limit it is
+measured against, reported in the context of the runtime that enforces it, so a number is
+never read without knowing what enforces it. Where usage cannot be read for one agent, that
+agent's report SHALL carry the reason and SHALL NOT suppress the others.
+
+The limit SHALL be enforced by the container runtime rather than by the hub; the hub declares
+it and the runtime applies it.
+
+#### Scenario: Setting a limit takes effect on next start
+
+- **WHEN** the user sets an agent's memory limit while that agent is running
+- **THEN** the value is stored, the user is told it applies from the agent's next start, and
+  the running container is left alone
+
+#### Scenario: A malformed size is refused
+
+- **WHEN** the user sets a memory limit that is not a well-formed size
+- **THEN** it is refused at that point, and the agent keeps its previous value
+
+#### Scenario: Unset means the default
+
+- **WHEN** an agent has no memory limit of its own
+- **THEN** it launches with the hub's default limit
+
+#### Scenario: Usage is reported against the limit
+
+- **WHEN** the user asks what agents are using
+- **THEN** each running agent's memory in use and its limit are reported, identified by agent
+  and repo, alongside the runtime enforcing them
+
+#### Scenario: One unreadable agent does not blank the report
+
+- **WHEN** usage cannot be read for one agent
+- **THEN** that row carries the reason and every other agent is still reported
+
+### Requirement: Attaching reports the occupied pane, best-effort
+
+Where an external pane tracker is present, attaching to an agent SHALL report which agent
+occupies the current terminal pane, and detaching SHALL drop that claim, so a tool outside
+sindri can show what is being watched where.
+
+This SHALL be best-effort in the strict sense: a tracker that is absent, failing, or slow
+SHALL NOT delay or prevent an attach or a detach, and SHALL NOT surface an error to the user
+attaching. The reporting SHALL go through an adapter like any other external tool, and
+deciding *when* to report SHALL belong to the interface performing the attach, not to the
+adapter.
+
+#### Scenario: Attach claims the pane
+
+- **WHEN** a user attaches to an agent and a pane tracker is available
+- **THEN** the tracker is told which agent occupies this pane
+
+#### Scenario: Detach releases it
+
+- **WHEN** the user detaches
+- **THEN** the claim is dropped
+
+#### Scenario: No tracker, no difference
+
+- **WHEN** no pane tracker is installed, or reporting fails
+- **THEN** the attach and detach proceed exactly as they would otherwise, with nothing
+  surfaced to the user
 

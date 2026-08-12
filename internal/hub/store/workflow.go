@@ -1,9 +1,8 @@
 // package: hub/store / workflow
-// type:    persistence (SQLite, hub-owned)
-// job:     the durable workflow state — the cached task read model (D15), each
-// agent's live workflow state, and merge-intents (PRs) — all write-through
-// so a crash loses nothing committed (D11). Every table is project-keyed;
-// the methods hang off ProjectStore (scoped) except AllPRs (global board).
+// type:    adapter (SQLite, hub-owned)
+// job:     the workflow schema (D11), plus each agent's live state and merge-intents
+// (PRs), write-through so a crash loses nothing committed. Project-keyed,
+// except AllPRs (global board). The task read model itself is tasks.go's.
 // limits:  primitive columns only; mapping to/from issue.Task lives in the hub.
 package store
 
@@ -12,6 +11,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/flo-at/sindri/internal/api"
 )
 
 const workflowSchema = `
@@ -27,6 +28,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   description TEXT NOT NULL DEFAULT '', -- the body (GitHub issue body, td/spec description)
   url         TEXT NOT NULL DEFAULT '', -- an external permalink (e.g. a GitHub issue); '' if none
   updated_at  TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL DEFAULT '', -- when the task began at its source; '' when it has no answer
   synced_at   TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (project, id)
 );
@@ -50,6 +52,31 @@ CREATE TABLE IF NOT EXISTS prs (
   feedback   TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT '',
   kind       TEXT NOT NULL DEFAULT 'final', -- final (task-done) | interim (mid-task contribution to the reference branch)
+  PRIMARY KEY (project, id)
+);
+-- The tasks sindri owns, and the authority for them. The tasks table above is a read model the
+-- sync rebuilds from every source including this one, so durable state belongs here. Ids keep the
+-- td- prefix, which PR ids, branch names and agent state all embed.
+CREATE TABLE IF NOT EXISTS owned_tasks (
+  project     TEXT NOT NULL,
+  id          TEXT NOT NULL,
+  title       TEXT NOT NULL DEFAULT '',
+  status      TEXT NOT NULL DEFAULT 'open', -- open | in_progress | in_review | closed
+  priority    TEXT NOT NULL DEFAULT '',
+  type        TEXT NOT NULL DEFAULT 'task',
+  labels      TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL DEFAULT '',
+  updated_at  TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (project, id)
+);
+-- Parentage for EVERY task, whatever owns its text. The hierarchy is sindri's own reading of how
+-- work relates, so an openspec change or a GitHub issue can be a parent or a child even though
+-- neither carries the notion upstream. One home, so no task has two answers.
+CREATE TABLE IF NOT EXISTS task_parent (
+  project   TEXT NOT NULL,
+  id        TEXT NOT NULL,
+  parent_id TEXT NOT NULL,
   PRIMARY KEY (project, id)
 );
 -- Durable priority we assign to tasks in our own db — survives the task-cache
@@ -103,26 +130,6 @@ CREATE TABLE IF NOT EXISTS task_approval (
 );
 `
 
-// Task is the cached read-model row; large fields land only on a detail read.
-type Task struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Status      string `json:"status"`
-	Priority    string `json:"priority"`
-	Type        string `json:"type"`
-	Labels      string `json:"labels"` // comma-joined
-	ParentID    string `json:"parent_id"`
-	Description string `json:"description,omitempty"`
-	Acceptance  string `json:"acceptance,omitempty"`
-	URL         string `json:"url,omitempty"` // an external permalink (e.g. a GitHub issue); "" if none
-	// Approval gates planner-created tasks: "" (none), pending, approved, rejected.
-	// Workers only ever see "" and approved tasks.
-	Approval        string `json:"approval,omitempty"`
-	ApprovalComment string `json:"approval_comment,omitempty"`
-	// Comments is not a tasks column: TaskInfo assembles it, so it's empty elsewhere.
-	Comments []Comment `json:"comments,omitempty"`
-}
-
 // AgentState is an agent's live workflow state (durable, D11).
 type AgentState struct {
 	Agent     string `json:"agent"`
@@ -132,248 +139,13 @@ type AgentState struct {
 	Container string `json:"container,omitempty"`
 }
 
-// Review is one review item attached to a PR.
-type Review struct {
-	ID          int64  `json:"id"`
-	PR          string `json:"pr"`
-	Requirement string `json:"requirement"`
-	Author      string `json:"author"`
-	Verdict     string `json:"verdict"`
-	Result      string `json:"result"`
-	CreatedAt   string `json:"created_at"`
-	ReviewAt    string `json:"review_at"`
-	VerdictAt   string `json:"verdict_at"`
-}
+// Review is one review item attached to a PR; it crosses the wire, so it is
+// internal/api.Review under the name every existing caller here already uses.
+type Review = api.Review
 
-// PR is a merge-intent; it carries its project so the global board can tag the repo.
-type PR struct {
-	Project   string `json:"project"`
-	ID        string `json:"id"`
-	Task      string `json:"task"`
-	Agent     string `json:"agent"`
-	Branch    string `json:"branch"`
-	Base      string `json:"base"`
-	Status    string `json:"status"`
-	Feedback  string `json:"feedback"`
-	CreatedAt string `json:"created_at"`
-	// Kind: a final PR's merge closes the task, an interim one keeps it open and puts
-	// the worker straight back on it. "" is read as "final".
-	Kind string `json:"kind"`
-}
-
-// ReplaceTasks swaps the cached set in one transaction; absent tasks are dropped.
-func (p *ProjectStore) ReplaceTasks(tasks []Task) error {
-	tx, err := p.s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec(`DELETE FROM tasks WHERE project=?`, p.project); err != nil {
-		return err
-	}
-	now := time.Now().UTC().Format(time.RFC3339)
-	for _, t := range tasks {
-		if _, err := tx.Exec(
-			`INSERT INTO tasks (project,id,title,status,priority,type,labels,parent_id,description,url,synced_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-			p.project, t.ID, t.Title, t.Status, t.Priority, t.Type, t.Labels, t.ParentID, t.Description, t.URL, now); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
-// UpsertTask refreshes a single cached task in this project (point-of-use refresh).
-func (p *ProjectStore) UpsertTask(t Task) error {
-	_, err := p.s.db.Exec(`
-		INSERT INTO tasks (project,id,title,status,priority,type,labels,parent_id,description,url,synced_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?)
-		ON CONFLICT(project,id) DO UPDATE SET
-			title=excluded.title, status=excluded.status, priority=excluded.priority,
-			type=excluded.type, labels=excluded.labels, parent_id=excluded.parent_id,
-			description=excluded.description, url=excluded.url, synced_at=excluded.synced_at`,
-		p.project, t.ID, t.Title, t.Status, t.Priority, t.Type, t.Labels, t.ParentID, t.Description, t.URL,
-		time.Now().UTC().Format(time.RFC3339))
-	return err
-}
-
-// RemoveTask shows a close/scrap on the board without a full re-sync; the next sync
-// rebuilds from the sources anyway, so this is only the intervening truth.
-func (p *ProjectStore) RemoveTask(id string) error {
-	if _, err := p.s.db.Exec(`DELETE FROM tasks WHERE project=? AND id=?`, p.project, id); err != nil {
-		return err
-	}
-	return p.DeleteComments(id) // don't strand a scrapped task's comments
-}
-
-// taskCols is the shared projection: cached td fields plus the hub's approval overlay.
-const taskCols = `t.id,t.title,t.status,t.priority,t.type,t.labels,t.parent_id,t.description,t.url,
-	COALESCE(a.status,''), COALESCE(a.comment,'')`
-
-const taskFrom = ` FROM tasks t LEFT JOIN task_approval a ON a.task=t.id AND a.project=t.project`
-
-// OpenTasks returns open, un-gated tasks, highest priority first.
-func (p *ProjectStore) OpenTasks() ([]Task, error) {
-	rows, err := p.s.db.Query(`
-		SELECT `+taskCols+taskFrom+`
-		WHERE t.project=? AND t.status='open' AND (a.status IS NULL OR a.status='approved')
-		ORDER BY CASE WHEN t.priority='' THEN 1 ELSE 0 END, t.priority, t.id`, p.project)
-	if err != nil {
-		return nil, fmt.Errorf("open tasks: %w", err)
-	}
-	defer rows.Close()
-	return scanTasks(rows)
-}
-
-// OpenLeaves returns the claimable tasks the automatic assigner may take in this
-// project: open, approved leaves, excluding any child of a container an agent holds
-// AND any leaf an agent already holds (agent_state.task). The held-leaf exclusion
-// matters for sources with no external status to flip: a td task claims flip to
-// in_progress at the source and drop out that way, but a gh-* issue stays "open" on
-// GitHub, so agent_state is what keeps a claimed issue from being handed out twice.
-// A task with no priority is left out — no priority, no assignment: an unprioritized
-// task stays in the backlog (visible, editable) until a human sets a priority, which
-// is the signal that it's ready to be worked.
-//
-// A standalone task, then: no children of its own (those are packages -> OpenContainers)
-// and no open parent. A child belongs to its package and is worked inside it, on the
-// package's branch, so handing one out on its own would split a tree across agents and
-// strip exactly the context the hierarchy was built to give.
-func (p *ProjectStore) OpenLeaves() ([]Task, error) {
-	rows, err := p.s.db.Query(`
-		SELECT `+taskCols+taskFrom+`
-		WHERE t.project=? AND t.status='open' AND (a.status IS NULL OR a.status='approved')
-		  AND t.priority != ''
-		  AND t.id NOT IN (SELECT parent_id FROM tasks WHERE project=? AND parent_id != '')
-		  AND NOT EXISTS (SELECT 1 FROM tasks pp WHERE pp.project=t.project AND pp.id=t.parent_id AND pp.status='open')
-		  AND t.id NOT IN (SELECT task FROM agent_state WHERE project=? AND task != '')
-		ORDER BY t.priority, t.id`,
-		p.project, p.project, p.project)
-	if err != nil {
-		return nil, fmt.Errorf("open leaves: %w", err)
-	}
-	defer rows.Close()
-	return scanTasks(rows)
-}
-
-// OpenChildren returns a container's open, approved children in this project.
-func (p *ProjectStore) OpenChildren(parentID string) ([]Task, error) {
-	rows, err := p.s.db.Query(`
-		SELECT `+taskCols+taskFrom+`
-		WHERE t.project=? AND t.status='open' AND (a.status IS NULL OR a.status='approved') AND t.parent_id=?
-		ORDER BY CASE WHEN t.priority='' THEN 1 ELSE 0 END, t.priority, t.id`, p.project, parentID)
-	if err != nil {
-		return nil, fmt.Errorf("open children of %s: %w", parentID, err)
-	}
-	defer rows.Close()
-	return scanTasks(rows)
-}
-
-// GetTask returns a single cached task in this project (with its approval overlay).
-func (p *ProjectStore) GetTask(id string) (Task, bool, error) {
-	row := p.s.db.QueryRow(`SELECT `+taskCols+taskFrom+` WHERE t.project=? AND t.id=?`, p.project, id)
-	var t Task
-	err := row.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Type, &t.Labels, &t.ParentID, &t.Description, &t.URL, &t.Approval, &t.ApprovalComment)
-	if err == sql.ErrNoRows {
-		return Task{}, false, nil
-	}
-	if err != nil {
-		return Task{}, false, fmt.Errorf("get task %s: %w", id, err)
-	}
-	return t, true, nil
-}
-
-// OpenContainers returns claimable packages: approved, prioritised, unheld tasks with an
-// open child and no open ancestor. A hierarchy IS the unit of work — one agent takes the
-// whole tree on the parent's branch, so OpenLeaves leaves them alone. Gates match
-// OpenLeaves, and excluding nested trees stops a claim at two levels at once.
-func (p *ProjectStore) OpenContainers() ([]Task, error) {
-	rows, err := p.s.db.Query(`
-		SELECT `+taskCols+taskFrom+`
-		WHERE t.project=? AND t.status NOT IN ('closed','approved','merged')
-		  AND (a.status IS NULL OR a.status='approved')
-		  AND t.priority != ''
-		  AND EXISTS (SELECT 1 FROM tasks c WHERE c.project=t.project AND c.parent_id=t.id AND c.status='open')
-		  AND NOT EXISTS (SELECT 1 FROM tasks pp WHERE pp.project=t.project AND pp.id=t.parent_id AND pp.status='open')
-		  AND t.id NOT IN (SELECT container FROM agent_state WHERE project=? AND container != '')
-		ORDER BY t.priority, t.id`, p.project, p.project)
-	if err != nil {
-		return nil, fmt.Errorf("open containers: %w", err)
-	}
-	defer rows.Close()
-	return scanTasks(rows)
-}
-
-// AllTasks returns every cached task in this project with its approval overlay.
-func (p *ProjectStore) AllTasks() ([]Task, error) {
-	rows, err := p.s.db.Query(`
-		SELECT `+taskCols+taskFrom+`
-		WHERE t.project=?
-		ORDER BY CASE WHEN t.priority='' THEN 1 ELSE 0 END, t.priority, t.id`, p.project)
-	if err != nil {
-		return nil, fmt.Errorf("all tasks: %w", err)
-	}
-	defer rows.Close()
-	return scanTasks(rows)
-}
-
-func scanTasks(rows *sql.Rows) ([]Task, error) {
-	var out []Task
-	for rows.Next() {
-		var t Task
-		if err := rows.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Type, &t.Labels, &t.ParentID, &t.Description, &t.URL, &t.Approval, &t.ApprovalComment); err != nil {
-			return nil, err
-		}
-		out = append(out, t)
-	}
-	return out, rows.Err()
-}
-
-// SetPriorityOverride records a priority we assign in our own db for this project.
-func (p *ProjectStore) SetPriorityOverride(id, priority string) error {
-	_, err := p.s.db.Exec(
-		`INSERT INTO task_priority (project,id,priority) VALUES (?,?,?)
-		 ON CONFLICT(project,id) DO UPDATE SET priority=excluded.priority`, p.project, id, priority)
-	if err != nil {
-		return fmt.Errorf("set priority override %s: %w", id, err)
-	}
-	return nil
-}
-
-// SetApproval records a task's approval state and comment in this project, now.
-func (p *ProjectStore) SetApproval(task, status, comment string) error {
-	_, err := p.s.db.Exec(
-		`INSERT INTO task_approval (project,task,status,comment,at) VALUES (?,?,?,?,?)
-		 ON CONFLICT(project,task) DO UPDATE SET status=excluded.status, comment=excluded.comment, at=excluded.at`,
-		p.project, task, status, comment, time.Now().UTC().Format(time.RFC3339))
-	if err != nil {
-		return fmt.Errorf("set approval %s: %w", task, err)
-	}
-	return nil
-}
-
-// GetApproval returns a task's approval status and comment in this project.
-func (p *ProjectStore) GetApproval(task string) (status, comment string) {
-	_ = p.s.db.QueryRow(`SELECT status, comment FROM task_approval WHERE project=? AND task=?`, p.project, task).Scan(&status, &comment)
-	return status, comment
-}
-
-// PriorityOverrides returns id→priority for this project's locally-assigned priorities.
-func (p *ProjectStore) PriorityOverrides() (map[string]string, error) {
-	rows, err := p.s.db.Query(`SELECT id, priority FROM task_priority WHERE project=?`, p.project)
-	if err != nil {
-		return nil, fmt.Errorf("priority overrides: %w", err)
-	}
-	defer rows.Close()
-	m := map[string]string{}
-	for rows.Next() {
-		var id, pr string
-		if err := rows.Scan(&id, &pr); err != nil {
-			return nil, err
-		}
-		m[id] = pr
-	}
-	return m, rows.Err()
-}
+// PR is a merge-intent; it crosses the wire, so it is internal/api.PR under the name
+// every existing caller here already uses.
+type PR = api.PR
 
 // GetState returns an agent's workflow state in this project (zero value if none).
 func (p *ProjectStore) GetState(agent string) (AgentState, error) {
@@ -574,6 +346,68 @@ func (p *ProjectStore) AssignReview(id int64, author string) error {
 		author, time.Now().UTC().Format(time.RFC3339), id, p.project)
 	if err != nil {
 		return fmt.Errorf("assign review %d: %w", id, err)
+	}
+	return nil
+}
+
+// UnclaimedReview returns the oldest review nobody is doing, for a PR that is still open — what a
+// reviewer picks up when it finishes one and is free again, and what covers a review requested
+// while no reviewer was running. (0, "", false) when there is none.
+func (p *ProjectStore) UnclaimedReview(id *int64, pr *string) (bool, error) {
+	err := p.s.db.QueryRow(`
+		SELECT r.id, r.pr FROM reviews r JOIN prs pp ON pp.project=r.project AND pp.id=r.pr
+		WHERE r.project=? AND r.author='' AND r.verdict='' AND pp.status='open'
+		ORDER BY r.id LIMIT 1`, p.project).Scan(id, pr)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("unclaimed review: %w", err)
+	}
+	return true, nil
+}
+
+// ActiveReviewers maps each PR in this project to the agent holding an open review of it. One query
+// for the whole project, since every PR list wants it and a lookup per row would be paid per render.
+func (p *ProjectStore) ActiveReviewers() (map[string]string, error) {
+	rows, err := p.s.db.Query(
+		`SELECT pr, author FROM reviews WHERE project=? AND verdict='' AND author!='' ORDER BY id`,
+		p.project)
+	if err != nil {
+		return nil, fmt.Errorf("active reviewers: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var pr, author string
+		if err := rows.Scan(&pr, &author); err != nil {
+			return nil, err
+		}
+		out[pr] = author
+	}
+	return out, rows.Err()
+}
+
+// AmendReview replaces an open review's requirement, for a second instruction arriving while the
+// first is still being carried out. The review is the same one: the reviewer keeps the branch it
+// has checked out and is simply told more.
+func (p *ProjectStore) AmendReview(id int64, requirement string) error {
+	_, err := p.s.db.Exec(`UPDATE reviews SET requirement=? WHERE id=? AND project=?`,
+		requirement, id, p.project)
+	if err != nil {
+		return fmt.Errorf("amend review %d: %w", id, err)
+	}
+	return nil
+}
+
+// CloseReviews ends every open review of a PR without a verdict — what a merge or a scrap does to a
+// review that has been overtaken: the thing it was about is settled, so nobody should still hold it.
+func (p *ProjectStore) CloseReviews(pr, why string) error {
+	_, err := p.s.db.Exec(
+		`UPDATE reviews SET verdict='moot', result=? WHERE project=? AND pr=? AND verdict=''`,
+		why, p.project, pr)
+	if err != nil {
+		return fmt.Errorf("close reviews of %s: %w", pr, err)
 	}
 	return nil
 }

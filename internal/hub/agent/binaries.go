@@ -4,7 +4,8 @@
 // and the linux brokkr mounted into pods) — next to the running sindri
 // executable first, then on PATH.
 // limits:  path resolution only; it doesn't run or mount anything (-> the hub's
-// launch path wires the mounts and entrypoint).
+// launch path wires the mounts and entrypoint). exec.LookPath here resolves a
+// path, same as os.Stat above it — it invokes nothing, so it needs no adapter.
 package agent
 
 import (

@@ -1,9 +1,12 @@
 package claude
 
 import (
+	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/flo-at/sindri/internal/adapter/agent"
@@ -122,5 +125,86 @@ func TestPrepareHomeStillWritesItsOwnFiles(t *testing.T) {
 	}
 	if _, serr := os.Stat(home.ConfigPath); serr != nil {
 		t.Errorf("config missing: %v", serr)
+	}
+}
+
+// TestGoWorkspaceGetsTheGoLanguageServer: the wiring only matters if it lands in the file Claude
+// actually reads. User-scope MCP servers live in ~/.claude.json under "mcpServers" — checked
+// against `claude mcp add -s user`, since a wrong key fails silently and the whole point is to be
+// there when the agent reaches for it.
+func TestGoWorkspaceGetsTheGoLanguageServer(t *testing.T) {
+	dir, ws := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(ws, "go.mod"), []byte("module x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	home, err := (Claude{}).PrepareHome(agent.HomeSpec{Dir: dir, SystemPrompt: "p", Out: io.Discard, Workspace: ws})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg map[string]any
+	raw, err := os.ReadFile(home.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	servers, ok := cfg["mcpServers"].(map[string]any)
+	if !ok {
+		t.Fatalf("no mcpServers in the config Claude reads:\n%s", raw)
+	}
+	gopls, ok := servers["gopls"].(map[string]any)
+	if !ok {
+		t.Fatalf("no gopls server declared: %v", servers)
+	}
+	// brokkr, not gopls directly: brokkr reaches the pod through the mounted pod-bin, so this is
+	// fixable without an image rebuild, and its shim turns a refused toolchain into advice.
+	if gopls["command"] != "brokkr" {
+		t.Errorf("command = %v, want brokkr (the shim), not gopls itself", gopls["command"])
+	}
+	if gopls["type"] != "stdio" {
+		t.Errorf("type = %v, want stdio", gopls["type"])
+	}
+	// The server runs in the pod, where the tree is mounted at /workspace — not at the host path
+	// this decision was made from.
+	args := fmt.Sprint(gopls["args"])
+	if !strings.Contains(args, "gopls-mcp") || !strings.Contains(args, "/workspace") {
+		t.Errorf("args = %v, want the shim pointed at the pod's /workspace", gopls["args"])
+	}
+	if strings.Contains(args, ws) {
+		t.Errorf("args leak the host path %q — that path does not exist in the pod: %v", ws, gopls["args"])
+	}
+}
+
+// TestNonGoWorkspaceIsUntouched: a pod with no Go project must be exactly as it was — no server
+// declared, not even an empty key. Declaring one would start a language server for a language the
+// project does not use.
+func TestNonGoWorkspaceIsUntouched(t *testing.T) {
+	for _, tc := range []struct{ name, ws string }{
+		{"no go.mod", t.TempDir()},
+		{"no workspace at all", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			home, err := (Claude{}).PrepareHome(agent.HomeSpec{Dir: dir, SystemPrompt: "p", Out: io.Discard, Workspace: tc.ws})
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := os.ReadFile(home.ConfigPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var cfg map[string]any
+			if err := json.Unmarshal(raw, &cfg); err != nil {
+				t.Fatal(err)
+			}
+			if _, present := cfg["mcpServers"]; present {
+				t.Errorf("a non-Go workspace was given an MCP server:\n%s", raw)
+			}
+			// The files the pod cannot start without stay untouched either way.
+			if cfg["hasCompletedOnboarding"] != true {
+				t.Error("the onboarding flag was lost")
+			}
+		})
 	}
 }

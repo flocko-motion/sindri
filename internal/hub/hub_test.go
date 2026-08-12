@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -130,6 +131,10 @@ func TestNewAgentRecordsIdentityAndLog(t *testing.T) {
 	if _, err := h.agents.NewAgent(testProject, "dvalin", "reviewer", ""); err != nil {
 		t.Fatal(err)
 	}
+	// Observe before asserting. The agent is registered after the watchdog seeded, so until a sweep
+	// looks at it its status is "unknown" — correct, and a race to assert around: whether this read
+	// caught the settled value depended on the 2s tick landing first.
+	h.watch.sweep()
 	st, err := h.State(testProject)
 	if err != nil {
 		t.Fatal(err)
@@ -247,7 +252,10 @@ func tdCreate(t *testing.T, root string, args ...string) {
 // store (the source of truth), so a task td gains after the first sync shows up
 // on the next Refresh. Skips when the td CLI isn't installed (matching the td
 // adapter's tests) — the read path is td's SQLite db.
-func TestRefreshSyncsTasksFromTd(t *testing.T) {
+// TestImportCarriesTheTdBacklogOnce: a repo arriving with a td store keeps its tasks, and the import
+// runs once. Repeating it would resurrect everything closed since, because td still holds the state
+// it had at migration. What td gains afterwards is deliberately ignored — sindri owns the tasks now.
+func TestImportCarriesTheTdBacklogOnce(t *testing.T) {
 	if _, err := exec.LookPath("td"); err != nil {
 		t.Skip("td CLI not installed")
 	}
@@ -256,26 +264,32 @@ func TestRefreshSyncsTasksFromTd(t *testing.T) {
 	if out, err := exec.Command("td", "-w", root, "init").CombinedOutput(); err != nil {
 		t.Fatalf("td init: %s", out)
 	}
-	ps := h.repo(root) // register the project → its tag; seeds the cache
-	tag := RepoTag(root)
-
 	tdCreate(t, root, "-t", "feature", "First task in the backlog")
+
+	ps := h.repo(root)
+	tag := RepoTag(root)
 	if err := h.Refresh(tag); err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
 	after, _ := ps.AllTasks()
 	if !hasTaskTitled(after, "First task in the backlog") {
-		t.Fatalf("first task not synced from td: %+v", after)
+		t.Fatalf("the existing td backlog was not imported: %+v", after)
+	}
+	owned, err := ps.OwnedTasks()
+	if err != nil || len(owned) != 1 {
+		t.Fatalf("the import must land in the owned table: %d task(s), err %v", len(owned), err)
 	}
 
-	// A task td gains later must appear on the next Refresh — the point of the sync.
-	tdCreate(t, root, "-t", "bug", "Second task added later on")
+	// Closing it and re-syncing must not bring it back: the import is spent.
+	if err := h.wf.CloseTask(tag, owned[0].ID); err != nil {
+		t.Fatalf("close: %v", err)
+	}
 	if err := h.Refresh(tag); err != nil {
 		t.Fatalf("second refresh: %v", err)
 	}
-	after, _ = ps.AllTasks()
-	if !hasTaskTitled(after, "Second task added later on") {
-		t.Fatalf("task added after the first sync was not picked up on refresh: %+v", after)
+	got, _, _ := ps.OwnedTask(owned[0].ID)
+	if got.Status != "closed" {
+		t.Errorf("status %q after a re-sync, want closed — a second import would undo the close", got.Status)
 	}
 }
 
@@ -314,7 +328,7 @@ func TestCloseFreesWorkingAgent(t *testing.T) {
 	}
 	h.repo(root)
 	tag := RepoTag(root)
-	id, err := h.wf.CreateTask(tag, TaskSpec{Title: "implement the widget feature", Type: "task"})
+	id, err := h.wf.CreateTask(tag, api.TaskSpec{Title: "implement the widget feature", Type: "task"})
 	if err != nil {
 		t.Fatal(err)
 	}

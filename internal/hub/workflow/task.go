@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
-	"github.com/flo-at/sindri/internal/adapter/tasks/td"
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/task"
@@ -35,10 +35,11 @@ func (e *Engine) Tasks(project string) ([]store.Task, error) {
 	return e.store.For(project).AllTasks()
 }
 
-// TaskInfo returns one task, refreshed from its source of truth. Only td-* live in td's store;
-// gh-* and os-* are served from the hub's cache, since asking td by a non-td id only errors.
+// TaskInfo returns one task, refreshed from its source of truth. Only sindri's own tasks live in
+// the hub's store as authoritative; a mirrored id is served from the cache, since asking the owned
+// store by a foreign id only errors.
 func (e *Engine) TaskInfo(project, id string) (store.Task, error) {
-	if !strings.HasPrefix(id, "td-") {
+	if !task.IsOwned(id) {
 		t, ok, err := e.store.For(project).GetTask(id)
 		if err != nil {
 			return store.Task{}, err
@@ -52,50 +53,56 @@ func (e *Engine) TaskInfo(project, id string) (store.Task, error) {
 	// Repair this one task's status against reality before returning it (task info /
 	// detail is a natural single-task check point).
 	_ = e.ReconcileTask(project, id)
-	root := e.deps.ProjectRoot(project)
-	t, err := td.Get(root, id)
+	ps := e.store.For(project)
+	owned, ok, err := ps.OwnedTask(id)
 	if err != nil {
 		return store.Task{}, err
 	}
-	st := ToStoreTask(t)
-	if d, a, derr := td.Detail(root, id); derr == nil {
-		st.Description, st.Acceptance = d, a
+	if !ok {
+		return store.Task{}, fmt.Errorf("no such task %q", id)
 	}
-	_ = e.store.For(project).UpsertTask(st)
+	_ = ps.UpsertTask(store.Task{
+		ID: owned.ID, Title: owned.Title, Status: owned.Status, Priority: owned.Priority,
+		Type: owned.Type, Labels: owned.Labels, ParentID: ps.ParentOf(id),
+		Description: owned.Description, UpdatedAt: owned.UpdatedAt,
+	})
+	// Read the row back rather than returning what was just written: the approval gate lives in its
+	// own table and reaches a task only through that join, so a hand-built row reports none.
+	st, ok, err := ps.GetTask(id)
+	if err != nil || !ok {
+		return store.Task{}, err
+	}
 	st.Comments = e.deps.TaskComments(project, id)
 	return st, nil
 }
 
 // TaskSpec is the full editable shape of a task — the payload of both create and
-// edit. Empty fields mean "unset" (create) or "leave unchanged" (edit).
-type TaskSpec struct {
-	Title       string
-	Type        string
-	Priority    string // a P-code (P0…P4)
-	Parent      string // parent task id (a child of this task)
-	Description string
-	Labels      []string
-}
+// edit. It crosses the wire, so it is internal/api.TaskSpec under the name every
+// existing caller here already uses.
+type TaskSpec = api.TaskSpec
 
 // CreateTask creates a task via the td tool in a project and returns its id.
 func (e *Engine) CreateTask(project string, s TaskSpec) (string, error) {
 	if err := e.checkParent(project, s.Parent, ""); err != nil {
 		return "", err
 	}
-	root := e.deps.ProjectRoot(project)
-	out, err := td.Create(root, s.Title, td.CreateOpts{
-		Type: s.Type, Priority: s.Priority, Body: s.Description, Labels: s.Labels, Parent: s.Parent,
-	})
+	id, err := task.MintID()
 	if err != nil {
 		return "", err
 	}
-	// td prints e.g. "CREATED td-1add0f" — return just the id.
-	id := strings.TrimSpace(out)
-	for _, f := range strings.Fields(out) {
-		if strings.HasPrefix(f, "td-") {
-			id = f
-			break
-		}
+	typ := s.Type
+	if typ == "" {
+		typ = "task"
+	}
+	ps := e.store.For(project)
+	if err := ps.PutOwnedTask(store.OwnedTask{
+		ID: id, Title: s.Title, Status: "open", Priority: s.Priority, Type: typ,
+		Labels: strings.Join(s.Labels, ","), Description: s.Description,
+	}); err != nil {
+		return "", err
+	}
+	if err := ps.SetParent(id, s.Parent); err != nil {
+		return "", err
 	}
 	e.refreshCachedTask(project, id) // targeted: pull just the new task, not a full re-sync
 	e.deps.Notify()
@@ -141,10 +148,10 @@ func (e *Engine) HealPlannerTasks() {
 		}
 		ps := e.store.For(a.Project)
 		st, _ := ps.GetState(a.Name)
-		if !strings.HasPrefix(st.Task, "td-") {
+		if st.Task == "" {
 			continue
 		}
-		_ = td.SetStatus(e.deps.ProjectRoot(a.Project), st.Task, "open")
+		_ = e.SetStatus(a.Project, st.Task, "open")
 		_ = ps.SetState(store.AgentState{Agent: a.Name, Phase: "planning"})
 		_ = ps.Log(a.Name, "unassign", st.Task+" (planners don't hold tasks)")
 	}
@@ -166,54 +173,15 @@ func (e *Engine) UnassignTask(project, id string) error {
 		_ = ps.SetState(store.AgentState{Agent: a.Name, Phase: "idle"})
 		_ = ps.Log(a.Name, "unassign", id)
 	}
-	if strings.HasPrefix(id, "td-") {
-		if err := td.SetStatus(e.deps.ProjectRoot(project), id, "open"); err != nil {
-			return err
-		}
+	if err := e.SetStatus(project, id, "open"); err != nil {
+		return err
 	}
 	_ = e.RefreshTask(project, id)
 	e.deps.Notify()
 	return nil
 }
 
-// ApproveTask clears the approval gate on a planner-proposed task (user-only),
-// making it claimable, and tells any running planner in the project.
-func (e *Engine) ApproveTask(project, id string) error {
-	if err := e.store.For(project).SetApproval(id, "approved", ""); err != nil {
-		return err
-	}
-	e.notifyPlanners(project, fmt.Sprintf("[user] task %s was approved — it's now in the backlog for a worker.", id))
-	e.deps.Notify()
-	return nil
-}
-
-// RejectTask rejects a planner-proposed task with a comment (user-only); it stays
-// hidden from workers, and the comment is delivered to any running planner.
-func (e *Engine) RejectTask(project, id, comment string) error {
-	comment = strings.TrimSpace(comment)
-	if comment == "" {
-		comment = "rejected"
-	}
-	if err := e.store.For(project).SetApproval(id, "rejected", comment); err != nil {
-		return err
-	}
-	e.notifyPlanners(project, fmt.Sprintf("[user] task %s was rejected: %s", id, comment))
-	e.deps.Notify()
-	return nil
-}
-
-// notifyPlanners injects a message into every running planner's session in a project.
-func (e *Engine) notifyPlanners(project, msg string) {
-	roster, _ := e.store.For(project).Roster()
-	for _, a := range roster {
-		if a.Role == "planner" {
-			name := a.Name
-			go func() { _ = e.deps.InjectWhenReady(project, name, msg) }()
-		}
-	}
-}
-
-// The planner's verb surface (task/create-task/state) lives in planner.go.
+// The approval gate (approve/reject) lives in approval.go; the planner's verb surface in planner.go.
 
 // dash renders "-" for an empty string (agent-facing output helper).
 func dash(s string) string {
@@ -223,19 +191,40 @@ func dash(s string) string {
 	return s
 }
 
+// commentBlock renders a task's thread oldest-first, shaped like the CLI's `task info` so the two
+// read alike. Source is on the head line: it says who else has already seen the comment.
+func commentBlock(comments []store.Comment) string {
+	var b strings.Builder
+	for _, c := range comments {
+		fmt.Fprintf(&b, "\n— %s (%s, %s)\n%s\n", dash(c.Author), c.Source, c.CreatedAt,
+			strings.TrimRight(c.Body, "\n"))
+	}
+	return b.String()
+}
+
 // EditTask applies a spec to an existing task in a project.
 func (e *Engine) EditTask(project, id string, s TaskSpec) error {
 	if err := e.checkParent(project, s.Parent, id); err != nil {
 		return err
 	}
-	if strings.HasPrefix(id, "td-") {
-		if err := td.Update(e.deps.ProjectRoot(project), id, td.UpdateOpts{
-			Title: s.Title, Type: s.Type, Priority: s.Priority, Body: s.Description, Labels: s.Labels, Parent: s.Parent,
-		}); err != nil {
+	ps := e.store.For(project)
+	// Parentage first, and for any task: the hierarchy is sindri's own, so re-parenting an openspec
+	// change or a GitHub issue is as ordinary as re-parenting one of its own.
+	if s.Parent != "" {
+		if err := ps.SetParent(id, s.Parent); err != nil {
+			return err
+		}
+	}
+	if owned, ok, oerr := ps.OwnedTask(id); oerr != nil {
+		return oerr
+	} else if ok {
+		// Only what the spec carries changes; an empty field leaves the stored one as it is.
+		applySpec(&owned, s)
+		if err := ps.PutOwnedTask(owned); err != nil {
 			return err
 		}
 	} else if s.Priority != "" {
-		if err := e.store.For(project).SetPriorityOverride(id, s.Priority); err != nil {
+		if err := ps.SetPriorityOverride(id, s.Priority); err != nil {
 			return err
 		}
 	}
@@ -263,16 +252,22 @@ func (e *Engine) prRejected(project, agent string) (feedback string, rejected bo
 	return "", false, nil
 }
 
-// workDirective is what a working agent is told: if its PR was rejected, the
-// reviewer's feedback is PUSHED (every time it asks — it never has to go hunting for
-// why the PR bounced); otherwise the plain "work on the task" directive.
-func (e *Engine) workDirective(project, name, task string) (string, error) {
+// workDirective is what a working agent is told: a rejected PR's feedback is PUSHED every time it
+// asks, so it never hunts for why the PR bounced; otherwise the plain "work on the task". container,
+// the feature it holds, decides which verb the directive names, and MUST match what the registry shows
+// that caller — a directive naming a hidden verb leaves the agent to improvise the workflow.
+func (e *Engine) workDirective(project, name, task, container string) (string, error) {
 	feedback, rejected, err := e.prRejected(project, name)
 	if err != nil {
 		return "", err
 	}
-	if rejected {
+	switch {
+	case rejected && container != "":
+		return DirContainerRejected(container, task, feedback), nil
+	case rejected:
 		return DirRejected(task, feedback), nil
+	case container != "":
+		return DirContainerWorking(container, task), nil
 	}
 	return DirWorking(task), nil
 }
@@ -293,29 +288,22 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 		return DirCoauthor, nil
 	}
 	if a.Role == "reviewer" {
-		return e.waitForWork(ctx, func() (string, bool, error) {
-			prs, err := ps.PRs()
-			if err != nil {
-				return "", false, err
-			}
-			for _, pr := range prs {
-				if pr.Status == "open" {
-					return DirReview(pr.ID, pr.Task, e.deps.ArchitectureDoc(project)), true, nil
-				}
-			}
-			return "", false, nil
-		})
+		return e.waitForWork(ctx, func() (string, bool, error) { return e.reviewDirective(project, name) })
 	}
 	st, _ := ps.GetState(name)
 	if a.Role == "planner" {
-		if st.Phase == "submitted" {
+		switch st.Phase {
+		case "submitted":
 			return DirSubmitted, nil
+		case "planning": // set by AssignPlan and by `state planning` — it HAS work in hand
+			return DirPlanning, nil
 		}
 		return DirPlanner, nil
 	}
-	// A worker holding a container is in the collaborative loop.
+	// A worker holding a feature is in the subtask loop — unless that feature has already landed. A
+	// merged PR says so as plainly as its status, and covers one left held by a partial-milestone merge.
 	if st.Container != "" {
-		if t, ok, _ := ps.GetTask(st.Container); ok && t.Status != "closed" && t.Status != "approved" && t.Status != "merged" {
+		if t, ok, _ := ps.GetTask(st.Container); ok && !featureLanded(ps, t) {
 			switch st.Phase {
 			case "submitted":
 				feedback, rejected, err := e.prRejected(project, name)
@@ -324,24 +312,30 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 				}
 				if rejected {
 					_ = ps.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "working"})
-					return DirRejected(st.Task, feedback), nil
+					return DirContainerRejected(st.Container, st.Task, feedback), nil
 				}
 				return DirSubmitted, nil
 			case "working":
-				return e.workDirective(project, name, st.Task)
+				return e.workDirective(project, name, st.Task, st.Container)
 			default:
-				if next, ok := e.advanceContainer(project, name, st.Container); ok {
-					return DirWorking(next.ID), nil
+				// A failure here is surfaced, never read as "finished": the feature is only done
+				// when the store says there is nothing under it, not when assignment went wrong.
+				next, ok, aerr := e.advanceContainer(project, name, st.Container)
+				if aerr != nil {
+					return "", aerr
 				}
-				return DirContainerWait(st.Container), nil
+				if ok {
+					return DirContainerWorking(st.Container, next.ID), nil
+				}
+				return DirContainerDone(st.Container), nil
 			}
 		}
 		_ = ps.SetState(store.AgentState{Agent: name, Phase: "idle"})
-		return e.waitForWork(ctx, func() (string, bool, error) { return e.claimNext(project, name) })
+		return e.waitForNextTask(ctx, project, name)
 	}
 	switch st.Phase {
 	case "working":
-		return e.workDirective(project, name, st.Task)
+		return e.workDirective(project, name, st.Task, "")
 	case "submitted":
 		feedback, rejected, err := e.prRejected(project, name)
 		if err != nil {
@@ -353,8 +347,20 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 		}
 		return DirSubmitted, nil
 	default: // idle — claim the next task, blocking until one exists
-		return e.waitForWork(ctx, func() (string, bool, error) { return e.claimNext(project, name) })
+		return e.waitForNextTask(ctx, project, name)
 	}
+}
+
+// waitForNextTask is the idle-agent path: an agent that will get no more work is told so
+// immediately, not left blocking on a queue it is no longer served from.
+func (e *Engine) waitForNextTask(ctx context.Context, project, name string) (string, error) {
+	if a, ok, _ := e.store.For(project).GetAgent(name); ok && a.Retired {
+		return DirRetired, nil
+	}
+	if tokens, full := e.contextFull(project, name); full {
+		return DirFull(tokens), nil
+	}
+	return e.waitForWork(ctx, func() (string, bool, error) { return e.claimNext(project, name) })
 }
 
 // waitForWork blocks until check reports work is ready (returning its directive) or
@@ -390,12 +396,17 @@ func (e *Engine) ForceSyncTasks(project string) error { return e.syncTasks(proje
 func (e *Engine) syncTasks(project string, force bool) error {
 	root := e.deps.ProjectRoot(project)
 	ps := e.store.For(project)
+	// Before reading any source: a repo arriving with a td backlog gets it once, or its tasks
+	// would simply be absent from the moment td stopped being a source.
+	if err := e.importTdOnce(project, root); err != nil {
+		return err
+	}
 	var rows []store.Task
 
 	// Every source treated identically — the hub never branches on which it is. Each self-gates,
 	// normalizes to task.Task, and throttles internally. td errors fail the sync (it is primary);
 	// a network source degrades to its last good list.
-	for _, src := range taskSources() {
+	for _, src := range e.taskSources(project) {
 		if !src.Enabled(root) {
 			continue
 		}
@@ -415,29 +426,72 @@ func (e *Engine) syncTasks(project string, force bool) error {
 			}
 		}
 	}
+	// Parentage is the hub's for every task, so it goes on after the sources rather than coming
+	// from them: no source but sindri's own carries the notion at all.
+	if links, err := ps.ParentLinks(); err == nil {
+		for i := range rows {
+			if parent, ok := links[rows[i].ID]; ok {
+				rows[i].ParentID = parent
+			}
+		}
+	}
 	return ps.ReplaceTasks(rows)
 }
 
-// SetPriority assigns a task's priority (a P-code) in a project.
-func (e *Engine) SetPriority(project, id, priority string) error {
-	if strings.HasPrefix(id, "td-") {
-		if err := td.SetPriority(e.deps.ProjectRoot(project), id, priority); err != nil {
-			return err
-		}
-	} else {
-		if err := e.store.For(project).SetPriorityOverride(id, priority); err != nil {
-			return err
-		}
+// SetPriority assigns a task's priority (a P-code), reaching as far below it as scope asks. What
+// reaching there does differs by case, and api.PriorityEffect is where that is set out.
+func (e *Engine) SetPriority(project, id, priority string, scope api.PriorityScope) error {
+	targets, err := e.priorityTargets(project, id, scope)
+	if err != nil {
+		return err
 	}
-	e.refreshCachedTask(project, id) // targeted refresh of the reprioritized task
+	for _, t := range targets {
+		if err := e.writePriority(project, t, priority); err != nil {
+			return err
+		}
+		e.refreshCachedTask(project, t) // targeted refresh of each reprioritized task
+	}
 	e.deps.Notify()
-	// Rating an unrated task is the moment it becomes claimable — a gh-* issue imported without
-	// one, say — so it needs the same nudge as a task created with a priority.
+	// Rating an unrated task is the moment it becomes claimable, so it needs the same nudge as a task
+	// created with a priority. ONE, however far the cascade reached: it only has to wake a worker up.
 	e.nudgeIdleWorkers(project, id, priority)
 	return nil
 }
 
-// checkParent validates a requested parent id within a project.
+// priorityTargets is which tasks a scoped rating writes to, CHILDREN FIRST — the parent's rating is
+// what releases a package, so no worker can claim one half-rated. Open descendants only: a finished
+// task's rating decides nothing, and overwriting it would edit the record of work already done.
+func (e *Engine) priorityTargets(project, id string, scope api.PriorityScope) ([]string, error) {
+	if scope == api.ScopeTask {
+		return []string{id}, nil
+	}
+	all, err := e.store.For(project).AllTasks()
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, d := range api.Descendants(all, id) {
+		if !api.Open(d) || (scope == api.ScopeUnrated && d.Priority != "") {
+			continue
+		}
+		out = append(out, d.ID)
+	}
+	return append(out, id), nil
+}
+
+// writePriority records one rating where that task's priority lives: its own row when sindri owns the
+// task, the hub's overlay when the task is mirrored.
+func (e *Engine) writePriority(project, id, priority string) error {
+	ps := e.store.For(project)
+	if ps.OwnsTask(id) {
+		return ps.SetOwnedPriority(id, priority)
+	}
+	return ps.SetPriorityOverride(id, priority)
+}
+
+// checkParent validates a requested parent before anything is written: it must exist, and it must
+// not already sit below the task being re-parented. A loop is unreachable from any root, so the task
+// list would simply stop showing every task inside it.
 func (e *Engine) checkParent(project, parent, self string) error {
 	if parent == "" {
 		return nil
@@ -445,30 +499,75 @@ func (e *Engine) checkParent(project, parent, self string) error {
 	if parent == self {
 		return fmt.Errorf("a task can't be its own parent")
 	}
-	tasks, err := e.store.For(project).AllTasks()
+	ps := e.store.For(project)
+	tasks, err := ps.AllTasks()
 	if err != nil {
 		return err
 	}
+	known := false
 	for _, t := range tasks {
 		if t.ID == parent {
-			return nil
+			known = true
+			break
 		}
 	}
-	return fmt.Errorf("unknown parent %q", parent)
+	if !known {
+		return fmt.Errorf("unknown parent %q", parent)
+	}
+	if self == "" {
+		return nil // a task being created has nothing below it yet
+	}
+	// Walk up from the proposed parent, reading the links themselves rather than the read model
+	// they are laid over. Reaching self means self is already an ancestor.
+	links, err := ps.ParentLinks()
+	if err != nil {
+		return err
+	}
+	chain := []string{parent}
+	for at := links[parent]; at != ""; at = links[at] {
+		if at == self {
+			return fmt.Errorf("%s already sits above %s (%s) — parenting it there would close a loop, "+
+				"and everything inside a loop drops off the task list", self, parent,
+				strings.Join(append(chain, self), " → "))
+		}
+		chain = append(chain, at)
+		if len(chain) > len(links)+1 {
+			return fmt.Errorf("the parent chain above %q doesn't terminate — a loop is already stored (%s)",
+				parent, strings.Join(chain, " → "))
+		}
+	}
+	return nil
 }
 
 // ToStoreTask maps a source-normalized domain task onto the hub's cached store row.
 // Exported because the hub's targeted single-task refresh reuses the same mapping.
 func ToStoreTask(t task.Task) store.Task {
+	var updatedAt, createdAt string
+	if !t.UpdatedAt.IsZero() {
+		updatedAt = t.UpdatedAt.UTC().Format(time.RFC3339)
+	}
+	// Left empty when the source has no answer, rather than stamped with now: the store keeps what it
+	// already had, and inventing a time here would age every task from the last sync.
+	if !t.CreatedAt.IsZero() {
+		createdAt = t.CreatedAt.UTC().Format(time.RFC3339)
+	}
 	return store.Task{
 		ID: t.ID, Title: t.Title, Status: t.Status, Priority: t.Priority,
 		Type: t.Type, Labels: strings.Join(t.Labels, ","), ParentID: t.ParentID,
-		Description: t.Description, URL: t.URL,
+		Description: t.Description, URL: t.URL, UpdatedAt: updatedAt, CreatedAt: createdAt,
 	}
 }
 
 // CmdNext claims the highest-priority open task for a worker and branches for it.
 func (e *Engine) CmdNext(c registry.Caller, _ []string, out io.Writer) (int, error) {
+	if a, ok, _ := e.store.For(c.Project).GetAgent(c.Agent); ok && a.Retired {
+		fmt.Fprintln(out, DirRetired)
+		return 0, nil
+	}
+	if tokens, full := e.contextFull(c.Project, c.Agent); full {
+		fmt.Fprintln(out, DirFull(tokens))
+		return 0, nil
+	}
 	d, claimed, err := e.claimNext(c.Project, c.Agent)
 	if err != nil {
 		return 1, err
@@ -481,9 +580,39 @@ func (e *Engine) CmdNext(c registry.Caller, _ []string, out io.Writer) (int, err
 	return 0, nil
 }
 
-// claimNext claims the highest-priority open LEAF task (or a marked container) for a
-// worker in a project. Returns (directive, true) on a claim, ("", false) when idle.
+// ContextFullFraction is how much of its window a worker may fill before it stops being handed new
+// work. A fraction, not a token count: a flat 170k written for a 200k window retired workers on a
+// 1M one with most of it unused.
+const ContextFullFraction = 0.85
+
+// contextFull is the one fact both the assignment gate and the board's status read. No recorded
+// usage yet (ok=false from ContextUsage) is never full, and neither is a window of 0 — an unknown
+// window must not retire anybody, since guessing one is what this replaced.
+func (e *Engine) contextFull(project, worker string) (tokens int, full bool) {
+	tokens, window, ok := e.deps.ContextUsage(project, worker)
+	if !ok || window <= 0 {
+		return tokens, false
+	}
+	return tokens, float64(tokens) >= float64(window)*ContextFullFraction
+}
+
+// ContextFull is contextFull's bool half, for the board's status word.
+func (e *Engine) ContextFull(project, worker string) bool {
+	_, full := e.contextFull(project, worker)
+	return full
+}
+
+// claimNext claims the highest-priority open LEAF task (or a marked container) for a worker in a
+// project. Returns (directive, true) on a claim, ("", false) when idle or retired (full).
 func (e *Engine) claimNext(project, agent string) (string, bool, error) {
+	// Retired by a human, or by its own context filling: either way it is being wound down, and the
+	// gate is here rather than at the task queries so it holds however the work would have arrived.
+	if a, ok, _ := e.store.For(project).GetAgent(agent); ok && a.Retired {
+		return "", false, nil
+	}
+	if _, full := e.contextFull(project, agent); full {
+		return "", false, nil // retired: a full worker is not handed new work
+	}
 	_ = e.SyncTasks(project) // best-effort refresh; cached set on failure
 	if d, ok, err := e.claimContainer(project, agent); ok || err != nil {
 		return d, ok, err
@@ -513,15 +642,10 @@ func (e *Engine) claimLeaf(project, worker string) (string, bool, error) {
 	}
 	wt := filepath.Join(root, a.Workspace)
 	branch := t.ID
-	// Only td owns a task's status. A gh-* issue's "in_progress" lives in agent_state
-	// (which OpenLeaves honors) — GitHub isn't told a worker started; the issue is
-	// touched only on merge (close+comment). Calling td for a gh-/os- id would error.
-	if strings.HasPrefix(t.ID, "td-") {
-		if err := td.SetStatus(root, t.ID, "in_progress"); err != nil {
-			return "", false, err
-		}
-		_ = e.RefreshTask(project, t.ID)
+	if err := e.SetStatus(project, t.ID, "in_progress"); err != nil {
+		return "", false, err
 	}
+	_ = e.RefreshTask(project, t.ID)
 	// Lay the new branch on a CLEAN base: leftover WIP from a cancelled task would block
 	// `checkout -B` or bleed in. Reset at claim time, not at cancel — the agent may work on after
 	// the push, and it never cleans its own worktree.
@@ -537,104 +661,4 @@ func (e *Engine) claimLeaf(project, worker string) (string, bool, error) {
 	_ = ps.Log(worker, "claim", t.ID+" "+t.Title)
 	e.deps.Notify()
 	return DirClaimed(t.ID, t.Title, branch, e.deps.ArchitectureDoc(project)), true, nil
-}
-
-// claimContainer assigns the highest-priority unheld package in a project to the agent,
-// starting it on the package's first open child. A package is any task with open children
-// (-> store.OpenContainers): a hierarchy is organised so that one agent takes the whole
-// thing, with the context that comes with it.
-func (e *Engine) claimContainer(project, worker string) (string, bool, error) {
-	ps := e.store.For(project)
-	root := e.deps.ProjectRoot(project)
-	containers, err := ps.OpenContainers()
-	if err != nil || len(containers) == 0 {
-		return "", false, err
-	}
-	c := containers[0]
-	children, err := ps.OpenChildren(c.ID)
-	if err != nil {
-		return "", false, err
-	}
-	if len(children) == 0 {
-		return "", false, nil // marked but nothing open to work
-	}
-	base, err := e.baseBranch(root)
-	if err != nil {
-		return "", false, err
-	}
-	a, ok, err := ps.GetAgent(worker)
-	if err != nil || !ok {
-		return "", false, fmt.Errorf("agent %s missing: %v", worker, err)
-	}
-	wt := filepath.Join(root, a.Workspace)
-	if err := git.EnsureBranch(wt, c.ID, base); err != nil {
-		return "", false, err
-	}
-	child := children[0]
-	if err := td.SetStatus(root, child.ID, "in_progress"); err != nil {
-		return "", false, err
-	}
-	_ = e.RefreshTask(project, child.ID)
-	if err := ps.SetState(store.AgentState{Agent: worker, Container: c.ID, Branch: c.ID, Task: child.ID, Phase: "working"}); err != nil {
-		return "", false, err
-	}
-	_ = ps.Log(worker, "claim-container", c.ID+" "+c.Title)
-	e.deps.Notify()
-	return DirContainerClaimed(c.ID, c.Title, child.ID, child.Title), true, nil
-}
-
-// CmdCheckpoint commits the current subtask to the container branch, closes that
-// child, and advances to the next — staying working, never blocking for review.
-func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) (int, error) {
-	ps := e.store.For(c.Project)
-	root := e.deps.ProjectRoot(c.Project)
-	st, err := ps.GetState(c.Agent)
-	if err != nil {
-		return 1, err
-	}
-	if st.Container == "" || st.Phase != "working" || st.Task == "" {
-		fmt.Fprintln(out, ReplyNothingToCheckpoint)
-		return 1, nil
-	}
-	a, _, _ := ps.GetAgent(c.Agent)
-	wt := filepath.Join(root, a.Workspace)
-	msg := strings.TrimSpace(strings.Join(args, " "))
-	if msg == "" {
-		msg = "work on " + st.Task
-	}
-	if err := git.CommitAll(wt, msg); err != nil {
-		return 1, err
-	}
-	if err := td.SetStatus(root, st.Task, "closed"); err != nil {
-		return 1, err
-	}
-	_ = e.RefreshTask(c.Project, st.Task)
-	_ = ps.Log(c.Agent, "checkpoint", st.Task)
-	done := st.Task
-	if next, ok := e.advanceContainer(c.Project, c.Agent, st.Container); ok {
-		fmt.Fprintln(out, ReplyCheckpointed(done, next.ID, next.Title))
-		return 0, nil
-	}
-	_ = ps.SetState(store.AgentState{Agent: c.Agent, Container: st.Container, Branch: st.Container, Phase: "idle"})
-	e.deps.Notify()
-	fmt.Fprintln(out, ReplyCheckpointedLast(done, st.Container))
-	return 0, nil
-}
-
-// advanceContainer moves a held container's agent onto its next open child in a
-// project, returning (child, true) when one was assigned or (zero, false) if none.
-func (e *Engine) advanceContainer(project, agent, container string) (store.Task, bool) {
-	ps := e.store.For(project)
-	children, err := ps.OpenChildren(container)
-	if err != nil || len(children) == 0 {
-		return store.Task{}, false
-	}
-	child := children[0]
-	if err := td.SetStatus(e.deps.ProjectRoot(project), child.ID, "in_progress"); err != nil {
-		return store.Task{}, false
-	}
-	_ = e.RefreshTask(project, child.ID)
-	_ = ps.SetState(store.AgentState{Agent: agent, Container: container, Branch: container, Task: child.ID, Phase: "working"})
-	e.deps.Notify()
-	return child, true
 }

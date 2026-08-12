@@ -144,15 +144,32 @@ regardless of the active filter.
 ### Requirement: The dashboard is a control surface
 
 Each tab SHALL offer its actions (shown in the footer's second row), performed
-via the hub: Tasks — create a task; Agents — new, launch, tell, attach; PRs —
-merge. Attaching SHALL hand the terminal to the agent's live tmux session and
-return to the TUI on detach. After an action, the view SHALL reflect the change
-(live, via board events).
+via the hub: Tasks — create a task, and approve or reject a planner-proposed task
+that is still under the approval gate; Agents — new (worker/reviewer/planner),
+launch, tell, attach; PRs — approve, reject, and merge. The PRs approve action
+SHALL be the human approve (distinct from requesting an agentic review). Attaching
+SHALL hand the terminal to the agent's live tmux session and return to the TUI on
+detach. After an action, the view SHALL reflect the change (live, via board
+events). For an action that is not instantaneous — notably merge — the view SHALL
+give immediate feedback the moment it is invoked (e.g. a transient "merging" status
+on the row) rather than appearing to hang until the hub's board event lands.
+
+#### Scenario: Approve from the PRs tab
+
+- **WHEN** the user approves the selected open PR
+- **THEN** the hub marks it approved and the row updates to show it approved,
+  ready to merge
 
 #### Scenario: Merge from the PRs tab
 
 - **WHEN** the user merges the selected approved PR
 - **THEN** the hub merges it and the board updates to show it merged
+
+#### Scenario: Immediate merge feedback
+
+- **WHEN** the user triggers a merge on a PR
+- **THEN** the row immediately shows a transient "merging" indicator, replaced by
+  "merged" when the hub confirms the merge (or cleared if the merge fails)
 
 #### Scenario: Attach and return
 
@@ -160,28 +177,82 @@ return to the TUI on detach. After an action, the view SHALL reflect the change
 - **THEN** the TUI suspends into the agent's live terminal and resumes when the
   user detaches
 
+#### Scenario: Approve a planner proposal
+
+- **WHEN** the user approves a gated planner-proposed task on the Tasks tab
+- **THEN** the hub clears its approval gate, the task becomes claimable, and the
+  view reflects the change
+
+#### Scenario: Reject a planner proposal
+
+- **WHEN** the user rejects a gated planner-proposed task with a comment
+- **THEN** the hub records the rejection, the comment is delivered to the planner,
+  and the task stays hidden from workers
+#### Scenario: New-agent picker offers the coauthor role
+
+- **WHEN** the user creates a new agent from the Agents tab
+- **THEN** the role picker offers coauthor alongside worker, reviewer, and planner
+
 ### Requirement: The TUI is a hub client
 
 The TUI SHALL get all data from the single global hub (`/state` + `/events`) and
 perform all mutations through it, holding no domain logic of its own. When no hub is
 running it SHALL auto-start a background hub rather than refusing.
 
+It SHALL reach the hub only through the client and the exchange format, importing no
+other part of the core — no hub package, no persistence package, no adapter the hub
+owns. Where it needs something the hub knows, it SHALL ask the hub rather than
+computing it in its own process: whether an optional external tool is installed is
+the hub's answer to give, because the hub is the process that runs it.
+
 #### Scenario: No hub yet
 
 - **WHEN** the TUI starts and no hub is running
 - **THEN** it starts a background hub, then connects
 
+#### Scenario: The TUI imports no core package
+
+- **WHEN** the TUI package is compiled
+- **THEN** it imports the client and the exchange format, and no hub or persistence
+  package
+
+#### Scenario: Tool availability is the hub's answer
+
+- **WHEN** the TUI reports that an optional external tool is missing
+- **THEN** the finding came from the hub, which is the process that would invoke the
+  tool, rather than from the TUI probing its own environment
+
 ### Requirement: Repo switcher scopes the per-repo view
 
-The TUI SHALL provide a repo switcher, presented as a picker overlay listing the
-projects the hub knows (from the project registry). Selecting a repo SHALL scope the
-Tasks tab (and any other per-repo view) to it, without affecting the global Agents
-and PRs tabs.
+The TUI SHALL make the active repo a first-class, always-visible part of the
+interface, and SHALL provide a switcher to change it.
+
+The **active repo name SHALL be persistently visible** in the top bar (not only
+inside an overlay), rendered in that repo's deterministic color scheme, so the user
+can tell at a glance which repo the Tasks tab and any `repo`-scoped view reflect.
+
+The **switcher SHALL be a picker overlay, not a tab strip** — the number of repos
+may be large, so a fixed tab row would not scale. The overlay SHALL list the
+registered projects (from the project registry) ordered most-relevant first: repos
+with **live agents** on top, then by **recency** (last used), then the rest; and it
+SHALL offer a typeahead filter to narrow a long list. Selecting a repo SHALL scope
+the Tasks tab (and any other per-repo view) to it.
+
+#### Scenario: Active repo always visible
+
+- **WHEN** the TUI is showing any tab
+- **THEN** the current repo's name is visible in the top bar, in that repo's color
 
 #### Scenario: Switching repos
 
 - **WHEN** the user opens the switcher overlay and picks a repo
-- **THEN** the per-repo view rescopes to it and the global tabs are unchanged
+- **THEN** the per-repo view rescopes to it and the top-bar indicator updates
+
+#### Scenario: Switcher ordering and scale
+
+- **WHEN** the switcher overlay is opened with many repos registered
+- **THEN** repos with live agents appear first, then by recency, and a typeahead
+  filter is available — it is a scrollable list, never a fixed tab row
 
 #### Scenario: Rows carry their repo
 
@@ -209,4 +280,63 @@ separable.
 - **WHEN** the Agents or PRs tab shows rows from several repos
 - **THEN** each repo's rows carry its own scheme's color, and the selected repo tints
   the board chrome
+
+### Requirement: Agents and PRs tabs have a global/repo scope toggle
+
+The Agents and PRs tabs SHALL each offer a scope toggle between `global` and `repo`,
+defaulting to `global`. In `global` the tab SHALL show the whole fleet across every
+registered repo, each row repo-tagged. In `repo` the tab SHALL show only the active
+repo's entries (the switcher's selection). The active scope SHALL be shown in the
+footer. This is a view filter only; it SHALL NOT change what data the hub holds, and
+the Tasks tab SHALL remain always scoped to the active repo.
+
+#### Scenario: Default is global
+
+- **WHEN** the Agents or PRs tab is first shown
+- **THEN** it lists entries across all repos, each tagged with its repo
+
+#### Scenario: Narrow to the active repo
+
+- **WHEN** the user toggles the Agents tab scope to `repo`
+- **THEN** it shows only the active repo's agents, and the footer reflects `repo`
+  scope
+
+### Requirement: Repo configuration is editable in the TUI
+
+The TUI SHALL let a user edit a repo's `.sindri/config.yaml` through a form over its
+keys (`architecture`, `containerfile`, `review_prompt`, `github.issues`), performed
+through the hub. An invalid entry SHALL be reported to the user and SHALL NOT be
+persisted as a broken config; hand-editing the YAML file directly SHALL remain
+equally valid.
+
+#### Scenario: Edit config via a form
+
+- **WHEN** the user opens the repo config form, changes a value, and saves
+- **THEN** the hub writes `.sindri/config.yaml` and the change takes effect on the
+  next load
+
+#### Scenario: Invalid config rejected
+
+- **WHEN** the user enters a value that fails config validation (e.g. a path that
+  escapes the repo)
+- **THEN** the form reports the error and does not persist a broken config
+
+### Requirement: Planner proposals are marked under the approval gate
+
+A task proposed by a planner and still awaiting the user's decision SHALL be
+visually distinguished in the Tasks tab from a normal backlog task, and its detail
+SHALL show its approval state (pending, approved, or rejected) and any rejection
+comment. Only a task under the gate (pending or rejected) SHALL be a valid target
+for the approve/reject actions.
+
+#### Scenario: Gated proposal is marked
+
+- **WHEN** a planner-proposed task is pending or rejected
+- **THEN** its row is distinguished from a normal task and its detail shows the
+  approval state and any comment
+
+#### Scenario: Approve/reject only on gated tasks
+
+- **WHEN** the selected task has no unresolved approval (a normal task)
+- **THEN** the approve/reject actions do not apply to it
 

@@ -2,16 +2,17 @@
 // type:    ui (Agents tab)
 // job:     the Agents tab content — the agent list (status, role, task) with
 // orphan warnings, and the agent detail pane (state + the lazily-
-// fetched activity timeline). Status is one word: down|idle|working|
-// submitted (down ⇒ not running).
+// fetched activity timeline). Status is the hub's one word, rendered as
+// given ("unknown" = nothing has observed the agent yet).
 // limits:  renders agent state only; mutations go through the hub (-> client)
 // and assembly is the hub's (-> State).
 package tui
 
 import (
+	"bytes"
 	"fmt"
-	"io"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,9 +20,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/flo-at/sindri/internal/adapter/tmux"
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
-	"github.com/flo-at/sindri/internal/hub"
 	"github.com/flo-at/sindri/internal/ui/attach"
+	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
 // attachCmd builds the interactive tmux attach through the container port, so any backend works.
@@ -30,12 +32,27 @@ func attachCmd(cname, name string) *exec.Cmd {
 	return container.AttachCmd(cname, append([]string{"tmux"}, tmux.Attach(name, false)...)...)
 }
 
+// attachTookHold is the shortest a real dial-in can last. Under it, the child cannot have handed the
+// terminal over and back — so an error is the attach never starting, which the keypress deserves an
+// answer about. Over it, a non-zero exit is the session's own business (a detach, a killed pane).
+const attachTookHold = 400 * time.Millisecond
+
 // attachAgent attaches and reports to herdr's sidebar for the duration, like every other attach
 // path (no-op outside a herdr pane). Released when the child exits, before the resume repaint.
+//
+// It never checks liveness first. The board's status is the watchdog's last sweep, which on a loaded
+// host can call a live agent down — and refusing on that costs the user the access, where attempting
+// costs a moment. So it tries, and explains only if the try fails.
 func attachAgent(cname, name string) tea.Cmd {
 	stop := attach.ReportToHerdr(cname, name)
+	began := time.Now()
 	return tea.ExecProcess(attachCmd(cname, name), func(err error) tea.Msg {
 		stop()
+		if err != nil && time.Since(began) < attachTookHold {
+			return errModalMsg{fmt.Errorf("couldn't attach to %s — it looks like its container or tmux "+
+				"session isn't up. '%s' starts it; '%s' shows what the hub's probes see. (%v)",
+				name, keyStartS, keyWhyNext, err)}
+		}
 		return resumed(err)
 	})
 }
@@ -51,7 +68,27 @@ func (m *model) openPlanForm(name string) {
 			if cl == nil || strings.TrimSpace(text) == "" {
 				return nil
 			}
-			if err := cl.AssignPlan(name, text); err != nil {
+			if err := cl.AssignPlan(name, text, ""); err != nil {
+				return errModalMsg{err}
+			}
+			st, _ := cl.State()
+			return polledMsg(st)
+		}
+	})
+}
+
+// openTaskPlanForm hands an existing task to a planner to work up. The task carries the brief, so
+// the textarea is for whatever it does not already say, and may be left empty.
+func (m *model) openTaskPlanForm(planner, taskID string) {
+	extra := newTextareaField("anything to add (optional)", "")
+	cl := m.cl
+	m.form.open("work up "+taskID+" with "+planner, []field{extra}, nil, func() tea.Cmd {
+		text := extra.value()
+		return func() tea.Msg {
+			if cl == nil {
+				return nil
+			}
+			if err := cl.AssignPlan(planner, text, taskID); err != nil {
 				return errModalMsg{err}
 			}
 			st, _ := cl.State()
@@ -62,17 +99,18 @@ func (m *model) openPlanForm(name string) {
 
 // agentContainer prefers the board's project-resolved name (right for any repo), falling back to
 // the current repo only for an older hub that doesn't report it.
-func (m model) agentContainer(a hub.AgentView) string {
+func (m model) agentContainer(a api.AgentView) string {
 	if a.Container != "" {
 		return a.Container
 	}
-	return hub.Container(m.root, a.Name)
+	return container.AgentContainer(m.root, a.Name)
 }
 
-// memoryLabelTUI shows the RAM limit; the "2g" mirrors the hub's defaultAgentMemory (display only).
-func memoryLabelTUI(m string) string {
+// memoryLabelTUI shows the RAM limit, naming the hub's own default where none is configured — the
+// figure comes off the board rather than being copied here, since it is the runtime's to state.
+func memoryLabelTUI(m, dflt string) string {
 	if strings.TrimSpace(m) == "" {
-		return "2g (default)"
+		return theme.MemoryDefaultLabel(dflt)
 	}
 	return m
 }
@@ -115,8 +153,10 @@ func (m *model) openNewAgentChoice() {
 			if v == "plan" {
 				return func() tea.Msg { return openPlanFormMsg(planner) }
 			}
-			// Register, then launch in the background (it can build the image) so the
-			// new row appears at once; /events reports launching → running.
+			// Register, then launch. The launch is a separate step so the new row appears at
+			// once, but its result is collected rather than dropped: a launch can fail (no
+			// image, no engine, a build that breaks) and the row would otherwise just sit at
+			// "down" with nothing said.
 			return func() tea.Msg {
 				if cl == nil {
 					return nil
@@ -125,13 +165,29 @@ func (m *model) openNewAgentChoice() {
 				if err != nil {
 					return errModalMsg{err}
 				}
-				if name != "" {
-					go func() { _ = cl.Launch(name, false, false, io.Discard) }()
+				if name == "" {
+					st, _ := cl.State()
+					return polledMsg(st)
 				}
-				st, _ := cl.State()
-				return polledMsg(st)
+				return agentCreatedMsg(name)
 			}
 		},
+	}
+}
+
+// launchCmd starts a registered agent and keeps what the launch says. A first run builds the
+// image, which is slow enough that silence reads as "nothing happened", and the build log is the
+// only account of a failure — so it is captured either way and shown when the launch fails.
+func (m *model) launchCmd(name string) tea.Cmd {
+	cl := m.cl
+	if cl == nil {
+		return nil
+	}
+	m.flash = "launching " + name + "… (a first run builds the image, which takes a while)"
+	return func() tea.Msg {
+		var buf bytes.Buffer
+		err := cl.Launch(name, false, false, &buf)
+		return launchedMsg{name: name, log: buf.String(), err: err}
 	}
 }
 
@@ -150,6 +206,23 @@ func (m *model) openDeleteChoice(id string) {
 	}
 }
 
+// openClearContextChoice confirms clearing a full agent's context. Confirmed rather than done on
+// the keystroke because it destroys everything the session remembers, including whatever the user
+// typed into that pane — the hub refuses mid-task, so what is left to lose here is the reasoning.
+func (m *model) openClearContextChoice(name string) {
+	cl := m.cl
+	m.choice = choiceModalState{
+		active: true, title: "clear " + name + "'s context?  (its session starts empty)",
+		options: []string{"cancel", "clear"}, values: []string{"cancel", "clear"},
+		apply: func(v string) tea.Cmd {
+			if v != "clear" {
+				return nil
+			}
+			return mutateThenRefresh(cl, func() error { return cl.ClearContext(name) })
+		},
+	}
+}
+
 // rebaseAgentCmd rebases the agent's worktree onto the reference branch; git aborts on conflict.
 func (m *model) rebaseAgentCmd(name string) tea.Cmd {
 	cl := m.cl
@@ -163,17 +236,29 @@ func (m *model) agentStartStop() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	switch a.Status {
-	case "down":
-		m.flash = "starting " + a.Name + "…" // status (hub) drives the rest
-		return m.action(func(id string) error { return m.cl.Launch(id, false, false, io.Discard) })
-	case "launching", "stopping":
+	switch {
+	case api.AgentNeedsLaunch(a.Status):
+		// Same path as a freshly created agent: the launch keeps its output, so a failed image
+		// build shows what broke rather than a bare "exit status 1". Not-yet-observed lands here
+		// too — there is nothing to stop, and this is where such an agent went before the hub
+		// could say so.
+		return m.launchCmd(a.Name)
+	case api.AgentNotUp(a.Status):
 		m.flash = a.Name + " is " + a.Status + "…"
 		return nil
 	default: // running
 		m.flash = "stopping " + a.Name + "…"
 		return m.action(func(id string) error { return m.cl.StopAgent(id) })
 	}
+}
+
+// attachTo dials in without asking the board's permission first. Every tab that offers attach goes
+// through it, so none of them can reintroduce a gate the others dropped.
+func (m *model) attachTo(a api.AgentView) tea.Cmd {
+	if m.cl == nil {
+		return nil
+	}
+	return attachAgent(m.agentContainer(a), a.Name)
 }
 
 // agentDetailW is wide enough that activity payloads (task ids + titles) aren't chopped.
@@ -191,12 +276,19 @@ func (m model) agentListHeight() int {
 	return n
 }
 
+// agentDetailWidth is the right detail column's width — the same clamp agentsBody renders at,
+// shared so reclamp can size the viewport to the same wrapped line count.
+func (m model) agentDetailWidth() int {
+	return clampInt(agentDetailW, 20, max(20, m.w-30))
+}
+
 // agentsBody lays out list over live pane on the left, fixed-width agent detail on the right.
 func (m model) agentsBody() string {
 	h := m.bodyHeight()
 	leftW := m.w
+	rightW := m.agentDetailWidth()
 	if m.showDetail() { // leave room for the right detail column
-		leftW = m.w - clampInt(agentDetailW, 20, max(20, m.w-30)) - 1
+		leftW = m.w - rightW - 1
 	}
 	listH := m.agentListHeight()
 	paneH := max(1, h-listH-1) // minus the horizontal divider
@@ -208,8 +300,10 @@ func (m model) agentsBody() string {
 	if !m.showDetail() { // § hid the right column — left split takes the full width
 		return leftCol
 	}
-	// Right column from metaItems, highlighting the focused actionable item.
-	items := m.agentItems()
+	// Right column from metaItems, word-wrapped like the PRs tab so a long task title or
+	// activity payload reads in full rather than losing its tail to an ellipsis. Highlight
+	// the focused actionable item.
+	items := wrapMeta(m.agentItems(), rightW)
 	lines := make([]string, len(items))
 	hl, ai := -1, 0
 	for i, it := range items {
@@ -221,7 +315,7 @@ func (m model) agentsBody() string {
 			ai++
 		}
 	}
-	right := pane(lines, m.detail, m.w-leftW-1, hl)
+	right := pane(lines, m.detail, rightW, hl)
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftCol, divider(h), right)
 }
 
@@ -230,11 +324,23 @@ func (m model) agentsBody() string {
 func (m model) agentItems() []metaItem {
 	a, ok := m.selAgent()
 	if !ok {
-		return []metaItem{{text: dimStyle.Render("(orphan — no roster entry; 'podman rm -f' it)")}}
+		return []metaItem{{text: dimStyle.Render("(orphan — no roster entry; '" + keyDelete + "' removes it)")}}
 	}
-	taskIt := metaItem{text: "task:      " + m.taskLabel(a.Task)}
-	if a.Task != "" {
-		taskIt.kind, taskIt.value = "task", a.Task
+	// A reviewer's own Task is always "" — the task belongs to the agent that wrote the PR — so
+	// fall back to what that PR is for, or the line reads as an agent holding nothing at all.
+	taskID := a.Task
+	if taskID == "" {
+		taskID = m.prTask(a.PR)
+	}
+	taskIt := metaItem{text: "task:      " + m.taskLabel(taskID)}
+	if taskID != "" {
+		taskIt.kind, taskIt.value = "task", taskID
+	}
+	// The feature reads alongside the subtask, and carries the pane on its own between subtasks —
+	// where the task line is a dash and the agent otherwise looks like it holds nothing at all.
+	featIt := metaItem{text: "feature:   " + m.taskLabel(a.Feature)}
+	if a.Feature != "" {
+		featIt.kind, featIt.value = "task", a.Feature
 	}
 	prIt := metaItem{text: "pr:        " + dash(a.PR)}
 	if a.PR != "" {
@@ -244,12 +350,26 @@ func (m model) agentItems() []metaItem {
 	if m.agentView == "pod" { // mark which view the main pane is showing
 		pod += dimStyle.Render("  ◂ shown")
 	}
+	status := "status:    " + a.Status
+	if m.agentView == "diag" {
+		status += dimStyle.Render("  ◂ shown")
+	} else {
+		status += dimStyle.Render("  (⏎ why)")
+	}
+	// Absolute: `value` is a child process's working directory and what `y` copies, so the text
+	// shows that same string. With no project root to join to, the relative form still shows — the
+	// field holds its place — but plain, since a shell opened at a relative path lands anywhere.
+	wsIt := metaItem{text: "workspace: " + dash(a.Workspace)}
+	if ws := m.agentWorkspacePath(a.Name); ws != "" {
+		wsIt = metaItem{text: "workspace: " + ws, kind: "path", value: ws}
+	}
 	items := []metaItem{
 		{text: "role:      " + a.Role},
-		{text: "status:    " + a.Status},
-		taskIt, prIt,
-		{text: "workspace: " + dash(a.Workspace)},
-		{text: "memory:    " + memoryLabelTUI(a.Memory) + dimStyle.Render("  (container RAM · e to edit)")},
+		{text: status, kind: "view", value: "diag"},
+		taskIt, featIt, prIt,
+		wsIt,
+		{text: "memory:    " + memoryLabelTUI(a.Memory, m.state.DefaultMemory) + dimStyle.Render("  (container RAM · e to edit)")},
+		{text: "context:   " + theme.ContextLine(a.ContextTokens)},
 		{text: pod, kind: "view", value: "pod"},
 	}
 	for _, line := range clientLines(m.agentClients) { // same dial-in detail as `agent info`
@@ -285,6 +405,13 @@ func (m model) paneLines() []string {
 			return []string{dimStyle.Render("(fetching container info…)")}
 		}
 		return strings.Split(strings.TrimRight(m.agentPod, "\n"), "\n")
+	}
+	if m.agentView == "diag" { // what the hub's liveness probes actually observe
+		if strings.TrimSpace(m.agentDiag) == "" {
+			return []string{dimStyle.Render("(asking the hub why…)")}
+		}
+		head := dimStyle.Render("liveness probe — why status is " + strconv.Quote(a.Status) + ":")
+		return append([]string{head}, strings.Split(strings.TrimRight(m.agentDiag, "\n"), "\n")...)
 	}
 	body := strings.Split(strings.TrimRight(m.agentPane, "\n"), "\n")
 	hasBody := strings.TrimSpace(m.agentPane) != ""
@@ -328,14 +455,14 @@ func tailPane(lines []string, w, h int) string {
 func hdivider(w int) string { return divStyle.Render(strings.Repeat("─", w)) }
 
 // selAgent returns the currently-selected agent from the board snapshot.
-func (m model) selAgent() (hub.AgentView, bool) {
+func (m model) selAgent() (api.AgentView, bool) {
 	id := m.selID()
 	for _, a := range m.state.Agents {
 		if a.Name == id {
 			return a, true
 		}
 	}
-	return hub.AgentView{}, false
+	return api.AgentView{}, false
 }
 
 // eyeGlyph marks attached humans. The U+FE0F is load-bearing: bare U+1F441 measures one cell but
@@ -345,28 +472,59 @@ const eyeGlyph = "👁️"
 // warnGlyph is the warning mark, likewise width-pinned.
 const warnGlyph = "⚠️"
 
+// gateGlyph marks work held back by the approval gate. Plain ASCII: it sits inside the header bar,
+// where an emoji's two drawn cells against one measured would shear the whole strip.
+const gateGlyph = "!"
+
+// retiredGlyph marks an agent being wound down. Width-pinned like the others.
+const retiredGlyph = "⏹️"
+
 func (m model) agentRows() []row {
-	var out []row
+	var visible []api.AgentView
 	for _, a := range m.state.Agents {
-		if !m.inScope(a.Project) { // repo-scoped: only the active repo's agents
-			continue
+		if m.inScope(a.Project) { // repo-scoped: only the active repo's agents
+			visible = append(visible, a)
 		}
+	}
+	var out []row
+	// Ordered by repo, then role, then name — the same call `sindri agent list` makes, so the two
+	// front-ends cannot drift onto different orders. In repo scope every row shares one repo, so
+	// this reduces to role-then-name without a redundant, single-value grouping level.
+	for _, a := range api.SortedAgents(visible, m.state.Projects) {
 		// Row coloured by lifecycle; cells styled independently so resets don't bleed.
 		ac := agentStatusStyle(a.Status)
-		// Work cell: the task, or the reviewed PR since a reviewer holds no task.
+		// Work cell: the task, or the reviewed PR since a reviewer holds no task — named alongside
+		// the task that PR is FOR, since the PR id alone says nothing a human recognizes. A held
+		// feature is named either way — as the subtask's parent, or alone between subtasks, where
+		// showing nothing made an agent that refused every verb look plainly idle.
 		work := a.Task
 		if work == "" {
 			work = a.PR
+			if t := m.prTask(a.PR); t != "" {
+				work += " › " + m.taskLabel(t)
+			}
+		}
+		switch {
+		case a.Feature != "" && work != "":
+			work = a.Feature + " › " + work
+		case a.Feature != "":
+			work = a.Feature
 		}
 		task := dash(work)
 		if a.Clients > 0 { // dial-ins attached — show the eye like the CLI list
 			task += fmt.Sprintf("  %s%d", eyeGlyph, a.Clients)
+		}
+		// Retirement rides beside the status, never in it: it is true of a busy agent too, and what
+		// that agent is doing right now is the one thing the status column exists to say.
+		if a.Retired {
+			task += "  " + stDone.Render(retiredGlyph+" retired")
 		}
 		out = append(out, row{strings.Join([]string{
 			m.repoStyle(a.Project).Render(fmt.Sprintf("%-10.10s", a.Repo)),
 			ac.Render(fmt.Sprintf("%-9s", a.Status)),
 			ac.Render(fmt.Sprintf("%-12s", a.Name)),
 			ac.Render(fmt.Sprintf("%-8s", a.Role)),
+			ac.Render(fmt.Sprintf("%4s", theme.ContextPercent(a.ContextTokens, a.ContextWindow))),
 			ac.Render(task),
 		}, " "), a.Name})
 	}
@@ -406,18 +564,25 @@ func (m *model) openRemoveOrphanChoice(name string) {
 func (m model) agentDetailLines() []string {
 	a, ok := m.selAgent()
 	if !ok {
-		return []string{dimStyle.Render("(orphan — no roster entry; 'podman rm -f' it)")}
+		return []string{dimStyle.Render("(orphan — no roster entry; '" + keyDelete + "' removes it)")}
 	}
 	return m.agentDetailFor(a)
 }
 
 // agentDetailFor renders an agent's detail; the activity log only for the selected one (lazy fetch).
-func (m model) agentDetailFor(a hub.AgentView) []string {
+func (m model) agentDetailFor(a api.AgentView) []string {
+	// A reviewer's own Task is always "" — the task belongs to the agent that wrote the PR — so
+	// fall back to what that PR is for, matching agentItems.
+	taskID := a.Task
+	if taskID == "" {
+		taskID = m.prTask(a.PR)
+	}
 	ls := []string{
 		"agent:     " + a.Name,
 		"role:      " + a.Role,
 		"status:    " + a.Status,
-		"task:      " + m.taskLabel(a.Task),
+		"task:      " + m.taskLabel(taskID),
+		"feature:   " + m.taskLabel(a.Feature),
 		"pr:        " + dash(a.PR),
 		"workspace: " + dash(a.Workspace),
 		"container: " + m.agentContainer(a),
@@ -437,8 +602,8 @@ func (m model) agentDetailFor(a hub.AgentView) []string {
 }
 
 // clientLines formats dial-ins via the hub's formatter, so this matches `sindri agent info`.
-func clientLines(cs []hub.ClientView) []string {
-	s := hub.FormatClients(cs)
+func clientLines(cs []api.ClientView) []string {
+	s := theme.FormatClients(cs)
 	if s == "" {
 		return nil
 	}

@@ -46,7 +46,7 @@ func (Claude) PrepareHome(spec agent.HomeSpec) (agent.Home, error) {
 	configPath := spec.Dir + ".json"
 	// Trust is recorded per-project under projects["<dir>"].hasTrustDialogAccepted —
 	// pre-accept /workspace so Claude doesn't block on the trust dialog.
-	cfg, _ := json.Marshal(map[string]any{
+	conf := map[string]any{
 		"hasCompletedOnboarding":        true,
 		"autoUpdates":                   false,
 		"bypassPermissionsModeAccepted": true,        // pre-accept --dangerously-skip-permissions
@@ -54,7 +54,11 @@ func (Claude) PrepareHome(spec agent.HomeSpec) (agent.Home, error) {
 		"projects": map[string]any{
 			"/workspace": map[string]any{"hasTrustDialogAccepted": true},
 		},
-	})
+	}
+	if servers := mcpServers(spec.Workspace); len(servers) > 0 {
+		conf["mcpServers"] = servers
+	}
+	cfg, _ := json.Marshal(conf)
 	if err := os.WriteFile(configPath, cfg, 0o644); err != nil {
 		return agent.Home{}, fmt.Errorf("write claude config: %w", err)
 	}
@@ -66,6 +70,29 @@ func (Claude) PrepareHome(spec agent.HomeSpec) (agent.Home, error) {
 	}
 	stageKeybindings(spec.Dir, spec.Out)
 	return agent.Home{Dir: spec.Dir, ConfigPath: configPath, HasCreds: hasCreds}, nil
+}
+
+// mcpServers declares the language tooling a workspace earns. User-scope servers live in
+// ~/.claude.json under "mcpServers" — checked against `claude mcp add -s user`, since a wrong key
+// fails silently. No go.mod, no entry: a non-Go pod is unchanged. It runs `brokkr gopls-mcp`
+// rather than `gopls mcp` because brokkr arrives via the mounted pod-bin (fixable without an image
+// rebuild) and its shim reports a refused toolchain instead of answering nothing.
+func mcpServers(workspace string) map[string]any {
+	if workspace == "" {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "go.mod")); err != nil {
+		return nil
+	}
+	return map[string]any{
+		"gopls": map[string]any{
+			"type":    "stdio",
+			"command": "brokkr",
+			// The pod mounts the tree at /workspace, not at the host path decided from here.
+			"args": []string{"gopls-mcp", "--dir", "/workspace"},
+			"env":  map[string]any{},
+		},
+	}
 }
 
 // stageKeybindings copies the user's ~/.claude/keybindings.json in; absence removes a copy from an

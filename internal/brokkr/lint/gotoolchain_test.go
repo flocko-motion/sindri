@@ -26,7 +26,7 @@ func TestToolchainTooOldRecognisesTheRefusal(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := toolchainTooOld(c.text)
+			got := ToolchainAdvice(c.text)
 			if got == "" {
 				t.Fatalf("expected advice for %q", c.text)
 			}
@@ -46,8 +46,8 @@ func TestToolchainTooOldIgnoresOtherFailures(t *testing.T) {
 		"packages contain errors",
 		"internal/hub/state.go:12:5: undefined: Foo",
 	} {
-		if got := toolchainTooOld(text); got != "" {
-			t.Errorf("toolchainTooOld(%q) = %q, want no advice", text, got)
+		if got := ToolchainAdvice(text); got != "" {
+			t.Errorf("ToolchainAdvice(%q) = %q, want no advice", text, got)
 		}
 	}
 }
@@ -60,7 +60,7 @@ func TestToolchainTooOldNamesTheInstaller(t *testing.T) {
 
 	dir := t.TempDir()
 	t.Setenv("PATH", dir)
-	if got := toolchainTooOld(text); strings.Contains(got, UpgradeCommand) {
+	if got := ToolchainAdvice(text); strings.Contains(got, UpgradeCommand) {
 		t.Errorf("with no %s on PATH the advice must not name it, got: %q", UpgradeCommand, got)
 	}
 
@@ -68,7 +68,7 @@ func TestToolchainTooOldNamesTheInstaller(t *testing.T) {
 	if err := os.WriteFile(script, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if got := toolchainTooOld(text); !strings.Contains(got, UpgradeCommand) {
+	if got := ToolchainAdvice(text); !strings.Contains(got, UpgradeCommand) {
 		t.Errorf("with %s on PATH the advice must name it, got: %q", UpgradeCommand, got)
 	}
 }

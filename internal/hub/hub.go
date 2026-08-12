@@ -9,14 +9,16 @@
 package hub
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/flo-at/sindri/internal/adapter/tasks/github"
+	"github.com/flo-at/sindri/internal/adapter/tasks/spec"
+	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/agentchan"
 	"github.com/flo-at/sindri/internal/hub/chat"
@@ -30,8 +32,9 @@ import (
 
 // Hub is the one global coordinator: sole writer of the store, sole driver of pods/tmux.
 type Hub struct {
-	store  *store.Store
-	events *bus // change notifications for /events
+	store     *store.Store
+	events    *bus      // change notifications for /events
+	startedAt time.Time // process start, reported on the board so `hub status` reads uptime from it rather than the OS
 
 	chat     *chat.Service     // the user's chatroom relay (internal/hub/chat)
 	comments *comments.Service // task-comment sync (internal/hub/comments)
@@ -41,6 +44,8 @@ type Hub struct {
 	agentCh  *agentchan.Server // the inbound agent command channel (internal/hub/agentchan)
 	watch    *watchdog         // agent liveness, observed on a loop (internal/hub/watchdog.go)
 	refs     *refwatch         // reference-branch drift, on a slow loop (internal/hub/refwatch.go)
+	creds    *credwatch        // agent credential upkeep from the host (internal/hub/credwatch.go)
+	stalls   *stallwatch       // held work nobody is working on (internal/hub/stallwatch.go)
 }
 
 // agentKey identifies an agent within a project (a repoTag), one hub serving many repos.
@@ -51,41 +56,19 @@ type agentKey struct {
 
 // repoTag is a short, stable per-repo id from the absolute root. It scopes container names so two
 // repos reusing an agent name don't collide in podman's host-global namespace.
-func repoTag(root string) string {
-	abs, err := filepath.Abs(root)
-	if err != nil {
-		abs = root
-	}
-	sum := sha256.Sum256([]byte(abs))
-	return hex.EncodeToString(sum[:4]) // 8 hex chars — plenty to separate repos
-}
+// repoTag is api.RepoTag under the name every existing call site here already uses; it
+// crosses the wire (AgentView.Project, every repo-scoped request), so its definition
+// lives in internal/api.
+func repoTag(root string) string { return api.RepoTag(root) }
 
 // RepoTag exposes the per-repo id (AgentView.Project) to host CLIs: State spans every project, so a
 // repo-scoped command must filter on this — matching the repo basename collides.
-func RepoTag(root string) string { return repoTag(root) }
+func RepoTag(root string) string { return api.RepoTag(root) }
 
-// repoSlug is the directory name, lowercased and podman-safe, so `podman ps` is eyeballable.
-func repoSlug(root string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(filepath.Base(root)) {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
-			b.WriteRune(r)
-		}
-	}
-	s := b.String()
-	if s == "" {
-		s = "repo"
-	}
-	if len(s) > 16 {
-		s = s[:16]
-	}
-	return s
-}
-
-// Container is an agent's repo-scoped podman container name: sindri-<slug>-<digest>-<name>.
-func Container(root, name string) string {
-	return "sindri-" + repoSlug(root) + "-" + repoTag(root) + "-" + name
-}
+// Container is an agent's repo-scoped podman container name; it crosses to whatever
+// addresses a container directly (podman inspect/logs), so its definition lives in
+// internal/container under the name every existing caller here already uses.
+func Container(root, name string) string { return container.AgentContainer(root, name) }
 
 // projectRoot resolves a project (repoTag) to its on-disk repo root via the registry ("" if unknown).
 func (h *Hub) projectRoot(project string) string {
@@ -103,20 +86,23 @@ func New() (*Hub, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := &Hub{store: st, events: newBus()}
+	h := &Hub{store: st, events: newBus(), startedAt: time.Now()}
 	h.chat = chat.New(h.store, chatDelivery{h})
-	h.comments = comments.New(h.store, commentsDeps{h})
+	h.comments = comments.New(h.store, commentsDeps{h}, spec.Source{}, github.Source{})
 	// agentCh before agents: the lifecycle serves sockets through it, and agentchanDeps only
 	// reaches h.agents at request time.
 	h.agentCh = agentchan.New(h.store, agentchanDeps{h})
 	h.agents = agent.New(h.store, agentDeps{h}, h.agentCh)
-	h.wf = workflow.New(h.store, workflowDeps{h})
+	h.wf = workflow.New(h.store, workflowDeps{h}, spec.Source{}, github.Source{}).WithGates(spec.Source{})
 	h.projects = project.New(h.store, projectDeps{h})
 	// Last, after agents: the watchdog probes through h.agents and reads once here, so the first
 	// board read has real observations.
 	h.watch = newWatchdog(h)
 	// After wf: it drives SyncReference, whose first pass only records where each reference stands.
 	h.refs = newRefwatch(h)
+	h.creds = newCredwatch(h)
+	// After watch: it reads the watchdog's idle dwell, and after wf: it nudges through it.
+	h.stalls = newStallwatch(h)
 	return h, nil
 }
 
@@ -171,13 +157,15 @@ func ensureGitignore(root string) {
 func (h *Hub) Close() error {
 	h.watch.close()
 	h.refs.close()
+	h.creds.close()
+	h.stalls.close()
 	h.agentCh.CloseAll()
 	server.FlushAccessLog() // emit any open access-log run before we go quiet
 	return h.store.Close()
 }
 
 // SocketPath is the global hub's control socket.
-func (h *Hub) SocketPath() string { return SocketPath() }
+func (h *Hub) SocketPath() string { return paths.HubSocket() }
 
 // ServeAgent opens an agent's command socket before its pod launches — the pod bind-mounts that
 // socket, and the socket IS the agent's identity. Serving itself lives in agentchan.
