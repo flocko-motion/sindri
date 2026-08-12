@@ -325,9 +325,11 @@ func (m model) taskItemsFor(t api.Task, desc string, comments []api.Comment) []m
 	}
 	// The exact moment, in local time — the list column rounds it, and rounding is what a question
 	// about one particular task is asking past.
-	if stamp := theme.Stamp(t.CreatedAt); stamp != "" {
-		items = append(items, metaItem{text: "created:  " + stamp + " (" + theme.Age(t.CreatedAt) + " ago)"})
+	created := theme.Stamp(t.CreatedAt)
+	if created != theme.Unknown {
+		created += " (" + theme.Age(t.CreatedAt) + " ago)"
 	}
+	items = append(items, metaItem{text: "created:  " + created})
 	if t.Approval != "" { // a planner proposal under the approval gate
 		line := "approval: " + t.Approval
 		if t.ApprovalComment != "" {

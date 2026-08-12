@@ -31,18 +31,23 @@ func TestAgeIsOneUnitWideEnoughForAColumn(t *testing.T) {
 	}
 }
 
-// TestUnknownAgeIsBlankNotZero: a source that never gave a time must not render as "now" — a task
-// carried over from before this column existed would read as though it had just been filed.
-func TestUnknownAgeIsBlankNotZero(t *testing.T) {
+// TestUnknownAgeSaysSo: a source that never gave a time must not render as "now" — a task from
+// before this column existed would read as though it had just been filed — nor as a blank cell,
+// which reads as a rendering gap rather than as an answer.
+func TestUnknownAgeSaysSo(t *testing.T) {
 	// The last is a zero time.Time formatted: valid RFC3339, year 1, and it would otherwise render
 	// as ~105000 weeks rather than as the absence of an answer.
 	for _, s := range []string{"", "not a date", "0001-01-01T00:00:00Z"} {
-		if got := Age(s); got != "" {
-			t.Errorf("Age(%q) = %q, want empty", s, got)
+		if got := Age(s); got != Unknown {
+			t.Errorf("Age(%q) = %q, want %q", s, got, Unknown)
 		}
-		if got := Stamp(s); got != "" {
-			t.Errorf("Stamp(%q) = %q, want empty", s, got)
+		if got := Stamp(s); got != Unknown {
+			t.Errorf("Stamp(%q) = %q, want %q", s, got, Unknown)
 		}
+	}
+	// It still has to fit the column it shares with real ages.
+	if len(Unknown) > 4 {
+		t.Errorf("%q is wider than the age column allows", Unknown)
 	}
 }
 

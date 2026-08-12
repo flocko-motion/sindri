@@ -10,14 +10,17 @@ import (
 	"time"
 )
 
+// Unknown is what a timestamp no source could give renders as. Said outright rather than left
+// blank: an empty cell reads as a rendering gap, and inventing an age would be worse than either.
+const Unknown = "n/a"
+
 // Age renders how long ago t was, in the width of a list column: "just now" under a minute, then
 // minutes, hours, days, weeks. One unit only — a column is read at a glance, and "2d" answers the
-// question "is this from today?" as well as "2d 4h" does. Empty for a timestamp the source never
-// gave, since a wrong age is worse than none.
+// question "is this from today?" as well as "2d 4h" does.
 func Age(rfc3339 string) string {
 	t, ok := parseStamp(rfc3339)
 	if !ok {
-		return ""
+		return Unknown
 	}
 	d := time.Since(t)
 	switch {
@@ -37,11 +40,11 @@ func Age(rfc3339 string) string {
 }
 
 // Stamp renders the exact moment for a detail pane, in the reader's own timezone — the answer the
-// column's rounded age deliberately does not give. Empty when unknown, like Age.
+// column's rounded age deliberately does not give. Unknown when the source has none, like Age.
 func Stamp(rfc3339 string) string {
 	t, ok := parseStamp(rfc3339)
 	if !ok {
-		return ""
+		return Unknown
 	}
 	return t.Local().Format("2006-01-02 15:04")
 }

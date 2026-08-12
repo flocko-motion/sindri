@@ -450,7 +450,9 @@ func taskInfoCmd() *cobra.Command {
 				fmt.Printf("id:       %s\ntitle:    %s\nstatus:   %s\ntype:     %s\npriority: %s\nparent:   %s\napproval: %s\nlabels:   %s\nurl:      %s\n",
 					t.ID, t.Title, t.Status, dash(t.Type), theme.PriorityLabel(t.Priority),
 					dash(t.ParentID), dash(t.Approval), dash(t.Labels), dash(t.URL))
-				if stamp := theme.Stamp(t.CreatedAt); stamp != "" { // exact, where the list rounds
+				if stamp := theme.Stamp(t.CreatedAt); stamp == theme.Unknown {
+					fmt.Printf("created:  %s\n", stamp)
+				} else { // exact, where the list rounds
 					fmt.Printf("created:  %s (%s ago)\n", stamp, theme.Age(t.CreatedAt))
 				}
 				if body := strings.TrimRight(t.Description, "\n"); body != "" {
