@@ -156,11 +156,11 @@ func (m *model) onKey(k string) tea.Cmd {
 				m.flash = "no agent is working " + m.selID()
 				return nil
 			}
-			return m.attachOrArm(a, "'"+keyStartS+"' on the Agents tab")
+			return m.attachTo(a)
 		}
 		if m.tab == 1 {
 			if a, ok := m.selAgent(); ok {
-				return m.attachOrArm(a, "'"+keyStartS+"'")
+				return m.attachTo(a)
 			}
 		}
 		if m.tab == 2 {
@@ -171,7 +171,7 @@ func (m *model) onKey(k string) tea.Cmd {
 				m.flash = "no agent is working " + m.selID()
 				return nil
 			}
-			return m.attachOrArm(a, "'"+keyStartS+"' on the Agents tab")
+			return m.attachTo(a)
 		}
 	case keyMerge: // agents: milestone PR · prs: merge (the human gate)
 		if m.tab == 1 {

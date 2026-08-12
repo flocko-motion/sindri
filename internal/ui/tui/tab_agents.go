@@ -32,12 +32,27 @@ func attachCmd(cname, name string) *exec.Cmd {
 	return container.AttachCmd(cname, append([]string{"tmux"}, tmux.Attach(name, false)...)...)
 }
 
+// attachTookHold is the shortest a real dial-in can last. Under it, the child cannot have handed the
+// terminal over and back — so an error is the attach never starting, which the keypress deserves an
+// answer about. Over it, a non-zero exit is the session's own business (a detach, a killed pane).
+const attachTookHold = 400 * time.Millisecond
+
 // attachAgent attaches and reports to herdr's sidebar for the duration, like every other attach
 // path (no-op outside a herdr pane). Released when the child exits, before the resume repaint.
+//
+// It never checks liveness first. The board's status is the watchdog's last sweep, which on a loaded
+// host can call a live agent down — and refusing on that costs the user the access, where attempting
+// costs a moment. So it tries, and explains only if the try fails.
 func attachAgent(cname, name string) tea.Cmd {
 	stop := attach.ReportToHerdr(cname, name)
+	began := time.Now()
 	return tea.ExecProcess(attachCmd(cname, name), func(err error) tea.Msg {
 		stop()
+		if err != nil && time.Since(began) < attachTookHold {
+			return errModalMsg{fmt.Errorf("couldn't attach to %s — it looks like its container or tmux "+
+				"session isn't up. '%s' starts it; '%s' shows what the hub's probes see. (%v)",
+				name, keyStartS, keyWhyNext, err)}
+		}
 		return resumed(err)
 	})
 }
@@ -237,34 +252,13 @@ func (m *model) agentStartStop() tea.Cmd {
 	}
 }
 
-// attachOrArm attaches, or refuses ONCE on a status that says the agent isn't up and lets the next
-// press through. Board liveness is the watchdog's last observation, minutes stale on a loaded host,
-// so the user watching a pane can be right where the sweep that timed out is wrong.
-func (m *model) attachOrArm(a api.AgentView, startHint string) tea.Cmd {
-	if api.AgentNotUp(a.Status) && m.attachAnyway != a.Name {
-		m.attachAnyway = a.Name
-		m.errText = attachRefusal(a.Name, a.Status, startHint)
-		return nil
-	}
-	m.attachAnyway = ""
+// attachTo dials in without asking the board's permission first. Every tab that offers attach goes
+// through it, so none of them can reintroduce a gate the others dropped.
+func (m *model) attachTo(a api.AgentView) tea.Cmd {
 	if m.cl == nil {
 		return nil
 	}
 	return attachAgent(m.agentContainer(a), a.Name)
-}
-
-// attachRefusal says why an attach cannot happen, in one place for the three tabs that offer it.
-// Not-yet-observed gets its own wording: telling the user to start an agent that may already be
-// running sends them to fix the wrong thing, when the next sweep answers within seconds.
-func attachRefusal(name, status, startHint string) string {
-	const anyway = " Press '" + keyAttach + "' again to attach anyway — this status is the last sweep's, not a fresh look."
-	switch status {
-	case api.StatusUnknown:
-		return "agent " + name + " hasn't been observed yet — try again in a moment." + anyway
-	case "launching", "stopping":
-		return "agent " + name + " is " + status + " — try again in a moment." + anyway
-	}
-	return "agent " + name + " is down — start it first (" + startHint + ")." + anyway
 }
 
 // agentDetailW is wide enough that activity payloads (task ids + titles) aren't chopped.

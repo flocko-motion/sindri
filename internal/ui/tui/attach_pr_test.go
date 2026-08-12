@@ -56,10 +56,10 @@ func TestPRsFooterOffersAttach(t *testing.T) {
 	}
 }
 
-// TestOnKeyAttachFromPR covers the three outcomes the 'a' dispatch itself decides between, not
-// just the resolution helper: no author working it, the author is down, and (implicitly, since
-// attachAgent execs a real process untestable here) the live case falls through to neither
-// message, which is what "no error, no flash" verifies.
+// TestOnKeyAttachFromPR covers the two outcomes the 'a' dispatch itself decides between, not just
+// the resolution helper: nobody is working the PR, or somebody is and the attach is attempted. A
+// down-looking author is NOT a third case — the board's status never turns the keypress into a
+// refusal, since it is the last sweep's and a loaded host makes a live agent read down.
 func TestOnKeyAttachFromPR(t *testing.T) {
 	m := newModel(nil, nil, "/r/one")
 	m.state = prFleet()
@@ -82,9 +82,9 @@ func TestOnKeyAttachFromPR(t *testing.T) {
 	}
 
 	m.flash, m.errText = "", ""
-	selectPR("pr-td-2") // nori, down
+	selectPR("pr-td-2") // nori, whom the last sweep saw as down
 	m.onKey(keyAttach)
-	if !strings.Contains(m.errText, "nori") || !strings.Contains(m.errText, "down") {
-		t.Errorf("expected a down-agent error naming nori, got errText=%q flash=%q", m.errText, m.flash)
+	if m.errText != "" || m.flash != "" {
+		t.Errorf("a down-looking author must still be attempted, got errText=%q flash=%q", m.errText, m.flash)
 	}
 }

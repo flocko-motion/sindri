@@ -117,8 +117,6 @@ type model struct {
 	flash      string    // transient status (e.g. "copied"), cleared on next key
 	errText    string    // when set, the error modal is shown (any key dismisses)
 	noticeText string    // when set, a startup warning modal is shown (any key dismisses)
-	// attachAnyway is the agent a second attach press reaches despite its status (-> attachOrArm).
-	attachAnyway string
 }
 
 // detailMinWidth is the floor below which the side detail column cannot coexist with the main

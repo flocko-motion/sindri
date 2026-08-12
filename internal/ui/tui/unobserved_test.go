@@ -38,71 +38,19 @@ func TestStartStopNeverStopsAnUnobservedAgent(t *testing.T) {
 	}
 }
 
-// TestAttachRefusedForAnUnobservedAgent: the guards asked `Status == "down"`, so "unknown" walked
-// past the friendly message and attached to a container that may not exist — the user got a raw
-// podman error instead of a sentence. Every tab that offers attach must refuse it.
-func TestAttachRefusedForAnUnobservedAgent(t *testing.T) {
-	m := agentAt(api.StatusUnknown)
-	if cmd := m.onKey(keyAttach); cmd != nil {
-		t.Error("attach on an unobserved agent should be refused, not executed")
-	}
-	if m.errText == "" {
-		t.Fatal("a refused attach must say why")
-	}
-	// It must not claim the agent is down — that is the claim the hub declined to make.
-	if strings.Contains(m.errText, "is down") {
-		t.Errorf("an unobserved agent is not known to be down: %q", m.errText)
-	}
-	if !strings.Contains(m.errText, "observed") {
-		t.Errorf("the refusal should say nothing has looked yet, got %q", m.errText)
-	}
-}
-
-// TestAttachStillRefusesADownAgentTheSameWay guards the wording the refusal already had, so
-// grouping the two statuses did not cost the clear message for the case that was already handled.
-func TestAttachStillRefusesADownAgentTheSameWay(t *testing.T) {
-	m := agentAt("down")
-	if cmd := m.onKey(keyAttach); cmd != nil {
-		t.Error("attach on a down agent should be refused")
-	}
-	if !strings.Contains(m.errText, "is down") || !strings.Contains(m.errText, keyStartS) {
-		t.Errorf("a down agent should still be told to start it with %q, got %q", keyStartS, m.errText)
-	}
-}
-
-// TestAttachRefusalWordsEveryNonRunningStatus: the three tabs share one refusal builder so they
-// cannot drift, and every status that is not up must produce a sentence rather than fall through.
-func TestAttachRefusalWordsEveryNonRunningStatus(t *testing.T) {
-	for _, s := range []string{"down", api.StatusUnknown, "launching", "stopping"} {
-		got := attachRefusal("dvalin", s, "'S'")
-		if got == "" || !strings.Contains(got, "dvalin") {
-			t.Errorf("attachRefusal(%q) = %q, want a sentence naming the agent", s, got)
+// TestAttachNeverAsksTheBoardFirst: the status is the watchdog's last sweep, and on a loaded host it
+// calls a live agent down — eitri read "down" while its session answered fine. Refusing on that
+// costs the access; attempting costs a moment, and the attempt is also the better probe. So no
+// status, observed or not, may turn a keypress into a refusal.
+func TestAttachNeverAsksTheBoardFirst(t *testing.T) {
+	for _, s := range []string{"down", api.StatusUnknown, "launching", "stopping", "working", "idle"} {
+		m := agentAt(s)
+		cmd := m.onKey(keyAttach)
+		if cmd == nil {
+			t.Errorf("status %q: attach was refused rather than attempted", s)
 		}
-		// A refusal the user cannot get past is the trap: the status is the last sweep's.
-		if !strings.Contains(got, "again") {
-			t.Errorf("attachRefusal(%q) should offer the override: %q", s, got)
+		if m.errText != "" {
+			t.Errorf("status %q: nothing is known to be wrong yet, but it said %q", s, m.errText)
 		}
-	}
-}
-
-// TestSecondAttachPressGoesThroughAnyway: eitri read "down" on a host loaded enough that the
-// liveness probe timed out, while its session was answering fine. A cached verdict must cost a
-// keystroke, never the access itself.
-func TestSecondAttachPressGoesThroughAnyway(t *testing.T) {
-	m := agentAt("down")
-	if cmd := m.onKey(keyAttach); cmd != nil {
-		t.Fatal("the first press should refuse, so a mistaken key does not hijack the terminal")
-	}
-	if m.attachAnyway != "dvalin" {
-		t.Fatalf("the refusal should arm the retry, got %q", m.attachAnyway)
-	}
-	if cmd := m.onKey(keyAttach); cmd == nil {
-		t.Error("the second press must attach despite the status")
-	}
-	// Armed for THAT agent only: moving the cursor and pressing once must refuse again.
-	m2 := agentAt("down")
-	m2.attachAnyway = "someone-else"
-	if cmd := m2.onKey(keyAttach); cmd != nil {
-		t.Error("an override armed on another agent must not carry over")
 	}
 }
