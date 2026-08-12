@@ -149,6 +149,9 @@ func (m model) taskRows() []row {
 				sc.Render(fmt.Sprintf("%-5s", typeAbbr(tr.Type))),
 				prio,
 				sc.Render(fmt.Sprintf("%-8s", state)),
+				// Age, right-aligned so the units line up under each other; the exact moment is in
+				// the detail pane, which is where a question about one task gets asked.
+				sc.Render(fmt.Sprintf("%4s", theme.Age(tr.CreatedAt))),
 				sc.Render(taskMarks(assigned[tr.ID], prMarkKind(tr))),
 				sc.Render(tr.Title),
 			}, " "),
@@ -319,6 +322,11 @@ func (m model) taskItemsFor(t api.Task, desc string, comments []api.Comment) []m
 		{text: "type:     " + dash(t.Type)},
 		{text: "priority: " + theme.PriorityLabel(t.Priority)},
 		{text: "status:   " + t.Status},
+	}
+	// The exact moment, in local time — the list column rounds it, and rounding is what a question
+	// about one particular task is asking past.
+	if stamp := theme.Stamp(t.CreatedAt); stamp != "" {
+		items = append(items, metaItem{text: "created:  " + stamp + " (" + theme.Age(t.CreatedAt) + " ago)"})
 	}
 	if t.Approval != "" { // a planner proposal under the approval gate
 		line := "approval: " + t.Approval

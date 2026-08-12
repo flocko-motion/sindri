@@ -408,7 +408,8 @@ func taskListCmd() *cobra.Command {
 					return nil
 				}
 				for _, t := range tasks {
-					fmt.Printf("%-12s %-8s %-12s %s\n", t.ID, theme.PriorityLabel(t.Priority), taskState(t), t.Title)
+					fmt.Printf("%-12s %-8s %-12s %4s  %s\n", t.ID, theme.PriorityLabel(t.Priority),
+						taskState(t), theme.Age(t.CreatedAt), t.Title)
 				}
 				if len(tasks) == 0 {
 					fmt.Fprintln(os.Stderr, "no tasks")
@@ -449,6 +450,9 @@ func taskInfoCmd() *cobra.Command {
 				fmt.Printf("id:       %s\ntitle:    %s\nstatus:   %s\ntype:     %s\npriority: %s\nparent:   %s\napproval: %s\nlabels:   %s\nurl:      %s\n",
 					t.ID, t.Title, t.Status, dash(t.Type), theme.PriorityLabel(t.Priority),
 					dash(t.ParentID), dash(t.Approval), dash(t.Labels), dash(t.URL))
+				if stamp := theme.Stamp(t.CreatedAt); stamp != "" { // exact, where the list rounds
+					fmt.Printf("created:  %s (%s ago)\n", stamp, theme.Age(t.CreatedAt))
+				}
 				if body := strings.TrimRight(t.Description, "\n"); body != "" {
 					fmt.Printf("\n%s\n", body)
 				}

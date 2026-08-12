@@ -22,6 +22,10 @@ type Task struct {
 	Acceptance  string `json:"acceptance,omitempty"`
 	URL         string `json:"url,omitempty"`        // an external permalink (e.g. a GitHub issue); "" if none
 	UpdatedAt   string `json:"updated_at,omitempty"` // last status/field change at the source; "" if unknown
+	// CreatedAt is when the task came into being at its source (RFC3339); "" if the source has no
+	// answer. Never rewritten by a sync — the cached row is replaced wholesale each time, so a value
+	// taken from "now" there would make every task look minutes old for ever.
+	CreatedAt string `json:"created_at,omitempty"`
 	// Approval gates planner-created tasks: "" (none), pending, approved, rejected.
 	// Workers only ever see "" and approved tasks.
 	Approval        string `json:"approval,omitempty"`

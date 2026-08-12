@@ -26,14 +26,25 @@ func (p *ProjectStore) ReplaceTasks(tasks []Task) error {
 		return err
 	}
 	defer tx.Rollback()
+	// A source that reports no creation time keeps the one already cached. The swap replaces every
+	// row, so re-deriving it here would reset each task's age on every sync — a minutes-old backlog
+	// for ever, which is worse than admitting the source does not know.
+	known, err := firstSeen(tx, p.project)
+	if err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`DELETE FROM tasks WHERE project=?`, p.project); err != nil {
 		return err
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, t := range tasks {
+		created := t.CreatedAt
+		if created == "" {
+			created = known[t.ID]
+		}
 		if _, err := tx.Exec(
-			`INSERT INTO tasks (project,id,title,status,priority,type,labels,parent_id,description,url,updated_at,synced_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-			p.project, t.ID, t.Title, t.Status, t.Priority, t.Type, t.Labels, t.ParentID, t.Description, t.URL, t.UpdatedAt, now); err != nil {
+			`INSERT INTO tasks (project,id,title,status,priority,type,labels,parent_id,description,url,updated_at,created_at,synced_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			p.project, t.ID, t.Title, t.Status, t.Priority, t.Type, t.Labels, t.ParentID, t.Description, t.URL, t.UpdatedAt, created, now); err != nil {
 			return err
 		}
 	}
@@ -42,17 +53,43 @@ func (p *ProjectStore) ReplaceTasks(tasks []Task) error {
 
 // UpsertTask refreshes a single cached task in this project (point-of-use refresh).
 func (p *ProjectStore) UpsertTask(t Task) error {
+	created := t.CreatedAt
+	if created == "" {
+		created = time.Now().UTC().Format(time.RFC3339) // first sight of a task nothing has recorded
+	}
+	// created_at is written once and then left: a later refresh carrying no time must not erase it,
+	// and one carrying a different time is a source correcting itself, which is worth taking.
 	_, err := p.s.db.Exec(`
-		INSERT INTO tasks (project,id,title,status,priority,type,labels,parent_id,description,url,updated_at,synced_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+		INSERT INTO tasks (project,id,title,status,priority,type,labels,parent_id,description,url,updated_at,created_at,synced_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(project,id) DO UPDATE SET
 			title=excluded.title, status=excluded.status, priority=excluded.priority,
 			type=excluded.type, labels=excluded.labels, parent_id=excluded.parent_id,
 			description=excluded.description, url=excluded.url, updated_at=excluded.updated_at,
+			created_at=CASE WHEN ?='' THEN tasks.created_at ELSE excluded.created_at END,
 			synced_at=excluded.synced_at`,
 		p.project, t.ID, t.Title, t.Status, t.Priority, t.Type, t.Labels, t.ParentID, t.Description, t.URL,
-		t.UpdatedAt, time.Now().UTC().Format(time.RFC3339))
+		t.UpdatedAt, created, time.Now().UTC().Format(time.RFC3339), t.CreatedAt)
 	return err
+}
+
+// firstSeen reads the creation times already cached, so a swap can carry forward what a source
+// cannot tell it.
+func firstSeen(tx *sql.Tx, project string) (map[string]string, error) {
+	rows, err := tx.Query(`SELECT id, created_at FROM tasks WHERE project=?`, project)
+	if err != nil {
+		return nil, fmt.Errorf("cached creation times: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, created string
+		if err := rows.Scan(&id, &created); err != nil {
+			return nil, err
+		}
+		out[id] = created
+	}
+	return out, rows.Err()
 }
 
 // RemoveTask shows a close/scrap on the board without a full re-sync; the next sync
@@ -65,7 +102,7 @@ func (p *ProjectStore) RemoveTask(id string) error {
 }
 
 // taskCols is the shared projection: cached td fields plus the hub's approval overlay.
-const taskCols = `t.id,t.title,t.status,t.priority,t.type,t.labels,t.parent_id,t.description,t.url,t.updated_at,
+const taskCols = `t.id,t.title,t.status,t.priority,t.type,t.labels,t.parent_id,t.description,t.url,t.updated_at,t.created_at,
 	COALESCE(a.status,''), COALESCE(a.comment,'')`
 
 const taskFrom = ` FROM tasks t LEFT JOIN task_approval a ON a.task=t.id AND a.project=t.project`
@@ -153,7 +190,7 @@ func (p *ProjectStore) OpenChildIDs(parentID string) ([]string, error) {
 func (p *ProjectStore) GetTask(id string) (Task, bool, error) {
 	row := p.s.db.QueryRow(`SELECT `+taskCols+taskFrom+` WHERE t.project=? AND t.id=?`, p.project, id)
 	var t Task
-	err := row.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Type, &t.Labels, &t.ParentID, &t.Description, &t.URL, &t.UpdatedAt, &t.Approval, &t.ApprovalComment)
+	err := row.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Type, &t.Labels, &t.ParentID, &t.Description, &t.URL, &t.UpdatedAt, &t.CreatedAt, &t.Approval, &t.ApprovalComment)
 	if err == sql.ErrNoRows {
 		return Task{}, false, nil
 	}
@@ -251,7 +288,7 @@ func scanTasks(rows *sql.Rows) ([]Task, error) {
 	var out []Task
 	for rows.Next() {
 		var t Task
-		if err := rows.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Type, &t.Labels, &t.ParentID, &t.Description, &t.URL, &t.UpdatedAt, &t.Approval, &t.ApprovalComment); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Type, &t.Labels, &t.ParentID, &t.Description, &t.URL, &t.UpdatedAt, &t.CreatedAt, &t.Approval, &t.ApprovalComment); err != nil {
 			return nil, err
 		}
 		out = append(out, t)

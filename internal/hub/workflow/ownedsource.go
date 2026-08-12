@@ -37,9 +37,11 @@ func (s ownedSource) Tasks(string, bool) ([]task.Task, error) {
 	for _, t := range owned {
 		// Parentage is left to the sync, which lays task_parent over every source's rows alike.
 		updatedAt, _ := time.Parse(time.RFC3339, t.UpdatedAt) // zero value if unset or malformed
+		createdAt, _ := time.Parse(time.RFC3339, t.CreatedAt)
 		out = append(out, task.Task{
 			ID: t.ID, Title: t.Title, Status: t.Status, Type: t.Type, Priority: t.Priority,
-			Labels: store.LabelList(t.Labels), Description: t.Description, UpdatedAt: updatedAt,
+			Labels: store.LabelList(t.Labels), Description: t.Description,
+			CreatedAt: createdAt, UpdatedAt: updatedAt,
 		})
 	}
 	return out, nil

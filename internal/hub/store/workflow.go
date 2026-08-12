@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   description TEXT NOT NULL DEFAULT '', -- the body (GitHub issue body, td/spec description)
   url         TEXT NOT NULL DEFAULT '', -- an external permalink (e.g. a GitHub issue); '' if none
   updated_at  TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL DEFAULT '', -- when the task began at its source; '' when it has no answer
   synced_at   TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (project, id)
 );

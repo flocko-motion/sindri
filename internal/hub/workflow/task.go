@@ -542,14 +542,19 @@ func (e *Engine) checkParent(project, parent, self string) error {
 // ToStoreTask maps a source-normalized domain task onto the hub's cached store row.
 // Exported because the hub's targeted single-task refresh reuses the same mapping.
 func ToStoreTask(t task.Task) store.Task {
-	var updatedAt string
+	var updatedAt, createdAt string
 	if !t.UpdatedAt.IsZero() {
 		updatedAt = t.UpdatedAt.UTC().Format(time.RFC3339)
+	}
+	// Left empty when the source has no answer, rather than stamped with now: the store keeps what it
+	// already had, and inventing a time here would age every task from the last sync.
+	if !t.CreatedAt.IsZero() {
+		createdAt = t.CreatedAt.UTC().Format(time.RFC3339)
 	}
 	return store.Task{
 		ID: t.ID, Title: t.Title, Status: t.Status, Priority: t.Priority,
 		Type: t.Type, Labels: strings.Join(t.Labels, ","), ParentID: t.ParentID,
-		Description: t.Description, URL: t.URL, UpdatedAt: updatedAt,
+		Description: t.Description, URL: t.URL, UpdatedAt: updatedAt, CreatedAt: createdAt,
 	}
 }
 
