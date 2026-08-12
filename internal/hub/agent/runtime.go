@@ -227,19 +227,48 @@ func (s *Service) SessionAliveCtx(ctx context.Context, project, name string) boo
 	return err == nil
 }
 
+// paneTTL bounds how stale a shown pane can be. It is the debounce as much as the cache: the board
+// re-renders on every cursor move, and each capture is a container exec — 1.3s on a loaded host.
+const paneTTL = 2 * time.Second
+
+var paneMemo struct {
+	mu  sync.Mutex
+	at  map[string]time.Time
+	val map[string]string
+}
+
 // AgentPane shows the live tmux screen, else startup logs, else captured launch output.
+//
+// The capture is attempted rather than preceded by a liveness check: asking `tmux has-session` first
+// spent a whole exec — doubling the wait before anything appeared — to predict what the capture
+// itself reports, and left a window for the session to die between the two answers.
 func (s *Service) AgentPane(project, name string, lines int) (string, error) {
-	if s.SessionAlive(project, name) {
-		out, err := container.Exec(s.deps.ContainerName(project, name), append([]string{"tmux"}, tmux.CapturePane(name, lines, true)...)...) // colour: the preview renders ANSI
-		if err != nil {
-			return "", err
+	key := fmt.Sprintf("%s/%s/%d", project, name, lines)
+	paneMemo.mu.Lock()
+	if at, ok := paneMemo.at[key]; ok && time.Since(at) < paneTTL {
+		v := paneMemo.val[key]
+		paneMemo.mu.Unlock()
+		return v, nil
+	}
+	paneMemo.mu.Unlock()
+
+	out, err := container.Exec(s.deps.ContainerName(project, name), append([]string{"tmux"}, tmux.CapturePane(name, lines, true)...)...) // colour: the preview renders ANSI
+	pane := string(out)
+	if err != nil {
+		// No session to capture: what a human wants next is why — the pod's own output, then whatever
+		// the launch printed. Not cached, since it is the failing path and its answer changes.
+		if logs := container.Logs(s.deps.ContainerName(project, name), lines); logs != "" {
+			return logs, nil
 		}
-		return string(out), nil
+		return s.LaunchOutput(project, name), nil
 	}
-	if logs := container.Logs(s.deps.ContainerName(project, name), lines); logs != "" {
-		return logs, nil
+	paneMemo.mu.Lock()
+	if paneMemo.at == nil {
+		paneMemo.at, paneMemo.val = map[string]time.Time{}, map[string]string{}
 	}
-	return s.LaunchOutput(project, name), nil
+	paneMemo.at[key], paneMemo.val[key] = time.Now(), pane
+	paneMemo.mu.Unlock()
+	return pane, nil
 }
 
 // PodInfo returns a short summary of an agent's container for the Agents-tab pod view.
