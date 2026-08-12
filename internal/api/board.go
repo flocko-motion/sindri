@@ -1,13 +1,10 @@
 // package: api / board
 // type:    logic (the whole-board wire type + its badge counts)
-// job:     the board every UI renders (BoardState), the views it carries, its
+// job:     the board every UI renders (BoardState), the views it carries, and its
 // pure count methods — these make it satisfy hub/commands' Board interface
-// without either side importing the other — and SortedAgents, the one
-// order both front-ends must show the roster in.
-// limits:  data and pure functions only; assembling a BoardState is the hub's.
+// without either side importing the other.
+// limits:  data and pure counts only; assembling a BoardState is the hub's.
 package api
-
-import "sort"
 
 // AgentView is an agent as the UIs see it. Status folds runtime and workflow into one word: the
 // observed phase (idle, working, submitted, …), else launching/stopping/down/"unknown".
@@ -27,53 +24,14 @@ type AgentView struct {
 	Container string `json:"container"` // podman container name (project-resolved, so cross-repo callers target the right pod)
 	Memory    string `json:"memory"`    // configured RAM limit ("" = hub default)
 	Runtime   string `json:"runtime"`   // Claude's live runtime: "working"|"blocked"|"idle"|"" (folded into Status; kept raw for the herdr projection)
-	// ContextTokens/ContextWindow are the agent's live session size and the window it fills (0 = not
-	// measured); past workflow.ContextFullFraction it is retired from assignment until cleared.
+	// ContextTokens is the agent's live session context size and ContextWindow the window it fills,
+	// both read off its transcript (0 = not measured). Past workflow.ContextFullFraction of that
+	// window an agent is retired from assignment until a human clears it; Status reads "full" only
+	// where that explains an agent holding nothing, since elsewhere the word it would replace is the
+	// one the column exists for. The window is per agent because it is the model's: one number for
+	// the fleet retired 1M agents at 17%.
 	ContextTokens int `json:"contextTokens"`
 	ContextWindow int `json:"contextWindow"`
-}
-
-// agentRoleRank orders roles by the path work takes through them, not alphabetically (worker,
-// reviewer, planner, coauthor); an unrecognised role sorts last.
-func agentRoleRank(role string) int {
-	switch role {
-	case "worker":
-		return 0
-	case "reviewer":
-		return 1
-	case "planner":
-		return 2
-	case "coauthor":
-		return 3
-	default:
-		return 4
-	}
-}
-
-// SortedAgents orders a roster for display: by repo path (matching the Repos list), then role
-// (agentRoleRank), then name — stably, and into a new slice rather than mutating the caller's.
-func SortedAgents(agents []AgentView, projects []Project) []AgentView {
-	path := make(map[string]string, len(projects))
-	for _, p := range projects {
-		path[p.Tag] = p.Path
-	}
-	out := make([]AgentView, len(agents))
-	copy(out, agents)
-	sort.SliceStable(out, func(i, j int) bool {
-		a, b := out[i], out[j]
-		if pa, pb := path[a.Project], path[b.Project]; pa != pb {
-			// An unregistered project (empty path) sorts last, not first — "" < x would put it ahead.
-			if pa == "" || pb == "" {
-				return pb == ""
-			}
-			return pa < pb
-		}
-		if ra, rb := agentRoleRank(a.Role), agentRoleRank(b.Role); ra != rb {
-			return ra < rb
-		}
-		return a.Name < b.Name
-	})
-	return out
 }
 
 // RepoDocState is a repo's architecture-doc situation: the path in effect, and Advice ("" when fine).
