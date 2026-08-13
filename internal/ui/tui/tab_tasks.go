@@ -14,6 +14,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/client"
@@ -84,29 +85,14 @@ func (m model) taskRows() []row {
 		gutter := treeGutter(cont, tr.Depth, last[i], hasKids[tr.ID], m.collapsed[tr.ID])
 		cont = append(cont, !last[i])
 
-		// Cells styled independently (never nested) so a colour reset can't bleed
-		// across the row. An approval gate overrides the status colour.
-		sc := taskStatusStyle(tr.Status)
-		state := theme.StateLabel(tr.Status)
-		switch approval[tr.ID] { // the approval gate overrides both colour and state word
-		case "pending":
-			sc, state = stWarn, theme.ApprovalLabel("pending")
-		case "rejected":
-			sc, state = stDone, theme.ApprovalLabel("rejected")
-		default:
-			// Unrated reads like ungated: both mean no worker can be given this, and the row that
-			// showed a plain "open" claimed otherwise. A rated ancestor releases the whole tree, so
-			// only a task with none anywhere above it is really held back.
-			if !api.DoneStatus(tr.Status) && !released[tr.ID] {
-				sc, state = stWarn, "unrated"
-			}
-		}
+		// Cells styled independently (never nested) so a colour reset can't bleed across the row.
+		sc, state := taskRowStyle(tr.Task, approval[tr.ID], released[tr.ID])
 		if v := m.busy[tr.ID]; v != "" { // transient: the user triggered a close/scrap, awaiting the hub
 			sc, state = stWarn, v
 		}
 		prio := sc.Render(fmt.Sprintf("%-8s", theme.PriorityLabel(tr.Priority)))
 		if isCriticalPriority(tr.Priority) {
-			prio = stCrit.Render(fmt.Sprintf("%-8s", theme.PriorityLabel(tr.Priority)))
+			prio = stPrio.Render(fmt.Sprintf("%-8s", theme.PriorityLabel(tr.Priority)))
 		}
 		out[i] = row{
 			strings.Join([]string{
@@ -125,6 +111,26 @@ func (m model) taskRows() []row {
 		}
 	}
 	return out
+}
+
+// taskRowStyle is a row's colour and its state word: the gate holding it where one is, else its
+// status. RED is api.TaskNeedsUser — the same predicate the Tasks badge counts — so a red row is
+// always counted and a counted row always red. A rejected task is grey: the user has ruled and it
+// is the author's move. gated is the task's approval state, "" when no gate applies (a finished
+// task's spent one included); released says whether any priority above it lets a worker take it.
+func taskRowStyle(t api.Task, gated string, released bool) (lipgloss.Style, string) {
+	switch {
+	case gated == "pending":
+		return stCrit, theme.ApprovalLabel("pending")
+	case gated == "rejected":
+		return stDone, theme.ApprovalLabel("rejected")
+	case api.Open(t) && !released:
+		// Unrated reads like ungated: both mean no worker can be given this, and a row saying plain
+		// "open" claimed otherwise. A rated ancestor releases the whole tree, so only a task with
+		// none anywhere above it is really held back.
+		return stCrit, "unrated"
+	}
+	return taskStatusStyle(t.Status), theme.StateLabel(t.Status)
 }
 
 const treeGutterW = 6 // fits ~3 levels of "│ "/"├─" connectors

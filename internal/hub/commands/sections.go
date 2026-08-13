@@ -19,7 +19,7 @@ type Board interface {
 	OpenPRCount() int
 	RepoCount() int
 	ChatMemberCount() int
-	TasksAwaitingVerdictCount() int
+	TasksNeedingUserCount() int
 	AgentsNeedingUserCount() int
 	PRsNeedingUserCount() int
 }
@@ -42,9 +42,9 @@ var Sections = []Section{
 	{
 		Key: "tasks", Title: "Tasks",
 		Count: func(b Board) int { return b.OpenTaskCount() },
-		// Gated work is hidden from every worker, so a backlog of it reads as plenty to do beside
-		// an idle agent.
-		Attention: func(b Board) int { return b.TasksAwaitingVerdictCount() },
+		// Work behind either gate — unapproved or unrated — is hidden from every worker, so a
+		// backlog of it reads as plenty to do beside an idle agent.
+		Attention: func(b Board) int { return b.TasksNeedingUserCount() },
 	},
 	{
 		Key: "agents", Title: "Agents",

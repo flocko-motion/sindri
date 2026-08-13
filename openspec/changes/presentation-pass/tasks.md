@@ -29,7 +29,15 @@
 
 ## 4. Task row colours: red for stopped-waiting-on-you, positive for in-progress
 
-- [ ] 4.1
+- [x] 4.1 Unapproved AND unrated read red: both are gates only the user opens.
+- [x] 4.2 In-progress reads cyan (`stWorking`), the colour PRs already use for rework in flight.
+- [x] 4.3 Critical priority moves to pink, so red keeps one meaning across every tab.
+- [x] 4.4 `taskRowStyle` is the one decision the rows make, and the test drives it rather than
+      re-deriving it.
+- [x] 4.5 The Tasks badge now counts both gates (`api.TaskNeedsUser`), so the invariant holds —
+      the badge and the red row are one claim, and an unrated task was red under the old count
+      without being counted.
+- [x] 4.6 The palette header describes the scheme in force.
 
 ## 5. Show the last-changed timestamp in the task detail
 

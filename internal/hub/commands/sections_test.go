@@ -29,14 +29,14 @@ func TestSectionCounts(t *testing.T) {
 // fakeBoard is a minimal Board for testing Resolved without a real BoardState.
 type fakeBoard struct{}
 
-func (fakeBoard) OpenTaskCount() int             { return 3 }
-func (fakeBoard) AgentCount() int                { return 2 }
-func (fakeBoard) OpenPRCount() int               { return 1 }
-func (fakeBoard) RepoCount() int                 { return 5 }
-func (fakeBoard) ChatMemberCount() int           { return 4 }
-func (fakeBoard) TasksAwaitingVerdictCount() int { return 2 }
-func (fakeBoard) AgentsNeedingUserCount() int    { return 1 }
-func (fakeBoard) PRsNeedingUserCount() int       { return 3 }
+func (fakeBoard) OpenTaskCount() int          { return 3 }
+func (fakeBoard) AgentCount() int             { return 2 }
+func (fakeBoard) OpenPRCount() int            { return 1 }
+func (fakeBoard) RepoCount() int              { return 5 }
+func (fakeBoard) ChatMemberCount() int        { return 4 }
+func (fakeBoard) TasksNeedingUserCount() int  { return 2 }
+func (fakeBoard) AgentsNeedingUserCount() int { return 1 }
+func (fakeBoard) PRsNeedingUserCount() int    { return 3 }
 
 // TestResolvedReadsEveryCount: Resolved is what actually crosses the wire — the
 // registry's Count funcs can't — so each section's Key and Title must survive and
@@ -70,8 +70,11 @@ func TestResolvedReadsEveryCount(t *testing.T) {
 func TestAttentionCountsWhatOnlyTheUserCanMove(t *testing.T) {
 	b := api.BoardState{
 		Tasks: []api.Task{
-			{ID: "a", Status: "open", Approval: "pending"},
-			{ID: "b", Status: "open"},
+			{ID: "a", Status: "open", Approval: "pending", Priority: "P1"},
+			{ID: "b", Status: "open", Priority: "P1"},
+			// Unrated: no priority anywhere above it, so no worker can be handed it either — the
+			// other gate, and counted the same way (-> api.TaskNeedsUser).
+			{ID: "c", Status: "open"},
 		},
 		Agents: []api.AgentView{
 			{Name: "blocked", Status: api.StatusBlocked},
@@ -97,7 +100,7 @@ func TestAttentionCountsWhatOnlyTheUserCanMove(t *testing.T) {
 			{Project: "p", ID: "pr-merge-failed", Status: "merge-failed"}, // a restart caught it mid-merge
 		},
 	}
-	want := map[string]int{"tasks": 1, "agents": 4, "prs": 3}
+	want := map[string]int{"tasks": 2, "agents": 4, "prs": 3}
 	for _, s := range Resolved(b) {
 		if s.Attention != want[s.Key] {
 			t.Errorf("%s attention = %d, want %d", s.Key, s.Attention, want[s.Key])

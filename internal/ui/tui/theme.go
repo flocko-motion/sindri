@@ -1,9 +1,9 @@
 // package: tui / theme
 // type:    ui (global colour scheme)
-// job:     the one place colours live. Status drives row colour: tasks are pink
-// when active, green when open, grey when done; agents are grey when
-// down, yellow while transitioning, green when running. Critical
-// priority is red. Everything else renders in the terminal's default.
+// job:     the one place colours live. Every tab colours a row by WHAT THE USER SHOULD
+// DO: red stopped and only they can unstop it, cyan work in flight, green
+// proceeding, yellow their move but not stopped, orange transitioning, grey
+// finished. Critical priority is pink, in its own column.
 // limits:  colours only; no layout or data logic (-> the component/tab that
 // uses them).
 package tui
@@ -17,7 +17,7 @@ import (
 
 // The palette. 256-colour codes so it works on basic terminals.
 var (
-	cPink   = lipgloss.Color("211") // active / in-progress
+	cPink   = lipgloss.Color("211") // critical priority, in its own column
 	cGreen  = lipgloss.Color("78")  // open / running
 	cGrey   = lipgloss.Color("244") // done / down
 	cRed    = lipgloss.Color("203") // critical
@@ -27,9 +27,12 @@ var (
 )
 
 var (
-	stActive = lipgloss.NewStyle().Foreground(cPink)
-	stOpen   = lipgloss.NewStyle().Foreground(cGreen)
-	stDone   = lipgloss.NewStyle().Foreground(cGrey)
+	// stPrio marks the critical priority band. Pink rather than red since red was given one
+	// meaning across every tab (below), and a critical task being worked is not stopped at all —
+	// it would have been the only red thing on the board saying "nothing to do here".
+	stPrio = lipgloss.NewStyle().Foreground(cPink)
+	stOpen = lipgloss.NewStyle().Foreground(cGreen)
+	stDone = lipgloss.NewStyle().Foreground(cGrey)
 	// stCrit is RED, and red means one thing across every tab: stopped, and only the user can
 	// unstop it. It is the (N!) attention badge rendered a second way — the badge counts the rows
 	// waiting on the user, red says THIS row is one of them — so both must come from one predicate
@@ -53,11 +56,12 @@ var (
 	diffMetaStyle = lipgloss.NewStyle().Foreground(cGrey).Bold(true)
 )
 
-// taskStatusStyle: pink active, grey done, green otherwise. Which words are done is the exchange
-// package's list, so a status added there is greyed here without anyone remembering to.
+// taskStatusStyle colours a task by its status alone: cyan while it is being worked, grey when
+// done, green otherwise. A task stopped behind a gate is redder than any of these, and that is the
+// caller's to apply (-> taskRows), since it reads the whole tree to know.
 func taskStatusStyle(status string) lipgloss.Style {
 	if status == "in_progress" {
-		return stActive
+		return stWorking
 	}
 	if api.DoneStatus(status) {
 		return stDone

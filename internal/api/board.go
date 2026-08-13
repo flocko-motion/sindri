@@ -145,9 +145,14 @@ func (b BoardState) RepoCount() int { return len(b.Projects) }
 // ChatMemberCount is the number of agents in the user's chatroom.
 func (b BoardState) ChatMemberCount() int { return len(b.Chat.Members) }
 
-// TasksAwaitingVerdictCount is the Tasks section's attention count: work the gate holds until the
-// user rules on it.
+// TasksAwaitingVerdictCount is how much work the approval gate holds until the user rules on it.
 func (b BoardState) TasksAwaitingVerdictCount() int { return CountAwaitingVerdict(b.Tasks) }
+
+// TasksNeedingUserCount is the Tasks section's attention count: tasks stopped behind either gate,
+// approval or rating (-> TaskNeedsUser). Wider than the verdict count on purpose — an unrated task
+// is exactly as unclaimable as an unapproved one, and the badge and the red row it colours are one
+// claim, so both read this.
+func (b BoardState) TasksNeedingUserCount() int { return CountTasksNeedingUser(b.Tasks) }
 
 // AgentsNeedingUserCount is the Agents section's attention count: agents that cannot move until a
 // human acts (-> AgentNeedsUser).

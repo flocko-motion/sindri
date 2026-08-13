@@ -34,7 +34,18 @@ added — invisibly, because each looks plausible alone.
   open PR's colour depends on whether any reviewer is alive in its repo, which is fleet state rather
   than row state, and that is the honest rendering of whether anything will happen.
 
-The remaining two subtasks (the "unapproved" label, PR row colours, task row colours, and the
+- **Task rows follow it too.** Unapproved and unrated both read red — they are the two gates that
+  release work, and a task failing either is stopped until a human acts. In-progress becomes cyan,
+  since work happening is the healthiest state on the board and should not be its loudest. Critical
+  priority moves to pink so red keeps one meaning; that collision was named in the task and is
+  resolved rather than documented.
+- **The Tasks badge follows the colour, not the other way round.** The invariant says anything red
+  is counted; an unrated task is red, and `CountAwaitingVerdict` did not count it. So the badge now
+  reads `api.TaskNeedsUser` — either gate — and the verdict-specific count stays where its wording
+  is verdict-specific (`task list`'s closing line). This widens what the Tasks marker counts, which
+  is a visible change and the reason it is called out here.
+
+The remaining subtask (the "unapproved" label, PR row colours, task row colours, and the
 last-changed timestamp in the task detail) land on this same branch and extend this document.
 
 ## Impact
