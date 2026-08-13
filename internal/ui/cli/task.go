@@ -391,14 +391,20 @@ func taskState(t api.Task) string {
 
 func taskListCmd() *cobra.Command {
 	var asJSON bool
+	var filter string
 	c := &cobra.Command{
 		Use: "list", Short: "List tasks", Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
+			f, err := api.ParseTaskFilter(filter)
+			if err != nil {
+				return err
+			}
 			return withBackend(func(b backend) error {
-				tasks, err := b.Tasks()
+				all, err := b.Tasks()
 				if err != nil {
 					return err
 				}
+				tasks := api.FilterTasks(f, all)
 				if asJSON {
 					out, err := tasksJSON(tasks)
 					if err != nil {
@@ -411,12 +417,17 @@ func taskListCmd() *cobra.Command {
 					fmt.Printf("%-12s %-8s %-12s %4s  %s\n", t.ID, theme.PriorityLabel(t.Priority),
 						taskState(t), theme.Age(t.CreatedAt), t.Title)
 				}
-				if len(tasks) == 0 {
+				if n := len(all) - len(tasks); n > 0 {
+					// What a filter hid is said out loud: an empty listing under `--filter closed`
+					// otherwise reads as "no tasks" when the backlog is full of open ones.
+					fmt.Fprintf(os.Stderr, "(filter %s — %d of %d task(s) shown)\n", f, len(tasks), len(all))
+				} else if len(tasks) == 0 {
 					fmt.Fprintln(os.Stderr, "no tasks")
 				}
 				// The gate hides these from every worker, so a list that ended here read as a full
-				// backlog while nothing in it could be claimed.
-				if n := api.CountAwaitingVerdict(tasks); n > 0 {
+				// backlog while nothing in it could be claimed. Counted over every task, not the
+				// filtered set: a verdict is owed whether or not this listing shows the task.
+				if n := api.CountAwaitingVerdict(all); n > 0 {
 					fmt.Fprintf(os.Stderr, "\n%d task(s) await your verdict and no worker can claim them: "+
 						"`sindri task approve <id>` (--subtasks clears the tree below it), or `sindri task reject <id> <why>`.\n", n)
 				}
@@ -425,6 +436,11 @@ func taskListCmd() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&asJSON, "json", false, "output tasks as JSON (machine-readable) instead of the table")
+	// Defaults to "all", which is what the bare command has always printed. The TUI opens on
+	// "active" instead: a screen redrawn every few seconds is a view, and a listing is a record.
+	c.Flags().StringVar(&filter, "filter", string(api.FilterAll),
+		"which tasks to list: "+api.TaskFilterNames()+" (active = open, plus anything closed within "+
+			api.ActiveWindow.String()+")")
 	return c
 }
 

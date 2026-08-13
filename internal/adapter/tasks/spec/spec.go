@@ -11,10 +11,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/flo-at/sindri/internal/hub/task"
 )
@@ -60,15 +62,44 @@ func (Source) Tasks(root string, _ bool) ([]task.Task, error) {
 			Status:      status,
 			Type:        "spec",
 			Description: Proposal(root, c.Name),
+			UpdatedAt:   changedAt(root, c.Name),
 		})
 	}
 	return out, nil
 }
 
+// changedAt is when a change last changed: the newest mtime under its directory, zero if it cannot
+// be read. openspec keeps no timestamps, so the files are the whole record — ticking a box in
+// tasks.md is what makes a change recent. Dated because an undated task can never be recent, which
+// kept every finished change out of the "active" filter that exists to show work just completed.
+// A fresh clone stamps every file at checkout, so shortly after one the changes all read as new.
+func changedAt(projectRoot, name string) time.Time {
+	if !safeChangeName(name) {
+		return time.Time{}
+	}
+	var newest time.Time
+	dir := filepath.Join(projectRoot, "openspec", "changes", name)
+	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil //nolint:nilerr // an unreadable entry dates nothing; the rest still do
+		}
+		if info, e := d.Info(); e == nil && info.ModTime().After(newest) {
+			newest = info.ModTime()
+		}
+		return nil
+	})
+	return newest
+}
+
+// safeChangeName rejects a name that would walk out of the changes directory.
+func safeChangeName(name string) bool {
+	return name != "" && !strings.ContainsAny(name, "/\\") && name != "." && name != ".."
+}
+
 // Proposal is a change's proposal.md — what the change is FOR, so it's what a board or detail view
 // shows (`openspec list --json` has only name and counts). Leading `# Heading` dropped; missing → "".
 func Proposal(projectRoot, name string) string {
-	if name == "" || strings.ContainsAny(name, "/\\") || name == "." || name == ".." {
+	if !safeChangeName(name) {
 		return "" // never let a change name walk out of the changes directory
 	}
 	b, err := os.ReadFile(filepath.Join(projectRoot, "openspec", "changes", name, "proposal.md"))
@@ -168,7 +199,7 @@ func Archive(projectRoot, name string) error {
 // DeleteChange is the "scrap" close: it removes openspec/changes/<name>, leaving the main specs
 // alone. The dir is git-tracked, so a mistaken scrap is recoverable. The name must be one segment.
 func DeleteChange(projectRoot, name string) error {
-	if name == "" || strings.ContainsAny(name, "/\\") || name == "." || name == ".." {
+	if !safeChangeName(name) {
 		return fmt.Errorf("invalid change name %q", name)
 	}
 	dir := filepath.Join(projectRoot, "openspec", "changes", name)

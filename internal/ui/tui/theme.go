@@ -11,6 +11,7 @@ package tui
 import (
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
@@ -42,16 +43,16 @@ var (
 	diffMetaStyle = lipgloss.NewStyle().Foreground(cGrey).Bold(true)
 )
 
-// taskStatusStyle: pink active, grey done, green otherwise.
+// taskStatusStyle: pink active, grey done, green otherwise. Which words are done is the exchange
+// package's list, so a status added there is greyed here without anyone remembering to.
 func taskStatusStyle(status string) lipgloss.Style {
-	switch status {
-	case "in_progress":
+	if status == "in_progress" {
 		return stActive
-	case "closed", "approved", "merged":
-		return stDone
-	default:
-		return stOpen
 	}
+	if api.DoneStatus(status) {
+		return stDone
+	}
+	return stOpen
 }
 
 // agentStatusStyle colours by what you should DO: red blocked (needs you now), yellow idle (your

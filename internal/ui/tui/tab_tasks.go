@@ -1,11 +1,11 @@
 // package: tui / tasks
 // type:    ui (Tasks tab)
-// job:     the Tasks tab content — the hierarchical tree selector (filtered
-// open/closed/all, collapsible, PR-marked) and the task detail pane.
-// Tree arrangement + PR annotation come from the hub (ArrangeTasks);
+// job:     the Tasks tab content — the hierarchical tree selector (collapsible,
+// PR-marked) and the task detail pane. Which tasks a filter admits and how
+// they arrange come from the exchange package (FilterTasks, ArrangeTasks);
 // this renders rows and folds.
-// limits:  renders rows and folds only; tree arrangement + PR annotation are the
-// hub's (-> ArrangeTasks).
+// limits:  renders rows and folds only; the filter rule and the tree arrangement are
+// shared with the CLI (-> api.MatchesFilter, api.ArrangeTasks).
 package tui
 
 import (
@@ -20,45 +20,11 @@ import (
 	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
-func isDone(status string) bool {
-	switch status {
-	case "closed", "approved", "merged":
-		return true
-	}
-	return false
-}
-
-// recentlyChanged reports whether a task's last known change falls inside activeWindow; a task
-// with no timestamp (an openspec change, say) is never recent, so it needs the open half of the
-// filter to show.
-func recentlyChanged(t api.Task) bool {
-	at, err := time.Parse(time.RFC3339, t.UpdatedAt)
-	return err == nil && time.Since(at) < activeWindow
-}
-
-// taskRows builds the filtered, folded, depth-indented task tree.
+// taskRows builds the filtered, folded, depth-indented task tree. Which tasks the filter admits is
+// the exchange package's answer (-> api.MatchesFilter), the same one `sindri task list --filter`
+// gets, so the two front-ends cannot come to mean different things by the same word.
 func (m model) taskRows() []row {
-	var filtered []api.Task
-	for _, t := range m.state.Tasks {
-		done := isDone(t.Status)
-		switch m.filter {
-		case filterAll:
-			filtered = append(filtered, t)
-		case filterOpen:
-			if !done {
-				filtered = append(filtered, t)
-			}
-		case filterClosed:
-			if done {
-				filtered = append(filtered, t)
-			}
-		case filterActive:
-			if !done || recentlyChanged(t) {
-				filtered = append(filtered, t)
-			}
-		}
-	}
-	arranged := api.ArrangeTasks(filtered, m.state.PRs)
+	arranged := api.ArrangeTasks(api.FilterTasks(m.filter, m.state.Tasks), m.state.PRs)
 
 	// Which tasks have a worker on them right now (drives the 🔨 marker).
 	assigned := map[string]bool{}
@@ -71,7 +37,7 @@ func (m model) taskRows() []row {
 	// that has ended is spent, and the state word below is the status's to give.
 	approval := map[string]string{}
 	for _, t := range m.state.Tasks {
-		if t.Approval != "" && !isDone(t.Status) {
+		if t.Approval != "" && !api.DoneStatus(t.Status) {
 			approval[t.ID] = t.Approval
 		}
 	}
@@ -131,7 +97,7 @@ func (m model) taskRows() []row {
 			// Unrated reads like ungated: both mean no worker can be given this, and the row that
 			// showed a plain "open" claimed otherwise. A rated ancestor releases the whole tree, so
 			// only a task with none anywhere above it is really held back.
-			if !isDone(tr.Status) && !released[tr.ID] {
+			if !api.DoneStatus(tr.Status) && !released[tr.ID] {
 				sc, state = stWarn, "unrated"
 			}
 		}
@@ -471,7 +437,7 @@ func (m *model) openTaskForm(edit bool, t api.Task) {
 // includes being live: a verdict on a task that has already ended decides nothing.
 func (m model) taskGated() bool {
 	t, ok := m.selTask()
-	return ok && !isDone(t.Status) && (t.Approval == "pending" || t.Approval == "rejected")
+	return ok && !api.DoneStatus(t.Status) && (t.Approval == "pending" || t.Approval == "rejected")
 }
 
 // unassignTaskCmd returns the task to the backlog; the hub refuses if a live agent holds it.
@@ -567,7 +533,7 @@ func (m *model) reconcileBusy() {
 		present[t.ID] = t.Status
 	}
 	for id := range m.busy {
-		if status, ok := present[id]; !ok || isDone(status) {
+		if status, ok := present[id]; !ok || api.DoneStatus(status) {
 			delete(m.busy, id)
 		}
 	}

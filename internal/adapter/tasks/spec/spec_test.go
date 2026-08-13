@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestValidateNoOpenspecDirSkipsSilently(t *testing.T) {
@@ -121,5 +122,45 @@ func TestFormatReportUnparseableStillShows(t *testing.T) {
 	raw := []byte(`not json at all`)
 	if got := formatReport(raw, true); !strings.Contains(got, "not json at all") {
 		t.Errorf("unparseable output must survive, got: %q", got)
+	}
+}
+
+// TestChangedAtDatesAChangeFromItsFiles: openspec keeps no timestamps, so an os- task reached the
+// board undated — and an undated task can never be recent, which kept every finished change out of
+// the "active" filter that exists to show work just completed. The files are the record: ticking a
+// box in tasks.md is the change changing.
+func TestChangedAtDatesAChangeFromItsFiles(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "openspec", "changes", "add-widgets")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"proposal.md", "tasks.md"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Now().Add(-72 * time.Hour)
+	if err := os.Chtimes(filepath.Join(dir, "proposal.md"), old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	got := changedAt(root, "add-widgets")
+	if got.IsZero() {
+		t.Fatal("a change on disk must carry a date; undated is what put it outside every recency filter")
+	}
+	// The NEWEST file wins: a proposal written days ago says nothing about a box ticked minutes ago.
+	if time.Since(got) > time.Hour {
+		t.Errorf("changedAt = %v, want the newest file's time (tasks.md, just written)", got)
+	}
+}
+
+// TestChangedAtRejectsPathEscape: same guard as Proposal — a name is one path segment, never a walk
+// out of the changes directory.
+func TestChangedAtRejectsPathEscape(t *testing.T) {
+	for _, name := range []string{"", ".", "..", "../../etc"} {
+		if got := changedAt(t.TempDir(), name); !got.IsZero() {
+			t.Errorf("changedAt(%q) = %v, want the zero time", name, got)
+		}
 	}
 }

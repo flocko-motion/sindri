@@ -12,7 +12,7 @@ import (
 // no worker could ever be given it.
 func TestUnratedReadsLikeUngated(t *testing.T) {
 	m := newModel(nil, nil, "")
-	m.tab, m.filter = 0, filterAll
+	m.tab, m.filter = 0, api.FilterAll
 	m.state = api.BoardState{Tasks: []api.Task{
 		{ID: "td-rated", Title: "rated", Status: "open", Priority: "P1"},
 		{ID: "td-bare", Title: "unrated", Status: "open"},
@@ -32,7 +32,7 @@ func TestUnratedReadsLikeUngated(t *testing.T) {
 // whole tree out. Marking them would put a warning on nearly every subtask in the backlog.
 func TestARatedEpicReleasesItsChildrenFromTheWarning(t *testing.T) {
 	m := newModel(nil, nil, "")
-	m.tab, m.filter = 0, filterAll
+	m.tab, m.filter = 0, api.FilterAll
 	m.state = api.BoardState{Tasks: []api.Task{
 		{ID: "td-epic", Title: "an epic", Status: "open", Priority: "P1"},
 		{ID: "td-kid", Title: "a subtask", Status: "open", ParentID: "td-epic"},
@@ -55,7 +55,7 @@ func TestARatedEpicReleasesItsChildrenFromTheWarning(t *testing.T) {
 // priority, and that is the verb the user reaches for — so the row keeps saying pending.
 func TestTheGateStillWinsOverUnrated(t *testing.T) {
 	m := newModel(nil, nil, "")
-	m.tab, m.filter = 0, filterAll
+	m.tab, m.filter = 0, api.FilterAll
 	m.state = api.BoardState{Tasks: []api.Task{
 		{ID: "td-prop", Title: "proposed", Status: "open", Approval: "pending"},
 	}}
@@ -71,7 +71,7 @@ func TestTheGateStillWinsOverUnrated(t *testing.T) {
 // finished task is not waiting for anything.
 func TestDoneTasksAreNeverMarkedUnrated(t *testing.T) {
 	m := newModel(nil, nil, "")
-	m.tab, m.filter = 0, filterAll
+	m.tab, m.filter = 0, api.FilterAll
 	m.state = api.BoardState{Tasks: []api.Task{
 		{ID: "td-done", Title: "finished", Status: "closed"},
 	}}

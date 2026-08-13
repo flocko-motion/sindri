@@ -57,8 +57,12 @@ type TaskSpec struct {
 
 // Done reports whether a task is in a terminal (done) state — the "closed" segment of
 // the open/closed filter.
-func Done(t Task) bool {
-	switch t.Status {
+func Done(t Task) bool { return DoneStatus(t.Status) }
+
+// DoneStatus is Done for a caller holding a status word rather than the task — a row being
+// coloured, a stored status being read back. The terminal words are listed once, here.
+func DoneStatus(status string) bool {
+	switch status {
 	case "closed", "approved", "merged":
 		return true
 	}

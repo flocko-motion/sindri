@@ -55,7 +55,7 @@ func TestTaskBusyTransient(t *testing.T) {
 // clear, or one left by a merge) cannot make a closed task read "pending" forever.
 func TestDoneTaskShowsItsStatusNotItsGate(t *testing.T) {
 	m := newModel(nil, nil, "")
-	m.tab, m.filter = 0, filterAll
+	m.tab, m.filter = 0, api.FilterAll
 	m.state = api.BoardState{Tasks: []api.Task{
 		{ID: "td-1", Title: "worked up", Status: "closed", Approval: "pending"},
 		{ID: "td-2", Title: "still proposed", Status: "open", Approval: "pending"},

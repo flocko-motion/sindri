@@ -115,7 +115,7 @@ var keymap = []binding{
 	{keyDelete, lbl("scrap"), scopeTasks},
 	{"A/R", lbl("approve/reject"), scopeTasks},
 	{keyWhyNext, lbl("why next"), scopeTasks},
-	{keyFilter, func(m model) string { return "filter: " + filterNames[m.filter] }, scopeTasks},
+	{keyFilter, func(m model) string { return "filter: " + string(m.filter) }, scopeTasks},
 
 	// Agents.
 	{keyNew, lbl("new"), scopeAgents},

@@ -11,7 +11,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -21,15 +20,6 @@ import (
 	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/ui/tui/scroll"
 )
-
-const (
-	filterOpen = iota
-	filterClosed
-	filterAll
-	filterActive
-)
-
-var filterNames = [...]string{"open", "closed", "all", "active"}
 
 // tuiSection is one dashboard tab: a key and a title. The badge count is the front-end's own
 // (-> tabCount), because Agents and PRs obey the § scope toggle the hub knows nothing about, so it
@@ -45,10 +35,6 @@ var tuiSections = []tuiSection{
 }
 
 type tuiSection struct{ Key, Title string }
-
-// activeWindow is how recently a task must have changed to count as "active" alongside every
-// open task — wide enough that a task closed just before you glanced over doesn't vanish.
-const activeWindow = 2 * time.Hour
 
 // inputMode is the active text-input modal (none = normal navigation).
 type inputMode int
@@ -78,8 +64,8 @@ type model struct {
 	// which is what put the reviews and history below the fold out of reach entirely.
 	prMeta scroll.Viewport
 
-	filter     int // Tasks tab: open/closed/all
-	prFilter   int // PRs tab: unmerged/merged/all (default hides merged)
+	filter     api.TaskFilter // Tasks tab: which segment of the backlog is shown (-> api.TaskFilters)
+	prFilter   int            // PRs tab: unmerged/merged/all (default hides merged)
 	collapsed  map[string]bool
 	merging    map[string]bool   // PR ids the user just triggered a merge on — shown as a transient "merging" on the row until the hub confirms
 	busy       map[string]string // task ids the user just triggered a close/scrap on → the transient verb ("closing"/"deleting") shown on the row until the hub confirms
@@ -142,7 +128,7 @@ func newModel(cl *client.HTTP, ch <-chan api.BoardState, root string) model {
 	// Tasks open on "active" — the open backlog plus whatever changed in the last couple of hours.
 	// Plain "open" hid a task the moment it closed, so the work just finished left no trace on the
 	// board and the tab read as though nothing had happened.
-	m := model{cl: cl, ch: ch, root: root, filter: filterActive, collapsed: map[string]bool{}, merging: map[string]bool{}, busy: map[string]string{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
+	m := model{cl: cl, ch: ch, root: root, filter: api.FilterActive, collapsed: map[string]bool{}, merging: map[string]bool{}, busy: map[string]string{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
 	m.reclamp()
 	return m
 }
