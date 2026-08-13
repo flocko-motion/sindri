@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/brokkr/lint"
@@ -38,18 +40,93 @@ func Probe(dir string) string {
 	return lint.ToolchainAdvice(string(out))
 }
 
-// Run serves the Go tools for dir. A healthy workspace is delegated to `gopls mcp` — this shim
-// replaces itself with the real server rather than proxying it, so there is no second thing to
-// keep in step. Only a refused toolchain is handled here.
+// Run serves the Go tools for dir, delegating a healthy module to `gopls mcp` rather than proxying
+// it. Everything it cannot serve it EXPLAINS: the server is declared for every pod now, so this is
+// the only thing that can tell a tree apart, and an empty answer would read as a fact about code
+// nothing examined.
 func Run(dir string, in io.Reader, out io.Writer, stderr io.Writer) error {
-	advice := Probe(dir)
-	if advice == "" {
-		cmd := exec.Command("gopls", "mcp")
-		cmd.Dir, cmd.Stdin, cmd.Stdout, cmd.Stderr = dir, in, out, stderr
-		return cmd.Run()
+	root, found := ModuleRoot(dir)
+	if !found {
+		return refuse(NoModuleAdvice(dir), in, out, stderr)
 	}
+	if advice := Probe(root); advice != "" {
+		return refuse(advice, in, out, stderr)
+	}
+	cmd := exec.Command("gopls", "mcp")
+	cmd.Dir, cmd.Stdin, cmd.Stdout, cmd.Stderr = root, in, out, stderr
+	return cmd.Run()
+}
+
+// refuse serves the diagnosis to the client and states it on stderr, where a launch log keeps it.
+func refuse(advice string, in io.Reader, out io.Writer, stderr io.Writer) error {
 	fmt.Fprintln(stderr, advice)
 	return serveAdvice(advice, in, out)
+}
+
+// searchDepth bounds the hunt for a module below dir: deep enough for the usual layouts, shallow
+// enough to stay a glance rather than a walk of somebody's node_modules.
+const searchDepth = 3
+
+// skipDirs never contain the module being served, and are where a deep walk goes to die.
+var skipDirs = map[string]bool{
+	".git": true, "node_modules": true, "vendor": true, ".worktrees": true, "testdata": true,
+}
+
+// ModuleRoot is where to serve Go tools from: dir when it holds a go.work or go.mod, else the
+// shallowest module below. go.work wins outright — a tree of several modules is exactly the shape a
+// single root go.mod test called "not Go".
+func ModuleRoot(dir string) (string, bool) {
+	if dir == "" {
+		return "", false
+	}
+	for _, name := range []string{"go.work", "go.mod"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return dir, true
+		}
+	}
+	return shallowestModule(dir)
+}
+
+// shallowestModule breadth-first-searches for a go.mod, so the outermost module wins rather than
+// whichever the walk happened to reach first.
+func shallowestModule(dir string) (string, bool) {
+	level := []string{dir}
+	for depth := 0; depth < searchDepth && len(level) > 0; depth++ {
+		var next []string
+		for _, d := range level {
+			entries, err := os.ReadDir(d)
+			if err != nil {
+				continue
+			}
+			for _, e := range entries {
+				if !e.IsDir() {
+					continue
+				}
+				if skipDirs[e.Name()] || strings.HasPrefix(e.Name(), ".") {
+					continue
+				}
+				child := filepath.Join(d, e.Name())
+				if _, err := os.Stat(filepath.Join(child, "go.mod")); err == nil {
+					return child, true
+				}
+				next = append(next, child)
+			}
+		}
+		level = next
+	}
+	return "", false
+}
+
+// NoModuleAdvice says what was looked for and where, so the refusal is about THIS tree.
+func NoModuleAdvice(dir string) string {
+	if dir == "" {
+		return "No workspace to serve: the Go tools have nothing to look at. This is not a fact about " +
+			"any code — nothing was examined."
+	}
+	return fmt.Sprintf("No Go module under %s: no go.work or go.mod at the root, and none within %d "+
+		"directories below it. The Go tools are unavailable here, which says nothing about the code — "+
+		"nothing was examined. If this tree IS Go, its module is deeper than the search or behind a "+
+		"skipped directory.", dir, searchDepth)
 }
 
 // rpc is the subset of JSON-RPC 2.0 this shim reads and writes. Notifications have no id, and must

@@ -83,9 +83,9 @@ func vcsInfo() (rev, when string, dirty, ok bool) {
 }
 
 // newVersionCmd wires `brokkr version`, since a hand reaches for that before `--version`.
-// newGoplsMCPCmd serves gopls' type-aware Go tools over MCP. Hidden: it speaks JSON-RPC on stdio
-// and is meant for Claude to spawn, not for a human to run — it appears in the pod's Claude config,
-// not in the help.
+// newGoplsMCPCmd serves gopls' type-aware Go tools over MCP. Listed rather than hidden: every pod
+// now declares it, so an agent whose Go tools are unavailable has to be able to find the command
+// that would tell it why. Its Short says who spawns it.
 //
 // It lives in brokkr because brokkr already reaches every pod through the hub's mounted pod-bin,
 // so a change here needs no image rebuild — and because it is the type-aware counterpart to
@@ -95,10 +95,9 @@ func vcsInfo() (rev, when string, dirty, ok bool) {
 func newGoplsMCPCmd() *cobra.Command {
 	var dir string
 	c := &cobra.Command{
-		Use:    "gopls-mcp",
-		Short:  "Serve gopls' Go tools over MCP (stdio; spawned by the coding agent, not by hand)",
-		Args:   cobra.NoArgs,
-		Hidden: true,
+		Use:   "gopls-mcp",
+		Short: "Serve gopls' Go tools over MCP (stdio; the agent spawns this — running it by hand just waits on JSON-RPC)",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if dir == "" {
 				wd, err := os.Getwd()

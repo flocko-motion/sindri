@@ -55,9 +55,7 @@ func (Claude) PrepareHome(spec agent.HomeSpec) (agent.Home, error) {
 			"/workspace": map[string]any{"hasTrustDialogAccepted": true},
 		},
 	}
-	if servers := mcpServers(spec.Workspace); len(servers) > 0 {
-		conf["mcpServers"] = servers
-	}
+	conf["mcpServers"] = mcpServers()
 	cfg, _ := json.Marshal(conf)
 	if err := os.WriteFile(configPath, cfg, 0o644); err != nil {
 		return agent.Home{}, fmt.Errorf("write claude config: %w", err)
@@ -72,18 +70,12 @@ func (Claude) PrepareHome(spec agent.HomeSpec) (agent.Home, error) {
 	return agent.Home{Dir: spec.Dir, ConfigPath: configPath, HasCreds: hasCreds}, nil
 }
 
-// mcpServers declares the language tooling a workspace earns. User-scope servers live in
-// ~/.claude.json under "mcpServers" — checked against `claude mcp add -s user`, since a wrong key
-// fails silently. No go.mod, no entry: a non-Go pod is unchanged. It runs `brokkr gopls-mcp`
-// rather than `gopls mcp` because brokkr arrives via the mounted pod-bin (fixable without an image
-// rebuild) and its shim reports a refused toolchain instead of answering nothing.
-func mcpServers(workspace string) map[string]any {
-	if workspace == "" {
-		return nil
-	}
-	if _, err := os.Stat(filepath.Join(workspace, "go.mod")); err != nil {
-		return nil
-	}
+// mcpServers declares every pod's language tooling, under the "mcpServers" key
+// `claude mcp add -s user` writes — a wrong one fails silently. UNCONDITIONAL is the point: a
+// condition here read the workspace as it was when the home was prepared, so a module below the
+// root, or a worktree not yet populated, lost the tooling for good. What the tree holds is the
+// shim's question (-> brokkr gopls-mcp), answered per call and out loud.
+func mcpServers() map[string]any {
 	return map[string]any{
 		"gopls": map[string]any{
 			"type":    "stdio",
