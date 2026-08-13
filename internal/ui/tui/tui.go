@@ -31,11 +31,11 @@ const (
 
 var filterNames = [...]string{"open", "closed", "all", "active"}
 
-// tuiSection is one dashboard tab: a key and a title. Unlike hub/commands' registry
-// (which pairs a key with a Count func — necessary hub-side, but a func can't cross
-// the wire), the front-end computes each badge itself, straight off the board it
-// already has (-> tabCount): Agents and PRs need the § scope toggle the hub knows
-// nothing about, so the count could never have been a value the hub resolved once.
+// tuiSection is one dashboard tab: a key and a title. The badge count is the front-end's own
+// (-> tabCount), because Agents and PRs obey the § scope toggle the hub knows nothing about, so it
+// could never be a number the hub resolved once. The attention marker beside it is the opposite
+// case: which rows wait on the user is one rule for the whole fleet, so it is read off the hub's
+// resolved sections (-> BoardState.SectionAttention) by key, the same line for every tab.
 var tuiSections = []tuiSection{
 	{"tasks", "Tasks"},
 	{"agents", "Agents"},
@@ -398,13 +398,14 @@ func (m model) View() string {
 	labels := make([]string, len(tuiSections))
 	for i, s := range tuiSections {
 		labels[i] = fmt.Sprintf("%d %s", m.tabCount(s), s.Title)
-		// Tasks awaiting a verdict ride on the Tasks label so the count is in view from every tab:
-		// they are hidden from workers, so a backlog of them reads as plenty of work beside an idle
-		// agent, and nothing said the two were connected.
-		if s.Key == "tasks" {
-			if n := api.CountAwaitingVerdict(m.state.Tasks); n > 0 {
-				labels[i] += fmt.Sprintf(" (%d%s)", n, gateGlyph)
-			}
+		// What waits on the user rides on the handle, so it is in view from whichever tab you are
+		// looking at — the question it answers ("why is nothing happening?") is rarely asked from
+		// the tab that holds the answer. Which rows count is the hub's to say, uniformly per
+		// section: a marker the view decided for itself would be a fourth rule in a fourth place.
+		// Fleet-wide even in repo scope — an agent stuck in another repo still waits on you, and a
+		// filter that hid it is how it would go on waiting.
+		if n := m.state.SectionAttention(s.Key); n > 0 {
+			labels[i] += fmt.Sprintf(" (%d%s)", n, attentionGlyph)
 		}
 	}
 	// Modals take over the whole screen.

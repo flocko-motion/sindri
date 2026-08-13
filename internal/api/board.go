@@ -65,6 +65,10 @@ type BoardState struct {
 	StartedAt string `json:"started_at"`
 	// DefaultMemory is the RAM an agent gets with none configured — the runtime's own current default.
 	DefaultMemory string `json:"defaultMemory"`
+	// Sections are the dashboard's tabs as the hub resolved them against this very board: which
+	// views exist, and the badge each shows. They ride on the board so a front-end renders the
+	// counts instead of deciding them (-> SectionAttention).
+	Sections []Section `json:"sections,omitempty"`
 }
 
 // AgentStatsView is one agent's resource snapshot; Err is set, not swallowed into a misleading zero.
@@ -117,6 +121,27 @@ func (b BoardState) RepoCount() int { return len(b.Projects) }
 
 // ChatMemberCount is the number of agents in the user's chatroom.
 func (b BoardState) ChatMemberCount() int { return len(b.Chat.Members) }
+
+// TasksAwaitingVerdictCount is the Tasks section's attention count: work the gate holds until the
+// user rules on it.
+func (b BoardState) TasksAwaitingVerdictCount() int { return CountAwaitingVerdict(b.Tasks) }
+
+// AgentsNeedingUserCount is the Agents section's attention count: agents that cannot move until a
+// human acts (-> AgentNeedsUser).
+func (b BoardState) AgentsNeedingUserCount() int { return CountAgentsNeedingUser(b.Agents) }
+
+// SectionAttention is how many rows of the named section wait on the user, read off the sections
+// the hub resolved. A front-end asks by key so every tab is drawn by the same line of code; a
+// board with no sections on it (an older hub, a hand-built snapshot) marks nothing rather than
+// deriving a count of its own.
+func (b BoardState) SectionAttention(key string) int {
+	for _, s := range b.Sections {
+		if s.Key == key {
+			return s.Attention
+		}
+	}
+	return 0
+}
 
 func countTasks(ts []Task, pred func(Task) bool) (n int) {
 	for _, t := range ts {

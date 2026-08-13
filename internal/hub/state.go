@@ -17,6 +17,7 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agent"
+	"github.com/flo-at/sindri/internal/hub/commands"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -140,12 +141,21 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	for _, p := range projects {
 		docs[p.Tag] = h.repoDocState(p.Path)
 	}
-	return BoardState{
+	board := BoardState{
 		RuntimeHint: h.watch.runtimeHint(),
 		Agents:      agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans, Chat: chat,
 		RepoDocs: docs, SpecCLIMissing: specMissing, StartedAt: h.startedAt.UTC().Format(time.RFC3339),
 		DefaultMemory: agent.MemoryOrDefault(""),
-	}, nil
+	}
+	return withSections(board), nil
+}
+
+// withSections stamps the board with its own tabs — each count, and how many of its rows wait on
+// the user — resolved against the board they describe. A front-end renders what it finds here, so
+// a board that left this out would silently drop every marker.
+func withSections(b BoardState) BoardState {
+	b.Sections = commands.Resolved(b)
+	return b
 }
 
 // fillReviewers stamps each PR with the agent holding an open review of it. Whether a PR is being

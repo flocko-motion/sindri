@@ -472,9 +472,10 @@ const eyeGlyph = "👁️"
 // warnGlyph is the warning mark, likewise width-pinned.
 const warnGlyph = "⚠️"
 
-// gateGlyph marks work held back by the approval gate. Plain ASCII: it sits inside the header bar,
+// attentionGlyph marks a tab holding rows that wait on the user — work held back by the approval
+// gate, an agent that cannot move until they answer. Plain ASCII: it sits inside the header bar,
 // where an emoji's two drawn cells against one measured would shear the whole strip.
-const gateGlyph = "!"
+const attentionGlyph = "!"
 
 // retiredGlyph marks an agent being wound down. Width-pinned like the others.
 const retiredGlyph = "⏹️"

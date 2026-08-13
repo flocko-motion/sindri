@@ -13,4 +13,10 @@ type Section struct {
 	Key   string `json:"key"`
 	Title string `json:"title"`
 	Count int    `json:"count"`
+	// Attention is how many of this section's rows are waiting on the USER — tasks nobody has ruled
+	// on, agents that cannot move until a human acts (-> AgentNeedsUser). A subset of Count, and
+	// the number every UI draws beside it as "(N!)". It rides on the section rather than being
+	// worked out per tab, so a third marker is a line in the registry instead of a third special
+	// case in each view.
+	Attention int `json:"attention"`
 }

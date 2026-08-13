@@ -1,10 +1,10 @@
 // package: hub/commands / sections
 // type:    logic (dashboard section registry)
-// job:     the ordered dashboard tabs every UI renders and how each derives its
-// actionable badge count. The count reads from an injected Board — the hub
-// owns the cross-module snapshot (its BoardState) and satisfies this
-// interface, so the section registry lives here without importing the hub.
-// limits:  the section list + count rule only; the data comes from the injected Board.
+// job:     the ordered dashboard tabs every UI renders, each with its badge count and
+// how many of those rows wait on the user. Both read from an injected Board —
+// the hub owns that snapshot (its BoardState) and satisfies this interface, so
+// the registry lives here without importing the hub.
+// limits:  the section list and its two count rules; the data comes from the Board.
 // A func can't cross the wire, so Resolved is what a client actually receives.
 package commands
 
@@ -19,32 +19,53 @@ type Board interface {
 	OpenPRCount() int
 	RepoCount() int
 	ChatMemberCount() int
+	TasksAwaitingVerdictCount() int
+	AgentsNeedingUserCount() int
 }
 
-// Section is one dashboard tab: a key, a title, and its actionable badge count read
-// from the board.
+// Section is one dashboard tab: a key, a title, its actionable badge count read from the board,
+// and how many of those rows are waiting on the user.
 type Section struct {
 	Key   string
 	Title string
 	Count func(Board) int
+	// Attention counts the rows only the user can move on — the "(N!)" marker beside the count.
+	// Every marker is a line here rather than a case in each view, which is what keeps the three
+	// of them one behaviour. nil where a section holds nothing that can wait on a human.
+	Attention func(Board) int
 }
 
 // Sections is the ordered set of dashboard sections — add one here and every UI picks
 // it up.
 var Sections = []Section{
-	{"tasks", "Tasks", func(b Board) int { return b.OpenTaskCount() }},
-	{"agents", "Agents", func(b Board) int { return b.AgentCount() }}, // whole roster — down agents are still agents
-	{"prs", "PRs", func(b Board) int { return b.OpenPRCount() }},
-	{"repos", "Repos", func(b Board) int { return b.RepoCount() }},
-	{"chat", "Meeting", func(b Board) int { return b.ChatMemberCount() }},
+	{
+		Key: "tasks", Title: "Tasks",
+		Count: func(b Board) int { return b.OpenTaskCount() },
+		// Gated work is hidden from every worker, so a backlog of it reads as plenty to do beside
+		// an idle agent.
+		Attention: func(b Board) int { return b.TasksAwaitingVerdictCount() },
+	},
+	{
+		Key: "agents", Title: "Agents",
+		Count: func(b Board) int { return b.AgentCount() }, // whole roster — down agents are still agents
+		// Blocked, signed out, full or stalled: each looks alive, holds its task and makes no
+		// progress, and none of them clears without a human.
+		Attention: func(b Board) int { return b.AgentsNeedingUserCount() },
+	},
+	{Key: "prs", Title: "PRs", Count: func(b Board) int { return b.OpenPRCount() }},
+	{Key: "repos", Title: "Repos", Count: func(b Board) int { return b.RepoCount() }},
+	{Key: "chat", Title: "Meeting", Count: func(b Board) int { return b.ChatMemberCount() }},
 }
 
-// Resolved reads every section's count against b and returns the wire shape: the
-// recipe (Count) stays here, only the number it produces crosses.
+// Resolved reads every section's counts against b and returns the wire shape: the
+// recipes (Count, Attention) stay here, only the numbers they produce cross.
 func Resolved(b Board) []api.Section {
 	out := make([]api.Section, len(Sections))
 	for i, s := range Sections {
 		out[i] = api.Section{Key: s.Key, Title: s.Title, Count: s.Count(b)}
+		if s.Attention != nil {
+			out[i].Attention = s.Attention(b)
+		}
 	}
 	return out
 }

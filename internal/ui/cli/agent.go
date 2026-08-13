@@ -108,9 +108,13 @@ func agentListCmd() *cobra.Command {
 					return err
 				}
 				warnRuntime(st) // a whole roster reading "down" has one likely cause
-				for _, a := range api.SortedAgents(st.Agents, st.Projects) {
+				sorted := api.SortedAgents(st.Agents, st.Projects)
+				for _, a := range sorted {
 					line := fmt.Sprintf("%-10.10s %-12s %-8s %-10s %4s %-14s %s", a.Repo, a.Name, a.Role, a.Status,
 						theme.ContextPercent(a.ContextTokens, a.ContextWindow), dash(a.Task), dash(a.PR))
+					if api.AgentNeedsUser(a) {
+						line += "  ! needs you" // the status says which state; this says whose move it is
+					}
 					if a.Retired {
 						line += "  ⏹ retired" // beside the status, which still shows what it is doing
 					}
@@ -125,10 +129,33 @@ func agentListCmd() *cobra.Command {
 				if len(st.Agents) == 0 && len(st.Orphans) == 0 {
 					fmt.Fprintln(os.Stderr, "no agents — register one with 'sindri agent new <name>'")
 				}
+				// Last, where a closing line is read: the same set the TUI's "(N!)" counts on the
+				// Agents handle, so a CLI user sees who waits on them without opening every pane.
+				if s := needsYouSummary(sorted); s != "" {
+					fmt.Fprintln(os.Stderr, "\n"+s)
+				}
 				return nil
 			})
 		},
 	}
+}
+
+// needsYouSummary names the agents that cannot move until the user acts, "" when none. Each of them
+// looks alive and holds its task, so a listing that ended at the rows reads as a working fleet.
+func needsYouSummary(agents []api.AgentView) string {
+	var stuck []string
+	for _, a := range agents {
+		if api.AgentNeedsUser(a) {
+			stuck = append(stuck, fmt.Sprintf("%s (%s)", a.Name, a.Status))
+		}
+	}
+	if len(stuck) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d agent(s) need you: %s — answer one at its pane "+
+		"(`sindri agent attach <name>`), clear a full one (`sindri agent clear-context <name>`), "+
+		"or restart a signed-out one once the host has logged in (`sindri agent restart <name>`).",
+		len(stuck), strings.Join(stuck, ", "))
 }
 
 // agentStatsCmd is the view for tuning per-agent memory; down agents have no VM to sample.
