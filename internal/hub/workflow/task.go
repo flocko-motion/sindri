@@ -284,13 +284,18 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 	if !ok {
 		return "", fmt.Errorf("unknown agent %q", name)
 	}
+	st, _ := ps.GetState(name)
+	// Escalated outranks every role's directive: with the work verbs shut, any other answer sends the
+	// agent at a wall. Repeated on EVERY ask — a relaunched agent has no memory of asking.
+	if st.Escalation != "" {
+		return DirEscalated(st.Escalation), nil
+	}
 	if a.Role == "coauthor" {
 		return DirCoauthor, nil
 	}
 	if a.Role == "reviewer" {
 		return e.waitForWork(ctx, func() (string, bool, error) { return e.reviewDirective(project, name) })
 	}
-	st, _ := ps.GetState(name)
 	if a.Role == "planner" {
 		switch st.Phase {
 		case "submitted":

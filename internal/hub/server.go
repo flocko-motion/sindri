@@ -182,6 +182,15 @@ func (h *Hub) Handler() http.Handler {
 		}
 		writeJSON(w, okMsg{"ok"}, h.agents.SetRetired(h.agentReq(r, req.Name), req.Name, req.Retired))
 	})
+	// The user's own clear of an escalation. The agent normally clears its own (`sindri resume`), but
+	// one that is gone, restarted, or simply wrong that it was blocked would stay stuck otherwise.
+	mux.HandleFunc("POST /agent/resume", func(w http.ResponseWriter, r *http.Request) {
+		var req NameReq
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"resumed"}, h.Resume(h.agentReq(r, req.Name), req.Name, "escalation cleared by the user"))
+	})
 	mux.HandleFunc("POST /agent/delete", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
 		if !decode(w, r, &req) {

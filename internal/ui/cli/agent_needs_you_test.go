@@ -34,6 +34,24 @@ func TestNeedsYouSummaryNamesEveryStuckAgent(t *testing.T) {
 	}
 }
 
+// TestAnEscalatedAgentIsQuotedNotJustNamed: for the other states the remedy is in the status word,
+// so naming the agent is enough. An escalation carries a question, and the question IS what the user
+// has to act on — having to attach to each pane to read it is what makes triaging several expensive.
+func TestAnEscalatedAgentIsQuotedNotJustNamed(t *testing.T) {
+	const q = "drop the two callers or keep both?"
+	got := needsYouSummary([]api.AgentView{
+		{Name: "dvalin", Status: api.StatusEscalated, Escalation: q},
+		{Name: "kili", Status: "working"},
+	})
+	if !strings.Contains(got, q) {
+		t.Errorf("the summary should carry the question itself: %q", got)
+	}
+	// And it says how to answer it, since the remedies for the other states do not apply here.
+	if !strings.Contains(got, "sindri agent resume") {
+		t.Errorf("the summary should name the release for one that cannot resume itself: %q", got)
+	}
+}
+
 // TestNeedsYouSummarySilentWhenNothingIsStuck: the line is a call to act, so a healthy fleet
 // prints nothing rather than a reassurance the user has to read past every time.
 func TestNeedsYouSummarySilentWhenNothingIsStuck(t *testing.T) {

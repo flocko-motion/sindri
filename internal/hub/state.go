@@ -115,6 +115,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		}
 		tokens, window, _ := h.agents.ContextUsage(a.Project, a.Name)
 		status = overlayFullness(status, h.wf.ContextFull(a.Project, a.Name), st.Task, st.Container, pr)
+		status = overlayEscalation(status, st.Escalation)
 		agents = append(agents, AgentView{
 			Project: a.Project, Repo: h.repoName(a.Project), Name: a.Name, Role: a.Role,
 			Status:  status,
@@ -122,7 +123,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			Task:    st.Task, Feature: st.Container, Branch: st.Branch, PR: pr, Workspace: a.Workspace,
 			Clients: clients[i], Container: container, Memory: a.Memory, Retired: a.Retired,
 			ClearArmed:    a.ClearArmed,
-			ContextTokens: tokens, ContextWindow: window,
+			ContextTokens: tokens, ContextWindow: window, Escalation: st.Escalation,
 		})
 	}
 
@@ -297,6 +298,22 @@ func overlayFullness(status string, full bool, task, feature, pr string) string 
 		return "full"
 	}
 	return status
+}
+
+// overlayEscalation says "escalated" wherever an agent is waiting on a decision the user must make.
+// It is applied LAST, over the runtime and the stall alike: those describe a screen, and this
+// describes why the screen is quiet — the agent's own account, which is the only one that tells the
+// user what to do about it. A stalled reading is the same standing-still seen without the reason,
+// and the nudge behind it is exempt for that reason too (-> workflow.NudgeStalled).
+//
+// Two words still outrank it, both saying the answer cannot be DELIVERED: a pod that is not up, and
+// a signed-out session where nothing typed is sent. Those come first because they must be fixed
+// before the question can be.
+func overlayEscalation(status, question string) string {
+	if question == "" || api.AgentNotUp(status) || status == api.StatusSignedOut {
+		return status
+	}
+	return api.StatusEscalated
 }
 
 // Refresh re-syncs tasks and notifies watchers; being the user's explicit refresh it forces the

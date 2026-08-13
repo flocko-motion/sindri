@@ -9,13 +9,11 @@ package workflow
 import "time"
 
 // StallDwell is how long an agent's screen must stand completely still before the hub calls it
-// stalled. A tool call freezes the pane for its duration — measured at 12s+ on an agent that was
-// working normally — so the dwell has to outlast an ordinary build or test run, not a redraw.
+// stalled. It has to outlast an ordinary build or test run (a tool call froze one pane for 12s+).
 const StallDwell = 3 * time.Minute
 
-// RetryDwell is how long a cut-off turn is left before the agent is told to resume. Short because
-// the pane STATES the failure — no evidence has to accumulate — and long enough only that a retry
-// already in flight finishes first.
+// RetryDwell is how long a cut-off turn is left before the agent is told to resume. Short because the
+// pane STATES the failure, and long enough only that a retry already in flight finishes first.
 const RetryDwell = time.Minute
 
 // parkedByTheHub reports whether an agent is idle because it was told to be — retired by a human, or
@@ -50,6 +48,11 @@ func (e *Engine) NudgeStalled(project, name, runtime string, idleFor time.Durati
 	ps := e.store.For(project)
 	st, err := ps.GetState(name)
 	if err != nil || !Stalled(st.Phase, st.Container, runtime, idleFor) {
+		return false
+	}
+	// Escalated is idle BY INSTRUCTION, like the parked states below (-> parkedByTheHub) — but ahead
+	// of the api-error retry, since a resumed turn has no verb left that advances the work.
+	if st.Escalation != "" {
 		return false
 	}
 	if !e.deps.AgentAlive(project, name) {

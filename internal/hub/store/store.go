@@ -163,6 +163,7 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE prs ADD COLUMN kind TEXT NOT NULL DEFAULT 'final'`,
 		`ALTER TABLE reviews ADD COLUMN advisory INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE prs ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agent_state ADD COLUMN escalation TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, a := range alters {
 		if _, err := db.Exec(a); err != nil && !strings.Contains(err.Error(), "duplicate column") {

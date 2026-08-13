@@ -39,6 +39,9 @@ CREATE TABLE IF NOT EXISTS agent_state (
   branch    TEXT NOT NULL DEFAULT '',
   phase     TEXT NOT NULL DEFAULT 'idle',  -- idle | working | submitted
   container TEXT NOT NULL DEFAULT '',      -- container task held in the collaborative workflow ('' = structured)
+  -- The question an agent stopped on, waiting for the user to decide it ('' = not escalated). Written
+  -- only by SetEscalation/ClearEscalation, never by SetState (-> SetState).
+  escalation TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (project, agent)
 );
 CREATE TABLE IF NOT EXISTS prs (
@@ -139,6 +142,10 @@ type AgentState struct {
 	Branch    string `json:"branch"`
 	Phase     string `json:"phase"`
 	Container string `json:"container,omitempty"`
+	// Escalation is the question the agent stopped on, waiting for the user to decide it ('' = not
+	// escalated). It rides here so every reader of the state has it — the command surface, the board,
+	// the directive — but it is NOT part of what SetState writes (-> SetState).
+	Escalation string `json:"escalation,omitempty"`
 }
 
 // Review is one review item attached to a PR; it crosses the wire, so it is
@@ -152,8 +159,8 @@ type PR = api.PR
 // GetState returns an agent's workflow state in this project (zero value if none).
 func (p *ProjectStore) GetState(agent string) (AgentState, error) {
 	st := AgentState{Agent: agent, Phase: "idle"}
-	row := p.s.db.QueryRow(`SELECT task,branch,phase,container FROM agent_state WHERE project=? AND agent=?`, p.project, agent)
-	err := row.Scan(&st.Task, &st.Branch, &st.Phase, &st.Container)
+	row := p.s.db.QueryRow(`SELECT task,branch,phase,container,escalation FROM agent_state WHERE project=? AND agent=?`, p.project, agent)
+	err := row.Scan(&st.Task, &st.Branch, &st.Phase, &st.Container, &st.Escalation)
 	if err == sql.ErrNoRows {
 		return st, nil
 	}
@@ -163,7 +170,10 @@ func (p *ProjectStore) GetState(agent string) (AgentState, error) {
 	return st, nil
 }
 
-// SetState writes an agent's workflow state in this project.
+// SetState writes an agent's workflow state in this project. It leaves the escalation alone: every
+// caller here builds a fresh AgentState from the columns it cares about, so writing that one from the
+// struct would clear a live escalation on the next phase change — and a durable state any unrelated
+// write can drop is not durable. SetEscalation and ClearEscalation are the only writers of it.
 func (p *ProjectStore) SetState(st AgentState) error {
 	if st.Phase == "" {
 		st.Phase = "idle"
@@ -174,6 +184,31 @@ func (p *ProjectStore) SetState(st AgentState) error {
 		p.project, st.Agent, st.Task, st.Branch, st.Phase, st.Container)
 	if err != nil {
 		return fmt.Errorf("set state %s: %w", st.Agent, err)
+	}
+	return nil
+}
+
+// SetEscalation records the question an agent has stopped on, so the escalation survives a hub
+// restart — an escalation that evaporates leaves an agent silently stuck, refused by every verb that
+// advances work with nothing to say why. An upsert, because an agent may escalate before anything
+// else has written it a state row.
+func (p *ProjectStore) SetEscalation(agent, question string) error {
+	_, err := p.s.db.Exec(`
+		INSERT INTO agent_state (project,agent,escalation) VALUES (?,?,?)
+		ON CONFLICT(project,agent) DO UPDATE SET escalation=excluded.escalation`,
+		p.project, agent, question)
+	if err != nil {
+		return fmt.Errorf("set escalation %s: %w", agent, err)
+	}
+	return nil
+}
+
+// ClearEscalation releases an escalated agent, whoever asked for it — the agent itself once it has
+// its answer, or the user, who must be able to clear one nobody else can.
+func (p *ProjectStore) ClearEscalation(agent string) error {
+	_, err := p.s.db.Exec(`UPDATE agent_state SET escalation='' WHERE project=? AND agent=?`, p.project, agent)
+	if err != nil {
+		return fmt.Errorf("clear escalation %s: %w", agent, err)
 	}
 	return nil
 }

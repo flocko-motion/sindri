@@ -40,20 +40,20 @@ func (h *Hub) registry() *registry.Registry {
 		// Only a worker grabs tasks and submits a branch. A planner has neither: it ships openspec
 		// via its own `openspec submit`, a PR in different dress (mock todo id os-new).
 		registry.Command{Name: "next", Help: "pick up the next task", Roles: []string{"worker"},
-			Blocked: func(c registry.Caller) string {
+			Blocked: heldByEscalation("next", func(c registry.Caller) string {
 				if c.HasTask {
 					return "You already hold work — run `sindri` to be told what to do with it."
 				}
 				return ""
-			}, Run: h.wf.CmdNext},
+			}), Run: h.wf.CmdNext},
 		registry.Command{Name: "lint", Help: "run the quality gate: lint (your workspace) or lint <pr-id> (a PR)", Run: h.cmdLint},
 		// Visibility MUST match these commands' own `st.Phase != "working"` guard. When it didn't, a
 		// worker in "submitted" was offered submit, ran it, and was told to abandon the task it held.
 		registry.Command{Name: "submit", Help: "request your branch be merged: submit [message]", Roles: []string{"worker"},
-			Blocked: landingBlocked("submit"), Run: h.wf.CmdSubmit},
+			Blocked: heldByEscalation("submit", landingBlocked("submit")), Run: h.wf.CmdSubmit},
 		// Land interim work mid-task without finishing it; same visibility as submit, task stays open.
 		registry.Command{Name: "contribute", Help: "land an interim contribution mid-task (needs the user's approval): contribute [message]", Roles: []string{"worker"},
-			Blocked: landingBlocked("contribute"), Run: h.wf.CmdContribute},
+			Blocked: heldByEscalation("contribute", landingBlocked("contribute")), Run: h.wf.CmdContribute},
 		// The author's own reject: it withdraws its PR to keep working. Available exactly while one is
 		// out, which is the state where realising something is missing had no way out but somebody
 		// else's verdict.
@@ -74,13 +74,13 @@ func (h *Hub) registry() *registry.Registry {
 		// see what it changed or put a file back, and reconstructs both from memory.
 		registry.Command{Name: "git", Help: workflow.GitHelp, Roles: []string{"worker", "planner", "coauthor"}, Run: h.wf.CmdGit},
 		registry.Command{Name: "checkpoint", Help: "record the current subtask and move to the next: checkpoint [summary]", Roles: []string{"worker"},
-			Blocked: func(c registry.Caller) string {
+			Blocked: heldByEscalation("checkpoint", func(c registry.Caller) string {
 				if c.Container == "" {
 					return "Checkpoint records one subtask of a feature, and you hold a task of your own — " +
 						"`sindri submit \"<summary>\"` puts it up for review when it's done."
 				}
 				return ""
-			}, Run: h.wf.CmdCheckpoint},
+			}), Run: h.wf.CmdCheckpoint},
 		// A worker reads too: it holds a whole package for context, so that context must stay
 		// re-readable. Roles see different scopes (-> CmdTasks) but share one verb name.
 		registry.Command{Name: "task", Help: workflow.TaskHelp, Roles: []string{"planner", "coauthor", "worker", "reviewer"}, Run: h.wf.CmdTasks},
@@ -117,8 +117,20 @@ func (h *Hub) registry() *registry.Registry {
 		// beside the reviewer's verdict, never a substitute for it — so the same verb is open to
 		// both roles rather than needing a second one.
 		registry.Command{Name: "approve", Help: approveHelp(registry.Caller{}), HelpFor: approveHelp,
-			Roles: []string{"reviewer", "planner"}, Run: h.wf.CmdApprove},
-		registry.Command{Name: "reject", Help: "reject a pull request: reject <pr-id> <feedback...>", Roles: []string{"reviewer"}, Run: h.wf.CmdReject},
+			Roles: []string{"reviewer", "planner"}, Blocked: heldByEscalation("approve", nil), Run: h.wf.CmdApprove},
+		registry.Command{Name: "reject", Help: "reject a pull request: reject <pr-id> <feedback...>", Roles: []string{"reviewer"},
+			Blocked: heldByEscalation("reject", nil), Run: h.wf.CmdReject},
+		// Either side of a stop only the user can end, open to every role — any agent can meet a
+		// decision that is not its to make. Escalate stays open while escalated: a badly-put
+		// question has to be re-puttable.
+		registry.Command{Name: "escalate", Help: escalateHelp, Run: h.cmdEscalate},
+		registry.Command{Name: "resume", Help: resumeHelp,
+			Blocked: func(c registry.Caller) string {
+				if c.Escalation == "" {
+					return "You have no escalation to clear — `sindri` tells you where you are."
+				}
+				return ""
+			}, Run: h.cmdResume},
 		// State-gated rather than role-gated: the user controls who is in the meeting room.
 		registry.Command{Name: "meeting", Help: "say something to everyone in the meeting room: meeting <message...>",
 			Blocked: func(c registry.Caller) string {
@@ -128,6 +140,21 @@ func (h *Hub) registry() *registry.Registry {
 				return ""
 			}, Run: h.cmdChat},
 	)
+}
+
+// heldByEscalation wraps a verb's own gate with the escalation hold, asked FIRST: an escalated agent
+// may read all it likes, but nothing it does may advance the work — that is what escalating means. The
+// refusal is its own question coming back (-> ReplyEscalated). A verb with no gate of its own passes nil.
+func heldByEscalation(verb string, gate func(registry.Caller) string) func(registry.Caller) string {
+	return func(c registry.Caller) string {
+		if c.Escalation != "" {
+			return workflow.ReplyEscalated(verb, c.Escalation)
+		}
+		if gate == nil {
+			return ""
+		}
+		return gate(c)
+	}
 }
 
 // landingBlocked is the shared gate on the two verbs that put a branch up (submit, contribute).
@@ -199,6 +226,7 @@ func (h *Hub) caller(project, name string) (registry.Caller, error) {
 		Task:         st.Task,
 		Phase:        st.Phase,
 		InChat:       inChat,
+		Escalation:   st.Escalation,
 	}, nil
 }
 

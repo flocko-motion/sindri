@@ -159,6 +159,12 @@ func (c *HTTP) SetRetired(name string, retired bool) error {
 	return c.post("/agent/retire", api.NameReq{Name: name, Retired: retired})
 }
 
+// ResumeAgent clears an escalation from the host — the user's half of it. The agent clears its own
+// once it has the answer; this is for one that cannot, or should not have escalated at all.
+func (c *HTTP) ResumeAgent(name string) error {
+	return c.post("/agent/resume", api.NameReq{Name: name})
+}
+
 // DeleteAgent removes an agent (pod, socket, worktree, identity).
 func (c *HTTP) DeleteAgent(name string) error {
 	return c.post("/agent/delete", api.NameReq{Name: name})

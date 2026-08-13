@@ -31,6 +31,7 @@ type backend interface {
 	NewAgent(name, role, memory string) (string, error)
 	SetMemory(name, memory string) error
 	SetRetired(name string, retired bool) error
+	ResumeAgent(name string) error
 	DeleteAgent(name string) error
 	StopAgent(name string) error
 	SetClearArmed(name string, armed bool) error
@@ -214,7 +215,7 @@ func NewAgentCmd() *cobra.Command {
 	// No PersistentPreRun: the runtime warning comes off the board (-> warnRuntime), which the
 	// commands that need it already fetch. Probing here cost every agent verb a `podman info`.
 	c := &cobra.Command{Use: "agent", Short: "Manage agents (workers, reviewers, planners, coauthors)"}
-	c.AddCommand(agentListCmd(), agentStatsCmd(), agentNewCmd(), agentDeleteCmd(), agentPaneCmd(), agentStartCmd(), agentStopCmd(), agentRestartCmd(), agentRebaseCmd(), agentRebuildCmd(), agentMemoryCmd(), agentRetireCmd(), agentClearContextCmd(), agentTellCmd(), agentPlanCmd(), agentDirCmd(), agentAttachCmd(), agentInfoCmd())
+	c.AddCommand(agentListCmd(), agentStatsCmd(), agentNewCmd(), agentDeleteCmd(), agentPaneCmd(), agentStartCmd(), agentStopCmd(), agentRestartCmd(), agentRebaseCmd(), agentRebuildCmd(), agentMemoryCmd(), agentRetireCmd(), agentResumeCmd(), agentClearContextCmd(), agentTellCmd(), agentPlanCmd(), agentDirCmd(), agentAttachCmd(), agentInfoCmd())
 	return c
 }
 

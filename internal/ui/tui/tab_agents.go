@@ -238,6 +238,23 @@ func clearLandsWhen(a api.AgentView) string {
 	}
 }
 
+// openResumeChoice confirms clearing an agent's escalation. Confirmed rather than done on the
+// keystroke because it drops the agent's own account of why it stopped: normally the agent clears its
+// own once it has the answer, and this is the release for one that never will.
+func (m *model) openResumeChoice(name string) {
+	cl := m.cl
+	m.choice = choiceModalState{
+		active: true, title: "clear " + name + "'s escalation?  (it carries on without an answer)",
+		options: []string{"cancel", "resume"}, values: []string{"cancel", "resume"},
+		apply: func(v string) tea.Cmd {
+			if v != "resume" {
+				return nil
+			}
+			return mutateThenRefresh(cl, func() error { return cl.ResumeAgent(name) })
+		},
+	}
+}
+
 // rebaseAgentCmd rebases the agent's worktree onto the reference branch; git aborts on conflict.
 func (m *model) rebaseAgentCmd(name string) tea.Cmd {
 	cl := m.cl
@@ -381,12 +398,25 @@ func (m model) agentItems() []metaItem {
 	items := []metaItem{
 		{text: "role:      " + a.Role},
 		{text: status, kind: "view", value: "diag"},
+	}
+	// The question an escalated agent stopped on, beside the status word that says it is. Readable
+	// here on purpose: several escalations can be triaged before deciding which to sit down with,
+	// which attaching to each pane in turn does not allow. ⏎ clears it — the user's own release,
+	// for an agent that cannot do it itself.
+	if a.Escalation != "" {
+		items = append(items, metaItem{
+			text:  "escalated: " + a.Escalation + dimStyle.Render("  (⏎ resume)"),
+			kind:  "resume",
+			value: a.Name,
+		})
+	}
+	items = append(items,
 		taskIt, featIt, prIt,
 		wsIt,
-		{text: "memory:    " + memoryLabelTUI(a.Memory, m.state.DefaultMemory) + dimStyle.Render("  (container RAM · e to edit)")},
-		{text: "context:   " + theme.ContextLine(a.ContextTokens)},
-		{text: pod, kind: "view", value: "pod"},
-	}
+		metaItem{text: "memory:    " + memoryLabelTUI(a.Memory, m.state.DefaultMemory) + dimStyle.Render("  (container RAM · e to edit)")},
+		metaItem{text: "context:   " + theme.ContextLine(a.ContextTokens)},
+		metaItem{text: pod, kind: "view", value: "pod"},
+	)
 	// The armed clear says WHEN it lands, not merely that it is set: the row's marker is the count,
 	// this is the sentence behind it — and "C cancels" because a toggle needs its way back shown.
 	if a.ClearArmed {
@@ -617,12 +647,17 @@ func (m model) agentDetailFor(a api.AgentView) []string {
 		"agent:     " + a.Name,
 		"role:      " + a.Role,
 		"status:    " + a.Status,
-		"task:      " + m.taskLabel(taskID),
-		"feature:   " + m.taskLabel(a.Feature),
-		"pr:        " + dash(a.PR),
-		"workspace: " + dash(a.Workspace),
-		"container: " + m.agentContainer(a),
 	}
+	if a.Escalation != "" { // what it is waiting on, wherever this detail is read (modal, yank, other tabs)
+		ls = append(ls, "escalated: "+a.Escalation)
+	}
+	ls = append(ls,
+		"task:      "+m.taskLabel(taskID),
+		"feature:   "+m.taskLabel(a.Feature),
+		"pr:        "+dash(a.PR),
+		"workspace: "+dash(a.Workspace),
+		"container: "+m.agentContainer(a),
+	)
 	if a.Name == m.selID() { // dial-ins are fetched for the selected agent only
 		ls = append(ls, clientLines(m.agentClients)...)
 	}

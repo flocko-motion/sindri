@@ -40,6 +40,10 @@ type AgentView struct {
 	// — it is handed no new work in between. Beside Status like Retired, and for the same reason:
 	// it is true of a working agent too, and Status can only say one thing at a time.
 	ClearArmed bool `json:"clearArmed,omitempty"`
+	// Escalation is what an escalated agent asked the user to decide ("" when it is not escalated;
+	// Status then reads StatusEscalated). Carried on the board so the question is readable without
+	// attaching to the pane — several escalations can be triaged before sitting down with one.
+	Escalation string `json:"escalation,omitempty"`
 }
 
 // RepoDocState is a repo's architecture-doc situation: the path in effect, and Advice ("" when fine).

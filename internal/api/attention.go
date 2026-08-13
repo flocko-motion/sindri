@@ -11,16 +11,23 @@ const (
 	StatusSignedOut = "signed-out" // the pane says to run /login, so nothing typed there is sent
 	StatusFull      = "full"       // past its context window holding nothing: no work until cleared
 	StatusStalled   = "stalled"    // holds work, screen standing still: it believes it is working
+	// StatusEscalated: it asked the user to decide something and stopped on the answer. A word of its
+	// own, not blocked: a runtime block is answered in the pane, this is answered and then resumed.
+	StatusEscalated = "escalated"
 )
 
 // AgentNeedsUser reports an agent whose state resolves ONLY IF A HUMAN ACTS. That is the rule, and
-// these four words are what satisfies it today; a status added later is asked the same question.
-// Idle never counts: waiting for work is normal, and idling beside claimable work is the hub's to
-// nudge. An api-error is the hub's to resend, and once resending fails the board says stalled.
-// Retired is checked ahead of the status because it REACHES the counting states — a retired agent
-// keeps running, so it fills up or stalls, and a marker would then never clear (the stall nudge
-// exempts it likewise: -> workflow.parkedByTheHub).
+// these five words satisfy it today; a status added later is asked the same question. Idle never
+// counts: waiting for work is normal, and idling beside claimable work is the hub's to nudge. An
+// api-error is the hub's to resend, and once resending fails the board says stalled. Retired is
+// checked ahead of the status because it REACHES the counting states — a retired agent keeps running,
+// so it fills up or stalls, and a marker would never clear (-> workflow.parkedByTheHub, same rule).
 func AgentNeedsUser(a AgentView) bool {
+	// Ahead of retirement, unlike the rest: retirement reaches full and stalled by itself, but nothing
+	// about it asks a question, and a retired agent still finishes what it holds.
+	if a.Status == StatusEscalated {
+		return true
+	}
 	if a.Retired {
 		return false
 	}

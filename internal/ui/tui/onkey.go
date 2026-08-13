@@ -397,6 +397,9 @@ func (m *model) onKey(k string) tea.Cmd {
 					}
 					m.prView = it.value // PRs: diff ⇄ lint
 					m.detail.Resize(m.detail.Height, len(m.prContentLines()))
+				case "resume": // Agents: release an escalated agent (its own clear is `sindri resume`)
+					m.openResumeChoice(it.value)
+					return nil
 				case "path": // open a shell in the workspace
 					return tea.ExecProcess(shellAt(it.value), resumed)
 				case "url": // e.g. a GitHub issue: no browser in the pod's TUI, so copy it instead

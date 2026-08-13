@@ -5,7 +5,7 @@ import "testing"
 // TestNeedsUserIsEveryStateOnlyAHumanClears walks the states an agent can wear. The four that count
 // share one property and not a family resemblance: nothing the agent or the hub does resolves them.
 func TestNeedsUserIsEveryStateOnlyAHumanClears(t *testing.T) {
-	for _, s := range []string{StatusBlocked, StatusSignedOut, StatusFull, StatusStalled} {
+	for _, s := range []string{StatusBlocked, StatusSignedOut, StatusFull, StatusStalled, StatusEscalated} {
 		if !AgentNeedsUser(AgentView{Status: s}) {
 			t.Errorf("AgentNeedsUser(%q) = false — that agent holds its work and nobody but a human can move it", s)
 		}
@@ -39,6 +39,16 @@ func TestRetiredNeverCounts(t *testing.T) {
 		if AgentNeedsUser(AgentView{Status: s, Retired: true}) {
 			t.Errorf("a retired agent reading %q was wound down deliberately; the decision is made", s)
 		}
+	}
+}
+
+// TestARetiredAgentsQuestionStillCounts is the exception to the rule above, and it turns on WHO put
+// the agent in the state. Retirement is excluded because it reaches full and stalled by itself, so a
+// marker there would never clear — but nothing about winding an agent down asks a question in its
+// name, and a retired agent still finishes what it holds. Its question is unanswered either way.
+func TestARetiredAgentsQuestionStillCounts(t *testing.T) {
+	if !AgentNeedsUser(AgentView{Status: StatusEscalated, Retired: true}) {
+		t.Error("a retired agent that asked the user something is still waiting on the answer")
 	}
 }
 

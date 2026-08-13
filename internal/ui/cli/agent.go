@@ -145,20 +145,28 @@ func agentListCmd() *cobra.Command {
 
 // needsYouSummary names the agents that cannot move until the user acts, "" when none. Each of them
 // looks alive and holds its task, so a listing that ended at the rows reads as a working fleet.
+// An escalated one is quoted rather than named: it asked a question, and the question is the whole
+// of what the user has to act on — having to attach to read it is what makes triage expensive.
 func needsYouSummary(agents []api.AgentView) string {
 	var stuck []string
 	for _, a := range agents {
-		if api.AgentNeedsUser(a) {
+		switch {
+		case !api.AgentNeedsUser(a):
+		case a.Escalation != "":
+			stuck = append(stuck, fmt.Sprintf("%s asks: %s", a.Name, oneLine(a.Escalation, 120)))
+		default:
 			stuck = append(stuck, fmt.Sprintf("%s (%s)", a.Name, a.Status))
 		}
 	}
 	if len(stuck) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%d agent(s) need you: %s — attach to see what each is stopped on "+
+	return fmt.Sprintf("%d agent(s) need you:\n  %s\nAttach to see what each is stopped on "+
 		"(`sindri agent attach <name>`). A full one wants clearing "+
 		"(`sindri agent clear-context <name>`), a signed-out one a restart once the host has "+
-		"logged in (`sindri agent restart <name>`).", len(stuck), strings.Join(stuck, ", "))
+		"logged in (`sindri agent restart <name>`). An escalated one wants its question answered — "+
+		"`sindri agent tell <name> \"<answer>\"` and it resumes itself; `sindri agent resume <name>` "+
+		"releases one that cannot.", len(stuck), strings.Join(stuck, "\n  "))
 }
 
 // agentStatsCmd is the view for tuning per-agent memory; down agents have no VM to sample.
@@ -263,35 +271,6 @@ func agentMemoryCmd() *cobra.Command {
 	}
 }
 
-// agentRetireCmd winds an agent down without interrupting it: the point is to stop it AFTER the work
-// in hand, so the pod keeps running and only the next assignment is withheld.
-func agentRetireCmd() *cobra.Command {
-	var back bool
-	c := &cobra.Command{
-		Use: "retire <name>", Short: "Assign this agent no further work (it finishes what it holds)", Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			return withAgent(args[0], func(b backend, a *api.AgentView) error {
-				if err := b.SetRetired(a.Name, !back); err != nil {
-					return err
-				}
-				if back {
-					fmt.Fprintf(os.Stderr, "%s takes work again\n", a.Name)
-					return nil
-				}
-				held := "it holds nothing, so it is done now"
-				if a.Task != "" || a.Feature != "" || a.PR != "" {
-					held = "it will finish what it holds first"
-				}
-				fmt.Fprintf(os.Stderr, "%s retired: no new work — %s. Stop it with 'sindri agent stop %s', "+
-					"or bring it back with 'sindri agent retire %s --back'\n", a.Name, held, a.Name, a.Name)
-				return nil
-			})
-		},
-	}
-	c.Flags().BoolVar(&back, "back", false, "put the agent back in service")
-	return c
-}
-
 func agentDeleteCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "delete <name>", Aliases: []string{"rm"}, Short: "Delete an agent (container, socket, worktree, identity), or remove an orphan", Args: cobra.ExactArgs(1),
@@ -390,47 +369,6 @@ func agentStopCmd() *cobra.Command {
 				return nil
 			})
 		},
-	}
-}
-
-// agentClearContextCmd arms a context clear — the remedy for a full agent. The user typing this
-// command IS the confirmation (the convention `agent delete` uses for its own irreversible action,
-// no extra prompt on top of it). WHEN it lands is the agent's answer, not a flag: it fires at the
-// next leaf boundary, which for an agent holding nothing is now.
-func agentClearContextCmd() *cobra.Command {
-	var cancel bool
-	c := &cobra.Command{
-		Use: "clear-context <name>", Short: "Clear the agent's session at its next leaf boundary (--cancel takes it back)", Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			return withAgent(args[0], func(b backend, a *api.AgentView) error {
-				if err := b.SetClearArmed(a.Name, !cancel); err != nil {
-					return err
-				}
-				if cancel {
-					fmt.Fprintf(os.Stderr, "%s: context clear cancelled\n", a.Name)
-					return nil
-				}
-				fmt.Fprintf(os.Stderr, "%s: %s. Take it back with 'sindri agent clear-context %s --cancel'\n",
-					a.Name, clearLandsWhen(*a), a.Name)
-				return nil
-			})
-		},
-	}
-	c.Flags().BoolVar(&cancel, "cancel", false, "disarm a clear that has not fired yet")
-	return c
-}
-
-// clearLandsWhen words api.ClearWaitsFor for a listing: what it waits on comes from the rule, and
-// only the sentence is this front-end's.
-func clearLandsWhen(a api.AgentView) string {
-	held := api.ClearWaitsFor(a)
-	switch {
-	case held == "":
-		return "context cleared now — it picks up its directive fresh"
-	case a.Role == "reviewer":
-		return "context clear armed — it fires when it delivers its verdict on " + held
-	default:
-		return "context clear armed — it fires when it finishes " + held
 	}
 }
 
@@ -597,6 +535,11 @@ func agentInfoCmd() *cobra.Command {
 				// it fires, so the only way to know it is set is to be told.
 				if found.ClearArmed {
 					fmt.Printf("clear:     ␡ armed — %s\n", clearLandsWhen(*found))
+				}
+				// The question in full, unwrapped: an escalated agent is stopped on THIS, and it is
+				// the reason to open the pane rather than something to go looking for once inside it.
+				if found.Escalation != "" {
+					fmt.Printf("escalated: %s\n", found.Escalation)
 				}
 				// engine + the exact runtime instance (id, image, cpus, memory limit, host pid)
 				if inst, err := b.Instance(found.Name); err == nil && inst != "" {
