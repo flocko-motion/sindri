@@ -73,7 +73,7 @@ func runEngine(t *testing.T) (*Engine, *store.ProjectStore) {
 
 func TestScheduleRunThenFleetRunsRanksIt(t *testing.T) {
 	e, _ := runEngine(t)
-	r, err := e.ScheduleRun("repo", "bombur", "go test ./...", "")
+	r, err := e.ScheduleRun("repo", "bombur", "go test ./...", "", "")
 	if err != nil {
 		t.Fatalf("ScheduleRun: %v", err)
 	}
@@ -94,11 +94,11 @@ func TestScheduleRunThenFleetRunsRanksIt(t *testing.T) {
 
 func TestRunInfoCapsOutputAndReportsPosition(t *testing.T) {
 	e, ps := runEngine(t)
-	r, err := e.ScheduleRun("repo", "bombur", "go test", "")
+	r, err := e.ScheduleRun("repo", "bombur", "go test", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.ScheduleRun("repo", "nori", "go build", "P0"); err != nil { // ranked ahead of r
+	if _, err := e.ScheduleRun("repo", "nori", "go build", "P0", ""); err != nil { // ranked ahead of r
 		t.Fatal(err)
 	}
 	d, err := e.RunInfo("repo", r.ID)
@@ -116,7 +116,7 @@ func TestRunInfoCapsOutputAndReportsPosition(t *testing.T) {
 
 func TestCancelRun(t *testing.T) {
 	e, ps := runEngine(t)
-	r, err := e.ScheduleRun("repo", "bombur", "go test", "")
+	r, err := e.ScheduleRun("repo", "bombur", "go test", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestCancelRun(t *testing.T) {
 
 func TestReprioritiseRun(t *testing.T) {
 	e, ps := runEngine(t)
-	r, err := e.ScheduleRun("repo", "bombur", "go test", "")
+	r, err := e.ScheduleRun("repo", "bombur", "go test", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestReprioritiseRun(t *testing.T) {
 
 func TestRunProjectFindsTheOwner(t *testing.T) {
 	e, _ := runEngine(t)
-	r, err := e.ScheduleRun("repo", "bombur", "go test", "")
+	r, err := e.ScheduleRun("repo", "bombur", "go test", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -142,6 +142,7 @@ CREATE TABLE IF NOT EXISTS runs (
   command     TEXT NOT NULL DEFAULT '',
   status      TEXT NOT NULL DEFAULT 'queued', -- queued|running|passed|failed|timed_out|cancelled
   priority    TEXT NOT NULL DEFAULT '',       -- P0..P4, same vocabulary as tasks; '' sorts last
+  timeout     TEXT NOT NULL DEFAULT '',       -- agent-requested budget, e.g. '5m'; '' = the hub's hard cap
   output      TEXT NOT NULL DEFAULT '',
   created_at  TEXT NOT NULL DEFAULT '',
   started_at  TEXT NOT NULL DEFAULT '',

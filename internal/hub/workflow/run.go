@@ -1,10 +1,9 @@
 // package: hub/workflow / run
 // type:    logic (the run queue: schedule, list with derived position, cancel, reprioritise)
-// job:     every operation on a queued or finished run, human and agent alike. The queue is
-// ONE slot across the whole fleet, not per project, so a run's position is ranked
-// against every project's queued runs together, never just its own.
-// limits:  scheduling and listing only; actually executing a run (containers, cache, the
-// 15-minute cap) is sd-938f23's, and enforcing one-at-a-time is sd-bf837f's.
+// job:     every operation on a queued or finished run, human and agent alike. The queue is ONE
+// slot across the whole fleet, ranked together, never per project. Execution itself
+// lives in execrun.go.
+// limits:  scheduling, listing, and picking the next to run; durable crash-recovery is sd-bf837f's.
 package workflow
 
 import (
@@ -14,6 +13,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/registry"
@@ -48,15 +48,15 @@ func newRunID() (string, error) {
 	return "run-" + hex.EncodeToString(b[:]), nil
 }
 
-// ScheduleRun queues a command for later execution — the store row only; there is nothing yet
-// to execute it (-> sd-938f23).
-func (e *Engine) ScheduleRun(project, agent, command, priority string) (api.Run, error) {
+// ScheduleRun queues a command for later execution — the store row only; execution (-> ExecuteRun)
+// is a separate step, triggered by the fleet's run watcher once this run reaches the front.
+func (e *Engine) ScheduleRun(project, agent, command, priority, timeout string) (api.Run, error) {
 	id, err := newRunID()
 	if err != nil {
 		return api.Run{}, err
 	}
 	ps := e.store.For(project)
-	if err := ps.PutRun(store.Run{ID: id, Agent: agent, Command: command, Status: "queued", Priority: priority}); err != nil {
+	if err := ps.PutRun(store.Run{ID: id, Agent: agent, Command: command, Status: "queued", Priority: priority, Timeout: timeout}); err != nil {
 		return api.Run{}, err
 	}
 	r, _, err := ps.GetRun(id)
@@ -66,14 +66,21 @@ func (e *Engine) ScheduleRun(project, agent, command, priority string) (api.Run,
 
 // CmdScheduleRun is the agent-facing verb: queue a command instead of running it in the pod.
 // Returns AT ONCE with the run's position — the same act-report-idle contract as submit — since
-// the result (pass, fail, or timeout) only exists once something executes it.
+// the result (pass, fail, or timeout) only exists once something executes it. An optional leading
+// --timeout=<duration> narrows the hub's hard cap; anything else, or nothing, defers to it.
 func (e *Engine) CmdScheduleRun(c registry.Caller, args []string, out io.Writer) (int, error) {
+	timeout := ""
+	if len(args) > 0 {
+		if t, ok := strings.CutPrefix(args[0], "--timeout="); ok {
+			timeout, args = t, args[1:]
+		}
+	}
 	cmd := strings.TrimSpace(strings.Join(args, " "))
 	if cmd == "" {
-		fmt.Fprintln(out, "usage: run <command...> — queues it; see your brief for when that's worth it over running it yourself")
+		fmt.Fprintln(out, "usage: run [--timeout=<duration>] <command...> — queues it; see your brief for when that's worth it over running it yourself")
 		return 2, nil
 	}
-	r, err := e.ScheduleRun(c.Project, c.Agent, cmd, "")
+	r, err := e.ScheduleRun(c.Project, c.Agent, cmd, "", timeout)
 	if err != nil {
 		return 1, err
 	}
@@ -81,7 +88,8 @@ func (e *Engine) CmdScheduleRun(c registry.Caller, args []string, out io.Writer)
 	if all, err := e.store.AllRuns("queued"); err == nil {
 		pos = queuePositions(all)[r.ID]
 	}
-	fmt.Fprintf(out, "%s queued at position %d. You'll be told the result — carry on with other work; a position is not a failure, so don't retry.\n", r.ID, pos)
+	fmt.Fprintf(out, "%s queued at position %d, budget %s. You'll be told the result — carry on with other work; a position is not a failure, so don't retry.\n",
+		r.ID, pos, runTimeout(r.Timeout))
 	return 0, nil
 }
 
@@ -136,6 +144,22 @@ func (e *Engine) FleetRuns() ([]api.Run, error) {
 	return out, nil
 }
 
+// NextQueuedRun returns the fleet's next run to execute — position 1 in the same ranking `run
+// list` shows an agent. ok is false when nothing is queued.
+func (e *Engine) NextQueuedRun() (project, id string, ok bool) {
+	all, err := e.store.AllRuns("queued")
+	if err != nil || len(all) == 0 {
+		return "", "", false
+	}
+	pos := queuePositions(all)
+	for _, r := range all {
+		if pos[r.ID] == 1 {
+			return r.Project, r.ID, true
+		}
+	}
+	return "", "", false
+}
+
 // RunProject finds a run's owner by id, matching PRProject — the caller's own project wins any
 // id clash.
 func (e *Engine) RunProject(fallback, id string) string {
@@ -171,8 +195,9 @@ func (e *Engine) RunInfo(project, id string) (api.RunDetail, error) {
 	return api.RunDetail{Run: r, Output: capRunOutput(output)}, nil
 }
 
-// CancelRun withdraws a queued or running run. Flips the status only: actually stopping a
-// container already executing is sd-938f23's to wire in once execution exists.
+// CancelRun withdraws a queued or running run. Flips the status only: killing a container already
+// executing out from under ExecuteRun, without racing its own timeout/finish path, is sd-bf837f's
+// — "cancellable" is that subtask's word for it.
 func (e *Engine) CancelRun(project, id string) error {
 	ps := e.store.For(project)
 	r, ok, err := ps.GetRun(id)
@@ -211,4 +236,39 @@ func (e *Engine) ReprioritiseRun(project, id, priority string) error {
 	}
 	e.deps.Notify()
 	return nil
+}
+
+// CmdShow dispatches the "show" verb by id shape: a run id shows a run's status and stored
+// output, everything else a PR's diff — one verb, so fetching a run's full log on request
+// (-> sd-938f23's "let it be fetched on request") needs no separate command to remember.
+func (e *Engine) CmdShow(c registry.Caller, args []string, out io.Writer) (int, error) {
+	if len(args) > 0 && strings.HasPrefix(args[0], "run-") {
+		return e.CmdShowRun(c, args, out)
+	}
+	return e.CmdShowPR(c, args, out)
+}
+
+// CmdShowRun prints a run's status, timing, and capped stored output — the on-request half of
+// "inject a summary, store the full log" (-> MsgRunFinished carries the short form at finish time).
+func (e *Engine) CmdShowRun(c registry.Caller, args []string, out io.Writer) (int, error) {
+	if len(args) == 0 {
+		fmt.Fprintln(out, "usage: show <run-id>")
+		return 2, nil
+	}
+	project := e.RunProject(c.Project, args[0])
+	d, err := e.RunInfo(project, args[0])
+	if err != nil {
+		return 1, err
+	}
+	r := d.Run
+	fmt.Fprintf(out, "%s  [%s]  %s\n", r.ID, r.Status, r.Command)
+	if st, err1 := time.Parse(time.RFC3339, r.StartedAt); err1 == nil {
+		if fn, err2 := time.Parse(time.RFC3339, r.FinishedAt); err2 == nil {
+			fmt.Fprintf(out, "duration: %s\n", fn.Sub(st).Round(time.Second))
+		}
+	}
+	if d.Output != "" {
+		fmt.Fprintf(out, "\n%s\n", strings.TrimSpace(d.Output))
+	}
+	return 0, nil
 }

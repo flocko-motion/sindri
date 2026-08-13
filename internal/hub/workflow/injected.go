@@ -103,6 +103,21 @@ func MsgVerdictRecorded(prID string) string {
 	return fmt.Sprintf("[hub] Verdict on %s recorded. Run `sindri` for your next review.", prID)
 }
 
+// MsgRunFinished is what a run's scheduling agent is told — a summary, never the full log:
+// injecting the whole output is how a 900k-token session happens, and one already has. The full
+// log stays on the run record, fetched with `show <run-id>`.
+func MsgRunFinished(id, status string, elapsed, budget time.Duration) string {
+	verb := status
+	if status == "timed_out" {
+		verb = "timed out"
+	}
+	usage := ""
+	if budget > 0 {
+		usage = fmt.Sprintf(" (%s of its %s budget)", elapsed.Round(time.Second), budget.Round(time.Second))
+	}
+	return fmt.Sprintf("[hub] %s %s%s. Full output: `sindri show %s`.", id, verb, usage, id)
+}
+
 // ReplyNothingToRevoke answers `revoke` with no PR out — nothing was withdrawn, so it says what the
 // agent's actual situation is rather than reporting a success that did not happen.
 const ReplyNothingToRevoke = "Nothing to withdraw — you have no pull request out. Run `sindri` for your current directive."

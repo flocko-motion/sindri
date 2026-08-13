@@ -46,6 +46,7 @@ type Hub struct {
 	refs     *refwatch         // reference-branch drift, on a slow loop (internal/hub/refwatch.go)
 	creds    *credwatch        // agent credential upkeep from the host (internal/hub/credwatch.go)
 	stalls   *stallwatch       // held work nobody is working on (internal/hub/stallwatch.go)
+	runs     *runwatch         // executes the run queue, one at a time (internal/hub/runwatch.go)
 }
 
 // agentKey identifies an agent within a project (a repoTag), one hub serving many repos.
@@ -103,6 +104,8 @@ func New() (*Hub, error) {
 	h.creds = newCredwatch(h)
 	// After watch: it reads the watchdog's idle dwell, and after wf: it nudges through it.
 	h.stalls = newStallwatch(h)
+	// After wf: it drives NextQueuedRun/ExecuteRun through it.
+	h.runs = newRunwatch(h)
 	return h, nil
 }
 
@@ -159,6 +162,7 @@ func (h *Hub) Close() error {
 	h.refs.close()
 	h.creds.close()
 	h.stalls.close()
+	h.runs.close()
 	h.agentCh.CloseAll()
 	server.FlushAccessLog() // emit any open access-log run before we go quiet
 	return h.store.Close()

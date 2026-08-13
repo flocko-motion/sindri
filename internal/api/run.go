@@ -16,6 +16,9 @@ type Run struct {
 	// Priority is a P-code (P0…P4), the same vocabulary tasks use — the queue runs its highest
 	// first, creation order breaking ties. "" sorts last.
 	Priority string `json:"priority,omitempty"`
+	// Timeout is the agent-requested budget (a Go duration string, e.g. "5m"); "" defers to the
+	// hub's hard cap. It never overrides that cap — only narrows it.
+	Timeout string `json:"timeout,omitempty"`
 	// Position is this run's place among currently queued runs, 1 = next; 0 once it is no longer
 	// queued. Derived by the hub at read time, never stored — the queue's real order is a live
 	// fact, not a column that could disagree with it.
