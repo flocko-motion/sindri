@@ -1,20 +1,22 @@
 // package: hub/workflow / execrun
 // type:    logic (execute one queued run)
-// job:     run a single queued run to completion: a fresh, memory-capped container from
-// the project's own image, a materialized (not live) copy of the agent's worktree,
-// a persistent build cache, and a hard 15-minute cap — then record the outcome and
-// tell the scheduling agent a summary, never the full log.
-// limits:  one run, synchronously, start to finish. Picking which run goes next
-// (-> NextQueuedRun) and enforcing only one runs at a time (-> hub/runwatch.go)
-// are the caller's.
+// job:     run one queued run to completion — fresh capped container, materialized worktree,
+// build cache, 15-minute cap — plus cancelling one in flight and reconciling one
+// orphaned by a hub restart.
+// limits:  one run, synchronously; picking the next and one-at-a-time are the caller's
+// (-> NextQueuedRun, hub/runwatch.go).
 package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/flo-at/sindri/internal/api"
@@ -40,8 +42,7 @@ func runTimeout(requested string) time.Duration {
 }
 
 // ExecuteRun runs a queued run to completion, always leaving it in a terminal status with output
-// on record. A returned error means the run was never attempted at all — its own outcome (a
-// failing test, a timeout) is recorded, not returned.
+// on record. A returned error means the run was never attempted at all.
 func (e *Engine) ExecuteRun(project, id string) error {
 	ps := e.store.For(project)
 	r, ok, err := ps.GetRun(id)
@@ -51,32 +52,32 @@ func (e *Engine) ExecuteRun(project, id string) error {
 	if !ok {
 		return fmt.Errorf("no such run %q", id)
 	}
-	root := e.deps.ProjectRoot(project)
-	a, ok, err := ps.GetAgent(r.Agent)
-	if err != nil {
-		return err
+	if r.Status != "queued" {
+		return nil // already settled (e.g. cancelled) before this reached the front
 	}
-	if !ok {
-		return e.finishRun(ps, project, r, "failed", fmt.Sprintf("run: agent %s no longer exists\n", r.Agent), 0, 0)
+	if reason := e.staleReason(ps, r); reason != "" {
+		return e.finishRun(ps, project, r, "cancelled", "run: dropped before executing — "+reason+"\n", 0, 0, -1)
 	}
 
+	root := e.deps.ProjectRoot(project)
+	a, _, _ := ps.GetAgent(r.Agent) // existence already checked by staleReason
 	mwt, err := repo.MaterializeRun(root, filepath.Join(root, a.Workspace), id)
 	if err != nil {
-		return e.finishRun(ps, project, r, "failed", fmt.Sprintf("run: could not prepare a workspace: %s\n", err), 0, 0)
+		return e.finishRun(ps, project, r, "failed", fmt.Sprintf("run: could not prepare a workspace: %s\n", err), 0, 0, -1)
 	}
 	defer func() { _ = repo.RemoveRunMaterialization(mwt) }()
 
 	cfg, err := e.deps.ProjectConfig(project)
 	if err != nil {
-		return e.finishRun(ps, project, r, "failed", fmt.Sprintf("run: could not read project config: %s\n", err), 0, 0)
+		return e.finishRun(ps, project, r, "failed", fmt.Sprintf("run: could not read project config: %s\n", err), 0, 0, -1)
 	}
 	imageRef, err := container.EnsureImage(root, config.Abs(root, cfg.Containerfile), io.Discard)
 	if err != nil {
-		return e.finishRun(ps, project, r, "failed", fmt.Sprintf("run: could not prepare the image: %s\n", err), 0, 0)
+		return e.finishRun(ps, project, r, "failed", fmt.Sprintf("run: could not prepare the image: %s\n", err), 0, 0, -1)
 	}
 	cacheMounts, cacheEnv, err := runCacheMounts(project)
 	if err != nil {
-		return e.finishRun(ps, project, r, "failed", fmt.Sprintf("run: could not prepare the build cache: %s\n", err), 0, 0)
+		return e.finishRun(ps, project, r, "failed", fmt.Sprintf("run: could not prepare the build cache: %s\n", err), 0, 0, -1)
 	}
 
 	if err := ps.SetRunStatus(id, "running"); err != nil {
@@ -97,7 +98,7 @@ func (e *Engine) ExecuteRun(project, id string) error {
 		Memory:     container.DefaultMemory(),     // one limit to tune, the same as an agent's default (-> agent.MemoryOrDefault)
 	}
 	if err := container.Run(opts); err != nil {
-		return e.finishRun(ps, project, r, "failed", fmt.Sprintf("run: could not start a container: %s\n", err), 0, 0)
+		return e.finishRun(ps, project, r, "failed", fmt.Sprintf("run: could not start a container: %s\n", err), 0, 0, -1)
 	}
 	defer func() { _ = container.Rm(name) }()
 
@@ -108,28 +109,53 @@ func (e *Engine) ExecuteRun(project, id string) error {
 	out, execErr := container.ExecContext(ctx, name, "sh", "-c", r.Command)
 	elapsed := time.Since(start)
 
-	status := "passed"
+	status, exitCode := "passed", 0
 	switch {
+	case e.runCancels.consume(id):
+		status, exitCode = "cancelled", -1
 	case ctx.Err() == context.DeadlineExceeded:
-		status = "timed_out"
+		status, exitCode = "timed_out", -1
 	case execErr != nil:
-		status = "failed"
+		status, exitCode = "failed", exitCodeOf(execErr)
 	}
 	output := string(out)
-	if status == "timed_out" {
+	switch status {
+	case "timed_out":
 		output += fmt.Sprintf("\nrun: exceeded its %s budget and was stopped — the container is gone; nothing from it keeps running.\n", budget)
+	case "cancelled":
+		output += "\nrun: cancelled while executing — the container was removed.\n"
 	}
-	return e.finishRun(ps, project, r, status, output, elapsed, budget)
+	return e.finishRun(ps, project, r, status, output, elapsed, budget, exitCode)
 }
 
-// finishRun records a run's outcome (full, uncapped output; terminal status) and injects a
-// summary into the scheduling agent's session — never the full log, which is what turns a large
-// run into an oversized session (-> MsgRunFinished).
-func (e *Engine) finishRun(ps *store.ProjectStore, project string, r api.Run, status, output string, elapsed, budget time.Duration) error {
-	if err := ps.SetRunOutput(r.ID, output); err != nil {
-		return err
+// exitCodeOf reports a failed exec's process exit code, or -1 when none is available (the runtime
+// itself failed to run the command at all, rather than the command running and exiting nonzero).
+func exitCodeOf(err error) int {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
 	}
-	if err := ps.SetRunStatus(r.ID, status); err != nil {
+	return -1
+}
+
+// staleReason reports why a queued run should be dropped rather than executed, or "" if it is
+// still good — cheaper to check than to materialize, build, and run against a workspace the
+// scheduling agent has since left behind.
+func (e *Engine) staleReason(ps *store.ProjectStore, r api.Run) string {
+	_, ok, err := ps.GetAgent(r.Agent)
+	if err != nil || !ok {
+		return fmt.Sprintf("agent %s no longer exists", r.Agent)
+	}
+	if st, err := ps.GetState(r.Agent); err == nil && r.Task != "" && st.Task != r.Task {
+		return fmt.Sprintf("agent %s has moved on to a different task since this was queued", r.Agent)
+	}
+	return ""
+}
+
+// finishRun records a run's terminal outcome — status, full uncapped output, exit code — and
+// injects a summary into the scheduling agent's session, never the full log (-> MsgRunFinished).
+func (e *Engine) finishRun(ps *store.ProjectStore, project string, r api.Run, status, output string, elapsed, budget time.Duration, exitCode int) error {
+	if err := ps.SetRunResult(r.ID, status, output, exitCode); err != nil {
 		return err
 	}
 	e.deps.Notify()
@@ -137,10 +163,82 @@ func (e *Engine) finishRun(ps *store.ProjectStore, project string, r api.Run, st
 	return nil
 }
 
-// runCacheMounts returns a run's persistent build-cache mounts and the env vars pointing Go at
-// them, creating the host directories on demand — without one, a cold container turns a
-// 30-second suite into a multi-minute rebuild every run. Safe to share across runs unguarded:
-// with one run at a time fleet-wide, there is never a second writer.
+// runCancelSet tracks run ids killed mid-execution, so the blocked ExecContext call can tell a
+// kill from an ordinary failure without a second write racing ExecuteRun's own finish.
+type runCancelSet struct {
+	mu  sync.Mutex
+	ids map[string]bool
+}
+
+func (s *runCancelSet) request(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ids == nil {
+		s.ids = map[string]bool{}
+	}
+	s.ids[id] = true
+}
+
+// consume reports whether id was requested, clearing it either way so the set never grows past
+// however many runs are cancelled and not yet finished (at most one, at concurrency one).
+func (s *runCancelSet) consume(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ok := s.ids[id]
+	delete(s.ids, id)
+	return ok
+}
+
+// CancelRun withdraws a queued run, or kills a running one's container so the slot frees now
+// rather than waiting out its timeout — leaving ExecuteRun's own goroutine to record the finish.
+func (e *Engine) CancelRun(project, id string) error {
+	ps := e.store.For(project)
+	r, ok, err := ps.GetRun(id)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("no such run %q", id)
+	}
+	if !api.RunOpen(r) {
+		return fmt.Errorf("%s is %s — already finished, nothing to cancel", id, r.Status)
+	}
+	if r.Status == "running" {
+		e.runCancels.request(id)
+		_ = container.Rm(e.deps.Container(project, "run-"+id))
+		return nil
+	}
+	if err := ps.SetRunStatus(id, "cancelled"); err != nil {
+		return err
+	}
+	e.deps.Notify()
+	return nil
+}
+
+// ReconcileRunningRuns runs at hub startup: a run still "running" was orphaned by the last hub
+// dying mid-execution — the ReconcileMergingPRs precedent, applied here so a ghost never sits on
+// the fleet's only slot forever.
+func (e *Engine) ReconcileRunningRuns() {
+	runs, err := e.store.AllRuns("running")
+	if err != nil {
+		log.Printf("hub: reconcile running runs: %v", err)
+		return
+	}
+	for _, r := range runs {
+		ps := e.store.For(r.Project)
+		_ = container.Rm(e.deps.Container(r.Project, "run-"+r.ID))
+		note := "run: hub restarted mid-run — outcome unknown; its container has been removed.\n"
+		if err := e.finishRun(ps, r.Project, r, "failed", note, 0, 0, -1); err != nil {
+			log.Printf("hub: reconcile run %s: %v", r.ID, err)
+			continue
+		}
+		log.Printf("hub: %s was running at restart → failed (outcome unknown)", r.ID)
+	}
+}
+
+// runCacheMounts returns a run's persistent build-cache mounts and the Go env pointing at them,
+// creating the host directories on demand — safe to share unguarded since only one run ever
+// executes at a time.
 func runCacheMounts(project string) ([]container.Mount, map[string]string, error) {
 	base := filepath.Join(paths.StateDir(), project, "run-cache")
 	specs := []struct{ dir, container string }{

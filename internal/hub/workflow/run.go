@@ -49,14 +49,22 @@ func newRunID() (string, error) {
 }
 
 // ScheduleRun queues a command for later execution — the store row only; execution (-> ExecuteRun)
-// is a separate step, triggered by the fleet's run watcher once this run reaches the front.
+// is a separate step, triggered by the fleet's run watcher once this run reaches the front. It
+// snapshots the agent's current workspace and task: a dequeue that finds the agent has since
+// moved on to something else (-> staleReason) drops the run rather than spend the only slot
+// testing against a workspace this was never meant for.
 func (e *Engine) ScheduleRun(project, agent, command, priority, timeout string) (api.Run, error) {
 	id, err := newRunID()
 	if err != nil {
 		return api.Run{}, err
 	}
 	ps := e.store.For(project)
-	if err := ps.PutRun(store.Run{ID: id, Agent: agent, Command: command, Status: "queued", Priority: priority, Timeout: timeout}); err != nil {
+	a, _, _ := ps.GetAgent(agent)
+	st, _ := ps.GetState(agent)
+	if err := ps.PutRun(store.Run{
+		ID: id, Agent: agent, Command: command, Status: "queued", Priority: priority, Timeout: timeout,
+		Workspace: a.Workspace, Task: st.Task,
+	}); err != nil {
 		return api.Run{}, err
 	}
 	r, _, err := ps.GetRun(id)
@@ -193,28 +201,6 @@ func (e *Engine) RunInfo(project, id string) (api.RunDetail, error) {
 	}
 	output, _ := ps.RunOutput(id)
 	return api.RunDetail{Run: r, Output: capRunOutput(output)}, nil
-}
-
-// CancelRun withdraws a queued or running run. Flips the status only: killing a container already
-// executing out from under ExecuteRun, without racing its own timeout/finish path, is sd-bf837f's
-// — "cancellable" is that subtask's word for it.
-func (e *Engine) CancelRun(project, id string) error {
-	ps := e.store.For(project)
-	r, ok, err := ps.GetRun(id)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("no such run %q", id)
-	}
-	if !api.RunOpen(r) {
-		return fmt.Errorf("%s is %s — already finished, nothing to cancel", id, r.Status)
-	}
-	if err := ps.SetRunStatus(id, "cancelled"); err != nil {
-		return err
-	}
-	e.deps.Notify()
-	return nil
 }
 
 // ReprioritiseRun moves a queued run within the queue. Refused once it is no longer queued —

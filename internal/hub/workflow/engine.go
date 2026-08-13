@@ -92,11 +92,12 @@ func (e *Engine) clearArmed(project, name string) bool {
 // Engine is the workflow orchestrator: it owns the store and drives the lifecycle
 // steps, reaching the rest of the hub through Deps.
 type Engine struct {
-	store   *store.Store
-	deps    Deps
-	sources []tasks.Source // external task sources, wired in at New; ownedSource is always added per-project
-	gates   []gate.Gate    // submit-path quality gates, wired in via WithGates; openspec today
-	pre     preflight      // serialises the reference-move PR checks (-> prcheck.go)
+	store      *store.Store
+	deps       Deps
+	sources    []tasks.Source // external task sources, wired in at New; ownedSource is always added per-project
+	gates      []gate.Gate    // submit-path quality gates, wired in via WithGates; openspec today
+	pre        preflight      // serialises the reference-move PR checks (-> prcheck.go)
+	runCancels runCancelSet   // run ids killed mid-execution (-> execrun.go)
 }
 
 // New builds the workflow engine over the hub's store, its Deps implementation, and the external

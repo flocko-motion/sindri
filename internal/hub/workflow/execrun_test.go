@@ -1,7 +1,9 @@
 package workflow
 
 import (
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -50,9 +52,11 @@ func TestRunCacheMountsCreatesDirsAndPointsGoAtThem(t *testing.T) {
 	}
 }
 
-// TestExecuteRunFailsGracefullyWithNoAgent covers the case ExecuteRun must reject before ever
+// TestExecuteRunDropsAStaleRunWithNoAgent covers the case ExecuteRun must reject before ever
 // touching a container: the run's scheduling agent no longer exists (retired/deleted mid-queue).
-func TestExecuteRunFailsGracefullyWithNoAgent(t *testing.T) {
+// This is a drop, not a failure of the command — the run never got a chance to say anything about
+// itself, so "cancelled" is the honest status.
+func TestExecuteRunDropsAStaleRunWithNoAgent(t *testing.T) {
 	e, ps := runEngine(t)
 	r, err := e.ScheduleRun("repo", "ghost", "go test ./...", "", "")
 	if err != nil {
@@ -62,12 +66,70 @@ func TestExecuteRunFailsGracefullyWithNoAgent(t *testing.T) {
 		t.Fatalf("ExecuteRun: %v", err)
 	}
 	got, _, _ := ps.GetRun(r.ID)
-	if got.Status != "failed" {
-		t.Fatalf("status = %q, want failed", got.Status)
+	if got.Status != "cancelled" {
+		t.Fatalf("status = %q, want cancelled", got.Status)
+	}
+	if got.ExitCode != -1 {
+		t.Errorf("exit code = %d, want -1 (nothing ran)", got.ExitCode)
 	}
 	out, _ := ps.RunOutput(r.ID)
 	if !strings.Contains(out, "ghost") {
 		t.Errorf("output should name the missing agent: %q", out)
+	}
+}
+
+// TestExecuteRunDropsAStaleRunWhenTheAgentMovedOn: the agent scheduled this while holding task
+// td-1, but by the time it reached the front it holds td-2 — the workspace this run was meant to
+// test no longer exists there, so it must be dropped rather than spend the only slot on it.
+func TestExecuteRunDropsAStaleRunWhenTheAgentMovedOn(t *testing.T) {
+	e, ps := runEngine(t)
+	if err := ps.PutAgent(store.Agent{Name: "bombur", Role: "worker", Workspace: ".worktrees/bombur"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "td-1"}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := e.ScheduleRun("repo", "bombur", "go test ./...", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Task != "td-1" {
+		t.Fatalf("ScheduleRun should snapshot the agent's task: got %q, want td-1", r.Task)
+	}
+	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "td-2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ExecuteRun("repo", r.ID); err != nil {
+		t.Fatalf("ExecuteRun: %v", err)
+	}
+	got, _, _ := ps.GetRun(r.ID)
+	if got.Status != "cancelled" {
+		t.Fatalf("status = %q, want cancelled", got.Status)
+	}
+	out, _ := ps.RunOutput(r.ID)
+	if !strings.Contains(out, "moved on") {
+		t.Errorf("output should explain why: %q", out)
+	}
+}
+
+// TestExecuteRunSkipsAlreadySettledRuns: a run cancelled by the user between NextQueuedRun
+// choosing it and ExecuteRun actually starting must not be executed anyway.
+func TestExecuteRunSkipsAlreadySettledRuns(t *testing.T) {
+	e, ps := runEngine(t)
+	r, err := e.ScheduleRun("repo", "bombur", "go test", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetRunStatus(r.ID, "cancelled"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ExecuteRun("repo", r.ID); err != nil {
+		t.Fatalf("ExecuteRun: %v", err)
+	}
+	got, _, _ := ps.GetRun(r.ID)
+	out, _ := ps.RunOutput(r.ID)
+	if got.Status != "cancelled" || out != "" {
+		t.Fatalf("an already-settled run must be left alone: %+v, output %q", got, out)
 	}
 }
 
@@ -169,5 +231,80 @@ func TestCmdShowDispatchesRunsToCmdShowRun(t *testing.T) {
 	code, err = e.CmdShow(c, []string{"no-such-pr"}, &out)
 	if err == nil {
 		t.Fatalf("a non-run id with no matching PR should error, got code=%d", code)
+	}
+}
+
+func TestRunCancelSet(t *testing.T) {
+	var s runCancelSet
+	if s.consume("run-x") {
+		t.Fatal("nothing was requested yet")
+	}
+	s.request("run-x")
+	if !s.consume("run-x") {
+		t.Fatal("a requested id must be reported")
+	}
+	if s.consume("run-x") {
+		t.Fatal("consume must clear it — a second read must not see the same request again")
+	}
+}
+
+func TestExitCodeOf(t *testing.T) {
+	if got := exitCodeOf(nil); got != -1 {
+		t.Errorf("exitCodeOf(nil) = %d, want -1 (no error is not this function's job to see)", got)
+	}
+	if got := exitCodeOf(errors.New("boom")); got != -1 {
+		t.Errorf("a non-exec error should report -1, got %d", got)
+	}
+	cmd := exec.Command("sh", "-c", "exit 7")
+	err := cmd.Run()
+	if got := exitCodeOf(err); got != 7 {
+		t.Errorf("exitCodeOf(exit 7) = %d, want 7", got)
+	}
+}
+
+// TestCancelRunKillsARunningContainerWithoutWritingItsStatus: cancelling a running run must not
+// itself write the terminal status — that races ExecuteRun's own finish. It records the kill
+// request (for the executing goroutine to notice) and best-effort removes the container.
+func TestCancelRunKillsARunningContainerWithoutWritingItsStatus(t *testing.T) {
+	e, ps := runEngine(t)
+	r, err := e.ScheduleRun("repo", "bombur", "go test", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetRunStatus(r.ID, "running"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.CancelRun("repo", r.ID); err != nil {
+		t.Fatalf("CancelRun: %v", err)
+	}
+	got, _, _ := ps.GetRun(r.ID)
+	if got.Status != "running" {
+		t.Fatalf("status = %q, want still running — ExecuteRun's own goroutine records the finish", got.Status)
+	}
+	if !e.runCancels.consume(r.ID) {
+		t.Error("cancelling a running run must record the kill request")
+	}
+}
+
+// TestReconcileRunningRunsFailsAnOrphan mirrors ReconcileMergingPRs' precedent: a run still
+// "running" at hub startup has no container behind it any more, so it must not occupy the
+// fleet's only slot forever.
+func TestReconcileRunningRunsFailsAnOrphan(t *testing.T) {
+	e, ps := runEngine(t)
+	r, err := e.ScheduleRun("repo", "bombur", "go test", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetRunStatus(r.ID, "running"); err != nil {
+		t.Fatal(err)
+	}
+	e.ReconcileRunningRuns()
+	got, _, _ := ps.GetRun(r.ID)
+	if got.Status != "failed" {
+		t.Fatalf("status = %q, want failed", got.Status)
+	}
+	out, _ := ps.RunOutput(r.ID)
+	if !strings.Contains(out, "restart") {
+		t.Errorf("output should explain it was orphaned by a restart: %q", out)
 	}
 }

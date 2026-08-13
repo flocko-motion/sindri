@@ -535,8 +535,9 @@ func (h *Hub) Serve() error {
 			return err
 		}
 	}
-	h.wf.HealPlannerTasks()    // a planner can't hold a backlog task — release any stale claim
-	h.wf.ReconcileMergingPRs() // a merge in flight when we last died → merge-failed (outcome unknown)
+	h.wf.HealPlannerTasks()     // a planner can't hold a backlog task — release any stale claim
+	h.wf.ReconcileMergingPRs()  // a merge in flight when we last died → merge-failed (outcome unknown)
+	h.wf.ReconcileRunningRuns() // a run in flight when we last died → failed (outcome unknown)
 	// Seed each known project's task cache so its board is populated from the start.
 	// A per-project failure (typically no td store at that repo) is not fatal — the
 	// hub still serves agents/PRs — but it must be loud, not silent.

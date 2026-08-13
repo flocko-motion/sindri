@@ -143,6 +143,9 @@ CREATE TABLE IF NOT EXISTS runs (
   status      TEXT NOT NULL DEFAULT 'queued', -- queued|running|passed|failed|timed_out|cancelled
   priority    TEXT NOT NULL DEFAULT '',       -- P0..P4, same vocabulary as tasks; '' sorts last
   timeout     TEXT NOT NULL DEFAULT '',       -- agent-requested budget, e.g. '5m'; '' = the hub's hard cap
+  workspace   TEXT NOT NULL DEFAULT '',       -- the agent's worktree path at schedule time
+  task        TEXT NOT NULL DEFAULT '',       -- the agent's task at schedule time, for staleness at dequeue
+  exit_code   INTEGER NOT NULL DEFAULT 0,
   output      TEXT NOT NULL DEFAULT '',
   created_at  TEXT NOT NULL DEFAULT '',
   started_at  TEXT NOT NULL DEFAULT '',

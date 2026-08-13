@@ -30,13 +30,15 @@ func (p *ProjectStore) PutRun(r Run) error {
 	}
 	r.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	_, err := p.s.db.Exec(`
-		INSERT INTO runs (project,id,agent,command,status,priority,timeout,created_at,started_at,finished_at,updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?)
+		INSERT INTO runs (project,id,agent,command,status,priority,timeout,workspace,task,created_at,started_at,finished_at,updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(project,id) DO UPDATE SET
 			agent=excluded.agent, command=excluded.command, status=excluded.status,
-			priority=excluded.priority, timeout=excluded.timeout, started_at=excluded.started_at,
+			priority=excluded.priority, timeout=excluded.timeout, workspace=excluded.workspace,
+			task=excluded.task, started_at=excluded.started_at,
 			finished_at=excluded.finished_at, updated_at=excluded.updated_at`,
-		p.project, r.ID, r.Agent, r.Command, r.Status, r.Priority, r.Timeout, r.CreatedAt, r.StartedAt, r.FinishedAt, r.UpdatedAt)
+		p.project, r.ID, r.Agent, r.Command, r.Status, r.Priority, r.Timeout, r.Workspace, r.Task,
+		r.CreatedAt, r.StartedAt, r.FinishedAt, r.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("put run %s: %w", r.ID, err)
 	}
@@ -100,13 +102,14 @@ func (p *ProjectStore) SetRunStatus(id, status string) error {
 	return nil
 }
 
-// SetRunOutput stores a run's full console output, uncapped — capping happens only when it's
-// fetched (-> capRunOutput), so the record itself never loses anything.
-func (p *ProjectStore) SetRunOutput(id, output string) error {
-	_, err := p.s.db.Exec(`UPDATE runs SET output=?, updated_at=? WHERE project=? AND id=?`,
-		output, time.Now().UTC().Format(time.RFC3339), p.project, id)
+// SetRunResult records a run's terminal outcome in one write: status, its full uncapped output
+// (capping happens only when fetched, -> capRunOutput), and the command's exit code.
+func (p *ProjectStore) SetRunResult(id, status, output string, exitCode int) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := p.s.db.Exec(`UPDATE runs SET status=?, output=?, exit_code=?, finished_at=?, updated_at=? WHERE project=? AND id=?`,
+		status, output, exitCode, now, now, p.project, id)
 	if err != nil {
-		return fmt.Errorf("set run output %s: %w", id, err)
+		return fmt.Errorf("set run result %s: %w", id, err)
 	}
 	return nil
 }
@@ -137,7 +140,7 @@ func (p *ProjectStore) RunOutput(id string) (string, error) {
 	return out, nil
 }
 
-const runCols = `SELECT project,id,agent,command,status,priority,timeout,created_at,started_at,finished_at,updated_at FROM runs`
+const runCols = `SELECT project,id,agent,command,status,priority,timeout,workspace,task,exit_code,created_at,started_at,finished_at,updated_at FROM runs`
 
 func queryRuns(db *sql.DB, q string, args ...any) ([]Run, error) {
 	rows, err := db.Query(q, args...)
@@ -170,6 +173,6 @@ func scanRun(row scanner) (Run, bool, error) {
 func scanRunRow(row scanner) (Run, error) {
 	var r Run
 	err := row.Scan(&r.Project, &r.ID, &r.Agent, &r.Command, &r.Status, &r.Priority, &r.Timeout,
-		&r.CreatedAt, &r.StartedAt, &r.FinishedAt, &r.UpdatedAt)
+		&r.Workspace, &r.Task, &r.ExitCode, &r.CreatedAt, &r.StartedAt, &r.FinishedAt, &r.UpdatedAt)
 	return r, err
 }

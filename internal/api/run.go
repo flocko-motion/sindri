@@ -19,6 +19,16 @@ type Run struct {
 	// Timeout is the agent-requested budget (a Go duration string, e.g. "5m"); "" defers to the
 	// hub's hard cap. It never overrides that cap — only narrows it.
 	Timeout string `json:"timeout,omitempty"`
+	// Workspace is the repo-relative worktree path this run executes against (the agent's, at the
+	// time it was scheduled).
+	Workspace string `json:"workspace,omitempty"`
+	// Task is the agent's task at schedule time, "" if it held none. A dequeue where the agent's
+	// current task no longer matches means the agent moved on while this sat queued — the record
+	// this run was meant to test may no longer exist in its workspace.
+	Task string `json:"task,omitempty"`
+	// ExitCode is the command's process exit code once it finishes: 0 on pass, the command's own
+	// code on failure, -1 for a timeout or a cancellation (nothing to exit on its own).
+	ExitCode int `json:"exit_code,omitempty"`
 	// Position is this run's place among currently queued runs, 1 = next; 0 once it is no longer
 	// queued. Derived by the hub at read time, never stored — the queue's real order is a live
 	// fact, not a column that could disagree with it.
