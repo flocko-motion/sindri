@@ -16,11 +16,15 @@ const (
 // AgentNeedsUser reports an agent whose state resolves ONLY IF A HUMAN ACTS. That is the rule, and
 // these four words are what satisfies it today; a status added later is asked the same question.
 //
-// Idle never counts — an agent waiting for work is functioning normally, and one idle beside work
-// it could claim is the hub's fault to nudge rather than the user's to fix. Retired is a decision
-// already taken. An api-error is the hub's to resend, and once resending stops working the screen
-// stands still and the board says stalled.
+// Idle never counts: waiting for work is normal, and idling beside claimable work is the hub's to
+// nudge. An api-error is the hub's to resend, and once resending fails the board says stalled.
+// Retired is checked ahead of the status because it REACHES the counting states — a retired agent
+// keeps running, so it fills up or stalls — and a marker on one would sit there until it was
+// deleted. The stall nudge exempts it for the same reason (-> workflow.parkedByTheHub).
 func AgentNeedsUser(a AgentView) bool {
+	if a.Retired {
+		return false
+	}
 	switch a.Status {
 	case StatusBlocked, StatusSignedOut, StatusFull, StatusStalled:
 		return true

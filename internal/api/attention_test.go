@@ -24,9 +24,21 @@ func TestIdleIsNeverTheUsersProblem(t *testing.T) {
 	if AgentNeedsUser(AgentView{Status: "idle"}) {
 		t.Error("an idle agent is waiting for work, not for the user")
 	}
-	// Retired is the user's own decision, already taken — it asks nothing further.
-	if AgentNeedsUser(AgentView{Status: "idle", Retired: true}) {
-		t.Error("a retired agent was wound down deliberately; the decision is made")
+}
+
+// TestRetiredNeverCounts pins the states retirement actually reaches. A retired agent keeps
+// running: it fills its context and reads "full", or holds work, stands still and reads "stalled".
+// Both pass the switch, so retirement has to be tested against THOSE — against "idle" the case
+// passes whatever Retired says, and proves nothing. Retiring a full worker is the ordinary way to
+// wind one down, and a marker that stuck to it would sit on the handle until it was deleted.
+func TestRetiredNeverCounts(t *testing.T) {
+	for _, s := range []string{StatusFull, StatusStalled, StatusBlocked, StatusSignedOut} {
+		if !AgentNeedsUser(AgentView{Status: s}) {
+			t.Fatalf("%q must count while running, or this test proves nothing about retirement", s)
+		}
+		if AgentNeedsUser(AgentView{Status: s, Retired: true}) {
+			t.Errorf("a retired agent reading %q was wound down deliberately; the decision is made", s)
+		}
 	}
 }
 

@@ -152,10 +152,10 @@ func needsYouSummary(agents []api.AgentView) string {
 	if len(stuck) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%d agent(s) need you: %s — answer one at its pane "+
-		"(`sindri agent attach <name>`), clear a full one (`sindri agent clear-context <name>`), "+
-		"or restart a signed-out one once the host has logged in (`sindri agent restart <name>`).",
-		len(stuck), strings.Join(stuck, ", "))
+	return fmt.Sprintf("%d agent(s) need you: %s — attach to see what each is stopped on "+
+		"(`sindri agent attach <name>`). A full one wants clearing "+
+		"(`sindri agent clear-context <name>`), a signed-out one a restart once the host has "+
+		"logged in (`sindri agent restart <name>`).", len(stuck), strings.Join(stuck, ", "))
 }
 
 // agentStatsCmd is the view for tuning per-agent memory; down agents have no VM to sample.

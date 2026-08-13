@@ -23,7 +23,9 @@
 
 ## 4. Pin it
 
-- [x] 4.1 The rule: every state that counts, every state that must not — idle and retired first.
-- [x] 4.2 The counts: both sections against a real board, and a nil recipe resolving to zero.
-- [x] 4.3 The board carries its sections, since a front-end that finds none marks nothing.
-- [x] 4.4 The handles render a marker per section, and none when nothing waits.
+- [x] 4.1 The rule: every state that counts, and every state that must not.
+- [x] 4.2 Retirement against the states it actually reaches (`full`, `stalled`), each first shown
+      to count while running — against `idle` the case would pass whatever retirement did.
+- [x] 4.3 The counts: both sections against a real board, and a nil recipe resolving to zero.
+- [x] 4.4 The board carries its sections, since a front-end that finds none marks nothing.
+- [x] 4.5 The handles render a marker per section, and none when nothing waits.

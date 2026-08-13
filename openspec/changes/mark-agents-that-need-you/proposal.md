@@ -28,9 +28,15 @@ shows"; a third `if s.Key == "…"` in the view would have been the third place 
   that question of it, rather than matching the shape of these four.
 - Idle never counts, and this is the shared half of the definition with the idle-agent observer:
   idle with no work available is healthy; idle beside work it could claim is a dispatch fault the
-  hub nudges; idle because a human must act is this set, which is marked and never nudged. Retired
-  is a decision the user has already taken, and an `api-error` is the hub's to resend — once
-  resending stops working the screen stands still and the board says `stalled`.
+  hub nudges; idle because a human must act is this set, which is marked and never nudged. An
+  `api-error` is the hub's to resend — once resending stops working the screen stands still and the
+  board says `stalled`.
+- Retired is excluded ahead of the status, because it reaches the states that count: retirement
+  withholds new work rather than stopping the agent, so a retired one fills its context and reads
+  `full`, or holds work and stands still and reads `stalled`. Since retiring a full worker is how
+  one is ordinarily wound down, counting it would park the marker on the handle until the agent was
+  deleted. `sd-521867` exempted parked agents from the stall nudge on the same reasoning, and the
+  two rules have to say one thing about the same agent.
 - `sindri agent list` marks each such row and closes with a line naming them, so a CLI user learns
   the fleet has stopped on them without attaching to every pane.
 

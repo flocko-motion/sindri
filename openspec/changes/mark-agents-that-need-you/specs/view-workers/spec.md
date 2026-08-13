@@ -21,9 +21,18 @@ is marked and never nudged, since prodding an agent complains about a state the 
 itself put it in. Marking a plain idle agent would make the marker mean "an agent
 exists", which the roster count already says.
 
-A retired agent SHALL NOT count: the user has taken that decision already. An agent
-whose turn was cut off by an API error SHALL NOT count while the hub is resending it;
-once resending stops working its screen stands still and it is stalled, which counts.
+A retired agent SHALL NOT count, whatever its state says: the user has taken that
+decision already. Retirement withholds new work rather than stopping the agent, so a
+retired one goes on to fill its context and read `full`, or to hold work and stand
+still and read `stalled` — and retiring a full worker is the ordinary way to wind one
+down. A marker that counted it would sit on the handle until the agent was cleared or
+deleted, which is exactly the state that empties a marker of meaning. The same
+reasoning already exempts a parked agent from the stall nudge, and one rule must not
+say of an agent what the other denies.
+
+An agent whose turn was cut off by an API error SHALL NOT count while the hub is
+resending it; once resending stops working its screen stands still and it is stalled,
+which counts.
 
 Every workers view SHALL make this visible. The CLI listing SHALL mark each such row
 and SHALL close by naming those agents and what clears them, because a status column
@@ -42,5 +51,6 @@ is skimmed and each of these agents otherwise reads as one at work.
 
 #### Scenario: A retired agent asks nothing further
 
-- **WHEN** an agent has been retired by the user
-- **THEN** it is not marked as waiting on them
+- **WHEN** a retired agent fills its context, or holds work and stops moving
+- **THEN** it is not marked as waiting on the user, though the same state on a running
+  agent would be

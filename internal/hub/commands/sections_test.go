@@ -78,7 +78,9 @@ func TestAttentionCountsWhatOnlyTheUserCanMove(t *testing.T) {
 			{Name: "stalled", Status: api.StatusStalled},
 			{Name: "idle", Status: "idle"},
 			{Name: "working", Status: "working"},
-			{Name: "retired", Status: "idle", Retired: true},
+			// Retired against a status that counts: it keeps running, so this is what winding one
+			// down actually looks like a few hours later.
+			{Name: "retired", Status: api.StatusFull, Retired: true},
 		},
 	}
 	want := map[string]int{"tasks": 1, "agents": 4}
