@@ -2,7 +2,7 @@
 // type:    logic (the tick behind reference-branch drift and PR health)
 // job:     re-check every project's reference branch on a slow loop, and keep its open
 // PRs honest against it (-> workflow/prcheck.go) and against the review-row
-// invariant (-> workflow/reviewhealth.go).
+// invariants (-> workflow/reviewhealth.go).
 // limits:  just the cadence and lifecycle; the checks live in workflow.
 package hub
 
@@ -97,6 +97,7 @@ func (r *refwatch) preflight(projects []store.Project) {
 			}
 			r.h.wf.CheckOpenPRs(p.Tag)
 			r.h.wf.RepairReviewRows(p.Tag)
+			r.h.wf.AssignPendingReviews(p.Tag) // after the repair: a row it just wrote is claimable now
 		}
 	}()
 }

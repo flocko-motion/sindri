@@ -58,6 +58,10 @@ type Deps interface {
 	Interrupt(project, name string) error
 	// AgentAlive reports whether an agent's pod is currently running.
 	AgentAlive(project, name string) bool
+	// AgentIdle reports an agent sitting at an empty prompt, from the watchdog's last observation.
+	// What it answers is whether a message sent NOW would be acted on: text typed into a running
+	// turn lands in the input box and dies there when the turn ends.
+	AgentIdle(project, name string) bool
 	// SessionAlive reports whether an agent's tmux session is live.
 	SessionAlive(project, name string) bool
 	// TaskComments returns a task's comments for display.

@@ -111,6 +111,13 @@ func (d workflowDeps) SessionAlive(project, name string) bool {
 	return d.h.agents.SessionAlive(project, name)
 }
 
+// AgentIdle reads the watchdog's last observation rather than probing: the sweep classifies every
+// pane every few seconds anyway, and an answer taken here would cost an exec per agent per tick.
+func (d workflowDeps) AgentIdle(project, name string) bool {
+	l, ok := d.h.watch.get(project, name)
+	return ok && l.up && l.runtime == "idle"
+}
+
 func (d workflowDeps) TaskComments(project, id string) []store.Comment {
 	return d.h.comments.ForView(project, id)
 }

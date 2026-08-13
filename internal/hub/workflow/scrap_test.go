@@ -24,6 +24,7 @@ type stubDeps struct {
 	ctxWindow    int      // 0 with ctxOK true means "measured, but the window is unknown"
 	ctxOK        bool
 	comments     map[string][]store.Comment // by task id, for the views that render a thread
+	busy         map[string]bool            // agents mid-turn, so AgentIdle answers false for them
 }
 
 func (d *stubDeps) ProjectRoot(string) string                   { return d.root }
@@ -41,6 +42,7 @@ func (d *stubDeps) Interrupt(_, name string) error {
 	return nil
 }
 func (d *stubDeps) AgentAlive(_, _ string) bool               { return d.alive }
+func (d *stubDeps) AgentIdle(_, name string) bool             { return !d.busy[name] }
 func (d *stubDeps) SessionAlive(_, _ string) bool             { return false }
 func (d *stubDeps) TaskComments(_, id string) []store.Comment { return d.comments[id] }
 func (d *stubDeps) Subscribe() (chan struct{}, func())        { return make(chan struct{}), func() {} }
