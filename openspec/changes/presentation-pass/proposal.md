@@ -26,7 +26,15 @@ added — invisibly, because each looks plausible alone.
   every predicate branches on it — and the word now comes from `theme.ApprovalLabel`, beside
   PriorityLabel and StateLabel, which is what stops the two front-ends drifting on it later.
 
-The remaining three subtasks (the "unapproved" label, PR row colours, task row colours, and the
+- **PR rows are coloured on the shared rule.** Red is not decided in the renderer: it is
+  `api.PRNeedsUser`, the same predicate the `(N!)` badge counts, so a red row is always counted and
+  a counted row is always red. The rest follows the cross-tab vocabulary — grey finished, orange
+  mid-merge, cyan for the worker's rework, green for a review that is coming — and yellow goes
+  unused, correctly, since no PR state is idle-but-unblocked. The one unusual part is deliberate: an
+  open PR's colour depends on whether any reviewer is alive in its repo, which is fleet state rather
+  than row state, and that is the honest rendering of whether anything will happen.
+
+The remaining two subtasks (the "unapproved" label, PR row colours, task row colours, and the
 last-changed timestamp in the task detail) land on this same branch and extend this document.
 
 ## Impact

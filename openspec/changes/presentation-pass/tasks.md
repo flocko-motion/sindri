@@ -19,7 +19,13 @@
 
 ## 3. Colour PR rows on the same rule as tasks and agents
 
-- [ ] 3.1
+- [x] 3.1 `prStatusStyle` derives RED from `api.PRNeedsUser` — the predicate the badge counts — so
+      the colour and the badge cannot disagree.
+- [x] 3.2 The rest of the mapping: grey finished, orange mid-merge, cyan the worker's rework, green
+      a review that is coming. Yellow stays unused: no PR state is idle-but-unblocked.
+- [x] 3.3 `stWorking` (cyan) is added as the shared "work is happening" colour, settled here because
+      the PR mapping needs it before the task palette lands.
+- [x] 3.4 The invariant is tested across every PR state: red exactly when counted.
 
 ## 4. Task row colours: red for stopped-waiting-on-you, positive for in-progress
 

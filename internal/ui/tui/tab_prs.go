@@ -226,16 +226,27 @@ func (m model) prRows() []row {
 		}
 		repo := m.repoStyle(p.Project).Render(fmt.Sprintf("%-10.10s", m.repoName(p.Project)))
 		status := api.StatusLabel(p.Status, p.Approvals)
-		if m.merging[p.ID] && p.Status != "merged" { // transient: the user triggered a merge, awaiting the hub
+		merging := m.merging[p.ID] && p.Status != "merged" // transient: the user triggered a merge, awaiting the hub
+		if merging {
 			status = "merging"
 		}
 		if p.Kind == "interim" { // ◇ = mid-task contribution (vs a final, task-done PR)
 			status = "◇" + status
 		}
+		// Cells styled independently, never nested, so a colour reset cannot bleed across the row —
+		// the same shape the task and agent rows use.
+		sc := prStatusStyle(p, m.state.Agents, merging)
 		// Who is reviewing it, from the board — a dash where nobody is, so the column reads as
 		// "waiting for a reviewer" rather than as missing.
-		out = append(out, row{fmt.Sprintf("%s %-14s %-9s %4s %-10s %-10s %s",
-			repo, p.ID, status, shortAge(p.CreatedAt), p.Agent, dash(p.Reviewer), p.Branch), p.ID})
+		out = append(out, row{strings.Join([]string{
+			repo,
+			sc.Render(fmt.Sprintf("%-14s", p.ID)),
+			sc.Render(fmt.Sprintf("%-9s", status)),
+			sc.Render(fmt.Sprintf("%4s", shortAge(p.CreatedAt))),
+			sc.Render(fmt.Sprintf("%-10s", p.Agent)),
+			sc.Render(fmt.Sprintf("%-10s", dash(p.Reviewer))),
+			sc.Render(p.Branch),
+		}, " "), p.ID})
 	}
 	return out
 }
