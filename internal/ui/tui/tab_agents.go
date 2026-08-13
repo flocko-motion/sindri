@@ -483,14 +483,14 @@ const retiredGlyph = "⏹️"
 func (m model) agentRows() []row {
 	var visible []api.AgentView
 	for _, a := range m.state.Agents {
-		if m.inScope(a.Project) { // repo-scoped: only the active repo's agents
+		if m.agentVisible(a) { // the active repo's agents, plus any agent stuck on the user
 			visible = append(visible, a)
 		}
 	}
 	var out []row
 	// Ordered by repo, then role, then name — the same call `sindri agent list` makes, so the two
-	// front-ends cannot drift onto different orders. In repo scope every row shares one repo, so
-	// this reduces to role-then-name without a redundant, single-value grouping level.
+	// front-ends cannot drift onto different orders. In repo scope the repo key is what gathers a
+	// stuck foreign agent into its own group instead of interleaving it with the local rows.
 	for _, a := range api.SortedAgents(visible, m.state.Projects) {
 		// Row coloured by lifecycle; cells styled independently so resets don't bleed.
 		ac := agentStatusStyle(a.Status)
@@ -514,6 +514,12 @@ func (m model) agentRows() []row {
 		task := dash(work)
 		if a.Clients > 0 { // dial-ins attached — show the eye like the CLI list
 			task += fmt.Sprintf("  %s%d", eyeGlyph, a.Clients)
+		}
+		// The handle's marker gives a count; this is the row behind it, saying whose move it is in the
+		// same words `sindri agent list` uses. Under repo scope it also answers why an agent from
+		// another repo is in this list at all.
+		if api.AgentNeedsUser(a) {
+			task += "  " + stWarn.Render(warnGlyph+" needs you")
 		}
 		// Retirement rides beside the status, never in it: it is true of a busy agent too, and what
 		// that agent is doing right now is the one thing the status column exists to say.

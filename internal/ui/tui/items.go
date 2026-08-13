@@ -215,6 +215,14 @@ func (m model) inScope(project string) bool {
 	return project == tag
 }
 
+// agentVisible admits an agent to the Agents tab: in scope, or waiting on the user anywhere in the
+// fleet. The attention marker beside the handle is fleet-wide by design (-> View), so a scope that
+// hid the row it points at left the user told that something needs them and shown a list where
+// nothing does. The row carries its own repo in the first column, which is what says it is foreign.
+func (m model) agentVisible(a api.AgentView) bool {
+	return m.inScope(a.Project) || api.AgentNeedsUser(a)
+}
+
 // tabCount is section s's badge. Agents/PRs obey the § scope toggle so the badge matches
 // the list; the rest are scope-invariant and read straight off the board.
 func (m model) tabCount(s tuiSection) int {
@@ -222,7 +230,7 @@ func (m model) tabCount(s tuiSection) int {
 	case "agents":
 		n := 0
 		for _, a := range m.state.Agents {
-			if m.inScope(a.Project) {
+			if m.agentVisible(a) {
 				n++
 			}
 		}

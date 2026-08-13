@@ -31,7 +31,7 @@ func TestGlyphsCountAsTerminalsDrawThem(t *testing.T) {
 
 // TestAgentRowFitsItsColumn is the invariant the bug broke: whatever a row contains, fitting
 // it to the column must produce exactly that many cells — including for a dialed-into agent,
-// whose row carries the eye marker.
+// whose row carries the eye marker, and a stuck one, whose row carries the warning.
 func TestAgentRowFitsItsColumn(t *testing.T) {
 	m := newModel(nil, nil, "/r/sindri")
 	m.scopeRepo = false
@@ -39,6 +39,7 @@ func TestAgentRowFitsItsColumn(t *testing.T) {
 		Agents: []api.AgentView{
 			{Name: "hepti", Role: "coauthor", Status: "collab", Task: "td-3", Clients: 1},
 			{Name: "eitri", Role: "worker", Status: "working", Task: "td-4"},
+			{Name: "thrain", Role: "worker", Status: api.StatusFull},
 		},
 		Orphans: []string{"sindri-stale-abc-nabbi"},
 	}
