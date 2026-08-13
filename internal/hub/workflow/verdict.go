@@ -61,8 +61,8 @@ func (e *Engine) plannerApprove(ps *store.ProjectStore, c registry.Caller, pr st
 	return 0, nil
 }
 
-// completeReview stamps the verdict (a human verdict has no record) and returns the
-// reviewer to idle, so a finished review stops showing as "reviewing".
+// completeReview stamps the verdict (a human verdict has no record), returns the reviewer to
+// idle, and wakes it back into its loop.
 func (e *Engine) completeReview(project, prID, agent, verdict, findings string) {
 	ps := e.store.For(project)
 	if revs, err := ps.Reviews(prID); err == nil {
@@ -74,6 +74,7 @@ func (e *Engine) completeReview(project, prID, agent, verdict, findings string) 
 		}
 	}
 	_ = ps.SetState(store.AgentState{Agent: agent, Phase: "idle"})
+	_ = e.deps.InjectWhenReady(project, agent, MsgVerdictRecorded(prID))
 }
 
 // ApprovePR is the human approve path (TUI/CLI): marks a project's open (or already-approved) PR

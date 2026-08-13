@@ -1,11 +1,9 @@
 // package: hub / refwatch
-// type:    logic (the tick behind reference-branch drift)
-// job:     ask the workflow to re-check every project's reference branch on a slow
-// loop, so a branch the user moves outside the hub is noticed rather than
-// silently left under the agents working against it — and to keep the open PRs
-// honest against it (-> workflow/prcheck.go).
-// limits:  just the cadence and lifecycle; the comparison and what agents are told
-// live in workflow/reference.go. Agent liveness is the watchdog's, not this.
+// type:    logic (the tick behind reference-branch drift and PR health)
+// job:     re-check every project's reference branch on a slow loop, and keep its open
+// PRs honest against it (-> workflow/prcheck.go) and against the review-row
+// invariant (-> workflow/reviewhealth.go).
+// limits:  just the cadence and lifecycle; the checks live in workflow.
 package hub
 
 import (
@@ -80,13 +78,10 @@ func (r *refwatch) sweep() {
 	r.preflight(projects)
 }
 
-// preflight keeps the open PRs honest against their bases, OFF this loop. Its tier 2 runs the project
-// gate, which may build and test for minutes; inline it would hold the drift check for that long and
-// make every later project wait behind an earlier project's gate. The engine serialises the work
-// itself and skips a sweep whose predecessor is still running, so this fires and forgets.
-//
-// Not waited on at shutdown: it only appends advisory PR history, and a write against a closed store
-// fails harmlessly — whereas close() blocking on a gate run would hang the hub's exit for minutes.
+// preflight keeps the open PRs honest against their bases, and their review rows live, OFF this
+// loop: CheckOpenPRs' gate may run for minutes, and inlining it would make every later project
+// wait behind an earlier one's. Not waited on at shutdown — it only appends advisory history, so a
+// write against a closed store fails harmlessly, unlike blocking close() on a gate run.
 func (r *refwatch) preflight(projects []store.Project) {
 	select {
 	case <-r.stop:
@@ -101,6 +96,7 @@ func (r *refwatch) preflight(projects []store.Project) {
 			default:
 			}
 			r.h.wf.CheckOpenPRs(p.Tag)
+			r.h.wf.RepairReviewRows(p.Tag)
 		}
 	}()
 }

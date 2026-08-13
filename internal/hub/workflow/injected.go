@@ -62,6 +62,12 @@ func MsgReviewCancelled(prID string) string {
 	return fmt.Sprintf("[hub] The PR you were reviewing (%s) was scrapped — stop reviewing it; its branch is gone. Just run `sindri` for your next task.", prID)
 }
 
+// MsgVerdictRecorded puts a reviewer back in the loop right after a verdict, its reply having
+// named no next step.
+func MsgVerdictRecorded(prID string) string {
+	return fmt.Sprintf("[hub] Verdict on %s recorded. Run `sindri` for your next review.", prID)
+}
+
 // ReplyNothingToRevoke answers `revoke` with no PR out — nothing was withdrawn, so it says what the
 // agent's actual situation is rather than reporting a success that did not happen.
 const ReplyNothingToRevoke = "Nothing to withdraw — you have no pull request out. Run `sindri` for your current directive."

@@ -189,7 +189,11 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 	} else {
 		_ = ps.LogPR(pr.ID, "created", "by "+c.Agent+": "+msg)
 	}
-	_ = e.RequestReview(c.Project, pr.ID, "") // one review path; the hub preps the terrain
+	if err := e.RequestReview(c.Project, pr.ID, ""); err != nil { // one review path; the hub preps the terrain
+		_ = ps.Log(c.Agent, "review-request-failed", pr.ID+": "+err.Error())
+		fmt.Fprintln(out, ReplyReviewRequestFailed(pr.ID, err))
+		return 0, nil
+	}
 	fmt.Fprintln(out, ReplyRegistered(pr.ID))
 	return 0, nil
 }
@@ -274,7 +278,11 @@ func (e *Engine) CmdOpenspec(c registry.Caller, args []string, out io.Writer) (i
 	} else {
 		_ = ps.LogPR(pr.ID, "created", "by "+c.Agent+": "+msg)
 	}
-	_ = e.RequestReview(c.Project, pr.ID, "") // one review path; the hub preps the terrain
+	if err := e.RequestReview(c.Project, pr.ID, ""); err != nil { // one review path; the hub preps the terrain
+		_ = ps.Log(c.Agent, "review-request-failed", pr.ID+": "+err.Error())
+		fmt.Fprintln(out, ReplyReviewRequestFailed(pr.ID, err))
+		return 0, nil
+	}
 	fmt.Fprintln(out, ReplyRegistered(pr.ID))
 	return 0, nil
 }

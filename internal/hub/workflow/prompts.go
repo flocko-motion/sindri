@@ -488,6 +488,12 @@ func ReplyRegistered(prID string) string {
 	return fmt.Sprintf("%s registered. You'll be informed when it's reviewed. Please wait — this may take a while.", prID)
 }
 
+// ReplyReviewRequestFailed tells a submitting agent its PR is up but requesting a review failed
+// (-> RepairReviewRows retries it in the background).
+func ReplyReviewRequestFailed(prID string, err error) string {
+	return fmt.Sprintf("%s registered, but requesting a review failed: %v. The hub retries this on its own; flag it if %s is still showing no reviewer after a while.", prID, err, prID)
+}
+
 // ReplyNotWorking guards a work verb run in a phase it doesn't apply to. It must name the ACTUAL
 // state: a flat "pick up a task first" told a worker under review to abandon the task it held.
 func ReplyNotWorking(verb, phase, task string) string {

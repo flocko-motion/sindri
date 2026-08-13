@@ -450,6 +450,26 @@ func (p *ProjectStore) CloseReviews(pr, why string) error {
 	return nil
 }
 
+// LiveReviewPRs is the set of PR ids in this project carrying at least one unverdicted review row
+// — held or unclaimed. One query for the whole project (-> ActiveReviewers, ApprovalCounts), since
+// the review-row invariant sweeps every open PR and a query per PR would be paid per one of them.
+func (p *ProjectStore) LiveReviewPRs() (map[string]bool, error) {
+	rows, err := p.s.db.Query(`SELECT DISTINCT pr FROM reviews WHERE project=? AND verdict=''`, p.project)
+	if err != nil {
+		return nil, fmt.Errorf("live review prs: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var pr string
+		if err := rows.Scan(&pr); err != nil {
+			return nil, err
+		}
+		out[pr] = true
+	}
+	return out, rows.Err()
+}
+
 // RecordVerdict completes a review with a verdict and the reviewer's findings.
 func (p *ProjectStore) RecordVerdict(id int64, verdict, result string) error {
 	_, err := p.s.db.Exec(`UPDATE reviews SET verdict=?, result=?, verdict_at=? WHERE id=? AND project=?`,
