@@ -3,7 +3,7 @@
 // job:     restore a closed sindri-owned task to "open" — the one thing close.go
 // cannot undo on its own, for the task closed before it actually held.
 // limits:  sindri-owned ids only; recording why is the caller's (-> hub.ReopenTask,
-// which also writes the task comment — this package has no comment store to reach).
+// which also writes the task comment, so both its entry points must supply a reason).
 package workflow
 
 import (

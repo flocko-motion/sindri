@@ -49,6 +49,19 @@ func MsgPRScrapped(prID string) string {
 		"Nothing to fix or resubmit. Run `sindri` for your next directive.", prID)
 }
 
+// MsgTaskEdited tells a worker the task it holds was revised under it. Its unit of work has moved,
+// and it is otherwise still building to the version it read when it picked the task up — so this
+// names the fields and sends it back to the task, where the old and new values are recorded in
+// full. It also says the obvious thing that stops being obvious once the task shows "pending"
+// again: the work is still the worker's to finish, and it finishes it the same way.
+func MsgTaskEdited(id, fields string) string {
+	return fmt.Sprintf("[hub] A planner edited %s — the task you're working on (%s). Read it again "+
+		"(`sindri task %s`, where the change is recorded on its thread) and work to what it says now, "+
+		"not to what you read when you picked it up. It is back awaiting the user's approval, which "+
+		"only holds it from being handed out afresh: it is still yours, and you finish and submit it "+
+		"exactly as before.", id, fields, id)
+}
+
 // MsgTaskCancelled tells a worker its task was closed/scrapped out from under it —
 // stop, and don't clean up (the hub already reset the worktree), just get new work.
 func MsgTaskCancelled(id string) string {

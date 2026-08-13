@@ -66,6 +66,9 @@ type Deps interface {
 	SessionAlive(project, name string) bool
 	// TaskComments returns a task's comments for display.
 	TaskComments(project, id string) []store.Comment
+	// AddTaskComment posts on a task's thread as author — the write half of TaskComments, for a
+	// workflow step whose record belongs where the user reads it rather than in an agent's log.
+	AddTaskComment(project, id, author, body string) error
 	// Subscribe returns a change-notification channel and an unsubscribe func — how
 	// the directive loop waits for work.
 	Subscribe() (chan struct{}, func())

@@ -25,6 +25,7 @@ type stubDeps struct {
 	ctxOK        bool
 	comments     map[string][]store.Comment // by task id, for the views that render a thread
 	busy         map[string]bool            // agents mid-turn, so AgentIdle answers false for them
+	posted       []store.Comment            // what the workflow wrote onto a task's thread (SourceRef holds the id)
 }
 
 func (d *stubDeps) ProjectRoot(string) string                   { return d.root }
@@ -45,9 +46,13 @@ func (d *stubDeps) AgentAlive(_, _ string) bool               { return d.alive }
 func (d *stubDeps) AgentIdle(_, name string) bool             { return !d.busy[name] }
 func (d *stubDeps) SessionAlive(_, _ string) bool             { return false }
 func (d *stubDeps) TaskComments(_, id string) []store.Comment { return d.comments[id] }
-func (d *stubDeps) Subscribe() (chan struct{}, func())        { return make(chan struct{}), func() {} }
-func (d *stubDeps) KnownProjects() []store.Project            { return nil }
-func (d *stubDeps) BrokkrBin() (string, error)                { return "", nil }
+func (d *stubDeps) AddTaskComment(_, id, author, body string) error {
+	d.posted = append(d.posted, store.Comment{SourceRef: id, Author: author, Body: body})
+	return nil
+}
+func (d *stubDeps) Subscribe() (chan struct{}, func()) { return make(chan struct{}), func() {} }
+func (d *stubDeps) KnownProjects() []store.Project     { return nil }
+func (d *stubDeps) BrokkrBin() (string, error)         { return "", nil }
 func (d *stubDeps) ContextUsage(_, _ string) (int, int, bool) {
 	return d.ctxTokens, d.ctxWindow, d.ctxOK
 }

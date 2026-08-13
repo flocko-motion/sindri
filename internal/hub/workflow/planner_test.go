@@ -35,23 +35,243 @@ func plannerEngine(t *testing.T, id, approval string) (*Engine, registry.Caller,
 	return e, registry.Caller{Project: "proj", Agent: "galar", Role: "planner"}, ps
 }
 
-// TestEditTaskRefusedOnceApproved is the constraint the approval gate exists for: approval is
-// the user's decision to take the task as it stands, so what a worker picks up is what the
-// user read and released.
-func TestEditTaskRefusedOnceApproved(t *testing.T) {
-	for _, approval := range []string{"approved", "rejected", ""} {
-		e, c, _ := plannerEngine(t, "td-1", approval)
+// plannerOwnedTask builds an engine holding one task sindri owns, in the given approval state, and
+// returns its minted id alongside the planner caller. CreateTask rather than a cached row: an edit
+// to a title or body writes owned_tasks, and a task that only exists in the read model absorbs none
+// of it.
+func plannerOwnedTask(t *testing.T, approval string) (*Engine, registry.Caller, *store.ProjectStore, string, *stubDeps) {
+	t.Helper()
+	e, c, ps := plannerEngine(t, "td-parent", "")
+	id, err := e.CreateTask("proj", TaskSpec{Title: "flat proposal", Description: "as first written", Type: "task"})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if approval != "" {
+		if err := ps.SetApproval(id, approval, ""); err != nil {
+			t.Fatalf("set approval: %v", err)
+		}
+	}
+	return e, c, ps, id, e.deps.(*stubDeps)
+}
+
+// TestAnyTaskIsEditableAndGoesBackForAVerdict is the rule, and it is one rule: a planner edits
+// whatever it can see, and every edit returns the task to awaiting-review. Approval records that
+// the user has READ this task — an edit makes that record untrue, so it is cleared. It is not
+// permission the planner has to hold, which is what the old pending-only refusal took it for.
+func TestAnyTaskIsEditableAndGoesBackForAVerdict(t *testing.T) {
+	for _, approval := range []string{"approved", "rejected", "pending", ""} {
+		e, c, ps, id, _ := plannerOwnedTask(t, approval)
 		var out bytes.Buffer
-		code, err := e.CmdEditTask(c, []string{"td-1", "--parent", "td-9"}, &out)
+		code, err := e.CmdEditTask(c, []string{id, "a sharper title"}, &out)
 		if err != nil {
 			t.Fatalf("approval %q: unexpected error: %v", approval, err)
 		}
-		if code == 0 {
-			t.Errorf("approval %q: edit should be refused, got exit 0: %s", approval, out.String())
+		if code != 0 {
+			t.Errorf("approval %q: the edit should be allowed, got exit %d: %s", approval, code, out.String())
 		}
-		if !strings.Contains(out.String(), "awaiting the user's approval") {
-			t.Errorf("approval %q: refusal should state the rule, got: %s", approval, out.String())
+		if got, _ := ps.GetApproval(id); got != "pending" {
+			t.Errorf("approval %q: after an edit the task should await a fresh verdict, got %q", approval, got)
 		}
+		if tk, _, _ := ps.GetTask(id); tk.Title != "a sharper title" {
+			t.Errorf("approval %q: the edit did not land, title is %q", approval, tk.Title)
+		}
+	}
+}
+
+// TestEditPausesRelease: the same act stops the task being handed out, which is the point rather
+// than a side effect — a task whose definition just changed must not be grabbed before the user
+// has seen the change.
+func TestEditPausesRelease(t *testing.T) {
+	e, c, ps, id, _ := plannerOwnedTask(t, "approved")
+	if err := ps.SetOwnedPriority(id, "P1"); err != nil {
+		t.Fatalf("rate: %v", err)
+	}
+	e.refreshCachedTask("proj", id)
+	if leaves, err := ps.OpenLeaves(); err != nil || !hasTask(leaves, id) {
+		t.Fatalf("an approved, rated task should be claimable to begin with (err=%v): %v", err, leaves)
+	}
+	var out bytes.Buffer
+	if code, err := e.CmdEditTask(c, []string{id, "--body", "the premise was wrong"}, &out); code != 0 || err != nil {
+		t.Fatalf("edit: code=%d err=%v out=%s", code, err, out.String())
+	}
+	leaves, err := ps.OpenLeaves()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasTask(leaves, id) {
+		t.Error("an edited task must stop being handed out until the user has seen the change")
+	}
+}
+
+// hasTask reports whether id is among these tasks.
+func hasTask(tasks []store.Task, id string) bool {
+	for _, tk := range tasks {
+		if tk.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// TestEditIsRecordedOnTheTask: the user has to be able to see WHAT changed, not merely that
+// something did — and the old value survives nowhere else once the write lands. It goes on the
+// task, where the user reads it, rather than into the planner's own activity log.
+func TestEditIsRecordedOnTheTask(t *testing.T) {
+	e, c, _, id, deps := plannerOwnedTask(t, "approved")
+	var out bytes.Buffer
+	if code, err := e.CmdEditTask(c, []string{id, "--body", "the premise was wrong"}, &out); code != 0 || err != nil {
+		t.Fatalf("edit: code=%d err=%v out=%s", code, err, out.String())
+	}
+	if len(deps.posted) != 1 {
+		t.Fatalf("the edit should be recorded on the task, got %d comments", len(deps.posted))
+	}
+	got := deps.posted[0]
+	if got.SourceRef != id || got.Author != "galar" {
+		t.Errorf("recorded on %q by %q, want %s by galar", got.SourceRef, got.Author, id)
+	}
+	for _, want := range []string{"description", "as first written", "the premise was wrong"} {
+		if !strings.Contains(got.Body, want) {
+			t.Errorf("the record should carry %q:\n%s", want, got.Body)
+		}
+	}
+}
+
+// TestEditKeepsTheVerdictItReplaces: a rejection's reason lives in the approval row and nowhere
+// else, and clearing that row is exactly what an edit does. Revising a rejected task is the
+// ordinary flow — the reason has to survive into the record, or the next reader sees a task that
+// bounced and no word of why.
+func TestEditKeepsTheVerdictItReplaces(t *testing.T) {
+	e, c, ps, id, deps := plannerOwnedTask(t, "")
+	if err := ps.SetApproval(id, "rejected", "the premise is false"); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if code, err := e.CmdEditTask(c, []string{id, "--body", "rewritten on a true premise"}, &out); code != 0 || err != nil {
+		t.Fatalf("edit: code=%d err=%v out=%s", code, err, out.String())
+	}
+	if len(deps.posted) != 1 || !strings.Contains(deps.posted[0].Body, "the premise is false") {
+		t.Errorf("the record should carry the verdict it replaced: %v", deps.posted)
+	}
+}
+
+// TestEditTellsTheHolder: a worker holds the task as it read it at claim time, so an edit that
+// nobody tells it about leaves it building to a brief that no longer exists. It is told for the
+// held task and for the feature it holds alike — both are its unit of work.
+func TestEditTellsTheHolder(t *testing.T) {
+	for _, held := range []string{"task", "container"} {
+		e, c, ps, id, deps := plannerOwnedTask(t, "approved")
+		deps.alive = true
+		if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker"}); err != nil {
+			t.Fatal(err)
+		}
+		st := store.AgentState{Agent: "eitri", Branch: id, Phase: "working"}
+		if held == "task" {
+			st.Task = id
+		} else {
+			st.Container = id
+		}
+		if err := ps.SetState(st); err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		if code, err := e.CmdEditTask(c, []string{id, "--body", "the premise was wrong"}, &out); code != 0 || err != nil {
+			t.Fatalf("%s: edit: code=%d err=%v out=%s", held, code, err, out.String())
+		}
+		if len(deps.injected) != 1 || deps.injected[0] != "eitri" {
+			t.Fatalf("%s: the holder should be told, injected: %v", held, deps.injected)
+		}
+		// It has to be able to act on it: which task, that it changed, and that the work is still its
+		// own to finish — a task showing "pending" again otherwise reads as one taken away.
+		for _, want := range []string{id, "description", "sindri task " + id, "you finish and submit it"} {
+			if !strings.Contains(deps.injectedText[0], want) {
+				t.Errorf("%s: the note should carry %q:\n%s", held, want, deps.injectedText[0])
+			}
+		}
+		if !strings.Contains(out.String(), "eitri") {
+			t.Errorf("%s: the planner should be told who holds it:\n%s", held, out.String())
+		}
+	}
+}
+
+// TestAnEditedTaskIsStillItsHolders: un-approving withdraws a task from the pools work is handed
+// out FROM; it says nothing about finishing work already in hand. A worker stranded because a
+// planner corrected a line in its brief would be the whole change made worthless.
+func TestAnEditedTaskIsStillItsHolders(t *testing.T) {
+	e, c, ps, id, deps := plannerOwnedTask(t, "approved")
+	deps.alive = true
+	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: id, Branch: id, Phase: "working"}); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if code, err := e.CmdEditTask(c, []string{id, "--body", "corrected"}, &out); code != 0 || err != nil {
+		t.Fatalf("edit: code=%d err=%v out=%s", code, err, out.String())
+	}
+	d, err := e.AgentDirective(t.Context(), "proj", "eitri")
+	if err != nil {
+		t.Fatalf("directive: %v", err)
+	}
+	if !strings.Contains(d, id) || !strings.Contains(d, "submit") {
+		t.Errorf("the holder should still be told to finish and submit %s, got: %s", id, d)
+	}
+}
+
+// TestEditTaskRefusesAnUnknownId: the approval read that used to stand here refused an absent task
+// by accident. Without a check of its own, an edit that writes nothing reports success.
+func TestEditTaskRefusesAnUnknownId(t *testing.T) {
+	e, c, _ := plannerEngine(t, "td-1", "pending")
+	var out bytes.Buffer
+	code, err := e.CmdEditTask(c, []string{"td-nope", "a new title"}, &out)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code == 0 || !strings.Contains(out.String(), "no such task") {
+		t.Errorf("editing a task that isn't there should be refused, got exit %d: %s", code, out.String())
+	}
+}
+
+// TestEditTaskLeavesRatingToPrioritiseTask: one field must not have two verbs with opposite
+// consequences. An edit returns the task for a verdict; re-ordering leaves the verdict standing —
+// so a rating carried in here would mean different things depending on which verb was reached for.
+func TestEditTaskLeavesRatingToPrioritiseTask(t *testing.T) {
+	e, c, ps, id, _ := plannerOwnedTask(t, "approved")
+	var out bytes.Buffer
+	code, err := e.CmdEditTask(c, []string{id, "--priority", "high", "a sharper title"}, &out)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code == 0 || !strings.Contains(out.String(), "prioritise-task") {
+		t.Errorf("a rating should be sent to prioritise-task, got exit %d: %s", code, out.String())
+	}
+	// And nothing at all was written — not the title that came with it, not the verdict.
+	if tk, _, _ := ps.GetTask(id); tk.Title != "flat proposal" {
+		t.Errorf("the refused call still edited the task: %q", tk.Title)
+	}
+	if got, _ := ps.GetApproval(id); got != "approved" {
+		t.Errorf("the refused call still cleared the verdict: %q", got)
+	}
+}
+
+// TestEditingWhatSindriDoesNotOwnSaysSo: a mirrored task's content belongs to its own source, so an
+// edit to it writes nothing. Reported from what the store says actually moved — echoing the request
+// back would claim a change that never happened, and would un-approve the task for it.
+func TestEditingWhatSindriDoesNotOwnSaysSo(t *testing.T) {
+	e, c, ps := plannerEngine(t, "gh-9", "approved")
+	var out bytes.Buffer
+	code, err := e.CmdEditTask(c, []string{"gh-9", "--body", "rewritten"}, &out)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != 0 || !strings.Contains(out.String(), "nothing changed") {
+		t.Errorf("expected a plain report that nothing moved, got exit %d: %s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "--parent") {
+		t.Errorf("the reply should name what sindri does own for such a task:\n%s", out.String())
+	}
+	if got, _ := ps.GetApproval("gh-9"); got != "approved" {
+		t.Errorf("an edit that changed nothing must not spend the user's verdict, got %q", got)
 	}
 }
 
