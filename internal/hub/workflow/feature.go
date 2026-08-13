@@ -178,9 +178,9 @@ func (e *Engine) closeCompletedAncestors(project, from, stopAt string) {
 	}
 }
 
-// gatedUnder is open, unclaimable work under a feature, at any depth — the question COMPLETION must
-// ask. A gated subtask is ABSENT from OpenSubtasks rather than reported by it, so a feature whose
-// completion asks only that query is declared done over work nobody started.
+// gatedUnder is open work under a feature still AWAITING A VERDICT, at any depth — the COMPLETION
+// question, since such a subtask is ABSENT from OpenSubtasks rather than reported by it. Pending
+// only, never the claim rule: nothing clears a rejection, so blocking on one parks the holder.
 func (e *Engine) gatedUnder(project, container string) ([]store.Task, error) {
 	all, err := e.store.For(project).AllTasks()
 	if err != nil {
@@ -188,8 +188,7 @@ func (e *Engine) gatedUnder(project, container string) ([]store.Task, error) {
 	}
 	var out []store.Task
 	for _, d := range api.Descendants(all, container) {
-		// The claim queries' own rule, so "not handed out" and "not finished" cannot drift apart.
-		if api.Open(d) && !authorisedForClaim(d.Approval) {
+		if api.Open(d) && d.Approval == "pending" {
 			out = append(out, d)
 		}
 	}
@@ -206,8 +205,7 @@ func openIDs(tasks []store.Task) []string {
 }
 
 // containerNext is the held feature's next step: the subtask just assigned, or the finished feature
-// to put up. Not ready while gated work remains, so the worker waits on the user's verdict
-// (-> waitForWork, woken by the approval's own Notify) rather than hearing the feature is done.
+// to put up. Not ready while work awaits a verdict, so the worker waits (woken by its Notify).
 func (e *Engine) containerNext(project, agent, container string) (string, bool, error) {
 	next, ok, err := e.advanceContainer(project, agent, container)
 	if err != nil {

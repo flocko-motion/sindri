@@ -134,6 +134,82 @@ func TestAGatedFeatureWaitsRatherThanBeingDeclaredDone(t *testing.T) {
 	}
 }
 
+// TestARejectedSubtaskBlocksNothing: a rejection is a verdict already given, so it cannot hold a
+// feature open. Nothing would ever clear it — the wait ends when the user rules, and on a rejected
+// task they have — so blocking would park the holder indefinitely and silently, which is a worse
+// failure than the wrong completion this guard exists to prevent.
+func TestARejectedSubtaskBlocksNothing(t *testing.T) {
+	e, ps, c := gatedFeature(t)
+	if err := ps.SetApproval("td-2", "rejected", "not wanted after all"); err != nil {
+		t.Fatal(err)
+	}
+	if gated, err := e.gatedUnder("repo", "td-EPIC"); err != nil || len(gated) != 0 {
+		t.Fatalf("a rejected subtask must not hold the feature open, got %v (err=%v)", openIDs(gated), err)
+	}
+	var out strings.Builder
+	if code, err := e.CmdCheckpoint(c, []string{"the worked one"}, &out); err != nil || code != 0 {
+		t.Fatalf("CmdCheckpoint: code=%d err=%v out=%s", code, err, out.String())
+	}
+	if !strings.Contains(out.String(), "submit") {
+		t.Errorf("with only a rejected subtask left the feature is finished:\n%s", out.String())
+	}
+	// And the directive agrees rather than waiting for a verdict that has already been given.
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	d, err := e.AgentDirective(ctx, "repo", "dain")
+	if err != nil {
+		t.Fatalf("AgentDirective: %v", err)
+	}
+	if !strings.Contains(d, "submit") {
+		t.Errorf("the held feature should be finished, got: %s", d)
+	}
+}
+
+// TestEditTellsTheHolderOfTheEnclosingFeature is the case that actually bites and that matching the
+// edited ROW missed entirely: nobody holds td-2, so nobody was told, while the worker holding the
+// feature it belongs to had just had its unit of work changed. It is told for a direct subtask and
+// for one further down, since a feature contains its whole tree.
+func TestEditTellsTheHolderOfTheEnclosingFeature(t *testing.T) {
+	for _, depth := range []string{"child", "grandchild"} {
+		e, ps, _ := gatedFeature(t)
+		deps := e.deps.(*stubDeps)
+		deps.alive = true
+		if err := ps.PutAgent(store.Agent{Name: "dain", Role: "worker"}); err != nil {
+			t.Fatal(err)
+		}
+		if depth == "grandchild" {
+			if err := ps.UpsertTask(store.Task{ID: "td-MID", Title: "an epic between", Status: "open", ParentID: "td-EPIC"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := ps.SetParent("td-MID", "td-EPIC"); err != nil {
+				t.Fatal(err)
+			}
+			if err := ps.SetParent("td-2", "td-MID"); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		planner := registry.Caller{Project: "repo", Agent: "galar", Role: "planner"}
+		var out strings.Builder
+		if code, err := e.CmdEditTask(planner, []string{"td-2", "--body", "the premise was wrong"}, &out); code != 0 || err != nil {
+			t.Fatalf("%s: edit: code=%d err=%v out=%s", depth, code, err, out.String())
+		}
+		if len(deps.injected) != 1 || deps.injected[0] != "dain" {
+			t.Fatalf("%s: the holder of the enclosing feature must be told, injected: %v", depth, deps.injected)
+		}
+		// It has to be able to judge whether this touches what it is building: which task changed,
+		// how, that it sits inside the feature it holds, and that it is not the task it is on.
+		for _, want := range []string{"td-2", "description", "td-EPIC", "not the task you're on", "sindri task td-2"} {
+			if !strings.Contains(deps.injectedText[0], want) {
+				t.Errorf("%s: the note should carry %q:\n%s", depth, want, deps.injectedText[0])
+			}
+		}
+		if !strings.Contains(out.String(), "dain holds td-EPIC") {
+			t.Errorf("%s: the planner should be told whose work this reached:\n%s", depth, out.String())
+		}
+	}
+}
+
 // TestGatedUnderReachesAnyDepth: the completion question has to reach as far as the assignment one
 // does. OpenSubtasks walks the whole tree, so a gated grandchild vanishes from it just as a gated
 // child does — and the status reconciler, which reads DIRECT children only, catches neither in time.

@@ -29,14 +29,20 @@
       nothing workable and nothing finished the directive WAITS; the approval's notify wakes it.
 - [x] 3.3 The submit gate is the backstop, so the narrow race where a feature is claimed as
       finished cannot end in a PR over undone work.
+- [x] 3.4 PENDING blocks, rejected does not. The claim rule was wrong here: nothing clears a
+      rejection, so blocking on one parks the holder for ever and in silence — a worse failure
+      than the wrong completion, not a safer one.
 
 ## 4. Tell the holder
 
-- [x] 4.1 A worker holding the task (or the feature it sits in) is told what changed, sent back to
-      the task for the full record, and told the work is still its own to finish.
-- [x] 4.2 A holder that is down is not waited on — the record on the task is what reaches it when
+- [x] 4.1 Every agent whose UNIT of work the edit touches is told — the holder of the edited task,
+      and the holder of anything above it at any depth (`enclosing`). Matching the edited ROW told
+      nobody in the sibling case, which is the one that bites.
+- [x] 4.2 The note says which task changed, how, and whether it is the agent's own work or sits
+      inside it; an agent told only that something changed cannot judge whether it matters.
+- [x] 4.3 A holder that is down is not waited on — the record on the task is what reaches it when
       it comes back, and the planner is told which case it was.
-- [x] 4.3 Told BEFORE the record is written, so the one path where the record does not exist is not
+- [x] 4.4 Told BEFORE the record is written, so the one path where the record does not exist is not
       also the path where the reader who most needs it hears nothing. That reply says the task
       carries no record and names who was told.
 
@@ -53,3 +59,8 @@
       checkpoint does not say "submit", the submit is refused with no PR, the directive waits, and
       the approval releases the subtask. Mutation-checked: disabling any of the three guards fails
       it, reproducing the reported defect exactly.
+- [x] 5.6 A rejected subtask holds nothing: `gatedUnder` empty, the checkpoint says submit, the
+      directive says finished. Mutation-checked against the claim predicate.
+- [x] 5.7 The sibling notification at the boundary, not the centre — hold a feature, edit a subtask
+      nobody holds, and the feature's holder is told, at child and grandchild depth.
+      Mutation-checked: matching the edited row tells nobody, which is how this was missed.

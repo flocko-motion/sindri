@@ -22,21 +22,34 @@ change. It SHALL NOT reach a worker already holding that task: the claim gate de
 handed OUT, and a holder finishes and submits exactly as it would have.
 
 That holds inside a feature as well as outside one, and it SHALL be answered by asking whether
-anything under the feature is still open rather than whether anything is claimable. The two
-questions differ exactly where a gate is shut, so a query written for assignment reports gated work
-as ABSENT, which cannot be told apart from finished: a feature was declared complete, its worker
-told to put the branch up, and the feature closed over a subtask nobody had worked. A feature with
-work under it awaiting the user, at any depth, SHALL NOT be reported as finished and its branch
-SHALL NOT be accepted as a pull request. Having nothing to hand out and nothing finished, the hub
-SHALL make the worker WAIT for the user's verdict, as it does for any other empty queue.
+anything under the feature is still awaiting a verdict rather than whether anything is claimable.
+The two questions differ exactly where a gate is shut, so a query written for assignment reports
+gated work as ABSENT, which cannot be told apart from finished: a feature was declared complete,
+its worker told to put the branch up, and the feature closed over a subtask nobody had worked. A
+feature with work under it awaiting the user, at any depth, SHALL NOT be reported as finished and
+its branch SHALL NOT be accepted as a pull request. Having nothing to hand out and nothing
+finished, the hub SHALL make the worker WAIT for the user's verdict, as it does for any other empty
+queue.
+
+Work AWAITING a verdict is what blocks; work already REJECTED SHALL block nothing. The wait ends
+when the user rules, and on a rejected task they have — so blocking on one would park the holder
+indefinitely, with no verb of its own able to clear it and no message saying why. That is a worse
+failure than the wrong completion this rule exists to prevent, not a safer one.
 
 Every edit that lands SHALL be recorded on the task itself, carrying the value each changed field
 held before it, so the user can see what changed rather than only that something did. Where the
 verdict being cleared was a rejection, its reason SHALL be carried into that record: the reason is
 held in the approval state and nowhere else, and this edit is the write that clears it.
 
-Where an agent holds the edited task, the hub SHALL tell it directly: name what changed, point at
-the task where the change is recorded in full, and say the work is still its own to finish.
+The hub SHALL tell every agent whose UNIT OF WORK the edit touches — the holder of the edited task,
+and the holder of any task ABOVE it at any depth. A worker holds a feature rather than a row, so an
+edit to any task within that feature changes what it is building; matching only the edited row
+tells nobody in the case that bites most, where the edit lands on a subtask nobody holds.
+
+The note SHALL name which task changed and how, and SHALL say whether that task is the agent's own
+work or sits inside it — told only that something changed, an agent cannot judge whether it affects
+what it is doing. It SHALL point at the task where the change is recorded in full, and say what
+returning the task for a verdict does not mean: the agent's own work remains its own to finish.
 
 What an edit changed SHALL be read from the task as stored either side of the write, never echoed
 back from the request. Where nothing moved — the values given are already held, or the field
@@ -70,6 +83,18 @@ reading it.
 - **WHEN** a subtask of a feature a worker holds is edited, and every other subtask is done
 - **THEN** the worker is not told the feature is finished, its branch is refused as a pull request,
   and the refusal names the subtask that awaits the user
+
+#### Scenario: A rejected subtask holds nothing open
+
+- **WHEN** the only work left under a feature has been rejected by the user
+- **THEN** the feature is finished, its branch is accepted, and the worker never waits on a verdict
+  that has already been given
+
+#### Scenario: The holder of the enclosing feature is told
+
+- **WHEN** a subtask is edited that nobody holds, inside a feature a worker holds, at any depth
+- **THEN** that worker is told which task changed and how, that it sits inside its feature rather
+  than being the task it is on, and where the change is recorded
 
 #### Scenario: The held feature waits for the verdict
 

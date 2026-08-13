@@ -37,21 +37,27 @@ worst outcome is that something reads wrongly until it is fixed.
   workable NOW, so a gated subtask does not come back from it held back — it is absent, which reads
   as finished. The worker was told the feature was complete, submitted the branch, and the feature
   closed over a subtask nobody had worked; the reconciler is only a partial net, since it reads
-  direct children while the assignment query reaches any depth. Completion now asks `gatedUnder`,
-  which applies the same `authorisedForClaim` rule the claim queries do, so "not handed out" and
-  "not finished" cannot drift into two opinions about one task. With nothing workable and nothing
-  finished, `sindri` WAITS — the approval's own notify wakes it, so no polling and no new nudge.
-  The fragility in `OpenSubtasks` predates this change and a user's rejection reaches it today; what
+  direct children while the assignment query reaches any depth. Completion now asks `gatedUnder`:
+  open work still AWAITING a verdict, at any depth. With nothing workable and nothing finished,
+  `sindri` WAITS — the approval's own notify wakes it, so no polling and no new nudge. The
+  fragility in `OpenSubtasks` predates this change and a user's rejection reaches it today; what
   this change does is make un-approval the routine consequence of the planner's main verb.
+- Pending blocks completion; REJECTED does not, and the claim rule is the wrong one here. Nothing
+  clears a rejection — the wait ends when the user rules, and on a rejected task they have — so
+  blocking on one parks the holder indefinitely, with no verb able to clear it and no message
+  saying why. That is a worse failure than the wrong completion, not a safer one. Assignment asks a
+  different question ("is the plan settled?") and is sd-d38859's; the two must not share a helper.
 - The edit is recorded on the task, carrying the value each changed field held before it. The old
   value survives nowhere else once the write lands, and "something was edited" is not a record. The
   verdict being cleared goes in too: a rejection's reason is held in the approval row alone, and
   this is the write that erases it — revising a rejected task is the ordinary flow, and it was
   impossible under the old rule, so the hole opens with the change that allows it.
-- A worker holding the task is told directly, so it stops building to the brief it read at claim
-  time. The note names the fields, points at the task where the change is recorded in full, and
-  says the work is still its own to finish — a task showing "pending" again otherwise reads as one
-  taken away.
+- Every agent whose UNIT of work the edit touches is told — the holder of the edited task, and the
+  holder of anything above it at any depth. A worker holds a feature, not a row, so matching the
+  edited row told nobody in the case that bites: an edit to a subtask nobody holds, inside a feature
+  someone does. The note names which task changed and how, says whether it is the agent's own work
+  or sits inside it, points at the record, and says the agent's own work is still its to finish — a
+  task showing "pending" again otherwise reads as one taken away.
 - What actually moved is read off the stored rows either side of the write, never echoed back from
   the request. A task whose content its own source owns absorbs no edit, and reporting one would
   claim a change that never happened and spend the user's verdict for it.

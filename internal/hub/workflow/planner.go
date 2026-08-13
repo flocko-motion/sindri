@@ -394,31 +394,60 @@ func prefixed(sep, s string) string {
 	return sep + s
 }
 
-// tellHolder tells whoever works on an edited task that its brief changed under it, and reports
-// whether anyone did. A worker holds the task as it read it at claim time. Un-approving does not
-// reach it: the claim gate decides what is handed OUT, so it finishes and submits exactly as before.
+// tellHolder tells every agent whose UNIT OF WORK the edit touches, and reports back who. Not the
+// holder of the edited row: a worker holds a feature, and an edit to any subtask of it changes what
+// that worker is building. Matching only the row left the sibling case — the one that actually bites
+// — telling nobody. Un-approving reaches none of them: the claim gate decides what is handed OUT.
 func (e *Engine) tellHolder(project, id string, changes []taskChange) string {
 	ps := e.store.For(project)
 	roster, err := ps.Roster()
 	if err != nil {
 		return ""
 	}
+	units := enclosing(ps, id)
+	var told []string
 	for _, a := range roster {
 		st, _ := ps.GetState(a.Name)
-		if st.Task != id && st.Container != id {
+		var unit string
+		switch {
+		case units[st.Task]:
+			unit = st.Task // the subtask it is on, or the edit landed below that
+		case units[st.Container]:
+			unit = st.Container // the feature the edit sits inside
+		default:
 			continue
 		}
-		// Not waited on when it is down (InjectWhenReady would sit there): the record on the task is
-		// what reaches it when it comes back.
-		if !e.deps.AgentAlive(project, a.Name) {
-			return fmt.Sprintf(" %s holds it but isn't running — it will read the change on the task.", a.Name)
-		}
-		if ierr := e.deps.InjectWhenReady(project, a.Name, MsgTaskEdited(id, fieldNames(changes))); ierr != nil {
-			return fmt.Sprintf(" %s is working on it and could not be told (%v) — say so in the meeting room.", a.Name, ierr)
-		}
-		return fmt.Sprintf(" %s is working on it and was told what changed.", a.Name)
+		told = append(told, e.tellOne(project, a.Name, id, unit, fieldNames(changes)))
 	}
-	return ""
+	return strings.Join(told, "")
+}
+
+// enclosing is the edited task and every task above it — the units of work a change to it belongs
+// to. Any depth, matching the reach OpenSubtasks has: a feature contains its whole tree, so an edit
+// three levels down is still an edit to that feature. Stops on a stored loop rather than spinning.
+func enclosing(ps *store.ProjectStore, id string) map[string]bool {
+	out := map[string]bool{id: true}
+	links, err := ps.ParentLinks()
+	if err != nil {
+		return out
+	}
+	for at := links[id]; at != "" && !out[at]; at = links[at] {
+		out[at] = true
+	}
+	return out
+}
+
+// tellOne delivers the note to one holder, and says what happened for the planner's own reply.
+func (e *Engine) tellOne(project, agent, id, unit, fields string) string {
+	// A down agent is not waited on (InjectWhenReady would sit there): the record on the task is
+	// what reaches it when it comes back.
+	if !e.deps.AgentAlive(project, agent) {
+		return fmt.Sprintf(" %s holds %s but isn't running — it will read the change on the task.", agent, unit)
+	}
+	if err := e.deps.InjectWhenReady(project, agent, MsgTaskEdited(id, unit, fields)); err != nil {
+		return fmt.Sprintf(" %s holds %s and could not be told (%v) — say so in the meeting room.", agent, unit, err)
+	}
+	return fmt.Sprintf(" %s holds %s and was told what changed.", agent, unit)
 }
 
 // childIDs are the ids of the tasks parented by id, in listing order.
