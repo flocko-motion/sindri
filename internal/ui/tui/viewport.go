@@ -41,7 +41,7 @@ func (m *model) reclamp() {
 		// happened.
 		lines, _ := m.prMetaLines(max(1, m.w-m.prContentWidth()-1))
 		m.prMeta.Resize(m.bodyHeight(), len(lines))
-	} else if m.tab == 0 || m.tab == 3 { // generic detail pane: size to the WRAPPED count
+	} else if m.tab == 0 || m.tab == 3 || m.tab == 5 || m.tab == 6 { // generic detail pane: size to the WRAPPED count
 		wrapped, _ := wrapContentMapped(m.detailLines(), m.detailWidth())
 		m.detail.Resize(m.bodyHeight(), len(wrapped))
 	} else if m.tab == 1 { // Agents: right column wraps like PRs' meta column (agentsBody)
@@ -103,6 +103,15 @@ func (m *model) syncDetail() tea.Cmd {
 	switch m.tab {
 	case 0:
 		return func() tea.Msg { t, _ := cl.TaskInfo(id); return taskMsg{id, t} }
+	case 6:
+		// A body is fetched per selection rather than carried for every row: the board's window holds
+		// a preview each, and a rejection's findings run to hundreds of lines.
+		m.mailBody, m.mailBodyID = "", 0
+		var mid int64
+		if _, err := fmt.Sscanf(id, "%d", &mid); err != nil {
+			return nil // the "showing the last N of M" row, which is not a message
+		}
+		return mailBodyFetchCmd(cl, mid)
 	case 1:
 		m.agentPane, m.agentPod, m.agentDiag, m.agentClients = "", "", "", nil // selection changed — drop the previous agent's screen/pod/clients
 		m.agentView = "screen"                                                 // default back to the live screen

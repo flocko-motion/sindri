@@ -17,6 +17,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/server"
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // agentDeps adapts the hub to agent.Deps.
@@ -98,8 +99,8 @@ func (d workflowDeps) Container(project, name string) string { return d.h.contai
 
 func (d workflowDeps) Notify() { d.h.notify() }
 
-func (d workflowDeps) InjectWhenReady(project, name, text string) error {
-	return d.h.agents.InjectWhenReady(project, name, text)
+func (d workflowDeps) Deliver(project, name, text string, del workflow.Delivery) error {
+	return d.h.Deliver(project, name, text, del)
 }
 
 func (d workflowDeps) Interrupt(project, name string) error {

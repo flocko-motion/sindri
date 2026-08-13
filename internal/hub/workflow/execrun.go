@@ -172,11 +172,11 @@ func (e *Engine) finishRun(ps *store.ProjectStore, project string, r api.Run, st
 	if r.Kind != "" {
 		return e.completeGate(project, r, status, output)
 	}
-	// Nobody to inject into: the user reads it on the board, which Notify has already refreshed.
+	// Nobody to deliver to: the user reads it on the board, which Notify has already refreshed.
 	if api.RunFromUser(r) {
 		return nil
 	}
-	_ = e.deps.InjectWhenReady(project, r.Agent, MsgRunFinished(r.ID, status, elapsed, budget))
+	_ = e.deps.Deliver(project, r.Agent, MsgRunFinished(r.ID, status, elapsed, budget), MailAndPush)
 	return nil
 }
 

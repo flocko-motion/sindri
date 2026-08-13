@@ -74,7 +74,7 @@ func (e *Engine) completeReview(project, prID, agent, verdict, findings string) 
 		}
 	}
 	_ = ps.SetState(store.AgentState{Agent: agent, Phase: "idle"})
-	_ = e.deps.InjectWhenReady(project, agent, MsgVerdictRecorded(prID))
+	_ = e.deps.Deliver(project, agent, MsgVerdictRecorded(prID), MailAndPush)
 }
 
 // ApprovePR is the human approve path (TUI/CLI): marks a project's open (or already-approved) PR
@@ -218,7 +218,7 @@ func (e *Engine) reject(project, prID, feedback string, byUser bool) error {
 	}
 	_ = ps.LogPR(pr.ID, "rejected", "by "+who+": "+feedback)
 	_ = ps.Log(pr.Agent, "reject", pr.ID+" ("+who+"): "+feedback)
-	_ = e.deps.InjectWhenReady(project, pr.Agent, msg)
+	_ = e.deps.Deliver(project, pr.Agent, msg, MailAndPush)
 	e.deps.Notify()
 	return nil
 }

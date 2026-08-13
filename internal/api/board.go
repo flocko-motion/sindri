@@ -40,6 +40,9 @@ type AgentView struct {
 	// — it is handed no new work in between. Beside Status like Retired, and for the same reason:
 	// it is true of a working agent too, and Status can only say one thing at a time.
 	ClearArmed bool `json:"clearArmed,omitempty"`
+	// UnreadMail is how many messages this agent has not read — a backlog says it has stopped
+	// reading, which nothing else surfaces, since a mailbox is content to wait.
+	UnreadMail int `json:"unreadMail,omitempty"`
 	// Escalation is what an escalated agent asked the user to decide ("" when it is not escalated;
 	// Status then reads StatusEscalated). Carried on the board so the question is readable without
 	// attaching to the pane — several escalations can be triaged before sitting down with one.
@@ -111,6 +114,15 @@ type BoardState struct {
 	// views exist, and the badge each shows. They ride on the board so a front-end renders the
 	// counts instead of deciding them (-> SectionAttention).
 	Sections []Section `json:"sections,omitempty"`
+	// Mail is the newest messages agents must read, fleet-wide, newest first — a WINDOW, with each
+	// body cut to a preview. MailTotal and MailUnread count the whole mailbox, so a view says
+	// "showing the last N of M" rather than presenting a window as the history (-> MailWindow).
+	Mail       []Mail `json:"mail,omitempty"`
+	MailTotal  int    `json:"mailTotal"`
+	MailUnread int    `json:"mailUnread"`
+	// MailUnreadByRepo is unread mail per repo tag, for a view scoped to one repo — counted over the
+	// whole mailbox like the totals, not over the window.
+	MailUnreadByRepo map[string]int `json:"mailUnreadByRepo,omitempty"`
 }
 
 // AgentStatsView is one agent's resource snapshot; Err is set, not swallowed into a misleading zero.
@@ -199,6 +211,11 @@ func (b BoardState) AgentsNeedingUserCount() int { return CountAgentsNeedingUser
 // no live reviewer will give (-> PRNeedsUser). It reads the roster too, since who is running is
 // half the question.
 func (b BoardState) PRsNeedingUserCount() int { return CountPRsNeedingUser(b.PRs, b.Agents) }
+
+// UnreadMailCount is the Mail section's badge: unread across the whole mailbox, not the window,
+// since a badge that stopped rising once the history outgrew the window would say the wrong thing
+// exactly when there was most to say.
+func (b BoardState) UnreadMailCount() int { return b.MailUnread }
 
 // SectionAttention is how many rows of the named section wait on the user, read off the sections
 // the hub resolved. A front-end asks by key so every tab is drawn by the same line of code; a

@@ -421,7 +421,9 @@ const DirClearPending = "[hub] The user has armed a context clear for you: it fi
 func DirEscalated(question string) string {
 	return fmt.Sprintf("[hub] You are ESCALATED — you stopped and asked the user to decide this:\n\n"+
 		"  %s\n\n"+
-		"Nothing has come back yet. Wait quietly; don't ask again and don't work around it. %s When you "+
+		"Nothing has come back yet, and your mailbox is empty — anything waiting there is handed to you "+
+		"BEFORE this, so there is nothing sitting unread behind it. Wait quietly; don't ask again and "+
+		"don't work around it. %s When you "+
 		"have their answer, run `sindri resume` and then `sindri` for your directive. If you now see the "+
 		"answer for yourself, resume anyway rather than sitting on a question that no longer needs "+
 		"them.", question, EscalationHold)

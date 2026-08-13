@@ -62,7 +62,7 @@ func (e *Engine) NudgeStalled(project, name, runtime string, idleFor time.Durati
 	// A cut-off turn is answered on its own terms: it is not idling and has nothing to explain, it
 	// simply stopped mid-sentence. Sent whatever it holds, since the retry is about the turn.
 	if runtime == "api-error" {
-		if err := e.deps.InjectWhenReady(project, name, MsgRetryTurn); err != nil {
+		if err := e.deps.Deliver(project, name, MsgRetryTurn, PushOnly); err != nil {
 			return false
 		}
 		_ = ps.Log(name, "nudge", "api error cut the turn off — asked it to resume")
@@ -83,7 +83,7 @@ func (e *Engine) NudgeStalled(project, name, runtime string, idleFor time.Durati
 	if held == "" {
 		return false // nothing to name, so nothing useful to say
 	}
-	if err := e.deps.InjectWhenReady(project, name, MsgStalled(held, idleFor)); err != nil {
+	if err := e.deps.Deliver(project, name, MsgStalled(held, idleFor), PushOnly); err != nil {
 		return false
 	}
 	_ = ps.Log(name, "nudge", "stalled on "+held+" — idle for "+idleFor.Round(time.Minute).String())

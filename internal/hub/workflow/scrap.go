@@ -42,7 +42,7 @@ func (e *Engine) DiscardPR(project, prID string) error {
 	if st.Phase == "submitted" || st.Phase == "resolving" {
 		if e.deps.AgentAlive(project, author) {
 			_ = e.deps.Interrupt(project, author)
-			_ = e.deps.InjectWhenReady(project, author, MsgPRScrapped(prID))
+			_ = e.deps.Deliver(project, author, MsgPRScrapped(prID), MailAndPush)
 		}
 		_ = ps.SetState(store.AgentState{Agent: author, Phase: "idle"})
 	}
@@ -72,7 +72,7 @@ func (e *Engine) ScrapPR(project, prID string) error {
 		}
 		if e.deps.AgentAlive(project, r.Author) {
 			_ = e.deps.Interrupt(project, r.Author)
-			_ = e.deps.InjectWhenReady(project, r.Author, MsgReviewCancelled(prID))
+			_ = e.deps.Deliver(project, r.Author, MsgReviewCancelled(prID), MailAndPush)
 		}
 		_ = ps.RecordVerdict(r.ID, "cancelled", "PR scrapped with its task")
 		_ = ps.SetState(store.AgentState{Agent: r.Author, Phase: "idle"})

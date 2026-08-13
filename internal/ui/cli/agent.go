@@ -112,6 +112,9 @@ func agentListCmd() *cobra.Command {
 				for _, a := range sorted {
 					line := fmt.Sprintf("%-10.10s %-12s %-8s %-10s %4s %-14s %s", a.Repo, a.Name, a.Role, a.Status,
 						theme.ContextPercent(a.ContextTokens, a.ContextWindow), dash(a.Task), dash(a.PR))
+					if a.UnreadMail > 0 { // a backlog is a strong signal it has stopped reading
+						line += fmt.Sprintf("  ✉%d", a.UnreadMail)
+					}
 					if api.AgentNeedsUser(a) {
 						line += "  ! needs you" // the status says which state; this says whose move it is
 					}
@@ -580,6 +583,11 @@ func agentInfoCmd() *cobra.Command {
 				// it fires, so the only way to know it is set is to be told.
 				if found.ClearArmed {
 					fmt.Printf("clear:     ␡ armed — %s\n", clearLandsWhen(*found))
+				}
+				// A backlog says it has stopped READING, which no other line reveals — the mailbox
+				// waits quietly by design, so a count is the only thing that speaks for it.
+				if found.UnreadMail > 0 {
+					fmt.Printf("mail:      %d unread — `sindri mail list --agent %s`\n", found.UnreadMail, found.Name)
 				}
 				// The question in full, unwrapped: an escalated agent is stopped on THIS, and it is
 				// the reason to open the pane rather than something to go looking for once inside it.

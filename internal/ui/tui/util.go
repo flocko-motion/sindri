@@ -124,6 +124,18 @@ func (m model) agentOnTask(id string) (api.AgentView, bool) {
 	return api.AgentView{}, false
 }
 
+// agentNamed resolves an agent name to its live row, ok=false when the roster has none — a name on a
+// record can outlive the agent (mail is never deleted), so a caller has to be told rather than shown
+// a blank row.
+func (m model) agentNamed(name string) (api.AgentView, bool) {
+	for _, a := range m.state.Agents {
+		if a.Name == name {
+			return a, true
+		}
+	}
+	return api.AgentView{}, false
+}
+
 // agentOnPR is the agent that authored PR id, and whether one is — the PR's own Agent field,
 // resolved to its live AgentView so attach gets status and container, not just a name.
 func (m model) agentOnPR(id string) (api.AgentView, bool) {

@@ -258,13 +258,7 @@ func (h *Hub) Handler() http.Handler {
 			w.Header().Set("X-Sindri-Error", err.Error())
 		}
 	})
-	mux.HandleFunc("POST /tell", func(w http.ResponseWriter, r *http.Request) {
-		var req TellReq
-		if !decode(w, r, &req) {
-			return
-		}
-		writeJSON(w, okMsg{"delivered"}, h.agents.Tell(h.agentReq(r, req.Name), req.Name, req.Msg, req.Source, req.SignedOut))
-	})
+	h.messageRoutes(mux)
 	mux.HandleFunc("POST /chat/add", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
 		if !decode(w, r, &req) {

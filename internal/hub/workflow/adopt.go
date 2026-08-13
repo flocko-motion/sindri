@@ -37,7 +37,7 @@ func (e *Engine) adoptChild(project, parent, child string) {
 			e.promoteToFeature(project, a.Name, parent)
 		}
 		if e.deps.AgentAlive(project, a.Name) {
-			_ = e.deps.InjectWhenReady(project, a.Name, MsgTaskGainedChild(parent, child, promoted))
+			_ = e.deps.Deliver(project, a.Name, MsgTaskGainedChild(parent, child, promoted), MailOnly)
 		}
 	}
 }

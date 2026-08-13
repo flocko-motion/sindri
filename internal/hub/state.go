@@ -35,6 +35,10 @@ type AgentView = api.AgentView
 // under the name every existing caller here already uses.
 type BoardState = api.BoardState
 
+// AgentMail is one message in an agent's mailbox; it crosses the wire, so it is internal/api.Mail,
+// named here for what it is to the hub.
+type AgentMail = api.Mail
+
 // State assembles the board; an empty selected tag means no project is chosen, so no tasks.
 func (h *Hub) State(selected string) (BoardState, error) {
 	agentsRow, err := h.store.AllAgents()
@@ -100,6 +104,11 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	existing, _ := container.ListByLabelCached(podCtx, "sindri.project", "")
 	podCancel()
 
+	// One query for the fleet's unread tallies: a count per agent row would be paid per render.
+	unreadMail, err := h.store.UnreadMailByAgent()
+	if err != nil {
+		return BoardState{}, err
+	}
 	known := map[string]bool{}
 	agents := make([]AgentView, 0, len(agentsRow))
 	for i, a := range agentsRow {
@@ -129,6 +138,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			Clients: clients[i], Container: container, Memory: a.Memory, Retired: a.Retired,
 			ClearArmed:    a.ClearArmed,
 			ContextTokens: tokens, ContextWindow: window, Escalation: st.Escalation,
+			UnreadMail: unreadMail[a.Project][a.Name],
 		})
 	}
 
@@ -148,6 +158,10 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	for _, p := range projects {
 		docs[p.Tag] = h.repoDocState(p.Path)
 	}
+	mail, mailTotal, mailUnread, unreadByRepo, err := h.mailWindow()
+	if err != nil {
+		return BoardState{}, err
+	}
 	board := BoardState{
 		RuntimeHint: h.watch.runtimeHint(),
 		Agents:      agents, Tasks: tasks, PRs: prs, Runs: runs, Projects: projects, Orphans: orphans, Chat: chat,
@@ -156,9 +170,42 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		// Reported from the watchdog's last reading, like liveness and for the same reason: taking
 		// one here would put a process spawn on every board read, and there are many.
 		Memory: h.watch.headroom(),
+		Mail:   mail, MailTotal: mailTotal, MailUnread: mailUnread, MailUnreadByRepo: unreadByRepo,
 	}
 	return withSections(board), nil
 }
+
+// MailWindow is how many messages the board carries. The mailbox is never pruned, so what needs
+// bounding is the RENDER: the counts beside this window are of the whole mailbox, so a view can say
+// what it is not showing, and older mail is reached one message at a time (-> MailBody).
+const MailWindow = 200
+
+// mailPreview is how much of a body the window carries: a rejection arrives with its whole findings,
+// so a row carries an opening and says it was cut rather than putting hundreds of lines on the board.
+const mailPreview = 240
+
+// mailWindow reads the newest mail for the board, each body cut to a preview, plus the tallies of the
+// WHOLE mailbox: the total, the unread count, and unread per repo for a repo-scoped view.
+func (h *Hub) mailWindow() (window []AgentMail, total, unread int, unreadByRepo map[string]int, err error) {
+	if window, err = h.store.AllMail(MailWindow); err != nil {
+		return nil, 0, 0, nil, err
+	}
+	for i, m := range window {
+		window[i].Repo = h.repoName(m.Project)
+		if len(m.Body) > mailPreview {
+			window[i].Body, window[i].Truncated = m.Body[:mailPreview], true
+		}
+	}
+	total, unread, unreadByRepo, err = h.store.MailTallies()
+	if err != nil {
+		return nil, 0, 0, nil, err
+	}
+	return window, total, unread, unreadByRepo, nil
+}
+
+// MailBody returns one message with its full body — what a detail view or `mail show` asks for, since
+// the board carries only a preview of each.
+func (h *Hub) MailBody(id int64) (AgentMail, bool, error) { return h.store.MailByID(id) }
 
 // withSections stamps the board with its own tabs — each count, and how many of its rows wait on
 // the user — resolved against the board they describe. A front-end renders what it finds here, so
@@ -308,15 +355,9 @@ func overlayFullness(status string, full bool, task, feature, pr string) string 
 	return status
 }
 
-// overlayEscalation says "escalated" wherever an agent is waiting on a decision the user must make.
-// It is applied LAST, over the runtime and the stall alike: those describe a screen, and this
-// describes why the screen is quiet — the agent's own account, which is the only one that tells the
-// user what to do about it. A stalled reading is the same standing-still seen without the reason,
-// and the nudge behind it is exempt for that reason too (-> workflow.NudgeStalled).
-//
-// Two words still outrank it, both saying the answer cannot be DELIVERED: a pod that is not up, and
-// a signed-out session where nothing typed is sent. Those come first because they must be fixed
-// before the question can be.
+// overlayEscalation says "escalated" wherever an agent waits on a decision the user must make. Last,
+// over the runtime and the stall alike: those describe a screen, this says why the screen is quiet.
+// Two words outrank it, both meaning the answer cannot be DELIVERED yet: not-up, and signed-out.
 func overlayEscalation(status, question string) string {
 	if question == "" || api.AgentNotUp(status) || status == api.StatusSignedOut {
 		return status

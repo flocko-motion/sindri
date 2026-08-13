@@ -34,7 +34,7 @@ func scopeLabels(t *testing.T, scope keyScope) map[string][]string {
 // tab. The same key with the same label twice is only a duplicated help row (config is listed
 // globally and on Repos), so labels — not counts — decide what a conflict is.
 func TestNoTwoActionsShareAKeyOnATab(t *testing.T) {
-	for _, scope := range []keyScope{scopeGlobal, scopeTasks, scopeAgents, scopePRs, scopeRepos, scopeChat} {
+	for _, scope := range []keyScope{scopeGlobal, scopeTasks, scopeAgents, scopePRs, scopeRepos, scopeChat, scopeMail} {
 		for key, labels := range scopeLabels(t, scope) {
 			for _, l := range labels {
 				if l != labels[0] {
@@ -65,6 +65,7 @@ func TestLowercaseKeysNeverMutate(t *testing.T) {
 		"m": "stats — samples memory use and shows it; mutates nothing",
 		"n": "why next — asks the hub what it would assign and prints the answer; assigns nothing",
 		"r": "refresh — re-reads the board",
+		"w": "who — narrows the mail list to one recipient; changes nothing about the mail",
 		"q": "quit",
 	}
 	m := newModel(nil, nil, "/r/one")

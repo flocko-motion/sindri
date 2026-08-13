@@ -123,6 +123,8 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.prFilter = api.NextPRFilter(m.prFilter)
 		} else if m.tab == 5 {
 			m.runFilter = api.NextRunFilter(m.runFilter)
+		} else if m.tab == 6 {
+			m.cycleMailFilter()
 		}
 	case "h": // tasks: collapse the fold under the cursor (tree navigation)
 		if m.tab == 0 && !m.rightFocus {
@@ -149,7 +151,11 @@ func (m *model) onKey(k string) tea.Cmd {
 				return mutateThenRefresh(cl, func() error { return cl.SetRetired(name, !back) })
 			}
 		}
-	case keyAttach: // agents/tasks/prs: attach to the live tmux session
+	case keyMailWho: // mail: narrow to the selected message's recipient, or widen again
+		if m.tab == 6 {
+			m.toggleMailAgent()
+		}
+	case keyAttach: // agents/tasks/prs/mail: attach to the live tmux session
 		if m.tab == 0 {
 			// Attach to whoever is working the selected task — the row you are looking at names
 			// the work, so it should reach the agent doing it without a detour via the Agents tab.
@@ -171,6 +177,20 @@ func (m *model) onKey(k string) tea.Cmd {
 			a, ok := m.agentOnPR(m.selID())
 			if !ok {
 				m.flash = "no agent is working " + m.selID()
+				return nil
+			}
+			return m.attachTo(a)
+		}
+		if m.tab == 6 {
+			// The row names its recipient, so attach reaches the agent the message is ABOUT. Mail
+			// outlives the agent it was sent to (nothing is deleted), so a missing one is ordinary.
+			msg, ok := m.selMail()
+			if !ok {
+				return nil
+			}
+			a, live := m.agentNamed(msg.Agent)
+			if !live {
+				m.flash = msg.Agent + " is no longer on the roster — its mail outlives it"
 				return nil
 			}
 			return m.attachTo(a)

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/ui/theme"
@@ -48,14 +49,20 @@ func headerBar(labels []string, active, width int, repoName, repoTag string, rep
 	}
 	ind := "◉ " + repoName + " "
 	badge := headroomBadge(mem, width-plainW-lipgloss.Width(ind))
-	gap := width - plainW - lipgloss.Width(ind) - lipgloss.Width(badge)
-	if gap < 1 {
-		gap = 1
+	// Exactly `width` or the frame shears — one cell of overflow pushes the layout off-screen. So the
+	// TAB STRIP gives way when the tabs stop fitting, keeping the repo indicator this bar exists to
+	// shout; every tab added makes it tighter, which is why it degrades rather than overflows.
+	strip, gap := b.String(), 0
+	room := width - lipgloss.Width(ind) - lipgloss.Width(badge)
+	if room < 0 {
+		room = 0
 	}
-	b.WriteString(base.Render(strings.Repeat(" ", gap)))
-	b.WriteString(base.Render(badge))
-	b.WriteString(base.Bold(true).Render(ind))
-	return b.String()
+	if plainW > room {
+		strip = ansi.Truncate(strip, room, "…")
+	} else {
+		gap = room - plainW
+	}
+	return strip + base.Render(strings.Repeat(" ", gap)) + base.Render(badge) + base.Bold(true).Render(ind)
 }
 
 // plainTabStrip is the no-repo fallback: labels with the active one highlighted,

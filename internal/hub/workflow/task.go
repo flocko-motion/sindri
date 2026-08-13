@@ -134,7 +134,7 @@ func (e *Engine) nudgeIdleWorkers(project, id, priority string) {
 		if !e.deps.AgentAlive(project, a.Name) {
 			continue // nothing to inject into
 		}
-		_ = e.deps.InjectWhenReady(project, a.Name, MsgWorkAvailable(id))
+		_ = e.deps.Deliver(project, a.Name, MsgWorkAvailable(id), PushOnly)
 		_ = ps.Log(a.Name, "nudge", "work available: "+id)
 	}
 }
@@ -295,6 +295,14 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 		return "", fmt.Errorf("unknown agent %q", name)
 	}
 	st, _ := ps.GetState(name)
+	// Unread mail outranks EVERYTHING. Before the paths that block, since an agent left blocking would
+	// sit on what may release it; before the escalation, the one state told to sit still, whose mail
+	// may answer or moot the question — and whose "nothing has come back" is true only once read.
+	if n, merr := ps.UnreadMailCount(name); merr != nil {
+		return "", merr
+	} else if n > 0 {
+		return DirUnreadMail(n), nil
+	}
 	// Escalated outranks every role's directive: with the work verbs shut, any other answer sends the
 	// agent at a wall. Repeated on EVERY ask — a relaunched agent has no memory of asking.
 	if st.Escalation != "" {
@@ -460,57 +468,6 @@ func (e *Engine) syncTasks(project string, force bool) error {
 		}
 	}
 	return ps.ReplaceTasks(rows)
-}
-
-// SetPriority assigns a task's priority (a P-code), reaching as far below it as scope asks. What
-// reaching there does differs by case, and api.PriorityEffect is where that is set out.
-func (e *Engine) SetPriority(project, id, priority string, scope api.PriorityScope) error {
-	targets, err := e.priorityTargets(project, id, scope)
-	if err != nil {
-		return err
-	}
-	for _, t := range targets {
-		if err := e.writePriority(project, t, priority); err != nil {
-			return err
-		}
-		e.refreshCachedTask(project, t) // targeted refresh of each reprioritized task
-	}
-	e.deps.Notify()
-	// Rating an unrated task is the moment it becomes claimable, so it needs the same nudge as a task
-	// created with a priority. ONE, however far the cascade reached: it only has to wake a worker up.
-	e.nudgeIdleWorkers(project, id, priority)
-	return nil
-}
-
-// priorityTargets is which tasks a scoped rating writes to, CHILDREN FIRST — the parent's rating is
-// what releases a package, so no worker can claim one half-rated. Open descendants only: a finished
-// task's rating decides nothing, and overwriting it would edit the record of work already done.
-func (e *Engine) priorityTargets(project, id string, scope api.PriorityScope) ([]string, error) {
-	if scope == api.ScopeTask {
-		return []string{id}, nil
-	}
-	all, err := e.store.For(project).AllTasks()
-	if err != nil {
-		return nil, err
-	}
-	var out []string
-	for _, d := range api.Descendants(all, id) {
-		if !api.Open(d) || (scope == api.ScopeUnrated && d.Priority != "") {
-			continue
-		}
-		out = append(out, d.ID)
-	}
-	return append(out, id), nil
-}
-
-// writePriority records one rating where that task's priority lives: its own row when sindri owns the
-// task, the hub's overlay when the task is mirrored.
-func (e *Engine) writePriority(project, id, priority string) error {
-	ps := e.store.For(project)
-	if ps.OwnsTask(id) {
-		return ps.SetOwnedPriority(id, priority)
-	}
-	return ps.SetPriorityOverride(id, priority)
 }
 
 // checkParent validates a requested parent before anything is written: it must exist, and it must

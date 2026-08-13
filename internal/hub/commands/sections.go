@@ -23,6 +23,7 @@ type Board interface {
 	TasksNeedingUserCount() int
 	AgentsNeedingUserCount() int
 	PRsNeedingUserCount() int
+	UnreadMailCount() int
 }
 
 // Section is one dashboard tab: a key, a title, its actionable badge count read from the board,
@@ -67,6 +68,16 @@ var Sections = []Section{
 	{Key: "runs", Title: "Runs", Count: func(b Board) int { return b.OpenRunCount() }},
 	{Key: "repos", Title: "Repos", Count: func(b Board) int { return b.RepoCount() }},
 	{Key: "chat", Title: "Meeting", Count: func(b Board) int { return b.ChatMemberCount() }},
+	{
+		Key: "mail", Title: "Mail",
+		// Unread, not the whole history: the mailbox never shrinks, so a total would climb for ever
+		// and stop meaning anything, while unread is the one number that can go back to zero.
+		Count: func(b Board) int { return b.UnreadMailCount() },
+		// No Attention, deliberately: unread mail is the AGENT's backlog, not the user's work, and
+		// nothing here waits on a human. An agent that has stopped reading is worth surfacing, and
+		// that belongs on the agent's own row (-> sd-7b317b) rather than as a marker asking the user
+		// to do something no verb of theirs can do.
+	},
 }
 
 // Resolved reads every section's counts against b and returns the wire shape: the

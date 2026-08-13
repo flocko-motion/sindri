@@ -35,9 +35,14 @@ var tuiSections = []tuiSection{
 	// Appended, not slotted in near PRs, so every existing `m.tab == N` guard elsewhere keeps
 	// pointing at the tab it always has — inserting in the middle would shift Repos and Chat.
 	{"runs", "Runs"},
+	{"mail", "Mail"},
 }
 
 type tuiSection struct{ Key, Title string }
+
+// tabCount is how many tabs there are, as a constant — the per-tab cursor array needs one, and it
+// is asserted against tuiSections in the tests, so a tab added without widening it fails there.
+const tabCount = 7
 
 // inputMode is the active text-input modal (none = normal navigation).
 type inputMode int
@@ -60,7 +65,7 @@ type model struct {
 	w, h   int
 
 	tab    int
-	cursor [6]int // one per section (Tasks/Agents/PRs/Repos/Chat/Runs)
+	cursor [tabCount]int // one per section (Tasks/Agents/PRs/Repos/Chat/Runs/Mail)
 	list   scroll.Viewport
 	detail scroll.Viewport
 	// prMeta is the PRs tab's right column. It needs its own viewport because `detail` is spent on
@@ -71,6 +76,10 @@ type model struct {
 	filter     api.TaskFilter // Tasks tab: which segment of the backlog is shown (-> api.TaskFilters)
 	prFilter   api.PRFilter   // PRs tab: which segment is shown (-> api.PRFilters)
 	runFilter  api.RunFilter  // Runs tab: which segment is shown (-> api.RunFilters)
+	mailFilter api.MailFilter // Mail tab: unread or all (-> api.MailFilters)
+	mailAgent  string         // Mail tab: narrowed to this recipient ("" = every agent)
+	mailBody   string         // the selected message's full body, fetched (the board carries a preview)
+	mailBodyID int64          // which message mailBody belongs to
 	collapsed  map[string]bool
 	merging    map[string]bool   // PR ids the user just triggered a merge on — shown as a transient "merging" on the row until the hub confirms
 	busy       map[string]string // task ids the user just triggered a close/scrap on → the transient verb ("closing"/"deleting") shown on the row until the hub confirms
@@ -134,7 +143,9 @@ func newModel(cl *client.HTTP, ch <-chan api.BoardState, root string) model {
 	// Tasks open on "active" — the open backlog plus whatever changed in the last couple of hours.
 	// Plain "open" hid a task the moment it closed, so the work just finished left no trace on the
 	// board and the tab read as though nothing had happened.
-	m := model{cl: cl, ch: ch, root: root, filter: api.FilterActive, prFilter: api.PRFilterActive, runFilter: api.RunFilterActive, collapsed: map[string]bool{}, merging: map[string]bool{}, busy: map[string]string{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
+	// Mail opens on "unread" — the mailbox keeps everything, so the whole history is rarely the
+	// question; what has not been read yet always is.
+	m := model{cl: cl, ch: ch, root: root, filter: api.FilterActive, prFilter: api.PRFilterActive, runFilter: api.RunFilterActive, mailFilter: api.MailUnread, collapsed: map[string]bool{}, merging: map[string]bool{}, busy: map[string]string{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
 	m.reclamp()
 	return m
 }
@@ -307,6 +318,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The diff arrives long after syncDetail sized the viewport to "(loading…)", so resize
 		// now or it renders against a stale one-line window.
 		m.reclamp()
+	case mailMsg:
+		m.mailBody, m.mailBodyID = msg.body, msg.id
+		m.reclamp() // the body is most of the detail's height, so its arrival resizes the pane
 	case taskMsg:
 		m.taskDetail = msg.t
 	case runMsg:

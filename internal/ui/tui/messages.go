@@ -35,6 +35,12 @@ type runMsg struct {
 	key string
 	d   api.RunDetail
 }
+
+// mailMsg carries one message's full body, fetched for the selected row.
+type mailMsg struct {
+	id   int64
+	body string
+}
 type paneMsg struct {
 	agent string
 	text  string

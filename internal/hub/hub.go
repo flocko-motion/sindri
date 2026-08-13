@@ -185,10 +185,12 @@ func (h *Hub) NewAgent(project, name, role, memory string) (string, error) {
 func (h *Hub) rehydrate(project, name string) {
 	// Let Claude boot to input-readiness first, or its Enter is eaten by the splash.
 	time.Sleep(8 * time.Second)
-	_ = h.agents.InjectWhenReady(project, name, workflow.MsgKickoff)
+	// Push-only, like every wake: a kickoff tells a live session to ask the hub what to do, and there
+	// is nothing worth keeping for an agent that was not there to be woken.
+	_ = h.Deliver(project, name, workflow.MsgKickoff, workflow.PushOnly)
 	// A relaunched chatroom member lost its durable prompt's membership cue — remind it, if the room
 	// is in a state where that means anything (-> chat.ReminderFor). Best-effort, as the kickoff is.
 	if cue := h.chat.ReminderFor(project, name); cue != "" {
-		_ = h.agents.InjectWhenReady(project, name, cue)
+		_ = h.Deliver(project, name, cue, workflow.PushOnly)
 	}
 }

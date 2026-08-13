@@ -136,7 +136,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("set pragmas: %w", err)
 	}
-	if _, err := db.Exec(schema + workflowSchema); err != nil {
+	if _, err := db.Exec(schema + workflowSchema + mailSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}

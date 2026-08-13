@@ -88,7 +88,7 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 		_ = ps.PutPR(pr)
 		_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "resolving"})
 		_ = ps.LogPR(pr.ID, "conflict", "rebase onto "+pr.Base+" conflicts: "+strings.Join(res.Files, ", "))
-		_ = e.deps.InjectWhenReady(project, pr.Agent, MsgResolveNeeded(pr.Base, res.Files))
+		_ = e.deps.Deliver(project, pr.Agent, MsgResolveNeeded(pr.Base, res.Files), MailAndPush)
 		e.deps.Notify()
 		return store.PR{}, fmt.Errorf("%s conflicts with %s — sent to %s to resolve; it returns for review once clean", prID, pr.Base, pr.Agent)
 	case repo.MergeRebaseErr:
@@ -150,12 +150,12 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 			_ = ps.Log(pr.Agent, "merged", prID+" (milestone)")
 			_ = ps.LogPR(prID, "merged", "milestone into "+pr.Base)
 			e.resumeContainer(project, pr.Agent)
-			_ = e.deps.InjectWhenReady(project, pr.Agent, MsgMilestoneMerged(prID))
+			_ = e.deps.Deliver(project, pr.Agent, MsgMilestoneMerged(prID), MailAndPush)
 		} else {
 			_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "working"})
 			_ = ps.Log(pr.Agent, "merged", prID+" (interim)")
 			_ = ps.LogPR(prID, "merged", "interim contribution into "+pr.Base)
-			_ = e.deps.InjectWhenReady(project, pr.Agent, MsgContributionMerged(prID, pr.Task))
+			_ = e.deps.Deliver(project, pr.Agent, MsgContributionMerged(prID, pr.Task), MailAndPush)
 		}
 		e.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
 		e.deps.Notify()
@@ -178,7 +178,7 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 	_ = ps.SetState(store.AgentState{Agent: pr.Agent, Phase: rest})
 	_ = ps.Log(pr.Agent, "merged", prID)
 	_ = ps.LogPR(prID, "merged", "into "+pr.Base)
-	_ = e.deps.InjectWhenReady(project, pr.Agent, MsgMerged(prID))
+	_ = e.deps.Deliver(project, pr.Agent, MsgMerged(prID), MailAndPush)
 	e.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
 	e.deps.Notify()
 	return pr, nil

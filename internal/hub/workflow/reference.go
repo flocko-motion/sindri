@@ -89,7 +89,7 @@ func (e *Engine) referenceMoved(project, root, base, prevTip, tip string, advanc
 		switch {
 		case !advanced:
 			_ = ps.Log(a.Name, "reference-rewritten", base)
-			_ = e.deps.InjectWhenReady(project, a.Name, MsgReferenceRewritten())
+			_ = e.deps.Deliver(project, a.Name, MsgReferenceRewritten(), MailAndPush)
 		case underReview:
 			// Leaving it unmoved is correct, but must leave a trace — otherwise the drift it lets
 			// stand is unmeasurable afterwards.
@@ -140,11 +140,11 @@ func (e *Engine) advanceAgent(project, root, base, prevTip, tip string, a store.
 	}
 	if rebaseErr != nil {
 		_ = ps.Log(a.Name, "reference-rebase-skip", base+": "+rebaseErr.Error())
-		_ = e.deps.InjectWhenReady(project, a.Name, MsgReferenceNeedsRebase(incoming))
+		_ = e.deps.Deliver(project, a.Name, MsgReferenceNeedsRebase(incoming), MailAndPush)
 		return
 	}
 	_ = ps.Log(a.Name, "reference-advanced", "rebased onto "+base)
-	_ = e.deps.InjectWhenReady(project, a.Name, MsgReferenceAdvanced(incoming))
+	_ = e.deps.Deliver(project, a.Name, MsgReferenceAdvanced(incoming), PushOnly)
 }
 
 // commitList renders incoming commits as an indented block, or "" when there are none to name.

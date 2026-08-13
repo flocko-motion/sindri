@@ -51,8 +51,11 @@ type Deps interface {
 	Container(project, name string) string
 	// Notify wakes the board (an SSE change notification).
 	Notify()
-	// InjectWhenReady delivers a message into an agent's session once it's ready.
-	InjectWhenReady(project, name, text string) error
+	// Deliver sends a message to an agent the way d says: mail keeps it until the agent reads it, a
+	// push types it into the session now, and a sender states both (-> delivery.go). This is how
+	// every hub-originated message reaches an agent — a bare injection is push-only by omission,
+	// which is exactly the silent loss mail exists to prevent.
+	Deliver(project, name, text string, d Delivery) error
 	// Interrupt aborts an agent's current operation (sends ESC to its session), so a
 	// scrapped-task notice lands on an idle prompt rather than queuing behind work.
 	Interrupt(project, name string) error

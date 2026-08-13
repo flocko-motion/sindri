@@ -119,7 +119,7 @@ func (e *Engine) RequestReview(project, prID, requirement string) error {
 			return err
 		}
 		_ = ps.LogPR(prID, "review-amended", "further instructions to "+holder)
-		go e.deps.InjectWhenReady(project, holder, MsgReviewAmended(prID, requirement))
+		go e.deps.Deliver(project, holder, MsgReviewAmended(prID, requirement), MailAndPush)
 		e.deps.Notify()
 		return nil
 	}
@@ -168,7 +168,7 @@ func (e *Engine) assignReview(project string, id int64, prID, reviewer, requirem
 	}
 	_ = ps.SetState(store.AgentState{Agent: reviewer, Phase: "reviewing"}) // board shows it working, not idle
 	_ = ps.LogPR(prID, "review-requested", "assigned to "+reviewer)
-	go e.deps.InjectWhenReady(project, reviewer, MsgReview(prID, requirement, pr.Branch, pr.Base, e.deps.ArchitectureDoc(project), checkedOut)) // async: don't block a worker's submit
+	go e.deps.Deliver(project, reviewer, MsgReview(prID, requirement, pr.Branch, pr.Base, e.deps.ArchitectureDoc(project), checkedOut), MailAndPush) // async: don't block a worker's submit
 	e.deps.Notify()
 	return nil
 }
@@ -198,7 +198,7 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 			return "", false, err
 		}
 		_ = ps.SetState(store.AgentState{Agent: name, Phase: restPhase("reviewer")})
-		_ = e.deps.InjectWhenReady(project, name, MsgReviewCancelled(held))
+		_ = e.deps.Deliver(project, name, MsgReviewCancelled(held), MailAndPush)
 	}
 	var id int64
 	var prID string
@@ -229,7 +229,7 @@ func (e *Engine) releaseReviewers(project, prID, why string) {
 			continue
 		}
 		_ = ps.SetState(store.AgentState{Agent: r.Author, Phase: restPhase("reviewer")})
-		_ = e.deps.InjectWhenReady(project, r.Author, MsgReviewCancelled(prID))
+		_ = e.deps.Deliver(project, r.Author, MsgReviewCancelled(prID), MailAndPush)
 	}
 	e.deps.Notify()
 }

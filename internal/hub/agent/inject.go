@@ -72,7 +72,8 @@ func (s *Service) injectWhenReady(project, name, text string, guard bool) error 
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return s.store.For(project).Log(name, "inject-skipped", text)
+	_ = s.store.For(project).Log(name, "inject-skipped", text)
+	return fmt.Errorf("agent %q has no live session — nothing was injected", name)
 }
 
 // Interrupt sends Escape — Claude's "abort the current operation" — so a follow-up message lands on

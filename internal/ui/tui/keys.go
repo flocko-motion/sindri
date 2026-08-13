@@ -53,8 +53,11 @@ const (
 	keyConfig    = "E" // edit the repo's config (mutation → shift)
 	keyColor     = "c" // pick a repo's colour (opens a chooser → lowercase)
 	keyRefresh   = "r" // refresh the board
-	keyDetail    = "§" // toggle the detail pane
-	keyQuit      = "q" // quit
+	// Mail: narrow the list to the selected message's recipient — "who was told this?", the question
+	// the tab is opened with. Its own letter because `a` attaches and only attaches, on every tab.
+	keyMailWho = "w"
+	keyDetail  = "§" // toggle the detail pane
+	keyQuit    = "q" // quit
 )
 
 // keyScope selects where a binding applies and is shown.
@@ -68,6 +71,7 @@ const (
 	scopeRepos
 	scopeChat
 	scopeRuns
+	scopeMail
 )
 
 // binding is one row of help: the key(s) as displayed, a label (may depend on model
@@ -168,6 +172,17 @@ var keymap = []binding{
 	{keyConfig, lbl("config"), scopeRepos},
 	{keyDelete, lbl("forget"), scopeRepos},
 
+	// Mail: look only — the mailbox is the agent's to read, and the user's part is finding a message.
+	{keyAttach, lbl("attach"), scopeMail},
+	{keyMailWho, func(m model) string {
+		if m.mailAgent != "" {
+			return "who: " + m.mailAgent
+		}
+		return "who: all"
+	}, scopeMail},
+	{keyFilter, func(m model) string { return "filter: " + string(m.mailFilter) }, scopeMail},
+	{keyScopeTog, func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scopeMail},
+
 	// Chat.
 	{"enter", lbl("compose"), scopeChat},
 	{keyApprove, lbl("add member"), scopeChat},
@@ -207,6 +222,8 @@ func tabScope(tab int) keyScope {
 		return scopeChat
 	case 5:
 		return scopeRuns
+	case 6:
+		return scopeMail
 	default:
 		return scopeRepos
 	}

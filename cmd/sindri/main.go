@@ -59,6 +59,7 @@ func main() {
 	rootCmd.AddCommand(cli.NewCoauthorCmd())
 	rootCmd.AddCommand(cli.NewAgentCmd())
 	rootCmd.AddCommand(cli.NewChatCmd())
+	rootCmd.AddCommand(cli.NewMailCmd())
 	rootCmd.AddCommand(cli.NewRepoCmd())
 	rootCmd.AddCommand(cli.NewTaskCmd())
 	rootCmd.AddCommand(cli.NewPrCmd())

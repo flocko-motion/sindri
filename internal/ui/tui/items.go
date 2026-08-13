@@ -25,6 +25,8 @@ func (m model) detailLines() []string {
 		return m.prDetailLines()
 	case 5:
 		return m.runDetailLines()
+	case 6:
+		return m.mailDetailLines()
 	default:
 		return m.repoDetailLines()
 	}
@@ -39,6 +41,8 @@ func (m model) modalTitle() string {
 		return "Agent " + m.selID()
 	case 2:
 		return "PR " + m.selID()
+	case 6:
+		return "Message " + m.selID()
 	default:
 		return "Repo " + m.repoName(m.selID())
 	}
@@ -199,6 +203,8 @@ func (m model) rows() []row {
 		return m.repoRows()
 	case 5:
 		return m.runRows()
+	case 6:
+		return m.mailRows()
 	default:
 		return nil // Chat has no selectable rows — it renders its own transcript body
 	}
@@ -271,6 +277,14 @@ func (m model) tabCount(s tuiSection) int {
 		return m.state.RepoCount()
 	case "chat":
 		return m.state.ChatMemberCount()
+	case "mail":
+		// Unread over the whole mailbox, not the window the list renders: a badge that stopped
+		// rising once the history outgrew the window would go quiet exactly when there was most
+		// unread. Narrowed by the § scope like Agents and PRs, from the hub's per-repo tally.
+		if _, tag := m.currentRepo(); m.scopeRepo && tag != "" {
+			return m.state.MailUnreadByRepo[tag]
+		}
+		return m.state.MailUnread
 	}
 	return 0
 }
@@ -303,6 +317,8 @@ func (m model) actionableItems() []metaItem {
 		return m.agentActionable()
 	case 2:
 		return m.prActionable()
+	case 6:
+		return m.mailActionable()
 	}
 	return nil
 }

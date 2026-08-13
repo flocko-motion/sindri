@@ -55,7 +55,7 @@ func (e *Engine) AssignPlan(project, agent, goal, taskID string) error {
 		_ = e.deps.Interrupt(project, agent)
 	}
 	brief := MsgPlanAssignment(subject, taskID, e.deps.ArchitectureDoc(project), e.planReading(project))
-	if err := e.deps.InjectWhenReady(project, agent, brief); err != nil {
+	if err := e.deps.Deliver(project, agent, brief, MailAndPush); err != nil {
 		return err
 	}
 	st, _ := ps.GetState(agent)
@@ -444,7 +444,7 @@ func (e *Engine) tellOne(project, agent, id, unit, fields string) string {
 	if !e.deps.AgentAlive(project, agent) {
 		return fmt.Sprintf(" %s holds %s but isn't running — it will read the change on the task.", agent, unit)
 	}
-	if err := e.deps.InjectWhenReady(project, agent, MsgTaskEdited(id, unit, fields)); err != nil {
+	if err := e.deps.Deliver(project, agent, MsgTaskEdited(id, unit, fields), MailOnly); err != nil {
 		return fmt.Sprintf(" %s holds %s and could not be told (%v) — say so in the meeting room.", agent, unit, err)
 	}
 	return fmt.Sprintf(" %s holds %s and was told what changed.", agent, unit)

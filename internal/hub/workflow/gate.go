@@ -85,7 +85,7 @@ func (e *Engine) openMilestoneOrInterim(project string, r api.Run) (store.PR, er
 		if err != nil {
 			return store.PR{}, err
 		}
-		_ = e.deps.InjectWhenReady(project, r.Agent, "[hub] "+ReplyMilestoneContributed(pr.ID, st.Container))
+		_ = e.deps.Deliver(project, r.Agent, "[hub] "+ReplyMilestoneContributed(pr.ID, st.Container), MailAndPush)
 		return pr, nil
 	}
 	root := e.deps.ProjectRoot(project)
@@ -122,7 +122,7 @@ func (e *Engine) openMilestoneOrInterim(project string, r api.Run) (store.PR, er
 	if !done {
 		_ = ps.SetState(store.AgentState{Agent: r.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "resolving"})
 		_ = ps.Log(r.Agent, "contribute-conflict", strings.Join(conflicts, ", "))
-		_ = e.deps.InjectWhenReady(project, r.Agent, "[hub] "+ReplyContributeConflicts(base, conflicts))
+		_ = e.deps.Deliver(project, r.Agent, "[hub] "+ReplyContributeConflicts(base, conflicts), MailAndPush)
 		return pr, nil
 	}
 	if err := ps.SetState(store.AgentState{Agent: r.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "submitted"}); err != nil {
@@ -135,7 +135,7 @@ func (e *Engine) openMilestoneOrInterim(project string, r api.Run) (store.PR, er
 		_ = ps.LogPR(pr.ID, "created", "interim, by "+r.Agent+": "+msg)
 	}
 	e.deps.Notify()
-	_ = e.deps.InjectWhenReady(project, r.Agent, "[hub] "+ReplyContributed(pr.ID))
+	_ = e.deps.Deliver(project, r.Agent, "[hub] "+ReplyContributed(pr.ID), MailAndPush)
 	return pr, nil
 }
 
@@ -186,9 +186,9 @@ func (e *Engine) landSubmit(project string, ps *store.ProjectStore, r api.Run) e
 	}
 	if err := e.RequestReview(project, pr.ID, ""); err != nil {
 		_ = ps.Log(r.Agent, "review-request-failed", pr.ID+": "+err.Error())
-		return e.deps.InjectWhenReady(project, r.Agent, "[hub] "+ReplyReviewRequestFailed(pr.ID, err))
+		return e.deps.Deliver(project, r.Agent, "[hub] "+ReplyReviewRequestFailed(pr.ID, err), MailAndPush)
 	}
-	return e.deps.InjectWhenReady(project, r.Agent, MsgGatePassed(pr.ID))
+	return e.deps.Deliver(project, r.Agent, MsgGatePassed(pr.ID), MailAndPush)
 }
 
 // rejectGate lands a failed gate: back to "working" with the violations, exactly what an inline
@@ -200,7 +200,7 @@ func (e *Engine) rejectGate(project string, ps *store.ProjectStore, r api.Run, o
 	}
 	_ = ps.Log(r.Agent, "lint-fail", gateTarget(st))
 	e.deps.Notify()
-	return e.deps.InjectWhenReady(project, r.Agent, MsgGateFailed(strings.TrimSpace(output)))
+	return e.deps.Deliver(project, r.Agent, MsgGateFailed(strings.TrimSpace(output)), MailAndPush)
 }
 
 // stallGate lands a gate that never reached a verdict: back to "working", told to just try again
@@ -212,7 +212,7 @@ func (e *Engine) stallGate(project string, ps *store.ProjectStore, r api.Run, st
 	}
 	_ = ps.Log(r.Agent, "gate-incomplete", status)
 	e.deps.Notify()
-	return e.deps.InjectWhenReady(project, r.Agent, MsgGateIncomplete(status))
+	return e.deps.Deliver(project, r.Agent, MsgGateIncomplete(status), MailAndPush)
 }
 
 // gateTarget names what a gate was checking, for the activity log — the container if the agent

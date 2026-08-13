@@ -138,6 +138,9 @@ func (h *Hub) registry() *registry.Registry {
 				}
 				return ""
 			}, Run: h.cmdResume},
+		// Every role receives mail, so every role can read it. Never held back by an escalation: an
+		// escalated agent reading what it was told is how it learns the answer it is waiting for.
+		registry.Command{Name: "mail", Help: mailHelp, Run: h.cmdMail},
 		// State-gated rather than role-gated: the user controls who is in the meeting room.
 		registry.Command{Name: "meeting", Help: "say something to everyone in the meeting room: meeting <message...>",
 			Blocked: func(c registry.Caller) string {

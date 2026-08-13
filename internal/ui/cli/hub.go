@@ -32,6 +32,7 @@ type backend interface {
 	SetMemory(name, memory string) error
 	SetRetired(name string, retired bool) error
 	ResumeAgent(name string) error
+	MailBody(id int64) (api.Mail, error)
 	DeleteAgent(name string) error
 	StopAgent(name string) error
 	SetClearArmed(name string, armed bool) error

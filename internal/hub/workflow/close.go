@@ -130,7 +130,7 @@ func (e *Engine) finishTask(project, id string, scrap bool) error {
 				// ESC first, so the cancellation lands on an idle prompt rather than
 				// queuing behind the work it is cancelling.
 				_ = e.deps.Interrupt(project, a.Name)
-				_ = e.deps.InjectWhenReady(project, a.Name, MsgTaskCancelled(id))
+				_ = e.deps.Deliver(project, a.Name, MsgTaskCancelled(id), MailAndPush)
 			}
 		}
 	}
