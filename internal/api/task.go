@@ -100,19 +100,19 @@ func ReleasedByPriority(tasks []Task) map[string]bool {
 // count is surfaced rather than left for someone to work out from the rows.
 func AwaitingVerdict(t Task) bool { return Open(t) && t.Approval == "pending" }
 
-// TaskNeedsUser reports a task stopped behind a gate only the user can open: it awaits a verdict,
-// or no priority releases it. Both gates must be satisfied for a worker to be handed it, so a task
-// failing either is halted — which is what the Tasks badge counts and what a red row says.
-// released is ReleasedByPriority's answer for this task, since that reads the whole tree.
+// TaskNeedsUser reports a task stopped behind a gate only the user can open — awaiting a verdict,
+// or unreleased by any priority (released is ReleasedByPriority's answer, which reads the tree).
+// Both gates must pass for a worker to be handed it. What the badge counts and what a red row says.
+// A REJECTED task is out whatever its rating: the user has ruled, rating releases nothing while the
+// rejection stands, and the next move belongs to whoever revises it.
 func TaskNeedsUser(t Task, released bool) bool {
-	if !Open(t) {
+	if !Open(t) || t.Approval == "rejected" {
 		return false
 	}
 	return t.Approval == "pending" || !released
 }
 
-// CountTasksNeedingUser is how many of these tasks are stopped behind one of those gates. Rejected
-// tasks are absent: the user has ruled, and it is the author's move.
+// CountTasksNeedingUser is how many of these tasks are stopped behind one of those gates.
 func CountTasksNeedingUser(tasks []Task) (n int) {
 	released := ReleasedByPriority(tasks)
 	for _, t := range tasks {

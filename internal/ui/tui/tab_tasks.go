@@ -113,24 +113,31 @@ func (m model) taskRows() []row {
 	return out
 }
 
-// taskRowStyle is a row's colour and its state word: the gate holding it where one is, else its
-// status. RED is api.TaskNeedsUser — the same predicate the Tasks badge counts — so a red row is
-// always counted and a counted row always red. A rejected task is grey: the user has ruled and it
-// is the author's move. gated is the task's approval state, "" when no gate applies (a finished
-// task's spent one included); released says whether any priority above it lets a worker take it.
+// taskRowStyle is a row's colour and its state word. The WORD comes from the gate holding it where
+// one is, else its status; RED is decided separately and last, by asking api.TaskNeedsUser — the
+// very predicate the Tasks badge counts. Deciding it in the switch instead let the two part company
+// on case order alone: a rejected task with no rating matched "rejected" and rendered grey while
+// the badge, reading the rating, counted it. gated is the task's approval state, "" where no gate
+// applies (a finished task's spent one included); released says whether a priority lets a worker
+// take it.
 func taskRowStyle(t api.Task, gated string, released bool) (lipgloss.Style, string) {
+	style, word := taskStatusStyle(t.Status), theme.StateLabel(t.Status)
 	switch {
 	case gated == "pending":
-		return stCrit, theme.ApprovalLabel("pending")
+		word = theme.ApprovalLabel("pending")
 	case gated == "rejected":
-		return stDone, theme.ApprovalLabel("rejected")
+		// The user has ruled; it is the author's move, so this asks nothing of anybody here.
+		style, word = stDone, theme.ApprovalLabel("rejected")
 	case api.Open(t) && !released:
 		// Unrated reads like ungated: both mean no worker can be given this, and a row saying plain
 		// "open" claimed otherwise. A rated ancestor releases the whole tree, so only a task with
 		// none anywhere above it is really held back.
-		return stCrit, "unrated"
+		word = "unrated"
 	}
-	return taskStatusStyle(t.Status), theme.StateLabel(t.Status)
+	if api.TaskNeedsUser(t, released) {
+		style = stCrit
+	}
+	return style, word
 }
 
 const treeGutterW = 6 // fits ~3 levels of "│ "/"├─" connectors

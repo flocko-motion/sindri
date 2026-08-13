@@ -8,12 +8,16 @@ import (
 	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
-// colourBoard is one task in each state the palette has to separate.
+// colourBoard is one task in each state the palette has to separate — and, crucially, EVERY
+// combination of the two gates rather than only the ones that agree: a rejected task with no rating
+// is where the row and the badge came apart, each looking plausible alone.
 func colourBoard() []api.Task {
 	return []api.Task{
 		{ID: "td-unapproved", Status: "open", Approval: "pending", Priority: "P1"},
 		{ID: "td-unrated", Status: "open"},
 		{ID: "td-rejected", Status: "open", Approval: "rejected", Priority: "P1"},
+		{ID: "td-rejected-unrated", Status: "open", Approval: "rejected"},
+		{ID: "td-unapproved-unrated", Status: "open", Approval: "pending"},
 		{ID: "td-working", Status: "in_progress", Priority: "P1"},
 		{ID: "td-open", Status: "open", Priority: "P1"},
 		{ID: "td-done", Status: "closed", Priority: "P1"},
@@ -51,8 +55,8 @@ func TestRedIsExactlyWhatTheTasksBadgeCounts(t *testing.T) {
 	if got := api.CountTasksNeedingUser(tasks); got != counted {
 		t.Errorf("the badge counts %d, the rows show %d red", got, counted)
 	}
-	if counted != 2 {
-		t.Errorf("want the unapproved and the unrated task counted, got %d", counted)
+	if counted != 3 {
+		t.Errorf("want the two unapproved tasks and the unrated one counted, got %d", counted)
 	}
 }
 
@@ -75,9 +79,12 @@ func TestBothGatesReadRed(t *testing.T) {
 		t.Errorf("the unrated row should say so: %q", rows["td-unrated"])
 	}
 	// A rejected task has had its verdict: it is the author's move, so it must not read as
-	// something the user has to act on.
-	if api.TaskNeedsUser(api.Task{ID: "x", Status: "open", Approval: "rejected"}, true) {
-		t.Error("a rejected task waits on its author, not on the user")
+	// something the user has to act on — RATED OR NOT. Passing released=true here was the one value
+	// that dodged the case the assertion is about.
+	for _, released := range []bool{true, false} {
+		if api.TaskNeedsUser(api.Task{ID: "x", Status: "open", Approval: "rejected"}, released) {
+			t.Errorf("a rejected task (released=%v) waits on its author, not on the user", released)
+		}
 	}
 	// And a done task is never counted, whatever gates it never passed.
 	if api.TaskNeedsUser(api.Task{ID: "y", Status: "closed"}, false) {

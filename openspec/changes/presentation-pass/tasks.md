@@ -38,6 +38,12 @@
       the badge and the red row are one claim, and an unrated task was red under the old count
       without being counted.
 - [x] 4.6 The palette header describes the scheme in force.
+- [x] 4.7 The row ASKS `api.TaskNeedsUser` for red, as the PR row asks `api.PRNeedsUser`, instead of
+      re-deriving it: the two parted on case order alone, and a rejected task with no rating was
+      counted while rendering grey.
+- [x] 4.8 A rejected task is out of both, rated or not: the user has ruled, and rating releases
+      nothing while the rejection stands.
+- [x] 4.9 The test board carries every combination of the two gates, not only the ones that agree.
 
 ## 5. Show the last-changed timestamp in the task detail
 

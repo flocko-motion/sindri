@@ -39,6 +39,12 @@ added — invisibly, because each looks plausible alone.
   since work happening is the healthiest state on the board and should not be its loudest. Critical
   priority moves to pink so red keeps one meaning; that collision was named in the task and is
   resolved rather than documented.
+- **The row asks the predicate; it does not re-derive it.** `taskRowStyle` decides the WORD in a
+  switch and then asks `api.TaskNeedsUser` for red, the shape `prStatusStyle` already had. Deriving
+  red inside the switch let the two part on case order: a rejected task with no rating matched
+  "rejected" and rendered grey while the badge, reading the rating, counted it. A rejected task is
+  now out of both — rated or not, the user has ruled, and rating releases nothing while the
+  rejection stands.
 - **The Tasks badge follows the colour, not the other way round.** The invariant says anything red
   is counted; an unrated task is red, and `CountAwaitingVerdict` did not count it. So the badge now
   reads `api.TaskNeedsUser` — either gate — and the verdict-specific count stays where its wording
