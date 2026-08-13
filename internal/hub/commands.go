@@ -113,7 +113,11 @@ func (h *Hub) registry() *registry.Registry {
 				}
 				return ""
 			}, Run: h.cmdComment},
-		registry.Command{Name: "approve", Help: "approve a pull request: approve [pr-id]", Roles: []string{"reviewer"}, Run: h.wf.CmdApprove},
+		// A planner's approve is a different act (-> CmdApprove): an optional, additional badge
+		// beside the reviewer's verdict, never a substitute for it — so the same verb is open to
+		// both roles rather than needing a second one.
+		registry.Command{Name: "approve", Help: approveHelp(registry.Caller{}), HelpFor: approveHelp,
+			Roles: []string{"reviewer", "planner"}, Run: h.wf.CmdApprove},
 		registry.Command{Name: "reject", Help: "reject a pull request: reject <pr-id> <feedback...>", Roles: []string{"reviewer"}, Run: h.wf.CmdReject},
 		// State-gated rather than role-gated: the user controls who is in the meeting room.
 		registry.Command{Name: "meeting", Help: "say something to everyone in the meeting room: meeting <message...>",
@@ -350,6 +354,15 @@ func commentUsage(c registry.Caller) string {
 	return "comment <id> <text...>"
 }
 
+// approveHelp is the verb's help line, since what a verdict MEANS differs by role: a reviewer's
+// opens the merge gate, a planner's is an optional badge beside it.
+func approveHelp(c registry.Caller) string {
+	if c.Role == "planner" {
+		return "add an optional advisory approval badge, beside the reviewer's verdict, never instead of it: approve [pr-id]"
+	}
+	return "approve a pull request: approve [pr-id]"
+}
+
 // commentHelp is the verb's help line. A caller with no role yields the general form, which is what
 // the registry carries as the static Help.
 func commentHelp(c registry.Caller) string {
@@ -448,7 +461,8 @@ func (h *Hub) cmdComment(c registry.Caller, args []string, out io.Writer) (int, 
 }
 
 func (h *Hub) cmdListPRs(c registry.Caller, _ []string, out io.Writer) (int, error) {
-	prs, err := h.store.For(c.Project).PRs()
+	ps := h.store.For(c.Project)
+	prs, err := ps.PRs()
 	if err != nil {
 		return 1, err
 	}
@@ -456,8 +470,12 @@ func (h *Hub) cmdListPRs(c registry.Caller, _ []string, out io.Writer) (int, err
 		fmt.Fprintln(out, "no PRs")
 		return 0, nil
 	}
+	counts, err := ps.ApprovalCounts()
+	if err != nil {
+		return 1, err
+	}
 	for _, p := range prs {
-		fmt.Fprintf(out, "%-14s %-9s %-10s %s\n", p.ID, p.Status, p.Agent, p.Branch)
+		fmt.Fprintf(out, "%-14s %-14s %-10s %s\n", p.ID, api.StatusLabel(p.Status, counts[p.ID]), p.Agent, p.Branch)
 	}
 	return 0, nil
 }

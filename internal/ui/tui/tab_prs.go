@@ -249,7 +249,7 @@ func (m model) prRows() []row {
 			continue
 		}
 		repo := m.repoStyle(p.Project).Render(fmt.Sprintf("%-10.10s", m.repoName(p.Project)))
-		status := p.Status
+		status := api.StatusLabel(p.Status, p.Approvals)
 		if m.merging[p.ID] && p.Status != "merged" { // transient: the user triggered a merge, awaiting the hub
 			status = "merging"
 		}
@@ -417,7 +417,7 @@ func (m model) prMetaItems() []metaItem {
 	}
 	items = append(items,
 		metaItem{text: d.PR.ID},
-		metaItem{text: "status: " + d.PR.Status},
+		metaItem{text: "status: " + api.StatusLabel(d.PR.Status, api.ApprovalCount(d.Reviews))},
 		metaItem{text: "kind:   " + prKindLabel(d.PR.Kind)},
 		metaItem{text: "agent:  " + d.PR.Agent, kind: "agent", value: d.PR.Agent},
 	)
@@ -583,11 +583,16 @@ func (m *model) verifyCmd(id string) tea.Cmd {
 	}
 }
 
-// reviewLine summarizes a review item: its state, verdict, and author.
+// reviewLine summarizes a review item: its state, verdict, author and when, marking a planner's
+// advisory badge for what it is — a second opinion, never the approval that satisfies the merge.
 func reviewLine(r api.Review) string {
 	switch {
 	case r.Verdict != "":
-		return fmt.Sprintf("• %s by %s", r.Verdict, r.Author)
+		who := r.Author
+		if r.Advisory {
+			who += " (advisory)"
+		}
+		return fmt.Sprintf("• %s by %s at %s", r.Verdict, who, eventTime(r.VerdictAt))
 	case r.Author != "":
 		return fmt.Sprintf("• in review by %s", r.Author)
 	default:
@@ -600,7 +605,7 @@ func reviewLine(r api.Review) string {
 // workspace path was already in the interactive item column and in neither of these.
 func (m model) prIdentity(d api.PRDetail) []string {
 	ls := []string{
-		fmt.Sprintf("%s   [%s]   by %s", d.PR.ID, d.PR.Status, d.PR.Agent),
+		fmt.Sprintf("%s   [%s]   by %s", d.PR.ID, api.StatusLabel(d.PR.Status, api.ApprovalCount(d.Reviews)), d.PR.Agent),
 		fmt.Sprintf("task: %s  %s (%s)", d.Task.ID, d.Task.Title, d.Task.Status),
 		fmt.Sprintf("branch %s → %s", d.PR.Branch, d.PR.Base),
 	}

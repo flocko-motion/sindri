@@ -359,7 +359,7 @@ func prListCmd() *cobra.Command {
 					return err
 				}
 				for _, p := range prs {
-					status := p.Status
+					status := api.StatusLabel(p.Status, p.Approvals)
 					if p.Kind == "interim" { // ◇ = mid-task contribution (vs a final, task-done PR)
 						status = "◇" + status
 					}
@@ -377,6 +377,24 @@ func prListCmd() *cobra.Command {
 	}
 }
 
+// reviewBadge renders one review verdict: its state, verdict, author and when, marking a
+// planner's advisory badge for what it is — a second opinion, never the approval that satisfies
+// the merge gate.
+func reviewBadge(r api.Review) string {
+	switch {
+	case r.Verdict != "":
+		who := r.Author
+		if r.Advisory {
+			who += " (advisory)"
+		}
+		return fmt.Sprintf("%s by %s at %s", r.Verdict, who, eventTime(r.VerdictAt))
+	case r.Author != "":
+		return "in review by " + r.Author
+	default:
+		return "unassigned"
+	}
+}
+
 func prInfoCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "info <pr-id>", Short: "Show a PR and its diff", Args: cobra.ExactArgs(1),
@@ -391,9 +409,13 @@ func prInfoCmd() *cobra.Command {
 				if p.Kind == "interim" {
 					kind = "interim (mid-task contribution)"
 				}
-				fmt.Printf("%s  [%s]  %s  by %s\nbranch %s → %s\n", p.ID, p.Status, kind, p.Agent, p.Branch, p.Base)
+				status := api.StatusLabel(p.Status, api.ApprovalCount(d.Reviews))
+				fmt.Printf("%s  [%s]  %s  by %s\nbranch %s → %s\n", p.ID, status, kind, p.Agent, p.Branch, p.Base)
 				if p.Feedback != "" {
 					fmt.Printf("feedback: %s\n", p.Feedback)
+				}
+				for _, r := range d.Reviews {
+					fmt.Println("review: " + reviewBadge(r))
 				}
 				fmt.Printf("\n%s\n", strings.TrimSpace(d.Diff))
 				return nil

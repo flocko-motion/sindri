@@ -369,9 +369,24 @@ func TestApprovePR(t *testing.T) {
 		t.Fatalf("status = %q, want approved", pr.Status)
 	}
 
-	// Open-only guard: an already-approved (non-open) PR cannot be re-approved.
+	// Approvals accumulate: an already-approved PR takes a second approval as another badge,
+	// rather than the first verdict locking out any that follow.
+	if err := h.wf.ApprovePR(testProject, "pr-td-1"); err != nil {
+		t.Fatalf("re-approving an approved PR should accumulate a badge: %v", err)
+	}
+	if revs, rerr := ps.Reviews("pr-td-1"); rerr != nil || api.ApprovalCount(revs) != 2 {
+		t.Fatalf("reviews=%v err=%v, want 2 approval badges", revs, rerr)
+	}
+
+	// A rejection still dominates: once rejected, only a renewed submission — not a fresh
+	// approval — clears it.
+	pr, _, _ = ps.GetPR("pr-td-1")
+	pr.Status = "rejected"
+	if err := ps.PutPR(pr); err != nil {
+		t.Fatalf("put pr: %v", err)
+	}
 	if err := h.wf.ApprovePR(testProject, "pr-td-1"); err == nil {
-		t.Fatalf("approving a non-open PR should be refused")
+		t.Fatalf("approving a rejected PR should be refused")
 	}
 
 	// Unknown PR errors.
@@ -408,6 +423,32 @@ func TestReviewerReadsButCannotAct(t *testing.T) {
 	for _, role := range []string{"planner", "worker", "coauthor"} {
 		if !available(role)["task"] {
 			t.Errorf("%s lost the task verb", role)
+		}
+	}
+}
+
+// TestPlannerGainsApproveButNotReject: a planner may add its optional, advisory badge (-> pr.go
+// CmdApprove's role branch), but never a reject — that stays the reviewer's alone, since the
+// planner grant is a second opinion beside a verdict, not a verdict of its own.
+func TestPlannerGainsApproveButNotReject(t *testing.T) {
+	h := newHub(t)
+	reg := h.registry()
+	available := func(role string) map[string]bool {
+		out := map[string]bool{}
+		for _, c := range reg.Available(registry.Caller{Project: testProject, Agent: "rune", Role: role}) {
+			out[c.Name] = true
+		}
+		return out
+	}
+	if !available("planner")["approve"] {
+		t.Error("a planner must be able to add its optional approval badge")
+	}
+	if available("planner")["reject"] {
+		t.Error("a planner must not be able to reject — that stays the reviewer's alone")
+	}
+	for _, role := range []string{"worker", "coauthor"} {
+		if available(role)["approve"] {
+			t.Errorf("%s must not gain approve — only reviewer and planner may", role)
 		}
 	}
 }

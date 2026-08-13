@@ -100,7 +100,8 @@ CREATE TABLE IF NOT EXISTS reviews (
   result      TEXT NOT NULL DEFAULT '',  -- the reviewer's findings
   created_at  TEXT NOT NULL DEFAULT '',  -- requirement added
   review_at   TEXT NOT NULL DEFAULT '',  -- picked up by an agent
-  verdict_at  TEXT NOT NULL DEFAULT ''   -- verdict given
+  verdict_at  TEXT NOT NULL DEFAULT '',  -- verdict given
+  advisory    INTEGER NOT NULL DEFAULT 0 -- a planner's optional badge; never satisfies the merge gate alone
 );
 -- The latest lint result for a PR (so it persists across hub restarts).
 CREATE TABLE IF NOT EXISTS pr_lint (
@@ -328,7 +329,7 @@ func (p *ProjectStore) PREvents(prID string) ([]Event, error) {
 
 // --- reviews ---
 
-const reviewCols = `SELECT id,pr,requirement,author,verdict,result,created_at,review_at,verdict_at FROM reviews`
+const reviewCols = `SELECT id,pr,requirement,author,verdict,result,created_at,review_at,verdict_at,advisory FROM reviews`
 
 // AddReview attaches a requirement to a PR in this project, unassigned. Returns id.
 func (p *ProjectStore) AddReview(pr, requirement string) (int64, error) {
@@ -338,6 +339,43 @@ func (p *ProjectStore) AddReview(pr, requirement string) (int64, error) {
 		return 0, fmt.Errorf("add review: %w", err)
 	}
 	return res.LastInsertId()
+}
+
+// AddVerdict records a completed review directly, author and verdict together — for a verdict
+// that never went through the assign flow: a human's approve/reject, or a planner's advisory
+// badge. Returns the new row's id.
+func (p *ProjectStore) AddVerdict(pr, requirement, author, verdict, result string, advisory bool) (int64, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := p.s.db.Exec(
+		`INSERT INTO reviews (project, pr, requirement, author, review_at, verdict, result, verdict_at, advisory, created_at)
+		 VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		p.project, pr, requirement, author, now, verdict, result, now, advisory, now)
+	if err != nil {
+		return 0, fmt.Errorf("add verdict: %w", err)
+	}
+	return res.LastInsertId()
+}
+
+// ApprovalCounts maps each PR in this project to how many approvals it has accumulated —
+// reviewer, human and planner badges alike, since this is what a person sees, not what gates
+// the merge (-> api.PRApprovable, which reads pr.Status instead).
+func (p *ProjectStore) ApprovalCounts() (map[string]int, error) {
+	rows, err := p.s.db.Query(
+		`SELECT pr, COUNT(*) FROM reviews WHERE project=? AND verdict='pass' GROUP BY pr`, p.project)
+	if err != nil {
+		return nil, fmt.Errorf("approval counts: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var pr string
+		var n int
+		if err := rows.Scan(&pr, &n); err != nil {
+			return nil, err
+		}
+		out[pr] = n
+	}
+	return out, rows.Err()
 }
 
 // AssignReview marks a review as picked up by an author (in progress).
@@ -433,7 +471,7 @@ func (p *ProjectStore) Reviews(pr string) ([]Review, error) {
 	for rows.Next() {
 		var r Review
 		if err := rows.Scan(&r.ID, &r.PR, &r.Requirement, &r.Author, &r.Verdict,
-			&r.Result, &r.CreatedAt, &r.ReviewAt, &r.VerdictAt); err != nil {
+			&r.Result, &r.CreatedAt, &r.ReviewAt, &r.VerdictAt, &r.Advisory); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
