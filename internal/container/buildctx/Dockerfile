@@ -30,6 +30,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   wget netcat-openbsd dnsutils iputils-ping openssh-client sshfs \
   # process / system
   procps lsof watch htop \
+  # init: PID 1 must reap orphans, or every process whose parent died accumulates
+  # as a zombie until the cgroup's pids.max stops the pod forking at all
+  tini \
   # terminal multiplexer — the agent runs interactively inside a tmux session
   # that the hub injects into (send-keys) and humans attach to
   tmux \

@@ -4,8 +4,8 @@
 # The agent runs INTERACTIVE inside a tmux session named after the agent. The
 # hub delivers all inbound messages by `tmux send-keys` into this session
 # ("as if the user typed"), and a human can `tmux attach` to dial in. The
-# container's PID 1 is a sleep that keeps the pod alive; the tmux server runs
-# the real session independently, so a hub crash never touches it.
+# container's PID 1 is an init that keeps the pod alive and reaps; the tmux
+# server runs the real session independently, so a hub crash never touches it.
 #
 # Default: launch interactive Claude with the hub-provided system prompt
 # (/home/sindri/.claude/system-prompt.txt). SINDRI_SHELL=1 runs a bare shell
@@ -69,4 +69,6 @@ tmux source-file "$HOME/.tmux.conf" 2>/dev/null || true
 
 echo "=== session ready — hub injects via 'tmux send-keys -t $SESSION' ==="
 
-exec sleep infinity
+# PID 1 must reap: tmux double-forks, so orphans land here, and a `sleep` never calls wait() —
+# one session reached ~2000 defunct [git] entries and pids.max, after which nothing could fork.
+exec tini -s -- sleep infinity
