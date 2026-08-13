@@ -35,12 +35,23 @@ counts it. What was missing was a state to hang them on.
 - The question is recorded twice over: in the agent's activity log, and as a comment on the task it
   holds. The comment is the durable half — it is what a human or the next agent reads when they open
   the work, long after the session that asked is gone.
-- While escalated, the verbs that ADVANCE work are refused: `next`, `submit`, `checkpoint`,
-  `contribute`, `approve`, `reject`. Each refusal quotes the agent's own question back and names
+- While escalated, every verb that LANDS work is refused, in every role: `next`, `submit`,
+  `checkpoint`, `contribute`, `approve`, `reject`, and the planner's `openspec` — its `openspec
+  submit` is a worker's submit in different dress, so holding one without the other would leave the
+  same act open under a second name. Each refusal quotes the agent's own question back and names
   `resume`, reusing the existing `Blocked` mechanism rather than a second gate.
 - Reads are NOT refused — `status`, `task`, `show`, `prs`, `log` and the whole `git` read/restore
   subset stay open. An agent that has just been given a decision has to re-read the task and its own
   diff to act on it; denying that makes the answer unusable.
+- Proposing is not landing, so `create-task`, `edit-task`, `prioritise-task` and `reopen-task` stay
+  open: the user rules on each before it becomes work, and a planner tidying the backlog while it
+  waits changes nothing anyone acts on. Neither is withdrawing: `revoke` stays open because an agent
+  that escalated on realising its submitted branch rests on a guess needs the verb that takes that
+  branch back. The line is stated on `heldByEscalation` and in the spec, so the next verb's author
+  knows which side of it they are on.
+- Every message about the hold says exactly what it holds, from one shared string
+  (`workflow.EscalationHold`). "Everything is refused" said where something is not spends the agent's
+  trust in every other hub message — and it was false for a planner in the first cut of this change.
 - The agent clears its own escalation, because only it knows whether it has understood the answer.
   The user can clear one too, from the host (`sindri agent resume`, the TUI's escalation line): an
   agent may be deleted, restarted, or simply wrong that it was blocked, and an escalation nobody can

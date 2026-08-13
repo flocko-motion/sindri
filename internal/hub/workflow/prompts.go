@@ -113,9 +113,10 @@ from starting — a missing dependency, a decision only they can make — say wh
 you need in one line and carry on with whatever part you can. Where NOTHING can
 go on without their answer, do not guess and do not stop silently:
 `+"`sindri escalate \"<what needs deciding>\"`"+` puts the question on the
-record, marks you on their board as waiting on them, and holds every verb that
-would advance the work until you `+"`sindri resume`"+` with their answer. Never
-poll, never guess, never invent commands.
+record, marks you on their board as waiting on them, and shuts every verb that
+LANDS work until you `+"`sindri resume`"+` with their answer — you can still
+read, record and propose meanwhile. Never poll, never guess, never invent
+commands.
 
 A HUB COMMAND THAT MISBEHAVES IS A BUG, NOT A PUZZLE TO SOLVE. If a `+"`sindri`"+`
 verb errors, does nothing, or refuses what you were just told to do, sindri is
@@ -416,17 +417,22 @@ func ReplyCheckpointedClearing(done, container string) string {
 
 // --- escalation: stopped on a decision only the user can make ---
 
-// DirEscalated answers an escalated agent, repeating the question back: one relaunched mid-escalation
-// remembers nothing of asking, and would try to carry on and be refused by every verb without knowing why.
+// DirEscalated answers an escalated agent, repeating the question back — one relaunched mid-escalation
+// remembers nothing of asking, and would try to carry on into a wall of refusals.
 func DirEscalated(question string) string {
 	return fmt.Sprintf("[hub] You are ESCALATED — you stopped and asked the user to decide this:\n\n"+
 		"  %s\n\n"+
-		"Nothing has come back yet. Wait quietly; don't ask again and don't work around it. You may "+
-		"still read — `sindri task`, `sindri show`, `sindri git diff` — but every verb that advances "+
-		"work is refused until you resume. When you have their answer, run `sindri resume` and then "+
-		"`sindri` for your directive. If you now see the answer for yourself, resume anyway rather "+
-		"than sitting on a question that no longer needs them.", question)
+		"Nothing has come back yet. Wait quietly; don't ask again and don't work around it. %s When you "+
+		"have their answer, run `sindri resume` and then `sindri` for your directive. If you now see the "+
+		"answer for yourself, resume anyway rather than sitting on a question that no longer needs "+
+		"them.", question, EscalationHold)
 }
+
+// EscalationHold states exactly what the hold does, in the one wording every message uses. Exact
+// because an agent acts on it: a hub message that turns out to be false is worse than none.
+const EscalationHold = "Reads all still work — `sindri task`, `sindri show`, `sindri git diff` — and " +
+	"so does anything that only records or proposes. What is refused is LANDING work: taking a task " +
+	"on, putting a branch or an openspec change up, checkpointing, contributing, or ruling on a PR."
 
 // ReplyEscalated is what a work verb says while its caller is escalated. It quotes the question so
 // the refusal reads as the agent's own doing rather than the hub blocking it for no stated reason.
@@ -443,8 +449,8 @@ func ReplyEscalationRaised(question, task string) string {
 		on = fmt.Sprintf(" and as a comment on %s", task)
 	}
 	return fmt.Sprintf("Escalated: %q\nRecorded in your activity log%s, and the user's board now marks "+
-		"you as waiting on them. Stop here and wait — reads still work, everything that advances work "+
-		"is refused until you run `sindri resume` with their answer.", question, on)
+		"you as waiting on them. Stop here and wait. %s That holds until you run `sindri resume` with "+
+		"their answer.", question, on, EscalationHold)
 }
 
 // ReplyResumed confirms an escalation is cleared and sends the agent back to the one loop it has.

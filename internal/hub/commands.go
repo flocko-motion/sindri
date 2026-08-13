@@ -90,7 +90,11 @@ func (h *Hub) registry() *registry.Registry {
 		// Planner only, never a worker, which could undo a human's verdict on its own task
 		// (-> h.ReopenTask, which needs both h.wf and h.comments, so it lives here, not workflow).
 		registry.Command{Name: "reopen-task", Help: reopenTaskHelp, Roles: []string{"planner"}, Run: h.cmdReopenTask},
-		registry.Command{Name: "openspec", Help: "ship your openspec changes as a PR: openspec submit [message]", Roles: []string{"planner"}, Run: h.wf.CmdOpenspec},
+		// A planner's landing verb: `openspec submit` is a worker's submit in different dress, so the
+		// escalation hold has to reach it. Held open, an escalated planner could ship a PR built on the
+		// guess it had just said it would not make.
+		registry.Command{Name: "openspec", Help: "ship your openspec changes as a PR: openspec submit [message]", Roles: []string{"planner"},
+			Blocked: heldByEscalation("openspec", nil), Run: h.wf.CmdOpenspec},
 		registry.Command{Name: "state", Help: "set your resting state: state planning | state idle", Roles: []string{"planner"}, Run: h.wf.CmdState},
 		// Scoped to what the role already sees (-> cmdComment): a worker its own task or held
 		// container, a reviewer the task of the PR it's reviewing, a planner/coauthor any task —
@@ -140,21 +144,6 @@ func (h *Hub) registry() *registry.Registry {
 				return ""
 			}, Run: h.cmdChat},
 	)
-}
-
-// heldByEscalation wraps a verb's own gate with the escalation hold, asked FIRST: an escalated agent
-// may read all it likes, but nothing it does may advance the work — that is what escalating means. The
-// refusal is its own question coming back (-> ReplyEscalated). A verb with no gate of its own passes nil.
-func heldByEscalation(verb string, gate func(registry.Caller) string) func(registry.Caller) string {
-	return func(c registry.Caller) string {
-		if c.Escalation != "" {
-			return workflow.ReplyEscalated(verb, c.Escalation)
-		}
-		if gate == nil {
-			return ""
-		}
-		return gate(c)
-	}
 }
 
 // landingBlocked is the shared gate on the two verbs that put a branch up (submit, contribute).

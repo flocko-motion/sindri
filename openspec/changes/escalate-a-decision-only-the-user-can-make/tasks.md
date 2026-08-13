@@ -22,12 +22,20 @@
 
 ## 3. The hold
 
-- [x] 3.1 `heldByEscalation` wraps each work verb's own gate: `next`, `submit`, `checkpoint`,
-      `contribute`, `approve`, `reject` — the existing `registry.Command.Blocked` mechanism, not a
-      second gate.
-- [x] 3.2 The refusal quotes the agent's own question and names `resume`.
-- [x] 3.3 Reads stay open: status, task, show, prs, log, git.
-- [x] 3.4 `registry.Caller` carries the question rather than a flag, so the refusal can quote it.
+- [x] 3.1 `heldByEscalation` wraps each landing verb's own gate — the existing
+      `registry.Command.Blocked` mechanism, not a second gate.
+- [x] 3.2 The line is WHAT LANDS WORK, and it is written down where the next verb's author will read
+      it (on `heldByEscalation`, and as the spec's rule): shut are `next`, `submit`, `checkpoint`,
+      `contribute`, `approve`, `reject` and the planner's `openspec`; open are the reads, the records,
+      the proposals (`create-task`, `edit-task`, `prioritise-task`, `reopen-task`) and `revoke`,
+      which withdraws work rather than landing it.
+- [x] 3.3 `openspec` is held: a planner's `openspec submit` is a worker's submit in different dress,
+      and holding one without the other leaves the same act open under a second name.
+- [x] 3.4 The refusal quotes the agent's own question and names `resume`.
+- [x] 3.5 Reads stay open: status, task, show, prs, log, git.
+- [x] 3.6 `registry.Caller` carries the question rather than a flag, so the refusal can quote it.
+- [x] 3.7 Every message about the hold says exactly what it holds, from one shared string
+      (`workflow.EscalationHold`) — an agent that finds a hub message false stops trusting the rest.
 
 ## 4. What the agent is told
 
@@ -35,7 +43,7 @@
       directive — the rehydration case, since a relaunched agent remembers nothing of asking.
 - [x] 4.2 Resuming returns it to the work it still holds.
 - [x] 4.3 The stall nudge exempts it, ahead of the api-error retry: a resumed turn has no verb left
-      that advances the work.
+      that lands work.
 - [x] 4.4 The system prompt names the verb — without that, the capability exists and nothing reaches
       for it.
 
@@ -59,6 +67,10 @@
 
 ## 7. Verify
 
+- [x] 7.0 EVERY ROLE's whole surface, partitioned: each verb that lands work refuses with the
+      agent's own question, and nothing else refuses because of the escalation. The reviewer's
+      `approve`/`reject` and the planner's `openspec` are unreachable from a worker's surface, so a
+      worker-only test cannot see them — which is how `openspec` was missed.
 - [x] 7.1 The hold and the reads, verb by verb, off the advertised surface.
 - [x] 7.2 A questionless escalation records nothing.
 - [x] 7.3 The question in the log and on the task; the release recorded too.
@@ -68,4 +80,6 @@
       question, which still counts.
 - [x] 7.7 The front-ends: the question quoted in the CLI summary, and the TUI detail line that
       releases it.
-- [x] 7.8 `make verify` passes.
+- [x] 7.8 A held verb EXECUTED, not merely listed: the refusal happens and nothing it would have
+      changed changed. The surface and the dispatcher read one predicate, and this is what proves it.
+- [x] 7.9 `make verify` passes.

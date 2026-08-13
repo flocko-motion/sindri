@@ -51,7 +51,7 @@ func (e *Engine) NudgeStalled(project, name, runtime string, idleFor time.Durati
 		return false
 	}
 	// Escalated is idle BY INSTRUCTION, like the parked states below (-> parkedByTheHub) — but ahead
-	// of the api-error retry, since a resumed turn has no verb left that advances the work.
+	// of the api-error retry, since a resumed turn has no verb left that lands work.
 	if st.Escalation != "" {
 		return false
 	}

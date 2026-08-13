@@ -190,7 +190,7 @@ func (p *ProjectStore) SetState(st AgentState) error {
 
 // SetEscalation records the question an agent has stopped on, so the escalation survives a hub
 // restart — an escalation that evaporates leaves an agent silently stuck, refused by every verb that
-// advances work with nothing to say why. An upsert, because an agent may escalate before anything
+// lands work with nothing to say why. An upsert, because an agent may escalate before anything
 // else has written it a state row.
 func (p *ProjectStore) SetEscalation(agent, question string) error {
 	_, err := p.s.db.Exec(`

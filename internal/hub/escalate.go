@@ -3,8 +3,8 @@
 // job:     raise, record and clear an escalation — the durable state, the question written
 // where a later reader finds it (the activity log and the task's own thread), and the
 // two verbs either side of it (`escalate`, `resume`), plus the user's clear from the host.
-// limits:  the state and the recording; the gate that shuts the work verbs is the registry's
-// (-> escalationBlocked), and the marker is the board's (-> api.AgentNeedsUser).
+// limits:  the state, the recording, and which verbs the hold shuts (-> heldByEscalation, applied at
+// registration in commands.go); the marker is the board's (-> api.AgentNeedsUser).
 package hub
 
 import (
@@ -17,14 +17,32 @@ import (
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
+// heldByEscalation wraps a verb's own gate with the escalation hold, asked FIRST. THE LINE IS WHAT
+// LANDS WORK — taking work on, putting a branch or an openspec change up, ruling on a PR — and a verb
+// added to the surface has to be put on one side of it. Reading, recording, proposing a task and
+// withdrawing a PR all stay open; the spec's requirement sets out each and why. The refusal is the
+// agent's own question coming back (-> ReplyEscalated); nil = the verb has no gate of its own.
+func heldByEscalation(verb string, gate func(registry.Caller) string) func(registry.Caller) string {
+	return func(c registry.Caller) string {
+		if c.Escalation != "" {
+			return workflow.ReplyEscalated(verb, c.Escalation)
+		}
+		if gate == nil {
+			return ""
+		}
+		return gate(c)
+	}
+}
+
 // escalateUsage is what an escalation with no question is answered with — the argument is the whole
 // point of the verb, so the refusal explains what to ask rather than restating the syntax.
 const escalateUsage = "usage: escalate <what needs deciding>\n" +
 	"  Stops you on a decision only the user can make, and tells them. The question is\n" +
 	"  REQUIRED: an escalation without one says no more than that something is wrong, which\n" +
 	"  is the part they can already see. Ask for what you need decided, in one line.\n" +
-	"  While escalated you may still read (status, task, show, prs, log, git), but every verb\n" +
-	"  that advances work is refused. `sindri resume` clears it once you have their answer."
+	"  While escalated you may still read, record and propose; what is refused is LANDING work —\n" +
+	"  claiming a task, putting a branch or an openspec change up, checkpointing, contributing,\n" +
+	"  ruling on a PR. `sindri resume` opens them again once you have their answer."
 
 // escalateHelp is what the command registry advertises for escalate.
 const escalateHelp = "stop on a decision only the user can make, and tell them: escalate <what needs deciding>"

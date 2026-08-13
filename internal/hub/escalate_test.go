@@ -30,6 +30,68 @@ func escalatedWorker(t *testing.T, question string) (*Hub, *store.ProjectStore) 
 	return h, ps
 }
 
+// landsWork is the classification the hold turns on (-> heldByEscalation): the verbs that LAND work,
+// as against the reads, the records and the proposals. The rule is stated for every role, so it is
+// checked for every role — a list that only covered the worker's verbs is how a planner's `openspec
+// submit` stayed open while the hub told it everything was shut.
+var landsWork = map[string]bool{
+	"next": true, "submit": true, "contribute": true, "checkpoint": true,
+	"approve": true, "reject": true, "openspec": true,
+}
+
+// escalatedAs seeds an agent of the given role, escalates it through the verb, and returns the hub.
+func escalatedAs(t *testing.T, role, question string) *Hub {
+	t.Helper()
+	h := newHub(t)
+	ps := h.store.For(testProject)
+	if err := ps.PutAgent(store.Agent{Name: "dvalin", Role: role, Workspace: "ws"}); err != nil {
+		t.Fatal(err)
+	}
+	if out, code := execAs(t, h, "dvalin", append([]string{"escalate"}, strings.Fields(question)...)...); code != 0 {
+		t.Fatalf("escalate as %s failed (%d): %s", role, code, out)
+	}
+	return h
+}
+
+// TestEveryRolesLandingVerbsAreHeld walks each role's WHOLE advertised surface and checks the
+// partition: every verb that lands work refuses with the agent's own question, and nothing else
+// refuses because of the escalation. This is the rule the spec states — "every verb that lands work",
+// for every role — rather than the enumeration one role's verbs happen to make.
+func TestEveryRolesLandingVerbsAreHeld(t *testing.T) {
+	const q = "which of the two schemas is authoritative?"
+	for _, role := range []string{"worker", "reviewer", "planner", "coauthor"} {
+		h := escalatedAs(t, role, q)
+		cmds, err := h.AgentCommands(testProject, "dvalin")
+		if err != nil {
+			t.Fatalf("%s: agent commands: %v", role, err)
+		}
+		if len(cmds) < 5 {
+			t.Fatalf("%s: only %d verbs on the surface — the roster is not being read", role, len(cmds))
+		}
+		held := 0
+		for _, c := range cmds {
+			byEscalation := strings.Contains(c.Unavailable, q)
+			switch {
+			case landsWork[c.Name] && !byEscalation:
+				t.Errorf("%s: %s lands work but is not held while escalated (reason %q)", role, c.Name, c.Unavailable)
+			case !landsWork[c.Name] && byEscalation:
+				t.Errorf("%s: %s neither lands work nor should be held by the escalation: %q", role, c.Name, c.Unavailable)
+			case byEscalation:
+				held++
+				if !strings.Contains(c.Unavailable, "sindri resume") {
+					t.Errorf("%s: %s's refusal should name the verb that clears it: %q", role, c.Name, c.Unavailable)
+				}
+			}
+		}
+		// A role with nothing to land is a role this rule says nothing about — the coauthor, which
+		// commits with git itself. Every other role must have had something shut, or the loop above
+		// passed by finding no landing verbs at all.
+		if held == 0 && role != "coauthor" {
+			t.Errorf("%s: no verb was held — the hold is not reaching this role", role)
+		}
+	}
+}
+
 // TestEscalatingHoldsTheWorkVerbsAndKeepsTheReads is the shape of the whole feature: an agent stopped
 // on the user's decision may still read — it has to re-read the task and its diff to act on an answer
 // — but nothing it does may advance the work, and each refusal quotes its own question back so the
@@ -80,6 +142,69 @@ func blockedFor(t *testing.T, h *Hub, agent, verb string) string {
 	}
 	t.Fatalf("%q is not on %s's surface at all — a verb it may be pointed at must be listed", verb, agent)
 	return ""
+}
+
+// TestAnEscalatedReviewerGivesNoVerdict: a verdict is landing work on somebody else's behalf, and a
+// reviewer that has stopped on a question about the very thing it is judging must not deliver one.
+// Its own two verbs never appear on a worker's surface, so the worker case above cannot reach them.
+func TestAnEscalatedReviewerGivesNoVerdict(t *testing.T) {
+	const q = "the diff contradicts the spec — is the spec the one that is wrong?"
+	h := escalatedAs(t, "reviewer", q)
+	for _, verb := range []string{"approve", "reject"} {
+		reason := blockedFor(t, h, "dvalin", verb)
+		if !strings.Contains(reason, q) {
+			t.Errorf("%s should be held with the reviewer's own question: %q", verb, reason)
+		}
+	}
+	// It can still read the PR it is judging, which is how it acts on the answer.
+	for _, verb := range []string{"show", "prs", "task"} {
+		if reason := blockedFor(t, h, "dvalin", verb); reason != "" {
+			t.Errorf("%s must stay open to an escalated reviewer: %q", verb, reason)
+		}
+	}
+}
+
+// TestAnEscalatedPlannerShipsNothing is the bug the review caught: `openspec submit` is a planner's
+// submit under another name, and it carried no gate — so the hub told a planner everything that lands
+// work was shut while its one landing verb was open. Proposing stays open: the user rules on a
+// proposal before it becomes work, so a planner tidying the backlog while it waits harms nothing.
+func TestAnEscalatedPlannerShipsNothing(t *testing.T) {
+	const q = "one change or three?"
+	h := escalatedAs(t, "planner", q)
+	if reason := blockedFor(t, h, "dvalin", "openspec"); !strings.Contains(reason, q) {
+		t.Errorf("openspec should be held with the planner's own question: %q", reason)
+	}
+	for _, verb := range []string{"create-task", "edit-task", "prioritise-task", "task", "state"} {
+		if reason := blockedFor(t, h, "dvalin", verb); reason != "" {
+			t.Errorf("%s only proposes or records, so it stays open while escalated: %q", verb, reason)
+		}
+	}
+}
+
+// TestAHeldVerbAlsoREFUSESToRun closes the gap between "advertised as unavailable" and "will not
+// run". The surface and the dispatcher read the same predicate, but only this proves it: the verb is
+// executed for real, and what it would have changed is checked to be unchanged.
+func TestAHeldVerbAlsoREFUSESToRun(t *testing.T) {
+	const q = "drop the two callers or keep both?"
+	h, ps := escalatedWorker(t, q)
+	out, code := execAs(t, h, "dvalin", "submit", "done with it")
+	if code == 0 {
+		t.Errorf("submit ran while escalated: %s", out)
+	}
+	if !strings.Contains(out, q) {
+		t.Errorf("the refusal should quote the question: %s", out)
+	}
+	prs, err := ps.PRs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prs) != 0 {
+		t.Errorf("a held submit registered a PR anyway: %v", prs)
+	}
+	st, _ := ps.GetState("dvalin")
+	if st.Phase != "working" || st.Escalation != q {
+		t.Errorf("nothing about the agent should have moved, got phase %q escalation %q", st.Phase, st.Escalation)
+	}
 }
 
 // TestAnEscalationWithoutAQuestionIsRefused: an escalation that states no question tells the user
