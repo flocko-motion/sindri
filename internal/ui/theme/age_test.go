@@ -63,3 +63,26 @@ func TestStampIsExactAndLocal(t *testing.T) {
 		t.Errorf("a detail stamp should carry the time of day, got %q", got)
 	}
 }
+
+// TestWhenPairsTheMomentWithItsAge: a detail pane shows created and changed side by side, so the
+// two must be written the same way — one function, not a composition each front-end repeats.
+func TestWhenPairsTheMomentWithItsAge(t *testing.T) {
+	got := When(time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339))
+	if !strings.Contains(got, "(2h ago)") {
+		t.Errorf("When = %q, want the exact moment with its age beside it", got)
+	}
+	if !strings.HasPrefix(got, Stamp(time.Now().Add(-2*time.Hour).UTC().Format(time.RFC3339))) {
+		t.Errorf("When = %q, want it to lead with the same stamp Stamp gives", got)
+	}
+}
+
+// TestWhenSaysUnknownRatherThanInventingOne is the honest blank the mirrored sources need: a task
+// whose source gives no timestamp is never "recent", and the detail saying so is what explains its
+// absence from the active filter. A fallback to the created time would hide exactly that.
+func TestWhenSaysUnknownRatherThanInventingOne(t *testing.T) {
+	for _, s := range []string{"", "not a date"} {
+		if got := When(s); got != Unknown {
+			t.Errorf("When(%q) = %q, want %q with no age attached", s, got, Unknown)
+		}
+	}
+}

@@ -295,13 +295,13 @@ func (m model) taskItemsFor(t api.Task, desc string, comments []api.Comment) []m
 		{text: "priority: " + theme.PriorityLabel(t.Priority)},
 		{text: "status:   " + t.Status},
 	}
-	// The exact moment, in local time — the list column rounds it, and rounding is what a question
-	// about one particular task is asking past.
-	created := theme.Stamp(t.CreatedAt)
-	if created != theme.Unknown {
-		created += " (" + theme.Age(t.CreatedAt) + " ago)"
-	}
-	items = append(items, metaItem{text: "created:  " + created})
+	// The exact moments, in local time — the list column rounds them, and rounding is what a
+	// question about one particular task is asking past. "changed" is the field the active filter
+	// reads, so an "n/a" here explains why a mirrored task that just closed is missing from it.
+	items = append(items,
+		metaItem{text: "created:  " + theme.When(t.CreatedAt)},
+		metaItem{text: "changed:  " + theme.When(t.UpdatedAt)},
+	)
 	if t.Approval != "" { // a planner proposal under the approval gate
 		line := "approval: " + theme.ApprovalLabel(t.Approval)
 		if t.ApprovalComment != "" {

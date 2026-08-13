@@ -49,6 +49,18 @@ func Stamp(rfc3339 string) string {
 	return t.Local().Format("2006-01-02 15:04")
 }
 
+// When is the detail pane's form of a timestamp: the exact local moment with its age beside it,
+// "n/a" where a source gives none. One spelling, because a detail line pairing created with changed
+// is unreadable if the two are written differently, and each front-end had its own copy of the
+// composition.
+func When(rfc3339 string) string {
+	stamp := Stamp(rfc3339)
+	if stamp == Unknown {
+		return stamp // no moment, so no age either — inventing one is what Unknown exists to avoid
+	}
+	return stamp + " (" + Age(rfc3339) + " ago)"
+}
+
 // parseStamp accepts what the sources actually write: RFC3339, and the date-only form a tracker may
 // give. Anything else is treated as unknown rather than guessed at.
 func parseStamp(s string) (time.Time, bool) {

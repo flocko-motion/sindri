@@ -466,11 +466,9 @@ func taskInfoCmd() *cobra.Command {
 				fmt.Printf("id:       %s\ntitle:    %s\nstatus:   %s\ntype:     %s\npriority: %s\nparent:   %s\napproval: %s\nlabels:   %s\nurl:      %s\n",
 					t.ID, t.Title, t.Status, dash(t.Type), theme.PriorityLabel(t.Priority),
 					dash(t.ParentID), dash(theme.ApprovalLabel(t.Approval)), dash(t.Labels), dash(t.URL))
-				if stamp := theme.Stamp(t.CreatedAt); stamp == theme.Unknown {
-					fmt.Printf("created:  %s\n", stamp)
-				} else { // exact, where the list rounds
-					fmt.Printf("created:  %s (%s ago)\n", stamp, theme.Age(t.CreatedAt))
-				}
+				// Exact, where the list rounds — and "changed" beside it, the field the active
+				// filter reads, so its "n/a" says why a mirrored task can be missing from that view.
+				fmt.Printf("created:  %s\nchanged:  %s\n", theme.When(t.CreatedAt), theme.When(t.UpdatedAt))
 				if body := strings.TrimRight(t.Description, "\n"); body != "" {
 					fmt.Printf("\n%s\n", body)
 				}

@@ -41,4 +41,8 @@
 
 ## 5. Show the last-changed timestamp in the task detail
 
-- [ ] 5.1
+- [x] 5.1 `theme.When` composes the moment with its age once, since both front-ends had their own
+      copy of that composition and the two timestamps must read alike side by side.
+- [x] 5.2 "changed:" sits under "created:" in the TUI detail and in `sindri task info`.
+- [x] 5.3 A source with no timestamp reads "n/a" — the blank IS the information, explaining why a
+      mirrored task can be missing from the active filter, so nothing stands in for it.

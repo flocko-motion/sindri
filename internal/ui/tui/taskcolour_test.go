@@ -84,3 +84,35 @@ func TestBothGatesReadRed(t *testing.T) {
 		t.Error("a finished task is not waiting for anything")
 	}
 }
+
+// TestTheDetailPairsCreatedWithChanged: the two timestamps read together, and the changed one is
+// the field the active filter is built on — so an "n/a" here is the answer to "why did this task
+// vanish from active the moment it closed?".
+func TestTheDetailPairsCreatedWithChanged(t *testing.T) {
+	m := newModel(nil, nil, "")
+	m.tab, m.filter = 0, api.FilterAll
+	m.state = api.BoardState{Tasks: []api.Task{
+		{ID: "td-1", Title: "dated", Status: "open", Priority: "P1",
+			CreatedAt: "2026-08-01T10:00:00Z", UpdatedAt: "2026-08-13T09:00:00Z"},
+		{ID: "os-1", Title: "undated", Status: "closed", Priority: "P1", CreatedAt: "2026-08-01T10:00:00Z"},
+	}}
+	m.reclamp()
+
+	detail := strings.Join(itemTexts(m.taskItemsFor(m.state.Tasks[0], "", nil)), "\n")
+	if !strings.Contains(detail, "created:  "+theme.When("2026-08-01T10:00:00Z")) {
+		t.Errorf("the created line should use the shared form:\n%s", detail)
+	}
+	if !strings.Contains(detail, "changed:  "+theme.When("2026-08-13T09:00:00Z")) {
+		t.Errorf("the changed line should sit beside it, written the same way:\n%s", detail)
+	}
+
+	// A source with no timestamp: the blank IS the information, so it is shown rather than filled
+	// in from the created time.
+	detail = strings.Join(itemTexts(m.taskItemsFor(m.state.Tasks[1], "", nil)), "\n")
+	if !strings.Contains(detail, "changed:  "+theme.Unknown) {
+		t.Errorf("an undated task should say so plainly:\n%s", detail)
+	}
+	if strings.Contains(detail, "changed:  "+theme.When("2026-08-01T10:00:00Z")) {
+		t.Error("the created time must not stand in for a missing changed time")
+	}
+}

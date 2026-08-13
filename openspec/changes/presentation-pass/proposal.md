@@ -45,13 +45,25 @@ added — invisibly, because each looks plausible alone.
   is verdict-specific (`task list`'s closing line). This widens what the Tasks marker counts, which
   is a visible change and the reason it is called out here.
 
-The remaining subtask (the "unapproved" label, PR row colours, task row colours, and the
-last-changed timestamp in the task detail) land on this same branch and extend this document.
+- **The task detail shows when it last changed**, beside when it was created, in both front-ends.
+  `theme.When` composes the two the same way, and a source with no timestamp reads "n/a" rather than
+  borrowing the created time: that blank is what explains a mirrored task's absence from the active
+  filter, which reads exactly this field.
+
+All five landed on one branch, which is what the package was for: three of them share the red rule,
+and working them apart would have meant three workers rediscovering it and two rebasing over each
+other.
 
 ## Impact
 
-- Specs: `hub` gains the classification and the projection; the colour rule follows with the
-  subtasks that implement it.
-- Code so far: `internal/api/prlifecycle.go` (new), `internal/ui/theme/task.go`,
-  `internal/ui/tui/tab_prs.go`, `internal/ui/tui/tab_tasks.go`, `internal/ui/cli/hub.go`,
-  `internal/ui/cli/task.go`, plus the fail-closed test in `internal/hub`.
+- Specs: `hub` gains the PR-event classification and the lifecycle projection; `01-architecture`
+  gains the rule that display words come from the shared rendering module.
+- Code: `internal/api` (`prlifecycle.go` new, `task.go`, `board.go`), `internal/hub/commands`,
+  `internal/ui/theme` (`task.go`, `age.go`), `internal/ui/tui` (`theme.go`, `tab_tasks.go`,
+  `tab_prs.go`), `internal/ui/cli` (`hub.go`, `task.go`), plus the fail-closed test in
+  `internal/hub`.
+- The Tasks badge widens: it now counts unrated tasks as well as unapproved ones, because the
+  invariant requires everything red to be counted and an unrated task is red.
+- `internal/hub/workflow/prompts.go` crossed the 700-line limit when this branch's strings met what
+  arrived on the reference branch, so the feature loop's own prompts moved to `prompts_feature.go`.
+  Unrelated to presentation, and named here because it is in the diff.
