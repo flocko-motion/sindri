@@ -19,7 +19,12 @@ import (
 	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
-// ReviewPrompt reads review-prompt.txt, auto-created from a built-in default if absent.
+// ReviewPrompt is the review instruction: a repo-committed `review_prompt`, else an edited
+// review-prompt.txt, else the built-in default.
+//
+// It does NOT write the default out. Seeding the file on first use meant the default could never be
+// improved again: every project that had ever requested a review already held a copy, so a better
+// one shipped to new installs only — silently, since nothing reports a stale seed.
 func (e *Engine) ReviewPrompt(project string) (string, error) {
 	// A repo-committed `review_prompt` wins; config already validated the path exists.
 	if cfg, err := e.deps.ProjectConfig(project); err != nil {
@@ -31,20 +36,43 @@ func (e *Engine) ReviewPrompt(project string) (string, error) {
 		}
 		return strings.TrimSpace(string(data)), nil
 	}
-	dir := filepath.Join(paths.StateDir(), project)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
+	data, err := os.ReadFile(reviewPromptPath(project))
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		return DefaultReviewPrompt, nil
 	}
-	path := filepath.Join(dir, "review-prompt.txt")
-	if data, err := os.ReadFile(path); err == nil {
-		return strings.TrimSpace(string(data)), nil
-	} else if !os.IsNotExist(err) {
-		return "", err
+	if text := strings.TrimSpace(string(data)); !isSeededPrompt(text) {
+		return text, nil // someone edited it; their words win
 	}
-	if err := os.WriteFile(path, []byte(DefaultReviewPrompt+"\n"), 0o644); err != nil {
-		return "", err
-	}
+	// A file matching a default sindri itself wrote is the seed, not a choice — so the current
+	// default wins and the improvement reaches the installs that already had one.
 	return DefaultReviewPrompt, nil
+}
+
+// reviewPromptPath is where a project's edited review instruction lives.
+func reviewPromptPath(project string) string {
+	return filepath.Join(paths.StateDir(), project, "review-prompt.txt")
+}
+
+// seededPrompts are the instructions sindri has written into review-prompt.txt itself, current and
+// superseded. A file byte-matching one of them was never a decision, so it does not outrank the
+// built-in — which is what lets an improved default reach a project that already has the file.
+var seededPrompts = []string{
+	DefaultReviewPrompt,
+	// Superseded: the one-liner seeded before the reviewer could read the task at all.
+	"Review this PR for correctness, clarity, and fit to the task. Flag bugs, missing tests, and anything that should change.",
+}
+
+// isSeededPrompt reports whether text is one sindri wrote rather than one someone chose.
+func isSeededPrompt(text string) bool {
+	for _, p := range seededPrompts {
+		if text == strings.TrimSpace(p) {
+			return true
+		}
+	}
+	return false
 }
 
 // taskTitle is a task's title for a directive, or "" when it cannot be read. Best-effort by design:

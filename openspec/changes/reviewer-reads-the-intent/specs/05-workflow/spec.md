@@ -25,6 +25,11 @@ itself, that the task and its comments are readable and which verbs read them. A
 mentions is access nobody uses. The directive SHALL name the task by id AND title, as the
 directive that assigns work to a worker does.
 
+A built-in default instruction SHALL NOT be copied into a project's own state as a side effect of
+being used. A default a project holds a copy of can never be improved for that project again, and
+the divergence is silent — so the built-in SHALL apply wherever nothing has deliberately overridden
+it, and a stored instruction matching one the tool itself wrote SHALL count as not overridden.
+
 An interface that shows a PR to an agent SHALL name the task it belongs to, as the host's PR detail
 does.
 
@@ -49,6 +54,17 @@ does.
 - **WHEN** a review is assigned
 - **THEN** the directive names the task by id and title and points at the verbs that read the task,
   its hierarchy and its comments, and the review instruction says the same
+
+#### Scenario: An improved default instruction reaches an existing project
+
+- **WHEN** the built-in review instruction changes and a project already holds a stored copy of an
+  earlier one
+- **THEN** the reviewer is given the current instruction
+
+#### Scenario: A deliberately written instruction is kept
+
+- **WHEN** a project's stored review instruction differs from any the tool wrote
+- **THEN** that instruction is used unchanged
 
 #### Scenario: A spec-linked task is discoverable
 

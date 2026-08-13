@@ -31,6 +31,13 @@ out the task view did not print labels at all, so granting access alone would no
   the approach it replaced.
 - `DefaultReviewPrompt` says the same. A directive covers one route into a review; the prompt holds
   however the review was requested.
+- And the prompt now actually reaches existing projects. `ReviewPrompt` used to WRITE the default
+  into `$STATE/<project>/review-prompt.txt` the first time it was missing, after which the file won
+  — so an improved default reached only a project that had never had a review requested, silently.
+  Two changes, because either alone is half a fix: the default is no longer written out (the cause),
+  and a stored instruction byte-matching one sindri itself wrote counts as the seed rather than a
+  choice, so the improvement reaches installs that already hold the file. An edited instruction
+  still wins, which is the point of the file.
 - The agent-facing `show <pr-id>` names the linked task, matching the host view. The hub already
   resolves it, so this is rendering rather than new data.
 
@@ -53,3 +60,6 @@ a planner grading its own spec would not.
   `DefaultReviewPrompt`), `review.go` (the title lookup) and `pr.go` (`show`).
 - `DirReview` gained a parameter. Its title lookup is best-effort: a title that will not load must
   not stop a review being handed out, and there is a test for the directive surviving that.
+- `show <pr-id>` resolves the task through a plain cache read rather than `TaskInfo`, which
+  reconciles and re-caches: displaying a PR must not write. Pinned by a test that clears the cache
+  row and asserts nothing puts it back.

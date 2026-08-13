@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,6 +36,12 @@ func reviewerEngine(t *testing.T) (*Engine, registry.Caller, *store.ProjectStore
 		{ID: "sd-elsewhere", Title: "unrelated backlog", Status: "open", Priority: "P3"},
 	} {
 		if err := ps.PutOwnedTask(task); err != nil {
+			t.Fatal(err)
+		}
+		// The cache too, which is what a plain read sees. In a live hub the sync rebuilds it from
+		// the owned rows; nothing has synced here, and `show` reads the cache rather than writing.
+		if err := ps.UpsertTask(store.Task{ID: task.ID, Title: task.Title, Status: task.Status,
+			Priority: task.Priority, Description: task.Description, Labels: task.Labels}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -175,5 +182,121 @@ func TestDirReviewSurvivesAnUnreadableTitle(t *testing.T) {
 	dir := DirReview("pr-sd-1", "sd-1", "", "ARCHITECTURE.md")
 	if !strings.Contains(dir, "pr-sd-1") || !strings.Contains(dir, "sindri task sd-1") {
 		t.Errorf("a missing title cost the directive its substance:\n%s", dir)
+	}
+}
+
+// promptEngine builds an engine whose state dir is a temp one, so a test can place (or not place) a
+// review-prompt.txt without touching the real install.
+func promptEngine(t *testing.T) (*Engine, string) {
+	t.Helper()
+	t.Setenv("SINDRI_HOME", t.TempDir())
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	root := t.TempDir()
+	if err := st.RegisterProject("proj", root); err != nil {
+		t.Fatal(err)
+	}
+	return New(st, &stubDeps{root: root}), reviewPromptPath("proj")
+}
+
+// writePrompt places a review-prompt.txt, as an older sindri did on first use.
+func writePrompt(t *testing.T, path, text string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(text+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestTheDefaultPromptIsNotWrittenOut is the cause. Seeding the file on first use meant the default
+// could never be improved again: every project that had ever requested a review held a copy, so a
+// better one shipped to new installs only — and silently, since nothing reports a stale seed.
+func TestTheDefaultPromptIsNotWrittenOut(t *testing.T) {
+	e, path := promptEngine(t)
+	got, err := e.ReviewPrompt("proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != DefaultReviewPrompt {
+		t.Errorf("an unconfigured project should get the built-in default, got %q", got)
+	}
+	if _, err := os.Stat(path); err == nil {
+		t.Error("the default was written to disk, which is what freezes it forever")
+	}
+}
+
+// TestAnImprovedDefaultReachesAnExistingProject is the half that stopping the write does not fix on
+// its own: an established install already HAS the file, so treating it as an override would keep
+// serving the stale seed. A file byte-matching something sindri wrote was never a decision.
+func TestAnImprovedDefaultReachesAnExistingProject(t *testing.T) {
+	e, path := promptEngine(t)
+	writePrompt(t, path, "Review this PR for correctness, clarity, and fit to the task. Flag bugs, missing tests, and anything that should change.")
+
+	got, err := e.ReviewPrompt("proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != DefaultReviewPrompt {
+		t.Errorf("a project holding the old seed still gets it:\n%s", got)
+	}
+	// And the improvement is the point: it must now say how to read the task.
+	if !strings.Contains(got, "sindri task") {
+		t.Errorf("the prompt reaching an existing project does not point at the task:\n%s", got)
+	}
+}
+
+// TestAnEditedPromptStillWins: the file remains the way to override the instruction, and someone
+// who wrote their own must not have it replaced by a default that thinks it knows better.
+func TestAnEditedPromptStillWins(t *testing.T) {
+	e, path := promptEngine(t)
+	writePrompt(t, path, "Only check the tests.")
+	got, err := e.ReviewPrompt("proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "Only check the tests." {
+		t.Errorf("an edited prompt should win, got %q", got)
+	}
+}
+
+// TestTheCurrentDefaultOnDiskIsAlsoJustASeed: a project seeded with today's default must not be
+// frozen at it either, or this recurs the next time the default improves.
+func TestTheCurrentDefaultOnDiskIsAlsoJustASeed(t *testing.T) {
+	e, path := promptEngine(t)
+	writePrompt(t, path, DefaultReviewPrompt)
+	if !isSeededPrompt(strings.TrimSpace(DefaultReviewPrompt)) {
+		t.Error("the current default must count as a seed, or the next improvement is stuck again")
+	}
+	got, err := e.ReviewPrompt("proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != DefaultReviewPrompt {
+		t.Errorf("got %q", got)
+	}
+}
+
+// TestShowPRDoesNotWrite: displaying a PR must not mutate anything. Resolving the task through
+// TaskInfo would reconcile and re-cache it, putting a write behind a read verb — cheap to avoid,
+// since the cache already holds the two fields shown.
+func TestShowPRDoesNotWrite(t *testing.T) {
+	e, c, ps := reviewerEngine(t)
+	// Drop the cache row: only the owned one remains, so any write would put it back.
+	if err := ps.RemoveTask("sd-1"); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	_, _ = e.CmdShowPR(c, []string{"pr-sd-1"}, &out)
+	if _, ok, _ := ps.GetTask("sd-1"); ok {
+		t.Error("showing a PR wrote the task back into the cache — a display verb must not mutate")
+	}
+	// It still names the task from what it has.
+	if !strings.Contains(out.String(), "sd-1") {
+		t.Errorf("`show` should still name the task id:\n%s", out.String())
 	}
 }

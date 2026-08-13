@@ -277,9 +277,9 @@ func (e *Engine) CmdShowPR(c registry.Caller, args []string, out io.Writer) (int
 		return 1, fmt.Errorf("no such PR %q", args[0])
 	}
 	fmt.Fprintf(out, "%s  [%s]  by %s\nbranch %s → %s\n", pr.ID, pr.Status, pr.Agent, pr.Branch, pr.Base)
-	// The linked task, as the host's PR detail shows it. The hub already resolves it, so a reviewer
-	// reading this saw the diff and never what it was for.
-	if t, terr := e.TaskInfo(c.Project, pr.Task); terr == nil && t.ID != "" {
+	// The linked task, as the host's PR detail shows it — a reviewer read this and saw the diff but
+	// never what it was for. A cache read, not TaskInfo: displaying a PR must not write.
+	if t, ok, terr := e.store.For(c.Project).GetTask(pr.Task); terr == nil && ok {
 		fmt.Fprintf(out, "task:   %s  %s (%s)\n", t.ID, t.Title, t.Status)
 	} else if pr.Task != "" {
 		fmt.Fprintf(out, "task:   %s\n", pr.Task)
