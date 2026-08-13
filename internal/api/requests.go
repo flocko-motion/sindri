@@ -80,6 +80,12 @@ type RejectReq struct {
 	Feedback string `json:"feedback"`
 }
 
+// RunPriorityReq is the body for POST /run/priority: the run and its new P-code.
+type RunPriorityReq struct {
+	ID       string `json:"id"`
+	Priority string `json:"priority"`
+}
+
 // ApproveTaskReq is the body for POST /task/approve: the task, and whether the verdict
 // carries down to the tasks below it that still await one.
 type ApproveTaskReq struct {

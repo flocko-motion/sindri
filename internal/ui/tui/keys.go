@@ -66,6 +66,7 @@ const (
 	scopePRs
 	scopeRepos
 	scopeChat
+	scopeRuns
 )
 
 // binding is one row of help: the key(s) as displayed, a label (may depend on model
@@ -171,6 +172,12 @@ var keymap = []binding{
 	{keyApprove, lbl("add member"), scopeChat},
 	{keyReject, lbl("remove member"), scopeChat},
 	{keyNew, lbl("new meeting"), scopeChat},
+
+	// Runs.
+	{keyPriority, lbl("priority"), scopeRuns},
+	{keyDelete, lbl("cancel"), scopeRuns},
+	{keyFilter, func(m model) string { return "filter: " + string(m.runFilter) }, scopeRuns},
+	{keyScopeTog, func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scopeRuns},
 }
 
 // footerFor renders the "key label · key label" hints for a scope from the keymap.
@@ -195,6 +202,8 @@ func tabScope(tab int) keyScope {
 		return scopePRs
 	case 4:
 		return scopeChat
+	case 5:
+		return scopeRuns
 	default:
 		return scopeRepos
 	}

@@ -17,8 +17,10 @@ func TestSectionCounts(t *testing.T) {
 		},
 		Agents: []api.AgentView{{Name: "x", Status: "idle"}, {Name: "y", Status: "down"}},
 		PRs:    []api.PR{{ID: "p1", Status: "open"}, {ID: "p2", Status: "merged"}, {ID: "p3", Status: "scrapped"}},
+		Runs:   []api.Run{{ID: "r1", Status: "queued"}, {ID: "r2", Status: "running"}, {ID: "r3", Status: "passed"}},
 	}
-	want := map[string]int{"tasks": 2, "agents": 2, "prs": 1} // non-closed; whole roster; open only (merged AND scrapped excluded)
+	// non-closed; whole roster; open only (merged AND scrapped excluded); queued+running only
+	want := map[string]int{"tasks": 2, "agents": 2, "prs": 1, "runs": 2}
 	for _, s := range Sections {
 		if got := s.Count(b); got != want[s.Key] {
 			t.Errorf("%s count = %d, want %d", s.Key, got, want[s.Key])
@@ -32,6 +34,7 @@ type fakeBoard struct{}
 func (fakeBoard) OpenTaskCount() int          { return 3 }
 func (fakeBoard) AgentCount() int             { return 2 }
 func (fakeBoard) OpenPRCount() int            { return 1 }
+func (fakeBoard) OpenRunCount() int           { return 6 }
 func (fakeBoard) RepoCount() int              { return 5 }
 func (fakeBoard) ChatMemberCount() int        { return 4 }
 func (fakeBoard) TasksNeedingUserCount() int  { return 2 }
@@ -46,9 +49,9 @@ func TestResolvedReadsEveryCount(t *testing.T) {
 	if len(got) != len(Sections) {
 		t.Fatalf("got %d resolved sections, want %d", len(got), len(Sections))
 	}
-	want := map[string]int{"tasks": 3, "agents": 2, "prs": 1, "repos": 5, "chat": 4}
-	// Repos and Meeting have no Attention recipe: they resolve to 0 rather than panicking on a nil
-	// call, which is what a section holding nothing a human can wait on looks like.
+	want := map[string]int{"tasks": 3, "agents": 2, "prs": 1, "runs": 6, "repos": 5, "chat": 4}
+	// Repos, Meeting and Runs have no Attention recipe: they resolve to 0 rather than panicking on
+	// a nil call, which is what a section holding nothing a human can wait on looks like.
 	wantAttention := map[string]int{"tasks": 2, "agents": 1, "prs": 3}
 	for i, s := range got {
 		if s.Key != Sections[i].Key || s.Title != Sections[i].Title {

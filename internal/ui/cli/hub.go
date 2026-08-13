@@ -79,6 +79,10 @@ type backend interface {
 	MaterializeReview(id string) (string, error)
 	Merge(id string) (api.PR, error)
 	MilestonePR(agent string) (api.PR, error)
+	Runs() ([]api.Run, error)
+	RunInfo(id string) (api.RunDetail, error)
+	CancelRun(id string) error
+	ReprioritiseRun(id, priority string) error
 	Repos() ([]api.RepoSummary, error)
 	RepoInfo(tag string) (api.RepoDetail, error)
 	RepoInit() (api.RepoSummary, error)

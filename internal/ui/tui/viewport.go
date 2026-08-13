@@ -86,6 +86,8 @@ func (m *model) syncDetail() tea.Cmd {
 			paneFetchCmd(cl, id),
 			clientsFetchCmd(cl, id),
 		)
+	case 5:
+		return func() tea.Msg { d, _ := cl.RunInfo(id); return runMsg{id, d} }
 	default:
 		m.prView = "diff" // new PR → show its diff (its stored lint loads via PRInfo)
 		return func() tea.Msg { d, _ := cl.PRInfo(id); return prMsg{id, d} }

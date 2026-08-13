@@ -466,6 +466,28 @@ func (c *HTTP) LintPR(id string) (string, error) {
 	return ok.Out, c.get("/pr/lint?id="+url.QueryEscape(id), &ok)
 }
 
+// Runs lists all queued and finished runs, fleet-wide.
+func (c *HTTP) Runs() ([]api.Run, error) {
+	var out []api.Run
+	return out, c.get("/runs", &out)
+}
+
+// RunInfo returns a run with its stored output.
+func (c *HTTP) RunInfo(id string) (api.RunDetail, error) {
+	var d api.RunDetail
+	return d, c.get("/run?id="+url.QueryEscape(id), &d)
+}
+
+// CancelRun withdraws a queued or running run.
+func (c *HTTP) CancelRun(id string) error {
+	return c.post("/run/cancel", api.NameReq{Name: id})
+}
+
+// ReprioritiseRun moves a queued run within the queue.
+func (c *HTTP) ReprioritiseRun(id, priority string) error {
+	return c.post("/run/priority", api.RunPriorityReq{ID: id, Priority: priority})
+}
+
 // RequestReview attaches a review requirement to a PR and dispatches it to a
 // reviewer agent.
 func (c *HTTP) RequestReview(id, requirement string) error {

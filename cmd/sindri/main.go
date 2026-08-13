@@ -62,6 +62,7 @@ func main() {
 	rootCmd.AddCommand(cli.NewRepoCmd())
 	rootCmd.AddCommand(cli.NewTaskCmd())
 	rootCmd.AddCommand(cli.NewPrCmd())
+	rootCmd.AddCommand(cli.NewRunCmd())
 	rootCmd.AddCommand(cli.NewTuiCmd())
 	rootCmd.AddCommand(cli.NewUpgradeCmd())
 	rootCmd.AddCommand(cli.NewVersionCmd())

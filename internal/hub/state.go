@@ -64,6 +64,11 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	}
 	prs = kept
 	h.fillReviewers(prs)
+	// Fleet-wide and position-ranked already (-> FleetRuns), so the board never re-derives either.
+	runs, err := h.wf.FleetRuns()
+	if err != nil {
+		return BoardState{}, err
+	}
 	var tasks []store.Task
 	var specMissing bool
 	if selected != "" {
@@ -145,7 +150,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	}
 	board := BoardState{
 		RuntimeHint: h.watch.runtimeHint(),
-		Agents:      agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans, Chat: chat,
+		Agents:      agents, Tasks: tasks, PRs: prs, Runs: runs, Projects: projects, Orphans: orphans, Chat: chat,
 		RepoDocs: docs, SpecCLIMissing: specMissing, StartedAt: h.startedAt.UTC().Format(time.RFC3339),
 		DefaultMemory: agent.MemoryOrDefault(""),
 		// Reported from the watchdog's last reading, like liveness and for the same reason: taking

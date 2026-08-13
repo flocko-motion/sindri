@@ -121,6 +121,8 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.filter = api.NextTaskFilter(m.filter)
 		} else if m.tab == 2 {
 			m.prFilter = api.NextPRFilter(m.prFilter)
+		} else if m.tab == 5 {
+			m.runFilter = api.NextRunFilter(m.runFilter)
 		}
 	case "h": // tasks: collapse the fold under the cursor (tree navigation)
 		if m.tab == 0 && !m.rightFocus {
@@ -256,7 +258,7 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.openTaskReopenForm(m.selID())
 			return nil
 		}
-	case keyDelete: // tasks: scrap · agents: delete (or remove an orphan) · prs: scrap · repos: forget
+	case keyDelete: // tasks: scrap · agents: delete (or remove an orphan) · prs: scrap · repos: forget · runs: cancel
 		if m.tab == 0 && m.selID() != "" {
 			m.openScrapChoice(m.selID())
 			return nil
@@ -275,6 +277,10 @@ func (m *model) onKey(k string) tea.Cmd {
 		}
 		if m.tab == 3 && m.selID() != "" {
 			m.openForgetChoice(m.selID(), m.repoName(m.selID()))
+			return nil
+		}
+		if m.tab == 5 && m.selID() != "" {
+			m.openRunCancelChoice(m.selID())
 			return nil
 		}
 	case keyTell: // tell the selected agent (agents) / show linked task (prs)
@@ -337,9 +343,13 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.openReviewForm(m.selID())
 			return nil
 		}
-	case keyPriority: // set the selected task's priority (shift = a modifying action)
+	case keyPriority: // tasks: set priority · runs: reprioritise (shift = a modifying action)
 		if m.tab == 0 && m.selID() != "" {
 			m.openPriorityChoice(m.selID())
+			return nil
+		}
+		if m.tab == 5 && m.selID() != "" {
+			m.openRunPriorityChoice(m.selID())
 			return nil
 		}
 	case keyUnassign: // tasks: release the selected task back to the backlog

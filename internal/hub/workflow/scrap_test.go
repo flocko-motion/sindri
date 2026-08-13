@@ -28,6 +28,7 @@ type stubDeps struct {
 	busy         map[string]bool            // agents mid-turn, so AgentIdle answers false for them
 	posted       []store.Comment            // what the workflow wrote onto a task's thread (SourceRef holds the id)
 	postFails    bool                       // AddTaskComment refuses, for the paths that must survive it
+	projects     []store.Project            // KnownProjects override; nil (the default) means none registered
 }
 
 func (d *stubDeps) ProjectRoot(string) string                   { return d.root }
@@ -56,7 +57,7 @@ func (d *stubDeps) AddTaskComment(_, id, author, body string) error {
 	return nil
 }
 func (d *stubDeps) Subscribe() (chan struct{}, func()) { return make(chan struct{}), func() {} }
-func (d *stubDeps) KnownProjects() []store.Project     { return nil }
+func (d *stubDeps) KnownProjects() []store.Project     { return d.projects }
 func (d *stubDeps) BrokkrBin() (string, error)         { return "", nil }
 func (d *stubDeps) ContextUsage(_, _ string) (int, int, bool) {
 	return d.ctxTokens, d.ctxWindow, d.ctxOK

@@ -32,6 +32,9 @@ var tuiSections = []tuiSection{
 	{"prs", "PRs"},
 	{"repos", "Repos"},
 	{"chat", "Meeting"},
+	// Appended, not slotted in near PRs, so every existing `m.tab == N` guard elsewhere keeps
+	// pointing at the tab it always has — inserting in the middle would shift Repos and Chat.
+	{"runs", "Runs"},
 }
 
 type tuiSection struct{ Key, Title string }
@@ -56,7 +59,7 @@ type model struct {
 	w, h   int
 
 	tab    int
-	cursor [5]int // one per section (Tasks/Agents/PRs/Repos/Chat)
+	cursor [6]int // one per section (Tasks/Agents/PRs/Repos/Chat/Runs)
 	list   scroll.Viewport
 	detail scroll.Viewport
 	// prMeta is the PRs tab's right column. It needs its own viewport because `detail` is spent on
@@ -66,6 +69,7 @@ type model struct {
 
 	filter     api.TaskFilter // Tasks tab: which segment of the backlog is shown (-> api.TaskFilters)
 	prFilter   api.PRFilter   // PRs tab: which segment is shown (-> api.PRFilters)
+	runFilter  api.RunFilter  // Runs tab: which segment is shown (-> api.RunFilters)
 	collapsed  map[string]bool
 	merging    map[string]bool   // PR ids the user just triggered a merge on — shown as a transient "merging" on the row until the hub confirms
 	busy       map[string]string // task ids the user just triggered a close/scrap on → the transient verb ("closing"/"deleting") shown on the row until the hub confirms
@@ -86,6 +90,7 @@ type model struct {
 	prView       string // which content the PR big pane shows: "diff" (default) | "lint"
 	reviewPrompt string // editable default review instruction (from the hub)
 	taskDetail   api.Task
+	runDetail    api.RunDetail
 	quit         bool
 
 	modalOverride      []string // when set, the detail modal shows these instead of the tab detail
@@ -128,7 +133,7 @@ func newModel(cl *client.HTTP, ch <-chan api.BoardState, root string) model {
 	// Tasks open on "active" — the open backlog plus whatever changed in the last couple of hours.
 	// Plain "open" hid a task the moment it closed, so the work just finished left no trace on the
 	// board and the tab read as though nothing had happened.
-	m := model{cl: cl, ch: ch, root: root, filter: api.FilterActive, prFilter: api.PRFilterActive, collapsed: map[string]bool{}, merging: map[string]bool{}, busy: map[string]string{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
+	m := model{cl: cl, ch: ch, root: root, filter: api.FilterActive, prFilter: api.PRFilterActive, runFilter: api.RunFilterActive, collapsed: map[string]bool{}, merging: map[string]bool{}, busy: map[string]string{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
 	m.reclamp()
 	return m
 }
@@ -303,6 +308,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reclamp()
 	case taskMsg:
 		m.taskDetail = msg.t
+	case runMsg:
+		m.runDetail = msg.d
 	case repoConfigMsg:
 		if msg.err != nil {
 			m.errText = msg.err.Error()

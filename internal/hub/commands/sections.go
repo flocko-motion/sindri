@@ -17,6 +17,7 @@ type Board interface {
 	OpenTaskCount() int
 	AgentCount() int
 	OpenPRCount() int
+	OpenRunCount() int
 	RepoCount() int
 	ChatMemberCount() int
 	TasksNeedingUserCount() int
@@ -60,6 +61,10 @@ var Sections = []Section{
 		// give — an interim PR being user-gated by design (-> api.PRWaitReason).
 		Attention: func(b Board) int { return b.PRsNeedingUserCount() },
 	},
+	// No Attention: a run's failure is the scheduling agent's to see and rerun, not a verdict a
+	// human owes — that changes once the submit gate routes through this queue (sd-cf630b), which
+	// should revisit this rather than inherit it by default.
+	{Key: "runs", Title: "Runs", Count: func(b Board) int { return b.OpenRunCount() }},
 	{Key: "repos", Title: "Repos", Count: func(b Board) int { return b.RepoCount() }},
 	{Key: "chat", Title: "Meeting", Count: func(b Board) int { return b.ChatMemberCount() }},
 }

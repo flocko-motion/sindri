@@ -31,6 +31,10 @@ type taskMsg struct {
 	key string
 	t   api.Task
 }
+type runMsg struct {
+	key string
+	d   api.RunDetail
+}
 type paneMsg struct {
 	agent string
 	text  string

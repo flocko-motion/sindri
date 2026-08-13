@@ -133,6 +133,22 @@ CREATE TABLE IF NOT EXISTS task_approval (
   at      TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (project, task)
 );
+-- The run queue: one scheduled command per row, its console output, and how it went.
+-- Methods live in runs.go; the schema stays here alongside its siblings.
+CREATE TABLE IF NOT EXISTS runs (
+  project     TEXT NOT NULL,
+  id          TEXT NOT NULL,
+  agent       TEXT NOT NULL DEFAULT '',
+  command     TEXT NOT NULL DEFAULT '',
+  status      TEXT NOT NULL DEFAULT 'queued', -- queued|running|passed|failed|timed_out|cancelled
+  priority    TEXT NOT NULL DEFAULT '',       -- P0..P4, same vocabulary as tasks; '' sorts last
+  output      TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL DEFAULT '',
+  started_at  TEXT NOT NULL DEFAULT '',
+  finished_at TEXT NOT NULL DEFAULT '',
+  updated_at  TEXT NOT NULL DEFAULT '', -- stamped on every write, for the active filter
+  PRIMARY KEY (project, id)
+);
 `
 
 // AgentState is an agent's live workflow state (durable, D11).

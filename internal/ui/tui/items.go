@@ -23,6 +23,8 @@ func (m model) detailLines() []string {
 		return m.agentDetailLines()
 	case 2:
 		return m.prDetailLines()
+	case 5:
+		return m.runDetailLines()
 	default:
 		return m.repoDetailLines()
 	}
@@ -195,6 +197,8 @@ func (m model) rows() []row {
 		return m.prRows()
 	case 3:
 		return m.repoRows()
+	case 5:
+		return m.runRows()
 	default:
 		return nil // Chat has no selectable rows — it renders its own transcript body
 	}
@@ -249,6 +253,14 @@ func (m model) tabCount(s tuiSection) int {
 		n := 0
 		for _, p := range m.state.PRs {
 			if m.prVisible(p) && api.PROpen(p) {
+				n++
+			}
+		}
+		return n
+	case "runs":
+		n := 0
+		for _, r := range m.state.Runs {
+			if m.inScope(r.Project) && api.RunOpen(r) {
 				n++
 			}
 		}

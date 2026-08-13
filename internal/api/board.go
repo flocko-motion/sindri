@@ -88,6 +88,7 @@ type BoardState struct {
 	Agents   []AgentView             `json:"agents"`
 	Tasks    []Task                  `json:"tasks"`
 	PRs      []PR                    `json:"prs"`
+	Runs     []Run                   `json:"runs,omitempty"`
 	Projects []Project               `json:"projects"`
 	Orphans  []string                `json:"orphans"`   // pods with no roster entry (D14)
 	Chat     ChatView                `json:"chat"`      // the user's chatroom: members + transcript
@@ -172,6 +173,9 @@ func (b BoardState) AgentCount() int { return len(b.Agents) }
 // OpenPRCount is open PRs across the fleet (neither merged nor scrapped), matching the PRs tab default.
 func (b BoardState) OpenPRCount() int { return countPRs(b.PRs, PROpen) }
 
+// OpenRunCount is queued or running runs across the fleet, matching the Runs tab default.
+func (b BoardState) OpenRunCount() int { return countRuns(b.Runs, RunOpen) }
+
 // RepoCount is the number of repos the hub tracks.
 func (b BoardState) RepoCount() int { return len(b.Projects) }
 
@@ -221,6 +225,15 @@ func countTasks(ts []Task, pred func(Task) bool) (n int) {
 func countPRs(ps []PR, pred func(PR) bool) (n int) {
 	for _, p := range ps {
 		if pred(p) {
+			n++
+		}
+	}
+	return
+}
+
+func countRuns(rs []Run, pred func(Run) bool) (n int) {
+	for _, r := range rs {
+		if pred(r) {
 			n++
 		}
 	}
