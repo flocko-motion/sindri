@@ -218,34 +218,10 @@ func (m *model) openReviewForm(prID string) {
 // prDetailW is the fixed width of the PRs tab's right detail column.
 const prDetailW = 44
 
-// PR filter states for the f-toggle: unmerged (the default), merged only, or all.
-const (
-	prFilterUnmerged = iota
-	prFilterMerged
-	prFilterAll
-)
-
-var prFilterNames = [...]string{"unmerged", "merged", "all"}
-
-// prFilterShows applies the f-filter; unmerged hides both terminal states (merged and scrapped).
-func (m model) prFilterShows(status string) bool {
-	switch m.prFilter {
-	case prFilterMerged:
-		return status == "merged"
-	case prFilterAll:
-		return true
-	default: // prFilterUnmerged
-		return status != "merged" && status != "scrapped"
-	}
-}
-
 func (m model) prRows() []row {
 	var out []row
-	for _, p := range m.state.PRs {
+	for _, p := range api.FilterPRs(m.prFilter, m.state.PRs) { // f-toggle: active by default
 		if !m.inScope(p.Project) { // repo-scoped: only the active repo's PRs
-			continue
-		}
-		if !m.prFilterShows(p.Status) { // f-toggle: merged hidden by default
 			continue
 		}
 		repo := m.repoStyle(p.Project).Render(fmt.Sprintf("%-10.10s", m.repoName(p.Project)))

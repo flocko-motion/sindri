@@ -65,8 +65,12 @@ func FilterTasks(f TaskFilter, tasks []Task) []Task {
 
 // ChangedWithin reports whether a task's last known change falls inside d. An absent or unparsable
 // timestamp is no evidence of recency, so it answers false.
-func ChangedWithin(t Task, d time.Duration) bool {
-	at, err := time.Parse(time.RFC3339, t.UpdatedAt)
+func ChangedWithin(t Task, d time.Duration) bool { return changedWithin(t.UpdatedAt, d) }
+
+// changedWithin is the recency check behind ChangedWithin and PRChangedWithin (-> prfilter.go):
+// the same rule, shared rather than copied, since both filters' "active" means it.
+func changedWithin(ts string, d time.Duration) bool {
+	at, err := time.Parse(time.RFC3339, ts)
 	return err == nil && time.Since(at) < d
 }
 

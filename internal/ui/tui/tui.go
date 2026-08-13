@@ -65,7 +65,7 @@ type model struct {
 	prMeta scroll.Viewport
 
 	filter     api.TaskFilter // Tasks tab: which segment of the backlog is shown (-> api.TaskFilters)
-	prFilter   int            // PRs tab: unmerged/merged/all (default hides merged)
+	prFilter   api.PRFilter   // PRs tab: which segment is shown (-> api.PRFilters)
 	collapsed  map[string]bool
 	merging    map[string]bool   // PR ids the user just triggered a merge on — shown as a transient "merging" on the row until the hub confirms
 	busy       map[string]string // task ids the user just triggered a close/scrap on → the transient verb ("closing"/"deleting") shown on the row until the hub confirms
@@ -128,7 +128,7 @@ func newModel(cl *client.HTTP, ch <-chan api.BoardState, root string) model {
 	// Tasks open on "active" — the open backlog plus whatever changed in the last couple of hours.
 	// Plain "open" hid a task the moment it closed, so the work just finished left no trace on the
 	// board and the tab read as though nothing had happened.
-	m := model{cl: cl, ch: ch, root: root, filter: api.FilterActive, collapsed: map[string]bool{}, merging: map[string]bool{}, busy: map[string]string{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
+	m := model{cl: cl, ch: ch, root: root, filter: api.FilterActive, prFilter: api.PRFilterActive, collapsed: map[string]bool{}, merging: map[string]bool{}, busy: map[string]string{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
 	m.reclamp()
 	return m
 }

@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func openTmpProject(t *testing.T) *ProjectStore { return openTmp(t).For("repo") }
 
@@ -422,6 +425,10 @@ func TestPRLifecycle(t *testing.T) {
 	if pr.Status != "open" || pr.Agent != "brokkr" || pr.Project != "repo" {
 		t.Fatalf("pr defaults wrong: %+v", pr)
 	}
+	firstUpdate, err := time.Parse(time.RFC3339, pr.UpdatedAt)
+	if err != nil || time.Since(firstUpdate) > time.Minute {
+		t.Fatalf("updated_at not stamped on insert: %q (err %v)", pr.UpdatedAt, err)
+	}
 
 	// Status filter.
 	p.PutPR(PR{ID: "pr-td-2", Task: "td-2", Status: "merged"})
@@ -445,6 +452,12 @@ func TestPRLifecycle(t *testing.T) {
 	got, _, _ := p.GetPR("pr-td-1")
 	if got.Status != "approved" {
 		t.Fatalf("approve not persisted: %+v", got)
+	}
+	// updated_at is stamped fresh on every write, ignoring whatever the caller's struct carried —
+	// pr.UpdatedAt here is still the FIRST timestamp, read back before this second write.
+	secondUpdate, err := time.Parse(time.RFC3339, got.UpdatedAt)
+	if err != nil || secondUpdate.Before(firstUpdate) {
+		t.Fatalf("updated_at not refreshed on the second write: first=%v second=%q (err %v)", firstUpdate, got.UpdatedAt, err)
 	}
 }
 

@@ -350,14 +350,20 @@ func prLintCmd() *cobra.Command {
 }
 
 func prListCmd() *cobra.Command {
-	return &cobra.Command{
+	var filter string
+	c := &cobra.Command{
 		Use: "list", Short: "List PRs", Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
+			f, err := api.ParsePRFilter(filter)
+			if err != nil {
+				return err
+			}
 			return withBackend(func(b backend) error {
-				prs, err := b.PRs()
+				all, err := b.PRs()
 				if err != nil {
 					return err
 				}
+				prs := api.FilterPRs(f, all)
 				for _, p := range prs {
 					status := api.StatusLabel(p.Status, p.Approvals)
 					if p.Kind == "interim" { // ◇ = mid-task contribution (vs a final, task-done PR)
@@ -368,13 +374,21 @@ func prListCmd() *cobra.Command {
 					fmt.Printf("%-14s %-13s %4s  %-10s %-10s %s\n",
 						p.ID, status, shortAge(p.CreatedAt), p.Agent, dash(p.Reviewer), p.Branch)
 				}
-				if len(prs) == 0 {
+				if n := len(all) - len(prs); n > 0 {
+					fmt.Fprintf(os.Stderr, "(filter %s — %d of %d PR(s) shown)\n", f, len(prs), len(all))
+				} else if len(prs) == 0 {
 					fmt.Fprintln(os.Stderr, "no PRs")
 				}
 				return nil
 			})
 		},
 	}
+	// Defaults to "all", the same reasoning taskListCmd gives: a listing is a record, not the
+	// TUI's redrawn view, which opens on "active" instead.
+	c.Flags().StringVar(&filter, "filter", string(api.PRFilterAll),
+		"which PRs to list: "+api.PRFilterNames()+" (active = open, plus anything closed within "+
+			api.ActiveWindow.String()+")")
+	return c
 }
 
 // reviewBadge renders one review verdict: its state, verdict, author and when, marking a

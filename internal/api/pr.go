@@ -18,6 +18,9 @@ type PR struct {
 	Status    string `json:"status"`
 	Feedback  string `json:"feedback"`
 	CreatedAt string `json:"created_at"`
+	// UpdatedAt is stamped on every write (PutPR), so the active filter can tell a PR that just
+	// changed from one that has sat merged or scrapped for a while.
+	UpdatedAt string `json:"updated_at,omitempty"`
 	// Kind: a final PR's merge closes the task, an interim one keeps it open and puts
 	// the worker straight back on it. "" is read as "final".
 	Kind string `json:"kind"`

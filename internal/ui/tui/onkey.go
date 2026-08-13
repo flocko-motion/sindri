@@ -120,7 +120,7 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 0 {
 			m.filter = api.NextTaskFilter(m.filter)
 		} else if m.tab == 2 {
-			m.prFilter = (m.prFilter + 1) % 3
+			m.prFilter = api.NextPRFilter(m.prFilter)
 		}
 	case "h": // tasks: collapse the fold under the cursor (tree navigation)
 		if m.tab == 0 && !m.rightFocus {

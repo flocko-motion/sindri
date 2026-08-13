@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS prs (
   feedback   TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT '',
   kind       TEXT NOT NULL DEFAULT 'final', -- final (task-done) | interim (mid-task contribution to the reference branch)
+  updated_at TEXT NOT NULL DEFAULT '', -- stamped by every PutPR, for the active filter (-> api.PRFilterActive)
   PRIMARY KEY (project, id)
 );
 -- The tasks sindri owns, and the authority for them. The tasks table above is a read model the
@@ -177,7 +178,9 @@ func (p *ProjectStore) SetState(st AgentState) error {
 	return nil
 }
 
-// PutPR inserts or updates a merge-intent in this project.
+// PutPR inserts or updates a merge-intent in this project. updated_at is stamped here,
+// unconditionally, on every call — the caller's own value (if any) is never trusted, mirroring
+// updateOwned's "any write is a change" rule for tasks, which the active filter relies on.
 func (p *ProjectStore) PutPR(pr PR) error {
 	if pr.CreatedAt == "" {
 		pr.CreatedAt = time.Now().UTC().Format(time.RFC3339)
@@ -188,13 +191,15 @@ func (p *ProjectStore) PutPR(pr PR) error {
 	if pr.Kind == "" {
 		pr.Kind = "final"
 	}
+	pr.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	_, err := p.s.db.Exec(`
-		INSERT INTO prs (project,id,task,agent,branch,base,status,feedback,created_at,kind)
-		VALUES (?,?,?,?,?,?,?,?,?,?)
+		INSERT INTO prs (project,id,task,agent,branch,base,status,feedback,created_at,kind,updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(project,id) DO UPDATE SET
 			task=excluded.task, agent=excluded.agent, branch=excluded.branch,
-			base=excluded.base, status=excluded.status, feedback=excluded.feedback, kind=excluded.kind`,
-		p.project, pr.ID, pr.Task, pr.Agent, pr.Branch, pr.Base, pr.Status, pr.Feedback, pr.CreatedAt, pr.Kind)
+			base=excluded.base, status=excluded.status, feedback=excluded.feedback, kind=excluded.kind,
+			updated_at=excluded.updated_at`,
+		p.project, pr.ID, pr.Task, pr.Agent, pr.Branch, pr.Base, pr.Status, pr.Feedback, pr.CreatedAt, pr.Kind, pr.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("put pr %s: %w", pr.ID, err)
 	}
@@ -235,7 +240,7 @@ func (s *Store) AllPRs(statuses ...string) ([]PR, error) {
 	return queryPRs(s.db, q, args...)
 }
 
-const prCols = `SELECT project,id,task,agent,branch,base,status,feedback,created_at,kind FROM prs`
+const prCols = `SELECT project,id,task,agent,branch,base,status,feedback,created_at,kind,updated_at FROM prs`
 
 type scanner interface{ Scan(...any) error }
 
@@ -269,7 +274,7 @@ func scanPR(row scanner) (PR, bool, error) {
 
 func scanPRRow(row scanner) (PR, error) {
 	var p PR
-	err := row.Scan(&p.Project, &p.ID, &p.Task, &p.Agent, &p.Branch, &p.Base, &p.Status, &p.Feedback, &p.CreatedAt, &p.Kind)
+	err := row.Scan(&p.Project, &p.ID, &p.Task, &p.Agent, &p.Branch, &p.Base, &p.Status, &p.Feedback, &p.CreatedAt, &p.Kind, &p.UpdatedAt)
 	return p, err
 }
 
