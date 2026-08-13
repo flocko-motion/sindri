@@ -80,7 +80,9 @@ func (e *Engine) idleReviewer(project string) (string, error) {
 		return "", fmt.Errorf("load roster for %s: %w", project, err)
 	}
 	for _, a := range roster {
-		if a.Role != "reviewer" || a.Retired || !e.deps.AgentIdle(project, a.Name) {
+		// ClearArmed for the same reason as Retired: a review handed over now would be cut in half
+		// by the clear that is about to land.
+		if a.Role != "reviewer" || a.Retired || a.ClearArmed || !e.deps.AgentIdle(project, a.Name) {
 			continue
 		}
 		held, err := ps.ReviewingPR(a.Name)

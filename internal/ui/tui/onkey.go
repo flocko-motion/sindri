@@ -359,7 +359,18 @@ func (m *model) onKey(k string) tea.Cmd {
 			return m.closeTaskCmd(m.selID())
 		}
 		if m.tab == 1 && m.selID() != "" && !m.isOrphan(m.selID()) {
-			m.openClearContextChoice(m.selID())
+			a, ok := m.selAgent()
+			if !ok {
+				return nil
+			}
+			// Disarming asks nothing: cancelling a destructive action is not itself destructive,
+			// and a confirm on a retreat is friction with nothing behind it.
+			if a.ClearArmed {
+				cl, name := m.cl, a.Name
+				m.flash = name + ": context clear cancelled"
+				return mutateThenRefresh(cl, func() error { return cl.SetClearArmed(name, false) })
+			}
+			m.openClearContextChoice(a)
 			return nil
 		}
 	case "enter":

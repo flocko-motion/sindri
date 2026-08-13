@@ -98,6 +98,9 @@ func (r *refwatch) preflight(projects []store.Project) {
 			r.h.wf.CheckOpenPRs(p.Tag)
 			r.h.wf.RepairReviewRows(p.Tag)
 			r.h.wf.AssignPendingReviews(p.Tag) // after the repair: a row it just wrote is claimable now
+			// Before nothing else in particular, but off the agent's own request: the clear
+			// interrupts the session, so it must not land on an agent mid-command (-> FireArmedClears).
+			r.h.agents.FireArmedClears(p.Tag)
 		}
 	}()
 }

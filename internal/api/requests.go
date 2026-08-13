@@ -43,6 +43,9 @@ type NameReq struct {
 	// Retired is the wind-down flag (POST /agent/retire): assign it nothing new. It is the whole
 	// payload there, so false is a real value — clearing it puts the agent back in service.
 	Retired bool `json:"retired"`
+	// Armed is the context-clear flag (POST /agent/clear-context): arm it, or take the arming back.
+	// False is a real value here too, since disarming is the other half of the same toggle.
+	Armed bool `json:"armed"`
 }
 
 // RepoReq targets a registered repo by its tag (POST /repo/forget, /repo/color).

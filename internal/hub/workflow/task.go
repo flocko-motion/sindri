@@ -318,6 +318,11 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 			case "working":
 				return e.workDirective(project, name, st.Task, st.Container)
 			default:
+				// Between subtasks is a leaf boundary, so an armed clear fires HERE — before the
+				// next subtask is served, not into the middle of it.
+				if e.clearArmed(project, name) {
+					return DirClearPending, nil
+				}
 				// A failure here is surfaced, never read as "finished": the feature is only done
 				// when the store says there is nothing under it, not when assignment went wrong.
 				next, ok, aerr := e.advanceContainer(project, name, st.Container)
@@ -356,6 +361,11 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 func (e *Engine) waitForNextTask(ctx context.Context, project, name string) (string, error) {
 	if a, ok, _ := e.store.For(project).GetAgent(name); ok && a.Retired {
 		return DirRetired, nil
+	}
+	// Ahead of fullness: an armed clear is the remedy FOR fullness, so telling a full agent to wait
+	// for a human is stale the moment one has acted (-> agent.Service.SetClearArmed).
+	if e.clearArmed(project, name) {
+		return DirClearPending, nil
 	}
 	if tokens, full := e.contextFull(project, name); full {
 		return DirFull(tokens), nil
@@ -564,6 +574,10 @@ func (e *Engine) CmdNext(c registry.Caller, _ []string, out io.Writer) (int, err
 		fmt.Fprintln(out, DirRetired)
 		return 0, nil
 	}
+	if e.clearArmed(c.Project, c.Agent) {
+		fmt.Fprintln(out, DirClearPending)
+		return 0, nil
+	}
 	if tokens, full := e.contextFull(c.Project, c.Agent); full {
 		fmt.Fprintln(out, DirFull(tokens))
 		return 0, nil
@@ -612,6 +626,9 @@ func (e *Engine) claimNext(project, agent string) (string, bool, error) {
 	}
 	if _, full := e.contextFull(project, agent); full {
 		return "", false, nil // retired: a full worker is not handed new work
+	}
+	if e.clearArmed(project, agent) {
+		return "", false, nil // a clear is about to land: work claimed now would be cut in half by it
 	}
 	_ = e.SyncTasks(project) // best-effort refresh; cached set on failure
 	ps := e.store.For(project)

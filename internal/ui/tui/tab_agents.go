@@ -206,20 +206,35 @@ func (m *model) openDeleteChoice(id string) {
 	}
 }
 
-// openClearContextChoice confirms clearing a full agent's context. Confirmed rather than done on
-// the keystroke because it destroys everything the session remembers, including whatever the user
-// typed into that pane — the hub refuses mid-task, so what is left to lose here is the reasoning.
-func (m *model) openClearContextChoice(name string) {
-	cl := m.cl
+// openClearContextChoice confirms arming a context clear. Always confirmed, never offered as a
+// choice of when: what it destroys is everything the session remembers, including whatever the user
+// typed into that pane. WHEN it lands is the agent's answer, not a question — so the title states
+// it, read off the work in hand.
+func (m *model) openClearContextChoice(a api.AgentView) {
+	cl, name := m.cl, a.Name
 	m.choice = choiceModalState{
-		active: true, title: "clear " + name + "'s context?  (its session starts empty)",
+		active: true, title: "clear " + name + "'s context?  (" + clearLandsWhen(a) + ")",
 		options: []string{"cancel", "clear"}, values: []string{"cancel", "clear"},
 		apply: func(v string) tea.Cmd {
 			if v != "clear" {
 				return nil
 			}
-			return mutateThenRefresh(cl, func() error { return cl.ClearContext(name) })
+			return mutateThenRefresh(cl, func() error { return cl.SetClearArmed(name, true) })
 		},
+	}
+}
+
+// clearLandsWhen words api.ClearWaitsFor for the confirm: the rule says what the clear waits on,
+// this says it in a sentence.
+func clearLandsWhen(a api.AgentView) string {
+	held := api.ClearWaitsFor(a)
+	switch {
+	case held == "":
+		return "clears now — its session starts empty"
+	case a.Role == "reviewer":
+		return "clears when it delivers its verdict on " + held
+	default:
+		return "clears when it finishes " + held
 	}
 }
 
@@ -372,6 +387,12 @@ func (m model) agentItems() []metaItem {
 		{text: "context:   " + theme.ContextLine(a.ContextTokens)},
 		{text: pod, kind: "view", value: "pod"},
 	}
+	// The armed clear says WHEN it lands, not merely that it is set: the row's marker is the count,
+	// this is the sentence behind it — and "C cancels" because a toggle needs its way back shown.
+	if a.ClearArmed {
+		items = append(items, metaItem{text: stWarn.Render("clear:     " + clearGlyph + " armed — " +
+			clearLandsWhen(a) + dimStyle.Render("  ("+keyClearCtx+" cancels)"))})
+	}
 	for _, line := range clientLines(m.agentClients) { // same dial-in detail as `agent info`
 		items = append(items, metaItem{text: line})
 	}
@@ -480,6 +501,9 @@ const attentionGlyph = "!"
 // retiredGlyph marks an agent being wound down. Width-pinned like the others.
 const retiredGlyph = "⏹️"
 
+// clearGlyph marks an agent with a context clear armed, waiting for its next leaf boundary.
+const clearGlyph = "␡"
+
 func (m model) agentRows() []row {
 	var visible []api.AgentView
 	for _, a := range m.state.Agents {
@@ -525,6 +549,11 @@ func (m model) agentRows() []row {
 		// that agent is doing right now is the one thing the status column exists to say.
 		if a.Retired {
 			task += "  " + stDone.Render(retiredGlyph+" retired")
+		}
+		// An armed clear is a toggle, and a toggle you cannot see is worse than none: this is the
+		// only thing separating an agent about to lose its session from one carrying on.
+		if a.ClearArmed {
+			task += "  " + stWarn.Render(clearGlyph+" clear armed")
 		}
 		out = append(out, row{strings.Join([]string{
 			m.repoStyle(a.Project).Render(fmt.Sprintf("%-10.10s", a.Repo)),

@@ -169,10 +169,10 @@ func (c *HTTP) StopAgent(name string) error {
 	return c.post("/agent/stop", api.NameReq{Name: name})
 }
 
-// ClearContext sends /clear into the agent's live session and re-serves its directive — only
-// valid at a leaf boundary (idle, holding no task); the hub refuses otherwise.
-func (c *HTTP) ClearContext(name string) error {
-	return c.post("/agent/clear-context", api.NameReq{Name: name})
+// SetClearArmed arms a context clear (armed=true), which fires at the agent's next leaf boundary —
+// at once if it is already at one — or takes the arming back (false).
+func (c *HTTP) SetClearArmed(name string, armed bool) error {
+	return c.post("/agent/clear-context", api.NameReq{Name: name, Armed: armed})
 }
 
 // RebaseAgent rebases the agent's worktree onto the current base (reference) branch.

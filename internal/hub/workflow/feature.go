@@ -121,6 +121,14 @@ func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) 
 	e.closeCompletedAncestors(c.Project, st.Task, st.Container)
 	_ = ps.Log(c.Agent, "checkpoint", st.Task)
 	done := st.Task
+	// A checkpoint IS a leaf boundary, so an armed clear takes precedence over the next subtask:
+	// the agent goes idle holding the feature, and the clear fires before anything else is served.
+	if e.clearArmed(c.Project, c.Agent) {
+		_ = ps.SetState(store.AgentState{Agent: c.Agent, Container: st.Container, Branch: st.Container, Phase: "idle"})
+		e.deps.Notify()
+		fmt.Fprintln(out, ReplyCheckpointedClearing(done, st.Container))
+		return 0, nil
+	}
 	next, ok, err := e.advanceContainer(c.Project, c.Agent, st.Container)
 	if err != nil {
 		return 1, err

@@ -244,3 +244,31 @@ func TestAgentMemoryRoundTripAndMigrateIdempotent(t *testing.T) {
 		t.Errorf("after reopen, memory = %q, want 4g", got2.Memory)
 	}
 }
+
+// TestClearArmedSurvivesAReopen is what "durable" has to mean: the hub may restart between the
+// arming and the boundary it waits for, and an arming that evaporated would leave the user
+// believing it was set. Reopened from the same file, since that is what a restart does.
+func TestClearArmedSurvivesAReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.For("proj").PutAgent(Agent{Name: "eitri", Role: "worker", ClearArmed: true}); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	again, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer again.Close()
+	a, ok, err := again.For("proj").GetAgent("eitri")
+	if err != nil || !ok {
+		t.Fatalf("agent gone after a restart: ok=%v err=%v", ok, err)
+	}
+	if !a.ClearArmed {
+		t.Error("the arming must outlive the hub that took it, or it is a promise the user cannot see broken")
+	}
+}

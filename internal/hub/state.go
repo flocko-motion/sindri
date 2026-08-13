@@ -121,6 +121,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			Runtime: runtimes[i],
 			Task:    st.Task, Feature: st.Container, Branch: st.Branch, PR: pr, Workspace: a.Workspace,
 			Clients: clients[i], Container: container, Memory: a.Memory, Retired: a.Retired,
+			ClearArmed:    a.ClearArmed,
 			ContextTokens: tokens, ContextWindow: window,
 		})
 	}

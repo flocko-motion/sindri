@@ -33,7 +33,7 @@ type backend interface {
 	SetRetired(name string, retired bool) error
 	DeleteAgent(name string) error
 	StopAgent(name string) error
-	ClearContext(name string) error
+	SetClearArmed(name string, armed bool) error
 	RebaseAgent(name string) error
 	RebuildImage(name string, out io.Writer) error
 	AgentPane(name string, lines int) (string, error)

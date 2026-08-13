@@ -201,7 +201,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"cleared"}, h.agents.ClearContext(h.agentReq(r, req.Name), req.Name))
+		writeJSON(w, okMsg{"ok"}, h.agents.SetClearArmed(h.agentReq(r, req.Name), req.Name, req.Armed))
 	})
 	mux.HandleFunc("POST /agent/rebase", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq

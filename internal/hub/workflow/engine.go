@@ -78,6 +78,14 @@ type Deps interface {
 	ContextUsage(project, name string) (tokens, window int, ok bool)
 }
 
+// clearArmed reports whether a human has armed a context clear for this agent. It is handed no new
+// leaf work while that stands: the clear fires at the boundary it is already at, and a task claimed
+// in between would be cut in half by it (-> agent.Service.SetClearArmed).
+func (e *Engine) clearArmed(project, name string) bool {
+	a, ok, err := e.store.For(project).GetAgent(name)
+	return err == nil && ok && a.ClearArmed
+}
+
 // Engine is the workflow orchestrator: it owns the store and drives the lifecycle
 // steps, reaching the rest of the hub through Deps.
 type Engine struct {

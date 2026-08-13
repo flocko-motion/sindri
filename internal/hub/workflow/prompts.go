@@ -396,6 +396,20 @@ func DirFull(tokens int) string {
 		"You're retired from assignment until a human clears you; don't ask again, just wait.", tokens/1000)
 }
 
+// DirClearPending answers an agent whose armed clear is about to land: no work meanwhile, since a
+// task handed out now would be cut in half by it.
+const DirClearPending = "[hub] The user has armed a context clear for you: it fires here, at this " +
+	"boundary, and your session starts empty. Nothing is assigned until it lands. Don't ask again — " +
+	"you'll be told to carry on the moment your context is clear."
+
+// ReplyCheckpointedClearing answers a checkpoint made while a clear was armed: the feature stays
+// held, the next subtask waits for the empty session.
+func ReplyCheckpointedClearing(done, container string) string {
+	return fmt.Sprintf("Checkpointed %s. The user has armed a context clear, so %s's next subtask "+
+		"waits for it: your session is about to be cleared, and you'll be told to carry on after. "+
+		"Wait — don't ask for the next one.", done, container)
+}
+
 // --- features: a task with subtasks, worked on one branch ---
 
 // DirContainerClaimed starts an agent on a feature: subtasks one at a time on a single standing

@@ -137,7 +137,12 @@ var keymap = []binding{
 		}
 		return "retire"
 	}, scopeAgents},
-	{keyClearCtx, lbl("clear context"), scopeAgents},
+	{keyClearCtx, func(m model) string {
+		if a, ok := m.selAgent(); ok && a.ClearArmed {
+			return "cancel clear"
+		}
+		return "clear context"
+	}, scopeAgents},
 	{keyDelete, lbl("delete"), scopeAgents},
 	{keyScopeTog, func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scopeAgents},
 

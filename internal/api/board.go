@@ -36,6 +36,10 @@ type AgentView struct {
 	// holds. Carried beside Status rather than inside it, because it is true of a busy agent too —
 	// that is the whole point of setting it — and Status can only say one thing at a time.
 	Retired bool `json:"retired,omitempty"`
+	// ClearArmed: a human has armed a context clear, which fires at this agent's next leaf boundary
+	// — it is handed no new work in between. Beside Status like Retired, and for the same reason:
+	// it is true of a working agent too, and Status can only say one thing at a time.
+	ClearArmed bool `json:"clearArmed,omitempty"`
 }
 
 // RepoDocState is a repo's architecture-doc situation: the path in effect, and Advice ("" when fine).
@@ -103,6 +107,21 @@ func AgentNotUp(status string) bool {
 // AgentNotUp, which also covers one already in flight.
 func AgentNeedsLaunch(status string) bool {
 	return status == "down" || status == StatusUnknown
+}
+
+// ClearWaitsFor says what an armed context clear will fire AFTER: the id of the work in hand, or ""
+// when the agent is already at a leaf boundary and the clear lands at once. The rule, so both
+// front-ends state the same "when" — a leaf task defers it, a held feature does not (the clear
+// fires between subtasks), and a reviewer's open review does. It mirrors the hub's own boundary
+// test, which reads the same two facts from the store.
+func ClearWaitsFor(a AgentView) string {
+	if a.Task != "" {
+		return a.Task
+	}
+	if a.Role == "reviewer" && a.PR != "" {
+		return a.PR
+	}
+	return ""
 }
 
 // These satisfy commands.Board — the dashboard's badge counts.
