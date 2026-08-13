@@ -602,8 +602,8 @@ func (e *Engine) ContextFull(project, worker string) bool {
 	return full
 }
 
-// claimNext claims the highest-priority open LEAF task (or a marked container) for a worker in a
-// project. Returns (directive, true) on a claim, ("", false) when idle or retired (full).
+// claimNext hands a worker the best-rated unit in a project, task or whole package (-> nextUp).
+// Returns (directive, true) on a claim, ("", false) when idle or retired (full).
 func (e *Engine) claimNext(project, agent string) (string, bool, error) {
 	// Retired by a human, or by its own context filling: either way it is being wound down, and the
 	// gate is here rather than at the task queries so it holds however the work would have arrived.
@@ -614,24 +614,29 @@ func (e *Engine) claimNext(project, agent string) (string, bool, error) {
 		return "", false, nil // retired: a full worker is not handed new work
 	}
 	_ = e.SyncTasks(project) // best-effort refresh; cached set on failure
-	if d, ok, err := e.claimContainer(project, agent); ok || err != nil {
-		return d, ok, err
-	}
-	return e.claimLeaf(project, agent)
-}
-
-// claimLeaf claims the highest-priority open leaf for a worker, branching on it.
-func (e *Engine) claimLeaf(project, worker string) (string, bool, error) {
 	ps := e.store.For(project)
-	root := e.deps.ProjectRoot(project)
-	open, err := ps.OpenLeaves()
+	packages, err := ps.OpenContainers()
 	if err != nil {
 		return "", false, err
 	}
-	if len(open) == 0 {
+	leaves, err := ps.OpenLeaves()
+	if err != nil {
+		return "", false, err
+	}
+	t, isPackage, ok := nextUp(packages, leaves)
+	if !ok {
 		return "", false, nil
 	}
-	t := open[0]
+	if isPackage {
+		return e.claimContainer(project, agent, t)
+	}
+	return e.claimLeaf(project, agent, t)
+}
+
+// claimLeaf claims one standalone task for a worker, branching on it.
+func (e *Engine) claimLeaf(project, worker string, t store.Task) (string, bool, error) {
+	ps := e.store.For(project)
+	root := e.deps.ProjectRoot(project)
 	base, err := e.baseBranch(root)
 	if err != nil {
 		return "", false, err

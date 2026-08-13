@@ -39,17 +39,12 @@ func featureLanded(ps *store.ProjectStore, t store.Task) bool {
 	return false
 }
 
-// claimContainer assigns the highest-priority unheld package, starting its first open subtask —
-// or, with nothing left under it, holding it anyway so the agent finishes it on the SAME branch
-// (git.EnsureBranch), never a fresh one.
-func (e *Engine) claimContainer(project, worker string) (string, bool, error) {
+// claimContainer assigns one package to a worker, starting its first open subtask — or, with
+// nothing left under it, holding it anyway so the agent finishes it on the SAME branch
+// (git.EnsureBranch), never a fresh one. Which package is nextUp's (-> assign.go).
+func (e *Engine) claimContainer(project, worker string, c store.Task) (string, bool, error) {
 	ps := e.store.For(project)
 	root := e.deps.ProjectRoot(project)
-	containers, err := ps.OpenContainers()
-	if err != nil || len(containers) == 0 {
-		return "", false, err
-	}
-	c := containers[0]
 	children, err := ps.OpenSubtasks(c.ID)
 	if err != nil {
 		return "", false, err

@@ -41,9 +41,12 @@ func (e *Engine) ExplainNext(project, agent string) (api.NextExplain, error) {
 	for _, t := range packages {
 		claimable[t.ID] = api.ClaimablePackage
 	}
-	// The assigner takes a package before a leaf, so the pick follows that order rather than
-	// priority across both pools — a P2 package really is handed out before a P1 leaf.
-	pick := first(packages, leaves)
+	// Ranked by the assigner's own rule over the same two pools, so the answer to "what is next"
+	// cannot part company with what is actually handed out (-> nextUp).
+	var pick string
+	if t, _, ok := nextUp(packages, leaves); ok {
+		pick = t.ID
+	}
 
 	held := map[string]bool{}
 	roster, _ := ps.Roster()
@@ -122,16 +125,6 @@ func (e *Engine) agentBlocked(ps *store.ProjectStore, project, agent string) str
 	}
 	if tokens, full := e.contextFull(project, agent); full {
 		return fmt.Sprintf("retired: its context is ~%dk — `sindri agent clear-context %s`", tokens/1000, agent)
-	}
-	return ""
-}
-
-// first returns the id the assigner would take, packages before leaves (-> claimNext).
-func first(pools ...[]store.Task) string {
-	for _, p := range pools {
-		if len(p) > 0 {
-			return p[0].ID
-		}
 	}
 	return ""
 }
