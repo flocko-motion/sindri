@@ -83,7 +83,7 @@ func (h *Hub) registry() *registry.Registry {
 			}, Run: h.wf.CmdCheckpoint},
 		// A worker reads too: it holds a whole package for context, so that context must stay
 		// re-readable. Roles see different scopes (-> CmdTasks) but share one verb name.
-		registry.Command{Name: "task", Help: workflow.TaskHelp, Roles: []string{"planner", "coauthor", "worker"}, Run: h.wf.CmdTasks},
+		registry.Command{Name: "task", Help: workflow.TaskHelp, Roles: []string{"planner", "coauthor", "worker", "reviewer"}, Run: h.wf.CmdTasks},
 		registry.Command{Name: "create-task", Help: workflow.CreateTaskHelp, Roles: []string{"planner"}, Run: h.wf.CmdCreateTask},
 		registry.Command{Name: "edit-task", Help: workflow.EditTaskHelp, Roles: []string{"planner"}, Run: h.wf.CmdEditTask},
 		registry.Command{Name: "prioritise-task", Help: workflow.PrioritiseTaskHelp, Roles: []string{"planner"}, Run: h.wf.CmdPrioritiseTask},

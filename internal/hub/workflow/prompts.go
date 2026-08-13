@@ -12,8 +12,14 @@ import (
 	"strings"
 )
 
-// DefaultReviewPrompt seeds the project's central review-prompt.txt the first time.
-const DefaultReviewPrompt = "Review this PR for correctness, clarity, and fit to the task. Flag bugs, missing tests, and anything that should change."
+// DefaultReviewPrompt seeds review-prompt.txt. It names the task: "fit to the task" is unanswerable
+// by a reviewer that never reads one, and this prompt holds however the review was requested.
+const DefaultReviewPrompt = "Review this PR for correctness, clarity, and fit to the task. " +
+	"Read the task first — `sindri task <id>` for its description, labels, parent and children, and " +
+	"the comments on it, where a plan is often corrected while the body still describes the approach " +
+	"it replaced. `sindri task list` shows the backlog around it, so you can tell a genuine gap from a " +
+	"boundary another task owns. A task labelled `spec:<name>` is to be verified against every " +
+	"requirement and scenario in that spec. Flag bugs, missing tests, and anything that should change."
 
 // ReviewArchitecture builds the reviewer's "read the architecture doc" clause for the
 // project's configured doc path (arch is repo-relative; /workspace is the mounted root).
@@ -350,11 +356,20 @@ func MsgPlanAssignment(goal, taskID, arch, reading string) string {
 // reorients: this is freestyle collaboration in the shared checkout.
 const DirCoauthor = "You're a coauthor working directly with the user in the shared checkout at /workspace — there's no task queue here. Do what the user asks in this terminal; edit files, run the build/tests, and use git yourself. `sindri lint` runs the quality gate, `sindri log \"<note>\"` records a note. When the user goes quiet, wait for their next instruction."
 
-// DirReview is a reviewer's directive: the PR branch is checked out fresh in its
-// /workspace — read it, lint, then approve or reject.
-func DirReview(prID, task, arch string) string {
-	return fmt.Sprintf("Review %s (task %s): the PR branch is checked out fresh in /workspace — review it (or `sindri show %s`), run `sindri lint %s`, then `sindri approve %s` or `sindri reject %s \"<reason>\"`.%s",
-		prID, task, prID, prID, prID, prID, ReviewArchitecture(arch))
+// DirReview is a reviewer's directive, and it NAMES the task: access nobody mentions is access
+// nobody uses, so a reviewer told only a PR id judges the diff against the architecture doc alone.
+func DirReview(prID, taskID, title, arch string) string {
+	return fmt.Sprintf("Review %s — task %s: %s\nThe PR branch is checked out fresh in /workspace — review it (or `sindri show %s`), run `sindri lint %s`, then `sindri approve %s` or `sindri reject %s \"<reason>\"`.\n%s%s",
+		prID, taskID, dash(title), prID, prID, prID, prID, ReviewIntent(taskID), ReviewArchitecture(arch))
+}
+
+// ReviewIntent points the reviewer at what the diff was FOR — including the comments, where a plan
+// is corrected while the body still describes the approach it replaced.
+func ReviewIntent(taskID string) string {
+	return fmt.Sprintf("`sindri task %s` shows what the work was for — its description, labels, parent and children — "+
+		"and `sindri task list` the backlog around it. Read the COMMENTS on the task as well: a plan is often "+
+		"corrected there while the body still describes the superseded approach. A task labelled `spec:<name>` "+
+		"is to be verified against every requirement and scenario in that spec.\n", taskID)
 }
 
 // DirClaimed announces a freshly-claimed leaf task: the branch is ready in the

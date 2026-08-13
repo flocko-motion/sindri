@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/workflow"
 	"os"
 	"os/exec"
@@ -224,7 +225,7 @@ func TestStartupAdvice(t *testing.T) {
 // `sindri` directive = workflow.DirReview, and the injected = workflow.MsgReview) always tell the
 // reviewer to read the repo's ARCHITECTURE.md.
 func TestReviewInstructionsCarryArchitecture(t *testing.T) {
-	if !strings.Contains(workflow.DirReview("pr-1", "td-1", "ARCHITECTURE.md"), "ARCHITECTURE.md") {
+	if !strings.Contains(workflow.DirReview("pr-1", "td-1", "a task title", "ARCHITECTURE.md"), "ARCHITECTURE.md") {
 		t.Errorf("workflow.DirReview must tell the reviewer to read the architecture doc")
 	}
 	if !strings.Contains(workflow.MsgReview("pr-1", "req", "br", "base", "ARCHITECTURE.md", true), "ARCHITECTURE.md") {
@@ -376,5 +377,37 @@ func TestApprovePR(t *testing.T) {
 	// Unknown PR errors.
 	if err := h.wf.ApprovePR(testProject, "pr-nope"); err == nil {
 		t.Fatalf("approving an unknown PR should error")
+	}
+}
+
+// TestReviewerReadsButCannotAct is the case for letting a reviewer read the backlog: reading is
+// inert. The authority lives in the registry's role lists rather than in the handlers, so that is
+// what this asks — a reviewer gains the read verb and none that change the work it judges.
+func TestReviewerReadsButCannotAct(t *testing.T) {
+	h := newHub(t)
+	reg := h.registry()
+	available := func(role string) map[string]bool {
+		out := map[string]bool{}
+		for _, c := range reg.Available(registry.Caller{Project: testProject, Agent: "rune", Role: role}) {
+			out[c.Name] = true
+		}
+		return out
+	}
+	rev := available("reviewer")
+	if !rev["task"] {
+		t.Error("a reviewer cannot read the task it is reviewing")
+	}
+	// Reading is the whole grant. Anything that proposes, edits or re-orders the work under review
+	// would make the reviewer a party to what it is judging.
+	for _, verb := range []string{"create-task", "edit-task", "prioritise-task", "reopen-task", "next", "submit"} {
+		if rev[verb] {
+			t.Errorf("a reviewer must not have %q — reading grants no authority", verb)
+		}
+	}
+	// And the grant is additive: the roles that already read still do.
+	for _, role := range []string{"planner", "worker", "coauthor"} {
+		if !available(role)["task"] {
+			t.Errorf("%s lost the task verb", role)
+		}
 	}
 }

@@ -333,8 +333,10 @@ func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int,
 		if comment != "" {
 			appr += " — " + comment
 		}
-		fmt.Fprintf(out, "%s  [%s]  %s  priority=%s\napproval: %s\nparent:   %s\nchildren: %s\n\n%s\n",
-			t.ID, t.Status, t.Title, dash(t.Priority), dash(appr),
+		// Type and labels are shown because a reviewer reads this: a `spec:<name>` label is what
+		// tells it which spec the work must be verified against, and it lives nowhere else.
+		fmt.Fprintf(out, "%s  [%s]  %s  priority=%s\napproval: %s\ntype:     %s\nlabels:   %s\nparent:   %s\nchildren: %s\n\n%s\n",
+			t.ID, t.Status, t.Title, dash(t.Priority), dash(appr), dash(t.Type), dash(t.Labels),
 			dash(t.ParentID), dash(strings.Join(childIDs(tasks, t.ID), ", ")), dash(t.Description))
 		// The same thread the TUI pane and `task info` show: an agent that just filed a finding
 		// (-> the comment verb) has to be able to read it back here, or the verb is worse than none.
@@ -369,7 +371,10 @@ func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int,
 // its held task and every descendant — the unit the hub assigned it.
 func (e *Engine) visibleTasks(c registry.Caller, tasks []store.Task) (map[string]bool, bool, error) {
 	switch c.Role {
-	case "planner", "coauthor":
+	case "planner", "coauthor", "reviewer":
+		// A reviewer reads everything for the same reason a planner does: it judges work against
+		// intent, and intent lives in the task, its neighbours and their comments. Reading grants no
+		// authority — it still cannot claim, mutate, or act on anything but the PR it was handed.
 		return nil, false, nil
 	}
 	st, err := e.store.For(c.Project).GetState(c.Agent)

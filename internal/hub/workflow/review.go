@@ -47,6 +47,19 @@ func (e *Engine) ReviewPrompt(project string) (string, error) {
 	return DefaultReviewPrompt, nil
 }
 
+// taskTitle is a task's title for a directive, or "" when it cannot be read. Best-effort by design:
+// a title that will not load must not stop a review being handed out.
+func (e *Engine) taskTitle(project, id string) string {
+	if id == "" {
+		return ""
+	}
+	t, ok, err := e.store.For(project).GetTask(id)
+	if err != nil || !ok {
+		return ""
+	}
+	return t.Title
+}
+
 // RequestReview is the ONE review path: every trigger funnels here, so a review is always
 // the same thing. No reviewer running → recorded unassigned; requirement "" uses the default.
 func (e *Engine) RequestReview(project, prID, requirement string) error {
@@ -149,7 +162,7 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 			return "", false, err
 		}
 		if ok && pr.Status == "open" {
-			return DirReview(pr.ID, pr.Task, e.deps.ArchitectureDoc(project)), true, nil
+			return DirReview(pr.ID, pr.Task, e.taskTitle(project, pr.Task), e.deps.ArchitectureDoc(project)), true, nil
 		}
 		// Settled while it was reading: a verdict on it now decides nothing, so the hold is released
 		// rather than left to produce one.
@@ -170,7 +183,7 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 		return "", false, err
 	}
 	pr, _, _ := ps.GetPR(prID)
-	return DirReview(prID, pr.Task, e.deps.ArchitectureDoc(project)), true, nil
+	return DirReview(prID, pr.Task, e.taskTitle(project, pr.Task), e.deps.ArchitectureDoc(project)), true, nil
 }
 
 // releaseReviewers closes every open review of a PR and frees whoever held one, telling them the PR
