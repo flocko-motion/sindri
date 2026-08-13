@@ -15,12 +15,11 @@ const (
 
 // AgentNeedsUser reports an agent whose state resolves ONLY IF A HUMAN ACTS. That is the rule, and
 // these four words are what satisfies it today; a status added later is asked the same question.
-//
 // Idle never counts: waiting for work is normal, and idling beside claimable work is the hub's to
 // nudge. An api-error is the hub's to resend, and once resending fails the board says stalled.
 // Retired is checked ahead of the status because it REACHES the counting states — a retired agent
-// keeps running, so it fills up or stalls, and a marker would sit on it until it was deleted (the
-// stall nudge exempts it likewise: -> workflow.parkedByTheHub).
+// keeps running, so it fills up or stalls, and a marker would then never clear (the stall nudge
+// exempts it likewise: -> workflow.parkedByTheHub).
 func AgentNeedsUser(a AgentView) bool {
 	if a.Retired {
 		return false
@@ -44,9 +43,9 @@ func CountAgentsNeedingUser(agents []AgentView) (n int) {
 
 // PRNeedsUser reports a PR nothing but a human will move: approved (it waits on the merge, the one
 // hard gate), interim (no reviewer is ever asked for one -> workflow.needsReview, so it is the
-// user's from the moment it opens), or open with no reviewer alive anywhere. A rejected PR waits on
-// its author. Liveness is fleet-wide: an unassigned PR is ordinary while a reviewer runs, and only
-// the absence of every live one strands the queue; one up but stuck is the Agents marker's.
+// user's from the moment it opens), or open with no reviewer alive IN ITS OWN REPO. A rejected PR
+// waits on its author. An unassigned PR is ordinary while a reviewer runs there, since one picks it
+// up shortly; one up but stuck is the Agents marker's business.
 func PRNeedsUser(p PR, agents []AgentView) bool {
 	if p.Status == "approved" {
 		return true
@@ -54,13 +53,15 @@ func PRNeedsUser(p PR, agents []AgentView) bool {
 	if p.Status != "open" {
 		return false
 	}
-	return p.Kind == "interim" || !AnyLiveReviewer(agents)
+	return p.Kind == "interim" || !AnyLiveReviewer(agents, p.Project)
 }
 
-// AnyLiveReviewer reports whether a reviewer agent is up anywhere in the fleet.
-func AnyLiveReviewer(agents []AgentView) bool {
+// AnyLiveReviewer reports whether a reviewer agent is up in that project. Scoped because
+// assignment is (-> workflow.freeReviewer reads one project's roster), so a reviewer up in another
+// repo will never be handed this PR.
+func AnyLiveReviewer(agents []AgentView, project string) bool {
 	for _, a := range agents {
-		if a.Role == "reviewer" && !AgentNotUp(a.Status) {
+		if a.Project == project && a.Role == "reviewer" && !AgentNotUp(a.Status) {
 			return true
 		}
 	}

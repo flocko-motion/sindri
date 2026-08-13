@@ -83,14 +83,17 @@ func TestAttentionCountsWhatOnlyTheUserCanMove(t *testing.T) {
 			// Retired against a status that counts: it keeps running, so this is what winding one
 			// down actually looks like a few hours later.
 			{Name: "retired", Status: api.StatusFull, Retired: true},
+			// A healthy reviewer, in a DIFFERENT repo from the PRs below: it is handed none of
+			// them, so it leaves their queue exactly as stranded as an empty roster would.
+			{Project: "other", Name: "fili", Role: "reviewer", Status: "idle"},
 		},
-		// No reviewer on this roster at all, so the open PR is stranded; the approved one waits on
-		// the merge whatever is running, and the merged and rejected ones wait on nobody.
+		// No reviewer in project p, so its open PR is stranded; the approved one waits on the merge
+		// whatever is running, and the merged and rejected ones wait on nobody.
 		PRs: []api.PR{
-			{ID: "pr-open", Status: "open"},
-			{ID: "pr-approved", Status: "approved"},
-			{ID: "pr-merged", Status: "merged"},
-			{ID: "pr-rejected", Status: "rejected"},
+			{Project: "p", ID: "pr-open", Status: "open"},
+			{Project: "p", ID: "pr-approved", Status: "approved"},
+			{Project: "p", ID: "pr-merged", Status: "merged"},
+			{Project: "p", ID: "pr-rejected", Status: "rejected"},
 		},
 	}
 	want := map[string]int{"tasks": 1, "agents": 4, "prs": 2}

@@ -12,13 +12,15 @@ Three states qualify, each following from a gate the workflow already has:
 - **open and interim** — a mid-task contribution or a milestone is user-gated by
   design and no reviewer is ever asked for one, so it is the user's from the moment
   it opens; a milestone blocks its agent until the merge lands
-- **open with no reviewer alive** — no review is coming, so the user must review it
-  themselves or start a reviewer
+- **open with no reviewer alive in its repo** — no review is coming, so the user must
+  review it themselves or start a reviewer
 
-Whether a reviewer is alive SHALL be judged across the fleet rather than per PR: an
-open PR with nobody assigned is ordinary while a reviewer is running, since one picks
-it up shortly, and it is the absence of every live reviewer that strands the queue. A
-rejected PR SHALL NOT count — it waits on its author to resubmit.
+Whether a reviewer is alive SHALL be judged PER REPO, because review assignment is: a
+reviewer is chosen from its own project's roster, so one running elsewhere is never
+handed this PR and its being up says nothing about whether a review will arrive. Within
+that repo the question is liveness rather than assignment — an open PR with nobody
+assigned is ordinary while a reviewer runs there, since one picks it up shortly. A
+rejected PR SHALL NOT count: it waits on its author to resubmit.
 
 This count SHALL be the PRs section's attention count, derived in the exchange package
 and resolved by the hub with the others, so every interface renders one number rather
@@ -34,13 +36,18 @@ commands.
 
 #### Scenario: No reviewer to review it
 
-- **WHEN** a PR is open and no reviewer agent is running anywhere
+- **WHEN** a PR is open and no reviewer agent is running in its repo
 - **THEN** it is counted as waiting on the user, and the listing says a review will
   not arrive on its own
 
+#### Scenario: A reviewer in another repo
+
+- **WHEN** a PR is open in a repo with no reviewer, while another repo runs one
+- **THEN** it is still counted: a reviewer is only ever handed its own repo's PRs
+
 #### Scenario: A reviewer is running
 
-- **WHEN** a PR is open, unassigned, not interim, and a reviewer agent is running
+- **WHEN** a PR is open, unassigned, not interim, and a reviewer agent is running in its repo
 - **THEN** it is not counted: the queue is moving
 
 #### Scenario: An interim PR with reviewers running
