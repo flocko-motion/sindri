@@ -410,6 +410,15 @@ func (m model) prMetaItems() []metaItem {
 		metaItem{text: dash(d.Task.ID), kind: "task", value: d.Task.ID},
 		metaItem{text: d.Task.Title},
 	)
+	// The lifecycle before anything long: what happened to this PR, in a few lines. The full
+	// history stays at the bottom — it renders all 22 event types, which is what you want when
+	// something went wrong and noise when you are asking "where is this up to".
+	if life := api.PRLifecycle(d.History, d.Reviews); len(life) > 0 {
+		items = append(items, metaItem{text: ""}, metaItem{text: dimStyle.Render("── lifecycle ──")})
+		for _, ms := range life {
+			items = append(items, metaItem{text: lifecycleLine(ms)})
+		}
+	}
 	if d.PR.Feedback != "" {
 		items = append(items, metaItem{text: ""}, metaItem{text: dimStyle.Render("── feedback ──")}, metaItem{text: d.PR.Feedback})
 	}
@@ -428,6 +437,19 @@ func (m model) prMetaItems() []metaItem {
 		items = append(items, metaItem{text: fmt.Sprintf("%s  %-9s %s", dimStyle.Render(eventTime(e.TS)), e.Type, e.Payload)})
 	}
 	return items
+}
+
+// lifecycleLine renders one milestone: when, what, and who did it. The stamp is theme.Age's, as
+// the task detail uses, so a time reads the same wherever it appears.
+func lifecycleLine(ms api.PRMilestone) string {
+	line := fmt.Sprintf("%s  %-12s", dimStyle.Render(eventTime(ms.At)), ms.Event)
+	if ms.Who != "" {
+		line += " by " + ms.Who
+	}
+	if ms.Note != "" {
+		line += dimStyle.Render("  " + ms.Note)
+	}
+	return line
 }
 
 // wrapMeta wraps detail lines to the column width, so history, feedback and a long task/PR title
@@ -614,6 +636,12 @@ func (m model) prDetailLines() []string {
 		return []string{id, dimStyle.Render("(loading…)")}
 	}
 	ls := m.prIdentity(d)
+	if life := api.PRLifecycle(d.History, d.Reviews); len(life) > 0 {
+		ls = append(ls, "", "── lifecycle ──")
+		for _, ms := range life {
+			ls = append(ls, lifecycleLine(ms))
+		}
+	}
 	if d.PR.Feedback != "" {
 		ls = append(ls, "feedback: "+d.PR.Feedback)
 	}

@@ -507,6 +507,11 @@ func prInfoCmd() *cobra.Command {
 				}
 				status := api.StatusLabel(p.Status, api.ApprovalCount(d.Reviews))
 				fmt.Printf("%s  [%s]  %s  by %s\nbranch %s → %s\n", p.ID, status, kind, p.Agent, p.Branch, p.Base)
+				// The same few lines the TUI shows, from the same classification: where this PR
+				// has got to, before the diff a reader would otherwise scroll past to find out.
+				for _, ms := range api.PRLifecycle(d.History, d.Reviews) {
+					fmt.Println(lifecycleLine(ms))
+				}
 				if p.Feedback != "" {
 					fmt.Printf("feedback: %s\n", p.Feedback)
 				}
@@ -518,6 +523,19 @@ func prInfoCmd() *cobra.Command {
 			})
 		},
 	}
+}
+
+// lifecycleLine renders one milestone for a listing: when, what, who. Same fields as the TUI's,
+// worded for a terminal that is not redrawn.
+func lifecycleLine(ms api.PRMilestone) string {
+	line := fmt.Sprintf("%-6s %-12s", shortAge(ms.At), ms.Event)
+	if ms.Who != "" {
+		line += " by " + ms.Who
+	}
+	if ms.Note != "" {
+		line += "  " + ms.Note
+	}
+	return strings.TrimRight(line, " ")
 }
 
 func prMergeCmd() *cobra.Command {
