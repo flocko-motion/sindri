@@ -21,12 +21,18 @@ added — invisibly, because each looks plausible alone.
   the review records rather than the payload prose, and an unclassified event type fails the build:
   a default either way is wrong in silence.
 
-The remaining four subtasks (the "unapproved" label, PR row colours, task row colours, and the
+- **An unapproved task says so.** "pending" names a state; "unapproved" names the action that is
+  missing, which is what a reader wants when a task is sitting still. The stored value is unchanged —
+  every predicate branches on it — and the word now comes from `theme.ApprovalLabel`, beside
+  PriorityLabel and StateLabel, which is what stops the two front-ends drifting on it later.
+
+The remaining three subtasks (the "unapproved" label, PR row colours, task row colours, and the
 last-changed timestamp in the task detail) land on this same branch and extend this document.
 
 ## Impact
 
 - Specs: `hub` gains the classification and the projection; the colour rule follows with the
   subtasks that implement it.
-- Code so far: `internal/api/prlifecycle.go` (new), `internal/ui/tui/tab_prs.go`,
-  `internal/ui/cli/hub.go`, plus the fail-closed test in `internal/hub`.
+- Code so far: `internal/api/prlifecycle.go` (new), `internal/ui/theme/task.go`,
+  `internal/ui/tui/tab_prs.go`, `internal/ui/tui/tab_tasks.go`, `internal/ui/cli/hub.go`,
+  `internal/ui/cli/task.go`, plus the fail-closed test in `internal/hub`.

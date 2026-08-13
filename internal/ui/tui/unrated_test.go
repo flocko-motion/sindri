@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
 // TestUnratedReadsLikeUngated: no priority means no assignment, exactly as an open approval gate
@@ -62,8 +63,8 @@ func TestTheGateStillWinsOverUnrated(t *testing.T) {
 	m.reclamp()
 
 	txt := taskRowText(m, "td-prop")
-	if !strings.Contains(txt, "pending") || strings.Contains(txt, "unrated") {
-		t.Errorf("an ungated proposal reads as pending: %q", txt)
+	if gate := theme.ApprovalLabel("pending"); !strings.Contains(txt, gate) || strings.Contains(txt, "unrated") {
+		t.Errorf("an ungated proposal should read %q, not unrated: %q", gate, txt)
 	}
 }
 

@@ -98,6 +98,17 @@ func StateLabel(s string) string {
 	}
 }
 
+// ApprovalLabel is the word an approval state is shown as. "pending" names a state; "unapproved"
+// names the ACTION that is missing, which is what a reader wants when a task is sitting still and
+// they are working out why. The stored value is untouched — every predicate branches on it — so the
+// change is here, where presentation lives, and both front-ends therefore say the same word.
+func ApprovalLabel(a string) string {
+	if a == "pending" {
+		return "unapproved"
+	}
+	return a // "", "approved", "rejected" — each already says what it is
+}
+
 // FormatClients is shared by CLI `agent info` and the TUI detail view, so both read alike.
 func FormatClients(cs []api.ClientView) string {
 	if len(cs) == 0 {

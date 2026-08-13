@@ -90,9 +90,9 @@ func (m model) taskRows() []row {
 		state := theme.StateLabel(tr.Status)
 		switch approval[tr.ID] { // the approval gate overrides both colour and state word
 		case "pending":
-			sc, state = stWarn, "pending"
+			sc, state = stWarn, theme.ApprovalLabel("pending")
 		case "rejected":
-			sc, state = stDone, "rejected"
+			sc, state = stDone, theme.ApprovalLabel("rejected")
 		default:
 			// Unrated reads like ungated: both mean no worker can be given this, and the row that
 			// showed a plain "open" claimed otherwise. A rated ancestor releases the whole tree, so
@@ -297,7 +297,7 @@ func (m model) taskItemsFor(t api.Task, desc string, comments []api.Comment) []m
 	}
 	items = append(items, metaItem{text: "created:  " + created})
 	if t.Approval != "" { // a planner proposal under the approval gate
-		line := "approval: " + t.Approval
+		line := "approval: " + theme.ApprovalLabel(t.Approval)
 		if t.ApprovalComment != "" {
 			line += " — " + t.ApprovalComment
 		}

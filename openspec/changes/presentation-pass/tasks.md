@@ -11,7 +11,11 @@
 
 ## 2. Label an unapproved task "unapproved", not "pending"
 
-- [ ] 2.1
+- [x] 2.1 `theme.ApprovalLabel` supplies the word, beside PriorityLabel and StateLabel — approval
+      was the one gate missed when presentation moved out of the API.
+- [x] 2.2 Applied in the CLI's `task list` and `task info`, and in the TUI's rows and detail.
+- [x] 2.3 The stored value is untouched: every predicate still branches on "pending".
+- [x] 2.4 The row tests assert the shared label rather than a literal, so the word cannot drift.
 
 ## 3. Colour PR rows on the same rule as tasks and agents
 

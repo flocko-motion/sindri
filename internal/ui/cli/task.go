@@ -384,7 +384,7 @@ func scopeExtent(scope api.PriorityScope, c api.PriorityCascade) string {
 // as plain "open" claimed to be available when no worker could see it.
 func taskState(t api.Task) string {
 	if t.Approval == "pending" || t.Approval == "rejected" {
-		return t.Approval
+		return theme.ApprovalLabel(t.Approval)
 	}
 	return t.Status
 }
@@ -465,7 +465,7 @@ func taskInfoCmd() *cobra.Command {
 				// chooses layout, not which facts exist, or it answers a different question.
 				fmt.Printf("id:       %s\ntitle:    %s\nstatus:   %s\ntype:     %s\npriority: %s\nparent:   %s\napproval: %s\nlabels:   %s\nurl:      %s\n",
 					t.ID, t.Title, t.Status, dash(t.Type), theme.PriorityLabel(t.Priority),
-					dash(t.ParentID), dash(t.Approval), dash(t.Labels), dash(t.URL))
+					dash(t.ParentID), dash(theme.ApprovalLabel(t.Approval)), dash(t.Labels), dash(t.URL))
 				if stamp := theme.Stamp(t.CreatedAt); stamp == theme.Unknown {
 					fmt.Printf("created:  %s\n", stamp)
 				} else { // exact, where the list rounds
