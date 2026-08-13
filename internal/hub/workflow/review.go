@@ -248,8 +248,14 @@ func (e *Engine) reviewerHolding(project, prID string) (int64, string) {
 	return 0, ""
 }
 
-// freeReviewer returns a running reviewer that is holding no review. A roster read failure is
-// returned rather than disguised as "no reviewer", which would silently drop the request.
+// reviewerAssignable reports whether a roster row may be handed a review, from the row alone. An
+// armed clear disqualifies one: PR after PR would defer it for ever, and an assignment slipping in
+// while the tick fires the clear would clear a reviewer mid-review. (Retirement: -> idleReviewer.)
+func reviewerAssignable(a store.Agent) bool {
+	return a.Role == "reviewer" && !a.ClearArmed
+}
+
+// freeReviewer returns a running reviewer holding no review; a roster failure is returned, not hidden.
 func (e *Engine) freeReviewer(project string) (string, error) {
 	ps := e.store.For(project)
 	roster, err := ps.Roster()
@@ -257,7 +263,7 @@ func (e *Engine) freeReviewer(project string) (string, error) {
 		return "", fmt.Errorf("load roster for %s: %w", project, err)
 	}
 	for _, a := range roster {
-		if a.Role != "reviewer" || !container.Running(e.deps.Container(project, a.Name)) || !e.deps.SessionAlive(project, a.Name) {
+		if !reviewerAssignable(a) || !container.Running(e.deps.Container(project, a.Name)) || !e.deps.SessionAlive(project, a.Name) {
 			continue
 		}
 		held, err := ps.ReviewingPR(a.Name)

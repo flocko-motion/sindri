@@ -147,6 +147,11 @@ func TestArmingAtABoundaryNeedsALivePod(t *testing.T) {
 	if !strings.Contains(err.Error(), "not running") {
 		t.Errorf("error = %q, want it to name the missing pod", err.Error())
 	}
+	// And the flag is read back, not assumed: an error the user reads as "nothing happened" must
+	// not leave the agent durably armed — armed, it would also be withheld from work by the gate.
+	if armedFlag(t, ps, "eitri") {
+		t.Error("a failed immediate clear must leave no arming behind it")
+	}
 }
 
 // TestFireArmedClearsPassesOverAgentsStillWorking: the sweep is what lands an arming set minutes

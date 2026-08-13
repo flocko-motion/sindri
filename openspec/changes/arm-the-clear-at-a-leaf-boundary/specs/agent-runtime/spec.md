@@ -21,7 +21,10 @@ coauthor hold neither, so they are always at one.
 
 An armed agent SHALL be handed no new leaf work until the clear lands, and SHALL be
 told that is why — otherwise the clear would arrive into work served in the meantime,
-meeting the very boundary rule it was waiting for. An armed clear SHALL take
+meeting the very boundary rule it was waiting for. This SHALL hold on every path that
+assigns work, including each way a review is handed out: one gated and one not leaves
+the arming deferrable for ever by a steady queue, and leaves an assignment able to land
+between the boundary check and the clear. An armed clear SHALL take
 precedence over the notice that a full agent is retired from assignment: that notice
 asks for a human to act, and one has.
 
@@ -55,6 +58,17 @@ while a full-screen interface SHALL confirm because the keystroke is one press.
 
 - **WHEN** the hub restarts between the arming and the boundary
 - **THEN** the clear is still armed and still fires at the next boundary
+
+#### Scenario: An armed reviewer is passed over
+
+- **WHEN** a PR needs a reviewer and the only free one has a clear armed
+- **THEN** it is not assigned that review, on the request path as on the sweep
+
+#### Scenario: A clear that cannot be performed leaves nothing behind
+
+- **WHEN** a human clears an agent at a boundary whose session cannot be reached
+- **THEN** they are told it failed and no arming is recorded, so the agent is not
+  silently withheld from work by a clear that never happened
 
 #### Scenario: Taking the arming back
 

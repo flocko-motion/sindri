@@ -19,9 +19,13 @@ The refusal is right. What is wrong is that it is a dead end rather than a wait.
   clear fires between subtasks, and the next subtask's directive names the feature afresh. Planners
   and coauthors hold neither, so they are always at one.
 - An armed agent is handed no new leaf work — through `claimNext`, through the feature's own
-  advance, and through the reviewer assignment — and is told why (`DirClearPending`). Without that
-  gate the clear would land into work served in the meantime, meeting the boundary rule it was
-  waiting for.
+  advance, and through BOTH reviewer-assignment paths (`freeReviewer` on the request side,
+  `idleReviewer` on the sweep) — and is told why (`DirClearPending`). Without that gate the clear
+  would land into work served in the meantime, meeting the boundary rule it was waiting for.
+- Gating `freeReviewer` is also what closes a race: it runs on the request goroutine while the clear
+  fires on the hub's tick, with no lock between them, so an assignment could otherwise land between
+  the fire's boundary check and its `/clear`. Excluding an armed reviewer from selection removes the
+  assignment that would interleave; a re-check alone cannot.
 - The arming outranks the fullness notice. `DirFull` says "retired from assignment until a human
   clears you"; once one has, repeating it would park the arming behind a state that never advances.
 - The arming is durable (an `agents.clear_armed` column) — the hub may restart between the arming
@@ -43,5 +47,12 @@ The refusal is right. What is wrong is that it is a dead end rather than a wait.
   (the tick), `internal/api` (the flag and the "when" rule), `internal/client`, and both front-ends.
 - `client.ClearContext` becomes `client.SetClearArmed(name, armed)` — one method for a toggle, so
   the CLI's `--cancel` and the TUI's second press are the same operation.
-- No path clears an agent mid-task: the fire re-checks the boundary itself, so the sweep and the
-  arming cannot disagree even if the agent picked something up between them.
+- No path clears an agent mid-task: the fire re-checks the boundary, and both assignment paths
+  exclude an armed agent, so there is no assignment left to interleave with the check.
+- An immediate clear that fails takes its arming back with it: the call said "clears now", so an
+  error the user reads as "nothing happened" must not leave durable state behind — or the agent
+  would sit armed, marked, and withheld from work. A failure in the sweep is the opposite case: that
+  arming was set deliberately and stands, to try again at the next boundary.
+- The arming is spent before the injection, so an inject that fails loses it. The alternative — an
+  arming that survives a failed fire — would try again at every boundary, which is worse; the log
+  line is the trace.

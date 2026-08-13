@@ -9,7 +9,8 @@
 
 ## 2. Hold the boundary open
 
-- [x] 2.1 `claimNext`, the feature's advance and the reviewer assignment hand an armed agent nothing.
+- [x] 2.1 `claimNext`, the feature's advance and BOTH reviewer paths (`freeReviewer`, `idleReviewer`)
+      hand an armed agent nothing — the request side as well as the sweep.
 - [x] 2.2 `DirClearPending` tells it why, so it does not read an empty queue as "nothing to do".
 - [x] 2.3 The arming outranks the fullness notice, which asks for the very act already taken.
 - [x] 2.4 A checkpoint with a clear armed holds the next subtask rather than advancing onto it.
@@ -32,4 +33,6 @@
 - [x] 5.3 The gate withholds work, and gives it back the moment the arming is taken away.
 - [x] 5.4 The armed answer outranks the fullness answer.
 - [x] 5.5 The sweep passes over an agent still working.
-- [x] 5.6 The confirm states when for each state; the second press asks nothing; both markers show.
+- [x] 5.6 An armed reviewer is not assignable, and is again once disarmed.
+- [x] 5.7 A failed immediate clear leaves no arming behind — the flag is read back, not assumed.
+- [x] 5.8 The confirm states when for each state; the second press asks nothing; both markers show.

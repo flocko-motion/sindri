@@ -86,6 +86,28 @@ func TestArmedClearOutranksFullness(t *testing.T) {
 	}
 }
 
+// TestAnArmedReviewerIsNotHandedThenextPR closes the door the sweep's gate left open: reviews are
+// handed out by freeReviewer on the request path (RequestReview, whenever a worker submits), not
+// only by the tick. Ungated there, a busy repo defers the arming for ever, and an assignment can
+// land between the fire's boundary check and the /clear — clearing a reviewer mid-review.
+//
+// The row half of the rule is what is asserted: liveness needs a live container runtime, so
+// freeReviewer itself cannot be driven here without one.
+func TestAnArmedReviewerIsNotHandedTheNextPR(t *testing.T) {
+	armed := store.Agent{Name: "fili", Role: "reviewer", ClearArmed: true}
+	if reviewerAssignable(armed) {
+		t.Error("an armed reviewer must not be a candidate — the clear is waiting for it to be free")
+	}
+	free := armed
+	free.ClearArmed = false
+	if !reviewerAssignable(free) {
+		t.Error("disarmed, the same reviewer takes reviews again")
+	}
+	if reviewerAssignable(store.Agent{Name: "dvalin", Role: "worker"}) {
+		t.Error("only reviewers review")
+	}
+}
+
 // TestTheClearLandsBeforeTheNextSubtask: mid-subtask the agent carries on and the clear waits (no
 // path clears an agent mid-task); between subtasks — where a checkpoint leaves it — the clear takes
 // precedence over the subtask that would otherwise be served next.
