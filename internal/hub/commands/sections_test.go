@@ -36,6 +36,7 @@ func (fakeBoard) RepoCount() int                 { return 5 }
 func (fakeBoard) ChatMemberCount() int           { return 4 }
 func (fakeBoard) TasksAwaitingVerdictCount() int { return 2 }
 func (fakeBoard) AgentsNeedingUserCount() int    { return 1 }
+func (fakeBoard) PRsNeedingUserCount() int       { return 3 }
 
 // TestResolvedReadsEveryCount: Resolved is what actually crosses the wire — the
 // registry's Count funcs can't — so each section's Key and Title must survive and
@@ -46,9 +47,9 @@ func TestResolvedReadsEveryCount(t *testing.T) {
 		t.Fatalf("got %d resolved sections, want %d", len(got), len(Sections))
 	}
 	want := map[string]int{"tasks": 3, "agents": 2, "prs": 1, "repos": 5, "chat": 4}
-	// A section with no Attention recipe resolves to 0 rather than panicking on a nil call — that is
-	// what a section holding nothing a human can wait on looks like.
-	wantAttention := map[string]int{"tasks": 2, "agents": 1}
+	// Repos and Meeting have no Attention recipe: they resolve to 0 rather than panicking on a nil
+	// call, which is what a section holding nothing a human can wait on looks like.
+	wantAttention := map[string]int{"tasks": 2, "agents": 1, "prs": 3}
 	for i, s := range got {
 		if s.Key != Sections[i].Key || s.Title != Sections[i].Title {
 			t.Errorf("resolved[%d] = %+v, want key/title from Sections[%d] = %+v", i, s, i, Sections[i])
@@ -62,9 +63,10 @@ func TestResolvedReadsEveryCount(t *testing.T) {
 	}
 }
 
-// TestAttentionCountsWhatOnlyTheUserCanMove pins both markers against a real board: the Tasks
-// section counts what the approval gate holds, the Agents section counts agents whose state needs
-// a human. A plain idle agent is in neither — it is waiting for work, which is not a fault.
+// TestAttentionCountsWhatOnlyTheUserCanMove pins all three markers against a real board: the Tasks
+// section counts what the approval gate holds, Agents counts agents whose state needs a human, and
+// PRs counts what waits on a merge or on a review nobody is left to give. A plain idle agent is in
+// none of them — it is waiting for work, which is not a fault.
 func TestAttentionCountsWhatOnlyTheUserCanMove(t *testing.T) {
 	b := api.BoardState{
 		Tasks: []api.Task{
@@ -82,8 +84,16 @@ func TestAttentionCountsWhatOnlyTheUserCanMove(t *testing.T) {
 			// down actually looks like a few hours later.
 			{Name: "retired", Status: api.StatusFull, Retired: true},
 		},
+		// No reviewer on this roster at all, so the open PR is stranded; the approved one waits on
+		// the merge whatever is running, and the merged and rejected ones wait on nobody.
+		PRs: []api.PR{
+			{ID: "pr-open", Status: "open"},
+			{ID: "pr-approved", Status: "approved"},
+			{ID: "pr-merged", Status: "merged"},
+			{ID: "pr-rejected", Status: "rejected"},
+		},
 	}
-	want := map[string]int{"tasks": 1, "agents": 4}
+	want := map[string]int{"tasks": 1, "agents": 4, "prs": 2}
 	for _, s := range Resolved(b) {
 		if s.Attention != want[s.Key] {
 			t.Errorf("%s attention = %d, want %d", s.Key, s.Attention, want[s.Key])

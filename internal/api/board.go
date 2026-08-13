@@ -130,6 +130,11 @@ func (b BoardState) TasksAwaitingVerdictCount() int { return CountAwaitingVerdic
 // human acts (-> AgentNeedsUser).
 func (b BoardState) AgentsNeedingUserCount() int { return CountAgentsNeedingUser(b.Agents) }
 
+// PRsNeedingUserCount is the PRs section's attention count: PRs waiting on a merge, or on a review
+// no live reviewer will give (-> PRNeedsUser). It reads the roster too, since who is running is
+// half the question.
+func (b BoardState) PRsNeedingUserCount() int { return CountPRsNeedingUser(b.PRs, b.Agents) }
+
 // SectionAttention is how many rows of the named section wait on the user, read off the sections
 // the hub resolved. A front-end asks by key so every tab is drawn by the same line of code; a
 // board with no sections on it (an older hub, a hand-built snapshot) marks nothing rather than

@@ -364,6 +364,13 @@ func prListCmd() *cobra.Command {
 					return err
 				}
 				prs := api.FilterPRs(f, all)
+				// The roster, because half of "waiting on you" is whether a reviewer runs in that
+				// PR's repo (-> api.PRNeedsUser). A second round trip and the cheapest available:
+				// /state is how a front-end learns who is running, off the hub's existing snapshot.
+				st, err := b.State()
+				if err != nil {
+					return err
+				}
 				for _, p := range prs {
 					status := api.StatusLabel(p.Status, p.Approvals)
 					if p.Kind == "interim" { // ◇ = mid-task contribution (vs a final, task-done PR)
@@ -371,13 +378,23 @@ func prListCmd() *cobra.Command {
 					}
 					// Who is reviewing it, alongside who wrote it — the same column the PRs tab shows,
 					// from the same field, so the two front-ends cannot answer differently.
-					fmt.Printf("%-14s %-13s %4s  %-10s %-10s %s\n",
+					line := fmt.Sprintf("%-14s %-13s %4s  %-10s %-10s %s",
 						p.ID, status, shortAge(p.CreatedAt), p.Agent, dash(p.Reviewer), p.Branch)
+					if why := prWaitReason(p, st.Agents); why != "" {
+						line += "  ! " + why
+					}
+					fmt.Println(line)
 				}
 				if n := len(all) - len(prs); n > 0 {
 					fmt.Fprintf(os.Stderr, "(filter %s — %d of %d PR(s) shown)\n", f, len(prs), len(all))
 				} else if len(prs) == 0 {
 					fmt.Fprintln(os.Stderr, "no PRs")
+				}
+				// Last, where a closing line is read: the same set the TUI counts on the PRs handle.
+				// Over every PR, not the filtered rows — a PR waits on you whether or not this
+				// listing happens to show it, exactly as `task list` reports gated work.
+				if s := prNeedsYouSummary(all, st.Agents); s != "" {
+					fmt.Fprintln(os.Stderr, "\n"+s)
 				}
 				return nil
 			})
@@ -389,6 +406,58 @@ func prListCmd() *cobra.Command {
 		"which PRs to list: "+api.PRFilterNames()+" (active = open, plus anything closed within "+
 			api.ActiveWindow.String()+")")
 	return c
+}
+
+// prWaitReason says why a PR waits on the user, "" when it does not. The three cases have different
+// remedies, and starting a reviewer — the obvious move — clears only one of them.
+func prWaitReason(p api.PR, agents []api.AgentView) string {
+	if !api.PRNeedsUser(p, agents) {
+		return ""
+	}
+	switch {
+	case p.Status == "approved":
+		return "waiting on your merge"
+	case p.Kind == "interim":
+		return "user-gated: no reviewer is asked for an interim PR"
+	default:
+		return "no reviewer is running"
+	}
+}
+
+// prNeedsYouSummary names the PRs nothing but the user will move, "" when none. An approved PR
+// looks finished and a stranded one looks busy; neither row says the queue has stopped.
+func prNeedsYouSummary(prs []api.PR, agents []api.AgentView) string {
+	var merge, interim, unreviewed []string
+	for _, p := range prs {
+		switch {
+		case !api.PRNeedsUser(p, agents):
+		case p.Status == "approved":
+			merge = append(merge, p.ID)
+		case p.Kind == "interim":
+			interim = append(interim, p.ID)
+		default:
+			unreviewed = append(unreviewed, p.ID)
+		}
+	}
+	var parts []string
+	if len(merge) > 0 {
+		parts = append(parts, fmt.Sprintf("%s approved and unmerged — `sindri pr merge <id>`",
+			strings.Join(merge, ", ")))
+	}
+	if len(interim) > 0 {
+		parts = append(parts, fmt.Sprintf("%s user-gated, so no reviewer will look — `sindri pr approve <id>`",
+			strings.Join(interim, ", ")))
+	}
+	if len(unreviewed) > 0 {
+		parts = append(parts, fmt.Sprintf("%s waiting on a review with no reviewer running — review it "+
+			"yourself (`sindri pr approve <id>`) or start one (`sindri agent new --role reviewer`)",
+			strings.Join(unreviewed, ", ")))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d PR(s) need you: %s.",
+		len(merge)+len(interim)+len(unreviewed), strings.Join(parts, "; "))
 }
 
 // reviewBadge renders one review verdict: its state, verdict, author and when, marking a

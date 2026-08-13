@@ -54,3 +54,69 @@ func TestCountAgentsNeedingUserCountsAgentsNotReasons(t *testing.T) {
 		t.Errorf("CountAgentsNeedingUser = %d, want 2", got)
 	}
 }
+
+// TestPRNeedsUserCoversEveryWaitingState: an approved PR waits on the merge, which no agent may
+// perform; an open one with no reviewer alive waits on a review that is never coming; an interim
+// one is user-gated by design, so no reviewer is ever asked for it. All three look like ordinary
+// rows, which is why they are counted rather than left to be noticed.
+func TestPRNeedsUserCoversEveryWaitingState(t *testing.T) {
+	live := []AgentView{{Name: "dvalin", Role: "reviewer", Status: "idle"}}
+	none := []AgentView{{Name: "dvalin", Role: "worker", Status: "working"}}
+	cases := []struct {
+		name   string
+		pr     PR
+		agents []AgentView
+		want   bool
+	}{
+		{"approved waits on the merge", PR{Status: "approved"}, live, true},
+		{"approved waits even with nobody about", PR{Status: "approved"}, none, true},
+		{"open with no reviewer is stranded", PR{Status: "open"}, none, true},
+		{"open with a reviewer running is not", PR{Status: "open"}, live, false},
+		{"open, unassigned, reviewer running: it picks one up", PR{Status: "open", Reviewer: ""}, live, false},
+		{"an interim PR is the user's from the start", PR{Status: "open", Kind: "interim"}, live, true},
+		{"a milestone blocks its agent until you merge", PR{Status: "open", Kind: "interim"}, none, true},
+		{"a rejected interim waits on its author", PR{Status: "rejected", Kind: "interim"}, live, false},
+		{"rejected waits on its author", PR{Status: "rejected"}, none, false},
+		{"merged waits on nobody", PR{Status: "merged"}, none, false},
+		{"scrapped waits on nobody", PR{Status: "scrapped"}, none, false},
+	}
+	for _, c := range cases {
+		if got := PRNeedsUser(c.pr, c.agents); got != c.want {
+			t.Errorf("%s: PRNeedsUser = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestALiveReviewerIsOneWhosePodIsUp: the words that mean "not running" are AgentNotUp's list, so a
+// reviewer that has never been started strands the queue and one merely idle does not.
+func TestALiveReviewerIsOneWhosePodIsUp(t *testing.T) {
+	for _, s := range []string{"idle", "working", "reviewing"} {
+		if !AnyLiveReviewer([]AgentView{{Role: "reviewer", Status: s}}) {
+			t.Errorf("a reviewer reading %q is running and will pick up reviews", s)
+		}
+	}
+	for _, s := range []string{"down", StatusUnknown, "launching", "stopping", ""} {
+		if AnyLiveReviewer([]AgentView{{Role: "reviewer", Status: s}}) {
+			t.Errorf("a reviewer reading %q has no pod to review with", s)
+		}
+	}
+	if AnyLiveReviewer([]AgentView{{Role: "worker", Status: "working"}, {Role: "planner", Status: "idle"}}) {
+		t.Error("no reviewer on the roster means no review is coming, whatever else is running")
+	}
+}
+
+// TestCountPRsNeedingUserCountsPRsNotReasons: the count is of things to attend to, and one PR is
+// one of those however many ways it qualifies.
+func TestCountPRsNeedingUserCountsPRsNotReasons(t *testing.T) {
+	prs := []PR{
+		{ID: "a", Status: "approved"}, {ID: "b", Status: "open"},
+		{ID: "c", Status: "merged"}, {ID: "d", Status: "open", Kind: "interim"},
+	}
+	if got := CountPRsNeedingUser(prs, nil); got != 3 {
+		t.Errorf("with no reviewer alive: %d, want 3 (approved, open, interim)", got)
+	}
+	live := []AgentView{{Role: "reviewer", Status: "idle"}}
+	if got := CountPRsNeedingUser(prs, live); got != 2 {
+		t.Errorf("with a reviewer running: %d, want 2 (the approved one and the interim one)", got)
+	}
+}

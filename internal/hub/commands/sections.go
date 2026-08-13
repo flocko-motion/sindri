@@ -21,6 +21,7 @@ type Board interface {
 	ChatMemberCount() int
 	TasksAwaitingVerdictCount() int
 	AgentsNeedingUserCount() int
+	PRsNeedingUserCount() int
 }
 
 // Section is one dashboard tab: a key, a title, its actionable badge count read from the board,
@@ -52,7 +53,13 @@ var Sections = []Section{
 		// progress, and none of them clears without a human.
 		Attention: func(b Board) int { return b.AgentsNeedingUserCount() },
 	},
-	{Key: "prs", Title: "PRs", Count: func(b Board) int { return b.OpenPRCount() }},
+	{
+		Key: "prs", Title: "PRs",
+		Count: func(b Board) int { return b.OpenPRCount() },
+		// Approved and unmerged, or open with no reviewer alive to look at it: either way the
+		// work is finished or stopped, and the next move is the user's.
+		Attention: func(b Board) int { return b.PRsNeedingUserCount() },
+	},
 	{Key: "repos", Title: "Repos", Count: func(b Board) int { return b.RepoCount() }},
 	{Key: "chat", Title: "Meeting", Count: func(b Board) int { return b.ChatMemberCount() }},
 }

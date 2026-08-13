@@ -8,20 +8,20 @@ import (
 )
 
 // TestTheAttentionMarkerRidesOnEveryHandle: what waits on the user is drawn beside the tab that
-// holds it, from the counts the hub resolved. Both markers come out of one loop over the sections,
-// which is the point — a third one is a line in the hub's registry, not a third case in this view.
+// holds it, from the counts the hub resolved. All three markers come out of one loop over the
+// sections, which is the point — a fourth is a line in the hub's registry, not a case in this view.
 func TestTheAttentionMarkerRidesOnEveryHandle(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.w, m.h = 120, 40
 	m.state = api.BoardState{Sections: []api.Section{
 		{Key: "tasks", Title: "Tasks", Count: 3, Attention: 2},
 		{Key: "agents", Title: "Agents", Count: 5, Attention: 1},
-		{Key: "prs", Title: "PRs", Count: 1},
+		{Key: "prs", Title: "PRs", Count: 4, Attention: 3},
 	}}
 	m.reclamp()
 
 	view := m.View()
-	for _, want := range []string{"2" + attentionGlyph, "1" + attentionGlyph} {
+	for _, want := range []string{"2" + attentionGlyph, "1" + attentionGlyph, "3" + attentionGlyph} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the header should show %q:\n%s", want, firstLine(view))
 		}
