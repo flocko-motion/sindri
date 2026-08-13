@@ -38,6 +38,51 @@ func TestConventionalCommit(t *testing.T) {
 	}
 }
 
+// TestConventionalCommitNormalizesDesc pins the commitlint rules real agent prose and task
+// titles actually trip: a trailing full stop, sentence-case capitalization, and a summary an
+// agent already dressed up in the format sindri is about to apply anyway.
+func TestConventionalCommitNormalizesDesc(t *testing.T) {
+	for _, tc := range []struct {
+		name, taskType, taskID, desc, want string
+	}{
+		{"trailing full stop dropped", "bug", "sd-1", "Fixed the retry storm.", "fix(sd-1): fixed the retry storm"},
+		{"already-prefixed summary collapses", "bug", "sd-1", "fix: retry storm", "fix(sd-1): retry storm"},
+		{"a mismatched prefix is replaced, not kept", "bug", "sd-1", "feat(sd-9): frobnicate the thing", "fix(sd-1): frobnicate the thing"},
+		{"an acronym-led word keeps its case", "bug", "sd-1", "URL parsing broke", "fix(sd-1): URL parsing broke"},
+		{"sentence case is lowered", "bug", "sd-1", "Retry the request", "fix(sd-1): retry the request"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := conventionalCommit(tc.taskType, tc.taskID, tc.desc); got != tc.want {
+				t.Errorf("conventionalCommit(%q, %q, %q) = %q, want %q", tc.taskType, tc.taskID, tc.desc, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestConventionalCommitOverflowMovesToBody covers a description alone longer than
+// commitlint's header-max-length (a real risk: this task's own title is 71 characters before
+// even a "fix(sd-7fa990): " prefix). The header must still fit and stay a prefix of the full
+// text, which moves intact into the body rather than being silently dropped.
+func TestConventionalCommitOverflowMovesToBody(t *testing.T) {
+	desc := strings.Repeat("a very long agent summary that keeps going ", 4)
+	msg := conventionalCommit("bug", "sd-1", desc)
+	parts := strings.SplitN(msg, "\n\n", 2)
+	if len(parts) != 2 {
+		t.Fatalf("an overlong desc should carry a body, got %q", msg)
+	}
+	header, body := parts[0], parts[1]
+	if len(header) > headerMax {
+		t.Errorf("header %q is %d bytes, want <= %d", header, len(header), headerMax)
+	}
+	full := normalizeDesc(desc)
+	if body != full {
+		t.Errorf("body = %q, want the full normalized desc %q", body, full)
+	}
+	if !strings.HasPrefix(full, strings.TrimPrefix(header, "fix(sd-1): ")) {
+		t.Errorf("header %q should be a word-safe prefix of %q", header, full)
+	}
+}
+
 // lastCommitMsg reads the subject of the last commit in dir, so a test can check the shape sindri
 // actually wrote to git rather than trusting the string it composed.
 func lastCommitMsg(t *testing.T, dir string) string {
