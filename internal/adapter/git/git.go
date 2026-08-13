@@ -639,13 +639,14 @@ func gitEnglish(dir string, args ...string) (string, error) {
 	return string(out), err
 }
 
-// Merge merges branch into base in repo with a merge commit (no fast-forward), leaving base
-// checked out. Returns the combined output on conflict, in English since the caller reads it.
-func Merge(repo, base, branch string) error {
+// Merge merges branch into base in repo with a merge commit (no fast-forward) carrying msg,
+// leaving base checked out. Returns the combined output on conflict, in English since the
+// caller reads it. msg's shape is the caller's business — this adapter just passes it to git.
+func Merge(repo, base, branch, msg string) error {
 	if out, err := gitEnglish(repo, "checkout", base); err != nil {
 		return fmt.Errorf("checkout %s: %s: %w", base, strings.TrimSpace(out), err)
 	}
-	if out, err := gitEnglish(repo, "merge", "--no-ff", "-m", "merge "+branch, branch); err != nil {
+	if out, err := gitEnglish(repo, "merge", "--no-ff", "-m", msg, branch); err != nil {
 		return fmt.Errorf("merge %s: %s: %w", branch, strings.TrimSpace(out), err)
 	}
 	return nil

@@ -76,7 +76,13 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 	if a, ok, _ := ps.GetAgent(pr.Agent); ok {
 		workspace, wt = a.Workspace, filepath.Join(root, a.Workspace)
 	}
-	switch res := repo.MergeBranch(root, wt, pr.Branch, pr.Base); res.Status {
+	tk, _, _ := ps.GetTask(pr.Task)
+	desc := tk.Title
+	if desc == "" {
+		desc = pr.Task
+	}
+	mergeMsg := conventionalCommit(tk.Type, pr.Task, desc)
+	switch res := repo.MergeBranch(root, wt, pr.Branch, pr.Base, mergeMsg); res.Status {
 	case repo.MergeConflict:
 		pr.Status, pr.Feedback = "open", "" // no longer mergeable; back to review after the worker resolves
 		_ = ps.PutPR(pr)

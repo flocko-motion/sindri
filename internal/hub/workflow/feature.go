@@ -96,10 +96,15 @@ func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) 
 	}
 	a, _, _ := ps.GetAgent(c.Agent)
 	wt := filepath.Join(root, a.Workspace)
+	tk, _, _ := ps.GetTask(st.Task)
 	msg := strings.TrimSpace(strings.Join(args, " "))
+	if msg == "" {
+		msg = tk.Title
+	}
 	if msg == "" {
 		msg = "work on " + st.Task
 	}
+	msg = conventionalCommit(tk.Type, st.Task, msg)
 	// A task with work still open beneath it is not something a checkpoint can finish. Checked here
 	// because this is what writes "closed": an epic handed out as a subtask was closed over four open
 	// children of its own, and nothing downstream could tell that had happened.

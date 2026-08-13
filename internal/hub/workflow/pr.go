@@ -153,10 +153,15 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 		_ = ps.Log(c.Agent, "lint-fail", target)
 		return 1, nil
 	}
-	msg := strings.TrimSpace(strings.Join(args, " "))
-	if msg == "" {
-		msg = "work on " + target
+	tk, _, _ := ps.GetTask(target)
+	desc := strings.TrimSpace(strings.Join(args, " "))
+	if desc == "" {
+		desc = tk.Title
 	}
+	if desc == "" {
+		desc = "work on " + target
+	}
+	msg := conventionalCommit(tk.Type, target, desc)
 	if err := git.CommitAll(wt, msg); err != nil {
 		return 1, err
 	}
@@ -237,10 +242,13 @@ func (e *Engine) CmdOpenspec(c registry.Caller, args []string, out io.Writer) (i
 		_ = ps.Log(c.Agent, "openspec-invalid", branch)
 		return 1, nil
 	}
-	msg := strings.TrimSpace(strings.Join(args[1:], " "))
-	if msg == "" {
-		msg = "openspec update"
+	desc := strings.TrimSpace(strings.Join(args[1:], " "))
+	if desc == "" {
+		desc = "openspec update"
 	}
+	// No taskID: the placeholder mockSpecTask names every planner's openspec PR alike, so it
+	// would not read as a scope — an unscoped chore is still a valid Conventional Commit.
+	msg := conventionalCommit("", "", desc)
 	if err := git.CommitAll(wt, msg); err != nil {
 		return 1, err
 	}
@@ -624,9 +632,14 @@ func (e *Engine) openMilestone(project, agent, msg string) (store.PR, error) {
 	if err != nil || !ok {
 		return store.PR{}, fmt.Errorf("no such agent %q", agent)
 	}
+	tk, _, _ := ps.GetTask(st.Container)
+	if msg == "" {
+		msg = tk.Title
+	}
 	if msg == "" {
 		msg = "milestone: " + st.Container
 	}
+	msg = conventionalCommit(tk.Type, st.Container, msg)
 	wt := filepath.Join(root, a.Workspace)
 	if err := git.CommitAll(wt, msg); err != nil { // capture current state
 		return store.PR{}, err

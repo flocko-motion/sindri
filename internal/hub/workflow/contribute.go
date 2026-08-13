@@ -53,9 +53,14 @@ func (e *Engine) CmdContribute(c registry.Caller, args []string, out io.Writer) 
 		fmt.Fprintln(out, ReplyMilestoneContributed(pr.ID, st.Container))
 		return 0, nil
 	}
+	tk, _, _ := ps.GetTask(st.Task)
+	if msg == "" {
+		msg = tk.Title
+	}
 	if msg == "" {
 		msg = "interim contribution on " + st.Task
 	}
+	msg = conventionalCommit(tk.Type, st.Task, msg)
 	if err := git.CommitAll(wt, msg); err != nil {
 		return 1, err
 	}
