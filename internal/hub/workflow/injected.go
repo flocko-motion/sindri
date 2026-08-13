@@ -49,12 +49,10 @@ func MsgPRScrapped(prID string) string {
 		"Nothing to fix or resubmit. Run `sindri` for your next directive.", prID)
 }
 
-// MsgTaskEdited tells a worker a task inside its unit of work was revised under it — its own task,
-// or one anywhere inside the feature it holds. unit is what the agent holds, so the note says WHICH
-// of the two: told only that something changed, an agent cannot judge whether it affects what it is
-// building, and it is otherwise still working to what it read when it picked the work up. Either
-// way it says what "pending" does and does not mean, which stops being obvious the moment a task
-// the agent is committed to reads as awaiting a verdict again.
+// MsgTaskEdited tells a worker a task inside its unit of work was revised under it — its own, or
+// one anywhere inside the feature it holds, and unit says WHICH: told only that something changed,
+// an agent cannot judge whether it affects what it is building. Both say what "pending" does not
+// mean, which stops being obvious the moment work it is committed to reads as awaiting a verdict.
 func MsgTaskEdited(id, unit, fields string) string {
 	if id == unit {
 		return fmt.Sprintf("[hub] A planner edited %s — the task you're working on (%s). Read it again "+
@@ -68,6 +66,22 @@ func MsgTaskEdited(id, unit, fields string) string {
 		"check whether what you are building still fits it. It is back awaiting the user's approval, so "+
 		"it cannot be handed to you until they rule — and %s is not finished while it waits, so carry "+
 		"on with what you have in hand.", id, fields, unit, id, unit)
+}
+
+// MsgTaskGainedChild tells an agent its unit of work grew: a child was added under a task it holds.
+// promoted says whether that turned a leaf into a feature, changing what it runs next. The bar for
+// its PR rose either way, and being refused at a checkpoint is not how it should find that out.
+func MsgTaskGainedChild(parent, child string, promoted bool) string {
+	if !promoted {
+		return fmt.Sprintf("[hub] %s was added under %s, which is inside the work you hold. Read it "+
+			"(`sindri task %s`) — it is part of your feature now, so its PR waits for this too. Carry "+
+			"on with the subtask you are on; the hub hands you this one in its turn.", child, parent, child)
+	}
+	return fmt.Sprintf("[hub] %s gained a child, %s, so what you hold is now a FEATURE rather than a "+
+		"single task — same branch, nothing of yours lost. You take the new work on too, and it goes "+
+		"up as ONE pull request covering the whole of it. Run `sindri` for the subtask to work, "+
+		"`sindri checkpoint \"<summary>\"` to end each one, and `sindri submit \"<summary>\"` only "+
+		"when none are left. Read the new work first: `sindri task %s`.", parent, child, child)
 }
 
 // MsgTaskCancelled tells a worker its task was closed/scrapped out from under it —

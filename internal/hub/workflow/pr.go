@@ -155,6 +155,15 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 	} else if st.Phase != "working" || st.Task == "" {
 		fmt.Fprintln(out, ReplyNotWorking("submit", st.Phase, st.Task))
 		return 1, nil
+	} else if grew, gerr := ps.OpenChildIDs(st.Task); gerr != nil {
+		return 1, gerr
+	} else if len(grew) > 0 {
+		// The unit under review grew after this task was handed out. Extending rather than refusing:
+		// the same agent takes the new work on the same branch, and the PR covers the whole of it
+		// (-> adoptChild, which does this when the child arrives; here the agent was not running).
+		e.promoteToFeature(c.Project, c.Agent, st.Task)
+		fmt.Fprintln(out, ReplyTaskGrew(st.Task, grew))
+		return 1, nil
 	}
 	a, _, _ := ps.GetAgent(c.Agent)
 	wt := filepath.Join(root, a.Workspace)

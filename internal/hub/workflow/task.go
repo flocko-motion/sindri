@@ -105,6 +105,7 @@ func (e *Engine) CreateTask(project string, s TaskSpec) (string, error) {
 		return "", err
 	}
 	e.refreshCachedTask(project, id) // targeted: pull just the new task, not a full re-sync
+	e.adoptChild(project, s.Parent, id)
 	e.deps.Notify()
 	e.nudgeIdleWorkers(project, id, s.Priority)
 	return id, nil
@@ -229,6 +230,9 @@ func (e *Engine) EditTask(project, id string, s TaskSpec) error {
 		}
 	}
 	e.refreshCachedTask(project, id) // targeted refresh of the edited task
+	// Re-parenting adds a child as surely as creating one does, so the same growth applies: whoever
+	// is working the new parent takes this on too, rather than merging over it.
+	e.adoptChild(project, s.Parent, id)
 	e.deps.Notify()
 	return nil
 }

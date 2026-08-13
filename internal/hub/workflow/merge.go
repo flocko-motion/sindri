@@ -125,6 +125,23 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 		}
 		partial = len(open) > 0
 	}
+	// THE INVARIANT, whatever shape the PR has: a merge never closes a task over work still open
+	// beneath it. A task that gained a child while its PR was out reaches here reading as finished,
+	// and closing it there is the incident all of this traces back to. Children rather than workable
+	// subtasks, because one still awaiting the user's verdict is work nobody has done either.
+	if !partial {
+		open, oerr := ps.OpenChildIDs(pr.Task)
+		if oerr != nil {
+			return store.PR{}, oerr
+		}
+		partial = len(open) > 0
+		// It is a feature now, so the merge is a milestone on it: promoting here puts it on the one
+		// path that resumes an agent inside a feature, rather than a second one beside it.
+		if partial && !onFeature && holder.Task == pr.Task {
+			e.promoteToFeature(project, pr.Agent, pr.Task)
+			onFeature = true
+		}
+	}
 	if partial {
 		if a, ok, _ := ps.GetAgent(pr.Agent); ok {
 			_ = git.RebaseOnto(filepath.Join(root, a.Workspace), pr.Branch, pr.Base) // ff past the merge

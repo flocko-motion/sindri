@@ -81,10 +81,15 @@ func TestAnEpicIsNeverHandedOutAsASubtask(t *testing.T) {
 	}
 }
 
-// TestCheckpointRefusesAParentAndClosesOneItCompletes covers both halves of the invariant: a task
-// with open work under it cannot be finished, and a parent IS finished the moment its last child is
-// — otherwise it stays open forever and, having no open children, later reads as a leaf itself.
-func TestCheckpointRefusesAParentAndClosesOneItCompletes(t *testing.T) {
+// TestCheckpointCarriesOnPastAParentAndClosesOneItCompletes covers both halves of the invariant: a
+// task with open work under it cannot be finished, and a parent IS finished the moment its last
+// child is — otherwise it stays open forever and, having no open children, later reads as a leaf.
+//
+// The first half used to be a REFUSAL, which had nowhere to go: the agent cannot close the child,
+// re-parent it or approve anything, so its only exit was a human noticing. The work is inside the
+// same feature on the same branch, so the checkpoint records it, leaves the parent open, and hands
+// over the next leaf — the parent still never closes over its children, which is the invariant.
+func TestCheckpointCarriesOnPastAParentAndClosesOneItCompletes(t *testing.T) {
 	e, ps := nestedFeature(t)
 	c := registry.Caller{Project: "repo", Agent: "dain", Role: "worker", Phase: "working"}
 	hold := func(task string) {
@@ -96,19 +101,23 @@ func TestCheckpointRefusesAParentAndClosesOneItCompletes(t *testing.T) {
 		}
 	}
 
-	// Refused: td-mid has two open children, so no checkpoint can call it done.
+	// td-mid has two open children, so no checkpoint can call it done — but the agent is carried on
+	// to the work rather than stopped in front of it.
 	hold("td-mid")
 	var out strings.Builder
-	if code, _ := e.CmdCheckpoint(c, []string{"done"}, &out); code == 0 {
-		t.Error("checkpointing a parent with open children must be refused")
+	if code, err := e.CmdCheckpoint(c, []string{"done"}, &out); code != 0 || err != nil {
+		t.Fatalf("checkpointing a parent should carry on, not refuse: code=%d err=%v out=%s", code, err, out.String())
 	}
-	for _, want := range []string{"td-mid", "td-deep1", "td-deep2"} {
+	for _, want := range []string{"td-mid", "stays OPEN", "td-deep1"} {
 		if !strings.Contains(out.String(), want) {
-			t.Errorf("the refusal should name %q: %s", want, out.String())
+			t.Errorf("the reply should say why %q is not finished and what is next: %s", want, out.String())
 		}
 	}
 	if s, _, _ := ps.OwnedTask("td-mid"); s.Status == "closed" {
 		t.Fatal("td-mid must not be closed over its open children")
+	}
+	if s, _ := ps.GetState("dain"); s.Task != "td-deep1" {
+		t.Errorf("the agent should be on the work it gained, got %q", s.Task)
 	}
 
 	// Its children, one at a time. The first leaves td-mid open; the second completes it.

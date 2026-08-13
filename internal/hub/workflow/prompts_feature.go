@@ -1,7 +1,7 @@
 // package: hub/workflow / prompts_feature
 // type:    logic (the feature loop's agent-facing strings)
 // job:     what a worker holding a FEATURE is told — claiming it, moving between its
-// subtasks, and the refusals that guard finishing one early.
+// subtasks, why one is not finished yet, and what its unit gaining work means.
 // limits:  pure strings; which one to use is the workflow's (-> feature.go), and the
 // rest of the agent's voice stays in prompts.go.
 package workflow
@@ -48,15 +48,6 @@ func DirContainerDone(container string) string {
 		"what it does rather than listing the subtasks.", container)
 }
 
-// ReplyHasOpenChildren refuses to finish a task that still has work under it, naming what is open.
-// A parent is done exactly when its children are, so marking one done over open children states
-// something untrue about the tree and hides that work from everything that reads it.
-func ReplyHasOpenChildren(verb, id string, open []string) string {
-	return fmt.Sprintf("Can't %s %s — it's a parent, and %s %s still open under it. Its children are "+
-		"the work; %s closes on its own once they're all done.", verb, id, FileList(open),
-		plural(len(open), "is", "are"), id)
-}
-
 // plural picks a verb form for a count, so a refusal reads as English either way.
 func plural(n int, one, many string) string {
 	if n == 1 {
@@ -71,6 +62,27 @@ func ReplySubtasksRemain(container, next string, open int) string {
 	return fmt.Sprintf("Feature %s still has %d open subtask(s) and goes up as ONE PR. You're on %s — "+
 		"`sindri checkpoint \"<summary>\"` records it and hands you the next; submit when they're done.",
 		container, open, next)
+}
+
+// ReplyTaskGrew answers a submit whose task gained work after it was handed out. Not a refusal to
+// leave the agent with: the same work is now a feature on the same branch, so it says what it has
+// instead of a PR, and the PR it does put up later covers the whole of it.
+func ReplyTaskGrew(id string, children []string) string {
+	return fmt.Sprintf("%s gained work after you picked it up — %s now %s under it, so what you hold "+
+		"is a FEATURE rather than one task, and its PR covers the whole of it. Nothing you have done "+
+		"is lost: you stay on the same branch. Run `sindri` for the subtask, `sindri checkpoint "+
+		"\"<summary>\"` to end each one, and submit when none are left.",
+		id, FileList(children), plural(len(children), "sits", "sit"))
+}
+
+// ReplyCheckpointedParentOpen records a subtask that CANNOT close: it gained children of its own, so
+// its work is its children's now. Said plainly, because "checkpointed" reads as finished and this
+// one is not — it closes on its own once the work under it is done.
+func ReplyCheckpointedParentOpen(done string, children []string, next, nextTitle string) string {
+	return fmt.Sprintf("Recorded your work on %s. It stays OPEN: %s %s under it, and a task is done "+
+		"exactly when its children are, so %s closes on its own once they do. Next subtask %s: %s — "+
+		"it is yours and starts now.",
+		done, FileList(children), plural(len(children), "is open", "are open"), done, next, nextTitle)
 }
 
 // ReplyFeatureGated refuses to call a feature finished while work under it awaits the user: that

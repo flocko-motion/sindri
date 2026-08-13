@@ -101,25 +101,25 @@ func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) 
 		msg = "work on " + st.Task
 	}
 	msg = conventionalCommit(tk.Type, st.Task, msg)
-	// A task with work still open beneath it is not something a checkpoint can finish. Checked here
-	// because this is what writes "closed": an epic handed out as a subtask was closed over four open
-	// children of its own, and nothing downstream could tell that had happened.
-	if open, oerr := ps.OpenChildIDs(st.Task); oerr != nil {
+	// A task with work under it cannot be CLOSED by a checkpoint — an epic was once closed over four
+	// open children. Nor is it a dead end: that work is in the same feature on the same branch, so
+	// this records what is done and hands over the next leaf, leaving the parent to its children.
+	grew, oerr := ps.OpenChildIDs(st.Task)
+	if oerr != nil {
 		return 1, oerr
-	} else if len(open) > 0 {
-		fmt.Fprintln(out, ReplyHasOpenChildren("checkpoint", st.Task, open))
-		return 1, nil
 	}
 	if err := git.CommitAll(wt, msg); err != nil {
 		return 1, err
 	}
-	// Through the source, not owned_tasks: a subtask can be an openspec change or an issue, whose
-	// status its own source keeps and a direct write would fail on.
-	if err := e.finishAtSource(c.Project, root, st.Task, false); err != nil {
-		return 1, err
+	if len(grew) == 0 {
+		// Through the source, not owned_tasks: a subtask can be an openspec change or an issue, whose
+		// status its own source keeps and a direct write would fail on.
+		if err := e.finishAtSource(c.Project, root, st.Task, false); err != nil {
+			return 1, err
+		}
+		_ = e.RefreshTask(c.Project, st.Task)
+		e.closeCompletedAncestors(c.Project, st.Task, st.Container)
 	}
-	_ = e.RefreshTask(c.Project, st.Task)
-	e.closeCompletedAncestors(c.Project, st.Task, st.Container)
 	_ = ps.Log(c.Agent, "checkpoint", st.Task)
 	done := st.Task
 	// A checkpoint IS a leaf boundary, so an armed clear takes precedence over the next subtask:
@@ -135,6 +135,10 @@ func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) 
 		return 1, err
 	}
 	if ok {
+		if len(grew) > 0 {
+			fmt.Fprintln(out, ReplyCheckpointedParentOpen(done, grew, next.ID, next.Title))
+			return 0, nil
+		}
 		fmt.Fprintln(out, ReplyCheckpointed(done, next.ID, next.Title))
 		return 0, nil
 	}
