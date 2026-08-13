@@ -18,6 +18,15 @@ const StallDwell = 3 * time.Minute
 // already in flight finishes first.
 const RetryDwell = time.Minute
 
+// parkedByTheHub reports whether an agent is idle because it was told to be — retired by a human, or
+// by its own context filling. Both are wound down deliberately (-> claimNext).
+func (e *Engine) parkedByTheHub(project, name string) bool {
+	if a, ok, err := e.store.For(project).GetAgent(name); err == nil && ok && a.Retired {
+		return true
+	}
+	return e.ContextFull(project, name)
+}
+
 // Stalled reports whether an agent holds work it has stopped doing. The evidence is the SCREEN
 // standing still — a pane frozen mid-turn keeps SAYING "working" forever. Two words still veto it,
 // both meaning the agent is correctly motionless: "blocked" waits on a human, "signed-out" cannot
@@ -54,6 +63,12 @@ func (e *Engine) NudgeStalled(project, name, runtime string, idleFor time.Durati
 		}
 		_ = ps.Log(name, "nudge", "api error cut the turn off — asked it to resume")
 		return true
+	}
+	// Past the api-error retry, not before it: a parked agent is idle BY INSTRUCTION — DirFull tells
+	// it "do not ask again, just wait" — so prodding it complains about the one state the hub put it
+	// in. A turn cut off mid-sentence is a different thing, and still deserves resuming.
+	if e.parkedByTheHub(project, name) {
+		return false
 	}
 	// The subtask if it is on one, else the feature it holds — a worker between subtasks still has
 	// something to be getting on with, and naming it is the point of the nudge.

@@ -121,6 +121,21 @@ func (s *Service) ContextUsage(project, name string) (tokens, window int, ok boo
 	return t, w, found
 }
 
+// ForgetContext drops name's memoised context reading. For the one caller that KNOWS the previous
+// measurement is now wrong because it just invalidated it: clearing a session (-> ClearContext).
+//
+// Here rather than in a shorter TTL. The memo exists so the frequent idle poll does not re-read a
+// transcript per request, and that is still right for every other reader — but the reading survived
+// the very act that made it false, so the hub answered the kickoff after a clear from the pre-clear
+// figure and told the agent it was still full.
+func (s *Service) ForgetContext(project, name string) {
+	key := project + "/" + name
+	contextMemo.mu.Lock()
+	delete(contextMemo.at, key)
+	delete(contextMemo.val, key)
+	contextMemo.mu.Unlock()
+}
+
 // LaunchDiagnostic re-runs both liveness probes so a launch timeout says which one failed.
 func (s *Service) LaunchDiagnostic(project, name string) string {
 	c := s.deps.ContainerName(project, name)

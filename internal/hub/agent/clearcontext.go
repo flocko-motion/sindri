@@ -37,6 +37,10 @@ func (s *Service) ClearContext(project, name string) error {
 	if err := s.Inject(project, name, "/clear"); err != nil {
 		return err
 	}
+	// Before the kickoff, not after: the kickoff makes the agent ask for work, and the answer is
+	// computed from this measurement. Left standing it reports the size the clear just discarded, so
+	// the agent is told it is still full — the exact remedy that had just been applied.
+	s.ForgetContext(project, name)
 	_ = ps.Log(name, "clear-context", "human-confirmed")
 	go func() {
 		time.Sleep(clearKickoffDelay)
