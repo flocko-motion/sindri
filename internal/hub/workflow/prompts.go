@@ -53,6 +53,21 @@ func BrokkrBrief() string {
 		"for it before reading files blind."
 }
 
+// RunServiceBrief gives an evaluable rule for the run queue, and why — a fleet-wide cost
+// invisible from inside one pod has to be told to be weighed correctly.
+func RunServiceBrief() string {
+	return "\n\n`sindri run \"<command>\"` queues a shell command for LATER execution in a fresh " +
+		"container, rather than running it yourself now. Use it when the command needs minutes " +
+		"rather than seconds, or needs services, containers or fixtures to come up first — run " +
+		"everything shorter yourself. There is ONE slot for the WHOLE FLEET, not per repo or per " +
+		"agent: queuing something that didn't need it delays every other agent's real suite behind " +
+		"yours, a cost you cannot see from inside your own pod, so the judgement call is yours to " +
+		"make well. Queuing returns AT ONCE with your place in line — that is not a failure, so " +
+		"don't retry — and the result (pass, fail, or timeout) reaches you later, the same way a " +
+		"submit's verdict does. Every run is capped at 15 minutes; past that it comes back as a " +
+		"FAILURE carrying whatever output it produced, and you're told how much of the cap it used."
+}
+
 // SystemPrompt is the agent's durable identity + how-to-work brief. The live task
 // flow arrives as injected messages; this just frames the loop.
 func SystemPrompt(name, role, archContent, archPath string) string {
@@ -77,7 +92,7 @@ the project's quality gate, `+"`sindri status`"+` shows who you are, and
 it to get work — the user gives you that here.
 
 When the user goes quiet, stop and wait for their next instruction rather than
-inventing work. Never poll or guess.`, name) + ArchitectureBrief(archContent, archPath) + BrokkrBrief()
+inventing work. Never poll or guess.`, name) + ArchitectureBrief(archContent, archPath) + BrokkrBrief() + RunServiceBrief()
 	}
 
 	common := fmt.Sprintf(`You are %q, a Sindri %s agent running in a sandboxed container.
@@ -193,7 +208,7 @@ As the reviewer:
 - Then ` + "`sindri approve <pr-id>`" + ` or
   ` + "`sindri reject <pr-id> <feedback>`" + `. Be specific in rejections —
   your feedback is delivered straight to the worker.
-- You never merge; a human does that.`
+- You never merge; a human does that.` + RunServiceBrief()
 	default: // worker
 		return common + `
 
@@ -230,7 +245,7 @@ As a worker:
   one of the two at a time; ` + "`sindri help`" + ` lists which.
 - So the loop closes like this: work, submit, wait for the verdict, ` + "`sindri`" + `
   for what's next. Skip the submit and you have not finished — you have stopped,
-  and the next ` + "`sindri`" + ` will hand you the very same task back.`
+  and the next ` + "`sindri`" + ` will hand you the very same task back.` + RunServiceBrief()
 	}
 }
 
@@ -364,8 +379,8 @@ const DirCoauthor = "You're a coauthor working directly with the user in the sha
 // DirReview is a reviewer's directive, and it NAMES the task: access nobody mentions is access
 // nobody uses, so a reviewer told only a PR id judges the diff against the architecture doc alone.
 func DirReview(prID, taskID, title, arch string) string {
-	return fmt.Sprintf("Review %s — task %s: %s\nThe PR branch is checked out fresh in /workspace — review it (or `sindri show %s`), run `sindri lint %s`, then `sindri approve %s` or `sindri reject %s \"<reason>\"`.\n%s%s",
-		prID, taskID, dash(title), prID, prID, prID, prID, ReviewIntent(taskID), ReviewArchitecture(arch))
+	return fmt.Sprintf("Review %s — task %s: %s\nThe PR branch is checked out fresh in /workspace — review it (or `sindri show %s`), run `sindri lint %s`, then `sindri approve %s` or `sindri reject %s \"<reason>\"`.\n%s%s%s",
+		prID, taskID, dash(title), prID, prID, prID, prID, ReviewIntent(taskID), ReviewArchitecture(arch), runPointer)
 }
 
 // ReviewIntent points the reviewer at what the diff was FOR — including the comments, where a plan
@@ -383,8 +398,12 @@ func DirClaimed(id, title, branch, arch string) string {
 	return fmt.Sprintf("Claimed %s: %s\nBranch %s is ready in your /workspace. Work on it — follow the "+
 		"project architecture (in your brief; re-read it at /workspace/%s) — then finish it the only way "+
 		"a task is finished: `sindri submit \"<summary>\"`, which turns your branch into a pull request "+
-		"and sends it for review.", id, title, branch, arch)
+		"and sends it for review.%s", id, title, branch, arch, runPointer)
 }
+
+// runPointer nudges toward the run queue at the one moment worth repeating it: a fresh claim.
+// RunServiceBrief states the rule in full, once, in the brief — this is not that again.
+const runPointer = " If part of it needs a slow build or test, `sindri run \"<command>\"` queues it — see your brief for when that's worth it over running it yourself."
 
 const DirNoTasks = "No open tasks. Wait — the hub will tell you when there is work."
 

@@ -452,3 +452,25 @@ func TestPlannerGainsApproveButNotReject(t *testing.T) {
 		}
 	}
 }
+
+// TestRunServiceReachesEveryRoleThatCanUseIt (sd-68f8e7): worker, reviewer and coauthor can
+// schedule a run; a planner cannot — its workspace is read-only, so there is nothing for it to run.
+func TestRunServiceReachesEveryRoleThatCanUseIt(t *testing.T) {
+	h := newHub(t)
+	reg := h.registry()
+	available := func(role string) map[string]bool {
+		out := map[string]bool{}
+		for _, c := range reg.Available(registry.Caller{Project: testProject, Agent: "rune", Role: role}) {
+			out[c.Name] = true
+		}
+		return out
+	}
+	for _, role := range []string{"worker", "reviewer", "coauthor"} {
+		if !available(role)["run"] {
+			t.Errorf("%s should be able to queue a run", role)
+		}
+	}
+	if available("planner")["run"] {
+		t.Error("a planner's workspace is read-only — it must not gain the run service")
+	}
+}

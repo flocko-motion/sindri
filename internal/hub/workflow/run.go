@@ -1,8 +1,8 @@
 // package: hub/workflow / run
 // type:    logic (the run queue: schedule, list with derived position, cancel, reprioritise)
-// job:     the human-facing operations on a queued or finished run. The queue is ONE slot
-// across the whole fleet, not per project, so a run's position is ranked against
-// every project's queued runs together, never just its own.
+// job:     every operation on a queued or finished run, human and agent alike. The queue is
+// ONE slot across the whole fleet, not per project, so a run's position is ranked
+// against every project's queued runs together, never just its own.
 // limits:  scheduling and listing only; actually executing a run (containers, cache, the
 // 15-minute cap) is sd-938f23's, and enforcing one-at-a-time is sd-bf837f's.
 package workflow
@@ -11,10 +11,12 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -46,8 +48,8 @@ func newRunID() (string, error) {
 	return "run-" + hex.EncodeToString(b[:]), nil
 }
 
-// ScheduleRun queues a command for later execution — the store row only. Exported for the
-// agent-facing verb sd-68f8e7 adds; nothing calls it yet.
+// ScheduleRun queues a command for later execution — the store row only; there is nothing yet
+// to execute it (-> sd-938f23).
 func (e *Engine) ScheduleRun(project, agent, command, priority string) (api.Run, error) {
 	id, err := newRunID()
 	if err != nil {
@@ -60,6 +62,27 @@ func (e *Engine) ScheduleRun(project, agent, command, priority string) (api.Run,
 	r, _, err := ps.GetRun(id)
 	e.deps.Notify()
 	return r, err
+}
+
+// CmdScheduleRun is the agent-facing verb: queue a command instead of running it in the pod.
+// Returns AT ONCE with the run's position — the same act-report-idle contract as submit — since
+// the result (pass, fail, or timeout) only exists once something executes it.
+func (e *Engine) CmdScheduleRun(c registry.Caller, args []string, out io.Writer) (int, error) {
+	cmd := strings.TrimSpace(strings.Join(args, " "))
+	if cmd == "" {
+		fmt.Fprintln(out, "usage: run <command...> — queues it; see your brief for when that's worth it over running it yourself")
+		return 2, nil
+	}
+	r, err := e.ScheduleRun(c.Project, c.Agent, cmd, "")
+	if err != nil {
+		return 1, err
+	}
+	pos := 0
+	if all, err := e.store.AllRuns("queued"); err == nil {
+		pos = queuePositions(all)[r.ID]
+	}
+	fmt.Fprintf(out, "%s queued at position %d. You'll be told the result — carry on with other work; a position is not a failure, so don't retry.\n", r.ID, pos)
+	return 0, nil
 }
 
 // queuePositions ranks every queued run in runs — priority first (P0 highest, unset last),

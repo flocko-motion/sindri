@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -167,5 +168,36 @@ func TestRunProjectFindsTheOwner(t *testing.T) {
 	}
 	if got := e.RunProject("repo", "no-such-run"); got != "repo" {
 		t.Errorf("an unknown id should fall back to the caller's own project, got %q", got)
+	}
+}
+
+// TestCmdScheduleRun is the agent-facing verb sd-68f8e7 adds: it queues at once and reports the
+// run's position, rather than blocking — the same act-report-idle contract as submit.
+func TestCmdScheduleRun(t *testing.T) {
+	e, ps := runEngine(t)
+	c := registry.Caller{Project: "repo", Agent: "bombur", Role: "worker"}
+
+	var out strings.Builder
+	if code, err := e.CmdScheduleRun(c, nil, &out); err != nil || code != 2 {
+		t.Fatalf("empty command should be a usage error: code=%d err=%v", code, err)
+	}
+
+	out.Reset()
+	if code, err := e.CmdScheduleRun(c, []string{"go", "test", "./..."}, &out); err != nil || code != 0 {
+		t.Fatalf("CmdScheduleRun: code=%d err=%v", code, err)
+	}
+	if !strings.Contains(out.String(), "position 1") {
+		t.Errorf("reply should report a queue position: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "run-") {
+		t.Errorf("reply should name the run id: %q", out.String())
+	}
+
+	runs, err := ps.Runs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 || runs[0].Command != "go test ./..." || runs[0].Agent != "bombur" {
+		t.Fatalf("scheduled run wrong: %+v", runs)
 	}
 }

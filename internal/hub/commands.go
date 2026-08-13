@@ -73,6 +73,9 @@ func (h *Hub) registry() *registry.Registry {
 		// curated read/restore subset for them (-> workflow.CmdGit): without it, an agent cannot
 		// see what it changed or put a file back, and reconstructs both from memory.
 		registry.Command{Name: "git", Help: workflow.GitHelp, Roles: []string{"worker", "planner", "coauthor"}, Run: h.wf.CmdGit},
+		// Not for a planner: its workspace is read-only, so there is nothing here for it to run.
+		registry.Command{Name: "run", Help: "queue a command for later execution (see your brief for when this beats running it yourself): run <command...>",
+			Roles: []string{"worker", "reviewer", "coauthor"}, Run: h.wf.CmdScheduleRun},
 		registry.Command{Name: "checkpoint", Help: "record the current subtask and move to the next: checkpoint [summary]", Roles: []string{"worker"},
 			Blocked: heldByEscalation("checkpoint", func(c registry.Caller) string {
 				if c.Container == "" {

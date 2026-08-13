@@ -76,6 +76,48 @@ func TestPlannerBriefOffersTaskOnlyPath(t *testing.T) {
 	}
 }
 
+// TestRunServiceIsAdvertisedWithAnEvaluableRule (sd-68f8e7): the brief must state the run queue
+// exists, give a rule an agent can actually apply (needs minutes, or services/containers/
+// fixtures — not "expensive"), say why (one slot for the whole fleet), what to expect (returns
+// at once, don't retry), and the budget (15 minutes). A planner's workspace is read-only, so it
+// never sees this — there is nothing there for it to run.
+func TestRunServiceIsAdvertisedWithAnEvaluableRule(t *testing.T) {
+	for _, role := range []string{"worker", "reviewer", "coauthor"} {
+		p := SystemPrompt("eitri", role, "", "ARCHITECTURE.md")
+		for _, want := range []string{"`sindri run \"<command>\"`", "minutes", "ONE slot", "15 minutes", "don't retry"} {
+			if !strings.Contains(p, want) {
+				t.Errorf("%s brief missing %q:\n%s", role, want, p)
+			}
+		}
+	}
+	if p := SystemPrompt("galar", "planner", "", "ARCHITECTURE.md"); strings.Contains(p, "sindri run") {
+		t.Errorf("a planner's workspace is read-only — it should never see the run service:\n%s", p)
+	}
+}
+
+// TestRunServicePointedAtOnlyWhenClaiming: repeated per sd-68f8e7's "do not repeat it in every
+// directive" — the pointer belongs on a claim (the moment it's actually relevant), never on the
+// directive an agent reads on every subsequent `sindri` while still holding the same work.
+func TestRunServicePointedAtOnlyWhenClaiming(t *testing.T) {
+	for _, s := range []string{
+		DirClaimed("td-1", "a task", "td-1", "ARCHITECTURE.md"),
+		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
+		DirReview("pr-td-1", "td-1", "a task", ""),
+	} {
+		if !strings.Contains(s, "sindri run") {
+			t.Errorf("a claim-moment directive should point at the run service: %q", s)
+		}
+	}
+	for _, s := range []string{
+		DirWorking("td-1"),
+		DirContainerWorking("td-EPIC", "td-1"),
+	} {
+		if strings.Contains(s, "sindri run") {
+			t.Errorf("a REPEATED directive must not carry the run pointer every time: %q", s)
+		}
+	}
+}
+
 // TestGuardRepliesNameTheRealState: the replies an agent hits when a verb doesn't apply
 // must describe its ACTUAL state. The flat "run `sindri` to pick up a task first" was
 // true only when idle — a worker whose PR was under review got told to abandon the task
