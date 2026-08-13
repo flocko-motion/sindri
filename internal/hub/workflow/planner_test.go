@@ -193,6 +193,41 @@ func TestEditTellsTheHolder(t *testing.T) {
 	}
 }
 
+// TestAFailedRecordStillTellsTheHolder: the record failing is precisely when the holder cannot find
+// out any other way, so it must not be the path where nobody tells it. The planner is told the task
+// carries no record, since it is then the only one who can put that right.
+func TestAFailedRecordStillTellsTheHolder(t *testing.T) {
+	e, c, ps, id, deps := plannerOwnedTask(t, "approved")
+	deps.alive, deps.postFails = true, true
+	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: id, Branch: id, Phase: "working"}); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	code, err := e.CmdEditTask(c, []string{id, "--body", "corrected"}, &out)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code == 0 {
+		t.Errorf("a failed record should be reported as a failure: %s", out.String())
+	}
+	if len(deps.injected) != 1 || deps.injected[0] != "eitri" {
+		t.Fatalf("the holder should still be told, injected: %v", deps.injected)
+	}
+	for _, want := range []string{"no record", "meeting room", "eitri"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the reply should carry %q:\n%s", want, out.String())
+		}
+	}
+	// The edit itself stands, verdict and all — reporting otherwise would send the planner to undo
+	// a write that landed.
+	if got, _ := ps.GetApproval(id); got != "pending" {
+		t.Errorf("the edit and its un-approval should stand, approval is %q", got)
+	}
+}
+
 // TestAnEditedTaskIsStillItsHolders: un-approving withdraws a task from the pools work is handed
 // out FROM; it says nothing about finishing work already in hand. A worker stranded because a
 // planner corrected a line in its brief would be the whole change made worthless.

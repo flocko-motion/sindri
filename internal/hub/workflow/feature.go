@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
@@ -137,8 +138,16 @@ func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) 
 		fmt.Fprintln(out, ReplyCheckpointed(done, next.ID, next.Title))
 		return 0, nil
 	}
+	gated, err := e.gatedUnder(c.Project, st.Container)
+	if err != nil {
+		return 1, err
+	}
 	_ = ps.SetState(store.AgentState{Agent: c.Agent, Container: st.Container, Branch: st.Container, Phase: "idle"})
 	e.deps.Notify()
+	if len(gated) > 0 {
+		fmt.Fprintf(out, "Checkpointed %s. %s\n", done, ReplyFeatureGated(st.Container, openIDs(gated)))
+		return 0, nil
+	}
 	fmt.Fprintln(out, ReplyCheckpointedLast(done, st.Container))
 	return 0, nil
 }
@@ -167,6 +176,54 @@ func (e *Engine) closeCompletedAncestors(project, from, stopAt string) {
 		}
 		_ = e.RefreshTask(project, parent)
 	}
+}
+
+// gatedUnder is open, unclaimable work under a feature, at any depth — the question COMPLETION must
+// ask. A gated subtask is ABSENT from OpenSubtasks rather than reported by it, so a feature whose
+// completion asks only that query is declared done over work nobody started.
+func (e *Engine) gatedUnder(project, container string) ([]store.Task, error) {
+	all, err := e.store.For(project).AllTasks()
+	if err != nil {
+		return nil, err
+	}
+	var out []store.Task
+	for _, d := range api.Descendants(all, container) {
+		// The claim queries' own rule, so "not handed out" and "not finished" cannot drift apart.
+		if api.Open(d) && !authorisedForClaim(d.Approval) {
+			out = append(out, d)
+		}
+	}
+	return out, nil
+}
+
+// openIDs names these tasks, for a message that has to say WHICH work is holding a feature open.
+func openIDs(tasks []store.Task) []string {
+	ids := make([]string, 0, len(tasks))
+	for _, t := range tasks {
+		ids = append(ids, t.ID)
+	}
+	return ids
+}
+
+// containerNext is the held feature's next step: the subtask just assigned, or the finished feature
+// to put up. Not ready while gated work remains, so the worker waits on the user's verdict
+// (-> waitForWork, woken by the approval's own Notify) rather than hearing the feature is done.
+func (e *Engine) containerNext(project, agent, container string) (string, bool, error) {
+	next, ok, err := e.advanceContainer(project, agent, container)
+	if err != nil {
+		return "", false, err
+	}
+	if ok {
+		return DirContainerWorking(container, next.ID), true, nil
+	}
+	gated, err := e.gatedUnder(project, container)
+	if err != nil {
+		return "", false, err
+	}
+	if len(gated) > 0 {
+		return "", false, nil
+	}
+	return DirContainerDone(container), true, nil
 }
 
 // advanceContainer moves a held feature's agent onto its next open subtask: (subtask, true) when one

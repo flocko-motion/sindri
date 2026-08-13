@@ -140,6 +140,17 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 			fmt.Fprintln(out, ReplySubtasksRemain(st.Container, open[0].ID, len(open)))
 			return 1, nil
 		}
+		// The second half of "is it finished": work under it the approval gate holds is absent from
+		// the query above rather than reported by it, so asking only that put a feature up as
+		// complete over a subtask nobody had touched (-> gatedUnder).
+		gated, gerr := e.gatedUnder(c.Project, st.Container)
+		if gerr != nil {
+			return 1, gerr
+		}
+		if len(gated) > 0 {
+			fmt.Fprintln(out, ReplyFeatureGated(st.Container, openIDs(gated)))
+			return 1, nil
+		}
 		target, branch = st.Container, st.Container
 	} else if st.Phase != "working" || st.Task == "" {
 		fmt.Fprintln(out, ReplyNotWorking("submit", st.Phase, st.Task))

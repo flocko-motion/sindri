@@ -318,21 +318,16 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 			case "working":
 				return e.workDirective(project, name, st.Task, st.Container)
 			default:
-				// Between subtasks is a leaf boundary, so an armed clear fires HERE — before the
-				// next subtask is served, not into the middle of it.
-				if e.clearArmed(project, name) {
-					return DirClearPending, nil
-				}
-				// A failure here is surfaced, never read as "finished": the feature is only done
-				// when the store says there is nothing under it, not when assignment went wrong.
-				next, ok, aerr := e.advanceContainer(project, name, st.Container)
-				if aerr != nil {
-					return "", aerr
-				}
-				if ok {
-					return DirContainerWorking(st.Container, next.ID), nil
-				}
-				return DirContainerDone(st.Container), nil
+				// Blocking: a feature whose remaining work is gated is neither finished nor able to
+				// hand anything out, so it waits on the user like any other empty queue.
+				return e.waitForWork(ctx, func() (string, bool, error) {
+					// Between subtasks is a leaf boundary, so an armed clear fires HERE — before
+					// the next subtask is served, and even if it is armed during the wait.
+					if e.clearArmed(project, name) {
+						return DirClearPending, true, nil
+					}
+					return e.containerNext(project, name, st.Container)
+				})
 			}
 		}
 		_ = ps.SetState(store.AgentState{Agent: name, Phase: "idle"})

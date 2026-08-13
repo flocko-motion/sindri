@@ -477,6 +477,15 @@ func ReplySubtasksRemain(container, next string, open int) string {
 		container, open, next)
 }
 
+// ReplyFeatureGated refuses to call a feature finished while work under it awaits the user: that
+// work is undone, merely absent from the queries that hand work out. Waiting is the whole answer.
+func ReplyFeatureGated(container string, gated []string) string {
+	return fmt.Sprintf("Feature %s isn't finished: %s under it %s awaiting the user's approval, so "+
+		"that is work still to do rather than work you have done. Run `sindri` — it waits until the "+
+		"user rules, then hands you the subtask (or the finished feature).",
+		container, FileList(gated), plural(len(gated), "is", "are"))
+}
+
 // ReplyCheckpointed acknowledges a checkpoint and hands over the next subtask. Alone among the
 // hand-offs it comes back from a command the worker ran itself, and read as a report it left agents
 // waiting for a go-ahead the workflow never sends — hence "starts now".

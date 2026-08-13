@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"errors"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,7 @@ type stubDeps struct {
 	comments     map[string][]store.Comment // by task id, for the views that render a thread
 	busy         map[string]bool            // agents mid-turn, so AgentIdle answers false for them
 	posted       []store.Comment            // what the workflow wrote onto a task's thread (SourceRef holds the id)
+	postFails    bool                       // AddTaskComment refuses, for the paths that must survive it
 }
 
 func (d *stubDeps) ProjectRoot(string) string                   { return d.root }
@@ -47,6 +49,9 @@ func (d *stubDeps) AgentIdle(_, name string) bool             { return !d.busy[n
 func (d *stubDeps) SessionAlive(_, _ string) bool             { return false }
 func (d *stubDeps) TaskComments(_, id string) []store.Comment { return d.comments[id] }
 func (d *stubDeps) AddTaskComment(_, id, author, body string) error {
+	if d.postFails {
+		return errors.New("the thread is unreachable")
+	}
 	d.posted = append(d.posted, store.Comment{SourceRef: id, Author: author, Body: body})
 	return nil
 }

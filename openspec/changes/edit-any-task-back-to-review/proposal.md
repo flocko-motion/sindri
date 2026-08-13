@@ -33,6 +33,16 @@ worst outcome is that something reads wrongly until it is fixed.
   definition just changed is not handed out before the user has seen the change. It does not reach
   a worker already holding it: the claim gate is about handing work OUT, and a holder finishes and
   submits exactly as before.
+- Inside a feature, "is it finished" stops being asked of `OpenSubtasks`. That query answers what is
+  workable NOW, so a gated subtask does not come back from it held back — it is absent, which reads
+  as finished. The worker was told the feature was complete, submitted the branch, and the feature
+  closed over a subtask nobody had worked; the reconciler is only a partial net, since it reads
+  direct children while the assignment query reaches any depth. Completion now asks `gatedUnder`,
+  which applies the same `authorisedForClaim` rule the claim queries do, so "not handed out" and
+  "not finished" cannot drift into two opinions about one task. With nothing workable and nothing
+  finished, `sindri` WAITS — the approval's own notify wakes it, so no polling and no new nudge.
+  The fragility in `OpenSubtasks` predates this change and a user's rejection reaches it today; what
+  this change does is make un-approval the routine consequence of the planner's main verb.
 - The edit is recorded on the task, carrying the value each changed field held before it. The old
   value survives nowhere else once the write lands, and "something was edited" is not a record. The
   verdict being cleared goes in too: a rejection's reason is held in the approval row alone, and
@@ -58,7 +68,9 @@ worst outcome is that something reads wrongly until it is fixed.
   written about ratings and now has to say which direction it forbids. Returning a task to the user
   hands the decision back rather than taking it, which is the opposite of releasing work unasked.
 - Code: `internal/hub/workflow/planner.go` (the verb, the record, the holder), `injected.go`
-  (the note), `plannerpriority.go` and `reopen.go` (comments that described the old rule).
+  (the note), `feature.go` (`gatedUnder`, `containerNext`, the checkpoint reply), `pr.go` (the
+  submit gate), `task.go` (the held-feature directive now waits), `prompts.go`,
+  `plannerpriority.go` and `reopen.go` (comments that described the old rule).
 - `workflow.Deps` gains `AddTaskComment`, the write half of the `TaskComments` it already had:
   the record and the note are two halves of telling the same person, and splitting them across
   packages to avoid one seam method would be the worse trade.

@@ -21,6 +21,15 @@ whose definition has just changed SHALL NOT be handed to a worker before the use
 change. It SHALL NOT reach a worker already holding that task: the claim gate decides what is
 handed OUT, and a holder finishes and submits exactly as it would have.
 
+That holds inside a feature as well as outside one, and it SHALL be answered by asking whether
+anything under the feature is still open rather than whether anything is claimable. The two
+questions differ exactly where a gate is shut, so a query written for assignment reports gated work
+as ABSENT, which cannot be told apart from finished: a feature was declared complete, its worker
+told to put the branch up, and the feature closed over a subtask nobody had worked. A feature with
+work under it awaiting the user, at any depth, SHALL NOT be reported as finished and its branch
+SHALL NOT be accepted as a pull request. Having nothing to hand out and nothing finished, the hub
+SHALL make the worker WAIT for the user's verdict, as it does for any other empty queue.
+
 Every edit that lands SHALL be recorded on the task itself, carrying the value each changed field
 held before it, so the user can see what changed rather than only that something did. Where the
 verdict being cleared was a rejection, its reason SHALL be carried into that record: the reason is
@@ -55,6 +64,17 @@ reading it.
 
 - **WHEN** a task that was approved and rated is edited
 - **THEN** no worker is offered it until the user has ruled on the change
+
+#### Scenario: A feature is not finished over work awaiting the user
+
+- **WHEN** a subtask of a feature a worker holds is edited, and every other subtask is done
+- **THEN** the worker is not told the feature is finished, its branch is refused as a pull request,
+  and the refusal names the subtask that awaits the user
+
+#### Scenario: The held feature waits for the verdict
+
+- **WHEN** a held feature has nothing workable left and work awaiting the user under it
+- **THEN** the worker waits, and the user's approval hands it that subtask
 
 #### Scenario: The worker holding it keeps the work
 

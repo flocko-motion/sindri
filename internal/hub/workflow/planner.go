@@ -314,15 +314,19 @@ func (e *Engine) CmdEditTask(c registry.Caller, args []string, out io.Writer) (i
 	e.refreshCachedTask(c.Project, id)
 	_ = ps.Log(c.Agent, "edit-task", id+" — "+fieldNames(changed))
 	e.deps.Notify()
+	// The holder first: it is the reader who acts on this, and it must not be the one left untold
+	// on the path where the record fails.
+	told := e.tellHolder(c.Project, id, changed)
 	// Recorded on the task itself, where the user reads it: "this was edited" without the what is
 	// not a record, and the planner's activity log is not where anyone looks for a task's history.
 	if cerr := e.deps.AddTaskComment(c.Project, id, c.Agent, editRecord(changed, verdict, why)); cerr != nil {
-		fmt.Fprintf(out, "%s was edited and is back awaiting the user's approval, but recording what "+
-			"changed on it failed: %v\n", id, cerr)
+		fmt.Fprintf(out, "%s was edited (%s) and is back awaiting the user's approval, but recording "+
+			"what changed on it failed: %v — the task carries no record of it, so say what changed in "+
+			"the meeting room.%s\n", id, fieldNames(changed), cerr, told)
 		return 1, nil
 	}
 	fmt.Fprintf(out, "%s updated (%s) — back to awaiting the user's approval, so it stays out of the claim "+
-		"pools until they have seen the change.%s\n", id, fieldNames(changed), e.tellHolder(c.Project, id, changed))
+		"pools until they have seen the change.%s\n", id, fieldNames(changed), told)
 	return 0, nil
 }
 
@@ -404,7 +408,8 @@ func (e *Engine) tellHolder(project, id string, changes []taskChange) string {
 		if st.Task != id && st.Container != id {
 			continue
 		}
-		// The comment is the durable half and already written: a holder that is down reads it later.
+		// Not waited on when it is down (InjectWhenReady would sit there): the record on the task is
+		// what reaches it when it comes back.
 		if !e.deps.AgentAlive(project, a.Name) {
 			return fmt.Sprintf(" %s holds it but isn't running — it will read the change on the task.", a.Name)
 		}
