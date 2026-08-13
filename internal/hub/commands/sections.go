@@ -56,8 +56,8 @@ var Sections = []Section{
 	{
 		Key: "prs", Title: "PRs",
 		Count: func(b Board) int { return b.OpenPRCount() },
-		// Approved and unmerged, or open with no reviewer alive to look at it: either way the
-		// work is finished or stopped, and the next move is the user's.
+		// Waiting on a merge, on a merge that died in flight, or on a review nobody is left to
+		// give — an interim PR being user-gated by design (-> api.PRWaitReason).
 		Attention: func(b Board) int { return b.PRsNeedingUserCount() },
 	},
 	{Key: "repos", Title: "Repos", Count: func(b Board) int { return b.RepoCount() }},

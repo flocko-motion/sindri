@@ -41,20 +41,48 @@ func CountAgentsNeedingUser(agents []AgentView) (n int) {
 	return n
 }
 
-// PRNeedsUser reports a PR nothing but a human will move: approved (it waits on the merge, the one
-// hard gate), interim (no reviewer is ever asked for one -> workflow.needsReview, so it is the
-// user's from the moment it opens), or open with no reviewer alive IN ITS OWN REPO. A rejected PR
-// waits on its author. An unassigned PR is ordinary while a reviewer runs there, since one picks it
-// up shortly; one up but stuck is the Agents marker's business.
-func PRNeedsUser(p PR, agents []AgentView) bool {
-	if p.Status == "approved" {
-		return true
+// PRWait is WHY a PR waits on the user — the classification itself, so a front-end maps it to
+// words instead of deciding it a second time and disagreeing about a state added later.
+type PRWait string
+
+// The reasons, each a different thing to do about it.
+const (
+	PRWaitNone        PRWait = ""             // nothing is asked of the user
+	PRWaitMergeFailed PRWait = "merge-failed" // a merge died in flight: base is in an unknown state
+	PRWaitMerge       PRWait = "merge"        // approved, so it waits on the human-only merge
+	PRWaitUserGated   PRWait = "user-gated"   // interim: no reviewer is ever asked for one
+	PRWaitReview      PRWait = "review"       // open with no reviewer alive in its repo
+)
+
+// PRWaits is every reason, urgent first, so a caller groups over the set rather than a list of
+// its own — and a reason added here reaches each of them.
+var PRWaits = []PRWait{PRWaitMergeFailed, PRWaitMerge, PRWaitUserGated, PRWaitReview}
+
+// PRWaitReason reports why nothing but a human will move this PR, PRWaitNone when something else
+// will. Merge-failed is most stuck: a restart caught the merge in flight (-> ReconcileMergingPRs),
+// nothing retries it and no verb accepts it, so only a person reading the base branch moves it on.
+// Approved waits on the merge, the one hard gate. Interim is user-gated from the moment it opens —
+// no reviewer is ever asked for one (-> workflow.needsReview). Open with no reviewer alive IN ITS
+// OWN REPO waits on a review that is not coming, though one merely unassigned is ordinary while a
+// reviewer runs there. A rejected PR waits on its author, a merging one on the merge under way.
+func PRWaitReason(p PR, agents []AgentView) PRWait {
+	switch {
+	case p.Status == "merge-failed":
+		return PRWaitMergeFailed
+	case p.Status == "approved":
+		return PRWaitMerge
+	case p.Status != "open":
+		return PRWaitNone
+	case p.Kind == "interim":
+		return PRWaitUserGated
+	case !AnyLiveReviewer(agents, p.Project):
+		return PRWaitReview
 	}
-	if p.Status != "open" {
-		return false
-	}
-	return p.Kind == "interim" || !AnyLiveReviewer(agents, p.Project)
+	return PRWaitNone
 }
+
+// PRNeedsUser reports whether this PR waits on the user at all.
+func PRNeedsUser(p PR, agents []AgentView) bool { return PRWaitReason(p, agents) != PRWaitNone }
 
 // AnyLiveReviewer reports whether a reviewer agent is up in that project. Scoped because
 // assignment is (-> workflow.freeReviewer reads one project's roster), so a reviewer up in another

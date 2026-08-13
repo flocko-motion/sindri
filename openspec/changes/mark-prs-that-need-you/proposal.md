@@ -10,9 +10,19 @@ going to be reviewed, and its row looks exactly like one being worked on.
 
 ## What changes
 
-- `api.PRNeedsUser` states the rule: approved (waiting on the merge), or open with no reviewer alive
-  in its repo (waiting on a review that is not coming). A rejected PR waits on its author, so it is
-  out.
+- `api.PRWaitReason` states the rule and returns WHICH state a PR is in: merge-failed, approved
+  (waiting on the merge), interim, or open with no reviewer alive in its repo. `PRNeedsUser` is that
+  answer read as a yes/no. A rejected PR waits on its author and a merging one on the merge under
+  way, so both are out.
+- `merge-failed` is the state a hub restart leaves behind when it catches a merge in flight
+  (`ReconcileMergingPRs`): nothing retries it, no agent path touches it, and no verb accepts it —
+  `PRApprovable` is open-or-approved and `Merge` takes only approved — so it sits in the PRs count
+  for ever unless a person is told to look at the base branch. It is the most stuck of the four and
+  the least arguable.
+- The reason is a value, not a sentence: the CLI maps it to words and to the command that clears it.
+  Each state has a different remedy, and a front-end that re-derived the classification would one
+  day print "no reviewer is running" against a half-applied merge — the one action that cannot
+  help. A test walks `api.PRWaits` and fails if any reason has no words here.
 - A third state joins those two: an open **interim** PR — a mid-task contribution or a milestone.
   No reviewer is ever asked for one (`workflow.needsReview` excludes them, `resolve.go` says
   "interim PRs are user-gated — no reviewer"), so it is the user's from the moment it opens, and a

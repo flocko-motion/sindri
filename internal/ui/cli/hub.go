@@ -380,7 +380,7 @@ func prListCmd() *cobra.Command {
 					// from the same field, so the two front-ends cannot answer differently.
 					line := fmt.Sprintf("%-14s %-13s %4s  %-10s %-10s %s",
 						p.ID, status, shortAge(p.CreatedAt), p.Agent, dash(p.Reviewer), p.Branch)
-					if why := prWaitReason(p, st.Agents); why != "" {
+					if why := prWaitRow(api.PRWaitReason(p, st.Agents)); why != "" {
 						line += "  ! " + why
 					}
 					fmt.Println(line)
@@ -408,56 +408,68 @@ func prListCmd() *cobra.Command {
 	return c
 }
 
-// prWaitReason says why a PR waits on the user, "" when it does not. The three cases have different
-// remedies, and starting a reviewer — the obvious move — clears only one of them.
-func prWaitReason(p api.PR, agents []api.AgentView) string {
-	if !api.PRNeedsUser(p, agents) {
-		return ""
-	}
-	switch {
-	case p.Status == "approved":
-		return "waiting on your merge"
-	case p.Kind == "interim":
-		return "user-gated: no reviewer is asked for an interim PR"
-	default:
-		return "no reviewer is running"
-	}
+// prWaitWords is how each reason (-> api.PRWaitReason) reads: the row's short why, and how the
+// closing line names the group with the command that clears it. Rendering only — a reason added to
+// the rule arrives here as a gap the tests catch, never as a confident wrong remedy.
+var prWaitWords = map[api.PRWait]struct{ row, fix string }{
+	api.PRWaitMergeFailed: {
+		"a merge died in flight — the base branch needs a look",
+		"left mid-merge with the outcome unknown — inspect the base branch (`sindri pr info <id>`)",
+	},
+	api.PRWaitMerge: {
+		"waiting on your merge",
+		"approved and unmerged — `sindri pr merge <id>`",
+	},
+	api.PRWaitUserGated: {
+		"user-gated: no reviewer is asked for an interim PR",
+		"user-gated, so no reviewer will look — `sindri pr approve <id>`",
+	},
+	api.PRWaitReview: {
+		"no reviewer is running in this repo",
+		"waiting on a review with no reviewer running in their repo — review one yourself " +
+			"(`sindri pr approve <id>`) or start a reviewer (`sindri agent new --role reviewer`)",
+	},
 }
 
-// prNeedsYouSummary names the PRs nothing but the user will move, "" when none. An approved PR
-// looks finished and a stranded one looks busy; neither row says the queue has stopped.
-func prNeedsYouSummary(prs []api.PR, agents []api.AgentView) string {
-	var merge, interim, unreviewed []string
-	for _, p := range prs {
-		switch {
-		case !api.PRNeedsUser(p, agents):
-		case p.Status == "approved":
-			merge = append(merge, p.ID)
-		case p.Kind == "interim":
-			interim = append(interim, p.ID)
-		default:
-			unreviewed = append(unreviewed, p.ID)
-		}
-	}
-	var parts []string
-	if len(merge) > 0 {
-		parts = append(parts, fmt.Sprintf("%s approved and unmerged — `sindri pr merge <id>`",
-			strings.Join(merge, ", ")))
-	}
-	if len(interim) > 0 {
-		parts = append(parts, fmt.Sprintf("%s user-gated, so no reviewer will look — `sindri pr approve <id>`",
-			strings.Join(interim, ", ")))
-	}
-	if len(unreviewed) > 0 {
-		parts = append(parts, fmt.Sprintf("%s waiting on a review with no reviewer running — review it "+
-			"yourself (`sindri pr approve <id>`) or start one (`sindri agent new --role reviewer`)",
-			strings.Join(unreviewed, ", ")))
-	}
-	if len(parts) == 0 {
+// prWaitRow is the marker a listed row carries, "" when the PR waits on nobody. A reason with no
+// words yet says only that it needs you: naming the wrong remedy is worse than naming none.
+func prWaitRow(w api.PRWait) string {
+	if w == api.PRWaitNone {
 		return ""
 	}
-	return fmt.Sprintf("%d PR(s) need you: %s.",
-		len(merge)+len(interim)+len(unreviewed), strings.Join(parts, "; "))
+	if words, ok := prWaitWords[w]; ok {
+		return words.row
+	}
+	return "needs you"
+}
+
+// prNeedsYouSummary names the PRs nothing but the user will move, "" when none — an approved one
+// looks finished, a stranded one busy. Most stuck first, each with the command that clears it.
+func prNeedsYouSummary(prs []api.PR, agents []api.AgentView) string {
+	byReason := map[api.PRWait][]string{}
+	n := 0
+	for _, p := range prs {
+		if w := api.PRWaitReason(p, agents); w != api.PRWaitNone {
+			byReason[w] = append(byReason[w], p.ID)
+			n++
+		}
+	}
+	if n == 0 {
+		return ""
+	}
+	var parts []string
+	for _, w := range api.PRWaits {
+		ids, ok := byReason[w]
+		if !ok {
+			continue
+		}
+		fix := "needs you" // as prWaitRow: an unrendered reason still gets its PRs named
+		if words, ok := prWaitWords[w]; ok {
+			fix = words.fix
+		}
+		parts = append(parts, strings.Join(ids, ", ")+" "+fix)
+	}
+	return fmt.Sprintf("%d PR(s) need you: %s.", n, strings.Join(parts, "; "))
 }
 
 // reviewBadge renders one review verdict: its state, verdict, author and when, marking a

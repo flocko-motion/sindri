@@ -94,9 +94,10 @@ func TestAttentionCountsWhatOnlyTheUserCanMove(t *testing.T) {
 			{Project: "p", ID: "pr-approved", Status: "approved"},
 			{Project: "p", ID: "pr-merged", Status: "merged"},
 			{Project: "p", ID: "pr-rejected", Status: "rejected"},
+			{Project: "p", ID: "pr-merge-failed", Status: "merge-failed"}, // a restart caught it mid-merge
 		},
 	}
-	want := map[string]int{"tasks": 1, "agents": 4, "prs": 2}
+	want := map[string]int{"tasks": 1, "agents": 4, "prs": 3}
 	for _, s := range Resolved(b) {
 		if s.Attention != want[s.Key] {
 			t.Errorf("%s attention = %d, want %d", s.Key, s.Attention, want[s.Key])

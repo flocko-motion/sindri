@@ -57,8 +57,9 @@ func TestCountAgentsNeedingUserCountsAgentsNotReasons(t *testing.T) {
 
 // TestPRNeedsUserCoversEveryWaitingState: an approved PR waits on the merge, which no agent may
 // perform; an open one with no reviewer alive waits on a review that is never coming; an interim
-// one is user-gated by design, so no reviewer is ever asked for it. All three look like ordinary
-// rows, which is why they are counted rather than left to be noticed.
+// one is user-gated by design; a merge-failed one is stuck hardest of all, since no verb accepts it
+// and nothing retries it. All four look like ordinary rows, which is why they are counted rather
+// than left to be noticed.
 func TestPRNeedsUserCoversEveryWaitingState(t *testing.T) {
 	live := []AgentView{{Project: "p", Name: "dvalin", Role: "reviewer", Status: "idle"}}
 	none := []AgentView{{Project: "p", Name: "dvalin", Role: "worker", Status: "working"}}
@@ -79,6 +80,10 @@ func TestPRNeedsUserCoversEveryWaitingState(t *testing.T) {
 		{"rejected waits on its author", PR{Project: "p", Status: "rejected"}, none, false},
 		{"merged waits on nobody", PR{Project: "p", Status: "merged"}, none, false},
 		{"scrapped waits on nobody", PR{Project: "p", Status: "scrapped"}, none, false},
+		// merge-failed: a restart caught the merge in flight, so nobody knows whether base carries
+		// it. No agent path touches it and no verb accepts it, so it moves only when a person looks.
+		{"merge-failed is the most stuck of all", PR{Project: "p", Status: "merge-failed"}, live, true},
+		{"a merge under way waits on the merge, not on you", PR{Project: "p", Status: "merging"}, live, false},
 	}
 	for _, c := range cases {
 		if got := PRNeedsUser(c.pr, c.agents); got != c.want {
@@ -132,12 +137,36 @@ func TestCountPRsNeedingUserCountsPRsNotReasons(t *testing.T) {
 	prs := []PR{
 		{Project: "p", ID: "a", Status: "approved"}, {Project: "p", ID: "b", Status: "open"},
 		{Project: "p", ID: "c", Status: "merged"}, {Project: "p", ID: "d", Status: "open", Kind: "interim"},
+		{Project: "p", ID: "e", Status: "merge-failed"},
 	}
-	if got := CountPRsNeedingUser(prs, nil); got != 3 {
-		t.Errorf("with no reviewer alive: %d, want 3 (approved, open, interim)", got)
+	if got := CountPRsNeedingUser(prs, nil); got != 4 {
+		t.Errorf("with no reviewer alive: %d, want 4 (approved, open, interim, merge-failed)", got)
 	}
 	live := []AgentView{{Project: "p", Role: "reviewer", Status: "idle"}}
-	if got := CountPRsNeedingUser(prs, live); got != 2 {
-		t.Errorf("with a reviewer running: %d, want 2 (the approved one and the interim one)", got)
+	if got := CountPRsNeedingUser(prs, live); got != 3 {
+		t.Errorf("with a reviewer running: %d, want 3 (approved, interim, merge-failed)", got)
+	}
+}
+
+// TestEveryReasonIsInPRWaits: callers group over PRWaits (the CLI's summary does), so a reason the
+// rule can return but the list omits would be counted and then silently dropped from the output.
+func TestEveryReasonIsInPRWaits(t *testing.T) {
+	live := []AgentView{{Project: "p", Role: "reviewer", Status: "idle"}}
+	reached := map[PRWait]bool{
+		PRWaitReason(PR{Project: "p", Status: "merge-failed"}, live):          true,
+		PRWaitReason(PR{Project: "p", Status: "approved"}, live):              true,
+		PRWaitReason(PR{Project: "p", Status: "open", Kind: "interim"}, live): true,
+		PRWaitReason(PR{Project: "other", Status: "open"}, live):              true,
+	}
+	if len(reached) != len(PRWaits) {
+		t.Fatalf("reached %d distinct reasons, PRWaits lists %d", len(reached), len(PRWaits))
+	}
+	for _, w := range PRWaits {
+		if !reached[w] {
+			t.Errorf("PRWaits lists %q, but no PR in this test produces it — one of the two is wrong", w)
+		}
+		if w == PRWaitNone {
+			t.Error("PRWaitNone is the absence of a reason; listing it would have callers group on it")
+		}
 	}
 }

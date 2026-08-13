@@ -5,8 +5,11 @@
 ### Requirement: A PR waiting on the human is marked
 
 A PR SHALL count as waiting on the user when nothing but a human will move it on.
-Three states qualify, each following from a gate the workflow already has:
+Four states qualify, each following from a gate the workflow already has:
 
+- **merge-failed** — a hub restart caught the merge in flight, so whether the base
+  branch carries it is unknown. Nothing retries it and no verb accepts it, so it moves
+  only when a person inspects the base; it is the most stuck state there is
 - **approved and unmerged** — merge is human-only and the one hard gate, so an
   approved PR is finished work waiting on a person to land it
 - **open and interim** — a mid-task contribution or a milestone is user-gated by
@@ -20,14 +23,22 @@ reviewer is chosen from its own project's roster, so one running elsewhere is ne
 handed this PR and its being up says nothing about whether a review will arrive. Within
 that repo the question is liveness rather than assignment — an open PR with nobody
 assigned is ordinary while a reviewer runs there, since one picks it up shortly. A
-rejected PR SHALL NOT count: it waits on its author to resubmit.
+rejected PR SHALL NOT count: it waits on its author to resubmit. Neither SHALL a PR
+whose merge is under way: it waits on that merge.
 
 This count SHALL be the PRs section's attention count, derived in the exchange package
 and resolved by the hub with the others, so every interface renders one number rather
-than deciding for itself which PRs qualify. Every front-end SHALL surface it: the TUI
-as the marker on its PRs handle, the CLI in its PR listing, naming the PRs and the
-action that clears each — an approved PR and a stranded one are cleared by different
-commands.
+than deciding for itself which PRs qualify. WHICH of the states a PR is in SHALL come
+from that same place, as a value a front-end renders: each is cleared by a different
+command, so a front-end that re-derived the classification could name the wrong one
+with confidence. Every front-end SHALL surface it — the TUI as the marker on its PRs
+handle, the CLI in its PR listing, naming the PRs and the action that clears each.
+
+#### Scenario: A merge orphaned by a restart
+
+- **WHEN** a hub restart leaves a PR merge-failed
+- **THEN** it is counted as waiting on the user, and the listing sends them to the base
+  branch rather than to any verb — none will take it
 
 #### Scenario: Approved work nobody has landed
 
