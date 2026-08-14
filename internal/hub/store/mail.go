@@ -69,7 +69,7 @@ func (p *ProjectStore) MarkMailRead(id int64) error {
 
 // MarkMailPushed records that the wake for this message actually landed. Set after the injection
 // SUCCEEDS, never from the sender's intent: a row claiming a push that never reached a down agent
-// would erase the difference between "it may have acted on this" and "nothing reached it".
+// would erase the difference between "it may have acted on this already" and "nothing reached it".
 func (p *ProjectStore) MarkMailPushed(id int64) error {
 	_, err := p.s.db.Exec(`UPDATE mail SET pushed=1 WHERE id=? AND project=?`, id, p.project)
 	if err != nil {

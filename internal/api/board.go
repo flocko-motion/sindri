@@ -114,9 +114,8 @@ type BoardState struct {
 	// views exist, and the badge each shows. They ride on the board so a front-end renders the
 	// counts instead of deciding them (-> SectionAttention).
 	Sections []Section `json:"sections,omitempty"`
-	// Mail is the newest messages agents must read, fleet-wide, newest first — a WINDOW, with each
-	// body cut to a preview. MailTotal and MailUnread count the whole mailbox, so a view says
-	// "showing the last N of M" rather than presenting a window as the history (-> MailWindow).
+	// Mail is the newest messages agents must read, fleet-wide — a WINDOW of previews, while MailTotal
+	// and MailUnread count the whole mailbox, so a view can say what it is not showing.
 	Mail       []Mail `json:"mail,omitempty"`
 	MailTotal  int    `json:"mailTotal"`
 	MailUnread int    `json:"mailUnread"`
@@ -212,9 +211,8 @@ func (b BoardState) AgentsNeedingUserCount() int { return CountAgentsNeedingUser
 // half the question.
 func (b BoardState) PRsNeedingUserCount() int { return CountPRsNeedingUser(b.PRs, b.Agents) }
 
-// UnreadMailCount is the Mail section's badge: unread across the whole mailbox, not the window,
-// since a badge that stopped rising once the history outgrew the window would say the wrong thing
-// exactly when there was most to say.
+// UnreadMailCount is the Mail section's badge: unread across the whole mailbox, not the window — a
+// badge that stopped rising as the history grew would go quiet exactly when there was most to say.
 func (b BoardState) UnreadMailCount() int { return b.MailUnread }
 
 // SectionAttention is how many rows of the named section wait on the user, read off the sections

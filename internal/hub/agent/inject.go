@@ -48,8 +48,11 @@ func (s *Service) inject(project, name, text string, guard bool) error {
 	return nil
 }
 
-// InjectWhenReady waits (briefly) for the tmux session, then injects — for hub-originated messages
-// right after a launch. One that never lands is recorded rather than silently lost.
+// InjectWhenReady waits (briefly) for an agent's tmux session, then injects — for a message sent right
+// after a launch, when the session may not be up yet. A message that never lands is recorded.
+//
+// It ERRORS when nothing was injected. Logging the skip used to be the whole answer, so a message
+// nobody could receive read as delivered — and a mail row's "pushed" is read from this outcome.
 func (s *Service) InjectWhenReady(project, name, text string) error {
 	return s.injectWhenReady(project, name, text, true)
 }

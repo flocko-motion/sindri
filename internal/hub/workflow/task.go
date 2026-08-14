@@ -308,6 +308,13 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 	if st.Escalation != "" {
 		return DirEscalated(st.Escalation), nil
 	}
+	// Unread mail comes before every role's directive, and before the paths that BLOCK waiting for
+	// work: an idle agent left blocking would sit on messages that may be the very thing releasing it.
+	if n, merr := ps.UnreadMailCount(name); merr != nil {
+		return "", merr
+	} else if n > 0 {
+		return DirUnreadMail(n), nil
+	}
 	if a.Role == "coauthor" {
 		return DirCoauthor, nil
 	}

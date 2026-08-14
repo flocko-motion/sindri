@@ -194,70 +194,6 @@ func (m *model) launchCmd(name string) tea.Cmd {
 	}
 }
 
-// openDeleteChoice opens the delete-agent confirm.
-func (m *model) openDeleteChoice(id string) {
-	cl := m.cl
-	m.choice = choiceModalState{
-		active: true, title: "delete agent " + id + "?",
-		options: []string{"cancel", "delete"}, values: []string{"cancel", "delete"},
-		apply: func(v string) tea.Cmd {
-			if v != "delete" {
-				return nil
-			}
-			return mutateThenRefresh(cl, func() error { return cl.DeleteAgent(id) })
-		},
-	}
-}
-
-// openClearContextChoice confirms arming a context clear. Always confirmed, never offered as a
-// choice of when: what it destroys is everything the session remembers, including whatever the user
-// typed into that pane. WHEN it lands is the agent's answer, not a question — so the title states
-// it, read off the work in hand.
-func (m *model) openClearContextChoice(a api.AgentView) {
-	cl, name := m.cl, a.Name
-	m.choice = choiceModalState{
-		active: true, title: "clear " + name + "'s context?  (" + clearLandsWhen(a) + ")",
-		options: []string{"cancel", "clear"}, values: []string{"cancel", "clear"},
-		apply: func(v string) tea.Cmd {
-			if v != "clear" {
-				return nil
-			}
-			return mutateThenRefresh(cl, func() error { return cl.SetClearArmed(name, true) })
-		},
-	}
-}
-
-// clearLandsWhen words api.ClearWaitsFor for the confirm: the rule says what the clear waits on,
-// this says it in a sentence.
-func clearLandsWhen(a api.AgentView) string {
-	held := api.ClearWaitsFor(a)
-	switch {
-	case held == "":
-		return "clears now — its session starts empty"
-	case a.Role == "reviewer":
-		return "clears when it delivers its verdict on " + held
-	default:
-		return "clears when it finishes " + held
-	}
-}
-
-// openResumeChoice confirms clearing an agent's escalation. Confirmed rather than done on the
-// keystroke because it drops the agent's own account of why it stopped: normally the agent clears its
-// own once it has the answer, and this is the release for one that never will.
-func (m *model) openResumeChoice(name string) {
-	cl := m.cl
-	m.choice = choiceModalState{
-		active: true, title: "clear " + name + "'s escalation?  (it carries on without an answer)",
-		options: []string{"cancel", "resume"}, values: []string{"cancel", "resume"},
-		apply: func(v string) tea.Cmd {
-			if v != "resume" {
-				return nil
-			}
-			return mutateThenRefresh(cl, func() error { return cl.ResumeAgent(name) })
-		},
-	}
-}
-
 // rebaseAgentCmd rebases the agent's worktree onto the reference branch; git aborts on conflict.
 func (m *model) rebaseAgentCmd(name string) tea.Cmd {
 	cl := m.cl
@@ -630,19 +566,4 @@ func (m model) isOrphan(id string) bool {
 		}
 	}
 	return false
-}
-
-// openRemoveOrphanChoice confirms a direct container rm; there's no agent identity to delete.
-func (m *model) openRemoveOrphanChoice(name string) {
-	cl := m.cl
-	m.choice = choiceModalState{
-		active: true, title: "remove orphan container " + name + "?",
-		options: []string{"cancel", "remove"}, values: []string{"cancel", "remove"},
-		apply: func(v string) tea.Cmd {
-			if v != "remove" {
-				return nil
-			}
-			return mutateThenRefresh(cl, func() error { return cl.RemoveOrphan(name) })
-		},
-	}
 }
