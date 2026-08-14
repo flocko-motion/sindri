@@ -18,7 +18,19 @@ type TellReq struct {
 	Name   string `json:"name"`
 	Msg    string `json:"msg"`
 	Source string `json:"source"`
+	// SignedOut carries the sender's answer to a signed-out pane (/tell only) — see the constants.
+	SignedOut string `json:"signedOut,omitempty"`
 }
+
+// What a message does when the agent's pane reads signed out. The pane is an OBSERVATION and can be
+// stale — the host token may have been renewed seconds ago — so a user who knows better may
+// overrule it, while a message with no human behind it keeps the refusal: typed at a /login prompt
+// it would pile up in the input box unread, and nobody is there to notice.
+const (
+	SignedOutRefuse  = ""        // refuse and explain: the default, and what a hub-originated message needs
+	SignedOutRestart = "restart" // restart the agent — it re-reads the staged credentials — then deliver
+	SignedOutSend    = "send"    // deliver regardless; if the pane was right, the failure is visible and cheap
+)
 
 // PlanReq is the body for POST /agent/plan. Task names an existing task to work up, whose title and
 // body become the brief; Goal is free text, and may accompany a task to add something it lacks.

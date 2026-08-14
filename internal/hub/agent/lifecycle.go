@@ -211,6 +211,15 @@ func (s *Service) RebuildAgent(project, name string, w io.Writer) error {
 	}
 	if container.Running(s.deps.ContainerName(project, name)) {
 		fmt.Fprintf(w, "Image rebuilt — restarting %s to run it (the session resumes)…\n", name)
+	}
+	return s.RestartAgent(project, name, w)
+}
+
+// RestartAgent replaces an agent's pod with a fresh one on the same identity — the worktree, socket
+// and log are the agent's — so the session resumes and a down agent is simply started. It is the
+// remedy for a signed-out one: the new process reads the credentials the hub keeps staged.
+func (s *Service) RestartAgent(project, name string, w io.Writer) error {
+	if container.Running(s.deps.ContainerName(project, name)) {
 		if err := s.StopAgent(project, name); err != nil {
 			return err
 		}

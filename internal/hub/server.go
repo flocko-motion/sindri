@@ -259,7 +259,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"delivered"}, h.agents.Tell(h.agentReq(r, req.Name), req.Name, req.Msg, req.Source))
+		writeJSON(w, okMsg{"delivered"}, h.agents.Tell(h.agentReq(r, req.Name), req.Name, req.Msg, req.Source, req.SignedOut))
 	})
 	mux.HandleFunc("POST /chat/add", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq

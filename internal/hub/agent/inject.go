@@ -10,22 +10,30 @@ package agent
 import (
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	agentport "github.com/flo-at/sindri/internal/adapter/agent"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
 )
 
-// Inject types text into an agent's tmux session via the container runtime. Fails if the agent isn't
-// running (the caller decides whether that's an error or to wait), or if it is signed out: text
-// typed at that prompt is never sent, it piles up in the input box unread.
+// Inject types text into an agent's tmux session. It fails on an agent that isn't running (the
+// caller decides whether to wait) and on a signed-out one, whose input box swallows anything typed.
+// That refusal is for messages with nobody present to notice; a user's own answers for itself (-> Tell).
 func (s *Service) Inject(project, name, text string) error {
+	return s.inject(project, name, text, true)
+}
+
+// inject is the delivery; guard refuses a signed-out pane. False where a human, asked, said send
+// anyway: the pane is a prediction and theirs may be the better information.
+func (s *Service) inject(project, name, text string, guard bool) error {
 	c := s.deps.ContainerName(project, name)
 	if !container.Running(c) {
 		return fmt.Errorf("agent %q is not running — launch it first", name)
 	}
-	if s.RuntimeState(context.Background(), project, name) == string(agentport.SignedOut) {
+	if guard && s.readsSignedOut(project, name) {
 		return fmt.Errorf("agent %q is signed out — its pane says to run /login, and nothing typed there is sent. "+
 			"Its credentials come from the host and the hub keeps them staged, so the running process just has to "+
 			"re-read them: `sindri agent restart %s` (the session resumes). If the host is signed out too, log in "+
@@ -40,16 +48,20 @@ func (s *Service) Inject(project, name, text string) error {
 	return nil
 }
 
-// InjectWhenReady waits (briefly) for an agent's tmux session to exist, then injects.
-// Used for hub-originated messages (verdicts, rehydrate) right after a launch, when
-// the session may not be up yet. A message that never lands is recorded so it is not
-// silently lost.
+// InjectWhenReady waits (briefly) for the tmux session, then injects — for hub-originated messages
+// right after a launch. One that never lands is recorded rather than silently lost.
 func (s *Service) InjectWhenReady(project, name, text string) error {
+	return s.injectWhenReady(project, name, text, true)
+}
+
+// injectWhenReady is InjectWhenReady with the guard as the caller's choice: an agent restarted for
+// this very reason must not be turned away by a pane that has yet to redraw.
+func (s *Service) injectWhenReady(project, name, text string, guard bool) error {
 	c := s.deps.ContainerName(project, name)
 	for i := 0; i < 25; i++ {
 		if container.Running(c) {
 			if _, err := container.Exec(c, "tmux", "has-session", "-t", name); err == nil {
-				err := s.Inject(project, name, text)
+				err := s.inject(project, name, text, guard)
 				if err != nil {
 					// Recorded, not dropped: the reason belongs to the agent, and the log is where a
 					// user reconstructs what it was never told.
@@ -63,10 +75,9 @@ func (s *Service) InjectWhenReady(project, name, text string) error {
 	return s.store.For(project).Log(name, "inject-skipped", text)
 }
 
-// Interrupt sends an Escape to the agent's tmux session — Claude's "abort the current
-// operation" key — so a follow-up message lands on an idle prompt instead of being
-// queued behind in-flight work. Errors when the agent isn't running; the caller
-// decides whether that matters (for a scrap it's fine — nothing to interrupt).
+// Interrupt sends Escape — Claude's "abort the current operation" — so a follow-up message lands on
+// an idle prompt rather than queueing behind in-flight work. Errors on an agent that isn't running,
+// which the caller may not mind (a scrap has nothing to interrupt).
 func (s *Service) Interrupt(project, name string) error {
 	c := s.deps.ContainerName(project, name)
 	if !container.Running(c) {
@@ -77,9 +88,10 @@ func (s *Service) Interrupt(project, name string) error {
 	return err
 }
 
-// Tell delivers a message into an agent's session, stamped with its source
-// (provenance, D12). The stamped line is recorded in the activity log.
-func (s *Service) Tell(project, name, msg, source string) error {
+// Tell delivers a source-stamped message (provenance, D12), recording the line in the activity log.
+// signedOut is the sender's answer to a signed-out pane (api.SignedOutRefuse / Restart / Send): the
+// default refuses, and the other two exist because the person typing may know the pane is stale.
+func (s *Service) Tell(project, name, msg, source, signedOut string) error {
 	ps := s.store.For(project)
 	if _, ok, err := ps.GetAgent(name); err != nil {
 		return err
@@ -90,9 +102,35 @@ func (s *Service) Tell(project, name, msg, source string) error {
 		source = "user"
 	}
 	stamped := fmt.Sprintf("[%s] %s", source, msg)
-	if err := s.Inject(project, name, stamped); err != nil {
+	if err := s.deliver(project, name, stamped, signedOut); err != nil {
 		return err
 	}
 	defer s.deps.Notify()
 	return ps.Log(name, "recv", stamped)
+}
+
+// deliver puts the line in, honouring the sender's answer about a signed-out pane: the restart the
+// refusal has always named is carried out rather than recommended. The answer applies only where the
+// pane really reads signed out — given in advance, it must not bounce a session that turned out fine.
+func (s *Service) deliver(project, name, stamped, signedOut string) error {
+	switch signedOut {
+	case api.SignedOutSend, api.SignedOutRestart:
+		if !s.readsSignedOut(project, name) {
+			break
+		}
+		if signedOut == api.SignedOutRestart {
+			if err := s.RestartAgent(project, name, io.Discard); err != nil {
+				return fmt.Errorf("restarting %s to deliver the message: %w", name, err)
+			}
+			return s.injectWhenReady(project, name, stamped, false)
+		}
+		return s.inject(project, name, stamped, false)
+	}
+	return s.Inject(project, name, stamped)
+}
+
+// readsSignedOut is the pane's verdict on whether anything typed is sent — an observation, which is
+// why a user may overrule it and the hub may not.
+func (s *Service) readsSignedOut(project, name string) bool {
+	return s.RuntimeState(context.Background(), project, name) == string(agentport.SignedOut)
 }

@@ -43,7 +43,7 @@ type backend interface {
 	Instance(name string) (string, error)
 	Clients(name string) ([]api.ClientView, error)
 	Launch(name string, shell, debug bool, out io.Writer) error
-	Tell(name, msg, source string) error
+	Tell(name, msg, source, signedOut string) error
 	AssignPlan(name, goal, taskID string) error
 	ChatAdd(name string) error
 	ChatRemove(name string) error

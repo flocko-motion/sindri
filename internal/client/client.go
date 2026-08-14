@@ -261,9 +261,11 @@ func (c *HTTP) RebuildImage(name string, out io.Writer) error {
 	return nil
 }
 
-// Tell delivers a provenance-stamped message into an agent's session.
-func (c *HTTP) Tell(name, msg, source string) error {
-	return c.post("/tell", api.TellReq{Name: name, Msg: msg, Source: source})
+// Tell delivers a provenance-stamped message into an agent's session. signedOut is what to do if
+// the agent's pane reads signed out: refuse (api.SignedOutRefuse), restart it first, or send
+// regardless — the sender's call, since the pane reading may be older than what they know.
+func (c *HTTP) Tell(name, msg, source, signedOut string) error {
+	return c.post("/tell", api.TellReq{Name: name, Msg: msg, Source: source, SignedOut: signedOut})
 }
 
 // AssignPlan gives a planner one thing to plan, as a phased brief. taskID works up an existing task,

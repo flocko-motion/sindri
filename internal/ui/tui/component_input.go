@@ -58,12 +58,13 @@ func (m *model) submitInput() tea.Cmd {
 	cl, target := m.cl, m.inputTarget
 	switch m.mode {
 	case inputTell:
-		return func() tea.Msg {
-			if err := cl.Tell(target, v, "user"); err != nil {
-				return errModalMsg{err}
-			}
+		// A signed-out agent takes the message through a choice rather than a refusal: the remedy
+		// the refusal names is one of the options (-> openTellChoice).
+		if m.agentReadsSignedOut(target) {
+			m.openTellChoice(target, v)
 			return nil
 		}
+		return tellCmd(cl, target, v)
 	case inputComment:
 		// Refreshed after: a GitHub issue's thread is re-read on the way back, so the comment
 		// appears with the author and timestamp the source gave it.
