@@ -18,6 +18,10 @@
 - [x] 2.5 `agent.InjectWhenReady` errors when nothing was injected; it used to return nil after
       logging the skip, which read as delivered.
 - [x] 2.6 A source guard: nothing in the workflow reaches past the port to inject.
+- [x] 2.7 And a repo-wide guard for the modules the compiler cannot reach (chat, the agent
+      lifecycle): every direct injection site is listed with the reason it is push-only, and an
+      unlisted one fails the build. `Tell` is push-only DELIBERATELY — synchronous, so its caller
+      sees the failure — and says so on itself.
 
 ## 3. Pick-up
 
@@ -31,6 +35,9 @@
       directive and before the paths that block waiting for work.
 - [x] 4.2 It REPLACES rather than accompanies that directive: mail can change what the next action is,
       so reading first is the correct order.
+- [x] 4.3 Ahead of the ESCALATION too — the one state told to sit and wait, so the least likely to
+      find mail by chance — which also makes DirEscalated's "nothing has come back" true rather than
+      merely unchecked.
 
 ## 5. Visibility
 
@@ -55,6 +62,8 @@
 - [x] 7.2 Push-only stores nothing — the argument that makes unbounded retention affordable.
 - [x] 7.3 Two real senders end to end: a rejection is mail+push, a stall nudge is push-only.
 - [x] 7.4 The directive reminds, reading clears it, and the record survives marked read.
+- [x] 7.4b An escalated agent is told, can read while escalated, and goes back to waiting after —
+      with the mailbox claim checked. The guard is proven non-vacuous by an undeclared injector.
 - [x] 7.5 The window keeps the recent end while the tallies count everything.
 - [x] 7.6 Both front-ends: rows, disclosure, filters, the body, the agent's count.
 - [x] 7.7 `make verify` passes.

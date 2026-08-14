@@ -42,6 +42,14 @@ wins.
 - **THEN** it is told how much is waiting and how to read it, ahead of any other
   directive, since a verdict or a cancellation can change what that action is
 
+#### Scenario: An agent that was told to sit still is told too
+
+- **WHEN** an agent stopped on a decision only the user can make asks for its next
+  action and has unread mail
+- **THEN** it is told about the mail first, because it is the state least likely to
+  find out by chance and the mail may answer or moot its question — and any claim the
+  hub makes that nothing has arrived is made only once the mailbox is empty
+
 #### Scenario: Reading is explicit and keeps the record
 
 - **WHEN** an agent reads its mail

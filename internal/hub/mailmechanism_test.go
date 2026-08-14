@@ -121,6 +121,46 @@ func TestTheDirectiveRemindsAndReadingClearsIt(t *testing.T) {
 	}
 }
 
+// TestAnEscalatedAgentIsStillToldItHasMail is the narrow path this feature exists for. An escalated
+// agent is the one state explicitly instructed to sit and wait, so it is the LAST that would discover
+// mail by chance — and the mail it is waiting on may be the answer, or may moot the task it asked
+// about. The escalation directive also claims nothing has come back, which is only true once the
+// mailbox is empty, so mail is answered first and the claim becomes true by construction.
+func TestAnEscalatedAgentIsStillToldItHasMail(t *testing.T) {
+	h, ps := mailAgent(t)
+	if _, err := h.Escalate(testProject, "dvalin", "one column or two?"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ps.AddMail("dvalin", "reviewer", "[reviewer] rejected: see the findings", false); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := h.wf.AgentDirective(t.Context(), testProject, "dvalin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(dir, "unread") {
+		t.Errorf("an escalated agent with mail must be told about it: %q", dir)
+	}
+	if strings.Contains(dir, "Nothing has come back yet") {
+		t.Errorf("it must not be told nothing has come back while a message waits: %q", dir)
+	}
+	// Reading it is never held back by the escalation, and afterwards the escalation directive is the
+	// answer again — now truthfully, since the mailbox is empty.
+	if out, code := execAs(t, h, "dvalin", "mail"); code != 0 {
+		t.Fatalf("an escalated agent must be able to read its mail (%d): %s", code, out)
+	}
+	dir, err = h.wf.AgentDirective(t.Context(), testProject, "dvalin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(dir, "ESCALATED") || !strings.Contains(dir, "one column or two?") {
+		t.Errorf("with the mailbox empty it goes back to waiting on its question: %q", dir)
+	}
+	if !strings.Contains(dir, "mailbox is empty") {
+		t.Errorf("and the claim it makes about the mailbox should be the checked one: %q", dir)
+	}
+}
+
 // TestAnEmptyMailboxSaysSo: an agent told to check its mail and shown nothing must be able to tell
 // "nothing is waiting" from "something went wrong".
 func TestAnEmptyMailboxSaysSo(t *testing.T) {

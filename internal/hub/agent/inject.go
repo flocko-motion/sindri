@@ -95,6 +95,10 @@ func (s *Service) Interrupt(project, name string) error {
 // Tell delivers a source-stamped message (provenance, D12), recording the line in the activity log.
 // signedOut is the sender's answer to a signed-out pane (api.SignedOutRefuse / Restart / Send): the
 // default refuses, and the other two exist because the person typing may know the pane is stale.
+//
+// PUSH-ONLY, decided rather than omitted (-> workflow.Delivery): it is synchronous, so a message that
+// cannot land is reported to whoever typed it rather than lost, and conversational steering must not
+// accumulate in a mailbox that is never pruned.
 func (s *Service) Tell(project, name, msg, source, signedOut string) error {
 	ps := s.store.For(project)
 	if _, ok, err := ps.GetAgent(name); err != nil {
