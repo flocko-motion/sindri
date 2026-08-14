@@ -292,6 +292,10 @@ func (h *Hub) Handler() http.Handler {
 		// Clears the shared history and announces it; membership survives.
 		writeJSON(w, okMsg{"new meeting"}, h.chat.NewMeeting())
 	})
+	mux.HandleFunc("POST /chat/close", func(w http.ResponseWriter, r *http.Request) {
+		_, err := h.chat.Close()
+		writeJSON(w, okMsg{"meeting closed"}, err)
+	})
 	mux.HandleFunc("POST /chat/heartbeat", func(w http.ResponseWriter, r *http.Request) {
 		h.chat.Heartbeat()
 		writeJSON(w, okMsg{"ok"}, nil)

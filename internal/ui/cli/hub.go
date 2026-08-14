@@ -49,6 +49,7 @@ type backend interface {
 	ChatRemove(name string) error
 	ChatSay(msg string) error
 	NewMeeting() error
+	CloseMeeting() error
 	ChatHeartbeat() error
 	Chat() (api.ChatView, error)
 	ChatWatch(ctx context.Context) (<-chan api.ChatView, error)

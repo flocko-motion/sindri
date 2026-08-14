@@ -14,15 +14,28 @@ import (
 //
 // Locked because a broadcast fans out to members concurrently.
 type recorder struct {
-	mu   sync.Mutex
-	sent map[string][]string
+	mu        sync.Mutex
+	sent      map[string][]string
+	whenReady map[string][]string // the subset delivered without interrupting the agent
 }
 
-func newRecorder() *recorder { return &recorder{sent: map[string][]string{}} }
+func newRecorder() *recorder {
+	return &recorder{sent: map[string][]string{}, whenReady: map[string][]string{}}
+}
 
 func (r *recorder) Inject(project, name, text string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.sent[name] = append(r.sent[name], text)
+	return nil
+}
+
+// InjectWhenReady records the same way but keeps the two apart, so a test can say whether an agent
+// was interrupted or waited for.
+func (r *recorder) InjectWhenReady(project, name, text string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.whenReady[name] = append(r.whenReady[name], text)
 	r.sent[name] = append(r.sent[name], text)
 	return nil
 }

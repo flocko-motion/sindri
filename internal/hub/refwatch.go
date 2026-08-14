@@ -1,8 +1,9 @@
 // package: hub / refwatch
 // type:    logic (the tick behind reference-branch drift and PR health)
-// job:     re-check every project's reference branch on a slow loop, and keep its open
-// PRs honest against it (-> workflow/prcheck.go) and against the review-row
-// invariants (-> workflow/reviewhealth.go).
+// job:     re-check every project's reference branch on a slow loop, keep its open PRs
+// honest against it (-> workflow/prcheck.go) and against the review-row
+// invariants (-> workflow/reviewhealth.go), and close a meeting nobody is
+// holding any more (-> chat.CloseIfIdle).
 // limits:  just the cadence and lifecycle; the checks live in workflow.
 package hub
 
@@ -76,6 +77,21 @@ func (r *refwatch) sweep() {
 		}
 	}
 	r.preflight(projects)
+	r.closeDormantMeeting()
+}
+
+// closeDormantMeeting ends a meeting that has gone quiet for an hour. On this loop rather than one
+// of its own: the room is one per hub, the check is a single transcript read, and being late by a
+// tick costs nothing — an hour is already the answer to "is this over?".
+func (r *refwatch) closeDormantMeeting() {
+	n, err := r.h.chat.CloseIfIdle()
+	if err != nil {
+		log.Printf("hub: closing the dormant meeting: %v", err)
+		return
+	}
+	if n > 0 {
+		log.Printf("hub: meeting closed after an hour idle — %d member(s) removed", n)
+	}
 }
 
 // preflight keeps the open PRs honest against their bases, and their review rows live, OFF this

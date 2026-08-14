@@ -39,6 +39,9 @@ type chatDelivery struct{ h *Hub }
 func (c chatDelivery) Inject(project, name, text string) error {
 	return c.h.agents.Inject(project, name, text)
 }
+func (c chatDelivery) InjectWhenReady(project, name, text string) error {
+	return c.h.agents.InjectWhenReady(project, name, text)
+}
 func (c chatDelivery) Running(project, name string) bool {
 	return container.Running(c.h.container(project, name))
 }

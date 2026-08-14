@@ -27,8 +27,12 @@ import (
 // Delivery is the only coupling back to the hub, keeping chat off tmux and the bus.
 type Delivery interface {
 	Inject(project, name, text string) error // type a line into an agent's session
-	Running(project, name string) bool       // is the agent's pod up?
-	Notify()                                 // wake the board / live views
+	// InjectWhenReady waits for an idle prompt before typing. What the hub says on its OWN
+	// initiative goes this way: an agent must not be interrupted to be told about a room it had
+	// forgotten it was in.
+	InjectWhenReady(project, name, text string) error
+	Running(project, name string) bool // is the agent's pod up?
+	Notify()                           // wake the board / live views
 }
 
 const (
@@ -37,8 +41,14 @@ const (
 
 	transcriptLimit = 200              // how much history a snapshot / live view carries
 	presenceTTL     = 20 * time.Second // room stays unlocked this long after the last heartbeat
-	maxLen          = 4000             // per-message cap (deep talk, but not a novel / huge inject)
-	sep             = " ⏎ "            // between messages of a one-line catch-up (a real newline would submit)
+	// meetingIdle is how long a room may go with nothing said before it closes itself. Slow on
+	// purpose, like refInterval: a meeting is a human activity, and an hour of silence means it is
+	// over. Measured from the last MESSAGE rather than from the presence lock — the transcript is
+	// the record of the meeting, and a TUI left open on the Chat tab heartbeats for ever, which
+	// would keep an empty room alive precisely when nobody is meeting in it.
+	meetingIdle = time.Hour
+	maxLen      = 4000  // per-message cap (deep talk, but not a novel / huge inject)
+	sep         = " ⏎ " // between messages of a one-line catch-up (a real newline would submit)
 
 )
 
@@ -52,6 +62,9 @@ const (
 	MsgWelcome  = "[hub] You've been added to the meeting room. Use `sindri meeting <message>` to emit a message to everybody in the room; you'll also receive the others' messages here, prefixed [meeting]. Use it to coordinate issues with the other agents — tell them what you're working on and listen to what they're working on. The user will lead the discussion to answer an open question as a team."
 	MsgReminder = "[hub] You're in the meeting room: `sindri meeting <message>` talks to everyone in the room, and their messages arrive here prefixed [meeting]."
 	MsgRemoved  = "[hub] You've been removed from the meeting room — `sindri meeting` is no longer available. Carry on with your work."
+	// MsgMeetingClosed ends membership for everyone at once. Distinct from MsgRemoved because
+	// nothing was decided about this agent in particular: the meeting is over.
+	MsgMeetingClosed = "[hub] The meeting room closed — `sindri meeting` is no longer available. Carry on with your work."
 	// MsgNewMeeting is announced, not silent: members hold the old discussion in their own context,
 	// so being told the shared slate is clean is what stops them answering the previous meeting.
 	MsgNewMeeting = "a new meeting started — the shared history was cleared. Earlier messages are gone from the room, so restate anything that still matters instead of assuming it carried over."
@@ -153,6 +166,65 @@ func (s *Service) NewMeeting() error {
 	}
 	_, err := s.broadcast("", system, MsgNewMeeting)
 	return err
+}
+
+// Close ends the meeting: every member is removed and told, and the transcript records why. It does
+// NOT clear the history — NewMeeting owns that, and keeping the two apart means a closed meeting can
+// still be read. Closing an empty room does nothing at all, so it is safe to press twice.
+//
+// Members are interrupted here, unlike the automatic close: the user has just ended the meeting, and
+// an agent that thinks it is still in a room will try to speak into one that no longer takes it.
+func (s *Service) Close() (int, error) {
+	return s.closeRoom("the user closed the meeting", false)
+}
+
+// CloseIfIdle closes a room that has gone meetingIdle with nothing said, reporting how many members
+// it removed (0 when the room was empty, or still in use). Quiet by design: nobody is woken to be
+// told a meeting they had forgotten is over.
+func (s *Service) CloseIfIdle() (int, error) { return s.closeIfIdleAt(time.Now()) }
+
+// closeIfIdleAt takes the moment to measure against, so the rule can be exercised without waiting an
+// hour. The clock is read once, at the edge (-> CloseIfIdle).
+func (s *Service) closeIfIdleAt(now time.Time) (int, error) {
+	msgs, err := s.store.ChatTranscript(1)
+	if err != nil {
+		return 0, err
+	}
+	if len(msgs) == 0 {
+		return 0, nil // nothing was ever said; there is no meeting to have gone quiet
+	}
+	at, err := time.Parse(time.RFC3339, msgs[len(msgs)-1].TS)
+	if err != nil || now.Sub(at) < meetingIdle {
+		return 0, nil
+	}
+	return s.closeRoom("meeting closed after an hour idle", true)
+}
+
+// closeRoom empties the roster and leaves the reason in the transcript. The note is written LAST,
+// once the members are gone: it is a record for whoever opens the room next, not another thing to
+// deliver to agents on their way out.
+func (s *Service) closeRoom(reason string, quiet bool) (int, error) {
+	members, err := s.store.ChatMembers()
+	if err != nil {
+		return 0, err
+	}
+	if len(members) == 0 {
+		return 0, nil
+	}
+	for _, m := range members {
+		if _, err := s.store.ChatRemove(m.Project, m.Name); err != nil {
+			return 0, err
+		}
+		if quiet {
+			s.deliverWhenReady(m.Project, m.Name, MsgMeetingClosed)
+			continue
+		}
+		s.deliver(m.Project, m.Name, MsgMeetingClosed)
+	}
+	if _, err := s.broadcast("", system, reason); err != nil {
+		return len(members), err
+	}
+	return len(members), nil
 }
 
 // Remove takes an agent out of the chatroom and tells it so.
@@ -386,10 +458,20 @@ func (s *Service) broadcast(senderProject, senderName, body string) (store.ChatM
 // deliver injects one line into an agent's session. Best-effort: offline agents are
 // skipped and errors only logged, because a delivery must never fail a broadcast.
 func (s *Service) deliver(project, name, line string) {
+	s.injected(project, name, line, s.d.Inject)
+}
+
+// deliverWhenReady is deliver for what the hub says on its own initiative: it waits for an idle
+// prompt instead of cutting into a turn. Same best-effort contract.
+func (s *Service) deliverWhenReady(project, name, line string) {
+	s.injected(project, name, line, s.d.InjectWhenReady)
+}
+
+func (s *Service) injected(project, name, line string, send func(string, string, string) error) {
 	if !s.d.Running(project, name) {
 		return
 	}
-	if err := s.d.Inject(project, name, line); err != nil {
+	if err := send(project, name, line); err != nil {
 		fmt.Fprintf(os.Stderr, "hub: chat delivery to %s/%s failed: %v\n", project, name, err)
 		return
 	}

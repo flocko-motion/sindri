@@ -29,6 +29,7 @@ const (
 	keyUnassign  = "U" // release a task to the backlog
 	keyClose     = "C" // close a task
 	keyClearCtx  = "C" // clear a full agent's context — C ends what is in front of you, as it does on a task
+	keyCloseMeet = "C" // close the meeting — the same "end what is in front of you" on the Chat tab
 	keyApprove   = "A" // approve: a PR (prs) / a proposed task (tasks) — one letter, one meaning
 	keyReview    = "I" // invite an agentic review of a PR (A is approve, R is reject)
 	keyReject    = "R" // reject a PR / a proposed task
@@ -172,6 +173,7 @@ var keymap = []binding{
 	{keyApprove, lbl("add member"), scopeChat},
 	{keyReject, lbl("remove member"), scopeChat},
 	{keyNew, lbl("new meeting"), scopeChat},
+	{keyCloseMeet, lbl("close meeting"), scopeChat},
 
 	// Runs.
 	{keyPriority, lbl("priority"), scopeRuns},

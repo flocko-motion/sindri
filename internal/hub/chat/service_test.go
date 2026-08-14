@@ -6,9 +6,10 @@ import "testing"
 // injection or notification.
 type noDelivery struct{}
 
-func (noDelivery) Inject(project, name, text string) error { return nil }
-func (noDelivery) Running(project, name string) bool       { return false }
-func (noDelivery) Notify()                                 {}
+func (noDelivery) Inject(project, name, text string) error          { return nil }
+func (noDelivery) InjectWhenReady(project, name, text string) error { return nil }
+func (noDelivery) Running(project, name string) bool                { return false }
+func (noDelivery) Notify()                                          {}
 
 // TestPresenceLock: the room is locked until the user heartbeats, and locks again
 // once the last heartbeat ages past the TTL (the required-participant rule).

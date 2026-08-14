@@ -360,13 +360,17 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 0 {
 			return m.whyNextCmd()
 		}
-	case keyClose: // tasks: close the selected task (mark it done) · agents: clear a full context
+	case keyClose: // tasks: close the task · agents: clear a full context · meeting: close the meeting
 		if m.tab == 0 && m.selID() != "" {
 			if pr := m.attachedOpenPR(m.selID()); pr != "" { // prompt to discard its PR too
 				m.openCloseChoice(m.selID(), pr)
 				return nil
 			}
 			return m.closeTaskCmd(m.selID())
+		}
+		if m.tab == 4 { // meeting: C ends what is in front of you here too — the meeting itself
+			m.openCloseMeetingChoice()
+			return nil
 		}
 		if m.tab == 1 && m.selID() != "" && !m.isOrphan(m.selID()) {
 			a, ok := m.selAgent()

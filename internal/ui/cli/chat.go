@@ -48,7 +48,7 @@ func NewChatCmd() *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	c.AddCommand(chatAddCmd(), chatRemoveCmd(), chatJoinCmd(), chatLogCmd(), chatNewCmd())
+	c.AddCommand(chatAddCmd(), chatRemoveCmd(), chatJoinCmd(), chatLogCmd(), chatNewCmd(), chatCloseCmd())
 	return c
 }
 
@@ -68,6 +68,30 @@ func chatNewCmd() *cobra.Command {
 					return err
 				}
 				fmt.Fprintln(os.Stderr, "new meeting — history cleared, members kept")
+				return nil
+			})
+		},
+	}
+}
+
+// chatCloseCmd ends the meeting: the CLI half of the TUI's `C`. No prompt, like every other
+// destructive verb here — the CLI stays scriptable and the TUI is where a human gets the confirm.
+func chatCloseCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "close", Short: "Close the meeting: remove every member (the transcript is kept)", Args: cobra.NoArgs,
+		Long: "End the meeting. Every member is removed and told, so nothing tries to speak into a " +
+			"room that is over, and the roster stops being carried indefinitely.\n\n" +
+			"The transcript is KEPT — a closed meeting can still be read (`sindri meeting log`); " +
+			"`sindri meeting new` is what clears it. Re-adding members afterwards is manual, which " +
+			"is why this is the deliberate end of a meeting rather than a pause.\n\n" +
+			"A room with nothing said in it for an hour closes itself the same way.",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return withBackend(func(b backend) error {
+				if err := b.CloseMeeting(); err != nil {
+					return err
+				}
+				fmt.Fprintln(os.Stderr, "meeting closed — members removed, transcript kept "+
+					"(`sindri meeting log` still reads it)")
 				return nil
 			})
 		},
