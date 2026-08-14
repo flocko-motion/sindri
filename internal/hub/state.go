@@ -148,6 +148,9 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		Agents:      agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans, Chat: chat,
 		RepoDocs: docs, SpecCLIMissing: specMissing, StartedAt: h.startedAt.UTC().Format(time.RFC3339),
 		DefaultMemory: agent.MemoryOrDefault(""),
+		// Reported from the watchdog's last reading, like liveness and for the same reason: taking
+		// one here would put a process spawn on every board read, and there are many.
+		Memory: h.watch.headroom(),
 	}
 	return withSections(board), nil
 }

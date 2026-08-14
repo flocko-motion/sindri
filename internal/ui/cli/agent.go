@@ -169,13 +169,19 @@ func needsYouSummary(agents []api.AgentView) string {
 		"releases one that cannot.", len(stuck), strings.Join(stuck, "\n  "))
 }
 
-// agentStatsCmd is the view for tuning per-agent memory; down agents have no VM to sample.
+// agentStatsCmd is the view for tuning per-agent memory; down agents have no VM to sample. It
+// opens with the fleet's headroom — the same figure the TUI header carries, since "will another
+// agent fit" is the question the per-agent rows are usually being read for.
 func agentStatsCmd() *cobra.Command {
 	return &cobra.Command{
-		Use: "stats [name]", Short: "Show each running agent's VM memory usage vs its limit", Args: cobra.MaximumNArgs(1),
+		Use: "stats [name]", Short: "Show the fleet's memory headroom and each running agent's usage vs its limit", Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withBackend(func(b backend) error {
 				report, err := b.Stats()
+				if err != nil {
+					return err
+				}
+				st, err := b.State()
 				if err != nil {
 					return err
 				}
@@ -189,7 +195,8 @@ func agentStatsCmd() *cobra.Command {
 					}
 					views = only
 				}
-				fmt.Printf("engine: %s\n\n", report.Engine)
+				fmt.Printf("engine: %s\n", report.Engine)
+				fmt.Printf("fleet:  %s\n\n", theme.FleetLine(st.Memory))
 				if len(views) == 0 {
 					fmt.Fprintln(os.Stderr, "no running agents to sample")
 					return nil

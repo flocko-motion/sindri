@@ -54,6 +54,35 @@ type RepoDocState struct {
 	Advice   string `json:"advice"`   // "" when nothing to say
 }
 
+// FleetMemory is the machine's memory headroom for agents: what the fleet costs the host now,
+// the ceiling it draws from, and how many more agents of the default size fit in what is left.
+// The fit count is the figure worth reading — "38% used" does not answer whether to start another
+// agent, and that is the only question being asked of it.
+type FleetMemory struct {
+	UsedBytes  int64 `json:"usedBytes"`
+	TotalBytes int64 `json:"totalBytes"`
+	// AgentBytes is the default agent's size — the unit Fits counts in, carried so the count can
+	// state what it counted.
+	AgentBytes int64 `json:"agentBytes"`
+	// Fits is how many more default-size agents the free memory holds.
+	Fits int `json:"fits"`
+	// Basis says what UsedBytes counts, which the runtime backend decides: memory containers have
+	// taken as they used it, or memory each pod reserved up front and holds whether it uses it.
+	Basis string `json:"basis,omitempty"`
+}
+
+// Known reports whether the runtime answered at all; an unknown figure is rendered as nothing
+// rather than as an empty machine.
+func (m FleetMemory) Known() bool { return m.TotalBytes > 0 }
+
+// FreeBytes is what is left for new agents, never negative: an overcommitted host has none free.
+func (m FleetMemory) FreeBytes() int64 {
+	if free := m.TotalBytes - m.UsedBytes; free > 0 {
+		return free
+	}
+	return 0
+}
+
 // BoardState is the whole board: Agents and PRs global, Tasks only the selected project's.
 type BoardState struct {
 	Agents   []AgentView             `json:"agents"`
@@ -73,6 +102,10 @@ type BoardState struct {
 	StartedAt string `json:"started_at"`
 	// DefaultMemory is the RAM an agent gets with none configured — the runtime's own current default.
 	DefaultMemory string `json:"defaultMemory"`
+	// Memory is the machine's memory headroom for agents. It sits here beside DefaultMemory and
+	// StartedAt because it is a property of the host and its runtime rather than of any project,
+	// and it rides on the board so a front-end renders the figure instead of measuring the host.
+	Memory FleetMemory `json:"memory"`
 	// Sections are the dashboard's tabs as the hub resolved them against this very board: which
 	// views exist, and the badge each shows. They ride on the board so a front-end renders the
 	// counts instead of deciding them (-> SectionAttention).

@@ -2,10 +2,10 @@
 // type:    logic (agent liveness observer)
 // job:     own what the hub believes about every agent's liveness — one loop probing on a
 // fixed cadence, so a board read reports the last observation instead of taking
-// one, and no single reading — a lost probe, or a listing taken a moment ago —
-// flips an agent to "down".
-// limits:  liveness and dial-in counts only; how a status word is chosen from liveness +
-// phase stays in agent.AgentStatus, and the board assembly in state.go.
+// one, and no single reading flips an agent to "down". The machine's memory is
+// read on the same terms, on a slower cadence of its own.
+// limits:  observations only; how a status word is chosen from liveness + phase stays in
+// agent.AgentStatus, what headroom means in agent.Headroom, the board in state.go.
 package hub
 
 import (
@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -30,6 +31,11 @@ const (
 	// downStrikes is how many consecutive failed probes declare an agent down: one contended exec
 	// is not evidence. Hysteresis a per-request probe could never have, starting with no history.
 	downStrikes = 3
+
+	// capacityInterval is how often the fleet's memory headroom is re-read. Slower than the liveness
+	// cadence because it costs its own process spawn and the figure moves when an agent starts, not
+	// second to second.
+	capacityInterval = 10 * time.Second
 )
 
 // liveness is what the watchdog last observed about one agent.
@@ -59,8 +65,10 @@ type watchdog struct {
 	// runtimeErr is the last pod-listing failure, which is what an unreachable container runtime
 	// looks like from here. nil once one succeeds.
 	runtimeErr error
-	stop       chan struct{}
-	done       chan struct{}
+	// capacity is the last memory reading the backend gave, zero until it gives one.
+	capacity container.Capacity
+	stop     chan struct{}
+	done     chan struct{}
 }
 
 // runtimeHint reports why the container runtime looks unreachable, "" when it answers. Read off the
@@ -113,16 +121,47 @@ func (w *watchdog) seed() {
 func (w *watchdog) loop() {
 	defer close(w.done)
 	w.sweep() // the real first reading, off the startup path (see newWatchdog)
+	go w.sampleCapacity()
 	t := time.NewTicker(watchInterval)
+	c := time.NewTicker(capacityInterval)
 	defer t.Stop()
+	defer c.Stop()
 	for {
 		select {
 		case <-w.stop:
 			return
 		case <-t.C:
 			w.sweep()
+		// Sampled off the loop's own goroutine: it is another process spawn, and a slow one must
+		// hold up liveness no more than a slow agent holds up the fleet. Its own timeout is well
+		// inside the interval, so two samples cannot overlap.
+		case <-c.C:
+			go w.sampleCapacity()
 		}
 	}
+}
+
+// headroom is the fleet's memory as the board reports it: the last reading, folded into agents of
+// the default size. Unknown until the backend has answered once — nobody having measured a machine
+// is not the same as it having nothing free.
+func (w *watchdog) headroom() api.FleetMemory {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return agent.Headroom(w.capacity)
+}
+
+// sampleCapacity takes one reading from the backend. A failed one settles nothing, as everywhere
+// else here: the previous reading stands rather than the header blinking out on a slow podman.
+func (w *watchdog) sampleCapacity() {
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	c, err := container.MemoryCapacity(ctx)
+	if err != nil {
+		return
+	}
+	w.mu.Lock()
+	w.capacity = c
+	w.mu.Unlock()
 }
 
 // close stops the loop and waits for the sweep in flight.

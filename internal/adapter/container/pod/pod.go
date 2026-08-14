@@ -215,6 +215,44 @@ func (Engine) Stats(ctx context.Context, name string) (container.Usage, error) {
 	return container.Usage{MemoryUsageBytes: u, MemoryLimitBytes: l}, nil
 }
 
+// MemoryCapacity reports what the fleet is using against what it can use, both read from podman
+// itself. `podman info` describes the host podman runs containers ON, which on macOS is the podman
+// VM and not the Mac — the Mac's own RAM would name a ceiling no container can reach. Containers
+// share that kernel and take memory as they use it, so the figure is memory in use against the
+// total, and it can be overcommitted: a limit is a ceiling, not a reservation.
+func (Engine) MemoryCapacity(ctx context.Context) (container.Capacity, error) {
+	out, err := exec.CommandContext(ctx, Binary, "info", "--format", "json").Output()
+	if err != nil {
+		if ctx.Err() != nil {
+			return container.Capacity{}, fmt.Errorf("podman info timed out: %w", ctx.Err())
+		}
+		return container.Capacity{}, fmt.Errorf("podman info: %w", err)
+	}
+	return parseInfoMemory(out)
+}
+
+// parseInfoMemory reads host.memTotal/host.memFree (bytes) out of `podman info --format json`.
+// A total of zero is an error rather than an empty reading: it would render as a full machine.
+func parseInfoMemory(raw []byte) (container.Capacity, error) {
+	var info struct {
+		Host struct {
+			MemTotal int64 `json:"memTotal"`
+			MemFree  int64 `json:"memFree"`
+		} `json:"host"`
+	}
+	if err := json.Unmarshal(raw, &info); err != nil {
+		return container.Capacity{}, fmt.Errorf("podman info: parse JSON: %w", err)
+	}
+	if info.Host.MemTotal <= 0 {
+		return container.Capacity{}, fmt.Errorf("podman info: no host memory reported")
+	}
+	used := info.Host.MemTotal - info.Host.MemFree
+	if used < 0 {
+		used = 0
+	}
+	return container.Capacity{UsedBytes: used, TotalBytes: info.Host.MemTotal, Basis: container.BasisInUse}, nil
+}
+
 // parseByteSize parses a human byte size as podman prints it ("543.9MB", "1.074GB",
 // decimal/1000-based) into bytes.
 func parseByteSize(s string) (int64, error) {

@@ -1,16 +1,19 @@
 // package: hub/agent / memory
 // type:    logic (per-agent memory config)
-// job:     resolve, validate, and set an agent pod's RAM limit — the per-agent value
-// (store.Agent.Memory) with a modest default when unset. Applied at Launch
-// (RunOpts.Memory); a change takes effect on the agent's next start.
-// limits:  config only; the limit is enforced by the container runtime, not here.
+// job:     resolve, validate and set an agent pod's RAM limit (store.Agent.Memory, with a
+// modest default when unset), and count the machine's free memory in agents of
+// that size. Applied at Launch; a change takes effect on the next start.
+// limits:  config and arithmetic; the limit is enforced by the runtime, and what the
+// machine has left is the runtime's to report (-> container.MemoryCapacity).
 package agent
 
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
 )
 
@@ -31,6 +34,45 @@ func MemoryOrDefault(m string) string {
 		return d
 	}
 	return fallbackMemory
+}
+
+// Headroom folds one capacity reading into the board's figure: what is free, and how many more
+// default-size agents fit there — the question being asked, which a percentage leaves the reader
+// to divide out. A zero total stays unknown: an unmeasured machine has no free memory to report.
+func Headroom(c container.Capacity) api.FleetMemory {
+	m := api.FleetMemory{UsedBytes: c.UsedBytes, TotalBytes: c.TotalBytes, Basis: c.Basis}
+	if !m.Known() {
+		return api.FleetMemory{}
+	}
+	if m.AgentBytes = parseMemory(MemoryOrDefault("")); m.AgentBytes > 0 {
+		m.Fits = int(m.FreeBytes() / m.AgentBytes)
+	}
+	return m
+}
+
+// parseMemory reads a limit in the form the runtimes take it ("2g", "512m", "1gb", plain bytes)
+// into bytes, binary units as the runtimes apply them; 0 when it is not a size.
+func parseMemory(m string) int64 {
+	m = strings.ToLower(strings.TrimSpace(m))
+	if !ValidMemory(m) || m == "" {
+		return 0
+	}
+	m = strings.TrimSuffix(m, "b")
+	unit := int64(1)
+	for _, u := range []struct {
+		suffix string
+		size   int64
+	}{{"k", 1 << 10}, {"m", 1 << 20}, {"g", 1 << 30}} {
+		if strings.HasSuffix(m, u.suffix) {
+			unit, m = u.size, strings.TrimSuffix(m, u.suffix)
+			break
+		}
+	}
+	n, err := strconv.ParseInt(m, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n * unit
 }
 
 // memoryRe validates a memory limit like "2g", "512m", "2048", "1gb".

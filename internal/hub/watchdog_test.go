@@ -3,6 +3,7 @@ package hub
 import (
 	"testing"
 
+	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
@@ -181,5 +182,36 @@ func TestALostProbeDoesNotRestartTheDwell(t *testing.T) {
 	// A capture that failed saw no screen, so it is not evidence the screen changed either.
 	if !held.stillSince.Equal(started.stillSince) {
 		t.Errorf("the dwell restarted on a lost probe: %v then %v", started.stillSince, held.stillSince)
+	}
+}
+
+// TestTheBoardCarriesTheLastMemoryReading: the front-ends must never measure the host themselves,
+// so the figure has to reach them on the board — and it comes from the watchdog's last reading,
+// like liveness, rather than from a process spawn on every board read.
+func TestTheBoardCarriesTheLastMemoryReading(t *testing.T) {
+	const gib = int64(1) << 30
+	h := newHub(t)
+
+	// Nothing sampled yet: unknown, which renders as nothing rather than as a full machine.
+	board, err := h.State("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if board.Memory.Known() {
+		t.Errorf("an unsampled hub reported a figure: %+v", board.Memory)
+	}
+
+	h.watch.mu.Lock()
+	h.watch.capacity = container.Capacity{UsedBytes: 6 * gib, TotalBytes: 16 * gib, Basis: container.BasisInUse}
+	h.watch.mu.Unlock()
+
+	if board, err = h.State(""); err != nil {
+		t.Fatal(err)
+	}
+	if board.Memory.FreeBytes() != 10*gib {
+		t.Errorf("board free = %d bytes, want the 10 GiB the reading leaves", board.Memory.FreeBytes())
+	}
+	if board.Memory.Fits < 1 {
+		t.Errorf("10 GiB free fits agents of the default size, got %d", board.Memory.Fits)
 	}
 }

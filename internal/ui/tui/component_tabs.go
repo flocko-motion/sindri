@@ -1,10 +1,11 @@
 // package: tui / component_tabs
 // type:    ui component (generic)
-// job:     render the top header — the tab labels plus a current-repo indicator. When
-// a repo is active the WHOLE bar is background-filled with that repo's colour
-// (a loud, always-visible "which repo am I in"); with no repo it falls back
-// to the plain tab strip.
-// limits:  pure rendering; which tab is active is the model's (-> tui.go).
+// job:     render the top header — the tab labels, the fleet's memory headroom, and a
+// current-repo indicator. When a repo is active the WHOLE bar is background-filled
+// with that repo's colour (a loud, always-visible "which repo am I in"); with no
+// repo it falls back to the plain tab strip.
+// limits:  pure rendering; which tab is active is the model's (-> tui.go), and the memory
+// figure is the hub's, read off the board (-> api.BoardState.Memory).
 package tui
 
 import (
@@ -12,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
@@ -24,9 +26,9 @@ var (
 // the repo's primary colour and the label sits on it (the active tab underlined+bold
 // to stand out on the shared background) — loud enough to never mistake which repo is
 // in view. With no repo, it degrades to the classic tab strip.
-func headerBar(labels []string, active, width int, repoName, repoTag string, repoColor int) string {
+func headerBar(labels []string, active, width int, repoName, repoTag string, repoColor int, mem api.FleetMemory) string {
 	if repoName == "" {
-		return plainTabStrip(labels, active, width)
+		return plainTabStrip(labels, active, width, mem)
 	}
 	dark, bright := theme.RepoColors(repoTag, repoColor)
 	base := lipgloss.NewStyle().Background(dark).Foreground(bright)
@@ -45,18 +47,20 @@ func headerBar(labels []string, active, width int, repoName, repoTag string, rep
 		plainW += lipgloss.Width(seg) + 1
 	}
 	ind := "◉ " + repoName + " "
-	gap := width - plainW - lipgloss.Width(ind)
+	badge := headroomBadge(mem, width-plainW-lipgloss.Width(ind))
+	gap := width - plainW - lipgloss.Width(ind) - lipgloss.Width(badge)
 	if gap < 1 {
 		gap = 1
 	}
 	b.WriteString(base.Render(strings.Repeat(" ", gap)))
+	b.WriteString(base.Render(badge))
 	b.WriteString(base.Bold(true).Render(ind))
 	return b.String()
 }
 
 // plainTabStrip is the no-repo fallback: labels with the active one highlighted,
-// padded to width.
-func plainTabStrip(labels []string, active, width int) string {
+// the headroom badge right-aligned, padded to width.
+func plainTabStrip(labels []string, active, width int, mem api.FleetMemory) string {
 	parts := make([]string, len(labels))
 	for i, l := range labels {
 		if i == active {
@@ -66,8 +70,21 @@ func plainTabStrip(labels []string, active, width int) string {
 		}
 	}
 	strip := strings.Join(parts, " ")
-	if pad := width - lipgloss.Width(strip); pad > 0 {
+	badge := headroomBadge(mem, width-lipgloss.Width(strip))
+	if pad := width - lipgloss.Width(strip) - lipgloss.Width(badge); pad > 0 {
 		strip += strings.Repeat(" ", pad)
 	}
-	return strip
+	return strip + tabStyle.Render(badge)
+}
+
+// headroomBadge is the fleet's memory in the space left over after the tabs and the repo
+// indicator, with a cell either side of it so it never abuts them. It yields that space rather
+// than taking it: a header that pushed a tab off the edge to say how much memory is free would
+// have cost more than it told anyone.
+func headroomBadge(mem api.FleetMemory, space int) string {
+	badge := theme.FleetBadge(mem, space-2)
+	if badge == "" {
+		return ""
+	}
+	return " " + badge + " "
 }
