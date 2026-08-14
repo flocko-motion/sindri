@@ -227,3 +227,81 @@ func TestAMergeNeverClosesATaskOverOpenChildren(t *testing.T) {
 		t.Errorf("the merge should leave the worker on the feature and its new work, got {container:%q task:%q}", st.Container, st.Task)
 	}
 }
+
+// TestReParentingWhereItAlreadySitsTellsNobody: an edit that moves nothing added no child, so the
+// holder hears nothing. Same rule as the record edit-task keeps — say what changed, never echo back
+// what was asked for.
+func TestReParentingWhereItAlreadySitsTellsNobody(t *testing.T) {
+	e, _, _, deps := leafWorker(t, "working")
+	child := addChild(t, e, "td-LEAF", true)
+	told := len(deps.injected)
+	if told == 0 {
+		t.Fatal("precondition: adding the child should have told the holder")
+	}
+
+	if err := e.EditTask("repo", child, TaskSpec{Parent: "td-LEAF"}); err != nil {
+		t.Fatalf("EditTask: %v", err)
+	}
+	if len(deps.injected) != told {
+		t.Errorf("re-parenting to where it already sits should tell nobody, injected: %v", deps.injectedText[told:])
+	}
+}
+
+// TestNothingClosesAParentOverAChildBeingWORKED is the severest form of the invariant, and the one
+// the queries themselves used to miss: a child an agent is inside reads as `in_progress`, which the
+// old "is it open" query did not return at all. So the parent looked childless to every guard —
+// checkpoint, submit and merge alike — while someone was actively working underneath it.
+func TestNothingClosesAParentOverAChildBeingWORKED(t *testing.T) {
+	e, ps, c, deps := leafWorker(t, "working")
+	child := addChild(t, e, "td-LEAF", true)
+	// Handed out and under way: the state the feature loop leaves behind between checkpoints.
+	if err := e.SetStatus("repo", child, "in_progress"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.RefreshTask("repo", child); err != nil {
+		t.Fatal(err)
+	}
+	if tk, _, _ := ps.GetTask(child); tk.Status != "in_progress" {
+		t.Fatalf("precondition: the child should be under way, got %q", tk.Status)
+	}
+
+	// The submit door: the leaf guard must see a child that is being worked, not just one waiting.
+	if err := ps.SetState(store.AgentState{Agent: "dain", Task: "td-LEAF", Branch: "td-LEAF", Phase: "working"}); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if code, _ := e.CmdSubmit(c, []string{"done"}, &out); code == 0 {
+		t.Errorf("a task must not go up over a child being worked:\n%s", out.String())
+	}
+	if _, ok, _ := ps.GetPR("pr-td-LEAF"); ok {
+		t.Fatal("no PR should exist over a child being worked")
+	}
+
+	// The merge door: submit from the feature state it now holds, then land it.
+	if err := ps.SetState(store.AgentState{Agent: "dain", Task: "td-LEAF", Branch: "td-LEAF", Phase: "working"}); err != nil {
+		t.Fatal(err)
+	}
+	deps.alive = false
+	if err := ps.SetParent(child, ""); err != nil { // detach so the submit can open the PR at all
+		t.Fatal(err)
+	}
+	e.refreshCachedTask("repo", child)
+	if code, err := e.CmdSubmit(c, []string{"done"}, &out); code != 0 || err != nil {
+		t.Fatalf("CmdSubmit: code=%d err=%v out=%s", code, err, out.String())
+	}
+	if err := ps.SetParent(child, "td-LEAF"); err != nil { // …and re-attach, as a re-parent would
+		t.Fatal(err)
+	}
+	e.refreshCachedTask("repo", child)
+	pr, _, _ := ps.GetPR("pr-td-LEAF")
+	pr.Status = "approved"
+	if err := ps.PutPR(pr); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Merge("repo", "pr-td-LEAF"); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if tk, _, _ := ps.OwnedTask("td-LEAF"); tk.Status == "closed" {
+		t.Error("the merge closed a task over a child someone was working")
+	}
+}

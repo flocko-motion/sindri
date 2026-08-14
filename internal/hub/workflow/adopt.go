@@ -24,6 +24,9 @@ func (e *Engine) adoptChild(project, parent, child string) {
 	if err != nil {
 		return
 	}
+	// Every agent that matches, never the first: one task cannot be two agents' at once, but that is
+	// an invariant of the claim queries rather than of this loop, and assuming it here silently is
+	// how one of them would come to be left out (-> tellHolder, which holds the same line).
 	for _, a := range roster {
 		st, _ := ps.GetState(a.Name)
 		if st.Container != parent && st.Task != parent {
@@ -36,7 +39,6 @@ func (e *Engine) adoptChild(project, parent, child string) {
 		if e.deps.AgentAlive(project, a.Name) {
 			_ = e.deps.InjectWhenReady(project, a.Name, MsgTaskGainedChild(parent, child, promoted))
 		}
-		return
 	}
 }
 

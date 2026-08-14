@@ -26,6 +26,9 @@
       agent inside a feature.
 - [x] 3.2 `store.OpenChildIDs` counts every unfinished status, not the literal `open`. A child being
       WORKED was invisible to close, reconcile, checkpoint and both new guards.
+- [x] 3.3 That line is pinned at the store AND end to end, because it is shared SQL behind six
+      callers and the failure it prevents is silent — tidied back to the literal `open`, nothing
+      else in the suite goes red.
 
 ## 4. Decide the two edges
 
@@ -43,3 +46,7 @@
 - [x] 5.4 A submit of a grown leaf opens no PR and leaves the agent holding the feature.
 - [x] 5.5 A merge never closes a task over an open child. Mutation-checked: without the guard the
       task closes and the worker is released, which is the original incident.
+- [x] 5.6 A child being WORKED holds its parent open — at the store, and through the submit and
+      merge doors. Mutation-checked against the literal `open` query, which is the tidier-looking
+      line someone would restore.
+- [x] 5.7 Re-parenting a task to where it already sits tells nobody: no child arrived.

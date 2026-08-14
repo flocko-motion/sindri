@@ -211,7 +211,11 @@ func (e *Engine) EditTask(project, id string, s TaskSpec) error {
 	ps := e.store.For(project)
 	// Parentage first, and for any task: the hierarchy is sindri's own, so re-parenting an openspec
 	// change or a GitHub issue is as ordinary as re-parenting one of its own.
+	gained := false
 	if s.Parent != "" {
+		// Diff rather than echo: re-parenting a task to where it already sits adds no child, and
+		// telling that parent's holder one arrived is noise about work it has had all along.
+		gained = ps.ParentOf(id) != s.Parent
 		if err := ps.SetParent(id, s.Parent); err != nil {
 			return err
 		}
@@ -232,7 +236,9 @@ func (e *Engine) EditTask(project, id string, s TaskSpec) error {
 	e.refreshCachedTask(project, id) // targeted refresh of the edited task
 	// Re-parenting adds a child as surely as creating one does, so the same growth applies: whoever
 	// is working the new parent takes this on too, rather than merging over it.
-	e.adoptChild(project, s.Parent, id)
+	if gained {
+		e.adoptChild(project, s.Parent, id)
+	}
 	e.deps.Notify()
 	return nil
 }

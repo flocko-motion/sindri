@@ -71,6 +71,16 @@ parent comes to be closed over real work.
 - **WHEN** a pull request merges whose task has an open child
 - **THEN** the branch lands, the task stays open, and its worker keeps it as a feature
 
+#### Scenario: A child being worked holds its parent open
+
+- **WHEN** a child of the task has been handed out and is under way rather than merely waiting
+- **THEN** every guard counts it — the parent is neither submitted nor merged over
+
+#### Scenario: Re-parenting a task where it already sits
+
+- **WHEN** a task is re-parented to the parent it already has
+- **THEN** no child was added, so nobody is told
+
 #### Scenario: A child that should not block
 
 - **WHEN** the user does not want an added child to hold the work in flight
