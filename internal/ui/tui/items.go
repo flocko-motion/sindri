@@ -223,6 +223,16 @@ func (m model) agentVisible(a api.AgentView) bool {
 	return m.inScope(a.Project) || api.AgentNeedsUser(a)
 }
 
+// prVisible admits a PR to the PRs tab, on the same rule and for the same reason as agentVisible:
+// agents and PRs are BACKGROUND work, progressing while the user looks elsewhere, so one that ends
+// up waiting on them has to surface wherever they are. An approved PR in another repo was invisible
+// until they switched to it, and nothing told them to switch. Calls the predicate rather than
+// restating it (-> api.PRNeedsUser), which is also what the marker and the row colour read: three
+// separate derivations of one question drift, and each looks plausible alone.
+func (m model) prVisible(p api.PR) bool {
+	return m.inScope(p.Project) || api.PRNeedsUser(p, m.state.Agents)
+}
+
 // tabCount is section s's badge. Agents/PRs obey the § scope toggle so the badge matches
 // the list; the rest are scope-invariant and read straight off the board.
 func (m model) tabCount(s tuiSection) int {
@@ -238,7 +248,7 @@ func (m model) tabCount(s tuiSection) int {
 	case "prs":
 		n := 0
 		for _, p := range m.state.PRs {
-			if m.inScope(p.Project) && api.PROpen(p) {
+			if m.prVisible(p) && api.PROpen(p) {
 				n++
 			}
 		}
@@ -253,10 +263,13 @@ func (m model) tabCount(s tuiSection) int {
 	return 0
 }
 
-// scopeName labels the global↔repo scope toggle for the footer.
+// scopeName labels the global↔repo scope toggle for the footer. The narrow scope is not the repo
+// alone and must not claim to be: it keeps anything waiting on the user, from any repo (->
+// agentVisible, prVisible). Named for what it does, so a foreign row is never a filter that looks
+// broken.
 func scopeName(repoScoped bool) string {
 	if repoScoped {
-		return "repo"
+		return "repo+needs-you"
 	}
 	return "global"
 }

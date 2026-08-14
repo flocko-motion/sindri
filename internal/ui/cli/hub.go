@@ -364,7 +364,6 @@ func prListCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				prs := api.FilterPRs(f, all)
 				// The roster, because half of "waiting on you" is whether a reviewer runs in that
 				// PR's repo (-> api.PRNeedsUser). A second round trip and the cheapest available:
 				// /state is how a front-end learns who is running, off the hub's existing snapshot.
@@ -372,15 +371,20 @@ func prListCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				// Grouped by repo, the order the PRs tab shows (-> api.SortedPRs). This listing is
+				// fleet-wide, so without the repo the rows it gathers from elsewhere are unplaceable.
+				prs := api.SortedPRs(api.FilterPRs(f, all), st.Projects)
 				for _, p := range prs {
 					status := api.StatusLabel(p.Status, p.Approvals)
 					if p.Kind == "interim" { // ◇ = mid-task contribution (vs a final, task-done PR)
 						status = "◇" + status
 					}
-					// Who is reviewing it, alongside who wrote it — the same column the PRs tab shows,
-					// from the same field, so the two front-ends cannot answer differently.
-					line := fmt.Sprintf("%-14s %-13s %4s  %-10s %-10s %s",
-						p.ID, status, shortAge(p.CreatedAt), p.Agent, dash(p.Reviewer), p.Branch)
+					// Repo first, as `agent list` prints it: this listing crosses repos, so the column
+					// is what places each row. Then who is reviewing it beside who wrote it, the PRs
+					// tab's own columns from the same fields, so the two cannot answer differently.
+					line := fmt.Sprintf("%-10.10s %-14s %-13s %4s  %-10s %-10s %s",
+						api.RepoName(st.Projects, p.Project), p.ID, status, shortAge(p.CreatedAt), p.Agent,
+						dash(p.Reviewer), p.Branch)
 					if why := prWaitRow(api.PRWaitReason(p, st.Agents)); why != "" {
 						line += "  ! " + why
 					}

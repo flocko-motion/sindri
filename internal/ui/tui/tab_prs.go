@@ -220,8 +220,12 @@ const prDetailW = 44
 
 func (m model) prRows() []row {
 	var out []row
-	for _, p := range api.FilterPRs(m.prFilter, m.state.PRs) { // f-toggle: active by default
-		if !m.inScope(p.Project) { // repo-scoped: only the active repo's PRs
+	// Ordered by repo, the same call `sindri pr list` makes, so the two front-ends cannot drift onto
+	// different orders. In repo scope that key is what gathers a foreign PR waiting on the user into
+	// its own group instead of interleaving it by age with the local rows.
+	visible := api.SortedPRs(api.FilterPRs(m.prFilter, m.state.PRs), m.state.Projects)
+	for _, p := range visible { // f-toggle: active by default
+		if !m.prVisible(p) { // the active repo's PRs, plus any PR waiting on the user
 			continue
 		}
 		repo := m.repoStyle(p.Project).Render(fmt.Sprintf("%-10.10s", m.repoName(p.Project)))

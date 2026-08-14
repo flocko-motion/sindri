@@ -13,16 +13,8 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 )
 
-// repoName maps a project's repoTag to its short repo name (its path's basename),
-// falling back to the tag when the project isn't in the board's registry.
-func (m model) repoName(tag string) string {
-	for _, p := range m.state.Projects {
-		if p.Tag == tag {
-			return filepath.Base(p.Path)
-		}
-	}
-	return tag
-}
+// repoName maps a project's repoTag to its short repo name, over the board's registry.
+func (m model) repoName(tag string) string { return api.RepoName(m.state.Projects, tag) }
 
 // repoPath maps a project's repoTag to its absolute path, or "" when the board's registry has
 // no such project.
