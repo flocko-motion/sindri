@@ -3,8 +3,8 @@
 // job:     start the next queued run, one at a time across the whole fleet. The queue and
 // execution itself live in workflow (-> NextQueuedRun, ExecuteRun); this is only the
 // cadence and the fleet-wide "one at a time" gate.
-// limits:  no durability — a hub restart mid-run loses track of it (a run's own container is
-// discarded either way). Crash-recovery is sd-bf837f's.
+// limits:  just the cadence; a run orphaned by a hub restart is reconciled at startup, not here
+// (-> workflow.ReconcileRunningRuns).
 package hub
 
 import (

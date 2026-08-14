@@ -12,3 +12,6 @@ gh-local/gh
 .todos/
 CLAUDE.md
 /gh
+# Claude Code's own session state (sessionId, pid, acquiredAt) — a live lock for
+# whichever agent session is running here, not feature code.
+.claude/scheduled_tasks.lock
