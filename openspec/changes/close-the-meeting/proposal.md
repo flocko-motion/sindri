@@ -33,8 +33,19 @@ and those members are still spoken to. Two agents sat in one for days.
   `internal/client`, `internal/ui/cli/chat.go`, `internal/ui/tui` (`onkey.go`, `keys.go`,
   `tab_chat.go`).
 - `chat.Delivery` gains `InjectWhenReady`, which the hub already had.
+- **The room is silent while locked** (the feature's other half): the membership cue a relaunched
+  agent gets now asks `chat.ReminderFor`, which answers "" unless the room is open. Rehydrate runs
+  on every relaunch, clear and restart, and membership outlives a meeting, so an agent was reminded
+  of a room the user had not touched in days — an interruption with no action behind it, since a
+  locked room can neither send nor receive.
+- **A user acting on the room counts as presence.** Adding, removing, closing or saying something
+  stamps the heartbeat: the lock asks whether a human is at the room, and one who has just acted on
+  it is. Without that, an add from the CLI — which sends no heartbeat — would land in a room read as
+  empty, and the newcomer would never learn it had been added.
+- **Ending membership is exempt**, deliberately: "you are no longer in the room" prevents a useless
+  action rather than inviting one, so the automatic close still tells its members while nobody is
+  present.
 - The meeting's client surface moved to `internal/client/chat.go`: `client.go` crossed the 700-line
   limit once this branch was combined with what landed on it while the PR was open. Split rather
   than shaved, per the linter's own instruction — the next method on `client.go` would put a shaved
   file straight back over. The methods are unchanged, and the block was already contiguous.
-- The second subtask of this feature (sd-8a0ae9) lands on the same branch and extends this document.

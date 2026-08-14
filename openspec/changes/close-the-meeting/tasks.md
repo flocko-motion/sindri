@@ -25,6 +25,16 @@
 - [x] 4.3 A room spoken in within the hour stays open; an hour later it does not.
 - [x] 4.4 The automatic notice takes the when-ready path, not the interrupting one.
 
+## 5. Keep it quiet while locked
+
+- [x] 5.1 The relaunch cue asks the room first (`chat.ReminderFor`), so a locked room says nothing.
+- [x] 5.2 The rule lives in the chat service, not at the call site: it is the room's own, and it is
+      testable there without standing up a hub.
+- [x] 5.3 A user acting on the room counts as presence, or a CLI add would land in a room read as
+      empty and the newcomer would never learn it had been added.
+- [x] 5.4 Pinned: locked says nothing, open reminds, a non-member is never greeted, and the
+      end-of-membership notice is exempt.
+
 ## 6. Keep the files within their limits
 
 - [x] 6.1 The meeting's client methods move to `internal/client/chat.go` with their own header —

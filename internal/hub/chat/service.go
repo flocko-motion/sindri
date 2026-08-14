@@ -95,6 +95,7 @@ func New(st *store.Store, d Delivery) *Service { return &Service{store: st, d: d
 // Add puts an agent in the room and greets it. The greeting is best-effort: a stopped
 // agent gets reminded on relaunch instead.
 func (s *Service) Add(project, name string) error {
+	s.Heartbeat() // the user is acting on the room, so the room is not empty
 	if _, ok, err := s.store.For(project).GetAgent(name); err != nil {
 		return err
 	} else if !ok {
@@ -161,6 +162,7 @@ func (s *Service) catchUp() (string, bool) {
 // dropping the roster would inject a removal notice into every agent and leave the user re-adding
 // them by hand. Clearing is irreversible, so the caller is the one that confirms.
 func (s *Service) NewMeeting() error {
+	s.Heartbeat() // the user is acting on the room, so the room is not empty
 	if _, err := s.store.ChatClearTranscript(); err != nil {
 		return err
 	}
@@ -175,6 +177,7 @@ func (s *Service) NewMeeting() error {
 // Members are interrupted here, unlike the automatic close: the user has just ended the meeting, and
 // an agent that thinks it is still in a room will try to speak into one that no longer takes it.
 func (s *Service) Close() (int, error) {
+	s.Heartbeat() // the user is acting on the room, so the room is not empty
 	return s.closeRoom("the user closed the meeting", false)
 }
 
@@ -229,6 +232,7 @@ func (s *Service) closeRoom(reason string, quiet bool) (int, error) {
 
 // Remove takes an agent out of the chatroom and tells it so.
 func (s *Service) Remove(project, name string) error {
+	s.Heartbeat() // the user is acting on the room, so the room is not empty
 	was, err := s.store.ChatRemove(project, name)
 	if err != nil {
 		return err
@@ -239,6 +243,24 @@ func (s *Service) Remove(project, name string) error {
 	s.deliver(project, name, MsgRemoved)
 	_, err = s.broadcast("", system, name+" left the meeting room")
 	return err
+}
+
+// ReminderFor is the membership cue a relaunched agent should get, "" when it should hear nothing —
+// including whenever the room is LOCKED, which can neither send nor receive, so the reminder would
+// interrupt with no action behind it. Ungated it fired for rooms nobody had opened in days.
+func (s *Service) ReminderFor(project, name string) string {
+	if !s.Present() {
+		return ""
+	}
+	member, err := s.IsMember(project, name)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "hub: chat membership check for %s/%s failed: %v\n", project, name, err)
+		return ""
+	}
+	if !member {
+		return ""
+	}
+	return MsgReminder
 }
 
 // IsMember reports whether an agent is currently in the chatroom.
@@ -257,7 +279,9 @@ func (s *Service) Transcript(limit int) ([]store.ChatMessage, error) {
 	return s.store.ChatTranscript(limit)
 }
 
-// Heartbeat records the user as present, which keeps the room unlocked.
+// Heartbeat records the user as present, which keeps the room unlocked. Every user-initiated verb
+// calls it: the lock asks whether a human is at the room, and one adding a member plainly is —
+// without which a CLI membership change, sending no heartbeat, would land in a room read as empty.
 func (s *Service) Heartbeat() {
 	s.mu.Lock()
 	s.seen = time.Now()
@@ -273,7 +297,10 @@ func (s *Service) Present() bool {
 }
 
 // Say forwards a message from the user (the discussion leader) to the room.
-func (s *Service) Say(msg string) (store.ChatMessage, error) { return s.broadcast("", user, msg) }
+func (s *Service) Say(msg string) (store.ChatMessage, error) {
+	s.Heartbeat() // saying something is the plainest presence there is
+	return s.broadcast("", user, msg)
+}
 
 // UserMessage runs a "/command" or broadcasts. Only the user's path interprets commands,
 // so agents (via Cmd) can never change membership.

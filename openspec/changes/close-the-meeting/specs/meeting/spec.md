@@ -54,3 +54,42 @@ changes already are.
 
 - **WHEN** the room has been spoken in within the hour
 - **THEN** it stays open, whatever the presence lock reads
+
+### Requirement: The room says nothing while it is locked
+
+Nothing about the meeting SHALL reach an agent while the room is locked. A locked room
+can neither send nor receive, so a message about membership there interrupts with no
+action behind it — and invites the agent to speak into a room that will refuse it. This
+covers the membership cue a relaunched member is given: it is delivered only while the
+room is open, since relaunches happen on a schedule the user did not choose and
+membership outlives the meeting.
+
+A user ACTING on the room SHALL count as presence — adding or removing a member,
+closing it, saying something. The lock asks whether a human is at the room, and one who
+has just acted on it is; without that, a membership change made from an interface that
+sends no heartbeat would land in a room read as empty, and the agent would never learn
+it had been added.
+
+The notice that membership has ENDED is exempt: it prevents a useless action rather
+than inviting one, and an agent that believes it is still in a closed room will try to
+speak into it.
+
+#### Scenario: A member is relaunched while the room is dormant
+
+- **WHEN** an agent that belongs to a room nobody has opened is relaunched
+- **THEN** it is told nothing about the meeting
+
+#### Scenario: A member is relaunched during a meeting
+
+- **WHEN** an agent that belongs to an open room is relaunched
+- **THEN** it is reminded that it is a member and how to speak
+
+#### Scenario: A member is added from an interface that does not heartbeat
+
+- **WHEN** the user adds an agent from the CLI
+- **THEN** the room counts the user as present and the newcomer is welcomed and caught up
+
+#### Scenario: Membership ending is always delivered
+
+- **WHEN** a room closes while nobody is present
+- **THEN** its members are still told they are no longer in it

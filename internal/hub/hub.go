@@ -186,10 +186,9 @@ func (h *Hub) rehydrate(project, name string) {
 	// Let Claude boot to input-readiness first, or its Enter is eaten by the splash.
 	time.Sleep(8 * time.Second)
 	_ = h.agents.InjectWhenReady(project, name, workflow.MsgKickoff)
-	// A relaunched chatroom member lost its durable prompt's membership cue — remind it (best-effort).
-	if member, err := h.chat.IsMember(project, name); err != nil {
-		fmt.Fprintf(os.Stderr, "hub: chat membership check for %s/%s failed: %v\n", project, name, err)
-	} else if member {
-		_ = h.agents.InjectWhenReady(project, name, chat.MsgReminder)
+	// A relaunched chatroom member lost its durable prompt's membership cue — remind it, if the room
+	// is in a state where that means anything (-> chat.ReminderFor). Best-effort, as the kickoff is.
+	if cue := h.chat.ReminderFor(project, name); cue != "" {
+		_ = h.agents.InjectWhenReady(project, name, cue)
 	}
 }
