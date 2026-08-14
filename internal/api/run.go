@@ -29,6 +29,14 @@ type Run struct {
 	// ExitCode is the command's process exit code once it finishes: 0 on pass, the command's own
 	// code on failure, -1 for a timeout or a cancellation (nothing to exit on its own).
 	ExitCode int `json:"exit_code,omitempty"`
+	// Kind is "" for an ordinary agent-requested run, or the submit-gate purpose ("submit" |
+	// "contribute") that routes its result back through the submit/contribute flow instead of a
+	// plain summary. Gate runs outrank ordinary ones in the queue by default.
+	Kind string `json:"kind,omitempty"`
+	// Message is the agent's free-text submit/contribute description, carried across the queue
+	// wait so the eventual commit reads the same as if the gate had run inline. Unused ("") for an
+	// ordinary run.
+	Message string `json:"message,omitempty"`
 	// Position is this run's place among currently queued runs, 1 = next; 0 once it is no longer
 	// queued. Derived by the hub at read time, never stored — the queue's real order is a live
 	// fact, not a column that could disagree with it.

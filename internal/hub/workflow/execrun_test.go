@@ -286,10 +286,10 @@ func TestCancelRunKillsARunningContainerWithoutWritingItsStatus(t *testing.T) {
 	}
 }
 
-// TestReconcileRunningRunsFailsAnOrphan mirrors ReconcileMergingPRs' precedent: a run still
+// TestReconcileRunningRunsCancelsAnOrphan mirrors ReconcileMergingPRs' precedent: a run still
 // "running" at hub startup has no container behind it any more, so it must not occupy the
-// fleet's only slot forever.
-func TestReconcileRunningRunsFailsAnOrphan(t *testing.T) {
+// fleet's only slot forever. "cancelled", not "failed" — nothing here found a violation.
+func TestReconcileRunningRunsCancelsAnOrphan(t *testing.T) {
 	e, ps := runEngine(t)
 	r, err := e.ScheduleRun("repo", "bombur", "go test", "", "")
 	if err != nil {
@@ -300,8 +300,8 @@ func TestReconcileRunningRunsFailsAnOrphan(t *testing.T) {
 	}
 	e.ReconcileRunningRuns()
 	got, _, _ := ps.GetRun(r.ID)
-	if got.Status != "failed" {
-		t.Fatalf("status = %q, want failed", got.Status)
+	if got.Status != "cancelled" {
+		t.Fatalf("status = %q, want cancelled", got.Status)
 	}
 	out, _ := ps.RunOutput(r.ID)
 	if !strings.Contains(out, "restart") {

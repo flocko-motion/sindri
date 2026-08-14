@@ -58,6 +58,9 @@ func (e *Engine) ExecuteRun(project, id string) error {
 	if reason := e.staleReason(ps, r); reason != "" {
 		return e.finishRun(ps, project, r, "cancelled", "run: dropped before executing — "+reason+"\n", 0, 0, -1)
 	}
+	if r.Kind != "" {
+		return e.executeGateRun(ps, project, r)
+	}
 
 	root := e.deps.ProjectRoot(project)
 	a, _, _ := ps.GetAgent(r.Agent) // existence already checked by staleReason
@@ -152,13 +155,17 @@ func (e *Engine) staleReason(ps *store.ProjectStore, r api.Run) string {
 	return ""
 }
 
-// finishRun records a run's terminal outcome — status, full uncapped output, exit code — and
-// injects a summary into the scheduling agent's session, never the full log (-> MsgRunFinished).
+// finishRun records a run's terminal outcome — status, full uncapped output, exit code. A gate
+// run's result unlocks its submit/contribute continuation (-> completeGate); an ordinary run just
+// gets a summary injected, never the full log (-> MsgRunFinished).
 func (e *Engine) finishRun(ps *store.ProjectStore, project string, r api.Run, status, output string, elapsed, budget time.Duration, exitCode int) error {
 	if err := ps.SetRunResult(r.ID, status, output, exitCode); err != nil {
 		return err
 	}
 	e.deps.Notify()
+	if r.Kind != "" {
+		return e.completeGate(project, r, status, output)
+	}
 	_ = e.deps.InjectWhenReady(project, r.Agent, MsgRunFinished(r.ID, status, elapsed, budget))
 	return nil
 }
@@ -227,12 +234,14 @@ func (e *Engine) ReconcileRunningRuns() {
 	for _, r := range runs {
 		ps := e.store.For(r.Project)
 		_ = container.Rm(e.deps.Container(r.Project, "run-"+r.ID))
+		// "cancelled", not "failed": nothing here found a violation or a broken build, and a gate
+		// run reconciled this way must not read as one either (-> stallGate, not rejectGate).
 		note := "run: hub restarted mid-run — outcome unknown; its container has been removed.\n"
-		if err := e.finishRun(ps, r.Project, r, "failed", note, 0, 0, -1); err != nil {
+		if err := e.finishRun(ps, r.Project, r, "cancelled", note, 0, 0, -1); err != nil {
 			log.Printf("hub: reconcile run %s: %v", r.ID, err)
 			continue
 		}
-		log.Printf("hub: %s was running at restart → failed (outcome unknown)", r.ID)
+		log.Printf("hub: %s was running at restart → cancelled (outcome unknown)", r.ID)
 	}
 }
 

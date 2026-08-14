@@ -11,8 +11,9 @@ import (
 )
 
 // featureWorker seeds a worker on feature td-EPIC with one subtask, in a real worktree so submit can
-// commit. openChild says whether that subtask is still open.
-func featureWorker(t *testing.T, openChild bool) (*Engine, *store.ProjectStore, registry.Caller) {
+// commit. openChild says whether that subtask is still open. Returns deps too, so a test can read
+// what was injected once a queued gate lands (-> runQueuedGate).
+func featureWorker(t *testing.T, openChild bool) (*Engine, *store.ProjectStore, registry.Caller, *stubDeps) {
 	t.Helper()
 	const agent = "dain"
 	root, _ := newWorkRepo(t, agent, "td-EPIC")
@@ -49,7 +50,8 @@ func featureWorker(t *testing.T, openChild bool) (*Engine, *store.ProjectStore, 
 	if err := os.WriteFile(filepath.Join(root, ".worktrees", agent, "feature.txt"), []byte("built\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return New(st, &stubDeps{root: root}), ps, registry.Caller{Project: "repo", Agent: agent, Role: "worker", Phase: phase}
+	deps := &stubDeps{root: root}
+	return New(st, deps), ps, registry.Caller{Project: "repo", Agent: agent, Role: "worker", Phase: phase}, deps
 }
 
 // TestFinishedFeatureSubmitsItself is the answer to "why can't dain submit his work?". A parent task
@@ -57,12 +59,13 @@ func featureWorker(t *testing.T, openChild bool) (*Engine, *store.ProjectStore, 
 // subtask was checkpointed onto — and nothing about who puts it up. The worker that built it submits
 // it, exactly as it would a task of its own; a human opening the PR by hand is not a step.
 func TestFinishedFeatureSubmitsItself(t *testing.T) {
-	e, ps, c := featureWorker(t, false)
+	e, ps, c, _ := featureWorker(t, false)
 	var out strings.Builder
 	code, err := e.CmdSubmit(c, []string{"separate the front-ends from the hub"}, &out)
 	if err != nil || code != 0 {
 		t.Fatalf("CmdSubmit: code=%d err=%v out=%s", code, err, out.String())
 	}
+	runQueuedGate(t, e)
 	pr, ok, _ := ps.GetPR("pr-td-EPIC")
 	if !ok {
 		t.Fatal("submitting a finished feature should open a PR for the feature")
@@ -80,7 +83,7 @@ func TestFinishedFeatureSubmitsItself(t *testing.T) {
 // an incomplete branch under review, so the refusal names the subtask still open and the verb that
 // clears it.
 func TestUnfinishedFeatureIsRefusedWithWhatIsLeft(t *testing.T) {
-	e, ps, c := featureWorker(t, true)
+	e, ps, c, _ := featureWorker(t, true)
 	var out strings.Builder
 	code, _ := e.CmdSubmit(c, []string{"early"}, &out)
 	if code == 0 {

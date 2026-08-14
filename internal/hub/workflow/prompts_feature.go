@@ -14,7 +14,7 @@ func DirContainerClaimed(container, ctitle, child, childTitle string) string {
 	return fmt.Sprintf("You're working feature %s: %s — on a single branch in /workspace. "+
 		"Current subtask %s: %s. Implement it, then run `sindri checkpoint \"<summary>\"` "+
 		"to record it and move to the next subtask. One PR covers the whole feature, so submit "+
-		"once every subtask is checkpointed, never per subtask.", container, ctitle, child, childTitle)
+		"once every subtask is checkpointed, never per subtask.%s", container, ctitle, child, childTitle, runPointer)
 }
 
 // DirContainerWorking is the working directive inside a feature. Claiming used to be the only place

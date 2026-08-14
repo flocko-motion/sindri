@@ -30,15 +30,15 @@ func (p *ProjectStore) PutRun(r Run) error {
 	}
 	r.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	_, err := p.s.db.Exec(`
-		INSERT INTO runs (project,id,agent,command,status,priority,timeout,workspace,task,created_at,started_at,finished_at,updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+		INSERT INTO runs (project,id,agent,command,status,priority,timeout,workspace,task,kind,message,created_at,started_at,finished_at,updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(project,id) DO UPDATE SET
 			agent=excluded.agent, command=excluded.command, status=excluded.status,
 			priority=excluded.priority, timeout=excluded.timeout, workspace=excluded.workspace,
-			task=excluded.task, started_at=excluded.started_at,
+			task=excluded.task, kind=excluded.kind, message=excluded.message, started_at=excluded.started_at,
 			finished_at=excluded.finished_at, updated_at=excluded.updated_at`,
 		p.project, r.ID, r.Agent, r.Command, r.Status, r.Priority, r.Timeout, r.Workspace, r.Task,
-		r.CreatedAt, r.StartedAt, r.FinishedAt, r.UpdatedAt)
+		r.Kind, r.Message, r.CreatedAt, r.StartedAt, r.FinishedAt, r.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("put run %s: %w", r.ID, err)
 	}
@@ -140,7 +140,7 @@ func (p *ProjectStore) RunOutput(id string) (string, error) {
 	return out, nil
 }
 
-const runCols = `SELECT project,id,agent,command,status,priority,timeout,workspace,task,exit_code,created_at,started_at,finished_at,updated_at FROM runs`
+const runCols = `SELECT project,id,agent,command,status,priority,timeout,workspace,task,exit_code,kind,message,created_at,started_at,finished_at,updated_at FROM runs`
 
 func queryRuns(db *sql.DB, q string, args ...any) ([]Run, error) {
 	rows, err := db.Query(q, args...)
@@ -173,6 +173,6 @@ func scanRun(row scanner) (Run, bool, error) {
 func scanRunRow(row scanner) (Run, error) {
 	var r Run
 	err := row.Scan(&r.Project, &r.ID, &r.Agent, &r.Command, &r.Status, &r.Priority, &r.Timeout,
-		&r.Workspace, &r.Task, &r.ExitCode, &r.CreatedAt, &r.StartedAt, &r.FinishedAt, &r.UpdatedAt)
+		&r.Workspace, &r.Task, &r.ExitCode, &r.Kind, &r.Message, &r.CreatedAt, &r.StartedAt, &r.FinishedAt, &r.UpdatedAt)
 	return r, err
 }

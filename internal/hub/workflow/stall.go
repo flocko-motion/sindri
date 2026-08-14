@@ -28,7 +28,8 @@ func (e *Engine) parkedByTheHub(project, name string) bool {
 // Stalled reports whether an agent holds work it has stopped doing. The evidence is the SCREEN
 // standing still — a pane frozen mid-turn keeps SAYING "working" forever. Two words still veto it,
 // both meaning the agent is correctly motionless: "blocked" waits on a human, "signed-out" cannot
-// act. Which work counts: "working", or a feature due to be submitted; "submitted" exists to wait.
+// act. Which work counts: "working", or a feature due to be submitted; "submitted" and "gating"
+// (a queued gate result pending) both exist to wait.
 func Stalled(phase, container, runtime string, stillFor time.Duration) bool {
 	// A cut-off turn counts in ANY phase: nothing resumes on its own, and an agent that could not
 	// finish its own sentence will not act on a verdict either.
@@ -38,7 +39,7 @@ func Stalled(phase, container, runtime string, stillFor time.Duration) bool {
 	if runtime == "blocked" || runtime == "signed-out" || stillFor < StallDwell {
 		return false
 	}
-	return phase == "working" || (container != "" && phase != "submitted")
+	return phase == "working" || (container != "" && phase != "submitted" && phase != "gating")
 }
 
 // NudgeStalled prods an agent holding work to continue or say what blocks it, reporting whether it

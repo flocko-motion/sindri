@@ -205,6 +205,7 @@ func TestAMergeNeverClosesATaskOverOpenChildren(t *testing.T) {
 	if code, err := e.CmdSubmit(c, []string{"the leaf"}, &out); code != 0 || err != nil {
 		t.Fatalf("CmdSubmit: code=%d err=%v out=%s", code, err, out.String())
 	}
+	runQueuedGate(t, e)
 	deps.alive = false
 	child := addChild(t, e, "td-LEAF", true)
 	if st, _ := ps.GetState("dain"); st.Container != "" {
@@ -289,6 +290,7 @@ func TestNothingClosesAParentOverAChildBeingWORKED(t *testing.T) {
 	if code, err := e.CmdSubmit(c, []string{"done"}, &out); code != 0 || err != nil {
 		t.Fatalf("CmdSubmit: code=%d err=%v out=%s", code, err, out.String())
 	}
+	runQueuedGate(t, e)
 	if err := ps.SetParent(child, "td-LEAF"); err != nil { // …and re-attach, as a re-parent would
 		t.Fatal(err)
 	}

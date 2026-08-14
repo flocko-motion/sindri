@@ -128,6 +128,7 @@ func TestSubmitCommitsConventionally(t *testing.T) {
 	if code, err := e.CmdSubmit(c, []string{"retry", "with", "backoff"}, &out); err != nil || code != 0 {
 		t.Fatalf("CmdSubmit: code=%d err=%v out=%s", code, err, out.String())
 	}
+	runQueuedGate(t, e)
 	if got, want := lastCommitMsg(t, wt), "fix(sd-1): retry with backoff"; got != want {
 		t.Errorf("commit message = %q, want %q", got, want)
 	}
@@ -215,6 +216,7 @@ func TestMergeCommitIsConventional(t *testing.T) {
 	if code, err := e.CmdContribute(caller, []string{"checkpoint"}, io.Discard); err != nil || code != 0 {
 		t.Fatalf("CmdContribute: code=%d err=%v", code, err)
 	}
+	runQueuedGate(t, e)
 	pr, ok, _ := ps.GetPR("pr-" + task)
 	if !ok {
 		t.Fatal("contribute should have created pr-td-1")

@@ -24,8 +24,7 @@ import (
 )
 
 // baseBranch is the branch agents work against: the configured `reference:`, else the main
-// checkout's current branch. Configured-but-absent is fatal — substituting one would corrupt every
-// claim, submit and merge measured against it.
+// checkout's current branch. Configured-but-absent is fatal — every claim/submit/merge needs it.
 func (e *Engine) baseBranch(root string) (string, error) {
 	cfg, err := config.Load(root)
 	if err != nil {
@@ -92,9 +91,8 @@ func (e *Engine) PRProject(fallback, id string) string {
 	return fallback
 }
 
-// PRDetail is a merge-intent plus its linked task and diff (for `pr info`). It
-// crosses the wire, so it is internal/api.PRDetail under the name every existing
-// caller here already uses.
+// PRDetail is a merge-intent plus its linked task and diff (for `pr info`); it crosses the wire
+// as internal/api.PRDetail, the name every existing caller here already uses.
 type PRDetail = api.PRDetail
 
 // PRInfo returns a project's PR with its linked task and diff.
@@ -127,9 +125,8 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 	if err != nil {
 		return 1, err
 	}
-	// What goes up: a whole feature branch when the worker holds one, otherwise the leaf task it is
-	// working. A hierarchy changes the unit under review, never who puts it up — so the worker that
-	// built it submits it, exactly as it would a task of its own.
+	// What goes up: a whole feature branch when the worker holds one, otherwise the leaf task —
+	// a hierarchy changes the unit under review, never who puts it up.
 	target, branch := st.Task, st.Branch
 	if st.Container != "" {
 		open, oerr := ps.OpenSubtasks(st.Container)
@@ -140,9 +137,8 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 			fmt.Fprintln(out, ReplySubtasksRemain(st.Container, open[0].ID, len(open)))
 			return 1, nil
 		}
-		// The second half of "is it finished": work under it the approval gate holds is absent from
-		// the query above rather than reported by it, so asking only that put a feature up as
-		// complete over a subtask nobody had touched (-> gatedUnder).
+		// The second half of "is it finished": work the approval gate holds is absent from the query
+		// above, not reported by it, so asking only that missed a gated subtask (-> gatedUnder).
 		gated, gerr := e.gatedUnder(c.Project, st.Container)
 		if gerr != nil {
 			return 1, gerr
@@ -158,9 +154,8 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 	} else if grew, gerr := ps.OpenChildIDs(st.Task); gerr != nil {
 		return 1, gerr
 	} else if len(grew) > 0 {
-		// The unit under review grew after this task was handed out. Extending rather than refusing:
-		// the same agent takes the new work on the same branch, and the PR covers the whole of it
-		// (-> adoptChild, which does this when the child arrives; here the agent was not running).
+		// Grown since hand-out: extend rather than refuse — the same agent takes the new work on the
+		// same branch, PR covering all of it (-> adoptChild, the case where it arrives mid-run).
 		e.promoteToFeature(c.Project, c.Agent, st.Task)
 		fmt.Fprintln(out, ReplyTaskGrew(st.Task, grew))
 		return 1, nil
@@ -176,56 +171,27 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 	if refused, rerr := e.refuseIfBehind(ps, c.Agent, wt, base, target, out); rerr != nil || refused {
 		return 1, rerr
 	}
-	if lintOut, ok := repo.Gate(wt, e.deps.BrokkrBin, e.verifyCmd(c.Project)); !ok {
-		fmt.Fprintln(out, ReplyLintFail(strings.TrimSpace(lintOut)))
-		_ = ps.Log(c.Agent, "lint-fail", target)
-		return 1, nil
-	}
-	tk, _, _ := ps.GetTask(target)
+	// Queued, not run here: several agents submitting at once must not mean several concurrent
+	// verify runs. No PR exists until it passes — landSubmit creates it from the queue.
 	desc := strings.TrimSpace(strings.Join(args, " "))
-	if desc == "" {
-		desc = tk.Title
-	}
-	if desc == "" {
-		desc = "work on " + target
-	}
-	msg := conventionalCommit(tk.Type, target, desc)
-	if err := git.CommitAll(wt, msg); err != nil {
+	run, err := e.enqueueGate(c.Project, c.Agent, "submit", desc)
+	if err != nil {
 		return 1, err
 	}
-	pr := store.PR{ID: "pr-" + target, Task: target, Agent: c.Agent, Branch: branch, Base: base, Status: "open"}
-	_, existed, _ := ps.GetPR(pr.ID) // first submit vs a resubmit after rejection
-	if err := ps.PutPR(pr); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: branch, Container: st.Container, Phase: "gating"}); err != nil {
 		return 1, err
 	}
-	if err := ps.SetState(store.AgentState{
-		Agent: c.Agent, Task: st.Task, Branch: branch, Container: st.Container, Phase: "submitted",
-	}); err != nil {
-		return 1, err
+	pos := 0
+	if all, aerr := e.store.AllRuns("queued"); aerr == nil {
+		pos = queuePositions(all)[run.ID]
 	}
-	_ = ps.Log(c.Agent, "submit", pr.ID)
-	if existed {
-		_ = ps.LogPR(pr.ID, "resubmitted", "by "+c.Agent+": "+msg)
-	} else {
-		_ = ps.LogPR(pr.ID, "created", "by "+c.Agent+": "+msg)
-	}
-	if err := e.RequestReview(c.Project, pr.ID, ""); err != nil { // one review path; the hub preps the terrain
-		_ = ps.Log(c.Agent, "review-request-failed", pr.ID+": "+err.Error())
-		fmt.Fprintln(out, ReplyReviewRequestFailed(pr.ID, err))
-		return 0, nil
-	}
-	fmt.Fprintln(out, ReplyRegistered(pr.ID))
+	fmt.Fprintln(out, ReplyGateQueued(run.ID, pos))
 	return 0, nil
 }
 
-// refuseIfBehind stops a PR being recorded on a base the reference has moved past. It refuses rather
-// than rebasing on the agent's behalf: the gate runs BEFORE the PR is written, so a silent rebase
-// here would attach a gate result that never saw the merged state — passed against the old base,
-// while the code that actually merges was never gated together. Sending the agent through `rebase`
-// and a fresh submit re-runs the gate on the tree that will land.
-//
-// A failure to count is not a refusal. The count is the evidence, and blocking a submit on a git
-// command that did not answer would strand an agent with finished work and nothing to fix.
+// refuseIfBehind stops a PR being recorded on a base the reference has moved past — refusing
+// rather than rebasing on the agent's behalf, so a fresh submit re-gates the tree that will land.
+// A failure to count is not a refusal: the count is the evidence, not a git command's success.
 func (e *Engine) refuseIfBehind(ps *store.ProjectStore, agent, wt, base, target string, out io.Writer) (refused bool, err error) {
 	behind, cerr := git.CountRange(wt, "HEAD", base)
 	if cerr != nil || behind == 0 {
@@ -307,9 +273,8 @@ func (e *Engine) CmdOpenspec(c registry.Caller, args []string, out io.Writer) (i
 	return 0, nil
 }
 
-// reviewBadge renders one review verdict for the agent-facing CLI: its state, verdict, author
-// and when, marking a planner's advisory badge for what it is — a second opinion, not the
-// approval that satisfies the merge gate.
+// reviewBadge renders one review verdict for the agent-facing CLI, marking a planner's advisory
+// badge for what it is — a second opinion, not the approval that satisfies the merge gate.
 func reviewBadge(r store.Review) string {
 	switch {
 	case r.Verdict != "":
@@ -457,9 +422,8 @@ func (e *Engine) RebaseAgent(project, name string) error {
 	return nil
 }
 
-// rebasePlanners is best-effort after a merge: a dirty or conflicting worktree is logged, skipped.
-// It also settles the reference tip, since a merge moves it and the hub already handled that here —
-// leaving it unrecorded would have SyncReference report the hub's own merge as an outside change.
+// rebasePlanners is best-effort after a merge, and settles the reference tip too — unrecorded, the
+// merge that just moved it would have SyncReference report it as an outside change.
 func (e *Engine) rebasePlanners(project, base string) {
 	defer e.noteReference(project)
 	ps := e.store.For(project)
@@ -484,10 +448,8 @@ func (e *Engine) MilestonePR(project, agent string) (store.PR, error) {
 	return e.openMilestone(project, agent, "")
 }
 
-// openMilestone puts a feature branch up as it stands: commit, record it as an interim PR the user
-// merges, and keep the agent on the feature across the landing. One operation behind two doors — the
-// human's milestone trigger and a worker's own `contribute` inside a feature — since partly landing a
-// feature is the same act however it is asked for.
+// openMilestone puts a feature branch up as it stands: commit, an interim PR, agent stays on the
+// feature — one operation behind both the human's milestone trigger and a worker's own `contribute`.
 func (e *Engine) openMilestone(project, agent, msg string) (store.PR, error) {
 	ps := e.store.For(project)
 	root := e.deps.ProjectRoot(project)
@@ -518,9 +480,8 @@ func (e *Engine) openMilestone(project, agent, msg string) (store.PR, error) {
 	if err != nil {
 		return store.PR{}, err
 	}
-	// Named for the FEATURE: the branch carries every checkpointed subtask, so naming it for the
-	// subtask in hand would misdescribe what is in it. Interim, so nothing reads the merge as the
-	// feature having landed — it is one instalment of a branch that goes on.
+	// Named for the FEATURE, not the subtask in hand — the branch carries every checkpointed one.
+	// Interim, so nothing reads the merge as the feature having landed.
 	pr := store.PR{ID: "pr-" + st.Container, Task: st.Container, Agent: agent, Branch: st.Container, Base: base, Status: "open", Kind: "interim"}
 	_, existed, _ := ps.GetPR(pr.ID)
 	if err := ps.PutPR(pr); err != nil {

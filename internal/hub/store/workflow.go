@@ -146,6 +146,8 @@ CREATE TABLE IF NOT EXISTS runs (
   workspace   TEXT NOT NULL DEFAULT '',       -- the agent's worktree path at schedule time
   task        TEXT NOT NULL DEFAULT '',       -- the agent's task at schedule time, for staleness at dequeue
   exit_code   INTEGER NOT NULL DEFAULT 0,
+  kind        TEXT NOT NULL DEFAULT '',       -- '' | 'submit' | 'contribute' -- a submit/contribute gate
+  message     TEXT NOT NULL DEFAULT '',       -- the agent's submit/contribute text, replayed once a gate passes
   output      TEXT NOT NULL DEFAULT '',
   created_at  TEXT NOT NULL DEFAULT '',
   started_at  TEXT NOT NULL DEFAULT '',

@@ -330,6 +330,8 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 					return DirContainerRejected(st.Container, st.Task, feedback), nil
 				}
 				return DirSubmitted, nil
+			case "gating":
+				return DirGating, nil
 			case "working":
 				return e.workDirective(project, name, st.Task, st.Container)
 			default:
@@ -361,6 +363,8 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 			return DirRejected(st.Task, feedback), nil
 		}
 		return DirSubmitted, nil
+	case "gating":
+		return DirGating, nil
 	default: // idle — claim the next task, blocking until one exists
 		return e.waitForNextTask(ctx, project, name)
 	}

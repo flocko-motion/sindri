@@ -161,6 +161,8 @@ func landingBlocked(verb string) func(registry.Caller) string {
 			case verb == "contribute" && c.Phase == "submitted":
 				return fmt.Sprintf("Feature %s is already up for the user to merge — wait for that, or "+
 					"`sindri revoke` to take it back and keep working.", c.Container)
+			case (verb == "contribute" || verb == "submit") && c.Phase == "gating":
+				return "Your quality gate is queued — wait for the result before trying again."
 			case verb == "submit" && c.SubtasksOpen:
 				return fmt.Sprintf("Feature %s still has open subtasks, and it goes up as ONE PR — "+
 					"record the one you're on with `sindri checkpoint \"<summary>\"` and it will hand you "+

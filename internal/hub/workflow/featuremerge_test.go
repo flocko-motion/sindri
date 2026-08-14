@@ -15,11 +15,12 @@ import (
 // PR took that branch too, so merging it closed nothing and freed nobody: the worker stayed assigned
 // to a feature already in the reference branch, and its task still read open.
 func TestMergingAFinishedFeatureReleasesTheWorker(t *testing.T) {
-	e, ps, c := featureWorker(t, false) // no open subtasks: this PR is the feature's last
+	e, ps, c, _ := featureWorker(t, false) // no open subtasks: this PR is the feature's last
 	var out strings.Builder
 	if code, err := e.CmdSubmit(c, []string{"the feature"}, &out); err != nil || code != 0 {
 		t.Fatalf("CmdSubmit: code=%d err=%v out=%s", code, err, out.String())
 	}
+	runQueuedGate(t, e)
 	pr, ok, _ := ps.GetPR("pr-td-EPIC")
 	if !ok {
 		t.Fatal("the feature should be up for review")
@@ -48,7 +49,7 @@ func TestMergingAFinishedFeatureReleasesTheWorker(t *testing.T) {
 // exists: cutting a milestone with subtasks still open lands the work so far and leaves the worker
 // exactly where it was, on the feature branch, carrying on.
 func TestAPartialMilestoneKeepsTheWorkerOnTheFeature(t *testing.T) {
-	e, ps, _ := featureWorker(t, true) // a subtask still open
+	e, ps, _, _ := featureWorker(t, true) // a subtask still open
 	if err := ps.PutPR(store.PR{
 		ID: "pr-td-EPIC", Task: "td-EPIC", Agent: "dain", Branch: "td-EPIC", Base: "main", Status: "approved",
 	}); err != nil {
@@ -69,7 +70,7 @@ func TestAPartialMilestoneKeepsTheWorkerOnTheFeature(t *testing.T) {
 // TestAWorkerIsNeverHandedALandedFeature: whatever route left it holding one, an agent whose feature
 // has already merged is released on its next ask rather than being sent round the loop again.
 func TestAWorkerIsNeverHandedALandedFeature(t *testing.T) {
-	e, ps, _ := featureWorker(t, false)
+	e, ps, _, _ := featureWorker(t, false)
 	// The shape the old merge path left behind: PR merged, feature still open, worker still on it.
 	if err := ps.PutPR(store.PR{
 		ID: "pr-td-EPIC", Task: "td-EPIC", Agent: "dain", Branch: "td-EPIC", Status: "merged",

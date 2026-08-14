@@ -49,11 +49,14 @@ func newRunID() (string, error) {
 }
 
 // ScheduleRun queues a command for later execution — the store row only; execution (-> ExecuteRun)
-// is a separate step, triggered by the fleet's run watcher once this run reaches the front. It
-// snapshots the agent's current workspace and task: a dequeue that finds the agent has since
-// moved on to something else (-> staleReason) drops the run rather than spend the only slot
-// testing against a workspace this was never meant for.
+// is a separate step, triggered by the fleet's run watcher once this run reaches the front.
 func (e *Engine) ScheduleRun(project, agent, command, priority, timeout string) (api.Run, error) {
+	return e.putQueuedRun(project, agent, "", command, "", priority, timeout)
+}
+
+// putQueuedRun is the one place a run row is created, ordinary or gate alike, snapshotting the
+// agent's workspace/task so a later dequeue can tell it moved on (-> staleReason).
+func (e *Engine) putQueuedRun(project, agent, kind, command, message, priority, timeout string) (api.Run, error) {
 	id, err := newRunID()
 	if err != nil {
 		return api.Run{}, err
@@ -63,7 +66,7 @@ func (e *Engine) ScheduleRun(project, agent, command, priority, timeout string) 
 	st, _ := ps.GetState(agent)
 	if err := ps.PutRun(store.Run{
 		ID: id, Agent: agent, Command: command, Status: "queued", Priority: priority, Timeout: timeout,
-		Workspace: a.Workspace, Task: st.Task,
+		Kind: kind, Message: message, Workspace: a.Workspace, Task: st.Task,
 	}); err != nil {
 		return api.Run{}, err
 	}
@@ -72,10 +75,8 @@ func (e *Engine) ScheduleRun(project, agent, command, priority, timeout string) 
 	return r, err
 }
 
-// CmdScheduleRun is the agent-facing verb: queue a command instead of running it in the pod.
-// Returns AT ONCE with the run's position — the same act-report-idle contract as submit — since
-// the result (pass, fail, or timeout) only exists once something executes it. An optional leading
-// --timeout=<duration> narrows the hub's hard cap; anything else, or nothing, defers to it.
+// CmdScheduleRun queues a command instead of running it in the pod, returning AT ONCE with its
+// position — submit's same act-report-idle contract. --timeout=<duration> narrows the hard cap.
 func (e *Engine) CmdScheduleRun(c registry.Caller, args []string, out io.Writer) (int, error) {
 	timeout := ""
 	if len(args) > 0 {
@@ -101,9 +102,9 @@ func (e *Engine) CmdScheduleRun(c registry.Caller, args []string, out io.Writer)
 	return 0, nil
 }
 
-// queuePositions ranks every queued run in runs — priority first (P0 highest, unset last),
-// creation order breaking ties — and returns each one's 1-based position. Runs not queued are
-// absent from the result, position being meaningless once a run has started or finished.
+// queuePositions ranks every queued run and returns each one's 1-based position. A gate run
+// (Kind != "") always outranks an ordinary one; within each group, priority (P0 highest, unset
+// last) then creation order breaks ties. Runs not queued are absent from the result.
 func queuePositions(runs []api.Run) map[string]int {
 	queued := make([]api.Run, 0, len(runs))
 	for _, r := range runs {
@@ -112,6 +113,10 @@ func queuePositions(runs []api.Run) map[string]int {
 		}
 	}
 	sort.SliceStable(queued, func(i, j int) bool {
+		gi, gj := queued[i].Kind != "", queued[j].Kind != ""
+		if gi != gj {
+			return gi // a gate run before any ordinary one, regardless of priority or arrival
+		}
 		pi, pj := queued[i].Priority, queued[j].Priority
 		if (pi == "") != (pj == "") {
 			return pj == "" // non-empty before empty
@@ -224,9 +229,8 @@ func (e *Engine) ReprioritiseRun(project, id, priority string) error {
 	return nil
 }
 
-// CmdShow dispatches the "show" verb by id shape: a run id shows a run's status and stored
-// output, everything else a PR's diff — one verb, so fetching a run's full log on request
-// (-> sd-938f23's "let it be fetched on request") needs no separate command to remember.
+// CmdShow dispatches "show" by id shape: a run id shows its status and stored output,
+// everything else a PR's diff — one verb to remember for either.
 func (e *Engine) CmdShow(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) > 0 && strings.HasPrefix(args[0], "run-") {
 		return e.CmdShowRun(c, args, out)
