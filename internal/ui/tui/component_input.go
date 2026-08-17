@@ -65,6 +65,17 @@ func (m *model) submitInput() tea.Cmd {
 			return nil
 		}
 		return tellCmd(cl, target, v)
+	case inputRunCommand:
+		// Against this repo's own checkout, the target only a human has — an agent's workspace is
+		// the agent's to queue. Not scheduled inline: the queue answers at once with a position,
+		// and the refresh is what puts the new row on the tab.
+		return func() tea.Msg {
+			if _, err := cl.ScheduleRun(v, "", "", ""); err != nil {
+				return errModalMsg{err}
+			}
+			st, _ := cl.State()
+			return polledMsg(st)
+		}
 	case inputComment:
 		// Refreshed after: a GitHub issue's thread is re-read on the way back, so the comment
 		// appears with the author and timestamp the source gave it.

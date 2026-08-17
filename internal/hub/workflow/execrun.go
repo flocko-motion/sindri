@@ -63,8 +63,9 @@ func (e *Engine) ExecuteRun(project, id string) error {
 	}
 
 	root := e.deps.ProjectRoot(project)
-	a, _, _ := ps.GetAgent(r.Agent) // existence already checked by staleReason
-	mwt, err := repo.MaterializeRun(root, filepath.Join(root, a.Workspace), id)
+	// The workspace the run was AIMED at, from its own row: re-deriving it from the agent answered
+	// differently once it had moved on, and answers nothing at all for a run the user queued.
+	mwt, err := repo.MaterializeRun(root, filepath.Join(root, r.Workspace), id)
 	if err != nil {
 		return e.finishRun(ps, project, r, "failed", fmt.Sprintf("run: could not prepare a workspace: %s\n", err), 0, 0, -1)
 	}
@@ -145,6 +146,11 @@ func exitCodeOf(err error) int {
 // still good — cheaper to check than to materialize, build, and run against a workspace the
 // scheduling agent has since left behind.
 func (e *Engine) staleReason(ps *store.ProjectStore, r api.Run) string {
+	// Nothing to go stale: no roster entry, no task. Dropping one for a missing "agent" named user
+	// would silently discard the run a human is sitting there waiting for.
+	if api.RunFromUser(r) {
+		return ""
+	}
 	_, ok, err := ps.GetAgent(r.Agent)
 	if err != nil || !ok {
 		return fmt.Sprintf("agent %s no longer exists", r.Agent)
@@ -165,6 +171,10 @@ func (e *Engine) finishRun(ps *store.ProjectStore, project string, r api.Run, st
 	e.deps.Notify()
 	if r.Kind != "" {
 		return e.completeGate(project, r, status, output)
+	}
+	// Nobody to inject into: the user reads it on the board, which Notify has already refreshed.
+	if api.RunFromUser(r) {
+		return nil
 	}
 	_ = e.deps.InjectWhenReady(project, r.Agent, MsgRunFinished(r.ID, status, elapsed, budget))
 	return nil

@@ -82,6 +82,7 @@ type backend interface {
 	MilestonePR(agent string) (api.PR, error)
 	Runs() ([]api.Run, error)
 	RunInfo(id string) (api.RunDetail, error)
+	ScheduleRun(command, agent, priority, timeout string) (api.Run, error)
 	CancelRun(id string) error
 	ReprioritiseRun(id, priority string) error
 	Repos() ([]api.RepoSummary, error)

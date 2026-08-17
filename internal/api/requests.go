@@ -80,6 +80,16 @@ type RejectReq struct {
 	Feedback string `json:"feedback"`
 }
 
+// ScheduleRunReq is the body for POST /run/new: what the user wants run, and against which
+// workspace. Agent names one to borrow; empty means the repo's own checkout, which is the target
+// only a human has. Priority and Timeout are optional, exactly as an agent's own run treats them.
+type ScheduleRunReq struct {
+	Command  string `json:"command"`
+	Agent    string `json:"agent,omitempty"`
+	Priority string `json:"priority,omitempty"`
+	Timeout  string `json:"timeout,omitempty"`
+}
+
 // RunPriorityReq is the body for POST /run/priority: the run and its new P-code.
 type RunPriorityReq struct {
 	ID       string `json:"id"`

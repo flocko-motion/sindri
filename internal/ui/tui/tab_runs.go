@@ -25,6 +25,15 @@ func runStatusLabel(r api.Run) string {
 	return r.Status
 }
 
+// runRequester names who asked for a run. A user's reads "you", not the bare sentinel: the column
+// is otherwise a list of agent names with one word in it that looks like another agent.
+func runRequester(r api.Run) string {
+	if api.RunFromUser(r) {
+		return "you"
+	}
+	return r.Agent
+}
+
 func (m model) runRows() []row {
 	var out []row
 	for _, r := range api.FilterRuns(m.runFilter, m.state.Runs) {
@@ -33,7 +42,7 @@ func (m model) runRows() []row {
 		}
 		repo := m.repoStyle(r.Project).Render(fmt.Sprintf("%-10.10s", m.repoName(r.Project)))
 		out = append(out, row{fmt.Sprintf("%s %-14s %-12s %4s %-10s %s",
-			repo, r.ID, runStatusLabel(r), shortAge(r.CreatedAt), r.Agent, r.Command), r.ID})
+			repo, r.ID, runStatusLabel(r), shortAge(r.CreatedAt), runRequester(r), r.Command), r.ID})
 	}
 	return out
 }
@@ -52,8 +61,9 @@ func (m model) runDetailLines() []string {
 	}
 	r := d.Run
 	ls := []string{
-		fmt.Sprintf("%s   [%s]   by %s", r.ID, runStatusLabel(r), r.Agent),
+		fmt.Sprintf("%s   [%s]   by %s", r.ID, runStatusLabel(r), runRequester(r)),
 		"command: " + r.Command,
+		"against: " + api.RunTarget(r),
 	}
 	if r.Priority != "" {
 		ls = append(ls, "priority: "+r.Priority)

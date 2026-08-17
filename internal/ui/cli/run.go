@@ -8,6 +8,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/spf13/cobra"
@@ -15,9 +16,65 @@ import (
 
 // NewRunCmd builds the `run` command tree (the scheduled-run queue).
 func NewRunCmd() *cobra.Command {
-	c := &cobra.Command{Use: "run", Short: "Inspect and manage scheduled runs (the run queue)"}
-	c.AddCommand(runListCmd(), runInfoCmd(), runOutputCmd(), runCancelCmd(), runPriorityCmd())
+	c := &cobra.Command{Use: "run", Short: "Queue, inspect and manage scheduled runs (the run queue)"}
+	c.AddCommand(runNewCmd(), runListCmd(), runInfoCmd(), runOutputCmd(), runCancelCmd(), runPriorityCmd())
 	return c
+}
+
+// runNewCmd queues a run as the user, into the same single slot agents share. The target is named,
+// never taken from the working directory: the same command means different things in different
+// trees, and a wrong guess spends the fleet's only slot on it.
+func runNewCmd() *cobra.Command {
+	var agent, priority, timeout string
+	c := &cobra.Command{
+		Use:   "new <command...>",
+		Short: "Queue a command to run against this repo's checkout, or an agent's workspace",
+		Long: "Queues a shell command into the fleet's single run slot — the same queue agents use, so\n" +
+			"a suite you want run does not race whatever an agent is already running.\n\n" +
+			"It runs against a COPY of the target, made when the run reaches the front, so nothing the\n" +
+			"command writes reaches the tree you are working in. Without --agent the target is this\n" +
+			"repo's own checkout, uncommitted work included — which is the point: it tests what you\n" +
+			"have, not what you have committed.\n\n" +
+			"A run you queue goes ahead of every agent's, including their submit gates: you are sitting\n" +
+			"there waiting on it and they are not. `sindri run priority` re-orders it afterwards.",
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if priority != "" {
+				code, ok := api.ParsePriority(priority)
+				if !ok {
+					return fmt.Errorf("unknown priority %q — one of: %s", priority, strings.Join(api.PriorityWords, ", "))
+				}
+				priority = code
+			}
+			return withBackend(func(b backend) error {
+				r, err := b.ScheduleRun(strings.Join(args, " "), agent, priority, timeout)
+				if err != nil {
+					return err
+				}
+				target := "this repo's checkout"
+				if agent != "" {
+					target = agent + "'s workspace"
+				}
+				fmt.Println(r.ID)
+				fmt.Fprintf(os.Stderr, "queued against %s — `sindri run list` for its place in line, "+
+					"`sindri run output %s` for the result.\n", target, r.ID)
+				return nil
+			})
+		},
+	}
+	c.Flags().StringVar(&agent, "agent", "", "run against this agent's workspace instead of the repo's checkout")
+	c.Flags().StringVar(&priority, "priority", "", "order among queued runs: "+strings.Join(api.PriorityWords, ", "))
+	c.Flags().StringVar(&timeout, "timeout", "", "narrow the run's budget (a duration, e.g. 5m); never widens the hub's cap")
+	return c
+}
+
+// runRequester names who asked for a run. A user's reads "you" rather than the bare sentinel: the
+// column is otherwise a list of agent names with one word in it that looks like another agent.
+func runRequester(r api.Run) string {
+	if api.RunFromUser(r) {
+		return "you"
+	}
+	return r.Agent
 }
 
 // runStatusLabel adds the queue position to a queued run's status, the same way api.StatusLabel
@@ -46,7 +103,7 @@ func runListCmd() *cobra.Command {
 				runs := api.FilterRuns(f, all)
 				for _, r := range runs {
 					fmt.Printf("%-14s %-12s %4s  %-10s %s\n",
-						r.ID, runStatusLabel(r), shortAge(r.CreatedAt), r.Agent, r.Command)
+						r.ID, runStatusLabel(r), shortAge(r.CreatedAt), runRequester(r), r.Command)
 				}
 				if n := len(all) - len(runs); n > 0 {
 					fmt.Fprintf(os.Stderr, "(filter %s — %d of %d run(s) shown)\n", f, len(runs), len(all))

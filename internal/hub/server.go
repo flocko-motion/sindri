@@ -382,29 +382,7 @@ func (h *Hub) Handler() http.Handler {
 		path, err := h.wf.MaterializeReview(h.wf.PRProject(h.reqProject(r), id), id)
 		writeJSON(w, okMsg{path}, err)
 	})
-	mux.HandleFunc("GET /runs", func(w http.ResponseWriter, r *http.Request) {
-		runs, err := h.wf.FleetRuns() // fleet-wide, matching the TUI board — not cwd-scoped
-		writeJSON(w, runs, err)
-	})
-	mux.HandleFunc("GET /run", func(w http.ResponseWriter, r *http.Request) {
-		id := r.URL.Query().Get("id")
-		d, err := h.wf.RunInfo(h.wf.RunProject(h.reqProject(r), id), id)
-		writeJSON(w, d, err)
-	})
-	mux.HandleFunc("POST /run/cancel", func(w http.ResponseWriter, r *http.Request) {
-		var req NameReq // Name carries the run id.
-		if !decode(w, r, &req) {
-			return
-		}
-		writeJSON(w, okMsg{"cancelled"}, h.wf.CancelRun(h.wf.RunProject(h.reqProject(r), req.Name), req.Name))
-	})
-	mux.HandleFunc("POST /run/priority", func(w http.ResponseWriter, r *http.Request) {
-		var req RunPriorityReq
-		if !decode(w, r, &req) {
-			return
-		}
-		writeJSON(w, okMsg{"ok"}, h.wf.ReprioritiseRun(h.wf.RunProject(h.reqProject(r), req.ID), req.ID, req.Priority))
-	})
+	h.runRoutes(mux) // the run queue's own surface (-> server_runs.go)
 	mux.HandleFunc("GET /tasks", func(w http.ResponseWriter, r *http.Request) {
 		tasks, err := h.wf.Tasks(h.reqProject(r))
 		writeJSON(w, tasks, err)

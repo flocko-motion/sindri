@@ -408,6 +408,15 @@ func (c *HTTP) RunInfo(id string) (api.RunDetail, error) {
 	return d, c.get("/run?id="+url.QueryEscape(id), &d)
 }
 
+// ScheduleRun queues a run the user asked for, against an agent's workspace or — with agent
+// empty — the repo's own checkout, and returns it with its place in the queue.
+func (c *HTTP) ScheduleRun(command, agent, priority, timeout string) (api.Run, error) {
+	var r api.Run
+	return r, c.postResult("/run/new", api.ScheduleRunReq{
+		Command: command, Agent: agent, Priority: priority, Timeout: timeout,
+	}, &r)
+}
+
 // CancelRun withdraws a queued or running run.
 func (c *HTTP) CancelRun(id string) error {
 	return c.post("/run/cancel", api.NameReq{Name: id})

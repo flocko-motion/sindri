@@ -201,6 +201,15 @@ func (m *model) onKey(k string) tea.Cmd {
 		} else if m.tab == 4 { // meeting: clear the shared history and start fresh
 			m.openNewMeetingChoice()
 			return nil
+		} else if m.tab == 5 { // runs: queue one against this repo's checkout
+			name, _ := m.currentRepo()
+			if name == "" {
+				name = "this repo"
+			}
+			// The target is in the prompt rather than assumed: this queues against the repo's own
+			// checkout, uncommitted work and all, which is the one target only a human has.
+			m.openInput(inputRunCommand, "run against "+name+"'s checkout: ")
+			return nil
 		}
 	case keyEdit: // edit what is selected, each tab in its own natural way
 		if m.tab == 0 && m.selID() != "" && m.cl != nil {

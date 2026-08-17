@@ -176,6 +176,7 @@ var keymap = []binding{
 	{keyCloseMeet, lbl("close meeting"), scopeChat},
 
 	// Runs.
+	{keyNew, lbl("queue a run"), scopeRuns},
 	{keyPriority, lbl("priority"), scopeRuns},
 	{keyDelete, lbl("cancel"), scopeRuns},
 	{keyFilter, func(m model) string { return "filter: " + string(m.runFilter) }, scopeRuns},

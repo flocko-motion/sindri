@@ -5,12 +5,14 @@
 // limits:  data and a pure predicate only; no persistence, no scheduling.
 package api
 
-// Run is one scheduled command: an agent's ask, the hub's queue slot for it, and how it went.
+// Run is one scheduled command: the ask, the hub's queue slot for it, and how it went.
 type Run struct {
 	Project string `json:"project"`
 	ID      string `json:"id"`
-	Agent   string `json:"agent"`   // who scheduled it
-	Command string `json:"command"` // the shell command run in the agent's workspace
+	// Agent is who scheduled it: an agent's name, or SenderUser for one the human queued. One
+	// column, because "who asked" has one answer — and that sentinel is already the human's word.
+	Agent   string `json:"agent"`
+	Command string `json:"command"` // the shell command, run against Workspace
 	// Status: queued | running | passed | failed | timed_out | cancelled.
 	Status string `json:"status"`
 	// Priority is a P-code (P0…P4), the same vocabulary tasks use — the queue runs its highest
@@ -19,8 +21,9 @@ type Run struct {
 	// Timeout is the agent-requested budget (a Go duration string, e.g. "5m"); "" defers to the
 	// hub's hard cap. It never overrides that cap — only narrows it.
 	Timeout string `json:"timeout,omitempty"`
-	// Workspace is the repo-relative worktree path this run executes against (the agent's, at the
-	// time it was scheduled).
+	// Workspace is the repo-relative worktree this run executes against, fixed when it was
+	// scheduled: an agent's, or "." for the repo's own checkout. Authoritative — the executor mounts
+	// a COPY of it and never re-derives it, so a run tests the tree it was aimed at.
 	Workspace string `json:"workspace,omitempty"`
 	// Task is the agent's task at schedule time, "" if it held none. A dequeue where the agent's
 	// current task no longer matches means the agent moved on while this sat queued — the record
@@ -58,3 +61,17 @@ type RunDetail struct {
 
 // RunOpen reports whether a run is still in play — queued or running, neither terminal state.
 func RunOpen(r Run) bool { return r.Status == "queued" || r.Status == "running" }
+
+// RunFromUser reports a run the human queued. Somebody is WATCHING it, so it leads the queue, and
+// nothing treating Agent as an agent name — roster lookup, staleness, an injected result — applies.
+// One predicate, so queue, executor and both front-ends cannot disagree about whose run it is.
+func RunFromUser(r Run) bool { return r.Agent == SenderUser }
+
+// RunTarget names the tree a run executes against: the same command passes in one workspace and
+// fails in another, so a row without it is uninterpretable.
+func RunTarget(r Run) string {
+	if r.Workspace == "" || r.Workspace == "." {
+		return "the repo's checkout"
+	}
+	return r.Workspace
+}

@@ -54,19 +54,48 @@ func (e *Engine) ScheduleRun(project, agent, command, priority, timeout string) 
 	return e.putQueuedRun(project, agent, "", command, "", priority, timeout)
 }
 
-// putQueuedRun is the one place a run row is created, ordinary or gate alike, snapshotting the
-// agent's workspace/task so a later dequeue can tell it moved on (-> staleReason).
+// ScheduleUserRun queues a run the human asked for, against a NAMED target — an agent's worktree,
+// or the repo's own checkout — never one inferred from a working directory. It carries no agent and
+// no task, so nothing about it can go stale (-> staleReason), and it executes against a COPY
+// (-> repo.MaterializeRun), which is what makes the user's live checkout a safe target at all.
+func (e *Engine) ScheduleUserRun(project, agent, command, priority, timeout string) (api.Run, error) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return api.Run{}, fmt.Errorf("say what to run")
+	}
+	workspace := "." // the repo's own checkout, when no agent is named
+	if agent = strings.TrimSpace(agent); agent != "" {
+		a, ok, err := e.store.For(project).GetAgent(agent)
+		if err != nil {
+			return api.Run{}, err
+		}
+		if !ok {
+			return api.Run{}, fmt.Errorf("no agent %q in this repo — `sindri agent list` names them; omit --agent to run against the repo's own checkout", agent)
+		}
+		workspace = a.Workspace
+	}
+	return e.putRun(project, api.SenderUser, "", command, "", priority, timeout, workspace, "")
+}
+
+// putQueuedRun creates an AGENT's run, ordinary or gate alike, snapshotting its workspace and task
+// so a later dequeue can tell it moved on (-> staleReason).
 func (e *Engine) putQueuedRun(project, agent, kind, command, message, priority, timeout string) (api.Run, error) {
+	ps := e.store.For(project)
+	a, _, _ := ps.GetAgent(agent)
+	st, _ := ps.GetState(agent)
+	return e.putRun(project, agent, kind, command, message, priority, timeout, a.Workspace, st.Task)
+}
+
+// putRun is the one place a run row is created, whoever asked for it.
+func (e *Engine) putRun(project, agent, kind, command, message, priority, timeout, workspace, task string) (api.Run, error) {
 	id, err := newRunID()
 	if err != nil {
 		return api.Run{}, err
 	}
 	ps := e.store.For(project)
-	a, _, _ := ps.GetAgent(agent)
-	st, _ := ps.GetState(agent)
 	if err := ps.PutRun(store.Run{
 		ID: id, Agent: agent, Command: command, Status: "queued", Priority: priority, Timeout: timeout,
-		Kind: kind, Message: message, Workspace: a.Workspace, Task: st.Task,
+		Kind: kind, Message: message, Workspace: workspace, Task: task,
 	}); err != nil {
 		return api.Run{}, err
 	}
@@ -113,6 +142,13 @@ func queuePositions(runs []api.Run) map[string]int {
 		}
 	}
 	sort.SliceStable(queued, func(i, j int) bool {
+		if ui, uj := api.RunFromUser(queued[i]), api.RunFromUser(queued[j]); ui != uj {
+			// A user's run before every agent's, gate runs included: somebody is WAITING on it,
+			// while the agent behind a gate run is parked and watching nothing. What it costs them
+			// is bounded by this run's own cap, and a human left behind a queue of background
+			// suites is the thing this ordering exists to prevent.
+			return ui
+		}
 		gi, gj := queued[i].Kind != "", queued[j].Kind != ""
 		if gi != gj {
 			return gi // a gate run before any ordinary one, regardless of priority or arrival
