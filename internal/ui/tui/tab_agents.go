@@ -177,16 +177,19 @@ func (m *model) openNewAgentChoice() {
 
 // launchCmd starts a registered agent and keeps what the launch says. A first run builds the
 // image, which is slow enough that silence reads as "nothing happened", and the build log is the
-// only account of a failure — so it is captured either way and shown when the launch fails.
+// only account of a failure — so it is captured either way and shown when the launch fails. Sizes
+// the session to the live preview pane it renders into, so it isn't cramped to tmux's 80x24
+// default until someone attaches.
 func (m *model) launchCmd(name string) tea.Cmd {
 	cl := m.cl
 	if cl == nil {
 		return nil
 	}
 	m.flash = "launching " + name + "… (a first run builds the image, which takes a while)"
+	cols, lines := m.previewSize()
 	return func() tea.Msg {
 		var buf bytes.Buffer
-		err := cl.Launch(name, false, false, &buf)
+		err := cl.Launch(name, false, false, cols, lines, &buf)
 		return launchedMsg{name: name, log: buf.String(), err: err}
 	}
 }
@@ -314,16 +317,22 @@ func (m model) agentDetailWidth() int {
 	return clampInt(agentDetailW, 20, max(20, m.w-30))
 }
 
+// previewSize is the live tmux pane's content width and height — the same numbers agentsBody
+// renders the preview at, and what a freshly launched session should be created at (-> launchCmd)
+// so it isn't cramped to tmux's 80x24 default until someone attaches.
+func (m model) previewSize() (w, h int) {
+	leftW := m.w
+	if m.showDetail() { // leave room for the right detail column
+		leftW = m.w - m.agentDetailWidth() - 1
+	}
+	return leftW, max(1, m.bodyHeight()-m.agentListHeight()-1) // minus the horizontal divider
+}
+
 // agentsBody lays out list over live pane on the left, fixed-width agent detail on the right.
 func (m model) agentsBody() string {
 	h := m.bodyHeight()
-	leftW := m.w
 	rightW := m.agentDetailWidth()
-	if m.showDetail() { // leave room for the right detail column
-		leftW = m.w - rightW - 1
-	}
-	listH := m.agentListHeight()
-	paneH := max(1, h-listH-1) // minus the horizontal divider
+	leftW, paneH := m.previewSize()
 
 	listBox := pane(rowTexts(m.rows()), m.list, leftW, m.cursor[m.tab])
 	paneBox := tailPane(m.paneLines(), leftW, paneH)

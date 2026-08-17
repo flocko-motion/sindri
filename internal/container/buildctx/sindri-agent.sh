@@ -18,13 +18,11 @@ HOME="${HOME:-/home/sindri}"
 
 echo "=== sindri agent '$AGENT' starting ==="
 
-# Reserve the bottom row for the hotkeys a dialed-in human needs — chiefly how to
-# detach (C-b d leaves the agent running; do NOT C-c or `exit`). Global options in
-# ~/.tmux.conf, so the server adopts them at start and nothing shadows status-right.
+# Reserve the bottom row for the hotkeys a dialed-in human needs — chiefly detach (C-b d;
+# do NOT C-c or `exit`). Global options in ~/.tmux.conf, adopted at server start.
 cat > "$HOME/.tmux.conf" <<'TMUXCONF'
-# Truecolor: Claude's TUI emits 24-bit colour, so the pane must be 256-colour AND the
-# attaching client flagged RGB-capable, or tmux downsamples and its orange goes red.
-# tmux 3.5 won't promote from the forwarded COLORTERM alone, hence terminal-features.
+# Truecolor: the pane must be 256-colour AND the client flagged RGB-capable, or tmux
+# downsamples and Claude's orange goes red — tmux 3.5 needs terminal-features for it.
 set -g default-terminal "tmux-256color"
 set -as terminal-features ",*:RGB"
 set -g status on
@@ -40,27 +38,29 @@ set -g window-status-format ""
 set -g allow-rename off
 set -g automatic-rename off
 set -g set-titles off
-# Mouse: drag to select (copy-mode), wheel to scroll; copy to the system
-# clipboard via OSC52 so a dialed-in human can mark/copy. (Hold Shift to fall
-# back to the terminal's own native selection.)
+# Mouse: drag to select (copy-mode), wheel to scroll, copy to the system clipboard via
+# OSC52. (Hold Shift for the terminal's own native selection instead.)
 set -g mouse on
 set -g set-clipboard on
-# Scrollback: vi keys in copy-mode so `prefix [` then C-u/C-d (half-page), C-b/C-f
-# (page), g/G and `/` search all work — the default emacs copy-mode leaves C-u/C-d
-# unbound, so keyboard scrollback appeared stuck. Generous history for a chatty agent.
+# Scrollback: vi keys in copy-mode, since the default emacs one leaves C-u/C-d unbound and
+# scrollback appeared stuck. Generous history for a chatty agent.
 set -g mode-keys vi
 set -g history-limit 50000
 TMUXCONF
 
+# A detached new-session with no -x/-y sticks at tmux's own 80x24 until attached; the hub passes
+# the caller's preview size (TUI only) so a fresh session isn't cramped from the start.
+SIZE_ARGS=()
+if [ -n "${SINDRI_COLS:-}" ] && [ -n "${SINDRI_LINES:-}" ]; then
+	SIZE_ARGS=(-x "$SINDRI_COLS" -y "$SINDRI_LINES")
+fi
+
 if [ -n "${SINDRI_SHELL:-}" ]; then
-	tmux new-session -d -s "$SESSION" bash
+	tmux new-session -d -s "$SESSION" "${SIZE_ARGS[@]}" bash
 else
-	# --continue resumes this workspace's session across a restart, but EXITS NON-ZERO
-	# with nothing to resume, so a first launch falls back to a fresh `claude`, not bash.
-	# --append-system-prompt every launch: dropping it costs the agent its role.
-	# Single-quoted so tmux's shell evaluates the multi-line $() at session start.
-	# `stty sane` undoes Claude's raw, echo-off terminal so a dial-in lands at a prompt.
-	tmux new-session -d -s "$SESSION" \
+	# --continue resumes across a restart, falling back to a fresh `claude` with nothing to resume.
+	# `stty sane` undoes Claude's raw terminal so a dial-in lands at a prompt.
+	tmux new-session -d -s "$SESSION" "${SIZE_ARGS[@]}" \
 		'SP="$(cat /home/sindri/.claude/system-prompt.txt)"; claude --continue --dangerously-skip-permissions --append-system-prompt "$SP" || claude --dangerously-skip-permissions --append-system-prompt "$SP"; stty sane; exec bash -i'
 fi
 

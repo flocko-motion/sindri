@@ -236,7 +236,7 @@ func (h *Hub) Handler() http.Handler {
 		if f, ok := w.(http.Flusher); ok {
 			fw.f = f
 		}
-		if err := h.agents.Launch(h.agentReq(r, req.Name), req.Name, req.Shell, req.Debug, fw); err != nil {
+		if err := h.agents.Launch(h.agentReq(r, req.Name), req.Name, req.Shell, req.Debug, req.Cols, req.Lines, fw); err != nil {
 			fmt.Fprintf(fw, "error: %v\n", err)
 			w.Header().Set("X-Sindri-Error", err.Error())
 		}

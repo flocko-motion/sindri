@@ -224,9 +224,10 @@ func (c *HTTP) PodInfo(name string) (string, error) {
 // Launch spins a pod for an existing agent (shell=true runs a bare shell instead
 // of Claude), streaming the hub's build/start progress to out so a long image
 // build isn't a frozen prompt. debug=true streams the hub's liveness-probe detail
-// during the wait. The failure, if any, rides back in a trailer.
-func (c *HTTP) Launch(name string, shell, debug bool, out io.Writer) error {
-	body, err := json.Marshal(api.NameReq{Name: name, Shell: shell, Debug: debug})
+// during the wait. cols/lines size the session's tmux preview at creation (0, 0 for
+// no preview — the CLI's case). The failure, if any, rides back in a trailer.
+func (c *HTTP) Launch(name string, shell, debug bool, cols, lines int, out io.Writer) error {
+	body, err := json.Marshal(api.NameReq{Name: name, Shell: shell, Debug: debug, Cols: cols, Lines: lines})
 	if err != nil {
 		return err
 	}

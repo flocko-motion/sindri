@@ -243,7 +243,7 @@ func agentNewCmd() *cobra.Command {
 				// output is the account of a failure. Registration already succeeded, so a
 				// failed start is reported as exactly that — the agent exists and can be
 				// started again, which a bare error would not convey.
-				if err := b.Launch(name, false, false, os.Stderr); err != nil {
+				if err := b.Launch(name, false, false, 0, 0, os.Stderr); err != nil {
 					return fmt.Errorf("%s was registered but did not start: %w\n"+
 						"it exists as a stopped agent — retry with 'sindri agent start %s'", name, err, name)
 				}
@@ -355,7 +355,7 @@ func agentStartCmd() *cobra.Command {
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				// Launch already ends with "launched — coming up"; a "started" here would contradict it.
-				return b.Launch(a.Name, shell, debug, os.Stderr)
+				return b.Launch(a.Name, shell, debug, 0, 0, os.Stderr)
 			})
 		},
 	}
@@ -423,7 +423,7 @@ func agentRestartCmd() *cobra.Command {
 					fmt.Fprintf(os.Stderr, "stopped %s — relaunching…\n", a.Name)
 				}
 				// Launch streams progress and ends with "launched — coming up".
-				return b.Launch(a.Name, shell, debug, os.Stderr)
+				return b.Launch(a.Name, shell, debug, 0, 0, os.Stderr)
 			})
 		},
 	}

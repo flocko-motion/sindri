@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -215,21 +216,30 @@ func (s *Service) RebuildAgent(project, name string, w io.Writer) error {
 	return s.RestartAgent(project, name, w)
 }
 
-// RestartAgent replaces an agent's pod with a fresh one on the same identity — the worktree, socket
-// and log are the agent's — so the session resumes and a down agent is simply started. It is the
-// remedy for a signed-out one: the new process reads the credentials the hub keeps staged.
+// RestartAgent replaces an agent's pod with a fresh one on the same identity, the worktree/socket/
+// log surviving — the remedy for a signed-out agent, whose new process reads staged credentials.
 func (s *Service) RestartAgent(project, name string, w io.Writer) error {
 	if container.Running(s.deps.ContainerName(project, name)) {
 		if err := s.StopAgent(project, name); err != nil {
 			return err
 		}
 	}
-	return s.Launch(project, name, false, false, w)
+	return s.Launch(project, name, false, false, 0, 0, w)
 }
 
-// Launch spins a pod that assumes an existing agent's identity, creating its worktree on
-// demand and running Claude in a tmux session named after it (or a bare shell, for debugging).
-func (s *Service) Launch(project, name string, shell, debug bool, progress io.Writer) (err error) {
+// previewSizeEnv sizes a session's tmux pane at creation (-> sindri-agent.sh), or nothing when
+// either dimension is unset — the CLI's case, left at tmux's own default until attached.
+func previewSizeEnv(cols, lines int) map[string]string {
+	if cols <= 0 || lines <= 0 {
+		return nil
+	}
+	return map[string]string{"SINDRI_COLS": strconv.Itoa(cols), "SINDRI_LINES": strconv.Itoa(lines)}
+}
+
+// Launch spins a pod that assumes an existing agent's identity, running Claude in a tmux session
+// named after it (or a bare shell, for debugging). cols/lines size that session to a caller's
+// preview pane (0, 0 for the CLI, which has none).
+func (s *Service) Launch(project, name string, shell, debug bool, cols, lines int, progress io.Writer) (err error) {
 	ps := s.store.For(project)
 	root := s.deps.ProjectRoot(project)
 	a, ok, err := ps.GetAgent(name)
@@ -321,6 +331,9 @@ func (s *Service) Launch(project, name string, shell, debug bool, progress io.Wr
 	_ = container.Rm(cName) // clear any stale container with this name
 
 	env := map[string]string{"SINDRI_AGENT": name, "COLORTERM": "truecolor"}
+	for k, v := range previewSizeEnv(cols, lines) {
+		env[k] = v
+	}
 	// macOS: the pod can't connect to the bind-mounted unix socket across the VM
 	// boundary, so point the worker at the loopback TCP channel with its token. On Linux
 	// these are unset and the worker uses /run/sindri/sock (below).
