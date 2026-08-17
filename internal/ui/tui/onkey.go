@@ -81,13 +81,13 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.rightFocus {
 			m.rightCursor = clampInt(m.rightCursor+1, 0, max(0, len(m.actionableItems())-1))
 		} else {
-			m.cursor[m.tab]++
+			m.moveCursor(1)
 		}
 	case "k", "up":
 		if m.rightFocus {
 			m.rightCursor = clampInt(m.rightCursor-1, 0, max(0, len(m.actionableItems())-1))
 		} else {
-			m.cursor[m.tab]--
+			m.moveCursor(-1)
 		}
 	case "J": // scroll the detail pane down (yazi-style secondary-pane scroll)
 		vp := m.scrollTarget()
@@ -109,10 +109,10 @@ func (m *model) onKey(k string) tea.Cmd {
 				m.gotoItem(it.kind, it.value)
 			}
 		} else {
-			m.cursor[m.tab] = 0
+			m.moveCursor(-1 << 30) // to the top, then down onto the first row that selects something
 		}
 	case "G":
-		m.cursor[m.tab] = 1 << 30
+		m.moveCursor(1 << 30)
 	// ctrl+d/ctrl+u are the half-page form of j/k and J/K, so they follow the focus rather than the
 	// tab: the right column scrolls the viewport scrollTarget() resolves (the PRs meta column
 	// included), the left moves the list cursor — which is how a list scrolls, the selected line
@@ -122,13 +122,13 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.halfPage(scrollDown)
 			return nil
 		}
-		m.cursor[m.tab] += m.bodyHeight() / 2
+		m.moveCursor(m.bodyHeight() / 2)
 	case "ctrl+u":
 		if m.rightFocus {
 			m.halfPage(scrollUp)
 			return nil
 		}
-		m.cursor[m.tab] -= m.bodyHeight() / 2
+		m.moveCursor(-m.bodyHeight() / 2)
 	case keyFilter:
 		if m.tab == 0 {
 			m.filter = api.NextTaskFilter(m.filter)

@@ -110,7 +110,7 @@ func TestTheBadgeStillMatchesTheRowsItSitsOver(t *testing.T) {
 			agents = s
 		}
 	}
-	if got, rows := m.tabCount(agents), len(m.agentRows()); got != rows {
-		t.Errorf("repo-scoped Agents badge = %d but the tab renders %d rows", got, rows)
+	if got, rows := m.tabCount(agents), itemRows(m.agentRows()); got != rows {
+		t.Errorf("repo-scoped Agents badge = %d but the tab renders %d agent rows", got, rows)
 	}
 }

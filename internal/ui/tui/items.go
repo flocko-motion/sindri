@@ -171,6 +171,39 @@ func (m *model) gotoItem(kind, id string) {
 	m.selectRow(id)
 }
 
+// moveCursor moves the active tab's cursor by delta rows and leaves it on a row that selects
+// something. Every key that moves the selection goes through it, so none of them can land on a
+// heading and leave the detail pane with nothing to show.
+func (m *model) moveCursor(delta int) {
+	rows := m.rows()
+	if len(rows) == 0 {
+		m.cursor[m.tab] = 0
+		return
+	}
+	step := 1
+	if delta < 0 {
+		step = -1
+	}
+	m.cursor[m.tab] = nearestSelectable(rows, clampInt(m.cursor[m.tab]+delta, 0, len(rows)-1), step)
+}
+
+// nearestSelectable is the first row from i that selects something, searched in step's direction and
+// then back the other way. Both directions, because a group's heading sits above its rows and its
+// spacer below them: which way out is open depends on where the cursor came to rest.
+func nearestSelectable(rows []row, i, step int) int {
+	for j := i; j >= 0 && j < len(rows); j += step {
+		if rows[j].selectable() {
+			return j
+		}
+	}
+	for j := i; j >= 0 && j < len(rows); j -= step {
+		if rows[j].selectable() {
+			return j
+		}
+	}
+	return i
+}
+
 // selID is the id of the row under the active tab's cursor ("" if none).
 func (m model) selID() string {
 	r := m.rows()

@@ -478,74 +478,79 @@ const (
 )
 
 func (m model) agentRows() []row {
-	var visible []api.AgentView
-	for _, a := range m.state.Agents {
-		if m.agentVisible(a) { // the active repo's agents, plus any agent stuck on the user
-			visible = append(visible, a)
-		}
-	}
-	var out []row
+	var foreign, local []row
 	// Ordered by repo, then role, then name — the same call `sindri agent list` makes, so the two
-	// front-ends cannot drift onto different orders. In repo scope the repo key is what gathers a
-	// stuck foreign agent into its own group instead of interleaving it with the local rows.
-	for _, a := range api.SortedAgents(visible, m.state.Projects) {
-		// Row coloured by lifecycle; cells styled independently so resets don't bleed.
-		ac := agentStatusStyle(a.Status)
-		// Work cell: the task, or the reviewed PR since a reviewer holds no task — named alongside
-		// the task that PR is FOR, since the PR id alone says nothing a human recognizes. A held
-		// feature is named either way — as the subtask's parent, or alone between subtasks, where
-		// showing nothing made an agent that refused every verb look plainly idle.
-		work := a.Task
-		if work == "" {
-			work = a.PR
-			if t := m.prTask(a.PR); t != "" {
-				work += " › " + m.taskLabel(t)
-			}
+	// front-ends cannot drift onto different orders. The repo key gathers the stuck foreign agents;
+	// the heading says they are foreign, which a skimmed repo column does not (-> sectioned).
+	for _, a := range api.SortedAgents(m.state.Agents, m.state.Projects) {
+		switch { // still one predicate deciding what is listed: which group is all this asks
+		case m.inScope(a.Project):
+			local = append(local, m.agentRow(a))
+		case m.agentVisible(a): // out of scope and listed anyway = stuck on the user elsewhere
+			foreign = append(foreign, m.agentRow(a))
 		}
-		switch {
-		case a.Feature != "" && work != "":
-			work = a.Feature + " › " + work
-		case a.Feature != "":
-			work = a.Feature
-		}
-		task := dash(work)
-		if a.Clients > 0 { // dial-ins attached — show the eye like the CLI list
-			task += fmt.Sprintf("  %s%d", eyeGlyph, a.Clients)
-		}
-		// The handle's marker gives a count; this is the row behind it, saying whose move it is in the
-		// same words `sindri agent list` uses. Under repo scope it also answers why an agent from
-		// another repo is in this list at all.
-		if api.AgentNeedsUser(a) {
-			task += "  " + stWarn.Render(warnGlyph+" needs you")
-		}
-		// Retirement rides beside the status, never in it: it is true of a busy agent too, and what
-		// that agent is doing right now is the one thing the status column exists to say.
-		if a.Retired {
-			task += "  " + stDone.Render(retiredGlyph+" retired")
-		}
-		if a.UnreadMail > 0 { // it has been told things it has not read
-			task += "  " + stWarn.Render(fmt.Sprintf("%s%d", mailGlyph, a.UnreadMail))
-		}
-		// An armed clear is a toggle, and a toggle you cannot see is worse than none: this is the
-		// only thing separating an agent about to lose its session from one carrying on.
-		if a.ClearArmed {
-			task += "  " + stWarn.Render(clearGlyph+" clear armed")
-		}
-		out = append(out, row{strings.Join([]string{
-			m.repoStyle(a.Project).Render(fmt.Sprintf("%-10.10s", a.Repo)),
-			ac.Render(fmt.Sprintf("%-9s", a.Status)),
-			ac.Render(fmt.Sprintf("%-12s", a.Name)),
-			ac.Render(fmt.Sprintf("%-8s", a.Role)),
-			ac.Render(fmt.Sprintf("%4s", theme.ContextPercent(a.ContextTokens, a.ContextWindow))),
-			ac.Render(task),
-		}, " "), a.Name})
 	}
+	out := sectioned(foreign, local)
 	for _, o := range m.state.Orphans {
 		// The id is the container name so D can remove it; agent-only actions skip
 		// non-roster ids, and isOrphan gates the ones reading selID directly.
 		out = append(out, row{stWarn.Render(warnGlyph + " orphan: " + o), o})
 	}
 	return out
+}
+
+// agentRow is one roster row: repo, lifecycle, name, role, context, work, and what is owed on it.
+func (m model) agentRow(a api.AgentView) row {
+	// Row coloured by lifecycle; cells styled independently so resets don't bleed.
+	ac := agentStatusStyle(a.Status)
+	// Work cell: the task, or the reviewed PR since a reviewer holds no task — named alongside
+	// the task that PR is FOR, since the PR id alone says nothing a human recognizes. A held
+	// feature is named either way — as the subtask's parent, or alone between subtasks, where
+	// showing nothing made an agent that refused every verb look plainly idle.
+	work := a.Task
+	if work == "" {
+		work = a.PR
+		if t := m.prTask(a.PR); t != "" {
+			work += " › " + m.taskLabel(t)
+		}
+	}
+	switch {
+	case a.Feature != "" && work != "":
+		work = a.Feature + " › " + work
+	case a.Feature != "":
+		work = a.Feature
+	}
+	task := dash(work)
+	if a.Clients > 0 { // dial-ins attached — show the eye like the CLI list
+		task += fmt.Sprintf("  %s%d", eyeGlyph, a.Clients)
+	}
+	// The handle's marker gives a count; this is the row behind it, saying whose move it is in the
+	// same words `sindri agent list` uses. Under repo scope it also answers why an agent from
+	// another repo is in this list at all.
+	if api.AgentNeedsUser(a) {
+		task += "  " + stWarn.Render(warnGlyph+" needs you")
+	}
+	// Retirement rides beside the status, never in it: it is true of a busy agent too, and what
+	// that agent is doing right now is the one thing the status column exists to say.
+	if a.Retired {
+		task += "  " + stDone.Render(retiredGlyph+" retired")
+	}
+	if a.UnreadMail > 0 { // it has been told things it has not read
+		task += "  " + stWarn.Render(fmt.Sprintf("%s%d", mailGlyph, a.UnreadMail))
+	}
+	// An armed clear is a toggle, and a toggle you cannot see is worse than none: this is the
+	// only thing separating an agent about to lose its session from one carrying on.
+	if a.ClearArmed {
+		task += "  " + stWarn.Render(clearGlyph+" clear armed")
+	}
+	return row{strings.Join([]string{
+		m.repoStyle(a.Project).Render(fmt.Sprintf("%-10.10s", a.Repo)),
+		ac.Render(fmt.Sprintf("%-9s", a.Status)),
+		ac.Render(fmt.Sprintf("%-12s", a.Name)),
+		ac.Render(fmt.Sprintf("%-8s", a.Role)),
+		ac.Render(fmt.Sprintf("%4s", theme.ContextPercent(a.ContextTokens, a.ContextWindow))),
+		ac.Render(task),
+	}, " "), a.Name}
 }
 
 // isOrphan reports a stray container rather than a roster agent, routing D to orphan removal.

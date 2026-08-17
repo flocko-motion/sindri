@@ -187,6 +187,10 @@ type row struct {
 	id   string
 }
 
+// selectable reports whether the cursor may rest on this row. A row with nothing to select is
+// structure — a section heading, a spacer, a listing's "showing the last N" note.
+func (r row) selectable() bool { return r.id != "" }
+
 func rowTexts(rows []row) []string {
 	out := make([]string, len(rows))
 	for i, r := range rows {

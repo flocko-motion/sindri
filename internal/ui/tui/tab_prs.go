@@ -220,40 +220,47 @@ func (m *model) openReviewForm(prID string) {
 const prDetailW = 44
 
 func (m model) prRows() []row {
-	var out []row
+	var foreign, local []row
 	// Ordered by repo, the same call `sindri pr list` makes, so the two front-ends cannot drift onto
-	// different orders. In repo scope that key is what gathers a foreign PR waiting on the user into
-	// its own group instead of interleaving it by age with the local rows.
-	visible := api.SortedPRs(api.FilterPRs(m.prFilter, m.state.PRs), m.state.Projects)
-	for _, p := range visible { // f-toggle: active by default
-		if !m.prVisible(p) { // the active repo's PRs, plus any PR waiting on the user
-			continue
+	// different orders. In repo scope that key gathers the foreign PRs waiting on the user together,
+	// and the heading above them is what says so — a repo tag alone reads as a local row with an
+	// unfamiliar tag, which is how the same rows were misread several times in one day (-> sectioned).
+	for _, p := range api.SortedPRs(api.FilterPRs(m.prFilter, m.state.PRs), m.state.Projects) {
+		switch { // still one predicate deciding what is listed: which group is all this asks
+		case m.inScope(p.Project):
+			local = append(local, m.prRow(p))
+		case m.prVisible(p): // out of scope and listed anyway = waiting on the user elsewhere
+			foreign = append(foreign, m.prRow(p))
 		}
-		repo := m.repoStyle(p.Project).Render(fmt.Sprintf("%-10.10s", m.repoName(p.Project)))
-		status := api.StatusLabel(p.Status, p.Approvals)
-		merging := m.merging[p.ID] && p.Status != "merged" // transient: the user triggered a merge, awaiting the hub
-		if merging {
-			status = "merging"
-		}
-		if p.Kind == "interim" { // the interim mark: a mid-task contribution, not a task-done PR
-			status = theme.MarkPRInterim + status
-		}
-		// Cells styled independently, never nested, so a colour reset cannot bleed across the row —
-		// the same shape the task and agent rows use.
-		sc := prStatusStyle(p, m.state.Agents, merging)
-		// Who is reviewing it, from the board — a dash where nobody is, so the column reads as
-		// "waiting for a reviewer" rather than as missing.
-		out = append(out, row{strings.Join([]string{
-			repo,
-			sc.Render(fmt.Sprintf("%-14s", p.ID)),
-			sc.Render(fmt.Sprintf("%-9s", status)),
-			sc.Render(fmt.Sprintf("%4s", shortAge(p.CreatedAt))),
-			sc.Render(fmt.Sprintf("%-10s", p.Agent)),
-			sc.Render(fmt.Sprintf("%-10s", dash(p.Reviewer))),
-			sc.Render(p.Branch),
-		}, " "), p.ID})
 	}
-	return out
+	return sectioned(foreign, local)
+}
+
+// prRow renders one PR row: repo, id, status, age, who wrote it, who is reviewing it, its branch.
+func (m model) prRow(p api.PR) row {
+	repo := m.repoStyle(p.Project).Render(fmt.Sprintf("%-10.10s", m.repoName(p.Project)))
+	status := api.StatusLabel(p.Status, p.Approvals)
+	merging := m.merging[p.ID] && p.Status != "merged" // transient: the user triggered a merge, awaiting the hub
+	if merging {
+		status = "merging"
+	}
+	if p.Kind == "interim" { // the interim mark: a mid-task contribution, not a task-done PR
+		status = theme.MarkPRInterim + status
+	}
+	// Cells styled independently, never nested, so a colour reset cannot bleed across the row —
+	// the same shape the task and agent rows use.
+	sc := prStatusStyle(p, m.state.Agents, merging)
+	// Who is reviewing it, from the board — a dash where nobody is, so the column reads as
+	// "waiting for a reviewer" rather than as missing.
+	return row{strings.Join([]string{
+		repo,
+		sc.Render(fmt.Sprintf("%-14s", p.ID)),
+		sc.Render(fmt.Sprintf("%-9s", status)),
+		sc.Render(fmt.Sprintf("%4s", shortAge(p.CreatedAt))),
+		sc.Render(fmt.Sprintf("%-10s", p.Agent)),
+		sc.Render(fmt.Sprintf("%-10s", dash(p.Reviewer))),
+		sc.Render(p.Branch),
+	}, " "), p.ID}
 }
 
 // openScrapPRChoice confirms scrapping a PR: branch gone, off the board, nobody asked to try again.

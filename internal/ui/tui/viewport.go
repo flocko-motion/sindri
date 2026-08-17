@@ -17,8 +17,14 @@ import (
 
 // reclamp keeps the active tab's cursor + both viewports in range.
 func (m *model) reclamp() {
-	n := len(m.rows())
+	rows := m.rows()
+	n := len(rows)
+	// Snapped as well as clamped: a poll can grow a heading above the cursor, and the first frame of a
+	// grouped list opens with one at index 0.
 	m.cursor[m.tab] = clampInt(m.cursor[m.tab], 0, max(0, n-1))
+	if n > 0 {
+		m.cursor[m.tab] = nearestSelectable(rows, m.cursor[m.tab], 1)
+	}
 	listH := m.bodyHeight()
 	switch m.tab { // agents/prs: the list is the short top region of a split (any width)
 	case 1:

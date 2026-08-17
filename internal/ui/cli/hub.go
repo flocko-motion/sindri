@@ -383,6 +383,9 @@ func prListCmd() *cobra.Command {
 				// Grouped by repo, the order the PRs tab shows (-> api.SortedPRs). This listing is
 				// fleet-wide, so without the repo the rows it gathers from elsewhere are unplaceable.
 				prs := api.SortedPRs(api.FilterPRs(f, all), st.Projects)
+				// And sectioned as the PRs tab is, so both front-ends read the same way.
+				local := localProject(st.Projects)
+				var rows []listRow
 				for _, p := range prs {
 					status := api.StatusLabel(p.Status, p.Approvals)
 					if p.Kind == "interim" { // the interim mark: a mid-task contribution, not a task-done PR
@@ -394,11 +397,13 @@ func prListCmd() *cobra.Command {
 					line := fmt.Sprintf("%-10.10s %-14s %-13s %4s  %-10s %-10s %s",
 						api.RepoName(st.Projects, p.Project), p.ID, status, shortAge(p.CreatedAt), p.Agent,
 						dash(p.Reviewer), p.Branch)
-					if why := prWaitRow(api.PRWaitReason(p, st.Agents)); why != "" {
+					wait := api.PRWaitReason(p, st.Agents)
+					if why := prWaitRow(wait); why != "" {
 						line += "  ! " + why
 					}
-					fmt.Println(line)
+					rows = append(rows, listRow{line, listGroupFor(p.Project, local, wait != api.PRWaitNone)})
 				}
+				printGrouped(rows)
 				if n := len(all) - len(prs); n > 0 {
 					fmt.Fprintf(os.Stderr, "(filter %s — %d of %d PR(s) shown)\n", f, len(prs), len(all))
 				} else if len(prs) == 0 {

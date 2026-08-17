@@ -33,10 +33,11 @@ func TestRepoScopeKeepsAPRWaitingOnYou(t *testing.T) {
 	if strings.Contains(got, "pr-3") {
 		t.Errorf("a foreign PR nobody is waiting on must stay out of repo scope, got %s", got)
 	}
-	// The badge is the same claim rendered twice, so it counts exactly what the list shows.
+	// The badge is the same claim rendered twice, so it counts exactly what the list shows — the
+	// selectable rows, since a grouped list also carries the headings that label them.
 	for _, s := range tuiSections {
-		if s.Key == "prs" && m.tabCount(s) != len(rows) {
-			t.Errorf("PRs badge = %d but the tab renders %d rows", m.tabCount(s), len(rows))
+		if s.Key == "prs" && m.tabCount(s) != itemRows(rows) {
+			t.Errorf("PRs badge = %d but the tab renders %d PR rows", m.tabCount(s), itemRows(rows))
 		}
 	}
 }

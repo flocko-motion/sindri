@@ -109,6 +109,11 @@ func agentListCmd() *cobra.Command {
 				}
 				warnRuntime(st) // a whole roster reading "down" has one likely cause
 				sorted := api.SortedAgents(st.Agents, st.Projects)
+				// Grouped the way the Agents tab groups its rows, so both front-ends teach one reading:
+				// an agent stuck in another repo is what the listing opens with, under a heading saying
+				// so, rather than a row placed only by the repo column a reader skims past.
+				local := localProject(st.Projects)
+				var rows []listRow
 				for _, a := range sorted {
 					line := fmt.Sprintf("%-10.10s %-12s %-8s %-10s %4s %-14s %s", a.Repo, a.Name, a.Role, a.Status,
 						theme.ContextPercent(a.ContextTokens, a.ContextWindow), dash(a.Task), dash(a.PR))
@@ -129,8 +134,9 @@ func agentListCmd() *cobra.Command {
 					if a.Clients > 0 {
 						line += fmt.Sprintf("  %s%d", theme.MarkDialIn, a.Clients)
 					}
-					fmt.Println(line)
+					rows = append(rows, listRow{line, listGroupFor(a.Project, local, api.AgentNeedsUser(a))})
 				}
+				printGrouped(rows)
 				for _, o := range st.Orphans {
 					fmt.Printf("%s  orphan: %s — no roster entry; remove with 'sindri agent delete %s'\n", theme.MarkWarning, o, o)
 				}

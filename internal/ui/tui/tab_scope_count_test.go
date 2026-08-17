@@ -93,8 +93,9 @@ func TestTabCountFollowsScope(t *testing.T) {
 }
 
 // TestTabCountMatchesRows is the invariant that motivates the shared inScope predicate:
-// whatever the scope, each badge equals the number of rows the tab renders. Agents is
-// compared against the roster rows only (agentRows appends orphan warnings, which are
+// whatever the scope, each badge equals the number of rows the tab renders. Counted over the
+// selectable rows, since a scope holding foreign rows also carries the headings that label them.
+// Agents is compared against the roster rows only (agentRows appends orphan warnings, which are
 // containers with no agent and deliberately outside the roster count). PRs holds at the
 // default f-filter, whose "unmerged" rule is the same as PROpen; the badge tracks scope,
 // not the f-toggle, so showing merged PRs is expected to exceed the open count.
@@ -108,9 +109,9 @@ func TestTabCountMatchesRows(t *testing.T) {
 			var rows int
 			switch s.Key {
 			case "agents":
-				rows = len(m.agentRows()) - len(m.state.Orphans)
+				rows = itemRows(m.agentRows()) - len(m.state.Orphans)
 			case "prs":
-				rows = len(m.prRows())
+				rows = itemRows(m.prRows())
 			default:
 				continue
 			}
