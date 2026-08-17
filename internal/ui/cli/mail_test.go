@@ -96,3 +96,31 @@ func TestPushAndMailReadAsDifferentActions(t *testing.T) {
 		t.Errorf("expected two named actions, got %q and %q", agentTellCmd().Name(), agentMailCmd().Name())
 	}
 }
+
+// TestTheUsersOwnMailIsGroupedAndNamed is the parity half: both front-ends answer "is anything waiting
+// for me?" the same way, so a note from another repo is grouped under the shared foreign heading rather
+// than interleaved, and the closing line names how many are the user's.
+func TestTheUsersOwnMailIsGroupedAndNamed(t *testing.T) {
+	rows := []listRow{
+		{line: "to you, elsewhere", group: listGroupFor("two", "one", true)},
+		{line: "to an agent, here", group: listGroupFor("one", "one", false)},
+		{line: "to an agent, elsewhere", group: listGroupFor("two", "one", false)},
+	}
+	got := strings.Join(groupedLines(rows), "\n")
+	if !strings.Contains(got, api.ForeignAttentionHeading(1)) {
+		t.Errorf("the user's note from another repo should sit under the foreign heading:\n%s", got)
+	}
+	if strings.Index(got, "to you, elsewhere") > strings.Index(got, "to an agent, here") {
+		t.Errorf("what waits on the user comes first:\n%s", got)
+	}
+	for _, want := range []string{api.LocalHeading, api.OtherReposHeading} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the other sections should be labelled too (%q):\n%s", want, got)
+		}
+	}
+	st := api.BoardState{Mail: mailBoard().Mail, MailTotal: 3, MailUnread: 3, MailUnreadUser: 2}
+	footer := mailFooter(st, st.Mail, api.MailUnread, "")
+	if !strings.Contains(footer, "2 of them addressed to YOU") || !strings.Contains(footer, "--mine") {
+		t.Errorf("the footer should name the user's own unread and how to narrow to it: %s", footer)
+	}
+}

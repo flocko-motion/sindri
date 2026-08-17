@@ -152,6 +152,18 @@ func (s *Store) MailTallies() (total, unread int, byProject map[string]int, err 
 	return total, unread, byProject, rows.Err()
 }
 
+// UnreadUserMail is how many unread messages are addressed to the USER, across every project. Its own
+// tally because it answers a different question from MailTallies: that one is the mailbox's size, this
+// one is what one person still has to read, and only the second can ask anything of them.
+func (s *Store) UnreadUserMail() (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM mail WHERE agent=? AND read_at=''`, api.SenderUser).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("unread user mail: %w", err)
+	}
+	return n, nil
+}
+
 // NotesToUserSince counts what the whole fleet has sent the user since t — the fleet-wide ceiling's
 // only input. Counted over the mailbox rather than a running tally, so there is nothing to drift: the
 // rows are the record, and a rolling window has no cliff for a queue to build against.

@@ -20,9 +20,10 @@ func TestSectionCounts(t *testing.T) {
 		Runs:   []api.Run{{ID: "r1", Status: "queued"}, {ID: "r2", Status: "running"}, {ID: "r3", Status: "passed"}},
 		// Mail's badge is UNREAD, counted over the whole mailbox rather than the window on the board:
 		// a mailbox is never pruned, so a total would only ever climb.
-		Mail:       []api.Mail{{ID: 1, Agent: "x"}, {ID: 2, Agent: "x", ReadAt: "2026-08-13T10:00:00Z"}},
-		MailTotal:  9,
-		MailUnread: 4,
+		Mail:           []api.Mail{{ID: 1, Agent: "x"}, {ID: 2, Agent: "x", ReadAt: "2026-08-13T10:00:00Z"}},
+		MailTotal:      9,
+		MailUnread:     4,
+		MailUnreadUser: 2,
 	}
 	// non-closed; whole roster; open only (merged AND scrapped excluded); queued+running only; unread
 	want := map[string]int{"tasks": 2, "agents": 2, "prs": 1, "runs": 2, "mail": 4}
@@ -46,6 +47,7 @@ func (fakeBoard) TasksNeedingUserCount() int  { return 2 }
 func (fakeBoard) AgentsNeedingUserCount() int { return 1 }
 func (fakeBoard) PRsNeedingUserCount() int    { return 3 }
 func (fakeBoard) UnreadMailCount() int        { return 7 }
+func (fakeBoard) UnreadUserMailCount() int    { return 2 }
 
 // TestResolvedReadsEveryCount: Resolved is what actually crosses the wire — the
 // registry's Count funcs can't — so each section's Key and Title must survive and
@@ -56,10 +58,10 @@ func TestResolvedReadsEveryCount(t *testing.T) {
 		t.Fatalf("got %d resolved sections, want %d", len(got), len(Sections))
 	}
 	want := map[string]int{"tasks": 3, "agents": 2, "prs": 1, "runs": 6, "repos": 5, "chat": 4, "mail": 7}
-	// Repos, Meeting, Runs and Mail have no Attention recipe: they resolve to 0 rather than panicking
-	// on a nil call, which is what a section holding nothing a human can wait on looks like. Mail is
-	// the deliberate case — unread mail is the AGENT's backlog, and no verb of the user's clears it.
-	wantAttention := map[string]int{"tasks": 2, "agents": 1, "prs": 3}
+	// Repos, Meeting and Runs have no Attention recipe: they resolve to 0 rather than panicking on a
+	// nil call, which is what a section holding nothing a human can wait on looks like. Mail HAS one,
+	// counting only what is addressed to the user — the rest of the mailbox is the agents' backlog.
+	wantAttention := map[string]int{"tasks": 2, "agents": 1, "prs": 3, "mail": 2}
 	for i, s := range got {
 		if s.Key != Sections[i].Key || s.Title != Sections[i].Title {
 			t.Errorf("resolved[%d] = %+v, want key/title from Sections[%d] = %+v", i, s, i, Sections[i])

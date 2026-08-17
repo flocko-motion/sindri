@@ -149,3 +149,34 @@ func TestTheMailBadgeCountsUnreadNotTheWindow(t *testing.T) {
 		t.Errorf("repo scope should show this repo's unread (7), got %d", got)
 	}
 }
+
+// TestTheUsersMailIsShownFromEveryRepo: the marker beside the handle counts the user's unread
+// fleet-wide, so a scope that hid the row it points at would say something waits and then show
+// nothing. It is grouped under the foreign heading rather than passed off as local.
+func TestTheUsersMailIsShownFromEveryRepo(t *testing.T) {
+	m := mailModel()
+	m.scopeRepo = true // narrowed to the repo in view
+	m.state.Projects = []api.Project{{Tag: "repo", Path: "/r/one"}}
+	m.state.Mail = append(m.state.Mail, api.Mail{
+		ID: 9, Project: "elsewhere", Repo: "two", Agent: "user", Sender: "nori",
+		Body: "the config field is documented backwards", SentAt: "2026-08-17T11:00:00Z",
+	})
+	rows := strings.Join(rowTexts(m.mailRows()), "\n")
+	if !strings.Contains(rows, "documented backwards") {
+		t.Errorf("a note to the user from another repo must still be listed:\n%s", rows)
+	}
+	if !strings.Contains(rows, api.ForeignAttentionHeading(1)) {
+		t.Errorf("and grouped under the foreign heading rather than read as local:\n%s", rows)
+	}
+	// It is marked as the user's own, since the list is mostly agent traffic.
+	if !strings.Contains(rows, "→ you") {
+		t.Errorf("the user's own rows should be marked:\n%s", rows)
+	}
+	// An agent's mail from another repo stays out: none of it is the user's to read.
+	m.state.Mail = append(m.state.Mail, api.Mail{
+		ID: 10, Project: "elsewhere", Repo: "two", Agent: "gloin", Sender: "hub", Body: "a verdict elsewhere",
+	})
+	if rows := strings.Join(rowTexts(m.mailRows()), "\n"); strings.Contains(rows, "a verdict elsewhere") {
+		t.Errorf("agent traffic from another repo is not the user's business:\n%s", rows)
+	}
+}

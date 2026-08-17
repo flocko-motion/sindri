@@ -31,6 +31,19 @@
 - [x] 5.1 The remainder is stated after every send, and in the verb's help via the caller's own state.
 - [x] 5.2 The register is in the brief, the help and every refusal, negatives first.
 
+## 5b. The read half (sd-36da91)
+
+- [x] 5b.1 The Mail tab's attention marker counts unread mail addressed to the user, fleet-wide,
+      counted over the whole mailbox rather than the board's window.
+- [x] 5b.2 Only user-directed mail counts — the rest is agent traffic and a marker over it would be
+      permanently lit.
+- [x] 5b.3 The user's rows are listed whatever repo is in view, and marked as theirs in a list that is
+      mostly agent traffic.
+- [x] 5b.4 Out-of-scope rows sit under the shared foreign heading (-> api.ForeignAttentionHeading),
+      the same one the Agents and PRs tabs use, rather than a second convention.
+- [x] 5b.5 Parity: `sindri mail list --mine` narrows to them, the listing groups by the same rule, and
+      the closing line names how many of the fleet's unread are the user's.
+
 ## 6. Verify
 
 - [x] 6.1 A note reaches the user's mailbox, attributed, unpushed, with the remainder stated.
@@ -38,4 +51,7 @@
 - [x] 6.3 The grant is spent, then refused with somewhere else to go; it replaces rather than banks.
 - [x] 6.4 The fleet ceiling refuses an otherwise-correct note and logs it.
 - [x] 6.5 An agent that has claimed nothing is refused, and no agent may be named "user".
-- [x] 6.6 `make verify` passes.
+- [x] 6.6 The marker counts the user's unread and not the mailbox's, through the board the hub builds.
+- [x] 6.7 A note from another repo is listed, grouped as foreign, and marked; agent traffic from
+      another repo is not.
+- [x] 6.8 `make verify` passes.

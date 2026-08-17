@@ -196,17 +196,6 @@ var keymap = []binding{
 	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.mailFilter) }, scope: scopeMail},
 	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scope: scopeMail},
 
-	// Mail: look only — the mailbox is the agent's to read, and the user's part is finding a message.
-	{keyAttach, lbl("attach"), scopeMail},
-	{keyMailWho, func(m model) string {
-		if m.mailAgent != "" {
-			return "who: " + m.mailAgent
-		}
-		return "who: all"
-	}, scopeMail},
-	{keyFilter, func(m model) string { return "filter: " + string(m.mailFilter) }, scopeMail},
-	{keyScopeTog, func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scopeMail},
-
 	// Chat.
 	{keys: "enter", label: lbl("compose"), scope: scopeChat},
 	{keys: keyApprove, label: lbl("add member"), scope: scopeChat},

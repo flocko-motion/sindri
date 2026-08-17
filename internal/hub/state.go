@@ -158,7 +158,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	for _, p := range projects {
 		docs[p.Tag] = h.repoDocState(p.Path)
 	}
-	mail, mailTotal, mailUnread, unreadByRepo, err := h.mailWindow()
+	mail, mailTotal, mailUnread, mailUnreadUser, unreadByRepo, err := h.mailWindow()
 	if err != nil {
 		return BoardState{}, err
 	}
@@ -171,6 +171,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		// one here would put a process spawn on every board read, and there are many.
 		Memory: h.watch.headroom(),
 		Mail:   mail, MailTotal: mailTotal, MailUnread: mailUnread, MailUnreadByRepo: unreadByRepo,
+		MailUnreadUser: mailUnreadUser,
 	}
 	return withSections(board), nil
 }
@@ -186,9 +187,9 @@ const mailPreview = 240
 
 // mailWindow reads the newest mail for the board, each body cut to a preview, plus the tallies of the
 // WHOLE mailbox: the total, the unread count, and unread per repo for a repo-scoped view.
-func (h *Hub) mailWindow() (window []AgentMail, total, unread int, unreadByRepo map[string]int, err error) {
+func (h *Hub) mailWindow() (window []AgentMail, total, unread, userUnread int, unreadByRepo map[string]int, err error) {
 	if window, err = h.store.AllMail(MailWindow); err != nil {
-		return nil, 0, 0, nil, err
+		return nil, 0, 0, 0, nil, err
 	}
 	for i, m := range window {
 		window[i].Repo = h.repoName(m.Project)
@@ -196,11 +197,13 @@ func (h *Hub) mailWindow() (window []AgentMail, total, unread int, unreadByRepo 
 			window[i].Body, window[i].Truncated = m.Body[:mailPreview], true
 		}
 	}
-	total, unread, unreadByRepo, err = h.store.MailTallies()
-	if err != nil {
-		return nil, 0, 0, nil, err
+	if total, unread, unreadByRepo, err = h.store.MailTallies(); err != nil {
+		return nil, 0, 0, 0, nil, err
 	}
-	return window, total, unread, unreadByRepo, nil
+	if userUnread, err = h.store.UnreadUserMail(); err != nil {
+		return nil, 0, 0, 0, nil, err
+	}
+	return window, total, unread, userUnread, unreadByRepo, nil
 }
 
 // MailBody returns one message with its full body — what a detail view or `mail show` asks for, since

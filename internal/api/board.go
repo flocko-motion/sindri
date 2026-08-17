@@ -120,6 +120,9 @@ type BoardState struct {
 	Mail       []Mail `json:"mail,omitempty"`
 	MailTotal  int    `json:"mailTotal"`
 	MailUnread int    `json:"mailUnread"`
+	// MailUnreadUser is unread mail addressed to the USER, across every repo — the only part of the
+	// mailbox that can ask a person for anything. Fleet-wide, since they are the same person in each.
+	MailUnreadUser int `json:"mailUnreadUser"`
 	// MailUnreadByRepo is unread mail per repo tag, for a view scoped to one repo — counted over the
 	// whole mailbox like the totals, not over the window.
 	MailUnreadByRepo map[string]int `json:"mailUnreadByRepo,omitempty"`
@@ -211,6 +214,10 @@ func (b BoardState) AgentsNeedingUserCount() int { return CountAgentsNeedingUser
 // no live reviewer will give (-> PRNeedsUser). It reads the roster too, since who is running is
 // half the question.
 func (b BoardState) PRsNeedingUserCount() int { return CountPRsNeedingUser(b.PRs, b.Agents) }
+
+// UnreadUserMailCount is the Mail section's ATTENTION count. Only the user's own: the rest of the
+// mailbox is agent traffic, and a marker over that would be permanently lit and instantly ignored.
+func (b BoardState) UnreadUserMailCount() int { return b.MailUnreadUser }
 
 // UnreadMailCount is the Mail section's badge: unread across the whole mailbox, not the window,
 // since a badge that stopped rising once the history outgrew the window would say the wrong thing

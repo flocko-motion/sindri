@@ -24,6 +24,7 @@ type Board interface {
 	AgentsNeedingUserCount() int
 	PRsNeedingUserCount() int
 	UnreadMailCount() int
+	UnreadUserMailCount() int
 }
 
 // Section is one dashboard tab: a key, a title, its actionable badge count read from the board,
@@ -73,10 +74,11 @@ var Sections = []Section{
 		// Unread, not the whole history: the mailbox never shrinks, so a total would climb for ever
 		// and stop meaning anything, while unread is the one number that can go back to zero.
 		Count: func(b Board) int { return b.UnreadMailCount() },
-		// No Attention, deliberately: unread mail is the AGENT's backlog, not the user's work, and
-		// nothing here waits on a human. An agent that has stopped reading is worth surfacing, and
-		// that belongs on the agent's own row (-> sd-7b317b) rather than as a marker asking the user
-		// to do something no verb of theirs can do.
+		// Attention counts ONLY what is addressed to the user. The rest of the mailbox is the agents'
+		// backlog and none of it theirs to read — a marker over all of it would be permanently lit and
+		// instantly ignored. Fleet-wide, whatever repo is selected, because the person is the same one
+		// in every repo.
+		Attention: func(b Board) int { return b.UnreadUserMailCount() },
 	},
 }
 

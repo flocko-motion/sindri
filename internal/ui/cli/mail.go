@@ -36,6 +36,7 @@ func NewMailCmd() *cobra.Command {
 
 func mailListCmd() *cobra.Command {
 	var agent, filter string
+	var mine bool
 	c := &cobra.Command{
 		Use: "list", Short: "List mail across the fleet, newest first", Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -43,23 +44,34 @@ func mailListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if mine { // the reservation is not something a user should have to know to type
+				agent = api.SenderUser
+			}
 			return withBackend(func(b backend) error {
 				st, err := b.State()
 				if err != nil {
 					return err
 				}
 				rows := api.FilterMail(f, agent, st.Mail)
-				lines := make([]string, 0, len(rows))
+				// Grouped the way every fleet-wide listing is: what waits on the user in another repo
+				// first, then this repo, then the rest — and flat when nothing waits elsewhere
+				// (-> groupedLines). A note to the user IS what waits, which is what makes it foreign.
+				local := localProject(st.Projects)
+				listed := make([]listRow, 0, len(rows))
 				for _, m := range rows {
-					lines = append(lines, mailLine(m))
+					listed = append(listed, listRow{
+						line:  mailLine(m),
+						group: listGroupFor(m.Project, local, api.MailToUser(m) && !m.Read()),
+					})
 				}
-				printRows(mailListTable, lines)
+				printListing(mailListTable, listed)
 				fmt.Fprintln(os.Stderr, mailFooter(st, rows, f, agent))
 				return nil
 			})
 		},
 	}
 	c.Flags().StringVar(&agent, "agent", "", "only mail sent to this agent")
+	c.Flags().BoolVar(&mine, "mine", false, "only mail addressed to you — what an agent has told you directly")
 	c.Flags().StringVar(&filter, "filter", string(api.MailUnread), "which mail to list: "+api.MailFilterNames())
 	return c
 }
@@ -114,8 +126,14 @@ func mailFooter(st api.BoardState, shown []api.Mail, f api.MailFilter, agent str
 		tail = fmt.Sprintf(" Showing the last %d of %d messages; older mail is reachable by id "+
 			"(`sindri mail show <id>`).", len(st.Mail), st.MailTotal)
 	}
-	return fmt.Sprintf("%d %s message(s)%s, %d unread across the fleet.%s",
-		len(shown), f, where, st.MailUnread, tail)
+	// The user's own unread is named separately, and fleet-wide: it is the number that asks something
+	// of them, where the mailbox total merely says how much traffic there has been.
+	mine := ""
+	if st.MailUnreadUser > 0 {
+		mine = fmt.Sprintf(" %d of them addressed to YOU (`sindri mail list --mine`).", st.MailUnreadUser)
+	}
+	return fmt.Sprintf("%d %s message(s)%s, %d unread across the fleet.%s%s",
+		len(shown), f, where, st.MailUnread, mine, tail)
 }
 
 func mailShowCmd() *cobra.Command {

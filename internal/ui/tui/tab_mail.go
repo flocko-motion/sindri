@@ -18,10 +18,15 @@ import (
 	"github.com/flo-at/sindri/internal/ui/table"
 )
 
-// mailVisible admits a message to the list: in scope, and admitted by the two filters — unread-or-all,
-// and the recipient the user has narrowed to.
+// mailVisible admits a message to the list: in scope OR addressed to the user, and admitted by the two
+// filters. Mail to the user ignores the repo scope on purpose — the marker beside the handle counts it
+// fleet-wide, so a scope that hid the row it points at would say something waits and show nothing. The
+// row carries its own repo, which is what says it came from elsewhere.
 func (m model) mailVisible(msg api.Mail) bool {
-	return m.inScope(msg.Project) && api.MatchesMailFilter(m.mailFilter, m.mailAgent, msg)
+	if !api.MatchesMailFilter(m.mailFilter, m.mailAgent, msg) {
+		return false
+	}
+	return m.inScope(msg.Project) || api.MailToUser(msg)
 }
 
 // mailShown is the board's mail window, filtered to what this view shows.
@@ -48,7 +53,7 @@ var mailTable = table.Table{
 }
 
 func (m model) mailRows() []row {
-	var out []row
+	var foreign, local []row
 	for _, msg := range m.mailShown() {
 		state, st := "unread", stWarn
 		if msg.Read() {
@@ -57,16 +62,28 @@ func (m model) mailRows() []row {
 		if msg.Pushed { // also injected live, so it may already have been acted on
 			state += "+push"
 		}
-		out = append(out, row{mailTable.Line(
+		// The user's own mail is marked, not merely present: in a list mostly of agent traffic, the few
+		// rows a person is expected to read have to be findable at a glance.
+		if api.MailToUser(msg) && !msg.Read() {
+			state = "→ you " + state
+		}
+		r := row{mailTable.Line(
 			table.Cell{Text: msg.Repo, Style: m.repoStyle(msg.Project).Render},
 			table.Cell{Text: dash(msg.Sender)},
 			table.Cell{Text: msg.Agent},
 			table.Cell{Text: state, Style: st.Render},
 			table.Cell{Text: shortAge(msg.SentAt), Style: dimStyle.Render},
 			table.Cell{Text: oneLineText(msg.Body)},
-		), fmt.Sprint(msg.ID)})
+		), fmt.Sprint(msg.ID)}
+		// Foreign here means the same as on the other scoped tabs: on screen only because it waits on
+		// the user, so the heading says so — a repo column is skimmed (-> sectioned).
+		if m.inScope(msg.Project) {
+			local = append(local, r)
+		} else {
+			foreign = append(foreign, r)
+		}
 	}
-	rows := listing(mailTable, nil, out)
+	rows := listing(mailTable, foreign, local)
 	// The window is not the history: a list that stopped at its rows would present the recent end as
 	// everything, and finding last month's message is the whole reason nothing is deleted. Outside the
 	// labelled rows, since it is a note about the listing rather than a message in it.

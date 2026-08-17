@@ -18,7 +18,7 @@ func TestTheBoardCarriesAWindowAndCountsTheWholeMailbox(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	window, total, unread, byRepo, err := h.mailWindow()
+	window, total, unread, userUnread, byRepo, err := h.mailWindow()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,6 +27,9 @@ func TestTheBoardCarriesAWindowAndCountsTheWholeMailbox(t *testing.T) {
 	}
 	if total != over || unread != over {
 		t.Errorf("the tallies count the whole mailbox, got total=%d unread=%d, want %d", total, unread, over)
+	}
+	if userUnread != 0 {
+		t.Errorf("none of this is addressed to the user, so its own tally is %d, want 0", userUnread)
 	}
 	if byRepo[testProject] != over {
 		t.Errorf("unread per repo = %v, want %d for %s", byRepo, over, testProject)
@@ -47,7 +50,7 @@ func TestALongBodyIsPreviewedInTheWindowAndWholeByID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	window, _, _, _, err := h.mailWindow()
+	window, _, _, _, _, err := h.mailWindow()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,5 +110,44 @@ func TestTheMailSectionCountsUnread(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("the Mail badge is unread, got %d, want 1", count)
+	}
+}
+
+// TestTheMarkerCountsOnlyTheUsersUnread is the read half's whole point: the mailbox is mostly agent
+// traffic, none of it a person's to read, so a marker over all of it would be permanently lit and
+// instantly ignored. It counts what is addressed to the user, and counts it fleet-wide.
+func TestTheMarkerCountsOnlyTheUsersUnread(t *testing.T) {
+	h := newHub(t)
+	ps := h.store.For(testProject)
+	// The bulk: hub-to-agent and agent-to-agent, unread, and none of it the user's.
+	for i := 0; i < 5; i++ {
+		if _, err := ps.AddMail("dvalin", "hub", "a verdict", true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Two notes to the user, one already read.
+	read, err := ps.AddMail("user", "dvalin", "the td adapter shells out twice", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ps.AddMail("user", "nori", "config field is documented backwards", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.MarkMailRead(read.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	board, err := h.State("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if board.MailUnreadUser != 1 {
+		t.Errorf("the user's unread = %d, want 1 of the seven", board.MailUnreadUser)
+	}
+	if board.MailUnread != 6 {
+		t.Errorf("the mailbox's own unread = %d, want 6 — the two numbers answer different questions", board.MailUnread)
+	}
+	if got := board.SectionAttention("mail"); got != 1 {
+		t.Errorf("the Mail marker = %d, want the user's own unread (1)", got)
 	}
 }

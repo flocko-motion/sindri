@@ -32,6 +32,11 @@ type Mail struct {
 	Pushed bool `json:"pushed,omitempty"`
 }
 
+// MailToUser reports whether a message is addressed to the USER rather than to an agent — the only
+// part of the mailbox a person is expected to read, and the rule behind both the marker and the way
+// each front-end separates those rows out.
+func MailToUser(m Mail) bool { return m.Agent == SenderUser }
+
 // Read reports whether this message has been read.
 func (m Mail) Read() bool { return m.ReadAt != "" }
 

@@ -81,3 +81,42 @@ the hard limit a backstop rather than the mechanism.
 
 - **WHEN** an agent that holds no claim sends a note
 - **THEN** it is refused, because the right to speak follows having been somewhere and looked
+
+### Requirement: The user can see what was said to them
+
+Unread mail addressed to the user SHALL be marked on the mail view's own tab handle, with
+the same treatment every other view uses for rows that wait on a person. Without it the
+channel is one into a void: an agent's note would sit unread until somebody happened to open
+the tab.
+
+The marker SHALL count ONLY user-directed mail. Agent-to-agent and hub-to-agent traffic is
+the bulk of the mailbox and none of it is the user's to read, so a marker counting that would
+be permanently lit and instantly ignored.
+
+It SHALL count across EVERY repo, whatever repo is in view, and the rows it counts SHALL be
+listed whatever repo is in view. A note from an agent in another project is still a note to
+the same person, who should not have to tour the repos to learn that someone spoke — and a
+marker that pointed at rows the current scope hid would say something waits and then show
+nothing.
+
+Those out-of-scope rows SHALL be labelled as coming from elsewhere, under the same heading
+every other scoped list uses, because a foreign row that reads as local is worse than one
+that is absent. Both front-ends SHALL offer the same narrowing to the user's own mail and the
+same grouping, so each answers "is anything waiting for me?" the same way.
+
+#### Scenario: A note from another repo
+
+- **WHEN** an agent in a repo other than the one in view mails the user
+- **THEN** the marker counts it, the row is listed, and it appears under the heading for rows
+  from elsewhere rather than among the local ones
+
+#### Scenario: Agent traffic is not the user's business
+
+- **WHEN** the mailbox holds unread hub-to-agent and agent-to-agent messages
+- **THEN** the marker counts none of them
+
+#### Scenario: Asking what is waiting
+
+- **WHEN** the user narrows either front-end to their own mail
+- **THEN** both show the same set, grouped the same way, and the listing says how many of the
+  fleet's unread are theirs
