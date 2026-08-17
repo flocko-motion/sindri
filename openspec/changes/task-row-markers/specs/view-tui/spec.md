@@ -4,10 +4,10 @@
 
 ### Requirement: Row markers come from one shared set
 
-Every marker either front-end draws — the mark for a task being worked, its PR, a dial-in, a
-warning, a retired agent, one with a clear armed, and one waiting on the user — SHALL come from a
-single set both front-ends read, so that a symbol cannot come to mean one thing in the dashboard and
-another in the CLI.
+Every marker either front-end draws SHALL come from a single set both of them read — the marks for
+a task being worked, its PR, a dial-in, a warning, a retired agent, one with a clear armed, and one
+waiting on the user — so that a symbol cannot come to mean one thing in the dashboard and another
+in the CLI.
 
 Each marker SHALL occupy exactly one terminal cell, and any column padded to fit markers SHALL take
 its width from the markers themselves rather than from a number written beside them. Layout breaks
