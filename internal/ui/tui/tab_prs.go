@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
 // defaultReviewPrompt pre-fills the Agentic Review instruction; the user edits it before dispatch.
@@ -234,8 +235,8 @@ func (m model) prRows() []row {
 		if merging {
 			status = "merging"
 		}
-		if p.Kind == "interim" { // ◇ = mid-task contribution (vs a final, task-done PR)
-			status = "◇" + status
+		if p.Kind == "interim" { // the interim mark: a mid-task contribution, not a task-done PR
+			status = theme.MarkPRInterim + status
 		}
 		// Cells styled independently, never nested, so a colour reset cannot bleed across the row —
 		// the same shape the task and agent rows use.

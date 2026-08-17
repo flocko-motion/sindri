@@ -466,26 +466,16 @@ func (m model) selAgent() (api.AgentView, bool) {
 	return api.AgentView{}, false
 }
 
-// eyeGlyph marks attached humans. The U+FE0F is load-bearing: bare U+1F441 measures one cell but
-// draws two, and one cell of overflow makes JoinHorizontal push the whole frame off-screen.
-const eyeGlyph = "👁️"
-
-// warnGlyph is the warning mark, likewise width-pinned.
-const warnGlyph = "⚠️"
-
-// attentionGlyph marks a tab holding rows that wait on the user — work held back by the approval
-// gate, an agent that cannot move until they answer. Plain ASCII: it sits inside the header bar,
-// where an emoji's two drawn cells against one measured would shear the whole strip.
-const attentionGlyph = "!"
-
-// mailGlyph marks unread mail on an agent's row. Width-pinned like the others.
-const mailGlyph = "✉️"
-
-// retiredGlyph marks an agent being wound down. Width-pinned like the others.
-const retiredGlyph = "⏹️"
-
-// clearGlyph marks an agent with a context clear armed, waiting for its next leaf boundary.
-const clearGlyph = "␡"
+// The row markers, from the set both front-ends share, so a symbol means one thing wherever it is
+// drawn (-> theme/glyph.go, which also holds why each is the width it is).
+const (
+	eyeGlyph       = theme.MarkDialIn
+	warnGlyph      = theme.MarkWarning
+	attentionGlyph = theme.MarkNeedsUser
+	mailGlyph      = theme.MarkMail
+	retiredGlyph   = theme.MarkRetired
+	clearGlyph     = theme.MarkClearArmed
+)
 
 func (m model) agentRows() []row {
 	var visible []api.AgentView

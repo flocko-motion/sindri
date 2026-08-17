@@ -27,7 +27,7 @@ import (
 func (m model) taskRows() []row {
 	arranged := api.ArrangeTasks(api.FilterTasks(m.filter, m.state.Tasks), m.state.PRs)
 
-	// Which tasks have a worker on them right now (drives the 🔨 marker).
+	// Which tasks have a worker on them right now (drives the worked-on marker).
 	assigned := map[string]bool{}
 	for _, a := range m.state.Agents {
 		if a.Task != "" {
@@ -191,11 +191,13 @@ func treeGutter(cont []bool, depth int, last, kids, collapsed bool) string {
 	return padTrunc(s, treeGutterW)
 }
 
-// marksW pads the marker column: 🔨 is two cells, so a fixed width keeps titles aligned.
-const marksW = 3
+// marksW pads the marker column so titles line up whatever a row carries. Measured from the marks
+// themselves rather than written down: a glyph swap that changed the count silently would knock
+// every title out of line, and this column has now been through one.
+var marksW = lipgloss.Width(theme.MarkAssigned) + lipgloss.Width(theme.MarkPRFinal)
 
-// prMarkKind picks the PR marker: ◆ final, ◇ interim, "" none. A kindless PR defaults to
-// final, the historical default, so older PRs still show ◆.
+// prMarkKind picks which PR marker a row carries: final, interim, or "" for none. A kindless PR
+// defaults to final, the historical default, so older PRs still read as one.
 func prMarkKind(tr api.TaskRow) string {
 	if tr.PR == "" {
 		return ""
@@ -206,18 +208,18 @@ func prMarkKind(tr api.TaskRow) string {
 	return "final"
 }
 
-// taskMarks is the status-marker column: 🔨 when a worker is on the task, then ◆ for a final PR
-// or ◇ for an interim one, padded to a fixed width so rows line up whatever they carry.
+// taskMarks is the status-marker column: the worked-on mark when an agent is on the task, then the
+// final or interim PR mark, padded to marksW so rows line up whatever they carry.
 func taskMarks(assigned bool, prKind string) string {
 	s := ""
 	if assigned {
-		s += "🔨"
+		s += theme.MarkAssigned
 	}
 	switch prKind {
 	case "final":
-		s += "◆"
+		s += theme.MarkPRFinal
 	case "interim":
-		s += "◇"
+		s += theme.MarkPRInterim
 	}
 	return padTrunc(s, marksW)
 }

@@ -112,25 +112,27 @@ func agentListCmd() *cobra.Command {
 				for _, a := range sorted {
 					line := fmt.Sprintf("%-10.10s %-12s %-8s %-10s %4s %-14s %s", a.Repo, a.Name, a.Role, a.Status,
 						theme.ContextPercent(a.ContextTokens, a.ContextWindow), dash(a.Task), dash(a.PR))
+					// The markers are the TUI's, from the set both read, so a symbol cannot come to
+					// mean one thing here and another there (-> theme/glyph.go).
 					if a.UnreadMail > 0 { // a backlog is a strong signal it has stopped reading
-						line += fmt.Sprintf("  ✉%d", a.UnreadMail)
+						line += fmt.Sprintf("  %s%d", theme.MarkMail, a.UnreadMail)
 					}
 					if api.AgentNeedsUser(a) {
-						line += "  ! needs you" // the status says which state; this says whose move it is
+						line += "  " + theme.MarkNeedsUser + " needs you" // the status says which state; this says whose move it is
 					}
 					if a.Retired {
-						line += "  ⏹ retired" // beside the status, which still shows what it is doing
+						line += "  " + theme.MarkRetired + " retired" // beside the status, which still shows what it is doing
 					}
 					if a.ClearArmed { // a toggle you cannot see is worse than no toggle
-						line += "  ␡ clear armed"
+						line += "  " + theme.MarkClearArmed + " clear armed"
 					}
 					if a.Clients > 0 {
-						line += fmt.Sprintf("  👁%d", a.Clients)
+						line += fmt.Sprintf("  %s%d", theme.MarkDialIn, a.Clients)
 					}
 					fmt.Println(line)
 				}
 				for _, o := range st.Orphans {
-					fmt.Printf("⚠  orphan: %s — no roster entry; remove with 'sindri agent delete %s'\n", o, o)
+					fmt.Printf("%s  orphan: %s — no roster entry; remove with 'sindri agent delete %s'\n", theme.MarkWarning, o, o)
 				}
 				if len(st.Agents) == 0 && len(st.Orphans) == 0 {
 					fmt.Fprintln(os.Stderr, "no agents — register one with 'sindri agent new <name>'")

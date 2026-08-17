@@ -21,6 +21,7 @@ import (
 	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/tools/paths"
+	"github.com/flo-at/sindri/internal/ui/theme"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -383,8 +384,8 @@ func prListCmd() *cobra.Command {
 				prs := api.SortedPRs(api.FilterPRs(f, all), st.Projects)
 				for _, p := range prs {
 					status := api.StatusLabel(p.Status, p.Approvals)
-					if p.Kind == "interim" { // ◇ = mid-task contribution (vs a final, task-done PR)
-						status = "◇" + status
+					if p.Kind == "interim" { // the interim mark: a mid-task contribution, not a task-done PR
+						status = theme.MarkPRInterim + status
 					}
 					// Repo first, as `agent list` prints it: this listing crosses repos, so the column
 					// is what places each row. Then who is reviewing it beside who wrote it, the PRs
