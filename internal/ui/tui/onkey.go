@@ -269,7 +269,12 @@ func (m *model) onKey(k string) tea.Cmd {
 			}
 			return nil
 		}
-	case keyComment: // tasks: comment on the selected task
+	// keyMail shares this letter (both open a prompt): on tasks it comments, on agents it mails.
+	case keyComment: // tasks: comment on the selected task · agents: mail it (waits, never interrupts)
+		if m.tab == 1 && m.selID() != "" && !m.isOrphan(m.selID()) {
+			m.openInput(inputMail, "mail "+m.selID()+" (waits, never interrupts): ")
+			return textinput.Blink
+		}
 		if m.tab == 0 && m.selID() != "" {
 			m.openInput(inputComment, "comment on "+m.selID()+": ")
 			return textinput.Blink

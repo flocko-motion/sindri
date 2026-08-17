@@ -72,3 +72,27 @@ func TestTheCLIAndTUIFilterTheSameSet(t *testing.T) {
 		t.Error("a mistyped --filter must be refused rather than showing everything silently")
 	}
 }
+
+// TestPushAndMailReadAsDifferentActions is the subtask's legibility requirement, checked where a user
+// actually meets it: the two one-liners. Someone choosing between them must see which interrupts and
+// which waits without opening any documentation.
+func TestPushAndMailReadAsDifferentActions(t *testing.T) {
+	tell, mail := agentTellCmd().Short, agentMailCmd().Short
+	if tell == mail {
+		t.Fatal("the two actions must not describe themselves the same way")
+	}
+	for _, want := range []string{"now", "lost"} {
+		if !strings.Contains(strings.ToLower(tell), want) {
+			t.Errorf("tell's one-liner should say it %s: %q", want, tell)
+		}
+	}
+	for _, want := range []string{"waits", "never interrupts"} {
+		if !strings.Contains(strings.ToLower(mail), want) {
+			t.Errorf("mail's one-liner should say it %s: %q", want, mail)
+		}
+	}
+	// And each is its own subcommand, not a flag on the other — the model is two actions.
+	if agentMailCmd().Name() != "mail" || agentTellCmd().Name() != "tell" {
+		t.Errorf("expected two named actions, got %q and %q", agentTellCmd().Name(), agentMailCmd().Name())
+	}
+}

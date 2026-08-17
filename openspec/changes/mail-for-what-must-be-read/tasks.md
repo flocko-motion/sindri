@@ -55,6 +55,26 @@
 - [x] 6.3 `05-workflow`: the classification, sender by sender.
 - [x] 6.4 `view-workers`: the Mail view and the agent's unread count.
 
+## 6b. The user's two actions (sd-ac5476)
+
+- [x] 6b.1 `hub.MailAgent` mails a user's message and never pushes it — not interrupting is the whole
+      reason to choose it — and refuses a name with no roster entry, since mail is durable and would
+      otherwise hide a typo for ever.
+- [x] 6b.2 `POST /agent/mail` beside `POST /tell`, `client.MailAgent` beside `client.Tell`.
+- [x] 6b.3 Both front-ends: `sindri agent mail` beside `agent tell`, and `i` beside `t` in the TUI,
+      each one-liner naming which interrupts and which waits.
+- [x] 6b.4 The signed-out guard stays on the PUSH path only, so mail reaches exactly the agent `tell`
+      cannot.
+
+## 6c. Length pressure on the wire files (sd-cd21aa)
+
+- [x] 6c.1 `server.go` split along the seams that grow separately: the request/response plumbing
+      (`httpjson.go`) and the streaming endpoints (`streams.go`), leaving the route table and `Serve`.
+      Each states a narrower job than "HTTP/JSON over a socket". 672 -> 535.
+- [x] 6c.2 `client.go` split at its transport core (`transport.go`), which is the seam that stays
+      separate as endpoints accumulate — deliberately NOT the chat/meeting group, which sd-b5d284 was
+      asked to lift. 632 -> 586.
+
 ## 7. Verify
 
 - [x] 7.1 A message that must be read survives an agent that cannot be reached, and records that no
@@ -66,4 +86,6 @@
       with the mailbox claim checked. The guard is proven non-vacuous by an undeclared injector.
 - [x] 7.5 The window keeps the recent end while the tallies count everything.
 - [x] 7.6 Both front-ends: rows, disclosure, filters, the body, the agent's count.
-- [x] 7.7 `make verify` passes.
+- [x] 7.7 A user's mail waits, is not pushed, is stamped as theirs, reaches a signed-out agent, and
+      an unknown recipient is refused with nothing stored.
+- [x] 7.8 `make verify` passes.

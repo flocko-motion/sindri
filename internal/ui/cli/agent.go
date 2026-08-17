@@ -469,60 +469,6 @@ func agentDirCmd() *cobra.Command {
 	}
 }
 
-func agentTellCmd() *cobra.Command {
-	var restart, anyway bool
-	c := &cobra.Command{
-		Use: "tell <name> <message...>", Short: "Send a message into an agent's session ([user])", Args: cobra.MinimumNArgs(2),
-		Long: "Send a message into an agent's session, stamped [user].\n\n" +
-			"An agent whose pane reads signed out is asked about rather than written to: nothing typed at a\n" +
-			"/login prompt is sent, so the message would sit in its input box unread. Both answers are yours\n" +
-			"to give — --restart bounces it first, which is how it re-reads the credentials the hub keeps\n" +
-			"staged, and --anyway sends regardless, for when you have just renewed the host's token and know\n" +
-			"better than the pane does.",
-		RunE: func(_ *cobra.Command, args []string) error {
-			msg := strings.Join(args[1:], " ")
-			return withAgent(args[0], func(b backend, a *api.AgentView) error {
-				signedOut, err := tellSignedOut(a, restart, anyway)
-				if err != nil {
-					return err
-				}
-				if signedOut == api.SignedOutRestart {
-					fmt.Fprintf(os.Stderr, "restarting %s, then sending — the session resumes…\n", a.Name)
-				}
-				if err := b.Tell(a.Name, msg, "user", signedOut); err != nil {
-					return err
-				}
-				fmt.Fprintf(os.Stderr, "delivered to %s\n", a.Name)
-				return nil
-			})
-		},
-	}
-	c.Flags().BoolVar(&restart, "restart", false, "if it reads signed out, restart it first (it re-reads the host's credentials), then send")
-	c.Flags().BoolVar(&anyway, "anyway", false, "send even if it reads signed out — the pane's reading may be out of date")
-	return c
-}
-
-// tellSignedOut is the answer the message carries about a signed-out pane: the one the user gave,
-// or a refusal that names both remedies rather than describing one it cannot perform. The check is
-// on the board's word, so the refusal only greets an agent that actually reads signed out.
-func tellSignedOut(a *api.AgentView, restart, anyway bool) (string, error) {
-	switch {
-	case restart && anyway:
-		return "", fmt.Errorf("--restart and --anyway ask for different things — pick one")
-	case restart:
-		return api.SignedOutRestart, nil
-	case anyway:
-		return api.SignedOutSend, nil
-	case a.Status == api.StatusSignedOut:
-		return "", fmt.Errorf("%s reads signed out — nothing typed at a /login prompt is sent, so the message "+
-			"would sit unread in its input box. Restart it and send, which makes the process re-read the "+
-			"credentials the hub keeps staged: `sindri agent tell %s --restart <message>`. Or send regardless, "+
-			"if you know the session is fine: `--anyway`. (If the host is signed out too, log in there first.)",
-			a.Name, a.Name)
-	}
-	return api.SignedOutRefuse, nil
-}
-
 // agentPlanCmd sends a phased brief — read, check for prior work, interview — not your raw text.
 func agentPlanCmd() *cobra.Command {
 	var taskID string

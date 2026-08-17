@@ -37,21 +37,24 @@ const (
 	keyRebuild   = "B" // reBuild the agent image and relaunch — confirms, then commits
 	keyRetire    = "X" // wind an agent down: no new work, on the keystroke. R is rebase here, S stops it
 	keyStats     = "m" // an agent's memory against its limit (a view)
-	keyTell      = "t" // tell an agent / show a PR's task
-	keyComment   = "i" // comment on a task — opens a prompt
-	keyAttach    = "a" // attach to an agent's session (agents, tasks, prs)
-	keyMerge     = "M" // merge a PR — commits on the keystroke, which is why it sits behind the prefix
-	keyDelete    = "D" // delete an agent
-	keyLint      = "L" // lint a PR
-	keyVerify    = "V" // verify (materialize) a PR
-	keyOpen      = "o" // open the row's worktree in a shell
-	keyFilter    = "f" // cycle the tasks filter
-	keyWhyNext   = "n" // what would be assigned next, and why nothing else would be (a view)
-	keyScopeTog  = "s" // toggle a tab's global↔repo scope
-	keyRepo      = "p" // switch the active repo/project
-	keyConfig    = "E" // edit the repo's config — opens a form, so it stays direct
-	keyColor     = "c" // pick a repo's colour — opens a picker
-	keyRefresh   = "r" // refresh the board
+	keyTell      = "t" // tell an agent: PUSH, interrupts now / show a PR's task
+	// Mail an agent: it waits to be read instead of interrupting, so the user picks the path at the
+	// keyboard. Shares "i" with comment — both open a prompt, and neither commits on the keystroke.
+	keyMail     = "i" // agents: mail (inbox) an agent — opens a prompt
+	keyComment  = "i" // comment on a task — opens a prompt
+	keyAttach   = "a" // attach to an agent's session (agents, tasks, prs)
+	keyMerge    = "M" // merge a PR — commits on the keystroke, which is why it sits behind the prefix
+	keyDelete   = "D" // delete an agent
+	keyLint     = "L" // lint a PR
+	keyVerify   = "V" // verify (materialize) a PR
+	keyOpen     = "o" // open the row's worktree in a shell
+	keyFilter   = "f" // cycle the tasks filter
+	keyWhyNext  = "n" // what would be assigned next, and why nothing else would be (a view)
+	keyScopeTog = "s" // toggle a tab's global↔repo scope
+	keyRepo     = "p" // switch the active repo/project
+	keyConfig   = "E" // edit the repo's config — opens a form, so it stays direct
+	keyColor    = "c" // pick a repo's colour — opens a picker
+	keyRefresh  = "r" // refresh the board
 	// Mail: narrow the list to the selected message's recipient — "who was told this?", the question
 	// the tab is opened with. Its own letter because `a` attaches and only attaches, on every tab.
 	keyMailWho = "w"
@@ -133,7 +136,8 @@ var keymap = []binding{
 
 	// Agents.
 	{keys: keyNew, label: lbl("new"), scope: scopeAgents},
-	{keys: keyTell, label: lbl("tell"), scope: scopeAgents},
+	{keys: keyTell, label: lbl("tell: push now"), scope: scopeAgents},
+	{keys: keyMail, label: lbl("mail: waits"), scope: scopeAgents},
 	{keys: keyAttach, label: lbl("attach"), scope: scopeAgents},
 	{keys: keyEdit, label: lbl("editor"), scope: scopeAgents},
 	{keys: keyOpen, label: lbl("open"), scope: scopeAgents},

@@ -65,6 +65,10 @@ func (m *model) submitInput() tea.Cmd {
 			return nil
 		}
 		return tellCmd(cl, target, v)
+	case inputMail:
+		// No signed-out question here, unlike tell: mail never touches the session, so a pane that
+		// cannot receive anything is exactly the case mail is FOR.
+		return mutateThenRefresh(cl, func() error { return cl.MailAgent(target, v) })
 	case inputRunCommand:
 		// Against this repo's own checkout, the target only a human has — an agent's workspace is
 		// the agent's to queue. Not scheduled inline: the queue answers at once with a position,

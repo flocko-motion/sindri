@@ -14,10 +14,8 @@ import (
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
-// senderOf reads a message's provenance from the tag it already opens with — every message the hub
-// injects is stamped "[hub] ", "[user] " or "[reviewer] " (D12), and that stamp is what the agent
-// itself sees. Read rather than restated, so a mail row's sender and the line the agent reads cannot
-// disagree; anything unstamped is the hub speaking in its own voice.
+// senderOf reads provenance off the tag a message already opens with (D12) — read, not restated, so a
+// mail row's sender and the line the agent sees cannot disagree. Unstamped is the hub's own voice.
 func senderOf(text string) string {
 	if open := strings.IndexByte(text, '['); open == 0 {
 		if close := strings.IndexByte(text, ']'); close > 1 {
@@ -30,11 +28,8 @@ func senderOf(text string) string {
 	return "hub"
 }
 
-// Deliver sends text to an agent the way d says. MAIL FIRST: a crash between the two loses only the
-// wake, which the mail then covers, where the other order loses the message itself.
-//
-// A push failure is NOT returned — an agent that is down cannot be typed into, and with the mail
-// written that is no longer a loss. What is returned is a failure to RECORD.
+// Deliver sends text to an agent the way d says. MAIL FIRST, so a crash between the two loses only the
+// wake. A push failure is NOT returned once mail is written — only a failure to RECORD is.
 func (h *Hub) Deliver(project, name, text string, d workflow.Delivery) error {
 	if !d.Sends() {
 		return fmt.Errorf("delivery to %s/%s asks for neither mail nor push, so it is not a message", project, name)
@@ -65,4 +60,16 @@ func (h *Hub) Deliver(project, name, text string, d workflow.Delivery) error {
 		return ps.MarkMailPushed(mailID)
 	}
 	return nil
+}
+
+// MailAgent puts a user's message in an agent's mailbox and deliberately does NOT push it: choosing
+// mail over `tell` IS the choice not to interrupt. It therefore reaches an agent `tell` cannot — down,
+// restarting or signed out — since the signed-out refusal belongs to the push path alone.
+func (h *Hub) MailAgent(project, name, msg string) error {
+	if _, ok, err := h.store.For(project).GetAgent(name); err != nil {
+		return err
+	} else if !ok {
+		return fmt.Errorf("no such agent %q", name)
+	}
+	return h.Deliver(project, name, "[user] "+msg, workflow.MailOnly)
 }

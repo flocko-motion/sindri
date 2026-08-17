@@ -49,6 +49,45 @@ different diagnoses and a reader needs to tell them apart.
 - **WHEN** a message declared push-only cannot be delivered
 - **THEN** nothing is stored, because being live was the whole of its value
 
+### Requirement: The user chooses the path, as two actions
+
+A user SHALL be able to PUSH a message to an agent or MAIL one, as two separate actions
+in both front-ends, exposing the same two questions every sender inside the hub answers.
+
+Push (`tell`) SHALL keep its meaning exactly: it types into the live session now, so it
+interrupts, and it is lost if the agent is not there. That is the right verb for "stop
+what you are doing", where a message that misses an absent agent is moot anyway, because
+the situation will have changed by the time it returns.
+
+Mail SHALL wait to be read and SHALL NOT interrupt — and SHALL NOT push either, even
+when the agent is reachable. Choosing mail over push IS the choice not to interrupt, so
+notifying anyway would defeat the only reason to pick it. This is where a mailed message
+differs from a verdict, which must be read AND acted on now.
+
+Because mail never touches the session, it SHALL reach an agent that push cannot: one
+that is down, restarting, mid-clear, or signed out. The refusal that protects a
+signed-out pane belongs to the PUSH path alone — text typed at a login prompt vanishes
+unread, which is a fact about typing, not about the message.
+
+The two SHALL NOT be folded into one action. The difference SHALL be legible where the
+choice is made — in the verb and in its one line of help — rather than in documentation
+the user will not read: one interrupts and may be lost, the other waits and will be read.
+
+#### Scenario: Mailing an agent that is away
+
+- **WHEN** the user mails an agent that is down, restarting or signed out
+- **THEN** the message is kept and is read when that agent next asks the hub what to do
+
+#### Scenario: Mail does not interrupt
+
+- **WHEN** the user mails an agent that is running and mid-turn
+- **THEN** nothing is typed into its session, and it reads the message at its next ask
+
+#### Scenario: Push keeps its meaning
+
+- **WHEN** the user pushes a message to an agent that is not there to receive it
+- **THEN** it is reported as undelivered rather than kept, because waking was the point
+
 #### Scenario: A sender that declares neither
 
 - **WHEN** a delivery asks for neither mail nor push

@@ -23,6 +23,15 @@ func (h *Hub) messageRoutes(mux *http.ServeMux) {
 		}
 		writeJSON(w, okMsg{"delivered"}, h.agents.Tell(h.agentReq(r, req.Name), req.Name, req.Msg, req.Source, req.SignedOut))
 	})
+	// The other half of the pair: mail waits to be read and does not interrupt, where /tell wakes the
+	// agent now and is lost if it is not there. Two routes, because the choice is the user's.
+	mux.HandleFunc("POST /agent/mail", func(w http.ResponseWriter, r *http.Request) {
+		var req TellReq
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"mailed"}, h.MailAgent(h.agentReq(r, req.Name), req.Name, req.Msg))
+	})
 	// One message in full. The board carries a preview of each body, so this is what a detail view
 	// and `mail show` ask for — and it reaches mail older than the board's window.
 	mux.HandleFunc("GET /mail", func(w http.ResponseWriter, r *http.Request) {

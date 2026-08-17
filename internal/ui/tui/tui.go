@@ -50,6 +50,7 @@ type inputMode int
 const (
 	inputNone inputMode = iota
 	inputTell
+	inputMail
 	inputComment
 	inputRunCommand
 )
