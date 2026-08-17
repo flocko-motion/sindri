@@ -28,9 +28,10 @@ settle rather than paper over.
   reviewer idled (sd-98fa96) — one call now says which.
 - A PR past "open" is reported by the state it is in rather than as one word. Each is a different
   person's move: a rejected PR is live work its author is revising and resubmits, an approved one
-  wants your merge, a half-merged one wants inspecting and re-approving. Any command a note names is
-  one that succeeds — `pr merge` refuses everything unapproved, so offering it elsewhere would be a
-  guaranteed error dressed as advice.
+  wants your merge, a half-merged one wants the base branch inspected. Any command a note names is
+  one that state accepts — `pr merge` refuses everything unapproved and `pr approve` everything past
+  "open", so naming either elsewhere would be a guaranteed error dressed as advice. Where no verb
+  reaches out of a status, the note says what is unknown and where to look instead of inventing one.
 - A reviewer holding a review of a PR that has left "open" is not reported as busy, mirroring the
   release the assignment path performs — a human `pr approve` leaves exactly that state behind, and
   the reviewer's very next ask takes the waiting review.
@@ -51,5 +52,9 @@ settle rather than paper over.
   `internal/ui/tui/tab_tasks.go`.
 - `NextTask` grows the role rather than gaining a second client method, so the two front-ends cannot
   drift onto different questions.
+- A contradiction this turned up is left alone deliberately: the mid-merge recovery logs "inspect
+  the base branch, then re-approve to retry", while the approve gate refuses a merge-failed PR. The
+  note here says only what is true; reconciling the two — by widening the gate or by rewording that
+  log — is its own change.
 - The reason column is now padded by display width. It was padded by bytes, and every reason
   containing a dash — most of them — pulled its title two columns left of the row above.

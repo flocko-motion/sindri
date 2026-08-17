@@ -28,6 +28,9 @@
 - [x] 4.1 A hold on a PR that has left "open" is not a hold: the explanation mirrors the release the
       assignment path performs, rather than describing a state the next ask undoes.
 - [x] 4.2 The noun rule is applied to `--agent` as well as `--role`, in both directions.
+- [x] 4.3 The merge-failed note names no verb at all: every route out of that status is refused
+      from it, so it says what is unknown and where to look. The test now asserts against the
+      gates (`api.PRApprovable`, Merge's approved-only rule) rather than against wording.
 
 ## 5. Pin it
 

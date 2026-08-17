@@ -214,29 +214,42 @@ func TestAnUnknownRoleIsRefused(t *testing.T) {
 	}
 }
 
-// TestANoteNamesACommandThatWorks: Merge takes an approved PR and nothing else, so telling the user
-// to merge a rejected or half-merged one is a guaranteed error dressed as advice — which is what a
-// single note for every non-open status produced.
+// TestANoteNamesACommandThatWorks: a note is advice, and advice that errors is worse than silence —
+// especially in the states a user reaches while already confused. Asserted against the GATES
+// themselves (Merge takes only an approved PR; approve takes only api.PRApprovable), so it holds for
+// whatever wording the notes land on, which is what checking for the word "approve" did not.
 func TestANoteNamesACommandThatWorks(t *testing.T) {
 	e, ps := roleFixture(t)
-	for _, pr := range []store.PR{
+	prs := []store.PR{
+		{ID: "pr-open", Status: "open"},
 		{ID: "pr-approved", Status: "approved"},
 		{ID: "pr-rejected", Status: "rejected"},
 		{ID: "pr-merging", Status: "merging"},
 		{ID: "pr-halfmerged", Status: "merge-failed", Base: "main"},
-	} {
+	}
+	byID := map[string]store.PR{}
+	for _, pr := range prs {
 		if err := ps.PutPR(pr); err != nil {
 			t.Fatal(err)
 		}
+		byID[pr.ID] = pr
 	}
 	x, err := e.ExplainNext("repo", "", "reviewer")
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(x.PRs) != len(prs) {
+		t.Fatalf("every PR should be accounted for, got %d of %d", len(x.PRs), len(prs))
+	}
 	for _, p := range x.PRs {
-		if p.ID != "pr-approved" && strings.Contains(p.Note, "pr merge "+p.ID) {
-			t.Errorf("%s (%s) is offered `pr merge`, which Merge refuses for anything unapproved: %q",
-				p.ID, p.Why, p.Note)
+		pr := byID[p.ID]
+		if strings.Contains(p.Note, "pr merge "+p.ID) && pr.Status != "approved" {
+			t.Errorf("%s is %s and its note offers `pr merge`, which Merge refuses: %q",
+				p.ID, pr.Status, p.Note)
+		}
+		if strings.Contains(p.Note, "pr approve "+p.ID) && !api.PRApprovable(pr) {
+			t.Errorf("%s is %s and its note offers `pr approve`, which the approve gate refuses: %q",
+				p.ID, pr.Status, p.Note)
 		}
 	}
 	notes := map[string]string{}
@@ -246,8 +259,10 @@ func TestANoteNamesACommandThatWorks(t *testing.T) {
 	if !strings.Contains(notes["pr-approved"], "pr merge pr-approved") {
 		t.Errorf("an approved PR wants merging, and the note should say so: %q", notes["pr-approved"])
 	}
-	if !strings.Contains(notes["pr-halfmerged"], "approve") {
-		t.Errorf("a half-merged PR is re-approved and merged again: %q", notes["pr-halfmerged"])
+	// The half-merged one still has to be USEFUL: no verb reaches out of that status, so it says
+	// what is unknown and where to look rather than nothing at all.
+	if !strings.Contains(notes["pr-halfmerged"], "main") {
+		t.Errorf("a half-merged PR must point at the base branch to inspect: %q", notes["pr-halfmerged"])
 	}
 }
 

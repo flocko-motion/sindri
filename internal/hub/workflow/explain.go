@@ -255,8 +255,11 @@ func leftOpen(p store.PR) (api.Reviewability, string) {
 	case "merging":
 		return api.ReviewMerging, "nothing to do — it is going in"
 	case "merge-failed":
-		return api.ReviewMergeFailed, "inspect " + p.Base + ", then `sindri pr approve " + p.ID +
-			"` and merge again"
+		// No verb named: the hub died mid-merge, so whether the change reached the base is unknown,
+		// and every route back out of this status is refused from it — approve included
+		// (api.PRApprovable). Pointing at one would send a confused user straight to an error.
+		return api.ReviewMergeFailed, "the merge outcome is unknown — inspect " + p.Base +
+			"; `sindri pr info " + p.ID + "` for what happened"
 	}
 	return api.ReviewSettled, ""
 }
