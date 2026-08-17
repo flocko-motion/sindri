@@ -50,8 +50,16 @@ const (
 	// ReviewInterim: a milestone PR is opened without requesting a review, because merging it is
 	// the user's call — so no reviewer would ever be offered it, however long it sits.
 	ReviewInterim Reviewability = "interim — yours to merge, not reviewed"
-	// ReviewSettled: the PR is no longer open, so a verdict on it would decide nothing.
-	ReviewSettled Reviewability = "no longer open — a verdict decides nothing"
+	// The states a PR reaches after leaving "open". Each is a different person's move, which is the
+	// whole answer to "why is nothing happening", so they are not collapsed into one word:
+	// ReviewRejected is live work — the author revises and resubmits, and the PR reopens.
+	ReviewRejected    Reviewability = "rejected — the author is revising it"
+	ReviewApproved    Reviewability = "approved — waiting on your merge"
+	ReviewMerging     Reviewability = "merging — going in now"
+	ReviewMergeFailed Reviewability = "merge failed — a human has to look"
+	// ReviewSettled is any other state a PR reaches: unrecognised here, so it says only that no
+	// reviewer would be offered it rather than inventing a remedy.
+	ReviewSettled Reviewability = "not open — no reviewer would be offered it"
 )
 
 // PRReason is one PR and where it stands for a reviewer.

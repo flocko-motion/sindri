@@ -53,3 +53,36 @@ func TestPRNextTakesOnlyAReviewer(t *testing.T) {
 		t.Errorf("the refusal must name the command that answers, got %q", err)
 	}
 }
+
+// TestTheNounHoldsForANamedAgentToo is the half the flags alone did not cover. --role is checked
+// before the call, but a named agent's role is the hub's to say, so the check has to happen after
+// it — otherwise `task next --agent <a reviewer>` prints a PR table under a task noun, which is
+// precisely what the flag path refuses.
+func TestTheNounHoldsForANamedAgentToo(t *testing.T) {
+	err := wrongNounRefusal("reviewer", "dvalin")
+	if err == nil || !strings.Contains(err.Error(), "pr next --agent dvalin") {
+		t.Errorf("a reviewer asked about under the task noun must be sent to `pr next`, got %v", err)
+	}
+	for _, role := range []string{"worker", "planner", "coauthor"} {
+		err := wrongNounRefusal(role, "nori")
+		if err == nil || !strings.Contains(err.Error(), "task next --agent nori") {
+			t.Errorf("a %s asked about under the PR noun must be sent to `task next`, got %v", role, err)
+		}
+		if !strings.Contains(err.Error(), role) {
+			t.Errorf("the refusal should name what the agent actually is, got %v", err)
+		}
+	}
+}
+
+// TestOnlyAReviewerIsAboutPRs pins the distinction both commands turn on, so a new role added
+// later cannot silently join the PR side by omission.
+func TestOnlyAReviewerIsAboutPRs(t *testing.T) {
+	if !nextIsAboutPRs("reviewer") {
+		t.Error("a reviewer is served PRs")
+	}
+	for _, role := range []string{"worker", "planner", "coauthor", ""} {
+		if nextIsAboutPRs(role) {
+			t.Errorf("%q is not served PRs", role)
+		}
+	}
+}

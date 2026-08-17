@@ -61,7 +61,10 @@ func TestEveryReasonAPRGoesUnreviewed(t *testing.T) {
 		{ID: "pr-unasked", Task: "sd-3", Status: "open"},
 		{ID: "pr-interim", Task: "sd-4", Status: "open", Kind: "interim"},
 		{ID: "pr-approved", Task: "sd-5", Status: "approved"},
-		{ID: "pr-merged", Task: "sd-6", Status: "merged"},
+		{ID: "pr-rejected", Task: "sd-6", Status: "rejected"},
+		{ID: "pr-merging", Task: "sd-7", Status: "merging"},
+		{ID: "pr-halfmerged", Task: "sd-8", Status: "merge-failed", Base: "main"},
+		{ID: "pr-merged", Task: "sd-9", Status: "merged"},
 	} {
 		if err := ps.PutPR(pr); err != nil {
 			t.Fatal(err)
@@ -88,7 +91,12 @@ func TestEveryReasonAPRGoesUnreviewed(t *testing.T) {
 		"pr-claimed":  api.ReviewInHand,
 		"pr-unasked":  api.ReviewUnrequested,
 		"pr-interim":  api.ReviewInterim,
-		"pr-approved": api.ReviewSettled,
+		"pr-approved": api.ReviewApproved,
+		// Rejected is the commonest of these and the one a single "settled" got wrong: the author
+		// is revising, a resubmit reopens the PR, and nobody is waiting on a reviewer meanwhile.
+		"pr-rejected":   api.ReviewRejected,
+		"pr-merging":    api.ReviewMerging,
+		"pr-halfmerged": api.ReviewMergeFailed,
 	} {
 		if got[id] != want {
 			t.Errorf("%s: %q, want %q", id, got[id], want)
@@ -203,5 +211,79 @@ func TestAnUnknownRoleIsRefused(t *testing.T) {
 	e, _ := roleFixture(t)
 	if _, err := e.ExplainNext("repo", "", "reviwer"); err == nil {
 		t.Error("an unknown role must be refused")
+	}
+}
+
+// TestANoteNamesACommandThatWorks: Merge takes an approved PR and nothing else, so telling the user
+// to merge a rejected or half-merged one is a guaranteed error dressed as advice — which is what a
+// single note for every non-open status produced.
+func TestANoteNamesACommandThatWorks(t *testing.T) {
+	e, ps := roleFixture(t)
+	for _, pr := range []store.PR{
+		{ID: "pr-approved", Status: "approved"},
+		{ID: "pr-rejected", Status: "rejected"},
+		{ID: "pr-merging", Status: "merging"},
+		{ID: "pr-halfmerged", Status: "merge-failed", Base: "main"},
+	} {
+		if err := ps.PutPR(pr); err != nil {
+			t.Fatal(err)
+		}
+	}
+	x, err := e.ExplainNext("repo", "", "reviewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range x.PRs {
+		if p.ID != "pr-approved" && strings.Contains(p.Note, "pr merge "+p.ID) {
+			t.Errorf("%s (%s) is offered `pr merge`, which Merge refuses for anything unapproved: %q",
+				p.ID, p.Why, p.Note)
+		}
+	}
+	notes := map[string]string{}
+	for _, p := range x.PRs {
+		notes[p.ID] = p.Note
+	}
+	if !strings.Contains(notes["pr-approved"], "pr merge pr-approved") {
+		t.Errorf("an approved PR wants merging, and the note should say so: %q", notes["pr-approved"])
+	}
+	if !strings.Contains(notes["pr-halfmerged"], "approve") {
+		t.Errorf("a half-merged PR is re-approved and merged again: %q", notes["pr-halfmerged"])
+	}
+}
+
+// TestAStaleHoldIsNotAHold: reviewDirective closes a review whose PR has left "open" and claims the
+// next one, so reporting the reviewer as busy describes a state its very next ask undoes. Reachable
+// in ordinary use — a human `pr approve` leaves the reviewer's own row unverdicted.
+func TestAStaleHoldIsNotAHold(t *testing.T) {
+	e, ps := roleFixture(t)
+	if err := ps.PutAgent(store.Agent{Name: "dvalin", Role: "reviewer"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutPR(store.PR{ID: "pr-1", Task: "sd-1", Status: "approved"}); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := ps.AddReview("pr-1", "check it")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.AssignReview(stale, "dvalin"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutPR(store.PR{ID: "pr-2", Task: "sd-2", Status: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ps.AddReview("pr-2", "check it"); err != nil {
+		t.Fatal(err)
+	}
+
+	x, err := e.ExplainNext("repo", "dvalin", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if x.AgentNote != "" {
+		t.Errorf("AgentNote = %q — the held PR is settled, so the hold is already released", x.AgentNote)
+	}
+	if x.PickPR == nil || x.PickPR.ID != "pr-2" {
+		t.Errorf("pick = %+v, want pr-2 — what its next ask would actually claim", x.PickPR)
 	}
 }

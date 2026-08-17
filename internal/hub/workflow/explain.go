@@ -192,11 +192,11 @@ func allChildrenGated(all []store.Task, id string) bool {
 func (e *Engine) explainReview(project, agent string, out api.NextExplain) (api.NextExplain, error) {
 	ps := e.store.For(project)
 	if agent != "" {
-		if held, err := ps.ReviewingPR(agent); err != nil {
+		note, err := reviewHeld(ps, agent)
+		if err != nil {
 			return out, err
-		} else if held != "" {
-			out.AgentNote = "holds the review of " + held
 		}
+		out.AgentNote = note
 	}
 	prs, err := ps.PRs()
 	if err != nil {
@@ -224,7 +224,7 @@ func (e *Engine) explainReview(project, agent string, out api.NextExplain) (api.
 		r := api.PRReason{ID: p.ID, Task: p.Task, Title: e.taskTitle(project, p.Task)}
 		switch {
 		case p.Status != "open":
-			r.Why, r.Note = api.ReviewSettled, p.Status+" — `sindri pr merge "+p.ID+"`"
+			r.Why, r.Note = leftOpen(p)
 		case claimed[p.ID] != "":
 			r.Why, r.Note = api.ReviewInHand, claimed[p.ID]+" has it"
 		case live[p.ID]:
@@ -241,4 +241,40 @@ func (e *Engine) explainReview(project, agent string, out api.NextExplain) (api.
 		out.PRs = append(out.PRs, r)
 	}
 	return out, nil
+}
+
+// leftOpen accounts for a PR past "open" but not yet gone. Each state is a different person's move
+// — a rejected one is live work its author resubmits — and each note must name a command that
+// WORKS: Merge takes an approved PR and nothing else.
+func leftOpen(p store.PR) (api.Reviewability, string) {
+	switch p.Status {
+	case "approved":
+		return api.ReviewApproved, "`sindri pr merge " + p.ID + "`"
+	case "rejected":
+		return api.ReviewRejected, "it comes back as open when the author submits again"
+	case "merging":
+		return api.ReviewMerging, "nothing to do — it is going in"
+	case "merge-failed":
+		return api.ReviewMergeFailed, "inspect " + p.Base + ", then `sindri pr approve " + p.ID +
+			"` and merge again"
+	}
+	return api.ReviewSettled, ""
+}
+
+// reviewHeld is why a reviewer takes nothing new, "" when it is free. A hold on a PR that has left
+// "open" is NOT one: reviewDirective releases it and claims the next review, so trusting the row
+// would describe a state the agent's very next ask undoes (a human `pr approve` leaves exactly it).
+func reviewHeld(ps *store.ProjectStore, agent string) (string, error) {
+	held, err := ps.ReviewingPR(agent)
+	if err != nil || held == "" {
+		return "", err
+	}
+	pr, ok, err := ps.GetPR(held)
+	if err != nil {
+		return "", err
+	}
+	if !ok || pr.Status != "open" {
+		return "", nil // released on its next ask; it is free in every sense that matters here
+	}
+	return "holds the review of " + held, nil
 }

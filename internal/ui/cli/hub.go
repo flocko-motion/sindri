@@ -262,6 +262,11 @@ func prNextCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				// The noun holds for a named agent too: everyone but a reviewer is served the
+				// backlog, and printing it here would answer a task question under a PR command.
+				if !nextIsAboutPRs(x.Role) {
+					return wrongNounRefusal(x.Role, agent)
+				}
 				fmt.Print(theme.FormatNext(x))
 				return nil
 			})

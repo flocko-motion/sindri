@@ -20,9 +20,19 @@
 - [x] 3.2 `task next --role reviewer` names that command instead of answering with PRs.
 - [x] 3.3 The TUI's `n` asks about the tab's own pool — the backlog on Tasks, the reviews on PRs.
 
-## 4. Pin it
+## 4. What the review found
 
-- [x] 4.1 A reviewer is answered with none running, and the task half stays empty for it.
-- [x] 4.2 Every reason a PR goes unreviewed, including a merged one being off the board entirely.
-- [x] 4.3 The refusals: agent-with-role, an unknown role, and each front-end pointer.
-- [x] 4.4 A reviewer holding a review takes nothing, as a worker holding a task does.
+- [x] 4.0 Each state past "open" is reported as itself, with a remedy that works against it — a
+      rejected PR is the author's move, not something settled, and `pr merge` is named only where
+      Merge would accept it.
+- [x] 4.1 A hold on a PR that has left "open" is not a hold: the explanation mirrors the release the
+      assignment path performs, rather than describing a state the next ask undoes.
+- [x] 4.2 The noun rule is applied to `--agent` as well as `--role`, in both directions.
+
+## 5. Pin it
+
+- [x] 5.1 A reviewer is answered with none running, and the task half stays empty for it.
+- [x] 5.2 Every reason a PR goes unreviewed — a row per status past "open" included, and a merged
+      one being off the board entirely.
+- [x] 5.3 The refusals: agent-with-role, an unknown role, and both noun redirects, each direction.
+- [x] 5.4 A reviewer holding a live review takes nothing; one holding a settled review does not.

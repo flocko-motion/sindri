@@ -87,6 +87,11 @@ func taskNextCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				// The same rule after the call as before it: a named agent brings its own role, and
+				// only the hub knows what that is, so this is where the noun is checked for one.
+				if nextIsAboutPRs(x.Role) {
+					return wrongNounRefusal(x.Role, agent)
+				}
 				fmt.Print(theme.FormatNext(x))
 				return nil
 			})
@@ -565,4 +570,17 @@ func splitCSV(s string) []string {
 		return nil
 	}
 	return strings.Split(s, ",")
+}
+
+// nextIsAboutPRs reports whether a role's assignment answer is PRs rather than tasks — the one
+// distinction both `next` commands' nouns turn on.
+func nextIsAboutPRs(role string) bool { return role == "reviewer" }
+
+// wrongNounRefusal is what a `next` command says when the hub answered for the other pool: the
+// question was legitimate and asked at the wrong door, so it names the door.
+func wrongNounRefusal(role, agent string) error {
+	if nextIsAboutPRs(role) {
+		return fmt.Errorf("%s is a reviewer, and is offered PRs rather than tasks — ask `sindri pr next --agent %s`", agent, agent)
+	}
+	return fmt.Errorf("%s is a %s, and is served tasks rather than PRs — ask `sindri task next --agent %s`", agent, role, agent)
 }
