@@ -18,6 +18,17 @@ type Delivery struct {
 	// Push types it into the agent's session now. Best-effort by nature: waking is the whole point,
 	// so a wake nobody was there to receive is nothing worth keeping.
 	Push bool
+	// Sender is WHO the message is from — hub, user, reviewer, or an agent by name. STATED, never read
+	// out of the text: a prefix in the body made provenance a property of the wording, under which only
+	// two of the four could ever be recorded. Empty means the hub in its own voice.
+	Sender string
+}
+
+// From names the sender, returning a COPY — so one call site cannot leak a sender into the shared
+// classification, and reads its provenance beside it: MailAndPush.From(api.SenderUser).
+func (d Delivery) From(sender string) Delivery {
+	d.Sender = sender
+	return d
 }
 
 // The three combinations that are messages at all: it must not be missed AND acted on now; it must be

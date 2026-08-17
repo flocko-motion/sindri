@@ -218,7 +218,9 @@ func (e *Engine) reject(project, prID, feedback string, byUser bool) error {
 	}
 	_ = ps.LogPR(pr.ID, "rejected", "by "+who+": "+feedback)
 	_ = ps.Log(pr.Agent, "reject", pr.ID+" ("+who+"): "+feedback)
-	_ = e.deps.Deliver(project, pr.Agent, msg, MailAndPush)
+	// From the reviewer whose verdict it is (or the user, for a human rejection): the feedback is
+	// theirs, and an agent weights a message by who it is from.
+	_ = e.deps.Deliver(project, pr.Agent, msg, MailAndPush.From(who))
 	e.deps.Notify()
 	return nil
 }

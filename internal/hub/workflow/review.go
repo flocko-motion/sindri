@@ -8,6 +8,7 @@ package workflow
 
 import (
 	"fmt"
+	"github.com/flo-at/sindri/internal/api"
 	"os"
 	"path/filepath"
 	"strings"
@@ -119,7 +120,7 @@ func (e *Engine) RequestReview(project, prID, requirement string) error {
 			return err
 		}
 		_ = ps.LogPR(prID, "review-amended", "further instructions to "+holder)
-		go e.deps.Deliver(project, holder, MsgReviewAmended(prID, requirement), MailAndPush)
+		go e.deps.Deliver(project, holder, MsgReviewAmended(prID, requirement), MailAndPush.From(api.SenderUser))
 		e.deps.Notify()
 		return nil
 	}

@@ -30,7 +30,8 @@ func mailAgent(t *testing.T) (*Hub, *store.ProjectStore) {
 // so a reader can see it was never delivered live.
 func TestMailIsKeptForAnAgentThatCannotBeReached(t *testing.T) {
 	h, ps := mailAgent(t)
-	if err := h.Deliver(testProject, "dvalin", "[reviewer] rejected: the gate is missing", workflow.MailAndPush); err != nil {
+	if err := h.Deliver(testProject, "dvalin", "[reviewer] rejected: the gate is missing",
+		workflow.MailAndPush.From("reviewer")); err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
 	unread, err := ps.UnreadMail("dvalin")
@@ -40,9 +41,10 @@ func TestMailIsKeptForAnAgentThatCannotBeReached(t *testing.T) {
 	if unread[0].Pushed {
 		t.Error("the agent is down, so no push landed — the flag must say so")
 	}
-	// The provenance tag the agent itself reads is what the row records, so the two cannot disagree.
+	// The sender is what the SENDER stated (-> workflow.Delivery.From), not what the body's tag happens
+	// to say — that inference is what sd-bc3a1f removed, and only two senders could survive it.
 	if unread[0].Sender != "reviewer" {
-		t.Errorf("sender = %q, want it read off the message's own tag", unread[0].Sender)
+		t.Errorf("sender = %q, want the one the delivery stated", unread[0].Sender)
 	}
 }
 

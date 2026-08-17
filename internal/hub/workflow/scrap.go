@@ -9,6 +9,7 @@ package workflow
 
 import (
 	"fmt"
+	"github.com/flo-at/sindri/internal/api"
 	"path/filepath"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
@@ -42,7 +43,7 @@ func (e *Engine) DiscardPR(project, prID string) error {
 	if st.Phase == "submitted" || st.Phase == "resolving" {
 		if e.deps.AgentAlive(project, author) {
 			_ = e.deps.Interrupt(project, author)
-			_ = e.deps.Deliver(project, author, MsgPRScrapped(prID), MailAndPush)
+			_ = e.deps.Deliver(project, author, MsgPRScrapped(prID), MailAndPush.From(api.SenderUser))
 		}
 		_ = ps.SetState(store.AgentState{Agent: author, Phase: "idle"})
 	}

@@ -9,21 +9,18 @@ package hub
 import (
 	"fmt"
 	"os"
-	"strings"
+
+	"github.com/flo-at/sindri/internal/api"
 
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
-// senderOf reads provenance off the tag a message already opens with (D12) — read, not restated, so a
-// mail row's sender and the line the agent sees cannot disagree. Unstamped is the hub's own voice.
-func senderOf(text string) string {
-	if open := strings.IndexByte(text, '['); open == 0 {
-		if close := strings.IndexByte(text, ']'); close > 1 {
-			switch tag := text[1:close]; tag {
-			case "hub", "user", "reviewer":
-				return tag
-			}
-		}
+// senderFor is who a message is from: what its sender stated, else the hub in its own voice. The
+// default is the hub because that is what an unattributed hub-originated message IS, rather than a
+// value to guess at.
+func senderFor(d workflow.Delivery) string {
+	if d.Sender != "" {
+		return d.Sender
 	}
 	return "hub"
 }
@@ -37,14 +34,16 @@ func (h *Hub) Deliver(project, name, text string, d workflow.Delivery) error {
 	ps := h.store.For(project)
 	var mailID int64
 	if d.Mail {
-		m, err := ps.AddMail(name, senderOf(text), text, false)
+		m, err := ps.AddMail(name, senderFor(d), text, false)
 		if err != nil {
 			return err
 		}
 		mailID = m.ID
 		h.notify() // the unread count is on the board
 	}
-	if !d.Push {
+	// The user has no session to type into, so their mailbox IS the channel: a push to them is not a
+	// failure to report, it is a thing that does not exist.
+	if !d.Push || name == api.SenderUser {
 		return nil
 	}
 	if err := h.agents.InjectWhenReady(project, name, text); err != nil {
@@ -71,5 +70,7 @@ func (h *Hub) MailAgent(project, name, msg string) error {
 	} else if !ok {
 		return fmt.Errorf("no such agent %q", name)
 	}
-	return h.Deliver(project, name, "[user] "+msg, workflow.MailOnly)
+	// The "[user] " prefix stays in the rendered line, where a reader wants it, but it is no longer the
+	// mechanism: the sender is stated.
+	return h.Deliver(project, name, "[user] "+msg, workflow.MailOnly.From(api.SenderUser))
 }

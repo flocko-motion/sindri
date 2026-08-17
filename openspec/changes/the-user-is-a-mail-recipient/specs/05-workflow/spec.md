@@ -2,6 +2,41 @@
 
 ## ADDED Requirements
 
+### Requirement: A message carries the sender its sender states
+
+Every message SHALL record WHO it is from, stated by whoever sends it. It SHALL NOT be
+inferred from the message's text: reading provenance out of a prefix in the body makes it a
+property of how a message happens to be worded, and under that scheme only two of the four
+senders the record documents — the hub, the user, a reviewer, an agent by name — could ever
+be stored at all.
+
+The sender SHALL travel with the delivery classification, as one statement of how a message
+travels and who it is from, so a call site cannot state one and forget the other. An
+unstated sender SHALL mean the hub speaking in its own voice, which is what an
+unattributed hub-originated message IS rather than a value to be guessed at. A provenance
+tag MAY remain in the rendered text where a reader wants it, but it SHALL NOT be the
+mechanism.
+
+There SHALL be ONE delivery path. A second way to write a message — a sender reaching the
+mailbox directly because the shared path could not carry what it needed — is how the two
+come to disagree about what a sender is.
+
+#### Scenario: A verdict from a reviewer
+
+- **WHEN** a reviewer's rejection is delivered to the agent that submitted it
+- **THEN** the message records that reviewer as its sender, whatever its text says
+
+#### Scenario: A body that quotes a tag
+
+- **WHEN** a message from an agent contains a provenance tag in its own text
+- **THEN** the recorded sender is the agent, not the tag
+
+#### Scenario: The user has no session
+
+- **WHEN** a message is delivered to the user
+- **THEN** no push is attempted, because their mailbox is the channel — not a delivery that
+  failed but one that does not exist
+
 ### Requirement: An agent may write to the user, against a budget
 
 The user SHALL be a mail recipient like any agent, addressed by the same name that stamps a

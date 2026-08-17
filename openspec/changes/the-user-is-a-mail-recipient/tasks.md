@@ -1,5 +1,16 @@
 # Tasks
 
+## 0. The sender is stated (sd-bc3a1f)
+
+- [x] 0.1 `Delivery` carries the sender, so a call site states how a message travels and who it is from
+      in one argument — no adjacent name strings to transpose.
+- [x] 0.2 `senderOf` (the "[user] " sniff) is gone; an unstated sender means the hub.
+- [x] 0.3 The senders that are not the hub are named where they are sent: a reviewer's or the user's
+      rejection (`who`), a scrapped PR, an amended review.
+- [x] 0.4 `fyi` and `MailAgent` go through the one delivery path rather than writing to the store, so
+      an agent's name reaches `Mail.Sender` — the third of the four, previously unreachable.
+- [x] 0.5 A push to the USER is never attempted: their mailbox is the channel.
+
 ## 1. The user as a recipient
 
 - [x] 1.1 `api.Mail.Agent` may name the user, using the same spelling that stamps a message from them.
@@ -76,4 +87,6 @@
 - [x] 6.9 A reviewer is granted by being given a review, and can send; a coauthor is not offered the
       verb at all; the refusal says nothing false to an agent that has never claimed.
 - [x] 6.10 The user's share and the mailbox's own tallies move independently, from one pass.
-- [x] 6.11 `make verify` passes.
+- [x] 6.11 All four senders are recorded, a tagged body does not decide, `From` does not mutate the
+      shared classifications, and a real rejection carries its author.
+- [x] 6.12 `make verify` passes.

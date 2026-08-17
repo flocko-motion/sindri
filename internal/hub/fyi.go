@@ -79,7 +79,9 @@ func (h *Hub) cmdFyi(c registry.Caller, args []string, out io.Writer) (int, erro
 		fmt.Fprintln(out, workflow.ReplyFyiFleetFull(fleetNotesPerHour, fleetNoteWindow))
 		return 1, nil
 	}
-	if _, err := ps.AddMail(api.SenderUser, c.Agent, msg, false); err != nil {
+	// Through the one delivery path, with the agent as an explicit sender — which is the third of the
+	// four senders Mail.Sender documents, and was unreachable while provenance was sniffed from text.
+	if err := h.Deliver(c.Project, api.SenderUser, msg, workflow.MailOnly.From(c.Agent)); err != nil {
 		return 1, err
 	}
 	if err := ps.SetNotesLeft(c.Agent, left-1); err != nil {

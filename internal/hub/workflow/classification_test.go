@@ -119,14 +119,19 @@ func TestARejectionIsMailedAndTheNudgeIsNot(t *testing.T) {
 	if err := e.RejectPR("proj", "pr-1", "needs another pass"); err != nil {
 		t.Fatalf("reject: %v", err)
 	}
-	if len(deps.delivered) != 1 || deps.delivered[0] != MailAndPush {
+	if len(deps.delivered) != 1 || !deps.delivered[0].Mail || !deps.delivered[0].Push {
 		t.Fatalf("a rejection must be mailed and pushed, got %+v", deps.delivered)
+	}
+	// And it says who rejected it, which is the half sd-bc3a1f added: an agent weights a message by
+	// its sender, and "the hub" would be a worse answer than the truth.
+	if deps.delivered[0].Sender == "" {
+		t.Error("a rejection should name its author as the sender")
 	}
 
 	if !e.NudgeStalled("proj", "bombur", "idle", StallDwell+time.Minute) {
 		t.Fatal("a rejected worker gone quiet past the dwell should be nudged")
 	}
-	if len(deps.delivered) != 2 || deps.delivered[1] != PushOnly {
+	if len(deps.delivered) != 2 || deps.delivered[1].Mail || !deps.delivered[1].Push {
 		t.Fatalf("a stall nudge must be push-only, got %+v", deps.delivered)
 	}
 }
