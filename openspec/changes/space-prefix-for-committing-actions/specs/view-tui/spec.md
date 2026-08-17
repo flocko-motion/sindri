@@ -37,6 +37,9 @@ keystroke does, rather than from the letter's case: the same letter may navigate
 tab and commit on another. Case SHALL be documented as a hint only, since uppercase
 letters exist on both sides of the line.
 
+The same key with the same label SHALL be classified the same way everywhere: it is one
+action, and classifying it twice makes it inert on one tab and live on another.
+
 The footer SHALL advertise the navigating keys and one entry for the prefix, naming it
 readably rather than as a blank, and SHALL say when the selected row offers nothing.
 
@@ -69,6 +72,11 @@ readably rather than as a blank, and SHALL say when the selected row offers noth
 
 - **WHEN** the user presses a key whose action is to open a form or a picker
 - **THEN** it opens directly, with no prefix, whatever case the letter has
+
+#### Scenario: One action, one classification
+
+- **WHEN** a key with the same label appears on more than one tab
+- **THEN** it commits on all of them or none, since it is the same action
 
 #### Scenario: A key that opens a confirmation
 

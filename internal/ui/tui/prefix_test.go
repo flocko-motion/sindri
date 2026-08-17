@@ -138,3 +138,32 @@ func TestNothingLowercaseCommits(t *testing.T) {
 		}
 	}
 }
+
+// TestOneActionIsClassifiedOnce is the guard the E slip walked past: whether a key commits may
+// differ BETWEEN tabs, because the action does — A approves a PR and opens a member picker on the
+// Meeting tab — but the same key with the same label is the same action, and it cannot navigate on
+// one tab and commit on another. E "config" opened the same prefilled form on both, and was direct
+// globally while inert-until-the-menu on Repos: one key, one implementation, two answers.
+func TestOneActionIsClassifiedOnce(t *testing.T) {
+	m := newModel(nil, nil, "/r/one")
+	seen := map[string]struct {
+		commits bool
+		scope   keyScope
+	}{}
+	for _, b := range keymap {
+		id := b.keys + "\x00" + b.label(m)
+		first, ok := seen[id]
+		if !ok {
+			seen[id] = struct {
+				commits bool
+				scope   keyScope
+			}{b.commits, b.scope}
+			continue
+		}
+		if first.commits != b.commits {
+			t.Errorf("%q (%s) commits=%v in scope %d but commits=%v in scope %d — same key and same "+
+				"label is the same action, so it cannot be both",
+				b.keys, b.label(m), first.commits, first.scope, b.commits, b.scope)
+		}
+	}
+}

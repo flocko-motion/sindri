@@ -177,7 +177,7 @@ var keymap = []binding{
 	// Repos.
 	{keys: "enter", label: lbl("switch"), scope: scopeRepos},
 	{keys: keyColor, label: lbl("colour"), scope: scopeRepos},
-	{keys: keyConfig, label: lbl("config"), scope: scopeRepos, commits: true},
+	{keys: keyConfig, label: lbl("config"), scope: scopeRepos},
 	{keys: keyDelete, label: lbl("forget"), scope: scopeRepos, commits: true},
 
 	// Mail: look only — the mailbox is the agent's to read, and the user's part is finding a message.

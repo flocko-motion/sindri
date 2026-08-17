@@ -18,7 +18,9 @@
 - [x] 3.2 The line follows what the keystroke does, not the letter's case: every form-or-picker
       opener stays direct (e, i, t, c, o, a — and N, O, P, E, B, I), and a confirm counts as part of
       the commit, so D, M, B-rebuild and clear-context stay behind the prefix.
-- [x] 3.3 Decided per binding and per tab, since the same letter differs between them.
+- [x] 3.3 Decided per binding and per tab, since the same letter differs between them — but the
+      same key with the same LABEL is one action, and a test now refuses to let it be classified
+      two ways. E "config" opens the same form on both its tabs and was committing on one.
 
 ## 4. The footer
 
