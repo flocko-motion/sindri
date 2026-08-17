@@ -48,11 +48,8 @@ func (s *Service) inject(project, name, text string, guard bool) error {
 	return nil
 }
 
-// InjectWhenReady waits (briefly) for an agent's tmux session, then injects — for a message sent right
-// after a launch, when the session may not be up yet. A message that never lands is recorded.
-//
-// It ERRORS when nothing was injected. Logging the skip used to be the whole answer, so a message
-// nobody could receive read as delivered — and a mail row's "pushed" is read from this outcome.
+// InjectWhenReady waits (briefly) for the tmux session, then injects. It ERRORS when nothing was
+// injected — logging the skip used to read as delivered, and a mail row's "pushed" reads this outcome.
 func (s *Service) InjectWhenReady(project, name, text string) error {
 	return s.injectWhenReady(project, name, text, true)
 }
@@ -94,11 +91,8 @@ func (s *Service) Interrupt(project, name string) error {
 
 // Tell delivers a source-stamped message (provenance, D12), recording the line in the activity log.
 // signedOut is the sender's answer to a signed-out pane (api.SignedOutRefuse / Restart / Send): the
-// default refuses, and the other two exist because the person typing may know the pane is stale.
-//
-// PUSH-ONLY, decided rather than omitted (-> workflow.Delivery): it is synchronous, so a message that
-// cannot land is reported to whoever typed it rather than lost, and conversational steering must not
-// accumulate in a mailbox that is never pruned.
+// default refuses, the other two because the person typing may know the pane is stale. PUSH-ONLY by
+// decision, not omission (-> workflow.Delivery): synchronous, so a failure reaches whoever typed it.
 func (s *Service) Tell(project, name, msg, source, signedOut string) error {
 	ps := s.store.For(project)
 	if _, ok, err := ps.GetAgent(name); err != nil {
