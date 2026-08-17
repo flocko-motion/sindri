@@ -350,11 +350,13 @@ func (c *HTTP) PRInfo(id string) (api.PRDetail, error) {
 	return d, c.get("/pr?id="+url.QueryEscape(id), &d)
 }
 
-// NextTask explains what would be assigned next and why every other open task would not be. agent
-// may be empty to ask about the backlog alone.
-func (c *HTTP) NextTask(agent string) (api.NextExplain, error) {
+// NextTask explains what would be handed out next and why nothing else would be. Ask about an
+// agent, or about a role as a hypothetical agent of it holding nothing (a reviewer's answer is
+// PRs, being the pool it is served from); both together are refused, and both empty is the
+// backlog question a worker would be asked.
+func (c *HTTP) NextTask(agent, role string) (api.NextExplain, error) {
 	var x api.NextExplain
-	return x, c.get("/task/next?agent="+url.QueryEscape(agent), &x)
+	return x, c.get("/task/next?agent="+url.QueryEscape(agent)+"&role="+url.QueryEscape(role), &x)
 }
 
 // RejectPR rejects a PR with feedback, routed to the owning worker.

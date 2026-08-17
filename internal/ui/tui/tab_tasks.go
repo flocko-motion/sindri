@@ -487,16 +487,17 @@ func (m *model) openBriefChoice(taskID string) {
 	}
 }
 
-// whyNextCmd asks the hub what it would assign next and why nothing else, shown as a notice — the
-// same account `sindri task next` prints, since the reasoning is the hub's and neither front-end
-// gets to have its own version of it.
-func (m *model) whyNextCmd() tea.Cmd {
+// whyNextCmd asks the hub what it would hand out next to an agent of role, and why nothing else,
+// shown as a notice — the same account the CLI prints, since the reasoning is the hub's and neither
+// front-end gets to have its own version of it. The role is the tab's: the Tasks tab asks the
+// backlog question, the PRs tab the reviewer's, each about the pool it is showing.
+func (m *model) whyNextCmd(role string) tea.Cmd {
 	cl := m.cl
 	if cl == nil {
 		return nil
 	}
 	return func() tea.Msg {
-		x, err := cl.NextTask("")
+		x, err := cl.NextTask("", role)
 		if err != nil {
 			return taskOpDoneMsg{err: err}
 		}

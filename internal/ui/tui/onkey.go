@@ -403,9 +403,14 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.tab == 0 && m.selID() != "" {
 			return m.unassignTaskCmd(m.selID())
 		}
-	case keyWhyNext: // tasks: what the assigner would hand out next, and why not everything else
+	case keyWhyNext: // what would be handed out next from THIS tab's pool, and why not the rest
 		if m.tab == 0 {
-			return m.whyNextCmd()
+			return m.whyNextCmd("worker")
+		}
+		if m.tab == 2 {
+			// The same question about the pool this tab shows: a reviewer is served PRs, and the
+			// states listed are the ones that let one sit unreviewed while a reviewer idled.
+			return m.whyNextCmd("reviewer")
 		}
 	case keyClose: // tasks: close the task · agents: clear a full context · meeting: close the meeting
 		if m.tab == 0 && m.selID() != "" {

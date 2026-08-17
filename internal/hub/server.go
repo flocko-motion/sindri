@@ -385,7 +385,7 @@ func (h *Hub) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /task/next", func(w http.ResponseWriter, r *http.Request) {
 		name := r.URL.Query().Get("agent")
-		x, err := h.wf.ExplainNext(h.agentReq(r, name), name)
+		x, err := h.wf.ExplainNext(h.agentReq(r, name), name, r.URL.Query().Get("role"))
 		writeJSON(w, x, err)
 	})
 	mux.HandleFunc("POST /tasks", func(w http.ResponseWriter, r *http.Request) {

@@ -12,13 +12,44 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// ExplainNext reports what agent would be handed next and where every other open task stands. The
-// claimable set comes from OpenLeaves and OpenContainers themselves — a second opinion about who is
-// eligible is exactly the drift this exists to expose. agent may be empty to ask about the backlog
-// alone.
-func (e *Engine) ExplainNext(project, agent string) (api.NextExplain, error) {
+// ExplainNext reports what would be handed out next and where everything else stands, each answer
+// from the POOL the assignment itself reads — the open tasks for a worker, the unclaimed reviews
+// for a reviewer — since a second opinion about eligibility is the drift this exists to expose.
+// It answers for an agent, whose own state can rule everything out, or for a ROLE as a hypothetical
+// agent of it holding nothing. Both at once is refused: an agent has a role, so they can contradict.
+func (e *Engine) ExplainNext(project, agent, role string) (api.NextExplain, error) {
 	ps := e.store.For(project)
-	out := api.NextExplain{Agent: agent}
+	if agent != "" && role != "" {
+		return api.NextExplain{}, fmt.Errorf("ask about an agent or about a role, not both: %s has a role of its own", agent)
+	}
+	if agent != "" {
+		// An agent brings its own role, so the answer suits the pool it is served from. One the
+		// roster never heard of falls through to the backlog question: this reports, it does not gate.
+		if a, ok, err := ps.GetAgent(agent); err != nil {
+			return api.NextExplain{}, err
+		} else if ok {
+			role = a.Role
+		}
+	}
+	if role == "" {
+		role = "worker" // the backlog question, which is what an unqualified ask has always meant
+	}
+	out := api.NextExplain{Agent: agent, Role: role}
+	switch role {
+	case "worker":
+	case "reviewer":
+		return e.explainReview(project, agent, out)
+	case "planner":
+		out.RoleNote = "a planner is not served from the backlog: it is briefed, with " +
+			"`sindri agent plan <name> <what to plan>` (or B on the Tasks tab), and works that up into a proposal"
+		return out, nil
+	case "coauthor":
+		out.RoleNote = "a coauthor takes no queued work: it shares your checkout and does what you " +
+			"tell it, with `sindri agent tell <name> \"…\"`"
+		return out, nil
+	default:
+		return api.NextExplain{}, fmt.Errorf("unknown role %q (worker|reviewer|planner|coauthor)", role)
+	}
 	if agent != "" {
 		out.AgentNote = e.agentBlocked(ps, project, agent)
 	}
@@ -153,4 +184,61 @@ func allChildrenGated(all []store.Task, id string) bool {
 		}
 	}
 	return any
+}
+
+// explainReview is the reviewer's answer: the review that would be picked up, from the same
+// UnclaimedReview query reviewDirective hands out from, and why each other PR would not be — the
+// states that let one sit unreviewed while a reviewer idled (-> sd-98fa96).
+func (e *Engine) explainReview(project, agent string, out api.NextExplain) (api.NextExplain, error) {
+	ps := e.store.For(project)
+	if agent != "" {
+		if held, err := ps.ReviewingPR(agent); err != nil {
+			return out, err
+		} else if held != "" {
+			out.AgentNote = "holds the review of " + held
+		}
+	}
+	prs, err := ps.PRs()
+	if err != nil {
+		return out, err
+	}
+	live, err := ps.LiveReviewPRs()
+	if err != nil {
+		return out, err
+	}
+	claimed, err := ps.ActiveReviewers()
+	if err != nil {
+		return out, err
+	}
+	var pickID string
+	var id int64
+	if found, ferr := ps.UnclaimedReview(&id, &pickID); ferr != nil {
+		return out, ferr
+	} else if !found {
+		pickID = ""
+	}
+	for _, p := range prs {
+		if !api.PROpen(p) {
+			continue // merged or scrapped: off the board, not an unanswered question
+		}
+		r := api.PRReason{ID: p.ID, Task: p.Task, Title: e.taskTitle(project, p.Task)}
+		switch {
+		case p.Status != "open":
+			r.Why, r.Note = api.ReviewSettled, p.Status+" — `sindri pr merge "+p.ID+"`"
+		case claimed[p.ID] != "":
+			r.Why, r.Note = api.ReviewInHand, claimed[p.ID]+" has it"
+		case live[p.ID]:
+			r.Why = api.ReviewWaiting
+		case p.Kind == "interim":
+			r.Why, r.Note = api.ReviewInterim, "`sindri pr merge "+p.ID+"` when you want it in"
+		default:
+			r.Why, r.Note = api.ReviewUnrequested, "`sindri pr review "+p.ID+"`"
+		}
+		if p.ID == pickID && out.AgentNote == "" {
+			pick := r
+			out.PickPR = &pick
+		}
+		out.PRs = append(out.PRs, r)
+	}
+	return out, nil
 }

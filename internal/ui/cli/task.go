@@ -62,16 +62,28 @@ func taskCommentCmd() *cobra.Command {
 	}
 }
 
-// taskNextCmd answers "why is nothing being assigned" without anyone reading the queries: what an
-// agent would be handed, and where every other open task stands.
+// taskNextCmd answers "why is nothing being assigned" without anyone reading the queries: what
+// would be handed out, and where every other open task stands. --role asks it of a role nobody is
+// running yet — "would a second worker have anything to pick up" — which otherwise took starting one.
 func taskNextCmd() *cobra.Command {
-	var agent string
+	var agent, role string
 	c := &cobra.Command{
 		Use: "next", Short: "Show what would be assigned next, and why each open task would not be",
+		Long: "Show what would be assigned next, and why each open task would not be.\n\n" +
+			"--agent asks on behalf of an agent that exists, whose own state can rule everything out.\n" +
+			"--role asks as a hypothetical agent of that role holding nothing, which is how to find out\n" +
+			"whether starting one would give it anything to do. The two cannot be combined: an agent\n" +
+			"already has a role, so passing both states two things that can contradict.\n\n" +
+			"A reviewer is served PRs rather than tasks, so its answer lives under `sindri pr next`.",
 		Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
+			if role == "reviewer" {
+				// Answered rather than refused blankly: the noun is the point. A reviewer's pool is
+				// PRs, and a command called `task next` has no business claiming otherwise.
+				return fmt.Errorf("a reviewer is offered PRs, not tasks — ask `sindri pr next`")
+			}
 			return withBackend(func(b backend) error {
-				x, err := b.NextTask(agent)
+				x, err := b.NextTask(agent, role)
 				if err != nil {
 					return err
 				}
@@ -81,6 +93,8 @@ func taskNextCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&agent, "agent", "", "ask on behalf of this agent (its own state can rule everything out)")
+	c.Flags().StringVar(&role, "role", "", "ask as a hypothetical agent of this role: worker|planner|coauthor (a reviewer: `sindri pr next`)")
+	c.MarkFlagsMutuallyExclusive("agent", "role")
 	return c
 }
 

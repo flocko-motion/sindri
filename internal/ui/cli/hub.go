@@ -67,7 +67,7 @@ type backend interface {
 	RejectTask(id, comment string) error
 	AddTaskComment(id, body string) error
 	RefreshTaskComments(id string) error
-	NextTask(agent string) (api.NextExplain, error)
+	NextTask(agent, role string) (api.NextExplain, error)
 	UnassignTask(id string) error
 	CloseTask(id string) error
 	ReopenTask(id, reason string) error
@@ -233,7 +233,43 @@ func NewAgentCmd() *cobra.Command {
 // NewPrCmd builds the `pr` command tree (review/merge pull requests).
 func NewPrCmd() *cobra.Command {
 	c := &cobra.Command{Use: "pr", Short: "Inspect and merge pull requests (merge-intents)"}
-	c.AddCommand(prListCmd(), prInfoCmd(), prReviewCmd(), prVerifyCmd(), prApproveCmd(), prRejectCmd(), prScrapCmd(), prLintCmd(), prMergeCmd(), prMilestoneCmd())
+	c.AddCommand(prListCmd(), prNextCmd(), prInfoCmd(), prReviewCmd(), prVerifyCmd(), prApproveCmd(), prRejectCmd(), prScrapCmd(), prLintCmd(), prMergeCmd(), prMilestoneCmd())
+	return c
+}
+
+// prNextCmd is `task next` for the reviewer's pool, which is PRs — hence its home here, since a
+// task noun answering with a PR would lie. It answers with no reviewer running.
+func prNextCmd() *cobra.Command {
+	var agent, role string
+	c := &cobra.Command{
+		Use: "next", Short: "Show which PR a reviewer would pick up next, and why each other PR would not be reviewed",
+		Long: "Show which PR a reviewer would pick up next, and why each other open PR would not be.\n\n" +
+			"Answers for a hypothetical reviewer holding nothing, so it works with no reviewer running.\n" +
+			"--agent asks on behalf of one that exists, whose own held review can rule everything out.\n\n" +
+			"The states listed here are the ones that let a PR sit unreviewed while a reviewer idled:\n" +
+			"no review was requested, one is already claimed, the PR has left \"open\", or it is an\n" +
+			"interim milestone that was always yours to merge.",
+		Args: cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			if role != "" && role != "reviewer" {
+				return fmt.Errorf("only a reviewer is served PRs — for %s ask `sindri task next --role %s`", role, role)
+			}
+			return withBackend(func(b backend) error {
+				if agent == "" {
+					role = "reviewer" // the hypothetical; a named agent brings its own role
+				}
+				x, err := b.NextTask(agent, role)
+				if err != nil {
+					return err
+				}
+				fmt.Print(theme.FormatNext(x))
+				return nil
+			})
+		},
+	}
+	c.Flags().StringVar(&agent, "agent", "", "ask on behalf of this reviewer (its own held review can rule everything out)")
+	c.Flags().StringVar(&role, "role", "", "the role to ask as; only `reviewer` is served PRs")
+	c.MarkFlagsMutuallyExclusive("agent", "role")
 	return c
 }
 

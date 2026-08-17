@@ -132,6 +132,7 @@ var keymap = []binding{
 	{keys: keyApprove, label: lbl("approve"), scope: scopeTasks, commits: true, when: taskAwaitsVerdict},
 	{keys: keyReject, label: lbl("reject"), scope: scopeTasks, when: taskAwaitsVerdict},
 	{keys: keyWhyNext, label: lbl("why next"), scope: scopeTasks},
+	{keys: keyWhyNext, label: lbl("why no review"), scope: scopePRs},
 	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.filter) }, scope: scopeTasks},
 
 	// Agents.

@@ -38,7 +38,7 @@ func TestExplainNextNamesEveryReason(t *testing.T) {
 	}
 
 	e := New(st, &stubDeps{root: t.TempDir()})
-	x, err := e.ExplainNext("repo", "")
+	x, err := e.ExplainNext("repo", "", "")
 	if err != nil {
 		t.Fatalf("ExplainNext: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestExplainNextAnswersForAnAgent(t *testing.T) {
 	full := &stubDeps{root: t.TempDir(), ctxTokens: 900_000, ctxWindow: 1_000_000, ctxOK: true}
 	e := New(st, full)
 
-	x, err := e.ExplainNext("repo", "bombur")
+	x, err := e.ExplainNext("repo", "bombur", "")
 	if err != nil {
 		t.Fatalf("ExplainNext: %v", err)
 	}
