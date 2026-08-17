@@ -31,9 +31,21 @@
 - [x] 4.2 Rendered as "you" in both front-ends, and the target named beside it.
 - [x] 4.3 Nothing agent-shaped applies: no staleness check, no injected result.
 
-## 5. Pin it
+## 5. The tab explains itself
 
-- [x] 5.1 The default target, the named one, and the refusal for an agent that does not exist.
-- [x] 5.2 The queue order — user, then gate, then ordinary — and that it stays reprioritisable.
-- [x] 5.3 A user run is never stale, while an agent run whose agent is gone still is.
-- [x] 5.4 A user run injects nothing; an agent's still gets its summary.
+- [x] 5.1 A permanent line at the top of the Runs tab — always, not an empty state, since "why has
+      mine not started" is asked when the list is FULL.
+- [x] 5.2 It names what a run is, the one-at-a-time queue, and that the user and agents both queue
+      them — written to stay true now that user runs exist.
+- [x] 5.3 One line where there is room, wrapping to at most two, never truncated.
+- [x] 5.4 Its lines come out of the rows' space; the row area never collapses to nothing.
+- [x] 5.5 The empty state stays, distinct, where the rows would be.
+
+## 6. Pin it
+
+- [x] 6.1 The default target, the named one, and the refusal for an agent that does not exist.
+- [x] 6.2 The queue order — user, then gate, then ordinary — and that it stays reprioritisable.
+- [x] 6.3 A user run is never stale, while an agent run whose agent is gone still is.
+- [x] 6.4 A user run injects nothing; an agent's still gets its summary.
+- [x] 6.5 The note is present empty and full, wraps to at most two lines, leaves the rows visible on
+      a short terminal, and the empty state shows only when there is nothing queued.

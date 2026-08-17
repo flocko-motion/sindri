@@ -25,6 +25,8 @@ func (m *model) reclamp() {
 		listH = m.agentListHeight()
 	case 2:
 		listH = m.prListHeight()
+	case 5:
+		listH = m.runsPaneHeight() // the note's lines come out of the rows', not off the screen
 	}
 	m.list.SetHeight(listH)
 	m.list.SetTotal(n)
@@ -44,6 +46,8 @@ func (m *model) reclamp() {
 		m.detail.Resize(m.bodyHeight(), len(wrapped))
 	} else if m.tab == 1 { // Agents: right column wraps like PRs' meta column (agentsBody)
 		m.detail.Resize(m.bodyHeight(), len(wrapMeta(m.agentItems(), m.agentDetailWidth())))
+	} else if m.tab == 5 {
+		m.detail.Resize(m.runsPaneHeight(), len(m.detailLines()))
 	} else {
 		m.detail.Resize(m.bodyHeight(), len(m.detailLines()))
 	}

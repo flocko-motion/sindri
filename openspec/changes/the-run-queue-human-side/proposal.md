@@ -26,6 +26,13 @@ which is the uncoordinated concurrency the queue exists to prevent.
 - Both front-ends now also name the workspace a run executes against. A run is uninterpretable
   without it: the same command passes in one tree and fails in another.
 
+- The Runs tab carries a permanent line saying what a run is, that the queue is serial across every
+  repo, and that both the user and agents queue them. Permanent rather than an empty state: the
+  serial queue is the surprising part, and the question it prompts arrives when the list is full.
+  Its lines come out of the rows' space, so it costs rows rather than pushing them off the screen,
+  and the "(no runs)" empty state stays beneath it — the line says what runs are, not whether there
+  are any.
+
 ## The target decision
 
 Three candidates were on the table. Two are in:
@@ -49,6 +56,7 @@ its own piece of work, not a flag here.
 ## Impact
 
 - Specs: `hub` gains the requirement for the human side of the run queue.
+- Specs: `view-tui` gains the requirement for the tab's own explanation.
 - Code: `internal/api/run.go` (`RunFromUser`, `RunTarget`), `requests.go`, `hub/workflow/run.go`
   (`ScheduleUserRun`, the queue rank), `execrun.go`, `hub/server_runs.go` (new — the run routes,
   lifted out because `server.go` had grown past its limit), `client`, `ui/cli/run.go`, `ui/tui`.

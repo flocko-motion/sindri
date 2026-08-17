@@ -433,6 +433,8 @@ func (m model) View() string {
 		body = m.prBody()
 	} else if m.tab == 4 {
 		body = m.chatBody()
+	} else if m.tab == 5 {
+		body = m.runsBody() // its rows under a permanent line saying what a run is
 	} else if m.showDetail() {
 		left := pane(rowTexts(m.rows()), m.list, m.leftWidth(), m.cursor[m.tab])
 		dlines, dhl := m.wrappedDetail()

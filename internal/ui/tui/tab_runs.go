@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/ui/theme"
@@ -23,6 +24,54 @@ func runStatusLabel(r api.Run) string {
 		return fmt.Sprintf("queued(#%d)", r.Position)
 	}
 	return r.Status
+}
+
+// runsNoteText says what a run IS and who queues one. Permanent rather than an empty state: the
+// surprising part is the SERIAL queue, and "why is mine not starting" is asked when the list is
+// full, so a line that vanished once there were rows would hide itself exactly when it earns its
+// place. Wrapped, never truncated — a half-sentence explains nothing.
+const runsNoteText = "A run is a command executed in a fresh container against a copy of a " +
+	"workspace — ONE at a time across every repo. Press N to queue one; agents queue their own."
+
+// runsNote is the note wrapped to width: one line on a wide terminal, two on a narrow one.
+func (m model) runsNote(width int) []string {
+	return wrapContent([]string{dimStyle.Render(runsNoteText)}, max(20, width))
+}
+
+// runsBody is the Runs tab: the permanent note, then the ordinary list/detail split beneath it,
+// sized so the note costs rows rather than pushing them off the screen.
+func (m model) runsBody() string {
+	note := m.runsNote(m.w)
+	list := m.runsList(m.leftWidth())
+	if !m.showDetail() {
+		list = m.runsList(m.w)
+		return strings.Join(append(note, list), "\n")
+	}
+	dlines, dhl := m.wrappedDetail()
+	right := pane(dlines, m.detail, m.detailWidth(), dhl)
+	split := lipgloss.JoinHorizontal(lipgloss.Top, list, divider(m.runsPaneHeight()), right)
+	return strings.Join(append(note, split), "\n")
+}
+
+// runsPaneHeight is what is left for the rows once the note has its lines. At least one, so a
+// terminal too short for both still shows a run rather than only the sentence describing runs.
+func (m model) runsPaneHeight() int {
+	return max(1, m.bodyHeight()-len(m.runsNote(m.w)))
+}
+
+// runsList is the rows, or the empty state where the rows would be — "no runs" belongs in the list,
+// in the shape the other panes use for emptiness, so a tab with nothing queued does not read broken.
+func (m model) runsList(width int) string {
+	rows := m.rows()
+	if len(rows) == 0 {
+		lines := make([]string, m.runsPaneHeight())
+		lines[0] = padTrunc(dimStyle.Render("(no runs)"), width)
+		for i := 1; i < len(lines); i++ {
+			lines[i] = strings.Repeat(" ", width)
+		}
+		return strings.Join(lines, "\n")
+	}
+	return pane(rowTexts(rows), m.list, width, m.cursor[m.tab])
 }
 
 // runRequester names who asked for a run. A user's reads "you", not the bare sentinel: the column
