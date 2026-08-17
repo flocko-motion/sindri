@@ -142,6 +142,11 @@ func (h *Hub) registry() *registry.Registry {
 				}
 				return ""
 			}, Run: h.cmdResume},
+		// One short note to the user about something noticed in passing, against a budget the help
+		// states up front — known scarcity selects better than a cap discovered by hitting it.
+		registry.Command{Name: "fyi", Help: workflow.FyiHelp(workflow.NotesPerClaim),
+			HelpFor: func(c registry.Caller) string { return workflow.FyiHelp(c.NotesLeft) },
+			Run:     h.cmdFyi},
 		// Every role receives mail, so every role can read it. Never held back by an escalation: an
 		// escalated agent reading what it was told is how it learns the answer it is waiting for.
 		registry.Command{Name: "mail", Help: mailHelp, Run: h.cmdMail},
@@ -228,6 +233,7 @@ func (h *Hub) caller(project, name string) (registry.Caller, error) {
 		Phase:        st.Phase,
 		InChat:       inChat,
 		Escalation:   st.Escalation,
+		NotesLeft:    st.NotesLeft,
 	}, nil
 }
 

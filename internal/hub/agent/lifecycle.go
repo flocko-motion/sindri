@@ -24,6 +24,7 @@ import (
 
 	agentport "github.com/flo-at/sindri/internal/adapter/agent"
 	"github.com/flo-at/sindri/internal/adapter/git"
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agentchan"
@@ -100,6 +101,11 @@ func (s *Service) NewAgent(project, name, role, memory string) (string, error) {
 	}
 	if !nameRe.MatchString(name) {
 		return "", fmt.Errorf("invalid agent name %q (use lowercase letters, digits, - _)", name)
+	}
+	// "user" names the human's own mailbox, so an agent called that would share one with the person it
+	// reports to, and no row would tell them apart.
+	if name == api.SenderUser {
+		return "", fmt.Errorf("%q is reserved: it names the user as a mail recipient, so no agent may take it", name)
 	}
 	if role != "worker" && role != "reviewer" && role != "planner" && role != "coauthor" {
 		return "", fmt.Errorf("invalid role %q (worker|reviewer|planner|coauthor)", role)

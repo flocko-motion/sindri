@@ -152,6 +152,19 @@ func (s *Store) MailTallies() (total, unread int, byProject map[string]int, err 
 	return total, unread, byProject, rows.Err()
 }
 
+// NotesToUserSince counts what the whole fleet has sent the user since t — the fleet-wide ceiling's
+// only input. Counted over the mailbox rather than a running tally, so there is nothing to drift: the
+// rows are the record, and a rolling window has no cliff for a queue to build against.
+func (s *Store) NotesToUserSince(t time.Time) (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM mail WHERE agent=? AND sent_at >= ?`,
+		api.SenderUser, t.UTC().Format(time.RFC3339)).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("notes to the user since %s: %w", t, err)
+	}
+	return n, nil
+}
+
 // MailByID returns one message with its FULL body, from any project — what the detail view and
 // `mail show` read, since the fleet list carries only a preview of each body.
 func (s *Store) MailByID(id int64) (Mail, bool, error) {

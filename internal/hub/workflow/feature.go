@@ -254,6 +254,10 @@ func (e *Engine) startSubtask(project, agent, container string, child store.Task
 		return err
 	}
 	_ = e.RefreshTask(project, child.ID)
+	// Each subtask is a claim, so each grants the note budget afresh (-> store.GrantNotes).
+	if err := ps.GrantNotes(agent, NotesPerClaim); err != nil {
+		return err
+	}
 	if err := ps.SetState(store.AgentState{
 		Agent: agent, Container: container, Branch: container, Task: child.ID, Phase: "working",
 	}); err != nil {

@@ -648,6 +648,11 @@ func (e *Engine) claimLeaf(project, worker string, t store.Task) (string, bool, 
 	if err := git.CreateBranch(wt, branch, base); err != nil {
 		return "", false, err
 	}
+	// A claim is what earns the right to speak to the user, so the note grant is given here and
+	// REPLACES whatever was left (-> store.GrantNotes).
+	if err := ps.GrantNotes(worker, NotesPerClaim); err != nil {
+		return "", false, err
+	}
 	if err := ps.SetState(store.AgentState{Agent: worker, Task: t.ID, Branch: branch, Phase: "working"}); err != nil {
 		return "", false, err
 	}

@@ -224,6 +224,13 @@ As a worker:
   Never guess at any of that, and never hand-write a script to do it.
 - ` + "`sindri lint`" + ` runs the quality gate on your workspace — use it to
   self-check and fix failures before submitting.
+- Something you noticed IN PASSING, with no home on this task or PR — the sort of thing
+  nobody will ever learn if you stay quiet — goes to the user with
+  ` + "`sindri fyi \"<one short line>\"`" + `. The test is: if you say nothing, does this
+  fact disappear? If not, don't send. It is NOT for "I finished X" (the PR says that), not
+  a summary, not a question or a blocker (that is ` + "`sindri escalate`" + `), and not
+  something about the task in hand (that is ` + "`sindri comment`" + `). You get two per
+  claim, and the fleet shares an hourly ceiling, so spend them on what only you saw.
 - A finding worth the next reader knowing — the task body is wrong, you hit a
   blocker, you made a call worth recording — goes ON THE TASK:
   ` + "`sindri comment \"<text>\"`" + ` — no id, it goes on what you're working

@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS agent_state (
   -- The question an agent stopped on, waiting for the user to decide it ('' = not escalated). Written
   -- only by SetEscalation/ClearEscalation, never by SetState (-> SetState).
   escalation TEXT NOT NULL DEFAULT '',
+  -- Notes to the user this agent may still send on its current claim (-> GrantNotes). Written only by
+  -- GrantNotes/SetNotesLeft, never by SetState, for the same reason the escalation is not.
+  notes_left INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (project, agent)
 );
 CREATE TABLE IF NOT EXISTS prs (
@@ -164,6 +167,9 @@ type AgentState struct {
 	Branch    string `json:"branch"`
 	Phase     string `json:"phase"`
 	Container string `json:"container,omitempty"`
+	// NotesLeft is how many notes to the user this agent may still send on its current claim. Here
+	// rather than derived, because the grant is per CLAIM and replaces (-> GrantNotes).
+	NotesLeft int `json:"notesLeft,omitempty"`
 	// Escalation is the question the agent stopped on, waiting for the user to decide it ('' = not
 	// escalated). It rides here so every reader of the state has it — the command surface, the board,
 	// the directive — but it is NOT part of what SetState writes (-> SetState).
@@ -181,8 +187,8 @@ type PR = api.PR
 // GetState returns an agent's workflow state in this project (zero value if none).
 func (p *ProjectStore) GetState(agent string) (AgentState, error) {
 	st := AgentState{Agent: agent, Phase: "idle"}
-	row := p.s.db.QueryRow(`SELECT task,branch,phase,container,escalation FROM agent_state WHERE project=? AND agent=?`, p.project, agent)
-	err := row.Scan(&st.Task, &st.Branch, &st.Phase, &st.Container, &st.Escalation)
+	row := p.s.db.QueryRow(`SELECT task,branch,phase,container,escalation,notes_left FROM agent_state WHERE project=? AND agent=?`, p.project, agent)
+	err := row.Scan(&st.Task, &st.Branch, &st.Phase, &st.Container, &st.Escalation, &st.NotesLeft)
 	if err == sql.ErrNoRows {
 		return st, nil
 	}
@@ -223,6 +229,44 @@ func (p *ProjectStore) SetEscalation(agent, question string) error {
 		return fmt.Errorf("set escalation %s: %w", agent, err)
 	}
 	return nil
+}
+
+// GrantNotes gives an agent its note budget for a claim. It REPLACES rather than adds: finishing a
+// claim with two unspent and starting the next at four is what turns any quota into an occasional
+// flood. Called where a claim is made, so the right to speak follows having been somewhere and looked.
+func (p *ProjectStore) GrantNotes(agent string, n int) error {
+	_, err := p.s.db.Exec(`
+		INSERT INTO agent_state (project,agent,notes_left) VALUES (?,?,?)
+		ON CONFLICT(project,agent) DO UPDATE SET notes_left=excluded.notes_left`, p.project, agent, n)
+	if err != nil {
+		return fmt.Errorf("grant notes to %s: %w", agent, err)
+	}
+	return nil
+}
+
+// SetNotesLeft records what an agent has left after spending one.
+func (p *ProjectStore) SetNotesLeft(agent string, n int) error {
+	_, err := p.s.db.Exec(`UPDATE agent_state SET notes_left=? WHERE project=? AND agent=?`, n, p.project, agent)
+	if err != nil {
+		return fmt.Errorf("set notes left for %s: %w", agent, err)
+	}
+	return nil
+}
+
+// NotesLeft is how many notes an agent may still send on this claim. An agent with no state row has
+// never claimed anything, so it has nothing granted — the budget fails CLOSED, which is the safe
+// direction for a limit whose purpose is protecting one person's attention.
+func (p *ProjectStore) NotesLeft(agent string) (int, error) {
+	var n int
+	err := p.s.db.QueryRow(`SELECT notes_left FROM agent_state WHERE project=? AND agent=?`,
+		p.project, agent).Scan(&n)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("notes left for %s: %w", agent, err)
+	}
+	return n, nil
 }
 
 // ClearEscalation releases an escalated agent, whoever asked for it — the agent itself once it has
