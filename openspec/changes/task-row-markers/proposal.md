@@ -29,13 +29,20 @@ front-ends already read, and the markers belong there.
   That is the accepted outcome: there is no way to ask a terminal whether it has a glyph, so a
   detected fallback would be a guess, and the width agreement is what makes the guess unnecessary.
 
+The task detail gains the agent behind the task, and keeps naming one while the PR waits on a
+verdict — the case a reader most often opens a task in. The row marker, that field and
+`sindri task info` read one rule, rather than the three lookups that agreed until one was edited.
+The NAME stays out of the row: the marker column is padded so every title starts in the same place,
+and a name is as long as it happens to be.
+
 ## Impact
 
 - Specs: `view-tui` (one shared marker set, one cell each, widths derived).
-- Code: `internal/ui/theme/glyph.go` (new), `internal/ui/tui/tab_tasks.go`,
-  `internal/ui/tui/tab_agents.go`, `internal/ui/tui/tab_prs.go`, `internal/ui/cli/agent.go`,
-  `internal/ui/cli/hub.go`.
-- The PR pair stays ◆/◇ here: the shapes carry the final-versus-interim distinction, and the
-  pull-request icon that replaces them belongs to the sibling task working the same column.
+- Code: `internal/ui/theme/glyph.go` and `internal/api/taskagent.go` (new),
+  `internal/ui/tui/tab_tasks.go`, `internal/ui/tui/tab_agents.go`, `internal/ui/tui/tab_prs.go`,
+  `internal/ui/cli/agent.go`, `internal/ui/cli/hub.go`, `internal/ui/cli/task.go`.
+- The PR pair becomes the pull-request icon and its draft form, which carries the distinction the
+  diamonds only gestured at: ◆ against ◇ says "some difference" and leaves the reader to learn
+  which is which.
 - `TestGlyphsCountAsTerminalsDrawThem` asserted the old two-cell emoji and now holds the new
   invariant — one cell per marker, which is the property the icons were chosen for.

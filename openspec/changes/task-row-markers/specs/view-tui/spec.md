@@ -35,3 +35,32 @@ in the header strip among them — SHALL stay plain.
 
 - **WHEN** the reader's terminal has no patched font
 - **THEN** the missing icons draw as boxes in their own column and every other column stays aligned
+
+### Requirement: A task names the agent behind it
+
+A task's detail SHALL name the agent behind it, in both front-ends, and SHALL keep naming one while
+its pull request waits on a verdict — a submitted task still has an owner, and who submitted it is
+what a reader opens it to find out.
+
+The name and the row's worked-on marker SHALL come from one rule, so a marked row always has a name
+behind it: the agent holding the task, the agent holding it as a feature container, and failing
+either, the author of its open PR. A live claim SHALL outrank a PR, since an agent put back on a
+rejected task is working it again while the PR it was rejected from is still on the board.
+
+The row itself SHALL carry the marker rather than the name: the marker column is padded to keep
+every title starting at the same place, and a name is as long as it happens to be.
+
+#### Scenario: A task under review
+
+- **WHEN** a task's PR is waiting on a verdict and no agent holds the task
+- **THEN** its detail names the agent that submitted it
+
+#### Scenario: The row and the detail agree
+
+- **WHEN** a row carries the worked-on marker
+- **THEN** that task's detail names an agent, and the same one in either front-end
+
+#### Scenario: Nobody is working it
+
+- **WHEN** no agent holds a task and it has no open PR
+- **THEN** the detail shows the field as empty rather than naming a past owner

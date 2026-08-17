@@ -7,13 +7,11 @@
 // belong to the front-end drawing it (which derives that width from these).
 package theme
 
-// The pictorial markers are Nerd Font icons, taken from the Font Awesome block every Nerd Font has
-// carried unchanged. A terminal without a patched font draws a box, which is accepted: the row
-// still aligns, because these live in the Private Use Area, and PUA carries no East Asian Width for
-// go-runewidth and the terminal to disagree over — both count one cell whether the glyph exists or
-// not. That makes them SAFER than the emoji they replaced, whose drawn width is exactly what
-// terminals argue about. Anything added here belongs to this block for the same reason: the
-// Material Design range, notably, is drawn double-width.
+// The pictorial markers are Nerd Font icons. A terminal without a patched font draws a box, which
+// is accepted: the row still aligns, because the Private Use Area carries no East Asian Width for
+// go-runewidth and the terminal to disagree over, and both count one cell whether the glyph exists
+// or not — SAFER than the emoji they replaced, whose drawn width is what terminals argue about. Add
+// only single-width icons: the Material Design range is drawn double and would undo that.
 const (
 	MarkAssigned = "\uf0ad" // nf-fa-wrench: a worker is on this task
 	MarkDialIn   = "\uf06e" // nf-fa-eye: humans attached to an agent's session
@@ -31,9 +29,10 @@ const MarkClearArmed = "␡"
 // rather than a picture.
 const MarkNeedsUser = "!"
 
-// The PR markers: filled for a final PR, hollow for an interim one. They are a PAIR — the shapes
-// carry the final-versus-interim distinction — so they only ever change together.
+// The PR markers, a PAIR because the distinction is load-bearing: merging a final PR closes its
+// task, while an interim one is a mid-task contribution that leaves the worker on it. The draft
+// icon says which is which, where ◆ against ◇ said only "some difference".
 const (
-	MarkPRFinal   = "◆"
-	MarkPRInterim = "◇"
+	MarkPRFinal   = "\uf407" // nf-oct-git_pull_request: the task's PR, whose merge ends it
+	MarkPRInterim = "\uf4dd" // nf-oct-git_pull_request_draft: a contribution mid-task
 )

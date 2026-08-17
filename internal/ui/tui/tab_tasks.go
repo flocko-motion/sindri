@@ -27,13 +27,9 @@ import (
 func (m model) taskRows() []row {
 	arranged := api.ArrangeTasks(api.FilterTasks(m.filter, m.state.Tasks), m.state.PRs)
 
-	// Which tasks have a worker on them right now (drives the worked-on marker).
-	assigned := map[string]bool{}
-	for _, a := range m.state.Agents {
-		if a.Task != "" {
-			assigned[a.Task] = true
-		}
-	}
+	// Who is behind each task (drives the worked-on marker). The same rule the detail pane names
+	// the agent by, so the mark and the name cannot contradict each other.
+	assigned := api.AgentsByTask(m.state.Agents, m.state.PRs)
 	// Hub-side approval per task (drives the row colour for planner proposals). A gate on a task
 	// that has ended is spent, and the state word below is the status's to give.
 	approval := map[string]string{}
@@ -104,7 +100,7 @@ func (m model) taskRows() []row {
 				// Age, right-aligned so the units line up under each other; the exact moment is in
 				// the detail pane, which is where a question about one task gets asked.
 				sc.Render(fmt.Sprintf("%4s", theme.Age(tr.CreatedAt))),
-				sc.Render(taskMarks(assigned[tr.ID], prMarkKind(tr))),
+				sc.Render(taskMarks(assigned[tr.ID] != "", prMarkKind(tr))),
 				sc.Render(tr.Title),
 			}, " "),
 			tr.ID,
@@ -281,12 +277,10 @@ func (m model) taskDetailFor(t api.Task, desc string) []string {
 
 // taskItemsFor builds the fields, the agent/PR/parent/url cross-references, then desc and comments.
 func (m model) taskItemsFor(t api.Task, desc string, comments []api.Comment) []metaItem {
-	assignee, pr := "", ""
-	for _, a := range m.state.Agents {
-		if a.Task == t.ID {
-			assignee = a.Name
-		}
-	}
+	// One rule for who is behind the task, shared with the row marker and the CLI: a live claim,
+	// else the author of the PR under review — a submitted task still has an owner, and that is
+	// the reader's question when they open one that is waiting on a verdict.
+	assignee, pr := api.AgentOnTask(m.state.Agents, m.state.PRs, t.ID), ""
 	for _, p := range m.state.PRs {
 		if p.Task == t.ID && p.Status != "merged" {
 			pr = p.ID

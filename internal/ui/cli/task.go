@@ -461,11 +461,19 @@ func taskInfoCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				// Who is behind it, by the rule the dashboard's detail pane and its row marker use,
+				// so the same task never names a different agent in the two front-ends. Read off the
+				// board, since a task carries no owner of its own: an agent holds it, or its PR does.
+				st, err := b.State()
+				if err != nil {
+					return err
+				}
+				agent := api.AgentOnTask(st.Agents, st.PRs, t.ID)
 				// The same fields the TUI pane and the agent's `task <id>` show: a front-end
 				// chooses layout, not which facts exist, or it answers a different question.
-				fmt.Printf("id:       %s\ntitle:    %s\nstatus:   %s\ntype:     %s\npriority: %s\nparent:   %s\napproval: %s\nlabels:   %s\nurl:      %s\n",
+				fmt.Printf("id:       %s\ntitle:    %s\nstatus:   %s\ntype:     %s\npriority: %s\nparent:   %s\nagent:    %s\napproval: %s\nlabels:   %s\nurl:      %s\n",
 					t.ID, t.Title, t.Status, dash(t.Type), theme.PriorityLabel(t.Priority),
-					dash(t.ParentID), dash(theme.ApprovalLabel(t.Approval)), dash(t.Labels), dash(t.URL))
+					dash(t.ParentID), dash(agent), dash(theme.ApprovalLabel(t.Approval)), dash(t.Labels), dash(t.URL))
 				// Exact, where the list rounds — and "changed" beside it, the field the active
 				// filter reads, so its "n/a" says why a mirrored task can be missing from that view.
 				fmt.Printf("created:  %s\nchanged:  %s\n", theme.When(t.CreatedAt), theme.When(t.UpdatedAt))
