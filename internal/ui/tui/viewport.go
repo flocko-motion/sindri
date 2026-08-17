@@ -37,6 +37,14 @@ func (m *model) reclamp() {
 	m.list.SetHeight(listH)
 	m.list.SetTotal(n)
 	m.list.SetCursor(m.cursor[m.tab])
+	// The detail pane's slot, chosen like the list's above it: full body height everywhere except
+	// Runs, whose permanent note takes its lines out of the panes beside it rather than off the
+	// screen (-> runsBody). Sized to the body there, it padded itself past its slot and the frame
+	// came out taller than the terminal, scrolling the header away.
+	detailH := m.bodyHeight()
+	if m.tab == 5 {
+		detailH = m.runsPaneHeight()
+	}
 	// Offset-driven scroll (J/K), preserved across re-layouts; reset to top only
 	// when the selection changes (syncDetail).
 	if m.tab == 2 { // PRs: detail pane is the big bottom-left content (any width)
@@ -49,13 +57,11 @@ func (m *model) reclamp() {
 		m.prMeta.Resize(m.bodyHeight(), len(lines))
 	} else if m.tab == 0 || m.tab == 3 || m.tab == 5 || m.tab == 6 { // generic detail pane: size to the WRAPPED count
 		wrapped, _ := wrapContentMapped(m.detailLines(), m.detailWidth())
-		m.detail.Resize(m.bodyHeight(), len(wrapped))
+		m.detail.Resize(detailH, len(wrapped))
 	} else if m.tab == 1 { // Agents: right column wraps like PRs' meta column (agentsBody)
-		m.detail.Resize(m.bodyHeight(), len(wrapMeta(m.agentItems(), m.agentDetailWidth())))
-	} else if m.tab == 5 {
-		m.detail.Resize(m.runsPaneHeight(), len(m.detailLines()))
+		m.detail.Resize(detailH, len(wrapMeta(m.agentItems(), m.agentDetailWidth())))
 	} else {
-		m.detail.Resize(m.bodyHeight(), len(m.detailLines()))
+		m.detail.Resize(detailH, len(m.detailLines()))
 	}
 }
 
