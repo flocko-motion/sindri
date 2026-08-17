@@ -15,12 +15,16 @@
 ## 3. The convention
 
 - [x] 3.1 Reworded to navigate/commit, with the exception clause removed rather than reworded.
-- [x] 3.2 Lowercase navigation untouched — e, i, t, c, o, a stay direct.
+- [x] 3.2 The line follows what the keystroke does, not the letter's case: every form-or-picker
+      opener stays direct (e, i, t, c, o, a — and N, O, P, E, B, I), and a confirm counts as part of
+      the commit, so D, M, B-rebuild and clear-context stay behind the prefix.
+- [x] 3.3 Decided per binding and per tab, since the same letter differs between them.
 
 ## 4. The footer
 
-- [x] 4.1 Navigation plus one entry, named readably ("space"), which is the room the movement keys
-      need.
+- [x] 4.1 The navigating keys plus one entry, named readably ("space"). Shorter, though not the
+      collapse the body pictured — the destinations that stay direct are still advertised, which the
+      proposal states plainly rather than implying the room was won.
 - [x] 4.2 A row with nothing to offer says so, rather than leading to an empty box.
 
 ## 5. The pinned tests

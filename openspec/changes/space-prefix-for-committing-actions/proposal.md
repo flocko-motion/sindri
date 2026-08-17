@@ -28,13 +28,38 @@ no form, no chooser — so it is the one action that most needs the shift". A sh
 - **Inertness does not depend on the selection.** A key that commits anywhere on the tab is never
   live bare; otherwise whether a stray press did something would depend on which row was selected.
 - **The convention now reads NAVIGATE OR COMMIT, with no exception clause.** Opening an editor,
-  form, prompt or chooser is navigation — you have moved to a place where you may act, and the act
-  happens on submit inside it. So `e`, `i`, `t`, `c`, `o`, `a` stay direct and outside the menu. The
-  old wording needed a carve-out ("it may OPEN a form … since that flow is confirmable"); the new
-  framing needs none, because opening a form was never a mutation.
-- **The footer collapses** to navigation plus one entry, which is the room sd-ac8831 needs for the
-  movement keys. It reads "space actions", or "space actions (none here)" on a row with nothing to
-  offer, since a bare "actions" leading to an empty box reads as a bug.
+  form, prompt or picker is navigation — you have moved to a place where you may act, and the act
+  happens on submit inside it. The old wording needed a carve-out ("it may OPEN a form … since that
+  flow is confirmable"); the new framing needs none, because opening a form was never a mutation.
+- **The line is drawn by what the keystroke does, not by the letter's case**, per binding and per
+  tab. So `e`, `i`, `t`, `c`, `o`, `a` stay direct — and so do `N` (task form), `O` (options/reopen
+  form), `P` (priority picker), `E` (config form), `B` (planner picker), `I` (review form), and `R`
+  where it opens a rejection form or a member picker. They are destinations exactly as `c` is, and
+  the case they carry is a legacy of the old rule. The same letter can differ by tab: `A` commits on
+  the PRs tab and opens a picker on the Meeting tab, `R` rebases an agent on the keystroke and
+  opens a form on a PR.
+- **A confirm is part of the commit, not a destination.** It asks "sure?" about an action the
+  keystroke has already chosen, so `D` (scrap/delete/forget), `M` (milestone), `B` (rebuild) and the
+  clear-context `C` are behind the prefix even though a modal follows. Anything else would leave a
+  stray `D` popping a delete-agent confirm.
+- **The footer carries the navigating keys plus one prefix entry**, reading "space actions" — or
+  "space actions (none here)" on a row with nothing to offer, since a bare "actions" leading to an
+  empty box reads as a bug. It is shorter than before, but NOT the collapse to "navigation plus one
+  entry" the body pictured: the destinations that stay direct are still advertised there, so the
+  Tasks footer still runs to about ten entries. See the note below.
+
+## What this does not buy, and the choice behind it
+
+The body expected the footer to collapse far enough to make room for the movement keys sd-ac8831
+must advertise. Drawn as the body's own rule requires — opening a form or picker is navigation, so
+it stays direct — most of the Tasks row survives: `N new · h/l fold · B brief a planner · i comment
+· a attach · e edit · P priority · O reopen · n why next · f filter · space actions`.
+
+The alternative is to gate every path that reaches a mutation, confirmable or not, which puts
+N/O/P/E/B/I behind the prefix and leaves a genuinely short footer. That is the position of one
+earlier comment on the task, which a later one explicitly overruled, and it is a design decision
+rather than an implementation detail — so this change follows the settled body, and the choice
+stays with the user.
 
 ## The pinned tests, revisited deliberately
 

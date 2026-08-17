@@ -89,16 +89,12 @@ func TestTheMenuOffersOnlyWhatAppliesToTheRow(t *testing.T) {
 	if menuHas(m, keyClose+" close") {
 		t.Errorf("a closed task cannot be closed again:\n%s", menuText(m))
 	}
-	if !menuHas(m, keyOptions+" reopen") {
-		t.Errorf("a closed task can be reopened:\n%s", menuText(m))
-	}
-
 	// A task nobody has proposed has no verdict to give.
-	if menuHas(m, "A/R approve/reject") {
+	if menuHas(m, keyApprove+" approve") {
 		t.Errorf("no approval is pending on td-1:\n%s", menuText(m))
 	}
 	pending := tasksTabWith(api.Task{ID: "td-2", Title: "proposed", Status: "open", Approval: "pending"})
-	if !menuHas(pending, "A/R approve/reject") {
+	if !menuHas(pending, keyApprove+" approve") {
 		t.Errorf("a task awaiting a verdict offers one:\n%s", menuText(pending))
 	}
 }

@@ -24,8 +24,18 @@ press did something would depend on which row happened to be selected.
 
 The convention SHALL read NAVIGATE OR COMMIT, and SHALL carry no exception clause.
 Navigating is direct: moving the selection, changing what is shown, and opening an
-editor, form, prompt or chooser — the act happens on submit inside the place the key
+editor, form, prompt or picker — the act happens on submit inside the place the key
 took you to, not on the key itself. Committing is what goes behind the prefix.
+
+A CONFIRM is not such a place, and SHALL count as part of the commit: it asks "sure?"
+about an action the keystroke has already chosen, offering nothing to compose or pick.
+So a key that opens a confirmation is behind the prefix, while a key that opens a form
+or a picker is direct.
+
+Whether a key commits SHALL be decided per binding and per tab, from what that
+keystroke does, rather than from the letter's case: the same letter may navigate on one
+tab and commit on another. Case SHALL be documented as a hint only, since uppercase
+letters exist on both sides of the line.
 
 The footer SHALL advertise the navigating keys and one entry for the prefix, naming it
 readably rather than as a blank, and SHALL say when the selected row offers nothing.
@@ -54,3 +64,13 @@ readably rather than as a blank, and SHALL say when the selected row offers noth
 
 - **WHEN** the user presses a navigating key
 - **THEN** it acts directly, with no prefix, as it always has
+
+#### Scenario: A key that opens a form
+
+- **WHEN** the user presses a key whose action is to open a form or a picker
+- **THEN** it opens directly, with no prefix, whatever case the letter has
+
+#### Scenario: A key that opens a confirmation
+
+- **WHEN** the user presses a key whose action is to ask for confirmation of a change
+- **THEN** it does nothing without the prefix: the confirm belongs to the commit

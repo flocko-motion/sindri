@@ -16,8 +16,7 @@ func TestOptionsReopensAClosedTaskOnTheTasksTab(t *testing.T) {
 	if id := m.selID(); id != "sd-abc123" {
 		t.Fatalf("expected sd-abc123 selected, got %q", id)
 	}
-	m.onKey(keyMenu) // reopen commits, so it lives behind the prefix
-	m.onKey(keyOptions)
+	m.onKey(keyOptions) // opens the reopen form: a destination, so it is direct
 	if !m.form.active || !strings.Contains(m.form.title, "sd-abc123") {
 		t.Errorf("%q should open sd-abc123's reopen form, got active=%v title=%q", keyOptions, m.form.active, m.form.title)
 	}
