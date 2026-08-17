@@ -63,21 +63,28 @@ func TestPRsDetailScrolls(t *testing.T) {
 	}
 }
 
-// TestPRsDetailHalfPages: ctrl+d/ctrl+u drive the same viewport, so they must move the same
-// content — by more than J does, since that is the distinction the two pairs of keys carry.
-func TestPRsDetailHalfPages(t *testing.T) {
-	m := prScrollModel()
+// TestHalfPageFollowsTheFocusedColumn: ctrl+d/ctrl+u are the coarse form of the scroll keys, so on
+// the tab with two scrollable regions they resolve their target the way J/K do — the focused one.
+// They used to half-page the diff whatever had focus, which is the same bug from the other end as
+// the list moving while the detail was focused.
+func TestHalfPageFollowsTheFocusedColumn(t *testing.T) {
+	m := prMetaModel()
+	m.rightFocus = true
+	before := m.detail.Offset
 	m.onKey("ctrl+d")
-	paged := m.detail.Offset
+	paged := m.prMeta.Offset
 	if paged == 0 {
-		t.Fatalf("ctrl+d did not scroll (height=%d total=%d)", m.detail.Height, m.detail.Total)
+		t.Fatalf("ctrl+d did not scroll the focused column (height=%d total=%d)", m.prMeta.Height, m.prMeta.Total)
 	}
 	if paged <= detailScrollStep {
 		t.Errorf("ctrl+d moved %d lines, no more than J's %d — it should half-page", paged, detailScrollStep)
 	}
+	if m.detail.Offset != before {
+		t.Error("half-paging the column must not also move the diff pane")
+	}
 	m.onKey("ctrl+u")
-	if m.detail.Offset >= paged {
-		t.Errorf("ctrl+u did not scroll back up: %d then %d", paged, m.detail.Offset)
+	if m.prMeta.Offset >= paged {
+		t.Errorf("ctrl+u did not scroll back up: %d then %d", paged, m.prMeta.Offset)
 	}
 }
 

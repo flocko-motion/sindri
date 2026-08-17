@@ -61,6 +61,27 @@ func (m *model) scrollTarget() *scroll.Viewport {
 	return &m.detail
 }
 
+// scrollDir is which way a scroll runs, so a call site reads as a direction rather than a bare bool.
+type scrollDir bool
+
+const (
+	scrollDown scrollDir = true
+	scrollUp   scrollDir = false
+)
+
+// halfPage moves the focused viewport by half its height — the coarse form of J/K, resolving its
+// target the same way, so both speeds scroll the same thing (-> scrollTarget).
+func (m *model) halfPage(dir scrollDir) {
+	vp := m.scrollTarget()
+	for i := 0; i < max(1, vp.Height/2); i++ {
+		if dir == scrollDown {
+			vp.ScrollDown()
+		} else {
+			vp.ScrollUp()
+		}
+	}
+}
+
 // syncDetail fetches the selected item's rich detail when the selection changes.
 func (m *model) syncDetail() tea.Cmd {
 	key := fmt.Sprintf("%d:%s", m.tab, m.selID())

@@ -100,19 +100,19 @@ func (m *model) onKey(k string) tea.Cmd {
 		}
 	case "G":
 		m.cursor[m.tab] = 1 << 30
+	// ctrl+d/ctrl+u are the half-page form of j/k and J/K, so they follow the focus rather than the
+	// tab: the right column scrolls the viewport scrollTarget() resolves (the PRs meta column
+	// included), the left moves the list cursor — which is how a list scrolls, the selected line
+	// staying in view. Deciding per tab instead sent the keys to the list while the detail had focus.
 	case "ctrl+d":
-		if m.tab == 2 { // PRs: fast-scroll the diff/lint main pane (J/K do fine-grained)
-			for i := 0; i < max(1, m.detail.Height/2); i++ {
-				m.detail.ScrollDown()
-			}
+		if m.rightFocus {
+			m.halfPage(scrollDown)
 			return nil
 		}
 		m.cursor[m.tab] += m.bodyHeight() / 2
 	case "ctrl+u":
-		if m.tab == 2 {
-			for i := 0; i < max(1, m.detail.Height/2); i++ {
-				m.detail.ScrollUp()
-			}
+		if m.rightFocus {
+			m.halfPage(scrollUp)
 			return nil
 		}
 		m.cursor[m.tab] -= m.bodyHeight() / 2
