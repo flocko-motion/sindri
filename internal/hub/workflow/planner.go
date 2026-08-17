@@ -58,6 +58,11 @@ func (e *Engine) AssignPlan(project, agent, goal, taskID string) error {
 		return err
 	}
 	st, _ := ps.GetState(agent)
+	// A brief is a planner's claim: it reads the code and the backlog to work one out, which is the
+	// same vantage point a worker's task gives (-> store.GrantNotes).
+	if err := ps.GrantNotes(agent, NotesPerClaim); err != nil {
+		return err
+	}
 	st.Agent, st.Phase = agent, "planning"
 	_ = ps.SetState(st)
 	_ = ps.Log(agent, "plan", subject)

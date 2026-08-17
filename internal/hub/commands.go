@@ -144,9 +144,11 @@ func (h *Hub) registry() *registry.Registry {
 			}, Run: h.cmdResume},
 		// One short note to the user about something noticed in passing, against a budget the help
 		// states up front — known scarcity selects better than a cap discovered by hitting it.
+		// Not the coauthor: it is in the room with the user already. The three roles that DO see it are
+		// granted at their own claim — a task, a review, a brief — so none sees a verb it cannot use.
 		registry.Command{Name: "fyi", Help: workflow.FyiHelp(workflow.NotesPerClaim),
 			HelpFor: func(c registry.Caller) string { return workflow.FyiHelp(c.NotesLeft) },
-			Run:     h.cmdFyi},
+			Roles:   []string{"worker", "reviewer", "planner"}, Run: h.cmdFyi},
 		// Every role receives mail, so every role can read it. Never held back by an escalation: an
 		// escalated agent reading what it was told is how it learns the answer it is waiting for.
 		registry.Command{Name: "mail", Help: mailHelp, Run: h.cmdMail},

@@ -112,7 +112,9 @@ func TestMailFiltersNarrowTheList(t *testing.T) {
 	if n := itemRows(m.mailRows()); n != 2 {
 		t.Errorf("all should show both messages, got %d", n)
 	}
-	// `w` narrows to whoever the selected message was sent to, and again to widen.
+	// `w` steps everyone → this row's recipient → YOU → everyone. The row step is first because the
+	// cursor makes it obvious, and because after narrowing to the user no other recipient is left to
+	// select — a row step placed last could never be reached.
 	m.onKey(keyMailWho)
 	if m.mailAgent != "dvalin" {
 		t.Errorf("`%s` should narrow to the selected recipient, got %q", keyMailWho, m.mailAgent)
@@ -121,8 +123,12 @@ func TestMailFiltersNarrowTheList(t *testing.T) {
 		t.Errorf("narrowed to dvalin should show one message, got %d", n)
 	}
 	m.onKey(keyMailWho)
+	if m.mailAgent != api.SenderUser {
+		t.Errorf("`%s` should then narrow to the user, got %q", keyMailWho, m.mailAgent)
+	}
+	m.onKey(keyMailWho)
 	if m.mailAgent != "" {
-		t.Errorf("`%s` again should widen back to every agent, got %q", keyMailWho, m.mailAgent)
+		t.Errorf("`%s` again should widen back to everyone, got %q", keyMailWho, m.mailAgent)
 	}
 }
 
@@ -178,5 +184,39 @@ func TestTheUsersMailIsShownFromEveryRepo(t *testing.T) {
 	})
 	if rows := strings.Join(rowTexts(m.mailRows()), "\n"); strings.Contains(rows, "a verdict elsewhere") {
 		t.Errorf("agent traffic from another repo is not the user's business:\n%s", rows)
+	}
+}
+
+// TestTheUserCanAlwaysAskWhatIsWaitingForThem is the gap the review found: the narrowing used to be
+// reachable only by selecting a row already addressed to the user, so the question was unanswerable in
+// the one case it matters — when nothing of theirs is on screen. Now it is a step of the cycle, so it
+// is reachable whatever is selected, and immediate when nothing is.
+func TestTheUserCanAlwaysAskWhatIsWaitingForThem(t *testing.T) {
+	// Nothing at all to select: one press, straight to the question.
+	empty := newModel(nil, nil, "")
+	empty.tab, empty.scopeRepo, empty.mailFilter = 6, false, api.MailAll
+	empty.reclamp()
+	empty.onKey(keyMailWho)
+	if empty.mailAgent != api.SenderUser {
+		t.Errorf("with nothing selected the first step should be the user, got %q", empty.mailAgent)
+	}
+
+	// An agent's row selected and nothing of the user's in the list: still reachable, and the footer
+	// names each state on the way so the next press is never a guess.
+	m := newModel(nil, nil, "")
+	m.tab, m.scopeRepo, m.mailFilter = 6, false, api.MailAll
+	m.state = api.BoardState{Mail: []api.Mail{{ID: 2, Repo: "one", Agent: "dvalin", Sender: "hub", Body: "a verdict"}}}
+	m.reclamp()
+	for i := 0; i < len(api.MailFilters) && m.mailAgent != api.SenderUser; i++ {
+		m.onKey(keyMailWho)
+	}
+	if m.mailAgent != api.SenderUser {
+		t.Fatalf("the cycle should reach the user from any state, got %q", m.mailAgent)
+	}
+	if rows := m.mailRows(); len(rows) != 0 {
+		t.Errorf("with nothing addressed to them the list is empty, not the agent's mail: %d rows", len(rows))
+	}
+	if got := mailWhoLabel(m.mailAgent); got != "you" {
+		t.Errorf("the footer should say who it is narrowed to, got %q", got)
 	}
 }

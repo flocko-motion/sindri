@@ -187,12 +187,7 @@ var keymap = []binding{
 
 	// Mail: look only — the mailbox is the agent's to read, and the user's part is finding a message.
 	{keys: keyAttach, label: lbl("attach"), scope: scopeMail},
-	{keys: keyMailWho, label: func(m model) string {
-		if m.mailAgent != "" {
-			return "who: " + m.mailAgent
-		}
-		return "who: all"
-	}, scope: scopeMail},
+	{keys: keyMailWho, label: func(m model) string { return "who: " + mailWhoLabel(m.mailAgent) }, scope: scopeMail},
 	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.mailFilter) }, scope: scopeMail},
 	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scope: scopeMail},
 

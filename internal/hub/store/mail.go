@@ -132,36 +132,29 @@ func (s *Store) AllMail(limit int) ([]Mail, error) {
 	return queryMail(s.db, q, args...)
 }
 
-// MailTallies is how many messages exist and how many are unread, per project and fleet-wide. Counted
-// here, not over the window: a badge derived from a window stops rising, and "N of M" needs the real M.
-func (s *Store) MailTallies() (total, unread int, byProject map[string]int, err error) {
+// MailTallies is every number the board needs about the mailbox: size, unread, the user's own unread,
+// and unread per project — counted here, not over the window, since a badge from a window stops rising.
+//
+// ONE PASS: the board is rebuilt per notify per client over a table that grows for the life of the
+// machine, so a second scan for the user's share would be paid on every read.
+func (s *Store) MailTallies() (total, unread, userUnread int, byProject map[string]int, err error) {
 	byProject = map[string]int{}
-	rows, qerr := s.db.Query(`SELECT project, COUNT(*), SUM(read_at = '') FROM mail GROUP BY project`)
+	rows, qerr := s.db.Query(
+		`SELECT project, COUNT(*), SUM(read_at = ''), SUM(read_at = '' AND agent = ?) FROM mail GROUP BY project`,
+		api.SenderUser)
 	if qerr != nil {
-		return 0, 0, nil, fmt.Errorf("mail tallies: %w", qerr)
+		return 0, 0, 0, nil, fmt.Errorf("mail tallies: %w", qerr)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var project string
-		var n, u int
-		if err := rows.Scan(&project, &n, &u); err != nil {
-			return 0, 0, nil, fmt.Errorf("scan mail tally: %w", err)
+		var n, u, mine int
+		if err := rows.Scan(&project, &n, &u, &mine); err != nil {
+			return 0, 0, 0, nil, fmt.Errorf("scan mail tally: %w", err)
 		}
-		total, unread, byProject[project] = total+n, unread+u, u
+		total, unread, userUnread, byProject[project] = total+n, unread+u, userUnread+mine, u
 	}
-	return total, unread, byProject, rows.Err()
-}
-
-// UnreadUserMail is how many unread messages are addressed to the USER, across every project. Its own
-// tally because it answers a different question from MailTallies: that one is the mailbox's size, this
-// one is what one person still has to read, and only the second can ask anything of them.
-func (s *Store) UnreadUserMail() (int, error) {
-	var n int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM mail WHERE agent=? AND read_at=''`, api.SenderUser).Scan(&n)
-	if err != nil {
-		return 0, fmt.Errorf("unread user mail: %w", err)
-	}
-	return n, nil
+	return total, unread, userUnread, byProject, rows.Err()
 }
 
 // NotesToUserSince counts what the whole fleet has sent the user since t — the fleet-wide ceiling's

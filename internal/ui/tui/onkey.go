@@ -164,9 +164,9 @@ func (m *model) onKey(k string) tea.Cmd {
 				return mutateThenRefresh(cl, func() error { return cl.SetRetired(name, !back) })
 			}
 		}
-	case keyMailWho: // mail: narrow to the selected message's recipient, or widen again
+	case keyMailWho: // mail: step the recipient narrowing — everyone → you → this row → everyone
 		if m.tab == 6 {
-			m.toggleMailAgent()
+			m.cycleMailWho()
 		}
 	case keyAttach: // agents/tasks/prs/mail: attach to the live tmux session
 		if m.tab == 0 {

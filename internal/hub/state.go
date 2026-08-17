@@ -197,10 +197,7 @@ func (h *Hub) mailWindow() (window []AgentMail, total, unread, userUnread int, u
 			window[i].Body, window[i].Truncated = m.Body[:mailPreview], true
 		}
 	}
-	if total, unread, unreadByRepo, err = h.store.MailTallies(); err != nil {
-		return nil, 0, 0, 0, nil, err
-	}
-	if userUnread, err = h.store.UnreadUserMail(); err != nil {
+	if total, unread, userUnread, unreadByRepo, err = h.store.MailTallies(); err != nil {
 		return nil, 0, 0, 0, nil, err
 	}
 	return window, total, unread, userUnread, unreadByRepo, nil

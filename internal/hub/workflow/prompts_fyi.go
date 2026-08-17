@@ -11,10 +11,8 @@ import (
 	"time"
 )
 
-// NotesPerClaim is the grant, given whole at each claim however long that claim runs: a three-day task
-// has more to say than a twenty-minute one, but also far more places to say it. It lives here because
-// the claim paths are the workflow's and the hub reads the same number for its refusals; expect the
-// first value to be wrong, so changing it must stay a one-line edit.
+// NotesPerClaim is the grant, whole at each claim however long it runs — a long task has more to say
+// but also more places to say it. Here because the claim paths are, and the hub reads the same number.
 const NotesPerClaim = 2
 
 // FyiGuidance is the register, in the words every place it appears uses — the verb's help, the usage
@@ -73,10 +71,12 @@ func ReplyFyiTooLong(n, max int) string {
 // ReplyFyiSpent refuses once the claim's grant is gone, and names where the material goes instead. The
 // grant REPLACES rather than accumulating, so the next claim starts whole however this one ended.
 func ReplyFyiSpent(perClaim int) string {
-	return fmt.Sprintf("Not sent: you have used both notes on this claim (%d per claim, granted whole "+
-		"at each claim and never banked). This one belongs somewhere else: the PR body if it is about "+
-		"the change, `sindri comment` if it is about the task, `sindri escalate` if it blocks you. Your "+
-		"next claim starts with %d again.\n%s", perClaim, perClaim, FyiGuidance)
+	// True whether the grant was spent or never given, and the number comes from the constant — so
+	// tuning it cannot leave the sentence saying "both".
+	return fmt.Sprintf("Not sent: no notes left on this claim. Each claim grants %d, whole, and they "+
+		"are never banked — so this belongs somewhere else: the PR body if it is about the change, "+
+		"`sindri comment` if it is about the task, `sindri escalate` if it blocks you.\n%s",
+		perClaim, FyiGuidance)
 }
 
 // ReplyFyiFleetFull refuses at the fleet-wide ceiling — the limit that exists because a per-agent

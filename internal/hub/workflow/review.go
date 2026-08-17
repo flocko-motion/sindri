@@ -156,6 +156,12 @@ func (e *Engine) assignReview(project string, id int64, prID, reviewer, requirem
 	if err := ps.AssignReview(id, reviewer); err != nil {
 		return err
 	}
+	// A review IS a reviewer's claim: it has been somewhere and looked at a whole diff, which is the
+	// vantage point the note grant pays for (-> store.GrantNotes). Its subsystems are often nobody's
+	// task, so this is the role most likely to notice something with no other home.
+	if err := ps.GrantNotes(reviewer, NotesPerClaim); err != nil {
+		return err
+	}
 	// The hub preps the terrain so the reviewer never faces a stale tree: force-checkout is
 	// safe because it only reads + lints. On failure it is told not to trust /workspace.
 	checkedOut := true

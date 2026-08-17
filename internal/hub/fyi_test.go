@@ -170,3 +170,75 @@ func TestAnAgentThatHasClaimedNothingHasNoNotes(t *testing.T) {
 		t.Errorf("it should be refused: %s", out)
 	}
 }
+
+// TestAReviewerGetsAGrantWhenGivenAReview is the role the reviewer of this change named: it reads whole
+// diffs across subsystems that are nobody's task, so it is the most likely to notice something with no
+// other home — and it reaches neither claimLeaf nor startSubtask, so nothing else would grant it.
+func TestAReviewerGetsAGrantWhenGivenAReview(t *testing.T) {
+	h := newHub(t)
+	ps := h.store.For(testProject)
+	if err := ps.PutAgent(store.Agent{Name: "rev", Role: "reviewer", Workspace: "ws"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutPR(store.PR{ID: "pr-td-1", Task: "td-1", Agent: "dvalin", Branch: "td-1", Base: "main", Status: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	// Through the reviewer's OWN pickup — asking the hub for work claims an unclaimed review. The other
+	// route (RequestReview picking a free reviewer) needs a live pod, which a test hub has not; both go
+	// through assignReview, which is where the grant is.
+	if _, err := ps.AddReview("pr-td-1", "check it"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.wf.AgentDirective(t.Context(), testProject, "rev"); err != nil {
+		t.Fatalf("AgentDirective for the reviewer: %v", err)
+	}
+	if n, _ := ps.NotesLeft("rev"); n != workflow.NotesPerClaim {
+		t.Fatalf("a reviewer given a review should hold the grant, got %d", n)
+	}
+	out, code := execAs(t, h, "rev", "fyi", "the adapter shells out twice per sync; no task owns that")
+	if code != 0 {
+		t.Fatalf("a reviewer must be able to send (%d): %s", code, out)
+	}
+}
+
+// TestTheCoauthorIsNotOfferedAVerbItCannotUse: it works beside the user in a shared terminal, so it
+// already has their attention — and a verb advertised to a role that can never use it is worse than
+// one absent, because the refusal has to invent a reason.
+func TestTheCoauthorIsNotOfferedAVerbItCannotUse(t *testing.T) {
+	h := newHub(t)
+	if err := h.store.For(testProject).PutAgent(store.Agent{Name: "hepti", Role: "coauthor", Workspace: "."}); err != nil {
+		t.Fatal(err)
+	}
+	cmds, err := h.AgentCommands(testProject, "hepti")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cmds {
+		if c.Name == "fyi" {
+			t.Error("a coauthor should not be offered fyi — it is in the room with the user")
+		}
+	}
+	// And it reads as unknown rather than as blocked, which is what role isolation means here.
+	out, code := execAs(t, h, "hepti", "fyi", "something")
+	if code != 127 || !strings.Contains(out, "unknown") {
+		t.Errorf("expected an unknown verb for a coauthor (code %d): %s", code, out)
+	}
+}
+
+// TestTheRefusalIsTrueBeforeAnyClaimToo: the same words serve a grant that was spent and one never
+// given, so nothing promises a "next claim" that has not happened, and nothing hardcodes "both".
+func TestTheRefusalIsTrueBeforeAnyClaimToo(t *testing.T) {
+	h := newHub(t)
+	if err := h.store.For(testProject).PutAgent(store.Agent{Name: "fresh", Role: "worker", Workspace: "ws"}); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := execAs(t, h, "fresh", "fyi", "something")
+	for _, bad := range []string{"used both", "next claim starts"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("the refusal says %q, which is false for an agent that has never claimed: %s", bad, out)
+		}
+	}
+	if !strings.Contains(out, "no notes left on this claim") {
+		t.Errorf("it should say what is true of both cases: %s", out)
+	}
+}

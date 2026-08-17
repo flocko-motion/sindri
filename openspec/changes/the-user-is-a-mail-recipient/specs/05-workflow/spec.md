@@ -10,7 +10,11 @@ both in it, and nothing in a row to tell them apart, is the collision that reser
 prevents.
 
 An agent SHALL have a verb for one short note to the user about something it noticed IN
-PASSING. The register SHALL be stated wherever the verb appears — in the agent's brief, in
+PASSING. It SHALL be offered to exactly the roles that can USE it: a role whose work
+grants no budget SHALL NOT see it at all, since a verb advertised and permanently
+refused has to invent a reason, and the reason would be false. A coauthor is excluded on
+its own grounds — it works beside the user in a shared terminal and already has their
+attention, so a note would be a slower way to say what it can simply say. The register SHALL be stated wherever the verb appears — in the agent's brief, in
 its help, and in every refusal — and SHALL lead with what the note is NOT, because the
 failure mode is over-sending:
 
@@ -34,6 +38,14 @@ place, because the first values will be wrong and tuning must not be a search:
   lets a long-blocked agent wake with a full purse. The grant SHALL REPLACE rather than
   accumulate — banking is what turns a quota into an occasional flood — and an agent that
   has claimed nothing SHALL have nothing granted, so the budget fails closed.
+  EVERY role that sees the verb SHALL be granted at its own equivalent of a claim: a task
+  for a worker, a review for a reviewer, a brief for a planner. A reviewer reads whole
+  diffs across subsystems that are nobody's task, which makes it the role most likely to
+  notice something with no other home — so granting only on a backlog task would withhold
+  the channel from where it is most useful.
+  The refusal SHALL be worded so that it is true both of a grant that was spent and of one
+  never given, and SHALL take its number from the constant, so tuning the grant cannot
+  leave the sentence describing the old value.
 - A FLEET-WIDE CEILING over a rolling window, on top of the per-agent grant. This is the
   limit that protects the user: a work-based budget scales with the fleet and one person's
   attention does not, so a fleet of impeccably behaved agents still buries them, every
@@ -102,7 +114,9 @@ nothing.
 Those out-of-scope rows SHALL be labelled as coming from elsewhere, under the same heading
 every other scoped list uses, because a foreign row that reads as local is worse than one
 that is absent. Both front-ends SHALL offer the same narrowing to the user's own mail and the
-same grouping, so each answers "is anything waiting for me?" the same way.
+same grouping, so each answers "is anything waiting for me?" the same way. That narrowing
+SHALL NOT depend on a row of the user's already being on screen: it is worth asking
+exactly when none is, so it is reachable from any state of the view.
 
 #### Scenario: A note from another repo
 

@@ -96,17 +96,21 @@ func TestMailWindowKeepsTheRecentEnd(t *testing.T) {
 	if len(window) != 2 || window[0].Body != "xxxxx" {
 		t.Fatalf("a window of 2 should be the newest two: %+v", window)
 	}
-	total, unread, byProject, err := s.MailTallies()
+	total, unread, userUnread, byProject, err := s.MailTallies()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if total != 5 || unread != 5 || byProject["proj"] != 5 {
 		t.Errorf("tallies count the whole mailbox, got total=%d unread=%d byProject=%v", total, unread, byProject)
 	}
+	// None of it is addressed to the user, and that share comes out of the same single pass.
+	if userUnread != 0 {
+		t.Errorf("the user's own unread = %d, want 0 — this is all agent traffic", userUnread)
+	}
 	if err := ps.MarkMailRead(window[0].ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, unread, byProject, _ = s.MailTallies(); unread != 4 || byProject["proj"] != 4 {
+	if _, unread, _, byProject, _ = s.MailTallies(); unread != 4 || byProject["proj"] != 4 {
 		t.Errorf("reading one should leave 4 unread, got %d / %v", unread, byProject)
 	}
 }
@@ -132,5 +136,39 @@ func TestMailSurvivesAReopen(t *testing.T) {
 	all, err := again.AllMail(0)
 	if err != nil || len(all) != 1 || all[0].Body != "merged pr-sd-1" {
 		t.Fatalf("mail must survive a restart, got %+v (err %v)", all, err)
+	}
+}
+
+// TestTheUsersShareComesFromTheSamePass: the board is rebuilt on every notify for every client and the
+// mailbox grows for the life of the machine, so the user's own unread must not cost a second scan.
+func TestTheUsersShareComesFromTheSamePass(t *testing.T) {
+	s := mailStore(t)
+	ps := s.For("proj")
+	for _, m := range []struct{ to, from string }{
+		{"dvalin", "hub"}, {"dvalin", "hub"}, {"user", "dvalin"}, {"user", "nori"},
+	} {
+		if _, err := ps.AddMail(m.to, m.from, "a message", false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	total, unread, userUnread, _, err := s.MailTallies()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 4 || unread != 4 || userUnread != 2 {
+		t.Errorf("tallies = total %d, unread %d, user %d; want 4, 4 and 2", total, unread, userUnread)
+	}
+	// Reading one of the user's own moves only that number.
+	mail, _ := s.AllMail(0)
+	for _, m := range mail {
+		if m.Agent == "user" {
+			if err := ps.MarkMailRead(m.ID); err != nil {
+				t.Fatal(err)
+			}
+			break
+		}
+	}
+	if _, unread, userUnread, _, _ = s.MailTallies(); unread != 3 || userUnread != 1 {
+		t.Errorf("after reading one of the user's: unread %d, user %d; want 3 and 1", unread, userUnread)
 	}
 }

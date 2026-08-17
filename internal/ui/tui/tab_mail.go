@@ -181,26 +181,47 @@ func mailBodyFetchCmd(cl *client.HTTP, id int64) tea.Cmd {
 	}
 }
 
-// cycleMailFilter steps the unread↔all cycle, shared with the CLI's --filter (-> api.MailFilters).
+// cycleMailFilter steps the active → unread → all cycle, shared with the CLI's --filter
+// (-> api.MailFilters), so a keypress and a flag admit the same set.
 func (m *model) cycleMailFilter() {
 	m.mailFilter = api.NextMailFilter(m.mailFilter)
 	m.cursor[m.tab] = 0
 	m.flash = "mail: " + string(m.mailFilter)
 }
 
-// toggleMailAgent narrows the list to the selected message's recipient, or clears that narrowing —
-// "what has this agent been told?" is the question a mail list is opened to answer.
-func (m *model) toggleMailAgent() {
-	if m.mailAgent != "" {
+// cycleMailWho steps the recipient the list is narrowed to: everyone → the selected row's recipient →
+// YOU → everyone. "You" is a step of the cycle rather than something you must find a row to reach,
+// since "is anything waiting for me?" is unanswerable when nothing of yours is on screen — which is
+// exactly when it is worth asking; with no such row selected the first step goes straight there. That
+// matches the CLI's --mine, which needs nothing selected either.
+//
+// The row step comes FIRST because it is the one the cursor makes obvious, and it has to come before
+// the narrowing that empties the list of other recipients — after "you" there is no other row left to
+// select, so a row step placed last could never be reached.
+func (m *model) cycleMailWho() {
+	switch {
+	case m.mailAgent == "":
+		if msg, ok := m.selMail(); ok && msg.Agent != api.SenderUser {
+			m.mailAgent = msg.Agent
+		} else {
+			m.mailAgent = api.SenderUser
+		}
+	case m.mailAgent == api.SenderUser:
 		m.mailAgent = ""
-		m.flash = "mail: every agent"
-		return
+	default:
+		m.mailAgent = api.SenderUser
 	}
-	msg, ok := m.selMail()
-	if !ok {
-		return
-	}
-	m.mailAgent = msg.Agent
 	m.cursor[m.tab] = 0
-	m.flash = "mail: " + msg.Agent + " only"
+	m.flash = "mail: " + mailWhoLabel(m.mailAgent)
+}
+
+// mailWhoLabel names the narrowing for the footer and the flash, in the words the tab uses.
+func mailWhoLabel(agent string) string {
+	switch agent {
+	case "":
+		return "everyone"
+	case api.SenderUser:
+		return "you"
+	}
+	return agent
 }
