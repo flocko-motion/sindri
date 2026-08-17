@@ -15,9 +15,12 @@ import (
 	"path/filepath"
 )
 
-// runSkipDirs skip .git (no history needed) and node_modules/target (replaced by the run's
-// own cache mount anyway -> workflow/execrun.go).
-var runSkipDirs = map[string]bool{".git": true, "node_modules": true, "target": true}
+// runSkipDirs skip .git (no history needed) and node_modules/target (the run's cache mount replaces
+// them -> workflow/execrun.go). .worktrees is load-bearing rather than tidiness: a run against the
+// repo ROOT has its destination INSIDE its source, so without it the walk sweeps in every other
+// agent's live worktree and then recurses into its own half-built copy — before the container
+// starts, so the run's cap is not yet counting.
+var runSkipDirs = map[string]bool{".git": true, "node_modules": true, "target": true, ".worktrees": true}
 
 // MaterializeRun copies srcWorktree into root/.worktrees/run-<runID>, fresh each time — the
 // artifact-isolation choice for sd-938f23: a run executes against this COPY, never the agent's

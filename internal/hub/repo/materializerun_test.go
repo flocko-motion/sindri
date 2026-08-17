@@ -1,8 +1,10 @@
 package repo
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -61,6 +63,54 @@ func TestMaterializeRunClearsAStalePreviousCopy(t *testing.T) {
 	}
 	mustExist(t, filepath.Join(dst, "fresh.txt"))
 	mustNotExist(t, filepath.Join(dst, "leftover.txt"))
+}
+
+// TestMaterializeRunFromTheRepoRootSkipsWorktrees is the case a user run makes ordinary: with no
+// agent named, the source is the repo ROOT, and every destination lives at root/.worktrees/run-<id>
+// — so the destination is INSIDE the source. Unskipped, the walk copies every other agent's live
+// worktree, with their uncommitted work in it, and then descends into the half-built destination
+// and copies that into itself. Nothing bounds it: materialization runs before the container starts,
+// so the run's 15-minute cap is not yet counting while the disk fills.
+func TestMaterializeRunFromTheRepoRootSkipsWorktrees(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "main.go"), "package main\n")
+	mustWriteFile(t, filepath.Join(root, "uncommitted.txt"), "what the user is working on\n")
+	// Another agent's live worktree, and the shared review checkout, both under .worktrees.
+	mustMkdirAll(t, filepath.Join(root, ".worktrees", "bombur"))
+	mustWriteFile(t, filepath.Join(root, ".worktrees", "bombur", "theirs.go"), "package theirs\n")
+	mustMkdirAll(t, filepath.Join(root, ".worktrees", "review"))
+	mustWriteFile(t, filepath.Join(root, ".worktrees", "review", "pr.go"), "package pr\n")
+	// And a copy left by an earlier run, which is what the walk would recurse into.
+	mustMkdirAll(t, filepath.Join(root, ".worktrees", "run-earlier"))
+	mustWriteFile(t, filepath.Join(root, ".worktrees", "run-earlier", "old.txt"), "old\n")
+
+	dst, err := MaterializeRun(root, root, "self")
+	if err != nil {
+		t.Fatalf("MaterializeRun: %v", err)
+	}
+	// The user's own tree is the point of the target, uncommitted work included.
+	mustExist(t, filepath.Join(dst, "main.go"))
+	mustExist(t, filepath.Join(dst, "uncommitted.txt"))
+	// Nobody else's, and not the destination itself.
+	mustNotExist(t, filepath.Join(dst, ".worktrees"))
+	// Nothing ANYWHERE beneath the copy, at any depth: the self-nesting shows up as a run- directory
+	// inside the copy, and another agent's tree as a .worktrees inside it. Relative paths, since
+	// the copy's own path is under .worktrees and would otherwise match itself.
+	if err := filepath.WalkDir(dst, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dst, p)
+		if err != nil || rel == "." {
+			return err
+		}
+		if d.IsDir() && (d.Name() == ".worktrees" || strings.HasPrefix(d.Name(), "run-")) {
+			t.Errorf("the copy swept in %s", rel)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk the copy: %v", err)
+	}
 }
 
 func mustMkdirAll(t *testing.T, path string) {

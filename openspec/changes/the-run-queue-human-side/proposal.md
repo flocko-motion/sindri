@@ -46,6 +46,13 @@ COPY, so nothing a command writes reaches the tree the user is editing. That is 
 sd-938f23 chose for agent worktrees, and it answers this case unchanged. Testing uncommitted work is
 the point of the target rather than a hazard of it.
 
+The copy has a second direction, though, and this target is what exposed it: with the repo ROOT as
+the source, the destination sits inside the source. `.worktrees` was not skipped, so the copy took
+every other agent's live worktree — uncommitted work included — and then descended into its own
+half-built destination and copied that into itself. It joins `runSkipDirs`, which is right for both
+targets: a run has no business copying any worktree but the one it was aimed at, and since every
+destination lives under `.worktrees` it closes the self-nesting by construction.
+
 **A PR's review checkout is OUT.** `.worktrees/review` is a single shared worktree that `pr verify`
 and reviewer assignment both reuse. Materialised at schedule time, a queued run would execute
 against a checkout that has since been replaced; materialised at execution time, it would fight a

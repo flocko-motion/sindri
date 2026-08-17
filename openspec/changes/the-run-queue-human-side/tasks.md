@@ -17,6 +17,9 @@
       shared slot, and `pr verify` already answers that question synchronously.
 - [x] 2.4 `ExecuteRun` materialises `r.Workspace` rather than re-reading the agent. Required for a
       run with no agent, and it fixes a snapshot the executor was storing and ignoring.
+- [x] 2.5 `.worktrees` joins `runSkipDirs`. With the repo root as source the destination is INSIDE
+      the source, so the copy swept in every other agent's live tree and then recursed into its own
+      half-built self — unbounded, since the copy predates the container and the cap.
 
 ## 3. Priority
 
@@ -47,5 +50,7 @@
 - [x] 6.2 The queue order — user, then gate, then ordinary — and that it stays reprioritisable.
 - [x] 6.3 A user run is never stale, while an agent run whose agent is gone still is.
 - [x] 6.4 A user run injects nothing; an agent's still gets its summary.
-- [x] 6.5 The note is present empty and full, wraps to at most two lines, leaves the rows visible on
+- [x] 6.5 A copy made from the repo root holds no worktree — not another agent's, not its own.
+      Mutation-checked: without the skip it fails, and takes ~100x longer doing it.
+- [x] 6.6 The note is present empty and full, wraps to at most two lines, leaves the rows visible on
       a short terminal, and the empty state shows only when there is nothing queued.

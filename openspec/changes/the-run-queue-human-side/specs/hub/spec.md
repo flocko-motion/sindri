@@ -18,6 +18,13 @@ target, made when the run reaches the front, so nothing the command writes can r
 user is working in — the isolation that already exists for agent worktrees answers this case
 unchanged. Testing uncommitted work is the point of the target, not a hazard of it.
 
+That copy SHALL exclude every worktree directory. The isolation has two directions and the copy
+must hold both: what the run WRITES cannot escape, and what it PULLS IN is only the tree it was
+aimed at. With the repo root as the source the copy's own destination sits inside the source, so a
+copy that did not exclude worktrees would sweep in every other agent's live tree, uncommitted work
+and all, and then descend into its own half-built destination. Nothing bounds that — the copy is
+made before the container starts, so the run's cap is not yet counting.
+
 A user's run SHALL outrank every agent's, gate runs included. Somebody is waiting on it, while the
 agent behind an agent run is parked and watching nothing; what the wait costs that agent is bounded
 by the run's own cap. The user SHALL still be able to reorder it by hand afterwards — the origin
@@ -39,6 +46,12 @@ lies about the run's origin, and a run without its target cannot be interpreted.
 - **WHEN** the user queues a run without naming an agent
 - **THEN** it is queued against the repo's own checkout, uncommitted work included, and executes
   against a copy of it
+
+#### Scenario: The copy takes only the tree it was aimed at
+
+- **WHEN** a run is materialised from the repo root, with other agents' worktrees present
+- **THEN** the copy holds the repo's own files and no worktree — neither another agent's nor the
+  copy itself
 
 #### Scenario: A user queues a run against an agent's workspace
 
