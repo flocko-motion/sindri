@@ -18,8 +18,9 @@ HOME="${HOME:-/home/sindri}"
 
 echo "=== sindri agent '$AGENT' starting ==="
 
-# Reserve the bottom row for the hotkeys a dialed-in human needs — chiefly detach (C-b d;
-# do NOT C-c or `exit`). Global options in ~/.tmux.conf, adopted at server start.
+# Reserve the bottom row for the hotkeys a dialed-in human needs — chiefly detach (C-b d; do
+# NOT C-c or `exit`). Global options in ~/.tmux.conf, adopted at server start so nothing later
+# shadows status-right.
 cat > "$HOME/.tmux.conf" <<'TMUXCONF'
 # Truecolor: the pane must be 256-colour AND the client flagged RGB-capable, or tmux
 # downsamples and Claude's orange goes red — tmux 3.5 needs terminal-features for it.
@@ -42,8 +43,9 @@ set -g set-titles off
 # OSC52. (Hold Shift for the terminal's own native selection instead.)
 set -g mouse on
 set -g set-clipboard on
-# Scrollback: vi keys in copy-mode, since the default emacs one leaves C-u/C-d unbound and
-# scrollback appeared stuck. Generous history for a chatty agent.
+# Scrollback: vi keys in copy-mode so `prefix [` then C-u/C-d (half-page), C-b/C-f (page), g/G
+# and `/` search all work — the default emacs mode leaves C-u/C-d unbound, so scrollback
+# appeared stuck. Generous history for a chatty agent.
 set -g mode-keys vi
 set -g history-limit 50000
 TMUXCONF
@@ -58,8 +60,11 @@ fi
 if [ -n "${SINDRI_SHELL:-}" ]; then
 	tmux new-session -d -s "$SESSION" "${SIZE_ARGS[@]}" bash
 else
-	# --continue resumes across a restart, falling back to a fresh `claude` with nothing to resume.
-	# `stty sane` undoes Claude's raw terminal so a dial-in lands at a prompt.
+	# --continue resumes this workspace's session across a restart, but EXITS NON-ZERO with
+	# nothing to resume, so `||` falls back to a fresh `claude`, not bash.
+	# --append-system-prompt every launch: dropping it costs the agent its role, even on --continue.
+	# Single-quoted so tmux's shell evaluates the multi-line $() at session start, not this script's.
+	# `stty sane` undoes Claude's raw, echo-off terminal so a dial-in lands at a prompt.
 	tmux new-session -d -s "$SESSION" "${SIZE_ARGS[@]}" \
 		'SP="$(cat /home/sindri/.claude/system-prompt.txt)"; claude --continue --dangerously-skip-permissions --append-system-prompt "$SP" || claude --dangerously-skip-permissions --append-system-prompt "$SP"; stty sane; exec bash -i'
 fi

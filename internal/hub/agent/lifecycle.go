@@ -216,8 +216,9 @@ func (s *Service) RebuildAgent(project, name string, w io.Writer) error {
 	return s.RestartAgent(project, name, w)
 }
 
-// RestartAgent replaces an agent's pod with a fresh one on the same identity, the worktree/socket/
-// log surviving — the remedy for a signed-out agent, whose new process reads staged credentials.
+// RestartAgent replaces an agent's pod with a fresh one on the same identity — the worktree,
+// socket and log survive, so the session resumes and a down agent is simply started. It is also
+// the remedy for a signed-out one: the new process reads the credentials the hub keeps staged.
 func (s *Service) RestartAgent(project, name string, w io.Writer) error {
 	if container.Running(s.deps.ContainerName(project, name)) {
 		if err := s.StopAgent(project, name); err != nil {
@@ -237,8 +238,7 @@ func previewSizeEnv(cols, lines int) map[string]string {
 }
 
 // Launch spins a pod that assumes an existing agent's identity, running Claude in a tmux session
-// named after it (or a bare shell, for debugging). cols/lines size that session to a caller's
-// preview pane (0, 0 for the CLI, which has none).
+// named after it (or a bare shell); cols/lines size it to a caller's preview pane.
 func (s *Service) Launch(project, name string, shell, debug bool, cols, lines int, progress io.Writer) (err error) {
 	ps := s.store.For(project)
 	root := s.deps.ProjectRoot(project)
