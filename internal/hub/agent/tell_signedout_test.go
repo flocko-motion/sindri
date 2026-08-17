@@ -31,6 +31,10 @@ type fakeRuntime struct {
 
 func (f *fakeRuntime) Running(string) bool { return true }
 
+// RunningContext answers as Running does: a liveness check that takes a deadline is asking the same
+// question, and a fake that answered differently would make "alive" depend on which one a path used.
+func (f *fakeRuntime) RunningContext(context.Context, string) bool { return true }
+
 func (f *fakeRuntime) Exec(name string, args ...string) ([]byte, error) {
 	return f.ExecContext(context.Background(), name, args...)
 }
@@ -54,14 +58,6 @@ func (f *fakeRuntime) Rm(name string) error {
 func (f *fakeRuntime) Check(io.Writer) error { return errNothingToLaunchInto }
 
 var errNothingToLaunchInto = errors.New("fake runtime: nothing to launch into")
-
-// downRuntime is what the port is left holding afterwards: a backend where nothing is running,
-// which is how the package's other tests find it.
-type downRuntime struct{ container.Runtime }
-
-func (downRuntime) Running(string) bool { return false }
-
-func (downRuntime) Exec(string, ...string) ([]byte, error) { return nil, errNothingToLaunchInto }
 
 func containsArg(args []string, want string) bool {
 	for _, a := range args {
@@ -108,7 +104,7 @@ func tellFixture(t *testing.T, name, pane string) (*Service, *fakeRuntime) {
 	container.Use(f)
 	agentport.Use(paneReader{})
 	t.Cleanup(func() {
-		container.Use(downRuntime{})    // nothing running, as the package's other tests expect
+		container.UseDefault()          // nothing running, as an unwired process finds it
 		agentport.Use(unreadablePane{}) // back to classifying nothing, as an unwired hub does
 	})
 	forgetObservations()

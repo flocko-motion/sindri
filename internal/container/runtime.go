@@ -133,6 +133,12 @@ var active Runtime = noop{}
 // Use selects the container backend for this process. Called once at startup.
 func Use(r Runtime) { active = r }
 
+// UseDefault restores the unwired default — reads report nothing present, mutations error. What a
+// caller that wired a backend for a moment puts back, so what follows starts where an unwired
+// process does: a partial stand-in left behind panics the first time anything reaches a method it
+// never implemented.
+func UseDefault() { active = noop{} }
+
 // errNoRuntime is returned by the no-op backend's mutating ops.
 var errNoRuntime = errors.New("no container runtime configured")
 
