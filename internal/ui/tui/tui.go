@@ -113,6 +113,7 @@ type model struct {
 	composing  bool           // Chat tab: the multiline composer is open in the main pane
 	composer   textarea.Model // multiline chat compose (a single line can't hold deep talk)
 	modal      bool           // detail modal (full-screen) is open
+	menu       bool           // the space-prefix action menu is open (-> component_menu.go)
 	choice     choiceModalState
 	form       formState // active fill-in form (new/edit task)
 	flash      string    // transient status (e.g. "copied"), cleared on next key
@@ -428,6 +429,9 @@ func (m model) View() string {
 	}
 	if m.choice.active {
 		return choiceModal(m.choice, m.w, m.h)
+	}
+	if m.menu {
+		return m.menuView(m.w, m.h)
 	}
 	if m.modal {
 		title := m.modalTitle()

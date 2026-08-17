@@ -64,6 +64,7 @@ func TestApproveKeyAsksOnlyWhenThereIsAChoice(t *testing.T) {
 		if got := m.selID(); got != tc.id {
 			t.Fatalf("expected %s selected, got %q", tc.id, got)
 		}
+		m.onKey(keyMenu) // approve commits, so it lives behind the prefix
 		m.onKey(keyApprove)
 		if m.choice.active != tc.wantAsks {
 			t.Errorf("%s: modal active = %v, want %v (title %q)", tc.id, m.choice.active, tc.wantAsks, m.choice.title)

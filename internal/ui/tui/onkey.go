@@ -49,6 +49,19 @@ func (m *model) onKey(k string) tea.Cmd {
 		}
 		return nil
 	}
+	// The space prefix. A committing key is live only while the menu is open, so a stray press can
+	// never change anything — and what the menu offers is what the keymap says applies to this row.
+	if m.menu {
+		m.menu = false
+		if k == "esc" || k == " " || !m.menuAccepts(k) {
+			return nil // cancelled, or a letter this menu never offered
+		}
+	} else if k == " " {
+		m.menu = true
+		return nil
+	} else if m.committingKey(k) {
+		return nil // it lives behind the prefix now: space, then the same letter
+	}
 	switch k {
 	case keyQuit, "ctrl+c":
 		m.quit = true

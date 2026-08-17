@@ -80,14 +80,38 @@ func TestLowercaseKeysNeverMutate(t *testing.T) {
 	}
 }
 
-// TestMergeIsUppercase is the headline: merge commits on the keystroke — no form, no chooser —
-// so it is the one action that most needs the shift. Spelled out, not read back from the constant.
-func TestMergeIsUppercase(t *testing.T) {
+// TestMergeIsBehindThePrefix is the headline, and the prefix is what strengthened it: merge commits
+// on the keystroke — no form, no chooser — so it was the one action that most needed the shift, and
+// it now needs two deliberate presses. Bare M does nothing; space then M merges. The letter is
+// spelled out rather than read back from the constant, since a test that reads a constant to itself
+// passes whatever the constant becomes.
+func TestMergeIsBehindThePrefix(t *testing.T) {
 	if keyMerge != "M" {
 		t.Errorf("merge should be M, got %q", keyMerge)
 	}
-	if got := footerOf(t, scopePRs); !strings.Contains(got, "M merge") {
-		t.Errorf("the PRs footer should offer \"M merge\":\n%s", got)
+	m := prTabWith(api.PR{ID: "pr-td-1", Status: "approved", Project: "repo", Branch: "td-1"})
+	if !m.committingKey("M") {
+		t.Error("merge must be declared a committing action, or a stray M merges")
+	}
+	if !menuHas(m, "M merge") {
+		t.Errorf("space should offer merge on an approved PR:\n%s", menuText(m))
+	}
+	if strings.Contains(footerOf(t, scopePRs), "M merge") {
+		t.Error("the footer advertises navigation now; merge belongs to the menu")
+	}
+}
+
+// TestMergeIsNotOfferedOnAnUnapprovedPR: the menu answers "what can I do with THIS", so an action
+// the hub would refuse is invisible rather than offered — and, pressed anyway, does nothing.
+func TestMergeIsNotOfferedOnAnUnapprovedPR(t *testing.T) {
+	m := prTabWith(api.PR{ID: "pr-td-1", Status: "open", Project: "repo", Branch: "td-1"})
+	if menuHas(m, "M merge") {
+		t.Errorf("an unapproved PR must not offer merge:\n%s", menuText(m))
+	}
+	m.onKey(keyMenu)
+	m.onKey(keyMerge)
+	if m.choice.active || m.flash != "" {
+		t.Errorf("a key the menu never offered must do nothing, got choice=%v flash=%q", m.choice.active, m.flash)
 	}
 }
 
@@ -139,18 +163,20 @@ func TestEditorIsBoundToE(t *testing.T) {
 // The letters are spelled out, not built from the constants: a test that reads the constant back
 // to itself would pass whatever the constant became, which is the regression to catch.
 func TestPRTabVerdictKeys(t *testing.T) {
-	footer := footerOf(t, scopePRs)
-	for _, want := range []string{"A approve", "R reject", "e editor"} {
-		if !strings.Contains(footer, want) {
-			t.Errorf("the PRs footer should offer %q:\n%s", want, footer)
+	m := prTabWith(api.PR{ID: "pr-td-1", Status: "open", Project: "repo", Branch: "td-1"})
+	for _, want := range []string{"A approve", "R reject", "I agent-review"} {
+		if !menuHas(m, want) {
+			t.Errorf("the PRs menu should offer %q:\n%s", want, menuText(m))
 		}
+	}
+	// The editor is navigation — it opens a place to act, and the act happens on submit inside it —
+	// so it stays direct, in the footer, where a key that changes nothing belongs.
+	if got := footerOf(t, scopePRs); !strings.Contains(got, "e editor") {
+		t.Errorf("the PRs footer should still offer %q:\n%s", "e editor", got)
 	}
 	// The agentic review keeps A's old job but not its key, and must stay out of lowercase.
 	if keyReview == "A" || strings.ToUpper(keyReview) != keyReview {
 		t.Errorf("agent-review should be its own uppercase key, got %q", keyReview)
-	}
-	if !strings.Contains(footer, keyReview+" agent-review") {
-		t.Errorf("the PRs footer should offer %q agent-review:\n%s", keyReview, footer)
 	}
 }
 
@@ -225,6 +251,7 @@ func TestNewKeysReachTheirActions(t *testing.T) {
 		if id := m.selID(); id != "pr-td-1" {
 			t.Fatalf("expected pr-td-1 selected, got %q", id)
 		}
+		m.onKey(keyMenu)
 		m.onKey(keyReview)
 		if !m.form.active || !strings.Contains(m.form.title, "agent-review of pr-td-1") {
 			t.Errorf("%q should open the agent-review form, got active=%v title=%q", keyReview, m.form.active, m.form.title)
@@ -238,6 +265,7 @@ func TestNewKeysReachTheirActions(t *testing.T) {
 		if id := m.selID(); id != "dvalin" {
 			t.Fatalf("expected dvalin selected, got %q", id)
 		}
+		m.onKey(keyMenu)
 		m.onKey(keyOptions)
 		if !m.form.active || !strings.Contains(m.form.title, "dvalin") {
 			t.Errorf("%q should open dvalin's options, got active=%v title=%q", keyOptions, m.form.active, m.form.title)
@@ -251,6 +279,7 @@ func TestNewKeysReachTheirActions(t *testing.T) {
 			Agents: []api.AgentView{{Name: "dvalin", Role: "worker"}, {Name: "nori", Role: "reviewer"}},
 			Chat:   api.ChatView{Members: []api.ChatMember{{Name: "nori", Role: "reviewer"}}},
 		}
+		m.onKey(keyMenu)
 		m.onKey(keyApprove)
 		if !m.choice.active {
 			t.Fatal("A should open the add-member chooser")
@@ -264,6 +293,7 @@ func TestNewKeysReachTheirActions(t *testing.T) {
 		m := newModel(nil, nil, "")
 		m.tab = 4 // Meeting
 		m.state = api.BoardState{Chat: api.ChatView{Members: []api.ChatMember{{Name: "nori", Role: "reviewer"}}}}
+		m.onKey(keyMenu)
 		m.onKey(keyReject)
 		if !m.choice.active {
 			t.Fatal("R should open the remove-member chooser")
@@ -280,6 +310,7 @@ func TestMeetingMembershipKeysHaveNothingToOffer(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.tab = 4 // Meeting
 	m.state = api.BoardState{Agents: []api.AgentView{{Name: "nori"}}, Chat: api.ChatView{Members: []api.ChatMember{{Name: "nori"}}}}
+	m.onKey(keyMenu)
 	m.onKey(keyApprove) // every agent is already a member
 	if m.choice.active {
 		t.Error("A should not open a chooser with nothing to add")
@@ -290,6 +321,7 @@ func TestMeetingMembershipKeysHaveNothingToOffer(t *testing.T) {
 
 	m = newModel(nil, nil, "")
 	m.tab = 4
+	m.onKey(keyMenu)
 	m.onKey(keyReject) // empty room
 	if m.choice.active {
 		t.Error("R should not open a chooser with nothing to remove")
@@ -299,16 +331,38 @@ func TestMeetingMembershipKeysHaveNothingToOffer(t *testing.T) {
 	}
 }
 
-// TestMeetingMembershipKeysAreAdvertised: the Chat footer must offer A/R now that the gap the
-// old comment described ("membership is curated from the CLI") is closed.
+// TestMeetingMembershipKeysAreAdvertised: membership is curated from the TUI as well as the CLI, so
+// the keys must be findable — in the menu now, which is where a committing action is advertised.
 func TestMeetingMembershipKeysAreAdvertised(t *testing.T) {
-	got := footerOf(t, scopeChat)
-	if !strings.Contains(got, keyApprove+" add member") {
-		t.Errorf("the Meeting footer should offer %q add member:\n%s", keyApprove, got)
+	m := newModel(nil, nil, "/r/one")
+	m.tab = 4
+	for _, want := range []string{keyApprove + " add member", keyReject + " remove member"} {
+		if !menuHas(m, want) {
+			t.Errorf("the Meeting menu should offer %q:\n%s", want, menuText(m))
+		}
 	}
-	if !strings.Contains(got, keyReject+" remove member") {
-		t.Errorf("the Meeting footer should offer %q remove member:\n%s", keyReject, got)
+}
+
+// prTabWith puts one PR on the PRs tab, selected — the row the menu is asked about.
+func prTabWith(pr api.PR) model {
+	m := newModel(nil, nil, "/r/one")
+	m.tab, m.scopeRepo = 2, false
+	m.state = api.BoardState{PRs: []api.PR{pr}}
+	return m
+}
+
+// menuText renders what space would show, for assertions and failure messages.
+func menuText(m model) string {
+	var lines []string
+	for _, b := range m.menuOffers() {
+		lines = append(lines, b.keys+" "+b.label(m))
 	}
+	return strings.Join(lines, "\n")
+}
+
+// menuHas reports whether the menu offers an entry, matched as "KEY label".
+func menuHas(m model, want string) bool {
+	return strings.Contains(menuText(m), want)
 }
 
 // footerOf renders one scope's footer for assertions — the string the user actually reads, and
@@ -321,12 +375,15 @@ func footerOf(t *testing.T, scope keyScope) string {
 // TestNewMeetingKeyIsOfferedAndConfirmed: N means "new" on every tab that has one, and on the
 // Meeting tab it clears history for everyone — so it must be advertised, and it must ask first.
 func TestNewMeetingKeyIsOfferedAndConfirmed(t *testing.T) {
-	if got := footerOf(t, scopeChat); !strings.Contains(got, keyNew+" new meeting") {
-		t.Errorf("the Meeting footer should offer %q:\n%s", keyNew, got)
+	menu := newModel(nil, nil, "/r/one")
+	menu.tab = 4
+	if !menuHas(menu, keyNew+" new meeting") {
+		t.Errorf("the Meeting menu should offer %q:\n%s", keyNew, menuText(menu))
 	}
 
 	m := newModel(nil, nil, "")
 	m.tab = 4 // Meeting
+	m.onKey(keyMenu)
 	m.onKey(keyNew)
 	if !m.choice.active {
 		t.Fatal("N must confirm before clearing the shared history, not act immediately")
@@ -355,12 +412,19 @@ func TestAgentsTabReachesMilestoneRebuildAndStats(t *testing.T) {
 		{keyRebuild, "rebuild image", true},
 		{keyStats, "stats", false},
 	} {
-		if !strings.Contains(footer, tc.key+" "+tc.label) {
-			t.Errorf("%q (%s) is not advertised on the Agents footer: %s", tc.key, tc.label, footer)
-		}
 		m := newModel(&client.HTTP{}, nil, "")
 		m.tab, m.scopeRepo = 1, false
 		m.state = api.BoardState{Agents: []api.AgentView{{Name: "dvalin", Project: "repo", Status: "idle"}}}
+		// Where the binding is advertised depends on what it does: a view in the footer, a
+		// committing action in the menu behind the prefix.
+		if tc.mutates {
+			if !menuHas(m, tc.key+" "+tc.label) {
+				t.Errorf("%q (%s) is not offered in the Agents menu:\n%s", tc.key, tc.label, menuText(m))
+			}
+			m.onKey(keyMenu)
+		} else if !strings.Contains(footer, tc.key+" "+tc.label) {
+			t.Errorf("%q (%s) is not advertised on the Agents footer: %s", tc.key, tc.label, footer)
+		}
 		cmd := m.onKey(tc.key)
 
 		if !tc.mutates {

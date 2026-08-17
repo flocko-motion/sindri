@@ -9,17 +9,13 @@ package tui
 
 import "strings"
 
-// Action-key constants. onKey switches on these and the keymap table lists them, so
-// changing a key (or discovering a conflict) is a single edit here. Navigation keys
-// that are compound in the help (tab, pane, move) are dispatched by their literal
-// tea strings in onKey and appear in the keymap only as display rows.
+// Action-key constants: onKey switches on these and the keymap lists them, so a rebinding is one
+// edit. Compound navigation rows (tab, pane, move) are display-only.
 //
-// CASE IS THE CONVENTION: lowercase looks or navigates, uppercase changes something. The binding
-// direction that carries the safety is lowercase: a mistyped one must never commit a change. It may
-// OPEN a form, chooser or prompt that then commits, since that flow is confirmable and esc cancels.
-//
-// The vim-family view keys (J/K scroll, G bottom, Y yank) are uppercase and mutate nothing; they
-// keep the shape a terminal user already has in their fingers.
+// NAVIGATE OR COMMIT, with no exception clause. Navigating is direct, and opening an editor, form
+// or chooser IS navigating — the act happens on submit inside it. Committing is behind the space
+// prefix (keyMenu), which makes those letters live and leaves them inert otherwise; M is still
+// merge. Case only hints (J/K/G/Y look): the `commits` field decides.
 const (
 	keyNew       = "N" // new task / new agent
 	keyBrief     = "B" // hand a task to a planner to work up (brief)
@@ -56,8 +52,12 @@ const (
 	// Mail: narrow the list to the selected message's recipient — "who was told this?", the question
 	// the tab is opened with. Its own letter because `a` attaches and only attaches, on every tab.
 	keyMailWho = "w"
-	keyDetail  = "§" // toggle the detail pane
-	keyQuit    = "q" // quit
+	keyMenu    = " " // the prefix: opens the menu of committing actions for the selected row
+	// keyMenuShown is how the prefix reads in a footer: a bare space would render as a gap, and a
+	// gap advertises nothing.
+	keyMenuShown = "space"
+	keyDetail    = "§" // toggle the detail pane
+	keyQuit      = "q" // quit
 )
 
 // keyScope selects where a binding applies and is shown.
@@ -74,12 +74,16 @@ const (
 	scopeMail
 )
 
-// binding is one row of help: the key(s) as displayed, a label (may depend on model
-// state, e.g. the active filter), and the scope that decides where it shows.
+// binding is one row of help: the displayed key(s), a label (which may read the model), the scope
+// it shows in, and whether it COMMITS — the fact that puts it behind the prefix. `when` narrows a
+// committing action to the rows it applies to (nil = always), so what would be refused is never
+// offered, as the hub does for an agent's command surface.
 type binding struct {
-	keys  string
-	label func(m model) string
-	scope keyScope
+	keys    string
+	label   func(m model) string
+	scope   keyScope
+	commits bool
+	when    func(m model) bool
 }
 
 // lbl wraps a static label.
@@ -91,122 +95,146 @@ var keymap = []binding{
 	// Global (first footer row): the compound nav keys are display-only rows. "C-h/C-l", not
 	// "C-h/l" — the trailing bare "l" would otherwise be misread as the plain letter, which IS a
 	// real, different binding (tasks: expand a fold) and must not share this row's label.
-	{"⇥/[]", lbl("tab"), scopeGlobal},
-	{"C-h/C-l", lbl("pane"), scopeGlobal},
-	{"j/k/g/G", lbl("move/top/bot"), scopeGlobal},
-	{"J/K", lbl("scroll detail"), scopeGlobal},
+	{keys: "⇥/[]", label: lbl("tab"), scope: scopeGlobal},
+	{keys: "C-h/C-l", label: lbl("pane"), scope: scopeGlobal},
+	{keys: "j/k/g/G", label: lbl("move/top/bot"), scope: scopeGlobal},
+	{keys: "J/K", label: lbl("scroll detail"), scope: scopeGlobal},
 	// "page", not "scroll detail": ctrl+d/ctrl+u half-page whichever column has the focus — the
 	// list on the left, the detail (or the PRs meta column) on the right — so a label naming one
 	// pane would be wrong half the time.
-	{"C-d/C-u", lbl("page"), scopeGlobal},
-	{"y/Y", lbl("yank/all"), scopeGlobal},
-	{keyDetail, lbl("detail"), scopeGlobal},
-	{keyRepo, lbl("repo"), scopeGlobal},
-	{keyConfig, lbl("config"), scopeGlobal},
-	{keyRefresh, lbl("refresh"), scopeGlobal},
-	{keyQuit, lbl("quit"), scopeGlobal},
+	{keys: "C-d/C-u", label: lbl("page"), scope: scopeGlobal},
+	{keys: "y/Y", label: lbl("yank/all"), scope: scopeGlobal},
+	{keys: keyDetail, label: lbl("detail"), scope: scopeGlobal},
+	{keys: keyRepo, label: lbl("repo"), scope: scopeGlobal},
+	{keys: keyConfig, label: lbl("config"), scope: scopeGlobal, commits: true},
+	{keys: keyRefresh, label: lbl("refresh"), scope: scopeGlobal},
+	{keys: keyQuit, label: lbl("quit"), scope: scopeGlobal},
 
 	// Tasks: each scope's rows are grouped and ordered look-first, so the footer reads left to
 	// right from the harmless to the decisive.
-	{keyNew, lbl("new"), scopeTasks},
-	{"h/l", lbl("fold"), scopeTasks},
-	{keyBrief, lbl("brief a planner"), scopeTasks},
-	{keyComment, lbl("comment"), scopeTasks},
-	{keyAttach, lbl("attach"), scopeTasks},
-	{keyEdit, lbl("edit"), scopeTasks},
-	{keyPriority, lbl("priority"), scopeTasks},
-	{keyUnassign, lbl("unassign"), scopeTasks},
-	{keyClose, lbl("close"), scopeTasks},
-	{keyOptions, lbl("reopen"), scopeTasks},
-	{keyDelete, lbl("scrap"), scopeTasks},
-	{"A/R", lbl("approve/reject"), scopeTasks},
-	{keyWhyNext, lbl("why next"), scopeTasks},
-	{keyFilter, func(m model) string { return "filter: " + string(m.filter) }, scopeTasks},
+	{keys: keyNew, label: lbl("new"), scope: scopeTasks, commits: true},
+	{keys: "h/l", label: lbl("fold"), scope: scopeTasks},
+	{keys: keyBrief, label: lbl("brief a planner"), scope: scopeTasks, commits: true},
+	{keys: keyComment, label: lbl("comment"), scope: scopeTasks},
+	{keys: keyAttach, label: lbl("attach"), scope: scopeTasks},
+	{keys: keyEdit, label: lbl("edit"), scope: scopeTasks},
+	{keys: keyPriority, label: lbl("priority"), scope: scopeTasks, commits: true},
+	{keys: keyUnassign, label: lbl("unassign"), scope: scopeTasks, commits: true, when: taskHeld},
+	{keys: keyClose, label: lbl("close"), scope: scopeTasks, commits: true, when: taskOpen},
+	{keys: keyOptions, label: lbl("reopen"), scope: scopeTasks, commits: true, when: model.taskReopenable},
+	{keys: keyDelete, label: lbl("scrap"), scope: scopeTasks, commits: true},
+	{keys: "A/R", label: lbl("approve/reject"), scope: scopeTasks, commits: true, when: taskAwaitsVerdict},
+	{keys: keyWhyNext, label: lbl("why next"), scope: scopeTasks},
+	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.filter) }, scope: scopeTasks},
 
 	// Agents.
-	{keyNew, lbl("new"), scopeAgents},
-	{keyTell, lbl("tell"), scopeAgents},
-	{keyAttach, lbl("attach"), scopeAgents},
-	{keyEdit, lbl("editor"), scopeAgents},
-	{keyOpen, lbl("open"), scopeAgents},
-	{keyStartS, lbl("start/stop"), scopeAgents},
-	{keyOptions, lbl("options"), scopeAgents},
-	{keyStats, lbl("stats"), scopeAgents},
-	{keyMilestone, lbl("milestone PR"), scopeAgents},
-	{keyRebuild, lbl("rebuild image"), scopeAgents},
-	{keyReject, lbl("rebase"), scopeAgents}, // R = reBase (onto the reference branch)
+	{keys: keyNew, label: lbl("new"), scope: scopeAgents, commits: true},
+	{keys: keyTell, label: lbl("tell"), scope: scopeAgents},
+	{keys: keyAttach, label: lbl("attach"), scope: scopeAgents},
+	{keys: keyEdit, label: lbl("editor"), scope: scopeAgents},
+	{keys: keyOpen, label: lbl("open"), scope: scopeAgents},
+	{keys: keyStartS, label: lbl("start/stop"), scope: scopeAgents, commits: true},
+	{keys: keyOptions, label: lbl("options"), scope: scopeAgents, commits: true},
+	{keys: keyStats, label: lbl("stats"), scope: scopeAgents},
+	{keys: keyMilestone, label: lbl("milestone PR"), scope: scopeAgents, commits: true},
+	{keys: keyRebuild, label: lbl("rebuild image"), scope: scopeAgents, commits: true},
+	{keys: keyReject, label: lbl("rebase"), scope: scopeAgents, commits: true}, // R = reBase (onto the reference branch)
 	// The label tracks the selection, since the key toggles and "retire" on an already-retired
 	// agent reads as a no-op the user would not press.
-	{keyRetire, func(m model) string {
+	{keys: keyRetire, label: func(m model) string {
 		if a, ok := m.selAgent(); ok && a.Retired {
 			return "unretire"
 		}
 		return "retire"
-	}, scopeAgents},
-	{keyClearCtx, func(m model) string {
+	}, scope: scopeAgents, commits: true},
+	{keys: keyClearCtx, label: func(m model) string {
 		if a, ok := m.selAgent(); ok && a.ClearArmed {
 			return "cancel clear"
 		}
 		return "clear context"
-	}, scopeAgents},
-	{keyDelete, lbl("delete"), scopeAgents},
-	{keyScopeTog, func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scopeAgents},
+	}, scope: scopeAgents, commits: true},
+	{keys: keyDelete, label: lbl("delete"), scope: scopeAgents, commits: true},
+	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scope: scopeAgents},
 
 	// PRs: look (verify/editor/open/lint), then the verdicts, then merge.
-	{keyVerify, lbl("verify"), scopePRs},
-	{keyEdit, lbl("editor"), scopePRs},
-	{keyOpen, lbl("open"), scopePRs},
-	{keyAttach, lbl("attach"), scopePRs},
-	{keyLint, lbl("lint"), scopePRs},
-	{keyApprove, lbl("approve"), scopePRs},
-	{keyReject, lbl("reject"), scopePRs},
-	{keyReview, lbl("agent-review"), scopePRs},
-	{keyMerge, lbl("merge"), scopePRs},
-	{keyDelete, lbl("scrap"), scopePRs},
-	{keyFilter, func(m model) string { return "filter: " + string(m.prFilter) }, scopePRs},
-	{keyScopeTog, func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scopePRs},
+	{keys: keyVerify, label: lbl("verify"), scope: scopePRs, commits: true},
+	{keys: keyEdit, label: lbl("editor"), scope: scopePRs},
+	{keys: keyOpen, label: lbl("open"), scope: scopePRs},
+	{keys: keyAttach, label: lbl("attach"), scope: scopePRs},
+	{keys: keyLint, label: lbl("lint"), scope: scopePRs, commits: true},
+	{keys: keyApprove, label: lbl("approve"), scope: scopePRs, commits: true, when: prDecidable},
+	{keys: keyReject, label: lbl("reject"), scope: scopePRs, commits: true, when: prDecidable},
+	{keys: keyReview, label: lbl("agent-review"), scope: scopePRs, commits: true, when: prDecidable},
+	{keys: keyMerge, label: lbl("merge"), scope: scopePRs, commits: true, when: model.selPRApproved},
+	{keys: keyDelete, label: lbl("scrap"), scope: scopePRs, commits: true},
+	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.prFilter) }, scope: scopePRs},
+	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scope: scopePRs},
 
 	// Repos.
-	{"enter", lbl("switch"), scopeRepos},
-	{keyColor, lbl("colour"), scopeRepos},
-	{keyConfig, lbl("config"), scopeRepos},
-	{keyDelete, lbl("forget"), scopeRepos},
+	{keys: "enter", label: lbl("switch"), scope: scopeRepos},
+	{keys: keyColor, label: lbl("colour"), scope: scopeRepos},
+	{keys: keyConfig, label: lbl("config"), scope: scopeRepos, commits: true},
+	{keys: keyDelete, label: lbl("forget"), scope: scopeRepos, commits: true},
 
 	// Mail: look only — the mailbox is the agent's to read, and the user's part is finding a message.
-	{keyAttach, lbl("attach"), scopeMail},
-	{keyMailWho, func(m model) string {
+	{keys: keyAttach, label: lbl("attach"), scope: scopeMail},
+	{keys: keyMailWho, label: func(m model) string {
 		if m.mailAgent != "" {
 			return "who: " + m.mailAgent
 		}
 		return "who: all"
-	}, scopeMail},
-	{keyFilter, func(m model) string { return "filter: " + string(m.mailFilter) }, scopeMail},
-	{keyScopeTog, func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scopeMail},
+	}, scope: scopeMail},
+	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.mailFilter) }, scope: scopeMail},
+	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scope: scopeMail},
 
 	// Chat.
-	{"enter", lbl("compose"), scopeChat},
-	{keyApprove, lbl("add member"), scopeChat},
-	{keyReject, lbl("remove member"), scopeChat},
-	{keyNew, lbl("new meeting"), scopeChat},
-	{keyCloseMeet, lbl("close meeting"), scopeChat},
+	{keys: "enter", label: lbl("compose"), scope: scopeChat},
+	{keys: keyApprove, label: lbl("add member"), scope: scopeChat, commits: true},
+	{keys: keyReject, label: lbl("remove member"), scope: scopeChat, commits: true},
+	{keys: keyNew, label: lbl("new meeting"), scope: scopeChat, commits: true},
+	{keys: keyCloseMeet, label: lbl("close meeting"), scope: scopeChat, commits: true},
 
 	// Runs.
-	{keyNew, lbl("queue a run"), scopeRuns},
-	{keyPriority, lbl("priority"), scopeRuns},
-	{keyDelete, lbl("cancel"), scopeRuns},
-	{keyFilter, func(m model) string { return "filter: " + string(m.runFilter) }, scopeRuns},
-	{keyScopeTog, func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scopeRuns},
+	{keys: keyNew, label: lbl("queue a run"), scope: scopeRuns}, // opens a prompt to type the command in
+	{keys: keyPriority, label: lbl("priority"), scope: scopeRuns, commits: true},
+	{keys: keyDelete, label: lbl("cancel"), scope: scopeRuns, commits: true},
+	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.runFilter) }, scope: scopeRuns},
+	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scope: scopeRuns},
 }
 
-// footerFor renders the "key label · key label" hints for a scope from the keymap.
+// footerFor renders a scope's "key label" hints — the navigating keys, plus one entry for the
+// prefix. The footer carried a dozen per tab and had no room left for the movement keys; the menu
+// lists the rest in context, which is what that buys back.
 func (m model) footerFor(scope keyScope) string {
 	var parts []string
 	for _, b := range keymap {
-		if b.scope == scope {
+		if b.scope == scope && !b.commits {
 			parts = append(parts, b.keys+" "+b.label(m))
 		}
 	}
+	if scope != scopeGlobal {
+		parts = append(parts, keyMenuShown+" "+menuLabel(m, scope))
+	}
 	return strings.Join(parts, " · ")
+}
+
+// menuLabel names the prefix entry, counting what is actually on offer for the selected row: a bare
+// "actions" on a row with none would send the reader into an empty box.
+func menuLabel(m model, scope keyScope) string {
+	n := 0
+	for _, b := range keymap {
+		if !b.commits || (b.scope != scope && b.scope != scopeGlobal) {
+			continue
+		}
+		if b.when != nil && !b.when(m) {
+			continue
+		}
+		n++
+	}
+	if n == 0 {
+		return "actions (none here)"
+	}
+	return "actions"
 }
 
 // tabScope maps a tab index to its keymap scope.
