@@ -145,9 +145,9 @@ func newModel(cl *client.HTTP, ch <-chan api.BoardState, root string) model {
 	// Tasks open on "active" — the open backlog plus whatever changed in the last couple of hours.
 	// Plain "open" hid a task the moment it closed, so the work just finished left no trace on the
 	// board and the tab read as though nothing had happened.
-	// Mail opens on "unread" — the mailbox keeps everything, so the whole history is rarely the
-	// question; what has not been read yet always is.
-	m := model{cl: cl, ch: ch, root: root, filter: api.FilterActive, prFilter: api.PRFilterActive, runFilter: api.RunFilterActive, mailFilter: api.MailUnread, collapsed: map[string]bool{}, merging: map[string]bool{}, busy: map[string]string{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
+	// Mail opens on "active" — unread plus whatever changed inside the shared window. The mailbox
+	// keeps everything for ever, so "all" is the one view that gets less usable every day.
+	m := model{cl: cl, ch: ch, root: root, filter: api.FilterActive, prFilter: api.PRFilterActive, runFilter: api.RunFilterActive, mailFilter: api.MailActive, collapsed: map[string]bool{}, merging: map[string]bool{}, busy: map[string]string{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
 	m.reclamp()
 	return m
 }

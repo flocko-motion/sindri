@@ -1,6 +1,9 @@
 package api
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // fleetMail is a mailbox spanning two agents, one message read.
 func fleetMail() []Mail {
@@ -83,4 +86,67 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// TestActiveIsUnreadPlusJustRead is the segment's whole shape, and the reason it is the default: the
+// mailbox is never pruned, so "all" grows for the life of the machine while "unread" hides what you
+// have just dealt with. Active is the union, exactly as it is for tasks.
+func TestActiveIsUnreadPlusJustRead(t *testing.T) {
+	now := time.Now().UTC()
+	recent := now.Add(-time.Minute).Format(time.RFC3339)
+	old := now.Add(-48 * time.Hour).Format(time.RFC3339)
+
+	unread := Mail{ID: 1, Agent: "dvalin", SentAt: old}
+	justRead := Mail{ID: 2, Agent: "dvalin", SentAt: old, ReadAt: recent}
+	longRead := Mail{ID: 3, Agent: "dvalin", SentAt: old, ReadAt: old}
+
+	got := FilterMail(MailActive, "", []Mail{unread, justRead, longRead})
+	if len(got) != 2 {
+		t.Fatalf("active should keep the unread and the just-read, got %d", len(got))
+	}
+	for _, m := range got {
+		if m.ID == 3 {
+			t.Error("a message read two days ago is not active")
+		}
+	}
+	// The change time is the READ, not the send: this message was sent days ago and dealt with now.
+	if MailChangedAt(justRead) != recent {
+		t.Errorf("MailChangedAt = %q, want the read time %q", MailChangedAt(justRead), recent)
+	}
+	if MailChangedAt(unread) != old {
+		t.Errorf("an unread message last changed when it was sent, got %q", MailChangedAt(unread))
+	}
+}
+
+// TestActiveLeadsAndUnreadRemains: active is what a view opens on, and the cycle reaches it first —
+// but unread stays, being the sharpest question to ask of a mailbox.
+func TestActiveLeadsAndUnreadRemains(t *testing.T) {
+	if MailFilters[0] != MailActive {
+		t.Errorf("MailFilters should lead with active, got %q", MailFilters[0])
+	}
+	found := false
+	for _, f := range MailFilters {
+		if f == MailUnread {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("unread must remain on offer")
+	}
+	if got := NextMailFilter(MailActive); got != MailUnread {
+		t.Errorf("the cycle should go active → unread, got %q", got)
+	}
+}
+
+// TestTheBadgeStillCountsUnreadNotActive is the invariant the PR badge already holds: the marker says
+// what NEEDS reading, and a message read ten minutes ago needs nothing.
+func TestTheBadgeStillCountsUnreadNotActive(t *testing.T) {
+	recent := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
+	mail := []Mail{
+		{ID: 1, Agent: "user", SentAt: recent},
+		{ID: 2, Agent: "user", SentAt: recent, ReadAt: recent},
+	}
+	if got := CountUnreadMail(mail); got != 1 {
+		t.Errorf("CountUnreadMail = %d, want 1 — the badge must not follow the filter", got)
+	}
 }

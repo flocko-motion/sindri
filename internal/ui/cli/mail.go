@@ -72,7 +72,7 @@ func mailListCmd() *cobra.Command {
 	}
 	c.Flags().StringVar(&agent, "agent", "", "only mail sent to this agent")
 	c.Flags().BoolVar(&mine, "mine", false, "only mail addressed to you — what an agent has told you directly")
-	c.Flags().StringVar(&filter, "filter", string(api.MailUnread), "which mail to list: "+api.MailFilterNames())
+	c.Flags().StringVar(&filter, "filter", string(api.MailActive), "which mail to list: "+api.MailFilterNames())
 	return c
 }
 

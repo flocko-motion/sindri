@@ -120,3 +120,34 @@ same grouping, so each answers "is anything waiting for me?" the same way.
 - **WHEN** the user narrows either front-end to their own mail
 - **THEN** both show the same set, grouped the same way, and the listing says how many of the
   fleet's unread are theirs
+
+### Requirement: The mail view opens on what is active, not on everything
+
+The mail view SHALL offer an ACTIVE segment — unread, PLUS anything read inside the window
+the other views already share — and SHALL open on it. Unread SHALL remain on offer, being
+still the sharpest question to ask of a mailbox, but it is not what a view should open on: a
+message vanishing from the list as it is read leaves no trace of what was just dealt with.
+
+A message's last change SHALL be when it was READ if it has been, else when it was sent. One
+sent days ago and read a moment ago changed a moment ago, and that is what "recently" must
+mean for the segment to say anything useful.
+
+The window SHALL be the one the other views use rather than a mail-specific one: if it is
+wrong it should be wrong everywhere at once and fixable in one place.
+
+This matters more here than on any other view because no mail is ever deleted: the unbounded
+segment grows for the life of the machine, so it is the one view that gets less usable every
+day, and a bounded default is what keeps it readable a year on.
+
+The unread MARKER SHALL NOT follow the filter. It says what needs reading, and a message read
+ten minutes ago needs nothing.
+
+#### Scenario: Opening the view
+
+- **WHEN** the user opens the mail view without asking for a segment
+- **THEN** it shows unread mail plus what was read inside the shared window
+
+#### Scenario: A message read a moment ago
+
+- **WHEN** a message sent days ago is read now
+- **THEN** it counts as recently changed and stays on screen, and the marker stops counting it

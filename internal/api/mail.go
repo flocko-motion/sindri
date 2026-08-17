@@ -45,14 +45,19 @@ type MailFilter string
 
 // The segments. Their spelling is the CLI's flag value and the word the TUI footer shows.
 const (
+	// MailActive is unread OR read recently — the mail equivalent of the Tasks segment of the same
+	// name, where unread is "open" and read is "closed". It matters more here than anywhere else
+	// because no mail is ever deleted: "all" grows for the life of the machine, so it is the one view
+	// that gets less usable every day, and a bounded default is what keeps the tab readable a year on.
+	MailActive MailFilter = "active"
 	MailUnread MailFilter = "unread" // still waiting to be read
 	MailAll    MailFilter = "all"    // every message, read or not
 )
 
 // MailFilters is the order both front-ends present: the CLI lists it in its help, the TUI cycles
-// through it, so the two describe the same set the same way round. Unread leads because it is the
-// question worth asking of a mailbox.
-var MailFilters = []MailFilter{MailUnread, MailAll}
+// through it, so the two describe the same set the same way round. Active leads because it is what a
+// view should OPEN on; unread stays, being still the sharpest question to ask of a mailbox.
+var MailFilters = []MailFilter{MailActive, MailUnread, MailAll}
 
 // MatchesMailFilter reports whether m belongs in the view f names, narrowed to one recipient when
 // agent is given ("" = every agent). An unrecognised filter admits everything: a listing that showed
@@ -61,10 +66,25 @@ func MatchesMailFilter(f MailFilter, agent string, m Mail) bool {
 	if agent != "" && m.Agent != agent {
 		return false
 	}
-	if f == MailUnread {
+	switch f {
+	case MailUnread:
 		return !m.Read()
+	case MailActive:
+		// A UNION, as it is for tasks: everything still waiting, plus whatever changed inside the
+		// window — so a message read a moment ago stays on screen instead of vanishing as it is read.
+		return !m.Read() || changedWithin(MailChangedAt(m), ActiveWindow)
 	}
 	return true
+}
+
+// MailChangedAt is when a message last changed: when it was READ if it has been, else when it was
+// sent. A message sent days ago and read ten minutes ago changed ten minutes ago, and that is what
+// "recently" has to mean for the active segment to say anything useful.
+func MailChangedAt(m Mail) string {
+	if m.ReadAt != "" {
+		return m.ReadAt
+	}
+	return m.SentAt
 }
 
 // FilterMail keeps the messages the filter admits, in the order given.

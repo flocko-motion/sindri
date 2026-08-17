@@ -44,6 +44,15 @@
 - [x] 5b.5 Parity: `sindri mail list --mine` narrows to them, the listing groups by the same rule, and
       the closing line names how many of the fleet's unread are the user's.
 
+## 5c. The active segment (sd-594dc0)
+
+- [x] 5c.1 `MailActive` = unread OR changed inside `api.ActiveWindow`, the shared constant rather than
+      a mail-specific one.
+- [x] 5c.2 A message's change time is its read time when set, else its send time.
+- [x] 5c.3 It leads `MailFilters`, so the TUI cycle and the CLI help both reach it first, and both
+      front-ends default to it.
+- [x] 5c.4 The unread badge and marker do NOT follow — they say what needs reading.
+
 ## 6. Verify
 
 - [x] 6.1 A note reaches the user's mailbox, attributed, unpushed, with the remainder stated.
@@ -54,4 +63,6 @@
 - [x] 6.6 The marker counts the user's unread and not the mailbox's, through the board the hub builds.
 - [x] 6.7 A note from another repo is listed, grouped as foreign, and marked; agent traffic from
       another repo is not.
-- [x] 6.8 `make verify` passes.
+- [x] 6.8 Active keeps the unread and the just-read, drops the long-read, and reads its change time
+      from the read stamp; the badge still counts unread.
+- [x] 6.9 `make verify` passes.
