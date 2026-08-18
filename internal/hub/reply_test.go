@@ -150,3 +150,41 @@ func TestTheUserRepliesFromWhereTheyAreReading(t *testing.T) {
 	}
 	_ = store.Agent{}
 }
+
+// TestAnAgentSeesTheIdsItCanReplyTo is the gap this rendering exposed: reading mail is the only place an
+// agent learns an id, so the read half has to show them — otherwise `reply <mail-id>` is a verb whose
+// argument the agent can never obtain. Both spellings are accepted, since the bare one is what anything
+// already told to an agent contains.
+func TestAnAgentSeesTheIdsItCanReplyTo(t *testing.T) {
+	h := twoRepos(t)
+	ps := h.store.For(testProject)
+	m, err := ps.AddMail("dvalin", "lib/galar", "the second call is cached upstream", false, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, code := execAs(t, h, "dvalin", "mail")
+	if code != 0 {
+		t.Fatalf("mail failed (%d): %s", code, out)
+	}
+	if !strings.Contains(out, api.MailID(m.ID)) {
+		t.Errorf("reading mail should show each id, so a reply has something to name: %s", out)
+	}
+
+	// The prefixed form works...
+	if out, code := execIn(t, h, testProject, "dvalin", "reply", api.MailID(m.ID), "understood"); code != 0 {
+		t.Fatalf("a prefixed id should be accepted (%d): %s", code, out)
+	}
+	// ...and so does the bare one, which is what older messages and shell history carry.
+	m2, err := ps.AddMail("dvalin", "lib/galar", "one more thing", false, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, code := execIn(t, h, testProject, "dvalin", "reply", fmt.Sprint(m2.ID), "also understood"); code != 0 {
+		t.Fatalf("a bare id must keep working (%d): %s", code, out)
+	}
+	// And a refusal shows the shape rather than just saying no.
+	out, code = execAs(t, h, "dvalin", "reply", "nonsense", "hello")
+	if code == 0 || !strings.Contains(out, api.MailIDPrefix) {
+		t.Errorf("the refusal should show what an id looks like (%d): %s", code, out)
+	}
+}

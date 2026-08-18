@@ -66,15 +66,15 @@ const ReplyMailToSelf = "Not sent: that is you. Mail reaches another agent; to l
 
 // ReplyReplyUsage answers a reply with no id or no message. It names where the ids come from, since an
 // agent has no reason to have memorised one.
-const ReplyReplyUsage = "usage: reply <mail-id> <message...>\n" +
+const ReplyReplyUsage = "usage: reply <mail-id> <message...>   (an id reads like ml-47)\n" +
 	"  Answers a message you were sent — the reply goes to whoever sent it, so you do not have\n" +
 	"  to know or retype a name. `sindri mail` lists what is waiting, each line with its id."
 
 // ReplyReplied confirms a reply and names who it went to, since the sender was resolved from the stored
 // row rather than typed — the agent should see whom the hub decided that was.
-func ReplyReplied(to string, id int64) string {
-	return fmt.Sprintf("Replied to %s (message %d) — it reads this at its next `sindri`. Threaded, so "+
-		"they see which of their messages you are answering.", to, id)
+func ReplyReplied(to, id string) string {
+	return fmt.Sprintf("Replied to %s (%s) — it reads this at its next `sindri`. Threaded, so they see "+
+		"which of their messages you are answering.", to, id)
 }
 
 // ReplyReplyToHub refuses a reply to the hub, naming what to use instead. The hub is not a

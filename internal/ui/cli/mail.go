@@ -9,7 +9,6 @@ package cli
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
@@ -80,7 +79,7 @@ func mailListCmd() *cobra.Command {
 // read in everywhere else: the two sat adjacent and unlabelled the other way round, and were misread
 // over and over — labelling a backwards order would only have made the backwardness legible.
 var mailListTable = table.Table{
-	{Label: "id", Width: 6},
+	{Label: "id", Width: 8}, // wide enough for the rendered form (-> api.MailID), not the bare integer
 	{Label: "repo", Width: 10, Clip: true},
 	{Label: "from", Width: 10},
 	{Label: "to", Width: 12},
@@ -100,7 +99,7 @@ func mailLine(m api.Mail) string {
 		state += "+pushed"
 	}
 	return mailListTable.Line(
-		table.Cell{Text: strconv.FormatInt(m.ID, 10)},
+		table.Cell{Text: api.MailID(m.ID)},
 		table.Cell{Text: m.Repo},
 		table.Cell{Text: dash(m.Sender)},
 		table.Cell{Text: m.Agent},
@@ -124,7 +123,7 @@ func mailFooter(st api.BoardState, shown []api.Mail, f api.MailFilter, agent str
 	tail := ""
 	if len(st.Mail) < st.MailTotal {
 		tail = fmt.Sprintf(" Showing the last %d of %d messages; older mail is reachable by id "+
-			"(`sindri mail show <id>`).", len(st.Mail), st.MailTotal)
+			"(`sindri mail show ml-<n>`).", len(st.Mail), st.MailTotal)
 	}
 	// The user's own unread is named separately, and fleet-wide: it is the number that asks something
 	// of them, where the mailbox total merely says how much traffic there has been.
@@ -143,9 +142,9 @@ func mailReplyCmd() *cobra.Command {
 		Use: "reply <id> <message...>", Short: "Answer a message an agent sent you (it goes to whoever sent it)",
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
-			var id int64
-			if _, err := fmt.Sscanf(args[0], "%d", &id); err != nil {
-				return fmt.Errorf("mail id must be a number, got %q", args[0])
+			id, err := api.ParseMailID(args[0])
+			if err != nil {
+				return err
 			}
 			msg := strings.Join(args[1:], " ")
 			return withBackend(func(b backend) error {
@@ -163,9 +162,9 @@ func mailShowCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "show <id>", Short: "Show one message in full (the list carries only an opening)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			var id int64
-			if _, err := fmt.Sscanf(args[0], "%d", &id); err != nil {
-				return fmt.Errorf("mail id must be a number, got %q", args[0])
+			id, err := api.ParseMailID(args[0])
+			if err != nil {
+				return err
 			}
 			return withBackend(func(b backend) error {
 				m, err := b.MailBody(id)

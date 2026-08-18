@@ -8,7 +8,7 @@
 package tui
 
 import (
-	"fmt"
+	"github.com/flo-at/sindri/internal/api"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -72,8 +72,8 @@ func (m *model) submitInput() tea.Cmd {
 		return mutateThenRefresh(cl, func() error { return cl.MailAgent(target, v) })
 	case inputMailReply:
 		// The recipient comes from the message, not from this prompt — which is why the target is an id.
-		var id int64
-		if _, err := fmt.Sscanf(target, "%d", &id); err != nil {
+		id, err := api.ParseMailID(target)
+		if err != nil {
 			return nil
 		}
 		return mutateThenRefresh(cl, func() error { return cl.ReplyToMail(id, v) })

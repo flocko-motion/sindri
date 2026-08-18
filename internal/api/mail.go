@@ -35,6 +35,25 @@ type Mail struct {
 	Pushed bool `json:"pushed,omitempty"`
 }
 
+// MailIDPrefix marks a mail id as an id. Every other id in sindri carries one — sd-, td-, pr-, os-,
+// gh- — and a bare integer beside agent names, repo names and ages does not read as something you can
+// address: "reply to 47" is not an instruction, "reply to ml-47" is.
+const MailIDPrefix = "ml-"
+
+// MailID renders a mail id for display and for anything the hub writes into a message.
+func MailID(id int64) string { return fmt.Sprintf("%s%d", MailIDPrefix, id) }
+
+// ParseMailID reads either spelling. The BARE form keeps working because it is already in users'
+// shell history and in whatever agents have been told — breaking that to gain a prefix would be a poor
+// trade, and the prefix is about how an id READS, not about what is accepted.
+func ParseMailID(s string) (int64, error) {
+	var id int64
+	if _, err := fmt.Sscanf(strings.TrimPrefix(strings.TrimSpace(s), MailIDPrefix), "%d", &id); err != nil || id <= 0 {
+		return 0, fmt.Errorf("%q is not a mail id — they read like %s47", s, MailIDPrefix)
+	}
+	return id, nil
+}
+
 // MailToUser reports whether a message is addressed to the USER rather than to an agent — the only
 // part of the mailbox a person is expected to read, and the rule behind both the marker and the way
 // each front-end separates those rows out.

@@ -37,7 +37,9 @@ func (h *Hub) cmdMail(c registry.Caller, args []string, out io.Writer) (int, err
 	}
 	fmt.Fprintf(out, "%d message(s) waiting, oldest first:\n", len(unread))
 	for _, m := range unread {
-		fmt.Fprintf(out, "\n── %s · %s ──\n%s\n", m.SentAt, m.Sender, m.Body)
+		// The id is on the header because an agent that wants to answer needs it, and reading is where
+		// it learns one — nothing else hands it out (-> cmdReply).
+		fmt.Fprintf(out, "\n── %s · %s · %s ──\n%s\n", api.MailID(m.ID), m.SentAt, m.Sender, m.Body)
 		if err := ps.MarkMailRead(m.ID); err != nil {
 			return 1, err
 		}
@@ -125,9 +127,9 @@ func (h *Hub) cmdReply(c registry.Caller, args []string, out io.Writer) (int, er
 		fmt.Fprintln(out, workflow.ReplyReplyUsage)
 		return 2, nil
 	}
-	var id int64
-	if _, err := fmt.Sscanf(args[0], "%d", &id); err != nil {
-		fmt.Fprintf(out, "%q is not a message id — `sindri mail` lists yours with theirs.\n", args[0])
+	id, err := api.ParseMailID(args[0])
+	if err != nil {
+		fmt.Fprintf(out, "%v — `sindri mail` lists what is waiting, each line with its id.\n", err)
 		return 2, nil
 	}
 	msg := strings.TrimSpace(strings.Join(args[1:], " "))
@@ -139,14 +141,14 @@ func (h *Hub) cmdReply(c registry.Caller, args []string, out io.Writer) (int, er
 		fmt.Fprintln(out, workflow.ReplyMailTooLong(n, maxMessageLen))
 		return 1, nil
 	}
-	original, ok, err := h.store.MailByID(id)
-	if err != nil {
-		return 1, err
+	original, ok, merr := h.store.MailByID(id)
+	if merr != nil {
+		return 1, merr
 	}
 	// Yours to answer: a reply to somebody else's mail would be a message they never see the question
 	// for, and reading another agent's mailbox is not what the id is for.
 	if !ok || original.Project != c.Project || original.Agent != c.Agent {
-		fmt.Fprintf(out, "No message %d in your mailbox — `sindri mail` shows what you were sent.\n", id)
+		fmt.Fprintf(out, "No message %s in your mailbox — `sindri mail` shows what you were sent.\n", api.MailID(id))
 		return 1, nil
 	}
 	if original.Sender == "hub" || original.Sender == "" {
@@ -170,6 +172,6 @@ func (h *Hub) cmdReply(c registry.Caller, args []string, out io.Writer) (int, er
 		return 1, err
 	}
 	_ = h.store.For(c.Project).Log(c.Agent, "mail-reply", fmt.Sprintf("%d to %s: %s", id, name, msg))
-	fmt.Fprintln(out, workflow.ReplyReplied(original.Sender, id))
+	fmt.Fprintln(out, workflow.ReplyReplied(original.Sender, api.MailID(id)))
 	return 0, nil
 }

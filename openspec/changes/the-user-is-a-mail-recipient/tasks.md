@@ -108,6 +108,16 @@
       thing waiting, and again when something new arrives.
 - [x] 5f.4 Supersedes sd-2f38d9's idle-nudge paragraph, whose 5d.7 line was left open for this.
 
+## 5g. Mail ids read as ids (sd-c84011)
+
+- [x] 5g.1 `api.MailID` / `api.ParseMailID` — one home for the spelling, since the hub writes ids into
+      messages and both front-ends render and parse them.
+- [x] 5g.2 Rendered in both front-ends, in the hub's replies, and in the hints that name an id.
+- [x] 5g.3 Both spellings accepted; the refusal shows the shape.
+- [x] 5g.4 The stored key is untouched, so nothing migrates.
+- [x] 5g.5 Reading mail now shows each id — the only place an agent can learn one, without which
+      `reply` has an argument it cannot obtain.
+
 ## 6. Verify
 
 - [x] 6.1 A note reaches the user's mailbox, attributed, unpushed, with the remainder stated.
@@ -132,4 +142,6 @@
       is uncharged; another agent's mail is refused; and the user can reply from either front-end.
 - [x] 6.14 An idle agent with mail is woken; the same message is not nudged twice and new mail is; an
       agent that needs a human, is parked, or holds work is left alone; an empty mailbox wakes nobody.
-- [x] 6.15 `make verify` passes.
+- [x] 6.15 Both spellings parse and round-trip, bad ones are refused with the shape shown, and an agent
+      can see the ids it may reply to.
+- [x] 6.16 `make verify` passes.

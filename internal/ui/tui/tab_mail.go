@@ -67,6 +67,8 @@ func (m model) mailRows() []row {
 		if api.MailToUser(msg) && !msg.Read() {
 			state = "→ you " + state
 		}
+		// The row's id is the RENDERED form: it is what selection keys off and what `y` copies, so what
+		// a reader sees is what they can type back (parsed by -> api.ParseMailID).
 		r := row{mailTable.Line(
 			table.Cell{Text: msg.Repo, Style: m.repoStyle(msg.Project).Render},
 			table.Cell{Text: dash(msg.Sender)},
@@ -74,7 +76,7 @@ func (m model) mailRows() []row {
 			table.Cell{Text: state, Style: st.Render},
 			table.Cell{Text: shortAge(msg.SentAt), Style: dimStyle.Render},
 			table.Cell{Text: oneLineText(msg.Body)},
-		), fmt.Sprint(msg.ID)}
+		), api.MailID(msg.ID)}
 		// Foreign here means the same as on the other scoped tabs: on screen only because it waits on
 		// the user, so the heading says so — a repo column is skimmed (-> sectioned).
 		if m.inScope(msg.Project) {
@@ -88,7 +90,7 @@ func (m model) mailRows() []row {
 	// everything, and finding last month's message is the whole reason nothing is deleted. Outside the
 	// labelled rows, since it is a note about the listing rather than a message in it.
 	if n, total := len(m.state.Mail), m.state.MailTotal; total > n {
-		rows = append(rows, row{dimStyle.Render(fmt.Sprintf("… showing the last %d of %d messages — older mail: `sindri mail show <id>`", n, total)), ""})
+		rows = append(rows, row{dimStyle.Render(fmt.Sprintf("… showing the last %d of %d messages — older mail: `sindri mail show ml-<n>`", n, total)), ""})
 	}
 	return rows
 }
@@ -104,9 +106,12 @@ func oneLineText(s string) string {
 
 // selMail returns the selected message from the board's window.
 func (m model) selMail() (api.Mail, bool) {
-	id := m.selID()
+	id, err := api.ParseMailID(m.selID())
+	if err != nil {
+		return api.Mail{}, false // the "showing the last N of M" row, which is not a message
+	}
 	for _, msg := range m.state.Mail {
-		if fmt.Sprint(msg.ID) == id {
+		if msg.ID == id {
 			return msg, true
 		}
 	}

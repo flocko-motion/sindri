@@ -334,3 +334,36 @@ new thing waiting and SHALL earn another.
 
 - **WHEN** an agent with unread mail is blocked, signed out, mid-turn, retired or full
 - **THEN** it is not woken
+
+### Requirement: A mail id reads as an id
+
+A mail id SHALL be rendered with a prefix, in both front-ends and in every message the hub
+writes. Every other id in the system carries one, and a bare integer shown beside agent names,
+repo names and ages does not read as something addressable: "reply to 47" is not an
+instruction where "reply to ml-47" is.
+
+The stored key SHALL NOT change. Only the rendering does, so nothing migrates and ids stay
+globally unique.
+
+BOTH spellings SHALL be accepted wherever an id is read — prefixed and bare. The bare form is
+already in users' shell history and in whatever agents have been told, and breaking it to gain
+a prefix would be a poor trade. A refusal SHALL show the shape, since somebody who typed a
+wrong one has not necessarily seen a right one.
+
+Reading mail SHALL show each message's id. It is the only place an agent learns one, so
+without it the reply verb has an argument the agent cannot obtain.
+
+#### Scenario: An id in a row
+
+- **WHEN** a message is listed in either front-end
+- **THEN** its id is shown prefixed
+
+#### Scenario: Typing either form
+
+- **WHEN** an id is given prefixed or bare
+- **THEN** both resolve to the same message
+
+#### Scenario: Learning an id
+
+- **WHEN** an agent reads its mail
+- **THEN** each message shows the id a reply would name

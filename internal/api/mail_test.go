@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -148,5 +149,33 @@ func TestTheBadgeStillCountsUnreadNotActive(t *testing.T) {
 	}
 	if got := CountUnreadMail(mail); got != 1 {
 		t.Errorf("CountUnreadMail = %d, want 1 — the badge must not follow the filter", got)
+	}
+}
+
+// TestMailIdsReadAsIdsAndBothSpellingsParse: every other id in sindri carries a prefix, and a bare
+// integer beside agent names and ages does not read as something you can address. The bare form still
+// parses, because it is already in shell history and in whatever agents have been told.
+func TestMailIdsReadAsIdsAndBothSpellingsParse(t *testing.T) {
+	if got := MailID(47); got != "ml-47" {
+		t.Errorf("MailID(47) = %q, want ml-47", got)
+	}
+	for _, in := range []string{"ml-47", "47", " ml-47 "} {
+		got, err := ParseMailID(in)
+		if err != nil || got != 47 {
+			t.Errorf("ParseMailID(%q) = %d, %v; want 47", in, got, err)
+		}
+	}
+	// A round trip, since the rendered form is what a front-end carries as a row id and then parses back.
+	if got, err := ParseMailID(MailID(1234)); err != nil || got != 1234 {
+		t.Errorf("round trip failed: %d, %v", got, err)
+	}
+	for _, bad := range []string{"", "ml-", "ml-x", "no", "0", "-3"} {
+		if _, err := ParseMailID(bad); err == nil {
+			t.Errorf("ParseMailID(%q) should refuse rather than resolve to a mailbox", bad)
+		}
+	}
+	// The refusal shows the shape, since somebody typing a wrong one has not seen a right one.
+	if _, err := ParseMailID("nonsense"); err == nil || !strings.Contains(err.Error(), MailIDPrefix) {
+		t.Errorf("the refusal should show the shape: %v", err)
 	}
 }

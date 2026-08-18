@@ -9,6 +9,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/flo-at/sindri/internal/api"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -119,8 +120,8 @@ func (m *model) syncDetail() tea.Cmd {
 		// A body is fetched per selection rather than carried for every row: the board's window holds
 		// a preview each, and a rejection's findings run to hundreds of lines.
 		m.mailBody, m.mailBodyID = "", 0
-		var mid int64
-		if _, err := fmt.Sscanf(id, "%d", &mid); err != nil {
+		mid, perr := api.ParseMailID(id)
+		if perr != nil {
 			return nil // the "showing the last N of M" row, which is not a message
 		}
 		return mailBodyFetchCmd(cl, mid)
