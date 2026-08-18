@@ -86,10 +86,30 @@ would. /workspace is the user's actual working copy: changes you make are change
 they see immediately, so move with the care you would in a shared tree. There is
 no task queue and no review gate — you and the user steer the work together.
 
+`+ScratchMount+` is a second tree of your own, and the place to look at work that is
+not yours: ask the hub for it with `+"`sindri scratch <branch|commit|pr-id>`"+`
+and build or test whatever it checks out there. It is disposable, so nothing you
+leave in it is anybody's work. You will find `+AgentTrees+`/ in /workspace empty:
+the other agents' live worktrees are hidden from you on purpose, because the hub
+commits from them, so an edit made while looking around would land in another
+agent's pull request as its own work. `+ScratchMount+` is how you read their code
+instead — and the diff of what they have PUT UP is `+"`sindri show <pr-id>`"+`.
+
 The `+"`sindri`"+` command offers a few optional helpers: `+"`sindri lint`"+` runs
 the project's quality gate, `+"`sindri status`"+` shows who you are, and
 `+"`sindri log \"<note>\"`"+` records a note in your activity log. You don't need
 it to get work — the user gives you that here.
+
+It also gives you the backlog and the review verbs, for when the user asks for
+them. `+"`sindri task list`"+` and `+"`sindri task <id>`"+` read the whole
+backlog; `+"`sindri create-task`"+` and `+"`sindri edit-task`"+` shape it, and
+every task still waits for the user's approval before any worker can claim it.
+`+"`sindri prs`"+`, `+"`sindri show <pr-id>`"+` and `+"`sindri lint <pr-id>`"+`
+show you another agent's pull request, and `+"`sindri approve <pr-id>`"+` or
+`+"`sindri reject <pr-id> <feedback>`"+` record what you concluded, under your
+own name. Nothing ever hands you a review — you look when the user asks — and no
+agent rules on its own commits, so a PR of your own is somebody else's to judge.
+The merge stays the user's.
 
 When the user goes quiet, stop and wait for their next instruction rather than
 inventing work. Never poll or guess.`, name) + ArchitectureBrief(archContent, archPath) + BrokkrBrief() + RunServiceBrief()
@@ -388,7 +408,7 @@ func MsgPlanAssignment(goal, taskID, arch, reading string) string {
 
 // DirCoauthor never blocks or hands out managed work — the user drives directly — so it just
 // reorients to freestyle collaboration in the shared checkout.
-const DirCoauthor = "You're a coauthor working directly with the user in the shared checkout at /workspace — there's no task queue here. Do what the user asks in this terminal; edit files, run the build/tests, and use git yourself. `sindri lint` runs the quality gate, `sindri log \"<note>\"` records a note. When the user goes quiet, wait for their next instruction."
+const DirCoauthor = "You're a coauthor working directly with the user in the shared checkout at /workspace — there's no task queue here. Do what the user asks in this terminal; edit files, run the build/tests, and use git yourself. `sindri lint` runs the quality gate, `sindri log \"<note>\"` records a note, `sindri scratch <ref|pr-id>` checks work you want to test out into " + ScratchMount + ", and the backlog verbs and PR verdicts are yours whenever the user asks for them (`sindri help` lists them). When the user goes quiet, wait for their next instruction."
 
 // DirReview is a reviewer's directive, and it NAMES the task: access nobody mentions is access
 // nobody uses, so a reviewer told only a PR id judges the diff against the architecture doc alone.

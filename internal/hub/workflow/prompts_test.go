@@ -69,9 +69,20 @@ func TestPlannerBriefOffersTaskOnlyPath(t *testing.T) {
 			t.Errorf("the planner brief must offer the task-only path, missing %q:\n%s", want, p)
 		}
 	}
-	for _, role := range []string{"worker", "reviewer", "coauthor"} {
+	for _, role := range []string{"worker", "reviewer"} {
 		if p := SystemPrompt("x", role, "", "ARCHITECTURE.md"); strings.Contains(p, "create-task") {
 			t.Errorf("%s should not see the planner's create-task guidance:\n%s", role, p)
+		}
+	}
+	// The coauthor holds create-task too (sd-44550c), so its brief names the verb — but none of the
+	// planner's own path, which is a loop it does not ride: it is steered by the user, turn by turn.
+	co := SystemPrompt("x", "coauthor", "", "ARCHITECTURE.md")
+	if !strings.Contains(co, "create-task") {
+		t.Errorf("the coauthor holds create-task, so its brief must name it:\n%s", co)
+	}
+	for _, planner := range []string{"a complete outcome", "sindri state idle"} {
+		if strings.Contains(co, planner) {
+			t.Errorf("the coauthor should not see the planner's own path (%q):\n%s", planner, co)
 		}
 	}
 }

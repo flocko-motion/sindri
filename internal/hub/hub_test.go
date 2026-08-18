@@ -429,8 +429,8 @@ func TestReviewerReadsButCannotAct(t *testing.T) {
 }
 
 // TestPlannerGainsApproveButNotReject: a planner may add its optional, advisory badge (-> pr.go
-// CmdApprove's role branch), but never a reject — that stays the reviewer's alone, since the
-// planner grant is a second opinion beside a verdict, not a verdict of its own.
+// CmdApprove's role branch), but never a reject — the planner grant is a second opinion beside a
+// verdict, not a verdict of its own. (A coauthor's IS a verdict: -> the test below.)
 func TestPlannerGainsApproveButNotReject(t *testing.T) {
 	h := newHub(t)
 	reg := h.registry()
@@ -447,9 +447,51 @@ func TestPlannerGainsApproveButNotReject(t *testing.T) {
 	if available("planner")["reject"] {
 		t.Error("a planner must not be able to reject — that stays the reviewer's alone")
 	}
-	for _, role := range []string{"worker", "coauthor"} {
-		if available(role)["approve"] {
-			t.Errorf("%s must not gain approve — only reviewer and planner may", role)
+	if available("worker")["approve"] {
+		t.Error("a worker must not gain approve — it would be ruling on the work it builds")
+	}
+}
+
+// TestCoauthorGainsAuthorshipAndVerdicts (sd-44550c): the strongest role, driven directly by the
+// user, gains the verbs it could only read around before — it shapes the backlog it already reads,
+// and records what it concluded about a PR it can already diff and lint. It gains no QUEUE with
+// them: nothing hands a coauthor work, which is what keeps it freestyle and non-blocking.
+func TestCoauthorGainsAuthorshipAndVerdicts(t *testing.T) {
+	h := newHub(t)
+	reg := h.registry()
+	available := func(role string) map[string]bool {
+		out := map[string]bool{}
+		for _, c := range reg.Available(registry.Caller{Project: testProject, Agent: "rune", Role: role}) {
+			out[c.Name] = true
+		}
+		return out
+	}
+	co := available("coauthor")
+	for _, verb := range []string{"create-task", "edit-task", "approve", "reject"} {
+		if !co[verb] {
+			t.Errorf("a coauthor must have %q — it reads the backlog and the PRs already", verb)
+		}
+	}
+	// Its own second workspace (sd-a6e45e), and nobody else's: every other role already has a
+	// worktree of its own to check work out into.
+	if !co["scratch"] {
+		t.Error("a coauthor must have `scratch` — it is the only way it can read another agent's code")
+	}
+	for _, role := range []string{"worker", "reviewer", "planner"} {
+		if available(role)["scratch"] {
+			t.Errorf("%s must not have `scratch` — it works in a worktree of its own already", role)
+		}
+	}
+	// The verbs, not the queue: these are how work is HANDED to an agent, and a coauthor takes none.
+	for _, verb := range []string{"next", "submit", "checkpoint"} {
+		if co[verb] {
+			t.Errorf("a coauthor must not have %q — its work comes from the user, never a queue", verb)
+		}
+	}
+	// The grant is the coauthor's, not everyone's: a worker still cannot author or rule on tasks.
+	for _, verb := range []string{"create-task", "edit-task", "approve", "reject"} {
+		if available("worker")[verb] {
+			t.Errorf("a worker must not gain %q with the coauthor grant", verb)
 		}
 	}
 }

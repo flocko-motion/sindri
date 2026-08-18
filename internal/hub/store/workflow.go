@@ -631,6 +631,27 @@ func (p *ProjectStore) Reviews(pr string) ([]Review, error) {
 	return out, rows.Err()
 }
 
+// RuledPRs is every PR author has recorded a verdict on, newest first — what a reviewer may still
+// comment on, its HELD review having ended the moment that verdict landed (-> ReviewingPR).
+func (p *ProjectStore) RuledPRs(author string) ([]string, error) {
+	rows, err := p.s.db.Query(
+		`SELECT pr FROM reviews WHERE project=? AND author=? AND verdict<>'' ORDER BY id DESC`,
+		p.project, author)
+	if err != nil {
+		return nil, fmt.Errorf("ruled prs for %s: %w", author, err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var pr string
+		if err := rows.Scan(&pr); err != nil {
+			return nil, err
+		}
+		out = append(out, pr)
+	}
+	return out, rows.Err()
+}
+
 // ReviewingPR is the newest verdict-less review assigned to author, "" if none. The board
 // needs it because a reviewer authors no PR, leaving its AgentView.PR empty.
 func (p *ProjectStore) ReviewingPR(author string) (string, error) {

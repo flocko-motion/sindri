@@ -92,9 +92,12 @@ func MsgReviewCancelled(prID string) string {
 }
 
 // MsgVerdictRecorded puts a reviewer back in the loop right after a verdict, its reply having
-// named no next step.
+// named no next step — and says the door is not shut on the PR it just ruled on, since that is the
+// moment an afterthought arrives and mail leaves no record on the task.
 func MsgVerdictRecorded(prID string) string {
-	return fmt.Sprintf("[hub] Verdict on %s recorded. Run `sindri` for your next review.", prID)
+	return fmt.Sprintf("[hub] Verdict on %s recorded. Run `sindri` for your next review. If you think "+
+		"of something more about %s later, `sindri comment \"<text>\"` still reaches its task — that is "+
+		"where a later reader finds it.", prID, prID)
 }
 
 // MsgRunFinished is what a run's scheduling agent is told — a summary, never the full log:
@@ -130,6 +133,15 @@ func MsgGateIncomplete(status string) string {
 		word = "timed out"
 	}
 	return fmt.Sprintf("[hub] Your quality gate did not complete (%s) — this says nothing about your code. Run `sindri submit \"<summary>\"` (or `contribute`) again.", word)
+}
+
+// ReplyNoSelfVerdict refuses a verdict on the caller's own commits (05-workflow: no agent approves
+// its own work). It says which half of the rule this is, since the other half is deliberately
+// allowed: a coauthor may rule on a PR built from a task it wrote, and its badge names it.
+func ReplyNoSelfVerdict(prID, verb string) string {
+	return fmt.Sprintf("%s is built from your own commits, so its verdict is somebody else's to give "+
+		"— you cannot %s it. (A task you WROTE is different: you may rule on work built from your "+
+		"plan, and the badge records that it was you.)", prID, verb)
 }
 
 // ReplyNothingToRevoke answers `revoke` with no PR out — nothing was withdrawn, so it says what the
@@ -216,9 +228,10 @@ func MsgRejectedByUser(prID, feedback string) string {
 	return fmt.Sprintf("[user] %s was rejected: %s — address the feedback on your branch and run `sindri submit` again.", prID, feedback)
 }
 
-// MsgRejectedByReviewer tells a worker its reviewer rejected the PR, with the feedback.
-func MsgRejectedByReviewer(prID, feedback string) string {
-	return fmt.Sprintf("[reviewer] %s rejected: %s — please address the feedback and submit again.", prID, feedback)
+// MsgRejectedByAgent tells a worker an agent rejected its PR, in that agent's own voice: the role
+// for the reviewer whose job it is, the name for a coauthor, which speaks for nobody but itself.
+func MsgRejectedByAgent(voice, prID, feedback string) string {
+	return fmt.Sprintf("[%s] %s rejected: %s — please address the feedback and submit again.", voice, prID, feedback)
 }
 
 // MsgReview is the single review instruction: the hub has already checked the PR branch out into

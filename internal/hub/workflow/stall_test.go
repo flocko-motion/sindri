@@ -34,6 +34,11 @@ func TestStalledOnlyCountsHeldWork(t *testing.T) {
 		{"a feature whose subtasks are all checkpointed", "idle", "td-EPIC", "idle", past, true},
 		{"mid-feature, on a subtask, gone quiet", "working", "td-EPIC", "idle", past, true},
 		{"between assignments, holding nothing", "idle", "", "idle", past, false},
+		// ori's case: assignReview writes "reviewing" and nothing else, so neither of the old disjuncts
+		// could ever hold and a reviewer that stopped reading was invisible to every sweep.
+		{"a reviewer holding a PR, gone quiet", "reviewing", "", "idle", past, true},
+		{"a reviewer quiet, but not for long enough", "reviewing", "", "idle", under, false},
+		{"a reviewer asking the user something", "reviewing", "", "blocked", past, false},
 		// An unreadable pane is not a reading, so the words are empty — but the dwell it carries is
 		// still time in which nothing was seen to change, and holding work through that is a stall.
 		{"unreadable pane, work held, nothing seen to move", "working", "", "", past, true},
@@ -84,6 +89,74 @@ func TestNudgeStalledNamesTheTask(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("the nudge should mention %q, got:\n%s", want, got)
 		}
+	}
+}
+
+// reviewingAgent adds a reviewer holding an assigned review of pr to a stallStore, in the state
+// assignReview leaves it in: the phase, and no Task or Container of any kind.
+func reviewingAgent(t *testing.T, ps *store.ProjectStore, name, pr string) {
+	t.Helper()
+	if err := ps.PutAgent(store.Agent{Name: name, Role: "reviewer", Workspace: ".worktrees/" + name}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutPR(store.PR{ID: pr, Task: "td-d9a8c3", Agent: "dvalin", Branch: pr, Status: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	id, err := ps.AddReview(pr, "review it")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.AssignReview(id, name); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: name, Phase: "reviewing"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestAStalledReviewerIsNudgedAboutItsPR (sd-9a7f80): a reviewer's hold lives in the review row, so
+// the nudge had nothing to name and bailed. Both halves must land — Stalled counting "reviewing" is
+// inert while this returns false — so this asserts the whole path, not the rule alone.
+func TestAStalledReviewerIsNudgedAboutItsPR(t *testing.T) {
+	e, deps, ps := stallStore(t)
+	reviewingAgent(t, ps, "ori", "pr-42")
+
+	if !e.NudgeStalled("proj", "ori", "idle", StallDwell+time.Minute) {
+		t.Fatal("a reviewer holding a PR and gone quiet should be nudged")
+	}
+	if len(deps.injected) != 1 || deps.injected[0] != "ori" {
+		t.Fatalf("expected ori to be nudged, got %v", deps.injected)
+	}
+	if got := deps.injectedText[0]; !strings.Contains(got, "pr-42") {
+		t.Errorf("the nudge must name the PR it holds, got:\n%s", got)
+	}
+	events, err := ps.Events("ori", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range events {
+		if ev.Type == "nudge" && strings.Contains(ev.Payload, "pr-42") {
+			return
+		}
+	}
+	t.Errorf("expected a logged nudge naming the PR, got %+v", events)
+}
+
+// TestAReviewerWithNothingToNameIsLeftAlone: the fallback reads the review row rather than assuming
+// one, so a phase left behind by a released review produces silence instead of an invented id.
+func TestAReviewerWithNothingToNameIsLeftAlone(t *testing.T) {
+	e, deps, ps := stallStore(t)
+	if err := ps.PutAgent(store.Agent{Name: "ori", Role: "reviewer", Workspace: ".worktrees/ori"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: "ori", Phase: "reviewing"}); err != nil {
+		t.Fatal(err)
+	}
+	if e.NudgeStalled("proj", "ori", "idle", StallDwell+time.Minute) {
+		t.Error("with no review held there is nothing to say, so nothing should be sent")
+	}
+	if len(deps.injected) != 0 {
+		t.Errorf("nothing should have been injected, got %v", deps.injected)
 	}
 }
 

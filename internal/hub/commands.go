@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
@@ -73,6 +74,9 @@ func (h *Hub) registry() *registry.Registry {
 		// curated read/restore subset for them (-> workflow.CmdGit): without it, an agent cannot
 		// see what it changed or put a file back, and reconstructs both from memory.
 		registry.Command{Name: "git", Help: workflow.GitHelp, Roles: []string{"worker", "planner", "coauthor"}, Run: h.wf.CmdGit},
+		// The coauthor's second workspace: /workspace is the user's checkout, which is no place to
+		// check out somebody else's branch, so the hub puts it in a tree of the coauthor's own.
+		registry.Command{Name: "scratch", Help: workflow.ScratchHelp, Roles: []string{"coauthor"}, Run: h.wf.CmdScratch},
 		// Not for a planner: its workspace is read-only, so there is nothing here for it to run.
 		registry.Command{Name: "run", Help: "queue a command for later execution (see your brief for when this beats running it yourself): run <command...>",
 			Roles: []string{"worker", "reviewer", "coauthor"}, Run: h.wf.CmdScheduleRun},
@@ -87,8 +91,9 @@ func (h *Hub) registry() *registry.Registry {
 		// A worker reads too: it holds a whole package for context, so that context must stay
 		// re-readable. Roles see different scopes (-> CmdTasks) but share one verb name.
 		registry.Command{Name: "task", Help: workflow.TaskHelp, Roles: []string{"planner", "coauthor", "worker", "reviewer"}, Run: h.wf.CmdTasks},
-		registry.Command{Name: "create-task", Help: workflow.CreateTaskHelp, Roles: []string{"planner"}, Run: h.wf.CmdCreateTask},
-		registry.Command{Name: "edit-task", Help: workflow.EditTaskHelp, Roles: []string{"planner"}, Run: h.wf.CmdEditTask},
+		// The coauthor shapes the backlog it already reads; both verbs still end at the user's approval.
+		registry.Command{Name: "create-task", Help: workflow.CreateTaskHelp, Roles: []string{"planner", "coauthor"}, Run: h.wf.CmdCreateTask},
+		registry.Command{Name: "edit-task", Help: workflow.EditTaskHelp, Roles: []string{"planner", "coauthor"}, Run: h.wf.CmdEditTask},
 		registry.Command{Name: "prioritise-task", Help: workflow.PrioritiseTaskHelp, Roles: []string{"planner"}, Run: h.wf.CmdPrioritiseTask},
 		// Planner only, never a worker, which could undo a human's verdict on its own task
 		// (-> h.ReopenTask, which needs both h.wf and h.comments, so it lives here, not workflow).
@@ -114,21 +119,21 @@ func (h *Hub) registry() *registry.Registry {
 						return "You hold no task to comment on."
 					}
 				case "reviewer":
-					// A store fault must not read as the settled "nothing to review" — err != nil
-					// leaves the verb unblocked so cmdComment hits ReviewingPR again and returns the
+					// A store fault must not read as the settled "nothing to comment on" — err != nil
+					// leaves the verb unblocked so cmdComment resolves the scope again and returns the
 					// error properly, rather than the agent being told a false reason to stop.
-					if pr, err := h.store.For(c.Project).ReviewingPR(c.Agent); err == nil && pr == "" {
-						return "You aren't reviewing a PR, so there's no task to comment on."
+					if tasks, err := h.reviewerTasks(c); err == nil && len(tasks) == 0 {
+						return replyNothingRuledOn
 					}
 				}
 				return ""
 			}, Run: h.cmdComment},
-		// A planner's approve is a different act (-> CmdApprove): an optional, additional badge
-		// beside the reviewer's verdict, never a substitute for it — so the same verb is open to
-		// both roles rather than needing a second one.
+		// One verb, three acts (-> CmdApprove): a reviewer's opens the merge gate, a planner's is an
+		// optional badge beside it, a coauthor's is a full verdict on a PR it can already diff and lint.
 		registry.Command{Name: "approve", Help: approveHelp(registry.Caller{}), HelpFor: approveHelp,
-			Roles: []string{"reviewer", "planner"}, Blocked: heldByEscalation("approve", nil), Run: h.wf.CmdApprove},
-		registry.Command{Name: "reject", Help: "reject a pull request: reject <pr-id> <feedback...>", Roles: []string{"reviewer"},
+			Roles: []string{"reviewer", "planner", "coauthor"}, Blocked: heldByEscalation("approve", nil), Run: h.wf.CmdApprove},
+		// The verb, never the queue: nothing assigns a coauthor a review (-> reviewerAssignable).
+		registry.Command{Name: "reject", Help: "reject a pull request: reject <pr-id> <feedback...>", Roles: []string{"reviewer", "coauthor"},
 			Blocked: heldByEscalation("reject", nil), Run: h.wf.CmdReject},
 		// Either side of a stop only the user can end, open to every role — any agent can meet a
 		// decision that is not its to make. Escalate stays open while escalated: a badly-put
@@ -142,9 +147,7 @@ func (h *Hub) registry() *registry.Registry {
 				return ""
 			}, Run: h.cmdResume},
 		// One short note to the user, against a budget the help states up front: known scarcity selects
-		// better than a cap discovered by hitting it. Not the coauthor, which is in the room with the
-		// user already; the three that do see it are granted at their own claim, so none is offered a
-		// verb it can never use.
+		// better than a cap discovered by hitting it. Not the coauthor — it is in the room already.
 		registry.Command{Name: "fyi", Help: workflow.FyiHelp(workflow.NotesPerClaim),
 			HelpFor: func(c registry.Caller) string { return workflow.FyiHelp(c.NotesLeft) },
 			Roles:   []string{"worker", "reviewer", "planner"}, Run: h.cmdFyi},
@@ -164,11 +167,9 @@ func (h *Hub) registry() *registry.Registry {
 	)
 }
 
-// landingBlocked is the shared gate on the two verbs that put a branch up (submit, contribute).
-// Inside a feature submit is the FINISHED branch, so it waits for the last subtask, while contribute
-// puts up what stands — a milestone, which needs nothing finished. Outside one, there is nothing to
-// land except from "working", worded exactly as the verb's own guard words it so an agent hears one
-// story whichever gate it meets first.
+// landingBlocked is the shared gate on the two verbs that put a branch up (submit, contribute). In a
+// feature submit waits for the last subtask and contribute needs nothing finished; outside one, only
+// "working" lands. Worded as each verb's own guard words it, so an agent hears one story.
 func landingBlocked(verb string) func(registry.Caller) string {
 	return func(c registry.Caller) string {
 		if c.Container != "" {
@@ -390,7 +391,9 @@ func commentUsage(c registry.Caller) string {
 		}
 		return "comment <text...>"
 	case "reviewer":
-		return "comment <text...>"
+		// An id is worth offering here: with more than one verdict behind it, a bare comment means the
+		// newest, and the others are reachable only by name.
+		return "comment <text...> (the PR you last ruled on), or comment <id> <text...>"
 	}
 	return "comment <id> <text...>"
 }
@@ -398,8 +401,11 @@ func commentUsage(c registry.Caller) string {
 // approveHelp is the verb's help line, since what a verdict MEANS differs by role: a reviewer's
 // opens the merge gate, a planner's is an optional badge beside it.
 func approveHelp(c registry.Caller) string {
-	if c.Role == "planner" {
+	switch c.Role {
+	case "planner":
 		return "add an optional advisory approval badge, beside the reviewer's verdict, never instead of it: approve [pr-id]"
+	case "coauthor":
+		return "approve a pull request when the user asks — recorded under your name, and nothing ever hands you a review: approve [pr-id]"
 	}
 	return "approve a pull request: approve [pr-id]"
 }
@@ -411,7 +417,7 @@ func commentHelp(c registry.Caller) string {
 	case "worker":
 		return "comment on your current task: " + commentUsage(c)
 	case "reviewer":
-		return "comment on the task of the PR you're reviewing: " + commentUsage(c)
+		return "comment on the task of a PR you're reviewing or have ruled on: " + commentUsage(c)
 	}
 	return "comment on a task: " + commentUsage(c)
 }
@@ -427,20 +433,13 @@ func (h *Hub) commentTarget(c registry.Caller) (string, error) {
 		}
 		return c.Container, nil
 	case "reviewer":
-		ps := h.store.For(c.Project)
-		pr, err := ps.ReviewingPR(c.Agent)
-		if err != nil {
+		// The review it holds, else its latest verdict (-> reviewerTasks, newest first): an
+		// afterthought is almost always about the PR it has just ruled on.
+		tasks, err := h.reviewerTasks(c)
+		if err != nil || len(tasks) == 0 {
 			return "", err
 		}
-		p, ok, err := ps.GetPR(pr)
-		if err != nil {
-			return "", err
-		}
-		if !ok {
-			// A missing row for an assigned PR is a hub fault, not something the agent can act on.
-			return "", fmt.Errorf("agent %q is reviewing PR %q, which is not in the store", c.Agent, pr)
-		}
-		return p.Task, nil
+		return tasks[0], nil
 	}
 	return "", nil // planner, coauthor: the whole backlog is in reach, so no single task is implied
 }
@@ -470,8 +469,12 @@ func (h *Hub) cmdComment(c registry.Caller, args []string, out io.Writer) (int, 
 			return 1, nil
 		}
 	case "reviewer":
-		if id != target {
-			fmt.Fprintf(out, "%s isn't the task of the PR you're reviewing — you can only comment on that\n", id)
+		tasks, terr := h.reviewerTasks(c)
+		if terr != nil {
+			return 1, terr
+		}
+		if !slices.Contains(tasks, id) {
+			fmt.Fprintf(out, "%s isn't a task you've reviewed — you can comment on %s\n", id, strings.Join(tasks, ", "))
 			return 1, nil
 		}
 	default: // planner, coauthor: any task in this project — they already read the whole backlog

@@ -125,7 +125,7 @@ func (s *Service) NewAgent(project, name, role, memory string) (string, error) {
 		}
 	}
 	// A coauthor shares the user's real checkout, not a worktree — the SAME material.
-	workspace := filepath.Join(".worktrees", name)
+	workspace := filepath.Join(workflow.AgentTrees, name)
 	if role == "coauthor" {
 		workspace = "."
 	}
@@ -165,9 +165,12 @@ func (s *Service) DeleteAgent(project, name string) error {
 	}
 	_ = container.Rm(s.deps.ContainerName(project, name))
 	s.agentCh.CloseAgent(project, name)
-	// A coauthor's workspace IS the repo root — never `git worktree remove` that.
+	// A coauthor's workspace IS the repo root — never `git worktree remove` that. Its scratch tree
+	// goes: left behind, the next agent of that name would inherit it.
 	if a.Workspace != "." {
 		_ = git.WorktreeRemove(root, filepath.Join(root, a.Workspace))
+	} else {
+		_ = git.WorktreeRemove(root, filepath.Join(root, workflow.ScratchWorktree(name)))
 	}
 	if err := ps.DeleteAgent(name); err != nil {
 		return err
@@ -247,6 +250,28 @@ func (s *Service) RestartAgent(project, name string, w io.Writer) error {
 	return s.Launch(project, name, false, false, 0, 0, w)
 }
 
+// plannerWritable is the one directory a planner may write, overlaid on a read-only workspace.
+const plannerWritable = "openspec"
+
+// workspaceMounts is everything a pod can reach in the repo: its workspace, plus what the two
+// exceptions to isolation add. A coauthor's is the user's own checkout, which HOLDS every other
+// agent's worktree — hidden behind an empty directory, since the hub commits from those trees — so
+// it gets a scratch tree of its own to check work out into instead.
+func workspaceMounts(role, wt, hidden, scratch string) []container.Mount {
+	ws := container.Mount{Host: wt, Container: "/workspace", Mode: "rw"}
+	switch role {
+	case "planner":
+		ws.Mode = "ro"
+		return []container.Mount{ws,
+			{Host: filepath.Join(wt, plannerWritable), Container: "/workspace/" + plannerWritable, Mode: "rw"}}
+	case "coauthor":
+		return []container.Mount{ws,
+			{Host: hidden, Container: "/workspace/" + workflow.AgentTrees, Mode: "ro"},
+			{Host: scratch, Container: workflow.ScratchMount, Mode: "rw"}}
+	}
+	return []container.Mount{ws}
+}
+
 // previewSizeEnv sizes a session's tmux pane at creation (-> sindri-agent.sh), or nothing when
 // either dimension is unset — the CLI's case, left at tmux's own default until attached.
 func previewSizeEnv(cols, lines int) map[string]string {
@@ -322,9 +347,12 @@ func (s *Service) Launch(project, name string, shell, debug bool, cols, lines in
 		return fmt.Errorf("repo has no commits yet")
 	}
 	if a.Role == "coauthor" {
-		// A coauthor's /workspace IS the user's checkout (wt == repo root) — no isolated
-		// worktree to add. Rest in "collab" so the dashboard shows it's standing with the
-		// user, not idle.
+		// A coauthor's /workspace IS the user's checkout (wt == repo root), so there is no isolated
+		// worktree to add — only its scratch tree (-> CmdScratch), kept as it was on a relaunch.
+		if err := git.WorktreeAdd(root, filepath.Join(root, workflow.ScratchWorktree(name)), "HEAD"); err != nil {
+			return err
+		}
+		// Rest in "collab" so the dashboard shows it's standing with the user, not idle.
 		if st, _ := ps.GetState(name); st.Phase == "" || st.Phase == "idle" {
 			_ = ps.SetState(store.AgentState{Agent: name, Phase: "collab"})
 		}
@@ -383,26 +411,25 @@ func (s *Service) Launch(project, name string, shell, debug bool, cols, lines in
 		env["SINDRI_HUB_ADDR"] = fmt.Sprintf("%s:%d", s.agentCh.DialHost(), s.agentCh.Port())
 		env["SINDRI_TOKEN"] = token
 	}
-	mounts := []container.Mount{
-		{Host: wt, Container: "/workspace", Mode: "rw"},
+	// An overlay target must exist on the host before podman binds over it, and each belongs to one
+	// role (-> workspaceMounts).
+	switch a.Role {
+	case "planner":
+		_ = os.MkdirAll(filepath.Join(wt, plannerWritable), 0o755)
+	case "coauthor":
+		if err := os.MkdirAll(paths.HiddenDir(), 0o755); err != nil {
+			return err
+		}
+	}
+	mounts := append(workspaceMounts(a.Role, wt, paths.HiddenDir(), filepath.Join(root, workflow.ScratchWorktree(name))),
 		// The agent's own socket — its sole channel to the hub, its identity. Mount the
 		// socket DIRECTORY (not the file) so the agent survives a hub restart, which
 		// recreates the socket file with a new inode.
-		{Host: agentchan.SocketDir(project, name), Container: "/run/sindri", Mode: "rw"},
+		container.Mount{Host: agentchan.SocketDir(project, name), Container: "/run/sindri", Mode: "rw"},
 		// The host-built tools (brokkr, the browser) as ONE DIRECTORY, for the same reason
 		// as the socket above: a per-file bind pins the inode, so a reinstalled binary
 		// never reached the pod. The image symlinks /usr/local/bin/{brokkr,sindri} in here.
-		{Host: paths.PodBinDir(), Container: paths.PodBinMount, Mode: "ro"},
-	}
-	if a.Role == "planner" {
-		// A planner sees the whole repo read-only and may only write openspec — so it
-		// plans (specs + tasks) without touching code. /workspace is remounted ro and
-		// openspec/ overlaid rw on top.
-		osDir := filepath.Join(wt, "openspec")
-		_ = os.MkdirAll(osDir, 0o755) // ensure the overlay target exists
-		mounts[0] = container.Mount{Host: wt, Container: "/workspace", Mode: "ro"}
-		mounts = append(mounts, container.Mount{Host: osDir, Container: "/workspace/openspec", Mode: "rw"})
-	}
+		container.Mount{Host: paths.PodBinDir(), Container: paths.PodBinMount, Mode: "ro"})
 	if shell {
 		env["SINDRI_SHELL"] = "1" // entrypoint runs bash instead of Claude
 	} else {
