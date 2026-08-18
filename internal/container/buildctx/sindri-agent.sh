@@ -72,10 +72,12 @@ else
 	# --continue resumes this workspace's session across a restart, but EXITS NON-ZERO with
 	# nothing to resume, so `||` falls back to a fresh `claude`, not bash.
 	# --append-system-prompt every launch: dropping it costs the agent its role, even on --continue.
+	# --model only when the hub chose one, else claude's own default. Explicit even under --continue:
+	# a change compacts first (-> agent.SetModel), meaning to carry the summary onto the new model.
 	# Single-quoted so tmux's shell evaluates the multi-line $() at session start, not this script's.
 	# `stty sane` undoes Claude's raw, echo-off terminal so a dial-in lands at a prompt.
 	tmux new-session -d -s "$SESSION" "${SIZE_ARGS[@]}" \
-		'SP="$(cat /home/sindri/.claude/system-prompt.txt)"; claude --continue --dangerously-skip-permissions --append-system-prompt "$SP" || claude --dangerously-skip-permissions --append-system-prompt "$SP"; stty sane; exec bash -i'
+		'SP="$(cat /home/sindri/.claude/system-prompt.txt)"; claude --continue --dangerously-skip-permissions ${SINDRI_MODEL:+--model "$SINDRI_MODEL"} --append-system-prompt "$SP" || claude --dangerously-skip-permissions ${SINDRI_MODEL:+--model "$SINDRI_MODEL"} --append-system-prompt "$SP"; stty sane; exec bash -i'
 fi
 
 # Belt-and-suspenders: re-source in case the server was already running.

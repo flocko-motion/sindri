@@ -184,6 +184,28 @@ func TestCompactionThresholdZeroWindow(t *testing.T) {
 	}
 }
 
+// TestModelWindowResolvesAKnownModel: the same table windowFor reads for sizing, but a real
+// rejection (ok=false) for anything unrecognised — a chosen model with no known window is one whose
+// fullness the hub cannot judge, so it must not fall back to a guessed default the way sizing does.
+func TestModelWindowResolvesAKnownModel(t *testing.T) {
+	for _, c := range []struct {
+		model      string
+		wantWindow int
+		wantOK     bool
+	}{
+		{"claude-opus-5-20260315", 1_000_000, true},
+		{"claude-sonnet-5", 1_000_000, true},
+		{"claude-haiku-4-5-20251001", 200_000, true},
+		{"some-model-nobody-listed", 0, false},
+		{"", 0, false},
+	} {
+		window, ok := (Claude{}).ModelWindow(c.model)
+		if ok != c.wantOK || (ok && window != c.wantWindow) {
+			t.Errorf("ModelWindow(%q) = (%d, %v), want (%d, %v)", c.model, window, ok, c.wantWindow, c.wantOK)
+		}
+	}
+}
+
 // TestAnUnrecordedModelStillReportsAWindow: usage with no model must not report window 0, which the
 // workflow reads as unknown and never retires on.
 func TestAnUnrecordedModelStillReportsAWindow(t *testing.T) {

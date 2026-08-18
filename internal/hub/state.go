@@ -127,7 +127,14 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		if _, stalled := h.stalledFor(a.Project, a.Name, st.Phase, st.Container); stalled {
 			status = "stalled"
 		}
-		tokens, window, model, _ := h.agents.ContextUsage(a.Project, a.Name)
+		tokens, window, detected, _ := h.agents.ContextUsage(a.Project, a.Name)
+		// Stored is authoritative: it is all there is for a stopped agent, and the record a dispatcher
+		// compares without waking one. Detected overrides it only while running — a human may change
+		// an agent's model by hand inside Claude Code, which the transcript sees before the record does.
+		model := a.Model
+		if running[i] && detected != "" {
+			model = detected
+		}
 		status = overlayFullness(status, h.wf.ContextFull(a.Project, a.Name), st.Task, st.Container, pr)
 		status = overlayEscalation(status, st.Escalation)
 		agents = append(agents, AgentView{

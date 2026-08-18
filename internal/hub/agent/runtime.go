@@ -127,6 +127,10 @@ func (s *Service) ContextUsage(project, name string) (tokens, window int, model 
 // compacting, from the wired backend's own formula for the model that window belongs to.
 func (s *Service) CompactionThreshold(window int) int { return agentport.CompactionThreshold(window) }
 
+// ModelWindow resolves model to its context window via the wired backend, ok=false when it is not
+// recognised — the check a chosen model must pass before an agent is started on it.
+func (s *Service) ModelWindow(model string) (int, bool) { return agentport.ModelWindow(model) }
+
 // ForgetContext drops name's memoised context reading. For the one caller that KNOWS the previous
 // measurement is now wrong because it just invalidated it: clearing a session (-> ClearContext).
 //

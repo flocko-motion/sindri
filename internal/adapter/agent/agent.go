@@ -70,6 +70,9 @@ type Agent interface {
 	// compacting — from the same backend ContextUsage's window came from, since only it knows the
 	// shape of its own context-management economics.
 	CompactionThreshold(window int) int
+	// ModelWindow resolves a model id to its context window, ok=false when the backend does not
+	// recognise it — the check a chosen model must pass before the hub starts an agent on it.
+	ModelWindow(model string) (window int, ok bool)
 }
 
 // active is wired once at startup via Use; the no-op default keeps the port safe before.
@@ -107,6 +110,9 @@ func ContextUsage(home string) (int, int, string, bool) { return active.ContextU
 // CompactionThreshold reports the wired backend's compaction threshold for a window this size.
 func CompactionThreshold(window int) int { return active.CompactionThreshold(window) }
 
+// ModelWindow resolves model to its window via the wired backend.
+func ModelWindow(model string) (int, bool) { return active.ModelWindow(model) }
+
 // noop is the default until Use: state is Unknown, no home is provisioned.
 type noop struct{}
 
@@ -121,3 +127,5 @@ func (noop) HostTokenExpiry() (int64, bool) { return 0, false }
 func (noop) ContextUsage(string) (int, int, string, bool) { return 0, 0, "", false }
 
 func (noop) CompactionThreshold(int) int { return math.MaxInt } // never worth it: nothing to measure
+
+func (noop) ModelWindow(string) (int, bool) { return 0, false } // nothing wired, nothing recognised

@@ -32,29 +32,26 @@ func TestPreviewSizeEnvOnlyWhenBothDimensionsSet(t *testing.T) {
 	}
 }
 
-// TestModelEnvOnlyWhenRecorded: a brand-new agent's first launch has no transcript yet to name a
-// model from, and ContextUsage answers that with ok=false — modelEnv must carry nothing then, not
-// an empty SINDRI_MODEL a relaunch would read as a real (if blank) value.
-func TestModelEnvOnlyWhenRecorded(t *testing.T) {
+// TestModelEnvOnlyWhenChosen: no model chosen carries nothing — the account default, same as
+// always — not an empty SINDRI_MODEL a relaunch would read as a real (if blank) value.
+func TestModelEnvOnlyWhenChosen(t *testing.T) {
 	cases := []struct {
 		name  string
 		model string
-		ok    bool
 		want  map[string]string
 	}{
-		{"never recorded", "", false, nil},
-		{"recorded but empty", "", true, nil},
-		{"recorded", "claude-opus-5", true, map[string]string{"SINDRI_MODEL": "claude-opus-5"}},
+		{"none chosen", "", nil},
+		{"chosen", "claude-opus-5", map[string]string{"SINDRI_MODEL": "claude-opus-5"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := modelEnv(c.model, c.ok)
+			got := modelEnv(c.model)
 			if len(got) != len(c.want) {
-				t.Fatalf("modelEnv(%q, %v) = %v, want %v", c.model, c.ok, got, c.want)
+				t.Fatalf("modelEnv(%q) = %v, want %v", c.model, got, c.want)
 			}
 			for k, v := range c.want {
 				if got[k] != v {
-					t.Errorf("modelEnv(%q, %v)[%q] = %q, want %q", c.model, c.ok, k, got[k], v)
+					t.Errorf("modelEnv(%q)[%q] = %q, want %q", c.model, k, got[k], v)
 				}
 			}
 		})

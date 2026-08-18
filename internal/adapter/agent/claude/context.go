@@ -37,6 +37,19 @@ var windows = []struct {
 	{"haiku", 200_000},
 }
 
+// ModelWindow implements agent.Agent: model's window, ok=false when it matches nothing in the table
+// above — a model the hub can start but whose window it cannot state is one whose fullness (and
+// whose compaction threshold, a function of that window) it cannot judge, so callers choosing a
+// model to launch on must refuse rather than fall back to a guess the way windowFor's sizing does.
+func (Claude) ModelWindow(model string) (window int, ok bool) {
+	for _, w := range windows {
+		if strings.Contains(model, w.match) {
+			return w.window, true
+		}
+	}
+	return 0, false
+}
+
 // The compaction threshold falls as the window grows: pct(W) = P∞ + (P₀−P∞)·(W/W₀)^(−k). The same
 // absolute overhead a 200k window pays in full is a smaller fraction of a bigger one, so the bar for
 // compacting worth it falls with it. Named and kept beside the window table for the same reason that
