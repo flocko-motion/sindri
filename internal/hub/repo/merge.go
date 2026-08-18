@@ -41,10 +41,10 @@ type MergeResult struct {
 	Err    error
 }
 
-// MergeBranch brings branch up to base then merges it into base in root with a merge commit
-// carrying msg, reporting the outcome without touching state. A non-empty worktree is rebased
-// onto base first (stale rebases silently, a conflict stops with MergeConflict); an empty one
-// skips that, as a planner PR has no worktree.
+// MergeBranch brings branch up to base then squash-merges it into base in root as a single
+// commit carrying msg, reporting the outcome without touching state. A non-empty worktree is
+// rebased onto base first (stale rebases silently, a conflict stops with MergeConflict); an empty
+// one skips that, as a planner PR has no worktree.
 func MergeBranch(root, worktree, branch, base, msg string) MergeResult {
 	if worktree != "" {
 		// RebaseStep, not RebaseStart: a worktree stranded in an autostash conflict cannot be

@@ -111,8 +111,8 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 	// its rejection overwrote the merge in the record.
 	e.releaseReviewers(project, prID, "overtaken: merged before a verdict")
 	// A landing that does not finish the work: the task stays open and its author stays on it, with
-	// the branch fast-forwarded past the merge. Two shapes arrive here — a mid-task contribution, and
-	// a milestone on a held feature that still has subtasks. A feature with none left IS finished by
+	// the branch reset onto the merge. Two shapes arrive here — a mid-task contribution, and a
+	// milestone on a held feature that still has subtasks. A feature with none left IS finished by
 	// this merge and takes the ordinary path below; keeping it here left a worker holding a feature
 	// that had already landed, with its task still reading open.
 	holder, _ := ps.GetState(pr.Agent)
@@ -144,7 +144,9 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 	}
 	if partial {
 		if a, ok, _ := ps.GetAgent(pr.Agent); ok {
-			_ = git.RebaseOnto(filepath.Join(root, a.Workspace), pr.Branch, pr.Base) // ff past the merge
+			// Standing branch, squashed merge: reset rather than rebase, or the branch's own
+			// commits would replay against content base already holds. Nothing lost — identical.
+			_ = git.ResetBranchTo(filepath.Join(root, a.Workspace), pr.Base)
 		}
 		if onFeature {
 			_ = ps.Log(pr.Agent, "merged", prID+" (milestone)")

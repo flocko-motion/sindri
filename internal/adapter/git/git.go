@@ -333,15 +333,6 @@ func CommitAll(dir, msg string) error {
 	return nil
 }
 
-// RebaseOnto rebases branch onto onto, aborting on conflict so the worktree stays clean and the
-// caller can route the conflict back to its worker. Lets a merely-stale branch merge unaided.
-func RebaseOnto(dir, branch, onto string) error {
-	if out, err := exec.Command("git", "-C", dir, "checkout", branch).CombinedOutput(); err != nil {
-		return fmt.Errorf("checkout %s: %s: %w", branch, strings.TrimSpace(string(out)), err)
-	}
-	return Rebase(dir, onto)
-}
-
 // RebaseInProgress reports whether dir has a rebase stopped mid-flight (conflict, or an empty patch
 // awaiting --skip). Asks git for the state path, since a worktree's .git is a file pointing away.
 func RebaseInProgress(dir string) bool {
@@ -618,15 +609,25 @@ func gitEnglish(dir string, args ...string) (string, error) {
 	return string(out), err
 }
 
-// Merge merges branch into base in repo with a merge commit (no fast-forward) carrying msg,
-// leaving base checked out. Returns the combined output on conflict, in English since the
+// Merge squash-merges branch into base in repo, committing the squashed diff with msg and leaving
+// base checked out. Squash, not a merge commit: base gets exactly one commit per PR however many
+// the branch accumulated, and msg becomes the whole record of the change since the branch's own
+// commit messages never reach base. Returns the combined output on conflict, in English since the
 // caller reads it. msg's shape is the caller's business — this adapter just passes it to git.
 func Merge(repo, base, branch, msg string) error {
 	if out, err := gitEnglish(repo, "checkout", base); err != nil {
 		return fmt.Errorf("checkout %s: %s: %w", base, strings.TrimSpace(out), err)
 	}
-	if out, err := gitEnglish(repo, "merge", "--no-ff", "-m", msg, branch); err != nil {
+	if out, err := gitEnglish(repo, "merge", "--squash", branch); err != nil {
 		return fmt.Errorf("merge %s: %s: %w", branch, strings.TrimSpace(out), err)
+	}
+	// A branch already fully contained in base squashes to nothing staged — what --no-ff used to
+	// report as "Already up to date" with no merge commit. `git commit` would refuse; skip it.
+	if len(nameOnly(repo, "diff", "--cached", "--name-only")) == 0 {
+		return nil
+	}
+	if out, err := gitEnglish(repo, "commit", "-m", msg); err != nil {
+		return fmt.Errorf("commit squashed %s: %s: %w", branch, strings.TrimSpace(out), err)
 	}
 	return nil
 }

@@ -238,39 +238,3 @@ func TestWorktreeAdd(t *testing.T) {
 		t.Fatalf("worktree add (reuse): %v", err)
 	}
 }
-
-func TestRebaseOntoCleanAndConflict(t *testing.T) {
-	repo := newRepo(t)
-	base, _ := CurrentBranch(repo)
-
-	// A feature branch that edits a different file rebases cleanly onto an
-	// advanced base.
-	if err := CreateBranch(repo, "feat", base); err != nil {
-		t.Fatal(err)
-	}
-	mustWrite(t, repo, "feat.go", "feature")
-	if err := CommitAll(repo, "feat"); err != nil {
-		t.Fatal(err)
-	}
-	mustCommitOn(t, repo, base, "base.go", "base-moved")
-	if err := RebaseOnto(repo, "feat", base); err != nil {
-		t.Fatalf("clean rebase should succeed: %v", err)
-	}
-
-	// A branch that edits the SAME line as the advanced base conflicts; RebaseOnto
-	// reports it and leaves the worktree clean (rebase aborted), not mid-rebase.
-	if err := CreateBranch(repo, "clash", base); err != nil {
-		t.Fatal(err)
-	}
-	mustWrite(t, repo, "f", "branch-version")
-	if err := CommitAll(repo, "clash"); err != nil {
-		t.Fatal(err)
-	}
-	mustCommitOn(t, repo, base, "f", "base-version")
-	if err := RebaseOnto(repo, "clash", base); err == nil {
-		t.Fatal("a conflicting rebase must be reported as an error")
-	}
-	if changed, err := HasChanges(repo); err != nil || changed {
-		t.Errorf("after a conflicting rebase the worktree must be clean (aborted), not mid-rebase (changed=%v err=%v)", changed, err)
-	}
-}
