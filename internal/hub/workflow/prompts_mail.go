@@ -36,3 +36,30 @@ func ReplyMailRead(n int) string {
 		"`sindri task` the task you hold, `sindri prs` your pull requests. Where a message and the "+
 		"live state disagree, the live state wins.", n)
 }
+
+// ReplyMailSent confirms one agent's message to another, and says when it will be read: at the
+// recipient's next ask, not now. Nothing was woken, which is the whole difference from a push.
+func ReplyMailSent(to, repo string) string {
+	return fmt.Sprintf("Mailed %s (%s) — it reads this at its next `sindri`, whatever it is doing now. "+
+		"Nothing was interrupted: agents mail each other, they do not wake each other.", to, repo)
+}
+
+// ReplyMailNoMessage answers a recipient with nothing after it. Named separately from the read half's
+// usage, because the mistake here is a verb half-typed rather than the wrong register.
+func ReplyMailNoMessage(to string) string {
+	return fmt.Sprintf("Nothing to send: `mail %s <message>` needs the message too. With no arguments at "+
+		"all, `mail` reads what is waiting for you instead.", to)
+}
+
+// ReplyMailTooLong refuses an over-length message, for the reason the note channel refuses one: the
+// cost is the recipient's attention, and here that recipient is another agent's context.
+func ReplyMailTooLong(n, max int) string {
+	return fmt.Sprintf("Not sent: %d characters, and the limit is %d. Cut it to what the recipient needs "+
+		"— what you send costs its context, and a message it has to wade through is one it may act on "+
+		"wrongly. Do not split it across two calls.", n, max)
+}
+
+// ReplyMailToSelf refuses the loop. Not a hard error to guard against so much as a sign the sender
+// meant somebody else, and saying so is more useful than delivering it.
+const ReplyMailToSelf = "Not sent: that is you. Mail reaches another agent; to leave something for " +
+	"yourself, `sindri log \"<note>\"` records it where you will see it again."

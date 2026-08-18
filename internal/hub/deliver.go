@@ -15,9 +15,13 @@ import (
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
-// senderFor is who a message is from: what its sender stated, else the hub in its own voice. The
-// default is the hub because that is what an unattributed hub-originated message IS, rather than a
-// value to guess at.
+// maxMessageLen is the longest message an agent may send, to the user or another agent — shared because
+// the reason is (brevity serves the reader), where the note grant and fleet ceiling guard the USER's
+// attention alone. Over-length is REFUSED, never truncated: a silent cut teaches nothing.
+const maxMessageLen = 300
+
+// senderFor is who a message is from: what the sender stated, else the hub in its own voice — which is
+// what an unattributed hub message IS, rather than a value to guess at.
 func senderFor(d workflow.Delivery) string {
 	if d.Sender != "" {
 		return d.Sender

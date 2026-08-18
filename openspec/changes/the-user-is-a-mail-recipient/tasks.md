@@ -72,6 +72,22 @@
       front-ends default to it.
 - [x] 5c.4 The unread badge and marker do NOT follow — they say what needs reading.
 
+## 5d. Agent-to-agent mail (sd-2f38d9)
+
+- [x] 5d.1 `mail <agent> <message...>` — one verb, two halves: bare `mail` still reads.
+- [x] 5d.2 Bare names resolve across every project (`store.AgentsNamed`); ambiguity is refused naming
+      every candidate, and `<repo>/<agent>` is the way through rather than a required form.
+- [x] 5d.3 Attribution is qualified (`repo/agent`) where addressing is bare, so a message from
+      elsewhere says where it came from and the reply path stays a bare name.
+- [x] 5d.4 Mail only — an agent cannot push, so agents cannot interrupt each other.
+- [x] 5d.5 The length cap moved to `deliver.go` as `maxMessageLen`, shared by both channels because the
+      reason is shared; the per-claim grant and fleet ceiling stay with the note channel, which is what
+      bounds the USER's attention.
+- [x] 5d.6 Mailing yourself is refused and points at the log.
+- [ ] 5d.7 NOT HERE: waking an idle agent that has unread mail is sd-aa3f93, which is why this task's
+      guarantee is only half-real until that lands — an agent that has stopped calling `sindri` will
+      not read what it is sent.
+
 ## 6. Verify
 
 - [x] 6.1 A note reaches the user's mailbox, attributed, unpushed, with the remainder stated.
@@ -89,4 +105,7 @@
 - [x] 6.10 The user's share and the mailbox's own tallies move independently, from one pass.
 - [x] 6.11 All four senders are recorded, a tagged body does not decide, `From` does not mutate the
       shared classifications, and a real rejection carries its author.
-- [x] 6.12 `make verify` passes.
+- [x] 6.12 Across repos by bare name with qualified attribution and no push; ambiguity refused naming
+      both, with the qualified form delivering; unknown refused; capped but not budgeted; self refused;
+      and the read half intact.
+- [x] 6.13 `make verify` passes.

@@ -200,3 +200,49 @@ ten minutes ago needs nothing.
 
 - **WHEN** a message sent days ago is read now
 - **THEN** it counts as recently changed and stays on screen, and the marker stops counting it
+
+### Requirement: An agent may mail another agent, anywhere in the fleet
+
+An agent SHALL be able to mail another by BARE NAME, whatever repo either is in. Names are
+unique across the fleet by the allocator's convention, and a sender is given a name by
+whoever asked it to make contact — so no roster listing accompanies this, and none should:
+addressing stays incidental to the instruction that prompted it.
+
+A bare name SHALL be resolved across every project. Ambiguity SHALL be REFUSED rather than
+guessed, because mailboxes are keyed by project and name, global uniqueness is only a
+convention of the allocator, and delivering to the wrong agent of that name is the failure
+worth engineering against. The refusal SHALL name every candidate in full.
+
+A qualified `<repo>/<agent>` form SHALL be accepted and never required. It is what the
+refusal points at: a safety check with no way past it would leave an ambiguous recipient
+permanently unreachable.
+
+Addressing is bare; ATTRIBUTION IS QUALIFIED. The recipient SHALL see the sender's repo
+alongside its name, since a message arriving from another repo says little without it — and
+the reply path is then the bare name again.
+
+It SHALL be MAIL ONLY. An agent SHALL NOT be able to push, because waking another agent is
+an interruption and agents that can interrupt each other invite a ping-pong nobody asked
+for. The recipient reads it at its next ask.
+
+The LENGTH cap SHALL be the one the note channel uses, for the reason that cap exists:
+brevity serves whoever must read it, and here the cost is another agent's context. The
+per-claim grant and the fleet ceiling SHALL NOT apply — those bound what one person must
+read, and this traffic does not reach them.
+
+#### Scenario: Across repos, by bare name
+
+- **WHEN** an agent mails an agent of another repo by bare name
+- **THEN** it is delivered to that agent's mailbox, attributed to the sender's repo and name,
+  and nothing is pushed
+
+#### Scenario: Two agents of the same name
+
+- **WHEN** a bare name matches an agent in more than one repo
+- **THEN** nothing is delivered, and the refusal names both candidates and the qualified form
+  that reaches either
+
+#### Scenario: Agent traffic is not budgeted
+
+- **WHEN** an agent has spent its note grant, or has never claimed anything
+- **THEN** it may still mail another agent, since that grant bounds the user's attention only

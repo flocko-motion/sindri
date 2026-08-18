@@ -377,6 +377,21 @@ func (p *ProjectStore) DeleteAgent(name string) error {
 	return nil
 }
 
+// AgentsNamed is every agent with this name, across every project. Global uniqueness is the
+// allocator's convention (AutoName checks the whole fleet) and NOT a schema constraint — mailboxes are
+// keyed (project, name) — so a caller addressing an agent by bare name gets every candidate and
+// decides. Delivering to the wrong dvalin is the one failure here worth engineering against.
+func (s *Store) AgentsNamed(name string) ([]Agent, error) {
+	rows, err := s.db.Query(
+		`SELECT project, name, role, workspace, socket, created_at, memory, retired, clear_armed FROM agents WHERE name=? ORDER BY project`,
+		name)
+	if err != nil {
+		return nil, fmt.Errorf("agents named %q: %w", name, err)
+	}
+	defer rows.Close()
+	return scanAgents(rows)
+}
+
 // Log appends an activity-log entry for an agent in this project.
 func (p *ProjectStore) Log(agent, typ, payload string) error {
 	_, err := p.s.db.Exec(
