@@ -211,7 +211,4 @@ func TestTheBoardCarriesTheLastMemoryReading(t *testing.T) {
 	if board.Memory.FreeBytes() != 10*gib {
 		t.Errorf("board free = %d bytes, want the 10 GiB the reading leaves", board.Memory.FreeBytes())
 	}
-	if board.Memory.Fits < 1 {
-		t.Errorf("10 GiB free fits agents of the default size, got %d", board.Memory.Fits)
-	}
 }

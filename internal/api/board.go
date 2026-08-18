@@ -60,18 +60,13 @@ type RepoDocState struct {
 	Advice   string `json:"advice"`   // "" when nothing to say
 }
 
-// FleetMemory is the machine's memory headroom for agents: what the fleet costs the host now,
-// the ceiling it draws from, and how many more agents of the default size fit in what is left.
-// The fit count is the figure worth reading — "38% used" does not answer whether to start another
-// agent, and that is the only question being asked of it.
+// FleetMemory is the machine's memory headroom: what the fleet costs the host now, and the ceiling
+// it draws from. Paired on the badge with how many agents are running versus how many exist
+// (-> CountRunningAgents) — once the hub can stop an idle one and start a stopped one on demand,
+// "how many more fit" answers a question nobody is asking; "is this idle or is it full" is.
 type FleetMemory struct {
 	UsedBytes  int64 `json:"usedBytes"`
 	TotalBytes int64 `json:"totalBytes"`
-	// AgentBytes is the default agent's size — the unit Fits counts in, carried so the count can
-	// state what it counted.
-	AgentBytes int64 `json:"agentBytes"`
-	// Fits is how many more default-size agents the free memory holds.
-	Fits int `json:"fits"`
 	// Basis says what UsedBytes counts, which the runtime backend decides: memory containers have
 	// taken as they used it, or memory each pod reserved up front and holds whether it uses it.
 	Basis string `json:"basis,omitempty"`
@@ -187,6 +182,18 @@ func (b BoardState) OpenTaskCount() int { return countTasks(b.Tasks, Open) }
 
 // AgentCount is the whole roster size (down agents are still agents).
 func (b BoardState) AgentCount() int { return len(b.Agents) }
+
+// RunningAgentCount is how many of the roster currently have a pod up — the other half of the
+// headroom badge's "is this idle or full" question, paired with AgentCount.
+func (b BoardState) RunningAgentCount() int {
+	n := 0
+	for _, a := range b.Agents {
+		if !AgentNotUp(a.Status) {
+			n++
+		}
+	}
+	return n
+}
 
 // OpenPRCount is open PRs across the fleet (neither merged nor scrapped), matching the PRs tab default.
 func (b BoardState) OpenPRCount() int { return countPRs(b.PRs, PROpen) }

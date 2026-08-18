@@ -247,7 +247,7 @@ func agentStatsCmd() *cobra.Command {
 					views = only
 				}
 				fmt.Printf("engine: %s\n", report.Engine)
-				fmt.Printf("fleet:  %s\n\n", theme.FleetLine(st.Memory))
+				fmt.Printf("fleet:  %s\n\n", theme.FleetLine(st.Memory, st.RunningAgentCount(), st.AgentCount()))
 				if len(views) == 0 {
 					fmt.Fprintln(os.Stderr, "no running agents to sample")
 					return nil

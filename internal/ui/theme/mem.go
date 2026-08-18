@@ -24,47 +24,44 @@ func MemLine(usage, limit int64) string {
 	return fmt.Sprintf("%9s / %-9s %3.0f%% %s", humanBytes(usage), humanBytes(limit), pct, memBar(pct))
 }
 
-// FleetLine renders the fleet's headroom in full: what the machine's agents cost it against the
-// ceiling, then the two figures worth reading — what is free, and how many more agents fit there.
-func FleetLine(m api.FleetMemory) string {
+// FleetLine renders the fleet's memory cost against the ceiling, then the live workload question a
+// byte count can't answer on its own: how many of the roster are actually up right now.
+func FleetLine(m api.FleetMemory, running, existing int) string {
 	if !m.Known() {
 		return "not reported by the runtime"
 	}
 	pct := float64(m.UsedBytes) / float64(m.TotalBytes) * 100
-	return fmt.Sprintf("%s / %s %s  %3.0f%% %s   %s free · %s",
-		humanBytes(m.UsedBytes), humanBytes(m.TotalBytes), m.Basis, pct, memBar(pct),
-		humanBytes(m.FreeBytes()), fitsPhrase(m))
+	return fmt.Sprintf("%s / %s %s  %3.0f%% %s   %s",
+		humanBytes(m.UsedBytes), humanBytes(m.TotalBytes), m.Basis, pct, memBar(pct), workloadPhrase(running, existing))
 }
 
-// fitsPhrase says how many more default-size agents fit, naming the size counted, so the number
-// can be read without knowing what the default is.
-func fitsPhrase(m api.FleetMemory) string {
-	if m.AgentBytes <= 0 {
-		return "the default agent size is unknown"
+// workloadPhrase says how much of the roster is actually up — the question that matters once a
+// stopped agent can be started on demand and an idle one can be stopped: not "may I create
+// another" but "is another one already able to run right now".
+func workloadPhrase(running, existing int) string {
+	switch {
+	case existing == 0:
+		return "no agents registered"
+	case running == existing:
+		return fmt.Sprintf("all %d agents running", existing)
+	default:
+		return fmt.Sprintf("%d of %d agents running", running, existing)
 	}
-	switch m.Fits {
-	case 0:
-		return fmt.Sprintf("no room for another agent (%s each)", humanBytes(m.AgentBytes))
-	case 1:
-		return fmt.Sprintf("room for 1 more agent (%s each)", humanBytes(m.AgentBytes))
-	}
-	return fmt.Sprintf("room for %d more agents (%s each)", m.Fits, humanBytes(m.AgentBytes))
 }
 
 // FleetBadge renders the same headroom for a header, in the widest form that fits `width` cells,
 // and "" when even the shortest does not — a header owes its space to the tabs first. The forms
-// shed the meter, then the free figure, keeping the fit count longest: it is the answer, and the
-// rest is the working.
-func FleetBadge(m api.FleetMemory, width int) string {
+// shed the meter, then the byte count, keeping the running/existing count longest: it is the
+// answer, the rest is the working.
+func FleetBadge(m api.FleetMemory, running, existing, width int) string {
 	if !m.Known() {
 		return ""
 	}
 	pct := float64(m.UsedBytes) / float64(m.TotalBytes) * 100
-	free := humanBytes(m.FreeBytes())
 	for _, form := range []string{
-		fmt.Sprintf("%s %s free · fits %d agents", memBar(pct), free, m.Fits),
-		fmt.Sprintf("%s free · fits %d", free, m.Fits),
-		fmt.Sprintf("fits %d", m.Fits),
+		fmt.Sprintf("%s %s / %s · %d/%d running", memBar(pct), humanBytes(m.UsedBytes), humanBytes(m.TotalBytes), running, existing),
+		fmt.Sprintf("%s / %s · %d/%d running", humanBytes(m.UsedBytes), humanBytes(m.TotalBytes), running, existing),
+		fmt.Sprintf("%d/%d running", running, existing),
 	} {
 		if lipgloss.Width(form) <= width {
 			return form

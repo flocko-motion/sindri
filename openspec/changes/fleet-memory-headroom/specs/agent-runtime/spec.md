@@ -13,10 +13,11 @@ fit cannot start however little the fleet is using; and a runtime that runs its 
 VM is bounded by that VM rather than by the machine hosting it. Neither the hub nor a front-end
 SHALL read the host's memory for this figure.
 
-From that reading the hub SHALL derive the fleet's headroom — the memory left, and how many further
-agents of the default size fit in it — and carry it on the board, so that whether another agent fits
-is answerable without arithmetic. The count SHALL name the agent size it counted in. An
-overcommitted machine SHALL report no free memory rather than a negative amount.
+From that reading the hub SHALL derive the fleet's headroom — the memory cost against the ceiling it
+draws from — and carry it on the board. Paired with it, the board SHALL carry how many of the
+roster's agents currently have a pod up against how many exist, so the question the badge answers is
+not "may I create another" but "is one already able to run right now." An overcommitted machine
+SHALL report no free memory rather than a negative amount.
 
 A reading the runtime cannot give SHALL leave the headroom unknown, and an unknown headroom SHALL be
 rendered as nothing rather than as a machine with nothing free. The reading SHALL be taken on the
@@ -26,11 +27,11 @@ measurement.
 Wherever memory is reported to the user, the fleet's headroom SHALL be reported in the same terms in
 both front-ends.
 
-#### Scenario: Headroom is counted in agents
+#### Scenario: Headroom is paired with the live workload
 
 - **WHEN** the machine has memory to spare
-- **THEN** the board reports what is free and how many more agents of the default size fit there,
-  naming that size
+- **THEN** the board reports what is free, and how many of the roster's agents are running against
+  how many exist
 
 #### Scenario: Reserved and in use are different questions
 
@@ -46,7 +47,7 @@ both front-ends.
 #### Scenario: An overcommitted machine
 
 - **WHEN** the fleet's memory exceeds the ceiling it draws from
-- **THEN** the free memory reads as none and no further agent is reported to fit
+- **THEN** the free memory reads as none rather than negative
 
 #### Scenario: The user asks what agents are using
 

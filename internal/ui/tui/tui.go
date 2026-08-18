@@ -444,7 +444,8 @@ func (m model) View() string {
 		return modal(title, m.modalLines(), m.detail, m.w, m.h)
 	}
 	repoName, repoTag := m.currentRepo()
-	top := headerBar(labels, m.tab, m.w, repoName, repoTag, m.repoColorIdx(repoTag), m.state.Memory)
+	top := headerBar(labels, m.tab, m.w, repoName, repoTag, m.repoColorIdx(repoTag), m.state.Memory,
+		m.state.RunningAgentCount(), m.state.AgentCount())
 	var body string
 	// Agents/PRs always render their main pane — it is the point of the tab. Each body drops
 	// only the right detail column when the terminal is narrow or § hid it.
