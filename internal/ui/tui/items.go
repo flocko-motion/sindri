@@ -57,6 +57,8 @@ func homeTab(kind string) int {
 		return 1
 	case "pr":
 		return 2
+	case "mail":
+		return 6
 	}
 	return -1
 }
@@ -168,6 +170,12 @@ func (m *model) gotoItem(kind, id string) {
 	}
 	m.rightFocus = false
 	m.tab = t
+	// Mail is reached by NARROWING rather than by selecting: the item is a count of an agent's
+	// unread messages, not one row, so what it names is a set (-> showUnreadFor).
+	if kind == "mail" {
+		m.showUnreadFor(id)
+		return
+	}
 	m.selectRow(id)
 }
 

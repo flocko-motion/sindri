@@ -216,6 +216,22 @@ func (m *model) cycleMailWho() {
 	m.flash = "mail: " + mailWhoLabel(m.mailAgent)
 }
 
+// showUnreadFor narrows the Mail tab to one agent's UNREAD mail, both axes at once, matching the
+// count that sent the user here. Scope widens too where the agent is foreign, so the jump never
+// lands on an empty list because the local repo hid the answer.
+func (m *model) showUnreadFor(agent string) {
+	m.mailAgent, m.mailFilter = agent, api.MailUnread
+	m.flash = "mail: " + agent + ", unread"
+	for _, a := range m.state.Agents {
+		if a.Name == agent && !m.inScope(a.Project) {
+			m.scopeRepo = false
+			m.flash += " (all repos: it is not in this one)"
+			break
+		}
+	}
+	m.cursor[m.tab] = 0
+}
+
 // mailWhoLabel names the narrowing for the footer and the flash, in the words the tab uses.
 func mailWhoLabel(agent string) string {
 	switch agent {

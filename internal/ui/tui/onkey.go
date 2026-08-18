@@ -477,6 +477,9 @@ func (m *model) onKey(k string) tea.Cmd {
 					}
 					m.prView = it.value // PRs: diff ⇄ lint
 					m.detail.Resize(m.detail.Height, len(m.prContentLines()))
+				case "mail": // Agents: go read what this agent has not (-> gotoItem, which narrows)
+					m.gotoItem(it.kind, it.value)
+					return nil
 				case "resume": // Agents: release an escalated agent (its own clear is `sindri resume`)
 					m.openResumeChoice(it.value)
 					return nil

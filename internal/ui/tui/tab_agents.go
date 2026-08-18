@@ -348,7 +348,11 @@ func (m model) agentItems() []metaItem {
 	// Unread mail, where there is any: the mailbox waits quietly by design, so a count on the agent
 	// is the only thing that shows one has stopped reading.
 	if a.UnreadMail > 0 {
-		items = append(items, metaItem{text: stWarn.Render(fmt.Sprintf("mail:      %d unread", a.UnreadMail))})
+		items = append(items, metaItem{
+			text:  stWarn.Render(fmt.Sprintf("mail:      %d unread", a.UnreadMail)) + dimStyle.Render("  (⏎ read them)"),
+			kind:  "mail",
+			value: a.Name,
+		})
 	}
 	// The question an escalated agent stopped on, beside the status word that says it is. Readable
 	// here on purpose: several escalations can be triaged before deciding which to sit down with,
