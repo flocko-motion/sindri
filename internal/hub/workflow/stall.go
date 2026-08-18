@@ -19,10 +19,7 @@ const RetryDwell = time.Minute
 // parkedByTheHub reports whether an agent is idle because it was told to be — retired by a human, or
 // by its own context filling. Both are wound down deliberately (-> claimNext).
 func (e *Engine) parkedByTheHub(project, name string) bool {
-	if a, ok, err := e.store.For(project).GetAgent(name); err == nil && ok && a.Retired {
-		return true
-	}
-	return e.ContextFull(project, name)
+	return e.retired(project, name) || e.ContextFull(project, name)
 }
 
 // Stalled reports whether an agent holds work it has stopped doing. The evidence is the SCREEN

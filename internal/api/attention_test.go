@@ -121,6 +121,17 @@ func TestALiveReviewerIsOneWhosePodIsUp(t *testing.T) {
 	}
 }
 
+// TestARetiredReviewerIsNotLive: retirement hands off every automatic behaviour, including being
+// counted as the reviewer who will pick this up — its status still reads idle (the pod is up), but
+// it will never be assigned the review, so a PR waiting on it must escalate rather than sit believing
+// someone has it.
+func TestARetiredReviewerIsNotLive(t *testing.T) {
+	roster := []AgentView{{Project: "a", Role: "reviewer", Status: "idle", Retired: true}}
+	if AnyLiveReviewer(roster, "a") {
+		t.Error("a retired reviewer must not count as live — it will never take the review")
+	}
+}
+
 // TestLivenessIsPerRepo is the case a single-project table cannot see. Review assignment reads ONE
 // project roster (-> workflow.freeReviewer), so a reviewer running in repo A is never handed repo
 // B's PR: B's queue is stranded exactly as if no reviewer existed, and that is what the marker is

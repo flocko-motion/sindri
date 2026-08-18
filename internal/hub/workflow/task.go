@@ -381,10 +381,17 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 	}
 }
 
+// retired reports a human-parked agent — hands off every automatic behaviour, written once so a
+// feature added later asks this instead of keeping its own copy (-> retire.go).
+func (e *Engine) retired(project, name string) bool {
+	a, ok, err := e.store.For(project).GetAgent(name)
+	return err == nil && ok && a.Retired
+}
+
 // waitForNextTask is the idle-agent path: an agent that will get no more work is told so
 // immediately, not left blocking on a queue it is no longer served from.
 func (e *Engine) waitForNextTask(ctx context.Context, project, name string) (string, error) {
-	if a, ok, _ := e.store.For(project).GetAgent(name); ok && a.Retired {
+	if e.retired(project, name) {
 		return DirRetired, nil
 	}
 	// Ahead of fullness: an armed clear is the remedy FOR fullness, so telling a full agent to wait
@@ -547,7 +554,7 @@ func ToStoreTask(t task.Task) store.Task {
 
 // CmdNext claims the highest-priority open task for a worker and branches for it.
 func (e *Engine) CmdNext(c registry.Caller, _ []string, out io.Writer) (int, error) {
-	if a, ok, _ := e.store.For(c.Project).GetAgent(c.Agent); ok && a.Retired {
+	if e.retired(c.Project, c.Agent) {
 		fmt.Fprintln(out, DirRetired)
 		return 0, nil
 	}
@@ -612,7 +619,7 @@ func (e *Engine) ContextFull(project, worker string) bool {
 func (e *Engine) claimNext(project, agent string) (string, bool, error) {
 	// Retired by a human, or by its own context filling: either way it is being wound down, and the
 	// gate is here rather than at the task queries so it holds however the work would have arrived.
-	if a, ok, _ := e.store.For(project).GetAgent(agent); ok && a.Retired {
+	if e.retired(project, agent) {
 		return "", false, nil
 	}
 	if e.clearArmed(project, agent) {

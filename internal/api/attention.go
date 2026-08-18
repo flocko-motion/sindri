@@ -91,12 +91,12 @@ func PRWaitReason(p PR, agents []AgentView) PRWait {
 // PRNeedsUser reports whether this PR waits on the user at all.
 func PRNeedsUser(p PR, agents []AgentView) bool { return PRWaitReason(p, agents) != PRWaitNone }
 
-// AnyLiveReviewer reports whether a reviewer agent is up in that project. Scoped because
-// assignment is (-> workflow.freeReviewer reads one project's roster), so a reviewer up in another
-// repo will never be handed this PR.
+// AnyLiveReviewer reports whether a reviewer agent is up AND assignable in that project (scoped:
+// -> workflow.freeReviewer). Excludes a retired one even though its status still reads up — it will
+// never be assigned this review, so a PR waiting on it must escalate rather than sit believing so.
 func AnyLiveReviewer(agents []AgentView, project string) bool {
 	for _, a := range agents {
-		if a.Project == project && a.Role == "reviewer" && !AgentNotUp(a.Status) {
+		if a.Project == project && a.Role == "reviewer" && !a.Retired && !AgentNotUp(a.Status) {
 			return true
 		}
 	}
