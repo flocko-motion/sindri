@@ -22,6 +22,16 @@ type Delivery struct {
 	// out of the text: a prefix in the body made provenance a property of the wording, under which only
 	// two of the four could ever be recorded. Empty means the hub in its own voice.
 	Sender string
+	// ReplyTo is the id of the message this answers, 0 when it starts a thread. Stored so a reply
+	// arrives as part of an exchange rather than as an unrelated message the recipient has to match
+	// against its own by guesswork.
+	ReplyTo int64
+}
+
+// Answering marks a message as the reply to another, returning a copy for the same reason From does.
+func (d Delivery) Answering(id int64) Delivery {
+	d.ReplyTo = id
+	return d
 }
 
 // From names the sender, returning a COPY — so one call site cannot leak a sender into the shared

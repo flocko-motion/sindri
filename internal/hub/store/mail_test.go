@@ -23,7 +23,7 @@ func mailStore(t *testing.T) *Store {
 func TestReadingMailMARKSIt(t *testing.T) {
 	s := mailStore(t)
 	ps := s.For("proj")
-	m, err := ps.AddMail("dvalin", "reviewer", "rejected: the gate is missing", true)
+	m, err := ps.AddMail("dvalin", "reviewer", "rejected: the gate is missing", true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,10 +60,10 @@ func TestReadingMailMARKSIt(t *testing.T) {
 // section rather than a second per-agent timeline.
 func TestMailIsFleetWideAndNewestFirst(t *testing.T) {
 	s := mailStore(t)
-	if _, err := s.For("one").AddMail("dvalin", "hub", "first", false); err != nil {
+	if _, err := s.For("one").AddMail("dvalin", "hub", "first", false, 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.For("two").AddMail("nori", "user", "second", false); err != nil {
+	if _, err := s.For("two").AddMail("nori", "user", "second", false, 0); err != nil {
 		t.Fatal(err)
 	}
 	all, err := s.AllMail(0)
@@ -85,7 +85,7 @@ func TestMailWindowKeepsTheRecentEnd(t *testing.T) {
 	s := mailStore(t)
 	ps := s.For("proj")
 	for i := 0; i < 5; i++ {
-		if _, err := ps.AddMail("dvalin", "hub", strings.Repeat("x", i+1), false); err != nil {
+		if _, err := ps.AddMail("dvalin", "hub", strings.Repeat("x", i+1), false, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -123,7 +123,7 @@ func TestMailSurvivesAReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.For("proj").AddMail("dvalin", "hub", "merged pr-sd-1", true); err != nil {
+	if _, err := s.For("proj").AddMail("dvalin", "hub", "merged pr-sd-1", true, 0); err != nil {
 		t.Fatal(err)
 	}
 	s.Close()
@@ -147,7 +147,7 @@ func TestTheUsersShareComesFromTheSamePass(t *testing.T) {
 	for _, m := range []struct{ to, from string }{
 		{"dvalin", "hub"}, {"dvalin", "hub"}, {"user", "dvalin"}, {"user", "nori"},
 	} {
-		if _, err := ps.AddMail(m.to, m.from, "a message", false); err != nil {
+		if _, err := ps.AddMail(m.to, m.from, "a message", false, 0); err != nil {
 			t.Fatal(err)
 		}
 	}

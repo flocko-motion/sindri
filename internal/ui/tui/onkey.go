@@ -270,7 +270,21 @@ func (m *model) onKey(k string) tea.Cmd {
 			return nil
 		}
 	// keyMail shares this letter (both open a prompt): on tasks it comments, on agents it mails.
-	case keyComment: // tasks: comment on the selected task · agents: mail it (waits, never interrupts)
+	case keyComment: // tasks: comment · agents: mail it · mail: reply to the selected message
+		if m.tab == 6 {
+			msg, ok := m.selMail()
+			if !ok {
+				return nil
+			}
+			if msg.Sender == "hub" || msg.Sender == "" {
+				m.flash = "nothing to reply to — that came from the hub, which has nobody behind it"
+				return nil
+			}
+			// openInput targets the selected row's id, which on this tab IS the message id — the
+			// recipient then comes from the message rather than from anything typed here.
+			m.openInput(inputMailReply, "reply to "+msg.Sender+": ")
+			return textinput.Blink
+		}
 		if m.tab == 1 && m.selID() != "" && !m.isOrphan(m.selID()) {
 			m.openInput(inputMail, "mail "+m.selID()+" (waits, never interrupts): ")
 			return textinput.Blink

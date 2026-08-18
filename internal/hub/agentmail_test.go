@@ -137,7 +137,7 @@ func TestMailingYourselfIsRefused(t *testing.T) {
 // TestSendingDoesNotConsumeTheReadHalf: one verb, two halves — a bare `mail` must still read.
 func TestSendingDoesNotConsumeTheReadHalf(t *testing.T) {
 	h := twoRepos(t)
-	if _, err := h.store.For(testProject).AddMail("dvalin", "hub", "[hub] a verdict", false); err != nil {
+	if _, err := h.store.For(testProject).AddMail("dvalin", "hub", "[hub] a verdict", false, 0); err != nil {
 		t.Fatal(err)
 	}
 	out, code := execAs(t, h, "dvalin", "mail")

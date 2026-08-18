@@ -32,6 +32,19 @@ func (h *Hub) messageRoutes(mux *http.ServeMux) {
 		}
 		writeJSON(w, okMsg{"mailed"}, h.MailAgent(h.agentReq(r, req.Name), req.Name, req.Msg))
 	})
+	// The user answering an agent's message, from either front-end: the recipient comes from the row.
+	mux.HandleFunc("POST /mail/reply", func(w http.ResponseWriter, r *http.Request) {
+		var req TellReq // Name carries the message id, Msg the reply
+		if !decode(w, r, &req) {
+			return
+		}
+		id, err := strconv.ParseInt(req.Name, 10, 64)
+		if err != nil {
+			writeJSON(w, nil, fmt.Errorf("mail id must be a number, got %q", req.Name))
+			return
+		}
+		writeJSON(w, okMsg{"replied"}, h.ReplyToMail(id, req.Msg))
+	})
 	// One message in full. The board carries a preview of each body, so this is what a detail view
 	// and `mail show` ask for — and it reaches mail older than the board's window.
 	mux.HandleFunc("GET /mail", func(w http.ResponseWriter, r *http.Request) {

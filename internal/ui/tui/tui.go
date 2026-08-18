@@ -51,6 +51,7 @@ const (
 	inputNone inputMode = iota
 	inputTell
 	inputMail
+	inputMailReply
 	inputComment
 	inputRunCommand
 )

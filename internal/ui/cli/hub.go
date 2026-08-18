@@ -36,6 +36,7 @@ type backend interface {
 	ResumeAgent(name string) error
 	MailBody(id int64) (api.Mail, error)
 	MailAgent(name, msg string) error
+	ReplyToMail(id int64, msg string) error
 	DeleteAgent(name string) error
 	StopAgent(name string) error
 	SetClearArmed(name string, armed bool) error

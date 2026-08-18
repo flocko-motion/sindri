@@ -121,7 +121,7 @@ func TestTheFleetCeilingProtectsTheUserFromImpeccableAgents(t *testing.T) {
 	h, ps := noteSender(t, "nori")
 	// The hour's ceiling is already spent, one note each — every one of those agents within its grant.
 	for i := 0; i < fleetNotesPerHour; i++ {
-		if _, err := ps.AddMail(api.SenderUser, "someone", "a perfectly good note", false); err != nil {
+		if _, err := ps.AddMail(api.SenderUser, "someone", "a perfectly good note", false, 0); err != nil {
 			t.Fatal(err)
 		}
 	}

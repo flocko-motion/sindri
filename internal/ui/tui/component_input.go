@@ -8,6 +8,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -69,6 +70,13 @@ func (m *model) submitInput() tea.Cmd {
 		// No signed-out question here, unlike tell: mail never touches the session, so a pane that
 		// cannot receive anything is exactly the case mail is FOR.
 		return mutateThenRefresh(cl, func() error { return cl.MailAgent(target, v) })
+	case inputMailReply:
+		// The recipient comes from the message, not from this prompt — which is why the target is an id.
+		var id int64
+		if _, err := fmt.Sscanf(target, "%d", &id); err != nil {
+			return nil
+		}
+		return mutateThenRefresh(cl, func() error { return cl.ReplyToMail(id, v) })
 	case inputRunCommand:
 		// Against this repo's own checkout, the target only a human has — an agent's workspace is
 		// the agent's to queue. Not scheduled inline: the queue answers at once with a position,

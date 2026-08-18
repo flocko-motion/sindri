@@ -12,6 +12,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
@@ -111,4 +112,64 @@ func (h *Hub) resolveRecipient(to string) (project, name string, err error) {
 	}
 	return "", "", fmt.Errorf("%q is ambiguous — it names %s. Say which with `sindri mail %s <message>`",
 		to, strings.Join(qualified, " and "), qualified[0])
+}
+
+// replyHelp is what the registry advertises for reply.
+const replyHelp = "answer a message you were sent, without needing to know who sent it: reply <mail-id> <message>"
+
+// cmdReply is `reply <mail-id> <message...>`: an agent answering something it was sent. The recipient
+// comes from the STORED ROW, which is the point — an agent that has been mailed can answer without
+// being told a name, so a conversation needs no directory at all.
+func (h *Hub) cmdReply(c registry.Caller, args []string, out io.Writer) (int, error) {
+	if len(args) < 2 {
+		fmt.Fprintln(out, workflow.ReplyReplyUsage)
+		return 2, nil
+	}
+	var id int64
+	if _, err := fmt.Sscanf(args[0], "%d", &id); err != nil {
+		fmt.Fprintf(out, "%q is not a message id — `sindri mail` lists yours with theirs.\n", args[0])
+		return 2, nil
+	}
+	msg := strings.TrimSpace(strings.Join(args[1:], " "))
+	if msg == "" {
+		fmt.Fprintln(out, workflow.ReplyReplyUsage)
+		return 2, nil
+	}
+	if n := len([]rune(msg)); n > maxMessageLen {
+		fmt.Fprintln(out, workflow.ReplyMailTooLong(n, maxMessageLen))
+		return 1, nil
+	}
+	original, ok, err := h.store.MailByID(id)
+	if err != nil {
+		return 1, err
+	}
+	// Yours to answer: a reply to somebody else's mail would be a message they never see the question
+	// for, and reading another agent's mailbox is not what the id is for.
+	if !ok || original.Project != c.Project || original.Agent != c.Agent {
+		fmt.Fprintf(out, "No message %d in your mailbox — `sindri mail` shows what you were sent.\n", id)
+		return 1, nil
+	}
+	if original.Sender == "hub" || original.Sender == "" {
+		fmt.Fprintln(out, workflow.ReplyReplyToHub)
+		return 1, nil
+	}
+	project, name := c.Project, original.Sender
+	if original.Sender == api.SenderUser {
+		// A reply to the user does NOT charge the note budget: that budget bounds attention the user
+		// did not ask for, and this answers a message they chose to send. Charging it would penalise
+		// answering and teach agents to go quiet when addressed.
+		name = api.SenderUser
+	} else if p, n, rerr := h.resolveRecipient(original.Sender); rerr == nil {
+		project, name = p, n
+	} else {
+		fmt.Fprintf(out, "%v\n", rerr)
+		return 1, nil
+	}
+	from := h.repoName(c.Project) + "/" + c.Agent
+	if err := h.Deliver(project, name, msg, workflow.MailOnly.From(from).Answering(id)); err != nil {
+		return 1, err
+	}
+	_ = h.store.For(c.Project).Log(c.Agent, "mail-reply", fmt.Sprintf("%d to %s: %s", id, name, msg))
+	fmt.Fprintln(out, workflow.ReplyReplied(original.Sender, id))
+	return 0, nil
 }

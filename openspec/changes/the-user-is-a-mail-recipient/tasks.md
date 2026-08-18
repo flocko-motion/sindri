@@ -88,6 +88,18 @@
       guarantee is only half-real until that lands — an agent that has stopped calling `sindri` will
       not read what it is sent.
 
+## 5e. Replying by id (sd-63a19b)
+
+- [x] 5e.1 `reply <mail-id> <message...>` for agents; the recipient comes from the stored row, so no
+      name is typed and no directory is needed.
+- [x] 5e.2 `in_reply_to` on the mail row, carried by the delivery (`Delivery.Answering`), so an exchange
+      reads as one.
+- [x] 5e.3 Only your own mail: an id is not a licence to read another mailbox.
+- [x] 5e.4 A reply to the hub is refused, naming escalate and comment as the paths that reach someone.
+- [x] 5e.5 A reply to the user does NOT consume the note grant — it answers a message they chose to
+      send — while the length cap still applies.
+- [x] 5e.6 Both front-ends: `sindri mail reply <id>` and `i` on the Mail tab, both addressing by id.
+
 ## 6. Verify
 
 - [x] 6.1 A note reaches the user's mailbox, attributed, unpushed, with the remainder stated.
@@ -108,4 +120,6 @@
 - [x] 6.12 Across repos by bare name with qualified attribution and no push; ambiguity refused naming
       both, with the qualified form delivering; unknown refused; capped but not budgeted; self refused;
       and the read half intact.
-- [x] 6.13 `make verify` passes.
+- [x] 6.13 Replying needs no name and threads; the hub is refused with somewhere to go; the user's reply
+      is uncharged; another agent's mail is refused; and the user can reply from either front-end.
+- [x] 6.14 `make verify` passes.

@@ -30,7 +30,7 @@ func NewMailCmd() *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
-	c.AddCommand(mailListCmd(), mailShowCmd())
+	c.AddCommand(mailListCmd(), mailShowCmd(), mailReplyCmd())
 	return c
 }
 
@@ -134,6 +134,29 @@ func mailFooter(st api.BoardState, shown []api.Mail, f api.MailFilter, agent str
 	}
 	return fmt.Sprintf("%d %s message(s)%s, %d unread across the fleet.%s%s",
 		len(shown), f, where, st.MailUnread, mine, tail)
+}
+
+// mailReplyCmd answers an agent's message by its id. No recipient to type: it comes from the row, which
+// is the point — the id is on every line of `mail list`.
+func mailReplyCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "reply <id> <message...>", Short: "Answer a message an agent sent you (it goes to whoever sent it)",
+		Args: cobra.MinimumNArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			var id int64
+			if _, err := fmt.Sscanf(args[0], "%d", &id); err != nil {
+				return fmt.Errorf("mail id must be a number, got %q", args[0])
+			}
+			msg := strings.Join(args[1:], " ")
+			return withBackend(func(b backend) error {
+				if err := b.ReplyToMail(id, msg); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "replied — it reads this at its next `sindri`, threaded with what you answered\n")
+				return nil
+			})
+		},
+	}
 }
 
 func mailShowCmd() *cobra.Command {

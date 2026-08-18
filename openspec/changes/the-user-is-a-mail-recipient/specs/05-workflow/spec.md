@@ -246,3 +246,50 @@ read, and this traffic does not reach them.
 
 - **WHEN** an agent has spent its note grant, or has never claimed anything
 - **THEN** it may still mail another agent, since that grant bounds the user's attention only
+
+### Requirement: A message can be answered by its id
+
+Anyone holding a message SHALL be able to answer it by its id, and the reply SHALL go to
+whoever sent it, resolved from the stored record. That is the point: an agent that has been
+mailed can answer without being told a name, so a conversation needs no directory at either
+end — and the same is true of the user, reading in either front-end.
+
+A reply SHALL record the message it answers, so an exchange reads as an exchange rather than
+as scattered rows the recipient must match up by guesswork.
+
+An agent SHALL be able to answer only its OWN mail. An id is not a licence to read another
+agent's mailbox, and a reply to somebody else's message would answer a question its recipient
+never saw.
+
+A reply to the HUB SHALL be refused, naming what to use instead. The hub is not a
+correspondent: a message from it is a notification, and an answer typed at it would be read
+by nobody. Where the answer needs a human, the escalation path is the one that reaches them;
+where it belongs to the work, a task comment does.
+
+A reply to the USER SHALL NOT consume the note budget. That budget bounds attention the user
+did not ask for, and a reply answers a message they chose to send — charging for it would
+penalise answering and teach agents to go quiet when addressed directly. The length cap still
+applies, since the cost of a long message is borne by whoever reads it.
+
+Both front-ends SHALL offer the reply, so the user can answer from wherever they are reading.
+
+#### Scenario: Answering without a name
+
+- **WHEN** an agent replies to a message by its id
+- **THEN** the reply reaches whoever sent it, recorded as answering that message, and nothing
+  is pushed
+
+#### Scenario: Answering a notification
+
+- **WHEN** a reply is attempted to a message the hub sent
+- **THEN** it is refused, and the refusal names the paths that do reach a person
+
+#### Scenario: Answering the user costs nothing
+
+- **WHEN** an agent with no note budget left replies to a message from the user
+- **THEN** the reply is delivered, because it answers something they chose to send
+
+#### Scenario: Somebody else's mail
+
+- **WHEN** an agent replies to a message addressed to a different agent
+- **THEN** it is refused

@@ -32,21 +32,24 @@ CREATE TABLE IF NOT EXISTS mail (
   body    TEXT NOT NULL DEFAULT '',
   sent_at TEXT NOT NULL DEFAULT '',
   read_at TEXT NOT NULL DEFAULT '',-- '' = unread; set when the agent reads it, never cleared
-  pushed  INTEGER NOT NULL DEFAULT 0 -- the same message was also injected, so it may have been seen live
+  pushed  INTEGER NOT NULL DEFAULT 0, -- the same message was also injected, so it may have been seen live
+  -- The message this one answers (0 = starts a thread), so an exchange reads as an exchange rather
+  -- than as scattered rows the recipient has to match up by hand.
+  in_reply_to INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS mail_agent ON mail (project, agent, id);
 `
 
-const mailCols = `SELECT id, project, agent, sender, body, sent_at, read_at, pushed FROM mail`
+const mailCols = `SELECT id, project, agent, sender, body, sent_at, read_at, pushed, in_reply_to FROM mail`
 
 // AddMail records a message an agent must read, returning the stored row. pushed says whether it was
 // also injected — "pushed and possibly missed" and "sitting here unread" are different diagnoses.
-func (p *ProjectStore) AddMail(agent, sender, body string, pushed bool) (Mail, error) {
+func (p *ProjectStore) AddMail(agent, sender, body string, pushed bool, inReplyTo int64) (Mail, error) {
 	m := Mail{Project: p.project, Agent: agent, Sender: sender, Body: body,
-		SentAt: time.Now().UTC().Format(time.RFC3339), Pushed: pushed}
+		SentAt: time.Now().UTC().Format(time.RFC3339), Pushed: pushed, InReplyTo: inReplyTo}
 	res, err := p.s.db.Exec(
-		`INSERT INTO mail (project, agent, sender, body, sent_at, pushed) VALUES (?,?,?,?,?,?)`,
-		m.Project, m.Agent, m.Sender, m.Body, m.SentAt, m.Pushed)
+		`INSERT INTO mail (project, agent, sender, body, sent_at, pushed, in_reply_to) VALUES (?,?,?,?,?,?,?)`,
+		m.Project, m.Agent, m.Sender, m.Body, m.SentAt, m.Pushed, m.InReplyTo)
 	if err != nil {
 		return Mail{}, fmt.Errorf("add mail for %s/%s: %w", p.project, agent, err)
 	}
@@ -202,6 +205,6 @@ func queryMail(db *sql.DB, q string, args ...any) ([]Mail, error) {
 
 func scanMail(row scanner) (Mail, error) {
 	var m Mail
-	err := row.Scan(&m.ID, &m.Project, &m.Agent, &m.Sender, &m.Body, &m.SentAt, &m.ReadAt, &m.Pushed)
+	err := row.Scan(&m.ID, &m.Project, &m.Agent, &m.Sender, &m.Body, &m.SentAt, &m.ReadAt, &m.Pushed, &m.InReplyTo)
 	return m, err
 }

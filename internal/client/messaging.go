@@ -27,6 +27,12 @@ func (c *HTTP) MailAgent(name, msg string) error {
 	return c.post("/agent/mail", api.TellReq{Name: name, Msg: msg, Source: api.SenderUser})
 }
 
+// ReplyToMail answers a message an agent sent the user, addressed by the message's id — the recipient
+// comes from the stored row, so whoever is reading it does not retype who wrote it.
+func (c *HTTP) ReplyToMail(id int64, msg string) error {
+	return c.post("/mail/reply", api.TellReq{Name: fmt.Sprint(id), Msg: msg, Source: api.SenderUser})
+}
+
 // MailBody returns one message from an agent's mailbox with its FULL body. The board carries a
 // window of mail with each body cut to a preview, so this is how a detail view shows a message
 // whole — and how one older than that window is reached at all.

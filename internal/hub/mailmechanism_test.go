@@ -79,7 +79,7 @@ func TestADeliveryThatSendsNothingIsAFault(t *testing.T) {
 // cancellation for the task it holds, say. After reading, the directive is the work again.
 func TestTheDirectiveRemindsAndReadingClearsIt(t *testing.T) {
 	h, ps := mailAgent(t)
-	if _, err := ps.AddMail("dvalin", "hub", "[hub] td-1 was cancelled", false); err != nil {
+	if _, err := ps.AddMail("dvalin", "hub", "[hub] td-1 was cancelled", false, 0); err != nil {
 		t.Fatal(err)
 	}
 	dir, err := h.wf.AgentDirective(t.Context(), testProject, "dvalin")
@@ -133,7 +133,7 @@ func TestAnEscalatedAgentIsStillToldItHasMail(t *testing.T) {
 	if _, err := h.Escalate(testProject, "dvalin", "one column or two?"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ps.AddMail("dvalin", "reviewer", "[reviewer] rejected: see the findings", false); err != nil {
+	if _, err := ps.AddMail("dvalin", "reviewer", "[reviewer] rejected: see the findings", false, 0); err != nil {
 		t.Fatal(err)
 	}
 	dir, err := h.wf.AgentDirective(t.Context(), testProject, "dvalin")
@@ -180,7 +180,7 @@ func TestAnEmptyMailboxSaysSo(t *testing.T) {
 // only thing that reveals one has stopped reading.
 func TestUnreadShowsOnTheAgentRow(t *testing.T) {
 	h, ps := mailAgent(t)
-	if _, err := ps.AddMail("dvalin", "hub", "[hub] read me", false); err != nil {
+	if _, err := ps.AddMail("dvalin", "hub", "[hub] read me", false, 0); err != nil {
 		t.Fatal(err)
 	}
 	board, err := h.State("")

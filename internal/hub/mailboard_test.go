@@ -14,7 +14,7 @@ func TestTheBoardCarriesAWindowAndCountsTheWholeMailbox(t *testing.T) {
 	ps := h.store.For(testProject)
 	const over = MailWindow + 6
 	for i := 0; i < over; i++ {
-		if _, err := ps.AddMail("dvalin", "hub", "message", false); err != nil {
+		if _, err := ps.AddMail("dvalin", "hub", "message", false, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -46,7 +46,7 @@ func TestTheBoardCarriesAWindowAndCountsTheWholeMailbox(t *testing.T) {
 func TestALongBodyIsPreviewedInTheWindowAndWholeByID(t *testing.T) {
 	h := newHub(t)
 	long := strings.Repeat("finding. ", 200)
-	m, err := h.store.For(testProject).AddMail("dvalin", "reviewer", long, true)
+	m, err := h.store.For(testProject).AddMail("dvalin", "reviewer", long, true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,11 +79,11 @@ func TestALongBodyIsPreviewedInTheWindowAndWholeByID(t *testing.T) {
 func TestTheMailSectionCountsUnread(t *testing.T) {
 	h := newHub(t)
 	ps := h.store.For(testProject)
-	read, err := ps.AddMail("dvalin", "hub", "merged pr-sd-1", true)
+	read, err := ps.AddMail("dvalin", "hub", "merged pr-sd-1", true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ps.AddMail("dvalin", "reviewer", "rejected", true); err != nil {
+	if _, err := ps.AddMail("dvalin", "reviewer", "rejected", true, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := ps.MarkMailRead(read.ID); err != nil {
@@ -121,16 +121,16 @@ func TestTheMarkerCountsOnlyTheUsersUnread(t *testing.T) {
 	ps := h.store.For(testProject)
 	// The bulk: hub-to-agent and agent-to-agent, unread, and none of it the user's.
 	for i := 0; i < 5; i++ {
-		if _, err := ps.AddMail("dvalin", "hub", "a verdict", true); err != nil {
+		if _, err := ps.AddMail("dvalin", "hub", "a verdict", true, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Two notes to the user, one already read.
-	read, err := ps.AddMail("user", "dvalin", "the td adapter shells out twice", false)
+	read, err := ps.AddMail("user", "dvalin", "the td adapter shells out twice", false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ps.AddMail("user", "nori", "config field is documented backwards", false); err != nil {
+	if _, err := ps.AddMail("user", "nori", "config field is documented backwards", false, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := ps.MarkMailRead(read.ID); err != nil {

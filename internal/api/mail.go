@@ -26,6 +26,9 @@ type Mail struct {
 	Truncated bool   `json:"truncated,omitempty"`
 	SentAt    string `json:"sentAt"`
 	ReadAt    string `json:"readAt,omitempty"` // "" = still unread
+	// InReplyTo is the message this one answers, 0 when it starts a thread — so a front-end can show an
+	// exchange as one, and a recipient is not left matching a reply against its own messages by hand.
+	InReplyTo int64 `json:"inReplyTo,omitempty"`
 	// Pushed: the same message was also injected into the agent's session, so it may have been acted
 	// on live. Carried because "pushed, and possibly missed" and "sitting here unread" are different
 	// diagnoses, and a reader looking at a quiet agent needs to tell them apart.
