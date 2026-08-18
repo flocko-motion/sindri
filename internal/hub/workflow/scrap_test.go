@@ -46,6 +46,8 @@ type stubDeps struct {
 	holdsNothing bool
 	compacted    []string // agents Compact was called for, in order
 	compactErr   error
+	// compactPend backs CompactPending/ForgetCompactPending — set by Compact, cleared by the latter.
+	compactPend  map[string]bool
 	cleared      []string // agents FireClear was called for, in order
 	fireClearErr error
 	// projectConfig overrides ProjectConfig's answer; the zero value (no lint.max_comment_avg set)
@@ -115,7 +117,21 @@ func (d *stubDeps) HoldsNothing(_, _, _ string) (bool, error) { return d.holdsNo
 
 func (d *stubDeps) Compact(_, name string) error {
 	d.compacted = append(d.compacted, name)
+	if d.compactErr == nil {
+		if d.compactPend == nil {
+			d.compactPend = map[string]bool{}
+		}
+		d.compactPend[name] = true
+	}
 	return d.compactErr
+}
+
+func (d *stubDeps) CompactPending(_, name string) bool { return d.compactPend[name] }
+
+func (d *stubDeps) ForgetCompactPending(_, name string) {
+	if d.compactPend != nil {
+		delete(d.compactPend, name)
+	}
 }
 
 func (d *stubDeps) FireClear(_, name string) error {

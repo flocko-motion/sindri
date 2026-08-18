@@ -132,9 +132,9 @@ func TestMailDefersPastAnArmedClear(t *testing.T) {
 	}
 }
 
-// TestMailDefersPastCompactionOnAClaim: fill past the threshold compacts inline, in the same pass
-// that would otherwise hand the task over. Mail must land in the context that compaction just
-// produced, not the one it replaced — so it is checked after the compact, before the claim.
+// TestMailDefersPastCompactionOnAClaim: fill past the threshold ends the pass on the compaction
+// itself, same as a model change — mail is not checked until a later ask finds the fresh, landed
+// reading, and only then (still ahead of the claim) if it is still unread.
 func TestMailDefersPastCompactionOnAClaim(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
 	e, ps := idleWorkerWithOpenTask(t, deps)
@@ -144,11 +144,25 @@ func TestMailDefersPastCompactionOnAClaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if !strings.Contains(dir, "unread") {
-		t.Errorf("directive = %q, want mail delivered into the just-compacted context, not the task", dir)
+	if strings.Contains(dir, "unread") || !strings.Contains(dir, "compact") {
+		t.Errorf("directive = %q, want the compacting answer — there is no fresh context yet", dir)
 	}
 	if len(deps.compacted) != 1 || deps.compacted[0] != "dvalin" {
-		t.Errorf("compacted = %v, want exactly one Compact(dvalin) fired ahead of the mail", deps.compacted)
+		t.Errorf("compacted = %v, want exactly one Compact(dvalin) fired", deps.compacted)
+	}
+	if st, _ := ps.GetState("dvalin"); st.Task != "" {
+		t.Errorf("state.Task = %q, the claim must wait until the mail is read", st.Task)
+	}
+
+	// The queued /compact has landed: this ask's fresh reading is under the threshold, so mail is
+	// checked — and delivered, since it is still unread — ahead of the claim.
+	deps.ctxTokens = 2_000
+	dir, err = e.AgentDirective(context.Background(), "repo", "dvalin")
+	if err != nil {
+		t.Fatalf("AgentDirective: %v", err)
+	}
+	if !strings.Contains(dir, "unread") {
+		t.Errorf("directive = %q, want mail delivered into the just-landed context, not the task", dir)
 	}
 	if st, _ := ps.GetState("dvalin"); st.Task != "" {
 		t.Errorf("state.Task = %q, the claim must wait until the mail is read", st.Task)
@@ -238,11 +252,23 @@ func TestMailDefersPastCompactionBetweenSubtasks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if !strings.Contains(dir, "unread") {
-		t.Errorf("directive = %q, want mail delivered into the just-compacted context, not the subtask", dir)
+	if strings.Contains(dir, "unread") || !strings.Contains(dir, "compact") {
+		t.Errorf("directive = %q, want the compacting answer — there is no fresh context yet", dir)
 	}
 	if len(deps.compacted) != 1 || deps.compacted[0] != agent {
-		t.Errorf("compacted = %v, want exactly one Compact(%s) fired ahead of the mail", deps.compacted, agent)
+		t.Errorf("compacted = %v, want exactly one Compact(%s) fired", deps.compacted, agent)
+	}
+	if held, _ := ps.GetState(agent); held.Task == "td-next" {
+		t.Error("the next subtask must not be claimed until the compaction lands")
+	}
+
+	deps.ctxTokens = 2_000
+	dir, err = e.AgentDirective(context.Background(), "repo", agent)
+	if err != nil {
+		t.Fatalf("AgentDirective: %v", err)
+	}
+	if !strings.Contains(dir, "unread") {
+		t.Errorf("directive = %q, want mail delivered into the just-landed context, not the subtask", dir)
 	}
 	if held, _ := ps.GetState(agent); held.Task == "td-next" {
 		t.Error("the next subtask must not be claimed until the mail is read")
@@ -307,11 +333,23 @@ func TestMailDefersPastCompactionOnAReviewClaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if !strings.Contains(dir, "unread") {
-		t.Errorf("directive = %q, want mail delivered into the just-compacted context, not the review", dir)
+	if strings.Contains(dir, "unread") || !strings.Contains(dir, "compact") {
+		t.Errorf("directive = %q, want the compacting answer — there is no fresh context yet", dir)
 	}
 	if len(deps.compacted) != 1 || deps.compacted[0] != "rune" {
-		t.Errorf("compacted = %v, want exactly one Compact(rune) fired ahead of the mail", deps.compacted)
+		t.Errorf("compacted = %v, want exactly one Compact(rune) fired", deps.compacted)
+	}
+	if held, _ := ps.ReviewingPR("rune"); held != "" {
+		t.Errorf("ReviewingPR = %q, the review must not be claimed until the compaction lands", held)
+	}
+
+	deps.ctxTokens = 2_000
+	dir, err = e.AgentDirective(context.Background(), "repo", "rune")
+	if err != nil {
+		t.Fatalf("AgentDirective: %v", err)
+	}
+	if !strings.Contains(dir, "unread") {
+		t.Errorf("directive = %q, want mail delivered into the just-landed context, not the review", dir)
 	}
 	if held, _ := ps.ReviewingPR("rune"); held != "" {
 		t.Errorf("ReviewingPR = %q, the review must not be claimed until the mail is read", held)

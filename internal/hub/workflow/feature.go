@@ -21,9 +21,8 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// featureLanded reports a feature an agent should no longer be holding: closed at its source, or
-// carried in by a PR that has merged. The PR half matters because a worker released only on status
-// sat on a feature whose branch was already in the reference, being handed it again on every ask.
+// featureLanded reports a feature an agent should no longer hold: closed at its source, or carried
+// in by a merged PR — the half that matters, since status alone left a landed branch handed out again.
 func featureLanded(ps *store.ProjectStore, t store.Task) bool {
 	if t.Status == "closed" || t.Status == "approved" || t.Status == "merged" {
 		return true
@@ -40,9 +39,8 @@ func featureLanded(ps *store.ProjectStore, t store.Task) bool {
 	return false
 }
 
-// claimContainer assigns one package to a worker, starting its first open subtask — or, with
-// nothing left under it, holding it anyway so the agent finishes it on the SAME branch
-// (git.EnsureBranch), never a fresh one. Which package is nextUp's (-> assign.go).
+// claimContainer assigns one package, starting its first open subtask — or, with none left,
+// holding it so the agent finishes on the SAME branch (git.EnsureBranch), never a fresh one.
 func (e *Engine) claimContainer(project, worker string, c store.Task) (string, bool, error) {
 	ps := e.store.For(project)
 	root := e.deps.ProjectRoot(project)
@@ -101,9 +99,8 @@ func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) 
 		msg = "work on " + st.Task
 	}
 	msg = conventionalCommit(tk.Type, st.Task, msg)
-	// A task with work under it cannot be CLOSED by a checkpoint — an epic was once closed over four
-	// open children. Nor is it a dead end: that work is in the same feature on the same branch, so
-	// this records what is done and hands over the next leaf, leaving the parent to its children.
+	// A task with work under it can't be CLOSED by a checkpoint (an epic was once closed over four
+	// open children) — it records progress and hands over the next leaf instead.
 	grew, oerr := ps.OpenChildIDs(st.Task)
 	if oerr != nil {
 		return 1, oerr
@@ -157,9 +154,8 @@ func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) 
 }
 
 // closeCompletedAncestors closes each parent above a just-closed task whose children are now all
-// closed, stopping below stopAt (the feature itself, which its PR closes). A parent is done exactly
-// when its children are, so this is the only thing that marks an intermediate epic finished — and
-// without it one stays open forever, then reads as a leaf and is handed out as work that isn't there.
+// closed, stopping below stopAt (the feature itself, which its PR closes) — the only thing that
+// marks an intermediate epic finished, or it stays open and is handed out as work that isn't there.
 func (e *Engine) closeCompletedAncestors(project, from, stopAt string) {
 	ps := e.store.For(project)
 	for parent := ps.ParentOf(from); parent != "" && parent != stopAt; parent = ps.ParentOf(parent) {
@@ -208,9 +204,9 @@ func openIDs(tasks []store.Task) []string {
 	return ids
 }
 
-// claimNextSubtask is claimNext's one-pass rule for a held feature's own subtasks rather than the
-// top-level pools; with none open, containerNext decides finished vs. still gated. Mail defers the
-// same way claimNext's does, past whatever model change or compaction runs here.
+// claimNextSubtask is claimNext's one-pass rule for a held feature's own subtasks; with none open,
+// containerNext decides finished vs. still gated. A model change or compaction ends the pass here
+// too, same as claimNext's — mail and containerNext only run once neither fires.
 func (e *Engine) claimNextSubtask(project, agent, container string) (string, bool, error) {
 	if e.clearArmed(project, agent) {
 		return "", false, nil // about to land (fired by the caller): a subtask claimed now would be cut in half by it
@@ -227,10 +223,10 @@ func (e *Engine) claimNextSubtask(project, agent, container string) (string, boo
 			}
 			return DirRetiering(tier), true, nil
 		}
-		if _, due := e.compactDue(project, agent); due {
-			if err := e.deps.Compact(project, agent); err != nil {
-				return "", false, err
-			}
+		if dir, acted, err := e.compactOrWait(project, agent); err != nil {
+			return "", false, err
+		} else if acted {
+			return dir, true, nil
 		}
 	}
 	if d, has, err := e.pendingMail(project, agent); err != nil {

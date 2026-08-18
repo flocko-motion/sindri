@@ -461,6 +461,13 @@ func DirRetiering(tier string) string {
 		"assigned until it lands; don't ask again.", tier)
 }
 
+// DirCompacting answers a worker whose next assignment needed the room compaction buys first — the
+// gate has already fired it (-> claimNext), queuing into the running session rather than assigning
+// here, so the un-compacted context is never what the task gets worked in.
+const DirCompacting = "[hub] Your context is being compacted before your next task is assigned — " +
+	"it's queued here, at this boundary. Nothing is assigned until it lands; don't ask again — " +
+	"you'll be told to carry on the moment it's done."
+
 // --- escalation: stopped on a decision only the user can make ---
 
 // DirEscalated answers an escalated agent, repeating the question back — one relaunched mid-escalation

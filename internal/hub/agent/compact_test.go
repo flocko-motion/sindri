@@ -7,6 +7,7 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/agent/claude"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // compactFixture wires a service over a fake tmux backend and the real transcript reader (so
@@ -34,6 +35,7 @@ func compactFixture(t *testing.T) (*Service, *fakeRuntime) {
 	forgetObservations()
 	t.Cleanup(forgetObservations)
 	s.ForgetContext("proj", "durin") // contextMemo is package-level; a prior test's reading must not leak in
+	s.ForgetCompactPending("proj", "durin")
 	return s, f
 }
 
@@ -53,14 +55,15 @@ func TestCompactInjectsAndForgetsTheMemo(t *testing.T) {
 		t.Fatalf("Compact: %v", err)
 	}
 
-	found := false
-	for _, sent := range f.sent {
-		if sent == "/compact" {
-			found = true
-		}
+	// Queued in order, never interrupted: the turn Compact is called from is the agent's own
+	// in-flight directive request, and an Escape here used to kill it before that reply landed
+	// (-> the regression this fixes). /compact runs first, then the re-ask picks the directive
+	// back up once Claude Code drains the queue behind the turn that is still finishing.
+	if f.interrupts != 0 {
+		t.Errorf("Compact must never interrupt — the in-flight turn is the one about to answer it, got %d escape(s)", f.interrupts)
 	}
-	if !found {
-		t.Errorf("/compact was never sent into the session; sent=%v", f.sent)
+	if want := []string{"/compact", workflow.MsgKickoff}; len(f.sent) != len(want) || f.sent[0] != want[0] || f.sent[1] != want[1] {
+		t.Errorf("sent = %v, want %v in that order", f.sent, want)
 	}
 
 	// The transcript compaction leaves behind is a fresh one — the memo must not serve the
@@ -87,5 +90,40 @@ func TestCompactRefusesMidTask(t *testing.T) {
 		if sent == "/compact" {
 			t.Error("a worker mid-task was compacted anyway")
 		}
+	}
+}
+
+// TestFakeInterruptDetectionIsNotVacuous is the anti-vacuity floor for f.interrupts: without one
+// real call that sends Escape to prove the fake's matcher fires, TestCompactInjectsAndForgetsTheMemo's
+// zero-count assertion would pass whether or not that matcher actually works.
+func TestFakeInterruptDetectionIsNotVacuous(t *testing.T) {
+	s, f := compactFixture(t)
+	if err := s.Interrupt("proj", "durin"); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if f.interrupts != 1 {
+		t.Errorf("interrupts = %d, want 1 — the fake's escape matcher did not fire", f.interrupts)
+	}
+}
+
+// TestCompactMarksAndClearsPending: fired once, CompactPending reads true until a fresh reading
+// below the threshold — the caller's own compactDue check — clears it via ForgetCompactPending.
+func TestCompactMarksAndClearsPending(t *testing.T) {
+	s, _ := compactFixture(t)
+	writeUsage(t, "proj", "durin", 80_000)
+
+	if s.CompactPending("proj", "durin") {
+		t.Fatal("nothing fired yet; CompactPending should read false")
+	}
+	if err := s.Compact("proj", "durin"); err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	if !s.CompactPending("proj", "durin") {
+		t.Error("CompactPending should read true right after Compact fires")
+	}
+
+	s.ForgetCompactPending("proj", "durin")
+	if s.CompactPending("proj", "durin") {
+		t.Error("ForgetCompactPending should have cleared the flag")
 	}
 }

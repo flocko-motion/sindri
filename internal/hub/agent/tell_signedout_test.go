@@ -27,6 +27,7 @@ type fakeRuntime struct {
 	pane              string
 	sent              []string
 	removed           []string
+	interrupts        int
 }
 
 func (f *fakeRuntime) Running(string) bool { return true }
@@ -45,6 +46,8 @@ func (f *fakeRuntime) ExecContext(_ context.Context, _ string, args ...string) (
 		return []byte(f.pane), nil
 	case containsArg(args, "send-keys") && containsArg(args, "-l"):
 		f.sent = append(f.sent, args[len(args)-1])
+	case containsArg(args, "send-keys") && containsArg(args, "Escape"):
+		f.interrupts++
 	}
 	return nil, nil
 }

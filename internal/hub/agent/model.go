@@ -1,10 +1,8 @@
 // package: hub/agent / model
 // type:    logic (choosing the model an agent runs on)
-// job:     SetModel — launching on a chosen model and changing an existing agent's are the same
-// act, since a running session belongs to its old model and cannot cross onto a new one
-// without losing it. Records the choice; compacts and relaunches a running agent onto it.
-// limits:  the record and the relaunch; which model to choose is the caller's (a human today,
-// the dispatcher once tiers exist — sd-f76aea).
+// job:     SetModel — launching on a chosen model and changing a running agent's are the same act,
+// since a session belongs to its old model and can't cross onto a new one without losing it.
+// limits:  the record and the relaunch; which model to choose is the caller's.
 package agent
 
 import (
@@ -13,11 +11,9 @@ import (
 )
 
 // SetModel changes the model an agent runs on, "" reverting to the account default. A non-empty
-// model must resolve through the backend's own window table (-> ModelWindow), or the hub would
-// start an agent whose fullness — and whose compaction threshold, a function of that window — it
-// cannot judge. Not running: just records the choice; the next Launch starts on it. Running:
-// compacts first, since the session belongs to its old model and a bare swap would lose it rather
-// than save it, then relaunches.
+// model must resolve through the backend's own window table (-> ModelWindow), or its fullness
+// would be unjudgeable. Not running: just records the choice. Running: compacts the old session
+// first, since a bare swap would lose it, then relaunches on the new model.
 func (s *Service) SetModel(project, name, model string) error {
 	if model != "" {
 		if _, ok := s.ModelWindow(model); !ok {
@@ -45,6 +41,9 @@ func (s *Service) SetModel(project, name, model string) error {
 	if !s.AgentAlive(project, name) {
 		return nil // nothing live to compact; the next Launch starts on the new model
 	}
+	// The restart right after kills this turn regardless, so unlike Compact's other callers an
+	// interrupt here costs nothing extra — it just gives the queued /compact its usual immediate start.
+	_ = s.Interrupt(project, name)
 	if err := s.Compact(project, name); err != nil {
 		return fmt.Errorf("compacting %s before its model change: %w", name, err)
 	}

@@ -97,6 +97,12 @@ type Deps interface {
 	// Compact fires Claude Code's own /compact into an agent's live session at a leaf boundary —
 	// the gate's decision, this only performs it.
 	Compact(project, name string) error
+	// CompactPending reports a fired compaction not yet observed to land, so compactDue's caller can
+	// wait rather than stack a second one behind it (-> agent.Service.CompactPending).
+	CompactPending(project, name string) bool
+	// ForgetCompactPending clears that flag — compactDue's own signal that a fresh reading below the
+	// threshold proves the wait is over.
+	ForgetCompactPending(project, name string)
 	// FireClear fires Claude Code's own /clear into an agent's live session at a leaf boundary and
 	// re-serves its directive once the reset settles — the gate's decision, this only performs it.
 	FireClear(project, name string) error

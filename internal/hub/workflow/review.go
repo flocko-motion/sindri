@@ -179,11 +179,9 @@ func (e *Engine) assignReview(project string, id int64, prID, reviewer, requirem
 	return nil
 }
 
-// reviewDirective is what a reviewer is told: the ONE PR it holds, whose branch is what sits in its
-// workspace. A reviewer has one checkout, so it can review one PR — scanning the open PRs and
-// serving whichever came first handed it a second while the first was still on disk, and the diff
-// it read then belonged to neither. Free, it claims the oldest unclaimed review, which is also how
-// one requested with no reviewer running is eventually picked up.
+// reviewDirective is what a reviewer is told: the ONE PR it holds, whose branch sits in its one
+// workspace — serving a second while the first was still checked out left neither diff readable.
+// Free, it claims the oldest unclaimed review, also how one with no reviewer running gets picked up.
 func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 	ps := e.store.For(project)
 	held, err := ps.ReviewingPR(name)
@@ -226,19 +224,20 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 		}
 		return "", false, nil
 	}
-	// Prepare, then hand over — one pass, claimNext's rule. No model-select: a review has no tier.
+	// Prepare, then hand over, claimNext's rule (no model-select: a review has no tier) — a clear or
+	// compaction ends the pass right here, so mail and the assign below only run once neither fires.
 	if e.clearArmed(project, name) {
 		if err := e.deps.FireClear(project, name); err != nil {
 			return "", false, err
 		}
 		return DirClearPending, true, nil
 	}
-	if _, due := e.compactDue(project, name); due {
-		if err := e.deps.Compact(project, name); err != nil {
-			return "", false, err
-		}
+	if dir, acted, err := e.compactOrWait(project, name); err != nil {
+		return "", false, err
+	} else if acted {
+		return dir, true, nil
 	}
-	if d, has, err := e.pendingMail(project, name); err != nil { // after compaction, before the assign below
+	if d, has, err := e.pendingMail(project, name); err != nil {
 		return "", false, err
 	} else if has {
 		return d, true, nil

@@ -510,7 +510,8 @@ func (e *Engine) CmdNext(c registry.Caller, _ []string, out io.Writer) (int, err
 }
 
 // claimNext hands a worker the best-rated unit in a project (-> nextUp), preparing it first: a model
-// change or compaction, then mail, then handover.
+// change or compaction ends this pass right there, same as clearArmed above — mail and handover only
+// run once neither fires, so the assignment always lands in the context that follows either one.
 func (e *Engine) claimNext(project, agent string) (string, bool, error) {
 	// Retired by a human, or by its own context filling: either way it is being wound down, and the
 	// gate is here rather than at the task queries so it holds however the work would have arrived.
@@ -542,13 +543,13 @@ func (e *Engine) claimNext(project, agent string) (string, bool, error) {
 			}
 			return DirRetiering(tier), true, nil
 		}
-		if _, due := e.compactDue(project, agent); due {
-			if err := e.deps.Compact(project, agent); err != nil {
-				return "", false, err
-			}
+		if dir, acted, err := e.compactOrWait(project, agent); err != nil {
+			return "", false, err
+		} else if acted {
+			return dir, true, nil
 		}
 	}
-	if d, has, err := e.pendingMail(project, agent); err != nil { // after any op above, before the claim below
+	if d, has, err := e.pendingMail(project, agent); err != nil { // neither op above fired; safe to check now
 		return "", false, err
 	} else if has {
 		return d, true, nil

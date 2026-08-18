@@ -130,7 +130,9 @@ func (s *Service) FireClear(project, name string) error {
 	if err := s.setArmed(project, name, false); err != nil {
 		return err
 	}
-	_ = s.Interrupt(project, name) // land on an idle prompt rather than queue behind a turn in flight
+	// A human armed this, not the agent's own request, so unlike Compact it may interrupt: there is
+	// no in-flight reply of the agent's own here to lose (-> agent/compact.go).
+	_ = s.Interrupt(project, name)
 	if err := s.Inject(project, name, "/clear"); err != nil {
 		return err
 	}

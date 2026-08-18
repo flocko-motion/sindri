@@ -93,6 +93,11 @@ func TestSetModelCompactsThenRelaunchesARunningAgent(t *testing.T) {
 	if !found {
 		t.Errorf("a running agent's model change never compacted first; sent=%v", f.sent)
 	}
+	// Unlike Compact's other callers, this one interrupts: the restart tears the pod down right
+	// after, so the turn dying here costs nothing an unforced wait would have saved.
+	if f.interrupts == 0 {
+		t.Error("a model change never forced the pane idle before compacting")
+	}
 	if len(f.removed) == 0 {
 		t.Error("the old container was never torn down on the way to relaunching")
 	}
