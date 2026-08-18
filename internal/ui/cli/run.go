@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/table"
 	"github.com/spf13/cobra"
 )
 
@@ -86,6 +87,15 @@ func runStatusLabel(r api.Run) string {
 	return r.Status
 }
 
+// runListTable is the columns `sindri run list` prints, its header and its rows alike.
+var runListTable = table.Table{
+	{Label: "run", Width: 14},
+	{Label: "status", Width: 12},
+	{Label: "age", Width: 4, Right: true},
+	{Label: "queued by", Width: 10},
+	{Label: "command"},
+}
+
 func runListCmd() *cobra.Command {
 	var filter string
 	c := &cobra.Command{
@@ -101,10 +111,17 @@ func runListCmd() *cobra.Command {
 					return err
 				}
 				runs := api.FilterRuns(f, all)
+				lines := make([]string, 0, len(runs))
 				for _, r := range runs {
-					fmt.Printf("%-14s %-12s %4s  %-10s %s\n",
-						r.ID, runStatusLabel(r), shortAge(r.CreatedAt), runRequester(r), r.Command)
+					lines = append(lines, runListTable.Line(
+						table.Cell{Text: r.ID},
+						table.Cell{Text: runStatusLabel(r)},
+						table.Cell{Text: shortAge(r.CreatedAt)},
+						table.Cell{Text: runRequester(r)},
+						table.Cell{Text: r.Command},
+					))
 				}
+				printRows(runListTable, lines)
 				if n := len(all) - len(runs); n > 0 {
 					fmt.Fprintf(os.Stderr, "(filter %s — %d of %d run(s) shown)\n", f, len(runs), len(all))
 				} else if len(runs) == 0 {

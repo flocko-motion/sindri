@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/table"
 	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
@@ -71,7 +72,7 @@ func (m model) runsList(width int) string {
 		}
 		return strings.Join(lines, "\n")
 	}
-	return pane(rowTexts(rows), m.list, width, m.cursor[m.tab])
+	return pane(rowTexts(rows), m.list, width, m.selRow())
 }
 
 // runRequester names who asked for a run. A user's reads "you", not the bare sentinel: the column
@@ -83,17 +84,32 @@ func runRequester(r api.Run) string {
 	return r.Agent
 }
 
+// runsTable is the Runs list's columns, read by its header and every row alike.
+var runsTable = table.Table{
+	{Label: "repo", Width: 10, Clip: true},
+	{Label: "run", Width: 14},
+	{Label: "status", Width: 12},
+	{Label: "age", Width: 4, Right: true},
+	{Label: "queued by", Width: 10},
+	{Label: "command"},
+}
+
 func (m model) runRows() []row {
 	var out []row
 	for _, r := range api.FilterRuns(m.runFilter, m.state.Runs) {
 		if !m.inScope(r.Project) {
 			continue
 		}
-		repo := m.repoStyle(r.Project).Render(fmt.Sprintf("%-10.10s", m.repoName(r.Project)))
-		out = append(out, row{fmt.Sprintf("%s %-14s %-12s %4s %-10s %s",
-			repo, r.ID, runStatusLabel(r), shortAge(r.CreatedAt), runRequester(r), r.Command), r.ID})
+		out = append(out, row{runsTable.Line(
+			table.Cell{Text: m.repoName(r.Project), Style: m.repoStyle(r.Project).Render},
+			table.Cell{Text: r.ID},
+			table.Cell{Text: runStatusLabel(r)},
+			table.Cell{Text: shortAge(r.CreatedAt)},
+			table.Cell{Text: runRequester(r)},
+			table.Cell{Text: r.Command},
+		), r.ID})
 	}
-	return out
+	return listing(runsTable, nil, out)
 }
 
 // runDetailLines is the full run detail for the right column / ENTER modal: its metadata, then

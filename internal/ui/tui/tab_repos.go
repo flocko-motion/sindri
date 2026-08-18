@@ -12,15 +12,23 @@ import (
 	"strconv"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/table"
 	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
 // repoRows lists the registered repos (switcher order: live-agents-first → recency →
 // alphabetical), each name in its repo colour with an agent count and markers. The
 // row id is the repo tag.
+// repoTable is the Repos list's columns. The counts used to carry their own word on every row
+// ("3 agents"); with a label over the column the word belongs there instead, once.
+var repoTable = table.Table{
+	{Label: "repo", Width: 20},
+	{Label: "agents", Width: 6, Right: true},
+	{Label: "path"},
+}
+
 func (m model) repoRows() []row {
 	var out []row
 	for _, p := range m.switcherOrder() {
@@ -31,22 +39,13 @@ func (m model) repoRows() []row {
 		if p.Path == m.root {
 			label += " ✓"
 		}
-		if pad := 20 - lipgloss.Width(label); pad > 0 {
-			label += repeat(pad)
-		}
-		text := m.repoStyle(p.Tag).Render(label) + fmt.Sprintf("  %2d agents  %s", m.repoAgentCount(p.Tag), p.Path)
-		out = append(out, row{text, p.Tag})
+		out = append(out, row{repoTable.Line(
+			table.Cell{Text: label, Style: m.repoStyle(p.Tag).Render},
+			table.Cell{Text: strconv.Itoa(m.repoAgentCount(p.Tag))},
+			table.Cell{Text: p.Path},
+		), p.Tag})
 	}
-	return out
-}
-
-// repeat is n spaces (a tiny helper so repoRows reads cleanly).
-func repeat(n int) string {
-	s := make([]byte, n)
-	for i := range s {
-		s[i] = ' '
-	}
-	return string(s)
+	return listing(repoTable, nil, out)
 }
 
 // repoAgentCount is how many agents the repo has on its roster (from the board).

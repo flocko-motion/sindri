@@ -49,8 +49,9 @@ func TestTheDetailNamesTheAgentWorkingIt(t *testing.T) {
 	if got := detailField(m, "agent:"); got != "nori" {
 		t.Errorf("agent field = %q, want nori", got)
 	}
-	if rows := m.taskRows(); len(rows) != 1 || !strings.Contains(rows[0].text, marksAssigned()) {
-		t.Errorf("the row of a worked task must carry the marker: %q", rows[0].text)
+	rows := items(m.taskRows())
+	if len(rows) != 1 || !strings.Contains(rows[0].text, marksAssigned()) {
+		t.Errorf("the row of a worked task must carry the marker: %q", rowTexts(rows))
 	}
 }
 
@@ -72,7 +73,7 @@ func TestTheRowAndTheDetailAgreeOnTheOwner(t *testing.T) {
 	for _, c := range cases {
 		m := taskDetailModel(c.agents, c.prs)
 		named := detailField(m, "agent:") != "" && detailField(m, "agent:") != "-"
-		marked := strings.Contains(m.taskRows()[0].text, strings.TrimSpace(marksAssigned()))
+		marked := strings.Contains(items(m.taskRows())[0].text, strings.TrimSpace(marksAssigned()))
 		if named != marked {
 			t.Errorf("%s: detail names an agent=%v but the row marks one=%v", c.name, named, marked)
 		}

@@ -18,8 +18,23 @@ import (
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/client"
+	"github.com/flo-at/sindri/internal/ui/table"
 	"github.com/flo-at/sindri/internal/ui/theme"
 )
+
+// taskTable is the Tasks list's columns. The tree gutter and the marker column go unlabelled: both
+// are a couple of cells wide, and two characters cannot name "an agent is on this, and it has a PR"
+// — a cryptic label would be worse than the glyphs it sat over, which the detail pane explains.
+var taskTable = table.Table{
+	{Width: treeGutterW},
+	{Label: "id", Width: 9},
+	{Label: "type", Width: 5},
+	{Label: "prio", Width: 8},
+	{Label: "state", Width: 8},
+	{Label: "age", Width: 4, Right: true},
+	{Width: marksW},
+	{Label: "title"},
+}
 
 // taskRows builds the filtered, folded, depth-indented task tree. Which tasks the filter admits is
 // the exchange package's answer (-> api.MatchesFilter), the same one `sindri task list --filter`
@@ -86,27 +101,27 @@ func (m model) taskRows() []row {
 		if v := m.busy[tr.ID]; v != "" { // transient: the user triggered a close/scrap, awaiting the hub
 			sc, state = stWarn, v
 		}
-		prio := sc.Render(fmt.Sprintf("%-8s", theme.PriorityLabel(tr.Priority)))
+		prio := sc // critical priority is pink, in its own column, whatever the row's state
 		if isCriticalPriority(tr.Priority) {
-			prio = stPrio.Render(fmt.Sprintf("%-8s", theme.PriorityLabel(tr.Priority)))
+			prio = stPrio
 		}
 		out[i] = row{
-			strings.Join([]string{
-				gutter,
-				sc.Render(fmt.Sprintf("%-9s", tr.ID)),
-				sc.Render(fmt.Sprintf("%-5s", typeAbbr(tr.Type))),
-				prio,
-				sc.Render(fmt.Sprintf("%-8s", state)),
+			taskTable.Line(
+				table.Cell{Text: gutter},
+				table.Cell{Text: tr.ID, Style: sc.Render},
+				table.Cell{Text: typeAbbr(tr.Type), Style: sc.Render},
+				table.Cell{Text: theme.PriorityLabel(tr.Priority), Style: prio.Render},
+				table.Cell{Text: state, Style: sc.Render},
 				// Age, right-aligned so the units line up under each other; the exact moment is in
 				// the detail pane, which is where a question about one task gets asked.
-				sc.Render(fmt.Sprintf("%4s", theme.Age(tr.CreatedAt))),
-				sc.Render(taskMarks(assigned[tr.ID] != "", prMarkKind(tr))),
-				sc.Render(tr.Title),
-			}, " "),
+				table.Cell{Text: theme.Age(tr.CreatedAt), Style: sc.Render},
+				table.Cell{Text: taskMarks(assigned[tr.ID] != "", prMarkKind(tr)), Style: sc.Render},
+				table.Cell{Text: tr.Title, Style: sc.Render},
+			),
 			tr.ID,
 		}
 	}
-	return out
+	return listing(taskTable, nil, out)
 }
 
 // taskRowStyle is a row's colour and its state word. The WORD comes from the gate holding it where

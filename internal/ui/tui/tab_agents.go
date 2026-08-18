@@ -23,6 +23,7 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/ui/attach"
+	"github.com/flo-at/sindri/internal/ui/table"
 	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
@@ -270,7 +271,7 @@ func (m model) agentsBody() string {
 	rightW := m.agentDetailWidth()
 	leftW, paneH := m.previewSize()
 
-	listBox := pane(rowTexts(m.rows()), m.list, leftW, m.cursor[m.tab])
+	listBox := pane(rowTexts(m.rows()), m.list, leftW, m.selRow())
 	paneBox := tailPane(m.paneLines(), leftW, paneH)
 	leftCol := strings.Join([]string{listBox, hdivider(leftW), paneBox}, "\n")
 
@@ -477,6 +478,17 @@ const (
 	clearGlyph     = theme.MarkClearArmed
 )
 
+// agentTable is the Agents list's columns. The header and every row are laid out through it, so a
+// label cannot come to sit over the wrong column.
+var agentTable = table.Table{
+	{Label: "repo", Width: 10, Clip: true}, // a repo name is unbounded; a long one would skew every row
+	{Label: "status", Width: 9},
+	{Label: "agent", Width: 12},
+	{Label: "role", Width: 8},
+	{Label: "ctx", Width: 4, Right: true},
+	{Label: "work"},
+}
+
 func (m model) agentRows() []row {
 	var foreign, local []row
 	// Ordered by repo, then role, then name — the same call `sindri agent list` makes, so the two
@@ -490,7 +502,7 @@ func (m model) agentRows() []row {
 			foreign = append(foreign, m.agentRow(a))
 		}
 	}
-	out := sectioned(foreign, local)
+	out := listing(agentTable, foreign, local)
 	for _, o := range m.state.Orphans {
 		// The id is the container name so D can remove it; agent-only actions skip
 		// non-roster ids, and isOrphan gates the ones reading selID directly.
@@ -543,14 +555,14 @@ func (m model) agentRow(a api.AgentView) row {
 	if a.ClearArmed {
 		task += "  " + stWarn.Render(clearGlyph+" clear armed")
 	}
-	return row{strings.Join([]string{
-		m.repoStyle(a.Project).Render(fmt.Sprintf("%-10.10s", a.Repo)),
-		ac.Render(fmt.Sprintf("%-9s", a.Status)),
-		ac.Render(fmt.Sprintf("%-12s", a.Name)),
-		ac.Render(fmt.Sprintf("%-8s", a.Role)),
-		ac.Render(fmt.Sprintf("%4s", theme.ContextPercent(a.ContextTokens, a.ContextWindow))),
-		ac.Render(task),
-	}, " "), a.Name}
+	return row{agentTable.Line(
+		table.Cell{Text: a.Repo, Style: m.repoStyle(a.Project).Render},
+		table.Cell{Text: a.Status, Style: ac.Render},
+		table.Cell{Text: a.Name, Style: ac.Render},
+		table.Cell{Text: a.Role, Style: ac.Render},
+		table.Cell{Text: theme.ContextPercent(a.ContextTokens, a.ContextWindow), Style: ac.Render},
+		table.Cell{Text: task, Style: ac.Render},
+	), a.Name}
 }
 
 // isOrphan reports a stray container rather than a roster agent, routing D to orphan removal.

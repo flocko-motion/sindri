@@ -343,6 +343,10 @@ func prTabWith(pr api.PR) model {
 	m := newModel(nil, nil, "/r/one")
 	m.tab, m.scopeRepo = 2, false
 	m.state = api.BoardState{PRs: []api.PR{pr}}
+	// Laid out, as every live path does before a key reaches the model: the cursor starts at 0, and
+	// the row there is the column-label line until the layout moves it onto a PR.
+	m.w, m.h = 120, 24
+	m.reclamp()
 	return m
 }
 

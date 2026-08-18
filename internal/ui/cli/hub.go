@@ -21,6 +21,7 @@ import (
 	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/tools/paths"
+	"github.com/flo-at/sindri/internal/ui/table"
 	"github.com/flo-at/sindri/internal/ui/theme"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -400,6 +401,18 @@ func prLintCmd() *cobra.Command {
 	}
 }
 
+// prListTable is the columns `sindri pr list` prints, its header and its rows alike.
+var prListTable = table.Table{
+	{Label: "repo", Width: 10, Clip: true},
+	{Label: "pr", Width: 14},
+	{Label: "status", Width: 13},
+	{Label: "age", Width: 4, Right: true},
+	{Label: "agent", Width: 10},
+	{Label: "reviewer", Width: 10},
+	{Label: "branch", Width: 24},
+	{Label: "waiting on you"},
+}
+
 func prListCmd() *cobra.Command {
 	var filter string
 	c := &cobra.Command{
@@ -435,16 +448,26 @@ func prListCmd() *cobra.Command {
 					// Repo first, as `agent list` prints it: this listing crosses repos, so the column
 					// is what places each row. Then who is reviewing it beside who wrote it, the PRs
 					// tab's own columns from the same fields, so the two cannot answer differently.
-					line := fmt.Sprintf("%-10.10s %-14s %-13s %4s  %-10s %-10s %s",
-						api.RepoName(st.Projects, p.Project), p.ID, status, shortAge(p.CreatedAt), p.Agent,
-						dash(p.Reviewer), p.Branch)
+					// Why it waits closes the row in a column of its own, since a marker tacked on the
+					// end had nothing over it saying what it was.
 					wait := api.PRWaitReason(p, st.Agents)
-					if why := prWaitRow(wait); why != "" {
-						line += "  ! " + why
+					why := prWaitRow(wait)
+					if why != "" {
+						why = theme.MarkNeedsUser + " " + why
 					}
+					line := prListTable.Line(
+						table.Cell{Text: api.RepoName(st.Projects, p.Project)},
+						table.Cell{Text: p.ID},
+						table.Cell{Text: status},
+						table.Cell{Text: shortAge(p.CreatedAt)},
+						table.Cell{Text: p.Agent},
+						table.Cell{Text: dash(p.Reviewer)},
+						table.Cell{Text: p.Branch},
+						table.Cell{Text: why},
+					)
 					rows = append(rows, listRow{line, listGroupFor(p.Project, local, wait != api.PRWaitNone)})
 				}
-				printGrouped(rows)
+				printListing(prListTable, rows)
 				if n := len(all) - len(prs); n > 0 {
 					fmt.Fprintf(os.Stderr, "(filter %s — %d of %d PR(s) shown)\n", f, len(prs), len(all))
 				} else if len(prs) == 0 {

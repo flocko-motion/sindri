@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/table"
 	"github.com/flo-at/sindri/internal/ui/theme"
 	"github.com/spf13/cobra"
 )
@@ -408,6 +409,15 @@ func taskState(t api.Task) string {
 	return t.Status
 }
 
+// taskListTable is the columns `sindri task list` prints, its header and its rows alike.
+var taskListTable = table.Table{
+	{Label: "id", Width: 12},
+	{Label: "prio", Width: 8},
+	{Label: "state", Width: 12},
+	{Label: "age", Width: 4, Right: true},
+	{Label: "title"},
+}
+
 func taskListCmd() *cobra.Command {
 	var asJSON bool
 	var filter string
@@ -432,10 +442,17 @@ func taskListCmd() *cobra.Command {
 					fmt.Println(out)
 					return nil
 				}
+				lines := make([]string, 0, len(tasks))
 				for _, t := range tasks {
-					fmt.Printf("%-12s %-8s %-12s %4s  %s\n", t.ID, theme.PriorityLabel(t.Priority),
-						taskState(t), theme.Age(t.CreatedAt), t.Title)
+					lines = append(lines, taskListTable.Line(
+						table.Cell{Text: t.ID},
+						table.Cell{Text: theme.PriorityLabel(t.Priority)},
+						table.Cell{Text: taskState(t)},
+						table.Cell{Text: theme.Age(t.CreatedAt)},
+						table.Cell{Text: t.Title},
+					))
 				}
+				printRows(taskListTable, lines)
 				if n := len(all) - len(tasks); n > 0 {
 					// What a filter hid is said out loud: an empty listing under `--filter closed`
 					// otherwise reads as "no tasks" when the backlog is full of open ones.

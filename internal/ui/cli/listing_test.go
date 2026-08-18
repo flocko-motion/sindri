@@ -4,7 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/table"
 )
 
 // listing is the fixture both listings reduce to: a local row, a foreign one waiting on the user,
@@ -84,5 +86,84 @@ func TestAnEmptySectionPrintsNoHeading(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(got, "\n"), api.LocalHeading) {
 		t.Errorf("no local rows, so no local heading: %q", got)
+	}
+}
+
+// cliTables is every column layout the CLI lists through, by the command that prints it.
+var cliTables = map[string]table.Table{
+	"agent list": agentListTable,
+	"pr list":    prListTable,
+	"task list":  taskListTable,
+	"mail list":  mailListTable,
+	"run list":   runListTable,
+	"repo list":  repoListTable,
+}
+
+// TestEveryCLIListingLabelsItsColumns: the same confusion and the same fix as the TUI's, and the
+// listing a user reads in a terminal is the one where the recipient and the sender sat adjacent and
+// unnamed. A label wider than its column would bleed into the next and put the header out of step
+// with the rows it names.
+func TestEveryCLIListingLabelsItsColumns(t *testing.T) {
+	for name, tbl := range cliTables {
+		if len(tbl) == 0 {
+			t.Errorf("%s has no columns", name)
+		}
+		for i, c := range tbl {
+			if c.Width == 0 {
+				if i != len(tbl)-1 {
+					t.Errorf("%s column %d (%q) has no width but is not the last", name, i, c.Label)
+				}
+				continue
+			}
+			if c.Label == "" {
+				t.Errorf("%s column %d is unlabelled", name, i)
+			}
+			if w := ansi.StringWidth(c.Label); w > c.Width {
+				t.Errorf("%s column %d: label %q is %d cells in a column of %d", name, i, c.Label, w, c.Width)
+			}
+		}
+	}
+}
+
+// TestMailListReadsFromThenTo: the order that prompted this. `to` before `from` is the reverse of how
+// mail is read anywhere else, and the two columns are adjacent, so the reader has nothing to correct
+// against — labelling that order would only have made the backwardness legible.
+func TestMailListReadsFromThenTo(t *testing.T) {
+	from, to := -1, -1
+	for i, c := range mailListTable {
+		switch c.Label {
+		case "from":
+			from = i
+		case "to":
+			to = i
+		}
+	}
+	if from < 0 || to < 0 {
+		t.Fatal("`mail list` must label its sender and its recipient")
+	}
+	if from > to {
+		t.Error("sender belongs before recipient, the order mail is read in everywhere else")
+	}
+}
+
+// TestTheHeaderIsLaidOutByTheRowsOwnColumns: one layout does both jobs, which is the whole guarantee
+// — a header assembled from widths of its own is aligned the day it is written and drifts after.
+func TestTheHeaderIsLaidOutByTheRowsOwnColumns(t *testing.T) {
+	row := mailListTable.Line(
+		table.Cell{Text: "42"},
+		table.Cell{Text: "sindri"},
+		table.Cell{Text: "user"},
+		table.Cell{Text: "dvalin"},
+		table.Cell{Text: "unread"},
+		table.Cell{Text: "2d"},
+		table.Cell{Text: "read the brief again"},
+	)
+	header := mailListTable.Header()
+	// "from" is the sender's column: the label and the value start in the same cell.
+	if strings.Index(header, "from") != strings.Index(row, "user") {
+		t.Errorf("the from label does not sit over the sender:\n%q\n%q", header, row)
+	}
+	if strings.Index(header, "to") != strings.Index(row, "dvalin") {
+		t.Errorf("the to label does not sit over the recipient:\n%q\n%q", header, row)
 	}
 }

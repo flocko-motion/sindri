@@ -204,10 +204,22 @@ func nearestSelectable(rows []row, i, step int) int {
 	return i
 }
 
+// selRow is the row the cursor selects: the stored index, snapped forward onto a row that selects
+// something. Stored and read apart because the arithmetic that moves the cursor works in raw row
+// indexes, while a model that has not been laid out yet has its cursor at 0 — where a labelled list
+// keeps its column names. Read through this and a selection is never a label, laid out or not.
+func (m model) selRow() int {
+	rows := m.rows()
+	if len(rows) == 0 {
+		return 0
+	}
+	return nearestSelectable(rows, clampInt(m.cursor[m.tab], 0, len(rows)-1), 1)
+}
+
 // selID is the id of the row under the active tab's cursor ("" if none).
 func (m model) selID() string {
 	r := m.rows()
-	if c := m.cursor[m.tab]; c >= 0 && c < len(r) {
+	if c := m.selRow(); c >= 0 && c < len(r) {
 		return r[c].id
 	}
 	return ""

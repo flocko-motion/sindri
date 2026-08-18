@@ -455,13 +455,13 @@ func (m model) View() string {
 	} else if m.tab == 5 {
 		body = m.runsBody() // its rows under a permanent line saying what a run is
 	} else if m.showDetail() {
-		left := pane(rowTexts(m.rows()), m.list, m.leftWidth(), m.cursor[m.tab])
+		left := pane(rowTexts(m.rows()), m.list, m.leftWidth(), m.selRow())
 		dlines, dhl := m.wrappedDetail()
 		right := pane(dlines, m.detail, m.detailWidth(), dhl)
 		body = lipgloss.JoinHorizontal(lipgloss.Top, left, divider(m.bodyHeight()), right)
 	} else {
 		// Narrow terminal: selector full-width; detail is ENTER-only.
-		body = pane(rowTexts(m.rows()), m.list, m.w, m.cursor[m.tab])
+		body = pane(rowTexts(m.rows()), m.list, m.w, m.selRow())
 	}
 	var foot string
 	switch {

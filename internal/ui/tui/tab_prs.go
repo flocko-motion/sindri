@@ -10,9 +10,6 @@ package tui
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,6 +17,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/table"
 	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
@@ -219,6 +217,17 @@ func (m *model) openReviewForm(prID string) {
 // prDetailW is the fixed width of the PRs tab's right detail column.
 const prDetailW = 44
 
+// prTable is the PRs list's columns, read by its header and every row alike.
+var prTable = table.Table{
+	{Label: "repo", Width: 10, Clip: true},
+	{Label: "pr", Width: 14},
+	{Label: "status", Width: 9},
+	{Label: "age", Width: 4, Right: true},
+	{Label: "agent", Width: 10},
+	{Label: "reviewer", Width: 10},
+	{Label: "branch"},
+}
+
 func (m model) prRows() []row {
 	var foreign, local []row
 	// Ordered by repo, the same call `sindri pr list` makes, so the two front-ends cannot drift onto
@@ -233,12 +242,11 @@ func (m model) prRows() []row {
 			foreign = append(foreign, m.prRow(p))
 		}
 	}
-	return sectioned(foreign, local)
+	return listing(prTable, foreign, local)
 }
 
 // prRow renders one PR row: repo, id, status, age, who wrote it, who is reviewing it, its branch.
 func (m model) prRow(p api.PR) row {
-	repo := m.repoStyle(p.Project).Render(fmt.Sprintf("%-10.10s", m.repoName(p.Project)))
 	status := api.StatusLabel(p.Status, p.Approvals)
 	merging := m.merging[p.ID] && p.Status != "merged" // transient: the user triggered a merge, awaiting the hub
 	if merging {
@@ -252,15 +260,15 @@ func (m model) prRow(p api.PR) row {
 	sc := prStatusStyle(p, m.state.Agents, merging)
 	// Who is reviewing it, from the board — a dash where nobody is, so the column reads as
 	// "waiting for a reviewer" rather than as missing.
-	return row{strings.Join([]string{
-		repo,
-		sc.Render(fmt.Sprintf("%-14s", p.ID)),
-		sc.Render(fmt.Sprintf("%-9s", status)),
-		sc.Render(fmt.Sprintf("%4s", shortAge(p.CreatedAt))),
-		sc.Render(fmt.Sprintf("%-10s", p.Agent)),
-		sc.Render(fmt.Sprintf("%-10s", dash(p.Reviewer))),
-		sc.Render(p.Branch),
-	}, " "), p.ID}
+	return row{prTable.Line(
+		table.Cell{Text: m.repoName(p.Project), Style: m.repoStyle(p.Project).Render},
+		table.Cell{Text: p.ID, Style: sc.Render},
+		table.Cell{Text: status, Style: sc.Render},
+		table.Cell{Text: shortAge(p.CreatedAt), Style: sc.Render},
+		table.Cell{Text: p.Agent, Style: sc.Render},
+		table.Cell{Text: dash(p.Reviewer), Style: sc.Render},
+		table.Cell{Text: p.Branch, Style: sc.Render},
+	), p.ID}
 }
 
 // openScrapPRChoice confirms scrapping a PR: branch gone, off the board, nobody asked to try again.
@@ -324,7 +332,7 @@ func (m model) prBody() string {
 	h := m.bodyHeight()
 	leftW := m.prContentWidth()
 
-	listBox := pane(rowTexts(m.rows()), m.list, leftW, m.cursor[m.tab])
+	listBox := pane(rowTexts(m.rows()), m.list, leftW, m.selRow())
 	contentBox := pane(m.prContentLines(), m.detail, leftW, -1) // big pane: diff/lint, J/K scrolls
 	leftCol := strings.Join([]string{listBox, hdivider(leftW), contentBox}, "\n")
 
@@ -509,99 +517,6 @@ func (m model) prActionable() []metaItem {
 		}
 	}
 	return out
-}
-
-// shellAt builds an interactive shell rooted at dir (for opening a workspace).
-func shellAt(dir string) *exec.Cmd {
-	sh := os.Getenv("SHELL")
-	if sh == "" {
-		sh = "bash"
-	}
-	c := exec.Command(sh)
-	c.Dir = dir
-	return marked(c)
-}
-
-// editorAtCmd opens the editor on an agent's live workspace; no materialization, it already exists.
-func (m *model) editorAtCmd(dir string) tea.Cmd {
-	m.flash = "opening " + dir + " in " + editorName() + "…"
-	return func() tea.Msg { return editorReadyMsg(dir) }
-}
-
-// openEditorCmd materializes a PR (the same checkout `verify` shells into) and opens the editor.
-func (m *model) openEditorCmd(id string) tea.Cmd {
-	cl := m.cl
-	m.flash = "opening " + id + " in " + editorName() + "…"
-	return func() tea.Msg {
-		path, err := cl.MaterializeReview(id)
-		if err != nil {
-			return errModalMsg{err}
-		}
-		return editorReadyMsg(path)
-	}
-}
-
-// editorCandidates lists editors in the order a Unix tool looks: the user's choice, the
-// distribution default, then vi, which POSIX requires, so the list can never come up empty.
-func editorCandidates() []string {
-	var out []string
-	for _, env := range []string{"VISUAL", "EDITOR"} {
-		if v := strings.TrimSpace(os.Getenv(env)); v != "" {
-			out = append(out, v)
-		}
-	}
-	return append(out, "sensible-editor", "editor", "vi")
-}
-
-// editorName is the editor that would run, for a flash message.
-func editorName() string {
-	for _, cand := range editorCandidates() {
-		if bin, _, ok := resolveEditor(cand); ok {
-			return filepath.Base(bin)
-		}
-	}
-	return "an editor"
-}
-
-// resolveEditor splits a candidate ($EDITOR is often "code --wait") and checks PATH for the binary.
-func resolveEditor(cand string) (bin string, args []string, ok bool) {
-	fields := strings.Fields(cand)
-	if len(fields) == 0 {
-		return "", nil, false
-	}
-	p, err := exec.LookPath(fields[0])
-	if err != nil {
-		return "", nil, false
-	}
-	return p, fields[1:], true
-}
-
-// editorAt passes dir as the argument, so a file-browser editor (vim, emacs) lands on the tree
-// rather than an empty buffer. nil when nothing is installed, for the caller to report.
-func editorAt(dir string) *exec.Cmd {
-	for _, cand := range editorCandidates() {
-		bin, args, ok := resolveEditor(cand)
-		if !ok {
-			continue
-		}
-		c := exec.Command(bin, append(args, ".")...)
-		c.Dir = dir
-		return marked(c) // an editor with a built-in terminal is the same door as a shell
-	}
-	return nil
-}
-
-// verifyCmd materializes a PR for review, then signals the loop to open a shell there.
-func (m *model) verifyCmd(id string) tea.Cmd {
-	cl := m.cl
-	m.flash = "materializing " + id + " for review…"
-	return func() tea.Msg {
-		path, err := cl.MaterializeReview(id)
-		if err != nil {
-			return errModalMsg{err}
-		}
-		return reviewReadyMsg(path)
-	}
 }
 
 // reviewLine summarizes a review item: its state, verdict, author and when, marking a planner's

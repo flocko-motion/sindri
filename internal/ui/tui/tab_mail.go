@@ -15,6 +15,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/client"
+	"github.com/flo-at/sindri/internal/ui/table"
 )
 
 // mailVisible admits a message to the list: in scope, and admitted by the two filters — unread-or-all,
@@ -34,6 +35,18 @@ func (m model) mailShown() []api.Mail {
 	return out
 }
 
+// mailTable is the Mail list's columns. Sender BEFORE recipient, the order mail is read in
+// everywhere else: adjacent and unlabelled, the reverse was misread over and over, and labelling a
+// backwards order would only have made the backwardness legible.
+var mailTable = table.Table{
+	{Label: "repo", Width: 10, Clip: true},
+	{Label: "from", Width: 10},
+	{Label: "to", Width: 12},
+	{Label: "state", Width: 12},
+	{Label: "age", Width: 5, Right: true},
+	{Label: "message"},
+}
+
 func (m model) mailRows() []row {
 	var out []row
 	for _, msg := range m.mailShown() {
@@ -44,21 +57,23 @@ func (m model) mailRows() []row {
 		if msg.Pushed { // also injected live, so it may already have been acted on
 			state += "+push"
 		}
-		out = append(out, row{strings.Join([]string{
-			m.repoStyle(msg.Project).Render(fmt.Sprintf("%-10.10s", msg.Repo)),
-			fmt.Sprintf("%-12s", msg.Agent),
-			fmt.Sprintf("%-10s", dash(msg.Sender)),
-			st.Render(fmt.Sprintf("%-12s", state)),
-			dimStyle.Render(fmt.Sprintf("%5s", shortAge(msg.SentAt))),
-			oneLineText(msg.Body),
-		}, " "), fmt.Sprint(msg.ID)})
+		out = append(out, row{mailTable.Line(
+			table.Cell{Text: msg.Repo, Style: m.repoStyle(msg.Project).Render},
+			table.Cell{Text: dash(msg.Sender)},
+			table.Cell{Text: msg.Agent},
+			table.Cell{Text: state, Style: st.Render},
+			table.Cell{Text: shortAge(msg.SentAt), Style: dimStyle.Render},
+			table.Cell{Text: oneLineText(msg.Body)},
+		), fmt.Sprint(msg.ID)})
 	}
+	rows := listing(mailTable, nil, out)
 	// The window is not the history: a list that stopped at its rows would present the recent end as
-	// everything, and finding last month's message is the whole reason nothing is deleted.
+	// everything, and finding last month's message is the whole reason nothing is deleted. Outside the
+	// labelled rows, since it is a note about the listing rather than a message in it.
 	if n, total := len(m.state.Mail), m.state.MailTotal; total > n {
-		out = append(out, row{dimStyle.Render(fmt.Sprintf("… showing the last %d of %d messages — older mail: `sindri mail show <id>`", n, total)), ""})
+		rows = append(rows, row{dimStyle.Render(fmt.Sprintf("… showing the last %d of %d messages — older mail: `sindri mail show <id>`", n, total)), ""})
 	}
-	return out
+	return rows
 }
 
 // oneLineText is a body as a row shows it: its first line, since a message is prose and a row is a

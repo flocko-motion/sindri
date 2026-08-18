@@ -42,7 +42,7 @@ func TestMailRowsSayWhoWhenAndWhetherRead(t *testing.T) {
 		t.Errorf("a message that was also injected should say so:\n%s", rows)
 	}
 	// One line per message, whatever the body does — the first row's body has a newline in it.
-	if n := len(m.mailRows()); n != 2 {
+	if n := itemRows(m.mailRows()); n != 2 {
 		t.Errorf("two messages should be two rows, got %d", n)
 	}
 }
@@ -102,23 +102,23 @@ func TestTheMailDetailShowsTheMessageAndReachesItsAgent(t *testing.T) {
 func TestMailFiltersNarrowTheList(t *testing.T) {
 	m := mailModel()
 	m.mailFilter = api.MailUnread
-	if rows := m.mailRows(); len(rows) != 1 {
-		t.Errorf("unread should show one of the two messages, got %d", len(rows))
+	if n := itemRows(m.mailRows()); n != 1 {
+		t.Errorf("unread should show one of the two messages, got %d", n)
 	}
 	m.onKey(keyFilter)
 	if m.mailFilter != api.MailAll {
 		t.Errorf("`%s` should cycle the mail filter, got %q", keyFilter, m.mailFilter)
 	}
-	if rows := m.mailRows(); len(rows) != 2 {
-		t.Errorf("all should show both messages, got %d", len(rows))
+	if n := itemRows(m.mailRows()); n != 2 {
+		t.Errorf("all should show both messages, got %d", n)
 	}
 	// `w` narrows to whoever the selected message was sent to, and again to widen.
 	m.onKey(keyMailWho)
 	if m.mailAgent != "dvalin" {
 		t.Errorf("`%s` should narrow to the selected recipient, got %q", keyMailWho, m.mailAgent)
 	}
-	if rows := m.mailRows(); len(rows) != 1 {
-		t.Errorf("narrowed to dvalin should show one message, got %d", len(rows))
+	if n := itemRows(m.mailRows()); n != 1 {
+		t.Errorf("narrowed to dvalin should show one message, got %d", n)
 	}
 	m.onKey(keyMailWho)
 	if m.mailAgent != "" {

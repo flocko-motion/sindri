@@ -9,9 +9,11 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/table"
 	"github.com/spf13/cobra"
 )
 
@@ -47,9 +49,11 @@ func mailListCmd() *cobra.Command {
 					return err
 				}
 				rows := api.FilterMail(f, agent, st.Mail)
+				lines := make([]string, 0, len(rows))
 				for _, m := range rows {
-					fmt.Println(mailLine(m))
+					lines = append(lines, mailLine(m))
 				}
+				printRows(mailListTable, lines)
 				fmt.Fprintln(os.Stderr, mailFooter(st, rows, f, agent))
 				return nil
 			})
@@ -58,6 +62,19 @@ func mailListCmd() *cobra.Command {
 	c.Flags().StringVar(&agent, "agent", "", "only mail sent to this agent")
 	c.Flags().StringVar(&filter, "filter", string(api.MailUnread), "which mail to list: "+api.MailFilterNames())
 	return c
+}
+
+// mailListTable is the columns `sindri mail list` prints. Sender BEFORE recipient, the order mail is
+// read in everywhere else: the two sat adjacent and unlabelled the other way round, and were misread
+// over and over — labelling a backwards order would only have made the backwardness legible.
+var mailListTable = table.Table{
+	{Label: "id", Width: 6},
+	{Label: "repo", Width: 10, Clip: true},
+	{Label: "from", Width: 10},
+	{Label: "to", Width: 12},
+	{Label: "state", Width: 14},
+	{Label: "age", Width: 8},
+	{Label: "message"},
 }
 
 // mailLine is one row: enough to tell whose it is, who sent it, whether it has been read, and what
@@ -70,8 +87,15 @@ func mailLine(m api.Mail) string {
 	if m.Pushed { // it was also injected live, so it may have been acted on already
 		state += "+pushed"
 	}
-	return fmt.Sprintf("%-6d %-10.10s %-12s %-10s %-14s %-8s %s",
-		m.ID, m.Repo, m.Agent, dash(m.Sender), state, shortAge(m.SentAt), oneLine(m.Body, 80))
+	return mailListTable.Line(
+		table.Cell{Text: strconv.FormatInt(m.ID, 10)},
+		table.Cell{Text: m.Repo},
+		table.Cell{Text: dash(m.Sender)},
+		table.Cell{Text: m.Agent},
+		table.Cell{Text: state},
+		table.Cell{Text: shortAge(m.SentAt)},
+		table.Cell{Text: oneLine(m.Body, 80)},
+	)
 }
 
 // mailFooter says what the listing is NOT showing. The board carries a window of a mailbox that is

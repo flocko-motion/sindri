@@ -1,17 +1,20 @@
-// package: ui/cli / foreignrows
+// package: ui/cli / listing
 // type:    command (host CLI)
-// job:     print a fleet-wide listing in the labelled groups the TUI's scoped lists
-// show — what waits on the user in another repo first, then the repo the
-// command was run in, then the rest — and print it flat when nothing waits
-// elsewhere.
-// limits:  grouping and printing only; the headings are api's, and whether a row
-// waits on the user is api's too (-> AgentNeedsUser, PRNeedsUser).
+// job:     print a listing's lines that are not rows — the column labels over it, and
+// the group headings a fleet-wide listing needs when something waits on the
+// user in another repo: those rows first, then the repo the command was run
+// in, then the rest.
+// limits:  labelling and printing only; the widths are the listing's table (-> ui/table),
+// the group headings are api's, and whether a row waits on the user is api's
+// too (-> AgentNeedsUser, PRNeedsUser).
 package cli
 
 import (
 	"fmt"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/table"
+	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
 // listGroup is which section of a listing a row belongs in.
@@ -94,9 +97,24 @@ func groupedLines(rows []listRow) []string {
 	return out
 }
 
-// printGrouped prints what groupedLines assembles.
-func printGrouped(rows []listRow) {
+// printListing prints the column labels over the rows, then the rows themselves, grouped where any
+// of them waits on the user in another repo. Nothing at all when there are no rows: labels over an
+// empty table explain nothing, and each command's own closing line says why it is empty.
+func printListing(t table.Table, rows []listRow) {
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Println(theme.Dim().Render(t.Header()))
 	for _, l := range groupedLines(rows) {
 		fmt.Println(l)
 	}
+}
+
+// printRows is printListing for a listing with no repo grouping to make: the labels, then the rows.
+func printRows(t table.Table, lines []string) {
+	rows := make([]listRow, len(lines))
+	for i, l := range lines {
+		rows[i] = listRow{l, groupLocal}
+	}
+	printListing(t, rows)
 }

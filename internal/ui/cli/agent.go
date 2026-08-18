@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/table"
 	"github.com/flo-at/sindri/internal/ui/theme"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -98,6 +99,17 @@ func withAgent(name string, fn func(b backend, a *api.AgentView) error) error {
 	return fn(b, a)
 }
 
+// agentListTable is the columns `sindri agent list` prints, its header and its rows alike.
+var agentListTable = table.Table{
+	{Label: "repo", Width: 10, Clip: true}, // a repo name is unbounded; a long one would skew every row
+	{Label: "agent", Width: 12},
+	{Label: "role", Width: 8},
+	{Label: "status", Width: 10},
+	{Label: "ctx", Width: 4, Right: true},
+	{Label: "task", Width: 14},
+	{Label: "pr"},
+}
+
 func agentListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "list", Short: "List agents with their live state", Args: cobra.NoArgs,
@@ -115,8 +127,15 @@ func agentListCmd() *cobra.Command {
 				local := localProject(st.Projects)
 				var rows []listRow
 				for _, a := range sorted {
-					line := fmt.Sprintf("%-10.10s %-12s %-8s %-10s %4s %-14s %s", a.Repo, a.Name, a.Role, a.Status,
-						theme.ContextPercent(a.ContextTokens, a.ContextWindow), dash(a.Task), dash(a.PR))
+					line := agentListTable.Line(
+						table.Cell{Text: a.Repo},
+						table.Cell{Text: a.Name},
+						table.Cell{Text: a.Role},
+						table.Cell{Text: a.Status},
+						table.Cell{Text: theme.ContextPercent(a.ContextTokens, a.ContextWindow)},
+						table.Cell{Text: dash(a.Task)},
+						table.Cell{Text: dash(a.PR)},
+					)
 					// The markers are the TUI's, from the set both read, so a symbol cannot come to
 					// mean one thing here and another there (-> theme/glyph.go).
 					if a.UnreadMail > 0 { // a backlog is a strong signal it has stopped reading
@@ -136,7 +155,7 @@ func agentListCmd() *cobra.Command {
 					}
 					rows = append(rows, listRow{line, listGroupFor(a.Project, local, api.AgentNeedsUser(a))})
 				}
-				printGrouped(rows)
+				printListing(agentListTable, rows)
 				for _, o := range st.Orphans {
 					fmt.Printf("%s  orphan: %s — no roster entry; remove with 'sindri agent delete %s'\n", theme.MarkWarning, o, o)
 				}
@@ -180,6 +199,14 @@ func needsYouSummary(agents []api.AgentView) string {
 		"releases one that cannot.", len(stuck), strings.Join(stuck, "\n  "))
 }
 
+// agentStatsTable is the columns `sindri agent stats` prints. It had a header already, laid out from
+// widths of its own beside the rows' — the drift a shared layout exists to prevent.
+var agentStatsTable = table.Table{
+	{Label: "repo", Width: 10, Clip: true},
+	{Label: "agent", Width: 12},
+	{Label: "memory"},
+}
+
 // agentStatsCmd is the view for tuning per-agent memory; down agents have no VM to sample. It
 // opens with the fleet's headroom — the same figure the TUI header carries, since "will another
 // agent fit" is the question the per-agent rows are usually being read for.
@@ -212,14 +239,19 @@ func agentStatsCmd() *cobra.Command {
 					fmt.Fprintln(os.Stderr, "no running agents to sample")
 					return nil
 				}
-				fmt.Printf("%-10.10s %-12s %s\n", "REPO", "AGENT", "MEMORY")
+				lines := make([]string, 0, len(views))
 				for _, v := range views {
+					mem := theme.MemLine(v.MemUsageBytes, v.MemLimitBytes)
 					if v.Err != "" { // surface the reason, don't hide it behind a blank row
-						fmt.Printf("%-10.10s %-12s stats unavailable: %s\n", v.Repo, v.Name, v.Err)
-						continue
+						mem = "stats unavailable: " + v.Err
 					}
-					fmt.Printf("%-10.10s %-12s %s\n", v.Repo, v.Name, theme.MemLine(v.MemUsageBytes, v.MemLimitBytes))
+					lines = append(lines, agentStatsTable.Line(
+						table.Cell{Text: v.Repo},
+						table.Cell{Text: v.Name},
+						table.Cell{Text: mem},
+					))
 				}
+				printRows(agentStatsTable, lines)
 				return nil
 			})
 		},
