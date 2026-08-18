@@ -72,7 +72,7 @@ func (m *model) switcherOrder() []api.Project {
 // from the already-global board snapshot, so ordering needs no extra hub call.
 func (m *model) repoHasLiveAgent(tag string) bool {
 	for _, a := range m.state.Agents {
-		if a.Project == tag && a.Status != "down" {
+		if a.Project == tag && a.Status != "down" && a.Status != "stopped" {
 			return true
 		}
 	}

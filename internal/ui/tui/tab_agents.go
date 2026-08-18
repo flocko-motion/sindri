@@ -427,6 +427,8 @@ func (m model) paneLines() []string {
 		// Built from the key constant, not spelled out: this said 'L', which is lint on the PRs
 		// tab and bound to nothing here, so the one hint a stopped agent shows led nowhere.
 		return []string{dimStyle.Render("(not running — start with '" + keyStartS + "')")}
+	case "stopped":
+		return []string{dimStyle.Render("(stopped — '" + keyStartS + "' resumes the session)")}
 	case "stopping":
 		return []string{dimStyle.Render("stopping…")}
 	case "launching":

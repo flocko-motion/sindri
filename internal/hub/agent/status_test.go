@@ -8,12 +8,25 @@ import "testing"
 // the same error as trusting a listing taken before the pod existed.
 func TestUnobservedIsNotDown(t *testing.T) {
 	s := &Service{lifecycle: map[lcKey]string{}}
-	if got := s.AgentStatus("proj", "galar", false, false, ""); got != "unknown" {
+	if got := s.AgentStatus("proj", "galar", false, false, "", false); got != "unknown" {
 		t.Errorf("an agent nothing has looked at reads %q, want unknown", got)
 	}
 	// Observed and not running IS a claim, and still reads down.
-	if got := s.AgentStatus("proj", "galar", false, true, ""); got != "down" {
+	if got := s.AgentStatus("proj", "galar", false, true, "", false); got != "down" {
 		t.Errorf("an observed, absent agent reads %q, want down", got)
+	}
+}
+
+// TestStoppedReadsDistinctFromDown: a human's StopAgent is a deliberate, resumable act, not the
+// same claim "down" makes — a status shared with a crash would read a chosen state as a fault.
+func TestStoppedReadsDistinctFromDown(t *testing.T) {
+	s := &Service{lifecycle: map[lcKey]string{}}
+	if got := s.AgentStatus("proj", "galar", false, true, "", true); got != "stopped" {
+		t.Errorf("a deliberately stopped agent reads %q, want stopped", got)
+	}
+	// Unobserved still outranks the durable flag: nothing has looked yet, so nothing confirms it.
+	if got := s.AgentStatus("proj", "galar", false, false, "", true); got != "unknown" {
+		t.Errorf("an unobserved agent reads %q, want unknown even when stopped is set", got)
 	}
 }
 
@@ -22,14 +35,14 @@ func TestUnobservedIsNotDown(t *testing.T) {
 // retire an intent — that would drop the one word explaining what the user just asked for.
 func TestIntentSurvivesAnUnobservedAgent(t *testing.T) {
 	s := &Service{lifecycle: map[lcKey]string{{"proj", "galar"}: "stopping"}}
-	if got := s.AgentStatus("proj", "galar", false, false, ""); got != "stopping" {
+	if got := s.AgentStatus("proj", "galar", false, false, "", false); got != "stopping" {
 		t.Errorf("an unobserved agent under a stop intent reads %q, want stopping", got)
 	}
 	if s.lifecycle[lcKey{"proj", "galar"}] != "stopping" {
 		t.Error("the stop intent was retired on an observation that never happened")
 	}
 	// Once something has actually looked and found it gone, the intent is fulfilled.
-	if got := s.AgentStatus("proj", "galar", false, true, ""); got != "down" {
+	if got := s.AgentStatus("proj", "galar", false, true, "", false); got != "down" {
 		t.Errorf("an observed stop reads %q, want down", got)
 	}
 	if _, still := s.lifecycle[lcKey{"proj", "galar"}]; still {
@@ -41,7 +54,7 @@ func TestIntentSurvivesAnUnobservedAgent(t *testing.T) {
 // is the more useful of the two words — the user asked for it and is waiting on it.
 func TestLaunchingOutranksUnknown(t *testing.T) {
 	s := &Service{lifecycle: map[lcKey]string{{"proj", "galar"}: "launching"}}
-	if got := s.AgentStatus("proj", "galar", false, false, ""); got != "launching" {
+	if got := s.AgentStatus("proj", "galar", false, false, "", false); got != "launching" {
 		t.Errorf("a launch in flight reads %q, want launching", got)
 	}
 }
@@ -50,10 +63,10 @@ func TestLaunchingOutranksUnknown(t *testing.T) {
 // phase is the answer, and the observed flag changes nothing about it.
 func TestRunningStillReportsThePhase(t *testing.T) {
 	s := &Service{lifecycle: map[lcKey]string{}}
-	if got := s.AgentStatus("proj", "galar", true, true, "working"); got != "working" {
+	if got := s.AgentStatus("proj", "galar", true, true, "working", false); got != "working" {
 		t.Errorf("a running agent reads %q, want its phase", got)
 	}
-	if got := s.AgentStatus("proj", "galar", true, true, ""); got != "idle" {
+	if got := s.AgentStatus("proj", "galar", true, true, "", false); got != "idle" {
 		t.Errorf("a running agent with no phase reads %q, want idle", got)
 	}
 }

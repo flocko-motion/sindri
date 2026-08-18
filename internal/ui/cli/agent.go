@@ -472,7 +472,7 @@ func agentRestartCmd() *cobra.Command {
 		Use: "restart <name>", Short: "Restart the agent's container (starts it if it wasn't running)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, a *api.AgentView) error {
-				if a.Status != "down" { // tear down the running container first
+				if a.Status != "down" && a.Status != "stopped" { // tear down the running container first
 					if err := b.StopAgent(a.Name); err != nil {
 						return err
 					}

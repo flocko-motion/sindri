@@ -122,7 +122,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			pr, _ = ps.ReviewingPR(a.Name)
 		}
 		holds := st.Task != "" || st.Container != "" || pr != ""
-		status := overlayRuntime(h.agents.AgentStatus(a.Project, a.Name, running[i], observed[i], st.Phase), runtimes[i], holds)
+		status := overlayRuntime(h.agents.AgentStatus(a.Project, a.Name, running[i], observed[i], st.Phase, a.Stopped), runtimes[i], holds)
 		// A stall reads as plain "idle" otherwise, which is what let one hold a task unnoticed.
 		if _, stalled := h.stalledFor(a.Project, a.Name, st.Phase, st.Container); stalled {
 			status = "stalled"

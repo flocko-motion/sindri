@@ -17,7 +17,7 @@ func TestUnknownIsNeverMistakenForRunning(t *testing.T) {
 
 // TestAgentNotUpCoversEveryNonRunningWord: the point of the helper is that the list lives once.
 func TestAgentNotUpCoversEveryNonRunningWord(t *testing.T) {
-	for _, s := range []string{"", "down", StatusUnknown, "launching", "stopping"} {
+	for _, s := range []string{"", "down", "stopped", StatusUnknown, "launching", "stopping"} {
 		if !AgentNotUp(s) {
 			t.Errorf("AgentNotUp(%q) = false, want true", s)
 		}
@@ -39,6 +39,9 @@ func TestNeedsLaunchExcludesWhatIsAlreadyMoving(t *testing.T) {
 	}
 	if !AgentNeedsLaunch("down") {
 		t.Error("a down agent still needs launching")
+	}
+	if !AgentNeedsLaunch("stopped") {
+		t.Error("a deliberately stopped agent needs launching too — the same verb resumes it")
 	}
 }
 

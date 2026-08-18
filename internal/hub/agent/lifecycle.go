@@ -55,13 +55,12 @@ func (s *Service) setLifecycle(project, name, state string) {
 	}
 }
 
-// AgentStatus reconciles intent with observed runtime into one status word, clearing the
-// intent once fulfilled. The single source of truth for "what is this agent doing".
-//
-// observed is whether the runtime has been LOOKED AT at all. "down" is a claim, and an agent the
-// watchdog has not reached yet supports no claim — so running=false alone must never produce one,
-// nor retire an intent as fulfilled. Unobserved implies not running; the two are not the same fact.
-func (s *Service) AgentStatus(project, name string, running, observed bool, phase string) string {
+// AgentStatus reconciles intent with observed runtime into one status word, clearing the intent
+// once fulfilled — the single source of truth for "what is this agent doing". observed is whether
+// the runtime has been LOOKED AT at all: running=false alone must never produce "down" or retire an
+// intent, since an agent the watchdog has not reached yet supports no claim. stopped is the durable
+// flag a human's StopAgent set, checked last of all so it never outranks a truer explanation.
+func (s *Service) AgentStatus(project, name string, running, observed bool, phase string, stopped bool) string {
 	s.lcMu.Lock()
 	defer s.lcMu.Unlock()
 	key := lcKey{project, name}
@@ -83,6 +82,8 @@ func (s *Service) AgentStatus(project, name string, running, observed bool, phas
 		return "launching" // requested, pod not up yet
 	case !observed:
 		return "unknown" // registered since the last sweep; the next one answers
+	case stopped:
+		return "stopped" // torn down on purpose, resumable — not the same claim as "down"
 	default:
 		return "down"
 	}
@@ -179,7 +180,8 @@ func (s *Service) DeleteAgent(project, name string) error {
 // resumes where it left off.
 func (s *Service) StopAgent(project, name string) error {
 	ps := s.store.For(project)
-	if _, ok, err := ps.GetAgent(name); err != nil {
+	a, ok, err := ps.GetAgent(name)
+	if err != nil {
 		return err
 	} else if !ok {
 		return fmt.Errorf("no such agent %q", name)
@@ -194,6 +196,10 @@ func (s *Service) StopAgent(project, name string) error {
 		s.deps.Notify()
 		return err
 	}
+	// Durable, so "stopped" (resumable) reads distinct from "down" (crashed) even across a hub
+	// restart that drops the in-memory intent above.
+	a.Stopped = true
+	_ = ps.PutAgent(a)
 	_ = ps.Log(name, "stop", "pod removed")
 	s.deps.Notify()
 	return nil
@@ -263,6 +269,10 @@ func (s *Service) Launch(project, name string, shell, debug bool, cols, lines in
 	}
 	if !ok {
 		return fmt.Errorf("no such agent %q — run 'sindri new %s' first", name, name)
+	}
+	if a.Stopped { // asked to run again — no longer the human's deliberate down
+		a.Stopped = false
+		_ = ps.PutAgent(a)
 	}
 	// Validate the project config up front — a bad .sindri/config.yaml fails the launch
 	// loudly rather than silently reverting to defaults mid-build.

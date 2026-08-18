@@ -73,7 +73,7 @@ func taskStatusStyle(status string) lipgloss.Style {
 // move), green working (leave it), orange transitioning, grey down.
 func agentStatusStyle(status string) lipgloss.Style {
 	switch status {
-	case "down":
+	case "down", "stopped":
 		return stDone
 	case "launching", "stopping":
 		return stTrans

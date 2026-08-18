@@ -272,3 +272,30 @@ func TestClearArmedSurvivesAReopen(t *testing.T) {
 		t.Error("the arming must outlive the hub that took it, or it is a promise the user cannot see broken")
 	}
 }
+
+// TestStoppedSurvivesAReopen: the same durability as ClearArmed, and for the same reason — a hub
+// restart between StopAgent and the next launch must not blur "stopped on purpose" back into "down".
+func TestStoppedSurvivesAReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.For("proj").PutAgent(Agent{Name: "eitri", Role: "worker", Stopped: true}); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	again, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer again.Close()
+	a, ok, err := again.For("proj").GetAgent("eitri")
+	if err != nil || !ok {
+		t.Fatalf("agent gone after a restart: ok=%v err=%v", ok, err)
+	}
+	if !a.Stopped {
+		t.Error("a deliberate stop must outlive the hub that took it, or a restart reads it back as a crash")
+	}
+}
