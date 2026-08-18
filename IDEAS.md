@@ -24,4 +24,4 @@ pct(W) = P∞ + (P₀−P∞)·(W/W₀)^(−k), mit W₀=200k, P₀=37,5%, P∞=
 
 Idea: whenever a worker had its final PR for a task merged and has no tasks left *in the hierarchy*, then 
 automatic compacting check is executed: if the current context fill is above the threshold of the above formula, 
-then we call /compact 
+then we call compacttion before assigning the worker to the next hierarchy.  
