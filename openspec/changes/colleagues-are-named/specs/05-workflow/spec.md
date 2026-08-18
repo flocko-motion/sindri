@@ -50,3 +50,35 @@ one.
 
 - **WHEN** a reviewer re-asks for its held review
 - **THEN** that directive names the author too, not only the one that first handed it over
+
+### Requirement: A task view names the agent holding it
+
+A task view SHALL name the agent behind the task — a listing as a column, a single task in full as
+a field — so that a reader planning around the work can see who is doing it. The name SHALL come
+from one rule wherever it is rendered, the dashboard's detail pane, the host CLI and the
+agent-facing task verb alike, since it is one fact shown in several places.
+
+That rule SHALL name the agent holding the task, the agent holding the feature it belongs to, and
+failing either, the author of its open pull request. A submitted task is exactly when the name is
+most wanted — the work is done and the question is who to ask about it — and it is exactly when the
+holder has moved on and only the PR remembers.
+
+Among agents this SHALL be shown to the roles that work around other people, a planner and a
+coauthor. A worker sees only the task it holds, and a reviewer is told the author by the directive
+that hands it the pull request, so neither is given a column that would make a task view into a
+directory of the fleet.
+
+#### Scenario: A task being worked
+
+- **WHEN** an agent holds a task
+- **THEN** the listing and the task's own view both name it
+
+#### Scenario: A task under review
+
+- **WHEN** a task's work has been submitted and no agent holds the task any longer
+- **THEN** the views name the agent that submitted it
+
+#### Scenario: A task nobody is working
+
+- **WHEN** no agent holds a task and it has no open PR
+- **THEN** the field is shown as empty rather than borrowing a name from elsewhere

@@ -500,9 +500,15 @@ func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int,
 		}
 		// Type and labels are shown because a reviewer reads this: a `spec:<name>` label is what
 		// tells it which spec the work must be verified against, and it lives nowhere else.
-		fmt.Fprintf(out, "%s  [%s]  %s  priority=%s\napproval: %s\ntype:     %s\nlabels:   %s\nparent:   %s\nchildren: %s\n\n%s\n",
+		fmt.Fprintf(out, "%s  [%s]  %s  priority=%s\napproval: %s\ntype:     %s\nlabels:   %s\nparent:   %s\nchildren: %s\n",
 			t.ID, t.Status, t.Title, dash(t.Priority), dash(appr), dash(t.Type), dash(t.Labels),
-			dash(t.ParentID), dash(strings.Join(childIDs(tasks, t.ID), ", ")), dash(t.Description))
+			dash(t.ParentID), dash(strings.Join(childIDs(tasks, t.ID), ", ")))
+		// Who holds it, for the roles that plan around people — the PR's author included, since the
+		// name is most wanted once the work is submitted (-> api.AgentsByTask).
+		if namesHolders(c.Role) {
+			fmt.Fprintf(out, "agent:    %s\n", dash(e.holdersByTask(ps)[t.ID]))
+		}
+		fmt.Fprintf(out, "\n%s\n", dash(t.Description))
 		// The same thread the TUI pane and `task info` show: an agent that just filed a finding
 		// (-> the comment verb) has to be able to read it back here, or the verb is worse than none.
 		fmt.Fprint(out, commentBlock(t.Comments))
@@ -516,14 +522,22 @@ func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int,
 	// hierarchy is how work is organised here (an openspec change parents its tasks), and a
 	// planner reads and repairs it from this view.
 	prs, _ := ps.PRs()
+	holders := map[string]string{}
+	if namesHolders(c.Role) {
+		holders = e.holdersByTask(ps)
+	}
 	shown := 0
 	for _, r := range task.ArrangeTasks(tasks, prs) {
 		if bounded && !visible[r.ID] {
 			continue
 		}
 		shown++
-		fmt.Fprintf(out, "%-12s %-8s %-9s %-3s %s%s\n",
-			r.ID, r.Status, dash(r.Approval), dash(r.Priority), strings.Repeat("  ", r.Depth), r.Title)
+		who := ""
+		if namesHolders(c.Role) {
+			who = fmt.Sprintf("%-12s ", dash(holders[r.ID]))
+		}
+		fmt.Fprintf(out, "%-12s %-8s %-9s %-3s %s%s%s\n",
+			r.ID, r.Status, dash(r.Approval), dash(r.Priority), who, strings.Repeat("  ", r.Depth), r.Title)
 	}
 	if bounded && shown == 0 {
 		fmt.Fprintln(out, "You hold no task. Run `sindri` to pick up your next one.")
@@ -639,4 +653,24 @@ func subtreeRows(tasks []store.Task, rootID string) []task.TaskRow {
 	}
 	walk(*root, 0)
 	return rows
+}
+
+// namesHolders reports whether a role's task views name who holds each task: the roles that work
+// around people. A worker sees only its own task, and a reviewer is told the author in DirReview.
+func namesHolders(role string) bool { return role == "planner" || role == "coauthor" }
+
+// holdersByTask names the agent behind each task by the rule both front-ends render, lifting the
+// roster into the board's view type rather than restating it (-> api.AgentsByTask).
+func (e *Engine) holdersByTask(ps *store.ProjectStore) map[string]string {
+	roster, err := ps.Roster()
+	if err != nil {
+		return nil
+	}
+	views := make([]api.AgentView, 0, len(roster))
+	for _, a := range roster {
+		st, _ := ps.GetState(a.Name)
+		views = append(views, api.AgentView{Name: a.Name, Task: st.Task, Feature: st.Container})
+	}
+	prs, _ := ps.PRs()
+	return api.AgentsByTask(views, prs)
 }

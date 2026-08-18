@@ -23,4 +23,11 @@
 
 ## 3. Task views name the agent holding the task (sd-4e4d5a)
 
-- [ ] (next subtask)
+- [x] 3.1 A holder column in `sindri task list` and in the agent-facing listing, a field in the
+      agent's `task <id>`; the TUI pane and `task info` already carry it from sd-569550.
+- [x] 3.2 All four read one rule (`api.AgentsByTask`), the hub side lifting its roster rows into the
+      board's view type rather than restating the rule over the store's.
+- [x] 3.3 Shown to a planner and a coauthor only: a worker sees its own task, a reviewer is told the
+      author in the directive, and neither view becomes a directory.
+- [x] 3.4 Pinned: a worked task, a submitted one still naming its author, an unheld one naming
+      nobody, and the roles that do and do not get the column.

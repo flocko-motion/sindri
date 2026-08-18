@@ -23,13 +23,18 @@ and cannot go browsing the fleet.
 - The review directive names the author: "Review pr-sd-1 — dwalin's work on task sd-1234", in the
   sentence that says what to do rather than in a footnote. A record with no author reads as it did
   before, since "'s work on" with nothing in front of it would be worse than the line it replaced.
-- (The remaining sibling subtask adds the holder to the task views.)
+- The task views name the holder: a column in `sindri task list` and in the agent-facing `task
+  list`, a field in `task <id>`. The dashboard's detail pane and `sindri task info` already gained
+  it with the marker work (sd-569550) and read the same rule, so this completes the set rather than
+  adding a fourth account of one fact.
 
 ## Impact
 
-- Specs: `05-workflow` (a planner's view of its own staff; the author in the review directive).
+- Specs: `05-workflow` (a planner's view of its own staff, the author in the review directive,
+  and the holder in the task views).
 - Code: `internal/hub/commands.go` (the `staff` verb and its registry entry),
-  `internal/hub/workflow/prompts.go` and `review.go` (the author in the review directive).
+  `internal/hub/workflow/prompts.go` and `review.go` (the author in the review directive),
+  `internal/hub/workflow/planner.go` and `internal/ui/cli/task.go` (the holder in the task views).
 - The follow-up the subtask anticipates — a reviewer asking the author instead of rejecting on a
   guess — is NOT promised in the directive yet: agents can read mail but cannot send it, and a
   comment on the task only wakes the board, not its holder. The sentence belongs with the verb that

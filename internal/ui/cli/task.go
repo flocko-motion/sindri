@@ -434,6 +434,12 @@ func taskListCmd() *cobra.Command {
 					return err
 				}
 				tasks := api.FilterTasks(f, all)
+				// Who holds each one, by the rule the detail views and the TUI read (-> AgentsByTask).
+				// Off the board, since a task carries no owner of its own.
+				holders := map[string]string{}
+				if st, serr := b.State(); serr == nil {
+					holders = api.AgentsByTask(st.Agents, st.PRs)
+				}
 				if asJSON {
 					out, err := tasksJSON(tasks)
 					if err != nil {
@@ -444,6 +450,7 @@ func taskListCmd() *cobra.Command {
 				}
 				lines := make([]string, 0, len(tasks))
 				for _, t := range tasks {
+<<<<<<< HEAD
 					lines = append(lines, taskListTable.Line(
 						table.Cell{Text: t.ID},
 						table.Cell{Text: theme.PriorityLabel(t.Priority)},
@@ -451,6 +458,10 @@ func taskListCmd() *cobra.Command {
 						table.Cell{Text: theme.Age(t.CreatedAt)},
 						table.Cell{Text: t.Title},
 					))
+=======
+					fmt.Printf("%-12s %-8s %-12s %4s  %-12s %s\n", t.ID, theme.PriorityLabel(t.Priority),
+						taskState(t), theme.Age(t.CreatedAt), dash(holders[t.ID]), t.Title)
+>>>>>>> 3fa2340 (chore(sd-4e4d5a): task views name the holder: a column in both listings and a field in the agent's)
 				}
 				printRows(taskListTable, lines)
 				if n := len(all) - len(tasks); n > 0 {
