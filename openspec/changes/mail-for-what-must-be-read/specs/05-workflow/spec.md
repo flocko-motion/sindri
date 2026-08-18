@@ -43,3 +43,30 @@ relay, the agent lifecycle — its injection sites SHALL be enumerated with the 
 each is push-only, and an unlisted one SHALL fail the build. The compiler cannot reach
 those, and an audit that merely looked found one and missed another.
 
+#### Scenario: A rejection reaches an agent that was away
+
+- **WHEN** a reviewer rejects a PR whose author cannot be typed into
+- **THEN** the feedback is waiting for that author when it next reads its mail
+
+#### Scenario: A nudge is not kept
+
+- **WHEN** the hub nudges an agent that has gone quiet
+- **THEN** nothing is stored, and the nudge fires again on the next sweep if it is
+  still needed
+
+#### Scenario: An edit does not interrupt
+
+- **WHEN** a planner edits the task an agent is working
+- **THEN** the notice is mailed and not pushed, so the agent reads it at its next ask
+  rather than mid-turn
+
+#### Scenario: A sender cannot omit the choice
+
+- **WHEN** new code in the workflow sends a message to an agent
+- **THEN** it states both properties, because no unclassified path exists to call
+
+#### Scenario: A module outside the workflow injects directly
+
+- **WHEN** code anywhere in the hub types into an agent's session without going through
+  the delivery primitive
+- **THEN** the build fails unless that site is listed with the reason it is push-only

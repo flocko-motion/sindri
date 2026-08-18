@@ -415,6 +415,7 @@ var taskListTable = table.Table{
 	{Label: "prio", Width: 8},
 	{Label: "state", Width: 12},
 	{Label: "age", Width: 4, Right: true},
+	{Label: "agent", Width: 12}, // who holds it (-> api.AgentsByTask)
 	{Label: "title"},
 }
 
@@ -450,18 +451,14 @@ func taskListCmd() *cobra.Command {
 				}
 				lines := make([]string, 0, len(tasks))
 				for _, t := range tasks {
-<<<<<<< HEAD
 					lines = append(lines, taskListTable.Line(
 						table.Cell{Text: t.ID},
 						table.Cell{Text: theme.PriorityLabel(t.Priority)},
 						table.Cell{Text: taskState(t)},
 						table.Cell{Text: theme.Age(t.CreatedAt)},
+						table.Cell{Text: dash(holders[t.ID])},
 						table.Cell{Text: t.Title},
 					))
-=======
-					fmt.Printf("%-12s %-8s %-12s %4s  %-12s %s\n", t.ID, theme.PriorityLabel(t.Priority),
-						taskState(t), theme.Age(t.CreatedAt), dash(holders[t.ID]), t.Title)
->>>>>>> 3fa2340 (chore(sd-4e4d5a): task views name the holder: a column in both listings and a field in the agent's)
 				}
 				printRows(taskListTable, lines)
 				if n := len(all) - len(tasks); n > 0 {
