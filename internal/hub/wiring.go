@@ -167,3 +167,7 @@ func (d workflowDeps) HoldsNothing(project, name, role string) (bool, error) {
 func (d workflowDeps) Compact(project, name string) error {
 	return d.h.agents.Compact(project, name)
 }
+
+func (d workflowDeps) FireClear(project, name string) error {
+	return d.h.agents.FireClear(project, name)
+}

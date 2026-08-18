@@ -342,18 +342,12 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 				// Blocking: a feature whose remaining work is gated is neither finished nor able to
 				// hand anything out, so it waits on the user like any other empty queue.
 				return e.waitForWork(ctx, func() (string, bool, error) {
-					// Between subtasks is a leaf boundary, so an armed clear fires HERE — before
-					// the next subtask is served, and even if it is armed during the wait.
-					if e.clearArmed(project, name) {
+					if fired, err := e.fireClearIfArmed(project, name); err != nil {
+						return "", false, err
+					} else if fired {
 						return DirClearPending, true, nil
 					}
-					if tokens, due := e.containerCompactDue(project, name, st.Container); due {
-						return DirCompacting(tokens), true, nil
-					}
-					if tier, due := e.containerRetierDue(project, name, st.Container); due {
-						return DirRetiering(tier), true, nil
-					}
-					return e.containerNext(project, name, st.Container)
+					return e.claimNextSubtask(project, name, st.Container)
 				})
 			}
 		}
@@ -387,27 +381,23 @@ func (e *Engine) retired(project, name string) bool {
 	return err == nil && ok && a.Retired
 }
 
-// waitForNextTask is the idle-agent path: an agent that will get no more work is told so
-// immediately, not left blocking on a queue it is no longer served from.
+// waitForNextTask is the idle-agent path. An armed clear fires on every check regardless of
+// whether work exists; compact and model-select are claimNext's, once it has an assignment.
 func (e *Engine) waitForNextTask(ctx context.Context, project, name string) (string, error) {
 	if e.retired(project, name) {
 		return DirRetired, nil
 	}
-	// Ahead of fullness: an armed clear is the remedy FOR fullness, so telling a full agent to wait
-	// for a human is stale the moment one has acted (-> agent.Service.SetClearArmed).
-	if e.clearArmed(project, name) {
-		return DirClearPending, nil
-	}
-	if tokens, due := e.compactDue(project, name); due {
-		return DirCompacting(tokens), nil
-	}
-	if tokens, full := e.contextFull(project, name); full {
-		return DirFull(tokens), nil
-	}
-	if tier, due := e.retierDue(project, name); due {
-		return DirRetiering(tier), nil
-	}
-	return e.waitForWork(ctx, func() (string, bool, error) { return e.claimNext(project, name) })
+	return e.waitForWork(ctx, func() (string, bool, error) {
+		if fired, err := e.fireClearIfArmed(project, name); err != nil {
+			return "", false, err
+		} else if fired {
+			return DirClearPending, true, nil
+		}
+		if tokens, full := e.contextFull(project, name); full {
+			return DirFull(tokens), true, nil
+		}
+		return e.claimNext(project, name)
+	})
 }
 
 // waitForWork blocks until check reports work is ready (returning its directive) or
@@ -560,20 +550,14 @@ func (e *Engine) CmdNext(c registry.Caller, _ []string, out io.Writer) (int, err
 		fmt.Fprintln(out, DirRetired)
 		return 0, nil
 	}
-	if e.clearArmed(c.Project, c.Agent) {
+	if fired, err := e.fireClearIfArmed(c.Project, c.Agent); err != nil {
+		return 1, err
+	} else if fired {
 		fmt.Fprintln(out, DirClearPending)
-		return 0, nil
-	}
-	if tokens, due := e.compactDue(c.Project, c.Agent); due {
-		fmt.Fprintln(out, DirCompacting(tokens))
 		return 0, nil
 	}
 	if tokens, full := e.contextFull(c.Project, c.Agent); full {
 		fmt.Fprintln(out, DirFull(tokens))
-		return 0, nil
-	}
-	if tier, due := e.retierDue(c.Project, c.Agent); due {
-		fmt.Fprintln(out, DirRetiering(tier))
 		return 0, nil
 	}
 	d, claimed, err := e.claimNext(c.Project, c.Agent)
@@ -588,8 +572,8 @@ func (e *Engine) CmdNext(c registry.Caller, _ []string, out io.Writer) (int, err
 	return 0, nil
 }
 
-// claimNext hands a worker the best-rated unit in a project, task or whole package (-> nextUp).
-// Returns (directive, true) on a claim, ("", false) when idle or retired (full).
+// claimNext hands a worker the best-rated unit in a project (-> nextUp), preparing it first: a
+// model change if the tier wants one, else a compact if fill is past the threshold, then handover.
 func (e *Engine) claimNext(project, agent string) (string, bool, error) {
 	// Retired by a human, or by its own context filling: either way it is being wound down, and the
 	// gate is here rather than at the task queries so it holds however the work would have arrived.
@@ -597,13 +581,10 @@ func (e *Engine) claimNext(project, agent string) (string, bool, error) {
 		return "", false, nil
 	}
 	if e.clearArmed(project, agent) {
-		return "", false, nil // a clear is about to land: work claimed now would be cut in half by it
-	}
-	if _, due := e.compactDue(project, agent); due {
-		return "", false, nil // fill past the threshold: compacting wins this cycle, off-tick
+		return "", false, nil // about to land (fired by the caller): work claimed now would be cut in half by it
 	}
 	if _, full := e.contextFull(project, agent); full {
-		return "", false, nil // retired: a full worker is not handed new work
+		return "", false, nil
 	}
 	_ = e.SyncTasks(project) // best-effort refresh; cached set on failure
 	ps := e.store.For(project)
@@ -619,8 +600,17 @@ func (e *Engine) claimNext(project, agent string) (string, bool, error) {
 	if !ok {
 		return "", false, nil
 	}
-	if want, known := e.deps.ModelForTier(api.TierOrDefault(t.Tier)); known && want != e.deps.CurrentModel(project, agent) {
-		return "", false, nil // held for the retier sweep, off-tick, for the same reason as compaction
+	tier := api.TierOrDefault(t.Tier)
+	if want, known := e.deps.ModelForTier(tier); known && want != e.deps.CurrentModel(project, agent) {
+		if err := e.deps.SetModel(project, agent, want); err != nil {
+			return "", false, err
+		}
+		return DirRetiering(tier), true, nil
+	}
+	if _, due := e.compactDue(project, agent); due {
+		if err := e.deps.Compact(project, agent); err != nil {
+			return "", false, err
+		}
 	}
 	if isPackage {
 		return e.claimContainer(project, agent, t)

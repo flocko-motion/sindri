@@ -208,6 +208,34 @@ func openIDs(tasks []store.Task) []string {
 	return ids
 }
 
+// claimNextSubtask is claimNext's one-pass rule for a held feature's own subtasks rather than the
+// top-level pools; with none open, containerNext decides finished vs. still gated.
+func (e *Engine) claimNextSubtask(project, agent, container string) (string, bool, error) {
+	if e.clearArmed(project, agent) {
+		return "", false, nil // about to land (fired by the caller): a subtask claimed now would be cut in half by it
+	}
+	children, err := e.store.For(project).OpenSubtasks(container)
+	if err != nil {
+		return "", false, err
+	}
+	if len(children) == 0 {
+		return e.containerNext(project, agent, container)
+	}
+	tier := api.TierOrDefault(children[0].Tier)
+	if want, known := e.deps.ModelForTier(tier); known && want != e.deps.CurrentModel(project, agent) {
+		if err := e.deps.SetModel(project, agent, want); err != nil {
+			return "", false, err
+		}
+		return DirRetiering(tier), true, nil
+	}
+	if _, due := e.compactDue(project, agent); due {
+		if err := e.deps.Compact(project, agent); err != nil {
+			return "", false, err
+		}
+	}
+	return e.containerNext(project, agent, container)
+}
+
 // containerNext is the held feature's next step: the subtask just assigned, or the finished feature
 // to put up. Not ready while work awaits a verdict, so the worker waits (woken by its Notify).
 func (e *Engine) containerNext(project, agent, container string) (string, bool, error) {

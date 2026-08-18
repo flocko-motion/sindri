@@ -46,6 +46,8 @@ type stubDeps struct {
 	holdsNothing bool
 	compacted    []string // agents Compact was called for, in order
 	compactErr   error
+	cleared      []string // agents FireClear was called for, in order
+	fireClearErr error
 }
 
 func (d *stubDeps) ProjectRoot(string) string                   { return d.root }
@@ -105,6 +107,11 @@ func (d *stubDeps) HoldsNothing(_, _, _ string) (bool, error) { return d.holdsNo
 func (d *stubDeps) Compact(_, name string) error {
 	d.compacted = append(d.compacted, name)
 	return d.compactErr
+}
+
+func (d *stubDeps) FireClear(_, name string) error {
+	d.cleared = append(d.cleared, name)
+	return d.fireClearErr
 }
 
 func (d *stubDeps) CompactionThreshold(int) int {

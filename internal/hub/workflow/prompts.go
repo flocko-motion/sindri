@@ -433,18 +433,9 @@ const DirClearPending = "[hub] The user has armed a context clear for you: it fi
 	"boundary, and your session starts empty. Nothing is assigned until it lands. Don't ask again — " +
 	"you'll be told to carry on the moment your context is clear."
 
-// DirCompacting answers an agent whose fill has grown past the point compacting it is worth doing —
-// automatic, unlike a clear, so it names the number rather than a human's decision. A summary, not a
-// wipe: it keeps what it was carrying, so no re-kickoff is owed the way a clear's is.
-func DirCompacting(tokens int) string {
-	return fmt.Sprintf("[hub] Your context is ~%dk tokens — past the point compacting it is worth "+
-		"doing. It fires here, at this boundary, keeping a summary rather than wiping it. Nothing is "+
-		"assigned until it lands; don't ask again.", tokens/1000)
-}
-
-// DirRetiering answers a worker whose next task needs a different model than the one it runs — a
-// change fires here, at this boundary, so nothing is assigned until it lands. Off-tick, same as a
-// compaction due, for the same reason: the change must never land on the worker mid-command.
+// DirRetiering answers a worker whose next task needed a different model than the one it was
+// running — the gate has already fired the change (-> claimNext), which compacts and restarts the
+// worker on its own, so that task is not assigned here: the restarted pod asks for it fresh.
 func DirRetiering(tier string) string {
 	return fmt.Sprintf("[hub] Your next task is rated %q, a different model than the one you're "+
 		"running — it changes here, at this boundary, before that task is assigned. Nothing is "+

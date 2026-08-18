@@ -122,8 +122,8 @@ func TestAnIdleWorkerTakesTheCriticalTaskOverAMidPackage(t *testing.T) {
 		currentModel: "claude-sonnet-5",
 		tierModels:   map[string]string{"mid": "claude-sonnet-5"},
 	})
-	// retierDue reads the synced cache, checked ahead of the claim path this test exercises — warm
-	// it now so that gate does not withhold on stale data taken before this seeding ever ran.
+	// claimNext reads the synced cache; warm it now so the assertions below see this seeding, not
+	// whatever the cache held (nothing) before it.
 	if err := e.SyncTasks("repo"); err != nil {
 		t.Fatalf("sync tasks: %v", err)
 	}
@@ -140,5 +140,65 @@ func TestAnIdleWorkerTakesTheCriticalTaskOverAMidPackage(t *testing.T) {
 	}
 	if held.Container != "" {
 		t.Errorf("state.Container = %q, want empty — the mid package must wait its turn", held.Container)
+	}
+}
+
+// TestAMismatchedTaskChangesTheModelInsteadOfBeingHandedOver: the model change compacts and
+// restarts the worker on its own (-> agent.Service.SetModel), so the CURRENT pod is on its way out
+// — handing the task over to it here would be handing it to a process about to be torn down. The
+// restarted pod's own boot asks fresh, once the model already matches.
+func TestAMismatchedTaskChangesTheModelInsteadOfBeingHandedOver(t *testing.T) {
+	deps := &stubDeps{
+		alive:        true,
+		currentModel: "claude-haiku-4-5",
+		tierModels:   map[string]string{"senior": "claude-opus-5"},
+	}
+	e, ps := idleWorkerWithOpenTask(t, deps)
+	if err := ps.SetOwnedTier("td-abc123", "senior"); err != nil {
+		t.Fatal(err)
+	}
+	e.refreshCachedTask("repo", "td-abc123")
+
+	dir, err := e.AgentDirective(context.Background(), "repo", "dvalin")
+	if err != nil {
+		t.Fatalf("AgentDirective: %v", err)
+	}
+	if !strings.Contains(dir, "senior") {
+		t.Errorf("directive = %q, want it to say the task needs the senior tier", dir)
+	}
+	if st, _ := ps.GetState("dvalin"); st.Task != "" {
+		t.Errorf("a mismatched task was handed over anyway: %q", st.Task)
+	}
+	if len(deps.modelSet) != 1 || deps.modelSet[0] != "dvalin=claude-opus-5" {
+		t.Errorf("modelSet = %v, want exactly one SetModel(dvalin, claude-opus-5)", deps.modelSet)
+	}
+	if len(deps.compacted) != 0 {
+		t.Errorf("compacted = %v, want none — SetModel compacts as part of its own restart", deps.compacted)
+	}
+}
+
+// TestAMatchingTaskIsHandedOverWithoutChangingTheModel is the control: nothing about the tier check
+// should stop an ordinary claim when the model already matches.
+func TestAMatchingTaskIsHandedOverWithoutChangingTheModel(t *testing.T) {
+	deps := &stubDeps{
+		alive:        true,
+		currentModel: "claude-opus-5",
+		tierModels:   map[string]string{"senior": "claude-opus-5"},
+	}
+	e, ps := idleWorkerWithOpenTask(t, deps)
+	if err := ps.SetOwnedTier("td-abc123", "senior"); err != nil {
+		t.Fatal(err)
+	}
+	e.refreshCachedTask("repo", "td-abc123")
+
+	dir, err := e.AgentDirective(context.Background(), "repo", "dvalin")
+	if err != nil {
+		t.Fatalf("AgentDirective: %v", err)
+	}
+	if !strings.Contains(dir, "td-abc123") {
+		t.Errorf("directive = %q, want the task claimed — the model already matches", dir)
+	}
+	if len(deps.modelSet) != 0 {
+		t.Errorf("modelSet = %v, want none — the model already matches", deps.modelSet)
 	}
 }

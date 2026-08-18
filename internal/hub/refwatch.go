@@ -114,21 +114,15 @@ func (r *refwatch) preflight(projects []store.Project) {
 			r.h.wf.CheckOpenPRs(p.Tag)
 			r.h.wf.RepairReviewRows(p.Tag)
 			r.h.wf.AssignPendingReviews(p.Tag) // after the repair: a row it just wrote is claimable now
-			// Before nothing else in particular, but off the agent's own request: the clear
-			// interrupts the session, so it must not land on an agent mid-command (-> FireArmedClears).
+			// A clear is armed regardless of whether any assignment ever triggers it, so an agent
+			// that never asks again still needs a backstop — unlike compact and model-select, which
+			// the gate now fires inline the moment it has an assignment to prepare for, this has no
+			// such trigger to lean on (-> workflow.Engine.claimNext, agent.Service.FireClear).
 			r.h.agents.FireArmedClears(p.Tag)
-			// Same hazard, same remedy: a compaction due is decided at the assignment gate but fired
-			// here, off-tick, so it never lands on an agent mid-command either. Lives on wf, not
-			// agents, unlike the clear above: deciding WHO is due needs task/review awareness this
-			// sweep alone has (-> workflow.Engine.FireDueCompactions).
-			r.h.wf.FireDueCompactions(p.Tag)
 			// Idleness alone reclaims a pod, and waiting work wakes one back up — both read the fleet
 			// rather than any one agent's request, so both belong on this same sweep.
 			r.h.agents.FireIdleStops(p.Tag)
 			r.h.agents.FireIdleStarts(p.Tag)
-			// Same hazard as compaction, same remedy: the gate withholds and this fires the model
-			// change off-tick, since it compacts and restarts the worker (-> FireDueRetiers).
-			r.h.wf.FireDueRetiers(p.Tag)
 		}
 	}()
 }

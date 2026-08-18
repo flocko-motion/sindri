@@ -1,8 +1,8 @@
 // package: hub/agent / compact
 // type:    logic (automatic context compaction)
 // job:     fire Claude Code's own /compact into an agent's session at a leaf boundary, keeping a
-// summary and dropping the transcript — the workflow engine decides when and for whom
-// (-> workflow.Engine.FireDueCompactions), this only performs it and logs what it fired on.
+// summary and dropping the transcript — the workflow engine's assignment gate decides when
+// and for whom (-> workflow.Engine.claimNext), this only performs it and logs what it fired on.
 // limits:  the session only; it never touches the pod, worktree, or queue. Never mid-task, and
 // never off the agent's own request — same hazard and same remedy as clear (-> FireArmedClears).
 package agent

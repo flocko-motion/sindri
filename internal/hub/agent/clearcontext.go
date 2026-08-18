@@ -50,7 +50,7 @@ func (s *Service) SetClearArmed(project, name string, armed bool) error {
 		s.deps.Notify()
 		return nil
 	}
-	if err := s.fireClear(project, name); err != nil {
+	if err := s.FireClear(project, name); err != nil {
 		// This call said "clears now" and could not. Undo the arming rather than leave a durable
 		// flag behind an error the user reads as "nothing happened" — one that would also withhold
 		// the agent from work. A failure in the SWEEP is the opposite case: the arming was set
@@ -104,17 +104,17 @@ func (s *Service) FireArmedClears(project string) {
 		if err != nil || !at {
 			continue
 		}
-		if err := s.fireClear(project, a.Name); err != nil {
+		if err := s.FireClear(project, a.Name); err != nil {
 			fmt.Fprintf(os.Stderr, "hub: clearing %s's context: %v\n", a.Name, err)
 		}
 	}
 }
 
-// fireClear sends /clear into name's live session, then re-serves its directive so it picks up where
+// FireClear sends /clear into name's live session, then re-serves its directive so it picks up where
 // it would after a fresh launch (D13) — same session, empty context. The arming is spent before the
 // injection, so an inject that fails loses it (the log line is the trace): one left standing would
 // fire again at every boundary, which is the worse hazard.
-func (s *Service) fireClear(project, name string) error {
+func (s *Service) FireClear(project, name string) error {
 	ps := s.store.For(project)
 	at, err := s.AtLeafBoundary(project, name)
 	if err != nil {

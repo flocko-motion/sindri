@@ -2,7 +2,7 @@
 // type:    logic (idle reclaim, and waking a stopped agent on demand)
 // job:     stop an agent idle past IdleStopThreshold, reclaiming its pod; start a stopped one
 // back up once its OWN kind of work is waiting and nothing else would take it. Off the
-// hub's tick, like FireDueCompactions/FireArmedClears: the fleet acted on unasked, not a request.
+// hub's tick, like FireArmedClears: the fleet acted on unasked, not a request.
 // limits:  the sweep and an in-memory "how long idle" record, lost on restart like
 // stallwatch's own; claimable work is OpenLeaves/OpenContainers/UnclaimedReview, the gate's own queries.
 package agent

@@ -95,8 +95,11 @@ type Deps interface {
 	// running, since the session belongs to its old model and cannot cross onto the new one.
 	SetModel(project, name, model string) error
 	// Compact fires Claude Code's own /compact into an agent's live session at a leaf boundary —
-	// FireDueCompactions' decision, this only performs it.
+	// the gate's decision, this only performs it.
 	Compact(project, name string) error
+	// FireClear fires Claude Code's own /clear into an agent's live session at a leaf boundary and
+	// re-serves its directive once the reset settles — the gate's decision, this only performs it.
+	FireClear(project, name string) error
 	// HoldsNothing reports whether an agent holds nothing the hub can see: no leaf task, no held
 	// feature, no review owed, no open escalation, nobody dialed in.
 	HoldsNothing(project, name, role string) (bool, error)
@@ -108,6 +111,17 @@ type Deps interface {
 func (e *Engine) clearArmed(project, name string) bool {
 	a, ok, err := e.store.For(project).GetAgent(name)
 	return err == nil && ok && a.ClearArmed
+}
+
+// fireClearIfArmed fires an armed clear right now, whether or not there is anything to hand over
+// after it — unlike compact and model-select, which only ever apply ahead of one specific
+// assignment, a clear is a direct request to wipe at the next boundary regardless of what (if
+// anything) follows it. Every gate path checks this first, so asking IS the trigger.
+func (e *Engine) fireClearIfArmed(project, name string) (fired bool, err error) {
+	if !e.clearArmed(project, name) {
+		return false, nil
+	}
+	return true, e.deps.FireClear(project, name)
 }
 
 // Engine is the workflow orchestrator: it owns the store and drives the lifecycle
