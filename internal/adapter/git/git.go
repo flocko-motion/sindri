@@ -589,13 +589,41 @@ func RestoreFromHEAD(dir string, paths []string) error {
 
 // RestoreFromRef puts paths back to ref's content and stages that, so it lands as a commit and so
 // leaves the agent's change. This is how churn in files a task never needed drops OUT of a PR —
-// reverting committed work, which restoring from HEAD cannot do.
+// reverting committed work, which restoring from HEAD cannot do. A no-op checkout still exits 0, so
+// a caller that needs to know whether anything moved checks MatchesRef first.
 func RestoreFromRef(dir, ref string, paths []string) error {
 	args := append([]string{"-C", dir, "checkout", ref, "--"}, paths...)
 	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
 		return fmt.Errorf("restore from %s: %s: %w", ref, strings.TrimSpace(string(out)), err)
 	}
 	return nil
+}
+
+// MatchesRef reports whether paths already hold ref's content — nothing left for RestoreFromRef to
+// change. `git diff --quiet` exits 1 for a real difference and non-1 for a genuine failure, which is
+// the only case worth returning as an error.
+func MatchesRef(dir, ref string, paths []string) (bool, error) {
+	args := append([]string{"-C", dir, "diff", "--quiet", ref, "--"}, paths...)
+	err := exec.Command("git", args...).Run()
+	if err == nil {
+		return true, nil
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && ee.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("git diff --quiet %s in %s: %w", ref, dir, err)
+}
+
+// MergeBase returns where dir's branch and ref last agreed — the point a rebase treats as "mine
+// started here", and the one target that lets a revert and a since-then diff agree on what "since"
+// means even after ref has moved on independently.
+func MergeBase(dir, ref, branch string) (string, error) {
+	out, err := exec.Command("git", "-C", dir, "merge-base", ref, branch).Output()
+	if err != nil {
+		return "", fmt.Errorf("git merge-base %s %s in %s: %s", ref, branch, dir, gitError(err))
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // BlockingLocalChanges returns the tracked files a merge of branch would overwrite: working-tree

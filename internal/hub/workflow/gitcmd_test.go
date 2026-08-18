@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -241,5 +242,199 @@ func TestGitIncomingShowsWhatMoved(t *testing.T) {
 	out, _ = gitVerb(t, e, c, "history")
 	if !strings.Contains(out, "feature plus churn") {
 		t.Errorf("`git history` should list the agent's own recorded work, got %q", out)
+	}
+}
+
+// TestGitDropSaysSoWhenNothingMoved is defect A: neither step gitDrop takes can fail on a no-op
+// (checkout exits 0 when the paths already match; CommitAll is a no-op with nothing staged), so the
+// unconditional success line was a claim about work that was never done.
+func TestGitDropSaysSoWhenNothingMoved(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+	root := t.TempDir()
+	run := func(dir string, args ...string) {
+		t.Helper()
+		if out, e := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); e != nil {
+			t.Fatalf("git -C %s %v: %s", dir, args, out)
+		}
+	}
+	run(root, "init", "-q", "-b", "main")
+	run(root, "config", "user.email", "t@t")
+	run(root, "config", "user.name", "t")
+	// steady.go is never touched by anyone — the one path that already matches wherever a branch and
+	// the reference last agreed, which is exactly what a no-op drop should find.
+	if e := os.WriteFile(filepath.Join(root, "steady.go"), []byte("package p // never touched\n"), 0o644); e != nil {
+		t.Fatal(e)
+	}
+	run(root, "add", "-A")
+	run(root, "commit", "-qm", "base")
+
+	wt := filepath.Join(root, ".worktrees", "eitri")
+	run(root, "worktree", "add", "-q", "-b", "work", wt)
+	// Real work on a different file, so the branch is not empty — a drop on steady.go must leave it.
+	if e := os.WriteFile(filepath.Join(wt, "feature.go"), []byte("package p\n\nfunc Feature() {}\n"), 0o644); e != nil {
+		t.Fatal(e)
+	}
+	run(wt, "add", "-A")
+	run(wt, "commit", "-qm", "feature")
+
+	if err := st.RegisterProject("proj", root); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	ps := st.For("proj")
+	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker", Workspace: ".worktrees/eitri"}); err != nil {
+		t.Fatalf("put agent: %v", err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Branch: "work", Phase: "working"}); err != nil {
+		t.Fatalf("set state: %v", err)
+	}
+	e := New(st, &stubDeps{root: root})
+	c := registry.Caller{Project: "proj", Agent: "eitri", Role: "worker"}
+	before := gitLog(t, wt)
+
+	out, code := gitVerb(t, e, c, "drop", "steady.go")
+	if code != 0 {
+		t.Fatalf("`git drop` on an already-matching path should still succeed, got code=%d out=%q", code, out)
+	}
+	for _, want := range []string{"already match", "nothing to drop", "nothing recorded"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("a no-op drop should say so plainly, got %q (missing %q)", out, want)
+		}
+	}
+	if strings.Contains(out, "Removed") {
+		t.Errorf("a no-op must not claim to have removed anything: %q", out)
+	}
+	if got := gitLog(t, wt); got != before {
+		t.Errorf("a no-op drop must not record a commit — log was %q, now %q", before, got)
+	}
+}
+
+// gitLog is the worktree's current commit history, short-form — used to assert that a no-op drop
+// records nothing, since HasChanges alone cannot tell "nothing to commit" from "never tried".
+func gitLog(t *testing.T, wt string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", wt, "log", "--format=%h").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git log: %s", out)
+	}
+	return string(out)
+}
+
+// TestGitDropAgreesWithChangeEvenAsTheReferenceAdvances is defect B, reproducing the exact report:
+// the agent's branch bumps a file to content the reference branch LATER bumps to as well,
+// independently. Dropping against the reference's current TIP would then be a no-op (the file
+// already matches there) while `change`'s three-dot diff — merge-base, not tip — still shows it.
+// Dropping against the merge-base instead keeps the two answers talking about the same commit.
+func TestGitDropAgreesWithChangeEvenAsTheReferenceAdvances(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+	root := t.TempDir()
+	run := func(dir string, args ...string) {
+		t.Helper()
+		if out, e := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); e != nil {
+			t.Fatalf("git -C %s %v: %s", dir, args, out)
+		}
+	}
+	run(root, "init", "-q", "-b", "main")
+	run(root, "config", "user.email", "t@t")
+	run(root, "config", "user.name", "t")
+	if e := os.WriteFile(filepath.Join(root, "go.mod"), []byte("v1\n"), 0o644); e != nil {
+		t.Fatal(e)
+	}
+	run(root, "add", "-A")
+	run(root, "commit", "-qm", "base")
+
+	wt := filepath.Join(root, ".worktrees", "eitri")
+	run(root, "worktree", "add", "-q", "-b", "work", wt)
+
+	// The agent bumps go.mod on its own branch, unrelated to its actual task.
+	if e := os.WriteFile(filepath.Join(wt, "go.mod"), []byte("v2\n"), 0o644); e != nil {
+		t.Fatal(e)
+	}
+	run(wt, "add", "-A")
+	run(wt, "commit", "-qm", "bump (churn)")
+
+	// The reference branch ALSO advances to v2, independently, after the agent forked — the case
+	// that made the first bug report's checkout a no-op.
+	if e := os.WriteFile(filepath.Join(root, "go.mod"), []byte("v2\n"), 0o644); e != nil {
+		t.Fatal(e)
+	}
+	run(root, "commit", "-aqm", "upstream also bumped")
+
+	if err := st.RegisterProject("proj", root); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	ps := st.For("proj")
+	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker", Workspace: ".worktrees/eitri"}); err != nil {
+		t.Fatalf("put agent: %v", err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Branch: "work", Phase: "working"}); err != nil {
+		t.Fatalf("set state: %v", err)
+	}
+	e := New(st, &stubDeps{root: root})
+	c := registry.Caller{Project: "proj", Agent: "eitri", Role: "worker"}
+
+	out, code := gitVerb(t, e, c, "change", "go.mod")
+	if code != 0 || !strings.Contains(out, "go.mod") {
+		t.Fatalf("`git change` should show go.mod diverging, got code=%d out=%q", code, out)
+	}
+
+	out, code = gitVerb(t, e, c, "drop", "go.mod")
+	if code != 0 {
+		t.Fatalf("`git drop` failed: code=%d out=%q", code, out)
+	}
+	if strings.Contains(out, "already match") {
+		t.Fatalf("dropping to the merge-base is a real change here (v2 -> v1) — must not read as a no-op: %q", out)
+	}
+	if b, err := os.ReadFile(filepath.Join(wt, "go.mod")); err != nil || string(b) != "v1\n" {
+		t.Fatalf("go.mod = %q (err %v), want the merge-base's content (v1), not the reference's current tip (v2)", b, err)
+	}
+
+	out, code = gitVerb(t, e, c, "change", "go.mod")
+	if code != 0 {
+		t.Fatalf("`git change` after drop: code=%d out=%q", code, out)
+	}
+	// "No whole change ... in go.mod" (scopeNote) is the answer wanted; anything with a diff hunk in
+	// it means change still measured the file as part of the branch's introduced content.
+	if !strings.HasPrefix(out, "No ") {
+		t.Errorf("`git drop` reported success but `git change` still shows go.mod — the two disagreed: %q", out)
+	}
+}
+
+// TestBaseBranchWarnsOnceAboutAnUnconfiguredReference is defect C: with no `reference:` set, every
+// agent measures against whatever the human happens to have checked out in the main working copy,
+// silently. That deserves at least a warning, logged once per repo rather than on every call —
+// baseBranch runs on nearly every git/PR verb, and a line per call would drown out everything else.
+func TestBaseBranchWarnsOnceAboutAnUnconfiguredReference(t *testing.T) {
+	e, _, _, root := gitEngine(t)
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stderr
+	os.Stderr = w
+
+	if _, err := e.baseBranch(root); err != nil {
+		t.Fatalf("baseBranch: %v", err)
+	}
+	if _, err := e.baseBranch(root); err != nil {
+		t.Fatalf("baseBranch (second call): %v", err)
+	}
+	w.Close()
+	os.Stderr = orig
+	out, _ := io.ReadAll(r)
+
+	if got := strings.Count(string(out), "no `reference:` configured"); got != 1 {
+		t.Errorf("warned %d time(s) across two calls, want exactly 1 (deduped by repo root): %q", got, out)
+	}
+	if !strings.Contains(string(out), root) {
+		t.Errorf("the warning should name which repo it's about, got %q", out)
 	}
 }

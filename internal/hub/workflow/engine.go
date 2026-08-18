@@ -97,16 +97,17 @@ func (e *Engine) clearArmed(project, name string) bool {
 type Engine struct {
 	store      *store.Store
 	deps       Deps
-	sources    []tasks.Source // external task sources, wired in at New; ownedSource is always added per-project
-	gates      []gate.Gate    // submit-path quality gates, wired in via WithGates; openspec today
-	pre        preflight      // serialises the reference-move PR checks (-> prcheck.go)
-	runCancels runCancelSet   // run ids killed mid-execution (-> execrun.go)
+	sources    []tasks.Source  // external task sources, wired in at New; ownedSource is always added per-project
+	gates      []gate.Gate     // submit-path quality gates, wired in via WithGates; openspec today
+	pre        preflight       // serialises the reference-move PR checks (-> prcheck.go)
+	runCancels runCancelSet    // run ids killed mid-execution (-> execrun.go)
+	refWarn    refFallbackWarn // which repo roots have already been warned about an unconfigured reference (-> pr.go)
 }
 
 // New builds the workflow engine over the hub's store, its Deps implementation, and the external
 // task sources the composition root wires in (github, openspec, ...) — the engine never names them.
 func New(st *store.Store, deps Deps, sources ...tasks.Source) *Engine {
-	return &Engine{store: st, deps: deps, sources: sources, pre: preflight{seen: map[string]string{}}}
+	return &Engine{store: st, deps: deps, sources: sources, pre: preflight{seen: map[string]string{}}, refWarn: refFallbackWarn{seen: map[string]bool{}}}
 }
 
 // WithGates installs the submit path's quality gates — openspec validation today, the built-in

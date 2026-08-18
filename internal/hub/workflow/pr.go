@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/api"
@@ -23,6 +24,13 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
+// refFallbackWarn remembers which repo roots have already been warned about the unconfigured-
+// reference fallback below, so a call on every submit does not spam the log with the same finding.
+type refFallbackWarn struct {
+	mu   sync.Mutex
+	seen map[string]bool
+}
+
 // baseBranch is the branch agents work against: the configured `reference:`, else the main
 // checkout's current branch. Configured-but-absent is fatal — every claim/submit/merge needs it.
 func (e *Engine) baseBranch(root string) (string, error) {
@@ -31,12 +39,33 @@ func (e *Engine) baseBranch(root string) (string, error) {
 		return "", err
 	}
 	if cfg.Reference == "" {
-		return git.CurrentBranch(root)
+		branch, err := git.CurrentBranch(root)
+		if err != nil {
+			return "", err
+		}
+		e.warnUnconfiguredReference(root, branch)
+		return branch, nil
 	}
 	if !git.BranchExists(root, cfg.Reference) {
 		return "", fmt.Errorf("the configured reference branch %q doesn't exist in %s — create it or fix `reference:` in .sindri/config.yaml", cfg.Reference, root)
 	}
 	return cfg.Reference, nil
+}
+
+// warnUnconfiguredReference logs, once per root, that every agent's reference is whatever a human
+// happens to have checked out in the main working copy — a fallback that moves silently the moment
+// they switch branches there, with nothing on the board to say so.
+func (e *Engine) warnUnconfiguredReference(root, branch string) {
+	e.refWarn.mu.Lock()
+	defer e.refWarn.mu.Unlock()
+	if e.refWarn.seen[root] {
+		return
+	}
+	if e.refWarn.seen == nil {
+		e.refWarn.seen = map[string]bool{}
+	}
+	e.refWarn.seen[root] = true
+	fmt.Fprintf(os.Stderr, "hub: %s has no `reference:` configured — every agent measures against %q, whatever is checked out there right now; set `reference:` in .sindri/config.yaml to pin it.\n", root, branch)
 }
 
 // FleetPRs is fleet-wide, so `pr list` matches the TUI regardless of the caller's cwd.

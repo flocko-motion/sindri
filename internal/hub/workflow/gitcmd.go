@@ -206,9 +206,16 @@ func (e *Engine) gitRestore(c registry.Caller, wt string, paths []string, out io
 	return 0, nil
 }
 
-// gitDrop takes paths out of the agent's change for good: back to the reference branch's content and
-// committed, since a restoration left uncommitted would keep the churn in the PR. This is what
-// "drop those files, feature only" needs — reverting COMMITTED work, which a restore cannot do.
+// gitDrop takes paths out of the agent's change for good: back to where the branch and the
+// reference last agreed, and committed, since a restoration left uncommitted would keep the churn
+// in the PR. This is what "drop those files, feature only" needs — reverting COMMITTED work, which
+// a restore cannot do.
+//
+// The target is the MERGE-BASE, not the reference's current tip: `git change` measures the whole
+// change with a three-dot diff against that same merge-base, so dropping against anything else can
+// leave drop reporting success while change still shows the file — true of two different commits,
+// read as one lying about the other. Checked before touching anything, since checkout and commit
+// both succeed on a no-op just as they do on a real change, and a no-op is not a failure to hide.
 func (e *Engine) gitDrop(c registry.Caller, wt, root string, paths []string, out io.Writer) (int, error) {
 	if len(paths) == 0 {
 		fmt.Fprintln(out, "`git drop` needs the paths to remove from your change — it throws work away, so it never guesses. `sindri git change` shows what your change covers.")
@@ -218,7 +225,23 @@ func (e *Engine) gitDrop(c registry.Caller, wt, root string, paths []string, out
 	if err != nil {
 		return 1, err
 	}
-	if err := git.RestoreFromRef(wt, ref, paths); err != nil {
+	branch, err := git.CurrentBranch(wt)
+	if err != nil {
+		return 1, err
+	}
+	target, err := git.MergeBase(wt, ref, branch)
+	if err != nil {
+		return 1, err
+	}
+	matched, err := git.MatchesRef(wt, target, paths)
+	if err != nil {
+		return 1, err
+	}
+	if matched {
+		fmt.Fprintf(out, "%s already match %s exactly — nothing to drop, nothing recorded.\n", FileList(paths), refName)
+		return 0, nil
+	}
+	if err := git.RestoreFromRef(wt, target, paths); err != nil {
 		return 1, err
 	}
 	ps := e.store.For(c.Project)
@@ -232,7 +255,7 @@ func (e *Engine) gitDrop(c registry.Caller, wt, root string, paths []string, out
 	if err := git.CommitAll(wt, conventionalCommit(tk.Type, id, desc)); err != nil {
 		return 1, err
 	}
-	_ = ps.Log(c.Agent, "drop", strings.Join(paths, ", ")+" (restored to "+ref+")")
+	_ = ps.Log(c.Agent, "drop", strings.Join(paths, ", ")+" (restored to "+target+")")
 	fmt.Fprintf(out, "Removed %s from your change and recorded that, so those files now match %s exactly. Your work in every other file is untouched.\n", FileList(paths), refName)
 	return 0, nil
 }
