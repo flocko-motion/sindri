@@ -98,3 +98,39 @@ func TestCompactDueIgnoresAnUnknownWindow(t *testing.T) {
 		t.Error("a window of 0 must never read as past its own threshold")
 	}
 }
+
+// TestReviewerFillPastTheCompactionThresholdWithholdsTheNextReview: the same gate, for a reviewer
+// about to be handed a new PR rather than a worker about to be handed a new task.
+func TestReviewerFillPastTheCompactionThresholdWithholdsTheNextReview(t *testing.T) {
+	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
+	e, ps := reviewerWithUnclaimedReview(t, deps)
+
+	dir, err := e.AgentDirective(context.Background(), "repo", "rune")
+	if err != nil {
+		t.Fatalf("AgentDirective: %v", err)
+	}
+	if !strings.Contains(dir, "compact") {
+		t.Errorf("directive = %q, want it to say compaction is due", dir)
+	}
+	if held, _ := ps.ReviewingPR("rune"); held != "" {
+		t.Errorf("a reviewer over the compaction threshold was handed %q — it must stay unclaimed this cycle", held)
+	}
+}
+
+// TestReviewerFillUnderTheCompactionThresholdIsHandedAReview is the control: an ordinary claim under
+// threshold is untouched by the new gate.
+func TestReviewerFillUnderTheCompactionThresholdIsHandedAReview(t *testing.T) {
+	deps := &stubDeps{ctxTokens: 1_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
+	e, ps := reviewerWithUnclaimedReview(t, deps)
+
+	dir, err := e.AgentDirective(context.Background(), "repo", "rune")
+	if err != nil {
+		t.Fatalf("AgentDirective: %v", err)
+	}
+	if !strings.Contains(dir, "pr-1") {
+		t.Errorf("directive = %q, want the open review claimed", dir)
+	}
+	if held, _ := ps.ReviewingPR("rune"); held != "pr-1" {
+		t.Errorf("ReviewingPR = %q, want pr-1", held)
+	}
+}

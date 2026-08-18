@@ -207,6 +207,14 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 		_ = ps.SetState(store.AgentState{Agent: name, Phase: restPhase("reviewer")})
 		_ = e.deps.Deliver(project, name, MsgReviewCancelled(held), MailAndPush)
 	}
+	// Between reviews is a leaf boundary: the same clear/compact rule the worker gate follows
+	// before its next task (-> waitForNextTask), fired here before the next review is claimed.
+	if e.clearArmed(project, name) {
+		return DirClearPending, true, nil
+	}
+	if tokens, due := e.reviewerCompactDue(project, name); due {
+		return DirCompacting(tokens), true, nil
+	}
 	var id int64
 	var prID string
 	found, err := ps.UnclaimedReview(&id, &prID)
@@ -219,6 +227,19 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 	}
 	pr, _, _ := ps.GetPR(prID)
 	return DirReview(prID, pr.Task, e.taskTitle(project, pr.Task), pr.Agent, e.deps.ArchitectureDoc(project)), true, nil
+}
+
+// reviewerCompactDue is compactDue's question for a reviewer: fill past threshold, and an actual
+// unclaimed review waiting to prepare for.
+func (e *Engine) reviewerCompactDue(project, name string) (tokens int, due bool) {
+	tokens, window, _, ok := e.deps.ContextUsage(project, name)
+	if !ok || window <= 0 || tokens < e.deps.CompactionThreshold(window) {
+		return tokens, false
+	}
+	var id int64
+	var prID string
+	found, err := e.store.For(project).UnclaimedReview(&id, &prID)
+	return tokens, err == nil && found
 }
 
 // releaseReviewers closes every open review of a PR and frees whoever held one, telling them the PR

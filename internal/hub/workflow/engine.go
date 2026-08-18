@@ -94,6 +94,9 @@ type Deps interface {
 	// SetModel changes the model an agent runs on — compacting and relaunching it first if it is
 	// running, since the session belongs to its old model and cannot cross onto the new one.
 	SetModel(project, name, model string) error
+	// Compact fires Claude Code's own /compact into an agent's live session at a leaf boundary —
+	// FireDueCompactions' decision, this only performs it.
+	Compact(project, name string) error
 	// HoldsNothing reports whether an agent holds nothing the hub can see: no leaf task, no held
 	// feature, no review owed, no open escalation, nobody dialed in.
 	HoldsNothing(project, name, role string) (bool, error)

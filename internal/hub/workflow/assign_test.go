@@ -66,6 +66,16 @@ func TestNextUpTiebreaksTowardThePreferredTaskWithinPriorityOnly(t *testing.T) {
 	if got, _, ok := nextUp(nil, mixed, preferZ); !ok || got.ID != "td-crit" {
 		t.Fatalf("a preference must never reach past a higher priority: got %q, want td-crit", got.ID)
 	}
+
+	// The same rule ACROSS the two pools: each pool's own top slice is computed separately, so a
+	// preferred package at ITS pool's best priority must not beat a higher-priority leaf in the
+	// other pool, even though neither pool's slice alone shows the difference.
+	crossPackages := []store.Task{pkg("td-pkg", "P3")}
+	crossLeaves := []store.Task{pkg("td-crit2", "P0")}
+	preferPkg := func(t store.Task) bool { return t.ID == "td-pkg" }
+	if got, isPkg, ok := nextUp(crossPackages, crossLeaves, preferPkg); !ok || got.ID != "td-crit2" || isPkg {
+		t.Fatalf("a preference must never reach past a higher priority in the OTHER pool: got %q (package=%v), want td-crit2", got.ID, isPkg)
+	}
 }
 
 // TestAnIdleWorkerTakesTheCriticalTaskOverAMidPackage is the same rule through the real claim path,
@@ -88,6 +98,10 @@ func TestAnIdleWorkerTakesTheCriticalTaskOverAMidPackage(t *testing.T) {
 		t.Fatalf("put agent: %v", err)
 	}
 	for _, x := range []store.OwnedTask{
+		// Both untiered, defaulting to mid (-> api.TierOrDefault), which the stub below maps onto
+		// the model the worker is already running — so the preference is LIVE for both, not inert,
+		// which is what let the cross-pool bug through undetected: the old code returned on the
+		// FIRST hit in the package pool without ever comparing priority against the leaf pool.
 		{ID: "td-pkg", Title: "a mid package", Status: "open", Priority: "P2", Type: "epic"},
 		{ID: "td-kid", Title: "its subtask", Status: "open", Priority: "P2"},
 		{ID: "td-crit", Title: "a critical task", Status: "open", Priority: "P0"},
@@ -103,7 +117,16 @@ func TestAnIdleWorkerTakesTheCriticalTaskOverAMidPackage(t *testing.T) {
 		t.Fatalf("set state: %v", err)
 	}
 
-	e := New(st, &stubDeps{root: root})
+	e := New(st, &stubDeps{
+		root:         root,
+		currentModel: "claude-sonnet-5",
+		tierModels:   map[string]string{"mid": "claude-sonnet-5"},
+	})
+	// retierDue reads the synced cache, checked ahead of the claim path this test exercises — warm
+	// it now so that gate does not withhold on stale data taken before this seeding ever ran.
+	if err := e.SyncTasks("repo"); err != nil {
+		t.Fatalf("sync tasks: %v", err)
+	}
 	dir, err := e.AgentDirective(context.Background(), "repo", agent)
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)

@@ -45,7 +45,7 @@ func (s *Service) SetModel(project, name, model string) error {
 	if !s.AgentAlive(project, name) {
 		return nil // nothing live to compact; the next Launch starts on the new model
 	}
-	if err := s.compact(project, name); err != nil {
+	if err := s.Compact(project, name); err != nil {
 		return fmt.Errorf("compacting %s before its model change: %w", name, err)
 	}
 	return s.RestartAgent(project, name, io.Discard)

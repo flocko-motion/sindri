@@ -347,7 +347,7 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 					if e.clearArmed(project, name) {
 						return DirClearPending, true, nil
 					}
-					if tokens, due := e.compactDue(project, name); due {
+					if tokens, due := e.containerCompactDue(project, name, st.Container); due {
 						return DirCompacting(tokens), true, nil
 					}
 					if tier, due := e.containerRetierDue(project, name, st.Container); due {

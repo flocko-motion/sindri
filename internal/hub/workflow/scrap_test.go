@@ -44,6 +44,8 @@ type stubDeps struct {
 	modelSet     []string // "name=model" for every SetModel call, in order
 	setModelErr  error
 	holdsNothing bool
+	compacted    []string // agents Compact was called for, in order
+	compactErr   error
 }
 
 func (d *stubDeps) ProjectRoot(string) string                   { return d.root }
@@ -99,6 +101,11 @@ func (d *stubDeps) SetModel(_, name, model string) error {
 }
 
 func (d *stubDeps) HoldsNothing(_, _, _ string) (bool, error) { return d.holdsNothing, nil }
+
+func (d *stubDeps) Compact(_, name string) error {
+	d.compacted = append(d.compacted, name)
+	return d.compactErr
+}
 
 func (d *stubDeps) CompactionThreshold(int) int {
 	if d.compactThreshold == 0 {
