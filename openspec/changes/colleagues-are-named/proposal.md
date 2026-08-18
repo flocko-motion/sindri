@@ -20,12 +20,19 @@ and cannot go browsing the fleet.
   a review, a task, a feature, or nothing, with retirement said plainly since it decides whether to
   wait for someone. Scoped to the project by construction: the query is the planner's own roster,
   never the fleet's.
-- (Sibling subtasks of this feature add the reviewer's author-in-directive and the task views'
-  holder column; each checkpoints its own account of what changed.)
+- The review directive names the author: "Review pr-sd-1 — dwalin's work on task sd-1234", in the
+  sentence that says what to do rather than in a footnote. A record with no author reads as it did
+  before, since "'s work on" with nothing in front of it would be worse than the line it replaced.
+- (The remaining sibling subtask adds the holder to the task views.)
 
 ## Impact
 
-- Specs: `05-workflow` (a planner's view of its own staff).
-- Code: `internal/hub/commands.go` (the `staff` verb and its registry entry).
+- Specs: `05-workflow` (a planner's view of its own staff; the author in the review directive).
+- Code: `internal/hub/commands.go` (the `staff` verb and its registry entry),
+  `internal/hub/workflow/prompts.go` and `review.go` (the author in the review directive).
+- The follow-up the subtask anticipates — a reviewer asking the author instead of rejecting on a
+  guess — is NOT promised in the directive yet: agents can read mail but cannot send it, and a
+  comment on the task only wakes the board, not its holder. The sentence belongs with the verb that
+  makes it true (sd-2f38d9).
 - Not an address book: nothing here enumerates agents outside the caller's own project, and no verb
   that would is added.

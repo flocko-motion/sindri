@@ -102,7 +102,7 @@ func TestRunServicePointedAtOnlyWhenClaiming(t *testing.T) {
 	for _, s := range []string{
 		DirClaimed("td-1", "a task", "td-1", "ARCHITECTURE.md"),
 		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
-		DirReview("pr-td-1", "td-1", "a task", ""),
+		DirReview("pr-td-1", "td-1", "a task", "dwalin", ""),
 	} {
 		if !strings.Contains(s, "sindri run") {
 			t.Errorf("a claim-moment directive should point at the run service: %q", s)

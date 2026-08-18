@@ -366,9 +366,21 @@ const DirCoauthor = "You're a coauthor working directly with the user in the sha
 
 // DirReview is a reviewer's directive, and it NAMES the task: access nobody mentions is access
 // nobody uses, so a reviewer told only a PR id judges the diff against the architecture doc alone.
-func DirReview(prID, taskID, title, arch string) string {
-	return fmt.Sprintf("Review %s — task %s: %s\nThe PR branch is checked out fresh in /workspace — review it (or `sindri show %s`), run `sindri lint %s`, then `sindri approve %s` or `sindri reject %s \"<reason>\"`.\n%s%s%s",
-		prID, taskID, dash(title), prID, prID, prID, prID, ReviewIntent(taskID), ReviewArchitecture(arch), runPointer)
+func DirReview(prID, taskID, title, author, arch string) string {
+	return fmt.Sprintf("Review %s — %s\nThe PR branch is checked out fresh in /workspace — review it (or `sindri show %s`), run `sindri lint %s`, then `sindri approve %s` or `sindri reject %s \"<reason>\"`.\n%s%s%s",
+		prID, reviewSubject(taskID, title, author), prID, prID, prID, prID, ReviewIntent(taskID), ReviewArchitecture(arch), runPointer)
+}
+
+// reviewSubject names WHOSE work is under review, which is what turns "this PR" into "dwalin's work
+// on sd-1234". The author was reachable only by going looking (`sindri show <pr>` prints it), and
+// nothing suggested looking — so a reviewer wrote verdicts about nobody. An unknown author (an
+// older PR record) falls back to the bare task, since a sentence about "'s work" would be worse
+// than the one it replaced.
+func reviewSubject(taskID, title, author string) string {
+	if author == "" {
+		return fmt.Sprintf("task %s: %s", taskID, dash(title))
+	}
+	return fmt.Sprintf("%s's work on task %s: %s", author, taskID, dash(title))
 }
 
 // ReviewIntent points the reviewer at what the diff was FOR — including the comments, where a plan

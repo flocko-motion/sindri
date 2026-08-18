@@ -190,7 +190,7 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 			return "", false, err
 		}
 		if ok && pr.Status == "open" {
-			return DirReview(pr.ID, pr.Task, e.taskTitle(project, pr.Task), e.deps.ArchitectureDoc(project)), true, nil
+			return DirReview(pr.ID, pr.Task, e.taskTitle(project, pr.Task), pr.Agent, e.deps.ArchitectureDoc(project)), true, nil
 		}
 		// Settled while it was reading: a verdict on it now decides nothing, so the hold is released
 		// rather than left to produce one.
@@ -211,7 +211,7 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 		return "", false, err
 	}
 	pr, _, _ := ps.GetPR(prID)
-	return DirReview(prID, pr.Task, e.taskTitle(project, pr.Task), e.deps.ArchitectureDoc(project)), true, nil
+	return DirReview(prID, pr.Task, e.taskTitle(project, pr.Task), pr.Agent, e.deps.ArchitectureDoc(project)), true, nil
 }
 
 // releaseReviewers closes every open review of a PR and frees whoever held one, telling them the PR

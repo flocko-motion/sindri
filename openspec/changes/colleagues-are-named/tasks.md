@@ -13,7 +13,13 @@
 
 ## 2. The review directive names the worker (sd-37fd79)
 
-- [ ] (next subtask)
+- [x] 2.1 The directive's opening line names the author beside the task, at both call sites — the
+      fresh claim and the re-ask, the second being the easy one to leave behind.
+- [x] 2.2 An authorless record falls back to the previous wording rather than claiming an author.
+- [x] 2.3 Pinned on the wording and on the wiring: the directive the reviewer is actually handed
+      carries the PR's own author.
+- [x] 2.4 The "ask the author instead of rejecting" line is deliberately NOT added: there is no
+      send verb yet, and a comment does not reach the holder. It belongs with sd-2f38d9.
 
 ## 3. Task views name the agent holding the task (sd-4e4d5a)
 

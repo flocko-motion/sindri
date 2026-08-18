@@ -225,7 +225,7 @@ func TestStartupAdvice(t *testing.T) {
 // `sindri` directive = workflow.DirReview, and the injected = workflow.MsgReview) always tell the
 // reviewer to read the repo's ARCHITECTURE.md.
 func TestReviewInstructionsCarryArchitecture(t *testing.T) {
-	if !strings.Contains(workflow.DirReview("pr-1", "td-1", "a task title", "ARCHITECTURE.md"), "ARCHITECTURE.md") {
+	if !strings.Contains(workflow.DirReview("pr-1", "td-1", "a task title", "dwalin", "ARCHITECTURE.md"), "ARCHITECTURE.md") {
 		t.Errorf("workflow.DirReview must tell the reviewer to read the architecture doc")
 	}
 	if !strings.Contains(workflow.MsgReview("pr-1", "req", "br", "base", "ARCHITECTURE.md", true), "ARCHITECTURE.md") {
