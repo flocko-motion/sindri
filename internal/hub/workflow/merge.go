@@ -144,9 +144,24 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 	}
 	if partial {
 		if a, ok, _ := ps.GetAgent(pr.Agent); ok {
-			// Standing branch, squashed merge: reset rather than rebase, or the branch's own
-			// commits would replay against content base already holds. Nothing lost — identical.
-			_ = git.ResetBranchTo(filepath.Join(root, a.Workspace), pr.Base)
+			// Standing branch, squashed merge: reset (not rebase, see ResetOntoKeepingWork) onto the
+			// new base, keeping whatever the agent is mid-editing rather than discarding it.
+			wt := filepath.Join(root, a.Workspace)
+			conflicts, done, rerr := git.ResetOntoKeepingWork(wt, pr.Base)
+			switch {
+			case rerr != nil:
+				log.Printf("hub: %s: reset %s onto %s after %s: %v", pr.Agent, pr.Branch, pr.Base, prID, rerr)
+				_ = ps.LogPR(prID, "warning", "merged, but resetting "+pr.Agent+"'s branch onto "+pr.Base+" failed (needs a manual look): "+rerr.Error())
+			case !done:
+				cur, _ := ps.GetState(pr.Agent) // re-read: promoting to a feature above already moved it on
+				_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: cur.Task, Branch: pr.Branch, Container: cur.Container, Phase: "resolving"})
+				_ = ps.Log(pr.Agent, "resolve", prID+" merged, but reapplying uncommitted work onto "+pr.Base+" conflicts: "+strings.Join(conflicts, ", "))
+				_ = ps.LogPR(prID, "merged", "into "+pr.Base+"; reapplying "+pr.Agent+"'s uncommitted work conflicts")
+				_ = e.deps.Deliver(project, pr.Agent, MsgReapplyConflict(prID, pr.Base, conflicts), MailAndPush)
+				e.rebasePlanners(project, pr.Base)
+				e.deps.Notify()
+				return pr, nil
+			}
 		}
 		if onFeature {
 			_ = ps.Log(pr.Agent, "merged", prID+" (milestone)")

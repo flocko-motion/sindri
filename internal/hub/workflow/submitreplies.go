@@ -143,6 +143,12 @@ func ReplyAlreadyCurrent(base string) string {
 	return fmt.Sprintf("Your branch is already current with %s — nothing to resolve.", base)
 }
 
+// ReplyReapplyResolved answers `resolve` once a milestone's post-merge reapply conflict is
+// cleared. Unlike ReplyResolvedClean, nothing goes back to a reviewer — the merge already landed.
+func ReplyReapplyResolved() string {
+	return "Resolved. The merge already landed, so there's nothing to resubmit — run `sindri` to carry on."
+}
+
 // ReplyTaskProposed acknowledges a planner's proposed task, pending user approval.
 func ReplyTaskProposed(id, title string) string {
 	return fmt.Sprintf("Proposed %s: %s — awaiting the user's approval before any worker can pick it up.", id, title)

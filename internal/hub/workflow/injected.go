@@ -183,9 +183,16 @@ func MsgResolveNeeded(base string, files []string) string {
 }
 
 // MsgMilestoneMerged tells a feature worker its milestone merged and its branch was
-// rebased onto the new base.
+// reset onto the new base.
 func MsgMilestoneMerged(prID string) string {
-	return fmt.Sprintf("[hub] Milestone %s merged — your feature branch is rebased onto the new base. Run `sindri` to continue.", prID)
+	return fmt.Sprintf("[hub] Milestone %s merged — your feature branch is reset onto the new base. Run `sindri` to continue.", prID)
+}
+
+// MsgReapplyConflict tells a worker its PR merged (milestone or plain interim contribution), but
+// resetting its branch onto the new base couldn't reapply its own uncommitted work cleanly. Not
+// "resolve needed": nothing failed to merge, so unlike MsgResolveNeeded no review awaits it.
+func MsgReapplyConflict(prID, base string, files []string) string {
+	return fmt.Sprintf("[hub] %s merged, but your uncommitted work didn't reapply cleanly onto %s: %s. The conflicts are in your /workspace with <<<<<<< markers — edit each file to the intended result (remove the markers), then run `sindri resolve`. That resumes you — the merge already landed, so nothing goes up for review.", prID, base, FileList(files))
 }
 
 // MsgMilestoneRejected is the rejection a feature worker gets. It names the feature rather than the

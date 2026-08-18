@@ -238,3 +238,53 @@ func TestWorktreeAdd(t *testing.T) {
 		t.Fatalf("worktree add (reuse): %v", err)
 	}
 }
+
+// TestResetOntoKeepingWorkPreservesUncommittedContent is the ordinary case: a squash-merged
+// milestone's reset target has the same tree the branch already had, so an uncommitted tracked
+// edit and a brand new untracked file must both come through the move untouched.
+func TestResetOntoKeepingWorkPreservesUncommittedContent(t *testing.T) {
+	repo := newRepo(t)
+	mustWrite(t, repo, "f", "edited but uncommitted\n")
+	mustWrite(t, repo, "scratch.txt", "untracked\n")
+	conflicts, done, err := ResetOntoKeepingWork(repo, "HEAD")
+	if err != nil || !done || len(conflicts) != 0 {
+		t.Fatalf("ResetOntoKeepingWork(HEAD) = conflicts=%v done=%v err=%v, want a clean no-op", conflicts, done, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(repo, "f")); err != nil || string(got) != "edited but uncommitted\n" {
+		t.Errorf("tracked edit lost: got %q, err %v", got, err)
+	}
+	if _, err := os.ReadFile(filepath.Join(repo, "scratch.txt")); err != nil {
+		t.Errorf("untracked file lost: %v", err)
+	}
+}
+
+// TestResetOntoKeepingWorkRoutesAClashingReapply: when the reset target's tree genuinely differs
+// from the one the uncommitted edit was made against, reapplying it can conflict.
+// ResetOntoKeepingWork must not lose the edit — it leaves the shape a clashing
+// `rebase --autostash` does, for the caller to route through StashConflict/ResolveStashConflict.
+func TestResetOntoKeepingWorkRoutesAClashingReapply(t *testing.T) {
+	repo := newRepo(t)
+	def := strings.TrimSpace(gitOut(t, repo, "rev-parse", "--abbrev-ref", "HEAD"))
+	mustCommitOn(t, repo, def, "clash", "base\n")
+	gitOut(t, repo, "checkout", "-q", "-b", "other")
+	mustCommitOn(t, repo, "other", "clash", "changed on other\n")
+	gitOut(t, repo, "checkout", "-q", def)
+	mustWrite(t, repo, "clash", "changed uncommitted\n")
+
+	conflicts, done, err := ResetOntoKeepingWork(repo, "other")
+	if err != nil {
+		t.Fatalf("ResetOntoKeepingWork: unexpected error: %v", err)
+	}
+	if done {
+		t.Fatal("a genuinely clashing reapply must not report done")
+	}
+	if len(conflicts) != 1 || conflicts[0] != "clash" {
+		t.Errorf("conflicts = %v, want [clash]", conflicts)
+	}
+	if !StashConflict(repo) {
+		t.Error("a clashing reapply must leave the StashConflict shape for the resolve loop to find")
+	}
+	if got, err := os.ReadFile(filepath.Join(repo, "clash")); err != nil || !strings.Contains(string(got), "changed uncommitted") {
+		t.Errorf("the uncommitted edit must survive inside the conflict markers, got %q err %v", got, err)
+	}
+}

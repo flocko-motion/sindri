@@ -2,6 +2,8 @@ package workflow
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -64,6 +66,33 @@ func TestAPartialMilestoneKeepsTheWorkerOnTheFeature(t *testing.T) {
 	}
 	if owned, ok, _ := ps.OwnedTask("td-EPIC"); ok && owned.Status == "closed" {
 		t.Error("a partial milestone must not close the feature — its subtasks are not done")
+	}
+}
+
+// TestAPartialMilestoneKeepsUncommittedWorkAcrossTheReset guards the reset the milestone path uses
+// to bring a standing branch onto its new base: unlike ResetBranchTo (built to discard, for scrap),
+// it must carry the agent's own uncommitted edits and untracked scratch across the move rather
+// than wiping them along with the branch's stale pre-squash commits.
+func TestAPartialMilestoneKeepsUncommittedWorkAcrossTheReset(t *testing.T) {
+	e, ps, _, deps := featureWorker(t, true) // a subtask still open — the branch stays standing
+	wt := filepath.Join(deps.root, ".worktrees", "dain")
+	// featureWorker already left feature.txt sitting untracked; edit a TRACKED file too, uncommitted.
+	if err := os.WriteFile(filepath.Join(wt, "seed"), []byte("mid-edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutPR(store.PR{
+		ID: "pr-td-EPIC", Task: "td-EPIC", Agent: "dain", Branch: "td-EPIC", Base: "main", Status: "approved",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Merge("repo", "pr-td-EPIC"); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(wt, "seed")); err != nil || string(got) != "mid-edit\n" {
+		t.Errorf("uncommitted edit to a tracked file lost across the reset: got %q, err %v", got, err)
+	}
+	if _, err := os.ReadFile(filepath.Join(wt, "feature.txt")); err != nil {
+		t.Errorf("untracked scratch file lost across the reset: %v", err)
 	}
 }
 

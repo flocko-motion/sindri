@@ -228,6 +228,36 @@ func ResetBranchTo(dir, ref string) error {
 	return nil
 }
 
+// ResetOntoKeepingWork resets dir's branch to ref, keeping uncommitted work (tracked and
+// untracked) across the move by stashing then reapplying it rather than discarding it, as
+// ResetBranchTo does. A clashing reapply leaves the shape a clashing `rebase --autostash` does,
+// for the caller to route through StashConflict the same way.
+func ResetOntoKeepingWork(dir, ref string) (conflicts []string, done bool, err error) {
+	changed, err := HasChanges(dir)
+	if err != nil {
+		return nil, false, err
+	}
+	if changed {
+		if out, e := exec.Command("git", "-C", dir, "stash", "push", "-u", "-m", "autostash").CombinedOutput(); e != nil {
+			return nil, false, fmt.Errorf("stash uncommitted work in %s: %s: %w", dir, strings.TrimSpace(string(out)), e)
+		}
+	}
+	if out, e := exec.Command("git", "-C", dir, "reset", "--hard", ref).CombinedOutput(); e != nil {
+		return nil, false, fmt.Errorf("reset %s to %s: %s: %w", dir, ref, strings.TrimSpace(string(out)), e)
+	}
+	if !changed {
+		return nil, true, nil
+	}
+	out, e := gitEditless(dir, "stash", "pop")
+	if u := unmergedFiles(dir); len(u) > 0 {
+		return u, false, nil // left for the worker, same shape a clashing autostash leaves
+	}
+	if e != nil {
+		return nil, false, fmt.Errorf("reapply stashed work in %s: %s: %w", dir, strings.TrimSpace(out), e)
+	}
+	return nil, true, nil
+}
+
 // DetachHead detaches dir from its branch, freeing that branch for deletion elsewhere.
 func DetachHead(dir string) error {
 	if out, err := exec.Command("git", "-C", dir, "checkout", "--detach").CombinedOutput(); err != nil {
@@ -411,10 +441,10 @@ func markedFiles(dir string, files []string) []string {
 // marker is git's conflict start line, the one the workers are told to look for.
 const marker = "<<<<<<< "
 
-// dropSpentAutostash removes the stash entry `rebase --autostash` leaves behind when re-applying it
-// conflicted — once the resolution is staged that entry is spent, and left in place every later
-// rebase piles another one on. Only an entry git itself labelled "autostash" is dropped, never a
-// stash anything else made. Best-effort: a leaked entry is cruft, not a reason to fail the rebase.
+// dropSpentAutostash removes the stash entry a clashing reapply leaves behind — spent once the
+// resolution is staged, and left in place every later autostash piles another on. Matched by
+// SUFFIX: git's own `rebase --autostash` labels its entry bare "autostash"; ResetOntoKeepingWork's
+// manual stash comes back "On <branch>: autostash". Best-effort: a leaked entry is cruft.
 func dropSpentAutostash(dir string) {
 	out, err := exec.Command("git", "-C", dir, "stash", "list", "--format=%gd %gs").Output()
 	if err != nil {
@@ -423,7 +453,7 @@ func dropSpentAutostash(dir string) {
 	}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		ref, subject, ok := strings.Cut(strings.TrimSpace(line), " ")
-		if !ok || strings.TrimSpace(subject) != "autostash" {
+		if !ok || !strings.HasSuffix(strings.TrimSpace(subject), "autostash") {
 			continue
 		}
 		// Newest first, and dropping renumbers the rest — take this one and stop.
