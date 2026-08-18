@@ -13,7 +13,6 @@ import (
 	"net/http"
 
 	"github.com/flo-at/sindri/internal/config"
-	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/server"
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -35,6 +34,19 @@ func (d agentDeps) Rehydrate(project, name string)            { d.h.rehydrate(pr
 // not by us, so the honest answer until the next sweep is that nobody has measured it.
 func (d agentDeps) ForgetFill(project, name string) { d.h.watch.forgetFill(project, name) }
 
+// AgentUp and AgentClients read the watchdog's last observation, for the hub's own idle/clear ticks
+// (FireIdleStops, FireArmedClears): a probe per roster member per tick is what the watchdog exists
+// to spare, the same reason workflowDeps.AgentUp reads it rather than probing (below).
+func (d agentDeps) AgentUp(project, name string) bool {
+	l, ok := d.h.watch.get(project, name)
+	return ok && l.up
+}
+
+func (d agentDeps) AgentClients(project, name string) int {
+	l, _ := d.h.watch.get(project, name)
+	return l.clients
+}
+
 func (d agentDeps) ProjectConfig(project string) (config.Config, error) {
 	return d.h.projectConfig(project)
 }
@@ -48,8 +60,13 @@ func (c chatDelivery) Inject(project, name, text string) error {
 func (c chatDelivery) InjectWhenReady(project, name, text string) error {
 	return c.h.agents.InjectWhenReady(project, name, text)
 }
+
+// Running reads the watchdog's last observation, not a probe of its own — a chat broadcast checks
+// every roster member, and a fresh exec per member per broadcast is exactly the cost the watchdog
+// exists to spare (-> hub/watchdog.go).
 func (c chatDelivery) Running(project, name string) bool {
-	return container.Running(c.h.container(project, name))
+	l, ok := c.h.watch.get(project, name)
+	return ok && l.up
 }
 func (c chatDelivery) Notify() { c.h.notify() }
 
@@ -114,10 +131,6 @@ func (d workflowDeps) Interrupt(project, name string) error {
 
 func (d workflowDeps) AgentAlive(project, name string) bool {
 	return d.h.agents.AgentAlive(project, name)
-}
-
-func (d workflowDeps) SessionAlive(project, name string) bool {
-	return d.h.agents.SessionAlive(project, name)
 }
 
 // AgentIdle reads the watchdog's last observation rather than probing: the sweep classifies every

@@ -18,7 +18,6 @@ import (
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/config"
-	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/repo"
@@ -325,7 +324,10 @@ func (h *Hub) AgentExec(project, name string, args []string, out io.Writer) (int
 }
 
 func (h *Hub) cmdStatus(c registry.Caller, _ []string, out io.Writer) (int, error) {
-	running := container.Running(h.container(c.Project, c.Agent))
+	// The watchdog's observation, not a probe — but no reading yet is not "down": the caller is
+	// running this from inside its own pod, so only a CONFIRMED-down reading says otherwise.
+	l, ok := h.watch.get(c.Project, c.Agent)
+	running := !ok || l.up
 	fmt.Fprintf(out, "agent:   %s\nrole:    %s\nrunning: %v\n", c.Agent, c.Role, running)
 	return 0, nil
 }

@@ -48,7 +48,7 @@ func (s *Service) HoldsNothing(project, name, role string) (bool, error) {
 	if reviewing != "" {
 		return false, nil
 	}
-	if clients, err := s.Clients(project, name); err == nil && len(clients) > 0 {
+	if s.deps.AgentClients(project, name) > 0 {
 		return false, nil // a human is dialed in; whatever they are doing, it is not the hub's to end
 	}
 	return true, nil
@@ -69,7 +69,7 @@ func (s *Service) FireIdleStops(project string) {
 			forgetIdleSince(key)
 			continue
 		}
-		if !s.AgentAlive(project, a.Name) {
+		if !s.deps.AgentUp(project, a.Name) {
 			continue // nothing running to reclaim
 		}
 		empty, err := s.HoldsNothing(project, a.Name, a.Role)
@@ -159,7 +159,7 @@ func (s *Service) wakeStoppedForRole(project string, roster []store.Agent, role,
 			}
 			continue
 		}
-		if s.AgentAlive(project, a.Name) {
+		if s.deps.AgentUp(project, a.Name) {
 			if empty, _ := s.HoldsNothing(project, a.Name, a.Role); empty {
 				return
 			}

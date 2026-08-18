@@ -15,7 +15,6 @@ import (
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/config"
-	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/tools/paths"
 )
@@ -301,7 +300,10 @@ func (e *Engine) freeReviewer(project string) (string, error) {
 		return "", fmt.Errorf("load roster for %s: %w", project, err)
 	}
 	for _, a := range roster {
-		if !reviewerAssignable(a) || !container.Running(e.deps.Container(project, a.Name)) || !e.deps.SessionAlive(project, a.Name) {
+		// The watchdog's standing observation, not a probe of our own — this runs off
+		// RepairReviewRows' tick, once per open PR, and a fresh exec per row is what saturated
+		// the runtime the observer now exists to prevent (-> hub/watchdog.go).
+		if !reviewerAssignable(a) || !e.deps.AgentUp(project, a.Name) {
 			continue
 		}
 		held, err := ps.ReviewingPR(a.Name)

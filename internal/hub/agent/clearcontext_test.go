@@ -21,6 +21,11 @@ func (clearTestDeps) RefreshTask(_, _ string) error               { return nil }
 func (clearTestDeps) Rehydrate(_, _ string)                       {}
 func (clearTestDeps) ForgetFill(_, _ string)                      {}
 
+// AgentUp: no watchdog here, so no reading ever says up — matching the "no container wired" liveness
+// these tests already relied on.
+func (clearTestDeps) AgentUp(_, _ string) bool     { return false }
+func (clearTestDeps) AgentClients(_, _ string) int { return 0 }
+
 // armedFlag is the arming as the STORE holds it — what survives a hub restart, so it is read back
 // rather than remembered from the call that set it.
 func armedFlag(t *testing.T, ps *store.ProjectStore, name string) bool {

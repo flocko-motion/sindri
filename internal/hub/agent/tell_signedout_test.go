@@ -80,6 +80,11 @@ func (tellDeps) RefreshTask(_, _ string) error               { return nil }
 func (tellDeps) Rehydrate(_, _ string)                       {}
 func (tellDeps) ForgetFill(_, _ string)                      {}
 
+// AgentUp mirrors fakeRuntime's always-up container, so the idle/clear sweeps this fixture backs
+// see the same liveness AgentAlive would have probed. AgentClients: no test here dials in a human.
+func (tellDeps) AgentUp(_, _ string) bool     { return true }
+func (tellDeps) AgentClients(_, _ string) int { return 0 }
+
 // paneReader is a coding-agent backend that reads the one banner these cases turn on. The port
 // defaults to a no-op that classifies nothing, and what the real classifier makes of a screen is
 // its own package's business (-> adapter/agent/claude); here the question is what the hub does with

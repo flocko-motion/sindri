@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -86,13 +87,10 @@ func TestArmedClearOutranksFullness(t *testing.T) {
 	}
 }
 
-// TestAnArmedReviewerIsNotHandedThenextPR closes the door the sweep's gate left open: reviews are
+// TestAnArmedReviewerIsNotHandedTheNextPR closes the door the sweep's gate left open: reviews are
 // handed out by freeReviewer on the request path (RequestReview, whenever a worker submits), not
 // only by the tick. Ungated there, a busy repo defers the arming for ever, and an assignment can
 // land between the fire's boundary check and the /clear — clearing a reviewer mid-review.
-//
-// The row half of the rule is what is asserted: liveness needs a live container runtime, so
-// freeReviewer itself cannot be driven here without one.
 func TestAnArmedReviewerIsNotHandedTheNextPR(t *testing.T) {
 	armed := store.Agent{Name: "fili", Role: "reviewer", ClearArmed: true}
 	if reviewerAssignable(armed) {
@@ -105,6 +103,42 @@ func TestAnArmedReviewerIsNotHandedTheNextPR(t *testing.T) {
 	}
 	if reviewerAssignable(store.Agent{Name: "dvalin", Role: "worker"}) {
 		t.Error("only reviewers review")
+	}
+}
+
+// TestAnArmedReviewerIsNotHandedTheNextPRThroughRequestReview is the row half the test above could
+// not exercise: freeReviewer's liveness check now reads AgentUp — the watchdog's standing
+// observation — rather than a live container.Running + SessionAlive probe, so a stub can state it
+// directly and drive the request path end to end, no container runtime required.
+func TestAnArmedReviewerIsNotHandedTheNextPRThroughRequestReview(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	root := t.TempDir()
+	if err := st.RegisterProject("repo", root); err != nil {
+		t.Fatal(err)
+	}
+	ps := st.For("repo")
+	if err := ps.PutAgent(store.Agent{Name: "fili", Role: "reviewer", Workspace: ".worktrees/fili", ClearArmed: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutAgent(store.Agent{Name: "nori", Role: "reviewer", Workspace: ".worktrees/nori"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutPR(store.PR{ID: "pr-c", Task: "td-c", Agent: "bombur", Branch: "pr-c", Base: "main", Status: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	e := New(st, &stubDeps{root: root, alive: true})
+	if err := e.RequestReview("repo", "pr-c", ""); err != nil {
+		t.Fatalf("RequestReview: %v", err)
+	}
+	if holder, _ := ps.ReviewingPR("nori"); holder != "pr-c" {
+		t.Errorf("nori is free and up — it should hold pr-c, got %q", holder)
+	}
+	if holder, _ := ps.ReviewingPR("fili"); holder != "" {
+		t.Errorf("fili is armed for a clear and must not be handed a review, got %q", holder)
 	}
 }
 

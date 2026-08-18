@@ -124,7 +124,7 @@ func (s *Service) FireClear(project, name string) error {
 		st, _ := ps.GetState(name)
 		return fmt.Errorf("%s still holds %s — clearing only applies at a leaf boundary", name, dashOrTask(st))
 	}
-	if !s.AgentAlive(project, name) {
+	if !s.deps.AgentUp(project, name) {
 		return fmt.Errorf("agent %q is not running", name)
 	}
 	if err := s.setArmed(project, name, false); err != nil {

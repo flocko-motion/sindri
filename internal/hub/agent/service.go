@@ -33,6 +33,11 @@ type Deps interface {
 	// sample rather than this package's memo, so a reading invalidated here is invalidated there too
 	// — one of the two left standing is the stale figure reappearing on whichever half still reads it.
 	ForgetFill(project, name string)
+	// AgentUp is the watchdog's last liveness reading — what the hub's idle/clear ticks read instead
+	// of AgentAlive, sparing a probe per roster member per tick.
+	AgentUp(project, name string) bool
+	// AgentClients is the watchdog's last dialed-in count, for the same reason.
+	AgentClients(project, name string) int
 }
 
 // Service is the agent-management module: identity (naming), auth (tokens), memory

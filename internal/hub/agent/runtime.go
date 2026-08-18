@@ -27,9 +27,8 @@ import (
 // probeTimeout bounds each probe: a container that can't answer reads "down", it doesn't stall.
 const probeTimeout = 3 * time.Second
 
-// ClientView is one dial-in on an agent's tmux session; orphaned attaches show up here too.
-// It crosses the wire, so it is internal/api.ClientView under the name every existing
-// caller here already uses.
+// ClientView is one dial-in on an agent's tmux session; orphaned attaches show up here too. It
+// crosses the wire, so it is internal/api.ClientView under the name every existing caller uses.
 type ClientView = api.ClientView
 
 // runtimeTTL: a stale runtime label costs nothing, a capture-pane spawn per board read does
@@ -37,8 +36,7 @@ type ClientView = api.ClientView
 const runtimeTTL = 2 * time.Second
 
 // Observation is one look at an agent's pane: what the text says, and a digest of the whole screen.
-// Both come from ONE capture — the digest is what tells activity from stillness, and taking it
-// separately would double the exec cost of every sweep.
+// Both come from ONE capture — taking them separately would double the exec cost of every sweep.
 type Observation struct {
 	Runtime string // "working" | "blocked" | "idle" | "signed-out" | "" when the capture failed
 	Digest  string // "" when the capture failed, so a lost probe never reads as "nothing changed"
@@ -81,9 +79,8 @@ func (s *Service) Observe(ctx context.Context, project, name string) Observation
 	return obs
 }
 
-// contextTTL: the transcript grows with every turn, not every board read, so a read straight off
-// disk per request buys nothing over a short memo (same reasoning as runtimeTTL, longer window
-// because a session file changes far less often than the tmux pane does).
+// contextTTL: the transcript grows with every turn, not every board read (same reasoning as
+// runtimeTTL, longer window since a session file changes far less often than the tmux pane).
 const contextTTL = 15 * time.Second
 
 // contextSample is one reading: what the session carries, the window it has to fill, and the model
@@ -101,8 +98,7 @@ var contextMemo struct {
 }
 
 // ContextUsage reads name's live session context size, window and model off disk (never the tmux
-// pane — that's pattern-matched text, this is exact usage from the transcript itself). ok=false when
-// no session has recorded usage yet.
+// pane — that's pattern-matched text). ok=false when no session has recorded usage yet.
 func (s *Service) ContextUsage(project, name string) (tokens, window int, model string, ok bool) {
 	key := project + "/" + name
 	contextMemo.mu.Lock()
@@ -115,9 +111,8 @@ func (s *Service) ContextUsage(project, name string) (tokens, window int, model 
 	return s.SampleContext(project, name)
 }
 
-// SampleContext reads the transcript itself and leaves the reading where ContextUsage will serve it.
-// For the observer that samples on its own cadence (-> hub/watchdog.go): a memoised answer would age
-// the board's figures for no saving, and its one pass is what spares every other reader the parse.
+// SampleContext reads the transcript itself and leaves the reading where ContextUsage will serve
+// it — for the observer's own cadence (-> hub/watchdog.go), sparing every other reader the parse.
 func (s *Service) SampleContext(project, name string) (tokens, window int, model string, ok bool) {
 	t, w, m, found := agentport.ContextUsage(paths.AgentHomeDir(project, name))
 	key := project + "/" + name
@@ -145,9 +140,8 @@ func (s *Service) ModelForTier(tier string) (string, bool) { return agentport.Mo
 // transcript while it is up — a human may change the model by hand, which the transcript sees first
 // — and the recorded choice otherwise, all there is for an agent that is not running.
 //
-// A function, not a probe, because the board holds both readings already from the watchdog's
-// standing observation. Taking them per render cost two container operations per agent per read,
-// per connected client (-> hub/watchdog.go: a board read REPORTS liveness, never takes one).
+// A function, not a probe: the board already holds both readings from the watchdog's own sample
+// (-> hub/watchdog.go), which taking them here again would cost per render, per connected client.
 func ModelInUse(recorded, detected string, up bool) string {
 	if up && detected != "" {
 		return detected
@@ -179,11 +173,9 @@ func (s *Service) recordedModel(project, name string) string {
 // own sample. For the one caller that KNOWS the previous measurement is now wrong because it just
 // invalidated it: clearing or compacting a session (-> ClearContext, Compact).
 //
-// Here rather than in a shorter TTL. The memo exists so the frequent idle poll does not re-read a
-// transcript per request, and that is still right for every other reader — but the reading survived
-// the very act that made it false, so the hub answered the kickoff after a clear from the pre-clear
-// figure and told the agent it was still full. Both stores are dropped together because the board
-// reads the sample and the gate reads the memo: leaving either behind puts that bug back on one half.
+// Both stores, not a shorter TTL: the reading survived the very act that made it false once before,
+// telling a just-cleared agent it was still full. The board reads the sample, the gate reads the
+// memo — leaving either behind puts that bug back on the half left standing.
 func (s *Service) ForgetContext(project, name string) {
 	key := project + "/" + name
 	contextMemo.mu.Lock()
@@ -291,12 +283,7 @@ func parseClients(out string) []ClientView {
 	return cs
 }
 
-// SessionAlive reports whether the agent's tmux session is up inside its pod.
-func (s *Service) SessionAlive(project, name string) bool {
-	return s.SessionAliveCtx(context.Background(), project, name)
-}
-
-// SessionAliveCtx is SessionAlive bounded by ctx.
+// SessionAliveCtx reports whether the agent's tmux session is up inside its pod, bounded by ctx.
 func (s *Service) SessionAliveCtx(ctx context.Context, project, name string) bool {
 	_, err := container.ExecContext(ctx, s.deps.ContainerName(project, name), append([]string{"tmux"}, tmux.HasSession(name)...)...)
 	return err == nil
@@ -312,11 +299,9 @@ var paneMemo struct {
 	val map[string]string
 }
 
-// AgentPane shows the live tmux screen, else startup logs, else captured launch output.
-//
-// The capture is attempted rather than preceded by a liveness check: asking `tmux has-session` first
-// spent a whole exec — doubling the wait before anything appeared — to predict what the capture
-// itself reports, and left a window for the session to die between the two answers.
+// AgentPane shows the live tmux screen, else startup logs, else captured launch output. The capture
+// is attempted rather than preceded by a liveness check: asking `tmux has-session` first doubled the
+// wait to predict what the capture itself reports, and left a window for the session to die between.
 func (s *Service) AgentPane(project, name string, lines int) (string, error) {
 	key := fmt.Sprintf("%s/%s/%d", project, name, lines)
 	paneMemo.mu.Lock()

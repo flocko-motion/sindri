@@ -67,8 +67,6 @@ type Deps interface {
 	// What it answers is whether a message sent NOW would be acted on: text typed into a running
 	// turn lands in the input box and dies there when the turn ends.
 	AgentIdle(project, name string) bool
-	// SessionAlive reports whether an agent's tmux session is live.
-	SessionAlive(project, name string) bool
 	// TaskComments returns a task's comments for display.
 	TaskComments(project, id string) []store.Comment
 	// AddTaskComment posts on a task's thread as author — the write half of TaskComments, for a
