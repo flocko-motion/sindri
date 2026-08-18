@@ -244,3 +244,35 @@ func TestTheLenientValueRuleIsUntouched(t *testing.T) {
 		t.Error("an unrecognised filter value must still admit everything")
 	}
 }
+
+// TestBareTaskListsTheBacklogForAPlanner is the invocation TaskHelp advertises first — "read your
+// work: `task` … a planner or coauthor: the whole backlog" — and the one role this whole verb is
+// about. It panicked: nothing bounds an unbounded caller's empty argument list before the slice that
+// drops the `list` word, so `task` with no arguments reached args[1:] on a slice of length zero.
+//
+// Nothing else covers it. listTasks always prepends "list", and the one zero-argument test goes
+// through a worker, which returns via workerTaskView before reaching the slice.
+func TestBareTaskListsTheBacklogForAPlanner(t *testing.T) {
+	e, c := backlogEngine(t)
+	for _, role := range []string{"planner", "coauthor", "reviewer"} {
+		caller := c
+		caller.Role = role
+		var out bytes.Buffer
+		code, err := e.CmdTasks(caller, nil, &out)
+		if err != nil {
+			t.Fatalf("%s: %v", role, err)
+		}
+		if code != 0 {
+			t.Errorf("%s: exit %d:\n%s", role, code, out.String())
+		}
+		if !strings.Contains(out.String(), "sd-open1") {
+			t.Errorf("%s: bare `task` should list the backlog:\n%s", role, out.String())
+		}
+		// And it is the same listing `task list` gives, closing with the same summary — which also
+		// pins that the bare listing IS the active filter, tested until now only through `list`.
+		spelled, _ := listTasks(t, e, caller)
+		if out.String() != spelled {
+			t.Errorf("%s: bare `task` and `task list` should agree:\n%s\n---\n%s", role, out.String(), spelled)
+		}
+	}
+}

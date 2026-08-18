@@ -131,7 +131,13 @@ func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int,
 		return e.workerTaskView(c, tasks, out)
 	}
 
-	filter, ferr := parseTaskListFlags(args[1:])
+	// The arguments after the `list` word — and a bare `task` carries none of them, which is how an
+	// unbounded caller reaches here with an empty slice: only a BOUNDED one is answered above.
+	rest := args
+	if len(rest) > 0 {
+		rest = rest[1:]
+	}
+	filter, ferr := parseTaskListFlags(rest)
 	if ferr != nil {
 		fmt.Fprintf(out, "%v\n%s\n", ferr, taskListUsage)
 		return 2, nil

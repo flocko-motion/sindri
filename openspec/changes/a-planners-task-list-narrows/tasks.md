@@ -43,3 +43,8 @@
       and the summary accounts for the extra row.
 - [x] 5.7 `api.MatchesFilter`'s leniency on an unknown VALUE is asserted intact, so the distinction
       cannot be tidied away in either direction.
+- [x] 5.8 Bare `task` for a planner, coauthor and reviewer — the invocation TaskHelp advertises first,
+      and the one the gate was green over. It panicked: an unbounded caller reached the slice that
+      drops the `list` word with nothing to drop, since only a BOUNDED one is answered above it. The
+      test asserts the bare listing is identical to `task list`, which also pins the claim that the
+      default IS the active filter through the spelling a planner actually types.

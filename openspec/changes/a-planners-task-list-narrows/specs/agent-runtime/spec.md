@@ -35,9 +35,10 @@ hangs in is most of what the view is read for.
 
 #### Scenario: The bare listing
 
-- **WHEN** an agent runs `task list` with no arguments
-- **THEN** it shows the active segment, and closes by saying how many it showed and how many tasks are
-  open and closed in total
+- **WHEN** an agent whose reading is not bounded to its own work runs `task`, or `task list`, with no
+  further arguments
+- **THEN** both show the same thing: the active segment, closing by saying how many it showed and how
+  many tasks are open and closed in total
 
 #### Scenario: Asking for the whole backlog
 
