@@ -142,18 +142,17 @@ func (h *Hub) registry() *registry.Registry {
 				}
 				return ""
 			}, Run: h.cmdResume},
-		// One short note to the user about something noticed in passing, against a budget the help
-		// states up front — known scarcity selects better than a cap discovered by hitting it.
-		// Not the coauthor: it is in the room with the user already. The three roles that DO see it are
-		// granted at their own claim — a task, a review, a brief — so none sees a verb it cannot use.
+		// One short note to the user, against a budget the help states up front: known scarcity selects
+		// better than a cap discovered by hitting it. Not the coauthor, which is in the room with the
+		// user already; the three that do see it are granted at their own claim, so none is offered a
+		// verb it can never use.
 		registry.Command{Name: "fyi", Help: workflow.FyiHelp(workflow.NotesPerClaim),
 			HelpFor: func(c registry.Caller) string { return workflow.FyiHelp(c.NotesLeft) },
 			Roles:   []string{"worker", "reviewer", "planner"}, Run: h.cmdFyi},
-		// Every role receives mail, so every role can read it. Never held back by an escalation: an
-		// escalated agent reading what it was told is how it learns the answer it is waiting for.
+		// Every role receives mail, so every role reads it — and never held back by an escalation, since
+		// reading is how an escalated agent learns the answer it waits for.
 		registry.Command{Name: "mail", Help: mailHelp, Run: h.cmdMail},
-		// Answering needs no name: the recipient comes from the message being answered, so a
-		// conversation between two agents needs no directory at either end.
+		// Answering needs no name: the recipient comes off the message, so neither end needs a directory.
 		registry.Command{Name: "reply", Help: replyHelp, Run: h.cmdReply},
 		// State-gated rather than role-gated: the user controls who is in the meeting room.
 		registry.Command{Name: "meeting", Help: "say something to everyone in the meeting room: meeting <message...>",
