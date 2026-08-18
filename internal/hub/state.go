@@ -19,10 +19,8 @@ import (
 	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/commands"
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 )
-
-// probeTimeout bounds each podman probe; a container that can't answer is "down", not a stalled read.
-const probeTimeout = 3 * time.Second
 
 // statsTimeout bounds one `stats` sample, slower than a probe (the runtime samples over a window).
 const statsTimeout = 8 * time.Second
@@ -74,35 +72,30 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		return BoardState{}, err
 	}
 	var tasks []store.Task
-	var specMissing bool
 	if selected != "" {
 		if tasks, err = h.store.For(selected).AllTasks(); err != nil {
 			return BoardState{}, err
 		}
-		root := h.projectRoot(selected)
-		specMissing = h.wf.TaskSourceToolMissing(root)
 	}
+	// What each repo says about itself — its architecture doc, and whether a task source wants a CLI
+	// that isn't installed — from the watchdog's sample. Read here it was a config file and a PATH
+	// lookup per repo per render, which is how `sindri task info` came to time out past 120s.
+	repos := h.watch.repoDocs()
 
-	// Liveness comes from the watchdog's last observation — a board read REPORTS it, never takes one.
-	// Probing per request scaled cost with readers (overlapping polls, SSE, post-mutation refetches);
-	// probes then lost their deadline and rendered as "down", flickering healthy agents (-> watchdog.go).
-	running := make([]bool, len(agentsRow))
-	clients := make([]int, len(agentsRow))
-	runtimes := make([]string, len(agentsRow)) // Claude's live runtime: busy|blocked|idle|""
-	// observed is carried separately because the zero value of running is a CLAIM: an agent
+	// Every per-agent reading comes from the watchdog's last observation — a board read REPORTS them,
+	// never takes one. Probing per request scaled cost with readers (overlapping polls, SSE,
+	// post-mutation refetches); probes then lost their deadline and rendered as "down", flickering
+	// healthy agents (-> watchdog.go).
+	obs := make([]liveness, len(agentsRow))
+	// observed is carried separately because the zero value of an observation is a CLAIM: an agent
 	// registered since the last sweep has been looked at by nothing, and reading its absent
 	// observation as "not running" is the same error as trusting a stale listing.
 	observed := make([]bool, len(agentsRow))
 	for i, a := range agentsRow {
-		if l, ok := h.watch.get(a.Project, a.Name); ok {
-			running[i], clients[i], runtimes[i], observed[i] = l.up, l.clients, l.runtime, true
-		}
+		obs[i], observed[i] = h.watch.get(a.Project, a.Name)
 	}
-
-	// The orphan scan needs the pod list, not per-agent liveness; cached, so it reuses the watchdog's.
-	podCtx, podCancel := context.WithTimeout(context.Background(), probeTimeout)
-	existing, _ := container.ListByLabelCached(podCtx, "sindri.project", "")
-	podCancel()
+	// The orphan scan wants the pod list, which the sweep takes fleet-wide in one spawn.
+	existing := h.watch.pods()
 
 	// One query for the fleet's unread tallies: a count per agent row would be paid per render.
 	unreadMail, err := h.store.UnreadMailByAgent()
@@ -112,8 +105,10 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	known := map[string]bool{}
 	agents := make([]AgentView, 0, len(agentsRow))
 	for i, a := range agentsRow {
-		container := h.container(a.Project, a.Name)
-		known[container] = true
+		// Not named `container`: that shadows the package of the same name, which is how a probe
+		// smuggled into this loop would read as a local call rather than a runtime operation.
+		pod := h.container(a.Project, a.Name)
+		known[pod] = true
 		ps := h.store.For(a.Project)
 		st, _ := ps.GetState(a.Name)
 		// A reviewer authors no PR, so fall back to the one it's reviewing — that's what it works on.
@@ -122,25 +117,25 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			pr, _ = ps.ReviewingPR(a.Name)
 		}
 		holds := st.Task != "" || st.Container != "" || pr != ""
-		status := overlayRuntime(h.agents.AgentStatus(a.Project, a.Name, running[i], observed[i], st.Phase, a.Stopped), runtimes[i], holds)
+		l := obs[i]
+		status := overlayRuntime(h.agents.AgentStatus(a.Project, a.Name, l.up, observed[i], st.Phase, a.Stopped), l.runtime, holds)
 		// A stall reads as plain "idle" otherwise, which is what let one hold a task unnoticed.
 		if _, stalled := h.stalledFor(a.Project, a.Name, st.Phase, st.Container); stalled {
 			status = "stalled"
 		}
-		tokens, window, _, _ := h.agents.ContextUsage(a.Project, a.Name)
-		// Liveness from the watchdog's reading above, never a fresh probe: this runs per agent per
-		// board read, and taking one here is what saturated the runtime.
-		model := h.agents.CurrentModelOf(a.Project, a.Name, running[i])
-		status = overlayFullness(status, h.wf.ContextFull(a.Project, a.Name), st.Task, st.Container, pr)
+		status = overlayFullness(status, workflow.Full(l.tokens, l.window), st.Task, st.Container, pr)
 		status = overlayEscalation(status, st.Escalation)
 		agents = append(agents, AgentView{
 			Project: a.Project, Repo: h.repoName(a.Project), Name: a.Name, Role: a.Role,
 			Status:  status,
-			Runtime: runtimes[i],
+			Runtime: l.runtime,
 			Task:    st.Task, Feature: st.Container, Branch: st.Branch, PR: pr, Workspace: a.Workspace,
-			Clients: clients[i], Container: container, Memory: a.Memory, Retired: a.Retired,
+			Clients: l.clients, Container: pod, Memory: a.Memory, Retired: a.Retired,
 			ClearArmed:    a.ClearArmed,
-			ContextTokens: tokens, ContextWindow: window, Model: model, Escalation: st.Escalation,
+			ContextTokens: l.tokens, ContextWindow: l.window, Escalation: st.Escalation,
+			// The transcript sees a model switched by hand inside Claude Code before the roster does,
+			// so the detected one wins while the agent is up — both readings off the same sample.
+			Model:      agent.ModelInUse(a.Model, l.model, l.up),
 			UnreadMail: unreadMail[a.Project][a.Name],
 		})
 	}
@@ -159,7 +154,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	// Carried in the snapshot so the TUI's recommendation matches the one hub startup prints.
 	docs := make(map[string]RepoDocState, len(projects))
 	for _, p := range projects {
-		docs[p.Tag] = h.repoDocState(p.Path)
+		docs[p.Tag] = repos[p.Tag].docs
 	}
 	mail, mailTotal, mailUnread, mailUnreadUser, unreadByRepo, err := h.mailWindow()
 	if err != nil {
@@ -168,7 +163,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	board := BoardState{
 		RuntimeHint: h.watch.runtimeHint(),
 		Agents:      agents, Tasks: tasks, PRs: prs, Runs: runs, Projects: projects, Orphans: orphans, Chat: chat,
-		RepoDocs: docs, SpecCLIMissing: specMissing, StartedAt: h.startedAt.UTC().Format(time.RFC3339),
+		RepoDocs: docs, SpecCLIMissing: repos[selected].specMissing, StartedAt: h.startedAt.UTC().Format(time.RFC3339),
 		DefaultMemory: agent.MemoryOrDefault(""),
 		// Reported from the watchdog's last reading, like liveness and for the same reason: taking
 		// one here would put a process spawn on every board read, and there are many.

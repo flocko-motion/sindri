@@ -19,6 +19,7 @@ func (clearTestDeps) ProjectConfig(string) (config.Config, error) { return confi
 func (clearTestDeps) ArchitectureDoc(string) string               { return "" }
 func (clearTestDeps) RefreshTask(_, _ string) error               { return nil }
 func (clearTestDeps) Rehydrate(_, _ string)                       {}
+func (clearTestDeps) ForgetFill(_, _ string)                      {}
 
 // armedFlag is the arming as the STORE holds it — what survives a hub restart, so it is read back
 // rather than remembered from the call that set it.

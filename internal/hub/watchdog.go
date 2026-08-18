@@ -1,8 +1,8 @@
 // package: hub / watchdog
 // type:    logic (agent liveness observer)
-// job:     own what the hub believes about every agent's liveness — the ONE place that polls
-// the container runtime, clocked on completion so nothing runs twice at once. A
-// board read reports the last observation; no single reading flips an agent down.
+// job:     own what the hub believes about the fleet — liveness, each session's fill and model,
+// the pod listing, the memory headroom, each repo's docs — as the ONE place that polls for
+// any of it. A board read reports the last observation; no reading flips an agent down.
 // limits:  observations only; how a status word is chosen from liveness + phase stays in
 // agent.AgentStatus, what headroom means in agent.Headroom, the board in state.go.
 package hub
@@ -38,14 +38,26 @@ const (
 	// is not evidence. Hysteresis a per-request probe could never have, starting with no history.
 	downStrikes = 3
 
+	// probeTimeout bounds each probe: a container that can't answer reads "down", not a stalled sweep.
+	// Here because the observer is the only thing in this package that probes at all.
+	probeTimeout = 3 * time.Second
+
 	// capacityInterval is how often the fleet's memory headroom is re-read. Slower than the liveness
 	// cadence because it costs its own process spawn and the figure moves when an agent starts, not
 	// second to second.
 	capacityInterval = 10 * time.Second
 )
 
+// fill is what an agent's transcript last said: how much of its window is used, and the model
+// carrying it. Sampled here because a reader taking it parses a large session file per render.
+type fill struct {
+	tokens, window int
+	model          string
+}
+
 // liveness is what the watchdog last observed about one agent.
 type liveness struct {
+	fill
 	up      bool
 	clients int
 	runtime string // Claude's live runtime: working|blocked|idle|signed-out|""
@@ -73,8 +85,18 @@ type watchdog struct {
 	runtimeErr error
 	// capacity is the last memory reading the backend gave, zero until it gives one.
 	capacity container.Capacity
-	stop     chan struct{}
-	done     chan struct{}
+	// listing is the pods the last successful sweep saw — the orphan scan's question, already answered.
+	listing []string
+	// repos is what each repo's own files say about it, by tag: a config read and a PATH lookup.
+	repos map[string]repoSample
+	stop  chan struct{}
+	done  chan struct{}
+}
+
+// repoSample is one repo's doc situation: the doc the board recommends, and any missing source CLI.
+type repoSample struct {
+	docs        RepoDocState
+	specMissing bool
 }
 
 // runtimeHint reports why the container runtime looks unreachable, "" when it answers. Read off the
@@ -94,14 +116,16 @@ func (w *watchdog) runtimeHint() string {
 // the socket, and a full sweep (14 agents × 2 commands, 4-wide) delayed startup past the health
 // check — so the first pass only lists, provisionally, and the first sweep refines it.
 func newWatchdog(h *Hub) *watchdog {
-	w := &watchdog{h: h, obs: map[agentKey]liveness{}, stop: make(chan struct{}), done: make(chan struct{})}
+	w := &watchdog{h: h, obs: map[agentKey]liveness{}, repos: map[string]repoSample{},
+		stop: make(chan struct{}), done: make(chan struct{})}
 	w.seed()
 	go w.loop()
 	return w
 }
 
-// seed takes the cheap first reading: which pods exist, and nothing else.
+// seed takes the cheap first reading: which pods exist, and what the repos say about themselves.
 func (w *watchdog) seed() {
+	w.sampleRepos()
 	agents, err := w.h.store.AllAgents()
 	if err != nil {
 		return
@@ -131,7 +155,12 @@ func (w *watchdog) loop() {
 		// Beat 0 probes: the first sweep is the real first reading, off the startup path (see
 		// newWatchdog), and a listing alone would leave every agent's runtime unknown until the
 		// first probe beat.
-		w.sweep(beat%probeEvery == 0)
+		probing := beat%probeEvery == 0
+		w.sweep(probing)
+		// Repo files ride the probe beat: what they say moves when someone edits a repo, not per render.
+		if probing {
+			w.sampleRepos()
+		}
 		// In the loop's own goroutine rather than beside it: one observer means one process spawn
 		// at a time, and a capacity sample racing a sweep is the parallelism this exists to end.
 		if time.Since(lastCapacity) >= capacityInterval {
@@ -153,6 +182,37 @@ func (w *watchdog) headroom() api.FleetMemory {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	return agent.Headroom(w.capacity)
+}
+
+// pods is the last pod listing the sweep took — what the orphan scan reads instead of listing again.
+func (w *watchdog) pods() []string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.listing
+}
+
+// repoDocs is every registered repo's doc situation, by tag. One the sweep has not reached is absent,
+// which reads as an unset doc: the next sample answers, and no reading beats one invented here.
+func (w *watchdog) repoDocs() map[string]repoSample {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.repos
+}
+
+// sampleRepos re-reads what every registered repo says about itself. Held rather than read per
+// render: `sindri task info` timed out past 120s while each read path took its own.
+func (w *watchdog) sampleRepos() {
+	projects, err := w.h.projects.Known()
+	if err != nil {
+		return // an unreadable registry settles nothing; the last sample stands
+	}
+	next := make(map[string]repoSample, len(projects))
+	for _, p := range projects {
+		next[p.Tag] = repoSample{docs: w.h.repoDocState(p.Path), specMissing: w.h.wf.TaskSourceToolMissing(p.Path)}
+	}
+	w.mu.Lock()
+	w.repos = next
+	w.mu.Unlock()
 }
 
 // sampleCapacity takes one reading from the backend. A failed one settles nothing, as everywhere
@@ -200,6 +260,11 @@ func (w *watchdog) sweep(withProbes bool) {
 	w.mu.Lock()
 	w.runtimeErr = listErr
 	w.mu.Unlock()
+	if listErr == nil {
+		w.mu.Lock()
+		w.listing = existing
+		w.mu.Unlock()
+	}
 	exists := make(map[string]bool, len(existing))
 	for _, p := range existing {
 		exists[p] = true
@@ -208,9 +273,9 @@ func (w *watchdog) sweep(withProbes bool) {
 	sem := make(chan struct{}, watchProbeParallel)
 	var wg sync.WaitGroup
 	for _, a := range agents {
-		if listErr == nil && !exists[w.h.container(a.Project, a.Name)] {
+		gone := listErr == nil && !exists[w.h.container(a.Project, a.Name)]
+		if gone {
 			w.record(a, false, 0, agent.Observation{})
-			continue
 		}
 		// A pod that EXISTS says nothing yet about the session inside it, which only the probe
 		// answers — so on a listing-only beat its last observation stands untouched. Death is still
@@ -219,12 +284,19 @@ func (w *watchdog) sweep(withProbes bool) {
 			continue
 		}
 		wg.Add(1)
-		go func(a store.Agent) {
+		go func(a store.Agent, gone bool) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			w.probe(a)
-		}(a)
+			if !gone {
+				w.probe(a)
+			}
+			// After the liveness reading, or a fill would create the entry and an unobserved agent
+			// would read down rather than unknown. Off the host's disk, so a stopped pod still answers.
+			if t, win, m, ok := w.h.agents.SampleContext(a.Project, a.Name); ok {
+				w.recordFill(a, fill{tokens: t, window: win, model: m})
+			}
+		}(a, gone)
 	}
 	wg.Wait()
 }
@@ -250,7 +322,8 @@ func (w *watchdog) record(a store.Agent, up bool, clients int, obs agent.Observa
 	defer w.mu.Unlock()
 	key := agentKey{a.Project, a.Name}
 	prev := w.obs[key]
-	next := liveness{up: up, clients: clients, runtime: obs.Runtime, digest: obs.Digest, seen: time.Now()}
+	// The fill rides along: dropping it here would blank the board's context column every sweep.
+	next := liveness{fill: prev.fill, up: up, clients: clients, runtime: obs.Runtime, digest: obs.Digest, seen: time.Now()}
 	switch {
 	case up:
 		next.strikes = 0
@@ -285,4 +358,30 @@ func (w *watchdog) record(a store.Agent, up bool, clients int, obs agent.Observa
 		next.runtimeSince = next.seen
 	}
 	w.obs[key] = next
+}
+
+// forgetFill drops one agent's fill: a window of 0 is the unknown every reader already handles, and
+// the next sweep measures again. For the moment a clear or a compact makes the last reading false.
+func (w *watchdog) forgetFill(project, name string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	key := agentKey{project, name}
+	if l, seen := w.obs[key]; seen {
+		l.fill = fill{}
+		w.obs[key] = l
+	}
+}
+
+// recordFill folds in one transcript reading. Apart from record because it has no hysteresis to
+// share: a sample that read nothing is not evidence of an empty context, so the caller does not call.
+func (w *watchdog) recordFill(a store.Agent, f fill) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	key := agentKey{a.Project, a.Name}
+	l, seen := w.obs[key]
+	if !seen {
+		return // nothing has observed this agent yet, and a fill alone is not an observation of it
+	}
+	l.fill = f
+	w.obs[key] = l
 }

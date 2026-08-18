@@ -29,6 +29,10 @@ type Deps interface {
 	ArchitectureDoc(project string) string
 	RefreshTask(project, id string) error
 	Rehydrate(project, name string)
+	// ForgetFill drops the hub's standing sample of an agent's context fill. The board reports that
+	// sample rather than this package's memo, so a reading invalidated here is invalidated there too
+	// — one of the two left standing is the stale figure reappearing on whichever half still reads it.
+	ForgetFill(project, name string)
 }
 
 // Service is the agent-management module: identity (naming), auth (tokens), memory

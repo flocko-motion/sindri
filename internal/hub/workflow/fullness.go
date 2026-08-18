@@ -12,15 +12,23 @@ package workflow
 // 1M one with most of it unused.
 const ContextFullFraction = 0.85
 
-// contextFull is the one fact both the assignment gate and the board's status read. No recorded
-// usage yet (ok=false from ContextUsage) is never full, and neither is a window of 0 — an unknown
-// window must not retire anybody, since guessing one is what this replaced.
+// Full is the fullness rule over figures the caller already holds. A window of 0 is never full — an
+// unknown window must not retire anybody, since guessing one is what this replaced — which covers an
+// agent with no recorded usage yet, whose window reads 0 too.
+//
+// Exported for the board, which has the figures from the watchdog's standing sample: asking the
+// engine would make it take the transcript read again, per agent, per render (-> hub/state.go).
+func Full(tokens, window int) bool {
+	return window > 0 && float64(tokens) >= float64(window)*ContextFullFraction
+}
+
+// contextFull is the same fact for a caller with no reading of its own — the assignment gate.
 func (e *Engine) contextFull(project, worker string) (tokens int, full bool) {
 	tokens, window, _, ok := e.deps.ContextUsage(project, worker)
-	if !ok || window <= 0 {
+	if !ok {
 		return tokens, false
 	}
-	return tokens, float64(tokens) >= float64(window)*ContextFullFraction
+	return tokens, Full(tokens, window)
 }
 
 // compactDue is fill past CompactionThreshold's curve for the running model — far below

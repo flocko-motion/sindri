@@ -112,8 +112,15 @@ func (s *Service) ContextUsage(project, name string) (tokens, window int, model 
 		return v.tokens, v.window, v.model, v.ok
 	}
 	contextMemo.mu.Unlock()
+	return s.SampleContext(project, name)
+}
 
+// SampleContext reads the transcript itself and leaves the reading where ContextUsage will serve it.
+// For the observer that samples on its own cadence (-> hub/watchdog.go): a memoised answer would age
+// the board's figures for no saving, and its one pass is what spares every other reader the parse.
+func (s *Service) SampleContext(project, name string) (tokens, window int, model string, ok bool) {
 	t, w, m, found := agentport.ContextUsage(paths.AgentHomeDir(project, name))
+	key := project + "/" + name
 	contextMemo.mu.Lock()
 	if contextMemo.at == nil {
 		contextMemo.at, contextMemo.val = map[string]time.Time{}, map[string]contextSample{}
@@ -134,22 +141,33 @@ func (s *Service) ModelWindow(model string) (int, bool) { return agentport.Model
 // ModelForTier resolves tier to the model it dispatches to, via the wired backend.
 func (s *Service) ModelForTier(tier string) (string, bool) { return agentport.ModelForTier(tier) }
 
-// CurrentModel is the model name is effectively running, taking its own liveness probe. For a
-// caller with no reading of its own; anything holding one must pass it (-> CurrentModelOf), since
-// this probe costs two container operations and is untimed.
-func (s *Service) CurrentModel(project, name string) string {
-	return s.CurrentModelOf(project, name, s.AgentAlive(project, name))
+// ModelInUse picks between the two readings of what an agent runs: the one detected off its
+// transcript while it is up — a human may change the model by hand, which the transcript sees first
+// — and the recorded choice otherwise, all there is for an agent that is not running.
+//
+// A function, not a probe, because the board holds both readings already from the watchdog's
+// standing observation. Taking them per render cost two container operations per agent per read,
+// per connected client (-> hub/watchdog.go: a board read REPORTS liveness, never takes one).
+func ModelInUse(recorded, detected string, up bool) string {
+	if up && detected != "" {
+		return detected
+	}
+	return recorded
 }
 
-// CurrentModelOf is the model name is effectively running: detected off its transcript while alive
-// (a human may change it by hand, which the transcript sees first), the stored choice otherwise.
-// Liveness is passed in because probing it per render saturated the runtime (-> watchdog.go).
-func (s *Service) CurrentModelOf(project, name string, alive bool) string {
-	if alive {
-		if _, _, detected, ok := s.ContextUsage(project, name); ok && detected != "" {
-			return detected
-		}
+// CurrentModel is the model name is effectively running, taking both readings itself. For a caller
+// with neither — the assignment path; the board must not use it, since the probe is per agent.
+func (s *Service) CurrentModel(project, name string) string {
+	up := s.AgentAlive(project, name)
+	var detected string
+	if up {
+		_, _, detected, _ = s.ContextUsage(project, name)
 	}
+	return ModelInUse(s.recordedModel(project, name), detected, up)
+}
+
+// recordedModel is the model the roster says an agent was started on, "" if it cannot be read.
+func (s *Service) recordedModel(project, name string) string {
 	a, ok, err := s.store.For(project).GetAgent(name)
 	if err != nil || !ok {
 		return ""
@@ -157,19 +175,22 @@ func (s *Service) CurrentModelOf(project, name string, alive bool) string {
 	return a.Model
 }
 
-// ForgetContext drops name's memoised context reading. For the one caller that KNOWS the previous
-// measurement is now wrong because it just invalidated it: clearing a session (-> ClearContext).
+// ForgetContext drops every standing reading of name's context — this package's memo and the hub's
+// own sample. For the one caller that KNOWS the previous measurement is now wrong because it just
+// invalidated it: clearing or compacting a session (-> ClearContext, Compact).
 //
 // Here rather than in a shorter TTL. The memo exists so the frequent idle poll does not re-read a
 // transcript per request, and that is still right for every other reader — but the reading survived
 // the very act that made it false, so the hub answered the kickoff after a clear from the pre-clear
-// figure and told the agent it was still full.
+// figure and told the agent it was still full. Both stores are dropped together because the board
+// reads the sample and the gate reads the memo: leaving either behind puts that bug back on one half.
 func (s *Service) ForgetContext(project, name string) {
 	key := project + "/" + name
 	contextMemo.mu.Lock()
 	delete(contextMemo.at, key)
 	delete(contextMemo.val, key)
 	contextMemo.mu.Unlock()
+	s.deps.ForgetFill(project, name)
 }
 
 // LaunchDiagnostic re-runs both liveness probes so a launch timeout says which one failed.

@@ -78,6 +78,7 @@ func (tellDeps) ProjectConfig(string) (config.Config, error) { return config.Con
 func (tellDeps) ArchitectureDoc(string) string               { return "" }
 func (tellDeps) RefreshTask(_, _ string) error               { return nil }
 func (tellDeps) Rehydrate(_, _ string)                       {}
+func (tellDeps) ForgetFill(_, _ string)                      {}
 
 // paneReader is a coding-agent backend that reads the one banner these cases turn on. The port
 // defaults to a no-op that classifies nothing, and what the real classifier makes of a screen is

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	agentport "github.com/flo-at/sindri/internal/adapter/agent"
+	hubagent "github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -128,17 +129,29 @@ func TestTheMemoIsWhatWasStale(t *testing.T) {
 	}
 }
 
-// TestTheBoardAgreesWithTheDirective: ContextFull reads the same memo, so a cleared agent would also
-// have shown as full on the board for the rest of the window. One invalidation fixes both, and this
-// is the half a directive test would not notice.
+// TestTheBoardAgreesWithTheDirective: a cleared agent must stop reading "full" on the board too, or
+// the user is invited to clear a context that was already cleared. Asserted on the BOARD rather than
+// on the fullness rule, because the board no longer reads that rule — it reports the observer's own
+// sample, so there are two standing readings of one figure and this is the one a directive test
+// cannot see. It went stale for a probe beat, which is the reported bug shortened rather than fixed.
 func TestTheBoardAgreesWithTheDirective(t *testing.T) {
-	h, agent, tokens := fullAgentWithWorkWaiting(t)
-	if !h.wf.ContextFull(testProject, agent) {
-		t.Fatal("precondition: the board should show a full agent as full")
+	h, name, tokens := fullAgentWithWorkWaiting(t)
+	w := stillWatchdog(t, h)
+	row := store.Agent{Project: testProject, Name: name}
+	w.record(row, true, 0, hubagent.Observation{Runtime: "idle", Digest: "d1"})
+	w.recordFill(row, fill{tokens: *tokens, window: 1_000_000})
+	if view := onlyAgent(t, h); view.Status != "full" {
+		t.Fatalf("precondition: a full agent should read full on the board, got %q", view.Status)
 	}
-	*tokens = 1_000
-	h.agents.ForgetContext(testProject, agent)
-	if h.wf.ContextFull(testProject, agent) {
+
+	*tokens = 1_000 // the clear happens: the session's context is gone
+	h.agents.ForgetContext(testProject, name)
+
+	view := onlyAgent(t, h)
+	if view.Status == "full" {
 		t.Error("the board still shows a cleared agent as full")
+	}
+	if view.ContextTokens != 0 {
+		t.Errorf("the board still reports the pre-clear fill of %d tokens", view.ContextTokens)
 	}
 }

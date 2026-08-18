@@ -30,6 +30,11 @@ func (d agentDeps) ArchitectureDoc(project string) string     { return d.h.archi
 func (d agentDeps) RefreshTask(project, id string) error      { return d.h.wf.RefreshTask(project, id) }
 func (d agentDeps) Rehydrate(project, name string)            { d.h.rehydrate(project, name) }
 
+// ForgetFill drops the observer's fill for one agent, so the board stops reporting a figure the
+// hub has just made false. Zeroed rather than re-sampled: the transcript is rewritten by the agent,
+// not by us, so the honest answer until the next sweep is that nobody has measured it.
+func (d agentDeps) ForgetFill(project, name string) { d.h.watch.forgetFill(project, name) }
+
 func (d agentDeps) ProjectConfig(project string) (config.Config, error) {
 	return d.h.projectConfig(project)
 }
