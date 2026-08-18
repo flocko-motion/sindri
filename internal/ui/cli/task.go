@@ -461,12 +461,12 @@ func taskListCmd() *cobra.Command {
 					))
 				}
 				printRows(taskListTable, lines)
-				if n := len(all) - len(tasks); n > 0 {
-					// What a filter hid is said out loud: an empty listing under `--filter closed`
-					// otherwise reads as "no tasks" when the backlog is full of open ones.
-					fmt.Fprintf(os.Stderr, "(filter %s — %d of %d task(s) shown)\n", f, len(tasks), len(all))
-				} else if len(tasks) == 0 {
+				// What a filter hid, said out loud, in the wording the agent's own `task list` uses
+				// (-> api.TaskListSummary) rather than a second one that drifts from it.
+				if len(all) == 0 {
 					fmt.Fprintln(os.Stderr, "no tasks")
+				} else {
+					fmt.Fprintln(os.Stderr, api.TaskListSummary(f, len(tasks), all))
 				}
 				// The gate hides these from every worker, so a list that ended here read as a full
 				// backlog while nothing in it could be claimed. Counted over every task, not the

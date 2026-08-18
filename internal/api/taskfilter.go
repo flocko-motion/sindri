@@ -63,6 +63,69 @@ func FilterTasks(f TaskFilter, tasks []Task) []Task {
 	return out
 }
 
+// TaskListSummary is the line a filtered listing closes with, in both front-ends and in the agent's
+// own verb. A narrow default is only safe alongside it: it says what was shown AND the shape of the
+// whole backlog, so a listing of fourteen rows can never read as a backlog of fourteen tasks.
+func TaskListSummary(f TaskFilter, shown int, tasks []Task) string {
+	open, closed := 0, 0
+	for _, t := range tasks {
+		if Done(t) {
+			closed++
+		} else {
+			open++
+		}
+	}
+	head := fmt.Sprintf("showing %d %s %s", shown, f, plural(shown, "task"))
+	if f == FilterAll {
+		head = fmt.Sprintf("showing all %d %s", shown, plural(shown, "task"))
+	}
+	return fmt.Sprintf("%s — %d open, %d closed in total", head, open, closed)
+}
+
+// plural is the noun for n of something, for a count a human reads.
+func plural(n int, noun string) string {
+	if n == 1 {
+		return noun
+	}
+	return noun + "s"
+}
+
+// WithAncestors adds every ancestor of a kept task back to the set, and reports which ids were added
+// for that reason alone. A listing indented by tree needs them: a subtask whose parent the filter
+// dropped would otherwise sit at a depth that means nothing, or be re-rooted as though it belonged to
+// nobody — and a planner reads this view to see exactly which tree a task hangs in.
+func WithAncestors(kept, all []Task) ([]Task, map[string]bool) {
+	byID := make(map[string]Task, len(all))
+	for _, t := range all {
+		byID[t.ID] = t
+	}
+	in := make(map[string]bool, len(kept))
+	for _, t := range kept {
+		in[t.ID] = true
+	}
+	context := map[string]bool{}
+	for _, t := range kept {
+		// Stops on a stored loop rather than spinning: a parent chain is data, and data can be wrong.
+		for at := t.ParentID; at != "" && !in[at] && !context[at]; at = byID[at].ParentID {
+			if _, ok := byID[at]; !ok {
+				break // a parent outside this set entirely; ArrangeTasks re-roots the child
+			}
+			context[at] = true
+		}
+	}
+	if len(context) == 0 {
+		return kept, nil
+	}
+	// Rebuilt in the order `all` gives, so the result keeps whatever order the caller sorted by.
+	out := make([]Task, 0, len(kept)+len(context))
+	for _, t := range all {
+		if in[t.ID] || context[t.ID] {
+			out = append(out, t)
+		}
+	}
+	return out, context
+}
+
 // ChangedWithin reports whether a task's last known change falls inside d. An absent or unparsable
 // timestamp is no evidence of recency, so it answers false.
 func ChangedWithin(t Task, d time.Duration) bool { return changedWithin(t.UpdatedAt, d) }
