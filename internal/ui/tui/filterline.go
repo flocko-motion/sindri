@@ -19,13 +19,9 @@ type narrowing struct {
 	applies bool   // this tab has this axis at all
 }
 
-// filterLine names every axis narrowing this tab's list, "" for the ordinary view. Shown ONLY when
-// something is non-default: a permanent banner would spend a row of screen explaining the usual
-// case, and the eye stops reading a line that is always there.
-//
-// When it is shown it names every axis in force, defaults included — the axis that raised the line
-// is rarely the only one hiding rows, and a line that mentioned one of two would send the reader
-// looking for the wrong cause.
+// filterLine names every axis narrowing this tab's list, "" for the ordinary view — shown only when
+// something is non-default, and then naming every axis, defaults included, since the one that raised
+// the line is rarely the only one hiding rows.
 func (m model) filterLine() string {
 	axes := m.narrowings()
 	ordinary := true
@@ -43,13 +39,24 @@ func (m model) filterLine() string {
 			parts = append(parts, a.label)
 		}
 	}
-	return stWarn.Render(strings.Join(parts, " · ")) +
-		dimStyle.Render("  ·  "+keyClearFilters+" clears")
+	line := stWarn.Render(strings.Join(parts, " · "))
+	if note := m.filterNote(); note != "" {
+		line += stWarn.Render(" — " + note)
+	}
+	return line + dimStyle.Render("  ·  "+keyClearFilters+" clears")
 }
 
-// narrowings is what each tab can be narrowed by. Tasks is repo-scoped whatever the toggle says, so
-// its scope is not an axis a reader can act on and is left out; Repos and the meeting have no
-// filters at all.
+// filterNote is a promise the line owes beyond its axes (-> mailShortfall). Mail alone has one: it
+// is the only tab whose rows are a window rather than the whole set.
+func (m model) filterNote() string {
+	if m.tab == 6 {
+		return m.mailShortfall()
+	}
+	return ""
+}
+
+// narrowings is what each tab can be narrowed by. Tasks is repo-scoped regardless of the toggle, so
+// it has no scope axis; Repos and the meeting have no filters at all.
 func (m model) narrowings() []narrowing {
 	scope := narrowing{label: m.scopeLabel(), dflt: m.scopeRepo, applies: true}
 	switch m.tab {
@@ -69,7 +76,7 @@ func (m model) narrowings() []narrowing {
 		}
 	case 6:
 		return []narrowing{
-			{label: "filter: " + string(m.mailFilter), dflt: m.mailFilter == api.MailUnread, applies: true},
+			{label: "filter: " + string(m.mailFilter), dflt: m.mailFilter == api.MailFilters[0], applies: true},
 			{label: "to " + m.mailAgent, dflt: m.mailAgent == "", applies: m.mailAgent != ""},
 			scope,
 		}
@@ -89,16 +96,15 @@ func (m model) scopeLabel() string {
 	return "this repo"
 }
 
-// clearFilters puts every axis back to what the tab opens with, which is what makes the line go
-// away. Back to the DEFAULT rather than to the widest: "all" is itself a filter a user would then
-// have to clear, so widening would leave the line on screen and the promise unkept.
+// clearFilters puts every axis back to what its tab opens with — the DEFAULT rather than the
+// widest, since "all" is itself a filter that would leave the line, and the promise, unkept.
 func (m *model) clearFilters() {
 	if m.filterLine() == "" {
 		return // nothing narrowed: leave esc to mean nothing rather than reset the scope silently
 	}
 	m.filter, m.prFilter, m.runFilter = api.FilterActive, api.PRFilterActive, api.RunFilterActive
-	m.mailFilter, m.mailAgent = api.MailUnread, ""
+	m.mailFilter, m.mailAgent, m.mailPromised = api.MailFilters[0], "", 0
 	m.scopeRepo = true
 	m.cursor[m.tab] = 0
-	m.flash = "filters cleared"
+	m.flash = "filters cleared on every tab" // reaches further than the line above THIS tab's rows
 }

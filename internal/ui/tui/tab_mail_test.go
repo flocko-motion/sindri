@@ -213,8 +213,11 @@ func TestTheUserCanAlwaysAskWhatIsWaitingForThem(t *testing.T) {
 	if m.mailAgent != api.SenderUser {
 		t.Fatalf("the cycle should reach the user from any state, got %q", m.mailAgent)
 	}
-	if rows := m.mailRows(); len(rows) != 0 {
-		t.Errorf("with nothing addressed to them the list is empty, not the agent's mail: %d rows", len(rows))
+	// Empty of messages, but not of the row that says why: a narrowed list still states its filter
+	// line (-> filterline.go listing), so "nothing addressed to them" reads as a narrowing the user
+	// can clear rather than as a mailbox that has gone silent.
+	if rows := m.mailRows(); len(rows) != 1 {
+		t.Errorf("with nothing addressed to them the list holds only its filter line, not the agent's mail: %d rows", len(rows))
 	}
 	if got := mailWhoLabel(m.mailAgent); got != "you" {
 		t.Errorf("the footer should say who it is narrowed to, got %q", got)

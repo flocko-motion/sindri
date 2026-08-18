@@ -177,3 +177,93 @@ func TestEnterOnTheCountJumps(t *testing.T) {
 		t.Errorf("both axes should be set, got agent=%q filter=%q", m.mailAgent, m.mailFilter)
 	}
 }
+
+// windowedMailBoard is the shape the fixtures above cannot express: the count is taken over the
+// WHOLE mailbox and the board carries only its newest slice, so some of the agent's unread mail
+// sits outside m.state.Mail. It is the target case rather than a corner one — an agent that has
+// stopped reading is the one whose unread mail is oldest, and so the first to fall out of the
+// window that a count on it exists to surface.
+func windowedMailModel() model {
+	m := mailJumpModel("nori", false)
+	for i, a := range m.state.Agents {
+		if a.Name == "nori" {
+			m.state.Agents[i].UnreadMail = 5 // the mailbox holds five; the window carries two of them
+		}
+	}
+	m.state.MailTotal = 431
+	return m
+}
+
+// TestTheJumpSaysWhenTheWindowHidesSomeOfWhatWasCounted is the contradiction in its other direction:
+// a line saying five that lands on two rows disagrees with itself exactly as one saying two that
+// lands on four does. The destination cannot hold the missing rows, so it must name them.
+func TestTheJumpSaysWhenTheWindowHidesSomeOfWhatWasCounted(t *testing.T) {
+	m := windowedMailModel()
+	it, ok := unreadItem(m)
+	if !ok {
+		t.Fatal("precondition: the agent shows its unread count")
+	}
+	m.gotoItem(it.kind, it.value)
+
+	if got := len(m.mailShown()); got != 2 {
+		t.Fatalf("precondition: the window should hold 2 of the 5 counted, got %d", got)
+	}
+	line := m.filterLine()
+	for _, want := range []string{"2 of 5 shown", "window"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the line should say %q, so the reader is not left counting rows against a number that disagrees; got %q", want, line)
+		}
+	}
+}
+
+// TestAJumpTheWindowHoldsInFullSaysNothingExtra: the note is owed only where rows are missing, and a
+// permanent "2 of 2 shown" would be a caveat about nothing.
+func TestAJumpTheWindowHoldsInFullSaysNothingExtra(t *testing.T) {
+	m := mailJumpModel("nori", false)
+	it, _ := unreadItem(m)
+	m.gotoItem(it.kind, it.value)
+	if strings.Contains(m.filterLine(), "shown") {
+		t.Errorf("the window holds every counted message, so nothing is missing to report: %q", m.filterLine())
+	}
+}
+
+// TestTheShortfallBelongsToTheJumpAlone: the promise was made by a count the user followed. Once
+// they move an axis themselves they are asking their own question, and a stale "2 of 5" would be
+// answering the one before it.
+func TestTheShortfallBelongsToTheJumpAlone(t *testing.T) {
+	for name, moved := range map[string]func(*model){
+		"cycling the filter": (*model).cycleMailFilter,
+		"clearing":           (*model).clearFilters,
+		"narrowing by hand":  (*model).cycleMailWho,
+	} {
+		m := windowedMailModel()
+		it, _ := unreadItem(m)
+		m.gotoItem(it.kind, it.value)
+		if !strings.Contains(m.filterLine(), "of 5") {
+			t.Fatalf("%s: precondition: the jump reports the shortfall", name)
+		}
+		moved(&m)
+		if strings.Contains(m.filterLine(), "of 5") {
+			t.Errorf("%s left the jump's promise on the line: %q", name, m.filterLine())
+		}
+	}
+}
+
+// TestTheCountOnAForeignAgentIsPromisedToo: widening the scope is the other way a jump's destination
+// can differ from its count, and the two corrections must not cancel each other out.
+func TestTheCountOnAForeignAgentIsPromisedToo(t *testing.T) {
+	m := mailJumpModel("dwalin", true)
+	for i, a := range m.state.Agents {
+		if a.Name == "dwalin" {
+			m.state.Agents[i].UnreadMail = 4 // one more than the window carries
+		}
+	}
+	it, _ := unreadItem(m)
+	m.gotoItem(it.kind, it.value)
+	if !strings.Contains(m.filterLine(), "3 of 4 shown") {
+		t.Errorf("the shortfall should survive the scope widening, got %q", m.filterLine())
+	}
+	if !strings.Contains(m.flash, "repo") {
+		t.Errorf("and the scope change is still said out loud, got %q", m.flash)
+	}
+}

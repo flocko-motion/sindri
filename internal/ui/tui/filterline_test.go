@@ -33,7 +33,7 @@ func TestANarrowedViewNamesEveryAxis(t *testing.T) {
 	m := narrowedModel(6)
 	m.mailAgent = "dvalin" // the only non-default axis
 	line := m.filterLine()
-	for _, want := range []string{"unread", "to dvalin", "repo here"} {
+	for _, want := range []string{"filter: " + string(api.MailFilters[0]), "to dvalin", "repo here"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("the line should name %q, got %q", want, line)
 		}
@@ -92,7 +92,7 @@ func TestEscClearsEveryAxisAtOnce(t *testing.T) {
 	}
 	for name, got := range map[string]bool{
 		"mailAgent":  m.mailAgent == "",
-		"mailFilter": m.mailFilter == api.MailUnread,
+		"mailFilter": m.mailFilter == api.MailFilters[0],
 		"scopeRepo":  m.scopeRepo,
 		"filter":     m.filter == api.FilterActive,
 		"prFilter":   m.prFilter == api.PRFilterActive,
@@ -144,5 +144,36 @@ func TestEscStillCancelsTheMenuPrefix(t *testing.T) {
 	}
 	if m.mailAgent != "dwalin" {
 		t.Error("cancelling the menu must not also clear the filters — one keypress, one meaning")
+	}
+}
+
+// TestEscSaysHowFarItReaches: it clears every tab, but the line above the rows names only this
+// tab's axes, so a user clearing a mail narrowing loses a PR filter the line never mentioned. In a
+// change whose whole theme is that a narrowing must be honest about itself, the key that undoes one
+// has to be honest about its reach.
+func TestEscSaysHowFarItReaches(t *testing.T) {
+	m := narrowedModel(6)
+	m.mailAgent, m.prFilter = "dwalin", api.PRFilterAll
+	m.onKey(keyClearFilters)
+	if !strings.Contains(m.flash, "every tab") {
+		t.Errorf("esc reached past this tab's axes without saying so, got %q", m.flash)
+	}
+}
+
+// TestTheMailDefaultIsReadWhereItIsDefined: the value the tab opens with is written in api, and a
+// copy of it here would go stale the day it changes — at which point the line would start calling
+// the default a narrowing, and esc would "clear" to something the view never opens on.
+func TestTheMailDefaultIsReadWhereItIsDefined(t *testing.T) {
+	m := narrowedModel(6)
+	if m.mailFilter != api.MailFilters[0] {
+		t.Fatalf("the Mail tab opens on %q, which is not what api says a view opens on", m.mailFilter)
+	}
+	m.mailFilter = api.NextMailFilter(api.MailFilters[0])
+	if m.filterLine() == "" {
+		t.Error("a filter that is not the default should raise the line")
+	}
+	m.onKey(keyClearFilters)
+	if m.mailFilter != api.MailFilters[0] {
+		t.Errorf("clearing put the filter back to %q rather than what the view opens on", m.mailFilter)
 	}
 }

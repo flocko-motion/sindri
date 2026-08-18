@@ -75,18 +75,19 @@ type model struct {
 	// which is what put the reviews and history below the fold out of reach entirely.
 	prMeta scroll.Viewport
 
-	filter     api.TaskFilter // Tasks tab: which segment of the backlog is shown (-> api.TaskFilters)
-	prFilter   api.PRFilter   // PRs tab: which segment is shown (-> api.PRFilters)
-	runFilter  api.RunFilter  // Runs tab: which segment is shown (-> api.RunFilters)
-	mailFilter api.MailFilter // Mail tab: unread or all (-> api.MailFilters)
-	mailAgent  string         // Mail tab: narrowed to this recipient ("" = every agent)
-	mailBody   string         // the selected message's full body, fetched (the board carries a preview)
-	mailBodyID int64          // which message mailBody belongs to
-	collapsed  map[string]bool
-	merging    map[string]bool   // PR ids the user just triggered a merge on — shown as a transient "merging" on the row until the hub confirms
-	busy       map[string]string // task ids the user just triggered a close/scrap on → the transient verb ("closing"/"deleting") shown on the row until the hub confirms
-	hideDetail bool              // § force-hides the detail pane (else shown when wide enough)
-	scopeRepo  bool              // TUI-wide global↔repo scope (default repo): Agents/PRs narrow to the active repo when true. Tasks is always repo-scoped regardless.
+	filter       api.TaskFilter // Tasks tab: which segment of the backlog is shown (-> api.TaskFilters)
+	prFilter     api.PRFilter   // PRs tab: which segment is shown (-> api.PRFilters)
+	runFilter    api.RunFilter  // Runs tab: which segment is shown (-> api.RunFilters)
+	mailFilter   api.MailFilter // Mail tab: unread or all (-> api.MailFilters)
+	mailAgent    string         // Mail tab: narrowed to this recipient ("" = every agent)
+	mailPromised int            // unread count a jump promised, 0 otherwise (-> showUnreadFor, mailShortfall)
+	mailBody     string         // the selected message's full body, fetched (the board carries a preview)
+	mailBodyID   int64          // which message mailBody belongs to
+	collapsed    map[string]bool
+	merging      map[string]bool   // PR ids the user just triggered a merge on — shown as a transient "merging" on the row until the hub confirms
+	busy         map[string]string // task ids the user just triggered a close/scrap on → the transient verb ("closing"/"deleting") shown on the row until the hub confirms
+	hideDetail   bool              // § force-hides the detail pane (else shown when wide enough)
+	scopeRepo    bool              // TUI-wide global↔repo scope (default repo): Agents/PRs narrow to the active repo when true. Tasks is always repo-scoped regardless.
 
 	rightFocus  bool // detail (right) column has focus (h/l switch; j/k move within)
 	rightCursor int  // focused actionable item in the right column
@@ -146,9 +147,9 @@ func newModel(cl *client.HTTP, ch <-chan api.BoardState, root string) model {
 	// Tasks open on "active" — the open backlog plus whatever changed in the last couple of hours.
 	// Plain "open" hid a task the moment it closed, so the work just finished left no trace on the
 	// board and the tab read as though nothing had happened.
-	// Mail opens on "active" — unread plus whatever changed inside the shared window. The mailbox
-	// keeps everything for ever, so "all" is the one view that gets less usable every day.
-	m := model{cl: cl, ch: ch, root: root, filter: api.FilterActive, prFilter: api.PRFilterActive, runFilter: api.RunFilterActive, mailFilter: api.MailActive, collapsed: map[string]bool{}, merging: map[string]bool{}, busy: map[string]string{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
+	// Mail opens on api's own default — unread plus whatever changed inside the shared window. The
+	// mailbox keeps everything for ever, so "all" is the one view that gets less usable every day.
+	m := model{cl: cl, ch: ch, root: root, filter: api.FilterActive, prFilter: api.PRFilterActive, runFilter: api.RunFilterActive, mailFilter: api.MailFilters[0], collapsed: map[string]bool{}, merging: map[string]bool{}, busy: map[string]string{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
 	m.reclamp()
 	return m
 }

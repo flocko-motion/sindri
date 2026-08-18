@@ -190,6 +190,7 @@ func mailBodyFetchCmd(cl *client.HTTP, id int64) tea.Cmd {
 // (-> api.MailFilters), so a keypress and a flag admit the same set.
 func (m *model) cycleMailFilter() {
 	m.mailFilter = api.NextMailFilter(m.mailFilter)
+	m.mailPromised = 0 // the promise was about the unread set a jump named; this is the user's own choice
 	m.cursor[m.tab] = 0
 	m.flash = "mail: " + string(m.mailFilter)
 }
@@ -200,6 +201,7 @@ func (m *model) cycleMailFilter() {
 // row selected the first step goes straight there, matching the CLI's --mine. The row step comes first
 // because "you" empties the list of other recipients, leaving no row a later step could select.
 func (m *model) cycleMailWho() {
+	m.mailPromised = 0 // narrowing by hand answers a different question from the one a count asked
 	switch {
 	case m.mailAgent == "":
 		if msg, ok := m.selMail(); ok && msg.Agent != api.SenderUser {
@@ -223,13 +225,27 @@ func (m *model) showUnreadFor(agent string) {
 	m.mailAgent, m.mailFilter = agent, api.MailUnread
 	m.flash = "mail: " + agent + ", unread"
 	for _, a := range m.state.Agents {
-		if a.Name == agent && !m.inScope(a.Project) {
+		if a.Name != agent {
+			continue
+		}
+		m.mailPromised = a.UnreadMail
+		if !m.inScope(a.Project) {
 			m.scopeRepo = false
 			m.flash += " (all repos: it is not in this one)"
-			break
 		}
+		break
 	}
 	m.cursor[m.tab] = 0
+}
+
+// mailShortfall names what a jump owes when the count and the board's window disagree: "" once the
+// window holds every message it promised, else how many of the promised total are missing.
+func (m model) mailShortfall() string {
+	shown := len(m.mailShown())
+	if m.mailPromised <= shown {
+		return ""
+	}
+	return fmt.Sprintf("%d of %d shown, the rest older than the board window", shown, m.mailPromised)
 }
 
 // mailWhoLabel names the narrowing for the footer and the flash, in the words the tab uses.
