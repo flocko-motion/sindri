@@ -179,6 +179,13 @@ func (s *Service) DeleteAgent(project, name string) error {
 // StopAgent tears down the pod but keeps identity, worktree, socket and log, so a relaunch
 // resumes where it left off.
 func (s *Service) StopAgent(project, name string) error {
+	return s.stopAgent(project, name, "pod removed")
+}
+
+// stopAgent is StopAgent with the log line's reason as the caller's — human-requested by default,
+// but the idle sweep states what it acted on instead (-> FireIdleStops), since this is the hub
+// acting on the fleet unasked and a user who finds an agent stopped must be able to see why.
+func (s *Service) stopAgent(project, name, reason string) error {
 	ps := s.store.For(project)
 	a, ok, err := ps.GetAgent(name)
 	if err != nil {
@@ -200,7 +207,7 @@ func (s *Service) StopAgent(project, name string) error {
 	// restart that drops the in-memory intent above.
 	a.Stopped = true
 	_ = ps.PutAgent(a)
-	_ = ps.Log(name, "stop", "pod removed")
+	_ = ps.Log(name, "stop", reason)
 	s.deps.Notify()
 	return nil
 }

@@ -120,6 +120,10 @@ func (r *refwatch) preflight(projects []store.Project) {
 			// Same hazard, same remedy: a compaction due is decided at the assignment gate but fired
 			// here, off-tick, so it never lands on an agent mid-command either (-> FireDueCompactions).
 			r.h.agents.FireDueCompactions(p.Tag)
+			// Idleness alone reclaims a pod, and waiting work wakes one back up — both read the fleet
+			// rather than any one agent's request, so both belong on this same sweep.
+			r.h.agents.FireIdleStops(p.Tag)
+			r.h.agents.FireIdleStarts(p.Tag)
 		}
 	}()
 }
