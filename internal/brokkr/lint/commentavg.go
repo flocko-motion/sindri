@@ -13,10 +13,23 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/flo-at/sindri/internal/config"
 )
 
 // DefaultMaxCommentAvg is the mean lines per comment a file may average. A ceiling, not a target.
 const DefaultMaxCommentAvg = 2.0
+
+// MaxCommentAvgFor resolves a project's own lint.max_comment_avg, or DefaultMaxCommentAvg with
+// none set — the config half of the effective ceiling, shared so cmd/brokkr's flag layer on top of
+// it and the hub's own brief (-> workflow.Engine.commentBudget) read one function, not two
+// independent copies of the same default-then-config fallback that could drift apart.
+func MaxCommentAvgFor(cfg config.Config) float64 {
+	if cfg.Lint.MaxCommentAvg != nil {
+		return *cfg.Lint.MaxCommentAvg
+	}
+	return DefaultMaxCommentAvg
+}
 
 // DefaultMaxCommentLine caps one comment line's width. Without it the mean is gameable in the one
 // direction that reads worst: fewer, longer lines pass a per-LINE budget while the prose grows.

@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/config"
 )
 
 // TestAllowanceMatchesSpec pins the rule to its formula: a file may spend a base budget of
@@ -428,6 +431,24 @@ func TestAimNeverExceedsTheMax(t *testing.T) {
 	}
 	if aim := AimFor(2.0); aim != 1.5 {
 		t.Errorf("the default max should give an ideal of 1.5, got %.1f", aim)
+	}
+}
+
+// TestMaxCommentAvgForFallsBackToTheDefault: an unconfigured project reads the same ceiling
+// CommentAvg itself falls back to — the one this repo's cmd/brokkr flag defaults to as well.
+func TestMaxCommentAvgForFallsBackToTheDefault(t *testing.T) {
+	if got := MaxCommentAvgFor(config.Config{}); got != DefaultMaxCommentAvg {
+		t.Errorf("MaxCommentAvgFor(unconfigured) = %v, want %v", got, DefaultMaxCommentAvg)
+	}
+}
+
+// TestMaxCommentAvgForHonorsAProjectOverride: lint.max_comment_avg wins over the default — the
+// SAME resolution cmd/brokkr's flag layer and the hub's own brief both sit on top of.
+func TestMaxCommentAvgForHonorsAProjectOverride(t *testing.T) {
+	override := 3.0
+	cfg := config.Config{Lint: api.Lint{MaxCommentAvg: &override}}
+	if got := MaxCommentAvgFor(cfg); got != 3.0 {
+		t.Errorf("MaxCommentAvgFor(override) = %v, want 3.0", got)
 	}
 }
 

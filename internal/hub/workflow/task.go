@@ -281,13 +281,11 @@ func (e *Engine) workDirective(project, name, task, container string) (string, e
 }
 
 // commentBudget resolves the SAME two numbers the submit gate's comment-length trend checks
-// against — the ceiling from project config, defaulting exactly as repoLintBar does, and the aim
-// lint.AimFor derives from it — so a worker's brief and the gate can never disagree about the limit.
+// against: the ceiling via lint.MaxCommentAvgFor — the one resolver cmd/brokkr's own flag layer
+// also sits on top of, so the two can never drift apart — and the aim lint.AimFor derives from it.
 func (e *Engine) commentBudget(project string) (aim, ceiling float64) {
-	ceiling = lint.DefaultMaxCommentAvg
-	if cfg, err := e.deps.ProjectConfig(project); err == nil && cfg.Lint.MaxCommentAvg != nil {
-		ceiling = *cfg.Lint.MaxCommentAvg
-	}
+	cfg, _ := e.deps.ProjectConfig(project) // unreadable: cfg is the zero value, which resolves the default
+	ceiling = lint.MaxCommentAvgFor(cfg)
 	return lint.AimFor(ceiling), ceiling
 }
 
