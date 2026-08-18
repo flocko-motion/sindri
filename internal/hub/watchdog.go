@@ -1,9 +1,8 @@
 // package: hub / watchdog
 // type:    logic (agent liveness observer)
-// job:     own what the hub believes about every agent's liveness — one loop probing on a
-// fixed cadence, so a board read reports the last observation instead of taking
-// one, and no single reading flips an agent to "down". The machine's memory is
-// read on the same terms, on a slower cadence of its own.
+// job:     own what the hub believes about every agent's liveness — the ONE place that polls
+// the container runtime, clocked on completion so nothing runs twice at once. A
+// board read reports the last observation; no single reading flips an agent down.
 // limits:  observations only; how a status word is chosen from liveness + phase stays in
 // agent.AgentStatus, what headroom means in agent.Headroom, the board in state.go.
 package hub
@@ -21,7 +20,9 @@ import (
 )
 
 const (
-	// watchInterval is the observation cadence — under the TUI's 3s poll, so no reading is wasted.
+	// watchInterval is the REST between sweeps, not a period: the loop clocks on completion, so a
+	// slow runtime throttles the observer instead of queueing work behind it. Under the TUI's 3s
+	// poll, so no reading is wasted.
 	watchInterval = 2 * time.Second
 
 	// watchProbeParallel bounds concurrent container commands: process spawns do not parallelise
@@ -120,23 +121,19 @@ func (w *watchdog) seed() {
 // loop observes the fleet until stopped.
 func (w *watchdog) loop() {
 	defer close(w.done)
-	w.sweep() // the real first reading, off the startup path (see newWatchdog)
-	go w.sampleCapacity()
-	t := time.NewTicker(watchInterval)
-	c := time.NewTicker(capacityInterval)
-	defer t.Stop()
-	defer c.Stop()
+	var lastCapacity time.Time
 	for {
+		w.sweep() // the first one is the real first reading, off the startup path (see newWatchdog)
+		// In the loop's own goroutine rather than beside it: one observer means one process spawn
+		// at a time, and a capacity sample racing a sweep is the parallelism this exists to end.
+		if time.Since(lastCapacity) >= capacityInterval {
+			w.sampleCapacity()
+			lastCapacity = time.Now()
+		}
 		select {
 		case <-w.stop:
 			return
-		case <-t.C:
-			w.sweep()
-		// Sampled off the loop's own goroutine: it is another process spawn, and a slow one must
-		// hold up liveness no more than a slow agent holds up the fleet. Its own timeout is well
-		// inside the interval, so two samples cannot overlap.
-		case <-c.C:
-			go w.sampleCapacity()
+		case <-time.After(watchInterval):
 		}
 	}
 }
