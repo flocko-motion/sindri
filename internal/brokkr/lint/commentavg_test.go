@@ -422,11 +422,11 @@ func TestReportAsksForTheJudgementNotJustTheNumber(t *testing.T) {
 // leaves no room — reporting "ideal 1.0, max 0.5" would ask for something the rule forbids.
 func TestAimNeverExceedsTheMax(t *testing.T) {
 	for _, max := range []float64{0.2, 0.5, 1.0, 1.5, 2.0, 8.0} {
-		if aim := aimFor(max); aim > max {
-			t.Errorf("aimFor(%.1f) = %.1f, must not exceed the max", max, aim)
+		if aim := AimFor(max); aim > max {
+			t.Errorf("AimFor(%.1f) = %.1f, must not exceed the max", max, aim)
 		}
 	}
-	if aim := aimFor(2.0); aim != 1.5 {
+	if aim := AimFor(2.0); aim != 1.5 {
 		t.Errorf("the default max should give an ideal of 1.5, got %.1f", aim)
 	}
 }

@@ -46,9 +46,11 @@ What does NOT count as fixing it:
   - Raising ` + "`lint: max_comment_avg:`" + `. That is the maintainer's call, not a way past a finding.
 `
 
-// aimFor is the mean a fix should TARGET, below the ceiling it must clear: a file trimmed to the
+// AimFor is the mean a fix should TARGET, below the ceiling it must clear: a file trimmed to the
 // limit exactly fails again on the next comment added, so half a line of headroom is the goal.
-func aimFor(allowed float64) float64 {
+// Exported so a caller stating the budget up front (-> workflow.Engine.commentBudget) computes it
+// the same way this package's own report does, rather than re-deriving it and drifting.
+func AimFor(allowed float64) float64 {
 	aim := allowed - 0.5
 	if aim < 1 {
 		aim = 1 // one line per comment is the floor; below that there is nothing to aim at
@@ -152,7 +154,7 @@ func CommentAvg(roots []string, maxAvg float64, maxLine int, blocks bool, cap *C
 
 	// From the CONFIGURED max, so it is one number per run. Only the max adapts per file; an ideal
 	// that moved with it would read "ideal 10.5" on a two-comment file.
-	aim := aimFor(maxAvg)
+	aim := AimFor(maxAvg)
 	// Worst mean first, so a capped run withholds the files that need it least.
 	sort.Slice(viols, func(i, j int) bool { return viols[i].avg > viols[j].avg })
 	for _, v := range viols {

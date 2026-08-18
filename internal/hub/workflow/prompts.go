@@ -10,6 +10,8 @@ package workflow
 import (
 	"fmt"
 	"strings"
+
+	"github.com/flo-at/sindri/internal/brokkr/lint"
 )
 
 // DefaultReviewPrompt seeds review-prompt.txt. It names the task: "fit to the task" is unanswerable
@@ -270,16 +272,33 @@ func FileList(files []string) string {
 
 // DirWorking is a worker's directive while it holds a leaf task, and the answer every time until
 // it submits — so it names what ENDS the task, not just what it is.
-func DirWorking(task string) string {
+func DirWorking(task string, aim, ceiling float64) string {
 	return fmt.Sprintf("Work on task %s. A task is finished by a PULL REQUEST, not by finished code: "+
 		"run `sindri submit \"<summary>\"` and the hub records your branch as a PR and sends it for "+
-		"review. Until you do, %s stays yours — being handed it again means exactly that.", task, task)
+		"review. Until you do, %s stays yours — being handed it again means exactly that.%s",
+		task, task, CommentBudgetNote(aim, ceiling))
 }
 
 // DirRejected hands a worker its reviewer's feedback verbatim, every time it asks what to do, so
 // the comments reach it whether or not it saw the rejection message.
-func DirRejected(task, feedback string) string {
-	return fmt.Sprintf("Your PR for task %s was REJECTED — address this reviewer feedback, then run `sindri submit \"<summary>\"`:\n\n%s", task, feedback)
+func DirRejected(task, feedback string, aim, ceiling float64) string {
+	return fmt.Sprintf("Your PR for task %s was REJECTED — address this reviewer feedback, then run "+
+		"`sindri submit \"<summary>\"`:\n\n%s%s", task, feedback, CommentBudgetNote(aim, ceiling))
+}
+
+// CommentBudgetNote is the one shared statement handed to a worker wherever it is sent to write
+// code, so the submit gate's comment-length trend is stated up front rather than met as a
+// rejection after the prose is already written. aim/ceiling are the hub's own resolution of the
+// SAME numbers the gate checks (-> Engine.commentBudget), never re-derived here.
+func CommentBudgetNote(aim, ceiling float64) string {
+	return fmt.Sprintf(
+		"\n\nComment length: keep each file's comments to a MEAN around %.1f lines per block. It's a "+
+			"trend, not a per-comment cap — one longer explanation is fine, paid for by short ones "+
+			"elsewhere. The gate's ceiling is %.1f; land under it with room, since a file trimmed to it "+
+			"exactly fails again on the next comment added. Say what a thing is FOR, don't restate the "+
+			"signature or control flow, and delete rather than compress — trimming to the limit isn't "+
+			"fixing it. Comment lines also cap at %d characters.",
+		aim, ceiling, lint.DefaultMaxCommentLine)
 }
 
 // DirPlanner answers a planner with nothing in hand. Its old "nothing is assigned to you" read as

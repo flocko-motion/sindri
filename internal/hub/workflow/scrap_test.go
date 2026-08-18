@@ -48,13 +48,22 @@ type stubDeps struct {
 	compactErr   error
 	cleared      []string // agents FireClear was called for, in order
 	fireClearErr error
+	// projectConfig overrides ProjectConfig's answer; the zero value (no lint.max_comment_avg set)
+	// means the caller sees no override, same as an unconfigured project.
+	projectConfig    config.Config
+	projectConfigErr error
 }
 
-func (d *stubDeps) ProjectRoot(string) string                   { return d.root }
-func (d *stubDeps) ProjectConfig(string) (config.Config, error) { return config.Config{}, nil }
-func (d *stubDeps) ArchitectureDoc(string) string               { return "" }
-func (d *stubDeps) Container(_, name string) string             { return name }
-func (d *stubDeps) Notify()                                     {}
+func (d *stubDeps) ProjectRoot(string) string { return d.root }
+func (d *stubDeps) ProjectConfig(string) (config.Config, error) {
+	if d.projectConfigErr != nil {
+		return config.Config{}, d.projectConfigErr
+	}
+	return d.projectConfig, nil
+}
+func (d *stubDeps) ArchitectureDoc(string) string   { return "" }
+func (d *stubDeps) Container(_, name string) string { return name }
+func (d *stubDeps) Notify()                         {}
 
 // Deliver records what was sent and HOW, so a test can assert the classification a sender chose —
 // which is half of what this feature is (-> workflow.Delivery). The recipient/text lists stay as they

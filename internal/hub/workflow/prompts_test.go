@@ -109,8 +109,8 @@ func TestRunServicePointedAtOnlyWhenClaiming(t *testing.T) {
 		}
 	}
 	for _, s := range []string{
-		DirWorking("td-1"),
-		DirContainerWorking("td-EPIC", "td-1"),
+		DirWorking("td-1", 1.5, 2.0),
+		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
 	} {
 		if strings.Contains(s, "sindri run") {
 			t.Errorf("a REPEATED directive must not carry the run pointer every time: %q", s)
@@ -155,10 +155,10 @@ func TestAgentAdviceNeverPromisesGit(t *testing.T) {
 		MsgReview("pr-td-1", "do the thing", "td-1", "main", "", false),
 		SystemPrompt("eitri", "worker", "", ""),
 		SystemPrompt("dvalin", "reviewer", "", ""),
-		DirWorking("td-1"),
+		DirWorking("td-1", 1.5, 2.0),
 		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
-		DirContainerWorking("td-EPIC", "td-1"),
-		DirContainerRejected("td-EPIC", "td-1", "not yet"),
+		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
+		DirContainerRejected("td-EPIC", "td-1", "not yet", 1.5, 2.0),
 		MsgMilestoneRejected("td-EPIC", "user", "not yet"),
 		ReplyCheckpointed("td-1", "td-2", "the next subtask"),
 	}
@@ -182,9 +182,9 @@ func TestAgentAdviceNeverPromisesGit(t *testing.T) {
 // lines under "do NOT run git", which is the same dead end in different words.
 func TestAgentAdviceNeverAsksForACommit(t *testing.T) {
 	for _, s := range []string{
-		DirWorking("td-1"),
+		DirWorking("td-1", 1.5, 2.0),
 		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
-		DirContainerWorking("td-EPIC", "td-1"),
+		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
 		ReplyResolveDirty("working", false),
 		ReplyResolveDirty("working", true),
 		ReplyResolveDirty("submitted", false),
@@ -246,7 +246,7 @@ func TestResolveDirtyAdviceIsRunnable(t *testing.T) {
 func TestAssignedWorkSaysItStartsNow(t *testing.T) {
 	for _, s := range []string{
 		ReplyCheckpointed("td-1", "td-2", "the next subtask"),
-		DirContainerWorking("td-EPIC", "td-1"),
+		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
 	} {
 		if !strings.Contains(s, "starts now") && !strings.Contains(s, "Implement it") {
 			t.Errorf("a hand-off that assigns work must say to start it: %q", s)
@@ -295,7 +295,7 @@ func TestAssignedWorkSaysItStartsNow(t *testing.T) {
 func TestMidFeatureAdviceNamesCheckpoint(t *testing.T) {
 	for _, s := range []string{
 		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
-		DirContainerWorking("td-EPIC", "td-1"),
+		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
 		ReplyCheckpointed("td-1", "td-2", "the next subtask"),
 		ReplySubtasksRemain("td-EPIC", "td-2", 3),
 		ReplyResolveDirty("working", true),
@@ -311,7 +311,7 @@ func TestMidFeatureAdviceNamesCheckpoint(t *testing.T) {
 	// to do per subtask, which is the confusion the checkpoint flow exists to prevent.
 	for _, s := range []string{
 		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
-		DirContainerWorking("td-EPIC", "td-1"),
+		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
 	} {
 		if !strings.Contains(s, "never per subtask") {
 			t.Errorf("mid-feature advice must rule out a per-subtask submit: %q", s)
@@ -322,7 +322,7 @@ func TestMidFeatureAdviceNamesCheckpoint(t *testing.T) {
 	for _, s := range []string{
 		DirContainerDone("td-EPIC"),
 		ReplyCheckpointedLast("td-2", "td-EPIC"),
-		DirContainerRejected("td-EPIC", "td-1", "not yet"),
+		DirContainerRejected("td-EPIC", "td-1", "not yet", 1.5, 2.0),
 		MsgMilestoneRejected("td-EPIC", "reviewer", "not yet"),
 	} {
 		if !strings.Contains(s, "`sindri submit") {

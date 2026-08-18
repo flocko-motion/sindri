@@ -244,7 +244,8 @@ func (e *Engine) containerNext(project, agent, container string) (string, bool, 
 		return "", false, err
 	}
 	if ok {
-		return DirContainerWorking(container, next.ID), true, nil
+		aim, ceiling := e.commentBudget(project)
+		return DirContainerWorking(container, next.ID, aim, ceiling), true, nil
 	}
 	gated, err := e.gatedUnder(project, container)
 	if err != nil {

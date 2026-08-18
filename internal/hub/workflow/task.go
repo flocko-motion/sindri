@@ -18,6 +18,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/brokkr/lint"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/task"
@@ -267,15 +268,27 @@ func (e *Engine) workDirective(project, name, task, container string) (string, e
 	if err != nil {
 		return "", err
 	}
+	aim, ceiling := e.commentBudget(project)
 	switch {
 	case rejected && container != "":
-		return DirContainerRejected(container, task, feedback), nil
+		return DirContainerRejected(container, task, feedback, aim, ceiling), nil
 	case rejected:
-		return DirRejected(task, feedback), nil
+		return DirRejected(task, feedback, aim, ceiling), nil
 	case container != "":
-		return DirContainerWorking(container, task), nil
+		return DirContainerWorking(container, task, aim, ceiling), nil
 	}
-	return DirWorking(task), nil
+	return DirWorking(task, aim, ceiling), nil
+}
+
+// commentBudget resolves the SAME two numbers the submit gate's comment-length trend checks
+// against — the ceiling from project config, defaulting exactly as repoLintBar does, and the aim
+// lint.AimFor derives from it — so a worker's brief and the gate can never disagree about the limit.
+func (e *Engine) commentBudget(project string) (aim, ceiling float64) {
+	ceiling = lint.DefaultMaxCommentAvg
+	if cfg, err := e.deps.ProjectConfig(project); err == nil && cfg.Lint.MaxCommentAvg != nil {
+		ceiling = *cfg.Lint.MaxCommentAvg
+	}
+	return lint.AimFor(ceiling), ceiling
 }
 
 // AgentDirective is the single next action the hub wants this agent to take — the
@@ -331,7 +344,8 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 				}
 				if rejected {
 					_ = ps.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "working"})
-					return DirContainerRejected(st.Container, st.Task, feedback), nil
+					aim, ceiling := e.commentBudget(project)
+					return DirContainerRejected(st.Container, st.Task, feedback, aim, ceiling), nil
 				}
 				return DirSubmitted, nil
 			case "gating":
@@ -364,7 +378,8 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 		}
 		if rejected {
 			_ = ps.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Phase: "working"})
-			return DirRejected(st.Task, feedback), nil
+			aim, ceiling := e.commentBudget(project)
+			return DirRejected(st.Task, feedback, aim, ceiling), nil
 		}
 		return DirSubmitted, nil
 	case "gating":
