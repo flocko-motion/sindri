@@ -109,7 +109,7 @@ func (m model) runRows() []row {
 			table.Cell{Text: r.Command},
 		), r.ID})
 	}
-	return listing(runsTable, nil, out)
+	return m.listing(runsTable, nil, out)
 }
 
 // runDetailLines is the full run detail for the right column / ENTER modal: its metadata, then

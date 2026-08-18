@@ -1,8 +1,9 @@
 // package: tui / rowsections
 // type:    ui (labelled selector lists)
 // job:     the lines a selector list holds that are not rows — the column labels over
-// it, and the headings over the two groups a scoped list can hold — each a
-// row that selects nothing, so the cursor walks past them.
+// it, the headings over the two groups a scoped list can hold, and the line
+// saying how a narrowed view is narrowed — each a row that selects nothing,
+// so the cursor walks past them.
 // limits:  assembling and labelling only; each row's own rendering is its tab's
 // (-> tab_*.go), the widths are its table's (-> ui/table), and which group a
 // row belongs in is the scope rule's (-> items.go inScope).
@@ -20,16 +21,24 @@ func headingRow(text string) row { return row{text: text} }
 // spacerRow is the blank line between two sections, a row for the same reason a heading is one.
 func spacerRow() row { return row{} }
 
-// listing is a tab's whole row list: the column labels, then its rows, sectioned when some of them
-// come from another repo. One assembler, so no tab can forget its labels or invent a second way of
-// putting an unselectable line in a list. Empty in, empty out — labels over no rows are chrome
-// explaining a table that isn't there, and every tab's own empty state says more.
-func listing(t table.Table, foreign, local []row) []row {
+// listing is a tab's whole row list: how it is narrowed, the column labels, then its rows,
+// sectioned when some of them come from another repo. One assembler, so no tab can forget its
+// labels or invent a second way of putting an unselectable line in a list.
+//
+// Labels over no rows are chrome explaining a table that isn't there, and every tab's own empty
+// state says more — but a NARROWED empty list still gets its filter line, because "you filtered
+// everything out, esc clears" is the one thing that empty state cannot say for itself.
+func (m model) listing(t table.Table, foreign, local []row) []row {
+	var out []row
+	if line := m.filterLine(); line != "" {
+		out = append(out, headingRow(line))
+	}
 	rows := sectioned(foreign, local)
 	if len(rows) == 0 {
-		return nil
+		return out
 	}
-	return append([]row{headingRow(dimStyle.Render(t.Header()))}, rows...)
+	out = append(out, headingRow(dimStyle.Render(t.Header())))
+	return append(out, rows...)
 }
 
 // sectioned labels foreign rows above local ones, and leaves a purely local list exactly as it was.

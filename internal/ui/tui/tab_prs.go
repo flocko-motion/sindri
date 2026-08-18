@@ -245,7 +245,7 @@ func (m model) prRows() []row {
 			foreign = append(foreign, m.prRow(p))
 		}
 	}
-	return listing(prTable, foreign, local)
+	return m.listing(prTable, foreign, local)
 }
 
 // prRow renders one PR row: repo, id, status, age, who wrote it, who is reviewing it, its branch.

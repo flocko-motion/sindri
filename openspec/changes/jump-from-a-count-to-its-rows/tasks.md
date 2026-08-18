@@ -16,4 +16,15 @@
 
 ## 2. An active filter says so, and one key clears it (sd-0e30bb)
 
-- [ ] (next subtask)
+- [x] 2.1 `filterLine` states every axis in force, and only when one of them is non-default.
+- [x] 2.2 It is the third user of the unselectable-line mechanism sd-9c1436 settled — a `headingRow`
+      through the one `listing` assembler, not a parallel path — so the cursor walks past it.
+- [x] 2.3 Every list tab, each with the axes it actually has: Tasks its filter, Agents the scope,
+      PRs and Runs both, Mail also the recipient. Tasks' scope is left out, being fixed to the repo
+      whatever the toggle says.
+- [x] 2.4 `esc` clears every axis to the tab's DEFAULT, not to the widest, and does nothing at all
+      on a view that is not narrowed.
+- [x] 2.5 An emptied list keeps its line, which is the case where "there is nothing" and "you
+      filtered it all out" look identical without one.
+- [x] 2.6 Pinned: silence on every tab's ordinary view, every axis named when shown, the line
+      unselectable and first, esc clearing all of it, and esc still cancelling the space menu.

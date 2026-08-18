@@ -62,8 +62,11 @@ const (
 	// keyMenuShown is how the prefix reads in a footer: a bare space would render as a gap, and a
 	// gap advertises nothing.
 	keyMenuShown = "space"
-	keyDetail    = "§" // toggle the detail pane
-	keyQuit      = "q" // quit
+	// esc, on a plain list: clear every narrowing at once. Unbound there until now, and "get me out
+	// of this narrowed view" is what it already means over a modal or a prompt.
+	keyClearFilters = "esc"
+	keyDetail       = "§" // toggle the detail pane
+	keyQuit         = "q" // quit
 )
 
 // keyScope selects where a binding applies and is shown.
@@ -114,6 +117,9 @@ var keymap = []binding{
 	{keys: keyRepo, label: lbl("repo"), scope: scopeGlobal},
 	{keys: keyConfig, label: lbl("config"), scope: scopeGlobal},
 	{keys: keyRefresh, label: lbl("refresh"), scope: scopeGlobal},
+	// esc is deliberately NOT a footer row. It applies only while something is narrowed, and the
+	// footer shows a binding whatever the state, so a permanent "clear filters" would advertise a
+	// key that usually does nothing. The line above the rows names it exactly when it works.
 	{keys: keyQuit, label: lbl("quit"), scope: scopeGlobal},
 
 	// Tasks: each scope's rows are grouped and ordered look-first, so the footer reads left to

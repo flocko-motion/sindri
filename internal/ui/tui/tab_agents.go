@@ -517,7 +517,7 @@ func (m model) agentRows() []row {
 			foreign = append(foreign, m.agentRow(a))
 		}
 	}
-	out := listing(agentTable, foreign, local)
+	out := m.listing(agentTable, foreign, local)
 	for _, o := range m.state.Orphans {
 		// The id is the container name so D can remove it; agent-only actions skip
 		// non-roster ids, and isOrphan gates the ones reading selID directly.

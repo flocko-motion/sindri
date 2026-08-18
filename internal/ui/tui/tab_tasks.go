@@ -121,7 +121,7 @@ func (m model) taskRows() []row {
 			tr.ID,
 		}
 	}
-	return listing(taskTable, nil, out)
+	return m.listing(taskTable, nil, out)
 }
 
 // taskRowStyle is a row's colour and its state word. The WORD comes from the gate holding it where

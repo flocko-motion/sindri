@@ -129,6 +129,9 @@ func (m *model) onKey(k string) tea.Cmd {
 			return nil
 		}
 		m.moveCursor(-m.bodyHeight() / 2)
+	case keyClearFilters: // clear every narrowing on this tab at once (-> clearFilters)
+		m.clearFilters()
+		return nil
 	case keyFilter:
 		if m.tab == 0 {
 			m.filter = api.NextTaskFilter(m.filter)

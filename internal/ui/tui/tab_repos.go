@@ -45,7 +45,7 @@ func (m model) repoRows() []row {
 			table.Cell{Text: p.Path},
 		), p.Tag})
 	}
-	return listing(repoTable, nil, out)
+	return m.listing(repoTable, nil, out)
 }
 
 // repoAgentCount is how many agents the repo has on its roster (from the board).

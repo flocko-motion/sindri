@@ -85,7 +85,7 @@ func (m model) mailRows() []row {
 			foreign = append(foreign, r)
 		}
 	}
-	rows := listing(mailTable, foreign, local)
+	rows := m.listing(mailTable, foreign, local)
 	// The window is not the history: a list that stopped at its rows would present the recent end as
 	// everything, and finding last month's message is the whole reason nothing is deleted. Outside the
 	// labelled rows, since it is a note about the listing rather than a message in it.
