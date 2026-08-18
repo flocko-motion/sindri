@@ -222,6 +222,9 @@ var prTable = table.Table{
 	{Label: "repo", Width: 10, Clip: true},
 	{Label: "pr", Width: 14},
 	{Label: "status", Width: 9},
+	// Two ages, and the pair is the point: "for" is how long it has held this status, "age" how long
+	// the PR has existed. A week-old PR that went approved an hour ago reads as both at once.
+	{Label: "for", Width: 4, Right: true},
 	{Label: "age", Width: 4, Right: true},
 	{Label: "agent", Width: 10},
 	{Label: "reviewer", Width: 10},
@@ -264,6 +267,7 @@ func (m model) prRow(p api.PR) row {
 		table.Cell{Text: m.repoName(p.Project), Style: m.repoStyle(p.Project).Render},
 		table.Cell{Text: p.ID, Style: sc.Render},
 		table.Cell{Text: status, Style: sc.Render},
+		table.Cell{Text: shortAge(p.StatusChangedAt), Style: sc.Render},
 		table.Cell{Text: shortAge(p.CreatedAt), Style: sc.Render},
 		table.Cell{Text: p.Agent, Style: sc.Render},
 		table.Cell{Text: dash(p.Reviewer), Style: sc.Render},
@@ -294,6 +298,15 @@ func prKindLabel(kind string) string {
 		return "interim (mid-task contribution)"
 	}
 	return "final (task done)"
+}
+
+// statusHeldFor suffixes the detail's status line with how long the PR has worn it (" for 3d"), or
+// nothing at all on a row predating the column — an unadorned status beats one qualified by "-".
+func statusHeldFor(p api.PR) string {
+	if age := shortAge(p.StatusChangedAt); age != "-" {
+		return dimStyle.Render(" for " + age)
+	}
+	return ""
 }
 
 // shortAge renders an RFC3339 timestamp compactly ("3d", "now"); "-" when missing, not a fake age.
@@ -424,7 +437,7 @@ func (m model) prMetaItems() []metaItem {
 	}
 	items = append(items,
 		metaItem{text: d.PR.ID},
-		metaItem{text: "status: " + api.StatusLabel(d.PR.Status, api.ApprovalCount(d.Reviews))},
+		metaItem{text: "status: " + api.StatusLabel(d.PR.Status, api.ApprovalCount(d.Reviews)) + statusHeldFor(d.PR)},
 		metaItem{text: "kind:   " + prKindLabel(d.PR.Kind)},
 		metaItem{text: "agent:  " + d.PR.Agent, kind: "agent", value: d.PR.Agent},
 	)

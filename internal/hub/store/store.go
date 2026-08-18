@@ -163,6 +163,7 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE prs ADD COLUMN kind TEXT NOT NULL DEFAULT 'final'`,
 		`ALTER TABLE reviews ADD COLUMN advisory INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE prs ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE prs ADD COLUMN status_changed_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE agent_state ADD COLUMN escalation TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE agent_state ADD COLUMN notes_left INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE mail ADD COLUMN in_reply_to INTEGER NOT NULL DEFAULT 0`,

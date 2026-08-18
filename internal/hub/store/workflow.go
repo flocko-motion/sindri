@@ -293,14 +293,20 @@ func (p *ProjectStore) PutPR(pr PR) error {
 		pr.Kind = "final"
 	}
 	pr.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	// The status stamp is decided in SQL against the row already stored, so it compares with what is
+	// actually there rather than with whatever the caller read some steps earlier — every writer here
+	// does Get, mutate, Put, and two of those interleaving would otherwise lose a transition.
+	pr.StatusChangedAt = pr.UpdatedAt
 	_, err := p.s.db.Exec(`
-		INSERT INTO prs (project,id,task,agent,branch,base,status,feedback,created_at,kind,updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?)
+		INSERT INTO prs (project,id,task,agent,branch,base,status,feedback,created_at,kind,updated_at,status_changed_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(project,id) DO UPDATE SET
 			task=excluded.task, agent=excluded.agent, branch=excluded.branch,
 			base=excluded.base, status=excluded.status, feedback=excluded.feedback, kind=excluded.kind,
-			updated_at=excluded.updated_at`,
-		p.project, pr.ID, pr.Task, pr.Agent, pr.Branch, pr.Base, pr.Status, pr.Feedback, pr.CreatedAt, pr.Kind, pr.UpdatedAt)
+			updated_at=excluded.updated_at,
+			status_changed_at=CASE WHEN prs.status<>excluded.status
+				THEN excluded.status_changed_at ELSE prs.status_changed_at END`,
+		p.project, pr.ID, pr.Task, pr.Agent, pr.Branch, pr.Base, pr.Status, pr.Feedback, pr.CreatedAt, pr.Kind, pr.UpdatedAt, pr.StatusChangedAt)
 	if err != nil {
 		return fmt.Errorf("put pr %s: %w", pr.ID, err)
 	}
@@ -341,7 +347,7 @@ func (s *Store) AllPRs(statuses ...string) ([]PR, error) {
 	return queryPRs(s.db, q, args...)
 }
 
-const prCols = `SELECT project,id,task,agent,branch,base,status,feedback,created_at,kind,updated_at FROM prs`
+const prCols = `SELECT project,id,task,agent,branch,base,status,feedback,created_at,kind,updated_at,status_changed_at FROM prs`
 
 type scanner interface{ Scan(...any) error }
 
@@ -375,7 +381,7 @@ func scanPR(row scanner) (PR, bool, error) {
 
 func scanPRRow(row scanner) (PR, error) {
 	var p PR
-	err := row.Scan(&p.Project, &p.ID, &p.Task, &p.Agent, &p.Branch, &p.Base, &p.Status, &p.Feedback, &p.CreatedAt, &p.Kind, &p.UpdatedAt)
+	err := row.Scan(&p.Project, &p.ID, &p.Task, &p.Agent, &p.Branch, &p.Base, &p.Status, &p.Feedback, &p.CreatedAt, &p.Kind, &p.UpdatedAt, &p.StatusChangedAt)
 	return p, err
 }
 

@@ -497,3 +497,45 @@ func TestReviewingPR(t *testing.T) {
 		t.Fatalf("completed review should not count, got %q", pr)
 	}
 }
+
+// TestStatusChangedAtMovesOnlyOnAStatusChange is the whole reason the column exists beside
+// updated_at, which every write refreshes. A PR rebased onto a new base, or given feedback, is still
+// sitting in the status it was in — answering "how long has this been open" from the last write
+// would report a week-old PR as an hour old, which is the number a person acts on.
+func TestStatusChangedAtMovesOnlyOnAStatusChange(t *testing.T) {
+	p := openTmpProject(t)
+	pr := PR{ID: "pr-td-9", Task: "td-9", Agent: "dvalin", Branch: "b", Base: "master", Status: "open"}
+	if err := p.PutPR(pr); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	first, _, _ := p.GetPR("pr-td-9")
+	if first.StatusChangedAt == "" {
+		t.Fatal("a new PR must record when it reached its first status")
+	}
+
+	// A write that leaves the status alone: the stamp must stand, however much else moved.
+	pr = first
+	pr.Base, pr.Feedback = "main", "please fix the naming"
+	time.Sleep(1100 * time.Millisecond) // RFC3339 is second-resolution, so a change must cross one
+	if err := p.PutPR(pr); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	held, _, _ := p.GetPR("pr-td-9")
+	if held.StatusChangedAt != first.StatusChangedAt {
+		t.Errorf("a rebase moved the status stamp: %q -> %q", first.StatusChangedAt, held.StatusChangedAt)
+	}
+	if held.UpdatedAt == first.UpdatedAt {
+		t.Error("updated_at must still move on every write — the two stamps answer different questions")
+	}
+
+	// And the transition itself does move it.
+	pr = held
+	pr.Status = "approved"
+	if err := p.PutPR(pr); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	moved, _, _ := p.GetPR("pr-td-9")
+	if moved.StatusChangedAt == first.StatusChangedAt {
+		t.Errorf("reaching %q left the stamp at %q", moved.Status, moved.StatusChangedAt)
+	}
+}
