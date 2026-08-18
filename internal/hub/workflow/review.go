@@ -197,6 +197,12 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 			return "", false, err
 		}
 		if ok && pr.Status == "open" {
+			// Holding a review is holding something, so mail outranks it as everywhere else.
+			if d, has, err := e.pendingMail(project, name); err != nil {
+				return "", false, err
+			} else if has {
+				return d, true, nil
+			}
 			return DirReview(pr.ID, pr.Task, e.taskTitle(project, pr.Task), pr.Agent, e.deps.ArchitectureDoc(project)), true, nil
 		}
 		// Settled while it was reading: a verdict on it now decides nothing, so the hold is released
@@ -210,8 +216,16 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 	var id int64
 	var prID string
 	found, err := ps.UnclaimedReview(&id, &prID)
-	if err != nil || !found {
+	if err != nil {
 		return "", false, err
+	}
+	if !found {
+		if d, has, err := e.pendingMail(project, name); err != nil { // blocking, not boundary: no op to wait out
+			return "", false, err
+		} else if has {
+			return d, true, nil
+		}
+		return "", false, nil
 	}
 	// Prepare, then hand over — one pass, claimNext's rule. No model-select: a review has no tier.
 	if e.clearArmed(project, name) {
@@ -224,6 +238,11 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 		if err := e.deps.Compact(project, name); err != nil {
 			return "", false, err
 		}
+	}
+	if d, has, err := e.pendingMail(project, name); err != nil { // after compaction, before the assign below
+		return "", false, err
+	} else if has {
+		return d, true, nil
 	}
 	req, _ := e.ReviewPrompt(project)
 	if err := e.assignReview(project, id, prID, name, req); err != nil {

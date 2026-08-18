@@ -209,7 +209,8 @@ func openIDs(tasks []store.Task) []string {
 }
 
 // claimNextSubtask is claimNext's one-pass rule for a held feature's own subtasks rather than the
-// top-level pools; with none open, containerNext decides finished vs. still gated.
+// top-level pools; with none open, containerNext decides finished vs. still gated. Mail defers the
+// same way claimNext's does, past whatever model change or compaction runs here.
 func (e *Engine) claimNextSubtask(project, agent, container string) (string, bool, error) {
 	if e.clearArmed(project, agent) {
 		return "", false, nil // about to land (fired by the caller): a subtask claimed now would be cut in half by it
@@ -218,20 +219,24 @@ func (e *Engine) claimNextSubtask(project, agent, container string) (string, boo
 	if err != nil {
 		return "", false, err
 	}
-	if len(children) == 0 {
-		return e.containerNext(project, agent, container)
-	}
-	tier := api.TierOrDefault(children[0].Tier)
-	if want, known := e.deps.ModelForTier(tier); known && want != e.deps.CurrentModel(project, agent) {
-		if err := e.deps.SetModel(project, agent, want); err != nil {
-			return "", false, err
+	if len(children) > 0 {
+		tier := api.TierOrDefault(children[0].Tier)
+		if want, known := e.deps.ModelForTier(tier); known && want != e.deps.CurrentModel(project, agent) {
+			if err := e.deps.SetModel(project, agent, want); err != nil {
+				return "", false, err
+			}
+			return DirRetiering(tier), true, nil
 		}
-		return DirRetiering(tier), true, nil
-	}
-	if _, due := e.compactDue(project, agent); due {
-		if err := e.deps.Compact(project, agent); err != nil {
-			return "", false, err
+		if _, due := e.compactDue(project, agent); due {
+			if err := e.deps.Compact(project, agent); err != nil {
+				return "", false, err
+			}
 		}
+	}
+	if d, has, err := e.pendingMail(project, agent); err != nil {
+		return "", false, err
+	} else if has {
+		return d, true, nil
 	}
 	return e.containerNext(project, agent, container)
 }

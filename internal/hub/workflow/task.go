@@ -289,6 +289,17 @@ func (e *Engine) commentBudget(project string) (aim, ceiling float64) {
 	return lint.AimFor(ceiling), ceiling
 }
 
+// pendingMail is the directive for unread mail, when there is any. Deferred by the task-boundary
+// gates (claimNext, claimNextSubtask, reviewDirective's unclaimed path) until any pending clear,
+// model change or compaction resolves — else mail is read into the context that operation discards.
+func (e *Engine) pendingMail(project, name string) (dir string, has bool, err error) {
+	n, err := e.store.For(project).UnreadMailCount(name)
+	if err != nil {
+		return "", false, err
+	}
+	return DirUnreadMail(n), n > 0, nil
+}
+
 // AgentDirective is the single next action the hub wants this agent to take — the
 // no-arg `sindri` answer. The hub decides; the agent obeys. When there's nothing to
 // do it BLOCKS until there is. ctx cancels the wait when the pod dies.
@@ -302,26 +313,33 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 		return "", fmt.Errorf("unknown agent %q", name)
 	}
 	st, _ := ps.GetState(name)
-	// Unread mail outranks EVERYTHING. Before the paths that block, since an agent left blocking would
-	// sit on what may release it; before the escalation, the one state told to sit still, whose mail
-	// may answer or moot the question — and whose "nothing has come back" is true only once read.
-	if n, merr := ps.UnreadMailCount(name); merr != nil {
-		return "", merr
-	} else if n > 0 {
-		return DirUnreadMail(n), nil
-	}
-	// Escalated outranks every role's directive: with the work verbs shut, any other answer sends the
-	// agent at a wall. Repeated on EVERY ask — a relaunched agent has no memory of asking.
+	// Escalated outranks every role's directive — repeated on EVERY ask, since a relaunched agent has
+	// no memory of asking. Mail outranks even that: it may answer or moot the question.
 	if st.Escalation != "" {
+		if d, has, err := e.pendingMail(project, name); err != nil {
+			return "", err
+		} else if has {
+			return d, nil
+		}
 		return DirEscalated(st.Escalation), nil
 	}
 	if a.Role == "coauthor" {
+		if d, has, err := e.pendingMail(project, name); err != nil {
+			return "", err
+		} else if has {
+			return d, nil
+		}
 		return DirCoauthor, nil
 	}
-	if a.Role == "reviewer" {
+	if a.Role == "reviewer" { // reviewDirective checks its own mail, deferring it the same way
 		return e.waitForWork(ctx, func() (string, bool, error) { return e.reviewDirective(project, name) })
 	}
 	if a.Role == "planner" {
+		if d, has, err := e.pendingMail(project, name); err != nil {
+			return "", err
+		} else if has {
+			return d, nil
+		}
 		switch st.Phase {
 		case "submitted":
 			return DirSubmitted, nil
@@ -334,6 +352,14 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 	// merged PR says so as plainly as its status, and covers one left held by a partial-milestone merge.
 	if st.Container != "" {
 		if t, ok, _ := ps.GetTask(st.Container); ok && !featureLanded(ps, t) {
+			switch st.Phase {
+			case "submitted", "gating", "working":
+				if d, has, err := e.pendingMail(project, name); err != nil {
+					return "", err
+				} else if has {
+					return d, nil
+				}
+			}
 			switch st.Phase {
 			case "submitted":
 				feedback, rejected, err := e.prRejected(project, name)
@@ -351,8 +377,8 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 			case "working":
 				return e.workDirective(project, name, st.Task, st.Container)
 			default:
-				// Blocking: a feature whose remaining work is gated is neither finished nor able to
-				// hand anything out, so it waits on the user like any other empty queue.
+				// Blocking: a feature whose remaining work is gated waits like any other empty queue.
+				// claimNextSubtask defers mail past whatever clear or compaction it resolves here.
 				return e.waitForWork(ctx, func() (string, bool, error) {
 					if fired, err := e.fireClearIfArmed(project, name); err != nil {
 						return "", false, err
@@ -365,6 +391,14 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 		}
 		_ = ps.SetState(store.AgentState{Agent: name, Phase: "idle"})
 		return e.waitForNextTask(ctx, project, name)
+	}
+	switch st.Phase {
+	case "working", "submitted", "gating":
+		if d, has, err := e.pendingMail(project, name); err != nil {
+			return "", err
+		} else if has {
+			return d, nil
+		}
 	}
 	switch st.Phase {
 	case "working":
@@ -382,7 +416,7 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 		return DirSubmitted, nil
 	case "gating":
 		return DirGating, nil
-	default: // idle — claim the next task, blocking until one exists
+	default: // idle — claim the next task; claimNext defers mail past whatever it resolves for it.
 		return e.waitForNextTask(ctx, project, name)
 	}
 }
@@ -398,6 +432,12 @@ func (e *Engine) retired(project, name string) bool {
 // whether work exists; compact and model-select are claimNext's, once it has an assignment.
 func (e *Engine) waitForNextTask(ctx context.Context, project, name string) (string, error) {
 	if e.retired(project, name) {
+		// Told to sit still, same as an escalation — mail outranks it for the same reason.
+		if d, has, err := e.pendingMail(project, name); err != nil {
+			return "", err
+		} else if has {
+			return d, nil
+		}
 		return DirRetired, nil
 	}
 	return e.waitForWork(ctx, func() (string, bool, error) {
@@ -407,6 +447,12 @@ func (e *Engine) waitForNextTask(ctx context.Context, project, name string) (str
 			return DirClearPending, true, nil
 		}
 		if tokens, full := e.contextFull(project, name); full {
+			// Also told to sit still, not a pending operation for mail to wait out.
+			if d, has, err := e.pendingMail(project, name); err != nil {
+				return "", false, err
+			} else if has {
+				return d, true, nil
+			}
 			return DirFull(tokens), true, nil
 		}
 		return e.claimNext(project, name)
@@ -432,128 +478,6 @@ func (e *Engine) waitForWork(ctx context.Context, check func() (string, bool, er
 		case <-ch: // a hub mutation — re-check
 		case <-time.After(workPollInterval): // re-sync td and re-check
 		}
-	}
-}
-
-// SyncTasks refreshes a project's cached task set from its sources (td + openspec +
-// the TTL-throttled GitHub scan). ForceSyncTasks bypasses the GitHub TTL for an
-// explicit [r]efresh.
-func (e *Engine) SyncTasks(project string) error { return e.syncTasks(project, false) }
-
-// ForceSyncTasks is SyncTasks with the GitHub scan forced past its TTL ([r]efresh).
-func (e *Engine) ForceSyncTasks(project string) error { return e.syncTasks(project, true) }
-
-func (e *Engine) syncTasks(project string, force bool) error {
-	root := e.deps.ProjectRoot(project)
-	ps := e.store.For(project)
-	// Before reading any source: a repo arriving with a td backlog gets it once, or its tasks
-	// would simply be absent from the moment td stopped being a source.
-	if err := e.importTdOnce(project, root); err != nil {
-		return err
-	}
-	var rows []store.Task
-
-	// Every source treated identically — the hub never branches on which it is. Each self-gates,
-	// normalizes to task.Task, and throttles internally. td errors fail the sync (it is primary);
-	// a network source degrades to its last good list.
-	for _, src := range e.taskSources(project) {
-		if !src.Enabled(root) {
-			continue
-		}
-		ts, err := src.Tasks(root, force)
-		if err != nil {
-			return err
-		}
-		for _, t := range ts {
-			rows = append(rows, ToStoreTask(t))
-		}
-	}
-
-	if ov, err := ps.PriorityOverrides(); err == nil {
-		for i := range rows {
-			if p, ok := ov[rows[i].ID]; ok {
-				rows[i].Priority = p
-			}
-		}
-	}
-	// Parentage is the hub's for every task, so it goes on after the sources rather than coming
-	// from them: no source but sindri's own carries the notion at all.
-	if links, err := ps.ParentLinks(); err == nil {
-		for i := range rows {
-			if parent, ok := links[rows[i].ID]; ok {
-				rows[i].ParentID = parent
-			}
-		}
-	}
-	return ps.ReplaceTasks(rows)
-}
-
-// checkParent validates a requested parent before anything is written: it must exist, and it must
-// not already sit below the task being re-parented. A loop is unreachable from any root, so the task
-// list would simply stop showing every task inside it.
-func (e *Engine) checkParent(project, parent, self string) error {
-	if parent == "" {
-		return nil
-	}
-	if parent == self {
-		return fmt.Errorf("a task can't be its own parent")
-	}
-	ps := e.store.For(project)
-	tasks, err := ps.AllTasks()
-	if err != nil {
-		return err
-	}
-	known := false
-	for _, t := range tasks {
-		if t.ID == parent {
-			known = true
-			break
-		}
-	}
-	if !known {
-		return fmt.Errorf("unknown parent %q", parent)
-	}
-	if self == "" {
-		return nil // a task being created has nothing below it yet
-	}
-	// Walk up from the proposed parent, reading the links themselves rather than the read model
-	// they are laid over. Reaching self means self is already an ancestor.
-	links, err := ps.ParentLinks()
-	if err != nil {
-		return err
-	}
-	chain := []string{parent}
-	for at := links[parent]; at != ""; at = links[at] {
-		if at == self {
-			return fmt.Errorf("%s already sits above %s (%s) — parenting it there would close a loop, "+
-				"and everything inside a loop drops off the task list", self, parent,
-				strings.Join(append(chain, self), " → "))
-		}
-		chain = append(chain, at)
-		if len(chain) > len(links)+1 {
-			return fmt.Errorf("the parent chain above %q doesn't terminate — a loop is already stored (%s)",
-				parent, strings.Join(chain, " → "))
-		}
-	}
-	return nil
-}
-
-// ToStoreTask maps a source-normalized domain task onto the hub's cached store row.
-// Exported because the hub's targeted single-task refresh reuses the same mapping.
-func ToStoreTask(t task.Task) store.Task {
-	var updatedAt, createdAt string
-	if !t.UpdatedAt.IsZero() {
-		updatedAt = t.UpdatedAt.UTC().Format(time.RFC3339)
-	}
-	// Left empty when the source has no answer, rather than stamped with now: the store keeps what it
-	// already had, and inventing a time here would age every task from the last sync.
-	if !t.CreatedAt.IsZero() {
-		createdAt = t.CreatedAt.UTC().Format(time.RFC3339)
-	}
-	return store.Task{
-		ID: t.ID, Title: t.Title, Status: t.Status, Priority: t.Priority, Tier: t.Tier,
-		Type: t.Type, Labels: strings.Join(t.Labels, ","), ParentID: t.ParentID,
-		Description: t.Description, URL: t.URL, UpdatedAt: updatedAt, CreatedAt: createdAt,
 	}
 }
 
@@ -585,8 +509,8 @@ func (e *Engine) CmdNext(c registry.Caller, _ []string, out io.Writer) (int, err
 	return 0, nil
 }
 
-// claimNext hands a worker the best-rated unit in a project (-> nextUp), preparing it first: a
-// model change if the tier wants one, else a compact if fill is past the threshold, then handover.
+// claimNext hands a worker the best-rated unit in a project (-> nextUp), preparing it first: a model
+// change or compaction, then mail, then handover.
 func (e *Engine) claimNext(project, agent string) (string, bool, error) {
 	// Retired by a human, or by its own context filling: either way it is being wound down, and the
 	// gate is here rather than at the task queries so it holds however the work would have arrived.
@@ -610,20 +534,27 @@ func (e *Engine) claimNext(project, agent string) (string, bool, error) {
 		return "", false, err
 	}
 	t, isPackage, ok := nextUp(packages, leaves, e.tierPrefers(project, agent))
+	if ok {
+		tier := api.TierOrDefault(t.Tier)
+		if want, known := e.deps.ModelForTier(tier); known && want != e.deps.CurrentModel(project, agent) {
+			if err := e.deps.SetModel(project, agent, want); err != nil {
+				return "", false, err
+			}
+			return DirRetiering(tier), true, nil
+		}
+		if _, due := e.compactDue(project, agent); due {
+			if err := e.deps.Compact(project, agent); err != nil {
+				return "", false, err
+			}
+		}
+	}
+	if d, has, err := e.pendingMail(project, agent); err != nil { // after any op above, before the claim below
+		return "", false, err
+	} else if has {
+		return d, true, nil
+	}
 	if !ok {
 		return "", false, nil
-	}
-	tier := api.TierOrDefault(t.Tier)
-	if want, known := e.deps.ModelForTier(tier); known && want != e.deps.CurrentModel(project, agent) {
-		if err := e.deps.SetModel(project, agent, want); err != nil {
-			return "", false, err
-		}
-		return DirRetiering(tier), true, nil
-	}
-	if _, due := e.compactDue(project, agent); due {
-		if err := e.deps.Compact(project, agent); err != nil {
-			return "", false, err
-		}
 	}
 	if isPackage {
 		return e.claimContainer(project, agent, t)
