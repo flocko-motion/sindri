@@ -1,4 +1,10 @@
-# Sindri
+<p align="center">
+  <img src="assets/web/emblem.png" alt="" width="160">
+</p>
+
+<p align="center">
+  <img src="assets/web/wordmark.png" alt="Sindri" width="420">
+</p>
 
 A sandboxed AI-agent orchestrator. You hand work to agents that run inside
 containers; they write code and open pull requests; **you approve the merge** —
