@@ -533,6 +533,13 @@ func agentInfoCmd() *cobra.Command {
 					found.Name, found.Role, found.Status, agentTaskLabel(b, found.Task),
 					agentTaskLabel(b, found.Feature), dash(found.PR), dash(found.Workspace), memoryLabel(found.Memory, dflt),
 					theme.ContextLine(found.ContextTokens))
+				// Same reasoning as the arming below, and it bites harder: retirement shows up only
+				// when the agent next asks for work, and DirRetired told it to stop asking — so the
+				// pane goes quiet and nothing anywhere says why.
+				if found.Retired {
+					fmt.Printf("retired:   %s no new work — `sindri agent retire %s --back` returns it to service\n",
+						theme.MarkRetired, found.Name)
+				}
 				// The same line the TUI's detail carries: an arming changes nothing observable until
 				// it fires, so the only way to know it is set is to be told.
 				if found.ClearArmed {
