@@ -84,9 +84,7 @@
       reason is shared; the per-claim grant and fleet ceiling stay with the note channel, which is what
       bounds the USER's attention.
 - [x] 5d.6 Mailing yourself is refused and points at the log.
-- [ ] 5d.7 NOT HERE: waking an idle agent that has unread mail is sd-aa3f93, which is why this task's
-      guarantee is only half-real until that lands — an agent that has stopped calling `sindri` will
-      not read what it is sent.
+- [x] 5d.7 The wake that makes this guarantee real is sd-aa3f93's, and it has landed (-> 5f).
 
 ## 5e. Replying by id (sd-63a19b)
 
@@ -99,6 +97,16 @@
 - [x] 5e.5 A reply to the user does NOT consume the note grant — it answers a message they chose to
       send — while the length cap still applies.
 - [x] 5e.6 Both front-ends: `sindri mail reply <id>` and `i` on the Mail tab, both addressing by id.
+
+## 5f. The hub wakes an agent that has mail (sd-aa3f93)
+
+- [x] 5f.1 `NudgeMailWaiting` on the sweep that already looks at every agent, so an agent that stopped
+      asking still reads what it was sent.
+- [x] 5f.2 The eligibility rule is SHARED with the rated-work nudge (`idleAndReachable`): alive, at an
+      empty prompt, holding nothing, not parked — one mechanism with a second reason, not a second path.
+- [x] 5f.3 Keyed on the newest unread id, like the stall nudge is keyed on the idle spell: told once per
+      thing waiting, and again when something new arrives.
+- [x] 5f.4 Supersedes sd-2f38d9's idle-nudge paragraph, whose 5d.7 line was left open for this.
 
 ## 6. Verify
 
@@ -122,4 +130,6 @@
       and the read half intact.
 - [x] 6.13 Replying needs no name and threads; the hub is refused with somewhere to go; the user's reply
       is uncharged; another agent's mail is refused; and the user can reply from either front-end.
-- [x] 6.14 `make verify` passes.
+- [x] 6.14 An idle agent with mail is woken; the same message is not nudged twice and new mail is; an
+      agent that needs a human, is parked, or holds work is left alone; an empty mailbox wakes nobody.
+- [x] 6.15 `make verify` passes.

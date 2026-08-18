@@ -88,6 +88,19 @@ func (p *ProjectStore) UnreadMail(agent string) ([]Mail, error) {
 		p.project, agent)
 }
 
+// NewestUnreadMail is an agent's unread count and the id of its newest unread message. The id is what a
+// nudge is keyed on: telling an agent once about what is waiting is the point, and NEW mail changes the
+// id, which is what makes a second nudge honest rather than a repeat.
+func (p *ProjectStore) NewestUnreadMail(agent string) (newest int64, count int, err error) {
+	err = p.s.db.QueryRow(
+		`SELECT COALESCE(MAX(id), 0), COUNT(*) FROM mail WHERE project=? AND agent=? AND read_at=''`,
+		p.project, agent).Scan(&newest, &count)
+	if err != nil {
+		return 0, 0, fmt.Errorf("newest unread mail for %s: %w", agent, err)
+	}
+	return newest, count, nil
+}
+
 // UnreadMailCount is how many messages an agent has not read — what the directive reminds it of.
 func (p *ProjectStore) UnreadMailCount(agent string) (int, error) {
 	var n int

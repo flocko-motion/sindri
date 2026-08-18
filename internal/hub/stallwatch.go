@@ -25,11 +25,15 @@ type stallwatch struct {
 	// spell rather than a timestamp so a stall is prodded once — and a NEW stall, which starts a
 	// new spell, is prodded again.
 	nudged map[agentKey]time.Time
+	// mailed records the newest unread message each agent has been told about, for the same reason and
+	// keyed the same way: once per thing waiting, and again when something new arrives.
+	mailed map[agentKey]int64
 }
 
 // newStallwatch starts the loop. It must not block: New runs before Serve answers the socket.
 func newStallwatch(h *Hub) *stallwatch {
-	s := &stallwatch{h: h, stop: make(chan struct{}), done: make(chan struct{}), nudged: map[agentKey]time.Time{}}
+	s := &stallwatch{h: h, stop: make(chan struct{}), done: make(chan struct{}),
+		nudged: map[agentKey]time.Time{}, mailed: map[agentKey]int64{}}
 	go s.loop()
 	return s
 }
@@ -63,6 +67,10 @@ func (s *stallwatch) sweep() {
 	}
 	for _, a := range agents {
 		key := agentKey{a.Project, a.Name}
+		// An idle agent with mail waiting is woken here, on the same tick that catches a stall: an agent
+		// that finished and stopped calling `sindri` would otherwise never read what it was sent, which
+		// would make "mail must be read" false exactly when it mattered (-> workflow.NudgeMailWaiting).
+		s.mailed[key], _ = s.h.wf.NudgeMailWaiting(a.Project, a.Name, s.mailed[key])
 		l, ok := s.h.watch.get(a.Project, a.Name)
 		// The spell is keyed on whichever clock this state is judged by, so a cut-off turn that
 		// resumes and dies again is a new spell rather than one already prodded for.

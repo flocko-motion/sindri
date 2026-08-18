@@ -293,3 +293,44 @@ Both front-ends SHALL offer the reply, so the user can answer from wherever they
 
 - **WHEN** an agent replies to a message addressed to a different agent
 - **THEN** it is refused
+
+### Requirement: The hub wakes an agent that has mail waiting
+
+The hub SHALL wake an idle agent that has unread mail. Mail reaches an agent whenever it next
+asks the hub what to do, and an idle agent may never ask again — the case already seen, where
+an agent finishes its work and simply stops. Without this wake the guarantee that a message
+which must be read is kept until it is read would hold of the record and fail in effect,
+exactly when it mattered.
+
+The wake SHALL be the hub's, never the sender's. No agent gains the power to interrupt
+another: what an agent does is leave mail, and what the hub does is tell an idle agent that
+something is waiting — which is already its job.
+
+It SHALL hold for mail from ANY sender — the user, the hub, or another agent — since it is
+what makes the distinction between mail and push honest rather than nominal.
+
+An agent that needs a HUMAN SHALL NOT be woken. Blocked, signed out, mid-turn or cut off, it
+cannot act on mail, and a nudge it cannot answer is noise on the very signal a user relies on
+to notice a stuck agent. Nor SHALL one the hub has parked — retired, or its context full —
+since the hub put it there and told it to wait. Nor one holding work, which will ask anyway
+and be handed its mail first.
+
+The same waiting message SHALL NOT be nudged for twice. An agent told once and still not
+reading is either choosing not to or is wedged, and repeating it every cycle burns its context
+and teaches it to skim the one channel it must not skim. Mail that arrives AFTER a wake is a
+new thing waiting and SHALL earn another.
+
+#### Scenario: An agent that stopped asking
+
+- **WHEN** an idle agent has unread mail and is sitting at an empty prompt
+- **THEN** the hub tells it what is waiting and how to read it
+
+#### Scenario: Told once
+
+- **WHEN** an agent has been woken for the mail it has and has still not read it
+- **THEN** it is not woken again for the same message, and is woken again when new mail arrives
+
+#### Scenario: An agent that cannot act
+
+- **WHEN** an agent with unread mail is blocked, signed out, mid-turn, retired or full
+- **THEN** it is not woken
