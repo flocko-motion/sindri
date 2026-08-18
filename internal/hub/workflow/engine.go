@@ -15,11 +15,8 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// taskSources is the ordered set of task backends the workflow syncs from and notifies on merge.
-// Each self-filters by id scheme, so the workflow treats them uniformly and never branches on which
-// concrete source is underneath a task. ownedSource always leads, project-scoped, because the source
-// sindri owns reads the hub's own store rather than a tool in the repo; the rest are whatever the
-// composition root wired in at New (github, openspec, ...) — the engine learns nothing about them.
+// taskSources is the ordered set of task backends the workflow syncs from and notifies on merge,
+// self-filtered by id scheme; ownedSource always leads, the rest are whatever New wired in.
 func (e *Engine) taskSources(project string) []tasks.Source {
 	return append([]tasks.Source{ownedSource{e.store.For(project)}}, e.sources...)
 }
@@ -36,10 +33,8 @@ func (e *Engine) TaskSourceToolMissing(root string) bool {
 	return false
 }
 
-// Deps is the seam the workflow needs back into the hub — everything the
-// orchestration touches that isn't the store (held directly) or another workflow
-// step. The hub supplies the implementation; this keeps the workflow package free of
-// the hub's transport, pods, and tmux.
+// Deps is the seam back into the hub for everything orchestration touches that isn't the store or
+// another workflow step — keeps this package free of the hub's transport, pods, and tmux.
 type Deps interface {
 	// ProjectRoot resolves a project (repoTag) to its on-disk repo root.
 	ProjectRoot(project string) string
@@ -51,10 +46,8 @@ type Deps interface {
 	Container(project, name string) string
 	// Notify wakes the board (an SSE change notification).
 	Notify()
-	// Deliver sends a message to an agent the way d says: mail keeps it until the agent reads it, a
-	// push types it into the session now, and a sender states both (-> delivery.go). This is how
-	// every hub-originated message reaches an agent — a bare injection is push-only by omission,
-	// which is exactly the silent loss mail exists to prevent.
+	// Deliver sends a message the way d says: mail keeps it until read, a push types it in now
+	// (-> delivery.go) — every hub-originated message goes through this.
 	Deliver(project, name, text string, d Delivery) error
 	// Interrupt aborts an agent's current operation (sends ESC to its session), so a
 	// scrapped-task notice lands on an idle prompt rather than queuing behind work.
@@ -63,14 +56,12 @@ type Deps interface {
 	AgentAlive(project, name string) bool
 	// AgentUp is the watchdog's last reading of the same, free. What anything on a timer asks.
 	AgentUp(project, name string) bool
-	// AgentIdle reports an agent sitting at an empty prompt, from the watchdog's last observation.
-	// What it answers is whether a message sent NOW would be acted on: text typed into a running
-	// turn lands in the input box and dies there when the turn ends.
+	// AgentIdle reports an agent at an empty prompt: would a message sent NOW be acted on, or lost
+	// in an input box when the running turn ends?
 	AgentIdle(project, name string) bool
 	// TaskComments returns a task's comments for display.
 	TaskComments(project, id string) []store.Comment
-	// AddTaskComment posts on a task's thread as author — the write half of TaskComments, for a
-	// workflow step whose record belongs where the user reads it rather than in an agent's log.
+	// AddTaskComment posts on a task's thread as author — TaskComments' write half.
 	AddTaskComment(project, id, author, body string) error
 	// Subscribe returns a change-notification channel and an unsubscribe func — how
 	// the directive loop waits for work.
@@ -79,50 +70,43 @@ type Deps interface {
 	KnownProjects() []store.Project
 	// BrokkrBin locates the brokkr toolbelt binary (the lint gate shells out to it).
 	BrokkrBin() (string, error)
-	// ContextUsage reports an agent's current session context size, the window it fills, and the
-	// model filling it, all read off its transcript. ok=false when nothing has been recorded yet.
+	// ContextUsage reports the session's context size, window and model, off its transcript. ok=false
+	// when nothing has been recorded yet.
 	ContextUsage(project, name string) (tokens, window int, model string, ok bool)
-	// CompactionThreshold is the token count above which a session filling window tokens is worth
-	// compacting, from the backend's own formula for the model that window belongs to.
+	// CompactionThreshold is the token count worth compacting at, for the model window belongs to.
 	CompactionThreshold(window int) int
-	// CurrentModel is the model an agent is effectively running: detected off its transcript while
-	// alive, the stored choice otherwise.
+	// CurrentModel is the model an agent is effectively running: detected while alive, else recorded.
 	CurrentModel(project, name string) string
-	// ModelForTier resolves a difficulty tier to the model it dispatches to, ok=false for anything
-	// the backend does not recognise.
+	// ModelForTier resolves a difficulty tier to its model, ok=false if unrecognised.
 	ModelForTier(tier string) (model string, ok bool)
-	// SetModel changes the model an agent runs on — compacting and relaunching it first if it is
-	// running, since the session belongs to its old model and cannot cross onto the new one.
+	// SetModel changes the model an agent runs on — clearing and relaunching it if running, since
+	// the session belongs to its old model and cannot cross onto the new one.
 	SetModel(project, name, model string) error
-	// Compact fires Claude Code's own /compact into an agent's live session at a leaf boundary —
-	// the gate's decision, this only performs it.
+	// Compact fires Claude Code's own /compact at a leaf boundary — the gate's decision, this only
+	// performs it, once, never checking whether it landed below the threshold that triggered it.
 	Compact(project, name string) error
-	// CompactPending reports a fired compaction not yet observed to land, so compactDue's caller can
-	// wait rather than stack a second one behind it (-> agent.Service.CompactPending).
-	CompactPending(project, name string) bool
-	// ForgetCompactPending clears that flag — compactDue's own signal that a fresh reading below the
-	// threshold proves the wait is over.
-	ForgetCompactPending(project, name string)
-	// FireClear fires Claude Code's own /clear into an agent's live session at a leaf boundary and
-	// re-serves its directive once the reset settles — the gate's decision, this only performs it.
+	// BeginAssignment marks an agent mid the preparation after a fresh claim, so AtLeafBoundary
+	// admits it rather than refusing the step the gate is running. Paired with EndAssignment.
+	BeginAssignment(project, name string)
+	// EndAssignment closes that window once preparation is done.
+	EndAssignment(project, name string)
+	// FireClear fires Claude Code's own /clear at a leaf boundary and re-serves the directive once
+	// the reset settles — the gate's decision, this only performs it.
 	FireClear(project, name string) error
-	// HoldsNothing reports whether an agent holds nothing the hub can see: no leaf task, no held
-	// feature, no review owed, no open escalation, nobody dialed in.
+	// HoldsNothing reports whether an agent holds nothing the hub can see: no task, no feature, no
+	// review, no escalation, nobody dialed in.
 	HoldsNothing(project, name, role string) (bool, error)
 }
 
-// clearArmed reports whether a human has armed a context clear for this agent. It is handed no new
-// leaf work while that stands: the clear fires at the boundary it is already at, and a task claimed
-// in between would be cut in half by it (-> agent.Service.SetClearArmed).
+// clearArmed reports whether a human has armed a context clear — no new leaf work while that
+// stands, since a task claimed in between would be cut in half by it.
 func (e *Engine) clearArmed(project, name string) bool {
 	a, ok, err := e.store.For(project).GetAgent(name)
 	return err == nil && ok && a.ClearArmed
 }
 
-// fireClearIfArmed fires an armed clear right now, whether or not there is anything to hand over
-// after it — unlike compact and model-select, which only ever apply ahead of one specific
-// assignment, a clear is a direct request to wipe at the next boundary regardless of what (if
-// anything) follows it. Every gate path checks this first, so asking IS the trigger.
+// fireClearIfArmed fires an armed clear right now regardless of what (if anything) follows it —
+// unlike compact and model-select, a clear is a direct request, not tied to one assignment.
 func (e *Engine) fireClearIfArmed(project, name string) (fired bool, err error) {
 	if !e.clearArmed(project, name) {
 		return false, nil
@@ -142,15 +126,14 @@ type Engine struct {
 	refWarn    refFallbackWarn // which repo roots have already been warned about an unconfigured reference (-> pr.go)
 }
 
-// New builds the workflow engine over the hub's store, its Deps implementation, and the external
-// task sources the composition root wires in (github, openspec, ...) — the engine never names them.
+// New builds the workflow engine over the hub's store, its Deps, and the external task sources the
+// composition root wires in — the engine never names them.
 func New(st *store.Store, deps Deps, sources ...tasks.Source) *Engine {
 	return &Engine{store: st, deps: deps, sources: sources, pre: preflight{seen: map[string]string{}}, refWarn: refFallbackWarn{seen: map[string]bool{}}}
 }
 
-// WithGates installs the submit path's quality gates — openspec validation today, the built-in
-// lint gate once its own adapter task lands (the same seam, a second Gate). Chainable, so the
-// composition root wires it in alongside New in one line. An engine with none runs no gate.
+// WithGates installs the submit path's quality gates, chainable alongside New. An engine with
+// none runs no gate.
 func (e *Engine) WithGates(gates ...gate.Gate) *Engine {
 	e.gates = gates
 	return e
@@ -176,9 +159,8 @@ const mockSpecTask = "os-new"
 // launch path lays this branch down when it starts a planner.
 func PlannerBranch(name string) string { return "plan-" + name }
 
-// restPhase is an agent's resting (not-busy) phase: a planner rests in "planning" and
-// a coauthor in "collab" (neither holds a backlog task, so "idle" would mislead —
-// they're standing with the user, not unoccupied); everyone else "idle".
+// restPhase is an agent's resting phase: "planning" for a planner, "collab" for a coauthor
+// (neither holds a backlog task, so "idle" would mislead), "idle" for everyone else.
 func restPhase(role string) string {
 	switch role {
 	case "planner":
@@ -190,9 +172,8 @@ func restPhase(role string) string {
 	}
 }
 
-// verifyCmd is the project's declared gate command, or "" when it declares none (or the config
-// cannot be read — an unreadable config must not silently disable a project's own gate, so the
-// built-ins still run and the config error surfaces where configs are loaded).
+// verifyCmd is the project's declared gate command, or "" when it declares none or the config
+// cannot be read (the built-ins still run either way).
 func (e *Engine) verifyCmd(project string) string {
 	cfg, err := e.deps.ProjectConfig(project)
 	if err != nil {

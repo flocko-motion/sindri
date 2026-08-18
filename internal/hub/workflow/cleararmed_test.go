@@ -3,7 +3,6 @@ package workflow
 import (
 	"context"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -50,40 +49,22 @@ func TestArmedClearWithholdsTheNextTask(t *testing.T) {
 	}
 }
 
-// TestArmedAgentIsToldWhyItGetsNothing: it must not read "no open tasks", which is a claim about the
-// queue and would leave the agent waiting for the wrong thing.
-func TestArmedAgentIsToldWhyItGetsNothing(t *testing.T) {
-	e, _, _ := armedWorker(t)
-	d, err := e.AgentDirective(context.Background(), "repo", "dvalin")
-	if err != nil {
-		t.Fatalf("AgentDirective: %v", err)
-	}
-	if d != DirClearPending {
-		t.Errorf("directive = %q, want the pending-clear answer", d)
-	}
-	if !strings.Contains(DirClearPending, "context clear") {
-		t.Errorf("the directive should name what is happening: %q", DirClearPending)
-	}
-	if strings.Contains(DirClearPending, "No open tasks") {
-		t.Error("an armed agent is not idle for want of work")
-	}
-}
-
 // TestArmedClearOutranksFullness is the interaction the two rules must get right: a full agent is
-// retired from assignment "until a human clears you", so once one HAS, the answer must stop being
-// "wait for a human" — else the arming sits behind a state that never advances.
+// retired from assignment "until a human clears you", so once one HAS, the clear must still fire —
+// checked ahead of the fullness answer in waitForNextTask's own closure — else the arming sits
+// behind a state that never advances.
 func TestArmedClearOutranksFullness(t *testing.T) {
 	e, _, deps := armedWorker(t)
 	deps.ctxTokens, deps.ctxWindow, deps.ctxOK = 190_000, 200_000, true
 	if _, full := e.contextFull("repo", "dvalin"); !full {
 		t.Fatal("the stub should read as full — this interaction only exists for a full agent")
 	}
-	d, err := e.AgentDirective(context.Background(), "repo", "dvalin")
-	if err != nil {
-		t.Fatalf("AgentDirective: %v", err)
+	fired, err := e.fireClearIfArmed("repo", "dvalin")
+	if err != nil || !fired {
+		t.Fatalf("fireClearIfArmed = (%v, %v), want it to fire even though the agent also reads full", fired, err)
 	}
-	if d != DirClearPending {
-		t.Errorf("directive = %q, want the pending clear rather than the fullness notice", d)
+	if len(deps.cleared) != 1 || deps.cleared[0] != "dvalin" {
+		t.Errorf("cleared = %v, want exactly one FireClear(dvalin)", deps.cleared)
 	}
 }
 
@@ -143,29 +124,28 @@ func TestAnArmedReviewerIsNotHandedTheNextPRThroughRequestReview(t *testing.T) {
 }
 
 // TestTheClearLandsBeforeTheNextSubtask: mid-subtask the agent carries on and the clear waits (no
-// path clears an agent mid-task); between subtasks — where a checkpoint leaves it — the clear takes
-// precedence over the subtask that would otherwise be served next.
+// path clears an agent mid-task, and the feature-holder directive never even checks for one there);
+// between subtasks — where a checkpoint leaves it — fireClearIfArmed fires it, same as the idle
+// worker's own path.
 func TestTheClearLandsBeforeTheNextSubtask(t *testing.T) {
-	e, ps, _ := containerWorker(t, "working")
+	e, ps, deps := containerWorker(t, "working")
 	a, _, _ := ps.GetAgent("dvalin")
 	a.ClearArmed = true
 	if err := ps.PutAgent(a); err != nil {
 		t.Fatal(err)
 	}
-	d, err := e.AgentDirective(context.Background(), "repo", "dvalin")
-	if err != nil {
+	if _, err := e.AgentDirective(context.Background(), "repo", "dvalin"); err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if d == DirClearPending {
-		t.Error("mid-subtask the agent keeps working; the clear waits for the checkpoint")
+	if len(deps.cleared) != 0 {
+		t.Error("mid-subtask the agent keeps working; the clear must not fire before the checkpoint")
 	}
+
 	if err := ps.SetState(store.AgentState{Agent: "dvalin", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}); err != nil {
 		t.Fatal(err)
 	}
-	if d, err = e.AgentDirective(context.Background(), "repo", "dvalin"); err != nil {
-		t.Fatalf("AgentDirective: %v", err)
-	}
-	if d != DirClearPending {
-		t.Errorf("directive = %q, want the clear to land before the next subtask is served", d)
+	fired, err := e.fireClearIfArmed("repo", "dvalin")
+	if err != nil || !fired {
+		t.Fatalf("fireClearIfArmed = (%v, %v), want it to fire now the agent is between subtasks", fired, err)
 	}
 }

@@ -204,61 +204,38 @@ func openIDs(tasks []store.Task) []string {
 	return ids
 }
 
-// claimNextSubtask is claimNext's one-pass rule for a held feature's own subtasks; with none open,
-// containerNext decides finished vs. still gated. Compaction ends the pass here, same as claimNext's;
-// a model change instead falls through to containerNext, deferring mail to the pod it restarts into.
+// claimNextSubtask is claimNext's one-pass rule for a held feature's own subtasks: the next open
+// child is claimed FIRST (-> advanceContainer), same reason claimNext claims before it prepares —
+// once the subtask is the agent's, no return in the middle is needed for a model switch or
+// compaction to run against it. With none open, the feature is finished or still gated.
 func (e *Engine) claimNextSubtask(project, agent, container string) (string, bool, error) {
 	if e.clearArmed(project, agent) {
 		return "", false, nil // about to land (fired by the caller): a subtask claimed now would be cut in half by it
 	}
-	children, err := e.store.For(project).OpenSubtasks(container)
+	if d, has, err := e.pendingMail(project, agent); err != nil { // before the claim below, nothing to defer past yet
+		return "", false, err
+	} else if has {
+		return d, true, nil
+	}
+	child, advanced, err := e.advanceContainer(project, agent, container)
 	if err != nil {
 		return "", false, err
 	}
-	retiered := false
-	if len(children) > 0 {
-		tier := api.TierOrDefault(children[0].Tier)
-		if want, known := e.deps.ModelForTier(tier); known && want != e.deps.CurrentModel(project, agent) {
-			// SetModel relaunches the worker itself; retiered defers mail to the pod that comes back up.
-			if err := e.deps.SetModel(project, agent, want); err != nil {
-				return "", false, err
-			}
-			retiered = true
-		} else if dir, acted, err := e.compactOrWait(project, agent); err != nil {
+	if !advanced {
+		gated, err := e.gatedUnder(project, container)
+		if err != nil {
 			return "", false, err
-		} else if acted {
-			return dir, true, nil
 		}
-	}
-	if !retiered {
-		if d, has, err := e.pendingMail(project, agent); err != nil {
-			return "", false, err
-		} else if has {
-			return d, true, nil
+		if len(gated) > 0 {
+			return "", false, nil // awaiting a verdict elsewhere in the tree — woken by its Notify
 		}
+		return DirContainerDone(container), true, nil
 	}
-	return e.containerNext(project, agent, container)
-}
-
-// containerNext is the held feature's next step: the subtask just assigned, or the finished feature
-// to put up. Not ready while work awaits a verdict, so the worker waits (woken by its Notify).
-func (e *Engine) containerNext(project, agent, container string) (string, bool, error) {
-	next, ok, err := e.advanceContainer(project, agent, container)
-	if err != nil {
+	if err := e.prepareAssignment(project, agent, api.TierOrDefault(child.Tier)); err != nil {
 		return "", false, err
 	}
-	if ok {
-		aim, ceiling := e.commentBudget(project)
-		return DirContainerWorking(container, next.ID, aim, ceiling), true, nil
-	}
-	gated, err := e.gatedUnder(project, container)
-	if err != nil {
-		return "", false, err
-	}
-	if len(gated) > 0 {
-		return "", false, nil
-	}
-	return DirContainerDone(container), true, nil
+	aim, ceiling := e.commentBudget(project)
+	return DirContainerWorking(container, child.ID, aim, ceiling), true, nil
 }
 
 // advanceContainer moves a held feature's agent onto its next open subtask: (subtask, true) when one

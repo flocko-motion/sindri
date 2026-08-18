@@ -26,7 +26,7 @@ func TestSetModelRefusesAnUnknownModel(t *testing.T) {
 	}
 }
 
-// TestSetModelStoresWithoutDisturbingAStoppedAgent: not running, so there is nothing to compact —
+// TestSetModelStoresWithoutDisturbingAStoppedAgent: not running, so there is nothing to clear —
 // the choice is just recorded for the next Launch to pick up.
 func TestSetModelStoresWithoutDisturbingAStoppedAgent(t *testing.T) {
 	_, st := newService(t)
@@ -52,7 +52,7 @@ func TestSetModelStoresWithoutDisturbingAStoppedAgent(t *testing.T) {
 }
 
 // TestSetModelToTheSameValueIsANoOp: nothing to disturb when nothing changes — seeded directly
-// rather than through a first SetModel call, so this test isolates the repeat from the compact
+// rather than through a first SetModel call, so this test isolates the repeat from the clear
 // and relaunch a genuine change would trigger.
 func TestSetModelToTheSameValueIsANoOp(t *testing.T) {
 	s, f := compactFixture(t)
@@ -73,10 +73,11 @@ func TestSetModelToTheSameValueIsANoOp(t *testing.T) {
 	}
 }
 
-// TestSetModelCompactsThenRelaunchesARunningAgent: the session belongs to its old model and cannot
-// cross, so a change compacts first — checked as the observable side effects up to the point Launch
+// TestSetModelClearsThenRelaunchesARunningAgent: the agent holds nothing at a model change (its own
+// boundary check runs exactly here) and the context belongs to the OLD model's reasoning, so a
+// change clears first, not compacts — checked as the observable side effects up to the point Launch
 // itself refuses (the fixture's fake Check() fails on purpose; see compactFixture/fakeRuntime).
-func TestSetModelCompactsThenRelaunchesARunningAgent(t *testing.T) {
+func TestSetModelClearsThenRelaunchesARunningAgent(t *testing.T) {
 	s, f := compactFixture(t)
 	writeUsage(t, "proj", "durin", 80_000) // a session with something in it, unlike a fresh one
 
@@ -87,17 +88,17 @@ func TestSetModelCompactsThenRelaunchesARunningAgent(t *testing.T) {
 
 	found := false
 	for _, sent := range f.sent {
-		if sent == "/compact" {
+		if sent == "/clear" {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("a running agent's model change never compacted first; sent=%v", f.sent)
+		t.Errorf("a running agent's model change never cleared first; sent=%v", f.sent)
 	}
-	// Unlike Compact's other callers, this one interrupts: the restart tears the pod down right
-	// after, so the turn dying here costs nothing an unforced wait would have saved.
+	// FireClear interrupts on its own — a human-armed-equivalent act here, not the agent's own
+	// request, and the restart tears the pod down right after regardless.
 	if f.interrupts == 0 {
-		t.Error("a model change never forced the pane idle before compacting")
+		t.Error("a model change never forced the pane idle before clearing")
 	}
 	if len(f.removed) == 0 {
 		t.Error("the old container was never torn down on the way to relaunching")
@@ -111,10 +112,9 @@ func TestSetModelCompactsThenRelaunchesARunningAgent(t *testing.T) {
 	}
 }
 
-// TestSetModelSkipsCompactionOnAFreshSession: no recorded usage means nothing has been said yet, so
-// there is nothing to carry across — firing Claude Code's own /compact into it would only land on
-// "Not enough messages to compact." The relaunch still runs.
-func TestSetModelSkipsCompactionOnAFreshSession(t *testing.T) {
+// TestSetModelSkipsClearingAFreshSession: no recorded usage means nothing has been said yet, so
+// there is nothing for /clear to do. The relaunch still runs.
+func TestSetModelSkipsClearingAFreshSession(t *testing.T) {
 	s, f := compactFixture(t)
 
 	err := s.SetModel("proj", "durin", "claude-opus-5")
@@ -123,8 +123,8 @@ func TestSetModelSkipsCompactionOnAFreshSession(t *testing.T) {
 	}
 
 	for _, sent := range f.sent {
-		if sent == "/compact" {
-			t.Errorf("a fresh session with no recorded usage was compacted anyway; sent=%v", f.sent)
+		if sent == "/clear" {
+			t.Errorf("a fresh session with no recorded usage was cleared anyway; sent=%v", f.sent)
 		}
 	}
 	if len(f.removed) == 0 {

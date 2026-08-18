@@ -289,9 +289,10 @@ func (e *Engine) commentBudget(project string) (aim, ceiling float64) {
 	return lint.AimFor(ceiling), ceiling
 }
 
-// pendingMail is the directive for unread mail, when there is any. Deferred by the task-boundary
-// gates (claimNext, claimNextSubtask, reviewDirective's unclaimed path) until any pending clear,
-// model change or compaction resolves — else mail is read into the context that operation discards.
+// pendingMail is the directive for unread mail, when there is any. Checked by every assignment
+// gate (claimNext, claimNextSubtask, reviewDirective) BEFORE it claims anything — a new task or
+// review wipes the agent onto a fresh track, and unread mail must not be read into the context
+// that wipe discards, so it is answered first and the claim waits for a later, mail-clear ask.
 func (e *Engine) pendingMail(project, name string) (dir string, has bool, err error) {
 	n, err := e.store.For(project).UnreadMailCount(name)
 	if err != nil {
@@ -383,7 +384,7 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 					if fired, err := e.fireClearIfArmed(project, name); err != nil {
 						return "", false, err
 					} else if fired {
-						return DirClearPending, true, nil
+						return "", false, nil // about to land: a subtask claimed now would be cut in half by it
 					}
 					return e.claimNextSubtask(project, name, st.Container)
 				})
@@ -444,7 +445,7 @@ func (e *Engine) waitForNextTask(ctx context.Context, project, name string) (str
 		if fired, err := e.fireClearIfArmed(project, name); err != nil {
 			return "", false, err
 		} else if fired {
-			return DirClearPending, true, nil
+			return "", false, nil // about to land: a task claimed now would be cut in half by it
 		}
 		if tokens, full := e.contextFull(project, name); full {
 			// Also told to sit still, not a pending operation for mail to wait out.
@@ -487,11 +488,8 @@ func (e *Engine) CmdNext(c registry.Caller, _ []string, out io.Writer) (int, err
 		fmt.Fprintln(out, DirRetired)
 		return 0, nil
 	}
-	if fired, err := e.fireClearIfArmed(c.Project, c.Agent); err != nil {
+	if _, err := e.fireClearIfArmed(c.Project, c.Agent); err != nil {
 		return 1, err
-	} else if fired {
-		fmt.Fprintln(out, DirClearPending)
-		return 0, nil
 	}
 	if tokens, full := e.contextFull(c.Project, c.Agent); full {
 		fmt.Fprintln(out, DirFull(tokens))
@@ -509,9 +507,10 @@ func (e *Engine) CmdNext(c registry.Caller, _ []string, out io.Writer) (int, err
 	return 0, nil
 }
 
-// claimNext hands a worker the best-rated unit in a project (-> nextUp), preparing it first: a
-// compaction ends this pass right there, same as clearArmed above. A model change instead falls
-// through to the claim below, deferring mail to the pod it restarts into.
+// claimNext hands a worker the best-rated unit in a project (-> nextUp): the claim comes FIRST,
+// because holding the work is what keeps another agent from taking it while preparation (a model
+// switch or compaction) runs — there is no moment where the hub has picked something and the agent
+// is told nothing is assigned yet (-> prepareAssignment).
 func (e *Engine) claimNext(project, agent string) (string, bool, error) {
 	// Retired by a human, or by its own context filling: either way it is being wound down, and the
 	// gate is here rather than at the task queries so it holds however the work would have arrived.
@@ -535,35 +534,27 @@ func (e *Engine) claimNext(project, agent string) (string, bool, error) {
 		return "", false, err
 	}
 	t, isPackage, ok := nextUp(packages, leaves, e.tierPrefers(project, agent))
-	retiered := false
-	if ok {
-		tier := api.TierOrDefault(t.Tier)
-		if want, known := e.deps.ModelForTier(tier); known && want != e.deps.CurrentModel(project, agent) {
-			// SetModel relaunches the worker itself; retiered defers mail to the pod that comes back up.
-			if err := e.deps.SetModel(project, agent, want); err != nil {
-				return "", false, err
-			}
-			retiered = true
-		} else if dir, acted, err := e.compactOrWait(project, agent); err != nil {
-			return "", false, err
-		} else if acted {
-			return dir, true, nil
-		}
-	}
-	if !retiered {
-		if d, has, err := e.pendingMail(project, agent); err != nil { // after any op above, before the claim below
-			return "", false, err
-		} else if has {
-			return d, true, nil
-		}
+	if d, has, err := e.pendingMail(project, agent); err != nil { // before the claim below, nothing to defer past yet
+		return "", false, err
+	} else if has {
+		return d, true, nil
 	}
 	if !ok {
 		return "", false, nil
 	}
+	var dir string
 	if isPackage {
-		return e.claimContainer(project, agent, t)
+		dir, _, err = e.claimContainer(project, agent, t)
+	} else {
+		dir, _, err = e.claimLeaf(project, agent, t)
 	}
-	return e.claimLeaf(project, agent, t)
+	if err != nil {
+		return "", false, err
+	}
+	if err := e.prepareAssignment(project, agent, api.TierOrDefault(t.Tier)); err != nil {
+		return "", false, err
+	}
+	return dir, true, nil
 }
 
 // claimLeaf claims one standalone task for a worker, branching on it.

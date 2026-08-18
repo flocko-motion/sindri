@@ -12,8 +12,14 @@ import (
 
 // SetModel changes the model an agent runs on, "" reverting to the account default. A non-empty
 // model must resolve through the backend's own window table (-> ModelWindow), or its fullness
-// would be unjudgeable. Not running: just records the choice. Running: compacts the old session
-// first, since a bare swap would lose it, then relaunches on the new model.
+// would be unjudgeable. Not running: just records the choice. Running: clears the old session
+// first, then relaunches on the new model.
+//
+// Clears rather than compacts: at a model change the agent holds nothing (its own boundary check
+// runs exactly here), the context was produced by the OLD model's reasoning, and a downgrade's
+// window can be smaller than even a well-compacted transcript can fit — arithmetically impossible
+// to carry across. FireClear's own re-served kickoff also answers "and then what" for the pod that
+// comes back up, which a bare compact never did.
 func (s *Service) SetModel(project, name, model string) error {
 	if model != "" {
 		if _, ok := s.ModelWindow(model); !ok {
@@ -39,15 +45,12 @@ func (s *Service) SetModel(project, name, model string) error {
 	_ = ps.Log(name, "model", fmt.Sprintf("%s -> %s", modelLabel(old), modelLabel(model)))
 	s.deps.Notify()
 	if !s.AgentAlive(project, name) {
-		return nil // nothing live to compact; the next Launch starts on the new model
+		return nil // nothing live to clear; the next Launch starts fresh on the new model
 	}
-	// No recorded usage means a fresh session — nothing to carry across, so nothing to compact.
+	// No recorded usage means a fresh session — nothing there for /clear to do.
 	if _, _, _, ok := s.ContextUsage(project, name); ok {
-		// The restart right after kills this turn regardless, so unlike Compact's other callers an
-		// interrupt here costs nothing extra — it just gives the queued /compact its usual immediate start.
-		_ = s.Interrupt(project, name)
-		if err := s.Compact(project, name); err != nil {
-			return fmt.Errorf("compacting %s before its model change: %w", name, err)
+		if err := s.FireClear(project, name); err != nil {
+			return fmt.Errorf("clearing %s before its model change: %w", name, err)
 		}
 	}
 	return s.RestartAgent(project, name, io.Discard)

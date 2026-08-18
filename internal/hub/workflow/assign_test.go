@@ -143,7 +143,7 @@ func TestAnIdleWorkerTakesTheCriticalTaskOverAMidPackage(t *testing.T) {
 	}
 }
 
-// TestAMismatchedTaskChangesTheModelThenHandsItOver: the model change compacts and restarts the
+// TestAMismatchedTaskChangesTheModelThenHandsItOver: the model change clears and restarts the
 // worker on its own (-> agent.Service.SetModel) — a fact the worker can neither act on nor verify,
 // so it is not reported back as a directive. The claim itself only touches the store and the
 // worktree, neither tied to which pod is running, so it proceeds in the same call: the restarted
@@ -174,7 +174,7 @@ func TestAMismatchedTaskChangesTheModelThenHandsItOver(t *testing.T) {
 		t.Errorf("modelSet = %v, want exactly one SetModel(dvalin, claude-opus-5)", deps.modelSet)
 	}
 	if len(deps.compacted) != 0 {
-		t.Errorf("compacted = %v, want none — SetModel compacts as part of its own restart", deps.compacted)
+		t.Errorf("compacted = %v, want none — a model change clears rather than compacts", deps.compacted)
 	}
 }
 

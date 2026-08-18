@@ -35,7 +35,6 @@ func compactFixture(t *testing.T) (*Service, *fakeRuntime) {
 	forgetObservations()
 	t.Cleanup(forgetObservations)
 	s.ForgetContext("proj", "durin") // contextMemo is package-level; a prior test's reading must not leak in
-	s.ForgetCompactPending("proj", "durin")
 	return s, f
 }
 
@@ -103,27 +102,5 @@ func TestFakeInterruptDetectionIsNotVacuous(t *testing.T) {
 	}
 	if f.interrupts != 1 {
 		t.Errorf("interrupts = %d, want 1 — the fake's escape matcher did not fire", f.interrupts)
-	}
-}
-
-// TestCompactMarksAndClearsPending: fired once, CompactPending reads true until a fresh reading
-// below the threshold — the caller's own compactDue check — clears it via ForgetCompactPending.
-func TestCompactMarksAndClearsPending(t *testing.T) {
-	s, _ := compactFixture(t)
-	writeUsage(t, "proj", "durin", 80_000)
-
-	if s.CompactPending("proj", "durin") {
-		t.Fatal("nothing fired yet; CompactPending should read false")
-	}
-	if err := s.Compact("proj", "durin"); err != nil {
-		t.Fatalf("Compact: %v", err)
-	}
-	if !s.CompactPending("proj", "durin") {
-		t.Error("CompactPending should read true right after Compact fires")
-	}
-
-	s.ForgetCompactPending("proj", "durin")
-	if s.CompactPending("proj", "durin") {
-		t.Error("ForgetCompactPending should have cleared the flag")
 	}
 }

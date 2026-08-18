@@ -466,19 +466,6 @@ func DirFull(tokens int) string {
 		"You're retired from assignment until a human clears you; don't ask again, just wait.", tokens/1000)
 }
 
-// DirClearPending answers an agent whose armed clear is about to land: no work meanwhile, since a
-// task handed out now would be cut in half by it.
-const DirClearPending = "[hub] The user has armed a context clear for you: it fires here, at this " +
-	"boundary, and your session starts empty. Nothing is assigned until it lands. Don't ask again — " +
-	"you'll be told to carry on the moment your context is clear."
-
-// DirCompacting answers a worker whose next assignment needed the room compaction buys first — the
-// gate has already fired it (-> claimNext), queuing into the running session rather than assigning
-// here, so the un-compacted context is never what the task gets worked in.
-const DirCompacting = "[hub] Your context is being compacted before your next task is assigned — " +
-	"it's queued here, at this boundary. Nothing is assigned until it lands; don't ask again — " +
-	"you'll be told to carry on the moment it's done."
-
 // --- escalation: stopped on a decision only the user can make ---
 
 // DirEscalated answers an escalated agent, repeating the question back — one relaunched mid-escalation

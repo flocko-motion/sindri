@@ -79,11 +79,12 @@ func TestMailOutranksAFullContext(t *testing.T) {
 	}
 }
 
-// TestMailDefersPastAnArmedClear is the OBSERVED bug: an armed clear is about to wipe the agent's
+// TestMailSurvivesAnArmedClear is the OBSERVED bug: an armed clear is about to wipe the agent's
 // context, so mail delivered ahead of it would be marked read and then discarded along with the
 // context that held it — worse than never having shown it, since an unread message survives the
-// clear and is re-served. The clear must resolve first; mail lands only once it has.
-func TestMailDefersPastAnArmedClear(t *testing.T) {
+// clear and is re-served. Firing the clear (fireClearIfArmed, checked ahead of any claim) never
+// reaches the mail check at all; only once it has landed does mail get a look.
+func TestMailSurvivesAnArmedClear(t *testing.T) {
 	deps := &stubDeps{}
 	e, ps := idleWorkerWithOpenTask(t, deps)
 	mailID := addUnreadMail(t, ps, "dvalin")
@@ -93,23 +94,21 @@ func TestMailDefersPastAnArmedClear(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dir, err := e.AgentDirective(context.Background(), "repo", "dvalin")
-	if err != nil {
-		t.Fatalf("AgentDirective: %v", err)
-	}
-	if dir != DirClearPending {
-		t.Errorf("directive = %q, want the clear to fire ahead of the mail it would otherwise discard", dir)
+	fired, err := e.fireClearIfArmed("repo", "dvalin")
+	if err != nil || !fired {
+		t.Fatalf("fireClearIfArmed = (%v, %v), want fired", fired, err)
 	}
 	if n, _ := ps.UnreadMailCount("dvalin"); n != 1 {
 		t.Errorf("unread = %d, the message must survive since it was never shown", n)
 	}
 
-	// The clear has landed (a real one flips the flag itself); the fresh context now asks again.
+	// The real FireClear spends the arming as its first act; the fake only records the call, so the
+	// test spends it by hand — the fresh context (a real clear's own doing) now asks again.
 	a.ClearArmed = false
 	if err := ps.PutAgent(a); err != nil {
 		t.Fatal(err)
 	}
-	dir, err = e.AgentDirective(context.Background(), "repo", "dvalin")
+	dir, err := e.AgentDirective(context.Background(), "repo", "dvalin")
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
@@ -132,10 +131,11 @@ func TestMailDefersPastAnArmedClear(t *testing.T) {
 	}
 }
 
-// TestMailDefersPastCompactionOnAClaim: fill past the threshold ends the pass on the compaction
-// itself, same as a model change — mail is not checked until a later ask finds the fresh, landed
-// reading, and only then (still ahead of the claim) if it is still unread.
-func TestMailDefersPastCompactionOnAClaim(t *testing.T) {
+// TestMailOutranksCompactionOnAClaim: mail is checked before the claim that would otherwise trigger
+// a compaction, so it wins outright in the very first ask — there is no "defer past compaction and
+// pick it up on a later one" dance, because claim and compaction now happen together in one pass and
+// mail is what decides whether that pass runs at all.
+func TestMailOutranksCompactionOnAClaim(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
 	e, ps := idleWorkerWithOpenTask(t, deps)
 	mailID := addUnreadMail(t, ps, "dvalin")
@@ -144,25 +144,11 @@ func TestMailDefersPastCompactionOnAClaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if strings.Contains(dir, "unread") || !strings.Contains(dir, "compact") {
-		t.Errorf("directive = %q, want the compacting answer — there is no fresh context yet", dir)
-	}
-	if len(deps.compacted) != 1 || deps.compacted[0] != "dvalin" {
-		t.Errorf("compacted = %v, want exactly one Compact(dvalin) fired", deps.compacted)
-	}
-	if st, _ := ps.GetState("dvalin"); st.Task != "" {
-		t.Errorf("state.Task = %q, the claim must wait until the mail is read", st.Task)
-	}
-
-	// The queued /compact has landed: this ask's fresh reading is under the threshold, so mail is
-	// checked — and delivered, since it is still unread — ahead of the claim.
-	deps.ctxTokens = 2_000
-	dir, err = e.AgentDirective(context.Background(), "repo", "dvalin")
-	if err != nil {
-		t.Fatalf("AgentDirective: %v", err)
-	}
 	if !strings.Contains(dir, "unread") {
-		t.Errorf("directive = %q, want mail delivered into the just-landed context, not the task", dir)
+		t.Errorf("directive = %q, want mail delivered ahead of the claim", dir)
+	}
+	if len(deps.compacted) != 0 {
+		t.Errorf("compacted = %v, want none — mail wins before the claim that would trigger it", deps.compacted)
 	}
 	if st, _ := ps.GetState("dvalin"); st.Task != "" {
 		t.Errorf("state.Task = %q, the claim must wait until the mail is read", st.Task)
@@ -178,42 +164,48 @@ func TestMailDefersPastCompactionOnAClaim(t *testing.T) {
 	if !strings.Contains(dir, "td-abc123") {
 		t.Errorf("directive = %q, want the task claimed now the mailbox is empty", dir)
 	}
+	if len(deps.compacted) != 1 {
+		t.Errorf("compacted = %v, want exactly one fire, alongside the claim", deps.compacted)
+	}
 }
 
-// TestMailDefersPastAModelChange: a retiering restart is itself a fresh-context boundary — SetModel
-// has already compacted and relaunched the pod by the time this call returns, so the pod it fired
-// from is already gone. Mail is not delivered on this call (there is nothing to read it into yet);
-// it lands on the next one, in the pod that comes back up.
-func TestMailDefersPastAModelChange(t *testing.T) {
+// TestMailOutranksAModelChange mirrors TestMailOutranksCompactionOnAClaim for a task whose tier
+// needs a different model: mail is checked (and wins) before the claim that would trigger the
+// switch, so a model change never fires while there is unread mail sitting on the claim it prepares.
+func TestMailOutranksAModelChange(t *testing.T) {
 	deps := &stubDeps{tierModels: map[string]string{"mid": "big-model"}, currentModel: "small-model"}
 	e, ps := idleWorkerWithOpenTask(t, deps)
-	addUnreadMail(t, ps, "dvalin")
+	mailID := addUnreadMail(t, ps, "dvalin")
 
 	dir, err := e.AgentDirective(context.Background(), "repo", "dvalin")
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if strings.Contains(dir, "unread") {
-		t.Errorf("directive = %q, want the model change, not mail — there is no fresh context yet", dir)
+	if !strings.Contains(dir, "unread") {
+		t.Errorf("directive = %q, want mail delivered ahead of the claim", dir)
 	}
-	if len(deps.modelSet) != 1 || deps.modelSet[0] != "dvalin=big-model" {
-		t.Errorf("modelSet = %v, want dvalin retiered to big-model", deps.modelSet)
+	if len(deps.modelSet) != 0 {
+		t.Errorf("modelSet = %v, want none — mail wins before the claim that would trigger it", deps.modelSet)
 	}
 
-	// The restart landed; the new pod's first ask sees the fresh context mail belongs in.
-	deps.currentModel = "big-model"
+	if err := ps.MarkMailRead(mailID); err != nil {
+		t.Fatal(err)
+	}
 	dir, err = e.AgentDirective(context.Background(), "repo", "dvalin")
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if !strings.Contains(dir, "unread") {
-		t.Errorf("directive = %q, want mail delivered into the restarted pod before the claim", dir)
+	if !strings.Contains(dir, "td-abc123") {
+		t.Errorf("directive = %q, want the task claimed now the mailbox is empty", dir)
+	}
+	if len(deps.modelSet) != 1 || deps.modelSet[0] != "dvalin=big-model" {
+		t.Errorf("modelSet = %v, want dvalin switched to big-model, alongside the claim", deps.modelSet)
 	}
 }
 
-// TestMailDefersPastCompactionBetweenSubtasks is TestMailDefersPastCompactionOnAClaim's counterpart
-// for a held feature (claimNextSubtask), the other half of the boundary this bug hit in practice.
-func TestMailDefersPastCompactionBetweenSubtasks(t *testing.T) {
+// TestMailOutranksCompactionBetweenSubtasks is TestMailOutranksCompactionOnAClaim's counterpart for
+// a held feature (claimNextSubtask), the other half of the boundary this bug hit in practice.
+func TestMailOutranksCompactionBetweenSubtasks(t *testing.T) {
 	const agent = "dain"
 	root, _ := newWorkRepo(t, agent, "td-EPIC")
 	st, err := store.Open(root + "/s.db")
@@ -252,23 +244,11 @@ func TestMailDefersPastCompactionBetweenSubtasks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if strings.Contains(dir, "unread") || !strings.Contains(dir, "compact") {
-		t.Errorf("directive = %q, want the compacting answer — there is no fresh context yet", dir)
-	}
-	if len(deps.compacted) != 1 || deps.compacted[0] != agent {
-		t.Errorf("compacted = %v, want exactly one Compact(%s) fired", deps.compacted, agent)
-	}
-	if held, _ := ps.GetState(agent); held.Task == "td-next" {
-		t.Error("the next subtask must not be claimed until the compaction lands")
-	}
-
-	deps.ctxTokens = 2_000
-	dir, err = e.AgentDirective(context.Background(), "repo", agent)
-	if err != nil {
-		t.Fatalf("AgentDirective: %v", err)
-	}
 	if !strings.Contains(dir, "unread") {
-		t.Errorf("directive = %q, want mail delivered into the just-landed context, not the subtask", dir)
+		t.Errorf("directive = %q, want mail delivered ahead of the claim", dir)
+	}
+	if len(deps.compacted) != 0 {
+		t.Errorf("compacted = %v, want none — mail wins before the claim that would trigger it", deps.compacted)
 	}
 	if held, _ := ps.GetState(agent); held.Task == "td-next" {
 		t.Error("the next subtask must not be claimed until the mail is read")
@@ -284,11 +264,15 @@ func TestMailDefersPastCompactionBetweenSubtasks(t *testing.T) {
 	if !strings.Contains(dir, "td-next") {
 		t.Errorf("directive = %q, want the next subtask claimed now the mailbox is empty", dir)
 	}
+	if len(deps.compacted) != 1 {
+		t.Errorf("compacted = %v, want exactly one fire, alongside the claim", deps.compacted)
+	}
 }
 
 // TestMailOutranksAFeatureWithNothingLeftOpen: no subtask waiting and nothing gated means there is
-// no operation for mail to wait out, so it must still be delivered ahead of whatever containerNext
-// reports (done or blocked) — this is the ordinary "mail outranks blocking" rule, not the exception.
+// no operation for mail to wait out, so it must still be delivered ahead of whatever
+// claimNextSubtask reports (done or blocked) — this is the ordinary "mail outranks blocking" rule,
+// not the exception.
 func TestMailOutranksAFeatureWithNothingLeftOpen(t *testing.T) {
 	const agent = "dain"
 	root, _ := newWorkRepo(t, agent, "td-EPIC")
@@ -322,9 +306,9 @@ func TestMailOutranksAFeatureWithNothingLeftOpen(t *testing.T) {
 	}
 }
 
-// TestMailDefersPastCompactionOnAReviewClaim mirrors the worker case for a reviewer about to be
+// TestMailOutranksCompactionOnAReviewClaim mirrors the worker case for a reviewer about to be
 // handed a new PR rather than a new task — the same gate, following the same rule.
-func TestMailDefersPastCompactionOnAReviewClaim(t *testing.T) {
+func TestMailOutranksCompactionOnAReviewClaim(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
 	e, ps := reviewerWithUnclaimedReview(t, deps)
 	mailID := addUnreadMail(t, ps, "rune")
@@ -333,23 +317,11 @@ func TestMailDefersPastCompactionOnAReviewClaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if strings.Contains(dir, "unread") || !strings.Contains(dir, "compact") {
-		t.Errorf("directive = %q, want the compacting answer — there is no fresh context yet", dir)
-	}
-	if len(deps.compacted) != 1 || deps.compacted[0] != "rune" {
-		t.Errorf("compacted = %v, want exactly one Compact(rune) fired", deps.compacted)
-	}
-	if held, _ := ps.ReviewingPR("rune"); held != "" {
-		t.Errorf("ReviewingPR = %q, the review must not be claimed until the compaction lands", held)
-	}
-
-	deps.ctxTokens = 2_000
-	dir, err = e.AgentDirective(context.Background(), "repo", "rune")
-	if err != nil {
-		t.Fatalf("AgentDirective: %v", err)
-	}
 	if !strings.Contains(dir, "unread") {
-		t.Errorf("directive = %q, want mail delivered into the just-landed context, not the review", dir)
+		t.Errorf("directive = %q, want mail delivered ahead of the claim", dir)
+	}
+	if len(deps.compacted) != 0 {
+		t.Errorf("compacted = %v, want none — mail wins before the claim that would trigger it", deps.compacted)
 	}
 	if held, _ := ps.ReviewingPR("rune"); held != "" {
 		t.Errorf("ReviewingPR = %q, the review must not be claimed until the mail is read", held)
@@ -364,5 +336,8 @@ func TestMailDefersPastCompactionOnAReviewClaim(t *testing.T) {
 	}
 	if !strings.Contains(dir, "pr-1") {
 		t.Errorf("directive = %q, want the review claimed now the mailbox is empty", dir)
+	}
+	if len(deps.compacted) != 1 {
+		t.Errorf("compacted = %v, want exactly one fire, alongside the claim", deps.compacted)
 	}
 }

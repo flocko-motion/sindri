@@ -69,25 +69,6 @@ func (s *Service) ClearArmed(project, name string) bool {
 	return err == nil && ok && a.ClearArmed
 }
 
-// AtLeafBoundary reports whether the agent holds nothing a clear would cut into: no leaf task, no
-// review owed. A feature is not such a thing — between subtasks IS a boundary, and the next
-// subtask's directive names the feature afresh. Planners and coauthors are always at one.
-func (s *Service) AtLeafBoundary(project, name string) (bool, error) {
-	ps := s.store.For(project)
-	st, err := ps.GetState(name)
-	if err != nil {
-		return false, err
-	}
-	if st.Task != "" {
-		return false, nil
-	}
-	reviewing, err := ps.ReviewingPR(name)
-	if err != nil {
-		return false, err
-	}
-	return reviewing == "", nil
-}
-
 // FireArmedClears fires every armed clear in a project whose agent has reached a leaf boundary. Off
 // the hub's tick rather than the agent's request: the clear interrupts the session, and an agent
 // that just asked for work is mid-turn, holding the very command that would be cut off.

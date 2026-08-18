@@ -224,26 +224,31 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 		}
 		return "", false, nil
 	}
-	// Prepare, then hand over, claimNext's rule (no model-select: a review has no tier) — a clear or
-	// compaction ends the pass right here, so mail and the assign below only run once neither fires.
+	// An armed clear preempts the claim below, same reason claimNext's own check does: firing it now,
+	// eagerly, rather than leaving it to the fleet-wide sweep, matches how a worker's own ask does
+	// (-> fireClearIfArmed).
 	if e.clearArmed(project, name) {
 		if err := e.deps.FireClear(project, name); err != nil {
 			return "", false, err
 		}
-		return DirClearPending, true, nil
-	}
-	if dir, acted, err := e.compactOrWait(project, name); err != nil {
-		return "", false, err
-	} else if acted {
-		return dir, true, nil
+		return "", false, nil // about to land: a review claimed now would be cut in half by it
 	}
 	if d, has, err := e.pendingMail(project, name); err != nil {
 		return "", false, err
 	} else if has {
 		return d, true, nil
 	}
+	// Claim FIRST — same reason claimNext claims before it prepares: once the review is the
+	// reviewer's, no return in the middle is needed for compaction (a review has no tier, so no
+	// model switch) to run against it.
 	req, _ := e.ReviewPrompt(project)
 	if err := e.assignReview(project, id, prID, name, req); err != nil {
+		return "", false, err
+	}
+	e.deps.BeginAssignment(project, name)
+	err = e.compactIfDue(project, name)
+	e.deps.EndAssignment(project, name)
+	if err != nil {
 		return "", false, err
 	}
 	pr, _, _ := ps.GetPR(prID)

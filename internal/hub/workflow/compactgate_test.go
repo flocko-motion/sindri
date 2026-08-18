@@ -34,127 +34,25 @@ func reviewerWithUnclaimedReview(t *testing.T, deps *stubDeps) (*Engine, *store.
 	return New(st, deps), ps
 }
 
-// TestFillPastTheCompactionThresholdEndsThePassThenHandsOverOnTheNextAsk: fill past the (much lower
-// than ContextFullFraction) compaction bar fires the compact and ends the pass right there — never
-// handing the SAME assignment over into the un-compacted context it exists to avoid. The task is
-// claimed only once a later ask finds the fresh reading (the queued /compact having landed) below
-// the threshold — the boundary re-ask, not this call, is what claims it.
-func TestFillPastTheCompactionThresholdEndsThePassThenHandsOverOnTheNextAsk(t *testing.T) {
+// TestFillPastTheCompactionThresholdClaimsAndCompactsInOnePass: the claim comes first — nothing here
+// returns in the middle for the agent to be asked back from — so a single ask both hands over the
+// task AND fires the compaction its fill warrants, in that order (-> prepareAssignment).
+func TestFillPastTheCompactionThresholdClaimsAndCompactsInOnePass(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
 	e, ps := idleWorkerWithOpenTask(t, deps)
 
 	dir, err := e.AgentDirective(context.Background(), "repo", "dvalin")
-	if err != nil {
-		t.Fatalf("AgentDirective: %v", err)
-	}
-	if strings.Contains(dir, "td-abc123") || !strings.Contains(dir, "compact") {
-		t.Errorf("directive = %q, want the compacting answer, not the task", dir)
-	}
-	if st, _ := ps.GetState("dvalin"); st.Task != "" {
-		t.Errorf("state.Task = %q, want unclaimed until the compaction lands", st.Task)
-	}
-	if len(deps.compacted) != 1 || deps.compacted[0] != "dvalin" {
-		t.Errorf("compacted = %v, want exactly one Compact(dvalin) fired", deps.compacted)
-	}
-
-	// The queued /compact has landed: the next ask reads a fresh figure under the threshold.
-	deps.ctxTokens = 2_000
-	dir, err = e.AgentDirective(context.Background(), "repo", "dvalin")
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
 	if !strings.Contains(dir, "td-abc123") {
-		t.Errorf("directive = %q, want the open task claimed now the compaction has landed", dir)
+		t.Errorf("directive = %q, want the task claimed in this same ask", dir)
 	}
 	if st, _ := ps.GetState("dvalin"); st.Task != "td-abc123" {
-		t.Errorf("state.Task = %q, want td-abc123", st.Task)
+		t.Errorf("state.Task = %q, want td-abc123 — the claim holds regardless of the compaction", st.Task)
 	}
-	if len(deps.compacted) != 1 {
-		t.Errorf("compacted = %v, want no second fire once it has landed", deps.compacted)
-	}
-}
-
-// TestAPrematureReAskWaitsRatherThanRefiresOrAssigns: an ask that arrives before the queued
-// compaction lands (the agent should not have asked again — DirCompacting says so — but this is
-// the guard for when one does) must neither stack a second Compact behind the first nor fall
-// through and assign into the context compaction was fired to avoid.
-func TestAPrematureReAskWaitsRatherThanRefiresOrAssigns(t *testing.T) {
-	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
-	e, ps := idleWorkerWithOpenTask(t, deps)
-
-	if _, err := e.AgentDirective(context.Background(), "repo", "dvalin"); err != nil {
-		t.Fatalf("AgentDirective: %v", err)
-	}
-	// Reading is unchanged — the queued /compact has not run yet — but a second ask comes in anyway.
-	dir, err := e.AgentDirective(context.Background(), "repo", "dvalin")
-	if err != nil {
-		t.Fatalf("AgentDirective: %v", err)
-	}
-	if strings.Contains(dir, "td-abc123") {
-		t.Errorf("directive = %q, want the wait answer, not the task, while still stale", dir)
-	}
-	if len(deps.compacted) != 1 {
-		t.Errorf("compacted = %v, want still exactly one — a stale re-ask must not stack a second fire", deps.compacted)
-	}
-	if st, _ := ps.GetState("dvalin"); st.Task != "" {
-		t.Errorf("state.Task = %q, want unclaimed while the reading is still stale", st.Task)
-	}
-}
-
-// TestAnUnreadableSampleClearsPendingSoCompactionCanFireAgain isolates the ok=false path from the
-// ordinary under-threshold one, since only the old code's early return skipped the clear — going
-// straight from the unreadable sample back over the threshold means the ok=false step is the ONLY
-// thing that could have cleared the flag. The old code left it true (Compact skipped, compacted
-// stays at 1); the fix clears it there too (a second fire, compacted reaches 2).
-func TestAnUnreadableSampleClearsPendingSoCompactionCanFireAgain(t *testing.T) {
-	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
-	e := New(nil, deps)
-
-	if dir, acted, err := e.compactOrWait("repo", "dvalin"); err != nil || !acted || dir != DirCompacting {
-		t.Fatalf("compactOrWait = (%q, %v, %v), want the first fire", dir, acted, err)
-	}
-	if len(deps.compacted) != 1 {
-		t.Fatalf("compacted = %v, want exactly one fire", deps.compacted)
-	}
-
-	deps.ctxOK = false // the transcript rotating to the fresh one /compact just wrote
-	if _, acted, err := e.compactOrWait("repo", "dvalin"); err != nil || acted {
-		t.Fatalf("compactOrWait on an unreadable sample = (%v, %v), want acted=false", acted, err)
-	}
-
-	// Straight back over the threshold — no under-threshold reading in between to clear the flag by
-	// the pre-existing branch instead, which would mask the ok=false path under test.
-	deps.ctxOK = true
-	if dir, acted, err := e.compactOrWait("repo", "dvalin"); err != nil || !acted || dir != DirCompacting {
-		t.Fatalf("compactOrWait = (%q, %v, %v), want a second fire — the unreadable sample must have cleared the flag", dir, acted, err)
-	}
-	if len(deps.compacted) != 2 {
-		t.Errorf("compacted = %v, want exactly two fires — the second must not have been skipped", deps.compacted)
-	}
-}
-
-// TestCompactionFiresAgainAfterLanding is the ordinary case the above isolates from: once a fired
-// compaction lands (a low reading), a later rise back over the threshold fires a genuine second
-// Compact rather than treating the agent as permanently done compacting.
-func TestCompactionFiresAgainAfterLanding(t *testing.T) {
-	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
-	e := New(nil, deps)
-
-	if _, acted, err := e.compactOrWait("repo", "dvalin"); err != nil || !acted {
-		t.Fatalf("compactOrWait = (%v, %v), want the first fire", acted, err)
-	}
-
-	deps.ctxTokens = 2_000 // landed
-	if _, acted, err := e.compactOrWait("repo", "dvalin"); err != nil || acted {
-		t.Fatalf("compactOrWait once landed = (%v, %v), want acted=false", acted, err)
-	}
-
-	deps.ctxTokens = 80_000 // due again
-	if dir, acted, err := e.compactOrWait("repo", "dvalin"); err != nil || !acted || dir != DirCompacting {
-		t.Fatalf("compactOrWait = (%q, %v, %v), want a second fire now it is due again", dir, acted, err)
-	}
-	if len(deps.compacted) != 2 {
-		t.Errorf("compacted = %v, want exactly two fires", deps.compacted)
+	if len(deps.compacted) != 1 || deps.compacted[0] != "dvalin" {
+		t.Errorf("compacted = %v, want exactly one Compact(dvalin) fired", deps.compacted)
 	}
 }
 
@@ -179,10 +77,69 @@ func TestFillUnderTheCompactionThresholdIsHandedWork(t *testing.T) {
 	}
 }
 
+// TestAnUnreadableSampleDoesNotStopANextFire: compactIfDue keeps no memory of its own prior fire —
+// an unreadable sample in between (the transcript rotating to the fresh one /compact just wrote)
+// reads as simply not due, and the very next due reading fires again regardless.
+func TestAnUnreadableSampleDoesNotStopANextFire(t *testing.T) {
+	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
+	e := New(nil, deps)
+
+	if err := e.compactIfDue("repo", "dvalin"); err != nil {
+		t.Fatalf("compactIfDue: %v", err)
+	}
+	if len(deps.compacted) != 1 {
+		t.Fatalf("compacted = %v, want exactly one fire", deps.compacted)
+	}
+
+	deps.ctxOK = false // the transcript rotating to the fresh one /compact just wrote
+	if err := e.compactIfDue("repo", "dvalin"); err != nil {
+		t.Fatalf("compactIfDue on an unreadable sample: %v", err)
+	}
+	if len(deps.compacted) != 1 {
+		t.Fatalf("compacted = %v, want still exactly one — an unreadable sample must not fire again", deps.compacted)
+	}
+
+	deps.ctxOK = true
+	if err := e.compactIfDue("repo", "dvalin"); err != nil {
+		t.Fatalf("compactIfDue: %v", err)
+	}
+	if len(deps.compacted) != 2 {
+		t.Errorf("compacted = %v, want a second fire — an unreadable sample in between is not remembered against it", deps.compacted)
+	}
+}
+
+// TestCompactionFiresAgainAfterLanding is the ordinary case the above isolates from: once a fired
+// compaction lands (a low reading), a later rise back over the threshold fires a genuine second
+// Compact rather than treating the agent as permanently done compacting.
+func TestCompactionFiresAgainAfterLanding(t *testing.T) {
+	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
+	e := New(nil, deps)
+
+	if err := e.compactIfDue("repo", "dvalin"); err != nil {
+		t.Fatalf("compactIfDue: %v", err)
+	}
+
+	deps.ctxTokens = 2_000 // landed
+	if err := e.compactIfDue("repo", "dvalin"); err != nil {
+		t.Fatalf("compactIfDue once landed: %v", err)
+	}
+	if len(deps.compacted) != 1 {
+		t.Fatalf("compacted = %v, want still exactly one — landed fill is not due", deps.compacted)
+	}
+
+	deps.ctxTokens = 80_000 // due again
+	if err := e.compactIfDue("repo", "dvalin"); err != nil {
+		t.Fatalf("compactIfDue: %v", err)
+	}
+	if len(deps.compacted) != 2 {
+		t.Errorf("compacted = %v, want exactly two fires", deps.compacted)
+	}
+}
+
 // TestClearWinsOverCompaction is rule 1 in the epic's order: an armed clear preempts compaction
 // outright, even when fill is also past the compaction threshold — a summary made first would be
-// discarded seconds later by the wipe the user asked for by hand. Unlike compaction, it fires
-// whether or not an assignment exists, so it wins ahead of ever looking for one.
+// discarded seconds later by the wipe the user asked for by hand. claimNext's own clearArmed check
+// runs before it ever looks for a compaction to fire, so nothing here reaches compactIfDue at all.
 func TestClearWinsOverCompaction(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
 	e, ps := idleWorkerWithOpenTask(t, deps)
@@ -195,15 +152,16 @@ func TestClearWinsOverCompaction(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dir, err := e.AgentDirective(context.Background(), "repo", "dvalin")
-	if err != nil {
-		t.Fatalf("AgentDirective: %v", err)
-	}
-	if strings.Contains(dir, "compact") || !strings.Contains(dir, "clear") {
-		t.Errorf("directive = %q, want the clear-pending answer, not compaction", dir)
+	fired, err := e.fireClearIfArmed("repo", "dvalin")
+	if err != nil || !fired {
+		t.Fatalf("fireClearIfArmed = (%v, %v), want fired", fired, err)
 	}
 	if len(deps.cleared) != 1 || deps.cleared[0] != "dvalin" {
 		t.Errorf("cleared = %v, want exactly one FireClear(dvalin)", deps.cleared)
+	}
+
+	if _, claimed, err := e.claimNext("repo", "dvalin"); err != nil || claimed {
+		t.Errorf("claimNext = (claimed=%v, err=%v), want nothing claimed this pass", claimed, err)
 	}
 	if len(deps.compacted) != 0 {
 		t.Errorf("compacted = %v, want none — the clear preempts it outright", deps.compacted)
@@ -214,7 +172,7 @@ func TestClearWinsOverCompaction(t *testing.T) {
 }
 
 // TestRetiredIsExemptFromCompaction: a retired worker is exempt from every automatic behaviour, not
-// just new task assignment — it must read "retired", not "compacting".
+// just new task assignment — it must read "retired", not fire a compaction.
 func TestRetiredIsExemptFromCompaction(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
 	e, ps := idleWorkerWithOpenTask(t, deps)
@@ -248,9 +206,9 @@ func TestCompactDueIgnoresAnUnknownWindow(t *testing.T) {
 	}
 }
 
-// TestBetweenSubtasksEndsThePassThenHandsOverOnTheNextAsk: the same rule claimNext follows, for a
-// worker already holding a feature and about to be handed its next subtask (-> claimNextSubtask).
-func TestBetweenSubtasksEndsThePassThenHandsOverOnTheNextAsk(t *testing.T) {
+// TestBetweenSubtasksClaimsAndCompactsInOnePass: claimNextSubtask follows the same rule claimNext
+// does, for a worker already holding a feature and about to be handed its next subtask.
+func TestBetweenSubtasksClaimsAndCompactsInOnePass(t *testing.T) {
 	const agent = "dain"
 	root, _ := newWorkRepo(t, agent, "td-EPIC")
 	st, err := store.Open(root + "/s.db")
@@ -291,32 +249,20 @@ func TestBetweenSubtasksEndsThePassThenHandsOverOnTheNextAsk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if strings.Contains(dir, "td-next") || !strings.Contains(dir, "compact") {
-		t.Errorf("directive = %q, want the compacting answer, not the subtask", dir)
+	if !strings.Contains(dir, "td-next") {
+		t.Errorf("directive = %q, want the next subtask claimed in this same ask", dir)
 	}
-	if held, _ := ps.GetState(agent); held.Task != "" {
-		t.Errorf("state.Task = %q, want unclaimed until the compaction lands", held.Task)
+	if held, _ := ps.GetState(agent); held.Task != "td-next" {
+		t.Errorf("state.Task = %q, want td-next — the claim holds regardless of the compaction", held.Task)
 	}
 	if len(deps.compacted) != 1 || deps.compacted[0] != agent {
 		t.Errorf("compacted = %v, want exactly one Compact(%s) fired", deps.compacted, agent)
 	}
-
-	deps.ctxTokens = 2_000
-	dir, err = e.AgentDirective(context.Background(), "repo", agent)
-	if err != nil {
-		t.Fatalf("AgentDirective: %v", err)
-	}
-	if !strings.Contains(dir, "td-next") {
-		t.Errorf("directive = %q, want the next subtask claimed now the compaction has landed", dir)
-	}
-	if held, _ := ps.GetState(agent); held.Task != "td-next" {
-		t.Errorf("state.Task = %q, want td-next", held.Task)
-	}
 }
 
-// TestReviewerFillPastTheCompactionThresholdEndsThePassThenHandsOverOnTheNextAsk: the same rule, for
-// a reviewer about to be handed a new PR rather than a worker about to be handed a new task.
-func TestReviewerFillPastTheCompactionThresholdEndsThePassThenHandsOverOnTheNextAsk(t *testing.T) {
+// TestReviewerFillPastTheCompactionThresholdClaimsAndCompactsInOnePass: the same rule, for a
+// reviewer about to be handed a new PR rather than a worker about to be handed a new task.
+func TestReviewerFillPastTheCompactionThresholdClaimsAndCompactsInOnePass(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
 	e, ps := reviewerWithUnclaimedReview(t, deps)
 
@@ -324,26 +270,14 @@ func TestReviewerFillPastTheCompactionThresholdEndsThePassThenHandsOverOnTheNext
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if strings.Contains(dir, "pr-1") || !strings.Contains(dir, "compact") {
-		t.Errorf("directive = %q, want the compacting answer, not the review", dir)
+	if !strings.Contains(dir, "pr-1") {
+		t.Errorf("directive = %q, want the review claimed in this same ask", dir)
 	}
-	if held, _ := ps.ReviewingPR("rune"); held != "" {
-		t.Errorf("ReviewingPR = %q, want unclaimed until the compaction lands", held)
+	if held, _ := ps.ReviewingPR("rune"); held != "pr-1" {
+		t.Errorf("ReviewingPR = %q, want pr-1 — the claim holds regardless of the compaction", held)
 	}
 	if len(deps.compacted) != 1 || deps.compacted[0] != "rune" {
 		t.Errorf("compacted = %v, want exactly one Compact(rune) fired", deps.compacted)
-	}
-
-	deps.ctxTokens = 2_000
-	dir, err = e.AgentDirective(context.Background(), "repo", "rune")
-	if err != nil {
-		t.Fatalf("AgentDirective: %v", err)
-	}
-	if !strings.Contains(dir, "pr-1") {
-		t.Errorf("directive = %q, want the review claimed now the compaction has landed", dir)
-	}
-	if held, _ := ps.ReviewingPR("rune"); held != "pr-1" {
-		t.Errorf("ReviewingPR = %q, want pr-1", held)
 	}
 }
 

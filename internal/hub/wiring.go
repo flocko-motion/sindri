@@ -194,14 +194,14 @@ func (d workflowDeps) Compact(project, name string) error {
 	return d.h.agents.Compact(project, name)
 }
 
-func (d workflowDeps) CompactPending(project, name string) bool {
-	return d.h.agents.CompactPending(project, name)
-}
-
-func (d workflowDeps) ForgetCompactPending(project, name string) {
-	d.h.agents.ForgetCompactPending(project, name)
-}
-
 func (d workflowDeps) FireClear(project, name string) error {
 	return d.h.agents.FireClear(project, name)
+}
+
+func (d workflowDeps) BeginAssignment(project, name string) {
+	d.h.agents.BeginAssignment(project, name)
+}
+
+func (d workflowDeps) EndAssignment(project, name string) {
+	d.h.agents.EndAssignment(project, name)
 }
