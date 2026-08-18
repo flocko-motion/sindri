@@ -58,11 +58,11 @@ type Agent interface {
 	// usable one. Every agent runs on this single token, so its expiry is the moment the whole fleet
 	// needs the replacement — the hub watches it to redistribute then rather than on a slow tick.
 	HostTokenExpiry() (expiresAtMS int64, usable bool)
-	// ContextUsage reports what the live session under home carries and the window it fills, both
-	// from the backend's own transcript. The window comes from here because only the backend knows
-	// which model answers; a caller that assumed one retired workers with most of 1M unused.
-	// ok=false when nothing has been recorded yet.
-	ContextUsage(home string) (tokens, window int, ok bool)
+	// ContextUsage reports what the live session under home carries, the window it fills, and the
+	// model carrying it, all from the backend's own transcript. The window comes from here because
+	// only the backend knows which model answers; a caller that assumed one retired workers with
+	// most of 1M unused. ok=false when nothing has been recorded yet.
+	ContextUsage(home string) (tokens, window int, model string, ok bool)
 }
 
 // active is wired once at startup via Use; the no-op default keeps the port safe before.
@@ -94,8 +94,8 @@ func RestageCredentials(dir string) (bool, error) { return active.RestageCredent
 // HostTokenExpiry reports the wired backend's host token expiry and whether it is usable.
 func HostTokenExpiry() (int64, bool) { return active.HostTokenExpiry() }
 
-// ContextUsage reports the wired backend's context size and window for the session under home.
-func ContextUsage(home string) (int, int, bool) { return active.ContextUsage(home) }
+// ContextUsage reports the wired backend's context size, window and model for the session under home.
+func ContextUsage(home string) (int, int, string, bool) { return active.ContextUsage(home) }
 
 // noop is the default until Use: state is Unknown, no home is provisioned.
 type noop struct{}
@@ -108,4 +108,4 @@ func (noop) RestageCredentials(string) (bool, error) { return false, nil }
 
 func (noop) HostTokenExpiry() (int64, bool) { return 0, false }
 
-func (noop) ContextUsage(string) (int, int, bool) { return 0, 0, false }
+func (noop) ContextUsage(string) (int, int, string, bool) { return 0, 0, "", false }

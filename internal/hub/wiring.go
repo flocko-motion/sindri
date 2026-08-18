@@ -140,6 +140,6 @@ func (d workflowDeps) KnownProjects() []store.Project {
 
 func (d workflowDeps) BrokkrBin() (string, error) { return agent.BrokkrBinary() }
 
-func (d workflowDeps) ContextUsage(project, name string) (tokens, window int, ok bool) {
+func (d workflowDeps) ContextUsage(project, name string) (tokens, window int, model string, ok bool) {
 	return d.h.agents.ContextUsage(project, name)
 }

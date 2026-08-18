@@ -370,6 +370,7 @@ func (m model) agentItems() []metaItem {
 		wsIt,
 		metaItem{text: "memory:    " + memoryLabelTUI(a.Memory, m.state.DefaultMemory) + dimStyle.Render("  (container RAM · e to edit)")},
 		metaItem{text: "context:   " + theme.ContextLine(a.ContextTokens)},
+		metaItem{text: "model:     " + dash(a.Model)},
 		metaItem{text: pod, kind: "view", value: "pod"},
 	)
 	// The armed clear says WHEN it lands, not merely that it is set: the row's marker is the count,
@@ -490,6 +491,7 @@ var agentTable = table.Table{
 	{Label: "role", Width: 8},
 	{Label: "status", Width: 9},
 	{Label: "ctx", Width: 4, Right: true},
+	{Label: "model", Width: 14, Clip: true}, // a raw model id is unbounded and often dated
 	{Label: "work"},
 }
 
@@ -576,6 +578,7 @@ func (m model) agentRow(a api.AgentView) row {
 		table.Cell{Text: a.Role, Style: ac.Render},
 		table.Cell{Text: a.Status, Style: ac.Render},
 		table.Cell{Text: theme.ContextPercent(a.ContextTokens, a.ContextWindow), Style: ac.Render},
+		table.Cell{Text: dash(a.Model), Style: ac.Render},
 		table.Cell{Text: task, Style: ac.Render},
 	), a.Name}
 }

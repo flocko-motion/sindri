@@ -70,8 +70,8 @@ func (d *stubDeps) AddTaskComment(_, id, author, body string) error {
 func (d *stubDeps) Subscribe() (chan struct{}, func()) { return make(chan struct{}), func() {} }
 func (d *stubDeps) KnownProjects() []store.Project     { return d.projects }
 func (d *stubDeps) BrokkrBin() (string, error)         { return "", nil }
-func (d *stubDeps) ContextUsage(_, _ string) (int, int, bool) {
-	return d.ctxTokens, d.ctxWindow, d.ctxOK
+func (d *stubDeps) ContextUsage(_, _ string) (int, int, string, bool) {
+	return d.ctxTokens, d.ctxWindow, "", d.ctxOK
 }
 
 // TestScrapPRStopsReviewer: scrapping a PR under review flips it to "scrapped",

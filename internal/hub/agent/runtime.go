@@ -86,9 +86,11 @@ func (s *Service) Observe(ctx context.Context, project, name string) Observation
 // because a session file changes far less often than the tmux pane does).
 const contextTTL = 15 * time.Second
 
-// contextSample is one reading: what the session carries, and the window it has to fill.
+// contextSample is one reading: what the session carries, the window it has to fill, and the model
+// carrying it.
 type contextSample struct {
 	tokens, window int
+	model          string
 	ok             bool
 }
 
@@ -98,27 +100,27 @@ var contextMemo struct {
 	val map[string]contextSample
 }
 
-// ContextUsage reads name's live session context size and window off disk (never the tmux pane —
-// that's pattern-matched text, this is exact usage from the transcript itself). ok=false when no
-// session has recorded usage yet.
-func (s *Service) ContextUsage(project, name string) (tokens, window int, ok bool) {
+// ContextUsage reads name's live session context size, window and model off disk (never the tmux
+// pane — that's pattern-matched text, this is exact usage from the transcript itself). ok=false when
+// no session has recorded usage yet.
+func (s *Service) ContextUsage(project, name string) (tokens, window int, model string, ok bool) {
 	key := project + "/" + name
 	contextMemo.mu.Lock()
 	if at, cached := contextMemo.at[key]; cached && time.Since(at) < contextTTL {
 		v := contextMemo.val[key]
 		contextMemo.mu.Unlock()
-		return v.tokens, v.window, v.ok
+		return v.tokens, v.window, v.model, v.ok
 	}
 	contextMemo.mu.Unlock()
 
-	t, w, found := agentport.ContextUsage(paths.AgentHomeDir(project, name))
+	t, w, m, found := agentport.ContextUsage(paths.AgentHomeDir(project, name))
 	contextMemo.mu.Lock()
 	if contextMemo.at == nil {
 		contextMemo.at, contextMemo.val = map[string]time.Time{}, map[string]contextSample{}
 	}
-	contextMemo.at[key], contextMemo.val[key] = time.Now(), contextSample{t, w, found}
+	contextMemo.at[key], contextMemo.val[key] = time.Now(), contextSample{t, w, m, found}
 	contextMemo.mu.Unlock()
-	return t, w, found
+	return t, w, m, found
 }
 
 // ForgetContext drops name's memoised context reading. For the one caller that KNOWS the previous

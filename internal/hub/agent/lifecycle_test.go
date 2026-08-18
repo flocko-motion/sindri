@@ -31,3 +31,32 @@ func TestPreviewSizeEnvOnlyWhenBothDimensionsSet(t *testing.T) {
 		})
 	}
 }
+
+// TestModelEnvOnlyWhenRecorded: a brand-new agent's first launch has no transcript yet to name a
+// model from, and ContextUsage answers that with ok=false — modelEnv must carry nothing then, not
+// an empty SINDRI_MODEL a relaunch would read as a real (if blank) value.
+func TestModelEnvOnlyWhenRecorded(t *testing.T) {
+	cases := []struct {
+		name  string
+		model string
+		ok    bool
+		want  map[string]string
+	}{
+		{"never recorded", "", false, nil},
+		{"recorded but empty", "", true, nil},
+		{"recorded", "claude-opus-5", true, map[string]string{"SINDRI_MODEL": "claude-opus-5"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := modelEnv(c.model, c.ok)
+			if len(got) != len(c.want) {
+				t.Fatalf("modelEnv(%q, %v) = %v, want %v", c.model, c.ok, got, c.want)
+			}
+			for k, v := range c.want {
+				if got[k] != v {
+					t.Errorf("modelEnv(%q, %v)[%q] = %q, want %q", c.model, c.ok, k, got[k], v)
+				}
+			}
+		})
+	}
+}

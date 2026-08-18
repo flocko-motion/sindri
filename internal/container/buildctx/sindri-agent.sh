@@ -50,6 +50,15 @@ set -g mode-keys vi
 set -g history-limit 50000
 TMUXCONF
 
+# Overrides status-left above, once the hub has a model to name (nothing on a first launch).
+# Stripped of '#'/'"': tmux's status format and this line's own quoting would read them as syntax.
+if [ -n "${SINDRI_MODEL:-}" ]; then
+	MODEL_SAFE="${SINDRI_MODEL//[\"#]/}"
+	cat >> "$HOME/.tmux.conf" <<TMUXMODEL
+set -g status-left "#[bold] sindri · #S ($MODEL_SAFE) #[default] "
+TMUXMODEL
+fi
+
 # A detached new-session with no -x/-y sticks at tmux's own 80x24 until attached; the hub passes
 # the caller's preview size (TUI only) so a fresh session isn't cramped from the start.
 SIZE_ARGS=()

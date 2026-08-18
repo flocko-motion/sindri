@@ -36,18 +36,18 @@ var windows = []struct {
 	{"haiku", 200_000},
 }
 
-// ContextUsage implements agent.Agent: what the session under home carries and the window it fills.
-// ok=false when nothing there has recorded usage yet.
-func (Claude) ContextUsage(home string) (tokens, window int, ok bool) {
+// ContextUsage implements agent.Agent: what the session under home carries, the window it fills, and
+// the raw model id carrying it. ok=false when nothing there has recorded usage yet.
+func (Claude) ContextUsage(home string) (tokens, window int, model string, ok bool) {
 	path, found := latestTranscript(home)
 	if !found {
-		return 0, 0, false
+		return 0, 0, "", false
 	}
-	tokens, model, ok := lastUsage(path)
+	tokens, model, ok = lastUsage(path)
 	if !ok {
-		return 0, 0, false
+		return 0, 0, "", false
 	}
-	return tokens, windowFor(model), true
+	return tokens, windowFor(model), model, true
 }
 
 // windowFor resolves a model id to its context window, conservatively when it is unrecognised.

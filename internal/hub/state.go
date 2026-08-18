@@ -127,7 +127,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		if _, stalled := h.stalledFor(a.Project, a.Name, st.Phase, st.Container); stalled {
 			status = "stalled"
 		}
-		tokens, window, _ := h.agents.ContextUsage(a.Project, a.Name)
+		tokens, window, model, _ := h.agents.ContextUsage(a.Project, a.Name)
 		status = overlayFullness(status, h.wf.ContextFull(a.Project, a.Name), st.Task, st.Container, pr)
 		status = overlayEscalation(status, st.Escalation)
 		agents = append(agents, AgentView{
@@ -137,7 +137,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			Task:    st.Task, Feature: st.Container, Branch: st.Branch, PR: pr, Workspace: a.Workspace,
 			Clients: clients[i], Container: container, Memory: a.Memory, Retired: a.Retired,
 			ClearArmed:    a.ClearArmed,
-			ContextTokens: tokens, ContextWindow: window, Escalation: st.Escalation,
+			ContextTokens: tokens, ContextWindow: window, Model: model, Escalation: st.Escalation,
 			UnreadMail: unreadMail[a.Project][a.Name],
 		})
 	}

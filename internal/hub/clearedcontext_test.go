@@ -22,11 +22,11 @@ func (f fakeAgent) PrepareHome(agentport.HomeSpec) (agentport.Home, error) {
 }
 func (f fakeAgent) RestageCredentials(string) (bool, error) { return false, nil }
 func (f fakeAgent) HostTokenExpiry() (int64, bool)          { return 0, false }
-func (f fakeAgent) ContextUsage(string) (int, int, bool) {
+func (f fakeAgent) ContextUsage(string) (int, int, string, bool) {
 	if f.tokens == nil {
-		return 0, 0, false // the unwired state this package's other tests expect
+		return 0, 0, "", false // the unwired state this package's other tests expect
 	}
-	return *f.tokens, 1_000_000, true
+	return *f.tokens, 1_000_000, "claude-opus-5", true
 }
 
 // fullAgentWithWorkWaiting seeds an idle worker reported as over the fullness threshold, with an

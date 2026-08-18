@@ -243,6 +243,15 @@ func previewSizeEnv(cols, lines int) map[string]string {
 	return map[string]string{"SINDRI_COLS": strconv.Itoa(cols), "SINDRI_LINES": strconv.Itoa(lines)}
 }
 
+// modelEnv names the model a session's status line should show (-> sindri-agent.sh), or nothing on
+// a first launch, which has no transcript yet to have recorded one.
+func modelEnv(model string, ok bool) map[string]string {
+	if !ok || model == "" {
+		return nil
+	}
+	return map[string]string{"SINDRI_MODEL": model}
+}
+
 // Launch spins a pod that assumes an existing agent's identity, running Claude in a tmux session
 // named after it (or a bare shell); cols/lines size it to a caller's preview pane.
 func (s *Service) Launch(project, name string, shell, debug bool, cols, lines int, progress io.Writer) (err error) {
@@ -338,6 +347,10 @@ func (s *Service) Launch(project, name string, shell, debug bool, cols, lines in
 
 	env := map[string]string{"SINDRI_AGENT": name, "COLORTERM": "truecolor"}
 	for k, v := range previewSizeEnv(cols, lines) {
+		env[k] = v
+	}
+	_, _, model, modelOK := s.ContextUsage(project, name)
+	for k, v := range modelEnv(model, modelOK) {
 		env[k] = v
 	}
 	// macOS: the pod can't connect to the bind-mounted unix socket across the VM

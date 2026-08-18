@@ -79,9 +79,9 @@ type Deps interface {
 	KnownProjects() []store.Project
 	// BrokkrBin locates the brokkr toolbelt binary (the lint gate shells out to it).
 	BrokkrBin() (string, error)
-	// ContextUsage reports an agent's current session context size and the window it fills, both
-	// read off its transcript. ok=false when nothing has been recorded yet.
-	ContextUsage(project, name string) (tokens, window int, ok bool)
+	// ContextUsage reports an agent's current session context size, the window it fills, and the
+	// model filling it, all read off its transcript. ok=false when nothing has been recorded yet.
+	ContextUsage(project, name string) (tokens, window int, model string, ok bool)
 }
 
 // clearArmed reports whether a human has armed a context clear for this agent. It is handed no new

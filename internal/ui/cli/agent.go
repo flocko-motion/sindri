@@ -106,6 +106,7 @@ var agentListTable = table.Table{
 	{Label: "role", Width: 8},
 	{Label: "status", Width: 10},
 	{Label: "ctx", Width: 4, Right: true},
+	{Label: "model", Width: 14, Clip: true}, // a raw model id is unbounded and often dated
 	{Label: "task", Width: 14},
 	{Label: "pr"},
 }
@@ -144,6 +145,7 @@ func agentListCmd() *cobra.Command {
 						table.Cell{Text: a.Role},
 						table.Cell{Text: a.Status},
 						table.Cell{Text: theme.ContextPercent(a.ContextTokens, a.ContextWindow)},
+						table.Cell{Text: dash(a.Model)},
 						table.Cell{Text: dash(a.Task)},
 						table.Cell{Text: dash(a.PR)},
 					)
@@ -572,10 +574,10 @@ func agentInfoCmd() *cobra.Command {
 				if st, err := b.State(); err == nil {
 					dflt = st.DefaultMemory
 				}
-				fmt.Printf("agent:     %s\nrole:      %s\nstatus:    %s\ntask:      %s\nfeature:   %s\npr:        %s\nworkspace: %s\nmemory:    %s\ncontext:   %s\n",
+				fmt.Printf("agent:     %s\nrole:      %s\nstatus:    %s\ntask:      %s\nfeature:   %s\npr:        %s\nworkspace: %s\nmemory:    %s\ncontext:   %s\nmodel:     %s\n",
 					found.Name, found.Role, found.Status, agentTaskLabel(b, found.Task),
 					agentTaskLabel(b, found.Feature), dash(found.PR), dash(found.Workspace), memoryLabel(found.Memory, dflt),
-					theme.ContextLine(found.ContextTokens))
+					theme.ContextLine(found.ContextTokens), dash(found.Model))
 				// Same reasoning as the arming below, and it bites harder: retirement shows up only
 				// when the agent next asks for work, and DirRetired told it to stop asking — so the
 				// pane goes quiet and nothing anywhere says why.

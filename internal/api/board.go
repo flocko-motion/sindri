@@ -32,6 +32,10 @@ type AgentView struct {
 	// the fleet retired 1M agents at 17%.
 	ContextTokens int `json:"contextTokens"`
 	ContextWindow int `json:"contextWindow"`
+	// Model is the raw id its transcript names ("" = not yet observed) — the denominator ContextWindow
+	// was read against. Until a worker can be launched on a chosen model this is the account default,
+	// the same for every agent, which is still worth seeing.
+	Model string `json:"model,omitempty"`
 	// Retired: a human has wound it down, so it is handed no new work while it finishes what it
 	// holds. Carried beside Status rather than inside it, because it is true of a busy agent too —
 	// that is the whole point of setting it — and Status can only say one thing at a time.

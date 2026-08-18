@@ -33,7 +33,7 @@ func TestContextUsageSumsTheLastAssistantUsage(t *testing.T) {
 		`{"type":"user","message":{}}`,
 		`{"type":"assistant","message":{"usage":{"input_tokens":2,"cache_read_input_tokens":240480,"cache_creation_input_tokens":1129}}}`,
 	})
-	got, _, ok := Claude{}.ContextUsage(home)
+	got, _, _, ok := Claude{}.ContextUsage(home)
 	if !ok {
 		t.Fatal("ContextUsage reported no usage, want the last assistant line's sum")
 	}
@@ -48,7 +48,7 @@ func TestContextUsageSkipsAssistantLinesWithNoUsage(t *testing.T) {
 		`{"type":"assistant","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}`,
 		`{"type":"assistant","message":{}}`, // a tool-use continuation line, no usage recorded
 	})
-	got, _, ok := Claude{}.ContextUsage(home)
+	got, _, _, ok := Claude{}.ContextUsage(home)
 	if !ok || got != 10 {
 		t.Errorf("ContextUsage = (%d, %v), want (10, true) — should skip the trailing no-usage line", got, ok)
 	}
@@ -56,7 +56,7 @@ func TestContextUsageSkipsAssistantLinesWithNoUsage(t *testing.T) {
 
 func TestContextUsageNoSessionYet(t *testing.T) {
 	home := t.TempDir()
-	if _, _, ok := (Claude{}).ContextUsage(home); ok {
+	if _, _, _, ok := (Claude{}).ContextUsage(home); ok {
 		t.Fatal("ContextUsage reported usage for a home with no transcript at all")
 	}
 }
@@ -76,7 +76,7 @@ func TestContextUsagePicksTheMostRecentSession(t *testing.T) {
 	if err := os.Chtimes(newer, time.Now(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	got, _, ok := Claude{}.ContextUsage(home)
+	got, _, _, ok := Claude{}.ContextUsage(home)
 	if !ok || got != 5 {
 		t.Errorf("ContextUsage = (%d, %v), want the NEWER session's (5, true), not the older one's 999", got, ok)
 	}
@@ -118,13 +118,30 @@ func TestTheWindowComesFromTheModel(t *testing.T) {
 			`{"type":"assistant","message":{"model":"` + c.model + `","usage":{"input_tokens":42,` +
 				`"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}`,
 		})
-		tokens, window, ok := Claude{}.ContextUsage(home)
+		tokens, window, model, ok := Claude{}.ContextUsage(home)
 		if !ok || tokens != 42 {
 			t.Fatalf("%s: tokens = (%d, %v), want (42, true)", c.model, tokens, ok)
 		}
 		if window != c.wantWindow {
 			t.Errorf("%s: window = %d, want %d", c.model, window, c.wantWindow)
 		}
+		if model != c.model {
+			t.Errorf("model = %q, want %q", model, c.model)
+		}
+	}
+}
+
+// TestContextUsageReportsTheModel: the board shows what backs an agent, not just the window it
+// resolves to — so the raw model id itself must come back too.
+func TestContextUsageReportsTheModel(t *testing.T) {
+	home := t.TempDir()
+	writeTranscript(t, home, "sess", []string{
+		`{"type":"assistant","message":{"model":"claude-opus-5-20260315","usage":{"input_tokens":1,` +
+			`"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}`,
+	})
+	_, _, model, ok := Claude{}.ContextUsage(home)
+	if !ok || model != "claude-opus-5-20260315" {
+		t.Errorf("model = (%q, %v), want (%q, true)", model, ok, "claude-opus-5-20260315")
 	}
 }
 
@@ -135,7 +152,7 @@ func TestAnUnrecordedModelStillReportsAWindow(t *testing.T) {
 	writeTranscript(t, home, "sess", []string{
 		`{"type":"assistant","message":{"usage":{"input_tokens":9,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}`,
 	})
-	if _, window, ok := (Claude{}).ContextUsage(home); !ok || window != defaultWindow {
+	if _, window, _, ok := (Claude{}).ContextUsage(home); !ok || window != defaultWindow {
 		t.Errorf("window = (%d, %v), want (%d, true)", window, ok, defaultWindow)
 	}
 }
@@ -151,7 +168,7 @@ func TestASyntheticTailStillResolvesTheWindow(t *testing.T) {
 		`{"type":"assistant","message":{"model":"<synthetic>","usage":{"input_tokens":0,` +
 			`"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}`,
 	})
-	tokens, window, ok := Claude{}.ContextUsage(home)
+	tokens, window, model, ok := Claude{}.ContextUsage(home)
 	if !ok {
 		t.Fatal("ContextUsage reported nothing past the synthetic tail")
 	}
@@ -160,5 +177,8 @@ func TestASyntheticTailStillResolvesTheWindow(t *testing.T) {
 	}
 	if window != 1_000_000 {
 		t.Errorf("window = %d, want 1000000 — the synthetic line names no model, the one before it does", window)
+	}
+	if model != "claude-opus-5" {
+		t.Errorf("model = %q, want %q — the synthetic line names no model, the one before it does", model, "claude-opus-5")
 	}
 }

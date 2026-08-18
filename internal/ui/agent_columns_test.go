@@ -12,7 +12,7 @@ import (
 // the CLI's table also has "task" and "pr", the TUI's has "work", so a straight equality check
 // would fail on those without saying anything about the columns this task cares about.
 func sharedCols(labels []string) []string {
-	want := map[string]bool{"repo": true, "agent": true, "role": true, "status": true}
+	want := map[string]bool{"repo": true, "agent": true, "role": true, "status": true, "model": true}
 	var out []string
 	for _, l := range labels {
 		if want[l] {
@@ -23,13 +23,13 @@ func sharedCols(labels []string) []string {
 }
 
 // TestAgentColumnOrderMatchesBothFrontEnds pins the Agents row's field order — repo, then agent,
-// then role, then status — in both front-ends at once, reading each one's own table.Table (the
-// same layout its rows render through), so a change to one side's column order without the other
-// fails here instead of drifting unnoticed (sd-aadbb4 exists because it already had). Lives here,
-// rather than inside tui or cli, because a test that imported both from either side would cycle
-// back through cli's own import of tui.
+// then role, then status, then model — in both front-ends at once, reading each one's own
+// table.Table (the same layout its rows render through), so a change to one side's column order
+// without the other fails here instead of drifting unnoticed (sd-aadbb4 exists because it already
+// had). Lives here, rather than inside tui or cli, because a test that imported both from either
+// side would cycle back through cli's own import of tui.
 func TestAgentColumnOrderMatchesBothFrontEnds(t *testing.T) {
-	want := []string{"repo", "agent", "role", "status"}
+	want := []string{"repo", "agent", "role", "status", "model"}
 
 	if got := sharedCols(tui.AgentColumnLabels()); !reflect.DeepEqual(got, want) {
 		t.Errorf("TUI Agents columns: want %v, got %v", want, got)

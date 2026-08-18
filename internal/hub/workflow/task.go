@@ -574,7 +574,7 @@ const ContextFullFraction = 0.85
 // usage yet (ok=false from ContextUsage) is never full, and neither is a window of 0 — an unknown
 // window must not retire anybody, since guessing one is what this replaced.
 func (e *Engine) contextFull(project, worker string) (tokens int, full bool) {
-	tokens, window, ok := e.deps.ContextUsage(project, worker)
+	tokens, window, _, ok := e.deps.ContextUsage(project, worker)
 	if !ok || window <= 0 {
 		return tokens, false
 	}
