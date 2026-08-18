@@ -20,10 +20,15 @@ import (
 )
 
 const (
-	// watchInterval is the REST between sweeps, not a period: the loop clocks on completion, so a
-	// slow runtime throttles the observer instead of queueing work behind it. Under the TUI's 3s
-	// poll, so no reading is wasted.
-	watchInterval = 2 * time.Second
+	// watchInterval is the REST between beats, not a period: the loop clocks on completion, so a
+	// slow runtime throttles the observer instead of queueing work behind it.
+	watchInterval = time.Second
+
+	// probeEvery is how many beats apart the per-agent probes run. A sweep's two halves differ by an
+	// order of magnitude: ONE listing answers for every container in a single spawn, while the
+	// probes cost two spawns per agent — 24 of them at twelve agents, ~96% of the work. So the
+	// cheap half runs every beat, and the dear half rides a slower one.
+	probeEvery = 6
 
 	// watchProbeParallel bounds concurrent container commands: process spawns do not parallelise
 	// (24 at once ~3.2s, one ~0.2s), so a small window finishes a sweep sooner than a fan-out.
@@ -122,8 +127,11 @@ func (w *watchdog) seed() {
 func (w *watchdog) loop() {
 	defer close(w.done)
 	var lastCapacity time.Time
-	for {
-		w.sweep() // the first one is the real first reading, off the startup path (see newWatchdog)
+	for beat := 0; ; beat++ {
+		// Beat 0 probes: the first sweep is the real first reading, off the startup path (see
+		// newWatchdog), and a listing alone would leave every agent's runtime unknown until the
+		// first probe beat.
+		w.sweep(beat%probeEvery == 0)
 		// In the loop's own goroutine rather than beside it: one observer means one process spawn
 		// at a time, and a capacity sample racing a sweep is the parallelism this exists to end.
 		if time.Since(lastCapacity) >= capacityInterval {
@@ -178,7 +186,7 @@ func (w *watchdog) get(project, name string) (liveness, bool) {
 // sweep reads the fleet: one listing of which pods exist — cheap, it answers for every container at
 // once — then a tmux probe per agent that has one. The listing is taken fresh: this is the caller
 // whose question is about now, and a memoized answer predating a launch reports the new pod absent.
-func (w *watchdog) sweep() {
+func (w *watchdog) sweep(withProbes bool) {
 	agents, err := w.h.store.AllAgents()
 	if err != nil {
 		return // a store hiccup is not evidence about any agent; keep the last observations
@@ -188,7 +196,7 @@ func (w *watchdog) sweep() {
 	cancel()
 	// This listing IS the runtime health check, so nobody has to pay for a second one. A CLI that
 	// spawned `podman info` per command was answering, in 3.8s, a question already answered here
-	// every 2 seconds — and on a loaded host its own timeout misreported a slow podman as absent.
+	// every beat — and on a loaded host its own timeout misreported a slow podman as absent.
 	w.mu.Lock()
 	w.runtimeErr = listErr
 	w.mu.Unlock()
@@ -202,6 +210,12 @@ func (w *watchdog) sweep() {
 	for _, a := range agents {
 		if listErr == nil && !exists[w.h.container(a.Project, a.Name)] {
 			w.record(a, false, 0, agent.Observation{})
+			continue
+		}
+		// A pod that EXISTS says nothing yet about the session inside it, which only the probe
+		// answers — so on a listing-only beat its last observation stands untouched. Death is still
+		// caught at full speed: absence above is conclusive on every beat.
+		if !withProbes {
 			continue
 		}
 		wg.Add(1)

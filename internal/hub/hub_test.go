@@ -134,8 +134,9 @@ func TestNewAgentRecordsIdentityAndLog(t *testing.T) {
 	}
 	// Observe before asserting. The agent is registered after the watchdog seeded, so until a sweep
 	// looks at it its status is "unknown" — correct, and a race to assert around: whether this read
-	// caught the settled value depended on the 2s tick landing first.
-	h.watch.sweep()
+	// caught the settled value depended on the tick landing first. Probes included, since the
+	// listing alone leaves an existing pod's session unread.
+	h.watch.sweep(true)
 	st, err := h.State(testProject)
 	if err != nil {
 		t.Fatal(err)
