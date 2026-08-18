@@ -148,35 +148,31 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 			// new base, keeping whatever the agent is mid-editing rather than discarding it.
 			wt := filepath.Join(root, a.Workspace)
 			conflicts, done, rerr := git.ResetOntoKeepingWork(wt, pr.Base)
-			switch {
-			case rerr != nil:
-				log.Printf("hub: %s: reset %s onto %s after %s: %v", pr.Agent, pr.Branch, pr.Base, prID, rerr)
-				_ = ps.LogPR(prID, "warning", "merged, but resetting "+pr.Agent+"'s branch onto "+pr.Base+" failed (needs a manual look): "+rerr.Error())
-			case !done:
-				cur, _ := ps.GetState(pr.Agent) // re-read: promoting to a feature above already moved it on
-				_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: cur.Task, Branch: pr.Branch, Container: cur.Container, Phase: "resolving"})
-				_ = ps.Log(pr.Agent, "resolve", prID+" merged, but reapplying uncommitted work onto "+pr.Base+" conflicts: "+strings.Join(conflicts, ", "))
-				_ = ps.LogPR(prID, "merged", "into "+pr.Base+"; reapplying "+pr.Agent+"'s uncommitted work conflicts")
-				_ = e.deps.Deliver(project, pr.Agent, MsgReapplyConflict(prID, pr.Base, conflicts), MailAndPush)
+			if rerr != nil || !done {
+				// cur.Task, not pr.Task: for a milestone that is the container's own id, not the real
+				// subtask resumeContainer must see later. Container mirrors onFeature, not a stale
+				// read, so a just-promoted feature is not lost here.
+				cur, _ := ps.GetState(pr.Agent)
+				container := ""
+				if onFeature {
+					container = pr.Branch
+				}
+				_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: cur.Task, Branch: pr.Branch, Container: container, Phase: "resolving"})
+				if rerr != nil {
+					log.Printf("hub: %s: reset %s onto %s after %s: %v", pr.Agent, pr.Branch, pr.Base, prID, rerr)
+					_ = ps.LogPR(prID, "warning", "merged, but resetting "+pr.Agent+"'s branch onto "+pr.Base+" failed (needs a manual look): "+rerr.Error())
+					_ = e.deps.Deliver(project, pr.Agent, MsgResetFailed(prID, pr.Base), MailAndPush)
+				} else {
+					_ = ps.Log(pr.Agent, "resolve", prID+" merged, but reapplying uncommitted work onto "+pr.Base+" conflicts: "+strings.Join(conflicts, ", "))
+					_ = ps.LogPR(prID, "merged", "into "+pr.Base+"; reapplying "+pr.Agent+"'s uncommitted work conflicts")
+					_ = e.deps.Deliver(project, pr.Agent, MsgReapplyConflict(prID, pr.Base, conflicts), MailAndPush)
+				}
 				e.rebasePlanners(project, pr.Base)
 				e.deps.Notify()
 				return pr, nil
 			}
 		}
-		if onFeature {
-			_ = ps.Log(pr.Agent, "merged", prID+" (milestone)")
-			_ = ps.LogPR(prID, "merged", "milestone into "+pr.Base)
-			e.resumeContainer(project, pr.Agent)
-			_ = e.deps.Deliver(project, pr.Agent, MsgMilestoneMerged(prID), MailAndPush)
-		} else {
-			_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "working"})
-			_ = ps.Log(pr.Agent, "merged", prID+" (interim)")
-			_ = ps.LogPR(prID, "merged", "interim contribution into "+pr.Base)
-			_ = e.deps.Deliver(project, pr.Agent, MsgContributionMerged(prID, pr.Task), MailAndPush)
-		}
-		e.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
-		e.deps.Notify()
-		return pr, nil
+		return e.finishPartialMerge(project, pr, onFeature)
 	}
 	// Tell every task source, so each runs its own consequence on its own ids and the workflow
 	// need not know the backend. After the local merge, so a failure warns rather than fails it.
@@ -196,6 +192,26 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 	_ = ps.Log(pr.Agent, "merged", prID)
 	_ = ps.LogPR(prID, "merged", "into "+pr.Base)
 	_ = e.deps.Deliver(project, pr.Agent, MsgMerged(prID), MailAndPush)
+	e.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
+	e.deps.Notify()
+	return pr, nil
+}
+
+// finishPartialMerge resumes a merged, partial PR's agent — the tail both a clean reset and a
+// resolved post-merge reapply conflict end up at, so the two paths can never drift apart.
+func (e *Engine) finishPartialMerge(project string, pr store.PR, onFeature bool) (store.PR, error) {
+	ps := e.store.For(project)
+	if onFeature {
+		_ = ps.Log(pr.Agent, "merged", pr.ID+" (milestone)")
+		_ = ps.LogPR(pr.ID, "merged", "milestone into "+pr.Base)
+		e.resumeContainer(project, pr.Agent)
+		_ = e.deps.Deliver(project, pr.Agent, MsgMilestoneMerged(pr.ID), MailAndPush)
+	} else {
+		_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "working"})
+		_ = ps.Log(pr.Agent, "merged", pr.ID+" (interim)")
+		_ = ps.LogPR(pr.ID, "merged", "interim contribution into "+pr.Base)
+		_ = e.deps.Deliver(project, pr.Agent, MsgContributionMerged(pr.ID, pr.Task), MailAndPush)
+	}
 	e.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
 	e.deps.Notify()
 	return pr, nil

@@ -142,25 +142,34 @@ func (e *Engine) CmdResolve(c registry.Caller, _ []string, out io.Writer) (int, 
 	// Only a completed CONFLICT resolution changed the branch and needs re-review; a proactive
 	// check on an already-current one leaves the phase alone.
 	if st.Phase == "resolving" {
-		pr, ok, _ := ps.GetPR("pr-" + st.Task)
-		if !ok {
-			// No submitted branch waiting on this — a standing branch's own uncommitted work
-			// failed to reapply after its milestone already merged (-> workflow/merge.go). Resolved,
-			// it just resumes: there is nothing to renew or send up for review.
-			_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "working"})
-			_ = ps.Log(c.Agent, "resolve", "reapply resolved onto "+base)
+		// A milestone PR is keyed by the CONTAINER, not the subtask st.Task holds while resolving
+		// (-> workflow/merge.go's own reset step keeps that distinct for resumeContainer's sake).
+		prKey := st.Task
+		if st.Container != "" {
+			prKey = st.Container
+		}
+		pr, ok, _ := ps.GetPR("pr-" + prKey)
+		// A MERGED pr is the signal, not its absence: a standing branch's own uncommitted work
+		// failed to reapply after its PR already merged (-> workflow/merge.go), so resolving it
+		// resumes exactly as a clean reset would have — never renew or re-review a merged PR.
+		if ok && pr.Status == "merged" {
+			onFeature := st.Container != "" && st.Container == pr.Branch
+			if _, ferr := e.finishPartialMerge(c.Project, pr, onFeature); ferr != nil {
+				return 1, ferr
+			}
 			fmt.Fprintln(out, ReplyReapplyResolved())
-			e.deps.Notify()
 			return 0, nil
 		}
 		reply := ReplyResolvedClean(base)
-		pr.Status, pr.Feedback = "open", ""
-		_ = ps.PutPR(pr)
-		_ = ps.LogPR(pr.ID, "renewed", "rebased clean onto "+base)
-		if pr.Kind == "interim" {
-			reply = ReplyContributionClean(base) // interim PRs are user-gated — no reviewer
-		} else {
-			_ = e.RequestReview(c.Project, pr.ID, "") // one review path; the hub preps the terrain
+		if ok {
+			pr.Status, pr.Feedback = "open", ""
+			_ = ps.PutPR(pr)
+			_ = ps.LogPR(pr.ID, "renewed", "rebased clean onto "+base)
+			if pr.Kind == "interim" {
+				reply = ReplyContributionClean(base) // interim PRs are user-gated — no reviewer
+			} else {
+				_ = e.RequestReview(c.Project, pr.ID, "") // one review path; the hub preps the terrain
+			}
 		}
 		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "submitted"})
 		fmt.Fprintln(out, reply)

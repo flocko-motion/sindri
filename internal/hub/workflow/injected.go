@@ -195,6 +195,13 @@ func MsgReapplyConflict(prID, base string, files []string) string {
 	return fmt.Sprintf("[hub] %s merged, but your uncommitted work didn't reapply cleanly onto %s: %s. The conflicts are in your /workspace with <<<<<<< markers — edit each file to the intended result (remove the markers), then run `sindri resolve`. That resumes you — the merge already landed, so nothing goes up for review.", prID, base, FileList(files))
 }
 
+// MsgResetFailed tells a worker its PR merged, but the hub hit a git error bringing its branch
+// onto the new base afterward — unlike MsgReapplyConflict, this is not a known conflict shape, so
+// it neither claims success nor points only at markers; `sindri resolve` may still find real ones.
+func MsgResetFailed(prID, base string) string {
+	return fmt.Sprintf("[hub] %s merged, but the hub hit an error bringing your branch onto %s afterward. Run `sindri resolve` — if it doesn't settle cleanly, say what it reports.", prID, base)
+}
+
 // MsgMilestoneRejected is the rejection a feature worker gets. It names the feature rather than the
 // subtask the worker happens to be holding, since the PR covers the whole branch. voice is who ruled
 // ("user" or "reviewer").

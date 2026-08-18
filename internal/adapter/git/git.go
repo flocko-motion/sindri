@@ -442,9 +442,9 @@ func markedFiles(dir string, files []string) []string {
 const marker = "<<<<<<< "
 
 // dropSpentAutostash removes the stash entry a clashing reapply leaves behind — spent once the
-// resolution is staged, and left in place every later autostash piles another on. Matched by
-// SUFFIX: git's own `rebase --autostash` labels its entry bare "autostash"; ResetOntoKeepingWork's
-// manual stash comes back "On <branch>: autostash". Best-effort: a leaked entry is cruft.
+// resolution is staged, and left in place every later autostash piles another on. Two exact shapes
+// only, never a stash anything else made: git's own `rebase --autostash` labels its entry bare
+// "autostash"; ResetOntoKeepingWork's manual stash comes back "On <branch>: autostash".
 func dropSpentAutostash(dir string) {
 	out, err := exec.Command("git", "-C", dir, "stash", "list", "--format=%gd %gs").Output()
 	if err != nil {
@@ -453,7 +453,8 @@ func dropSpentAutostash(dir string) {
 	}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		ref, subject, ok := strings.Cut(strings.TrimSpace(line), " ")
-		if !ok || !strings.HasSuffix(strings.TrimSpace(subject), "autostash") {
+		subject = strings.TrimSpace(subject)
+		if !ok || (subject != "autostash" && !strings.HasSuffix(subject, ": autostash")) {
 			continue
 		}
 		// Newest first, and dropping renumbers the rest — take this one and stop.
@@ -653,11 +654,30 @@ func Merge(repo, base, branch, msg string) error {
 	}
 	// A branch already fully contained in base squashes to nothing staged — what --no-ff used to
 	// report as "Already up to date" with no merge commit. `git commit` would refuse; skip it.
-	if len(nameOnly(repo, "diff", "--cached", "--name-only")) == 0 {
+	staged, err := hasStagedChanges(repo)
+	if err != nil {
+		return err
+	}
+	if !staged {
 		return nil
 	}
 	if out, err := gitEnglish(repo, "commit", "-m", msg); err != nil {
 		return fmt.Errorf("commit squashed %s: %s: %w", branch, strings.TrimSpace(out), err)
 	}
 	return nil
+}
+
+// hasStagedChanges reports whether repo's index differs from HEAD. Answered by exit code, not
+// nameOnly: that helper reads a failed git call as an empty list, which here would read a broken
+// `git diff` as "nothing staged" and report a squash merged when nothing was ever committed.
+func hasStagedChanges(repo string) (bool, error) {
+	err := exec.Command("git", "-C", repo, "diff", "--cached", "--quiet").Run()
+	if err == nil {
+		return false, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return true, nil
+	}
+	return false, fmt.Errorf("check staged diff in %s: %w", repo, err)
 }
