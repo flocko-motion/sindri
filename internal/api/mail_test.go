@@ -169,7 +169,9 @@ func TestMailIdsReadAsIdsAndBothSpellingsParse(t *testing.T) {
 	if got, err := ParseMailID(MailID(1234)); err != nil || got != 1234 {
 		t.Errorf("round trip failed: %d, %v", got, err)
 	}
-	for _, bad := range []string{"", "ml-", "ml-x", "no", "0", "-3"} {
+	// Trailing rubbish is refused, not half-read: taking "ml-47zzz" for 47 answers a question the agent
+	// did not ask, and the id is the one argument here typed from memory.
+	for _, bad := range []string{"", "ml-", "ml-x", "no", "0", "-3", "ml-47zzz", "47zzz", "ml-4 7", "ml-1.5"} {
 		if _, err := ParseMailID(bad); err == nil {
 			t.Errorf("ParseMailID(%q) should refuse rather than resolve to a mailbox", bad)
 		}

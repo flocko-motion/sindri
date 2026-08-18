@@ -67,8 +67,8 @@ func (m model) mailRows() []row {
 		if api.MailToUser(msg) && !msg.Read() {
 			state = "→ you " + state
 		}
-		// The row's id is the RENDERED form: it is what selection keys off and what `y` copies, so what
-		// a reader sees is what they can type back (parsed by -> api.ParseMailID).
+		// The row's id is the RENDERED form — what selection keys off and what `y` copies, so what is read
+		// is what can be typed back (-> api.ParseMailID).
 		r := row{mailTable.Line(
 			table.Cell{Text: msg.Repo, Style: m.repoStyle(msg.Project).Render},
 			table.Cell{Text: dash(msg.Sender)},
@@ -194,15 +194,11 @@ func (m *model) cycleMailFilter() {
 	m.flash = "mail: " + string(m.mailFilter)
 }
 
-// cycleMailWho steps the recipient the list is narrowed to: everyone → the selected row's recipient →
-// YOU → everyone. "You" is a step of the cycle rather than something you must find a row to reach,
-// since "is anything waiting for me?" is unanswerable when nothing of yours is on screen — which is
-// exactly when it is worth asking; with no such row selected the first step goes straight there. That
-// matches the CLI's --mine, which needs nothing selected either.
-//
-// The row step comes FIRST because it is the one the cursor makes obvious, and it has to come before
-// the narrowing that empties the list of other recipients — after "you" there is no other row left to
-// select, so a row step placed last could never be reached.
+// cycleMailWho steps the recipient the list narrows to: everyone → the selected row's → YOU → everyone.
+// "You" is a STEP, not something you must find a row to reach: "is anything waiting for me?" is
+// unanswerable when nothing of yours is on screen, which is when it is worth asking — so with no such
+// row selected the first step goes straight there, matching the CLI's --mine. The row step comes first
+// because "you" empties the list of other recipients, leaving no row a later step could select.
 func (m *model) cycleMailWho() {
 	switch {
 	case m.mailAgent == "":

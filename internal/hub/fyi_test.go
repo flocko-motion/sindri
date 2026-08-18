@@ -3,6 +3,7 @@ package hub
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -142,6 +143,31 @@ func TestTheFleetCeilingProtectsTheUserFromImpeccableAgents(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("every refusal must be logged: %v", evs)
+	}
+}
+
+// TestRepliesDoNotSpendTheFleetCeiling is the mirror of the test above, and the seam where two of this
+// feature's parts disagreed: the ceiling bounds what the user must read WITHOUT HAVING ASKED, so an
+// answer to something they sent cannot count against it. The user mailing six agents a question and
+// getting six answers must not close the channel on the whole fleet for an hour — and the refusal it
+// would produce is false twice over, since nobody sent a note and the six were what was asked for.
+func TestRepliesDoNotSpendTheFleetCeiling(t *testing.T) {
+	h, ps := noteSender(t, "nori")
+	// A whole ceiling's worth of REPLIES: the user asked, and this many agents answered.
+	for i := 0; i < fleetNotesPerHour+2; i++ {
+		asked, err := ps.AddMail("nori", api.SenderUser, "what is holding this up?", false, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ps.AddMail(api.SenderUser, "nori", "the td adapter, still", false, asked.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := h.store.NotesToUserSince(time.Now().Add(-fleetNoteWindow)); err != nil || n != 0 {
+		t.Errorf("unprompted notes = %d (err %v), want 0 — every row in the window is a reply", n, err)
+	}
+	if out, code := execAs(t, h, "nori", "fyi", "and the pod's go lags go.mod"); code != 0 {
+		t.Errorf("a note must still go through (%d): %s", code, out)
 	}
 }
 

@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"errors"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -29,6 +30,7 @@ type stubDeps struct {
 	posted       []store.Comment            // what the workflow wrote onto a task's thread (SourceRef holds the id)
 	postFails    bool                       // AddTaskComment refuses, for the paths that must survive it
 	delivered    []Delivery                 // how each message was classified, in step with injected/injectedText
+	deliverErr   bool                       // Deliver refuses, for the paths that must not record an undelivered message
 	projects     []store.Project            // KnownProjects override; nil (the default) means none registered
 }
 
@@ -42,6 +44,9 @@ func (d *stubDeps) Notify()                                     {}
 // which is half of what this feature is (-> workflow.Delivery). The recipient/text lists stay as they
 // were, since every existing assertion about "what was injected" is about the same messages.
 func (d *stubDeps) Deliver(_, name, text string, del Delivery) error {
+	if d.deliverErr {
+		return fmt.Errorf("nothing could be delivered to %s", name)
+	}
 	d.injected = append(d.injected, name)
 	d.injectedText = append(d.injectedText, text)
 	d.delivered = append(d.delivered, del)

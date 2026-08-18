@@ -36,12 +36,8 @@ func idleAgentWithMail(t *testing.T, deps *stubDeps) (*Engine, *store.ProjectSto
 func TestAnIdleAgentWithMailIsWoken(t *testing.T) {
 	deps := &stubDeps{}
 	e, _ := idleAgentWithMail(t, deps)
-	id, woken := e.NudgeMailWaiting("proj", "dvalin", 0)
-	if !woken {
+	if !e.NudgeMailWaiting("proj", "dvalin") {
 		t.Fatal("an idle agent with unread mail should be woken")
-	}
-	if id == 0 {
-		t.Error("the nudge should report what it nudged for, so it is not repeated")
 	}
 	if len(deps.delivered) != 1 || deps.delivered[0].Mail || !deps.delivered[0].Push {
 		t.Errorf("the wake is push-only — what must be read is already kept: %+v", deps.delivered)
@@ -52,20 +48,76 @@ func TestAnIdleAgentWithMailIsWoken(t *testing.T) {
 }
 
 // TestTheSameMessageIsNotNudgedTwice: an agent told once and still not reading is either choosing not
-// to or is wedged, and repeating it every tick burns its context and teaches it to skim.
+// to or is wedged, and repeating it every tick burns its context and teaches it to skim. Nothing is
+// carried between the calls — what the agent has been told is on the MESSAGE, which is what makes this
+// hold across a hub restart too.
 func TestTheSameMessageIsNotNudgedTwice(t *testing.T) {
 	deps := &stubDeps{}
 	e, ps := idleAgentWithMail(t, deps)
-	id, _ := e.NudgeMailWaiting("proj", "dvalin", 0)
-	if _, woken := e.NudgeMailWaiting("proj", "dvalin", id); woken {
+	e.NudgeMailWaiting("proj", "dvalin")
+	if e.NudgeMailWaiting("proj", "dvalin") {
 		t.Error("the same waiting message must not be nudged for twice")
 	}
 	// NEW mail is a new thing waiting, so it earns a second wake.
 	if _, err := ps.AddMail("dvalin", "galar", "and the config is documented backwards", false, 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, woken := e.NudgeMailWaiting("proj", "dvalin", id); !woken {
+	if !e.NudgeMailWaiting("proj", "dvalin") {
 		t.Error("mail that arrived after the last nudge should wake it again")
+	}
+}
+
+// TestOneNudgeCoversTheWholeMailbox: eleven messages must be one interruption, not eleven — and the
+// count it states is the whole unread total, since that is what the agent has to deal with.
+func TestOneNudgeCoversTheWholeMailbox(t *testing.T) {
+	deps := &stubDeps{}
+	e, ps := idleAgentWithMail(t, deps)
+	for i := 0; i < 10; i++ {
+		if _, err := ps.AddMail("dvalin", "hub", "another one", false, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !e.NudgeMailWaiting("proj", "dvalin") {
+		t.Fatal("eleven unread messages should be worth a wake")
+	}
+	if len(deps.injectedText) != 1 || !contains(deps.injectedText[0], "11 unread") {
+		t.Errorf("one wake, naming the whole unread count: %q", deps.injectedText)
+	}
+	// Everything waiting was marked, so the next tick is silent — announcing eight of eleven and marking
+	// all eleven would lose three for ever, and the reverse would repeat them.
+	if e.NudgeMailWaiting("proj", "dvalin") {
+		t.Error("one nudge should have covered every message then waiting")
+	}
+}
+
+// TestAnUndeliveredNudgeLeavesTheMailUnannounced: marking before the push lands would lose the
+// announcement for a message nobody was ever told about — the agent would sit on mail in silence.
+func TestAnUndeliveredNudgeLeavesTheMailUnannounced(t *testing.T) {
+	deps := &stubDeps{deliverErr: true}
+	e, ps := idleAgentWithMail(t, deps)
+	if e.NudgeMailWaiting("proj", "dvalin") {
+		t.Error("a wake that did not land is not a wake")
+	}
+	if unannounced, _, err := ps.UnannouncedMail("dvalin"); err != nil || unannounced != 1 {
+		t.Errorf("unannounced = %d (err %v), want the message still owed a wake", unannounced, err)
+	}
+}
+
+// TestEveryRoleIsWoken is the hole this replaced: the only unasked push was role-gated to workers, and a
+// worker is the role that needs it LEAST — it calls `sindri` constantly. A planner mid-conversation and a
+// reviewer between verdicts can go hours without asking, which is how an agent came to sit on 11 unread.
+func TestEveryRoleIsWoken(t *testing.T) {
+	for _, role := range []string{"worker", "planner", "reviewer", "coauthor"} {
+		t.Run(role, func(t *testing.T) {
+			deps := &stubDeps{}
+			e, ps := idleAgentWithMail(t, deps)
+			if err := ps.PutAgent(store.Agent{Name: "dvalin", Role: role, Workspace: ".worktrees/dvalin"}); err != nil {
+				t.Fatal(err)
+			}
+			if !e.NudgeMailWaiting("proj", "dvalin") {
+				t.Errorf("a %s with unread mail must be woken too", role)
+			}
+		})
 	}
 }
 
@@ -75,7 +127,7 @@ func TestAnAgentThatNeedsAHumanIsNotWoken(t *testing.T) {
 	// busy covers every runtime that is not an empty prompt — mid-turn, blocked, signed out, cut off.
 	deps := &stubDeps{busy: map[string]bool{"dvalin": true}}
 	e, _ := idleAgentWithMail(t, deps)
-	if _, woken := e.NudgeMailWaiting("proj", "dvalin", 0); woken {
+	if e.NudgeMailWaiting("proj", "dvalin") {
 		t.Error("an agent that is not at an empty prompt must not be nudged")
 	}
 	if len(deps.delivered) != 0 {
@@ -88,7 +140,7 @@ func TestAnAgentThatNeedsAHumanIsNotWoken(t *testing.T) {
 func TestAParkedAgentIsNotWoken(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 900_000, ctxWindow: 1_000_000, ctxOK: true}
 	e, _ := idleAgentWithMail(t, deps)
-	if _, woken := e.NudgeMailWaiting("proj", "dvalin", 0); woken {
+	if e.NudgeMailWaiting("proj", "dvalin") {
 		t.Error("a context-full agent was woken for mail it cannot act on")
 	}
 }
@@ -101,7 +153,7 @@ func TestAnAgentHoldingWorkIsNotWoken(t *testing.T) {
 	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "sd-1", Branch: "sd-1", Phase: "working"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, woken := e.NudgeMailWaiting("proj", "dvalin", 0); woken {
+	if e.NudgeMailWaiting("proj", "dvalin") {
 		t.Error("an agent holding work reads its mail at its next ask, without being prodded")
 	}
 }
@@ -117,7 +169,7 @@ func TestNothingWaitingIsNotAWake(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, woken := e.NudgeMailWaiting("proj", "dvalin", 0); woken {
+	if e.NudgeMailWaiting("proj", "dvalin") {
 		t.Error("an empty mailbox is nothing to wake anyone for")
 	}
 }

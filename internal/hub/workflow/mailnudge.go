@@ -3,8 +3,7 @@
 // job:     tell an idle agent it has unread mail, so "mail must be read" stays true for an agent
 // that finished, stopped calling `sindri`, and would otherwise never look again.
 // limits:  the rule and the message; the cadence is the hub's (-> hub/stallwatch.go) and the
-//
-//	mailbox is the store's. Agents gain nothing here: the HUB does the waking.
+// mailbox is the store's. Agents gain nothing here: the HUB does the waking.
 package workflow
 
 import "fmt"
@@ -14,7 +13,7 @@ import "fmt"
 // signed out, mid-turn — since a nudge none of them can answer is noise on the signal a user watches.
 func (e *Engine) idleAndReachable(project, name string) bool {
 	st, err := e.store.For(project).GetState(name)
-	if err != nil || st.Task != "" || (st.Phase != "" && st.Phase != "idle" && st.Phase != restPhaseFor(project, name, e)) {
+	if err != nil || st.Task != "" || (st.Phase != "" && st.Phase != "idle" && st.Phase != e.restPhaseFor(project, name)) {
 		return false
 	}
 	if !e.deps.AgentAlive(project, name) || !e.deps.AgentIdle(project, name) {
@@ -25,7 +24,7 @@ func (e *Engine) idleAndReachable(project, name string) bool {
 
 // restPhaseFor is the phase a role RESTS in — "planning" for a planner, "collab" for a coauthor — so
 // resting is not mistaken for holding work. A reviewer and a worker rest in "idle".
-func restPhaseFor(project, name string, e *Engine) string {
+func (e *Engine) restPhaseFor(project, name string) string {
 	a, ok, err := e.store.For(project).GetAgent(name)
 	if err != nil || !ok {
 		return "idle"
@@ -33,26 +32,30 @@ func restPhaseFor(project, name string, e *Engine) string {
 	return restPhase(a.Role)
 }
 
-// NudgeMailWaiting wakes an agent that has unread mail, returning the id it nudged for so the caller
-// does not repeat itself — what makes the mail guarantee real for an agent that stopped asking. No agent
-// gains the power to wake another: the HUB wakes one that has something waiting, which is its job.
-//
-// Never twice for the same message: an agent told once and still not reading is choosing not to or is
-// wedged, and repeating it burns context and teaches it to skim.
-func (e *Engine) NudgeMailWaiting(project, name string, lastNudged int64) (int64, bool) {
+// NudgeMailWaiting wakes an agent that has unread mail it has not been told about, whatever its ROLE — a
+// worker asks constantly, while a planner mid-conversation and a reviewer between verdicts can go hours
+// without asking, so a task-keyed wake misses exactly the roles that need one. No agent gains the power
+// to wake another; the HUB wakes one that has something waiting. Never twice for the same message, and
+// marked only after the push LANDS: marking first would leave a message announced to nobody.
+func (e *Engine) NudgeMailWaiting(project, name string) bool {
 	ps := e.store.For(project)
-	newest, count, err := ps.NewestUnreadMail(name)
-	if err != nil || count == 0 || newest == lastNudged {
-		return lastNudged, false
+	unannounced, unread, err := ps.UnannouncedMail(name)
+	if err != nil || unannounced == 0 {
+		return false
 	}
 	if !e.idleAndReachable(project, name) {
-		return lastNudged, false
+		return false
 	}
-	if err := e.deps.Deliver(project, name, MsgMailWaiting(count), PushOnly); err != nil {
-		return lastNudged, false
+	// The message states the WHOLE unread count, not just the new part: what the agent has to deal with
+	// is its mailbox, and "1 waiting" beside ten it never read would read as nine having gone away.
+	if err := e.deps.Deliver(project, name, MsgMailWaiting(unread), PushOnly); err != nil {
+		return false
 	}
-	_ = ps.Log(name, "nudge", fmt.Sprintf("%d unread message(s) waiting", count))
-	return newest, true
+	if err := ps.MarkMailAnnounced(name); err != nil {
+		return false
+	}
+	_ = ps.Log(name, "nudge", fmt.Sprintf("%d unread message(s) waiting, %d newly announced", unread, unannounced))
+	return true
 }
 
 // MsgMailWaiting wakes an agent that has stopped asking. Push-only, like every wake: what must be read

@@ -104,9 +104,14 @@
       asking still reads what it was sent.
 - [x] 5f.2 The eligibility rule is SHARED with the rated-work nudge (`idleAndReachable`): alive, at an
       empty prompt, holding nothing, not parked — one mechanism with a second reason, not a second path.
-- [x] 5f.3 Keyed on the newest unread id, like the stall nudge is keyed on the idle spell: told once per
-      thing waiting, and again when something new arrives.
-- [x] 5f.4 Supersedes sd-2f38d9's idle-nudge paragraph, whose 5d.7 line was left open for this.
+- [x] 5f.3 Whatever the ROLE: a worker asks the hub constantly, while a planner mid-conversation and a
+      reviewer between verdicts can go hours without asking — the roles a task-keyed nudge misses.
+- [x] 5f.4 A durable `notified` column on the message, distinct from `pushed` — the hub having said "you
+      have mail" is a different event from the text being injected at delivery, and a per-message flag is
+      what survives a restart where a dwell timer or an in-memory key does not.
+- [x] 5f.5 ONE wake covers everything then waiting and marks all of it, stating the whole unread count;
+      the marking follows a wake that LANDED, so an undelivered one is still owed.
+- [x] 5f.6 Supersedes sd-2f38d9's idle-nudge paragraph, whose 5d.7 line was left open for this.
 
 ## 5g. Mail ids read as ids (sd-c84011)
 
@@ -140,8 +145,13 @@
       and the read half intact.
 - [x] 6.13 Replying needs no name and threads; the hub is refused with somewhere to go; the user's reply
       is uncharged; another agent's mail is refused; and the user can reply from either front-end.
-- [x] 6.14 An idle agent with mail is woken; the same message is not nudged twice and new mail is; an
-      agent that needs a human, is parked, or holds work is left alone; an empty mailbox wakes nobody.
-- [x] 6.15 Both spellings parse and round-trip, bad ones are refused with the shape shown, and an agent
-      can see the ids it may reply to.
-- [x] 6.16 `make verify` passes.
+- [x] 6.14 An idle agent with mail is woken whatever its role; the same message is not nudged twice —
+      carrying nothing between the calls, so it holds across a restart — and new mail is; eleven messages
+      are one wake naming eleven; a wake that failed to land leaves the mail still owed; an agent that
+      needs a human, is parked, or holds work is left alone; an empty mailbox wakes nobody.
+- [x] 6.15 Both spellings parse and round-trip, bad ones — including a trailing-rubbish id like
+      `ml-47zzz`, which must not half-read as 47 — are refused with the shape shown, and an agent can
+      see the ids it may reply to.
+- [x] 6.16 A ceiling's worth of REPLIES leaves the ceiling untouched and an unprompted note still goes
+      through: the exemption covers both halves of the budget, not only the per-claim grant.
+- [x] 6.17 `make verify` passes.

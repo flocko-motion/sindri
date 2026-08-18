@@ -35,7 +35,12 @@ CREATE TABLE IF NOT EXISTS mail (
   pushed  INTEGER NOT NULL DEFAULT 0, -- the same message was also injected, so it may have been seen live
   -- The message this one answers (0 = starts a thread), so an exchange reads as an exchange rather
   -- than as scattered rows the recipient has to match up by hand.
-  in_reply_to INTEGER NOT NULL DEFAULT 0
+  in_reply_to INTEGER NOT NULL DEFAULT 0,
+  -- The hub has since told the recipient this message is waiting. NOT the pushed column, which says the
+  -- text itself was injected at delivery: one means "it may have acted on this already", the other "it
+  -- has been told there is something to read". Per-message and durable, so a restart announces nothing
+  -- a second time.
+  notified INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS mail_agent ON mail (project, agent, id);
 `
@@ -88,17 +93,30 @@ func (p *ProjectStore) UnreadMail(agent string) ([]Mail, error) {
 		p.project, agent)
 }
 
-// NewestUnreadMail is an agent's unread count and the id of its newest unread message. The id is what a
-// nudge is keyed on: telling an agent once about what is waiting is the point, and NEW mail changes the
-// id, which is what makes a second nudge honest rather than a repeat.
-func (p *ProjectStore) NewestUnreadMail(agent string) (newest int64, count int, err error) {
+// UnannouncedMail is what a nudge would be ABOUT: how many messages an agent has neither read nor been
+// told about, and the whole unread count to say it with — a count, not the rows, since one nudge covers
+// all of it. Per message rather than a dwell timer or the newest id, so a restart, or an agent quiet for
+// an hour, announces nothing a second time.
+func (p *ProjectStore) UnannouncedMail(agent string) (unannounced, unread int, err error) {
 	err = p.s.db.QueryRow(
-		`SELECT COALESCE(MAX(id), 0), COUNT(*) FROM mail WHERE project=? AND agent=? AND read_at=''`,
-		p.project, agent).Scan(&newest, &count)
+		`SELECT COUNT(*), COALESCE(SUM(notified = 0), 0) FROM mail WHERE project=? AND agent=? AND read_at=''`,
+		p.project, agent).Scan(&unread, &unannounced)
 	if err != nil {
-		return 0, 0, fmt.Errorf("newest unread mail for %s: %w", agent, err)
+		return 0, 0, fmt.Errorf("unannounced mail for %s: %w", agent, err)
 	}
-	return newest, count, nil
+	return unannounced, unread, nil
+}
+
+// MarkMailAnnounced records that the agent has been told about everything now waiting — one statement, so
+// marking cannot outrun what was announced and lose a message for ever.
+func (p *ProjectStore) MarkMailAnnounced(agent string) error {
+	_, err := p.s.db.Exec(
+		`UPDATE mail SET notified=1 WHERE project=? AND agent=? AND read_at='' AND notified=0`,
+		p.project, agent)
+	if err != nil {
+		return fmt.Errorf("mark mail announced for %s: %w", agent, err)
+	}
+	return nil
 }
 
 // UnreadMailCount is how many messages an agent has not read — what the directive reminds it of.
@@ -148,11 +166,9 @@ func (s *Store) AllMail(limit int) ([]Mail, error) {
 	return queryMail(s.db, q, args...)
 }
 
-// MailTallies is every number the board needs about the mailbox: size, unread, the user's own unread,
-// and unread per project — counted here, not over the window, since a badge from a window stops rising.
-//
-// ONE PASS: the board is rebuilt per notify per client over a table that grows for the life of the
-// machine, so a second scan for the user's share would be paid on every read.
+// MailTallies is every number the board needs: size, unread, the user's own unread, and unread per
+// project — over the whole table, since a badge from a window stops rising. ONE PASS, because the board
+// is rebuilt per notify per client, so a second scan would be paid on every read.
 func (s *Store) MailTallies() (total, unread, userUnread int, byProject map[string]int, err error) {
 	byProject = map[string]int{}
 	rows, qerr := s.db.Query(
@@ -173,12 +189,13 @@ func (s *Store) MailTallies() (total, unread, userUnread int, byProject map[stri
 	return total, unread, userUnread, byProject, rows.Err()
 }
 
-// NotesToUserSince counts what the whole fleet has sent the user since t — the fleet-wide ceiling's
-// only input. Counted over the mailbox rather than a running tally, so there is nothing to drift: the
-// rows are the record, and a rolling window has no cliff for a queue to build against.
+// NotesToUserSince counts the UNPROMPTED notes the fleet has sent the user since t — the fleet
+// ceiling's only input, over the rows so no tally drifts and no cliff builds a queue. A REPLY IS NOT A
+// NOTE (`in_reply_to = 0`): the ceiling bounds what the user must read WITHOUT ASKING, so charging
+// answers spends the fleet's hour on ones they asked for and inflates the refusal counts.
 func (s *Store) NotesToUserSince(t time.Time) (int, error) {
 	var n int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM mail WHERE agent=? AND sent_at >= ?`,
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM mail WHERE agent=? AND in_reply_to=0 AND sent_at >= ?`,
 		api.SenderUser, t.UTC().Format(time.RFC3339)).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("notes to the user since %s: %w", t, err)

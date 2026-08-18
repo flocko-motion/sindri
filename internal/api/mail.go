@@ -8,6 +8,7 @@ package api
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -46,9 +47,13 @@ func MailID(id int64) string { return fmt.Sprintf("%s%d", MailIDPrefix, id) }
 // ParseMailID reads either spelling. The BARE form keeps working because it is already in users'
 // shell history and in whatever agents have been told — breaking that to gain a prefix would be a poor
 // trade, and the prefix is about how an id READS, not about what is accepted.
+//
+// It reads the WHOLE remainder or none of it: a scan that stops at the first non-digit takes "ml-47zzz"
+// for 47, and half-reading an argument an agent types from memory is worse than refusing it, since the
+// refusal is the only thing that says which part was wrong.
 func ParseMailID(s string) (int64, error) {
-	var id int64
-	if _, err := fmt.Sscanf(strings.TrimPrefix(strings.TrimSpace(s), MailIDPrefix), "%d", &id); err != nil || id <= 0 {
+	id, err := strconv.ParseInt(strings.TrimPrefix(strings.TrimSpace(s), MailIDPrefix), 10, 64)
+	if err != nil || id <= 0 {
 		return 0, fmt.Errorf("%q is not a mail id — they read like %s47", s, MailIDPrefix)
 	}
 	return id, nil

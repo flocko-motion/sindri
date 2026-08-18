@@ -266,10 +266,15 @@ correspondent: a message from it is a notification, and an answer typed at it wo
 by nobody. Where the answer needs a human, the escalation path is the one that reaches them;
 where it belongs to the work, a task comment does.
 
-A reply to the USER SHALL NOT consume the note budget. That budget bounds attention the user
-did not ask for, and a reply answers a message they chose to send — charging for it would
-penalise answering and teach agents to go quiet when addressed directly. The length cap still
-applies, since the cost of a long message is borne by whoever reads it.
+A reply to the USER SHALL NOT consume the note budget — NEITHER HALF OF IT: not the sender's
+per-claim grant and not the fleet-wide ceiling. That budget bounds attention the user did not
+ask for, and a reply answers a message they chose to send — charging for it would penalise
+answering and teach agents to go quiet when addressed directly. Exempting only the per-agent
+half leaves the worse failure in place: the user asking several agents a question spends the
+fleet's whole hour on the answers they wanted, and every unprompted note across every repo is
+then refused for a reason that is false twice over. It would also corrupt the evidence the
+ceiling rests on, since the refusal counts are what say whether the number is right. The
+length cap still applies, since the cost of a long message is borne by whoever reads it.
 
 Both front-ends SHALL offer the reply, so the user can answer from wherever they are reading.
 
@@ -289,6 +294,13 @@ Both front-ends SHALL offer the reply, so the user can answer from wherever they
 - **WHEN** an agent with no note budget left replies to a message from the user
 - **THEN** the reply is delivered, because it answers something they chose to send
 
+#### Scenario: Answers do not close the channel on everyone else
+
+- **WHEN** the user has asked enough agents a question that their answers alone would reach the
+  hourly ceiling
+- **THEN** an unprompted note from another agent is still delivered, because none of those
+  answers was attention the user did not ask for
+
 #### Scenario: Somebody else's mail
 
 - **WHEN** an agent replies to a message addressed to a different agent
@@ -307,7 +319,11 @@ another: what an agent does is leave mail, and what the hub does is tell an idle
 something is waiting — which is already its job.
 
 It SHALL hold for mail from ANY sender — the user, the hub, or another agent — since it is
-what makes the distinction between mail and push honest rather than nominal.
+what makes the distinction between mail and push honest rather than nominal. It SHALL hold for
+any ROLE, too. A worker is the role that needs it least, calling the hub constantly; a planner
+mid-conversation and a reviewer between verdicts may go hours without asking, and those are
+precisely the roles a wake keyed to holding a task would miss — as one did, leaving an agent
+sitting on eleven unread messages it found only by asking unprompted.
 
 An agent that needs a HUMAN SHALL NOT be woken. Blocked, signed out, mid-turn or cut off, it
 cannot act on mail, and a nudge it cannot answer is noise on the very signal a user relies on
@@ -320,6 +336,19 @@ reading is either choosing not to or is wedged, and repeating it every cycle bur
 and teaches it to skim the one channel it must not skim. Mail that arrives AFTER a wake is a
 new thing waiting and SHALL earn another.
 
+Having been told SHALL be recorded PER MESSAGE and durably, alongside the message itself and
+distinct from whether it was pushed at delivery. Those are different events with different
+diagnoses: pushed says the text was put in front of the agent and may already have been acted
+on, announced says the hub later said something was waiting. A dwell timer or an in-memory key
+would answer the question for as long as the process happened to live, so a restart — or an
+agent quiet for an hour — would announce the same messages afresh.
+
+ONE wake SHALL cover everything then waiting, and mark all of it. Eleven messages are one
+interruption, not eleven; and the count the agent is given is its whole unread total, since
+that is what it has to deal with, where naming only the new part would read as the rest having
+gone away. The marking SHALL follow a wake that LANDED — recording it first would leave a
+message announced to nobody, which is the one failure this mechanism exists to prevent.
+
 #### Scenario: An agent that stopped asking
 
 - **WHEN** an idle agent has unread mail and is sitting at an empty prompt
@@ -329,6 +358,21 @@ new thing waiting and SHALL earn another.
 
 - **WHEN** an agent has been woken for the mail it has and has still not read it
 - **THEN** it is not woken again for the same message, and is woken again when new mail arrives
+
+#### Scenario: A mailbox, not a message each
+
+- **WHEN** an idle agent has eleven unread messages it has not been told about
+- **THEN** it is woken ONCE, told how many are waiting, and the next sweep is silent
+
+#### Scenario: A wake that did not land
+
+- **WHEN** the wake cannot be delivered to the agent
+- **THEN** the mail is still owed a wake, so the next sweep tries again
+
+#### Scenario: A role that rarely asks
+
+- **WHEN** an idle planner or reviewer has unread mail
+- **THEN** it is woken, exactly as a worker is
 
 #### Scenario: An agent that cannot act
 

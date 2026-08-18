@@ -166,6 +166,7 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE agent_state ADD COLUMN escalation TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE agent_state ADD COLUMN notes_left INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE mail ADD COLUMN in_reply_to INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE mail ADD COLUMN notified INTEGER NOT NULL DEFAULT 0`,
 	}
 	for _, a := range alters {
 		if _, err := db.Exec(a); err != nil && !strings.Contains(err.Error(), "duplicate column") {
