@@ -24,7 +24,7 @@ func ownedStore(t *testing.T) *ProjectStore {
 func TestOwnedTaskRoundTrip(t *testing.T) {
 	ps := ownedStore(t)
 	want := OwnedTask{
-		ID: "td-abc123", Title: "wire the thing", Status: "open", Priority: "P2",
+		ID: "td-abc123", Title: "wire the thing", Status: "open", Priority: "P2", Tier: "senior",
 		Type: "task", Labels: "spec,ui", Description: "the body",
 	}
 	if err := ps.PutOwnedTask(want); err != nil {
@@ -38,6 +38,7 @@ func TestOwnedTaskRoundTrip(t *testing.T) {
 		{"title", got.Title, want.Title},
 		{"status", got.Status, want.Status},
 		{"priority", got.Priority, want.Priority},
+		{"tier", got.Tier, want.Tier},
 		{"type", got.Type, want.Type},
 		{"labels", got.Labels, want.Labels},
 		{"description", got.Description, want.Description},
@@ -87,6 +88,25 @@ func TestStatusWriteOnAnUnownedIdFails(t *testing.T) {
 	got, _, _ := ps.OwnedTask("td-2")
 	if got.Status != "closed" {
 		t.Errorf("status = %q, want closed", got.Status)
+	}
+}
+
+// TestSetOwnedTier mirrors SetOwnedStatus's own contract: an id this project does not own fails
+// rather than passing silently.
+func TestSetOwnedTier(t *testing.T) {
+	ps := ownedStore(t)
+	if err := ps.SetOwnedTier("td-nope", "senior"); err == nil {
+		t.Error("a tier write on an id this project does not own must be an error")
+	}
+	if err := ps.PutOwnedTask(OwnedTask{ID: "td-4", Status: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetOwnedTier("td-4", "junior"); err != nil {
+		t.Fatalf("tier write on an owned task: %v", err)
+	}
+	got, _, _ := ps.OwnedTask("td-4")
+	if got.Tier != "junior" {
+		t.Errorf("tier = %q, want junior", got.Tier)
 	}
 }
 

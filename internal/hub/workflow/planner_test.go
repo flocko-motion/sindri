@@ -361,6 +361,54 @@ func TestPlannerProposesAPriority(t *testing.T) {
 	}
 }
 
+// TestPlannerProposesATier: create-task accepts a difficulty estimate, refusing an unrecognised
+// word rather than guessing — the same rule --priority follows.
+func TestPlannerProposesATier(t *testing.T) {
+	for _, flag := range []string{"--tier", "-T"} {
+		spec, words, err := parseTaskFlags([]string{flag, "senior", "hard thing"})
+		if err != nil {
+			t.Fatalf("%s should be accepted: %v", flag, err)
+		}
+		if spec.Tier != "senior" {
+			t.Errorf("%s senior should parse to senior, got %q", flag, spec.Tier)
+		}
+		if strings.Join(words, " ") != "hard thing" {
+			t.Errorf("%s consumed the title: %v", flag, words)
+		}
+	}
+	if _, _, err := parseTaskFlags([]string{"--tier", "expert", "a thing"}); err == nil {
+		t.Error("an unknown tier should be refused")
+	}
+	if !strings.Contains(createTaskUsage, "--tier") {
+		t.Error("create-task usage should advertise --tier now that it exists")
+	}
+}
+
+// TestEditTaskChangesTierAndGoesBackForAVerdict: unlike priority, tier carries no claimability
+// consequence, so edit-task changes it directly rather than refusing the way it refuses --priority
+// — and the change must be detected as one, or it reads as "nothing changed" and never returns to
+// the user for a fresh look.
+func TestEditTaskChangesTierAndGoesBackForAVerdict(t *testing.T) {
+	e, c, ps, id, _ := plannerOwnedTask(t, "approved")
+	var out bytes.Buffer
+	code, err := e.CmdEditTask(c, []string{id, "--tier", "senior"}, &out)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("the tier edit should be allowed, got exit %d: %s", code, out.String())
+	}
+	if strings.Contains(out.String(), "nothing changed") {
+		t.Errorf("a tier-only edit read as no change at all: %s", out.String())
+	}
+	if tk, _, _ := ps.GetTask(id); tk.Tier != "senior" {
+		t.Errorf("the edit did not land, tier is %q", tk.Tier)
+	}
+	if got, _ := ps.GetApproval(id); got != "pending" {
+		t.Errorf("after a tier edit the task should await a fresh verdict, got %q", got)
+	}
+}
+
 // TestUnknownFlagRefused: a silently ignored flag looks like it took effect, and the task is
 // then created or edited without the parent or body that was asked for.
 func TestUnknownFlagRefused(t *testing.T) {

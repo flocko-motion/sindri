@@ -61,11 +61,7 @@ func (e *Engine) TaskInfo(project, id string) (store.Task, error) {
 	if !ok {
 		return store.Task{}, fmt.Errorf("no such task %q", id)
 	}
-	_ = ps.UpsertTask(store.Task{
-		ID: owned.ID, Title: owned.Title, Status: owned.Status, Priority: owned.Priority,
-		Type: owned.Type, Labels: owned.Labels, ParentID: ps.ParentOf(id),
-		Description: owned.Description, UpdatedAt: owned.UpdatedAt,
-	})
+	_ = ps.UpsertTask(ownedToCachedTask(owned, ps.ParentOf(id)))
 	// Read the row back rather than returning what was just written: the approval gate lives in its
 	// own table and reaches a task only through that join, so a hand-built row reports none.
 	st, ok, err := ps.GetTask(id)
@@ -96,7 +92,7 @@ func (e *Engine) CreateTask(project string, s TaskSpec) (string, error) {
 	}
 	ps := e.store.For(project)
 	if err := ps.PutOwnedTask(store.OwnedTask{
-		ID: id, Title: s.Title, Status: "open", Priority: s.Priority, Type: typ,
+		ID: id, Title: s.Title, Status: "open", Priority: s.Priority, Tier: s.Tier, Type: typ,
 		Labels: strings.Join(s.Labels, ","), Description: s.Description,
 	}); err != nil {
 		return "", err
@@ -546,7 +542,7 @@ func ToStoreTask(t task.Task) store.Task {
 		createdAt = t.CreatedAt.UTC().Format(time.RFC3339)
 	}
 	return store.Task{
-		ID: t.ID, Title: t.Title, Status: t.Status, Priority: t.Priority,
+		ID: t.ID, Title: t.Title, Status: t.Status, Priority: t.Priority, Tier: t.Tier,
 		Type: t.Type, Labels: strings.Join(t.Labels, ","), ParentID: t.ParentID,
 		Description: t.Description, URL: t.URL, UpdatedAt: updatedAt, CreatedAt: createdAt,
 	}

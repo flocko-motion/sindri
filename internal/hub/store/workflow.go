@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   title      TEXT NOT NULL DEFAULT '',
   status     TEXT NOT NULL DEFAULT '',
   priority   TEXT NOT NULL DEFAULT '',
+  tier       TEXT NOT NULL DEFAULT '', -- junior|mid|senior, '' unrated (-> api.TierOrDefault)
   type       TEXT NOT NULL DEFAULT '',
   labels      TEXT NOT NULL DEFAULT '',
   parent_id   TEXT NOT NULL DEFAULT '',
@@ -70,6 +71,7 @@ CREATE TABLE IF NOT EXISTS owned_tasks (
   title       TEXT NOT NULL DEFAULT '',
   status      TEXT NOT NULL DEFAULT 'open', -- open | in_progress | in_review | closed
   priority    TEXT NOT NULL DEFAULT '',
+  tier        TEXT NOT NULL DEFAULT '', -- junior|mid|senior, '' unrated (-> api.TierOrDefault)
   type        TEXT NOT NULL DEFAULT 'task',
   labels      TEXT NOT NULL DEFAULT '',
   description TEXT NOT NULL DEFAULT '',

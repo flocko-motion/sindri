@@ -413,6 +413,7 @@ func taskState(t api.Task) string {
 var taskListTable = table.Table{
 	{Label: "id", Width: 12},
 	{Label: "prio", Width: 8},
+	{Label: "tier", Width: 6},
 	{Label: "state", Width: 12},
 	{Label: "age", Width: 4, Right: true},
 	{Label: "agent", Width: 12}, // who holds it (-> api.AgentsByTask)
@@ -454,6 +455,7 @@ func taskListCmd() *cobra.Command {
 					lines = append(lines, taskListTable.Line(
 						table.Cell{Text: t.ID},
 						table.Cell{Text: theme.PriorityLabel(t.Priority)},
+						table.Cell{Text: api.TierOrDefault(t.Tier)},
 						table.Cell{Text: taskState(t)},
 						table.Cell{Text: theme.Age(t.CreatedAt)},
 						table.Cell{Text: dash(holders[t.ID])},
@@ -515,8 +517,8 @@ func taskInfoCmd() *cobra.Command {
 				agent := api.AgentOnTask(st.Agents, st.PRs, t.ID)
 				// The same fields the TUI pane and the agent's `task <id>` show: a front-end
 				// chooses layout, not which facts exist, or it answers a different question.
-				fmt.Printf("id:       %s\ntitle:    %s\nstatus:   %s\ntype:     %s\npriority: %s\nparent:   %s\nagent:    %s\napproval: %s\nlabels:   %s\nurl:      %s\n",
-					t.ID, t.Title, t.Status, dash(t.Type), theme.PriorityLabel(t.Priority),
+				fmt.Printf("id:       %s\ntitle:    %s\nstatus:   %s\ntype:     %s\npriority: %s\ntier:     %s\nparent:   %s\nagent:    %s\napproval: %s\nlabels:   %s\nurl:      %s\n",
+					t.ID, t.Title, t.Status, dash(t.Type), theme.PriorityLabel(t.Priority), api.TierOrDefault(t.Tier),
 					dash(t.ParentID), dash(agent), dash(theme.ApprovalLabel(t.Approval)), dash(t.Labels), dash(t.URL))
 				// Exact, where the list rounds — and "changed" beside it, the field the active
 				// filter reads, so its "n/a" says why a mirrored task can be missing from that view.
@@ -539,13 +541,13 @@ func taskInfoCmd() *cobra.Command {
 }
 
 func taskNewCmd() *cobra.Command {
-	var typ, priority, parent, labels, desc string
+	var typ, priority, tier, parent, labels, desc string
 	c := &cobra.Command{
 		Use: "new <title...>", Short: "Create a task", Args: cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withBackend(func(b backend) error {
 				id, err := b.CreateTask(api.TaskSpec{
-					Title: strings.Join(args, " "), Type: typ, Priority: priority,
+					Title: strings.Join(args, " "), Type: typ, Priority: priority, Tier: tier,
 					Parent: parent, Description: desc, Labels: splitCSV(labels),
 				})
 				if err != nil {
@@ -556,18 +558,18 @@ func taskNewCmd() *cobra.Command {
 			})
 		},
 	}
-	taskSpecFlags(c, &typ, &priority, &parent, &labels, &desc)
+	taskSpecFlags(c, &typ, &priority, &tier, &parent, &labels, &desc)
 	return c
 }
 
 func taskEditCmd() *cobra.Command {
-	var typ, priority, parent, labels, desc, title string
+	var typ, priority, tier, parent, labels, desc, title string
 	c := &cobra.Command{
 		Use: "edit <id>", Short: "Edit a task (only the flags you pass are changed)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withBackend(func(b backend) error {
 				if err := b.EditTask(args[0], api.TaskSpec{
-					Title: title, Type: typ, Priority: priority,
+					Title: title, Type: typ, Priority: priority, Tier: tier,
 					Parent: parent, Description: desc, Labels: splitCSV(labels),
 				}); err != nil {
 					return err
@@ -578,13 +580,14 @@ func taskEditCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&title, "title", "", "new title")
-	taskSpecFlags(c, &typ, &priority, &parent, &labels, &desc)
+	taskSpecFlags(c, &typ, &priority, &tier, &parent, &labels, &desc)
 	return c
 }
 
-func taskSpecFlags(c *cobra.Command, typ, priority, parent, labels, desc *string) {
+func taskSpecFlags(c *cobra.Command, typ, priority, tier, parent, labels, desc *string) {
 	c.Flags().StringVarP(typ, "type", "t", "", "issue type: bug, feature, task, epic, chore (default: task)")
 	c.Flags().StringVarP(priority, "priority", "p", "", "priority: P0, P1, P2, P3, P4 (P0 highest; high/medium/low also accepted)")
+	c.Flags().StringVar(tier, "tier", "", "difficulty tier: junior, mid, senior (default: mid)")
 	c.Flags().StringVar(parent, "parent", "", "parent task id (creates a child)")
 	c.Flags().StringVarP(desc, "desc", "d", "", "description body")
 	c.Flags().StringVar(labels, "labels", "", "comma-separated labels")

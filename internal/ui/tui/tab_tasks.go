@@ -30,6 +30,7 @@ var taskTable = table.Table{
 	{Label: "id", Width: 9},
 	{Label: "type", Width: 5},
 	{Label: "prio", Width: 8},
+	{Label: "tier", Width: 6},
 	{Label: "state", Width: 8},
 	{Label: "age", Width: 4, Right: true},
 	{Width: marksW},
@@ -111,6 +112,7 @@ func (m model) taskRows() []row {
 				table.Cell{Text: tr.ID, Style: sc.Render},
 				table.Cell{Text: typeAbbr(tr.Type), Style: sc.Render},
 				table.Cell{Text: theme.PriorityLabel(tr.Priority), Style: prio.Render},
+				table.Cell{Text: api.TierOrDefault(tr.Tier), Style: sc.Render},
 				table.Cell{Text: state, Style: sc.Render},
 				// Age, right-aligned so the units line up under each other; the exact moment is in
 				// the detail pane, which is where a question about one task gets asked.
@@ -311,6 +313,7 @@ func (m model) taskItemsFor(t api.Task, desc string, comments []api.Comment) []m
 		{text: t.Title}, {text: ""},
 		{text: "type:     " + dash(t.Type)},
 		{text: "priority: " + theme.PriorityLabel(t.Priority)},
+		{text: "tier:     " + api.TierOrDefault(t.Tier)},
 		{text: "status:   " + t.Status},
 	}
 	// The exact moments, in local time — the list column rounds them, and rounding is what a
@@ -400,9 +403,10 @@ func (m *model) openTaskForm(edit bool, t api.Task) {
 	for i, w := range theme.PriorityWords {
 		prioCodes[i] = theme.PriorityCode(w)
 	}
-	title, typ, prio, parent, labels, desc, id := "", "task", "P2", "", "", "", ""
+	title, typ, prio, tier, parent, labels, desc, id := "", "task", "P2", "mid", "", "", "", ""
 	if edit {
 		id, title, prio, parent, labels, desc = t.ID, t.Title, t.Priority, t.ParentID, t.Labels, t.Description
+		tier = api.TierOrDefault(t.Tier)
 		if t.Type != "" {
 			typ = t.Type
 		}
@@ -413,6 +417,7 @@ func (m *model) openTaskForm(edit bool, t api.Task) {
 	titleF := newTextField("title", title)
 	typeF := newChoiceField("type", taskTypes, taskTypes, typ)
 	prioF := newChoiceField("priority", theme.PriorityWords, prioCodes, prio)
+	tierF := newChoiceField("tier", api.TierWords, api.TierWords, tier)
 	parentF := newTextField("parent", parent)
 	labelsF := newTextField("labels", labels)
 	descF := newTextareaField("description", desc)
@@ -433,9 +438,9 @@ func (m *model) openTaskForm(edit bool, t api.Task) {
 		}
 		return ""
 	}
-	m.form.open(heading, []field{titleF, typeF, prioF, parentF, labelsF, descF}, validate, func() tea.Cmd {
+	m.form.open(heading, []field{titleF, typeF, prioF, tierF, parentF, labelsF, descF}, validate, func() tea.Cmd {
 		spec := api.TaskSpec{
-			Title: titleF.value(), Type: typeF.value(), Priority: prioF.value(),
+			Title: titleF.value(), Type: typeF.value(), Priority: prioF.value(), Tier: tierF.value(),
 			Parent: strings.TrimSpace(parentF.value()), Description: descF.value(), Labels: csv(labelsF.value()),
 		}
 		return func() tea.Msg {

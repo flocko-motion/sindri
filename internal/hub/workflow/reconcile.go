@@ -25,11 +25,18 @@ func (e *Engine) RefreshTask(project, id string) error {
 	if !ok {
 		return fmt.Errorf("refresh %s: this project owns no such task", id)
 	}
-	return ps.UpsertTask(store.Task{
-		ID: owned.ID, Title: owned.Title, Status: owned.Status, Priority: owned.Priority,
-		Type: owned.Type, Labels: owned.Labels, ParentID: ps.ParentOf(id),
+	return ps.UpsertTask(ownedToCachedTask(owned, ps.ParentOf(id)))
+}
+
+// ownedToCachedTask projects an owned task onto the cached row every source shares (store.Task),
+// so an owned task carries every field into the cache through the ONE place that does — a second
+// hand-written copy is exactly how a field added here drifted from a field added there.
+func ownedToCachedTask(owned store.OwnedTask, parentID string) store.Task {
+	return store.Task{
+		ID: owned.ID, Title: owned.Title, Status: owned.Status, Priority: owned.Priority, Tier: owned.Tier,
+		Type: owned.Type, Labels: owned.Labels, ParentID: parentID,
 		Description: owned.Description, UpdatedAt: owned.UpdatedAt,
-	})
+	}
 }
 
 // refreshCachedTask updates one task's cached row after a local mutation instead of a full

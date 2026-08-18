@@ -23,6 +23,7 @@ type OwnedTask struct {
 	Title       string
 	Status      string
 	Priority    string
+	Tier        string // junior|mid|senior, "" unrated (-> api.TierOrDefault)
 	Type        string
 	Labels      string
 	Description string
@@ -30,7 +31,7 @@ type OwnedTask struct {
 	UpdatedAt   string
 }
 
-const ownedCols = `id,title,status,priority,type,labels,description,created_at,updated_at`
+const ownedCols = `id,title,status,priority,tier,type,labels,description,created_at,updated_at`
 
 // PutOwnedTask writes a task sindri owns, stamping updated_at and preserving created_at.
 func (p *ProjectStore) PutOwnedTask(t OwnedTask) error {
@@ -40,12 +41,12 @@ func (p *ProjectStore) PutOwnedTask(t OwnedTask) error {
 	}
 	_, err := p.s.db.Exec(`
 		INSERT INTO owned_tasks (project,`+ownedCols+`)
-		VALUES (?,?,?,?,?,?,?,?,?,?)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(project,id) DO UPDATE SET
 			title=excluded.title, status=excluded.status, priority=excluded.priority,
-			type=excluded.type, labels=excluded.labels,
+			tier=excluded.tier, type=excluded.type, labels=excluded.labels,
 			description=excluded.description, updated_at=excluded.updated_at`,
-		p.project, t.ID, t.Title, t.Status, t.Priority, t.Type, t.Labels, t.Description,
+		p.project, t.ID, t.Title, t.Status, t.Priority, t.Tier, t.Type, t.Labels, t.Description,
 		t.CreatedAt, now)
 	if err != nil {
 		return fmt.Errorf("put owned task %s: %w", t.ID, err)
@@ -94,6 +95,11 @@ func (p *ProjectStore) SetOwnedPriority(id, priority string) error {
 	return p.updateOwned(id, "priority", priority)
 }
 
+// SetOwnedTier sets the task's difficulty estimate.
+func (p *ProjectStore) SetOwnedTier(id, tier string) error {
+	return p.updateOwned(id, "tier", tier)
+}
+
 // updateOwned writes one column, reporting an id this project does not own rather than passing
 // silently: a status write that hit nothing is how a task drifts from what the board shows.
 func (p *ProjectStore) updateOwned(id, column, value string) error {
@@ -126,7 +132,7 @@ func (p *ProjectStore) OwnsTask(id string) bool {
 
 func scanOwned(r rowScanner) (OwnedTask, error) {
 	var t OwnedTask
-	err := r.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Type, &t.Labels,
+	err := r.Scan(&t.ID, &t.Title, &t.Status, &t.Priority, &t.Tier, &t.Type, &t.Labels,
 		&t.Description, &t.CreatedAt, &t.UpdatedAt)
 	return t, err
 }

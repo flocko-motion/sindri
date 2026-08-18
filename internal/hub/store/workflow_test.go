@@ -110,6 +110,30 @@ func TestTaskDescriptionPersists(t *testing.T) {
 	}
 }
 
+// TestTaskTierPersists: the difficulty estimate round-trips through both write paths — the bulk
+// ReplaceTasks a sync does, and the point UpsertTask a single-task refresh does.
+func TestTaskTierPersists(t *testing.T) {
+	p := openTmpProject(t)
+	p.ReplaceTasks([]Task{{ID: "td-1", Status: "open", Type: "task", Tier: "senior"}})
+	got, ok, err := p.GetTask("td-1")
+	if err != nil || !ok {
+		t.Fatalf("GetTask: ok=%v err=%v", ok, err)
+	}
+	if got.Tier != "senior" {
+		t.Fatalf("tier not persisted via ReplaceTasks: got %q, want senior", got.Tier)
+	}
+	if err := p.UpsertTask(Task{ID: "td-1", Status: "open", Type: "task", Tier: "junior"}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err = p.GetTask("td-1")
+	if err != nil || !ok {
+		t.Fatalf("GetTask: ok=%v err=%v", ok, err)
+	}
+	if got.Tier != "junior" {
+		t.Fatalf("tier not persisted via UpsertTask: got %q, want junior", got.Tier)
+	}
+}
+
 // TestTaskURLPersists: a GitHub issue's URL round-trips through both write paths — the bulk
 // ReplaceTasks a sync does, and the point UpsertTask a single-task refresh does — and survives
 // the read paths (GetTask, AllTasks) a plain task with no URL leaves it "" through either.

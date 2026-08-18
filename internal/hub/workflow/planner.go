@@ -188,10 +188,11 @@ func (e *Engine) CmdCreateTask(c registry.Caller, args []string, out io.Writer) 
 
 // createTaskUsage is the one description of create-task's surface, shown for a bad flag, a
 // missing title, and (via CreateTaskHelp) `create-task --help`.
-const createTaskUsage = "usage: create-task [--parent <id>] [--type <task|feature|bug|epic>] [--body <text>] [--labels a,b] [--priority <critical|high|mid|low|none>] <title...>\n" +
+const createTaskUsage = "usage: create-task [--parent <id>] [--type <task|feature|bug|epic>] [--body <text>] [--labels a,b] [--priority <critical|high|mid|low|none>] [--tier <junior|mid|senior>] <title...>\n" +
 	"  --parent    hang the task under an existing task or openspec change (os-*), so it joins that tree\n" +
 	"  --body      the task's description — what a worker needs in order to start\n" +
 	"  --priority  the order you propose this is worked in; `prioritise-task` changes it afterwards\n" +
+	"  --tier      your estimate of the difficulty (default: mid); `edit-task` changes it afterwards\n" +
 	"Approval answers \"have I read this?\" — it is the user's record of what they have seen, which is\n" +
 	"why an edit to a task returns it for a fresh one. Priority answers \"do I want this worked now?\"\n" +
 	"— their control over pacing. Neither is a guard against you: they are the user's levers over\n" +
@@ -238,6 +239,12 @@ func parseTaskFlags(args []string) (TaskSpec, []string, error) {
 				return s, nil, fmt.Errorf("unknown priority %q — one of: %s", val, strings.Join(api.PriorityWords, ", "))
 			}
 			s.Priority = code
+		case "--tier", "-T":
+			tier, known := api.ParseTier(val)
+			if !known {
+				return s, nil, fmt.Errorf("unknown tier %q — one of: %s", val, strings.Join(api.TierWords, ", "))
+			}
+			s.Tier = tier
 		default:
 			return s, nil, fmt.Errorf("unknown flag %q", name)
 		}
@@ -246,9 +253,10 @@ func parseTaskFlags(args []string) (TaskSpec, []string, error) {
 }
 
 // editTaskUsage is the one description of edit-task's surface.
-const editTaskUsage = "usage: edit-task <id> [--parent <id>] [--type <task|feature|bug|epic>] [--body <text>] [--labels a,b] [<new title...>]\n" +
+const editTaskUsage = "usage: edit-task <id> [--parent <id>] [--type <task|feature|bug|epic>] [--body <text>] [--labels a,b] [--tier <junior|mid|senior>] [<new title...>]\n" +
 	"  --parent  hang this task under another task or openspec change — how a set of flat\n" +
 	"            proposals becomes a tree: propose the parent, then point each child at it\n" +
+	"  --tier    revise your difficulty estimate; unlike priority, tier is changed here directly\n" +
 	"  Any task you can see, whether or not the user has approved it. An edit returns the task\n" +
 	"  to the user for a fresh verdict, which also holds it out of the claim pools until they\n" +
 	"  have seen the change. Omitted fields are left as they are; the order work is done in is\n" +
@@ -280,7 +288,7 @@ func (e *Engine) CmdEditTask(c registry.Caller, args []string, out io.Writer) (i
 			"user's approval standing.\n", id, strings.Join(api.PriorityWords, "|"))
 		return 2, nil
 	}
-	if spec.Title == "" && spec.Parent == "" && spec.Type == "" && spec.Description == "" && len(spec.Labels) == 0 {
+	if spec.Title == "" && spec.Parent == "" && spec.Type == "" && spec.Tier == "" && spec.Description == "" && len(spec.Labels) == 0 {
 		fmt.Fprintf(out, "nothing to change on %s\n%s\n", id, editTaskUsage)
 		return 2, nil
 	}
@@ -354,6 +362,7 @@ func taskChanges(before, after store.Task) []taskChange {
 	all := []taskChange{
 		{"title", before.Title, after.Title},
 		{"type", before.Type, after.Type},
+		{"tier", before.Tier, after.Tier},
 		{"labels", before.Labels, after.Labels},
 		{"parent", before.ParentID, after.ParentID},
 		{"description", before.Description, after.Description},
