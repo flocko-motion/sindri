@@ -74,7 +74,9 @@ const (
 	compactW0   = 200_000 // the window the curve is anchored to
 	compactP0   = 0.375   // the fraction worth compacting at compactW0
 	compactPInf = 0.05    // the floor the fraction falls toward as the window grows
-	compactK    = 0.6     // how fast it falls between the two
+	compactK    = 0.863   // how fast it falls between the two — fit to the epic's own table (sd-43fa4a):
+	// every anchor past the 200k one it's pinned at (500k/1M/2M/4M/8M) only reproduces near this k,
+	// not the 0.6 first written down; 200k fits any k since (W/W0)^-k is 1 there regardless.
 )
 
 // CompactionThreshold implements agent.Agent: the token count above which a session filling window

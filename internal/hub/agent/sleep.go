@@ -1,10 +1,10 @@
 // package: hub/agent / sleep
-// type:    logic (idle reclaim, and waking a stopped worker on demand)
-// job:     stop a worker idle past IdleStopThreshold, reclaiming its pod; start a stopped one
-// back up once its repo has claimable work nothing else would take. Off the hub's tick,
-// like FireDueCompactions/FireArmedClears: the fleet acted on unasked, not a request.
+// type:    logic (idle reclaim, and waking a stopped agent on demand)
+// job:     stop an agent idle past IdleStopThreshold, reclaiming its pod; start a stopped one
+// back up once its OWN kind of work is waiting and nothing else would take it. Off the
+// hub's tick, like FireDueCompactions/FireArmedClears: the fleet acted on unasked, not a request.
 // limits:  the sweep and an in-memory "how long idle" record, lost on restart like
-// stallwatch's own; claimable work is OpenLeaves/OpenContainers, the gate's own query.
+// stallwatch's own; claimable work is OpenLeaves/OpenContainers/UnclaimedReview, the gate's own queries.
 package agent
 
 import (
@@ -13,6 +13,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/flo-at/sindri/internal/hub/store"
 )
 
 // IdleStopThreshold is how long a worker may hold nothing before the hub reclaims its pod. A first
@@ -110,9 +112,8 @@ func forgetIdleSince(key lcKey) {
 	idleSince.mu.Unlock()
 }
 
-// FireIdleStarts wakes one stopped, non-retired worker when the repo has claimable work and no
-// live idle one would take it on its own next poll. Which worker: whichever the roster scan
-// reaches first — no tier system yet to pick a better fit (-> sd-f76aea).
+// FireIdleStarts wakes a stopped, non-retired agent when its OWN kind of work is waiting: a worker
+// for an open task, a reviewer for an unclaimed PR — one role's queue must never wake the other's.
 func (s *Service) FireIdleStarts(project string) {
 	ps := s.store.For(project)
 	packages, err := ps.OpenContainers()
@@ -123,16 +124,33 @@ func (s *Service) FireIdleStarts(project string) {
 	if err != nil {
 		return
 	}
-	if len(packages) == 0 && len(leaves) == 0 {
+	var reviewID int64
+	var reviewPR string
+	hasReview, err := ps.UnclaimedReview(&reviewID, &reviewPR)
+	if err != nil {
+		return
+	}
+	if len(packages) == 0 && len(leaves) == 0 && !hasReview {
 		return // nothing waiting to wake anyone for
 	}
 	roster, err := ps.Roster()
 	if err != nil {
 		return
 	}
+	if len(packages) > 0 || len(leaves) > 0 {
+		s.wakeStoppedForRole(project, roster, "worker", "work is waiting in this repo — starting")
+	}
+	if hasReview {
+		s.wakeStoppedForRole(project, roster, "reviewer", "a review is waiting in this repo — starting")
+	}
+}
+
+// wakeStoppedForRole wakes the first stopped, non-retired agent of role in roster, unless a live
+// one of that SAME role already holds nothing and would claim the work itself next poll.
+func (s *Service) wakeStoppedForRole(project string, roster []store.Agent, role, reason string) {
 	toWake := ""
 	for _, a := range roster {
-		if a.Retired || a.Role == "coauthor" {
+		if a.Retired || a.Role != role {
 			continue
 		}
 		if a.Stopped {
@@ -143,14 +161,14 @@ func (s *Service) FireIdleStarts(project string) {
 		}
 		if s.AgentAlive(project, a.Name) {
 			if empty, _ := s.HoldsNothing(project, a.Name, a.Role); empty {
-				return // already idle and alive: it claims this itself within one poll
+				return
 			}
 		}
 	}
 	if toWake == "" {
 		return
 	}
-	_ = ps.Log(toWake, "wake", "work is waiting in this repo — starting")
+	_ = s.store.For(project).Log(toWake, "wake", reason)
 	if err := s.Launch(project, toWake, false, false, 0, 0, io.Discard); err != nil {
 		fmt.Fprintf(os.Stderr, "hub: waking %s for waiting work: %v\n", toWake, err)
 	}

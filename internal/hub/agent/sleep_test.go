@@ -240,3 +240,89 @@ func TestFireIdleStartsLeavesAnAlreadyIdleWorkerToClaimItItself(t *testing.T) {
 		t.Error("a stopped worker was woken even though a live idle one could claim the work itself")
 	}
 }
+
+// unclaimedReview seeds a repo's PR at the status UnclaimedReview requires (RequestReview's own
+// rule: "the PR has to be open for anyone to be handed it") with one review nobody has claimed yet.
+func unclaimedReview(t *testing.T, ps *store.ProjectStore, prID string) {
+	t.Helper()
+	if err := ps.PutPR(store.PR{ID: prID, Task: "td-1", Agent: "wrk", Branch: "td-1", Status: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ps.AddReview(prID, "check it"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestFireIdleStartsWakesAStoppedReviewerForAWaitingReview: the demand signal for a reviewer is an
+// unclaimed review, not OpenLeaves — a stopped reviewer with a PR nobody has claimed is started.
+func TestFireIdleStartsWakesAStoppedReviewerForAWaitingReview(t *testing.T) {
+	s, _ := sleepFixture(t)
+	ps := s.store.For("proj")
+	if err := ps.PutAgent(store.Agent{Name: "rune", Role: "reviewer", Stopped: true}); err != nil {
+		t.Fatal(err)
+	}
+	unclaimedReview(t, ps, "pr-1")
+
+	s.FireIdleStarts("proj")
+
+	got, _, err := ps.GetAgent("rune")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Stopped {
+		t.Error("a stopped reviewer with an unclaimed review waiting was never woken")
+	}
+}
+
+// TestFireIdleStartsDoesNotWakeAStoppedReviewerForAWaitingTask: an open task is a worker's demand
+// signal, not a reviewer's — the exact bug report this guards: a stopped reviewer must never be
+// mistaken for a fit answer to a task nobody but a worker can claim.
+func TestFireIdleStartsDoesNotWakeAStoppedReviewerForAWaitingTask(t *testing.T) {
+	s, _ := sleepFixture(t)
+	ps := s.store.For("proj")
+	if err := ps.PutAgent(store.Agent{Name: "rune", Role: "reviewer", Stopped: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutOwnedTask(store.OwnedTask{ID: "td-1", Title: "waiting", Status: "open", Priority: "P2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.UpsertTask(store.Task{ID: "td-1", Status: "open", Priority: "P2", Type: "task"}); err != nil {
+		t.Fatal(err)
+	}
+
+	s.FireIdleStarts("proj") // no worker in the roster at all — nothing can claim td-1
+
+	got, _, err := ps.GetAgent("rune")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Stopped {
+		t.Error("a stopped reviewer was woken for an open task, which it cannot claim")
+	}
+}
+
+// TestFireIdleStartsDoesNotWakeAStoppedWorkerForAWaitingReview is the same guard the other
+// direction: an unclaimed review is a reviewer's demand signal, not a worker's.
+func TestFireIdleStartsDoesNotWakeAStoppedWorkerForAWaitingReview(t *testing.T) {
+	s, _ := sleepFixture(t)
+	ps := s.store.For("proj")
+	a, _, err := ps.GetAgent("durin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Stopped = true
+	if err := ps.PutAgent(a); err != nil {
+		t.Fatal(err)
+	}
+	unclaimedReview(t, ps, "pr-1")
+
+	s.FireIdleStarts("proj") // no reviewer in the roster at all — nothing can claim pr-1's review
+
+	got, _, err := ps.GetAgent("durin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Stopped {
+		t.Error("a stopped worker was woken for an unclaimed review, which it cannot claim")
+	}
+}

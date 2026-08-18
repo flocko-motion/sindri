@@ -167,11 +167,33 @@ func TestCompactionThresholdFallsAsTheWindowGrows(t *testing.T) {
 			t.Errorf("window %d: fraction %.4f did not fall below the previous %.4f", w, pct, prevPct)
 		}
 		prevPct = pct
-		// Independently recomputed, not copied from the implementation, so a shared typo in both
-		// wouldn't pass silently.
+		// Recomputed from the named constants, not copied from CompactionThreshold's own expression
+		// — catches a typo in the formula. It shares those constants, though, so a WRONG constant
+		// (the k that had drifted) passes here regardless; TestCompactionThresholdMatchesTheEpicsTable
+		// pins the values themselves for that.
 		want := compactPInf + (compactP0-compactPInf)*math.Pow(float64(w)/compactW0, -compactK)
 		if wantTokens := int(want * float64(w)); got != wantTokens {
 			t.Errorf("window %d: CompactionThreshold = %d, want %d", w, got, wantTokens)
+		}
+	}
+}
+
+// TestCompactionThresholdMatchesTheEpicsTable pins against the epic's own worked table (sd-43fa4a)
+// with literal numbers, not the formula's named constants — the k that had drifted (0.6, not the
+// 0.863 that actually reproduces this table) recomputed identically from those constants, so the
+// test above passed throughout.
+func TestCompactionThresholdMatchesTheEpicsTable(t *testing.T) {
+	for _, c := range []struct{ window, want int }{
+		{200_000, 75_000},
+		{500_000, 99_000},
+		{1_000_000, 131_000},
+		{2_000_000, 189_000},
+		{4_000_000, 297_000},
+		{8_000_000, 507_000},
+	} {
+		got := (Claude{}).CompactionThreshold(c.window)
+		if diff := got - c.want; diff < -2_000 || diff > 2_000 {
+			t.Errorf("CompactionThreshold(%d) = %d, want %d (±2000, the table's own rounding)", c.window, got, c.want)
 		}
 	}
 }
