@@ -351,6 +351,9 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 					if e.clearArmed(project, name) {
 						return DirClearPending, true, nil
 					}
+					if tokens, due := e.compactDue(project, name); due {
+						return DirCompacting(tokens), true, nil
+					}
 					return e.containerNext(project, name, st.Container)
 				})
 			}
@@ -388,6 +391,9 @@ func (e *Engine) waitForNextTask(ctx context.Context, project, name string) (str
 	// for a human is stale the moment one has acted (-> agent.Service.SetClearArmed).
 	if e.clearArmed(project, name) {
 		return DirClearPending, nil
+	}
+	if tokens, due := e.compactDue(project, name); due {
+		return DirCompacting(tokens), nil
 	}
 	if tokens, full := e.contextFull(project, name); full {
 		return DirFull(tokens), nil
@@ -549,6 +555,10 @@ func (e *Engine) CmdNext(c registry.Caller, _ []string, out io.Writer) (int, err
 		fmt.Fprintln(out, DirClearPending)
 		return 0, nil
 	}
+	if tokens, due := e.compactDue(c.Project, c.Agent); due {
+		fmt.Fprintln(out, DirCompacting(tokens))
+		return 0, nil
+	}
 	if tokens, full := e.contextFull(c.Project, c.Agent); full {
 		fmt.Fprintln(out, DirFull(tokens))
 		return 0, nil
@@ -581,6 +591,16 @@ func (e *Engine) contextFull(project, worker string) (tokens int, full bool) {
 	return tokens, float64(tokens) >= float64(window)*ContextFullFraction
 }
 
+// compactDue is fill past CompactionThreshold's curve for the running model — far below
+// ContextFullFraction. Withheld here; the actual firing is off-tick (-> agent.FireDueCompactions).
+func (e *Engine) compactDue(project, worker string) (tokens int, due bool) {
+	tokens, window, _, ok := e.deps.ContextUsage(project, worker)
+	if !ok || window <= 0 {
+		return tokens, false
+	}
+	return tokens, tokens >= e.deps.CompactionThreshold(window)
+}
+
 // ContextFull is contextFull's bool half, for the board's status word.
 func (e *Engine) ContextFull(project, worker string) bool {
 	_, full := e.contextFull(project, worker)
@@ -595,11 +615,14 @@ func (e *Engine) claimNext(project, agent string) (string, bool, error) {
 	if a, ok, _ := e.store.For(project).GetAgent(agent); ok && a.Retired {
 		return "", false, nil
 	}
-	if _, full := e.contextFull(project, agent); full {
-		return "", false, nil // retired: a full worker is not handed new work
-	}
 	if e.clearArmed(project, agent) {
 		return "", false, nil // a clear is about to land: work claimed now would be cut in half by it
+	}
+	if _, due := e.compactDue(project, agent); due {
+		return "", false, nil // fill past the threshold: compacting wins this cycle, off-tick
+	}
+	if _, full := e.contextFull(project, agent); full {
+		return "", false, nil // retired: a full worker is not handed new work
 	}
 	_ = e.SyncTasks(project) // best-effort refresh; cached set on failure
 	ps := e.store.For(project)

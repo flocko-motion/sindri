@@ -10,6 +10,7 @@ package claude
 import (
 	"encoding/json"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,6 +35,28 @@ var windows = []struct {
 	{"opus-5", 1_000_000},
 	{"sonnet-5", 1_000_000},
 	{"haiku", 200_000},
+}
+
+// The compaction threshold falls as the window grows: pct(W) = P∞ + (P₀−P∞)·(W/W₀)^(−k). The same
+// absolute overhead a 200k window pays in full is a smaller fraction of a bigger one, so the bar for
+// compacting worth it falls with it. Named and kept beside the window table for the same reason that
+// table gives itself: a threshold computed from a window guessed elsewhere is a guess nobody checked.
+const (
+	compactW0   = 200_000 // the window the curve is anchored to
+	compactP0   = 0.375   // the fraction worth compacting at compactW0
+	compactPInf = 0.05    // the floor the fraction falls toward as the window grows
+	compactK    = 0.6     // how fast it falls between the two
+)
+
+// CompactionThreshold implements agent.Agent: the token count above which a session filling window
+// tokens is worth summarizing rather than carrying — the curve above, in tokens rather than a bare
+// fraction, since that is what a live reading is compared against.
+func (Claude) CompactionThreshold(window int) int {
+	if window <= 0 {
+		return 0
+	}
+	pct := compactPInf + (compactP0-compactPInf)*math.Pow(float64(window)/compactW0, -compactK)
+	return int(pct * float64(window))
 }
 
 // ContextUsage implements agent.Agent: what the session under home carries, the window it fills, and

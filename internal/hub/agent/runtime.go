@@ -123,6 +123,10 @@ func (s *Service) ContextUsage(project, name string) (tokens, window int, model 
 	return t, w, m, found
 }
 
+// CompactionThreshold reports the token count above which a session filling window tokens is worth
+// compacting, from the wired backend's own formula for the model that window belongs to.
+func (s *Service) CompactionThreshold(window int) int { return agentport.CompactionThreshold(window) }
+
 // ForgetContext drops name's memoised context reading. For the one caller that KNOWS the previous
 // measurement is now wrong because it just invalidated it: clearing a session (-> ClearContext).
 //

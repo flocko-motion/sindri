@@ -28,6 +28,7 @@ func (f fakeAgent) ContextUsage(string) (int, int, string, bool) {
 	}
 	return *f.tokens, 1_000_000, "claude-opus-5", true
 }
+func (f fakeAgent) CompactionThreshold(int) int { return 1 << 30 } // never due; not this test's concern
 
 // fullAgentWithWorkWaiting seeds an idle worker reported as over the fullness threshold, with an
 // approved, prioritised task waiting for it. The returned pointer is the reported context size: set

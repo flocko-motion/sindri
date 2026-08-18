@@ -117,6 +117,9 @@ func (r *refwatch) preflight(projects []store.Project) {
 			// Before nothing else in particular, but off the agent's own request: the clear
 			// interrupts the session, so it must not land on an agent mid-command (-> FireArmedClears).
 			r.h.agents.FireArmedClears(p.Tag)
+			// Same hazard, same remedy: a compaction due is decided at the assignment gate but fired
+			// here, off-tick, so it never lands on an agent mid-command either (-> FireDueCompactions).
+			r.h.agents.FireDueCompactions(p.Tag)
 		}
 	}()
 }

@@ -82,6 +82,9 @@ type Deps interface {
 	// ContextUsage reports an agent's current session context size, the window it fills, and the
 	// model filling it, all read off its transcript. ok=false when nothing has been recorded yet.
 	ContextUsage(project, name string) (tokens, window int, model string, ok bool)
+	// CompactionThreshold is the token count above which a session filling window tokens is worth
+	// compacting, from the backend's own formula for the model that window belongs to.
+	CompactionThreshold(window int) int
 }
 
 // clearArmed reports whether a human has armed a context clear for this agent. It is handed no new

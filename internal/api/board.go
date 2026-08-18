@@ -32,9 +32,8 @@ type AgentView struct {
 	// the fleet retired 1M agents at 17%.
 	ContextTokens int `json:"contextTokens"`
 	ContextWindow int `json:"contextWindow"`
-	// Model is the raw id its transcript names ("" = not yet observed) — the denominator ContextWindow
-	// was read against. Until a worker can be launched on a chosen model this is the account default,
-	// the same for every agent, which is still worth seeing.
+	// Model is the raw id its transcript names ("" = not yet observed), the denominator ContextWindow
+	// was read against. The account default until a worker can be launched on a chosen one.
 	Model string `json:"model,omitempty"`
 	// Retired: a human has wound it down, so it is handed no new work while it finishes what it
 	// holds. Carried beside Status rather than inside it, because it is true of a busy agent too —
@@ -161,8 +160,7 @@ func AgentNotUp(status string) bool {
 }
 
 // AgentNeedsLaunch reports whether an agent has no pod and none on the way — narrower than
-// AgentNotUp, which also covers one already in flight. "stopped" counts: a human tore its pod down
-// on purpose, but it is exactly as launchable as "down" — the same verb, `Launch`, resumes either.
+// AgentNotUp, which also covers one in flight. "stopped" counts too: the same verb, Launch, resumes it.
 func AgentNeedsLaunch(status string) bool {
 	return status == "down" || status == "stopped" || status == StatusUnknown
 }

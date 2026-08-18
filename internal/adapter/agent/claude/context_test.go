@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -142,6 +143,44 @@ func TestContextUsageReportsTheModel(t *testing.T) {
 	_, _, model, ok := Claude{}.ContextUsage(home)
 	if !ok || model != "claude-opus-5-20260315" {
 		t.Errorf("model = (%q, %v), want (%q, true)", model, ok, "claude-opus-5-20260315")
+	}
+}
+
+// TestCompactionThresholdAtItsAnchor: at W0 itself, the curve's own definition collapses to P0 —
+// the one point the formula and a hand check agree on without floating-point noise.
+func TestCompactionThresholdAtItsAnchor(t *testing.T) {
+	if got, want := (Claude{}).CompactionThreshold(compactW0), int(compactP0*compactW0); got != want {
+		t.Errorf("CompactionThreshold(%d) = %d, want %d (P0 exactly)", compactW0, got, want)
+	}
+}
+
+// TestCompactionThresholdFallsAsTheWindowGrows: the whole point of a curve rather than a flat
+// fraction — the same absolute overhead costs less against a bigger window, so the bar for
+// compacting worthwhile must fall as window grows, never rise or invert.
+func TestCompactionThresholdFallsAsTheWindowGrows(t *testing.T) {
+	windows := []int{200_000, 500_000, 1_000_000, 2_000_000, 4_000_000, 8_000_000}
+	prevPct := 1.0
+	for _, w := range windows {
+		got := Claude{}.CompactionThreshold(w)
+		pct := float64(got) / float64(w)
+		if pct >= prevPct {
+			t.Errorf("window %d: fraction %.4f did not fall below the previous %.4f", w, pct, prevPct)
+		}
+		prevPct = pct
+		// Independently recomputed, not copied from the implementation, so a shared typo in both
+		// wouldn't pass silently.
+		want := compactPInf + (compactP0-compactPInf)*math.Pow(float64(w)/compactW0, -compactK)
+		if wantTokens := int(want * float64(w)); got != wantTokens {
+			t.Errorf("window %d: CompactionThreshold = %d, want %d", w, got, wantTokens)
+		}
+	}
+}
+
+// TestCompactionThresholdZeroWindow: an unresolved window must not compute a threshold against it —
+// same rule windowFor's caller already leans on for ContextUsage.
+func TestCompactionThresholdZeroWindow(t *testing.T) {
+	if got := (Claude{}).CompactionThreshold(0); got != 0 {
+		t.Errorf("CompactionThreshold(0) = %d, want 0", got)
 	}
 }
 

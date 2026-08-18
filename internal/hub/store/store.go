@@ -393,7 +393,7 @@ func (p *ProjectStore) DeleteAgent(name string) error {
 // decides. Delivering to the wrong dvalin is the one failure here worth engineering against.
 func (s *Store) AgentsNamed(name string) ([]Agent, error) {
 	rows, err := s.db.Query(
-		`SELECT project, name, role, workspace, socket, created_at, memory, retired, clear_armed FROM agents WHERE name=? ORDER BY project`,
+		`SELECT project, name, role, workspace, socket, created_at, memory, retired, clear_armed, stopped FROM agents WHERE name=? ORDER BY project`,
 		name)
 	if err != nil {
 		return nil, fmt.Errorf("agents named %q: %w", name, err)

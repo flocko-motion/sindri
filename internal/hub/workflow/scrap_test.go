@@ -3,6 +3,7 @@ package workflow
 import (
 	"errors"
 	"fmt"
+	"math"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -25,13 +26,17 @@ type stubDeps struct {
 	ctxTokens    int      // TestContextFull* set these to simulate a worker's session usage
 	ctxWindow    int      // 0 with ctxOK true means "measured, but the window is unknown"
 	ctxOK        bool
-	comments     map[string][]store.Comment // by task id, for the views that render a thread
-	busy         map[string]bool            // agents mid-turn, so AgentIdle answers false for them
-	posted       []store.Comment            // what the workflow wrote onto a task's thread (SourceRef holds the id)
-	postFails    bool                       // AddTaskComment refuses, for the paths that must survive it
-	delivered    []Delivery                 // how each message was classified, in step with injected/injectedText
-	deliverErr   bool                       // Deliver refuses, for the paths that must not record an undelivered message
-	projects     []store.Project            // KnownProjects override; nil (the default) means none registered
+	// compactThreshold overrides CompactionThreshold's answer; 0 (the default) means "never due" —
+	// no real formula returns exactly 0 for a positive window, so it is a safe sentinel rather than
+	// a real threshold every unrelated fullness test would otherwise trip on.
+	compactThreshold int
+	comments         map[string][]store.Comment // by task id, for the views that render a thread
+	busy             map[string]bool            // agents mid-turn, so AgentIdle answers false for them
+	posted           []store.Comment            // what the workflow wrote onto a task's thread (SourceRef holds the id)
+	postFails        bool                       // AddTaskComment refuses, for the paths that must survive it
+	delivered        []Delivery                 // how each message was classified, in step with injected/injectedText
+	deliverErr       bool                       // Deliver refuses, for the paths that must not record an undelivered message
+	projects         []store.Project            // KnownProjects override; nil (the default) means none registered
 }
 
 func (d *stubDeps) ProjectRoot(string) string                   { return d.root }
@@ -72,6 +77,13 @@ func (d *stubDeps) KnownProjects() []store.Project     { return d.projects }
 func (d *stubDeps) BrokkrBin() (string, error)         { return "", nil }
 func (d *stubDeps) ContextUsage(_, _ string) (int, int, string, bool) {
 	return d.ctxTokens, d.ctxWindow, "", d.ctxOK
+}
+
+func (d *stubDeps) CompactionThreshold(int) int {
+	if d.compactThreshold == 0 {
+		return math.MaxInt
+	}
+	return d.compactThreshold
 }
 
 // TestScrapPRStopsReviewer: scrapping a PR under review flips it to "scrapped",

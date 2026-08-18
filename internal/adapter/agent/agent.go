@@ -6,7 +6,10 @@
 // package, never the reverse).
 package agent
 
-import "io"
+import (
+	"io"
+	"math"
+)
 
 // State is what the agent tool is doing now, not sindri's workflow phase.
 type State string
@@ -63,6 +66,10 @@ type Agent interface {
 	// only the backend knows which model answers; a caller that assumed one retired workers with
 	// most of 1M unused. ok=false when nothing has been recorded yet.
 	ContextUsage(home string) (tokens, window int, model string, ok bool)
+	// CompactionThreshold is the token count above which a session filling window tokens is worth
+	// compacting — from the same backend ContextUsage's window came from, since only it knows the
+	// shape of its own context-management economics.
+	CompactionThreshold(window int) int
 }
 
 // active is wired once at startup via Use; the no-op default keeps the port safe before.
@@ -97,6 +104,9 @@ func HostTokenExpiry() (int64, bool) { return active.HostTokenExpiry() }
 // ContextUsage reports the wired backend's context size, window and model for the session under home.
 func ContextUsage(home string) (int, int, string, bool) { return active.ContextUsage(home) }
 
+// CompactionThreshold reports the wired backend's compaction threshold for a window this size.
+func CompactionThreshold(window int) int { return active.CompactionThreshold(window) }
+
 // noop is the default until Use: state is Unknown, no home is provisioned.
 type noop struct{}
 
@@ -109,3 +119,5 @@ func (noop) RestageCredentials(string) (bool, error) { return false, nil }
 func (noop) HostTokenExpiry() (int64, bool) { return 0, false }
 
 func (noop) ContextUsage(string) (int, int, string, bool) { return 0, 0, "", false }
+
+func (noop) CompactionThreshold(int) int { return math.MaxInt } // never worth it: nothing to measure

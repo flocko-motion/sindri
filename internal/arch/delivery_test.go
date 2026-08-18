@@ -37,6 +37,9 @@ var declaredInjectors = map[string]string{
 	// A kickoff after a context clear: a wake, and nothing worth keeping for an agent that was not
 	// there to be woken — the same class as the kickoff after a launch.
 	"internal/hub/agent/clearcontext.go": "the post-clear kickoff — a wake, push-only",
+	// The /compact injection itself: the same class as clear's — nothing worth keeping for an agent
+	// that was not there to receive it, and the hub's own decision rather than a message from anyone.
+	"internal/hub/agent/compact.go": "the /compact injection — push-only, like clear's",
 	// A broadcast is push-only BY CONSTRUCTION: the chat module holds a Delivery port that can only
 	// inject, so it cannot mail even by mistake. Correct for a stream a newcomer catches up on.
 	"internal/hub/chat/service.go": "chat.deliver — push-only by construction (its port cannot mail)",

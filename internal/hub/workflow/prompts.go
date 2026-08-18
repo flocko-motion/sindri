@@ -433,6 +433,15 @@ const DirClearPending = "[hub] The user has armed a context clear for you: it fi
 	"boundary, and your session starts empty. Nothing is assigned until it lands. Don't ask again — " +
 	"you'll be told to carry on the moment your context is clear."
 
+// DirCompacting answers an agent whose fill has grown past the point compacting it is worth doing —
+// automatic, unlike a clear, so it names the number rather than a human's decision. A summary, not a
+// wipe: it keeps what it was carrying, so no re-kickoff is owed the way a clear's is.
+func DirCompacting(tokens int) string {
+	return fmt.Sprintf("[hub] Your context is ~%dk tokens — past the point compacting it is worth "+
+		"doing. It fires here, at this boundary, keeping a summary rather than wiping it. Nothing is "+
+		"assigned until it lands; don't ask again.", tokens/1000)
+}
+
 // --- escalation: stopped on a decision only the user can make ---
 
 // DirEscalated answers an escalated agent, repeating the question back — one relaunched mid-escalation
