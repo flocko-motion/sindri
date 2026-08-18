@@ -23,6 +23,10 @@ func (m model) detailLines() []string {
 		return m.agentDetailLines()
 	case 2:
 		return m.prDetailLines()
+	case 5:
+		return m.runDetailLines()
+	case 6:
+		return m.mailDetailLines()
 	default:
 		return m.repoDetailLines()
 	}
@@ -37,6 +41,8 @@ func (m model) modalTitle() string {
 		return "Agent " + m.selID()
 	case 2:
 		return "PR " + m.selID()
+	case 6:
+		return "Message " + m.selID()
 	default:
 		return "Repo " + m.repoName(m.selID())
 	}
@@ -165,6 +171,39 @@ func (m *model) gotoItem(kind, id string) {
 	m.selectRow(id)
 }
 
+// moveCursor moves the active tab's cursor by delta rows and leaves it on a row that selects
+// something. Every key that moves the selection goes through it, so none of them can land on a
+// heading and leave the detail pane with nothing to show.
+func (m *model) moveCursor(delta int) {
+	rows := m.rows()
+	if len(rows) == 0 {
+		m.cursor[m.tab] = 0
+		return
+	}
+	step := 1
+	if delta < 0 {
+		step = -1
+	}
+	m.cursor[m.tab] = nearestSelectable(rows, clampInt(m.cursor[m.tab]+delta, 0, len(rows)-1), step)
+}
+
+// nearestSelectable is the first row from i that selects something, searched in step's direction and
+// then back the other way. Both directions, because a group's heading sits above its rows and its
+// spacer below them: which way out is open depends on where the cursor came to rest.
+func nearestSelectable(rows []row, i, step int) int {
+	for j := i; j >= 0 && j < len(rows); j += step {
+		if rows[j].selectable() {
+			return j
+		}
+	}
+	for j := i; j >= 0 && j < len(rows); j -= step {
+		if rows[j].selectable() {
+			return j
+		}
+	}
+	return i
+}
+
 // selID is the id of the row under the active tab's cursor ("" if none).
 func (m model) selID() string {
 	r := m.rows()
@@ -195,6 +234,10 @@ func (m model) rows() []row {
 		return m.prRows()
 	case 3:
 		return m.repoRows()
+	case 5:
+		return m.runRows()
+	case 6:
+		return m.mailRows()
 	default:
 		return nil // Chat has no selectable rows — it renders its own transcript body
 	}
@@ -215,6 +258,24 @@ func (m model) inScope(project string) bool {
 	return project == tag
 }
 
+// agentVisible admits an agent to the Agents tab: in scope, or waiting on the user anywhere in the
+// fleet. The attention marker beside the handle is fleet-wide by design (-> View), so a scope that
+// hid the row it points at left the user told that something needs them and shown a list where
+// nothing does. The row carries its own repo in the first column, which is what says it is foreign.
+func (m model) agentVisible(a api.AgentView) bool {
+	return m.inScope(a.Project) || api.AgentNeedsUser(a)
+}
+
+// prVisible admits a PR to the PRs tab, on the same rule and for the same reason as agentVisible:
+// agents and PRs are BACKGROUND work, progressing while the user looks elsewhere, so one that ends
+// up waiting on them has to surface wherever they are. An approved PR in another repo was invisible
+// until they switched to it, and nothing told them to switch. Calls the predicate rather than
+// restating it (-> api.PRNeedsUser), which is also what the marker and the row colour read: three
+// separate derivations of one question drift, and each looks plausible alone.
+func (m model) prVisible(p api.PR) bool {
+	return m.inScope(p.Project) || api.PRNeedsUser(p, m.state.Agents)
+}
+
 // tabCount is section s's badge. Agents/PRs obey the § scope toggle so the badge matches
 // the list; the rest are scope-invariant and read straight off the board.
 func (m model) tabCount(s tuiSection) int {
@@ -222,7 +283,7 @@ func (m model) tabCount(s tuiSection) int {
 	case "agents":
 		n := 0
 		for _, a := range m.state.Agents {
-			if m.inScope(a.Project) {
+			if m.agentVisible(a) {
 				n++
 			}
 		}
@@ -230,7 +291,15 @@ func (m model) tabCount(s tuiSection) int {
 	case "prs":
 		n := 0
 		for _, p := range m.state.PRs {
-			if m.inScope(p.Project) && api.PROpen(p) {
+			if m.prVisible(p) && api.PROpen(p) {
+				n++
+			}
+		}
+		return n
+	case "runs":
+		n := 0
+		for _, r := range m.state.Runs {
+			if m.inScope(r.Project) && api.RunOpen(r) {
 				n++
 			}
 		}
@@ -241,14 +310,25 @@ func (m model) tabCount(s tuiSection) int {
 		return m.state.RepoCount()
 	case "chat":
 		return m.state.ChatMemberCount()
+	case "mail":
+		// Unread over the whole mailbox, not the window the list renders: a badge that stopped
+		// rising once the history outgrew the window would go quiet exactly when there was most
+		// unread. Narrowed by the § scope like Agents and PRs, from the hub's per-repo tally.
+		if _, tag := m.currentRepo(); m.scopeRepo && tag != "" {
+			return m.state.MailUnreadByRepo[tag]
+		}
+		return m.state.MailUnread
 	}
 	return 0
 }
 
-// scopeName labels the global↔repo scope toggle for the footer.
+// scopeName labels the global↔repo scope toggle for the footer. The narrow scope is not the repo
+// alone and must not claim to be: it keeps anything waiting on the user, from any repo (->
+// agentVisible, prVisible). Named for what it does, so a foreign row is never a filter that looks
+// broken.
 func scopeName(repoScoped bool) string {
 	if repoScoped {
-		return "repo"
+		return "repo+needs-you"
 	}
 	return "global"
 }
@@ -270,6 +350,8 @@ func (m model) actionableItems() []metaItem {
 		return m.agentActionable()
 	case 2:
 		return m.prActionable()
+	case 6:
+		return m.mailActionable()
 	}
 	return nil
 }

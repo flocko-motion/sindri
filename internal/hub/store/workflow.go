@@ -39,6 +39,9 @@ CREATE TABLE IF NOT EXISTS agent_state (
   branch    TEXT NOT NULL DEFAULT '',
   phase     TEXT NOT NULL DEFAULT 'idle',  -- idle | working | submitted
   container TEXT NOT NULL DEFAULT '',      -- container task held in the collaborative workflow ('' = structured)
+  -- The question an agent stopped on, waiting for the user to decide it ('' = not escalated). Written
+  -- only by SetEscalation/ClearEscalation, never by SetState (-> SetState).
+  escalation TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (project, agent)
 );
 CREATE TABLE IF NOT EXISTS prs (
@@ -52,6 +55,7 @@ CREATE TABLE IF NOT EXISTS prs (
   feedback   TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT '',
   kind       TEXT NOT NULL DEFAULT 'final', -- final (task-done) | interim (mid-task contribution to the reference branch)
+  updated_at TEXT NOT NULL DEFAULT '', -- stamped by every PutPR, for the active filter (-> api.PRFilterActive)
   PRIMARY KEY (project, id)
 );
 -- The tasks sindri owns, and the authority for them. The tasks table above is a read model the
@@ -100,7 +104,8 @@ CREATE TABLE IF NOT EXISTS reviews (
   result      TEXT NOT NULL DEFAULT '',  -- the reviewer's findings
   created_at  TEXT NOT NULL DEFAULT '',  -- requirement added
   review_at   TEXT NOT NULL DEFAULT '',  -- picked up by an agent
-  verdict_at  TEXT NOT NULL DEFAULT ''   -- verdict given
+  verdict_at  TEXT NOT NULL DEFAULT '',  -- verdict given
+  advisory    INTEGER NOT NULL DEFAULT 0 -- a planner's optional badge; never satisfies the merge gate alone
 );
 -- The latest lint result for a PR (so it persists across hub restarts).
 CREATE TABLE IF NOT EXISTS pr_lint (
@@ -128,6 +133,28 @@ CREATE TABLE IF NOT EXISTS task_approval (
   at      TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (project, task)
 );
+-- The run queue: one scheduled command per row, its console output, and how it went.
+-- Methods live in runs.go; the schema stays here alongside its siblings.
+CREATE TABLE IF NOT EXISTS runs (
+  project     TEXT NOT NULL,
+  id          TEXT NOT NULL,
+  agent       TEXT NOT NULL DEFAULT '',
+  command     TEXT NOT NULL DEFAULT '',
+  status      TEXT NOT NULL DEFAULT 'queued', -- queued|running|passed|failed|timed_out|cancelled
+  priority    TEXT NOT NULL DEFAULT '',       -- P0..P4, same vocabulary as tasks; '' sorts last
+  timeout     TEXT NOT NULL DEFAULT '',       -- agent-requested budget, e.g. '5m'; '' = the hub's hard cap
+  workspace   TEXT NOT NULL DEFAULT '',       -- the agent's worktree path at schedule time
+  task        TEXT NOT NULL DEFAULT '',       -- the agent's task at schedule time, for staleness at dequeue
+  exit_code   INTEGER NOT NULL DEFAULT 0,
+  kind        TEXT NOT NULL DEFAULT '',       -- '' | 'submit' | 'contribute' -- a submit/contribute gate
+  message     TEXT NOT NULL DEFAULT '',       -- the agent's submit/contribute text, replayed once a gate passes
+  output      TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL DEFAULT '',
+  started_at  TEXT NOT NULL DEFAULT '',
+  finished_at TEXT NOT NULL DEFAULT '',
+  updated_at  TEXT NOT NULL DEFAULT '', -- stamped on every write, for the active filter
+  PRIMARY KEY (project, id)
+);
 `
 
 // AgentState is an agent's live workflow state (durable, D11).
@@ -137,6 +164,10 @@ type AgentState struct {
 	Branch    string `json:"branch"`
 	Phase     string `json:"phase"`
 	Container string `json:"container,omitempty"`
+	// Escalation is the question the agent stopped on, waiting for the user to decide it ('' = not
+	// escalated). It rides here so every reader of the state has it — the command surface, the board,
+	// the directive — but it is NOT part of what SetState writes (-> SetState).
+	Escalation string `json:"escalation,omitempty"`
 }
 
 // Review is one review item attached to a PR; it crosses the wire, so it is
@@ -150,8 +181,8 @@ type PR = api.PR
 // GetState returns an agent's workflow state in this project (zero value if none).
 func (p *ProjectStore) GetState(agent string) (AgentState, error) {
 	st := AgentState{Agent: agent, Phase: "idle"}
-	row := p.s.db.QueryRow(`SELECT task,branch,phase,container FROM agent_state WHERE project=? AND agent=?`, p.project, agent)
-	err := row.Scan(&st.Task, &st.Branch, &st.Phase, &st.Container)
+	row := p.s.db.QueryRow(`SELECT task,branch,phase,container,escalation FROM agent_state WHERE project=? AND agent=?`, p.project, agent)
+	err := row.Scan(&st.Task, &st.Branch, &st.Phase, &st.Container, &st.Escalation)
 	if err == sql.ErrNoRows {
 		return st, nil
 	}
@@ -161,7 +192,10 @@ func (p *ProjectStore) GetState(agent string) (AgentState, error) {
 	return st, nil
 }
 
-// SetState writes an agent's workflow state in this project.
+// SetState writes an agent's workflow state in this project. It leaves the escalation alone: every
+// caller here builds a fresh AgentState from the columns it cares about, so writing that one from the
+// struct would clear a live escalation on the next phase change — and a durable state any unrelated
+// write can drop is not durable. SetEscalation and ClearEscalation are the only writers of it.
 func (p *ProjectStore) SetState(st AgentState) error {
 	if st.Phase == "" {
 		st.Phase = "idle"
@@ -176,7 +210,34 @@ func (p *ProjectStore) SetState(st AgentState) error {
 	return nil
 }
 
-// PutPR inserts or updates a merge-intent in this project.
+// SetEscalation records the question an agent has stopped on, so the escalation survives a hub
+// restart — an escalation that evaporates leaves an agent silently stuck, refused by every verb that
+// lands work with nothing to say why. An upsert, because an agent may escalate before anything
+// else has written it a state row.
+func (p *ProjectStore) SetEscalation(agent, question string) error {
+	_, err := p.s.db.Exec(`
+		INSERT INTO agent_state (project,agent,escalation) VALUES (?,?,?)
+		ON CONFLICT(project,agent) DO UPDATE SET escalation=excluded.escalation`,
+		p.project, agent, question)
+	if err != nil {
+		return fmt.Errorf("set escalation %s: %w", agent, err)
+	}
+	return nil
+}
+
+// ClearEscalation releases an escalated agent, whoever asked for it — the agent itself once it has
+// its answer, or the user, who must be able to clear one nobody else can.
+func (p *ProjectStore) ClearEscalation(agent string) error {
+	_, err := p.s.db.Exec(`UPDATE agent_state SET escalation='' WHERE project=? AND agent=?`, p.project, agent)
+	if err != nil {
+		return fmt.Errorf("clear escalation %s: %w", agent, err)
+	}
+	return nil
+}
+
+// PutPR inserts or updates a merge-intent in this project. updated_at is stamped here,
+// unconditionally, on every call — the caller's own value (if any) is never trusted, mirroring
+// updateOwned's "any write is a change" rule for tasks, which the active filter relies on.
 func (p *ProjectStore) PutPR(pr PR) error {
 	if pr.CreatedAt == "" {
 		pr.CreatedAt = time.Now().UTC().Format(time.RFC3339)
@@ -187,13 +248,15 @@ func (p *ProjectStore) PutPR(pr PR) error {
 	if pr.Kind == "" {
 		pr.Kind = "final"
 	}
+	pr.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	_, err := p.s.db.Exec(`
-		INSERT INTO prs (project,id,task,agent,branch,base,status,feedback,created_at,kind)
-		VALUES (?,?,?,?,?,?,?,?,?,?)
+		INSERT INTO prs (project,id,task,agent,branch,base,status,feedback,created_at,kind,updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(project,id) DO UPDATE SET
 			task=excluded.task, agent=excluded.agent, branch=excluded.branch,
-			base=excluded.base, status=excluded.status, feedback=excluded.feedback, kind=excluded.kind`,
-		p.project, pr.ID, pr.Task, pr.Agent, pr.Branch, pr.Base, pr.Status, pr.Feedback, pr.CreatedAt, pr.Kind)
+			base=excluded.base, status=excluded.status, feedback=excluded.feedback, kind=excluded.kind,
+			updated_at=excluded.updated_at`,
+		p.project, pr.ID, pr.Task, pr.Agent, pr.Branch, pr.Base, pr.Status, pr.Feedback, pr.CreatedAt, pr.Kind, pr.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("put pr %s: %w", pr.ID, err)
 	}
@@ -234,7 +297,7 @@ func (s *Store) AllPRs(statuses ...string) ([]PR, error) {
 	return queryPRs(s.db, q, args...)
 }
 
-const prCols = `SELECT project,id,task,agent,branch,base,status,feedback,created_at,kind FROM prs`
+const prCols = `SELECT project,id,task,agent,branch,base,status,feedback,created_at,kind,updated_at FROM prs`
 
 type scanner interface{ Scan(...any) error }
 
@@ -268,7 +331,7 @@ func scanPR(row scanner) (PR, bool, error) {
 
 func scanPRRow(row scanner) (PR, error) {
 	var p PR
-	err := row.Scan(&p.Project, &p.ID, &p.Task, &p.Agent, &p.Branch, &p.Base, &p.Status, &p.Feedback, &p.CreatedAt, &p.Kind)
+	err := row.Scan(&p.Project, &p.ID, &p.Task, &p.Agent, &p.Branch, &p.Base, &p.Status, &p.Feedback, &p.CreatedAt, &p.Kind, &p.UpdatedAt)
 	return p, err
 }
 
@@ -328,7 +391,7 @@ func (p *ProjectStore) PREvents(prID string) ([]Event, error) {
 
 // --- reviews ---
 
-const reviewCols = `SELECT id,pr,requirement,author,verdict,result,created_at,review_at,verdict_at FROM reviews`
+const reviewCols = `SELECT id,pr,requirement,author,verdict,result,created_at,review_at,verdict_at,advisory FROM reviews`
 
 // AddReview attaches a requirement to a PR in this project, unassigned. Returns id.
 func (p *ProjectStore) AddReview(pr, requirement string) (int64, error) {
@@ -338,6 +401,43 @@ func (p *ProjectStore) AddReview(pr, requirement string) (int64, error) {
 		return 0, fmt.Errorf("add review: %w", err)
 	}
 	return res.LastInsertId()
+}
+
+// AddVerdict records a completed review directly, author and verdict together — for a verdict
+// that never went through the assign flow: a human's approve/reject, or a planner's advisory
+// badge. Returns the new row's id.
+func (p *ProjectStore) AddVerdict(pr, requirement, author, verdict, result string, advisory bool) (int64, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := p.s.db.Exec(
+		`INSERT INTO reviews (project, pr, requirement, author, review_at, verdict, result, verdict_at, advisory, created_at)
+		 VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		p.project, pr, requirement, author, now, verdict, result, now, advisory, now)
+	if err != nil {
+		return 0, fmt.Errorf("add verdict: %w", err)
+	}
+	return res.LastInsertId()
+}
+
+// ApprovalCounts maps each PR in this project to how many approvals it has accumulated —
+// reviewer, human and planner badges alike, since this is what a person sees, not what gates
+// the merge (-> api.PRApprovable, which reads pr.Status instead).
+func (p *ProjectStore) ApprovalCounts() (map[string]int, error) {
+	rows, err := p.s.db.Query(
+		`SELECT pr, COUNT(*) FROM reviews WHERE project=? AND verdict='pass' GROUP BY pr`, p.project)
+	if err != nil {
+		return nil, fmt.Errorf("approval counts: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var pr string
+		var n int
+		if err := rows.Scan(&pr, &n); err != nil {
+			return nil, err
+		}
+		out[pr] = n
+	}
+	return out, rows.Err()
 }
 
 // AssignReview marks a review as picked up by an author (in progress).
@@ -412,6 +512,26 @@ func (p *ProjectStore) CloseReviews(pr, why string) error {
 	return nil
 }
 
+// LiveReviewPRs is the set of PR ids in this project carrying at least one unverdicted review row
+// — held or unclaimed. One query for the whole project (-> ActiveReviewers, ApprovalCounts), since
+// the review-row invariant sweeps every open PR and a query per PR would be paid per one of them.
+func (p *ProjectStore) LiveReviewPRs() (map[string]bool, error) {
+	rows, err := p.s.db.Query(`SELECT DISTINCT pr FROM reviews WHERE project=? AND verdict=''`, p.project)
+	if err != nil {
+		return nil, fmt.Errorf("live review prs: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var pr string
+		if err := rows.Scan(&pr); err != nil {
+			return nil, err
+		}
+		out[pr] = true
+	}
+	return out, rows.Err()
+}
+
 // RecordVerdict completes a review with a verdict and the reviewer's findings.
 func (p *ProjectStore) RecordVerdict(id int64, verdict, result string) error {
 	_, err := p.s.db.Exec(`UPDATE reviews SET verdict=?, result=?, verdict_at=? WHERE id=? AND project=?`,
@@ -433,7 +553,7 @@ func (p *ProjectStore) Reviews(pr string) ([]Review, error) {
 	for rows.Next() {
 		var r Review
 		if err := rows.Scan(&r.ID, &r.PR, &r.Requirement, &r.Author, &r.Verdict,
-			&r.Result, &r.CreatedAt, &r.ReviewAt, &r.VerdictAt); err != nil {
+			&r.Result, &r.CreatedAt, &r.ReviewAt, &r.VerdictAt, &r.Advisory); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

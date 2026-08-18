@@ -19,7 +19,12 @@ import (
 	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
-// ReviewPrompt reads review-prompt.txt, auto-created from a built-in default if absent.
+// ReviewPrompt is the review instruction: a repo-committed `review_prompt`, else an edited
+// review-prompt.txt, else the built-in default.
+//
+// It does NOT write the default out. Seeding the file on first use meant the default could never be
+// improved again: every project that had ever requested a review already held a copy, so a better
+// one shipped to new installs only — silently, since nothing reports a stale seed.
 func (e *Engine) ReviewPrompt(project string) (string, error) {
 	// A repo-committed `review_prompt` wins; config already validated the path exists.
 	if cfg, err := e.deps.ProjectConfig(project); err != nil {
@@ -31,20 +36,56 @@ func (e *Engine) ReviewPrompt(project string) (string, error) {
 		}
 		return strings.TrimSpace(string(data)), nil
 	}
-	dir := filepath.Join(paths.StateDir(), project)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
+	data, err := os.ReadFile(reviewPromptPath(project))
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		return DefaultReviewPrompt, nil
 	}
-	path := filepath.Join(dir, "review-prompt.txt")
-	if data, err := os.ReadFile(path); err == nil {
-		return strings.TrimSpace(string(data)), nil
-	} else if !os.IsNotExist(err) {
-		return "", err
+	if text := strings.TrimSpace(string(data)); !isSeededPrompt(text) {
+		return text, nil // someone edited it; their words win
 	}
-	if err := os.WriteFile(path, []byte(DefaultReviewPrompt+"\n"), 0o644); err != nil {
-		return "", err
-	}
+	// A file matching a default sindri itself wrote is the seed, not a choice — so the current
+	// default wins and the improvement reaches the installs that already had one.
 	return DefaultReviewPrompt, nil
+}
+
+// reviewPromptPath is where a project's edited review instruction lives.
+func reviewPromptPath(project string) string {
+	return filepath.Join(paths.StateDir(), project, "review-prompt.txt")
+}
+
+// seededPrompts are the instructions sindri has written into review-prompt.txt itself, current and
+// superseded. A file byte-matching one of them was never a decision, so it does not outrank the
+// built-in — which is what lets an improved default reach a project that already has the file.
+var seededPrompts = []string{
+	DefaultReviewPrompt,
+	// Superseded: the one-liner seeded before the reviewer could read the task at all.
+	"Review this PR for correctness, clarity, and fit to the task. Flag bugs, missing tests, and anything that should change.",
+}
+
+// isSeededPrompt reports whether text is one sindri wrote rather than one someone chose.
+func isSeededPrompt(text string) bool {
+	for _, p := range seededPrompts {
+		if text == strings.TrimSpace(p) {
+			return true
+		}
+	}
+	return false
+}
+
+// taskTitle is a task's title for a directive, or "" when it cannot be read. Best-effort by design:
+// a title that will not load must not stop a review being handed out.
+func (e *Engine) taskTitle(project, id string) string {
+	if id == "" {
+		return ""
+	}
+	t, ok, err := e.store.For(project).GetTask(id)
+	if err != nil || !ok {
+		return ""
+	}
+	return t.Title
 }
 
 // RequestReview is the ONE review path: every trigger funnels here, so a review is always
@@ -78,7 +119,7 @@ func (e *Engine) RequestReview(project, prID, requirement string) error {
 			return err
 		}
 		_ = ps.LogPR(prID, "review-amended", "further instructions to "+holder)
-		go e.deps.InjectWhenReady(project, holder, MsgReviewAmended(prID, requirement))
+		go e.deps.Deliver(project, holder, MsgReviewAmended(prID, requirement), MailAndPush)
 		e.deps.Notify()
 		return nil
 	}
@@ -127,7 +168,7 @@ func (e *Engine) assignReview(project string, id int64, prID, reviewer, requirem
 	}
 	_ = ps.SetState(store.AgentState{Agent: reviewer, Phase: "reviewing"}) // board shows it working, not idle
 	_ = ps.LogPR(prID, "review-requested", "assigned to "+reviewer)
-	go e.deps.InjectWhenReady(project, reviewer, MsgReview(prID, requirement, pr.Branch, pr.Base, e.deps.ArchitectureDoc(project), checkedOut)) // async: don't block a worker's submit
+	go e.deps.Deliver(project, reviewer, MsgReview(prID, requirement, pr.Branch, pr.Base, e.deps.ArchitectureDoc(project), checkedOut), MailAndPush) // async: don't block a worker's submit
 	e.deps.Notify()
 	return nil
 }
@@ -149,7 +190,7 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 			return "", false, err
 		}
 		if ok && pr.Status == "open" {
-			return DirReview(pr.ID, pr.Task, e.deps.ArchitectureDoc(project)), true, nil
+			return DirReview(pr.ID, pr.Task, e.taskTitle(project, pr.Task), e.deps.ArchitectureDoc(project)), true, nil
 		}
 		// Settled while it was reading: a verdict on it now decides nothing, so the hold is released
 		// rather than left to produce one.
@@ -157,7 +198,7 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 			return "", false, err
 		}
 		_ = ps.SetState(store.AgentState{Agent: name, Phase: restPhase("reviewer")})
-		_ = e.deps.InjectWhenReady(project, name, MsgReviewCancelled(held))
+		_ = e.deps.Deliver(project, name, MsgReviewCancelled(held), MailAndPush)
 	}
 	var id int64
 	var prID string
@@ -170,7 +211,7 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 		return "", false, err
 	}
 	pr, _, _ := ps.GetPR(prID)
-	return DirReview(prID, pr.Task, e.deps.ArchitectureDoc(project)), true, nil
+	return DirReview(prID, pr.Task, e.taskTitle(project, pr.Task), e.deps.ArchitectureDoc(project)), true, nil
 }
 
 // releaseReviewers closes every open review of a PR and frees whoever held one, telling them the PR
@@ -188,7 +229,7 @@ func (e *Engine) releaseReviewers(project, prID, why string) {
 			continue
 		}
 		_ = ps.SetState(store.AgentState{Agent: r.Author, Phase: restPhase("reviewer")})
-		_ = e.deps.InjectWhenReady(project, r.Author, MsgReviewCancelled(prID))
+		_ = e.deps.Deliver(project, r.Author, MsgReviewCancelled(prID), MailAndPush)
 	}
 	e.deps.Notify()
 }
@@ -207,8 +248,14 @@ func (e *Engine) reviewerHolding(project, prID string) (int64, string) {
 	return 0, ""
 }
 
-// freeReviewer returns a running reviewer that is holding no review. A roster read failure is
-// returned rather than disguised as "no reviewer", which would silently drop the request.
+// reviewerAssignable reports whether a roster row may be handed a review, from the row alone. An
+// armed clear disqualifies one: PR after PR would defer it for ever, and an assignment slipping in
+// while the tick fires the clear would clear a reviewer mid-review. (Retirement: -> idleReviewer.)
+func reviewerAssignable(a store.Agent) bool {
+	return a.Role == "reviewer" && !a.ClearArmed
+}
+
+// freeReviewer returns a running reviewer holding no review; a roster failure is returned, not hidden.
 func (e *Engine) freeReviewer(project string) (string, error) {
 	ps := e.store.For(project)
 	roster, err := ps.Roster()
@@ -216,7 +263,7 @@ func (e *Engine) freeReviewer(project string) (string, error) {
 		return "", fmt.Errorf("load roster for %s: %w", project, err)
 	}
 	for _, a := range roster {
-		if a.Role != "reviewer" || !container.Running(e.deps.Container(project, a.Name)) || !e.deps.SessionAlive(project, a.Name) {
+		if !reviewerAssignable(a) || !container.Running(e.deps.Container(project, a.Name)) || !e.deps.SessionAlive(project, a.Name) {
 			continue
 		}
 		held, err := ps.ReviewingPR(a.Name)

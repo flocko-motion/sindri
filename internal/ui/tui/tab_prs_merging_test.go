@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/flo-at/sindri/internal/api"
 )
@@ -16,6 +17,23 @@ func prRowText(m model, id string) string {
 		}
 	}
 	return ""
+}
+
+// TestActiveDefaultShowsARecentlyMergedPR is the behaviour change sd-2aac4e calls out
+// explicitly: unlike the old "unmerged" default, a PR merged moments ago stays visible under the
+// new default (active) — merged is not by itself a reason to hide it.
+func TestActiveDefaultShowsARecentlyMergedPR(t *testing.T) {
+	m := newModel(nil, nil, "")
+	m.scopeRepo = false
+	if m.prFilter != api.PRFilterActive {
+		t.Fatalf("prFilter default = %q, want active", m.prFilter)
+	}
+	m.state = api.BoardState{PRs: []api.PR{
+		{ID: "pr-recent", Status: "merged", Project: "repo", UpdatedAt: time.Now().UTC().Format(time.RFC3339)},
+	}}
+	if txt := prRowText(m, "pr-recent"); !strings.Contains(txt, "merged") {
+		t.Fatalf("a just-merged PR should still show under the active default, got %q", txt)
+	}
 }
 
 // TestMergingTransient: triggering a merge shows a transient "merging" on the row
@@ -44,13 +62,14 @@ func TestMergingTransient(t *testing.T) {
 	if m.merging["pr-td-1"] {
 		t.Fatalf("marker should clear once the board confirms merged")
 	}
-	// Merged PRs are hidden by the default filter, so the row drops out of the list.
+	// A merged PR with no recorded change time is hidden by the active default (unrecognized
+	// as recent), so the row drops out of the list.
 	if txt := prRowText(m, "pr-td-1"); txt != "" {
-		t.Fatalf("merged PR should be hidden by the default (unmerged) filter, got %q", txt)
+		t.Fatalf("merged PR with no update time should be hidden by the active default, got %q", txt)
 	}
-	// With the filter showing merged, the row reappears with the real "merged" status
+	// With the filter showing everything, the row reappears with the real "merged" status
 	// (and no lingering transient "merging").
-	m.prFilter = prFilterAll
+	m.prFilter = api.PRFilterAll
 	if txt := prRowText(m, "pr-td-1"); !strings.Contains(txt, "merged") || strings.Contains(txt, "merging") {
 		t.Fatalf("with filter=all, row = %q, want merged and not merging", txt)
 	}

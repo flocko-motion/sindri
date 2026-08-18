@@ -38,7 +38,7 @@ func TestExplainNextNamesEveryReason(t *testing.T) {
 	}
 
 	e := New(st, &stubDeps{root: t.TempDir()})
-	x, err := e.ExplainNext("repo", "")
+	x, err := e.ExplainNext("repo", "", "")
 	if err != nil {
 		t.Fatalf("ExplainNext: %v", err)
 	}
@@ -63,10 +63,10 @@ func TestExplainNextNamesEveryReason(t *testing.T) {
 	if _, listed := got["td-done"]; listed {
 		t.Error("a closed task is not waiting for anything and should not be listed")
 	}
-	// A package outranks a leaf in claimNext, so the pick follows that rather than priority alone —
-	// and among packages, priority decides.
+	// Packages and leaves are ranked together (-> nextUp), so the P2 package loses to both P1s, and
+	// the tie between the P1 package and the P1 leaf falls to the id.
 	if x.Pick == nil || x.Pick.ID != "os-spent" {
-		t.Errorf("pick = %+v, want os-spent (packages before leaves, P1 before P2)", x.Pick)
+		t.Errorf("pick = %+v, want os-spent (P1 beats the P2 package, and it sorts before td-ready)", x.Pick)
 	}
 	// Nothing may be stranded: that category is a bug detector, not a state the backlog can be in.
 	for _, r := range x.Tasks {
@@ -95,7 +95,7 @@ func TestExplainNextAnswersForAnAgent(t *testing.T) {
 	full := &stubDeps{root: t.TempDir(), ctxTokens: 900_000, ctxWindow: 1_000_000, ctxOK: true}
 	e := New(st, full)
 
-	x, err := e.ExplainNext("repo", "bombur")
+	x, err := e.ExplainNext("repo", "bombur", "")
 	if err != nil {
 		t.Fatalf("ExplainNext: %v", err)
 	}

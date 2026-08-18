@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
@@ -39,17 +40,12 @@ func featureLanded(ps *store.ProjectStore, t store.Task) bool {
 	return false
 }
 
-// claimContainer assigns the highest-priority unheld package, starting its first open subtask —
-// or, with nothing left under it, holding it anyway so the agent finishes it on the SAME branch
-// (git.EnsureBranch), never a fresh one.
-func (e *Engine) claimContainer(project, worker string) (string, bool, error) {
+// claimContainer assigns one package to a worker, starting its first open subtask — or, with
+// nothing left under it, holding it anyway so the agent finishes it on the SAME branch
+// (git.EnsureBranch), never a fresh one. Which package is nextUp's (-> assign.go).
+func (e *Engine) claimContainer(project, worker string, c store.Task) (string, bool, error) {
 	ps := e.store.For(project)
 	root := e.deps.ProjectRoot(project)
-	containers, err := ps.OpenContainers()
-	if err != nil || len(containers) == 0 {
-		return "", false, err
-	}
-	c := containers[0]
 	children, err := ps.OpenSubtasks(c.ID)
 	if err != nil {
 		return "", false, err
@@ -96,41 +92,66 @@ func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) 
 	}
 	a, _, _ := ps.GetAgent(c.Agent)
 	wt := filepath.Join(root, a.Workspace)
+	tk, _, _ := ps.GetTask(st.Task)
 	msg := strings.TrimSpace(strings.Join(args, " "))
+	if msg == "" {
+		msg = tk.Title
+	}
 	if msg == "" {
 		msg = "work on " + st.Task
 	}
-	// A task with work still open beneath it is not something a checkpoint can finish. Checked here
-	// because this is what writes "closed": an epic handed out as a subtask was closed over four open
-	// children of its own, and nothing downstream could tell that had happened.
-	if open, oerr := ps.OpenChildIDs(st.Task); oerr != nil {
+	msg = conventionalCommit(tk.Type, st.Task, msg)
+	// A task with work under it cannot be CLOSED by a checkpoint — an epic was once closed over four
+	// open children. Nor is it a dead end: that work is in the same feature on the same branch, so
+	// this records what is done and hands over the next leaf, leaving the parent to its children.
+	grew, oerr := ps.OpenChildIDs(st.Task)
+	if oerr != nil {
 		return 1, oerr
-	} else if len(open) > 0 {
-		fmt.Fprintln(out, ReplyHasOpenChildren("checkpoint", st.Task, open))
-		return 1, nil
 	}
 	if err := git.CommitAll(wt, msg); err != nil {
 		return 1, err
 	}
-	// Through the source, not owned_tasks: a subtask can be an openspec change or an issue, whose
-	// status its own source keeps and a direct write would fail on.
-	if err := e.finishAtSource(c.Project, root, st.Task, false); err != nil {
-		return 1, err
+	if len(grew) == 0 {
+		// Through the source, not owned_tasks: a subtask can be an openspec change or an issue, whose
+		// status its own source keeps and a direct write would fail on.
+		if err := e.finishAtSource(c.Project, root, st.Task, false); err != nil {
+			return 1, err
+		}
+		_ = e.RefreshTask(c.Project, st.Task)
+		e.closeCompletedAncestors(c.Project, st.Task, st.Container)
 	}
-	_ = e.RefreshTask(c.Project, st.Task)
-	e.closeCompletedAncestors(c.Project, st.Task, st.Container)
 	_ = ps.Log(c.Agent, "checkpoint", st.Task)
 	done := st.Task
+	// A checkpoint IS a leaf boundary, so an armed clear takes precedence over the next subtask:
+	// the agent goes idle holding the feature, and the clear fires before anything else is served.
+	if e.clearArmed(c.Project, c.Agent) {
+		_ = ps.SetState(store.AgentState{Agent: c.Agent, Container: st.Container, Branch: st.Container, Phase: "idle"})
+		e.deps.Notify()
+		fmt.Fprintln(out, ReplyCheckpointedClearing(done, st.Container))
+		return 0, nil
+	}
 	next, ok, err := e.advanceContainer(c.Project, c.Agent, st.Container)
 	if err != nil {
 		return 1, err
 	}
 	if ok {
+		if len(grew) > 0 {
+			fmt.Fprintln(out, ReplyCheckpointedParentOpen(done, grew, next.ID, next.Title))
+			return 0, nil
+		}
 		fmt.Fprintln(out, ReplyCheckpointed(done, next.ID, next.Title))
 		return 0, nil
 	}
+	gated, err := e.gatedUnder(c.Project, st.Container)
+	if err != nil {
+		return 1, err
+	}
 	_ = ps.SetState(store.AgentState{Agent: c.Agent, Container: st.Container, Branch: st.Container, Phase: "idle"})
 	e.deps.Notify()
+	if len(gated) > 0 {
+		fmt.Fprintf(out, "Checkpointed %s. %s\n", done, ReplyFeatureGated(st.Container, openIDs(gated)))
+		return 0, nil
+	}
 	fmt.Fprintln(out, ReplyCheckpointedLast(done, st.Container))
 	return 0, nil
 }
@@ -159,6 +180,52 @@ func (e *Engine) closeCompletedAncestors(project, from, stopAt string) {
 		}
 		_ = e.RefreshTask(project, parent)
 	}
+}
+
+// gatedUnder is open work under a feature still AWAITING A VERDICT, at any depth — the COMPLETION
+// question, since such a subtask is ABSENT from OpenSubtasks rather than reported by it. Pending
+// only, never the claim rule: nothing clears a rejection, so blocking on one parks the holder.
+func (e *Engine) gatedUnder(project, container string) ([]store.Task, error) {
+	all, err := e.store.For(project).AllTasks()
+	if err != nil {
+		return nil, err
+	}
+	var out []store.Task
+	for _, d := range api.Descendants(all, container) {
+		if api.Open(d) && d.Approval == "pending" {
+			out = append(out, d)
+		}
+	}
+	return out, nil
+}
+
+// openIDs names these tasks, for a message that has to say WHICH work is holding a feature open.
+func openIDs(tasks []store.Task) []string {
+	ids := make([]string, 0, len(tasks))
+	for _, t := range tasks {
+		ids = append(ids, t.ID)
+	}
+	return ids
+}
+
+// containerNext is the held feature's next step: the subtask just assigned, or the finished feature
+// to put up. Not ready while work awaits a verdict, so the worker waits (woken by its Notify).
+func (e *Engine) containerNext(project, agent, container string) (string, bool, error) {
+	next, ok, err := e.advanceContainer(project, agent, container)
+	if err != nil {
+		return "", false, err
+	}
+	if ok {
+		return DirContainerWorking(container, next.ID), true, nil
+	}
+	gated, err := e.gatedUnder(project, container)
+	if err != nil {
+		return "", false, err
+	}
+	if len(gated) > 0 {
+		return "", false, nil
+	}
+	return DirContainerDone(container), true, nil
 }
 
 // advanceContainer moves a held feature's agent onto its next open subtask: (subtask, true) when one

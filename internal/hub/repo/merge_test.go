@@ -49,7 +49,7 @@ func TestMergeBlockedByLocalState(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(root, "kept.txt"), []byte("my uncommitted edit\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		res := MergeBranch(root, "", "work", "main")
+		res := MergeBranch(root, "", "work", "main", "chore: merge")
 		if res.Status != MergeBlocked {
 			t.Fatalf("status = %q (err %v), want %q", res.Status, res.Err, MergeBlocked)
 		}
@@ -64,7 +64,7 @@ func TestMergeBlockedByLocalState(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(root, "added.txt"), []byte("mine, never committed\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		res := MergeBranch(root, "", "work", "main")
+		res := MergeBranch(root, "", "work", "main", "chore: merge")
 		if res.Status != MergeBlocked {
 			t.Fatalf("status = %q (err %v), want %q — git words untracked collisions differently", res.Status, res.Err, MergeBlocked)
 		}
@@ -72,7 +72,7 @@ func TestMergeBlockedByLocalState(t *testing.T) {
 
 	t.Run("clean checkout merges", func(t *testing.T) {
 		root := mergeRepo(t)
-		if res := MergeBranch(root, "", "work", "main"); res.Status != MergeDone {
+		if res := MergeBranch(root, "", "work", "main", "chore: merge"); res.Status != MergeDone {
 			t.Fatalf("status = %q (err %v), want %q", res.Status, res.Err, MergeDone)
 		}
 	})
@@ -91,7 +91,7 @@ func TestMergeBlockedUnderATranslatedLocale(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "kept.txt"), []byte("my uncommitted edit\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	res := MergeBranch(root, "", "work", "main")
+	res := MergeBranch(root, "", "work", "main", "chore: merge")
 	if res.Status != MergeBlocked {
 		t.Fatalf("status = %q (err %v), want %q — git's message must reach the matcher in English", res.Status, res.Err, MergeBlocked)
 	}

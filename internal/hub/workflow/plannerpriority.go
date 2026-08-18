@@ -47,10 +47,10 @@ const prioritiseUsage = "usage: prioritise-task <id> <critical|high|mid|low|none
 // PrioritiseTaskHelp is what the command registry advertises.
 const PrioritiseTaskHelp = "set the order of work you planned. " + prioritiseUsage
 
-// CmdPrioritiseTask is the planner's ordering verb. Separate from edit-task on purpose: edit-task is
-// pending-only because approval means the user took the task AS IT STANDS, and that is about
-// content. Ordering is not content — re-sequencing live backlog is the job — so folding it in would
-// make edit-task's rule depend on which flags were passed and weaken it for the fields it protects.
+// CmdPrioritiseTask is the planner's ordering verb. Separate from edit-task by consequence rather
+// than permission: an edit changes what the user read, so it returns the task for a fresh verdict
+// (-> CmdEditTask), while ordering leaves the verdict standing — un-approving every re-sequencing
+// of live backlog would make the job unworkable. So this verb rates, and edit-task refuses to.
 //
 // One task at a time, no scope: a cascade would have to test the boundary per target, and one
 // planner call could then flip many tasks at once. The rule stays inspectable at the call.

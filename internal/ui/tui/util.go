@@ -13,16 +13,8 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 )
 
-// repoName maps a project's repoTag to its short repo name (its path's basename),
-// falling back to the tag when the project isn't in the board's registry.
-func (m model) repoName(tag string) string {
-	for _, p := range m.state.Projects {
-		if p.Tag == tag {
-			return filepath.Base(p.Path)
-		}
-	}
-	return tag
-}
+// repoName maps a project's repoTag to its short repo name, over the board's registry.
+func (m model) repoName(tag string) string { return api.RepoName(m.state.Projects, tag) }
 
 // repoPath maps a project's repoTag to its absolute path, or "" when the board's registry has
 // no such project.
@@ -132,6 +124,18 @@ func (m model) agentOnTask(id string) (api.AgentView, bool) {
 	return api.AgentView{}, false
 }
 
+// agentNamed resolves an agent name to its live row, ok=false when the roster has none — a name on a
+// record can outlive the agent (mail is never deleted), so a caller has to be told rather than shown
+// a blank row.
+func (m model) agentNamed(name string) (api.AgentView, bool) {
+	for _, a := range m.state.Agents {
+		if a.Name == name {
+			return a, true
+		}
+	}
+	return api.AgentView{}, false
+}
+
 // agentOnPR is the agent that authored PR id, and whether one is — the PR's own Agent field,
 // resolved to its live AgentView so attach gets status and container, not just a name.
 func (m model) agentOnPR(id string) (api.AgentView, bool) {
@@ -182,6 +186,10 @@ type row struct {
 	text string
 	id   string
 }
+
+// selectable reports whether the cursor may rest on this row. A row with nothing to select is
+// structure — a section heading, a spacer, a listing's "showing the last N" note.
+func (r row) selectable() bool { return r.id != "" }
 
 func rowTexts(rows []row) []string {
 	out := make([]string, len(rows))

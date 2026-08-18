@@ -10,6 +10,11 @@ import (
 // scopeBoard: two agents and one open PR in the selected repo ("sin"), the rest of the
 // fleet elsewhere — 17 agents and 3 open PRs in total. One merged PR in the selected
 // repo checks that the scoped PR badge still honours open-ness, not just the repo tag.
+//
+// The foreign PRs are deliberately one of each kind, because repo scope is no longer the repo
+// alone: pr-3 has a live reviewer in its own repo, so nothing is asked of the user and scope hides
+// it; pr-4 is approved, which only the user can act on, so it crosses. One of the far agents is
+// that reviewer rather than an eighteenth, so the agent counts stay what they were.
 func scopeBoard() (model, api.BoardState) {
 	m := newModel(nil, nil, "/r/sindri")
 	b := api.BoardState{
@@ -21,7 +26,7 @@ func scopeBoard() (model, api.BoardState) {
 			{ID: "pr-1", Project: "sin", Status: "open"},
 			{ID: "pr-2", Project: "sin", Status: "merged"}, // in scope but terminal
 			{ID: "pr-3", Project: "oth", Status: "open"},
-			{ID: "pr-4", Project: "oth", Status: "open"},
+			{ID: "pr-4", Project: "oth", Status: "approved"}, // waits on the user's merge
 		},
 	}
 	b.Agents = append(b.Agents,
@@ -29,7 +34,11 @@ func scopeBoard() (model, api.BoardState) {
 		api.AgentView{Name: "dvalin", Project: "sin", Status: "down"}, // down agents still count
 	)
 	for i := 0; i < 15; i++ {
-		b.Agents = append(b.Agents, api.AgentView{Name: fmt.Sprintf("far-%d", i), Project: "oth", Status: "working"})
+		a := api.AgentView{Name: fmt.Sprintf("far-%d", i), Project: "oth", Status: "working"}
+		if i == 0 {
+			a.Role = "reviewer" // so pr-3 waits on a review that IS coming
+		}
+		b.Agents = append(b.Agents, a)
 	}
 	return m, b
 }
@@ -37,6 +46,11 @@ func scopeBoard() (model, api.BoardState) {
 // TestTabCountFollowsScope: the § toggle re-scopes the Agents/PRs lists, so their tab
 // badges have to move with it — 2 local agents must read "2" even though the fleet has
 // 17, otherwise the header contradicts the list right below it.
+//
+// "Re-scopes" is not "hides every other repo": both lists keep whatever waits on the user, wherever
+// it is, because agents and PRs run while attention is elsewhere. So the scoped PR badge is the
+// local open one PLUS the approved foreign one, and pr-3 — foreign with a reviewer of its own —
+// is what proves the scope still bites.
 func TestTabCountFollowsScope(t *testing.T) {
 	m, b := scopeBoard()
 	m.state = b
@@ -56,8 +70,8 @@ func TestTabCountFollowsScope(t *testing.T) {
 	if got := m.tabCount(agents); got != 2 {
 		t.Errorf("repo-scoped Agents badge = %d, want 2", got)
 	}
-	if got := m.tabCount(prs); got != 1 {
-		t.Errorf("repo-scoped PRs badge = %d, want 1 (open, this repo)", got)
+	if got := m.tabCount(prs); got != 2 {
+		t.Errorf("repo-scoped PRs badge = %d, want 2 (this repo's open one, plus the foreign PR waiting on the user)", got)
 	}
 
 	m.scopeRepo = false
@@ -79,8 +93,9 @@ func TestTabCountFollowsScope(t *testing.T) {
 }
 
 // TestTabCountMatchesRows is the invariant that motivates the shared inScope predicate:
-// whatever the scope, each badge equals the number of rows the tab renders. Agents is
-// compared against the roster rows only (agentRows appends orphan warnings, which are
+// whatever the scope, each badge equals the number of rows the tab renders. Counted over the
+// selectable rows, since a scope holding foreign rows also carries the headings that label them.
+// Agents is compared against the roster rows only (agentRows appends orphan warnings, which are
 // containers with no agent and deliberately outside the roster count). PRs holds at the
 // default f-filter, whose "unmerged" rule is the same as PROpen; the badge tracks scope,
 // not the f-toggle, so showing merged PRs is expected to exceed the open count.
@@ -94,9 +109,9 @@ func TestTabCountMatchesRows(t *testing.T) {
 			var rows int
 			switch s.Key {
 			case "agents":
-				rows = len(m.agentRows()) - len(m.state.Orphans)
+				rows = itemRows(m.agentRows()) - len(m.state.Orphans)
 			case "prs":
-				rows = len(m.prRows())
+				rows = itemRows(m.prRows())
 			default:
 				continue
 			}

@@ -108,22 +108,45 @@ func agentListCmd() *cobra.Command {
 					return err
 				}
 				warnRuntime(st) // a whole roster reading "down" has one likely cause
-				for _, a := range api.SortedAgents(st.Agents, st.Projects) {
+				sorted := api.SortedAgents(st.Agents, st.Projects)
+				// Grouped the way the Agents tab groups its rows, so both front-ends teach one reading:
+				// an agent stuck in another repo is what the listing opens with, under a heading saying
+				// so, rather than a row placed only by the repo column a reader skims past.
+				local := localProject(st.Projects)
+				var rows []listRow
+				for _, a := range sorted {
 					line := fmt.Sprintf("%-10.10s %-12s %-8s %-10s %4s %-14s %s", a.Repo, a.Name, a.Role, a.Status,
 						theme.ContextPercent(a.ContextTokens, a.ContextWindow), dash(a.Task), dash(a.PR))
+					// The markers are the TUI's, from the set both read, so a symbol cannot come to
+					// mean one thing here and another there (-> theme/glyph.go).
+					if a.UnreadMail > 0 { // a backlog is a strong signal it has stopped reading
+						line += fmt.Sprintf("  %s%d", theme.MarkMail, a.UnreadMail)
+					}
+					if api.AgentNeedsUser(a) {
+						line += "  " + theme.MarkNeedsUser + " needs you" // the status says which state; this says whose move it is
+					}
 					if a.Retired {
-						line += "  ⏹ retired" // beside the status, which still shows what it is doing
+						line += "  " + theme.MarkRetired + " retired" // beside the status, which still shows what it is doing
+					}
+					if a.ClearArmed { // a toggle you cannot see is worse than no toggle
+						line += "  " + theme.MarkClearArmed + " clear armed"
 					}
 					if a.Clients > 0 {
-						line += fmt.Sprintf("  👁%d", a.Clients)
+						line += fmt.Sprintf("  %s%d", theme.MarkDialIn, a.Clients)
 					}
-					fmt.Println(line)
+					rows = append(rows, listRow{line, listGroupFor(a.Project, local, api.AgentNeedsUser(a))})
 				}
+				printGrouped(rows)
 				for _, o := range st.Orphans {
-					fmt.Printf("⚠  orphan: %s — no roster entry; remove with 'sindri agent delete %s'\n", o, o)
+					fmt.Printf("%s  orphan: %s — no roster entry; remove with 'sindri agent delete %s'\n", theme.MarkWarning, o, o)
 				}
 				if len(st.Agents) == 0 && len(st.Orphans) == 0 {
 					fmt.Fprintln(os.Stderr, "no agents — register one with 'sindri agent new <name>'")
+				}
+				// Last, where a closing line is read: the same set the TUI's "(N!)" counts on the
+				// Agents handle, so a CLI user sees who waits on them without opening every pane.
+				if s := needsYouSummary(sorted); s != "" {
+					fmt.Fprintln(os.Stderr, "\n"+s)
 				}
 				return nil
 			})
@@ -131,13 +154,45 @@ func agentListCmd() *cobra.Command {
 	}
 }
 
-// agentStatsCmd is the view for tuning per-agent memory; down agents have no VM to sample.
+// needsYouSummary names the agents that cannot move until the user acts, "" when none. Each of them
+// looks alive and holds its task, so a listing that ended at the rows reads as a working fleet.
+// An escalated one is quoted rather than named: it asked a question, and the question is the whole
+// of what the user has to act on — having to attach to read it is what makes triage expensive.
+func needsYouSummary(agents []api.AgentView) string {
+	var stuck []string
+	for _, a := range agents {
+		switch {
+		case !api.AgentNeedsUser(a):
+		case a.Escalation != "":
+			stuck = append(stuck, fmt.Sprintf("%s asks: %s", a.Name, oneLine(a.Escalation, 120)))
+		default:
+			stuck = append(stuck, fmt.Sprintf("%s (%s)", a.Name, a.Status))
+		}
+	}
+	if len(stuck) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d agent(s) need you:\n  %s\nAttach to see what each is stopped on "+
+		"(`sindri agent attach <name>`). A full one wants clearing "+
+		"(`sindri agent clear-context <name>`), a signed-out one a restart once the host has "+
+		"logged in (`sindri agent restart <name>`). An escalated one wants its question answered — "+
+		"`sindri agent tell <name> \"<answer>\"` and it resumes itself; `sindri agent resume <name>` "+
+		"releases one that cannot.", len(stuck), strings.Join(stuck, "\n  "))
+}
+
+// agentStatsCmd is the view for tuning per-agent memory; down agents have no VM to sample. It
+// opens with the fleet's headroom — the same figure the TUI header carries, since "will another
+// agent fit" is the question the per-agent rows are usually being read for.
 func agentStatsCmd() *cobra.Command {
 	return &cobra.Command{
-		Use: "stats [name]", Short: "Show each running agent's VM memory usage vs its limit", Args: cobra.MaximumNArgs(1),
+		Use: "stats [name]", Short: "Show the fleet's memory headroom and each running agent's usage vs its limit", Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withBackend(func(b backend) error {
 				report, err := b.Stats()
+				if err != nil {
+					return err
+				}
+				st, err := b.State()
 				if err != nil {
 					return err
 				}
@@ -151,7 +206,8 @@ func agentStatsCmd() *cobra.Command {
 					}
 					views = only
 				}
-				fmt.Printf("engine: %s\n\n", report.Engine)
+				fmt.Printf("engine: %s\n", report.Engine)
+				fmt.Printf("fleet:  %s\n\n", theme.FleetLine(st.Memory))
 				if len(views) == 0 {
 					fmt.Fprintln(os.Stderr, "no running agents to sample")
 					return nil
@@ -198,7 +254,7 @@ func agentNewCmd() *cobra.Command {
 				// output is the account of a failure. Registration already succeeded, so a
 				// failed start is reported as exactly that — the agent exists and can be
 				// started again, which a bare error would not convey.
-				if err := b.Launch(name, false, false, os.Stderr); err != nil {
+				if err := b.Launch(name, false, false, 0, 0, os.Stderr); err != nil {
 					return fmt.Errorf("%s was registered but did not start: %w\n"+
 						"it exists as a stopped agent — retry with 'sindri agent start %s'", name, err, name)
 				}
@@ -231,35 +287,6 @@ func agentMemoryCmd() *cobra.Command {
 			})
 		},
 	}
-}
-
-// agentRetireCmd winds an agent down without interrupting it: the point is to stop it AFTER the work
-// in hand, so the pod keeps running and only the next assignment is withheld.
-func agentRetireCmd() *cobra.Command {
-	var back bool
-	c := &cobra.Command{
-		Use: "retire <name>", Short: "Assign this agent no further work (it finishes what it holds)", Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			return withAgent(args[0], func(b backend, a *api.AgentView) error {
-				if err := b.SetRetired(a.Name, !back); err != nil {
-					return err
-				}
-				if back {
-					fmt.Fprintf(os.Stderr, "%s takes work again\n", a.Name)
-					return nil
-				}
-				held := "it holds nothing, so it is done now"
-				if a.Task != "" || a.Feature != "" || a.PR != "" {
-					held = "it will finish what it holds first"
-				}
-				fmt.Fprintf(os.Stderr, "%s retired: no new work — %s. Stop it with 'sindri agent stop %s', "+
-					"or bring it back with 'sindri agent retire %s --back'\n", a.Name, held, a.Name, a.Name)
-				return nil
-			})
-		},
-	}
-	c.Flags().BoolVar(&back, "back", false, "put the agent back in service")
-	return c
 }
 
 func agentDeleteCmd() *cobra.Command {
@@ -339,7 +366,7 @@ func agentStartCmd() *cobra.Command {
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				// Launch already ends with "launched — coming up"; a "started" here would contradict it.
-				return b.Launch(a.Name, shell, debug, os.Stderr)
+				return b.Launch(a.Name, shell, debug, 0, 0, os.Stderr)
 			})
 		},
 	}
@@ -357,25 +384,6 @@ func agentStopCmd() *cobra.Command {
 					return err
 				}
 				fmt.Fprintf(os.Stderr, "stopped %s\n", a.Name)
-				return nil
-			})
-		},
-	}
-}
-
-// agentClearContextCmd sends /clear into a full agent's session — the confirmed remedy for
-// retirement; the user typing this command IS the confirmation (the same convention `agent
-// delete` uses for its own irreversible action, no extra prompt on top of it). The hub still
-// refuses if the agent holds a task: clearing is only safe at a leaf boundary.
-func agentClearContextCmd() *cobra.Command {
-	return &cobra.Command{
-		Use: "clear-context <name>", Short: "Send /clear into the agent's session and re-serve its directive (leaf boundary only)", Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			return withAgent(args[0], func(b backend, a *api.AgentView) error {
-				if err := b.ClearContext(a.Name); err != nil {
-					return err
-				}
-				fmt.Fprintf(os.Stderr, "cleared %s's context — it will pick up its directive fresh\n", a.Name)
 				return nil
 			})
 		},
@@ -426,7 +434,7 @@ func agentRestartCmd() *cobra.Command {
 					fmt.Fprintf(os.Stderr, "stopped %s — relaunching…\n", a.Name)
 				}
 				// Launch streams progress and ends with "launched — coming up".
-				return b.Launch(a.Name, shell, debug, os.Stderr)
+				return b.Launch(a.Name, shell, debug, 0, 0, os.Stderr)
 			})
 		},
 	}
@@ -461,22 +469,6 @@ func agentDirCmd() *cobra.Command {
 					return fmt.Errorf("%s has no workspace yet (launch it / give it a task first)", a.Name)
 				}
 				fmt.Println(filepath.Join(root, a.Workspace))
-				return nil
-			})
-		},
-	}
-}
-
-func agentTellCmd() *cobra.Command {
-	return &cobra.Command{
-		Use: "tell <name> <message...>", Short: "Send a message into an agent's session ([user])", Args: cobra.MinimumNArgs(2),
-		RunE: func(_ *cobra.Command, args []string) error {
-			msg := strings.Join(args[1:], " ")
-			return withAgent(args[0], func(b backend, a *api.AgentView) error {
-				if err := b.Tell(a.Name, msg, "user"); err != nil {
-					return err
-				}
-				fmt.Fprintf(os.Stderr, "delivered to %s\n", a.Name)
 				return nil
 			})
 		},
@@ -541,6 +533,21 @@ func agentInfoCmd() *cobra.Command {
 					found.Name, found.Role, found.Status, agentTaskLabel(b, found.Task),
 					agentTaskLabel(b, found.Feature), dash(found.PR), dash(found.Workspace), memoryLabel(found.Memory, dflt),
 					theme.ContextLine(found.ContextTokens))
+				// The same line the TUI's detail carries: an arming changes nothing observable until
+				// it fires, so the only way to know it is set is to be told.
+				if found.ClearArmed {
+					fmt.Printf("clear:     ␡ armed — %s\n", clearLandsWhen(*found))
+				}
+				// A backlog says it has stopped READING, which no other line reveals — the mailbox
+				// waits quietly by design, so a count is the only thing that speaks for it.
+				if found.UnreadMail > 0 {
+					fmt.Printf("mail:      %d unread — `sindri mail list --agent %s`\n", found.UnreadMail, found.Name)
+				}
+				// The question in full, unwrapped: an escalated agent is stopped on THIS, and it is
+				// the reason to open the pane rather than something to go looking for once inside it.
+				if found.Escalation != "" {
+					fmt.Printf("escalated: %s\n", found.Escalation)
+				}
 				// engine + the exact runtime instance (id, image, cpus, memory limit, host pid)
 				if inst, err := b.Instance(found.Name); err == nil && inst != "" {
 					fmt.Printf("\n%s\n", inst)

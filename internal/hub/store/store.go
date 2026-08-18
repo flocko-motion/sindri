@@ -31,6 +31,10 @@ type Agent struct {
 	// wound down without interrupting it — the flag a human sets, distinct from the automatic
 	// retirement a full context causes.
 	Retired bool `json:"retired"`
+	// ClearArmed: a human has armed a context clear, which fires at the agent's next leaf boundary.
+	// Durable because the hub may restart between the arming and the boundary, and an arming that
+	// evaporated would leave the human believing it was set.
+	ClearArmed bool `json:"clear_armed"`
 }
 
 // Event is one row of the append-only activity log; it crosses the wire, so it is
@@ -64,6 +68,7 @@ CREATE TABLE IF NOT EXISTS agents (
   created_at TEXT NOT NULL,
   memory     TEXT NOT NULL DEFAULT '',
   retired    INTEGER NOT NULL DEFAULT 0,
+  clear_armed INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (project, name)
 );
 CREATE TABLE IF NOT EXISTS events (
@@ -131,7 +136,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("set pragmas: %w", err)
 	}
-	if _, err := db.Exec(schema + workflowSchema); err != nil {
+	if _, err := db.Exec(schema + workflowSchema + mailSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
@@ -149,12 +154,16 @@ func migrate(db *sql.DB) error {
 	alters := []string{
 		`ALTER TABLE agents ADD COLUMN memory TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE agents ADD COLUMN retired INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE agents ADD COLUMN clear_armed INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE projects ADD COLUMN last_used TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE projects ADD COLUMN color INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE tasks ADD COLUMN description TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE tasks ADD COLUMN url TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE tasks ADD COLUMN created_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE prs ADD COLUMN kind TEXT NOT NULL DEFAULT 'final'`,
+		`ALTER TABLE reviews ADD COLUMN advisory INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE prs ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agent_state ADD COLUMN escalation TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, a := range alters {
 		if _, err := db.Exec(a); err != nil && !strings.Contains(err.Error(), "duplicate column") {
@@ -281,7 +290,7 @@ func (s *Store) SetMeta(key, value string) error {
 // the canonical set backing the global board and token resolution.
 func (s *Store) AllAgents() ([]Agent, error) {
 	rows, err := s.db.Query(
-		`SELECT project, name, role, workspace, socket, created_at, memory, retired FROM agents ORDER BY project, name`)
+		`SELECT project, name, role, workspace, socket, created_at, memory, retired, clear_armed FROM agents ORDER BY project, name`)
 	if err != nil {
 		return nil, fmt.Errorf("all agents: %w", err)
 	}
@@ -293,7 +302,7 @@ func scanAgents(rows *sql.Rows) ([]Agent, error) {
 	var agents []Agent
 	for rows.Next() {
 		var a Agent
-		if err := rows.Scan(&a.Project, &a.Name, &a.Role, &a.Workspace, &a.Socket, &a.CreatedAt, &a.Memory, &a.Retired); err != nil {
+		if err := rows.Scan(&a.Project, &a.Name, &a.Role, &a.Workspace, &a.Socket, &a.CreatedAt, &a.Memory, &a.Retired, &a.ClearArmed); err != nil {
 			return nil, fmt.Errorf("scan agent: %w", err)
 		}
 		agents = append(agents, a)
@@ -310,12 +319,12 @@ func (p *ProjectStore) PutAgent(a Agent) error {
 		a.CreatedAt = time.Now().UTC().Format(time.RFC3339)
 	}
 	_, err := p.s.db.Exec(`
-		INSERT INTO agents (project, name, role, workspace, socket, created_at, memory, retired)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO agents (project, name, role, workspace, socket, created_at, memory, retired, clear_armed)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(project, name) DO UPDATE SET
 			role=excluded.role, workspace=excluded.workspace, socket=excluded.socket,
-			memory=excluded.memory, retired=excluded.retired`,
-		a.Project, a.Name, a.Role, a.Workspace, a.Socket, a.CreatedAt, a.Memory, a.Retired)
+			memory=excluded.memory, retired=excluded.retired, clear_armed=excluded.clear_armed`,
+		a.Project, a.Name, a.Role, a.Workspace, a.Socket, a.CreatedAt, a.Memory, a.Retired, a.ClearArmed)
 	if err != nil {
 		return fmt.Errorf("put agent %s/%s: %w", a.Project, a.Name, err)
 	}
@@ -325,9 +334,9 @@ func (p *ProjectStore) PutAgent(a Agent) error {
 // GetAgent returns an agent by name within this project; ok is false if absent.
 func (p *ProjectStore) GetAgent(name string) (a Agent, ok bool, err error) {
 	row := p.s.db.QueryRow(
-		`SELECT project, name, role, workspace, socket, created_at, memory, retired FROM agents WHERE project=? AND name=?`,
+		`SELECT project, name, role, workspace, socket, created_at, memory, retired, clear_armed FROM agents WHERE project=? AND name=?`,
 		p.project, name)
-	err = row.Scan(&a.Project, &a.Name, &a.Role, &a.Workspace, &a.Socket, &a.CreatedAt, &a.Memory, &a.Retired)
+	err = row.Scan(&a.Project, &a.Name, &a.Role, &a.Workspace, &a.Socket, &a.CreatedAt, &a.Memory, &a.Retired, &a.ClearArmed)
 	if err == sql.ErrNoRows {
 		return Agent{}, false, nil
 	}
@@ -340,7 +349,7 @@ func (p *ProjectStore) GetAgent(name string) (a Agent, ok bool, err error) {
 // Roster returns this project's agents, ordered by name.
 func (p *ProjectStore) Roster() ([]Agent, error) {
 	rows, err := p.s.db.Query(
-		`SELECT project, name, role, workspace, socket, created_at, memory, retired FROM agents WHERE project=? ORDER BY name`,
+		`SELECT project, name, role, workspace, socket, created_at, memory, retired, clear_armed FROM agents WHERE project=? ORDER BY name`,
 		p.project)
 	if err != nil {
 		return nil, fmt.Errorf("roster %s: %w", p.project, err)

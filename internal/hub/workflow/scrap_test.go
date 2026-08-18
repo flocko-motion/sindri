@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"errors"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,11 @@ type stubDeps struct {
 	ctxWindow    int      // 0 with ctxOK true means "measured, but the window is unknown"
 	ctxOK        bool
 	comments     map[string][]store.Comment // by task id, for the views that render a thread
+	busy         map[string]bool            // agents mid-turn, so AgentIdle answers false for them
+	posted       []store.Comment            // what the workflow wrote onto a task's thread (SourceRef holds the id)
+	postFails    bool                       // AddTaskComment refuses, for the paths that must survive it
+	delivered    []Delivery                 // how each message was classified, in step with injected/injectedText
+	projects     []store.Project            // KnownProjects override; nil (the default) means none registered
 }
 
 func (d *stubDeps) ProjectRoot(string) string                   { return d.root }
@@ -31,9 +37,14 @@ func (d *stubDeps) ProjectConfig(string) (config.Config, error) { return config.
 func (d *stubDeps) ArchitectureDoc(string) string               { return "" }
 func (d *stubDeps) Container(_, name string) string             { return name }
 func (d *stubDeps) Notify()                                     {}
-func (d *stubDeps) InjectWhenReady(_, name, text string) error {
+
+// Deliver records what was sent and HOW, so a test can assert the classification a sender chose —
+// which is half of what this feature is (-> workflow.Delivery). The recipient/text lists stay as they
+// were, since every existing assertion about "what was injected" is about the same messages.
+func (d *stubDeps) Deliver(_, name, text string, del Delivery) error {
 	d.injected = append(d.injected, name)
 	d.injectedText = append(d.injectedText, text)
+	d.delivered = append(d.delivered, del)
 	return nil
 }
 func (d *stubDeps) Interrupt(_, name string) error {
@@ -41,11 +52,19 @@ func (d *stubDeps) Interrupt(_, name string) error {
 	return nil
 }
 func (d *stubDeps) AgentAlive(_, _ string) bool               { return d.alive }
+func (d *stubDeps) AgentIdle(_, name string) bool             { return !d.busy[name] }
 func (d *stubDeps) SessionAlive(_, _ string) bool             { return false }
 func (d *stubDeps) TaskComments(_, id string) []store.Comment { return d.comments[id] }
-func (d *stubDeps) Subscribe() (chan struct{}, func())        { return make(chan struct{}), func() {} }
-func (d *stubDeps) KnownProjects() []store.Project            { return nil }
-func (d *stubDeps) BrokkrBin() (string, error)                { return "", nil }
+func (d *stubDeps) AddTaskComment(_, id, author, body string) error {
+	if d.postFails {
+		return errors.New("the thread is unreachable")
+	}
+	d.posted = append(d.posted, store.Comment{SourceRef: id, Author: author, Body: body})
+	return nil
+}
+func (d *stubDeps) Subscribe() (chan struct{}, func()) { return make(chan struct{}), func() {} }
+func (d *stubDeps) KnownProjects() []store.Project     { return d.projects }
+func (d *stubDeps) BrokkrBin() (string, error)         { return "", nil }
 func (d *stubDeps) ContextUsage(_, _ string) (int, int, bool) {
 	return d.ctxTokens, d.ctxWindow, d.ctxOK
 }

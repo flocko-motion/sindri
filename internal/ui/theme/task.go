@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/flo-at/sindri/internal/api"
 )
 
@@ -98,6 +100,17 @@ func StateLabel(s string) string {
 	}
 }
 
+// ApprovalLabel is the word an approval state is shown as. "pending" names a state; "unapproved"
+// names the ACTION that is missing, which is what a reader wants when a task is sitting still and
+// they are working out why. The stored value is untouched — every predicate branches on it — so the
+// change is here, where presentation lives, and both front-ends therefore say the same word.
+func ApprovalLabel(a string) string {
+	if a == "pending" {
+		return "unapproved"
+	}
+	return a // "", "approved", "rejected" — each already says what it is
+}
+
 // FormatClients is shared by CLI `agent info` and the TUI detail view, so both read alike.
 func FormatClients(cs []api.ClientView) string {
 	if len(cs) == 0 {
@@ -115,10 +128,31 @@ func FormatClients(cs []api.ClientView) string {
 	return b.String()
 }
 
-// FormatNext renders the assignment explanation, shared by `task next` and the TUI so both give the
-// same account. Claimable rows first — the answer to "what happens next" is at the top.
+// reasonW is the width the standing column is padded to — wide enough for the longest reason
+// either pool can give, so the titles beside them line up.
+const reasonW = 42
+
+// padCell pads s to w display CELLS: %-42s pads by bytes, and a dash is three of them, so every
+// reason containing one pulled its title two columns left of the row above.
+func padCell(s string, w int) string {
+	if pad := w - lipgloss.Width(s); pad > 0 {
+		return s + strings.Repeat(" ", pad)
+	}
+	return s
+}
+
+// FormatNext renders the assignment explanation for the CLI and the TUI alike, claimable rows
+// first. It renders the half the role's pool fills — tasks, PRs, or the sentence saying a role is
+// served from neither, which an empty list would report as "no work".
 func FormatNext(x api.NextExplain) string {
 	var b strings.Builder
+	if x.RoleNote != "" {
+		fmt.Fprintf(&b, "%s: %s\n", x.Role, x.RoleNote)
+		return b.String()
+	}
+	if x.Role == "reviewer" {
+		return formatNextReview(x)
+	}
 	switch {
 	case x.AgentNote != "":
 		fmt.Fprintf(&b, "%s takes nothing right now: %s\n\n", x.Agent, x.AgentNote)
@@ -132,9 +166,39 @@ func FormatNext(x api.NextExplain) string {
 			if t.Claimable() != pass {
 				continue
 			}
-			fmt.Fprintf(&b, "%-12s %-8s %-42s %s", t.ID, PriorityLabel(t.Priority), t.Why, t.Title)
+			fmt.Fprintf(&b, "%s %s %s %s", padCell(t.ID, 12), padCell(PriorityLabel(t.Priority), 8),
+				padCell(string(t.Why), reasonW), t.Title)
 			if t.Note != "" {
-				fmt.Fprintf(&b, "\n%-12s %-8s %s", "", "", t.Note)
+				fmt.Fprintf(&b, "\n%s %s %s", padCell("", 12), padCell("", 8), t.Note)
+			}
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
+// formatNextReview is the reviewer's half: the review that would be picked up, then where every
+// other PR stands.
+func formatNextReview(x api.NextExplain) string {
+	var b strings.Builder
+	switch {
+	case x.AgentNote != "":
+		fmt.Fprintf(&b, "%s takes nothing right now: %s\n\n", x.Agent, x.AgentNote)
+	case x.PickPR != nil:
+		fmt.Fprintf(&b, "next: %s  %s  (%s)\n\n", x.PickPR.ID, x.PickPR.Title, x.PickPR.Why)
+	case len(x.PRs) == 0:
+		fmt.Fprintf(&b, "next: nothing — there are no open PRs at all\n\n")
+	default:
+		fmt.Fprintf(&b, "next: nothing — no PR is waiting on a review\n\n")
+	}
+	for _, pass := range []bool{true, false} {
+		for _, p := range x.PRs {
+			if p.Reviewable() != pass {
+				continue
+			}
+			fmt.Fprintf(&b, "%s %s %s", padCell(p.ID, 20), padCell(string(p.Why), reasonW), p.Title)
+			if p.Note != "" {
+				fmt.Fprintf(&b, "\n%s %s", padCell("", 20), p.Note)
 			}
 			b.WriteString("\n")
 		}

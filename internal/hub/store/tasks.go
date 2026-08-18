@@ -165,11 +165,13 @@ func (p *ProjectStore) OpenSubtasks(parentID string) ([]Task, error) {
 	return scanTasks(rows)
 }
 
-// OpenChildIDs lists the DIRECT children of a task that are still open — what makes closing it a
-// lie. Ids only: every caller either refuses on the count or names them back to a human.
+// OpenChildIDs lists the DIRECT children of a task that are not finished — what makes closing it a
+// lie. Ids only: every caller either refuses on the count or names them back to a human. Every
+// unfinished status, not the literal 'open': asking for that hid a child being WORKED from every
+// caller, so a parent could be closed, merged over or checkpointed past with someone inside it.
 func (p *ProjectStore) OpenChildIDs(parentID string) ([]string, error) {
 	rows, err := p.s.db.Query(
-		`SELECT id FROM tasks WHERE project=? AND parent_id=? AND status='open' ORDER BY id`,
+		`SELECT id FROM tasks WHERE project=? AND parent_id=? AND status NOT IN ('closed','approved','merged') ORDER BY id`,
 		p.project, parentID)
 	if err != nil {
 		return nil, fmt.Errorf("open children of %s: %w", parentID, err)

@@ -107,7 +107,7 @@ func ensureCoauthorAlive(cl *client.HTTP, proj, name string) error {
 	// to a pod that was never started.
 	if api.AgentNeedsLaunch(statusOf(st, proj, name)) {
 		fmt.Fprintf(os.Stderr, "launching agent '%s' (first run builds the agent image — may take a few minutes)…\n", name)
-		if err := cl.Launch(name, false, false, os.Stderr); err != nil {
+		if err := cl.Launch(name, false, false, 0, 0, os.Stderr); err != nil {
 			return err
 		}
 	}

@@ -6,6 +6,21 @@
 // limits:  data only; the registry management lives in hub/project.
 package api
 
+import "path/filepath"
+
+// RepoName is a project tag's short repo name — its path's basename — falling back to the tag for a
+// project the registry doesn't have. One function, because both front-ends label rows with it and a
+// row placed by one name in the TUI and another in the CLI is a row the user cannot follow between
+// them.
+func RepoName(projects []Project, tag string) string {
+	for _, p := range projects {
+		if p.Tag == tag {
+			return filepath.Base(p.Path)
+		}
+	}
+	return tag
+}
+
 // Project is one row of the registry: a repo the hub knows, keyed by its stable
 // repoTag (a digest of the abs path), with the on-disk path, when first seen, and
 // when last used (touched on every register/use, so the repo switcher can order by

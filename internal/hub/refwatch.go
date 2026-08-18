@@ -1,11 +1,10 @@
 // package: hub / refwatch
-// type:    logic (the tick behind reference-branch drift)
-// job:     ask the workflow to re-check every project's reference branch on a slow
-// loop, so a branch the user moves outside the hub is noticed rather than
-// silently left under the agents working against it — and to keep the open PRs
-// honest against it (-> workflow/prcheck.go).
-// limits:  just the cadence and lifecycle; the comparison and what agents are told
-// live in workflow/reference.go. Agent liveness is the watchdog's, not this.
+// type:    logic (the tick behind reference-branch drift and PR health)
+// job:     re-check every project's reference branch on a slow loop, keep its open PRs
+// honest against it (-> workflow/prcheck.go) and against the review-row
+// invariants (-> workflow/reviewhealth.go), and close a meeting nobody is
+// holding any more (-> chat.CloseIfIdle).
+// limits:  just the cadence and lifecycle; the checks live in workflow.
 package hub
 
 import (
@@ -78,15 +77,27 @@ func (r *refwatch) sweep() {
 		}
 	}
 	r.preflight(projects)
+	r.closeDormantMeeting()
 }
 
-// preflight keeps the open PRs honest against their bases, OFF this loop. Its tier 2 runs the project
-// gate, which may build and test for minutes; inline it would hold the drift check for that long and
-// make every later project wait behind an earlier project's gate. The engine serialises the work
-// itself and skips a sweep whose predecessor is still running, so this fires and forgets.
-//
-// Not waited on at shutdown: it only appends advisory PR history, and a write against a closed store
-// fails harmlessly — whereas close() blocking on a gate run would hang the hub's exit for minutes.
+// closeDormantMeeting ends a meeting that has gone quiet for an hour. On this loop rather than one
+// of its own: the room is one per hub, the check is a single transcript read, and being late by a
+// tick costs nothing — an hour is already the answer to "is this over?".
+func (r *refwatch) closeDormantMeeting() {
+	n, err := r.h.chat.CloseIfIdle()
+	if err != nil {
+		log.Printf("hub: closing the dormant meeting: %v", err)
+		return
+	}
+	if n > 0 {
+		log.Printf("hub: meeting closed after an hour idle — %d member(s) removed", n)
+	}
+}
+
+// preflight keeps the open PRs honest against their bases, and their review rows live, OFF this
+// loop: CheckOpenPRs' gate may run for minutes, and inlining it would make every later project
+// wait behind an earlier one's. Not waited on at shutdown — it only appends advisory history, so a
+// write against a closed store fails harmlessly, unlike blocking close() on a gate run.
 func (r *refwatch) preflight(projects []store.Project) {
 	select {
 	case <-r.stop:
@@ -101,6 +112,11 @@ func (r *refwatch) preflight(projects []store.Project) {
 			default:
 			}
 			r.h.wf.CheckOpenPRs(p.Tag)
+			r.h.wf.RepairReviewRows(p.Tag)
+			r.h.wf.AssignPendingReviews(p.Tag) // after the repair: a row it just wrote is claimable now
+			// Before nothing else in particular, but off the agent's own request: the clear
+			// interrupts the session, so it must not land on an agent mid-command (-> FireArmedClears).
+			r.h.agents.FireArmedClears(p.Tag)
 		}
 	}()
 }

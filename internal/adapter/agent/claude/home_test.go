@@ -176,12 +176,14 @@ func TestGoWorkspaceGetsTheGoLanguageServer(t *testing.T) {
 	}
 }
 
-// TestNonGoWorkspaceIsUntouched: a pod with no Go project must be exactly as it was — no server
-// declared, not even an empty key. Declaring one would start a language server for a language the
-// project does not use.
-func TestNonGoWorkspaceIsUntouched(t *testing.T) {
+// TestEveryPodGetsTheGoTools replaces the rule that a workspace had to earn them. That condition
+// was evaluated once, against the tree as it looked while this home was prepared — so a module
+// below the root read as no Go at all, and an agent launched before its worktree was populated lost
+// the tooling for good, since the config persists and nothing revisits it. The cost is a stdio shim
+// a non-Go pod never spawns; the benefit is that what the tree holds is asked per call.
+func TestEveryPodGetsTheGoTools(t *testing.T) {
 	for _, tc := range []struct{ name, ws string }{
-		{"no go.mod", t.TempDir()},
+		{"no go.mod at the root", t.TempDir()},
 		{"no workspace at all", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -198,8 +200,12 @@ func TestNonGoWorkspaceIsUntouched(t *testing.T) {
 			if err := json.Unmarshal(raw, &cfg); err != nil {
 				t.Fatal(err)
 			}
-			if _, present := cfg["mcpServers"]; present {
-				t.Errorf("a non-Go workspace was given an MCP server:\n%s", raw)
+			servers, present := cfg["mcpServers"].(map[string]any)
+			if !present {
+				t.Fatalf("no MCP servers declared:\n%s", raw)
+			}
+			if _, ok := servers["gopls"]; !ok {
+				t.Errorf("gopls was not declared:\n%s", raw)
 			}
 			// The files the pod cannot start without stay untouched either way.
 			if cfg["hasCompletedOnboarding"] != true {

@@ -17,6 +17,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/server"
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // agentDeps adapts the hub to agent.Deps.
@@ -38,6 +39,9 @@ type chatDelivery struct{ h *Hub }
 
 func (c chatDelivery) Inject(project, name, text string) error {
 	return c.h.agents.Inject(project, name, text)
+}
+func (c chatDelivery) InjectWhenReady(project, name, text string) error {
+	return c.h.agents.InjectWhenReady(project, name, text)
 }
 func (c chatDelivery) Running(project, name string) bool {
 	return container.Running(c.h.container(project, name))
@@ -95,8 +99,8 @@ func (d workflowDeps) Container(project, name string) string { return d.h.contai
 
 func (d workflowDeps) Notify() { d.h.notify() }
 
-func (d workflowDeps) InjectWhenReady(project, name, text string) error {
-	return d.h.agents.InjectWhenReady(project, name, text)
+func (d workflowDeps) Deliver(project, name, text string, del workflow.Delivery) error {
+	return d.h.Deliver(project, name, text, del)
 }
 
 func (d workflowDeps) Interrupt(project, name string) error {
@@ -111,8 +115,19 @@ func (d workflowDeps) SessionAlive(project, name string) bool {
 	return d.h.agents.SessionAlive(project, name)
 }
 
+// AgentIdle reads the watchdog's last observation rather than probing: the sweep classifies every
+// pane every few seconds anyway, and an answer taken here would cost an exec per agent per tick.
+func (d workflowDeps) AgentIdle(project, name string) bool {
+	l, ok := d.h.watch.get(project, name)
+	return ok && l.up && l.runtime == "idle"
+}
+
 func (d workflowDeps) TaskComments(project, id string) []store.Comment {
 	return d.h.comments.ForView(project, id)
+}
+
+func (d workflowDeps) AddTaskComment(project, id, author, body string) error {
+	return d.h.comments.Add(project, id, author, body)
 }
 
 func (d workflowDeps) Subscribe() (chan struct{}, func()) { return d.h.events.subscribe() }

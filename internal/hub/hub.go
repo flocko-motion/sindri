@@ -46,6 +46,7 @@ type Hub struct {
 	refs     *refwatch         // reference-branch drift, on a slow loop (internal/hub/refwatch.go)
 	creds    *credwatch        // agent credential upkeep from the host (internal/hub/credwatch.go)
 	stalls   *stallwatch       // held work nobody is working on (internal/hub/stallwatch.go)
+	runs     *runwatch         // executes the run queue, one at a time (internal/hub/runwatch.go)
 }
 
 // agentKey identifies an agent within a project (a repoTag), one hub serving many repos.
@@ -103,6 +104,8 @@ func New() (*Hub, error) {
 	h.creds = newCredwatch(h)
 	// After watch: it reads the watchdog's idle dwell, and after wf: it nudges through it.
 	h.stalls = newStallwatch(h)
+	// After wf: it drives NextQueuedRun/ExecuteRun through it.
+	h.runs = newRunwatch(h)
 	return h, nil
 }
 
@@ -159,6 +162,7 @@ func (h *Hub) Close() error {
 	h.refs.close()
 	h.creds.close()
 	h.stalls.close()
+	h.runs.close()
 	h.agentCh.CloseAll()
 	server.FlushAccessLog() // emit any open access-log run before we go quiet
 	return h.store.Close()
@@ -181,11 +185,12 @@ func (h *Hub) NewAgent(project, name, role, memory string) (string, error) {
 func (h *Hub) rehydrate(project, name string) {
 	// Let Claude boot to input-readiness first, or its Enter is eaten by the splash.
 	time.Sleep(8 * time.Second)
-	_ = h.agents.InjectWhenReady(project, name, workflow.MsgKickoff)
-	// A relaunched chatroom member lost its durable prompt's membership cue — remind it (best-effort).
-	if member, err := h.chat.IsMember(project, name); err != nil {
-		fmt.Fprintf(os.Stderr, "hub: chat membership check for %s/%s failed: %v\n", project, name, err)
-	} else if member {
-		_ = h.agents.InjectWhenReady(project, name, chat.MsgReminder)
+	// Push-only, like every wake: a kickoff tells a live session to ask the hub what to do, and there
+	// is nothing worth keeping for an agent that was not there to be woken.
+	_ = h.Deliver(project, name, workflow.MsgKickoff, workflow.PushOnly)
+	// A relaunched chatroom member lost its durable prompt's membership cue — remind it, if the room
+	// is in a state where that means anything (-> chat.ReminderFor). Best-effort, as the kickoff is.
+	if cue := h.chat.ReminderFor(project, name); cue != "" {
+		_ = h.Deliver(project, name, cue, workflow.PushOnly)
 	}
 }

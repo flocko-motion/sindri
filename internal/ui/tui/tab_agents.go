@@ -177,49 +177,20 @@ func (m *model) openNewAgentChoice() {
 
 // launchCmd starts a registered agent and keeps what the launch says. A first run builds the
 // image, which is slow enough that silence reads as "nothing happened", and the build log is the
-// only account of a failure — so it is captured either way and shown when the launch fails.
+// only account of a failure — so it is captured either way and shown when the launch fails. Sizes
+// the session to the live preview pane it renders into, so it isn't cramped to tmux's 80x24
+// default until someone attaches.
 func (m *model) launchCmd(name string) tea.Cmd {
 	cl := m.cl
 	if cl == nil {
 		return nil
 	}
 	m.flash = "launching " + name + "… (a first run builds the image, which takes a while)"
+	cols, lines := m.previewSize()
 	return func() tea.Msg {
 		var buf bytes.Buffer
-		err := cl.Launch(name, false, false, &buf)
+		err := cl.Launch(name, false, false, cols, lines, &buf)
 		return launchedMsg{name: name, log: buf.String(), err: err}
-	}
-}
-
-// openDeleteChoice opens the delete-agent confirm.
-func (m *model) openDeleteChoice(id string) {
-	cl := m.cl
-	m.choice = choiceModalState{
-		active: true, title: "delete agent " + id + "?",
-		options: []string{"cancel", "delete"}, values: []string{"cancel", "delete"},
-		apply: func(v string) tea.Cmd {
-			if v != "delete" {
-				return nil
-			}
-			return mutateThenRefresh(cl, func() error { return cl.DeleteAgent(id) })
-		},
-	}
-}
-
-// openClearContextChoice confirms clearing a full agent's context. Confirmed rather than done on
-// the keystroke because it destroys everything the session remembers, including whatever the user
-// typed into that pane — the hub refuses mid-task, so what is left to lose here is the reasoning.
-func (m *model) openClearContextChoice(name string) {
-	cl := m.cl
-	m.choice = choiceModalState{
-		active: true, title: "clear " + name + "'s context?  (its session starts empty)",
-		options: []string{"cancel", "clear"}, values: []string{"cancel", "clear"},
-		apply: func(v string) tea.Cmd {
-			if v != "clear" {
-				return nil
-			}
-			return mutateThenRefresh(cl, func() error { return cl.ClearContext(name) })
-		},
 	}
 }
 
@@ -282,16 +253,22 @@ func (m model) agentDetailWidth() int {
 	return clampInt(agentDetailW, 20, max(20, m.w-30))
 }
 
+// previewSize is the live tmux pane's content width and height — the same numbers agentsBody
+// renders the preview at, and what a freshly launched session should be created at (-> launchCmd)
+// so it isn't cramped to tmux's 80x24 default until someone attaches.
+func (m model) previewSize() (w, h int) {
+	leftW := m.w
+	if m.showDetail() { // leave room for the right detail column
+		leftW = m.w - m.agentDetailWidth() - 1
+	}
+	return leftW, max(1, m.bodyHeight()-m.agentListHeight()-1) // minus the horizontal divider
+}
+
 // agentsBody lays out list over live pane on the left, fixed-width agent detail on the right.
 func (m model) agentsBody() string {
 	h := m.bodyHeight()
-	leftW := m.w
 	rightW := m.agentDetailWidth()
-	if m.showDetail() { // leave room for the right detail column
-		leftW = m.w - rightW - 1
-	}
-	listH := m.agentListHeight()
-	paneH := max(1, h-listH-1) // minus the horizontal divider
+	leftW, paneH := m.previewSize()
 
 	listBox := pane(rowTexts(m.rows()), m.list, leftW, m.cursor[m.tab])
 	paneBox := tailPane(m.paneLines(), leftW, paneH)
@@ -366,11 +343,35 @@ func (m model) agentItems() []metaItem {
 	items := []metaItem{
 		{text: "role:      " + a.Role},
 		{text: status, kind: "view", value: "diag"},
+	}
+	// Unread mail, where there is any: the mailbox waits quietly by design, so a count on the agent
+	// is the only thing that shows one has stopped reading.
+	if a.UnreadMail > 0 {
+		items = append(items, metaItem{text: stWarn.Render(fmt.Sprintf("mail:      %d unread", a.UnreadMail))})
+	}
+	// The question an escalated agent stopped on, beside the status word that says it is. Readable
+	// here on purpose: several escalations can be triaged before deciding which to sit down with,
+	// which attaching to each pane in turn does not allow. ⏎ clears it — the user's own release,
+	// for an agent that cannot do it itself.
+	if a.Escalation != "" {
+		items = append(items, metaItem{
+			text:  "escalated: " + a.Escalation + dimStyle.Render("  (⏎ resume)"),
+			kind:  "resume",
+			value: a.Name,
+		})
+	}
+	items = append(items,
 		taskIt, featIt, prIt,
 		wsIt,
-		{text: "memory:    " + memoryLabelTUI(a.Memory, m.state.DefaultMemory) + dimStyle.Render("  (container RAM · e to edit)")},
-		{text: "context:   " + theme.ContextLine(a.ContextTokens)},
-		{text: pod, kind: "view", value: "pod"},
+		metaItem{text: "memory:    " + memoryLabelTUI(a.Memory, m.state.DefaultMemory) + dimStyle.Render("  (container RAM · e to edit)")},
+		metaItem{text: "context:   " + theme.ContextLine(a.ContextTokens)},
+		metaItem{text: pod, kind: "view", value: "pod"},
+	)
+	// The armed clear says WHEN it lands, not merely that it is set: the row's marker is the count,
+	// this is the sentence behind it — and "C cancels" because a toggle needs its way back shown.
+	if a.ClearArmed {
+		items = append(items, metaItem{text: stWarn.Render("clear:     " + clearGlyph + " armed — " +
+			clearLandsWhen(a) + dimStyle.Render("  ("+keyClearCtx+" cancels)"))})
 	}
 	for _, line := range clientLines(m.agentClients) { // same dial-in detail as `agent info`
 		items = append(items, metaItem{text: line})
@@ -465,75 +466,91 @@ func (m model) selAgent() (api.AgentView, bool) {
 	return api.AgentView{}, false
 }
 
-// eyeGlyph marks attached humans. The U+FE0F is load-bearing: bare U+1F441 measures one cell but
-// draws two, and one cell of overflow makes JoinHorizontal push the whole frame off-screen.
-const eyeGlyph = "👁️"
-
-// warnGlyph is the warning mark, likewise width-pinned.
-const warnGlyph = "⚠️"
-
-// gateGlyph marks work held back by the approval gate. Plain ASCII: it sits inside the header bar,
-// where an emoji's two drawn cells against one measured would shear the whole strip.
-const gateGlyph = "!"
-
-// retiredGlyph marks an agent being wound down. Width-pinned like the others.
-const retiredGlyph = "⏹️"
+// The row markers, from the set both front-ends share, so a symbol means one thing wherever it is
+// drawn (-> theme/glyph.go, which also holds why each is the width it is).
+const (
+	eyeGlyph       = theme.MarkDialIn
+	warnGlyph      = theme.MarkWarning
+	attentionGlyph = theme.MarkNeedsUser
+	mailGlyph      = theme.MarkMail
+	retiredGlyph   = theme.MarkRetired
+	clearGlyph     = theme.MarkClearArmed
+)
 
 func (m model) agentRows() []row {
-	var visible []api.AgentView
-	for _, a := range m.state.Agents {
-		if m.inScope(a.Project) { // repo-scoped: only the active repo's agents
-			visible = append(visible, a)
-		}
-	}
-	var out []row
+	var foreign, local []row
 	// Ordered by repo, then role, then name — the same call `sindri agent list` makes, so the two
-	// front-ends cannot drift onto different orders. In repo scope every row shares one repo, so
-	// this reduces to role-then-name without a redundant, single-value grouping level.
-	for _, a := range api.SortedAgents(visible, m.state.Projects) {
-		// Row coloured by lifecycle; cells styled independently so resets don't bleed.
-		ac := agentStatusStyle(a.Status)
-		// Work cell: the task, or the reviewed PR since a reviewer holds no task — named alongside
-		// the task that PR is FOR, since the PR id alone says nothing a human recognizes. A held
-		// feature is named either way — as the subtask's parent, or alone between subtasks, where
-		// showing nothing made an agent that refused every verb look plainly idle.
-		work := a.Task
-		if work == "" {
-			work = a.PR
-			if t := m.prTask(a.PR); t != "" {
-				work += " › " + m.taskLabel(t)
-			}
+	// front-ends cannot drift onto different orders. The repo key gathers the stuck foreign agents;
+	// the heading says they are foreign, which a skimmed repo column does not (-> sectioned).
+	for _, a := range api.SortedAgents(m.state.Agents, m.state.Projects) {
+		switch { // still one predicate deciding what is listed: which group is all this asks
+		case m.inScope(a.Project):
+			local = append(local, m.agentRow(a))
+		case m.agentVisible(a): // out of scope and listed anyway = stuck on the user elsewhere
+			foreign = append(foreign, m.agentRow(a))
 		}
-		switch {
-		case a.Feature != "" && work != "":
-			work = a.Feature + " › " + work
-		case a.Feature != "":
-			work = a.Feature
-		}
-		task := dash(work)
-		if a.Clients > 0 { // dial-ins attached — show the eye like the CLI list
-			task += fmt.Sprintf("  %s%d", eyeGlyph, a.Clients)
-		}
-		// Retirement rides beside the status, never in it: it is true of a busy agent too, and what
-		// that agent is doing right now is the one thing the status column exists to say.
-		if a.Retired {
-			task += "  " + stDone.Render(retiredGlyph+" retired")
-		}
-		out = append(out, row{strings.Join([]string{
-			m.repoStyle(a.Project).Render(fmt.Sprintf("%-10.10s", a.Repo)),
-			ac.Render(fmt.Sprintf("%-9s", a.Status)),
-			ac.Render(fmt.Sprintf("%-12s", a.Name)),
-			ac.Render(fmt.Sprintf("%-8s", a.Role)),
-			ac.Render(fmt.Sprintf("%4s", theme.ContextPercent(a.ContextTokens, a.ContextWindow))),
-			ac.Render(task),
-		}, " "), a.Name})
 	}
+	out := sectioned(foreign, local)
 	for _, o := range m.state.Orphans {
 		// The id is the container name so D can remove it; agent-only actions skip
 		// non-roster ids, and isOrphan gates the ones reading selID directly.
 		out = append(out, row{stWarn.Render(warnGlyph + " orphan: " + o), o})
 	}
 	return out
+}
+
+// agentRow is one roster row: repo, lifecycle, name, role, context, work, and what is owed on it.
+func (m model) agentRow(a api.AgentView) row {
+	// Row coloured by lifecycle; cells styled independently so resets don't bleed.
+	ac := agentStatusStyle(a.Status)
+	// Work cell: the task, or the reviewed PR since a reviewer holds no task — named alongside
+	// the task that PR is FOR, since the PR id alone says nothing a human recognizes. A held
+	// feature is named either way — as the subtask's parent, or alone between subtasks, where
+	// showing nothing made an agent that refused every verb look plainly idle.
+	work := a.Task
+	if work == "" {
+		work = a.PR
+		if t := m.prTask(a.PR); t != "" {
+			work += " › " + m.taskLabel(t)
+		}
+	}
+	switch {
+	case a.Feature != "" && work != "":
+		work = a.Feature + " › " + work
+	case a.Feature != "":
+		work = a.Feature
+	}
+	task := dash(work)
+	if a.Clients > 0 { // dial-ins attached — show the eye like the CLI list
+		task += fmt.Sprintf("  %s%d", eyeGlyph, a.Clients)
+	}
+	// The handle's marker gives a count; this is the row behind it, saying whose move it is in the
+	// same words `sindri agent list` uses. Under repo scope it also answers why an agent from
+	// another repo is in this list at all.
+	if api.AgentNeedsUser(a) {
+		task += "  " + stWarn.Render(warnGlyph+" needs you")
+	}
+	// Retirement rides beside the status, never in it: it is true of a busy agent too, and what
+	// that agent is doing right now is the one thing the status column exists to say.
+	if a.Retired {
+		task += "  " + stDone.Render(retiredGlyph+" retired")
+	}
+	if a.UnreadMail > 0 { // it has been told things it has not read
+		task += "  " + stWarn.Render(fmt.Sprintf("%s%d", mailGlyph, a.UnreadMail))
+	}
+	// An armed clear is a toggle, and a toggle you cannot see is worse than none: this is the
+	// only thing separating an agent about to lose its session from one carrying on.
+	if a.ClearArmed {
+		task += "  " + stWarn.Render(clearGlyph+" clear armed")
+	}
+	return row{strings.Join([]string{
+		m.repoStyle(a.Project).Render(fmt.Sprintf("%-10.10s", a.Repo)),
+		ac.Render(fmt.Sprintf("%-9s", a.Status)),
+		ac.Render(fmt.Sprintf("%-12s", a.Name)),
+		ac.Render(fmt.Sprintf("%-8s", a.Role)),
+		ac.Render(fmt.Sprintf("%4s", theme.ContextPercent(a.ContextTokens, a.ContextWindow))),
+		ac.Render(task),
+	}, " "), a.Name}
 }
 
 // isOrphan reports a stray container rather than a roster agent, routing D to orphan removal.
@@ -544,77 +561,4 @@ func (m model) isOrphan(id string) bool {
 		}
 	}
 	return false
-}
-
-// openRemoveOrphanChoice confirms a direct container rm; there's no agent identity to delete.
-func (m *model) openRemoveOrphanChoice(name string) {
-	cl := m.cl
-	m.choice = choiceModalState{
-		active: true, title: "remove orphan container " + name + "?",
-		options: []string{"cancel", "remove"}, values: []string{"cancel", "remove"},
-		apply: func(v string) tea.Cmd {
-			if v != "remove" {
-				return nil
-			}
-			return mutateThenRefresh(cl, func() error { return cl.RemoveOrphan(name) })
-		},
-	}
-}
-
-func (m model) agentDetailLines() []string {
-	a, ok := m.selAgent()
-	if !ok {
-		return []string{dimStyle.Render("(orphan — no roster entry; '" + keyDelete + "' removes it)")}
-	}
-	return m.agentDetailFor(a)
-}
-
-// agentDetailFor renders an agent's detail; the activity log only for the selected one (lazy fetch).
-func (m model) agentDetailFor(a api.AgentView) []string {
-	// A reviewer's own Task is always "" — the task belongs to the agent that wrote the PR — so
-	// fall back to what that PR is for, matching agentItems.
-	taskID := a.Task
-	if taskID == "" {
-		taskID = m.prTask(a.PR)
-	}
-	ls := []string{
-		"agent:     " + a.Name,
-		"role:      " + a.Role,
-		"status:    " + a.Status,
-		"task:      " + m.taskLabel(taskID),
-		"feature:   " + m.taskLabel(a.Feature),
-		"pr:        " + dash(a.PR),
-		"workspace: " + dash(a.Workspace),
-		"container: " + m.agentContainer(a),
-	}
-	if a.Name == m.selID() { // dial-ins are fetched for the selected agent only
-		ls = append(ls, clientLines(m.agentClients)...)
-	}
-	if m.tab == 1 && a.Name == m.selID() {
-		ls = append(ls, "", "── activity ──")
-		// Newest-first so the latest action is visible at the top.
-		for i := len(m.agentLog) - 1; i >= 0; i-- {
-			e := m.agentLog[i]
-			ls = append(ls, fmt.Sprintf("%s  %-10s %s", dimStyle.Render(eventTime(e.TS)), e.Type, e.Payload))
-		}
-	}
-	return ls
-}
-
-// clientLines formats dial-ins via the hub's formatter, so this matches `sindri agent info`.
-func clientLines(cs []api.ClientView) []string {
-	s := theme.FormatClients(cs)
-	if s == "" {
-		return nil
-	}
-	return strings.Split(strings.TrimRight(s, "\n"), "\n")
-}
-
-// eventTime shows a stored UTC RFC3339 stamp as local HH:MM:SS, or raw if it won't parse.
-func eventTime(ts string) string {
-	t, err := time.Parse(time.RFC3339, ts)
-	if err != nil {
-		return ts
-	}
-	return t.Local().Format("15:04:05")
 }

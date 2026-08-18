@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
 // defaultReviewPrompt pre-fills the Agentic Review instruction; the user edits it before dispatch.
@@ -218,50 +219,48 @@ func (m *model) openReviewForm(prID string) {
 // prDetailW is the fixed width of the PRs tab's right detail column.
 const prDetailW = 44
 
-// PR filter states for the f-toggle: unmerged (the default), merged only, or all.
-const (
-	prFilterUnmerged = iota
-	prFilterMerged
-	prFilterAll
-)
-
-var prFilterNames = [...]string{"unmerged", "merged", "all"}
-
-// prFilterShows applies the f-filter; unmerged hides both terminal states (merged and scrapped).
-func (m model) prFilterShows(status string) bool {
-	switch m.prFilter {
-	case prFilterMerged:
-		return status == "merged"
-	case prFilterAll:
-		return true
-	default: // prFilterUnmerged
-		return status != "merged" && status != "scrapped"
+func (m model) prRows() []row {
+	var foreign, local []row
+	// Ordered by repo, the same call `sindri pr list` makes, so the two front-ends cannot drift onto
+	// different orders. In repo scope that key gathers the foreign PRs waiting on the user together,
+	// and the heading above them is what says so — a repo tag alone reads as a local row with an
+	// unfamiliar tag, which is how the same rows were misread several times in one day (-> sectioned).
+	for _, p := range api.SortedPRs(api.FilterPRs(m.prFilter, m.state.PRs), m.state.Projects) {
+		switch { // still one predicate deciding what is listed: which group is all this asks
+		case m.inScope(p.Project):
+			local = append(local, m.prRow(p))
+		case m.prVisible(p): // out of scope and listed anyway = waiting on the user elsewhere
+			foreign = append(foreign, m.prRow(p))
+		}
 	}
+	return sectioned(foreign, local)
 }
 
-func (m model) prRows() []row {
-	var out []row
-	for _, p := range m.state.PRs {
-		if !m.inScope(p.Project) { // repo-scoped: only the active repo's PRs
-			continue
-		}
-		if !m.prFilterShows(p.Status) { // f-toggle: merged hidden by default
-			continue
-		}
-		repo := m.repoStyle(p.Project).Render(fmt.Sprintf("%-10.10s", m.repoName(p.Project)))
-		status := p.Status
-		if m.merging[p.ID] && p.Status != "merged" { // transient: the user triggered a merge, awaiting the hub
-			status = "merging"
-		}
-		if p.Kind == "interim" { // ◇ = mid-task contribution (vs a final, task-done PR)
-			status = "◇" + status
-		}
-		// Who is reviewing it, from the board — a dash where nobody is, so the column reads as
-		// "waiting for a reviewer" rather than as missing.
-		out = append(out, row{fmt.Sprintf("%s %-14s %-9s %4s %-10s %-10s %s",
-			repo, p.ID, status, shortAge(p.CreatedAt), p.Agent, dash(p.Reviewer), p.Branch), p.ID})
+// prRow renders one PR row: repo, id, status, age, who wrote it, who is reviewing it, its branch.
+func (m model) prRow(p api.PR) row {
+	repo := m.repoStyle(p.Project).Render(fmt.Sprintf("%-10.10s", m.repoName(p.Project)))
+	status := api.StatusLabel(p.Status, p.Approvals)
+	merging := m.merging[p.ID] && p.Status != "merged" // transient: the user triggered a merge, awaiting the hub
+	if merging {
+		status = "merging"
 	}
-	return out
+	if p.Kind == "interim" { // the interim mark: a mid-task contribution, not a task-done PR
+		status = theme.MarkPRInterim + status
+	}
+	// Cells styled independently, never nested, so a colour reset cannot bleed across the row —
+	// the same shape the task and agent rows use.
+	sc := prStatusStyle(p, m.state.Agents, merging)
+	// Who is reviewing it, from the board — a dash where nobody is, so the column reads as
+	// "waiting for a reviewer" rather than as missing.
+	return row{strings.Join([]string{
+		repo,
+		sc.Render(fmt.Sprintf("%-14s", p.ID)),
+		sc.Render(fmt.Sprintf("%-9s", status)),
+		sc.Render(fmt.Sprintf("%4s", shortAge(p.CreatedAt))),
+		sc.Render(fmt.Sprintf("%-10s", p.Agent)),
+		sc.Render(fmt.Sprintf("%-10s", dash(p.Reviewer))),
+		sc.Render(p.Branch),
+	}, " "), p.ID}
 }
 
 // openScrapPRChoice confirms scrapping a PR: branch gone, off the board, nobody asked to try again.
@@ -417,7 +416,7 @@ func (m model) prMetaItems() []metaItem {
 	}
 	items = append(items,
 		metaItem{text: d.PR.ID},
-		metaItem{text: "status: " + d.PR.Status},
+		metaItem{text: "status: " + api.StatusLabel(d.PR.Status, api.ApprovalCount(d.Reviews))},
 		metaItem{text: "kind:   " + prKindLabel(d.PR.Kind)},
 		metaItem{text: "agent:  " + d.PR.Agent, kind: "agent", value: d.PR.Agent},
 	)
@@ -434,6 +433,15 @@ func (m model) prMetaItems() []metaItem {
 		metaItem{text: dash(d.Task.ID), kind: "task", value: d.Task.ID},
 		metaItem{text: d.Task.Title},
 	)
+	// The lifecycle before anything long: what happened to this PR, in a few lines. The full
+	// history stays at the bottom — it renders all 22 event types, which is what you want when
+	// something went wrong and noise when you are asking "where is this up to".
+	if life := api.PRLifecycle(d.History, d.Reviews); len(life) > 0 {
+		items = append(items, metaItem{text: ""}, metaItem{text: dimStyle.Render("── lifecycle ──")})
+		for _, ms := range life {
+			items = append(items, metaItem{text: lifecycleLine(ms)})
+		}
+	}
 	if d.PR.Feedback != "" {
 		items = append(items, metaItem{text: ""}, metaItem{text: dimStyle.Render("── feedback ──")}, metaItem{text: d.PR.Feedback})
 	}
@@ -452,6 +460,19 @@ func (m model) prMetaItems() []metaItem {
 		items = append(items, metaItem{text: fmt.Sprintf("%s  %-9s %s", dimStyle.Render(eventTime(e.TS)), e.Type, e.Payload)})
 	}
 	return items
+}
+
+// lifecycleLine renders one milestone: when, what, and who did it. The stamp is theme.Age's, as
+// the task detail uses, so a time reads the same wherever it appears.
+func lifecycleLine(ms api.PRMilestone) string {
+	line := fmt.Sprintf("%s  %-12s", dimStyle.Render(eventTime(ms.At)), ms.Event)
+	if ms.Who != "" {
+		line += " by " + ms.Who
+	}
+	if ms.Note != "" {
+		line += dimStyle.Render("  " + ms.Note)
+	}
+	return line
 }
 
 // wrapMeta wraps detail lines to the column width, so history, feedback and a long task/PR title
@@ -583,11 +604,16 @@ func (m *model) verifyCmd(id string) tea.Cmd {
 	}
 }
 
-// reviewLine summarizes a review item: its state, verdict, and author.
+// reviewLine summarizes a review item: its state, verdict, author and when, marking a planner's
+// advisory badge for what it is — a second opinion, never the approval that satisfies the merge.
 func reviewLine(r api.Review) string {
 	switch {
 	case r.Verdict != "":
-		return fmt.Sprintf("• %s by %s", r.Verdict, r.Author)
+		who := r.Author
+		if r.Advisory {
+			who += " (advisory)"
+		}
+		return fmt.Sprintf("• %s by %s at %s", r.Verdict, who, eventTime(r.VerdictAt))
 	case r.Author != "":
 		return fmt.Sprintf("• in review by %s", r.Author)
 	default:
@@ -600,7 +626,7 @@ func reviewLine(r api.Review) string {
 // workspace path was already in the interactive item column and in neither of these.
 func (m model) prIdentity(d api.PRDetail) []string {
 	ls := []string{
-		fmt.Sprintf("%s   [%s]   by %s", d.PR.ID, d.PR.Status, d.PR.Agent),
+		fmt.Sprintf("%s   [%s]   by %s", d.PR.ID, api.StatusLabel(d.PR.Status, api.ApprovalCount(d.Reviews)), d.PR.Agent),
 		fmt.Sprintf("task: %s  %s (%s)", d.Task.ID, d.Task.Title, d.Task.Status),
 		fmt.Sprintf("branch %s → %s", d.PR.Branch, d.PR.Base),
 	}
@@ -633,6 +659,12 @@ func (m model) prDetailLines() []string {
 		return []string{id, dimStyle.Render("(loading…)")}
 	}
 	ls := m.prIdentity(d)
+	if life := api.PRLifecycle(d.History, d.Reviews); len(life) > 0 {
+		ls = append(ls, "", "── lifecycle ──")
+		for _, ms := range life {
+			ls = append(ls, lifecycleLine(ms))
+		}
+	}
 	if d.PR.Feedback != "" {
 		ls = append(ls, "feedback: "+d.PR.Feedback)
 	}

@@ -7,9 +7,7 @@
 package hub
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -46,6 +44,10 @@ type ChatView = api.ChatView
 // (POST /merge); it crosses the wire, so it is internal/api.NameReq under the name
 // every existing caller here already uses.
 type NameReq = api.NameReq
+
+// RunPriorityReq is the body for POST /run/priority; it crosses the wire, so it is
+// internal/api.RunPriorityReq under the name every existing caller here already uses.
+type RunPriorityReq = api.RunPriorityReq
 
 // RepoReq targets a registered repo by its tag (POST /repo/forget, /repo/color); it
 // crosses the wire, so it is internal/api.RepoReq under the name every existing
@@ -182,6 +184,15 @@ func (h *Hub) Handler() http.Handler {
 		}
 		writeJSON(w, okMsg{"ok"}, h.agents.SetRetired(h.agentReq(r, req.Name), req.Name, req.Retired))
 	})
+	// The user's own clear of an escalation. The agent normally clears its own (`sindri resume`), but
+	// one that is gone, restarted, or simply wrong that it was blocked would stay stuck otherwise.
+	mux.HandleFunc("POST /agent/resume", func(w http.ResponseWriter, r *http.Request) {
+		var req NameReq
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, okMsg{"resumed"}, h.Resume(h.agentReq(r, req.Name), req.Name, "escalation cleared by the user"))
+	})
 	mux.HandleFunc("POST /agent/delete", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
 		if !decode(w, r, &req) {
@@ -201,7 +212,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"cleared"}, h.agents.ClearContext(h.agentReq(r, req.Name), req.Name))
+		writeJSON(w, okMsg{"ok"}, h.agents.SetClearArmed(h.agentReq(r, req.Name), req.Name, req.Armed))
 	})
 	mux.HandleFunc("POST /agent/rebase", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
@@ -223,7 +234,7 @@ func (h *Hub) Handler() http.Handler {
 		if f, ok := w.(http.Flusher); ok {
 			fw.f = f
 		}
-		if err := h.agents.Launch(h.agentReq(r, req.Name), req.Name, req.Shell, req.Debug, fw); err != nil {
+		if err := h.agents.Launch(h.agentReq(r, req.Name), req.Name, req.Shell, req.Debug, req.Cols, req.Lines, fw); err != nil {
 			fmt.Fprintf(fw, "error: %v\n", err)
 			w.Header().Set("X-Sindri-Error", err.Error())
 		}
@@ -245,13 +256,7 @@ func (h *Hub) Handler() http.Handler {
 			w.Header().Set("X-Sindri-Error", err.Error())
 		}
 	})
-	mux.HandleFunc("POST /tell", func(w http.ResponseWriter, r *http.Request) {
-		var req TellReq
-		if !decode(w, r, &req) {
-			return
-		}
-		writeJSON(w, okMsg{"delivered"}, h.agents.Tell(h.agentReq(r, req.Name), req.Name, req.Msg, req.Source))
-	})
+	h.messageRoutes(mux)
 	mux.HandleFunc("POST /chat/add", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
 		if !decode(w, r, &req) {
@@ -278,6 +283,10 @@ func (h *Hub) Handler() http.Handler {
 	mux.HandleFunc("POST /chat/new", func(w http.ResponseWriter, r *http.Request) {
 		// Clears the shared history and announces it; membership survives.
 		writeJSON(w, okMsg{"new meeting"}, h.chat.NewMeeting())
+	})
+	mux.HandleFunc("POST /chat/close", func(w http.ResponseWriter, r *http.Request) {
+		_, err := h.chat.Close()
+		writeJSON(w, okMsg{"meeting closed"}, err)
 	})
 	mux.HandleFunc("POST /chat/heartbeat", func(w http.ResponseWriter, r *http.Request) {
 		h.chat.Heartbeat()
@@ -365,6 +374,7 @@ func (h *Hub) Handler() http.Handler {
 		path, err := h.wf.MaterializeReview(h.wf.PRProject(h.reqProject(r), id), id)
 		writeJSON(w, okMsg{path}, err)
 	})
+	h.runRoutes(mux) // the run queue's own surface (-> server_runs.go)
 	mux.HandleFunc("GET /tasks", func(w http.ResponseWriter, r *http.Request) {
 		tasks, err := h.wf.Tasks(h.reqProject(r))
 		writeJSON(w, tasks, err)
@@ -375,7 +385,7 @@ func (h *Hub) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /task/next", func(w http.ResponseWriter, r *http.Request) {
 		name := r.URL.Query().Get("agent")
-		x, err := h.wf.ExplainNext(h.agentReq(r, name), name)
+		x, err := h.wf.ExplainNext(h.agentReq(r, name), name, r.URL.Query().Get("role"))
 		writeJSON(w, x, err)
 	})
 	mux.HandleFunc("POST /tasks", func(w http.ResponseWriter, r *http.Request) {
@@ -499,8 +509,9 @@ func (h *Hub) Serve() error {
 			return err
 		}
 	}
-	h.wf.HealPlannerTasks()    // a planner can't hold a backlog task — release any stale claim
-	h.wf.ReconcileMergingPRs() // a merge in flight when we last died → merge-failed (outcome unknown)
+	h.wf.HealPlannerTasks()     // a planner can't hold a backlog task — release any stale claim
+	h.wf.ReconcileMergingPRs()  // a merge in flight when we last died → merge-failed (outcome unknown)
+	h.wf.ReconcileRunningRuns() // a run in flight when we last died → failed (outcome unknown)
 	// Seed each known project's task cache so its board is populated from the start.
 	// A per-project failure (typically no td store at that repo) is not fatal — the
 	// hub still serves agents/PRs — but it must be loud, not silent.
@@ -521,139 +532,4 @@ func (h *Hub) Serve() error {
 	}
 	defer os.Remove(path)
 	return http.Serve(ln, server.LogRequests("hub", requireProject(h.Handler())))
-}
-
-// handleEvents streams board state as Server-Sent Events: the current state on
-// connect, then a fresh snapshot on every change, until the client disconnects.
-func (h *Hub) handleEvents(w http.ResponseWriter, r *http.Request) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	flusher.Flush() // send headers immediately so the client connects even if a
-	// snapshot can't be built yet — never leave the request hanging.
-
-	ch, unsub := h.events.subscribe()
-	defer unsub()
-
-	project := h.reqProject(r) // the selected repo scopes the board's tasks
-	send := func() {
-		st, err := h.State(project)
-		if err != nil {
-			return
-		}
-		data, err := json.Marshal(st)
-		if err != nil {
-			return
-		}
-		fmt.Fprintf(w, "data: %s\n\n", data)
-		flusher.Flush()
-	}
-	send() // initial snapshot
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-ch:
-			send()
-		}
-	}
-}
-
-// chatView builds the current chatroom snapshot (roster + recent transcript).
-func (h *Hub) chatView() (ChatView, error) {
-	members, err := h.chat.Members()
-	if err != nil {
-		return ChatView{}, err
-	}
-	log, err := h.chat.Transcript(0)
-	if err != nil {
-		return ChatView{}, err
-	}
-	return ChatView{Members: members, Log: log}, nil
-}
-
-// handleChatEvents streams the chatroom as Server-Sent Events: the snapshot on
-// connect, then a fresh one on every board change (chat included), until the
-// client disconnects. This is how the user's live views (the `chat join` CLI and
-// the TUI chat tab) receive forwarded messages — the star topology's user leg.
-func (h *Hub) handleChatEvents(w http.ResponseWriter, r *http.Request) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	flusher.Flush()
-
-	ch, unsub := h.events.subscribe()
-	defer unsub()
-
-	send := func() {
-		v, err := h.chatView()
-		if err != nil {
-			return
-		}
-		data, err := json.Marshal(v)
-		if err != nil {
-			return
-		}
-		fmt.Fprintf(w, "data: %s\n\n", data)
-		flusher.Flush()
-	}
-	send()
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-ch:
-			send()
-		}
-	}
-}
-
-type okMsg struct {
-	OK string `json:"ok"`
-}
-
-type errMsg struct {
-	Error string `json:"error"`
-}
-
-func decode(w http.ResponseWriter, r *http.Request, v any) bool {
-	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
-		writeJSON(w, nil, err)
-		return false
-	}
-	return true
-}
-
-// flushWriter flushes after every write so streamed control-socket output (the
-// launch / rebuild progress) reaches the client live rather than buffering.
-type flushWriter struct {
-	w io.Writer
-	f http.Flusher
-}
-
-func (fw *flushWriter) Write(p []byte) (int, error) {
-	n, err := fw.w.Write(p)
-	if fw.f != nil {
-		fw.f.Flush()
-	}
-	return n, err
-}
-
-// writeJSON writes v as JSON, or a 400 with the error message if err != nil.
-func writeJSON(w http.ResponseWriter, v any, err error) {
-	w.Header().Set("Content-Type", "application/json")
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(errMsg{err.Error()})
-		return
-	}
-	_ = json.NewEncoder(w).Encode(v)
 }

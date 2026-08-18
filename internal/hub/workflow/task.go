@@ -105,6 +105,7 @@ func (e *Engine) CreateTask(project string, s TaskSpec) (string, error) {
 		return "", err
 	}
 	e.refreshCachedTask(project, id) // targeted: pull just the new task, not a full re-sync
+	e.adoptChild(project, s.Parent, id)
 	e.deps.Notify()
 	e.nudgeIdleWorkers(project, id, s.Priority)
 	return id, nil
@@ -133,7 +134,7 @@ func (e *Engine) nudgeIdleWorkers(project, id, priority string) {
 		if !e.deps.AgentAlive(project, a.Name) {
 			continue // nothing to inject into
 		}
-		_ = e.deps.InjectWhenReady(project, a.Name, MsgWorkAvailable(id))
+		_ = e.deps.Deliver(project, a.Name, MsgWorkAvailable(id), PushOnly)
 		_ = ps.Log(a.Name, "nudge", "work available: "+id)
 	}
 }
@@ -210,7 +211,11 @@ func (e *Engine) EditTask(project, id string, s TaskSpec) error {
 	ps := e.store.For(project)
 	// Parentage first, and for any task: the hierarchy is sindri's own, so re-parenting an openspec
 	// change or a GitHub issue is as ordinary as re-parenting one of its own.
+	gained := false
 	if s.Parent != "" {
+		// Diff rather than echo: re-parenting a task to where it already sits adds no child, and
+		// telling that parent's holder one arrived is noise about work it has had all along.
+		gained = ps.ParentOf(id) != s.Parent
 		if err := ps.SetParent(id, s.Parent); err != nil {
 			return err
 		}
@@ -229,6 +234,11 @@ func (e *Engine) EditTask(project, id string, s TaskSpec) error {
 		}
 	}
 	e.refreshCachedTask(project, id) // targeted refresh of the edited task
+	// Re-parenting adds a child as surely as creating one does, so the same growth applies: whoever
+	// is working the new parent takes this on too, rather than merging over it.
+	if gained {
+		e.adoptChild(project, s.Parent, id)
+	}
 	e.deps.Notify()
 	return nil
 }
@@ -284,13 +294,26 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 	if !ok {
 		return "", fmt.Errorf("unknown agent %q", name)
 	}
+	st, _ := ps.GetState(name)
+	// Unread mail outranks EVERYTHING. Before the paths that block, since an agent left blocking would
+	// sit on what may release it; before the escalation, the one state told to sit still, whose mail
+	// may answer or moot the question — and whose "nothing has come back" is true only once read.
+	if n, merr := ps.UnreadMailCount(name); merr != nil {
+		return "", merr
+	} else if n > 0 {
+		return DirUnreadMail(n), nil
+	}
+	// Escalated outranks every role's directive: with the work verbs shut, any other answer sends the
+	// agent at a wall. Repeated on EVERY ask — a relaunched agent has no memory of asking.
+	if st.Escalation != "" {
+		return DirEscalated(st.Escalation), nil
+	}
 	if a.Role == "coauthor" {
 		return DirCoauthor, nil
 	}
 	if a.Role == "reviewer" {
 		return e.waitForWork(ctx, func() (string, bool, error) { return e.reviewDirective(project, name) })
 	}
-	st, _ := ps.GetState(name)
 	if a.Role == "planner" {
 		switch st.Phase {
 		case "submitted":
@@ -315,19 +338,21 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 					return DirContainerRejected(st.Container, st.Task, feedback), nil
 				}
 				return DirSubmitted, nil
+			case "gating":
+				return DirGating, nil
 			case "working":
 				return e.workDirective(project, name, st.Task, st.Container)
 			default:
-				// A failure here is surfaced, never read as "finished": the feature is only done
-				// when the store says there is nothing under it, not when assignment went wrong.
-				next, ok, aerr := e.advanceContainer(project, name, st.Container)
-				if aerr != nil {
-					return "", aerr
-				}
-				if ok {
-					return DirContainerWorking(st.Container, next.ID), nil
-				}
-				return DirContainerDone(st.Container), nil
+				// Blocking: a feature whose remaining work is gated is neither finished nor able to
+				// hand anything out, so it waits on the user like any other empty queue.
+				return e.waitForWork(ctx, func() (string, bool, error) {
+					// Between subtasks is a leaf boundary, so an armed clear fires HERE — before
+					// the next subtask is served, and even if it is armed during the wait.
+					if e.clearArmed(project, name) {
+						return DirClearPending, true, nil
+					}
+					return e.containerNext(project, name, st.Container)
+				})
 			}
 		}
 		_ = ps.SetState(store.AgentState{Agent: name, Phase: "idle"})
@@ -346,6 +371,8 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 			return DirRejected(st.Task, feedback), nil
 		}
 		return DirSubmitted, nil
+	case "gating":
+		return DirGating, nil
 	default: // idle — claim the next task, blocking until one exists
 		return e.waitForNextTask(ctx, project, name)
 	}
@@ -356,6 +383,11 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 func (e *Engine) waitForNextTask(ctx context.Context, project, name string) (string, error) {
 	if a, ok, _ := e.store.For(project).GetAgent(name); ok && a.Retired {
 		return DirRetired, nil
+	}
+	// Ahead of fullness: an armed clear is the remedy FOR fullness, so telling a full agent to wait
+	// for a human is stale the moment one has acted (-> agent.Service.SetClearArmed).
+	if e.clearArmed(project, name) {
+		return DirClearPending, nil
 	}
 	if tokens, full := e.contextFull(project, name); full {
 		return DirFull(tokens), nil
@@ -438,57 +470,6 @@ func (e *Engine) syncTasks(project string, force bool) error {
 	return ps.ReplaceTasks(rows)
 }
 
-// SetPriority assigns a task's priority (a P-code), reaching as far below it as scope asks. What
-// reaching there does differs by case, and api.PriorityEffect is where that is set out.
-func (e *Engine) SetPriority(project, id, priority string, scope api.PriorityScope) error {
-	targets, err := e.priorityTargets(project, id, scope)
-	if err != nil {
-		return err
-	}
-	for _, t := range targets {
-		if err := e.writePriority(project, t, priority); err != nil {
-			return err
-		}
-		e.refreshCachedTask(project, t) // targeted refresh of each reprioritized task
-	}
-	e.deps.Notify()
-	// Rating an unrated task is the moment it becomes claimable, so it needs the same nudge as a task
-	// created with a priority. ONE, however far the cascade reached: it only has to wake a worker up.
-	e.nudgeIdleWorkers(project, id, priority)
-	return nil
-}
-
-// priorityTargets is which tasks a scoped rating writes to, CHILDREN FIRST — the parent's rating is
-// what releases a package, so no worker can claim one half-rated. Open descendants only: a finished
-// task's rating decides nothing, and overwriting it would edit the record of work already done.
-func (e *Engine) priorityTargets(project, id string, scope api.PriorityScope) ([]string, error) {
-	if scope == api.ScopeTask {
-		return []string{id}, nil
-	}
-	all, err := e.store.For(project).AllTasks()
-	if err != nil {
-		return nil, err
-	}
-	var out []string
-	for _, d := range api.Descendants(all, id) {
-		if !api.Open(d) || (scope == api.ScopeUnrated && d.Priority != "") {
-			continue
-		}
-		out = append(out, d.ID)
-	}
-	return append(out, id), nil
-}
-
-// writePriority records one rating where that task's priority lives: its own row when sindri owns the
-// task, the hub's overlay when the task is mirrored.
-func (e *Engine) writePriority(project, id, priority string) error {
-	ps := e.store.For(project)
-	if ps.OwnsTask(id) {
-		return ps.SetOwnedPriority(id, priority)
-	}
-	return ps.SetPriorityOverride(id, priority)
-}
-
 // checkParent validates a requested parent before anything is written: it must exist, and it must
 // not already sit below the task being re-parented. A loop is unreachable from any root, so the task
 // list would simply stop showing every task inside it.
@@ -564,6 +545,10 @@ func (e *Engine) CmdNext(c registry.Caller, _ []string, out io.Writer) (int, err
 		fmt.Fprintln(out, DirRetired)
 		return 0, nil
 	}
+	if e.clearArmed(c.Project, c.Agent) {
+		fmt.Fprintln(out, DirClearPending)
+		return 0, nil
+	}
 	if tokens, full := e.contextFull(c.Project, c.Agent); full {
 		fmt.Fprintln(out, DirFull(tokens))
 		return 0, nil
@@ -602,8 +587,8 @@ func (e *Engine) ContextFull(project, worker string) bool {
 	return full
 }
 
-// claimNext claims the highest-priority open LEAF task (or a marked container) for a worker in a
-// project. Returns (directive, true) on a claim, ("", false) when idle or retired (full).
+// claimNext hands a worker the best-rated unit in a project, task or whole package (-> nextUp).
+// Returns (directive, true) on a claim, ("", false) when idle or retired (full).
 func (e *Engine) claimNext(project, agent string) (string, bool, error) {
 	// Retired by a human, or by its own context filling: either way it is being wound down, and the
 	// gate is here rather than at the task queries so it holds however the work would have arrived.
@@ -613,25 +598,33 @@ func (e *Engine) claimNext(project, agent string) (string, bool, error) {
 	if _, full := e.contextFull(project, agent); full {
 		return "", false, nil // retired: a full worker is not handed new work
 	}
-	_ = e.SyncTasks(project) // best-effort refresh; cached set on failure
-	if d, ok, err := e.claimContainer(project, agent); ok || err != nil {
-		return d, ok, err
+	if e.clearArmed(project, agent) {
+		return "", false, nil // a clear is about to land: work claimed now would be cut in half by it
 	}
-	return e.claimLeaf(project, agent)
-}
-
-// claimLeaf claims the highest-priority open leaf for a worker, branching on it.
-func (e *Engine) claimLeaf(project, worker string) (string, bool, error) {
+	_ = e.SyncTasks(project) // best-effort refresh; cached set on failure
 	ps := e.store.For(project)
-	root := e.deps.ProjectRoot(project)
-	open, err := ps.OpenLeaves()
+	packages, err := ps.OpenContainers()
 	if err != nil {
 		return "", false, err
 	}
-	if len(open) == 0 {
+	leaves, err := ps.OpenLeaves()
+	if err != nil {
+		return "", false, err
+	}
+	t, isPackage, ok := nextUp(packages, leaves)
+	if !ok {
 		return "", false, nil
 	}
-	t := open[0]
+	if isPackage {
+		return e.claimContainer(project, agent, t)
+	}
+	return e.claimLeaf(project, agent, t)
+}
+
+// claimLeaf claims one standalone task for a worker, branching on it.
+func (e *Engine) claimLeaf(project, worker string, t store.Task) (string, bool, error) {
+	ps := e.store.For(project)
+	root := e.deps.ProjectRoot(project)
 	base, err := e.baseBranch(root)
 	if err != nil {
 		return "", false, err

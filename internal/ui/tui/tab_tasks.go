@@ -1,11 +1,11 @@
 // package: tui / tasks
 // type:    ui (Tasks tab)
-// job:     the Tasks tab content — the hierarchical tree selector (filtered
-// open/closed/all, collapsible, PR-marked) and the task detail pane.
-// Tree arrangement + PR annotation come from the hub (ArrangeTasks);
+// job:     the Tasks tab content — the hierarchical tree selector (collapsible,
+// PR-marked) and the task detail pane. Which tasks a filter admits and how
+// they arrange come from the exchange package (FilterTasks, ArrangeTasks);
 // this renders rows and folds.
-// limits:  renders rows and folds only; tree arrangement + PR annotation are the
-// hub's (-> ArrangeTasks).
+// limits:  renders rows and folds only; the filter rule and the tree arrangement are
+// shared with the CLI (-> api.MatchesFilter, api.ArrangeTasks).
 package tui
 
 import (
@@ -14,64 +14,27 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
-func isDone(status string) bool {
-	switch status {
-	case "closed", "approved", "merged":
-		return true
-	}
-	return false
-}
-
-// recentlyChanged reports whether a task's last known change falls inside activeWindow; a task
-// with no timestamp (an openspec change, say) is never recent, so it needs the open half of the
-// filter to show.
-func recentlyChanged(t api.Task) bool {
-	at, err := time.Parse(time.RFC3339, t.UpdatedAt)
-	return err == nil && time.Since(at) < activeWindow
-}
-
-// taskRows builds the filtered, folded, depth-indented task tree.
+// taskRows builds the filtered, folded, depth-indented task tree. Which tasks the filter admits is
+// the exchange package's answer (-> api.MatchesFilter), the same one `sindri task list --filter`
+// gets, so the two front-ends cannot come to mean different things by the same word.
 func (m model) taskRows() []row {
-	var filtered []api.Task
-	for _, t := range m.state.Tasks {
-		done := isDone(t.Status)
-		switch m.filter {
-		case filterAll:
-			filtered = append(filtered, t)
-		case filterOpen:
-			if !done {
-				filtered = append(filtered, t)
-			}
-		case filterClosed:
-			if done {
-				filtered = append(filtered, t)
-			}
-		case filterActive:
-			if !done || recentlyChanged(t) {
-				filtered = append(filtered, t)
-			}
-		}
-	}
-	arranged := api.ArrangeTasks(filtered, m.state.PRs)
+	arranged := api.ArrangeTasks(api.FilterTasks(m.filter, m.state.Tasks), m.state.PRs)
 
-	// Which tasks have a worker on them right now (drives the 🔨 marker).
-	assigned := map[string]bool{}
-	for _, a := range m.state.Agents {
-		if a.Task != "" {
-			assigned[a.Task] = true
-		}
-	}
+	// Who is behind each task (drives the worked-on marker). The same rule the detail pane names
+	// the agent by, so the mark and the name cannot contradict each other.
+	assigned := api.AgentsByTask(m.state.Agents, m.state.PRs)
 	// Hub-side approval per task (drives the row colour for planner proposals). A gate on a task
 	// that has ended is spent, and the state word below is the status's to give.
 	approval := map[string]string{}
 	for _, t := range m.state.Tasks {
-		if t.Approval != "" && !isDone(t.Status) {
+		if t.Approval != "" && !api.DoneStatus(t.Status) {
 			approval[t.ID] = t.Approval
 		}
 	}
@@ -118,29 +81,14 @@ func (m model) taskRows() []row {
 		gutter := treeGutter(cont, tr.Depth, last[i], hasKids[tr.ID], m.collapsed[tr.ID])
 		cont = append(cont, !last[i])
 
-		// Cells styled independently (never nested) so a colour reset can't bleed
-		// across the row. An approval gate overrides the status colour.
-		sc := taskStatusStyle(tr.Status)
-		state := theme.StateLabel(tr.Status)
-		switch approval[tr.ID] { // the approval gate overrides both colour and state word
-		case "pending":
-			sc, state = stWarn, "pending"
-		case "rejected":
-			sc, state = stDone, "rejected"
-		default:
-			// Unrated reads like ungated: both mean no worker can be given this, and the row that
-			// showed a plain "open" claimed otherwise. A rated ancestor releases the whole tree, so
-			// only a task with none anywhere above it is really held back.
-			if !isDone(tr.Status) && !released[tr.ID] {
-				sc, state = stWarn, "unrated"
-			}
-		}
+		// Cells styled independently (never nested) so a colour reset can't bleed across the row.
+		sc, state := taskRowStyle(tr.Task, approval[tr.ID], released[tr.ID])
 		if v := m.busy[tr.ID]; v != "" { // transient: the user triggered a close/scrap, awaiting the hub
 			sc, state = stWarn, v
 		}
 		prio := sc.Render(fmt.Sprintf("%-8s", theme.PriorityLabel(tr.Priority)))
 		if isCriticalPriority(tr.Priority) {
-			prio = stCrit.Render(fmt.Sprintf("%-8s", theme.PriorityLabel(tr.Priority)))
+			prio = stPrio.Render(fmt.Sprintf("%-8s", theme.PriorityLabel(tr.Priority)))
 		}
 		out[i] = row{
 			strings.Join([]string{
@@ -152,13 +100,40 @@ func (m model) taskRows() []row {
 				// Age, right-aligned so the units line up under each other; the exact moment is in
 				// the detail pane, which is where a question about one task gets asked.
 				sc.Render(fmt.Sprintf("%4s", theme.Age(tr.CreatedAt))),
-				sc.Render(taskMarks(assigned[tr.ID], prMarkKind(tr))),
+				sc.Render(taskMarks(assigned[tr.ID] != "", prMarkKind(tr))),
 				sc.Render(tr.Title),
 			}, " "),
 			tr.ID,
 		}
 	}
 	return out
+}
+
+// taskRowStyle is a row's colour and its state word. The WORD comes from the gate holding it where
+// one is, else its status; RED is decided separately and last, by asking api.TaskNeedsUser — the
+// very predicate the Tasks badge counts. Deciding it in the switch instead let the two part company
+// on case order alone: a rejected task with no rating matched "rejected" and rendered grey while
+// the badge, reading the rating, counted it. gated is the task's approval state, "" where no gate
+// applies (a finished task's spent one included); released says whether a priority lets a worker
+// take it.
+func taskRowStyle(t api.Task, gated string, released bool) (lipgloss.Style, string) {
+	style, word := taskStatusStyle(t.Status), theme.StateLabel(t.Status)
+	switch {
+	case gated == "pending":
+		word = theme.ApprovalLabel("pending")
+	case gated == "rejected":
+		// The user has ruled; it is the author's move, so this asks nothing of anybody here.
+		style, word = stDone, theme.ApprovalLabel("rejected")
+	case api.Open(t) && !released:
+		// Unrated reads like ungated: both mean no worker can be given this, and a row saying plain
+		// "open" claimed otherwise. A rated ancestor releases the whole tree, so only a task with
+		// none anywhere above it is really held back.
+		word = "unrated"
+	}
+	if api.TaskNeedsUser(t, released) {
+		style = stCrit
+	}
+	return style, word
 }
 
 const treeGutterW = 6 // fits ~3 levels of "│ "/"├─" connectors
@@ -212,11 +187,13 @@ func treeGutter(cont []bool, depth int, last, kids, collapsed bool) string {
 	return padTrunc(s, treeGutterW)
 }
 
-// marksW pads the marker column: 🔨 is two cells, so a fixed width keeps titles aligned.
-const marksW = 3
+// marksW pads the marker column so titles line up whatever a row carries. Measured from the marks
+// themselves rather than written down: a glyph swap that changed the count silently would knock
+// every title out of line, and this column has now been through one.
+var marksW = lipgloss.Width(theme.MarkAssigned) + lipgloss.Width(theme.MarkPRFinal)
 
-// prMarkKind picks the PR marker: ◆ final, ◇ interim, "" none. A kindless PR defaults to
-// final, the historical default, so older PRs still show ◆.
+// prMarkKind picks which PR marker a row carries: final, interim, or "" for none. A kindless PR
+// defaults to final, the historical default, so older PRs still read as one.
 func prMarkKind(tr api.TaskRow) string {
 	if tr.PR == "" {
 		return ""
@@ -227,18 +204,18 @@ func prMarkKind(tr api.TaskRow) string {
 	return "final"
 }
 
-// taskMarks is the status-marker column: 🔨 when a worker is on the task, then ◆ for a final PR
-// or ◇ for an interim one, padded to a fixed width so rows line up whatever they carry.
+// taskMarks is the status-marker column: the worked-on mark when an agent is on the task, then the
+// final or interim PR mark, padded to marksW so rows line up whatever they carry.
 func taskMarks(assigned bool, prKind string) string {
 	s := ""
 	if assigned {
-		s += "🔨"
+		s += theme.MarkAssigned
 	}
 	switch prKind {
 	case "final":
-		s += "◆"
+		s += theme.MarkPRFinal
 	case "interim":
-		s += "◇"
+		s += theme.MarkPRInterim
 	}
 	return padTrunc(s, marksW)
 }
@@ -300,12 +277,10 @@ func (m model) taskDetailFor(t api.Task, desc string) []string {
 
 // taskItemsFor builds the fields, the agent/PR/parent/url cross-references, then desc and comments.
 func (m model) taskItemsFor(t api.Task, desc string, comments []api.Comment) []metaItem {
-	assignee, pr := "", ""
-	for _, a := range m.state.Agents {
-		if a.Task == t.ID {
-			assignee = a.Name
-		}
-	}
+	// One rule for who is behind the task, shared with the row marker and the CLI: a live claim,
+	// else the author of the PR under review — a submitted task still has an owner, and that is
+	// the reader's question when they open one that is waiting on a verdict.
+	assignee, pr := api.AgentOnTask(m.state.Agents, m.state.PRs, t.ID), ""
 	for _, p := range m.state.PRs {
 		if p.Task == t.ID && p.Status != "merged" {
 			pr = p.ID
@@ -323,15 +298,15 @@ func (m model) taskItemsFor(t api.Task, desc string, comments []api.Comment) []m
 		{text: "priority: " + theme.PriorityLabel(t.Priority)},
 		{text: "status:   " + t.Status},
 	}
-	// The exact moment, in local time — the list column rounds it, and rounding is what a question
-	// about one particular task is asking past.
-	created := theme.Stamp(t.CreatedAt)
-	if created != theme.Unknown {
-		created += " (" + theme.Age(t.CreatedAt) + " ago)"
-	}
-	items = append(items, metaItem{text: "created:  " + created})
+	// The exact moments, in local time — the list column rounds them, and rounding is what a
+	// question about one particular task is asking past. "changed" is the field the active filter
+	// reads, so an "n/a" here explains why a mirrored task that just closed is missing from it.
+	items = append(items,
+		metaItem{text: "created:  " + theme.When(t.CreatedAt)},
+		metaItem{text: "changed:  " + theme.When(t.UpdatedAt)},
+	)
 	if t.Approval != "" { // a planner proposal under the approval gate
-		line := "approval: " + t.Approval
+		line := "approval: " + theme.ApprovalLabel(t.Approval)
 		if t.ApprovalComment != "" {
 			line += " — " + t.ApprovalComment
 		}
@@ -471,7 +446,7 @@ func (m *model) openTaskForm(edit bool, t api.Task) {
 // includes being live: a verdict on a task that has already ended decides nothing.
 func (m model) taskGated() bool {
 	t, ok := m.selTask()
-	return ok && !isDone(t.Status) && (t.Approval == "pending" || t.Approval == "rejected")
+	return ok && !api.DoneStatus(t.Status) && (t.Approval == "pending" || t.Approval == "rejected")
 }
 
 // unassignTaskCmd returns the task to the backlog; the hub refuses if a live agent holds it.
@@ -512,16 +487,17 @@ func (m *model) openBriefChoice(taskID string) {
 	}
 }
 
-// whyNextCmd asks the hub what it would assign next and why nothing else, shown as a notice — the
-// same account `sindri task next` prints, since the reasoning is the hub's and neither front-end
-// gets to have its own version of it.
-func (m *model) whyNextCmd() tea.Cmd {
+// whyNextCmd asks the hub what it would hand out next to an agent of role, and why nothing else,
+// shown as a notice — the same account the CLI prints, since the reasoning is the hub's and neither
+// front-end gets to have its own version of it. The role is the tab's: the Tasks tab asks the
+// backlog question, the PRs tab the reviewer's, each about the pool it is showing.
+func (m *model) whyNextCmd(role string) tea.Cmd {
 	cl := m.cl
 	if cl == nil {
 		return nil
 	}
 	return func() tea.Msg {
-		x, err := cl.NextTask("")
+		x, err := cl.NextTask("", role)
 		if err != nil {
 			return taskOpDoneMsg{err: err}
 		}
@@ -567,7 +543,7 @@ func (m *model) reconcileBusy() {
 		present[t.ID] = t.Status
 	}
 	for id := range m.busy {
-		if status, ok := present[id]; !ok || isDone(status) {
+		if status, ok := present[id]; !ok || api.DoneStatus(status) {
 			delete(m.busy, id)
 		}
 	}

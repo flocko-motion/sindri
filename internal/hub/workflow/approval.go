@@ -76,7 +76,7 @@ func (e *Engine) notifyPlanners(project, msg string) {
 	for _, a := range roster {
 		if a.Role == "planner" {
 			name := a.Name
-			go func() { _ = e.deps.InjectWhenReady(project, name, msg) }()
+			go func() { _ = e.deps.Deliver(project, name, msg, MailAndPush) }()
 		}
 	}
 }

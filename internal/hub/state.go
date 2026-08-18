@@ -17,6 +17,7 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agent"
+	"github.com/flo-at/sindri/internal/hub/commands"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -33,6 +34,10 @@ type AgentView = api.AgentView
 // BoardState is the whole board; it crosses the wire, so it is internal/api.BoardState
 // under the name every existing caller here already uses.
 type BoardState = api.BoardState
+
+// AgentMail is one message in an agent's mailbox; it crosses the wire, so it is internal/api.Mail,
+// named here for what it is to the hub.
+type AgentMail = api.Mail
 
 // State assembles the board; an empty selected tag means no project is chosen, so no tasks.
 func (h *Hub) State(selected string) (BoardState, error) {
@@ -63,6 +68,11 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	}
 	prs = kept
 	h.fillReviewers(prs)
+	// Fleet-wide and position-ranked already (-> FleetRuns), so the board never re-derives either.
+	runs, err := h.wf.FleetRuns()
+	if err != nil {
+		return BoardState{}, err
+	}
 	var tasks []store.Task
 	var specMissing bool
 	if selected != "" {
@@ -94,6 +104,11 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	existing, _ := container.ListByLabelCached(podCtx, "sindri.project", "")
 	podCancel()
 
+	// One query for the fleet's unread tallies: a count per agent row would be paid per render.
+	unreadMail, err := h.store.UnreadMailByAgent()
+	if err != nil {
+		return BoardState{}, err
+	}
 	known := map[string]bool{}
 	agents := make([]AgentView, 0, len(agentsRow))
 	for i, a := range agentsRow {
@@ -114,13 +129,16 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		}
 		tokens, window, _ := h.agents.ContextUsage(a.Project, a.Name)
 		status = overlayFullness(status, h.wf.ContextFull(a.Project, a.Name), st.Task, st.Container, pr)
+		status = overlayEscalation(status, st.Escalation)
 		agents = append(agents, AgentView{
 			Project: a.Project, Repo: h.repoName(a.Project), Name: a.Name, Role: a.Role,
 			Status:  status,
 			Runtime: runtimes[i],
 			Task:    st.Task, Feature: st.Container, Branch: st.Branch, PR: pr, Workspace: a.Workspace,
 			Clients: clients[i], Container: container, Memory: a.Memory, Retired: a.Retired,
-			ContextTokens: tokens, ContextWindow: window,
+			ClearArmed:    a.ClearArmed,
+			ContextTokens: tokens, ContextWindow: window, Escalation: st.Escalation,
+			UnreadMail: unreadMail[a.Project][a.Name],
 		})
 	}
 
@@ -140,12 +158,61 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	for _, p := range projects {
 		docs[p.Tag] = h.repoDocState(p.Path)
 	}
-	return BoardState{
+	mail, mailTotal, mailUnread, unreadByRepo, err := h.mailWindow()
+	if err != nil {
+		return BoardState{}, err
+	}
+	board := BoardState{
 		RuntimeHint: h.watch.runtimeHint(),
-		Agents:      agents, Tasks: tasks, PRs: prs, Projects: projects, Orphans: orphans, Chat: chat,
+		Agents:      agents, Tasks: tasks, PRs: prs, Runs: runs, Projects: projects, Orphans: orphans, Chat: chat,
 		RepoDocs: docs, SpecCLIMissing: specMissing, StartedAt: h.startedAt.UTC().Format(time.RFC3339),
 		DefaultMemory: agent.MemoryOrDefault(""),
-	}, nil
+		// Reported from the watchdog's last reading, like liveness and for the same reason: taking
+		// one here would put a process spawn on every board read, and there are many.
+		Memory: h.watch.headroom(),
+		Mail:   mail, MailTotal: mailTotal, MailUnread: mailUnread, MailUnreadByRepo: unreadByRepo,
+	}
+	return withSections(board), nil
+}
+
+// MailWindow is how many messages the board carries. The mailbox is never pruned, so what needs
+// bounding is the RENDER: the counts beside this window are of the whole mailbox, so a view can say
+// what it is not showing, and older mail is reached one message at a time (-> MailBody).
+const MailWindow = 200
+
+// mailPreview is how much of a body the window carries: a rejection arrives with its whole findings,
+// so a row carries an opening and says it was cut rather than putting hundreds of lines on the board.
+const mailPreview = 240
+
+// mailWindow reads the newest mail for the board, each body cut to a preview, plus the tallies of the
+// WHOLE mailbox: the total, the unread count, and unread per repo for a repo-scoped view.
+func (h *Hub) mailWindow() (window []AgentMail, total, unread int, unreadByRepo map[string]int, err error) {
+	if window, err = h.store.AllMail(MailWindow); err != nil {
+		return nil, 0, 0, nil, err
+	}
+	for i, m := range window {
+		window[i].Repo = h.repoName(m.Project)
+		if len(m.Body) > mailPreview {
+			window[i].Body, window[i].Truncated = m.Body[:mailPreview], true
+		}
+	}
+	total, unread, unreadByRepo, err = h.store.MailTallies()
+	if err != nil {
+		return nil, 0, 0, nil, err
+	}
+	return window, total, unread, unreadByRepo, nil
+}
+
+// MailBody returns one message with its full body — what a detail view or `mail show` asks for, since
+// the board carries only a preview of each.
+func (h *Hub) MailBody(id int64) (AgentMail, bool, error) { return h.store.MailByID(id) }
+
+// withSections stamps the board with its own tabs — each count, and how many of its rows wait on
+// the user — resolved against the board they describe. A front-end renders what it finds here, so
+// a board that left this out would silently drop every marker.
+func withSections(b BoardState) BoardState {
+	b.Sections = commands.Resolved(b)
+	return b
 }
 
 // fillReviewers stamps each PR with the agent holding an open review of it. Whether a PR is being
@@ -286,6 +353,16 @@ func overlayFullness(status string, full bool, task, feature, pr string) string 
 		return "full"
 	}
 	return status
+}
+
+// overlayEscalation says "escalated" wherever an agent waits on a decision the user must make. Last,
+// over the runtime and the stall alike: those describe a screen, this says why the screen is quiet.
+// Two words outrank it, both meaning the answer cannot be DELIVERED yet: not-up, and signed-out.
+func overlayEscalation(status, question string) string {
+	if question == "" || api.AgentNotUp(status) || status == api.StatusSignedOut {
+		return status
+	}
+	return api.StatusEscalated
 }
 
 // Refresh re-syncs tasks and notifies watchers; being the user's explicit refresh it forces the

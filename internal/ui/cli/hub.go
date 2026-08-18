@@ -21,6 +21,7 @@ import (
 	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/tools/paths"
+	"github.com/flo-at/sindri/internal/ui/theme"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -31,9 +32,12 @@ type backend interface {
 	NewAgent(name, role, memory string) (string, error)
 	SetMemory(name, memory string) error
 	SetRetired(name string, retired bool) error
+	ResumeAgent(name string) error
+	MailBody(id int64) (api.Mail, error)
+	MailAgent(name, msg string) error
 	DeleteAgent(name string) error
 	StopAgent(name string) error
-	ClearContext(name string) error
+	SetClearArmed(name string, armed bool) error
 	RebaseAgent(name string) error
 	RebuildImage(name string, out io.Writer) error
 	AgentPane(name string, lines int) (string, error)
@@ -41,13 +45,14 @@ type backend interface {
 	Stats() (api.StatsReport, error)
 	Instance(name string) (string, error)
 	Clients(name string) ([]api.ClientView, error)
-	Launch(name string, shell, debug bool, out io.Writer) error
-	Tell(name, msg, source string) error
+	Launch(name string, shell, debug bool, cols, lines int, out io.Writer) error
+	Tell(name, msg, source, signedOut string) error
 	AssignPlan(name, goal, taskID string) error
 	ChatAdd(name string) error
 	ChatRemove(name string) error
 	ChatSay(msg string) error
 	NewMeeting() error
+	CloseMeeting() error
 	ChatHeartbeat() error
 	Chat() (api.ChatView, error)
 	ChatWatch(ctx context.Context) (<-chan api.ChatView, error)
@@ -62,7 +67,7 @@ type backend interface {
 	RejectTask(id, comment string) error
 	AddTaskComment(id, body string) error
 	RefreshTaskComments(id string) error
-	NextTask(agent string) (api.NextExplain, error)
+	NextTask(agent, role string) (api.NextExplain, error)
 	UnassignTask(id string) error
 	CloseTask(id string) error
 	ReopenTask(id, reason string) error
@@ -78,6 +83,11 @@ type backend interface {
 	MaterializeReview(id string) (string, error)
 	Merge(id string) (api.PR, error)
 	MilestonePR(agent string) (api.PR, error)
+	Runs() ([]api.Run, error)
+	RunInfo(id string) (api.RunDetail, error)
+	ScheduleRun(command, agent, priority, timeout string) (api.Run, error)
+	CancelRun(id string) error
+	ReprioritiseRun(id, priority string) error
 	Repos() ([]api.RepoSummary, error)
 	RepoInfo(tag string) (api.RepoDetail, error)
 	RepoInit() (api.RepoSummary, error)
@@ -214,7 +224,7 @@ func NewAgentCmd() *cobra.Command {
 	// No PersistentPreRun: the runtime warning comes off the board (-> warnRuntime), which the
 	// commands that need it already fetch. Probing here cost every agent verb a `podman info`.
 	c := &cobra.Command{Use: "agent", Short: "Manage agents (workers, reviewers, planners, coauthors)"}
-	c.AddCommand(agentListCmd(), agentStatsCmd(), agentNewCmd(), agentDeleteCmd(), agentPaneCmd(), agentStartCmd(), agentStopCmd(), agentRestartCmd(), agentRebaseCmd(), agentRebuildCmd(), agentMemoryCmd(), agentRetireCmd(), agentClearContextCmd(), agentTellCmd(), agentPlanCmd(), agentDirCmd(), agentAttachCmd(), agentInfoCmd())
+	c.AddCommand(agentListCmd(), agentStatsCmd(), agentNewCmd(), agentDeleteCmd(), agentPaneCmd(), agentStartCmd(), agentStopCmd(), agentRestartCmd(), agentRebaseCmd(), agentRebuildCmd(), agentMemoryCmd(), agentRetireCmd(), agentResumeCmd(), agentClearContextCmd(), agentTellCmd(), agentMailCmd(), agentPlanCmd(), agentDirCmd(), agentAttachCmd(), agentInfoCmd())
 	return c
 }
 
@@ -223,7 +233,48 @@ func NewAgentCmd() *cobra.Command {
 // NewPrCmd builds the `pr` command tree (review/merge pull requests).
 func NewPrCmd() *cobra.Command {
 	c := &cobra.Command{Use: "pr", Short: "Inspect and merge pull requests (merge-intents)"}
-	c.AddCommand(prListCmd(), prInfoCmd(), prReviewCmd(), prVerifyCmd(), prApproveCmd(), prRejectCmd(), prScrapCmd(), prLintCmd(), prMergeCmd(), prMilestoneCmd())
+	c.AddCommand(prListCmd(), prNextCmd(), prInfoCmd(), prReviewCmd(), prVerifyCmd(), prApproveCmd(), prRejectCmd(), prScrapCmd(), prLintCmd(), prMergeCmd(), prMilestoneCmd())
+	return c
+}
+
+// prNextCmd is `task next` for the reviewer's pool, which is PRs — hence its home here, since a
+// task noun answering with a PR would lie. It answers with no reviewer running.
+func prNextCmd() *cobra.Command {
+	var agent, role string
+	c := &cobra.Command{
+		Use: "next", Short: "Show which PR a reviewer would pick up next, and why each other PR would not be reviewed",
+		Long: "Show which PR a reviewer would pick up next, and why each other open PR would not be.\n\n" +
+			"Answers for a hypothetical reviewer holding nothing, so it works with no reviewer running.\n" +
+			"--agent asks on behalf of one that exists, whose own held review can rule everything out.\n\n" +
+			"The states listed here are the ones that let a PR sit unreviewed while a reviewer idled:\n" +
+			"no review was requested, one is already claimed, the PR has left \"open\", or it is an\n" +
+			"interim milestone that was always yours to merge.",
+		Args: cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			if role != "" && role != "reviewer" {
+				return fmt.Errorf("only a reviewer is served PRs — for %s ask `sindri task next --role %s`", role, role)
+			}
+			return withBackend(func(b backend) error {
+				if agent == "" {
+					role = "reviewer" // the hypothetical; a named agent brings its own role
+				}
+				x, err := b.NextTask(agent, role)
+				if err != nil {
+					return err
+				}
+				// The noun holds for a named agent too: everyone but a reviewer is served the
+				// backlog, and printing it here would answer a task question under a PR command.
+				if !nextIsAboutPRs(x.Role) {
+					return wrongNounRefusal(x.Role, agent)
+				}
+				fmt.Print(theme.FormatNext(x))
+				return nil
+			})
+		},
+	}
+	c.Flags().StringVar(&agent, "agent", "", "ask on behalf of this reviewer (its own held review can rule everything out)")
+	c.Flags().StringVar(&role, "role", "", "the role to ask as; only `reviewer` is served PRs")
+	c.MarkFlagsMutuallyExclusive("agent", "role")
 	return c
 }
 
@@ -350,30 +401,152 @@ func prLintCmd() *cobra.Command {
 }
 
 func prListCmd() *cobra.Command {
-	return &cobra.Command{
+	var filter string
+	c := &cobra.Command{
 		Use: "list", Short: "List PRs", Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
+			f, err := api.ParsePRFilter(filter)
+			if err != nil {
+				return err
+			}
 			return withBackend(func(b backend) error {
-				prs, err := b.PRs()
+				all, err := b.PRs()
 				if err != nil {
 					return err
 				}
-				for _, p := range prs {
-					status := p.Status
-					if p.Kind == "interim" { // ◇ = mid-task contribution (vs a final, task-done PR)
-						status = "◇" + status
-					}
-					// Who is reviewing it, alongside who wrote it — the same column the PRs tab shows,
-					// from the same field, so the two front-ends cannot answer differently.
-					fmt.Printf("%-14s %-13s %4s  %-10s %-10s %s\n",
-						p.ID, status, shortAge(p.CreatedAt), p.Agent, dash(p.Reviewer), p.Branch)
+				// The roster, because half of "waiting on you" is whether a reviewer runs in that
+				// PR's repo (-> api.PRNeedsUser). A second round trip and the cheapest available:
+				// /state is how a front-end learns who is running, off the hub's existing snapshot.
+				st, err := b.State()
+				if err != nil {
+					return err
 				}
-				if len(prs) == 0 {
+				// Grouped by repo, the order the PRs tab shows (-> api.SortedPRs). This listing is
+				// fleet-wide, so without the repo the rows it gathers from elsewhere are unplaceable.
+				prs := api.SortedPRs(api.FilterPRs(f, all), st.Projects)
+				// And sectioned as the PRs tab is, so both front-ends read the same way.
+				local := localProject(st.Projects)
+				var rows []listRow
+				for _, p := range prs {
+					status := api.StatusLabel(p.Status, p.Approvals)
+					if p.Kind == "interim" { // the interim mark: a mid-task contribution, not a task-done PR
+						status = theme.MarkPRInterim + status
+					}
+					// Repo first, as `agent list` prints it: this listing crosses repos, so the column
+					// is what places each row. Then who is reviewing it beside who wrote it, the PRs
+					// tab's own columns from the same fields, so the two cannot answer differently.
+					line := fmt.Sprintf("%-10.10s %-14s %-13s %4s  %-10s %-10s %s",
+						api.RepoName(st.Projects, p.Project), p.ID, status, shortAge(p.CreatedAt), p.Agent,
+						dash(p.Reviewer), p.Branch)
+					wait := api.PRWaitReason(p, st.Agents)
+					if why := prWaitRow(wait); why != "" {
+						line += "  ! " + why
+					}
+					rows = append(rows, listRow{line, listGroupFor(p.Project, local, wait != api.PRWaitNone)})
+				}
+				printGrouped(rows)
+				if n := len(all) - len(prs); n > 0 {
+					fmt.Fprintf(os.Stderr, "(filter %s — %d of %d PR(s) shown)\n", f, len(prs), len(all))
+				} else if len(prs) == 0 {
 					fmt.Fprintln(os.Stderr, "no PRs")
+				}
+				// Last, where a closing line is read: the same set the TUI counts on the PRs handle.
+				// Over every PR, not the filtered rows — a PR waits on you whether or not this
+				// listing happens to show it, exactly as `task list` reports gated work.
+				if s := prNeedsYouSummary(all, st.Agents); s != "" {
+					fmt.Fprintln(os.Stderr, "\n"+s)
 				}
 				return nil
 			})
 		},
+	}
+	// Defaults to "all", the same reasoning taskListCmd gives: a listing is a record, not the
+	// TUI's redrawn view, which opens on "active" instead.
+	c.Flags().StringVar(&filter, "filter", string(api.PRFilterAll),
+		"which PRs to list: "+api.PRFilterNames()+" (active = open, plus anything closed within "+
+			api.ActiveWindow.String()+")")
+	return c
+}
+
+// prWaitWords is how each reason (-> api.PRWaitReason) reads: the row's short why, and how the
+// closing line names the group with the command that clears it. Rendering only — a reason added to
+// the rule arrives here as a gap the tests catch, never as a confident wrong remedy.
+var prWaitWords = map[api.PRWait]struct{ row, fix string }{
+	api.PRWaitMergeFailed: {
+		"a merge died in flight — the base branch needs a look",
+		"left mid-merge with the outcome unknown — inspect the base branch (`sindri pr info <id>`)",
+	},
+	api.PRWaitMerge: {
+		"waiting on your merge",
+		"approved and unmerged — `sindri pr merge <id>`",
+	},
+	api.PRWaitUserGated: {
+		"user-gated: no reviewer is asked for an interim PR",
+		"user-gated, so no reviewer will look — `sindri pr approve <id>`",
+	},
+	api.PRWaitReview: {
+		"no reviewer is running in this repo",
+		"waiting on a review with no reviewer running in their repo — review one yourself " +
+			"(`sindri pr approve <id>`) or start a reviewer (`sindri agent new --role reviewer`)",
+	},
+}
+
+// prWaitRow is the marker a listed row carries, "" when the PR waits on nobody. A reason with no
+// words yet says only that it needs you: naming the wrong remedy is worse than naming none.
+func prWaitRow(w api.PRWait) string {
+	if w == api.PRWaitNone {
+		return ""
+	}
+	if words, ok := prWaitWords[w]; ok {
+		return words.row
+	}
+	return "needs you"
+}
+
+// prNeedsYouSummary names the PRs nothing but the user will move, "" when none — an approved one
+// looks finished, a stranded one busy. Most stuck first, each with the command that clears it.
+func prNeedsYouSummary(prs []api.PR, agents []api.AgentView) string {
+	byReason := map[api.PRWait][]string{}
+	n := 0
+	for _, p := range prs {
+		if w := api.PRWaitReason(p, agents); w != api.PRWaitNone {
+			byReason[w] = append(byReason[w], p.ID)
+			n++
+		}
+	}
+	if n == 0 {
+		return ""
+	}
+	var parts []string
+	for _, w := range api.PRWaits {
+		ids, ok := byReason[w]
+		if !ok {
+			continue
+		}
+		fix := "needs you" // as prWaitRow: an unrendered reason still gets its PRs named
+		if words, ok := prWaitWords[w]; ok {
+			fix = words.fix
+		}
+		parts = append(parts, strings.Join(ids, ", ")+" "+fix)
+	}
+	return fmt.Sprintf("%d PR(s) need you: %s.", n, strings.Join(parts, "; "))
+}
+
+// reviewBadge renders one review verdict: its state, verdict, author and when, marking a
+// planner's advisory badge for what it is — a second opinion, never the approval that satisfies
+// the merge gate.
+func reviewBadge(r api.Review) string {
+	switch {
+	case r.Verdict != "":
+		who := r.Author
+		if r.Advisory {
+			who += " (advisory)"
+		}
+		return fmt.Sprintf("%s by %s at %s", r.Verdict, who, eventTime(r.VerdictAt))
+	case r.Author != "":
+		return "in review by " + r.Author
+	default:
+		return "unassigned"
 	}
 }
 
@@ -391,15 +564,37 @@ func prInfoCmd() *cobra.Command {
 				if p.Kind == "interim" {
 					kind = "interim (mid-task contribution)"
 				}
-				fmt.Printf("%s  [%s]  %s  by %s\nbranch %s → %s\n", p.ID, p.Status, kind, p.Agent, p.Branch, p.Base)
+				status := api.StatusLabel(p.Status, api.ApprovalCount(d.Reviews))
+				fmt.Printf("%s  [%s]  %s  by %s\nbranch %s → %s\n", p.ID, status, kind, p.Agent, p.Branch, p.Base)
+				// The same few lines the TUI shows, from the same classification: where this PR
+				// has got to, before the diff a reader would otherwise scroll past to find out.
+				for _, ms := range api.PRLifecycle(d.History, d.Reviews) {
+					fmt.Println(lifecycleLine(ms))
+				}
 				if p.Feedback != "" {
 					fmt.Printf("feedback: %s\n", p.Feedback)
+				}
+				for _, r := range d.Reviews {
+					fmt.Println("review: " + reviewBadge(r))
 				}
 				fmt.Printf("\n%s\n", strings.TrimSpace(d.Diff))
 				return nil
 			})
 		},
 	}
+}
+
+// lifecycleLine renders one milestone for a listing: when, what, who. Same fields as the TUI's,
+// worded for a terminal that is not redrawn.
+func lifecycleLine(ms api.PRMilestone) string {
+	line := fmt.Sprintf("%-6s %-12s", shortAge(ms.At), ms.Event)
+	if ms.Who != "" {
+		line += " by " + ms.Who
+	}
+	if ms.Note != "" {
+		line += "  " + ms.Note
+	}
+	return strings.TrimRight(line, " ")
 }
 
 func prMergeCmd() *cobra.Command {

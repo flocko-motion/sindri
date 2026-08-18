@@ -40,6 +40,10 @@ var (
 // NOW just above the input box, and everything higher is transcript describing what WAS.
 const statusTail = 12
 
+// promptTail is the live region for a question. Deeper than statusTail because a status line is one
+// row and a prompt is a box: its hints sit just above the input, its question at the box's top.
+const promptTail = 30
+
 // paneTail returns the last n lines of a captured pane.
 func paneTail(screen string, n int) string {
 	lines := strings.Split(screen, "\n")
@@ -70,19 +74,33 @@ func (Claude) DetectState(screen string) agent.State {
 		return agent.Unknown
 	}
 
-	// Blocked: Claude is waiting on a human response. Checked before idle because a
-	// prompt box (❯) is also visible while blocked.
+	// Blocked: Claude is waiting on a human response. Read in the live region only, on the same
+	// grounds as the banner below: a prompt is drawn just above the input box, and the same words
+	// higher up are something the agent SAID. Matched over the whole pane, an agent's own sentence
+	// "What would you like to clarify?" reported a running turn as blocked — and let go again when
+	// the line scrolled off, so the word tracked where a sentence sat rather than what was happening.
+	// Checked before idle because a prompt box (❯) is also visible while blocked.
+	prompt := paneTail(screen, promptTail)
+	p := strings.ToLower(prompt)
+	asks := func(subs ...string) bool { // every substring present in the live region
+		for _, sub := range subs {
+			if !strings.Contains(p, sub) {
+				return false
+			}
+		}
+		return true
+	}
 	switch {
-	case has("enter to select", "esc to cancel") && hasNav(s):
+	case asks("enter to select", "esc to cancel") && hasNav(p):
 		return agent.Blocked // a selection form
-	case has("run a dynamic workflow?", "esc to cancel"):
+	case asks("run a dynamic workflow?", "esc to cancel"):
 		return agent.Blocked
-	case has("do you want to proceed?"):
+	case asks("do you want to proceed?"):
 		return agent.Blocked // permission / confirmation prompt
-	case has("waiting for permission"):
+	case asks("waiting for permission"):
 		return agent.Blocked
-	case (has("do you want to") || has("would you like to")) &&
-		(strings.Contains(s, "❯") || yesNoOption.MatchString(screen)):
+	case (asks("do you want to") || asks("would you like to")) &&
+		(asks("❯") || yesNoOption.MatchString(prompt)):
 		return agent.Blocked
 	}
 

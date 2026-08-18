@@ -51,17 +51,27 @@ type Deps interface {
 	Container(project, name string) string
 	// Notify wakes the board (an SSE change notification).
 	Notify()
-	// InjectWhenReady delivers a message into an agent's session once it's ready.
-	InjectWhenReady(project, name, text string) error
+	// Deliver sends a message to an agent the way d says: mail keeps it until the agent reads it, a
+	// push types it into the session now, and a sender states both (-> delivery.go). This is how
+	// every hub-originated message reaches an agent — a bare injection is push-only by omission,
+	// which is exactly the silent loss mail exists to prevent.
+	Deliver(project, name, text string, d Delivery) error
 	// Interrupt aborts an agent's current operation (sends ESC to its session), so a
 	// scrapped-task notice lands on an idle prompt rather than queuing behind work.
 	Interrupt(project, name string) error
 	// AgentAlive reports whether an agent's pod is currently running.
 	AgentAlive(project, name string) bool
+	// AgentIdle reports an agent sitting at an empty prompt, from the watchdog's last observation.
+	// What it answers is whether a message sent NOW would be acted on: text typed into a running
+	// turn lands in the input box and dies there when the turn ends.
+	AgentIdle(project, name string) bool
 	// SessionAlive reports whether an agent's tmux session is live.
 	SessionAlive(project, name string) bool
 	// TaskComments returns a task's comments for display.
 	TaskComments(project, id string) []store.Comment
+	// AddTaskComment posts on a task's thread as author — the write half of TaskComments, for a
+	// workflow step whose record belongs where the user reads it rather than in an agent's log.
+	AddTaskComment(project, id, author, body string) error
 	// Subscribe returns a change-notification channel and an unsubscribe func — how
 	// the directive loop waits for work.
 	Subscribe() (chan struct{}, func())
@@ -74,14 +84,23 @@ type Deps interface {
 	ContextUsage(project, name string) (tokens, window int, ok bool)
 }
 
+// clearArmed reports whether a human has armed a context clear for this agent. It is handed no new
+// leaf work while that stands: the clear fires at the boundary it is already at, and a task claimed
+// in between would be cut in half by it (-> agent.Service.SetClearArmed).
+func (e *Engine) clearArmed(project, name string) bool {
+	a, ok, err := e.store.For(project).GetAgent(name)
+	return err == nil && ok && a.ClearArmed
+}
+
 // Engine is the workflow orchestrator: it owns the store and drives the lifecycle
 // steps, reaching the rest of the hub through Deps.
 type Engine struct {
-	store   *store.Store
-	deps    Deps
-	sources []tasks.Source // external task sources, wired in at New; ownedSource is always added per-project
-	gates   []gate.Gate    // submit-path quality gates, wired in via WithGates; openspec today
-	pre     preflight      // serialises the reference-move PR checks (-> prcheck.go)
+	store      *store.Store
+	deps       Deps
+	sources    []tasks.Source // external task sources, wired in at New; ownedSource is always added per-project
+	gates      []gate.Gate    // submit-path quality gates, wired in via WithGates; openspec today
+	pre        preflight      // serialises the reference-move PR checks (-> prcheck.go)
+	runCancels runCancelSet   // run ids killed mid-execution (-> execrun.go)
 }
 
 // New builds the workflow engine over the hub's store, its Deps implementation, and the external

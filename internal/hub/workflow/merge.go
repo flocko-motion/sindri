@@ -76,13 +76,19 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 	if a, ok, _ := ps.GetAgent(pr.Agent); ok {
 		workspace, wt = a.Workspace, filepath.Join(root, a.Workspace)
 	}
-	switch res := repo.MergeBranch(root, wt, pr.Branch, pr.Base); res.Status {
+	tk, _, _ := ps.GetTask(pr.Task)
+	desc := tk.Title
+	if desc == "" {
+		desc = pr.Task
+	}
+	mergeMsg := conventionalCommit(tk.Type, pr.Task, desc)
+	switch res := repo.MergeBranch(root, wt, pr.Branch, pr.Base, mergeMsg); res.Status {
 	case repo.MergeConflict:
 		pr.Status, pr.Feedback = "open", "" // no longer mergeable; back to review after the worker resolves
 		_ = ps.PutPR(pr)
 		_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "resolving"})
 		_ = ps.LogPR(pr.ID, "conflict", "rebase onto "+pr.Base+" conflicts: "+strings.Join(res.Files, ", "))
-		_ = e.deps.InjectWhenReady(project, pr.Agent, MsgResolveNeeded(pr.Base, res.Files))
+		_ = e.deps.Deliver(project, pr.Agent, MsgResolveNeeded(pr.Base, res.Files), MailAndPush)
 		e.deps.Notify()
 		return store.PR{}, fmt.Errorf("%s conflicts with %s — sent to %s to resolve; it returns for review once clean", prID, pr.Base, pr.Agent)
 	case repo.MergeRebaseErr:
@@ -119,6 +125,23 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 		}
 		partial = len(open) > 0
 	}
+	// THE INVARIANT, whatever shape the PR has: a merge never closes a task over work still open
+	// beneath it. A task that gained a child while its PR was out reaches here reading as finished,
+	// and closing it there is the incident all of this traces back to. Children rather than workable
+	// subtasks, because one still awaiting the user's verdict is work nobody has done either.
+	if !partial {
+		open, oerr := ps.OpenChildIDs(pr.Task)
+		if oerr != nil {
+			return store.PR{}, oerr
+		}
+		partial = len(open) > 0
+		// It is a feature now, so the merge is a milestone on it: promoting here puts it on the one
+		// path that resumes an agent inside a feature, rather than a second one beside it.
+		if partial && !onFeature && holder.Task == pr.Task {
+			e.promoteToFeature(project, pr.Agent, pr.Task)
+			onFeature = true
+		}
+	}
 	if partial {
 		if a, ok, _ := ps.GetAgent(pr.Agent); ok {
 			_ = git.RebaseOnto(filepath.Join(root, a.Workspace), pr.Branch, pr.Base) // ff past the merge
@@ -127,12 +150,12 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 			_ = ps.Log(pr.Agent, "merged", prID+" (milestone)")
 			_ = ps.LogPR(prID, "merged", "milestone into "+pr.Base)
 			e.resumeContainer(project, pr.Agent)
-			_ = e.deps.InjectWhenReady(project, pr.Agent, MsgMilestoneMerged(prID))
+			_ = e.deps.Deliver(project, pr.Agent, MsgMilestoneMerged(prID), MailAndPush)
 		} else {
 			_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "working"})
 			_ = ps.Log(pr.Agent, "merged", prID+" (interim)")
 			_ = ps.LogPR(prID, "merged", "interim contribution into "+pr.Base)
-			_ = e.deps.InjectWhenReady(project, pr.Agent, MsgContributionMerged(prID, pr.Task))
+			_ = e.deps.Deliver(project, pr.Agent, MsgContributionMerged(prID, pr.Task), MailAndPush)
 		}
 		e.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
 		e.deps.Notify()
@@ -155,7 +178,7 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 	_ = ps.SetState(store.AgentState{Agent: pr.Agent, Phase: rest})
 	_ = ps.Log(pr.Agent, "merged", prID)
 	_ = ps.LogPR(prID, "merged", "into "+pr.Base)
-	_ = e.deps.InjectWhenReady(project, pr.Agent, MsgMerged(prID))
+	_ = e.deps.Deliver(project, pr.Agent, MsgMerged(prID), MailAndPush)
 	e.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
 	e.deps.Notify()
 	return pr, nil

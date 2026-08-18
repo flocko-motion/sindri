@@ -58,11 +58,27 @@ func (m *model) submitInput() tea.Cmd {
 	cl, target := m.cl, m.inputTarget
 	switch m.mode {
 	case inputTell:
+		// A signed-out agent takes the message through a choice rather than a refusal: the remedy
+		// the refusal names is one of the options (-> openTellChoice).
+		if m.agentReadsSignedOut(target) {
+			m.openTellChoice(target, v)
+			return nil
+		}
+		return tellCmd(cl, target, v)
+	case inputMail:
+		// No signed-out question here, unlike tell: mail never touches the session, so a pane that
+		// cannot receive anything is exactly the case mail is FOR.
+		return mutateThenRefresh(cl, func() error { return cl.MailAgent(target, v) })
+	case inputRunCommand:
+		// Against this repo's own checkout, the target only a human has — an agent's workspace is
+		// the agent's to queue. Not scheduled inline: the queue answers at once with a position,
+		// and the refresh is what puts the new row on the tab.
 		return func() tea.Msg {
-			if err := cl.Tell(target, v, "user"); err != nil {
+			if _, err := cl.ScheduleRun(v, "", "", ""); err != nil {
 				return errModalMsg{err}
 			}
-			return nil
+			st, _ := cl.State()
+			return polledMsg(st)
 		}
 	case inputComment:
 		// Refreshed after: a GitHub issue's thread is re-read on the way back, so the comment

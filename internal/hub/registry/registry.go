@@ -27,6 +27,10 @@ type Caller struct {
 	Task         string // the task or subtask it holds; carried so a blocked verb can name the work
 	Phase        string // the agent's current phase (working|submitted|resolving|idle|…), gating phase-specific verbs
 	InChat       bool   // a member of the user's chatroom: shows "chat"
+	// Escalation is the question this agent stopped on, waiting for the user ("" = not escalated).
+	// The QUESTION rather than a flag, so a verb held back by it answers in the agent's own words —
+	// the state is one the agent asked for, and hearing its own question back is what identifies it.
+	Escalation string
 }
 
 // Command is one hub-side verb the browser can invoke.

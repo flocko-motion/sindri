@@ -45,6 +45,23 @@ type Usage struct {
 	MemoryLimitBytes int64
 }
 
+// The two things UsedBytes can count, which is the difference between the backends: containers
+// sharing the host kernel take memory as they use it, a micro-VM takes its whole limit when it
+// starts. Named so a reader of the figure knows which question it answers.
+const (
+	BasisInUse    = "in use"
+	BasisReserved = "reserved"
+)
+
+// Capacity is the fleet's memory situation: what running pods cost the machine (UsedBytes) against
+// the ceiling they draw from (TotalBytes), in bytes, with Basis naming what Used counts. A zero
+// TotalBytes means the backend could not say.
+type Capacity struct {
+	UsedBytes  int64
+	TotalBytes int64
+	Basis      string // BasisInUse | BasisReserved
+}
+
 // NetChannel is the macOS agent TCP channel: a unix socket can't cross the VM
 // boundary, so the hub binds at BindAddr and pods dial DialHost (SINDRI_HUB_ADDR).
 // Per-backend: podman forwards host.containers.internal to loopback; apple-container
@@ -88,6 +105,12 @@ type Runtime interface {
 	Diagnose(ctx context.Context, name string) string
 	// Stats snapshots memory usage vs limit, to show how close a pod is to its ceiling.
 	Stats(ctx context.Context, name string) (Usage, error)
+	// MemoryCapacity reports the whole fleet's memory against the ceiling it draws from, so a
+	// caller can tell whether another agent fits. The backend answers for the reason DefaultMemory
+	// is its to state: a shared-kernel container draws host memory as it uses it and may be
+	// overcommitted, a micro-VM reserves its limit up front and refuses to start when the
+	// reservation does not fit, and podman on macOS is bounded by its VM rather than by the Mac.
+	MemoryCapacity(ctx context.Context) (Capacity, error)
 	// AgentChannel reports the macOS TCP channel; backend-specific networking.
 	AgentChannel() (NetChannel, error)
 	Logs(name string, tail int) string
@@ -110,6 +133,12 @@ var active Runtime = noop{}
 // Use selects the container backend for this process. Called once at startup.
 func Use(r Runtime) { active = r }
 
+// UseDefault restores the unwired default — reads report nothing present, mutations error. What a
+// caller that wired a backend for a moment puts back, so what follows starts where an unwired
+// process does: a partial stand-in left behind panics the first time anything reaches a method it
+// never implemented.
+func UseDefault() { active = noop{} }
+
 // errNoRuntime is returned by the no-op backend's mutating ops.
 var errNoRuntime = errors.New("no container runtime configured")
 
@@ -127,6 +156,7 @@ func (noop) Running(string) bool                                            { re
 func (noop) RunningContext(context.Context, string) bool                    { return false }
 func (noop) Diagnose(context.Context, string) string                        { return "no container runtime configured" }
 func (noop) Stats(context.Context, string) (Usage, error)                   { return Usage{}, errNoRuntime }
+func (noop) MemoryCapacity(context.Context) (Capacity, error)               { return Capacity{}, errNoRuntime }
 
 // AgentChannel returns the podman-style loopback default, not an error: an unwired
 // backend has a legitimate config, and production always wires a real one via Use.
@@ -179,6 +209,9 @@ func Diagnose(ctx context.Context, name string) string { return active.Diagnose(
 
 // Stats returns a point-in-time resource snapshot (memory usage vs limit) for a pod.
 func Stats(ctx context.Context, name string) (Usage, error) { return active.Stats(ctx, name) }
+
+// MemoryCapacity reports the fleet's memory against the ceiling the wired backend draws from.
+func MemoryCapacity(ctx context.Context) (Capacity, error) { return active.MemoryCapacity(ctx) }
 
 // AgentChannel reports how the macOS agent TCP channel is bound and addressed.
 func AgentChannel() (NetChannel, error) { return active.AgentChannel() }

@@ -11,12 +11,12 @@ import (
 // "reopen" (Tasks) — the same key, gated by tab, the way `C` already covers close/clear-context.
 func TestOptionsReopensAClosedTaskOnTheTasksTab(t *testing.T) {
 	m := newModel(nil, nil, "")
-	m.tab, m.filter = 0, filterAll // the default filter hides closed tasks — this one needs to show
+	m.tab, m.filter = 0, api.FilterAll // the default filter hides closed tasks — this one needs to show
 	m.state = api.BoardState{Tasks: []api.Task{{ID: "sd-abc123", Title: "a task", Status: "closed"}}}
 	if id := m.selID(); id != "sd-abc123" {
 		t.Fatalf("expected sd-abc123 selected, got %q", id)
 	}
-	m.onKey(keyOptions)
+	m.onKey(keyOptions) // opens the reopen form: a destination, so it is direct
 	if !m.form.active || !strings.Contains(m.form.title, "sd-abc123") {
 		t.Errorf("%q should open sd-abc123's reopen form, got active=%v title=%q", keyOptions, m.form.active, m.form.title)
 	}
@@ -37,7 +37,7 @@ func TestOptionsDoesNotReopenAnOpenTask(t *testing.T) {
 // TestTaskReopenable is the gate itself: closed only, and false with nothing selected.
 func TestTaskReopenable(t *testing.T) {
 	m := newModel(nil, nil, "")
-	m.tab, m.filter = 0, filterAll
+	m.tab, m.filter = 0, api.FilterAll
 	m.state = api.BoardState{Tasks: []api.Task{
 		{ID: "sd-1", Status: "closed"},
 		{ID: "sd-2", Status: "open"},

@@ -50,6 +50,20 @@ func newWorkRepo(t *testing.T, agent, branch string) (root, base string) {
 	return root, base
 }
 
+// runQueuedGate drives a submit/contribute gate through the queue exactly as hub/runwatch.go
+// would, one tick at a time — the tests that call it exercise the SAME code path production does,
+// just without a ticker to wait on. Fails the test if nothing was queued.
+func runQueuedGate(t *testing.T, e *Engine) {
+	t.Helper()
+	project, id, ok := e.NextQueuedRun()
+	if !ok {
+		t.Fatal("expected a queued gate run")
+	}
+	if err := e.ExecuteRun(project, id); err != nil {
+		t.Fatalf("ExecuteRun(%s): %v", id, err)
+	}
+}
+
 // TestContributeThenMergeKeepsTaskOpen is the interim-contribution happy path:
 // `contribute` records a GATED interim PR (open, no reviewer requested), and merging
 // it keeps the task open and puts the worker straight back to "working" on the SAME
@@ -79,6 +93,7 @@ func TestContributeThenMergeKeepsTaskOpen(t *testing.T) {
 	if code, err := e.CmdContribute(caller, []string{"checkpoint"}, io.Discard); err != nil || code != 0 {
 		t.Fatalf("CmdContribute: code=%d err=%v", code, err)
 	}
+	runQueuedGate(t, e)
 
 	pr, ok, _ := ps.GetPR("pr-" + task)
 	if !ok {

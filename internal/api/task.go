@@ -57,8 +57,12 @@ type TaskSpec struct {
 
 // Done reports whether a task is in a terminal (done) state — the "closed" segment of
 // the open/closed filter.
-func Done(t Task) bool {
-	switch t.Status {
+func Done(t Task) bool { return DoneStatus(t.Status) }
+
+// DoneStatus is Done for a caller holding a status word rather than the task — a row being
+// coloured, a stored status being read back. The terminal words are listed once, here.
+func DoneStatus(status string) bool {
+	switch status {
 	case "closed", "approved", "merged":
 		return true
 	}
@@ -95,6 +99,29 @@ func ReleasedByPriority(tasks []Task) map[string]bool {
 // worker, so a backlog full of them looks busy while nothing can be claimed — which is why the
 // count is surfaced rather than left for someone to work out from the rows.
 func AwaitingVerdict(t Task) bool { return Open(t) && t.Approval == "pending" }
+
+// TaskNeedsUser reports a task stopped behind a gate only the user can open — awaiting a verdict,
+// or unreleased by any priority (released is ReleasedByPriority's answer, which reads the tree).
+// Both gates must pass for a worker to be handed it. What the badge counts and what a red row says.
+// A REJECTED task is out whatever its rating: the user has ruled, rating releases nothing while the
+// rejection stands, and the next move belongs to whoever revises it.
+func TaskNeedsUser(t Task, released bool) bool {
+	if !Open(t) || t.Approval == "rejected" {
+		return false
+	}
+	return t.Approval == "pending" || !released
+}
+
+// CountTasksNeedingUser is how many of these tasks are stopped behind one of those gates.
+func CountTasksNeedingUser(tasks []Task) (n int) {
+	released := ReleasedByPriority(tasks)
+	for _, t := range tasks {
+		if TaskNeedsUser(t, released[t.ID]) {
+			n++
+		}
+	}
+	return n
+}
 
 // CountAwaitingVerdict is how many of these tasks are waiting on the user.
 func CountAwaitingVerdict(tasks []Task) (n int) {

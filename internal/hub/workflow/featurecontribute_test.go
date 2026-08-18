@@ -15,11 +15,15 @@ import (
 // merges. What goes up is the feature, named for the feature, and the worker keeps it across the
 // landing.
 func TestFeatureWorkerContributesTheBranch(t *testing.T) {
-	e, ps, c := featureWorker(t, true) // a subtask still open: mid-feature
+	e, ps, c, deps := featureWorker(t, true) // a subtask still open: mid-feature
 	var out strings.Builder
 	if code, err := e.CmdContribute(c, []string{"the parser is usable now"}, &out); err != nil || code != 0 {
 		t.Fatalf("CmdContribute: code=%d err=%v out=%s", code, err, out.String())
 	}
+	if !strings.Contains(out.String(), "queued") {
+		t.Errorf("the immediate reply should say the gate is queued, nothing has landed yet: %s", out.String())
+	}
+	runQueuedGate(t, e)
 
 	// Named for the FEATURE: the branch carries every checkpointed subtask, so a PR named for the
 	// subtask in hand would misdescribe what is in it.
@@ -43,8 +47,10 @@ func TestFeatureWorkerContributesTheBranch(t *testing.T) {
 	if st.Phase != "submitted" || st.Container != "td-EPIC" {
 		t.Errorf("state = {phase:%q container:%q}, want it waiting and still on the feature", st.Phase, st.Container)
 	}
-	if !strings.Contains(out.String(), "td-EPIC") {
-		t.Errorf("the reply should name what went up: %s", out.String())
+	// What went up is named in the message injected once the gate passes — the immediate reply
+	// could not have named it, since nothing had landed yet when it was sent.
+	if len(deps.injectedText) == 0 || !strings.Contains(deps.injectedText[len(deps.injectedText)-1], "td-EPIC") {
+		t.Errorf("the agent should be told what went up: %v", deps.injectedText)
 	}
 }
 
@@ -52,10 +58,11 @@ func TestFeatureWorkerContributesTheBranch(t *testing.T) {
 // with the same feature — the whole point of an interim landing. Closing td-EPIC here would finish a
 // feature that still has subtasks to do.
 func TestFeatureContributionMergeKeepsTheFeature(t *testing.T) {
-	e, ps, c := featureWorker(t, true)
+	e, ps, c, _ := featureWorker(t, true)
 	if code, err := e.CmdContribute(c, nil, io.Discard); err != nil || code != 0 {
 		t.Fatalf("CmdContribute: code=%d err=%v", code, err)
 	}
+	runQueuedGate(t, e)
 	pr, _, _ := ps.GetPR("pr-td-EPIC")
 	pr.Status = "approved"
 	if err := ps.PutPR(pr); err != nil {

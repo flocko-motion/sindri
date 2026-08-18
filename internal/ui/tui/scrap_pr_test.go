@@ -79,20 +79,35 @@ func TestScrapChoiceOffersTheSubtasks(t *testing.T) {
 	}
 }
 
-// TestPRFilterHidesScrapped: a scrapped PR is hidden in the default (unmerged) view
-// like merged, appears under filter=all, and is not shown by the merged-only filter.
+// TestPRFilterHidesScrapped: a scrapped PR with no recent change is hidden under open and
+// under the active default alike, appears under all, and is excluded by closed's opposite.
 func TestPRFilterHidesScrapped(t *testing.T) {
 	m := newModel(nil, nil, "")
-	m.prFilter = prFilterUnmerged
-	if m.prFilterShows("scrapped") {
-		t.Error("scrapped must be hidden in the unmerged (default) view")
+	_, tag := m.currentRepo()
+	m.state = api.BoardState{PRs: []api.PR{{ID: "pr-1", Project: tag, Status: "scrapped"}}}
+	shown := func() bool {
+		for _, r := range m.prRows() {
+			if r.id == "pr-1" {
+				return true
+			}
+		}
+		return false
 	}
-	m.prFilter = prFilterAll
-	if !m.prFilterShows("scrapped") {
-		t.Error("scrapped must appear under filter=all")
+
+	m.prFilter = api.PRFilterOpen
+	if shown() {
+		t.Error("scrapped must be hidden under open")
 	}
-	m.prFilter = prFilterMerged
-	if m.prFilterShows("scrapped") {
-		t.Error("the merged-only filter must not show scrapped")
+	m.prFilter = api.PRFilterActive
+	if shown() {
+		t.Error("scrapped with no recent change must be hidden under the active default")
+	}
+	m.prFilter = api.PRFilterAll
+	if !shown() {
+		t.Error("scrapped must appear under all")
+	}
+	m.prFilter = api.PRFilterClosed
+	if !shown() {
+		t.Error("scrapped must appear under closed")
 	}
 }

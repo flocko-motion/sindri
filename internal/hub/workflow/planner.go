@@ -55,7 +55,7 @@ func (e *Engine) AssignPlan(project, agent, goal, taskID string) error {
 		_ = e.deps.Interrupt(project, agent)
 	}
 	brief := MsgPlanAssignment(subject, taskID, e.deps.ArchitectureDoc(project), e.planReading(project))
-	if err := e.deps.InjectWhenReady(project, agent, brief); err != nil {
+	if err := e.deps.Deliver(project, agent, brief, MailAndPush); err != nil {
 		return err
 	}
 	st, _ := ps.GetState(agent)
@@ -188,8 +188,10 @@ const createTaskUsage = "usage: create-task [--parent <id>] [--type <task|featur
 	"  --parent    hang the task under an existing task or openspec change (os-*), so it joins that tree\n" +
 	"  --body      the task's description — what a worker needs in order to start\n" +
 	"  --priority  the order you propose this is worked in; `prioritise-task` changes it afterwards\n" +
-	"Approval is what releases work, and it is the user's alone. A priority you set is a proposed\n" +
-	"ordering: the task stays unclaimable until the user approves it."
+	"Approval answers \"have I read this?\" — it is the user's record of what they have seen, which is\n" +
+	"why an edit to a task returns it for a fresh one. Priority answers \"do I want this worked now?\"\n" +
+	"— their control over pacing. Neither is a guard against you: they are the user's levers over\n" +
+	"their own attention, and a task stays unclaimable until they have pulled both."
 
 // CreateTaskHelp is what the command registry advertises for create-task, so the verb list
 // and the verb's own usage describe one surface.
@@ -243,14 +245,18 @@ func parseTaskFlags(args []string) (TaskSpec, []string, error) {
 const editTaskUsage = "usage: edit-task <id> [--parent <id>] [--type <task|feature|bug|epic>] [--body <text>] [--labels a,b] [<new title...>]\n" +
 	"  --parent  hang this task under another task or openspec change — how a set of flat\n" +
 	"            proposals becomes a tree: propose the parent, then point each child at it\n" +
-	"  Only a task still awaiting the user's approval can be edited. Omitted fields are left as they are."
+	"  Any task you can see, whether or not the user has approved it. An edit returns the task\n" +
+	"  to the user for a fresh verdict, which also holds it out of the claim pools until they\n" +
+	"  have seen the change. Omitted fields are left as they are; the order work is done in is\n" +
+	"  `prioritise-task`'s."
 
 // EditTaskHelp is what the command registry advertises for edit-task.
-const EditTaskHelp = "revise a task you proposed, while it still awaits approval. " + editTaskUsage
+const EditTaskHelp = "revise any task, returning it to the user for re-approval. " + editTaskUsage
 
-// CmdEditTask repairs a planner's own proposal — retitle, body, or a parent, which is how flat
-// proposals become a tree. PENDING only: approval is the user taking the task as it stands, so
-// what a worker picks up is what they read.
+// CmdEditTask revises any task, approved or not — title, body, type, labels, or a parent, which is
+// how flat proposals become a tree. ONE consequence: the edit returns it to awaiting-review, since
+// approval is the user's record of having READ this task and not permission the planner must hold.
+// No split by field: which edits are "substantive" is a classification nothing tests.
 func (e *Engine) CmdEditTask(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) == 0 {
 		fmt.Fprintln(out, editTaskUsage)
@@ -263,15 +269,26 @@ func (e *Engine) CmdEditTask(c registry.Caller, args []string, out io.Writer) (i
 		return 2, nil
 	}
 	spec.Title = strings.TrimSpace(strings.Join(words, " "))
+	if spec.Priority != "" {
+		// One field, two verbs with opposite consequences: an edit un-approves and a re-ordering
+		// must not (-> CmdPrioritiseTask), so a rating here would mean whichever was reached for.
+		fmt.Fprintf(out, "edit-task doesn't rate a task — `prioritise-task %s <%s>` does, and it leaves the "+
+			"user's approval standing.\n", id, strings.Join(api.PriorityWords, "|"))
+		return 2, nil
+	}
 	if spec.Title == "" && spec.Parent == "" && spec.Type == "" && spec.Description == "" && len(spec.Labels) == 0 {
 		fmt.Fprintf(out, "nothing to change on %s\n%s\n", id, editTaskUsage)
 		return 2, nil
 	}
 	ps := e.store.For(c.Project)
-	appr, _ := ps.GetApproval(id)
-	if appr != "pending" {
-		fmt.Fprintf(out, "%s can't be edited: only a task still awaiting the user's approval can be (this one is %s). "+
-			"Propose a new task instead, or ask the user in the meeting room.\n", id, dash(appr))
+	// Read the row before the write: it is half of what changed, and gone once the edit lands. It
+	// also answers whether the task exists — the approval read here refused an absent id by accident.
+	before, ok, err := ps.GetTask(id)
+	if err != nil {
+		return 1, err
+	}
+	if !ok {
+		fmt.Fprintf(out, "no such task %q\n", id)
 		return 1, nil
 	}
 	if err := e.EditTask(c.Project, id, spec); err != nil {
@@ -279,10 +296,158 @@ func (e *Engine) CmdEditTask(c registry.Caller, args []string, out io.Writer) (i
 		fmt.Fprintf(out, "could not edit %s: %v\n", id, err)
 		return 1, nil
 	}
-	_ = e.RefreshTask(c.Project, id)
+	after, _, err := ps.GetTask(id)
+	if err != nil {
+		return 1, err
+	}
+	changed := taskChanges(before, after)
+	if len(changed) == 0 {
+		fmt.Fprintf(out, "nothing changed on %s%s\n", id, unownedNote(ps.OwnsTask(id)))
+		return 0, nil
+	}
+	// The verdict being cleared, carried into the record first: a rejection's reason lives in the
+	// approval row and nowhere else, and this is the write that would erase it.
+	verdict, why := ps.GetApproval(id)
+	if err := ps.SetApproval(id, "pending", ""); err != nil {
+		return 1, err
+	}
+	e.refreshCachedTask(c.Project, id)
+	_ = ps.Log(c.Agent, "edit-task", id+" — "+fieldNames(changed))
 	e.deps.Notify()
-	fmt.Fprintf(out, "%s updated — still awaiting the user's approval.\n", id)
+	// The holder first: it is the reader who acts on this, and it must not be the one left untold
+	// on the path where the record fails.
+	told := e.tellHolder(c.Project, id, changed)
+	// Recorded on the task itself, where the user reads it: "this was edited" without the what is
+	// not a record, and the planner's activity log is not where anyone looks for a task's history.
+	if cerr := e.deps.AddTaskComment(c.Project, id, c.Agent, editRecord(changed, verdict, why)); cerr != nil {
+		fmt.Fprintf(out, "%s was edited (%s) and is back awaiting the user's approval, but recording "+
+			"what changed on it failed: %v — the task carries no record of it, so say what changed in "+
+			"the meeting room.%s\n", id, fieldNames(changed), cerr, told)
+		return 1, nil
+	}
+	fmt.Fprintf(out, "%s updated (%s) — back to awaiting the user's approval, so it stays out of the claim "+
+		"pools until they have seen the change.%s\n", id, fieldNames(changed), told)
 	return 0, nil
+}
+
+// unownedNote explains an edit that wrote nothing: a mirrored task's content belongs to its own
+// source, and what sindri keeps for it is where it sits in the tree.
+func unownedNote(owned bool) string {
+	if owned {
+		return " — it already reads that way."
+	}
+	return ": its own source keeps its content, and what sindri owns for such a task is its place in " +
+		"the tree, so `--parent` is what edit-task changes here."
+}
+
+// taskChange is one field an edit moved, in parts: a reply names fields, the record carries values.
+type taskChange struct{ field, was, now string }
+
+// taskChanges is what an edit ACTUALLY moved, read off the stored rows either side of the write
+// rather than off the spec that asked for it: a field a task's own source owns is not sindri's to
+// write, and echoing the request back would report a change that never happened.
+func taskChanges(before, after store.Task) []taskChange {
+	all := []taskChange{
+		{"title", before.Title, after.Title},
+		{"type", before.Type, after.Type},
+		{"labels", before.Labels, after.Labels},
+		{"parent", before.ParentID, after.ParentID},
+		{"description", before.Description, after.Description},
+	}
+	var out []taskChange
+	for _, ch := range all {
+		if ch.was != ch.now {
+			out = append(out, ch)
+		}
+	}
+	return out
+}
+
+// fieldNames lists which fields moved — the short form, for a reply and a log line.
+func fieldNames(changes []taskChange) string {
+	names := make([]string, 0, len(changes))
+	for _, ch := range changes {
+		names = append(names, ch.field)
+	}
+	return strings.Join(names, ", ")
+}
+
+// editRecord is the comment left on the edited task: each field that moved, with the value it held
+// before. That value survives nowhere else, and it is what answers "what changed".
+func editRecord(changes []taskChange, verdict, why string) string {
+	var b strings.Builder
+	b.WriteString("edited " + fieldNames(changes) + ", and returned to you for approval.\n")
+	if verdict != "" {
+		fmt.Fprintf(&b, "\nThe verdict this replaces: %s%s\n", verdict, prefixed(" — ", why))
+	}
+	for _, ch := range changes {
+		fmt.Fprintf(&b, "\n%s was:\n%s\n\n%s is now:\n%s\n", ch.field, dash(ch.was), ch.field, dash(ch.now))
+	}
+	return b.String()
+}
+
+// prefixed joins sep and s, or nothing at all when s is empty.
+func prefixed(sep, s string) string {
+	if s == "" {
+		return ""
+	}
+	return sep + s
+}
+
+// tellHolder tells every agent whose UNIT OF WORK the edit touches, and reports back who. Not the
+// holder of the edited row: a worker holds a feature, and an edit to any subtask of it changes what
+// that worker is building. Matching only the row left the sibling case — the one that actually bites
+// — telling nobody. Un-approving reaches none of them: the claim gate decides what is handed OUT.
+func (e *Engine) tellHolder(project, id string, changes []taskChange) string {
+	ps := e.store.For(project)
+	roster, err := ps.Roster()
+	if err != nil {
+		return ""
+	}
+	units := enclosing(ps, id)
+	var told []string
+	for _, a := range roster {
+		st, _ := ps.GetState(a.Name)
+		var unit string
+		switch {
+		case units[st.Task]:
+			unit = st.Task // the subtask it is on, or the edit landed below that
+		case units[st.Container]:
+			unit = st.Container // the feature the edit sits inside
+		default:
+			continue
+		}
+		told = append(told, e.tellOne(project, a.Name, id, unit, fieldNames(changes)))
+	}
+	return strings.Join(told, "")
+}
+
+// enclosing is the edited task and every task above it — the units of work a change to it belongs
+// to. Any depth, matching the reach OpenSubtasks has: a feature contains its whole tree, so an edit
+// three levels down is still an edit to that feature. Stops on a stored loop rather than spinning.
+func enclosing(ps *store.ProjectStore, id string) map[string]bool {
+	out := map[string]bool{id: true}
+	links, err := ps.ParentLinks()
+	if err != nil {
+		return out
+	}
+	for at := links[id]; at != "" && !out[at]; at = links[at] {
+		out[at] = true
+	}
+	return out
+}
+
+// tellOne delivers the note to one holder, and says what happened for the planner's own reply.
+func (e *Engine) tellOne(project, agent, id, unit, fields string) string {
+	// A down agent is not waited on (InjectWhenReady would sit there): the record on the task is
+	// what reaches it when it comes back.
+	if !e.deps.AgentAlive(project, agent) {
+		return fmt.Sprintf(" %s holds %s but isn't running — it will read the change on the task.", agent, unit)
+	}
+	if err := e.deps.Deliver(project, agent, MsgTaskEdited(id, unit, fields), MailOnly); err != nil {
+		return fmt.Sprintf(" %s holds %s and could not be told (%v) — say so in the meeting room.", agent, unit, err)
+	}
+	return fmt.Sprintf(" %s holds %s and was told what changed.", agent, unit)
 }
 
 // childIDs are the ids of the tasks parented by id, in listing order.
@@ -333,8 +498,10 @@ func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int,
 		if comment != "" {
 			appr += " — " + comment
 		}
-		fmt.Fprintf(out, "%s  [%s]  %s  priority=%s\napproval: %s\nparent:   %s\nchildren: %s\n\n%s\n",
-			t.ID, t.Status, t.Title, dash(t.Priority), dash(appr),
+		// Type and labels are shown because a reviewer reads this: a `spec:<name>` label is what
+		// tells it which spec the work must be verified against, and it lives nowhere else.
+		fmt.Fprintf(out, "%s  [%s]  %s  priority=%s\napproval: %s\ntype:     %s\nlabels:   %s\nparent:   %s\nchildren: %s\n\n%s\n",
+			t.ID, t.Status, t.Title, dash(t.Priority), dash(appr), dash(t.Type), dash(t.Labels),
 			dash(t.ParentID), dash(strings.Join(childIDs(tasks, t.ID), ", ")), dash(t.Description))
 		// The same thread the TUI pane and `task info` show: an agent that just filed a finding
 		// (-> the comment verb) has to be able to read it back here, or the verb is worse than none.
@@ -369,7 +536,10 @@ func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int,
 // its held task and every descendant — the unit the hub assigned it.
 func (e *Engine) visibleTasks(c registry.Caller, tasks []store.Task) (map[string]bool, bool, error) {
 	switch c.Role {
-	case "planner", "coauthor":
+	case "planner", "coauthor", "reviewer":
+		// A reviewer reads everything for the same reason a planner does: it judges work against
+		// intent, and intent lives in the task, its neighbours and their comments. Reading grants no
+		// authority — it still cannot claim, mutate, or act on anything but the PR it was handed.
 		return nil, false, nil
 	}
 	st, err := e.store.For(c.Project).GetState(c.Agent)

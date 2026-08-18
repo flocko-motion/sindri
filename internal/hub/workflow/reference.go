@@ -83,17 +83,16 @@ func (e *Engine) referenceMoved(project, root, base, prevTip, tip string, advanc
 		if st.Branch == "" {
 			continue // nothing of its own in flight — it gets current material when it claims
 		}
-		// A branch under review must not move: the reviewer is reading the diff that was
-		// submitted. A rewrite is still worth saying, since it can invalidate that diff's base.
-		underReview := st.Phase == "submitted" || st.Phase == "resolving"
+		// A branch under review, resolving, or gating must not move — a reviewer or a queued gate
+		// is reading it right now, and a rebase would pull the ground out from under either.
+		underReview := st.Phase == "submitted" || st.Phase == "resolving" || st.Phase == "gating"
 		switch {
 		case !advanced:
 			_ = ps.Log(a.Name, "reference-rewritten", base)
-			_ = e.deps.InjectWhenReady(project, a.Name, MsgReferenceRewritten())
+			_ = e.deps.Deliver(project, a.Name, MsgReferenceRewritten(), MailAndPush)
 		case underReview:
-			// Not moving it is correct — the reviewer is reading the diff that was submitted — but
-			// the decision itself must leave a trace, or the drift it lets stand is unmeasurable
-			// afterwards. The count is the useful part: how stale a review-time PR actually gets.
+			// Leaving it unmoved is correct, but must leave a trace — otherwise the drift it lets
+			// stand is unmeasurable afterwards.
 			e.logReviewSkip(project, root, base, a)
 			continue
 		default:
@@ -103,11 +102,8 @@ func (e *Engine) referenceMoved(project, root, base, prevTip, tip string, advanc
 	e.deps.Notify()
 }
 
-// logReviewSkip records the one decision referenceMoved makes with no other trace: leaving a
-// submitted/resolving agent's branch unmoved. Measures the STANDING drift — the branch against
-// base, the same question refuseIfBehind asks before a submit — not this move's own delta: the
-// agent is never rebased here, so each unrebased sweep adds to the same drift, and only the
-// standing figure still means anything once it has happened more than once.
+// logReviewSkip records referenceMoved's one untraced decision: the STANDING drift against base,
+// not this move's own delta — only that keeps meaning once it happens more than once.
 func (e *Engine) logReviewSkip(project, root, base string, a store.Agent) {
 	wt := filepath.Join(root, a.Workspace)
 	behind, err := git.CountRange(wt, "HEAD", base)
@@ -120,16 +116,15 @@ func (e *Engine) logReviewSkip(project, root, base string, a store.Agent) {
 	_ = e.store.For(project).Log(a.Name, "reference-review-skip", msg)
 }
 
-// advanceAgent rebases one agent onto the advanced reference and tells it what arrived. A rebase it
-// cannot do cleanly is reported to the agent, not swallowed — it owns the conflict. A move that
-// brought nothing is still rebased, but not spoken about: a message that reliably says nothing
-// teaches an agent to skim the channel the hub also uses for verdicts and assignments.
+// advanceAgent rebases one agent onto the advanced reference and reports it. A conflict is
+// reported to the agent, not swallowed; a move that brought nothing stays silent, since a message
+// that reliably says nothing teaches an agent to skim the channel.
 func (e *Engine) advanceAgent(project, root, base, prevTip, tip string, a store.Agent) {
 	ps := e.store.For(project)
 	wt := filepath.Join(root, a.Workspace)
-	// Measure against the tip the move was DECIDED FROM, not the branch name: refwatch polls, so
-	// the branch can move again in between and re-resolving here reports a range nobody compared.
-	// Read before the rebase, which makes those commits indistinguishable from the agent's own.
+	// Measured against the tip the move was DECIDED FROM, not the branch name — re-resolving it
+	// here would report a range nobody compared, and only before the rebase is it distinguishable
+	// from the agent's own commits.
 	arrived, countErr := git.CountRange(wt, prevTip, tip)
 	incoming, _ := git.LogRange(wt, prevTip, tip, logCap)
 	rebaseErr := git.Rebase(wt, base)
@@ -145,11 +140,11 @@ func (e *Engine) advanceAgent(project, root, base, prevTip, tip string, a store.
 	}
 	if rebaseErr != nil {
 		_ = ps.Log(a.Name, "reference-rebase-skip", base+": "+rebaseErr.Error())
-		_ = e.deps.InjectWhenReady(project, a.Name, MsgReferenceNeedsRebase(incoming))
+		_ = e.deps.Deliver(project, a.Name, MsgReferenceNeedsRebase(incoming), MailAndPush)
 		return
 	}
 	_ = ps.Log(a.Name, "reference-advanced", "rebased onto "+base)
-	_ = e.deps.InjectWhenReady(project, a.Name, MsgReferenceAdvanced(incoming))
+	_ = e.deps.Deliver(project, a.Name, MsgReferenceAdvanced(incoming), PushOnly)
 }
 
 // commitList renders incoming commits as an indented block, or "" when there are none to name.

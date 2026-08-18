@@ -11,7 +11,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -22,33 +21,28 @@ import (
 	"github.com/flo-at/sindri/internal/ui/tui/scroll"
 )
 
-const (
-	filterOpen = iota
-	filterClosed
-	filterAll
-	filterActive
-)
-
-var filterNames = [...]string{"open", "closed", "all", "active"}
-
-// tuiSection is one dashboard tab: a key and a title. Unlike hub/commands' registry
-// (which pairs a key with a Count func — necessary hub-side, but a func can't cross
-// the wire), the front-end computes each badge itself, straight off the board it
-// already has (-> tabCount): Agents and PRs need the § scope toggle the hub knows
-// nothing about, so the count could never have been a value the hub resolved once.
+// tuiSection is one dashboard tab: a key and a title. The badge count is the front-end's own
+// (-> tabCount), because Agents and PRs obey the § scope toggle the hub knows nothing about, so it
+// could never be a number the hub resolved once. The attention marker beside it is the opposite
+// case: which rows wait on the user is one rule for the whole fleet, so it is read off the hub's
+// resolved sections (-> BoardState.SectionAttention) by key, the same line for every tab.
 var tuiSections = []tuiSection{
 	{"tasks", "Tasks"},
 	{"agents", "Agents"},
 	{"prs", "PRs"},
 	{"repos", "Repos"},
 	{"chat", "Meeting"},
+	// Appended, not slotted in near PRs, so every existing `m.tab == N` guard elsewhere keeps
+	// pointing at the tab it always has — inserting in the middle would shift Repos and Chat.
+	{"runs", "Runs"},
+	{"mail", "Mail"},
 }
 
 type tuiSection struct{ Key, Title string }
 
-// activeWindow is how recently a task must have changed to count as "active" alongside every
-// open task — wide enough that a task closed just before you glanced over doesn't vanish.
-const activeWindow = 2 * time.Hour
+// tabCount is how many tabs there are, as a constant — the per-tab cursor array needs one, and it
+// is asserted against tuiSections in the tests, so a tab added without widening it fails there.
+const tabCount = 7
 
 // inputMode is the active text-input modal (none = normal navigation).
 type inputMode int
@@ -56,7 +50,9 @@ type inputMode int
 const (
 	inputNone inputMode = iota
 	inputTell
+	inputMail
 	inputComment
+	inputRunCommand
 )
 
 type model struct {
@@ -70,7 +66,7 @@ type model struct {
 	w, h   int
 
 	tab    int
-	cursor [5]int // one per section (Tasks/Agents/PRs/Repos/Chat)
+	cursor [tabCount]int // one per section (Tasks/Agents/PRs/Repos/Chat/Runs/Mail)
 	list   scroll.Viewport
 	detail scroll.Viewport
 	// prMeta is the PRs tab's right column. It needs its own viewport because `detail` is spent on
@@ -78,8 +74,13 @@ type model struct {
 	// which is what put the reviews and history below the fold out of reach entirely.
 	prMeta scroll.Viewport
 
-	filter     int // Tasks tab: open/closed/all
-	prFilter   int // PRs tab: unmerged/merged/all (default hides merged)
+	filter     api.TaskFilter // Tasks tab: which segment of the backlog is shown (-> api.TaskFilters)
+	prFilter   api.PRFilter   // PRs tab: which segment is shown (-> api.PRFilters)
+	runFilter  api.RunFilter  // Runs tab: which segment is shown (-> api.RunFilters)
+	mailFilter api.MailFilter // Mail tab: unread or all (-> api.MailFilters)
+	mailAgent  string         // Mail tab: narrowed to this recipient ("" = every agent)
+	mailBody   string         // the selected message's full body, fetched (the board carries a preview)
+	mailBodyID int64          // which message mailBody belongs to
 	collapsed  map[string]bool
 	merging    map[string]bool   // PR ids the user just triggered a merge on — shown as a transient "merging" on the row until the hub confirms
 	busy       map[string]string // task ids the user just triggered a close/scrap on → the transient verb ("closing"/"deleting") shown on the row until the hub confirms
@@ -100,6 +101,7 @@ type model struct {
 	prView       string // which content the PR big pane shows: "diff" (default) | "lint"
 	reviewPrompt string // editable default review instruction (from the hub)
 	taskDetail   api.Task
+	runDetail    api.RunDetail
 	quit         bool
 
 	modalOverride      []string // when set, the detail modal shows these instead of the tab detail
@@ -112,6 +114,7 @@ type model struct {
 	composing  bool           // Chat tab: the multiline composer is open in the main pane
 	composer   textarea.Model // multiline chat compose (a single line can't hold deep talk)
 	modal      bool           // detail modal (full-screen) is open
+	menu       bool           // the space-prefix action menu is open (-> component_menu.go)
 	choice     choiceModalState
 	form       formState // active fill-in form (new/edit task)
 	flash      string    // transient status (e.g. "copied"), cleared on next key
@@ -142,7 +145,9 @@ func newModel(cl *client.HTTP, ch <-chan api.BoardState, root string) model {
 	// Tasks open on "active" — the open backlog plus whatever changed in the last couple of hours.
 	// Plain "open" hid a task the moment it closed, so the work just finished left no trace on the
 	// board and the tab read as though nothing had happened.
-	m := model{cl: cl, ch: ch, root: root, filter: filterActive, collapsed: map[string]bool{}, merging: map[string]bool{}, busy: map[string]string{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
+	// Mail opens on "unread" — the mailbox keeps everything, so the whole history is rarely the
+	// question; what has not been read yet always is.
+	m := model{cl: cl, ch: ch, root: root, filter: api.FilterActive, prFilter: api.PRFilterActive, runFilter: api.RunFilterActive, mailFilter: api.MailUnread, collapsed: map[string]bool{}, merging: map[string]bool{}, busy: map[string]string{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
 	m.reclamp()
 	return m
 }
@@ -315,8 +320,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The diff arrives long after syncDetail sized the viewport to "(loading…)", so resize
 		// now or it renders against a stale one-line window.
 		m.reclamp()
+	case mailMsg:
+		m.mailBody, m.mailBodyID = msg.body, msg.id
+		m.reclamp() // the body is most of the detail's height, so its arrival resizes the pane
 	case taskMsg:
 		m.taskDetail = msg.t
+	case runMsg:
+		m.runDetail = msg.d
 	case repoConfigMsg:
 		if msg.err != nil {
 			m.errText = msg.err.Error()
@@ -398,13 +408,14 @@ func (m model) View() string {
 	labels := make([]string, len(tuiSections))
 	for i, s := range tuiSections {
 		labels[i] = fmt.Sprintf("%d %s", m.tabCount(s), s.Title)
-		// Tasks awaiting a verdict ride on the Tasks label so the count is in view from every tab:
-		// they are hidden from workers, so a backlog of them reads as plenty of work beside an idle
-		// agent, and nothing said the two were connected.
-		if s.Key == "tasks" {
-			if n := api.CountAwaitingVerdict(m.state.Tasks); n > 0 {
-				labels[i] += fmt.Sprintf(" (%d%s)", n, gateGlyph)
-			}
+		// What waits on the user rides on the handle, so it is in view from whichever tab you are
+		// looking at — the question it answers ("why is nothing happening?") is rarely asked from
+		// the tab that holds the answer. Which rows count is the hub's to say, uniformly per
+		// section: a marker the view decided for itself would be a fourth rule in a fourth place.
+		// Fleet-wide even in repo scope — an agent stuck in another repo still waits on you, and a
+		// filter that hid it is how it would go on waiting.
+		if n := m.state.SectionAttention(s.Key); n > 0 {
+			labels[i] += fmt.Sprintf(" (%d%s)", n, attentionGlyph)
 		}
 	}
 	// Modals take over the whole screen.
@@ -420,6 +431,9 @@ func (m model) View() string {
 	if m.choice.active {
 		return choiceModal(m.choice, m.w, m.h)
 	}
+	if m.menu {
+		return m.menuView(m.w, m.h)
+	}
 	if m.modal {
 		title := m.modalTitle()
 		if m.modalOverride != nil { // e.g. the task modal opened from the PRs tab
@@ -428,7 +442,7 @@ func (m model) View() string {
 		return modal(title, m.modalLines(), m.detail, m.w, m.h)
 	}
 	repoName, repoTag := m.currentRepo()
-	top := headerBar(labels, m.tab, m.w, repoName, repoTag, m.repoColorIdx(repoTag))
+	top := headerBar(labels, m.tab, m.w, repoName, repoTag, m.repoColorIdx(repoTag), m.state.Memory)
 	var body string
 	// Agents/PRs always render their main pane — it is the point of the tab. Each body drops
 	// only the right detail column when the terminal is narrow or § hid it.
@@ -438,6 +452,8 @@ func (m model) View() string {
 		body = m.prBody()
 	} else if m.tab == 4 {
 		body = m.chatBody()
+	} else if m.tab == 5 {
+		body = m.runsBody() // its rows under a permanent line saying what a run is
 	} else if m.showDetail() {
 		left := pane(rowTexts(m.rows()), m.list, m.leftWidth(), m.cursor[m.tab])
 		dlines, dhl := m.wrappedDetail()

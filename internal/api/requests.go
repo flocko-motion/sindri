@@ -18,7 +18,19 @@ type TellReq struct {
 	Name   string `json:"name"`
 	Msg    string `json:"msg"`
 	Source string `json:"source"`
+	// SignedOut carries the sender's answer to a signed-out pane (/tell only) — see the constants.
+	SignedOut string `json:"signedOut,omitempty"`
 }
+
+// What a message does when the agent's pane reads signed out. The pane is an OBSERVATION and can be
+// stale — the host token may have been renewed seconds ago — so a user who knows better may
+// overrule it, while a message with no human behind it keeps the refusal: typed at a /login prompt
+// it would pile up in the input box unread, and nobody is there to notice.
+const (
+	SignedOutRefuse  = ""        // refuse and explain: the default, and what a hub-originated message needs
+	SignedOutRestart = "restart" // restart the agent — it re-reads the staged credentials — then deliver
+	SignedOutSend    = "send"    // deliver regardless; if the pane was right, the failure is visible and cheap
+)
 
 // PlanReq is the body for POST /agent/plan. Task names an existing task to work up, whose title and
 // body become the brief; Goal is free text, and may accompany a task to add something it lacks.
@@ -34,15 +46,23 @@ type ChatSayReq struct {
 }
 
 // NameReq is the body for operations addressing one agent (POST /launch) or PR
-// (POST /merge). Shell and Debug apply to /launch only.
+// (POST /merge). Shell, Debug, Cols and Lines apply to /launch only.
 type NameReq struct {
 	Name   string `json:"name"`
 	Shell  bool   `json:"shell"`
 	Debug  bool   `json:"debug"`  // stream the hub's liveness-probe detail during the launch wait
 	Memory string `json:"memory"` // set an agent's RAM limit (POST /agent/memory)
+	// Cols and Lines size the agent's tmux session at creation, to the preview pane that will
+	// display it — 0 means unset (the CLI has no preview and never sends these), leaving the
+	// session at tmux's own default until something attaches.
+	Cols  int `json:"cols,omitempty"`
+	Lines int `json:"lines,omitempty"`
 	// Retired is the wind-down flag (POST /agent/retire): assign it nothing new. It is the whole
 	// payload there, so false is a real value — clearing it puts the agent back in service.
 	Retired bool `json:"retired"`
+	// Armed is the context-clear flag (POST /agent/clear-context): arm it, or take the arming back.
+	// False is a real value here too, since disarming is the other half of the same toggle.
+	Armed bool `json:"armed"`
 }
 
 // RepoReq targets a registered repo by its tag (POST /repo/forget, /repo/color).
@@ -63,6 +83,22 @@ type PriorityReq struct {
 type RejectReq struct {
 	ID       string `json:"id"`
 	Feedback string `json:"feedback"`
+}
+
+// ScheduleRunReq is the body for POST /run/new: what the user wants run, and against which
+// workspace. Agent names one to borrow; empty means the repo's own checkout, which is the target
+// only a human has. Priority and Timeout are optional, exactly as an agent's own run treats them.
+type ScheduleRunReq struct {
+	Command  string `json:"command"`
+	Agent    string `json:"agent,omitempty"`
+	Priority string `json:"priority,omitempty"`
+	Timeout  string `json:"timeout,omitempty"`
+}
+
+// RunPriorityReq is the body for POST /run/priority: the run and its new P-code.
+type RunPriorityReq struct {
+	ID       string `json:"id"`
+	Priority string `json:"priority"`
 }
 
 // ApproveTaskReq is the body for POST /task/approve: the task, and whether the verdict

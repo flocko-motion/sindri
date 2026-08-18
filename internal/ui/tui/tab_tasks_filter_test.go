@@ -13,14 +13,14 @@ import (
 func TestFilterCyclesThroughFour(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.tab = 0
-	if m.filter != filterActive {
-		t.Fatalf("the Tasks tab opens on %q, want active", filterNames[m.filter])
+	if m.filter != api.FilterActive {
+		t.Fatalf("the Tasks tab opens on %q, want active", string(m.filter))
 	}
-	want := []int{filterOpen, filterClosed, filterAll, filterActive}
+	want := []api.TaskFilter{api.FilterOpen, api.FilterClosed, api.FilterAll, api.FilterActive}
 	for _, w := range want {
 		m.onKey(keyFilter)
 		if m.filter != w {
-			t.Fatalf("after cycling, filter = %d, want %d", m.filter, w)
+			t.Fatalf("after cycling, filter = %q, want %q", m.filter, w)
 		}
 	}
 }
@@ -32,7 +32,7 @@ func TestActiveFilterIncludesOpenAndRecentlyChanged(t *testing.T) {
 	now := time.Now().UTC()
 	m := newModel(nil, nil, "")
 	m.tab = 0
-	m.filter = filterActive
+	m.filter = api.FilterActive
 	m.state = api.BoardState{Tasks: []api.Task{
 		{ID: "td-1", Title: "open, no timestamp", Status: "open"},
 		{ID: "td-2", Title: "closed just now", Status: "closed", UpdatedAt: now.Format(time.RFC3339)},

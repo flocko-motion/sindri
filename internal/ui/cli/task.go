@@ -62,18 +62,35 @@ func taskCommentCmd() *cobra.Command {
 	}
 }
 
-// taskNextCmd answers "why is nothing being assigned" without anyone reading the queries: what an
-// agent would be handed, and where every other open task stands.
+// taskNextCmd answers "why is nothing being assigned" without anyone reading the queries: what
+// would be handed out, and where every other open task stands. --role asks it of a role nobody is
+// running yet — "would a second worker have anything to pick up" — which otherwise took starting one.
 func taskNextCmd() *cobra.Command {
-	var agent string
+	var agent, role string
 	c := &cobra.Command{
 		Use: "next", Short: "Show what would be assigned next, and why each open task would not be",
+		Long: "Show what would be assigned next, and why each open task would not be.\n\n" +
+			"--agent asks on behalf of an agent that exists, whose own state can rule everything out.\n" +
+			"--role asks as a hypothetical agent of that role holding nothing, which is how to find out\n" +
+			"whether starting one would give it anything to do. The two cannot be combined: an agent\n" +
+			"already has a role, so passing both states two things that can contradict.\n\n" +
+			"A reviewer is served PRs rather than tasks, so its answer lives under `sindri pr next`.",
 		Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
+			if role == "reviewer" {
+				// Answered rather than refused blankly: the noun is the point. A reviewer's pool is
+				// PRs, and a command called `task next` has no business claiming otherwise.
+				return fmt.Errorf("a reviewer is offered PRs, not tasks — ask `sindri pr next`")
+			}
 			return withBackend(func(b backend) error {
-				x, err := b.NextTask(agent)
+				x, err := b.NextTask(agent, role)
 				if err != nil {
 					return err
+				}
+				// The same rule after the call as before it: a named agent brings its own role, and
+				// only the hub knows what that is, so this is where the noun is checked for one.
+				if nextIsAboutPRs(x.Role) {
+					return wrongNounRefusal(x.Role, agent)
 				}
 				fmt.Print(theme.FormatNext(x))
 				return nil
@@ -81,6 +98,8 @@ func taskNextCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&agent, "agent", "", "ask on behalf of this agent (its own state can rule everything out)")
+	c.Flags().StringVar(&role, "role", "", "ask as a hypothetical agent of this role: worker|planner|coauthor (a reviewer: `sindri pr next`)")
+	c.MarkFlagsMutuallyExclusive("agent", "role")
 	return c
 }
 
@@ -384,21 +403,27 @@ func scopeExtent(scope api.PriorityScope, c api.PriorityCascade) string {
 // as plain "open" claimed to be available when no worker could see it.
 func taskState(t api.Task) string {
 	if t.Approval == "pending" || t.Approval == "rejected" {
-		return t.Approval
+		return theme.ApprovalLabel(t.Approval)
 	}
 	return t.Status
 }
 
 func taskListCmd() *cobra.Command {
 	var asJSON bool
+	var filter string
 	c := &cobra.Command{
 		Use: "list", Short: "List tasks", Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
+			f, err := api.ParseTaskFilter(filter)
+			if err != nil {
+				return err
+			}
 			return withBackend(func(b backend) error {
-				tasks, err := b.Tasks()
+				all, err := b.Tasks()
 				if err != nil {
 					return err
 				}
+				tasks := api.FilterTasks(f, all)
 				if asJSON {
 					out, err := tasksJSON(tasks)
 					if err != nil {
@@ -411,12 +436,17 @@ func taskListCmd() *cobra.Command {
 					fmt.Printf("%-12s %-8s %-12s %4s  %s\n", t.ID, theme.PriorityLabel(t.Priority),
 						taskState(t), theme.Age(t.CreatedAt), t.Title)
 				}
-				if len(tasks) == 0 {
+				if n := len(all) - len(tasks); n > 0 {
+					// What a filter hid is said out loud: an empty listing under `--filter closed`
+					// otherwise reads as "no tasks" when the backlog is full of open ones.
+					fmt.Fprintf(os.Stderr, "(filter %s — %d of %d task(s) shown)\n", f, len(tasks), len(all))
+				} else if len(tasks) == 0 {
 					fmt.Fprintln(os.Stderr, "no tasks")
 				}
 				// The gate hides these from every worker, so a list that ended here read as a full
-				// backlog while nothing in it could be claimed.
-				if n := api.CountAwaitingVerdict(tasks); n > 0 {
+				// backlog while nothing in it could be claimed. Counted over every task, not the
+				// filtered set: a verdict is owed whether or not this listing shows the task.
+				if n := api.CountAwaitingVerdict(all); n > 0 {
 					fmt.Fprintf(os.Stderr, "\n%d task(s) await your verdict and no worker can claim them: "+
 						"`sindri task approve <id>` (--subtasks clears the tree below it), or `sindri task reject <id> <why>`.\n", n)
 				}
@@ -425,6 +455,11 @@ func taskListCmd() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&asJSON, "json", false, "output tasks as JSON (machine-readable) instead of the table")
+	// Defaults to "all", which is what the bare command has always printed. The TUI opens on
+	// "active" instead: a screen redrawn every few seconds is a view, and a listing is a record.
+	c.Flags().StringVar(&filter, "filter", string(api.FilterAll),
+		"which tasks to list: "+api.TaskFilterNames()+" (active = open, plus anything closed within "+
+			api.ActiveWindow.String()+")")
 	return c
 }
 
@@ -445,16 +480,22 @@ func taskInfoCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				// Who is behind it, by the rule the dashboard's detail pane and its row marker use,
+				// so the same task never names a different agent in the two front-ends. Read off the
+				// board, since a task carries no owner of its own: an agent holds it, or its PR does.
+				st, err := b.State()
+				if err != nil {
+					return err
+				}
+				agent := api.AgentOnTask(st.Agents, st.PRs, t.ID)
 				// The same fields the TUI pane and the agent's `task <id>` show: a front-end
 				// chooses layout, not which facts exist, or it answers a different question.
-				fmt.Printf("id:       %s\ntitle:    %s\nstatus:   %s\ntype:     %s\npriority: %s\nparent:   %s\napproval: %s\nlabels:   %s\nurl:      %s\n",
+				fmt.Printf("id:       %s\ntitle:    %s\nstatus:   %s\ntype:     %s\npriority: %s\nparent:   %s\nagent:    %s\napproval: %s\nlabels:   %s\nurl:      %s\n",
 					t.ID, t.Title, t.Status, dash(t.Type), theme.PriorityLabel(t.Priority),
-					dash(t.ParentID), dash(t.Approval), dash(t.Labels), dash(t.URL))
-				if stamp := theme.Stamp(t.CreatedAt); stamp == theme.Unknown {
-					fmt.Printf("created:  %s\n", stamp)
-				} else { // exact, where the list rounds
-					fmt.Printf("created:  %s (%s ago)\n", stamp, theme.Age(t.CreatedAt))
-				}
+					dash(t.ParentID), dash(agent), dash(theme.ApprovalLabel(t.Approval)), dash(t.Labels), dash(t.URL))
+				// Exact, where the list rounds — and "changed" beside it, the field the active
+				// filter reads, so its "n/a" says why a mirrored task can be missing from that view.
+				fmt.Printf("created:  %s\nchanged:  %s\n", theme.When(t.CreatedAt), theme.When(t.UpdatedAt))
 				if body := strings.TrimRight(t.Description, "\n"); body != "" {
 					fmt.Printf("\n%s\n", body)
 				}
@@ -529,4 +570,17 @@ func splitCSV(s string) []string {
 		return nil
 	}
 	return strings.Split(s, ",")
+}
+
+// nextIsAboutPRs reports whether a role's assignment answer is PRs rather than tasks — the one
+// distinction both `next` commands' nouns turn on.
+func nextIsAboutPRs(role string) bool { return role == "reviewer" }
+
+// wrongNounRefusal is what a `next` command says when the hub answered for the other pool: the
+// question was legitimate and asked at the wrong door, so it names the door.
+func wrongNounRefusal(role, agent string) error {
+	if nextIsAboutPRs(role) {
+		return fmt.Errorf("%s is a reviewer, and is offered PRs rather than tasks — ask `sindri pr next --agent %s`", agent, agent)
+	}
+	return fmt.Errorf("%s is a %s, and is served tasks rather than PRs — ask `sindri task next --agent %s`", agent, role, agent)
 }

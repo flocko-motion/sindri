@@ -16,6 +16,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -236,6 +237,51 @@ func (Engine) Stats(ctx context.Context, name string) (container.Usage, error) {
 		return container.Usage{}, fmt.Errorf("container stats %s: no sample returned", name)
 	}
 	return container.Usage{MemoryUsageBytes: entries[0].MemoryUsageBytes, MemoryLimitBytes: entries[0].MemoryLimitBytes}, nil
+}
+
+// MemoryCapacity reports what the fleet RESERVES against the memory it reserves from. A micro-VM
+// takes its whole limit from the Mac when it starts, used or not, so the reservation total is what
+// decides whether another agent starts at all — a fleet barely using its memory still cannot fit an
+// agent whose reservation does not. Host memory is read here, in the backend, because which host it
+// is (the Mac itself, for micro-VMs) is exactly what differs between backends.
+func (Engine) MemoryCapacity(ctx context.Context) (container.Capacity, error) {
+	out, err := exec.CommandContext(ctx, Binary, "ls", "--format", "json").Output()
+	if err != nil {
+		return container.Capacity{}, fmt.Errorf("container ls: %w", err)
+	}
+	entries, err := parseInspect("ls --format json", out)
+	if err != nil {
+		return container.Capacity{}, fmt.Errorf("container ls json: %w", err)
+	}
+	total, err := hostMemory(ctx)
+	if err != nil {
+		return container.Capacity{}, err
+	}
+	return container.Capacity{UsedBytes: reservedBytes(entries), TotalBytes: total, Basis: container.BasisReserved}, nil
+}
+
+// reservedBytes sums what the listed pods hold. `container ls` lists the running ones, which are
+// the ones holding a reservation — a stopped micro-VM's limit is a number in its config, not memory
+// anybody else is denied.
+func reservedBytes(entries []inspectEntry) int64 {
+	var n int64
+	for _, e := range entries {
+		n += e.Configuration.Resources.MemoryInBytes
+	}
+	return n
+}
+
+// hostMemory is the Mac's physical memory, read from sysctl — the pool micro-VMs reserve out of.
+func hostMemory(ctx context.Context) (int64, error) {
+	out, err := exec.CommandContext(ctx, "sysctl", "-n", "hw.memsize").Output()
+	if err != nil {
+		return 0, fmt.Errorf("sysctl hw.memsize: %w", err)
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("sysctl hw.memsize: parse %q: %w", strings.TrimSpace(string(out)), err)
+	}
+	return n, nil
 }
 
 // Logs returns the last `tail` lines; `container logs` has no --tail, so trim here.

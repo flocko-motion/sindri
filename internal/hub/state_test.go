@@ -102,3 +102,21 @@ func TestNotFullChangesNothing(t *testing.T) {
 		}
 	}
 }
+
+// TestBoardCarriesItsSections: the tabs and their markers travel WITH the board, because a
+// front-end may not link the hub and so cannot resolve them for itself. A board served without
+// them would render a fleet of blocked agents as an ordinary one.
+func TestBoardCarriesItsSections(t *testing.T) {
+	b := withSections(BoardState{
+		Tasks:  []api.Task{{ID: "a", Status: "open", Approval: "pending"}},
+		Agents: []api.AgentView{{Name: "dvalin", Status: api.StatusBlocked}, {Name: "fili", Status: "idle"}},
+	})
+	if len(b.Sections) == 0 {
+		t.Fatal("the board must carry the sections the UIs draw")
+	}
+	for key, want := range map[string]int{"tasks": 1, "agents": 1, "prs": 0} {
+		if got := b.SectionAttention(key); got != want {
+			t.Errorf("%s attention = %d, want %d", key, got, want)
+		}
+	}
+}

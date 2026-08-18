@@ -20,18 +20,16 @@ func MsgWorkAvailable(id string) string {
 	return fmt.Sprintf("[hub] New work is ready (%s). Run `sindri` to pick up your next task — it may not be this one, whichever is highest priority.", id)
 }
 
-// MsgStalled prods an agent that holds work but has gone quiet. It names the task, because a stalled
-// agent has usually lost the thread rather than the will, and it offers the other honest answer —
-// saying what blocks it — so a genuine blocker surfaces instead of being sat on.
+// MsgStalled prods an agent that holds work but has gone quiet, naming the task and inviting it
+// to say what blocks it — so a genuine blocker surfaces instead of being sat on.
 func MsgStalled(task string, idleFor time.Duration) string {
 	return fmt.Sprintf("[hub] You still hold %s and have been idle for %s. Carry on with it — run `sindri` "+
 		"if you need your directive again. If something blocks you, say what it is rather than waiting: "+
 		"nothing is coming unless you ask.", task, idleFor.Round(time.Minute))
 }
 
-// MsgRetryTurn restarts a turn the API cut off. It names the cause, because the agent's own last
-// output is truncated and it would otherwise reason from a half-finished thought as if it were
-// complete — and it says to re-check the work rather than assume the interrupted step landed.
+// MsgRetryTurn restarts a turn the API cut off, naming the cause — the agent's own last output is
+// truncated, and it says to re-check the work rather than assume the interrupted step landed.
 const MsgRetryTurn = "[hub] Your last response was cut off mid-stream by an API error, so nothing " +
 	"resumed on its own. Pick up where you left off: check whether the step you were on actually " +
 	"completed (`sindri git change` shows what is written) before carrying on, since your own last " +
@@ -49,17 +47,89 @@ func MsgPRScrapped(prID string) string {
 		"Nothing to fix or resubmit. Run `sindri` for your next directive.", prID)
 }
 
+// MsgTaskEdited tells a worker a task inside its unit was revised under it — its own, or one
+// anywhere inside a held feature — naming which, and what "pending" does and doesn't mean for it.
+func MsgTaskEdited(id, unit, fields string) string {
+	if id == unit {
+		return fmt.Sprintf("[hub] A planner edited %s — the task you're working on (%s). Read it again "+
+			"(`sindri task %s`, where the change is recorded on its thread) and work to what it says now, "+
+			"not to what you read when you picked it up. It is back awaiting the user's approval, which "+
+			"only holds it from being handed out afresh: it is still yours, and you finish and submit it "+
+			"exactly as before.", id, fields, id)
+	}
+	return fmt.Sprintf("[hub] A planner edited %s (%s) — not the task you're on, but one inside %s, "+
+		"the work you hold. Read it (`sindri task %s`, where the change is recorded on its thread) and "+
+		"check whether what you are building still fits it. It is back awaiting the user's approval, so "+
+		"it cannot be handed to you until they rule — and %s is not finished while it waits, so carry "+
+		"on with what you have in hand.", id, fields, unit, id, unit)
+}
+
+// MsgTaskGainedChild tells an agent its unit of work grew: a child was added under a task it holds.
+// promoted says whether that turned a leaf into a feature, changing what it runs next. The bar for
+// its PR rose either way, and being refused at a checkpoint is not how it should find that out.
+func MsgTaskGainedChild(parent, child string, promoted bool) string {
+	if !promoted {
+		return fmt.Sprintf("[hub] %s was added under %s, which is inside the work you hold. Read it "+
+			"(`sindri task %s`) — it is part of your feature now, so its PR waits for this too. Carry "+
+			"on with the subtask you are on; the hub hands you this one in its turn.", child, parent, child)
+	}
+	return fmt.Sprintf("[hub] %s gained a child, %s, so what you hold is now a FEATURE rather than a "+
+		"single task — same branch, nothing of yours lost. You take the new work on too, and it goes "+
+		"up as ONE pull request covering the whole of it. Run `sindri` for the subtask to work, "+
+		"`sindri checkpoint \"<summary>\"` to end each one, and `sindri submit \"<summary>\"` only "+
+		"when none are left. Read the new work first: `sindri task %s`.", parent, child, child)
+}
+
 // MsgTaskCancelled tells a worker its task was closed/scrapped out from under it —
 // stop, and don't clean up (the hub already reset the worktree), just get new work.
 func MsgTaskCancelled(id string) string {
 	return fmt.Sprintf("[hub] Task %s was cancelled — stop working on it. Don't clean up your workspace; the sindri hub will reset it for you when you pick up your next task. Just run `sindri`.", id)
 }
 
-// MsgReviewCancelled tells a reviewer the PR it was reviewing was scrapped, so the
-// review is moot — stop and pick up new work. Its branch is gone, so there's nothing
-// left to read.
+// MsgReviewCancelled tells a reviewer its PR was scrapped — stop, its branch is gone, get new work.
 func MsgReviewCancelled(prID string) string {
 	return fmt.Sprintf("[hub] The PR you were reviewing (%s) was scrapped — stop reviewing it; its branch is gone. Just run `sindri` for your next task.", prID)
+}
+
+// MsgVerdictRecorded puts a reviewer back in the loop right after a verdict, its reply having
+// named no next step.
+func MsgVerdictRecorded(prID string) string {
+	return fmt.Sprintf("[hub] Verdict on %s recorded. Run `sindri` for your next review.", prID)
+}
+
+// MsgRunFinished is what a run's scheduling agent is told — a summary, never the full log:
+// injecting the whole output is how a 900k-token session happens, and one already has. The full
+// log stays on the run record, fetched with `show <run-id>`.
+func MsgRunFinished(id, status string, elapsed, budget time.Duration) string {
+	verb := status
+	if status == "timed_out" {
+		verb = "timed out"
+	}
+	usage := ""
+	if budget > 0 {
+		usage = fmt.Sprintf(" (%s of its %s budget)", elapsed.Round(time.Second), budget.Round(time.Second))
+	}
+	return fmt.Sprintf("[hub] %s %s%s. Full output: `sindri show %s`.", id, verb, usage, id)
+}
+
+// MsgGatePassed is the injected equivalent of ReplyRegistered, sent once a queued gate passes.
+func MsgGatePassed(prID string) string {
+	return fmt.Sprintf("[hub] Your quality gate passed — %s is now up for review. Run `sindri` for your next directive.", prID)
+}
+
+// MsgGateFailed reuses ReplyLintFail's rulebook — only the delivery differs.
+func MsgGateFailed(output string) string {
+	return "[hub] " + ReplyLintFail(output)
+}
+
+// MsgGateIncomplete answers a gate that never reached a verdict (timeout, or a hub restart) —
+// never as a violation, since nothing here found the code wrong.
+func MsgGateIncomplete(status string) string {
+	word := status
+	if status == "timed_out" {
+		word = "timed out"
+	}
+	return fmt.Sprintf("[hub] Your quality gate did not complete (%s) — this says nothing about your code. Run `sindri submit \"<summary>\"` (or `contribute`) again.", word)
 }
 
 // ReplyNothingToRevoke answers `revoke` with no PR out — nothing was withdrawn, so it says what the

@@ -113,6 +113,7 @@ func TestACurrentBranchStillSubmits(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("a current branch should submit, got exit %d:\n%s", code, out.String())
 	}
+	runQueuedGate(t, e)
 	pr, exists, _ := ps.GetPR("pr-sd-1")
 	if !exists {
 		t.Fatal("no PR was recorded for a current branch")
@@ -148,6 +149,7 @@ func TestSubmittingAfterRebasingWorks(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("submit after rebase should succeed, got exit %d:\n%s", code, out.String())
 	}
+	runQueuedGate(t, e)
 	if _, exists, _ := ps.GetPR("pr-sd-1"); !exists {
 		t.Error("the path the refusal points at must end in a PR")
 	}

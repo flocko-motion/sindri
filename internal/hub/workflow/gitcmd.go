@@ -221,10 +221,18 @@ func (e *Engine) gitDrop(c registry.Caller, wt, root string, paths []string, out
 	if err := git.RestoreFromRef(wt, ref, paths); err != nil {
 		return 1, err
 	}
-	if err := git.CommitAll(wt, "drop "+strings.Join(paths, ", ")+" from this change"); err != nil {
+	ps := e.store.For(c.Project)
+	st, _ := ps.GetState(c.Agent)
+	id := st.Task
+	if id == "" {
+		id = st.Container
+	}
+	tk, _, _ := ps.GetTask(id)
+	desc := "drop " + strings.Join(paths, ", ") + " from this change"
+	if err := git.CommitAll(wt, conventionalCommit(tk.Type, id, desc)); err != nil {
 		return 1, err
 	}
-	_ = e.store.For(c.Project).Log(c.Agent, "drop", strings.Join(paths, ", ")+" (restored to "+ref+")")
+	_ = ps.Log(c.Agent, "drop", strings.Join(paths, ", ")+" (restored to "+ref+")")
 	fmt.Fprintf(out, "Removed %s from your change and recorded that, so those files now match %s exactly. Your work in every other file is untouched.\n", FileList(paths), refName)
 	return 0, nil
 }

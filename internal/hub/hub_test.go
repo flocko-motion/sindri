@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/workflow"
 	"os"
 	"os/exec"
@@ -224,7 +225,7 @@ func TestStartupAdvice(t *testing.T) {
 // `sindri` directive = workflow.DirReview, and the injected = workflow.MsgReview) always tell the
 // reviewer to read the repo's ARCHITECTURE.md.
 func TestReviewInstructionsCarryArchitecture(t *testing.T) {
-	if !strings.Contains(workflow.DirReview("pr-1", "td-1", "ARCHITECTURE.md"), "ARCHITECTURE.md") {
+	if !strings.Contains(workflow.DirReview("pr-1", "td-1", "a task title", "ARCHITECTURE.md"), "ARCHITECTURE.md") {
 		t.Errorf("workflow.DirReview must tell the reviewer to read the architecture doc")
 	}
 	if !strings.Contains(workflow.MsgReview("pr-1", "req", "br", "base", "ARCHITECTURE.md", true), "ARCHITECTURE.md") {
@@ -234,7 +235,7 @@ func TestReviewInstructionsCarryArchitecture(t *testing.T) {
 
 func TestTellUnknownAgent(t *testing.T) {
 	h := newHub(t)
-	if err := h.agents.Tell(testProject, "ghost", "hi", "user"); err == nil {
+	if err := h.agents.Tell(testProject, "ghost", "hi", "user", api.SignedOutRefuse); err == nil {
 		t.Fatalf("telling unknown agent should error")
 	}
 }
@@ -368,13 +369,108 @@ func TestApprovePR(t *testing.T) {
 		t.Fatalf("status = %q, want approved", pr.Status)
 	}
 
-	// Open-only guard: an already-approved (non-open) PR cannot be re-approved.
+	// Approvals accumulate: an already-approved PR takes a second approval as another badge,
+	// rather than the first verdict locking out any that follow.
+	if err := h.wf.ApprovePR(testProject, "pr-td-1"); err != nil {
+		t.Fatalf("re-approving an approved PR should accumulate a badge: %v", err)
+	}
+	if revs, rerr := ps.Reviews("pr-td-1"); rerr != nil || api.ApprovalCount(revs) != 2 {
+		t.Fatalf("reviews=%v err=%v, want 2 approval badges", revs, rerr)
+	}
+
+	// A rejection still dominates: once rejected, only a renewed submission — not a fresh
+	// approval — clears it.
+	pr, _, _ = ps.GetPR("pr-td-1")
+	pr.Status = "rejected"
+	if err := ps.PutPR(pr); err != nil {
+		t.Fatalf("put pr: %v", err)
+	}
 	if err := h.wf.ApprovePR(testProject, "pr-td-1"); err == nil {
-		t.Fatalf("approving a non-open PR should be refused")
+		t.Fatalf("approving a rejected PR should be refused")
 	}
 
 	// Unknown PR errors.
 	if err := h.wf.ApprovePR(testProject, "pr-nope"); err == nil {
 		t.Fatalf("approving an unknown PR should error")
+	}
+}
+
+// TestReviewerReadsButCannotAct is the case for letting a reviewer read the backlog: reading is
+// inert. The authority lives in the registry's role lists rather than in the handlers, so that is
+// what this asks — a reviewer gains the read verb and none that change the work it judges.
+func TestReviewerReadsButCannotAct(t *testing.T) {
+	h := newHub(t)
+	reg := h.registry()
+	available := func(role string) map[string]bool {
+		out := map[string]bool{}
+		for _, c := range reg.Available(registry.Caller{Project: testProject, Agent: "rune", Role: role}) {
+			out[c.Name] = true
+		}
+		return out
+	}
+	rev := available("reviewer")
+	if !rev["task"] {
+		t.Error("a reviewer cannot read the task it is reviewing")
+	}
+	// Reading is the whole grant. Anything that proposes, edits or re-orders the work under review
+	// would make the reviewer a party to what it is judging.
+	for _, verb := range []string{"create-task", "edit-task", "prioritise-task", "reopen-task", "next", "submit"} {
+		if rev[verb] {
+			t.Errorf("a reviewer must not have %q — reading grants no authority", verb)
+		}
+	}
+	// And the grant is additive: the roles that already read still do.
+	for _, role := range []string{"planner", "worker", "coauthor"} {
+		if !available(role)["task"] {
+			t.Errorf("%s lost the task verb", role)
+		}
+	}
+}
+
+// TestPlannerGainsApproveButNotReject: a planner may add its optional, advisory badge (-> pr.go
+// CmdApprove's role branch), but never a reject — that stays the reviewer's alone, since the
+// planner grant is a second opinion beside a verdict, not a verdict of its own.
+func TestPlannerGainsApproveButNotReject(t *testing.T) {
+	h := newHub(t)
+	reg := h.registry()
+	available := func(role string) map[string]bool {
+		out := map[string]bool{}
+		for _, c := range reg.Available(registry.Caller{Project: testProject, Agent: "rune", Role: role}) {
+			out[c.Name] = true
+		}
+		return out
+	}
+	if !available("planner")["approve"] {
+		t.Error("a planner must be able to add its optional approval badge")
+	}
+	if available("planner")["reject"] {
+		t.Error("a planner must not be able to reject — that stays the reviewer's alone")
+	}
+	for _, role := range []string{"worker", "coauthor"} {
+		if available(role)["approve"] {
+			t.Errorf("%s must not gain approve — only reviewer and planner may", role)
+		}
+	}
+}
+
+// TestRunServiceReachesEveryRoleThatCanUseIt (sd-68f8e7): worker, reviewer and coauthor can
+// schedule a run; a planner cannot — its workspace is read-only, so there is nothing for it to run.
+func TestRunServiceReachesEveryRoleThatCanUseIt(t *testing.T) {
+	h := newHub(t)
+	reg := h.registry()
+	available := func(role string) map[string]bool {
+		out := map[string]bool{}
+		for _, c := range reg.Available(registry.Caller{Project: testProject, Agent: "rune", Role: role}) {
+			out[c.Name] = true
+		}
+		return out
+	}
+	for _, role := range []string{"worker", "reviewer", "coauthor"} {
+		if !available(role)["run"] {
+			t.Errorf("%s should be able to queue a run", role)
+		}
+	}
+	if available("planner")["run"] {
+		t.Error("a planner's workspace is read-only — it must not gain the run service")
 	}
 }

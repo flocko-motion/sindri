@@ -17,18 +17,34 @@ import (
 
 // reclamp keeps the active tab's cursor + both viewports in range.
 func (m *model) reclamp() {
-	n := len(m.rows())
+	rows := m.rows()
+	n := len(rows)
+	// Snapped as well as clamped: a poll can grow a heading above the cursor, and the first frame of a
+	// grouped list opens with one at index 0.
 	m.cursor[m.tab] = clampInt(m.cursor[m.tab], 0, max(0, n-1))
+	if n > 0 {
+		m.cursor[m.tab] = nearestSelectable(rows, m.cursor[m.tab], 1)
+	}
 	listH := m.bodyHeight()
 	switch m.tab { // agents/prs: the list is the short top region of a split (any width)
 	case 1:
 		listH = m.agentListHeight()
 	case 2:
 		listH = m.prListHeight()
+	case 5:
+		listH = m.runsPaneHeight() // the note's lines come out of the rows', not off the screen
 	}
 	m.list.SetHeight(listH)
 	m.list.SetTotal(n)
 	m.list.SetCursor(m.cursor[m.tab])
+	// The detail pane's slot, chosen like the list's above it: full body height everywhere except
+	// Runs, whose permanent note takes its lines out of the panes beside it rather than off the
+	// screen (-> runsBody). Sized to the body there, it padded itself past its slot and the frame
+	// came out taller than the terminal, scrolling the header away.
+	detailH := m.bodyHeight()
+	if m.tab == 5 {
+		detailH = m.runsPaneHeight()
+	}
 	// Offset-driven scroll (J/K), preserved across re-layouts; reset to top only
 	// when the selection changes (syncDetail).
 	if m.tab == 2 { // PRs: detail pane is the big bottom-left content (any width)
@@ -39,13 +55,13 @@ func (m *model) reclamp() {
 		// happened.
 		lines, _ := m.prMetaLines(max(1, m.w-m.prContentWidth()-1))
 		m.prMeta.Resize(m.bodyHeight(), len(lines))
-	} else if m.tab == 0 || m.tab == 3 { // generic detail pane: size to the WRAPPED count
+	} else if m.tab == 0 || m.tab == 3 || m.tab == 5 || m.tab == 6 { // generic detail pane: size to the WRAPPED count
 		wrapped, _ := wrapContentMapped(m.detailLines(), m.detailWidth())
-		m.detail.Resize(m.bodyHeight(), len(wrapped))
+		m.detail.Resize(detailH, len(wrapped))
 	} else if m.tab == 1 { // Agents: right column wraps like PRs' meta column (agentsBody)
-		m.detail.Resize(m.bodyHeight(), len(wrapMeta(m.agentItems(), m.agentDetailWidth())))
+		m.detail.Resize(detailH, len(wrapMeta(m.agentItems(), m.agentDetailWidth())))
 	} else {
-		m.detail.Resize(m.bodyHeight(), len(m.detailLines()))
+		m.detail.Resize(detailH, len(m.detailLines()))
 	}
 }
 
@@ -59,6 +75,27 @@ func (m *model) scrollTarget() *scroll.Viewport {
 		return &m.prMeta
 	}
 	return &m.detail
+}
+
+// scrollDir is which way a scroll runs, so a call site reads as a direction rather than a bare bool.
+type scrollDir bool
+
+const (
+	scrollDown scrollDir = true
+	scrollUp   scrollDir = false
+)
+
+// halfPage moves the focused viewport by half its height — the coarse form of J/K, resolving its
+// target the same way, so both speeds scroll the same thing (-> scrollTarget).
+func (m *model) halfPage(dir scrollDir) {
+	vp := m.scrollTarget()
+	for i := 0; i < max(1, vp.Height/2); i++ {
+		if dir == scrollDown {
+			vp.ScrollDown()
+		} else {
+			vp.ScrollUp()
+		}
+	}
 }
 
 // syncDetail fetches the selected item's rich detail when the selection changes.
@@ -78,6 +115,15 @@ func (m *model) syncDetail() tea.Cmd {
 	switch m.tab {
 	case 0:
 		return func() tea.Msg { t, _ := cl.TaskInfo(id); return taskMsg{id, t} }
+	case 6:
+		// A body is fetched per selection rather than carried for every row: the board's window holds
+		// a preview each, and a rejection's findings run to hundreds of lines.
+		m.mailBody, m.mailBodyID = "", 0
+		var mid int64
+		if _, err := fmt.Sscanf(id, "%d", &mid); err != nil {
+			return nil // the "showing the last N of M" row, which is not a message
+		}
+		return mailBodyFetchCmd(cl, mid)
 	case 1:
 		m.agentPane, m.agentPod, m.agentDiag, m.agentClients = "", "", "", nil // selection changed — drop the previous agent's screen/pod/clients
 		m.agentView = "screen"                                                 // default back to the live screen
@@ -86,6 +132,8 @@ func (m *model) syncDetail() tea.Cmd {
 			paneFetchCmd(cl, id),
 			clientsFetchCmd(cl, id),
 		)
+	case 5:
+		return func() tea.Msg { d, _ := cl.RunInfo(id); return runMsg{id, d} }
 	default:
 		m.prView = "diff" // new PR → show its diff (its stored lint loads via PRInfo)
 		return func() tea.Msg { d, _ := cl.PRInfo(id); return prMsg{id, d} }

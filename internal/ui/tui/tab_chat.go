@@ -75,6 +75,25 @@ func (m *model) openNewMeetingChoice() {
 	}
 }
 
+// openCloseMeetingChoice confirms ending the meeting. Confirmed because re-adding members is manual
+// work: closing is the deliberate end of a meeting, not a pause. The transcript is untouched, and
+// the title says so — the two verbs on this tab (C and N) destroy different things.
+func (m *model) openCloseMeetingChoice() {
+	cl := m.cl
+	m.choice = choiceModalState{
+		active:  true,
+		title:   "close the meeting? (removes every member; the transcript is kept)",
+		options: []string{"cancel", "close — remove every member"},
+		values:  []string{"cancel", "close"},
+		apply: func(v string) tea.Cmd {
+			if v != "close" {
+				return nil
+			}
+			return mutateThenRefresh(cl, cl.CloseMeeting)
+		},
+	}
+}
+
 // openAddMemberChoice picks an agent — from the whole fleet, not just this repo, since membership
 // spans projects — to add to the meeting room. Agents already in the room are left off the list.
 func (m *model) openAddMemberChoice() {

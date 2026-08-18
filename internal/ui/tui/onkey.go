@@ -49,6 +49,19 @@ func (m *model) onKey(k string) tea.Cmd {
 		}
 		return nil
 	}
+	// The space prefix. A committing key is live only while the menu is open, so a stray press can
+	// never change anything — and what the menu offers is what the keymap says applies to this row.
+	if m.menu {
+		m.menu = false
+		if k == "esc" || k == " " || !m.menuAccepts(k) {
+			return nil // cancelled, or a letter this menu never offered
+		}
+	} else if k == " " {
+		m.menu = true
+		return nil
+	} else if m.committingKey(k) {
+		return nil // it lives behind the prefix now: space, then the same letter
+	}
 	switch k {
 	case keyQuit, "ctrl+c":
 		m.quit = true
@@ -68,13 +81,13 @@ func (m *model) onKey(k string) tea.Cmd {
 		if m.rightFocus {
 			m.rightCursor = clampInt(m.rightCursor+1, 0, max(0, len(m.actionableItems())-1))
 		} else {
-			m.cursor[m.tab]++
+			m.moveCursor(1)
 		}
 	case "k", "up":
 		if m.rightFocus {
 			m.rightCursor = clampInt(m.rightCursor-1, 0, max(0, len(m.actionableItems())-1))
 		} else {
-			m.cursor[m.tab]--
+			m.moveCursor(-1)
 		}
 	case "J": // scroll the detail pane down (yazi-style secondary-pane scroll)
 		vp := m.scrollTarget()
@@ -96,31 +109,35 @@ func (m *model) onKey(k string) tea.Cmd {
 				m.gotoItem(it.kind, it.value)
 			}
 		} else {
-			m.cursor[m.tab] = 0
+			m.moveCursor(-1 << 30) // to the top, then down onto the first row that selects something
 		}
 	case "G":
-		m.cursor[m.tab] = 1 << 30
+		m.moveCursor(1 << 30)
+	// ctrl+d/ctrl+u are the half-page form of j/k and J/K, so they follow the focus rather than the
+	// tab: the right column scrolls the viewport scrollTarget() resolves (the PRs meta column
+	// included), the left moves the list cursor — which is how a list scrolls, the selected line
+	// staying in view. Deciding per tab instead sent the keys to the list while the detail had focus.
 	case "ctrl+d":
-		if m.tab == 2 { // PRs: fast-scroll the diff/lint main pane (J/K do fine-grained)
-			for i := 0; i < max(1, m.detail.Height/2); i++ {
-				m.detail.ScrollDown()
-			}
+		if m.rightFocus {
+			m.halfPage(scrollDown)
 			return nil
 		}
-		m.cursor[m.tab] += m.bodyHeight() / 2
+		m.moveCursor(m.bodyHeight() / 2)
 	case "ctrl+u":
-		if m.tab == 2 {
-			for i := 0; i < max(1, m.detail.Height/2); i++ {
-				m.detail.ScrollUp()
-			}
+		if m.rightFocus {
+			m.halfPage(scrollUp)
 			return nil
 		}
-		m.cursor[m.tab] -= m.bodyHeight() / 2
+		m.moveCursor(-m.bodyHeight() / 2)
 	case keyFilter:
 		if m.tab == 0 {
-			m.filter = (m.filter + 1) % 4
+			m.filter = api.NextTaskFilter(m.filter)
 		} else if m.tab == 2 {
-			m.prFilter = (m.prFilter + 1) % 3
+			m.prFilter = api.NextPRFilter(m.prFilter)
+		} else if m.tab == 5 {
+			m.runFilter = api.NextRunFilter(m.runFilter)
+		} else if m.tab == 6 {
+			m.cycleMailFilter()
 		}
 	case "h": // tasks: collapse the fold under the cursor (tree navigation)
 		if m.tab == 0 && !m.rightFocus {
@@ -147,7 +164,11 @@ func (m *model) onKey(k string) tea.Cmd {
 				return mutateThenRefresh(cl, func() error { return cl.SetRetired(name, !back) })
 			}
 		}
-	case keyAttach: // agents/tasks/prs: attach to the live tmux session
+	case keyMailWho: // mail: narrow to the selected message's recipient, or widen again
+		if m.tab == 6 {
+			m.toggleMailAgent()
+		}
+	case keyAttach: // agents/tasks/prs/mail: attach to the live tmux session
 		if m.tab == 0 {
 			// Attach to whoever is working the selected task — the row you are looking at names
 			// the work, so it should reach the agent doing it without a detour via the Agents tab.
@@ -169,6 +190,20 @@ func (m *model) onKey(k string) tea.Cmd {
 			a, ok := m.agentOnPR(m.selID())
 			if !ok {
 				m.flash = "no agent is working " + m.selID()
+				return nil
+			}
+			return m.attachTo(a)
+		}
+		if m.tab == 6 {
+			// The row names its recipient, so attach reaches the agent the message is ABOUT. Mail
+			// outlives the agent it was sent to (nothing is deleted), so a missing one is ordinary.
+			msg, ok := m.selMail()
+			if !ok {
+				return nil
+			}
+			a, live := m.agentNamed(msg.Agent)
+			if !live {
+				m.flash = msg.Agent + " is no longer on the roster — its mail outlives it"
 				return nil
 			}
 			return m.attachTo(a)
@@ -199,6 +234,15 @@ func (m *model) onKey(k string) tea.Cmd {
 		} else if m.tab == 4 { // meeting: clear the shared history and start fresh
 			m.openNewMeetingChoice()
 			return nil
+		} else if m.tab == 5 { // runs: queue one against this repo's checkout
+			name, _ := m.currentRepo()
+			if name == "" {
+				name = "this repo"
+			}
+			// The target is in the prompt rather than assumed: this queues against the repo's own
+			// checkout, uncommitted work and all, which is the one target only a human has.
+			m.openInput(inputRunCommand, "run against "+name+"'s checkout: ")
+			return nil
 		}
 	case keyEdit: // edit what is selected, each tab in its own natural way
 		if m.tab == 0 && m.selID() != "" && m.cl != nil {
@@ -225,7 +269,12 @@ func (m *model) onKey(k string) tea.Cmd {
 			}
 			return nil
 		}
-	case keyComment: // tasks: comment on the selected task
+	// keyMail shares this letter (both open a prompt): on tasks it comments, on agents it mails.
+	case keyComment: // tasks: comment on the selected task · agents: mail it (waits, never interrupts)
+		if m.tab == 1 && m.selID() != "" && !m.isOrphan(m.selID()) {
+			m.openInput(inputMail, "mail "+m.selID()+" (waits, never interrupts): ")
+			return textinput.Blink
+		}
 		if m.tab == 0 && m.selID() != "" {
 			m.openInput(inputComment, "comment on "+m.selID()+": ")
 			return textinput.Blink
@@ -256,7 +305,7 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.openTaskReopenForm(m.selID())
 			return nil
 		}
-	case keyDelete: // tasks: scrap · agents: delete (or remove an orphan) · prs: scrap · repos: forget
+	case keyDelete: // tasks: scrap · agents: delete (or remove an orphan) · prs: scrap · repos: forget · runs: cancel
 		if m.tab == 0 && m.selID() != "" {
 			m.openScrapChoice(m.selID())
 			return nil
@@ -275,6 +324,10 @@ func (m *model) onKey(k string) tea.Cmd {
 		}
 		if m.tab == 3 && m.selID() != "" {
 			m.openForgetChoice(m.selID(), m.repoName(m.selID()))
+			return nil
+		}
+		if m.tab == 5 && m.selID() != "" {
+			m.openRunCancelChoice(m.selID())
 			return nil
 		}
 	case keyTell: // tell the selected agent (agents) / show linked task (prs)
@@ -337,20 +390,29 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.openReviewForm(m.selID())
 			return nil
 		}
-	case keyPriority: // set the selected task's priority (shift = a modifying action)
+	case keyPriority: // tasks: set priority · runs: reprioritise (shift = a modifying action)
 		if m.tab == 0 && m.selID() != "" {
 			m.openPriorityChoice(m.selID())
+			return nil
+		}
+		if m.tab == 5 && m.selID() != "" {
+			m.openRunPriorityChoice(m.selID())
 			return nil
 		}
 	case keyUnassign: // tasks: release the selected task back to the backlog
 		if m.tab == 0 && m.selID() != "" {
 			return m.unassignTaskCmd(m.selID())
 		}
-	case keyWhyNext: // tasks: what the assigner would hand out next, and why not everything else
+	case keyWhyNext: // what would be handed out next from THIS tab's pool, and why not the rest
 		if m.tab == 0 {
-			return m.whyNextCmd()
+			return m.whyNextCmd("worker")
 		}
-	case keyClose: // tasks: close the selected task (mark it done) · agents: clear a full context
+		if m.tab == 2 {
+			// The same question about the pool this tab shows: a reviewer is served PRs, and the
+			// states listed are the ones that let one sit unreviewed while a reviewer idled.
+			return m.whyNextCmd("reviewer")
+		}
+	case keyClose: // tasks: close the task · agents: clear a full context · meeting: close the meeting
 		if m.tab == 0 && m.selID() != "" {
 			if pr := m.attachedOpenPR(m.selID()); pr != "" { // prompt to discard its PR too
 				m.openCloseChoice(m.selID(), pr)
@@ -358,8 +420,23 @@ func (m *model) onKey(k string) tea.Cmd {
 			}
 			return m.closeTaskCmd(m.selID())
 		}
+		if m.tab == 4 { // meeting: C ends what is in front of you here too — the meeting itself
+			m.openCloseMeetingChoice()
+			return nil
+		}
 		if m.tab == 1 && m.selID() != "" && !m.isOrphan(m.selID()) {
-			m.openClearContextChoice(m.selID())
+			a, ok := m.selAgent()
+			if !ok {
+				return nil
+			}
+			// Disarming asks nothing: cancelling a destructive action is not itself destructive,
+			// and a confirm on a retreat is friction with nothing behind it.
+			if a.ClearArmed {
+				cl, name := m.cl, a.Name
+				m.flash = name + ": context clear cancelled"
+				return mutateThenRefresh(cl, func() error { return cl.SetClearArmed(name, false) })
+			}
+			m.openClearContextChoice(a)
 			return nil
 		}
 	case "enter":
@@ -386,6 +463,9 @@ func (m *model) onKey(k string) tea.Cmd {
 					}
 					m.prView = it.value // PRs: diff ⇄ lint
 					m.detail.Resize(m.detail.Height, len(m.prContentLines()))
+				case "resume": // Agents: release an escalated agent (its own clear is `sindri resume`)
+					m.openResumeChoice(it.value)
+					return nil
 				case "path": // open a shell in the workspace
 					return tea.ExecProcess(shellAt(it.value), resumed)
 				case "url": // e.g. a GitHub issue: no browser in the pod's TUI, so copy it instead

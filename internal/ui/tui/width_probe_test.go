@@ -10,15 +10,19 @@ import (
 )
 
 // TestGlyphsCountAsTerminalsDrawThem: every glyph the TUI places inside a width-counted cell
-// must be counted at the width a terminal actually advances. A rune in an emoji block is
-// drawn two cells wide; counted as one, its row is wider than the column, JoinHorizontal
-// widens the whole block past the screen, every row wraps, and the frame grows taller than
-// the terminal — which scrolls the top bar out of view.
+// must be counted at the width a terminal actually advances. Counted short, a row is wider than
+// its column, JoinHorizontal widens the whole block past the screen, every row wraps, and the
+// frame grows taller than the terminal — which scrolls the top bar out of view.
+//
+// The markers are Nerd Font icons now, and one cell each: they sit in the Private Use Area, which
+// carries no East Asian Width for the counter and the terminal to disagree over. That is the
+// property they were chosen for — an emoji's drawn width is the thing terminals argue about — so
+// it is what this holds. A double-width icon range (Material Design) would fail here.
 func TestGlyphsCountAsTerminalsDrawThem(t *testing.T) {
-	for _, g := range []string{eyeGlyph, warnGlyph} {
-		if w := ansi.StringWidth(g); w != 2 {
-			t.Errorf("%q counts as %d; an emoji-presentation glyph is drawn 2 cells wide "+
-				"(add U+FE0F, or choose a narrow glyph)", g, w)
+	for _, g := range []string{eyeGlyph, warnGlyph, retiredGlyph, clearGlyph, attentionGlyph, mailGlyph} {
+		if w := ansi.StringWidth(g); w != 1 {
+			t.Errorf("%q counts as %d; a row marker must be one cell — pick a Private Use Area "+
+				"icon that is drawn single-width", g, w)
 		}
 	}
 	// The narrow glyphs: genuinely one cell, and must stay that way.
@@ -31,7 +35,7 @@ func TestGlyphsCountAsTerminalsDrawThem(t *testing.T) {
 
 // TestAgentRowFitsItsColumn is the invariant the bug broke: whatever a row contains, fitting
 // it to the column must produce exactly that many cells — including for a dialed-into agent,
-// whose row carries the eye marker.
+// whose row carries the eye marker, and a stuck one, whose row carries the warning.
 func TestAgentRowFitsItsColumn(t *testing.T) {
 	m := newModel(nil, nil, "/r/sindri")
 	m.scopeRepo = false
@@ -39,6 +43,7 @@ func TestAgentRowFitsItsColumn(t *testing.T) {
 		Agents: []api.AgentView{
 			{Name: "hepti", Role: "coauthor", Status: "collab", Task: "td-3", Clients: 1},
 			{Name: "eitri", Role: "worker", Status: "working", Task: "td-4"},
+			{Name: "thrain", Role: "worker", Status: api.StatusFull},
 		},
 		Orphans: []string{"sindri-stale-abc-nabbi"},
 	}

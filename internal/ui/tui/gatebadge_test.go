@@ -7,30 +7,30 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 )
 
-// TestTheGateCountRidesOnTheTasksTab: work awaiting a verdict is invisible to every worker, so a
-// backlog of it reads as plenty to do beside an idle agent. The count sits in the header, which is
-// on screen from whichever tab you are looking at — the question it answers ("why is nothing
-// happening?") is usually asked from the Agents tab.
-func TestTheGateCountRidesOnTheTasksTab(t *testing.T) {
+// TestTheAttentionMarkerRidesOnEveryHandle: what waits on the user is drawn beside the tab that
+// holds it, from the counts the hub resolved. All three markers come out of one loop over the
+// sections, which is the point — a fourth is a line in the hub's registry, not a case in this view.
+func TestTheAttentionMarkerRidesOnEveryHandle(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.w, m.h = 120, 40
-	m.state = api.BoardState{Tasks: []api.Task{
-		{ID: "td-1", Status: "open", Approval: "pending"},
-		{ID: "td-2", Status: "open", Approval: "pending"},
-		{ID: "td-3", Status: "open"},
-		{ID: "td-4", Status: "closed", Approval: "pending"}, // ended: it decides nothing
+	m.state = api.BoardState{Sections: []api.Section{
+		{Key: "tasks", Title: "Tasks", Count: 3, Attention: 2},
+		{Key: "agents", Title: "Agents", Count: 5, Attention: 1},
+		{Key: "prs", Title: "PRs", Count: 4, Attention: 3},
 	}}
 	m.reclamp()
 
 	view := m.View()
-	if !strings.Contains(view, "2"+gateGlyph) {
-		t.Errorf("the header should show the two tasks awaiting a verdict:\n%s", firstLine(view))
+	for _, want := range []string{"2" + attentionGlyph, "1" + attentionGlyph, "3" + attentionGlyph} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the header should show %q:\n%s", want, firstLine(view))
+		}
 	}
 
-	// With nothing gated the marker is absent — it is a call to act, not furniture.
-	m.state = api.BoardState{Tasks: []api.Task{{ID: "td-3", Status: "open"}}}
-	if view := m.View(); strings.Contains(view, gateGlyph) {
-		t.Errorf("no gated work should mean no marker:\n%s", firstLine(view))
+	// With nothing waiting the marker is absent — it is a call to act, not furniture.
+	m.state = api.BoardState{Sections: []api.Section{{Key: "tasks", Title: "Tasks", Count: 3}}}
+	if view := m.View(); strings.Contains(view, attentionGlyph) {
+		t.Errorf("nothing waiting on the user should mean no marker:\n%s", firstLine(view))
 	}
 }
 

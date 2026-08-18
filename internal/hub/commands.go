@@ -36,24 +36,24 @@ func (h *Hub) registry() *registry.Registry {
 		registry.Command{Name: "status", Help: "show who you are and your current state", Run: h.cmdStatus},
 		registry.Command{Name: "log", Help: "record a note in your activity log: log <message>", Run: h.cmdLog},
 		registry.Command{Name: "prs", Help: "list pull requests and their status", Run: h.cmdListPRs},
-		registry.Command{Name: "show", Help: "show a PR's diff: show <pr-id>", Run: h.wf.CmdShowPR},
+		registry.Command{Name: "show", Help: "show a PR's diff: show <pr-id>; or a run's status and output: show <run-id>", Run: h.wf.CmdShow},
 		// Only a worker grabs tasks and submits a branch. A planner has neither: it ships openspec
 		// via its own `openspec submit`, a PR in different dress (mock todo id os-new).
 		registry.Command{Name: "next", Help: "pick up the next task", Roles: []string{"worker"},
-			Blocked: func(c registry.Caller) string {
+			Blocked: heldByEscalation("next", func(c registry.Caller) string {
 				if c.HasTask {
 					return "You already hold work — run `sindri` to be told what to do with it."
 				}
 				return ""
-			}, Run: h.wf.CmdNext},
+			}), Run: h.wf.CmdNext},
 		registry.Command{Name: "lint", Help: "run the quality gate: lint (your workspace) or lint <pr-id> (a PR)", Run: h.cmdLint},
 		// Visibility MUST match these commands' own `st.Phase != "working"` guard. When it didn't, a
 		// worker in "submitted" was offered submit, ran it, and was told to abandon the task it held.
 		registry.Command{Name: "submit", Help: "request your branch be merged: submit [message]", Roles: []string{"worker"},
-			Blocked: landingBlocked("submit"), Run: h.wf.CmdSubmit},
+			Blocked: heldByEscalation("submit", landingBlocked("submit")), Run: h.wf.CmdSubmit},
 		// Land interim work mid-task without finishing it; same visibility as submit, task stays open.
 		registry.Command{Name: "contribute", Help: "land an interim contribution mid-task (needs the user's approval): contribute [message]", Roles: []string{"worker"},
-			Blocked: landingBlocked("contribute"), Run: h.wf.CmdContribute},
+			Blocked: heldByEscalation("contribute", landingBlocked("contribute")), Run: h.wf.CmdContribute},
 		// The author's own reject: it withdraws its PR to keep working. Available exactly while one is
 		// out, which is the state where realising something is missing had no way out but somebody
 		// else's verdict.
@@ -73,24 +73,31 @@ func (h *Hub) registry() *registry.Registry {
 		// curated read/restore subset for them (-> workflow.CmdGit): without it, an agent cannot
 		// see what it changed or put a file back, and reconstructs both from memory.
 		registry.Command{Name: "git", Help: workflow.GitHelp, Roles: []string{"worker", "planner", "coauthor"}, Run: h.wf.CmdGit},
+		// Not for a planner: its workspace is read-only, so there is nothing here for it to run.
+		registry.Command{Name: "run", Help: "queue a command for later execution (see your brief for when this beats running it yourself): run <command...>",
+			Roles: []string{"worker", "reviewer", "coauthor"}, Run: h.wf.CmdScheduleRun},
 		registry.Command{Name: "checkpoint", Help: "record the current subtask and move to the next: checkpoint [summary]", Roles: []string{"worker"},
-			Blocked: func(c registry.Caller) string {
+			Blocked: heldByEscalation("checkpoint", func(c registry.Caller) string {
 				if c.Container == "" {
 					return "Checkpoint records one subtask of a feature, and you hold a task of your own — " +
 						"`sindri submit \"<summary>\"` puts it up for review when it's done."
 				}
 				return ""
-			}, Run: h.wf.CmdCheckpoint},
+			}), Run: h.wf.CmdCheckpoint},
 		// A worker reads too: it holds a whole package for context, so that context must stay
 		// re-readable. Roles see different scopes (-> CmdTasks) but share one verb name.
-		registry.Command{Name: "task", Help: workflow.TaskHelp, Roles: []string{"planner", "coauthor", "worker"}, Run: h.wf.CmdTasks},
+		registry.Command{Name: "task", Help: workflow.TaskHelp, Roles: []string{"planner", "coauthor", "worker", "reviewer"}, Run: h.wf.CmdTasks},
 		registry.Command{Name: "create-task", Help: workflow.CreateTaskHelp, Roles: []string{"planner"}, Run: h.wf.CmdCreateTask},
 		registry.Command{Name: "edit-task", Help: workflow.EditTaskHelp, Roles: []string{"planner"}, Run: h.wf.CmdEditTask},
 		registry.Command{Name: "prioritise-task", Help: workflow.PrioritiseTaskHelp, Roles: []string{"planner"}, Run: h.wf.CmdPrioritiseTask},
 		// Planner only, never a worker, which could undo a human's verdict on its own task
 		// (-> h.ReopenTask, which needs both h.wf and h.comments, so it lives here, not workflow).
 		registry.Command{Name: "reopen-task", Help: reopenTaskHelp, Roles: []string{"planner"}, Run: h.cmdReopenTask},
-		registry.Command{Name: "openspec", Help: "ship your openspec changes as a PR: openspec submit [message]", Roles: []string{"planner"}, Run: h.wf.CmdOpenspec},
+		// A planner's landing verb: `openspec submit` is a worker's submit in different dress, so the
+		// escalation hold has to reach it. Held open, an escalated planner could ship a PR built on the
+		// guess it had just said it would not make.
+		registry.Command{Name: "openspec", Help: "ship your openspec changes as a PR: openspec submit [message]", Roles: []string{"planner"},
+			Blocked: heldByEscalation("openspec", nil), Run: h.wf.CmdOpenspec},
 		registry.Command{Name: "state", Help: "set your resting state: state planning | state idle", Roles: []string{"planner"}, Run: h.wf.CmdState},
 		// Scoped to what the role already sees (-> cmdComment): a worker its own task or held
 		// container, a reviewer the task of the PR it's reviewing, a planner/coauthor any task —
@@ -113,8 +120,27 @@ func (h *Hub) registry() *registry.Registry {
 				}
 				return ""
 			}, Run: h.cmdComment},
-		registry.Command{Name: "approve", Help: "approve a pull request: approve [pr-id]", Roles: []string{"reviewer"}, Run: h.wf.CmdApprove},
-		registry.Command{Name: "reject", Help: "reject a pull request: reject <pr-id> <feedback...>", Roles: []string{"reviewer"}, Run: h.wf.CmdReject},
+		// A planner's approve is a different act (-> CmdApprove): an optional, additional badge
+		// beside the reviewer's verdict, never a substitute for it — so the same verb is open to
+		// both roles rather than needing a second one.
+		registry.Command{Name: "approve", Help: approveHelp(registry.Caller{}), HelpFor: approveHelp,
+			Roles: []string{"reviewer", "planner"}, Blocked: heldByEscalation("approve", nil), Run: h.wf.CmdApprove},
+		registry.Command{Name: "reject", Help: "reject a pull request: reject <pr-id> <feedback...>", Roles: []string{"reviewer"},
+			Blocked: heldByEscalation("reject", nil), Run: h.wf.CmdReject},
+		// Either side of a stop only the user can end, open to every role — any agent can meet a
+		// decision that is not its to make. Escalate stays open while escalated: a badly-put
+		// question has to be re-puttable.
+		registry.Command{Name: "escalate", Help: escalateHelp, Run: h.cmdEscalate},
+		registry.Command{Name: "resume", Help: resumeHelp,
+			Blocked: func(c registry.Caller) string {
+				if c.Escalation == "" {
+					return "You have no escalation to clear — `sindri` tells you where you are."
+				}
+				return ""
+			}, Run: h.cmdResume},
+		// Every role receives mail, so every role can read it. Never held back by an escalation: an
+		// escalated agent reading what it was told is how it learns the answer it is waiting for.
+		registry.Command{Name: "mail", Help: mailHelp, Run: h.cmdMail},
 		// State-gated rather than role-gated: the user controls who is in the meeting room.
 		registry.Command{Name: "meeting", Help: "say something to everyone in the meeting room: meeting <message...>",
 			Blocked: func(c registry.Caller) string {
@@ -138,6 +164,8 @@ func landingBlocked(verb string) func(registry.Caller) string {
 			case verb == "contribute" && c.Phase == "submitted":
 				return fmt.Sprintf("Feature %s is already up for the user to merge — wait for that, or "+
 					"`sindri revoke` to take it back and keep working.", c.Container)
+			case (verb == "contribute" || verb == "submit") && c.Phase == "gating":
+				return "Your quality gate is queued — wait for the result before trying again."
 			case verb == "submit" && c.SubtasksOpen:
 				return fmt.Sprintf("Feature %s still has open subtasks, and it goes up as ONE PR — "+
 					"record the one you're on with `sindri checkpoint \"<summary>\"` and it will hand you "+
@@ -195,6 +223,7 @@ func (h *Hub) caller(project, name string) (registry.Caller, error) {
 		Task:         st.Task,
 		Phase:        st.Phase,
 		InChat:       inChat,
+		Escalation:   st.Escalation,
 	}, nil
 }
 
@@ -350,6 +379,15 @@ func commentUsage(c registry.Caller) string {
 	return "comment <id> <text...>"
 }
 
+// approveHelp is the verb's help line, since what a verdict MEANS differs by role: a reviewer's
+// opens the merge gate, a planner's is an optional badge beside it.
+func approveHelp(c registry.Caller) string {
+	if c.Role == "planner" {
+		return "add an optional advisory approval badge, beside the reviewer's verdict, never instead of it: approve [pr-id]"
+	}
+	return "approve a pull request: approve [pr-id]"
+}
+
 // commentHelp is the verb's help line. A caller with no role yields the general form, which is what
 // the registry carries as the static Help.
 func commentHelp(c registry.Caller) string {
@@ -448,7 +486,8 @@ func (h *Hub) cmdComment(c registry.Caller, args []string, out io.Writer) (int, 
 }
 
 func (h *Hub) cmdListPRs(c registry.Caller, _ []string, out io.Writer) (int, error) {
-	prs, err := h.store.For(c.Project).PRs()
+	ps := h.store.For(c.Project)
+	prs, err := ps.PRs()
 	if err != nil {
 		return 1, err
 	}
@@ -456,8 +495,12 @@ func (h *Hub) cmdListPRs(c registry.Caller, _ []string, out io.Writer) (int, err
 		fmt.Fprintln(out, "no PRs")
 		return 0, nil
 	}
+	counts, err := ps.ApprovalCounts()
+	if err != nil {
+		return 1, err
+	}
 	for _, p := range prs {
-		fmt.Fprintf(out, "%-14s %-9s %-10s %s\n", p.ID, p.Status, p.Agent, p.Branch)
+		fmt.Fprintf(out, "%-14s %-14s %-10s %s\n", p.ID, api.StatusLabel(p.Status, counts[p.ID]), p.Agent, p.Branch)
 	}
 	return 0, nil
 }

@@ -159,6 +159,12 @@ func (c *HTTP) SetRetired(name string, retired bool) error {
 	return c.post("/agent/retire", api.NameReq{Name: name, Retired: retired})
 }
 
+// ResumeAgent clears an escalation from the host — the user's half of it. The agent clears its own
+// once it has the answer; this is for one that cannot, or should not have escalated at all.
+func (c *HTTP) ResumeAgent(name string) error {
+	return c.post("/agent/resume", api.NameReq{Name: name})
+}
+
 // DeleteAgent removes an agent (pod, socket, worktree, identity).
 func (c *HTTP) DeleteAgent(name string) error {
 	return c.post("/agent/delete", api.NameReq{Name: name})
@@ -169,10 +175,10 @@ func (c *HTTP) StopAgent(name string) error {
 	return c.post("/agent/stop", api.NameReq{Name: name})
 }
 
-// ClearContext sends /clear into the agent's live session and re-serves its directive — only
-// valid at a leaf boundary (idle, holding no task); the hub refuses otherwise.
-func (c *HTTP) ClearContext(name string) error {
-	return c.post("/agent/clear-context", api.NameReq{Name: name})
+// SetClearArmed arms a context clear (armed=true), which fires at the agent's next leaf boundary —
+// at once if it is already at one — or takes the arming back (false).
+func (c *HTTP) SetClearArmed(name string, armed bool) error {
+	return c.post("/agent/clear-context", api.NameReq{Name: name, Armed: armed})
 }
 
 // RebaseAgent rebases the agent's worktree onto the current base (reference) branch.
@@ -218,9 +224,10 @@ func (c *HTTP) PodInfo(name string) (string, error) {
 // Launch spins a pod for an existing agent (shell=true runs a bare shell instead
 // of Claude), streaming the hub's build/start progress to out so a long image
 // build isn't a frozen prompt. debug=true streams the hub's liveness-probe detail
-// during the wait. The failure, if any, rides back in a trailer.
-func (c *HTTP) Launch(name string, shell, debug bool, out io.Writer) error {
-	body, err := json.Marshal(api.NameReq{Name: name, Shell: shell, Debug: debug})
+// during the wait. cols/lines size the session's tmux preview at creation (0, 0 for
+// no preview — the CLI's case). The failure, if any, rides back in a trailer.
+func (c *HTTP) Launch(name string, shell, debug bool, cols, lines int, out io.Writer) error {
+	body, err := json.Marshal(api.NameReq{Name: name, Shell: shell, Debug: debug, Cols: cols, Lines: lines})
 	if err != nil {
 		return err
 	}
@@ -255,86 +262,11 @@ func (c *HTTP) RebuildImage(name string, out io.Writer) error {
 	return nil
 }
 
-// Tell delivers a provenance-stamped message into an agent's session.
-func (c *HTTP) Tell(name, msg, source string) error {
-	return c.post("/tell", api.TellReq{Name: name, Msg: msg, Source: source})
-}
-
 // AssignPlan gives a planner one thing to plan, as a phased brief. taskID works up an existing task,
 // which becomes the parent of what the planning produces; goal alone plans free text. Refused while
 // that planner has a PR open — the answer says to merge or scrap it first.
 func (c *HTTP) AssignPlan(name, goal, taskID string) error {
 	return c.post("/agent/plan", api.PlanReq{Name: name, Goal: goal, Task: taskID})
-}
-
-// ChatAdd adds an agent to the user's chatroom (the hub greets it).
-func (c *HTTP) ChatAdd(name string) error {
-	return c.post("/chat/add", api.NameReq{Name: name})
-}
-
-// ChatRemove takes an agent out of the chatroom.
-func (c *HTTP) ChatRemove(name string) error {
-	return c.post("/chat/remove", api.NameReq{Name: name})
-}
-
-// ChatSay posts a message to the chatroom as the user (the discussion leader).
-func (c *HTTP) ChatSay(msg string) error {
-	return c.post("/chat/say", api.ChatSayReq{Msg: msg})
-}
-
-// NewMeeting clears the meeting's shared history and announces the fresh start to the room.
-// Membership is untouched.
-func (c *HTTP) NewMeeting() error {
-	return c.post("/chat/new", struct{}{})
-}
-
-// ChatHeartbeat signals the user is present in the chatroom (sent periodically by
-// `chat join` and the TUI chat tab). Presence keeps the room unlocked for agents.
-func (c *HTTP) ChatHeartbeat() error {
-	return c.post("/chat/heartbeat", struct{}{})
-}
-
-// Chat returns the current chatroom snapshot (members + recent transcript).
-func (c *HTTP) Chat() (api.ChatView, error) {
-	var v api.ChatView
-	return v, c.get("/chat", &v)
-}
-
-// ChatWatch subscribes to the chatroom over SSE: it yields the snapshot on connect
-// and a fresh one on every change, closing when ctx is cancelled or the hub goes
-// away. This is the user's live leg of the star topology (the join CLI, TUI tab).
-func (c *HTTP) ChatWatch(ctx context.Context) (<-chan api.ChatView, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", c.base+"/chat/stream", nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	out := make(chan api.ChatView)
-	go func() {
-		defer resp.Body.Close()
-		defer close(out)
-		sc := bufio.NewScanner(resp.Body)
-		sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-		for sc.Scan() {
-			line := sc.Text()
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
-			var v api.ChatView
-			if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &v) != nil {
-				continue
-			}
-			select {
-			case out <- v:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	return out, nil
 }
 
 // Commands fetches the caller's currently-available command surface (the browser
@@ -418,11 +350,13 @@ func (c *HTTP) PRInfo(id string) (api.PRDetail, error) {
 	return d, c.get("/pr?id="+url.QueryEscape(id), &d)
 }
 
-// NextTask explains what would be assigned next and why every other open task would not be. agent
-// may be empty to ask about the backlog alone.
-func (c *HTTP) NextTask(agent string) (api.NextExplain, error) {
+// NextTask explains what would be handed out next and why nothing else would be. Ask about an
+// agent, or about a role as a hypothetical agent of it holding nothing (a reviewer's answer is
+// PRs, being the pool it is served from); both together are refused, and both empty is the
+// backlog question a worker would be asked.
+func (c *HTTP) NextTask(agent, role string) (api.NextExplain, error) {
 	var x api.NextExplain
-	return x, c.get("/task/next?agent="+url.QueryEscape(agent), &x)
+	return x, c.get("/task/next?agent="+url.QueryEscape(agent)+"&role="+url.QueryEscape(role), &x)
 }
 
 // RejectPR rejects a PR with feedback, routed to the owning worker.
@@ -456,6 +390,37 @@ func (c *HTTP) LintPR(id string) (string, error) {
 		Out string `json:"ok"`
 	}
 	return ok.Out, c.get("/pr/lint?id="+url.QueryEscape(id), &ok)
+}
+
+// Runs lists all queued and finished runs, fleet-wide.
+func (c *HTTP) Runs() ([]api.Run, error) {
+	var out []api.Run
+	return out, c.get("/runs", &out)
+}
+
+// RunInfo returns a run with its stored output.
+func (c *HTTP) RunInfo(id string) (api.RunDetail, error) {
+	var d api.RunDetail
+	return d, c.get("/run?id="+url.QueryEscape(id), &d)
+}
+
+// ScheduleRun queues a run the user asked for, against an agent's workspace or — with agent
+// empty — the repo's own checkout, and returns it with its place in the queue.
+func (c *HTTP) ScheduleRun(command, agent, priority, timeout string) (api.Run, error) {
+	var r api.Run
+	return r, c.postResult("/run/new", api.ScheduleRunReq{
+		Command: command, Agent: agent, Priority: priority, Timeout: timeout,
+	}, &r)
+}
+
+// CancelRun withdraws a queued or running run.
+func (c *HTTP) CancelRun(id string) error {
+	return c.post("/run/cancel", api.NameReq{Name: id})
+}
+
+// ReprioritiseRun moves a queued run within the queue.
+func (c *HTTP) ReprioritiseRun(id, priority string) error {
+	return c.post("/run/priority", api.RunPriorityReq{ID: id, Priority: priority})
 }
 
 // RequestReview attaches a review requirement to a PR and dispatches it to a
@@ -620,50 +585,4 @@ func (c *HTTP) RemoveOrphan(name string) error {
 // WriteRepoConfig persists the caller's repo's .sindri/config.yaml (validated hub-side).
 func (c *HTTP) WriteRepoConfig(cfg config.Config) error {
 	return c.post("/repo/config", cfg)
-}
-
-func (c *HTTP) get(path string, out any) error {
-	resp, err := c.hc.Get(c.base + path)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	return readResult(resp, out)
-}
-
-func (c *HTTP) post(path string, body any) error {
-	return c.postResult(path, body, nil)
-}
-
-// postResult posts body and decodes a successful JSON response into out.
-func (c *HTTP) postResult(path string, body, out any) error {
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-	resp, err := c.hc.Post(c.base+path, "application/json", bytes.NewReader(buf))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	return readResult(resp, out)
-}
-
-// readResult decodes a successful JSON body into out (if non-nil), or turns a
-// non-2xx into the hub's reported error.
-func readResult(resp *http.Response, out any) error {
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 300 {
-		var e struct {
-			Error string `json:"error"`
-		}
-		if json.Unmarshal(data, &e) == nil && e.Error != "" {
-			return fmt.Errorf("%s", e.Error)
-		}
-		return fmt.Errorf("hub error: %s", resp.Status)
-	}
-	if out != nil {
-		return json.Unmarshal(data, out)
-	}
-	return nil
 }

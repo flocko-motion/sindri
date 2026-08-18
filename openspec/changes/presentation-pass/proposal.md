@@ -1,0 +1,75 @@
+# Presentation pass: colours, labels and detail fields
+
+## Why
+
+Five small changes to how state is PRESENTED, landing on one branch because they touch the same
+files — the row and detail rendering and the shared theme — and three of them share one rule.
+
+That rule: colour by what the USER should do, where red means stopped and only the user can unstop
+it. The agents palette already says exactly this; tasks and PRs are being brought into line with it.
+And the invariant behind it: red and the `(N!)` attention badge are the same claim rendered twice,
+so both must come from one predicate, or the colour drifts from the badge the first time a state is
+added — invisibly, because each looks plausible alone.
+
+## What changes
+
+- **PR detail carries a lifecycle summary.** Twenty-two event types are logged against a PR and the
+  detail rendered all of them, so the block that should say "where has this got to" was unreadable.
+  The milestones — created, the verdicts, merged — now head the detail, and the full log stays below
+  it, because the diagnostics it drops are what a failure needs. The classification lives in
+  `internal/api` (both front-ends must agree on what a milestone is), verdict authorship comes from
+  the review records rather than the payload prose, and an unclassified event type fails the build:
+  a default either way is wrong in silence.
+
+- **An unapproved task says so.** "pending" names a state; "unapproved" names the action that is
+  missing, which is what a reader wants when a task is sitting still. The stored value is unchanged —
+  every predicate branches on it — and the word now comes from `theme.ApprovalLabel`, beside
+  PriorityLabel and StateLabel, which is what stops the two front-ends drifting on it later.
+
+- **PR rows are coloured on the shared rule.** Red is not decided in the renderer: it is
+  `api.PRNeedsUser`, the same predicate the `(N!)` badge counts, so a red row is always counted and
+  a counted row is always red. The rest follows the cross-tab vocabulary — grey finished, orange
+  mid-merge, cyan for the worker's rework, green for a review that is coming — and yellow goes
+  unused, correctly, since no PR state is idle-but-unblocked. The one unusual part is deliberate: an
+  open PR's colour depends on whether any reviewer is alive in its repo, which is fleet state rather
+  than row state, and that is the honest rendering of whether anything will happen.
+
+- **Task rows follow it too.** Unapproved and unrated both read red — they are the two gates that
+  release work, and a task failing either is stopped until a human acts. In-progress becomes cyan,
+  since work happening is the healthiest state on the board and should not be its loudest. Critical
+  priority moves to pink so red keeps one meaning; that collision was named in the task and is
+  resolved rather than documented.
+- **The row asks the predicate; it does not re-derive it.** `taskRowStyle` decides the WORD in a
+  switch and then asks `api.TaskNeedsUser` for red, the shape `prStatusStyle` already had. Deriving
+  red inside the switch let the two part on case order: a rejected task with no rating matched
+  "rejected" and rendered grey while the badge, reading the rating, counted it. A rejected task is
+  now out of both — rated or not, the user has ruled, and rating releases nothing while the
+  rejection stands.
+- **The Tasks badge follows the colour, not the other way round.** The invariant says anything red
+  is counted; an unrated task is red, and `CountAwaitingVerdict` did not count it. So the badge now
+  reads `api.TaskNeedsUser` — either gate — and the verdict-specific count stays where its wording
+  is verdict-specific (`task list`'s closing line). This widens what the Tasks marker counts, which
+  is a visible change and the reason it is called out here.
+
+- **The task detail shows when it last changed**, beside when it was created, in both front-ends.
+  `theme.When` composes the two the same way, and a source with no timestamp reads "n/a" rather than
+  borrowing the created time: that blank is what explains a mirrored task's absence from the active
+  filter, which reads exactly this field.
+
+All five landed on one branch, which is what the package was for: three of them share the red rule,
+and working them apart would have meant three workers rediscovering it and two rebasing over each
+other.
+
+## Impact
+
+- Specs: `hub` gains the PR-event classification and the lifecycle projection; `01-architecture`
+  gains the rule that display words come from the shared rendering module.
+- Code: `internal/api` (`prlifecycle.go` new, `task.go`, `board.go`), `internal/hub/commands`,
+  `internal/ui/theme` (`task.go`, `age.go`), `internal/ui/tui` (`theme.go`, `tab_tasks.go`,
+  `tab_prs.go`), `internal/ui/cli` (`hub.go`, `task.go`), plus the fail-closed test in
+  `internal/hub`.
+- The Tasks badge widens: it now counts unrated tasks as well as unapproved ones, because the
+  invariant requires everything red to be counted and an unrated task is red.
+- `internal/hub/workflow/prompts.go` crossed the 700-line limit when this branch's strings met what
+  arrived on the reference branch, so the feature loop's own prompts moved to `prompts_feature.go`.
+  Unrelated to presentation, and named here because it is in the diff.
