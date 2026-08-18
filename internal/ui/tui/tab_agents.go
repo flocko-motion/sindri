@@ -482,11 +482,22 @@ const (
 // label cannot come to sit over the wrong column.
 var agentTable = table.Table{
 	{Label: "repo", Width: 10, Clip: true}, // a repo name is unbounded; a long one would skew every row
-	{Label: "status", Width: 9},
 	{Label: "agent", Width: 12},
 	{Label: "role", Width: 8},
+	{Label: "status", Width: 9},
 	{Label: "ctx", Width: 4, Right: true},
 	{Label: "work"},
+}
+
+// AgentColumnLabels is agentTable's column labels, left to right — exported so a cross-front-end
+// test (-> internal/ui) can pin their order against the CLI's `agent list` columns without either
+// package importing the other, and without duplicating the layout each renders from.
+func AgentColumnLabels() []string {
+	labels := make([]string, len(agentTable))
+	for i, c := range agentTable {
+		labels[i] = c.Label
+	}
+	return labels
 }
 
 func (m model) agentRows() []row {
@@ -511,7 +522,7 @@ func (m model) agentRows() []row {
 	return out
 }
 
-// agentRow is one roster row: repo, lifecycle, name, role, context, work, and what is owed on it.
+// agentRow is one roster row: repo, name, role, lifecycle, context, work, and what is owed on it.
 func (m model) agentRow(a api.AgentView) row {
 	// Row coloured by lifecycle; cells styled independently so resets don't bleed.
 	ac := agentStatusStyle(a.Status)
@@ -557,9 +568,9 @@ func (m model) agentRow(a api.AgentView) row {
 	}
 	return row{agentTable.Line(
 		table.Cell{Text: a.Repo, Style: m.repoStyle(a.Project).Render},
-		table.Cell{Text: a.Status, Style: ac.Render},
 		table.Cell{Text: a.Name, Style: ac.Render},
 		table.Cell{Text: a.Role, Style: ac.Render},
+		table.Cell{Text: a.Status, Style: ac.Render},
 		table.Cell{Text: theme.ContextPercent(a.ContextTokens, a.ContextWindow), Style: ac.Render},
 		table.Cell{Text: task, Style: ac.Render},
 	), a.Name}
