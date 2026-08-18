@@ -419,6 +419,27 @@ func TestAgentStateContainerRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSetPhaseLeavesTaskBranchAndContainerAlone(t *testing.T) {
+	p := openTmpProject(t)
+	if err := p.SetState(AgentState{Agent: "brokkr", Container: "P", Branch: "P", Task: "C1", Phase: "working"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.SetPhase("brokkr", "resolving"); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := p.GetState("brokkr")
+	if st.Container != "P" || st.Branch != "P" || st.Task != "C1" || st.Phase != "resolving" {
+		t.Fatalf("SetPhase must change only phase, got %+v", st)
+	}
+}
+
+func TestSetPhaseErrorsRatherThanNoOpOnAnUnknownAgent(t *testing.T) {
+	p := openTmpProject(t)
+	if err := p.SetPhase("nobody", "working"); err == nil {
+		t.Fatal("SetPhase against an agent with no row must error, not silently do nothing")
+	}
+}
+
 func mustLeaves(t *testing.T, p *ProjectStore) []Task {
 	t.Helper()
 	v, err := p.OpenLeaves()

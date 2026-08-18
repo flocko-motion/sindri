@@ -86,7 +86,9 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 	case repo.MergeConflict:
 		pr.Status, pr.Feedback = "open", "" // no longer mergeable; back to review after the worker resolves
 		_ = ps.PutPR(pr)
-		_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "resolving"})
+		// Phase only: pr.Task is the container's id for a milestone, not the subtask held — writing
+		// it, or dropping Container, would misplace or unhook a feature worker.
+		_ = ps.SetPhase(pr.Agent, "resolving")
 		_ = ps.LogPR(pr.ID, "conflict", "rebase onto "+pr.Base+" conflicts: "+strings.Join(res.Files, ", "))
 		_ = e.deps.Deliver(project, pr.Agent, MsgResolveNeeded(pr.Base, res.Files), MailAndPush)
 		e.deps.Notify()
@@ -207,7 +209,9 @@ func (e *Engine) finishPartialMerge(project string, pr store.PR, onFeature bool)
 		e.resumeContainer(project, pr.Agent)
 		_ = e.deps.Deliver(project, pr.Agent, MsgMilestoneMerged(pr.ID), MailAndPush)
 	} else {
-		_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "working"})
+		// Phase only: promoteToFeature only promotes a "working" agent, so this one never picked up
+		// a container while its interim PR was out.
+		_ = ps.SetPhase(pr.Agent, "working")
 		_ = ps.Log(pr.Agent, "merged", pr.ID+" (interim)")
 		_ = ps.LogPR(pr.ID, "merged", "interim contribution into "+pr.Base)
 		_ = e.deps.Deliver(project, pr.Agent, MsgContributionMerged(pr.ID, pr.Task), MailAndPush)

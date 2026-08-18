@@ -218,6 +218,24 @@ func (p *ProjectStore) SetState(st AgentState) error {
 	return nil
 }
 
+// SetPhase changes only an agent's phase, leaving task, branch and container exactly as they were.
+// SetState writes the whole row, so a caller with nothing new to say about the rest of it had to
+// read the row first just to echo it back — and skipping that read is how a held container got
+// dropped independently at four call sites. Requires an existing row (SetState is the one that
+// creates it); it errors rather than silently doing nothing against an agent it has never seen.
+func (p *ProjectStore) SetPhase(agent, phase string) error {
+	res, err := p.s.db.Exec(`UPDATE agent_state SET phase=? WHERE project=? AND agent=?`, phase, p.project, agent)
+	if err != nil {
+		return fmt.Errorf("set phase %s: %w", agent, err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("set phase %s: %w", agent, err)
+	} else if n == 0 {
+		return fmt.Errorf("set phase %s: no existing state row (use SetState first)", agent)
+	}
+	return nil
+}
+
 // SetEscalation records the question an agent has stopped on, so the escalation survives a hub
 // restart — an escalation that evaporates leaves an agent silently stuck, refused by every verb that
 // lands work with nothing to say why. An upsert, because an agent may escalate before anything
