@@ -134,11 +134,24 @@ func (s *Service) ModelWindow(model string) (int, bool) { return agentport.Model
 // ModelForTier resolves tier to the model it dispatches to, via the wired backend.
 func (s *Service) ModelForTier(tier string) (string, bool) { return agentport.ModelForTier(tier) }
 
-// CurrentModel is the model name is effectively running: detected off its transcript while alive
-// (a human may change it by hand inside Claude Code, which the transcript sees first), the stored
-// choice otherwise — all there is for one that is not running.
+// CurrentModel is the model name is effectively running, taking its own liveness probe. For a
+// caller with no reading of its own; anything holding one must pass it (-> CurrentModelOf), since
+// this probe costs two container operations and is untimed.
 func (s *Service) CurrentModel(project, name string) string {
-	if s.AgentAlive(project, name) {
+	return s.CurrentModelOf(project, name, s.AgentAlive(project, name))
+}
+
+// CurrentModelOf is the model name is effectively running, given whether it is alive: detected off
+// its transcript while it is (a human may change it by hand inside Claude Code, which the transcript
+// sees first), the stored choice otherwise — all there is for one that is not running.
+//
+// Liveness is the caller's to supply because the board read has it already, from the watchdog's
+// standing observation. Probing per render put two container operations per agent on every board
+// read, every 3s per client, and saturated the runtime until healthy agents read as down — which is
+// the failure the watchdog was built to end (-> watchdog.go, "a board read REPORTS it, never takes
+// one").
+func (s *Service) CurrentModelOf(project, name string, alive bool) string {
+	if alive {
 		if _, _, detected, ok := s.ContextUsage(project, name); ok && detected != "" {
 			return detected
 		}

@@ -128,7 +128,9 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			status = "stalled"
 		}
 		tokens, window, _, _ := h.agents.ContextUsage(a.Project, a.Name)
-		model := h.agents.CurrentModel(a.Project, a.Name)
+		// Liveness from the watchdog's reading above, never a fresh probe: this runs per agent per
+		// board read, and taking one here is what saturated the runtime.
+		model := h.agents.CurrentModelOf(a.Project, a.Name, running[i])
 		status = overlayFullness(status, h.wf.ContextFull(a.Project, a.Name), st.Task, st.Container, pr)
 		status = overlayEscalation(status, st.Escalation)
 		agents = append(agents, AgentView{
