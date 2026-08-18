@@ -22,6 +22,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/repo"
+	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/task"
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
@@ -99,6 +100,9 @@ func (h *Hub) registry() *registry.Registry {
 		registry.Command{Name: "openspec", Help: "ship your openspec changes as a PR: openspec submit [message]", Roles: []string{"planner"},
 			Blocked: heldByEscalation("openspec", nil), Run: h.wf.CmdOpenspec},
 		registry.Command{Name: "state", Help: "set your resting state: state planning | state idle", Roles: []string{"planner"}, Run: h.wf.CmdState},
+		// A planner plans for people, so it may see who they are — in ITS repo. Visibility is local
+		// while addressing is global: mail takes any name, but only ones the user has given it.
+		registry.Command{Name: "staff", Help: "list this repo's agents — name, role, and what each is working on", Roles: []string{"planner"}, Run: h.cmdStaff},
 		// Scoped to what the role already sees (-> cmdComment): a worker its own task or held
 		// container, a reviewer the task of the PR it's reviewing, a planner/coauthor any task —
 		// they already read the whole backlog. Findings belong on the task, not the activity log.
@@ -503,6 +507,58 @@ func (h *Hub) cmdListPRs(c registry.Caller, _ []string, out io.Writer) (int, err
 		fmt.Fprintf(out, "%-14s %-14s %-10s %s\n", p.ID, api.StatusLabel(p.Status, counts[p.ID]), p.Agent, p.Branch)
 	}
 	return 0, nil
+}
+
+// cmdStaff lists the caller's colleagues in ITS OWN project — who they are and what each holds,
+// the answer to "who do I ask about this". Scoped by construction, the roster query being: an
+// agent may talk to anyone the user has named to it, and may not browse the fleet for a name.
+func (h *Hub) cmdStaff(c registry.Caller, _ []string, out io.Writer) (int, error) {
+	ps := h.store.For(c.Project)
+	roster, err := ps.Roster()
+	if err != nil {
+		return 1, err
+	}
+	if len(roster) == 0 {
+		fmt.Fprintln(out, "no agents in this repo yet")
+		return 0, nil
+	}
+	for _, a := range roster {
+		who := a.Name
+		if a.Name == c.Agent {
+			who += " (you)"
+		}
+		fmt.Fprintf(out, "%-14s %-9s %s\n", who, a.Role, staffHolding(ps, a))
+	}
+	return 0, nil
+}
+
+// staffHolding is what one colleague has in hand: a reviewer a PR, everyone else a task or the
+// feature it is working through. Retirement is said, since it decides whether to wait for them.
+func staffHolding(ps *store.ProjectStore, a store.Agent) string {
+	var holding string
+	if a.Role == "reviewer" {
+		if pr, err := ps.ReviewingPR(a.Name); err == nil && pr != "" {
+			holding = "reviewing " + pr
+		}
+	}
+	st, err := ps.GetState(a.Name)
+	if err == nil && holding == "" {
+		switch {
+		case st.Container != "" && st.Task != "":
+			holding = st.Container + " › " + st.Task
+		case st.Container != "":
+			holding = st.Container
+		case st.Task != "":
+			holding = st.Task
+		}
+	}
+	if holding == "" {
+		holding = "nothing in hand"
+	}
+	if a.Retired {
+		holding += " (retired: finishing what it holds, taking nothing new)"
+	}
+	return holding
 }
 
 // cmdChat is the agent-facing `chat` verb — it delegates to the chat relay.
