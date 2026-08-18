@@ -128,7 +128,7 @@ func (e *Engine) nudgeIdleWorkers(project, id, priority string) {
 		if st.Task != "" || (st.Phase != "" && st.Phase != "idle") {
 			continue // holding work, or mid-flow — leave it alone
 		}
-		if !e.deps.AgentAlive(project, a.Name) {
+		if !e.deps.AgentUp(project, a.Name) {
 			continue // nothing to inject into
 		}
 		_ = e.deps.Deliver(project, a.Name, MsgWorkAvailable(id), PushOnly)

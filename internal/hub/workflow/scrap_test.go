@@ -82,6 +82,7 @@ func (d *stubDeps) Interrupt(_, name string) error {
 	return nil
 }
 func (d *stubDeps) AgentAlive(_, _ string) bool               { return d.alive }
+func (d *stubDeps) AgentUp(_, _ string) bool                  { return d.alive }
 func (d *stubDeps) AgentIdle(_, name string) bool             { return !d.busy[name] }
 func (d *stubDeps) SessionAlive(_, _ string) bool             { return false }
 func (d *stubDeps) TaskComments(_, id string) []store.Comment { return d.comments[id] }

@@ -141,15 +141,9 @@ func (s *Service) CurrentModel(project, name string) string {
 	return s.CurrentModelOf(project, name, s.AgentAlive(project, name))
 }
 
-// CurrentModelOf is the model name is effectively running, given whether it is alive: detected off
-// its transcript while it is (a human may change it by hand inside Claude Code, which the transcript
-// sees first), the stored choice otherwise — all there is for one that is not running.
-//
-// Liveness is the caller's to supply because the board read has it already, from the watchdog's
-// standing observation. Probing per render put two container operations per agent on every board
-// read, every 3s per client, and saturated the runtime until healthy agents read as down — which is
-// the failure the watchdog was built to end (-> watchdog.go, "a board read REPORTS it, never takes
-// one").
+// CurrentModelOf is the model name is effectively running: detected off its transcript while alive
+// (a human may change it by hand, which the transcript sees first), the stored choice otherwise.
+// Liveness is passed in because probing it per render saturated the runtime (-> watchdog.go).
 func (s *Service) CurrentModelOf(project, name string, alive bool) string {
 	if alive {
 		if _, _, detected, ok := s.ContextUsage(project, name); ok && detected != "" {
@@ -228,9 +222,12 @@ func (s *Service) AgentDiagnostic(project, name string) string {
 	return b.String()
 }
 
-// AgentAlive reports whether an agent is running (pod up and tmux session live).
+// AgentAlive reports whether an agent is running (pod up and tmux session live), bounded like every
+// other probe here — on context.Background() a wedged pod blocked its caller for ever.
 func (s *Service) AgentAlive(project, name string) bool {
-	return s.AgentAliveCtx(context.Background(), project, name)
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	return s.AgentAliveCtx(ctx, project, name)
 }
 
 // AgentAliveCtx is AgentAlive bounded by ctx, so a wedged pod reads "down" instead of blocking.

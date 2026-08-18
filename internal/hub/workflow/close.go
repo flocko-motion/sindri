@@ -126,12 +126,13 @@ func (e *Engine) finishTask(project, id string, scrap bool) error {
 		if st, _ := ps.GetState(a.Name); st.Task == id {
 			_ = ps.SetState(store.AgentState{Agent: a.Name, Phase: restPhase(a.Role)})
 			_ = ps.Log(a.Name, "task-cancelled", id)
-			if e.deps.AgentAlive(project, a.Name) {
-				// ESC first, so the cancellation lands on an idle prompt rather than
-				// queuing behind the work it is cancelling.
+			// ESC first, so the cancellation lands on an idle prompt rather than queuing behind
+			// the work it is cancelling. Only the interrupt needs the agent up; the delivery is
+			// made either way, since mail is precisely what reaches one that is down.
+			if e.deps.AgentUp(project, a.Name) {
 				_ = e.deps.Interrupt(project, a.Name)
-				_ = e.deps.Deliver(project, a.Name, MsgTaskCancelled(id), MailAndPush)
 			}
+			_ = e.deps.Deliver(project, a.Name, MsgTaskCancelled(id), MailAndPush)
 		}
 	}
 	// The approval gate goes with the task: a gate left standing outlives what it asked about, and

@@ -122,6 +122,14 @@ func (d workflowDeps) AgentIdle(project, name string) bool {
 	return ok && l.up && l.runtime == "idle"
 }
 
+// AgentUp answers liveness from the same observation, for the same reason. An agent nothing has
+// looked at yet reads down, which is the safe direction: it costs a tick's delay, where a probe
+// per agent per tick cost the whole runtime.
+func (d workflowDeps) AgentUp(project, name string) bool {
+	l, ok := d.h.watch.get(project, name)
+	return ok && l.up
+}
+
 func (d workflowDeps) TaskComments(project, id string) []store.Comment {
 	return d.h.comments.ForView(project, id)
 }

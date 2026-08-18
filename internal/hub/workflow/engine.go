@@ -59,8 +59,10 @@ type Deps interface {
 	// Interrupt aborts an agent's current operation (sends ESC to its session), so a
 	// scrapped-task notice lands on an idle prompt rather than queuing behind work.
 	Interrupt(project, name string) error
-	// AgentAlive reports whether an agent's pod is currently running.
+	// AgentAlive PROBES: for a caller needing the answer as of now, never from a tick (-> AgentUp).
 	AgentAlive(project, name string) bool
+	// AgentUp is the watchdog's last reading of the same, free. What anything on a timer asks.
+	AgentUp(project, name string) bool
 	// AgentIdle reports an agent sitting at an empty prompt, from the watchdog's last observation.
 	// What it answers is whether a message sent NOW would be acted on: text typed into a running
 	// turn lands in the input box and dies there when the turn ends.

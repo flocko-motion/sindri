@@ -16,7 +16,7 @@ func (e *Engine) idleAndReachable(project, name string) bool {
 	if err != nil || st.Task != "" || (st.Phase != "" && st.Phase != "idle" && st.Phase != e.restPhaseFor(project, name)) {
 		return false
 	}
-	if !e.deps.AgentAlive(project, name) || !e.deps.AgentIdle(project, name) {
+	if !e.deps.AgentUp(project, name) || !e.deps.AgentIdle(project, name) {
 		return false
 	}
 	return !e.parkedByTheHub(project, name)

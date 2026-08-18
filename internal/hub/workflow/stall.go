@@ -53,7 +53,7 @@ func (e *Engine) NudgeStalled(project, name, runtime string, idleFor time.Durati
 	if st.Escalation != "" {
 		return false
 	}
-	if !e.deps.AgentAlive(project, name) {
+	if !e.deps.AgentUp(project, name) { // the watchdog's reading: this runs on the stall tick
 		return false
 	}
 	// A cut-off turn is answered on its own terms: it is not idling and has nothing to explain, it
