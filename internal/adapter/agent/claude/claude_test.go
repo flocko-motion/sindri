@@ -104,6 +104,26 @@ func TestClaudeState(t *testing.T) {
 				strings.Repeat("  more output since then\n", 14) + "❯ ",
 			want: agent.Idle,
 		},
+		{
+			// sudri, verbatim: six minutes into a turn, and the board said blocked. The agent had ASKED
+			// the user something several screens earlier, and the input box is always drawn — so the
+			// pair matched anywhere on the pane and outranked the interrupt hint below it. The word
+			// then flipped back to working when the sentence scrolled off, and blocked again at the
+			// next one: it was reporting the transcript's contents, not the agent's state.
+			name: "a question the agent asked earlier is transcript, not a prompt",
+			screen: "● What would you like to clarify? Happy to give more background.\n" +
+				strings.Repeat("  work since then\n", 40) +
+				"✶ Perusing… (6m 1s · ↓ 25.6k tokens)\n❯ \n  ⏵⏵ bypass permissions on · esc to interrupt",
+			want: agent.Working,
+		},
+		{
+			// The other half of the same rule: a real prompt lives directly above the input box, however
+			// long the transcript above it is, so scoping the match must not lose it.
+			name: "a real prompt under a long transcript is still blocked",
+			screen: strings.Repeat("  earlier output\n", 60) +
+				"Do you want to proceed?\n❯ 1. Yes\n  2. No\n(esc to cancel)",
+			want: agent.Blocked,
+		},
 	}
 	for _, c := range cases {
 		if got := (Claude{}).DetectState(c.screen); got != c.want {
