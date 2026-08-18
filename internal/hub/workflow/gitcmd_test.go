@@ -245,22 +245,52 @@ func TestGitIncomingShowsWhatMoved(t *testing.T) {
 	}
 }
 
-// TestGitDropSaysSoWhenNothingMoved is defect A: neither step gitDrop takes can fail on a no-op
-// (checkout exits 0 when the paths already match; CommitAll is a no-op with nothing staged), so the
-// unconditional success line was a claim about work that was never done.
-func TestGitDropSaysSoWhenNothingMoved(t *testing.T) {
+// manualRepo returns a fresh repo root, the path its agent worktree will live at, and a `git -C`
+// runner over either — the plumbing every hand-built fixture below needs before it can lay down
+// whatever commit history and worktree state the case calls for; gitEngine's fixed shape can't
+// express a repo that advances independently of the agent's branch or a path with no committed churn.
+func manualRepo(t *testing.T) (root, wt string, run func(dir string, args ...string)) {
+	t.Helper()
+	root = t.TempDir()
+	return root, filepath.Join(root, ".worktrees", "eitri"), func(dir string, args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git -C %s %v: %s", dir, args, out)
+		}
+	}
+}
+
+// manualEngine wires root/wt into a workflow Engine with one worker agent, "eitri", on branch
+// "work" — called once the caller has already committed whatever history manualRepo's case needs.
+func manualEngine(t *testing.T, root, wt string) (*Engine, registry.Caller) {
+	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
-	root := t.TempDir()
-	run := func(dir string, args ...string) {
-		t.Helper()
-		if out, e := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); e != nil {
-			t.Fatalf("git -C %s %v: %s", dir, args, out)
-		}
+	if err := st.RegisterProject("proj", root); err != nil {
+		t.Fatalf("register: %v", err)
 	}
+	ps := st.For("proj")
+	rel, err := filepath.Rel(root, wt)
+	if err != nil {
+		t.Fatalf("worktree path: %v", err)
+	}
+	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker", Workspace: rel}); err != nil {
+		t.Fatalf("put agent: %v", err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Branch: "work", Phase: "working"}); err != nil {
+		t.Fatalf("set state: %v", err)
+	}
+	return New(st, &stubDeps{root: root}), registry.Caller{Project: "proj", Agent: "eitri", Role: "worker"}
+}
+
+// TestGitDropSaysSoWhenNothingMoved is defect A: neither step gitDrop takes can fail on a no-op
+// (checkout exits 0 when the paths already match; CommitAll is a no-op with nothing staged), so the
+// unconditional success line was a claim about work that was never done.
+func TestGitDropSaysSoWhenNothingMoved(t *testing.T) {
+	root, wt, run := manualRepo(t)
 	run(root, "init", "-q", "-b", "main")
 	run(root, "config", "user.email", "t@t")
 	run(root, "config", "user.name", "t")
@@ -272,7 +302,6 @@ func TestGitDropSaysSoWhenNothingMoved(t *testing.T) {
 	run(root, "add", "-A")
 	run(root, "commit", "-qm", "base")
 
-	wt := filepath.Join(root, ".worktrees", "eitri")
 	run(root, "worktree", "add", "-q", "-b", "work", wt)
 	// Real work on a different file, so the branch is not empty — a drop on steady.go must leave it.
 	if e := os.WriteFile(filepath.Join(wt, "feature.go"), []byte("package p\n\nfunc Feature() {}\n"), 0o644); e != nil {
@@ -281,18 +310,7 @@ func TestGitDropSaysSoWhenNothingMoved(t *testing.T) {
 	run(wt, "add", "-A")
 	run(wt, "commit", "-qm", "feature")
 
-	if err := st.RegisterProject("proj", root); err != nil {
-		t.Fatalf("register: %v", err)
-	}
-	ps := st.For("proj")
-	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker", Workspace: ".worktrees/eitri"}); err != nil {
-		t.Fatalf("put agent: %v", err)
-	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Branch: "work", Phase: "working"}); err != nil {
-		t.Fatalf("set state: %v", err)
-	}
-	e := New(st, &stubDeps{root: root})
-	c := registry.Caller{Project: "proj", Agent: "eitri", Role: "worker"}
+	e, c := manualEngine(t, root, wt)
 	before := gitLog(t, wt)
 
 	out, code := gitVerb(t, e, c, "drop", "steady.go")
@@ -329,18 +347,7 @@ func gitLog(t *testing.T, wt string) string {
 // already matches there) while `change`'s three-dot diff — merge-base, not tip — still shows it.
 // Dropping against the merge-base instead keeps the two answers talking about the same commit.
 func TestGitDropAgreesWithChangeEvenAsTheReferenceAdvances(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { st.Close() })
-	root := t.TempDir()
-	run := func(dir string, args ...string) {
-		t.Helper()
-		if out, e := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); e != nil {
-			t.Fatalf("git -C %s %v: %s", dir, args, out)
-		}
-	}
+	root, wt, run := manualRepo(t)
 	run(root, "init", "-q", "-b", "main")
 	run(root, "config", "user.email", "t@t")
 	run(root, "config", "user.name", "t")
@@ -350,7 +357,6 @@ func TestGitDropAgreesWithChangeEvenAsTheReferenceAdvances(t *testing.T) {
 	run(root, "add", "-A")
 	run(root, "commit", "-qm", "base")
 
-	wt := filepath.Join(root, ".worktrees", "eitri")
 	run(root, "worktree", "add", "-q", "-b", "work", wt)
 
 	// The agent bumps go.mod on its own branch, unrelated to its actual task.
@@ -367,18 +373,7 @@ func TestGitDropAgreesWithChangeEvenAsTheReferenceAdvances(t *testing.T) {
 	}
 	run(root, "commit", "-aqm", "upstream also bumped")
 
-	if err := st.RegisterProject("proj", root); err != nil {
-		t.Fatalf("register: %v", err)
-	}
-	ps := st.For("proj")
-	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker", Workspace: ".worktrees/eitri"}); err != nil {
-		t.Fatalf("put agent: %v", err)
-	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Branch: "work", Phase: "working"}); err != nil {
-		t.Fatalf("set state: %v", err)
-	}
-	e := New(st, &stubDeps{root: root})
-	c := registry.Caller{Project: "proj", Agent: "eitri", Role: "worker"}
+	e, c := manualEngine(t, root, wt)
 
 	out, code := gitVerb(t, e, c, "change", "go.mod")
 	if code != 0 || !strings.Contains(out, "go.mod") {
@@ -404,6 +399,102 @@ func TestGitDropAgreesWithChangeEvenAsTheReferenceAdvances(t *testing.T) {
 	// it means change still measured the file as part of the branch's introduced content.
 	if !strings.HasPrefix(out, "No ") {
 		t.Errorf("`git drop` reported success but `git change` still shows go.mod — the two disagreed: %q", out)
+	}
+}
+
+// TestGitDropCatchesCommittedChurnBehindAHandEditedWorktree is the review's blocking finding: a
+// worktree-only no-op check can be fooled by hand-editing a path back to what it will end up
+// matching, without committing — HEAD still carries the churn `git change` measures, but the
+// worktree alone already looks settled. Mirrors TestGitDropAgreesWithChangeEvenAsTheReferenceAdvances
+// with one extra step (the hand-edit) so it pins the exact shape the review described.
+func TestGitDropCatchesCommittedChurnBehindAHandEditedWorktree(t *testing.T) {
+	root, wt, run := manualRepo(t)
+	run(root, "init", "-q", "-b", "main")
+	run(root, "config", "user.email", "t@t")
+	run(root, "config", "user.name", "t")
+	if e := os.WriteFile(filepath.Join(root, "go.mod"), []byte("v1\n"), 0o644); e != nil {
+		t.Fatal(e)
+	}
+	run(root, "add", "-A")
+	run(root, "commit", "-qm", "base")
+
+	run(root, "worktree", "add", "-q", "-b", "work", wt)
+	// The agent commits churn to go.mod: merge-base v1 -> committed v2.
+	if e := os.WriteFile(filepath.Join(wt, "go.mod"), []byte("v2\n"), 0o644); e != nil {
+		t.Fatal(e)
+	}
+	run(wt, "add", "-A")
+	run(wt, "commit", "-qm", "bump (churn)")
+	// Then hand-edits it back to v1 in the worktree, uncommitted — "tidying up" before asking drop
+	// to be sure. HEAD still holds v2; only the worktree looks like the merge-base.
+	if e := os.WriteFile(filepath.Join(wt, "go.mod"), []byte("v1\n"), 0o644); e != nil {
+		t.Fatal(e)
+	}
+
+	e, c := manualEngine(t, root, wt)
+
+	out, code := gitVerb(t, e, c, "drop", "go.mod")
+	if code != 0 {
+		t.Fatalf("`git drop` failed: code=%d out=%q", code, out)
+	}
+	if strings.Contains(out, "already match") || strings.Contains(out, "nothing recorded") {
+		t.Fatalf("HEAD still carries the committed churn — a hand-edited worktree must not read as a no-op: %q", out)
+	}
+	if !strings.Contains(out, "Removed") {
+		t.Errorf("the committed churn should be dropped and recorded, got %q", out)
+	}
+
+	out, code = gitVerb(t, e, c, "change", "go.mod")
+	if code != 0 {
+		t.Fatalf("`git change` after drop: code=%d out=%q", code, out)
+	}
+	if !strings.HasPrefix(out, "No ") {
+		t.Errorf("`git drop` claimed to have recorded a fix but `git change` still shows go.mod: %q", out)
+	}
+}
+
+// TestGitDropClearsADirtyEditWithNothingToRecord is the review's milder finding, other direction:
+// HEAD already agrees with the merge-base (no committed churn), but the worktree carries an
+// uncommitted edit — say, from a drop run a second time after a further hand-edit. Something real
+// happens (the edit is cleared), but no commit results, and the reply must not claim one.
+func TestGitDropClearsADirtyEditWithNothingToRecord(t *testing.T) {
+	root, wt, run := manualRepo(t)
+	run(root, "init", "-q", "-b", "main")
+	run(root, "config", "user.email", "t@t")
+	run(root, "config", "user.name", "t")
+	if e := os.WriteFile(filepath.Join(root, "go.mod"), []byte("v1\n"), 0o644); e != nil {
+		t.Fatal(e)
+	}
+	run(root, "add", "-A")
+	run(root, "commit", "-qm", "base")
+
+	run(root, "worktree", "add", "-q", "-b", "work", wt)
+	// The branch never actually diverges from the merge-base in its commits...
+	if e := os.WriteFile(filepath.Join(wt, "feature.go"), []byte("package p\n"), 0o644); e != nil {
+		t.Fatal(e)
+	}
+	run(wt, "add", "-A")
+	run(wt, "commit", "-qm", "unrelated feature commit")
+	// ...but go.mod sits dirty in the worktree, uncommitted.
+	if e := os.WriteFile(filepath.Join(wt, "go.mod"), []byte("scratch edit\n"), 0o644); e != nil {
+		t.Fatal(e)
+	}
+	before := gitLog(t, wt)
+
+	e, c := manualEngine(t, root, wt)
+
+	out, code := gitVerb(t, e, c, "drop", "go.mod")
+	if code != 0 {
+		t.Fatalf("`git drop` failed: code=%d out=%q", code, out)
+	}
+	if strings.Contains(out, "Removed") {
+		t.Errorf("no commit resulted (HEAD already matched) — the reply must not claim one: %q", out)
+	}
+	if b, err := os.ReadFile(filepath.Join(wt, "go.mod")); err != nil || string(b) != "v1\n" {
+		t.Fatalf("go.mod = %q (err %v), want the dirty edit cleared back to HEAD's content", b, err)
+	}
+	if got := gitLog(t, wt); got != before {
+		t.Errorf("nothing should have been committed — log was %q, now %q", before, got)
 	}
 }
 

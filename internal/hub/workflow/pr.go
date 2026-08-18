@@ -58,11 +58,11 @@ func (e *Engine) baseBranch(root string) (string, error) {
 func (e *Engine) warnUnconfiguredReference(root, branch string) {
 	e.refWarn.mu.Lock()
 	defer e.refWarn.mu.Unlock()
+	if e.refWarn.seen == nil { // a bare &Engine{} in a test skips New's own initialisation
+		e.refWarn.seen = map[string]bool{}
+	}
 	if e.refWarn.seen[root] {
 		return
-	}
-	if e.refWarn.seen == nil {
-		e.refWarn.seen = map[string]bool{}
 	}
 	e.refWarn.seen[root] = true
 	fmt.Fprintf(os.Stderr, "hub: %s has no `reference:` configured — every agent measures against %q, whatever is checked out there right now; set `reference:` in .sindri/config.yaml to pin it.\n", root, branch)

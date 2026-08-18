@@ -206,16 +206,11 @@ func (e *Engine) gitRestore(c registry.Caller, wt string, paths []string, out io
 	return 0, nil
 }
 
-// gitDrop takes paths out of the agent's change for good: back to where the branch and the
-// reference last agreed, and committed, since a restoration left uncommitted would keep the churn
-// in the PR. This is what "drop those files, feature only" needs — reverting COMMITTED work, which
-// a restore cannot do.
-//
-// The target is the MERGE-BASE, not the reference's current tip: `git change` measures the whole
-// change with a three-dot diff against that same merge-base, so dropping against anything else can
-// leave drop reporting success while change still shows the file — true of two different commits,
-// read as one lying about the other. Checked before touching anything, since checkout and commit
-// both succeed on a no-op just as they do on a real change, and a no-op is not a failure to hide.
+// gitDrop takes paths out of the agent's change for good: reverting COMMITTED work back to the
+// MERGE-BASE (not the reference's current tip, which `git change`'s three-dot diff never measures
+// against — dropping against anything else can leave the two disagreeing about the same file) and
+// committing that. CommittedChurn and WorktreeDirty are asked separately, each with its own honest
+// reply, rather than one worktree-only check that can miss committed churn hidden by a hand-edit.
 func (e *Engine) gitDrop(c registry.Caller, wt, root string, paths []string, out io.Writer) (int, error) {
 	if len(paths) == 0 {
 		fmt.Fprintln(out, "`git drop` needs the paths to remove from your change — it throws work away, so it never guesses. `sindri git change` shows what your change covers.")
@@ -233,16 +228,26 @@ func (e *Engine) gitDrop(c registry.Caller, wt, root string, paths []string, out
 	if err != nil {
 		return 1, err
 	}
-	matched, err := git.MatchesRef(wt, target, paths)
+	churn, err := git.CommittedChurn(wt, target, paths)
 	if err != nil {
 		return 1, err
 	}
-	if matched {
+	dirty, err := git.WorktreeDirty(wt, paths)
+	if err != nil {
+		return 1, err
+	}
+	if !churn && !dirty {
 		fmt.Fprintf(out, "%s already match %s exactly — nothing to drop, nothing recorded.\n", FileList(paths), refName)
 		return 0, nil
 	}
 	if err := git.RestoreFromRef(wt, target, paths); err != nil {
 		return 1, err
+	}
+	if !churn {
+		// The worktree was dirty but the branch's own commits already agreed with the reference —
+		// the edit is cleared, but there was never anything here for `git change` to disagree about.
+		fmt.Fprintf(out, "%s already matched %s in your commits — cleared the uncommitted edit there, but there was nothing to record.\n", FileList(paths), refName)
+		return 0, nil
 	}
 	ps := e.store.For(c.Project)
 	st, _ := ps.GetState(c.Agent)
