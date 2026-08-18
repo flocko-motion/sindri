@@ -110,6 +110,17 @@ var agentListTable = table.Table{
 	{Label: "pr"},
 }
 
+// AgentColumnLabels is agentListTable's column labels, left to right — exported so a cross-front-end
+// test (-> internal/ui) can pin their order against the TUI's without either package importing the
+// other, and without duplicating the layout each renders from.
+func AgentColumnLabels() []string {
+	labels := make([]string, len(agentListTable))
+	for i, c := range agentListTable {
+		labels[i] = c.Label
+	}
+	return labels
+}
+
 func agentListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "list", Short: "List agents with their live state", Args: cobra.NoArgs,
