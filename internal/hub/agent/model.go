@@ -41,11 +41,14 @@ func (s *Service) SetModel(project, name, model string) error {
 	if !s.AgentAlive(project, name) {
 		return nil // nothing live to compact; the next Launch starts on the new model
 	}
-	// The restart right after kills this turn regardless, so unlike Compact's other callers an
-	// interrupt here costs nothing extra — it just gives the queued /compact its usual immediate start.
-	_ = s.Interrupt(project, name)
-	if err := s.Compact(project, name); err != nil {
-		return fmt.Errorf("compacting %s before its model change: %w", name, err)
+	// No recorded usage means a fresh session — nothing to carry across, so nothing to compact.
+	if _, _, _, ok := s.ContextUsage(project, name); ok {
+		// The restart right after kills this turn regardless, so unlike Compact's other callers an
+		// interrupt here costs nothing extra — it just gives the queued /compact its usual immediate start.
+		_ = s.Interrupt(project, name)
+		if err := s.Compact(project, name); err != nil {
+			return fmt.Errorf("compacting %s before its model change: %w", name, err)
+		}
 	}
 	return s.RestartAgent(project, name, io.Discard)
 }

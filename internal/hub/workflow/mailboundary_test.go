@@ -181,9 +181,9 @@ func TestMailDefersPastCompactionOnAClaim(t *testing.T) {
 }
 
 // TestMailDefersPastAModelChange: a retiering restart is itself a fresh-context boundary — SetModel
-// has already compacted and relaunched the pod by the time DirRetiering is returned. Mail is not
-// delivered on this call (there is nothing to read it into yet); it lands on the next one, in the
-// pod that comes back up.
+// has already compacted and relaunched the pod by the time this call returns, so the pod it fired
+// from is already gone. Mail is not delivered on this call (there is nothing to read it into yet);
+// it lands on the next one, in the pod that comes back up.
 func TestMailDefersPastAModelChange(t *testing.T) {
 	deps := &stubDeps{tierModels: map[string]string{"mid": "big-model"}, currentModel: "small-model"}
 	e, ps := idleWorkerWithOpenTask(t, deps)

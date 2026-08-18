@@ -509,9 +509,9 @@ func (e *Engine) CmdNext(c registry.Caller, _ []string, out io.Writer) (int, err
 	return 0, nil
 }
 
-// claimNext hands a worker the best-rated unit in a project (-> nextUp), preparing it first: a model
-// change or compaction ends this pass right there, same as clearArmed above — mail and handover only
-// run once neither fires, so the assignment always lands in the context that follows either one.
+// claimNext hands a worker the best-rated unit in a project (-> nextUp), preparing it first: a
+// compaction ends this pass right there, same as clearArmed above. A model change instead falls
+// through to the claim below, deferring mail to the pod it restarts into.
 func (e *Engine) claimNext(project, agent string) (string, bool, error) {
 	// Retired by a human, or by its own context filling: either way it is being wound down, and the
 	// gate is here rather than at the task queries so it holds however the work would have arrived.
@@ -535,24 +535,27 @@ func (e *Engine) claimNext(project, agent string) (string, bool, error) {
 		return "", false, err
 	}
 	t, isPackage, ok := nextUp(packages, leaves, e.tierPrefers(project, agent))
+	retiered := false
 	if ok {
 		tier := api.TierOrDefault(t.Tier)
 		if want, known := e.deps.ModelForTier(tier); known && want != e.deps.CurrentModel(project, agent) {
+			// SetModel relaunches the worker itself; retiered defers mail to the pod that comes back up.
 			if err := e.deps.SetModel(project, agent, want); err != nil {
 				return "", false, err
 			}
-			return DirRetiering(tier), true, nil
-		}
-		if dir, acted, err := e.compactOrWait(project, agent); err != nil {
+			retiered = true
+		} else if dir, acted, err := e.compactOrWait(project, agent); err != nil {
 			return "", false, err
 		} else if acted {
 			return dir, true, nil
 		}
 	}
-	if d, has, err := e.pendingMail(project, agent); err != nil { // neither op above fired; safe to check now
-		return "", false, err
-	} else if has {
-		return d, true, nil
+	if !retiered {
+		if d, has, err := e.pendingMail(project, agent); err != nil { // after any op above, before the claim below
+			return "", false, err
+		} else if has {
+			return d, true, nil
+		}
 	}
 	if !ok {
 		return "", false, nil

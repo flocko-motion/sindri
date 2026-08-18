@@ -143,11 +143,12 @@ func TestAnIdleWorkerTakesTheCriticalTaskOverAMidPackage(t *testing.T) {
 	}
 }
 
-// TestAMismatchedTaskChangesTheModelInsteadOfBeingHandedOver: the model change compacts and
-// restarts the worker on its own (-> agent.Service.SetModel), so the CURRENT pod is on its way out
-// — handing the task over to it here would be handing it to a process about to be torn down. The
-// restarted pod's own boot asks fresh, once the model already matches.
-func TestAMismatchedTaskChangesTheModelInsteadOfBeingHandedOver(t *testing.T) {
+// TestAMismatchedTaskChangesTheModelThenHandsItOver: the model change compacts and restarts the
+// worker on its own (-> agent.Service.SetModel) — a fact the worker can neither act on nor verify,
+// so it is not reported back as a directive. The claim itself only touches the store and the
+// worktree, neither tied to which pod is running, so it proceeds in the same call: the restarted
+// pod finds itself already on the task the moment it boots and asks fresh.
+func TestAMismatchedTaskChangesTheModelThenHandsItOver(t *testing.T) {
 	deps := &stubDeps{
 		alive:        true,
 		currentModel: "claude-haiku-4-5",
@@ -163,11 +164,11 @@ func TestAMismatchedTaskChangesTheModelInsteadOfBeingHandedOver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if !strings.Contains(dir, "senior") {
-		t.Errorf("directive = %q, want it to say the task needs the senior tier", dir)
+	if !strings.Contains(dir, "td-abc123") {
+		t.Errorf("directive = %q, want the task claimed once the model change is done", dir)
 	}
-	if st, _ := ps.GetState("dvalin"); st.Task != "" {
-		t.Errorf("a mismatched task was handed over anyway: %q", st.Task)
+	if st, _ := ps.GetState("dvalin"); st.Task != "td-abc123" {
+		t.Errorf("state.Task = %q, want the mismatched task claimed", st.Task)
 	}
 	if len(deps.modelSet) != 1 || deps.modelSet[0] != "dvalin=claude-opus-5" {
 		t.Errorf("modelSet = %v, want exactly one SetModel(dvalin, claude-opus-5)", deps.modelSet)

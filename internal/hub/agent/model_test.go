@@ -78,6 +78,7 @@ func TestSetModelToTheSameValueIsANoOp(t *testing.T) {
 // itself refuses (the fixture's fake Check() fails on purpose; see compactFixture/fakeRuntime).
 func TestSetModelCompactsThenRelaunchesARunningAgent(t *testing.T) {
 	s, f := compactFixture(t)
+	writeUsage(t, "proj", "durin", 80_000) // a session with something in it, unlike a fresh one
 
 	err := s.SetModel("proj", "durin", "claude-opus-5")
 	if err == nil || !strings.Contains(err.Error(), "nothing to launch into") {
@@ -107,5 +108,26 @@ func TestSetModelCompactsThenRelaunchesARunningAgent(t *testing.T) {
 	}
 	if a.Model != "claude-opus-5" {
 		t.Errorf("Model = %q, want claude-opus-5 recorded even though the relaunch itself failed", a.Model)
+	}
+}
+
+// TestSetModelSkipsCompactionOnAFreshSession: no recorded usage means nothing has been said yet, so
+// there is nothing to carry across — firing Claude Code's own /compact into it would only land on
+// "Not enough messages to compact." The relaunch still runs.
+func TestSetModelSkipsCompactionOnAFreshSession(t *testing.T) {
+	s, f := compactFixture(t)
+
+	err := s.SetModel("proj", "durin", "claude-opus-5")
+	if err == nil || !strings.Contains(err.Error(), "nothing to launch into") {
+		t.Fatalf("SetModel = %v, want it to reach (and fail at) Launch's pre-flight", err)
+	}
+
+	for _, sent := range f.sent {
+		if sent == "/compact" {
+			t.Errorf("a fresh session with no recorded usage was compacted anyway; sent=%v", f.sent)
+		}
+	}
+	if len(f.removed) == 0 {
+		t.Error("the old container was never torn down on the way to relaunching")
 	}
 }

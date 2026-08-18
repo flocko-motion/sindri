@@ -205,8 +205,8 @@ func openIDs(tasks []store.Task) []string {
 }
 
 // claimNextSubtask is claimNext's one-pass rule for a held feature's own subtasks; with none open,
-// containerNext decides finished vs. still gated. A model change or compaction ends the pass here
-// too, same as claimNext's — mail and containerNext only run once neither fires.
+// containerNext decides finished vs. still gated. Compaction ends the pass here, same as claimNext's;
+// a model change instead falls through to containerNext, deferring mail to the pod it restarts into.
 func (e *Engine) claimNextSubtask(project, agent, container string) (string, bool, error) {
 	if e.clearArmed(project, agent) {
 		return "", false, nil // about to land (fired by the caller): a subtask claimed now would be cut in half by it
@@ -215,24 +215,27 @@ func (e *Engine) claimNextSubtask(project, agent, container string) (string, boo
 	if err != nil {
 		return "", false, err
 	}
+	retiered := false
 	if len(children) > 0 {
 		tier := api.TierOrDefault(children[0].Tier)
 		if want, known := e.deps.ModelForTier(tier); known && want != e.deps.CurrentModel(project, agent) {
+			// SetModel relaunches the worker itself; retiered defers mail to the pod that comes back up.
 			if err := e.deps.SetModel(project, agent, want); err != nil {
 				return "", false, err
 			}
-			return DirRetiering(tier), true, nil
-		}
-		if dir, acted, err := e.compactOrWait(project, agent); err != nil {
+			retiered = true
+		} else if dir, acted, err := e.compactOrWait(project, agent); err != nil {
 			return "", false, err
 		} else if acted {
 			return dir, true, nil
 		}
 	}
-	if d, has, err := e.pendingMail(project, agent); err != nil {
-		return "", false, err
-	} else if has {
-		return d, true, nil
+	if !retiered {
+		if d, has, err := e.pendingMail(project, agent); err != nil {
+			return "", false, err
+		} else if has {
+			return d, true, nil
+		}
 	}
 	return e.containerNext(project, agent, container)
 }

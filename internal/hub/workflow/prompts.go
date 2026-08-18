@@ -452,15 +452,6 @@ const DirClearPending = "[hub] The user has armed a context clear for you: it fi
 	"boundary, and your session starts empty. Nothing is assigned until it lands. Don't ask again — " +
 	"you'll be told to carry on the moment your context is clear."
 
-// DirRetiering answers a worker whose next task needed a different model than the one it was
-// running — the gate has already fired the change (-> claimNext), which compacts and restarts the
-// worker on its own, so that task is not assigned here: the restarted pod asks for it fresh.
-func DirRetiering(tier string) string {
-	return fmt.Sprintf("[hub] Your next task is rated %q, a different model than the one you're "+
-		"running — it changes here, at this boundary, before that task is assigned. Nothing is "+
-		"assigned until it lands; don't ask again.", tier)
-}
-
 // DirCompacting answers a worker whose next assignment needed the room compaction buys first — the
 // gate has already fired it (-> claimNext), queuing into the running session rather than assigning
 // here, so the un-compacted context is never what the task gets worked in.
