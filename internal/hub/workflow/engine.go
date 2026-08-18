@@ -85,6 +85,18 @@ type Deps interface {
 	// CompactionThreshold is the token count above which a session filling window tokens is worth
 	// compacting, from the backend's own formula for the model that window belongs to.
 	CompactionThreshold(window int) int
+	// CurrentModel is the model an agent is effectively running: detected off its transcript while
+	// alive, the stored choice otherwise.
+	CurrentModel(project, name string) string
+	// ModelForTier resolves a difficulty tier to the model it dispatches to, ok=false for anything
+	// the backend does not recognise.
+	ModelForTier(tier string) (model string, ok bool)
+	// SetModel changes the model an agent runs on — compacting and relaunching it first if it is
+	// running, since the session belongs to its old model and cannot cross onto the new one.
+	SetModel(project, name, model string) error
+	// HoldsNothing reports whether an agent holds nothing the hub can see: no leaf task, no held
+	// feature, no review owed, no open escalation, nobody dialed in.
+	HoldsNothing(project, name, role string) (bool, error)
 }
 
 // clearArmed reports whether a human has armed a context clear for this agent. It is handed no new

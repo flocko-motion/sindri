@@ -73,6 +73,10 @@ type Agent interface {
 	// ModelWindow resolves a model id to its context window, ok=false when the backend does not
 	// recognise it — the check a chosen model must pass before the hub starts an agent on it.
 	ModelWindow(model string) (window int, ok bool)
+	// ModelForTier resolves a difficulty tier to the model it dispatches to, ok=false for anything
+	// the backend does not recognise — the dispatcher's own mapping, from the backend since a
+	// second implementation would have its own names for the same idea.
+	ModelForTier(tier string) (model string, ok bool)
 }
 
 // active is wired once at startup via Use; the no-op default keeps the port safe before.
@@ -113,6 +117,9 @@ func CompactionThreshold(window int) int { return active.CompactionThreshold(win
 // ModelWindow resolves model to its window via the wired backend.
 func ModelWindow(model string) (int, bool) { return active.ModelWindow(model) }
 
+// ModelForTier resolves tier to a model via the wired backend.
+func ModelForTier(tier string) (string, bool) { return active.ModelForTier(tier) }
+
 // noop is the default until Use: state is Unknown, no home is provisioned.
 type noop struct{}
 
@@ -129,3 +136,5 @@ func (noop) ContextUsage(string) (int, int, string, bool) { return 0, 0, "", fal
 func (noop) CompactionThreshold(int) int { return math.MaxInt } // never worth it: nothing to measure
 
 func (noop) ModelWindow(string) (int, bool) { return 0, false } // nothing wired, nothing recognised
+
+func (noop) ModelForTier(string) (string, bool) { return "", false } // nothing wired, nothing recognised

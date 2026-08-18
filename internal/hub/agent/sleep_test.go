@@ -68,7 +68,7 @@ func TestForgetIdleSinceStartsANewSpell(t *testing.T) {
 // escalation each mean the worker is mid-something, not idle.
 func TestHoldsNothingChecksEveryKindOfWork(t *testing.T) {
 	s, _ := sleepFixture(t)
-	if empty, err := s.holdsNothing("proj", "durin", "worker"); err != nil || !empty {
+	if empty, err := s.HoldsNothing("proj", "durin", "worker"); err != nil || !empty {
 		t.Fatalf("a fresh idle worker should hold nothing: empty=%v err=%v", empty, err)
 	}
 	ps := s.store.For("proj")
@@ -91,7 +91,7 @@ func TestHoldsNothingChecksEveryKindOfWork(t *testing.T) {
 			if err := c.setup(); err != nil {
 				t.Fatal(err)
 			}
-			if empty, err := s.holdsNothing("proj", "durin", "worker"); err != nil || empty {
+			if empty, err := s.HoldsNothing("proj", "durin", "worker"); err != nil || empty {
 				t.Errorf("holding %s should not read as holding nothing: empty=%v err=%v", c.name, empty, err)
 			}
 		})
@@ -102,7 +102,7 @@ func TestHoldsNothingChecksEveryKindOfWork(t *testing.T) {
 // capacity — checked by role alone, before any state is even read.
 func TestHoldsNothingExcludesCoauthor(t *testing.T) {
 	s, _ := sleepFixture(t)
-	if empty, err := s.holdsNothing("proj", "durin", "coauthor"); err != nil || empty {
+	if empty, err := s.HoldsNothing("proj", "durin", "coauthor"); err != nil || empty {
 		t.Errorf("a coauthor must never read as holding nothing: empty=%v err=%v", empty, err)
 	}
 }

@@ -124,6 +124,9 @@ func (r *refwatch) preflight(projects []store.Project) {
 			// rather than any one agent's request, so both belong on this same sweep.
 			r.h.agents.FireIdleStops(p.Tag)
 			r.h.agents.FireIdleStarts(p.Tag)
+			// Same hazard as compaction, same remedy: the gate withholds and this fires the model
+			// change off-tick, since it compacts and restarts the worker (-> FireDueRetiers).
+			r.h.wf.FireDueRetiers(p.Tag)
 		}
 	}()
 }

@@ -442,6 +442,15 @@ func DirCompacting(tokens int) string {
 		"assigned until it lands; don't ask again.", tokens/1000)
 }
 
+// DirRetiering answers a worker whose next task needs a different model than the one it runs — a
+// change fires here, at this boundary, so nothing is assigned until it lands. Off-tick, same as a
+// compaction due, for the same reason: the change must never land on the worker mid-command.
+func DirRetiering(tier string) string {
+	return fmt.Sprintf("[hub] Your next task is rated %q, a different model than the one you're "+
+		"running — it changes here, at this boundary, before that task is assigned. Nothing is "+
+		"assigned until it lands; don't ask again.", tier)
+}
+
 // --- escalation: stopped on a decision only the user can make ---
 
 // DirEscalated answers an escalated agent, repeating the question back — one relaunched mid-escalation

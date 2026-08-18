@@ -147,3 +147,19 @@ func (d workflowDeps) ContextUsage(project, name string) (tokens, window int, mo
 func (d workflowDeps) CompactionThreshold(window int) int {
 	return d.h.agents.CompactionThreshold(window)
 }
+
+func (d workflowDeps) CurrentModel(project, name string) string {
+	return d.h.agents.CurrentModel(project, name)
+}
+
+func (d workflowDeps) ModelForTier(tier string) (string, bool) {
+	return d.h.agents.ModelForTier(tier)
+}
+
+func (d workflowDeps) SetModel(project, name, model string) error {
+	return d.h.agents.SetModel(project, name, model)
+}
+
+func (d workflowDeps) HoldsNothing(project, name, role string) (bool, error) {
+	return d.h.agents.HoldsNothing(project, name, role)
+}

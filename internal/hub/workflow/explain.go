@@ -75,7 +75,7 @@ func (e *Engine) ExplainNext(project, agent, role string) (api.NextExplain, erro
 	// Ranked by the assigner's own rule over the same two pools, so the answer to "what is next"
 	// cannot part company with what is actually handed out (-> nextUp).
 	var pick string
-	if t, _, ok := nextUp(packages, leaves); ok {
+	if t, _, ok := nextUp(packages, leaves, e.tierPrefers(project, agent)); ok {
 		pick = t.ID
 	}
 

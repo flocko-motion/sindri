@@ -37,6 +37,13 @@ type stubDeps struct {
 	delivered        []Delivery                 // how each message was classified, in step with injected/injectedText
 	deliverErr       bool                       // Deliver refuses, for the paths that must not record an undelivered message
 	projects         []store.Project            // KnownProjects override; nil (the default) means none registered
+	currentModel     string                     // CurrentModel's answer; "" is fine — no real model is ever ""
+	// tierModels overrides ModelForTier's answer; nil (the default) means every tier is unknown, so
+	// the retier check never fires for a test that has not opted into it.
+	tierModels   map[string]string
+	modelSet     []string // "name=model" for every SetModel call, in order
+	setModelErr  error
+	holdsNothing bool
 }
 
 func (d *stubDeps) ProjectRoot(string) string                   { return d.root }
@@ -78,6 +85,20 @@ func (d *stubDeps) BrokkrBin() (string, error)         { return "", nil }
 func (d *stubDeps) ContextUsage(_, _ string) (int, int, string, bool) {
 	return d.ctxTokens, d.ctxWindow, "", d.ctxOK
 }
+
+func (d *stubDeps) CurrentModel(_, _ string) string { return d.currentModel }
+
+func (d *stubDeps) ModelForTier(tier string) (string, bool) {
+	m, ok := d.tierModels[tier]
+	return m, ok
+}
+
+func (d *stubDeps) SetModel(_, name, model string) error {
+	d.modelSet = append(d.modelSet, name+"="+model)
+	return d.setModelErr
+}
+
+func (d *stubDeps) HoldsNothing(_, _, _ string) (bool, error) { return d.holdsNothing, nil }
 
 func (d *stubDeps) CompactionThreshold(int) int {
 	if d.compactThreshold == 0 {

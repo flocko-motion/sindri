@@ -31,7 +31,7 @@ func TestNextUpRanksPackagesAndLeavesTogether(t *testing.T) {
 		{"only packages", []store.Task{pkg("td-pkg", "P3")}, nil, "td-pkg", true},
 		{"only leaves", nil, []store.Task{pkg("td-leaf", "P3")}, "td-leaf", false},
 	} {
-		got, isPkg, ok := nextUp(c.packages, c.leaves)
+		got, isPkg, ok := nextUp(c.packages, c.leaves, nil)
 		if !ok {
 			t.Errorf("%s: nothing picked", c.name)
 			continue
@@ -40,8 +40,31 @@ func TestNextUpRanksPackagesAndLeavesTogether(t *testing.T) {
 			t.Errorf("%s: picked %s (package=%v), want %s (package=%v)", c.name, got.ID, isPkg, c.want, c.wantPackage)
 		}
 	}
-	if _, _, ok := nextUp(nil, nil); ok {
+	if _, _, ok := nextUp(nil, nil, nil); ok {
 		t.Error("an empty backlog must pick nothing")
+	}
+}
+
+// TestNextUpTiebreaksTowardThePreferredTaskWithinPriorityOnly: prefers may pick a lower-id task
+// among those tied on the best priority present, but must never reach past a higher-priority one —
+// priority is the user's flow control, not the fleet's to spend for its own convenience.
+func TestNextUpTiebreaksTowardThePreferredTaskWithinPriorityOnly(t *testing.T) {
+	pkg := func(id, prio string) store.Task { return store.Task{ID: id, Priority: prio} }
+	preferZ := func(t store.Task) bool { return t.ID == "td-z" }
+
+	// Two leaves tied on P1: without a preference the lower id wins; with one preferring td-z, it does.
+	leaves := []store.Task{pkg("td-a", "P1"), pkg("td-z", "P1")}
+	if got, _, ok := nextUp(nil, leaves, nil); !ok || got.ID != "td-a" {
+		t.Fatalf("no preference: got %q, want td-a (lower id)", got.ID)
+	}
+	if got, _, ok := nextUp(nil, leaves, preferZ); !ok || got.ID != "td-z" {
+		t.Fatalf("preferring td-z among equals: got %q, want td-z", got.ID)
+	}
+
+	// A higher-priority task the preference does NOT name must still win outright.
+	mixed := []store.Task{pkg("td-crit", "P0"), pkg("td-z", "P1")}
+	if got, _, ok := nextUp(nil, mixed, preferZ); !ok || got.ID != "td-crit" {
+		t.Fatalf("a preference must never reach past a higher priority: got %q, want td-crit", got.ID)
 	}
 }
 

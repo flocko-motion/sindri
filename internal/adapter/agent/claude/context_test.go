@@ -206,6 +206,19 @@ func TestModelWindowResolvesAKnownModel(t *testing.T) {
 	}
 }
 
+// TestModelForTierResolvesExactlyTheThreeWords: the dispatcher's own mapping, refusing anything
+// api.TierWords does not name rather than guessing at a fourth tier.
+func TestModelForTierResolvesExactlyTheThreeWords(t *testing.T) {
+	for _, tier := range []string{"junior", "mid", "senior"} {
+		if model, ok := (Claude{}).ModelForTier(tier); !ok || model == "" {
+			t.Errorf("ModelForTier(%q) = (%q, %v), want a real model", tier, model, ok)
+		}
+	}
+	if _, ok := (Claude{}).ModelForTier("expert"); ok {
+		t.Error("ModelForTier(\"expert\") should be refused, not guessed at")
+	}
+}
+
 // TestAnUnrecordedModelStillReportsAWindow: usage with no model must not report window 0, which the
 // workflow reads as unknown and never retires on.
 func TestAnUnrecordedModelStillReportsAWindow(t *testing.T) {

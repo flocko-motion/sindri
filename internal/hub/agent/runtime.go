@@ -131,6 +131,25 @@ func (s *Service) CompactionThreshold(window int) int { return agentport.Compact
 // recognised — the check a chosen model must pass before an agent is started on it.
 func (s *Service) ModelWindow(model string) (int, bool) { return agentport.ModelWindow(model) }
 
+// ModelForTier resolves tier to the model it dispatches to, via the wired backend.
+func (s *Service) ModelForTier(tier string) (string, bool) { return agentport.ModelForTier(tier) }
+
+// CurrentModel is the model name is effectively running: detected off its transcript while alive
+// (a human may change it by hand inside Claude Code, which the transcript sees first), the stored
+// choice otherwise — all there is for one that is not running.
+func (s *Service) CurrentModel(project, name string) string {
+	if s.AgentAlive(project, name) {
+		if _, _, detected, ok := s.ContextUsage(project, name); ok && detected != "" {
+			return detected
+		}
+	}
+	a, ok, err := s.store.For(project).GetAgent(name)
+	if err != nil || !ok {
+		return ""
+	}
+	return a.Model
+}
+
 // ForgetContext drops name's memoised context reading. For the one caller that KNOWS the previous
 // measurement is now wrong because it just invalidated it: clearing a session (-> ClearContext).
 //

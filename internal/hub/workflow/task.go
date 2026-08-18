@@ -350,6 +350,9 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 					if tokens, due := e.compactDue(project, name); due {
 						return DirCompacting(tokens), true, nil
 					}
+					if tier, due := e.containerRetierDue(project, name, st.Container); due {
+						return DirRetiering(tier), true, nil
+					}
 					return e.containerNext(project, name, st.Container)
 				})
 			}
@@ -400,6 +403,9 @@ func (e *Engine) waitForNextTask(ctx context.Context, project, name string) (str
 	}
 	if tokens, full := e.contextFull(project, name); full {
 		return DirFull(tokens), nil
+	}
+	if tier, due := e.retierDue(project, name); due {
+		return DirRetiering(tier), nil
 	}
 	return e.waitForWork(ctx, func() (string, bool, error) { return e.claimNext(project, name) })
 }
@@ -566,6 +572,10 @@ func (e *Engine) CmdNext(c registry.Caller, _ []string, out io.Writer) (int, err
 		fmt.Fprintln(out, DirFull(tokens))
 		return 0, nil
 	}
+	if tier, due := e.retierDue(c.Project, c.Agent); due {
+		fmt.Fprintln(out, DirRetiering(tier))
+		return 0, nil
+	}
 	d, claimed, err := e.claimNext(c.Project, c.Agent)
 	if err != nil {
 		return 1, err
@@ -576,38 +586,6 @@ func (e *Engine) CmdNext(c registry.Caller, _ []string, out io.Writer) (int, err
 	}
 	fmt.Fprintln(out, d)
 	return 0, nil
-}
-
-// ContextFullFraction is how much of its window a worker may fill before it stops being handed new
-// work. A fraction, not a token count: a flat 170k written for a 200k window retired workers on a
-// 1M one with most of it unused.
-const ContextFullFraction = 0.85
-
-// contextFull is the one fact both the assignment gate and the board's status read. No recorded
-// usage yet (ok=false from ContextUsage) is never full, and neither is a window of 0 — an unknown
-// window must not retire anybody, since guessing one is what this replaced.
-func (e *Engine) contextFull(project, worker string) (tokens int, full bool) {
-	tokens, window, _, ok := e.deps.ContextUsage(project, worker)
-	if !ok || window <= 0 {
-		return tokens, false
-	}
-	return tokens, float64(tokens) >= float64(window)*ContextFullFraction
-}
-
-// compactDue is fill past CompactionThreshold's curve for the running model — far below
-// ContextFullFraction. Withheld here; the actual firing is off-tick (-> agent.FireDueCompactions).
-func (e *Engine) compactDue(project, worker string) (tokens int, due bool) {
-	tokens, window, _, ok := e.deps.ContextUsage(project, worker)
-	if !ok || window <= 0 {
-		return tokens, false
-	}
-	return tokens, tokens >= e.deps.CompactionThreshold(window)
-}
-
-// ContextFull is contextFull's bool half, for the board's status word.
-func (e *Engine) ContextFull(project, worker string) bool {
-	_, full := e.contextFull(project, worker)
-	return full
 }
 
 // claimNext hands a worker the best-rated unit in a project, task or whole package (-> nextUp).
@@ -637,9 +615,12 @@ func (e *Engine) claimNext(project, agent string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	t, isPackage, ok := nextUp(packages, leaves)
+	t, isPackage, ok := nextUp(packages, leaves, e.tierPrefers(project, agent))
 	if !ok {
 		return "", false, nil
+	}
+	if want, known := e.deps.ModelForTier(api.TierOrDefault(t.Tier)); known && want != e.deps.CurrentModel(project, agent) {
+		return "", false, nil // held for the retier sweep, off-tick, for the same reason as compaction
 	}
 	if isPackage {
 		return e.claimContainer(project, agent, t)

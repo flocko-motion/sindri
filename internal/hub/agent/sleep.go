@@ -24,10 +24,10 @@ var idleSince struct {
 	at map[lcKey]time.Time
 }
 
-// holdsNothing is no leaf task, no held feature, no review owed, no open escalation, nobody dialed
+// HoldsNothing is no leaf task, no held feature, no review owed, no open escalation, nobody dialed
 // in — stricter than AtLeafBoundary, which treats a held feature as fine to compact but not to
 // reclaim the whole pod for. A coauthor is never this: its session is the user's own seat.
-func (s *Service) holdsNothing(project, name, role string) (bool, error) {
+func (s *Service) HoldsNothing(project, name, role string) (bool, error) {
 	if role == "coauthor" {
 		return false, nil
 	}
@@ -70,7 +70,7 @@ func (s *Service) FireIdleStops(project string) {
 		if !s.AgentAlive(project, a.Name) {
 			continue // nothing running to reclaim
 		}
-		empty, err := s.holdsNothing(project, a.Name, a.Role)
+		empty, err := s.HoldsNothing(project, a.Name, a.Role)
 		if err != nil || !empty {
 			forgetIdleSince(key)
 			continue
@@ -142,7 +142,7 @@ func (s *Service) FireIdleStarts(project string) {
 			continue
 		}
 		if s.AgentAlive(project, a.Name) {
-			if empty, _ := s.holdsNothing(project, a.Name, a.Role); empty {
+			if empty, _ := s.HoldsNothing(project, a.Name, a.Role); empty {
 				return // already idle and alive: it claims this itself within one poll
 			}
 		}

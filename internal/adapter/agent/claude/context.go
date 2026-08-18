@@ -50,6 +50,22 @@ func (Claude) ModelWindow(model string) (window int, ok bool) {
 	return 0, false
 }
 
+// tierModels maps each difficulty tier to the model it dispatches to — the one place a tier
+// resolves to an actual model id, so a caller never invents its own mapping.
+var tierModels = map[string]string{
+	"junior": "claude-haiku-4-5",
+	"mid":    "claude-sonnet-5",
+	"senior": "claude-opus-5",
+}
+
+// ModelForTier implements agent.Agent: the model a task of this tier dispatches to, ok=false for
+// anything outside api.TierWords — a caller must refuse rather than guess, the same rule
+// ModelWindow holds for a model id it does not recognise.
+func (Claude) ModelForTier(tier string) (model string, ok bool) {
+	m, found := tierModels[tier]
+	return m, found
+}
+
 // The compaction threshold falls as the window grows: pct(W) = P∞ + (P₀−P∞)·(W/W₀)^(−k). The same
 // absolute overhead a 200k window pays in full is a smaller fraction of a bigger one, so the bar for
 // compacting worth it falls with it. Named and kept beside the window table for the same reason that
