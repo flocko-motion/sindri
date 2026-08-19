@@ -361,28 +361,58 @@ func prRejectCmd() *cobra.Command {
 	}
 }
 
-// prScrapCmd discards a PR outright (delete/rm alias it), matching the TUI's D. Unlike reject,
-// which sends it BACK for another try, scrap ends it and drops the branch — hence --yes.
+// prScraper is the slice of backend scrapPR needs — narrow enough for a test to fake without a
+// live hub.
+type prScraper interface {
+	PRInfo(id string) (api.PRDetail, error)
+	DiscardPR(id string) error
+	ScrapTask(id string, subtree, withPRs bool) error
+}
+
+// scrapPR runs the scrap, refusing withTask on a settled task — the TUI's own guard against
+// deleting a finished task's record.
+func scrapPR(b prScraper, id string, withTask bool, out io.Writer) error {
+	if !withTask {
+		if err := b.DiscardPR(id); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "scrapped %s — branch deleted\n", id)
+		return nil
+	}
+	d, err := b.PRInfo(id)
+	if err != nil {
+		return err
+	}
+	if d.PR.Task == "" {
+		return fmt.Errorf("%s names no task to scrap alongside it", id)
+	}
+	if !api.Open(d.Task) {
+		return fmt.Errorf("%s's task %s is already %s — not scrapping a settled task", id, d.PR.Task, d.Task.Status)
+	}
+	if err := b.ScrapTask(d.PR.Task, false, true); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "scrapped %s — branch deleted, task %s scrapped too\n", id, d.PR.Task)
+	return nil
+}
+
+// prScrapCmd drops a PR's branch for good (--task takes its task with it, so nothing retries it).
 func prScrapCmd() *cobra.Command {
-	var yes bool
+	var yes, task bool
 	c := &cobra.Command{
 		Use: "scrap <pr-id>", Aliases: []string{"delete", "rm", "discard"},
-		Short: "Scrap a PR and delete its branch (no feedback, nobody retries)", Args: cobra.ExactArgs(1),
+		Short: "Scrap a PR and delete its branch; --task scraps its task too, so nobody retries it",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if !yes {
 				return fmt.Errorf("scrapping %s deletes its branch and cannot be undone — pass --yes to confirm.\n"+
 					"To send it back for another attempt instead, use `sindri pr reject %s \"<what to fix>\"`", args[0], args[0])
 			}
-			return withBackend(func(b backend) error {
-				if err := b.DiscardPR(args[0]); err != nil {
-					return err
-				}
-				fmt.Fprintf(os.Stderr, "scrapped %s — branch deleted\n", args[0])
-				return nil
-			})
+			return withBackend(func(b backend) error { return scrapPR(b, args[0], task, os.Stderr) })
 		},
 	}
 	c.Flags().BoolVar(&yes, "yes", false, "confirm: scrap the PR and delete its branch")
+	c.Flags().BoolVar(&task, "task", false, "also scrap the PR's task, so nobody retries it")
 	return c
 }
 

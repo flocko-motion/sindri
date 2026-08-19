@@ -295,19 +295,55 @@ func (m model) prRow(p api.PR) row {
 	), p.ID}
 }
 
+// prTaskOpen finds the task a PR names, and whether it is still open — a task already closed or
+// scrapped is not offered a second time.
+func (m model) prTaskOpen(prID string) (taskID string, open bool) {
+	for _, p := range m.state.PRs {
+		if p.ID == prID {
+			taskID = p.Task
+			break
+		}
+	}
+	if taskID == "" {
+		return "", false
+	}
+	for _, t := range m.state.Tasks {
+		if t.ID == taskID {
+			return taskID, api.Open(t)
+		}
+	}
+	return taskID, false
+}
+
 // openScrapPRChoice confirms scrapping a PR: branch gone, off the board, nobody asked to try again.
 // The prompt names reject too, since the two are easy to confuse and only reject is recoverable.
+// Its task is offered alongside, mirroring the task-scrap modal's own "+ PR" option — scrapping only
+// the PR leaves the task open and claimable, so the same work is picked up and redone right away.
 func (m *model) openScrapPRChoice(id string) {
 	cl := m.cl
+	taskID, taskOpen := m.prTaskOpen(id)
+	opts, vals := []string{"cancel"}, []string{"cancel"}
+	if taskOpen {
+		opts = append(opts, "scrap PR only", "scrap PR + task "+taskID)
+		vals = append(vals, "pr", "prtask")
+	} else {
+		opts = append(opts, "scrap "+id)
+		vals = append(vals, "pr")
+	}
 	m.choice = choiceModalState{
 		active: true, title: "scrap " + id + "? (deletes its branch; reject instead to send it back for another try)",
-		options: []string{"cancel", "scrap " + id},
-		values:  []string{"cancel", "scrap"},
+		options: opts, values: vals,
 		apply: func(v string) tea.Cmd {
-			if v != "scrap" {
+			switch v {
+			case "pr":
+				return mutateThenRefresh(cl, func() error { return cl.DiscardPR(id) })
+			case "prtask":
+				// withPRs=true: finishTask frees the task's holder and ScrapTask scraps this same
+				// PR itself — the exact path the task-scrap modal's own "+ PR" option already takes.
+				return mutateThenRefresh(cl, func() error { return cl.ScrapTask(taskID, false, true) })
+			default:
 				return nil
 			}
-			return mutateThenRefresh(cl, func() error { return cl.DiscardPR(id) })
 		},
 	}
 }
