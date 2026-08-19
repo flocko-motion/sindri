@@ -22,7 +22,8 @@ import (
 )
 
 // featureLanded reports a feature an agent should no longer hold: closed at its source, or carried
-// in by a merged PR — the half that matters, since status alone left a landed branch handed out again.
+// in by a merged PR that is not an interim contribution's — that milestone is not the feature's own
+// end, and counting it as one stranded a worker mid-feature the moment its own `contribute` merged.
 func featureLanded(ps *store.ProjectStore, t store.Task) bool {
 	if t.Status == "closed" || t.Status == "approved" || t.Status == "merged" {
 		return true
@@ -32,7 +33,7 @@ func featureLanded(ps *store.ProjectStore, t store.Task) bool {
 		return false
 	}
 	for _, p := range prs {
-		if p.Task == t.ID && p.Status == "merged" {
+		if p.Task == t.ID && p.Status == "merged" && p.Kind != "interim" {
 			return true
 		}
 	}
