@@ -298,12 +298,14 @@ func (m model) selID() string {
 
 // wrappedDetail wraps the detail pane to column width (long titles scroll with J/K
 // rather than truncate), remapping the highlight index through the wrap (-1 for none).
+// reclamp already wrapped this frame's content before View runs, so this is normally a cache hit —
+// nil for calls, since a genuine miss here is a fallback this method cannot make reclamp reuse.
 func (m model) wrappedDetail() (lines []string, highlight int) {
-	wrapped, origAt := wrapContentMapped(m.detailLines(), m.detailWidth())
-	if h := m.detailHighlight(); h >= 0 && h < len(origAt) {
-		return wrapped, origAt[h]
+	c := detailWrap(m.detailWrapCache, m.tab, m.detailWidth(), m.detailLines(), nil)
+	if h := m.detailHighlight(); h >= 0 && h < len(c.origAt) {
+		return c.wrapped, c.origAt[h]
 	}
-	return wrapped, -1
+	return c.wrapped, -1
 }
 
 // rows dispatches to the active tab's row builder (tasks/agents/prs).

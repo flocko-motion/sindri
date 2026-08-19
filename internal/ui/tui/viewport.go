@@ -9,12 +9,39 @@ package tui
 
 import (
 	"fmt"
+	"slices"
+
 	"github.com/flo-at/sindri/internal/api"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/flo-at/sindri/internal/ui/tui/scroll"
 )
+
+// wrapCache is the last word-wrap computed for the detail pane, and what it was computed from —
+// enough to tell a later call whether reusing it is safe.
+type wrapCache struct {
+	tab     int
+	width   int
+	lines   []string
+	wrapped []string
+	origAt  []int
+}
+
+// detailWrap wraps lines to width, reusing prior when tab, width and lines all still match it. A
+// cursor move within one task changes none of them, so the ANSI-aware wrap — proportional to the
+// body's length, not to a keystroke — is skipped rather than repeated. calls, when non-nil, counts
+// every real wrap: the regression test for this pins a call count, not a timing.
+func detailWrap(prior wrapCache, tab, width int, lines []string, calls *int) wrapCache {
+	if prior.tab == tab && prior.width == width && slices.Equal(prior.lines, lines) {
+		return prior
+	}
+	if calls != nil {
+		*calls++
+	}
+	wrapped, origAt := wrapContentMapped(lines, width)
+	return wrapCache{tab, width, lines, wrapped, origAt}
+}
 
 // reclamp keeps the active tab's cursor + both viewports in range.
 func (m *model) reclamp() {
@@ -57,8 +84,8 @@ func (m *model) reclamp() {
 		lines, _ := m.prMetaLines(max(1, m.w-m.prContentWidth()-1))
 		m.prMeta.Resize(m.bodyHeight(), len(lines))
 	} else if m.tab == 0 || m.tab == 3 || m.tab == 5 || m.tab == 6 { // generic detail pane: size to the WRAPPED count
-		wrapped, _ := wrapContentMapped(m.detailLines(), m.detailWidth())
-		m.detail.Resize(detailH, len(wrapped))
+		m.detailWrapCache = detailWrap(m.detailWrapCache, m.tab, m.detailWidth(), m.detailLines(), &m.wrapCalls)
+		m.detail.Resize(detailH, len(m.detailWrapCache.wrapped))
 	} else if m.tab == 1 { // Agents: right column wraps like PRs' meta column (agentsBody)
 		m.detail.Resize(detailH, len(wrapMeta(m.agentItems(), m.agentDetailWidth())))
 	} else {

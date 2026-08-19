@@ -92,19 +92,21 @@ type model struct {
 	rightFocus  bool // detail (right) column has focus (h/l switch; j/k move within)
 	rightCursor int  // focused actionable item in the right column
 
-	detailKey    string
-	agentLog     []api.Event
-	agentPane    string           // captured tmux screen of the selected agent (live)
-	agentView    string           // Agents main pane: "screen" (tmux, default) | "pod" (podman info)
-	agentPod     string           // fetched podman pod-info for the selected agent
-	agentDiag    string           // fetched liveness-probe explanation for the selected agent
-	agentClients []api.ClientView // dial-ins attached to the selected agent's session
-	prDetail     api.PRDetail
-	prView       string // which content the PR big pane shows: "diff" (default) | "lint"
-	reviewPrompt string // editable default review instruction (from the hub)
-	taskDetail   api.Task
-	runDetail    api.RunDetail
-	quit         bool
+	detailKey       string
+	detailWrapCache wrapCache // last wrap of the detail pane, reused across a cursor move that changes nothing it depends on
+	wrapCalls       int       // count of real wraps performed, for the regression test on that reuse
+	agentLog        []api.Event
+	agentPane       string           // captured tmux screen of the selected agent (live)
+	agentView       string           // Agents main pane: "screen" (tmux, default) | "pod" (podman info)
+	agentPod        string           // fetched podman pod-info for the selected agent
+	agentDiag       string           // fetched liveness-probe explanation for the selected agent
+	agentClients    []api.ClientView // dial-ins attached to the selected agent's session
+	prDetail        api.PRDetail
+	prView          string // which content the PR big pane shows: "diff" (default) | "lint"
+	reviewPrompt    string // editable default review instruction (from the hub)
+	taskDetail      api.Task
+	runDetail       api.RunDetail
+	quit            bool
 
 	modalOverride      []string // when set, the detail modal shows these instead of the tab detail
 	modalOverrideTitle string
@@ -324,8 +326,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reclamp() // the body is most of the detail's height, so its arrival resizes the pane
 	case taskMsg:
 		m.taskDetail = msg.t
+		m.reclamp() // the description/comments land long after syncDetail sized the pane for less
 	case runMsg:
 		m.runDetail = msg.d
+		m.reclamp() // same: the run's detail arrives after syncDetail sized the pane for less
 	case repoConfigMsg:
 		if msg.err != nil {
 			m.errText = msg.err.Error()
