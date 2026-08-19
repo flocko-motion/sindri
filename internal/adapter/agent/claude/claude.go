@@ -104,8 +104,11 @@ func (Claude) DetectState(screen string) agent.State {
 		return agent.Blocked // permission / confirmation prompt
 	case asks("waiting for permission"):
 		return agent.Blocked
+	// yesNoOption only: the bare ❯ is the input box, drawn on almost every pane, so it proves
+	// nothing about a live dialog — checking it as an alternative let any "would you like to"
+	// sentence in the transcript pass as one, however narrow the live region.
 	case (asks("do you want to") || asks("would you like to")) &&
-		(asks("❯") || yesNoOption.MatchString(prompt)):
+		yesNoOption.MatchString(prompt):
 		return agent.Blocked
 	}
 
@@ -128,7 +131,7 @@ func (Claude) DetectState(screen string) agent.State {
 		return agent.SignedOut
 	}
 
-	// Idle: the empty prompt box is visible and nothing above needs an answer.
+	// Idle: the prompt box is visible, typed into or not, and nothing above needs an answer.
 	if promptLine.MatchString(screen) {
 		return agent.Idle
 	}

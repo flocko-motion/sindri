@@ -117,6 +117,25 @@ func TestClaudeState(t *testing.T) {
 			want: agent.Working,
 		},
 		{
+			// The same question, still inside the 30-line live region: nothing here is a yes/no option
+			// line, so the bare ❯ (the input box, always drawn) must not stand in for one. Fixed by
+			// dropping that alternative, not by the transcript happening to scroll far enough away.
+			name: "a question still in the live region is not a yes/no prompt",
+			screen: "● What would you like to clarify? Happy to give more background.\n" +
+				strings.Repeat("  work since then\n", 5) +
+				"✶ Perusing… (6m 1s · ↓ 25.6k tokens)\n❯ \n  ⏵⏵ bypass permissions on · esc to interrupt",
+			want: agent.Working,
+		},
+		{
+			// bombur, verbatim: the row read blocked while the question was the user's OWN, still being
+			// typed into the box. asks("do you want to") matches the ❯ line same as any prose would, but
+			// nothing below is a yes/no option, so the case no longer fires — it lands on promptLine,
+			// which must match an input box holding text same as an empty one.
+			name:   "a user's own question on the input line is not a prompt",
+			screen: "╭──────────────────────────────────────╮\n❯ how many times do you want to run the tests?\n╰──────────────────────────────────────╯",
+			want:   agent.Idle,
+		},
+		{
 			// The other half of the same rule: a real prompt lives directly above the input box, however
 			// long the transcript above it is, so scoping the match must not lose it.
 			name: "a real prompt under a long transcript is still blocked",
