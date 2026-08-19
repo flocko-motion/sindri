@@ -27,8 +27,8 @@ func DirContainerWorking(container, task string, aim, ceiling float64) string {
 		"nothing of yours reaches the reference branch until a PR merges. The feature itself ends in ONE "+
 		"pull request covering the whole branch — `sindri submit \"<summary>\"` once every subtask is "+
 		"checkpointed, never per subtask. If what's on the branch is already useful to others, "+
-		"`sindri contribute \"<summary>\"` puts it up for the user to merge without ending the feature.%s",
-		task, container, task, CommentBudgetNote(aim, ceiling))
+		"`sindri contribute \"<summary>\"` puts it up for the user to merge without ending the feature.%s%s",
+		task, container, task, CommentBudgetNote(aim, ceiling), ToolingBlock())
 }
 
 // DirContainerRejected is the verdict on a feature's PR: the worker fixes the branch it is already on
@@ -36,8 +36,8 @@ func DirContainerWorking(container, task string, aim, ceiling float64) string {
 func DirContainerRejected(container, task, feedback string, aim, ceiling float64) string {
 	return fmt.Sprintf("The PR for feature %s was REJECTED — address this feedback on the branch you're "+
 		"already on (subtask %s is yours again; `sindri checkpoint \"<summary>\"` records a fix that "+
-		"completes it), then `sindri submit \"<summary>\"` to put the feature up again:\n\n%s%s",
-		container, task, feedback, CommentBudgetNote(aim, ceiling))
+		"completes it), then `sindri submit \"<summary>\"` to put the feature up again:\n\n%s%s%s",
+		container, task, feedback, CommentBudgetNote(aim, ceiling), ToolingBlock())
 }
 
 // DirContainerDone is the directive once every subtask of a feature is checkpointed: the branch is

@@ -268,6 +268,6 @@ func MsgReview(prID, requirement, branch, base, arch string, checkedOut bool) st
 		// rather than letting the reviewer assume /workspace holds the change.
 		loc = fmt.Sprintf("⚠ %s could NOT be checked out into /workspace — review from the diff only; do NOT trust /workspace. ", branch)
 	}
-	return fmt.Sprintf("[hub] Review %s — %s %s(1) see what changed: %s. (2) check the gate: `sindri lint %s`. (3) decide: `sindri approve %s` or `sindri reject %s \"<findings>\"`.%s",
-		prID, requirement, loc, seeChanges, prID, prID, prID, ReviewArchitecture(arch))
+	return fmt.Sprintf("[hub] Review %s — %s %s(1) see what changed: %s. (2) check the gate: `sindri lint %s`. (3) decide: `sindri approve %s` or `sindri reject %s \"<findings>\"`.%s%s",
+		prID, requirement, loc, seeChanges, prID, prID, prID, ReviewArchitecture(arch), ToolingBlock())
 }

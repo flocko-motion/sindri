@@ -39,19 +39,17 @@ func ArchitectureBrief(content, arch string) string {
 	return fmt.Sprintf("\n\n# Project architecture (binding)\n\nThis is how the project is built and how your work must fit it — treat it as binding. To read it again at any time, refer to /workspace/%s.\n\n%s", arch, content)
 }
 
-// BrokkrBrief points every agent at brokkr, always mounted into the pod: the recommended linter,
-// a grep-beating overview, and built for single commands. None of that is obvious from the binary.
+// BrokkrBrief states brokkr's constraint on USE — none of it obvious from the binary — and stops
+// there: the REASON to reach for it lives on the hand-over instead (-> ToolingBlock, sd-d96355),
+// since arguing for it twice is the duplication that ticket exists to remove.
 func BrokkrBrief() string {
 	return "\n\nThe `brokkr` tool is on your PATH — a toolbelt built for you (Claude Code): " +
 		"every feature is a SINGLE self-contained command, so run it WITHOUT compound " +
 		"shell — no pipes, no `&&`/`;`, no `2>&1 | tail`. Anything you'd reach a pipe for, " +
 		"it already has a flag for (e.g. `--tail N` prints the last N lines AND the exit " +
-		"status in one shot). So learn each subcommand from its own `--help` first " +
+		"status in one shot). Learn each subcommand from its own `--help` first " +
 		"(`brokkr --help`, then `brokkr <cmd> --help`) — the help lists the flags that make " +
-		"compound commands unnecessary. Prefer brokkr for two things: linting (`brokkr " +
-		"lint`, the same gate `sindri lint` runs), and getting an overview of the codebase " +
-		"— it maps structure and finds definitions/uses far better than grepping, so reach " +
-		"for it before reading files blind."
+		"compound commands unnecessary."
 }
 
 // RunServiceBrief gives an evaluable rule for the run queue, and why — a fleet-wide cost
@@ -190,11 +188,11 @@ spec written from your own assumptions is the failure mode of this role.
 - ` + "`sindri create-task \"<title>\"`" + ` proposes a task — a complete outcome
   the interview can end in on its own. It needs the user's approval before any
   worker can pick it up; you'll be told if it's approved or rejected (with a
-  reason). ` + "`--parent <id>`" + ` hangs it under another task or an openspec
-  change, so a feature that is really several pieces of backlog work becomes a
-  hierarchy: propose the container first (` + "`--type epic`" + ` reads well for
-  it), then each piece with ` + "`--parent`" + ` pointed at it. Backlog work with
-  nothing worth writing down ends here: propose the tasks, then
+  reason). ` + "`--parent <id>`" + ` is the DEFAULT for related work, not a
+  special case: propose the container first (` + "`--type epic`" + ` reads well
+  for it), then each piece with ` + "`--parent`" + ` pointed at it, so nothing
+  floats flat beside work it belongs under. Backlog work with nothing worth
+  writing down ends here: propose the tasks, then
   ` + "`sindri state idle`" + ` — no spec, no PR required.
 - Draft specs in /workspace/openspec for work that needs one — a design worth
   recording, a tradeoff a future reader would otherwise have to reconstruct.
@@ -301,21 +299,37 @@ func FileList(files []string) string {
 func DirWorking(task string, aim, ceiling float64) string {
 	return fmt.Sprintf("Work on task %s. A task is finished by a PULL REQUEST, not by finished code: "+
 		"run `sindri submit \"<summary>\"` and the hub records your branch as a PR and sends it for "+
-		"review. Until you do, %s stays yours — being handed it again means exactly that.%s",
-		task, task, CommentBudgetNote(aim, ceiling))
+		"review. Until you do, %s stays yours — being handed it again means exactly that.%s%s",
+		task, task, CommentBudgetNote(aim, ceiling), ToolingBlock())
 }
 
 // DirRejected hands a worker its reviewer's feedback verbatim, every time it asks what to do, so
 // the comments reach it whether or not it saw the rejection message.
 func DirRejected(task, feedback string, aim, ceiling float64) string {
 	return fmt.Sprintf("Your PR for task %s was REJECTED — address this reviewer feedback, then run "+
-		"`sindri submit \"<summary>\"`:\n\n%s%s", task, feedback, CommentBudgetNote(aim, ceiling))
+		"`sindri submit \"<summary>\"`:\n\n%s%s%s", task, feedback, CommentBudgetNote(aim, ceiling), ToolingBlock())
 }
 
-// CommentBudgetNote is the one shared statement handed to a worker wherever it is sent to write
-// code, so the submit gate's comment-length trend is stated up front rather than met as a
-// rejection after the prose is already written. aim/ceiling are the hub's own resolution of the
-// SAME numbers the gate checks (-> Engine.commentBudget), never re-derived here.
+// toolingLines is the tooling block's content, one line per tool: what it is, how to reach it, and
+// the wrong action it displaces. Add an entry here and every hand-over picks it up (sd-4b5a53) —
+// brokkr's entry is sd-d96355's fix, gopls's is sd-0de9e2's.
+var toolingLines = []string{
+	"brokkr — explore with `brokkr map` before grepping blind, and lint with `brokkr lint`; " +
+		"`brokkr <cmd> --help` per subcommand, no compound shell.",
+	"gopls — Go tooling as deferred MCP tools `mcp__gopls__go_*`; load a tool's schema with ToolSearch " +
+		"before calling it (e.g. `ToolSearch(\"select:mcp__gopls__go_diagnostics\")`); already " +
+		"installed, do not install it.",
+}
+
+// ToolingBlock rides the directive, never the durable brief: a clear or compaction erases the
+// brief's mention outright, while a directive is re-served (-> fireClear) the moment work resumes.
+func ToolingBlock() string {
+	return "\n\nTooling you already have:\n- " + strings.Join(toolingLines, "\n- ")
+}
+
+// CommentBudgetNote states the gate's comment-length trend up front rather than as a later
+// rejection. aim/ceiling are the hub's own resolution of the same numbers the gate checks
+// (-> Engine.commentBudget), never re-derived here.
 func CommentBudgetNote(aim, ceiling float64) string {
 	return fmt.Sprintf(
 		"\n\nComment length: keep each file's comments to a MEAN around %.1f lines per block. It's a "+
@@ -332,7 +346,7 @@ func CommentBudgetNote(aim, ceiling float64) string {
 const DirPlanner = "Nothing has come to you through the hub — which is not the same as having nothing to do. Work reaches a planner as a CONVERSATION: anything the user has said in this terminal is yours to act on now, and a phased brief from `sindri agent plan` is one route to you rather than the only one. If they've asked you for something, get on with it; never ask them to re-send it some other way. With nothing asked of you, orient: read README.md and the architecture doc, the specs under /workspace/openspec, and the backlog (`sindri task list`, then `sindri task <id>` for detail). The thing you must not do is invent an assignment nobody asked for — and nothing is written down before the user sends GO."
 
 // DirPlanning answers a planner mid-plan: the interview is the user's, so the hub has nothing to add.
-const DirPlanning = "You're working out a plan with the user — carry on with that conversation. The hub is not waiting on a command from you and has nothing to add: read, search, ask one question at a time. Nothing is written down until they send GO; after it, `sindri create-task` files each piece and `sindri openspec submit \"<summary>\"` ships spec edits as a PR (that PR IS the review — never ask them to read your files instead). If you're waiting on an answer, ask again in one line rather than sitting silently. `sindri state idle` when you're done."
+const DirPlanning = "You're working out a plan with the user — carry on with that conversation. The hub is not waiting on a command from you and has nothing to add: read, search, ask one question at a time. Nothing is written down until they send GO; after it, propose the container first, then `sindri create-task \"<title>\" --parent <id>` for each piece — that shape is the DEFAULT for related work, not a special case — and `sindri openspec submit \"<summary>\"` ships spec edits as a PR (that PR IS the review — never ask them to read your files instead). If you're waiting on an answer, ask again in one line rather than sitting silently. `sindri state idle` when you're done."
 
 // GoToken authorises a planner to write; GoRule states it. One literal token, because agreement
 // is not authorisation — "sounds good" is what a user says while still thinking.
@@ -401,15 +415,16 @@ func MsgPlanAssignment(goal, taskID, arch, reading string) string {
 	b.WriteString(GoRule + "\n")
 	b.WriteString("  - decide which of these the interview settled — ask if it's still unclear, " +
 		"don't default to one:\n")
-	b.WriteString("  - just backlog work, nothing worth writing down: `sindri create-task " +
-		"\"<title>\"` for each piece — `--parent` hangs children under a container " +
-		"(`--type epic` reads well for that one) — then `sindri state idle`. No spec, no PR.\n")
+	b.WriteString("  - just backlog work, nothing worth writing down: propose the container first " +
+		"(`--type epic` reads well for it), then `sindri create-task \"<title>\" --parent <id>` for " +
+		"each piece — that shape is the DEFAULT for related work, not a special case — then " +
+		"`sindri state idle`. No spec, no PR.\n")
 	b.WriteString("  - work with a design worth recording: draft the spec in /workspace/openspec, " +
 		"propose its tasks the same way, then `sindri openspec submit \"<summary>\"`.\n\n")
 	b.WriteString("Do not skip ahead. Drafting before the interview means specifying your " +
 		"assumptions instead of their requirements — and once written, you will defend them. " +
 		"If you have already started, stop and go back to phase 1.")
-	return b.String()
+	return b.String() + ToolingBlock()
 }
 
 // DirCoauthor never blocks or hands out managed work — the user drives directly — so it just
@@ -428,11 +443,8 @@ func DirReview(prID, taskID, title, author, arch string) string {
 		prID, reviewSubject(taskID, title, author), prID, prID, prID, prID, ReviewIntent(taskID), ReviewArchitecture(arch), runPointer)
 }
 
-// reviewSubject names WHOSE work is under review, which is what turns "this PR" into "dwalin's work
-// on sd-1234". The author was reachable only by going looking (`sindri show <pr>` prints it), and
-// nothing suggested looking — so a reviewer wrote verdicts about nobody. An unknown author (an
-// older PR record) falls back to the bare task, since a sentence about "'s work" would be worse
-// than the one it replaced.
+// reviewSubject names WHOSE work is under review — "dwalin's work on sd-1234" rather than just
+// "this PR". An unknown author (an older PR record) falls back to the bare task.
 func reviewSubject(taskID, title, author string) string {
 	if author == "" {
 		return fmt.Sprintf("task %s: %s", taskID, dash(title))
@@ -490,8 +502,8 @@ const DirClearPending = "[hub] The user has armed a context clear for you: it fi
 
 // --- escalation: stopped on a decision only the user can make ---
 
-// DirEscalated answers an escalated agent, repeating the question back — one relaunched mid-escalation
-// remembers nothing of asking, and would try to carry on into a wall of refusals.
+// DirEscalated answers an escalated agent by repeating the question back — one relaunched mid-escalation
+// remembers nothing of asking.
 func DirEscalated(question string) string {
 	return fmt.Sprintf("[hub] You are ESCALATED — you stopped and asked the user to decide this:\n\n"+
 		"  %s\n\n"+

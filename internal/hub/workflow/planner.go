@@ -18,8 +18,7 @@ import (
 )
 
 // AssignPlan hands a planner one thing to plan, as a phased brief (-> MsgPlanAssignment). Refused
-// while it has a PR open: it drafts on ONE standing branch, so a second plan would pile
-// unreviewed work onto specs awaiting a verdict.
+// while it has a PR open, since it drafts on one standing branch.
 func (e *Engine) AssignPlan(project, agent, goal, taskID string) error {
 	goal, taskID = strings.TrimSpace(goal), strings.TrimSpace(taskID)
 	if goal == "" && taskID == "" {
@@ -70,10 +69,8 @@ func (e *Engine) AssignPlan(project, agent, goal, taskID string) error {
 	return nil
 }
 
-// planSubject resolves what the planner is being handed. A task carries its own title and body, so
-// the brief quotes those rather than asking the user to retype them, and the task moves to "pending
-// approval" — which is what lets the planner revise it (-> CmdEditTask), keeps it away from workers
-// while it is still being worked out, and returns it to the user for a verdict when it is done.
+// planSubject resolves what the planner is being handed, quoting a task's own title and body rather
+// than asking the user to retype them, and moves it to "pending approval" while it's worked out.
 func (e *Engine) planSubject(ps *store.ProjectStore, taskID, goal string) (string, error) {
 	if taskID == "" {
 		return goal, nil
@@ -160,9 +157,8 @@ func (e *Engine) CmdCreateTask(c registry.Caller, args []string, out io.Writer) 
 	if spec.Type == "" {
 		spec.Type = "task"
 	}
-	// The priority is applied AFTER the approval row, never with the task: a task carrying a rating
-	// and no approval row is claimable, so writing them the other way round would open a window in
-	// which a worker could take work the user has not seen.
+	// Applied AFTER the approval row: a rated task with no approval row is claimable, opening a
+	// window where a worker could take work the user has not seen.
 	proposed := spec.Priority
 	spec.Priority = ""
 	id, err := e.CreateTask(c.Project, spec)
@@ -181,15 +177,55 @@ func (e *Engine) CmdCreateTask(c registry.Caller, args []string, out io.Writer) 
 		}
 		e.refreshCachedTask(c.Project, id)
 	}
+	nudge := ""
+	if spec.Parent == "" {
+		nudge = e.unparentedNudge(c.Project, c.Agent, id)
+	}
+	_ = e.store.For(c.Project).Log(c.Agent, createTaskLogType, id)
 	e.deps.Notify()
-	fmt.Fprintln(out, ReplyTaskProposed(id, spec.Title))
+	fmt.Fprintln(out, ReplyTaskProposed(id, spec.Title, nudge))
 	return 0, nil
+}
+
+// createTaskLogType tags a proposal's log entry for unparentedNudge to find; an edit is never
+// logged under it, so reparenting can never look like another flat proposal.
+const createTaskLogType = "create-task"
+
+// recentUnparentedWindow bounds how far back unparentedNudge looks — recent context, not the
+// planner's whole history of flat tasks it may have long since tidied up.
+const recentUnparentedWindow = 5
+
+// unparentedNudge names this agent's OTHER recent proposals still without a parent right now,
+// checked live so a task reparented since drops off the list on its own.
+func (e *Engine) unparentedNudge(project, agent, justCreated string) string {
+	ps := e.store.For(project)
+	events, err := ps.Events(agent, recentUnparentedWindow)
+	if err != nil {
+		return ""
+	}
+	var recent []string
+	for _, ev := range events {
+		if ev.Type != createTaskLogType || ev.Payload == justCreated {
+			continue
+		}
+		t, ok, err := ps.GetTask(ev.Payload)
+		if err != nil || !ok || t.ParentID != "" {
+			continue
+		}
+		recent = append(recent, ev.Payload)
+	}
+	if len(recent) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" You also proposed %s without a parent recently — if they're related, propose "+
+		"a container and hang them under it.", FileList(recent))
 }
 
 // createTaskUsage is the one description of create-task's surface, shown for a bad flag, a
 // missing title, and (via CreateTaskHelp) `create-task --help`.
 const createTaskUsage = "usage: create-task [--parent <id>] [--type <task|feature|bug|epic>] [--body <text>] [--labels a,b] [--priority <critical|high|mid|low|none>] [--tier <junior|mid|senior>] <title...>\n" +
-	"  --parent    hang the task under an existing task or openspec change (os-*), so it joins that tree\n" +
+	"  --parent    the default for related work, not a special case: propose the container first,\n" +
+	"              then each piece with --parent pointed at it, so it joins that tree\n" +
 	"  --body      the task's description — what a worker needs in order to start\n" +
 	"  --priority  the order you propose this is worked in; `prioritise-task` changes it afterwards\n" +
 	"  --tier      your estimate of the difficulty (default: mid); `edit-task` changes it afterwards\n" +
@@ -202,10 +238,8 @@ const createTaskUsage = "usage: create-task [--parent <id>] [--type <task|featur
 // and the verb's own usage describe one surface.
 const CreateTaskHelp = "propose a new task, needing the user's approval. " + createTaskUsage
 
-// parseTaskFlags splits create-task's flags from the words forming the title, accepting both
-// `--flag value` and `--flag=value`. An unknown flag is an error: silently ignoring one creates
-// the task without the parent or body that was asked for. A priority is a proposed ORDER and is
-// accepted; what releases the task is the user's approval, which no flag here can reach.
+// parseTaskFlags splits create-task's flags (`--flag value` or `--flag=value`) from the title
+// words. An unknown flag errors rather than being silently dropped.
 func parseTaskFlags(args []string) (TaskSpec, []string, error) {
 	var s TaskSpec
 	var words []string
@@ -265,10 +299,8 @@ const editTaskUsage = "usage: edit-task <id> [--parent <id>] [--type <task|featu
 // EditTaskHelp is what the command registry advertises for edit-task.
 const EditTaskHelp = "revise any task, returning it to the user for re-approval. " + editTaskUsage
 
-// CmdEditTask revises any task, approved or not — title, body, type, labels, or a parent, which is
-// how flat proposals become a tree. ONE consequence: the edit returns it to awaiting-review, since
-// approval is the user's record of having READ this task and not permission the planner must hold.
-// No split by field: which edits are "substantive" is a classification nothing tests.
+// CmdEditTask revises any task, approved or not. ONE consequence regardless of field: it returns to
+// awaiting-review, since approval records having READ the task, not permission the planner holds.
 func (e *Engine) CmdEditTask(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) == 0 {
 		fmt.Fprintln(out, editTaskUsage)
@@ -355,9 +387,8 @@ func unownedNote(owned bool) string {
 // taskChange is one field an edit moved, in parts: a reply names fields, the record carries values.
 type taskChange struct{ field, was, now string }
 
-// taskChanges is what an edit ACTUALLY moved, read off the stored rows either side of the write
-// rather than off the spec that asked for it: a field a task's own source owns is not sindri's to
-// write, and echoing the request back would report a change that never happened.
+// taskChanges is what an edit ACTUALLY moved, read off the stored rows either side of the write —
+// echoing the request back would report a change to a field the task's own source owns.
 func taskChanges(before, after store.Task) []taskChange {
 	all := []taskChange{
 		{"title", before.Title, after.Title},
@@ -407,10 +438,8 @@ func prefixed(sep, s string) string {
 	return sep + s
 }
 
-// tellHolder tells every agent whose UNIT OF WORK the edit touches, and reports back who. Not the
-// holder of the edited row: a worker holds a feature, and an edit to any subtask of it changes what
-// that worker is building. Matching only the row left the sibling case — the one that actually bites
-// — telling nobody. Un-approving reaches none of them: the claim gate decides what is handed OUT.
+// tellHolder tells every agent whose UNIT OF WORK the edit touches, not just the holder of the
+// edited row — a worker holding the enclosing feature must hear about it too.
 func (e *Engine) tellHolder(project, id string, changes []taskChange) string {
 	ps := e.store.For(project)
 	roster, err := ps.Roster()
@@ -435,9 +464,8 @@ func (e *Engine) tellHolder(project, id string, changes []taskChange) string {
 	return strings.Join(told, "")
 }
 
-// enclosing is the edited task and every task above it — the units of work a change to it belongs
-// to. Any depth, matching the reach OpenSubtasks has: a feature contains its whole tree, so an edit
-// three levels down is still an edit to that feature. Stops on a stored loop rather than spinning.
+// enclosing is the edited task and every task above it, any depth — an edit three levels down is
+// still an edit to the feature at the top. Stops on a stored loop rather than spinning.
 func enclosing(ps *store.ProjectStore, id string) map[string]bool {
 	out := map[string]bool{id: true}
 	links, err := ps.ParentLinks()

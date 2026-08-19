@@ -167,9 +167,10 @@ func ReplyReapplyResolved() string {
 	return "Resolved. The merge already landed, so there's nothing to resubmit — run `sindri` to carry on."
 }
 
-// ReplyTaskProposed acknowledges a planner's proposed task, pending user approval.
-func ReplyTaskProposed(id, title string) string {
-	return fmt.Sprintf("Proposed %s: %s — awaiting the user's approval before any worker can pick it up.", id, title)
+// ReplyTaskProposed acknowledges a planner's proposed task, pending user approval. nudge is the
+// unparented-siblings reminder (-> unparentedNudge), empty when there's nothing recent to name.
+func ReplyTaskProposed(id, title, nudge string) string {
+	return fmt.Sprintf("Proposed %s: %s — awaiting the user's approval before any worker can pick it up.%s", id, title, nudge)
 }
 
 // ReplyBehindBase refuses a submit whose branch the reference has moved past, naming how far behind

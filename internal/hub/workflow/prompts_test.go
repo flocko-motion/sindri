@@ -129,6 +129,98 @@ func TestRunServicePointedAtOnlyWhenClaiming(t *testing.T) {
 	}
 }
 
+// TestToolingBlockReachesEveryRoleThatReceivesWork (sd-4b5a53): one block, in one place, naming
+// every tool an agent has and how to reach it — attached to the hand-over of work rather than the
+// durable brief, since a clear or compaction erases the brief's mention outright while a directive
+// is re-served (-> fireClear) the moment work reaches the agent again. sd-d96355 (brokkr) and
+// sd-0de9e2 (gopls) are its first two entries.
+func TestToolingBlockReachesEveryRoleThatReceivesWork(t *testing.T) {
+	handOvers := []string{
+		DirWorking("td-1", 1.5, 2.0),
+		DirRejected("td-1", "not yet", 1.5, 2.0),
+		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
+		DirContainerRejected("td-EPIC", "td-1", "not yet", 1.5, 2.0),
+		MsgReview("pr-td-1", "do the thing", "td-1", "main", "", true),
+		MsgPlanAssignment("build the thing", "", "", ""),
+	}
+	for _, s := range handOvers {
+		for _, want := range []string{"brokkr", "mcp__gopls__go_", "ToolSearch"} {
+			if !strings.Contains(s, want) {
+				t.Errorf("hand-over of work missing %q: %q", want, s)
+			}
+		}
+	}
+	// The block belongs on the REPEATED directive, not the one-time claim: a fresh claim's context
+	// still has the system prompt in it, and the gap opens only once a clear or compaction erases it
+	// mid-task — exactly when the repeated directive, not the claim, is re-served.
+	for _, s := range []string{
+		DirClaimed("td-1", "a task", "td-1", "ARCHITECTURE.md"),
+		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
+	} {
+		if strings.Contains(s, "mcp__gopls__go_") {
+			t.Errorf("a claim-moment directive should not repeat the tooling block: %q", s)
+		}
+	}
+	// The durable brief (BrokkrBrief) states only the CONSTRAINT on using brokkr, never the reason to
+	// reach for it — that argument lives on the hand-over alone, or the fleet pays for it twice
+	// (sd-d96355). Neither brief should carry gopls at all: that mention is exactly what a clear or
+	// compaction erases, which is the reason this block exists.
+	for _, role := range []string{"worker", "reviewer", "planner", "coauthor"} {
+		p := SystemPrompt("eitri", role, "", "ARCHITECTURE.md")
+		if strings.Contains(p, "gopls") {
+			t.Errorf("%s: gopls belongs on the hand-over, not the durable brief:\n%s", role, p)
+		}
+		if strings.Contains(p, "grepping") || strings.Contains(p, "reading files blind") {
+			t.Errorf("%s: the durable brief should state brokkr's constraint, not argue for it — that's "+
+				"the hand-over's job now:\n%s", role, p)
+		}
+	}
+}
+
+// TestParentIsStatedAsTheDefaultShape (sd-ac9800): a planner that reads `--parent` as an option for
+// unusual cases keeps filing flat tasks — every surface a planner reads about create-task, at the
+// standing prompt and at the moment work is handed over alike, must state hanging related work
+// under a container FIRST as the default shape, not a special case.
+func TestParentIsStatedAsTheDefaultShape(t *testing.T) {
+	// Flattened so a source line wrapped mid-phrase (this prose is hard-wrapped for terminal
+	// display) can't make a substring check miss text that reads fine to whoever receives it.
+	flatten := func(s string) string { return strings.Join(strings.Fields(s), " ") }
+	for _, s := range []string{
+		createTaskUsage,
+		CreateTaskHelp,
+		SystemPrompt("galar", "planner", "", "ARCHITECTURE.md"),
+		DirPlanning,
+		MsgPlanAssignment("build the thing", "", "", ""),
+	} {
+		flat := strings.ToLower(flatten(s))
+		if !strings.Contains(flat, "the container first") {
+			t.Errorf("missing container-first guidance: %q", s)
+		}
+		if !strings.Contains(flat, "default") || !strings.Contains(flat, "not a special case") {
+			t.Errorf("missing an explicit default/not-a-special-case statement: %q", s)
+		}
+	}
+}
+
+// TestToolingBlockPointsAtBrokkrMapOverGrepping (sd-d96355): BrokkrBrief said the right thing
+// already, but buried in the system prompt behind three sentences about compound shell, in a place
+// nobody re-reads — repetition via CLAUDE.md didn't fix that either. The point itself, not just the
+// tool's name, has to reach every hand-over of work.
+func TestToolingBlockPointsAtBrokkrMapOverGrepping(t *testing.T) {
+	for _, s := range []string{
+		DirWorking("td-1", 1.5, 2.0),
+		DirRejected("td-1", "not yet", 1.5, 2.0),
+		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
+		DirContainerRejected("td-EPIC", "td-1", "not yet", 1.5, 2.0),
+		MsgReview("pr-td-1", "do the thing", "td-1", "main", "", true),
+		MsgPlanAssignment("build the thing", "", "", ""),
+	} {
+		if !strings.Contains(s, "brokkr map") || !strings.Contains(s, "grepping") {
+			t.Errorf("hand-over should point at exploring with brokkr map over grepping blind: %q", s)
+		}
+	}
+}
+
 // TestGuardRepliesNameTheRealState: the replies an agent hits when a verb doesn't apply
 // must describe its ACTUAL state. The flat "run `sindri` to pick up a task first" was
 // true only when idle — a worker whose PR was under review got told to abandon the task
