@@ -182,18 +182,12 @@ func (h *Hub) NewAgent(project, name, role, memory string) (string, error) {
 
 // rehydrate injects one kickoff so a (re)launched agent asks the hub for work: AgentDirective is
 // idempotent and state-driven, so new and resuming agents alike land on their current job (D13).
-// A gate-triggered relaunch may have armed the claimed directive as this wake's kickoff instead
-// (-> workflow.Engine.prepareAssignment), sparing a round trip back to the same answer.
 func (h *Hub) rehydrate(project, name string) {
 	// Let Claude boot to input-readiness first, or its Enter is eaten by the splash.
 	time.Sleep(8 * time.Second)
-	msg := workflow.MsgKickoff
-	if dir, ok := h.wf.TakePendingKickoff(project, name); ok {
-		msg = dir
-	}
 	// Push-only, like every wake: a kickoff tells a live session to ask the hub what to do, and there
 	// is nothing worth keeping for an agent that was not there to be woken.
-	_ = h.Deliver(project, name, msg, workflow.PushOnly)
+	_ = h.Deliver(project, name, workflow.MsgKickoff, workflow.PushOnly)
 	// A relaunched chatroom member lost its durable prompt's membership cue — remind it, if the room
 	// is in a state where that means anything (-> chat.ReminderFor). Best-effort, as the kickoff is.
 	if cue := h.chat.ReminderFor(project, name); cue != "" {

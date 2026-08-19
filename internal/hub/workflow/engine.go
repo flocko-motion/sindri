@@ -79,9 +79,12 @@ type Deps interface {
 	CurrentModel(project, name string) string
 	// ModelForTier resolves a difficulty tier to its model, ok=false if unrecognised.
 	ModelForTier(tier string) (model string, ok bool)
-	// SetModel changes the model an agent runs on — clearing and relaunching it if running, since
-	// the session belongs to its old model and cannot cross onto the new one.
-	SetModel(project, name, model string) error
+	// ModelMatches reports whether detected is want — not always a bare equality, since a backend
+	// may run a tier's model under a more specific id than the one it dispatches to.
+	ModelMatches(want, detected string) bool
+	// SetModel changes the model an agent runs on, queuing next (the real instruction) behind the
+	// live switch if running — no relaunch.
+	SetModel(project, name, model, next string) error
 	// Compact fires /compact at a leaf boundary then queues next behind it, once, never checking
 	// whether it landed below the threshold that triggered it.
 	Compact(project, name, next string) error
@@ -124,7 +127,6 @@ type Engine struct {
 	pre        preflight       // serialises the reference-move PR checks (-> prcheck.go)
 	runCancels runCancelSet    // run ids killed mid-execution (-> execrun.go)
 	refWarn    refFallbackWarn // which repo roots have already been warned about an unconfigured reference (-> pr.go)
-	kickoff    pendingKickoff  // the directive a model-switch's relaunch should wake into (-> kickoff.go)
 }
 
 // New builds the workflow engine over the hub's store, its Deps, and the external task sources the

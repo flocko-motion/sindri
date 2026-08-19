@@ -140,6 +140,12 @@ func (s *Service) ModelWindow(model string) (int, bool) { return agentport.Model
 // ModelForTier resolves tier to the model it dispatches to, via the wired backend.
 func (s *Service) ModelForTier(tier string) (string, bool) { return agentport.ModelForTier(tier) }
 
+// ModelMatches reports whether detected is want, via the wired backend — not always a bare
+// equality (-> agentport.Agent.ModelMatches).
+func (s *Service) ModelMatches(want, detected string) bool {
+	return agentport.ModelMatches(want, detected)
+}
+
 // ModelInUse picks between the two readings of what an agent runs: the one detected off its
 // transcript while it is up — a human may change the model by hand, which the transcript sees first
 // — and the recorded choice otherwise, all there is for an agent that is not running.

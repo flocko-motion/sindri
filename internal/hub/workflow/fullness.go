@@ -42,14 +42,13 @@ func (e *Engine) compactIfDue(project, agent, dir string) (fired bool, err error
 
 // prepareAssignment runs an already-claimed assignment's preparation: a model switch the tier
 // wants, else compaction if due, bracketed so AtLeafBoundary admits the claim just written. fired
-// means the caller answers DirPreparing, not dir — dir is delivered by whatever fired instead.
+// means the caller answers DirPreparing, not dir — dir is delivered by whatever fired instead
+// (queued behind /clear and /model, or behind /compact).
 func (e *Engine) prepareAssignment(project, agent, tier, dir string) (fired bool, err error) {
 	e.deps.BeginAssignment(project, agent)
 	defer e.deps.EndAssignment(project, agent)
-	if want, known := e.deps.ModelForTier(tier); known && want != e.deps.CurrentModel(project, agent) {
-		// The relaunch kills this reply regardless — dir is armed as its kickoff instead (-> kickoff.go).
-		e.kickoff.arm(project, agent, dir)
-		return true, e.deps.SetModel(project, agent, want)
+	if want, known := e.deps.ModelForTier(tier); known && !e.deps.ModelMatches(want, e.deps.CurrentModel(project, agent)) {
+		return true, e.deps.SetModel(project, agent, want, dir)
 	}
 	return e.compactIfDue(project, agent, dir)
 }

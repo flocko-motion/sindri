@@ -42,6 +42,7 @@ type stubDeps struct {
 	// the retier check never fires for a test that has not opted into it.
 	tierModels    map[string]string
 	modelSet      []string // "name=model" for every SetModel call, in order
+	modelSetWith  []string // the "next" text passed alongside each, in step with modelSet
 	setModelErr   error
 	holdsNothing  bool
 	compacted     []string // agents Compact was called for, in order
@@ -111,8 +112,16 @@ func (d *stubDeps) ModelForTier(tier string) (string, bool) {
 	return m, ok
 }
 
-func (d *stubDeps) SetModel(_, name, model string) error {
+// ModelMatches mirrors the real adapter's own substring tolerance (a detected model id may carry
+// more than the plain tier id names, e.g. a dated snapshot suffix) rather than a bare equality —
+// exact-string test cases pass either way, since a string always contains itself.
+func (d *stubDeps) ModelMatches(want, detected string) bool {
+	return strings.Contains(detected, want)
+}
+
+func (d *stubDeps) SetModel(_, name, model, next string) error {
 	d.modelSet = append(d.modelSet, name+"="+model)
+	d.modelSetWith = append(d.modelSetWith, next)
 	return d.setModelErr
 }
 

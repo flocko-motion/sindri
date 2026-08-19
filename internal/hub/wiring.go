@@ -182,8 +182,12 @@ func (d workflowDeps) ModelForTier(tier string) (string, bool) {
 	return d.h.agents.ModelForTier(tier)
 }
 
-func (d workflowDeps) SetModel(project, name, model string) error {
-	return d.h.agents.SetModel(project, name, model)
+func (d workflowDeps) ModelMatches(want, detected string) bool {
+	return d.h.agents.ModelMatches(want, detected)
+}
+
+func (d workflowDeps) SetModel(project, name, model, next string) error {
+	return d.h.agents.SetModel(project, name, model, next)
 }
 
 func (d workflowDeps) HoldsNothing(project, name, role string) (bool, error) {

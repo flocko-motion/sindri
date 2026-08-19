@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"strings"
 	"testing"
 
 	agentport "github.com/flo-at/sindri/internal/adapter/agent"
@@ -14,7 +13,7 @@ import (
 // whose fullness (and compaction threshold) the hub cannot judge — refused outright, never stored.
 func TestSetModelRefusesAnUnknownModel(t *testing.T) {
 	s, _ := compactFixture(t)
-	if err := s.SetModel("proj", "durin", "some-model-nobody-listed"); err == nil {
+	if err := s.SetModel("proj", "durin", "some-model-nobody-listed", "next"); err == nil {
 		t.Fatal("SetModel accepted a model with no known window")
 	}
 	a, _, err := s.store.For("proj").GetAgent("durin")
@@ -26,8 +25,8 @@ func TestSetModelRefusesAnUnknownModel(t *testing.T) {
 	}
 }
 
-// TestSetModelStoresWithoutDisturbingAStoppedAgent: not running, so there is nothing to clear —
-// the choice is just recorded for the next Launch to pick up.
+// TestSetModelStoresWithoutDisturbingAStoppedAgent: not running, so there is nothing live to
+// retarget — the choice is just recorded for the next Launch to pick up.
 func TestSetModelStoresWithoutDisturbingAStoppedAgent(t *testing.T) {
 	_, st := newService(t)
 	s := New(st, tellDeps{}, nil)
@@ -39,7 +38,7 @@ func TestSetModelStoresWithoutDisturbingAStoppedAgent(t *testing.T) {
 	agentport.Use(claude.New()) // real ModelWindow, not the partial fakes other tests leave wired
 	t.Cleanup(func() { agentport.Use(unreadablePane{}) })
 
-	if err := s.SetModel("proj", "durin", "claude-opus-5"); err != nil {
+	if err := s.SetModel("proj", "durin", "claude-opus-5", "next"); err != nil {
 		t.Fatalf("SetModel on a stopped agent: %v", err)
 	}
 	a, _, err := s.store.For("proj").GetAgent("durin")
@@ -52,8 +51,8 @@ func TestSetModelStoresWithoutDisturbingAStoppedAgent(t *testing.T) {
 }
 
 // TestSetModelToTheSameValueIsANoOp: nothing to disturb when nothing changes — seeded directly
-// rather than through a first SetModel call, so this test isolates the repeat from the clear
-// and relaunch a genuine change would trigger.
+// rather than through a first SetModel call, so this test isolates the repeat from the live
+// switch a genuine change would trigger.
 func TestSetModelToTheSameValueIsANoOp(t *testing.T) {
 	s, f := compactFixture(t)
 	a, _, err := s.store.For("proj").GetAgent("durin")
@@ -65,7 +64,7 @@ func TestSetModelToTheSameValueIsANoOp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := s.SetModel("proj", "durin", "claude-opus-5"); err != nil {
+	if err := s.SetModel("proj", "durin", "claude-opus-5", "next"); err != nil {
 		t.Fatalf("SetModel to the value it already holds: %v", err)
 	}
 	if len(f.sent) != 0 || len(f.removed) != 0 {
@@ -73,61 +72,61 @@ func TestSetModelToTheSameValueIsANoOp(t *testing.T) {
 	}
 }
 
-// TestSetModelClearsThenRelaunchesARunningAgent: the agent holds nothing at a model change (its own
-// boundary check runs exactly here) and the context belongs to the OLD model's reasoning, so a
-// change clears first, not compacts — checked as the observable side effects up to the point Launch
-// itself refuses (the fixture's fake Check() fails on purpose; see compactFixture/fakeRuntime).
-func TestSetModelClearsThenRelaunchesARunningAgent(t *testing.T) {
+// TestSetModelClearsSwitchesAndQueuesTheInstruction: the agent holds nothing at a model change
+// (its own boundary check runs exactly here) and the context belongs to the OLD model's reasoning,
+// so a change clears first, then switches, then queues next — the caller's real instruction — all
+// into the still-live session. No relaunch: the old container is never torn down.
+func TestSetModelClearsSwitchesAndQueuesTheInstruction(t *testing.T) {
 	s, f := compactFixture(t)
 	writeUsage(t, "proj", "durin", 80_000) // a session with something in it, unlike a fresh one
 
-	err := s.SetModel("proj", "durin", "claude-opus-5")
-	if err == nil || !strings.Contains(err.Error(), "nothing to launch into") {
-		t.Fatalf("SetModel = %v, want it to reach (and fail at) Launch's pre-flight", err)
+	if err := s.SetModel("proj", "durin", "claude-opus-5", "you hold td-abc123"); err != nil {
+		t.Fatalf("SetModel: %v", err)
 	}
 
-	found := false
-	for _, sent := range f.sent {
-		if sent == "/clear" {
-			found = true
+	want := []string{"/clear", "/model claude-opus-5", "you hold td-abc123"}
+	if len(f.sent) != len(want) {
+		t.Fatalf("sent = %v, want %v in that order", f.sent, want)
+	}
+	for i, w := range want {
+		if f.sent[i] != w {
+			t.Errorf("sent[%d] = %q, want %q", i, f.sent[i], w)
 		}
 	}
-	if !found {
-		t.Errorf("a running agent's model change never cleared first; sent=%v", f.sent)
+	if f.interrupts != 0 {
+		t.Errorf("interrupts = %d, want none — queuing, not interrupting, is the whole point", f.interrupts)
 	}
-	// FireClear interrupts on its own — a human-armed-equivalent act here, not the agent's own
-	// request, and the restart tears the pod down right after regardless.
-	if f.interrupts == 0 {
-		t.Error("a model change never forced the pane idle before clearing")
-	}
-	if len(f.removed) == 0 {
-		t.Error("the old container was never torn down on the way to relaunching")
+	if len(f.removed) != 0 {
+		t.Errorf("removed = %v, want none — a model change no longer relaunches the pod", f.removed)
 	}
 	a, _, err := s.store.For("proj").GetAgent("durin")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if a.Model != "claude-opus-5" {
-		t.Errorf("Model = %q, want claude-opus-5 recorded even though the relaunch itself failed", a.Model)
+		t.Errorf("Model = %q, want claude-opus-5", a.Model)
 	}
 }
 
 // TestSetModelSkipsClearingAFreshSession: no recorded usage means nothing has been said yet, so
-// there is nothing for /clear to do. The relaunch still runs.
+// there is nothing for /clear to do — the switch and the instruction still queue.
 func TestSetModelSkipsClearingAFreshSession(t *testing.T) {
 	s, f := compactFixture(t)
 
-	err := s.SetModel("proj", "durin", "claude-opus-5")
-	if err == nil || !strings.Contains(err.Error(), "nothing to launch into") {
-		t.Fatalf("SetModel = %v, want it to reach (and fail at) Launch's pre-flight", err)
+	if err := s.SetModel("proj", "durin", "claude-opus-5", "you hold td-abc123"); err != nil {
+		t.Fatalf("SetModel: %v", err)
 	}
 
-	for _, sent := range f.sent {
-		if sent == "/clear" {
-			t.Errorf("a fresh session with no recorded usage was cleared anyway; sent=%v", f.sent)
+	want := []string{"/model claude-opus-5", "you hold td-abc123"}
+	if len(f.sent) != len(want) {
+		t.Fatalf("sent = %v, want %v — no /clear, nothing was recorded to clear", f.sent, want)
+	}
+	for i, w := range want {
+		if f.sent[i] != w {
+			t.Errorf("sent[%d] = %q, want %q", i, f.sent[i], w)
 		}
 	}
-	if len(f.removed) == 0 {
-		t.Error("the old container was never torn down on the way to relaunching")
+	if len(f.removed) != 0 {
+		t.Errorf("removed = %v, want none — a model change no longer relaunches the pod", f.removed)
 	}
 }

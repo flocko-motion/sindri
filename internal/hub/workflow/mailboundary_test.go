@@ -210,8 +210,8 @@ func TestMailOutranksAModelChange(t *testing.T) {
 	if len(deps.modelSet) != 1 || deps.modelSet[0] != "dvalin=big-model" {
 		t.Errorf("modelSet = %v, want dvalin switched to big-model, alongside the claim", deps.modelSet)
 	}
-	if armed, ok := e.TakePendingKickoff("repo", "dvalin"); !ok || !strings.Contains(armed, "td-abc123") {
-		t.Errorf("TakePendingKickoff = (%q, %v), want the claimed directive armed for the relaunch", armed, ok)
+	if len(deps.modelSetWith) != 1 || !strings.Contains(deps.modelSetWith[0], "td-abc123") {
+		t.Errorf("modelSetWith = %v, want the claimed directive queued as SetModel's next", deps.modelSetWith)
 	}
 }
 

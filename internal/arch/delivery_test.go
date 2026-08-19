@@ -40,6 +40,10 @@ var declaredInjectors = map[string]string{
 	// The /compact injection itself: the same class as clear's — nothing worth keeping for an agent
 	// that was not there to receive it, and the hub's own decision rather than a message from anyone.
 	"internal/hub/agent/compact.go": "the /compact injection — push-only, like clear's",
+	// A model switch's /clear, /model, and the instruction queued behind them: the same class again —
+	// the claim behind that instruction is durable, so an agent that was not there to receive it just
+	// gets the same answer on its next ask, and nothing is lost by not mailing it.
+	"internal/hub/agent/model.go": "the model-switch sequence — push-only, like clear's and compact's",
 	// A broadcast is push-only BY CONSTRUCTION: the chat module holds a Delivery port that can only
 	// inject, so it cannot mail even by mistake. Correct for a stream a newcomer catches up on.
 	"internal/hub/chat/service.go": "chat.deliver — push-only by construction (its port cannot mail)",

@@ -1,26 +1,17 @@
 // package: hub/agent / model
 // type:    logic (choosing the model an agent runs on)
-// job:     SetModel — launching on a chosen model and changing a running agent's are the same act,
-// since a session belongs to its old model and can't cross onto a new one without losing it.
-// limits:  the record and the relaunch; which model to choose is the caller's.
+// job:     SetModel — the record and, for a live agent, the queued session switch: /clear (if
+// there's anything to clear), then /model, then the next instruction.
+// limits:  the record and the live switch; which model to choose is the caller's.
 package agent
 
-import (
-	"fmt"
-	"io"
-)
+import "fmt"
 
-// SetModel changes the model an agent runs on, "" reverting to the account default. A non-empty
-// model must resolve through the backend's own window table (-> ModelWindow), or its fullness
-// would be unjudgeable. Not running: just records the choice. Running: clears the old session
-// first, then relaunches on the new model.
-//
-// Clears rather than compacts: at a model change the agent holds nothing (its own boundary check
-// runs exactly here), the context was produced by the OLD model's reasoning, and a downgrade's
-// window can be smaller than even a well-compacted transcript can fit — arithmetically impossible
-// to carry across. FireClear's own re-served kickoff also answers "and then what" for the pod that
-// comes back up, which a bare compact never did.
-func (s *Service) SetModel(project, name, model string) error {
+// SetModel changes the model an agent runs on, "" reverting to the account default. Not running:
+// records the choice for the next Launch. Running: queues /clear (if there's anything to clear),
+// /model, then next — no relaunch. Clearing first matters: /model on cached history shows a
+// confirmation that silently drops whatever queues behind it (verified live).
+func (s *Service) SetModel(project, name, model, next string) error {
 	if model != "" {
 		if _, ok := s.ModelWindow(model); !ok {
 			return fmt.Errorf("model %q has no known context window — refusing to start an agent whose fullness the hub cannot judge", model)
@@ -44,16 +35,22 @@ func (s *Service) SetModel(project, name, model string) error {
 	}
 	_ = ps.Log(name, "model", fmt.Sprintf("%s -> %s", modelLabel(old), modelLabel(model)))
 	s.deps.Notify()
-	if !s.AgentAlive(project, name) {
-		return nil // nothing live to clear; the next Launch starts fresh on the new model
+	if !s.AgentAlive(project, name) || model == "" {
+		return nil // nothing live to retarget, or no live command yet for the account default
 	}
-	// No recorded usage means a fresh session — nothing there for /clear to do.
 	if _, _, _, ok := s.ContextUsage(project, name); ok {
-		if err := s.FireClear(project, name); err != nil {
-			return fmt.Errorf("clearing %s before its model change: %w", name, err)
+		if err := s.Inject(project, name, "/clear"); err != nil {
+			return err
 		}
 	}
-	return s.RestartAgent(project, name, io.Discard)
+	if err := s.Inject(project, name, "/model "+model); err != nil {
+		return err
+	}
+	if err := s.Inject(project, name, next); err != nil {
+		return err
+	}
+	s.ForgetContext(project, name)
+	return nil
 }
 
 // modelLabel names an empty model as the account default, for the log line.

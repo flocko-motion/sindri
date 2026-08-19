@@ -241,6 +241,23 @@ func TestModelForTierResolvesExactlyTheThreeWords(t *testing.T) {
 	}
 }
 
+// TestModelMatchesTheDatedSnapshotSuffix: junior's own ModelForTier answer, "claude-haiku-4-5",
+// never appears verbatim on a live transcript — Haiku 4.5's real id carries a dated snapshot
+// suffix. A bare equality would see that as a permanent mismatch and re-switch (clearing the
+// session) on every single claim, even already running on it.
+func TestModelMatchesTheDatedSnapshotSuffix(t *testing.T) {
+	want, ok := (Claude{}).ModelForTier("junior")
+	if !ok {
+		t.Fatal("ModelForTier(\"junior\") should resolve")
+	}
+	if !(Claude{}).ModelMatches(want, "claude-haiku-4-5-20251001") {
+		t.Errorf("ModelMatches(%q, %q) = false, want true", want, "claude-haiku-4-5-20251001")
+	}
+	if (Claude{}).ModelMatches(want, "claude-sonnet-5") {
+		t.Error("ModelMatches must not confuse two different families")
+	}
+}
+
 // TestAnUnrecordedModelStillReportsAWindow: usage with no model must not report window 0, which the
 // workflow reads as unknown and never retires on.
 func TestAnUnrecordedModelStillReportsAWindow(t *testing.T) {
