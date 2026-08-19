@@ -6,50 +6,52 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 )
 
-// TestReadingTheUsersMailMarksItRead is sd-1d2213 part B: a message addressed to the user is the one
-// case where a human LOOKING at it via MailBody is the reading the mailbox promises to record.
-func TestReadingTheUsersMailMarksItRead(t *testing.T) {
+// TestMailBodyNeverMarksAnything: a look is not a consequence. sd-70dad1 replaced "viewing marks
+// read" (ENTER, then even a bare cursor move) with a deliberate act — a dwell, an ENTER on a narrow
+// terminal, or `mail show` — so the fetch itself must be inert, whoever the message is addressed to.
+func TestMailBodyNeverMarksAnything(t *testing.T) {
 	h := newHub(t)
-	m, err := h.store.For(testProject).AddMail(api.SenderUser, "dvalin", "the gate keeps flaking", false, 0)
+	toUser, err := h.store.For(testProject).AddMail(api.SenderUser, "dvalin", "the gate keeps flaking", false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Read() {
-		t.Fatal("precondition: the message starts unread")
+	toAgent, err := h.store.For(testProject).AddMail("dvalin", "reviewer", "rejected: needs another pass", false, 0)
+	if err != nil {
+		t.Fatal(err)
 	}
-	got, ok, err := h.MailBody(m.ID)
-	if err != nil || !ok {
-		t.Fatalf("MailBody(%d): ok=%v err=%v", m.ID, ok, err)
-	}
-	if !got.Read() {
-		t.Error("MailBody should mark the user's own mail read and reflect that in its own return")
-	}
-	stored, ok, err := h.store.MailByID(m.ID)
-	if err != nil || !ok {
-		t.Fatalf("MailByID(%d): ok=%v err=%v", m.ID, ok, err)
-	}
-	if !stored.Read() {
-		t.Error("the mark must actually be written, not just reflected in the one response")
+	for _, id := range []int64{toUser.ID, toAgent.ID} {
+		if got, ok, err := h.MailBody(id); err != nil || !ok || got.Read() {
+			t.Errorf("MailBody(%d) must not mark it read: got=%+v ok=%v err=%v", id, got, ok, err)
+		}
+		if stored, ok, err := h.store.MailByID(id); err != nil || !ok || stored.Read() {
+			t.Errorf("mail %d was marked read by a mere fetch", id)
+		}
 	}
 }
 
-// TestReadingAnAgentsMailDoesNotMarkIt is the hazard the ticket named: MailBody is also how a human
-// inspects an AGENT's mailbox, and marking that read on a mere look would tell AgentDirective the
-// message was consumed before the agent ever asked — swallowing it at the point it exists to interrupt.
-func TestReadingAnAgentsMailDoesNotMarkIt(t *testing.T) {
+// TestMarkMailReadForUserMarksOnlyMailToTheUser is the scope guarantee sd-70dad1 exists to protect:
+// the deliberate mark applies to the user's own mail and is a silent no-op for an agent's, so a
+// human browsing the fleet's mailbox can never consume another agent's delivery.
+func TestMarkMailReadForUserMarksOnlyMailToTheUser(t *testing.T) {
 	h := newHub(t)
-	m, err := h.store.For(testProject).AddMail("dvalin", "reviewer", "rejected: needs another pass", false, 0)
+	toUser, err := h.store.For(testProject).AddMail(api.SenderUser, "dvalin", "the gate keeps flaking", false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, err := h.MailBody(m.ID); err != nil || !ok {
-		t.Fatalf("MailBody(%d): ok=%v err=%v", m.ID, ok, err)
+	toAgent, err := h.store.For(testProject).AddMail("dvalin", "reviewer", "rejected: needs another pass", false, 0)
+	if err != nil {
+		t.Fatal(err)
 	}
-	stored, ok, err := h.store.MailByID(m.ID)
-	if err != nil || !ok {
-		t.Fatalf("MailByID(%d): ok=%v err=%v", m.ID, ok, err)
+	if err := h.MarkMailReadForUser(toUser.ID); err != nil {
+		t.Fatalf("MarkMailReadForUser(%d): %v", toUser.ID, err)
 	}
-	if stored.Read() {
-		t.Error("a human looking at an agent's mail must not mark it read out from under the agent")
+	if stored, _, _ := h.store.MailByID(toUser.ID); !stored.Read() {
+		t.Error("mail addressed to the user should now be marked read")
+	}
+	if err := h.MarkMailReadForUser(toAgent.ID); err != nil {
+		t.Fatalf("MarkMailReadForUser(%d): %v", toAgent.ID, err)
+	}
+	if stored, _, _ := h.store.MailByID(toAgent.ID); stored.Read() {
+		t.Error("mail addressed to an agent must never be marked read out from under it")
 	}
 }

@@ -198,22 +198,24 @@ func (h *Hub) mailWindow() (window []AgentMail, total, unread, userUnread int, u
 	return window, total, unread, userUnread, unreadByRepo, nil
 }
 
-// MailBody returns one message with its full body — what a detail view or `mail show` asks for, since
-// the board carries only a preview of each. Reading it marks it read, but ONLY when it is addressed
-// to the user: MailBody is also how a human inspects an AGENT's mailbox, and marking that read on a
-// mere look would tell AgentDirective the message was consumed before the agent ever saw it —
-// swallowing it silently at the exact point it exists to interrupt.
+// MailBody returns one message with its full body — what a detail view or `mail show` asks for. A
+// PURE read: marking is a separate, deliberate act (-> MarkMailReadForUser), not a side effect of a look.
 func (h *Hub) MailBody(id int64) (AgentMail, bool, error) {
+	return h.store.MailByID(id)
+}
+
+// MarkMailReadForUser marks one message read, but ONLY when addressed to the user — the one
+// deliberate act (a dwell, an ENTER, `mail show`) that may retire a message from the Mail tab.
+func (h *Hub) MarkMailReadForUser(id int64) error {
 	m, ok, err := h.store.MailByID(id)
 	if err != nil || !ok || m.Read() || !api.MailToUser(m) {
-		return m, ok, err
+		return err
 	}
 	if err := h.store.For(m.Project).MarkMailRead(id); err != nil {
-		return m, ok, err
+		return err
 	}
-	m.ReadAt = time.Now().UTC().Format(time.RFC3339) // reflect the mark just made, not a stale read
 	h.notify()
-	return m, ok, nil
+	return nil
 }
 
 // withSections stamps the board with its own tabs — each count, and how many of its rows wait on

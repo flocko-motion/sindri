@@ -227,10 +227,16 @@ func TestCmdShowDispatchesRunsToCmdShowRun(t *testing.T) {
 		t.Errorf("CmdShow should print the run's id and status: %q", out.String())
 	}
 
+	// An id belonging to none of show's recognised families is a usage error, not a lookup that
+	// happens to fail — `show ml-465` used to fall through to the PR path and surface as an opaque
+	// "internal error" once GetPR came back not-found.
 	out.Reset()
 	code, err = e.CmdShow(c, []string{"no-such-pr"}, &out)
-	if err == nil {
-		t.Fatalf("a non-run id with no matching PR should error, got code=%d", code)
+	if err != nil || code != 2 {
+		t.Fatalf("an unrecognised id shape should be a clean usage error, got code=%d err=%v", code, err)
+	}
+	if !strings.Contains(out.String(), "usage") {
+		t.Errorf("should print the grammar: %q", out.String())
 	}
 }
 

@@ -45,8 +45,8 @@ func (h *Hub) messageRoutes(mux *http.ServeMux) {
 		}
 		writeJSON(w, okMsg{"replied"}, h.ReplyToMail(id, req.Msg))
 	})
-	// One message in full. The board carries a preview of each body, so this is what a detail view
-	// and `mail show` ask for — and it reaches mail older than the board's window.
+	// One message in full — what a detail view and `mail show` ask for. A pure fetch: it never marks
+	// anything (-> POST /mail/mark-read is the deliberate act that does).
 	mux.HandleFunc("GET /mail", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
 		if err != nil {
@@ -58,5 +58,18 @@ func (h *Hub) messageRoutes(mux *http.ServeMux) {
 			err = fmt.Errorf("no message %d", id)
 		}
 		writeJSON(w, m, err)
+	})
+	// The deliberate act — a dwell, an ENTER, `mail show` — that retires a message the user was sent.
+	mux.HandleFunc("POST /mail/mark-read", func(w http.ResponseWriter, r *http.Request) {
+		var req TellReq // reuse: Name carries the mail id, Msg unused
+		if !decode(w, r, &req) {
+			return
+		}
+		id, err := strconv.ParseInt(req.Name, 10, 64)
+		if err != nil {
+			writeJSON(w, nil, fmt.Errorf("mail id must be a number, got %q", req.Name))
+			return
+		}
+		writeJSON(w, okMsg{"marked read"}, h.MarkMailReadForUser(id))
 	})
 }

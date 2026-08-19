@@ -87,7 +87,7 @@ const (
 )
 
 // binding is one row of help: the displayed key(s), a label, the scope it shows in, and whether it
-// COMMITS. `when` narrows a committing action to the rows it applies to (nil = always).
+// COMMITS. `when` narrows a binding to the rows it applies to (nil = always; menuOffers/footerFor).
 type binding struct {
 	keys    string
 	label   func(m model) string
@@ -194,7 +194,7 @@ var keymap = []binding{
 	{keys: keyDelete, label: lbl("forget"), scope: scopeRepos, commits: true},
 
 	// Mail: look only — the mailbox is the agent's to read, and the user's part is finding a message.
-	{keys: keyAttach, label: lbl("attach"), scope: scopeMail},
+	{keys: keyAttach, label: lbl("attach"), scope: scopeMail, when: mailAttachable},
 	{keys: keyMail, label: lbl("reply"), scope: scopeMail},
 	{keys: keyMailWho, label: func(m model) string { return "who: " + mailWhoLabel(m.mailAgent) }, scope: scopeMail},
 	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.mailFilter) }, scope: scopeMail},
@@ -220,9 +220,13 @@ var keymap = []binding{
 func (m model) footerFor(scope keyScope) string {
 	var parts []string
 	for _, b := range keymap {
-		if b.scope == scope && !b.commits {
-			parts = append(parts, b.keys+" "+b.label(m))
+		if b.scope != scope || b.commits {
+			continue
 		}
+		if b.when != nil && !b.when(m) {
+			continue
+		}
+		parts = append(parts, b.keys+" "+b.label(m))
 	}
 	if scope != scopeGlobal {
 		parts = append(parts, keyMenuShown+" "+menuLabel(m, scope))

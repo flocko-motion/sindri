@@ -343,7 +343,10 @@ func (e *Engine) CmdShowPR(c registry.Caller, args []string, out io.Writer) (int
 		return 1, err
 	}
 	if !ok {
-		return 1, fmt.Errorf("no such PR %q", args[0])
+		// Agent-actionable, not a hub fault: printed and returned with a nil error, or AgentExec
+		// would mask it behind "an internal error" (-> commands.go).
+		fmt.Fprintf(out, "no such PR %q\n", args[0])
+		return 1, nil
 	}
 	revs, _ := ps.Reviews(pr.ID)
 	fmt.Fprintf(out, "%s  [%s]  by %s\nbranch %s → %s\n", pr.ID, api.StatusLabel(pr.Status, api.ApprovalCount(revs)), pr.Agent, pr.Branch, pr.Base)

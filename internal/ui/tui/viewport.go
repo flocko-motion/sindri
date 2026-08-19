@@ -151,7 +151,7 @@ func (m *model) syncDetail() tea.Cmd {
 		if perr != nil {
 			return nil // the "showing the last N of M" row, which is not a message
 		}
-		return mailBodyFetchCmd(cl, mid)
+		return tea.Batch(mailSyncCmds(cl, mid, m.showDetail())...)
 	case 1:
 		m.agentPane, m.agentPod, m.agentDiag, m.agentClients = "", "", "", nil // selection changed — drop the previous agent's screen/pod/clients
 		m.agentView = "screen"                                                 // default back to the live screen

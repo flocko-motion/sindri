@@ -324,6 +324,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case mailMsg:
 		m.mailBody, m.mailBodyID = msg.body, msg.id
 		m.reclamp() // the body is most of the detail's height, so its arrival resizes the pane
+	case mailDwellMsg:
+		return m, m.mailDwellFired(msg.id)
 	case taskMsg:
 		m.taskDetail = msg.t
 		m.reclamp() // the description/comments land long after syncDetail sized the pane for less

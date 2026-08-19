@@ -1,7 +1,8 @@
 // package: hub / mail verb
 // type:    logic (the agent's side of the mailbox)
 // job:     `sindri mail` — hand an agent everything it has not read, oldest first, and mark
-// those messages read. Pick-up is explicit and it is what survives a crash between
+// those messages read; `mail list` for a scoped look at the project's mailbox without
+// marking anything. Pick-up is explicit and it is what survives a crash between
 // delivery and processing, which an injection cannot.
 // limits:  reading only; who writes mail is the sender's (-> workflow.Delivery), and the
 // record is the store's (reading MARKS, it never deletes).
@@ -17,12 +18,18 @@ import (
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
-// mailHelp advertises both halves in one line, since they are one verb: no argument READS, a name SENDS.
-const mailHelp = "read what is waiting for you (mail), or send an agent a message (mail <agent> <message>)"
+// mailHelp advertises all three in one line, since they are one verb: no argument READS, a name
+// SENDS, and "list" is the one word reserved out of the name position (-> cmdMail).
+const mailHelp = "read what is waiting for you (mail), send an agent a message (mail <agent> <message>), " +
+	"or list recent mail (mail list)"
 
 // cmdMail prints an agent's unread messages and marks them read, OLDEST FIRST — a later message often
 // supersedes an earlier one. Marked per message as it is printed, so nothing handed over stays unread.
 func (h *Hub) cmdMail(c registry.Caller, args []string, out io.Writer) (int, error) {
+	// "list" is reserved ahead of send, mirroring CmdTasks (-> taskread.go); nothing else is reserved.
+	if len(args) > 0 && args[0] == "list" {
+		return h.mailList(c, out)
+	}
 	if len(args) > 0 {
 		return h.sendMail(c, args[0], strings.Join(args[1:], " "), out)
 	}
@@ -49,9 +56,45 @@ func (h *Hub) cmdMail(c registry.Caller, args []string, out io.Writer) (int, err
 	return 0, nil
 }
 
-// sendMail is `mail <agent> <message...>`: one agent writing to another by BARE NAME, which it was given
-// by whoever asked it to make contact — so no roster listing comes with this. MAIL ONLY, never a push:
-// agents that can interrupt each other invite a ping-pong nobody asked for.
+// mailList is "mail list": planner/coauthor see the whole project, worker/reviewer only their own.
+// ACTIVE by default — mail is never deleted, so an unfiltered dump only grows (-> api.MailActive).
+func (h *Hub) mailList(c registry.Caller, out io.Writer) (int, error) {
+	all, err := h.store.For(c.Project).Mail()
+	if err != nil {
+		return 1, err
+	}
+	visible := all
+	if c.Role == "worker" || c.Role == "reviewer" {
+		self := h.repoName(c.Project) + "/" + c.Agent
+		visible = make([]api.Mail, 0, len(all))
+		for _, m := range all {
+			if m.Agent == c.Agent || m.Sender == self {
+				visible = append(visible, m)
+			}
+		}
+	}
+	active := api.FilterMail(api.MailActive, "", visible)
+	if len(active) == 0 {
+		fmt.Fprintln(out, "no active mail — `mail` reads what's unread for you.")
+		return 0, nil
+	}
+	for _, m := range active {
+		mark := " "
+		if m.Read() {
+			mark = "r"
+		}
+		fmt.Fprintf(out, "%s %-14s %-16s → %-16s %s\n", mark, api.MailID(m.ID), m.Sender, m.Agent, m.SentAt)
+	}
+	scope := "in the project"
+	if c.Role == "worker" || c.Role == "reviewer" {
+		scope = "of yours"
+	}
+	fmt.Fprintf(out, "\n%d active message(s) %s, %d in total — `mail` still reads what's unread for you.\n",
+		len(active), scope, len(visible))
+	return 0, nil
+}
+
+// sendMail sends by bare name, MAIL ONLY never a push — interrupting agents invites unwanted ping-pong.
 func (h *Hub) sendMail(c registry.Caller, to, msg string, out io.Writer) (int, error) {
 	msg = strings.TrimSpace(msg)
 	if msg == "" {
@@ -82,9 +125,7 @@ func (h *Hub) sendMail(c registry.Caller, to, msg string, out io.Writer) (int, e
 	return 0, nil
 }
 
-// resolveRecipient turns what was typed into one mailbox: a bare name looked up fleet-wide, or
-// `<repo>/<agent>` naming one directly — never required, but the way through an ambiguity, which is
-// REFUSED rather than guessed since uniqueness is only the allocator's convention.
+// resolveRecipient resolves a bare name fleet-wide, or "repo/agent" directly; ambiguity is refused.
 func (h *Hub) resolveRecipient(to string) (project, name string, err error) {
 	if repo, agent, ok := strings.Cut(to, "/"); ok {
 		matches, merr := h.store.AgentsNamed(agent)
@@ -119,9 +160,7 @@ func (h *Hub) resolveRecipient(to string) (project, name string, err error) {
 // replyHelp is what the registry advertises for reply.
 const replyHelp = "answer a message you were sent, without needing to know who sent it: reply <mail-id> <message>"
 
-// cmdReply is `reply <mail-id> <message...>`: an agent answering something it was sent. The recipient
-// comes from the STORED ROW, which is the point — an agent that has been mailed can answer without
-// being told a name, so a conversation needs no directory at all.
+// cmdReply answers by mail id; the recipient comes from the stored row, so no name is ever needed.
 func (h *Hub) cmdReply(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) < 2 {
 		fmt.Fprintln(out, workflow.ReplyReplyUsage)
@@ -157,9 +196,7 @@ func (h *Hub) cmdReply(c registry.Caller, args []string, out io.Writer) (int, er
 	}
 	project, name := c.Project, original.Sender
 	if original.Sender == api.SenderUser {
-		// A reply to the user does NOT charge the note budget: that budget bounds attention the user
-		// did not ask for, and this answers a message they chose to send. Charging it would penalise
-		// answering and teach agents to go quiet when addressed.
+		// Exempt from the note budget: that bounds unprompted attention, not an answer to a message they sent.
 		name = api.SenderUser
 	} else if p, n, rerr := h.resolveRecipient(original.Sender); rerr == nil {
 		project, name = p, n

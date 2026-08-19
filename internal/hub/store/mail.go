@@ -20,9 +20,7 @@ import (
 // under the name every existing caller here already uses.
 type Mail = api.Mail
 
-// mailSchema is the mailbox. APPEND-ONLY BY DESIGN — no delete, no expiry: reading sets read_at, so
-// the rows are the record of what an agent was told. Affordable because push-only traffic (a nudge, a
-// broadcast) is never stored here at all, leaving one-shot consequence to accumulate.
+// mailSchema is the mailbox: APPEND-ONLY, no delete or expiry — reading only sets read_at.
 const mailSchema = `
 CREATE TABLE IF NOT EXISTS mail (
   id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,9 +73,7 @@ func (p *ProjectStore) MarkMailRead(id int64) error {
 	return nil
 }
 
-// MarkMailPushed records that the wake for this message actually landed. Set after the injection
-// SUCCEEDS, never from the sender's intent: a row claiming a push that never reached a down agent
-// would erase the difference between "it may have acted on this already" and "nothing reached it".
+// MarkMailPushed is set only when the injection actually SUCCEEDS, never from intent alone.
 func (p *ProjectStore) MarkMailPushed(id int64) error {
 	_, err := p.s.db.Exec(`UPDATE mail SET pushed=1 WHERE id=? AND project=?`, id, p.project)
 	if err != nil {
@@ -86,17 +82,18 @@ func (p *ProjectStore) MarkMailPushed(id int64) error {
 	return nil
 }
 
-// UnreadMail is an agent's unread messages, OLDEST FIRST — the order they were sent is the order
-// they make sense in, since a later message often supersedes an earlier one.
+// UnreadMail is an agent's unread messages, OLDEST FIRST — a later one often supersedes an earlier one.
 func (p *ProjectStore) UnreadMail(agent string) ([]Mail, error) {
 	return queryMail(p.s.db, mailCols+` WHERE project=? AND agent=? AND read_at='' ORDER BY id`,
 		p.project, agent)
 }
 
-// UnannouncedMail is what a nudge would be ABOUT: how many messages an agent has neither read nor been
-// told about, and the whole unread count to say it with — a count, not the rows, since one nudge covers
-// all of it. Per message rather than a dwell timer or the newest id, so a restart, an agent quiet for an
-// hour, or a message already pushed to its pane, announces nothing a second time.
+// Mail returns every message in this project, newest first — mail list's whole-project scope.
+func (p *ProjectStore) Mail() ([]Mail, error) {
+	return queryMail(p.s.db, mailCols+` WHERE project=? ORDER BY id DESC`, p.project)
+}
+
+// UnannouncedMail counts what a nudge is about — per message, not a timer, so nothing is announced twice.
 func (p *ProjectStore) UnannouncedMail(agent string) (unannounced, unread int, err error) {
 	err = p.s.db.QueryRow(
 		`SELECT COUNT(*), COALESCE(SUM(notified = 0 AND pushed = 0), 0) FROM mail WHERE project=? AND agent=? AND read_at=''`,
@@ -166,9 +163,7 @@ func (s *Store) AllMail(limit int) ([]Mail, error) {
 	return queryMail(s.db, q, args...)
 }
 
-// MailTallies is every number the board needs: size, unread, the user's own unread, and unread per
-// project — over the whole table, since a badge from a window stops rising. ONE PASS, because the board
-// is rebuilt per notify per client, so a second scan would be paid on every read.
+// MailTallies is every board number in ONE PASS over the whole table — rebuilt per notify per client.
 func (s *Store) MailTallies() (total, unread, userUnread int, byProject map[string]int, err error) {
 	byProject = map[string]int{}
 	rows, qerr := s.db.Query(
@@ -189,10 +184,7 @@ func (s *Store) MailTallies() (total, unread, userUnread int, byProject map[stri
 	return total, unread, userUnread, byProject, rows.Err()
 }
 
-// NotesToUserSince counts the UNPROMPTED notes the fleet has sent the user since t — the fleet
-// ceiling's only input, over the rows so no tally drifts and no cliff builds a queue. A REPLY IS NOT A
-// NOTE (`in_reply_to = 0`): the ceiling bounds what the user must read WITHOUT ASKING, so charging
-// answers spends the fleet's hour on ones they asked for and inflates the refusal counts.
+// NotesToUserSince counts UNPROMPTED notes only — a reply never counts against the ceiling.
 func (s *Store) NotesToUserSince(t time.Time) (int, error) {
 	var n int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM mail WHERE agent=? AND in_reply_to=0 AND sent_at >= ?`,

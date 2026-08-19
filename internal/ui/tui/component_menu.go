@@ -119,6 +119,13 @@ func prDecidable(m model) bool {
 	return false
 }
 
+// mailAttachable: attach needs a live agent on one side of the message — hub/user/reviewer are
+// never one, so a hub notice to the user has nobody to reach (-> mailAttachTarget).
+func mailAttachable(m model) bool {
+	_, ok := m.mailAttachTarget()
+	return ok
+}
+
 // menuEntryStyle is white, the opposite of the footer's uniform dim — the only sign the menu is
 // open now that it no longer takes the screen.
 var menuEntryStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("231"))

@@ -7,11 +7,11 @@ import (
 )
 
 // detailPaneFixture is one board with enough cross-references wired for every kind of item a
-// detail pane can offer: a task with both a parent and a child, an agent holding it with a PR,
-// mail between two real agents (so the traceable "from:" xref has something to point at), and a
-// run tied to both an agent and a task. The parent is closed and the agent's own PR is merged —
-// both hidden by the Tasks/PRs tabs' own default filters — so a jump to either exercises sd-15f9a1's
-// "arrive narrowed to what the item named," not just the case where the target was visible anyway.
+// detail pane can offer: a task with both a parent and a child, an agent holding it with a PR, mail
+// TO THE USER from a real agent (untraceable "to:", traceable "from:" — both exercised, since one
+// bug here was the guard applied to one and not the other), and a run tied to an agent and a task.
+// The parent is closed and the agent's own PR is merged — both hidden by the Tasks/PRs tabs' own
+// default filters — so a jump to either exercises sd-15f9a1's "arrive narrowed to what it named."
 func detailPaneFixture() api.BoardState {
 	return api.BoardState{
 		Projects: []api.Project{{Tag: "here", Path: "/r/here"}},
@@ -32,6 +32,7 @@ func detailPaneFixture() api.BoardState {
 		},
 		Mail: []api.Mail{
 			{ID: 1, Project: "here", Agent: "nori", Sender: "dwalin", Body: "hi", SentAt: "2026-08-18T00:00:00Z"},
+			{ID: 2, Project: "here", Agent: api.SenderUser, Sender: "nori", Body: "hi back", SentAt: "2026-08-18T00:05:00Z"},
 		},
 	}
 }
@@ -64,7 +65,7 @@ func detailPaneModel(tab int) model {
 		m.selectRow("run-1")
 		m.runDetail = api.RunDetail{Run: m.state.Runs[0]}
 	case 6:
-		m.selectRow(api.MailID(1))
+		m.selectRow(api.MailID(2)) // to the user: exercises the untraceable "to:" (sd-fffd47)
 	}
 	return m
 }
@@ -146,6 +147,15 @@ func TestEveryDetailPaneIsActionable(t *testing.T) {
 					jumped.onKey("enter")
 					if jumped.tab != 6 {
 						t.Errorf("enter on a mail item should land on the Mail tab, got tab %d", jumped.tab)
+					}
+				case "mailbody":
+					// Already fully shown in the pane, so enter has nothing to add — only y copies
+					// it, which the walk-then-yank block above already exercises.
+					peeked := detailPaneModel(tab)
+					peeked.rightFocus, peeked.rightCursor = true, idx
+					peeked.onKey("enter")
+					if peeked.modal {
+						t.Errorf("enter on the mail body should not open a modal — it is already fully shown")
 					}
 				case "view", "path", "url", "resume":
 					// Each already has its own dedicated test (agent view toggle, url copy,

@@ -10,6 +10,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -17,6 +18,62 @@ import (
 	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/ui/table"
 )
+
+// mailReadDwell is how long the cursor must rest on a message, body on screen, before it counts as
+// read — a first guess, like every other interval in the fleet (-> refreshInterval).
+const mailReadDwell = 3 * time.Second
+
+// mailDwellCmd arms the read-dwell clock for one message — mailDwellFired re-checks it still
+// applies, so a moved-on timer needs no cancelling, only ignoring.
+func mailDwellCmd(id int64) tea.Cmd {
+	return tea.Tick(mailReadDwell, func(time.Time) tea.Msg { return mailDwellMsg{id: id} })
+}
+
+// mailSyncCmds is what selecting a mail row schedules: the body fetch always, a dwell only when
+// the detail pane is showing to time it against. Split out so it's testable without invoking either.
+func mailSyncCmds(cl *client.HTTP, id int64, showDetail bool) []tea.Cmd {
+	if !showDetail {
+		return []tea.Cmd{mailBodyFetchCmd(cl, id)}
+	}
+	return []tea.Cmd{mailBodyFetchCmd(cl, id), mailDwellCmd(id)}
+}
+
+// mailDwellFired re-checks every dwell condition NOW rather than trusting when it was armed: same
+// selection, Mail tab current, pane showing, still addressed to the user (-> MarkMailReadForUser).
+func (m model) mailDwellFired(id int64) tea.Cmd {
+	if m.tab != 6 || !m.showDetail() || m.cl == nil {
+		return nil
+	}
+	msg, ok := m.selMail()
+	if !ok || msg.ID != id || msg.Read() || !api.MailToUser(msg) {
+		return nil
+	}
+	cl := m.cl
+	return mutateThenRefresh(cl, func() error { return cl.MarkMailRead(id) })
+}
+
+// mailPartyName bares a sender for roster lookup: mailverb.go qualifies one as "repo/agent" so a
+// cross-repo reply knows where to answer, but m.state.Agents carries only the bare name.
+func mailPartyName(s string) string {
+	if _, bare, ok := strings.Cut(s, "/"); ok {
+		return bare
+	}
+	return s
+}
+
+// mailAttachTarget is the live agent attach should reach: the recipient ordinarily, else the
+// sender — hub/user/reviewer are never live, so this reaches the OTHER party either direction.
+// ok=false when neither is, which is when keys.go's mailAttachable hides the binding.
+func (m model) mailAttachTarget() (api.AgentView, bool) {
+	msg, ok := m.selMail()
+	if !ok {
+		return api.AgentView{}, false
+	}
+	if a, live := m.agentNamed(msg.Agent); live {
+		return a, true
+	}
+	return m.agentNamed(mailPartyName(msg.Sender))
+}
 
 // mailVisible admits a message to the list: in scope OR addressed to the user, and admitted by the two
 // filters. Mail to the user ignores the repo scope on purpose — the marker beside the handle counts it
@@ -133,8 +190,12 @@ func (m model) mailItems() []metaItem {
 	if m.isAgent(msg.Sender) { // hub/user/reviewer aren't traceable; an agent's own name is
 		from = metaItem{text: "from:    " + msg.Sender, kind: "agent", value: msg.Sender}
 	}
+	to := metaItem{text: "to:      " + msg.Agent + dimStyle.Render("  ("+msg.Repo+")")}
+	if m.isAgent(msg.Agent) { // the reserved recipient "user" is not traceable either
+		to.kind, to.value = "agent", msg.Agent
+	}
 	items := []metaItem{
-		{text: "to:      " + msg.Agent + dimStyle.Render("  ("+msg.Repo+")"), kind: "agent", value: msg.Agent},
+		to,
 		from,
 		{text: "sent:    " + msg.SentAt},
 		{text: "state:   " + read},
@@ -143,10 +204,18 @@ func (m model) mailItems() []metaItem {
 		{text: fmt.Sprintf("pushed:  %v", msg.Pushed)},
 		{text: ""},
 	}
-	for _, line := range strings.Split(strings.TrimRight(m.mailBodyOf(msg), "\n"), "\n") {
-		items = append(items, metaItem{text: line})
-	}
+	// One item for the whole body, not one per line — a per-line kind would make the cursor walk
+	// every line of a long message just to get past it. value is the clean text (-> mailBodyText).
+	items = append(items, metaItem{text: m.mailBodyOf(msg), kind: "mailbody", value: m.mailBodyText(msg)})
 	return items
+}
+
+// mailBodyText is mailBodyOf's own text without the pane's "fetching the rest" decoration.
+func (m model) mailBodyText(msg api.Mail) string {
+	if m.mailBodyID == msg.ID && m.mailBody != "" {
+		return m.mailBody
+	}
+	return msg.Body
 }
 
 // mailBodyOf is the message's text: the fetched full body once it has landed, else the preview the

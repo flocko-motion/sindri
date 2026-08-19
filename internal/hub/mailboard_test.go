@@ -151,3 +151,64 @@ func TestTheMarkerCountsOnlyTheUsersUnread(t *testing.T) {
 		t.Errorf("the Mail marker = %d, want the user's own unread (1)", got)
 	}
 }
+
+// TestMailAttentionCountsExactlyUnreadAndToTheUser pins the whole 2x2 the marker's conjunction rests
+// on, one cell per case rather than one mailbox for all four — a test that only asserts the cell
+// that already works would have missed sd-ac1757's single dropped conjunct.
+func TestMailAttentionCountsExactlyUnreadAndToTheUser(t *testing.T) {
+	cases := []struct {
+		name  string
+		agent string
+		read  bool
+		want  int
+	}{
+		{"to the user, unread", "user", false, 1},
+		{"to the user, read", "user", true, 0},
+		{"to an agent, unread", "dvalin", false, 0},
+		{"to an agent, read", "dvalin", true, 0},
+	}
+	for _, c := range cases {
+		h := newHub(t)
+		ps := h.store.For(testProject)
+		m, err := ps.AddMail(c.agent, "hub", "a message", false, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.read {
+			if err := ps.MarkMailRead(m.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		board, err := h.State("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if board.MailUnreadUser != c.want {
+			t.Errorf("%s: MailUnreadUser = %d, want %d", c.name, board.MailUnreadUser, c.want)
+		}
+		if got := board.SectionAttention("mail"); got != c.want {
+			t.Errorf("%s: mail section attention = %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+// TestMarkMailReadForUserNotifiesAtOnce: the agent read path calls notify explicitly ("the unread
+// count is on the board, and it has just changed" — mailverb.go); the user's own path has to too, or
+// the marker only falls on the next poll rather than the instant it is read.
+func TestMarkMailReadForUserNotifiesAtOnce(t *testing.T) {
+	h := newHub(t)
+	m, err := h.store.For(testProject).AddMail("user", "dvalin", "a note", false, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch, unsub := h.events.subscribe()
+	defer unsub()
+	if err := h.MarkMailReadForUser(m.ID); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ch:
+	default:
+		t.Error("MarkMailReadForUser should notify subscribers so the marker falls at once, not on the next poll")
+	}
+}

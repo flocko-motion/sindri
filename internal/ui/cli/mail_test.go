@@ -97,6 +97,23 @@ func TestPushAndMailReadAsDifferentActions(t *testing.T) {
 	}
 }
 
+// TestMailShowStateNamesAFreshMark: `mail show` marks the user's own mail read on the spot, but the
+// fetched value can't reflect a mark made after it was returned — justRead is how the print line
+// says so anyway, rather than showing "unread" for a message it just retired.
+func TestMailShowStateNamesAFreshMark(t *testing.T) {
+	unread := api.Mail{}
+	if got := mailShowState(unread, false); got != "unread" {
+		t.Errorf("mailShowState(unread, false) = %q, want unread", got)
+	}
+	if got := mailShowState(unread, true); got != "read just now" {
+		t.Errorf("mailShowState(unread, true) = %q, want \"read just now\"", got)
+	}
+	alreadyRead := api.Mail{ReadAt: "2026-08-13T09:00:00Z"}
+	if got := mailShowState(alreadyRead, false); !strings.Contains(got, "ago") {
+		t.Errorf("mailShowState(read, false) = %q, want it to say how long ago", got)
+	}
+}
+
 // TestTheUsersOwnMailIsGroupedAndNamed is the parity half: both front-ends answer "is anything waiting
 // for me?" the same way, so a note from another repo is grouped under the shared foreign heading rather
 // than interleaved, and the closing line names how many are the user's.

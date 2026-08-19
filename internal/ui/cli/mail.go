@@ -26,9 +26,9 @@ func NewMailCmd() *cobra.Command {
 			"the record of what an agent was told, not a queue you are watching drain.\n\n" +
 			"Push-only traffic (a stall nudge, a meeting broadcast) is not here by design: waking the\n" +
 			"agent is its entire purpose, and it is recorded per agent in `sindri agent info`.\n\n" +
-			"Your OWN mail works the same way: `mail show` and the TUI's Mail tab mark a message read\n" +
-			"the moment it is shown, which in the TUI is as soon as it is selected — moving the cursor\n" +
-			"onto a row is enough, the same way the detail pane renders whatever is selected.",
+			"Your OWN mail works the same way: `mail show` marks a message read the moment you ask for\n" +
+			"it. The TUI's Mail tab does too, but only once the cursor has rested on one for a few\n" +
+			"seconds with its body on screen — moving the cursor alone never marks anything.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
@@ -167,6 +167,19 @@ func mailReplyCmd() *cobra.Command {
 	}
 }
 
+// mailShowState is the state word `mail show` prints — pulled out so it's testable without a
+// backend. justRead names a mark this very call just made, which m.Read() cannot yet reflect.
+func mailShowState(m api.Mail, justRead bool) string {
+	switch {
+	case justRead:
+		return "read just now"
+	case m.Read():
+		return "read " + shortAge(m.ReadAt) + " ago"
+	default:
+		return "unread"
+	}
+}
+
 func mailShowCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "show <id>", Short: "Show one message in full (the list carries only an opening)", Args: cobra.ExactArgs(1),
@@ -180,10 +193,15 @@ func mailShowCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				read := "unread"
-				if m.Read() {
-					read = "read " + shortAge(m.ReadAt) + " ago"
+				// An explicit `mail show` is a deliberate read — the same act ENTER used to be — so it
+				// marks at once rather than waiting on a dwell that has no cursor to time here.
+				justRead := api.MailToUser(m) && !m.Read()
+				if justRead {
+					if err := b.MarkMailRead(id); err != nil {
+						return err
+					}
 				}
+				read := mailShowState(m, justRead)
 				fmt.Printf("to:     %s (%s)\nfrom:   %s\nsent:   %s\nstate:  %s\npushed: %v\n\n%s\n",
 					m.Agent, m.Repo, dash(m.Sender), m.SentAt, read, m.Pushed, strings.TrimRight(m.Body, "\n"))
 				return nil

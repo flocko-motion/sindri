@@ -210,15 +210,11 @@ func (m *model) onKey(k string) tea.Cmd {
 			return m.attachTo(a)
 		}
 		if m.tab == 6 {
-			// The row names its recipient, so attach reaches the agent the message is ABOUT. Mail
-			// outlives the agent it was sent to (nothing is deleted), so a missing one is ordinary.
-			msg, ok := m.selMail()
+			// The other live party (-> mailAttachTarget); mailAttachable hides this binding when
+			// neither is, but a stale footer can still reach here, so it still needs its own answer.
+			a, ok := m.mailAttachTarget()
 			if !ok {
-				return nil
-			}
-			a, live := m.agentNamed(msg.Agent)
-			if !live {
-				m.flash = msg.Agent + " is no longer on the roster — its mail outlives it"
+				m.flash = "neither party is a live agent to attach to"
 				return nil
 			}
 			return m.attachTo(a)
@@ -503,6 +499,7 @@ func (m *model) onKey(k string) tea.Cmd {
 				case "url": // e.g. a GitHub issue: no browser in the pod's TUI, so copy it instead
 					_ = clipboard.WriteAll(it.value)
 					m.flash = "copied URL: " + it.value
+				case "mailbody": // already fully shown in the pane — `y` is the point, enter has nothing to add
 				default: // cross-reference: open its details modal
 					m.openItemModal(it.kind, it.value)
 				}
@@ -520,11 +517,20 @@ func (m *model) onKey(k string) tea.Cmd {
 			return nil
 		}
 		if m.selID() != "" { // open the full-screen detail modal
+			var markRead tea.Cmd
+			// Narrow terminal: the detail pane is ENTER-only, so this modal is the body's first
+			// appearance — marking read here plays the dwell's role (-> mailDwellFired).
+			if m.tab == 6 && !m.showDetail() && m.cl != nil {
+				if msg, ok := m.selMail(); ok && !msg.Read() && api.MailToUser(msg) {
+					cl := m.cl
+					markRead = mutateThenRefresh(cl, func() error { return cl.MarkMailRead(msg.ID) })
+				}
+			}
 			m.modal = true
 			m.detail.SetHeight(modalContentHeight(m.h))
 			m.detail.SetTotal(len(m.modalLines()))
 			m.detail.ScrollTop()
-			return nil
+			return markRead
 		}
 	case keyDetail: // toggle the detail pane (full-width selector when hidden)
 		m.hideDetail = !m.hideDetail

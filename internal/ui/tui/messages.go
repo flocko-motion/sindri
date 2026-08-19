@@ -41,6 +41,10 @@ type mailMsg struct {
 	id   int64
 	body string
 }
+
+// mailDwellMsg fires once the read-dwell clock runs out on one message; whether it still applies
+// is checked at Update time (-> mailDwellFired), which is what lets a moved-on timer be ignored.
+type mailDwellMsg struct{ id int64 }
 type paneMsg struct {
 	agent string
 	text  string
