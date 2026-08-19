@@ -159,21 +159,24 @@ func TestEditorIsBoundToE(t *testing.T) {
 
 // TestPRTabVerdictKeys: the three verdicts a human hands down from the PRs tab, each on its own
 // key. Approve on A (not a, where attach lives on the other tabs) and the agentic review moved
-// off A to make room, so pin all of it — this is the arrangement the tab was wrong about.
+// off A to make room. All three commit on the keystroke (sd-6d0ff2), so they sit behind the
+// prefix now — only the editor, a destination rather than a verdict, stays direct.
 // The letters are spelled out, not built from the constants: a test that reads the constant back
 // to itself would pass whatever the constant became, which is the regression to catch.
 func TestPRTabVerdictKeys(t *testing.T) {
 	m := prTabWith(api.PR{ID: "pr-td-1", Status: "open", Project: "repo", Branch: "td-1"})
-	// Approve commits on the keystroke, so it is behind the prefix.
-	if !menuHas(m, "A approve") {
-		t.Errorf("the PRs menu should offer %q:\n%s", "A approve", menuText(m))
+	for _, want := range []string{"A approve", "R reject", "I agent-review"} {
+		if !menuHas(m, want) {
+			t.Errorf("the PRs menu should offer %q:\n%s", want, menuText(m))
+		}
 	}
-	// Reject and agent-review open a form to write in, and the editor opens a place to work: all
-	// three are destinations, so they stay direct and stay in the footer.
 	footer := footerOf(t, scopePRs)
-	for _, want := range []string{"R reject", "I agent-review", "e editor"} {
-		if !strings.Contains(footer, want) {
-			t.Errorf("the PRs footer should still offer %q:\n%s", want, footer)
+	if !strings.Contains(footer, "e editor") {
+		t.Errorf("the PRs footer should still offer %q:\n%s", "e editor", footer)
+	}
+	for _, gone := range []string{"R reject", "I agent-review"} {
+		if strings.Contains(footer, gone) {
+			t.Errorf("a verdict that commits must not also sit in the footer:\n%s", footer)
 		}
 	}
 	// The agentic review keeps A's old job but not its key, and must stay out of lowercase.
@@ -242,9 +245,9 @@ func TestOpenShellTargetsTheWorktree(t *testing.T) {
 	})
 }
 
-// TestNewKeysReachTheirActions drives the dispatcher, not just the help: the two rebound actions
-// that open a form are observable headlessly, so pressing the new key must open exactly that
-// form. The rest of the tab's actions call the hub, which needs a live one.
+// TestNewKeysReachTheirActions drives the dispatcher, not just the help: each of these commits on
+// the keystroke (sd-6d0ff2), so it sits behind the space prefix now — pressing it bare does
+// nothing, and space then the letter must reach exactly the form or chooser it used to open bare.
 func TestNewKeysReachTheirActions(t *testing.T) {
 	t.Run("agent-review on the PRs tab", func(t *testing.T) {
 		m := newModel(nil, nil, "")
@@ -253,7 +256,12 @@ func TestNewKeysReachTheirActions(t *testing.T) {
 		if id := m.selID(); id != "pr-td-1" {
 			t.Fatalf("expected pr-td-1 selected, got %q", id)
 		}
-		m.onKey(keyReview) // opens the review form: a destination, so it is direct
+		m.onKey(keyReview) // commits: bare, it must do nothing
+		if m.form.active {
+			t.Fatal("a bare committing key must not open the form")
+		}
+		m.onKey(keyMenu)
+		m.onKey(keyReview)
 		if !m.form.active || !strings.Contains(m.form.title, "agent-review of pr-td-1") {
 			t.Errorf("%q should open the agent-review form, got active=%v title=%q", keyReview, m.form.active, m.form.title)
 		}
@@ -266,7 +274,12 @@ func TestNewKeysReachTheirActions(t *testing.T) {
 		if id := m.selID(); id != "dvalin" {
 			t.Fatalf("expected dvalin selected, got %q", id)
 		}
-		m.onKey(keyOptions) // opens the options form: a destination, so it is direct
+		m.onKey(keyOptions)
+		if m.form.active {
+			t.Fatal("a bare committing key must not open the form")
+		}
+		m.onKey(keyMenu)
+		m.onKey(keyOptions)
 		if !m.form.active || !strings.Contains(m.form.title, "dvalin") {
 			t.Errorf("%q should open dvalin's options, got active=%v title=%q", keyOptions, m.form.active, m.form.title)
 		}
@@ -279,7 +292,12 @@ func TestNewKeysReachTheirActions(t *testing.T) {
 			Agents: []api.AgentView{{Name: "dvalin", Role: "worker"}, {Name: "nori", Role: "reviewer"}},
 			Chat:   api.ChatView{Members: []api.ChatMember{{Name: "nori", Role: "reviewer"}}},
 		}
-		m.onKey(keyApprove) // opens the add-member picker: a destination, so it is direct
+		m.onKey(keyApprove)
+		if m.choice.active {
+			t.Fatal("a bare committing key must not open the chooser")
+		}
+		m.onKey(keyMenu)
+		m.onKey(keyApprove)
 		if !m.choice.active {
 			t.Fatal("A should open the add-member chooser")
 		}
@@ -292,7 +310,12 @@ func TestNewKeysReachTheirActions(t *testing.T) {
 		m := newModel(nil, nil, "")
 		m.tab = 4 // Meeting
 		m.state = api.BoardState{Chat: api.ChatView{Members: []api.ChatMember{{Name: "nori", Role: "reviewer"}}}}
-		m.onKey(keyReject) // opens the remove-member picker: a destination, so it is direct
+		m.onKey(keyReject)
+		if m.choice.active {
+			t.Fatal("a bare committing key must not open the chooser")
+		}
+		m.onKey(keyMenu)
+		m.onKey(keyReject)
 		if !m.choice.active {
 			t.Fatal("R should open the remove-member chooser")
 		}
@@ -303,11 +326,13 @@ func TestNewKeysReachTheirActions(t *testing.T) {
 }
 
 // TestMeetingMembershipKeysHaveNothingToOffer: A/R degrade to a flash rather than an empty
-// chooser when there is nobody to add or remove — a modal with zero rows is a dead end.
+// chooser when there is nobody to add or remove — a modal with zero rows is a dead end. Both
+// commit, so the menu is opened first (sd-6d0ff2).
 func TestMeetingMembershipKeysHaveNothingToOffer(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.tab = 4 // Meeting
 	m.state = api.BoardState{Agents: []api.AgentView{{Name: "nori"}}, Chat: api.ChatView{Members: []api.ChatMember{{Name: "nori"}}}}
+	m.onKey(keyMenu)
 	m.onKey(keyApprove) // every agent is already a member
 	if m.choice.active {
 		t.Error("A should not open a chooser with nothing to add")
@@ -318,6 +343,7 @@ func TestMeetingMembershipKeysHaveNothingToOffer(t *testing.T) {
 
 	m = newModel(nil, nil, "")
 	m.tab = 4
+	m.onKey(keyMenu)
 	m.onKey(keyReject) // empty room
 	if m.choice.active {
 		t.Error("R should not open a chooser with nothing to remove")
@@ -328,12 +354,20 @@ func TestMeetingMembershipKeysHaveNothingToOffer(t *testing.T) {
 }
 
 // TestMeetingMembershipKeysAreAdvertised: membership is curated from the TUI as well as the CLI, so
-// the keys must be findable. Both open a picker — a destination — so they stay in the footer.
+// the keys must be findable. Both commit now (sd-6d0ff2), so they are advertised through the menu
+// rather than the footer.
 func TestMeetingMembershipKeysAreAdvertised(t *testing.T) {
-	got := footerOf(t, scopeChat)
+	m := newModel(nil, nil, "")
+	m.tab = 4 // Meeting
 	for _, want := range []string{keyApprove + " add member", keyReject + " remove member"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("the Meeting footer should offer %q:\n%s", want, got)
+		if !menuHas(m, want) {
+			t.Errorf("the Meeting menu should offer %q:\n%s", want, menuText(m))
+		}
+	}
+	got := footerOf(t, scopeChat)
+	for _, gone := range []string{keyApprove + " add member", keyReject + " remove member"} {
+		if strings.Contains(got, gone) {
+			t.Errorf("a committing key must not also sit in the footer:\n%s", got)
 		}
 	}
 }

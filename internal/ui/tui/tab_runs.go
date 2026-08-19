@@ -115,38 +115,63 @@ func (m model) runRows() []row {
 // runDetailLines is the full run detail for the right column / ENTER modal: its metadata, then
 // its stored output (already capped by the hub — never re-capped here, or a truncation notice
 // could read as this view's own).
-func (m model) runDetailLines() []string {
+func (m model) runDetailLines() []string { return itemTexts(m.runItems()) }
+
+// runItems is the selected run's detail; who queued it and the task it was aimed at (if any) are
+// cross-references, so a run can be chased back to the agent or task it belongs to.
+func (m model) runItems() []metaItem {
 	id := m.selID()
 	if id == "" {
-		return []string{dimStyle.Render("(no run)")}
+		return []metaItem{{text: dimStyle.Render("(no run)")}}
 	}
 	d := m.runDetail
 	if d.Run.ID != id {
-		return []string{id, dimStyle.Render("(loading…)")}
+		return []metaItem{{text: id}, {text: dimStyle.Render("(loading…)")}}
 	}
 	r := d.Run
-	ls := []string{
-		fmt.Sprintf("%s   [%s]   by %s", r.ID, runStatusLabel(r), runRequester(r)),
-		"command: " + r.Command,
-		"against: " + api.RunTarget(r),
+	by := metaItem{text: "by:       " + runRequester(r)}
+	if !api.RunFromUser(r) {
+		by.kind, by.value = "agent", r.Agent
+	}
+	items := []metaItem{
+		{text: fmt.Sprintf("%s   [%s]", r.ID, runStatusLabel(r))},
+		by,
+		{text: "command:  " + r.Command},
+		{text: "against:  " + api.RunTarget(r)},
+	}
+	if r.Task != "" {
+		items = append(items, metaItem{text: "task:     " + r.Task, kind: "task", value: r.Task})
 	}
 	if r.Priority != "" {
-		ls = append(ls, "priority: "+r.Priority)
+		items = append(items, metaItem{text: "priority: " + r.Priority})
 	}
-	ls = append(ls, "created: "+r.CreatedAt)
+	items = append(items, metaItem{text: "created:  " + r.CreatedAt})
 	if r.StartedAt != "" {
-		ls = append(ls, "started: "+r.StartedAt)
+		items = append(items, metaItem{text: "started:  " + r.StartedAt})
 	}
 	if r.FinishedAt != "" {
-		ls = append(ls, "finished: "+r.FinishedAt)
+		items = append(items, metaItem{text: "finished: " + r.FinishedAt})
 	}
-	ls = append(ls, "", dimStyle.Render("── output ──"))
+	items = append(items, metaItem{text: ""}, metaItem{text: dimStyle.Render("── output ──")})
 	if d.Output == "" {
-		ls = append(ls, dimStyle.Render("(none yet)"))
+		items = append(items, metaItem{text: dimStyle.Render("(none yet)")})
 	} else {
-		ls = append(ls, strings.Split(strings.TrimRight(d.Output, "\n"), "\n")...)
+		for _, l := range strings.Split(strings.TrimRight(d.Output, "\n"), "\n") {
+			items = append(items, metaItem{text: l})
+		}
 	}
-	return ls
+	return items
+}
+
+// runActionable is the focusable subset of the run detail (who queued it, and its task).
+func (m model) runActionable() []metaItem {
+	var out []metaItem
+	for _, it := range m.runItems() {
+		if it.kind != "" {
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 // openRunCancelChoice confirms withdrawing a queued or running run — "cancel" is both the run

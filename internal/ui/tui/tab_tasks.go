@@ -1,17 +1,16 @@
 // package: tui / tasks
 // type:    ui (Tasks tab)
 // job:     the Tasks tab content — the hierarchical tree selector (collapsible,
-// PR-marked) and the task detail pane. Which tasks a filter admits and how
-// they arrange come from the exchange package (FilterTasks, ArrangeTasks);
-// this renders rows and folds.
-// limits:  renders rows and folds only; the filter rule and the tree arrangement are
-// shared with the CLI (-> api.MatchesFilter, api.ArrangeTasks).
+// PR-marked) and its actions (new/edit/close/approve/reject/…). Which tasks a
+// filter admits and how they arrange come from the exchange package
+// (FilterTasks, ArrangeTasks); this renders rows and folds.
+// limits:  renders rows and folds, and wires actions; the detail pane's items are
+// tab_tasks_detail.go's, and the filter rule and tree arrangement are shared
+// with the CLI (-> api.MatchesFilter, api.ArrangeTasks).
 package tui
 
 import (
-	"fmt"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -41,7 +40,18 @@ var taskTable = table.Table{
 // the exchange package's answer (-> api.MatchesFilter), the same one `sindri task list --filter`
 // gets, so the two front-ends cannot come to mean different things by the same word.
 func (m model) taskRows() []row {
-	arranged := api.ArrangeTasks(api.FilterTasks(m.filter, m.state.Tasks), m.state.PRs)
+	tasks := api.FilterTasks(m.filter, m.state.Tasks)
+	// Search narrows WITHIN the filter (a match the filter already excluded stays excluded), but a
+	// match's ancestors come back from the whole board regardless of the filter — the same
+	// exemption sd-c0a7a0 gives the status filters' own ancestors, so a match never sits at an
+	// indentation lying about where it hangs.
+	term := searchTerm(m.taskSearch)
+	searching := term != ""
+	var context map[string]bool
+	if searching {
+		tasks, context = api.WithAncestors(matchTasks(tasks, term), m.state.Tasks)
+	}
+	arranged := api.ArrangeTasks(tasks, m.state.PRs)
 
 	// Who is behind each task (drives the worked-on marker). The same rule the detail pane names
 	// the agent by, so the mark and the name cannot contradict each other.
@@ -81,7 +91,8 @@ func (m model) taskRows() []row {
 		}
 		hideAbove = -1
 		visible = append(visible, tr)
-		if hasKids[tr.ID] && m.collapsed[tr.ID] {
+		// A fold set before the search must not hide a match found after it.
+		if hasKids[tr.ID] && m.collapsed[tr.ID] && !searching {
 			hideAbove = tr.Depth
 		}
 	}
@@ -99,6 +110,9 @@ func (m model) taskRows() []row {
 
 		// Cells styled independently (never nested) so a colour reset can't bleed across the row.
 		sc, state := taskRowStyle(tr.Task, approval[tr.ID], released[tr.ID])
+		if context[tr.ID] { // present for the path to a match, not a match itself
+			sc = dimStyle
+		}
 		if v := m.busy[tr.ID]; v != "" { // transient: the user triggered a close/scrap, awaiting the hub
 			sc, state = stWarn, v
 		}
@@ -124,6 +138,28 @@ func (m model) taskRows() []row {
 		}
 	}
 	return m.listing(taskTable, nil, out)
+}
+
+// searchTerm normalizes free-typed search text for matching: trimmed and lowered, "" meaning no
+// search is active. Not Tasks-specific, so another list tab's own field can share it.
+func searchTerm(raw string) string { return strings.ToLower(strings.TrimSpace(raw)) }
+
+// matchesSearch reports whether a normalized term is a substring of id or title, case-insensitive
+// — the one matching rule every searchable list tab shares, so wiring a second tab to it later
+// needs no rule of its own.
+func matchesSearch(term, id, title string) bool {
+	return strings.Contains(strings.ToLower(id), term) || strings.Contains(strings.ToLower(title), term)
+}
+
+// matchTasks keeps the tasks whose id or title contains term.
+func matchTasks(tasks []api.Task, term string) []api.Task {
+	var out []api.Task
+	for _, t := range tasks {
+		if matchesSearch(term, t.ID, t.Title) {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // taskRowStyle is a row's colour and its state word. The WORD comes from the gate holding it where
@@ -246,140 +282,6 @@ func typeAbbr(t string) string {
 		return t[:5]
 	}
 	return t
-}
-
-// taskDetailLines renders the selected task, description included once the lazy fetch lands.
-func (m model) taskDetailLines() []string {
-	if m.selID() == "" {
-		return []string{dimStyle.Render("(no task)")}
-	}
-	return itemTexts(m.taskItems())
-}
-
-// taskItems is the selected task's detail; parent/agent/pr are focusable cross-references.
-func (m model) taskItems() []metaItem {
-	id := m.selID()
-	var t api.Task
-	for _, x := range m.state.Tasks {
-		if x.ID == id {
-			t = x
-		}
-	}
-	// The board row's description shows at once; the lazy read then refines it.
-	desc := t.Description
-	var comments []api.Comment
-	if m.taskDetail.ID == id {
-		if m.taskDetail.Description != "" {
-			desc = m.taskDetail.Description
-		}
-		comments = m.taskDetail.Comments
-	}
-	return m.taskItemsFor(t, desc, comments)
-}
-
-func (m model) taskActionable() []metaItem {
-	var out []metaItem
-	for _, it := range m.taskItems() {
-		if it.kind != "" {
-			out = append(out, it)
-		}
-	}
-	return out
-}
-
-// taskDetailFor renders any task's detail block, for the modal-peek and PRs' linked-task modal.
-func (m model) taskDetailFor(t api.Task, desc string) []string {
-	return itemTexts(m.taskItemsFor(t, desc, nil))
-}
-
-// taskItemsFor builds the fields, the agent/PR/parent/url cross-references, then desc and comments.
-func (m model) taskItemsFor(t api.Task, desc string, comments []api.Comment) []metaItem {
-	// One rule for who is behind the task, shared with the row marker and the CLI: a live claim,
-	// else the author of the PR under review — a submitted task still has an owner, and that is
-	// the reader's question when they open one that is waiting on a verdict.
-	assignee, pr := api.AgentOnTask(m.state.Agents, m.state.PRs, t.ID), ""
-	for _, p := range m.state.PRs {
-		if p.Task == t.ID && p.Status != "merged" {
-			pr = p.ID
-		}
-	}
-	xref := func(label, val, kind string) metaItem {
-		if val == "" {
-			return metaItem{text: label + "-"}
-		}
-		return metaItem{text: label + val, kind: kind, value: val}
-	}
-	items := []metaItem{
-		{text: t.Title}, {text: ""},
-		{text: "type:     " + dash(t.Type)},
-		{text: "priority: " + theme.PriorityLabel(t.Priority)},
-		{text: "tier:     " + api.TierOrDefault(t.Tier)},
-		{text: "status:   " + t.Status},
-	}
-	// The exact moments, in local time — the list column rounds them, and rounding is what a
-	// question about one particular task is asking past. "changed" is the field the active filter
-	// reads, so an "n/a" here explains why a mirrored task that just closed is missing from it.
-	items = append(items,
-		metaItem{text: "created:  " + theme.When(t.CreatedAt)},
-		metaItem{text: "changed:  " + theme.When(t.UpdatedAt)},
-	)
-	if t.Approval != "" { // a planner proposal under the approval gate
-		line := "approval: " + theme.ApprovalLabel(t.Approval)
-		if t.ApprovalComment != "" {
-			line += " — " + t.ApprovalComment
-		}
-		items = append(items, metaItem{text: line})
-	}
-	items = append(items,
-		xref("parent:   ", t.ParentID, "task"),
-		xref("agent:    ", assignee, "agent"),
-		xref("pr:       ", pr, "pr"),
-		xref("url:      ", t.URL, "url"), // e.g. the GitHub issue; enter copies it (onkey.go)
-		metaItem{text: "labels:   " + dash(t.Labels)},
-	)
-	items = append(items, descItems(desc)...)
-	return append(items, commentItems(comments)...)
-}
-
-// descItems renders an optional description block.
-func descItems(desc string) []metaItem {
-	if strings.TrimSpace(desc) == "" {
-		return nil
-	}
-	items := []metaItem{{text: ""}, {text: "── description ──"}}
-	for _, l := range strings.Split(strings.TrimRight(desc, "\n"), "\n") {
-		items = append(items, metaItem{text: l})
-	}
-	return items
-}
-
-// commentItems renders the synced thread as author + local timestamp, then body lines.
-func commentItems(comments []api.Comment) []metaItem {
-	if len(comments) == 0 {
-		return nil
-	}
-	items := []metaItem{{text: ""}, {text: fmt.Sprintf("── comments (%d) ──", len(comments))}}
-	for _, c := range comments {
-		// The source too: "github" means the comment came from or went to the upstream issue, so
-		// it says who else has already seen it — which a reply is written differently for.
-		head := c.Author + " (" + c.Source + ")"
-		if ts := commentTime(c.CreatedAt); ts != "" {
-			head = ts + "  " + head
-		}
-		items = append(items, metaItem{text: ""}, metaItem{text: dimStyle.Render(head)})
-		for _, l := range strings.Split(strings.TrimRight(c.Body, "\n"), "\n") {
-			items = append(items, metaItem{text: l})
-		}
-	}
-	return items
-}
-
-// commentTime formats local date + time ("" if unparseable); threads span days, so HH:MM won't do.
-func commentTime(ts string) string {
-	if t, err := time.Parse(time.RFC3339, ts); err == nil {
-		return t.Local().Format("2006-01-02 15:04")
-	}
-	return ""
 }
 
 // taskTypes is the full set of td issue types (display == td value).

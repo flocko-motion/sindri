@@ -9,6 +9,7 @@ import (
 
 // TestOptionsReopensAClosedTaskOnTheTasksTab: `O` doubles as "an agent's options" (Agents) and
 // "reopen" (Tasks) — the same key, gated by tab, the way `C` already covers close/clear-context.
+// It commits (sd-6d0ff2), so it sits behind the space prefix now.
 func TestOptionsReopensAClosedTaskOnTheTasksTab(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.tab, m.filter = 0, api.FilterAll // the default filter hides closed tasks — this one needs to show
@@ -16,18 +17,25 @@ func TestOptionsReopensAClosedTaskOnTheTasksTab(t *testing.T) {
 	if id := m.selID(); id != "sd-abc123" {
 		t.Fatalf("expected sd-abc123 selected, got %q", id)
 	}
-	m.onKey(keyOptions) // opens the reopen form: a destination, so it is direct
+	m.onKey(keyOptions)
+	if m.form.active {
+		t.Fatal("a bare committing key must not open the form")
+	}
+	m.onKey(keyMenu)
+	m.onKey(keyOptions)
 	if !m.form.active || !strings.Contains(m.form.title, "sd-abc123") {
 		t.Errorf("%q should open sd-abc123's reopen form, got active=%v title=%q", keyOptions, m.form.active, m.form.title)
 	}
 }
 
 // TestOptionsDoesNotReopenAnOpenTask: nothing to reopen on a task that isn't closed — `O` must not
-// silently open the form and let a reason be filed against a task that never closed.
+// silently open the form and let a reason be filed against a task that never closed, even reached
+// through the menu.
 func TestOptionsDoesNotReopenAnOpenTask(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.tab = 0
 	m.state = api.BoardState{Tasks: []api.Task{{ID: "sd-abc123", Title: "a task", Status: "open"}}}
+	m.onKey(keyMenu)
 	m.onKey(keyOptions)
 	if m.form.active {
 		t.Error("O should have nothing to do on a task that is not closed")

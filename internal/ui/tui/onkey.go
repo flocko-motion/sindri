@@ -70,6 +70,10 @@ func (m *model) onKey(k string) tea.Cmd {
 		m.tab = (m.tab + 1) % len(tuiSections)
 	case "shift+tab", "[": // switch tabs back ([ mirrors shift+tab)
 		m.tab = (m.tab - 1 + len(tuiSections)) % len(tuiSections)
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9": // jump straight to a tab by its header number
+		if n := int(k[0] - '0'); n <= len(tuiSections) { // out of range: leave the tab alone, no clamp
+			m.tab = n - 1
+		}
 	case "ctrl+l": // the only way to switch panes (with ctrl+h): focus the detail
 		if m.showDetail() && len(m.actionableItems()) > 0 {
 			m.rightFocus = true
@@ -141,6 +145,14 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.runFilter = api.NextRunFilter(m.runFilter)
 		} else if m.tab == 6 {
 			m.cycleMailFilter()
+		}
+	case keySearch: // tasks: open a live search over the list
+		if m.tab == 0 {
+			sel := m.selID()
+			m.taskSearchPrev, m.taskSearch = m.taskSearch, ""
+			m.openInput(inputSearch, "search tasks: ")
+			m.restoreSelection(sel)
+			return textinput.Blink
 		}
 	case "h": // tasks: collapse the fold under the cursor (tree navigation)
 		if m.tab == 0 && !m.rightFocus {

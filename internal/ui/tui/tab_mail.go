@@ -129,9 +129,13 @@ func (m model) mailItems() []metaItem {
 	if msg.Read() {
 		read = "read " + shortAge(msg.ReadAt) + " ago"
 	}
+	from := metaItem{text: "from:    " + dash(msg.Sender)}
+	if m.isAgent(msg.Sender) { // hub/user/reviewer aren't traceable; an agent's own name is
+		from = metaItem{text: "from:    " + msg.Sender, kind: "agent", value: msg.Sender}
+	}
 	items := []metaItem{
 		{text: "to:      " + msg.Agent + dimStyle.Render("  ("+msg.Repo+")"), kind: "agent", value: msg.Agent},
-		{text: "from:    " + dash(msg.Sender)},
+		from,
 		{text: "sent:    " + msg.SentAt},
 		{text: "state:   " + read},
 		// Whether it was also pushed is the difference between "it may have acted on this already"

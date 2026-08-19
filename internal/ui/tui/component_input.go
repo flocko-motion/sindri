@@ -16,12 +16,19 @@ import (
 )
 
 // updateInput routes a keypress to the open modal: esc cancels, enter submits,
-// everything else edits the field.
+// everything else edits the field. Search is live: it also re-filters the list on every
+// keystroke, esc restores the term the field opened with, and the selection is held by id
+// through the redraws either causes rather than clamped by index (-> selectRow).
 func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
+		sel := m.selID()
+		if m.mode == inputSearch {
+			m.taskSearch = m.taskSearchPrev
+		}
 		m.mode, m.inputTarget = inputNone, ""
 		m.input.Blur()
+		m.restoreSelection(sel)
 		return m, nil
 	case "enter":
 		cmd := m.submitInput()
@@ -29,8 +36,13 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input.Blur()
 		return m, cmd
 	}
+	sel := m.selID()
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+	if m.mode == inputSearch {
+		m.taskSearch = m.input.Value()
+		m.restoreSelection(sel)
+	}
 	return m, cmd
 }
 

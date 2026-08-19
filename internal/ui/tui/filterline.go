@@ -61,7 +61,10 @@ func (m model) narrowings() []narrowing {
 	scope := narrowing{label: m.scopeLabel(), dflt: m.scopeRepo, applies: true}
 	switch m.tab {
 	case 0:
-		return []narrowing{{label: "filter: " + string(m.filter), dflt: m.filter == api.FilterActive, applies: true}}
+		return []narrowing{
+			{label: "filter: " + string(m.filter), dflt: m.filter == api.FilterActive, applies: true},
+			{label: "search: " + m.taskSearch, dflt: m.taskSearch == "", applies: m.taskSearch != ""},
+		}
 	case 1:
 		return []narrowing{scope}
 	case 2:
@@ -104,6 +107,7 @@ func (m *model) clearFilters() {
 	}
 	m.filter, m.prFilter, m.runFilter = api.FilterActive, api.PRFilterActive, api.RunFilterActive
 	m.mailFilter, m.mailAgent, m.mailPromised = api.MailFilters[0], "", 0
+	m.taskSearch = ""
 	m.scopeRepo = true
 	m.cursor[m.tab] = 0
 	m.flash = "filters cleared on every tab" // reaches further than the line above THIS tab's rows
