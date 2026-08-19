@@ -64,6 +64,16 @@ func ParseMailID(s string) (int64, error) {
 // each front-end separates those rows out.
 func MailToUser(m Mail) bool { return m.Agent == SenderUser }
 
+// MailToUserHeading labels the messages addressed to the user, lifted above the rest of the
+// mailbox — the few rows a person is expected to read, out of a list that is mostly agent traffic.
+func MailToUserHeading(n int) string {
+	return fmt.Sprintf("To you (%d):", n)
+}
+
+// MailLogHeading labels what's under MailToUserHeading: the record of what every agent has been
+// told, shown only once there is a "to you" section above it to separate it from.
+const MailLogHeading = "The rest of the mailbox:"
+
 // Read reports whether this message has been read.
 func (m Mail) Read() bool { return m.ReadAt != "" }
 

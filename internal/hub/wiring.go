@@ -156,8 +156,6 @@ func (d workflowDeps) AddTaskComment(project, id, author, body string) error {
 	return d.h.comments.Add(project, id, author, body)
 }
 
-func (d workflowDeps) Subscribe() (chan struct{}, func()) { return d.h.events.subscribe() }
-
 // KnownProjects is best-effort: a skipped scan self-corrects next tick (unlike the board -> State).
 func (d workflowDeps) KnownProjects() []store.Project {
 	ps, _ := d.h.projects.Known()

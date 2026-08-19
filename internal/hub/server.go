@@ -182,7 +182,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"ok"}, h.agents.SetRetired(h.agentReq(r, req.Name), req.Name, req.Retired))
+		writeJSON(w, okMsg{"ok"}, h.SetRetired(h.agentReq(r, req.Name), req.Name, req.Retired))
 	})
 	// The user's own clear of an escalation. The agent normally clears its own (`sindri resume`), but
 	// one that is gone, restarted, or simply wrong that it was blocked would stay stuck otherwise.

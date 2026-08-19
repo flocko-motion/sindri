@@ -59,8 +59,9 @@ func (e *Engine) NudgeMailWaiting(project, name string) bool {
 }
 
 // MsgMailWaiting wakes an agent that has stopped asking. Push-only, like every wake: what must be read
-// is already kept, and this only prompts the reading.
+// is already kept, and this only prompts the reading. Points at the plain verb, not `sindri mail`
+// then `sindri`: one ask now delivers the mail and the directive together (-> serveMail).
 func MsgMailWaiting(n int) string {
 	return fmt.Sprintf("[hub] You have %d unread message(s) waiting — things you must read, sent while "+
-		"you were busy or away. Run `sindri mail` to read them, then `sindri` for your next action.", n)
+		"you were busy or away. Run `sindri` — it reads them and answers your next action in one call.", n)
 }

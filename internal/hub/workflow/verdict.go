@@ -95,7 +95,9 @@ func (e *Engine) completeReview(project, prID, agent, verdict, findings string) 
 		}
 	}
 	_ = ps.SetState(store.AgentState{Agent: agent, Phase: "idle"})
-	_ = e.deps.Deliver(project, agent, MsgVerdictRecorded(prID), MailAndPush)
+	// Push only: asking `sindri` gets the reviewer exactly this — its next review — so nothing here
+	// needs to survive being read late.
+	_ = e.deps.Deliver(project, agent, MsgVerdictRecorded(prID), PushOnly)
 }
 
 // ApprovePR is the human approve path (TUI/CLI): marks a project's open (or already-approved) PR
@@ -228,12 +230,12 @@ func (e *Engine) reject(project, prID, feedback, voice string) error {
 		Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Container: prior.Container, Phase: phase,
 	})
 
-	who, msg := voice, MsgRejectedByAgent(voice, pr.ID, feedback)
+	who, msg := voice, MsgRejectedByAgent(voice, pr.ID)
 	if voice == api.SenderUser {
-		msg = MsgRejectedByUser(pr.ID, feedback)
+		msg = MsgRejectedByUser(pr.ID)
 	}
 	if prior.Container != "" { // the milestone is the user's to re-open; there is nothing to re-submit
-		msg = MsgMilestoneRejected(prior.Container, who, feedback)
+		msg = MsgMilestoneRejected(prior.Container, who)
 	}
 	_ = ps.LogPR(pr.ID, "rejected", "by "+who+": "+feedback)
 	_ = ps.Log(pr.Agent, "reject", pr.ID+" ("+who+"): "+feedback)

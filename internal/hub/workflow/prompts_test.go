@@ -170,7 +170,7 @@ func TestAgentAdviceNeverPromisesGit(t *testing.T) {
 		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
 		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
 		DirContainerRejected("td-EPIC", "td-1", "not yet", 1.5, 2.0),
-		MsgMilestoneRejected("td-EPIC", "user", "not yet"),
+		MsgMilestoneRejected("td-EPIC", "user"),
 		ReplyCheckpointed("td-1", "td-2", "the next subtask"),
 	}
 	for _, s := range sandboxed {
@@ -339,7 +339,6 @@ func TestMidFeatureAdviceNamesCheckpoint(t *testing.T) {
 		DirContainerDone("td-EPIC"),
 		ReplyCheckpointedLast("td-2", "td-EPIC"),
 		DirContainerRejected("td-EPIC", "td-1", "not yet", 1.5, 2.0),
-		MsgMilestoneRejected("td-EPIC", "reviewer", "not yet"),
 	} {
 		if !strings.Contains(s, "`sindri submit") {
 			t.Errorf("a complete feature must be told to submit: %q", s)

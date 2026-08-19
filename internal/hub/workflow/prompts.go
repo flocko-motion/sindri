@@ -416,6 +416,11 @@ func MsgPlanAssignment(goal, taskID, arch, reading string) string {
 // reorients to freestyle collaboration in the shared checkout.
 const DirCoauthor = "You're a coauthor working directly with the user in the shared checkout at /workspace — there's no task queue here. Do what the user asks in this terminal; edit files, run the build/tests, and use git yourself. `sindri lint` runs the quality gate, `sindri log \"<note>\"` records a note, `sindri scratch <ref|pr-id>` checks work you want to test out into " + ScratchMount + ", and the backlog verbs and PR verdicts are yours whenever the user asks for them (`sindri help` lists them). When the user goes quiet, wait for their next instruction."
 
+// DirNoReviews answers a reviewer holding nothing when no PR is waiting — the reviewer's twin of
+// DirNoTasks, since `sindri` answers at once either way rather than blocking until one arrives
+// (-> AssignPendingReviews, which pushes a wake once one is).
+const DirNoReviews = "No open reviews waiting. Wait — the hub will tell you when one is ready."
+
 // DirReview is a reviewer's directive, and it NAMES the task: access nobody mentions is access
 // nobody uses, so a reviewer told only a PR id judges the diff against the architecture doc alone.
 func DirReview(prID, taskID, title, author, arch string) string {
@@ -459,11 +464,12 @@ const runPointer = " If part of it needs a slow build or test, `sindri run \"<co
 
 const DirNoTasks = "No open tasks. Wait — the hub will tell you when there is work."
 
-// DirRetired answers an agent a human has wound down. It is told the reason, so it neither asks
-// again nor reads an empty queue into it — "no tasks" would have it waiting for work that is coming.
+// DirRetired answers an agent a human has wound down — un-retiring now pushes MsgUnretired
+// (-> Hub.SetRetired), so "you'll be told" is a kept promise rather than a hope.
 const DirRetired = "[hub] You've been retired by the user: no further work will be assigned to you. " +
 	"Whatever you were holding you have already finished. Don't ask again and don't look for something " +
-	"to do — just wait quietly; they'll either bring you back or stop you."
+	"to do — just wait quietly. If they bring you back, you'll be told; if they stop you instead, " +
+	"this simply won't run again."
 
 // DirFull tells a worker why it isn't getting the next task even with plenty in the queue: its own
 // context is full. Distinct from DirNoTasks so a retired agent never reads it as "nothing to do".
@@ -475,6 +481,12 @@ func DirFull(tokens int) string {
 // DirPreparing answers an ask whose real instruction is queued right behind this same reply (or
 // armed for the relaunch it triggers) — names no operation, asks for nothing but a beat.
 const DirPreparing = "[hub] One moment — your next instruction is right behind this."
+
+// DirClearPending answers an agent whose armed clear is about to land: no work meanwhile, since a
+// task handed out now would be cut in half by it.
+const DirClearPending = "[hub] The user has armed a context clear for you: it fires here, at this " +
+	"boundary, and your session starts empty. Nothing is assigned until it lands. Don't ask again — " +
+	"you'll be told to carry on the moment your context is clear."
 
 // --- escalation: stopped on a decision only the user can make ---
 

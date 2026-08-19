@@ -29,11 +29,17 @@ func spacerRow() row { return row{} }
 // state says more — but a NARROWED empty list still gets its filter line, because "you filtered
 // everything out, esc clears" is the one thing that empty state cannot say for itself.
 func (m model) listing(t table.Table, foreign, local []row) []row {
+	return m.listingHeaded(t, foreign, local, api.ForeignAttentionHeading(len(foreign)), api.LocalHeading)
+}
+
+// listingHeaded is listing with its own words over the two groups — for a split that isn't a scope
+// (-> tab_mail.go, grouped on WHO a message is for rather than which repo it came from).
+func (m model) listingHeaded(t table.Table, first, second []row, firstHeading, secondHeading string) []row {
 	var out []row
 	if line := m.filterLine(); line != "" {
 		out = append(out, headingRow(line))
 	}
-	rows := sectioned(foreign, local)
+	rows := sectioned(first, second, firstHeading, secondHeading)
 	if len(rows) == 0 {
 		return out
 	}
@@ -41,16 +47,16 @@ func (m model) listing(t table.Table, foreign, local []row) []row {
 	return append(out, rows...)
 }
 
-// sectioned labels foreign rows above local ones, and leaves a purely local list exactly as it was.
-// Foreign first because the only reason those rows are on screen is that they need the user; under
-// the local list they would be back to being found by scrolling, which is what admitting them fixed.
-func sectioned(foreign, local []row) []row {
-	if len(foreign) == 0 {
-		return local
+// sectioned labels the first group above the second, and leaves a first-empty list exactly as it
+// was. First on top because the only reason those rows are pulled out at all is to be seen first;
+// left mixed into the second group they would be back to being found by scrolling.
+func sectioned(first, second []row, firstHeading, secondHeading string) []row {
+	if len(first) == 0 {
+		return second
 	}
-	out := make([]row, 0, len(foreign)+len(local)+3)
-	out = append(out, headingRow(stCrit.Render(api.ForeignAttentionHeading(len(foreign)))))
-	out = append(out, foreign...)
-	out = append(out, spacerRow(), headingRow(dimStyle.Render(api.LocalHeading)))
-	return append(out, local...)
+	out := make([]row, 0, len(first)+len(second)+3)
+	out = append(out, headingRow(stCrit.Render(firstHeading)))
+	out = append(out, first...)
+	out = append(out, spacerRow(), headingRow(dimStyle.Render(secondHeading)))
+	return append(out, second...)
 }

@@ -202,8 +202,22 @@ func (h *Hub) mailWindow() (window []AgentMail, total, unread, userUnread int, u
 }
 
 // MailBody returns one message with its full body — what a detail view or `mail show` asks for, since
-// the board carries only a preview of each.
-func (h *Hub) MailBody(id int64) (AgentMail, bool, error) { return h.store.MailByID(id) }
+// the board carries only a preview of each. Reading it marks it read, but ONLY when it is addressed
+// to the user: MailBody is also how a human inspects an AGENT's mailbox, and marking that read on a
+// mere look would tell AgentDirective the message was consumed before the agent ever saw it —
+// swallowing it silently at the exact point it exists to interrupt.
+func (h *Hub) MailBody(id int64) (AgentMail, bool, error) {
+	m, ok, err := h.store.MailByID(id)
+	if err != nil || !ok || m.Read() || !api.MailToUser(m) {
+		return m, ok, err
+	}
+	if err := h.store.For(m.Project).MarkMailRead(id); err != nil {
+		return m, ok, err
+	}
+	m.ReadAt = time.Now().UTC().Format(time.RFC3339) // reflect the mark just made, not a stale read
+	h.notify()
+	return m, ok, nil
+}
 
 // withSections stamps the board with its own tabs — each count, and how many of its rows wait on
 // the user — resolved against the board they describe. A front-end renders what it finds here, so

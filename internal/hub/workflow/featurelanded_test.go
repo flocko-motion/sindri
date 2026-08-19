@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/flo-at/sindri/internal/hub/store"
 )
@@ -27,9 +26,6 @@ func TestAnInterimMergeDoesNotLandTheFeature(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if _, has, _ := e.pendingMail("repo", "dain"); has {
-		t.Fatal("no mail seeded; the assertion below assumes none")
-	}
 	// workDirective's own text names the held task; DirContainerDone (the wrong answer here) never
 	// does. Checking state directly is the stronger assertion.
 	if !strings.Contains(dir, "td-1") {
@@ -41,10 +37,9 @@ func TestAnInterimMergeDoesNotLandTheFeature(t *testing.T) {
 }
 
 // TestAFinalMergeDoesLandTheFeature is the control: a non-interim merge — the real submit — must
-// still release the worker, exactly as before this fix. Once released, AgentDirective blocks
-// waiting for the next claimable task (there is none in this fixture), so the release itself —
-// the SetState clearing Container, written before that wait begins — is checked against a context
-// cancelled almost immediately, rather than waiting the call out.
+// still release the worker, exactly as before this fix. Once released, AgentDirective answers AT
+// ONCE (there is no claimable task in this fixture), so the release itself — the SetState clearing
+// Container — is checked directly against the answer, not against a wait that no longer happens.
 func TestAFinalMergeDoesLandTheFeature(t *testing.T) {
 	e, ps, _, _ := featureWorker(t, true)
 	if err := ps.PutPR(store.PR{
@@ -53,10 +48,12 @@ func TestAFinalMergeDoesLandTheFeature(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	if _, err := e.AgentDirective(ctx, "repo", "dain"); err != context.DeadlineExceeded {
-		t.Fatalf("AgentDirective: %v, want the wait for a next task to time out (none is claimable)", err)
+	dir, err := e.AgentDirective(context.Background(), "repo", "dain")
+	if err != nil {
+		t.Fatalf("AgentDirective: %v", err)
+	}
+	if dir != DirNoTasks {
+		t.Errorf("directive = %q, want DirNoTasks — nothing claimable in this fixture", dir)
 	}
 	if st, _ := ps.GetState("dain"); st.Container != "" {
 		t.Errorf("state.Container = %q, want cleared — a real merge must still release the worker", st.Container)

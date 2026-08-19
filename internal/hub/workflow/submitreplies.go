@@ -15,9 +15,11 @@ const DirSubmitted = "Your pull request is under review. Wait — the hub will t
 	"the task back to you on the same branch, so you can finish it and submit again."
 
 // DirGating answers a worker whose submit/contribute is queued for its quality gate — there is no
-// PR yet, so DirSubmitted's wording would claim one exists. Wait only.
-const DirGating = "Your quality gate is queued — wait for the result, which arrives as a message " +
-	"(a PR if it passes, feedback to fix if it fails). Nothing to check in the meantime."
+// PR yet, so DirSubmitted's wording would claim one exists. A failure reaches it as a message
+// either way; a pass moves it straight to review WITHOUT one, since nothing about that changes what
+// it does next — asking again is how it would notice, not required to.
+const DirGating = "Your quality gate is queued. A failure reaches you as a message, with what to " +
+	"fix. A pass sends nothing — you're simply moved to review; ask `sindri` again if you want to see it."
 
 // ReplyRegistered acknowledges a submitted PR and tells the worker to wait for review.
 func ReplyRegistered(prID string) string {
@@ -25,9 +27,10 @@ func ReplyRegistered(prID string) string {
 }
 
 // ReplyGateQueued answers submit/contribute at once: the gate is queued, not run yet, so there is
-// no PR to name — position is the same fact `sindri run` reports.
+// no PR to name — position is the same fact `sindri run` reports. Same asymmetry as DirGating: a
+// failure is worth a message, a pass isn't.
 func ReplyGateQueued(runID string, position int) string {
-	return fmt.Sprintf("Quality gate %s queued at position %d. You'll be told the result — no need to ask again.", runID, position)
+	return fmt.Sprintf("Quality gate %s queued at position %d. A failure reaches you as a message; a pass moves you to review without one.", runID, position)
 }
 
 // ReplyGateReused answers a landing verb whose commit already has a passing verdict: nothing ran, so

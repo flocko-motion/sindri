@@ -66,6 +66,44 @@ func TestARetiredAgentIsNotNudged(t *testing.T) {
 	}
 }
 
+// TestAGatedFeatureWorkerIsNotNudged: ReplyFeatureGated promises a push once the user rules, so the
+// stall watchdog re-serving the same wait every dwell in the meantime is exactly the noise a review
+// of this feature found — assignPendingSubtask (task.go) is what actually resolves it.
+func TestAGatedFeatureWorkerIsNotNudged(t *testing.T) {
+	deps := &stubDeps{}
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	root := t.TempDir()
+	deps.root, deps.alive = root, true
+	if err := st.RegisterProject("proj", root); err != nil {
+		t.Fatal(err)
+	}
+	ps := st.For("proj")
+	if err := ps.PutAgent(store.Agent{Name: "dain", Role: "worker", Workspace: ".worktrees/dain"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.UpsertTask(store.Task{ID: "td-EPIC", Title: "a feature", Status: "open", Priority: "P1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.UpsertTask(store.Task{ID: "td-gated", Title: "gated", Status: "open", ParentID: "td-EPIC"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetApproval("td-gated", "pending", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}); err != nil {
+		t.Fatal(err)
+	}
+	e := New(st, deps)
+
+	if e.NudgeStalled("proj", "dain", "idle", 6*time.Minute) {
+		t.Error("a feature worker waiting on a gate was nudged for waiting as it was told to")
+	}
+}
+
 // TestACutOffTurnIsStillRetried: the api-error retry is not a complaint about idling, it asks a turn
 // that stopped mid-sentence to resume. A parked agent still deserves that, since nothing about being
 // wound down means its last turn should be left broken.

@@ -415,7 +415,9 @@ func (e *Engine) openMilestoneOrInterim(project string, r api.Run) (store.PR, er
 		if err != nil {
 			return store.PR{}, err
 		}
-		_ = e.deps.Deliver(project, r.Agent, "[hub] "+ReplyMilestoneContributed(pr.ID, st.Container), MailAndPush)
+		// Push only: it names what just went up, which nothing else states, but it is nothing to
+		// act on now — just wait — so it need not survive being read late.
+		_ = e.deps.Deliver(project, r.Agent, "[hub] "+ReplyMilestoneContributed(pr.ID, st.Container), PushOnly)
 		return pr, nil
 	}
 	root := e.deps.ProjectRoot(project)
@@ -454,7 +456,8 @@ func (e *Engine) openMilestoneOrInterim(project string, r api.Run) (store.PR, er
 		_ = ps.LogPR(pr.ID, "created", "interim, by "+r.Agent+": "+msg)
 	}
 	e.deps.Notify()
-	_ = e.deps.Deliver(project, r.Agent, "[hub] "+ReplyContributed(pr.ID), MailAndPush)
+	// Push only, same reason as the milestone case above.
+	_ = e.deps.Deliver(project, r.Agent, "[hub] "+ReplyContributed(pr.ID), PushOnly)
 	return pr, nil
 }
 
@@ -494,7 +497,9 @@ func (e *Engine) landSubmit(project string, ps *store.ProjectStore, r api.Run) e
 		_ = ps.Log(r.Agent, "review-request-failed", pr.ID+": "+err.Error())
 		return e.deps.Deliver(project, r.Agent, "[hub] "+ReplyReviewRequestFailed(pr.ID, err), MailAndPush)
 	}
-	return e.deps.Deliver(project, r.Agent, MsgGatePassed(pr.ID), MailAndPush)
+	// No "now up for review" message: it changes nothing the agent does — it waits either way —
+	// and the verdict that eventually arrives (a merge push, or a mailed rejection) says it all.
+	return nil
 }
 
 // rejectGate lands a failed gate: back to "working" with the violations, exactly what an inline

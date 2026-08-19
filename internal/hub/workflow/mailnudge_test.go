@@ -42,8 +42,8 @@ func TestAnIdleAgentWithMailIsWoken(t *testing.T) {
 	if len(deps.delivered) != 1 || deps.delivered[0].Mail || !deps.delivered[0].Push {
 		t.Errorf("the wake is push-only — what must be read is already kept: %+v", deps.delivered)
 	}
-	if len(deps.injectedText) != 1 || !contains(deps.injectedText[0], "sindri mail") {
-		t.Errorf("it should name the verb that reads it: %q", deps.injectedText)
+	if len(deps.injectedText) != 1 || !contains(deps.injectedText[0], "Run `sindri`") {
+		t.Errorf("it should point at the plain verb, which now delivers mail and the directive together: %q", deps.injectedText)
 	}
 }
 

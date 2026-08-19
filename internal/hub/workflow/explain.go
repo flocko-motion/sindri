@@ -144,6 +144,12 @@ func (e *Engine) ExplainNext(project, agent, role string) (api.NextExplain, erro
 
 // agentBlocked reports why an agent can be handed nothing whatever the backlog holds.
 func (e *Engine) agentBlocked(ps *store.ProjectStore, project, agent string) string {
+	if e.retired(project, agent) {
+		return fmt.Sprintf("retired by the user — `sindri agent retire %s --back` brings it back", agent)
+	}
+	if e.clearArmed(project, agent) {
+		return "a context clear is armed for it — nothing is assigned until it fires"
+	}
 	st, err := ps.GetState(agent)
 	if err != nil {
 		return ""

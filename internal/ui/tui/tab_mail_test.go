@@ -158,7 +158,7 @@ func TestTheMailBadgeCountsUnreadNotTheWindow(t *testing.T) {
 
 // TestTheUsersMailIsShownFromEveryRepo: the marker beside the handle counts the user's unread
 // fleet-wide, so a scope that hid the row it points at would say something waits and then show
-// nothing. It is grouped under the foreign heading rather than passed off as local.
+// nothing. It is grouped under the to-you heading, above the rest of the mailbox, wherever it's from.
 func TestTheUsersMailIsShownFromEveryRepo(t *testing.T) {
 	m := mailModel()
 	m.scopeRepo = true // narrowed to the repo in view
@@ -171,8 +171,8 @@ func TestTheUsersMailIsShownFromEveryRepo(t *testing.T) {
 	if !strings.Contains(rows, "documented backwards") {
 		t.Errorf("a note to the user from another repo must still be listed:\n%s", rows)
 	}
-	if !strings.Contains(rows, api.ForeignAttentionHeading(1)) {
-		t.Errorf("and grouped under the foreign heading rather than read as local:\n%s", rows)
+	if !strings.Contains(rows, api.MailToUserHeading(1)) {
+		t.Errorf("and grouped under the to-you heading regardless of which repo it came from:\n%s", rows)
 	}
 	// It is marked as the user's own, since the list is mostly agent traffic.
 	if !strings.Contains(rows, "→ you") {

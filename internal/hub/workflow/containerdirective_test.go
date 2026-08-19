@@ -79,11 +79,15 @@ func TestRejectedFeatureKeepsTheFeature(t *testing.T) {
 	if len(deps.injectedText) != 1 {
 		t.Fatalf("want one message to the author, got %d", len(deps.injectedText))
 	}
+	// A pointer, not the feedback itself — that stays on the PR and is what the next directive re-serves.
 	msg := deps.injectedText[0]
-	for _, want := range []string{"td-EPIC", "not yet", "`sindri submit"} {
+	for _, want := range []string{"td-EPIC", "sindri"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("the rejection should carry %q: %q", want, msg)
 		}
+	}
+	if strings.Contains(msg, "not yet") {
+		t.Errorf("the mail should not duplicate the feedback itself: %q", msg)
 	}
 	// And the directive it gets next keeps it on the feature, pointed at the same resubmit.
 	dir, err := e.AgentDirective(context.Background(), "repo", "dvalin")

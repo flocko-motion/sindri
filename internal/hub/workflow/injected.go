@@ -14,10 +14,15 @@ import (
 
 const MsgKickoff = "[hub] You're live. Run `sindri` and do exactly what it tells you — it always returns your current job, whether you're new or resuming."
 
-// MsgWorkAvailable nudges an idle worker that rated work exists. Claiming stays a pull, so two
-// workers can't take one task — but an agent that stopped asking would never hear about it.
+// MsgUnretired tells a retired agent it is back in service. DirRetired sends it away from asking
+// again on its own, so this push is the only thing that would ever reach it (-> Hub.SetRetired).
+const MsgUnretired = "[hub] You're back in service — the user has un-retired you. Run `sindri` for your next action."
+
+// MsgWorkAvailable nudges an idle worker with what IT would be handed right now — nudgeIdleWorkers
+// computed id against this agent's own preferences, not just the task that triggered the check.
+// Named, but not guaranteed: claiming stays a pull, so another agent asking first can still take it.
 func MsgWorkAvailable(id string) string {
-	return fmt.Sprintf("[hub] New work is ready (%s). Run `sindri` to pick up your next task — it may not be this one, whichever is highest priority.", id)
+	return fmt.Sprintf("[hub] %s is ready for you. Run `sindri` to claim it — someone else may beat you to it, in which case you'll be handed whatever is next.", id)
 }
 
 // MsgStalled prods an agent that holds work but has gone quiet, naming the task and inviting it
@@ -34,11 +39,6 @@ const MsgRetryTurn = "[hub] Your last response was cut off mid-stream by an API 
 	"resumed on its own. Pick up where you left off: check whether the step you were on actually " +
 	"completed (`sindri git change` shows what is written) before carrying on, since your own last " +
 	"message is truncated and may describe work that never happened."
-
-// MsgMerged tells a worker its PR merged and to fetch the next task.
-func MsgMerged(prID string) string {
-	return fmt.Sprintf("[hub] %s merged. Run `sindri` for your next task.", prID)
-}
 
 // MsgPRScrapped tells an author its PR was discarded. Deliberately final — the branch is gone, so
 // unlike a rejection there is nothing to resubmit. Without it the author waits in "submitted".
@@ -113,11 +113,6 @@ func MsgRunFinished(id, status string, elapsed, budget time.Duration) string {
 		usage = fmt.Sprintf(" (%s of its %s budget)", elapsed.Round(time.Second), budget.Round(time.Second))
 	}
 	return fmt.Sprintf("[hub] %s %s%s. Full output: `sindri show %s`.", id, verb, usage, id)
-}
-
-// MsgGatePassed is the injected equivalent of ReplyRegistered, sent once a queued gate passes.
-func MsgGatePassed(prID string) string {
-	return fmt.Sprintf("[hub] Your quality gate passed — %s is now up for review. Run `sindri` for your next directive.", prID)
 }
 
 // MsgLintPassed answers a queued self-check that passed. It names the run, because the report on it
@@ -239,24 +234,23 @@ func MsgResetFailed(prID, base string) string {
 	return fmt.Sprintf("[hub] %s merged, but the hub hit an error bringing your branch onto %s afterward. Run `sindri resolve` — if it doesn't settle cleanly, say what it reports.", prID, base)
 }
 
-// MsgMilestoneRejected is the rejection a feature worker gets. It names the feature rather than the
-// subtask the worker happens to be holding, since the PR covers the whole branch. voice is who ruled
-// ("user" or "reviewer").
-func MsgMilestoneRejected(container, voice, feedback string) string {
-	return fmt.Sprintf("[%s] The PR for feature %s was rejected: %s — address it on the branch you're "+
-		"already on, then `sindri submit \"<summary>\"` to put the feature up again.",
-		voice, container, feedback)
+// MsgMilestoneRejected names the feature rather than the subtask in hand, since the PR covers the
+// whole branch. A pointer, like its siblings below — DirContainerRejected re-serves the feedback.
+func MsgMilestoneRejected(container, voice string) string {
+	return fmt.Sprintf("[%s] The PR for feature %s was rejected. Run `sindri` for the feedback and "+
+		"where to address it.", voice, container)
 }
 
-// MsgRejectedByUser tells a worker the user rejected its PR, with the feedback.
-func MsgRejectedByUser(prID, feedback string) string {
-	return fmt.Sprintf("[user] %s was rejected: %s — address the feedback on your branch and run `sindri submit` again.", prID, feedback)
+// MsgRejectedByUser tells a worker the user rejected its PR — a pointer, not the feedback itself,
+// which stays on the PR (-> pr.Feedback) and is what DirRejected re-serves on every ask.
+func MsgRejectedByUser(prID string) string {
+	return fmt.Sprintf("[user] %s was rejected. Run `sindri` for the feedback and to carry on.", prID)
 }
 
-// MsgRejectedByAgent tells a worker an agent rejected its PR, in that agent's own voice: the role
-// for the reviewer whose job it is, the name for a coauthor, which speaks for nobody but itself.
-func MsgRejectedByAgent(voice, prID, feedback string) string {
-	return fmt.Sprintf("[%s] %s rejected: %s — please address the feedback and submit again.", voice, prID, feedback)
+// MsgRejectedByAgent speaks in that agent's own voice: the role for a reviewer, the name for a
+// coauthor. Same pointer shape as MsgRejectedByUser.
+func MsgRejectedByAgent(voice, prID string) string {
+	return fmt.Sprintf("[%s] %s was rejected. Run `sindri` for the feedback and to carry on.", voice, prID)
 }
 
 // MsgReview is the single review instruction: the hub has already checked the PR branch out into

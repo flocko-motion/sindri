@@ -25,7 +25,10 @@ func NewMailCmd() *cobra.Command {
 			"feedback, an assignment. Reading one marks it read; nothing is ever deleted, so this is\n" +
 			"the record of what an agent was told, not a queue you are watching drain.\n\n" +
 			"Push-only traffic (a stall nudge, a meeting broadcast) is not here by design: waking the\n" +
-			"agent is its entire purpose, and it is recorded per agent in `sindri agent info`.",
+			"agent is its entire purpose, and it is recorded per agent in `sindri agent info`.\n\n" +
+			"Your OWN mail works the same way: `mail show` and the TUI's Mail tab mark a message read\n" +
+			"the moment it is shown, which in the TUI is as soon as it is selected — moving the cursor\n" +
+			"onto a row is enough, the same way the detail pane renders whatever is selected.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}

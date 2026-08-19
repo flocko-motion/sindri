@@ -53,7 +53,7 @@ var mailTable = table.Table{
 }
 
 func (m model) mailRows() []row {
-	var foreign, local []row
+	var toUser, rest []row
 	for _, msg := range m.mailShown() {
 		state, st := "unread", stWarn
 		if msg.Read() {
@@ -77,15 +77,15 @@ func (m model) mailRows() []row {
 			table.Cell{Text: shortAge(msg.SentAt), Style: dimStyle.Render},
 			table.Cell{Text: oneLineText(msg.Body)},
 		), api.MailID(msg.ID)}
-		// Foreign here means the same as on the other scoped tabs: on screen only because it waits on
-		// the user, so the heading says so — a repo column is skimmed (-> sectioned).
-		if m.inScope(msg.Project) {
-			local = append(local, r)
+		// Grouped on WHO it is for, not which repo it came from: the repo column already says that, and
+		// "to you" already carries the "needs a person" meaning the other tabs use scope for.
+		if api.MailToUser(msg) {
+			toUser = append(toUser, r)
 		} else {
-			foreign = append(foreign, r)
+			rest = append(rest, r)
 		}
 	}
-	rows := m.listing(mailTable, foreign, local)
+	rows := m.listingHeaded(mailTable, toUser, rest, api.MailToUserHeading(len(toUser)), api.MailLogHeading)
 	// The window is not the history: a list that stopped at its rows would present the recent end as
 	// everything, and finding last month's message is the whole reason nothing is deleted. Outside the
 	// labelled rows, since it is a note about the listing rather than a message in it.

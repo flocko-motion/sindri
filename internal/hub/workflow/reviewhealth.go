@@ -42,10 +42,10 @@ func (e *Engine) RepairReviewRows(project string) {
 	}
 }
 
-// AssignPendingReviews hands out the review rows nobody claimed. The only thing that ever claimed
-// one was a reviewer choosing to ask (-> reviewDirective), which rested on a message injected
-// mid-turn, where it lands in the input box and dies unsent — so a reviewer sat idle beside a PR
-// waiting on it. The hub assigns it here instead, and only to a reviewer at an idle prompt.
+// AssignPendingReviews hands out the review rows nobody claimed. `sindri` answers a reviewer's own
+// ask at once (-> reviewDirective), but one that stopped asking would otherwise sit idle beside a
+// PR waiting on it until it happened to ask again — so the hub claims it here instead, periodically,
+// for whichever reviewer is genuinely at an idle prompt to receive it.
 func (e *Engine) AssignPendingReviews(project string) {
 	ps := e.store.For(project)
 	// Each assignment spends a reviewer, so the loop drains as many rows as there are idle ones.

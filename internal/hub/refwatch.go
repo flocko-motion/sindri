@@ -114,6 +114,7 @@ func (r *refwatch) preflight(projects []store.Project) {
 			r.h.wf.CheckOpenPRs(p.Tag)
 			r.h.wf.RepairReviewRows(p.Tag)
 			r.h.wf.AssignPendingReviews(p.Tag) // after the repair: a row it just wrote is claimable now
+			r.h.wf.AssignPendingWork(p.Tag)    // its worker-side twin, for the idle backlog claim
 			// A clear is armed regardless of whether any assignment ever triggers it, so an agent
 			// that never asks again still needs a backstop — unlike compact and model-select, which
 			// the gate now fires inline the moment it has an assignment to prepare for, this has no

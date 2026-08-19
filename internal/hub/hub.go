@@ -180,6 +180,23 @@ func (h *Hub) NewAgent(project, name, role, memory string) (string, error) {
 	return h.agents.NewAgent(project, name, role, memory)
 }
 
+// SetRetired winds an agent down, or brings it back — the flag itself is hub/agent's, but the seam
+// belongs here: DirRetired sends a retired agent away from ever asking again, so the only channel
+// that would reveal a real return to service is this push (hub/agent's Deps has no Deliver).
+func (h *Hub) SetRetired(project, name string, retired bool) error {
+	was := false
+	if a, ok, _ := h.store.For(project).GetAgent(name); ok {
+		was = a.Retired
+	}
+	if err := h.agents.SetRetired(project, name, retired); err != nil {
+		return err
+	}
+	if was && !retired {
+		return h.Deliver(project, name, workflow.MsgUnretired, workflow.MailAndPush)
+	}
+	return nil
+}
+
 // rehydrate injects one kickoff so a (re)launched agent asks the hub for work: AgentDirective is
 // idempotent and state-driven, so new and resuming agents alike land on their current job (D13).
 func (h *Hub) rehydrate(project, name string) {

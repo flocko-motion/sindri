@@ -211,12 +211,7 @@ func openIDs(tasks []store.Task) []string {
 // compaction to run against it. With none open, the feature is finished or still gated.
 func (e *Engine) claimNextSubtask(project, agent, container string) (string, bool, error) {
 	if e.clearArmed(project, agent) {
-		return "", false, nil // about to land (fired by the caller): a subtask claimed now would be cut in half by it
-	}
-	if d, has, err := e.pendingMail(project, agent); err != nil { // before the claim below, nothing to defer past yet
-		return "", false, err
-	} else if has {
-		return d, true, nil
+		return DirClearPending, true, nil // about to land: a subtask claimed now would be cut in half by it
 	}
 	child, advanced, err := e.advanceContainer(project, agent, container)
 	if err != nil {
@@ -228,7 +223,10 @@ func (e *Engine) claimNextSubtask(project, agent, container string) (string, boo
 			return "", false, err
 		}
 		if len(gated) > 0 {
-			return "", false, nil // awaiting a verdict elsewhere in the tree — woken by its Notify
+			// false, not true: nothing was claimed, same as claimNext's own "nothing for you" — the
+			// distinction assignPendingSubtask (task.go) depends on to tell a real hand-over from a
+			// repeat of the same wait.
+			return ReplyFeatureGated(container, openIDs(gated)), false, nil
 		}
 		return DirContainerDone(container), true, nil
 	}

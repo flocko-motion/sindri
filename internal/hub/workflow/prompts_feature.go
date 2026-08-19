@@ -86,11 +86,12 @@ func ReplyCheckpointedParentOpen(done string, children []string, next, nextTitle
 }
 
 // ReplyFeatureGated refuses to call a feature finished while work under it awaits the user: that
-// work is undone, merely absent from the queries that hand work out. Waiting is the whole answer.
+// work is undone, merely absent from the queries that hand work out. Waiting is the whole answer —
+// also used standalone as the directive `sindri` itself returns while this holds (-> claimNextSubtask).
 func ReplyFeatureGated(container string, gated []string) string {
 	return fmt.Sprintf("Feature %s isn't finished: %s under it %s awaiting the user's approval, so "+
-		"that is work still to do rather than work you have done. Run `sindri` — it waits until the "+
-		"user rules, then hands you the subtask (or the finished feature).",
+		"that is work still to do rather than work you have done. You'll be pushed a wake once the "+
+		"user rules — asking again meanwhile just reads the same wait.",
 		container, FileList(gated), plural(len(gated), "is", "are"))
 }
 

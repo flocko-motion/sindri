@@ -6,18 +6,29 @@
 // limits:  pure strings; the mailbox is the store's and the classification the sender's.
 package workflow
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
 
-// DirUnreadMail is the answer to `sindri` while mail is waiting. It REPLACES the ordinary directive
-// rather than sitting beside it, because mail is one-shot consequence — a verdict, a cancellation, an
-// edit to the task in hand — and any of those can change what the next action should be. Reading
-// first and asking again is therefore the correct order, not an extra round trip.
-func DirUnreadMail(n int) string {
-	return fmt.Sprintf("[hub] You have %d unread message(s) — things you must read, kept for you "+
-		"however busy or away you were when they were sent. Run `sindri mail` to read them (that "+
-		"marks them read; nothing is deleted), then `sindri` again for your next action. Read them "+
-		"first: a verdict, a cancellation or an edit to the task you hold can change what that action "+
-		"is, which is why they are not simply pushed at you and hoped for.", n)
+	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/hub/store"
+)
+
+// DirMail is unread mail served AHEAD of the rest of `sindri`'s answer (-> Engine.serveMail), which
+// is what marks it read: the ask itself is the reading, so there is nothing left to run and nothing
+// to divert to. Oldest first, the order the messages make sense in.
+func DirMail(msgs []store.Mail) string {
+	var b strings.Builder
+	if len(msgs) == 1 {
+		b.WriteString("[hub] One message was waiting — reading it is this:\n\n")
+	} else {
+		fmt.Fprintf(&b, "[hub] %d messages were waiting — reading them is this:\n\n", len(msgs))
+	}
+	for _, m := range msgs {
+		fmt.Fprintf(&b, "— %s from %s:\n%s\n\n", api.MailID(m.ID), dash(m.Sender), strings.TrimRight(m.Body, "\n"))
+	}
+	b.WriteString("Your actual directive follows.\n\n")
+	return b.String()
 }
 
 // ReplyNoMail answers `mail` with an empty mailbox. It says what the mailbox IS, since "no messages"

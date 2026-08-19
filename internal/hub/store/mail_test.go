@@ -56,6 +56,31 @@ func TestReadingMailMARKSIt(t *testing.T) {
 	}
 }
 
+// TestUnannouncedMailSkipsALandedPush: a message delivered as mail-and-push already reached the
+// agent's pane, so counting it toward "unannounced" would nudge a second notification about
+// something already sitting there — pushed and notified are two different questions, and either
+// one answering "yes" is enough to skip it.
+func TestUnannouncedMailSkipsALandedPush(t *testing.T) {
+	s := mailStore(t)
+	ps := s.For("proj")
+	if _, err := ps.AddMail("dvalin", "hub", "already pushed", true, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ps.AddMail("dvalin", "hub", "never pushed", false, 0); err != nil {
+		t.Fatal(err)
+	}
+	unannounced, unread, err := ps.UnannouncedMail("dvalin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unread != 2 {
+		t.Errorf("unread = %d, want 2 — both messages are still unread", unread)
+	}
+	if unannounced != 1 {
+		t.Errorf("unannounced = %d, want 1 — the pushed one already reached the pane", unannounced)
+	}
+}
+
 // TestMailIsFleetWideAndNewestFirst: the view spans agents and repos, which is what makes it a Mail
 // section rather than a second per-agent timeline.
 func TestMailIsFleetWideAndNewestFirst(t *testing.T) {

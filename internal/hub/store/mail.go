@@ -95,11 +95,11 @@ func (p *ProjectStore) UnreadMail(agent string) ([]Mail, error) {
 
 // UnannouncedMail is what a nudge would be ABOUT: how many messages an agent has neither read nor been
 // told about, and the whole unread count to say it with — a count, not the rows, since one nudge covers
-// all of it. Per message rather than a dwell timer or the newest id, so a restart, or an agent quiet for
-// an hour, announces nothing a second time.
+// all of it. Per message rather than a dwell timer or the newest id, so a restart, an agent quiet for an
+// hour, or a message already pushed to its pane, announces nothing a second time.
 func (p *ProjectStore) UnannouncedMail(agent string) (unannounced, unread int, err error) {
 	err = p.s.db.QueryRow(
-		`SELECT COUNT(*), COALESCE(SUM(notified = 0), 0) FROM mail WHERE project=? AND agent=? AND read_at=''`,
+		`SELECT COUNT(*), COALESCE(SUM(notified = 0 AND pushed = 0), 0) FROM mail WHERE project=? AND agent=? AND read_at=''`,
 		p.project, agent).Scan(&unread, &unannounced)
 	if err != nil {
 		return 0, 0, fmt.Errorf("unannounced mail for %s: %w", agent, err)

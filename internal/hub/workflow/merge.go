@@ -193,7 +193,8 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 	_ = ps.SetState(store.AgentState{Agent: pr.Agent, Phase: rest})
 	_ = ps.Log(pr.Agent, "merged", prID)
 	_ = ps.LogPR(prID, "merged", "into "+pr.Base)
-	_ = e.deps.Deliver(project, pr.Agent, MsgMerged(prID), MailAndPush)
+	// No message: the task left pr.Agent's hands the moment it submitted. Silence is the successful
+	// outcome; nudgeIdleWorkers is what tells it once there is new work to pick up.
 	e.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
 	e.deps.Notify()
 	return pr, nil
@@ -207,14 +208,17 @@ func (e *Engine) finishPartialMerge(project string, pr store.PR, onFeature bool)
 		_ = ps.Log(pr.Agent, "merged", pr.ID+" (milestone)")
 		_ = ps.LogPR(pr.ID, "merged", "milestone into "+pr.Base)
 		e.resumeContainer(project, pr.Agent)
-		_ = e.deps.Deliver(project, pr.Agent, MsgMilestoneMerged(pr.ID), MailAndPush)
+		// Push only: the agent resumes the same feature it never left, which its own directive
+		// already says — nothing here needs to survive being read late.
+		_ = e.deps.Deliver(project, pr.Agent, MsgMilestoneMerged(pr.ID), PushOnly)
 	} else {
 		// Phase only: promoteToFeature only promotes a "working" agent, so this one never picked up
 		// a container while its interim PR was out.
 		_ = ps.SetPhase(pr.Agent, "working")
 		_ = ps.Log(pr.Agent, "merged", pr.ID+" (interim)")
 		_ = ps.LogPR(pr.ID, "merged", "interim contribution into "+pr.Base)
-		_ = e.deps.Deliver(project, pr.Agent, MsgContributionMerged(pr.ID, pr.Task), MailAndPush)
+		// Push only, same reason: it resumes the same task, which its directive already says.
+		_ = e.deps.Deliver(project, pr.Agent, MsgContributionMerged(pr.ID, pr.Task), PushOnly)
 	}
 	e.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
 	e.deps.Notify()

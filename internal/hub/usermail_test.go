@@ -30,13 +30,17 @@ func TestAUsersMailWaitsAndDoesNotPush(t *testing.T) {
 	if !strings.HasPrefix(unread[0].Body, "[user] ") {
 		t.Errorf("the body should carry the provenance tag the agent reads: %q", unread[0].Body)
 	}
-	// And the agent is told at its next ask, which is what "it will be read" means in practice.
+	// And the agent is told at its next ask, served inline — which is what "it will be read" means
+	// in practice, and the ask itself is what marks it read.
 	dir, err := h.wf.AgentDirective(t.Context(), testProject, "dvalin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(dir, "unread") {
-		t.Errorf("the directive should announce it: %q", dir)
+	if !strings.Contains(dir, "note that the base moved") {
+		t.Errorf("the directive should carry the message itself: %q", dir)
+	}
+	if again, err := ps.UnreadMail("dvalin"); err != nil || len(again) != 0 {
+		t.Errorf("asking for the directive should have marked it read, got %+v (err %v)", again, err)
 	}
 }
 

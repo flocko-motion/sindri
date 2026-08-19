@@ -125,7 +125,15 @@ func TestTheRejectionSaysWhoRejectedIt(t *testing.T) {
 	if mail[0].Sender != api.SenderUser {
 		t.Errorf("a human rejection is from the user, got %q", mail[0].Sender)
 	}
-	if !strings.Contains(mail[0].Body, "the gate is missing") {
-		t.Errorf("the feedback should travel with it: %q", mail[0].Body)
+	// A pointer, not a third copy of the feedback: pr.Feedback is canonical, and DirRejected already
+	// re-serves it verbatim on every ask while the PR stays rejected.
+	if strings.Contains(mail[0].Body, "the gate is missing") {
+		t.Errorf("mail should point at `sindri`, not duplicate the feedback: %q", mail[0].Body)
+	}
+	if !strings.Contains(mail[0].Body, "sindri") {
+		t.Errorf("mail should point the reader at `sindri` for the feedback: %q", mail[0].Body)
+	}
+	if pr, _, _ := ps.GetPR("pr-td-1"); pr.Feedback != "the gate is missing" {
+		t.Errorf("the canonical feedback should live on the PR, got %q", pr.Feedback)
 	}
 }

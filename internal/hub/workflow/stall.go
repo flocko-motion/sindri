@@ -16,10 +16,20 @@ const StallDwell = 3 * time.Minute
 // pane STATES the failure, and long enough only that a retry already in flight finishes first.
 const RetryDwell = time.Minute
 
-// parkedByTheHub reports whether an agent is idle because it was told to be — retired by a human, or
-// by its own context filling. Both are wound down deliberately (-> claimNext).
+// parkedByTheHub reports whether an agent is idle because it was told to be — retired by a human,
+// its own context filling, or a feature worker between subtasks with the next one gated on the
+// user. All three are wound down deliberately (-> claimNext, claimNextSubtask), so prodding any of
+// them complains about the one state the hub deliberately put the agent in.
 func (e *Engine) parkedByTheHub(project, name string) bool {
-	return e.retired(project, name) || e.ContextFull(project, name)
+	if e.retired(project, name) || e.ContextFull(project, name) {
+		return true
+	}
+	st, err := e.store.For(project).GetState(name)
+	if err != nil || st.Container == "" || st.Task != "" || st.Phase != "idle" {
+		return false
+	}
+	gated, err := e.gatedUnder(project, st.Container)
+	return err == nil && len(gated) > 0
 }
 
 // Stalled reports whether an agent holds work it has stopped doing. The evidence is the SCREEN

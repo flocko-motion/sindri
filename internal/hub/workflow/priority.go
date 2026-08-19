@@ -27,7 +27,7 @@ func (e *Engine) SetPriority(project, id, priority string, scope api.PrioritySco
 	e.deps.Notify()
 	// Rating an unrated task is the moment it becomes claimable, so it needs the same nudge as a task
 	// created with a priority. ONE, however far the cascade reached: it only has to wake a worker up.
-	e.nudgeIdleWorkers(project, id, priority)
+	e.nudgeIdleWorkers(project, priority)
 	return nil
 }
 

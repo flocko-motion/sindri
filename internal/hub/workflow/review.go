@@ -194,12 +194,6 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 			return "", false, err
 		}
 		if ok && pr.Status == "open" {
-			// Holding a review is holding something, so mail outranks it as everywhere else.
-			if d, has, err := e.pendingMail(project, name); err != nil {
-				return "", false, err
-			} else if has {
-				return d, true, nil
-			}
 			return DirReview(pr.ID, pr.Task, e.taskTitle(project, pr.Task), pr.Agent, e.deps.ArchitectureDoc(project)), true, nil
 		}
 		// Settled while it was reading: a verdict on it now decides nothing, so the hold is released
@@ -217,12 +211,8 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 		return "", false, err
 	}
 	if !found {
-		if d, has, err := e.pendingMail(project, name); err != nil { // blocking, not boundary: no op to wait out
-			return "", false, err
-		} else if has {
-			return d, true, nil
-		}
-		return "", false, nil
+		// `sindri` answers at once: AssignPendingReviews pushes a wake once a review is claimable.
+		return DirNoReviews, true, nil
 	}
 	// An armed clear preempts the claim below, same reason claimNext's own check does: firing it now,
 	// eagerly, rather than leaving it to the fleet-wide sweep, matches how a worker's own ask does
@@ -231,12 +221,7 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 		if err := e.deps.FireClear(project, name); err != nil {
 			return "", false, err
 		}
-		return "", false, nil // about to land: a review claimed now would be cut in half by it
-	}
-	if d, has, err := e.pendingMail(project, name); err != nil {
-		return "", false, err
-	} else if has {
-		return d, true, nil
+		return DirClearPending, true, nil // about to land: a review claimed now would be cut in half by it
 	}
 	// Claim FIRST — same reason claimNext claims before it prepares: once the review is the
 	// reviewer's, no return in the middle is needed for compaction (a review has no tier, so no

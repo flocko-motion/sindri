@@ -98,9 +98,8 @@ func (d *stubDeps) AddTaskComment(_, id, author, body string) error {
 	d.posted = append(d.posted, store.Comment{SourceRef: id, Author: author, Body: body})
 	return nil
 }
-func (d *stubDeps) Subscribe() (chan struct{}, func()) { return make(chan struct{}), func() {} }
-func (d *stubDeps) KnownProjects() []store.Project     { return d.projects }
-func (d *stubDeps) BrokkrBin() (string, error)         { return "", nil }
+func (d *stubDeps) KnownProjects() []store.Project { return d.projects }
+func (d *stubDeps) BrokkrBin() (string, error)     { return "", nil }
 func (d *stubDeps) ContextUsage(_, _ string) (int, int, string, bool) {
 	return d.ctxTokens, d.ctxWindow, "", d.ctxOK
 }

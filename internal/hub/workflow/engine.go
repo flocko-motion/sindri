@@ -63,9 +63,6 @@ type Deps interface {
 	TaskComments(project, id string) []store.Comment
 	// AddTaskComment posts on a task's thread as author — TaskComments' write half.
 	AddTaskComment(project, id, author, body string) error
-	// Subscribe returns a change-notification channel and an unsubscribe func — how
-	// the directive loop waits for work.
-	Subscribe() (chan struct{}, func())
 	// KnownProjects returns the registered repos (for fleet-wide PR listing).
 	KnownProjects() []store.Project
 	// BrokkrBin locates the brokkr toolbelt binary (the lint gate shells out to it).
@@ -132,7 +129,8 @@ type Engine struct {
 // New builds the workflow engine over the hub's store, its Deps, and the external task sources the
 // composition root wires in — the engine never names them.
 func New(st *store.Store, deps Deps, sources ...tasks.Source) *Engine {
-	return &Engine{store: st, deps: deps, sources: sources, pre: preflight{seen: map[string]string{}}, refWarn: refFallbackWarn{seen: map[string]bool{}}}
+	return &Engine{store: st, deps: deps, sources: sources, pre: preflight{seen: map[string]string{}},
+		refWarn: refFallbackWarn{seen: map[string]bool{}}}
 }
 
 // WithGates installs the submit path's quality gates, chainable alongside New. An engine with
