@@ -116,9 +116,8 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		if pr == "" {
 			pr, _ = ps.ReviewingPR(a.Name)
 		}
-		holds := st.Task != "" || st.Container != "" || pr != ""
 		l := obs[i]
-		status := overlayRuntime(h.agents.AgentStatus(a.Project, a.Name, l.up, observed[i], st.Phase, a.Stopped), l.runtime, holds)
+		status := overlayRuntime(h.agents.AgentStatus(a.Project, a.Name, l.up, observed[i], st.Phase, a.Stopped), l.runtime)
 		// A stall reads as plain "idle" otherwise, which is what let one hold a task unnoticed.
 		if _, stalled := h.stalledFor(a.Project, a.Name, st.Phase, st.Container); stalled {
 			status = "stalled"
@@ -326,8 +325,9 @@ func (h *Hub) container(project, name string) string {
 // overlayRuntime folds Claude's live runtime into the workflow status: "signed-out" = unreachable
 // until a human acts, "blocked" = needs you now (any phase), "working" = busy, "idle" = nothing
 // doing. It replaces a plain working/idle phase but keeps the meaningful ones; runtime "" (probe
-// failed) changes nothing. holds says whether the agent has work in hand.
-func overlayRuntime(status, runtime string, holds bool) string {
+// failed) changes nothing. Idleness is what the pane shows, not what the workflow holds — "working,
+// holding nothing" is honest, and what is held is the separate column the board already shows.
+func overlayRuntime(status, runtime string) string {
 	switch runtime {
 	case "signed-out":
 		// Outranks every phase: whatever was asked of it, nothing is happening and nothing can reach it.
@@ -339,12 +339,6 @@ func overlayRuntime(status, runtime string, holds bool) string {
 		// that was doing it is dead. The hub retries, and the word says why it went quiet meanwhile.
 		return "api-error"
 	case "working", "idle":
-		// A pane in motion is not work in hand. An agent reading a broadcast, or answering the user,
-		// moves its screen while holding nothing — and "working" is a claim about the workflow, so
-		// against an empty task column it states something that cannot be true.
-		if runtime == "working" && !holds {
-			return status
-		}
 		if status == "working" || status == "idle" {
 			return runtime
 		}
