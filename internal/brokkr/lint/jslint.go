@@ -1,8 +1,8 @@
 // package: lint / jslint
 // type:    logic (delegating to the JS/TS toolchain)
-// job:     run the project's OWN TypeScript/JavaScript checks — `tsc --noEmit` and eslint —
-// when the repo has them, and say so loudly when a JS/TS project has neither, so a
-// green `brokkr lint` never stands for an unchecked front end.
+// job:     run each JS/TS project's OWN checks (tsc --noEmit, eslint) when configured.
+// Reports whether it WAS ABLE to check: a tool missing skips, a config missing
+// is still a finding.
 // limits:  shells out and relays; brokkr's own rules (headers, length, comment trend) are the
 // other files' work.
 package lint
@@ -33,7 +33,8 @@ var (
 )
 
 // JSLint runs each JS/TS project's OWN checks, so brokkr never disagrees with the editor and CI.
-// Source with NO tool above it is itself a finding: a green gate must not mean tsc never ran.
+// Source with NO tool configured above it is still a finding — that is a project decision the
+// project can act on, unlike a configured tool that just isn't installed here.
 func JSLint(root string, ig *Ignore, w io.Writer) (bool, error) {
 	if root == "" {
 		root = "."
@@ -151,13 +152,15 @@ func sortedKeys(m map[string]int) []string {
 	return out
 }
 
-// runJSTool runs one delegated tool and relays its output. Configured but not installed is a
-// failure: the config promises a check the repo cannot perform.
+// runJSTool runs one delegated tool and relays its output. Configured but not installed is a skip,
+// like every other optional delegate — a gate tree is a fresh checkout with node_modules gitignored,
+// so a project's own tool is never there to install into it.
 func runJSTool(root string, w io.Writer, label string, bin string, args ...string) bool {
 	cmd, how := jsCommand(root, bin, args...)
 	if cmd == nil {
-		fmt.Fprintf(w, "js/%s: configured, but %s is not installed — %s\n", label, bin, missingToolAdvice(root, bin))
-		return true
+		fmt.Fprintf(w, "js/%s: %s configured but not installed — skipping (optional)\n", label, bin)
+		fmt.Fprintf(w, "    hint: %s\n", missingToolHint(bin))
+		return false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), jsToolTimeout)
 	defer cancel()
@@ -183,24 +186,30 @@ func runJSTool(root string, w io.Writer, label string, bin string, args ...strin
 	return true
 }
 
-// toolPackage is the npm package that provides a binary, for advice that names what to install.
-var toolPackage = map[string]string{"tsc": "typescript", "eslint": "eslint"}
+// toolPackage is the npm package that provides a binary, and toolAction what running it checks —
+// together they name what a hint says would start working.
+var (
+	toolPackage = map[string]string{"tsc": "typescript", "eslint": "eslint"}
+	toolAction  = map[string]string{"tsc": "the type-check", "eslint": "the lint"}
+)
 
-// missingToolAdvice probes what is actually present before advising, since "run `npm install`" is
-// wrong when there is no node at all and useless when node_modules is already populated.
-func missingToolAdvice(root, bin string) string {
+// missingToolHint says what installing would BUY, not what to run: the same words as an imperative
+// sent dvalin looking for a way to install into a gate tree that gets thrown away every run. Only
+// two cases, not the three missingToolAdvice used to probe: with node present, "no node_modules"
+// and "node_modules without the binary" both buy the same gain, so they collapse into one line.
+func missingToolHint(bin string) string {
 	pkg := toolPackage[bin]
 	if pkg == "" {
 		pkg = bin
 	}
+	action := toolAction[bin]
+	if action == "" {
+		action = "the check"
+	}
 	if _, err := exec.LookPath("node"); err != nil {
-		return "node itself is not on PATH, so no JS tooling can run here — install Node.js, then `npm install`."
+		return fmt.Sprintf("installing Node.js and %s here would let %s run.", pkg, action)
 	}
-	if _, err := os.Stat(filepath.Join(root, "node_modules")); err != nil {
-		return fmt.Sprintf("no node_modules here yet — run `npm install` in this project, or `npm install -D %s` if it isn't a dependency.", pkg)
-	}
-	// Dependencies are installed yet the binary is absent, so it was never declared.
-	return fmt.Sprintf("node_modules is present but has no %s — add it with `npm install -D %s`.", bin, pkg)
+	return fmt.Sprintf("install %s here and %s runs.", pkg, action)
 }
 
 // jsCommand prefers the repo's pinned tool, then a global one, nil if neither. Never `npx`: on the
