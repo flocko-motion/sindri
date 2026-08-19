@@ -33,7 +33,7 @@ func (h *Hub) registry() *registry.Registry {
 	return registry.New(
 		registry.Command{Name: "status", Help: "show who you are and your current state", Run: h.cmdStatus},
 		registry.Command{Name: "log", Help: "record a note in your activity log: log <message>", Run: h.cmdLog},
-		registry.Command{Name: "prs", Help: "list pull requests and their status", Run: h.cmdListPRs},
+		registry.Command{Name: "prs", Help: "list pull requests and their status — your own if you're a worker, the whole project otherwise; the 10 most recent active ones, `--limit N` to widen", Run: h.cmdListPRs},
 		registry.Command{Name: "show", Help: "show a PR's diff: show <pr-id>; or a run's status and output: show <run-id>", Run: h.wf.CmdShow},
 		// Only a worker grabs tasks and submits a branch. A planner has neither: it ships openspec
 		// via its own `openspec submit`, a PR in different dress (mock todo id os-new).
@@ -466,26 +466,6 @@ func (h *Hub) cmdComment(c registry.Caller, args []string, out io.Writer) (int, 
 		}
 	}
 	fmt.Fprintf(out, "commented on %s%s\n", id, which)
-	return 0, nil
-}
-
-func (h *Hub) cmdListPRs(c registry.Caller, _ []string, out io.Writer) (int, error) {
-	ps := h.store.For(c.Project)
-	prs, err := ps.PRs()
-	if err != nil {
-		return 1, err
-	}
-	if len(prs) == 0 {
-		fmt.Fprintln(out, "no PRs")
-		return 0, nil
-	}
-	counts, err := ps.ApprovalCounts()
-	if err != nil {
-		return 1, err
-	}
-	for _, p := range prs {
-		fmt.Fprintf(out, "%-14s %-14s %-10s %s\n", p.ID, api.StatusLabel(p.Status, counts[p.ID]), p.Agent, p.Branch)
-	}
 	return 0, nil
 }
 
