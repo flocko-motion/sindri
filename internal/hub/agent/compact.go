@@ -1,24 +1,19 @@
 // package: hub/agent / compact
 // type:    logic (automatic context compaction)
-// job:     fire Claude Code's own /compact into an agent's session at a leaf boundary, keeping a
-// summary and dropping the transcript — the workflow engine's assignment gate (already holding the
-// claim, -> workflow.Engine.prepareAssignment) decides when and for whom; this only performs it.
+// job:     fire Claude Code's own /compact at a leaf boundary, then queue what to do once it
+// lands — the assignment gate decides when, for whom, and with what; this only performs it.
 // limits:  the session, once; never the pod, worktree, or task queue, and never a second look at
 // whether it landed below whatever threshold triggered it — that judgment is compactDue's, not
 // this call's.
 package agent
 
-import (
-	"fmt"
+import "fmt"
 
-	"github.com/flo-at/sindri/internal/hub/workflow"
-)
-
-// Compact sends /compact into name's live session, then a kickoff to re-ask. Mirrors fireClear's
-// mechanics — the boundary check, the liveness check, forgetting the stale reading — but queues
-// rather than interrupts, so the claim's own directive already answers this ask, and the queued
-// /compact+kickoff behind it just re-confirms it once it lands.
-func (s *Service) Compact(project, name string) error {
+// Compact sends /compact into name's live session, then queues next behind it — the real
+// instruction, not a generic re-ask, so nothing is handed to the agent until it is safe to act on.
+// Mirrors fireClear's mechanics (boundary check, liveness check, forgetting the stale reading) but
+// queues rather than interrupts.
+func (s *Service) Compact(project, name, next string) error {
 	at, err := s.AtLeafBoundary(project, name)
 	if err != nil {
 		return err
@@ -34,7 +29,7 @@ func (s *Service) Compact(project, name string) error {
 	if err := s.Inject(project, name, "/compact"); err != nil {
 		return err
 	}
-	if err := s.Inject(project, name, workflow.MsgKickoff); err != nil {
+	if err := s.Inject(project, name, next); err != nil {
 		return err
 	}
 	// Before the log line and the notify, not after: a reader of either must see the size compaction

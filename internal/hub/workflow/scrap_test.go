@@ -40,14 +40,15 @@ type stubDeps struct {
 	currentModel     string                     // CurrentModel's answer; "" is fine — no real model is ever ""
 	// tierModels overrides ModelForTier's answer; nil (the default) means every tier is unknown, so
 	// the retier check never fires for a test that has not opted into it.
-	tierModels   map[string]string
-	modelSet     []string // "name=model" for every SetModel call, in order
-	setModelErr  error
-	holdsNothing bool
-	compacted    []string // agents Compact was called for, in order
-	compactErr   error
-	cleared      []string // agents FireClear was called for, in order
-	fireClearErr error
+	tierModels    map[string]string
+	modelSet      []string // "name=model" for every SetModel call, in order
+	setModelErr   error
+	holdsNothing  bool
+	compacted     []string // agents Compact was called for, in order
+	compactedWith []string // the "next" text passed alongside each, in step with compacted
+	compactErr    error
+	cleared       []string // agents FireClear was called for, in order
+	fireClearErr  error
 	// projectConfig overrides ProjectConfig's answer; the zero value (no lint.max_comment_avg set)
 	// means the caller sees no override, same as an unconfigured project.
 	projectConfig    config.Config
@@ -117,8 +118,9 @@ func (d *stubDeps) SetModel(_, name, model string) error {
 
 func (d *stubDeps) HoldsNothing(_, _, _ string) (bool, error) { return d.holdsNothing, nil }
 
-func (d *stubDeps) Compact(_, name string) error {
+func (d *stubDeps) Compact(_, name, next string) error {
 	d.compacted = append(d.compacted, name)
+	d.compactedWith = append(d.compactedWith, next)
 	return d.compactErr
 }
 

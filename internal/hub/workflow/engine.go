@@ -82,9 +82,9 @@ type Deps interface {
 	// SetModel changes the model an agent runs on — clearing and relaunching it if running, since
 	// the session belongs to its old model and cannot cross onto the new one.
 	SetModel(project, name, model string) error
-	// Compact fires Claude Code's own /compact at a leaf boundary — the gate's decision, this only
-	// performs it, once, never checking whether it landed below the threshold that triggered it.
-	Compact(project, name string) error
+	// Compact fires /compact at a leaf boundary then queues next behind it, once, never checking
+	// whether it landed below the threshold that triggered it.
+	Compact(project, name, next string) error
 	// BeginAssignment marks an agent mid the preparation after a fresh claim, so AtLeafBoundary
 	// admits it rather than refusing the step the gate is running. Paired with EndAssignment.
 	BeginAssignment(project, name string)
@@ -124,6 +124,7 @@ type Engine struct {
 	pre        preflight       // serialises the reference-move PR checks (-> prcheck.go)
 	runCancels runCancelSet    // run ids killed mid-execution (-> execrun.go)
 	refWarn    refFallbackWarn // which repo roots have already been warned about an unconfigured reference (-> pr.go)
+	kickoff    pendingKickoff  // the directive a model-switch's relaunch should wake into (-> kickoff.go)
 }
 
 // New builds the workflow engine over the hub's store, its Deps, and the external task sources the

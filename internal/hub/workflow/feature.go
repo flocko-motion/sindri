@@ -231,11 +231,16 @@ func (e *Engine) claimNextSubtask(project, agent, container string) (string, boo
 		}
 		return DirContainerDone(container), true, nil
 	}
-	if err := e.prepareAssignment(project, agent, api.TierOrDefault(child.Tier)); err != nil {
+	aim, ceiling := e.commentBudget(project)
+	dir := DirContainerWorking(container, child.ID, aim, ceiling)
+	fired, err := e.prepareAssignment(project, agent, api.TierOrDefault(child.Tier), dir)
+	if err != nil {
 		return "", false, err
 	}
-	aim, ceiling := e.commentBudget(project)
-	return DirContainerWorking(container, child.ID, aim, ceiling), true, nil
+	if fired {
+		return DirPreparing, true, nil
+	}
+	return dir, true, nil
 }
 
 // advanceContainer moves a held feature's agent onto its next open subtask: (subtask, true) when one

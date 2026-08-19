@@ -161,11 +161,17 @@ func TestMailOutranksCompactionOnAClaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if !strings.Contains(dir, "td-abc123") {
-		t.Errorf("directive = %q, want the task claimed now the mailbox is empty", dir)
+	if dir != DirPreparing {
+		t.Errorf("directive = %q, want DirPreparing — the claim fires the compaction it also triggers", dir)
+	}
+	if st, _ := ps.GetState("dvalin"); st.Task != "td-abc123" {
+		t.Errorf("state.Task = %q, want td-abc123 — claimed even though this ask doesn't say so", st.Task)
 	}
 	if len(deps.compacted) != 1 {
 		t.Errorf("compacted = %v, want exactly one fire, alongside the claim", deps.compacted)
+	}
+	if len(deps.compactedWith) != 1 || !strings.Contains(deps.compactedWith[0], "td-abc123") {
+		t.Errorf("compactedWith = %v, want the claimed directive queued behind /compact", deps.compactedWith)
 	}
 }
 
@@ -195,11 +201,17 @@ func TestMailOutranksAModelChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if !strings.Contains(dir, "td-abc123") {
-		t.Errorf("directive = %q, want the task claimed now the mailbox is empty", dir)
+	if dir != DirPreparing {
+		t.Errorf("directive = %q, want DirPreparing — the claim fires the model switch it also triggers", dir)
+	}
+	if st, _ := ps.GetState("dvalin"); st.Task != "td-abc123" {
+		t.Errorf("state.Task = %q, want td-abc123 — claimed even though this ask doesn't say so", st.Task)
 	}
 	if len(deps.modelSet) != 1 || deps.modelSet[0] != "dvalin=big-model" {
 		t.Errorf("modelSet = %v, want dvalin switched to big-model, alongside the claim", deps.modelSet)
+	}
+	if armed, ok := e.TakePendingKickoff("repo", "dvalin"); !ok || !strings.Contains(armed, "td-abc123") {
+		t.Errorf("TakePendingKickoff = (%q, %v), want the claimed directive armed for the relaunch", armed, ok)
 	}
 }
 
@@ -261,11 +273,17 @@ func TestMailOutranksCompactionBetweenSubtasks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if !strings.Contains(dir, "td-next") {
-		t.Errorf("directive = %q, want the next subtask claimed now the mailbox is empty", dir)
+	if dir != DirPreparing {
+		t.Errorf("directive = %q, want DirPreparing — the claim fires the compaction it also triggers", dir)
+	}
+	if held, _ := ps.GetState(agent); held.Task != "td-next" {
+		t.Errorf("state.Task = %q, want td-next — claimed even though this ask doesn't say so", held.Task)
 	}
 	if len(deps.compacted) != 1 {
 		t.Errorf("compacted = %v, want exactly one fire, alongside the claim", deps.compacted)
+	}
+	if len(deps.compactedWith) != 1 || !strings.Contains(deps.compactedWith[0], "td-next") {
+		t.Errorf("compactedWith = %v, want the next-subtask directive queued behind /compact", deps.compactedWith)
 	}
 }
 
@@ -334,10 +352,16 @@ func TestMailOutranksCompactionOnAReviewClaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if !strings.Contains(dir, "pr-1") {
-		t.Errorf("directive = %q, want the review claimed now the mailbox is empty", dir)
+	if dir != DirPreparing {
+		t.Errorf("directive = %q, want DirPreparing — the claim fires the compaction it also triggers", dir)
+	}
+	if held, _ := ps.ReviewingPR("rune"); held != "pr-1" {
+		t.Errorf("ReviewingPR = %q, want pr-1 — claimed even though this ask doesn't say so", held)
 	}
 	if len(deps.compacted) != 1 {
 		t.Errorf("compacted = %v, want exactly one fire, alongside the claim", deps.compacted)
+	}
+	if len(deps.compactedWith) != 1 || !strings.Contains(deps.compactedWith[0], "pr-1") {
+		t.Errorf("compactedWith = %v, want the review directive queued behind /compact", deps.compactedWith)
 	}
 }

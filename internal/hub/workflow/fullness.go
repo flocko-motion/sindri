@@ -25,34 +25,33 @@ func (e *Engine) contextFull(project, worker string) (tokens int, full bool) {
 }
 
 // compactDue is fill past CompactionThreshold's curve, far below ContextFullFraction — a trigger,
-// not a gate: whether firing gets the agent back under it is not this function's business, or
-// compactIfDue's either (-> ContextFullFraction, the actual hard stop).
+// not the hard stop ContextFullFraction is.
 func (e *Engine) compactDue(project, worker string) (tokens int, due bool) {
 	tokens, window, _, ok := e.deps.ContextUsage(project, worker)
 	return tokens, ok && window > 0 && tokens >= e.deps.CompactionThreshold(window)
 }
 
-// compactIfDue fires a due compaction — once, no retry, no re-reading the result to judge whether
-// it "worked". A summary this far below the fullness gate may well still read due afterward; success
-// isn't this call's to test, or a later claim's flag to skip past instead of firing again.
-func (e *Engine) compactIfDue(project, agent string) error {
+// compactIfDue fires a due compaction once, queuing dir — the real instruction — behind it, so the
+// agent is never handed dir to act on and then cut off by the compaction that follows.
+func (e *Engine) compactIfDue(project, agent, dir string) (fired bool, err error) {
 	if _, due := e.compactDue(project, agent); !due {
-		return nil
+		return false, nil
 	}
-	return e.deps.Compact(project, agent)
+	return true, e.deps.Compact(project, agent, dir)
 }
 
 // prepareAssignment runs an already-claimed assignment's preparation: a model switch the tier
-// wants, else compaction if due (never both — SetModel clears the old session itself, -> agent.
-// Service.SetModel). Bracketed by BeginAssignment/EndAssignment so AtLeafBoundary admits the claim
-// just written, rather than refusing the preparation the gate is now running against its own guard.
-func (e *Engine) prepareAssignment(project, agent, tier string) error {
+// wants, else compaction if due, bracketed so AtLeafBoundary admits the claim just written. fired
+// means the caller answers DirPreparing, not dir — dir is delivered by whatever fired instead.
+func (e *Engine) prepareAssignment(project, agent, tier, dir string) (fired bool, err error) {
 	e.deps.BeginAssignment(project, agent)
 	defer e.deps.EndAssignment(project, agent)
 	if want, known := e.deps.ModelForTier(tier); known && want != e.deps.CurrentModel(project, agent) {
-		return e.deps.SetModel(project, agent, want)
+		// The relaunch kills this reply regardless — dir is armed as its kickoff instead (-> kickoff.go).
+		e.kickoff.arm(project, agent, dir)
+		return true, e.deps.SetModel(project, agent, want)
 	}
-	return e.compactIfDue(project, agent)
+	return e.compactIfDue(project, agent, dir)
 }
 
 // ContextFull is contextFull's bool half, for the board's status word.

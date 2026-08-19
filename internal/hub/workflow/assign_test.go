@@ -146,8 +146,10 @@ func TestAnIdleWorkerTakesTheCriticalTaskOverAMidPackage(t *testing.T) {
 // TestAMismatchedTaskChangesTheModelThenHandsItOver: the model change clears and restarts the
 // worker on its own (-> agent.Service.SetModel) — a fact the worker can neither act on nor verify,
 // so it is not reported back as a directive. The claim itself only touches the store and the
-// worktree, neither tied to which pod is running, so it proceeds in the same call: the restarted
-// pod finds itself already on the task the moment it boots and asks fresh.
+// worktree, neither tied to which pod is running, so it proceeds in the same call: this ask
+// answers DirPreparing (its own reply is about to be killed by the restart regardless), and the
+// claimed directive is armed as the pending kickoff the restarted pod wakes into instead of a
+// generic one.
 func TestAMismatchedTaskChangesTheModelThenHandsItOver(t *testing.T) {
 	deps := &stubDeps{
 		alive:        true,
@@ -164,8 +166,8 @@ func TestAMismatchedTaskChangesTheModelThenHandsItOver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if !strings.Contains(dir, "td-abc123") {
-		t.Errorf("directive = %q, want the task claimed once the model change is done", dir)
+	if dir != DirPreparing {
+		t.Errorf("directive = %q, want DirPreparing — the model switch is about to relaunch the pod", dir)
 	}
 	if st, _ := ps.GetState("dvalin"); st.Task != "td-abc123" {
 		t.Errorf("state.Task = %q, want the mismatched task claimed", st.Task)
@@ -175,6 +177,9 @@ func TestAMismatchedTaskChangesTheModelThenHandsItOver(t *testing.T) {
 	}
 	if len(deps.compacted) != 0 {
 		t.Errorf("compacted = %v, want none — a model change clears rather than compacts", deps.compacted)
+	}
+	if armed, ok := e.TakePendingKickoff("repo", "dvalin"); !ok || !strings.Contains(armed, "td-abc123") {
+		t.Errorf("TakePendingKickoff = (%q, %v), want the claimed directive armed for the relaunch", armed, ok)
 	}
 }
 

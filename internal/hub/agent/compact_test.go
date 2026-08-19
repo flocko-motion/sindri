@@ -7,7 +7,6 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/agent/claude"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // compactFixture wires a service over a fake tmux backend and the real transcript reader (so
@@ -50,19 +49,20 @@ func TestCompactInjectsAndForgetsTheMemo(t *testing.T) {
 		t.Fatalf("ContextUsage = (%d, %v), want the pre-compaction reading", got, ok)
 	}
 
-	if err := s.Compact("proj", "durin"); err != nil {
+	if err := s.Compact("proj", "durin", "the claimed directive"); err != nil {
 		t.Fatalf("Compact: %v", err)
 	}
 
 	// Queued in order, never interrupted: the turn Compact is called from is the agent's own
 	// in-flight directive request, and an Escape here used to kill it before that reply landed
-	// (-> the regression this fixes). /compact runs first, then the re-ask picks the directive
-	// back up once Claude Code drains the queue behind the turn that is still finishing.
+	// (-> the regression this fixes). /compact runs first, then the caller's own next — its real
+	// instruction, not a generic re-ask — once Claude Code drains the queue behind the turn that
+	// is still finishing.
 	if f.interrupts != 0 {
 		t.Errorf("Compact must never interrupt — the in-flight turn is the one about to answer it, got %d escape(s)", f.interrupts)
 	}
-	if want := []string{"/compact", workflow.MsgKickoff}; len(f.sent) != len(want) || f.sent[0] != want[0] || f.sent[1] != want[1] {
-		t.Errorf("sent = %v, want %v in that order", f.sent, want)
+	if want := []string{"/compact", "the claimed directive"}; len(f.sent) != len(want) || f.sent[0] != want[0] || f.sent[1] != want[1] {
+		t.Errorf("sent = %v, want %v in that order — next must be what the caller passed, not a hardcoded kickoff", f.sent, want)
 	}
 
 	// The transcript compaction leaves behind is a fresh one — the memo must not serve the
@@ -82,7 +82,7 @@ func TestCompactRefusesMidTask(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := s.Compact("proj", "durin"); err == nil {
+	if err := s.Compact("proj", "durin", "next"); err == nil {
 		t.Error("Compact should have refused a worker mid-task")
 	}
 	for _, sent := range f.sent {

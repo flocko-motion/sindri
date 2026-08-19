@@ -245,14 +245,18 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 	if err := e.assignReview(project, id, prID, name, req); err != nil {
 		return "", false, err
 	}
+	pr, _, _ := ps.GetPR(prID)
+	dir := DirReview(prID, pr.Task, e.taskTitle(project, pr.Task), pr.Agent, e.deps.ArchitectureDoc(project))
 	e.deps.BeginAssignment(project, name)
-	err = e.compactIfDue(project, name)
+	fired, err := e.compactIfDue(project, name, dir)
 	e.deps.EndAssignment(project, name)
 	if err != nil {
 		return "", false, err
 	}
-	pr, _, _ := ps.GetPR(prID)
-	return DirReview(prID, pr.Task, e.taskTitle(project, pr.Task), pr.Agent, e.deps.ArchitectureDoc(project)), true, nil
+	if fired {
+		return DirPreparing, true, nil
+	}
+	return dir, true, nil
 }
 
 // releaseReviewers closes every open review of a PR and frees whoever held one, telling them the PR

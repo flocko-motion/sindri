@@ -551,8 +551,12 @@ func (e *Engine) claimNext(project, agent string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	if err := e.prepareAssignment(project, agent, api.TierOrDefault(t.Tier)); err != nil {
+	fired, err := e.prepareAssignment(project, agent, api.TierOrDefault(t.Tier), dir)
+	if err != nil {
 		return "", false, err
+	}
+	if fired {
+		return DirPreparing, true, nil
 	}
 	return dir, true, nil
 }

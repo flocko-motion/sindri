@@ -472,6 +472,10 @@ func DirFull(tokens int) string {
 		"You're retired from assignment until a human clears you; don't ask again, just wait.", tokens/1000)
 }
 
+// DirPreparing answers an ask whose real instruction is queued right behind this same reply (or
+// armed for the relaunch it triggers) — names no operation, asks for nothing but a beat.
+const DirPreparing = "[hub] One moment — your next instruction is right behind this."
+
 // --- escalation: stopped on a decision only the user can make ---
 
 // DirEscalated answers an escalated agent, repeating the question back — one relaunched mid-escalation
