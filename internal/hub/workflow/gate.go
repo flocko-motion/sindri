@@ -163,7 +163,7 @@ func gateReusedReport(sha string, passed bool, out string) string {
 // the pass the submit reuses. With a pr-id it checks that PR instead: the reviewer's pre-verdict look.
 func (e *Engine) CmdLint(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) > 0 {
-		res, err := e.lintPR(c.Project, args[0], c.Agent)
+		res, err := e.lintPR(e.callerPRProject(c, args[0]), args[0], c.Agent)
 		if err != nil {
 			return 1, err
 		}

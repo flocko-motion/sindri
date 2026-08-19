@@ -8,6 +8,7 @@ package workflow
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
@@ -19,8 +20,7 @@ import (
 // approval accumulates as another badge rather than being refused: approvals are evidence, not a
 // single scalar the first verdict claims. A planner's is different in kind (-> plannerApprove).
 func (e *Engine) CmdApprove(c registry.Caller, args []string, out io.Writer) (int, error) {
-	ps := e.store.For(c.Project)
-	pr, err := e.openPR(c.Project, args)
+	pr, err := e.openPR(c, args)
 	if err != nil {
 		return 1, err
 	}
@@ -28,6 +28,9 @@ func (e *Engine) CmdApprove(c registry.Caller, args []string, out io.Writer) (in
 		fmt.Fprintln(out, ReplyNoSelfVerdict(pr.ID, "approve"))
 		return 1, nil
 	}
+	// pr.Project, not c.Project: a GlobalProject reviewer's own project never holds the PR it
+	// approves — the PR record stays with its own project regardless of who is ruling on it.
+	ps := e.store.For(pr.Project)
 	if c.Role == "planner" {
 		return e.plannerApprove(ps, c, pr, out)
 	}
@@ -39,9 +42,9 @@ func (e *Engine) CmdApprove(c registry.Caller, args []string, out io.Writer) (in
 	if err := ps.PutPR(pr); err != nil {
 		return 1, err
 	}
-	_ = ps.Log(c.Agent, "approve", pr.ID)
+	_ = e.store.For(c.Project).Log(c.Agent, "approve", pr.ID)
 	_ = ps.LogPR(pr.ID, "approved", "by "+c.Agent)
-	if err := e.stampVerdict(c, pr.ID, "pass", ""); err != nil {
+	if err := e.stampVerdict(c, pr.Project, pr.ID, "pass", ""); err != nil {
 		return 1, fmt.Errorf("%s is approved, but recording who approved it failed: %w", pr.ID, err)
 	}
 	e.deps.Notify()
@@ -55,9 +58,11 @@ func ownWork(pr store.PR, c registry.Caller) bool { return pr.Agent == c.Agent }
 
 // stampVerdict records who ruled: on the review row a reviewer was assigned (-> completeReview), or
 // outright for a coauthor, which holds no row and stays where it is — with the user, not in a queue.
-func (e *Engine) stampVerdict(c registry.Caller, prID, verdict, findings string) error {
+// prProject is the caller's own already-resolved project — openPR resolved and gated it, so this
+// does not re-derive it unsafely from a bare id.
+func (e *Engine) stampVerdict(c registry.Caller, prProject, prID, verdict, findings string) error {
 	if c.Role != "coauthor" {
-		e.completeReview(c.Project, prID, c.Agent, verdict, findings)
+		e.completeReview(prProject, c.Project, prID, c.Agent, verdict, findings)
 		return nil
 	}
 	_, err := e.store.For(c.Project).AddVerdict(prID, "", c.Agent, verdict, findings, false)
@@ -82,22 +87,26 @@ func (e *Engine) plannerApprove(ps *store.ProjectStore, c registry.Caller, pr st
 	return 0, nil
 }
 
-// completeReview stamps the verdict (a human verdict has no record), returns the reviewer to
-// idle, and wakes it back into its loop.
-func (e *Engine) completeReview(project, prID, agent, verdict, findings string) {
-	ps := e.store.For(project)
-	if revs, err := ps.Reviews(prID); err == nil {
+// completeReview stamps the verdict (a human verdict has no record) — on the review row filed under
+// prProject, never home for a GlobalProject reviewer — and clears the reviewer's OWN session at
+// home: the verdict just given is its own leaf boundary, and a session must carry nothing from one
+// review into the next. FireClear re-serves the directive itself once the reset settles, so a
+// cleared reviewer is never left waiting to be told what to do.
+func (e *Engine) completeReview(prProject, home, prID, agent, verdict, findings string) {
+	if revs, err := e.store.For(prProject).Reviews(prID); err == nil {
 		for _, r := range revs {
 			if r.Author == agent && r.Verdict == "" {
-				_ = ps.RecordVerdict(r.ID, verdict, findings)
+				_ = e.store.For(prProject).RecordVerdict(r.ID, verdict, findings)
 				break
 			}
 		}
 	}
-	_ = ps.SetState(store.AgentState{Agent: agent, Phase: "idle"})
-	// Push only: asking `sindri` gets the reviewer exactly this — its next review — so nothing here
-	// needs to survive being read late.
-	_ = e.deps.Deliver(project, agent, MsgVerdictRecorded(prID), PushOnly)
+	_ = e.store.For(home).SetState(store.AgentState{Agent: agent, Phase: "idle"})
+	// interrupt=false: this runs inside the reviewer's own request (CmdApprove/CmdReject), so there
+	// is nothing of its own in flight to cut off, unlike a human arming a clear from outside.
+	if err := e.deps.FireClear(home, agent, MsgKickoff, false); err != nil {
+		fmt.Fprintf(os.Stderr, "hub: clearing %s's context after its verdict on %s: %v\n", agent, prID, err)
+	}
 }
 
 // ApprovePR is the human approve path (TUI/CLI): marks a project's open (or already-approved) PR
@@ -252,7 +261,9 @@ func (e *Engine) CmdReject(c registry.Caller, args []string, out io.Writer) (int
 		fmt.Fprintln(out, "usage: reject <pr-id> <feedback...>")
 		return 2, nil
 	}
-	pr, ok, err := e.store.For(c.Project).GetPR(args[0])
+	// callerPRProject, not PRProject: it widens beyond c.Project only when c itself holds this PR.
+	prProject := e.callerPRProject(c, args[0])
+	pr, ok, err := e.store.For(prProject).GetPR(args[0])
 	if err != nil {
 		return 1, err
 	}
@@ -261,11 +272,11 @@ func (e *Engine) CmdReject(c registry.Caller, args []string, out io.Writer) (int
 		return 1, nil
 	}
 	feedback := strings.Join(args[1:], " ")
-	if err := e.reject(c.Project, args[0], feedback, rejectVoice(c)); err != nil {
+	if err := e.reject(prProject, args[0], feedback, rejectVoice(c)); err != nil {
 		return 1, err
 	}
 	if c.Role != "coauthor" { // its badge is reject's own, written under its name (-> reject)
-		e.completeReview(c.Project, args[0], c.Agent, "changes", strings.TrimSpace(feedback))
+		e.completeReview(prProject, c.Project, args[0], c.Agent, "changes", strings.TrimSpace(feedback))
 	}
 	fmt.Fprintf(out, "%s rejected; worker notified.\n", args[0])
 	return 0, nil

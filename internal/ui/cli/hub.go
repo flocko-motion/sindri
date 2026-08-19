@@ -131,6 +131,17 @@ func withBackend(fn func(backend) error) error {
 	return fn(b)
 }
 
+// withGlobalBackend is withBackend scoped to the fleet-wide reviewer pool rather than the cwd's
+// repo — no cwd ever resolves to it, so it never goes through repoRoot.
+func withGlobalBackend(fn func(backend) error) error {
+	b, err := open(api.GlobalProject)
+	if err != nil {
+		return err
+	}
+	defer b.Close()
+	return fn(b)
+}
+
 // --- first-order: hub ---
 
 // NewHubCmd builds the `hub` command tree (start/stop/status the hub).

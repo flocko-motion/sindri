@@ -3,6 +3,7 @@ package agent
 import (
 	"testing"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -55,5 +56,35 @@ func TestBeginAssignmentIsPerAgent(t *testing.T) {
 
 	if at, _ := s.AtLeafBoundary("proj", "nori"); at {
 		t.Error("nori's own mid-task hold must not be admitted by eitri's in-flight preparation")
+	}
+}
+
+// TestAPooledReviewerMidReviewIsNotABoundary is the safety-critical gap a review found: a
+// GlobalProject reviewer's held review is filed under the PR's own project, never GlobalProject
+// itself, so a project-scoped read used to say "boundary" while it was reading a diff — the exact
+// moment /clear or compaction must not fire, since it would silently invalidate that reading.
+func TestAPooledReviewerMidReviewIsNotABoundary(t *testing.T) {
+	_, st := newService(t)
+	s := New(st, clearTestDeps{}, nil)
+	if err := st.For(api.GlobalProject).PutAgent(store.Agent{Name: "ori", Role: "reviewer"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.For(api.GlobalProject).SetState(store.AgentState{Agent: "ori", Phase: "reviewing"}); err != nil {
+		t.Fatal(err)
+	}
+	repo := st.For("repo")
+	if err := repo.PutPR(store.PR{ID: "pr-1", Agent: "bombur", Branch: "sd-1", Base: "main", Status: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	rid, err := repo.AddReview("pr-1", "look")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AssignReview(rid, "ori"); err != nil {
+		t.Fatal(err)
+	}
+
+	if at, err := s.AtLeafBoundary(api.GlobalProject, "ori"); err != nil || at {
+		t.Errorf("AtLeafBoundary = (%v, %v), want false — ori holds pr-1 in repo, not nothing", at, err)
 	}
 }

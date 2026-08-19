@@ -56,7 +56,9 @@ func (s *Service) AtLeafBoundary(project, name string) (bool, error) {
 	if st.Task != "" {
 		return false, nil
 	}
-	reviewing, err := ps.ReviewingPR(name)
+	// store.Store's ReviewingPR, not ps's: a pooled reviewer's held review is never filed under
+	// its own project, and a project-scoped read here would clear/compact it mid-review.
+	_, reviewing, err := s.store.ReviewingPR(project, name)
 	if err != nil {
 		return false, err
 	}

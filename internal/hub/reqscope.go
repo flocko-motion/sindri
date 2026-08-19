@@ -9,6 +9,8 @@ package hub
 import (
 	"fmt"
 	"net/http"
+
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // globalRoutes are the only control endpoints valid without a repo context: the
@@ -44,6 +46,10 @@ func (h *Hub) reqProject(r *http.Request) string {
 	root := r.Header.Get("X-Sindri-Project")
 	if root == "" {
 		return ""
+	}
+	if root == api.GlobalProject {
+		// Already a tag, not a path — nothing to register or hash, unlike every real repo.
+		return api.GlobalProject
 	}
 	h.repo(root) // register (idempotent) + ensure .worktrees gitignore
 	return repoTag(root)

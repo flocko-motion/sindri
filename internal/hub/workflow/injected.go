@@ -91,15 +91,6 @@ func MsgReviewCancelled(prID string) string {
 	return fmt.Sprintf("[hub] The PR you were reviewing (%s) was scrapped — stop reviewing it; its branch is gone. Just run `sindri` for your next task.", prID)
 }
 
-// MsgVerdictRecorded puts a reviewer back in the loop right after a verdict, its reply having
-// named no next step — and says the door is not shut on the PR it just ruled on, since that is the
-// moment an afterthought arrives and mail leaves no record on the task.
-func MsgVerdictRecorded(prID string) string {
-	return fmt.Sprintf("[hub] Verdict on %s recorded. Run `sindri` for your next review. If you think "+
-		"of something more about %s later, `sindri comment \"<text>\"` still reaches its task — that is "+
-		"where a later reader finds it.", prID, prID)
-}
-
 // MsgRunFinished is what a run's scheduling agent is told — a summary, never the full log:
 // injecting the whole output is how a 900k-token session happens, and one already has. The full
 // log stays on the run record, fetched with `show <run-id>`.

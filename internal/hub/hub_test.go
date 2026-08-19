@@ -92,6 +92,21 @@ func TestNewAgentValidation(t *testing.T) {
 	}
 }
 
+// TestGlobalProjectAcceptsOnlyAReviewer: _global holds no repo, so nothing a worker, planner or
+// coauthor carries across its work — a branch, a standing conversation, the user's own seat —
+// exists there. A reviewer, which carries nothing between reviews, is the one role that fits.
+func TestGlobalProjectAcceptsOnlyAReviewer(t *testing.T) {
+	h := newHub(t)
+	for _, role := range []string{"worker", "planner", "coauthor"} {
+		if _, err := h.agents.NewAgent(workflow.GlobalProject, "x-"+role, role, ""); err == nil {
+			t.Errorf("a %s should be refused in %s", role, workflow.GlobalProject)
+		}
+	}
+	if _, err := h.agents.NewAgent(workflow.GlobalProject, "ori", "reviewer", ""); err != nil {
+		t.Errorf("a reviewer should be accepted in %s: %v", workflow.GlobalProject, err)
+	}
+}
+
 func TestNewAgentAutoName(t *testing.T) {
 	h := newHub(t)
 	n1, err := h.agents.NewAgent(testProject, "", "worker", "")

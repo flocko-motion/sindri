@@ -3,7 +3,6 @@ package workflow
 import (
 	"io"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/flo-at/sindri/internal/hub/registry"
@@ -28,20 +27,18 @@ func verdictFixture(t *testing.T) (*Engine, *store.ProjectStore, *stubDeps) {
 	return e, ps, deps
 }
 
-// TestApproveWakesTheReviewer is the sd-98fa96 fix: a verdict must not be where a reviewer's loop
-// ends. Without the injection, fili read "awaiting human merge" and had no reason to run `sindri`
-// again.
+// TestApproveWakesTheReviewer is the sd-98fa96 fix, now via sd-a19ef9's clear: a verdict must not be
+// where a reviewer's loop ends. FireClear re-serves the directive itself once its /clear settles, so
+// firing it is what wakes fili rather than leaving it on "awaiting human merge" with no reason to
+// run `sindri` again.
 func TestApproveWakesTheReviewer(t *testing.T) {
 	e, _, deps := verdictFixture(t)
 	c := registry.Caller{Project: "repo", Agent: "fili", Role: "reviewer"}
 	if code, err := e.CmdApprove(c, []string{"pr-a"}, io.Discard); err != nil || code != 0 {
 		t.Fatalf("CmdApprove: code=%d err=%v", code, err)
 	}
-	if len(deps.injected) == 0 || deps.injected[len(deps.injected)-1] != "fili" {
-		t.Fatalf("no injection sent to fili after its verdict: %v", deps.injected)
-	}
-	if !strings.Contains(deps.injectedText[len(deps.injectedText)-1], "sindri") {
-		t.Errorf("injected text = %q, want it to say to run sindri again", deps.injectedText[len(deps.injectedText)-1])
+	if len(deps.cleared) == 0 || deps.cleared[len(deps.cleared)-1] != "fili" {
+		t.Fatalf("no clear fired for fili after its verdict: %v", deps.cleared)
 	}
 }
 
@@ -52,7 +49,7 @@ func TestRejectWakesTheReviewer(t *testing.T) {
 	if code, err := e.CmdReject(c, []string{"pr-a", "not", "yet"}, io.Discard); err != nil || code != 0 {
 		t.Fatalf("CmdReject: code=%d err=%v", code, err)
 	}
-	if len(deps.injected) == 0 || deps.injected[len(deps.injected)-1] != "fili" {
-		t.Fatalf("no injection sent to fili after its verdict: %v", deps.injected)
+	if len(deps.cleared) == 0 || deps.cleared[len(deps.cleared)-1] != "fili" {
+		t.Fatalf("no clear fired for fili after its verdict: %v", deps.cleared)
 	}
 }

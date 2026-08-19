@@ -111,9 +111,11 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		ps := h.store.For(a.Project)
 		st, _ := ps.GetState(a.Name)
 		// A reviewer authors no PR, so fall back to the one it's reviewing — that's what it works on.
+		// store.Store's ReviewingPR: a pooled reviewer's held review is never filed under its own
+		// project, so a.Project-scoped alone would show it holding nothing while it plainly is.
 		pr := openPRFor(prs, a.Project, a.Name)
 		if pr == "" {
-			pr, _ = ps.ReviewingPR(a.Name)
+			_, pr, _ = h.store.ReviewingPR(a.Project, a.Name)
 		}
 		l := obs[i]
 		status := overlayRuntime(h.agents.AgentStatus(a.Project, a.Name, l.up, observed[i], st.Phase, a.Stopped), l.runtime)

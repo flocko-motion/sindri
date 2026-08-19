@@ -47,10 +47,11 @@ func localProject(projects []api.Project) string {
 	return ""
 }
 
-// listGroupFor places a row by its repo and whether anything is owed on it.
+// listGroupFor places a row by its repo and whether anything is owed on it. GlobalProject belongs to
+// no repo, so it is never foreign to one.
 func listGroupFor(project, localTag string, needsUser bool) listGroup {
 	switch {
-	case localTag == "" || project == localTag:
+	case localTag == "" || project == localTag || project == api.GlobalProject:
 		return groupLocal
 	case needsUser:
 		return groupForeignAttention

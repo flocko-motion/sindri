@@ -139,19 +139,17 @@ func TestMilestoneAndInterimMergesArePushOnly(t *testing.T) {
 	})
 }
 
-// TestVerdictRecordedIsPushOnly: "run sindri for your next review" is exactly what a reviewer gets
-// by asking, so it must wake the reviewer without becoming a permanent mailbox entry.
-func TestVerdictRecordedIsPushOnly(t *testing.T) {
+// TestVerdictClearsTheReviewer: a verdict is the reviewer's own leaf boundary, and its session must
+// carry nothing from this review into the next — so approving fires a clear rather than leaving a
+// mailbox entry behind.
+func TestVerdictClearsTheReviewer(t *testing.T) {
 	e, _, deps := verdictFixture(t)
 	c := registry.Caller{Project: "repo", Agent: "fili", Role: "reviewer"}
 	if code, err := e.CmdApprove(c, []string{"pr-a"}, io.Discard); err != nil || code != 0 {
 		t.Fatalf("CmdApprove: code=%d err=%v", code, err)
 	}
-	if len(deps.delivered) == 0 {
-		t.Fatal("approving should have woken the reviewer")
-	}
-	if last := deps.delivered[len(deps.delivered)-1]; last.Mail || !last.Push {
-		t.Errorf("the verdict-recorded wake must be push-only, got %+v", last)
+	if len(deps.cleared) != 1 || deps.cleared[0] != "fili" {
+		t.Errorf("cleared = %v, want exactly one FireClear(fili)", deps.cleared)
 	}
 }
 

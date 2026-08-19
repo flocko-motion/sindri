@@ -120,6 +120,16 @@ func (e *Engine) PRProject(fallback, id string) string {
 	return fallback
 }
 
+// callerPRProject is PRProject narrowed for an unrestricted agent verb (show, lint): it widens
+// beyond c.Project only when c is the reviewer actually holding prID, fleet-wide — never for any
+// other PR, or a PR id (not secret, but not a bypass either) would reach every agent in every repo.
+func (e *Engine) callerPRProject(c registry.Caller, prID string) string {
+	if home, held, err := e.store.ReviewingPR(c.Project, c.Agent); err == nil && held == prID {
+		return home
+	}
+	return c.Project
+}
+
 // PRDetail is a merge-intent plus its linked task and diff (for `pr info`); it crosses the wire
 // as internal/api.PRDetail, the name every existing caller here already uses.
 type PRDetail = api.PRDetail
@@ -337,7 +347,7 @@ func (e *Engine) CmdShowPR(c registry.Caller, args []string, out io.Writer) (int
 		fmt.Fprintln(out, "usage: show <pr-id>")
 		return 2, nil
 	}
-	ps := e.store.For(c.Project)
+	ps := e.store.For(e.callerPRProject(c, args[0]))
 	pr, ok, err := ps.GetPR(args[0])
 	if err != nil {
 		return 1, err
@@ -363,7 +373,7 @@ func (e *Engine) CmdShowPR(c registry.Caller, args []string, out io.Writer) (int
 	for _, r := range revs {
 		fmt.Fprintln(out, "review: "+reviewBadge(r))
 	}
-	diff, err := git.Diff(e.deps.ProjectRoot(c.Project), pr.Base, pr.Branch)
+	diff, err := git.Diff(e.deps.ProjectRoot(pr.Project), pr.Base, pr.Branch)
 	if err != nil {
 		return 1, err
 	}
@@ -371,11 +381,13 @@ func (e *Engine) CmdShowPR(c registry.Caller, args []string, out io.Writer) (int
 	return 0, nil
 }
 
-// openPR takes an explicit id, else the oldest open PR.
-func (e *Engine) openPR(project string, args []string) (store.PR, error) {
-	ps := e.store.For(project)
+// openPR takes an explicit id, else the oldest open PR in c's own project.
+func (e *Engine) openPR(c registry.Caller, args []string) (store.PR, error) {
 	if len(args) > 0 {
-		pr, ok, err := ps.GetPR(args[0])
+		// callerPRProject, not c.Project directly: it widens beyond the caller's own project only
+		// when the caller itself holds this exact PR fleet-wide — any other caller naming a
+		// foreign id must still get "no such PR", not another project's row.
+		pr, ok, err := e.store.For(e.callerPRProject(c, args[0])).GetPR(args[0])
 		if err != nil {
 			return store.PR{}, err
 		}
@@ -384,6 +396,7 @@ func (e *Engine) openPR(project string, args []string) (store.PR, error) {
 		}
 		return pr, nil
 	}
+	ps := e.store.For(c.Project)
 	open, err := ps.PRs("open")
 	if err != nil {
 		return store.PR{}, err

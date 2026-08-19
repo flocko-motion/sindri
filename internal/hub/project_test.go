@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // TestRepoInitScaffoldsAndRegisters: init registers the repo and writes a
@@ -66,5 +68,36 @@ func TestRepoForgetDeletesAgentsKeepsRepo(t *testing.T) {
 	// The repo's files (scaffolded config) survive — forget is not delete.
 	if _, err := os.ReadFile(filepath.Join(root, ".sindri", "config.yaml")); err != nil {
 		t.Errorf("forget must not delete the repo's .sindri/config.yaml: %v", err)
+	}
+}
+
+// TestGlobalProjectRegistersAtStartup: nothing ever names GlobalProject in a request the way a real
+// repo's root does (there is no directory to lazily register from), so it must already be in the
+// registry the moment the hub opens, with a path whose basename repoSlug reads back unchanged.
+func TestGlobalProjectRegistersAtStartup(t *testing.T) {
+	h := newHub(t)
+
+	path, ok, err := h.store.ProjectPath(api.GlobalProject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("GlobalProject should already be registered when the hub opens")
+	}
+	if got := filepath.Base(path); got != api.GlobalProject {
+		t.Errorf("GlobalProject's registered path is %q, whose basename is %q, want %q", path, got, api.GlobalProject)
+	}
+}
+
+// TestGlobalProjectCannotBeForgotten: forgetting it would tear down every reviewer in the pool for a
+// project the hub re-registers on its very next restart anyway — a footgun with no matching benefit.
+func TestGlobalProjectCannotBeForgotten(t *testing.T) {
+	h := newHub(t)
+
+	if err := h.projects.Forget(api.GlobalProject); err == nil {
+		t.Fatal("forgetting GlobalProject should be refused")
+	}
+	if _, ok, _ := h.store.ProjectPath(api.GlobalProject); !ok {
+		t.Error("a refused forget must leave the registry row in place")
 	}
 }

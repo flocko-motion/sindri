@@ -1,53 +1,55 @@
 # 05-workflow — delta
 
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: The reviewer pool spans projects
 
-Assignment SHALL consider `_global` reviewers alongside the project's own when looking for a reviewer
-to hand an unclaimed review to. A pool read from one project's roster leaves an idle reviewer in
-another repo unreachable — which is waste no reclaiming of idle pods can recover, since the
-constraint is identity rather than memory.
+A reviewer SHALL be assignable from the virtual project `_global`, serving any project's review
+queue rather than being bound to a single repo. Assigning a review to an idle reviewer SHALL
+consider a `_global` reviewer alongside a project's own, preferring a reviewer local to the project
+when both are idle — a repo that keeps a dedicated reviewer expects it used.
 
-Where both a local and a global reviewer are free, either MAY take the review. A repo that keeps its
-own reviewer expects it to be used, so a local one SHALL be preferred; the global pool is what
-answers when there is none.
+Whether a candidate reviewer already holds a review SHALL be a fleet-wide question for a `_global`
+reviewer: its held review may be filed under any project it was sent to, so a project-scoped read
+that finds nothing MUST NOT be read as "free" for such a reviewer.
 
-A global reviewer holding a review SHALL be found by the same query wherever that review lives. What
-a reviewer is reviewing is a fleet-wide question once the reviewer is fleet-wide, so a project-scoped
-read of its held review reports nothing for an agent that is plainly busy.
+Assigning a review to a `_global` reviewer SHALL resolve the reviewer's own roster row, workspace,
+state and notes from its own project, never the PR's project. The review record itself SHALL stay
+with the PR's project regardless of who is assigned to rule on it.
 
-The workspace a review is checked out into SHALL be resolved from the reviewer's own record rather
-than from the project the PR belongs to. A global reviewer is on no project roster, and the existing
-lookup already fails loudly in that case — it would fail on every review.
+Every verb a reviewer runs on a PR it already holds — asking for its own directive, approving,
+rejecting, showing the diff, running the lint gate against it — SHALL resolve the PR's actual
+project before touching any store scoped by project, since a `_global` reviewer's own project is
+never the PR's project. Operations scoped to the reviewer's own identity (its roster row, session
+state, context) SHALL stay scoped to its own project throughout the same operation.
 
-#### Scenario: A global reviewer takes another project's review
+#### Scenario: A local reviewer is preferred over a pooled one
 
-- **WHEN** a project has an unclaimed review and no free reviewer of its own, and the pool has one
-- **THEN** the global reviewer is assigned it, and its workspace is resolved from its own record
+- **GIVEN** a project with its own idle reviewer and an idle `_global` reviewer
+- **WHEN** an unclaimed review in that project is assigned
+- **THEN** the project's own reviewer is handed it, not the pooled one
 
-#### Scenario: A local reviewer is preferred
+#### Scenario: A pooled reviewer serves a project with none of its own
 
-- **WHEN** both a local and a global reviewer are free for the same review
-- **THEN** the local one takes it
+- **GIVEN** a project with no reviewer of its own and an idle `_global` reviewer
+- **WHEN** an unclaimed review in that project is assigned
+- **THEN** the `_global` reviewer is handed it
 
-#### Scenario: A busy global reviewer is seen to be busy
+#### Scenario: A pooled reviewer already busy elsewhere is not handed a second review
 
-- **WHEN** a global reviewer holds a review in one project and any project's board is read
-- **THEN** it reads as reviewing that PR rather than as idle
+- **GIVEN** a `_global` reviewer already holding an unresolved review filed under a different project
+- **WHEN** idle reviewers are considered for a new assignment
+- **THEN** that reviewer is not offered it
 
-## ADDED Requirements
+#### Scenario: A pooled reviewer finds the review it holds
 
-### Requirement: Reviews queue when the pool is busy
+- **GIVEN** a `_global` reviewer holding a review filed under another project
+- **WHEN** it asks for its own directive
+- **THEN** it is told the PR it holds, not that nothing is pending
 
-A review that finds no free reviewer SHALL wait, and SHALL be handed out when one becomes free. A
-bounded pool means concurrent reviews are bounded, and queuing is the correct answer — the fleet
-already treats its single run slot this way.
+#### Scenario: A pooled reviewer's verdict lands on the PR's own project
 
-Waiting SHALL be visible: a review nobody has picked up is a fact the board already carries, and it
-must not become invisible for being queued behind a busy pool rather than an absent reviewer.
-
-#### Scenario: Every reviewer is busy
-
-- **WHEN** a review is requested and no reviewer, local or global, is free
-- **THEN** it waits, stays visible as waiting, and is handed out when one frees
+- **GIVEN** a `_global` reviewer approving or rejecting a PR filed under another project
+- **WHEN** it records its verdict
+- **THEN** the PR's status and review row change under that PR's own project, and the reviewer's own
+  session state changes under `_global`

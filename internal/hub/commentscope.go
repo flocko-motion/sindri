@@ -17,12 +17,13 @@ import (
 // the narrow gate was really asking — and a verdict used to END the reviewer's reach at the moment
 // it acquired afterthoughts, leaving mail as the only channel and no record on the task.
 func (h *Hub) reviewerTasks(c registry.Caller) ([]string, error) {
-	ps := h.store.For(c.Project)
-	held, err := ps.ReviewingPR(c.Agent)
+	// store.Store's ReviewingPR/RuledPRs, not c.Project-scoped: a pooled reviewer's rows are never
+	// filed under its own project.
+	_, held, err := h.store.ReviewingPR(c.Project, c.Agent)
 	if err != nil {
 		return nil, err
 	}
-	ruled, err := ps.RuledPRs(c.Agent)
+	ruled, err := h.store.RuledPRs(c.Project, c.Agent)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +34,7 @@ func (h *Hub) reviewerTasks(c registry.Caller) ([]string, error) {
 	var out []string
 	seen := map[string]bool{}
 	for _, id := range prs {
-		p, ok, gerr := ps.GetPR(id)
+		p, ok, gerr := h.store.For(h.wf.PRProject(c.Project, id)).GetPR(id)
 		if gerr != nil {
 			return nil, gerr
 		}

@@ -92,9 +92,9 @@ func (e *Engine) NudgeStalled(project, name, runtime string, idleFor time.Durati
 		held = st.Container
 	}
 	if held == "" {
-		// A reviewer's hold is the review row: no state field carries it, so without this the nudge
-		// bailed on the one role Stalled had just started counting.
-		pr, rerr := ps.ReviewingPR(name)
+		// A reviewer's hold is the review row: no state field carries it. store.Store's
+		// ReviewingPR, not ps's, since a pooled reviewer's row is never filed under its own project.
+		_, pr, rerr := e.store.ReviewingPR(project, name)
 		if rerr != nil {
 			return false
 		}

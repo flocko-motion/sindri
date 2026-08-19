@@ -195,7 +195,7 @@ func allChildrenGated(all []store.Task, id string) bool {
 func (e *Engine) explainReview(project, agent string, out api.NextExplain) (api.NextExplain, error) {
 	ps := e.store.For(project)
 	if agent != "" {
-		note, err := reviewHeld(ps, agent)
+		note, err := reviewHeld(e.store, project, agent)
 		if err != nil {
 			return out, err
 		}
@@ -270,12 +270,14 @@ func leftOpen(p store.PR) (api.Reviewability, string) {
 // reviewHeld is why a reviewer takes nothing new, "" when it is free. A hold on a PR that has left
 // "open" is NOT one: reviewDirective releases it and claims the next review, so trusting the row
 // would describe a state the agent's very next ask undoes (a human `pr approve` leaves exactly it).
-func reviewHeld(ps *store.ProjectStore, agent string) (string, error) {
-	held, err := ps.ReviewingPR(agent)
+func reviewHeld(st *store.Store, project, agent string) (string, error) {
+	// st's ReviewingPR, not a *ProjectStore's: a pooled reviewer's row is never filed under its
+	// own project.
+	heldProject, held, err := st.ReviewingPR(project, agent)
 	if err != nil || held == "" {
 		return "", err
 	}
-	pr, ok, err := ps.GetPR(held)
+	pr, ok, err := st.For(heldProject).GetPR(held)
 	if err != nil {
 		return "", err
 	}

@@ -487,21 +487,22 @@ func (h *Hub) cmdStaff(c registry.Caller, _ []string, out io.Writer) (int, error
 		if a.Name == c.Agent {
 			who += " (you)"
 		}
-		fmt.Fprintf(out, "%-14s %-9s %s\n", who, a.Role, staffHolding(ps, a))
+		fmt.Fprintf(out, "%-14s %-9s %s\n", who, a.Role, staffHolding(h.store, a))
 	}
 	return 0, nil
 }
 
 // staffHolding is what one colleague has in hand: a reviewer a PR, everyone else a task or the
 // feature it is working through. Retirement is said, since it decides whether to wait for them.
-func staffHolding(ps *store.ProjectStore, a store.Agent) string {
+func staffHolding(fleet *store.Store, a store.Agent) string {
 	var holding string
 	if a.Role == "reviewer" {
-		if pr, err := ps.ReviewingPR(a.Name); err == nil && pr != "" {
+		// fleet's ReviewingPR: a pooled reviewer's row is never filed under its own project.
+		if _, pr, err := fleet.ReviewingPR(a.Project, a.Name); err == nil && pr != "" {
 			holding = "reviewing " + pr
 		}
 	}
-	st, err := ps.GetState(a.Name)
+	st, err := fleet.For(a.Project).GetState(a.Name)
 	if err == nil && holding == "" {
 		switch {
 		case st.Container != "" && st.Task != "":

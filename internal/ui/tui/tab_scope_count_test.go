@@ -122,6 +122,29 @@ func TestTabCountMatchesRows(t *testing.T) {
 	}
 }
 
+// TestGlobalReviewerCountsInNarrowScope: a GlobalProject reviewer belongs to no repo, so the narrow
+// scope must count it without needing api.AgentNeedsUser — unlike a genuinely foreign, idle agent,
+// which the scope still excludes (scopeBoard's 15 far-N agents do not move the badge above).
+func TestGlobalReviewerCountsInNarrowScope(t *testing.T) {
+	m, b := scopeBoard()
+	b.Agents = append(b.Agents, api.AgentView{Name: "ori", Project: api.GlobalProject, Role: "reviewer", Status: "idle"})
+	m.state = b
+	m.scopeRepo = true
+
+	var agents tuiSection
+	for _, s := range tuiSections {
+		if s.Key == "agents" {
+			agents = s
+		}
+	}
+	if got := m.tabCount(agents); got != 3 {
+		t.Errorf("repo-scoped Agents badge = %d, want 3 (2 local + the idle global reviewer)", got)
+	}
+	if !m.inScope(api.GlobalProject) {
+		t.Error("GlobalProject should always be in scope — it belongs to no repo to be foreign to")
+	}
+}
+
 // TestTabCountScopeInvariantSections: Tasks is always the selected repo's and Repos /
 // Meeting are global by nature, so the § toggle must not move their badges.
 func TestTabCountScopeInvariantSections(t *testing.T) {

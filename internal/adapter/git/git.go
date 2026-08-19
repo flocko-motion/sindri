@@ -276,6 +276,45 @@ func CheckoutDetachedClean(dir, ref string) error {
 	return nil
 }
 
+// ArchiveTree exports ref's tree into dest as plain files, no .git, clearing dest's prior contents
+// first — for a reviewer with no git of its own.
+func ArchiveTree(repo, ref, dest string) error {
+	if err := emptyDir(dest); err != nil {
+		return fmt.Errorf("clear %s: %w", dest, err)
+	}
+	tmp, err := os.CreateTemp("", "sindri-archive-*.tar")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+	if out, err := exec.Command("git", "-C", repo, "archive", "-o", tmp.Name(), ref).CombinedOutput(); err != nil {
+		return fmt.Errorf("archive %s: %s: %w", ref, strings.TrimSpace(string(out)), err)
+	}
+	if out, err := exec.Command("tar", "-x", "-f", tmp.Name(), "-C", dest).CombinedOutput(); err != nil {
+		return fmt.Errorf("extract %s: %s: %w", ref, strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// emptyDir removes dest's contents, creating it first if absent — the directory itself (a bind
+// mount target) is never removed, only what is inside it.
+func emptyDir(dest string) error {
+	entries, err := os.ReadDir(dest)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return os.MkdirAll(dest, 0o755)
+		}
+		return err
+	}
+	for _, e := range entries {
+		if err := os.RemoveAll(filepath.Join(dest, e.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // EnsureBranch puts dir on name, creating it from base if absent and preserving any work on it
 // if not — a planner's standing branch.
 func EnsureBranch(dir, name, base string) error {

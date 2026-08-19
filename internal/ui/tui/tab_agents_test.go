@@ -174,3 +174,27 @@ func TestAgentsBodyWrapsTheTaskLine(t *testing.T) {
 		t.Errorf("the long task title should read in full (wrapped, not truncated):\nwant substring: %q\ngot:            %q", wantFlat, flat)
 	}
 }
+
+// TestNewAgentChoiceOffersAGlobalReviewer: creating a reviewer in the fleet-wide pool is a distinct
+// choice from an ordinary repo-scoped one, not a flag on it — the value it carries ("global-reviewer")
+// is what tells apply to dial GlobalProject instead of the ambient client.
+func TestNewAgentChoiceOffersAGlobalReviewer(t *testing.T) {
+	m := newModel(nil, nil, "/r/sindri")
+	m.openNewAgentChoice()
+
+	if !m.choice.active {
+		t.Fatal("openNewAgentChoice should open the modal")
+	}
+	found := false
+	for i, v := range m.choice.values {
+		if v == "global-reviewer" {
+			found = true
+			if !strings.Contains(m.choice.options[i], "global") {
+				t.Errorf("option label %q should say it is global", m.choice.options[i])
+			}
+		}
+	}
+	if !found {
+		t.Errorf("no global-reviewer choice offered among values %v", m.choice.values)
+	}
+}

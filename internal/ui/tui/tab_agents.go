@@ -21,6 +21,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/ui/attach"
 	"github.com/flo-at/sindri/internal/ui/table"
@@ -138,8 +139,8 @@ func (m *model) openAgentOptionsForm(name, current string) {
 // openNewAgentChoice picks the role for a new agent; the role is fixed at creation.
 func (m *model) openNewAgentChoice() {
 	cl := m.cl
-	opts := []string{"worker", "reviewer", "planner", "coauthor"}
-	vals := []string{"worker", "reviewer", "planner", "coauthor"}
+	opts := []string{"worker", "reviewer", "reviewer (global)", "planner", "coauthor"}
+	vals := []string{"worker", "reviewer", "global-reviewer", "planner", "coauthor"}
 	// Plans share the "new" key rather than a second binding; only planners take one.
 	planner := ""
 	if a, ok := m.selAgent(); ok && a.Role == "planner" {
@@ -154,15 +155,19 @@ func (m *model) openNewAgentChoice() {
 			if v == "plan" {
 				return func() tea.Msg { return openPlanFormMsg(planner) }
 			}
+			target, role := cl, v
+			if v == "global-reviewer" {
+				target, role = client.Dial(api.GlobalProject), "reviewer"
+			}
 			// Register, then launch. The launch is a separate step so the new row appears at
 			// once, but its result is collected rather than dropped: a launch can fail (no
 			// image, no engine, a build that breaks) and the row would otherwise just sit at
 			// "down" with nothing said.
 			return func() tea.Msg {
-				if cl == nil {
+				if target == nil {
 					return nil
 				}
-				name, err := cl.NewAgent("", v, "") // memory: hub default; editable via the detail view / CLI
+				name, err := target.NewAgent("", role, "") // memory: hub default; editable via the detail view / CLI
 				if err != nil {
 					return errModalMsg{err}
 				}

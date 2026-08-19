@@ -161,6 +161,9 @@ func (s *Service) Init(root string) (Summary, error) {
 // Forget deletes the repo's agents and its registry row, nothing else: passive data stays keyed by
 // the stable tag, so re-adding the repo reactivates it. Hard on agents, soft on records.
 func (s *Service) Forget(project string) error {
+	if project == api.GlobalProject {
+		return fmt.Errorf("%s is not a repo — it takes no worktrees and cannot be forgotten", api.GlobalProject)
+	}
 	roster, err := s.store.For(project).Roster()
 	if err != nil {
 		return err

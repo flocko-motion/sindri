@@ -96,6 +96,12 @@ func New(ctx context.Context) (*Hub, error) {
 	if err != nil {
 		return nil, err
 	}
+	// GlobalProject registers here, not lazily like a repo: nothing ever names it in a request the
+	// way a real repo's root does, so it must exist from the first tick. Its path is a dedicated
+	// subdirectory (not the bare state dir itself) so repoSlug reads its name off it unchanged.
+	if err := st.RegisterProject(workflow.GlobalProject, filepath.Join(dir, workflow.GlobalProject)); err != nil {
+		return nil, err
+	}
 	life, endLife := context.WithCancel(ctx)
 	h := &Hub{store: st, events: newBus(), startedAt: time.Now(), lifetime: life, endLife: endLife}
 	h.chat = chat.New(h.store, chatDelivery{h})

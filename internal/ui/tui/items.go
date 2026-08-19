@@ -334,6 +334,9 @@ func (m model) inScope(project string) bool {
 	if !m.scopeRepo {
 		return true
 	}
+	if project == api.GlobalProject {
+		return true // belongs to no repo, so it is never foreign to one
+	}
 	_, tag := m.currentRepo()
 	if tag == "" {
 		// No nameable repo (registry hiccup, unregistered cwd): scoping would blank every

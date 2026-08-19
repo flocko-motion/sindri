@@ -23,11 +23,11 @@ type switchRepoMsg string
 // openSwitcher opens the repo picker over the board's known projects, marking the
 // current one.
 func (m *model) openSwitcher() {
-	if len(m.state.Projects) == 0 {
+	projects := m.switcherOrder()
+	if len(projects) == 0 {
 		m.flash = "no repos yet"
 		return
 	}
-	projects := m.switcherOrder()
 	var opts, vals []string
 	for _, p := range projects {
 		label := m.repoName(p.Tag)
@@ -52,9 +52,15 @@ func (m *model) openSwitcher() {
 // switcherOrder ranks the known repos for the picker: repos with a live agent first
 // (that's where work is happening), then by recency (most-recently-used), then
 // alphabetically by name — so the relevant repos are always near the top of a
-// possibly-long list.
+// possibly-long list. GlobalProject is excluded: it is not a repo to switch into (-> sd-808cdc),
+// and dialing it by its registered path here would hash it into a phantom project instead.
 func (m *model) switcherOrder() []api.Project {
-	ps := append([]api.Project(nil), m.state.Projects...)
+	ps := make([]api.Project, 0, len(m.state.Projects))
+	for _, p := range m.state.Projects {
+		if p.Tag != api.GlobalProject {
+			ps = append(ps, p)
+		}
+	}
 	sort.SliceStable(ps, func(i, j int) bool {
 		li, lj := m.repoHasLiveAgent(ps[i].Tag), m.repoHasLiveAgent(ps[j].Tag)
 		if li != lj {

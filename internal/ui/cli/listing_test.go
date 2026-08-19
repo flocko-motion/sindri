@@ -89,6 +89,15 @@ func TestAnEmptySectionPrintsNoHeading(t *testing.T) {
 	}
 }
 
+// TestGlobalProjectIsNeverForeign: GlobalProject belongs to no repo, so it must group as local even
+// when idle in a different repo's listing — unlike an ordinary foreign row, which needs
+// api.AgentNeedsUser (or its PR/mail equivalent) to earn a place at all.
+func TestGlobalProjectIsNeverForeign(t *testing.T) {
+	if got := listGroupFor(api.GlobalProject, "sin", false); got != groupLocal {
+		t.Errorf("listGroupFor(GlobalProject, ...) = %v, want groupLocal", got)
+	}
+}
+
 // cliTables is every column layout the CLI lists through, by the command that prints it.
 var cliTables = map[string]table.Table{
 	"agent list": agentListTable,

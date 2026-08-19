@@ -4,6 +4,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -55,5 +56,29 @@ func TestUnknownAgentStaysWithTheCaller(t *testing.T) {
 	req.Header.Set("X-Sindri-Project", t.TempDir())
 	if got := h.agentReq(req, "nobody"); got != h.reqProject(req) {
 		t.Errorf("agentReq = %q, want the caller's own project", got)
+	}
+}
+
+// TestReqProjectResolvesGlobalProjectAsATagNotAPath: GlobalProject is already registered at
+// startup under its literal tag, never a path to hash — a client targeting it sends the tag
+// itself as the header, and reqProject must return that tag unchanged rather than treating it as
+// a cwd to register a phantom project under.
+func TestReqProjectResolvesGlobalProjectAsATagNotAPath(t *testing.T) {
+	h := newHub(t)
+	before, err := h.store.Projects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("POST", "/agents", nil)
+	req.Header.Set("X-Sindri-Project", api.GlobalProject)
+	if got := h.reqProject(req); got != api.GlobalProject {
+		t.Errorf("reqProject = %q, want %q unchanged", got, api.GlobalProject)
+	}
+	after, err := h.store.Projects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Errorf("project count changed from %d to %d — a phantom project was registered", len(before), len(after))
 	}
 }

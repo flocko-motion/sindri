@@ -2,84 +2,74 @@
 
 ## ADDED Requirements
 
-### Requirement: A reviewer may belong to the global pool
+### Requirement: Agent creation in `_global` accepts only a reviewer
 
-The hub SHALL accept a reviewer created in `_global`, where it serves every project's review queue
-rather than one repo's. The role is eligible because a reviewer holds nothing across reviews: its
-assignment lives in the review row, its verdict is written when given, and both its brief and its
-tree are replaced at the next assignment.
+`NewAgent` SHALL refuse to create any role but reviewer in the virtual project `_global`, since a
+worker, planner or coauthor each holds something across its unit of work — a branch, a standing
+conversation, the user's own seat — that a project with no repo cannot give it. The refusal SHALL
+name what the refused role would have held. A repo keeping its own, project-bound reviewer SHALL
+remain unaffected — `_global` is an ordinary project, so the two coexist without a special case.
 
-The reviewer role SHALL be the only one accepted there. Workers, planners and coauthors remain bound
-to a repo: each holds something that outlives a single unit of work — a branch, a standing
-conversation, the user's own seat — so the reasoning above does not reach them.
+#### Scenario: A reviewer can be created in `_global`
 
-A repo MAY still have its own reviewer. `_global` being an ordinary project means the two coexist
-without a special case, and a repo with review needs of its own keeps a dedicated one.
+- **WHEN** a reviewer is registered in `_global`
+- **THEN** it is accepted, exactly as in any other project
 
-#### Scenario: A reviewer is created in the pool
+#### Scenario: Every other role is refused
 
-- **WHEN** a reviewer is created in `_global`
-- **THEN** it is accepted, and it is served reviews from every project
+- **WHEN** a worker, planner, or coauthor is registered in `_global`
+- **THEN** it is refused, and the refusal names what that role holds that `_global` cannot
 
-#### Scenario: Another role is refused
+### Requirement: A `_global` reviewer's pod holds no repository
 
-- **WHEN** a worker, planner or coauthor is created in `_global`
-- **THEN** it is refused, and the reason names what that role holds across a unit of work
+A pod launched for a `_global` reviewer SHALL NOT check out or check for a git repository: there is
+none to check out. Launch SHALL skip the commit-check and worktree-add steps that every other role's
+pod requires, creating only the fixed workspace directory its bind mount needs. The pod's mounts
+SHALL be no different from a project-bound reviewer's — `/workspace` alone, no worktree or scratch
+mount — so no mount-table change is needed for the role itself.
 
-#### Scenario: A repo keeps its own reviewer
+#### Scenario: A `_global` reviewer launches without a repository
 
-- **WHEN** a repo has a reviewer of its own and the pool also has one
-- **THEN** both exist, and the repo's own is preferred for its reviews
+- **WHEN** a reviewer's pod is launched in `_global`
+- **THEN** it succeeds without any git operation against `_global`'s path, and its workspace
+  directory exists once launched
 
 ### Requirement: A global reviewer's workspace is materialised per review
 
-A global reviewer's `/workspace` SHALL be a fixed host path the hub fills, not a git worktree inside a
-repo. Assigning a review SHALL materialise the PR's tree there, replacing what the previous review
-left.
+Assigning a review to a `_global` reviewer SHALL populate its fixed workspace directory with the
+PR's tree as plain files — no `.git`, since the reviewer has no git of its own and the hub runs the
+curated git surface and the lint gate hub-side. The materialise SHALL replace whatever the previous
+review left there, without restarting the pod (the workspace is a bind mount; replacing its contents
+is the whole change). A failed materialise SHALL be reported the same way a failed checkout already
+is for a project-bound reviewer: the reviewer is told `/workspace` does not hold the PR and to read
+the diff alone.
 
-A plain tree suffices: an agent has no git of its own — the hub runs a curated read-only subset on its
-behalf — and the quality gate executes hub-side. A reviewer needs the files, not a repository.
+#### Scenario: A review's tree replaces the last one
 
-Because the mount is a fixed path, the pod SHALL NOT be restarted to serve a different repo. A bind
-mount shows what is at its path, so replacing the contents is the whole of the change.
+- **GIVEN** a `_global` reviewer's workspace holding files from a prior review
+- **WHEN** it is assigned a new review
+- **THEN** the new PR's tree is there and the prior review's files are gone, with no `.git` present
 
-Where materialising fails, the reviewer SHALL be told plainly that `/workspace` does not hold the PR
-and to review from the diff alone — the guarantee the existing checkout failure already makes, and it
-must survive the change of mechanism.
+#### Scenario: A failed materialise still hands over the review
 
-#### Scenario: A second review replaces the first tree
-
-- **WHEN** a global reviewer is assigned a review after finishing one in a different repo
-- **THEN** its `/workspace` holds the new PR's tree, nothing of the previous one remains, and its pod
-  was not restarted
-
-#### Scenario: Materialising fails
-
-- **WHEN** the tree cannot be materialised
-- **THEN** the reviewer is told `/workspace` does not hold the PR and to review from the diff alone
+- **WHEN** materialising a `_global` reviewer's workspace fails
+- **THEN** the reviewer is still assigned the review and told not to trust `/workspace`, the same
+  guarantee a failed checkout already gives a project-bound reviewer
 
 ### Requirement: A reviewer's context is cleared when its verdict lands
 
-A reviewer's session SHALL be cleared after it records a verdict, not compacted, and not at its next
-assignment.
+Recording a reviewer's verdict SHALL clear its session (Claude Code's own `/clear`), not compact it,
+and SHALL do so at the verdict rather than at its next assignment. A summary would keep the
+conclusions of the review just finished while discarding the diff that justified them, which is
+backwards for a role whose work is reading that diff; and clearing at the verdict — a leaf boundary
+by construction — means the fresh window is ready before the next review arrives rather than costing
+latency when it does. The clear SHALL re-serve the reviewer's directive itself once it settles, so a
+cleared reviewer is never left waiting to be told what to do. A reviewer's session SHALL carry
+nothing from one review into the next — no conclusion, no judgement — which matters most for a
+`_global` reviewer moving between unrelated repos.
 
-Clearing rather than compacting: a summary keeps the conclusions of the last review and discards the
-diff that justified them, which is backwards for a role whose work is reading this diff carefully. It
-also carries judgements between unrelated PRs, and for a global reviewer between unrelated repos.
+#### Scenario: A verdict clears the reviewer
 
-At the verdict rather than the next assignment: that is a leaf boundary by definition, the fresh
-window is ready before work arrives rather than costing latency when it does, and it keeps context
-operations off the assignment path entirely.
-
-Clearing SHALL re-serve the reviewer's directive as an armed clear already does, so a cleared reviewer
-is never left waiting to be told what to do.
-
-#### Scenario: The verdict clears the session
-
-- **WHEN** a reviewer records a verdict
-- **THEN** its session is cleared, and its directive is re-served so it is not left waiting
-
-#### Scenario: Nothing carries into the next review
-
-- **WHEN** that reviewer is assigned its next review
-- **THEN** its session carries nothing of the previous one
+- **WHEN** a reviewer approves or rejects a PR
+- **THEN** its session is cleared, not compacted, and it is left able to ask for its next review
+  without further prompting

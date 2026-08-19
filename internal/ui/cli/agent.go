@@ -272,19 +272,25 @@ func agentStatsCmd() *cobra.Command {
 
 func agentNewCmd() *cobra.Command {
 	var role, memory string
-	var noStart bool
+	var noStart, global bool
 	c := &cobra.Command{
 		Use: "new [name]", Short: "Create an agent and start it (name optional — auto dwarf name)", Args: cobra.MaximumNArgs(1),
 		Long: "Register an agent identity and start its container, which is what you almost always want —\n" +
 			"the same thing the TUI's 'new' does.\n\n" +
 			"--no-start registers the identity alone, for pre-declaring an agent you will start later.\n" +
-			"An agent exists independently of any container, so this is a supported state, not a failure.",
+			"An agent exists independently of any container, so this is a supported state, not a failure.\n\n" +
+			"--global creates it in the fleet-wide _global pool instead of this repo — the hub refuses\n" +
+			"every role there but reviewer, since none of the rest has a repo to hold their work in.",
 		RunE: func(_ *cobra.Command, args []string) error {
 			var want string
 			if len(args) == 1 {
 				want = args[0]
 			}
-			return withBackend(func(b backend) error {
+			run := withBackend
+			if global {
+				run = withGlobalBackend
+			}
+			return run(func(b backend) error {
 				name, err := b.NewAgent(want, role, memory)
 				if err != nil {
 					return err
@@ -309,6 +315,7 @@ func agentNewCmd() *cobra.Command {
 	c.Flags().StringVar(&role, "role", "worker", "agent role: worker|reviewer|planner|coauthor")
 	c.Flags().StringVar(&memory, "memory", "", "RAM limit for this agent's container (e.g. 4g, 512m; unset = the runtime's default)")
 	c.Flags().BoolVar(&noStart, "no-start", false, "register the identity only, without starting a container")
+	c.Flags().BoolVar(&global, "global", false, "create it in the fleet-wide _global pool instead of this repo")
 	return c
 }
 

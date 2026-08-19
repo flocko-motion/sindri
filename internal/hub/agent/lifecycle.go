@@ -140,6 +140,20 @@ func (s *Service) FailLaunch(ctx context.Context, project, name, reason string) 
 	}
 }
 
+// whatARoleHolds names what a non-reviewer role carries across its own unit of work — the reason
+// none of them can live in a project with no repo to hold it in.
+func whatARoleHolds(role string) string {
+	switch role {
+	case "worker":
+		return "a branch"
+	case "planner":
+		return "a standing conversation"
+	case "coauthor":
+		return "the user's own seat"
+	}
+	return "its work"
+}
+
 // NewAgent registers an agent identity in a project (no pod) — identity precedes runtime
 // (D13). An empty name gets an unused Norse dwarf name. Returns the final name.
 func (s *Service) NewAgent(project, name, role, memory string) (string, error) {
@@ -161,6 +175,10 @@ func (s *Service) NewAgent(project, name, role, memory string) (string, error) {
 	}
 	if role != "worker" && role != "reviewer" && role != "planner" && role != "coauthor" {
 		return "", fmt.Errorf("invalid role %q (worker|reviewer|planner|coauthor)", role)
+	}
+	if project == api.GlobalProject && role != "reviewer" {
+		return "", fmt.Errorf("a %s holds %s across its work — %s has no repo to hold it in, so only a reviewer can be created there",
+			role, whatARoleHolds(role), api.GlobalProject)
 	}
 	if !ValidMemory(memory) {
 		return "", fmt.Errorf("invalid memory %q (e.g. 2g, 512m)", memory)
@@ -218,11 +236,16 @@ func (s *Service) DeleteAgent(ctx context.Context, project, name string) error {
 	_ = container.RmContext(rmCtx, s.deps.ContainerName(project, name))
 	rmCancel()
 	s.agentCh.CloseAgent(project, name)
+	switch {
+	// GlobalProject's workspace is a plain directory (prepareWorkspace's own doing), not a
+	// worktree — git.WorktreeRemove against it fails and leaves the tree behind forever.
+	case project == workflow.GlobalProject:
+		_ = os.RemoveAll(filepath.Join(root, a.Workspace))
 	// A coauthor's workspace IS the repo root — never `git worktree remove` that. Its scratch tree
 	// goes: left behind, the next agent of that name would inherit it.
-	if a.Workspace != "." {
+	case a.Workspace != ".":
 		_ = git.WorktreeRemove(root, filepath.Join(root, a.Workspace))
-	} else {
+	default:
 		_ = git.WorktreeRemove(root, filepath.Join(root, workflow.ScratchWorktree(name)))
 	}
 	if err := ps.DeleteAgent(name); err != nil {
@@ -346,6 +369,51 @@ func modelEnv(model string) map[string]string {
 	return map[string]string{"SINDRI_MODEL": model}
 }
 
+// prepareWorkspace lays down what /workspace will bind-mount: nothing to check out for a
+// GlobalProject reviewer (-> workflow.assignReview fills it later), else a git worktree shaped
+// by role.
+func (s *Service) prepareWorkspace(ps *store.ProjectStore, project, name, root, wt string, a store.Agent) error {
+	if project == workflow.GlobalProject {
+		return os.MkdirAll(wt, 0o755)
+	}
+	hasCommits, err := git.HasCommits(root)
+	if err != nil {
+		return err
+	}
+	if !hasCommits {
+		return fmt.Errorf("repo has no commits yet")
+	}
+	if a.Role == "coauthor" {
+		// A coauthor's /workspace IS the user's checkout (wt == repo root), so there is no isolated
+		// worktree to add — only its scratch tree (-> CmdScratch), kept as it was on a relaunch.
+		if err := git.WorktreeAdd(root, filepath.Join(root, workflow.ScratchWorktree(name)), "HEAD"); err != nil {
+			return err
+		}
+		// Rest in "collab" so the dashboard shows it's standing with the user, not idle.
+		if st, _ := ps.GetState(name); st.Phase == "" || st.Phase == "idle" {
+			_ = ps.SetState(store.AgentState{Agent: name, Phase: "collab"})
+		}
+	} else if err := git.WorktreeAdd(root, wt, "HEAD"); err != nil {
+		return err
+	}
+	if a.Role == "planner" {
+		// Put the planner on its standing branch so it can draft openspec and ship it via
+		// `openspec submit` without ever grabbing a backlog task.
+		base, err := git.CurrentBranch(root)
+		if err != nil {
+			return err
+		}
+		if err := git.EnsureBranch(wt, workflow.PlannerBranch(name), base); err != nil {
+			return err
+		}
+		// Rest in "planning", not "idle" — unless a PR is already in flight.
+		if st, _ := ps.GetState(name); st.Phase != "submitted" {
+			_ = ps.SetState(store.AgentState{Agent: name, Phase: "planning"})
+		}
+	}
+	return nil
+}
+
 // Launch spins a pod that assumes an existing agent's identity, running Claude in a tmux session
 // named after it (or a bare shell); cols/lines size it to a caller's preview pane.
 func (s *Service) Launch(ctx context.Context, project, name string, shell, debug bool, cols, lines int, progress io.Writer) (err error) {
@@ -395,40 +463,8 @@ func (s *Service) Launch(ctx context.Context, project, name string, shell, debug
 	cName := s.deps.ContainerName(project, name)
 	fmt.Fprintf(w, "Image ready. Starting container %s…\n", cName)
 	wt := filepath.Join(root, a.Workspace)
-	hasCommits, err := git.HasCommits(root)
-	if err != nil {
+	if err := s.prepareWorkspace(ps, project, name, root, wt, a); err != nil {
 		return err
-	}
-	if !hasCommits {
-		return fmt.Errorf("repo has no commits yet")
-	}
-	if a.Role == "coauthor" {
-		// A coauthor's /workspace IS the user's checkout (wt == repo root), so there is no isolated
-		// worktree to add — only its scratch tree (-> CmdScratch), kept as it was on a relaunch.
-		if err := git.WorktreeAdd(root, filepath.Join(root, workflow.ScratchWorktree(name)), "HEAD"); err != nil {
-			return err
-		}
-		// Rest in "collab" so the dashboard shows it's standing with the user, not idle.
-		if st, _ := ps.GetState(name); st.Phase == "" || st.Phase == "idle" {
-			_ = ps.SetState(store.AgentState{Agent: name, Phase: "collab"})
-		}
-	} else if err := git.WorktreeAdd(root, wt, "HEAD"); err != nil {
-		return err
-	}
-	if a.Role == "planner" {
-		// Put the planner on its standing branch so it can draft openspec and ship it via
-		// `openspec submit` without ever grabbing a backlog task.
-		base, err := git.CurrentBranch(root)
-		if err != nil {
-			return err
-		}
-		if err := git.EnsureBranch(wt, workflow.PlannerBranch(name), base); err != nil {
-			return err
-		}
-		// Rest in "planning", not "idle" — unless a PR is already in flight.
-		if st, _ := ps.GetState(name); st.Phase != "submitted" {
-			_ = ps.SetState(store.AgentState{Agent: name, Phase: "planning"})
-		}
 	}
 	// Serve the agent's own socket BEFORE the pod launches — the pod bind-mounts it, and
 	// the socket IS the agent's identity (D2); needs the persistent hub.

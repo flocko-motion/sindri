@@ -42,7 +42,9 @@ func (s *Service) HoldsNothing(project, name, role string) (bool, error) {
 	if st.Task != "" || st.Container != "" || st.Escalation != "" {
 		return false, nil
 	}
-	reviewing, err := ps.ReviewingPR(name)
+	// store.Store's ReviewingPR, not ps's: a pooled reviewer's held review is never filed under
+	// its own project, and reading it as "" here would let the sweep stop it mid-review.
+	_, reviewing, err := s.store.ReviewingPR(project, name)
 	if err != nil {
 		return false, err
 	}
