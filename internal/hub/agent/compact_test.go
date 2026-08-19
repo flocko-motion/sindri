@@ -49,7 +49,7 @@ func TestCompactInjectsAndForgetsTheMemo(t *testing.T) {
 		t.Fatalf("ContextUsage = (%d, %v), want the pre-compaction reading", got, ok)
 	}
 
-	if err := s.Compact("proj", "durin", "the claimed directive"); err != nil {
+	if err := s.Compact(t.Context(), "proj", "durin", "the claimed directive"); err != nil {
 		t.Fatalf("Compact: %v", err)
 	}
 
@@ -82,7 +82,7 @@ func TestCompactRefusesMidTask(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := s.Compact("proj", "durin", "next"); err == nil {
+	if err := s.Compact(t.Context(), "proj", "durin", "next"); err == nil {
 		t.Error("Compact should have refused a worker mid-task")
 	}
 	for _, sent := range f.sent {
@@ -97,7 +97,7 @@ func TestCompactRefusesMidTask(t *testing.T) {
 // zero-count assertion would pass whether or not that matcher actually works.
 func TestFakeInterruptDetectionIsNotVacuous(t *testing.T) {
 	s, f := compactFixture(t)
-	if err := s.Interrupt("proj", "durin"); err != nil {
+	if err := s.Interrupt(t.Context(), "proj", "durin"); err != nil {
 		t.Fatalf("Interrupt: %v", err)
 	}
 	if f.interrupts != 1 {

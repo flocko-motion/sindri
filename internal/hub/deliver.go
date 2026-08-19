@@ -50,7 +50,9 @@ func (h *Hub) Deliver(project, name, text string, d workflow.Delivery) error {
 	if !d.Push || name == api.SenderUser {
 		return nil
 	}
-	if err := h.agents.InjectWhenReady(project, name, text); err != nil {
+	// Under the hub's lifetime: a push is the hub telling an agent something on the fleet's timeline,
+	// and it must land whether or not whoever triggered it is still there (-> Hub.lifetime).
+	if err := h.agents.InjectWhenReady(h.lifetime, project, name, text); err != nil {
 		// Push-only had nowhere else to go, so say so where a user reconstructs what an agent was
 		// never told. With mail written, the message is not lost and the row's pushed flag stays
 		// false, which is what tells a reader it is waiting rather than possibly already acted on.

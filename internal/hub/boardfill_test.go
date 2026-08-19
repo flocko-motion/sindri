@@ -13,7 +13,7 @@ import (
 func stillWatchdog(t *testing.T, h *Hub) *watchdog {
 	t.Helper()
 	h.watch.close()
-	w := &watchdog{h: h, obs: map[agentKey]liveness{}, repos: map[string]repoSample{},
+	w := &watchdog{h: h, base: t.Context(), obs: map[agentKey]liveness{}, repos: map[string]repoSample{},
 		stop: make(chan struct{}), done: make(chan struct{})}
 	close(w.done) // nothing is running, so Hub.Close's close() returns instead of waiting for a sweep
 	h.watch = w

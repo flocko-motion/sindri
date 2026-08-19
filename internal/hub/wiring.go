@@ -52,13 +52,17 @@ func (d agentDeps) ProjectConfig(project string) (config.Config, error) {
 }
 
 // chatDelivery adapts the hub to chat.Delivery.
+//
+// Both pushes run under the hub's lifetime rather than a caller's context: chat.Delivery carries
+// none, and a broadcast is fan-out to every OTHER member — work the hub owns on their behalf, which
+// the sender hanging up must not cut short (-> Hub.lifetime).
 type chatDelivery struct{ h *Hub }
 
 func (c chatDelivery) Inject(project, name, text string) error {
-	return c.h.agents.Inject(project, name, text)
+	return c.h.agents.Inject(c.h.lifetime, project, name, text)
 }
 func (c chatDelivery) InjectWhenReady(project, name, text string) error {
-	return c.h.agents.InjectWhenReady(project, name, text)
+	return c.h.agents.InjectWhenReady(c.h.lifetime, project, name, text)
 }
 
 // Running reads the watchdog's last observation, not a probe of its own — a chat broadcast checks
@@ -79,8 +83,10 @@ func (c commentsDeps) Notify()                           { c.h.notify() }
 // projectDeps adapts the hub to project.Deps.
 type projectDeps struct{ h *Hub }
 
+// DeleteAgent tears the pod down under the hub's lifetime, not the request's: forgetting a repo
+// deletes every agent in it, and a half-deleted one leaves a pod nobody owns (-> Hub.lifetime).
 func (d projectDeps) DeleteAgent(project, name string) error {
-	return d.h.agents.DeleteAgent(project, name)
+	return d.h.agents.DeleteAgent(d.h.lifetime, project, name)
 }
 func (d projectDeps) EnsureGitignore(root string)    { ensureGitignore(root) }
 func (d projectDeps) RepoName(project string) string { return d.h.repoName(project) }
@@ -125,12 +131,15 @@ func (d workflowDeps) Deliver(project, name, text string, del workflow.Delivery)
 	return d.h.Deliver(project, name, text, del)
 }
 
+// Interrupt, AgentAlive and CurrentModel reach the runtime for the workflow engine, whose Deps
+// carry no context: the engine acts on the fleet's own timeline — a merge landing, a review
+// arriving — so the hub's lifetime is the honest lineage for them (-> Hub.lifetime).
 func (d workflowDeps) Interrupt(project, name string) error {
-	return d.h.agents.Interrupt(project, name)
+	return d.h.agents.Interrupt(d.h.lifetime, project, name)
 }
 
 func (d workflowDeps) AgentAlive(project, name string) bool {
-	return d.h.agents.AgentAlive(project, name)
+	return d.h.agents.AgentAlive(d.h.lifetime, project, name)
 }
 
 // AgentIdle reads the watchdog's last observation rather than probing: the sweep classifies every
@@ -173,7 +182,7 @@ func (d workflowDeps) CompactionThreshold(window int) int {
 }
 
 func (d workflowDeps) CurrentModel(project, name string) string {
-	return d.h.agents.CurrentModel(project, name)
+	return d.h.agents.CurrentModel(d.h.lifetime, project, name)
 }
 
 func (d workflowDeps) ModelForTier(tier string) (string, bool) {
@@ -185,7 +194,7 @@ func (d workflowDeps) ModelMatches(want, detected string) bool {
 }
 
 func (d workflowDeps) SetModel(project, name, model, next string) error {
-	return d.h.agents.SetModel(project, name, model, next)
+	return d.h.agents.SetModel(d.h.lifetime, project, name, model, next)
 }
 
 func (d workflowDeps) HoldsNothing(project, name, role string) (bool, error) {
@@ -193,11 +202,11 @@ func (d workflowDeps) HoldsNothing(project, name, role string) (bool, error) {
 }
 
 func (d workflowDeps) Compact(project, name, next string) error {
-	return d.h.agents.Compact(project, name, next)
+	return d.h.agents.Compact(d.h.lifetime, project, name, next)
 }
 
 func (d workflowDeps) FireClear(project, name, next string, interrupt bool) error {
-	return d.h.agents.FireClear(project, name, next, interrupt)
+	return d.h.agents.FireClear(d.h.lifetime, project, name, next, interrupt)
 }
 
 func (d workflowDeps) BeginAssignment(project, name string) {

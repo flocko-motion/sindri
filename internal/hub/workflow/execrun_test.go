@@ -62,7 +62,7 @@ func TestExecuteRunDropsAStaleRunWithNoAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.ExecuteRun("repo", r.ID); err != nil {
+	if err := e.ExecuteRun(t.Context(), "repo", r.ID); err != nil {
 		t.Fatalf("ExecuteRun: %v", err)
 	}
 	got, _, _ := ps.GetRun(r.ID)
@@ -99,7 +99,7 @@ func TestExecuteRunDropsAStaleRunWhenTheAgentMovedOn(t *testing.T) {
 	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "td-2"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.ExecuteRun("repo", r.ID); err != nil {
+	if err := e.ExecuteRun(t.Context(), "repo", r.ID); err != nil {
 		t.Fatalf("ExecuteRun: %v", err)
 	}
 	got, _, _ := ps.GetRun(r.ID)
@@ -123,7 +123,7 @@ func TestExecuteRunSkipsAlreadySettledRuns(t *testing.T) {
 	if err := ps.SetRunStatus(r.ID, "cancelled"); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.ExecuteRun("repo", r.ID); err != nil {
+	if err := e.ExecuteRun(t.Context(), "repo", r.ID); err != nil {
 		t.Fatalf("ExecuteRun: %v", err)
 	}
 	got, _, _ := ps.GetRun(r.ID)
@@ -154,7 +154,7 @@ func TestExecuteRunMaterializesThenFailsWithoutARuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.ExecuteRun("repo", r.ID); err != nil {
+	if err := e.ExecuteRun(t.Context(), "repo", r.ID); err != nil {
 		t.Fatalf("ExecuteRun: %v", err)
 	}
 	got, _, _ := ps.GetRun(r.ID)
@@ -274,7 +274,7 @@ func TestCancelRunKillsARunningContainerWithoutWritingItsStatus(t *testing.T) {
 	if err := ps.SetRunStatus(r.ID, "running"); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.CancelRun("repo", r.ID); err != nil {
+	if err := e.CancelRun(t.Context(), "repo", r.ID); err != nil {
 		t.Fatalf("CancelRun: %v", err)
 	}
 	got, _, _ := ps.GetRun(r.ID)
@@ -298,7 +298,7 @@ func TestReconcileRunningRunsCancelsAnOrphan(t *testing.T) {
 	if err := ps.SetRunStatus(r.ID, "running"); err != nil {
 		t.Fatal(err)
 	}
-	e.ReconcileRunningRuns()
+	e.ReconcileRunningRuns(t.Context())
 	got, _, _ := ps.GetRun(r.ID)
 	if got.Status != "cancelled" {
 		t.Fatalf("status = %q, want cancelled", got.Status)

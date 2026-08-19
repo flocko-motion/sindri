@@ -8,6 +8,7 @@
 package workflow
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -129,7 +130,7 @@ func (e *Engine) preflightPR(project string, ps *store.ProjectStore, pr store.PR
 // executePrecheckRun is that check, from the queue: build what a merge would produce and gate it.
 // The rebase is the definitive applies-answer — the same replay the merge performs, in a tree
 // nobody is working in. ADVISORY throughout: the finding is logged on the PR and nobody is told.
-func (e *Engine) executePrecheckRun(ps *store.ProjectStore, project string, r api.Run) error {
+func (e *Engine) executePrecheckRun(ctx context.Context, ps *store.ProjectStore, project string, r api.Run) error {
 	pr, ok, err := ps.GetPR(r.Message)
 	if err != nil || !ok {
 		return e.finishRun(ps, project, r, "cancelled", "precheck: "+r.Message+" is gone\n", 0, 0, -1)
@@ -162,7 +163,7 @@ func (e *Engine) executePrecheckRun(ps *store.ProjectStore, project string, r ap
 	}
 	// Not recorded against the commit: the combined replay is thrown away with its worktree, so a
 	// verdict about that sha could never be reused (-> gateOnce).
-	out, passed := e.gateOnce(project, path, sha)
+	out, passed := e.gateOnce(ctx, project, path, sha)
 	if passed {
 		_ = ps.LogPR(pr.ID, "precheck-pass", "applies onto "+base+" and the gate passes on the combined result")
 		return e.finishRun(ps, project, r, "passed", out, time.Since(start), RunHardCap, 0)

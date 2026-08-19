@@ -144,7 +144,7 @@ func forgetObservations() {
 // fails loudly instead of vanishing — and the refusal names the restart that fixes it.
 func TestAHubMessageStillRefusesASignedOutPane(t *testing.T) {
 	s, f := tellFixture(t, "eitri", signedOutPane)
-	err := s.Inject("proj", "eitri", "the verdict is in")
+	err := s.Inject(t.Context(), "proj", "eitri", "the verdict is in")
 	if err == nil {
 		t.Fatal("a hub-originated message into a signed-out pane must fail rather than vanish")
 	}
@@ -161,7 +161,7 @@ func TestAHubMessageStillRefusesASignedOutPane(t *testing.T) {
 // are wrong the failure is visible and costs a message.
 func TestSendAnywayOverrulesThePane(t *testing.T) {
 	s, f := tellFixture(t, "dvalin", signedOutPane)
-	if err := s.Tell("proj", "dvalin", "carry on", "user", api.SignedOutSend); err != nil {
+	if err := s.Tell(t.Context(), "proj", "dvalin", "carry on", "user", api.SignedOutSend); err != nil {
 		t.Fatalf("send-anyway must deliver: %v", err)
 	}
 	if len(f.sent) != 1 || !strings.Contains(f.sent[0], "carry on") {
@@ -176,7 +176,7 @@ func TestSendAnywayOverrulesThePane(t *testing.T) {
 // out. Asked in advance — a CLI flag typed out of habit — it must not bounce a healthy session.
 func TestTheAnswerOnlyAppliesToASignedOutPane(t *testing.T) {
 	s, f := tellFixture(t, "nori", idlePane)
-	if err := s.Tell("proj", "nori", "carry on", "user", api.SignedOutRestart); err != nil {
+	if err := s.Tell(t.Context(), "proj", "nori", "carry on", "user", api.SignedOutRestart); err != nil {
 		t.Fatalf("a healthy agent takes the message as it always did: %v", err)
 	}
 	if len(f.removed) != 0 {
@@ -192,7 +192,7 @@ func TestTheAnswerOnlyAppliesToASignedOutPane(t *testing.T) {
 // — the pod goes down on the way to coming back up, and a failure says what it was doing.
 func TestRestartIsPerformedRatherThanRecommended(t *testing.T) {
 	s, f := tellFixture(t, "bombur", signedOutPane)
-	err := s.Tell("proj", "bombur", "carry on", "user", api.SignedOutRestart)
+	err := s.Tell(t.Context(), "proj", "bombur", "carry on", "user", api.SignedOutRestart)
 	if len(f.removed) != 1 || f.removed[0] != "pod-bombur" {
 		t.Errorf("the restart must tear the pod down first, got %q", f.removed)
 	}

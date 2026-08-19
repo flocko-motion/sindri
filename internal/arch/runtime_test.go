@@ -6,9 +6,9 @@
 // inject are container operations in their own right, not a question), or is an
 // explicit, user-requested diagnostic. The call sites that still query either
 // port directly are listed here with the reason each is allowed to.
-// limits:  the query methods only (Running, RunningContext, ListByLabelContext,
+// limits:  the query methods only (RunningContext, ListByLabelContext,
 // ListByLabelFresh, ListByLabelCached, Diagnose, MemoryCapacity, Stats for the
-// container port; AgentAlive, AgentAliveCtx, SessionAliveCtx, Clients, ClientsCtx
+// container port; AgentAlive, SessionAliveCtx, Clients, ClientsCtx
 // for the agent probe) — actions are out of scope for both. The board-read
 // invariant itself (hub.State touches only the store and the watchdog) is
 // internal/arch/boardread_test.go's, which walks the whole reachable call graph
@@ -29,7 +29,7 @@ import (
 // the ones a poll means, as opposed to Run/Rm/Exec/EnsureImage and the rest, which DO something and
 // so are never in question here (-> the watchdog header's "ACTIONS act").
 var runtimeQueryMethods = map[string]bool{
-	"Running": true, "RunningContext": true,
+	"RunningContext":     true,
 	"ListByLabelContext": true, "ListByLabelFresh": true, "ListByLabelCached": true,
 	"Diagnose": true, "MemoryCapacity": true, "Stats": true,
 }
@@ -44,7 +44,7 @@ var declaredRuntimeQueriers = map[string]string{
 	"internal/hub/watchdog.go": "the observer — the one place a listing or a capacity sample is taken",
 	// The shared liveness/clients probe mechanism the watchdog's own probe() calls through, and that
 	// explicit diagnostics (`agent info`) read too — the probe lives here once, not at each caller.
-	"internal/hub/agent/runtime.go": "AgentAliveCtx/SessionAliveCtx/Diagnose — the probe mechanism itself",
+	"internal/hub/agent/runtime.go": "SessionAliveCtx/Diagnose — the probe mechanism itself",
 	// Launch/stop/relaunch act on a specific pod and need to know, right then, whether it is up
 	// before doing so — the same immediacy an action gets elsewhere (-> injection's declared files).
 	"internal/hub/agent/lifecycle.go": "launch/stop actions and their own wait/debug diagnostics",
@@ -60,7 +60,7 @@ var declaredRuntimeQueriers = map[string]string{
 // the second half of the invariant delivery didn't cover: the outage this ticket answers reached one
 // of these (AgentAlive, from CurrentModel) rather than the container port directly.
 var agentProbeMethods = map[string]bool{
-	"AgentAlive": true, "AgentAliveCtx": true, "SessionAliveCtx": true,
+	"AgentAlive": true, "SessionAliveCtx": true,
 	"Clients": true, "ClientsCtx": true,
 }
 
@@ -136,7 +136,7 @@ func probeGuard(t *testing.T, methods map[string]bool, declared map[string]strin
 					return true
 				}
 				if packageQualified {
-					// container.Running(...): a package-qualified call, not any type's same-named
+					// container.RunningContext(...): a package-qualified call, not any type's same-named
 					// method — a local variable named "container" (state.go has one, a pod's name)
 					// is not this call.
 					if pkg, ok := sel.X.(*ast.Ident); !ok || pkg.Name != "container" {

@@ -8,6 +8,7 @@
 package workflow
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -294,9 +295,9 @@ func (e *Engine) queuePosition(id string) int {
 
 // executeGateRun runs one gate from the queue, against the commit it names. repo.GateTimeout bounds
 // it (already equal to RunHardCap); nothing here adds a second bound.
-func (e *Engine) executeGateRun(ps *store.ProjectStore, project string, r api.Run) error {
+func (e *Engine) executeGateRun(ctx context.Context, ps *store.ProjectStore, project string, r api.Run) error {
 	if r.Kind == gatePrecheck {
-		return e.executePrecheckRun(ps, project, r)
+		return e.executePrecheckRun(ctx, ps, project, r)
 	}
 	wt, cleanup, err := e.gateTree(project, r)
 	defer cleanup()
@@ -308,7 +309,7 @@ func (e *Engine) executeGateRun(ps *store.ProjectStore, project string, r api.Ru
 	}
 	e.deps.Notify()
 	start := time.Now()
-	out, passed := e.runGate(ps, project, wt, r.Commit)
+	out, passed := e.runGate(ctx, ps, project, wt, r.Commit)
 	status, exitCode := "passed", 0
 	if !passed {
 		status, exitCode = "failed", 1
@@ -318,19 +319,19 @@ func (e *Engine) executeGateRun(ps *store.ProjectStore, project string, r api.Ru
 
 // runGate is the gate, recorded. That is the point: the next caller asking about this commit is
 // answered from the store rather than building and testing it again.
-func (e *Engine) runGate(ps *store.ProjectStore, project, wt, sha string) (report string, passed bool) {
+func (e *Engine) runGate(ctx context.Context, ps *store.ProjectStore, project, wt, sha string) (report string, passed bool) {
 	verify := e.verifyCmd(project)
 	// The gate's own words are stored, not the report: the header naming the commit is composed for
 	// each reader, so a reused result cannot end up carrying two of them.
-	out, passed := repo.Gate(wt, e.deps.BrokkrBin, verify)
+	out, passed := repo.Gate(ctx, wt, e.deps.BrokkrBin, verify)
 	_ = ps.SetGateResult(sha, passed, verify, out)
 	return gateReport(sha, passed, out), passed
 }
 
 // gateOnce is the gate without the record — for a tree that exists only for this check (the
 // preflight's combined replay), whose commit is thrown away with it, so nothing could ever reuse it.
-func (e *Engine) gateOnce(project, wt, sha string) (report string, passed bool) {
-	out, passed := repo.Gate(wt, e.deps.BrokkrBin, e.verifyCmd(project))
+func (e *Engine) gateOnce(ctx context.Context, project, wt, sha string) (report string, passed bool) {
+	out, passed := repo.Gate(ctx, wt, e.deps.BrokkrBin, e.verifyCmd(project))
 	return gateReport(sha, passed, out), passed
 }
 

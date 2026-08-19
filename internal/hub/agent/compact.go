@@ -7,11 +7,14 @@
 // this call's.
 package agent
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 // Compact sends /compact into name's live session, then queues next behind it. Mirrors FireClear's
 // mechanics otherwise, but never interrupts: every call runs inside the agent's own ask.
-func (s *Service) Compact(project, name, next string) error {
+func (s *Service) Compact(ctx context.Context, project, name, next string) error {
 	at, err := s.AtLeafBoundary(project, name)
 	if err != nil {
 		return err
@@ -19,15 +22,15 @@ func (s *Service) Compact(project, name, next string) error {
 	if !at {
 		return fmt.Errorf("%s is not at a leaf boundary — compaction only applies there", name)
 	}
-	if !s.AgentAlive(project, name) {
+	if !s.AgentAlive(ctx, project, name) {
 		return fmt.Errorf("agent %q is not running", name)
 	}
 	tokens, window, model, ok := s.ContextUsage(project, name)
 	threshold := s.CompactionThreshold(window)
-	if err := s.Inject(project, name, "/compact"); err != nil {
+	if err := s.Inject(ctx, project, name, "/compact"); err != nil {
 		return err
 	}
-	if err := s.Inject(project, name, next); err != nil {
+	if err := s.Inject(ctx, project, name, next); err != nil {
 		return err
 	}
 	// Before the log/notify: a reader must see the size compaction fired ON, not the fresh one after.

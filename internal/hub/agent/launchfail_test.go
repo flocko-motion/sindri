@@ -17,7 +17,7 @@ import (
 // board reading "down" for having asked nothing yet, when a launch is already under way.
 func TestLaunchRecordsTheRequestEvenWhenThePreflightFails(t *testing.T) {
 	s, _ := tellFixture(t, "eitri", idlePane) // fakeRuntime.Check always fails
-	err := s.Launch("proj", "eitri", false, false, 0, 0, io.Discard)
+	err := s.Launch(t.Context(), "proj", "eitri", false, false, 0, 0, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "nothing to launch into") {
 		t.Fatalf("Launch = %v, want it to fail at the fake preflight", err)
 	}

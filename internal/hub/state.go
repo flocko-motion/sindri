@@ -252,14 +252,14 @@ type AgentStatsView = api.AgentStatsView
 type StatsReport = api.StatsReport
 
 // Stats returns the engine name and a resource snapshot for every running agent.
-func (h *Hub) Stats() (StatsReport, error) {
-	views, err := h.AllStats()
+func (h *Hub) Stats(ctx context.Context) (StatsReport, error) {
+	views, err := h.AllStats(ctx)
 	return StatsReport{Engine: container.Name(), Agents: views}, err
 }
 
 // AllStats snapshots every RUNNING agent concurrently — each sample is slow, so serial would be N×that.
 // Down agents are omitted; a per-agent failure lands in that row's Err rather than being dropped.
-func (h *Hub) AllStats() ([]AgentStatsView, error) {
+func (h *Hub) AllStats(ctx context.Context) ([]AgentStatsView, error) {
 	agentsRow, err := h.store.AllAgents()
 	if err != nil {
 		return nil, err
@@ -270,7 +270,7 @@ func (h *Hub) AllStats() ([]AgentStatsView, error) {
 		wg.Add(1)
 		go func(i int, a store.Agent) {
 			defer wg.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), statsTimeout)
+			ctx, cancel := context.WithTimeout(ctx, statsTimeout)
 			defer cancel()
 			c := h.container(a.Project, a.Name)
 			if !container.RunningContext(ctx, c) {

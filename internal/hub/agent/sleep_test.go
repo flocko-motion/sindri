@@ -115,7 +115,7 @@ func TestFireIdleStopsReclaimsAPastDueSpell(t *testing.T) {
 	idleSinceOrMark(key, time.Now().Add(-IdleStopThreshold-time.Minute))
 	t.Cleanup(func() { forgetIdleSince(key) })
 
-	s.FireIdleStops("proj")
+	s.FireIdleStops(t.Context(), "proj")
 
 	if len(f.removed) == 0 {
 		t.Error("a worker idle past the threshold was never stopped")
@@ -146,7 +146,7 @@ func TestFireIdleStopsLeavesARetiredWorkerAlone(t *testing.T) {
 	idleSinceOrMark(key, time.Now().Add(-IdleStopThreshold-time.Minute))
 	t.Cleanup(func() { forgetIdleSince(key) })
 
-	s.FireIdleStops("proj")
+	s.FireIdleStops(t.Context(), "proj")
 
 	if len(f.removed) != 0 {
 		t.Error("a retired worker was stopped anyway")
@@ -175,7 +175,7 @@ func TestFireIdleStartsWakesAStoppedWorkerForWaitingWork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s.FireIdleStarts("proj")
+	s.FireIdleStarts(t.Context(), "proj")
 
 	// Launch fails at its own pre-flight (fakeRuntime.Check refuses), but Stopped must already have
 	// been cleared by the time it got there — that happens before Check ever runs.
@@ -201,7 +201,7 @@ func TestFireIdleStartsDoesNothingWithoutWaitingWork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s.FireIdleStarts("proj")
+	s.FireIdleStarts(t.Context(), "proj")
 
 	got, _, err := ps.GetAgent("durin")
 	if err != nil {
@@ -230,7 +230,7 @@ func TestFireIdleStartsLeavesAnAlreadyIdleWorkerToClaimItItself(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s.FireIdleStarts("proj") // "durin" is live and idle; "nori" is stopped
+	s.FireIdleStarts(t.Context(), "proj") // "durin" is live and idle; "nori" is stopped
 
 	got, _, err := ps.GetAgent("nori")
 	if err != nil {
@@ -263,7 +263,7 @@ func TestFireIdleStartsWakesAStoppedReviewerForAWaitingReview(t *testing.T) {
 	}
 	unclaimedReview(t, ps, "pr-1")
 
-	s.FireIdleStarts("proj")
+	s.FireIdleStarts(t.Context(), "proj")
 
 	got, _, err := ps.GetAgent("rune")
 	if err != nil {
@@ -290,7 +290,7 @@ func TestFireIdleStartsDoesNotWakeAStoppedReviewerForAWaitingTask(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	s.FireIdleStarts("proj") // no worker in the roster at all — nothing can claim td-1
+	s.FireIdleStarts(t.Context(), "proj") // no worker in the roster at all — nothing can claim td-1
 
 	got, _, err := ps.GetAgent("rune")
 	if err != nil {
@@ -316,7 +316,7 @@ func TestFireIdleStartsDoesNotWakeAStoppedWorkerForAWaitingReview(t *testing.T) 
 	}
 	unclaimedReview(t, ps, "pr-1")
 
-	s.FireIdleStarts("proj") // no reviewer in the roster at all — nothing can claim pr-1's review
+	s.FireIdleStarts(t.Context(), "proj") // no reviewer in the roster at all — nothing can claim pr-1's review
 
 	got, _, err := ps.GetAgent("durin")
 	if err != nil {

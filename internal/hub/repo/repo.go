@@ -106,9 +106,9 @@ const gateOutputLines = 400
 // Gate checks wt in a subprocess, so the concurrent hub never chdir's. ONE of the two checks, never
 // both: a declared verify (repo-relative, validated by config) owns the gate, since it is the thing
 // that can run the built-in linter itself — running both paid for the same linter twice per gate.
-func Gate(wt string, resolveBin func() (string, error), verify string) (output string, ok bool) {
+func Gate(ctx context.Context, wt string, resolveBin func() (string, error), verify string) (output string, ok bool) {
 	if verify != "" {
-		return runVerify(wt, verify)
+		return runVerify(ctx, wt, verify)
 	}
 	return builtinLint(wt, resolveBin)
 }
@@ -125,12 +125,12 @@ func builtinLint(wt string, resolveBin func() (string, error)) (string, bool) {
 
 // runVerify executes the project's own declared command (not a tool sindri wraps, so no adapter
 // applies), bounded and with its output capped. A timeout is a refusal, not a hang.
-func runVerify(wt, verify string) (string, bool) {
+func runVerify(ctx context.Context, wt, verify string) (string, bool) {
 	bin := filepath.Join(wt, filepath.FromSlash(verify))
 	if _, err := os.Stat(bin); err != nil {
 		return "verify: " + verify + " not found in the worktree — the project declares it in .sindri/config.yaml\n", false
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), GateTimeout)
+	ctx, cancel := context.WithTimeout(ctx, GateTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin)
 	cmd.Dir = wt

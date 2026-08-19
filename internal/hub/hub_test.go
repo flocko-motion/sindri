@@ -20,7 +20,7 @@ const testProject = "proj"
 func newHub(t *testing.T) *Hub {
 	t.Helper()
 	t.Setenv("SINDRI_HOME", t.TempDir())
-	h, err := New()
+	h, err := New(t.Context())
 	if err != nil {
 		t.Fatalf("new hub: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestReviewInstructionsCarryArchitecture(t *testing.T) {
 
 func TestTellUnknownAgent(t *testing.T) {
 	h := newHub(t)
-	if err := h.agents.Tell(testProject, "ghost", "hi", "user", api.SignedOutRefuse); err == nil {
+	if err := h.agents.Tell(t.Context(), testProject, "ghost", "hi", "user", api.SignedOutRefuse); err == nil {
 		t.Fatalf("telling unknown agent should error")
 	}
 }

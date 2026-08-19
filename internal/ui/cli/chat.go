@@ -186,7 +186,7 @@ func chatJoin(cmd *cobra.Command, b backend) error {
 		"Ctrl-D or /quit to leave. Agents ("+theme.AgentIcon+") talk with `sindri meeting <message>` from their pods."))
 	fmt.Fprintln(out, theme.Dim().Render("--- transcript ---"))
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(cmd.Context())
 	defer cancel()
 	// Heartbeat while joined: the user is a required participant, so a live join keeps the room unlocked.
 	_ = b.ChatHeartbeat()

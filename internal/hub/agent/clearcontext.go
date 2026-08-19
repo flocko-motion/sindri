@@ -8,6 +8,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -20,9 +21,10 @@ import (
 // the kickoff lands — shorter than rehydrate's launch wait, since the session is already live.
 const clearKickoffDelay = 2 * time.Second
 
-// SetClearArmed arms a context clear, or takes it back. WHEN it lands is the agent's to say: one at
-// a leaf boundary clears now, one holding work waits for FireArmedClears. Disarming is just the flag.
-func (s *Service) SetClearArmed(project, name string, armed bool) error {
+// SetClearArmed arms a context clear, or takes it back. Arming is the whole decision a human makes:
+// WHEN it lands is the agent's to say, so one at a leaf boundary is cleared now and one holding work
+// keeps the arming until it reaches one (-> FireArmedClears). Disarming is just the flag.
+func (s *Service) SetClearArmed(ctx context.Context, project, name string, armed bool) error {
 	ps := s.store.For(project)
 	a, ok, err := ps.GetAgent(name)
 	if err != nil {
@@ -49,9 +51,11 @@ func (s *Service) SetClearArmed(project, name string, armed bool) error {
 		s.deps.Notify()
 		return nil
 	}
-	if err := s.FireClear(project, name, workflow.MsgKickoff, true); err != nil {
-		// Undo the arming rather than leave it behind an error the user reads as "nothing happened".
-		// A sweep failure is the opposite case: the arming stands and tries again at the next boundary.
+	if err := s.FireClear(ctx, project, name, workflow.MsgKickoff, true); err != nil {
+		// This call said "clears now" and could not. Undo the arming rather than leave a durable
+		// flag behind an error the user reads as "nothing happened" — one that would also withhold
+		// the agent from work. A failure in the SWEEP is the opposite case: the arming was set
+		// deliberately, so it stands and tries again at the next boundary.
 		_ = s.setArmed(project, name, false)
 		s.deps.Notify()
 		return err
@@ -66,9 +70,10 @@ func (s *Service) ClearArmed(project, name string) bool {
 	return err == nil && ok && a.ClearArmed
 }
 
-// FireArmedClears fires every armed clear in a project whose agent has reached a leaf boundary — off
-// the hub's tick, where nothing of the agent's own is in flight to interrupt.
-func (s *Service) FireArmedClears(project string) {
+// FireArmedClears fires every armed clear in a project whose agent has reached a leaf boundary. Off
+// the hub's tick rather than the agent's request: the clear interrupts the session, and an agent
+// that just asked for work is mid-turn, holding the very command that would be cut off.
+func (s *Service) FireArmedClears(ctx context.Context, project string) {
 	agents, err := s.store.For(project).Roster()
 	if err != nil {
 		return
@@ -81,7 +86,7 @@ func (s *Service) FireArmedClears(project string) {
 		if err != nil || !at {
 			continue
 		}
-		if err := s.FireClear(project, a.Name, workflow.MsgKickoff, true); err != nil {
+		if err := s.FireClear(ctx, project, a.Name, workflow.MsgKickoff, true); err != nil {
 			fmt.Fprintf(os.Stderr, "hub: clearing %s's context: %v\n", a.Name, err)
 		}
 	}
@@ -89,8 +94,9 @@ func (s *Service) FireArmedClears(project string) {
 
 // FireClear sends /clear into name's live session, then queues next behind it on a delay. interrupt
 // is true where nothing of the agent's is in flight (a terminal, or the hub's own tick) — never
-// where the call answers the agent's own ask, which ESC would cut off mid-turn.
-func (s *Service) FireClear(project, name, next string, interrupt bool) error {
+// where the call answers the agent's own ask, which ESC would cut off mid-turn. The arming is spent
+// before the injection, so a failed inject loses it rather than firing again at every boundary.
+func (s *Service) FireClear(ctx context.Context, project, name, next string, interrupt bool) error {
 	ps := s.store.For(project)
 	at, err := s.AtLeafBoundary(project, name)
 	if err != nil {
@@ -107,9 +113,9 @@ func (s *Service) FireClear(project, name, next string, interrupt bool) error {
 		return err
 	}
 	if interrupt {
-		_ = s.Interrupt(project, name)
+		_ = s.Interrupt(ctx, project, name)
 	}
-	if err := s.Inject(project, name, "/clear"); err != nil {
+	if err := s.Inject(ctx, project, name, "/clear"); err != nil {
 		return err
 	}
 	// Before the kickoff, not after: next is computed from this measurement, and left standing it
@@ -117,9 +123,12 @@ func (s *Service) FireClear(project, name, next string, interrupt bool) error {
 	s.ForgetContext(project, name)
 	_ = ps.Log(name, "clear-context", "fired at a leaf boundary")
 	s.deps.Notify()
+	// The kickoff waits out the clear, so it runs on ctx rather than on the caller's return: every
+	// caller hands work-lifetime context here — a handler detaches from its request, the sweeps carry
+	// the hub's own — and one that does not means to abandon this too.
 	go func() {
 		time.Sleep(clearKickoffDelay)
-		_ = s.InjectWhenReady(project, name, next)
+		_ = s.InjectWhenReady(ctx, project, name, next)
 	}()
 	return nil
 }

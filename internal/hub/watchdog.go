@@ -99,6 +99,9 @@ type liveness struct {
 // watchdog observes agent liveness on a loop; one per hub, started by New, stopped by Close.
 type watchdog struct {
 	h *Hub
+	// base is the hub's lifetime (-> Hub.lifetime): every probe here is a bounded child of it, so a
+	// hub on its way out stops asking podman questions.
+	base context.Context
 
 	mu  sync.RWMutex
 	obs map[agentKey]liveness
@@ -137,8 +140,8 @@ func (w *watchdog) runtimeHint() string {
 // newWatchdog builds and starts the observer. It must not block — New runs before Serve answers
 // the socket, and a full sweep (14 agents × 2 commands, 4-wide) delayed startup past the health
 // check — so the first pass only lists, provisionally, and the first sweep refines it.
-func newWatchdog(h *Hub) *watchdog {
-	w := &watchdog{h: h, obs: map[agentKey]liveness{}, repos: map[string]repoSample{},
+func newWatchdog(base context.Context, h *Hub) *watchdog {
+	w := &watchdog{h: h, base: base, obs: map[agentKey]liveness{}, repos: map[string]repoSample{},
 		stop: make(chan struct{}), done: make(chan struct{})}
 	w.seed()
 	go w.loop()
@@ -152,7 +155,7 @@ func (w *watchdog) seed() {
 	if err != nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	ctx, cancel := context.WithTimeout(w.base, probeTimeout)
 	existing, listErr := container.ListByLabelFresh(ctx, "sindri.project", "")
 	cancel()
 	if listErr != nil {
@@ -240,7 +243,7 @@ func (w *watchdog) sampleRepos() {
 // sampleCapacity takes one reading from the backend. A failed one settles nothing, as everywhere
 // else here: the previous reading stands rather than the header blinking out on a slow podman.
 func (w *watchdog) sampleCapacity() {
-	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	ctx, cancel := context.WithTimeout(w.base, probeTimeout)
 	defer cancel()
 	c, err := container.MemoryCapacity(ctx)
 	if err != nil {
@@ -273,7 +276,7 @@ func (w *watchdog) sweep(withProbes bool) {
 	if err != nil {
 		return // a store hiccup is not evidence about any agent; keep the last observations
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	ctx, cancel := context.WithTimeout(w.base, probeTimeout)
 	existing, listErr := container.ListByLabelFresh(ctx, "sindri.project", "")
 	cancel()
 	// This listing IS the runtime health check, so nobody has to pay for a second one. A CLI that
@@ -342,7 +345,7 @@ func (w *watchdog) checkStuckLaunch(a store.Agent, containerExists bool) {
 	if !launching {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	ctx, cancel := context.WithTimeout(w.base, probeTimeout)
 	running := containerExists && container.RunningContext(ctx, w.h.container(a.Project, a.Name))
 	// A probe out of time answers false, and false here would read as "exited" — of the runtime whose
 	// silence hangs launches in the first place. No answer, no claim; the time bounds still fire.
@@ -359,7 +362,7 @@ func (w *watchdog) checkStuckLaunch(a store.Agent, containerExists bool) {
 	// Off the beat: FailLaunch removes the container, and the fleet's whole sweep queues behind this.
 	// Its own root, since the beat's context ends first.
 	go func() {
-		rmCtx, rmCancel := context.WithTimeout(context.Background(), launchReleaseBound)
+		rmCtx, rmCancel := context.WithTimeout(w.base, launchReleaseBound)
 		defer rmCancel()
 		w.h.agents.FailLaunch(rmCtx, a.Project, a.Name, reason)
 	}()
@@ -384,7 +387,7 @@ func launchFailure(elapsed time.Duration, containerExists, containerExited, sess
 
 // probe reads one agent's tmux session and, when up, Claude's state; a failure is a strike only.
 func (w *watchdog) probe(a store.Agent) {
-	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	ctx, cancel := context.WithTimeout(w.base, probeTimeout)
 	defer cancel()
 	cs, ok := w.h.agents.ClientsCtx(ctx, a.Project, a.Name)
 	if !ok {

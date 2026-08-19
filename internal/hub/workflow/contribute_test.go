@@ -59,7 +59,7 @@ func runQueuedGate(t *testing.T, e *Engine) {
 	if !ok {
 		t.Fatal("expected a queued gate run")
 	}
-	if err := e.ExecuteRun(project, id); err != nil {
+	if err := e.ExecuteRun(t.Context(), project, id); err != nil {
 		t.Fatalf("ExecuteRun(%s): %v", id, err)
 	}
 }

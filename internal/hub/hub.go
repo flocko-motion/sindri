@@ -9,6 +9,7 @@
 package hub
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -35,6 +36,13 @@ type Hub struct {
 	store     *store.Store
 	events    *bus      // change notifications for /events
 	startedAt time.Time // process start, reported on the board so `hub status` reads uptime from it rather than the OS
+
+	// lifetime is the hub's own context, cut from the one New was given and ended by Close. Held
+	// rather than threaded because it is what the hub's FLEET-SIDE work inherits — every loop it
+	// starts, and every push through a port whose signature carries no context of its own — so that
+	// work stops when the hub does. Request work takes the request's context instead (-> detached).
+	lifetime context.Context
+	endLife  context.CancelFunc
 
 	chat     *chat.Service     // the user's chatroom relay (internal/hub/chat)
 	comments *comments.Service // task-comment sync (internal/hub/comments)
@@ -78,7 +86,8 @@ func (h *Hub) projectRoot(project string) string {
 }
 
 // New opens the single global hub and its project-keyed store; repos register lazily on first use.
-func New() (*Hub, error) {
+// ctx is the hub's lifetime: what its loops and its fleet-side pushes run under, until Close.
+func New(ctx context.Context) (*Hub, error) {
 	dir := paths.StateDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create state dir %s: %w", dir, err)
@@ -87,7 +96,8 @@ func New() (*Hub, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := &Hub{store: st, events: newBus(), startedAt: time.Now()}
+	life, endLife := context.WithCancel(ctx)
+	h := &Hub{store: st, events: newBus(), startedAt: time.Now(), lifetime: life, endLife: endLife}
 	h.chat = chat.New(h.store, chatDelivery{h})
 	h.comments = comments.New(h.store, commentsDeps{h}, spec.Source{}, github.Source{})
 	// agentCh before agents: the lifecycle serves sockets through it, and agentchanDeps only
@@ -98,14 +108,14 @@ func New() (*Hub, error) {
 	h.projects = project.New(h.store, projectDeps{h})
 	// Last, after agents: the watchdog probes through h.agents and reads once here, so the first
 	// board read has real observations.
-	h.watch = newWatchdog(h)
+	h.watch = newWatchdog(life, h)
 	// After wf: it drives SyncReference, whose first pass only records where each reference stands.
-	h.refs = newRefwatch(h)
+	h.refs = newRefwatch(life, h)
 	h.creds = newCredwatch(h)
 	// After watch: it reads the watchdog's idle dwell, and after wf: it nudges through it.
 	h.stalls = newStallwatch(h)
 	// After wf: it drives NextQueuedRun/ExecuteRun through it.
-	h.runs = newRunwatch(h)
+	h.runs = newRunwatch(life, h)
 	return h, nil
 }
 
@@ -158,12 +168,15 @@ func ensureGitignore(root string) {
 
 // Close shuts agent listeners and releases the store.
 func (h *Hub) Close() error {
+	// The loops first, THEN the lifetime: work already under way finishes as it would have, and only
+	// what outlives the loops is cut short. runs.close() is the one exception (-> runwatch.close).
 	h.watch.close()
 	h.refs.close()
 	h.creds.close()
 	h.stalls.close()
 	h.runs.close()
 	h.agentCh.CloseAll()
+	h.endLife()
 	server.FlushAccessLog() // emit any open access-log run before we go quiet
 	return h.store.Close()
 }

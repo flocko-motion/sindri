@@ -161,8 +161,8 @@ func ModelInUse(recorded, detected string, up bool) string {
 
 // CurrentModel is the model name is effectively running, taking both readings itself. For a caller
 // with neither — the assignment path; the board must not use it, since the probe is per agent.
-func (s *Service) CurrentModel(project, name string) string {
-	up := s.AgentAlive(project, name)
+func (s *Service) CurrentModel(ctx context.Context, project, name string) string {
+	up := s.AgentAlive(ctx, project, name)
 	var detected string
 	if up {
 		_, _, detected, _ = s.ContextUsage(project, name)
@@ -196,13 +196,15 @@ func (s *Service) ForgetContext(project, name string) {
 }
 
 // LaunchDiagnostic re-runs both liveness probes so a launch timeout says which one failed.
-func (s *Service) LaunchDiagnostic(project, name string) string {
+func (s *Service) LaunchDiagnostic(ctx context.Context, project, name string) string {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
 	c := s.deps.ContainerName(project, name)
-	if !container.Running(c) {
+	if !container.RunningContext(ctx, c) {
 		return fmt.Sprintf("the runtime does not report container %s as running [%s]", c,
-			container.Diagnose(context.Background(), c))
+			container.Diagnose(ctx, c))
 	}
-	if out, err := container.Exec(c, append([]string{"tmux"}, tmux.HasSession(name)...)...); err != nil {
+	if out, err := container.ExecContext(ctx, c, append([]string{"tmux"}, tmux.HasSession(name)...)...); err != nil {
 		msg := strings.TrimSpace(string(out))
 		if msg == "" {
 			msg = err.Error()
@@ -213,14 +215,14 @@ func (s *Service) LaunchDiagnostic(project, name string) string {
 }
 
 // AgentDiagnostic un-collapses the board's "down" into both probes' real results.
-func (s *Service) AgentDiagnostic(project, name string) string {
+func (s *Service) AgentDiagnostic(ctx context.Context, project, name string) string {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
 	c := s.deps.ContainerName(project, name)
 	var b strings.Builder
 	fmt.Fprintf(&b, "container:      %s\n", c)
-	fmt.Fprintf(&b, "running check:  %s\n", container.Diagnose(context.Background(), c))
+	fmt.Fprintf(&b, "running check:  %s\n", container.Diagnose(ctx, c))
 
-	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
-	defer cancel()
 	out, err := container.ExecContext(ctx, c, append([]string{"tmux"}, tmux.HasSession(name)...)...)
 	switch {
 	case ctx.Err() == context.DeadlineExceeded:
@@ -245,22 +247,17 @@ func (s *Service) AgentDiagnostic(project, name string) string {
 	return b.String()
 }
 
-// AgentAlive reports whether an agent is running (pod up and tmux session live), bounded like every
-// other probe here — on context.Background() a wedged pod blocked its caller for ever.
-func (s *Service) AgentAlive(project, name string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+// AgentAlive reports whether an agent is running: pod up AND tmux session live, under a probeTimeout
+// cut from the caller's ctx — a wedged pod reads "down" rather than blocking whoever asked.
+func (s *Service) AgentAlive(ctx context.Context, project, name string) bool {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-	return s.AgentAliveCtx(ctx, project, name)
-}
-
-// AgentAliveCtx is AgentAlive bounded by ctx, so a wedged pod reads "down" instead of blocking.
-func (s *Service) AgentAliveCtx(ctx context.Context, project, name string) bool {
 	return container.RunningContext(ctx, s.deps.ContainerName(project, name)) && s.SessionAliveCtx(ctx, project, name)
 }
 
 // Clients lists an agent's dial-ins; a wedged exec degrades to "not running".
-func (s *Service) Clients(project, name string) ([]ClientView, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+func (s *Service) Clients(ctx context.Context, project, name string) ([]ClientView, error) {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	cs, ok := s.ClientsCtx(ctx, project, name)
 	if !ok {
@@ -312,7 +309,7 @@ var paneMemo struct {
 // AgentPane shows the live tmux screen, else startup logs, else captured launch output. The capture
 // is attempted rather than preceded by a liveness check: asking `tmux has-session` first doubled the
 // wait to predict what the capture itself reports, and left a window for the session to die between.
-func (s *Service) AgentPane(project, name string, lines int) (string, error) {
+func (s *Service) AgentPane(ctx context.Context, project, name string, lines int) (string, error) {
 	key := fmt.Sprintf("%s/%s/%d", project, name, lines)
 	paneMemo.mu.Lock()
 	if at, ok := paneMemo.at[key]; ok && time.Since(at) < paneTTL {
@@ -322,7 +319,9 @@ func (s *Service) AgentPane(project, name string, lines int) (string, error) {
 	}
 	paneMemo.mu.Unlock()
 
-	out, err := container.Exec(s.deps.ContainerName(project, name), append([]string{"tmux"}, tmux.CapturePane(name, lines, true)...)...) // colour: the preview renders ANSI
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	out, err := container.ExecContext(ctx, s.deps.ContainerName(project, name), append([]string{"tmux"}, tmux.CapturePane(name, lines, true)...)...) // colour: the preview renders ANSI
 	pane := string(out)
 	if err != nil {
 		// No session to capture: what a human wants next is why — the pod's own output, then whatever

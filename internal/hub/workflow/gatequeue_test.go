@@ -47,7 +47,7 @@ func TestASelfCheckMeasuresTheCommitNotTheMovingTree(t *testing.T) {
 
 	r := openGate(t, e, "bombur", gateLint, "")
 	writeFile(t, filepath.Join(wt, "scratch.txt"), "half-written, as the agent was told to carry on")
-	if err := e.ExecuteRun("repo", r.ID); err != nil {
+	if err := e.ExecuteRun(t.Context(), "repo", r.ID); err != nil {
 		t.Fatalf("ExecuteRun: %v", err)
 	}
 
@@ -112,7 +112,7 @@ func TestASelfCheckOnAnUnchangedWorkspaceAnswersFromTheStore(t *testing.T) {
 	writeFile(t, filepath.Join(root, ".worktrees", "bombur", "new.txt"), "work")
 
 	first := openGate(t, e, "bombur", gateLint, "")
-	if err := e.ExecuteRun("repo", first.ID); err != nil {
+	if err := e.ExecuteRun(t.Context(), "repo", first.ID); err != nil {
 		t.Fatalf("ExecuteRun: %v", err)
 	}
 
@@ -185,7 +185,7 @@ func TestACoauthorsCheckCommitsNothing(t *testing.T) {
 	if len(runs) != 1 || runs[0].Commit != "" {
 		t.Fatalf("queued runs = %+v, want one gate naming no commit", runs)
 	}
-	if err := e.ExecuteRun("repo", runs[0].ID); err != nil {
+	if err := e.ExecuteRun(t.Context(), "repo", runs[0].ID); err != nil {
 		t.Fatalf("ExecuteRun: %v", err)
 	}
 	if _, ok := ps.GatePassed("", ""); ok {
@@ -201,7 +201,7 @@ func TestAReviewersOwnCheckWritesNothingToTheBranch(t *testing.T) {
 	e, ps, root := gateRepo(t, "bombur", "sd-1")
 	writeFile(t, filepath.Join(root, ".worktrees", "bombur", "new.txt"), "work")
 	submitted := openGate(t, e, "bombur", gateSubmit, "the work")
-	if err := e.ExecuteRun("repo", submitted.ID); err != nil {
+	if err := e.ExecuteRun(t.Context(), "repo", submitted.ID); err != nil {
 		t.Fatalf("ExecuteRun: %v", err)
 	}
 	review := filepath.Join(root, ".worktrees", "rune")
@@ -250,7 +250,7 @@ func TestAPRCheckReusesTheSubmitGatesPass(t *testing.T) {
 	e, ps, root := gateRepo(t, "bombur", "sd-1")
 	writeFile(t, filepath.Join(root, ".worktrees", "bombur", "new.txt"), "work")
 	r := openGate(t, e, "bombur", gateSubmit, "the work")
-	if err := e.ExecuteRun("repo", r.ID); err != nil {
+	if err := e.ExecuteRun(t.Context(), "repo", r.ID); err != nil {
 		t.Fatalf("ExecuteRun: %v", err)
 	}
 	if _, exists, _ := ps.GetPR("pr-sd-1"); !exists {
@@ -348,7 +348,7 @@ func TestAFailedPRVerdictIsReadBackWithoutAnotherGate(t *testing.T) {
 	wt := filepath.Join(root, ".worktrees", "bombur")
 	writeExec(t, filepath.Join(wt, "check.sh"), "#!/bin/sh\necho 'FAIL: the project says no'\nexit 1\n")
 	r := openGate(t, e, "bombur", gateSubmit, "the work")
-	if err := e.ExecuteRun("repo", r.ID); err != nil {
+	if err := e.ExecuteRun(t.Context(), "repo", r.ID); err != nil {
 		t.Fatalf("ExecuteRun: %v", err)
 	}
 	if got, _, _ := ps.GetRun(r.ID); got.Status != "failed" {
@@ -386,7 +386,7 @@ func TestAReusedPassNeverSitsQueued(t *testing.T) {
 	e, ps, root := gateRepo(t, "bombur", "sd-1")
 	writeFile(t, filepath.Join(root, ".worktrees", "bombur", "new.txt"), "work")
 	first := openGate(t, e, "bombur", gateLint, "")
-	if err := e.ExecuteRun("repo", first.ID); err != nil {
+	if err := e.ExecuteRun(t.Context(), "repo", first.ID); err != nil {
 		t.Fatalf("ExecuteRun: %v", err)
 	}
 
@@ -414,7 +414,7 @@ func TestAPRCheckGatesTheBranchNotTheAuthorsTree(t *testing.T) {
 	wt := filepath.Join(root, ".worktrees", "bombur")
 	writeFile(t, filepath.Join(wt, "new.txt"), "work")
 	r := openGate(t, e, "bombur", gateSubmit, "the work")
-	if err := e.ExecuteRun("repo", r.ID); err != nil {
+	if err := e.ExecuteRun(t.Context(), "repo", r.ID); err != nil {
 		t.Fatalf("ExecuteRun: %v", err)
 	}
 	// The author moves on: a change in its tree that no commit on the branch carries.
@@ -426,7 +426,7 @@ func TestAPRCheckGatesTheBranchNotTheAuthorsTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.ExecuteRun("repo", run.ID); err != nil {
+	if err := e.ExecuteRun(t.Context(), "repo", run.ID); err != nil {
 		t.Fatalf("ExecuteRun: %v", err)
 	}
 	got, _, _ := ps.GetRun(run.ID)

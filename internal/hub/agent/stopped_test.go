@@ -12,7 +12,7 @@ import (
 // (crashed) — the whole reason the flag exists rather than living only in AgentStatus's argument.
 func TestStopAgentPersistsStopped(t *testing.T) {
 	s, _ := tellFixture(t, "eitri", idlePane)
-	if err := s.StopAgent("proj", "eitri"); err != nil {
+	if err := s.StopAgent(t.Context(), "proj", "eitri"); err != nil {
 		t.Fatal(err)
 	}
 	a, ok, err := s.store.For("proj").GetAgent("eitri")
@@ -32,7 +32,7 @@ func TestLaunchClearsStopped(t *testing.T) {
 	if err := s.store.For("proj").PutAgent(store.Agent{Name: "eitri", Role: "worker", Stopped: true}); err != nil {
 		t.Fatal(err)
 	}
-	_ = s.Launch("proj", "eitri", false, false, 0, 0, io.Discard)
+	_ = s.Launch(t.Context(), "proj", "eitri", false, false, 0, 0, io.Discard)
 
 	a, ok, err := s.store.For("proj").GetAgent("eitri")
 	if err != nil || !ok {

@@ -13,7 +13,7 @@ import (
 // whose fullness (and compaction threshold) the hub cannot judge — refused outright, never stored.
 func TestSetModelRefusesAnUnknownModel(t *testing.T) {
 	s, _ := compactFixture(t)
-	if err := s.SetModel("proj", "durin", "some-model-nobody-listed", "next"); err == nil {
+	if err := s.SetModel(t.Context(), "proj", "durin", "some-model-nobody-listed", "next"); err == nil {
 		t.Fatal("SetModel accepted a model with no known window")
 	}
 	a, _, err := s.store.For("proj").GetAgent("durin")
@@ -38,7 +38,7 @@ func TestSetModelStoresWithoutDisturbingAStoppedAgent(t *testing.T) {
 	agentport.Use(claude.New()) // real ModelWindow, not the partial fakes other tests leave wired
 	t.Cleanup(func() { agentport.Use(unreadablePane{}) })
 
-	if err := s.SetModel("proj", "durin", "claude-opus-5", "next"); err != nil {
+	if err := s.SetModel(t.Context(), "proj", "durin", "claude-opus-5", "next"); err != nil {
 		t.Fatalf("SetModel on a stopped agent: %v", err)
 	}
 	a, _, err := s.store.For("proj").GetAgent("durin")
@@ -64,7 +64,7 @@ func TestSetModelToTheSameValueIsANoOp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := s.SetModel("proj", "durin", "claude-opus-5", "next"); err != nil {
+	if err := s.SetModel(t.Context(), "proj", "durin", "claude-opus-5", "next"); err != nil {
 		t.Fatalf("SetModel to the value it already holds: %v", err)
 	}
 	if len(f.sent) != 0 || len(f.removed) != 0 {
@@ -80,7 +80,7 @@ func TestSetModelClearsSwitchesAndQueuesTheInstruction(t *testing.T) {
 	s, f := compactFixture(t)
 	writeUsage(t, "proj", "durin", 80_000) // a session with something in it, unlike a fresh one
 
-	if err := s.SetModel("proj", "durin", "claude-opus-5", "you hold td-abc123"); err != nil {
+	if err := s.SetModel(t.Context(), "proj", "durin", "claude-opus-5", "you hold td-abc123"); err != nil {
 		t.Fatalf("SetModel: %v", err)
 	}
 
@@ -113,7 +113,7 @@ func TestSetModelClearsSwitchesAndQueuesTheInstruction(t *testing.T) {
 func TestSetModelSkipsClearingAFreshSession(t *testing.T) {
 	s, f := compactFixture(t)
 
-	if err := s.SetModel("proj", "durin", "claude-opus-5", "you hold td-abc123"); err != nil {
+	if err := s.SetModel(t.Context(), "proj", "durin", "claude-opus-5", "you hold td-abc123"); err != nil {
 		t.Fatalf("SetModel: %v", err)
 	}
 

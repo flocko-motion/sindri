@@ -8,6 +8,7 @@
 package hub
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -20,14 +21,15 @@ const runInterval = 5 * time.Second
 // run at a time" fleet-wide via TryLock, mirroring workflow/prcheck.go's preflight.
 type runwatch struct {
 	h    *Hub
+	base context.Context // the hub's lifetime; a run in flight is a child of it (-> Hub.lifetime)
 	stop chan struct{}
 	done chan struct{}
 	busy sync.Mutex
 }
 
 // newRunwatch starts the loop. It must not block: New runs before Serve answers the socket.
-func newRunwatch(h *Hub) *runwatch {
-	r := &runwatch{h: h, stop: make(chan struct{}), done: make(chan struct{})}
+func newRunwatch(base context.Context, h *Hub) *runwatch {
+	r := &runwatch{h: h, base: base, stop: make(chan struct{}), done: make(chan struct{})}
 	go r.loop()
 	return r
 }
@@ -60,7 +62,7 @@ func (r *runwatch) tick() {
 	}
 	go func() {
 		defer r.busy.Unlock()
-		_ = r.h.wf.ExecuteRun(project, id)
+		_ = r.h.wf.ExecuteRun(r.base, project, id)
 	}()
 }
 

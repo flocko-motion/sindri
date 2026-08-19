@@ -71,7 +71,7 @@ func TestTheClearItselfDropsTheStaleReading(t *testing.T) {
 
 	// The clear: /clear into the session, and the transcript it leaves behind is a fresh one.
 	writeUsage(t, "proj", "eitri", 1_000)
-	if err := s.SetClearArmed("proj", "eitri", true); err != nil {
+	if err := s.SetClearArmed(t.Context(), "proj", "eitri", true); err != nil {
 		t.Fatalf("clearing an idle agent at a boundary: %v", err)
 	}
 

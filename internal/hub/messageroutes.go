@@ -21,7 +21,7 @@ func (h *Hub) messageRoutes(mux *http.ServeMux) {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"delivered"}, h.agents.Tell(h.agentReq(r, req.Name), req.Name, req.Msg, req.Source, req.SignedOut))
+		writeJSON(w, okMsg{"delivered"}, h.agents.Tell(detached(r), h.agentReq(r, req.Name), req.Name, req.Msg, req.Source, req.SignedOut))
 	})
 	// The other half of the pair: mail waits to be read and does not interrupt, where /tell wakes the
 	// agent now and is lost if it is not there. Two routes, because the choice is the user's.

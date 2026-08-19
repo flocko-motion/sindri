@@ -85,13 +85,8 @@ func (Engine) Run(o container.RunOpts) error {
 	return nil
 }
 
-// Exec runs a command inside a pod and returns its combined output.
-func (e Engine) Exec(name string, args ...string) ([]byte, error) {
-	return e.ExecContext(context.Background(), name, args...)
-}
-
-// ExecContext is Exec bounded by ctx: when ctx is cancelled the podman process is
-// killed and the call returns promptly, so a wedged container can't stall the caller.
+// ExecContext runs a command inside a pod, bounded by ctx, and returns its combined output: when
+// ctx is cancelled the podman process is killed, so a wedged container can't stall the caller.
 func (Engine) ExecContext(ctx context.Context, name string, args ...string) ([]byte, error) {
 	full := append([]string{"exec", name}, args...)
 	out, err := exec.CommandContext(ctx, Binary, full...).CombinedOutput()
@@ -170,11 +165,8 @@ func (Engine) Healthy() (ok bool, hint string) {
 	return false, "podman isn't reachable — agents can't run until it is. On macOS/Windows: `podman machine start` (or stop then start if it's wedged), then verify with `podman info`."
 }
 
-// Running reports whether a container exists and is running.
-func (e Engine) Running(name string) bool { return e.RunningContext(context.Background(), name) }
-
-// RunningContext is Running bounded by ctx: on cancellation the podman process is
-// killed and it reports false, so a stalled inspect degrades to "down".
+// RunningContext reports whether a container exists and is running, bounded by ctx: on cancellation
+// the podman process is killed and it reports false, so a stalled inspect degrades to "down".
 func (Engine) RunningContext(ctx context.Context, name string) bool {
 	out, err := exec.CommandContext(ctx, Binary, "inspect", "-f", "{{.State.Running}}", name).Output()
 	return err == nil && strings.TrimSpace(string(out)) == "true"
@@ -293,11 +285,8 @@ func (Engine) Info(name string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// Rm force-removes a container.
-func (e Engine) Rm(name string) error { return e.RmContext(context.Background(), name) }
-
-// RmContext is Rm bounded by ctx: on cancellation podman is killed, and the error names the bound
-// rather than the removal — `rm -f` stops the container first, so it is a slow verb by nature.
+// RmContext force-removes a container, bounded by ctx: on cancellation podman is killed, and the
+// error names the bound rather than the removal — `rm -f` stops the container first, so it is slow.
 func (Engine) RmContext(ctx context.Context, name string) error {
 	out, err := exec.CommandContext(ctx, Binary, "rm", "-f", name).CombinedOutput()
 	if err == nil {

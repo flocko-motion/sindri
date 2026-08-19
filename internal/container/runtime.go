@@ -92,13 +92,11 @@ type Runtime interface {
 	// takes what it uses from the host, a micro-VM reserves its whole limit up front.
 	DefaultMemory() string
 	Run(o RunOpts) error
-	Exec(name string, args ...string) ([]byte, error)
 	ExecContext(ctx context.Context, name string, args ...string) ([]byte, error)
 	ExecInteractive(name string, args ...string) error
 	// AttachCmd returns the interactive exec command unrun, for callers (the TUI)
 	// that drive their own terminal handoff.
 	AttachCmd(name string, args ...string) *exec.Cmd
-	Running(name string) bool
 	RunningContext(ctx context.Context, name string) bool
 	// Diagnose accounts for what the running probe observes, so a "not running"
 	// verdict is explainable rather than a silent false.
@@ -115,9 +113,8 @@ type Runtime interface {
 	AgentChannel() (NetChannel, error)
 	Logs(name string, tail int) string
 	Info(name string) string
-	Rm(name string) error
-	// RmContext is Rm bounded by ctx, for a caller that must not wait on the runtime — a
-	// removal is a stop as well, so it is the slowest of the verbs to answer.
+	// RmContext force-removes a pod, bounded by ctx: a removal is a stop as well, so it is the
+	// slowest of these verbs to answer and the one a caller most needs a bound on.
 	RmContext(ctx context.Context, name string) error
 	ListByLabelContext(ctx context.Context, label, value string) ([]string, error)
 	// Check pre-flights the runtime, narrating to w. There is no separate reachability probe: the
@@ -151,11 +148,9 @@ type noop struct{}
 func (noop) Name() string                                                   { return "none (no runtime configured)" }
 func (noop) DefaultMemory() string                                          { return "" }
 func (noop) Run(RunOpts) error                                              { return errNoRuntime }
-func (noop) Exec(string, ...string) ([]byte, error)                         { return nil, errNoRuntime }
 func (noop) ExecContext(context.Context, string, ...string) ([]byte, error) { return nil, errNoRuntime }
 func (noop) ExecInteractive(string, ...string) error                        { return errNoRuntime }
 func (noop) AttachCmd(string, ...string) *exec.Cmd                          { return exec.Command("true") }
-func (noop) Running(string) bool                                            { return false }
 func (noop) RunningContext(context.Context, string) bool                    { return false }
 func (noop) Diagnose(context.Context, string) string                        { return "no container runtime configured" }
 func (noop) Stats(context.Context, string) (Usage, error)                   { return Usage{}, errNoRuntime }
@@ -168,7 +163,6 @@ func (noop) AgentChannel() (NetChannel, error) {
 }
 func (noop) Logs(string, int) string                                              { return "" }
 func (noop) Info(string) string                                                   { return "" }
-func (noop) Rm(string) error                                                      { return errNoRuntime }
 func (noop) RmContext(context.Context, string) error                              { return errNoRuntime }
 func (noop) ListByLabelContext(context.Context, string, string) ([]string, error) { return nil, nil }
 func (noop) Check(io.Writer) error                                                { return errNoRuntime }
@@ -186,10 +180,7 @@ func DefaultMemory() string { return active.DefaultMemory() }
 // Run launches a detached agent pod on the wired backend.
 func Run(o RunOpts) error { return active.Run(o) }
 
-// Exec runs a command in a pod and returns its combined output.
-func Exec(name string, args ...string) ([]byte, error) { return active.Exec(name, args...) }
-
-// ExecContext is Exec bounded by ctx.
+// ExecContext runs a command in a pod, bounded by ctx, and returns its combined output.
 func ExecContext(ctx context.Context, name string, args ...string) ([]byte, error) {
 	return active.ExecContext(ctx, name, args...)
 }
@@ -200,10 +191,8 @@ func ExecInteractive(name string, args ...string) error { return active.ExecInte
 // AttachCmd returns (without running) the interactive exec command.
 func AttachCmd(name string, args ...string) *exec.Cmd { return active.AttachCmd(name, args...) }
 
-// Running reports whether a pod is running.
-func Running(name string) bool { return active.Running(name) }
-
-// RunningContext is Running bounded by ctx.
+// RunningContext reports whether a pod is running, bounded by ctx: on cancellation the runtime
+// process is killed and it reports false, so a stalled probe degrades to "down".
 func RunningContext(ctx context.Context, name string) bool {
 	return active.RunningContext(ctx, name)
 }
@@ -226,11 +215,8 @@ func Logs(name string, tail int) string { return active.Logs(name, tail) }
 // Info returns a short summary of a pod.
 func Info(name string) string { return active.Info(name) }
 
-// Rm force-removes a pod.
-func Rm(name string) error { return active.Rm(name) }
-
-// RmContext is Rm bounded by ctx: on cancellation the runtime process is killed and the error says
-// so, so a caller that cannot wait — a sweep beat, a board read — is never held by an unwell runtime.
+// RmContext force-removes a pod, bounded by ctx: on cancellation the runtime process is killed and
+// the error says so, so a caller that cannot wait is never held by an unwell runtime.
 func RmContext(ctx context.Context, name string) error { return active.RmContext(ctx, name) }
 
 // ListTTL bounds ListByLabelCached staleness: short enough that a board read seconds

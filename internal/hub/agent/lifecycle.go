@@ -33,6 +33,10 @@ import (
 	"github.com/flo-at/sindri/internal/tools/paths"
 )
 
+// agentRemoveTimeout bounds tearing a pod down on delete/stop. Wider than probeTimeout: `rm -f`
+// stops before it removes, so it is the slowest verb here (-> workflow.runRemoveTimeout).
+const agentRemoveTimeout = 30 * time.Second
+
 // lcKey keys the transient lifecycle-intent map by (project, name).
 type lcKey struct{ project, name string }
 
@@ -192,7 +196,7 @@ func (s *Service) NewAgent(project, name, role, memory string) (string, error) {
 
 // DeleteAgent removes an agent entirely — pod, socket, worktree, identity, log. Teardown is
 // best-effort (a missing pod or worktree is fine); the identity always goes.
-func (s *Service) DeleteAgent(project, name string) error {
+func (s *Service) DeleteAgent(ctx context.Context, project, name string) error {
 	ps := s.store.For(project)
 	root := s.deps.ProjectRoot(project)
 	a, ok, err := ps.GetAgent(name)
@@ -210,7 +214,9 @@ func (s *Service) DeleteAgent(project, name string) error {
 		}
 		_ = s.deps.RefreshTask(project, st.Task)
 	}
-	_ = container.Rm(s.deps.ContainerName(project, name))
+	rmCtx, rmCancel := context.WithTimeout(context.WithoutCancel(ctx), agentRemoveTimeout)
+	_ = container.RmContext(rmCtx, s.deps.ContainerName(project, name))
+	rmCancel()
 	s.agentCh.CloseAgent(project, name)
 	// A coauthor's workspace IS the repo root — never `git worktree remove` that. Its scratch tree
 	// goes: left behind, the next agent of that name would inherit it.
@@ -228,14 +234,14 @@ func (s *Service) DeleteAgent(project, name string) error {
 
 // StopAgent tears down the pod but keeps identity, worktree, socket and log, so a relaunch
 // resumes where it left off.
-func (s *Service) StopAgent(project, name string) error {
-	return s.stopAgent(project, name, "pod removed")
+func (s *Service) StopAgent(ctx context.Context, project, name string) error {
+	return s.stopAgent(ctx, project, name, "pod removed")
 }
 
 // stopAgent is StopAgent with the log line's reason as the caller's — human-requested by default,
 // but the idle sweep states what it acted on instead (-> FireIdleStops), since this is the hub
 // acting on the fleet unasked and a user who finds an agent stopped must be able to see why.
-func (s *Service) stopAgent(project, name, reason string) error {
+func (s *Service) stopAgent(ctx context.Context, project, name, reason string) error {
 	ps := s.store.For(project)
 	a, ok, err := ps.GetAgent(name)
 	if err != nil {
@@ -243,12 +249,15 @@ func (s *Service) stopAgent(project, name, reason string) error {
 	} else if !ok {
 		return fmt.Errorf("no such agent %q", name)
 	}
-	if !container.Running(s.deps.ContainerName(project, name)) {
+	if !container.RunningContext(ctx, s.deps.ContainerName(project, name)) {
 		return fmt.Errorf("agent %q is not running", name)
 	}
 	s.setLifecycle(project, name, "stopping") // status → stopping (pod up); → down once gone
 	s.deps.Notify()
-	if err := container.Rm(s.deps.ContainerName(project, name)); err != nil {
+	rmCtx, rmCancel := context.WithTimeout(context.WithoutCancel(ctx), agentRemoveTimeout)
+	err = container.RmContext(rmCtx, s.deps.ContainerName(project, name))
+	rmCancel()
+	if err != nil {
 		s.setLifecycle(project, name, "")
 		s.deps.Notify()
 		return err
@@ -264,7 +273,7 @@ func (s *Service) stopAgent(project, name, reason string) error {
 
 // RebuildAgent rebuilds the image (re-pull base) then relaunches, streaming progress to w. A
 // bad config fails before any build; a running agent stops first so it comes up on the new one.
-func (s *Service) RebuildAgent(project, name string, w io.Writer) error {
+func (s *Service) RebuildAgent(ctx context.Context, project, name string, w io.Writer) error {
 	ps := s.store.For(project)
 	root := s.deps.ProjectRoot(project)
 	if _, ok, err := ps.GetAgent(name); err != nil {
@@ -279,22 +288,22 @@ func (s *Service) RebuildAgent(project, name string, w io.Writer) error {
 	if _, err := container.RebuildImage(root, config.Abs(root, cfg.Containerfile), w); err != nil {
 		return err
 	}
-	if container.Running(s.deps.ContainerName(project, name)) {
+	if container.RunningContext(ctx, s.deps.ContainerName(project, name)) {
 		fmt.Fprintf(w, "Image rebuilt — restarting %s to run it (the session resumes)…\n", name)
 	}
-	return s.RestartAgent(project, name, w)
+	return s.RestartAgent(ctx, project, name, w)
 }
 
 // RestartAgent replaces an agent's pod with a fresh one on the same identity — the worktree,
 // socket and log survive, so the session resumes and a down agent is simply started. It is also
 // the remedy for a signed-out one: the new process reads the credentials the hub keeps staged.
-func (s *Service) RestartAgent(project, name string, w io.Writer) error {
-	if container.Running(s.deps.ContainerName(project, name)) {
-		if err := s.StopAgent(project, name); err != nil {
+func (s *Service) RestartAgent(ctx context.Context, project, name string, w io.Writer) error {
+	if container.RunningContext(ctx, s.deps.ContainerName(project, name)) {
+		if err := s.StopAgent(ctx, project, name); err != nil {
 			return err
 		}
 	}
-	return s.Launch(project, name, false, false, 0, 0, w)
+	return s.Launch(ctx, project, name, false, false, 0, 0, w)
 }
 
 // plannerWritable is the one directory a planner may write, overlaid on a read-only workspace.
@@ -339,7 +348,7 @@ func modelEnv(model string) map[string]string {
 
 // Launch spins a pod that assumes an existing agent's identity, running Claude in a tmux session
 // named after it (or a bare shell); cols/lines size it to a caller's preview pane.
-func (s *Service) Launch(project, name string, shell, debug bool, cols, lines int, progress io.Writer) (err error) {
+func (s *Service) Launch(ctx context.Context, project, name string, shell, debug bool, cols, lines int, progress io.Writer) (err error) {
 	ps := s.store.For(project)
 	root := s.deps.ProjectRoot(project)
 	a, ok, err := ps.GetAgent(name)
@@ -435,7 +444,7 @@ func (s *Service) Launch(project, name string, shell, debug bool, cols, lines in
 	if _, err := Binary(); err != nil { // the worker is required; fail before launching
 		return err
 	}
-	_ = container.Rm(cName) // clear any stale container with this name
+	_ = container.RmContext(ctx, cName) // clear any stale container with this name
 
 	env := map[string]string{"SINDRI_AGENT": name, "COLORTERM": "truecolor"}
 	for k, v := range previewSizeEnv(cols, lines) {
@@ -528,17 +537,17 @@ func (s *Service) Launch(project, name string, shell, debug bool, cols, lines in
 	fmt.Fprintf(w, "Waiting for %s to come up…\n", name)
 	deadline := time.Now().Add(launchReadyTimeout)
 	shown := 0
-	for !s.AgentAlive(project, name) {
+	for !s.AgentAlive(ctx, project, name) {
 		if full := container.Logs(cName, 1000); len(full) > shown { // follow the container's output during the wait
 			fmt.Fprint(w, full[shown:])
 			shown = len(full)
 		}
 		if debug { // --debug: surface what the hub's liveness probe actually observes
-			fmt.Fprintf(w, "  [debug] %s\n", container.Diagnose(context.Background(), cName))
+			fmt.Fprintf(w, "  [debug] %s\n", container.Diagnose(ctx, cName))
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("%s launched but didn't come up within %s: %s (check `sindri agent pane %s`)",
-				name, launchReadyTimeout, s.LaunchDiagnostic(project, name), name)
+				name, launchReadyTimeout, s.LaunchDiagnostic(ctx, project, name), name)
 		}
 		time.Sleep(time.Second)
 	}

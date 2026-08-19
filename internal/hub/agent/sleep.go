@@ -8,6 +8,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -57,7 +58,7 @@ func (s *Service) HoldsNothing(project, name, role string) (bool, error) {
 // FireIdleStops stops every non-retired worker that has held nothing past IdleStopThreshold.
 // Idleness alone triggers it, never memory pressure: a stop preserves the session, so reclaiming
 // costs only the next start's latency — no reason to wait for memory to be tight.
-func (s *Service) FireIdleStops(project string) {
+func (s *Service) FireIdleStops(ctx context.Context, project string) {
 	roster, err := s.store.For(project).Roster()
 	if err != nil {
 		return
@@ -81,7 +82,7 @@ func (s *Service) FireIdleStops(project string) {
 		if !due {
 			continue
 		}
-		if err := s.stopAgent(project, a.Name, fmt.Sprintf("idle for %s, reclaiming its pod", now.Sub(since).Round(time.Second))); err != nil {
+		if err := s.stopAgent(ctx, project, a.Name, fmt.Sprintf("idle for %s, reclaiming its pod", now.Sub(since).Round(time.Second))); err != nil {
 			fmt.Fprintf(os.Stderr, "hub: idle-stopping %s: %v\n", a.Name, err)
 			continue
 		}
@@ -114,7 +115,7 @@ func forgetIdleSince(key lcKey) {
 
 // FireIdleStarts wakes a stopped, non-retired agent when its OWN kind of work is waiting: a worker
 // for an open task, a reviewer for an unclaimed PR — one role's queue must never wake the other's.
-func (s *Service) FireIdleStarts(project string) {
+func (s *Service) FireIdleStarts(ctx context.Context, project string) {
 	ps := s.store.For(project)
 	packages, err := ps.OpenContainers()
 	if err != nil {
@@ -138,16 +139,16 @@ func (s *Service) FireIdleStarts(project string) {
 		return
 	}
 	if len(packages) > 0 || len(leaves) > 0 {
-		s.wakeStoppedForRole(project, roster, "worker", "work is waiting in this repo — starting")
+		s.wakeStoppedForRole(ctx, project, roster, "worker", "work is waiting in this repo — starting")
 	}
 	if hasReview {
-		s.wakeStoppedForRole(project, roster, "reviewer", "a review is waiting in this repo — starting")
+		s.wakeStoppedForRole(ctx, project, roster, "reviewer", "a review is waiting in this repo — starting")
 	}
 }
 
 // wakeStoppedForRole wakes the first stopped, non-retired agent of role in roster, unless a live
 // one of that SAME role already holds nothing and would claim the work itself next poll.
-func (s *Service) wakeStoppedForRole(project string, roster []store.Agent, role, reason string) {
+func (s *Service) wakeStoppedForRole(ctx context.Context, project string, roster []store.Agent, role, reason string) {
 	toWake := ""
 	for _, a := range roster {
 		if a.Retired || a.Role != role {
@@ -169,7 +170,7 @@ func (s *Service) wakeStoppedForRole(project string, roster []store.Agent, role,
 		return
 	}
 	_ = s.store.For(project).Log(toWake, "wake", reason)
-	if err := s.Launch(project, toWake, false, false, 0, 0, io.Discard); err != nil {
+	if err := s.Launch(ctx, project, toWake, false, false, 0, 0, io.Discard); err != nil {
 		fmt.Fprintf(os.Stderr, "hub: waking %s for waiting work: %v\n", toWake, err)
 	}
 }

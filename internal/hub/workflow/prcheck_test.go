@@ -62,7 +62,7 @@ func checkOpenPRs(t *testing.T, e *Engine) {
 		if !ok {
 			return
 		}
-		if err := e.ExecuteRun(project, id); err != nil {
+		if err := e.ExecuteRun(t.Context(), project, id); err != nil {
 			t.Fatalf("ExecuteRun(%s): %v", id, err)
 		}
 	}

@@ -107,7 +107,7 @@ func TestASecondGateOnTheSameCommitReusesTheVerdict(t *testing.T) {
 	writeFile(t, filepath.Join(root, ".worktrees", "bombur", "new.txt"), "work")
 
 	first := openGate(t, e, "bombur", gateLint, "")
-	if err := e.ExecuteRun("repo", first.ID); err != nil {
+	if err := e.ExecuteRun(t.Context(), "repo", first.ID); err != nil {
 		t.Fatalf("ExecuteRun: %v", err)
 	}
 	if got, _, _ := ps.GetRun(first.ID); got.Status != "passed" {
@@ -145,7 +145,7 @@ func TestAChangedCommitIsGatedAgain(t *testing.T) {
 	writeFile(t, filepath.Join(wt, "new.txt"), "work")
 
 	first := openGate(t, e, "bombur", gateLint, "")
-	if err := e.ExecuteRun("repo", first.ID); err != nil {
+	if err := e.ExecuteRun(t.Context(), "repo", first.ID); err != nil {
 		t.Fatalf("ExecuteRun: %v", err)
 	}
 	writeFile(t, filepath.Join(wt, "new.txt"), "second thoughts")
@@ -226,7 +226,7 @@ func TestExecuteGateRunUsesRepoGateNotAContainer(t *testing.T) {
 	const agent, task = "bombur", "sd-1"
 	e, ps, _ := gateRepo(t, agent, task)
 	r := openGate(t, e, agent, gateSubmit, "")
-	if err := e.ExecuteRun("repo", r.ID); err != nil {
+	if err := e.ExecuteRun(t.Context(), "repo", r.ID); err != nil {
 		t.Fatalf("ExecuteRun: %v", err)
 	}
 	got, _, _ := ps.GetRun(r.ID)

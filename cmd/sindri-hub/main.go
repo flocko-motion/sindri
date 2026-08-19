@@ -7,6 +7,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -34,7 +35,9 @@ func run() error {
 	container.Use(chooseRuntime()) // wire the one container backend this process launches pods with
 	agent.Use(claude.New())        // wire the one coding-agent backend
 
-	h, err := hub.New()
+	// The process root: this is the entrypoint, so the one context.Background() the hub's whole tree
+	// hangs off is started here and handed in (-> ARCHITECTURE.md, "Context is handed through").
+	h, err := hub.New(context.Background())
 	if err != nil {
 		return err
 	}
