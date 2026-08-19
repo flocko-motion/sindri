@@ -32,6 +32,11 @@ jobs:
           go install "github.com/mikefarah/yq/v4@${YQ_VERSION}"
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
+      # The toolchain check `make verify` no longer runs: it is an internet round trip, which is
+      # cheap here (once per PR) and wasteful in the hub's gate (dozens of times a day).
+      - name: Go toolchain is current
+        run: make check-go
+
       - name: Test
         run: make test
 

@@ -1,8 +1,7 @@
 // package: adapter/git / restore
 // type:    adapter (external tool: git)
-// job:     put paths back to an earlier commit's content — HEAD (discard uncommitted) or an
-// arbitrary ref (drop committed churn) — and the two questions a caller needs answered
-// before doing that: is there committed churn to drop, and is the worktree dirty.
+// job:     put paths back to an earlier commit's content, and the two questions a caller needs
+// answered before doing that: is there committed churn to drop, and is the worktree dirty.
 // limits:  no podman, no task/PR logic; pure git.
 package git
 
@@ -12,16 +11,6 @@ import (
 	"os/exec"
 	"strings"
 )
-
-// RestoreFromHEAD discards uncommitted changes to paths, putting them back as HEAD has them.
-// Untracked files are left alone: they are not "changes to a file" and a silent delete is worse.
-func RestoreFromHEAD(dir string, paths []string) error {
-	args := append([]string{"-C", dir, "checkout", "HEAD", "--"}, paths...)
-	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
-		return fmt.Errorf("restore from HEAD: %s: %w", strings.TrimSpace(string(out)), err)
-	}
-	return nil
-}
 
 // RestoreFromRef puts paths back to ref's content and stages that, so it lands as a commit and so
 // leaves the agent's change — reverting COMMITTED work, which restoring from HEAD cannot do. It

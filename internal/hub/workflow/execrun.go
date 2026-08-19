@@ -147,8 +147,9 @@ func exitCodeOf(err error) int {
 // scheduling agent has since left behind.
 func (e *Engine) staleReason(ps *store.ProjectStore, r api.Run) string {
 	// Nothing to go stale: no roster entry, no task. Dropping one for a missing "agent" named user
-	// would silently discard the run a human is sitting there waiting for.
-	if api.RunFromUser(r) {
+	// would silently discard the run a human is sitting there waiting for, and a gate on a PR names
+	// its subject, which is checked when it executes (-> gateTree).
+	if api.RunFromUser(r) || gateOnAPR(r) {
 		return ""
 	}
 	_, ok, err := ps.GetAgent(r.Agent)

@@ -384,7 +384,8 @@ func (c *HTTP) DiscardPR(id string) error {
 	return c.post("/pr/discard", api.NameReq{Name: id})
 }
 
-// LintPR runs the quality gate against a PR's worktree and returns the output.
+// LintPR asks for the gate's verdict on the commit a PR's branch names: the stored one when that
+// commit has it, otherwise a queued check and where it sits. Never the author's working tree.
 func (c *HTTP) LintPR(id string) (string, error) {
 	var ok struct {
 		Out string `json:"ok"`

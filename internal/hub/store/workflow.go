@@ -120,6 +120,25 @@ CREATE TABLE IF NOT EXISTS pr_lint (
   ran_at  TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (project, pr)
 );
+-- What the gate said about one COMMIT, so an unchanged commit is never gated twice. It carries the
+-- verify command too: re-pointing that asks a different question of the same tree.
+CREATE TABLE IF NOT EXISTS gate_result (
+  project TEXT NOT NULL,
+  sha     TEXT NOT NULL,
+  passed  INTEGER NOT NULL DEFAULT 0,
+  verify  TEXT NOT NULL DEFAULT '',
+  output  TEXT NOT NULL DEFAULT '',
+  ran_at  TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (project, sha)
+);
+-- Who is waiting to be TOLD a run has landed, beyond whoever queued it: a second asker joins the
+-- queued run rather than queueing another, and would otherwise wait on a message nobody sends.
+CREATE TABLE IF NOT EXISTS run_waiters (
+  project TEXT NOT NULL,
+  run     TEXT NOT NULL,
+  agent   TEXT NOT NULL,
+  PRIMARY KEY (project, run, agent)
+);
 -- A PR's lifecycle history, shown in the detail column with timestamps.
 CREATE TABLE IF NOT EXISTS pr_events (
   id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,8 +170,9 @@ CREATE TABLE IF NOT EXISTS runs (
   workspace   TEXT NOT NULL DEFAULT '',       -- the agent's worktree path at schedule time
   task        TEXT NOT NULL DEFAULT '',       -- the agent's task at schedule time, for staleness at dequeue
   exit_code   INTEGER NOT NULL DEFAULT 0,
-  kind        TEXT NOT NULL DEFAULT '',       -- '' | 'submit' | 'contribute' -- a submit/contribute gate
+  kind        TEXT NOT NULL DEFAULT '',       -- '' = an ordinary run; otherwise which gate (-> workflow/gate.go)
   message     TEXT NOT NULL DEFAULT '',       -- the agent's submit/contribute text, replayed once a gate passes
+  commit_sha  TEXT NOT NULL DEFAULT '',       -- the commit a gate run checks; its verdict is recorded against it
   output      TEXT NOT NULL DEFAULT '',
   created_at  TEXT NOT NULL DEFAULT '',
   started_at  TEXT NOT NULL DEFAULT '',
@@ -200,10 +220,9 @@ func (p *ProjectStore) GetState(agent string) (AgentState, error) {
 	return st, nil
 }
 
-// SetState writes an agent's workflow state in this project. It leaves the escalation alone: every
-// caller here builds a fresh AgentState from the columns it cares about, so writing that one from the
-// struct would clear a live escalation on the next phase change — and a durable state any unrelated
-// write can drop is not durable. SetEscalation and ClearEscalation are the only writers of it.
+// SetState writes an agent's workflow state, leaving the escalation alone: callers build a fresh
+// AgentState from the columns they care about, so writing that one from the struct would clear a live
+// escalation on the next phase change. SetEscalation and ClearEscalation are its only writers.
 func (p *ProjectStore) SetState(st AgentState) error {
 	if st.Phase == "" {
 		st.Phase = "idle"
@@ -218,11 +237,9 @@ func (p *ProjectStore) SetState(st AgentState) error {
 	return nil
 }
 
-// SetPhase changes only an agent's phase, leaving task, branch and container exactly as they were.
-// SetState writes the whole row, so a caller with nothing new to say about the rest of it had to
-// read the row first just to echo it back — and skipping that read is how a held container got
-// dropped independently at four call sites. Requires an existing row (SetState is the one that
-// creates it); it errors rather than silently doing nothing against an agent it has never seen.
+// SetPhase changes only an agent's phase, leaving task, branch and container as they were — skipping
+// the read-then-echo SetState forces is how a held container got dropped at four call sites. It needs
+// an existing row (SetState creates those), and errors rather than quietly writing nothing.
 func (p *ProjectStore) SetPhase(agent, phase string) error {
 	res, err := p.s.db.Exec(`UPDATE agent_state SET phase=? WHERE project=? AND agent=?`, phase, p.project, agent)
 	if err != nil {
@@ -236,10 +253,8 @@ func (p *ProjectStore) SetPhase(agent, phase string) error {
 	return nil
 }
 
-// SetEscalation records the question an agent has stopped on, so the escalation survives a hub
-// restart — an escalation that evaporates leaves an agent silently stuck, refused by every verb that
-// lands work with nothing to say why. An upsert, because an agent may escalate before anything
-// else has written it a state row.
+// SetEscalation records the question an agent stopped on, durably: one that evaporates leaves the
+// agent silently stuck. An upsert, since an agent may escalate before anything wrote it a state row.
 func (p *ProjectStore) SetEscalation(agent, question string) error {
 	_, err := p.s.db.Exec(`
 		INSERT INTO agent_state (project,agent,escalation) VALUES (?,?,?)
@@ -407,25 +422,6 @@ func scanPRRow(row scanner) (PR, error) {
 
 func placeholders(n int) string {
 	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
-}
-
-// --- pr lint ---
-
-// SetPRLint stores (or replaces) a PR's latest lint output in this project, now.
-func (p *ProjectStore) SetPRLint(prID, output string) error {
-	_, err := p.s.db.Exec(`INSERT INTO pr_lint (project, pr, output, ran_at) VALUES (?,?,?,?)
-		ON CONFLICT(project, pr) DO UPDATE SET output=excluded.output, ran_at=excluded.ran_at`,
-		p.project, prID, output, time.Now().UTC().Format(time.RFC3339))
-	if err != nil {
-		return fmt.Errorf("set pr lint %s: %w", prID, err)
-	}
-	return nil
-}
-
-// GetPRLint returns a PR's stored lint output and run time in this project.
-func (p *ProjectStore) GetPRLint(prID string) (output, ranAt string) {
-	_ = p.s.db.QueryRow(`SELECT output, ran_at FROM pr_lint WHERE project=? AND pr=?`, p.project, prID).Scan(&output, &ranAt)
-	return output, ranAt
 }
 
 // --- pr history ---

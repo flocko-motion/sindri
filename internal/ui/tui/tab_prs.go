@@ -24,11 +24,13 @@ import (
 // defaultReviewPrompt pre-fills the Agentic Review instruction; the user edits it before dispatch.
 const defaultReviewPrompt = "Review this PR for correctness, clarity, and fit to the task. Flag bugs, missing tests, and anything that should change."
 
-// lintCmd runs the quality gate against the selected PR's worktree, into the big content pane.
+// lintCmd asks the hub for this PR's gate result. The hub answers from its store when the commit
+// already has a verdict, and otherwise queues the check — so the pane may land on either, and this
+// says "asking" rather than "running": one gate runs at a time fleet-wide, and it may be a wait.
 func (m *model) lintCmd(id string) tea.Cmd {
 	cl := m.cl
-	m.flash = "linting " + id + "…"
-	m.prDetail.Lint = "running lint…" // shown immediately; replaced by the result
+	m.flash = "gate " + id + "…"
+	m.prDetail.Lint = "asking the hub…" // shown immediately; replaced by the answer
 	m.prView = "lint"
 	m.rightFocus = true
 	m.rightCursor = m.viewCursor("lint")
@@ -51,15 +53,33 @@ func (m model) viewCursor(val string) int {
 	return 0
 }
 
-// lintStatus summarizes a PR's stored lint result for the selector label.
+// lintCommitNote names the commit a stored result describes, from the field that carries it rather
+// than from the report prose the pane shows: a result about an older commit must be readable as one
+// without reading it.
+func lintCommitNote(sha string) string {
+	if sha == "" {
+		return ""
+	}
+	if len(sha) > 7 {
+		sha = sha[:7]
+	}
+	return " · " + sha
+}
+
+// lintStatus summarizes a PR's stored gate result for the selector label — including the two states
+// a queued gate spends real time in, which a label reading "done" would misreport as an answer.
 func lintStatus(lint string) string {
 	switch {
 	case strings.TrimSpace(lint) == "":
-		return "not linted"
-	case strings.HasPrefix(lint, "lint PASS"):
+		return "not gated"
+	case strings.HasPrefix(lint, "gate PASS"):
 		return "PASS"
-	case strings.HasPrefix(lint, "lint FAIL"):
+	case strings.HasPrefix(lint, "gate FAIL"):
 		return "FAIL"
+	case strings.HasPrefix(lint, "gate queued"):
+		return "queued"
+	case strings.HasPrefix(lint, "gate running"):
+		return "running"
 	}
 	return "done"
 }
@@ -398,7 +418,7 @@ func (m model) prRawContentLines() []string {
 	}
 	if m.prView == "lint" {
 		if strings.TrimSpace(d.Lint) == "" {
-			return []string{dimStyle.Render("(not linted — press L to run)")}
+			return []string{dimStyle.Render("(not gated — press L to ask)")}
 		}
 		return append([]string{dimStyle.Render("── lint ──"), ""},
 			strings.Split(strings.TrimRight(d.Lint, "\n"), "\n")...)
@@ -432,7 +452,7 @@ func (m model) prMetaItems() []metaItem {
 	}
 	items := []metaItem{
 		view("diff", "diff"),
-		view("lint", "lint ("+lintStatus(d.Lint)+")"),
+		view("lint", "gate ("+lintStatus(d.Lint)+lintCommitNote(d.LintCommit)+")"),
 		{text: ""},
 	}
 	items = append(items,

@@ -141,9 +141,10 @@ func (e *Engine) PRInfo(project, id string) (PRDetail, error) {
 	task, _ := e.TaskInfo(project, pr.Task) // linked task; zero value if unreadable
 	reviews, _ := ps.Reviews(id)
 	pr.Approvals = api.ApprovalCount(reviews) // the same count the list carries, so the two agree
-	lint, lintAt := ps.GetPRLint(id)
+	lint, lintCommit, lintAt := ps.GetPRLint(id)
 	history, _ := ps.PREvents(id)
-	return PRDetail{PR: pr, Task: task, Diff: diff, Reviews: reviews, Lint: lint, LintAt: lintAt, History: history}, nil
+	return PRDetail{PR: pr, Task: task, Diff: diff, Reviews: reviews, Lint: lint, LintCommit: lintCommit,
+		LintAt: lintAt, History: history}, nil
 }
 
 // CmdSubmit returns immediately; the worker idles until the hub injects a verdict (D5).
@@ -200,21 +201,32 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 	if refused, rerr := e.refuseIfBehind(ps, c.Agent, wt, base, target, out); rerr != nil || refused {
 		return 1, rerr
 	}
-	// Queued, not run here: several agents submitting at once must not mean several concurrent
-	// verify runs. No PR exists until it passes — landSubmit creates it from the queue.
+	// Recorded before it is judged: the gate checks a COMMIT, which is what makes its verdict
+	// reusable — and agents have no commit verb, so this is where their work gets written down.
 	desc := strings.TrimSpace(strings.Join(args, " "))
-	run, err := e.enqueueGate(c.Project, c.Agent, "submit", desc)
+	sha, err := e.gateCommit(c.Project, c.Agent, desc)
 	if err != nil {
 		return 1, err
 	}
+	// Parked BEFORE the gate opens: a commit that already passed lands its PR inside the next call,
+	// and a phase written after that would overwrite "submitted" with a wait that is already over.
 	if err := ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: branch, Container: st.Container, Phase: "gating"}); err != nil {
 		return 1, err
 	}
-	pos := 0
-	if all, aerr := e.store.AllRuns("queued"); aerr == nil {
-		pos = queuePositions(all)[run.ID]
+	// Queued, not run here: several agents submitting at once must not mean several concurrent
+	// verify runs. No PR exists until it passes — landSubmit creates it from the queue.
+	run, reused, err := e.gateRun(c.Project, c.Agent, gateSubmit, desc, sha)
+	if err != nil {
+		// The phase goes back: "gating" has no way out on its own — Stalled ignores it and every
+		// landing verb refuses it — so an agent parked on a gate that never opened is parked for good.
+		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: branch, Container: st.Container, Phase: "working"})
+		return 1, err
 	}
-	fmt.Fprintln(out, ReplyGateQueued(run.ID, pos))
+	if reused {
+		fmt.Fprintln(out, ReplyGateReused(run.ID, shortSHA(sha)))
+		return 0, nil
+	}
+	fmt.Fprintln(out, ReplyGateQueued(run.ID, e.queuePosition(run.ID)))
 	return 0, nil
 }
 
@@ -391,36 +403,6 @@ func (e *Engine) MaterializeReview(project, prID string) (string, error) {
 		return "", fmt.Errorf("no such PR %q", prID)
 	}
 	return repo.MaterializeReview(root, pr.Branch)
-}
-
-// LintPR runs the quality gate on a PR worktree, headed with PASS/FAIL.
-func (e *Engine) LintPR(project, prID string) (string, error) {
-	ps := e.store.For(project)
-	pr, ok, err := ps.GetPR(prID)
-	if err != nil {
-		return "", err
-	}
-	if !ok {
-		return "", fmt.Errorf("no such PR %q", prID)
-	}
-	a, ok, err := ps.GetAgent(pr.Agent)
-	if err != nil {
-		return "", err
-	}
-	if !ok {
-		return "", fmt.Errorf("no agent %q for %s", pr.Agent, prID)
-	}
-	out, passed := repo.Gate(filepath.Join(e.deps.ProjectRoot(project), a.Workspace), e.deps.BrokkrBin, e.verifyCmd(project))
-	status := "FAIL"
-	if passed {
-		status = "PASS"
-	}
-	if strings.TrimSpace(out) == "" {
-		out = "(no output)\n"
-	}
-	result := fmt.Sprintf("lint %s\n\n%s", status, out)
-	_ = ps.SetPRLint(prID, result) // persist the latest result
-	return result, nil
 }
 
 // RebaseAgent recovers a stale tree after the base moved outside a sindri merge; git aborts

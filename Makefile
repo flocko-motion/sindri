@@ -111,7 +111,12 @@ screenshot: ## render the TUI headlessly (mock data) to eyeball its layout
 seed: ## seed a mock task hierarchy into the current repo (via sindri task new)
 	./scripts/seed.sh
 
-verify: check-go brokkr ## build + test + lint (deadcode, loc, comments, openspec) — the quality gate
+# The submit gate the hub runs (scripts/verify.sh points here), so it is on the path of every
+# submit, contribute and self-check in the fleet. check-go is deliberately NOT a prerequisite:
+# it curls go.dev/VERSION, and a synchronous internet round trip belongs in CI and `make install`
+# (both of which run it), not dozens of times a day in front of a build. It checks something that
+# moves every few weeks.
+verify: brokkr ## build + test + lint (deadcode, loc, comments, openspec) — the quality gate
 	go build ./...
 	go test ./...
 	./bin/brokkr lint

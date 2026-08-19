@@ -101,19 +101,23 @@ func TestGateUnchangedWithoutAVerifyKey(t *testing.T) {
 	}
 }
 
-// TestGateRefusesBeforeRunningVerifyWhenLintFails: the built-in runs first, so a lint failure is
-// reported without spending minutes on a build the work has already failed.
-func TestGateRefusesBeforeRunningVerifyWhenLintFails(t *testing.T) {
+// TestADeclaredGateOwnsTheLinter: ONE of the two checks runs, never both. A project's verify script
+// is the thing that can run the built-in linter itself (this repo's does), so running the linter here
+// too meant paying for the same ~15 seconds twice on every gate in the fleet.
+func TestADeclaredGateOwnsTheLinter(t *testing.T) {
 	wt := worktree(t, true)
-	script(t, wt, "failing-lint", "echo 'lint: bad'\nexit 1\n")
+	script(t, wt, "failing-lint", "echo 'BUILT-IN-RAN'\nexit 1\n")
 	script(t, wt, "verify", "echo VERIFY-RAN\nexit 0\n")
 
 	out, ok := Gate(wt, func() (string, error) { return filepath.Join(wt, "failing-lint"), nil }, "verify")
-	if ok {
-		t.Fatal("a failing built-in lint must refuse")
+	if !ok {
+		t.Fatalf("the declared gate passed, so the gate passes — got:\n%s", out)
 	}
-	if strings.Contains(out, "VERIFY-RAN") {
-		t.Errorf("the declared gate should not run once the built-in has already refused:\n%s", out)
+	if strings.Contains(out, "BUILT-IN-RAN") {
+		t.Errorf("the built-in linter must not run beside a declared gate:\n%s", out)
+	}
+	if !strings.Contains(out, "VERIFY-RAN") {
+		t.Errorf("the declared gate's own output must come back:\n%s", out)
 	}
 }
 

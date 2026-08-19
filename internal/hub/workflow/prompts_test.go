@@ -201,6 +201,11 @@ func TestAgentAdviceNeverAsksForACommit(t *testing.T) {
 		ReplyResolveDirty("submitted", false),
 		SystemPrompt("eitri", "worker", "", ""),
 		GitHelp,
+		// The gate now records the workspace itself, so its replies are exactly where "just commit it"
+		// would creep back in — they are the ones that know a commit happened.
+		ReplyLintQueued("run-1", "abc1234", 2),
+		ReplyGateReused("run-1", "abc1234"),
+		MsgLintPassed("run-1"),
 	} {
 		for _, bad := range []string{"commit", "Commit", "uncommitted", "Uncommitted"} {
 			if strings.Contains(s, bad) {

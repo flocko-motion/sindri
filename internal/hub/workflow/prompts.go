@@ -223,8 +223,9 @@ As the reviewer:
 - When a review is assigned, the PR's branch is checked out in /workspace — read
   the code in context, build it, run it. See what changed with ` + "`sindri show <pr-id>`" + `
   (git can't run in your sandbox — the hub is the gatekeeper for it).
-  ` + "`sindri lint <pr-id>`" + ` runs the quality gate —
-  always lint before deciding.
+  ` + "`sindri lint <pr-id>`" + ` gives you the gate's verdict on what the PR
+  actually contains — at once if that has already been checked, otherwise queued,
+  with the result landing on the PR. Always have it before deciding.
 - Then ` + "`sindri approve <pr-id>`" + ` or
   ` + "`sindri reject <pr-id> <feedback>`" + `. Be specific in rejections —
   your feedback is delivered straight to the worker.
@@ -239,13 +240,18 @@ As a worker:
   before it reached you, and a feature's subtasks come to you one after another the
   same way. Start each one as it arrives.
 - Implement it by editing files in /workspace. The hub records your work for you
-  when you contribute or submit — you never do that yourself.
+  whenever it checks it — you never do that yourself.
 - You do NOT have ` + "`git`" + ` — use ` + "`sindri git`" + `, which the hub runs
   for you: what you have changed, your change as a diff, what came in from the
-  reference branch, and putting files back. Run ` + "`sindri git`" + ` for the list.
-  Never guess at any of that, and never hand-write a script to do it.
-- ` + "`sindri lint`" + ` runs the quality gate on your workspace — use it to
-  self-check and fix failures before submitting.
+  reference branch, and going back to an earlier point of your own. Run
+  ` + "`sindri git`" + ` for the list. Never guess at any of that, and never
+  hand-write a script to do it.
+- ` + "`sindri lint`" + ` is the same gate your submit will face — run it to
+  self-check and fix what it finds. It is QUEUED (one gate runs at a time across
+  the fleet), so it returns at once and the result reaches you as a message; carry
+  on with something else meanwhile. Its verdict is recorded against your work as
+  the hub recorded it, so if you then submit without changing anything, the submit
+  reuses it instead of paying for the gate twice.
 - Something you noticed IN PASSING, with no home on this task or PR — the sort of thing
   nobody will ever learn if you stay quiet — goes to the user with
   ` + "`sindri fyi \"<one short line>\"`" + `. The test is: if you say nothing, does this

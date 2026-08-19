@@ -120,6 +120,31 @@ func MsgGatePassed(prID string) string {
 	return fmt.Sprintf("[hub] Your quality gate passed — %s is now up for review. Run `sindri` for your next directive.", prID)
 }
 
+// MsgLintPassed answers a queued self-check that passed. It names the run, because the report on it
+// names what was checked — the same result a submit reuses if the agent changes nothing after this.
+func MsgLintPassed(runID string) string {
+	return fmt.Sprintf("[hub] Your quality gate passed (`sindri show %s` for the report). Submitting "+
+		"without changing anything reuses this result rather than gating again.", runID)
+}
+
+// MsgPRGateFinished tells a reviewer its PR check has landed. The verdict is on the PR and in the
+// run's output rather than in here: a whole gate log injected into a session is how contexts die.
+func MsgPRGateFinished(prID, runID string) string {
+	return fmt.Sprintf("[hub] The quality gate on %s has finished — `sindri show %s` has the whole log, "+
+		"and `sindri lint %s` the verdict alone. Neither re-runs it. Then give your verdict.", prID, runID, prID)
+}
+
+// MsgLintIncomplete answers a self-check that never reached a verdict. Unlike a landing gate's, there
+// is nothing to re-submit: the agent kept its task the whole time and simply has no answer yet.
+func MsgLintIncomplete(status string) string {
+	word := status
+	if status == "timed_out" {
+		word = "timed out"
+	}
+	return fmt.Sprintf("[hub] Your quality gate did not complete (%s) — this says nothing about your "+
+		"code. Run `sindri lint` again when you want the answer.", word)
+}
+
 // MsgGateFailed reuses ReplyLintFail's rulebook — only the delivery differs.
 func MsgGateFailed(output string) string {
 	return "[hub] " + ReplyLintFail(output)

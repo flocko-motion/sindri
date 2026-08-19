@@ -94,10 +94,10 @@ func (r *refwatch) closeDormantMeeting() {
 	}
 }
 
-// preflight keeps the open PRs honest against their bases, and their review rows live, OFF this
-// loop: CheckOpenPRs' gate may run for minutes, and inlining it would make every later project
-// wait behind an earlier one's. Not waited on at shutdown — it only appends advisory history, so a
-// write against a closed store fails harmlessly, unlike blocking close() on a gate run.
+// preflight keeps the open PRs honest against their bases, and their review rows live, OFF this loop:
+// its own steps are cheap now that CheckOpenPRs only decides and queues the check (the run queue
+// runs it), but the review repair and the clears here still touch git per project. Not waited on at
+// shutdown — it only appends advisory history, so a write against a closed store fails harmlessly.
 func (r *refwatch) preflight(projects []store.Project) {
 	select {
 	case <-r.stop:

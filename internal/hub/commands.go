@@ -13,15 +13,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/config"
-	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/registry"
-	"github.com/flo-at/sindri/internal/hub/repo"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/task"
 	"github.com/flo-at/sindri/internal/hub/workflow"
@@ -47,7 +44,9 @@ func (h *Hub) registry() *registry.Registry {
 				}
 				return ""
 			}), Run: h.wf.CmdNext},
-		registry.Command{Name: "lint", Help: "run the quality gate: lint (your workspace) or lint <pr-id> (a PR)", Run: h.cmdLint},
+		// Through the workflow, not inline here: the gate builds and tests, so it goes through the run
+		// queue with every other one (-> workflow.CmdLint).
+		registry.Command{Name: "lint", Help: "run the quality gate: lint (your workspace) or lint <pr-id> (a PR)", Run: h.wf.CmdLint},
 		// Visibility MUST match these commands' own `st.Phase != "working"` guard. When it didn't, a
 		// worker in "submitted" was offered submit, ran it, and was told to abandon the task it held.
 		registry.Command{Name: "submit", Help: "request your branch be merged: submit [message]", Roles: []string{"worker"},
@@ -330,40 +329,6 @@ func (h *Hub) cmdStatus(c registry.Caller, _ []string, out io.Writer) (int, erro
 	l, ok := h.watch.get(c.Project, c.Agent)
 	running := !ok || l.up
 	fmt.Fprintf(out, "agent:   %s\nrole:    %s\nrunning: %v\n", c.Agent, c.Role, running)
-	return 0, nil
-}
-
-// cmdLint runs the quality gate host-side: with a pr-id, that PR's worktree (the reviewer's
-// pre-verdict check); with none, the caller's own (the worker's pre-submit self-check).
-func (h *Hub) cmdLint(c registry.Caller, args []string, out io.Writer) (int, error) {
-	if len(args) > 0 { // lint a specific PR's worktree
-		res, err := h.wf.LintPR(c.Project, args[0])
-		if err != nil {
-			return 1, err
-		}
-		fmt.Fprint(out, res)
-		return 0, nil
-	}
-	ps := h.store.For(c.Project)
-	a, ok, err := ps.GetAgent(c.Agent)
-	if err != nil {
-		return 1, err
-	}
-	if !ok {
-		return 1, fmt.Errorf("unknown agent %q", c.Agent)
-	}
-	verify := ""
-	if cfg, cerr := h.projectConfig(c.Project); cerr == nil {
-		verify = cfg.Verify
-	}
-	res, passed := repo.Gate(filepath.Join(h.projectRoot(c.Project), a.Workspace), agent.BrokkrBinary, verify)
-	if strings.TrimSpace(res) == "" {
-		res = "lint: clean\n"
-	}
-	fmt.Fprint(out, res)
-	if !passed {
-		return 1, nil // non-zero so the agent knows the gate failed
-	}
 	return 0, nil
 }
 

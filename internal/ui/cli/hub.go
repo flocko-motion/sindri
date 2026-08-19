@@ -388,8 +388,10 @@ func prScrapCmd() *cobra.Command {
 
 func prLintCmd() *cobra.Command {
 	return &cobra.Command{
-		Use: "lint <pr-id>", Short: "Run the quality gate against a PR's worktree", Args: cobra.ExactArgs(1),
+		Use: "lint <pr-id>", Short: "Ask for the quality gate's verdict on the commit a PR's branch names", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			// It may answer without running anything: the commit's verdict is stored, and one that has
+			// none queues the gate rather than running it here (-> workflow.LintPR).
 			return withBackend(func(b backend) error {
 				out, err := b.LintPR(args[0])
 				if err != nil {

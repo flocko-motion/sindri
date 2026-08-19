@@ -63,7 +63,10 @@ type PRDetail struct {
 	Reviews []Review `json:"reviews"`
 	Lint    string   `json:"lint"`    // latest stored lint output ("" = never run)
 	LintAt  string   `json:"lint_at"` // when it was run
-	History []Event  `json:"history"` // lifecycle log (oldest-first)
+	// LintCommit is the commit that result describes. A timestamp cannot say which tree was
+	// checked, so without this a reader cannot tell a current result from one about an older one.
+	LintCommit string  `json:"lint_commit,omitempty"`
+	History    []Event `json:"history"` // lifecycle log (oldest-first)
 }
 
 // PROpen reports whether a PR is still open — in neither terminal state (merged or

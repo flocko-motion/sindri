@@ -42,7 +42,7 @@ Use `sindri git` instead — the hub runs it for you and returns the result:
   sindri git change [<paths>]  your WHOLE change vs the reference branch
   sindri git history           the work you have already handed over
   sindri git incoming          what has landed on the reference branch
-  sindri git restore <paths>   throw away your unrecorded changes to those paths
+  sindri git rollback <commit> put your workspace back to one of your own commits
   sindri git drop <paths>      remove those paths from your change entirely
 
 Run `sindri git` for the current list. Do NOT script around this — if what you

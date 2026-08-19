@@ -51,6 +51,23 @@ func prCheckEngine(t *testing.T) (*Engine, *store.ProjectStore, string) {
 	return New(st, &stubDeps{root: root}), ps, root
 }
 
+// checkOpenPRs sweeps and then drains what it queued. The sweep only DECIDES that a check should
+// happen — the materialise-and-gate is a queued run now, sharing the fleet's one slot with every
+// other gate, so a test that stopped at the sweep would assert against a check that never ran.
+func checkOpenPRs(t *testing.T, e *Engine) {
+	t.Helper()
+	e.CheckOpenPRs("proj")
+	for {
+		project, id, ok := e.NextQueuedRun()
+		if !ok {
+			return
+		}
+		if err := e.ExecuteRun(project, id); err != nil {
+			t.Fatalf("ExecuteRun(%s): %v", id, err)
+		}
+	}
+}
+
 // run is a git command that must succeed.
 func run(t *testing.T, dir string, args ...string) {
 	t.Helper()
@@ -91,7 +108,7 @@ func prEventTypes(t *testing.T, ps *store.ProjectStore, id string) []string {
 // re-answer a question nothing has changed.
 func TestAPRLevelWithItsBaseIsNotChecked(t *testing.T) {
 	e, ps, _ := prCheckEngine(t)
-	e.CheckOpenPRs("proj")
+	checkOpenPRs(t, e)
 	if got := prEventTypes(t, ps, "pr-sd-1"); len(got) != 0 {
 		t.Errorf("a PR level with its base needs no check, got %v", got)
 	}
@@ -103,7 +120,7 @@ func TestABehindPRIsCheckedAndTheFindingLandsOnThePR(t *testing.T) {
 	e, ps, root := prCheckEngine(t)
 	commitIn(t, root, "base-moved.txt", "later\n", "base moves")
 
-	e.CheckOpenPRs("proj")
+	checkOpenPRs(t, e)
 	got := strings.Join(prEventTypes(t, ps, "pr-sd-1"), "\n")
 	if !strings.Contains(got, "precheck") {
 		t.Fatalf("a PR whose base moved should carry a finding, got %q", got)
@@ -122,7 +139,7 @@ func TestAConflictingPRIsReportedWithItsPaths(t *testing.T) {
 	commitIn(t, filepath.Join(root, ".worktrees", "bombur"), "shared.txt", "the PR's line\n", "PR edits shared")
 	commitIn(t, root, "shared.txt", "base's line\n", "base edits shared")
 
-	e.CheckOpenPRs("proj")
+	checkOpenPRs(t, e)
 	got := strings.Join(prEventTypes(t, ps, "pr-sd-1"), "\n")
 	if !strings.Contains(got, "precheck-conflict") {
 		t.Fatalf("competing edits should report a conflict, got %q", got)
@@ -143,7 +160,7 @@ func TestTheCheckIsAdvisory(t *testing.T) {
 	commitIn(t, root, "shared.txt", "base's line\n", "base edits shared")
 	deps := e.deps.(*stubDeps)
 
-	e.CheckOpenPRs("proj")
+	checkOpenPRs(t, e)
 	pr, _, err := ps.GetPR("pr-sd-1")
 	if err != nil {
 		t.Fatal(err)
@@ -166,20 +183,20 @@ func TestTheSameTipsAreCheckedOnce(t *testing.T) {
 	e, ps, root := prCheckEngine(t)
 	commitIn(t, root, "base-moved.txt", "later\n", "base moves")
 
-	e.CheckOpenPRs("proj")
+	checkOpenPRs(t, e)
 	first := len(prEventTypes(t, ps, "pr-sd-1"))
 	if first == 0 {
 		t.Fatal("precondition: the first pass should record a finding")
 	}
 	for i := 0; i < 3; i++ {
-		e.CheckOpenPRs("proj") // further sweeps, nothing moved
+		checkOpenPRs(t, e) // further sweeps, nothing moved
 	}
 	if got := len(prEventTypes(t, ps, "pr-sd-1")); got != first {
 		t.Errorf("the same tips were re-checked: %d findings, want %d", got, first)
 	}
 	// The base moves again: that is a new question, and it is asked.
 	commitIn(t, root, "base-moved-again.txt", "later still\n", "base moves again")
-	e.CheckOpenPRs("proj")
+	checkOpenPRs(t, e)
 	if got := len(prEventTypes(t, ps, "pr-sd-1")); got <= first {
 		t.Errorf("a further base move should be checked, still %d findings", got)
 	}
@@ -194,7 +211,7 @@ func TestAMergedPRIsLeftAlone(t *testing.T) {
 	}
 	commitIn(t, root, "base-moved.txt", "later\n", "base moves")
 
-	e.CheckOpenPRs("proj")
+	checkOpenPRs(t, e)
 	if got := prEventTypes(t, ps, "pr-sd-1"); len(got) != 0 {
 		t.Errorf("a merged PR should not be checked, got %v", got)
 	}
@@ -206,7 +223,7 @@ func TestNoWorktreeIsLeftBehind(t *testing.T) {
 	e, _, root := prCheckEngine(t)
 	commitIn(t, root, "base-moved.txt", "later\n", "base moves")
 
-	e.CheckOpenPRs("proj")
+	checkOpenPRs(t, e)
 	if _, err := os.Stat(filepath.Join(root, ".worktrees", "precheck")); err == nil {
 		t.Error("the throwaway worktree was left behind")
 	}
@@ -231,7 +248,7 @@ func TestTheCheckUsesThePRsOwnBase(t *testing.T) {
 	run(t, root, "checkout", "-q", "main")
 	commitIn(t, filepath.Join(root, ".worktrees", "bombur"), "shared.txt", "the PR's line\n", "PR edits shared")
 
-	e.CheckOpenPRs("proj")
+	checkOpenPRs(t, e)
 	got := strings.Join(prEventTypes(t, ps, "pr-sd-1"), "\n")
 	if !strings.Contains(got, "precheck-conflict") {
 		t.Fatalf("the conflict is with the PR's own base, and must be found: %q", got)
@@ -257,7 +274,7 @@ func TestAPRIsRecheckedWhenItsBaseChanges(t *testing.T) {
 	run(t, root, "checkout", "-q", "main")
 	commitIn(t, root, "base-moved.txt", "later\n", "main moves")
 
-	e.CheckOpenPRs("proj")
+	checkOpenPRs(t, e)
 	first := len(prEventTypes(t, ps, "pr-sd-1"))
 	if first == 0 {
 		t.Fatal("precondition: the first check should record a finding")
@@ -271,7 +288,7 @@ func TestAPRIsRecheckedWhenItsBaseChanges(t *testing.T) {
 	if err := ps.PutPR(pr); err != nil {
 		t.Fatal(err)
 	}
-	e.CheckOpenPRs("proj")
+	checkOpenPRs(t, e)
 	if got := len(prEventTypes(t, ps, "pr-sd-1")); got <= first {
 		t.Errorf("a PR re-pointed at another base should be re-checked, still %d findings", got)
 	}
@@ -286,7 +303,7 @@ func TestARepointedPRIsRecheckedEvenAtTheSameTip(t *testing.T) {
 	commitIn(t, root, "base-moved.txt", "later\n", "main moves")
 	run(t, root, "branch", "release", "main") // a second name for the same commit
 
-	e.CheckOpenPRs("proj")
+	checkOpenPRs(t, e)
 	got := strings.Join(prEventTypes(t, ps, "pr-sd-1"), "\n")
 	if !strings.Contains(got, "main") {
 		t.Fatalf("precondition: the first finding should name main, got %q", got)
@@ -301,7 +318,7 @@ func TestARepointedPRIsRecheckedEvenAtTheSameTip(t *testing.T) {
 	if err := ps.PutPR(pr); err != nil {
 		t.Fatal(err)
 	}
-	e.CheckOpenPRs("proj")
+	checkOpenPRs(t, e)
 	if len(prEventTypes(t, ps, "pr-sd-1")) <= first {
 		t.Fatal("a PR aimed at a different base must be re-checked, even at an identical tip")
 	}

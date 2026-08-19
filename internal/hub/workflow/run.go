@@ -51,7 +51,7 @@ func newRunID() (string, error) {
 // ScheduleRun queues a command for later execution — the store row only; execution (-> ExecuteRun)
 // is a separate step, triggered by the fleet's run watcher once this run reaches the front.
 func (e *Engine) ScheduleRun(project, agent, command, priority, timeout string) (api.Run, error) {
-	return e.putQueuedRun(project, agent, "", command, "", priority, timeout)
+	return e.putQueuedRun(project, store.Run{Agent: agent, Command: command, Priority: priority, Timeout: timeout})
 }
 
 // ScheduleUserRun queues a run the human asked for, against a NAMED target — an agent's worktree,
@@ -74,34 +74,40 @@ func (e *Engine) ScheduleUserRun(project, agent, command, priority, timeout stri
 		}
 		workspace = a.Workspace
 	}
-	return e.putRun(project, api.SenderUser, "", command, "", priority, timeout, workspace, "")
+	return e.putRun(project, store.Run{
+		Agent: api.SenderUser, Command: command, Priority: priority, Timeout: timeout, Workspace: workspace,
+	})
 }
 
 // putQueuedRun creates an AGENT's run, ordinary or gate alike, snapshotting its workspace and task
 // so a later dequeue can tell it moved on (-> staleReason).
-func (e *Engine) putQueuedRun(project, agent, kind, command, message, priority, timeout string) (api.Run, error) {
+func (e *Engine) putQueuedRun(project string, r store.Run) (api.Run, error) {
 	ps := e.store.For(project)
-	a, _, _ := ps.GetAgent(agent)
-	st, _ := ps.GetState(agent)
-	return e.putRun(project, agent, kind, command, message, priority, timeout, a.Workspace, st.Task)
+	a, _, _ := ps.GetAgent(r.Agent)
+	st, _ := ps.GetState(r.Agent)
+	r.Workspace, r.Task = a.Workspace, st.Task
+	return e.putRun(project, r)
 }
 
 // putRun is the one place a run row is created, whoever asked for it.
-func (e *Engine) putRun(project, agent, kind, command, message, priority, timeout, workspace, task string) (api.Run, error) {
+func (e *Engine) putRun(project string, r store.Run) (api.Run, error) {
 	id, err := newRunID()
 	if err != nil {
 		return api.Run{}, err
 	}
+	r.ID = id
+	if r.Status == "" {
+		// A caller that already knows the outcome says so: a gate reusing a stored verdict must not
+		// leave a queued row the watcher can pick up and run for real (-> gateRun).
+		r.Status = "queued"
+	}
 	ps := e.store.For(project)
-	if err := ps.PutRun(store.Run{
-		ID: id, Agent: agent, Command: command, Status: "queued", Priority: priority, Timeout: timeout,
-		Kind: kind, Message: message, Workspace: workspace, Task: task,
-	}); err != nil {
+	if err := ps.PutRun(r); err != nil {
 		return api.Run{}, err
 	}
-	r, _, err := ps.GetRun(id)
+	out, _, err := ps.GetRun(id)
 	e.deps.Notify()
-	return r, err
+	return out, err
 }
 
 // CmdScheduleRun queues a command instead of running it in the pod, returning AT ONCE with its
@@ -149,7 +155,7 @@ func queuePositions(runs []api.Run) map[string]int {
 			// suites is the thing this ordering exists to prevent.
 			return ui
 		}
-		gi, gj := queued[i].Kind != "", queued[j].Kind != ""
+		gi, gj := gateBlocksSomeone(queued[i]), gateBlocksSomeone(queued[j])
 		if gi != gj {
 			return gi // a gate run before any ordinary one, regardless of priority or arrival
 		}

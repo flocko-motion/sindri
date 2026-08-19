@@ -1,13 +1,61 @@
 package workflow
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
+
+// writeFile puts content at path, so a fixture can give an agent something to gate.
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// gateRepo is a worker on its own branch in a real repo — what a gate needs now that it commits
+// before it checks: the store alone cannot answer "which commit is this".
+func gateRepo(t *testing.T, agent, task string) (*Engine, *store.ProjectStore, string) {
+	t.Helper()
+	root, _ := newWorkRepo(t, agent, task)
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if err := st.RegisterProject("repo", root); err != nil {
+		t.Fatal(err)
+	}
+	ps := st.For("repo")
+	if err := ps.PutAgent(store.Agent{Name: agent, Role: "worker", Workspace: filepath.Join(".worktrees", agent)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: agent, Task: task, Branch: task, Phase: "gating"}); err != nil {
+		t.Fatal(err)
+	}
+	return New(st, &stubDeps{root: root, projects: []store.Project{{Tag: "repo", Path: root}}}), ps, root
+}
+
+// openGate is the two steps every gate goes through, as a test helper: record the commit, then open
+// the gate on it.
+func openGate(t *testing.T, e *Engine, agent, kind, message string) api.Run {
+	t.Helper()
+	sha, err := e.gateCommit("repo", agent, message)
+	if err != nil {
+		t.Fatalf("gateCommit: %v", err)
+	}
+	r, _, err := e.gateRun("repo", agent, kind, message, sha)
+	if err != nil {
+		t.Fatalf("gateRun: %v", err)
+	}
+	return r
+}
 
 func TestQueuePositionsRanksGateRunsFirst(t *testing.T) {
 	runs := []api.Run{
@@ -25,40 +73,103 @@ func TestQueuePositionsRanksGateRunsFirst(t *testing.T) {
 	}
 }
 
-// TestEnqueueGateSnapshotsKindAndMessage: the eventual commit needs the agent's free-text
-// description back, and the completion needs to know which continuation to run — both must
-// survive the round trip through the store exactly as given.
-func TestEnqueueGateSnapshotsKindAndMessage(t *testing.T) {
-	e, ps := runEngine(t)
-	if err := ps.PutAgent(store.Agent{Name: "bombur", Role: "worker"}); err != nil {
-		t.Fatal(err)
+// TestAGateRunNamesTheCommitItChecks: the completion needs to know which continuation to run and
+// what the agent said, and the verdict needs the commit it describes — a run row that named only
+// the agent could not tell the store WHICH tree passed, which is why nothing was ever reusable.
+func TestAGateRunNamesTheCommitItChecks(t *testing.T) {
+	e, ps, root := gateRepo(t, "bombur", "sd-1")
+	writeFile(t, filepath.Join(root, ".worktrees", "bombur", "new.txt"), "work")
+
+	r := openGate(t, e, "bombur", gateSubmit, "fix the retry loop")
+
+	if r.Kind != gateSubmit || r.Message != "fix the retry loop" || r.Task != "sd-1" {
+		t.Errorf("gate run = %+v, want kind=submit message=%q task=sd-1", r, "fix the retry loop")
 	}
-	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "sd-1"}); err != nil {
-		t.Fatal(err)
-	}
-	r, err := e.enqueueGate("repo", "bombur", "submit", "fix the retry loop")
+	head, err := git.Head(filepath.Join(root, ".worktrees", "bombur"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Kind != "submit" || r.Message != "fix the retry loop" || r.Task != "sd-1" {
-		t.Errorf("gate run = %+v, want kind=submit message=%q task=sd-1", r, "fix the retry loop")
+	if r.Commit != head {
+		t.Errorf("run commit = %q, want the worktree's HEAD %q", r.Commit, head)
+	}
+	if dirty, _ := git.HasChanges(filepath.Join(root, ".worktrees", "bombur")); dirty {
+		t.Error("the gate must leave a clean tree — an uncommitted change is a tree no sha names")
+	}
+	if _, _, err := ps.GetRun(r.ID); err != nil {
+		t.Fatalf("the run must be on record: %v", err)
+	}
+}
+
+// TestASecondGateOnTheSameCommitReusesTheVerdict is the point of the whole feature: the common
+// sequence is lint, change nothing, submit — and that must cost one gate, not two.
+func TestASecondGateOnTheSameCommitReusesTheVerdict(t *testing.T) {
+	e, ps, root := gateRepo(t, "bombur", "sd-1")
+	writeFile(t, filepath.Join(root, ".worktrees", "bombur", "new.txt"), "work")
+
+	first := openGate(t, e, "bombur", gateLint, "")
+	if err := e.ExecuteRun("repo", first.ID); err != nil {
+		t.Fatalf("ExecuteRun: %v", err)
+	}
+	if got, _, _ := ps.GetRun(first.ID); got.Status != "passed" {
+		t.Fatalf("first gate = %q, want passed (no go.mod, no declared verify)", got.Status)
+	}
+
+	sha, err := e.gateCommit("repo", "bombur", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, reused, err := e.gateRun("repo", "bombur", gateSubmit, "", sha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reused {
+		t.Fatal("a commit that already passed must not be gated again")
+	}
+	if got, _, _ := ps.GetRun(second.ID); got.Status != "passed" {
+		t.Errorf("reused gate status = %q, want passed without executing", got.Status)
+	}
+	out, _ := ps.RunOutput(second.ID)
+	if !strings.Contains(out, "reused") || !strings.Contains(out, shortSHA(sha)) {
+		t.Errorf("a reused result must say so and name the commit, got:\n%s", out)
+	}
+	if _, exists, _ := ps.GetPR("pr-sd-1"); !exists {
+		t.Error("the reused pass must land the PR, exactly as a fresh one does")
+	}
+}
+
+// TestAChangedCommitIsGatedAgain is the other half: reuse keyed on the commit must not answer for a
+// tree that has since changed, or the gate stops being a gate.
+func TestAChangedCommitIsGatedAgain(t *testing.T) {
+	e, ps, root := gateRepo(t, "bombur", "sd-1")
+	wt := filepath.Join(root, ".worktrees", "bombur")
+	writeFile(t, filepath.Join(wt, "new.txt"), "work")
+
+	first := openGate(t, e, "bombur", gateLint, "")
+	if err := e.ExecuteRun("repo", first.ID); err != nil {
+		t.Fatalf("ExecuteRun: %v", err)
+	}
+	writeFile(t, filepath.Join(wt, "new.txt"), "second thoughts")
+
+	sha, err := e.gateCommit("repo", "bombur", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sha == first.Commit {
+		t.Fatal("a changed tree must produce a different commit")
+	}
+	if _, reused, err := e.gateRun("repo", "bombur", gateSubmit, "", sha); err != nil || reused {
+		t.Fatalf("reused = %v (err %v), want a fresh gate for a commit nothing has said anything about", reused, err)
+	}
+	if _, exists, _ := ps.GetPR("pr-sd-1"); exists {
+		t.Error("no PR may exist before the gate on the new commit has run")
 	}
 }
 
 // TestRejectGateReturnsAgentToWorkingWithoutAPR: a failed gate must leave the agent exactly where
 // an inline refusal always did — no PR, back to "working", told what to fix.
 func TestRejectGateReturnsAgentToWorkingWithoutAPR(t *testing.T) {
-	e, ps := runEngine(t)
-	if err := ps.PutAgent(store.Agent{Name: "bombur", Role: "worker", Workspace: "."}); err != nil {
-		t.Fatal(err)
-	}
-	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "sd-1", Branch: "sd-1", Phase: "gating"}); err != nil {
-		t.Fatal(err)
-	}
-	r, err := e.enqueueGate("repo", "bombur", "submit", "my summary")
-	if err != nil {
-		t.Fatal(err)
-	}
+	e, ps, _ := gateRepo(t, "bombur", "sd-1")
+	r := openGate(t, e, "bombur", gateSubmit, "my summary")
 	deps := e.deps.(*stubDeps)
 	if err := e.completeGate("repo", r, "failed", "lint: line too long"); err != nil {
 		t.Fatalf("completeGate: %v", err)
@@ -84,17 +195,8 @@ func TestRejectGateReturnsAgentToWorkingWithoutAPR(t *testing.T) {
 func TestStallGateDoesNotReadAsALintFailure(t *testing.T) {
 	for _, status := range []string{"timed_out", "cancelled"} {
 		t.Run(status, func(t *testing.T) {
-			e, ps := runEngine(t)
-			if err := ps.PutAgent(store.Agent{Name: "bombur", Role: "worker", Workspace: "."}); err != nil {
-				t.Fatal(err)
-			}
-			if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "sd-1", Branch: "sd-1", Phase: "gating"}); err != nil {
-				t.Fatal(err)
-			}
-			r, err := e.enqueueGate("repo", "bombur", "submit", "my summary")
-			if err != nil {
-				t.Fatal(err)
-			}
+			e, ps, _ := gateRepo(t, "bombur", "sd-1")
+			r := openGate(t, e, "bombur", gateSubmit, "my summary")
 			deps := e.deps.(*stubDeps)
 			if err := e.completeGate("repo", r, status, "whatever partial output"); err != nil {
 				t.Fatalf("completeGate: %v", err)
@@ -121,25 +223,9 @@ func TestStallGateDoesNotReadAsALintFailure(t *testing.T) {
 // declared verify in the fixture, repo.Gate trivially passes; the point here is that it runs at
 // all without a container runtime wired (which would error, per the exploratory-run tests).
 func TestExecuteGateRunUsesRepoGateNotAContainer(t *testing.T) {
-	const agent, task, branch = "bombur", "sd-1", "sd-1"
-	root, _ := newWorkRepo(t, agent, branch)
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { st.Close() })
-	ps := st.For("repo")
-	if err := ps.PutAgent(store.Agent{Name: agent, Role: "worker", Workspace: filepath.Join(".worktrees", agent)}); err != nil {
-		t.Fatal(err)
-	}
-	if err := ps.SetState(store.AgentState{Agent: agent, Task: task, Branch: branch, Phase: "gating"}); err != nil {
-		t.Fatal(err)
-	}
-	e := New(st, &stubDeps{root: root})
-	r, err := e.enqueueGate("repo", agent, "submit", "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	const agent, task = "bombur", "sd-1"
+	e, ps, _ := gateRepo(t, agent, task)
+	r := openGate(t, e, agent, gateSubmit, "")
 	if err := e.ExecuteRun("repo", r.ID); err != nil {
 		t.Fatalf("ExecuteRun: %v", err)
 	}

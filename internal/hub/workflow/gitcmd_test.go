@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
@@ -161,30 +162,158 @@ func TestGitDropRemovesCommittedChurn(t *testing.T) {
 	}
 }
 
-// TestGitRestoreDiscardsOnlyUncommitted separates the two destructive actions: restore puts back
-// what is uncommitted, and leaves committed work alone (that is what drop is for).
-func TestGitRestoreDiscardsOnlyUncommitted(t *testing.T) {
+// TestGitRollbackReturnsToAnEarlierPointOfItsOwn is the undo that replaced `git restore`: with the
+// workspace recorded at every gate there are no unrecorded changes left to put back, so the unit an
+// agent can undo is a step of its own history — and everything after it goes, edits included.
+func TestGitRollbackReturnsToAnEarlierPointOfItsOwn(t *testing.T) {
 	e, c, wt, _ := gitEngine(t)
-	if err := os.WriteFile(filepath.Join(wt, "feature.go"), []byte("package p\n\nfunc Feature() {}\n// scratch\n"), 0o644); err != nil {
+	target, err := git.Head(wt)
+	if err != nil {
 		t.Fatal(err)
 	}
-	out, code := gitVerb(t, e, c, "status")
-	if code != 0 || !strings.Contains(out, "feature.go") {
-		t.Fatalf("`git status` must list the uncommitted change, got code=%d out=%q", code, out)
+	writeFile(t, filepath.Join(wt, "feature.go"), "package p\n\nfunc Feature() {}\n// a wrong turn\n")
+	if _, err := e.gateCommit("proj", "eitri", "a wrong turn"); err != nil {
+		t.Fatalf("gateCommit: %v", err)
 	}
-	if out, code = gitVerb(t, e, c, "restore", "feature.go"); code != 0 {
-		t.Fatalf("`git restore` failed: code=%d out=%q", code, out)
+	writeFile(t, filepath.Join(wt, "scratch.go"), "package p // not handed over\n")
+
+	out, code := gitVerb(t, e, c, "rollback", shortSHA(target))
+	if code != 0 {
+		t.Fatalf("`git rollback` failed: code=%d out=%q", code, out)
 	}
 	b, err := os.ReadFile(filepath.Join(wt, "feature.go"))
-	if err != nil || strings.Contains(string(b), "scratch") {
-		t.Fatalf("feature.go = %q (err %v), want the scratch edit gone", b, err)
+	if err != nil || strings.Contains(string(b), "wrong turn") {
+		t.Fatalf("feature.go = %q (err %v), want the recorded wrong turn gone", b, err)
 	}
 	if !strings.Contains(string(b), "func Feature()") {
-		t.Fatalf("restore must not touch committed work, got %q", b)
+		t.Fatalf("rollback must keep everything up to its target, got %q", b)
 	}
-	out, _ = gitVerb(t, e, c, "status")
-	if !strings.Contains(out, "Nothing to show") {
-		t.Errorf("status should be clean after the restore, got %q", out)
+	if _, err := os.Stat(filepath.Join(wt, "scratch.go")); err == nil {
+		t.Error("work never handed over must go too — a rollback that leaves it is not a rollback")
+	}
+	if head, _ := git.Head(wt); head != target {
+		t.Errorf("HEAD = %q, want the named point %q", head, target)
+	}
+	if !strings.Contains(out, "back at") {
+		t.Errorf("the reply should say where it left the agent, got %q", out)
+	}
+}
+
+// TestGitRollbackRefusesWhatIsNotTheAgentsOwn: the verb takes an id, which is the one place an agent
+// names something that is not a path — so it must reach only its own history. Neither a commit the
+// reference branch already had, nor a made-up id, may move the branch.
+func TestGitRollbackRefusesWhatIsNotTheAgentsOwn(t *testing.T) {
+	e, c, wt, root := gitEngine(t)
+	before, err := git.Head(wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The reference moves on, as it does under every agent: its new tip is a real commit in the repo
+	// and no part of this branch, so naming it must be refused rather than checked out.
+	writeFile(t, filepath.Join(root, "unrelated.go"), "package p // somebody else's work\n")
+	if out, err := exec.Command("git", "-C", root, "commit", "-aqm", "moved on").CombinedOutput(); err != nil {
+		t.Fatalf("advance main: %s", out)
+	}
+	moved, err := git.BranchTip(root, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, id, want string }{
+		{"a made-up id", "0000000", "No 0000000"},
+		{"not an id at all", "main", "not an id"},
+		{"no id", "", "exactly one id"},
+		{"somebody else's commit", shortSHA(moved), "isn't in your branch"},
+	} {
+		args := []string{"rollback"}
+		if tc.id != "" {
+			args = append(args, tc.id)
+		}
+		out, code := gitVerb(t, e, c, args...)
+		if code == 0 {
+			t.Errorf("%s: should be refused, got exit 0 and %q", tc.name, out)
+		}
+		if !strings.Contains(out, tc.want) {
+			t.Errorf("%s: reply should say %q, got %q", tc.name, tc.want, out)
+		}
+	}
+	if head, _ := git.Head(wt); head != before {
+		t.Errorf("a refused rollback must move nothing: HEAD = %q, want %q", head, before)
+	}
+}
+
+// TestGitRollbackWillNotRewindPastWhereTheBranchStarted: the reference's own history is reachable
+// from the agent's HEAD, so "is it an ancestor" alone would let a rollback rewind into work the agent
+// never did — leaving its branch DELETING files, and the reset out of reach of every verb it has.
+func TestGitRollbackWillNotRewindPastWhereTheBranchStarted(t *testing.T) {
+	e, c, wt, root := gitEngine(t)
+	first, err := exec.Command("git", "-C", root, "rev-list", "--max-parents=0", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "unrelated.go"), "package p // a second commit on the reference\n")
+	if out, e := exec.Command("git", "-C", root, "commit", "-aqm", "second").CombinedOutput(); e != nil {
+		t.Fatalf("commit on the reference: %s", out)
+	}
+	// A branch that starts at the reference's SECOND commit: its first is then an ancestor of HEAD
+	// and older than where this branch began — exactly the shape the guard exists for.
+	second, err := git.BranchTip(root, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := git.ResetBranchTo(wt, second); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(wt, "mine.go"), "package p // my own work\n")
+	if _, err := e.gateCommit("proj", "eitri", "my own work"); err != nil {
+		t.Fatalf("gateCommit: %v", err)
+	}
+	head, err := git.Head(wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, code := gitVerb(t, e, c, "rollback", strings.TrimSpace(string(first))[:7])
+	if code == 0 {
+		t.Fatalf("rolling back into the reference's history must be refused, got %q", out)
+	}
+	if !strings.Contains(out, "not yours to undo") {
+		t.Errorf("the refusal should say whose work that is, got %q", out)
+	}
+	if now, _ := git.Head(wt); now != head {
+		t.Errorf("nothing may have moved: HEAD = %q, want %q", now, head)
+	}
+}
+
+// TestTheDestructiveVerbsRefuseASharedCheckout: a coauthor's /workspace is the user's own tree. A
+// rollback there is `reset --hard` plus `clean -fd` over whatever they have in progress, and a drop
+// commits into it — so both are refused rather than performed on somebody else's behalf.
+func TestTheDestructiveVerbsRefuseASharedCheckout(t *testing.T) {
+	e, _, _, root := gitEngine(t)
+	ps := e.store.For("proj")
+	if err := ps.PutAgent(store.Agent{Name: "loki", Role: "coauthor", Workspace: "."}); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "the-users-work.txt"), "half-finished")
+	c := registry.Caller{Project: "proj", Agent: "loki", Role: "coauthor"}
+	head, err := git.Head(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, args := range [][]string{{"rollback", shortSHA(head)}, {"drop", "feature.go"}} {
+		out, code := gitVerb(t, e, c, args...)
+		if code == 0 {
+			t.Errorf("`git %s` on the user's checkout must be refused, got %q", args[0], out)
+		}
+		if !strings.Contains(out, "the user's own checkout") {
+			t.Errorf("`git %s`: the refusal should say whose tree that is, got %q", args[0], out)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "the-users-work.txt")); err != nil {
+		t.Error("the user's work in progress was destroyed")
+	}
+	if now, _ := git.Head(root); now != head {
+		t.Errorf("the user's checkout moved: HEAD %q → %q", head, now)
 	}
 }
 
@@ -201,7 +330,7 @@ func TestGitRefusesWhatIsNotAllowed(t *testing.T) {
 		{"raw flag", []string{"diff", "--stat"}, "looks like a flag"},
 		{"absolute path", []string{"diff", "/etc/passwd"}, "absolute path"},
 		{"escaping path", []string{"diff", "../../etc/passwd"}, "outside your workspace"},
-		{"unscoped restore", []string{"restore"}, "needs the paths"},
+		{"the withdrawn restore", []string{"restore"}, "is gone"},
 		{"unscoped drop", []string{"drop"}, "needs the paths"},
 	} {
 		out, code := gitVerb(t, e, c, tc.args...)

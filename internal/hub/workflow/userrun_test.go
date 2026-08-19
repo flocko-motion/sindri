@@ -79,7 +79,7 @@ func TestAUserRunGoesToTheFrontOfTheQueue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gate, err := e.putQueuedRun("repo", "eitri", "submit", "make verify", "done", "", "")
+	gate, err := e.putQueuedRun("repo", store.Run{Agent: "eitri", Kind: gateSubmit, Command: "make verify", Message: "done"})
 	if err != nil {
 		t.Fatal(err)
 	}

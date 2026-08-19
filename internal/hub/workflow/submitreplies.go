@@ -30,6 +30,21 @@ func ReplyGateQueued(runID string, position int) string {
 	return fmt.Sprintf("Quality gate %s queued at position %d. You'll be told the result — no need to ask again.", runID, position)
 }
 
+// ReplyGateReused answers a landing verb whose commit already has a passing verdict: nothing ran, so
+// the continuation has ALREADY happened by the time this is printed — which is why it points at the
+// message rather than restating it. A reused pass that read like a fresh one would hide both facts.
+func ReplyGateReused(runID, sha string) string {
+	return fmt.Sprintf("Quality gate %s did not need to run: %s already passed and nothing has changed "+
+		"since, so the result stands. What follows it has already been sent to you — read that, not this.", runID, sha)
+}
+
+// ReplyLintQueued answers `lint` with no stored verdict for the commit: the gate builds and tests, so
+// it goes through the fleet's single slot like every other one rather than running N at a time.
+func ReplyLintQueued(runID, sha string, position int) string {
+	return fmt.Sprintf("Quality gate %s queued at position %d, on your work as the hub recorded it (%s). You'll "+
+		"be told the result — carry on with something else; a position is not a failure, so don't retry.", runID, position, sha)
+}
+
 // ReplyReviewRequestFailed tells a submitting agent its PR is up but requesting a review failed
 // (-> RepairReviewRows retries it in the background).
 func ReplyReviewRequestFailed(prID string, err error) string {
