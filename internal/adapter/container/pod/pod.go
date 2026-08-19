@@ -294,11 +294,19 @@ func (Engine) Info(name string) string {
 }
 
 // Rm force-removes a container.
-func (Engine) Rm(name string) error {
-	if out, err := exec.Command(Binary, "rm", "-f", name).CombinedOutput(); err != nil {
-		return fmt.Errorf("podman rm %s: %s: %w", name, strings.TrimSpace(string(out)), err)
+func (e Engine) Rm(name string) error { return e.RmContext(context.Background(), name) }
+
+// RmContext is Rm bounded by ctx: on cancellation podman is killed, and the error names the bound
+// rather than the removal — `rm -f` stops the container first, so it is a slow verb by nature.
+func (Engine) RmContext(ctx context.Context, name string) error {
+	out, err := exec.CommandContext(ctx, Binary, "rm", "-f", name).CombinedOutput()
+	if err == nil {
+		return nil
 	}
-	return nil
+	if ctx.Err() != nil {
+		return fmt.Errorf("podman rm %s: %w", name, ctx.Err())
+	}
+	return fmt.Errorf("podman rm %s: %s: %w", name, strings.TrimSpace(string(out)), err)
 }
 
 // ListByLabelContext returns the names of containers carrying label=value — used to

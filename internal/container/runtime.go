@@ -116,6 +116,9 @@ type Runtime interface {
 	Logs(name string, tail int) string
 	Info(name string) string
 	Rm(name string) error
+	// RmContext is Rm bounded by ctx, for a caller that must not wait on the runtime — a
+	// removal is a stop as well, so it is the slowest of the verbs to answer.
+	RmContext(ctx context.Context, name string) error
 	ListByLabelContext(ctx context.Context, label, value string) ([]string, error)
 	// Check pre-flights the runtime, narrating to w. There is no separate reachability probe: the
 	// hub learns that from the pod listing its liveness sweep already takes, so a caller asking
@@ -166,6 +169,7 @@ func (noop) AgentChannel() (NetChannel, error) {
 func (noop) Logs(string, int) string                                              { return "" }
 func (noop) Info(string) string                                                   { return "" }
 func (noop) Rm(string) error                                                      { return errNoRuntime }
+func (noop) RmContext(context.Context, string) error                              { return errNoRuntime }
 func (noop) ListByLabelContext(context.Context, string, string) ([]string, error) { return nil, nil }
 func (noop) Check(io.Writer) error                                                { return errNoRuntime }
 func (noop) EnsureImage(string, string, io.Writer) (string, error)                { return "", errNoRuntime }
@@ -224,6 +228,10 @@ func Info(name string) string { return active.Info(name) }
 
 // Rm force-removes a pod.
 func Rm(name string) error { return active.Rm(name) }
+
+// RmContext is Rm bounded by ctx: on cancellation the runtime process is killed and the error says
+// so, so a caller that cannot wait — a sweep beat, a board read — is never held by an unwell runtime.
+func RmContext(ctx context.Context, name string) error { return active.RmContext(ctx, name) }
 
 // ListTTL bounds ListByLabelCached staleness: short enough that a board read seconds
 // later is current, long enough that a burst (poll tick + refetch + keystrokes) costs one.

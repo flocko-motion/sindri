@@ -52,8 +52,8 @@ type Service struct {
 	launchMu sync.Mutex             // guards launch
 	launch   map[string]*safeBuffer // per-agent launch-output buffers (see launchbuf.go)
 
-	lcMu      sync.Mutex       // guards lifecycle
-	lifecycle map[lcKey]string // transient launch/stop intent: "launching"|"stopping"
+	lcMu      sync.Mutex                // guards lifecycle
+	lifecycle map[lcKey]lifecycleIntent // transient launch/stop intent: "launching"|"stopping"|failed
 }
 
 // New builds the agent module over the hub's store, its Deps, and the agent channel
@@ -62,6 +62,6 @@ func New(st *store.Store, deps Deps, agentCh *agentchan.Server) *Service {
 	return &Service{
 		store: st, deps: deps, agentCh: agentCh,
 		launch:    map[string]*safeBuffer{},
-		lifecycle: map[lcKey]string{},
+		lifecycle: map[lcKey]lifecycleIntent{},
 	}
 }

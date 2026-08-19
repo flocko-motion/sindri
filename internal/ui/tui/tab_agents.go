@@ -436,6 +436,8 @@ func (m model) paneLines() []string {
 			return body
 		}
 		return []string{dimStyle.Render("launching… (building image / starting container)")}
+	case "launch-failed":
+		return []string{dimStyle.Render("(launch failed — see the log; '" + keyStartS + "' tries again)")}
 	default: // running
 		if !hasBody {
 			return []string{dimStyle.Render("(starting…)")}

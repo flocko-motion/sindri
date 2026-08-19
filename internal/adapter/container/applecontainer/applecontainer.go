@@ -328,11 +328,19 @@ func (Engine) Info(name string) string {
 }
 
 // Rm force-removes a container (and its micro-VM).
-func (Engine) Rm(name string) error {
-	if out, err := exec.Command(Binary, "rm", "-f", name).CombinedOutput(); err != nil {
-		return fmt.Errorf("container rm %s: %s: %w", name, strings.TrimSpace(string(out)), err)
+func (e Engine) Rm(name string) error { return e.RmContext(context.Background(), name) }
+
+// RmContext is Rm bounded by ctx: on cancellation the CLI is killed, and the error names the bound
+// rather than the removal — stopping a micro-VM is part of the verb, so it is a slow one.
+func (Engine) RmContext(ctx context.Context, name string) error {
+	out, err := exec.CommandContext(ctx, Binary, "rm", "-f", name).CombinedOutput()
+	if err == nil {
+		return nil
 	}
-	return nil
+	if ctx.Err() != nil {
+		return fmt.Errorf("container rm %s: %w", name, ctx.Err())
+	}
+	return fmt.Errorf("container rm %s: %s: %w", name, strings.TrimSpace(string(out)), err)
 }
 
 // ListByLabelContext lists containers carrying label=value (empty value: any value, so

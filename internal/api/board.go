@@ -148,16 +148,16 @@ const StatusUnknown = "unknown"
 // are enumerated, so nothing else defaults an unknown status to "running".
 func AgentNotUp(status string) bool {
 	switch status {
-	case "", "down", "stopped", StatusUnknown, "launching", "stopping":
+	case "", "down", "stopped", StatusUnknown, "launching", "stopping", StatusLaunchFailed:
 		return true
 	}
 	return false
 }
 
 // AgentNeedsLaunch reports whether an agent has no pod and none on the way — narrower than
-// AgentNotUp, which also covers one in flight. "stopped" counts too: the same verb, Launch, resumes it.
+// AgentNotUp, which also covers one in flight. "stopped" and a failed launch count too.
 func AgentNeedsLaunch(status string) bool {
-	return status == "down" || status == "stopped" || status == StatusUnknown
+	return status == "down" || status == "stopped" || status == StatusUnknown || status == StatusLaunchFailed
 }
 
 // ClearWaitsFor says what an armed context clear will fire AFTER: the id of the work in hand, or ""

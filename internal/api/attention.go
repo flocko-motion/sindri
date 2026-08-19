@@ -14,6 +14,10 @@ const (
 	// StatusEscalated: it asked the user to decide something and stopped on the answer. A word of its
 	// own, not blocked: a runtime block is answered in the pane, this is answered and then resumed.
 	StatusEscalated = "escalated"
+	// StatusLaunchFailed: a launch was asked for and never came up — the watchdog's sweep gave up
+	// waiting (-> agent.Service.FailLaunch), not a board read. Distinct from "down": here somebody
+	// asked and it did not work, which only a human relaunching (or investigating first) resolves.
+	StatusLaunchFailed = "launch-failed"
 )
 
 // AgentNeedsUser reports an agent whose state resolves ONLY IF A HUMAN ACTS. That is the rule, and
@@ -32,7 +36,7 @@ func AgentNeedsUser(a AgentView) bool {
 		return false
 	}
 	switch a.Status {
-	case StatusBlocked, StatusSignedOut, StatusFull, StatusStalled:
+	case StatusBlocked, StatusSignedOut, StatusFull, StatusStalled, StatusLaunchFailed:
 		return true
 	}
 	return false

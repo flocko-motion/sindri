@@ -36,6 +36,12 @@ import (
 // lcKey keys the transient lifecycle-intent map by (project, name).
 type lcKey struct{ project, name string }
 
+// lifecycleIntent is a transient launch/stop intent plus when it was set (-> LaunchIntent).
+type lifecycleIntent struct {
+	state string
+	since time.Time
+}
+
 var nameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
 // launchReadyTimeout bounds the wait for a new agent's session. Generous: a cold pod boot
@@ -51,7 +57,18 @@ func (s *Service) setLifecycle(project, name, state string) {
 	if state == "" {
 		delete(s.lifecycle, key)
 	} else {
-		s.lifecycle[key] = state
+		s.lifecycle[key] = lifecycleIntent{state: state, since: time.Now()}
+	}
+}
+
+// clearLaunching retracts a launch intent this call itself set, leaving the sweep's verdict
+// (-> FailLaunch) alone: that names a reason, where a bare clear reports "down" — nobody asked.
+func (s *Service) clearLaunching(project, name string) {
+	s.lcMu.Lock()
+	defer s.lcMu.Unlock()
+	key := lcKey{project, name}
+	if s.lifecycle[key].state == "launching" {
+		delete(s.lifecycle, key)
 	}
 }
 
@@ -64,7 +81,7 @@ func (s *Service) AgentStatus(project, name string, running, observed bool, phas
 	s.lcMu.Lock()
 	defer s.lcMu.Unlock()
 	key := lcKey{project, name}
-	intent := s.lifecycle[key]
+	intent := s.lifecycle[key].state
 	switch {
 	case intent == "stopping":
 		if running || !observed {
@@ -80,12 +97,42 @@ func (s *Service) AgentStatus(project, name string, running, observed bool, phas
 		return phase
 	case intent == "launching":
 		return "launching" // requested, pod not up yet
+	case intent == api.StatusLaunchFailed:
+		return api.StatusLaunchFailed // the watchdog gave up waiting; see FailLaunch
 	case !observed:
 		return "unknown" // registered since the last sweep; the next one answers
 	case stopped:
 		return "stopped" // torn down on purpose, resumable — not the same claim as "down"
 	default:
 		return "down"
+	}
+}
+
+// LaunchIntent reports a launch in flight and when it was requested, for the watchdog's own bound
+// on how long one may run (-> FailLaunch).
+func (s *Service) LaunchIntent(project, name string) (since time.Time, ok bool) {
+	s.lcMu.Lock()
+	defer s.lcMu.Unlock()
+	li := s.lifecycle[lcKey{project, name}]
+	return li.since, li.state == "launching"
+}
+
+// FailLaunch ends a launch that will never complete: a distinct status rather than a silent fall to
+// "down", the reason logged beside "launch: requested", then the container removed under ctx — the
+// runtime that hung the launch may hang that too. A no-op unless the intent is still "launching".
+func (s *Service) FailLaunch(ctx context.Context, project, name, reason string) {
+	s.lcMu.Lock()
+	key := lcKey{project, name}
+	if s.lifecycle[key].state != "launching" {
+		s.lcMu.Unlock()
+		return
+	}
+	s.lifecycle[key] = lifecycleIntent{state: api.StatusLaunchFailed, since: time.Now()}
+	s.lcMu.Unlock()
+	_ = s.store.For(project).Log(name, "launch", "failed: "+reason)
+	s.deps.Notify()
+	if err := container.RmContext(ctx, s.deps.ContainerName(project, name)); err != nil {
+		_ = s.store.For(project).Log(name, "launch", "container not released: "+err.Error())
 	}
 }
 
@@ -306,6 +353,17 @@ func (s *Service) Launch(project, name string, shell, debug bool, cols, lines in
 		a.Stopped = false
 		_ = ps.PutAgent(a)
 	}
+	// Status → launching before any preflight, not after: container.Check below can start a
+	// stopped podman VM on macOS, and that wait must not read as "down" for having asked nothing yet.
+	s.setLifecycle(project, name, "launching")
+	_ = ps.Log(name, "launch", "requested")
+	s.deps.Notify()
+	defer func() {
+		if err != nil {
+			s.clearLaunching(project, name)
+			s.deps.Notify()
+		}
+	}()
 	// Validate the project config up front — a bad .sindri/config.yaml fails the launch
 	// loudly rather than silently reverting to defaults mid-build.
 	cfg, err := s.deps.ProjectConfig(project)
@@ -321,17 +379,6 @@ func (s *Service) Launch(project, name string, shell, debug bool, cols, lines in
 	if err := container.Check(w); err != nil {
 		return err
 	}
-	// Status → launching immediately (cleared by AgentStatus once the pod is up); on any
-	// failure below, clear it so it doesn't stick at "launching".
-	s.setLifecycle(project, name, "launching")
-	_ = ps.Log(name, "launch", "requested")
-	s.deps.Notify()
-	defer func() {
-		if err != nil {
-			s.setLifecycle(project, name, "")
-			s.deps.Notify()
-		}
-	}()
 	imageRef, err := container.EnsureImage(root, config.Abs(root, cfg.Containerfile), w)
 	if err != nil {
 		return err

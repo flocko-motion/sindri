@@ -52,7 +52,11 @@ func (f *fakeRuntime) ExecContext(_ context.Context, _ string, args ...string) (
 	return nil, nil
 }
 
-func (f *fakeRuntime) Rm(name string) error {
+func (f *fakeRuntime) Rm(name string) error { return f.RmContext(context.Background(), name) }
+
+// RmContext records the removal as Rm does: a teardown that takes a deadline still tears the same
+// pod down, and a fake that only counted one of the two would miss whichever verb a path used.
+func (f *fakeRuntime) RmContext(_ context.Context, name string) error {
 	f.removed = append(f.removed, name)
 	return nil
 }
