@@ -39,6 +39,7 @@ func NewMailCmd() *cobra.Command {
 func mailListCmd() *cobra.Command {
 	var agent, filter string
 	var mine bool
+	var limit int
 	c := &cobra.Command{
 		Use: "list", Short: "List mail across the fleet, newest first", Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -54,7 +55,8 @@ func mailListCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				rows := api.FilterMail(f, agent, st.Mail)
+				// AllMail orders newest first, so capHead keeps that end.
+				rows, matched := capHead(api.FilterMail(f, agent, st.Mail), limit)
 				// Grouped the way every fleet-wide listing is: what waits on the user in another repo
 				// first, then this repo, then the rest — and flat when nothing waits elsewhere
 				// (-> groupedLines). A note to the user IS what waits, which is what makes it foreign.
@@ -68,6 +70,9 @@ func mailListCmd() *cobra.Command {
 				}
 				printListing(mailListTable, listed)
 				fmt.Fprintln(os.Stderr, mailFooter(st, rows, f, agent))
+				if note := limitNotice("message", len(rows), matched); note != "" {
+					fmt.Fprint(os.Stderr, note)
+				}
 				return nil
 			})
 		},
@@ -75,6 +80,7 @@ func mailListCmd() *cobra.Command {
 	c.Flags().StringVar(&agent, "agent", "", "only mail sent to this agent")
 	c.Flags().BoolVar(&mine, "mine", false, "only mail addressed to you — what an agent has told you directly")
 	c.Flags().StringVar(&filter, "filter", string(api.MailActive), "which mail to list: "+api.MailFilterNames())
+	c.Flags().IntVar(&limit, "limit", DefaultListLimit, "show at most this many, newest first (0 = no limit)")
 	return c
 }
 

@@ -118,3 +118,40 @@ func printRows(t table.Table, lines []string) {
 	}
 	printListing(t, rows)
 }
+
+// DefaultListLimit bounds every history listing the same way defaulting to "active" does: a filter
+// alone still lets a listing grow without bound as the fleet grows (sd-4be9f8) — the bound wants a
+// count too.
+const DefaultListLimit = 50
+
+// limitNotice is the line a capped listing prints once --limit (or -n) cuts something, naming the
+// count and how to see the rest. Silent truncation would read as a complete answer, which for a
+// listing is a wrong one — the same principle gitcmd.go's capLines states for an agent reading a
+// diff applies here for a person reading a list.
+func limitNotice(noun string, shown, matched int) string {
+	if shown >= matched {
+		return ""
+	}
+	return fmt.Sprintf("(%d of %d %s(s) shown — raise with --limit, or --limit 0 for all)\n", shown, matched, noun)
+}
+
+// capHead keeps the first limit items (all of them when limit <= 0), plus how many there were
+// before that. Pick this over capTail when items already sort newest (or most important) first, so
+// the kept prefix is the newest.
+func capHead[T any](items []T, limit int) (kept []T, matched int) {
+	matched = len(items)
+	if limit <= 0 || matched <= limit {
+		return items, matched
+	}
+	return items[:limit], matched
+}
+
+// capTail is capHead for a source that sorts oldest first: it keeps the last limit items, so the
+// kept suffix is still the newest.
+func capTail[T any](items []T, limit int) (kept []T, matched int) {
+	matched = len(items)
+	if limit <= 0 || matched <= limit {
+		return items, matched
+	}
+	return items[matched-limit:], matched
+}

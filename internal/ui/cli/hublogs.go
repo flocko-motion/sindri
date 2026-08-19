@@ -22,7 +22,7 @@ import (
 const followPoll = 300 * time.Millisecond
 
 // newHubLogsCmd builds `hub logs`. It carries its own filtering (--agent, --grep) and bound
-// (--lines) on purpose: the log is where a stuck agent is diagnosed, and needing `grep`/`tail`
+// (--limit) on purpose: the log is where a stuck agent is diagnosed, and needing `grep`/`tail`
 // to read it means reaching for a pipe the callers here — agents included — cannot use.
 func newHubLogsCmd() *cobra.Command {
 	var lines int
@@ -60,8 +60,12 @@ func newHubLogsCmd() *cobra.Command {
 				return fmt.Errorf("read hub log: %w", err)
 			}
 			out := cmd.OutOrStdout()
-			for _, l := range tailMatching(string(data), keep, lines) {
+			kept, matched := tailMatching(string(data), keep, lines)
+			for _, l := range kept {
 				fmt.Fprintln(out, l)
+			}
+			if note := limitNotice("line", len(kept), matched); note != "" {
+				fmt.Fprint(cmd.ErrOrStderr(), note)
 			}
 			if !follow {
 				return nil
@@ -69,7 +73,9 @@ func newHubLogsCmd() *cobra.Command {
 			return followLog(f, keep, out)
 		},
 	}
-	c.Flags().IntVarP(&lines, "lines", "n", 50, "show only the last N matching lines (0 for all)")
+	// --limit is the vocabulary every list uses now; -n stays as the shorthand this command has
+	// always had, so a working invocation keeps working.
+	c.Flags().IntVarP(&lines, "limit", "n", DefaultListLimit, "show only the last N matching lines (0 = no limit)")
 	c.Flags().BoolVarP(&follow, "follow", "f", false, "keep streaming new output as the hub writes it")
 	c.Flags().StringVar(&agent, "agent", "", "show only lines mentioning this agent")
 	c.Flags().StringVar(&grep, "grep", "", "show only lines containing this substring (case-insensitive)")
@@ -87,20 +93,17 @@ func logFilter(agent, grep string) func(string) bool {
 	}
 }
 
-// tailMatching returns the last n lines of s that satisfy keep (all of them when n <= 0). Filtering
-// happens before the bound, so `-n 50 --agent x` yields 50 of x's lines, not 50 lines that may hold
-// none — the bound is on what you asked for.
-func tailMatching(s string, keep func(string) bool, n int) []string {
+// tailMatching returns the last n lines of s that satisfy keep, plus how many matched before that
+// bound. Filtering happens first, so `--limit 50 --agent x` yields 50 of x's lines, not 50 lines
+// that may hold none — the bound is on what you asked for.
+func tailMatching(s string, keep func(string) bool, n int) (kept []string, matched int) {
 	var out []string
 	for _, l := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
 		if l != "" && keep(l) {
 			out = append(out, l)
 		}
 	}
-	if n > 0 && len(out) > n {
-		out = out[len(out)-n:]
-	}
-	return out
+	return capTail(out, n)
 }
 
 // followLog streams appended lines from f (already read to EOF) until interrupted. Polling, not

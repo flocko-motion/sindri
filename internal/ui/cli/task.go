@@ -21,9 +21,7 @@ import (
 
 // --- task ---
 
-// tasksJSON renders the task rows (their json tags) for machine consumers. It
-// always yields a JSON array — never null — so the output parses even when there
-// are no tasks.
+// tasksJSON renders task rows as JSON, always an array — never null — even with none.
 func tasksJSON(tasks []api.Task) (string, error) {
 	if tasks == nil {
 		tasks = []api.Task{}
@@ -42,10 +40,8 @@ func NewTaskCmd() *cobra.Command {
 	return c
 }
 
-// taskRefreshCmd re-syncs the task cache and notifies watchers. Reads sync on their own, so this is
-// for forcing one without listing — e.g. pushing fresh state to a running TUI.
-// taskCommentCmd comments on a task. A GitHub issue gets it upstream, so its own readers see it;
-// every other kind keeps the thread in the hub.
+// taskRefreshCmd forces a re-sync without listing — e.g. to push fresh state to a running TUI.
+// taskCommentCmd comments on a task; a GitHub issue's goes upstream, everything else stays in the hub.
 func taskCommentCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "comment <id> <text...>", Short: "Comment on a task (a GitHub issue is commented upstream)",
@@ -63,9 +59,7 @@ func taskCommentCmd() *cobra.Command {
 	}
 }
 
-// taskNextCmd answers "why is nothing being assigned" without anyone reading the queries: what
-// would be handed out, and where every other open task stands. --role asks it of a role nobody is
-// running yet — "would a second worker have anything to pick up" — which otherwise took starting one.
+// taskNextCmd answers "why is nothing being assigned" — what would be handed out, and why not the rest.
 func taskNextCmd() *cobra.Command {
 	var agent, role string
 	c := &cobra.Command{
@@ -79,8 +73,7 @@ func taskNextCmd() *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			if role == "reviewer" {
-				// Answered rather than refused blankly: the noun is the point. A reviewer's pool is
-				// PRs, and a command called `task next` has no business claiming otherwise.
+				// Answered, not refused blankly: the noun is the point — a reviewer's pool is PRs.
 				return fmt.Errorf("a reviewer is offered PRs, not tasks — ask `sindri pr next`")
 			}
 			return withBackend(func(b backend) error {
@@ -88,8 +81,7 @@ func taskNextCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				// The same rule after the call as before it: a named agent brings its own role, and
-				// only the hub knows what that is, so this is where the noun is checked for one.
+				// Checked again after the call: a named agent brings its own role, known only now.
 				if nextIsAboutPRs(x.Role) {
 					return wrongNounRefusal(x.Role, agent)
 				}
@@ -119,8 +111,7 @@ func taskRefreshCmd() *cobra.Command {
 	}
 }
 
-// taskCloseCmd marks a task done — dispatched by backend (td close / openspec archive
-// / GitHub issue close).
+// taskCloseCmd marks a task done — dispatched by backend (td close / openspec archive / issue close).
 func taskCloseCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "close <id>", Short: "Close a task (done): td close · openspec archive · issue close", Args: cobra.ExactArgs(1),
@@ -136,9 +127,8 @@ func taskCloseCmd() *cobra.Command {
 	}
 }
 
-// taskReopenCmd restores a closed sindri-owned task to open, with a required reason — the host's
-// counterpart to `task close` (ARCHITECTURE.md's interchangeable-front-ends rule) and a planner's
-// `reopen-task`. Refused for a task whose status comes from its own source (openspec, GitHub).
+// taskReopenCmd reopens a closed sindri-owned task with a reason; a task whose status comes from
+// its own source (openspec, GitHub) refuses.
 func taskReopenCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "reopen <id> <reason...>", Short: "Reopen a closed task, with a reason (sindri-owned tasks only)", Args: cobra.MinimumNArgs(2),
@@ -149,8 +139,7 @@ func taskReopenCmd() *cobra.Command {
 					return err
 				}
 				fmt.Fprintf(os.Stderr, "reopened %s\n", id)
-				// The one thing to be told rather than discover: a priority left standing from
-				// before the close is enough on its own to make this immediately claimable.
+				// A priority left standing from before the close makes this claimable right away.
 				if t, terr := b.TaskInfo(id); terr == nil && t.Priority != "" {
 					fmt.Fprintf(os.Stderr, "%s still carries priority %s, so a worker may claim it immediately\n",
 						id, theme.PriorityLabel(t.Priority))
@@ -161,8 +150,7 @@ func taskReopenCmd() *cobra.Command {
 	}
 }
 
-// taskDeleteCmd scraps a task, dispatched by backend. --subtasks widens it down the tree and --prs
-// takes the open PRs, the same two shapes the TUI's scrap modal offers.
+// taskDeleteCmd scraps a task; --subtasks widens down the tree, --prs takes their open PRs too.
 func taskDeleteCmd() *cobra.Command {
 	var subtasks, prs bool
 	c := &cobra.Command{
@@ -250,10 +238,8 @@ func taskApproveCmd() *cobra.Command {
 	return c
 }
 
-// approvedPriority is the second gate, in the same call. Approving FEELS like releasing work, and it
-// is not: an unrated task is claimable by nobody, which is how a dozen approved tasks came to sit in
-// the backlog doing nothing. So the rating is either given here or its absence is said out loud — the
-// TUI asks in a modal, and this is the same offer where there is nobody to ask.
+// approvedPriority is the second gate: an unrated task is claimable by nobody, so the rating is
+// either given here or its absence is said out loud.
 func approvedPriority(b backend, id, priority string, scope api.PriorityScope, all []api.Task) error {
 	if priority != "" {
 		cascade := api.PriorityEffect(all, id)
@@ -270,9 +256,7 @@ func approvedPriority(b backend, id, priority string, scope api.PriorityScope, a
 		return nil // the backlog didn't read; silence beats being wrong about what is owed
 	}
 	if api.ReleasedByPriority(all)[id] {
-		// Name the rating being authorised. A planner may have proposed the sequence, and the
-		// approve is the moment it takes effect — silence here would land work in a worker's lap
-		// at an order the user never consciously agreed to.
+		// Name the rating this approve just made effective — a planner may have proposed it.
 		if word := priorityOf(all, id); word != "" {
 			fmt.Fprintf(os.Stderr, "%s is %s and now claimable\n", id, word)
 		}
@@ -283,13 +267,10 @@ func approvedPriority(b backend, id, priority string, scope api.PriorityScope, a
 	return nil
 }
 
-// taskLister is the slice of the backend this needs: what the backlog says, so the advice can be
-// about the tree as it stands rather than the one call that just happened.
+// taskLister is the backend slice this needs: the backlog, for advice about the tree as it stands.
 type taskLister interface{ Tasks() ([]api.Task, error) }
 
-// ratedApproval is the mirror of approvedPriority: a rating on a task the approval gate still holds
-// releases nothing, and reporting only success leaves the user to wonder why no worker took it.
-// It names the act that would release it rather than performing one — approving is the user's.
+// ratedApproval names the approve that would release a still-pending task — approving is the user's.
 func ratedApproval(w io.Writer, b taskLister, id string) {
 	all, err := b.Tasks()
 	if err != nil || len(all) == 0 {
@@ -314,8 +295,7 @@ func ratedApproval(w io.Writer, b taskLister, id string) {
 	}
 }
 
-// priorityOf is the readable priority a task carries itself, or "" — the ancestor's rating that
-// also releases it is not this task's sequence to state.
+// priorityOf is the priority a task carries itself, or "" — an ancestor's rating is not this task's.
 func priorityOf(all []api.Task, id string) string {
 	for _, t := range all {
 		if t.ID == id && t.Priority != "" {
@@ -359,8 +339,7 @@ func taskPriorityCmd() *cobra.Command {
 					return err
 				}
 				fmt.Fprintf(os.Stderr, "set %s priority %s%s\n", id, args[1], scopeExtent(sc, cascade))
-				// The same note the TUI's scope modal carries, for the same reason: a rating that
-				// reached the children of an open package ordered them, and did not release them.
+				// A rating reaching open children ordered them; it did not release them.
 				if note := theme.PriorityScopeNote(cascade); note != "" {
 					fmt.Fprintf(os.Stderr, "%s\n", note)
 					if sc == api.ScopeTask {
@@ -377,8 +356,7 @@ func taskPriorityCmd() *cobra.Command {
 	return c
 }
 
-// priorityReach is what a rating on id could carry to; a backlog that can't be read yields nothing to
-// say about the tree, which must not turn the rating itself into a failure.
+// priorityReach is what a rating on id could carry to; an unreadable backlog yields nothing, not a failure.
 func priorityReach(b backend, id string) api.PriorityCascade {
 	all, err := b.Tasks()
 	if err != nil {
@@ -399,9 +377,8 @@ func scopeExtent(scope api.PriorityScope, c api.PriorityCascade) string {
 	return " and " + theme.Plural(n, "task", "tasks") + " below it"
 }
 
-// taskState is the word a listing shows for a task: the approval gate where one is set, since that
-// is what decides whether the task can be worked, and the status otherwise. A pending task printed
-// as plain "open" claimed to be available when no worker could see it.
+// taskState is the word a listing shows: the approval gate where one is set, else the status —
+// "open" alone would claim a pending task is available when no worker can see it.
 func taskState(t api.Task) string {
 	if t.Approval == "pending" || t.Approval == "rejected" {
 		return theme.ApprovalLabel(t.Approval)
@@ -423,6 +400,7 @@ var taskListTable = table.Table{
 func taskListCmd() *cobra.Command {
 	var asJSON bool
 	var filter string
+	var limit int
 	c := &cobra.Command{
 		Use: "list", Short: "List tasks", Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
@@ -436,19 +414,22 @@ func taskListCmd() *cobra.Command {
 					return err
 				}
 				tasks := api.FilterTasks(f, all)
-				// Who holds each one, by the rule the detail views and the TUI read (-> AgentsByTask).
-				// Off the board, since a task carries no owner of its own.
-				holders := map[string]string{}
-				if st, serr := b.State(); serr == nil {
-					holders = api.AgentsByTask(st.Agents, st.PRs)
-				}
 				if asJSON {
+					// Uncapped: a script asked for the filtered set and reads only stdout, so it
+					// cannot see a stderr notice — --limit is for a screen, not this.
 					out, err := tasksJSON(tasks)
 					if err != nil {
 						return err
 					}
 					fmt.Println(out)
 					return nil
+				}
+				// Highest priority first, then id (-> store.AllTasks), so capHead keeps what matters most.
+				tasks, matched := capHead(tasks, limit)
+				// Off the board, since a task carries no owner of its own (-> AgentsByTask).
+				holders := map[string]string{}
+				if st, serr := b.State(); serr == nil {
+					holders = api.AgentsByTask(st.Agents, st.PRs)
 				}
 				lines := make([]string, 0, len(tasks))
 				for _, t := range tasks {
@@ -463,16 +444,16 @@ func taskListCmd() *cobra.Command {
 					))
 				}
 				printRows(taskListTable, lines)
-				// What a filter hid, said out loud, in the wording the agent's own `task list` uses
-				// (-> api.TaskListSummary) rather than a second one that drifts from it.
+				// The same wording the agent's own `task list` uses (-> api.TaskListSummary).
 				if len(all) == 0 {
 					fmt.Fprintln(os.Stderr, "no tasks")
 				} else {
 					fmt.Fprintln(os.Stderr, api.TaskListSummary(f, len(tasks), all))
 				}
-				// The gate hides these from every worker, so a list that ended here read as a full
-				// backlog while nothing in it could be claimed. Counted over every task, not the
-				// filtered set: a verdict is owed whether or not this listing shows the task.
+				if note := limitNotice("task", len(tasks), matched); note != "" {
+					fmt.Fprint(os.Stderr, note)
+				}
+				// Counted over every task, not the filtered set — a verdict is owed regardless.
 				if n := api.CountAwaitingVerdict(all); n > 0 {
 					fmt.Fprintf(os.Stderr, "\n%d task(s) await your verdict and no worker can claim them: "+
 						"`sindri task approve <id>` (--subtasks clears the tree below it), or `sindri task reject <id> <why>`.\n", n)
@@ -482,22 +463,22 @@ func taskListCmd() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&asJSON, "json", false, "output tasks as JSON (machine-readable) instead of the table")
-	// Defaults to "all", which is what the bare command has always printed. The TUI opens on
-	// "active" instead: a screen redrawn every few seconds is a view, and a listing is a record.
-	c.Flags().StringVar(&filter, "filter", string(api.FilterAll),
+	// Defaults to "active", matching mail list and the TUI — --filter all recovers the whole record.
+	c.Flags().StringVar(&filter, "filter", string(api.FilterActive),
 		"which tasks to list: "+api.TaskFilterNames()+" (active = open, plus anything closed within "+
 			api.ActiveWindow.String()+")")
+	c.Flags().IntVar(&limit, "limit", DefaultListLimit, "show at most this many, highest priority first (0 = no limit)")
 	return c
 }
 
 func taskInfoCmd() *cobra.Command {
 	var refresh bool
+	var limit int
 	c := &cobra.Command{
 		Use: "info <id>", Short: "Show a task", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withBackend(func(b backend) error {
-				// The TUI re-pulls a thread on demand, so the CLI can too: an upstream comment
-				// added since the last sync is otherwise unreachable from here.
+				// An upstream comment added since the last sync is otherwise unreachable from here.
 				if refresh {
 					if err := b.RefreshTaskComments(args[0]); err != nil {
 						return err
@@ -507,36 +488,36 @@ func taskInfoCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				// Who is behind it, by the rule the dashboard's detail pane and its row marker use,
-				// so the same task never names a different agent in the two front-ends. Read off the
-				// board, since a task carries no owner of its own: an agent holds it, or its PR does.
+				// The same rule the dashboard's detail pane uses, off the board — a task owns no agent.
 				st, err := b.State()
 				if err != nil {
 					return err
 				}
 				agent := api.AgentOnTask(st.Agents, st.PRs, t.ID)
-				// The same fields the TUI pane and the agent's `task <id>` show: a front-end
-				// chooses layout, not which facts exist, or it answers a different question.
+				// The same fields the TUI pane and the agent's `task <id>` show.
 				fmt.Printf("id:       %s\ntitle:    %s\nstatus:   %s\ntype:     %s\npriority: %s\ntier:     %s\nparent:   %s\nagent:    %s\napproval: %s\nlabels:   %s\nurl:      %s\n",
 					t.ID, t.Title, t.Status, dash(t.Type), theme.PriorityLabel(t.Priority), api.TierOrDefault(t.Tier),
 					dash(t.ParentID), dash(agent), dash(theme.ApprovalLabel(t.Approval)), dash(t.Labels), dash(t.URL))
-				// Exact, where the list rounds — and "changed" beside it, the field the active
-				// filter reads, so its "n/a" says why a mirrored task can be missing from that view.
+				// Exact, where the list rounds; "changed" is the field the active filter reads.
 				fmt.Printf("created:  %s\nchanged:  %s\n", theme.When(t.CreatedAt), theme.When(t.UpdatedAt))
 				if body := strings.TrimRight(t.Description, "\n"); body != "" {
 					fmt.Printf("\n%s\n", body)
 				}
-				// The thread too, for the same reason the fields above are all here: the TUI's pane
-				// shows it, so a CLI that omitted it answered a different question.
-				for _, c := range t.Comments {
+				// The description stays whole; a long thread is capped like every other listing now.
+				comments, total := capTail(t.Comments, limit)
+				for _, c := range comments {
 					fmt.Printf("\n— %s (%s, %s)\n%s\n", dash(c.Author), c.Source, c.CreatedAt,
 						strings.TrimRight(c.Body, "\n"))
+				}
+				if note := limitNotice("comment", len(comments), total); note != "" {
+					fmt.Fprint(os.Stderr, note)
 				}
 				return nil
 			})
 		},
 	}
 	c.Flags().BoolVar(&refresh, "refresh", false, "re-pull the comment thread from its source first (a GitHub issue's upstream replies)")
+	c.Flags().IntVar(&limit, "limit", DefaultListLimit, "show at most this many of the newest comments (0 = no limit)")
 	return c
 }
 
@@ -600,12 +581,10 @@ func splitCSV(s string) []string {
 	return strings.Split(s, ",")
 }
 
-// nextIsAboutPRs reports whether a role's assignment answer is PRs rather than tasks — the one
-// distinction both `next` commands' nouns turn on.
+// nextIsAboutPRs reports whether a role's assignment answer is PRs rather than tasks.
 func nextIsAboutPRs(role string) bool { return role == "reviewer" }
 
-// wrongNounRefusal is what a `next` command says when the hub answered for the other pool: the
-// question was legitimate and asked at the wrong door, so it names the door.
+// wrongNounRefusal names the right door when a `next` command answered for the other pool.
 func wrongNounRefusal(role, agent string) error {
 	if nextIsAboutPRs(role) {
 		return fmt.Errorf("%s is a reviewer, and is offered PRs rather than tasks — ask `sindri pr next --agent %s`", agent, agent)

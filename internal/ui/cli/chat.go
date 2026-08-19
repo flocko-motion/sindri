@@ -100,7 +100,7 @@ func chatCloseCmd() *cobra.Command {
 
 // chatLogCmd prints the room transcript — what bare `meeting` used to do unasked.
 func chatLogCmd() *cobra.Command {
-	var n int
+	var limit int
 	c := &cobra.Command{
 		Use: "log", Short: "Print the meeting transcript (members + recent messages)", Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -109,15 +109,19 @@ func chatLogCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if n > 0 && len(v.Log) > n { // keep the newest n
-					v.Log = v.Log[len(v.Log)-n:]
-				}
+				var total int
+				v.Log, total = capTail(v.Log, limit)
 				fmt.Print(renderChat(v))
+				if note := limitNotice("message", len(v.Log), total); note != "" {
+					fmt.Fprint(os.Stderr, note)
+				}
 				return nil
 			})
 		},
 	}
-	c.Flags().IntVarP(&n, "tail", "n", 0, "print only the newest N messages (0 = the hub's whole window)")
+	// --limit is the vocabulary every list uses now; -n stays as the shorthand this command has
+	// always had, so a working invocation keeps working.
+	c.Flags().IntVarP(&limit, "limit", "n", DefaultListLimit, "print only the newest N messages (0 = the hub's whole window)")
 	return c
 }
 

@@ -448,6 +448,7 @@ var prListTable = table.Table{
 
 func prListCmd() *cobra.Command {
 	var filter string
+	var limit int
 	c := &cobra.Command{
 		Use: "list", Short: "List PRs", Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
@@ -467,9 +468,12 @@ func prListCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				// store.AllPRs orders newest first, so capHead before SortedPRs regroups by repo keeps
+				// the newest `limit` fleet-wide rather than the newest per repo.
+				filtered, matched := capHead(api.FilterPRs(f, all), limit)
 				// Grouped by repo, the order the PRs tab shows (-> api.SortedPRs). This listing is
 				// fleet-wide, so without the repo the rows it gathers from elsewhere are unplaceable.
-				prs := api.SortedPRs(api.FilterPRs(f, all), st.Projects)
+				prs := api.SortedPRs(filtered, st.Projects)
 				// And sectioned as the PRs tab is, so both front-ends read the same way.
 				local := localProject(st.Projects)
 				var rows []listRow
@@ -501,10 +505,15 @@ func prListCmd() *cobra.Command {
 					rows = append(rows, listRow{line, listGroupFor(p.Project, local, wait != api.PRWaitNone)})
 				}
 				printListing(prListTable, rows)
-				if n := len(all) - len(prs); n > 0 {
+				// len(prs), not matched: that many were actually printed — matched only decides
+				// whether the filter hid anything worth naming.
+				if n := len(all) - matched; n > 0 {
 					fmt.Fprintf(os.Stderr, "(filter %s — %d of %d PR(s) shown)\n", f, len(prs), len(all))
 				} else if len(prs) == 0 {
 					fmt.Fprintln(os.Stderr, "no PRs")
+				}
+				if note := limitNotice("PR", len(prs), matched); note != "" {
+					fmt.Fprint(os.Stderr, note)
 				}
 				// Last, where a closing line is read: the same set the TUI counts on the PRs handle.
 				// Over every PR, not the filtered rows — a PR waits on you whether or not this
@@ -516,11 +525,12 @@ func prListCmd() *cobra.Command {
 			})
 		},
 	}
-	// Defaults to "all", the same reasoning taskListCmd gives: a listing is a record, not the
-	// TUI's redrawn view, which opens on "active" instead.
-	c.Flags().StringVar(&filter, "filter", string(api.PRFilterAll),
+	// Defaults to "active", matching mail list and the TUI: a listing is a view kept to what still
+	// matters, not the whole record. --filter all recovers that.
+	c.Flags().StringVar(&filter, "filter", string(api.PRFilterActive),
 		"which PRs to list: "+api.PRFilterNames()+" (active = open, plus anything closed within "+
 			api.ActiveWindow.String()+")")
+	c.Flags().IntVar(&limit, "limit", DefaultListLimit, "show at most this many, newest first (0 = no limit)")
 	return c
 }
 
