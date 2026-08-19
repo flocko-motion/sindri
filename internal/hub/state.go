@@ -19,7 +19,6 @@ import (
 	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/commands"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // statsTimeout bounds one `stats` sample, slower than a probe (the runtime samples over a window).
@@ -122,7 +121,6 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		if _, stalled := h.stalledFor(a.Project, a.Name, st.Phase, st.Container); stalled {
 			status = "stalled"
 		}
-		status = overlayFullness(status, workflow.Full(l.tokens, l.window), st.Task, st.Container, pr)
 		status = overlayEscalation(status, st.Escalation)
 		agents = append(agents, AgentView{
 			Project: a.Project, Repo: h.repoName(a.Project), Name: a.Name, Role: a.Role,
@@ -342,21 +340,6 @@ func overlayRuntime(status, runtime string) string {
 		if status == "working" || status == "idle" {
 			return runtime
 		}
-	}
-	return status
-}
-
-// overlayFullness shows "full" only where it EXPLAINS something: an agent holding nothing, which
-// claimNext is passing over for exactly this reason. Fullness is not an activity, so anywhere else
-// it would replace the one fact the column exists to carry — and the fill is on the board as
-// ContextTokens for anyone who wants the number.
-//
-// Held work is checked directly rather than trusted to the word: a quiet runtime probe reads a
-// task-holder as "idle" (-> overlayRuntime) before it has been still long enough to say "stalled",
-// and "full" on an agent mid-task invites clearing a context the hub refuses to clear anyway.
-func overlayFullness(status string, full bool, task, feature, pr string) string {
-	if full && status == "idle" && task == "" && feature == "" && pr == "" {
-		return "full"
 	}
 	return status
 }

@@ -22,7 +22,7 @@ func TestAgentNotUpCoversEveryNonRunningWord(t *testing.T) {
 			t.Errorf("AgentNotUp(%q) = false, want true", s)
 		}
 	}
-	for _, s := range []string{"idle", "working", "blocked", "submitted", "collab", "stalled", "full"} {
+	for _, s := range []string{"idle", "working", "blocked", "submitted", "collab", "stalled", StatusEscalated} {
 		if AgentNotUp(s) {
 			t.Errorf("AgentNotUp(%q) = true — a running agent must stay actionable", s)
 		}

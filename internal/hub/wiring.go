@@ -196,8 +196,8 @@ func (d workflowDeps) Compact(project, name, next string) error {
 	return d.h.agents.Compact(project, name, next)
 }
 
-func (d workflowDeps) FireClear(project, name string) error {
-	return d.h.agents.FireClear(project, name)
+func (d workflowDeps) FireClear(project, name, next string, interrupt bool) error {
+	return d.h.agents.FireClear(project, name, next, interrupt)
 }
 
 func (d workflowDeps) BeginAssignment(project, name string) {

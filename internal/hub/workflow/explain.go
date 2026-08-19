@@ -160,9 +160,6 @@ func (e *Engine) agentBlocked(ps *store.ProjectStore, project, agent string) str
 	if st.Task != "" {
 		return fmt.Sprintf("holds %s", st.Task)
 	}
-	if tokens, full := e.contextFull(project, agent); full {
-		return fmt.Sprintf("retired: its context is ~%dk — `sindri agent clear-context %s`", tokens/1000, agent)
-	}
 	return ""
 }
 

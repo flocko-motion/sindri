@@ -42,13 +42,13 @@ func TestAnOrdinaryStalledAgentIsStillNudged(t *testing.T) {
 	}
 }
 
-// TestAContextFullAgentIsNotNudged: DirFull tells it "do not ask again, just wait". It obeyed, went
-// quiet, and was then prodded every minute for obeying — the hub complaining about the one state it
-// deliberately put the agent in.
-func TestAContextFullAgentIsNotNudged(t *testing.T) {
+// TestAFullAgentMidTaskIsStillNudged: fullness only clears an agent at the leaf boundary an idle
+// ask is — nothing about it parks a worker already holding a task, so one that goes quiet mid-task
+// is nudged exactly as any other stalled worker would be.
+func TestAFullAgentMidTaskIsStillNudged(t *testing.T) {
 	e, _ := quietWorkerHoldingWork(t, &stubDeps{ctxTokens: 900_000, ctxWindow: 1_000_000, ctxOK: true})
-	if e.NudgeStalled("proj", "dvalin", "idle", 6*time.Minute) {
-		t.Error("a full agent was nudged for waiting as it was told to")
+	if !e.NudgeStalled("proj", "dvalin", "idle", 6*time.Minute) {
+		t.Error("a full agent holding a task went unnudged — fullness must not park a worker mid-task")
 	}
 }
 

@@ -135,13 +135,21 @@ func TestAnAgentThatNeedsAHumanIsNotWoken(t *testing.T) {
 	}
 }
 
-// TestAParkedAgentIsNotWoken: retired or context-full is a state the hub itself put the agent in, and
-// told it to wait in. The stall nudge exempts it for the same reason.
+// TestAParkedAgentIsNotWoken: retirement is a state the hub itself put the agent in, and told it to
+// wait in. The stall nudge exempts it for the same reason.
 func TestAParkedAgentIsNotWoken(t *testing.T) {
-	deps := &stubDeps{ctxTokens: 900_000, ctxWindow: 1_000_000, ctxOK: true}
-	e, _ := idleAgentWithMail(t, deps)
+	deps := &stubDeps{}
+	e, ps := idleAgentWithMail(t, deps)
+	a, _, err := ps.GetAgent("dvalin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Retired = true
+	if err := ps.PutAgent(a); err != nil {
+		t.Fatal(err)
+	}
 	if e.NudgeMailWaiting("proj", "dvalin") {
-		t.Error("a context-full agent was woken for mail it cannot act on")
+		t.Error("a retired agent was woken for mail it cannot act on")
 	}
 }
 

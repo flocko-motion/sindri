@@ -483,13 +483,6 @@ const DirRetired = "[hub] You've been retired by the user: no further work will 
 	"to do — just wait quietly. If they bring you back, you'll be told; if they stop you instead, " +
 	"this simply won't run again."
 
-// DirFull tells a worker why it isn't getting the next task even with plenty in the queue: its own
-// context is full. Distinct from DirNoTasks so a retired agent never reads it as "nothing to do".
-func DirFull(tokens int) string {
-	return fmt.Sprintf("[hub] Your context is ~%dk tokens — past the point of taking on new work. "+
-		"You're retired from assignment until a human clears you; don't ask again, just wait.", tokens/1000)
-}
-
 // DirPreparing answers an ask whose real instruction is queued right behind this same reply (or
 // armed for the relaunch it triggers) — names no operation, asks for nothing but a beat.
 const DirPreparing = "[hub] One moment — your next instruction is right behind this."

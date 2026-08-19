@@ -91,13 +91,13 @@ func TestAttentionCountsWhatOnlyTheUserCanMove(t *testing.T) {
 		Agents: []api.AgentView{
 			{Name: "blocked", Status: api.StatusBlocked},
 			{Name: "signed-out", Status: api.StatusSignedOut},
-			{Name: "full", Status: api.StatusFull},
+			{Name: "escalated", Status: api.StatusEscalated},
 			{Name: "stalled", Status: api.StatusStalled},
 			{Name: "idle", Status: "idle"},
 			{Name: "working", Status: "working"},
 			// Retired against a status that counts: it keeps running, so this is what winding one
 			// down actually looks like a few hours later.
-			{Name: "retired", Status: api.StatusFull, Retired: true},
+			{Name: "retired", Status: api.StatusStalled, Retired: true},
 			// A healthy reviewer, in a DIFFERENT repo from the PRs below: it is handed none of
 			// them, so it leaves their queue exactly as stranded as an empty roster would.
 			{Project: "other", Name: "fili", Role: "reviewer", Status: "idle"},

@@ -90,9 +90,9 @@ type Deps interface {
 	BeginAssignment(project, name string)
 	// EndAssignment closes that window once preparation is done.
 	EndAssignment(project, name string)
-	// FireClear fires Claude Code's own /clear at a leaf boundary and re-serves the directive once
-	// the reset settles — the gate's decision, this only performs it.
-	FireClear(project, name string) error
+	// FireClear fires Claude Code's own /clear at a leaf boundary, then queues next behind it
+	// (agent.Service.FireClear states interrupt's rule).
+	FireClear(project, name, next string, interrupt bool) error
 	// HoldsNothing reports whether an agent holds nothing the hub can see: no task, no feature, no
 	// review, no escalation, nobody dialed in.
 	HoldsNothing(project, name, role string) (bool, error)
@@ -106,12 +106,13 @@ func (e *Engine) clearArmed(project, name string) bool {
 }
 
 // fireClearIfArmed fires an armed clear right now regardless of what (if anything) follows it —
-// unlike compact and model-select, a clear is a direct request, not tied to one assignment.
+// unlike compact and model-select, a clear is a direct request, not tied to one assignment. Every
+// caller runs inside the call answering the agent's own ask, so it passes interrupt=false.
 func (e *Engine) fireClearIfArmed(project, name string) (fired bool, err error) {
 	if !e.clearArmed(project, name) {
 		return false, nil
 	}
-	return true, e.deps.FireClear(project, name)
+	return true, e.deps.FireClear(project, name, MsgKickoff, false)
 }
 
 // Engine is the workflow orchestrator: it owns the store and drives the lifecycle

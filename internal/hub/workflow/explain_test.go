@@ -89,11 +89,13 @@ func TestExplainNextAnswersForAnAgent(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: "td-ready", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := ps.PutAgent(store.Agent{Name: "bombur", Role: "worker", Retired: true}); err != nil {
+		t.Fatal(err)
+	}
 	if err := ps.SetState(store.AgentState{Agent: "bombur", Phase: "idle"}); err != nil {
 		t.Fatal(err)
 	}
-	full := &stubDeps{root: t.TempDir(), ctxTokens: 900_000, ctxWindow: 1_000_000, ctxOK: true}
-	e := New(st, full)
+	e := New(st, &stubDeps{root: t.TempDir()})
 
 	x, err := e.ExplainNext("repo", "bombur", "")
 	if err != nil {
@@ -114,8 +116,8 @@ func TestExplainNextAnswersForAnAgent(t *testing.T) {
 }
 
 // TestExplainNextRulesOutARetiredOrClearArmedAgent closes the gap nudgeIdleWorkers's herd fix
-// (sd-4589ef) would otherwise inherit: agentBlocked used to check only a held task or a full
-// context, so a human-retired or clear-armed agent still showed a Pick as though it were free.
+// (sd-4589ef) would otherwise inherit: agentBlocked used to check only a held task, so a
+// human-retired or clear-armed agent still showed a Pick as though it were free.
 func TestExplainNextRulesOutARetiredOrClearArmedAgent(t *testing.T) {
 	for _, mutate := range []struct {
 		name string

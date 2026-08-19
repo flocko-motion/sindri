@@ -214,11 +214,10 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 		// `sindri` answers at once: AssignPendingReviews pushes a wake once a review is claimable.
 		return DirNoReviews, true, nil
 	}
-	// An armed clear preempts the claim below, same reason claimNext's own check does: firing it now,
-	// eagerly, rather than leaving it to the fleet-wide sweep, matches how a worker's own ask does
-	// (-> fireClearIfArmed).
+	// An armed clear preempts the claim below, firing eagerly rather than waiting for the sweep, same
+	// as fireClearIfArmed — interrupt=false for the same reason: this runs inside the reviewer's own ask.
 	if e.clearArmed(project, name) {
-		if err := e.deps.FireClear(project, name); err != nil {
+		if err := e.deps.FireClear(project, name, MsgKickoff, false); err != nil {
 			return "", false, err
 		}
 		return DirClearPending, true, nil // about to land: a review claimed now would be cut in half by it

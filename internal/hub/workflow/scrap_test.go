@@ -40,16 +40,18 @@ type stubDeps struct {
 	currentModel     string                     // CurrentModel's answer; "" is fine — no real model is ever ""
 	// tierModels overrides ModelForTier's answer; nil (the default) means every tier is unknown, so
 	// the retier check never fires for a test that has not opted into it.
-	tierModels    map[string]string
-	modelSet      []string // "name=model" for every SetModel call, in order
-	modelSetWith  []string // the "next" text passed alongside each, in step with modelSet
-	setModelErr   error
-	holdsNothing  bool
-	compacted     []string // agents Compact was called for, in order
-	compactedWith []string // the "next" text passed alongside each, in step with compacted
-	compactErr    error
-	cleared       []string // agents FireClear was called for, in order
-	fireClearErr  error
+	tierModels       map[string]string
+	modelSet         []string // "name=model" for every SetModel call, in order
+	modelSetWith     []string // the "next" text passed alongside each, in step with modelSet
+	setModelErr      error
+	holdsNothing     bool
+	compacted        []string // agents Compact was called for, in order
+	compactedWith    []string // the "next" text passed alongside each, in step with compacted
+	compactErr       error
+	cleared          []string // agents FireClear was called for, in order
+	clearedWith      []string // the "next" text passed alongside each, in step with cleared
+	clearedInterrupt []bool   // the "interrupt" flag passed alongside each, in step with cleared
+	fireClearErr     error
 	// projectConfig overrides ProjectConfig's answer; the zero value (no lint.max_comment_avg set)
 	// means the caller sees no override, same as an unconfigured project.
 	projectConfig    config.Config
@@ -132,8 +134,10 @@ func (d *stubDeps) Compact(_, name, next string) error {
 	return d.compactErr
 }
 
-func (d *stubDeps) FireClear(_, name string) error {
+func (d *stubDeps) FireClear(_, name, next string, interrupt bool) error {
 	d.cleared = append(d.cleared, name)
+	d.clearedWith = append(d.clearedWith, next)
+	d.clearedInterrupt = append(d.clearedInterrupt, interrupt)
 	return d.fireClearErr
 }
 

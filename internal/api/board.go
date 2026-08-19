@@ -26,10 +26,9 @@ type AgentView struct {
 	Runtime   string `json:"runtime"`   // Claude's live runtime: "working"|"blocked"|"idle"|"" (folded into Status; kept raw for the herdr projection)
 	// ContextTokens is the agent's live session context size and ContextWindow the window it fills,
 	// both read off its transcript (0 = not measured). Past workflow.ContextFullFraction of that
-	// window an agent is retired from assignment until a human clears it; Status reads "full" only
-	// where that explains an agent holding nothing, since elsewhere the word it would replace is the
-	// one the column exists for. The window is per agent because it is the model's: one number for
-	// the fleet retired 1M agents at 17%.
+	// window, its next assignment clears its context instead of compacting it, before handing the
+	// work over — automatic, so Status never needs a word for it. The window is per agent because
+	// it is the model's: one number for the fleet would clear 1M agents at 17%.
 	ContextTokens int `json:"contextTokens"`
 	ContextWindow int `json:"contextWindow"`
 	// Model is the raw id its transcript names ("" = not yet observed), the denominator ContextWindow

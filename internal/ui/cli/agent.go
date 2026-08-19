@@ -205,8 +205,7 @@ func needsYouSummary(agents []api.AgentView) string {
 		return ""
 	}
 	return fmt.Sprintf("%d agent(s) need you:\n  %s\nAttach to see what each is stopped on "+
-		"(`sindri agent attach <name>`). A full one wants clearing "+
-		"(`sindri agent clear-context <name>`), a signed-out one a restart once the host has "+
+		"(`sindri agent attach <name>`). A signed-out one wants a restart once the host has "+
 		"logged in (`sindri agent restart <name>`). An escalated one wants its question answered — "+
 		"`sindri agent tell <name> \"<answer>\"` and it resumes itself; `sindri agent resume <name>` "+
 		"releases one that cannot.", len(stuck), strings.Join(stuck, "\n  "))

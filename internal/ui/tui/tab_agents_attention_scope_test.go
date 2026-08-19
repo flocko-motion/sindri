@@ -8,7 +8,7 @@ import (
 )
 
 // attentionScopeBoard: one working agent in the selected repo ("sin"), and in another repo one
-// working agent and one that is full — the shape that produced the complaint, a marked handle over
+// working agent and one that is stalled — the shape that produced the complaint, a marked handle over
 // a list where every visible agent was busy.
 func attentionScopeBoard() (model, api.BoardState) {
 	m := newModel(nil, nil, "/r/sindri")
@@ -21,7 +21,7 @@ func attentionScopeBoard() (model, api.BoardState) {
 		Agents: []api.AgentView{
 			{Name: "eitri", Project: "sin", Repo: "sindri", Status: "working"},
 			{Name: "gloin", Project: "oth", Repo: "other", Status: "working"},
-			{Name: "thrain", Project: "oth", Repo: "other", Status: api.StatusFull},
+			{Name: "thrain", Project: "oth", Repo: "other", Status: api.StatusStalled},
 		},
 	}
 	return m, b
@@ -41,7 +41,7 @@ func TestRepoScopeStillShowsAgentsWaitingOnYou(t *testing.T) {
 	}
 	joined := strings.Join(ids, " ")
 	if !strings.Contains(joined, "thrain") {
-		t.Errorf("a full agent in another repo must still be listed under repo scope, got %q", joined)
+		t.Errorf("a stalled agent in another repo must still be listed under repo scope, got %q", joined)
 	}
 	if strings.Contains(joined, "gloin") {
 		t.Errorf("a busy agent in another repo must stay out of repo scope, got %q", joined)
@@ -84,7 +84,7 @@ func TestTheStuckRowCarriesTheWarningGlyph(t *testing.T) {
 		switch r.id {
 		case "thrain":
 			if !marked {
-				t.Errorf("a full agent's row must say it needs you: %q", r.text)
+				t.Errorf("a stalled agent's row must say it needs you: %q", r.text)
 			}
 			if !strings.Contains(r.text, warnGlyph) {
 				t.Errorf("the marker must carry the warning glyph: %q", r.text)

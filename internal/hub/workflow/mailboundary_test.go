@@ -53,9 +53,11 @@ func TestMailOutranksRetirement(t *testing.T) {
 	assertMailRead(t, ps, "dvalin")
 }
 
-// TestMailOutranksAFullContext: same shape as retirement — fullness is a "wait for a human" state,
-// not an operation about to consume the context, so mail rides along with it in one call.
-func TestMailOutranksAFullContext(t *testing.T) {
+// TestMailDefersPastAFullContextsClear is the automatic counterpart to TestMailDefersPastAnArmedClear
+// below: a full worker's own ask claims its next task and then fires a clear to prepare it, discarding
+// the very context mail would be read into — so mail is deferred here too, exactly as an armed clear
+// defers it, served once the fresh context asks again.
+func TestMailDefersPastAFullContextsClear(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 900_000, ctxWindow: 1_000_000, ctxOK: true}
 	e, ps := idleWorkerWithOpenTask(t, deps)
 	addUnreadMail(t, ps, "dvalin")
@@ -64,13 +66,12 @@ func TestMailOutranksAFullContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if !strings.Contains(dir, "something happened") {
-		t.Errorf("directive = %q, want the mail served inline", dir)
+	if dir != DirPreparing {
+		t.Errorf("directive = %q, want DirPreparing — the clear must fire before anything else is served", dir)
 	}
-	if !strings.Contains(dir, "context is") {
-		t.Errorf("directive = %q, want the fullness notice alongside it", dir)
+	if n, _ := ps.UnreadMailCount("dvalin"); n != 1 {
+		t.Errorf("unread = %d, the message must survive since it was never shown", n)
 	}
-	assertMailRead(t, ps, "dvalin")
 }
 
 // TestMailDefersPastAnArmedClear is a genuine deferral: an armed clear is about to wipe the agent's

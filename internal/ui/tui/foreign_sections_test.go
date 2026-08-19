@@ -68,7 +68,7 @@ func foreignBoard() (model, api.BoardState) {
 		Agents: []api.AgentView{
 			{Name: "eitri", Project: "sin", Repo: "sindri", Status: "working"},
 			{Name: "gloin", Project: "oth", Repo: "other", Status: "working"},
-			{Name: "thrain", Project: "oth", Repo: "other", Status: api.StatusFull},
+			{Name: "thrain", Project: "oth", Repo: "other", Status: api.StatusStalled},
 			{Name: "nori", Project: "oth", Repo: "other", Status: api.StatusBlocked},
 			// A reviewer up in "oth", so the foreign open PR there waits on nobody.
 			{Name: "regin", Project: "oth", Repo: "other", Role: "reviewer", Status: "working"},
@@ -167,7 +167,7 @@ func countRowsUntilBlank(texts []string) int {
 // waiting elsewhere the lists must read exactly as they did — no heading, no spacer.
 func TestNoHeadingsWhenEverythingIsLocal(t *testing.T) {
 	m, b := foreignBoard()
-	b.Agents = []api.AgentView{{Name: "eitri", Project: "sin", Repo: "sindri", Status: api.StatusFull}}
+	b.Agents = []api.AgentView{{Name: "eitri", Project: "sin", Repo: "sindri", Status: api.StatusStalled}}
 	b.PRs = []api.PR{{ID: "pr-1", Project: "sin", Status: "approved"}}
 	m.state = b
 

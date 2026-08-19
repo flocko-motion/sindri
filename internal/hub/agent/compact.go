@@ -9,10 +9,8 @@ package agent
 
 import "fmt"
 
-// Compact sends /compact into name's live session, then queues next behind it — the real
-// instruction, not a generic re-ask, so nothing is handed to the agent until it is safe to act on.
-// Mirrors fireClear's mechanics (boundary check, liveness check, forgetting the stale reading) but
-// queues rather than interrupts.
+// Compact sends /compact into name's live session, then queues next behind it. Mirrors FireClear's
+// mechanics otherwise, but never interrupts: every call runs inside the agent's own ask.
 func (s *Service) Compact(project, name, next string) error {
 	at, err := s.AtLeafBoundary(project, name)
 	if err != nil {
@@ -32,8 +30,7 @@ func (s *Service) Compact(project, name, next string) error {
 	if err := s.Inject(project, name, next); err != nil {
 		return err
 	}
-	// Before the log line and the notify, not after: a reader of either must see the size compaction
-	// was fired ON, not the fresh (and lower) one it left behind.
+	// Before the log/notify: a reader must see the size compaction fired ON, not the fresh one after.
 	s.ForgetContext(project, name)
 	_ = s.store.For(project).Log(name, "compact", fmt.Sprintf(
 		"fired at a leaf boundary: fill=%d window=%d model=%s threshold=%d recorded=%v", tokens, window, model, threshold, ok))

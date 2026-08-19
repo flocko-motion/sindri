@@ -5,7 +5,7 @@ import "testing"
 // TestNeedsUserIsEveryStateOnlyAHumanClears walks the states an agent can wear. The ones that count
 // share one property and not a family resemblance: nothing the agent or the hub does resolves them.
 func TestNeedsUserIsEveryStateOnlyAHumanClears(t *testing.T) {
-	for _, s := range []string{StatusBlocked, StatusSignedOut, StatusFull, StatusStalled, StatusEscalated, StatusLaunchFailed} {
+	for _, s := range []string{StatusBlocked, StatusSignedOut, StatusStalled, StatusEscalated, StatusLaunchFailed} {
 		if !AgentNeedsUser(AgentView{Status: s}) {
 			t.Errorf("AgentNeedsUser(%q) = false — that agent holds its work and nobody but a human can move it", s)
 		}
@@ -27,12 +27,11 @@ func TestIdleIsNeverTheUsersProblem(t *testing.T) {
 }
 
 // TestRetiredNeverCounts pins the states retirement actually reaches. A retired agent keeps
-// running: it fills its context and reads "full", or holds work, stands still and reads "stalled".
-// Both pass the switch, so retirement has to be tested against THOSE — against "idle" the case
-// passes whatever Retired says, and proves nothing. Retiring a full worker is the ordinary way to
-// wind one down, and a marker that stuck to it would sit on the handle until it was deleted.
+// running: it holds work, stands still and reads "stalled" — that passes the switch, so retirement
+// has to be tested against it and the rest here rather than "idle", where the case passes whatever
+// Retired says and proves nothing.
 func TestRetiredNeverCounts(t *testing.T) {
-	for _, s := range []string{StatusFull, StatusStalled, StatusBlocked, StatusSignedOut} {
+	for _, s := range []string{StatusStalled, StatusBlocked, StatusSignedOut} {
 		if !AgentNeedsUser(AgentView{Status: s}) {
 			t.Fatalf("%q must count while running, or this test proves nothing about retirement", s)
 		}
@@ -43,17 +42,17 @@ func TestRetiredNeverCounts(t *testing.T) {
 }
 
 // TestARetiredAgentsQuestionStillCounts is the exception to the rule above, and it turns on WHO put
-// the agent in the state. Retirement is excluded because it reaches full and stalled by itself, so a
-// marker there would never clear — but nothing about winding an agent down asks a question in its
-// name, and a retired agent still finishes what it holds. Its question is unanswered either way.
+// the agent in the state. Retirement is excluded because it reaches stalled by itself, so a marker
+// there would never clear — but nothing about winding an agent down asks a question in its name,
+// and a retired agent still finishes what it holds. Its question is unanswered either way.
 func TestARetiredAgentsQuestionStillCounts(t *testing.T) {
 	if !AgentNeedsUser(AgentView{Status: StatusEscalated, Retired: true}) {
 		t.Error("a retired agent that asked the user something is still waiting on the answer")
 	}
 }
 
-// TestCountAgentsNeedingUserCountsAgentsNotReasons: an agent both full and stalled wears one word,
-// and either way it is one thing to attend to.
+// TestCountAgentsNeedingUserCountsAgentsNotReasons: an agent that is both near its context window
+// and stalled is counted once, not twice — one thing to attend to either way.
 func TestCountAgentsNeedingUserCountsAgentsNotReasons(t *testing.T) {
 	got := CountAgentsNeedingUser([]AgentView{
 		{Name: "a", Status: StatusStalled, ContextTokens: 190_000, ContextWindow: 200_000},

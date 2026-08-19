@@ -106,10 +106,10 @@ func TestADownAgentShowsTheModelItWasStartedOn(t *testing.T) {
 	}
 }
 
-// TestTheBoardJudgesFullnessFromTheSample: "full" is the reason an idle agent is passed over, and the
-// board decides it from the figures it already holds — asking the workflow engine would make it take
-// the transcript read again, per agent, per render.
-func TestTheBoardJudgesFullnessFromTheSample(t *testing.T) {
+// TestTheBoardStatusIgnoresFullness: fullness no longer waits on the user (an idle ask clears and
+// reassigns a full worker automatically), so the board's status word never reads anything but
+// "idle" for one, however close to its window it sits — only the raw ContextTokens says so.
+func TestTheBoardStatusIgnoresFullness(t *testing.T) {
 	h := newHub(t)
 	w := stillWatchdog(t, h)
 	a := observedAgent(t, h, "dvalin", "")
@@ -120,8 +120,12 @@ func TestTheBoardJudgesFullnessFromTheSample(t *testing.T) {
 		t.Errorf("at 60%% of its window an agent is idle, not %q", view.Status)
 	}
 	w.recordFill(a, fill{tokens: 190_000, window: 200_000})
-	if view := onlyAgent(t, h); view.Status != "full" {
-		t.Errorf("at 95%% of its window an idle agent reads %q, want full", view.Status)
+	view := onlyAgent(t, h)
+	if view.Status != "idle" {
+		t.Errorf("at 95%% of its window an idle agent still reads %q, want idle", view.Status)
+	}
+	if view.ContextTokens != 190_000 {
+		t.Errorf("ContextTokens = %d, want 190000 — the raw fill still carries the figure", view.ContextTokens)
 	}
 }
 

@@ -315,3 +315,28 @@ func TestReviewerFillUnderTheCompactionThresholdIsHandedAReview(t *testing.T) {
 		t.Errorf("compacted = %v, want none — fill is under the threshold", deps.compacted)
 	}
 }
+
+// TestFullnessWinsOverCompaction: prepareAssignment prefers a clear to a compaction once a worker is
+// past ContextFullFraction — a session that far gone is not worth summarizing — even though fill
+// that high is also past the (much lower) compaction threshold.
+func TestFullnessWinsOverCompaction(t *testing.T) {
+	deps := &stubDeps{ctxTokens: 900_000, ctxWindow: 1_000_000, ctxOK: true, compactThreshold: 75_000}
+	e, ps := idleWorkerWithOpenTask(t, deps)
+
+	dir, err := e.AgentDirective(context.Background(), "repo", "dvalin")
+	if err != nil {
+		t.Fatalf("AgentDirective: %v", err)
+	}
+	if dir != DirPreparing {
+		t.Errorf("directive = %q, want DirPreparing", dir)
+	}
+	if len(deps.cleared) != 1 || deps.cleared[0] != "dvalin" {
+		t.Errorf("cleared = %v, want exactly one FireClear(dvalin)", deps.cleared)
+	}
+	if len(deps.compacted) != 0 {
+		t.Errorf("compacted = %v, want none — the clear preempts it", deps.compacted)
+	}
+	if st, _ := ps.GetState("dvalin"); st.Task != "td-abc123" {
+		t.Errorf("state.Task = %q, want td-abc123 — the claim holds regardless of the preparation fired", st.Task)
+	}
+}

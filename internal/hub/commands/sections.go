@@ -52,7 +52,7 @@ var Sections = []Section{
 	{
 		Key: "agents", Title: "Agents",
 		Count: func(b Board) int { return b.AgentCount() }, // whole roster — down agents are still agents
-		// Blocked, signed out, full or stalled: each looks alive, holds its task and makes no
+		// Blocked, signed out or stalled: each looks alive, holds its task and makes no
 		// progress, and none of them clears without a human.
 		Attention: func(b Board) int { return b.AgentsNeedingUserCount() },
 	},

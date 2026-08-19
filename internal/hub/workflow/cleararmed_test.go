@@ -49,10 +49,9 @@ func TestArmedClearWithholdsTheNextTask(t *testing.T) {
 	}
 }
 
-// TestArmedClearOutranksFullness is the interaction the two rules must get right: a full agent is
-// retired from assignment "until a human clears you", so once one HAS, the clear must still fire —
-// checked ahead of the fullness answer in waitForNextTask's own closure — else the arming sits
-// behind a state that never advances.
+// TestArmedClearOutranksFullness is the interaction the two rules must get right: a human's own
+// arming fires ahead of the automatic fullness path in waitForNextTask's own closure — else the
+// arming sits behind a state that never advances.
 func TestArmedClearOutranksFullness(t *testing.T) {
 	e, _, deps := armedWorker(t)
 	deps.ctxTokens, deps.ctxWindow, deps.ctxOK = 190_000, 200_000, true
@@ -66,12 +65,18 @@ func TestArmedClearOutranksFullness(t *testing.T) {
 	if len(deps.cleared) != 1 || deps.cleared[0] != "dvalin" {
 		t.Errorf("cleared = %v, want exactly one FireClear(dvalin)", deps.cleared)
 	}
+	if len(deps.clearedWith) != 1 || deps.clearedWith[0] != MsgKickoff {
+		t.Errorf("clearedWith = %v, want the generic kickoff — nothing was claimed for this arming to hand over", deps.clearedWith)
+	}
+	// fireClearIfArmed runs inside the call answering this very ask, same as the automatic path —
+	// ESC here would cut off the turn computing whatever this ask answers with.
+	if len(deps.clearedInterrupt) != 1 || deps.clearedInterrupt[0] {
+		t.Errorf("clearedInterrupt = %v, want false — this fires inside the agent's own ask", deps.clearedInterrupt)
+	}
 }
 
-// TestAnArmedReviewerIsNotHandedTheNextPR closes the door the sweep's gate left open: reviews are
-// handed out by freeReviewer on the request path (RequestReview, whenever a worker submits), not
-// only by the tick. Ungated there, a busy repo defers the arming for ever, and an assignment can
-// land between the fire's boundary check and the /clear — clearing a reviewer mid-review.
+// TestAnArmedReviewerIsNotHandedTheNextPR closes the door the sweep's gate left open: reviews are also
+// handed out by freeReviewer on the request path (RequestReview), which must gate the same arming.
 func TestAnArmedReviewerIsNotHandedTheNextPR(t *testing.T) {
 	armed := store.Agent{Name: "fili", Role: "reviewer", ClearArmed: true}
 	if reviewerAssignable(armed) {
@@ -87,10 +92,9 @@ func TestAnArmedReviewerIsNotHandedTheNextPR(t *testing.T) {
 	}
 }
 
-// TestAnArmedReviewerIsNotHandedTheNextPRThroughRequestReview is the row half the test above could
-// not exercise: freeReviewer's liveness check now reads AgentUp — the watchdog's standing
-// observation — rather than a live container.Running + SessionAlive probe, so a stub can state it
-// directly and drive the request path end to end, no container runtime required.
+// TestAnArmedReviewerIsNotHandedTheNextPRThroughRequestReview drives the request path end to end:
+// freeReviewer's liveness check reads AgentUp (the watchdog's own reading), so a stub states it
+// directly with no container runtime required.
 func TestAnArmedReviewerIsNotHandedTheNextPRThroughRequestReview(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
@@ -123,10 +127,8 @@ func TestAnArmedReviewerIsNotHandedTheNextPRThroughRequestReview(t *testing.T) {
 	}
 }
 
-// TestTheClearLandsBeforeTheNextSubtask: mid-subtask the agent carries on and the clear waits (no
-// path clears an agent mid-task, and the feature-holder directive never even checks for one there);
-// between subtasks — where a checkpoint leaves it — fireClearIfArmed fires it, same as the idle
-// worker's own path.
+// TestTheClearLandsBeforeTheNextSubtask: mid-subtask the clear waits; between subtasks, where a
+// checkpoint leaves it, fireClearIfArmed fires it, same as the idle worker's own path.
 func TestTheClearLandsBeforeTheNextSubtask(t *testing.T) {
 	e, ps, deps := containerWorker(t, "working")
 	a, _, _ := ps.GetAgent("dvalin")

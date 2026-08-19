@@ -266,7 +266,7 @@ agent you have yet to start.
 
 ## When an agent needs you
 
-Five status words mean an agent is stuck somewhere only a human reaches. The board
+Four status words mean an agent is stuck somewhere only a human reaches. The board
 marks each one, and `sindri agent list` names them at the bottom:
 
 | Status | What it means | What clears it |
@@ -274,7 +274,6 @@ marks each one, and `sindri agent list` names them at the bottom:
 | `blocked` | stopped at a prompt in its own session | answer it: `agent attach`, or `agent tell` |
 | `escalated` | it asked you to decide something and stopped | `agent tell <name> "<answer>"` — it resumes itself |
 | `signed-out` | its pane says to run `/login`, so anything typed there goes nowhere | log in on the host, then `agent restart <name>` |
-| `full` | past its context window holding nothing | `agent clear-context <name>` |
 | `stalled` | it holds work and its screen has stood still | `agent attach` to look, `agent tell` to prod |
 
 **Escalation** is the agent's own verb: it stops on a decision that is yours to

@@ -2,19 +2,57 @@ package hub
 
 import (
 	"context"
+	"io"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	agentport "github.com/flo-at/sindri/internal/adapter/agent"
+	"github.com/flo-at/sindri/internal/container"
 	hubagent "github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
-// fakeAgent is an implementation of the coding-agent port whose reported context size the test
-// controls. The adapter is wired at the composition root, so a hub test supplies its own — which is
-// what the port is for, and it isolates the memo, which is the defect under test.
+// clearableRuntime fakes the tmux/podman runtime, just enough for FireClear's calls to succeed with
+// no real pod. sent is mutex-guarded: FireClear's own kickoff goroutine writes it too.
+type clearableRuntime struct {
+	container.Runtime
+	mu   sync.Mutex
+	sent []string
+}
+
+func (r *clearableRuntime) Running(string) bool                         { return true }
+func (r *clearableRuntime) RunningContext(context.Context, string) bool { return true }
+func (r *clearableRuntime) Exec(name string, args ...string) ([]byte, error) {
+	return r.ExecContext(context.Background(), name, args...)
+}
+func (r *clearableRuntime) ExecContext(_ context.Context, _ string, args ...string) ([]byte, error) {
+	for _, a := range args {
+		if a == "capture-pane" {
+			return []byte("\n> \n"), nil
+		}
+	}
+	r.mu.Lock()
+	r.sent = append(r.sent, strings.Join(args, " "))
+	r.mu.Unlock()
+	return nil, nil
+}
+func (r *clearableRuntime) Logs(string, int) string { return "" }
+func (r *clearableRuntime) Check(io.Writer) error   { return nil }
+
+// joined is every command sent so far, one string, safe against the kickoff goroutine's own writes.
+func (r *clearableRuntime) joined() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return strings.Join(r.sent, " | ")
+}
+
+// fakeAgent is a coding-agent port whose reported context size the test controls — the adapter a
+// hub test supplies at the composition root, isolating the memo under test.
 type fakeAgent struct{ tokens *int }
 
 func (f fakeAgent) DetectState(string) agentport.State { return agentport.Unknown }
@@ -35,9 +73,8 @@ func (f fakeAgent) ModelForTier(string) (string, bool) { return "", false }   //
 func (f fakeAgent) ModelMatches(want, got string) bool { return want == got } // not this test's concern
 func (f fakeAgent) ToolRunning(string) bool            { return false }       // not this test's concern
 
-// fullAgentWithWorkWaiting seeds an idle worker reported as over the fullness threshold, with an
-// approved, prioritised task waiting for it. The returned pointer is the reported context size: set
-// it to simulate a clear.
+// fullAgentWithWorkWaiting seeds an idle, over-threshold worker with a task waiting. The returned
+// pointer is the reported context size: set it to simulate a clear.
 func fullAgentWithWorkWaiting(t *testing.T) (*Hub, string, *int) {
 	t.Helper()
 	tokens := 900_000
@@ -76,84 +113,69 @@ func fullAgentWithWorkWaiting(t *testing.T) (*Hub, string, *int) {
 	return h, "dvalin", &tokens
 }
 
-// TestAClearedAgentIsNotStillToldItIsFull is the reported behaviour, end to end and against the real
-// measurement. The context figure is memoised for 15s and the kickoff after a clear lands at 2s, so
-// the hub answered every clear from the pre-clear reading and told the agent it was still full — the
-// exact remedy that had just been applied. Deterministic, not a race.
-//
-// Asserted on the DIRECTIVE rather than on the memo entry: a test that only checked the entry was
-// gone would pass while the agent kept being turned away, if the invalidation moved after the
-// kickoff.
-func TestAClearedAgentIsNotStillToldItIsFull(t *testing.T) {
+// TestAFullWorkersOwnAskFiresAClearEndToEnd is the automatic clear-context flow, end to end. Checked
+// on the session, not a second AgentDirective call: the claim's own hand-over lands behind /clear.
+func TestAFullWorkersOwnAskFiresAClearEndToEnd(t *testing.T) {
 	h, agent, tokens := fullAgentWithWorkWaiting(t)
+	w := stillWatchdog(t, h)
+	w.record(store.Agent{Project: testProject, Name: agent}, true, 0, hubagent.Observation{Runtime: "idle", Digest: "d1"})
+	rt := &clearableRuntime{}
+	container.Use(rt)
+	t.Cleanup(container.UseDefault)
 
 	dir, err := h.wf.AgentDirective(context.Background(), testProject, agent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(dir, "retired") {
-		t.Fatalf("precondition: a full agent should be retired from assignment, got %q", dir)
+	if dir != workflow.DirPreparing {
+		t.Fatalf("a full agent's claim should fire a clear and answer %q, got %q", workflow.DirPreparing, dir)
+	}
+	if st, _ := h.store.For(testProject).GetState(agent); st.Task != "sd-1" {
+		t.Errorf("state.Task = %q, want sd-1 — the claim holds regardless of the clear firing", st.Task)
 	}
 
 	*tokens = 1_000 // the clear happens: the session's context is gone
-	// Without the invalidation the memo still holds the pre-clear figure, and this is the moment
-	// the agent asks for work.
 	h.agents.ForgetContext(testProject, agent)
 
-	dir, err = h.wf.AgentDirective(context.Background(), testProject, agent)
-	if err != nil {
-		t.Fatal(err)
+	// FireClear's kickoff fires clearKickoffDelay later in its own goroutine — poll rather than
+	// sleep a fixed margin over that delay, so this can't flake under a loaded gate.
+	var sent string
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		sent = rt.joined()
+		if strings.Contains(sent, "sd-1") || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	if strings.Contains(dir, "retired") {
-		t.Errorf("a cleared agent is still being turned away:\n%s", dir)
+
+	if !strings.Contains(sent, "/clear") {
+		t.Errorf("the session was never sent /clear: %s", sent)
 	}
-	if !strings.Contains(dir, "sd-1") {
-		t.Errorf("a cleared agent should be handed the waiting work, got:\n%s", dir)
+	if !strings.Contains(sent, "sd-1") {
+		t.Errorf("the claimed task's own directive should be queued behind the clear, not a generic kickoff: %s", sent)
+	}
+	if strings.Contains(sent, "Escape") {
+		t.Errorf("the automatic clear interrupted the session it was answering: %s", sent)
 	}
 }
 
-// TestTheMemoIsWhatWasStale confirms the diagnosis rather than assuming it: with the transcript
-// rewritten and no invalidation, the hub keeps answering from the old reading. If this passed, the
-// fix would be aimed at the wrong thing.
-func TestTheMemoIsWhatWasStale(t *testing.T) {
-	h, agent, tokens := fullAgentWithWorkWaiting(t)
-	if _, err := h.wf.AgentDirective(context.Background(), testProject, agent); err != nil {
-		t.Fatal(err)
-	}
-	*tokens = 1_000 // cleared, but nothing tells the memo
-
-	dir, err := h.wf.AgentDirective(context.Background(), testProject, agent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(dir, "retired") {
-		t.Skip("the measurement is not memoised here, so this diagnosis no longer applies")
-	}
-}
-
-// TestTheBoardAgreesWithTheDirective: a cleared agent must stop reading "full" on the board too, or
-// the user is invited to clear a context that was already cleared. Asserted on the BOARD rather than
-// on the fullness rule, because the board no longer reads that rule — it reports the observer's own
-// sample, so there are two standing readings of one figure and this is the one a directive test
-// cannot see. It went stale for a probe beat, which is the reported bug shortened rather than fixed.
-func TestTheBoardAgreesWithTheDirective(t *testing.T) {
+// TestTheBoardReportsAFreshFillAfterAClear: ContextTokens must stop reporting the pre-clear figure
+// once a clear lands — there is no status word for fullness anymore to assert on instead.
+func TestTheBoardReportsAFreshFillAfterAClear(t *testing.T) {
 	h, name, tokens := fullAgentWithWorkWaiting(t)
 	w := stillWatchdog(t, h)
 	row := store.Agent{Project: testProject, Name: name}
 	w.record(row, true, 0, hubagent.Observation{Runtime: "idle", Digest: "d1"})
 	w.recordFill(row, fill{tokens: *tokens, window: 1_000_000})
-	if view := onlyAgent(t, h); view.Status != "full" {
-		t.Fatalf("precondition: a full agent should read full on the board, got %q", view.Status)
+	if view := onlyAgent(t, h); view.ContextTokens != *tokens {
+		t.Fatalf("precondition: the board should report the pre-clear fill, got %d", view.ContextTokens)
 	}
 
 	*tokens = 1_000 // the clear happens: the session's context is gone
 	h.agents.ForgetContext(testProject, name)
 
-	view := onlyAgent(t, h)
-	if view.Status == "full" {
-		t.Error("the board still shows a cleared agent as full")
-	}
-	if view.ContextTokens != 0 {
+	if view := onlyAgent(t, h); view.ContextTokens != 0 {
 		t.Errorf("the board still reports the pre-clear fill of %d tokens", view.ContextTokens)
 	}
 }
