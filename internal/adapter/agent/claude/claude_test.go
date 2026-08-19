@@ -132,6 +132,56 @@ func TestClaudeState(t *testing.T) {
 	}
 }
 
+// TestToolRunning pins the footer signal a long, silent shell call needs: austri, mid-`make verify`,
+// showed exactly this pane for the whole 27s+ run, and DetectState alone reads it as Working either
+// way — ToolRunning is the only thing that says the stillness is a tool call, not a frozen turn.
+func TestToolRunning(t *testing.T) {
+	cases := []struct {
+		name   string
+		screen string
+		want   bool
+	}{
+		{
+			name:   "a shell in flight is running",
+			screen: "✳ Cooking… (esc to interrupt)\n❯ \n  ⏵⏵ bypass permissions on · 1 shell · esc to interrupt",
+			want:   true,
+		},
+		{
+			name:   "more than one shell is still running",
+			screen: "✳ Cooking… (esc to interrupt)\n❯ \n  ⏵⏵ bypass permissions on · 2 shells · esc to interrupt",
+			want:   true,
+		},
+		{
+			name:   "an ordinary working footer with no shell is not",
+			screen: "✳ Cooking… (esc to interrupt)\n❯ \n  ⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt",
+			want:   false,
+		},
+		{
+			name:   "an idle prompt is not",
+			screen: "╭─────────────╮\n❯                          \n╰─────────────╯",
+			want:   false,
+		},
+		{
+			name: "a shell count in old transcript, scrolled out of the footer, is not",
+			screen: "  earlier: ran with 1 shell\n" + strings.Repeat("  more output since then\n", 14) +
+				"✳ Cooking… (esc to interrupt)\n❯ \n  ⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt",
+			want: false,
+		},
+		{
+			// The false positive a reviewer caught live: this line, describing the footer rather than
+			// being it, sits in the live region with no middot fencing it either side.
+			name:   "the pattern named in prose inside the live region is not the footer",
+			screen: `toolCount matches Claude's tool-tally footer ("1 shell", "2 shells") for real`,
+			want:   false,
+		},
+	}
+	for _, c := range cases {
+		if got := (Claude{}).ToolRunning(c.screen); got != c.want {
+			t.Errorf("%s: ToolRunning() = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 // TestRuntime pins the shared classifier the board and the herdr sidebar both read
 // through — working/blocked/idle, with an unrecognized screen counting as idle.
 func TestRuntime(t *testing.T) {

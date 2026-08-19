@@ -34,6 +34,11 @@ var (
 	// keeps its "esc to interrupt" footer afterwards and its spinner keeps animating, so this reads as
 	// a live turn to every other signal — neither the words nor a still screen can see it.
 	apiError = regexp.MustCompile(`(?im)^\s*[^\n]{0,4}api error[:\s]`)
+	// toolCount matches Claude's tool-tally footer ("1 shell", "2 shells") — all of Bash, `go test`,
+	// `sindri run` and `git` render as one. Anchored to the mode line it actually lives on, fenced by
+	// the same middot separators as bypass permissions on and esc to interrupt: matched anywhere in
+	// the region, it also matched the words in this file's own comment describing it.
+	toolCount = regexp.MustCompile(`(?im)·\s*\d+\s+shells?\s*(?:·|$)`)
 )
 
 // statusTail is how many trailing lines count as the live status region: Claude draws what is true
@@ -129,6 +134,12 @@ func (Claude) DetectState(screen string) agent.State {
 	}
 
 	return agent.Unknown
+}
+
+// ToolRunning reports a tool call in flight, read in the live region only — the same digits further
+// up could be transcript describing one that already finished.
+func (Claude) ToolRunning(screen string) bool {
+	return toolCount.MatchString(paneTail(screen, statusTail))
 }
 
 // hasNav reports whether the (lowercased) screen shows a navigation hint of the kind

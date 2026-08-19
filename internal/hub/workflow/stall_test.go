@@ -17,35 +17,41 @@ func TestStalledOnlyCountsHeldWork(t *testing.T) {
 	for _, c := range []struct {
 		what                      string
 		phase, container, runtime string
+		waitingOnHub              bool
 		stillFor                  time.Duration
 		want                      bool
 	}{
-		{"holding work and gone quiet", "working", "", "idle", past, true},
-		{"quiet, but not for long enough", "working", "", "idle", under, false},
+		{"holding work and gone quiet", "working", "", "idle", false, past, true},
+		{"quiet, but not for long enough", "working", "", "idle", false, under, false},
 		// The case the old rule could not see: a turn that wedged leaves "esc to interrupt" on screen
 		// forever, so the classifier says "working" while not one byte changes for minutes.
-		{"still saying 'working', with a frozen screen", "working", "working", "working", past, true},
-		{"asking for input — that is 'blocked', already visible", "working", "", "blocked", past, false},
-		{"signed out: motionless because it cannot act, and no prod reaches it", "working", "", "signed-out", past, false},
-		{"waiting for a verdict on a submitted PR", "submitted", "", "idle", past, false},
-		{"waiting for a verdict on a feature's PR", "submitted", "td-EPIC", "idle", past, false},
+		{"still saying 'working', with a frozen screen", "working", "working", "working", false, past, true},
+		{"asking for input — that is 'blocked', already visible", "working", "", "blocked", false, past, false},
+		{"signed out: motionless because it cannot act, and no prod reaches it", "working", "", "signed-out", false, past, false},
+		{"waiting for a verdict on a submitted PR", "submitted", "", "idle", false, past, false},
+		{"waiting for a verdict on a feature's PR", "submitted", "td-EPIC", "idle", false, past, false},
 		// A finished feature is the worker's to submit, so parking on one is a stall. It was excluded
 		// while only a human could open the milestone PR, and that wait no longer exists.
-		{"a feature whose subtasks are all checkpointed", "idle", "td-EPIC", "idle", past, true},
-		{"mid-feature, on a subtask, gone quiet", "working", "td-EPIC", "idle", past, true},
-		{"between assignments, holding nothing", "idle", "", "idle", past, false},
+		{"a feature whose subtasks are all checkpointed", "idle", "td-EPIC", "idle", false, past, true},
+		{"mid-feature, on a subtask, gone quiet", "working", "td-EPIC", "idle", false, past, true},
+		{"between assignments, holding nothing", "idle", "", "idle", false, past, false},
 		// ori's case: assignReview writes "reviewing" and nothing else, so neither of the old disjuncts
 		// could ever hold and a reviewer that stopped reading was invisible to every sweep.
-		{"a reviewer holding a PR, gone quiet", "reviewing", "", "idle", past, true},
-		{"a reviewer quiet, but not for long enough", "reviewing", "", "idle", under, false},
-		{"a reviewer asking the user something", "reviewing", "", "blocked", past, false},
+		{"a reviewer holding a PR, gone quiet", "reviewing", "", "idle", false, past, true},
+		{"a reviewer quiet, but not for long enough", "reviewing", "", "idle", false, under, false},
+		{"a reviewer asking the user something", "reviewing", "", "blocked", false, past, false},
 		// An unreadable pane is not a reading, so the words are empty — but the dwell it carries is
 		// still time in which nothing was seen to change, and holding work through that is a stall.
-		{"unreadable pane, work held, nothing seen to move", "working", "", "", past, true},
+		{"unreadable pane, work held, nothing seen to move", "working", "", "", false, past, true},
+		// The queue is the hub's, not the agent's: a worker parked on its own gate run, or a reviewer
+		// on a lint-pr it asked for, is correctly motionless — the nudge would tell it to carry on
+		// with the very thing the hub itself is holding.
+		{"a worker's own gate run is queued or running", "working", "", "idle", true, past, false},
+		{"a reviewer waiting on a lint-pr run it asked for", "reviewing", "", "idle", true, past, false},
 	} {
-		if got := Stalled(c.phase, c.container, c.runtime, c.stillFor); got != c.want {
-			t.Errorf("%s: Stalled(%q, %q, %q, %v) = %v, want %v",
-				c.what, c.phase, c.container, c.runtime, c.stillFor, got, c.want)
+		if got := Stalled(c.phase, c.container, c.runtime, c.waitingOnHub, c.stillFor); got != c.want {
+			t.Errorf("%s: Stalled(%q, %q, %q, %v, %v) = %v, want %v",
+				c.what, c.phase, c.container, c.runtime, c.waitingOnHub, c.stillFor, got, c.want)
 		}
 	}
 }
@@ -186,6 +192,41 @@ func TestNudgeStalledRechecksThePhase(t *testing.T) {
 	}
 }
 
+// TestNudgeStalledLeavesAWorkerOnItsOwnQueuedRunAlone: a worker's `sindri lint`/`sindri run` returns
+// at once and leaves it in phase "working" on purpose, so its pane goes idle for as long as the
+// fleet's one queue slot takes to reach it — exactly what an unbounded pane read as a stall.
+func TestNudgeStalledLeavesAWorkerOnItsOwnQueuedRunAlone(t *testing.T) {
+	e, deps, ps := stallStore(t)
+	if err := ps.PutRun(store.Run{ID: "run-1", Agent: "dvalin", Status: "queued"}); err != nil {
+		t.Fatal(err)
+	}
+	if e.NudgeStalled("proj", "dvalin", "idle", StallDwell+time.Minute) {
+		t.Error("a worker waiting on its own queued run must not be nudged")
+	}
+	if len(deps.injected) != 0 {
+		t.Errorf("nothing should have been injected, got %v", deps.injected)
+	}
+}
+
+// TestNudgeStalledLeavesAReviewerOnAnAskedLintPRAlone: `sindri lint <pr>` returns a queued note and
+// registers the reviewer as a waiter, exactly the case a reviewer raised as still unfixed here.
+func TestNudgeStalledLeavesAReviewerOnAnAskedLintPRAlone(t *testing.T) {
+	e, deps, ps := stallStore(t)
+	reviewingAgent(t, ps, "ori", "pr-42")
+	if err := ps.PutRun(store.Run{ID: "run-pr", Agent: "system", Status: "running", Kind: "lint-pr"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.AddRunWaiter("run-pr", "ori"); err != nil {
+		t.Fatal(err)
+	}
+	if e.NudgeStalled("proj", "ori", "idle", StallDwell+time.Minute) {
+		t.Error("a reviewer waiting on a lint-pr run it asked for must not be nudged")
+	}
+	if len(deps.injected) != 0 {
+		t.Errorf("nothing should have been injected, got %v", deps.injected)
+	}
+}
+
 // TestNudgeStalledNeedsALiveAgent: a stopped pod has no session to type into.
 func TestNudgeStalledNeedsALiveAgent(t *testing.T) {
 	e, deps, _ := stallStore(t)
@@ -222,11 +263,11 @@ func TestNudgeStalledIsLogged(t *testing.T) {
 // the agent is, including waiting on a verdict it could not act on anyway.
 func TestACutOffTurnIsRetriedInAnyPhase(t *testing.T) {
 	for _, phase := range []string{"working", "submitted", "idle", "resolving"} {
-		if !Stalled(phase, "", "api-error", RetryDwell+time.Second) {
+		if !Stalled(phase, "", "api-error", false, RetryDwell+time.Second) {
 			t.Errorf("phase %q: a cut-off turn must be retried", phase)
 		}
 		// Not instantly, though: a retry already in flight gets to finish first.
-		if Stalled(phase, "", "api-error", RetryDwell-time.Second) {
+		if Stalled(phase, "", "api-error", false, RetryDwell-time.Second) {
 			t.Errorf("phase %q: retried before the dwell elapsed", phase)
 		}
 	}

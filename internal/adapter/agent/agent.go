@@ -77,6 +77,11 @@ type Agent interface {
 	// the backend does not recognise — the dispatcher's own mapping, from the backend since a
 	// second implementation would have its own names for the same idea.
 	ModelForTier(tier string) (model string, ok bool)
+	// ToolRunning reports whether the pane shows a tool call in flight (a shell, or anything else the
+	// backend renders the same way) — evidence the screen is quiet because nothing has RETURNED yet,
+	// not because the turn is stuck. Separate from DetectState: the state stays Working either way,
+	// and only the caller measuring stillness needs to know which kind of "unchanged" this is.
+	ToolRunning(screen string) bool
 }
 
 // active is wired once at startup via Use; the no-op default keeps the port safe before.
@@ -120,6 +125,9 @@ func ModelWindow(model string) (int, bool) { return active.ModelWindow(model) }
 // ModelForTier resolves tier to a model via the wired backend.
 func ModelForTier(tier string) (string, bool) { return active.ModelForTier(tier) }
 
+// ToolRunning reports whether the wired backend reads screen as a tool call in flight.
+func ToolRunning(screen string) bool { return active.ToolRunning(screen) }
+
 // noop is the default until Use: state is Unknown, no home is provisioned.
 type noop struct{}
 
@@ -138,3 +146,5 @@ func (noop) CompactionThreshold(int) int { return math.MaxInt } // never worth i
 func (noop) ModelWindow(string) (int, bool) { return 0, false } // nothing wired, nothing recognised
 
 func (noop) ModelForTier(string) (string, bool) { return "", false } // nothing wired, nothing recognised
+
+func (noop) ToolRunning(string) bool { return false }

@@ -23,17 +23,18 @@ func (e *Engine) parkedByTheHub(project, name string) bool {
 }
 
 // Stalled reports whether an agent holds work it has stopped doing. The evidence is the SCREEN
-// standing still — a pane frozen mid-turn keeps SAYING "working" forever. Two words veto it, both
-// meaning the agent is correctly motionless: "blocked" waits on a human, "signed-out" cannot act.
-// Which work counts: "working", "reviewing", or a feature due to be submitted. "submitted" and
-// "gating" exist to wait; reviewing does not — a reviewer with a PR is meant to be reading it.
-func Stalled(phase, container, runtime string, stillFor time.Duration) bool {
+// standing still — a pane frozen mid-turn keeps SAYING "working" forever. Three things veto it, each
+// meaning the agent is correctly motionless: "blocked" waits on a human, "signed-out" cannot act,
+// waitingOnHub is queued behind the fleet's own gate rather than idling on its own account. Which
+// work counts: "working", "reviewing", or a feature due to be submitted. "submitted" and "gating"
+// exist to wait; reviewing does not — a reviewer with a PR is meant to be reading it.
+func Stalled(phase, container, runtime string, waitingOnHub bool, stillFor time.Duration) bool {
 	// A cut-off turn counts in ANY phase: nothing resumes on its own, and an agent that could not
 	// finish its own sentence will not act on a verdict either.
 	if runtime == "api-error" {
 		return stillFor >= RetryDwell
 	}
-	if runtime == "blocked" || runtime == "signed-out" || stillFor < StallDwell {
+	if runtime == "blocked" || runtime == "signed-out" || waitingOnHub || stillFor < StallDwell {
 		return false
 	}
 	return phase == "working" || phase == "reviewing" ||
@@ -45,7 +46,11 @@ func Stalled(phase, container, runtime string, stillFor time.Duration) bool {
 func (e *Engine) NudgeStalled(project, name, runtime string, idleFor time.Duration) bool {
 	ps := e.store.For(project)
 	st, err := ps.GetState(name)
-	if err != nil || !Stalled(st.Phase, st.Container, runtime, idleFor) {
+	if err != nil {
+		return false
+	}
+	waiting, err := ps.AgentWaitingOnRun(name)
+	if err != nil || !Stalled(st.Phase, st.Container, runtime, waiting, idleFor) {
 		return false
 	}
 	// Escalated is idle BY INSTRUCTION, like the parked states below (-> parkedByTheHub) — but ahead

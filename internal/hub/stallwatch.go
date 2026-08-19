@@ -104,5 +104,6 @@ func (h *Hub) stalledFor(project, name, phase, container string) (time.Duration,
 	if l.runtime == "api-error" {
 		dwell = time.Since(l.runtimeSince)
 	}
-	return dwell, workflow.Stalled(phase, container, l.runtime, dwell)
+	waiting, _ := h.store.For(project).AgentWaitingOnRun(name)
+	return dwell, workflow.Stalled(phase, container, l.runtime, waiting, dwell)
 }

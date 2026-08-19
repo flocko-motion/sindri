@@ -40,6 +40,9 @@ const runtimeTTL = 2 * time.Second
 type Observation struct {
 	Runtime string // "working" | "blocked" | "idle" | "signed-out" | "" when the capture failed
 	Digest  string // "" when the capture failed, so a lost probe never reads as "nothing changed"
+	// ToolRunning is whether the pane itself shows a tool call still in flight — a shell that has not
+	// returned prints nothing, so Digest alone cannot tell this apart from a frozen turn (-> watchdog.record).
+	ToolRunning bool
 }
 
 var runtimeMemo struct {
@@ -69,6 +72,7 @@ func (s *Service) Observe(ctx context.Context, project, name string) Observation
 	if err == nil {
 		obs.Runtime = agentport.Runtime(string(out)) // shared classifier: board + herdr agree
 		obs.Digest = fmt.Sprintf("%x", sha256.Sum256(out))
+		obs.ToolRunning = agentport.ToolRunning(string(out))
 	}
 	runtimeMemo.mu.Lock()
 	if runtimeMemo.at == nil {

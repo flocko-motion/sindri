@@ -2,6 +2,7 @@ package hub
 
 import (
 	"testing"
+	"time"
 
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agent"
@@ -12,6 +13,12 @@ import (
 // digest per call stands for a screen that changed since the last look.
 func seen(runtime, digest string) agent.Observation {
 	return agent.Observation{Runtime: runtime, Digest: digest}
+}
+
+// busy is seen with a tool call reported in flight — a shell whose output has not landed yet, so the
+// digest holds still exactly as a stall would, and only this bit tells them apart.
+func busy(runtime, digest string) agent.Observation {
+	return agent.Observation{Runtime: runtime, Digest: digest, ToolRunning: true}
 }
 
 // TestOneLostProbeDoesNotFlipAnAgentDown is the bug the watchdog exists for. A probe that loses
@@ -135,6 +142,62 @@ func TestStillnessDwellRunsFromTheLastChange(t *testing.T) {
 	moved, _ := w.get("proj", "dvalin")
 	if !moved.stillSince.After(first.stillSince) {
 		t.Error("a changed pane must restart the dwell")
+	}
+}
+
+// TestAToolCallInFlightResetsTheDwellEvenWithNoOutputYet is the incident that started this: austri,
+// running `make verify`, held one byte-identical pane for the whole gate and was nudged as stalled
+// mid-command. A shell prints nothing until it exits, so the digest alone cannot tell that apart from
+// a frozen turn — ToolRunning is the one thing that still says something is moving.
+func TestAToolCallInFlightResetsTheDwellEvenWithNoOutputYet(t *testing.T) {
+	h := newHub(t)
+	w := h.watch
+	a := store.Agent{Project: "proj", Name: "austri"}
+
+	w.record(a, true, 0, seen("working", "d1"))
+	first, _ := w.get("proj", "austri")
+
+	// The gate is still running: same digest, same word, every beat — exactly what a stall looks
+	// like, except the footer still shows a shell in flight.
+	w.record(a, true, 0, busy("working", "d1"))
+	stillRunning, _ := w.get("proj", "austri")
+	if !stillRunning.stillSince.After(first.stillSince) {
+		t.Error("a tool call reported in flight must reset the dwell, not let an unchanged pane read as stalled")
+	}
+
+	// It lands: the digest finally changes, output rendered, no shell left running.
+	w.record(a, true, 0, seen("working", "d2"))
+	landed, _ := w.get("proj", "austri")
+	if !landed.stillSince.After(stillRunning.stillSince) {
+		t.Error("the tool landing is itself a change and must move the dwell on again")
+	}
+}
+
+// TestAToolCallPastTheCapStallsAgain is the other half of the same fix: the reset the marker earns
+// is not a blank check. A shell that never returns is the freeze the dwell exists to catch, and
+// resetting on the marker's mere presence for ever would hide exactly that. Past toolRunningCap the
+// marker stops resetting the dwell on its own, and an unchanged pane reads as a stall again.
+func TestAToolCallPastTheCapStallsAgain(t *testing.T) {
+	h := newHub(t)
+	w := h.watch
+	a := store.Agent{Project: "proj", Name: "austri"}
+
+	w.record(a, true, 0, seen("working", "d1"))
+	key := agentKey{a.Project, a.Name}
+
+	// Fake a marker that has already been in flight far longer than the cap allows — standing in
+	// for the real wall-clock wait a wedged shell would otherwise take to reach here.
+	w.mu.Lock()
+	l := w.obs[key]
+	l.toolSince = l.seen.Add(-(toolRunningCap + time.Minute))
+	held := l.stillSince
+	w.obs[key] = l
+	w.mu.Unlock()
+
+	// Same digest, marker still reported on, but past the cap: the reset must not fire.
+	w.record(a, true, 0, busy("working", "d1"))
+	if l, _ := w.get("proj", "austri"); !l.stillSince.Equal(held) {
+		t.Error("past the cap, a marker that is merely still on must not keep resetting the dwell")
 	}
 }
 

@@ -94,6 +94,40 @@ func TestEveryAskerIsRecordedOnce(t *testing.T) {
 	}
 }
 
+// TestAgentWaitingOnRunCoversBothWaysToWait: a worker waits on its own run (a self-check, a queued
+// `sindri run`); a reviewer waits on someone else's, having asked to be told (-> AddRunWaiter). Both
+// mean the fleet's queue, not the agent, decides the next move — neither is idling on its own account.
+func TestAgentWaitingOnRunCoversBothWaysToWait(t *testing.T) {
+	ps := gateStore(t)
+	if err := ps.PutRun(Run{ID: "run-own", Agent: "dvalin", Status: "queued"}); err != nil {
+		t.Fatal(err)
+	}
+	if waiting, err := ps.AgentWaitingOnRun("dvalin"); err != nil || !waiting {
+		t.Errorf("an agent with its own queued run should read as waiting, got %v, err %v", waiting, err)
+	}
+	if waiting, _ := ps.AgentWaitingOnRun("nori"); waiting {
+		t.Error("an agent with no run of its own and nothing waited on must not read as waiting")
+	}
+
+	if err := ps.PutRun(Run{ID: "run-pr", Agent: "system", Status: "running", Kind: "lint-pr"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.AddRunWaiter("run-pr", "ori"); err != nil {
+		t.Fatal(err)
+	}
+	if waiting, err := ps.AgentWaitingOnRun("ori"); err != nil || !waiting {
+		t.Errorf("a reviewer waiting on someone else's running gate should read as waiting, got %v, err %v", waiting, err)
+	}
+
+	// It lands: a terminal run settles nothing further, so waiting on it is over.
+	if err := ps.SetRunStatus("run-own", "passed"); err != nil {
+		t.Fatal(err)
+	}
+	if waiting, _ := ps.AgentWaitingOnRun("dvalin"); waiting {
+		t.Error("a run that has already finished must not still count as waiting")
+	}
+}
+
 // TestAPRLintRemembersItsCommit: the stored PR result used to carry only a timestamp, which cannot
 // say which tree was checked — so no stored result could ever be trusted.
 func TestAPRLintRemembersItsCommit(t *testing.T) {

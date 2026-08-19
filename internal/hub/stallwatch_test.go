@@ -107,6 +107,28 @@ func standStill(t *testing.T, w *watchdog, project, name string) {
 	w.obs[agentKey{project, name}] = l
 }
 
+// TestStalledForLeavesAnAgentQueuedOnTheHubAlone: the pane signal (ToolRunning) cannot see this case
+// at all — nothing is running in the agent's OWN pane, because it is waiting on the fleet's queue,
+// the commonest instance of this same bug once gate results started caching.
+func TestStalledForLeavesAnAgentQueuedOnTheHubAlone(t *testing.T) {
+	h := newHub(t)
+	a := store.Agent{Project: "proj", Name: "dvalin"}
+	h.watch.record(a, true, 0, seen("idle", "d1"))
+	standStill(t, h.watch, "proj", "dvalin")
+
+	if _, stalled := h.stalledFor("proj", "dvalin", "working", ""); !stalled {
+		t.Fatal("sanity: past the dwell with no run queued, this must already read as stalled")
+	}
+
+	ps := h.store.For("proj")
+	if err := ps.PutRun(store.Run{ID: "run-1", Agent: "dvalin", Status: "queued"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, stalled := h.stalledFor("proj", "dvalin", "working", ""); stalled {
+		t.Error("an agent waiting on its own queued run must not read as stalled")
+	}
+}
+
 // TestStalledForNeedsAnObservation: an agent the watchdog has never seen, or one that is down, is
 // not stalled — it is unknown or stopped, and both already show as themselves.
 func TestStalledForNeedsAnObservation(t *testing.T) {

@@ -100,3 +100,20 @@ func (p *ProjectStore) RunWaiters(runID string) ([]string, error) {
 	}
 	return out, rows.Err()
 }
+
+// AgentWaitingOnRun reports whether agent's next move depends on a run the fleet's own queue is
+// holding: one it queued itself (a self-check, a `sindri run`), or one it asked to be told about
+// (-> AddRunWaiter, a reviewer's `sindri lint <pr>`). Either way the hub, not the agent, decides
+// when it moves next (-> workflow.Stalled).
+func (p *ProjectStore) AgentWaitingOnRun(agent string) (bool, error) {
+	var waiting bool
+	err := p.s.db.QueryRow(`
+		SELECT EXISTS(SELECT 1 FROM runs WHERE project=? AND agent=? AND status IN ('queued','running'))
+			OR EXISTS(SELECT 1 FROM run_waiters w JOIN runs r ON r.project=w.project AND r.id=w.run
+				WHERE w.project=? AND w.agent=? AND r.status IN ('queued','running'))`,
+		p.project, agent, p.project, agent).Scan(&waiting)
+	if err != nil {
+		return false, fmt.Errorf("check %s waiting on a run: %w", agent, err)
+	}
+	return waiting, nil
+}

@@ -42,6 +42,10 @@ const (
 	// Here because the observer is the only thing in this package that probes at all.
 	probeTimeout = 3 * time.Second
 
+	// toolRunningCap bounds how long a tool call in flight resets the dwell, generously above a cold
+	// `make verify` — past it, a shell that never returns is caught by the ordinary stall rule again.
+	toolRunningCap = 15 * time.Minute
+
 	// capacityInterval is how often the fleet's memory headroom is re-read. Slower than the liveness
 	// cadence because it costs its own process spawn and the figure moves when an agent starts, not
 	// second to second.
@@ -64,10 +68,12 @@ type liveness struct {
 	digest  string // the pane's content hash, so stillness is measurable
 	strikes int    // consecutive failed probes; up is held until downStrikes
 	seen    time.Time
-	// stillSince is when the pane last changed. A dwell rather than a flag: a tool call holds the
-	// screen still for its duration (measured: 12s+ on a working agent), a stall holds it still
-	// indefinitely, and only the length tells them apart.
+	// stillSince is when the pane last changed, or last reported a tool call in flight within
+	// toolRunningCap — neither a running shell nor a busy screen is a stall (-> record).
 	stillSince time.Time
+	// toolSince is when the in-flight marker was first seen this streak, zero once it clears; it is
+	// what toolRunningCap measures against (-> record).
+	toolSince time.Time
 	// runtimeSince is when the runtime word last changed. A cut-off turn needs this rather than
 	// stillSince: its spinner keeps animating, so the screen never stands still even though nothing
 	// is happening — measured on gloin, two different digests 12s apart with a dead turn.
@@ -334,12 +340,28 @@ func (w *watchdog) record(a store.Agent, up bool, clients int, obs agent.Observa
 			next.up, next.clients, next.runtime, next.digest = true, prev.clients, prev.runtime, prev.digest
 		}
 	}
-	// The screen changing is the one direct evidence of an agent doing something, and the classifier
-	// is a reading of words that may be minutes old. A failed capture has no digest and settles
-	// nothing — it carries the dwell rather than restarting it, so a lost probe cannot hide a stall.
+	// The screen changing is the one direct evidence of an agent doing something; a failed capture
+	// holds the dwell rather than restarting it. obs.ToolRunning is the other evidence — a shell
+	// prints nothing until it exits — but only within toolRunningCap, past which a shell that never
+	// returns must still fall back to the plain digest comparison.
 	switch {
 	case next.digest == "":
-		next.stillSince = prev.stillSince
+		next.stillSince, next.toolSince = prev.stillSince, prev.toolSince
+	case obs.ToolRunning:
+		next.toolSince = prev.toolSince
+		if next.toolSince.IsZero() {
+			next.toolSince = next.seen
+		}
+		switch {
+		case next.seen.Sub(next.toolSince) <= toolRunningCap:
+			next.stillSince = next.seen
+		case next.digest != prev.digest:
+			next.stillSince = next.seen
+		default:
+			if next.stillSince = prev.stillSince; next.stillSince.IsZero() {
+				next.stillSince = next.seen
+			}
+		}
 	case next.digest != prev.digest:
 		next.stillSince = next.seen
 	default:

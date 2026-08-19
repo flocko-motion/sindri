@@ -101,6 +101,8 @@ func (paneReader) DetectState(screen string) agentport.State {
 	return agentport.Idle
 }
 
+func (paneReader) ToolRunning(string) bool { return false }
+
 // tellFixture wires a service over a fake backend showing pane, with one agent registered.
 func tellFixture(t *testing.T, name, pane string) (*Service, *fakeRuntime) {
 	t.Helper()
