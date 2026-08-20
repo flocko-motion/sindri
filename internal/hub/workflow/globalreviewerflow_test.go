@@ -225,3 +225,36 @@ func TestRequestReviewReachesThePoolDirectly(t *testing.T) {
 		t.Errorf("ori should hold pr-1 immediately from RequestReview, got %q — the pool must not need the tick", held)
 	}
 }
+
+// TestGlobalReviewerReadsTheTasksOfTheProjectItReviewsFor is the blind-review regression vestri
+// reported: `sindri task <id>` and `task list` read the caller's own project, and a pooled reviewer's
+// own project holds no tasks at all. So it answered "0 active tasks" and "no such task" for the very
+// task its PR implements, and the review was made against the diff alone — silently, since nothing
+// about that reads as a failure. A reviewer works for the project whose PR it holds.
+func TestGlobalReviewerReadsTheTasksOfTheProjectItReviewsFor(t *testing.T) {
+	st, ps := poolFixture(t)
+	if err := st.For(GlobalProject).PutAgent(store.Agent{Name: "ori", Role: "reviewer", Workspace: "ori"}); err != nil {
+		t.Fatal(err)
+	}
+	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
+	e.AssignPendingReviews("repo")
+	if held, _ := ps.ReviewingPR("ori"); held != "pr-1" {
+		t.Fatalf("setup: ori should hold pr-1, got %q", held)
+	}
+	c := registry.Caller{Project: GlobalProject, Agent: "ori", Role: "reviewer"}
+
+	if home := e.taskHome(c); home != "repo" {
+		t.Errorf("taskHome while holding repo's pr-1 = %q, want \"repo\"", home)
+	}
+	// An unheld reviewer borrows nothing: there is no project to read, and inventing one would let it
+	// read a backlog it was never handed anything from.
+	idle := registry.Caller{Project: GlobalProject, Agent: "nobody", Role: "reviewer"}
+	if home := e.taskHome(idle); home != GlobalProject {
+		t.Errorf("taskHome holding no review = %q, want %q", home, GlobalProject)
+	}
+	// A project-bound caller is untouched, whatever any reviewer holds.
+	local := registry.Caller{Project: "repo", Agent: "dvalin", Role: "worker"}
+	if home := e.taskHome(local); home != "repo" {
+		t.Errorf("taskHome for a project-bound caller = %q, want its own project", home)
+	}
+}

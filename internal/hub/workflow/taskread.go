@@ -76,10 +76,11 @@ func parseTaskListFlags(args []string) (api.TaskFilter, error) {
 // coauthor shapes all of it, a worker sees only the package it holds. The rest of the backlog is
 // a distraction to a worker, and an invitation to start what nobody assigned it.
 func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int, error) {
-	if err := e.SyncTasks(c.Project); err != nil {
+	home := e.taskHome(c)
+	if err := e.SyncTasks(home); err != nil {
 		return 1, err
 	}
-	ps := e.store.For(c.Project)
+	ps := e.store.For(home)
 	tasks, err := ps.AllTasks()
 	if err != nil {
 		return 1, err
@@ -103,7 +104,7 @@ func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int,
 			fmt.Fprintf(out, "%s is not part of your work. Run `sindri task` for the package you hold.\n", id)
 			return 1, nil
 		}
-		t, err := e.TaskInfo(c.Project, id)
+		t, err := e.TaskInfo(home, id)
 		if err != nil {
 			return 1, err
 		}
