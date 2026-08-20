@@ -318,7 +318,19 @@ func (h *Hub) AgentExec(project, name string, args []string, out io.Writer) (int
 				"else needing it will keep failing. Retrying won't help and there's nothing in /workspace "+
 				"to fix — tell the user, and carry on with whatever doesn't need it", args[0])
 		}
-		return exit, fmt.Errorf("the hub hit an internal error running %q — it's logged for the operator; nothing for you to fix, try again later", args[0])
+		// The hub escalates for itself: it produced this failure, and asking the agent to report it
+		// back is the thing that failed — told "try again later", one reviewed a PR without the task
+		// it implements. Never on a refusal: those reach `out` with a nil error and are routine.
+		if c.Escalation == "" { // already stopped on its own question — do not overwrite it
+			if _, eerr := h.Escalate(c.Project, name, fmt.Sprintf(
+				"`sindri %s` failed inside the hub, so I stopped. The cause is in the hub's log, not in "+
+					"my workspace; `sindri agent resume %s` once it is fixed.", args[0], name)); eerr != nil {
+				fmt.Fprintf(os.Stderr, "hub: escalating %q after %q failed: %v\n", name, args[0], eerr)
+			}
+		}
+		return exit, fmt.Errorf("the hub hit an internal error running %q. You are now ESCALATED — the "+
+			"hub raised it for you and the user can see it, so there is nothing to report and nothing "+
+			"to work around. Wait for their answer", args[0])
 	}
 	return exit, nil
 }
