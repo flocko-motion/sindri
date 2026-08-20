@@ -52,17 +52,32 @@ func TestAFullAgentMidTaskIsStillNudged(t *testing.T) {
 	}
 }
 
-// TestARetiredAgentIsNotNudged is the same state reached deliberately by a human, and it must be
-// exempt for the same reason — the agent has been wound down, not lost.
-func TestARetiredAgentIsNotNudged(t *testing.T) {
+// TestARetiredAgentMidTaskIsStillNudged: retirement parks an agent at the same boundary fullness
+// does (-> TestAFullAgentMidTaskIsStillNudged) and for the same reason — it is "hand it no NEW work"
+// (store.Agent.Retired), and a worker still holding a task has been promised it may finish.
+func TestARetiredAgentMidTaskIsStillNudged(t *testing.T) {
 	e, ps := quietWorkerHoldingWork(t, &stubDeps{})
 	a, _, _ := ps.GetAgent("dvalin")
 	a.Retired = true
 	if err := ps.PutAgent(a); err != nil {
 		t.Fatal(err)
 	}
+	if !e.NudgeStalled("proj", "dvalin", "idle", 6*time.Minute) {
+		t.Error("a retired agent stalled on work it still holds went unnudged, so it can never finish it")
+	}
+}
+
+// TestARetiredAgentHoldingNothingIsNotNudged is where retirement DOES park: nothing in hand means
+// the winding down is complete, and prodding then complains about a state the human chose.
+func TestARetiredAgentHoldingNothingIsNotNudged(t *testing.T) {
+	e, ps := quietWorkerHoldingWork(t, &stubDeps{holdsNothing: true})
+	a, _, _ := ps.GetAgent("dvalin")
+	a.Retired = true
+	if err := ps.PutAgent(a); err != nil {
+		t.Fatal(err)
+	}
 	if e.NudgeStalled("proj", "dvalin", "idle", 6*time.Minute) {
-		t.Error("a retired agent was nudged for waiting as it was told to")
+		t.Error("a retired agent with nothing in hand was nudged for waiting as it was told to")
 	}
 }
 

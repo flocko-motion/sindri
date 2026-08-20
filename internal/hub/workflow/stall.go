@@ -22,7 +22,11 @@ const RetryDwell = time.Minute
 // the hub deliberately put the agent in.
 func (e *Engine) parkedByTheHub(project, name string) bool {
 	if e.retired(project, name) {
-		return true
+		// Only once it holds NOTHING: retirement is "no new work", and finishing what it already has
+		// requires the verdicts about that work to keep reaching it. A retired dain sat unable to.
+		a, _, _ := e.store.For(project).GetAgent(name)
+		nothing, err := e.deps.HoldsNothing(project, name, a.Role)
+		return err == nil && nothing
 	}
 	st, err := e.store.For(project).GetState(name)
 	if err != nil || st.Container == "" || st.Task != "" || st.Phase != "idle" {

@@ -135,9 +135,10 @@ func TestAnAgentThatNeedsAHumanIsNotWoken(t *testing.T) {
 	}
 }
 
-// TestAParkedAgentIsNotWoken: retirement is a state the hub itself put the agent in, and told it to
-// wait in. The stall nudge exempts it for the same reason.
-func TestAParkedAgentIsNotWoken(t *testing.T) {
+// TestARetiredAgentHoldingWorkIsWoken: retiring an agent promises it FINISHES what it holds, so a
+// gate result or a rejection about that work is exactly what it still needs. Read as silence, this
+// left a retired dain sitting on an unread gate failure for its own held task, unable to learn of it.
+func TestARetiredAgentHoldingWorkIsWoken(t *testing.T) {
 	deps := &stubDeps{}
 	e, ps := idleAgentWithMail(t, deps)
 	a, _, err := ps.GetAgent("dvalin")
@@ -148,8 +149,26 @@ func TestAParkedAgentIsNotWoken(t *testing.T) {
 	if err := ps.PutAgent(a); err != nil {
 		t.Fatal(err)
 	}
+	if !e.NudgeMailWaiting("proj", "dvalin") {
+		t.Error("a retired agent holding work went untold; it cannot finish what it holds without the news")
+	}
+}
+
+// TestARetiredAgentHoldingNothingIsLeftAlone is the other half: with nothing in hand it is done,
+// which is all retirement ever meant, so no mail can be about work it still owes.
+func TestARetiredAgentHoldingNothingIsLeftAlone(t *testing.T) {
+	deps := &stubDeps{holdsNothing: true}
+	e, ps := idleAgentWithMail(t, deps)
+	a, _, err := ps.GetAgent("dvalin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Retired = true
+	if err := ps.PutAgent(a); err != nil {
+		t.Fatal(err)
+	}
 	if e.NudgeMailWaiting("proj", "dvalin") {
-		t.Error("a retired agent was woken for mail it cannot act on")
+		t.Error("a retired agent with nothing in hand was woken; it has already finished")
 	}
 }
 
