@@ -194,6 +194,12 @@ func (e *Engine) AssignPendingWork(project string) {
 		if st.Task != "" {
 			continue // holding a plain task already
 		}
+		// Holding nothing by here, so this answers only "could it take work at all" — retired, or a
+		// clear about to land. Its sibling nudgeIdleWorkers asks the same thing; this one did not, and
+		// pushed at a retired agent every sweep, which answered "still retired, waiting quietly".
+		if e.agentBlocked(ps, project, a.Name) != "" {
+			continue
+		}
 		t, isPackage, ok := nextUp(packages, leaves, e.tierPrefers(project, a.Name))
 		if !ok {
 			continue
