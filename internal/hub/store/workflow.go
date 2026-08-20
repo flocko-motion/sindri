@@ -648,6 +648,22 @@ func (p *ProjectStore) RuledPRs(author string) ([]string, error) {
 	return out, rows.Err()
 }
 
+// AwaitingPR is agent's newest PR that has not settled, with the task it would land into — ("", "")
+// if none. An agent HOLDS that task until the PR merges, which is what the board has always shown
+// and what every "is it free" question in the hub used to miss.
+func (p *ProjectStore) AwaitingPR(agent string) (pr, task string, err error) {
+	err = p.s.db.QueryRow(
+		`SELECT id, task FROM prs WHERE project=? AND agent=? AND status NOT IN ('merged','scrapped') ORDER BY rowid DESC LIMIT 1`,
+		p.project, agent).Scan(&pr, &task)
+	if err == sql.ErrNoRows {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("awaiting pr for %s: %w", agent, err)
+	}
+	return pr, task, nil
+}
+
 // ReviewingPR is the newest verdict-less review assigned to author, "" if none. The board
 // needs it because a reviewer authors no PR, leaving its AgentView.PR empty.
 func (p *ProjectStore) ReviewingPR(author string) (string, error) {

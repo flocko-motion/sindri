@@ -48,13 +48,14 @@ func TestMailIsKeptForAnAgentThatCannotBeReached(t *testing.T) {
 	}
 }
 
-// TestPushOnlyKeepsNothing: waking is the entire value of a nudge or a broadcast, so a wake nobody
-// received is not a loss and must not become a permanent row. This is what makes keeping mail for
-// ever affordable, so it is the half worth pinning hardest.
+// TestPushOnlyKeepsNothing: waking is the entire value of a nudge or a broadcast, so it must not
+// become a permanent row. This is what makes keeping mail for ever affordable, so it is the half
+// worth pinning hardest. The push is REPORTED though — with no row behind it the push IS the
+// message, and a swallowed failure left hepti's mailbox marked announced to nobody.
 func TestPushOnlyKeepsNothing(t *testing.T) {
 	h, _ := mailAgent(t)
-	if err := h.Deliver(testProject, "dvalin", "[hub] carry on with td-1", workflow.PushOnly); err != nil {
-		t.Fatalf("Deliver: %v", err)
+	if err := h.Deliver(testProject, "dvalin", "[hub] carry on with td-1", workflow.PushOnly); err == nil {
+		t.Error("a push-only delivery to an agent with no session reported success; its caller cannot retry")
 	}
 	all, err := h.store.AllMail(0)
 	if err != nil {

@@ -42,6 +42,11 @@ func (s *Service) HoldsNothing(project, name, role string) (bool, error) {
 	if st.Task != "" || st.Container != "" || st.Escalation != "" {
 		return false, nil
 	}
+	// A PR still in flight is held work: the agent owns that task until it merges, and a rejection
+	// hands it straight back. Missing this read a rejected author as an idle agent.
+	if pr, _, aerr := ps.AwaitingPR(name); aerr != nil || pr != "" {
+		return false, aerr
+	}
 	// store.Store's ReviewingPR, not ps's: a pooled reviewer's held review is never filed under
 	// its own project, and reading it as "" here would let the sweep stop it mid-review.
 	_, reviewing, err := s.store.ReviewingPR(project, name)

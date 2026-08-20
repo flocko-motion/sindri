@@ -56,6 +56,11 @@ func (s *Service) AtLeafBoundary(project, name string) (bool, error) {
 	if st.Task != "" {
 		return false, nil
 	}
+	// A PR awaiting a verdict is not a boundary: the agent holds that task until it merges, and a
+	// rejection returns the work mid-stream. Cutting the session there loses what it was waiting for.
+	if pr, _, perr := ps.AwaitingPR(name); perr != nil || pr != "" {
+		return false, perr
+	}
 	// store.Store's ReviewingPR, not ps's: a pooled reviewer's held review is never filed under
 	// its own project, and a project-scoped read here would clear/compact it mid-review.
 	_, reviewing, err := s.store.ReviewingPR(project, name)

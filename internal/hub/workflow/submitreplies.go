@@ -54,6 +54,13 @@ func ReplyReviewRequestFailed(prID string, err error) string {
 	return fmt.Sprintf("%s registered, but requesting a review failed: %v. The hub retries this on its own; flag it if %s is still showing no reviewer after a while.", prID, err, prID)
 }
 
+// ReplyPRStillToLand refuses to end a task whose PR has not merged. Names the way out, since a
+// rejected author is in the state that most looks finished and is not.
+func ReplyPRStillToLand(task, pr string) string {
+	return fmt.Sprintf("Not closing %s: %s has not merged, so the task is still yours. If it was rejected, "+
+		"answer the feedback and `sindri submit` again — a task ends when its PR lands, never before.", task, pr)
+}
+
 // ReplySubmitTaskClosed refuses a submission whose target closed under it. It states the fact and
 // stops there: nothing the agent can fix, and nothing gained by gating work with nowhere to land.
 func ReplySubmitTaskClosed(task string) string {

@@ -57,6 +57,13 @@ func (h *Hub) Deliver(project, name, text string, d workflow.Delivery) error {
 		// trace of WHY anywhere — its log records the text as inject-skipped, never the reason — and
 		// mail catching the message only helps once something tells the agent to read it.
 		fmt.Fprintf(os.Stderr, "hub: push to %s/%s did not land: %v\n", project, name, err)
+		// A push with no mail behind it IS the message, so a swallowed failure reads as delivered:
+		// NudgeMailWaiting marked hepti's mailbox announced off this nil and never announced again,
+		// turning one skipped inject into permanent silence. Mail written still absorbs it — that row
+		// is the durable record, and the announcement retries until it lands.
+		if !d.Mail {
+			return err
+		}
 		return nil
 	}
 	if mailID != 0 {

@@ -160,6 +160,11 @@ func (e *Engine) agentBlocked(ps *store.ProjectStore, project, agent string) str
 	if st.Task != "" {
 		return fmt.Sprintf("holds %s", st.Task)
 	}
+	// Held until it MERGES, which is what the board has always displayed. austri was handed a second
+	// task while pr-sd-a47b61 sat rejected, because every reader here stopped at the state row.
+	if pr, task, err := ps.AwaitingPR(agent); err == nil && pr != "" {
+		return fmt.Sprintf("holds %s — %s is still to land", task, pr)
+	}
 	return ""
 }
 

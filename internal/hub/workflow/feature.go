@@ -89,6 +89,15 @@ func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) 
 		fmt.Fprintln(out, ReplyNothingToCheckpoint)
 		return 1, nil
 	}
+	// A rejection returns the work in phase "working", which is exactly the shape a checkpoint takes
+	// for finished. austri checkpointed past a rejected pr-sd-a47b61, closing the task and freeing
+	// itself for a second one it then had no room for.
+	if pr, task, perr := ps.AwaitingPR(c.Agent); perr != nil {
+		return 1, perr
+	} else if pr != "" && task == st.Task {
+		fmt.Fprintln(out, ReplyPRStillToLand(st.Task, pr))
+		return 1, nil
+	}
 	a, _, _ := ps.GetAgent(c.Agent)
 	wt := filepath.Join(root, a.Workspace)
 	tk, _, _ := ps.GetTask(st.Task)
