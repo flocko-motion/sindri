@@ -8,28 +8,11 @@ package workflow
 
 import "fmt"
 
-// idleAndReachable reports an agent a nudge would REACH and that could act on it: alive, at an empty
-// prompt, holding nothing, not parked. The empty prompt excludes the states needing a human — blocked,
-// signed out, mid-turn — since a nudge none of them can answer is noise on the signal a user watches.
-func (e *Engine) idleAndReachable(project, name string) bool {
-	st, err := e.store.For(project).GetState(name)
-	if err != nil || st.Task != "" || (st.Phase != "" && st.Phase != "idle" && st.Phase != e.restPhaseFor(project, name)) {
-		return false
-	}
-	if !e.deps.AgentUp(project, name) || !e.deps.AgentIdle(project, name) {
-		return false
-	}
-	return !e.parkedByTheHub(project, name)
-}
-
-// restPhaseFor is the phase a role RESTS in — "planning" for a planner, "collab" for a coauthor — so
-// resting is not mistaken for holding work. A reviewer and a worker rest in "idle".
-func (e *Engine) restPhaseFor(project, name string) string {
-	a, ok, err := e.store.For(project).GetAgent(name)
-	if err != nil || !ok {
-		return "idle"
-	}
-	return restPhase(a.Role)
+// reachable asks only whether a message would LAND: a push into a running turn is lost. Never whether
+// the agent is FREE — mail is most urgent while it holds work, since the verdict or cancellation is
+// about that work, and one agent waited on a gate result unread for holding a task.
+func (e *Engine) reachable(project, name string) bool {
+	return e.deps.AgentUp(project, name) && e.deps.AgentIdle(project, name)
 }
 
 // NudgeMailWaiting wakes an agent that has unread mail it has not been told about, whatever its ROLE — a
@@ -43,7 +26,10 @@ func (e *Engine) NudgeMailWaiting(project, name string) bool {
 	if err != nil || unannounced == 0 {
 		return false
 	}
-	if !e.idleAndReachable(project, name) {
+	// Parked stays exempt: retirement and a full context are states the hub itself put the agent in
+	// and told it to wait in, and "hands off every automatic behaviour" is the whole of what retiring
+	// means. Holding work is NOT such a state, which is the distinction this used to miss.
+	if !e.reachable(project, name) || e.parkedByTheHub(project, name) {
 		return false
 	}
 	// The message states the WHOLE unread count, not just the new part: what the agent has to deal with

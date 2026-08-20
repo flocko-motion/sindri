@@ -153,16 +153,18 @@ func TestAParkedAgentIsNotWoken(t *testing.T) {
 	}
 }
 
-// TestAnAgentHoldingWorkIsNotWoken: it is going to call `sindri` anyway, and the directive hands it its
-// mail before anything else — so a wake would be redundant noise mid-task.
-func TestAnAgentHoldingWorkIsNotWoken(t *testing.T) {
+// TestAnAgentHoldingWorkIsWoken inverts what this asserted: that an agent mid-task "is going to call
+// `sindri` anyway". Twice it was not — it believed a gate result was still coming, so it waited on a
+// verdict already sitting unread in its own mailbox. Mail is most urgent while work is held, since
+// that is what a verdict, a rejection or a cancellation is about.
+func TestAnAgentHoldingWorkIsWoken(t *testing.T) {
 	deps := &stubDeps{}
 	e, ps := idleAgentWithMail(t, deps)
 	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "sd-1", Branch: "sd-1", Phase: "working"}); err != nil {
 		t.Fatal(err)
 	}
-	if e.NudgeMailWaiting("proj", "dvalin") {
-		t.Error("an agent holding work reads its mail at its next ask, without being prodded")
+	if !e.NudgeMailWaiting("proj", "dvalin") {
+		t.Error("an agent holding work was left unaware of mail about that very work")
 	}
 }
 

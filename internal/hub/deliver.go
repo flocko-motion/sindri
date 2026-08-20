@@ -53,12 +53,10 @@ func (h *Hub) Deliver(project, name, text string, d workflow.Delivery) error {
 	// Under the hub's lifetime: a push is the hub telling an agent something on the fleet's timeline,
 	// and it must land whether or not whoever triggered it is still there (-> Hub.lifetime).
 	if err := h.agents.InjectWhenReady(h.lifetime, project, name, text); err != nil {
-		// Push-only had nowhere else to go, so say so where a user reconstructs what an agent was
-		// never told. With mail written, the message is not lost and the row's pushed flag stays
-		// false, which is what tells a reader it is waiting rather than possibly already acted on.
-		if !d.Mail {
-			fmt.Fprintf(os.Stderr, "hub: push to %s/%s did not land: %v\n", project, name, err)
-		}
+		// Said whatever the class. Guarded by !d.Mail, three consecutive failures to one agent left no
+		// trace of WHY anywhere — its log records the text as inject-skipped, never the reason — and
+		// mail catching the message only helps once something tells the agent to read it.
+		fmt.Fprintf(os.Stderr, "hub: push to %s/%s did not land: %v\n", project, name, err)
 		return nil
 	}
 	if mailID != 0 {
