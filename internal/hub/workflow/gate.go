@@ -473,6 +473,13 @@ func (e *Engine) landSubmit(project string, ps *store.ProjectStore, r api.Run) e
 	if st.Container != "" {
 		target, branch = st.Container, st.Container
 	}
+	// The task can close while the gate runs — a checkpoint closed one 126 seconds before its own
+	// submit landed, and the PR that resulted drew two full reviews it could never act on. This is
+	// the only point that shuts that window, since the gate is what takes the time.
+	if t, ok, terr := ps.GetTask(target); terr == nil && ok && !api.Open(t) {
+		_ = ps.Log(r.Agent, "submit-refused", target+" closed while the gate ran")
+		return e.deps.Deliver(project, r.Agent, MsgSubmitTaskClosed(target), MailAndPush)
+	}
 	base, err := e.baseBranch(e.deps.ProjectRoot(project))
 	if err != nil {
 		return err

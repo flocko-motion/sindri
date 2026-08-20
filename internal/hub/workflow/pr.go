@@ -200,6 +200,12 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 		fmt.Fprintln(out, ReplyTaskGrew(st.Task, grew))
 		return 1, nil
 	}
+	// Before the gate takes a slot: with the target closed there is nothing to land into, so the
+	// gate's minutes would buy a PR rejected the moment it landed (-> settleWithTask).
+	if t, ok, terr := ps.GetTask(target); terr == nil && ok && !api.Open(t) {
+		fmt.Fprintln(out, ReplySubmitTaskClosed(target))
+		return 1, nil
+	}
 	a, _, _ := ps.GetAgent(c.Agent)
 	wt := filepath.Join(root, a.Workspace)
 	base, err := e.baseBranch(root)

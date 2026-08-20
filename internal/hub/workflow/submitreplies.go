@@ -54,6 +54,14 @@ func ReplyReviewRequestFailed(prID string, err error) string {
 	return fmt.Sprintf("%s registered, but requesting a review failed: %v. The hub retries this on its own; flag it if %s is still showing no reviewer after a while.", prID, err, prID)
 }
 
+// ReplySubmitTaskClosed refuses a submission whose target closed under it. It states the fact and
+// stops there: nothing the agent can fix, and nothing gained by gating work with nowhere to land.
+func ReplySubmitTaskClosed(task string) string {
+	return fmt.Sprintf("Not submitted: task %s is closed, so there is nothing for a pull request to land into. "+
+		"Your work is committed and your branch keeps it. Do not submit again — if what is on it is still "+
+		"wanted, `sindri escalate` says so; otherwise run `sindri` for new work.", task)
+}
+
 // ReplyNotWorking guards a work verb run in a phase it doesn't apply to. It must name the ACTUAL
 // state: a flat "pick up a task first" told a worker under review to abandon the task it held.
 func ReplyNotWorking(verb, phase, task string) string {

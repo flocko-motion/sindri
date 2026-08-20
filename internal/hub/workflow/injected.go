@@ -86,6 +86,19 @@ func MsgTaskCancelled(id string) string {
 	return fmt.Sprintf("[hub] Task %s was cancelled — stop working on it. Don't clean up your workspace; the sindri hub will reset it for you when you pick up your next task. Just run `sindri`.", id)
 }
 
+// MsgSubmitTaskClosed tells an author its submission found no task to land into. A fact about the
+// world, never a violation to fix, so it does not ask for a resubmission — that would loop.
+func MsgSubmitTaskClosed(task string) string {
+	return fmt.Sprintf("[hub] Nothing to submit into: task %s closed while your gate was running, so no pull request was opened. Your work is committed and your branch is untouched. Do not submit again — if what you built is still wanted, say so with `sindri escalate`, otherwise run `sindri` for new work.", task)
+}
+
+// MsgPRSettledWithTask tells an author its PR was rejected because its task closed. Says the work
+// was not judged — the author is the one who knows whether the branch still holds something wanted,
+// and a rejection with no reading of the code reads as one otherwise.
+func MsgPRSettledWithTask(prID, task string) string {
+	return fmt.Sprintf("[hub] %s was rejected: its task %s is closed, so there is nothing left for it to land into. This is not a verdict on your work — nobody read it, and your branch still holds it. Do not resubmit; if what is on it is still wanted, say so with `sindri escalate`, otherwise run `sindri` for new work.", prID, task)
+}
+
 // MsgReviewCancelled tells a reviewer its PR was scrapped — stop, its branch is gone, get new work.
 func MsgReviewCancelled(prID string) string {
 	return fmt.Sprintf("[hub] The PR you were reviewing (%s) was scrapped — stop reviewing it; its branch is gone. Just run `sindri` for your next task.", prID)

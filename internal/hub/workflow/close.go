@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/task"
 )
@@ -98,6 +99,32 @@ func (e *Engine) SetStatus(project, id, want string) error {
 	return ps.UpsertTask(t)
 }
 
+// settleWithTask rejects every pending PR against a just-closed task, naming the close as the
+// reason. A rejection rather than a scrap: the work itself is not being judged and the branch keeps
+// it, only the route in has gone. pr-sd-c9e829 drew two full reviews and a rejection asking for real
+// work, every one of them after its task had closed.
+func (e *Engine) settleWithTask(project, id string) {
+	ps := e.store.For(project)
+	prs, err := ps.PRs()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "hub: reading PRs after closing %s: %v\n", id, err)
+		return
+	}
+	for _, pr := range prs {
+		if pr.Task != id || !api.PROpen(pr) || pr.Status == "rejected" {
+			continue
+		}
+		e.releaseReviewers(project, pr.ID, "its task closed")
+		pr.Status, pr.Feedback = "rejected", "task "+id+" is closed"
+		if perr := ps.PutPR(pr); perr != nil {
+			fmt.Fprintf(os.Stderr, "hub: rejecting PR %s with its task: %v\n", pr.ID, perr)
+			continue
+		}
+		_ = ps.LogPR(pr.ID, "rejected", "by hub: task "+id+" is closed")
+		_ = e.deps.Deliver(project, pr.Agent, MsgPRSettledWithTask(pr.ID, id), MailAndPush)
+	}
+}
+
 // finishTask is the shared close/scrap path: dispatch to the id's backend, then free whoever held
 // the task. Cancelling mid-flight is allowed, never a refusal that strands the human.
 func (e *Engine) finishTask(project, id string, scrap bool) error {
@@ -118,6 +145,11 @@ func (e *Engine) finishTask(project, id string, scrap bool) error {
 	}
 	if err := e.finishAtSource(project, root, id, scrap); err != nil {
 		return err
+	}
+	// A scrap settles its PRs through ScrapPR instead, which also discards the branch; doing it here
+	// too would mark them terminal first and leave that branch standing.
+	if !scrap {
+		e.settleWithTask(project, id)
 	}
 	// Free whoever held it, so nobody grinds on dead work. The worktree is NOT reset here — the
 	// agent may keep editing, so claimLeaf cleans up when it takes its next task.

@@ -115,6 +115,7 @@ func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) 
 		if err := e.finishAtSource(c.Project, root, st.Task, false); err != nil {
 			return 1, err
 		}
+		e.settleWithTask(c.Project, st.Task)
 		_ = e.RefreshTask(c.Project, st.Task)
 		e.closeCompletedAncestors(c.Project, st.Task, st.Container)
 	}
@@ -175,6 +176,7 @@ func (e *Engine) closeCompletedAncestors(project, from, stopAt string) {
 			fmt.Fprintf(os.Stderr, "hub: closing completed parent %s: %v\n", parent, err)
 			return
 		}
+		e.settleWithTask(project, parent)
 		_ = e.RefreshTask(project, parent)
 	}
 }
