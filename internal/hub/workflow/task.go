@@ -330,15 +330,19 @@ func (e *Engine) EditTask(project, id string, s TaskSpec) error {
 	return nil
 }
 
-// prRejected reports a rejected PR (the signal to revise, not wait) and its feedback, so the worker
-// is handed the comments directly rather than having to go find them.
-func (e *Engine) prRejected(project, agent string) (feedback string, rejected bool, err error) {
+// prRejected reports a rejected PR for the work IN HAND and its feedback, so the worker is handed the
+// comments directly. Scoped to target because matching any rejected PR by this author served an old
+// one for ever: an agent was told its current task was rejected, over feedback about a finished one.
+func (e *Engine) prRejected(project, agent, target string) (feedback string, rejected bool, err error) {
+	if target == "" {
+		return "", false, nil // nothing held, so no rejection of it to report
+	}
 	prs, err := e.store.For(project).PRs()
 	if err != nil {
 		return "", false, fmt.Errorf("load PRs for %s: %w", agent, err)
 	}
 	for _, p := range prs {
-		if p.Agent == agent && p.Status == "rejected" {
+		if p.Agent == agent && p.Status == "rejected" && p.Task == target {
 			return p.Feedback, true, nil
 		}
 	}
@@ -349,7 +353,11 @@ func (e *Engine) prRejected(project, agent string) (feedback string, rejected bo
 // plain "work on the task". container, the feature it holds, must match what the registry shows that
 // caller — a directive naming a hidden verb leaves the agent to improvise the workflow.
 func (e *Engine) workDirective(project, name, task, container string) (string, error) {
-	feedback, rejected, err := e.prRejected(project, name)
+	target := container // a feature's PR is filed against the feature, not the subtask in hand
+	if target == "" {
+		target = task
+	}
+	feedback, rejected, err := e.prRejected(project, name, target)
 	if err != nil {
 		return "", err
 	}
@@ -440,7 +448,7 @@ func (e *Engine) directive(ctx context.Context, project, name string) (string, e
 		if t, ok, _ := ps.GetTask(st.Container); ok && !featureLanded(ps, t) {
 			switch st.Phase {
 			case "submitted":
-				feedback, rejected, err := e.prRejected(project, name)
+				feedback, rejected, err := e.prRejected(project, name, st.Container)
 				if err != nil {
 					return "", err
 				}
@@ -471,7 +479,7 @@ func (e *Engine) directive(ctx context.Context, project, name string) (string, e
 	case "working":
 		return e.workDirective(project, name, st.Task, "")
 	case "submitted":
-		feedback, rejected, err := e.prRejected(project, name)
+		feedback, rejected, err := e.prRejected(project, name, st.Task)
 		if err != nil {
 			return "", err
 		}
