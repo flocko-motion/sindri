@@ -131,9 +131,9 @@ func MsgLintIncomplete(status string) string {
 		"code. Run `sindri lint` again when you want the answer.", word)
 }
 
-// MsgGateFailed reuses ReplyLintFail's rulebook — only the delivery differs.
+// MsgGateFailed reuses ReplyGateFail's rulebook — only the delivery differs.
 func MsgGateFailed(output string) string {
-	return "[hub] " + ReplyLintFail(output)
+	return "[hub] " + ReplyGateFail(output)
 }
 
 // MsgGateIncomplete answers a gate that never reached a verdict (timeout, or a hub restart) —

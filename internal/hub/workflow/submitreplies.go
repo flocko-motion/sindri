@@ -184,19 +184,22 @@ func ReplyBehindBase(base string, behind int, incoming []string) string {
 		behind, base, commitList(incoming))
 }
 
-// ReplyLintFail echoes the violations, and says a finding is to be MET, not evaded: relocating
-// prose or widening a limit clears the report while leaving the problem the rule exists for.
-func ReplyLintFail(out string) string {
-	return fmt.Sprintf("Lint failed — fix the violations and submit again:\n%s\n"+
-		"Meet each finding on its own terms; do NOT work around the linter. If a comment is "+
-		"too long, CUT WORDS — don't move it somewhere the rule doesn't reach, don't split it "+
-		"or pad the file with one-liners to shift an average, don't widen an ignore list, and "+
-		"don't retune limits in .sindri/config.yaml (those are the maintainer's call).\n"+
-		"Every limit is a CEILING, not a target. Don't trim until the number just passes — "+
-		"trim until the comment earns its lines. A single line suffices for most: say what the "+
-		"thing is for, or why it isn't done the obvious way, and stop. Land well under the "+
-		"limit, or the next comment anyone adds puts the file straight back over it.", out)
+// ReplyGateFail echoes what the gate found and states the one rule agents keep discovering the
+// expensive way: it passes only if EVERYTHING passes. One resubmitted the same failing test three
+// times, having correctly judged it pre-existing — a fact the gate cannot act on and never claimed to.
+func ReplyGateFail(out string) string {
+	return fmt.Sprintf("The quality gate FAILED, so no PR was created:\n%s\n%s", out, gateRule)
 }
+
+// gateRule is why a resubmission of the same tree is wasted: the gate reports what is broken, never
+// who broke it, so "pre-existing" and "unrelated" change nothing about the verdict. Escalation is the
+// way out when a fault genuinely belongs outside the task — nothing else here is.
+const gateRule = "The gate passes only if EVERYTHING passes. It does not ask who caused a failure " +
+	"and cannot: pre-existing, unrelated, somebody else's — the verdict is the same, and every line " +
+	"in this repo was written by an agent, so there is nobody else to hand it to. Submitting the same " +
+	"tree again returns this same result and spends the fleet's one run slot doing it. Two ways " +
+	"forward: fix it, whoever wrote it; or `sindri escalate \"<what needs deciding>\"` if it truly " +
+	"belongs outside your task and the user must rule on it."
 
 // ReplySpecInvalid answers `openspec submit` when the change fails openspec's own
 // validation (the planner's gate — the code linter doesn't apply to spec work).
