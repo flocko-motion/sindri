@@ -145,11 +145,20 @@ func TestShowIsScopedUnlessTheCallerHoldsTheNamedPR(t *testing.T) {
 
 	var out bytes.Buffer
 	code, err := e.CmdShowPR(c, []string{"pr-9"}, &out)
-	if err == nil || code == 0 {
-		t.Fatalf("a worker in another repo should be refused pr-9, got code=%d err=%v: %s", code, err, out.String())
+	// Refused on `out` with a NIL error: that is the convention for an agent-actionable outcome, and a
+	// returned error means a hub-internal fault — which now escalates the agent (-> AgentExec). Demanding
+	// one here would escalate every worker that mistypes a PR id.
+	if err != nil {
+		t.Fatalf("a refusal must not read as a hub fault: %v", err)
 	}
-	if strings.Contains(out.String(), "pr-9") {
-		t.Errorf("pr-9's own data leaked to an unrelated caller: %s", out.String())
+	if code == 0 {
+		t.Fatalf("a worker in another repo should be refused pr-9, got code=%d: %s", code, out.String())
+	}
+	// Echoing back the id the caller itself typed is not a leak; the PR's own data is.
+	for _, secret := range []string{"td-9", "dain", "sd-9"} {
+		if strings.Contains(out.String(), secret) {
+			t.Errorf("pr-9's own data (%q) leaked to an unrelated caller: %s", secret, out.String())
+		}
 	}
 }
 
