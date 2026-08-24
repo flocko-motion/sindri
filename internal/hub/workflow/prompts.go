@@ -524,16 +524,14 @@ const DirClearPending = "[hub] The user has armed a context clear for you: it fi
 // --- escalation: stopped on a decision only the user can make ---
 
 // DirEscalated answers an escalated agent by repeating the question back — one relaunched mid-escalation
-// remembers nothing of asking.
+// remembers nothing of how it got here, whether that was the hub's doing or its own.
 func DirEscalated(question string) string {
-	return fmt.Sprintf("[hub] You are ESCALATED — you stopped and asked the user to decide this:\n\n"+
+	return fmt.Sprintf("[hub] You are ESCALATED on this:\n\n"+
 		"  %s\n\n"+
 		"Nothing has come back yet, and your mailbox is empty — anything waiting there is handed to you "+
 		"BEFORE this, so there is nothing sitting unread behind it. Wait quietly; don't ask again and "+
 		"don't work around it. %s When you "+
-		"have their answer, run `sindri resume` and then `sindri` for your directive. If you now see the "+
-		"answer for yourself, resume anyway rather than sitting on a question that no longer needs "+
-		"them.", question, EscalationHold)
+		"have their answer, run `sindri resume` and then `sindri` for your directive.", question, EscalationHold)
 }
 
 // EscalationHold states exactly what the hold does, in the one wording every message uses. Exact
@@ -543,9 +541,9 @@ const EscalationHold = "Reads all still work — `sindri task`, `sindri show`, `
 	"on, putting a branch or an openspec change up, checkpointing, contributing, or ruling on a PR."
 
 // ReplyEscalated is what a work verb says while its caller is escalated. It quotes the question so
-// the refusal reads as the agent's own doing rather than the hub blocking it for no stated reason.
+// the refusal names a reason instead of reading as the hub blocking work for no stated cause.
 func ReplyEscalated(verb, question string) string {
-	return fmt.Sprintf("You escalated and are waiting on the user to decide this: %q. `sindri %s` "+
+	return fmt.Sprintf("You are escalated, waiting on the user to decide this: %q. `sindri %s` "+
 		"stays shut until you have their answer — then `sindri resume` opens it again.", question, verb)
 }
 
