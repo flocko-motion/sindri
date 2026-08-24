@@ -137,9 +137,9 @@ func TestRunServicePointedAtOnlyWhenClaiming(t *testing.T) {
 func TestToolingBlockReachesEveryRoleThatReceivesWork(t *testing.T) {
 	handOvers := []string{
 		DirWorking("td-1", 1.5, 2.0),
-		DirRejected("td-1", "not yet", 1.5, 2.0),
+		DirRejected("td-1", "not yet", 1, 1.5, 2.0),
 		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
-		DirContainerRejected("td-EPIC", "td-1", "not yet", 1.5, 2.0),
+		DirContainerRejected("td-EPIC", "td-1", "not yet", 1, 1.5, 2.0),
 		MsgReview("pr-td-1", "do the thing", "td-1", "main", "", true),
 		MsgPlanAssignment("build the thing", "", "", ""),
 	}
@@ -209,9 +209,9 @@ func TestParentIsStatedAsTheDefaultShape(t *testing.T) {
 func TestToolingBlockPointsAtBrokkrMapOverGrepping(t *testing.T) {
 	for _, s := range []string{
 		DirWorking("td-1", 1.5, 2.0),
-		DirRejected("td-1", "not yet", 1.5, 2.0),
+		DirRejected("td-1", "not yet", 1, 1.5, 2.0),
 		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
-		DirContainerRejected("td-EPIC", "td-1", "not yet", 1.5, 2.0),
+		DirContainerRejected("td-EPIC", "td-1", "not yet", 1, 1.5, 2.0),
 		MsgReview("pr-td-1", "do the thing", "td-1", "main", "", true),
 		MsgPlanAssignment("build the thing", "", "", ""),
 	} {
@@ -261,7 +261,7 @@ func TestAgentAdviceNeverPromisesGit(t *testing.T) {
 		DirWorking("td-1", 1.5, 2.0),
 		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
 		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
-		DirContainerRejected("td-EPIC", "td-1", "not yet", 1.5, 2.0),
+		DirContainerRejected("td-EPIC", "td-1", "not yet", 1, 1.5, 2.0),
 		MsgMilestoneRejected("td-EPIC", "user"),
 		ReplyCheckpointed("td-1", "td-2", "the next subtask"),
 	}
@@ -430,7 +430,7 @@ func TestMidFeatureAdviceNamesCheckpoint(t *testing.T) {
 	for _, s := range []string{
 		DirContainerDone("td-EPIC"),
 		ReplyCheckpointedLast("td-2", "td-EPIC"),
-		DirContainerRejected("td-EPIC", "td-1", "not yet", 1.5, 2.0),
+		DirContainerRejected("td-EPIC", "td-1", "not yet", 1, 1.5, 2.0),
 	} {
 		if !strings.Contains(s, "`sindri submit") {
 			t.Errorf("a complete feature must be told to submit: %q", s)

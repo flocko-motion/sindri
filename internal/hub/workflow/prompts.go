@@ -305,9 +305,37 @@ func DirWorking(task string, aim, ceiling float64) string {
 
 // DirRejected hands a worker its reviewer's feedback verbatim, every time it asks what to do, so
 // the comments reach it whether or not it saw the rejection message.
-func DirRejected(task, feedback string, aim, ceiling float64) string {
+func DirRejected(task, feedback string, round int, aim, ceiling float64) string {
 	return fmt.Sprintf("Your PR for task %s was REJECTED — address this reviewer feedback, then run "+
-		"`sindri submit \"<summary>\"`:\n\n%s%s%s", task, feedback, CommentBudgetNote(aim, ceiling), ToolingBlock())
+		"`sindri submit \"<summary>\"`:\n\n%s%s%s%s", task, feedback,
+		GeneralizeNote(round), CommentBudgetNote(aim, ceiling), ToolingBlock())
+}
+
+// GeneralizeNote answers why a PR keeps coming back, and escalates with the count. Silent on the
+// first rejection — one round is the review working, and a lecture there is noise on the healthy
+// case. pr-sd-a6e884 took NINE, every round opening "the previous findings are genuinely fixed"
+// and then naming a fresh instance of the same class, which is what verifying nothing looks like.
+func GeneralizeNote(round int) string {
+	if round < 2 {
+		return ""
+	}
+	s := fmt.Sprintf("\n\nTHIS PR HAS NOW BEEN REJECTED %d TIMES. That count is the signal, and it is about "+
+		"your method rather than any one finding: fixing the case named and resubmitting sends the next "+
+		"instance of the same class straight back. A finding is an INSTANCE OF A CLASS.\n\n"+
+		"Before you submit again:\n"+
+		"- Re-read the task and any spec it names, and cross-check them against your diff line by line. "+
+		"Requirements you never implemented are the cheapest rejection to avoid and the most common.\n"+
+		"- Run the reviewer's own check yourself, in full, across the whole surface it covers — not just "+
+		"the case it named. Whatever it derived by hand, derive too, in both directions.\n"+
+		"- Then fix every place the same mistake was made, and say in your summary what you checked.", round)
+	if round >= 4 {
+		s += fmt.Sprintf("\n\nAt %d rounds this is no longer a quality problem, it is a professionalism one. "+
+			"A review is among the most expensive things this fleet does — a full read by an agent that could "+
+			"be doing its own work — and using it as your debugging loop spends someone else's effort to skip "+
+			"your own verification. Assert the quality of your work BEFORE submitting. That is your job, not "+
+			"the reviewer's.", round)
+	}
+	return s
 }
 
 // toolingLines is the tooling block's content, one line per tool: what it is, how to reach it, and

@@ -355,6 +355,26 @@ func (e *Engine) prRejected(project, agent, target string) (feedback string, rej
 	return "", false, nil
 }
 
+// rejectionRound is how many times this PR has come back, 1 for the first. Told to the author
+// because the count is the fact that should change its approach: 171 of the fleet's 409 submissions
+// were rejected, one of them nine times, each round costing a gate run and an exhaustive read.
+func (e *Engine) rejectionRound(project, target string) int {
+	evs, err := e.store.For(project).PREvents("pr-" + target)
+	if err != nil {
+		return 1
+	}
+	n := 0
+	for _, ev := range evs {
+		if ev.Type == "rejected" {
+			n++
+		}
+	}
+	if n == 0 {
+		return 1
+	}
+	return n
+}
+
 // workDirective is what a working agent is told: a rejected PR's feedback is PUSHED every ask, else the
 // plain "work on the task". container, the feature it holds, must match what the registry shows that
 // caller — a directive naming a hidden verb leaves the agent to improvise the workflow.
@@ -370,9 +390,9 @@ func (e *Engine) workDirective(project, name, task, container string) (string, e
 	aim, ceiling := e.commentBudget(project)
 	switch {
 	case rejected && container != "":
-		return DirContainerRejected(container, task, feedback, aim, ceiling), nil
+		return DirContainerRejected(container, task, feedback, e.rejectionRound(project, target), aim, ceiling), nil
 	case rejected:
-		return DirRejected(task, feedback, aim, ceiling), nil
+		return DirRejected(task, feedback, e.rejectionRound(project, target), aim, ceiling), nil
 	case container != "":
 		return DirContainerWorking(container, task, aim, ceiling), nil
 	}
@@ -461,7 +481,8 @@ func (e *Engine) directive(ctx context.Context, project, name string) (string, e
 				if rejected {
 					_ = ps.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "working"})
 					aim, ceiling := e.commentBudget(project)
-					return DirContainerRejected(st.Container, st.Task, feedback, aim, ceiling), nil
+					return DirContainerRejected(st.Container, st.Task, feedback,
+						e.rejectionRound(project, st.Container), aim, ceiling), nil
 				}
 				return DirSubmitted, nil
 			case "gating":
@@ -492,7 +513,7 @@ func (e *Engine) directive(ctx context.Context, project, name string) (string, e
 		if rejected {
 			_ = ps.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Phase: "working"})
 			aim, ceiling := e.commentBudget(project)
-			return DirRejected(st.Task, feedback, aim, ceiling), nil
+			return DirRejected(st.Task, feedback, e.rejectionRound(project, st.Task), aim, ceiling), nil
 		}
 		return DirSubmitted, nil
 	case "gating":

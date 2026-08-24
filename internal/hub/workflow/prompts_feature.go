@@ -33,11 +33,11 @@ func DirContainerWorking(container, task string, aim, ceiling float64) string {
 
 // DirContainerRejected is the verdict on a feature's PR: the worker fixes the branch it is already on
 // and submits it again, the same loop a rejected leaf task follows.
-func DirContainerRejected(container, task, feedback string, aim, ceiling float64) string {
+func DirContainerRejected(container, task, feedback string, round int, aim, ceiling float64) string {
 	return fmt.Sprintf("The PR for feature %s was REJECTED — address this feedback on the branch you're "+
 		"already on (subtask %s is yours again; `sindri checkpoint \"<summary>\"` records a fix that "+
-		"completes it), then `sindri submit \"<summary>\"` to put the feature up again:\n\n%s%s%s",
-		container, task, feedback, CommentBudgetNote(aim, ceiling), ToolingBlock())
+		"completes it), then `sindri submit \"<summary>\"` to put the feature up again:\n\n%s%s%s%s",
+		container, task, feedback, GeneralizeNote(round), CommentBudgetNote(aim, ceiling), ToolingBlock())
 }
 
 // DirContainerDone is the directive once every subtask of a feature is checkpointed: the branch is
