@@ -455,12 +455,18 @@ func (p *ProjectStore) PREvents(prID string) ([]Event, error) {
 	return evs, rows.Err()
 }
 
-// AwaitingPR is agent's newest PR that has not settled, with the task it would land into — ("", "")
-// if none. An agent HOLDS that task until the PR merges, which is what the board has always shown
-// and what every "is it free" question in the hub used to miss.
+// AwaitingPR is agent's newest PR that still has somewhere to land, with the task it lands into —
+// ("", "") if none. An agent HOLDS that task until the PR merges, as the board has always shown.
+//
+// A CLOSED task ends the hold: "rejected" is not terminal (-> api.PROpen), so a rejected PR over one
+// would be held for ever with nothing to fix. austri carried pr-sd-a47b61 that way for four days.
 func (p *ProjectStore) AwaitingPR(agent string) (pr, task string, err error) {
-	err = p.s.db.QueryRow(
-		`SELECT id, task FROM prs WHERE project=? AND agent=? AND status NOT IN ('merged','scrapped') ORDER BY rowid DESC LIMIT 1`,
+	err = p.s.db.QueryRow(`
+		SELECT p.id, p.task FROM prs p
+		LEFT JOIN tasks t ON t.project = p.project AND t.id = p.task
+		WHERE p.project=? AND p.agent=? AND p.status NOT IN ('merged','scrapped')
+		  AND COALESCE(t.status,'') <> 'closed'
+		ORDER BY p.rowid DESC LIMIT 1`,
 		p.project, agent).Scan(&pr, &task)
 	if err == sql.ErrNoRows {
 		return "", "", nil

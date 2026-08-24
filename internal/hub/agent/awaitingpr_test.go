@@ -39,6 +39,23 @@ func TestAPRAwaitingAVerdictIsNotABoundary(t *testing.T) {
 	}
 }
 
+// TestAClosedTaskEndsTheHold: "rejected" is not terminal, since a resubmission clears it — so a
+// rejected PR over a CLOSED task is held work with nothing left to fix and no way to discharge it.
+// austri carried pr-sd-a47b61 that way for four days, idle and unable to take anything else.
+func TestAClosedTaskEndsTheHold(t *testing.T) {
+	s := awaitingAuthor(t, "rejected")
+	ps := s.store.For("proj")
+	if err := ps.UpsertTask(store.Task{ID: "sd-1", Status: "closed"}); err != nil {
+		t.Fatal(err)
+	}
+	if nothing, err := s.HoldsNothing("proj", "eitri", "worker"); err != nil || !nothing {
+		t.Errorf("HoldsNothing = (%v, %v); a closed task leaves its PR nothing to land into", nothing, err)
+	}
+	if at, err := s.AtLeafBoundary("proj", "eitri"); err != nil || !at {
+		t.Errorf("AtLeafBoundary = (%v, %v), want a boundary once the task is closed", at, err)
+	}
+}
+
 // TestASettledPRHoldsNothing is the control: once it merges or is scrapped the work really is over,
 // and an agent that can never be freed is as broken as one freed too early.
 func TestASettledPRHoldsNothing(t *testing.T) {
