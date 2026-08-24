@@ -518,7 +518,18 @@ func (e *Engine) directive(ctx context.Context, project, name string) (string, e
 		return DirSubmitted, nil
 	case "gating":
 		return DirGating, nil
-	default: // idle — claim the next task
+	default: // idle — claim the next task, unless a PR of its own is still to land
+		// Without this an agent whose state row was cleared out from under it (a checkpoint over an
+		// unlanded PR) waits here for work agentBlocked refuses it over that very PR. austri sat
+		// idle on a rejected pr-sd-a47b61, each side waiting for the other.
+		if pr, task, aerr := ps.AwaitingPR(name); aerr == nil && pr != "" {
+			p, ok, perr := ps.GetPR(pr)
+			if perr == nil && ok && p.Status == "rejected" {
+				aim, ceiling := e.commentBudget(project)
+				return DirRejected(task, p.Feedback, e.rejectionRound(project, task), aim, ceiling), nil
+			}
+			return DirSubmitted, nil
+		}
 		return e.waitForNextTask(ctx, project, name)
 	}
 }

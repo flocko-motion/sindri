@@ -31,6 +31,31 @@ func TestAnAgentAwaitingAVerdictIsHandedNothing(t *testing.T) {
 	}
 }
 
+// TestAnIdleAuthorIsSentBackToItsRejectedPR closes the deadlock: agentBlocked refuses an author new
+// work over its unlanded PR, so an idle one that fell to the claim path waited for something it
+// could never be given. austri sat on a rejected pr-sd-a47b61 with each side waiting for the other.
+func TestAnIdleAuthorIsSentBackToItsRejectedPR(t *testing.T) {
+	e, ps, _ := ownedEngine(t, "open")
+	if err := ps.PutAgent(store.Agent{Name: "durin", Role: "worker"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: "durin", Phase: "idle"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutPR(store.PR{ID: "pr-sd-9", Task: "sd-9", Agent: "durin", Status: "rejected",
+		Feedback: "the second half is missing"}); err != nil {
+		t.Fatal(err)
+	}
+
+	dir, err := e.directive(t.Context(), "proj", "durin")
+	if err != nil {
+		t.Fatalf("directive: %v", err)
+	}
+	if !strings.Contains(dir, "REJECTED") || !strings.Contains(dir, "the second half is missing") {
+		t.Errorf("an idle author was not sent back to its rejected PR; got %q", dir)
+	}
+}
+
 // TestCheckpointRefusedWhileThePRIsUnlanded: a rejection returns the work in phase "working", which
 // is the shape a checkpoint reads as finished — so austri checkpointed straight past one, closing
 // the task and freeing itself. A task ends when its PR lands.
