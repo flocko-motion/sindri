@@ -41,6 +41,29 @@ func TestLaunchRecordsTheRequestEvenWhenThePreflightFails(t *testing.T) {
 	}
 }
 
+// TestAFailedLaunchSaysSoInTheLog: three of eitri's launches left "requested" as the last word in
+// its log and nothing after, which reads exactly like a launch still in flight — the error went to
+// the caller alone, and the log is where a failure days old is reconstructed.
+func TestAFailedLaunchSaysSoInTheLog(t *testing.T) {
+	s, _ := tellFixture(t, "eitri", idlePane) // fakeRuntime.Check always fails
+	if err := s.Launch(t.Context(), "proj", "eitri", false, false, 0, 0, io.Discard); err == nil {
+		t.Fatal("Launch succeeded against the failing fake preflight")
+	}
+	evs, everr := s.store.For("proj").Events("eitri", 0)
+	if everr != nil {
+		t.Fatalf("events: %v", everr)
+	}
+	for _, e := range evs {
+		if e.Type == "launch" && strings.HasPrefix(e.Payload, "failed:") {
+			if !strings.Contains(e.Payload, "nothing to launch into") {
+				t.Errorf("the failure entry %q does not carry the reason", e.Payload)
+			}
+			return
+		}
+	}
+	t.Errorf("no 'launch: failed' entry — a launch that gave up is indistinguishable from one still running, events=%v", evs)
+}
+
 // TestLaunchIntentTracksOnlyLaunching: the watchdog's bound applies to a launch in flight, and
 // nothing else the same map holds — a stop intent, or none at all, must not be mistaken for one.
 func TestLaunchIntentTracksOnlyLaunching(t *testing.T) {
