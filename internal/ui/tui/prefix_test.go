@@ -5,6 +5,7 @@ import (
 	"testing"
 	"unicode"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/flo-at/sindri/internal/api"
 )
 
@@ -100,22 +101,143 @@ func TestTheMenuOffersOnlyWhatAppliesToTheRow(t *testing.T) {
 }
 
 // TestTheFooterCarriesNavigationAndOneEntry: the footer had run out of room — eight working
-// bindings were never advertised at all — and collapsing the committing ones behind one entry is
-// what buys the space back.
+// bindings were never advertised at all — and collapsing the committing ones behind one entry,
+// now named on the GLOBAL row since the prefix works on every tab, is what buys the space back.
+// A tab-local row carries only its own navigation, never the prefix or a committing binding.
 func TestTheFooterCarriesNavigationAndOneEntry(t *testing.T) {
-	for _, scope := range []keyScope{scopeTasks, scopeAgents, scopePRs, scopeRepos, scopeChat, scopeRuns} {
-		footer := footerOf(t, scope)
-		if !strings.Contains(footer, keyMenuShown+" actions") {
-			t.Errorf("scope %d's footer should name the prefix readably:\n%s", scope, footer)
+	for _, tc := range []struct {
+		tab   int
+		scope keyScope
+	}{
+		{0, scopeTasks}, {1, scopeAgents}, {2, scopePRs}, {3, scopeRepos}, {4, scopeChat}, {5, scopeRuns},
+	} {
+		m := newModel(nil, nil, "/r/one")
+		m.tab = tc.tab
+		global := m.globalFooter(500)
+		if !strings.Contains(global, keyMenuShown+" actions") {
+			t.Errorf("tab %d's global footer should name the prefix readably:\n%s", tc.tab, global)
+		}
+		local := footerOf(t, tc.scope)
+		if strings.Contains(local, keyMenuShown) {
+			t.Errorf("scope %d's local footer should no longer carry the prefix — it is global now:\n%s", tc.scope, local)
 		}
 		for _, b := range keymap {
-			if b.scope != scope || !b.commits {
+			if b.scope != tc.scope || !b.commits {
 				continue
 			}
-			if strings.Contains(footer, b.keys+" "+b.label(newModel(nil, nil, "/r/one"))) {
-				t.Errorf("scope %d still advertises the committing %q in its footer:\n%s", scope, b.keys, footer)
+			if strings.Contains(local, b.keys+" "+b.label(m)) {
+				t.Errorf("scope %d still advertises the committing %q in its footer:\n%s", tc.scope, b.keys, local)
 			}
 		}
+	}
+}
+
+// TestGlobalFooterShedsWholeEntriesWhenNarrow: the row must stay exactly the terminal width, so a
+// narrow one drops whole entries — never truncates one mid-word — and says so with a trailing "…"
+// between the pinned lead and trail.
+func TestGlobalFooterShedsWholeEntriesWhenNarrow(t *testing.T) {
+	m := newModel(nil, nil, "/r/one")
+	full := m.globalFooter(500)
+	wantEntries := map[string]bool{"…": true}
+	for _, e := range strings.Split(full, " · ") {
+		wantEntries[e] = true
+	}
+	if len(wantEntries) < 4 {
+		t.Fatal("precondition: need several global entries to force shedding")
+	}
+	for _, width := range []int{30, 40, 60} {
+		got := m.globalFooter(width)
+		if w := ansi.StringWidth(got); w > width {
+			t.Errorf("width %d: global footer is %d cells wide: %q", width, w, got)
+		}
+		for _, tok := range strings.Split(got, " · ") {
+			if tok != "" && !wantEntries[tok] {
+				t.Errorf("width %d: %q is not one whole entry — the row split one:\n%s", width, tok, got)
+			}
+		}
+	}
+}
+
+// TestGlobalFooterKeepsHelpAndPrefixAtOrdinaryWidths: shedding from the tail would drop the prefix
+// first, since it is appended last — invisible below 180 columns on the Tasks tab, where it used
+// to ride the much shorter tab-local row. Both ends are pinned, so an ordinary terminal (80, 100,
+// 120 columns) must still show both "? help" and the prefix entry.
+func TestGlobalFooterKeepsHelpAndPrefixAtOrdinaryWidths(t *testing.T) {
+	for _, tab := range []int{0, 1, 2, 3, 4, 5, 6} {
+		m := newModel(nil, nil, "/r/one")
+		m.tab = tab
+		for _, width := range []int{80, 100, 120} {
+			got := m.globalFooter(width)
+			if w := ansi.StringWidth(got); w > width {
+				t.Fatalf("tab %d width %d: global footer is %d cells wide: %q", tab, width, w, got)
+			}
+			if !strings.HasPrefix(got, keyHelp+" help") {
+				t.Errorf("tab %d width %d: ? help should lead the row, got %q", tab, width, got)
+			}
+			if !strings.Contains(got, keyMenuShown+" actions") {
+				t.Errorf("tab %d width %d: the prefix entry should still be named, got %q", tab, width, got)
+			}
+		}
+	}
+}
+
+// TestGlobalFooterShedsByUsefulnessNotDeclarationOrder is sd-5e3032's own instruction: "shed the
+// least useful entries". Shedding by declaration order instead dropped movement (j/k/g/G) at 80
+// columns — the default terminal width — while keeping tab-jump and pane-switching, which the task
+// singles out as the least useful. globalShedOrder must protect basic movement and quit before
+// anything else goes.
+func TestGlobalFooterShedsByUsefulnessNotDeclarationOrder(t *testing.T) {
+	m := newModel(nil, nil, "/r/one")
+	m.tab = 0
+	got := m.globalFooter(80)
+	for _, want := range []string{"move/top/bot", keyQuit + " quit"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("%q should survive at 80 columns, got %q", want, got)
+		}
+	}
+	for _, gone := range []string{"1-7 jump", "pane"} {
+		if strings.Contains(got, gone) {
+			t.Errorf("%q was named the least useful and should be first to go at 80 columns, got %q", gone, got)
+		}
+	}
+}
+
+// TestGlobalFooterShedsByUsefulnessUnderFocusToo: focusSplit mints display labels
+// ("item", "goto", "copy") globalShedOrder has never heard of. Ranking by that display
+// label instead of the underlying binding's own label let those parts outrank named
+// entries by accident — at 80 columns focused, movement ("G move/top/bot") was shed
+// while "y copy" (unranked, so sorted last) survived. globalEntry.rank fixes this by
+// tracking a part back to its parent binding's label for shedPriority; this pins it.
+func TestGlobalFooterShedsByUsefulnessUnderFocusToo(t *testing.T) {
+	m := newModel(nil, nil, "/r/one")
+	m.tab = 0
+	m.state = api.BoardState{Tasks: []api.Task{{ID: "td-1", Status: "open"}}}
+	m.reclamp()
+	m.rightFocus = true
+	got := m.globalFooter(80)
+	for _, want := range []string{"move/top/bot", keyQuit + " quit"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("%q should survive at 80 columns while focused, got %q", want, got)
+		}
+	}
+	for _, gone := range []string{"1-7 jump", "pane"} {
+		if strings.Contains(got, gone) {
+			t.Errorf("%q should still be shed first at 80 columns while focused, got %q", gone, got)
+		}
+	}
+}
+
+// TestHelpKeyLeadsTheGlobalRow: "?" is the first thing a reader sees, and so the first thing kept
+// once the row has to shed the rest.
+func TestHelpKeyLeadsTheGlobalRow(t *testing.T) {
+	m := newModel(nil, nil, "/r/one")
+	full := m.globalFooter(500)
+	if !strings.HasPrefix(full, keyHelp+" help") {
+		t.Errorf("? help should lead the global row, got %q", full)
+	}
+	narrow := m.globalFooter(20)
+	if !strings.HasPrefix(narrow, keyHelp+" help") {
+		t.Errorf("? help should survive shedding at a realistic narrow width, got %q", narrow)
 	}
 }
 
@@ -164,6 +286,17 @@ func TestOneActionIsClassifiedOnce(t *testing.T) {
 			t.Errorf("%q (%s) commits=%v in scope %d but commits=%v in scope %d — same key and same "+
 				"label is the same action, so it cannot be both",
 				b.keys, b.label(m), first.commits, first.scope, b.commits, b.scope)
+		}
+	}
+}
+
+// TestEveryWhenGatedBindingHasWhenText holds tasks.md's invariant: a binding narrowed by `when`
+// must spell the condition out for the help modal, or a future one ships silently condition-less.
+func TestEveryWhenGatedBindingHasWhenText(t *testing.T) {
+	m := newModel(nil, nil, "/r/one")
+	for _, b := range keymap {
+		if b.when != nil && b.whenText == "" {
+			t.Errorf("%q (%s) has a when-clause but no whenText for the help modal", b.keys, b.label(m))
 		}
 	}
 }

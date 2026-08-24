@@ -79,13 +79,15 @@ func TestForeignPRsAreGroupedByRepo(t *testing.T) {
 // TestScopeLabelSaysWhatItDoes: the toggle admits foreign rows that need the user, so a label
 // reading "repo" would be a filter claiming to exclude what it shows.
 func TestScopeLabelSaysWhatItDoes(t *testing.T) {
-	if got := scopeName(true); got == "repo" {
+	m := newModel(nil, nil, "/r/one")
+	m.tab = 2 // PRs: scopeNeedsYou(scopePRs) is true
+	if got := scopeName(true, m); got == "repo" {
 		t.Errorf("the narrow scope is not the repo alone — %q claims it is", got)
 	}
-	if !strings.Contains(scopeName(true), "repo") {
-		t.Errorf("it is still repo-first, and the label should say so: %q", scopeName(true))
+	if !strings.Contains(scopeName(true, m), "repo") {
+		t.Errorf("it is still repo-first, and the label should say so: %q", scopeName(true, m))
 	}
-	if got := scopeName(false); got != "global" {
+	if got := scopeName(false, m); got != "global" {
 		t.Errorf("the wide scope is unchanged, got %q", got)
 	}
 }

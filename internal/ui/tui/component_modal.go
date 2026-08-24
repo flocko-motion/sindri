@@ -16,7 +16,7 @@ import (
 // updateModal handles keys while the detail modal is open: scroll or close.
 func (m model) updateModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc", "enter", "q":
+	case keyClearFilters, keyEnter, keyQuit:
 		m.modal = false
 		m.modalOverride, m.modalOverrideTitle = nil, ""
 		m.reclamp() // restore the inline detail viewport

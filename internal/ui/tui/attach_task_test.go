@@ -79,6 +79,21 @@ func TestAgentOnTaskSurvivesACycle(t *testing.T) {
 	}
 }
 
+// TestAttachFlashIsNotTruncatedWhenNothingIsSelected: selID() is "" on an empty list, and
+// "no agent is working " + "" once read as a sentence cut off mid-word rather than an answer.
+func TestAttachFlashIsNotTruncatedWhenNothingIsSelected(t *testing.T) {
+	m := newModel(nil, nil, "/r/one")
+	m.state = api.BoardState{Projects: []api.Project{{Tag: "one", Path: "/r/one"}}}
+	m.tab = 0
+	m.onKey(keyAttach)
+	if strings.HasSuffix(m.flash, " ") {
+		t.Errorf("flash should not trail off mid-word, got %q", m.flash)
+	}
+	if m.flash == "" {
+		t.Error("attach with nothing selected should still set a flash")
+	}
+}
+
 // TestTasksFooterOffersAttach: a binding nobody can see is a binding nobody uses, and the
 // screenshot's footer line is truncated to the terminal — so assert on the string itself.
 func TestTasksFooterOffersAttach(t *testing.T) {
@@ -86,7 +101,11 @@ func TestTasksFooterOffersAttach(t *testing.T) {
 	if got := m.footerFor(scopeTasks); !strings.Contains(got, "attach") {
 		t.Errorf("the Tasks footer should offer attach:\n%s", got)
 	}
-	// Still offered where it already was.
+	// Still offered where it already was — on a real roster agent (attach is now `when`-gated
+	// against agentSelected, since it silently no-ops on an orphan container otherwise).
+	m.tab = 1
+	m.state = api.BoardState{Agents: []api.AgentView{{Name: "dvalin", Project: "repo", Status: "idle"}}}
+	m.reclamp()
 	if got := m.footerFor(scopeAgents); !strings.Contains(got, "attach") {
 		t.Errorf("the Agents footer lost attach:\n%s", got)
 	}

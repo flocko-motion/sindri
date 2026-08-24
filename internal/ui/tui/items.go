@@ -164,6 +164,16 @@ func (m *model) openItemModal(kind, id string) {
 	m.detail.ScrollTop()
 }
 
+// openHelpModal shows "?"'s reference in the same scrollable modal every other detail view uses.
+func (m *model) openHelpModal() {
+	m.modalOverride = m.helpLines()
+	m.modalOverrideTitle = "Help" // the body's own first line already names the tab
+	m.modal = true
+	m.detail.SetHeight(modalContentHeight(m.h))
+	m.detail.SetTotal(len(m.modalLines()))
+	m.detail.ScrollTop()
+}
+
 // selectRow moves the current tab's cursor to the row with the given id, reporting whether it
 // found one — a caller that must land somewhere DEFINITE when it did not (the first row, never
 // wherever reclamp's index-clamp happened to leave the cursor) needs to tell the two apart.
@@ -403,20 +413,49 @@ func (m model) tabCount(s tuiSection) int {
 	return 0
 }
 
-// scopeName labels the global↔repo scope toggle: named for what it does (keeps anything waiting on
-// the user, from any repo — agentVisible, prVisible), so a foreign row is never a filter that
-// looks broken.
-func scopeName(repoScoped bool) string {
-	if repoScoped {
+// scopeNeedsYou reports whether the active tab's repo scope keeps anything waiting on the user
+// from any repo (Agents, PRs, Mail — agentVisible, prVisible, mailVisible) or is the repo alone
+// (Runs — runRows filters on inScope alone). Read off the tab rather than passed in at each
+// scopeName call site, so which tabs keep it cannot be gotten wrong there.
+func scopeNeedsYou(scope keyScope) bool {
+	switch scope {
+	case scopeAgents, scopePRs, scopeMail:
+		return true
+	default:
+		return false
+	}
+}
+
+// scopeName labels the global↔repo scope toggle: named for what it does, or it promises a row the
+// scope does not keep (a label naming the repo alone would claim to exclude what it plainly shows).
+func scopeName(repoScoped bool, m model) string {
+	if !repoScoped {
+		return "global"
+	}
+	if scopeNeedsYou(tabScope(m.tab)) {
 		return "repo+needs-you"
 	}
-	return "global"
+	return "repo"
+}
+
+// rightFocusKeys is what j/k, enter, g and y mean while the detail/meta column has focus —
+// overriding every tab's ordinary bindings for those same letters. One table, so the footer's
+// hint and "?"'s reference (helpLines) cannot describe two different focused worlds.
+var rightFocusKeys = []struct{ keys, label string }{
+	{"j/k", "item"},
+	{keyEnter, "details"},
+	{"g", "goto"},
+	{"y", "copy"},
 }
 
 // contextFooter is the tab's action hints, generated from the keymap so help can't drift.
 func (m model) contextFooter() string {
 	if m.rightFocus { // focused on a detail cross-reference
-		return "j/k item · enter details · g goto · y copy"
+		var parts []string
+		for _, r := range rightFocusKeys {
+			parts = append(parts, r.keys+" "+r.label)
+		}
+		return strings.Join(parts, " · ")
 	}
 	return m.footerFor(tabScope(m.tab))
 }
