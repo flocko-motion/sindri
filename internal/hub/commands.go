@@ -193,6 +193,10 @@ func landingBlocked(verb string) func(registry.Caller) string {
 	}
 }
 
+// errUnknownAgent marks caller's not-found branch as an identity answer, not a hub-internal fault:
+// escalating a name absent from the roster would write a state row nothing else can see.
+var errUnknownAgent = errors.New("unknown agent")
+
 // caller resolves an agent's identity and role within its project.
 func (h *Hub) caller(project, name string) (registry.Caller, error) {
 	ps := h.store.For(project)
@@ -201,7 +205,7 @@ func (h *Hub) caller(project, name string) (registry.Caller, error) {
 		return registry.Caller{}, err
 	}
 	if !ok {
-		return registry.Caller{}, fmt.Errorf("unknown agent %q", name)
+		return registry.Caller{}, fmt.Errorf("%w %q", errUnknownAgent, name)
 	}
 	// Holding a task or a collaborative container hides "next" and shows "submit" (a container
 	// swaps in "checkpoint"); an idle worker gets the reverse.
@@ -269,7 +273,12 @@ func (h *Hub) AgentCommands(project, name string) ([]CmdInfo, error) {
 func (h *Hub) AgentExec(project, name string, args []string, out io.Writer) (int, error) {
 	c, err := h.caller(project, name)
 	if err != nil {
-		return 1, err
+		// A name absent from the roster is an identity answer, not a breakage: escalating it would
+		// write a state row for an agent with none, invisible on the board and asked nothing real.
+		if errors.Is(err, errUnknownAgent) {
+			return 1, err
+		}
+		return h.internalFailure(project, name, "resolving your identity", 1, err)
 	}
 	if len(args) == 0 {
 		return 1, fmt.Errorf("no command given")
@@ -304,35 +313,55 @@ func (h *Hub) AgentExec(project, name string, args []string, out io.Writer) (int
 	exit, err := cmd.Run(c, args[1:], out)
 	h.notify() // the command may have changed board state
 	if err != nil {
-		// A returned error is a hub-INTERNAL failure (agent-actionable outcomes go to `out` with a nil
-		// error) and may carry host paths or operator instructions — log it host-side, never leak it.
-		fmt.Fprintf(os.Stderr, "hub: agent %q command %q failed: %v\n", name, args[0], err)
-		if exit == 0 {
-			exit = 1
-		}
-		// "Try again later" is only true of a fault that might pass. A broken project config never
-		// will, and telling an agent otherwise bought hours of retries against a one-line fix: the
-		// project is misconfigured, every verb that reads it is down, and only a human can end it.
-		if errors.Is(err, config.ErrConfig) {
-			return exit, fmt.Errorf("this project's .sindri/config.yaml can't be read, so %q and anything "+
-				"else needing it will keep failing. Retrying won't help and there's nothing in /workspace "+
-				"to fix — tell the user, and carry on with whatever doesn't need it", args[0])
-		}
-		// The hub escalates for itself: it produced this failure, and asking the agent to report it
-		// back is the thing that failed — told "try again later", one reviewed a PR without the task
-		// it implements. Never on a refusal: those reach `out` with a nil error and are routine.
-		if c.Escalation == "" { // already stopped on its own question — do not overwrite it
-			if _, eerr := h.Escalate(c.Project, name, fmt.Sprintf(
-				"`sindri %s` failed inside the hub, so I stopped. The cause is in the hub's log, not in "+
-					"my workspace; `sindri agent resume %s` once it is fixed.", args[0], name)); eerr != nil {
-				fmt.Fprintf(os.Stderr, "hub: escalating %q after %q failed: %v\n", name, args[0], eerr)
-			}
-		}
-		return exit, fmt.Errorf("the hub hit an internal error running %q. You are now ESCALATED — the "+
-			"hub raised it for you and the user can see it, so there is nothing to report and nothing "+
-			"to work around. Wait for their answer", args[0])
+		return h.internalFailure(project, name, "`sindri "+args[0]+"`", exit, err)
 	}
 	return exit, nil
+}
+
+// internalFailure is AgentExec's one door for a hub-internal fault, distinct from an agent-actionable
+// refusal (nil error, written to `out`). It escalates from a LIVE state read, not a pre-Run snapshot,
+// since the failing verb may itself have just raised or cleared this agent's own escalation.
+func (h *Hub) internalFailure(project, name, what string, exit int, err error) (int, error) {
+	fmt.Fprintf(os.Stderr, "hub: agent %q: %s failed: %v\n", name, what, err)
+	if exit == 0 {
+		exit = 1
+	}
+	reason := fmt.Sprintf("%s failed inside the hub, so I stopped. The cause is in the hub's log, "+
+		"not in my workspace; `sindri agent resume %s` once it is fixed.", what, name)
+	// A broken project config never passes on its own — a human edits the file or nothing changes.
+	if errors.Is(err, config.ErrConfig) {
+		reason = fmt.Sprintf("this project's .sindri/config.yaml can't be read, so %s and anything "+
+			"else needing it will keep failing until a human fixes it.", what)
+	}
+	live, _ := h.store.For(project).GetState(name)
+	if live.Escalation == "" {
+		if _, eerr := h.Escalate(project, name, reason); eerr != nil {
+			fmt.Fprintf(os.Stderr, "hub: escalating %q after %s failed: %v\n", name, what, eerr)
+			// Escalate writes state FIRST (escalate.go): a later step failing still leaves it set, so
+			// a re-read — not the in-memory reason — is what actually reflects the truth.
+			live, _ = h.store.For(project).GetState(name)
+		} else {
+			live.Escalation = reason
+		}
+	}
+	if live.Escalation == "" {
+		// No ready-to-paste command here: reason may itself carry backticks (from a quoted verb
+		// name), and nesting those inside a shell-quoted suggestion risks command substitution.
+		return exit, fmt.Errorf("%s failed inside the hub, and escalating you for it failed too — "+
+			"run `sindri escalate` yourself and describe what happened in your own words, rather than "+
+			"pasting the reason above verbatim into a shell command", what)
+	}
+	// Keyed on live state, not on whether Escalate returned an error: SetEscalation lands first, so
+	// live.Escalation == reason even when a later step failed — the board reads state, so say so.
+	if live.Escalation == reason {
+		return exit, fmt.Errorf("%s failed inside the hub. You are ESCALATED — the hub reported it for "+
+			"you and the user can see it. Wait for their answer", what)
+	}
+	// An unrelated escalation already stood, so Escalate above was skipped: this fault has no log
+	// entry of its own. The board shows the EARLIER question — say so, and point at `sindri log`.
+	return exit, fmt.Errorf("%s failed inside the hub too, on top of the escalation already standing. "+
+		"The user sees that earlier question on the board, not this fault — it's only in the hub's log "+
+		"right now. `sindri log <message>` is still open; use it to put this on record yourself.", what)
 }
 
 func (h *Hub) cmdStatus(c registry.Caller, _ []string, out io.Writer) (int, error) {

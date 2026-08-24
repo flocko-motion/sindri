@@ -403,6 +403,12 @@ func (s *Service) prepareWorkspace(ps *store.ProjectStore, project, name, root, 
 		if err != nil {
 			return err
 		}
+		// Named before EnsureBranch trips over it: git's "there is already a rebase-merge directory"
+		// says nothing about which tree or what to do, and eitri could not launch for four days.
+		if git.RebaseInProgress(wt) {
+			return fmt.Errorf("%s's worktree (%s) is stopped mid-rebase, so its branch cannot be set — "+
+				"finish it there with `git rebase --continue`, or abandon it with `git rebase --abort`", name, wt)
+		}
 		if err := git.EnsureBranch(wt, workflow.PlannerBranch(name), base); err != nil {
 			return err
 		}
@@ -437,6 +443,9 @@ func (s *Service) Launch(ctx context.Context, project, name string, shell, debug
 	s.deps.Notify()
 	defer func() {
 		if err != nil {
+			// Recorded, not just cleared: every early return below reported to the caller alone, so
+			// three of eitri's launches left "requested" as their last word — a launch still running.
+			_ = ps.Log(name, "launch", "failed: "+err.Error())
 			s.clearLaunching(project, name)
 			s.deps.Notify()
 		}

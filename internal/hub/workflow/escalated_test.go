@@ -38,6 +38,30 @@ func TestAnEscalatedAgentIsToldWhatItAsked(t *testing.T) {
 	}
 }
 
+// TestEscalationWordingDoesNotAssumeTheAgentAskedOrInviteSelfResume is sd-350519's rejection round:
+// a hub-raised escalation is not the agent stopping to ask a question, so DirEscalated/ReplyEscalated
+// must not open by claiming it did, and the closing "resume anyway if you now see the answer" reads
+// as permission to route around a hub fault the moment the failing verb happens to work again —
+// exactly what auto-escalation exists to remove.
+func TestEscalationWordingDoesNotAssumeTheAgentAskedOrInviteSelfResume(t *testing.T) {
+	const q = "`sindri git` failed inside the hub, so I stopped."
+	dir := DirEscalated(q)
+	if strings.Contains(dir, "you stopped and asked") {
+		t.Errorf("the directive must not claim the agent asked, false for a hub-raised one: %q", dir)
+	}
+	if strings.Contains(dir, "resume anyway") || strings.Contains(dir, "no longer needs") {
+		t.Errorf("the directive must not invite a self-resume: %q", dir)
+	}
+	if !strings.Contains(dir, q) {
+		t.Errorf("the directive should still repeat the question back: %q", dir)
+	}
+
+	reply := ReplyEscalated("submit", q)
+	if strings.Contains(reply, "You escalated") {
+		t.Errorf("the reply must not claim the agent performed the escalating: %q", reply)
+	}
+}
+
 // TestAnEscalatedAgentIsNotNudged: it is idle BY INSTRUCTION — the hub told it to wait quietly for an
 // answer only the user can give — so the stall nudge would complain about the state the hub is holding
 // it in, which is what happened to a retired agent (sd-521867) before that state was exempted.
