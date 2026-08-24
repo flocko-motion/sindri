@@ -110,6 +110,30 @@ func TestTaskDescriptionPersists(t *testing.T) {
 	}
 }
 
+// TestTaskTierPersists: the difficulty estimate round-trips through both write paths — the bulk
+// ReplaceTasks a sync does, and the point UpsertTask a single-task refresh does.
+func TestTaskTierPersists(t *testing.T) {
+	p := openTmpProject(t)
+	p.ReplaceTasks([]Task{{ID: "td-1", Status: "open", Type: "task", Tier: "senior"}})
+	got, ok, err := p.GetTask("td-1")
+	if err != nil || !ok {
+		t.Fatalf("GetTask: ok=%v err=%v", ok, err)
+	}
+	if got.Tier != "senior" {
+		t.Fatalf("tier not persisted via ReplaceTasks: got %q, want senior", got.Tier)
+	}
+	if err := p.UpsertTask(Task{ID: "td-1", Status: "open", Type: "task", Tier: "junior"}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err = p.GetTask("td-1")
+	if err != nil || !ok {
+		t.Fatalf("GetTask: ok=%v err=%v", ok, err)
+	}
+	if got.Tier != "junior" {
+		t.Fatalf("tier not persisted via UpsertTask: got %q, want junior", got.Tier)
+	}
+}
+
 // TestTaskURLPersists: a GitHub issue's URL round-trips through both write paths — the bulk
 // ReplaceTasks a sync does, and the point UpsertTask a single-task refresh does — and survives
 // the read paths (GetTask, AllTasks) a plain task with no URL leaves it "" through either.
@@ -395,6 +419,27 @@ func TestAgentStateContainerRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSetPhaseLeavesTaskBranchAndContainerAlone(t *testing.T) {
+	p := openTmpProject(t)
+	if err := p.SetState(AgentState{Agent: "brokkr", Container: "P", Branch: "P", Task: "C1", Phase: "working"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.SetPhase("brokkr", "resolving"); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := p.GetState("brokkr")
+	if st.Container != "P" || st.Branch != "P" || st.Task != "C1" || st.Phase != "resolving" {
+		t.Fatalf("SetPhase must change only phase, got %+v", st)
+	}
+}
+
+func TestSetPhaseErrorsRatherThanNoOpOnAnUnknownAgent(t *testing.T) {
+	p := openTmpProject(t)
+	if err := p.SetPhase("nobody", "working"); err == nil {
+		t.Fatal("SetPhase against an agent with no row must error, not silently do nothing")
+	}
+}
+
 func mustLeaves(t *testing.T, p *ProjectStore) []Task {
 	t.Helper()
 	v, err := p.OpenLeaves()
@@ -495,5 +540,47 @@ func TestReviewingPR(t *testing.T) {
 	}
 	if pr, _ := p.ReviewingPR("dvalin"); pr != "" {
 		t.Fatalf("completed review should not count, got %q", pr)
+	}
+}
+
+// TestStatusChangedAtMovesOnlyOnAStatusChange is the whole reason the column exists beside
+// updated_at, which every write refreshes. A PR rebased onto a new base, or given feedback, is still
+// sitting in the status it was in — answering "how long has this been open" from the last write
+// would report a week-old PR as an hour old, which is the number a person acts on.
+func TestStatusChangedAtMovesOnlyOnAStatusChange(t *testing.T) {
+	p := openTmpProject(t)
+	pr := PR{ID: "pr-td-9", Task: "td-9", Agent: "dvalin", Branch: "b", Base: "master", Status: "open"}
+	if err := p.PutPR(pr); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	first, _, _ := p.GetPR("pr-td-9")
+	if first.StatusChangedAt == "" {
+		t.Fatal("a new PR must record when it reached its first status")
+	}
+
+	// A write that leaves the status alone: the stamp must stand, however much else moved.
+	pr = first
+	pr.Base, pr.Feedback = "main", "please fix the naming"
+	time.Sleep(1100 * time.Millisecond) // RFC3339 is second-resolution, so a change must cross one
+	if err := p.PutPR(pr); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	held, _, _ := p.GetPR("pr-td-9")
+	if held.StatusChangedAt != first.StatusChangedAt {
+		t.Errorf("a rebase moved the status stamp: %q -> %q", first.StatusChangedAt, held.StatusChangedAt)
+	}
+	if held.UpdatedAt == first.UpdatedAt {
+		t.Error("updated_at must still move on every write — the two stamps answer different questions")
+	}
+
+	// And the transition itself does move it.
+	pr = held
+	pr.Status = "approved"
+	if err := p.PutPR(pr); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	moved, _, _ := p.GetPR("pr-td-9")
+	if moved.StatusChangedAt == first.StatusChangedAt {
+		t.Errorf("reaching %q left the stamp at %q", moved.Status, moved.StatusChangedAt)
 	}
 }

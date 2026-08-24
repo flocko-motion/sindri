@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/table"
 	"github.com/spf13/cobra"
 )
 
@@ -86,8 +87,18 @@ func runStatusLabel(r api.Run) string {
 	return r.Status
 }
 
+// runListTable is the columns `sindri run list` prints, its header and its rows alike.
+var runListTable = table.Table{
+	{Label: "run", Width: 14},
+	{Label: "status", Width: 12},
+	{Label: "age", Width: 4, Right: true},
+	{Label: "queued by", Width: 10},
+	{Label: "command"},
+}
+
 func runListCmd() *cobra.Command {
 	var filter string
+	var limit int
 	c := &cobra.Command{
 		Use: "list", Short: "List runs", Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
@@ -100,25 +111,40 @@ func runListCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				runs := api.FilterRuns(f, all)
+				// store.AllRuns orders oldest first, so capTail keeps the newest `limit` — the same
+				// end chatLogCmd keeps from its own oldest-first transcript.
+				runs, matched := capTail(api.FilterRuns(f, all), limit)
+				lines := make([]string, 0, len(runs))
 				for _, r := range runs {
-					fmt.Printf("%-14s %-12s %4s  %-10s %s\n",
-						r.ID, runStatusLabel(r), shortAge(r.CreatedAt), runRequester(r), r.Command)
+					lines = append(lines, runListTable.Line(
+						table.Cell{Text: r.ID},
+						table.Cell{Text: runStatusLabel(r)},
+						table.Cell{Text: shortAge(r.CreatedAt)},
+						table.Cell{Text: runRequester(r)},
+						table.Cell{Text: r.Command},
+					))
 				}
-				if n := len(all) - len(runs); n > 0 {
+				printRows(runListTable, lines)
+				// len(runs), not matched: that many were actually printed — matched only decides
+				// whether the filter hid anything worth naming.
+				if n := len(all) - matched; n > 0 {
 					fmt.Fprintf(os.Stderr, "(filter %s — %d of %d run(s) shown)\n", f, len(runs), len(all))
 				} else if len(runs) == 0 {
 					fmt.Fprintln(os.Stderr, "no runs")
+				}
+				if note := limitNotice("run", len(runs), matched); note != "" {
+					fmt.Fprint(os.Stderr, note)
 				}
 				return nil
 			})
 		},
 	}
-	// Defaults to "all", the same reasoning prListCmd/taskListCmd give: a listing is a record,
-	// not the TUI's redrawn view, which opens on "active" instead.
-	c.Flags().StringVar(&filter, "filter", string(api.RunFilterAll),
+	// Defaults to "active", matching mail list and the TUI: a listing is a view kept to what still
+	// matters, not the whole record. --filter all recovers that.
+	c.Flags().StringVar(&filter, "filter", string(api.RunFilterActive),
 		"which runs to list: "+api.RunFilterNames()+" (active = open, plus anything closed within "+
 			api.ActiveWindow.String()+")")
+	c.Flags().IntVar(&limit, "limit", DefaultListLimit, "show at most this many, newest first (0 = no limit)")
 	return c
 }
 

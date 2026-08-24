@@ -5,21 +5,23 @@
 ### Requirement: The header carries the fleet's memory headroom
 
 The TUI SHALL show the fleet's memory headroom in the header bar, on the right, drawn from the
-figure the hub carries on the board. It SHALL read as the memory left and how many further agents
-fit in it, so the question behind it — whether to start another agent — is answered at a glance from
-whichever tab is open. It SHALL use the same memory meter the per-agent figures use, so one shape
-means one thing across the dashboard.
+figure the hub carries on the board. It SHALL read as the memory cost against the ceiling, paired
+with how many of the roster are running against how many exist — so the question behind it, whether
+another agent is already able to run right now, is answered at a glance from whichever tab is open.
+It SHALL use the same memory meter the per-agent figures use, so one shape means one thing across
+the dashboard.
 
 The TUI SHALL NOT measure the machine itself: the figure is the hub's, read off the board.
 
 The header SHALL yield its space to the tabs and the repo indicator. Where the terminal is too
-narrow for the whole figure, the TUI SHALL show a shorter form, keeping the count of agents that fit
-longest, and SHALL omit it entirely rather than push a tab off the edge.
+narrow for the whole figure, the TUI SHALL show a shorter form, keeping the running-versus-existing
+count longest, and SHALL omit it entirely rather than push a tab off the edge.
 
 #### Scenario: The headroom is in view from every tab
 
 - **WHEN** the hub reports the machine's memory headroom
-- **THEN** the header shows what is free and how many more agents fit, on whichever tab is open
+- **THEN** the header shows what is used and how many of the roster are running, on whichever tab is
+  open
 
 #### Scenario: A narrow terminal keeps its tabs
 

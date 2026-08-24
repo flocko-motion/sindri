@@ -239,38 +239,52 @@ func TestWorktreeAdd(t *testing.T) {
 	}
 }
 
-func TestRebaseOntoCleanAndConflict(t *testing.T) {
+// TestResetOntoKeepingWorkPreservesUncommittedContent is the ordinary case: a squash-merged
+// milestone's reset target has the same tree the branch already had, so an uncommitted tracked
+// edit and a brand new untracked file must both come through the move untouched.
+func TestResetOntoKeepingWorkPreservesUncommittedContent(t *testing.T) {
 	repo := newRepo(t)
-	base, _ := CurrentBranch(repo)
+	mustWrite(t, repo, "f", "edited but uncommitted\n")
+	mustWrite(t, repo, "scratch.txt", "untracked\n")
+	conflicts, done, err := ResetOntoKeepingWork(repo, "HEAD")
+	if err != nil || !done || len(conflicts) != 0 {
+		t.Fatalf("ResetOntoKeepingWork(HEAD) = conflicts=%v done=%v err=%v, want a clean no-op", conflicts, done, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(repo, "f")); err != nil || string(got) != "edited but uncommitted\n" {
+		t.Errorf("tracked edit lost: got %q, err %v", got, err)
+	}
+	if _, err := os.ReadFile(filepath.Join(repo, "scratch.txt")); err != nil {
+		t.Errorf("untracked file lost: %v", err)
+	}
+}
 
-	// A feature branch that edits a different file rebases cleanly onto an
-	// advanced base.
-	if err := CreateBranch(repo, "feat", base); err != nil {
-		t.Fatal(err)
-	}
-	mustWrite(t, repo, "feat.go", "feature")
-	if err := CommitAll(repo, "feat"); err != nil {
-		t.Fatal(err)
-	}
-	mustCommitOn(t, repo, base, "base.go", "base-moved")
-	if err := RebaseOnto(repo, "feat", base); err != nil {
-		t.Fatalf("clean rebase should succeed: %v", err)
-	}
+// TestResetOntoKeepingWorkRoutesAClashingReapply: when the reset target's tree genuinely differs
+// from the one the uncommitted edit was made against, reapplying it can conflict.
+// ResetOntoKeepingWork must not lose the edit — it leaves the shape a clashing
+// `rebase --autostash` does, for the caller to route through StashConflict/ResolveStashConflict.
+func TestResetOntoKeepingWorkRoutesAClashingReapply(t *testing.T) {
+	repo := newRepo(t)
+	def := strings.TrimSpace(gitOut(t, repo, "rev-parse", "--abbrev-ref", "HEAD"))
+	mustCommitOn(t, repo, def, "clash", "base\n")
+	gitOut(t, repo, "checkout", "-q", "-b", "other")
+	mustCommitOn(t, repo, "other", "clash", "changed on other\n")
+	gitOut(t, repo, "checkout", "-q", def)
+	mustWrite(t, repo, "clash", "changed uncommitted\n")
 
-	// A branch that edits the SAME line as the advanced base conflicts; RebaseOnto
-	// reports it and leaves the worktree clean (rebase aborted), not mid-rebase.
-	if err := CreateBranch(repo, "clash", base); err != nil {
-		t.Fatal(err)
+	conflicts, done, err := ResetOntoKeepingWork(repo, "other")
+	if err != nil {
+		t.Fatalf("ResetOntoKeepingWork: unexpected error: %v", err)
 	}
-	mustWrite(t, repo, "f", "branch-version")
-	if err := CommitAll(repo, "clash"); err != nil {
-		t.Fatal(err)
+	if done {
+		t.Fatal("a genuinely clashing reapply must not report done")
 	}
-	mustCommitOn(t, repo, base, "f", "base-version")
-	if err := RebaseOnto(repo, "clash", base); err == nil {
-		t.Fatal("a conflicting rebase must be reported as an error")
+	if len(conflicts) != 1 || conflicts[0] != "clash" {
+		t.Errorf("conflicts = %v, want [clash]", conflicts)
 	}
-	if changed, err := HasChanges(repo); err != nil || changed {
-		t.Errorf("after a conflicting rebase the worktree must be clean (aborted), not mid-rebase (changed=%v err=%v)", changed, err)
+	if !StashConflict(repo) {
+		t.Error("a clashing reapply must leave the StashConflict shape for the resolve loop to find")
+	}
+	if got, err := os.ReadFile(filepath.Join(repo, "clash")); err != nil || !strings.Contains(string(got), "changed uncommitted") {
+		t.Errorf("the uncommitted edit must survive inside the conflict markers, got %q err %v", got, err)
 	}
 }

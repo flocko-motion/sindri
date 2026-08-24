@@ -17,6 +17,7 @@ type Task struct {
 	Status      string
 	Type        string
 	Priority    string
+	Tier        string // junior|mid|senior, "" unrated (-> api.TierOrDefault)
 	ParentID    string
 	Labels      []string
 	Description string // the body, when the source carries one up front (e.g. a GitHub issue)

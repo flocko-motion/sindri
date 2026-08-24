@@ -37,9 +37,12 @@ type Run struct {
 	// plain summary. Gate runs outrank ordinary ones in the queue by default.
 	Kind string `json:"kind,omitempty"`
 	// Message is the agent's free-text submit/contribute description, carried across the queue
-	// wait so the eventual commit reads the same as if the gate had run inline. Unused ("") for an
-	// ordinary run.
+	// wait so the eventual commit reads the same as if the gate had run inline. A PR gate carries
+	// the PR id here instead. Unused ("") for an ordinary run.
 	Message string `json:"message,omitempty"`
+	// Commit is the sha a gate run checks, recorded when it was queued: the verdict describes that
+	// commit, not "whatever was on disk", which is what makes it reusable. "" for an ordinary run.
+	Commit string `json:"commit,omitempty"`
 	// Position is this run's place among currently queued runs, 1 = next; 0 once it is no longer
 	// queued. Derived by the hub at read time, never stored — the queue's real order is a live
 	// fact, not a column that could disagree with it.

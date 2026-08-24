@@ -21,9 +21,6 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// probeTimeout bounds each podman probe; a container that can't answer is "down", not a stalled read.
-const probeTimeout = 3 * time.Second
-
 // statsTimeout bounds one `stats` sample, slower than a probe (the runtime samples over a window).
 const statsTimeout = 8 * time.Second
 
@@ -74,35 +71,30 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		return BoardState{}, err
 	}
 	var tasks []store.Task
-	var specMissing bool
 	if selected != "" {
 		if tasks, err = h.store.For(selected).AllTasks(); err != nil {
 			return BoardState{}, err
 		}
-		root := h.projectRoot(selected)
-		specMissing = h.wf.TaskSourceToolMissing(root)
 	}
+	// What each repo says about itself — its architecture doc, and whether a task source wants a CLI
+	// that isn't installed — from the watchdog's sample. Read here it was a config file and a PATH
+	// lookup per repo per render, which is how `sindri task info` came to time out past 120s.
+	repos := h.watch.repoDocs()
 
-	// Liveness comes from the watchdog's last observation — a board read REPORTS it, never takes one.
-	// Probing per request scaled cost with readers (overlapping polls, SSE, post-mutation refetches);
-	// probes then lost their deadline and rendered as "down", flickering healthy agents (-> watchdog.go).
-	running := make([]bool, len(agentsRow))
-	clients := make([]int, len(agentsRow))
-	runtimes := make([]string, len(agentsRow)) // Claude's live runtime: busy|blocked|idle|""
-	// observed is carried separately because the zero value of running is a CLAIM: an agent
+	// Every per-agent reading comes from the watchdog's last observation — a board read REPORTS them,
+	// never takes one. Probing per request scaled cost with readers (overlapping polls, SSE,
+	// post-mutation refetches); probes then lost their deadline and rendered as "down", flickering
+	// healthy agents (-> watchdog.go).
+	obs := make([]liveness, len(agentsRow))
+	// observed is carried separately because the zero value of an observation is a CLAIM: an agent
 	// registered since the last sweep has been looked at by nothing, and reading its absent
 	// observation as "not running" is the same error as trusting a stale listing.
 	observed := make([]bool, len(agentsRow))
 	for i, a := range agentsRow {
-		if l, ok := h.watch.get(a.Project, a.Name); ok {
-			running[i], clients[i], runtimes[i], observed[i] = l.up, l.clients, l.runtime, true
-		}
+		obs[i], observed[i] = h.watch.get(a.Project, a.Name)
 	}
-
-	// The orphan scan needs the pod list, not per-agent liveness; cached, so it reuses the watchdog's.
-	podCtx, podCancel := context.WithTimeout(context.Background(), probeTimeout)
-	existing, _ := container.ListByLabelCached(podCtx, "sindri.project", "")
-	podCancel()
+	// The orphan scan wants the pod list, which the sweep takes fleet-wide in one spawn.
+	existing := h.watch.pods()
 
 	// One query for the fleet's unread tallies: a count per agent row would be paid per render.
 	unreadMail, err := h.store.UnreadMailByAgent()
@@ -112,32 +104,37 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	known := map[string]bool{}
 	agents := make([]AgentView, 0, len(agentsRow))
 	for i, a := range agentsRow {
-		container := h.container(a.Project, a.Name)
-		known[container] = true
+		// Not named `container`: that shadows the package of the same name, which is how a probe
+		// smuggled into this loop would read as a local call rather than a runtime operation.
+		pod := h.container(a.Project, a.Name)
+		known[pod] = true
 		ps := h.store.For(a.Project)
 		st, _ := ps.GetState(a.Name)
 		// A reviewer authors no PR, so fall back to the one it's reviewing — that's what it works on.
+		// store.Store's ReviewingPR: a pooled reviewer's held review is never filed under its own
+		// project, so a.Project-scoped alone would show it holding nothing while it plainly is.
 		pr := openPRFor(prs, a.Project, a.Name)
 		if pr == "" {
-			pr, _ = ps.ReviewingPR(a.Name)
+			_, pr, _ = h.store.ReviewingPR(a.Project, a.Name)
 		}
-		holds := st.Task != "" || st.Container != "" || pr != ""
-		status := overlayRuntime(h.agents.AgentStatus(a.Project, a.Name, running[i], observed[i], st.Phase), runtimes[i], holds)
+		l := obs[i]
+		status := overlayRuntime(h.agents.AgentStatus(a.Project, a.Name, l.up, observed[i], st.Phase, a.Stopped), l.runtime)
 		// A stall reads as plain "idle" otherwise, which is what let one hold a task unnoticed.
 		if _, stalled := h.stalledFor(a.Project, a.Name, st.Phase, st.Container); stalled {
 			status = "stalled"
 		}
-		tokens, window, _ := h.agents.ContextUsage(a.Project, a.Name)
-		status = overlayFullness(status, h.wf.ContextFull(a.Project, a.Name), st.Task, st.Container, pr)
 		status = overlayEscalation(status, st.Escalation)
 		agents = append(agents, AgentView{
 			Project: a.Project, Repo: h.repoName(a.Project), Name: a.Name, Role: a.Role,
 			Status:  status,
-			Runtime: runtimes[i],
+			Runtime: l.runtime,
 			Task:    st.Task, Feature: st.Container, Branch: st.Branch, PR: pr, Workspace: a.Workspace,
-			Clients: clients[i], Container: container, Memory: a.Memory, Retired: a.Retired,
+			Clients: l.clients, Container: pod, Memory: a.Memory, Retired: a.Retired,
 			ClearArmed:    a.ClearArmed,
-			ContextTokens: tokens, ContextWindow: window, Escalation: st.Escalation,
+			ContextTokens: l.tokens, ContextWindow: l.window, Escalation: st.Escalation,
+			// The transcript sees a model switched by hand inside Claude Code before the roster does,
+			// so the detected one wins while the agent is up — both readings off the same sample.
+			Model:      agent.ModelInUse(a.Model, l.model, l.up),
 			UnreadMail: unreadMail[a.Project][a.Name],
 		})
 	}
@@ -156,21 +153,22 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	// Carried in the snapshot so the TUI's recommendation matches the one hub startup prints.
 	docs := make(map[string]RepoDocState, len(projects))
 	for _, p := range projects {
-		docs[p.Tag] = h.repoDocState(p.Path)
+		docs[p.Tag] = repos[p.Tag].docs
 	}
-	mail, mailTotal, mailUnread, unreadByRepo, err := h.mailWindow()
+	mail, mailTotal, mailUnread, mailUnreadUser, unreadByRepo, err := h.mailWindow()
 	if err != nil {
 		return BoardState{}, err
 	}
 	board := BoardState{
 		RuntimeHint: h.watch.runtimeHint(),
 		Agents:      agents, Tasks: tasks, PRs: prs, Runs: runs, Projects: projects, Orphans: orphans, Chat: chat,
-		RepoDocs: docs, SpecCLIMissing: specMissing, StartedAt: h.startedAt.UTC().Format(time.RFC3339),
+		RepoDocs: docs, SpecCLIMissing: repos[selected].specMissing, StartedAt: h.startedAt.UTC().Format(time.RFC3339),
 		DefaultMemory: agent.MemoryOrDefault(""),
 		// Reported from the watchdog's last reading, like liveness and for the same reason: taking
 		// one here would put a process spawn on every board read, and there are many.
 		Memory: h.watch.headroom(),
 		Mail:   mail, MailTotal: mailTotal, MailUnread: mailUnread, MailUnreadByRepo: unreadByRepo,
+		MailUnreadUser: mailUnreadUser,
 	}
 	return withSections(board), nil
 }
@@ -186,9 +184,9 @@ const mailPreview = 240
 
 // mailWindow reads the newest mail for the board, each body cut to a preview, plus the tallies of the
 // WHOLE mailbox: the total, the unread count, and unread per repo for a repo-scoped view.
-func (h *Hub) mailWindow() (window []AgentMail, total, unread int, unreadByRepo map[string]int, err error) {
+func (h *Hub) mailWindow() (window []AgentMail, total, unread, userUnread int, unreadByRepo map[string]int, err error) {
 	if window, err = h.store.AllMail(MailWindow); err != nil {
-		return nil, 0, 0, nil, err
+		return nil, 0, 0, 0, nil, err
 	}
 	for i, m := range window {
 		window[i].Repo = h.repoName(m.Project)
@@ -196,16 +194,31 @@ func (h *Hub) mailWindow() (window []AgentMail, total, unread int, unreadByRepo 
 			window[i].Body, window[i].Truncated = m.Body[:mailPreview], true
 		}
 	}
-	total, unread, unreadByRepo, err = h.store.MailTallies()
-	if err != nil {
-		return nil, 0, 0, nil, err
+	if total, unread, userUnread, unreadByRepo, err = h.store.MailTallies(); err != nil {
+		return nil, 0, 0, 0, nil, err
 	}
-	return window, total, unread, unreadByRepo, nil
+	return window, total, unread, userUnread, unreadByRepo, nil
 }
 
-// MailBody returns one message with its full body — what a detail view or `mail show` asks for, since
-// the board carries only a preview of each.
-func (h *Hub) MailBody(id int64) (AgentMail, bool, error) { return h.store.MailByID(id) }
+// MailBody returns one message with its full body — what a detail view or `mail show` asks for. A
+// PURE read: marking is a separate, deliberate act (-> MarkMailReadForUser), not a side effect of a look.
+func (h *Hub) MailBody(id int64) (AgentMail, bool, error) {
+	return h.store.MailByID(id)
+}
+
+// MarkMailReadForUser marks one message read, but ONLY when addressed to the user — the one
+// deliberate act (a dwell, an ENTER, `mail show`) that may retire a message from the Mail tab.
+func (h *Hub) MarkMailReadForUser(id int64) error {
+	m, ok, err := h.store.MailByID(id)
+	if err != nil || !ok || m.Read() || !api.MailToUser(m) {
+		return err
+	}
+	if err := h.store.For(m.Project).MarkMailRead(id); err != nil {
+		return err
+	}
+	h.notify()
+	return nil
+}
 
 // withSections stamps the board with its own tabs — each count, and how many of its rows wait on
 // the user — resolved against the board they describe. A front-end renders what it finds here, so
@@ -243,14 +256,14 @@ type AgentStatsView = api.AgentStatsView
 type StatsReport = api.StatsReport
 
 // Stats returns the engine name and a resource snapshot for every running agent.
-func (h *Hub) Stats() (StatsReport, error) {
-	views, err := h.AllStats()
+func (h *Hub) Stats(ctx context.Context) (StatsReport, error) {
+	views, err := h.AllStats(ctx)
 	return StatsReport{Engine: container.Name(), Agents: views}, err
 }
 
 // AllStats snapshots every RUNNING agent concurrently — each sample is slow, so serial would be N×that.
 // Down agents are omitted; a per-agent failure lands in that row's Err rather than being dropped.
-func (h *Hub) AllStats() ([]AgentStatsView, error) {
+func (h *Hub) AllStats(ctx context.Context) ([]AgentStatsView, error) {
 	agentsRow, err := h.store.AllAgents()
 	if err != nil {
 		return nil, err
@@ -261,7 +274,7 @@ func (h *Hub) AllStats() ([]AgentStatsView, error) {
 		wg.Add(1)
 		go func(i int, a store.Agent) {
 			defer wg.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), statsTimeout)
+			ctx, cancel := context.WithTimeout(ctx, statsTimeout)
 			defer cancel()
 			c := h.container(a.Project, a.Name)
 			if !container.RunningContext(ctx, c) {
@@ -314,8 +327,9 @@ func (h *Hub) container(project, name string) string {
 // overlayRuntime folds Claude's live runtime into the workflow status: "signed-out" = unreachable
 // until a human acts, "blocked" = needs you now (any phase), "working" = busy, "idle" = nothing
 // doing. It replaces a plain working/idle phase but keeps the meaningful ones; runtime "" (probe
-// failed) changes nothing. holds says whether the agent has work in hand.
-func overlayRuntime(status, runtime string, holds bool) string {
+// failed) changes nothing. Idleness is what the pane shows, not what the workflow holds — "working,
+// holding nothing" is honest, and what is held is the separate column the board already shows.
+func overlayRuntime(status, runtime string) string {
 	switch runtime {
 	case "signed-out":
 		// Outranks every phase: whatever was asked of it, nothing is happening and nothing can reach it.
@@ -327,30 +341,9 @@ func overlayRuntime(status, runtime string, holds bool) string {
 		// that was doing it is dead. The hub retries, and the word says why it went quiet meanwhile.
 		return "api-error"
 	case "working", "idle":
-		// A pane in motion is not work in hand. An agent reading a broadcast, or answering the user,
-		// moves its screen while holding nothing — and "working" is a claim about the workflow, so
-		// against an empty task column it states something that cannot be true.
-		if runtime == "working" && !holds {
-			return status
-		}
 		if status == "working" || status == "idle" {
 			return runtime
 		}
-	}
-	return status
-}
-
-// overlayFullness shows "full" only where it EXPLAINS something: an agent holding nothing, which
-// claimNext is passing over for exactly this reason. Fullness is not an activity, so anywhere else
-// it would replace the one fact the column exists to carry — and the fill is on the board as
-// ContextTokens for anyone who wants the number.
-//
-// Held work is checked directly rather than trusted to the word: a quiet runtime probe reads a
-// task-holder as "idle" (-> overlayRuntime) before it has been still long enough to say "stalled",
-// and "full" on an agent mid-task invites clearing a context the hub refuses to clear anyway.
-func overlayFullness(status string, full bool, task, feature, pr string) string {
-	if full && status == "idle" && task == "" && feature == "" && pr == "" {
-		return "full"
 	}
 	return status
 }

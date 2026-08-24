@@ -11,10 +11,14 @@ import "sort"
 
 // Task is the cached read-model row; large fields land only on a detail read.
 type Task struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Status      string `json:"status"`
-	Priority    string `json:"priority"`
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Status   string `json:"status"`
+	Priority string `json:"priority"`
+	// Tier is the task's difficulty estimate — junior/mid/senior, "" unrated (-> TierOrDefault, which
+	// reads that as mid). A planner's guess at which worker model it is worth, not a claimability gate
+	// the way Priority is.
+	Tier        string `json:"tier,omitempty"`
 	Type        string `json:"type"`
 	Labels      string `json:"labels"` // comma-joined
 	ParentID    string `json:"parent_id"`
@@ -50,6 +54,7 @@ type TaskSpec struct {
 	Title       string
 	Type        string
 	Priority    string // a P-code (P0…P4)
+	Tier        string // junior|mid|senior, "" = unset (create) or unchanged (edit)
 	Parent      string // parent task id (a child of this task)
 	Description string
 	Labels      []string

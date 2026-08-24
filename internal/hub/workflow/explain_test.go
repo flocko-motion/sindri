@@ -89,11 +89,13 @@ func TestExplainNextAnswersForAnAgent(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: "td-ready", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := ps.PutAgent(store.Agent{Name: "bombur", Role: "worker", Retired: true}); err != nil {
+		t.Fatal(err)
+	}
 	if err := ps.SetState(store.AgentState{Agent: "bombur", Phase: "idle"}); err != nil {
 		t.Fatal(err)
 	}
-	full := &stubDeps{root: t.TempDir(), ctxTokens: 900_000, ctxWindow: 1_000_000, ctxOK: true}
-	e := New(st, full)
+	e := New(st, &stubDeps{root: t.TempDir()})
 
 	x, err := e.ExplainNext("repo", "bombur", "")
 	if err != nil {
@@ -110,6 +112,52 @@ func TestExplainNextAnswersForAnAgent(t *testing.T) {
 		if r.ID == "td-ready" && !r.Claimable() {
 			t.Errorf("td-ready = %q, want it still claimable — the agent is what is blocked", r.Why)
 		}
+	}
+}
+
+// TestExplainNextRulesOutARetiredOrClearArmedAgent closes the gap nudgeIdleWorkers's herd fix
+// (sd-4589ef) would otherwise inherit: agentBlocked used to check only a held task, so a
+// human-retired or clear-armed agent still showed a Pick as though it were free.
+func TestExplainNextRulesOutARetiredOrClearArmedAgent(t *testing.T) {
+	for _, mutate := range []struct {
+		name string
+		do   func(a *store.Agent)
+		want string
+	}{
+		{"retired", func(a *store.Agent) { a.Retired = true }, "retired"},
+		{"clear-armed", func(a *store.Agent) { a.ClearArmed = true }, "clear"},
+	} {
+		t.Run(mutate.name, func(t *testing.T) {
+			st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { st.Close() })
+			ps := st.For("repo")
+			if err := ps.UpsertTask(store.Task{ID: "td-ready", Status: "open", Priority: "P1"}); err != nil {
+				t.Fatal(err)
+			}
+			a := store.Agent{Name: "bombur", Role: "worker"}
+			mutate.do(&a)
+			if err := ps.PutAgent(a); err != nil {
+				t.Fatal(err)
+			}
+			if err := ps.SetState(store.AgentState{Agent: "bombur", Phase: "idle"}); err != nil {
+				t.Fatal(err)
+			}
+			e := New(st, &stubDeps{root: t.TempDir()})
+
+			x, err := e.ExplainNext("repo", "bombur", "")
+			if err != nil {
+				t.Fatalf("ExplainNext: %v", err)
+			}
+			if !strings.Contains(x.AgentNote, mutate.want) {
+				t.Errorf("AgentNote = %q, want it to name why (%q)", x.AgentNote, mutate.want)
+			}
+			if x.Pick != nil {
+				t.Errorf("a %s agent is handed nothing, got %+v", mutate.name, x.Pick)
+			}
+		})
 	}
 }
 

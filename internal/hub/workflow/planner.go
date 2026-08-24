@@ -15,12 +15,10 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/task"
 )
 
 // AssignPlan hands a planner one thing to plan, as a phased brief (-> MsgPlanAssignment). Refused
-// while it has a PR open: it drafts on ONE standing branch, so a second plan would pile
-// unreviewed work onto specs awaiting a verdict.
+// while it has a PR open, since it drafts on one standing branch.
 func (e *Engine) AssignPlan(project, agent, goal, taskID string) error {
 	goal, taskID = strings.TrimSpace(goal), strings.TrimSpace(taskID)
 	if goal == "" && taskID == "" {
@@ -59,6 +57,11 @@ func (e *Engine) AssignPlan(project, agent, goal, taskID string) error {
 		return err
 	}
 	st, _ := ps.GetState(agent)
+	// A brief is a planner's claim: it reads the code and the backlog to work one out, which is the
+	// same vantage point a worker's task gives (-> store.GrantNotes).
+	if err := ps.GrantNotes(agent, NotesPerClaim); err != nil {
+		return err
+	}
 	st.Agent, st.Phase = agent, "planning"
 	_ = ps.SetState(st)
 	_ = ps.Log(agent, "plan", subject)
@@ -66,10 +69,8 @@ func (e *Engine) AssignPlan(project, agent, goal, taskID string) error {
 	return nil
 }
 
-// planSubject resolves what the planner is being handed. A task carries its own title and body, so
-// the brief quotes those rather than asking the user to retype them, and the task moves to "pending
-// approval" — which is what lets the planner revise it (-> CmdEditTask), keeps it away from workers
-// while it is still being worked out, and returns it to the user for a verdict when it is done.
+// planSubject resolves what the planner is being handed, quoting a task's own title and body rather
+// than asking the user to retype them, and moves it to "pending approval" while it's worked out.
 func (e *Engine) planSubject(ps *store.ProjectStore, taskID, goal string) (string, error) {
 	if taskID == "" {
 		return goal, nil
@@ -156,9 +157,8 @@ func (e *Engine) CmdCreateTask(c registry.Caller, args []string, out io.Writer) 
 	if spec.Type == "" {
 		spec.Type = "task"
 	}
-	// The priority is applied AFTER the approval row, never with the task: a task carrying a rating
-	// and no approval row is claimable, so writing them the other way round would open a window in
-	// which a worker could take work the user has not seen.
+	// Applied AFTER the approval row: a rated task with no approval row is claimable, opening a
+	// window where a worker could take work the user has not seen.
 	proposed := spec.Priority
 	spec.Priority = ""
 	id, err := e.CreateTask(c.Project, spec)
@@ -177,17 +177,58 @@ func (e *Engine) CmdCreateTask(c registry.Caller, args []string, out io.Writer) 
 		}
 		e.refreshCachedTask(c.Project, id)
 	}
+	nudge := ""
+	if spec.Parent == "" {
+		nudge = e.unparentedNudge(c.Project, c.Agent, id)
+	}
+	_ = e.store.For(c.Project).Log(c.Agent, createTaskLogType, id)
 	e.deps.Notify()
-	fmt.Fprintln(out, ReplyTaskProposed(id, spec.Title))
+	fmt.Fprintln(out, ReplyTaskProposed(id, spec.Title, nudge))
 	return 0, nil
+}
+
+// createTaskLogType tags a proposal's log entry for unparentedNudge to find; an edit is never
+// logged under it, so reparenting can never look like another flat proposal.
+const createTaskLogType = "create-task"
+
+// recentUnparentedWindow bounds how far back unparentedNudge looks — recent context, not the
+// planner's whole history of flat tasks it may have long since tidied up.
+const recentUnparentedWindow = 5
+
+// unparentedNudge names this agent's OTHER recent proposals still without a parent right now,
+// checked live so a task reparented since drops off the list on its own.
+func (e *Engine) unparentedNudge(project, agent, justCreated string) string {
+	ps := e.store.For(project)
+	events, err := ps.Events(agent, recentUnparentedWindow)
+	if err != nil {
+		return ""
+	}
+	var recent []string
+	for _, ev := range events {
+		if ev.Type != createTaskLogType || ev.Payload == justCreated {
+			continue
+		}
+		t, ok, err := ps.GetTask(ev.Payload)
+		if err != nil || !ok || t.ParentID != "" {
+			continue
+		}
+		recent = append(recent, ev.Payload)
+	}
+	if len(recent) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" You also proposed %s without a parent recently — if they're related, propose "+
+		"a container and hang them under it.", FileList(recent))
 }
 
 // createTaskUsage is the one description of create-task's surface, shown for a bad flag, a
 // missing title, and (via CreateTaskHelp) `create-task --help`.
-const createTaskUsage = "usage: create-task [--parent <id>] [--type <task|feature|bug|epic>] [--body <text>] [--labels a,b] [--priority <critical|high|mid|low|none>] <title...>\n" +
-	"  --parent    hang the task under an existing task or openspec change (os-*), so it joins that tree\n" +
+const createTaskUsage = "usage: create-task [--parent <id>] [--type <task|feature|bug|epic>] [--body <text>] [--labels a,b] [--priority <critical|high|mid|low|none>] [--tier <junior|mid|senior>] <title...>\n" +
+	"  --parent    the default for related work, not a special case: propose the container first,\n" +
+	"              then each piece with --parent pointed at it, so it joins that tree\n" +
 	"  --body      the task's description — what a worker needs in order to start\n" +
 	"  --priority  the order you propose this is worked in; `prioritise-task` changes it afterwards\n" +
+	"  --tier      your estimate of the difficulty (default: mid); `edit-task` changes it afterwards\n" +
 	"Approval answers \"have I read this?\" — it is the user's record of what they have seen, which is\n" +
 	"why an edit to a task returns it for a fresh one. Priority answers \"do I want this worked now?\"\n" +
 	"— their control over pacing. Neither is a guard against you: they are the user's levers over\n" +
@@ -197,10 +238,8 @@ const createTaskUsage = "usage: create-task [--parent <id>] [--type <task|featur
 // and the verb's own usage describe one surface.
 const CreateTaskHelp = "propose a new task, needing the user's approval. " + createTaskUsage
 
-// parseTaskFlags splits create-task's flags from the words forming the title, accepting both
-// `--flag value` and `--flag=value`. An unknown flag is an error: silently ignoring one creates
-// the task without the parent or body that was asked for. A priority is a proposed ORDER and is
-// accepted; what releases the task is the user's approval, which no flag here can reach.
+// parseTaskFlags splits create-task's flags (`--flag value` or `--flag=value`) from the title
+// words. An unknown flag errors rather than being silently dropped.
 func parseTaskFlags(args []string) (TaskSpec, []string, error) {
 	var s TaskSpec
 	var words []string
@@ -234,6 +273,12 @@ func parseTaskFlags(args []string) (TaskSpec, []string, error) {
 				return s, nil, fmt.Errorf("unknown priority %q — one of: %s", val, strings.Join(api.PriorityWords, ", "))
 			}
 			s.Priority = code
+		case "--tier", "-T":
+			tier, known := api.ParseTier(val)
+			if !known {
+				return s, nil, fmt.Errorf("unknown tier %q — one of: %s", val, strings.Join(api.TierWords, ", "))
+			}
+			s.Tier = tier
 		default:
 			return s, nil, fmt.Errorf("unknown flag %q", name)
 		}
@@ -242,9 +287,10 @@ func parseTaskFlags(args []string) (TaskSpec, []string, error) {
 }
 
 // editTaskUsage is the one description of edit-task's surface.
-const editTaskUsage = "usage: edit-task <id> [--parent <id>] [--type <task|feature|bug|epic>] [--body <text>] [--labels a,b] [<new title...>]\n" +
+const editTaskUsage = "usage: edit-task <id> [--parent <id>] [--type <task|feature|bug|epic>] [--body <text>] [--labels a,b] [--tier <junior|mid|senior>] [<new title...>]\n" +
 	"  --parent  hang this task under another task or openspec change — how a set of flat\n" +
 	"            proposals becomes a tree: propose the parent, then point each child at it\n" +
+	"  --tier    revise your difficulty estimate; unlike priority, tier is changed here directly\n" +
 	"  Any task you can see, whether or not the user has approved it. An edit returns the task\n" +
 	"  to the user for a fresh verdict, which also holds it out of the claim pools until they\n" +
 	"  have seen the change. Omitted fields are left as they are; the order work is done in is\n" +
@@ -253,10 +299,8 @@ const editTaskUsage = "usage: edit-task <id> [--parent <id>] [--type <task|featu
 // EditTaskHelp is what the command registry advertises for edit-task.
 const EditTaskHelp = "revise any task, returning it to the user for re-approval. " + editTaskUsage
 
-// CmdEditTask revises any task, approved or not — title, body, type, labels, or a parent, which is
-// how flat proposals become a tree. ONE consequence: the edit returns it to awaiting-review, since
-// approval is the user's record of having READ this task and not permission the planner must hold.
-// No split by field: which edits are "substantive" is a classification nothing tests.
+// CmdEditTask revises any task, approved or not. ONE consequence regardless of field: it returns to
+// awaiting-review, since approval records having READ the task, not permission the planner holds.
 func (e *Engine) CmdEditTask(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) == 0 {
 		fmt.Fprintln(out, editTaskUsage)
@@ -276,7 +320,7 @@ func (e *Engine) CmdEditTask(c registry.Caller, args []string, out io.Writer) (i
 			"user's approval standing.\n", id, strings.Join(api.PriorityWords, "|"))
 		return 2, nil
 	}
-	if spec.Title == "" && spec.Parent == "" && spec.Type == "" && spec.Description == "" && len(spec.Labels) == 0 {
+	if spec.Title == "" && spec.Parent == "" && spec.Type == "" && spec.Tier == "" && spec.Description == "" && len(spec.Labels) == 0 {
 		fmt.Fprintf(out, "nothing to change on %s\n%s\n", id, editTaskUsage)
 		return 2, nil
 	}
@@ -343,13 +387,13 @@ func unownedNote(owned bool) string {
 // taskChange is one field an edit moved, in parts: a reply names fields, the record carries values.
 type taskChange struct{ field, was, now string }
 
-// taskChanges is what an edit ACTUALLY moved, read off the stored rows either side of the write
-// rather than off the spec that asked for it: a field a task's own source owns is not sindri's to
-// write, and echoing the request back would report a change that never happened.
+// taskChanges is what an edit ACTUALLY moved, read off the stored rows either side of the write —
+// echoing the request back would report a change to a field the task's own source owns.
 func taskChanges(before, after store.Task) []taskChange {
 	all := []taskChange{
 		{"title", before.Title, after.Title},
 		{"type", before.Type, after.Type},
+		{"tier", before.Tier, after.Tier},
 		{"labels", before.Labels, after.Labels},
 		{"parent", before.ParentID, after.ParentID},
 		{"description", before.Description, after.Description},
@@ -394,10 +438,8 @@ func prefixed(sep, s string) string {
 	return sep + s
 }
 
-// tellHolder tells every agent whose UNIT OF WORK the edit touches, and reports back who. Not the
-// holder of the edited row: a worker holds a feature, and an edit to any subtask of it changes what
-// that worker is building. Matching only the row left the sibling case — the one that actually bites
-// — telling nobody. Un-approving reaches none of them: the claim gate decides what is handed OUT.
+// tellHolder tells every agent whose UNIT OF WORK the edit touches, not just the holder of the
+// edited row — a worker holding the enclosing feature must hear about it too.
 func (e *Engine) tellHolder(project, id string, changes []taskChange) string {
 	ps := e.store.For(project)
 	roster, err := ps.Roster()
@@ -422,9 +464,8 @@ func (e *Engine) tellHolder(project, id string, changes []taskChange) string {
 	return strings.Join(told, "")
 }
 
-// enclosing is the edited task and every task above it — the units of work a change to it belongs
-// to. Any depth, matching the reach OpenSubtasks has: a feature contains its whole tree, so an edit
-// three levels down is still an edit to that feature. Stops on a stored loop rather than spinning.
+// enclosing is the edited task and every task above it, any depth — an edit three levels down is
+// still an edit to the feature at the top. Stops on a stored loop rather than spinning.
 func enclosing(ps *store.ProjectStore, id string) map[string]bool {
 	out := map[string]bool{id: true}
 	links, err := ps.ParentLinks()
@@ -448,195 +489,4 @@ func (e *Engine) tellOne(project, agent, id, unit, fields string) string {
 		return fmt.Sprintf(" %s holds %s and could not be told (%v) — say so in the meeting room.", agent, unit, err)
 	}
 	return fmt.Sprintf(" %s holds %s and was told what changed.", agent, unit)
-}
-
-// childIDs are the ids of the tasks parented by id, in listing order.
-func childIDs(tasks []store.Task, id string) []string {
-	var out []string
-	for _, t := range tasks {
-		if t.ParentID == id {
-			out = append(out, t.ID)
-		}
-	}
-	return out
-}
-
-// TaskHelp is what the registry advertises for `task`.
-const TaskHelp = "read your work: `task` (your own task or package; a planner or coauthor: the whole backlog), " +
-	"`task <id>` (one task in full — description, parent, children), `task list` (every task you can see, indented by tree)"
-
-// CmdTasks is the read surface over the backlog, scoped to the caller's job: a planner or
-// coauthor shapes all of it, a worker sees only the package it holds. The rest of the backlog is
-// a distraction to a worker, and an invitation to start what nobody assigned it.
-func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int, error) {
-	if err := e.SyncTasks(c.Project); err != nil {
-		return 1, err
-	}
-	ps := e.store.For(c.Project)
-	tasks, err := ps.AllTasks()
-	if err != nil {
-		return 1, err
-	}
-	visible, bounded, err := e.visibleTasks(c, tasks)
-	if err != nil {
-		return 1, err
-	}
-
-	if len(args) > 0 && args[0] != "list" {
-		id := args[0]
-		if bounded && !visible[id] {
-			// Naming what it CAN read keeps the refusal actionable, and a worker that wandered
-			// here was usually looking for its own package anyway.
-			fmt.Fprintf(out, "%s is not part of your work. Run `sindri task` for the package you hold.\n", id)
-			return 1, nil
-		}
-		t, err := e.TaskInfo(c.Project, id)
-		if err != nil {
-			return 1, err
-		}
-		appr, comment := ps.GetApproval(t.ID)
-		if comment != "" {
-			appr += " — " + comment
-		}
-		// Type and labels are shown because a reviewer reads this: a `spec:<name>` label is what
-		// tells it which spec the work must be verified against, and it lives nowhere else.
-		fmt.Fprintf(out, "%s  [%s]  %s  priority=%s\napproval: %s\ntype:     %s\nlabels:   %s\nparent:   %s\nchildren: %s\n\n%s\n",
-			t.ID, t.Status, t.Title, dash(t.Priority), dash(appr), dash(t.Type), dash(t.Labels),
-			dash(t.ParentID), dash(strings.Join(childIDs(tasks, t.ID), ", ")), dash(t.Description))
-		// The same thread the TUI pane and `task info` show: an agent that just filed a finding
-		// (-> the comment verb) has to be able to read it back here, or the verb is worse than none.
-		fmt.Fprint(out, commentBlock(t.Comments))
-		return 0, nil
-	}
-	if bounded && len(args) == 0 {
-		return e.workerTaskView(c, tasks, out)
-	}
-
-	// Indent by depth so the parent/child structure is visible in the listing itself —
-	// hierarchy is how work is organised here (an openspec change parents its tasks), and a
-	// planner reads and repairs it from this view.
-	prs, _ := ps.PRs()
-	shown := 0
-	for _, r := range task.ArrangeTasks(tasks, prs) {
-		if bounded && !visible[r.ID] {
-			continue
-		}
-		shown++
-		fmt.Fprintf(out, "%-12s %-8s %-9s %-3s %s%s\n",
-			r.ID, r.Status, dash(r.Approval), dash(r.Priority), strings.Repeat("  ", r.Depth), r.Title)
-	}
-	if bounded && shown == 0 {
-		fmt.Fprintln(out, "You hold no task. Run `sindri` to pick up your next one.")
-	}
-	return 0, nil
-}
-
-// visibleTasks is what the caller may read, and whether that is BOUNDED rather than everything.
-// A nil set with bounded=false means no filtering, so callers stay simple; a worker is bounded to
-// its held task and every descendant — the unit the hub assigned it.
-func (e *Engine) visibleTasks(c registry.Caller, tasks []store.Task) (map[string]bool, bool, error) {
-	switch c.Role {
-	case "planner", "coauthor", "reviewer":
-		// A reviewer reads everything for the same reason a planner does: it judges work against
-		// intent, and intent lives in the task, its neighbours and their comments. Reading grants no
-		// authority — it still cannot claim, mutate, or act on anything but the PR it was handed.
-		return nil, false, nil
-	}
-	st, err := e.store.For(c.Project).GetState(c.Agent)
-	if err != nil {
-		return nil, true, err
-	}
-	held := st.Container
-	if held == "" {
-		held = st.Task
-	}
-	visible := map[string]bool{}
-	for _, r := range subtreeRows(tasks, held) {
-		visible[r.ID] = true
-	}
-	return visible, true, nil
-}
-
-// workerTaskView answers bare `task` for a worker: what it holds. A standalone task prints in
-// full, since there is nothing to choose between; a package prints as an overview small enough to
-// re-read often, with the detail one request away.
-func (e *Engine) workerTaskView(c registry.Caller, tasks []store.Task, out io.Writer) (int, error) {
-	ps := e.store.For(c.Project)
-	st, err := ps.GetState(c.Agent)
-	if err != nil {
-		return 1, err
-	}
-	held := st.Container // a package…
-	if held == "" {
-		held = st.Task // …else the single task
-	}
-	if held == "" {
-		fmt.Fprintln(out, "You hold no task. Run `sindri` to pick up your next one.")
-		return 0, nil
-	}
-	root, ok, err := ps.GetTask(held)
-	if err != nil {
-		return 1, err
-	}
-	if !ok {
-		fmt.Fprintf(out, "You hold %s, but it is no longer in the backlog. Run `sindri` for your current directive.\n", held)
-		return 0, nil
-	}
-
-	// GetTask reads the row; the thread lives in its own table and is fetched separately, the same
-	// way TaskInfo attaches it. Bare `task` is where an agent looks first, so a comment addressed
-	// to it has to arrive here — not only on the fuller `task <id>`.
-	comments := e.deps.TaskComments(c.Project, root.ID)
-
-	rows := subtreeRows(tasks, root.ID)
-	if len(rows) <= 1 { // a standalone task: show it whole
-		fmt.Fprintf(out, "Your task %s  [%s]  %s\n\n%s\n", root.ID, root.Status, root.Title, dash(root.Description))
-		fmt.Fprint(out, commentBlock(comments))
-		return 0, nil
-	}
-	fmt.Fprintf(out, "Your package %s: %s\n", root.ID, root.Title)
-	if body := strings.TrimSpace(root.Description); body != "" {
-		fmt.Fprintf(out, "\n%s\n", body)
-	}
-	// The package's own thread, not its subtasks' — a comment on the package is addressed to
-	// whoever holds it, which is the reader. Each subtask carries its own to `task <id>`.
-	fmt.Fprint(out, commentBlock(comments))
-	fmt.Fprintf(out, "\n%d subtasks:\n", len(rows)-1)
-	for _, r := range rows[1:] {
-		marker := "  "
-		if r.ID == st.Task {
-			marker = "→ " // the subtask you are on now
-		}
-		fmt.Fprintf(out, "%s%-12s %-8s %s%s\n", marker, r.ID, r.Status, strings.Repeat("  ", r.Depth-1), r.Title)
-	}
-	fmt.Fprintln(out, "\n`sindri task <id>` shows any of them in full (description included).")
-	return 0, nil
-}
-
-// subtreeRows is rootID and its descendants, depth-tagged in tree order — the shape an
-// overview prints. Built from the cached task set, so it needs no extra read.
-func subtreeRows(tasks []store.Task, rootID string) []task.TaskRow {
-	byParent := map[string][]store.Task{}
-	var root *store.Task
-	for i, t := range tasks {
-		if t.ID == rootID {
-			root = &tasks[i]
-		}
-		if t.ParentID != "" {
-			byParent[t.ParentID] = append(byParent[t.ParentID], t)
-		}
-	}
-	if root == nil {
-		return nil
-	}
-	var rows []task.TaskRow
-	var walk func(t store.Task, depth int)
-	walk = func(t store.Task, depth int) {
-		rows = append(rows, task.TaskRow{Task: t, Depth: depth})
-		for _, ch := range byParent[t.ID] {
-			walk(ch, depth+1)
-		}
-	}
-	walk(*root, 0)
-	return rows
 }

@@ -148,12 +148,7 @@ func (Engine) Run(o container.RunOpts) error {
 	return nil
 }
 
-// Exec runs a command inside a pod and returns its combined output.
-func (e Engine) Exec(name string, args ...string) ([]byte, error) {
-	return e.ExecContext(context.Background(), name, args...)
-}
-
-// ExecContext is Exec bounded by ctx.
+// ExecContext runs a command inside a pod, bounded by ctx, and returns its combined output.
 func (Engine) ExecContext(ctx context.Context, name string, args ...string) ([]byte, error) {
 	full := append([]string{"exec", name}, args...)
 	out, err := exec.CommandContext(ctx, Binary, full...).CombinedOutput()
@@ -179,10 +174,8 @@ func (e Engine) ExecInteractive(name string, args ...string) error {
 	return c.Run()
 }
 
-// Running reports whether the pod's micro-VM is running.
-func (e Engine) Running(name string) bool { return e.RunningContext(context.Background(), name) }
-
-// RunningContext is Running bounded by ctx, reading `.status.state` from inspect.
+// RunningContext reports whether the pod's micro-VM is running, bounded by ctx, reading
+// `.status.state` from inspect.
 func (Engine) RunningContext(ctx context.Context, name string) bool {
 	out, err := exec.CommandContext(ctx, Binary, "inspect", name).Output()
 	if err != nil {
@@ -327,12 +320,17 @@ func (Engine) Info(name string) string {
 	return b.String()
 }
 
-// Rm force-removes a container (and its micro-VM).
-func (Engine) Rm(name string) error {
-	if out, err := exec.Command(Binary, "rm", "-f", name).CombinedOutput(); err != nil {
-		return fmt.Errorf("container rm %s: %s: %w", name, strings.TrimSpace(string(out)), err)
+// RmContext force-removes a container (and its micro-VM), bounded by ctx: on cancellation the CLI is
+// killed, and the error names the bound — stopping a micro-VM is part of the verb, so it is slow.
+func (Engine) RmContext(ctx context.Context, name string) error {
+	out, err := exec.CommandContext(ctx, Binary, "rm", "-f", name).CombinedOutput()
+	if err == nil {
+		return nil
 	}
-	return nil
+	if ctx.Err() != nil {
+		return fmt.Errorf("container rm %s: %w", name, ctx.Err())
+	}
+	return fmt.Errorf("container rm %s: %s: %w", name, strings.TrimSpace(string(out)), err)
 }
 
 // ListByLabelContext lists containers carrying label=value (empty value: any value, so

@@ -27,10 +27,21 @@ func (c *HTTP) MailAgent(name, msg string) error {
 	return c.post("/agent/mail", api.TellReq{Name: name, Msg: msg, Source: api.SenderUser})
 }
 
-// MailBody returns one message from an agent's mailbox with its FULL body. The board carries a
-// window of mail with each body cut to a preview, so this is how a detail view shows a message
-// whole — and how one older than that window is reached at all.
+// ReplyToMail answers a message an agent sent the user, addressed by the message's id — the recipient
+// comes from the stored row, so whoever is reading it does not retype who wrote it.
+func (c *HTTP) ReplyToMail(id int64, msg string) error {
+	return c.post("/mail/reply", api.TellReq{Name: fmt.Sprint(id), Msg: msg, Source: api.SenderUser})
+}
+
+// MailBody returns one message from an agent's mailbox with its FULL body — the board carries only
+// a preview. A pure fetch: it never marks anything read (-> MarkMailRead is the deliberate act).
 func (c *HTTP) MailBody(id int64) (api.Mail, error) {
 	var m api.Mail
 	return m, c.get(fmt.Sprintf("/mail?id=%d", id), &m)
+}
+
+// MarkMailRead marks one message read. The hub is the one that knows whether it may: only a
+// message addressed to the user is ever retired this way, no matter who calls this.
+func (c *HTTP) MarkMailRead(id int64) error {
+	return c.post("/mail/mark-read", api.TellReq{Name: fmt.Sprint(id), Source: api.SenderUser})
 }

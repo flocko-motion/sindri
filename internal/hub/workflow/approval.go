@@ -28,6 +28,9 @@ func (e *Engine) ApproveTask(project, id string, subtree bool) error {
 			below = append(below, d.ID)
 		}
 	}
+	// Read before writing: the message describes a TRANSITION, so a second approval of an already-
+	// approved id with nothing pending below it has nothing to announce.
+	already, _ := ps.GetApproval(id)
 	// Children before the parent: the parent turning claimable is what releases the package, and a
 	// worker claiming between the two writes would find a package half of which it cannot see.
 	for _, child := range below {
@@ -38,8 +41,10 @@ func (e *Engine) ApproveTask(project, id string, subtree bool) error {
 	if err := ps.SetApproval(id, "approved", ""); err != nil {
 		return err
 	}
-	e.notifyPlanners(project, fmt.Sprintf("[user] task %s%s was approved — it's now in the backlog for a worker.",
-		id, withSubtasks(len(below))))
+	if already != "approved" || len(below) > 0 {
+		e.notifyPlanners(project, fmt.Sprintf("[user] task %s%s was approved — it's now in the backlog for a worker.",
+			id, withSubtasks(len(below))))
+	}
 	e.deps.Notify()
 	return nil
 }
@@ -62,10 +67,16 @@ func (e *Engine) RejectTask(project, id, comment string) error {
 	if comment == "" {
 		comment = "rejected"
 	}
-	if err := e.store.For(project).SetApproval(id, "rejected", comment); err != nil {
+	ps := e.store.For(project)
+	// Read before writing, same reason as ApproveTask: a repeat rejection with the same comment has
+	// nothing new to say. A DIFFERENT comment is genuinely new feedback, so that still announces.
+	prevStatus, prevComment := ps.GetApproval(id)
+	if err := ps.SetApproval(id, "rejected", comment); err != nil {
 		return err
 	}
-	e.notifyPlanners(project, fmt.Sprintf("[user] task %s was rejected: %s", id, comment))
+	if prevStatus != "rejected" || prevComment != comment {
+		e.notifyPlanners(project, fmt.Sprintf("[user] task %s was rejected: %s", id, comment))
+	}
 	e.deps.Notify()
 	return nil
 }

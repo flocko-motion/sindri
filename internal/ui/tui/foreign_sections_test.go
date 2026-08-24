@@ -11,20 +11,24 @@ import (
 	"github.com/muesli/termenv"
 )
 
-// itemRows counts the rows the cursor can rest on. A badge counts items, and a grouped list also
-// carries the headings and spacers that label them.
-func itemRows(rows []row) int {
-	n := 0
+// items is the rows the cursor can rest on: a list's column labels, its section headings and its
+// spacers dropped, so a test about rows is about rows.
+func items(rows []row) []row {
+	var out []row
 	for _, r := range rows {
 		if r.selectable() {
-			n++
+			out = append(out, r)
 		}
 	}
-	return n
+	return out
 }
 
+// itemRows counts them. A badge counts items, and a labelled list also carries the lines naming them.
+func itemRows(rows []row) int { return len(items(rows)) }
+
 // headingIndexes is where the unselectable rows are, so a test can say what the cursor must not
-// land on without knowing how a heading is styled.
+// land on without knowing how a heading is styled. Every labelled list has at least one — its
+// column labels — so a test about the section headings looks for their words instead (-> sectionText).
 func headingIndexes(rows []row) []int {
 	var out []int
 	for i, r := range rows {
@@ -34,6 +38,21 @@ func headingIndexes(rows []row) []int {
 	}
 	return out
 }
+
+// sectionText is the section headings a list carries, "" when it carries none.
+func sectionText(rows []row) string {
+	var found []string
+	for _, r := range rows {
+		if strings.Contains(r.text, foreignHeadingWords) || strings.Contains(r.text, api.LocalHeading) {
+			found = append(found, r.text)
+		}
+	}
+	return strings.Join(found, "\n")
+}
+
+// foreignHeadingWords is the foreign heading without its count, for a test that does not know how
+// many rows it will find.
+const foreignHeadingWords = "Needing attention in other repos"
 
 // foreignBoard: the selected repo holds a working agent and an open PR; another repo holds one of
 // each that waits on the user, plus one of each that does not. The shape the complaint came from —
@@ -49,7 +68,7 @@ func foreignBoard() (model, api.BoardState) {
 		Agents: []api.AgentView{
 			{Name: "eitri", Project: "sin", Repo: "sindri", Status: "working"},
 			{Name: "gloin", Project: "oth", Repo: "other", Status: "working"},
-			{Name: "thrain", Project: "oth", Repo: "other", Status: api.StatusFull},
+			{Name: "thrain", Project: "oth", Repo: "other", Status: api.StatusStalled},
 			{Name: "nori", Project: "oth", Repo: "other", Status: api.StatusBlocked},
 			// A reviewer up in "oth", so the foreign open PR there waits on nobody.
 			{Name: "regin", Project: "oth", Repo: "other", Role: "reviewer", Status: "working"},
@@ -78,7 +97,7 @@ func TestForeignRowsSitUnderALabelledHeading(t *testing.T) {
 		joined := strings.Join(texts, "\n")
 		foreign, local := -1, -1
 		for i, text := range texts {
-			if strings.Contains(text, "Needing attention in other repos") {
+			if strings.Contains(text, foreignHeadingWords) {
 				foreign = i
 			}
 			if strings.Contains(text, api.LocalHeading) {
@@ -118,7 +137,7 @@ func TestTheForeignHeadingCarriesItsCount(t *testing.T) {
 		texts := rowTexts(c.rows)
 		var foreign int
 		for i, text := range texts {
-			if strings.Contains(text, "Needing attention in other repos") {
+			if strings.Contains(text, foreignHeadingWords) {
 				foreign = countRowsUntilBlank(texts[i+1:])
 				if !strings.Contains(text, api.ForeignAttentionHeading(foreign)) {
 					t.Errorf("%s: heading %q does not count the %d rows under it", c.tab, text, foreign)
@@ -148,7 +167,7 @@ func countRowsUntilBlank(texts []string) int {
 // waiting elsewhere the lists must read exactly as they did — no heading, no spacer.
 func TestNoHeadingsWhenEverythingIsLocal(t *testing.T) {
 	m, b := foreignBoard()
-	b.Agents = []api.AgentView{{Name: "eitri", Project: "sin", Repo: "sindri", Status: api.StatusFull}}
+	b.Agents = []api.AgentView{{Name: "eitri", Project: "sin", Repo: "sindri", Status: api.StatusStalled}}
 	b.PRs = []api.PR{{ID: "pr-1", Project: "sin", Status: "approved"}}
 	m.state = b
 
@@ -157,8 +176,12 @@ func TestNoHeadingsWhenEverythingIsLocal(t *testing.T) {
 		tab  string
 		rows []row
 	}{{"agents", m.agentRows()}, {"prs", m.prRows()}} {
-		if n := len(headingIndexes(c.rows)); n != 0 {
-			t.Errorf("%s: %d unselectable row(s) in a purely local list:\n%s", c.tab, n, strings.Join(rowTexts(c.rows), "\n"))
+		if got := sectionText(c.rows); got != "" {
+			t.Errorf("%s: a purely local list is sectioned:\n%s", c.tab, got)
+		}
+		// The column labels are the ONE unselectable line such a list carries.
+		if n := len(headingIndexes(c.rows)); n != 1 {
+			t.Errorf("%s: %d unselectable row(s), want just the column labels:\n%s", c.tab, n, strings.Join(rowTexts(c.rows), "\n"))
 		}
 	}
 }
@@ -174,8 +197,8 @@ func TestGlobalScopeHasNoForeignSection(t *testing.T) {
 		tab  string
 		rows []row
 	}{{"agents", m.agentRows()}, {"prs", m.prRows()}} {
-		if n := len(headingIndexes(c.rows)); n != 0 {
-			t.Errorf("%s: global scope should group nothing, got %d unselectable row(s)", c.tab, n)
+		if got := sectionText(c.rows); got != "" {
+			t.Errorf("%s: global scope should group nothing, got:\n%s", c.tab, got)
 		}
 	}
 }

@@ -261,7 +261,8 @@ func Validate(projectRoot string) (ok bool, output string) {
 		return true, "" // project doesn't use openspec — nothing to validate
 	}
 	if _, err := exec.LookPath("openspec"); err != nil {
-		return true, "openspec/ present but the openspec CLI is not installed — skipping spec validation (optional)"
+		return true, "openspec/ present but the openspec CLI is not installed — skipping spec validation (optional)\n" +
+			"    hint: install the openspec CLI and spec validation runs."
 	}
 	cmd := exec.Command("openspec", "validate", "--all", "--json")
 	cmd.Dir = projectRoot

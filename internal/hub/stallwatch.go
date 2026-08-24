@@ -29,7 +29,8 @@ type stallwatch struct {
 
 // newStallwatch starts the loop. It must not block: New runs before Serve answers the socket.
 func newStallwatch(h *Hub) *stallwatch {
-	s := &stallwatch{h: h, stop: make(chan struct{}), done: make(chan struct{}), nudged: map[agentKey]time.Time{}}
+	s := &stallwatch{h: h, stop: make(chan struct{}), done: make(chan struct{}),
+		nudged: map[agentKey]time.Time{}}
 	go s.loop()
 	return s
 }
@@ -63,6 +64,12 @@ func (s *stallwatch) sweep() {
 	}
 	for _, a := range agents {
 		key := agentKey{a.Project, a.Name}
+		// An idle agent with mail waiting is woken here, on the same tick that catches a stall: an agent
+		// that finished and stopped calling `sindri` would otherwise never read what it was sent, which
+		// would make "mail must be read" false exactly when it mattered. What it has already been told
+		// about is kept per MESSAGE in the mailbox, not in this map, so a hub restart announces nothing
+		// twice (-> workflow.NudgeMailWaiting).
+		s.h.wf.NudgeMailWaiting(a.Project, a.Name)
 		l, ok := s.h.watch.get(a.Project, a.Name)
 		// The spell is keyed on whichever clock this state is judged by, so a cut-off turn that
 		// resumes and dies again is a new spell rather than one already prodded for.
@@ -97,5 +104,6 @@ func (h *Hub) stalledFor(project, name, phase, container string) (time.Duration,
 	if l.runtime == "api-error" {
 		dwell = time.Since(l.runtimeSince)
 	}
-	return dwell, workflow.Stalled(phase, container, l.runtime, dwell)
+	waiting, _ := h.store.For(project).AgentWaitingOnRun(name)
+	return dwell, workflow.Stalled(phase, container, l.runtime, waiting, dwell)
 }

@@ -44,6 +44,9 @@ func (h *Hub) StartupAdvice() []string {
 	}
 	var out []string
 	for _, p := range projects {
+		if p.Tag == api.GlobalProject {
+			continue // no repo, no doc to advise on
+		}
 		if st := h.repoDocState(p.Path); st.Advice != "" {
 			out = append(out, fmt.Sprintf("%s: %s", filepath.Base(p.Path), st.Advice))
 		}

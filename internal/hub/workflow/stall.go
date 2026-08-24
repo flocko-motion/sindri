@@ -16,39 +16,55 @@ const StallDwell = 3 * time.Minute
 // pane STATES the failure, and long enough only that a retry already in flight finishes first.
 const RetryDwell = time.Minute
 
-// parkedByTheHub reports whether an agent is idle because it was told to be — retired by a human, or
-// by its own context filling. Both are wound down deliberately (-> claimNext).
+// parkedByTheHub reports whether an agent is idle because it was told to be — retired by a human,
+// or a feature worker between subtasks with the next one gated on the user. Both are wound down
+// deliberately (-> claimNext, claimNextSubtask), so prodding either complains about the one state
+// the hub deliberately put the agent in.
 func (e *Engine) parkedByTheHub(project, name string) bool {
-	if a, ok, err := e.store.For(project).GetAgent(name); err == nil && ok && a.Retired {
-		return true
+	if e.retired(project, name) {
+		// Only once it holds NOTHING: retirement is "no new work", and finishing what it already has
+		// requires the verdicts about that work to keep reaching it. A retired dain sat unable to.
+		a, _, _ := e.store.For(project).GetAgent(name)
+		nothing, err := e.deps.HoldsNothing(project, name, a.Role)
+		return err == nil && nothing
 	}
-	return e.ContextFull(project, name)
+	st, err := e.store.For(project).GetState(name)
+	if err != nil || st.Container == "" || st.Task != "" || st.Phase != "idle" {
+		return false
+	}
+	gated, err := e.gatedUnder(project, st.Container)
+	return err == nil && len(gated) > 0
 }
 
 // Stalled reports whether an agent holds work it has stopped doing. The evidence is the SCREEN
-// standing still — a pane frozen mid-turn keeps SAYING "working" forever. Two words still veto it,
-// both meaning the agent is correctly motionless: "blocked" waits on a human, "signed-out" cannot
-// act. Which work counts: "working", or a feature due to be submitted; "submitted" and "gating"
-// (a queued gate result pending) both exist to wait.
-func Stalled(phase, container, runtime string, stillFor time.Duration) bool {
+// standing still — a pane frozen mid-turn keeps SAYING "working" forever. Three things veto it, each
+// meaning the agent is correctly motionless: "blocked" waits on a human, "signed-out" cannot act,
+// waitingOnHub is queued behind the fleet's own gate rather than idling on its own account. Which
+// work counts: "working", "reviewing", or a feature due to be submitted. "submitted" and "gating"
+// exist to wait; reviewing does not — a reviewer with a PR is meant to be reading it.
+func Stalled(phase, container, runtime string, waitingOnHub bool, stillFor time.Duration) bool {
 	// A cut-off turn counts in ANY phase: nothing resumes on its own, and an agent that could not
 	// finish its own sentence will not act on a verdict either.
 	if runtime == "api-error" {
 		return stillFor >= RetryDwell
 	}
-	if runtime == "blocked" || runtime == "signed-out" || stillFor < StallDwell {
+	if runtime == "blocked" || runtime == "signed-out" || waitingOnHub || stillFor < StallDwell {
 		return false
 	}
-	return phase == "working" || (container != "" && phase != "submitted" && phase != "gating")
+	return phase == "working" || phase == "reviewing" ||
+		(container != "" && phase != "submitted" && phase != "gating")
 }
 
 // NudgeStalled prods an agent holding work to continue or say what blocks it, reporting whether it
-// sent anything. The phase is re-read rather than trusted: the dwell is minutes old by definition,
-// so the agent may have moved on while it elapsed.
+// sent anything. The phase is re-read: the dwell is minutes old, so the agent may have moved on.
 func (e *Engine) NudgeStalled(project, name, runtime string, idleFor time.Duration) bool {
 	ps := e.store.For(project)
 	st, err := ps.GetState(name)
-	if err != nil || !Stalled(st.Phase, st.Container, runtime, idleFor) {
+	if err != nil {
+		return false
+	}
+	waiting, err := ps.AgentWaitingOnRun(name)
+	if err != nil || !Stalled(st.Phase, st.Container, runtime, waiting, idleFor) {
 		return false
 	}
 	// Escalated is idle BY INSTRUCTION, like the parked states below (-> parkedByTheHub) — but ahead
@@ -56,7 +72,7 @@ func (e *Engine) NudgeStalled(project, name, runtime string, idleFor time.Durati
 	if st.Escalation != "" {
 		return false
 	}
-	if !e.deps.AgentAlive(project, name) {
+	if !e.deps.AgentUp(project, name) { // the watchdog's reading: this runs on the stall tick
 		return false
 	}
 	// A cut-off turn is answered on its own terms: it is not idling and has nothing to explain, it
@@ -68,9 +84,8 @@ func (e *Engine) NudgeStalled(project, name, runtime string, idleFor time.Durati
 		_ = ps.Log(name, "nudge", "api error cut the turn off — asked it to resume")
 		return true
 	}
-	// Past the api-error retry, not before it: a parked agent is idle BY INSTRUCTION — DirFull tells
-	// it "do not ask again, just wait" — so prodding it complains about the one state the hub put it
-	// in. A turn cut off mid-sentence is a different thing, and still deserves resuming.
+	// Past the api-error retry, not before it: a parked agent is idle BY INSTRUCTION, so prodding it
+	// complains about the state the hub put it in. A cut-off turn still deserves resuming.
 	if e.parkedByTheHub(project, name) {
 		return false
 	}
@@ -79,6 +94,15 @@ func (e *Engine) NudgeStalled(project, name, runtime string, idleFor time.Durati
 	held := st.Task
 	if held == "" {
 		held = st.Container
+	}
+	if held == "" {
+		// A reviewer's hold is the review row: no state field carries it. store.Store's
+		// ReviewingPR, not ps's, since a pooled reviewer's row is never filed under its own project.
+		_, pr, rerr := e.store.ReviewingPR(project, name)
+		if rerr != nil {
+			return false
+		}
+		held = pr
 	}
 	if held == "" {
 		return false // nothing to name, so nothing useful to say

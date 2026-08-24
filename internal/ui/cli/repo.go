@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/table"
 	"github.com/flo-at/sindri/internal/ui/theme"
 	"github.com/spf13/cobra"
 )
@@ -52,6 +53,15 @@ func repoInitCmd() *cobra.Command {
 	}
 }
 
+// repoListTable is the columns `sindri repo list` prints. The counts used to carry their own words on
+// every row ("3 agents", "issues:on"); with labels over the columns the words belong there, once.
+var repoListTable = table.Table{
+	{Label: "repo", Width: 16},
+	{Label: "agents", Width: 6, Right: true},
+	{Label: "issues", Width: 6},
+	{Label: "path"},
+}
+
 func repoListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "list", Short: "List every repo the hub tracks", Args: cobra.NoArgs,
@@ -61,13 +71,20 @@ func repoListCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				lines := make([]string, 0, len(repos))
 				for _, r := range repos {
 					issues := "off"
 					if r.IssuesEnabled {
 						issues = "on"
 					}
-					fmt.Printf("%-16s %2d agents  issues:%-3s  %s\n", r.Name, r.Agents, issues, r.Path)
+					lines = append(lines, repoListTable.Line(
+						table.Cell{Text: r.Name},
+						table.Cell{Text: strconv.Itoa(r.Agents)},
+						table.Cell{Text: issues},
+						table.Cell{Text: r.Path},
+					))
 				}
+				printRows(repoListTable, lines)
 				if len(repos) == 0 {
 					fmt.Fprintln(os.Stderr, "no repos registered")
 				}

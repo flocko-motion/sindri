@@ -69,9 +69,20 @@ func TestPlannerBriefOffersTaskOnlyPath(t *testing.T) {
 			t.Errorf("the planner brief must offer the task-only path, missing %q:\n%s", want, p)
 		}
 	}
-	for _, role := range []string{"worker", "reviewer", "coauthor"} {
+	for _, role := range []string{"worker", "reviewer"} {
 		if p := SystemPrompt("x", role, "", "ARCHITECTURE.md"); strings.Contains(p, "create-task") {
 			t.Errorf("%s should not see the planner's create-task guidance:\n%s", role, p)
+		}
+	}
+	// The coauthor holds create-task too (sd-44550c), so its brief names the verb — but none of the
+	// planner's own path, which is a loop it does not ride: it is steered by the user, turn by turn.
+	co := SystemPrompt("x", "coauthor", "", "ARCHITECTURE.md")
+	if !strings.Contains(co, "create-task") {
+		t.Errorf("the coauthor holds create-task, so its brief must name it:\n%s", co)
+	}
+	for _, planner := range []string{"a complete outcome", "sindri state idle"} {
+		if strings.Contains(co, planner) {
+			t.Errorf("the coauthor should not see the planner's own path (%q):\n%s", planner, co)
 		}
 	}
 }
@@ -102,18 +113,110 @@ func TestRunServicePointedAtOnlyWhenClaiming(t *testing.T) {
 	for _, s := range []string{
 		DirClaimed("td-1", "a task", "td-1", "ARCHITECTURE.md"),
 		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
-		DirReview("pr-td-1", "td-1", "a task", ""),
+		DirReview("pr-td-1", "td-1", "a task", "dwalin", ""),
 	} {
 		if !strings.Contains(s, "sindri run") {
 			t.Errorf("a claim-moment directive should point at the run service: %q", s)
 		}
 	}
 	for _, s := range []string{
-		DirWorking("td-1"),
-		DirContainerWorking("td-EPIC", "td-1"),
+		DirWorking("td-1", 1.5, 2.0),
+		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
 	} {
 		if strings.Contains(s, "sindri run") {
 			t.Errorf("a REPEATED directive must not carry the run pointer every time: %q", s)
+		}
+	}
+}
+
+// TestToolingBlockReachesEveryRoleThatReceivesWork (sd-4b5a53): one block, in one place, naming
+// every tool an agent has and how to reach it — attached to the hand-over of work rather than the
+// durable brief, since a clear or compaction erases the brief's mention outright while a directive
+// is re-served (-> fireClear) the moment work reaches the agent again. sd-d96355 (brokkr) and
+// sd-0de9e2 (gopls) are its first two entries.
+func TestToolingBlockReachesEveryRoleThatReceivesWork(t *testing.T) {
+	handOvers := []string{
+		DirWorking("td-1", 1.5, 2.0),
+		DirRejected("td-1", "not yet", 1, 1.5, 2.0),
+		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
+		DirContainerRejected("td-EPIC", "td-1", "not yet", 1, 1.5, 2.0),
+		MsgReview("pr-td-1", "do the thing", "td-1", "main", "", true),
+		MsgPlanAssignment("build the thing", "", "", ""),
+	}
+	for _, s := range handOvers {
+		for _, want := range []string{"brokkr", "mcp__gopls__go_", "ToolSearch"} {
+			if !strings.Contains(s, want) {
+				t.Errorf("hand-over of work missing %q: %q", want, s)
+			}
+		}
+	}
+	// The block belongs on the REPEATED directive, not the one-time claim: a fresh claim's context
+	// still has the system prompt in it, and the gap opens only once a clear or compaction erases it
+	// mid-task — exactly when the repeated directive, not the claim, is re-served.
+	for _, s := range []string{
+		DirClaimed("td-1", "a task", "td-1", "ARCHITECTURE.md"),
+		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
+	} {
+		if strings.Contains(s, "mcp__gopls__go_") {
+			t.Errorf("a claim-moment directive should not repeat the tooling block: %q", s)
+		}
+	}
+	// The durable brief (BrokkrBrief) states only the CONSTRAINT on using brokkr, never the reason to
+	// reach for it — that argument lives on the hand-over alone, or the fleet pays for it twice
+	// (sd-d96355). Neither brief should carry gopls at all: that mention is exactly what a clear or
+	// compaction erases, which is the reason this block exists.
+	for _, role := range []string{"worker", "reviewer", "planner", "coauthor"} {
+		p := SystemPrompt("eitri", role, "", "ARCHITECTURE.md")
+		if strings.Contains(p, "gopls") {
+			t.Errorf("%s: gopls belongs on the hand-over, not the durable brief:\n%s", role, p)
+		}
+		if strings.Contains(p, "grepping") || strings.Contains(p, "reading files blind") {
+			t.Errorf("%s: the durable brief should state brokkr's constraint, not argue for it — that's "+
+				"the hand-over's job now:\n%s", role, p)
+		}
+	}
+}
+
+// TestParentIsStatedAsTheDefaultShape (sd-ac9800): a planner that reads `--parent` as an option for
+// unusual cases keeps filing flat tasks — every surface a planner reads about create-task, at the
+// standing prompt and at the moment work is handed over alike, must state hanging related work
+// under a container FIRST as the default shape, not a special case.
+func TestParentIsStatedAsTheDefaultShape(t *testing.T) {
+	// Flattened so a source line wrapped mid-phrase (this prose is hard-wrapped for terminal
+	// display) can't make a substring check miss text that reads fine to whoever receives it.
+	flatten := func(s string) string { return strings.Join(strings.Fields(s), " ") }
+	for _, s := range []string{
+		createTaskUsage,
+		CreateTaskHelp,
+		SystemPrompt("galar", "planner", "", "ARCHITECTURE.md"),
+		DirPlanning,
+		MsgPlanAssignment("build the thing", "", "", ""),
+	} {
+		flat := strings.ToLower(flatten(s))
+		if !strings.Contains(flat, "the container first") {
+			t.Errorf("missing container-first guidance: %q", s)
+		}
+		if !strings.Contains(flat, "default") || !strings.Contains(flat, "not a special case") {
+			t.Errorf("missing an explicit default/not-a-special-case statement: %q", s)
+		}
+	}
+}
+
+// TestToolingBlockPointsAtBrokkrMapOverGrepping (sd-d96355): BrokkrBrief said the right thing
+// already, but buried in the system prompt behind three sentences about compound shell, in a place
+// nobody re-reads — repetition via CLAUDE.md didn't fix that either. The point itself, not just the
+// tool's name, has to reach every hand-over of work.
+func TestToolingBlockPointsAtBrokkrMapOverGrepping(t *testing.T) {
+	for _, s := range []string{
+		DirWorking("td-1", 1.5, 2.0),
+		DirRejected("td-1", "not yet", 1, 1.5, 2.0),
+		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
+		DirContainerRejected("td-EPIC", "td-1", "not yet", 1, 1.5, 2.0),
+		MsgReview("pr-td-1", "do the thing", "td-1", "main", "", true),
+		MsgPlanAssignment("build the thing", "", "", ""),
+	} {
+		if !strings.Contains(s, "brokkr map") || !strings.Contains(s, "grepping") {
+			t.Errorf("hand-over should point at exploring with brokkr map over grepping blind: %q", s)
 		}
 	}
 }
@@ -155,11 +258,11 @@ func TestAgentAdviceNeverPromisesGit(t *testing.T) {
 		MsgReview("pr-td-1", "do the thing", "td-1", "main", "", false),
 		SystemPrompt("eitri", "worker", "", ""),
 		SystemPrompt("dvalin", "reviewer", "", ""),
-		DirWorking("td-1"),
+		DirWorking("td-1", 1.5, 2.0),
 		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
-		DirContainerWorking("td-EPIC", "td-1"),
-		DirContainerRejected("td-EPIC", "td-1", "not yet"),
-		MsgMilestoneRejected("td-EPIC", "user", "not yet"),
+		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
+		DirContainerRejected("td-EPIC", "td-1", "not yet", 1, 1.5, 2.0),
+		MsgMilestoneRejected("td-EPIC", "user"),
 		ReplyCheckpointed("td-1", "td-2", "the next subtask"),
 	}
 	for _, s := range sandboxed {
@@ -182,14 +285,19 @@ func TestAgentAdviceNeverPromisesGit(t *testing.T) {
 // lines under "do NOT run git", which is the same dead end in different words.
 func TestAgentAdviceNeverAsksForACommit(t *testing.T) {
 	for _, s := range []string{
-		DirWorking("td-1"),
+		DirWorking("td-1", 1.5, 2.0),
 		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
-		DirContainerWorking("td-EPIC", "td-1"),
+		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
 		ReplyResolveDirty("working", false),
 		ReplyResolveDirty("working", true),
 		ReplyResolveDirty("submitted", false),
 		SystemPrompt("eitri", "worker", "", ""),
 		GitHelp,
+		// The gate now records the workspace itself, so its replies are exactly where "just commit it"
+		// would creep back in — they are the ones that know a commit happened.
+		ReplyLintQueued("run-1", "abc1234", 2),
+		ReplyGateReused("run-1", "abc1234"),
+		MsgLintPassed("run-1"),
 	} {
 		for _, bad := range []string{"commit", "Commit", "uncommitted", "Uncommitted"} {
 			if strings.Contains(s, bad) {
@@ -246,7 +354,7 @@ func TestResolveDirtyAdviceIsRunnable(t *testing.T) {
 func TestAssignedWorkSaysItStartsNow(t *testing.T) {
 	for _, s := range []string{
 		ReplyCheckpointed("td-1", "td-2", "the next subtask"),
-		DirContainerWorking("td-EPIC", "td-1"),
+		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
 	} {
 		if !strings.Contains(s, "starts now") && !strings.Contains(s, "Implement it") {
 			t.Errorf("a hand-off that assigns work must say to start it: %q", s)
@@ -295,7 +403,7 @@ func TestAssignedWorkSaysItStartsNow(t *testing.T) {
 func TestMidFeatureAdviceNamesCheckpoint(t *testing.T) {
 	for _, s := range []string{
 		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
-		DirContainerWorking("td-EPIC", "td-1"),
+		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
 		ReplyCheckpointed("td-1", "td-2", "the next subtask"),
 		ReplySubtasksRemain("td-EPIC", "td-2", 3),
 		ReplyResolveDirty("working", true),
@@ -311,7 +419,7 @@ func TestMidFeatureAdviceNamesCheckpoint(t *testing.T) {
 	// to do per subtask, which is the confusion the checkpoint flow exists to prevent.
 	for _, s := range []string{
 		DirContainerClaimed("td-EPIC", "a feature", "td-1", "a subtask"),
-		DirContainerWorking("td-EPIC", "td-1"),
+		DirContainerWorking("td-EPIC", "td-1", 1.5, 2.0),
 	} {
 		if !strings.Contains(s, "never per subtask") {
 			t.Errorf("mid-feature advice must rule out a per-subtask submit: %q", s)
@@ -322,8 +430,7 @@ func TestMidFeatureAdviceNamesCheckpoint(t *testing.T) {
 	for _, s := range []string{
 		DirContainerDone("td-EPIC"),
 		ReplyCheckpointedLast("td-2", "td-EPIC"),
-		DirContainerRejected("td-EPIC", "td-1", "not yet"),
-		MsgMilestoneRejected("td-EPIC", "reviewer", "not yet"),
+		DirContainerRejected("td-EPIC", "td-1", "not yet", 1, 1.5, 2.0),
 	} {
 		if !strings.Contains(s, "`sindri submit") {
 			t.Errorf("a complete feature must be told to submit: %q", s)

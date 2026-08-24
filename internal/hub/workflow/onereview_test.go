@@ -233,3 +233,29 @@ func TestAMergedPRIsNotReopenedByAReviewRequest(t *testing.T) {
 		t.Errorf("status = %q — a merged PR stays merged", got.Status)
 	}
 }
+
+// TestTheHandedDirectiveCarriesTheAuthor is the wiring, as opposed to the wording: the directive
+// the reviewer is actually handed must carry the PR's own author, not a name the caller happened
+// to have. It is the fact that makes the follow-up possible — a question to the person who wrote
+// it, rather than a rejection written at nobody.
+func TestTheHandedDirectiveCarriesTheAuthor(t *testing.T) {
+	e, ps, _ := reviewFixture(t)
+	dir, ok, err := e.reviewDirective("repo", "fili")
+	if err != nil || !ok {
+		t.Fatalf("reviewDirective: ok=%v err=%v", ok, err)
+	}
+	held, _ := ps.ReviewingPR("fili")
+	pr, _, _ := ps.GetPR(held)
+	if pr.Agent == "" {
+		t.Fatal("precondition: the fixture's PRs have an author")
+	}
+	if !strings.Contains(dir, pr.Agent) {
+		t.Errorf("the directive for %s does not name its author %q:\n%s", held, pr.Agent, dir)
+	}
+	// And again on the re-ask path, which builds the directive from the HELD review rather than
+	// from a fresh claim — two call sites, one of which is easy to leave behind.
+	again, _, _ := e.reviewDirective("repo", "fili")
+	if !strings.Contains(again, pr.Agent) {
+		t.Errorf("the re-asked directive dropped the author:\n%s", again)
+	}
+}

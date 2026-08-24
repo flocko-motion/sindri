@@ -10,15 +10,15 @@ package claude
 import (
 	"encoding/json"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
 
-// tailBytes bounds how much of a transcript is read from its end — enough to survive a huge
-// tool-result block between the last assistant turn and EOF, without reading a many-hundred-MB
-// session whole on every probe.
+// tailBytes bounds how much of a transcript is read from its end, past a huge tool-result block,
+// without reading a many-hundred-MB session whole on every probe.
 const tailBytes = 4 << 20
 
 // defaultWindow is assumed for an unrecognised model: the smallest any current Claude carries, so
@@ -36,18 +36,71 @@ var windows = []struct {
 	{"haiku", 200_000},
 }
 
-// ContextUsage implements agent.Agent: what the session under home carries and the window it fills.
-// ok=false when nothing there has recorded usage yet.
-func (Claude) ContextUsage(home string) (tokens, window int, ok bool) {
+// ModelWindow implements agent.Agent: model's window, ok=false when it matches nothing in the table
+// above — refuse rather than guess, since a window this can't state is fullness it can't judge.
+func (Claude) ModelWindow(model string) (window int, ok bool) {
+	for _, w := range windows {
+		if strings.Contains(model, w.match) {
+			return w.window, true
+		}
+	}
+	return 0, false
+}
+
+// tierModels maps each difficulty tier to the model it dispatches to — the one place a tier
+// resolves to an actual model id, so a caller never invents its own mapping.
+var tierModels = map[string]string{
+	"junior": "claude-haiku-4-5",
+	"mid":    "claude-sonnet-5",
+	"senior": "claude-opus-5",
+}
+
+// ModelForTier implements agent.Agent: the model a task of this tier dispatches to, ok=false for
+// anything outside api.TierWords — refuse rather than guess, same rule as ModelWindow.
+func (Claude) ModelForTier(tier string) (model string, ok bool) {
+	m, found := tierModels[tier]
+	return m, found
+}
+
+// ModelMatches implements agent.Agent: is detected want's family, not want verbatim — Haiku 4.5's
+// real id carries a dated snapshot suffix (claude-haiku-4-5-20251001) the plain tier id never names.
+func (Claude) ModelMatches(want, detected string) bool {
+	return strings.Contains(detected, want)
+}
+
+// The compaction threshold falls as the window grows: pct(W) = P∞ + (P₀−P∞)·(W/W₀)^(−k). The same
+// absolute overhead is a smaller fraction of a bigger window, so the bar for compacting falls with it.
+const (
+	compactW0   = 200_000 // the window the curve is anchored to
+	compactP0   = 0.375   // the fraction worth compacting at compactW0
+	compactPInf = 0.05    // the floor the fraction falls toward as the window grows
+	compactK    = 0.863   // how fast it falls between the two — fit to the epic's own table (sd-43fa4a):
+	// every anchor past the 200k one it's pinned at (500k/1M/2M/4M/8M) only reproduces near this k,
+	// not the 0.6 first written down; 200k fits any k since (W/W0)^-k is 1 there regardless.
+)
+
+// CompactionThreshold implements agent.Agent: the curve above, in tokens rather than a bare
+// fraction, since that is what a live reading is compared against.
+func (Claude) CompactionThreshold(window int) int {
+	if window <= 0 {
+		return 0
+	}
+	pct := compactPInf + (compactP0-compactPInf)*math.Pow(float64(window)/compactW0, -compactK)
+	return int(pct * float64(window))
+}
+
+// ContextUsage implements agent.Agent: what the session under home carries, the window it fills, and
+// the raw model id carrying it. ok=false when nothing there has recorded usage yet.
+func (Claude) ContextUsage(home string) (tokens, window int, model string, ok bool) {
 	path, found := latestTranscript(home)
 	if !found {
-		return 0, 0, false
+		return 0, 0, "", false
 	}
-	tokens, model, ok := lastUsage(path)
+	tokens, model, ok = lastUsage(path)
 	if !ok {
-		return 0, 0, false
+		return 0, 0, "", false
 	}
-	return tokens, windowFor(model), true
+	return tokens, windowFor(model), model, true
 }
 
 // windowFor resolves a model id to its context window, conservatively when it is unrecognised.
@@ -60,9 +113,8 @@ func windowFor(model string) int {
 	return defaultWindow
 }
 
-// latestTranscript finds home's most recently written *.jsonl under projects/*/ — Claude Code
-// names the subdirectory after the container's cwd (always /workspace here), but the exact
-// encoding is that tool's own business, so this globs rather than assumes the spelling.
+// latestTranscript finds home's most recently written *.jsonl under projects/*/ — globbed rather
+// than assumed, since the exact subdirectory spelling is Claude Code's own business.
 func latestTranscript(home string) (string, bool) {
 	matches, err := filepath.Glob(filepath.Join(home, "projects", "*", "*.jsonl"))
 	if err != nil {
@@ -99,9 +151,8 @@ type transcriptLine struct {
 // names no model, so it can say nothing about the window.
 const syntheticModel = "<synthetic>"
 
-// lastUsage scans path's tail backward for the size the session carries and the model carrying it,
-// each from the newest line that can answer for it — not necessarily the same line, since a real
-// transcript often ends on a synthetic one.
+// lastUsage scans path's tail backward for the size and model, each from the newest line that can
+// answer for it — not necessarily the same line, since a real transcript often ends on a synthetic one.
 func lastUsage(path string) (tokens int, model string, ok bool) {
 	tail, err := readTail(path, tailBytes)
 	if err != nil {

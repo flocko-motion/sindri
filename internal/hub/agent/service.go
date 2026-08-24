@@ -29,6 +29,15 @@ type Deps interface {
 	ArchitectureDoc(project string) string
 	RefreshTask(project, id string) error
 	Rehydrate(project, name string)
+	// ForgetFill drops the hub's standing sample of an agent's context fill. The board reports that
+	// sample rather than this package's memo, so a reading invalidated here is invalidated there too
+	// — one of the two left standing is the stale figure reappearing on whichever half still reads it.
+	ForgetFill(project, name string)
+	// AgentUp is the watchdog's last liveness reading — what the hub's idle/clear ticks read instead
+	// of AgentAlive, sparing a probe per roster member per tick.
+	AgentUp(project, name string) bool
+	// AgentClients is the watchdog's last dialed-in count, for the same reason.
+	AgentClients(project, name string) int
 }
 
 // Service is the agent-management module: identity (naming), auth (tokens), memory
@@ -43,8 +52,8 @@ type Service struct {
 	launchMu sync.Mutex             // guards launch
 	launch   map[string]*safeBuffer // per-agent launch-output buffers (see launchbuf.go)
 
-	lcMu      sync.Mutex       // guards lifecycle
-	lifecycle map[lcKey]string // transient launch/stop intent: "launching"|"stopping"
+	lcMu      sync.Mutex                // guards lifecycle
+	lifecycle map[lcKey]lifecycleIntent // transient launch/stop intent: "launching"|"stopping"|failed
 }
 
 // New builds the agent module over the hub's store, its Deps, and the agent channel
@@ -53,6 +62,6 @@ func New(st *store.Store, deps Deps, agentCh *agentchan.Server) *Service {
 	return &Service{
 		store: st, deps: deps, agentCh: agentCh,
 		launch:    map[string]*safeBuffer{},
-		lifecycle: map[lcKey]string{},
+		lifecycle: map[lcKey]lifecycleIntent{},
 	}
 }

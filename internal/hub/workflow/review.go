@@ -8,13 +8,13 @@ package workflow
 
 import (
 	"fmt"
+	"github.com/flo-at/sindri/internal/api"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/config"
-	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/tools/paths"
 )
@@ -119,7 +119,7 @@ func (e *Engine) RequestReview(project, prID, requirement string) error {
 			return err
 		}
 		_ = ps.LogPR(prID, "review-amended", "further instructions to "+holder)
-		go e.deps.Deliver(project, holder, MsgReviewAmended(prID, requirement), MailAndPush)
+		go e.deps.Deliver(project, holder, MsgReviewAmended(prID, requirement), MailAndPush.From(api.SenderUser))
 		e.deps.Notify()
 		return nil
 	}
@@ -145,8 +145,8 @@ func (e *Engine) RequestReview(project, prID, requirement string) error {
 	return nil
 }
 
-// assignReview gives one reviewer one PR: the review record, the branch in its workspace, and the
-// instruction — in that order, so what it is told to review is what it is looking at.
+// assignReview gives one reviewer one PR. The review record stays with the PR's project; the
+// reviewer's own roster row, workspace, state and notes are read and written under its own home.
 func (e *Engine) assignReview(project string, id int64, prID, reviewer, requirement string) error {
 	ps := e.store.For(project)
 	pr, ok, err := ps.GetPR(prID)
@@ -156,45 +156,78 @@ func (e *Engine) assignReview(project string, id int64, prID, reviewer, requirem
 	if err := ps.AssignReview(id, reviewer); err != nil {
 		return err
 	}
-	// The hub preps the terrain so the reviewer never faces a stale tree: force-checkout is
-	// safe because it only reads + lints. On failure it is told not to trust /workspace.
+	home, a, found := e.reviewerHome(project, reviewer)
+	hs := e.store.For(home)
+	// A review IS a reviewer's claim: it has been somewhere and looked at a whole diff, which is the
+	// vantage point the note grant pays for (-> store.GrantNotes). Its subsystems are often nobody's
+	// task, so this is the role most likely to notice something with no other home.
+	if err := hs.GrantNotes(reviewer, NotesPerClaim); err != nil {
+		return err
+	}
+	// The hub preps the terrain so the reviewer never faces a stale tree; on failure it is told
+	// not to trust /workspace. A GlobalProject reviewer gets plain files instead (-> git.ArchiveTree).
 	checkedOut := true
-	if a, ok, gerr := ps.GetAgent(reviewer); gerr != nil || !ok {
+	dest := filepath.Join(e.deps.ProjectRoot(home), a.Workspace)
+	switch {
+	case !found:
 		checkedOut = false
 		_ = ps.LogPR(prID, "checkout-failed", "reviewer "+reviewer+" not on roster")
-	} else if coErr := git.CheckoutDetachedClean(filepath.Join(e.deps.ProjectRoot(project), a.Workspace), pr.Branch); coErr != nil {
-		checkedOut = false
-		_ = ps.LogPR(prID, "checkout-failed", fmt.Sprintf("%s into %s: %v", pr.Branch, a.Workspace, coErr))
+	case home == GlobalProject:
+		if mErr := git.ArchiveTree(e.deps.ProjectRoot(project), pr.Branch, dest); mErr != nil {
+			checkedOut = false
+			_ = ps.LogPR(prID, "checkout-failed", fmt.Sprintf("%s into %s: %v", pr.Branch, dest, mErr))
+		}
+	default:
+		if coErr := git.CheckoutDetachedClean(dest, pr.Branch); coErr != nil {
+			checkedOut = false
+			_ = ps.LogPR(prID, "checkout-failed", fmt.Sprintf("%s into %s: %v", pr.Branch, a.Workspace, coErr))
+		}
 	}
-	_ = ps.SetState(store.AgentState{Agent: reviewer, Phase: "reviewing"}) // board shows it working, not idle
+	_ = hs.SetState(store.AgentState{Agent: reviewer, Phase: "reviewing"}) // board shows it working, not idle
 	_ = ps.LogPR(prID, "review-requested", "assigned to "+reviewer)
-	go e.deps.Deliver(project, reviewer, MsgReview(prID, requirement, pr.Branch, pr.Base, e.deps.ArchitectureDoc(project), checkedOut), MailAndPush) // async: don't block a worker's submit
+	go e.deps.Deliver(home, reviewer, MsgReview(prID, requirement, pr.Branch, pr.Base, e.deps.ArchitectureDoc(project), checkedOut), MailAndPush) // async: don't block a worker's submit
 	e.deps.Notify()
 	return nil
 }
 
-// reviewDirective is what a reviewer is told: the ONE PR it holds, whose branch is what sits in its
-// workspace. A reviewer has one checkout, so it can review one PR — scanning the open PRs and
-// serving whichever came first handed it a second while the first was still on disk, and the diff
-// it read then belonged to neither. Free, it claims the oldest unclaimed review, which is also how
-// one requested with no reviewer running is eventually picked up.
+// reviewerHome resolves a reviewer's own roster row: its own project first, else GlobalProject's.
+func (e *Engine) reviewerHome(project, reviewer string) (home string, a store.Agent, ok bool) {
+	if a, ok, err := e.store.For(project).GetAgent(reviewer); err == nil && ok {
+		return project, a, true
+	}
+	if project == GlobalProject {
+		return project, store.Agent{}, false
+	}
+	a, ok, err := e.store.For(GlobalProject).GetAgent(reviewer)
+	if err != nil {
+		return project, store.Agent{}, false
+	}
+	return GlobalProject, a, ok
+}
+
+// reviewDirective is what a reviewer is told: the ONE PR it holds, whose branch sits in its one
+// workspace — serving a second while the first was still checked out left neither diff readable.
+// Free, it claims the oldest unclaimed review, also how one with no reviewer running gets picked up.
 func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 	ps := e.store.For(project)
-	held, err := ps.ReviewingPR(name)
+	// heldProject, not project: a GlobalProject reviewer's held review is filed under whatever
+	// project it was sent to, never its own.
+	heldProject, held, err := e.store.ReviewingPR(project, name)
 	if err != nil {
 		return "", false, err
 	}
 	if held != "" {
-		pr, ok, err := ps.GetPR(held)
+		hps := e.store.For(heldProject)
+		pr, ok, err := hps.GetPR(held)
 		if err != nil {
 			return "", false, err
 		}
 		if ok && pr.Status == "open" {
-			return DirReview(pr.ID, pr.Task, e.taskTitle(project, pr.Task), e.deps.ArchitectureDoc(project)), true, nil
+			return DirReview(pr.ID, pr.Task, e.taskTitle(heldProject, pr.Task), pr.Agent, e.deps.ArchitectureDoc(heldProject)), true, nil
 		}
 		// Settled while it was reading: a verdict on it now decides nothing, so the hold is released
 		// rather than left to produce one.
-		if err := ps.CloseReviews(held, "overtaken: the PR was "+pr.Status+" before a verdict"); err != nil {
+		if err := hps.CloseReviews(held, "overtaken: the PR was "+pr.Status+" before a verdict"); err != nil {
 			return "", false, err
 		}
 		_ = ps.SetState(store.AgentState{Agent: name, Phase: restPhase("reviewer")})
@@ -203,15 +236,40 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 	var id int64
 	var prID string
 	found, err := ps.UnclaimedReview(&id, &prID)
-	if err != nil || !found {
+	if err != nil {
 		return "", false, err
 	}
+	if !found {
+		// `sindri` answers at once: AssignPendingReviews pushes a wake once a review is claimable.
+		return DirNoReviews, true, nil
+	}
+	// An armed clear preempts the claim below, firing eagerly rather than waiting for the sweep, same
+	// as fireClearIfArmed — interrupt=false for the same reason: this runs inside the reviewer's own ask.
+	if e.clearArmed(project, name) {
+		if err := e.deps.FireClear(project, name, MsgKickoff, false); err != nil {
+			return "", false, err
+		}
+		return DirClearPending, true, nil // about to land: a review claimed now would be cut in half by it
+	}
+	// Claim FIRST — same reason claimNext claims before it prepares: once the review is the
+	// reviewer's, no return in the middle is needed for compaction (a review has no tier, so no
+	// model switch) to run against it.
 	req, _ := e.ReviewPrompt(project)
 	if err := e.assignReview(project, id, prID, name, req); err != nil {
 		return "", false, err
 	}
 	pr, _, _ := ps.GetPR(prID)
-	return DirReview(prID, pr.Task, e.taskTitle(project, pr.Task), e.deps.ArchitectureDoc(project)), true, nil
+	dir := DirReview(prID, pr.Task, e.taskTitle(project, pr.Task), pr.Agent, e.deps.ArchitectureDoc(project))
+	e.deps.BeginAssignment(project, name)
+	fired, err := e.compactIfDue(project, name, dir)
+	e.deps.EndAssignment(project, name)
+	if err != nil {
+		return "", false, err
+	}
+	if fired {
+		return DirPreparing, true, nil
+	}
+	return dir, true, nil
 }
 
 // releaseReviewers closes every open review of a PR and frees whoever held one, telling them the PR
@@ -255,18 +313,32 @@ func reviewerAssignable(a store.Agent) bool {
 	return a.Role == "reviewer" && !a.ClearArmed
 }
 
-// freeReviewer returns a running reviewer holding no review; a roster failure is returned, not hidden.
+// freeReviewer returns a running reviewer holding no review, checking the project's own roster
+// first, then GlobalProject's — a submit reaches the pool here too, not just the periodic sweep.
 func (e *Engine) freeReviewer(project string) (string, error) {
-	ps := e.store.For(project)
-	roster, err := ps.Roster()
+	if name, err := e.freeReviewerOn(project); name != "" || err != nil {
+		return name, err
+	}
+	if project == GlobalProject {
+		return "", nil
+	}
+	return e.freeReviewerOn(GlobalProject)
+}
+
+// freeReviewerOn is freeReviewer narrowed to one project's own roster.
+func (e *Engine) freeReviewerOn(home string) (string, error) {
+	roster, err := e.store.For(home).Roster()
 	if err != nil {
-		return "", fmt.Errorf("load roster for %s: %w", project, err)
+		return "", fmt.Errorf("load roster for %s: %w", home, err)
 	}
 	for _, a := range roster {
-		if !reviewerAssignable(a) || !container.Running(e.deps.Container(project, a.Name)) || !e.deps.SessionAlive(project, a.Name) {
+		// The watchdog's standing observation, not a probe of our own — this runs off
+		// RepairReviewRows' tick, once per open PR, and a fresh exec per row is what saturated
+		// the runtime the observer now exists to prevent (-> hub/watchdog.go).
+		if !reviewerAssignable(a) || !e.deps.AgentUp(home, a.Name) {
 			continue
 		}
-		held, err := ps.ReviewingPR(a.Name)
+		_, held, err := e.store.ReviewingPR(home, a.Name)
 		if err != nil {
 			return "", err
 		}

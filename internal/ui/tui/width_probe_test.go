@@ -43,7 +43,7 @@ func TestAgentRowFitsItsColumn(t *testing.T) {
 		Agents: []api.AgentView{
 			{Name: "hepti", Role: "coauthor", Status: "collab", Task: "td-3", Clients: 1},
 			{Name: "eitri", Role: "worker", Status: "working", Task: "td-4"},
-			{Name: "thrain", Role: "worker", Status: api.StatusFull},
+			{Name: "thrain", Role: "worker", Status: api.StatusStalled},
 		},
 		Orphans: []string{"sindri-stale-abc-nabbi"},
 	}

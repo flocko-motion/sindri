@@ -9,15 +9,21 @@
 package project
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
+
+// orphanRemoveTimeout bounds tearing an orphaned pod down. Wider than a liveness probe: `rm -f`
+// stops before it removes, so it is the slowest verb here (-> workflow.runRemoveTimeout).
+const orphanRemoveTimeout = 30 * time.Second
 
 // Deps is what registry management needs from the hub: agent teardown, .gitignore upkeep, naming.
 type Deps interface {
@@ -155,6 +161,9 @@ func (s *Service) Init(root string) (Summary, error) {
 // Forget deletes the repo's agents and its registry row, nothing else: passive data stays keyed by
 // the stable tag, so re-adding the repo reactivates it. Hard on agents, soft on records.
 func (s *Service) Forget(project string) error {
+	if project == api.GlobalProject {
+		return fmt.Errorf("%s is not a repo — it takes no worktrees and cannot be forgotten", api.GlobalProject)
+	}
 	roster, err := s.store.For(project).Roster()
 	if err != nil {
 		return err
@@ -175,8 +184,10 @@ func (s *Service) WriteConfig(root string, cfg config.Config) error {
 
 // RemoveOrphan rm's a pod with no roster entry. No identity to delete, and the container name is
 // globally unique, so no project context is needed.
-func (s *Service) RemoveOrphan(name string) error {
-	if err := container.Rm(name); err != nil {
+func (s *Service) RemoveOrphan(ctx context.Context, name string) error {
+	rmCtx, rmCancel := context.WithTimeout(context.WithoutCancel(ctx), orphanRemoveTimeout)
+	defer rmCancel()
+	if err := container.RmContext(rmCtx, name); err != nil {
 		return fmt.Errorf("remove orphan container %s: %w", name, err)
 	}
 	s.deps.Notify()

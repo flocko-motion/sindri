@@ -7,22 +7,34 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 )
 
-// TestTaskListFilterFlagDefaultsToTodaysBehaviour: the TUI has had a four-way filter and the CLI
-// none, which is a behaviour one front-end could not reach. The flag closes that — and defaults to
-// "all", which is what the bare command has always printed, so no existing use changes.
-func TestTaskListFilterFlagDefaultsToTodaysBehaviour(t *testing.T) {
+// TestTaskListFilterFlagDefaultsToActive (sd-4be9f8): the TUI opens on "active" and stays readable;
+// the CLI offered the same filter but shipped "all", which is how a bare `task list` grew to 264
+// lines. --filter all still recovers the whole backlog.
+func TestTaskListFilterFlagDefaultsToActive(t *testing.T) {
 	f := taskListCmd().Flags().Lookup("filter")
 	if f == nil {
 		t.Fatal("`task list` must offer --filter; the TUI cycles the same set with `f`")
 	}
-	if f.DefValue != string(api.FilterAll) {
-		t.Errorf("--filter defaults to %q, want %q — the bare command must keep printing every task",
-			f.DefValue, api.FilterAll)
+	if f.DefValue != string(api.FilterActive) {
+		t.Errorf("--filter defaults to %q, want %q — matching mail list and the TUI",
+			f.DefValue, api.FilterActive)
 	}
 	for _, name := range api.TaskFilters {
 		if !strings.Contains(f.Usage, string(name)) {
 			t.Errorf("the flag's help must name %q — the four words are the whole interface: %q", name, f.Usage)
 		}
+	}
+}
+
+// TestTaskListLimitFlagDefaultsTo50 (sd-4be9f8): active alone still grows without bound as the
+// fleet grows, so the bound needs a count too.
+func TestTaskListLimitFlagDefaultsTo50(t *testing.T) {
+	f := taskListCmd().Flags().Lookup("limit")
+	if f == nil {
+		t.Fatal("`task list` must offer --limit")
+	}
+	if f.DefValue != "50" {
+		t.Errorf("--limit defaults to %q, want 50", f.DefValue)
 	}
 }
 

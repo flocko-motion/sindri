@@ -35,7 +35,9 @@ type ChatView struct {
 
 // Sender values a ChatMessage carries beyond an agent's own name.
 const (
-	SenderUser   = "user"   // the human — the one participant an agent must never mistake for a peer
+	// SenderUser is the human, in both directions: the sender of a message they type, and the RECIPIENT
+	// of an agent's note (-> Mail.Agent). One spelling, so no agent may be named it.
+	SenderUser   = "user"
 	SenderSystem = "system" // the hub speaking for itself
 )
 

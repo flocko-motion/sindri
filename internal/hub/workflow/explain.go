@@ -75,7 +75,7 @@ func (e *Engine) ExplainNext(project, agent, role string) (api.NextExplain, erro
 	// Ranked by the assigner's own rule over the same two pools, so the answer to "what is next"
 	// cannot part company with what is actually handed out (-> nextUp).
 	var pick string
-	if t, _, ok := nextUp(packages, leaves); ok {
+	if t, _, ok := nextUp(packages, leaves, e.tierPrefers(project, agent)); ok {
 		pick = t.ID
 	}
 
@@ -144,6 +144,12 @@ func (e *Engine) ExplainNext(project, agent, role string) (api.NextExplain, erro
 
 // agentBlocked reports why an agent can be handed nothing whatever the backlog holds.
 func (e *Engine) agentBlocked(ps *store.ProjectStore, project, agent string) string {
+	if e.retired(project, agent) {
+		return fmt.Sprintf("retired by the user — `sindri agent retire %s --back` brings it back", agent)
+	}
+	if e.clearArmed(project, agent) {
+		return "a context clear is armed for it — nothing is assigned until it fires"
+	}
 	st, err := ps.GetState(agent)
 	if err != nil {
 		return ""
@@ -154,8 +160,10 @@ func (e *Engine) agentBlocked(ps *store.ProjectStore, project, agent string) str
 	if st.Task != "" {
 		return fmt.Sprintf("holds %s", st.Task)
 	}
-	if tokens, full := e.contextFull(project, agent); full {
-		return fmt.Sprintf("retired: its context is ~%dk — `sindri agent clear-context %s`", tokens/1000, agent)
+	// Held until it MERGES, which is what the board has always displayed. austri was handed a second
+	// task while pr-sd-a47b61 sat rejected, because every reader here stopped at the state row.
+	if pr, task, err := ps.AwaitingPR(agent); err == nil && pr != "" {
+		return fmt.Sprintf("holds %s — %s is still to land", task, pr)
 	}
 	return ""
 }
@@ -192,7 +200,7 @@ func allChildrenGated(all []store.Task, id string) bool {
 func (e *Engine) explainReview(project, agent string, out api.NextExplain) (api.NextExplain, error) {
 	ps := e.store.For(project)
 	if agent != "" {
-		note, err := reviewHeld(ps, agent)
+		note, err := reviewHeld(e.store, project, agent)
 		if err != nil {
 			return out, err
 		}
@@ -267,12 +275,14 @@ func leftOpen(p store.PR) (api.Reviewability, string) {
 // reviewHeld is why a reviewer takes nothing new, "" when it is free. A hold on a PR that has left
 // "open" is NOT one: reviewDirective releases it and claims the next review, so trusting the row
 // would describe a state the agent's very next ask undoes (a human `pr approve` leaves exactly it).
-func reviewHeld(ps *store.ProjectStore, agent string) (string, error) {
-	held, err := ps.ReviewingPR(agent)
+func reviewHeld(st *store.Store, project, agent string) (string, error) {
+	// st's ReviewingPR, not a *ProjectStore's: a pooled reviewer's row is never filed under its
+	// own project.
+	heldProject, held, err := st.ReviewingPR(project, agent)
 	if err != nil || held == "" {
 		return "", err
 	}
-	pr, ok, err := ps.GetPR(held)
+	pr, ok, err := st.For(heldProject).GetPR(held)
 	if err != nil {
 		return "", err
 	}

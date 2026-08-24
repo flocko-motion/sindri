@@ -67,7 +67,7 @@ func TestJSLintFindsProjectsInSubdirs(t *testing.T) {
 		}
 	}
 
-	t.Run("tool missing is itself a finding", func(t *testing.T) {
+	t.Run("tool missing is a skip, not a finding", func(t *testing.T) {
 		stubToolPath(t, "unrelated", 0) // a PATH with no tsc on it
 		root := subdirTree(t)
 		var out bytes.Buffer
@@ -77,16 +77,57 @@ func TestJSLintFindsProjectsInSubdirs(t *testing.T) {
 		}
 		got := out.String()
 		if !found {
-			t.Fatalf("expected findings, got none:\n%s", got)
+			t.Fatalf("stray and packages/lib are still findings on their own:\n%s", got)
 		}
 		assertDiscovery(t, got)
-		// web/ configures tsc, so a missing tsc is a broken promise, not a pass.
-		if !strings.Contains(got, "web") || !strings.Contains(got, "not installed") {
-			t.Errorf("a configured project whose tool is absent must be reported:\n%s", got)
+		// web/ configures tsc: absent, it is a skip with a hint, not a broken promise.
+		if !strings.Contains(got, "web") || !strings.Contains(got, "not installed — skipping") {
+			t.Errorf("a configured project whose tool is absent must be reported as a skip:\n%s", got)
 		}
-		// This PATH has no node either, so the advice must say so — `npm install` cannot help.
-		if !strings.Contains(got, "node itself is not on PATH") {
-			t.Errorf("with no node, the advice must name that rather than suggest npm install:\n%s", got)
+		if !strings.Contains(got, "hint: installing Node.js") {
+			t.Errorf("with no node, the hint must name that rather than suggest installing the package:\n%s", got)
+		}
+	})
+
+	t.Run("tool missing alone does not fail the gate", func(t *testing.T) {
+		stubToolPath(t, "unrelated", 0) // a PATH with no tsc on it
+		root := writeTree(t, map[string]string{
+			"web/package.json":  `{"name":"web"}`,
+			"web/tsconfig.json": `{"compilerOptions":{}}`,
+			"web/src/a.ts":      "export const a = 1;\n",
+		})
+		var out bytes.Buffer
+		found, err := JSLint(root, mustIgnore(t), &out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := out.String()
+		if found {
+			t.Fatalf("a missing delegate is a skip, so a repo with no other findings must pass:\n%s", got)
+		}
+		if !strings.Contains(got, "skipping (optional)") {
+			t.Errorf("the skip must still say so:\n%s", got)
+		}
+	})
+
+	t.Run("node present but the package missing gives the package hint", func(t *testing.T) {
+		stubToolPath(t, "node", 0) // node itself is on PATH, tsc is not
+		root := writeTree(t, map[string]string{
+			"web/package.json":  `{"name":"web"}`,
+			"web/tsconfig.json": `{"compilerOptions":{}}`,
+			"web/src/a.ts":      "export const a = 1;\n",
+		})
+		var out bytes.Buffer
+		found, err := JSLint(root, mustIgnore(t), &out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := out.String()
+		if found {
+			t.Fatalf("a missing delegate is a skip, so a repo with no other findings must pass:\n%s", got)
+		}
+		if !strings.Contains(got, "hint: install typescript here and the type-check runs.") {
+			t.Errorf("node present, package missing must give the package hint verbatim:\n%s", got)
 		}
 	})
 

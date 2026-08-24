@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -160,29 +159,15 @@ func BranchExists(dir, branch string) bool {
 	return exec.Command("git", "-C", dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch).Run() == nil
 }
 
-// BranchTip is branch's current commit — what a moved reference is detected against.
-func BranchTip(dir, branch string) (string, error) {
-	out, err := exec.Command("git", "-C", dir, "rev-parse", "--verify", "refs/heads/"+branch).Output()
-	if err != nil {
-		return "", fmt.Errorf("read tip of %s: %s", branch, gitError(err))
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-// IsAncestor reports whether a is reachable from b. False for a branch that moved means its history
-// was REWRITTEN (rebased, reset, force-moved), not merely advanced.
-func IsAncestor(dir, a, b string) bool { return isAncestor(dir, a, b) }
-
 // AttachBranch reattaches a detached worktree to branch, reporting a rescue ref if it made one.
 // Detaching frees a branch for deletion (-> DetachHead), so an agent could commit onto a HEAD no
 // branch named. Nothing is discarded: the branch is created when missing, fast-forwarded when HEAD
 // is ahead, and on divergence it stays put while the rescue ref names HEAD's commits.
 func AttachBranch(dir, branch string) (rescue string, err error) {
-	head, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
+	at, err := Head(dir)
 	if err != nil {
-		return "", fmt.Errorf("attach %s: read HEAD: %s", branch, gitError(err))
+		return "", fmt.Errorf("attach %s: %w", branch, err)
 	}
-	at := strings.TrimSpace(string(head))
 	tip, tipErr := exec.Command("git", "-C", dir, "rev-parse", "--verify", "refs/heads/"+branch).Output()
 	switch {
 	case tipErr != nil: // no such branch — the deletion case; name HEAD and carry on
@@ -209,11 +194,6 @@ func checkoutArgs(dir, branch string, args ...string) error {
 	return nil
 }
 
-// isAncestor reports whether commit a is reachable from b, so a branch can be fast-forwarded.
-func isAncestor(dir, a, b string) bool {
-	return exec.Command("git", "-C", dir, "merge-base", "--is-ancestor", a, b).Run() == nil
-}
-
 // ResetBranchTo empties dir's checked-out branch back to ref — commits, tracked edits and untracked
 // files go; the branch and dir's attachment to it survive. What a STANDING branch needs: deleting
 // one would detach its worktree first, leaving the agent homeless.
@@ -226,6 +206,36 @@ func ResetBranchTo(dir, ref string) error {
 		return fmt.Errorf("clean %s: %s", dir, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// ResetOntoKeepingWork resets dir's branch to ref, keeping uncommitted work (tracked and
+// untracked) across the move by stashing then reapplying it rather than discarding it, as
+// ResetBranchTo does. A clashing reapply leaves the shape a clashing `rebase --autostash` does,
+// for the caller to route through StashConflict the same way.
+func ResetOntoKeepingWork(dir, ref string) (conflicts []string, done bool, err error) {
+	changed, err := HasChanges(dir)
+	if err != nil {
+		return nil, false, err
+	}
+	if changed {
+		if out, e := exec.Command("git", "-C", dir, "stash", "push", "-u", "-m", "autostash").CombinedOutput(); e != nil {
+			return nil, false, fmt.Errorf("stash uncommitted work in %s: %s: %w", dir, strings.TrimSpace(string(out)), e)
+		}
+	}
+	if out, e := exec.Command("git", "-C", dir, "reset", "--hard", ref).CombinedOutput(); e != nil {
+		return nil, false, fmt.Errorf("reset %s to %s: %s: %w", dir, ref, strings.TrimSpace(string(out)), e)
+	}
+	if !changed {
+		return nil, true, nil
+	}
+	out, e := gitEditless(dir, "stash", "pop")
+	if u := unmergedFiles(dir); len(u) > 0 {
+		return u, false, nil // left for the worker, same shape a clashing autostash leaves
+	}
+	if e != nil {
+		return nil, false, fmt.Errorf("reapply stashed work in %s: %s: %w", dir, strings.TrimSpace(out), e)
+	}
+	return nil, true, nil
 }
 
 // DetachHead detaches dir from its branch, freeing that branch for deletion elsewhere.
@@ -262,6 +272,45 @@ func CheckoutDetachedClean(dir, ref string) error {
 	}
 	if out, err := exec.Command("git", "-C", dir, "clean", "-fd").CombinedOutput(); err != nil {
 		return fmt.Errorf("clean %s: %s: %w", dir, strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// ArchiveTree exports ref's tree into dest as plain files, no .git, clearing dest's prior contents
+// first — for a reviewer with no git of its own.
+func ArchiveTree(repo, ref, dest string) error {
+	if err := emptyDir(dest); err != nil {
+		return fmt.Errorf("clear %s: %w", dest, err)
+	}
+	tmp, err := os.CreateTemp("", "sindri-archive-*.tar")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+	if out, err := exec.Command("git", "-C", repo, "archive", "-o", tmp.Name(), ref).CombinedOutput(); err != nil {
+		return fmt.Errorf("archive %s: %s: %w", ref, strings.TrimSpace(string(out)), err)
+	}
+	if out, err := exec.Command("tar", "-x", "-f", tmp.Name(), "-C", dest).CombinedOutput(); err != nil {
+		return fmt.Errorf("extract %s: %s: %w", ref, strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// emptyDir removes dest's contents, creating it first if absent — the directory itself (a bind
+// mount target) is never removed, only what is inside it.
+func emptyDir(dest string) error {
+	entries, err := os.ReadDir(dest)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return os.MkdirAll(dest, 0o755)
+		}
+		return err
+	}
+	for _, e := range entries {
+		if err := os.RemoveAll(filepath.Join(dest, e.Name())); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -331,15 +380,6 @@ func CommitAll(dir, msg string) error {
 		return fmt.Errorf("git commit: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
-}
-
-// RebaseOnto rebases branch onto onto, aborting on conflict so the worktree stays clean and the
-// caller can route the conflict back to its worker. Lets a merely-stale branch merge unaided.
-func RebaseOnto(dir, branch, onto string) error {
-	if out, err := exec.Command("git", "-C", dir, "checkout", branch).CombinedOutput(); err != nil {
-		return fmt.Errorf("checkout %s: %s: %w", branch, strings.TrimSpace(string(out)), err)
-	}
-	return Rebase(dir, onto)
 }
 
 // RebaseInProgress reports whether dir has a rebase stopped mid-flight (conflict, or an empty patch
@@ -420,10 +460,10 @@ func markedFiles(dir string, files []string) []string {
 // marker is git's conflict start line, the one the workers are told to look for.
 const marker = "<<<<<<< "
 
-// dropSpentAutostash removes the stash entry `rebase --autostash` leaves behind when re-applying it
-// conflicted — once the resolution is staged that entry is spent, and left in place every later
-// rebase piles another one on. Only an entry git itself labelled "autostash" is dropped, never a
-// stash anything else made. Best-effort: a leaked entry is cruft, not a reason to fail the rebase.
+// dropSpentAutostash removes the stash entry a clashing reapply leaves behind — spent once the
+// resolution is staged, and left in place every later autostash piles another on. Two exact shapes
+// only, never a stash anything else made: git's own `rebase --autostash` labels its entry bare
+// "autostash"; ResetOntoKeepingWork's manual stash comes back "On <branch>: autostash".
 func dropSpentAutostash(dir string) {
 	out, err := exec.Command("git", "-C", dir, "stash", "list", "--format=%gd %gs").Output()
 	if err != nil {
@@ -432,7 +472,8 @@ func dropSpentAutostash(dir string) {
 	}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		ref, subject, ok := strings.Cut(strings.TrimSpace(line), " ")
-		if !ok || strings.TrimSpace(subject) != "autostash" {
+		subject = strings.TrimSpace(subject)
+		if !ok || (subject != "autostash" && !strings.HasSuffix(subject, ": autostash")) {
 			continue
 		}
 		// Newest first, and dropping renumbers the rest — take this one and stop.
@@ -541,63 +582,6 @@ func ChangedNames(dir string) ([]string, error) {
 	return lines, nil
 }
 
-// CountRange counts every commit in from..to, merges included. LogRange hides merges because they
-// read as noise in a list, which makes an empty LIST a bad test for "nothing arrived" — an advance
-// made only of merge commits produces one. Callers deciding whether anything moved ask this; callers
-// showing a human what moved ask LogRange.
-func CountRange(dir, from, to string) (int, error) {
-	out, err := exec.Command("git", "-C", dir, "rev-list", "--count", from+".."+to).CombinedOutput()
-	if err != nil {
-		return 0, fmt.Errorf("git rev-list --count %s..%s: %s: %w", from, to, strings.TrimSpace(string(out)), err)
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
-	if err != nil {
-		return 0, fmt.Errorf("git rev-list --count %s..%s: unreadable count %q: %w", from, to, strings.TrimSpace(string(out)), err)
-	}
-	return n, nil
-}
-
-// LogRange lists "<short-sha> <subject>" for the commits in from..to (newest first), capped at
-// max. Reused for both directions: a branch's own commits, and what its base has moved on by.
-func LogRange(dir, from, to string, max int) ([]string, error) {
-	args := []string{"-C", dir, "log", "--format=%h %s", "--no-merges"}
-	if max > 0 {
-		args = append(args, fmt.Sprintf("-%d", max))
-	}
-	out, err := exec.Command("git", append(args, from+".."+to)...).CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("git log %s..%s: %s: %w", from, to, strings.TrimSpace(string(out)), err)
-	}
-	var lines []string
-	for _, l := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
-		if strings.TrimSpace(l) != "" {
-			lines = append(lines, l)
-		}
-	}
-	return lines, nil
-}
-
-// RestoreFromHEAD discards uncommitted changes to paths, putting them back as HEAD has them.
-// Untracked files are left alone: they are not "changes to a file" and a silent delete is worse.
-func RestoreFromHEAD(dir string, paths []string) error {
-	args := append([]string{"-C", dir, "checkout", "HEAD", "--"}, paths...)
-	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
-		return fmt.Errorf("restore from HEAD: %s: %w", strings.TrimSpace(string(out)), err)
-	}
-	return nil
-}
-
-// RestoreFromRef puts paths back to ref's content and stages that, so it lands as a commit and so
-// leaves the agent's change. This is how churn in files a task never needed drops OUT of a PR —
-// reverting committed work, which restoring from HEAD cannot do.
-func RestoreFromRef(dir, ref string, paths []string) error {
-	args := append([]string{"-C", dir, "checkout", ref, "--"}, paths...)
-	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
-		return fmt.Errorf("restore from %s: %s: %w", ref, strings.TrimSpace(string(out)), err)
-	}
-	return nil
-}
-
 // BlockingLocalChanges returns the tracked files a merge of branch would overwrite: working-tree
 // changes that also lie in what the merge touches, so unrelated dirt is excluded.
 func BlockingLocalChanges(repo, base, branch string) []string {
@@ -639,15 +623,44 @@ func gitEnglish(dir string, args ...string) (string, error) {
 	return string(out), err
 }
 
-// Merge merges branch into base in repo with a merge commit (no fast-forward) carrying msg,
-// leaving base checked out. Returns the combined output on conflict, in English since the
+// Merge squash-merges branch into base in repo, committing the squashed diff with msg and leaving
+// base checked out. Squash, not a merge commit: base gets exactly one commit per PR however many
+// the branch accumulated, and msg becomes the whole record of the change since the branch's own
+// commit messages never reach base. Returns the combined output on conflict, in English since the
 // caller reads it. msg's shape is the caller's business — this adapter just passes it to git.
 func Merge(repo, base, branch, msg string) error {
 	if out, err := gitEnglish(repo, "checkout", base); err != nil {
 		return fmt.Errorf("checkout %s: %s: %w", base, strings.TrimSpace(out), err)
 	}
-	if out, err := gitEnglish(repo, "merge", "--no-ff", "-m", msg, branch); err != nil {
+	if out, err := gitEnglish(repo, "merge", "--squash", branch); err != nil {
 		return fmt.Errorf("merge %s: %s: %w", branch, strings.TrimSpace(out), err)
 	}
+	// A branch already fully contained in base squashes to nothing staged — what --no-ff used to
+	// report as "Already up to date" with no merge commit. `git commit` would refuse; skip it.
+	staged, err := hasStagedChanges(repo)
+	if err != nil {
+		return err
+	}
+	if !staged {
+		return nil
+	}
+	if out, err := gitEnglish(repo, "commit", "-m", msg); err != nil {
+		return fmt.Errorf("commit squashed %s: %s: %w", branch, strings.TrimSpace(out), err)
+	}
 	return nil
+}
+
+// hasStagedChanges reports whether repo's index differs from HEAD. Answered by exit code, not
+// nameOnly: that helper reads a failed git call as an empty list, which here would read a broken
+// `git diff` as "nothing staged" and report a squash merged when nothing was ever committed.
+func hasStagedChanges(repo string) (bool, error) {
+	err := exec.Command("git", "-C", repo, "diff", "--cached", "--quiet").Run()
+	if err == nil {
+		return false, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return true, nil
+	}
+	return false, fmt.Errorf("check staged diff in %s: %w", repo, err)
 }

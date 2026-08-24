@@ -79,6 +79,40 @@ func TestScrapChoiceOffersTheSubtasks(t *testing.T) {
 	}
 }
 
+// TestScrapPRChoiceOffersItsTask: scrapping a PR whose task is still open must offer to take the
+// task too — without that, the task sits open and claimable, so the same work gets redone right
+// after the PR that did it is thrown away (-> sd-1c3242). A PR whose task is already done, or one
+// with none at all, gets the plain confirm instead.
+func TestScrapPRChoiceOffersItsTask(t *testing.T) {
+	m := newModel(nil, nil, "")
+	m.state = api.BoardState{
+		Tasks: []api.Task{{ID: "td-1", Status: "open"}, {ID: "td-2", Status: "closed"}},
+		PRs: []api.PR{
+			{ID: "pr-td-1", Task: "td-1", Status: "submitted"},
+			{ID: "pr-td-2", Task: "td-2", Status: "submitted"},
+			{ID: "pr-td-3", Task: "", Status: "submitted"},
+		},
+	}
+
+	m.openScrapPRChoice("pr-td-1")
+	if got := m.choice.values; !slices.Equal(got, []string{"cancel", "pr", "prtask"}) {
+		t.Fatalf("a PR with an open task = %v, want the PR/task pair", got)
+	}
+	if !strings.Contains(m.choice.options[2], "td-1") {
+		t.Errorf("the task+PR option should name the task, got %v", m.choice.options)
+	}
+
+	m.openScrapPRChoice("pr-td-2")
+	if got := m.choice.values; !slices.Equal(got, []string{"cancel", "pr"}) {
+		t.Fatalf("a PR whose task is already done = %v, want the plain confirm", got)
+	}
+
+	m.openScrapPRChoice("pr-td-3")
+	if got := m.choice.values; !slices.Equal(got, []string{"cancel", "pr"}) {
+		t.Fatalf("a PR with no task = %v, want the plain confirm", got)
+	}
+}
+
 // TestPRFilterHidesScrapped: a scrapped PR with no recent change is hidden under open and
 // under the active default alike, appears under all, and is excluded by closed's opposite.
 func TestPRFilterHidesScrapped(t *testing.T) {

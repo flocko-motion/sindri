@@ -24,7 +24,7 @@ const testTimeout = 30 * time.Second
 func serveTestHub(t *testing.T) *hub.Hub {
 	t.Helper()
 	t.Setenv("SINDRI_HOME", t.TempDir())
-	h, err := hub.New()
+	h, err := hub.New(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func has(s []string, v string) bool {
 // real per-agent socket.
 func TestAgentSocketIdentityAndSurface(t *testing.T) {
 	t.Setenv("SINDRI_HOME", t.TempDir())
-	h, err := hub.New()
+	h, err := hub.New(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

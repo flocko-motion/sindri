@@ -70,6 +70,10 @@ func (m *model) onKey(k string) tea.Cmd {
 		m.tab = (m.tab + 1) % len(tuiSections)
 	case "shift+tab", "[": // switch tabs back ([ mirrors shift+tab)
 		m.tab = (m.tab - 1 + len(tuiSections)) % len(tuiSections)
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9": // jump straight to a tab by its header number
+		if n := int(k[0] - '0'); n <= len(tuiSections) { // out of range: leave the tab alone, no clamp
+			m.tab = n - 1
+		}
 	case "ctrl+l": // the only way to switch panes (with ctrl+h): focus the detail
 		if m.showDetail() && len(m.actionableItems()) > 0 {
 			m.rightFocus = true
@@ -129,6 +133,9 @@ func (m *model) onKey(k string) tea.Cmd {
 			return nil
 		}
 		m.moveCursor(-m.bodyHeight() / 2)
+	case keyClearFilters: // clear every narrowing on this tab at once (-> clearFilters)
+		m.clearFilters()
+		return nil
 	case keyFilter:
 		if m.tab == 0 {
 			m.filter = api.NextTaskFilter(m.filter)
@@ -138,6 +145,14 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.runFilter = api.NextRunFilter(m.runFilter)
 		} else if m.tab == 6 {
 			m.cycleMailFilter()
+		}
+	case keySearch: // tasks: open a live search over the list
+		if m.tab == 0 {
+			sel := m.selID()
+			m.taskSearchPrev, m.taskSearch = m.taskSearch, ""
+			m.openInput(inputSearch, "search tasks: ")
+			m.restoreSelection(sel)
+			return textinput.Blink
 		}
 	case "h": // tasks: collapse the fold under the cursor (tree navigation)
 		if m.tab == 0 && !m.rightFocus {
@@ -164,9 +179,9 @@ func (m *model) onKey(k string) tea.Cmd {
 				return mutateThenRefresh(cl, func() error { return cl.SetRetired(name, !back) })
 			}
 		}
-	case keyMailWho: // mail: narrow to the selected message's recipient, or widen again
+	case keyMailWho: // mail: step the recipient narrowing — everyone → you → this row → everyone
 		if m.tab == 6 {
-			m.toggleMailAgent()
+			m.cycleMailWho()
 		}
 	case keyAttach: // agents/tasks/prs/mail: attach to the live tmux session
 		if m.tab == 0 {
@@ -195,15 +210,11 @@ func (m *model) onKey(k string) tea.Cmd {
 			return m.attachTo(a)
 		}
 		if m.tab == 6 {
-			// The row names its recipient, so attach reaches the agent the message is ABOUT. Mail
-			// outlives the agent it was sent to (nothing is deleted), so a missing one is ordinary.
-			msg, ok := m.selMail()
+			// The other live party (-> mailAttachTarget); mailAttachable hides this binding when
+			// neither is, but a stale footer can still reach here, so it still needs its own answer.
+			a, ok := m.mailAttachTarget()
 			if !ok {
-				return nil
-			}
-			a, live := m.agentNamed(msg.Agent)
-			if !live {
-				m.flash = msg.Agent + " is no longer on the roster — its mail outlives it"
+				m.flash = "neither party is a live agent to attach to"
 				return nil
 			}
 			return m.attachTo(a)
@@ -270,7 +281,21 @@ func (m *model) onKey(k string) tea.Cmd {
 			return nil
 		}
 	// keyMail shares this letter (both open a prompt): on tasks it comments, on agents it mails.
-	case keyComment: // tasks: comment on the selected task · agents: mail it (waits, never interrupts)
+	case keyComment: // tasks: comment · agents: mail it · mail: reply to the selected message
+		if m.tab == 6 {
+			msg, ok := m.selMail()
+			if !ok {
+				return nil
+			}
+			if msg.Sender == "hub" || msg.Sender == "" {
+				m.flash = "nothing to reply to — that came from the hub, which has nobody behind it"
+				return nil
+			}
+			// openInput targets the selected row's id, which on this tab IS the message id — the
+			// recipient then comes from the message rather than from anything typed here.
+			m.openInput(inputMailReply, "reply to "+msg.Sender+": ")
+			return textinput.Blink
+		}
 		if m.tab == 1 && m.selID() != "" && !m.isOrphan(m.selID()) {
 			m.openInput(inputMail, "mail "+m.selID()+" (waits, never interrupts): ")
 			return textinput.Blink
@@ -463,6 +488,9 @@ func (m *model) onKey(k string) tea.Cmd {
 					}
 					m.prView = it.value // PRs: diff ⇄ lint
 					m.detail.Resize(m.detail.Height, len(m.prContentLines()))
+				case "mail": // Agents: go read what this agent has not (-> gotoItem, which narrows)
+					m.gotoItem(it.kind, it.value)
+					return nil
 				case "resume": // Agents: release an escalated agent (its own clear is `sindri resume`)
 					m.openResumeChoice(it.value)
 					return nil
@@ -471,6 +499,7 @@ func (m *model) onKey(k string) tea.Cmd {
 				case "url": // e.g. a GitHub issue: no browser in the pod's TUI, so copy it instead
 					_ = clipboard.WriteAll(it.value)
 					m.flash = "copied URL: " + it.value
+				case "mailbody": // already fully shown in the pane — `y` is the point, enter has nothing to add
 				default: // cross-reference: open its details modal
 					m.openItemModal(it.kind, it.value)
 				}
@@ -488,11 +517,20 @@ func (m *model) onKey(k string) tea.Cmd {
 			return nil
 		}
 		if m.selID() != "" { // open the full-screen detail modal
+			var markRead tea.Cmd
+			// Narrow terminal: the detail pane is ENTER-only, so this modal is the body's first
+			// appearance — marking read here plays the dwell's role (-> mailDwellFired).
+			if m.tab == 6 && !m.showDetail() && m.cl != nil {
+				if msg, ok := m.selMail(); ok && !msg.Read() && api.MailToUser(msg) {
+					cl := m.cl
+					markRead = mutateThenRefresh(cl, func() error { return cl.MarkMailRead(msg.ID) })
+				}
+			}
 			m.modal = true
 			m.detail.SetHeight(modalContentHeight(m.h))
 			m.detail.SetTotal(len(m.modalLines()))
 			m.detail.ScrollTop()
-			return nil
+			return markRead
 		}
 	case keyDetail: // toggle the detail pane (full-width selector when hidden)
 		m.hideDetail = !m.hideDetail

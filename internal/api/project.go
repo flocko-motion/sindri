@@ -8,6 +8,10 @@ package api
 
 import "path/filepath"
 
+// GlobalProject is the virtual project tag for the fleet-wide reviewer pool — no repo, so it is
+// never foreign to any of them, and both front-ends need to recognise it as such.
+const GlobalProject = "_global"
+
 // RepoName is a project tag's short repo name — its path's basename — falling back to the tag for a
 // project the registry doesn't have. One function, because both front-ends label rows with it and a
 // row placed by one name in the TUI and another in the CLI is a row the user cannot follow between

@@ -20,24 +20,24 @@ func DirContainerClaimed(container, ctitle, child, childTitle string) string {
 // DirContainerWorking is the working directive inside a feature. Claiming used to be the only place
 // the feature loop named its verb; every later `sindri` fell through to DirWorking and asked for a
 // submit that was held back mid-feature.
-func DirContainerWorking(container, task string) string {
+func DirContainerWorking(container, task string, aim, ceiling float64) string {
 	return fmt.Sprintf("Subtask %s of feature %s. Implement it, then run `sindri checkpoint \"<summary>\"` "+
 		"— that is what ends a subtask and hands you the next one; until you run it, %s stays yours and "+
 		"you'll be given it again. Checkpointing records work on the feature branch and nothing more: "+
 		"nothing of yours reaches the reference branch until a PR merges. The feature itself ends in ONE "+
 		"pull request covering the whole branch — `sindri submit \"<summary>\"` once every subtask is "+
 		"checkpointed, never per subtask. If what's on the branch is already useful to others, "+
-		"`sindri contribute \"<summary>\"` puts it up for the user to merge without ending the feature.",
-		task, container, task)
+		"`sindri contribute \"<summary>\"` puts it up for the user to merge without ending the feature.%s%s",
+		task, container, task, CommentBudgetNote(aim, ceiling), ToolingBlock())
 }
 
 // DirContainerRejected is the verdict on a feature's PR: the worker fixes the branch it is already on
 // and submits it again, the same loop a rejected leaf task follows.
-func DirContainerRejected(container, task, feedback string) string {
+func DirContainerRejected(container, task, feedback string, round int, aim, ceiling float64) string {
 	return fmt.Sprintf("The PR for feature %s was REJECTED — address this feedback on the branch you're "+
 		"already on (subtask %s is yours again; `sindri checkpoint \"<summary>\"` records a fix that "+
-		"completes it), then `sindri submit \"<summary>\"` to put the feature up again:\n\n%s",
-		container, task, feedback)
+		"completes it), then `sindri submit \"<summary>\"` to put the feature up again:\n\n%s%s%s%s",
+		container, task, feedback, GeneralizeNote(round), CommentBudgetNote(aim, ceiling), ToolingBlock())
 }
 
 // DirContainerDone is the directive once every subtask of a feature is checkpointed: the branch is
@@ -86,11 +86,12 @@ func ReplyCheckpointedParentOpen(done string, children []string, next, nextTitle
 }
 
 // ReplyFeatureGated refuses to call a feature finished while work under it awaits the user: that
-// work is undone, merely absent from the queries that hand work out. Waiting is the whole answer.
+// work is undone, merely absent from the queries that hand work out. Waiting is the whole answer —
+// also used standalone as the directive `sindri` itself returns while this holds (-> claimNextSubtask).
 func ReplyFeatureGated(container string, gated []string) string {
 	return fmt.Sprintf("Feature %s isn't finished: %s under it %s awaiting the user's approval, so "+
-		"that is work still to do rather than work you have done. Run `sindri` — it waits until the "+
-		"user rules, then hands you the subtask (or the finished feature).",
+		"that is work still to do rather than work you have done. You'll be pushed a wake once the "+
+		"user rules — asking again meanwhile just reads the same wait.",
 		container, FileList(gated), plural(len(gated), "is", "are"))
 }
 

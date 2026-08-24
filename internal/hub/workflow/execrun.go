@@ -31,6 +31,10 @@ import (
 // starves every agent behind it in the queue, so this is what stops one bad test wedging the fleet.
 const RunHardCap = 15 * time.Minute
 
+// runRemoveTimeout bounds tearing a run's container down once the command is finished or its budget
+// spent. Its own bound because `rm -f` stops before it removes, so it is the slowest verb here.
+const runRemoveTimeout = 30 * time.Second
+
 // runTimeout resolves a run's requested budget against the hard cap: unset, unparsable, or over
 // cap all fall back to the cap itself — a request can only narrow it, never widen it.
 func runTimeout(requested string) time.Duration {
@@ -43,7 +47,7 @@ func runTimeout(requested string) time.Duration {
 
 // ExecuteRun runs a queued run to completion, always leaving it in a terminal status with output
 // on record. A returned error means the run was never attempted at all.
-func (e *Engine) ExecuteRun(project, id string) error {
+func (e *Engine) ExecuteRun(ctx context.Context, project, id string) error {
 	ps := e.store.For(project)
 	r, ok, err := ps.GetRun(id)
 	if err != nil {
@@ -59,7 +63,7 @@ func (e *Engine) ExecuteRun(project, id string) error {
 		return e.finishRun(ps, project, r, "cancelled", "run: dropped before executing — "+reason+"\n", 0, 0, -1)
 	}
 	if r.Kind != "" {
-		return e.executeGateRun(ps, project, r)
+		return e.executeGateRun(ctx, ps, project, r)
 	}
 
 	root := e.deps.ProjectRoot(project)
@@ -104,11 +108,16 @@ func (e *Engine) ExecuteRun(project, id string) error {
 	if err := container.Run(opts); err != nil {
 		return e.finishRun(ps, project, r, "failed", fmt.Sprintf("run: could not start a container: %s\n", err), 0, 0, -1)
 	}
-	defer func() { _ = container.Rm(name) }()
-
 	budget := runTimeout(r.Timeout)
-	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
+	// After the bound, and with a context of its own: the removal is this run's last act, and a
+	// budget already spent (or a hub shutting down) must not take the teardown with it.
+	defer func() {
+		rmCtx, rmCancel := context.WithTimeout(context.WithoutCancel(ctx), runRemoveTimeout)
+		defer rmCancel()
+		_ = container.RmContext(rmCtx, name)
+	}()
 	start := time.Now()
 	out, execErr := container.ExecContext(ctx, name, "sh", "-c", r.Command)
 	elapsed := time.Since(start)
@@ -147,8 +156,9 @@ func exitCodeOf(err error) int {
 // scheduling agent has since left behind.
 func (e *Engine) staleReason(ps *store.ProjectStore, r api.Run) string {
 	// Nothing to go stale: no roster entry, no task. Dropping one for a missing "agent" named user
-	// would silently discard the run a human is sitting there waiting for.
-	if api.RunFromUser(r) {
+	// would silently discard the run a human is sitting there waiting for, and a gate on a PR names
+	// its subject, which is checked when it executes (-> gateTree).
+	if api.RunFromUser(r) || gateOnAPR(r) {
 		return ""
 	}
 	_, ok, err := ps.GetAgent(r.Agent)
@@ -208,7 +218,7 @@ func (s *runCancelSet) consume(id string) bool {
 
 // CancelRun withdraws a queued run, or kills a running one's container so the slot frees now
 // rather than waiting out its timeout — leaving ExecuteRun's own goroutine to record the finish.
-func (e *Engine) CancelRun(project, id string) error {
+func (e *Engine) CancelRun(ctx context.Context, project, id string) error {
 	ps := e.store.For(project)
 	r, ok, err := ps.GetRun(id)
 	if err != nil {
@@ -222,7 +232,9 @@ func (e *Engine) CancelRun(project, id string) error {
 	}
 	if r.Status == "running" {
 		e.runCancels.request(id)
-		_ = container.Rm(e.deps.Container(project, "run-"+id))
+		rmCtx, rmCancel := context.WithTimeout(context.WithoutCancel(ctx), runRemoveTimeout)
+		defer rmCancel()
+		_ = container.RmContext(rmCtx, e.deps.Container(project, "run-"+id))
 		return nil
 	}
 	if err := ps.SetRunStatus(id, "cancelled"); err != nil {
@@ -235,7 +247,7 @@ func (e *Engine) CancelRun(project, id string) error {
 // ReconcileRunningRuns runs at hub startup: a run still "running" was orphaned by the last hub
 // dying mid-execution — the ReconcileMergingPRs precedent, applied here so a ghost never sits on
 // the fleet's only slot forever.
-func (e *Engine) ReconcileRunningRuns() {
+func (e *Engine) ReconcileRunningRuns(ctx context.Context) {
 	runs, err := e.store.AllRuns("running")
 	if err != nil {
 		log.Printf("hub: reconcile running runs: %v", err)
@@ -243,7 +255,9 @@ func (e *Engine) ReconcileRunningRuns() {
 	}
 	for _, r := range runs {
 		ps := e.store.For(r.Project)
-		_ = container.Rm(e.deps.Container(r.Project, "run-"+r.ID))
+		rmCtx, rmCancel := context.WithTimeout(context.WithoutCancel(ctx), runRemoveTimeout)
+		_ = container.RmContext(rmCtx, e.deps.Container(r.Project, "run-"+r.ID))
+		rmCancel()
 		// "cancelled", not "failed": nothing here found a violation or a broken build, and a gate
 		// run reconciled this way must not read as one either (-> stallGate, not rejectGate).
 		note := "run: hub restarted mid-run — outcome unknown; its container has been removed.\n"

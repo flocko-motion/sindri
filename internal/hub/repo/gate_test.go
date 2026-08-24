@@ -45,7 +45,7 @@ func TestGateRefusesOnAFailingVerify(t *testing.T) {
 	wt := worktree(t, true)
 	script(t, wt, "scripts/verify.sh", "echo 'FAIL: architecture test'\nexit 1\n")
 
-	out, ok := Gate(wt, passingLint(t, wt), "scripts/verify.sh")
+	out, ok := Gate(t.Context(), wt, passingLint(t, wt), "scripts/verify.sh")
 	if ok {
 		t.Fatal("a failing verify must refuse the submit")
 	}
@@ -62,7 +62,7 @@ func TestGatePassesWhenVerifyPasses(t *testing.T) {
 	wt := worktree(t, true)
 	script(t, wt, "scripts/verify.sh", "echo all good\nexit 0\n")
 
-	out, ok := Gate(wt, passingLint(t, wt), "scripts/verify.sh")
+	out, ok := Gate(t.Context(), wt, passingLint(t, wt), "scripts/verify.sh")
 	if !ok {
 		t.Fatalf("a passing verify must let the submit through, got:\n%s", out)
 	}
@@ -77,7 +77,7 @@ func TestGateRunsWhateverTheLanguage(t *testing.T) {
 	wt := worktree(t, false) // no go.mod: a TypeScript repo, say
 	script(t, wt, "verify", "echo 'tsc failed'\nexit 1\n")
 
-	out, ok := Gate(wt, passingLint(t, wt), "verify")
+	out, ok := Gate(t.Context(), wt, passingLint(t, wt), "verify")
 	if ok {
 		t.Fatalf("a declared gate must run on a non-Go tree, got:\n%s", out)
 	}
@@ -89,31 +89,35 @@ func TestGateRunsWhateverTheLanguage(t *testing.T) {
 // TestGateUnchangedWithoutAVerifyKey: existing repos must submit exactly as before — including the
 // pass for a tree with no go.mod, which is current behaviour and not this change's to alter.
 func TestGateUnchangedWithoutAVerifyKey(t *testing.T) {
-	if out, ok := Gate(worktree(t, false), passingLint(t, t.TempDir()), ""); !ok || out != "" {
+	if out, ok := Gate(t.Context(), worktree(t, false), passingLint(t, t.TempDir()), ""); !ok || out != "" {
 		t.Errorf("a non-Go tree with no declared gate should pass silently, got ok=%v out=%q", ok, out)
 	}
 
 	wt := worktree(t, true)
 	script(t, wt, "failing-lint", "echo 'lint: bad'\nexit 1\n")
 	resolve := func() (string, error) { return filepath.Join(wt, "failing-lint"), nil }
-	if out, ok := Gate(wt, resolve, ""); ok {
+	if out, ok := Gate(t.Context(), wt, resolve, ""); ok {
 		t.Errorf("the built-in lint must still refuse, got:\n%s", out)
 	}
 }
 
-// TestGateRefusesBeforeRunningVerifyWhenLintFails: the built-in runs first, so a lint failure is
-// reported without spending minutes on a build the work has already failed.
-func TestGateRefusesBeforeRunningVerifyWhenLintFails(t *testing.T) {
+// TestADeclaredGateOwnsTheLinter: ONE of the two checks runs, never both. A project's verify script
+// is the thing that can run the built-in linter itself (this repo's does), so running the linter here
+// too meant paying for the same ~15 seconds twice on every gate in the fleet.
+func TestADeclaredGateOwnsTheLinter(t *testing.T) {
 	wt := worktree(t, true)
-	script(t, wt, "failing-lint", "echo 'lint: bad'\nexit 1\n")
+	script(t, wt, "failing-lint", "echo 'BUILT-IN-RAN'\nexit 1\n")
 	script(t, wt, "verify", "echo VERIFY-RAN\nexit 0\n")
 
-	out, ok := Gate(wt, func() (string, error) { return filepath.Join(wt, "failing-lint"), nil }, "verify")
-	if ok {
-		t.Fatal("a failing built-in lint must refuse")
+	out, ok := Gate(t.Context(), wt, func() (string, error) { return filepath.Join(wt, "failing-lint"), nil }, "verify")
+	if !ok {
+		t.Fatalf("the declared gate passed, so the gate passes — got:\n%s", out)
 	}
-	if strings.Contains(out, "VERIFY-RAN") {
-		t.Errorf("the declared gate should not run once the built-in has already refused:\n%s", out)
+	if strings.Contains(out, "BUILT-IN-RAN") {
+		t.Errorf("the built-in linter must not run beside a declared gate:\n%s", out)
+	}
+	if !strings.Contains(out, "VERIFY-RAN") {
+		t.Errorf("the declared gate's own output must come back:\n%s", out)
 	}
 }
 
@@ -121,7 +125,7 @@ func TestGateRefusesBeforeRunningVerifyWhenLintFails(t *testing.T) {
 // fault, and saying so beats a bare non-zero exit.
 func TestGateReportsAMissingCommand(t *testing.T) {
 	wt := worktree(t, true)
-	out, ok := Gate(wt, passingLint(t, wt), "scripts/not-there.sh")
+	out, ok := Gate(t.Context(), wt, passingLint(t, wt), "scripts/not-there.sh")
 	if ok {
 		t.Fatal("a missing gate command must refuse rather than pass")
 	}

@@ -8,9 +8,11 @@
 package workflow
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/api"
@@ -22,9 +24,9 @@ import (
 // the author looking; the whole list of a wide conflict is not evidence, it is noise.
 const prCheckPaths = 10
 
-// preflight serialises the checks and remembers what has already been answered. ONE AT A TIME, and
-// one PR per sweep: tier 2 may build and test, so several open PRs on a moving base would otherwise
-// leave the host permanently busy.
+// preflight serialises the DECIDING and remembers what has already been answered — one PR per sweep,
+// so a moving base cannot queue a check per open PR at once. What keeps two checks from building at
+// the same time is the run queue they now go through, not this mutex (-> executePrecheckRun).
 type preflight struct {
 	mu   sync.Mutex
 	seen map[string]string // PR id -> the base and tips already checked (-> prCheckKey)
@@ -103,37 +105,73 @@ func (e *Engine) preflightWanted(pr store.PR, root, base, baseTip string) bool {
 	return true
 }
 
-// preflightPR is tier 2: materialise what would land and gate it. Its rebase is the definitive
-// applies-answer — the same replay the merge performs, in a tree nobody is working in.
+// preflightPR is tier 2: QUEUE the materialise-and-gate, rather than run it here. The check builds
+// and tests, so it belongs in the fleet's one slot with every other gate — its own mutex kept two
+// prechecks apart but nothing kept one out of a submitting agent's way.
 func (e *Engine) preflightPR(project string, ps *store.ProjectStore, pr store.PR, root, base, baseTip string) {
 	branchTip, err := git.BranchTip(root, pr.Branch)
 	if err != nil {
 		return
 	}
+	// Marked as answered when the work is QUEUED, not when it lands: the sweep runs every 30s and a
+	// gate takes minutes, so re-asking while the run waits would queue the same check many times.
 	e.pre.seen[pr.ID] = prCheckKey(base, baseTip, branchTip)
+	if e.queuedPrecheck(ps, pr.ID) {
+		return // one is already waiting, and it will answer about the tips it finds when it runs
+	}
+	if _, err := e.putRun(project, store.Run{
+		Agent: api.SenderSystem, Kind: gatePrecheck, Message: pr.ID,
+		Command: "gate: precheck " + pr.ID + " onto " + base,
+	}); err != nil {
+		_ = ps.LogPR(pr.ID, "precheck-skipped", trimTo(err.Error(), 200))
+	}
+}
 
+// executePrecheckRun is that check, from the queue: build what a merge would produce and gate it.
+// The rebase is the definitive applies-answer — the same replay the merge performs, in a tree
+// nobody is working in. ADVISORY throughout: the finding is logged on the PR and nobody is told.
+func (e *Engine) executePrecheckRun(ctx context.Context, ps *store.ProjectStore, project string, r api.Run) error {
+	pr, ok, err := ps.GetPR(r.Message)
+	if err != nil || !ok {
+		return e.finishRun(ps, project, r, "cancelled", "precheck: "+r.Message+" is gone\n", 0, 0, -1)
+	}
+	root := e.deps.ProjectRoot(project)
+	fallback, _ := e.baseBranch(root)
+	base, _, resolved := e.prBase(root, pr, fallback)
+	if !resolved {
+		return e.finishRun(ps, project, r, "cancelled", "precheck: the base of "+pr.ID+" is gone\n", 0, 0, -1)
+	}
+	if err := ps.SetRunStatus(r.ID, "running"); err != nil {
+		return err
+	}
+	e.deps.Notify()
+	start := time.Now()
 	path, conflicts, err := repo.MaterializeCombined(root, pr.Branch, base)
 	defer repo.RemoveCombined(root)
 	if err != nil {
 		// The check itself failed — say so as a check failure, never as a finding about the PR.
 		_ = ps.LogPR(pr.ID, "precheck-skipped", trimTo(err.Error(), 200))
-		return
+		return e.finishRun(ps, project, r, "cancelled", "precheck: "+err.Error()+"\n", time.Since(start), RunHardCap, -1)
 	}
 	if len(conflicts) > 0 {
 		_ = ps.LogPR(pr.ID, "precheck-conflict", conflictNote(base, conflicts))
-		e.deps.Notify()
-		return
+		return e.finishRun(ps, project, r, "failed", conflictNote(base, conflicts)+"\n", time.Since(start), RunHardCap, 1)
 	}
-	out, passed := repo.Gate(path, e.deps.BrokkrBin, e.verifyCmd(project))
+	sha, err := git.Head(path)
+	if err != nil {
+		return e.finishRun(ps, project, r, "cancelled", "precheck: "+err.Error()+"\n", time.Since(start), RunHardCap, -1)
+	}
+	// Not recorded against the commit: the combined replay is thrown away with its worktree, so a
+	// verdict about that sha could never be reused (-> gateOnce).
+	out, passed := e.gateOnce(ctx, project, path, sha)
 	if passed {
 		_ = ps.LogPR(pr.ID, "precheck-pass", "applies onto "+base+" and the gate passes on the combined result")
-		e.deps.Notify()
-		return
+		return e.finishRun(ps, project, r, "passed", out, time.Since(start), RunHardCap, 0)
 	}
 	// Quote the failure. A bare "the gate fails" makes the author reproduce the whole run to find
 	// out what it was, and the combined tree it failed in no longer exists by then.
 	_ = ps.LogPR(pr.ID, "precheck-gate-fail", "combined with "+base+" the gate fails:\n"+trimTo(out, 1200))
-	e.deps.Notify()
+	return e.finishRun(ps, project, r, "failed", out, time.Since(start), RunHardCap, 1)
 }
 
 // prCheckKey is what a PR has already been answered at. The base NAME is in it, not just its tip:

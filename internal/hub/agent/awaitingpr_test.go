@@ -1,0 +1,54 @@
+package agent
+
+import (
+	"testing"
+
+	"github.com/flo-at/sindri/internal/hub/store"
+)
+
+// awaitingAuthor seeds a worker holding no task in its state row, with one PR of the given status
+// against sd-1 — the shape a submit leaves, and the shape a rejection returns to.
+func awaitingAuthor(t *testing.T, status string) *Service {
+	t.Helper()
+	_, st := newService(t)
+	s := New(st, clearTestDeps{}, nil)
+	ps := st.For("proj")
+	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Phase: "idle"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutPR(store.PR{ID: "pr-sd-1", Task: "sd-1", Agent: "eitri", Branch: "sd-1", Status: status}); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// TestAPRAwaitingAVerdictIsNotABoundary: austri sat waiting on a review with its state row empty,
+// so every reader called it free. Compaction there cuts away the context that knows what it awaits.
+func TestAPRAwaitingAVerdictIsNotABoundary(t *testing.T) {
+	for _, status := range []string{"open", "rejected", "approved"} {
+		s := awaitingAuthor(t, status)
+		if at, err := s.AtLeafBoundary("proj", "eitri"); err != nil || at {
+			t.Errorf("status %q: AtLeafBoundary = (%v, %v), want held — the task is its until the PR lands", status, at, err)
+		}
+		if nothing, err := s.HoldsNothing("proj", "eitri", "worker"); err != nil || nothing {
+			t.Errorf("status %q: HoldsNothing = (%v, %v), want holding", status, nothing, err)
+		}
+	}
+}
+
+// TestASettledPRHoldsNothing is the control: once it merges or is scrapped the work really is over,
+// and an agent that can never be freed is as broken as one freed too early.
+func TestASettledPRHoldsNothing(t *testing.T) {
+	for _, status := range []string{"merged", "scrapped"} {
+		s := awaitingAuthor(t, status)
+		if at, err := s.AtLeafBoundary("proj", "eitri"); err != nil || !at {
+			t.Errorf("status %q: AtLeafBoundary = (%v, %v), want a boundary", status, at, err)
+		}
+		if nothing, err := s.HoldsNothing("proj", "eitri", "worker"); err != nil || !nothing {
+			t.Errorf("status %q: HoldsNothing = (%v, %v), want nothing held", status, nothing, err)
+		}
+	}
+}

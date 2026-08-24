@@ -20,9 +20,7 @@ import (
 // under the name every existing caller here already uses.
 type Mail = api.Mail
 
-// mailSchema is the mailbox. APPEND-ONLY BY DESIGN — no delete, no expiry: reading sets read_at, so
-// the rows are the record of what an agent was told. Affordable because push-only traffic (a nudge, a
-// broadcast) is never stored here at all, leaving one-shot consequence to accumulate.
+// mailSchema is the mailbox: APPEND-ONLY, no delete or expiry — reading only sets read_at.
 const mailSchema = `
 CREATE TABLE IF NOT EXISTS mail (
   id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,21 +30,29 @@ CREATE TABLE IF NOT EXISTS mail (
   body    TEXT NOT NULL DEFAULT '',
   sent_at TEXT NOT NULL DEFAULT '',
   read_at TEXT NOT NULL DEFAULT '',-- '' = unread; set when the agent reads it, never cleared
-  pushed  INTEGER NOT NULL DEFAULT 0 -- the same message was also injected, so it may have been seen live
+  pushed  INTEGER NOT NULL DEFAULT 0, -- the same message was also injected, so it may have been seen live
+  -- The message this one answers (0 = starts a thread), so an exchange reads as an exchange rather
+  -- than as scattered rows the recipient has to match up by hand.
+  in_reply_to INTEGER NOT NULL DEFAULT 0,
+  -- The hub has since told the recipient this message is waiting. NOT the pushed column, which says the
+  -- text itself was injected at delivery: one means "it may have acted on this already", the other "it
+  -- has been told there is something to read". Per-message and durable, so a restart announces nothing
+  -- a second time.
+  notified INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS mail_agent ON mail (project, agent, id);
 `
 
-const mailCols = `SELECT id, project, agent, sender, body, sent_at, read_at, pushed FROM mail`
+const mailCols = `SELECT id, project, agent, sender, body, sent_at, read_at, pushed, in_reply_to FROM mail`
 
 // AddMail records a message an agent must read, returning the stored row. pushed says whether it was
 // also injected — "pushed and possibly missed" and "sitting here unread" are different diagnoses.
-func (p *ProjectStore) AddMail(agent, sender, body string, pushed bool) (Mail, error) {
+func (p *ProjectStore) AddMail(agent, sender, body string, pushed bool, inReplyTo int64) (Mail, error) {
 	m := Mail{Project: p.project, Agent: agent, Sender: sender, Body: body,
-		SentAt: time.Now().UTC().Format(time.RFC3339), Pushed: pushed}
+		SentAt: time.Now().UTC().Format(time.RFC3339), Pushed: pushed, InReplyTo: inReplyTo}
 	res, err := p.s.db.Exec(
-		`INSERT INTO mail (project, agent, sender, body, sent_at, pushed) VALUES (?,?,?,?,?,?)`,
-		m.Project, m.Agent, m.Sender, m.Body, m.SentAt, m.Pushed)
+		`INSERT INTO mail (project, agent, sender, body, sent_at, pushed, in_reply_to) VALUES (?,?,?,?,?,?,?)`,
+		m.Project, m.Agent, m.Sender, m.Body, m.SentAt, m.Pushed, m.InReplyTo)
 	if err != nil {
 		return Mail{}, fmt.Errorf("add mail for %s/%s: %w", p.project, agent, err)
 	}
@@ -67,9 +73,7 @@ func (p *ProjectStore) MarkMailRead(id int64) error {
 	return nil
 }
 
-// MarkMailPushed records that the wake for this message actually landed. Set after the injection
-// SUCCEEDS, never from the sender's intent: a row claiming a push that never reached a down agent
-// would erase the difference between "it may have acted on this already" and "nothing reached it".
+// MarkMailPushed is set only when the injection actually SUCCEEDS, never from intent alone.
 func (p *ProjectStore) MarkMailPushed(id int64) error {
 	_, err := p.s.db.Exec(`UPDATE mail SET pushed=1 WHERE id=? AND project=?`, id, p.project)
 	if err != nil {
@@ -78,11 +82,38 @@ func (p *ProjectStore) MarkMailPushed(id int64) error {
 	return nil
 }
 
-// UnreadMail is an agent's unread messages, OLDEST FIRST — the order they were sent is the order
-// they make sense in, since a later message often supersedes an earlier one.
+// UnreadMail is an agent's unread messages, OLDEST FIRST — a later one often supersedes an earlier one.
 func (p *ProjectStore) UnreadMail(agent string) ([]Mail, error) {
 	return queryMail(p.s.db, mailCols+` WHERE project=? AND agent=? AND read_at='' ORDER BY id`,
 		p.project, agent)
+}
+
+// Mail returns every message in this project, newest first — mail list's whole-project scope.
+func (p *ProjectStore) Mail() ([]Mail, error) {
+	return queryMail(p.s.db, mailCols+` WHERE project=? ORDER BY id DESC`, p.project)
+}
+
+// UnannouncedMail counts what a nudge is about — per message, not a timer, so nothing is announced twice.
+func (p *ProjectStore) UnannouncedMail(agent string) (unannounced, unread int, err error) {
+	err = p.s.db.QueryRow(
+		`SELECT COUNT(*), COALESCE(SUM(notified = 0 AND pushed = 0), 0) FROM mail WHERE project=? AND agent=? AND read_at=''`,
+		p.project, agent).Scan(&unread, &unannounced)
+	if err != nil {
+		return 0, 0, fmt.Errorf("unannounced mail for %s: %w", agent, err)
+	}
+	return unannounced, unread, nil
+}
+
+// MarkMailAnnounced records that the agent has been told about everything now waiting — one statement, so
+// marking cannot outrun what was announced and lose a message for ever.
+func (p *ProjectStore) MarkMailAnnounced(agent string) error {
+	_, err := p.s.db.Exec(
+		`UPDATE mail SET notified=1 WHERE project=? AND agent=? AND read_at='' AND notified=0`,
+		p.project, agent)
+	if err != nil {
+		return fmt.Errorf("mark mail announced for %s: %w", agent, err)
+	}
+	return nil
 }
 
 // UnreadMailCount is how many messages an agent has not read — what the directive reminds it of.
@@ -132,24 +163,36 @@ func (s *Store) AllMail(limit int) ([]Mail, error) {
 	return queryMail(s.db, q, args...)
 }
 
-// MailTallies is how many messages exist and how many are unread, per project and fleet-wide. Counted
-// here, not over the window: a badge derived from a window stops rising, and "N of M" needs the real M.
-func (s *Store) MailTallies() (total, unread int, byProject map[string]int, err error) {
+// MailTallies is every board number in ONE PASS over the whole table — rebuilt per notify per client.
+func (s *Store) MailTallies() (total, unread, userUnread int, byProject map[string]int, err error) {
 	byProject = map[string]int{}
-	rows, qerr := s.db.Query(`SELECT project, COUNT(*), SUM(read_at = '') FROM mail GROUP BY project`)
+	rows, qerr := s.db.Query(
+		`SELECT project, COUNT(*), SUM(read_at = ''), SUM(read_at = '' AND agent = ?) FROM mail GROUP BY project`,
+		api.SenderUser)
 	if qerr != nil {
-		return 0, 0, nil, fmt.Errorf("mail tallies: %w", qerr)
+		return 0, 0, 0, nil, fmt.Errorf("mail tallies: %w", qerr)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var project string
-		var n, u int
-		if err := rows.Scan(&project, &n, &u); err != nil {
-			return 0, 0, nil, fmt.Errorf("scan mail tally: %w", err)
+		var n, u, mine int
+		if err := rows.Scan(&project, &n, &u, &mine); err != nil {
+			return 0, 0, 0, nil, fmt.Errorf("scan mail tally: %w", err)
 		}
-		total, unread, byProject[project] = total+n, unread+u, u
+		total, unread, userUnread, byProject[project] = total+n, unread+u, userUnread+mine, u
 	}
-	return total, unread, byProject, rows.Err()
+	return total, unread, userUnread, byProject, rows.Err()
+}
+
+// NotesToUserSince counts UNPROMPTED notes only — a reply never counts against the ceiling.
+func (s *Store) NotesToUserSince(t time.Time) (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM mail WHERE agent=? AND in_reply_to=0 AND sent_at >= ?`,
+		api.SenderUser, t.UTC().Format(time.RFC3339)).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("notes to the user since %s: %w", t, err)
+	}
+	return n, nil
 }
 
 // MailByID returns one message with its FULL body, from any project — what the detail view and
@@ -184,6 +227,6 @@ func queryMail(db *sql.DB, q string, args ...any) ([]Mail, error) {
 
 func scanMail(row scanner) (Mail, error) {
 	var m Mail
-	err := row.Scan(&m.ID, &m.Project, &m.Agent, &m.Sender, &m.Body, &m.SentAt, &m.ReadAt, &m.Pushed)
+	err := row.Scan(&m.ID, &m.Project, &m.Agent, &m.Sender, &m.Body, &m.SentAt, &m.ReadAt, &m.Pushed, &m.InReplyTo)
 	return m, err
 }

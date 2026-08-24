@@ -73,11 +73,11 @@ func taskStatusStyle(status string) lipgloss.Style {
 // move), green working (leave it), orange transitioning, grey down.
 func agentStatusStyle(status string) lipgloss.Style {
 	switch status {
-	case "down":
+	case "down", "stopped":
 		return stDone
 	case "launching", "stopping":
 		return stTrans
-	case "blocked", "stalled", "full", "signed-out", "api-error":
+	case "blocked", "stalled", "signed-out", "api-error", "launch-failed":
 		return stCrit // all need a human; a signed-out agent cannot even be told anything
 	case "idle":
 		return stWarn

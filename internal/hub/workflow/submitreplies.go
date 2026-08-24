@@ -15,9 +15,11 @@ const DirSubmitted = "Your pull request is under review. Wait — the hub will t
 	"the task back to you on the same branch, so you can finish it and submit again."
 
 // DirGating answers a worker whose submit/contribute is queued for its quality gate — there is no
-// PR yet, so DirSubmitted's wording would claim one exists. Wait only.
-const DirGating = "Your quality gate is queued — wait for the result, which arrives as a message " +
-	"(a PR if it passes, feedback to fix if it fails). Nothing to check in the meantime."
+// PR yet, so DirSubmitted's wording would claim one exists. A failure reaches it as a message
+// either way; a pass moves it straight to review WITHOUT one, since nothing about that changes what
+// it does next — asking again is how it would notice, not required to.
+const DirGating = "Your quality gate is queued. A failure reaches you as a message, with what to " +
+	"fix. A pass sends nothing — you're simply moved to review; ask `sindri` again if you want to see it."
 
 // ReplyRegistered acknowledges a submitted PR and tells the worker to wait for review.
 func ReplyRegistered(prID string) string {
@@ -25,15 +27,46 @@ func ReplyRegistered(prID string) string {
 }
 
 // ReplyGateQueued answers submit/contribute at once: the gate is queued, not run yet, so there is
-// no PR to name — position is the same fact `sindri run` reports.
+// no PR to name — position is the same fact `sindri run` reports. Same asymmetry as DirGating: a
+// failure is worth a message, a pass isn't.
 func ReplyGateQueued(runID string, position int) string {
-	return fmt.Sprintf("Quality gate %s queued at position %d. You'll be told the result — no need to ask again.", runID, position)
+	return fmt.Sprintf("Quality gate %s queued at position %d. A failure reaches you as a message; a pass moves you to review without one.", runID, position)
+}
+
+// ReplyGateReused answers a landing verb whose commit already has a passing verdict: nothing ran, so
+// the continuation has ALREADY happened by the time this is printed — which is why it points at the
+// message rather than restating it. A reused pass that read like a fresh one would hide both facts.
+func ReplyGateReused(runID, sha string) string {
+	return fmt.Sprintf("Quality gate %s did not need to run: %s already passed and nothing has changed "+
+		"since, so the result stands. What follows it has already been sent to you — read that, not this.", runID, sha)
+}
+
+// ReplyLintQueued answers `lint` with no stored verdict for the commit: the gate builds and tests, so
+// it goes through the fleet's single slot like every other one rather than running N at a time.
+func ReplyLintQueued(runID, sha string, position int) string {
+	return fmt.Sprintf("Quality gate %s queued at position %d, on your work as the hub recorded it (%s). You'll "+
+		"be told the result — carry on with something else; a position is not a failure, so don't retry.", runID, position, sha)
 }
 
 // ReplyReviewRequestFailed tells a submitting agent its PR is up but requesting a review failed
 // (-> RepairReviewRows retries it in the background).
 func ReplyReviewRequestFailed(prID string, err error) string {
 	return fmt.Sprintf("%s registered, but requesting a review failed: %v. The hub retries this on its own; flag it if %s is still showing no reviewer after a while.", prID, err, prID)
+}
+
+// ReplyPRStillToLand refuses to end a task whose PR has not merged. Names the way out, since a
+// rejected author is in the state that most looks finished and is not.
+func ReplyPRStillToLand(task, pr string) string {
+	return fmt.Sprintf("Not closing %s: %s has not merged, so the task is still yours. If it was rejected, "+
+		"answer the feedback and `sindri submit` again — a task ends when its PR lands, never before.", task, pr)
+}
+
+// ReplySubmitTaskClosed refuses a submission whose target closed under it. It states the fact and
+// stops there: nothing the agent can fix, and nothing gained by gating work with nowhere to land.
+func ReplySubmitTaskClosed(task string) string {
+	return fmt.Sprintf("Not submitted: task %s is closed, so there is nothing for a pull request to land into. "+
+		"Your work is committed and your branch keeps it. Do not submit again — if what is on it is still "+
+		"wanted, `sindri escalate` says so; otherwise run `sindri` for new work.", task)
 }
 
 // ReplyNotWorking guards a work verb run in a phase it doesn't apply to. It must name the ACTUAL
@@ -143,9 +176,16 @@ func ReplyAlreadyCurrent(base string) string {
 	return fmt.Sprintf("Your branch is already current with %s — nothing to resolve.", base)
 }
 
-// ReplyTaskProposed acknowledges a planner's proposed task, pending user approval.
-func ReplyTaskProposed(id, title string) string {
-	return fmt.Sprintf("Proposed %s: %s — awaiting the user's approval before any worker can pick it up.", id, title)
+// ReplyReapplyResolved answers `resolve` once a milestone's post-merge reapply conflict is
+// cleared. Unlike ReplyResolvedClean, nothing goes back to a reviewer — the merge already landed.
+func ReplyReapplyResolved() string {
+	return "Resolved. The merge already landed, so there's nothing to resubmit — run `sindri` to carry on."
+}
+
+// ReplyTaskProposed acknowledges a planner's proposed task, pending user approval. nudge is the
+// unparented-siblings reminder (-> unparentedNudge), empty when there's nothing recent to name.
+func ReplyTaskProposed(id, title, nudge string) string {
+	return fmt.Sprintf("Proposed %s: %s — awaiting the user's approval before any worker can pick it up.%s", id, title, nudge)
 }
 
 // ReplyBehindBase refuses a submit whose branch the reference has moved past, naming how far behind
@@ -159,19 +199,22 @@ func ReplyBehindBase(base string, behind int, incoming []string) string {
 		behind, base, commitList(incoming))
 }
 
-// ReplyLintFail echoes the violations, and says a finding is to be MET, not evaded: relocating
-// prose or widening a limit clears the report while leaving the problem the rule exists for.
-func ReplyLintFail(out string) string {
-	return fmt.Sprintf("Lint failed — fix the violations and submit again:\n%s\n"+
-		"Meet each finding on its own terms; do NOT work around the linter. If a comment is "+
-		"too long, CUT WORDS — don't move it somewhere the rule doesn't reach, don't split it "+
-		"or pad the file with one-liners to shift an average, don't widen an ignore list, and "+
-		"don't retune limits in .sindri/config.yaml (those are the maintainer's call).\n"+
-		"Every limit is a CEILING, not a target. Don't trim until the number just passes — "+
-		"trim until the comment earns its lines. A single line suffices for most: say what the "+
-		"thing is for, or why it isn't done the obvious way, and stop. Land well under the "+
-		"limit, or the next comment anyone adds puts the file straight back over it.", out)
+// ReplyGateFail echoes what the gate found and states the one rule agents keep discovering the
+// expensive way: it passes only if EVERYTHING passes. One resubmitted the same failing test three
+// times, having correctly judged it pre-existing — a fact the gate cannot act on and never claimed to.
+func ReplyGateFail(out string) string {
+	return fmt.Sprintf("The quality gate FAILED, so no PR was created:\n%s\n%s", out, gateRule)
 }
+
+// gateRule is why a resubmission of the same tree is wasted: the gate reports what is broken, never
+// who broke it, so "pre-existing" and "unrelated" change nothing about the verdict. Escalation is the
+// way out when a fault genuinely belongs outside the task — nothing else here is.
+const gateRule = "The gate passes only if EVERYTHING passes. It does not ask who caused a failure " +
+	"and cannot: pre-existing, unrelated, somebody else's — the verdict is the same, and every line " +
+	"in this repo was written by an agent, so there is nobody else to hand it to. Submitting the same " +
+	"tree again returns this same result and spends the fleet's one run slot doing it. Two ways " +
+	"forward: fix it, whoever wrote it; or `sindri escalate \"<what needs deciding>\"` if it truly " +
+	"belongs outside your task and the user must rule on it."
 
 // ReplySpecInvalid answers `openspec submit` when the change fails openspec's own
 // validation (the planner's gate — the code linter doesn't apply to spec work).

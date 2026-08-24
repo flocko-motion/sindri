@@ -70,6 +70,32 @@ Each non-test `.go` file opens with the four-field header `brokkr map` reads, an
 may extend describes nothing, and a file that fits none of the seven is usually a
 file doing two jobs. `internal/arch/vocab_test.go` fails the build on an eighth.
 
+## Context is handed through, never invented
+
+`context.Background()` belongs at an **entrypoint** — a `main`, a server's request
+root, a background loop where it starts. Everywhere below that, a function takes the
+caller's context and passes it on, narrowing it where the work needs its own bound:
+`context.WithTimeout(ctx, probeTimeout)` around a probe, never a fresh root.
+
+Inventing one at depth cuts two wires at once. Cancellation stops reaching the work,
+so an operation the caller has abandoned runs on; and a root carries no deadline to
+inherit, so a wedged dependency blocks its caller for ever. Both have happened here —
+a liveness probe on `context.Background()` held every board read open until podman
+answered, which under load it did not.
+
+In the hub this resolves into three lineages, and every call belongs to one of them.
+A **read** takes the request's context, so abandoning the request abandons the work.
+Work the hub must **finish** whatever the client then does — a pod coming up, a pod
+going away, a message landing — takes that context with its cancellation dropped
+(`hub.detached`), which keeps the lineage visible at the handler where the decision
+belongs. **Fleet-side** work the hub does on its own account runs under the hub's
+**lifetime** (`Hub.lifetime`, cut from the root `main` hands to `hub.New`): its loops,
+and the pushes it makes through a port whose signature carries no context of its own.
+
+`internal/arch/context_test.go` holds the line: a file that starts a context must be on
+its list with the reason it is an entrypoint, and an entry that stops rooting anything
+has to go — so the argument stays on record rather than being remembered.
+
 ## Topology
 
 There is **one hub per machine** — the single global coordinator that owns all

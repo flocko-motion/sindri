@@ -38,14 +38,16 @@ func TestClearConfirmStatesWhenItLands(t *testing.T) {
 	}
 }
 
-// TestCTogglesOffWithoutAModal: cancelling a destructive action is not itself destructive, so the
-// second press just takes the arming back. A confirm there is friction with nothing behind it.
+// TestCTogglesOffWithoutAModal: cancelling a destructive action is not itself destructive, so
+// disarming stays reachable bare — no confirm, no prefix, friction with nothing behind it.
+// Arming is the destructive direction: it commits (sd-6d0ff2), so it opens the confirm only from
+// behind the space prefix.
 func TestCTogglesOffWithoutAModal(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.tab = 1
 	m.state = agentsBoard(api.AgentView{Project: "repo", Name: "dvalin", Role: "worker", Status: "idle", ClearArmed: true})
 	m.reclamp()
-	m.onKey(keyClearCtx)
+	m.onKey(keyClearCtx) // disarm: bare, no prefix needed
 	if m.choice.active {
 		t.Errorf("disarming must not ask: %q", m.choice.title)
 	}
@@ -53,14 +55,19 @@ func TestCTogglesOffWithoutAModal(t *testing.T) {
 		t.Errorf("the user should be told the arming is gone, got %q", m.flash)
 	}
 
-	// And with nothing armed, the same key confirms instead.
+	// And with nothing armed, the same bare key must do nothing — arming commits.
 	m2 := newModel(nil, nil, "")
 	m2.tab = 1
 	m2.state = agentsBoard(api.AgentView{Project: "repo", Name: "dvalin", Role: "worker", Status: "idle"})
 	m2.reclamp()
 	m2.onKey(keyClearCtx)
+	if m2.choice.active {
+		t.Error("a bare committing key must not open the confirm")
+	}
+	m2.onKey(keyMenu)
+	m2.onKey(keyClearCtx)
 	if !m2.choice.active {
-		t.Error("arming is the destructive direction and must be confirmed")
+		t.Error("arming is the destructive direction and must be confirmed, from behind the prefix")
 	}
 }
 

@@ -39,7 +39,7 @@ func (s ownedSource) Tasks(string, bool) ([]task.Task, error) {
 		updatedAt, _ := time.Parse(time.RFC3339, t.UpdatedAt) // zero value if unset or malformed
 		createdAt, _ := time.Parse(time.RFC3339, t.CreatedAt)
 		out = append(out, task.Task{
-			ID: t.ID, Title: t.Title, Status: t.Status, Type: t.Type, Priority: t.Priority,
+			ID: t.ID, Title: t.Title, Status: t.Status, Type: t.Type, Priority: t.Priority, Tier: t.Tier,
 			Labels: store.LabelList(t.Labels), Description: t.Description,
 			CreatedAt: createdAt, UpdatedAt: updatedAt,
 		})
@@ -93,6 +93,9 @@ func applySpec(t *store.OwnedTask, s TaskSpec) {
 	}
 	if s.Priority != "" {
 		t.Priority = s.Priority
+	}
+	if s.Tier != "" {
+		t.Tier = s.Tier
 	}
 	if s.Description != "" {
 		t.Description = s.Description

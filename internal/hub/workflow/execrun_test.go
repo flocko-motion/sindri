@@ -62,7 +62,7 @@ func TestExecuteRunDropsAStaleRunWithNoAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.ExecuteRun("repo", r.ID); err != nil {
+	if err := e.ExecuteRun(t.Context(), "repo", r.ID); err != nil {
 		t.Fatalf("ExecuteRun: %v", err)
 	}
 	got, _, _ := ps.GetRun(r.ID)
@@ -99,7 +99,7 @@ func TestExecuteRunDropsAStaleRunWhenTheAgentMovedOn(t *testing.T) {
 	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "td-2"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.ExecuteRun("repo", r.ID); err != nil {
+	if err := e.ExecuteRun(t.Context(), "repo", r.ID); err != nil {
 		t.Fatalf("ExecuteRun: %v", err)
 	}
 	got, _, _ := ps.GetRun(r.ID)
@@ -123,7 +123,7 @@ func TestExecuteRunSkipsAlreadySettledRuns(t *testing.T) {
 	if err := ps.SetRunStatus(r.ID, "cancelled"); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.ExecuteRun("repo", r.ID); err != nil {
+	if err := e.ExecuteRun(t.Context(), "repo", r.ID); err != nil {
 		t.Fatalf("ExecuteRun: %v", err)
 	}
 	got, _, _ := ps.GetRun(r.ID)
@@ -154,7 +154,7 @@ func TestExecuteRunMaterializesThenFailsWithoutARuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.ExecuteRun("repo", r.ID); err != nil {
+	if err := e.ExecuteRun(t.Context(), "repo", r.ID); err != nil {
 		t.Fatalf("ExecuteRun: %v", err)
 	}
 	got, _, _ := ps.GetRun(r.ID)
@@ -227,10 +227,16 @@ func TestCmdShowDispatchesRunsToCmdShowRun(t *testing.T) {
 		t.Errorf("CmdShow should print the run's id and status: %q", out.String())
 	}
 
+	// An id belonging to none of show's recognised families is a usage error, not a lookup that
+	// happens to fail — `show ml-465` used to fall through to the PR path and surface as an opaque
+	// "internal error" once GetPR came back not-found.
 	out.Reset()
 	code, err = e.CmdShow(c, []string{"no-such-pr"}, &out)
-	if err == nil {
-		t.Fatalf("a non-run id with no matching PR should error, got code=%d", code)
+	if err != nil || code != 2 {
+		t.Fatalf("an unrecognised id shape should be a clean usage error, got code=%d err=%v", code, err)
+	}
+	if !strings.Contains(out.String(), "usage") {
+		t.Errorf("should print the grammar: %q", out.String())
 	}
 }
 
@@ -274,7 +280,7 @@ func TestCancelRunKillsARunningContainerWithoutWritingItsStatus(t *testing.T) {
 	if err := ps.SetRunStatus(r.ID, "running"); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.CancelRun("repo", r.ID); err != nil {
+	if err := e.CancelRun(t.Context(), "repo", r.ID); err != nil {
 		t.Fatalf("CancelRun: %v", err)
 	}
 	got, _, _ := ps.GetRun(r.ID)
@@ -298,7 +304,7 @@ func TestReconcileRunningRunsCancelsAnOrphan(t *testing.T) {
 	if err := ps.SetRunStatus(r.ID, "running"); err != nil {
 		t.Fatal(err)
 	}
-	e.ReconcileRunningRuns()
+	e.ReconcileRunningRuns(t.Context())
 	got, _, _ := ps.GetRun(r.ID)
 	if got.Status != "cancelled" {
 		t.Fatalf("status = %q, want cancelled", got.Status)

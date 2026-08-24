@@ -1,8 +1,7 @@
 // package: tui / component_menu
 // type:    ui component (the space-prefix action menu)
-// job:     show the committing actions available for what is selected, and make their
-// letters live while it is open — the prefix that keeps every state change two
-// deliberate presses away.
+// job:     show the committing actions for what is selected, into the footer's own two rows
+// (-> menuFooter) rather than over the screen, and make their letters live while open.
 // limits:  chrome and the offer list; the actions themselves stay in onKey, and which
 // bindings commit is declared in the keymap (-> keys.go).
 package tui
@@ -11,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/flo-at/sindri/internal/api"
 )
 
@@ -26,9 +26,8 @@ func menuKeys(display string) []string {
 	return out
 }
 
-// menuOffers is what the space menu shows for the current tab: every committing binding in scope
-// whose `when` admits the selected row. Generated from the keymap, so the menu, the footer and the
-// dispatcher cannot describe different worlds.
+// menuOffers is every committing binding in scope whose `when` admits the selected row, generated
+// from the keymap so the menu and the dispatcher cannot describe different worlds.
 func (m model) menuOffers() []binding {
 	scope := tabScope(m.tab)
 	var out []binding
@@ -57,11 +56,18 @@ func (m model) menuAccepts(k string) bool {
 	return false
 }
 
-// committingKey reports whether k is a committing binding for the current tab — the keys that are
-// inert until the menu is open. Availability is deliberately NOT consulted: a key that commits
-// somewhere on this tab is never live bare, or whether a stray press did something would depend on
-// which row happened to be selected.
+// committingKey reports whether k commits somewhere on this tab — inert until the menu is open.
+// Availability is not consulted (a key that commits is never live bare, whichever row is
+// selected), except that disarming a clear stays bare: cancelling a destructive action isn't one.
 func (m model) committingKey(k string) bool {
+	// Arming a clear opens a confirm, so it commits; disarming is not itself destructive — cancelling
+	// one is safe, as its own onKey branch already argues — so it stays reachable bare even though
+	// both share this key and scope.
+	if k == keyClearCtx && m.tab == 1 {
+		if a, ok := m.selAgent(); ok && a.ClearArmed {
+			return false
+		}
+	}
 	scope := tabScope(m.tab)
 	for _, b := range keymap {
 		if !b.commits || (b.scope != scope && b.scope != scopeGlobal) {
@@ -76,9 +82,8 @@ func (m model) committingKey(k string) bool {
 	return false
 }
 
-// The availability rules the menu filters on. Each answers "does this action apply to the row in
-// front of me", so what cannot be done is not offered — the same thing the hub does for an agent's
-// command surface, where an out-of-order verb is invisible rather than refused.
+// The availability rules the menu filters on: each answers "does this apply to this row", so what
+// cannot be done is not offered rather than offered and refused.
 
 // taskOpen: a finished task cannot be closed again.
 func taskOpen(m model) bool {
@@ -114,20 +119,80 @@ func prDecidable(m model) bool {
 	return false
 }
 
-// menuView renders the offers as a centered box: one line per action, the key then what it does.
-// Nothing applicable is said out loud rather than shown as an empty frame — "no actions here" is an
-// answer, and an empty box reads as a bug.
-func (m model) menuView(screenW, screenH int) string {
+// mailAttachable: attach needs a live agent on one side of the message — hub/user/reviewer are
+// never one, so a hub notice to the user has nobody to reach (-> mailAttachTarget).
+func mailAttachable(m model) bool {
+	_, ok := m.mailAttachTarget()
+	return ok
+}
+
+// menuEntryStyle is white, the opposite of the footer's uniform dim — the only sign the menu is
+// open now that it no longer takes the screen.
+var menuEntryStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("231"))
+
+// menuFooter renders the offers into the footer's two rows in place of the ordinary hints. Nothing
+// applicable is said out loud rather than shown as an empty row — "no actions here" is an answer.
+// In practice this branch has no way in from a real tab any more: `E config` is scopeGlobal and
+// commits (sd-6d0ff2), so it fills every tab's menu on its own (-> TestGlobalConfigFillsEveryTabsMenu).
+// Kept correct regardless — a `when` narrowing that binding, or a new global one added without
+// commits, would make this reachable again.
+func (m model) menuFooter(width int) string {
 	offers := m.menuOffers()
-	body := dimStyle.Render("nothing to commit on this row")
-	if len(offers) > 0 {
-		lines := make([]string, len(offers))
-		for i, b := range offers {
-			lines[i] = stWarn.Render(padTrunc(b.keys, 5)) + " " + b.label(m)
-		}
-		body = strings.Join(lines, "\n")
+	if len(offers) == 0 {
+		return dimStyle.Render(padTrunc("nothing to commit on this row", width)) + "\n" + strings.Repeat(" ", width)
 	}
-	box := modalBorderStyle.Render(
-		modalTitleStyle.Render("actions") + "\n" + body + "\n\n" + dimStyle.Render("esc cancels"))
-	return lipgloss.Place(screenW, screenH, lipgloss.Center, lipgloss.Center, box)
+	entries := make([]string, len(offers))
+	for i, b := range offers {
+		entries[i] = stWarn.Render(b.keys) + " " + menuEntryStyle.Render(b.label(m))
+	}
+	row1, row2 := menuFooterRows(entries, width)
+	return padTrunc(row1, width) + "\n" + padTrunc(row2, width)
+}
+
+// menuFooterRows packs entries across two rows, breaking only between entries, ANSI-aware and
+// cell-accurate (entries carry colour). Ends row 2 with "…", no count, when they still overflow.
+func menuFooterRows(entries []string, width int) (row1, row2 string) {
+	var rows [2]string
+	i := 0
+	for r := 0; r < len(rows) && i < len(entries); r++ {
+		line := ""
+		for i < len(entries) {
+			candidate := entries[i]
+			if line != "" {
+				candidate = line + " · " + entries[i]
+			}
+			if ansi.StringWidth(candidate) > width {
+				if line == "" { // this one entry alone doesn't fit even on an empty row: say part of
+					// it rather than nothing, so the row still names something instead of going blank.
+					line = ansi.Truncate(entries[i], width, "…")
+					i++
+				}
+				break
+			}
+			line = candidate
+			i++
+		}
+		rows[r] = line
+	}
+	if i < len(entries) {
+		rows[1] = withEllipsis(rows[1], width)
+	}
+	return rows[0], rows[1]
+}
+
+// withEllipsis trims line back to the last whole entry so a trailing "…" still fits within width —
+// the only sign the offers ran past two rows.
+func withEllipsis(line string, width int) string {
+	for line != "" && ansi.StringWidth(line)+2 > width {
+		idx := strings.LastIndex(line, " · ")
+		if idx < 0 {
+			line = ""
+			break
+		}
+		line = line[:idx]
+	}
+	if line == "" {
+		return ansi.Truncate("…", width, "")
+	}
+	return line + " …"
 }

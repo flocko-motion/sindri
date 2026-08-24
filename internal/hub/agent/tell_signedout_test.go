@@ -27,6 +27,7 @@ type fakeRuntime struct {
 	pane              string
 	sent              []string
 	removed           []string
+	interrupts        int
 }
 
 func (f *fakeRuntime) Running(string) bool { return true }
@@ -45,11 +46,17 @@ func (f *fakeRuntime) ExecContext(_ context.Context, _ string, args ...string) (
 		return []byte(f.pane), nil
 	case containsArg(args, "send-keys") && containsArg(args, "-l"):
 		f.sent = append(f.sent, args[len(args)-1])
+	case containsArg(args, "send-keys") && containsArg(args, "Escape"):
+		f.interrupts++
 	}
 	return nil, nil
 }
 
-func (f *fakeRuntime) Rm(name string) error {
+func (f *fakeRuntime) Rm(name string) error { return f.RmContext(context.Background(), name) }
+
+// RmContext records the removal as Rm does: a teardown that takes a deadline still tears the same
+// pod down, and a fake that only counted one of the two would miss whichever verb a path used.
+func (f *fakeRuntime) RmContext(_ context.Context, name string) error {
 	f.removed = append(f.removed, name)
 	return nil
 }
@@ -78,6 +85,12 @@ func (tellDeps) ProjectConfig(string) (config.Config, error) { return config.Con
 func (tellDeps) ArchitectureDoc(string) string               { return "" }
 func (tellDeps) RefreshTask(_, _ string) error               { return nil }
 func (tellDeps) Rehydrate(_, _ string)                       {}
+func (tellDeps) ForgetFill(_, _ string)                      {}
+
+// AgentUp mirrors fakeRuntime's always-up container, so the idle/clear sweeps this fixture backs
+// see the same liveness AgentAlive would have probed. AgentClients: no test here dials in a human.
+func (tellDeps) AgentUp(_, _ string) bool     { return true }
+func (tellDeps) AgentClients(_, _ string) int { return 0 }
 
 // paneReader is a coding-agent backend that reads the one banner these cases turn on. The port
 // defaults to a no-op that classifies nothing, and what the real classifier makes of a screen is
@@ -91,6 +104,8 @@ func (paneReader) DetectState(screen string) agentport.State {
 	}
 	return agentport.Idle
 }
+
+func (paneReader) ToolRunning(string) bool { return false }
 
 // tellFixture wires a service over a fake backend showing pane, with one agent registered.
 func tellFixture(t *testing.T, name, pane string) (*Service, *fakeRuntime) {
@@ -129,7 +144,7 @@ func forgetObservations() {
 // fails loudly instead of vanishing — and the refusal names the restart that fixes it.
 func TestAHubMessageStillRefusesASignedOutPane(t *testing.T) {
 	s, f := tellFixture(t, "eitri", signedOutPane)
-	err := s.Inject("proj", "eitri", "the verdict is in")
+	err := s.Inject(t.Context(), "proj", "eitri", "the verdict is in")
 	if err == nil {
 		t.Fatal("a hub-originated message into a signed-out pane must fail rather than vanish")
 	}
@@ -146,7 +161,7 @@ func TestAHubMessageStillRefusesASignedOutPane(t *testing.T) {
 // are wrong the failure is visible and costs a message.
 func TestSendAnywayOverrulesThePane(t *testing.T) {
 	s, f := tellFixture(t, "dvalin", signedOutPane)
-	if err := s.Tell("proj", "dvalin", "carry on", "user", api.SignedOutSend); err != nil {
+	if err := s.Tell(t.Context(), "proj", "dvalin", "carry on", "user", api.SignedOutSend); err != nil {
 		t.Fatalf("send-anyway must deliver: %v", err)
 	}
 	if len(f.sent) != 1 || !strings.Contains(f.sent[0], "carry on") {
@@ -161,7 +176,7 @@ func TestSendAnywayOverrulesThePane(t *testing.T) {
 // out. Asked in advance — a CLI flag typed out of habit — it must not bounce a healthy session.
 func TestTheAnswerOnlyAppliesToASignedOutPane(t *testing.T) {
 	s, f := tellFixture(t, "nori", idlePane)
-	if err := s.Tell("proj", "nori", "carry on", "user", api.SignedOutRestart); err != nil {
+	if err := s.Tell(t.Context(), "proj", "nori", "carry on", "user", api.SignedOutRestart); err != nil {
 		t.Fatalf("a healthy agent takes the message as it always did: %v", err)
 	}
 	if len(f.removed) != 0 {
@@ -177,7 +192,7 @@ func TestTheAnswerOnlyAppliesToASignedOutPane(t *testing.T) {
 // — the pod goes down on the way to coming back up, and a failure says what it was doing.
 func TestRestartIsPerformedRatherThanRecommended(t *testing.T) {
 	s, f := tellFixture(t, "bombur", signedOutPane)
-	err := s.Tell("proj", "bombur", "carry on", "user", api.SignedOutRestart)
+	err := s.Tell(t.Context(), "proj", "bombur", "carry on", "user", api.SignedOutRestart)
 	if len(f.removed) != 1 || f.removed[0] != "pod-bombur" {
 		t.Errorf("the restart must tear the pod down first, got %q", f.removed)
 	}

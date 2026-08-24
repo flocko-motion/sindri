@@ -104,7 +104,7 @@ what it produces — you're the reviewer, no second agent needed.
 
 ```bash
 sindri hub start --bg                       # start the global hub in the background
-                                            # (foreground: `sindri hub start`; see also `sindri hub list` / `sindri hub stop`)
+                                            # (foreground: `sindri hub start`; see also `sindri hub status` / `sindri hub stop`)
 
 sindri task new "Add a /healthz endpoint"   # describe a task
 sindri agent new                            # create a worker and start it — auto-named (e.g. dvalin)
@@ -256,6 +256,72 @@ sindri pr merge   pr-sd-abc123       # the hard gate — human only, requires ap
 
 A worker's PR reaches `approved` via a reviewer agent **or** your own
 `pr approve`. Merge always requires `approved`, and only a human merges.
+
+Wondering why nothing is moving? **`sindri task next`** shows what would be
+assigned next and why every other open task would not be; **`sindri pr next`**
+answers the same for a reviewer's pool. Both take `--role` to ask on behalf of an
+agent you have yet to start.
+
+---
+
+## When an agent needs you
+
+Four status words mean an agent is stuck somewhere only a human reaches. The board
+marks each one, and `sindri agent list` names them at the bottom:
+
+| Status | What it means | What clears it |
+|---|---|---|
+| `blocked` | stopped at a prompt in its own session | answer it: `agent attach`, or `agent tell` |
+| `escalated` | it asked you to decide something and stopped | `agent tell <name> "<answer>"` — it resumes itself |
+| `signed-out` | its pane says to run `/login`, so anything typed there goes nowhere | log in on the host, then `agent restart <name>` |
+| `stalled` | it holds work and its screen has stood still | `agent attach` to look, `agent tell` to prod |
+
+**Escalation** is the agent's own verb: it stops on a decision that is yours to
+make and says what it needs. Answering with `agent tell` clears the escalation
+itself; `sindri agent resume <name>` releases one that cannot clear its own.
+
+### Mail waits, tell interrupts
+
+Two ways to reach an agent, separated by what they do to a running turn:
+
+```bash
+sindri agent mail <name> "when you get to it, note that X"   # waits to be read, never lost
+sindri agent tell <name> "stop and look at Y"                # types into the live session now
+```
+
+Mail keeps until the agent next asks the hub what to do, which makes it the verb
+for one that is down, restarting or signed out. Tell reaches a live session this
+instant, and is lost if the agent is away. `sindri mail list` shows the fleet's
+unread mail and `sindri mail show <id>` one message in full; reading marks it read
+and nothing is ever deleted, so the mailbox stays the record of what an agent was
+told.
+
+### Retiring and clearing
+
+- **`sindri agent retire <name>`** — assign it no further work; it finishes what it
+  already holds. `--back` returns it to service.
+- **`sindri agent clear-context <name>`** — arm a `/clear` that fires at the agent's
+  next leaf boundary, so it never cuts into a task mid-flight. `--cancel` takes it
+  back.
+
+---
+
+## Runs — one queue for the fleet
+
+**`sindri run new <command…>`** queues a shell command into the single run slot the
+agents share, so a suite you want run waits its turn instead of racing whatever an
+agent is already running. It executes against a **copy** of the target, taken when
+the run reaches the front, so nothing it writes touches the tree you are working in.
+
+```bash
+sindri run new go test ./...                    # this repo's checkout, uncommitted work included
+sindri run new --agent dvalin go build ./...    # that agent's workspace instead
+sindri run list                                 # then: info <id> · output <id> · cancel <id>
+```
+
+A run you queue goes ahead of every agent's, their submit gates included — you are
+sitting there waiting on it and they are not. `sindri run priority <id>` re-orders
+it afterwards.
 
 ---
 
@@ -438,20 +504,31 @@ Orchestration is `sindri <category> <action>`; the toolbelt is the separate
 
 | Category | Actions |
 |---|---|
-| `agent` | `list` · `new [name] [--role worker\|reviewer\|planner\|coauthor]` · `start` · `stop` · `restart` · `delete` · `tell <name> "msg"` · `attach` · `info` · `pane` · `dir` · `stats` · `memory <name> [size]` · `rebase` · `rebuild` · `plan <name> "goal"` |
-| `task` | `list [--json]` · `new <title> [-t -p -d --labels --parent]` · `info <id>` · `edit <id>` · `priority <id> <P0..P4>` · `approve <id>` · `reject <id> "why"` · `unassign <id>` · `close <id>` · `delete <id>` · `comment <id> "text"` · `refresh` |
-| `pr` | `list` · `info <id>` · `lint <id>` · `verify <id>` · `review <id> "…"` · `approve <id>` · `reject <id> "…"` · `scrap <id>` · `milestone <agent>` · `merge <id>` |
-| `meeting` | `add <agent…>` · `remove <agent…>` · `join` · `log [-n]` · `new` |
-| `repo` | `init` · `list` · `info [tag]` · `forget <tag>` · `color <tag> <n>` |
-| `hub` | `start [--bg]` · `status` · `restart` · `stop` · `logs` · `list` |
+| `agent` | `list` · `new [name] [--role worker\|reviewer\|planner\|coauthor]` · `start` · `stop` · `restart` · `delete` · `mail <name> "msg"` · `tell <name> "msg"` · `attach` · `info` · `pane` · `dir` · `stats` · `memory <name> [size]` · `rebase` · `rebuild` · `plan <name> "goal"` · `clear-context <name> [--cancel]` · `retire <name> [--back]` · `resume <name>` |
+| `task` | `list [--json]` · `new <title> [-t -p -d --labels --parent]` · `info <id>` · `edit <id>` · `priority <id> <P0..P4>` · `approve <id>` · `reject <id> "why"` · `unassign <id>` · `close <id>` · `delete <id>` · `reopen <id> "why"` · `comment <id> "text"` · `refresh` · `next [--agent\|--role]` |
+| `pr` | `list` · `info <id>` · `lint <id>` · `verify <id>` · `review <id> "…"` · `approve <id>` · `reject <id> "…"` · `scrap <id>` · `milestone <agent>` · `merge <id>` · `next [--agent]` |
+| `mail` | `list [--agent --filter unread\|all]` · `show <id>` |
+| `run` | `new <command…> [--agent --priority]` · `list` · `info <id>` · `output <id>` · `priority <id>` · `cancel <id>` |
+| `meeting` | `add <agent…>` · `remove <agent…>` · `join` · `log [-n]` · `new` · `close` |
+| `repo` | `init` · `list` · `info [tag]` · `forget <tag>` · `config [k [v]]` · `color <tag> <n>` |
+| `hub` | `start [--bg]` · `status` · `restart` · `stop` · `logs` |
 | `brokkr` | `map [paths…] [--find --grep --symbol --file --depth]` · `refs <symbol> [paths…] [--comments --file --limit]` · `lint [deadcode\|loc\|comments\|openspec]` (none = all) |
 
 Inside a pod the agent talks to the hub through a single command, **`sindri`**
 (the browser binary, presented under that name in the isolated container) — run
 with no args to get its next directive, or a verb the hub currently offers it:
-workers get `next`/`submit`/`checkpoint`/`show`/`lint`; reviewers
-`approve`/`reject`/`review`; planners `task`/`create-task`/`openspec`/`state`; all
-get `status`/`log`/`prs`.
+
+| Role | Verbs |
+|---|---|
+| worker | `next` · `submit` · `contribute` · `revoke` · `checkpoint` · `resolve` · `rebase` · `git` · `run` |
+| reviewer | `approve` · `reject` · `run` |
+| planner | `create-task` · `edit-task` · `prioritise-task` · `reopen-task` · `openspec` · `state` · `approve` · `revoke` · `rebase` · `git` |
+| coauthor | `git` · `run` |
+| every role | `status` · `log` · `prs` · `show` · `lint` · `task` · `comment` · `escalate` · `resume` · `mail` · `meeting` |
+
+`escalate` is how an agent stops on a decision that is yours to make; `mail` is
+how it reads what it was sent. A verb it cannot run right now is invisible to it,
+so the surface above is the maximum, filtered per agent by role and state.
 
 ---
 

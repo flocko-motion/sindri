@@ -8,6 +8,7 @@
 package tui
 
 import (
+	"github.com/flo-at/sindri/internal/api"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -15,12 +16,19 @@ import (
 )
 
 // updateInput routes a keypress to the open modal: esc cancels, enter submits,
-// everything else edits the field.
+// everything else edits the field. Search is live: it also re-filters the list on every
+// keystroke, esc restores the term the field opened with, and the selection is held by id
+// through the redraws either causes rather than clamped by index (-> selectRow).
 func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
+		sel := m.selID()
+		if m.mode == inputSearch {
+			m.taskSearch = m.taskSearchPrev
+		}
 		m.mode, m.inputTarget = inputNone, ""
 		m.input.Blur()
+		m.restoreSelection(sel)
 		return m, nil
 	case "enter":
 		cmd := m.submitInput()
@@ -28,8 +36,13 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input.Blur()
 		return m, cmd
 	}
+	sel := m.selID()
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+	if m.mode == inputSearch {
+		m.taskSearch = m.input.Value()
+		m.restoreSelection(sel)
+	}
 	return m, cmd
 }
 
@@ -69,6 +82,13 @@ func (m *model) submitInput() tea.Cmd {
 		// No signed-out question here, unlike tell: mail never touches the session, so a pane that
 		// cannot receive anything is exactly the case mail is FOR.
 		return mutateThenRefresh(cl, func() error { return cl.MailAgent(target, v) })
+	case inputMailReply:
+		// The recipient comes from the message, not from this prompt — which is why the target is an id.
+		id, err := api.ParseMailID(target)
+		if err != nil {
+			return nil
+		}
+		return mutateThenRefresh(cl, func() error { return cl.ReplyToMail(id, v) })
 	case inputRunCommand:
 		// Against this repo's own checkout, the target only a human has — an agent's workspace is
 		// the agent's to queue. Not scheduled inline: the queue answers at once with a position,

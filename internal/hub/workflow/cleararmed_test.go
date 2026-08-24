@@ -2,7 +2,7 @@ package workflow
 
 import (
 	"context"
-	"strings"
+	"path/filepath"
 	"testing"
 
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -49,50 +49,34 @@ func TestArmedClearWithholdsTheNextTask(t *testing.T) {
 	}
 }
 
-// TestArmedAgentIsToldWhyItGetsNothing: it must not read "no open tasks", which is a claim about the
-// queue and would leave the agent waiting for the wrong thing.
-func TestArmedAgentIsToldWhyItGetsNothing(t *testing.T) {
-	e, _, _ := armedWorker(t)
-	d, err := e.AgentDirective(context.Background(), "repo", "dvalin")
-	if err != nil {
-		t.Fatalf("AgentDirective: %v", err)
-	}
-	if d != DirClearPending {
-		t.Errorf("directive = %q, want the pending-clear answer", d)
-	}
-	if !strings.Contains(DirClearPending, "context clear") {
-		t.Errorf("the directive should name what is happening: %q", DirClearPending)
-	}
-	if strings.Contains(DirClearPending, "No open tasks") {
-		t.Error("an armed agent is not idle for want of work")
-	}
-}
-
-// TestArmedClearOutranksFullness is the interaction the two rules must get right: a full agent is
-// retired from assignment "until a human clears you", so once one HAS, the answer must stop being
-// "wait for a human" — else the arming sits behind a state that never advances.
+// TestArmedClearOutranksFullness is the interaction the two rules must get right: a human's own
+// arming fires ahead of the automatic fullness path in waitForNextTask's own closure — else the
+// arming sits behind a state that never advances.
 func TestArmedClearOutranksFullness(t *testing.T) {
 	e, _, deps := armedWorker(t)
 	deps.ctxTokens, deps.ctxWindow, deps.ctxOK = 190_000, 200_000, true
 	if _, full := e.contextFull("repo", "dvalin"); !full {
 		t.Fatal("the stub should read as full — this interaction only exists for a full agent")
 	}
-	d, err := e.AgentDirective(context.Background(), "repo", "dvalin")
-	if err != nil {
-		t.Fatalf("AgentDirective: %v", err)
+	fired, err := e.fireClearIfArmed("repo", "dvalin")
+	if err != nil || !fired {
+		t.Fatalf("fireClearIfArmed = (%v, %v), want it to fire even though the agent also reads full", fired, err)
 	}
-	if d != DirClearPending {
-		t.Errorf("directive = %q, want the pending clear rather than the fullness notice", d)
+	if len(deps.cleared) != 1 || deps.cleared[0] != "dvalin" {
+		t.Errorf("cleared = %v, want exactly one FireClear(dvalin)", deps.cleared)
+	}
+	if len(deps.clearedWith) != 1 || deps.clearedWith[0] != MsgKickoff {
+		t.Errorf("clearedWith = %v, want the generic kickoff — nothing was claimed for this arming to hand over", deps.clearedWith)
+	}
+	// fireClearIfArmed runs inside the call answering this very ask, same as the automatic path —
+	// ESC here would cut off the turn computing whatever this ask answers with.
+	if len(deps.clearedInterrupt) != 1 || deps.clearedInterrupt[0] {
+		t.Errorf("clearedInterrupt = %v, want false — this fires inside the agent's own ask", deps.clearedInterrupt)
 	}
 }
 
-// TestAnArmedReviewerIsNotHandedThenextPR closes the door the sweep's gate left open: reviews are
-// handed out by freeReviewer on the request path (RequestReview, whenever a worker submits), not
-// only by the tick. Ungated there, a busy repo defers the arming for ever, and an assignment can
-// land between the fire's boundary check and the /clear — clearing a reviewer mid-review.
-//
-// The row half of the rule is what is asserted: liveness needs a live container runtime, so
-// freeReviewer itself cannot be driven here without one.
+// TestAnArmedReviewerIsNotHandedTheNextPR closes the door the sweep's gate left open: reviews are also
+// handed out by freeReviewer on the request path (RequestReview), which must gate the same arming.
 func TestAnArmedReviewerIsNotHandedTheNextPR(t *testing.T) {
 	armed := store.Agent{Name: "fili", Role: "reviewer", ClearArmed: true}
 	if reviewerAssignable(armed) {
@@ -108,30 +92,62 @@ func TestAnArmedReviewerIsNotHandedTheNextPR(t *testing.T) {
 	}
 }
 
-// TestTheClearLandsBeforeTheNextSubtask: mid-subtask the agent carries on and the clear waits (no
-// path clears an agent mid-task); between subtasks — where a checkpoint leaves it — the clear takes
-// precedence over the subtask that would otherwise be served next.
+// TestAnArmedReviewerIsNotHandedTheNextPRThroughRequestReview drives the request path end to end:
+// freeReviewer's liveness check reads AgentUp (the watchdog's own reading), so a stub states it
+// directly with no container runtime required.
+func TestAnArmedReviewerIsNotHandedTheNextPRThroughRequestReview(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	root := t.TempDir()
+	if err := st.RegisterProject("repo", root); err != nil {
+		t.Fatal(err)
+	}
+	ps := st.For("repo")
+	if err := ps.PutAgent(store.Agent{Name: "fili", Role: "reviewer", Workspace: ".worktrees/fili", ClearArmed: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutAgent(store.Agent{Name: "nori", Role: "reviewer", Workspace: ".worktrees/nori"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutPR(store.PR{ID: "pr-c", Task: "td-c", Agent: "bombur", Branch: "pr-c", Base: "main", Status: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	e := New(st, &stubDeps{root: root, alive: true})
+	if err := e.RequestReview("repo", "pr-c", ""); err != nil {
+		t.Fatalf("RequestReview: %v", err)
+	}
+	if holder, _ := ps.ReviewingPR("nori"); holder != "pr-c" {
+		t.Errorf("nori is free and up — it should hold pr-c, got %q", holder)
+	}
+	if holder, _ := ps.ReviewingPR("fili"); holder != "" {
+		t.Errorf("fili is armed for a clear and must not be handed a review, got %q", holder)
+	}
+}
+
+// TestTheClearLandsBeforeTheNextSubtask: mid-subtask the clear waits; between subtasks, where a
+// checkpoint leaves it, fireClearIfArmed fires it, same as the idle worker's own path.
 func TestTheClearLandsBeforeTheNextSubtask(t *testing.T) {
-	e, ps, _ := containerWorker(t, "working")
+	e, ps, deps := containerWorker(t, "working")
 	a, _, _ := ps.GetAgent("dvalin")
 	a.ClearArmed = true
 	if err := ps.PutAgent(a); err != nil {
 		t.Fatal(err)
 	}
-	d, err := e.AgentDirective(context.Background(), "repo", "dvalin")
-	if err != nil {
+	if _, err := e.AgentDirective(context.Background(), "repo", "dvalin"); err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if d == DirClearPending {
-		t.Error("mid-subtask the agent keeps working; the clear waits for the checkpoint")
+	if len(deps.cleared) != 0 {
+		t.Error("mid-subtask the agent keeps working; the clear must not fire before the checkpoint")
 	}
+
 	if err := ps.SetState(store.AgentState{Agent: "dvalin", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}); err != nil {
 		t.Fatal(err)
 	}
-	if d, err = e.AgentDirective(context.Background(), "repo", "dvalin"); err != nil {
-		t.Fatalf("AgentDirective: %v", err)
-	}
-	if d != DirClearPending {
-		t.Errorf("directive = %q, want the clear to land before the next subtask is served", d)
+	fired, err := e.fireClearIfArmed("repo", "dvalin")
+	if err != nil || !fired {
+		t.Fatalf("fireClearIfArmed = (%v, %v), want it to fire now the agent is between subtasks", fired, err)
 	}
 }

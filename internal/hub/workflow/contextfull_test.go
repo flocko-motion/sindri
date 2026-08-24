@@ -37,9 +37,10 @@ func idleWorkerWithOpenTask(t *testing.T, deps *stubDeps) (*Engine, *store.Proje
 	return New(st, deps), ps
 }
 
-// TestAFullWorkerIsNotHandedTheNextTask is RETIRE's whole point: past the threshold, an open leaf
-// sits there unclaimed rather than landing on a worker who has no room left for it.
-func TestAFullWorkerIsNotHandedTheNextTask(t *testing.T) {
+// TestAFullWorkerIsClearedAndPreparedForTheNextTask is why the retirement gate went: asking for
+// work IS a leaf boundary, which is exactly where a clear is safe, so a full worker is claimed for
+// like any other and prepared with a clear instead of being refused and left waiting on a human.
+func TestAFullWorkerIsClearedAndPreparedForTheNextTask(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 900_000, ctxWindow: 1_000_000, ctxOK: true}
 	e, ps := idleWorkerWithOpenTask(t, deps)
 
@@ -47,11 +48,23 @@ func TestAFullWorkerIsNotHandedTheNextTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if !strings.Contains(dir, "retired") {
-		t.Errorf("directive = %q, want it to say the worker is retired for a full context", dir)
+	if dir != DirPreparing {
+		t.Errorf("directive = %q, want DirPreparing — a full worker is prepared, not refused", dir)
 	}
-	if st, _ := ps.GetState("dvalin"); st.Task != "" {
-		t.Errorf("a full worker was handed %q — it must stay unclaimed", st.Task)
+	if st, _ := ps.GetState("dvalin"); st.Task != "td-abc123" {
+		t.Errorf("state.Task = %q, want td-abc123 — the claim holds regardless of what this ask answers", st.Task)
+	}
+	if len(deps.cleared) != 1 || deps.cleared[0] != "dvalin" {
+		t.Errorf("cleared = %v, want exactly one FireClear(dvalin) fired in place of a compaction", deps.cleared)
+	}
+	if len(deps.clearedWith) != 1 || !strings.Contains(deps.clearedWith[0], "td-abc123") {
+		t.Errorf("clearedWith = %v, want the claimed directive queued behind /clear", deps.clearedWith)
+	}
+	if len(deps.clearedInterrupt) != 1 || deps.clearedInterrupt[0] {
+		t.Errorf("clearedInterrupt = %v, want false — this runs inside the agent's own ask", deps.clearedInterrupt)
+	}
+	if len(deps.compacted) != 0 {
+		t.Errorf("compacted = %v, want none — past ContextFullFraction clears rather than compacts", deps.compacted)
 	}
 }
 

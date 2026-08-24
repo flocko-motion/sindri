@@ -44,6 +44,10 @@ func RuntimeDir() string {
 	return StateDir()
 }
 
+// HiddenDir is an empty directory the launcher binds OVER a path a pod must not see. One for the
+// machine, mounted read-only: it holds nothing, and nothing may ever put anything in it.
+func HiddenDir() string { return filepath.Join(StateDir(), "hidden") }
+
 // HubSocket is the global hub's control socket: the server binds it, clients dial it.
 // There is one hub for the whole machine, so it lives under the runtime dir, not any repo.
 func HubSocket() string {

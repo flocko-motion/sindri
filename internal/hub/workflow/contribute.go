@@ -30,20 +30,25 @@ func (e *Engine) CmdContribute(c registry.Caller, args []string, out io.Writer) 
 		fmt.Fprintln(out, ReplyNotWorking("contribute", st.Phase, st.Task))
 		return 1, nil
 	}
-	// The gate is queued, not run here (sd-cf630b) — see CmdSubmit for why. Nothing lands (no
-	// commit, no PR) until it passes; openMilestoneOrInterim runs the rest once it does.
+	// The gate is queued, not run here (sd-cf630b) — see CmdSubmit for why, including why the work
+	// is committed and the agent parked before it opens. No PR exists until the gate passes.
 	msg := strings.TrimSpace(strings.Join(args, " "))
-	run, err := e.enqueueGate(c.Project, c.Agent, "contribute", msg)
+	sha, err := e.gateCommit(c.Project, c.Agent, msg)
 	if err != nil {
 		return 1, err
 	}
 	if err := ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "gating"}); err != nil {
 		return 1, err
 	}
-	pos := 0
-	if all, aerr := e.store.AllRuns("queued"); aerr == nil {
-		pos = queuePositions(all)[run.ID]
+	run, reused, err := e.gateRun(c.Project, c.Agent, gateContribute, msg, sha)
+	if err != nil {
+		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "working"})
+		return 1, err // see CmdSubmit: "gating" is a park with no way out if no gate was opened
 	}
-	fmt.Fprintln(out, ReplyGateQueued(run.ID, pos))
+	if reused {
+		fmt.Fprintln(out, ReplyGateReused(run.ID, shortSHA(sha)))
+		return 0, nil
+	}
+	fmt.Fprintln(out, ReplyGateQueued(run.ID, e.queuePosition(run.ID)))
 	return 0, nil
 }

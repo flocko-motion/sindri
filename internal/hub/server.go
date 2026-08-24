@@ -64,7 +64,7 @@ func (h *Hub) Handler() http.Handler {
 		writeJSON(w, st, err)
 	})
 	mux.HandleFunc("GET /stats", func(w http.ResponseWriter, r *http.Request) {
-		report, err := h.Stats()
+		report, err := h.Stats(r.Context())
 		writeJSON(w, report, err)
 	})
 	mux.HandleFunc("GET /events", h.handleEvents)
@@ -125,7 +125,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"removed"}, h.projects.RemoveOrphan(req.Name))
+		writeJSON(w, okMsg{"removed"}, h.projects.RemoveOrphan(detached(r), req.Name))
 	})
 	mux.HandleFunc("POST /repo/config", func(w http.ResponseWriter, r *http.Request) {
 		var cfg config.Config
@@ -145,7 +145,7 @@ func (h *Hub) Handler() http.Handler {
 			lines = 40
 		}
 		name := r.URL.Query().Get("agent")
-		out, err := h.agents.AgentPane(h.agentReq(r, name), name, lines)
+		out, err := h.agents.AgentPane(r.Context(), h.agentReq(r, name), name, lines)
 		writeJSON(w, okMsg{out}, err)
 	})
 	mux.HandleFunc("GET /agent/pod", func(w http.ResponseWriter, r *http.Request) {
@@ -155,11 +155,11 @@ func (h *Hub) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /agent/diagnose", func(w http.ResponseWriter, r *http.Request) {
 		name := r.URL.Query().Get("agent")
-		writeJSON(w, okMsg{h.agents.AgentDiagnostic(h.agentReq(r, name), name)}, nil)
+		writeJSON(w, okMsg{h.agents.AgentDiagnostic(r.Context(), h.agentReq(r, name), name)}, nil)
 	})
 	mux.HandleFunc("GET /agent/clients", func(w http.ResponseWriter, r *http.Request) {
 		name := r.URL.Query().Get("agent")
-		cs, err := h.agents.Clients(h.agentReq(r, name), name)
+		cs, err := h.agents.Clients(r.Context(), h.agentReq(r, name), name)
 		writeJSON(w, cs, err)
 	})
 	mux.HandleFunc("POST /agents", func(w http.ResponseWriter, r *http.Request) {
@@ -182,7 +182,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"ok"}, h.agents.SetRetired(h.agentReq(r, req.Name), req.Name, req.Retired))
+		writeJSON(w, okMsg{"ok"}, h.SetRetired(h.agentReq(r, req.Name), req.Name, req.Retired))
 	})
 	// The user's own clear of an escalation. The agent normally clears its own (`sindri resume`), but
 	// one that is gone, restarted, or simply wrong that it was blocked would stay stuck otherwise.
@@ -198,21 +198,21 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"deleted"}, h.agents.DeleteAgent(h.agentReq(r, req.Name), req.Name))
+		writeJSON(w, okMsg{"deleted"}, h.agents.DeleteAgent(detached(r), h.agentReq(r, req.Name), req.Name))
 	})
 	mux.HandleFunc("POST /agent/stop", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"stopped"}, h.agents.StopAgent(h.agentReq(r, req.Name), req.Name))
+		writeJSON(w, okMsg{"stopped"}, h.agents.StopAgent(detached(r), h.agentReq(r, req.Name), req.Name))
 	})
 	mux.HandleFunc("POST /agent/clear-context", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"ok"}, h.agents.SetClearArmed(h.agentReq(r, req.Name), req.Name, req.Armed))
+		writeJSON(w, okMsg{"ok"}, h.agents.SetClearArmed(detached(r), h.agentReq(r, req.Name), req.Name, req.Armed))
 	})
 	mux.HandleFunc("POST /agent/rebase", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq
@@ -234,7 +234,7 @@ func (h *Hub) Handler() http.Handler {
 		if f, ok := w.(http.Flusher); ok {
 			fw.f = f
 		}
-		if err := h.agents.Launch(h.agentReq(r, req.Name), req.Name, req.Shell, req.Debug, req.Cols, req.Lines, fw); err != nil {
+		if err := h.agents.Launch(detached(r), h.agentReq(r, req.Name), req.Name, req.Shell, req.Debug, req.Cols, req.Lines, fw); err != nil {
 			fmt.Fprintf(fw, "error: %v\n", err)
 			w.Header().Set("X-Sindri-Error", err.Error())
 		}
@@ -251,7 +251,7 @@ func (h *Hub) Handler() http.Handler {
 		if f, ok := w.(http.Flusher); ok {
 			fw.f = f
 		}
-		if err := h.agents.RebuildAgent(h.agentReq(r, req.Name), req.Name, fw); err != nil {
+		if err := h.agents.RebuildAgent(detached(r), h.agentReq(r, req.Name), req.Name, fw); err != nil {
 			fmt.Fprintf(fw, "error: %v\n", err)
 			w.Header().Set("X-Sindri-Error", err.Error())
 		}
@@ -509,9 +509,9 @@ func (h *Hub) Serve() error {
 			return err
 		}
 	}
-	h.wf.HealPlannerTasks()     // a planner can't hold a backlog task — release any stale claim
-	h.wf.ReconcileMergingPRs()  // a merge in flight when we last died → merge-failed (outcome unknown)
-	h.wf.ReconcileRunningRuns() // a run in flight when we last died → failed (outcome unknown)
+	h.wf.HealPlannerTasks()               // a planner can't hold a backlog task — release any stale claim
+	h.wf.ReconcileMergingPRs()            // a merge in flight when we last died → merge-failed (outcome unknown)
+	h.wf.ReconcileRunningRuns(h.lifetime) // a run in flight when we last died → failed (outcome unknown)
 	// Seed each known project's task cache so its board is populated from the start.
 	// A per-project failure (typically no td store at that repo) is not fatal — the
 	// hub still serves agents/PRs — but it must be loud, not silent.

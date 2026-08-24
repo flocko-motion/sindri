@@ -6,18 +6,29 @@
 // limits:  pure strings; the mailbox is the store's and the classification the sender's.
 package workflow
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
 
-// DirUnreadMail is the answer to `sindri` while mail is waiting. It REPLACES the ordinary directive
-// rather than sitting beside it, because mail is one-shot consequence — a verdict, a cancellation, an
-// edit to the task in hand — and any of those can change what the next action should be. Reading
-// first and asking again is therefore the correct order, not an extra round trip.
-func DirUnreadMail(n int) string {
-	return fmt.Sprintf("[hub] You have %d unread message(s) — things you must read, kept for you "+
-		"however busy or away you were when they were sent. Run `sindri mail` to read them (that "+
-		"marks them read; nothing is deleted), then `sindri` again for your next action. Read them "+
-		"first: a verdict, a cancellation or an edit to the task you hold can change what that action "+
-		"is, which is why they are not simply pushed at you and hoped for.", n)
+	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/hub/store"
+)
+
+// DirMail is unread mail served AHEAD of the rest of `sindri`'s answer (-> Engine.serveMail), which
+// is what marks it read: the ask itself is the reading, so there is nothing left to run and nothing
+// to divert to. Oldest first, the order the messages make sense in.
+func DirMail(msgs []store.Mail) string {
+	var b strings.Builder
+	if len(msgs) == 1 {
+		b.WriteString("[hub] One message was waiting — reading it is this:\n\n")
+	} else {
+		fmt.Fprintf(&b, "[hub] %d messages were waiting — reading them is this:\n\n", len(msgs))
+	}
+	for _, m := range msgs {
+		fmt.Fprintf(&b, "— %s from %s:\n%s\n\n", api.MailID(m.ID), dash(m.Sender), strings.TrimRight(m.Body, "\n"))
+	}
+	b.WriteString("Your actual directive follows.\n\n")
+	return b.String()
 }
 
 // ReplyNoMail answers `mail` with an empty mailbox. It says what the mailbox IS, since "no messages"
@@ -36,3 +47,50 @@ func ReplyMailRead(n int) string {
 		"`sindri task` the task you hold, `sindri prs` your pull requests. Where a message and the "+
 		"live state disagree, the live state wins.", n)
 }
+
+// ReplyMailSent confirms one agent's message to another, and says when it will be read: at the
+// recipient's next ask, not now. Nothing was woken, which is the whole difference from a push.
+func ReplyMailSent(to, repo string) string {
+	return fmt.Sprintf("Mailed %s (%s) — it reads this at its next `sindri`, whatever it is doing now. "+
+		"Nothing was interrupted: agents mail each other, they do not wake each other.", to, repo)
+}
+
+// ReplyMailNoMessage answers a recipient with nothing after it. Named separately from the read half's
+// usage, because the mistake here is a verb half-typed rather than the wrong register.
+func ReplyMailNoMessage(to string) string {
+	return fmt.Sprintf("Nothing to send: `mail %s <message>` needs the message too. With no arguments at "+
+		"all, `mail` reads what is waiting for you instead.", to)
+}
+
+// ReplyMailTooLong refuses an over-length message, for the reason the note channel refuses one: the
+// cost is the recipient's attention, and here that recipient is another agent's context.
+func ReplyMailTooLong(n, max int) string {
+	return fmt.Sprintf("Not sent: %d characters, and the limit is %d. Cut it to what the recipient needs "+
+		"— what you send costs its context, and a message it has to wade through is one it may act on "+
+		"wrongly. Do not split it across two calls.", n, max)
+}
+
+// ReplyMailToSelf refuses the loop. Not a hard error to guard against so much as a sign the sender
+// meant somebody else, and saying so is more useful than delivering it.
+const ReplyMailToSelf = "Not sent: that is you. Mail reaches another agent; to leave something for " +
+	"yourself, `sindri log \"<note>\"` records it where you will see it again."
+
+// ReplyReplyUsage answers a reply with no id or no message. It names where the ids come from, since an
+// agent has no reason to have memorised one.
+const ReplyReplyUsage = "usage: reply <mail-id> <message...>   (an id reads like ml-47)\n" +
+	"  Answers a message you were sent — the reply goes to whoever sent it, so you do not have\n" +
+	"  to know or retype a name. `sindri mail` lists what is waiting, each line with its id."
+
+// ReplyReplied confirms a reply and names who it went to, since the sender was resolved from the stored
+// row rather than typed — the agent should see whom the hub decided that was.
+func ReplyReplied(to, id string) string {
+	return fmt.Sprintf("Replied to %s (%s) — it reads this at its next `sindri`. Threaded, so they see "+
+		"which of their messages you are answering.", to, id)
+}
+
+// ReplyReplyToHub refuses a reply to the hub, naming what to use instead. The hub is not a
+// correspondent: a message from it is a notification, and an answer typed at it would be read by nobody.
+const ReplyReplyToHub = "Not sent: that message came from the hub, which is not a correspondent — a " +
+	"notification, not something with anyone behind it to read your answer. If the answer needs a " +
+	"human, `sindri escalate \"<what needs deciding>\"` puts the question where they will see it; if it " +
+	"belongs on the work, `sindri comment \"<text>\"` records it on the task."

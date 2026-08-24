@@ -148,8 +148,8 @@ func repoLintBar(cmd *cobra.Command, flagLines int, flagAvg float64) (int, float
 	if cfg.Lint.MaxLines != nil && !cmd.Flags().Changed("max") {
 		lines = *cfg.Lint.MaxLines
 	}
-	if cfg.Lint.MaxCommentAvg != nil && !cmd.Flags().Changed("max-comment-avg") {
-		avg = *cfg.Lint.MaxCommentAvg
+	if !cmd.Flags().Changed("max-comment-avg") {
+		avg = lint.MaxCommentAvgFor(cfg)
 	}
 	return lines, avg
 }

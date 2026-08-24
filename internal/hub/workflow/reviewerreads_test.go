@@ -163,7 +163,7 @@ func TestShowPRNamesItsTask(t *testing.T) {
 // review — the directive and the prompt — have to point at the verbs, or the reviewer keeps judging
 // the diff against the architecture doc alone.
 func TestTheReviewerIsToldItCanRead(t *testing.T) {
-	dir := DirReview("pr-sd-1", "sd-1", "the reviewed work", "ARCHITECTURE.md")
+	dir := DirReview("pr-sd-1", "sd-1", "the reviewed work", "dwalin", "ARCHITECTURE.md")
 	for _, want := range []string{"sd-1", "the reviewed work", "sindri task sd-1", "task list", "COMMENTS", "spec:"} {
 		if !strings.Contains(dir, want) {
 			t.Errorf("the directive does not mention %q:\n%s", want, dir)
@@ -179,7 +179,7 @@ func TestTheReviewerIsToldItCanRead(t *testing.T) {
 // TestDirReviewSurvivesAnUnreadableTitle: a title that will not load must not stop a review being
 // handed out — the reviewer still needs the PR id and the verbs.
 func TestDirReviewSurvivesAnUnreadableTitle(t *testing.T) {
-	dir := DirReview("pr-sd-1", "sd-1", "", "ARCHITECTURE.md")
+	dir := DirReview("pr-sd-1", "sd-1", "", "dwalin", "ARCHITECTURE.md")
 	if !strings.Contains(dir, "pr-sd-1") || !strings.Contains(dir, "sindri task sd-1") {
 		t.Errorf("a missing title cost the directive its substance:\n%s", dir)
 	}
@@ -298,5 +298,37 @@ func TestShowPRDoesNotWrite(t *testing.T) {
 	// It still names the task from what it has.
 	if !strings.Contains(out.String(), "sd-1") {
 		t.Errorf("`show` should still name the task id:\n%s", out.String())
+	}
+}
+
+// TestTheReviewDirectiveNamesTheAuthor is the gap: a reviewer was handed a PR and never told whose
+// work it was. The name was reachable — `sindri show <pr>` prints it — but only by going looking,
+// and nothing suggested looking, so verdicts were written about nobody.
+func TestTheReviewDirectiveNamesTheAuthor(t *testing.T) {
+	dir := DirReview("pr-sd-1", "sd-1", "the reviewed work", "dwalin", "ARCHITECTURE.md")
+	if !strings.Contains(dir, "dwalin") {
+		t.Errorf("the directive must name the author:\n%s", dir)
+	}
+	// Named where the reviewer is told WHAT to do, not in a footnote: the first line is the one
+	// sentence every reviewer reads.
+	first := strings.SplitN(dir, "\n", 2)[0]
+	if !strings.Contains(first, "dwalin") {
+		t.Errorf("the author belongs in the opening line, got %q", first)
+	}
+	if !strings.Contains(first, "sd-1") {
+		t.Errorf("the task is still named beside the author, got %q", first)
+	}
+}
+
+// TestAnAuthorlessPRStillReadsAsASentence: an older PR record carries no author, and "'s work on"
+// with nothing in front of it would read worse than the plain task line it replaced.
+func TestAnAuthorlessPRStillReadsAsASentence(t *testing.T) {
+	dir := DirReview("pr-sd-1", "sd-1", "the reviewed work", "", "ARCHITECTURE.md")
+	first := strings.SplitN(dir, "\n", 2)[0]
+	if strings.Contains(first, "'s work") {
+		t.Errorf("with no author the line must not claim one, got %q", first)
+	}
+	if !strings.Contains(first, "task sd-1") {
+		t.Errorf("it falls back to naming the task, got %q", first)
 	}
 }

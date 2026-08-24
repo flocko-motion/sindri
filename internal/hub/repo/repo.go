@@ -32,6 +32,25 @@ func MaterializeReview(root, branch string) (string, error) {
 	return path, nil
 }
 
+// gateName is the gate's own reserved worktree, not the review tree a human may be reading in.
+const gateName = "gate"
+
+// MaterializeGate checks ref out fresh and detached, so a gate measures the commit it is filed under
+// rather than whatever the tree it came from holds by then.
+func MaterializeGate(root, ref string) (string, error) {
+	path := filepath.Join(root, ".worktrees", gateName)
+	_ = git.WorktreeRemove(root, path)
+	if err := git.WorktreeAdd(root, path, ref); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// RemoveGate drops that worktree. Best-effort: tidying up must not turn a verdict into an error.
+func RemoveGate(root string) {
+	_ = git.WorktreeRemove(root, filepath.Join(root, ".worktrees", gateName))
+}
+
 // combinedName is the preflight's throwaway worktree and branch: one reserved name, so a crash
 // leaves at most one stale tree rather than accumulating them.
 const combinedName = "precheck"
@@ -84,30 +103,21 @@ const GateTimeout = 15 * time.Minute
 // gateOutputLines caps stored gate output, the way the diff commands cap theirs.
 const gateOutputLines = 400
 
-// Gate runs the submit gate in a worktree as a subprocess, so the concurrent hub never chdir's: the
-// built-in lint, then the project's own verify command when it declares one. Named for what it now
-// is — a gate — since it may build and test, not only lint.
-//
-// verify is repo-relative and already validated by config; "" means the project declares none, and
-// then the built-in behaviour is exactly what it was, including the silent pass for a non-Go tree.
-// A declared gate runs whatever the language, because the project asked for it.
-func Gate(wt string, resolveBin func() (string, error), verify string) (output string, ok bool) {
-	if out, passed := builtinLint(wt, resolveBin, verify != ""); !passed {
-		return out, false
-	} else if verify == "" {
-		return out, true
+// Gate checks wt in a subprocess, so the concurrent hub never chdir's. ONE of the two checks, never
+// both: a declared verify (repo-relative, validated by config) owns the gate, since it is the thing
+// that can run the built-in linter itself — running both paid for the same linter twice per gate.
+func Gate(ctx context.Context, wt string, resolveBin func() (string, error), verify string) (output string, ok bool) {
+	if verify != "" {
+		return runVerify(ctx, wt, verify)
 	}
-	return runVerify(wt, verify)
+	return builtinLint(wt, resolveBin)
 }
 
-// builtinLint is the gate brokkr provides. skipGoCheck keeps a non-Go tree in play when the project
-// has declared its own gate — otherwise a project in another language would still gate on nothing.
-func builtinLint(wt string, resolveBin func() (string, error), declared bool) (string, bool) {
+// builtinLint is the gate brokkr provides, for a project that declares none of its own. A tree with
+// no Go module passes: there is nothing here for it to say, and it is the only gate left.
+func builtinLint(wt string, resolveBin func() (string, error)) (string, bool) {
 	if _, err := os.Stat(filepath.Join(wt, "go.mod")); err != nil {
-		if declared {
-			return "", true // not a Go tree: nothing for the built-in to say, the declared gate decides
-		}
-		return "", true // no Go module and no declared gate — as before
+		return "", true
 	}
 	ok, out := lintgate.Adapter{ResolveBin: resolveBin}.Validate(wt)
 	return out, ok
@@ -115,12 +125,12 @@ func builtinLint(wt string, resolveBin func() (string, error), declared bool) (s
 
 // runVerify executes the project's own declared command (not a tool sindri wraps, so no adapter
 // applies), bounded and with its output capped. A timeout is a refusal, not a hang.
-func runVerify(wt, verify string) (string, bool) {
+func runVerify(ctx context.Context, wt, verify string) (string, bool) {
 	bin := filepath.Join(wt, filepath.FromSlash(verify))
 	if _, err := os.Stat(bin); err != nil {
 		return "verify: " + verify + " not found in the worktree — the project declares it in .sindri/config.yaml\n", false
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), GateTimeout)
+	ctx, cancel := context.WithTimeout(ctx, GateTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin)
 	cmd.Dir = wt

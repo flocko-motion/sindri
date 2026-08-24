@@ -8,8 +8,9 @@ the board already carries `DefaultMemory` — but the fleet figure is missing: h
 has left, and therefore whether another agent will start.
 
 A percentage would leave the reader dividing free memory by a default they would have to look up.
-The number worth showing is the one the question is about: what is free, and how many more agents of
-the default size fit in it.
+The number worth showing is the one the question is about — what the fleet costs the machine — paired
+with a live workload count: how many of the roster are running against how many exist, so the
+question answered is "is one already able to run right now" rather than "may I create another."
 
 The host cannot be read for that figure, because "left" means a different thing per backend.
 Containers sharing the host kernel take memory as they use it, so the machine can be overcommitted
@@ -25,9 +26,11 @@ reason; capacity is the same question one step out.
   costs the machine against the ceiling it draws from, with a word for what the used figure counts.
   Podman answers from `podman info`, which describes the host it runs containers on. Apple
   `container` answers with the sum of the running micro-VMs' reservations against the Mac's memory.
-- The hub folds one reading into `BoardState.Memory`: free memory, and how many more default-size
-  agents fit there. It sits beside `DefaultMemory` and `StartedAt`, being a property of the machine
-  and its runtime rather than of a project.
+- The hub folds one reading into `BoardState.Memory`: what the fleet costs against the ceiling. It
+  sits beside `DefaultMemory` and `StartedAt`, being a property of the machine and its runtime rather
+  than of a project. Paired with it, `BoardState.RunningAgentCount()` answers the live half of the
+  question — once an idle agent can be stopped and a stopped one started on demand, "how many more
+  fit" is not the question; "is this idle or full" is.
 - The reading is taken by the watchdog on a slower cadence of its own, so a board read reports it
   rather than paying a process spawn for it — the rule liveness already follows.
 - The TUI draws it top-right in the header, reusing the existing memory meter. It degrades as the

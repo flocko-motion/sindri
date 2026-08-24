@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   title      TEXT NOT NULL DEFAULT '',
   status     TEXT NOT NULL DEFAULT '',
   priority   TEXT NOT NULL DEFAULT '',
+  tier       TEXT NOT NULL DEFAULT '', -- junior|mid|senior, '' unrated (-> api.TierOrDefault)
   type       TEXT NOT NULL DEFAULT '',
   labels      TEXT NOT NULL DEFAULT '',
   parent_id   TEXT NOT NULL DEFAULT '',
@@ -42,6 +43,9 @@ CREATE TABLE IF NOT EXISTS agent_state (
   -- The question an agent stopped on, waiting for the user to decide it ('' = not escalated). Written
   -- only by SetEscalation/ClearEscalation, never by SetState (-> SetState).
   escalation TEXT NOT NULL DEFAULT '',
+  -- Notes to the user this agent may still send on its current claim (-> GrantNotes). Written only by
+  -- GrantNotes/SetNotesLeft, never by SetState, for the same reason the escalation is not.
+  notes_left INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (project, agent)
 );
 CREATE TABLE IF NOT EXISTS prs (
@@ -67,6 +71,7 @@ CREATE TABLE IF NOT EXISTS owned_tasks (
   title       TEXT NOT NULL DEFAULT '',
   status      TEXT NOT NULL DEFAULT 'open', -- open | in_progress | in_review | closed
   priority    TEXT NOT NULL DEFAULT '',
+  tier        TEXT NOT NULL DEFAULT '', -- junior|mid|senior, '' unrated (-> api.TierOrDefault)
   type        TEXT NOT NULL DEFAULT 'task',
   labels      TEXT NOT NULL DEFAULT '',
   description TEXT NOT NULL DEFAULT '',
@@ -115,6 +120,25 @@ CREATE TABLE IF NOT EXISTS pr_lint (
   ran_at  TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (project, pr)
 );
+-- What the gate said about one COMMIT, so an unchanged commit is never gated twice. It carries the
+-- verify command too: re-pointing that asks a different question of the same tree.
+CREATE TABLE IF NOT EXISTS gate_result (
+  project TEXT NOT NULL,
+  sha     TEXT NOT NULL,
+  passed  INTEGER NOT NULL DEFAULT 0,
+  verify  TEXT NOT NULL DEFAULT '',
+  output  TEXT NOT NULL DEFAULT '',
+  ran_at  TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (project, sha)
+);
+-- Who is waiting to be TOLD a run has landed, beyond whoever queued it: a second asker joins the
+-- queued run rather than queueing another, and would otherwise wait on a message nobody sends.
+CREATE TABLE IF NOT EXISTS run_waiters (
+  project TEXT NOT NULL,
+  run     TEXT NOT NULL,
+  agent   TEXT NOT NULL,
+  PRIMARY KEY (project, run, agent)
+);
 -- A PR's lifecycle history, shown in the detail column with timestamps.
 CREATE TABLE IF NOT EXISTS pr_events (
   id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -146,8 +170,9 @@ CREATE TABLE IF NOT EXISTS runs (
   workspace   TEXT NOT NULL DEFAULT '',       -- the agent's worktree path at schedule time
   task        TEXT NOT NULL DEFAULT '',       -- the agent's task at schedule time, for staleness at dequeue
   exit_code   INTEGER NOT NULL DEFAULT 0,
-  kind        TEXT NOT NULL DEFAULT '',       -- '' | 'submit' | 'contribute' -- a submit/contribute gate
+  kind        TEXT NOT NULL DEFAULT '',       -- '' = an ordinary run; otherwise which gate (-> workflow/gate.go)
   message     TEXT NOT NULL DEFAULT '',       -- the agent's submit/contribute text, replayed once a gate passes
+  commit_sha  TEXT NOT NULL DEFAULT '',       -- the commit a gate run checks; its verdict is recorded against it
   output      TEXT NOT NULL DEFAULT '',
   created_at  TEXT NOT NULL DEFAULT '',
   started_at  TEXT NOT NULL DEFAULT '',
@@ -164,6 +189,9 @@ type AgentState struct {
 	Branch    string `json:"branch"`
 	Phase     string `json:"phase"`
 	Container string `json:"container,omitempty"`
+	// NotesLeft is how many notes to the user this agent may still send on its current claim. Here
+	// rather than derived, because the grant is per CLAIM and replaces (-> GrantNotes).
+	NotesLeft int `json:"notesLeft,omitempty"`
 	// Escalation is the question the agent stopped on, waiting for the user to decide it ('' = not
 	// escalated). It rides here so every reader of the state has it — the command surface, the board,
 	// the directive — but it is NOT part of what SetState writes (-> SetState).
@@ -181,8 +209,8 @@ type PR = api.PR
 // GetState returns an agent's workflow state in this project (zero value if none).
 func (p *ProjectStore) GetState(agent string) (AgentState, error) {
 	st := AgentState{Agent: agent, Phase: "idle"}
-	row := p.s.db.QueryRow(`SELECT task,branch,phase,container,escalation FROM agent_state WHERE project=? AND agent=?`, p.project, agent)
-	err := row.Scan(&st.Task, &st.Branch, &st.Phase, &st.Container, &st.Escalation)
+	row := p.s.db.QueryRow(`SELECT task,branch,phase,container,escalation,notes_left FROM agent_state WHERE project=? AND agent=?`, p.project, agent)
+	err := row.Scan(&st.Task, &st.Branch, &st.Phase, &st.Container, &st.Escalation, &st.NotesLeft)
 	if err == sql.ErrNoRows {
 		return st, nil
 	}
@@ -192,10 +220,9 @@ func (p *ProjectStore) GetState(agent string) (AgentState, error) {
 	return st, nil
 }
 
-// SetState writes an agent's workflow state in this project. It leaves the escalation alone: every
-// caller here builds a fresh AgentState from the columns it cares about, so writing that one from the
-// struct would clear a live escalation on the next phase change — and a durable state any unrelated
-// write can drop is not durable. SetEscalation and ClearEscalation are the only writers of it.
+// SetState writes an agent's workflow state, leaving the escalation alone: callers build a fresh
+// AgentState from the columns they care about, so writing that one from the struct would clear a live
+// escalation on the next phase change. SetEscalation and ClearEscalation are its only writers.
 func (p *ProjectStore) SetState(st AgentState) error {
 	if st.Phase == "" {
 		st.Phase = "idle"
@@ -210,10 +237,24 @@ func (p *ProjectStore) SetState(st AgentState) error {
 	return nil
 }
 
-// SetEscalation records the question an agent has stopped on, so the escalation survives a hub
-// restart — an escalation that evaporates leaves an agent silently stuck, refused by every verb that
-// lands work with nothing to say why. An upsert, because an agent may escalate before anything
-// else has written it a state row.
+// SetPhase changes only an agent's phase, leaving task, branch and container as they were — skipping
+// the read-then-echo SetState forces is how a held container got dropped at four call sites. It needs
+// an existing row (SetState creates those), and errors rather than quietly writing nothing.
+func (p *ProjectStore) SetPhase(agent, phase string) error {
+	res, err := p.s.db.Exec(`UPDATE agent_state SET phase=? WHERE project=? AND agent=?`, phase, p.project, agent)
+	if err != nil {
+		return fmt.Errorf("set phase %s: %w", agent, err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("set phase %s: %w", agent, err)
+	} else if n == 0 {
+		return fmt.Errorf("set phase %s: no existing state row (use SetState first)", agent)
+	}
+	return nil
+}
+
+// SetEscalation records the question an agent stopped on, durably: one that evaporates leaves the
+// agent silently stuck. An upsert, since an agent may escalate before anything wrote it a state row.
 func (p *ProjectStore) SetEscalation(agent, question string) error {
 	_, err := p.s.db.Exec(`
 		INSERT INTO agent_state (project,agent,escalation) VALUES (?,?,?)
@@ -223,6 +264,44 @@ func (p *ProjectStore) SetEscalation(agent, question string) error {
 		return fmt.Errorf("set escalation %s: %w", agent, err)
 	}
 	return nil
+}
+
+// GrantNotes gives an agent its note budget for a claim. It REPLACES rather than adds: finishing a
+// claim with two unspent and starting the next at four is what turns any quota into an occasional
+// flood. Called where a claim is made, so the right to speak follows having been somewhere and looked.
+func (p *ProjectStore) GrantNotes(agent string, n int) error {
+	_, err := p.s.db.Exec(`
+		INSERT INTO agent_state (project,agent,notes_left) VALUES (?,?,?)
+		ON CONFLICT(project,agent) DO UPDATE SET notes_left=excluded.notes_left`, p.project, agent, n)
+	if err != nil {
+		return fmt.Errorf("grant notes to %s: %w", agent, err)
+	}
+	return nil
+}
+
+// SetNotesLeft records what an agent has left after spending one.
+func (p *ProjectStore) SetNotesLeft(agent string, n int) error {
+	_, err := p.s.db.Exec(`UPDATE agent_state SET notes_left=? WHERE project=? AND agent=?`, n, p.project, agent)
+	if err != nil {
+		return fmt.Errorf("set notes left for %s: %w", agent, err)
+	}
+	return nil
+}
+
+// NotesLeft is how many notes an agent may still send on this claim. An agent with no state row has
+// never claimed anything, so it has nothing granted — the budget fails CLOSED, which is the safe
+// direction for a limit whose purpose is protecting one person's attention.
+func (p *ProjectStore) NotesLeft(agent string) (int, error) {
+	var n int
+	err := p.s.db.QueryRow(`SELECT notes_left FROM agent_state WHERE project=? AND agent=?`,
+		p.project, agent).Scan(&n)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("notes left for %s: %w", agent, err)
+	}
+	return n, nil
 }
 
 // ClearEscalation releases an escalated agent, whoever asked for it — the agent itself once it has
@@ -249,14 +328,20 @@ func (p *ProjectStore) PutPR(pr PR) error {
 		pr.Kind = "final"
 	}
 	pr.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	// The status stamp is decided in SQL against the row already stored, so it compares with what is
+	// actually there rather than with whatever the caller read some steps earlier — every writer here
+	// does Get, mutate, Put, and two of those interleaving would otherwise lose a transition.
+	pr.StatusChangedAt = pr.UpdatedAt
 	_, err := p.s.db.Exec(`
-		INSERT INTO prs (project,id,task,agent,branch,base,status,feedback,created_at,kind,updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?)
+		INSERT INTO prs (project,id,task,agent,branch,base,status,feedback,created_at,kind,updated_at,status_changed_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(project,id) DO UPDATE SET
 			task=excluded.task, agent=excluded.agent, branch=excluded.branch,
 			base=excluded.base, status=excluded.status, feedback=excluded.feedback, kind=excluded.kind,
-			updated_at=excluded.updated_at`,
-		p.project, pr.ID, pr.Task, pr.Agent, pr.Branch, pr.Base, pr.Status, pr.Feedback, pr.CreatedAt, pr.Kind, pr.UpdatedAt)
+			updated_at=excluded.updated_at,
+			status_changed_at=CASE WHEN prs.status<>excluded.status
+				THEN excluded.status_changed_at ELSE prs.status_changed_at END`,
+		p.project, pr.ID, pr.Task, pr.Agent, pr.Branch, pr.Base, pr.Status, pr.Feedback, pr.CreatedAt, pr.Kind, pr.UpdatedAt, pr.StatusChangedAt)
 	if err != nil {
 		return fmt.Errorf("put pr %s: %w", pr.ID, err)
 	}
@@ -297,7 +382,7 @@ func (s *Store) AllPRs(statuses ...string) ([]PR, error) {
 	return queryPRs(s.db, q, args...)
 }
 
-const prCols = `SELECT project,id,task,agent,branch,base,status,feedback,created_at,kind,updated_at FROM prs`
+const prCols = `SELECT project,id,task,agent,branch,base,status,feedback,created_at,kind,updated_at,status_changed_at FROM prs`
 
 type scanner interface{ Scan(...any) error }
 
@@ -331,31 +416,12 @@ func scanPR(row scanner) (PR, bool, error) {
 
 func scanPRRow(row scanner) (PR, error) {
 	var p PR
-	err := row.Scan(&p.Project, &p.ID, &p.Task, &p.Agent, &p.Branch, &p.Base, &p.Status, &p.Feedback, &p.CreatedAt, &p.Kind, &p.UpdatedAt)
+	err := row.Scan(&p.Project, &p.ID, &p.Task, &p.Agent, &p.Branch, &p.Base, &p.Status, &p.Feedback, &p.CreatedAt, &p.Kind, &p.UpdatedAt, &p.StatusChangedAt)
 	return p, err
 }
 
 func placeholders(n int) string {
 	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
-}
-
-// --- pr lint ---
-
-// SetPRLint stores (or replaces) a PR's latest lint output in this project, now.
-func (p *ProjectStore) SetPRLint(prID, output string) error {
-	_, err := p.s.db.Exec(`INSERT INTO pr_lint (project, pr, output, ran_at) VALUES (?,?,?,?)
-		ON CONFLICT(project, pr) DO UPDATE SET output=excluded.output, ran_at=excluded.ran_at`,
-		p.project, prID, output, time.Now().UTC().Format(time.RFC3339))
-	if err != nil {
-		return fmt.Errorf("set pr lint %s: %w", prID, err)
-	}
-	return nil
-}
-
-// GetPRLint returns a PR's stored lint output and run time in this project.
-func (p *ProjectStore) GetPRLint(prID string) (output, ranAt string) {
-	_ = p.s.db.QueryRow(`SELECT output, ran_at FROM pr_lint WHERE project=? AND pr=?`, p.project, prID).Scan(&output, &ranAt)
-	return output, ranAt
 }
 
 // --- pr history ---
@@ -559,6 +625,43 @@ func (p *ProjectStore) Reviews(pr string) ([]Review, error) {
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// RuledPRs is every PR author has recorded a verdict on, newest first — what a reviewer may still
+// comment on, its HELD review having ended the moment that verdict landed (-> ReviewingPR).
+func (p *ProjectStore) RuledPRs(author string) ([]string, error) {
+	rows, err := p.s.db.Query(
+		`SELECT pr FROM reviews WHERE project=? AND author=? AND verdict<>'' ORDER BY id DESC`,
+		p.project, author)
+	if err != nil {
+		return nil, fmt.Errorf("ruled prs for %s: %w", author, err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var pr string
+		if err := rows.Scan(&pr); err != nil {
+			return nil, err
+		}
+		out = append(out, pr)
+	}
+	return out, rows.Err()
+}
+
+// AwaitingPR is agent's newest PR that has not settled, with the task it would land into — ("", "")
+// if none. An agent HOLDS that task until the PR merges, which is what the board has always shown
+// and what every "is it free" question in the hub used to miss.
+func (p *ProjectStore) AwaitingPR(agent string) (pr, task string, err error) {
+	err = p.s.db.QueryRow(
+		`SELECT id, task FROM prs WHERE project=? AND agent=? AND status NOT IN ('merged','scrapped') ORDER BY rowid DESC LIMIT 1`,
+		p.project, agent).Scan(&pr, &task)
+	if err == sql.ErrNoRows {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("awaiting pr for %s: %w", agent, err)
+	}
+	return pr, task, nil
 }
 
 // ReviewingPR is the newest verdict-less review assigned to author, "" if none. The board

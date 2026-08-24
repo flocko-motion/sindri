@@ -20,7 +20,7 @@ const testProject = "proj"
 func newHub(t *testing.T) *Hub {
 	t.Helper()
 	t.Setenv("SINDRI_HOME", t.TempDir())
-	h, err := New()
+	h, err := New(t.Context())
 	if err != nil {
 		t.Fatalf("new hub: %v", err)
 	}
@@ -92,6 +92,21 @@ func TestNewAgentValidation(t *testing.T) {
 	}
 }
 
+// TestGlobalProjectAcceptsOnlyAReviewer: _global holds no repo, so nothing a worker, planner or
+// coauthor carries across its work — a branch, a standing conversation, the user's own seat —
+// exists there. A reviewer, which carries nothing between reviews, is the one role that fits.
+func TestGlobalProjectAcceptsOnlyAReviewer(t *testing.T) {
+	h := newHub(t)
+	for _, role := range []string{"worker", "planner", "coauthor"} {
+		if _, err := h.agents.NewAgent(workflow.GlobalProject, "x-"+role, role, ""); err == nil {
+			t.Errorf("a %s should be refused in %s", role, workflow.GlobalProject)
+		}
+	}
+	if _, err := h.agents.NewAgent(workflow.GlobalProject, "ori", "reviewer", ""); err != nil {
+		t.Errorf("a reviewer should be accepted in %s: %v", workflow.GlobalProject, err)
+	}
+}
+
 func TestNewAgentAutoName(t *testing.T) {
 	h := newHub(t)
 	n1, err := h.agents.NewAgent(testProject, "", "worker", "")
@@ -134,8 +149,9 @@ func TestNewAgentRecordsIdentityAndLog(t *testing.T) {
 	}
 	// Observe before asserting. The agent is registered after the watchdog seeded, so until a sweep
 	// looks at it its status is "unknown" — correct, and a race to assert around: whether this read
-	// caught the settled value depended on the 2s tick landing first.
-	h.watch.sweep()
+	// caught the settled value depended on the tick landing first. Probes included, since the
+	// listing alone leaves an existing pod's session unread.
+	h.watch.sweep(true)
 	st, err := h.State(testProject)
 	if err != nil {
 		t.Fatal(err)
@@ -225,7 +241,7 @@ func TestStartupAdvice(t *testing.T) {
 // `sindri` directive = workflow.DirReview, and the injected = workflow.MsgReview) always tell the
 // reviewer to read the repo's ARCHITECTURE.md.
 func TestReviewInstructionsCarryArchitecture(t *testing.T) {
-	if !strings.Contains(workflow.DirReview("pr-1", "td-1", "a task title", "ARCHITECTURE.md"), "ARCHITECTURE.md") {
+	if !strings.Contains(workflow.DirReview("pr-1", "td-1", "a task title", "dwalin", "ARCHITECTURE.md"), "ARCHITECTURE.md") {
 		t.Errorf("workflow.DirReview must tell the reviewer to read the architecture doc")
 	}
 	if !strings.Contains(workflow.MsgReview("pr-1", "req", "br", "base", "ARCHITECTURE.md", true), "ARCHITECTURE.md") {
@@ -235,7 +251,7 @@ func TestReviewInstructionsCarryArchitecture(t *testing.T) {
 
 func TestTellUnknownAgent(t *testing.T) {
 	h := newHub(t)
-	if err := h.agents.Tell(testProject, "ghost", "hi", "user", api.SignedOutRefuse); err == nil {
+	if err := h.agents.Tell(t.Context(), testProject, "ghost", "hi", "user", api.SignedOutRefuse); err == nil {
 		t.Fatalf("telling unknown agent should error")
 	}
 }
@@ -428,8 +444,8 @@ func TestReviewerReadsButCannotAct(t *testing.T) {
 }
 
 // TestPlannerGainsApproveButNotReject: a planner may add its optional, advisory badge (-> pr.go
-// CmdApprove's role branch), but never a reject — that stays the reviewer's alone, since the
-// planner grant is a second opinion beside a verdict, not a verdict of its own.
+// CmdApprove's role branch), but never a reject — the planner grant is a second opinion beside a
+// verdict, not a verdict of its own. (A coauthor's IS a verdict: -> the test below.)
 func TestPlannerGainsApproveButNotReject(t *testing.T) {
 	h := newHub(t)
 	reg := h.registry()
@@ -446,9 +462,51 @@ func TestPlannerGainsApproveButNotReject(t *testing.T) {
 	if available("planner")["reject"] {
 		t.Error("a planner must not be able to reject — that stays the reviewer's alone")
 	}
-	for _, role := range []string{"worker", "coauthor"} {
-		if available(role)["approve"] {
-			t.Errorf("%s must not gain approve — only reviewer and planner may", role)
+	if available("worker")["approve"] {
+		t.Error("a worker must not gain approve — it would be ruling on the work it builds")
+	}
+}
+
+// TestCoauthorGainsAuthorshipAndVerdicts (sd-44550c): the strongest role, driven directly by the
+// user, gains the verbs it could only read around before — it shapes the backlog it already reads,
+// and records what it concluded about a PR it can already diff and lint. It gains no QUEUE with
+// them: nothing hands a coauthor work, which is what keeps it freestyle and non-blocking.
+func TestCoauthorGainsAuthorshipAndVerdicts(t *testing.T) {
+	h := newHub(t)
+	reg := h.registry()
+	available := func(role string) map[string]bool {
+		out := map[string]bool{}
+		for _, c := range reg.Available(registry.Caller{Project: testProject, Agent: "rune", Role: role}) {
+			out[c.Name] = true
+		}
+		return out
+	}
+	co := available("coauthor")
+	for _, verb := range []string{"create-task", "edit-task", "approve", "reject"} {
+		if !co[verb] {
+			t.Errorf("a coauthor must have %q — it reads the backlog and the PRs already", verb)
+		}
+	}
+	// Its own second workspace (sd-a6e45e), and nobody else's: every other role already has a
+	// worktree of its own to check work out into.
+	if !co["scratch"] {
+		t.Error("a coauthor must have `scratch` — it is the only way it can read another agent's code")
+	}
+	for _, role := range []string{"worker", "reviewer", "planner"} {
+		if available(role)["scratch"] {
+			t.Errorf("%s must not have `scratch` — it works in a worktree of its own already", role)
+		}
+	}
+	// The verbs, not the queue: these are how work is HANDED to an agent, and a coauthor takes none.
+	for _, verb := range []string{"next", "submit", "checkpoint"} {
+		if co[verb] {
+			t.Errorf("a coauthor must not have %q — its work comes from the user, never a queue", verb)
+		}
+	}
+	// The grant is the coauthor's, not everyone's: a worker still cannot author or rule on tasks.
+	for _, verb := range []string{"create-task", "edit-task", "approve", "reject"} {
+		if available("worker")[verb] {
+			t.Errorf("a worker must not gain %q with the coauthor grant", verb)
 		}
 	}
 }

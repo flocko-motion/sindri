@@ -1,13 +1,10 @@
 package workflow
 
 import (
-	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
@@ -96,8 +93,8 @@ func TestAFeatureIsNotFinishedOverGatedWork(t *testing.T) {
 }
 
 // TestAGatedFeatureWaitsRatherThanBeingDeclaredDone: the directive is the other route to a false
-// "finished". With nothing workable and nothing finished, there is nothing to say — so `sindri`
-// waits, exactly as it does for any other empty queue, and the user's verdict releases it.
+// "finished". With nothing workable and nothing finished, `sindri` answers at once with a truthful
+// wait rather than declaring the feature done, and the user's verdict is what actually releases it.
 func TestAGatedFeatureWaitsRatherThanBeingDeclaredDone(t *testing.T) {
 	e, ps, _ := gatedFeature(t)
 	// Every subtask that CAN be worked is done, which is the state a checkpoint leaves behind.
@@ -111,14 +108,15 @@ func TestAGatedFeatureWaitsRatherThanBeingDeclaredDone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
-	defer cancel()
-	d, err := e.AgentDirective(ctx, "repo", "dain")
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("the directive should wait on the user, got %q (err=%v)", d, err)
+	d, err := e.AgentDirective(t.Context(), "repo", "dain")
+	if err != nil {
+		t.Fatalf("AgentDirective: %v", err)
+	}
+	if !strings.Contains(d, "td-2") || !strings.Contains(d, "isn't finished") {
+		t.Errorf("with nothing workable and nothing finished, the directive should say so, got: %s", d)
 	}
 
-	// The verdict releases it, and the same call then hands over the subtask.
+	// The verdict releases it, and the next ask hands over the subtask.
 	if err := e.ApproveTask("repo", "td-2", false); err != nil {
 		t.Fatal(err)
 	}
@@ -154,9 +152,7 @@ func TestARejectedSubtaskBlocksNothing(t *testing.T) {
 		t.Errorf("with only a rejected subtask left the feature is finished:\n%s", out.String())
 	}
 	// And the directive agrees rather than waiting for a verdict that has already been given.
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
-	defer cancel()
-	d, err := e.AgentDirective(ctx, "repo", "dain")
+	d, err := e.AgentDirective(t.Context(), "repo", "dain")
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}

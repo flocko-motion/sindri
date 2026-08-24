@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/table"
 	"github.com/spf13/cobra"
 )
 
@@ -24,16 +25,21 @@ func NewMailCmd() *cobra.Command {
 			"feedback, an assignment. Reading one marks it read; nothing is ever deleted, so this is\n" +
 			"the record of what an agent was told, not a queue you are watching drain.\n\n" +
 			"Push-only traffic (a stall nudge, a meeting broadcast) is not here by design: waking the\n" +
-			"agent is its entire purpose, and it is recorded per agent in `sindri agent info`.",
+			"agent is its entire purpose, and it is recorded per agent in `sindri agent info`.\n\n" +
+			"Your OWN mail works the same way: `mail show` marks a message read the moment you ask for\n" +
+			"it. The TUI's Mail tab does too, but only once the cursor has rested on one for a few\n" +
+			"seconds with its body on screen — moving the cursor alone never marks anything.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
-	c.AddCommand(mailListCmd(), mailShowCmd())
+	c.AddCommand(mailListCmd(), mailShowCmd(), mailReplyCmd())
 	return c
 }
 
 func mailListCmd() *cobra.Command {
 	var agent, filter string
+	var mine bool
+	var limit int
 	c := &cobra.Command{
 		Use: "list", Short: "List mail across the fleet, newest first", Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -41,23 +47,54 @@ func mailListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if mine { // the reservation is not something a user should have to know to type
+				agent = api.SenderUser
+			}
 			return withBackend(func(b backend) error {
 				st, err := b.State()
 				if err != nil {
 					return err
 				}
-				rows := api.FilterMail(f, agent, st.Mail)
+				// AllMail orders newest first, so capHead keeps that end.
+				rows, matched := capHead(api.FilterMail(f, agent, st.Mail), limit)
+				// Grouped the way every fleet-wide listing is: what waits on the user in another repo
+				// first, then this repo, then the rest — and flat when nothing waits elsewhere
+				// (-> groupedLines). A note to the user IS what waits, which is what makes it foreign.
+				local := localProject(st.Projects)
+				listed := make([]listRow, 0, len(rows))
 				for _, m := range rows {
-					fmt.Println(mailLine(m))
+					listed = append(listed, listRow{
+						line:  mailLine(m),
+						group: listGroupFor(m.Project, local, api.MailToUser(m) && !m.Read()),
+					})
 				}
+				printListing(mailListTable, listed)
 				fmt.Fprintln(os.Stderr, mailFooter(st, rows, f, agent))
+				if note := limitNotice("message", len(rows), matched); note != "" {
+					fmt.Fprint(os.Stderr, note)
+				}
 				return nil
 			})
 		},
 	}
 	c.Flags().StringVar(&agent, "agent", "", "only mail sent to this agent")
-	c.Flags().StringVar(&filter, "filter", string(api.MailUnread), "which mail to list: "+api.MailFilterNames())
+	c.Flags().BoolVar(&mine, "mine", false, "only mail addressed to you — what an agent has told you directly")
+	c.Flags().StringVar(&filter, "filter", string(api.MailActive), "which mail to list: "+api.MailFilterNames())
+	c.Flags().IntVar(&limit, "limit", DefaultListLimit, "show at most this many, newest first (0 = no limit)")
 	return c
+}
+
+// mailListTable is the columns `sindri mail list` prints. Sender BEFORE recipient, the order mail is
+// read in everywhere else: the two sat adjacent and unlabelled the other way round, and were misread
+// over and over — labelling a backwards order would only have made the backwardness legible.
+var mailListTable = table.Table{
+	{Label: "id", Width: 8}, // wide enough for the rendered form (-> api.MailID), not the bare integer
+	{Label: "repo", Width: 10, Clip: true},
+	{Label: "from", Width: 10},
+	{Label: "to", Width: 12},
+	{Label: "state", Width: 14},
+	{Label: "age", Width: 8},
+	{Label: "message"},
 }
 
 // mailLine is one row: enough to tell whose it is, who sent it, whether it has been read, and what
@@ -70,8 +107,15 @@ func mailLine(m api.Mail) string {
 	if m.Pushed { // it was also injected live, so it may have been acted on already
 		state += "+pushed"
 	}
-	return fmt.Sprintf("%-6d %-10.10s %-12s %-10s %-14s %-8s %s",
-		m.ID, m.Repo, m.Agent, dash(m.Sender), state, shortAge(m.SentAt), oneLine(m.Body, 80))
+	return mailListTable.Line(
+		table.Cell{Text: api.MailID(m.ID)},
+		table.Cell{Text: m.Repo},
+		table.Cell{Text: dash(m.Sender)},
+		table.Cell{Text: m.Agent},
+		table.Cell{Text: state},
+		table.Cell{Text: shortAge(m.SentAt)},
+		table.Cell{Text: oneLine(m.Body, 80)},
+	)
 }
 
 // mailFooter says what the listing is NOT showing. The board carries a window of a mailbox that is
@@ -88,29 +132,76 @@ func mailFooter(st api.BoardState, shown []api.Mail, f api.MailFilter, agent str
 	tail := ""
 	if len(st.Mail) < st.MailTotal {
 		tail = fmt.Sprintf(" Showing the last %d of %d messages; older mail is reachable by id "+
-			"(`sindri mail show <id>`).", len(st.Mail), st.MailTotal)
+			"(`sindri mail show ml-<n>`).", len(st.Mail), st.MailTotal)
 	}
-	return fmt.Sprintf("%d %s message(s)%s, %d unread across the fleet.%s",
-		len(shown), f, where, st.MailUnread, tail)
+	// The user's own unread is named separately, and fleet-wide: it is the number that asks something
+	// of them, where the mailbox total merely says how much traffic there has been.
+	mine := ""
+	if st.MailUnreadUser > 0 {
+		mine = fmt.Sprintf(" %d of them addressed to YOU (`sindri mail list --mine`).", st.MailUnreadUser)
+	}
+	return fmt.Sprintf("%d %s message(s)%s, %d unread across the fleet.%s%s",
+		len(shown), f, where, st.MailUnread, mine, tail)
+}
+
+// mailReplyCmd answers an agent's message by its id. No recipient to type: it comes from the row, which
+// is the point — the id is on every line of `mail list`.
+func mailReplyCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "reply <id> <message...>", Short: "Answer a message an agent sent you (it goes to whoever sent it)",
+		Args: cobra.MinimumNArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			id, err := api.ParseMailID(args[0])
+			if err != nil {
+				return err
+			}
+			msg := strings.Join(args[1:], " ")
+			return withBackend(func(b backend) error {
+				if err := b.ReplyToMail(id, msg); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stderr, "replied — it reads this at its next `sindri`, threaded with what you answered\n")
+				return nil
+			})
+		},
+	}
+}
+
+// mailShowState is the state word `mail show` prints — pulled out so it's testable without a
+// backend. justRead names a mark this very call just made, which m.Read() cannot yet reflect.
+func mailShowState(m api.Mail, justRead bool) string {
+	switch {
+	case justRead:
+		return "read just now"
+	case m.Read():
+		return "read " + shortAge(m.ReadAt) + " ago"
+	default:
+		return "unread"
+	}
 }
 
 func mailShowCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "show <id>", Short: "Show one message in full (the list carries only an opening)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			var id int64
-			if _, err := fmt.Sscanf(args[0], "%d", &id); err != nil {
-				return fmt.Errorf("mail id must be a number, got %q", args[0])
+			id, err := api.ParseMailID(args[0])
+			if err != nil {
+				return err
 			}
 			return withBackend(func(b backend) error {
 				m, err := b.MailBody(id)
 				if err != nil {
 					return err
 				}
-				read := "unread"
-				if m.Read() {
-					read = "read " + shortAge(m.ReadAt) + " ago"
+				// An explicit `mail show` is a deliberate read — the same act ENTER used to be — so it
+				// marks at once rather than waiting on a dwell that has no cursor to time here.
+				justRead := api.MailToUser(m) && !m.Read()
+				if justRead {
+					if err := b.MarkMailRead(id); err != nil {
+						return err
+					}
 				}
+				read := mailShowState(m, justRead)
 				fmt.Printf("to:     %s (%s)\nfrom:   %s\nsent:   %s\nstate:  %s\npushed: %v\n\n%s\n",
 					m.Agent, m.Repo, dash(m.Sender), m.SentAt, read, m.Pushed, strings.TrimRight(m.Body, "\n"))
 				return nil

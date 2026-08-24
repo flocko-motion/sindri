@@ -50,6 +50,15 @@ set -g mode-keys vi
 set -g history-limit 50000
 TMUXCONF
 
+# Overrides status-left above, once the hub has a model to name (nothing on a first launch).
+# Stripped of '#'/'"': tmux's status format and this line's own quoting would read them as syntax.
+if [ -n "${SINDRI_MODEL:-}" ]; then
+	MODEL_SAFE="${SINDRI_MODEL//[\"#]/}"
+	cat >> "$HOME/.tmux.conf" <<TMUXMODEL
+set -g status-left "#[bold] sindri · #S ($MODEL_SAFE) #[default] "
+TMUXMODEL
+fi
+
 # A detached new-session with no -x/-y sticks at tmux's own 80x24 until attached; the hub passes
 # the caller's preview size (TUI only) so a fresh session isn't cramped from the start.
 SIZE_ARGS=()
@@ -63,10 +72,12 @@ else
 	# --continue resumes this workspace's session across a restart, but EXITS NON-ZERO with
 	# nothing to resume, so `||` falls back to a fresh `claude`, not bash.
 	# --append-system-prompt every launch: dropping it costs the agent its role, even on --continue.
+	# --model only when the hub chose one, else claude's own default. Explicit even under --continue:
+	# a change compacts first (-> agent.SetModel), meaning to carry the summary onto the new model.
 	# Single-quoted so tmux's shell evaluates the multi-line $() at session start, not this script's.
 	# `stty sane` undoes Claude's raw, echo-off terminal so a dial-in lands at a prompt.
 	tmux new-session -d -s "$SESSION" "${SIZE_ARGS[@]}" \
-		'SP="$(cat /home/sindri/.claude/system-prompt.txt)"; claude --continue --dangerously-skip-permissions --append-system-prompt "$SP" || claude --dangerously-skip-permissions --append-system-prompt "$SP"; stty sane; exec bash -i'
+		'SP="$(cat /home/sindri/.claude/system-prompt.txt)"; claude --continue --dangerously-skip-permissions ${SINDRI_MODEL:+--model "$SINDRI_MODEL"} --append-system-prompt "$SP" || claude --dangerously-skip-permissions ${SINDRI_MODEL:+--model "$SINDRI_MODEL"} --append-system-prompt "$SP"; stty sane; exec bash -i'
 fi
 
 # Belt-and-suspenders: re-source in case the server was already running.

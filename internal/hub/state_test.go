@@ -29,77 +29,65 @@ func TestAgentPRMatchesThePRsTab(t *testing.T) {
 // unlike every other status here, it cannot even be told so.
 func TestSignedOutOutranksEveryPhase(t *testing.T) {
 	for _, status := range []string{"idle", "working", "planning", "collab", "reviewing", "submitted", "stalled"} {
-		if got := overlayRuntime(status, "signed-out", true); got != "signed-out" {
+		if got := overlayRuntime(status, "signed-out"); got != "signed-out" {
 			t.Errorf("overlayRuntime(%q, signed-out) = %q, want signed-out", status, got)
 		}
 	}
 	// A phase the runtime says nothing about is still the phase: a failed probe reports "".
-	if got := overlayRuntime("planning", "", true); got != "planning" {
+	if got := overlayRuntime("planning", ""); got != "planning" {
 		t.Errorf("a silent probe must change nothing, got %q", got)
 	}
 }
 
-// TestAMovingPaneIsNotWorkInHand: bombur read "working" against an empty task column. It was
-// reacting to a "there may be new work" broadcast — its screen moved, which is all the runtime can
-// see, but a worker holding nothing cannot be working. Activity decides the runtime word; whether
-// that word may claim the status is the workflow's to say.
-func TestAMovingPaneIsNotWorkInHand(t *testing.T) {
-	if got := overlayRuntime("idle", "working", false); got != "idle" {
-		t.Errorf("an agent holding nothing must not read as working, got %q", got)
+// TestRuntimeDecidesIdleOrWorking: eitri was planning — the pane showed the interrupt hint, 1m41s
+// and 5.1k tokens into a turn — while the board read "idle", because a planner holds no task, feature
+// or PR by design and a stale guard discarded "working" against that empty column. Whether an agent
+// is idle is the RUNTIME's answer, an observed fact about the pane; what it holds is a separate
+// column the board already shows, and "working, holding nothing" is a coherent, honest state rather
+// than a contradiction to paper over — the ordinary state for a planner, and a real one worth seeing
+// for any other role too.
+func TestRuntimeDecidesIdleOrWorking(t *testing.T) {
+	if got := overlayRuntime("idle", "working"); got != "working" {
+		t.Errorf("a moving pane is working even holding nothing, got %q", got)
 	}
-	if got := overlayRuntime("idle", "working", true); got != "working" {
-		t.Errorf("holding work, a moving pane IS working, got %q", got)
+	if got := overlayRuntime("working", "idle"); got != "idle" {
+		t.Errorf("a still pane is idle even if the phase says working, got %q", got)
 	}
-	// The states that need a human are about the agent, not its workload, so they still apply.
-	for _, rt := range []string{"blocked", "signed-out"} {
-		if got := overlayRuntime("idle", rt, false); got != rt {
-			t.Errorf("%s must show even with nothing held, got %q", rt, got)
+	// The states that need a human are about the agent, not its workload, so they still outrank.
+	for _, rt := range []string{"blocked", "signed-out", "api-error"} {
+		if got := overlayRuntime("idle", rt); got != rt {
+			t.Errorf("%s must show regardless of what is held, got %q", rt, got)
 		}
 	}
-	// And going quiet still reads idle either way — that claims nothing that could be untrue.
-	if got := overlayRuntime("working", "idle", false); got != "idle" {
-		t.Errorf("a still pane is idle, got %q", got)
+	// A specific phase survives a runtime that only disagrees on the generic idle/working ambiguity —
+	// overlayRuntime replaces the generic words, never a more meaningful one.
+	if got := overlayRuntime("planning", "working"); got != "planning" {
+		t.Errorf("a specific phase should not be flattened to the generic runtime word, got %q", got)
 	}
 }
 
-// TestFullnessOnlyExplainsAnIdleAgent: "full" is a REASON an idle agent is passed over, not an
-// activity. Applied unconditionally it overwrote the one fact the status column carries, so an
-// agent mid-task read "full" — inviting the user to clear a context the hub refuses to clear at a
-// leaf boundary, which is how they learned the board was lying.
-func TestFullnessOnlyExplainsAnIdleAgent(t *testing.T) {
-	for _, tc := range []struct {
-		name              string
-		status            string
-		task, feature, pr string
-		want              string
-	}{
-		{"idle and holding nothing is the one case", "idle", "", "", "", "full"},
-		{"working keeps working", "working", "sd-1", "", "", "working"},
-		{"blocked keeps blocked — it needs the user now", "blocked", "sd-1", "", "", "blocked"},
-		{"submitted keeps submitted", "submitted", "sd-1", "", "pr-1", "submitted"},
-		{"down keeps down", "down", "", "", "", "down"},
-		// Stalled sits directly above fullness and has the same shape. A stalled agent HOLDS work,
-		// and stalled is the more actionable word, so it must survive.
-		{"stalled keeps stalled", "stalled", "sd-1", "", "", "stalled"},
-		// The reason held work is checked directly: a quiet runtime probe reads a task-holder as
-		// idle, and that agent is not idle in the sense fullness explains.
-		{"idle but holding a task", "idle", "sd-1", "", "", "idle"},
-		{"idle but holding a feature", "idle", "", "feat-1", "", "idle"},
-		{"idle but carrying a PR", "idle", "", "", "pr-1", "idle"},
-	} {
-		if got := overlayFullness(tc.status, true, tc.task, tc.feature, tc.pr); got != tc.want {
-			t.Errorf("%s: overlayFullness(%q) = %q, want %q", tc.name, tc.status, got, tc.want)
+// TestOrphanScanReadsTheWatchdogsListing: the orphan scan reads the sweep's own last listing
+// (-> hub/watchdog.go's pods) rather than taking a second one of its own — a stopped watchdog, so
+// nothing in the background can overwrite it mid-test (-> boardfill_test.go's stillWatchdog).
+func TestOrphanScanReadsTheWatchdogsListing(t *testing.T) {
+	h := newHub(t)
+	w := stillWatchdog(t, h)
+	w.mu.Lock()
+	w.listing = []string{"sindri-proj-nobody"}
+	w.mu.Unlock()
+
+	board, err := h.State("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, o := range board.Orphans {
+		if o == "sindri-proj-nobody" {
+			found = true
 		}
 	}
-}
-
-// TestNotFullChangesNothing: the overlay is only ever additive, so a fleet under the threshold
-// reads exactly as it did before.
-func TestNotFullChangesNothing(t *testing.T) {
-	for _, status := range []string{"idle", "working", "blocked", "submitted", "stalled", "down"} {
-		if got := overlayFullness(status, false, "", "", ""); got != status {
-			t.Errorf("overlayFullness(%q, full=false) = %q, want it unchanged", status, got)
-		}
+	if !found {
+		t.Errorf("a pod in the watchdog's listing with no roster entry should read as an orphan, got %v", board.Orphans)
 	}
 }
 

@@ -21,9 +21,9 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// featureLanded reports a feature an agent should no longer be holding: closed at its source, or
-// carried in by a PR that has merged. The PR half matters because a worker released only on status
-// sat on a feature whose branch was already in the reference, being handed it again on every ask.
+// featureLanded reports a feature an agent should no longer hold: closed at its source, or carried
+// in by a merged PR that is not an interim contribution's — that milestone is not the feature's own
+// end, and counting it as one stranded a worker mid-feature the moment its own `contribute` merged.
 func featureLanded(ps *store.ProjectStore, t store.Task) bool {
 	if t.Status == "closed" || t.Status == "approved" || t.Status == "merged" {
 		return true
@@ -33,16 +33,15 @@ func featureLanded(ps *store.ProjectStore, t store.Task) bool {
 		return false
 	}
 	for _, p := range prs {
-		if p.Task == t.ID && p.Status == "merged" {
+		if p.Task == t.ID && p.Status == "merged" && p.Kind != "interim" {
 			return true
 		}
 	}
 	return false
 }
 
-// claimContainer assigns one package to a worker, starting its first open subtask — or, with
-// nothing left under it, holding it anyway so the agent finishes it on the SAME branch
-// (git.EnsureBranch), never a fresh one. Which package is nextUp's (-> assign.go).
+// claimContainer assigns one package, starting its first open subtask — or, with none left,
+// holding it so the agent finishes on the SAME branch (git.EnsureBranch), never a fresh one.
 func (e *Engine) claimContainer(project, worker string, c store.Task) (string, bool, error) {
 	ps := e.store.For(project)
 	root := e.deps.ProjectRoot(project)
@@ -90,6 +89,15 @@ func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) 
 		fmt.Fprintln(out, ReplyNothingToCheckpoint)
 		return 1, nil
 	}
+	// A rejection returns the work in phase "working", which is exactly the shape a checkpoint takes
+	// for finished. austri checkpointed past a rejected pr-sd-a47b61, closing the task and freeing
+	// itself for a second one it then had no room for.
+	if pr, task, perr := ps.AwaitingPR(c.Agent); perr != nil {
+		return 1, perr
+	} else if pr != "" && task == st.Task {
+		fmt.Fprintln(out, ReplyPRStillToLand(st.Task, pr))
+		return 1, nil
+	}
 	a, _, _ := ps.GetAgent(c.Agent)
 	wt := filepath.Join(root, a.Workspace)
 	tk, _, _ := ps.GetTask(st.Task)
@@ -101,9 +109,8 @@ func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) 
 		msg = "work on " + st.Task
 	}
 	msg = conventionalCommit(tk.Type, st.Task, msg)
-	// A task with work under it cannot be CLOSED by a checkpoint — an epic was once closed over four
-	// open children. Nor is it a dead end: that work is in the same feature on the same branch, so
-	// this records what is done and hands over the next leaf, leaving the parent to its children.
+	// A task with work under it can't be CLOSED by a checkpoint (an epic was once closed over four
+	// open children) — it records progress and hands over the next leaf instead.
 	grew, oerr := ps.OpenChildIDs(st.Task)
 	if oerr != nil {
 		return 1, oerr
@@ -117,6 +124,7 @@ func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) 
 		if err := e.finishAtSource(c.Project, root, st.Task, false); err != nil {
 			return 1, err
 		}
+		e.settleWithTask(c.Project, st.Task)
 		_ = e.RefreshTask(c.Project, st.Task)
 		e.closeCompletedAncestors(c.Project, st.Task, st.Container)
 	}
@@ -157,9 +165,8 @@ func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) 
 }
 
 // closeCompletedAncestors closes each parent above a just-closed task whose children are now all
-// closed, stopping below stopAt (the feature itself, which its PR closes). A parent is done exactly
-// when its children are, so this is the only thing that marks an intermediate epic finished — and
-// without it one stays open forever, then reads as a leaf and is handed out as work that isn't there.
+// closed, stopping below stopAt (the feature itself, which its PR closes) — the only thing that
+// marks an intermediate epic finished, or it stays open and is handed out as work that isn't there.
 func (e *Engine) closeCompletedAncestors(project, from, stopAt string) {
 	ps := e.store.For(project)
 	for parent := ps.ParentOf(from); parent != "" && parent != stopAt; parent = ps.ParentOf(parent) {
@@ -178,6 +185,7 @@ func (e *Engine) closeCompletedAncestors(project, from, stopAt string) {
 			fmt.Fprintf(os.Stderr, "hub: closing completed parent %s: %v\n", parent, err)
 			return
 		}
+		e.settleWithTask(project, parent)
 		_ = e.RefreshTask(project, parent)
 	}
 }
@@ -208,24 +216,41 @@ func openIDs(tasks []store.Task) []string {
 	return ids
 }
 
-// containerNext is the held feature's next step: the subtask just assigned, or the finished feature
-// to put up. Not ready while work awaits a verdict, so the worker waits (woken by its Notify).
-func (e *Engine) containerNext(project, agent, container string) (string, bool, error) {
-	next, ok, err := e.advanceContainer(project, agent, container)
+// claimNextSubtask is claimNext's one-pass rule for a held feature's own subtasks: the next open
+// child is claimed FIRST (-> advanceContainer), same reason claimNext claims before it prepares —
+// once the subtask is the agent's, no return in the middle is needed for a model switch or
+// compaction to run against it. With none open, the feature is finished or still gated.
+func (e *Engine) claimNextSubtask(project, agent, container string) (string, bool, error) {
+	if e.clearArmed(project, agent) {
+		return DirClearPending, true, nil // about to land: a subtask claimed now would be cut in half by it
+	}
+	child, advanced, err := e.advanceContainer(project, agent, container)
 	if err != nil {
 		return "", false, err
 	}
-	if ok {
-		return DirContainerWorking(container, next.ID), true, nil
+	if !advanced {
+		gated, err := e.gatedUnder(project, container)
+		if err != nil {
+			return "", false, err
+		}
+		if len(gated) > 0 {
+			// false, not true: nothing was claimed, same as claimNext's own "nothing for you" — the
+			// distinction assignPendingSubtask (task.go) depends on to tell a real hand-over from a
+			// repeat of the same wait.
+			return ReplyFeatureGated(container, openIDs(gated)), false, nil
+		}
+		return DirContainerDone(container), true, nil
 	}
-	gated, err := e.gatedUnder(project, container)
+	aim, ceiling := e.commentBudget(project)
+	dir := DirContainerWorking(container, child.ID, aim, ceiling)
+	fired, err := e.prepareAssignment(project, agent, api.TierOrDefault(child.Tier), dir)
 	if err != nil {
 		return "", false, err
 	}
-	if len(gated) > 0 {
-		return "", false, nil
+	if fired {
+		return DirPreparing, true, nil
 	}
-	return DirContainerDone(container), true, nil
+	return dir, true, nil
 }
 
 // advanceContainer moves a held feature's agent onto its next open subtask: (subtask, true) when one
@@ -254,6 +279,10 @@ func (e *Engine) startSubtask(project, agent, container string, child store.Task
 		return err
 	}
 	_ = e.RefreshTask(project, child.ID)
+	// Each subtask is a claim, so each grants the note budget afresh (-> store.GrantNotes).
+	if err := ps.GrantNotes(agent, NotesPerClaim); err != nil {
+		return err
+	}
 	if err := ps.SetState(store.AgentState{
 		Agent: agent, Container: container, Branch: container, Task: child.ID, Phase: "working",
 	}); err != nil {

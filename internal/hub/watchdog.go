@@ -1,9 +1,8 @@
 // package: hub / watchdog
 // type:    logic (agent liveness observer)
-// job:     own what the hub believes about every agent's liveness — one loop probing on a
-// fixed cadence, so a board read reports the last observation instead of taking
-// one, and no single reading flips an agent to "down". The machine's memory is
-// read on the same terms, on a slower cadence of its own.
+// job:     own what the hub believes about the fleet — liveness, each session's fill and model,
+// the pod listing, the memory headroom, each repo's docs — as the ONE place that polls for
+// any of it. A board read reports the last observation; no reading flips an agent down.
 // limits:  observations only; how a status word is chosen from liveness + phase stays in
 // agent.AgentStatus, what headroom means in agent.Headroom, the board in state.go.
 package hub
@@ -21,8 +20,15 @@ import (
 )
 
 const (
-	// watchInterval is the observation cadence — under the TUI's 3s poll, so no reading is wasted.
-	watchInterval = 2 * time.Second
+	// watchInterval is the REST between beats, not a period: the loop clocks on completion, so a
+	// slow runtime throttles the observer instead of queueing work behind it.
+	watchInterval = time.Second
+
+	// probeEvery is how many beats apart the per-agent probes run. A sweep's two halves differ by an
+	// order of magnitude: ONE listing answers for every container in a single spawn, while the
+	// probes cost two spawns per agent — 24 of them at twelve agents, ~96% of the work. So the
+	// cheap half runs every beat, and the dear half rides a slower one.
+	probeEvery = 6
 
 	// watchProbeParallel bounds concurrent container commands: process spawns do not parallelise
 	// (24 at once ~3.2s, one ~0.2s), so a small window finishes a sweep sooner than a fan-out.
@@ -32,24 +38,58 @@ const (
 	// is not evidence. Hysteresis a per-request probe could never have, starting with no history.
 	downStrikes = 3
 
+	// probeTimeout bounds each probe: a container that can't answer reads "down", not a stalled sweep.
+	// Here because the observer is the only thing in this package that probes at all.
+	probeTimeout = 3 * time.Second
+
+	// toolRunningCap bounds how long a tool call in flight resets the dwell, generously above a cold
+	// `make verify` — past it, a shell that never returns is caught by the ordinary stall rule again.
+	toolRunningCap = 15 * time.Minute
+
 	// capacityInterval is how often the fleet's memory headroom is re-read. Slower than the liveness
 	// cadence because it costs its own process spawn and the figure moves when an agent starts, not
 	// second to second.
 	capacityInterval = 10 * time.Second
+
+	// launchGrace holds off judging a fresh "launching" intent: podman may not have created the
+	// container yet, and absence this soon is not evidence of one that already exited.
+	launchGrace = 5 * time.Second
+
+	// launchSessionBound bounds "container up, session never answered" — over Launch's own wait
+	// (agent.launchReadyTimeout), so this backstop never races the ordinary path.
+	launchSessionBound = 90 * time.Second
+
+	// launchOverallBound is the ceiling on a launch from the keystroke, wide enough for a cold image
+	// build (the CLI's own "first run … may take a few minutes" warning).
+	launchOverallBound = 5 * time.Minute
+
+	// launchReleaseBound bounds tearing a failed launch's container down. Wider than probeTimeout:
+	// `rm -f` stops before it removes, and podman's own stop grace is 10s.
+	launchReleaseBound = 30 * time.Second
 )
+
+// fill is what an agent's transcript last said: how much of its window is used, and the model
+// carrying it. Sampled here because a reader taking it parses a large session file per render.
+type fill struct {
+	tokens, window int
+	model          string
+}
 
 // liveness is what the watchdog last observed about one agent.
 type liveness struct {
+	fill
 	up      bool
 	clients int
 	runtime string // Claude's live runtime: working|blocked|idle|signed-out|""
 	digest  string // the pane's content hash, so stillness is measurable
 	strikes int    // consecutive failed probes; up is held until downStrikes
 	seen    time.Time
-	// stillSince is when the pane last changed. A dwell rather than a flag: a tool call holds the
-	// screen still for its duration (measured: 12s+ on a working agent), a stall holds it still
-	// indefinitely, and only the length tells them apart.
+	// stillSince is when the pane last changed, or last reported a tool call in flight within
+	// toolRunningCap — neither a running shell nor a busy screen is a stall (-> record).
 	stillSince time.Time
+	// toolSince is when the in-flight marker was first seen this streak, zero once it clears; it is
+	// what toolRunningCap measures against (-> record).
+	toolSince time.Time
 	// runtimeSince is when the runtime word last changed. A cut-off turn needs this rather than
 	// stillSince: its spinner keeps animating, so the screen never stands still even though nothing
 	// is happening — measured on gloin, two different digests 12s apart with a dead turn.
@@ -59,6 +99,9 @@ type liveness struct {
 // watchdog observes agent liveness on a loop; one per hub, started by New, stopped by Close.
 type watchdog struct {
 	h *Hub
+	// base is the hub's lifetime (-> Hub.lifetime): every probe here is a bounded child of it, so a
+	// hub on its way out stops asking podman questions.
+	base context.Context
 
 	mu  sync.RWMutex
 	obs map[agentKey]liveness
@@ -67,8 +110,18 @@ type watchdog struct {
 	runtimeErr error
 	// capacity is the last memory reading the backend gave, zero until it gives one.
 	capacity container.Capacity
-	stop     chan struct{}
-	done     chan struct{}
+	// listing is the pods the last successful sweep saw — the orphan scan's question, already answered.
+	listing []string
+	// repos is what each repo's own files say about it, by tag: a config read and a PATH lookup.
+	repos map[string]repoSample
+	stop  chan struct{}
+	done  chan struct{}
+}
+
+// repoSample is one repo's doc situation: the doc the board recommends, and any missing source CLI.
+type repoSample struct {
+	docs        RepoDocState
+	specMissing bool
 }
 
 // runtimeHint reports why the container runtime looks unreachable, "" when it answers. Read off the
@@ -87,20 +140,22 @@ func (w *watchdog) runtimeHint() string {
 // newWatchdog builds and starts the observer. It must not block — New runs before Serve answers
 // the socket, and a full sweep (14 agents × 2 commands, 4-wide) delayed startup past the health
 // check — so the first pass only lists, provisionally, and the first sweep refines it.
-func newWatchdog(h *Hub) *watchdog {
-	w := &watchdog{h: h, obs: map[agentKey]liveness{}, stop: make(chan struct{}), done: make(chan struct{})}
+func newWatchdog(base context.Context, h *Hub) *watchdog {
+	w := &watchdog{h: h, base: base, obs: map[agentKey]liveness{}, repos: map[string]repoSample{},
+		stop: make(chan struct{}), done: make(chan struct{})}
 	w.seed()
 	go w.loop()
 	return w
 }
 
-// seed takes the cheap first reading: which pods exist, and nothing else.
+// seed takes the cheap first reading: which pods exist, and what the repos say about themselves.
 func (w *watchdog) seed() {
+	w.sampleRepos()
 	agents, err := w.h.store.AllAgents()
 	if err != nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	ctx, cancel := context.WithTimeout(w.base, probeTimeout)
 	existing, listErr := container.ListByLabelFresh(ctx, "sindri.project", "")
 	cancel()
 	if listErr != nil {
@@ -120,23 +175,27 @@ func (w *watchdog) seed() {
 // loop observes the fleet until stopped.
 func (w *watchdog) loop() {
 	defer close(w.done)
-	w.sweep() // the real first reading, off the startup path (see newWatchdog)
-	go w.sampleCapacity()
-	t := time.NewTicker(watchInterval)
-	c := time.NewTicker(capacityInterval)
-	defer t.Stop()
-	defer c.Stop()
-	for {
+	var lastCapacity time.Time
+	for beat := 0; ; beat++ {
+		// Beat 0 probes: the first sweep is the real first reading, off the startup path (see
+		// newWatchdog), and a listing alone would leave every agent's runtime unknown until the
+		// first probe beat.
+		probing := beat%probeEvery == 0
+		w.sweep(probing)
+		// Repo files ride the probe beat: what they say moves when someone edits a repo, not per render.
+		if probing {
+			w.sampleRepos()
+		}
+		// In the loop's own goroutine rather than beside it: one observer means one process spawn
+		// at a time, and a capacity sample racing a sweep is the parallelism this exists to end.
+		if time.Since(lastCapacity) >= capacityInterval {
+			w.sampleCapacity()
+			lastCapacity = time.Now()
+		}
 		select {
 		case <-w.stop:
 			return
-		case <-t.C:
-			w.sweep()
-		// Sampled off the loop's own goroutine: it is another process spawn, and a slow one must
-		// hold up liveness no more than a slow agent holds up the fleet. Its own timeout is well
-		// inside the interval, so two samples cannot overlap.
-		case <-c.C:
-			go w.sampleCapacity()
+		case <-time.After(watchInterval):
 		}
 	}
 }
@@ -150,10 +209,41 @@ func (w *watchdog) headroom() api.FleetMemory {
 	return agent.Headroom(w.capacity)
 }
 
+// pods is the last pod listing the sweep took — what the orphan scan reads instead of listing again.
+func (w *watchdog) pods() []string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.listing
+}
+
+// repoDocs is every registered repo's doc situation, by tag. One the sweep has not reached is absent,
+// which reads as an unset doc: the next sample answers, and no reading beats one invented here.
+func (w *watchdog) repoDocs() map[string]repoSample {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.repos
+}
+
+// sampleRepos re-reads what every registered repo says about itself. Held rather than read per
+// render: `sindri task info` timed out past 120s while each read path took its own.
+func (w *watchdog) sampleRepos() {
+	projects, err := w.h.projects.Known()
+	if err != nil {
+		return // an unreadable registry settles nothing; the last sample stands
+	}
+	next := make(map[string]repoSample, len(projects))
+	for _, p := range projects {
+		next[p.Tag] = repoSample{docs: w.h.repoDocState(p.Path), specMissing: w.h.wf.TaskSourceToolMissing(p.Path)}
+	}
+	w.mu.Lock()
+	w.repos = next
+	w.mu.Unlock()
+}
+
 // sampleCapacity takes one reading from the backend. A failed one settles nothing, as everywhere
 // else here: the previous reading stands rather than the header blinking out on a slow podman.
 func (w *watchdog) sampleCapacity() {
-	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	ctx, cancel := context.WithTimeout(w.base, probeTimeout)
 	defer cancel()
 	c, err := container.MemoryCapacity(ctx)
 	if err != nil {
@@ -181,20 +271,25 @@ func (w *watchdog) get(project, name string) (liveness, bool) {
 // sweep reads the fleet: one listing of which pods exist — cheap, it answers for every container at
 // once — then a tmux probe per agent that has one. The listing is taken fresh: this is the caller
 // whose question is about now, and a memoized answer predating a launch reports the new pod absent.
-func (w *watchdog) sweep() {
+func (w *watchdog) sweep(withProbes bool) {
 	agents, err := w.h.store.AllAgents()
 	if err != nil {
 		return // a store hiccup is not evidence about any agent; keep the last observations
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	ctx, cancel := context.WithTimeout(w.base, probeTimeout)
 	existing, listErr := container.ListByLabelFresh(ctx, "sindri.project", "")
 	cancel()
 	// This listing IS the runtime health check, so nobody has to pay for a second one. A CLI that
 	// spawned `podman info` per command was answering, in 3.8s, a question already answered here
-	// every 2 seconds — and on a loaded host its own timeout misreported a slow podman as absent.
+	// every beat — and on a loaded host its own timeout misreported a slow podman as absent.
 	w.mu.Lock()
 	w.runtimeErr = listErr
 	w.mu.Unlock()
+	if listErr == nil {
+		w.mu.Lock()
+		w.listing = existing
+		w.mu.Unlock()
+	}
 	exists := make(map[string]bool, len(existing))
 	for _, p := range existing {
 		exists[p] = true
@@ -203,24 +298,96 @@ func (w *watchdog) sweep() {
 	sem := make(chan struct{}, watchProbeParallel)
 	var wg sync.WaitGroup
 	for _, a := range agents {
-		if listErr == nil && !exists[w.h.container(a.Project, a.Name)] {
+		gone := listErr == nil && !exists[w.h.container(a.Project, a.Name)]
+		if gone {
 			w.record(a, false, 0, agent.Observation{})
+		}
+		// Fanned out, not inline: it inspects the container of any launch in flight, and the serial
+		// part of a beat holds every other agent's reading behind whatever it waits for.
+		if listErr == nil {
+			wg.Add(1)
+			go func(a store.Agent, exists bool) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				w.checkStuckLaunch(a, exists)
+			}(a, !gone)
+		}
+		// A pod that EXISTS says nothing yet about the session inside it, which only the probe
+		// answers — so on a listing-only beat its last observation stands untouched. Death is still
+		// caught at full speed: absence above is conclusive on every beat.
+		if !withProbes {
 			continue
 		}
 		wg.Add(1)
-		go func(a store.Agent) {
+		go func(a store.Agent, gone bool) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			w.probe(a)
-		}(a)
+			if !gone {
+				w.probe(a)
+			}
+			// After the liveness reading, or a fill would create the entry and an unobserved agent
+			// would read down rather than unknown. Off the host's disk, so a stopped pod still answers.
+			if t, win, m, ok := w.h.agents.SampleContext(a.Project, a.Name); ok {
+				w.recordFill(a, fill{tokens: t, window: win, model: m})
+			}
+		}(a, gone)
 	}
 	wg.Wait()
 }
 
+// checkStuckLaunch bounds one agent's "launching" intent against reality, so a launch that will
+// never complete stops reading like one still on its way (-> sd-c6c4aa). In the sweep, never on a
+// board read, which must not probe (-> sd-8e11ab); the bounds themselves are launchFailure's.
+func (w *watchdog) checkStuckLaunch(a store.Agent, containerExists bool) {
+	since, launching := w.h.agents.LaunchIntent(a.Project, a.Name)
+	if !launching {
+		return
+	}
+	ctx, cancel := context.WithTimeout(w.base, probeTimeout)
+	running := containerExists && container.RunningContext(ctx, w.h.container(a.Project, a.Name))
+	// A probe out of time answers false, and false here would read as "exited" — of the runtime whose
+	// silence hangs launches in the first place. No answer, no claim; the time bounds still fire.
+	exited := containerExists && !running && ctx.Err() == nil
+	cancel()
+	sessionUp := false
+	if l, ok := w.get(a.Project, a.Name); ok {
+		sessionUp = l.up
+	}
+	reason := launchFailure(time.Since(since), containerExists, exited, sessionUp)
+	if reason == "" {
+		return
+	}
+	// Off the beat: FailLaunch removes the container, and the fleet's whole sweep queues behind this.
+	// Its own root, since the beat's context ends first.
+	go func() {
+		rmCtx, rmCancel := context.WithTimeout(w.base, launchReleaseBound)
+		defer rmCancel()
+		w.h.agents.FailLaunch(rmCtx, a.Project, a.Name, reason)
+	}()
+}
+
+// launchFailure decides, from elapsed time and what the sweep observed, whether a launch has failed
+// and why — "" means not (yet). containerExited is a DEFINITE observation, never an unanswered probe.
+func launchFailure(elapsed time.Duration, containerExists, containerExited, sessionUp bool) string {
+	switch {
+	case elapsed < launchGrace:
+		return "" // podman may not have even created the container yet
+	case containerExited:
+		return "the container exited during launch"
+	case containerExists && !sessionUp && elapsed > launchSessionBound:
+		return "the container started but the agent session never came up"
+	case elapsed > launchOverallBound:
+		return fmt.Sprintf("did not come up within %s", launchOverallBound)
+	default:
+		return ""
+	}
+}
+
 // probe reads one agent's tmux session and, when up, Claude's state; a failure is a strike only.
 func (w *watchdog) probe(a store.Agent) {
-	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	ctx, cancel := context.WithTimeout(w.base, probeTimeout)
 	defer cancel()
 	cs, ok := w.h.agents.ClientsCtx(ctx, a.Project, a.Name)
 	if !ok {
@@ -239,7 +406,8 @@ func (w *watchdog) record(a store.Agent, up bool, clients int, obs agent.Observa
 	defer w.mu.Unlock()
 	key := agentKey{a.Project, a.Name}
 	prev := w.obs[key]
-	next := liveness{up: up, clients: clients, runtime: obs.Runtime, digest: obs.Digest, seen: time.Now()}
+	// The fill rides along: dropping it here would blank the board's context column every sweep.
+	next := liveness{fill: prev.fill, up: up, clients: clients, runtime: obs.Runtime, digest: obs.Digest, seen: time.Now()}
 	switch {
 	case up:
 		next.strikes = 0
@@ -250,12 +418,28 @@ func (w *watchdog) record(a store.Agent, up bool, clients int, obs agent.Observa
 			next.up, next.clients, next.runtime, next.digest = true, prev.clients, prev.runtime, prev.digest
 		}
 	}
-	// The screen changing is the one direct evidence of an agent doing something, and the classifier
-	// is a reading of words that may be minutes old. A failed capture has no digest and settles
-	// nothing — it carries the dwell rather than restarting it, so a lost probe cannot hide a stall.
+	// The screen changing is the one direct evidence of an agent doing something; a failed capture
+	// holds the dwell rather than restarting it. obs.ToolRunning is the other evidence — a shell
+	// prints nothing until it exits — but only within toolRunningCap, past which a shell that never
+	// returns must still fall back to the plain digest comparison.
 	switch {
 	case next.digest == "":
-		next.stillSince = prev.stillSince
+		next.stillSince, next.toolSince = prev.stillSince, prev.toolSince
+	case obs.ToolRunning:
+		next.toolSince = prev.toolSince
+		if next.toolSince.IsZero() {
+			next.toolSince = next.seen
+		}
+		switch {
+		case next.seen.Sub(next.toolSince) <= toolRunningCap:
+			next.stillSince = next.seen
+		case next.digest != prev.digest:
+			next.stillSince = next.seen
+		default:
+			if next.stillSince = prev.stillSince; next.stillSince.IsZero() {
+				next.stillSince = next.seen
+			}
+		}
 	case next.digest != prev.digest:
 		next.stillSince = next.seen
 	default:
@@ -274,4 +458,30 @@ func (w *watchdog) record(a store.Agent, up bool, clients int, obs agent.Observa
 		next.runtimeSince = next.seen
 	}
 	w.obs[key] = next
+}
+
+// forgetFill drops one agent's fill: a window of 0 is the unknown every reader already handles, and
+// the next sweep measures again. For the moment a clear or a compact makes the last reading false.
+func (w *watchdog) forgetFill(project, name string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	key := agentKey{project, name}
+	if l, seen := w.obs[key]; seen {
+		l.fill = fill{}
+		w.obs[key] = l
+	}
+}
+
+// recordFill folds in one transcript reading. Apart from record because it has no hysteresis to
+// share: a sample that read nothing is not evidence of an empty context, so the caller does not call.
+func (w *watchdog) recordFill(a store.Agent, f fill) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	key := agentKey{a.Project, a.Name}
+	l, seen := w.obs[key]
+	if !seen {
+		return // nothing has observed this agent yet, and a fill alone is not an observation of it
+	}
+	l.fill = f
+	w.obs[key] = l
 }

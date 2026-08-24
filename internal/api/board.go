@@ -26,12 +26,14 @@ type AgentView struct {
 	Runtime   string `json:"runtime"`   // Claude's live runtime: "working"|"blocked"|"idle"|"" (folded into Status; kept raw for the herdr projection)
 	// ContextTokens is the agent's live session context size and ContextWindow the window it fills,
 	// both read off its transcript (0 = not measured). Past workflow.ContextFullFraction of that
-	// window an agent is retired from assignment until a human clears it; Status reads "full" only
-	// where that explains an agent holding nothing, since elsewhere the word it would replace is the
-	// one the column exists for. The window is per agent because it is the model's: one number for
-	// the fleet retired 1M agents at 17%.
+	// window, its next assignment clears its context instead of compacting it, before handing the
+	// work over — automatic, so Status never needs a word for it. The window is per agent because
+	// it is the model's: one number for the fleet would clear 1M agents at 17%.
 	ContextTokens int `json:"contextTokens"`
 	ContextWindow int `json:"contextWindow"`
+	// Model is the raw id its transcript names ("" = not yet observed), the denominator ContextWindow
+	// was read against. The account default until a worker can be launched on a chosen one.
+	Model string `json:"model,omitempty"`
 	// Retired: a human has wound it down, so it is handed no new work while it finishes what it
 	// holds. Carried beside Status rather than inside it, because it is true of a busy agent too —
 	// that is the whole point of setting it — and Status can only say one thing at a time.
@@ -57,18 +59,13 @@ type RepoDocState struct {
 	Advice   string `json:"advice"`   // "" when nothing to say
 }
 
-// FleetMemory is the machine's memory headroom for agents: what the fleet costs the host now,
-// the ceiling it draws from, and how many more agents of the default size fit in what is left.
-// The fit count is the figure worth reading — "38% used" does not answer whether to start another
-// agent, and that is the only question being asked of it.
+// FleetMemory is the machine's memory headroom: what the fleet costs the host now, and the ceiling
+// it draws from. Paired on the badge with how many agents are running versus how many exist
+// (-> CountRunningAgents) — once the hub can stop an idle one and start a stopped one on demand,
+// "how many more fit" answers a question nobody is asking; "is this idle or is it full" is.
 type FleetMemory struct {
 	UsedBytes  int64 `json:"usedBytes"`
 	TotalBytes int64 `json:"totalBytes"`
-	// AgentBytes is the default agent's size — the unit Fits counts in, carried so the count can
-	// state what it counted.
-	AgentBytes int64 `json:"agentBytes"`
-	// Fits is how many more default-size agents the free memory holds.
-	Fits int `json:"fits"`
 	// Basis says what UsedBytes counts, which the runtime backend decides: memory containers have
 	// taken as they used it, or memory each pod reserved up front and holds whether it uses it.
 	Basis string `json:"basis,omitempty"`
@@ -114,11 +111,15 @@ type BoardState struct {
 	// views exist, and the badge each shows. They ride on the board so a front-end renders the
 	// counts instead of deciding them (-> SectionAttention).
 	Sections []Section `json:"sections,omitempty"`
-	// Mail is the newest messages agents must read, fleet-wide — a WINDOW of previews, while MailTotal
-	// and MailUnread count the whole mailbox, so a view can say what it is not showing.
+	// Mail is the newest messages agents must read, fleet-wide, newest first — a WINDOW, with each
+	// body cut to a preview. MailTotal and MailUnread count the whole mailbox, so a view says
+	// "showing the last N of M" rather than presenting a window as the history (-> MailWindow).
 	Mail       []Mail `json:"mail,omitempty"`
 	MailTotal  int    `json:"mailTotal"`
 	MailUnread int    `json:"mailUnread"`
+	// MailUnreadUser is unread mail addressed to the USER, across every repo — the only part of the
+	// mailbox that can ask a person for anything. Fleet-wide, since they are the same person in each.
+	MailUnreadUser int `json:"mailUnreadUser"`
 	// MailUnreadByRepo is unread mail per repo tag, for a view scoped to one repo — counted over the
 	// whole mailbox like the totals, not over the window.
 	MailUnreadByRepo map[string]int `json:"mailUnreadByRepo,omitempty"`
@@ -146,16 +147,16 @@ const StatusUnknown = "unknown"
 // are enumerated, so nothing else defaults an unknown status to "running".
 func AgentNotUp(status string) bool {
 	switch status {
-	case "", "down", StatusUnknown, "launching", "stopping":
+	case "", "down", "stopped", StatusUnknown, "launching", "stopping", StatusLaunchFailed:
 		return true
 	}
 	return false
 }
 
 // AgentNeedsLaunch reports whether an agent has no pod and none on the way — narrower than
-// AgentNotUp, which also covers one already in flight.
+// AgentNotUp, which also covers one in flight. "stopped" and a failed launch count too.
 func AgentNeedsLaunch(status string) bool {
-	return status == "down" || status == StatusUnknown
+	return status == "down" || status == "stopped" || status == StatusUnknown || status == StatusLaunchFailed
 }
 
 // ClearWaitsFor says what an armed context clear will fire AFTER: the id of the work in hand, or ""
@@ -180,6 +181,18 @@ func (b BoardState) OpenTaskCount() int { return countTasks(b.Tasks, Open) }
 
 // AgentCount is the whole roster size (down agents are still agents).
 func (b BoardState) AgentCount() int { return len(b.Agents) }
+
+// RunningAgentCount is how many of the roster currently have a pod up — the other half of the
+// headroom badge's "is this idle or full" question, paired with AgentCount.
+func (b BoardState) RunningAgentCount() int {
+	n := 0
+	for _, a := range b.Agents {
+		if !AgentNotUp(a.Status) {
+			n++
+		}
+	}
+	return n
+}
 
 // OpenPRCount is open PRs across the fleet (neither merged nor scrapped), matching the PRs tab default.
 func (b BoardState) OpenPRCount() int { return countPRs(b.PRs, PROpen) }
@@ -211,8 +224,13 @@ func (b BoardState) AgentsNeedingUserCount() int { return CountAgentsNeedingUser
 // half the question.
 func (b BoardState) PRsNeedingUserCount() int { return CountPRsNeedingUser(b.PRs, b.Agents) }
 
-// UnreadMailCount is the Mail section's badge: unread across the whole mailbox, not the window — a
-// badge that stopped rising as the history grew would go quiet exactly when there was most to say.
+// UnreadUserMailCount is the Mail section's ATTENTION count. Only the user's own: the rest of the
+// mailbox is agent traffic, and a marker over that would be permanently lit and instantly ignored.
+func (b BoardState) UnreadUserMailCount() int { return b.MailUnreadUser }
+
+// UnreadMailCount is the Mail section's badge: unread across the whole mailbox, not the window,
+// since a badge that stopped rising once the history outgrew the window would say the wrong thing
+// exactly when there was most to say.
 func (b BoardState) UnreadMailCount() int { return b.MailUnread }
 
 // SectionAttention is how many rows of the named section wait on the user, read off the sections

@@ -12,15 +12,23 @@ import (
 	"strconv"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/table"
 	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
 // repoRows lists the registered repos (switcher order: live-agents-first → recency →
 // alphabetical), each name in its repo colour with an agent count and markers. The
 // row id is the repo tag.
+// repoTable is the Repos list's columns. The counts used to carry their own word on every row
+// ("3 agents"); with a label over the column the word belongs there instead, once.
+var repoTable = table.Table{
+	{Label: "repo", Width: 20},
+	{Label: "agents", Width: 6, Right: true},
+	{Label: "path"},
+}
+
 func (m model) repoRows() []row {
 	var out []row
 	for _, p := range m.switcherOrder() {
@@ -31,22 +39,13 @@ func (m model) repoRows() []row {
 		if p.Path == m.root {
 			label += " ✓"
 		}
-		if pad := 20 - lipgloss.Width(label); pad > 0 {
-			label += repeat(pad)
-		}
-		text := m.repoStyle(p.Tag).Render(label) + fmt.Sprintf("  %2d agents  %s", m.repoAgentCount(p.Tag), p.Path)
-		out = append(out, row{text, p.Tag})
+		out = append(out, row{repoTable.Line(
+			table.Cell{Text: label, Style: m.repoStyle(p.Tag).Render},
+			table.Cell{Text: strconv.Itoa(m.repoAgentCount(p.Tag))},
+			table.Cell{Text: p.Path},
+		), p.Tag})
 	}
-	return out
-}
-
-// repeat is n spaces (a tiny helper so repoRows reads cleanly).
-func repeat(n int) string {
-	s := make([]byte, n)
-	for i := range s {
-		s[i] = ' '
-	}
-	return string(s)
+	return m.listing(repoTable, nil, out)
 }
 
 // repoAgentCount is how many agents the repo has on its roster (from the board).
@@ -62,10 +61,15 @@ func (m model) repoAgentCount(tag string) int {
 
 // repoDetailLines renders the selected repo's detail: path, tag, its agents, and its
 // PRs — all from the board snapshot (no fetch).
-func (m model) repoDetailLines() []string {
+func (m model) repoDetailLines() []string { return itemTexts(m.repoItems()) }
+
+// repoItems is the selected repo's detail; each of its agents and open PRs is its own
+// cross-reference line, so the roster and the queue can be reached one row at a time rather than
+// read as a single joined string nothing can select.
+func (m model) repoItems() []metaItem {
 	tag := m.selID()
 	if tag == "" {
-		return []string{dimStyle.Render("(no repos)")}
+		return []metaItem{{text: dimStyle.Render("(no repos)")}}
 	}
 	var path, last string
 	for _, p := range m.state.Projects {
@@ -73,30 +77,62 @@ func (m model) repoDetailLines() []string {
 			path, last = p.Path, p.LastUsed
 		}
 	}
-	ls := []string{
-		"repo:   " + m.repoName(tag),
-		"path:   " + path,
-		"tag:    " + tag,
+	items := []metaItem{
+		{text: "repo:   " + m.repoName(tag)},
+		{text: "path:   " + path},
+		{text: "tag:    " + tag},
 	}
 	if last != "" {
-		ls = append(ls, "used:   "+shortAge(last)+" ago")
+		items = append(items, metaItem{text: "used:   " + shortAge(last) + " ago"})
 	}
-	var agents, prs []string
-	for _, a := range m.state.Agents {
+	items = append(items, metaItem{text: ""}, metaItem{text: "agents:"})
+	items = append(items, repoAgentItems(m.state.Agents, tag)...)
+	items = append(items, metaItem{text: ""}, metaItem{text: "open prs:"})
+	items = append(items, repoPRItems(m.state.PRs, tag)...)
+	for _, l := range archLines(m.state.RepoDocs[tag]) {
+		items = append(items, metaItem{text: l})
+	}
+	items = append(items, metaItem{text: ""}, metaItem{text: dimStyle.Render("enter switch · E config · D forget")})
+	return items
+}
+
+// repoAgentItems lists a repo's agents as cross-references, "  -" for none.
+func repoAgentItems(agents []api.AgentView, tag string) []metaItem {
+	var out []metaItem
+	for _, a := range agents {
 		if a.Project == tag {
-			agents = append(agents, a.Name+" ("+a.Status+")")
+			out = append(out, metaItem{text: "  " + a.Name + " (" + a.Status + ")", kind: "agent", value: a.Name})
 		}
 	}
-	for _, p := range m.state.PRs {
+	if len(out) == 0 {
+		return []metaItem{{text: "  -"}}
+	}
+	return out
+}
+
+// repoPRItems lists a repo's still-open PRs as cross-references, "  -" for none.
+func repoPRItems(prs []api.PR, tag string) []metaItem {
+	var out []metaItem
+	for _, p := range prs {
 		if p.Project == tag && p.Status != "merged" {
-			prs = append(prs, p.ID+" "+p.Status)
+			out = append(out, metaItem{text: "  " + p.ID + " " + p.Status, kind: "pr", value: p.ID})
 		}
 	}
-	ls = append(ls, "", "agents: "+joinOrDash(agents))
-	ls = append(ls, "open prs: "+joinOrDash(prs))
-	ls = append(ls, archLines(m.state.RepoDocs[tag])...)
-	ls = append(ls, "", dimStyle.Render("enter switch · E config · D forget"))
-	return ls
+	if len(out) == 0 {
+		return []metaItem{{text: "  -"}}
+	}
+	return out
+}
+
+// repoActionable is the focusable subset of the repo detail (its agents and open PRs).
+func (m model) repoActionable() []metaItem {
+	var out []metaItem
+	for _, it := range m.repoItems() {
+		if it.kind != "" {
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 // archLines renders the repo's architecture-doc situation. This tab IS the UI for
@@ -114,22 +150,6 @@ func archLines(st api.RepoDocState) []string {
 		return nil // no snapshot for this repo (older hub) — say nothing rather than guess
 	}
 	return []string{"", stWarn.Render(warnGlyph + " no architecture doc"), dimStyle.Render("agents get no architecture brief — press E to set `architecture`")}
-}
-
-// joinOrDash renders a "-" for an empty list, else the entries one per line-ready
-// comma join (kept short — the detail pane is narrow).
-func joinOrDash(xs []string) string {
-	if len(xs) == 0 {
-		return "-"
-	}
-	out := ""
-	for i, x := range xs {
-		if i > 0 {
-			out += ", "
-		}
-		out += x
-	}
-	return out
 }
 
 // openColorChoice opens a picker of colour swatches for a repo: "default" (the

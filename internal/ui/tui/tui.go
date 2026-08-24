@@ -22,10 +22,8 @@ import (
 )
 
 // tuiSection is one dashboard tab: a key and a title. The badge count is the front-end's own
-// (-> tabCount), because Agents and PRs obey the § scope toggle the hub knows nothing about, so it
-// could never be a number the hub resolved once. The attention marker beside it is the opposite
-// case: which rows wait on the user is one rule for the whole fleet, so it is read off the hub's
-// resolved sections (-> BoardState.SectionAttention) by key, the same line for every tab.
+// (-> tabCount, since Agents/PRs obey the § scope the hub doesn't know); the attention marker is
+// read off the hub's resolved sections (-> BoardState.SectionAttention) by key instead.
 var tuiSections = []tuiSection{
 	{"tasks", "Tasks"},
 	{"agents", "Agents"},
@@ -51,8 +49,10 @@ const (
 	inputNone inputMode = iota
 	inputTell
 	inputMail
+	inputMailReply
 	inputComment
 	inputRunCommand
+	inputSearch
 )
 
 type model struct {
@@ -69,40 +69,44 @@ type model struct {
 	cursor [tabCount]int // one per section (Tasks/Agents/PRs/Repos/Chat/Runs/Mail)
 	list   scroll.Viewport
 	detail scroll.Viewport
-	// prMeta is the PRs tab's right column. It needs its own viewport because `detail` is spent on
-	// that tab's big diff pane, and a column built fresh each render can only ever show its top —
-	// which is what put the reviews and history below the fold out of reach entirely.
+	// prMeta is the PRs tab's right column: its own viewport since `detail` is spent on that tab's
+	// diff pane, and a column rebuilt fresh each render could never scroll past its own top.
 	prMeta scroll.Viewport
 
-	filter     api.TaskFilter // Tasks tab: which segment of the backlog is shown (-> api.TaskFilters)
-	prFilter   api.PRFilter   // PRs tab: which segment is shown (-> api.PRFilters)
-	runFilter  api.RunFilter  // Runs tab: which segment is shown (-> api.RunFilters)
-	mailFilter api.MailFilter // Mail tab: unread or all (-> api.MailFilters)
-	mailAgent  string         // Mail tab: narrowed to this recipient ("" = every agent)
-	mailBody   string         // the selected message's full body, fetched (the board carries a preview)
-	mailBodyID int64          // which message mailBody belongs to
-	collapsed  map[string]bool
-	merging    map[string]bool   // PR ids the user just triggered a merge on — shown as a transient "merging" on the row until the hub confirms
-	busy       map[string]string // task ids the user just triggered a close/scrap on → the transient verb ("closing"/"deleting") shown on the row until the hub confirms
-	hideDetail bool              // § force-hides the detail pane (else shown when wide enough)
-	scopeRepo  bool              // TUI-wide global↔repo scope (default repo): Agents/PRs narrow to the active repo when true. Tasks is always repo-scoped regardless.
+	filter         api.TaskFilter // Tasks tab: which segment of the backlog is shown (-> api.TaskFilters)
+	taskSearch     string         // Tasks tab: live/committed "/" search term, narrows within filter
+	taskSearchPrev string         // the committed term as of the last "/" open, restored on esc-while-typing
+	prFilter       api.PRFilter   // PRs tab: which segment is shown (-> api.PRFilters)
+	runFilter      api.RunFilter  // Runs tab: which segment is shown (-> api.RunFilters)
+	mailFilter     api.MailFilter // Mail tab: unread or all (-> api.MailFilters)
+	mailAgent      string         // Mail tab: narrowed to this recipient ("" = every agent)
+	mailPromised   int            // unread count a jump promised, 0 otherwise (-> showUnreadFor, mailShortfall)
+	mailBody       string         // the selected message's full body, fetched (the board carries a preview)
+	mailBodyID     int64          // which message mailBody belongs to
+	collapsed      map[string]bool
+	merging        map[string]bool   // PR ids the user just triggered a merge on — shown as a transient "merging" on the row until the hub confirms
+	busy           map[string]string // task ids the user just triggered a close/scrap on → the transient verb ("closing"/"deleting") shown on the row until the hub confirms
+	hideDetail     bool              // § force-hides the detail pane (else shown when wide enough)
+	scopeRepo      bool              // TUI-wide global↔repo scope (default repo): Agents/PRs narrow to the active repo when true. Tasks is always repo-scoped regardless.
 
 	rightFocus  bool // detail (right) column has focus (h/l switch; j/k move within)
 	rightCursor int  // focused actionable item in the right column
 
-	detailKey    string
-	agentLog     []api.Event
-	agentPane    string           // captured tmux screen of the selected agent (live)
-	agentView    string           // Agents main pane: "screen" (tmux, default) | "pod" (podman info)
-	agentPod     string           // fetched podman pod-info for the selected agent
-	agentDiag    string           // fetched liveness-probe explanation for the selected agent
-	agentClients []api.ClientView // dial-ins attached to the selected agent's session
-	prDetail     api.PRDetail
-	prView       string // which content the PR big pane shows: "diff" (default) | "lint"
-	reviewPrompt string // editable default review instruction (from the hub)
-	taskDetail   api.Task
-	runDetail    api.RunDetail
-	quit         bool
+	detailKey       string
+	detailWrapCache wrapCache // last wrap of the detail pane, reused across a cursor move that changes nothing it depends on
+	wrapCalls       int       // count of real wraps performed, for the regression test on that reuse
+	agentLog        []api.Event
+	agentPane       string           // captured tmux screen of the selected agent (live)
+	agentView       string           // Agents main pane: "screen" (tmux, default) | "pod" (podman info)
+	agentPod        string           // fetched podman pod-info for the selected agent
+	agentDiag       string           // fetched liveness-probe explanation for the selected agent
+	agentClients    []api.ClientView // dial-ins attached to the selected agent's session
+	prDetail        api.PRDetail
+	prView          string // which content the PR big pane shows: "diff" (default) | "lint"
+	reviewPrompt    string // editable default review instruction (from the hub)
+	taskDetail      api.Task
+	runDetail       api.RunDetail
+	quit            bool
 
 	modalOverride      []string // when set, the detail modal shows these instead of the tab detail
 	modalOverrideTitle string
@@ -142,12 +146,9 @@ func newModel(cl *client.HTTP, ch <-chan api.BoardState, root string) model {
 	ta.CharLimit = 0 // the hub enforces the length cap (with feedback); never clip silently here
 	ta.Placeholder = "Type a message to the meeting room…"
 	ta.ShowLineNumbers = false
-	// Tasks open on "active" — the open backlog plus whatever changed in the last couple of hours.
-	// Plain "open" hid a task the moment it closed, so the work just finished left no trace on the
-	// board and the tab read as though nothing had happened.
-	// Mail opens on "unread" — the mailbox keeps everything, so the whole history is rarely the
-	// question; what has not been read yet always is.
-	m := model{cl: cl, ch: ch, root: root, filter: api.FilterActive, prFilter: api.PRFilterActive, runFilter: api.RunFilterActive, mailFilter: api.MailUnread, collapsed: map[string]bool{}, merging: map[string]bool{}, busy: map[string]string{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
+	// Tasks open on "active" (open + recently changed), not plain "open" — else a task that just
+	// closed vanished at once, as though nothing had happened. Mail opens on api's own default.
+	m := model{cl: cl, ch: ch, root: root, filter: api.FilterActive, prFilter: api.PRFilterActive, runFilter: api.RunFilterActive, mailFilter: api.MailFilters[0], collapsed: map[string]bool{}, merging: map[string]bool{}, busy: map[string]string{}, scopeRepo: true, w: 80, h: 24, input: in, composer: ta}
 	m.reclamp()
 	return m
 }
@@ -323,10 +324,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case mailMsg:
 		m.mailBody, m.mailBodyID = msg.body, msg.id
 		m.reclamp() // the body is most of the detail's height, so its arrival resizes the pane
+	case mailDwellMsg:
+		return m, m.mailDwellFired(msg.id)
 	case taskMsg:
 		m.taskDetail = msg.t
+		m.reclamp() // the description/comments land long after syncDetail sized the pane for less
 	case runMsg:
 		m.runDetail = msg.d
+		m.reclamp() // same: the run's detail arrives after syncDetail sized the pane for less
 	case repoConfigMsg:
 		if msg.err != nil {
 			m.errText = msg.err.Error()
@@ -397,6 +402,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// tabLabels is each tab's header text: hotkey (1-N, -> onKey's digit case), title, count badge,
+// then an attention marker — the title separates the two numbers so neither reads as the other.
+func (m model) tabLabels() []string {
+	labels := make([]string, len(tuiSections))
+	for i, s := range tuiSections {
+		// The title separates the two numbers: "1 Tasks 12" reads unambiguously (hotkey, then
+		// count trailing the name it counts), where "1 12 Tasks" put an unrelated pair of bare
+		// digits side by side with nothing saying which was which.
+		labels[i] = fmt.Sprintf("%d %s %d", i+1, s.Title, m.tabCount(s))
+		// Fleet-wide even in repo scope: an agent or PR stuck in another repo still waits on you.
+		if n := m.state.SectionAttention(s.Key); n > 0 {
+			labels[i] += fmt.Sprintf(" (%d%s)", n, attentionGlyph)
+		}
+	}
+	return labels
+}
+
 // View composes the full-height frame: tab strip, master-detail body, footer.
 func (m model) View() string {
 	if m.err != nil {
@@ -405,19 +427,7 @@ func (m model) View() string {
 	if m.w == 0 || m.h == 0 {
 		return "loading…"
 	}
-	labels := make([]string, len(tuiSections))
-	for i, s := range tuiSections {
-		labels[i] = fmt.Sprintf("%d %s", m.tabCount(s), s.Title)
-		// What waits on the user rides on the handle, so it is in view from whichever tab you are
-		// looking at — the question it answers ("why is nothing happening?") is rarely asked from
-		// the tab that holds the answer. Which rows count is the hub's to say, uniformly per
-		// section: a marker the view decided for itself would be a fourth rule in a fourth place.
-		// Fleet-wide even in repo scope — an agent stuck in another repo still waits on you, and a
-		// filter that hid it is how it would go on waiting.
-		if n := m.state.SectionAttention(s.Key); n > 0 {
-			labels[i] += fmt.Sprintf(" (%d%s)", n, attentionGlyph)
-		}
-	}
+	labels := m.tabLabels()
 	// Modals take over the whole screen.
 	if m.errText != "" {
 		return errModal(m.errText, m.w, m.h)
@@ -431,9 +441,6 @@ func (m model) View() string {
 	if m.choice.active {
 		return choiceModal(m.choice, m.w, m.h)
 	}
-	if m.menu {
-		return m.menuView(m.w, m.h)
-	}
 	if m.modal {
 		title := m.modalTitle()
 		if m.modalOverride != nil { // e.g. the task modal opened from the PRs tab
@@ -442,7 +449,8 @@ func (m model) View() string {
 		return modal(title, m.modalLines(), m.detail, m.w, m.h)
 	}
 	repoName, repoTag := m.currentRepo()
-	top := headerBar(labels, m.tab, m.w, repoName, repoTag, m.repoColorIdx(repoTag), m.state.Memory)
+	top := headerBar(labels, m.tab, m.w, repoName, repoTag, m.repoColorIdx(repoTag), m.state.Memory,
+		m.state.RunningAgentCount(), m.state.AgentCount())
 	var body string
 	// Agents/PRs always render their main pane — it is the point of the tab. Each body drops
 	// only the right detail column when the terminal is narrow or § hid it.
@@ -455,13 +463,13 @@ func (m model) View() string {
 	} else if m.tab == 5 {
 		body = m.runsBody() // its rows under a permanent line saying what a run is
 	} else if m.showDetail() {
-		left := pane(rowTexts(m.rows()), m.list, m.leftWidth(), m.cursor[m.tab])
+		left := pane(rowTexts(m.rows()), m.list, m.leftWidth(), m.selRow())
 		dlines, dhl := m.wrappedDetail()
 		right := pane(dlines, m.detail, m.detailWidth(), dhl)
 		body = lipgloss.JoinHorizontal(lipgloss.Top, left, divider(m.bodyHeight()), right)
 	} else {
 		// Narrow terminal: selector full-width; detail is ENTER-only.
-		body = pane(rowTexts(m.rows()), m.list, m.w, m.cursor[m.tab])
+		body = pane(rowTexts(m.rows()), m.list, m.w, m.selRow())
 	}
 	var foot string
 	switch {
@@ -470,6 +478,8 @@ func (m model) View() string {
 	case m.composing:
 		foot = dimStyle.Render(padTrunc("ctrl+s send · enter newline (sends a /command) · esc cancel", m.w)) + "\n" +
 			dimStyle.Render(padTrunc("composing to the meeting room…", m.w))
+	case m.menu:
+		foot = m.menuFooter(m.w)
 	default:
 		global := m.footerFor(scopeGlobal)
 		if m.flash != "" {

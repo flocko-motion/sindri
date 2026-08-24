@@ -120,7 +120,7 @@ func TestCancelRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.CancelRun("repo", r.ID); err != nil {
+	if err := e.CancelRun(t.Context(), "repo", r.ID); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 	got, _, _ := ps.GetRun(r.ID)
@@ -128,10 +128,10 @@ func TestCancelRun(t *testing.T) {
 		t.Fatalf("cancelled run = %+v, want status cancelled with finished_at set", got)
 	}
 	// Already settled: a second cancel must be refused, not silently re-applied.
-	if err := e.CancelRun("repo", r.ID); err == nil {
+	if err := e.CancelRun(t.Context(), "repo", r.ID); err == nil {
 		t.Error("cancelling an already-finished run must be refused")
 	}
-	if err := e.CancelRun("repo", "no-such-run"); err == nil {
+	if err := e.CancelRun(t.Context(), "repo", "no-such-run"); err == nil {
 		t.Error("cancelling an unknown run must error")
 	}
 }

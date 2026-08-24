@@ -21,8 +21,10 @@ import (
 
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/ui/attach"
+	"github.com/flo-at/sindri/internal/ui/table"
 	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
@@ -137,8 +139,8 @@ func (m *model) openAgentOptionsForm(name, current string) {
 // openNewAgentChoice picks the role for a new agent; the role is fixed at creation.
 func (m *model) openNewAgentChoice() {
 	cl := m.cl
-	opts := []string{"worker", "reviewer", "planner", "coauthor"}
-	vals := []string{"worker", "reviewer", "planner", "coauthor"}
+	opts := []string{"worker", "reviewer", "reviewer (global)", "planner", "coauthor"}
+	vals := []string{"worker", "reviewer", "global-reviewer", "planner", "coauthor"}
 	// Plans share the "new" key rather than a second binding; only planners take one.
 	planner := ""
 	if a, ok := m.selAgent(); ok && a.Role == "planner" {
@@ -153,15 +155,19 @@ func (m *model) openNewAgentChoice() {
 			if v == "plan" {
 				return func() tea.Msg { return openPlanFormMsg(planner) }
 			}
+			target, role := cl, v
+			if v == "global-reviewer" {
+				target, role = client.Dial(api.GlobalProject), "reviewer"
+			}
 			// Register, then launch. The launch is a separate step so the new row appears at
 			// once, but its result is collected rather than dropped: a launch can fail (no
 			// image, no engine, a build that breaks) and the row would otherwise just sit at
 			// "down" with nothing said.
 			return func() tea.Msg {
-				if cl == nil {
+				if target == nil {
 					return nil
 				}
-				name, err := cl.NewAgent("", v, "") // memory: hub default; editable via the detail view / CLI
+				name, err := target.NewAgent("", role, "") // memory: hub default; editable via the detail view / CLI
 				if err != nil {
 					return errModalMsg{err}
 				}
@@ -270,7 +276,7 @@ func (m model) agentsBody() string {
 	rightW := m.agentDetailWidth()
 	leftW, paneH := m.previewSize()
 
-	listBox := pane(rowTexts(m.rows()), m.list, leftW, m.cursor[m.tab])
+	listBox := pane(rowTexts(m.rows()), m.list, leftW, m.selRow())
 	paneBox := tailPane(m.paneLines(), leftW, paneH)
 	leftCol := strings.Join([]string{listBox, hdivider(leftW), paneBox}, "\n")
 
@@ -347,7 +353,11 @@ func (m model) agentItems() []metaItem {
 	// Unread mail, where there is any: the mailbox waits quietly by design, so a count on the agent
 	// is the only thing that shows one has stopped reading.
 	if a.UnreadMail > 0 {
-		items = append(items, metaItem{text: stWarn.Render(fmt.Sprintf("mail:      %d unread", a.UnreadMail))})
+		items = append(items, metaItem{
+			text:  stWarn.Render(fmt.Sprintf("mail:      %d unread", a.UnreadMail)) + dimStyle.Render("  (⏎ read them)"),
+			kind:  "mail",
+			value: a.Name,
+		})
 	}
 	// The question an escalated agent stopped on, beside the status word that says it is. Readable
 	// here on purpose: several escalations can be triaged before deciding which to sit down with,
@@ -365,6 +375,7 @@ func (m model) agentItems() []metaItem {
 		wsIt,
 		metaItem{text: "memory:    " + memoryLabelTUI(a.Memory, m.state.DefaultMemory) + dimStyle.Render("  (container RAM · e to edit)")},
 		metaItem{text: "context:   " + theme.ContextLine(a.ContextTokens)},
+		metaItem{text: "model:     " + dash(a.Model)},
 		metaItem{text: pod, kind: "view", value: "pod"},
 	)
 	// The armed clear says WHEN it lands, not merely that it is set: the row's marker is the count,
@@ -421,6 +432,8 @@ func (m model) paneLines() []string {
 		// Built from the key constant, not spelled out: this said 'L', which is lint on the PRs
 		// tab and bound to nothing here, so the one hint a stopped agent shows led nowhere.
 		return []string{dimStyle.Render("(not running — start with '" + keyStartS + "')")}
+	case "stopped":
+		return []string{dimStyle.Render("(stopped — '" + keyStartS + "' resumes the session)")}
 	case "stopping":
 		return []string{dimStyle.Render("stopping…")}
 	case "launching":
@@ -428,6 +441,8 @@ func (m model) paneLines() []string {
 			return body
 		}
 		return []string{dimStyle.Render("launching… (building image / starting container)")}
+	case "launch-failed":
+		return []string{dimStyle.Render("(launch failed — see the log; '" + keyStartS + "' tries again)")}
 	default: // running
 		if !hasBody {
 			return []string{dimStyle.Render("(starting…)")}
@@ -477,6 +492,29 @@ const (
 	clearGlyph     = theme.MarkClearArmed
 )
 
+// agentTable is the Agents list's columns. The header and every row are laid out through it, so a
+// label cannot come to sit over the wrong column.
+var agentTable = table.Table{
+	{Label: "repo", Width: 10, Clip: true}, // a repo name is unbounded; a long one would skew every row
+	{Label: "agent", Width: 12},
+	{Label: "role", Width: 8},
+	{Label: "status", Width: 9},
+	{Label: "ctx", Width: 4, Right: true},
+	{Label: "model", Width: 14, Clip: true}, // a raw model id is unbounded and often dated
+	{Label: "work"},
+}
+
+// AgentColumnLabels is agentTable's column labels, left to right — exported so a cross-front-end
+// test (-> internal/ui) can pin their order against the CLI's `agent list` columns without either
+// package importing the other, and without duplicating the layout each renders from.
+func AgentColumnLabels() []string {
+	labels := make([]string, len(agentTable))
+	for i, c := range agentTable {
+		labels[i] = c.Label
+	}
+	return labels
+}
+
 func (m model) agentRows() []row {
 	var foreign, local []row
 	// Ordered by repo, then role, then name — the same call `sindri agent list` makes, so the two
@@ -490,7 +528,7 @@ func (m model) agentRows() []row {
 			foreign = append(foreign, m.agentRow(a))
 		}
 	}
-	out := sectioned(foreign, local)
+	out := m.listing(agentTable, foreign, local)
 	for _, o := range m.state.Orphans {
 		// The id is the container name so D can remove it; agent-only actions skip
 		// non-roster ids, and isOrphan gates the ones reading selID directly.
@@ -499,7 +537,7 @@ func (m model) agentRows() []row {
 	return out
 }
 
-// agentRow is one roster row: repo, lifecycle, name, role, context, work, and what is owed on it.
+// agentRow is one roster row: repo, name, role, lifecycle, context, work, and what is owed on it.
 func (m model) agentRow(a api.AgentView) row {
 	// Row coloured by lifecycle; cells styled independently so resets don't bleed.
 	ac := agentStatusStyle(a.Status)
@@ -543,14 +581,15 @@ func (m model) agentRow(a api.AgentView) row {
 	if a.ClearArmed {
 		task += "  " + stWarn.Render(clearGlyph+" clear armed")
 	}
-	return row{strings.Join([]string{
-		m.repoStyle(a.Project).Render(fmt.Sprintf("%-10.10s", a.Repo)),
-		ac.Render(fmt.Sprintf("%-9s", a.Status)),
-		ac.Render(fmt.Sprintf("%-12s", a.Name)),
-		ac.Render(fmt.Sprintf("%-8s", a.Role)),
-		ac.Render(fmt.Sprintf("%4s", theme.ContextPercent(a.ContextTokens, a.ContextWindow))),
-		ac.Render(task),
-	}, " "), a.Name}
+	return row{agentTable.Line(
+		table.Cell{Text: a.Repo, Style: m.repoStyle(a.Project).Render},
+		table.Cell{Text: a.Name, Style: ac.Render},
+		table.Cell{Text: a.Role, Style: ac.Render},
+		table.Cell{Text: a.Status, Style: ac.Render},
+		table.Cell{Text: theme.ContextPercent(a.ContextTokens, a.ContextWindow), Style: ac.Render},
+		table.Cell{Text: dash(a.Model), Style: ac.Render},
+		table.Cell{Text: task, Style: ac.Render},
+	), a.Name}
 }
 
 // isOrphan reports a stray container rather than a roster agent, routing D to orphan removal.

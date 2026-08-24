@@ -30,7 +30,8 @@ func mailAgent(t *testing.T) (*Hub, *store.ProjectStore) {
 // so a reader can see it was never delivered live.
 func TestMailIsKeptForAnAgentThatCannotBeReached(t *testing.T) {
 	h, ps := mailAgent(t)
-	if err := h.Deliver(testProject, "dvalin", "[reviewer] rejected: the gate is missing", workflow.MailAndPush); err != nil {
+	if err := h.Deliver(testProject, "dvalin", "[reviewer] rejected: the gate is missing",
+		workflow.MailAndPush.From("reviewer")); err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
 	unread, err := ps.UnreadMail("dvalin")
@@ -40,19 +41,21 @@ func TestMailIsKeptForAnAgentThatCannotBeReached(t *testing.T) {
 	if unread[0].Pushed {
 		t.Error("the agent is down, so no push landed — the flag must say so")
 	}
-	// The provenance tag the agent itself reads is what the row records, so the two cannot disagree.
+	// The sender is what the SENDER stated (-> workflow.Delivery.From), not what the body's tag happens
+	// to say — that inference is what sd-bc3a1f removed, and only two senders could survive it.
 	if unread[0].Sender != "reviewer" {
-		t.Errorf("sender = %q, want it read off the message's own tag", unread[0].Sender)
+		t.Errorf("sender = %q, want the one the delivery stated", unread[0].Sender)
 	}
 }
 
-// TestPushOnlyKeepsNothing: waking is the entire value of a nudge or a broadcast, so a wake nobody
-// received is not a loss and must not become a permanent row. This is what makes keeping mail for
-// ever affordable, so it is the half worth pinning hardest.
+// TestPushOnlyKeepsNothing: waking is the entire value of a nudge or a broadcast, so it must not
+// become a permanent row. This is what makes keeping mail for ever affordable, so it is the half
+// worth pinning hardest. The push is REPORTED though — with no row behind it the push IS the
+// message, and a swallowed failure left hepti's mailbox marked announced to nobody.
 func TestPushOnlyKeepsNothing(t *testing.T) {
 	h, _ := mailAgent(t)
-	if err := h.Deliver(testProject, "dvalin", "[hub] carry on with td-1", workflow.PushOnly); err != nil {
-		t.Fatalf("Deliver: %v", err)
+	if err := h.Deliver(testProject, "dvalin", "[hub] carry on with td-1", workflow.PushOnly); err == nil {
+		t.Error("a push-only delivery to an agent with no session reported success; its caller cannot retry")
 	}
 	all, err := h.store.AllMail(0)
 	if err != nil {
@@ -72,92 +75,59 @@ func TestADeliveryThatSendsNothingIsAFault(t *testing.T) {
 	}
 }
 
-// TestTheDirectiveRemindsAndReadingClearsIt: `sindri` is the one place every agent already looks, and
-// the reminder REPLACES the ordinary directive because mail can change what the next action is — a
-// cancellation for the task it holds, say. After reading, the directive is the work again.
-func TestTheDirectiveRemindsAndReadingClearsIt(t *testing.T) {
+// TestTheDirectiveServesMailInlineAndMarksItRead: `sindri` is the one place every agent already
+// looks, so the mail is served THERE, ahead of the ordinary directive that follows it in the same
+// call — the ask itself is what marks it read, collapsing what used to be a "go read your mail,
+// then ask again" detour into the one call an agent was already making.
+func TestTheDirectiveServesMailInlineAndMarksItRead(t *testing.T) {
 	h, ps := mailAgent(t)
-	if _, err := ps.AddMail("dvalin", "hub", "[hub] td-1 was cancelled", false); err != nil {
+	if _, err := ps.AddMail("dvalin", "hub", "[hub] td-1 was cancelled", false, 0); err != nil {
 		t.Fatal(err)
 	}
 	dir, err := h.wf.AgentDirective(t.Context(), testProject, "dvalin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"1 unread", "sindri mail"} {
-		if !strings.Contains(dir, want) {
-			t.Errorf("the directive should name %q: %q", want, dir)
-		}
+	if !strings.Contains(dir, "td-1 was cancelled") {
+		t.Errorf("the directive should carry the message itself: %q", dir)
 	}
-	if strings.Contains(dir, "Work on task") {
-		t.Errorf("mail comes first, since it may change what the next action is: %q", dir)
-	}
-
-	out, code := execAs(t, h, "dvalin", "mail")
-	if code != 0 {
-		t.Fatalf("mail failed (%d): %s", code, out)
-	}
-	if !strings.Contains(out, "td-1 was cancelled") {
-		t.Errorf("the verb should hand over the message: %s", out)
-	}
-	// Relevance is settled at pickup, not by a clock: the reply sends the reader back to live state.
-	if !strings.Contains(out, "CHECK EACH ONE") {
-		t.Errorf("the reply should make the reader check relevance: %s", out)
+	if !strings.Contains(dir, "Work on task") {
+		t.Errorf("and the ordinary directive should follow it in the same call: %q", dir)
 	}
 	// Read, not deleted — the record survives for a human.
 	if n, _ := ps.UnreadMailCount("dvalin"); n != 0 {
-		t.Errorf("reading should leave nothing unread, got %d", n)
+		t.Errorf("asking should leave nothing unread, got %d", n)
 	}
 	if all, _ := h.store.AllMail(0); len(all) != 1 || !all[0].Read() {
 		t.Errorf("the message must remain, marked read: %+v", all)
 	}
-	// And the directive is the work again.
-	dir, err = h.wf.AgentDirective(t.Context(), testProject, "dvalin")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(dir, "td-1") || strings.Contains(dir, "unread") {
-		t.Errorf("with the mailbox empty the directive is the task again: %q", dir)
-	}
 }
 
-// TestAnEscalatedAgentIsStillToldItHasMail is the narrow path this feature exists for. An escalated
-// agent is the one state explicitly instructed to sit and wait, so it is the LAST that would discover
-// mail by chance — and the mail it is waiting on may be the answer, or may moot the task it asked
-// about. The escalation directive also claims nothing has come back, which is only true once the
-// mailbox is empty, so mail is answered first and the claim becomes true by construction.
-func TestAnEscalatedAgentIsStillToldItHasMail(t *testing.T) {
+// TestAnEscalatedAgentIsStillToldItsMailInline is the narrow path this feature exists for. An
+// escalated agent is the one state explicitly instructed to sit and wait, so it is the LAST that
+// would discover mail by chance — and the mail it is waiting on may be the answer, or may moot the
+// question it asked. Served inline ahead of the escalation notice, in the same call, exactly like
+// any other directive: escalation is not an operation that would discard the context mail lands in.
+func TestAnEscalatedAgentIsStillToldItsMailInline(t *testing.T) {
 	h, ps := mailAgent(t)
 	if _, err := h.Escalate(testProject, "dvalin", "one column or two?"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ps.AddMail("dvalin", "reviewer", "[reviewer] rejected: see the findings", false); err != nil {
+	if _, err := ps.AddMail("dvalin", "reviewer", "[reviewer] rejected: see the findings", false, 0); err != nil {
 		t.Fatal(err)
 	}
 	dir, err := h.wf.AgentDirective(t.Context(), testProject, "dvalin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(dir, "unread") {
-		t.Errorf("an escalated agent with mail must be told about it: %q", dir)
-	}
-	if strings.Contains(dir, "Nothing has come back yet") {
-		t.Errorf("it must not be told nothing has come back while a message waits: %q", dir)
-	}
-	// Reading it is never held back by the escalation, and afterwards the escalation directive is the
-	// answer again — now truthfully, since the mailbox is empty.
-	if out, code := execAs(t, h, "dvalin", "mail"); code != 0 {
-		t.Fatalf("an escalated agent must be able to read its mail (%d): %s", code, out)
-	}
-	dir, err = h.wf.AgentDirective(t.Context(), testProject, "dvalin")
-	if err != nil {
-		t.Fatal(err)
+	if !strings.Contains(dir, "rejected: see the findings") {
+		t.Errorf("an escalated agent with mail must be told what it says: %q", dir)
 	}
 	if !strings.Contains(dir, "ESCALATED") || !strings.Contains(dir, "one column or two?") {
-		t.Errorf("with the mailbox empty it goes back to waiting on its question: %q", dir)
+		t.Errorf("and the escalation notice should follow it in the same call: %q", dir)
 	}
-	if !strings.Contains(dir, "mailbox is empty") {
-		t.Errorf("and the claim it makes about the mailbox should be the checked one: %q", dir)
+	if n, _ := ps.UnreadMailCount("dvalin"); n != 0 {
+		t.Errorf("asking should have marked it read, got %d unread", n)
 	}
 }
 
@@ -178,7 +148,7 @@ func TestAnEmptyMailboxSaysSo(t *testing.T) {
 // only thing that reveals one has stopped reading.
 func TestUnreadShowsOnTheAgentRow(t *testing.T) {
 	h, ps := mailAgent(t)
-	if _, err := ps.AddMail("dvalin", "hub", "[hub] read me", false); err != nil {
+	if _, err := ps.AddMail("dvalin", "hub", "[hub] read me", false, 0); err != nil {
 		t.Fatal(err)
 	}
 	board, err := h.State("")

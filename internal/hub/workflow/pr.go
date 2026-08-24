@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/api"
@@ -23,6 +24,13 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
+// refFallbackWarn remembers which repo roots have already been warned about the unconfigured-
+// reference fallback below, so a call on every submit does not spam the log with the same finding.
+type refFallbackWarn struct {
+	mu   sync.Mutex
+	seen map[string]bool
+}
+
 // baseBranch is the branch agents work against: the configured `reference:`, else the main
 // checkout's current branch. Configured-but-absent is fatal — every claim/submit/merge needs it.
 func (e *Engine) baseBranch(root string) (string, error) {
@@ -31,12 +39,33 @@ func (e *Engine) baseBranch(root string) (string, error) {
 		return "", err
 	}
 	if cfg.Reference == "" {
-		return git.CurrentBranch(root)
+		branch, err := git.CurrentBranch(root)
+		if err != nil {
+			return "", err
+		}
+		e.warnUnconfiguredReference(root, branch)
+		return branch, nil
 	}
 	if !git.BranchExists(root, cfg.Reference) {
 		return "", fmt.Errorf("the configured reference branch %q doesn't exist in %s — create it or fix `reference:` in .sindri/config.yaml", cfg.Reference, root)
 	}
 	return cfg.Reference, nil
+}
+
+// warnUnconfiguredReference logs, once per root, that every agent's reference is whatever a human
+// happens to have checked out in the main working copy — a fallback that moves silently the moment
+// they switch branches there, with nothing on the board to say so.
+func (e *Engine) warnUnconfiguredReference(root, branch string) {
+	e.refWarn.mu.Lock()
+	defer e.refWarn.mu.Unlock()
+	if e.refWarn.seen == nil { // a bare &Engine{} in a test skips New's own initialisation
+		e.refWarn.seen = map[string]bool{}
+	}
+	if e.refWarn.seen[root] {
+		return
+	}
+	e.refWarn.seen[root] = true
+	fmt.Fprintf(os.Stderr, "hub: %s has no `reference:` configured — every agent measures against %q, whatever is checked out there right now; set `reference:` in .sindri/config.yaml to pin it.\n", root, branch)
 }
 
 // FleetPRs is fleet-wide, so `pr list` matches the TUI regardless of the caller's cwd.
@@ -91,6 +120,16 @@ func (e *Engine) PRProject(fallback, id string) string {
 	return fallback
 }
 
+// callerPRProject is PRProject narrowed for an unrestricted agent verb (show, lint): it widens
+// beyond c.Project only when c is the reviewer actually holding prID, fleet-wide — never for any
+// other PR, or a PR id (not secret, but not a bypass either) would reach every agent in every repo.
+func (e *Engine) callerPRProject(c registry.Caller, prID string) string {
+	if home, held, err := e.store.ReviewingPR(c.Project, c.Agent); err == nil && held == prID {
+		return home
+	}
+	return c.Project
+}
+
 // PRDetail is a merge-intent plus its linked task and diff (for `pr info`); it crosses the wire
 // as internal/api.PRDetail, the name every existing caller here already uses.
 type PRDetail = api.PRDetail
@@ -112,9 +151,10 @@ func (e *Engine) PRInfo(project, id string) (PRDetail, error) {
 	task, _ := e.TaskInfo(project, pr.Task) // linked task; zero value if unreadable
 	reviews, _ := ps.Reviews(id)
 	pr.Approvals = api.ApprovalCount(reviews) // the same count the list carries, so the two agree
-	lint, lintAt := ps.GetPRLint(id)
+	lint, lintCommit, lintAt := ps.GetPRLint(id)
 	history, _ := ps.PREvents(id)
-	return PRDetail{PR: pr, Task: task, Diff: diff, Reviews: reviews, Lint: lint, LintAt: lintAt, History: history}, nil
+	return PRDetail{PR: pr, Task: task, Diff: diff, Reviews: reviews, Lint: lint, LintCommit: lintCommit,
+		LintAt: lintAt, History: history}, nil
 }
 
 // CmdSubmit returns immediately; the worker idles until the hub injects a verdict (D5).
@@ -160,6 +200,12 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 		fmt.Fprintln(out, ReplyTaskGrew(st.Task, grew))
 		return 1, nil
 	}
+	// Before the gate takes a slot: with the target closed there is nothing to land into, so the
+	// gate's minutes would buy a PR rejected the moment it landed (-> settleWithTask).
+	if t, ok, terr := ps.GetTask(target); terr == nil && ok && !api.Open(t) {
+		fmt.Fprintln(out, ReplySubmitTaskClosed(target))
+		return 1, nil
+	}
 	a, _, _ := ps.GetAgent(c.Agent)
 	wt := filepath.Join(root, a.Workspace)
 	base, err := e.baseBranch(root)
@@ -171,21 +217,32 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 	if refused, rerr := e.refuseIfBehind(ps, c.Agent, wt, base, target, out); rerr != nil || refused {
 		return 1, rerr
 	}
-	// Queued, not run here: several agents submitting at once must not mean several concurrent
-	// verify runs. No PR exists until it passes — landSubmit creates it from the queue.
+	// Recorded before it is judged: the gate checks a COMMIT, which is what makes its verdict
+	// reusable — and agents have no commit verb, so this is where their work gets written down.
 	desc := strings.TrimSpace(strings.Join(args, " "))
-	run, err := e.enqueueGate(c.Project, c.Agent, "submit", desc)
+	sha, err := e.gateCommit(c.Project, c.Agent, desc)
 	if err != nil {
 		return 1, err
 	}
+	// Parked BEFORE the gate opens: a commit that already passed lands its PR inside the next call,
+	// and a phase written after that would overwrite "submitted" with a wait that is already over.
 	if err := ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: branch, Container: st.Container, Phase: "gating"}); err != nil {
 		return 1, err
 	}
-	pos := 0
-	if all, aerr := e.store.AllRuns("queued"); aerr == nil {
-		pos = queuePositions(all)[run.ID]
+	// Queued, not run here: several agents submitting at once must not mean several concurrent
+	// verify runs. No PR exists until it passes — landSubmit creates it from the queue.
+	run, reused, err := e.gateRun(c.Project, c.Agent, gateSubmit, desc, sha)
+	if err != nil {
+		// The phase goes back: "gating" has no way out on its own — Stalled ignores it and every
+		// landing verb refuses it — so an agent parked on a gate that never opened is parked for good.
+		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: branch, Container: st.Container, Phase: "working"})
+		return 1, err
 	}
-	fmt.Fprintln(out, ReplyGateQueued(run.ID, pos))
+	if reused {
+		fmt.Fprintln(out, ReplyGateReused(run.ID, shortSHA(sha)))
+		return 0, nil
+	}
+	fmt.Fprintln(out, ReplyGateQueued(run.ID, e.queuePosition(run.ID)))
 	return 0, nil
 }
 
@@ -296,13 +353,16 @@ func (e *Engine) CmdShowPR(c registry.Caller, args []string, out io.Writer) (int
 		fmt.Fprintln(out, "usage: show <pr-id>")
 		return 2, nil
 	}
-	ps := e.store.For(c.Project)
+	ps := e.store.For(e.callerPRProject(c, args[0]))
 	pr, ok, err := ps.GetPR(args[0])
 	if err != nil {
 		return 1, err
 	}
 	if !ok {
-		return 1, fmt.Errorf("no such PR %q", args[0])
+		// Agent-actionable, not a hub fault: printed and returned with a nil error, or AgentExec
+		// would mask it behind "an internal error" (-> commands.go).
+		fmt.Fprintf(out, "no such PR %q\n", args[0])
+		return 1, nil
 	}
 	revs, _ := ps.Reviews(pr.ID)
 	fmt.Fprintf(out, "%s  [%s]  by %s\nbranch %s → %s\n", pr.ID, api.StatusLabel(pr.Status, api.ApprovalCount(revs)), pr.Agent, pr.Branch, pr.Base)
@@ -319,7 +379,7 @@ func (e *Engine) CmdShowPR(c registry.Caller, args []string, out io.Writer) (int
 	for _, r := range revs {
 		fmt.Fprintln(out, "review: "+reviewBadge(r))
 	}
-	diff, err := git.Diff(e.deps.ProjectRoot(c.Project), pr.Base, pr.Branch)
+	diff, err := git.Diff(e.deps.ProjectRoot(pr.Project), pr.Base, pr.Branch)
 	if err != nil {
 		return 1, err
 	}
@@ -327,11 +387,13 @@ func (e *Engine) CmdShowPR(c registry.Caller, args []string, out io.Writer) (int
 	return 0, nil
 }
 
-// openPR takes an explicit id, else the oldest open PR.
-func (e *Engine) openPR(project string, args []string) (store.PR, error) {
-	ps := e.store.For(project)
+// openPR takes an explicit id, else the oldest open PR in c's own project.
+func (e *Engine) openPR(c registry.Caller, args []string) (store.PR, error) {
 	if len(args) > 0 {
-		pr, ok, err := ps.GetPR(args[0])
+		// callerPRProject, not c.Project directly: it widens beyond the caller's own project only
+		// when the caller itself holds this exact PR fleet-wide — any other caller naming a
+		// foreign id must still get "no such PR", not another project's row.
+		pr, ok, err := e.store.For(e.callerPRProject(c, args[0])).GetPR(args[0])
 		if err != nil {
 			return store.PR{}, err
 		}
@@ -340,6 +402,7 @@ func (e *Engine) openPR(project string, args []string) (store.PR, error) {
 		}
 		return pr, nil
 	}
+	ps := e.store.For(c.Project)
 	open, err := ps.PRs("open")
 	if err != nil {
 		return store.PR{}, err
@@ -362,36 +425,6 @@ func (e *Engine) MaterializeReview(project, prID string) (string, error) {
 		return "", fmt.Errorf("no such PR %q", prID)
 	}
 	return repo.MaterializeReview(root, pr.Branch)
-}
-
-// LintPR runs the quality gate on a PR worktree, headed with PASS/FAIL.
-func (e *Engine) LintPR(project, prID string) (string, error) {
-	ps := e.store.For(project)
-	pr, ok, err := ps.GetPR(prID)
-	if err != nil {
-		return "", err
-	}
-	if !ok {
-		return "", fmt.Errorf("no such PR %q", prID)
-	}
-	a, ok, err := ps.GetAgent(pr.Agent)
-	if err != nil {
-		return "", err
-	}
-	if !ok {
-		return "", fmt.Errorf("no agent %q for %s", pr.Agent, prID)
-	}
-	out, passed := repo.Gate(filepath.Join(e.deps.ProjectRoot(project), a.Workspace), e.deps.BrokkrBin, e.verifyCmd(project))
-	status := "FAIL"
-	if passed {
-		status = "PASS"
-	}
-	if strings.TrimSpace(out) == "" {
-		out = "(no output)\n"
-	}
-	result := fmt.Sprintf("lint %s\n\n%s", status, out)
-	_ = ps.SetPRLint(prID, result) // persist the latest result
-	return result, nil
 }
 
 // RebaseAgent recovers a stale tree after the base moved outside a sindri merge; git aborts

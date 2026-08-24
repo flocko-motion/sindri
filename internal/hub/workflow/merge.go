@@ -86,7 +86,9 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 	case repo.MergeConflict:
 		pr.Status, pr.Feedback = "open", "" // no longer mergeable; back to review after the worker resolves
 		_ = ps.PutPR(pr)
-		_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "resolving"})
+		// Phase only: pr.Task is the container's id for a milestone, not the subtask held — writing
+		// it, or dropping Container, would misplace or unhook a feature worker.
+		_ = ps.SetPhase(pr.Agent, "resolving")
 		_ = ps.LogPR(pr.ID, "conflict", "rebase onto "+pr.Base+" conflicts: "+strings.Join(res.Files, ", "))
 		_ = e.deps.Deliver(project, pr.Agent, MsgResolveNeeded(pr.Base, res.Files), MailAndPush)
 		e.deps.Notify()
@@ -111,8 +113,8 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 	// its rejection overwrote the merge in the record.
 	e.releaseReviewers(project, prID, "overtaken: merged before a verdict")
 	// A landing that does not finish the work: the task stays open and its author stays on it, with
-	// the branch fast-forwarded past the merge. Two shapes arrive here — a mid-task contribution, and
-	// a milestone on a held feature that still has subtasks. A feature with none left IS finished by
+	// the branch reset onto the merge. Two shapes arrive here — a mid-task contribution, and a
+	// milestone on a held feature that still has subtasks. A feature with none left IS finished by
 	// this merge and takes the ordinary path below; keeping it here left a worker holding a feature
 	// that had already landed, with its task still reading open.
 	holder, _ := ps.GetState(pr.Agent)
@@ -144,22 +146,35 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 	}
 	if partial {
 		if a, ok, _ := ps.GetAgent(pr.Agent); ok {
-			_ = git.RebaseOnto(filepath.Join(root, a.Workspace), pr.Branch, pr.Base) // ff past the merge
+			// Standing branch, squashed merge: reset (not rebase, see ResetOntoKeepingWork) onto the
+			// new base, keeping whatever the agent is mid-editing rather than discarding it.
+			wt := filepath.Join(root, a.Workspace)
+			conflicts, done, rerr := git.ResetOntoKeepingWork(wt, pr.Base)
+			if rerr != nil || !done {
+				// cur.Task, not pr.Task: for a milestone that is the container's own id, not the real
+				// subtask resumeContainer must see later. Container mirrors onFeature, not a stale
+				// read, so a just-promoted feature is not lost here.
+				cur, _ := ps.GetState(pr.Agent)
+				container := ""
+				if onFeature {
+					container = pr.Branch
+				}
+				_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: cur.Task, Branch: pr.Branch, Container: container, Phase: "resolving"})
+				if rerr != nil {
+					log.Printf("hub: %s: reset %s onto %s after %s: %v", pr.Agent, pr.Branch, pr.Base, prID, rerr)
+					_ = ps.LogPR(prID, "warning", "merged, but resetting "+pr.Agent+"'s branch onto "+pr.Base+" failed (needs a manual look): "+rerr.Error())
+					_ = e.deps.Deliver(project, pr.Agent, MsgResetFailed(prID, pr.Base), MailAndPush)
+				} else {
+					_ = ps.Log(pr.Agent, "resolve", prID+" merged, but reapplying uncommitted work onto "+pr.Base+" conflicts: "+strings.Join(conflicts, ", "))
+					_ = ps.LogPR(prID, "merged", "into "+pr.Base+"; reapplying "+pr.Agent+"'s uncommitted work conflicts")
+					_ = e.deps.Deliver(project, pr.Agent, MsgReapplyConflict(prID, pr.Base, conflicts), MailAndPush)
+				}
+				e.rebasePlanners(project, pr.Base)
+				e.deps.Notify()
+				return pr, nil
+			}
 		}
-		if onFeature {
-			_ = ps.Log(pr.Agent, "merged", prID+" (milestone)")
-			_ = ps.LogPR(prID, "merged", "milestone into "+pr.Base)
-			e.resumeContainer(project, pr.Agent)
-			_ = e.deps.Deliver(project, pr.Agent, MsgMilestoneMerged(prID), MailAndPush)
-		} else {
-			_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Phase: "working"})
-			_ = ps.Log(pr.Agent, "merged", prID+" (interim)")
-			_ = ps.LogPR(prID, "merged", "interim contribution into "+pr.Base)
-			_ = e.deps.Deliver(project, pr.Agent, MsgContributionMerged(prID, pr.Task), MailAndPush)
-		}
-		e.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
-		e.deps.Notify()
-		return pr, nil
+		return e.finishPartialMerge(project, pr, onFeature)
 	}
 	// Tell every task source, so each runs its own consequence on its own ids and the workflow
 	// need not know the backend. After the local merge, so a failure warns rather than fails it.
@@ -178,7 +193,33 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 	_ = ps.SetState(store.AgentState{Agent: pr.Agent, Phase: rest})
 	_ = ps.Log(pr.Agent, "merged", prID)
 	_ = ps.LogPR(prID, "merged", "into "+pr.Base)
-	_ = e.deps.Deliver(project, pr.Agent, MsgMerged(prID), MailAndPush)
+	// No message: the task left pr.Agent's hands the moment it submitted. Silence is the successful
+	// outcome; nudgeIdleWorkers is what tells it once there is new work to pick up.
+	e.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
+	e.deps.Notify()
+	return pr, nil
+}
+
+// finishPartialMerge resumes a merged, partial PR's agent — the tail both a clean reset and a
+// resolved post-merge reapply conflict end up at, so the two paths can never drift apart.
+func (e *Engine) finishPartialMerge(project string, pr store.PR, onFeature bool) (store.PR, error) {
+	ps := e.store.For(project)
+	if onFeature {
+		_ = ps.Log(pr.Agent, "merged", pr.ID+" (milestone)")
+		_ = ps.LogPR(pr.ID, "merged", "milestone into "+pr.Base)
+		e.resumeContainer(project, pr.Agent)
+		// Push only: the agent resumes the same feature it never left, which its own directive
+		// already says — nothing here needs to survive being read late.
+		_ = e.deps.Deliver(project, pr.Agent, MsgMilestoneMerged(pr.ID), PushOnly)
+	} else {
+		// Phase only: promoteToFeature only promotes a "working" agent, so this one never picked up
+		// a container while its interim PR was out.
+		_ = ps.SetPhase(pr.Agent, "working")
+		_ = ps.Log(pr.Agent, "merged", pr.ID+" (interim)")
+		_ = ps.LogPR(pr.ID, "merged", "interim contribution into "+pr.Base)
+		// Push only, same reason: it resumes the same task, which its directive already says.
+		_ = e.deps.Deliver(project, pr.Agent, MsgContributionMerged(pr.ID, pr.Task), PushOnly)
+	}
 	e.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
 	e.deps.Notify()
 	return pr, nil

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
@@ -31,7 +32,7 @@ const GitHelp = "run a safe git action on your workspace (the hub runs it for yo
 	"  git change [<paths>]    your WHOLE change vs " + refName + " — recorded work included\n" +
 	"  git history             the work you have already handed over on your branch\n" +
 	"  git incoming            what has landed on " + refName + " that you don't have yet\n" +
-	"  git restore <paths>     throw away your unrecorded changes to those paths\n" +
+	"  git rollback <id>       put your workspace back to an earlier point in your history\n" +
 	"  git drop <paths>        remove those paths from your change entirely (recorded work too)"
 
 // diffCap bounds a diff's output. A repo-wide diff runs to tens of thousands of lines, which buries
@@ -60,6 +61,13 @@ func (e *Engine) CmdGit(c registry.Caller, args []string, out io.Writer) (int, e
 		fmt.Fprintln(out, perr.Error())
 		return 2, nil
 	}
+	// Neither destructive action touches a shared checkout: a coauthor's /workspace IS the user's own
+	// tree, and putting that back is theirs to do with the git they have (-> RebaseAgent refuses it too).
+	if (args[0] == "rollback" || args[0] == "drop") && !e.hubOwnedTree(wt, a.Workspace) {
+		fmt.Fprintf(out, "`git %s` isn't available here: /workspace is the user's own checkout, not a workspace "+
+			"the hub records, so undoing anything in it is theirs to do — and you have git yourself.\n", args[0])
+		return 2, nil
+	}
 	switch args[0] {
 	case "status":
 		return e.gitStatus(wt, out)
@@ -71,8 +79,15 @@ func (e *Engine) CmdGit(c registry.Caller, args []string, out io.Writer) (int, e
 		return e.gitCommits(wt, root, false, out)
 	case "incoming":
 		return e.gitCommits(wt, root, true, out)
+	case "rollback":
+		return e.gitRollback(c, wt, root, args[1:], out)
 	case "restore":
-		return e.gitRestore(c, wt, paths, out)
+		// Gone rather than renamed: with the workspace recorded at every gate there is nothing
+		// unrecorded left to put back, so it would be a no-op that reads like a rescue.
+		fmt.Fprintln(out, "`git restore` is gone: the hub now records your workspace every time it gates it, so there "+
+			"is nothing unrecorded left for it to put back. `git rollback <id>` returns you to a point `sindri git history` "+
+			"lists; `git drop <paths>` takes single paths out of your change.")
+		return 2, nil
 	case "drop":
 		return e.gitDrop(c, wt, root, paths, out)
 	}
@@ -192,23 +207,77 @@ func (e *Engine) gitCommits(wt, root string, incoming bool, out io.Writer) (int,
 	return 0, nil
 }
 
-// gitRestore discards uncommitted changes to paths. Destructive, so it never guesses at scope.
-func (e *Engine) gitRestore(c registry.Caller, wt string, paths []string, out io.Writer) (int, error) {
-	if len(paths) == 0 {
-		fmt.Fprintln(out, "`git restore` needs the paths to put back — it throws work away, so it never guesses. `sindri git status` shows what you changed.")
+// gitRollback puts the workspace back to an earlier point in the agent's own history — the shape of
+// "that last attempt was wrong", which `git drop` (per-path, against the reference) cannot express.
+// The point must be ONE OF ITS OWN (-> rollbackTarget).
+func (e *Engine) gitRollback(c registry.Caller, wt, root string, args []string, out io.Writer) (int, error) {
+	if len(args) != 1 {
+		fmt.Fprintln(out, "`git rollback` takes exactly one id, from `sindri git history` — it throws work away, so it never guesses.")
 		return 2, nil
 	}
-	if err := git.RestoreFromHEAD(wt, paths); err != nil {
+	target, reason := e.rollbackTarget(wt, root, args[0])
+	if reason != "" {
+		fmt.Fprintln(out, reason)
+		return 2, nil
+	}
+	dropped, _ := git.LogRange(wt, target, "HEAD", logCap)
+	if err := git.ResetBranchTo(wt, target); err != nil {
 		return 1, err
 	}
-	_ = e.store.For(c.Project).Log(c.Agent, "restore", "to last commit: "+strings.Join(paths, ", "))
-	fmt.Fprintf(out, "Threw away your unrecorded changes to %s — they're back as the hub last recorded them. Anything there you hadn't handed over is gone.\n", FileList(paths))
+	_ = e.store.For(c.Project).Log(c.Agent, "rollback", fmt.Sprintf("to %s, dropping %d commit(s)", args[0], len(dropped)))
+	fmt.Fprintf(out, "Your workspace is back at %s. %s\n", args[0], rollbackNote(dropped))
 	return 0, nil
 }
 
-// gitDrop takes paths out of the agent's change for good: back to the reference branch's content and
-// committed, since a restoration left uncommitted would keep the churn in the PR. This is what
-// "drop those files, feature only" needs — reverting COMMITTED work, which a restore cannot do.
+// rollbackTarget resolves an agent-named id to a sha on its own branch, at or after where that branch
+// left the reference — or the refusal to print, since a destructive verb may not guess at a near-miss.
+func (e *Engine) rollbackTarget(wt, root, id string) (sha, refusal string) {
+	if !commitID.MatchString(id) {
+		return "", fmt.Sprintf("%q is not an id from `sindri git history` — that lists yours; give one of those.", id)
+	}
+	sha, err := git.ResolveCommit(wt, id)
+	if err != nil {
+		return "", fmt.Sprintf("No %s in your workspace — `sindri git history` lists the points you can go back to.", id)
+	}
+	if !git.IsAncestor(wt, sha, "HEAD") {
+		return "", fmt.Sprintf("%s isn't in your branch's history, so there is nothing to roll back to there. `sindri git history` lists what is.", id)
+	}
+	ref, err := e.baseBranch(root)
+	if err != nil {
+		return "", err.Error()
+	}
+	branch, err := git.CurrentBranch(wt)
+	if err != nil {
+		return "", err.Error()
+	}
+	base, err := git.MergeBase(wt, ref, branch)
+	if err != nil {
+		return "", err.Error()
+	}
+	if !git.IsAncestor(wt, base, sha) {
+		return "", fmt.Sprintf("%s is older than where your branch left %s — that is somebody else's work, not yours to undo. "+
+			"`sindri git history` lists your own.", id, refName)
+	}
+	return sha, ""
+}
+
+// commitID is what an agent may name: the hex id `git history` prints, never a ref.
+var commitID = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
+
+// rollbackNote lists what went, since the reset leaves no trace an agent can read afterwards.
+func rollbackNote(dropped []string) string {
+	if len(dropped) == 0 {
+		return "It was already there; anything in it you hadn't handed over is gone."
+	}
+	return fmt.Sprintf("Gone: %d step(s) of your history, and anything you hadn't handed over — %s.",
+		len(dropped), strings.Join(dropped, "; "))
+}
+
+// gitDrop takes paths out of the agent's change for good: reverting COMMITTED work back to the
+// MERGE-BASE (not the reference's current tip, which `git change`'s three-dot diff never measures
+// against — dropping against anything else can leave the two disagreeing about the same file) and
+// committing that. CommittedChurn and WorktreeDirty are asked separately, each with its own honest
+// reply, rather than one worktree-only check that can miss committed churn hidden by a hand-edit.
 func (e *Engine) gitDrop(c registry.Caller, wt, root string, paths []string, out io.Writer) (int, error) {
 	if len(paths) == 0 {
 		fmt.Fprintln(out, "`git drop` needs the paths to remove from your change — it throws work away, so it never guesses. `sindri git change` shows what your change covers.")
@@ -218,8 +287,34 @@ func (e *Engine) gitDrop(c registry.Caller, wt, root string, paths []string, out
 	if err != nil {
 		return 1, err
 	}
-	if err := git.RestoreFromRef(wt, ref, paths); err != nil {
+	branch, err := git.CurrentBranch(wt)
+	if err != nil {
 		return 1, err
+	}
+	target, err := git.MergeBase(wt, ref, branch)
+	if err != nil {
+		return 1, err
+	}
+	churn, err := git.CommittedChurn(wt, target, paths)
+	if err != nil {
+		return 1, err
+	}
+	dirty, err := git.WorktreeDirty(wt, paths)
+	if err != nil {
+		return 1, err
+	}
+	if !churn && !dirty {
+		fmt.Fprintf(out, "%s already match %s exactly — nothing to drop, nothing recorded.\n", FileList(paths), refName)
+		return 0, nil
+	}
+	if err := git.RestoreFromRef(wt, target, paths); err != nil {
+		return 1, err
+	}
+	if !churn {
+		// The worktree was dirty but the branch's own commits already agreed with the reference —
+		// the edit is cleared, but there was never anything here for `git change` to disagree about.
+		fmt.Fprintf(out, "%s already matched %s in your commits — cleared the uncommitted edit there, but there was nothing to record.\n", FileList(paths), refName)
+		return 0, nil
 	}
 	ps := e.store.For(c.Project)
 	st, _ := ps.GetState(c.Agent)
@@ -232,7 +327,7 @@ func (e *Engine) gitDrop(c registry.Caller, wt, root string, paths []string, out
 	if err := git.CommitAll(wt, conventionalCommit(tk.Type, id, desc)); err != nil {
 		return 1, err
 	}
-	_ = ps.Log(c.Agent, "drop", strings.Join(paths, ", ")+" (restored to "+ref+")")
+	_ = ps.Log(c.Agent, "drop", strings.Join(paths, ", ")+" (restored to "+target+")")
 	fmt.Fprintf(out, "Removed %s from your change and recorded that, so those files now match %s exactly. Your work in every other file is untouched.\n", FileList(paths), refName)
 	return 0, nil
 }

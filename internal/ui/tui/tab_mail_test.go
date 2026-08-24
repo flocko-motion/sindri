@@ -42,7 +42,7 @@ func TestMailRowsSayWhoWhenAndWhetherRead(t *testing.T) {
 		t.Errorf("a message that was also injected should say so:\n%s", rows)
 	}
 	// One line per message, whatever the body does — the first row's body has a newline in it.
-	if n := len(m.mailRows()); n != 2 {
+	if n := itemRows(m.mailRows()); n != 2 {
 		t.Errorf("two messages should be two rows, got %d", n)
 	}
 }
@@ -102,27 +102,33 @@ func TestTheMailDetailShowsTheMessageAndReachesItsAgent(t *testing.T) {
 func TestMailFiltersNarrowTheList(t *testing.T) {
 	m := mailModel()
 	m.mailFilter = api.MailUnread
-	if rows := m.mailRows(); len(rows) != 1 {
-		t.Errorf("unread should show one of the two messages, got %d", len(rows))
+	if n := itemRows(m.mailRows()); n != 1 {
+		t.Errorf("unread should show one of the two messages, got %d", n)
 	}
 	m.onKey(keyFilter)
 	if m.mailFilter != api.MailAll {
 		t.Errorf("`%s` should cycle the mail filter, got %q", keyFilter, m.mailFilter)
 	}
-	if rows := m.mailRows(); len(rows) != 2 {
-		t.Errorf("all should show both messages, got %d", len(rows))
+	if n := itemRows(m.mailRows()); n != 2 {
+		t.Errorf("all should show both messages, got %d", n)
 	}
-	// `w` narrows to whoever the selected message was sent to, and again to widen.
+	// `w` steps everyone → this row's recipient → YOU → everyone. The row step is first because the
+	// cursor makes it obvious, and because after narrowing to the user no other recipient is left to
+	// select — a row step placed last could never be reached.
 	m.onKey(keyMailWho)
 	if m.mailAgent != "dvalin" {
 		t.Errorf("`%s` should narrow to the selected recipient, got %q", keyMailWho, m.mailAgent)
 	}
-	if rows := m.mailRows(); len(rows) != 1 {
-		t.Errorf("narrowed to dvalin should show one message, got %d", len(rows))
+	if n := itemRows(m.mailRows()); n != 1 {
+		t.Errorf("narrowed to dvalin should show one message, got %d", n)
+	}
+	m.onKey(keyMailWho)
+	if m.mailAgent != api.SenderUser {
+		t.Errorf("`%s` should then narrow to the user, got %q", keyMailWho, m.mailAgent)
 	}
 	m.onKey(keyMailWho)
 	if m.mailAgent != "" {
-		t.Errorf("`%s` again should widen back to every agent, got %q", keyMailWho, m.mailAgent)
+		t.Errorf("`%s` again should widen back to everyone, got %q", keyMailWho, m.mailAgent)
 	}
 }
 
@@ -147,5 +153,73 @@ func TestTheMailBadgeCountsUnreadNotTheWindow(t *testing.T) {
 	m.scopeRepo = true
 	if got := m.tabCount(mail); got != 7 {
 		t.Errorf("repo scope should show this repo's unread (7), got %d", got)
+	}
+}
+
+// TestTheUsersMailIsShownFromEveryRepo: the marker beside the handle counts the user's unread
+// fleet-wide, so a scope that hid the row it points at would say something waits and then show
+// nothing. It is grouped under the to-you heading, above the rest of the mailbox, wherever it's from.
+func TestTheUsersMailIsShownFromEveryRepo(t *testing.T) {
+	m := mailModel()
+	m.scopeRepo = true // narrowed to the repo in view
+	m.state.Projects = []api.Project{{Tag: "repo", Path: "/r/one"}}
+	m.state.Mail = append(m.state.Mail, api.Mail{
+		ID: 9, Project: "elsewhere", Repo: "two", Agent: "user", Sender: "nori",
+		Body: "the config field is documented backwards", SentAt: "2026-08-17T11:00:00Z",
+	})
+	rows := strings.Join(rowTexts(m.mailRows()), "\n")
+	if !strings.Contains(rows, "documented backwards") {
+		t.Errorf("a note to the user from another repo must still be listed:\n%s", rows)
+	}
+	if !strings.Contains(rows, api.MailToUserHeading(1)) {
+		t.Errorf("and grouped under the to-you heading regardless of which repo it came from:\n%s", rows)
+	}
+	// It is marked as the user's own, since the list is mostly agent traffic.
+	if !strings.Contains(rows, "→ you") {
+		t.Errorf("the user's own rows should be marked:\n%s", rows)
+	}
+	// An agent's mail from another repo stays out: none of it is the user's to read.
+	m.state.Mail = append(m.state.Mail, api.Mail{
+		ID: 10, Project: "elsewhere", Repo: "two", Agent: "gloin", Sender: "hub", Body: "a verdict elsewhere",
+	})
+	if rows := strings.Join(rowTexts(m.mailRows()), "\n"); strings.Contains(rows, "a verdict elsewhere") {
+		t.Errorf("agent traffic from another repo is not the user's business:\n%s", rows)
+	}
+}
+
+// TestTheUserCanAlwaysAskWhatIsWaitingForThem is the gap the review found: the narrowing used to be
+// reachable only by selecting a row already addressed to the user, so the question was unanswerable in
+// the one case it matters — when nothing of theirs is on screen. Now it is a step of the cycle, so it
+// is reachable whatever is selected, and immediate when nothing is.
+func TestTheUserCanAlwaysAskWhatIsWaitingForThem(t *testing.T) {
+	// Nothing at all to select: one press, straight to the question.
+	empty := newModel(nil, nil, "")
+	empty.tab, empty.scopeRepo, empty.mailFilter = 6, false, api.MailAll
+	empty.reclamp()
+	empty.onKey(keyMailWho)
+	if empty.mailAgent != api.SenderUser {
+		t.Errorf("with nothing selected the first step should be the user, got %q", empty.mailAgent)
+	}
+
+	// An agent's row selected and nothing of the user's in the list: still reachable, and the footer
+	// names each state on the way so the next press is never a guess.
+	m := newModel(nil, nil, "")
+	m.tab, m.scopeRepo, m.mailFilter = 6, false, api.MailAll
+	m.state = api.BoardState{Mail: []api.Mail{{ID: 2, Repo: "one", Agent: "dvalin", Sender: "hub", Body: "a verdict"}}}
+	m.reclamp()
+	for i := 0; i < len(api.MailFilters) && m.mailAgent != api.SenderUser; i++ {
+		m.onKey(keyMailWho)
+	}
+	if m.mailAgent != api.SenderUser {
+		t.Fatalf("the cycle should reach the user from any state, got %q", m.mailAgent)
+	}
+	// Empty of messages, but not of the row that says why: a narrowed list still states its filter
+	// line (-> filterline.go listing), so "nothing addressed to them" reads as a narrowing the user
+	// can clear rather than as a mailbox that has gone silent.
+	if rows := m.mailRows(); len(rows) != 1 {
+		t.Errorf("with nothing addressed to them the list holds only its filter line, not the agent's mail: %d rows", len(rows))
+	}
+	if got := mailWhoLabel(m.mailAgent); got != "you" {
+		t.Errorf("the footer should say who it is narrowed to, got %q", got)
 	}
 }

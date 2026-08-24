@@ -8,7 +8,8 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// nudgeStore sets up a project with one idle worker plus the agents that must NOT be nudged.
+// nudgeStore sets up a project with one idle worker plus the agents that must NOT be nudged, and
+// one open, rated, claimable task — nudgeIdleWorkers now asks the real backlog, not a bare id.
 func nudgeStore(t *testing.T) (*Engine, *stubDeps, *store.ProjectStore) {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
@@ -27,6 +28,9 @@ func nudgeStore(t *testing.T) (*Engine, *stubDeps, *store.ProjectStore) {
 			t.Fatal(err)
 		}
 	}
+	if err := ps.UpsertTask(store.Task{ID: "td-ae5ca0", Title: "fix it", Status: "open", Priority: "P2"}); err != nil {
+		t.Fatal(err)
+	}
 	// dvalin is busy, galar plans, hepti collaborates — only nori is free.
 	_ = ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-busy", Branch: "td-busy", Phase: "working"})
 	_ = ps.SetState(store.AgentState{Agent: "galar", Phase: "planning"})
@@ -43,21 +47,21 @@ func nudgeStore(t *testing.T) (*Engine, *stubDeps, *store.ProjectStore) {
 // agents holding work or roles that never claim backlog tasks.
 func TestNudgeReachesOnlyTheIdleWorker(t *testing.T) {
 	e, deps, _ := nudgeStore(t)
-	e.nudgeIdleWorkers("proj", "td-ae5ca0", "P2")
+	e.nudgeIdleWorkers("proj", "P2")
 
 	if len(deps.injected) != 1 || deps.injected[0] != "nori" {
 		t.Fatalf("only the idle worker should be nudged, got %v", deps.injected)
 	}
 }
 
-// TestNudgeSkipsUnratedWork: a worker won't claim an unrated task, so nudging for one would send it
-// to fetch work it has to refuse — noise that teaches the agent the nudge means nothing.
+// TestNudgeSkipsUnratedWork: an unrated creation cannot itself have made anything newly claimable,
+// so it is not worth a scan.
 func TestNudgeSkipsUnratedWork(t *testing.T) {
 	e, deps, _ := nudgeStore(t)
-	e.nudgeIdleWorkers("proj", "gh-9", "")
+	e.nudgeIdleWorkers("proj", "")
 
 	if len(deps.injected) != 0 {
-		t.Fatalf("an unrated task must not nudge anyone, got %v", deps.injected)
+		t.Fatalf("an unrated trigger must not nudge anyone, got %v", deps.injected)
 	}
 }
 
@@ -65,10 +69,54 @@ func TestNudgeSkipsUnratedWork(t *testing.T) {
 func TestNudgeSkipsADeadAgent(t *testing.T) {
 	e, deps, _ := nudgeStore(t)
 	deps.alive = false
-	e.nudgeIdleWorkers("proj", "td-ae5ca0", "P2")
+	e.nudgeIdleWorkers("proj", "P2")
 
 	if len(deps.injected) != 0 {
 		t.Fatalf("a dead agent cannot be nudged, got %v", deps.injected)
+	}
+}
+
+// TestNudgeCapsAtHowManyTasksAreClaimable is sd-4589ef's herd fix: two idle workers behind one
+// claimable task must wake only one of them, not both to race for it.
+func TestNudgeCapsAtHowManyTasksAreClaimable(t *testing.T) {
+	e, deps, ps := nudgeStore(t)
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "idle"}); err != nil {
+		t.Fatal(err) // dvalin is free too now — still only one task to give out
+	}
+	e.nudgeIdleWorkers("proj", "P2")
+
+	if len(deps.injected) != 1 {
+		t.Fatalf("one task should wake exactly one worker, got %v", deps.injected)
+	}
+}
+
+// TestNudgeSkipsAnAgentExplainNextWouldRuleOut is the predicate the ticket asks for: retired,
+// clear-armed and a full context all say "takes nothing regardless of the backlog" (-> agentBlocked),
+// so nudging past them wastes a turn on an agent that was always going to be told no.
+func TestNudgeSkipsAnAgentExplainNextWouldRuleOut(t *testing.T) {
+	for _, mutate := range []struct {
+		name string
+		do   func(ps *store.ProjectStore)
+	}{
+		{"retired", func(ps *store.ProjectStore) {
+			a, _, _ := ps.GetAgent("nori")
+			a.Retired = true
+			_ = ps.PutAgent(a)
+		}},
+		{"clear-armed", func(ps *store.ProjectStore) {
+			a, _, _ := ps.GetAgent("nori")
+			a.ClearArmed = true
+			_ = ps.PutAgent(a)
+		}},
+	} {
+		t.Run(mutate.name, func(t *testing.T) {
+			e, deps, ps := nudgeStore(t)
+			mutate.do(ps)
+			e.nudgeIdleWorkers("proj", "P2")
+			if len(deps.injected) != 0 {
+				t.Errorf("a %s worker must not be nudged, got %v", mutate.name, deps.injected)
+			}
+		})
 	}
 }
 

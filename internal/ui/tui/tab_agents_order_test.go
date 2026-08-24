@@ -7,11 +7,12 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 )
 
-// rowIDsInOrder is the row ids in the order agentRows returned them.
+// rowIDsInOrder is the ids of the rows a list holds, in order — its labels and section headings
+// dropped, since they select nothing and a question about order is a question about the rows.
 func rowIDsInOrder(rows []row) []string {
-	out := make([]string, len(rows))
-	for i, r := range rows {
-		out[i] = r.id
+	var out []string
+	for _, r := range items(rows) {
+		out = append(out, r.id)
 	}
 	return out
 }

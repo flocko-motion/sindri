@@ -14,10 +14,15 @@ import (
 
 const MsgKickoff = "[hub] You're live. Run `sindri` and do exactly what it tells you — it always returns your current job, whether you're new or resuming."
 
-// MsgWorkAvailable nudges an idle worker that rated work exists. Claiming stays a pull, so two
-// workers can't take one task — but an agent that stopped asking would never hear about it.
+// MsgUnretired tells a retired agent it is back in service. DirRetired sends it away from asking
+// again on its own, so this push is the only thing that would ever reach it (-> Hub.SetRetired).
+const MsgUnretired = "[hub] You're back in service — the user has un-retired you. Run `sindri` for your next action."
+
+// MsgWorkAvailable nudges an idle worker with what IT would be handed right now — nudgeIdleWorkers
+// computed id against this agent's own preferences, not just the task that triggered the check.
+// Named, but not guaranteed: claiming stays a pull, so another agent asking first can still take it.
 func MsgWorkAvailable(id string) string {
-	return fmt.Sprintf("[hub] New work is ready (%s). Run `sindri` to pick up your next task — it may not be this one, whichever is highest priority.", id)
+	return fmt.Sprintf("[hub] %s is ready for you. Run `sindri` to claim it — someone else may beat you to it, in which case you'll be handed whatever is next.", id)
 }
 
 // MsgStalled prods an agent that holds work but has gone quiet, naming the task and inviting it
@@ -34,11 +39,6 @@ const MsgRetryTurn = "[hub] Your last response was cut off mid-stream by an API 
 	"resumed on its own. Pick up where you left off: check whether the step you were on actually " +
 	"completed (`sindri git change` shows what is written) before carrying on, since your own last " +
 	"message is truncated and may describe work that never happened."
-
-// MsgMerged tells a worker its PR merged and to fetch the next task.
-func MsgMerged(prID string) string {
-	return fmt.Sprintf("[hub] %s merged. Run `sindri` for your next task.", prID)
-}
 
 // MsgPRScrapped tells an author its PR was discarded. Deliberately final — the branch is gone, so
 // unlike a rejection there is nothing to resubmit. Without it the author waits in "submitted".
@@ -86,15 +86,22 @@ func MsgTaskCancelled(id string) string {
 	return fmt.Sprintf("[hub] Task %s was cancelled — stop working on it. Don't clean up your workspace; the sindri hub will reset it for you when you pick up your next task. Just run `sindri`.", id)
 }
 
+// MsgSubmitTaskClosed tells an author its submission found no task to land into. A fact about the
+// world, never a violation to fix, so it does not ask for a resubmission — that would loop.
+func MsgSubmitTaskClosed(task string) string {
+	return fmt.Sprintf("[hub] Nothing to submit into: task %s closed while your gate was running, so no pull request was opened. Your work is committed and your branch is untouched. Do not submit again — if what you built is still wanted, say so with `sindri escalate`, otherwise run `sindri` for new work.", task)
+}
+
+// MsgPRSettledWithTask tells an author its PR was rejected because its task closed. Says the work
+// was not judged — the author is the one who knows whether the branch still holds something wanted,
+// and a rejection with no reading of the code reads as one otherwise.
+func MsgPRSettledWithTask(prID, task string) string {
+	return fmt.Sprintf("[hub] %s was rejected: its task %s is closed, so there is nothing left for it to land into. This is not a verdict on your work — nobody read it, and your branch still holds it. Do not resubmit; if what is on it is still wanted, say so with `sindri escalate`, otherwise run `sindri` for new work.", prID, task)
+}
+
 // MsgReviewCancelled tells a reviewer its PR was scrapped — stop, its branch is gone, get new work.
 func MsgReviewCancelled(prID string) string {
 	return fmt.Sprintf("[hub] The PR you were reviewing (%s) was scrapped — stop reviewing it; its branch is gone. Just run `sindri` for your next task.", prID)
-}
-
-// MsgVerdictRecorded puts a reviewer back in the loop right after a verdict, its reply having
-// named no next step.
-func MsgVerdictRecorded(prID string) string {
-	return fmt.Sprintf("[hub] Verdict on %s recorded. Run `sindri` for your next review.", prID)
 }
 
 // MsgRunFinished is what a run's scheduling agent is told — a summary, never the full log:
@@ -112,14 +119,34 @@ func MsgRunFinished(id, status string, elapsed, budget time.Duration) string {
 	return fmt.Sprintf("[hub] %s %s%s. Full output: `sindri show %s`.", id, verb, usage, id)
 }
 
-// MsgGatePassed is the injected equivalent of ReplyRegistered, sent once a queued gate passes.
-func MsgGatePassed(prID string) string {
-	return fmt.Sprintf("[hub] Your quality gate passed — %s is now up for review. Run `sindri` for your next directive.", prID)
+// MsgLintPassed answers a queued self-check that passed. It names the run, because the report on it
+// names what was checked — the same result a submit reuses if the agent changes nothing after this.
+func MsgLintPassed(runID string) string {
+	return fmt.Sprintf("[hub] Your quality gate passed (`sindri show %s` for the report). Submitting "+
+		"without changing anything reuses this result rather than gating again.", runID)
 }
 
-// MsgGateFailed reuses ReplyLintFail's rulebook — only the delivery differs.
+// MsgPRGateFinished tells a reviewer its PR check has landed. The verdict is on the PR and in the
+// run's output rather than in here: a whole gate log injected into a session is how contexts die.
+func MsgPRGateFinished(prID, runID string) string {
+	return fmt.Sprintf("[hub] The quality gate on %s has finished — `sindri show %s` has the whole log, "+
+		"and `sindri lint %s` the verdict alone. Neither re-runs it. Then give your verdict.", prID, runID, prID)
+}
+
+// MsgLintIncomplete answers a self-check that never reached a verdict. Unlike a landing gate's, there
+// is nothing to re-submit: the agent kept its task the whole time and simply has no answer yet.
+func MsgLintIncomplete(status string) string {
+	word := status
+	if status == "timed_out" {
+		word = "timed out"
+	}
+	return fmt.Sprintf("[hub] Your quality gate did not complete (%s) — this says nothing about your "+
+		"code. Run `sindri lint` again when you want the answer.", word)
+}
+
+// MsgGateFailed reuses ReplyGateFail's rulebook — only the delivery differs.
 func MsgGateFailed(output string) string {
-	return "[hub] " + ReplyLintFail(output)
+	return "[hub] " + ReplyGateFail(output)
 }
 
 // MsgGateIncomplete answers a gate that never reached a verdict (timeout, or a hub restart) —
@@ -130,6 +157,15 @@ func MsgGateIncomplete(status string) string {
 		word = "timed out"
 	}
 	return fmt.Sprintf("[hub] Your quality gate did not complete (%s) — this says nothing about your code. Run `sindri submit \"<summary>\"` (or `contribute`) again.", word)
+}
+
+// ReplyNoSelfVerdict refuses a verdict on the caller's own commits (05-workflow: no agent approves
+// its own work). It says which half of the rule this is, since the other half is deliberately
+// allowed: a coauthor may rule on a PR built from a task it wrote, and its badge names it.
+func ReplyNoSelfVerdict(prID, verb string) string {
+	return fmt.Sprintf("%s is built from your own commits, so its verdict is somebody else's to give "+
+		"— you cannot %s it. (A task you WROTE is different: you may rule on work built from your "+
+		"plan, and the badge records that it was you.)", prID, verb)
 }
 
 // ReplyNothingToRevoke answers `revoke` with no PR out — nothing was withdrawn, so it says what the
@@ -183,28 +219,42 @@ func MsgResolveNeeded(base string, files []string) string {
 }
 
 // MsgMilestoneMerged tells a feature worker its milestone merged and its branch was
-// rebased onto the new base.
+// reset onto the new base.
 func MsgMilestoneMerged(prID string) string {
-	return fmt.Sprintf("[hub] Milestone %s merged — your feature branch is rebased onto the new base. Run `sindri` to continue.", prID)
+	return fmt.Sprintf("[hub] Milestone %s merged — your feature branch is reset onto the new base. Run `sindri` to continue.", prID)
 }
 
-// MsgMilestoneRejected is the rejection a feature worker gets. It names the feature rather than the
-// subtask the worker happens to be holding, since the PR covers the whole branch. voice is who ruled
-// ("user" or "reviewer").
-func MsgMilestoneRejected(container, voice, feedback string) string {
-	return fmt.Sprintf("[%s] The PR for feature %s was rejected: %s — address it on the branch you're "+
-		"already on, then `sindri submit \"<summary>\"` to put the feature up again.",
-		voice, container, feedback)
+// MsgReapplyConflict tells a worker its PR merged (milestone or plain interim contribution), but
+// resetting its branch onto the new base couldn't reapply its own uncommitted work cleanly. Not
+// "resolve needed": nothing failed to merge, so unlike MsgResolveNeeded no review awaits it.
+func MsgReapplyConflict(prID, base string, files []string) string {
+	return fmt.Sprintf("[hub] %s merged, but your uncommitted work didn't reapply cleanly onto %s: %s. The conflicts are in your /workspace with <<<<<<< markers — edit each file to the intended result (remove the markers), then run `sindri resolve`. That resumes you — the merge already landed, so nothing goes up for review.", prID, base, FileList(files))
 }
 
-// MsgRejectedByUser tells a worker the user rejected its PR, with the feedback.
-func MsgRejectedByUser(prID, feedback string) string {
-	return fmt.Sprintf("[user] %s was rejected: %s — address the feedback on your branch and run `sindri submit` again.", prID, feedback)
+// MsgResetFailed tells a worker its PR merged, but the hub hit a git error bringing its branch
+// onto the new base afterward — unlike MsgReapplyConflict, this is not a known conflict shape, so
+// it neither claims success nor points only at markers; `sindri resolve` may still find real ones.
+func MsgResetFailed(prID, base string) string {
+	return fmt.Sprintf("[hub] %s merged, but the hub hit an error bringing your branch onto %s afterward. Run `sindri resolve` — if it doesn't settle cleanly, say what it reports.", prID, base)
 }
 
-// MsgRejectedByReviewer tells a worker its reviewer rejected the PR, with the feedback.
-func MsgRejectedByReviewer(prID, feedback string) string {
-	return fmt.Sprintf("[reviewer] %s rejected: %s — please address the feedback and submit again.", prID, feedback)
+// MsgMilestoneRejected names the feature rather than the subtask in hand, since the PR covers the
+// whole branch. A pointer, like its siblings below — DirContainerRejected re-serves the feedback.
+func MsgMilestoneRejected(container, voice string) string {
+	return fmt.Sprintf("[%s] The PR for feature %s was rejected. Run `sindri` for the feedback and "+
+		"where to address it.", voice, container)
+}
+
+// MsgRejectedByUser tells a worker the user rejected its PR — a pointer, not the feedback itself,
+// which stays on the PR (-> pr.Feedback) and is what DirRejected re-serves on every ask.
+func MsgRejectedByUser(prID string) string {
+	return fmt.Sprintf("[user] %s was rejected. Run `sindri` for the feedback and to carry on.", prID)
+}
+
+// MsgRejectedByAgent speaks in that agent's own voice: the role for a reviewer, the name for a
+// coauthor. Same pointer shape as MsgRejectedByUser.
+func MsgRejectedByAgent(voice, prID string) string {
+	return fmt.Sprintf("[%s] %s was rejected. Run `sindri` for the feedback and to carry on.", voice, prID)
 }
 
 // MsgReview is the single review instruction: the hub has already checked the PR branch out into
@@ -222,6 +272,6 @@ func MsgReview(prID, requirement, branch, base, arch string, checkedOut bool) st
 		// rather than letting the reviewer assume /workspace holds the change.
 		loc = fmt.Sprintf("⚠ %s could NOT be checked out into /workspace — review from the diff only; do NOT trust /workspace. ", branch)
 	}
-	return fmt.Sprintf("[hub] Review %s — %s %s(1) see what changed: %s. (2) check the gate: `sindri lint %s`. (3) decide: `sindri approve %s` or `sindri reject %s \"<findings>\"`.%s",
-		prID, requirement, loc, seeChanges, prID, prID, prID, ReviewArchitecture(arch))
+	return fmt.Sprintf("[hub] Review %s — %s %s(1) see what changed: %s. (2) check the gate: `sindri lint %s`. (3) decide: `sindri approve %s` or `sindri reject %s \"<findings>\"`.%s%s",
+		prID, requirement, loc, seeChanges, prID, prID, prID, ReviewArchitecture(arch), ToolingBlock())
 }

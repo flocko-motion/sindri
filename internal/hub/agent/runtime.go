@@ -27,9 +27,8 @@ import (
 // probeTimeout bounds each probe: a container that can't answer reads "down", it doesn't stall.
 const probeTimeout = 3 * time.Second
 
-// ClientView is one dial-in on an agent's tmux session; orphaned attaches show up here too.
-// It crosses the wire, so it is internal/api.ClientView under the name every existing
-// caller here already uses.
+// ClientView is one dial-in on an agent's tmux session; orphaned attaches show up here too. It
+// crosses the wire, so it is internal/api.ClientView under the name every existing caller uses.
 type ClientView = api.ClientView
 
 // runtimeTTL: a stale runtime label costs nothing, a capture-pane spawn per board read does
@@ -37,11 +36,13 @@ type ClientView = api.ClientView
 const runtimeTTL = 2 * time.Second
 
 // Observation is one look at an agent's pane: what the text says, and a digest of the whole screen.
-// Both come from ONE capture — the digest is what tells activity from stillness, and taking it
-// separately would double the exec cost of every sweep.
+// Both come from ONE capture — taking them separately would double the exec cost of every sweep.
 type Observation struct {
 	Runtime string // "working" | "blocked" | "idle" | "signed-out" | "" when the capture failed
 	Digest  string // "" when the capture failed, so a lost probe never reads as "nothing changed"
+	// ToolRunning is whether the pane itself shows a tool call still in flight — a shell that has not
+	// returned prints nothing, so Digest alone cannot tell this apart from a frozen turn (-> watchdog.record).
+	ToolRunning bool
 }
 
 var runtimeMemo struct {
@@ -71,6 +72,7 @@ func (s *Service) Observe(ctx context.Context, project, name string) Observation
 	if err == nil {
 		obs.Runtime = agentport.Runtime(string(out)) // shared classifier: board + herdr agree
 		obs.Digest = fmt.Sprintf("%x", sha256.Sum256(out))
+		obs.ToolRunning = agentport.ToolRunning(string(out))
 	}
 	runtimeMemo.mu.Lock()
 	if runtimeMemo.at == nil {
@@ -81,14 +83,15 @@ func (s *Service) Observe(ctx context.Context, project, name string) Observation
 	return obs
 }
 
-// contextTTL: the transcript grows with every turn, not every board read, so a read straight off
-// disk per request buys nothing over a short memo (same reasoning as runtimeTTL, longer window
-// because a session file changes far less often than the tmux pane does).
+// contextTTL: the transcript grows with every turn, not every board read (same reasoning as
+// runtimeTTL, longer window since a session file changes far less often than the tmux pane).
 const contextTTL = 15 * time.Second
 
-// contextSample is one reading: what the session carries, and the window it has to fill.
+// contextSample is one reading: what the session carries, the window it has to fill, and the model
+// carrying it.
 type contextSample struct {
 	tokens, window int
+	model          string
 	ok             bool
 }
 
@@ -98,52 +101,110 @@ var contextMemo struct {
 	val map[string]contextSample
 }
 
-// ContextUsage reads name's live session context size and window off disk (never the tmux pane —
-// that's pattern-matched text, this is exact usage from the transcript itself). ok=false when no
-// session has recorded usage yet.
-func (s *Service) ContextUsage(project, name string) (tokens, window int, ok bool) {
+// ContextUsage reads name's live session context size, window and model off disk (never the tmux
+// pane — that's pattern-matched text). ok=false when no session has recorded usage yet.
+func (s *Service) ContextUsage(project, name string) (tokens, window int, model string, ok bool) {
 	key := project + "/" + name
 	contextMemo.mu.Lock()
 	if at, cached := contextMemo.at[key]; cached && time.Since(at) < contextTTL {
 		v := contextMemo.val[key]
 		contextMemo.mu.Unlock()
-		return v.tokens, v.window, v.ok
+		return v.tokens, v.window, v.model, v.ok
 	}
 	contextMemo.mu.Unlock()
+	return s.SampleContext(project, name)
+}
 
-	t, w, found := agentport.ContextUsage(paths.AgentHomeDir(project, name))
+// SampleContext reads the transcript itself and leaves the reading where ContextUsage will serve
+// it — for the observer's own cadence (-> hub/watchdog.go), sparing every other reader the parse.
+func (s *Service) SampleContext(project, name string) (tokens, window int, model string, ok bool) {
+	t, w, m, found := agentport.ContextUsage(paths.AgentHomeDir(project, name))
+	key := project + "/" + name
 	contextMemo.mu.Lock()
 	if contextMemo.at == nil {
 		contextMemo.at, contextMemo.val = map[string]time.Time{}, map[string]contextSample{}
 	}
-	contextMemo.at[key], contextMemo.val[key] = time.Now(), contextSample{t, w, found}
+	contextMemo.at[key], contextMemo.val[key] = time.Now(), contextSample{t, w, m, found}
 	contextMemo.mu.Unlock()
-	return t, w, found
+	return t, w, m, found
 }
 
-// ForgetContext drops name's memoised context reading. For the one caller that KNOWS the previous
-// measurement is now wrong because it just invalidated it: clearing a session (-> ClearContext).
+// CompactionThreshold reports the token count above which a session filling window tokens is worth
+// compacting, from the wired backend's own formula for the model that window belongs to.
+func (s *Service) CompactionThreshold(window int) int { return agentport.CompactionThreshold(window) }
+
+// ModelWindow resolves model to its context window via the wired backend, ok=false when it is not
+// recognised — the check a chosen model must pass before an agent is started on it.
+func (s *Service) ModelWindow(model string) (int, bool) { return agentport.ModelWindow(model) }
+
+// ModelForTier resolves tier to the model it dispatches to, via the wired backend.
+func (s *Service) ModelForTier(tier string) (string, bool) { return agentport.ModelForTier(tier) }
+
+// ModelMatches reports whether detected is want, via the wired backend — not always a bare
+// equality (-> agentport.Agent.ModelMatches).
+func (s *Service) ModelMatches(want, detected string) bool {
+	return agentport.ModelMatches(want, detected)
+}
+
+// ModelInUse picks between the two readings of what an agent runs: the one detected off its
+// transcript while it is up — a human may change the model by hand, which the transcript sees first
+// — and the recorded choice otherwise, all there is for an agent that is not running.
 //
-// Here rather than in a shorter TTL. The memo exists so the frequent idle poll does not re-read a
-// transcript per request, and that is still right for every other reader — but the reading survived
-// the very act that made it false, so the hub answered the kickoff after a clear from the pre-clear
-// figure and told the agent it was still full.
+// A function, not a probe: the board already holds both readings from the watchdog's own sample
+// (-> hub/watchdog.go), which taking them here again would cost per render, per connected client.
+func ModelInUse(recorded, detected string, up bool) string {
+	if up && detected != "" {
+		return detected
+	}
+	return recorded
+}
+
+// CurrentModel is the model name is effectively running, taking both readings itself. For a caller
+// with neither — the assignment path; the board must not use it, since the probe is per agent.
+func (s *Service) CurrentModel(ctx context.Context, project, name string) string {
+	up := s.AgentAlive(ctx, project, name)
+	var detected string
+	if up {
+		_, _, detected, _ = s.ContextUsage(project, name)
+	}
+	return ModelInUse(s.recordedModel(project, name), detected, up)
+}
+
+// recordedModel is the model the roster says an agent was started on, "" if it cannot be read.
+func (s *Service) recordedModel(project, name string) string {
+	a, ok, err := s.store.For(project).GetAgent(name)
+	if err != nil || !ok {
+		return ""
+	}
+	return a.Model
+}
+
+// ForgetContext drops every standing reading of name's context — this package's memo and the hub's
+// own sample. For the one caller that KNOWS the previous measurement is now wrong because it just
+// invalidated it: clearing or compacting a session (-> ClearContext, Compact).
+//
+// Both stores, not a shorter TTL: the reading survived the very act that made it false once before,
+// telling a just-cleared agent it was still full. The board reads the sample, the gate reads the
+// memo — leaving either behind puts that bug back on the half left standing.
 func (s *Service) ForgetContext(project, name string) {
 	key := project + "/" + name
 	contextMemo.mu.Lock()
 	delete(contextMemo.at, key)
 	delete(contextMemo.val, key)
 	contextMemo.mu.Unlock()
+	s.deps.ForgetFill(project, name)
 }
 
 // LaunchDiagnostic re-runs both liveness probes so a launch timeout says which one failed.
-func (s *Service) LaunchDiagnostic(project, name string) string {
+func (s *Service) LaunchDiagnostic(ctx context.Context, project, name string) string {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
 	c := s.deps.ContainerName(project, name)
-	if !container.Running(c) {
+	if !container.RunningContext(ctx, c) {
 		return fmt.Sprintf("the runtime does not report container %s as running [%s]", c,
-			container.Diagnose(context.Background(), c))
+			container.Diagnose(ctx, c))
 	}
-	if out, err := container.Exec(c, append([]string{"tmux"}, tmux.HasSession(name)...)...); err != nil {
+	if out, err := container.ExecContext(ctx, c, append([]string{"tmux"}, tmux.HasSession(name)...)...); err != nil {
 		msg := strings.TrimSpace(string(out))
 		if msg == "" {
 			msg = err.Error()
@@ -154,14 +215,14 @@ func (s *Service) LaunchDiagnostic(project, name string) string {
 }
 
 // AgentDiagnostic un-collapses the board's "down" into both probes' real results.
-func (s *Service) AgentDiagnostic(project, name string) string {
+func (s *Service) AgentDiagnostic(ctx context.Context, project, name string) string {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
 	c := s.deps.ContainerName(project, name)
 	var b strings.Builder
 	fmt.Fprintf(&b, "container:      %s\n", c)
-	fmt.Fprintf(&b, "running check:  %s\n", container.Diagnose(context.Background(), c))
+	fmt.Fprintf(&b, "running check:  %s\n", container.Diagnose(ctx, c))
 
-	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
-	defer cancel()
 	out, err := container.ExecContext(ctx, c, append([]string{"tmux"}, tmux.HasSession(name)...)...)
 	switch {
 	case ctx.Err() == context.DeadlineExceeded:
@@ -186,19 +247,17 @@ func (s *Service) AgentDiagnostic(project, name string) string {
 	return b.String()
 }
 
-// AgentAlive reports whether an agent is running (pod up and tmux session live).
-func (s *Service) AgentAlive(project, name string) bool {
-	return s.AgentAliveCtx(context.Background(), project, name)
-}
-
-// AgentAliveCtx is AgentAlive bounded by ctx, so a wedged pod reads "down" instead of blocking.
-func (s *Service) AgentAliveCtx(ctx context.Context, project, name string) bool {
+// AgentAlive reports whether an agent is running: pod up AND tmux session live, under a probeTimeout
+// cut from the caller's ctx — a wedged pod reads "down" rather than blocking whoever asked.
+func (s *Service) AgentAlive(ctx context.Context, project, name string) bool {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
 	return container.RunningContext(ctx, s.deps.ContainerName(project, name)) && s.SessionAliveCtx(ctx, project, name)
 }
 
 // Clients lists an agent's dial-ins; a wedged exec degrades to "not running".
-func (s *Service) Clients(project, name string) ([]ClientView, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+func (s *Service) Clients(ctx context.Context, project, name string) ([]ClientView, error) {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	cs, ok := s.ClientsCtx(ctx, project, name)
 	if !ok {
@@ -231,12 +290,7 @@ func parseClients(out string) []ClientView {
 	return cs
 }
 
-// SessionAlive reports whether the agent's tmux session is up inside its pod.
-func (s *Service) SessionAlive(project, name string) bool {
-	return s.SessionAliveCtx(context.Background(), project, name)
-}
-
-// SessionAliveCtx is SessionAlive bounded by ctx.
+// SessionAliveCtx reports whether the agent's tmux session is up inside its pod, bounded by ctx.
 func (s *Service) SessionAliveCtx(ctx context.Context, project, name string) bool {
 	_, err := container.ExecContext(ctx, s.deps.ContainerName(project, name), append([]string{"tmux"}, tmux.HasSession(name)...)...)
 	return err == nil
@@ -252,12 +306,10 @@ var paneMemo struct {
 	val map[string]string
 }
 
-// AgentPane shows the live tmux screen, else startup logs, else captured launch output.
-//
-// The capture is attempted rather than preceded by a liveness check: asking `tmux has-session` first
-// spent a whole exec — doubling the wait before anything appeared — to predict what the capture
-// itself reports, and left a window for the session to die between the two answers.
-func (s *Service) AgentPane(project, name string, lines int) (string, error) {
+// AgentPane shows the live tmux screen, else startup logs, else captured launch output. The capture
+// is attempted rather than preceded by a liveness check: asking `tmux has-session` first doubled the
+// wait to predict what the capture itself reports, and left a window for the session to die between.
+func (s *Service) AgentPane(ctx context.Context, project, name string, lines int) (string, error) {
 	key := fmt.Sprintf("%s/%s/%d", project, name, lines)
 	paneMemo.mu.Lock()
 	if at, ok := paneMemo.at[key]; ok && time.Since(at) < paneTTL {
@@ -267,7 +319,9 @@ func (s *Service) AgentPane(project, name string, lines int) (string, error) {
 	}
 	paneMemo.mu.Unlock()
 
-	out, err := container.Exec(s.deps.ContainerName(project, name), append([]string{"tmux"}, tmux.CapturePane(name, lines, true)...)...) // colour: the preview renders ANSI
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	out, err := container.ExecContext(ctx, s.deps.ContainerName(project, name), append([]string{"tmux"}, tmux.CapturePane(name, lines, true)...)...) // colour: the preview renders ANSI
 	pane := string(out)
 	if err != nil {
 		// No session to capture: what a human wants next is why — the pod's own output, then whatever

@@ -57,8 +57,22 @@ func homeTab(kind string) int {
 		return 1
 	case "pr":
 		return 2
+	case "mail":
+		return 6
 	}
 	return -1
+}
+
+// isAgent reports whether name is a live entry on the roster — the check a sender/queuer string
+// needs before it can be offered as an "agent" cross-reference, since hub/user/reviewer and a
+// retired agent's old name are not reachable on the Agents tab.
+func (m model) isAgent(name string) bool {
+	for _, a := range m.state.Agents {
+		if a.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // itemTexts is the plain text of a metaItem slice (for the modal / pane body).
@@ -150,17 +164,32 @@ func (m *model) openItemModal(kind, id string) {
 	m.detail.ScrollTop()
 }
 
-// selectRow moves the current tab's cursor to the row with the given id.
-func (m *model) selectRow(id string) {
+// selectRow moves the current tab's cursor to the row with the given id, reporting whether it
+// found one — a caller that must land somewhere DEFINITE when it did not (the first row, never
+// wherever reclamp's index-clamp happened to leave the cursor) needs to tell the two apart.
+func (m *model) selectRow(id string) bool {
 	for i, r := range m.rows() {
 		if r.id == id {
 			m.cursor[m.tab] = i
-			return
+			return true
 		}
+	}
+	return false
+}
+
+// restoreSelection re-filters, then puts the cursor back on sel if a re-filter left it visible —
+// the first row otherwise, never wherever reclamp's plain index-clamp happened to land, which is
+// a different row entirely once enough rows above the old index have dropped out.
+func (m *model) restoreSelection(sel string) {
+	m.reclamp()
+	if !m.selectRow(sel) {
+		m.cursor[m.tab] = 0
+		m.reclamp()
 	}
 }
 
-// gotoItem navigates to where an item lives: its home tab, with it selected.
+// gotoItem navigates to where an item lives: its home tab, with it selected — widened first if
+// the destination's own filter hides it, or the jump lands beside it (or not at all).
 func (m *model) gotoItem(kind, id string) {
 	t := homeTab(kind)
 	if t < 0 {
@@ -168,7 +197,52 @@ func (m *model) gotoItem(kind, id string) {
 	}
 	m.rightFocus = false
 	m.tab = t
-	m.selectRow(id)
+	// Mail is reached by NARROWING rather than by selecting: the item is a count of an agent's
+	// unread messages, not one row, so what it names is a set (-> showUnreadFor).
+	if kind == "mail" {
+		m.showUnreadFor(id)
+		return
+	}
+	if m.selectRow(id) {
+		return
+	}
+	if w := m.widenTabFor(t); w != "" && m.selectRow(id) {
+		m.flash = id + " was hidden by " + w + " — widened to show it"
+		return
+	}
+	m.flash = "can't find " + id + " on the board"
+}
+
+// widenTabFor relaxes every axis that could hide one row on tab t (Tasks: filter and search;
+// PRs: filter and scope; Agents: scope), reporting what it widened ("" if already widest).
+func (m *model) widenTabFor(t int) string {
+	var widened []string
+	switch t {
+	case 0:
+		if m.filter != api.FilterAll {
+			m.filter = api.FilterAll
+			widened = append(widened, "the task filter")
+		}
+		if m.taskSearch != "" {
+			m.taskSearch = ""
+			widened = append(widened, "the search")
+		}
+	case 1:
+		if m.scopeRepo {
+			m.scopeRepo = false
+			widened = append(widened, "the repo scope")
+		}
+	case 2:
+		if m.prFilter != api.PRFilterAll {
+			m.prFilter = api.PRFilterAll
+			widened = append(widened, "the PR filter")
+		}
+		if m.scopeRepo {
+			m.scopeRepo = false
+			widened = append(widened, "the repo scope")
+		}
+	}
+	return strings.Join(widened, " and ")
 }
 
 // moveCursor moves the active tab's cursor by delta rows and leaves it on a row that selects
@@ -187,9 +261,8 @@ func (m *model) moveCursor(delta int) {
 	m.cursor[m.tab] = nearestSelectable(rows, clampInt(m.cursor[m.tab]+delta, 0, len(rows)-1), step)
 }
 
-// nearestSelectable is the first row from i that selects something, searched in step's direction and
-// then back the other way. Both directions, because a group's heading sits above its rows and its
-// spacer below them: which way out is open depends on where the cursor came to rest.
+// nearestSelectable is the first row from i that selects something, searched in step's direction
+// then back the other way — a heading sits above its rows, a spacer below, either way out.
 func nearestSelectable(rows []row, i, step int) int {
 	for j := i; j >= 0 && j < len(rows); j += step {
 		if rows[j].selectable() {
@@ -204,10 +277,20 @@ func nearestSelectable(rows []row, i, step int) int {
 	return i
 }
 
+// selRow is the row the cursor selects: the stored index, snapped forward onto a row that selects
+// something — a model not yet laid out has its cursor at 0, where a labelled list keeps its labels.
+func (m model) selRow() int {
+	rows := m.rows()
+	if len(rows) == 0 {
+		return 0
+	}
+	return nearestSelectable(rows, clampInt(m.cursor[m.tab], 0, len(rows)-1), 1)
+}
+
 // selID is the id of the row under the active tab's cursor ("" if none).
 func (m model) selID() string {
 	r := m.rows()
-	if c := m.cursor[m.tab]; c >= 0 && c < len(r) {
+	if c := m.selRow(); c >= 0 && c < len(r) {
 		return r[c].id
 	}
 	return ""
@@ -215,12 +298,14 @@ func (m model) selID() string {
 
 // wrappedDetail wraps the detail pane to column width (long titles scroll with J/K
 // rather than truncate), remapping the highlight index through the wrap (-1 for none).
+// reclamp already wrapped this frame's content before View runs, so this is normally a cache hit —
+// nil for calls, since a genuine miss here is a fallback this method cannot make reclamp reuse.
 func (m model) wrappedDetail() (lines []string, highlight int) {
-	wrapped, origAt := wrapContentMapped(m.detailLines(), m.detailWidth())
-	if h := m.detailHighlight(); h >= 0 && h < len(origAt) {
-		return wrapped, origAt[h]
+	c := detailWrap(m.detailWrapCache, m.tab, m.detailWidth(), m.detailLines(), nil)
+	if h := m.detailHighlight(); h >= 0 && h < len(c.origAt) {
+		return c.wrapped, c.origAt[h]
 	}
-	return wrapped, -1
+	return c.wrapped, -1
 }
 
 // rows dispatches to the active tab's row builder (tasks/agents/prs).
@@ -249,6 +334,9 @@ func (m model) inScope(project string) bool {
 	if !m.scopeRepo {
 		return true
 	}
+	if project == api.GlobalProject {
+		return true // belongs to no repo, so it is never foreign to one
+	}
 	_, tag := m.currentRepo()
 	if tag == "" {
 		// No nameable repo (registry hiccup, unregistered cwd): scoping would blank every
@@ -259,19 +347,13 @@ func (m model) inScope(project string) bool {
 }
 
 // agentVisible admits an agent to the Agents tab: in scope, or waiting on the user anywhere in the
-// fleet. The attention marker beside the handle is fleet-wide by design (-> View), so a scope that
-// hid the row it points at left the user told that something needs them and shown a list where
-// nothing does. The row carries its own repo in the first column, which is what says it is foreign.
+// fleet — the attention marker beside the handle is fleet-wide by design (-> View).
 func (m model) agentVisible(a api.AgentView) bool {
 	return m.inScope(a.Project) || api.AgentNeedsUser(a)
 }
 
-// prVisible admits a PR to the PRs tab, on the same rule and for the same reason as agentVisible:
-// agents and PRs are BACKGROUND work, progressing while the user looks elsewhere, so one that ends
-// up waiting on them has to surface wherever they are. An approved PR in another repo was invisible
-// until they switched to it, and nothing told them to switch. Calls the predicate rather than
-// restating it (-> api.PRNeedsUser), which is also what the marker and the row colour read: three
-// separate derivations of one question drift, and each looks plausible alone.
+// prVisible admits a PR to the PRs tab, on the same rule and reason as agentVisible: background
+// work waiting on the user has to surface wherever they are (-> api.PRNeedsUser).
 func (m model) prVisible(p api.PR) bool {
 	return m.inScope(p.Project) || api.PRNeedsUser(p, m.state.Agents)
 }
@@ -311,9 +393,8 @@ func (m model) tabCount(s tuiSection) int {
 	case "chat":
 		return m.state.ChatMemberCount()
 	case "mail":
-		// Unread over the whole mailbox, not the window the list renders: a badge that stopped
-		// rising once the history outgrew the window would go quiet exactly when there was most
-		// unread. Narrowed by the § scope like Agents and PRs, from the hub's per-repo tally.
+		// Unread over the whole mailbox, not the rendered window, or the badge would go quiet
+		// exactly when there was most unread. Narrowed by § like Agents/PRs, from the per-repo tally.
 		if _, tag := m.currentRepo(); m.scopeRepo && tag != "" {
 			return m.state.MailUnreadByRepo[tag]
 		}
@@ -322,10 +403,9 @@ func (m model) tabCount(s tuiSection) int {
 	return 0
 }
 
-// scopeName labels the global↔repo scope toggle for the footer. The narrow scope is not the repo
-// alone and must not claim to be: it keeps anything waiting on the user, from any repo (->
-// agentVisible, prVisible). Named for what it does, so a foreign row is never a filter that looks
-// broken.
+// scopeName labels the global↔repo scope toggle: named for what it does (keeps anything waiting on
+// the user, from any repo — agentVisible, prVisible), so a foreign row is never a filter that
+// looks broken.
 func scopeName(repoScoped bool) string {
 	if repoScoped {
 		return "repo+needs-you"
@@ -335,7 +415,7 @@ func scopeName(repoScoped bool) string {
 
 // contextFooter is the tab's action hints, generated from the keymap so help can't drift.
 func (m model) contextFooter() string {
-	if m.rightFocus { // focused on a detail cross-reference (Tasks/PRs)
+	if m.rightFocus { // focused on a detail cross-reference
 		return "j/k item · enter details · g goto · y copy"
 	}
 	return m.footerFor(tabScope(m.tab))
@@ -350,10 +430,14 @@ func (m model) actionableItems() []metaItem {
 		return m.agentActionable()
 	case 2:
 		return m.prActionable()
+	case 3:
+		return m.repoActionable()
+	case 5:
+		return m.runActionable()
 	case 6:
 		return m.mailActionable()
 	}
-	return nil
+	return nil // Chat (4) has no detail pane — it renders its own transcript body
 }
 
 // focusedItem is the right-column item the cursor is on (when right-focused).
@@ -365,13 +449,31 @@ func (m model) focusedItem() (metaItem, bool) {
 	return metaItem{}, false
 }
 
-// detailHighlight is the Tasks detail line to highlight, or -1. (PRs highlight in prBody.)
+// unwrappedDetailItems is the raw (pre-wrap) items behind a tab's detailLines(), for tabs whose
+// detail renders through the generic pane path (Agents/PRs/Mail wrap or highlight their own way).
+func (m model) unwrappedDetailItems() []metaItem {
+	switch m.tab {
+	case 0:
+		return m.taskItems()
+	case 3:
+		return m.repoItems()
+	case 5:
+		return m.runItems()
+	}
+	return nil
+}
+
+// detailHighlight is the detail line to highlight, or -1.
 func (m model) detailHighlight() int {
-	if !m.rightFocus || m.tab != 0 {
+	if !m.rightFocus {
+		return -1
+	}
+	items := m.unwrappedDetailItems()
+	if items == nil {
 		return -1
 	}
 	ai := 0
-	for i, it := range m.taskItems() {
+	for i, it := range items {
 		if it.kind != "" {
 			if ai == m.rightCursor {
 				return i

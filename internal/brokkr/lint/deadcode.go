@@ -33,6 +33,7 @@ func Deadcode(patterns []string, tags string, cap *Cap, ig *Ignore, w io.Writer)
 	// The Go toolchain is optional, so its absence is a visible skip rather than a failure.
 	if _, err := exec.LookPath("go"); err != nil {
 		fmt.Fprintln(w, "deadcode: go toolchain not found on PATH — skipping (optional)")
+		fmt.Fprintln(w, "    hint: install Go and the dead-code check runs.")
 		return false, nil
 	}
 	// Go is one language brokkr lints, not a precondition. A TypeScript-only project matches no

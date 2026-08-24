@@ -7,6 +7,7 @@
 package hub
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -19,6 +20,11 @@ type okMsg struct {
 type errMsg struct {
 	Error string `json:"error"`
 }
+
+// detached carries a request's context WITHOUT its cancellation, for work the hub must finish
+// whatever the client then does: a pod coming up, a pod going away, a message landing. A read is the
+// other case and takes r.Context() plain, so abandoning it abandons the work behind it.
+func detached(r *http.Request) context.Context { return context.WithoutCancel(r.Context()) }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {

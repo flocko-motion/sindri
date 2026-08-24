@@ -9,6 +9,7 @@ package workflow
 
 import (
 	"fmt"
+	"github.com/flo-at/sindri/internal/api"
 	"path/filepath"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
@@ -40,10 +41,12 @@ func (e *Engine) DiscardPR(project, prID string) error {
 	// blocked) must not be interrupted for a verdict it isn't expecting.
 	st, _ := ps.GetState(author)
 	if st.Phase == "submitted" || st.Phase == "resolving" {
-		if e.deps.AgentAlive(project, author) {
+		// The interrupt needs it up; the verdict reaches it either way, mail being the half that
+		// waits for one that is down.
+		if e.deps.AgentUp(project, author) {
 			_ = e.deps.Interrupt(project, author)
-			_ = e.deps.Deliver(project, author, MsgPRScrapped(prID), MailAndPush)
 		}
+		_ = e.deps.Deliver(project, author, MsgPRScrapped(prID), MailAndPush.From(api.SenderUser))
 		_ = ps.SetState(store.AgentState{Agent: author, Phase: "idle"})
 	}
 	_ = ps.Log(author, "pr-scrapped", prID)

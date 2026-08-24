@@ -8,6 +8,7 @@
 package hub
 
 import (
+	"context"
 	"log"
 	"time"
 
@@ -21,6 +22,7 @@ const refInterval = 30 * time.Second
 // refwatch re-checks reference branches until stopped; one per hub, started by New.
 type refwatch struct {
 	h    *Hub
+	base context.Context // the hub's lifetime; what each sweep runs under (-> Hub.lifetime)
 	stop chan struct{}
 	done chan struct{}
 	// lastErr is the failure already reported per project. A root that isn't a git repo fails
@@ -29,8 +31,8 @@ type refwatch struct {
 }
 
 // newRefwatch starts the loop. It must not block: New runs before Serve answers the socket.
-func newRefwatch(h *Hub) *refwatch {
-	r := &refwatch{h: h, stop: make(chan struct{}), done: make(chan struct{}), lastErr: map[string]string{}}
+func newRefwatch(base context.Context, h *Hub) *refwatch {
+	r := &refwatch{h: h, base: base, stop: make(chan struct{}), done: make(chan struct{}), lastErr: map[string]string{}}
 	go r.loop()
 	return r
 }
@@ -39,22 +41,25 @@ func newRefwatch(h *Hub) *refwatch {
 // on the strength of a hub restart.
 func (r *refwatch) loop() {
 	defer close(r.done)
+	// The loop returns only on r.stop, and cancelling then reaches whatever a sweep has in flight.
+	ctx, cancel := context.WithCancel(r.base)
+	defer cancel()
 	t := time.NewTicker(refInterval)
 	defer t.Stop()
-	r.sweep()
+	r.sweep(ctx)
 	for {
 		select {
 		case <-r.stop:
 			return
 		case <-t.C:
-			r.sweep()
+			r.sweep(ctx)
 		}
 	}
 }
 
 // sweep checks each registered project. A failure is logged and the others still run — one repo
 // with a broken `reference:` must not blind the hub to the rest.
-func (r *refwatch) sweep() {
+func (r *refwatch) sweep(ctx context.Context) {
 	projects, err := r.h.store.Projects()
 	if err != nil {
 		log.Printf("hub: reference check: list projects: %v", err)
@@ -76,7 +81,7 @@ func (r *refwatch) sweep() {
 			r.lastErr[p.Tag] = msg
 		}
 	}
-	r.preflight(projects)
+	r.preflight(ctx, projects)
 	r.closeDormantMeeting()
 }
 
@@ -94,11 +99,11 @@ func (r *refwatch) closeDormantMeeting() {
 	}
 }
 
-// preflight keeps the open PRs honest against their bases, and their review rows live, OFF this
-// loop: CheckOpenPRs' gate may run for minutes, and inlining it would make every later project
-// wait behind an earlier one's. Not waited on at shutdown — it only appends advisory history, so a
-// write against a closed store fails harmlessly, unlike blocking close() on a gate run.
-func (r *refwatch) preflight(projects []store.Project) {
+// preflight keeps the open PRs honest against their bases, and their review rows live, OFF this loop:
+// its own steps are cheap now that CheckOpenPRs only decides and queues the check (the run queue
+// runs it), but the review repair and the clears here still touch git per project. Not waited on at
+// shutdown — it only appends advisory history, so a write against a closed store fails harmlessly.
+func (r *refwatch) preflight(ctx context.Context, projects []store.Project) {
 	select {
 	case <-r.stop:
 		return // shutting down; do not start a fresh gate run
@@ -114,9 +119,16 @@ func (r *refwatch) preflight(projects []store.Project) {
 			r.h.wf.CheckOpenPRs(p.Tag)
 			r.h.wf.RepairReviewRows(p.Tag)
 			r.h.wf.AssignPendingReviews(p.Tag) // after the repair: a row it just wrote is claimable now
-			// Before nothing else in particular, but off the agent's own request: the clear
-			// interrupts the session, so it must not land on an agent mid-command (-> FireArmedClears).
-			r.h.agents.FireArmedClears(p.Tag)
+			r.h.wf.AssignPendingWork(p.Tag)    // its worker-side twin, for the idle backlog claim
+			// A clear is armed regardless of whether any assignment ever triggers it, so an agent
+			// that never asks again still needs a backstop — unlike compact and model-select, which
+			// the gate now fires inline the moment it has an assignment to prepare for, this has no
+			// such trigger to lean on (-> workflow.Engine.claimNext, agent.Service.FireClear).
+			r.h.agents.FireArmedClears(ctx, p.Tag)
+			// Idleness alone reclaims a pod, and waiting work wakes one back up — both read the fleet
+			// rather than any one agent's request, so both belong on this same sweep.
+			r.h.agents.FireIdleStops(ctx, p.Tag)
+			r.h.agents.FireIdleStarts(ctx, p.Tag)
 		}
 	}()
 }

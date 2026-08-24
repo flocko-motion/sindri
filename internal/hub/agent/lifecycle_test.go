@@ -31,3 +31,29 @@ func TestPreviewSizeEnvOnlyWhenBothDimensionsSet(t *testing.T) {
 		})
 	}
 }
+
+// TestModelEnvOnlyWhenChosen: no model chosen carries nothing — the account default, same as
+// always — not an empty SINDRI_MODEL a relaunch would read as a real (if blank) value.
+func TestModelEnvOnlyWhenChosen(t *testing.T) {
+	cases := []struct {
+		name  string
+		model string
+		want  map[string]string
+	}{
+		{"none chosen", "", nil},
+		{"chosen", "claude-opus-5", map[string]string{"SINDRI_MODEL": "claude-opus-5"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := modelEnv(c.model)
+			if len(got) != len(c.want) {
+				t.Fatalf("modelEnv(%q) = %v, want %v", c.model, got, c.want)
+			}
+			for k, v := range c.want {
+				if got[k] != v {
+					t.Errorf("modelEnv(%q)[%q] = %q, want %q", c.model, k, got[k], v)
+				}
+			}
+		})
+	}
+}

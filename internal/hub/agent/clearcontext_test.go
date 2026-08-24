@@ -19,6 +19,12 @@ func (clearTestDeps) ProjectConfig(string) (config.Config, error) { return confi
 func (clearTestDeps) ArchitectureDoc(string) string               { return "" }
 func (clearTestDeps) RefreshTask(_, _ string) error               { return nil }
 func (clearTestDeps) Rehydrate(_, _ string)                       {}
+func (clearTestDeps) ForgetFill(_, _ string)                      {}
+
+// AgentUp: no watchdog here, so no reading ever says up — matching the "no container wired" liveness
+// these tests already relied on.
+func (clearTestDeps) AgentUp(_, _ string) bool     { return false }
+func (clearTestDeps) AgentClients(_, _ string) int { return 0 }
 
 // armedFlag is the arming as the STORE holds it — what survives a hub restart, so it is read back
 // rather than remembered from the call that set it.
@@ -45,7 +51,7 @@ func TestArmingWaitsForTheBoundary(t *testing.T) {
 	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-abc123", Phase: "working"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetClearArmed("proj", "eitri", true); err != nil {
+	if err := s.SetClearArmed(t.Context(), "proj", "eitri", true); err != nil {
 		t.Fatalf("arming a working agent must succeed — the waiting IS the feature: %v", err)
 	}
 	if !armedFlag(t, ps, "eitri") {
@@ -119,7 +125,7 @@ func TestDisarmingIsJustTheFlag(t *testing.T) {
 	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-abc123", Phase: "working"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetClearArmed("proj", "eitri", false); err != nil {
+	if err := s.SetClearArmed(t.Context(), "proj", "eitri", false); err != nil {
 		t.Fatalf("disarming must not fail: %v", err)
 	}
 	if armedFlag(t, ps, "eitri") {
@@ -140,7 +146,7 @@ func TestArmingAtABoundaryNeedsALivePod(t *testing.T) {
 	if err := ps.SetState(store.AgentState{Agent: "eitri", Phase: "idle"}); err != nil {
 		t.Fatal(err)
 	}
-	err := s.SetClearArmed("proj", "eitri", true)
+	err := s.SetClearArmed(t.Context(), "proj", "eitri", true)
 	if err == nil {
 		t.Fatal("arming an agent with no running container should report that it cannot be cleared")
 	}
@@ -166,7 +172,7 @@ func TestFireArmedClearsPassesOverAgentsStillWorking(t *testing.T) {
 	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-abc123", Phase: "working"}); err != nil {
 		t.Fatal(err)
 	}
-	s.FireArmedClears("proj")
+	s.FireArmedClears(t.Context(), "proj")
 	if !armedFlag(t, ps, "eitri") {
 		t.Error("a working agent's arming must survive the sweep — it fires at the boundary, not before")
 	}

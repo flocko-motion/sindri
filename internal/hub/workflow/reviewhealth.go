@@ -42,10 +42,10 @@ func (e *Engine) RepairReviewRows(project string) {
 	}
 }
 
-// AssignPendingReviews hands out the review rows nobody claimed. The only thing that ever claimed
-// one was a reviewer choosing to ask (-> reviewDirective), which rested on a message injected
-// mid-turn, where it lands in the input box and dies unsent — so a reviewer sat idle beside a PR
-// waiting on it. The hub assigns it here instead, and only to a reviewer at an idle prompt.
+// AssignPendingReviews hands out the review rows nobody claimed. `sindri` answers a reviewer's own
+// ask at once (-> reviewDirective), but one that stopped asking would otherwise sit idle beside a
+// PR waiting on it until it happened to ask again — so the hub claims it here instead, periodically,
+// for whichever reviewer is genuinely at an idle prompt to receive it.
 func (e *Engine) AssignPendingReviews(project string) {
 	ps := e.store.For(project)
 	// Each assignment spends a reviewer, so the loop drains as many rows as there are idle ones.
@@ -70,22 +70,35 @@ func (e *Engine) AssignPendingReviews(project string) {
 	}
 }
 
-// idleReviewer returns a reviewer holding no review and sitting at an idle prompt. Liveness is the
-// watchdog's standing observation rather than freeReviewer's probe per call, so "is it up" and "can
-// it be told anything" are one question from one moment. Retired is honoured as claimNext does.
+// idleReviewer returns a reviewer holding no review and sitting at an idle prompt: the project's own
+// roster first, since a repo keeping its own reviewer expects it used, then GlobalProject's — a
+// fleet-wide pool a project without one can still draw on. Liveness is the watchdog's standing
+// observation rather than freeReviewer's probe per call, so "is it up" and "can it be told anything"
+// are one question from one moment. Retired is honoured as claimNext does.
 func (e *Engine) idleReviewer(project string) (string, error) {
-	ps := e.store.For(project)
+	if name, err := e.idleReviewerOn(project); name != "" || err != nil {
+		return name, err
+	}
+	if project == GlobalProject {
+		return "", nil
+	}
+	return e.idleReviewerOn(GlobalProject)
+}
+
+// idleReviewerOn is idleReviewer narrowed to one project's own roster.
+func (e *Engine) idleReviewerOn(home string) (string, error) {
+	ps := e.store.For(home)
 	roster, err := ps.Roster()
 	if err != nil {
-		return "", fmt.Errorf("load roster for %s: %w", project, err)
+		return "", fmt.Errorf("load roster for %s: %w", home, err)
 	}
 	for _, a := range roster {
 		// ClearArmed for the same reason as Retired: a review handed over now would be cut in half
 		// by the clear that is about to land.
-		if a.Role != "reviewer" || a.Retired || a.ClearArmed || !e.deps.AgentIdle(project, a.Name) {
+		if a.Role != "reviewer" || a.Retired || a.ClearArmed || !e.deps.AgentIdle(home, a.Name) {
 			continue
 		}
-		held, err := ps.ReviewingPR(a.Name)
+		_, held, err := e.store.ReviewingPR(a.Project, a.Name)
 		if err != nil {
 			return "", err
 		}

@@ -51,13 +51,11 @@ func newRunID() (string, error) {
 // ScheduleRun queues a command for later execution — the store row only; execution (-> ExecuteRun)
 // is a separate step, triggered by the fleet's run watcher once this run reaches the front.
 func (e *Engine) ScheduleRun(project, agent, command, priority, timeout string) (api.Run, error) {
-	return e.putQueuedRun(project, agent, "", command, "", priority, timeout)
+	return e.putQueuedRun(project, store.Run{Agent: agent, Command: command, Priority: priority, Timeout: timeout})
 }
 
-// ScheduleUserRun queues a run the human asked for, against a NAMED target — an agent's worktree,
-// or the repo's own checkout — never one inferred from a working directory. It carries no agent and
-// no task, so nothing about it can go stale (-> staleReason), and it executes against a COPY
-// (-> repo.MaterializeRun), which is what makes the user's live checkout a safe target at all.
+// ScheduleUserRun queues a run against a NAMED target — an agent's worktree or the repo's own
+// checkout — and executes it against a COPY (-> repo.MaterializeRun), keeping the live checkout safe.
 func (e *Engine) ScheduleUserRun(project, agent, command, priority, timeout string) (api.Run, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {
@@ -74,34 +72,40 @@ func (e *Engine) ScheduleUserRun(project, agent, command, priority, timeout stri
 		}
 		workspace = a.Workspace
 	}
-	return e.putRun(project, api.SenderUser, "", command, "", priority, timeout, workspace, "")
+	return e.putRun(project, store.Run{
+		Agent: api.SenderUser, Command: command, Priority: priority, Timeout: timeout, Workspace: workspace,
+	})
 }
 
 // putQueuedRun creates an AGENT's run, ordinary or gate alike, snapshotting its workspace and task
 // so a later dequeue can tell it moved on (-> staleReason).
-func (e *Engine) putQueuedRun(project, agent, kind, command, message, priority, timeout string) (api.Run, error) {
+func (e *Engine) putQueuedRun(project string, r store.Run) (api.Run, error) {
 	ps := e.store.For(project)
-	a, _, _ := ps.GetAgent(agent)
-	st, _ := ps.GetState(agent)
-	return e.putRun(project, agent, kind, command, message, priority, timeout, a.Workspace, st.Task)
+	a, _, _ := ps.GetAgent(r.Agent)
+	st, _ := ps.GetState(r.Agent)
+	r.Workspace, r.Task = a.Workspace, st.Task
+	return e.putRun(project, r)
 }
 
 // putRun is the one place a run row is created, whoever asked for it.
-func (e *Engine) putRun(project, agent, kind, command, message, priority, timeout, workspace, task string) (api.Run, error) {
+func (e *Engine) putRun(project string, r store.Run) (api.Run, error) {
 	id, err := newRunID()
 	if err != nil {
 		return api.Run{}, err
 	}
+	r.ID = id
+	if r.Status == "" {
+		// A caller that already knows the outcome says so: a gate reusing a stored verdict must not
+		// leave a queued row the watcher can pick up and run for real (-> gateRun).
+		r.Status = "queued"
+	}
 	ps := e.store.For(project)
-	if err := ps.PutRun(store.Run{
-		ID: id, Agent: agent, Command: command, Status: "queued", Priority: priority, Timeout: timeout,
-		Kind: kind, Message: message, Workspace: workspace, Task: task,
-	}); err != nil {
+	if err := ps.PutRun(r); err != nil {
 		return api.Run{}, err
 	}
-	r, _, err := ps.GetRun(id)
+	out, _, err := ps.GetRun(id)
 	e.deps.Notify()
-	return r, err
+	return out, err
 }
 
 // CmdScheduleRun queues a command instead of running it in the pod, returning AT ONCE with its
@@ -131,9 +135,8 @@ func (e *Engine) CmdScheduleRun(c registry.Caller, args []string, out io.Writer)
 	return 0, nil
 }
 
-// queuePositions ranks every queued run and returns each one's 1-based position. A gate run
-// (Kind != "") always outranks an ordinary one; within each group, priority (P0 highest, unset
-// last) then creation order breaks ties. Runs not queued are absent from the result.
+// queuePositions ranks queued runs — gate first, then priority, then creation order — and returns
+// each one's 1-based position; runs not queued are absent from the result.
 func queuePositions(runs []api.Run) map[string]int {
 	queued := make([]api.Run, 0, len(runs))
 	for _, r := range runs {
@@ -143,13 +146,11 @@ func queuePositions(runs []api.Run) map[string]int {
 	}
 	sort.SliceStable(queued, func(i, j int) bool {
 		if ui, uj := api.RunFromUser(queued[i]), api.RunFromUser(queued[j]); ui != uj {
-			// A user's run before every agent's, gate runs included: somebody is WAITING on it,
-			// while the agent behind a gate run is parked and watching nothing. What it costs them
-			// is bounded by this run's own cap, and a human left behind a queue of background
-			// suites is the thing this ordering exists to prevent.
+			// A user's run outranks every agent's, gate runs included — a human is WAITING on it,
+			// while the agent behind a gate run is merely parked.
 			return ui
 		}
-		gi, gj := queued[i].Kind != "", queued[j].Kind != ""
+		gi, gj := gateBlocksSomeone(queued[i]), gateBlocksSomeone(queued[j])
 		if gi != gj {
 			return gi // a gate run before any ordinary one, regardless of priority or arrival
 		}
@@ -265,13 +266,27 @@ func (e *Engine) ReprioritiseRun(project, id, priority string) error {
 	return nil
 }
 
-// CmdShow dispatches "show" by id shape: a run id shows its status and stored output,
-// everything else a PR's diff — one verb to remember for either.
+// showUsage is what every unrecognised shape gets, so a typo reads as "here is the grammar" rather
+// than a lookup that was doomed before it ran.
+const showUsage = "usage: show <pr-id> | <run-id> | <mail-id>"
+
+// CmdShow dispatches "show" by id shape — run-, ml- or pr-. Anything else is refused HERE, by shape:
+// a fallthrough to CmdShowPR once turned "show ml-465" into an opaque internal error (-> AgentExec).
 func (e *Engine) CmdShow(c registry.Caller, args []string, out io.Writer) (int, error) {
-	if len(args) > 0 && strings.HasPrefix(args[0], "run-") {
-		return e.CmdShowRun(c, args, out)
+	if len(args) == 0 {
+		fmt.Fprintln(out, showUsage)
+		return 2, nil
 	}
-	return e.CmdShowPR(c, args, out)
+	switch {
+	case strings.HasPrefix(args[0], "run-"):
+		return e.CmdShowRun(c, args, out)
+	case strings.HasPrefix(args[0], api.MailIDPrefix):
+		return e.CmdShowMail(c, args, out)
+	case strings.HasPrefix(args[0], "pr-"):
+		return e.CmdShowPR(c, args, out)
+	}
+	fmt.Fprintf(out, "%q is none of those.\n%s\n", args[0], showUsage)
+	return 2, nil
 }
 
 // CmdShowRun prints a run's status, timing, and capped stored output — the on-request half of
@@ -282,6 +297,13 @@ func (e *Engine) CmdShowRun(c registry.Caller, args []string, out io.Writer) (in
 		return 2, nil
 	}
 	project := e.RunProject(c.Project, args[0])
+	// Checked ahead of RunInfo, whose error doesn't distinguish "not found" from a real fault.
+	if _, ok, err := e.store.For(project).GetRun(args[0]); err != nil {
+		return 1, err
+	} else if !ok {
+		fmt.Fprintf(out, "no such run %q\n", args[0])
+		return 1, nil
+	}
 	d, err := e.RunInfo(project, args[0])
 	if err != nil {
 		return 1, err

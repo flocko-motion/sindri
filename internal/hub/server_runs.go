@@ -40,7 +40,7 @@ func (h *Hub) runRoutes(mux *http.ServeMux) {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"cancelled"}, h.wf.CancelRun(h.wf.RunProject(h.reqProject(r), req.Name), req.Name))
+		writeJSON(w, okMsg{"cancelled"}, h.wf.CancelRun(detached(r), h.wf.RunProject(h.reqProject(r), req.Name), req.Name))
 	})
 	mux.HandleFunc("POST /run/priority", func(w http.ResponseWriter, r *http.Request) {
 		var req RunPriorityReq

@@ -10,9 +10,6 @@ package tui
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,17 +17,20 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/table"
 	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
 // defaultReviewPrompt pre-fills the Agentic Review instruction; the user edits it before dispatch.
 const defaultReviewPrompt = "Review this PR for correctness, clarity, and fit to the task. Flag bugs, missing tests, and anything that should change."
 
-// lintCmd runs the quality gate against the selected PR's worktree, into the big content pane.
+// lintCmd asks the hub for this PR's gate result. The hub answers from its store when the commit
+// already has a verdict, and otherwise queues the check — so the pane may land on either, and this
+// says "asking" rather than "running": one gate runs at a time fleet-wide, and it may be a wait.
 func (m *model) lintCmd(id string) tea.Cmd {
 	cl := m.cl
-	m.flash = "linting " + id + "…"
-	m.prDetail.Lint = "running lint…" // shown immediately; replaced by the result
+	m.flash = "gate " + id + "…"
+	m.prDetail.Lint = "asking the hub…" // shown immediately; replaced by the answer
 	m.prView = "lint"
 	m.rightFocus = true
 	m.rightCursor = m.viewCursor("lint")
@@ -53,15 +53,33 @@ func (m model) viewCursor(val string) int {
 	return 0
 }
 
-// lintStatus summarizes a PR's stored lint result for the selector label.
+// lintCommitNote names the commit a stored result describes, from the field that carries it rather
+// than from the report prose the pane shows: a result about an older commit must be readable as one
+// without reading it.
+func lintCommitNote(sha string) string {
+	if sha == "" {
+		return ""
+	}
+	if len(sha) > 7 {
+		sha = sha[:7]
+	}
+	return " · " + sha
+}
+
+// lintStatus summarizes a PR's stored gate result for the selector label — including the two states
+// a queued gate spends real time in, which a label reading "done" would misreport as an answer.
 func lintStatus(lint string) string {
 	switch {
 	case strings.TrimSpace(lint) == "":
-		return "not linted"
-	case strings.HasPrefix(lint, "lint PASS"):
+		return "not gated"
+	case strings.HasPrefix(lint, "gate PASS"):
 		return "PASS"
-	case strings.HasPrefix(lint, "lint FAIL"):
+	case strings.HasPrefix(lint, "gate FAIL"):
 		return "FAIL"
+	case strings.HasPrefix(lint, "gate queued"):
+		return "queued"
+	case strings.HasPrefix(lint, "gate running"):
+		return "running"
 	}
 	return "done"
 }
@@ -219,6 +237,20 @@ func (m *model) openReviewForm(prID string) {
 // prDetailW is the fixed width of the PRs tab's right detail column.
 const prDetailW = 44
 
+// prTable is the PRs list's columns, read by its header and every row alike.
+var prTable = table.Table{
+	{Label: "repo", Width: 10, Clip: true},
+	{Label: "pr", Width: 14},
+	{Label: "status", Width: 9},
+	// Two ages, and the pair is the point: "for" is how long it has held this status, "age" how long
+	// the PR has existed. A week-old PR that went approved an hour ago reads as both at once.
+	{Label: "for", Width: 4, Right: true},
+	{Label: "age", Width: 4, Right: true},
+	{Label: "agent", Width: 10},
+	{Label: "reviewer", Width: 10},
+	{Label: "branch"},
+}
+
 func (m model) prRows() []row {
 	var foreign, local []row
 	// Ordered by repo, the same call `sindri pr list` makes, so the two front-ends cannot drift onto
@@ -233,12 +265,11 @@ func (m model) prRows() []row {
 			foreign = append(foreign, m.prRow(p))
 		}
 	}
-	return sectioned(foreign, local)
+	return m.listing(prTable, foreign, local)
 }
 
 // prRow renders one PR row: repo, id, status, age, who wrote it, who is reviewing it, its branch.
 func (m model) prRow(p api.PR) row {
-	repo := m.repoStyle(p.Project).Render(fmt.Sprintf("%-10.10s", m.repoName(p.Project)))
 	status := api.StatusLabel(p.Status, p.Approvals)
 	merging := m.merging[p.ID] && p.Status != "merged" // transient: the user triggered a merge, awaiting the hub
 	if merging {
@@ -252,30 +283,67 @@ func (m model) prRow(p api.PR) row {
 	sc := prStatusStyle(p, m.state.Agents, merging)
 	// Who is reviewing it, from the board — a dash where nobody is, so the column reads as
 	// "waiting for a reviewer" rather than as missing.
-	return row{strings.Join([]string{
-		repo,
-		sc.Render(fmt.Sprintf("%-14s", p.ID)),
-		sc.Render(fmt.Sprintf("%-9s", status)),
-		sc.Render(fmt.Sprintf("%4s", shortAge(p.CreatedAt))),
-		sc.Render(fmt.Sprintf("%-10s", p.Agent)),
-		sc.Render(fmt.Sprintf("%-10s", dash(p.Reviewer))),
-		sc.Render(p.Branch),
-	}, " "), p.ID}
+	return row{prTable.Line(
+		table.Cell{Text: m.repoName(p.Project), Style: m.repoStyle(p.Project).Render},
+		table.Cell{Text: p.ID, Style: sc.Render},
+		table.Cell{Text: status, Style: sc.Render},
+		table.Cell{Text: shortAge(p.StatusChangedAt), Style: sc.Render},
+		table.Cell{Text: shortAge(p.CreatedAt), Style: sc.Render},
+		table.Cell{Text: p.Agent, Style: sc.Render},
+		table.Cell{Text: dash(p.Reviewer), Style: sc.Render},
+		table.Cell{Text: p.Branch, Style: sc.Render},
+	), p.ID}
+}
+
+// prTaskOpen finds the task a PR names, and whether it is still open — a task already closed or
+// scrapped is not offered a second time.
+func (m model) prTaskOpen(prID string) (taskID string, open bool) {
+	for _, p := range m.state.PRs {
+		if p.ID == prID {
+			taskID = p.Task
+			break
+		}
+	}
+	if taskID == "" {
+		return "", false
+	}
+	for _, t := range m.state.Tasks {
+		if t.ID == taskID {
+			return taskID, api.Open(t)
+		}
+	}
+	return taskID, false
 }
 
 // openScrapPRChoice confirms scrapping a PR: branch gone, off the board, nobody asked to try again.
 // The prompt names reject too, since the two are easy to confuse and only reject is recoverable.
+// Its task is offered alongside, mirroring the task-scrap modal's own "+ PR" option — scrapping only
+// the PR leaves the task open and claimable, so the same work is picked up and redone right away.
 func (m *model) openScrapPRChoice(id string) {
 	cl := m.cl
+	taskID, taskOpen := m.prTaskOpen(id)
+	opts, vals := []string{"cancel"}, []string{"cancel"}
+	if taskOpen {
+		opts = append(opts, "scrap PR only", "scrap PR + task "+taskID)
+		vals = append(vals, "pr", "prtask")
+	} else {
+		opts = append(opts, "scrap "+id)
+		vals = append(vals, "pr")
+	}
 	m.choice = choiceModalState{
 		active: true, title: "scrap " + id + "? (deletes its branch; reject instead to send it back for another try)",
-		options: []string{"cancel", "scrap " + id},
-		values:  []string{"cancel", "scrap"},
+		options: opts, values: vals,
 		apply: func(v string) tea.Cmd {
-			if v != "scrap" {
+			switch v {
+			case "pr":
+				return mutateThenRefresh(cl, func() error { return cl.DiscardPR(id) })
+			case "prtask":
+				// withPRs=true: finishTask frees the task's holder and ScrapTask scraps this same
+				// PR itself — the exact path the task-scrap modal's own "+ PR" option already takes.
+				return mutateThenRefresh(cl, func() error { return cl.ScrapTask(taskID, false, true) })
+			default:
 				return nil
 			}
-			return mutateThenRefresh(cl, func() error { return cl.DiscardPR(id) })
 		},
 	}
 }
@@ -286,6 +354,15 @@ func prKindLabel(kind string) string {
 		return "interim (mid-task contribution)"
 	}
 	return "final (task done)"
+}
+
+// statusHeldFor suffixes the detail's status line with how long the PR has worn it (" for 3d"), or
+// nothing at all on a row predating the column — an unadorned status beats one qualified by "-".
+func statusHeldFor(p api.PR) string {
+	if age := shortAge(p.StatusChangedAt); age != "-" {
+		return dimStyle.Render(" for " + age)
+	}
+	return ""
 }
 
 // shortAge renders an RFC3339 timestamp compactly ("3d", "now"); "-" when missing, not a fake age.
@@ -324,7 +401,7 @@ func (m model) prBody() string {
 	h := m.bodyHeight()
 	leftW := m.prContentWidth()
 
-	listBox := pane(rowTexts(m.rows()), m.list, leftW, m.cursor[m.tab])
+	listBox := pane(rowTexts(m.rows()), m.list, leftW, m.selRow())
 	contentBox := pane(m.prContentLines(), m.detail, leftW, -1) // big pane: diff/lint, J/K scrolls
 	leftCol := strings.Join([]string{listBox, hdivider(leftW), contentBox}, "\n")
 
@@ -377,7 +454,7 @@ func (m model) prRawContentLines() []string {
 	}
 	if m.prView == "lint" {
 		if strings.TrimSpace(d.Lint) == "" {
-			return []string{dimStyle.Render("(not linted — press L to run)")}
+			return []string{dimStyle.Render("(not gated — press L to ask)")}
 		}
 		return append([]string{dimStyle.Render("── lint ──"), ""},
 			strings.Split(strings.TrimRight(d.Lint, "\n"), "\n")...)
@@ -391,7 +468,7 @@ func (m model) prRawContentLines() []string {
 // metaItem is one right-column line; with kind set it can be focused, acted on (ENTER) or yanked.
 type metaItem struct {
 	text  string
-	kind  string // "" plain · "agent" · "task" · "pr" · "path" · "view" · "url"
+	kind  string // "" plain · "agent" · "task" · "pr" · "path" · "view" · "url" · "mail" · "resume" · "mailbody"
 	value string
 }
 
@@ -411,12 +488,12 @@ func (m model) prMetaItems() []metaItem {
 	}
 	items := []metaItem{
 		view("diff", "diff"),
-		view("lint", "lint ("+lintStatus(d.Lint)+")"),
+		view("lint", "gate ("+lintStatus(d.Lint)+lintCommitNote(d.LintCommit)+")"),
 		{text: ""},
 	}
 	items = append(items,
 		metaItem{text: d.PR.ID},
-		metaItem{text: "status: " + api.StatusLabel(d.PR.Status, api.ApprovalCount(d.Reviews))},
+		metaItem{text: "status: " + api.StatusLabel(d.PR.Status, api.ApprovalCount(d.Reviews)) + statusHeldFor(d.PR)},
 		metaItem{text: "kind:   " + prKindLabel(d.PR.Kind)},
 		metaItem{text: "agent:  " + d.PR.Agent, kind: "agent", value: d.PR.Agent},
 	)
@@ -509,99 +586,6 @@ func (m model) prActionable() []metaItem {
 		}
 	}
 	return out
-}
-
-// shellAt builds an interactive shell rooted at dir (for opening a workspace).
-func shellAt(dir string) *exec.Cmd {
-	sh := os.Getenv("SHELL")
-	if sh == "" {
-		sh = "bash"
-	}
-	c := exec.Command(sh)
-	c.Dir = dir
-	return marked(c)
-}
-
-// editorAtCmd opens the editor on an agent's live workspace; no materialization, it already exists.
-func (m *model) editorAtCmd(dir string) tea.Cmd {
-	m.flash = "opening " + dir + " in " + editorName() + "…"
-	return func() tea.Msg { return editorReadyMsg(dir) }
-}
-
-// openEditorCmd materializes a PR (the same checkout `verify` shells into) and opens the editor.
-func (m *model) openEditorCmd(id string) tea.Cmd {
-	cl := m.cl
-	m.flash = "opening " + id + " in " + editorName() + "…"
-	return func() tea.Msg {
-		path, err := cl.MaterializeReview(id)
-		if err != nil {
-			return errModalMsg{err}
-		}
-		return editorReadyMsg(path)
-	}
-}
-
-// editorCandidates lists editors in the order a Unix tool looks: the user's choice, the
-// distribution default, then vi, which POSIX requires, so the list can never come up empty.
-func editorCandidates() []string {
-	var out []string
-	for _, env := range []string{"VISUAL", "EDITOR"} {
-		if v := strings.TrimSpace(os.Getenv(env)); v != "" {
-			out = append(out, v)
-		}
-	}
-	return append(out, "sensible-editor", "editor", "vi")
-}
-
-// editorName is the editor that would run, for a flash message.
-func editorName() string {
-	for _, cand := range editorCandidates() {
-		if bin, _, ok := resolveEditor(cand); ok {
-			return filepath.Base(bin)
-		}
-	}
-	return "an editor"
-}
-
-// resolveEditor splits a candidate ($EDITOR is often "code --wait") and checks PATH for the binary.
-func resolveEditor(cand string) (bin string, args []string, ok bool) {
-	fields := strings.Fields(cand)
-	if len(fields) == 0 {
-		return "", nil, false
-	}
-	p, err := exec.LookPath(fields[0])
-	if err != nil {
-		return "", nil, false
-	}
-	return p, fields[1:], true
-}
-
-// editorAt passes dir as the argument, so a file-browser editor (vim, emacs) lands on the tree
-// rather than an empty buffer. nil when nothing is installed, for the caller to report.
-func editorAt(dir string) *exec.Cmd {
-	for _, cand := range editorCandidates() {
-		bin, args, ok := resolveEditor(cand)
-		if !ok {
-			continue
-		}
-		c := exec.Command(bin, append(args, ".")...)
-		c.Dir = dir
-		return marked(c) // an editor with a built-in terminal is the same door as a shell
-	}
-	return nil
-}
-
-// verifyCmd materializes a PR for review, then signals the loop to open a shell there.
-func (m *model) verifyCmd(id string) tea.Cmd {
-	cl := m.cl
-	m.flash = "materializing " + id + " for review…"
-	return func() tea.Msg {
-		path, err := cl.MaterializeReview(id)
-		if err != nil {
-			return errModalMsg{err}
-		}
-		return reviewReadyMsg(path)
-	}
 }
 
 // reviewLine summarizes a review item: its state, verdict, author and when, marking a planner's

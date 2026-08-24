@@ -2,6 +2,8 @@ package workflow
 
 import (
 	"errors"
+	"fmt"
+	"math"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -24,24 +26,60 @@ type stubDeps struct {
 	ctxTokens    int      // TestContextFull* set these to simulate a worker's session usage
 	ctxWindow    int      // 0 with ctxOK true means "measured, but the window is unknown"
 	ctxOK        bool
-	comments     map[string][]store.Comment // by task id, for the views that render a thread
-	busy         map[string]bool            // agents mid-turn, so AgentIdle answers false for them
-	posted       []store.Comment            // what the workflow wrote onto a task's thread (SourceRef holds the id)
-	postFails    bool                       // AddTaskComment refuses, for the paths that must survive it
-	delivered    []Delivery                 // how each message was classified, in step with injected/injectedText
-	projects     []store.Project            // KnownProjects override; nil (the default) means none registered
+	// compactThreshold overrides CompactionThreshold's answer; 0 (the default) means "never due" —
+	// no real formula returns exactly 0 for a positive window, so it is a safe sentinel rather than
+	// a real threshold every unrelated fullness test would otherwise trip on.
+	compactThreshold int
+	comments         map[string][]store.Comment // by task id, for the views that render a thread
+	busy             map[string]bool            // agents mid-turn, so AgentIdle answers false for them
+	posted           []store.Comment            // what the workflow wrote onto a task's thread (SourceRef holds the id)
+	postFails        bool                       // AddTaskComment refuses, for the paths that must survive it
+	delivered        []Delivery                 // how each message was classified, in step with injected/injectedText
+	deliverErr       bool                       // Deliver refuses, for the paths that must not record an undelivered message
+	projects         []store.Project            // KnownProjects override; nil (the default) means none registered
+	currentModel     string                     // CurrentModel's answer; "" is fine — no real model is ever ""
+	// tierModels overrides ModelForTier's answer; nil (the default) means every tier is unknown, so
+	// the retier check never fires for a test that has not opted into it.
+	tierModels       map[string]string
+	modelSet         []string // "name=model" for every SetModel call, in order
+	modelSetWith     []string // the "next" text passed alongside each, in step with modelSet
+	setModelErr      error
+	holdsNothing     bool
+	compacted        []string // agents Compact was called for, in order
+	compactedWith    []string // the "next" text passed alongside each, in step with compacted
+	compactErr       error
+	cleared          []string // agents FireClear was called for, in order
+	clearedWith      []string // the "next" text passed alongside each, in step with cleared
+	clearedInterrupt []bool   // the "interrupt" flag passed alongside each, in step with cleared
+	fireClearErr     error
+	// projectConfig overrides ProjectConfig's answer; the zero value (no lint.max_comment_avg set)
+	// means the caller sees no override, same as an unconfigured project.
+	projectConfig    config.Config
+	projectConfigErr error
+	// assignBrackets records BeginAssignment/EndAssignment calls as "begin:name"/"end:name", in
+	// order, so a test can assert prepareAssignment brackets its work correctly (and always closes
+	// the bracket, even when SetModel or Compact underneath it errors).
+	assignBrackets []string
 }
 
-func (d *stubDeps) ProjectRoot(string) string                   { return d.root }
-func (d *stubDeps) ProjectConfig(string) (config.Config, error) { return config.Config{}, nil }
-func (d *stubDeps) ArchitectureDoc(string) string               { return "" }
-func (d *stubDeps) Container(_, name string) string             { return name }
-func (d *stubDeps) Notify()                                     {}
+func (d *stubDeps) ProjectRoot(string) string { return d.root }
+func (d *stubDeps) ProjectConfig(string) (config.Config, error) {
+	if d.projectConfigErr != nil {
+		return config.Config{}, d.projectConfigErr
+	}
+	return d.projectConfig, nil
+}
+func (d *stubDeps) ArchitectureDoc(string) string   { return "" }
+func (d *stubDeps) Container(_, name string) string { return name }
+func (d *stubDeps) Notify()                         {}
 
 // Deliver records what was sent and HOW, so a test can assert the classification a sender chose —
 // which is half of what this feature is (-> workflow.Delivery). The recipient/text lists stay as they
 // were, since every existing assertion about "what was injected" is about the same messages.
 func (d *stubDeps) Deliver(_, name, text string, del Delivery) error {
+	if d.deliverErr {
+		return fmt.Errorf("nothing could be delivered to %s", name)
+	}
 	d.injected = append(d.injected, name)
 	d.injectedText = append(d.injectedText, text)
 	d.delivered = append(d.delivered, del)
@@ -52,8 +90,8 @@ func (d *stubDeps) Interrupt(_, name string) error {
 	return nil
 }
 func (d *stubDeps) AgentAlive(_, _ string) bool               { return d.alive }
+func (d *stubDeps) AgentUp(_, _ string) bool                  { return d.alive }
 func (d *stubDeps) AgentIdle(_, name string) bool             { return !d.busy[name] }
-func (d *stubDeps) SessionAlive(_, _ string) bool             { return false }
 func (d *stubDeps) TaskComments(_, id string) []store.Comment { return d.comments[id] }
 func (d *stubDeps) AddTaskComment(_, id, author, body string) error {
 	if d.postFails {
@@ -62,11 +100,60 @@ func (d *stubDeps) AddTaskComment(_, id, author, body string) error {
 	d.posted = append(d.posted, store.Comment{SourceRef: id, Author: author, Body: body})
 	return nil
 }
-func (d *stubDeps) Subscribe() (chan struct{}, func()) { return make(chan struct{}), func() {} }
-func (d *stubDeps) KnownProjects() []store.Project     { return d.projects }
-func (d *stubDeps) BrokkrBin() (string, error)         { return "", nil }
-func (d *stubDeps) ContextUsage(_, _ string) (int, int, bool) {
-	return d.ctxTokens, d.ctxWindow, d.ctxOK
+func (d *stubDeps) KnownProjects() []store.Project { return d.projects }
+func (d *stubDeps) BrokkrBin() (string, error)     { return "", nil }
+func (d *stubDeps) ContextUsage(_, _ string) (int, int, string, bool) {
+	return d.ctxTokens, d.ctxWindow, "", d.ctxOK
+}
+
+func (d *stubDeps) CurrentModel(_, _ string) string { return d.currentModel }
+
+func (d *stubDeps) ModelForTier(tier string) (string, bool) {
+	m, ok := d.tierModels[tier]
+	return m, ok
+}
+
+// ModelMatches mirrors the real adapter's own substring tolerance (a detected model id may carry
+// more than the plain tier id names, e.g. a dated snapshot suffix) rather than a bare equality —
+// exact-string test cases pass either way, since a string always contains itself.
+func (d *stubDeps) ModelMatches(want, detected string) bool {
+	return strings.Contains(detected, want)
+}
+
+func (d *stubDeps) SetModel(_, name, model, next string) error {
+	d.modelSet = append(d.modelSet, name+"="+model)
+	d.modelSetWith = append(d.modelSetWith, next)
+	return d.setModelErr
+}
+
+func (d *stubDeps) HoldsNothing(_, _, _ string) (bool, error) { return d.holdsNothing, nil }
+
+func (d *stubDeps) Compact(_, name, next string) error {
+	d.compacted = append(d.compacted, name)
+	d.compactedWith = append(d.compactedWith, next)
+	return d.compactErr
+}
+
+func (d *stubDeps) FireClear(_, name, next string, interrupt bool) error {
+	d.cleared = append(d.cleared, name)
+	d.clearedWith = append(d.clearedWith, next)
+	d.clearedInterrupt = append(d.clearedInterrupt, interrupt)
+	return d.fireClearErr
+}
+
+func (d *stubDeps) BeginAssignment(_, name string) {
+	d.assignBrackets = append(d.assignBrackets, "begin:"+name)
+}
+
+func (d *stubDeps) EndAssignment(_, name string) {
+	d.assignBrackets = append(d.assignBrackets, "end:"+name)
+}
+
+func (d *stubDeps) CompactionThreshold(int) int {
+	if d.compactThreshold == 0 {
+		return math.MaxInt
+	}
+	return d.compactThreshold
 }
 
 // TestScrapPRStopsReviewer: scrapping a PR under review flips it to "scrapped",

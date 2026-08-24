@@ -65,17 +65,17 @@ func TestTheClearItselfDropsTheStaleReading(t *testing.T) {
 	})
 
 	writeUsage(t, "proj", "eitri", 900_000)
-	if got, _, ok := s.ContextUsage("proj", "eitri"); !ok || got != 900_000 {
+	if got, _, _, ok := s.ContextUsage("proj", "eitri"); !ok || got != 900_000 {
 		t.Fatalf("ContextUsage = (%d, %v), want the full reading — the memo must hold it first", got, ok)
 	}
 
 	// The clear: /clear into the session, and the transcript it leaves behind is a fresh one.
 	writeUsage(t, "proj", "eitri", 1_000)
-	if err := s.SetClearArmed("proj", "eitri", true); err != nil {
+	if err := s.SetClearArmed(t.Context(), "proj", "eitri", true); err != nil {
 		t.Fatalf("clearing an idle agent at a boundary: %v", err)
 	}
 
-	got, _, ok := s.ContextUsage("proj", "eitri")
+	got, _, _, ok := s.ContextUsage("proj", "eitri")
 	if !ok {
 		t.Fatal("the reading went missing entirely, rather than being re-taken")
 	}

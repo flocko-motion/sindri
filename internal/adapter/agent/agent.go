@@ -6,7 +6,10 @@
 // package, never the reverse).
 package agent
 
-import "io"
+import (
+	"io"
+	"math"
+)
 
 // State is what the agent tool is doing now, not sindri's workflow phase.
 type State string
@@ -58,11 +61,31 @@ type Agent interface {
 	// usable one. Every agent runs on this single token, so its expiry is the moment the whole fleet
 	// needs the replacement — the hub watches it to redistribute then rather than on a slow tick.
 	HostTokenExpiry() (expiresAtMS int64, usable bool)
-	// ContextUsage reports what the live session under home carries and the window it fills, both
-	// from the backend's own transcript. The window comes from here because only the backend knows
-	// which model answers; a caller that assumed one retired workers with most of 1M unused.
-	// ok=false when nothing has been recorded yet.
-	ContextUsage(home string) (tokens, window int, ok bool)
+	// ContextUsage reports what the live session under home carries, the window it fills, and the
+	// model carrying it, all from the backend's own transcript. The window comes from here because
+	// only the backend knows which model answers; a caller that assumed one retired workers with
+	// most of 1M unused. ok=false when nothing has been recorded yet.
+	ContextUsage(home string) (tokens, window int, model string, ok bool)
+	// CompactionThreshold is the token count above which a session filling window tokens is worth
+	// compacting — from the same backend ContextUsage's window came from, since only it knows the
+	// shape of its own context-management economics.
+	CompactionThreshold(window int) int
+	// ModelWindow resolves a model id to its context window, ok=false when the backend does not
+	// recognise it — the check a chosen model must pass before the hub starts an agent on it.
+	ModelWindow(model string) (window int, ok bool)
+	// ModelForTier resolves a difficulty tier to the model it dispatches to, ok=false for anything
+	// the backend does not recognise — the dispatcher's own mapping, from the backend since a
+	// second implementation would have its own names for the same idea.
+	ModelForTier(tier string) (model string, ok bool)
+	// ModelMatches reports whether detected (read off a live transcript) is the same model as want
+	// (a plain tier id) — not always a bare string equality, since a backend may run a tier's model
+	// under a more specific id than the one it dispatches to.
+	ModelMatches(want, detected string) bool
+	// ToolRunning reports whether the pane shows a tool call in flight (a shell, or anything else the
+	// backend renders the same way) — evidence the screen is quiet because nothing has RETURNED yet,
+	// not because the turn is stuck. Separate from DetectState: the state stays Working either way,
+	// and only the caller measuring stillness needs to know which kind of "unchanged" this is.
+	ToolRunning(screen string) bool
 }
 
 // active is wired once at startup via Use; the no-op default keeps the port safe before.
@@ -94,8 +117,23 @@ func RestageCredentials(dir string) (bool, error) { return active.RestageCredent
 // HostTokenExpiry reports the wired backend's host token expiry and whether it is usable.
 func HostTokenExpiry() (int64, bool) { return active.HostTokenExpiry() }
 
-// ContextUsage reports the wired backend's context size and window for the session under home.
-func ContextUsage(home string) (int, int, bool) { return active.ContextUsage(home) }
+// ContextUsage reports the wired backend's context size, window and model for the session under home.
+func ContextUsage(home string) (int, int, string, bool) { return active.ContextUsage(home) }
+
+// CompactionThreshold reports the wired backend's compaction threshold for a window this size.
+func CompactionThreshold(window int) int { return active.CompactionThreshold(window) }
+
+// ModelWindow resolves model to its window via the wired backend.
+func ModelWindow(model string) (int, bool) { return active.ModelWindow(model) }
+
+// ModelForTier resolves tier to a model via the wired backend.
+func ModelForTier(tier string) (string, bool) { return active.ModelForTier(tier) }
+
+// ModelMatches reports whether detected is want via the wired backend.
+func ModelMatches(want, detected string) bool { return active.ModelMatches(want, detected) }
+
+// ToolRunning reports whether the wired backend reads screen as a tool call in flight.
+func ToolRunning(screen string) bool { return active.ToolRunning(screen) }
 
 // noop is the default until Use: state is Unknown, no home is provisioned.
 type noop struct{}
@@ -108,4 +146,14 @@ func (noop) RestageCredentials(string) (bool, error) { return false, nil }
 
 func (noop) HostTokenExpiry() (int64, bool) { return 0, false }
 
-func (noop) ContextUsage(string) (int, int, bool) { return 0, 0, false }
+func (noop) ContextUsage(string) (int, int, string, bool) { return 0, 0, "", false }
+
+func (noop) CompactionThreshold(int) int { return math.MaxInt } // never worth it: nothing to measure
+
+func (noop) ModelWindow(string) (int, bool) { return 0, false } // nothing wired, nothing recognised
+
+func (noop) ModelForTier(string) (string, bool) { return "", false } // nothing wired, nothing recognised
+
+func (noop) ModelMatches(want, detected string) bool { return want == detected }
+
+func (noop) ToolRunning(string) bool { return false }

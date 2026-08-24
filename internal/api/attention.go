@@ -9,22 +9,21 @@ package api
 const (
 	StatusBlocked   = "blocked"    // stopped at a prompt, waiting for an answer
 	StatusSignedOut = "signed-out" // the pane says to run /login, so nothing typed there is sent
-	StatusFull      = "full"       // past its context window holding nothing: no work until cleared
 	StatusStalled   = "stalled"    // holds work, screen standing still: it believes it is working
 	// StatusEscalated: it asked the user to decide something and stopped on the answer. A word of its
 	// own, not blocked: a runtime block is answered in the pane, this is answered and then resumed.
 	StatusEscalated = "escalated"
+	// StatusLaunchFailed: a launch was asked for and never came up (-> agent.Service.FailLaunch).
+	// Distinct from "down": here somebody asked and it did not work.
+	StatusLaunchFailed = "launch-failed"
 )
 
-// AgentNeedsUser reports an agent whose state resolves ONLY IF A HUMAN ACTS. That is the rule, and
-// these five words satisfy it today; a status added later is asked the same question. Idle never
-// counts: waiting for work is normal, and idling beside claimable work is the hub's to nudge. An
-// api-error is the hub's to resend, and once resending fails the board says stalled. Retired is
-// checked ahead of the status because it REACHES the counting states — a retired agent keeps running,
-// so it fills up or stalls, and a marker would never clear (-> workflow.parkedByTheHub, same rule).
+// AgentNeedsUser reports an agent whose state resolves ONLY IF A HUMAN ACTS — these five words today.
+// Idle never counts, a full context included: an idle ask clears and reassigns itself. Retired is
+// checked ahead of the rest since it reaches stalled by itself (-> workflow.parkedByTheHub).
 func AgentNeedsUser(a AgentView) bool {
-	// Ahead of retirement, unlike the rest: retirement reaches full and stalled by itself, but nothing
-	// about it asks a question, and a retired agent still finishes what it holds.
+	// Ahead of retirement, unlike the rest: retirement reaches stalled by itself, but nothing about
+	// it asks a question, and a retired agent still finishes what it holds.
 	if a.Status == StatusEscalated {
 		return true
 	}
@@ -32,7 +31,7 @@ func AgentNeedsUser(a AgentView) bool {
 		return false
 	}
 	switch a.Status {
-	case StatusBlocked, StatusSignedOut, StatusFull, StatusStalled:
+	case StatusBlocked, StatusSignedOut, StatusStalled, StatusLaunchFailed:
 		return true
 	}
 	return false
@@ -65,13 +64,9 @@ const (
 // its own — and a reason added here reaches each of them.
 var PRWaits = []PRWait{PRWaitMergeFailed, PRWaitMerge, PRWaitUserGated, PRWaitReview}
 
-// PRWaitReason reports why nothing but a human will move this PR, PRWaitNone when something else
-// will. Merge-failed is most stuck: a restart caught the merge in flight (-> ReconcileMergingPRs),
-// nothing retries it and no verb accepts it, so only a person reading the base branch moves it on.
-// Approved waits on the merge, the one hard gate. Interim is user-gated from the moment it opens —
-// no reviewer is ever asked for one (-> workflow.needsReview). Open with no reviewer alive IN ITS
-// OWN REPO waits on a review that is not coming, though one merely unassigned is ordinary while a
-// reviewer runs there. A rejected PR waits on its author, a merging one on the merge under way.
+// PRWaitReason reports why nothing but a human will move this PR, PRWaitNone otherwise — merge-failed
+// is most stuck, since no verb accepts it and nothing retries it. Interim is user-gated from the
+// moment it opens: no reviewer is ever asked for one (-> workflow.needsReview).
 func PRWaitReason(p PR, agents []AgentView) PRWait {
 	switch {
 	case p.Status == "merge-failed":
@@ -91,12 +86,11 @@ func PRWaitReason(p PR, agents []AgentView) PRWait {
 // PRNeedsUser reports whether this PR waits on the user at all.
 func PRNeedsUser(p PR, agents []AgentView) bool { return PRWaitReason(p, agents) != PRWaitNone }
 
-// AnyLiveReviewer reports whether a reviewer agent is up in that project. Scoped because
-// assignment is (-> workflow.freeReviewer reads one project's roster), so a reviewer up in another
-// repo will never be handed this PR.
+// AnyLiveReviewer reports whether a reviewer agent is up AND assignable in that project. Excludes a
+// retired one even though its status still reads up — it will never be assigned this review.
 func AnyLiveReviewer(agents []AgentView, project string) bool {
 	for _, a := range agents {
-		if a.Project == project && a.Role == "reviewer" && !AgentNotUp(a.Status) {
+		if a.Project == project && a.Role == "reviewer" && !a.Retired && !AgentNotUp(a.Status) {
 			return true
 		}
 	}

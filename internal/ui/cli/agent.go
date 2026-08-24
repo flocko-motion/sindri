@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/table"
 	"github.com/flo-at/sindri/internal/ui/theme"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -98,6 +99,29 @@ func withAgent(name string, fn func(b backend, a *api.AgentView) error) error {
 	return fn(b, a)
 }
 
+// agentListTable is the columns `sindri agent list` prints, its header and its rows alike.
+var agentListTable = table.Table{
+	{Label: "repo", Width: 10, Clip: true}, // a repo name is unbounded; a long one would skew every row
+	{Label: "agent", Width: 12},
+	{Label: "role", Width: 8},
+	{Label: "status", Width: 10},
+	{Label: "ctx", Width: 4, Right: true},
+	{Label: "model", Width: 14, Clip: true}, // a raw model id is unbounded and often dated
+	{Label: "task", Width: 14},
+	{Label: "pr"},
+}
+
+// AgentColumnLabels is agentListTable's column labels, left to right — exported so a cross-front-end
+// test (-> internal/ui) can pin their order against the TUI's without either package importing the
+// other, and without duplicating the layout each renders from.
+func AgentColumnLabels() []string {
+	labels := make([]string, len(agentListTable))
+	for i, c := range agentListTable {
+		labels[i] = c.Label
+	}
+	return labels
+}
+
 func agentListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "list", Short: "List agents with their live state", Args: cobra.NoArgs,
@@ -115,8 +139,16 @@ func agentListCmd() *cobra.Command {
 				local := localProject(st.Projects)
 				var rows []listRow
 				for _, a := range sorted {
-					line := fmt.Sprintf("%-10.10s %-12s %-8s %-10s %4s %-14s %s", a.Repo, a.Name, a.Role, a.Status,
-						theme.ContextPercent(a.ContextTokens, a.ContextWindow), dash(a.Task), dash(a.PR))
+					line := agentListTable.Line(
+						table.Cell{Text: a.Repo},
+						table.Cell{Text: a.Name},
+						table.Cell{Text: a.Role},
+						table.Cell{Text: a.Status},
+						table.Cell{Text: theme.ContextPercent(a.ContextTokens, a.ContextWindow)},
+						table.Cell{Text: dash(a.Model)},
+						table.Cell{Text: dash(a.Task)},
+						table.Cell{Text: dash(a.PR)},
+					)
 					// The markers are the TUI's, from the set both read, so a symbol cannot come to
 					// mean one thing here and another there (-> theme/glyph.go).
 					if a.UnreadMail > 0 { // a backlog is a strong signal it has stopped reading
@@ -136,7 +168,7 @@ func agentListCmd() *cobra.Command {
 					}
 					rows = append(rows, listRow{line, listGroupFor(a.Project, local, api.AgentNeedsUser(a))})
 				}
-				printGrouped(rows)
+				printListing(agentListTable, rows)
 				for _, o := range st.Orphans {
 					fmt.Printf("%s  orphan: %s — no roster entry; remove with 'sindri agent delete %s'\n", theme.MarkWarning, o, o)
 				}
@@ -173,11 +205,18 @@ func needsYouSummary(agents []api.AgentView) string {
 		return ""
 	}
 	return fmt.Sprintf("%d agent(s) need you:\n  %s\nAttach to see what each is stopped on "+
-		"(`sindri agent attach <name>`). A full one wants clearing "+
-		"(`sindri agent clear-context <name>`), a signed-out one a restart once the host has "+
+		"(`sindri agent attach <name>`). A signed-out one wants a restart once the host has "+
 		"logged in (`sindri agent restart <name>`). An escalated one wants its question answered — "+
 		"`sindri agent tell <name> \"<answer>\"` and it resumes itself; `sindri agent resume <name>` "+
 		"releases one that cannot.", len(stuck), strings.Join(stuck, "\n  "))
+}
+
+// agentStatsTable is the columns `sindri agent stats` prints. It had a header already, laid out from
+// widths of its own beside the rows' — the drift a shared layout exists to prevent.
+var agentStatsTable = table.Table{
+	{Label: "repo", Width: 10, Clip: true},
+	{Label: "agent", Width: 12},
+	{Label: "memory"},
 }
 
 // agentStatsCmd is the view for tuning per-agent memory; down agents have no VM to sample. It
@@ -207,19 +246,24 @@ func agentStatsCmd() *cobra.Command {
 					views = only
 				}
 				fmt.Printf("engine: %s\n", report.Engine)
-				fmt.Printf("fleet:  %s\n\n", theme.FleetLine(st.Memory))
+				fmt.Printf("fleet:  %s\n\n", theme.FleetLine(st.Memory, st.RunningAgentCount(), st.AgentCount()))
 				if len(views) == 0 {
 					fmt.Fprintln(os.Stderr, "no running agents to sample")
 					return nil
 				}
-				fmt.Printf("%-10.10s %-12s %s\n", "REPO", "AGENT", "MEMORY")
+				lines := make([]string, 0, len(views))
 				for _, v := range views {
+					mem := theme.MemLine(v.MemUsageBytes, v.MemLimitBytes)
 					if v.Err != "" { // surface the reason, don't hide it behind a blank row
-						fmt.Printf("%-10.10s %-12s stats unavailable: %s\n", v.Repo, v.Name, v.Err)
-						continue
+						mem = "stats unavailable: " + v.Err
 					}
-					fmt.Printf("%-10.10s %-12s %s\n", v.Repo, v.Name, theme.MemLine(v.MemUsageBytes, v.MemLimitBytes))
+					lines = append(lines, agentStatsTable.Line(
+						table.Cell{Text: v.Repo},
+						table.Cell{Text: v.Name},
+						table.Cell{Text: mem},
+					))
 				}
+				printRows(agentStatsTable, lines)
 				return nil
 			})
 		},
@@ -228,19 +272,25 @@ func agentStatsCmd() *cobra.Command {
 
 func agentNewCmd() *cobra.Command {
 	var role, memory string
-	var noStart bool
+	var noStart, global bool
 	c := &cobra.Command{
 		Use: "new [name]", Short: "Create an agent and start it (name optional — auto dwarf name)", Args: cobra.MaximumNArgs(1),
 		Long: "Register an agent identity and start its container, which is what you almost always want —\n" +
 			"the same thing the TUI's 'new' does.\n\n" +
 			"--no-start registers the identity alone, for pre-declaring an agent you will start later.\n" +
-			"An agent exists independently of any container, so this is a supported state, not a failure.",
+			"An agent exists independently of any container, so this is a supported state, not a failure.\n\n" +
+			"--global creates it in the fleet-wide _global pool instead of this repo — the hub refuses\n" +
+			"every role there but reviewer, since none of the rest has a repo to hold their work in.",
 		RunE: func(_ *cobra.Command, args []string) error {
 			var want string
 			if len(args) == 1 {
 				want = args[0]
 			}
-			return withBackend(func(b backend) error {
+			run := withBackend
+			if global {
+				run = withGlobalBackend
+			}
+			return run(func(b backend) error {
 				name, err := b.NewAgent(want, role, memory)
 				if err != nil {
 					return err
@@ -265,6 +315,7 @@ func agentNewCmd() *cobra.Command {
 	c.Flags().StringVar(&role, "role", "worker", "agent role: worker|reviewer|planner|coauthor")
 	c.Flags().StringVar(&memory, "memory", "", "RAM limit for this agent's container (e.g. 4g, 512m; unset = the runtime's default)")
 	c.Flags().BoolVar(&noStart, "no-start", false, "register the identity only, without starting a container")
+	c.Flags().BoolVar(&global, "global", false, "create it in the fleet-wide _global pool instead of this repo")
 	return c
 }
 
@@ -427,7 +478,7 @@ func agentRestartCmd() *cobra.Command {
 		Use: "restart <name>", Short: "Restart the agent's container (starts it if it wasn't running)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withAgent(args[0], func(b backend, a *api.AgentView) error {
-				if a.Status != "down" { // tear down the running container first
+				if a.Status != "down" && a.Status != "stopped" { // tear down the running container first
 					if err := b.StopAgent(a.Name); err != nil {
 						return err
 					}
@@ -529,10 +580,17 @@ func agentInfoCmd() *cobra.Command {
 				if st, err := b.State(); err == nil {
 					dflt = st.DefaultMemory
 				}
-				fmt.Printf("agent:     %s\nrole:      %s\nstatus:    %s\ntask:      %s\nfeature:   %s\npr:        %s\nworkspace: %s\nmemory:    %s\ncontext:   %s\n",
+				fmt.Printf("agent:     %s\nrole:      %s\nstatus:    %s\ntask:      %s\nfeature:   %s\npr:        %s\nworkspace: %s\nmemory:    %s\ncontext:   %s\nmodel:     %s\n",
 					found.Name, found.Role, found.Status, agentTaskLabel(b, found.Task),
 					agentTaskLabel(b, found.Feature), dash(found.PR), dash(found.Workspace), memoryLabel(found.Memory, dflt),
-					theme.ContextLine(found.ContextTokens))
+					theme.ContextLine(found.ContextTokens), dash(found.Model))
+				// Same reasoning as the arming below, and it bites harder: retirement shows up only
+				// when the agent next asks for work, and DirRetired told it to stop asking — so the
+				// pane goes quiet and nothing anywhere says why.
+				if found.Retired {
+					fmt.Printf("retired:   %s no new work — `sindri agent retire %s --back` returns it to service\n",
+						theme.MarkRetired, found.Name)
+				}
 				// The same line the TUI's detail carries: an arming changes nothing observable until
 				// it fires, so the only way to know it is set is to be told.
 				if found.ClearArmed {

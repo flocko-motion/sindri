@@ -21,6 +21,9 @@ type PR struct {
 	// UpdatedAt is stamped on every write (PutPR), so the active filter can tell a PR that just
 	// changed from one that has sat merged or scrapped for a while.
 	UpdatedAt string `json:"updated_at,omitempty"`
+	// StatusChangedAt is when Status last became what it is — apart from UpdatedAt, which a rebase
+	// or a feedback edit moves too, so "open for 3 days" read off that would report an hour.
+	StatusChangedAt string `json:"status_changed_at,omitempty"`
 	// Kind: a final PR's merge closes the task, an interim one keeps it open and puts
 	// the worker straight back on it. "" is read as "final".
 	Kind string `json:"kind"`
@@ -60,7 +63,10 @@ type PRDetail struct {
 	Reviews []Review `json:"reviews"`
 	Lint    string   `json:"lint"`    // latest stored lint output ("" = never run)
 	LintAt  string   `json:"lint_at"` // when it was run
-	History []Event  `json:"history"` // lifecycle log (oldest-first)
+	// LintCommit is the commit that result describes. A timestamp cannot say which tree was
+	// checked, so without this a reader cannot tell a current result from one about an older one.
+	LintCommit string  `json:"lint_commit,omitempty"`
+	History    []Event `json:"history"` // lifecycle log (oldest-first)
 }
 
 // PROpen reports whether a PR is still open — in neither terminal state (merged or

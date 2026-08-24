@@ -26,8 +26,9 @@ import (
 )
 
 // Deps is what the channel needs from the hub to answer the agent surface: the verb
-// set, the blocking directive, verb execution, token→identity resolution, and the
-// access-log wrapper. The channel owns transport; the behaviour stays in the hub.
+// set, the directive (answered at once, never held open), verb execution,
+// token→identity resolution, and the access-log wrapper. The channel owns transport;
+// the behaviour stays in the hub.
 type Deps interface {
 	Commands(project, name string) (any, error)
 	Directive(ctx context.Context, project, name string) (string, error)
@@ -149,7 +150,7 @@ func (s *Server) handler(project, name string) http.Handler {
 		writeJSON(w, cmds, err)
 	})
 	mux.HandleFunc("GET /directive", func(w http.ResponseWriter, r *http.Request) {
-		// Blocks until the agent has something to do (or it disconnects).
+		// Answers at once — see workflow.Engine.AgentDirective for why nothing here waits.
 		d, err := s.deps.Directive(r.Context(), project, name)
 		writeJSON(w, okMsg{d}, err)
 	})

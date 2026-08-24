@@ -21,6 +21,7 @@ import (
 	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/tools/paths"
+	"github.com/flo-at/sindri/internal/ui/table"
 	"github.com/flo-at/sindri/internal/ui/theme"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -34,7 +35,9 @@ type backend interface {
 	SetRetired(name string, retired bool) error
 	ResumeAgent(name string) error
 	MailBody(id int64) (api.Mail, error)
+	MarkMailRead(id int64) error
 	MailAgent(name, msg string) error
+	ReplyToMail(id int64, msg string) error
 	DeleteAgent(name string) error
 	StopAgent(name string) error
 	SetClearArmed(name string, armed bool) error
@@ -121,6 +124,17 @@ func withBackend(fn func(backend) error) error {
 		return err
 	}
 	b, err := open(root)
+	if err != nil {
+		return err
+	}
+	defer b.Close()
+	return fn(b)
+}
+
+// withGlobalBackend is withBackend scoped to the fleet-wide reviewer pool rather than the cwd's
+// repo — no cwd ever resolves to it, so it never goes through repoRoot.
+func withGlobalBackend(fn func(backend) error) error {
+	b, err := open(api.GlobalProject)
 	if err != nil {
 		return err
 	}
@@ -359,35 +373,67 @@ func prRejectCmd() *cobra.Command {
 	}
 }
 
-// prScrapCmd discards a PR outright (delete/rm alias it), matching the TUI's D. Unlike reject,
-// which sends it BACK for another try, scrap ends it and drops the branch — hence --yes.
+// prScraper is the slice of backend scrapPR needs — narrow enough for a test to fake without a
+// live hub.
+type prScraper interface {
+	PRInfo(id string) (api.PRDetail, error)
+	DiscardPR(id string) error
+	ScrapTask(id string, subtree, withPRs bool) error
+}
+
+// scrapPR runs the scrap, refusing withTask on a settled task — the TUI's own guard against
+// deleting a finished task's record.
+func scrapPR(b prScraper, id string, withTask bool, out io.Writer) error {
+	if !withTask {
+		if err := b.DiscardPR(id); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "scrapped %s — branch deleted\n", id)
+		return nil
+	}
+	d, err := b.PRInfo(id)
+	if err != nil {
+		return err
+	}
+	if d.PR.Task == "" {
+		return fmt.Errorf("%s names no task to scrap alongside it", id)
+	}
+	if !api.Open(d.Task) {
+		return fmt.Errorf("%s's task %s is already %s — not scrapping a settled task", id, d.PR.Task, d.Task.Status)
+	}
+	if err := b.ScrapTask(d.PR.Task, false, true); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "scrapped %s — branch deleted, task %s scrapped too\n", id, d.PR.Task)
+	return nil
+}
+
+// prScrapCmd drops a PR's branch for good (--task takes its task with it, so nothing retries it).
 func prScrapCmd() *cobra.Command {
-	var yes bool
+	var yes, task bool
 	c := &cobra.Command{
 		Use: "scrap <pr-id>", Aliases: []string{"delete", "rm", "discard"},
-		Short: "Scrap a PR and delete its branch (no feedback, nobody retries)", Args: cobra.ExactArgs(1),
+		Short: "Scrap a PR and delete its branch; --task scraps its task too, so nobody retries it",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if !yes {
 				return fmt.Errorf("scrapping %s deletes its branch and cannot be undone — pass --yes to confirm.\n"+
 					"To send it back for another attempt instead, use `sindri pr reject %s \"<what to fix>\"`", args[0], args[0])
 			}
-			return withBackend(func(b backend) error {
-				if err := b.DiscardPR(args[0]); err != nil {
-					return err
-				}
-				fmt.Fprintf(os.Stderr, "scrapped %s — branch deleted\n", args[0])
-				return nil
-			})
+			return withBackend(func(b backend) error { return scrapPR(b, args[0], task, os.Stderr) })
 		},
 	}
 	c.Flags().BoolVar(&yes, "yes", false, "confirm: scrap the PR and delete its branch")
+	c.Flags().BoolVar(&task, "task", false, "also scrap the PR's task, so nobody retries it")
 	return c
 }
 
 func prLintCmd() *cobra.Command {
 	return &cobra.Command{
-		Use: "lint <pr-id>", Short: "Run the quality gate against a PR's worktree", Args: cobra.ExactArgs(1),
+		Use: "lint <pr-id>", Short: "Ask for the quality gate's verdict on the commit a PR's branch names", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			// It may answer without running anything: the commit's verdict is stored, and one that has
+			// none queues the gate rather than running it here (-> workflow.LintPR).
 			return withBackend(func(b backend) error {
 				out, err := b.LintPR(args[0])
 				if err != nil {
@@ -400,8 +446,21 @@ func prLintCmd() *cobra.Command {
 	}
 }
 
+// prListTable is the columns `sindri pr list` prints, its header and its rows alike.
+var prListTable = table.Table{
+	{Label: "repo", Width: 10, Clip: true},
+	{Label: "pr", Width: 14},
+	{Label: "status", Width: 13},
+	{Label: "age", Width: 4, Right: true},
+	{Label: "agent", Width: 10},
+	{Label: "reviewer", Width: 10},
+	{Label: "branch", Width: 24},
+	{Label: "waiting on you"},
+}
+
 func prListCmd() *cobra.Command {
 	var filter string
+	var limit int
 	c := &cobra.Command{
 		Use: "list", Short: "List PRs", Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
@@ -421,9 +480,12 @@ func prListCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				// store.AllPRs orders newest first, so capHead before SortedPRs regroups by repo keeps
+				// the newest `limit` fleet-wide rather than the newest per repo.
+				filtered, matched := capHead(api.FilterPRs(f, all), limit)
 				// Grouped by repo, the order the PRs tab shows (-> api.SortedPRs). This listing is
 				// fleet-wide, so without the repo the rows it gathers from elsewhere are unplaceable.
-				prs := api.SortedPRs(api.FilterPRs(f, all), st.Projects)
+				prs := api.SortedPRs(filtered, st.Projects)
 				// And sectioned as the PRs tab is, so both front-ends read the same way.
 				local := localProject(st.Projects)
 				var rows []listRow
@@ -435,20 +497,35 @@ func prListCmd() *cobra.Command {
 					// Repo first, as `agent list` prints it: this listing crosses repos, so the column
 					// is what places each row. Then who is reviewing it beside who wrote it, the PRs
 					// tab's own columns from the same fields, so the two cannot answer differently.
-					line := fmt.Sprintf("%-10.10s %-14s %-13s %4s  %-10s %-10s %s",
-						api.RepoName(st.Projects, p.Project), p.ID, status, shortAge(p.CreatedAt), p.Agent,
-						dash(p.Reviewer), p.Branch)
+					// Why it waits closes the row in a column of its own, since a marker tacked on the
+					// end had nothing over it saying what it was.
 					wait := api.PRWaitReason(p, st.Agents)
-					if why := prWaitRow(wait); why != "" {
-						line += "  ! " + why
+					why := prWaitRow(wait)
+					if why != "" {
+						why = theme.MarkNeedsUser + " " + why
 					}
+					line := prListTable.Line(
+						table.Cell{Text: api.RepoName(st.Projects, p.Project)},
+						table.Cell{Text: p.ID},
+						table.Cell{Text: status},
+						table.Cell{Text: shortAge(p.CreatedAt)},
+						table.Cell{Text: p.Agent},
+						table.Cell{Text: dash(p.Reviewer)},
+						table.Cell{Text: p.Branch},
+						table.Cell{Text: why},
+					)
 					rows = append(rows, listRow{line, listGroupFor(p.Project, local, wait != api.PRWaitNone)})
 				}
-				printGrouped(rows)
-				if n := len(all) - len(prs); n > 0 {
+				printListing(prListTable, rows)
+				// len(prs), not matched: that many were actually printed — matched only decides
+				// whether the filter hid anything worth naming.
+				if n := len(all) - matched; n > 0 {
 					fmt.Fprintf(os.Stderr, "(filter %s — %d of %d PR(s) shown)\n", f, len(prs), len(all))
 				} else if len(prs) == 0 {
 					fmt.Fprintln(os.Stderr, "no PRs")
+				}
+				if note := limitNotice("PR", len(prs), matched); note != "" {
+					fmt.Fprint(os.Stderr, note)
 				}
 				// Last, where a closing line is read: the same set the TUI counts on the PRs handle.
 				// Over every PR, not the filtered rows — a PR waits on you whether or not this
@@ -460,11 +537,12 @@ func prListCmd() *cobra.Command {
 			})
 		},
 	}
-	// Defaults to "all", the same reasoning taskListCmd gives: a listing is a record, not the
-	// TUI's redrawn view, which opens on "active" instead.
-	c.Flags().StringVar(&filter, "filter", string(api.PRFilterAll),
+	// Defaults to "active", matching mail list and the TUI: a listing is a view kept to what still
+	// matters, not the whole record. --filter all recovers that.
+	c.Flags().StringVar(&filter, "filter", string(api.PRFilterActive),
 		"which PRs to list: "+api.PRFilterNames()+" (active = open, plus anything closed within "+
 			api.ActiveWindow.String()+")")
+	c.Flags().IntVar(&limit, "limit", DefaultListLimit, "show at most this many, newest first (0 = no limit)")
 	return c
 }
 

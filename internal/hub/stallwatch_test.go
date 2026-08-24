@@ -60,6 +60,75 @@ func TestStalledForIsWhatTheBoardAndTheNudgeShare(t *testing.T) {
 	}
 }
 
+// TestAStalledReviewerReadsAsStalledOnTheBoard is why the rule change is visible at all: stalledFor
+// feeds both the board word and the nudge, so a reviewer that stopped mid-review now says so where
+// the user looks, instead of sitting under the "reviewing" it was assigned hours ago.
+func TestAStalledReviewerReadsAsStalledOnTheBoard(t *testing.T) {
+	h := newHub(t)
+	w := stillWatchdog(t, h)
+	ps := h.store.For(testProject)
+	if err := ps.PutAgent(store.Agent{Name: "ori", Role: "reviewer", Workspace: ".worktrees/ori"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutPR(store.PR{ID: "pr-1", Task: "sd-1", Agent: "dvalin", Branch: "sd-1", Status: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	id, err := ps.AddReview("pr-1", "review it")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.AssignReview(id, "ori"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: "ori", Phase: "reviewing"}); err != nil {
+		t.Fatal(err)
+	}
+	a := store.Agent{Project: testProject, Name: "ori"}
+	w.record(a, true, 0, seen("idle", "d1"))
+	standStill(t, w, testProject, "ori")
+
+	view := onlyAgent(t, h)
+	if view.Status != "stalled" {
+		t.Errorf("a reviewer whose screen stood still past the dwell reads %q, want stalled", view.Status)
+	}
+	if view.PR != "pr-1" {
+		t.Errorf("the row names PR %q, want the one it holds", view.PR)
+	}
+}
+
+// standStill backdates an agent's quiet spell past the dwell, which is how a test reaches a stall
+// without waiting minutes for one.
+func standStill(t *testing.T, w *watchdog, project, name string) {
+	t.Helper()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	l := w.obs[agentKey{project, name}]
+	l.stillSince = time.Now().Add(-workflow.StallDwell - time.Minute)
+	w.obs[agentKey{project, name}] = l
+}
+
+// TestStalledForLeavesAnAgentQueuedOnTheHubAlone: the pane signal (ToolRunning) cannot see this case
+// at all — nothing is running in the agent's OWN pane, because it is waiting on the fleet's queue,
+// the commonest instance of this same bug once gate results started caching.
+func TestStalledForLeavesAnAgentQueuedOnTheHubAlone(t *testing.T) {
+	h := newHub(t)
+	a := store.Agent{Project: "proj", Name: "dvalin"}
+	h.watch.record(a, true, 0, seen("idle", "d1"))
+	standStill(t, h.watch, "proj", "dvalin")
+
+	if _, stalled := h.stalledFor("proj", "dvalin", "working", ""); !stalled {
+		t.Fatal("sanity: past the dwell with no run queued, this must already read as stalled")
+	}
+
+	ps := h.store.For("proj")
+	if err := ps.PutRun(store.Run{ID: "run-1", Agent: "dvalin", Status: "queued"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, stalled := h.stalledFor("proj", "dvalin", "working", ""); stalled {
+		t.Error("an agent waiting on its own queued run must not read as stalled")
+	}
+}
+
 // TestStalledForNeedsAnObservation: an agent the watchdog has never seen, or one that is down, is
 // not stalled — it is unknown or stopped, and both already show as themselves.
 func TestStalledForNeedsAnObservation(t *testing.T) {
