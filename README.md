@@ -70,6 +70,26 @@ start below) — it starts the hub for you, so you rarely launch one by hand.
 note — never a hard failure): `openspec` (`npm i -g @fission-ai/openspec`) for the
 spec-driven workflow, and the Go toolchain for the `deadcode` linter.
 
+### Just `brokkr` (standalone)
+
+Want only the code map + linters, without the rest of sindri? Every release also
+publishes `brokkr` on its own — one line, straight to any path on your `PATH`
+(arm64 shown; replace `arm64` with `amd64` for an Intel machine):
+
+Linux:
+
+```bash
+curl -fsSL "$(curl -fsSL https://api.github.com/repos/flocko-motion/sindri/releases/latest | grep -o 'https://[^"]*brokkr_[^"]*_linux_arm64')" -o ~/.local/bin/brokkr && chmod +x ~/.local/bin/brokkr
+```
+
+macOS:
+
+```bash
+curl -fsSL "$(curl -fsSL https://api.github.com/repos/flocko-motion/sindri/releases/latest | grep -o 'https://[^"]*brokkr_[^"]*_darwin_arm64')" -o ~/.local/bin/brokkr && chmod +x ~/.local/bin/brokkr && xattr -d com.apple.quarantine ~/.local/bin/brokkr
+```
+
+(the last step clears Gatekeeper's quarantine on the unsigned binary.)
+
 ### Updating
 
 Sindri checks for a newer release once a day (and on demand via **`sindri
@@ -350,22 +370,9 @@ claim it before then.
 ## Dev tooling — `brokkr`
 
 `brokkr` is sindri's toolbelt: a separate, hub-less binary with the generic Go
-tools. Works on any repo, no orchestration involved.
-
-Every sindri release also publishes `brokkr` on its own — for using the code map and
-linters without installing the rest of sindri:
-
-```bash
-os=$(uname -s | tr '[:upper:]' '[:lower:]')
-arch=$(uname -m); [ "$arch" = x86_64 ] && arch=amd64; [ "$arch" = aarch64 ] && arch=arm64
-url=$(curl -fsSL https://api.github.com/repos/flocko-motion/sindri/releases/latest | grep -o "https://[^\"]*/brokkr_[^\"]*_${os}_${arch}" | head -1)
-curl -fsSL "$url" -o ~/.local/bin/brokkr && chmod +x ~/.local/bin/brokkr
-```
-
-It's a single unsigned binary, so on macOS Gatekeeper quarantines it on download —
-clear that once with `xattr -d com.apple.quarantine ~/.local/bin/brokkr` (the bundled
-tarball's `install.sh` does this step for you; this standalone binary has no
-installer, so it doesn't).
+tools. Works on any repo, no orchestration involved. It also installs on its own,
+without the rest of sindri — see [Install → Just `brokkr`
+(standalone)](#just-brokkr-standalone).
 
 ### Linters — `brokkr lint`
 
