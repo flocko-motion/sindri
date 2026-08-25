@@ -26,12 +26,15 @@ func TestJSLintSilentWithoutJSSource(t *testing.T) {
 func subdirTree(t *testing.T) string {
 	t.Helper()
 	return writeTree(t, map[string]string{
-		"web/package.json":          `{"name":"web"}`,
-		"web/tsconfig.json":         `{"compilerOptions":{}}`,
-		"web/src/a.ts":              "export const a = 1;\n",
-		"packages/lib/package.json": `{"name":"lib"}`, // declared, but nothing checks it
-		"packages/lib/src/b.ts":     "export const b = 2;\n",
-		"stray/src/c.ts":            "export const c = 3;\n", // no config anywhere above
+		"web/package.json":  `{"name":"web"}`,
+		"web/tsconfig.json": `{"compilerOptions":{}}`,
+		"web/src/a.ts":      "export const a = 1;\n",
+		// Installed, so a delegated tool's verdict about web/ is trustworthy: without them the
+		// type-check is skipped as unresolvable, whatever the tool would have said.
+		"web/node_modules/.package-lock.json": `{}`,
+		"packages/lib/package.json":           `{"name":"lib"}`, // declared, but nothing checks it
+		"packages/lib/src/b.ts":               "export const b = 2;\n",
+		"stray/src/c.ts":                      "export const c = 3;\n", // no config anywhere above
 	})
 }
 
@@ -146,6 +149,30 @@ func TestJSLintFindsProjectsInSubdirs(t *testing.T) {
 		assertDiscovery(t, got)
 		if strings.Contains(got, "not installed") {
 			t.Errorf("tsc was on PATH, so nothing may claim it is missing:\n%s", got)
+		}
+	})
+
+	// A global tsc cannot resolve types that live in a node_modules that is not there, so it fails on
+	// every file whatever the diff says. The hub's gate checks a commit out FRESH and node_modules is
+	// gitignored, so this is its normal state: dvalin lost five days to a verdict no diff could change.
+	t.Run("deps absent is a skip even with a tool on PATH", func(t *testing.T) {
+		stubToolPath(t, "tsc", 2) // a tsc that rejects whatever it is pointed at
+		root := writeTree(t, map[string]string{
+			"web/package.json":  `{"name":"web"}`,
+			"web/tsconfig.json": `{"compilerOptions":{"types":["node"]}}`,
+			"web/src/a.ts":      "export const a = 1;\n",
+		})
+		var out bytes.Buffer
+		found, err := JSLint(root, mustIgnore(t), &out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := out.String()
+		if found {
+			t.Errorf("an uninstalled project failed the gate on a verdict no diff could change:\n%s", got)
+		}
+		if !strings.Contains(got, "node_modules is absent") {
+			t.Errorf("the skip must name the missing dependencies as the reason:\n%s", got)
 		}
 	})
 
