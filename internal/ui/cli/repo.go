@@ -215,8 +215,14 @@ func printRepoDetail(d api.RepoDetail) {
 	fmt.Printf("repo:     %s\npath:     %s\ntag:      %s\n", d.Name, d.Path, d.Tag)
 	fmt.Printf("agents:   %d\ntasks:    %d open / %d total\nprs:      %d open / %d total\n",
 		d.Agents, d.OpenTasks, d.Tasks, d.OpenPRs, d.PRs)
-	fmt.Printf("config:\n  architecture:  %s\n  containerfile: %s\n  review_prompt: %s\n  github.issues: %s\n",
-		dash(d.Config.Architecture), dash(d.Config.Containerfile), dash(d.Config.ReviewPrompt), issues)
+	// verify first, and its absence spelled out rather than dashed: it is the only REQUIRED key, and
+	// a repo without one can submit nothing at all. The TUI's Repos pane says the same (-> gateLines),
+	// since a front-end that reports less than its sibling is how the two drift apart.
+	fmt.Printf("config:\n  verify:        %s\n  architecture:  %s\n  containerfile: %s\n  review_prompt: %s\n  github.issues: %s\n",
+		dash(d.Config.Verify), dash(d.Config.Architecture), dash(d.Config.Containerfile), dash(d.Config.ReviewPrompt), issues)
+	if d.Config.Verify == "" {
+		fmt.Printf("\nNO QUALITY GATE: nothing can be submitted from this repo until `verify:` names a script\nthat builds, tests and lints it. Set it with `sindri repo config verify <path>`.\n")
+	}
 }
 
 // withHub runs fn against the hub without requiring the cwd to be a git repo — for

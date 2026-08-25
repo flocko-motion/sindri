@@ -89,6 +89,9 @@ func (m model) repoItems() []metaItem {
 	items = append(items, repoAgentItems(m.state.Agents, tag)...)
 	items = append(items, metaItem{text: ""}, metaItem{text: "open prs:"})
 	items = append(items, repoPRItems(m.state.PRs, tag)...)
+	for _, l := range gateLines(m.state.RepoDocs[tag]) {
+		items = append(items, metaItem{text: l})
+	}
 	for _, l := range archLines(m.state.RepoDocs[tag]) {
 		items = append(items, metaItem{text: l})
 	}
@@ -150,6 +153,21 @@ func archLines(st api.RepoDocState) []string {
 		return nil // no snapshot for this repo (older hub) — say nothing rather than guess
 	}
 	return []string{"", stWarn.Render(warnGlyph + " no architecture doc"), dimStyle.Render("agents get no architecture brief — press E to set `architecture`")}
+}
+
+// gateLines renders the repo's quality gate, for the same reason archLines renders its doc — except
+// this one is REQUIRED: an ungated repo cannot submit at all, so its absence is the loudest thing
+// this pane can say about a repo.
+func gateLines(st api.RepoDocState) []string {
+	switch {
+	case st.GateOK:
+		return []string{"gate:   " + st.Gate}
+	case st.GateAdvice == "":
+		return nil // no snapshot for this repo (older hub) — say nothing rather than guess
+	case st.Gate != "":
+		return []string{"", stWarn.Render(warnGlyph + " gate " + st.Gate + " is missing"), dimStyle.Render("every submit refuses until that script is in the repo")}
+	}
+	return []string{"", stWarn.Render(warnGlyph + " no quality gate"), dimStyle.Render("nothing can be submitted from this repo — press E to set `verify`")}
 }
 
 // openColorChoice opens a picker of colour swatches for a repo: "default" (the

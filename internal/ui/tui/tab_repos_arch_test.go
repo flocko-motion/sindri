@@ -69,3 +69,30 @@ func TestRepoDetailSilentWithoutSnapshot(t *testing.T) {
 		t.Errorf("no snapshot should render no architecture line, got:\n%s", got)
 	}
 }
+
+// TestRepoDetailShowsTheGate: the gate is the one REQUIRED key — a repo without one can submit
+// nothing at all — so the pane that IS the UI for .sindri/config.yaml has to say when it is absent,
+// and say which script it is when present.
+func TestRepoDetailShowsTheGate(t *testing.T) {
+	got := repoDetail(t, api.RepoDocState{Gate: "scripts/check.sh", GateOK: true})
+	if !strings.Contains(got, "scripts/check.sh") {
+		t.Errorf("a configured gate should be named, got:\n%s", got)
+	}
+
+	got = repoDetail(t, api.RepoDocState{GateAdvice: "NO QUALITY GATE — …"})
+	if !strings.Contains(got, "no quality gate") {
+		t.Errorf("a repo that can submit nothing must say so, got:\n%s", got)
+	}
+
+	// A gate named but absent from the tree is its own case: the key is set, so "no quality gate"
+	// would send the reader to a config file that already looks right.
+	got = repoDetail(t, api.RepoDocState{Gate: "scripts/check.sh", GateAdvice: "the gate is not in the repo"})
+	if !strings.Contains(got, "missing") || !strings.Contains(got, "scripts/check.sh") {
+		t.Errorf("a missing gate script must be named as missing, got:\n%s", got)
+	}
+
+	// An older hub sends no gate fields at all; guessing from that would report every repo ungated.
+	if got := repoDetail(t, api.RepoDocState{Doc: "ARCHITECTURE.md", Readable: true, Set: true}); strings.Contains(got, "quality gate") {
+		t.Errorf("with no snapshot the pane must say nothing about the gate, got:\n%s", got)
+	}
+}

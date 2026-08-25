@@ -27,10 +27,13 @@ type configKey struct {
 	apply func(c *config.Config, v string) error
 }
 
-// configKeys is the settable surface, in display order. It is deliberately the whole file, not
-// the four keys the TUI form shows: a CLI that could only reach some of them would just be a
-// smaller gap in the same wall.
+// configKeys is the settable surface, in display order — verify first, since it is the only one a
+// repo cannot work without. Deliberately the whole file, not just the keys the TUI form shows: a
+// CLI that could only reach some of them would just be a smaller gap in the same wall.
 var configKeys = []configKey{
+	{"verify", "REQUIRED — repo-relative script the submit gate runs; without it nothing can be submitted",
+		func(c config.Config) string { return c.Verify },
+		func(c *config.Config, v string) error { c.Verify = v; return nil }},
 	{"architecture", "repo-relative architecture doc (default ARCHITECTURE.md)",
 		func(c config.Config) string { return c.Architecture },
 		func(c *config.Config, v string) error { c.Architecture = v; return nil }},
@@ -40,9 +43,6 @@ var configKeys = []configKey{
 	{"review_prompt", "repo-relative reviewer-prompt file (empty = built-in prompt)",
 		func(c config.Config) string { return c.ReviewPrompt },
 		func(c *config.Config, v string) error { c.ReviewPrompt = v; return nil }},
-	{"verify", "repo-relative executable the submit gate runs (empty = built-in gates only)",
-		func(c config.Config) string { return c.Verify },
-		func(c *config.Config, v string) error { c.Verify = v; return nil }},
 	{"reference", "branch agents work from and merge into (empty = the checkout's current branch)",
 		func(c config.Config) string { return c.Reference },
 		func(c *config.Config, v string) error { c.Reference = v; return nil }},

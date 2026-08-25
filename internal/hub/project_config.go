@@ -69,10 +69,23 @@ func (h *Hub) repoDocState(root string) RepoDocState {
 		return RepoDocState{Advice: err.Error()}
 	}
 	st := RepoDocState{Doc: cfg.Architecture, Set: cfg.ArchitectureSet}
+	st.Gate, st.GateOK, st.GateAdvice = repoGateState(root, cfg.Verify)
 	if _, serr := os.Stat(filepath.Join(root, st.Doc)); serr == nil {
 		st.Readable = true
 		return st
 	}
 	st.Advice = fmt.Sprintf("no architecture doc — agents get no architecture brief. Point sindri at yours with `architecture: <path>` in %s/.sindri/config.yaml", root)
 	return st
+}
+
+// repoGateState resolves the repo's quality gate the same way, and for the same reason: every
+// surface that reports it reads this, so the TUI, the CLI and the hub's own warning agree.
+func repoGateState(root, verify string) (gate string, ok bool, advice string) {
+	if verify == "" {
+		return "", false, fmt.Sprintf("NO QUALITY GATE — nothing can be submitted from this repo. Set `verify: <script>` in %s/.sindri/config.yaml, pointing at a script that builds, tests and lints it", root)
+	}
+	if _, err := os.Stat(filepath.Join(root, verify)); err != nil {
+		return verify, false, fmt.Sprintf("the gate `%s` is not in the repo — every submit refuses until it is there", verify)
+	}
+	return verify, true, ""
 }
