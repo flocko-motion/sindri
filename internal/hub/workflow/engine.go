@@ -63,6 +63,9 @@ type Deps interface {
 	TaskComments(project, id string) []store.Comment
 	// AddTaskComment posts on a task's thread as author — TaskComments' write half.
 	AddTaskComment(project, id, author, body string) error
+	// Escalate stops an agent on a decision only the user can make, recording the question where a
+	// later reader looks. The hub's own verb, so a hub-raised escalation is the agent's in every way.
+	Escalate(project, name, question string) (task string, err error)
 	// KnownProjects returns the registered repos (for fleet-wide PR listing).
 	KnownProjects() []store.Project
 	// ContextUsage reports the session's context size, window and model, off its transcript. ok=false

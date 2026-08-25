@@ -61,6 +61,8 @@ type stubDeps struct {
 	// order, so a test can assert prepareAssignment brackets its work correctly (and always closes
 	// the bracket, even when SetModel or Compact underneath it errors).
 	assignBrackets []string
+	// escalated records Escalate calls as "name: question", in order.
+	escalated []string
 }
 
 func (d *stubDeps) ProjectRoot(string) string { return d.root }
@@ -100,6 +102,14 @@ func (d *stubDeps) writeTestGate(root string) {
 		}
 	}
 }
+
+// Escalate records the question, so a test can assert the hub stopped an agent rather than merely
+// telling it something it could not act on.
+func (d *stubDeps) Escalate(_, name, question string) (string, error) {
+	d.escalated = append(d.escalated, name+": "+question)
+	return "", nil
+}
+
 func (d *stubDeps) ArchitectureDoc(string) string   { return "" }
 func (d *stubDeps) Container(_, name string) string { return name }
 func (d *stubDeps) Notify()                         {}

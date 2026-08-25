@@ -352,6 +352,21 @@ claim it before then.
 `brokkr` is sindri's toolbelt: a separate, hub-less binary with the generic Go
 tools. Works on any repo, no orchestration involved.
 
+Every sindri release also publishes `brokkr` on its own — for using the code map and
+linters without installing the rest of sindri:
+
+```bash
+os=$(uname -s | tr '[:upper:]' '[:lower:]')
+arch=$(uname -m); [ "$arch" = x86_64 ] && arch=amd64; [ "$arch" = aarch64 ] && arch=arm64
+url=$(curl -fsSL https://api.github.com/repos/flocko-motion/sindri/releases/latest | grep -o "https://[^\"]*/brokkr_[^\"]*_${os}_${arch}" | head -1)
+curl -fsSL "$url" -o ~/.local/bin/brokkr && chmod +x ~/.local/bin/brokkr
+```
+
+It's a single unsigned binary, so on macOS Gatekeeper quarantines it on download —
+clear that once with `xattr -d com.apple.quarantine ~/.local/bin/brokkr` (the bundled
+tarball's `install.sh` does this step for you; this standalone binary has no
+installer, so it doesn't).
+
 ### Linters — `brokkr lint`
 
 ```bash

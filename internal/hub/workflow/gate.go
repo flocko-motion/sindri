@@ -513,6 +513,11 @@ func (e *Engine) landSubmit(project string, ps *store.ProjectStore, r api.Run) e
 // rejectGate lands a failed gate: back to "working" with the violations, exactly what an inline
 // refusal left the agent to fix — only the delivery (injected, not a command reply) differs.
 func (e *Engine) rejectGate(project string, ps *store.ProjectStore, r api.Run, output string) error {
+	// Not a finding about the diff: only the user can set `verify:`, so "fix the violations" would
+	// send the agent hunting its own work for a fault that is not there.
+	if strings.TrimSpace(output) == strings.TrimSpace(repo.MsgNoGate) {
+		return e.escalateNoGate(project, ps, r)
+	}
 	st, err := e.backToWorking(ps, r)
 	if err != nil {
 		return err
@@ -520,6 +525,23 @@ func (e *Engine) rejectGate(project string, ps *store.ProjectStore, r api.Run, o
 	_ = ps.Log(r.Agent, "lint-fail", gateTarget(st))
 	e.deps.Notify()
 	return e.deps.Deliver(project, r.Agent, MsgGateFailed(strings.TrimSpace(output)), MailAndPush)
+}
+
+// escalateNoGate stops the agent on the one question it cannot answer. Escalated rather than told:
+// nothing it does next can land, and the escalation is what reaches the user.
+func (e *Engine) escalateNoGate(project string, ps *store.ProjectStore, r api.Run) error {
+	if _, err := e.deps.Escalate(project, r.Agent, MsgNoGateQuestion); err != nil {
+		return err
+	}
+	_ = ps.Log(r.Agent, "gate-unconfigured", gateTarget(mustState(ps, r.Agent)))
+	e.deps.Notify()
+	return e.deps.Deliver(project, r.Agent, MsgNoGateEscalated(repo.MsgNoGate), MailAndPush)
+}
+
+// mustState reads a state row where its absence is not actionable: the caller is only reporting.
+func mustState(ps *store.ProjectStore, agent string) store.AgentState {
+	st, _ := ps.GetState(agent)
+	return st
 }
 
 // stallGate lands a gate that never reached a verdict: back to "working", told to just try again

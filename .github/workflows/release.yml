@@ -1,13 +1,17 @@
 name: release
 
 # Build and publish release assets whenever a semver tag (vMAJOR.MINOR.PATCH) is
-# pushed — e.g. by `make release <major|minor|patch>`. Ships one artifact shape for
-# every platform: a tarball (linux + darwin, arm64 + amd64) that install.sh unpacks
-# into ~/.local/bin. All cross-compiled on the Linux runner (pure Go, no cgo).
+# pushed — e.g. by `make release <major|minor|patch>`. Ships two artifact shapes for
+# every platform (linux + darwin, arm64 + amd64), all cross-compiled on the Linux
+# runner (pure Go, no cgo):
+#   - the sindri tarball, unpacked into ~/.local/bin by its bundled install.sh
+#   - a standalone `brokkr` binary, for using the code map + linters without the
+#     rest of sindri
 #
-# There is deliberately NO .deb. A system package lands in /usr/bin, which then
-# shadows or is shadowed by the ~/.local/bin install depending on PATH order, and
-# the two drift apart silently. One install location means one build in play.
+# There is deliberately NO .deb for the sindri tarball. A system package lands in
+# /usr/bin, which then shadows or is shadowed by the ~/.local/bin install depending
+# on PATH order, and the two drift apart silently. One install location means one
+# build in play.
 on:
   push:
     tags:
@@ -62,6 +66,9 @@ jobs:
               go build -ldflags "-X main.version=${ver}" -o "$stage/sindri-hub" ./cmd/sindri-hub/
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
               go build -ldflags "-X main.version=${ver} -X main.buildTime=${built}" -o "$stage/brokkr" ./cmd/brokkr/
+            # Same binary, published a second time as a standalone download —
+            # `brokkr map`/`lint` is useful on its own, without the rest of sindri.
+            cp "$stage/brokkr" "dist/brokkr_${ver}_${os}_${arch}"
             # The browser and brokkr-linux run INSIDE the (always linux) pod, so they are
             # linux builds arch-matched to the host's VM — on linux, the same as above.
             CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
@@ -87,11 +94,12 @@ jobs:
             tar -C dist -czf "dist/sindri_${ver}_${os}_${arch}.tar.gz" "sindri_${ver}_${os}_${arch}"
           done
           done
-          ls -la dist/*.tar.gz
+          ls -la dist/*.tar.gz dist/brokkr_*
 
       - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/sindri_*.tar.gz
+            dist/brokkr_*
           generate_release_notes: true

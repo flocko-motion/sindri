@@ -4,9 +4,10 @@
 # branch (catching any conflict locally, up front), force-push it, open + merge a
 # PR into the default branch (so the tag points at merged code), tag the merged
 # tip, and push the tag — which triggers the release workflow (build + attach the
-# .deb). Once the PR has merged it rebases your branch onto the updated default and
-# pushes it, so the release branch ends the cycle current with main (ready for the
-# next round) rather than stranded behind. It then returns you to the branch you
+# sindri tarballs and the standalone brokkr binaries). Once the PR has merged it
+# rebases your branch onto the updated default and pushes it, so the release
+# branch ends the cycle current with main (ready for the next round) rather than
+# stranded behind. It then returns you to the branch you
 # started on; it never leaves you on, or commits directly to, the default branch.
 # The rebases rewrite history, so the branch pushes are lease-guarded forces.
 # Every wait here is a wait with a verdict: a failed PR check (or a conflict) aborts

@@ -170,11 +170,13 @@ fullloop: build ## full autonomous loop with two real Claude agents (worker + re
 
 all: build image install ## build everything (binaries + agent image) and install
 
-# One artifact shape for every OS: a tarball that install.sh unpacks into ~/.local/bin.
-# There is deliberately no .deb — a system package installs to /usr/bin, which then
-# shadows (or is shadowed by) the ~/.local/bin install depending on PATH order, and the
-# two drift apart silently. One location means one build can ever be in play.
-tarball: build ## build the release tarball into dist/ (binaries + bundled yq + install.sh)
+# Two artifact shapes for every OS: a tarball that install.sh unpacks into
+# ~/.local/bin, and brokkr published a second time as a standalone binary (useful on
+# its own, without the rest of sindri). There is deliberately no .deb for the
+# tarball — a system package installs to /usr/bin, which then shadows (or is
+# shadowed by) the ~/.local/bin install depending on PATH order, and the two drift
+# apart silently. One location means one build can ever be in play.
+tarball: build ## build the release tarball + standalone brokkr into dist/
 	cp "$$(command -v yq)" bin/yq
 	rm -rf "dist/sindri_$(VERSION)_$(GOOS)_$(ARCH)"
 	mkdir -p "dist/sindri_$(VERSION)_$(GOOS)_$(ARCH)"
@@ -183,7 +185,8 @@ tarball: build ## build the release tarball into dist/ (binaries + bundled yq + 
 	cp scripts/install.sh "dist/sindri_$(VERSION)_$(GOOS)_$(ARCH)/install.sh"
 	chmod +x "dist/sindri_$(VERSION)_$(GOOS)_$(ARCH)/install.sh"
 	tar -C dist -czf "dist/sindri_$(VERSION)_$(GOOS)_$(ARCH).tar.gz" "sindri_$(VERSION)_$(GOOS)_$(ARCH)"
-	@echo "built dist/sindri_$(VERSION)_$(GOOS)_$(ARCH).tar.gz"
+	cp bin/brokkr "dist/brokkr_$(VERSION)_$(GOOS)_$(ARCH)"
+	@echo "built dist/sindri_$(VERSION)_$(GOOS)_$(ARCH).tar.gz and dist/brokkr_$(VERSION)_$(GOOS)_$(ARCH)"
 
 release: ## cut a release (validates arg, then lints): make release <major|minor|patch> (breaking|feature|fix too)
 	@./scripts/release.sh $(filter major minor patch breaking feature fix,$(MAKECMDGOALS))
