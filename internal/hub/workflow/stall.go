@@ -105,6 +105,15 @@ func (e *Engine) NudgeStalled(project, name, runtime string, idleFor time.Durati
 		held = pr
 	}
 	if held == "" {
+		// An authored PR still to land is held work too, and all that is left to name once a
+		// checkpoint has emptied the state row: austri sat on a rejected pr-sd-a47b61 unnamed.
+		pr, _, aerr := ps.AwaitingPR(name)
+		if aerr != nil {
+			return false
+		}
+		held = pr
+	}
+	if held == "" {
 		return false // nothing to name, so nothing useful to say
 	}
 	if err := e.deps.Deliver(project, name, MsgStalled(held, idleFor), PushOnly); err != nil {

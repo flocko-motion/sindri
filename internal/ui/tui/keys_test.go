@@ -10,9 +10,31 @@ import (
 	"github.com/flo-at/sindri/internal/client"
 )
 
+// dispatchKeyParts splits a compound display row and keeps only the parts onKey actually matches
+// on: single runes, plus the few multi-character names bubbletea reports whole ("enter", "esc").
+// Everything else ("[]", "C-h", a jump-range placeholder like "1-7") is prose, not a real key — a
+// rune-count check alone missed "enter" (sd-5e3032's review), so the exceptions are named here
+// rather than derived, and a future multi-character key needs adding to this list to be guarded.
+// keySearch ("/") is its own special case: elsewhere "/" separates alternatives in a display row,
+// but here it IS the key, so splitting on it would erase it into two empty strings.
+func dispatchKeyParts(keys string) []string {
+	if keys == keySearch {
+		return []string{keys}
+	}
+	var out []string
+	for _, part := range strings.Split(keys, "/") {
+		if part == "⇥" {
+			continue // the tab glyph is decorative — bubbletea never reports a keypress as "⇥"
+		}
+		if len([]rune(part)) == 1 || part == keyEnter || part == keyClearFilters {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
 // scopeLabels is what a tab's footer effectively offers: its own bindings plus the global ones,
-// which show on every tab. Compound display rows ("j/k", "A/R") are split, and any part that
-// isn't a single key ("[]", "C-h", "enter") is dropped — those are prose, not dispatchable keys.
+// which show on every tab.
 func scopeLabels(t *testing.T, scope keyScope) map[string][]string {
 	t.Helper()
 	m := newModel(nil, nil, "/r/one")
@@ -21,20 +43,70 @@ func scopeLabels(t *testing.T, scope keyScope) map[string][]string {
 		if b.scope != scope && b.scope != scopeGlobal {
 			continue
 		}
-		for _, part := range strings.Split(b.keys, "/") {
-			if len([]rune(part)) == 1 {
-				out[part] = append(out[part], b.label(m))
-			}
+		for _, part := range dispatchKeyParts(b.keys) {
+			out[part] = append(out[part], b.label(m))
 		}
 	}
 	return out
 }
 
+// TestScopeToggleWorksOnRunsAndMail: keys.go advertises "s scope: …" on Runs and Mail (with a
+// label that renders live state, reading as working), so onKey's guard must actually act on both,
+// not just Agents and PRs. Both tabs' rows are inScope-filtered (runRows, mailShown ->
+// mailVisible), so the fix is widening the guard, not dropping the rows.
+func TestScopeToggleWorksOnRunsAndMail(t *testing.T) {
+	for _, tab := range []int{5, 6} {
+		m := newModel(nil, nil, "/r/one")
+		m.tab = tab
+		before := m.scopeRepo
+		m.onKey(keyScopeTog)
+		if m.scopeRepo == before {
+			t.Errorf("tab %d: %q should toggle scopeRepo, still %v", tab, keyScopeTog, m.scopeRepo)
+		}
+		if m.flash == "" {
+			t.Errorf("tab %d: toggling scope should flash the new state", tab)
+		}
+	}
+}
+
+// TestRunsScopeLabelDoesNotClaimNeedsYou: once the scope key actually works on Runs, its label —
+// "scope: " + scopeName(m.scopeRepo, m) — is an authoritative claim, not dead advertising.
+// runRows filters on inScope alone (no RunNeedsUser anywhere in internal/api), so scopeNeedsYou
+// must say false for Runs, or the label would claim "repo+needs-you" wording Runs does not keep.
+func TestRunsScopeLabelDoesNotClaimNeedsYou(t *testing.T) {
+	m := newModel(nil, nil, "/r/one")
+	m.tab, m.scopeRepo = 5, true
+	footer := m.contextFooter()
+	if strings.Contains(footer, "needs-you") {
+		t.Errorf("Runs scope label should not claim needs-you, got %q", footer)
+	}
+	if !strings.Contains(footer, "scope: repo") {
+		t.Errorf("Runs scope label should say plain repo, got %q", footer)
+	}
+}
+
+// TestMailToUserSurvivesRepoScope: `repo` scope shows only the active repo's entries on Runs, but
+// not on Mail — mailVisible deliberately keeps a message addressed to the user regardless of its
+// repo, since the unread marker beside the Mail tab counts it fleet-wide (sd-ac1757/sd-57e895).
+// Scoping it away would make the badge point at a row the list no longer has.
+func TestMailToUserSurvivesRepoScope(t *testing.T) {
+	m := newModel(nil, nil, "/r/here")
+	m.tab, m.scopeRepo = 6, true
+	m.state = api.BoardState{
+		Projects: []api.Project{{Tag: "here", Path: "/r/here"}, {Tag: "there", Path: "/r/there"}},
+		Mail:     []api.Mail{{ID: 1, Project: "there", Agent: api.SenderUser, Sender: "hub", Body: "from another repo"}},
+	}
+	shown := m.mailShown()
+	if len(shown) != 1 || shown[0].ID != 1 {
+		t.Errorf("a message addressed to the user from another repo should survive repo scope, got %v", shown)
+	}
+}
+
 // TestNoTwoActionsShareAKeyOnATab is the guard keys.go claims to be: one key, one meaning per
-// tab. The same key with the same label twice is only a duplicated help row (config is listed
-// globally and on Repos), so labels — not counts — decide what a conflict is.
+// tab. Labels, not counts, decide what a conflict is — a key legitimately declared at more than
+// one scope with the SAME label is one action seen twice, not two competing ones.
 func TestNoTwoActionsShareAKeyOnATab(t *testing.T) {
-	for _, scope := range []keyScope{scopeGlobal, scopeTasks, scopeAgents, scopePRs, scopeRepos, scopeChat, scopeMail} {
+	for _, scope := range []keyScope{scopeGlobal, scopeTasks, scopeAgents, scopePRs, scopeRepos, scopeChat, scopeRuns, scopeMail} {
 		for key, labels := range scopeLabels(t, scope) {
 			for _, l := range labels {
 				if l != labels[0] {
@@ -146,14 +218,26 @@ func TestConfirmModalsDefaultToCancel(t *testing.T) {
 // TestEditorIsBoundToE: the editor opens with `e`, the letter it starts with, on every tab that
 // offers it — `o` was a mnemonic for nothing, and now opens a shell instead.
 func TestEditorIsBoundToE(t *testing.T) {
-	for _, scope := range []keyScope{scopePRs, scopeAgents} {
-		footer := footerOf(t, scope)
-		if !strings.Contains(footer, keyEdit+" editor") {
-			t.Errorf("scope %d should open the editor with %q:\n%s", scope, keyEdit, footer)
-		}
-		if strings.Contains(footer, "o editor") {
-			t.Errorf("scope %d still offers the old editor key:\n%s", scope, footer)
-		}
+	footer := footerOf(t, scopePRs)
+	if !strings.Contains(footer, keyEdit+" editor") {
+		t.Errorf("PRs should open the editor with %q:\n%s", keyEdit, footer)
+	}
+	if strings.Contains(footer, "o editor") {
+		t.Errorf("PRs still offers the old editor key:\n%s", footer)
+	}
+
+	// Agents' editor is `when`-gated against agentSelected (it silently no-ops on an orphan
+	// container otherwise), so this needs a real roster agent selected to be offered at all.
+	m := newModel(nil, nil, "/r/one")
+	m.tab = 1
+	m.state = api.BoardState{Agents: []api.AgentView{{Name: "dvalin", Project: "repo", Status: "idle"}}}
+	m.reclamp()
+	footer = m.footerFor(scopeAgents)
+	if !strings.Contains(footer, keyEdit+" editor") {
+		t.Errorf("Agents should open the editor with %q:\n%s", keyEdit, footer)
+	}
+	if strings.Contains(footer, "o editor") {
+		t.Errorf("Agents still offers the old editor key:\n%s", footer)
 	}
 }
 
@@ -427,6 +511,32 @@ func TestNewMeetingKeyIsOfferedAndConfirmed(t *testing.T) {
 	// Cancel is first, so a stray Enter on the modal cannot wipe the room.
 	if len(m.choice.values) == 0 || m.choice.values[0] != "cancel" {
 		t.Errorf("cancel must be the default option, got %v", m.choice.values)
+	}
+}
+
+// TestWhyNoReviewSitsInThePRsBlock: keyWhyNext's PRs row must be declared inside the PRs block, or
+// keymap's array order lets it lead the reference ahead of verify — against that group's own
+// stated order ("look..., then the verdicts, then merge"). It must render after every other PRs
+// binding, not before verify (a committing row, so this is only visible in the reference, not the
+// footer, which skips committing bindings).
+func TestWhyNoReviewSitsInThePRsBlock(t *testing.T) {
+	m := newModel(nil, nil, "/r/one")
+	m.tab = 2 // PRs
+	lines := m.helpLines()
+	verifyAt, whyAt := -1, -1
+	for i, l := range lines {
+		if strings.Contains(l, "verify") {
+			verifyAt = i
+		}
+		if strings.Contains(l, "why no review") {
+			whyAt = i
+		}
+	}
+	if verifyAt < 0 || whyAt < 0 {
+		t.Fatalf("expected both verify and why no review in the PRs reference, got:\n%s", strings.Join(lines, "\n"))
+	}
+	if whyAt < verifyAt {
+		t.Errorf("why no review should not lead the PRs reference ahead of verify, got:\n%s", strings.Join(lines, "\n"))
 	}
 }
 

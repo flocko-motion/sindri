@@ -63,6 +63,9 @@ func (m *model) onKey(k string) tea.Cmd {
 		return nil // it lives behind the prefix now: space, then the same letter
 	}
 	switch k {
+	case keyHelp: // reference modal: the current tab's bindings, then every global one, in full
+		m.openHelpModal()
+		return nil
 	case keyQuit, "ctrl+c":
 		m.quit = true
 		return nil
@@ -154,14 +157,16 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.restoreSelection(sel)
 			return textinput.Blink
 		}
+	// h/l fold the row the cursor is on, not the pane with focus, so both work the same whichever
+	// column is focused.
 	case "h": // tasks: collapse the fold under the cursor (tree navigation)
-		if m.tab == 0 && !m.rightFocus {
+		if m.tab == 0 {
 			if id := m.selID(); id != "" {
 				m.collapsed[id] = true
 			}
 		}
 	case "l": // tasks: expand the fold under the cursor (tree navigation)
-		if m.tab == 0 && !m.rightFocus {
+		if m.tab == 0 {
 			delete(m.collapsed, m.selID())
 		}
 	case keyStartS: // agents: Start/Stop toggle — start if down, stop if running
@@ -189,7 +194,7 @@ func (m *model) onKey(k string) tea.Cmd {
 			// the work, so it should reach the agent doing it without a detour via the Agents tab.
 			a, ok := m.agentOnTask(m.selID())
 			if !ok {
-				m.flash = "no agent is working " + m.selID()
+				m.flash = noAgentFlash(m.selID())
 				return nil
 			}
 			return m.attachTo(a)
@@ -204,7 +209,7 @@ func (m *model) onKey(k string) tea.Cmd {
 			// without a detour via the Agents tab.
 			a, ok := m.agentOnPR(m.selID())
 			if !ok {
-				m.flash = "no agent is working " + m.selID()
+				m.flash = noAgentFlash(m.selID())
 				return nil
 			}
 			return m.attachTo(a)
@@ -464,7 +469,7 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.openClearContextChoice(a)
 			return nil
 		}
-	case "enter":
+	case keyEnter:
 		if m.tab == 4 { // Chat: open the multiline composer in the main pane
 			return m.startComposing()
 		}
@@ -553,12 +558,13 @@ func (m *model) onKey(k string) tea.Cmd {
 			m.openColorChoice(m.selID())
 			return nil
 		}
-	case keyScopeTog: // agents/prs: toggle the TUI-wide scope between the active repo and all repos
-		if m.tab == 1 || m.tab == 2 {
+	case keyScopeTog: // agents/prs/runs/mail: toggle the TUI-wide scope between the active repo and all repos
+		if m.tab == 1 || m.tab == 2 || m.tab == 5 || m.tab == 6 {
 			m.scopeRepo = !m.scopeRepo
-			// Both Agents and PRs re-filter, so reset both their cursors (reclamp
-			// keeps them valid, but the lists change out from under the old position).
-			m.cursor[1], m.cursor[2] = 0, 0
+			// All four tabs' rows are inScope-filtered and re-filter together, so reset every one
+			// of their cursors — reclamp keeps them valid, but the lists change out from under
+			// the old position.
+			m.cursor[1], m.cursor[2], m.cursor[5], m.cursor[6] = 0, 0, 0, 0
 			if m.scopeRepo {
 				m.flash = "scope: this repo"
 			} else {
@@ -582,3 +588,12 @@ func (m *model) onKey(k string) tea.Cmd {
 // resumed asks the loop to repaint after an interactive child exits. Its exit error is dropped:
 // nothing here can act on a shell that exited non-zero, and a modal about it is only noise.
 func resumed(error) tea.Msg { return resumedMsg{} }
+
+// noAgentFlash is attach's no-agent-found flash for Tasks and PRs: id is "" when nothing is
+// selected, and "no agent is working " + "" read as a truncated sentence rather than an answer.
+func noAgentFlash(id string) string {
+	if id == "" {
+		return "nothing selected"
+	}
+	return "no agent is working " + id
+}

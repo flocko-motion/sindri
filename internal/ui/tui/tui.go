@@ -481,7 +481,7 @@ func (m model) View() string {
 	case m.menu:
 		foot = m.menuFooter(m.w)
 	default:
-		global := m.footerFor(scopeGlobal)
+		global := m.globalFooter(m.w)
 		if m.flash != "" {
 			global = m.flash
 		}

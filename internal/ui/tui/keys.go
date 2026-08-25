@@ -9,7 +9,10 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Action-key constants: onKey switches on these and the keymap lists them, so a rebinding is one
@@ -22,6 +25,7 @@ import (
 // land on either side; the call is recorded on the binding it was made for, not stated here.
 // Committing sits behind the space prefix (keyMenu); M is still merge.
 const (
+	keyHelp      = "?" // list every hotkey — the current tab's, then global — conditions spelled out
 	keyNew       = "N" // new task / new agent
 	keyBrief     = "B" // hand a task to a planner to work up (brief)
 	keyEdit      = "e" // edit the selection: task fields (tasks) / open the workspace in $EDITOR (agents, prs)
@@ -68,8 +72,9 @@ const (
 	// esc, on a plain list: clear every narrowing at once. Unbound there until now, and "get me out
 	// of this narrowed view" is what it already means over a modal or a prompt.
 	keyClearFilters = "esc"
-	keyDetail       = "§" // toggle the detail pane
-	keyQuit         = "q" // quit
+	keyDetail       = "§"     // toggle the detail pane
+	keyQuit         = "q"     // quit
+	keyEnter        = "enter" // not a single rune — named here so every use agrees on the string
 )
 
 // keyScope selects where a binding applies and is shown.
@@ -86,14 +91,20 @@ const (
 	scopeMail
 )
 
-// binding is one row of help: the displayed key(s), a label, the scope it shows in, and whether it
-// COMMITS. `when` narrows a binding to the rows it applies to (nil = always; menuOffers/footerFor).
+// binding is one row of help: keys, label, scope, and whether it COMMITS. `when` narrows a
+// binding to the rows it applies to; whenText names that condition for the help modal.
 type binding struct {
 	keys    string
 	label   func(m model) string
 	scope   keyScope
 	commits bool
 	when    func(m model) bool
+	// whenText names `when` in words, for the help modal. Every binding with `when` set MUST carry
+	// one (-> TestEveryWhenGatedBindingHasWhenText).
+	whenText string
+	// refOnly keeps a binding out of the footer (esc, enter — real dispatcher keys the footer rows
+	// deliberately never carried) while still listing it in the "?" reference.
+	refOnly bool
 }
 
 // lbl wraps a static label.
@@ -104,6 +115,7 @@ func lbl(s string) func(model) string { return func(model) string { return s } }
 var keymap = []binding{
 	// Global (first footer row): compound nav rows are display-only. "C-h/C-l", not "C-h/l" — the
 	// trailing bare "l" would misread as the real, different binding tasks: expand a fold uses.
+	{keys: keyHelp, label: lbl("help"), scope: scopeGlobal}, // leads the row: kept longest if it sheds
 	{keys: "⇥/[]", label: lbl("tab"), scope: scopeGlobal},
 	// 1-N jumps straight to a tab by its header number (tui.go); out of range is inert, never a
 	// jump to whatever the last tab happens to be (-> onKey's digit case).
@@ -119,13 +131,14 @@ var keymap = []binding{
 	{keys: keyRepo, label: lbl("repo"), scope: scopeGlobal},
 	{keys: keyConfig, label: lbl("config"), scope: scopeGlobal, commits: true},
 	{keys: keyRefresh, label: lbl("refresh"), scope: scopeGlobal},
-	// esc is deliberately not a footer row: it does something only while narrowed, and the line
-	// above the rows already names it exactly when it works.
+	// esc is a real dispatcher key the footer never carried (refOnly keeps it off, but not off
+	// "?"). enter has no global row here: its meaning is per-tab, declared per scope below.
+	{keys: keyClearFilters, label: lbl("clear filters"), scope: scopeGlobal, refOnly: true},
 	{keys: keyQuit, label: lbl("quit"), scope: scopeGlobal},
 
 	// Tasks: each scope's rows are grouped and ordered look-first, so the footer reads left to
 	// right from the harmless to the decisive.
-	{keys: keyNew, label: lbl("new"), scope: scopeTasks},
+	{keys: keyNew, label: lbl("new"), scope: scopeTasks, commits: true}, // was direct; now matches Chat's N (sd-5e3032)
 	{keys: "h/l", label: lbl("fold"), scope: scopeTasks},
 	{keys: keyBrief, label: lbl("brief a planner"), scope: scopeTasks},
 	{keys: keyComment, label: lbl("comment"), scope: scopeTasks},
@@ -133,29 +146,32 @@ var keymap = []binding{
 	{keys: keyEdit, label: lbl("edit"), scope: scopeTasks},
 	{keys: keyPriority, label: lbl("priority"), scope: scopeTasks},
 	{keys: keySearch, label: lbl("search"), scope: scopeTasks},
-	{keys: keyUnassign, label: lbl("unassign"), scope: scopeTasks, commits: true, when: taskHeld},
-	{keys: keyClose, label: lbl("close"), scope: scopeTasks, commits: true, when: taskOpen},
-	{keys: keyOptions, label: lbl("reopen"), scope: scopeTasks, commits: true},
+	{keys: keyUnassign, label: lbl("unassign"), scope: scopeTasks, commits: true, when: taskHeld, whenText: "while an agent holds it"},
+	{keys: keyClose, label: lbl("close"), scope: scopeTasks, commits: true, when: taskOpen, whenText: "while it's open"},
+	{keys: keyOptions, label: lbl("reopen"), scope: scopeTasks, commits: true, when: model.taskReopenable, whenText: "while it's closed"},
 	{keys: keyDelete, label: lbl("scrap"), scope: scopeTasks, commits: true},
-	{keys: keyApprove, label: lbl("approve"), scope: scopeTasks, commits: true, when: taskAwaitsVerdict},
-	{keys: keyReject, label: lbl("reject"), scope: scopeTasks, commits: true, when: taskAwaitsVerdict},
+	{keys: keyApprove, label: lbl("approve"), scope: scopeTasks, commits: true, when: taskAwaitsVerdict, whenText: "while awaiting your verdict"},
+	{keys: keyReject, label: lbl("reject"), scope: scopeTasks, commits: true, when: taskAwaitsVerdict, whenText: "while awaiting your verdict"},
 	{keys: keyWhyNext, label: lbl("why next"), scope: scopeTasks},
-	{keys: keyWhyNext, label: lbl("why no review"), scope: scopePRs},
 	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.filter) }, scope: scopeTasks},
+	{keys: keyEnter, label: lbl("full screen"), scope: scopeTasks, refOnly: true},
 
 	// Agents.
-	{keys: keyNew, label: lbl("new"), scope: scopeAgents},
-	{keys: keyTell, label: lbl("tell: push now"), scope: scopeAgents},
-	{keys: keyMail, label: lbl("mail: waits"), scope: scopeAgents},
-	{keys: keyAttach, label: lbl("attach"), scope: scopeAgents},
-	{keys: keyEdit, label: lbl("editor"), scope: scopeAgents},
+	{keys: keyNew, label: lbl("new"), scope: scopeAgents, commits: true}, // same call as Tasks' N (sd-5e3032)
+	// The following all silently no-op on an orphan container (selAgent finds nothing to act on),
+	// so each needs agentSelected to say so.
+	{keys: keyTell, label: lbl("tell: push now"), scope: scopeAgents, when: agentSelected, whenText: "while a roster agent, not an orphan"},
+	{keys: keyMail, label: lbl("mail: waits"), scope: scopeAgents, when: agentSelected, whenText: "while a roster agent, not an orphan"},
+	{keys: keyAttach, label: lbl("attach"), scope: scopeAgents, when: agentSelected, whenText: "while a roster agent, not an orphan"},
+	{keys: keyEdit, label: lbl("editor"), scope: scopeAgents, when: agentSelected, whenText: "while a roster agent, not an orphan"},
 	{keys: keyOpen, label: lbl("open"), scope: scopeAgents},
-	{keys: keyStartS, label: lbl("start/stop"), scope: scopeAgents, commits: true},
-	{keys: keyOptions, label: lbl("options"), scope: scopeAgents, commits: true},
+	{keys: keyStartS, label: lbl("start/stop"), scope: scopeAgents, commits: true, when: agentSelected, whenText: "while a roster agent, not an orphan"},
+	{keys: keyOptions, label: lbl("options"), scope: scopeAgents, commits: true, when: agentSelected, whenText: "while a roster agent, not an orphan"},
 	{keys: keyStats, label: lbl("stats"), scope: scopeAgents},
-	{keys: keyMilestone, label: lbl("milestone PR"), scope: scopeAgents, commits: true},
-	{keys: keyRebuild, label: lbl("rebuild image"), scope: scopeAgents, commits: true},
-	{keys: keyReject, label: lbl("rebase"), scope: scopeAgents, commits: true}, // R = reBase (onto the reference branch)
+	{keys: keyMilestone, label: lbl("milestone PR"), scope: scopeAgents, commits: true, when: agentSelected, whenText: "while a roster agent, not an orphan"},
+	{keys: keyRebuild, label: lbl("rebuild image"), scope: scopeAgents, commits: true, when: agentSelected, whenText: "while a roster agent, not an orphan"},
+	// R = reBase (onto the reference branch)
+	{keys: keyReject, label: lbl("rebase"), scope: scopeAgents, commits: true, when: agentSelected, whenText: "while a roster agent, not an orphan"},
 	// The label tracks the selection, since the key toggles and "retire" on an already-retired
 	// agent reads as a no-op the user would not press.
 	{keys: keyRetire, label: func(m model) string {
@@ -163,64 +179,68 @@ var keymap = []binding{
 			return "unretire"
 		}
 		return "retire"
-	}, scope: scopeAgents, commits: true},
+	}, scope: scopeAgents, commits: true, when: agentSelected, whenText: "while a roster agent, not an orphan"},
 	{keys: keyClearCtx, label: func(m model) string {
 		if a, ok := m.selAgent(); ok && a.ClearArmed {
 			return "cancel clear"
 		}
 		return "clear context"
-	}, scope: scopeAgents, commits: true},
+	}, scope: scopeAgents, commits: true, when: agentSelected, whenText: "while a roster agent, not an orphan"},
 	{keys: keyDelete, label: lbl("delete"), scope: scopeAgents, commits: true},
-	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scope: scopeAgents},
+	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo, m) }, scope: scopeAgents},
+	{keys: keyEnter, label: lbl("full screen"), scope: scopeAgents, refOnly: true},
 
 	// PRs: look (verify/editor/open/lint), then the verdicts, then merge.
 	{keys: keyVerify, label: lbl("verify"), scope: scopePRs, commits: true},
 	{keys: keyEdit, label: lbl("editor"), scope: scopePRs},
 	{keys: keyOpen, label: lbl("open"), scope: scopePRs},
 	{keys: keyAttach, label: lbl("attach"), scope: scopePRs},
+	{keys: keyTell, label: lbl("show linked task"), scope: scopePRs, when: prShowsLinkedTask, whenText: "while the PR has a linked task"},
 	{keys: keyLint, label: lbl("lint"), scope: scopePRs, commits: true},
-	{keys: keyApprove, label: lbl("approve"), scope: scopePRs, commits: true, when: prDecidable},
+	{keys: keyApprove, label: lbl("approve"), scope: scopePRs, commits: true, when: prDecidable, whenText: "while the PR is still open"},
 	{keys: keyReject, label: lbl("reject"), scope: scopePRs, commits: true},
 	{keys: keyReview, label: lbl("agent-review"), scope: scopePRs, commits: true},
-	{keys: keyMerge, label: lbl("merge"), scope: scopePRs, commits: true, when: model.selPRApproved},
+	{keys: keyMerge, label: lbl("merge"), scope: scopePRs, commits: true, when: model.selPRApproved, whenText: "once it's approved"},
 	{keys: keyDelete, label: lbl("scrap"), scope: scopePRs, commits: true},
+	{keys: keyWhyNext, label: lbl("why no review"), scope: scopePRs},
 	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.prFilter) }, scope: scopePRs},
-	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scope: scopePRs},
+	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo, m) }, scope: scopePRs},
+	{keys: keyEnter, label: lbl("full screen"), scope: scopePRs, refOnly: true},
 
-	// Repos.
-	{keys: "enter", label: lbl("switch"), scope: scopeRepos},
+	// Repos. config is not redeclared here: scopeGlobal+commits already reaches every tab's menu.
+	{keys: keyEnter, label: lbl("switch"), scope: scopeRepos},
 	{keys: keyColor, label: lbl("colour"), scope: scopeRepos},
-	{keys: keyConfig, label: lbl("config"), scope: scopeRepos, commits: true},
 	{keys: keyDelete, label: lbl("forget"), scope: scopeRepos, commits: true},
 
 	// Mail: look only — the mailbox is the agent's to read, and the user's part is finding a message.
-	{keys: keyAttach, label: lbl("attach"), scope: scopeMail, when: mailAttachable},
+	{keys: keyAttach, label: lbl("attach"), scope: scopeMail, when: mailAttachable, whenText: "while either party is a live agent"},
 	{keys: keyMail, label: lbl("reply"), scope: scopeMail},
 	{keys: keyMailWho, label: func(m model) string { return "who: " + mailWhoLabel(m.mailAgent) }, scope: scopeMail},
 	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.mailFilter) }, scope: scopeMail},
-	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scope: scopeMail},
+	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo, m) }, scope: scopeMail},
+	{keys: keyEnter, label: lbl("full screen"), scope: scopeMail, refOnly: true},
 
 	// Chat.
-	{keys: "enter", label: lbl("compose"), scope: scopeChat},
+	{keys: keyEnter, label: lbl("compose"), scope: scopeChat},
 	{keys: keyApprove, label: lbl("add member"), scope: scopeChat, commits: true},
 	{keys: keyReject, label: lbl("remove member"), scope: scopeChat, commits: true},
 	{keys: keyNew, label: lbl("new meeting"), scope: scopeChat, commits: true},
 	{keys: keyCloseMeet, label: lbl("close meeting"), scope: scopeChat, commits: true},
 
 	// Runs.
-	{keys: keyNew, label: lbl("queue a run"), scope: scopeRuns}, // opens a prompt to type the command in
+	{keys: keyNew, label: lbl("queue a run"), scope: scopeRuns, commits: true}, // opens a prompt (sd-5e3032)
 	{keys: keyPriority, label: lbl("priority"), scope: scopeRuns},
 	{keys: keyDelete, label: lbl("cancel"), scope: scopeRuns, commits: true},
 	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.runFilter) }, scope: scopeRuns},
-	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo) }, scope: scopeRuns},
+	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo, m) }, scope: scopeRuns},
+	{keys: keyEnter, label: lbl("full screen"), scope: scopeRuns, refOnly: true},
 }
 
-// footerFor renders a scope's "key label" hints — the navigating keys, plus one entry for the
-// prefix, which is what buys back the room the movement keys needed.
+// footerFor renders a scope's plain "key label" hints — no prefix; that is global now (-> globalFooter).
 func (m model) footerFor(scope keyScope) string {
 	var parts []string
 	for _, b := range keymap {
-		if b.scope != scope || b.commits {
+		if b.scope != scope || b.commits || b.refOnly {
 			continue
 		}
 		if b.when != nil && !b.when(m) {
@@ -228,10 +248,94 @@ func (m model) footerFor(scope keyScope) string {
 		}
 		parts = append(parts, b.keys+" "+b.label(m))
 	}
-	if scope != scopeGlobal {
-		parts = append(parts, keyMenuShown+" "+menuLabel(m, scope))
-	}
 	return strings.Join(parts, " · ")
+}
+
+// globalFooter is the first footer row: "?" leading, the prefix trailing, both pinned since each
+// names where the rest still reads in full — only the navigation between them sheds.
+func (m model) globalFooter(width int) string {
+	var lead string
+	var middle []globalEntry
+	for _, b := range keymap {
+		if b.scope != scopeGlobal || b.commits || b.refOnly {
+			continue
+		}
+		if b.when != nil && !b.when(m) {
+			continue
+		}
+		if b.keys == keyHelp {
+			lead = b.keys + " " + b.label(m)
+			continue
+		}
+		for _, p := range focusSplit(b, m, m.rightFocus) {
+			middle = append(middle, globalEntry{label: p.label, rank: b.label(m), text: p.keys + " " + p.label})
+		}
+	}
+	trail := keyMenuShown + " " + menuLabel(m, tabScope(m.tab))
+	return shedMiddle(lead, middle, trail, width)
+}
+
+// globalEntry is one global-row entry: text is shown, label its display identity, rank the
+// parent binding's own label — so a focus-remapped display label still sheds by its parent's rank.
+type globalEntry struct{ label, rank, text string }
+
+// globalShedOrder ranks the global row's entries least useful (shed first) to most useful (kept
+// longest) — sd-5e3032's own instruction, a usefulness order distinct from keymap's own reading
+// order.
+var globalShedOrder = []string{
+	"jump", "pane", "repo", "yank/all", "detail", "refresh", "page", "scroll detail",
+	"tab", "move/top/bot", "quit",
+}
+
+// shedPriority is an entry's position in globalShedOrder — lower sheds first. An entry not listed
+// there sorts last (shed last, not skipped) — shedMiddle's loop still reaches it eventually.
+func shedPriority(label string) int {
+	for i, l := range globalShedOrder {
+		if l == label {
+			return i
+		}
+	}
+	return len(globalShedOrder)
+}
+
+// shedMiddle joins lead, middle and trail with " · ", dropping whole entries — by shedPriority,
+// least useful first, never lead or trail — until the row fits width. Survivors keep keymap's own
+// declaration order; only which ones survive changes.
+func shedMiddle(lead string, middle []globalEntry, trail string, width int) string {
+	join := func(keep []globalEntry, shed bool) string {
+		parts := []string{lead}
+		for _, e := range keep {
+			parts = append(parts, e.text)
+		}
+		if shed {
+			parts = append(parts, "…")
+		}
+		return strings.Join(append(parts, trail), " · ")
+	}
+	if line := join(middle, false); ansi.StringWidth(line) <= width {
+		return line
+	}
+	byPriority := append([]globalEntry(nil), middle...)
+	sort.SliceStable(byPriority, func(i, j int) bool {
+		return shedPriority(byPriority[i].rank) < shedPriority(byPriority[j].rank)
+	})
+	dropped := map[string]bool{}
+	for _, e := range byPriority {
+		dropped[e.label] = true
+		var keep []globalEntry
+		for _, e := range middle {
+			if !dropped[e.label] {
+				keep = append(keep, e)
+			}
+		}
+		if line := join(keep, true); ansi.StringWidth(line) <= width {
+			return line
+		}
+	}
+	// Reachable only once every middle entry is shed and lead+trail alone still overflow width —
+	// realistically never, since a terminal narrow enough for that cannot show a usable footer at
+	// all. ansi.Truncate supplies its own "…" here, which is why join's shed marker is off.
+	return ansi.Truncate(join(nil, false), width, "…")
 }
 
 // menuLabel names the prefix entry, counting what is actually on offer for the selected row: a bare
@@ -271,4 +375,123 @@ func tabScope(tab int) keyScope {
 	default:
 		return scopeRepos
 	}
+}
+
+// helpLines is "?"'s reference: the current tab first (what a folded viewport must not lose),
+// GLOBAL after, unfiltered by `when`. Focus relabels only rightFocusKeys' handful of keys, never
+// replaces a whole section, or every other row still working under focus would go missing.
+func (m model) helpLines() []string {
+	global := map[string]bool{}
+	for _, b := range keymap {
+		if b.scope == scopeGlobal {
+			global[b.keys+"\x00"+b.label(m)] = true
+		}
+	}
+	lines := []string{tuiSections[m.tab].Title}
+	lines = append(lines, helpRows(m, tabScope(m.tab), global, m.rightFocus)...)
+	lines = append(lines, "", "GLOBAL")
+	lines = append(lines, helpRows(m, scopeGlobal, map[string]bool{}, m.rightFocus)...)
+	return lines
+}
+
+// focusOverrides is rightFocusKeys decomposed to one entry per literal key, so a compound row
+// (e.g. "j/k/g/G") can be split into the parts focus relabels and the parts it leaves alone.
+var focusOverrides = func() map[string]string {
+	out := map[string]string{}
+	for _, r := range rightFocusKeys {
+		for _, k := range strings.Split(r.keys, "/") {
+			out[k] = r.label
+		}
+	}
+	return out
+}()
+
+// helpRows renders every binding in scope as one reference line (formatRow), or two under focus
+// if rightFocus's keys split between a remapped meaning and an ordinary one (-> focusRows).
+// exclude skips a binding also declared globally — a defensive guard; nothing relies on it today.
+func helpRows(m model, scope keyScope, exclude map[string]bool, rightFocus bool) []string {
+	var rows []string
+	for _, b := range keymap {
+		if b.scope != scope {
+			continue
+		}
+		id := b.keys + "\x00" + b.label(m)
+		if exclude[id] {
+			continue
+		}
+		rows = append(rows, focusRows(b, m, rightFocus)...)
+	}
+	return rows
+}
+
+// focusPart is one piece of a binding split by focus: overridden marks the relabelled half (a
+// different action, so formatRow's commits/whenText do not apply to it), false for the half left
+// with the binding's own meaning (G in "j/k/g/G", Y in "y/Y", or the whole binding when unfocused
+// or untouched by focusOverrides).
+type focusPart struct {
+	keys       string
+	label      string
+	overridden bool
+}
+
+// focusSplit is the one place a binding's keys are split by focus — used by both globalFooter and
+// the reference (helpRows), so the live footer and "?" cannot disagree about what a key currently
+// does. Grouped by override label first (j and k both read "item" as one entry), then whatever is
+// left keeps the binding's own label.
+func focusSplit(b binding, m model, rightFocus bool) []focusPart {
+	if !rightFocus {
+		return []focusPart{{b.keys, b.label(m), false}}
+	}
+	byLabel := map[string][]string{}
+	var order, left []string
+	for _, k := range strings.Split(b.keys, "/") {
+		lbl, ok := focusOverrides[k]
+		if !ok {
+			left = append(left, k)
+			continue
+		}
+		if _, seen := byLabel[lbl]; !seen {
+			order = append(order, lbl)
+		}
+		byLabel[lbl] = append(byLabel[lbl], k)
+	}
+	if len(order) == 0 {
+		return []focusPart{{b.keys, b.label(m), false}}
+	}
+	parts := make([]focusPart, 0, len(order)+1)
+	for _, lbl := range order {
+		parts = append(parts, focusPart{strings.Join(byLabel[lbl], "/"), lbl, true})
+	}
+	if len(left) > 0 {
+		parts = append(parts, focusPart{strings.Join(left, "/"), b.label(m), false})
+	}
+	return parts
+}
+
+// focusRows renders one binding's focusSplit parts as reference lines: formatRow for an
+// unoverridden part (keeps commits/whenText), the bare label for an overridden one — safe only
+// while TestFocusOverriddenKeysNeverCommitOrCarryAWhen holds.
+func focusRows(b binding, m model, rightFocus bool) []string {
+	var rows []string
+	for _, p := range focusSplit(b, m, rightFocus) {
+		if p.overridden {
+			rows = append(rows, p.keys+"  "+p.label)
+		} else {
+			rows = append(rows, formatRow(p.keys, b, m))
+		}
+	}
+	return rows
+}
+
+// formatRow is one binding's reference line at the given key text: the prefix folded in
+// ("space X") and any `when` condition named after it.
+func formatRow(keys string, b binding, m model) string {
+	if b.commits {
+		keys = keyMenuShown + " " + keys
+	}
+	row := keys + "  " + b.label(m)
+	if b.whenText != "" {
+		row += " (" + b.whenText + ")"
+	}
+	return row
 }

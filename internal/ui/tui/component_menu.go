@@ -126,6 +126,20 @@ func mailAttachable(m model) bool {
 	return ok
 }
 
+// agentSelected: several Agents-tab actions apply only to a real roster agent, not one of the
+// orphan containers the tab also lists — an orphan routes only to its own removal (D, isOrphan).
+func agentSelected(m model) bool {
+	_, ok := m.selAgent()
+	return ok
+}
+
+// prShowsLinkedTask: t on the PRs tab opens the linked task's modal, which needs the fetched
+// detail to actually be this PR's own (it lands a moment after the row is selected) and to name a
+// task at all — not every PR has one.
+func prShowsLinkedTask(m model) bool {
+	return m.prDetail.PR.ID == m.selID() && m.prDetail.Task.ID != ""
+}
+
 // menuEntryStyle is white, the opposite of the footer's uniform dim — the only sign the menu is
 // open now that it no longer takes the screen.
 var menuEntryStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("231"))

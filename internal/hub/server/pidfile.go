@@ -33,8 +33,12 @@ func WritePID(version string) error {
 	if err := os.MkdirAll(paths.RuntimeDir(), 0o755); err != nil {
 		return err
 	}
-	if pid, _, ok := ReadPID(); ok && pid != os.Getpid() && processAlive(pid) {
-		return fmt.Errorf("a hub is already running (pid %d)", pid)
+	// Both versions, and the verb: the refusal is read almost only after a rebuild, where "already
+	// running" alone leaves the new build looking broken rather than simply not the one holding the
+	// socket. ReadPID has the running version anyway, so saying nothing about it was the waste.
+	if pid, running, ok := ReadPID(); ok && pid != os.Getpid() && processAlive(pid) {
+		return fmt.Errorf("a hub is already running (pid %d, version %s) and this one is %s — "+
+			"`sindri hub restart` replaces it with this build", pid, running, version)
 	}
 	data, err := json.Marshal(pidInfo{PID: os.Getpid(), Version: version})
 	if err != nil {
