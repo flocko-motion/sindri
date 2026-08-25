@@ -223,8 +223,49 @@ func (e *Engine) ReconcileTasks(project string) error {
 			changed = true
 		}
 	}
+	if e.healSplitHierarchies(project) {
+		changed = true
+	}
 	if changed {
 		e.deps.Notify()
 	}
 	return nil
+}
+
+// healSplitHierarchies frees every container holder whose tree somebody else is already working —
+// the claim guard cannot cover a tree SPLIT after the fact by reparenting (-> healSplit).
+func (e *Engine) healSplitHierarchies(project string) (moved bool) {
+	roster, err := e.store.For(project).Roster()
+	if err != nil {
+		return false
+	}
+	for _, a := range roster {
+		if e.healSplit(project, a.Name) {
+			moved = true
+		}
+	}
+	return moved
+}
+
+// healSplit frees ONE container holder whose tree another agent is inside, so the hub can ask
+// wherever it already reads state: the sweep above, and every ask for work (-> directive). The
+// CONTAINER holder yields — the leaf is concrete work, and a container is held to hand out subtasks
+// it has none of. sudri held sd-ca28d3 while dvalin was a day into the subtask holding it open.
+func (e *Engine) healSplit(project, name string) bool {
+	ps := e.store.For(project)
+	st, err := ps.GetState(name)
+	if err != nil || st.Container == "" {
+		return false
+	}
+	held, herr := ps.HeldDescendant(st.Container)
+	if herr != nil || held == "" || held == name {
+		return false
+	}
+	a, _, _ := ps.GetAgent(name)
+	if serr := ps.SetState(store.AgentState{Agent: name, Phase: restPhase(a.Role)}); serr != nil {
+		return false
+	}
+	_ = ps.Log(name, "container-released", st.Container+": "+held+" is working inside it")
+	_ = e.deps.Deliver(project, name, MsgHierarchyTaken(st.Container, held), MailAndPush)
+	return true
 }

@@ -241,6 +241,13 @@ func (p *ProjectStore) OpenContainers() ([]Task, error) {
 			out = append(out, c) // real work to hand out
 			continue
 		}
+		// Somebody already inside it: the tree is not free, whatever its subtasks look like from
+		// here. Checked before "nothing left", since an in-progress subtask is invisible to both.
+		if held, herr := p.HeldDescendant(c.ID); herr != nil {
+			return nil, herr
+		} else if held != "" {
+			continue
+		}
 		stuck, err := p.HasOpenDescendant(c.ID)
 		if err != nil {
 			return nil, err
@@ -252,6 +259,25 @@ func (p *ProjectStore) OpenContainers() ([]Task, error) {
 		// or itself a parent of gated work) — stays excluded until that gate clears.
 	}
 	return out, nil
+}
+
+// HeldDescendant names an agent holding work anywhere under parentID, "" when nobody does. Two
+// agents in one hierarchy is two branches for one tree: dvalin held sd-dfc0d5, and a day later the
+// hub handed its parent to sudri, an in-progress subtask being invisible to every other query here.
+func (p *ProjectStore) HeldDescendant(parentID string) (string, error) {
+	row := p.s.db.QueryRow(`
+		WITH RECURSIVE descendant(id) AS (
+			SELECT id FROM tasks WHERE project=?1 AND parent_id=?2
+			UNION
+			SELECT t.id FROM tasks t JOIN descendant d ON t.parent_id=d.id WHERE t.project=?1
+		)
+		SELECT COALESCE(MIN(agent), '') FROM agent_state
+		WHERE project=?1 AND task IN (SELECT id FROM descendant)`, p.project, parentID)
+	var agent string
+	if err := row.Scan(&agent); err != nil {
+		return "", fmt.Errorf("held descendant of %s: %w", parentID, err)
+	}
+	return agent, nil
 }
 
 // HasOpenDescendant reports an open descendant at ANY depth, gated or not — unlike OpenSubtasks

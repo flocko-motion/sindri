@@ -446,6 +446,10 @@ func (e *Engine) directive(ctx context.Context, project, name string) (string, e
 	if !ok {
 		return "", fmt.Errorf("unknown agent %q", name)
 	}
+	// Asked BEFORE the state is read: an agent asking what to do is the hub's chance to notice two of
+	// them in one tree, and the answer it would otherwise give is the wrong one — sudri was told its
+	// feature was finished while dvalin worked the subtask holding it open.
+	e.healSplit(project, name)
 	st, _ := ps.GetState(name)
 	// Escalated outranks every role's directive — repeated on EVERY ask, since a relaunched agent has
 	// no memory of asking.
