@@ -72,23 +72,20 @@ spec-driven workflow, and the Go toolchain for the `deadcode` linter.
 
 ### Just `brokkr` (standalone)
 
-Want only the code map + linters, without the rest of sindri? Every release also
-publishes `brokkr` on its own — one line, straight to any path on your `PATH`
-(arm64 shown; replace `arm64` with `amd64` for an Intel machine):
-
-Linux:
-
-```bash
-curl -fsSL "$(curl -fsSL https://api.github.com/repos/flocko-motion/sindri/releases/latest | grep -o 'https://[^"]*brokkr_[^"]*_linux_arm64')" -o ~/.local/bin/brokkr && chmod +x ~/.local/bin/brokkr
-```
-
-macOS:
+Want only the code map + linters, without the rest of sindri — e.g. curl'd into
+another repo's CI or dev setup? One line installs it, no clone needed. It
+auto-detects OS/arch, and re-running it upgrades in place only when the release
+is newer:
 
 ```bash
-curl -fsSL "$(curl -fsSL https://api.github.com/repos/flocko-motion/sindri/releases/latest | grep -o 'https://[^"]*brokkr_[^"]*_darwin_arm64')" -o ~/.local/bin/brokkr && chmod +x ~/.local/bin/brokkr && xattr -d com.apple.quarantine ~/.local/bin/brokkr
+curl -fsSL https://raw.githubusercontent.com/flocko-motion/sindri/master/scripts/install-brokkr.sh | bash
 ```
 
-(the last step clears Gatekeeper's quarantine on the unsigned binary.)
+Installs to `~/.local/bin/brokkr` by default; pass a different path as an arg:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/flocko-motion/sindri/master/scripts/install-brokkr.sh | bash -s -- /usr/local/bin/brokkr
+```
 
 ### Updating
 
