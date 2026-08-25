@@ -63,6 +63,8 @@ type stubDeps struct {
 	assignBrackets []string
 	// escalated records Escalate calls as "name: question", in order.
 	escalated []string
+	started   []string // agents StartAgent was called for, in order
+	startErr  error
 }
 
 func (d *stubDeps) ProjectRoot(string) string { return d.root }
@@ -101,6 +103,13 @@ func (d *stubDeps) writeTestGate(root string) {
 			_ = os.WriteFile(filepath.Join(root, ".worktrees", e.Name(), testGate), []byte("#!/bin/sh\nexit 0\n"), 0o755)
 		}
 	}
+}
+
+// StartAgent records who was woken, so a test can assert work arriving for an empty pool brings a
+// reviewer back rather than waiting for one that never comes.
+func (d *stubDeps) StartAgent(_, name string) error {
+	d.started = append(d.started, name)
+	return d.startErr
 }
 
 // Escalate records the question, so a test can assert the hub stopped an agent rather than merely

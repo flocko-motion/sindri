@@ -69,3 +69,25 @@ func TestASettledPRHoldsNothing(t *testing.T) {
 		}
 	}
 }
+
+// TestATaskGivenToSomebodyElseEndsTheHold: the TASK decides what an agent holds, and a PR against
+// one it no longer has is nobody's business. sudri's feature was released to dvalin, yet its PR kept
+// pointing back — so `sindri task` said "you hold no task" while the directive sent it to submit.
+func TestATaskGivenToSomebodyElseEndsTheHold(t *testing.T) {
+	s := awaitingAuthor(t, "rejected")
+	ps := s.store.For("proj")
+	if err := ps.PutAgent(store.Agent{Name: "dvalin", Role: "worker"}); err != nil {
+		t.Fatal(err)
+	}
+	// The task moves on, exactly as a release leaves it.
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "sd-1", Phase: "working"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if nothing, err := s.HoldsNothing("proj", "eitri", "worker"); err != nil || !nothing {
+		t.Errorf("HoldsNothing = (%v, %v); the work is dvalin's now", nothing, err)
+	}
+	if at, err := s.AtLeafBoundary("proj", "eitri"); err != nil || !at {
+		t.Errorf("AtLeafBoundary = (%v, %v), want a boundary once the task is gone", at, err)
+	}
+}

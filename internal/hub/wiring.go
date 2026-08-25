@@ -168,6 +168,12 @@ func (d workflowDeps) Escalate(project, name, question string) (string, error) {
 	return d.h.Escalate(project, name, question)
 }
 
+// StartAgent runs under the hub's lifetime: bringing a reviewer back for work that has arrived is
+// the fleet's business, not the request's, and the caller is a tick with nobody waiting on it.
+func (d workflowDeps) StartAgent(project, name string) error {
+	return d.h.agents.RestartAgent(d.h.lifetime, project, name, io.Discard)
+}
+
 // KnownProjects is best-effort: a skipped scan self-corrects next tick (unlike the board -> State).
 func (d workflowDeps) KnownProjects() []store.Project {
 	ps, _ := d.h.projects.Known()

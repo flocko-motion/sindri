@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
@@ -55,10 +56,12 @@ func TestRevokeHandsTheTaskBack(t *testing.T) {
 	if st.Phase != "working" || st.Task != "gh-285" || st.Branch != "gh-285" {
 		t.Errorf("state = {phase:%q task:%q branch:%q}, want working on gh-285", st.Phase, st.Task, st.Branch)
 	}
-	// The PR is off the table but its history is kept, with who withdrew it and why.
+	// TERMINAL, and its history kept with who withdrew it and why. "rejected" would leave it live
+	// (-> api.PROpen), and every reader that treats an unsettled PR as held work would hand the author
+	// back to a branch it just withdrew — sudri was told to fix a PR it had closed itself.
 	pr, _, _ := ps.GetPR("pr-gh-285")
-	if pr.Status != "rejected" {
-		t.Errorf("PR status = %q, want it out of the running", pr.Status)
+	if api.PROpen(pr) {
+		t.Errorf("PR status = %q, want it settled — a withdrawal is the author closing it", pr.Status)
 	}
 	if !strings.Contains(pr.Feedback, "nidi") || !strings.Contains(pr.Feedback, "needs a test") {
 		t.Errorf("feedback = %q, want the author and the reason", pr.Feedback)

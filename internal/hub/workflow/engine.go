@@ -66,6 +66,9 @@ type Deps interface {
 	// Escalate stops an agent on a decision only the user can make, recording the question where a
 	// later reader looks. The hub's own verb, so a hub-raised escalation is the agent's in every way.
 	Escalate(project, name, question string) (task string, err error)
+	// StartAgent brings a stopped agent back up, its session resuming. The hub reclaims idle pods
+	// (-> agent.FireIdleStops) and nothing put them back, so work could arrive for an empty fleet.
+	StartAgent(project, name string) error
 	// KnownProjects returns the registered repos (for fleet-wide PR listing).
 	KnownProjects() []store.Project
 	// ContextUsage reports the session's context size, window and model, off its transcript. ok=false

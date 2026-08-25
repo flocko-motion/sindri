@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/task"
 )
@@ -223,7 +224,7 @@ func (e *Engine) ReconcileTasks(project string) error {
 			changed = true
 		}
 	}
-	if e.healSplitHierarchies(project) {
+	if e.HealSplitHierarchies(project) {
 		changed = true
 	}
 	if changed {
@@ -232,9 +233,9 @@ func (e *Engine) ReconcileTasks(project string) error {
 	return nil
 }
 
-// healSplitHierarchies frees every container holder whose tree somebody else is already working —
+// HealSplitHierarchies frees every container holder whose tree somebody else is already working —
 // the claim guard cannot cover a tree SPLIT after the fact by reparenting (-> healSplit).
-func (e *Engine) healSplitHierarchies(project string) (moved bool) {
+func (e *Engine) HealSplitHierarchies(project string) (moved bool) {
 	roster, err := e.store.For(project).Roster()
 	if err != nil {
 		return false
@@ -265,7 +266,31 @@ func (e *Engine) healSplit(project, name string) bool {
 	if serr := ps.SetState(store.AgentState{Agent: name, Phase: restPhase(a.Role)}); serr != nil {
 		return false
 	}
+	// The PR goes with the feature. Left standing it binds the agent to a tree it no longer holds:
+	// AwaitingPR treats an unsettled PR as held work, so the directive kept sending sudri back to
+	// sd-ca28d3 while `sindri task` told it — correctly — that it held nothing.
+	e.settleReleasedPR(ps, project, name, st.Container, held)
 	_ = ps.Log(name, "container-released", st.Container+": "+held+" is working inside it")
 	_ = e.deps.Deliver(project, name, MsgHierarchyTaken(st.Container, held), MailAndPush)
 	return true
+}
+
+// settleReleasedPR closes an agent's unsettled PR against a feature taken off it — scrapped, since
+// nobody is going to land a branch for a tree somebody else now owns. The branch is untouched.
+func (e *Engine) settleReleasedPR(ps *store.ProjectStore, project, name, container, held string) {
+	prs, err := ps.PRs()
+	if err != nil {
+		return
+	}
+	for _, pr := range prs {
+		if pr.Agent != name || pr.Task != container || !api.PROpen(pr) {
+			continue
+		}
+		pr.Status, pr.Feedback = "scrapped", "the feature went to "+held+", who is working inside it"
+		if perr := ps.PutPR(pr); perr != nil {
+			continue
+		}
+		e.releaseReviewers(project, pr.ID, "its feature changed hands")
+		_ = ps.LogPR(pr.ID, "scrapped", "released with "+container)
+	}
 }
