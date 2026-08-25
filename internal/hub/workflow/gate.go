@@ -203,7 +203,7 @@ func (e *Engine) lintPR(project, prID, asker string) (string, error) {
 		return "", err
 	}
 	if !ok {
-		return "", fmt.Errorf("no such PR %q", prID)
+		return "", fmt.Errorf("%w %q", ErrNoSuchPR, prID)
 	}
 	sha, err := git.BranchTip(e.deps.ProjectRoot(project), pr.Branch)
 	if err != nil {

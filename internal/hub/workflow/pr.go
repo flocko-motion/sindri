@@ -142,7 +142,7 @@ func (e *Engine) PRInfo(project, id string) (PRDetail, error) {
 		return PRDetail{}, err
 	}
 	if !ok {
-		return PRDetail{}, fmt.Errorf("no such PR %q", id)
+		return PRDetail{}, fmt.Errorf("%w %q", ErrNoSuchPR, id)
 	}
 	if active, aerr := ps.ActiveReviewers(); aerr == nil {
 		pr.Reviewer = active[id] // the same fact the lists carry, so the detail cannot disagree
@@ -398,7 +398,7 @@ func (e *Engine) openPR(c registry.Caller, args []string) (store.PR, error) {
 			return store.PR{}, err
 		}
 		if !ok {
-			return store.PR{}, fmt.Errorf("no such PR %q", args[0])
+			return store.PR{}, fmt.Errorf("%w %q", ErrNoSuchPR, args[0])
 		}
 		return pr, nil
 	}
@@ -408,7 +408,7 @@ func (e *Engine) openPR(c registry.Caller, args []string) (store.PR, error) {
 		return store.PR{}, err
 	}
 	if len(open) == 0 {
-		return store.PR{}, fmt.Errorf("no open PRs")
+		return store.PR{}, ErrNoOpenPRs
 	}
 	return open[len(open)-1], nil // oldest
 }
@@ -422,7 +422,7 @@ func (e *Engine) MaterializeReview(project, prID string) (string, error) {
 		return "", err
 	}
 	if !ok {
-		return "", fmt.Errorf("no such PR %q", prID)
+		return "", fmt.Errorf("%w %q", ErrNoSuchPR, prID)
 	}
 	return repo.MaterializeReview(root, pr.Branch)
 }

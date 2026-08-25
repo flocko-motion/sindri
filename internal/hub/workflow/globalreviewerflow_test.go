@@ -188,8 +188,16 @@ func TestApproveIsScopedUnlessTheCallerHoldsTheNamedPR(t *testing.T) {
 	st, other, c := foreignPRFixture(t)
 	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
 
-	if code, err := e.CmdApprove(c, []string{"pr-9"}, io.Discard); err == nil || code == 0 {
-		t.Fatalf("a reviewer holding nothing in other-repo should be refused pr-9, got code=%d err=%v", code, err)
+	var out bytes.Buffer
+	code, err := e.CmdApprove(c, []string{"pr-9"}, &out)
+	if err != nil {
+		t.Fatalf("the refusal came back as a hub fault, which escalates the caller: %v", err)
+	}
+	if code == 0 {
+		t.Fatalf("a reviewer holding nothing in other-repo should be refused pr-9, got code=%d", code)
+	}
+	if !strings.Contains(out.String(), "No PR pr-9") {
+		t.Errorf("the caller must be told the id is out of its reach, got %q", out.String())
 	}
 	if pr, _, _ := other.GetPR("pr-9"); pr.Status != "open" {
 		t.Errorf("pr-9's status changed to %q from an unrelated caller's approve attempt", pr.Status)
@@ -201,8 +209,16 @@ func TestRejectIsScopedUnlessTheCallerHoldsTheNamedPR(t *testing.T) {
 	st, other, c := foreignPRFixture(t)
 	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
 
-	if code, err := e.CmdReject(c, []string{"pr-9", "no"}, io.Discard); err == nil || code == 0 {
-		t.Fatalf("a reviewer holding nothing in other-repo should be refused pr-9, got code=%d err=%v", code, err)
+	var out bytes.Buffer
+	code, err := e.CmdReject(c, []string{"pr-9", "no"}, &out)
+	if err != nil {
+		t.Fatalf("the refusal came back as a hub fault, which escalates the caller: %v", err)
+	}
+	if code == 0 {
+		t.Fatalf("a reviewer holding nothing in other-repo should be refused pr-9, got code=%d", code)
+	}
+	if !strings.Contains(out.String(), "No PR pr-9") {
+		t.Errorf("the caller must be told the id is out of its reach, got %q", out.String())
 	}
 	if pr, _, _ := other.GetPR("pr-9"); pr.Status != "open" {
 		t.Errorf("pr-9's status changed to %q from an unrelated caller's reject attempt", pr.Status)

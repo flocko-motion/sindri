@@ -10,7 +10,6 @@ package workflow
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -35,11 +34,6 @@ func (e *Engine) Tasks(project string) ([]store.Task, error) {
 	_ = e.ReconcileTasks(project)
 	return e.store.For(project).AllTasks()
 }
-
-// ErrNoSuchTask marks an id this project does not carry, so a caller can answer it as the ordinary
-// fact it is. Returned bare it reached AgentExec as a hub failure, which auto-escalates: balin asked
-// about a task outside the project its review put it in, and was stranded for a typo-grade question.
-var ErrNoSuchTask = errors.New("no such task")
 
 // TaskInfo returns one task, refreshed from its source of truth: sindri's own from the store, a
 // mirrored id from the cache (the store errors on a foreign id).

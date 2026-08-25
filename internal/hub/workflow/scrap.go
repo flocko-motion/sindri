@@ -28,7 +28,7 @@ func (e *Engine) DiscardPR(project, prID string) error {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("no such PR %q", prID)
+		return fmt.Errorf("%w %q", ErrNoSuchPR, prID)
 	}
 	author := pr.Agent
 	if err := e.ScrapPR(project, prID); err != nil {
@@ -63,7 +63,7 @@ func (e *Engine) ScrapPR(project, prID string) error {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("no such PR %q", prID)
+		return fmt.Errorf("%w %q", ErrNoSuchPR, prID)
 	}
 
 	// Stop any reviewer mid-review: the branch is about to vanish, so the review is moot. Abort,

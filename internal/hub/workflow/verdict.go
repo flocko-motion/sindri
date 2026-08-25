@@ -6,6 +6,7 @@
 package workflow
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -21,7 +22,14 @@ import (
 // single scalar the first verdict claims. A planner's is different in kind (-> plannerApprove).
 func (e *Engine) CmdApprove(c registry.Caller, args []string, out io.Writer) (int, error) {
 	pr, err := e.openPR(c, args)
-	if err != nil {
+	switch {
+	case errors.Is(err, ErrNoSuchPR):
+		fmt.Fprintln(out, ReplyNoSuchPR(args[0]))
+		return 1, nil
+	case errors.Is(err, ErrNoOpenPRs):
+		fmt.Fprintln(out, "Nothing is up for review here, so there is nothing to approve. Run `sindri` for your next move.")
+		return 1, nil
+	case err != nil:
 		return 1, err
 	}
 	if ownWork(pr, c) {
@@ -119,7 +127,7 @@ func (e *Engine) ApprovePR(project, prID string) error {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("no such PR %q", prID)
+		return fmt.Errorf("%w %q", ErrNoSuchPR, prID)
 	}
 	if !api.PRApprovable(pr) {
 		return fmt.Errorf("%s is %s — only an open or already-approved PR can be approved", prID, pr.Status)
@@ -205,7 +213,7 @@ func (e *Engine) reject(project, prID, feedback, voice string) error {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("no such PR %q", prID)
+		return fmt.Errorf("%w %q", ErrNoSuchPR, prID)
 	}
 	// Only a LANDED or discarded PR refuses a verdict (api.PROpen's line): an approved one still takes
 	// a rejection, since overruling a reviewer to stop a merge is the point of a human verdict. A
@@ -272,7 +280,10 @@ func (e *Engine) CmdReject(c registry.Caller, args []string, out io.Writer) (int
 		return 1, nil
 	}
 	feedback := strings.Join(args[1:], " ")
-	if err := e.reject(prProject, args[0], feedback, rejectVoice(c)); err != nil {
+	if err := e.reject(prProject, args[0], feedback, rejectVoice(c)); errors.Is(err, ErrNoSuchPR) {
+		fmt.Fprintln(out, ReplyNoSuchPR(args[0]))
+		return 1, nil
+	} else if err != nil {
 		return 1, err
 	}
 	if c.Role != "coauthor" { // its badge is reject's own, written under its name (-> reject)
