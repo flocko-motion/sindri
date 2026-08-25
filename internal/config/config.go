@@ -109,7 +109,9 @@ func validate(c Config, root string) error {
 		{"architecture", c.Architecture, c.ArchitectureSet},
 		{"containerfile", c.Containerfile, c.Containerfile != ""},
 		{"review_prompt", c.ReviewPrompt, c.ReviewPrompt != ""},
-		{"verify", c.Verify, c.Verify != ""},
+		// verify is NOT here: it is a shell command, not a path (-> api.Config.Verify). Validating it
+		// as one rejected `make check`, and the rule bought no safety anyway — a script it did accept
+		// is arbitrary code the moment it runs.
 	}
 	for _, ch := range checks {
 		if ch.val == "" {

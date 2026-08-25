@@ -68,7 +68,7 @@ func TestGateRunsWhateverTheLanguage(t *testing.T) {
 	wt := worktree(t, false) // no go.mod: a TypeScript repo, say
 	script(t, wt, "verify", "echo 'tsc failed'\nexit 1\n")
 
-	out, ok := Gate(t.Context(), wt, "verify")
+	out, ok := Gate(t.Context(), wt, "./verify")
 	if ok {
 		t.Fatalf("a declared gate must run on a non-Go tree, got:\n%s", out)
 	}

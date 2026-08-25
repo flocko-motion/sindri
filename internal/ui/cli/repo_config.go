@@ -31,7 +31,7 @@ type configKey struct {
 // repo cannot work without. Deliberately the whole file, not just the keys the TUI form shows: a
 // CLI that could only reach some of them would just be a smaller gap in the same wall.
 var configKeys = []configKey{
-	{"verify", "REQUIRED — repo-relative script the submit gate runs; without it nothing can be submitted",
+	{"verify", "REQUIRED — the command the submit gate runs (e.g. `make check`); without it nothing can be submitted",
 		func(c config.Config) string { return c.Verify },
 		func(c *config.Config, v string) error { c.Verify = v; return nil }},
 	{"architecture", "repo-relative architecture doc (default ARCHITECTURE.md)",

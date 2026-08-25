@@ -118,24 +118,23 @@ func Gate(ctx context.Context, wt string, verify string) (output string, ok bool
 // project has not answered, and answering it "fine" is how unchecked work lands.
 const MsgNoGate = "No quality gate is configured for this project, so nothing can be verified and " +
 	"nothing may merge.\n\n" +
-	"Set `verify:` in .sindri/config.yaml to a repo-relative script that builds, tests and lints this " +
-	"project, and exits non-zero when any of it fails:\n\n" +
-	"    verify: scripts/check.sh\n\n" +
-	"It is a path rather than a command line so the hub can check it exists before running it; wrap " +
-	"whatever the project already uses (`make check`, `npm test`, `cargo test`) in that script. Every " +
-	"submit runs it in a FRESH checkout of the commit, so anything the checks need — installed " +
-	"dependencies among them — the script has to put there itself.\n"
+	"Set `verify:` in .sindri/config.yaml to the command that builds, tests and lints this project, " +
+	"exiting non-zero when any of it fails:\n\n" +
+	"    verify: make check\n\n" +
+	"It runs through a shell in the repo root, so whatever the project already uses does — `make " +
+	"check`, `npm test`, `cargo test`, or a script of your own. Every submit runs it in a FRESH " +
+	"checkout of the commit, so anything the checks need — installed dependencies among them — the " +
+	"command has to put there itself.\n"
 
 // runVerify executes the project's own declared command (not a tool sindri wraps, so no adapter
 // applies), bounded and with its output capped. A timeout is a refusal, not a hang.
 func runVerify(ctx context.Context, wt, verify string) (string, bool) {
-	bin := filepath.Join(wt, filepath.FromSlash(verify))
-	if _, err := os.Stat(bin); err != nil {
-		return "verify: " + verify + " not found in the worktree — the project declares it in .sindri/config.yaml\n", false
-	}
 	ctx, cancel := context.WithTimeout(ctx, GateTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin)
+	// Through a shell, so `make check` — or anything with arguments, a pipe, or an && — is what a
+	// project may write. Requiring a path made every repo carry a wrapper whose whole content was
+	// the real command, and validating existence was all it ever bought.
+	cmd := exec.CommandContext(ctx, "sh", "-c", verify)
 	cmd.Dir = wt
 	out, err := cmd.CombinedOutput()
 	body := capLines(string(out), gateOutputLines)

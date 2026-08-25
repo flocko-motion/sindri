@@ -81,7 +81,7 @@ func (d *stubDeps) ProjectConfig(string) (config.Config, error) {
 		// Written where the gate looks for it — runVerify stats the path in the worktree it is
 		// checking, and every fixture here gates the root or a worktree built out of it.
 		d.writeTestGate(d.root)
-		cfg.Verify = testGate
+		cfg.Verify = "./" + testGate // a command, run through a shell, so a bare name would need PATH
 	}
 	return cfg, nil
 }

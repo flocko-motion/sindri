@@ -27,9 +27,11 @@ type Config struct {
 	Containerfile string `yaml:"containerfile"` // repo-relative image recipe ("" = filename discovery)
 	ReviewPrompt  string `yaml:"review_prompt"` // repo-relative reviewer-prompt file ("" = default prompt)
 
-	// Verify is a repo-relative executable the submit gate runs in the worktree — the project's
-	// own checks, which no generic toolbelt can know. A path, not a command line, so it can be
-	// validated before it runs; wrap a build tool in a script. "" = the built-in gates alone.
+	// Verify is the shell command the submit gate runs in the worktree — the project's own checks,
+	// which no generic toolbelt can know. REQUIRED: with none, nothing can be submitted from the
+	// repo, since sindri supplies no gate of its own (-> repo.Gate). A command rather than a path,
+	// so `make check` needs no wrapper script; requiring one bought no safety, since a script is
+	// arbitrary code the moment it runs.
 	Verify string `yaml:"verify"`
 
 	GitHub GitHub `yaml:"github"`
