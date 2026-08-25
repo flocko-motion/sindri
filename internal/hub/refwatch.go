@@ -28,11 +28,15 @@ type refwatch struct {
 	// lastErr is the failure already reported per project. A root that isn't a git repo fails
 	// every pass, and on a 30s loop that buried the log — report a change, not a drip.
 	lastErr map[string]string
+	// noGate is the projects already told they have no quality gate, on the same once-per-change
+	// discipline: it is true until somebody edits a config file, which is not often.
+	noGate map[string]bool
 }
 
 // newRefwatch starts the loop. It must not block: New runs before Serve answers the socket.
 func newRefwatch(base context.Context, h *Hub) *refwatch {
-	r := &refwatch{h: h, base: base, stop: make(chan struct{}), done: make(chan struct{}), lastErr: map[string]string{}}
+	r := &refwatch{h: h, base: base, stop: make(chan struct{}), done: make(chan struct{}),
+		lastErr: map[string]string{}, noGate: map[string]bool{}}
 	go r.loop()
 	return r
 }
@@ -79,6 +83,16 @@ func (r *refwatch) sweep(ctx context.Context) {
 				log.Printf("hub: reference check for %s recovered", p.Tag)
 			}
 			r.lastErr[p.Tag] = msg
+		}
+		// Said before anyone submits, rather than only when a gate refuses: a project with no
+		// `verify:` cannot land ANY work, and finding that out mid-submit wastes the attempt.
+		if gate := r.h.wf.VerifyCmd(p.Tag); gate == "" && !r.noGate[p.Tag] {
+			r.noGate[p.Tag] = true
+			log.Printf("hub: %s has no `verify:` configured — no work can be submitted from it until "+
+				"one is set in .sindri/config.yaml (a repo-relative script that builds, tests and lints).", p.Path)
+		} else if gate != "" && r.noGate[p.Tag] {
+			r.noGate[p.Tag] = false
+			log.Printf("hub: %s now has a quality gate (%s).", p.Path, gate)
 		}
 	}
 	r.preflight(ctx, projects)

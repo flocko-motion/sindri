@@ -13,7 +13,6 @@ import (
 	"net/http"
 
 	"github.com/flo-at/sindri/internal/config"
-	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/server"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/workflow"
@@ -170,8 +169,6 @@ func (d workflowDeps) KnownProjects() []store.Project {
 	ps, _ := d.h.projects.Known()
 	return ps
 }
-
-func (d workflowDeps) BrokkrBin() (string, error) { return agent.BrokkrBinary() }
 
 func (d workflowDeps) ContextUsage(project, name string) (tokens, window int, model string, ok bool) {
 	return d.h.agents.ContextUsage(project, name)

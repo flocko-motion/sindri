@@ -65,8 +65,6 @@ type Deps interface {
 	AddTaskComment(project, id, author, body string) error
 	// KnownProjects returns the registered repos (for fleet-wide PR listing).
 	KnownProjects() []store.Project
-	// BrokkrBin locates the brokkr toolbelt binary (the lint gate shells out to it).
-	BrokkrBin() (string, error)
 	// ContextUsage reports the session's context size, window and model, off its transcript. ok=false
 	// when nothing has been recorded yet.
 	ContextUsage(project, name string) (tokens, window int, model string, ok bool)
@@ -174,9 +172,9 @@ func restPhase(role string) string {
 	}
 }
 
-// verifyCmd is the project's declared gate command, or "" when it declares none or the config
-// cannot be read (the built-ins still run either way).
-func (e *Engine) verifyCmd(project string) string {
+// VerifyCmd is the project's declared gate command, "" when it declares none or the config cannot be
+// read. Nothing stands in for it: an undeclared gate refuses every submit (-> repo.Gate).
+func (e *Engine) VerifyCmd(project string) string {
 	cfg, err := e.deps.ProjectConfig(project)
 	if err != nil {
 		return ""

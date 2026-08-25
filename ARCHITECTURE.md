@@ -118,9 +118,9 @@ else is a front-end or a pod.
 
 ## Conformance
 
-All code must conform to the built-in `brokkr` linters (`brokkr lint`, run by
-`make verify`). That baseline is enforced automatically — a change that fails it
-does not merge.
+All code must conform to the `brokkr` linters (`brokkr lint`, run by `make check`
+— this project's declared gate, which chooses to run it). That baseline is
+enforced automatically — a change that fails it does not merge.
 
 ## Why
 

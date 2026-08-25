@@ -121,7 +121,7 @@ func (e *Engine) gateRun(project, agent, kind, message, sha string) (run api.Run
 	// Asked BEFORE the row exists, and the row then written already settled: a row that sits "queued"
 	// for even an instant can be dequeued by the run watcher, and then one submit lands its
 	// continuation twice — two PR log lines, two deliveries, and a phase decided by whichever finished last.
-	out, reused := ps.GatePassed(sha, e.verifyCmd(project))
+	out, reused := ps.GatePassed(sha, e.VerifyCmd(project))
 	status := ""
 	if reused {
 		status = "passed"
@@ -175,7 +175,7 @@ func (e *Engine) CmdLint(c registry.Caller, args []string, out io.Writer) (int, 
 		return 1, err
 	}
 	// From the store, unqueued: the common case, and the whole reason for keying on the commit.
-	if stored, ok := e.store.For(c.Project).GatePassed(sha, e.verifyCmd(c.Project)); ok {
+	if stored, ok := e.store.For(c.Project).GatePassed(sha, e.VerifyCmd(c.Project)); ok {
 		fmt.Fprint(out, gateReusedReport(sha, true, stored))
 		return 0, nil
 	}
@@ -212,7 +212,7 @@ func (e *Engine) lintPR(project, prID, asker string) (string, error) {
 	// Pass OR fail: this is a READING, and the message that points a reviewer here must not cost the
 	// fleet's only slot every time one looks at why a gate failed (-> MsgPRGateFinished). What may
 	// never stand on a stored failure is a DECISION, and none is taken here.
-	if stored, passed, ok := ps.GateVerdict(sha, e.verifyCmd(project)); ok {
+	if stored, passed, ok := ps.GateVerdict(sha, e.VerifyCmd(project)); ok {
 		report := gateReusedReport(sha, passed, stored)
 		_ = ps.SetPRLint(prID, sha, report)
 		return report, nil
@@ -320,10 +320,10 @@ func (e *Engine) executeGateRun(ctx context.Context, ps *store.ProjectStore, pro
 // runGate is the gate, recorded. That is the point: the next caller asking about this commit is
 // answered from the store rather than building and testing it again.
 func (e *Engine) runGate(ctx context.Context, ps *store.ProjectStore, project, wt, sha string) (report string, passed bool) {
-	verify := e.verifyCmd(project)
+	verify := e.VerifyCmd(project)
 	// The gate's own words are stored, not the report: the header naming the commit is composed for
 	// each reader, so a reused result cannot end up carrying two of them.
-	out, passed := repo.Gate(ctx, wt, e.deps.BrokkrBin, verify)
+	out, passed := repo.Gate(ctx, wt, verify)
 	_ = ps.SetGateResult(sha, passed, verify, out)
 	return gateReport(sha, passed, out), passed
 }
@@ -331,7 +331,7 @@ func (e *Engine) runGate(ctx context.Context, ps *store.ProjectStore, project, w
 // gateOnce is the gate without the record — for a tree that exists only for this check (the
 // preflight's combined replay), whose commit is thrown away with it, so nothing could ever reuse it.
 func (e *Engine) gateOnce(ctx context.Context, project, wt, sha string) (report string, passed bool) {
-	out, passed := repo.Gate(ctx, wt, e.deps.BrokkrBin, e.verifyCmd(project))
+	out, passed := repo.Gate(ctx, wt, e.VerifyCmd(project))
 	return gateReport(sha, passed, out), passed
 }
 

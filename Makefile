@@ -111,12 +111,12 @@ screenshot: ## render the TUI headlessly (mock data) to eyeball its layout
 seed: ## seed a mock task hierarchy into the current repo (via sindri task new)
 	./scripts/seed.sh
 
-# The submit gate the hub runs (scripts/verify.sh points here), so it is on the path of every
-# submit, contribute and self-check in the fleet. check-go is deliberately NOT a prerequisite:
+# The same three checks as `check`, printing all of it rather than a tail — for reading a failure,
+# where `check` is for deciding one. check-go is deliberately NOT a prerequisite:
 # it curls go.dev/VERSION, and a synchronous internet round trip belongs in CI and `make install`
 # (both of which run it), not dozens of times a day in front of a build. It checks something that
 # moves every few weeks.
-verify: brokkr ## build + test + lint (deadcode, loc, comments, openspec) — the quality gate
+verify: brokkr ## build + test + lint, printing all of it — `check` is the gate
 	go build ./...
 	go test ./...
 	./bin/brokkr lint
@@ -145,7 +145,10 @@ upgrade-go: ## bump the go directive to the latest release, tidy, and rebuild
 	go build ./...
 	@./scripts/check-go.sh
 
-check: brokkr ## terse one-shot gate: build + test + lint, stops at the first failure
+# THE quality gate: scripts/check.sh points here and `verify:` in .sindri/config.yaml points there,
+# so this is on the path of every submit, contribute and self-check in the fleet. brokkr is a
+# prerequisite because this gate chooses to run it — sindri supplies no gate of its own.
+check: brokkr ## build + test + lint, stopping at the first failure — the quality gate
 	@out=$$(go build ./... 2>&1) && echo "BUILD OK" || { echo "BUILD FAIL"; echo "$$out" | tail -20; exit 1; }
 	@out=$$(go test ./... 2>&1) && echo "TESTS PASS" || { echo "TESTS FAIL"; echo "$$out" | tail -30; exit 1; }
 	@out=$$(./bin/brokkr lint 2>&1) && echo "LINT PASS" || { echo "LINT FAIL"; echo "$$out" | tail -40; exit 1; }

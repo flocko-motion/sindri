@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
-	"github.com/flo-at/sindri/internal/adapter/lintgate"
 )
 
 // MaterializeReview checks branch out detached into the reserved .worktrees/review workspace, fresh
@@ -103,25 +102,29 @@ const GateTimeout = 15 * time.Minute
 // gateOutputLines caps stored gate output, the way the diff commands cap theirs.
 const gateOutputLines = 400
 
-// Gate checks wt in a subprocess, so the concurrent hub never chdir's. ONE of the two checks, never
-// both: a declared verify (repo-relative, validated by config) owns the gate, since it is the thing
-// that can run the built-in linter itself — running both paid for the same linter twice per gate.
-func Gate(ctx context.Context, wt string, resolveBin func() (string, error), verify string) (output string, ok bool) {
-	if verify != "" {
-		return runVerify(ctx, wt, verify)
+// Gate checks wt in a subprocess, so the concurrent hub never chdir's. A project MUST declare what
+// its gate is: brokkr enforces a few minimum standards and knows nothing about a project's own
+// correctness, so standing in as the whole gate let work merge on a check nobody chose. ranke-db
+// never declared one, so its Go tests were never run and its TypeScript rode on a linter that could
+// not see the types (-> sd-dfc0d5).
+func Gate(ctx context.Context, wt string, verify string) (output string, ok bool) {
+	if verify == "" {
+		return MsgNoGate, false
 	}
-	return builtinLint(wt, resolveBin)
+	return runVerify(ctx, wt, verify)
 }
 
-// builtinLint is the gate brokkr provides, for a project that declares none of its own. A tree with
-// no Go module passes: there is nothing here for it to say, and it is the only gate left.
-func builtinLint(wt string, resolveBin func() (string, error)) (string, bool) {
-	if _, err := os.Stat(filepath.Join(wt, "go.mod")); err != nil {
-		return "", true
-	}
-	ok, out := lintgate.Adapter{ResolveBin: resolveBin}.Validate(wt)
-	return out, ok
-}
+// MsgNoGate refuses a gate no one has defined. Never a pass: an undeclared gate is a question the
+// project has not answered, and answering it "fine" is how unchecked work lands.
+const MsgNoGate = "No quality gate is configured for this project, so nothing can be verified and " +
+	"nothing may merge.\n\n" +
+	"Set `verify:` in .sindri/config.yaml to a repo-relative script that builds, tests and lints this " +
+	"project, and exits non-zero when any of it fails:\n\n" +
+	"    verify: scripts/check.sh\n\n" +
+	"It is a path rather than a command line so the hub can check it exists before running it; wrap " +
+	"whatever the project already uses (`make check`, `npm test`, `cargo test`) in that script. Every " +
+	"submit runs it in a FRESH checkout of the commit, so anything the checks need — installed " +
+	"dependencies among them — the script has to put there itself.\n"
 
 // runVerify executes the project's own declared command (not a tool sindri wraps, so no adapter
 // applies), bounded and with its output capped. A timeout is a refusal, not a hang.
