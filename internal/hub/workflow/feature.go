@@ -241,6 +241,9 @@ func (e *Engine) claimNextSubtask(project, agent, container string) (string, boo
 		}
 		return DirContainerDone(container), true, nil
 	}
+	// Claimed, whichever subtask it was — the "told about this while idle" memory ends here too
+	// (-> claimNext's own reset).
+	_ = e.store.For(project).SetLastNudge(agent, "")
 	aim, ceiling := e.commentBudget(project)
 	dir := DirContainerWorking(container, child.ID, aim, ceiling)
 	fired, err := e.prepareAssignment(project, agent, api.TierOrDefault(child.Tier), dir)

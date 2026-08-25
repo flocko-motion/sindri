@@ -535,7 +535,8 @@ func (e *Engine) escalateNoGate(project string, ps *store.ProjectStore, r api.Ru
 	}
 	_ = ps.Log(r.Agent, "gate-unconfigured", gateTarget(mustState(ps, r.Agent)))
 	e.deps.Notify()
-	return e.deps.Deliver(project, r.Agent, MsgNoGateEscalated(repo.MsgNoGate), MailAndPush)
+	// Regardless: this push explains the very escalation that would otherwise gate it.
+	return e.deps.Deliver(project, r.Agent, MsgNoGateEscalated(repo.MsgNoGate), MailAndPush.Regardless())
 }
 
 // mustState reads a state row where its absence is not actionable: the caller is only reporting.

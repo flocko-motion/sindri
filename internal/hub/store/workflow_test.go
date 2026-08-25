@@ -257,6 +257,35 @@ func TestAgentStateRoundTrip(t *testing.T) {
 	}
 }
 
+// TestLastNudgeRoundTrip: SetLastNudge persists, SetState leaves it alone (same reason escalation and
+// notes_left are excluded from it), and SetLastNudge("") clears it once a claim ends the memory.
+func TestLastNudgeRoundTrip(t *testing.T) {
+	p := openTmpProject(t)
+	st, err := p.GetState("brokkr")
+	if err != nil || st.LastNudge != "" {
+		t.Fatalf("default last_nudge: %+v err=%v", st, err)
+	}
+	if err := p.SetLastNudge("brokkr", "td-1"); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ = p.GetState("brokkr"); st.LastNudge != "td-1" {
+		t.Fatalf("last_nudge not persisted: %+v", st)
+	}
+	// A phase change is not a claim — the memory must survive it.
+	if err := p.SetState(AgentState{Agent: "brokkr", Phase: "working"}); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ = p.GetState("brokkr"); st.LastNudge != "td-1" {
+		t.Fatalf("SetState must leave last_nudge alone: %+v", st)
+	}
+	if err := p.SetLastNudge("brokkr", ""); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ = p.GetState("brokkr"); st.LastNudge != "" {
+		t.Fatalf("last_nudge not cleared: %+v", st)
+	}
+}
+
 func ids(tasks []Task) []string {
 	out := []string{}
 	for _, t := range tasks {

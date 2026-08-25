@@ -233,6 +233,9 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 		_ = ps.SetState(store.AgentState{Agent: name, Phase: restPhase("reviewer")})
 		_ = e.deps.Deliver(project, name, MsgReviewCancelled(held), MailAndPush)
 	}
+	if e.retired(project, name) {
+		return DirRetired, true, nil // holds nothing now — retirement means no new claim, reviewer too
+	}
 	var id int64
 	var prID string
 	found, err := ps.UnclaimedReview(&id, &prID)

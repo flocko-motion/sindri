@@ -211,6 +211,9 @@ func (h *Hub) SetRetired(project, name string, retired bool) error {
 		return err
 	}
 	if was && !retired {
+		// No .Regardless() needed: the flag above is already false by the time this runs, so
+		// WakeRefusal's own retired-check never sees it. An escalated or clear-armed agent is
+		// correctly left waiting on THAT instead — this notice is not the exit from either.
 		return h.Deliver(project, name, workflow.MsgUnretired, workflow.MailAndPush)
 	}
 	return nil
@@ -221,12 +224,13 @@ func (h *Hub) SetRetired(project, name string, retired bool) error {
 func (h *Hub) rehydrate(project, name string) {
 	// Let Claude boot to input-readiness first, or its Enter is eaten by the splash.
 	time.Sleep(8 * time.Second)
-	// Push-only, like every wake: a kickoff tells a live session to ask the hub what to do, and there
-	// is nothing worth keeping for an agent that was not there to be woken.
-	_ = h.Deliver(project, name, workflow.MsgKickoff, workflow.PushOnly)
+	// Push-only and Regardless: mail-less, a fresh session gated on retired would sit silent forever
+	// instead of seeing DirRetired even once — its only way to learn its own situation.
+	_ = h.Deliver(project, name, workflow.MsgKickoff, workflow.PushOnly.Regardless())
 	// A relaunched chatroom member lost its durable prompt's membership cue — remind it, if the room
-	// is in a state where that means anything (-> chat.ReminderFor). Best-effort, as the kickoff is.
+	// is in a state where that means anything (-> chat.ReminderFor). Same reasoning as the kickoff:
+	// mail-less, so a gated retired or escalated member would lose the cue for good.
 	if cue := h.chat.ReminderFor(project, name); cue != "" {
-		_ = h.Deliver(project, name, cue, workflow.PushOnly)
+		_ = h.Deliver(project, name, cue, workflow.PushOnly.Regardless())
 	}
 }

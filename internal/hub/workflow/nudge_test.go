@@ -54,6 +54,18 @@ func TestNudgeReachesOnlyTheIdleWorker(t *testing.T) {
 	}
 }
 
+// TestNudgeIdleWorkersDoesNotRepeatIdenticalNudges: notifyOnce's dedup is shared with AssignPendingWork
+// — a second creation event finding the same open task and idle worker must not push about it twice.
+func TestNudgeIdleWorkersDoesNotRepeatIdenticalNudges(t *testing.T) {
+	e, deps, _ := nudgeStore(t)
+	e.nudgeIdleWorkers("proj", "P2")
+	e.nudgeIdleWorkers("proj", "P2")
+
+	if len(deps.injected) != 1 {
+		t.Fatalf("the same unclaimed task must be pushed once, not on every creation event, got %v", deps.injected)
+	}
+}
+
 // TestNudgeSkipsUnratedWork: an unrated creation cannot itself have made anything newly claimable,
 // so it is not worth a scan.
 func TestNudgeSkipsUnratedWork(t *testing.T) {
@@ -115,6 +127,322 @@ func TestNudgeSkipsAnAgentExplainNextWouldRuleOut(t *testing.T) {
 			e.nudgeIdleWorkers("proj", "P2")
 			if len(deps.injected) != 0 {
 				t.Errorf("a %s worker must not be nudged, got %v", mutate.name, deps.injected)
+			}
+		})
+	}
+}
+
+// TestAssignPendingWorkSkipsARetiredOrEscalatedAgent pins sd-72af71: AssignPendingWork is a second,
+// independent push path from nudgeIdleWorkers (the periodic sweep, not the event-triggered one), and
+// it forgot the same exemption — the bug that woke a retired agent every sweep and then refused it.
+// idleWorkerWithOpenTask, not nudgeStore: AssignPendingWork calls SyncTasks first, which a plain
+// UpsertTask (nudgeStore's fixture) does not survive — only an owned task does.
+func TestAssignPendingWorkSkipsARetiredOrEscalatedAgent(t *testing.T) {
+	for _, mutate := range []struct {
+		name string
+		do   func(ps *store.ProjectStore)
+	}{
+		{"retired", func(ps *store.ProjectStore) {
+			a, _, _ := ps.GetAgent("dvalin")
+			a.Retired = true
+			_ = ps.PutAgent(a)
+		}},
+		{"clear-armed", func(ps *store.ProjectStore) {
+			a, _, _ := ps.GetAgent("dvalin")
+			a.ClearArmed = true
+			_ = ps.PutAgent(a)
+		}},
+		{"escalated", func(ps *store.ProjectStore) {
+			_ = ps.SetEscalation("dvalin", "one column or two?")
+		}},
+	} {
+		t.Run(mutate.name, func(t *testing.T) {
+			deps := &stubDeps{}
+			e, ps := idleWorkerWithOpenTask(t, deps)
+			mutate.do(ps)
+			e.AssignPendingWork("repo")
+			if len(deps.injected) != 0 {
+				t.Errorf("a %s worker must not be pushed, got %v", mutate.name, deps.injected)
+			}
+		})
+	}
+}
+
+// TestAssignPendingWorkDoesNotRepeatIdenticalNudges pins the second half of sd-72af71: a sweep that
+// finds the same task still unclaimed must not push about it again — the fortieth identical wake is
+// noise that teaches an agent to stop reading the channel.
+func TestAssignPendingWorkDoesNotRepeatIdenticalNudges(t *testing.T) {
+	deps := &stubDeps{}
+	e, _ := idleWorkerWithOpenTask(t, deps)
+	e.AssignPendingWork("repo")
+	e.AssignPendingWork("repo")
+
+	if len(deps.injected) != 1 {
+		t.Fatalf("the same unclaimed task must be pushed once, not on every sweep, got %v", deps.injected)
+	}
+}
+
+// TestAssignPendingWorkNudgesAgainWhenTheTaskChanges: the dedup remembers what an agent was last told,
+// not that it was told SOMETHING — a new claimable task still deserves its own push.
+func TestAssignPendingWorkNudgesAgainWhenTheTaskChanges(t *testing.T) {
+	deps := &stubDeps{}
+	e, ps := idleWorkerWithOpenTask(t, deps)
+	e.AssignPendingWork("repo")
+	if len(deps.injected) != 1 {
+		t.Fatalf("setup: expected the first nudge, got %v", deps.injected)
+	}
+	if err := ps.PutOwnedTask(store.OwnedTask{ID: "td-def456", Title: "also fix it", Status: "open", Priority: "P1"}); err != nil {
+		t.Fatal(err)
+	}
+	e.AssignPendingWork("repo")
+	if len(deps.injected) != 2 {
+		t.Fatalf("a new claimable task should still be pushed, got %v", deps.injected)
+	}
+}
+
+// TestAssignPendingWorkReoffersAfterReopening pins Finding 3 (review round 3): last_nudge must not
+// outlive the offer it recorded — a task nudged, then closed, then reopened under the same id must be
+// announced again, not silently skipped for ever.
+func TestAssignPendingWorkReoffersAfterReopening(t *testing.T) {
+	deps := &stubDeps{}
+	e, _ := idleWorkerWithOpenTask(t, deps)
+	e.AssignPendingWork("repo")
+	if len(deps.injected) != 1 {
+		t.Fatalf("setup: expected the first nudge, got %v", deps.injected)
+	}
+
+	if err := e.SetStatus("repo", "td-abc123", "closed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.RefreshTask("repo", "td-abc123"); err != nil {
+		t.Fatal(err)
+	}
+	e.AssignPendingWork("repo") // a sweep while it is genuinely closed — this must forget the memory
+
+	if err := e.SetStatus("repo", "td-abc123", "open"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.RefreshTask("repo", "td-abc123"); err != nil {
+		t.Fatal(err)
+	}
+	e.AssignPendingWork("repo")
+
+	if len(deps.injected) != 2 {
+		t.Fatalf("a task closed then reopened under the same id must be announced again, got %v", deps.injected)
+	}
+}
+
+// TestAssignPendingSubtaskReoffersAfterReopening is the container-path analogue: assignPendingSubtask
+// forgot to forget too (review round 4), so a subtask closed then reopened under the same id was
+// never announced again on that path.
+func TestAssignPendingSubtaskReoffersAfterReopening(t *testing.T) {
+	root, _ := newWorkRepo(t, "dain", "seed")
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if err := st.RegisterProject("repo", root); err != nil {
+		t.Fatal(err)
+	}
+	ps := st.For("repo")
+	if err := ps.PutAgent(store.Agent{Name: "dain", Role: "worker", Workspace: ".worktrees/dain"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.UpsertTask(store.Task{ID: "td-EPIC", Title: "a feature", Status: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutOwnedTask(store.OwnedTask{ID: "td-1", Title: "a subtask", Status: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetParent("td-1", "td-EPIC"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}); err != nil {
+		t.Fatal(err)
+	}
+	deps := &stubDeps{}
+	e := New(st, deps)
+
+	e.AssignPendingWork("repo")
+	if len(deps.injected) != 1 {
+		t.Fatalf("setup: expected the first nudge, got %v", deps.injected)
+	}
+
+	if err := e.SetStatus("repo", "td-1", "closed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.RefreshTask("repo", "td-1"); err != nil {
+		t.Fatal(err)
+	}
+	e.AssignPendingWork("repo") // genuinely gone — this must forget the memory
+
+	if err := e.SetStatus("repo", "td-1", "open"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.RefreshTask("repo", "td-1"); err != nil {
+		t.Fatal(err)
+	}
+	e.AssignPendingWork("repo")
+
+	if len(deps.injected) != 2 {
+		t.Fatalf("a subtask closed then reopened under the same id must be announced again, got %v", deps.injected)
+	}
+}
+
+// TestReviewDirectiveRefusesARetiredReviewer: the non-blocking finding from review round 4 —
+// reviewDirective had no retired check, so a retired reviewer could still be handed a fresh claim.
+func TestReviewDirectiveRefusesARetiredReviewer(t *testing.T) {
+	st, ps := poolFixture(t)
+	if err := ps.PutAgent(store.Agent{Name: "fili", Role: "reviewer", Workspace: ".worktrees/fili", Retired: true}); err != nil {
+		t.Fatal(err)
+	}
+	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
+
+	dir, _, err := e.reviewDirective("repo", "fili")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dir != DirRetired {
+		t.Errorf("directive = %q, want DirRetired", dir)
+	}
+	if held, _ := ps.ReviewingPR("fili"); held != "" {
+		t.Errorf("a retired reviewer must not claim anything, got %q", held)
+	}
+}
+
+// TestWakeRefusalDoesNotBlockAnAgentHoldingWork pins Finding 1 (review round 3): retired and
+// clear-armed only refuse the idle path directive() falls to — an agent holding a task gets its real
+// directive (a rejection, a run result, a merge conflict) regardless of either state.
+func TestWakeRefusalDoesNotBlockAnAgentHoldingWork(t *testing.T) {
+	for _, mutate := range []struct {
+		name string
+		do   func(a *store.Agent)
+	}{
+		{"retired", func(a *store.Agent) { a.Retired = true }},
+		{"clear-armed", func(a *store.Agent) { a.ClearArmed = true }},
+	} {
+		t.Run(mutate.name, func(t *testing.T) {
+			st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { st.Close() })
+			ps := st.For("repo")
+			a := store.Agent{Name: "dvalin", Role: "worker"}
+			mutate.do(&a)
+			if err := ps.PutAgent(a); err != nil {
+				t.Fatal(err)
+			}
+			if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "submitted"}); err != nil {
+				t.Fatal(err)
+			}
+			e := New(st, &stubDeps{root: t.TempDir()})
+
+			if r := e.WakeRefusal("repo", "dvalin"); r != "" {
+				t.Errorf("an agent holding a task must not be refused a wake, got %q", r)
+			}
+		})
+	}
+}
+
+// TestWakeRefusalIgnoresRetiredBetweenSubtasks pins review round 4's finding: a retired feature
+// worker between subtasks still gets its next one from claimNextSubtask, which gates only on
+// clearArmed — never on retired.
+func TestWakeRefusalIgnoresRetiredBetweenSubtasks(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	ps := st.For("repo")
+	if err := ps.PutAgent(store.Agent{Name: "dain", Role: "worker", Retired: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.UpsertTask(store.Task{ID: "td-EPIC", Title: "a feature", Status: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}); err != nil {
+		t.Fatal(err)
+	}
+	e := New(st, &stubDeps{root: t.TempDir()})
+
+	if r := e.WakeRefusal("repo", "dain"); r != "" {
+		t.Errorf("a retired feature worker between subtasks must not be refused, got %q", r)
+	}
+}
+
+// TestWakeRefusalStillGatesClearArmedBetweenSubtasks is the converse: claimNextSubtask DOES check
+// clearArmed, so that state must still refuse the same shape of agent.
+func TestWakeRefusalStillGatesClearArmedBetweenSubtasks(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	ps := st.For("repo")
+	if err := ps.PutAgent(store.Agent{Name: "dain", Role: "worker", ClearArmed: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.UpsertTask(store.Task{ID: "td-EPIC", Title: "a feature", Status: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}); err != nil {
+		t.Fatal(err)
+	}
+	e := New(st, &stubDeps{root: t.TempDir()})
+
+	if r := e.WakeRefusal("repo", "dain"); r == "" {
+		t.Error("a clear-armed feature worker between subtasks must still be refused")
+	}
+}
+
+// TestWakeRefusalIgnoresRetiredAwaitingItsOwnPR pins the other gap: directive()'s idle branch checks
+// AwaitingPR before the retired check, so that verdict reaches the agent regardless.
+func TestWakeRefusalIgnoresRetiredAwaitingItsOwnPR(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	ps := st.For("repo")
+	if err := ps.PutAgent(store.Agent{Name: "dvalin", Role: "worker", Retired: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.PutPR(store.PR{ID: "pr-td-1", Task: "td-1", Agent: "dvalin", Branch: "td-1", Base: "main", Status: "rejected"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "idle"}); err != nil {
+		t.Fatal(err)
+	}
+	e := New(st, &stubDeps{root: t.TempDir()})
+
+	if r := e.WakeRefusal("repo", "dvalin"); r != "" {
+		t.Errorf("an agent awaiting its own PR must not be refused, got %q", r)
+	}
+}
+
+// TestWakeRefusalNeverBlocksAPlannerOrCoauthor: directive() never checks retired/clear-armed for
+// either role, so WakeRefusal must not invent a refusal neither would ever actually answer with.
+func TestWakeRefusalNeverBlocksAPlannerOrCoauthor(t *testing.T) {
+	for _, role := range []string{"planner", "coauthor"} {
+		t.Run(role, func(t *testing.T) {
+			st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { st.Close() })
+			ps := st.For("repo")
+			if err := ps.PutAgent(store.Agent{Name: "galar", Role: role, Retired: true}); err != nil {
+				t.Fatal(err)
+			}
+			if err := ps.SetState(store.AgentState{Agent: "galar", Phase: "idle"}); err != nil {
+				t.Fatal(err)
+			}
+			e := New(st, &stubDeps{root: t.TempDir()})
+
+			if r := e.WakeRefusal("repo", "galar"); r != "" {
+				t.Errorf("a %s is never refused this way, got %q", role, r)
 			}
 		})
 	}
