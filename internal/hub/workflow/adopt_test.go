@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ func leafWorker(t *testing.T, phase string) (*Engine, *store.ProjectStore, regis
 	t.Helper()
 	const agent = "dain"
 	root, _ := newWorkRepo(t, agent, "td-LEAF")
+	didSomeWork(t, root, agent)
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -35,6 +37,16 @@ func leafWorker(t *testing.T, phase string) (*Engine, *store.ProjectStore, regis
 	}
 	deps := &stubDeps{root: root, alive: true}
 	return New(st, deps), ps, registry.Caller{Project: "repo", Agent: agent, Role: "worker", Phase: phase}, deps
+}
+
+// didSomeWork puts an edit in the agent's worktree. A branch matching its base has nothing to
+// submit and is refused (-> ReplyNothingToSubmit), so a fixture about submitting must have worked.
+func didSomeWork(t *testing.T, root, agent string) {
+	t.Helper()
+	wt := filepath.Join(root, ".worktrees", agent)
+	if err := os.WriteFile(filepath.Join(wt, "work.txt"), []byte("the work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // gatedFeatureAlive is gatedFeature with its worker reachable, for the cases that assert what it

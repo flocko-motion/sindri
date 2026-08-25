@@ -184,3 +184,32 @@ func revParseIn(t *testing.T, dir, ref string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+// TestAnEmptyBranchIsNotSubmitted: a branch matching its base has nothing to gate, review or merge.
+// The planner's submit has always refused this; a worker's did not, so sudri — whose work had landed
+// on the reference branch by other means — put an empty PR up, was rejected, and put it up AGAIN,
+// because a live PR is the one thing that stops a task closing (-> ReplyPRStillToLand).
+func TestAnEmptyBranchIsNotSubmitted(t *testing.T) {
+	e, _, root, caller := submitEngine(t)
+	// Rewind the worker to the base: the shape a rebase leaves when the reference already carries
+	// everything the branch was for.
+	wt := filepath.Join(root, ".worktrees", "bombur")
+	run(t, wt, "reset", "--hard", "main")
+
+	var out bytes.Buffer
+	code, err := e.CmdSubmit(caller, []string{"nothing here"}, &out)
+	if err != nil {
+		t.Fatalf("CmdSubmit: %v", err)
+	}
+	if code == 0 {
+		t.Fatalf("an empty branch was submitted; said %q", out.String())
+	}
+	if !strings.Contains(out.String(), "Nothing to submit") {
+		t.Errorf("the refusal should say there is no diff, got %q", out.String())
+	}
+	// The way out matters as much as the refusal: both obvious moves are shut, so naming escalate is
+	// what stops the resubmit loop sudri fell into.
+	if !strings.Contains(out.String(), "escalate") {
+		t.Errorf("the refusal must name an exit, got %q", out.String())
+	}
+}

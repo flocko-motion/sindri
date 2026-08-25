@@ -54,6 +54,16 @@ func ReplyReviewRequestFailed(prID string, err error) string {
 	return fmt.Sprintf("%s registered, but requesting a review failed: %v. The hub retries this on its own; flag it if %s is still showing no reviewer after a while.", prID, err, prID)
 }
 
+// ReplyNothingToSubmit answers a branch that matches its base. It names the way OUT, because the
+// obvious moves are both shut: a checkpoint is refused while a PR is live, and submitting is what
+// creates one — sudri put an empty PR up twice looking for an exit from exactly here.
+func ReplyNothingToSubmit(target, base string) string {
+	return fmt.Sprintf("Nothing to submit: %s holds nothing that %s does not already have, so there is no "+
+		"diff to gate, review or merge.\n\nIf your work landed some other way — somebody else's branch, or a "+
+		"rebase that took the reference version — say so with `sindri escalate \"<what happened>\"`; %s can "+
+		"then be closed without a PR. If you still have work to do, do it and submit then.", target, base, target)
+}
+
 // ReplyNoSuchPR answers an id no PR carries, and names the listing that does — an unknown id is a
 // dead end, so the reply's content is where to look instead. An ordinary answer: reported as an
 // error it reaches AgentExec as a hub fault and stops the agent (-> ErrNoSuchPR).
