@@ -8,6 +8,7 @@
 package workflow
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -72,6 +73,17 @@ func parseTaskListFlags(args []string) (api.TaskFilter, error) {
 	return f, nil
 }
 
+// replyNoSuchTask answers an id the caller's project does not carry. A pooled reviewer reads the
+// backlog of whichever repo its REVIEW is in (-> taskHome), so between reviews it can reach only
+// _global — where every ordinary id is missing, which is a confusing way to be told nothing.
+func replyNoSuchTask(c registry.Caller, home, id string) string {
+	if c.Project == GlobalProject && home == GlobalProject {
+		return fmt.Sprintf("No task %s here. You are a pooled reviewer holding no review, so the only backlog "+
+			"you can read is the shared one; a repo's tasks come into reach with the PR you are given.", id)
+	}
+	return fmt.Sprintf("No task %s in this repo's backlog — check the id with `sindri task list`.", id)
+}
+
 // CmdTasks is the read surface over the backlog, scoped to the caller's job: a planner or
 // coauthor shapes all of it, a worker sees only the package it holds. The rest of the backlog is
 // a distraction to a worker, and an invitation to start what nobody assigned it.
@@ -105,6 +117,10 @@ func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int,
 			return 1, nil
 		}
 		t, err := e.TaskInfo(home, id)
+		if errors.Is(err, ErrNoSuchTask) {
+			fmt.Fprintln(out, replyNoSuchTask(c, home, id))
+			return 1, nil // an answer, not a fault: returning the error escalates the caller
+		}
 		if err != nil {
 			return 1, err
 		}

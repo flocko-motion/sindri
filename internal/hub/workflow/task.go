@@ -10,6 +10,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -35,6 +36,11 @@ func (e *Engine) Tasks(project string) ([]store.Task, error) {
 	return e.store.For(project).AllTasks()
 }
 
+// ErrNoSuchTask is an id this project does not carry — an ANSWER, not a fault. Returned bare it
+// reached AgentExec as a hub failure, which auto-escalates: balin asked about a task outside the
+// project its review put it in, and was stranded for a typo-grade question.
+var ErrNoSuchTask = errors.New("no such task")
+
 // TaskInfo returns one task, refreshed from its source of truth: sindri's own from the store, a
 // mirrored id from the cache (the store errors on a foreign id).
 func (e *Engine) TaskInfo(project, id string) (store.Task, error) {
@@ -44,7 +50,7 @@ func (e *Engine) TaskInfo(project, id string) (store.Task, error) {
 			return store.Task{}, err
 		}
 		if !ok {
-			return store.Task{}, fmt.Errorf("unknown task %q", id)
+			return store.Task{}, fmt.Errorf("%w %q", ErrNoSuchTask, id)
 		}
 		t.Comments = e.deps.TaskComments(project, id)
 		return t, nil
@@ -58,7 +64,7 @@ func (e *Engine) TaskInfo(project, id string) (store.Task, error) {
 		return store.Task{}, err
 	}
 	if !ok {
-		return store.Task{}, fmt.Errorf("no such task %q", id)
+		return store.Task{}, fmt.Errorf("%w %q", ErrNoSuchTask, id)
 	}
 	_ = ps.UpsertTask(ownedToCachedTask(owned, ps.ParentOf(id)))
 	// Read the row back rather than returning what was just written: the approval gate lives in its
