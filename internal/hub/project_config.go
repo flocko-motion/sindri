@@ -86,8 +86,7 @@ func repoGateState(root, verify string) (gate string, ok bool, advice string) {
 			"%s/.sindri/config.yaml to the command that builds, tests and lints it; `verify: make check` is the "+
 			"usual answer, and any shell command does", root)
 	}
-	if _, err := os.Stat(filepath.Join(root, verify)); err != nil {
-		return verify, false, fmt.Sprintf("the gate `%s` is not in the repo — every submit refuses until it is there", verify)
-	}
+	// Declared is configured. Statting it as a repo-relative file called `make check` a missing
+	// script: the gate is a COMMAND, and only running it answers whether it works (-> repo.Gate).
 	return verify, true, ""
 }

@@ -164,8 +164,6 @@ func gateLines(st api.RepoDocState) []string {
 		return []string{"gate:   " + st.Gate}
 	case st.GateAdvice == "":
 		return nil // no snapshot for this repo (older hub) — say nothing rather than guess
-	case st.Gate != "":
-		return []string{"", stWarn.Render(warnGlyph + " gate " + st.Gate + " is missing"), dimStyle.Render("every submit refuses until that script is in the repo")}
 	}
 	return []string{"", stWarn.Render(warnGlyph + " no quality gate"),
 		dimStyle.Render("nothing can be submitted from this repo — press E and set `verify` (usually `make check`)")}
