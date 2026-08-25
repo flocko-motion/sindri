@@ -73,15 +73,17 @@ func parseTaskListFlags(args []string) (api.TaskFilter, error) {
 	return f, nil
 }
 
-// replyNoSuchTask answers an id the caller's project does not carry. A pooled reviewer reads the
-// backlog of whichever repo its REVIEW is in (-> taskHome), so between reviews it can reach only
-// _global — where every ordinary id is missing, which is a confusing way to be told nothing.
+// replyNoSuchTask answers an unknown id by naming the work that does exist: the id is a dead end, so
+// the next move is the reply's real content. A pooled reviewer reads the backlog of whichever repo
+// its REVIEW is in (-> taskHome), reaching only _global between reviews.
 func replyNoSuchTask(c registry.Caller, home, id string) string {
 	if c.Project == GlobalProject && home == GlobalProject {
-		return fmt.Sprintf("No task %s here. You are a pooled reviewer holding no review, so the only backlog "+
-			"you can read is the shared one; a repo's tasks come into reach with the PR you are given.", id)
+		return fmt.Sprintf("This backlog carries no %s. As a pooled reviewer you read the backlog of the "+
+			"repo whose PR you hold, and you hold none right now, so the shared backlog is all that is in "+
+			"reach; a repo's tasks arrive with the PR you are handed. Run `sindri` for your next move.", id)
 	}
-	return fmt.Sprintf("No task %s in this repo's backlog — check the id with `sindri task list`.", id)
+	return fmt.Sprintf("This backlog carries no %s — the id is unknown here, which is an ordinary answer "+
+		"and settles it. Run `sindri` for the work you hold, or `sindri task list` to see what exists.", id)
 }
 
 // CmdTasks is the read surface over the backlog, scoped to the caller's job: a planner or
@@ -119,7 +121,7 @@ func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int,
 		t, err := e.TaskInfo(home, id)
 		if errors.Is(err, ErrNoSuchTask) {
 			fmt.Fprintln(out, replyNoSuchTask(c, home, id))
-			return 1, nil // an answer, not a fault: returning the error escalates the caller
+			return 1, nil // an ordinary answer; returned as an error it escalates the caller
 		}
 		if err != nil {
 			return 1, err

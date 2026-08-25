@@ -77,9 +77,9 @@ func TestGateRunsWhateverTheLanguage(t *testing.T) {
 	}
 }
 
-// TestAnUndeclaredGateRefuses: brokkr used to stand in here, which meant a project's real checks
-// never ran — ranke-db's Go tests were never gated and its TypeScript rode on a linter that could
-// not resolve its types. An unanswered question is not a pass, whatever the tree contains.
+// TestAnUndeclaredGateRefuses: the toolbelt used to stand in here, which left a project's real
+// checks unrun — ranke-db's Go tests went ungated and its TypeScript rode on a linter blind to its
+// types. An unanswered question refuses, whatever the tree contains.
 func TestAnUndeclaredGateRefuses(t *testing.T) {
 	for _, goMod := range []bool{true, false} {
 		out, ok := Gate(t.Context(), worktree(t, goMod), "")

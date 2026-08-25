@@ -97,12 +97,12 @@ func MsgSubmitTaskClosed(task string) string {
 const MsgNoGateQuestion = "This project has no quality gate: `verify:` is unset in .sindri/config.yaml, " +
 	"so nothing can be submitted here until you point it at a script that builds, tests and lints."
 
-// MsgNoGateEscalated tells the agent it has been stopped and why it is not its doing. Carries the
+// MsgNoGateEscalated tells the agent it has been stopped and where the cause lies. Carries the
 // gate's own words, since they name the fix — the user may well ask the agent to make it.
 func MsgNoGateEscalated(detail string) string {
 	return "[hub] You are now ESCALATED and your submission did not go through: this project declares no " +
-		"quality gate, which only the user can set. This is NOT a fault in your work and there is nothing " +
-		"in your diff to fix — do not resubmit, and do not go looking.\n\n" + detail +
+		"quality gate, which only the user can set. Your work is fine and your diff is beside the point — " +
+		"the fault is in the project's configuration, so leave the code alone and stop here.\n\n" + detail +
 		"\nThe user has been asked. Wait for their answer; if they ask you to write the gate script, that " +
 		"becomes your work."
 }
