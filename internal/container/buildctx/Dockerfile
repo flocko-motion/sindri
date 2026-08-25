@@ -110,6 +110,21 @@ RUN mkdir -p /opt/sindri && cd /opt/sindri && npm init -y && npm install "@anthr
 # ── openspec CLI (spec-driven workflow, optional per project) ──────────────────
 RUN npm install -g @fission-ai/openspec@latest
 
+# ── tool-version manifest (sd-39dad3) ──────────────────────────────────────────
+# The hub compares these against its own host's, to catch the gate and the agents quietly
+# running different tools. Printed to the build log, which the hub already captures — never a
+# file inside the image, never something read back by execing into a built container.
+# A podman layer-cache hit on this RUN skips it silently, leaving the prior manifest (if any) in
+# place rather than clearing it — a stale-but-present manifest reads as "nothing new to compare".
+# The marker is assembled from two adjacent shell strings so it never appears whole in this RUN's
+# own source text: podman/BuildKit echo that source verbatim as a "STEP N/M: RUN ..." line (or a
+# cache-hit line replacing it) before ever running it, and a literal marker there would make a cache
+# hit's echo of the instruction itself look like a real, freshly-printed reading.
+RUN m="SINDRI-TOOL-""VERSION" \
+  && echo "$m go $(go version | awk '{print $3}')" \
+  && echo "$m node $(node --version)" \
+  && echo "$m openspec $(openspec --version)"
+
 # ── host-built tools (mounted from host at runtime) ──────────────────────────
 # The hub mounts its pod-bin DIRECTORY read-only at /opt/sindri/host-bin. These
 # symlinks resolve on every exec, so a reinstalled binary lands without

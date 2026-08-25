@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flo-at/sindri/internal/adapter/hosttools"
 	"github.com/flo-at/sindri/internal/adapter/tasks/github"
 	"github.com/flo-at/sindri/internal/adapter/tasks/spec"
 	"github.com/flo-at/sindri/internal/api"
@@ -55,6 +56,9 @@ type Hub struct {
 	creds    *credwatch        // agent credential upkeep from the host (internal/hub/credwatch.go)
 	stalls   *stallwatch       // held work nobody is working on (internal/hub/stallwatch.go)
 	runs     *runwatch         // executes the run queue, one at a time (internal/hub/runwatch.go)
+	// host/pod tool-version skew, checked once at startup (internal/hub/toolskew.go). Kept as a
+	// field only so toolskew_test.go can reach check()/said; New drives it once and nothing else does.
+	tools *toolskew
 }
 
 // agentKey identifies an agent within a project (a repoTag), one hub serving many repos.
@@ -88,6 +92,32 @@ func (h *Hub) projectRoot(project string) string {
 // New opens the single global hub and its project-keyed store; repos register lazily on first use.
 // ctx is the hub's lifetime: what its loops and its fleet-side pushes run under, until Close.
 func New(ctx context.Context) (*Hub, error) {
+	return open(ctx, hosttools.Versions, defaultPodManifest)
+}
+
+// defaultPodManifest is toolskew's real pod-side lookup: the image's baked-in manifest
+// (go/node/openspec, a local cache read, no build and no container call) plus brokkr's own
+// version. brokkr isn't baked into the image at all — it's bind-mounted from pod-bin at container
+// run time — so its value comes from agent.PodBrokkrVersion instead, reading that same file's own
+// build info.
+func defaultPodManifest() (map[string]string, error) {
+	m, err := container.ImageManifest(container.ImageName)
+	if err != nil {
+		return nil, err
+	}
+	if v, ok := agent.PodBrokkrVersion(); ok {
+		if m == nil {
+			m = map[string]string{}
+		}
+		m["brokkr"] = v
+	}
+	return m, nil
+}
+
+// open is New's real body, parameterized over toolskew's two lookups: production always supplies
+// the real ones (via New); newHub(t) supplies an inert stand-in, so the other hub tests never touch
+// the real image cache or spawn a real go/node/openspec just by constructing a Hub.
+func open(ctx context.Context, hostVersions func(context.Context) map[string]string, podManifest func() (map[string]string, error)) (*Hub, error) {
 	dir := paths.StateDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create state dir %s: %w", dir, err)
@@ -122,6 +152,9 @@ func New(ctx context.Context) (*Hub, error) {
 	h.stalls = newStallwatch(h)
 	// After wf: it drives NextQueuedRun/ExecuteRun through it.
 	h.runs = newRunwatch(life, h)
+	// A one-shot startup comparison, not a loop: the pod image only changes on a rebuild, not tick
+	// by tick. Needs only h.store (via Deliver), so nothing above it is a real dependency.
+	h.tools = newToolskew(h, hostVersions, podManifest)
 	return h, nil
 }
 

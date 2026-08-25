@@ -7,6 +7,7 @@
 package spec
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -233,6 +234,21 @@ func Enabled(projectRoot string) bool {
 func CLIInstalled() bool {
 	_, err := exec.LookPath("openspec")
 	return err == nil
+}
+
+// Version reports the openspec CLI's own version (ctx-bounded so a wedged CLI can't hang a caller,
+// e.g. hosttools.Versions checking this at hub startup). Only the first line: symmetric with the
+// pod-side manifest, which only ever captures the one build-log line its marker echo produced.
+func Version(ctx context.Context) (string, bool) {
+	out, err := exec.CommandContext(ctx, "openspec", "--version").Output()
+	if err != nil {
+		return "", false
+	}
+	v := strings.TrimSpace(string(out))
+	if i := strings.IndexByte(v, '\n'); i >= 0 {
+		v = strings.TrimSpace(v[:i])
+	}
+	return v, true
 }
 
 // ValidatorName names the check Validate performs. `brokkr lint openspec` and `sindri openspec

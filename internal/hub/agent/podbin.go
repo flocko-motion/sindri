@@ -1,16 +1,19 @@
 // package: hub/agent / podbin
 // type:    logic
 // job:     keep pod-bin holding current copies of the host-built tools agents run, so a
-// rebuild reaches running agents without recreating their containers.
+// rebuild reaches running agents without recreating their containers. Also reports
+// the brokkr version currently there (-> PodBrokkrVersion, for hub/toolskew.go).
 // limits:  copies and reports; mounting is the launch path's, building the Makefile's.
 package agent
 
 import (
+	"debug/buildinfo"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/flo-at/sindri/internal/tools/paths"
 )
@@ -112,4 +115,36 @@ func publish(src, dst string) error {
 		return err
 	}
 	return os.Rename(tmpName, dst)
+}
+
+// PodBrokkrVersion reports the version baked into pod-bin/brokkr, the file every pod actually runs
+// (kept current by SyncPodBin). Read from its own build info rather than executed: pod-bin holds a
+// linux binary, which a non-linux host cannot run, and reading needs no container call either way.
+// false if pod-bin holds nothing yet, or the file predates version stamping.
+func PodBrokkrVersion() (string, bool) {
+	info, err := buildinfo.ReadFile(filepath.Join(paths.PodBinDir(), "brokkr"))
+	if err != nil {
+		return "", false
+	}
+	for _, s := range info.Settings {
+		if s.Key == "-ldflags" {
+			return parseLdflagsVersion(s.Value)
+		}
+	}
+	return "", false
+}
+
+// parseLdflagsVersion pulls "-X main.version=X" out of a -ldflags build setting (brokkr's Makefile
+// recipe also stamps -X main.buildTime=..., so the value stops at the next space, not the string's end).
+func parseLdflagsVersion(ldflags string) (string, bool) {
+	const marker = "-X main.version="
+	i := strings.Index(ldflags, marker)
+	if i < 0 {
+		return "", false
+	}
+	v := ldflags[i+len(marker):]
+	if j := strings.IndexByte(v, ' '); j >= 0 {
+		v = v[:j]
+	}
+	return v, v != ""
 }

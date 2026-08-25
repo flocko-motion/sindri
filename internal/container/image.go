@@ -9,6 +9,7 @@ package container
 import (
 	"crypto/sha256"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -34,8 +35,65 @@ var buildContext embed.FS
 type ImageBuilder interface {
 	// ImageExists reports whether ref is present; an error means UNKNOWN, not absent.
 	ImageExists(ref string) (bool, error)
-	// Build builds ref from ctxDir/dockerfile; pull re-fetches the base image.
-	Build(ref, ctxDir, dockerfile string, pull bool, out io.Writer) error
+	// Build builds ref from ctxDir/dockerfile; pull re-fetches the base image. The returned map is
+	// this build's tool-version manifest (-> ParseVersionManifest), nil if none was found.
+	Build(ref, ctxDir, dockerfile string, pull bool, out io.Writer) (map[string]string, error)
+}
+
+// versionMarker prefixes each "tool version" line the Dockerfile prints while installing one, so the
+// build log every ImageBuilder.Build already captures doubles as the version manifest — nothing baked
+// into the image itself to fetch back out, no exec into a built container.
+const versionMarker = "SINDRI-TOOL-VERSION "
+
+// ParseVersionManifest pulls "tool version" pairs out of a build log, keyed by the marker lines an
+// ImageBuilder.Build implementation captured (stdout+stderr of the build it just ran). The marker is
+// found anywhere in the line, not just at its start: a BuildKit-driven builder (-> applecontainer)
+// prefixes every RUN line with its own step/elapsed decoration, which must not hide the marker. Only
+// the first space after the marker splits tool from version — the rest of the line, however many
+// words, is kept whole as the version, so a CLI whose own --version isn't a bare token still compares
+// correctly against the identically-unprocessed value the host side reads (-> hosttools.Versions).
+func ParseVersionManifest(buildLog string) map[string]string {
+	m := map[string]string{}
+	for _, line := range strings.Split(buildLog, "\n") {
+		i := strings.Index(line, versionMarker)
+		if i < 0 {
+			continue
+		}
+		rest := strings.TrimSpace(line[i+len(versionMarker):])
+		tool, version, ok := strings.Cut(rest, " ")
+		version = strings.TrimSpace(version)
+		if !ok || tool == "" || version == "" {
+			continue
+		}
+		m[tool] = version
+	}
+	return m
+}
+
+// ImageManifest is ref's tool-version manifest as of its last successful build (nil, nil if it has
+// never been built here, or nothing was recorded) — a local cache read, never a build or a container
+// call, so a caller may check it any time without forcing an image to exist first.
+func ImageManifest(ref string) (map[string]string, error) {
+	cacheDir, err := buildCacheDir()
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(manifestFile(cacheDir, ref))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var m map[string]string
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("parse cached manifest for %s: %w", ref, err)
+	}
+	return m, nil
+}
+
+func manifestFile(cacheDir, ref string) string {
+	return filepath.Join(cacheDir, "manifest-"+tagOf(ref)+".json")
 }
 
 // buildProgress collapses a build's output into one in-place status line; finish() ends it.
@@ -166,13 +224,20 @@ func buildImage(projectRoot, containerfile string, out io.Writer, b ImageBuilder
 	// Collapse the (verbose) build log into one in-place-updating line, so the caller
 	// sees progress happening without pages of buildkit output.
 	bp := &buildProgress{out: out}
-	buildErr := b.Build(ref, ctxDir, filepath.Join(ctxDir, "Dockerfile"), force, bp)
+	manifest, buildErr := b.Build(ref, ctxDir, filepath.Join(ctxDir, "Dockerfile"), force, bp)
 	bp.finish()
 	if buildErr != nil {
 		return "", buildErr
 	}
 	if err := os.WriteFile(keyFile, []byte(buildKey), 0o644); err != nil {
 		return "", fmt.Errorf("write build key: %w", err)
+	}
+	// Best-effort: nil (a custom recipe with no version lines, or podman's own layer cache skipping
+	// the RUN that prints them) means nothing new to compare, not a failure — any older manifest stays.
+	if len(manifest) > 0 {
+		if data, err := json.Marshal(manifest); err == nil {
+			_ = os.WriteFile(manifestFile(cacheDir, ref), data, 0o644)
+		}
 	}
 	return ref, nil
 }

@@ -353,9 +353,10 @@ func (podmanBuilder) ImageExists(ref string) (bool, error) {
 	return false, fmt.Errorf("podman image exists %s: %s: %w", ref, strings.TrimSpace(stderr.String()), err)
 }
 
-func (podmanBuilder) Build(ref, ctxDir, dockerfile string, pull bool, out io.Writer) error {
+func (podmanBuilder) Build(ref, ctxDir, dockerfile string, pull bool, out io.Writer) (map[string]string, error) {
 	// Capture podman's output alongside streaming it, so a failure carries the actual
-	// diagnostic — not a bare "exit status 125".
+	// diagnostic — not a bare "exit status 125" — and a success can be scanned for the
+	// tool-version lines the Dockerfile prints (-> container.ParseVersionManifest).
 	var captured bytes.Buffer
 	args := []string{"build", "-t", ref, "-f", dockerfile}
 	if pull {
@@ -368,9 +369,9 @@ func (podmanBuilder) Build(ref, ctxDir, dockerfile string, pull bool, out io.Wri
 	cmd.Stdout = io.MultiWriter(out, &captured)
 	cmd.Stderr = io.MultiWriter(out, &captured)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("podman build failed (%v):\n%s", err, buildFailureDetail(captured.String()))
+		return nil, fmt.Errorf("podman build failed (%v):\n%s", err, buildFailureDetail(captured.String()))
 	}
-	return nil
+	return container.ParseVersionManifest(captured.String()), nil
 }
 
 // reachable reports whether `podman info` succeeds, returning the trimmed last line

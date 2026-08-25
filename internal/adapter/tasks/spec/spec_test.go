@@ -1,12 +1,38 @@
 package spec
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+// Version degrades to ok=false rather than an error or a panic when the CLI isn't on PATH — the
+// shape a best-effort host-side version probe (hosttools.Versions) needs.
+func TestVersionMissingCLI(t *testing.T) {
+	t.Setenv("PATH", "")
+	if _, ok := Version(context.Background()); ok {
+		t.Fatal("a missing CLI must report ok=false, not a version")
+	}
+}
+
+// A CLI whose own --version prints more than one line must compare against only its first: the
+// pod-side manifest only ever captures the single build-log line its marker echo produced, so
+// keeping a trailing banner here would make this tool a permanent, unactionable mismatch.
+func TestVersionKeepsOnlyTheFirstLine(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "openspec")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '1.8.0\\nsome extra banner line\\n'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	v, ok := Version(context.Background())
+	if !ok || v != "1.8.0" {
+		t.Errorf("Version() = (%q, %v), want (\"1.8.0\", true)", v, ok)
+	}
+}
 
 func TestValidateNoOpenspecDirSkipsSilently(t *testing.T) {
 	ok, out := Validate(t.TempDir())
