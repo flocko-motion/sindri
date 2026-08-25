@@ -11,6 +11,7 @@ import (
 	"os"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/hub/store"
 
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
@@ -52,7 +53,9 @@ func (h *Hub) Deliver(project, name, text string, d workflow.Delivery) error {
 	}
 	// Under the hub's lifetime: a push is the hub telling an agent something on the fleet's timeline,
 	// and it must land whether or not whoever triggered it is still there (-> Hub.lifetime).
+	// Recorded per message: `pushed` only says send-keys was accepted (-> api.Mail.History).
 	if err := h.agents.InjectWhenReady(h.lifetime, project, name, text); err != nil {
+		_ = ps.LogMail(mailID, store.MailPushFailed, err.Error())
 		// Said whatever the class. Guarded by !d.Mail, three consecutive failures to one agent left no
 		// trace of WHY anywhere — its log records the text as inject-skipped, never the reason — and
 		// mail catching the message only helps once something tells the agent to read it.
@@ -67,6 +70,7 @@ func (h *Hub) Deliver(project, name, text string, d workflow.Delivery) error {
 		return nil
 	}
 	if mailID != 0 {
+		_ = ps.LogMail(mailID, store.MailPushLanded, "")
 		return ps.MarkMailPushed(mailID)
 	}
 	return nil

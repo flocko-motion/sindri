@@ -34,6 +34,9 @@ type Mail struct {
 	// on live. Carried because "pushed, and possibly missed" and "sitting here unread" are different
 	// diagnoses, and a reader looking at a quiet agent needs to tell them apart.
 	Pushed bool `json:"pushed,omitempty"`
+	// History is what happened to it, single fetches only. Pushed says send-keys was accepted, so it
+	// cannot answer "did this arrive" — dvalin's rejection carried it and never did.
+	History []Event `json:"history,omitempty"`
 }
 
 // MailIDPrefix marks a mail id as an id. Every other id in sindri carries one — sd-, td-, pr-, os-,

@@ -65,10 +65,15 @@ func (p *ProjectStore) AddMail(agent, sender, body string, pushed bool, inReplyT
 // MarkMailRead stamps a message as read, now — the row stays (-> mailSchema). Re-reading keeps the
 // first stamp, which is the one that answers "when did it learn".
 func (p *ProjectStore) MarkMailRead(id int64) error {
-	_, err := p.s.db.Exec(`UPDATE mail SET read_at=? WHERE id=? AND project=? AND read_at=''`,
+	res, err := p.s.db.Exec(`UPDATE mail SET read_at=? WHERE id=? AND project=? AND read_at=''`,
 		time.Now().UTC().Format(time.RFC3339), id, p.project)
 	if err != nil {
 		return fmt.Errorf("mark mail %d read: %w", id, err)
+	}
+	// Only the FIRST read is an event: re-reading changes nothing, and a trail that grew every time
+	// somebody looked would bury the delivery it exists to explain.
+	if n, aerr := res.RowsAffected(); aerr == nil && n > 0 {
+		_ = p.LogMail(id, MailRead, "")
 	}
 	return nil
 }
@@ -107,13 +112,38 @@ func (p *ProjectStore) UnannouncedMail(agent string) (unannounced, unread int, e
 // MarkMailAnnounced records that the agent has been told about everything now waiting — one statement, so
 // marking cannot outrun what was announced and lose a message for ever.
 func (p *ProjectStore) MarkMailAnnounced(agent string) error {
+	// The ids first: the UPDATE is what makes them stop matching, so reading after it returns none
+	// and the trail would record an announcement against nothing.
+	ids, _ := p.unannouncedIDs(agent)
 	_, err := p.s.db.Exec(
 		`UPDATE mail SET notified=1 WHERE project=? AND agent=? AND read_at='' AND notified=0`,
 		p.project, agent)
 	if err != nil {
 		return fmt.Errorf("mark mail announced for %s: %w", agent, err)
 	}
+	for _, id := range ids {
+		_ = p.LogMail(id, MailAnnounced, "")
+	}
 	return nil
+}
+
+// unannouncedIDs are the messages MarkMailAnnounced is about to claim, read before it claims them.
+func (p *ProjectStore) unannouncedIDs(agent string) ([]int64, error) {
+	rows, err := p.s.db.Query(
+		`SELECT id FROM mail WHERE project=? AND agent=? AND read_at='' AND notified=0`, p.project, agent)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // UnreadMailCount is how many messages an agent has not read — what the directive reminds it of.
