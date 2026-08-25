@@ -34,10 +34,14 @@ func (s *Service) inject(ctx context.Context, project, name, text string, guard 
 		return fmt.Errorf("agent %q is not running — launch it first", name)
 	}
 	if guard && s.readsSignedOut(ctx, project, name) {
-		return fmt.Errorf("agent %q is signed out — its pane says to run /login, and nothing typed there is sent. "+
-			"Its credentials come from the host and the hub keeps them staged, so the running process just has to "+
-			"re-read them: `sindri agent restart %s` (the session resumes). If the host is signed out too, log in "+
-			"there first", name, name)
+		// Says "READS", never "is": the banner stays in the transcript long after the turn that
+		// printed it, so this fires on agents that are working. A restart is not offered — it hands
+		// the process the credentials the hub already staged, which only differ if the host's token
+		// changed, and when it does the hub restarts the agent itself (-> credwatch.revive).
+		return fmt.Errorf("agent %q reads signed out — its pane carries a /login banner, and nothing typed at "+
+			"that prompt is sent. If the banner is stale it is working normally: `sindri agent tell %s \"…\" "+
+			"--anyway` sends regardless. If it is genuinely at the prompt, only a fresh token on the HOST "+
+			"fixes it — the hub stages that itself, and restarts the agent when it arrives", name, name)
 	}
 	for _, argv := range tmux.SendText(name, text) { // the tmux session is the agent name
 		full := append([]string{"tmux"}, argv...)

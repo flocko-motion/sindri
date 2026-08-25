@@ -47,11 +47,15 @@ func TestTellingASignedOutAgentAsksInsteadOfRefusing(t *testing.T) {
 	if m.choice.values[0] != "cancel" {
 		t.Errorf("cancel must sit under the cursor, got %q", m.choice.values)
 	}
-	if m.choice.values[1] != api.SignedOutRestart {
-		t.Errorf("the restart is the remedy that works, so it leads the answers: %q", m.choice.values)
+	// SEND leads. The reading is a look at a screen, and the /login banner outlives the turn that
+	// printed it — balin read signed-out while answering messages and holding a review. A restart
+	// hands the process the credentials the hub already staged, so unless the host's token CHANGED
+	// it re-reads the one it holds; when it does change, the hub restarts the agent itself.
+	if m.choice.values[1] != api.SignedOutSend {
+		t.Errorf("sending leads: the pane's reading is usually stale, got %q", m.choice.values)
 	}
-	if !strings.Contains(m.choice.title+m.choice.note, "restart") {
-		t.Error("the modal must say what a restart does, since that is why it is offered")
+	if !strings.Contains(m.choice.note, "host") {
+		t.Error("the modal must name the host's token as the fix, since nothing local clears a real one")
 	}
 }
 

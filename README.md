@@ -598,7 +598,7 @@ defaults — **repo → global → default, per key**. All keys are optional:
 architecture: docs/ARCHITECTURE.md    # doc the reviewer must read (default: ARCHITECTURE.md)
 containerfile: .sindri/Containerfile  # agent image recipe (highest-precedence; see below)
 review_prompt: .sindri/review.md      # file whose contents become the reviewer's prompt
-verify: scripts/check.sh              # REQUIRED — your own submit gate; nothing merges without one
+verify: make check                    # REQUIRED — your own submit gate; nothing merges without one
 github:
   issues: false                       # import open GitHub issues as tasks (default: true)
 ```
@@ -611,16 +611,17 @@ github:
 - **`containerfile`** — repo-relative agent-image recipe (see the next section).
 - **`review_prompt`** — repo-relative file whose contents replace the default reviewer
   prompt.
-- **`verify`** — repo-relative executable the submit gate runs in the agent's worktree,
+- **`verify`** — **required.** The command the submit gate runs in the agent's worktree,
   after the rebase and **before the PR exists**. A non-zero exit refuses the submit and
   reports the output, so a PR that fails your build, your tests or your architecture
-  tests is never created. It's a path rather than a command line so it can be validated
-  before it runs — wrap a build tool in a script (this repo uses `scripts/check.sh`,
-  which runs `make check`). A declared gate runs **whatever the language**.
-  **Required**: with no `verify` key nothing can be submitted at all, since sindri
-  supplies no gate of its own — `brokkr` is a tool your gate may choose to run, not a
-  stand-in for the checks only your project knows. Bounded by a timeout, with long
-  output capped and the cut announced.
+  tests is never created. It runs through a shell in the repo root, so whatever you
+  already use does — `verify: make check`, `npm test`, `cargo test`, a script of your
+  own. Works **whatever the language**. With no `verify` key nothing can be submitted at
+  all: sindri supplies no gate of its own, and `brokkr` is a tool your gate may choose to
+  run rather than a stand-in for the checks only your project knows. Each submit runs it
+  in a **fresh checkout** of the commit, so anything the checks need — installed
+  dependencies among them — the command has to put there itself. Bounded by a timeout,
+  with long output capped and the cut announced.
 - **`github.issues`** — the repo's open GitHub issues are imported as `gh-<number>`
   tasks (via the `gh` CLI, reusing your `gh` auth). **On by default** (opt-out — set
   `false` to disable). Imported issues arrive **unrated**: they show in the backlog

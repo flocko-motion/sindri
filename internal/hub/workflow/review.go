@@ -97,7 +97,7 @@ func (e *Engine) RequestReview(project, prID, requirement string) error {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("no such PR %q", prID)
+		return fmt.Errorf("%w %q", ErrNoSuchPR, prID)
 	}
 	requirement = strings.TrimSpace(requirement)
 	if requirement == "" {

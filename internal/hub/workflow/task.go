@@ -44,7 +44,7 @@ func (e *Engine) TaskInfo(project, id string) (store.Task, error) {
 			return store.Task{}, err
 		}
 		if !ok {
-			return store.Task{}, fmt.Errorf("unknown task %q", id)
+			return store.Task{}, fmt.Errorf("%w %q", ErrNoSuchTask, id)
 		}
 		t.Comments = e.deps.TaskComments(project, id)
 		return t, nil
@@ -58,7 +58,7 @@ func (e *Engine) TaskInfo(project, id string) (store.Task, error) {
 		return store.Task{}, err
 	}
 	if !ok {
-		return store.Task{}, fmt.Errorf("no such task %q", id)
+		return store.Task{}, fmt.Errorf("%w %q", ErrNoSuchTask, id)
 	}
 	_ = ps.UpsertTask(ownedToCachedTask(owned, ps.ParentOf(id)))
 	// Read the row back rather than returning what was just written: the approval gate lives in its

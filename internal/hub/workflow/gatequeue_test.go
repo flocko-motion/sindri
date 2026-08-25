@@ -39,7 +39,7 @@ func writeExec(t *testing.T, path, body string) {
 // taken on. An edit undone before the next gate would then be reused as a pass about that commit.
 func TestASelfCheckMeasuresTheCommitNotTheMovingTree(t *testing.T) {
 	e, ps, root := gateRepo(t, "bombur", "sd-1")
-	e.deps.(*stubDeps).projectConfig = config.Config{Verify: "check.sh"}
+	e.deps.(*stubDeps).projectConfig = config.Config{Verify: "./check.sh"}
 	wt := filepath.Join(root, ".worktrees", "bombur")
 	// The project's own gate refuses if the tree carries scratch.txt — so the check's verdict says
 	// which tree it read, rather than a test having to trust that it read the right one.
@@ -57,7 +57,7 @@ func TestASelfCheckMeasuresTheCommitNotTheMovingTree(t *testing.T) {
 		t.Fatalf("status = %q, want passed — the gate read the agent's live tree, not %s:\n%s",
 			got.Status, shortSHA(r.Commit), out)
 	}
-	if _, passed, ok := ps.GateVerdict(r.Commit, "check.sh"); !ok || !passed {
+	if _, passed, ok := ps.GateVerdict(r.Commit, "./check.sh"); !ok || !passed {
 		t.Errorf("verdict for %s: ok=%v passed=%v, want the pass filed under the commit measured", shortSHA(r.Commit), ok, passed)
 	}
 	if head, _ := git.Head(wt); head != r.Commit {
@@ -344,7 +344,7 @@ func TestAPRCheckOnAMovedBranchIsQueuedOnce(t *testing.T) {
 // back, pass or fail; what may never stand on a stored failure is a DECISION, and reading is not one.
 func TestAFailedPRVerdictIsReadBackWithoutAnotherGate(t *testing.T) {
 	e, ps, root := gateRepo(t, "bombur", "sd-1")
-	e.deps.(*stubDeps).projectConfig = config.Config{Verify: "check.sh"}
+	e.deps.(*stubDeps).projectConfig = config.Config{Verify: "./check.sh"}
 	wt := filepath.Join(root, ".worktrees", "bombur")
 	writeExec(t, filepath.Join(wt, "check.sh"), "#!/bin/sh\necho 'FAIL: the project says no'\nexit 1\n")
 	r := openGate(t, e, "bombur", gateSubmit, "the work")
@@ -374,7 +374,7 @@ func TestAFailedPRVerdictIsReadBackWithoutAnotherGate(t *testing.T) {
 		t.Errorf("reading a recorded verdict must queue nothing, got %+v", runs)
 	}
 	// The rule that matters is untouched: a DECISION never stands on a stored failure.
-	if _, ok := ps.GatePassed(r.Commit, "check.sh"); ok {
+	if _, ok := ps.GatePassed(r.Commit, "./check.sh"); ok {
 		t.Error("a stored failure must never answer a landing decision")
 	}
 }

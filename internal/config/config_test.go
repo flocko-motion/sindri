@@ -117,46 +117,29 @@ func TestRepoOverridesGlobal(t *testing.T) {
 	}
 }
 
-// TestVerifyKeyIsValidatedLikeEveryOtherPath: the gate command is a path the hub will execute, so a
-// bad one has to be refused when the config is read, not discovered mid-submit.
-func TestVerifyKeyIsValidatedLikeEveryOtherPath(t *testing.T) {
+// TestVerifyIsACommandNotAPath: the gate is whatever the project already runs, so `make check` and
+// anything else with arguments must survive being read back. Validating it as a repo-relative file
+// refused exactly that, and bought no safety — a script it did accept is arbitrary code too.
+func TestVerifyIsACommandNotAPath(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".sindri"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	write := func(body string) error {
+	load := func(body string) (Config, error) {
 		if err := os.WriteFile(filepath.Join(root, ".sindri", "config.yaml"), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		_, err := Load(root)
-		return err
+		return Load(root)
 	}
 
-	if err := write("verify: /etc/passwd\n"); err == nil {
-		t.Error("an absolute verify path must be refused")
-	}
-	if err := write("verify: ../escape.sh\n"); err == nil {
-		t.Error("a verify path escaping the repo must be refused")
-	}
-	if err := write("verify: scripts/absent.sh\n"); err == nil {
-		t.Error("a verify path that does not exist must be refused")
-	}
-
-	if err := os.MkdirAll(filepath.Join(root, "scripts"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "scripts", "verify.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := write("verify: scripts/verify.sh\n"); err != nil {
-		t.Errorf("a real repo-relative gate must be accepted: %v", err)
-	}
-
-	cfg, err := Load(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Verify != "scripts/verify.sh" {
-		t.Errorf("Verify = %q, want the declared path", cfg.Verify)
+	for _, cmd := range []string{"make check", "npm test", "./scripts/check.sh --fast"} {
+		cfg, err := load("verify: " + cmd + "\n")
+		if err != nil {
+			t.Errorf("verify %q was refused: %v", cmd, err)
+			continue
+		}
+		if cfg.Verify != cmd {
+			t.Errorf("Verify = %q, want %q read back verbatim", cfg.Verify, cmd)
+		}
 	}
 }

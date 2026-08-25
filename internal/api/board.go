@@ -51,12 +51,17 @@ type AgentView struct {
 	Escalation string `json:"escalation,omitempty"`
 }
 
-// RepoDocState is a repo's architecture-doc situation: the path in effect, and Advice ("" when fine).
+// RepoDocState is what a repo has told sindri about itself — its architecture doc and its quality
+// gate, each with Advice ("" when fine). Absent, one costs a briefing and the other every submit.
 type RepoDocState struct {
 	Doc      string `json:"doc"`      // the path in effect: configured, else the default
 	Set      bool   `json:"set"`      // the project named it (vs falling back to the default)
 	Readable bool   `json:"readable"` // a doc exists at Doc
 	Advice   string `json:"advice"`   // "" when nothing to say
+
+	Gate       string `json:"gate"`       // the `verify:` script, "" when the repo declares none
+	GateOK     bool   `json:"gateOK"`     // Gate is set and present in the repo
+	GateAdvice string `json:"gateAdvice"` // "" when nothing to say
 }
 
 // FleetMemory is the machine's memory headroom: what the fleet costs the host now, and the ceiling

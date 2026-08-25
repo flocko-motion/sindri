@@ -54,6 +54,14 @@ func ReplyReviewRequestFailed(prID string, err error) string {
 	return fmt.Sprintf("%s registered, but requesting a review failed: %v. The hub retries this on its own; flag it if %s is still showing no reviewer after a while.", prID, err, prID)
 }
 
+// ReplyNoSuchPR answers an id no PR carries, and names the listing that does — an unknown id is a
+// dead end, so the reply's content is where to look instead. An ordinary answer: reported as an
+// error it reaches AgentExec as a hub fault and stops the agent (-> ErrNoSuchPR).
+func ReplyNoSuchPR(id string) string {
+	return fmt.Sprintf("No PR %s here. `sindri prs` lists the ones you can act on; a pooled reviewer sees "+
+		"the PR it was handed. Check the id there, then carry on with `sindri`.", id)
+}
+
 // ReplyPRStillToLand refuses to end a task whose PR has not merged. Names the way out, since a
 // rejected author is in the state that most looks finished and is not.
 func ReplyPRStillToLand(task, pr string) string {

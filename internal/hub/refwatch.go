@@ -88,8 +88,9 @@ func (r *refwatch) sweep(ctx context.Context) {
 		// `verify:` cannot land ANY work, and finding that out mid-submit wastes the attempt.
 		if gate := r.h.wf.VerifyCmd(p.Tag); gate == "" && !r.noGate[p.Tag] {
 			r.noGate[p.Tag] = true
-			log.Printf("hub: %s has no `verify:` configured — no work can be submitted from it until "+
-				"one is set in .sindri/config.yaml (a repo-relative script that builds, tests and lints).", p.Path)
+			log.Printf("hub: %s has no `verify:` configured — no work can be submitted from it until one is "+
+				"set in .sindri/config.yaml. `verify: make check` is the usual answer; any shell command "+
+				"that builds, tests and lints the project does.", p.Path)
 		} else if gate != "" && r.noGate[p.Tag] {
 			r.noGate[p.Tag] = false
 			log.Printf("hub: %s now has a quality gate (%s).", p.Path, gate)

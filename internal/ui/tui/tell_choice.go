@@ -1,8 +1,8 @@
 // package: tui / tell choice
 // type:    ui (Agents tab confirm modal)
-// job:     what to do when the user tells an agent whose pane reads signed out — restart it and
-// send, send regardless, or cancel — since the reading is a look at a screen and the person
-// typing may know the token was renewed a moment ago.
+// job:     what to do when the user tells an agent whose pane reads signed out — send regardless,
+// restart it first, or cancel — since the reading is a look at a screen and the person typing
+// usually knows better than a banner left in the transcript.
 // limits:  labels and choice-to-call plumbing only; whether the answer comes into play, and the
 // restart itself, are the hub's (-> agent.Service.Tell).
 package tui
@@ -24,19 +24,24 @@ func (m model) agentReadsSignedOut(name string) bool {
 	return false
 }
 
-// openTellChoice offers the answers to a signed-out pane. The restart comes first among them
-// because it is the remedy that works — a restarted process re-reads the credentials the hub keeps
-// staged — and cancel keeps the cursor's default harmless, as every other confirm here does.
+// openTellChoice offers the answers to a signed-out pane. SEND leads, because the reading is most
+// often stale: the banner sits in the transcript long after the turn that produced it, so an agent
+// working normally still reads signed-out — balin answered a message while the board said otherwise.
+// The restart is kept but demoted and told the truth about: it re-reads the credentials the hub
+// already staged, so unless those CHANGED it hands the process the token it is holding. When they do
+// change the hub restarts the agent itself (-> credwatch.revive), which is why this rarely helps.
 func (m *model) openTellChoice(name, msg string) {
 	cl := m.cl
 	m.choice = choiceModalState{
 		active: true,
-		title:  name + " reads signed out — restart it and send, or send anyway?",
-		note: "Nothing typed at a /login prompt is sent: the message would sit in its input box, unread.\n" +
-			"A restart makes the process re-read the credentials the hub keeps staged; the session resumes.\n" +
-			"That reading is a look at its pane, so if you have just renewed the host's token, send anyway.",
-		options: []string{"cancel", "restart " + name + ", then send", "send anyway"},
-		values:  []string{"cancel", api.SignedOutRestart, api.SignedOutSend},
+		title:  name + "'s pane reads signed out — send anyway?",
+		note: "That reading is a look at a SCREEN, and the /login banner stays in the transcript long after " +
+			"the turn that printed it — so an agent working normally reads signed-out too.\n" +
+			"If it really is at a /login prompt, what you send waits in its input box until it is not.\n" +
+			"A restart only helps if the host's token CHANGED since that process started; when it does, the " +
+			"hub restarts the agent itself. Renewing the token on the host is the fix that works.",
+		options: []string{"cancel", "send anyway", "restart " + name + " first, then send"},
+		values:  []string{"cancel", api.SignedOutSend, api.SignedOutRestart},
 		apply: func(v string) tea.Cmd {
 			if v == "cancel" {
 				return nil

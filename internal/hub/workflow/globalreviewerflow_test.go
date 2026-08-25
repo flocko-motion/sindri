@@ -188,8 +188,16 @@ func TestApproveIsScopedUnlessTheCallerHoldsTheNamedPR(t *testing.T) {
 	st, other, c := foreignPRFixture(t)
 	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
 
-	if code, err := e.CmdApprove(c, []string{"pr-9"}, io.Discard); err == nil || code == 0 {
-		t.Fatalf("a reviewer holding nothing in other-repo should be refused pr-9, got code=%d err=%v", code, err)
+	var out bytes.Buffer
+	code, err := e.CmdApprove(c, []string{"pr-9"}, &out)
+	if err != nil {
+		t.Fatalf("the refusal came back as a hub fault, which escalates the caller: %v", err)
+	}
+	if code == 0 {
+		t.Fatalf("a reviewer holding nothing in other-repo should be refused pr-9, got code=%d", code)
+	}
+	if !strings.Contains(out.String(), "No PR pr-9") {
+		t.Errorf("the caller must be told the id is out of its reach, got %q", out.String())
 	}
 	if pr, _, _ := other.GetPR("pr-9"); pr.Status != "open" {
 		t.Errorf("pr-9's status changed to %q from an unrelated caller's approve attempt", pr.Status)
@@ -201,8 +209,16 @@ func TestRejectIsScopedUnlessTheCallerHoldsTheNamedPR(t *testing.T) {
 	st, other, c := foreignPRFixture(t)
 	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
 
-	if code, err := e.CmdReject(c, []string{"pr-9", "no"}, io.Discard); err == nil || code == 0 {
-		t.Fatalf("a reviewer holding nothing in other-repo should be refused pr-9, got code=%d err=%v", code, err)
+	var out bytes.Buffer
+	code, err := e.CmdReject(c, []string{"pr-9", "no"}, &out)
+	if err != nil {
+		t.Fatalf("the refusal came back as a hub fault, which escalates the caller: %v", err)
+	}
+	if code == 0 {
+		t.Fatalf("a reviewer holding nothing in other-repo should be refused pr-9, got code=%d", code)
+	}
+	if !strings.Contains(out.String(), "No PR pr-9") {
+		t.Errorf("the caller must be told the id is out of its reach, got %q", out.String())
 	}
 	if pr, _, _ := other.GetPR("pr-9"); pr.Status != "open" {
 		t.Errorf("pr-9's status changed to %q from an unrelated caller's reject attempt", pr.Status)
@@ -265,5 +281,32 @@ func TestGlobalReviewerReadsTheTasksOfTheProjectItReviewsFor(t *testing.T) {
 	local := registry.Caller{Project: "repo", Agent: "dvalin", Role: "worker"}
 	if home := e.taskHome(local); home != "repo" {
 		t.Errorf("taskHome for a project-bound caller = %q, want its own project", home)
+	}
+}
+
+// TestAnUnknownTaskIsAnsweredNotEscalated: `sindri task <id>` for an id the caller's project does
+// not carry is an ANSWER. Returned as an error it reaches AgentExec as a hub-internal failure,
+// which auto-escalates — and balin, a pooled reviewer between reviews, was stranded on exactly that
+// for asking about a task in the repo it had just been reviewing for.
+func TestAnUnknownTaskIsAnsweredNotEscalated(t *testing.T) {
+	st, _ := poolFixture(t)
+	if err := st.For(GlobalProject).PutAgent(store.Agent{Name: "balin", Role: "reviewer", Workspace: "balin"}); err != nil {
+		t.Fatal(err)
+	}
+	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
+	c := registry.Caller{Project: GlobalProject, Agent: "balin", Role: "reviewer"}
+
+	var out bytes.Buffer
+	code, err := e.CmdTasks(c, []string{"sd-39dad3"}, &out)
+	if err != nil {
+		t.Fatalf("an unknown id came back as a hub fault, which escalates the agent: %v", err)
+	}
+	if code == 0 {
+		t.Error("an unknown id is still a refusal, so the code must be non-zero")
+	}
+	// Holding no review, its only reachable backlog is the shared one — saying so beats "not found",
+	// which reads as the task having been deleted.
+	if !strings.Contains(out.String(), "pooled reviewer") {
+		t.Errorf("the answer should explain why the id is out of reach, got %q", out.String())
 	}
 }

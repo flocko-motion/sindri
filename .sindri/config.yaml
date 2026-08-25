@@ -1,4 +1,4 @@
-# The project's own submit gate. The hub runs it in the agent's worktree after the rebase and
-# before the PR record exists, so a refused submit never creates one. Every project must declare
+# The project's own submit gate: the command the hub runs in the agent's worktree after the rebase
+# and before the PR record exists, so a refused submit never creates one. Every project must declare
 # one — nothing stands in for it, and an undeclared gate refuses every submit.
-verify: scripts/check.sh
+verify: make check

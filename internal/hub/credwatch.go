@@ -8,6 +8,7 @@ package hub
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"strings"
 	"time"
@@ -63,21 +64,25 @@ func (c *credwatch) loop() {
 // is taken, because a token changing under a running agent explains behaviour that is otherwise hard
 // to place.
 func (c *credwatch) sweep() {
-	c.watchToken()
+	usable := c.watchToken()
 	agents, err := c.h.store.AllAgents()
 	if err != nil {
 		log.Printf("hub: credential upkeep: roster: %v", err)
 		return
 	}
-	var took []string
+	var took, revived []string
 	for _, a := range agents {
 		wrote, err := agentport.RestageCredentials(paths.AgentHomeDir(a.Project, a.Name))
 		if err != nil {
 			c.say(fmt.Sprintf("hub: credential upkeep for %s: %v", a.Name, err))
 			continue
 		}
-		if wrote {
-			took = append(took, a.Name)
+		if !wrote {
+			continue
+		}
+		took = append(took, a.Name)
+		if usable && c.revive(a.Project, a.Name) {
+			revived = append(revived, a.Name)
 		}
 	}
 	// One line for the round rather than one per agent: they share a token, so they are refreshed
@@ -86,28 +91,61 @@ func (c *credwatch) sweep() {
 		log.Printf("hub: redistributed the host's Claude credentials to %d agent(s): %s",
 			len(took), strings.Join(took, ", "))
 	}
+	// The recovery, not the copy: a person reconstructing a quiet fleet needs to know an agent came
+	// back, which the line above never said.
+	if len(revived) > 0 {
+		log.Printf("hub: restarted %d signed-out agent(s) onto the new credentials: %s",
+			len(revived), strings.Join(revived, ", "))
+	}
+}
+
+// revive restarts an agent that just took a fresh token and is sitting at a /login prompt. Only
+// those: the process holds the OLD token in memory, so a new file on disk changes nothing until it
+// restarts, and a message typed at that prompt is swallowed (-> agent.Service.Inject's refusal). An
+// agent working normally is left alone — a token refreshed under it is routine.
+func (c *credwatch) revive(project, name string) bool {
+	if !c.stuckAtLogin(project, name) {
+		return false
+	}
+	if err := c.h.agents.RestartAgent(c.h.lifetime, project, name, io.Discard); err != nil {
+		log.Printf("hub: restarting signed-out %s onto the new credentials: %v", name, err)
+		return false
+	}
+	return true
+}
+
+// stuckAtLogin is the whole rule revive acts on, separated from the acting so it can be checked
+// without a runtime. The observer's standing reading, never a probe: this runs over the whole roster.
+func (c *credwatch) stuckAtLogin(project, name string) bool {
+	l, ok := c.h.watch.get(project, name)
+	return ok && l.up && l.runtime == "signed-out"
 }
 
 // watchToken reports the shared token's state as it changes: gone, lapsed, or about to lapse. Only
 // the host can renew it, so the hub's job is to make the coming outage legible rather than let a
 // fleet of "signed out" agents be the first news of it.
-func (c *credwatch) watchToken() {
+func (c *credwatch) watchToken() (usable bool) {
 	expires, usable := agentport.HostTokenExpiry()
 	if !usable {
 		c.say("hub: the host has no usable Claude credentials — agents cannot be re-authenticated until you log in on the host")
-		return
+		return false
 	}
 	left := time.Until(time.UnixMilli(expires))
 	switch {
 	case left <= 0:
 		c.say(fmt.Sprintf("hub: the shared Claude token lapsed %s ago — every agent is signed out until the host renews it",
 			left.Abs().Round(time.Second)))
+		// Restarting into a lapsed token returns the agent to the same prompt, which is a loop.
+		return false
 	case left <= expiryLead:
 		c.say(fmt.Sprintf("hub: the shared Claude token lapses in %s; the fleet stops until the host renews it",
 			left.Round(time.Second)))
 	default:
 		c.say("") // healthy: forget the last complaint so the next one is reported afresh
 	}
+	// Nearly-lapsed still counts: it authenticates now, and an agent brought back for the minutes
+	// that remain beats one left at a prompt through them.
+	return true
 }
 
 // say logs a message once, until it changes.

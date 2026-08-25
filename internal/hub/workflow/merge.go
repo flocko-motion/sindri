@@ -50,7 +50,7 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 		return store.PR{}, err
 	}
 	if !ok {
-		return store.PR{}, fmt.Errorf("no such PR %q", prID)
+		return store.PR{}, fmt.Errorf("%w %q", ErrNoSuchPR, prID)
 	}
 	if pr.Status != "approved" {
 		return store.PR{}, fmt.Errorf("%s is %s — only an approved PR may be merged", prID, pr.Status)
