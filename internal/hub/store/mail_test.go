@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // mailStore opens a throwaway store with two projects' mail in it.
@@ -56,20 +57,25 @@ func TestReadingMailMARKSIt(t *testing.T) {
 	}
 }
 
-// TestUnannouncedMailSkipsALandedPush: a message delivered as mail-and-push already reached the
-// agent's pane, so counting it toward "unannounced" would nudge a second notification about
-// something already sitting there — pushed and notified are two different questions, and either
-// one answering "yes" is enough to skip it.
-func TestUnannouncedMailSkipsALandedPush(t *testing.T) {
+// TestALandedPushGoesQuietThenSpeaksAgain: a push that landed counts as told, so the agent is not
+// nudged about something it just received. But "send-keys was accepted" is not "the agent read it" —
+// dvalin's rejection carried pushed=1 and never reached its pane — so once the message has sat
+// unread past the interval it counts again, and the nudge repeats until it is read.
+func TestALandedPushGoesQuietThenSpeaksAgain(t *testing.T) {
 	s := mailStore(t)
 	ps := s.For("proj")
-	if _, err := ps.AddMail("dvalin", "hub", "already pushed", true, 0); err != nil {
+	m, err := ps.AddMail("dvalin", "hub", "already pushed", true, 0)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ps.AddMail("dvalin", "hub", "never pushed", false, 0); err != nil {
 		t.Fatal(err)
 	}
-	unannounced, unread, err := ps.UnannouncedMail("dvalin")
+	if err := ps.LogMail(m.ID, MailPushLanded, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	unannounced, unread, err := ps.UnannouncedMail("dvalin", time.Now().Add(-time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +83,15 @@ func TestUnannouncedMailSkipsALandedPush(t *testing.T) {
 		t.Errorf("unread = %d, want 2 — both messages are still unread", unread)
 	}
 	if unannounced != 1 {
-		t.Errorf("unannounced = %d, want 1 — the pushed one already reached the pane", unannounced)
+		t.Errorf("unannounced = %d, want 1 — the freshly pushed one needs no second word", unannounced)
+	}
+
+	// The same mailbox, asked about a moment further on: the push is stale, so it is due again.
+	if unannounced, _, err = ps.UnannouncedMail("dvalin", time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if unannounced != 2 {
+		t.Errorf("unannounced = %d, want 2 — an unread message is told again once the push goes stale", unannounced)
 	}
 }
 

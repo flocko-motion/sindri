@@ -3,6 +3,7 @@ package workflow
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/flo-at/sindri/internal/hub/store"
 )
@@ -98,7 +99,7 @@ func TestAnUndeliveredNudgeLeavesTheMailUnannounced(t *testing.T) {
 	if e.NudgeMailWaiting("proj", "dvalin") {
 		t.Error("a wake that did not land is not a wake")
 	}
-	if unannounced, _, err := ps.UnannouncedMail("dvalin"); err != nil || unannounced != 1 {
+	if unannounced, _, err := ps.UnannouncedMail("dvalin", time.Now()); err != nil || unannounced != 1 {
 		t.Errorf("unannounced = %d (err %v), want the message still owed a wake", unannounced, err)
 	}
 }

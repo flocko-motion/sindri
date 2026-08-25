@@ -98,10 +98,19 @@ func (p *ProjectStore) Mail() ([]Mail, error) {
 	return queryMail(p.s.db, mailCols+` WHERE project=? ORDER BY id DESC`, p.project)
 }
 
-// UnannouncedMail counts what a nudge is about — per message, not a timer, so nothing is announced twice.
-func (p *ProjectStore) UnannouncedMail(agent string) (unannounced, unread int, err error) {
-	err = p.s.db.QueryRow(
-		`SELECT COUNT(*), COALESCE(SUM(notified = 0 AND pushed = 0), 0) FROM mail WHERE project=? AND agent=? AND read_at=''`,
+// UnannouncedMail counts what a nudge is about: unread messages the agent has not been told of SINCE
+// cutoff, and the unread total. Timed rather than once-per-message, because "we said it" is not "it
+// arrived" — a push sets pushed=1 when send-keys is accepted, and dvalin's rejection carried that
+// flag while never reaching its pane, which under a one-shot rule silenced it for good.
+func (p *ProjectStore) UnannouncedMail(agent string, cutoff time.Time) (unannounced, unread int, err error) {
+	err = p.s.db.QueryRow(`
+		SELECT COUNT(*), COALESCE(SUM(NOT EXISTS (
+			SELECT 1 FROM mail_events e
+			WHERE e.project = m.project AND e.mail = m.id
+			  AND e.type IN (?, ?) AND e.ts > ?
+		)), 0)
+		FROM mail m WHERE m.project=? AND m.agent=? AND m.read_at=''`,
+		MailAnnounced, MailPushLanded, cutoff.UTC().Format(time.RFC3339),
 		p.project, agent).Scan(&unread, &unannounced)
 	if err != nil {
 		return 0, 0, fmt.Errorf("unannounced mail for %s: %w", agent, err)
@@ -112,9 +121,9 @@ func (p *ProjectStore) UnannouncedMail(agent string) (unannounced, unread int, e
 // MarkMailAnnounced records that the agent has been told about everything now waiting — one statement, so
 // marking cannot outrun what was announced and lose a message for ever.
 func (p *ProjectStore) MarkMailAnnounced(agent string) error {
-	// The ids first: the UPDATE is what makes them stop matching, so reading after it returns none
-	// and the trail would record an announcement against nothing.
-	ids, _ := p.unannouncedIDs(agent)
+	// Every UNREAD message, not just the ones flipping the flag: an announcement covers the mailbox
+	// as it stands, and re-announcing an already-flagged message is the whole point of repeating.
+	ids, _ := p.unreadIDs(agent)
 	_, err := p.s.db.Exec(
 		`UPDATE mail SET notified=1 WHERE project=? AND agent=? AND read_at='' AND notified=0`,
 		p.project, agent)
@@ -127,10 +136,10 @@ func (p *ProjectStore) MarkMailAnnounced(agent string) error {
 	return nil
 }
 
-// unannouncedIDs are the messages MarkMailAnnounced is about to claim, read before it claims them.
-func (p *ProjectStore) unannouncedIDs(agent string) ([]int64, error) {
+// unreadIDs are the messages an announcement covers — everything still waiting for this agent.
+func (p *ProjectStore) unreadIDs(agent string) ([]int64, error) {
 	rows, err := p.s.db.Query(
-		`SELECT id FROM mail WHERE project=? AND agent=? AND read_at='' AND notified=0`, p.project, agent)
+		`SELECT id FROM mail WHERE project=? AND agent=? AND read_at=''`, p.project, agent)
 	if err != nil {
 		return nil, err
 	}
