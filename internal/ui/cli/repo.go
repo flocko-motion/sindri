@@ -221,7 +221,8 @@ func printRepoDetail(d api.RepoDetail) {
 	fmt.Printf("config:\n  verify:        %s\n  architecture:  %s\n  containerfile: %s\n  review_prompt: %s\n  github.issues: %s\n",
 		dash(d.Config.Verify), dash(d.Config.Architecture), dash(d.Config.Containerfile), dash(d.Config.ReviewPrompt), issues)
 	if d.Config.Verify == "" {
-		fmt.Printf("\nNO QUALITY GATE: nothing can be submitted from this repo until `verify:` names a script\nthat builds, tests and lints it. Set it with `sindri repo config verify <path>`.\n")
+		fmt.Printf("\nNO QUALITY GATE: nothing can be submitted from this repo until `verify:` names the command\n" +
+			"that builds, tests and lints it. `sindri repo config verify \"make check\"` is the usual answer.\n")
 	}
 }
 

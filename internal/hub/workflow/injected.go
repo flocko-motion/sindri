@@ -94,8 +94,8 @@ func MsgSubmitTaskClosed(task string) string {
 
 // MsgNoGateQuestion is what the USER reads on the escalation list, so it states the decision rather
 // than the incident: one line, naming the thing to set.
-const MsgNoGateQuestion = "This project has no quality gate: `verify:` is unset in .sindri/config.yaml, " +
-	"so nothing can be submitted here until you point it at a script that builds, tests and lints."
+const MsgNoGateQuestion = "This project has no quality gate: `verify:` is unset in .sindri/config.yaml, so " +
+	"nothing can be submitted here until it names the command that builds, tests and lints — `verify: make check`."
 
 // MsgNoGateEscalated tells the agent it has been stopped and where the cause lies. Carries the
 // gate's own words, since they name the fix — the user may well ask the agent to make it.

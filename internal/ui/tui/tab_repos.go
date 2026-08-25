@@ -167,7 +167,8 @@ func gateLines(st api.RepoDocState) []string {
 	case st.Gate != "":
 		return []string{"", stWarn.Render(warnGlyph + " gate " + st.Gate + " is missing"), dimStyle.Render("every submit refuses until that script is in the repo")}
 	}
-	return []string{"", stWarn.Render(warnGlyph + " no quality gate"), dimStyle.Render("nothing can be submitted from this repo — press E to set `verify`")}
+	return []string{"", stWarn.Render(warnGlyph + " no quality gate"),
+		dimStyle.Render("nothing can be submitted from this repo — press E and set `verify` (usually `make check`)")}
 }
 
 // openColorChoice opens a picker of colour swatches for a repo: "default" (the
