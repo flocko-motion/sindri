@@ -6,6 +6,7 @@ package workflow
 
 import (
 	"fmt"
+	"github.com/flo-at/sindri/internal/api"
 	"strings"
 	"time"
 
@@ -131,4 +132,17 @@ func ToStoreTask(t task.Task) store.Task {
 		Type: t.Type, Labels: strings.Join(t.Labels, ","), ParentID: t.ParentID,
 		Description: t.Description, URL: t.URL, UpdatedAt: updatedAt, CreatedAt: createdAt,
 	}
+}
+
+// checkTier refuses a word that is not a tier. Here rather than in a front-end, so every caller is
+// held to it — and REFUSED rather than defaulted: TierOrDefault answers "mid" for anything it does
+// not know, so a dropped or mistyped tier arrived as a deliberate-looking mid with nothing said.
+func checkTier(tier string) error {
+	if tier == "" {
+		return nil // unset is a real answer: the task takes the default (-> api.TierOrDefault)
+	}
+	if _, ok := api.ParseTier(tier); !ok {
+		return fmt.Errorf("unknown tier %q — one of: %s", tier, strings.Join(api.TierWords, ", "))
+	}
+	return nil
 }

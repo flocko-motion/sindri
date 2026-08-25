@@ -84,11 +84,11 @@ func TestRepoDetailShowsTheGate(t *testing.T) {
 		t.Errorf("a repo that can submit nothing must say so, got:\n%s", got)
 	}
 
-	// A gate named but absent from the tree is its own case: the key is set, so "no quality gate"
-	// would send the reader to a config file that already looks right.
-	got = repoDetail(t, api.RepoDocState{Gate: "scripts/check.sh", GateAdvice: "the gate is not in the repo"})
-	if !strings.Contains(got, "missing") || !strings.Contains(got, "scripts/check.sh") {
-		t.Errorf("a missing gate script must be named as missing, got:\n%s", got)
+	// A declared gate reads as configured whatever it names. It is a shell COMMAND, so `make check`
+	// resolves nowhere in the tree — stating it as a path made the pane call a working gate missing.
+	got = repoDetail(t, api.RepoDocState{Gate: "make check", GateOK: true})
+	if !strings.Contains(got, "make check") || strings.Contains(got, "missing") {
+		t.Errorf("a command gate must read as configured, got:\n%s", got)
 	}
 
 	// An older hub sends no gate fields at all; guessing from that would report every repo ungated.

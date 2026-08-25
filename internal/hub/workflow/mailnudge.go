@@ -6,13 +6,20 @@
 // mailbox is the store's. Agents gain nothing here: the HUB does the waking.
 package workflow
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
-// reachable asks only whether a message would LAND: a push into a running turn is lost. Never whether
-// the agent is FREE — mail is most urgent while it holds work, since the verdict or cancellation is
-// about that work, and one agent waited on a gate result unread for holding a task.
+// ReannounceAfter is how long an unread message waits before the agent is told again — the answer to
+// a push ACCEPTED by send-keys that still never arrives, as dvalin's rejection did.
+const ReannounceAfter = 5 * time.Minute
+
+// reachable asks whether the agent is THERE, and nothing else. Claude Code QUEUES what is typed
+// mid-turn, so a one-line notice sent now arrives as that turn ends — the moment it can be acted on,
+// where waiting for an idle prompt made the news stale. The message itself waits in the mailbox.
 func (e *Engine) reachable(project, name string) bool {
-	return e.deps.AgentUp(project, name) && e.deps.AgentIdle(project, name)
+	return e.deps.AgentUp(project, name)
 }
 
 // NudgeMailWaiting wakes an agent that has unread mail it has not been told about, whatever its ROLE — a
@@ -22,7 +29,7 @@ func (e *Engine) reachable(project, name string) bool {
 // marked only after the push LANDS: marking first would leave a message announced to nobody.
 func (e *Engine) NudgeMailWaiting(project, name string) bool {
 	ps := e.store.For(project)
-	unannounced, unread, err := ps.UnannouncedMail(name)
+	unannounced, unread, err := ps.UnannouncedMail(name, time.Now().Add(-ReannounceAfter))
 	if err != nil || unannounced == 0 {
 		return false
 	}

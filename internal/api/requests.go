@@ -118,10 +118,13 @@ type ScrapTaskReq struct {
 
 // TaskReq is the body for POST /tasks (create) and POST /task/edit (ID set).
 type TaskReq struct {
-	ID          string   `json:"id"`
-	Title       string   `json:"title"`
-	Type        string   `json:"type"`
-	Priority    string   `json:"priority"`
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Type     string `json:"type"`
+	Priority string `json:"priority"`
+	// Tier was MISSING here, so `--tier senior` was read by the CLI and dropped on the wire — the hub
+	// saw "" and TierOrDefault answered mid, which is why it failed without a word (-> ParseTier).
+	Tier        string   `json:"tier"`
 	Parent      string   `json:"parent"`
 	Description string   `json:"description"`
 	Labels      []string `json:"labels"`
@@ -129,5 +132,6 @@ type TaskReq struct {
 
 // Spec is req's payload as a TaskSpec, for CreateTask/EditTask.
 func (r TaskReq) Spec() TaskSpec {
-	return TaskSpec{Title: r.Title, Type: r.Type, Priority: r.Priority, Parent: r.Parent, Description: r.Description, Labels: r.Labels}
+	return TaskSpec{Title: r.Title, Type: r.Type, Priority: r.Priority, Tier: r.Tier,
+		Parent: r.Parent, Description: r.Description, Labels: r.Labels}
 }

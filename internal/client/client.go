@@ -491,7 +491,8 @@ func (c *HTTP) EditTask(id string, s api.TaskSpec) error {
 }
 
 func specReq(id string, s api.TaskSpec) api.TaskReq {
-	return api.TaskReq{ID: id, Title: s.Title, Type: s.Type, Priority: s.Priority, Parent: s.Parent, Description: s.Description, Labels: s.Labels}
+	return api.TaskReq{ID: id, Title: s.Title, Type: s.Type, Priority: s.Priority, Tier: s.Tier,
+		Parent: s.Parent, Description: s.Description, Labels: s.Labels}
 }
 
 // SetPriority assigns a task's priority (P-code) — to td or our own db. scope carries the rating to

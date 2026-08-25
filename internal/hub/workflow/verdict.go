@@ -165,7 +165,10 @@ func (e *Engine) CmdRevoke(c registry.Caller, args []string, out io.Writer) (int
 	if reason == "" {
 		reason = "the author withdrew it"
 	}
-	pr.Status, pr.Feedback = "rejected", "withdrawn by "+c.Agent+": "+reason
+	// SCRAPPED, not rejected: a withdrawal is the author closing its own PR, where a rejection is a
+	// verdict a resubmission clears — so "rejected" left it live (-> api.PROpen) and every later
+	// reader handed the author back to it. sudri withdrew this one and was still being told to fix it.
+	pr.Status, pr.Feedback = "scrapped", "withdrawn by "+c.Agent+": "+reason
 	if err := ps.PutPR(pr); err != nil {
 		return 1, err
 	}

@@ -212,6 +212,23 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 	if err != nil {
 		return 1, err
 	}
+	// An empty branch is not a pull request: there is nothing to gate, nothing to review, and nothing
+	// to merge. The planner's own submit has always refused this (-> CmdOpenspec); a worker's did not,
+	// so sudri put up a branch identical to the reference tip — its work having landed by other
+	// means — and resubmitted it after the rejection, since a live PR is the one thing that blocks a
+	// task from closing (-> ReplyPRStillToLand).
+	changed, cerr := git.HasChanges(wt)
+	if cerr != nil {
+		return 1, cerr
+	}
+	ahead, aerr := git.Ahead(wt, base)
+	if aerr != nil {
+		return 1, aerr
+	}
+	if !changed && !ahead {
+		fmt.Fprintln(out, ReplyNothingToSubmit(target, base))
+		return 1, nil
+	}
 	// Before the gate, not after: a branch that must rebase will be gated again on the rebased tree,
 	// so running it now is a build and a test suite spent on a result nobody will keep.
 	if refused, rerr := e.refuseIfBehind(ps, c.Agent, wt, base, target, out); rerr != nil || refused {

@@ -132,6 +132,10 @@ func (r *refwatch) preflight(ctx context.Context, projects []store.Project) {
 			default:
 			}
 			r.h.wf.CheckOpenPRs(p.Tag)
+			// Noticed and resolved in the same breath: two agents in one tree is a fault the fleet
+			// carries until somebody looks, and waiting for the next ask left sudri holding a feature
+			// dvalin was inside (-> workflow.HealSplitHierarchies).
+			r.h.wf.HealSplitHierarchies(p.Tag)
 			r.h.wf.RepairReviewRows(p.Tag)
 			r.h.wf.AssignPendingReviews(p.Tag) // after the repair: a row it just wrote is claimable now
 			r.h.wf.AssignPendingWork(p.Tag)    // its worker-side twin, for the idle backlog claim

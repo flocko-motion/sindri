@@ -57,7 +57,15 @@ func (e *Engine) AssignPendingReviews(project string) {
 			return
 		}
 		reviewer, err := e.idleReviewer(project)
-		if err != nil || reviewer == "" {
+		if err != nil {
+			return
+		}
+		if reviewer == "" {
+			// Nobody up. The hub reclaims an idle reviewer's pod after 30 minutes and nothing put one
+			// back, so a PR submitted into an empty pool waited for a reviewer that would never come:
+			// dvalin's sat unassigned while both were stopped. Waking one is the missing half of
+			// reclaiming it — the next tick assigns the row once it is up.
+			e.wakeAReviewer(project)
 			return
 		}
 		req, _ := e.ReviewPrompt(project)
@@ -107,4 +115,32 @@ func (e *Engine) idleReviewerOn(home string) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+// wakeAReviewer starts a stopped reviewer, so work arriving for an empty pool brings one back. The
+// project's own roster first, then the shared pool, matching who would be ASKED (-> idleReviewer).
+// One per call: a second is woken by the next tick only if a second row is still waiting.
+func (e *Engine) wakeAReviewer(project string) {
+	for _, home := range []string{project, GlobalProject} {
+		roster, err := e.store.For(home).Roster()
+		if err != nil {
+			continue
+		}
+		for _, a := range roster {
+			// Stopped, never down: a pod the hub reclaimed comes back on its own session, where one
+			// that died did so for a reason a restart here would just repeat.
+			if !reviewerAssignable(a) || !a.Stopped || e.deps.AgentUp(home, a.Name) {
+				continue
+			}
+			if err := e.deps.StartAgent(home, a.Name); err != nil {
+				fmt.Fprintf(os.Stderr, "hub: waking %s for a waiting review: %v\n", a.Name, err)
+				continue
+			}
+			_ = e.store.For(home).Log(a.Name, "woken", "a review is waiting and no reviewer was up")
+			return
+		}
+		if project == GlobalProject {
+			return
+		}
+	}
 }

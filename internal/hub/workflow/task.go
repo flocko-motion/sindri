@@ -77,6 +77,9 @@ type TaskSpec = api.TaskSpec
 
 // CreateTask creates a task via the td tool in a project and returns its id.
 func (e *Engine) CreateTask(project string, s TaskSpec) (string, error) {
+	if err := checkTier(s.Tier); err != nil {
+		return "", err
+	}
 	if err := e.checkParent(project, s.Parent, ""); err != nil {
 		return "", err
 	}
@@ -298,6 +301,9 @@ func commentBlock(comments []store.Comment) string {
 
 // EditTask applies a spec to an existing task in a project.
 func (e *Engine) EditTask(project, id string, s TaskSpec) error {
+	if err := checkTier(s.Tier); err != nil {
+		return err
+	}
 	if err := e.checkParent(project, s.Parent, id); err != nil {
 		return err
 	}
@@ -446,6 +452,10 @@ func (e *Engine) directive(ctx context.Context, project, name string) (string, e
 	if !ok {
 		return "", fmt.Errorf("unknown agent %q", name)
 	}
+	// Asked BEFORE the state is read: an agent asking what to do is the hub's chance to notice two of
+	// them in one tree, and the answer it would otherwise give is the wrong one — sudri was told its
+	// feature was finished while dvalin worked the subtask holding it open.
+	e.healSplit(project, name)
 	st, _ := ps.GetState(name)
 	// Escalated outranks every role's directive — repeated on EVERY ask, since a relaunched agent has
 	// no memory of asking.

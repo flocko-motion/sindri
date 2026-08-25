@@ -65,10 +65,15 @@ func (p *ProjectStore) AddMail(agent, sender, body string, pushed bool, inReplyT
 // MarkMailRead stamps a message as read, now — the row stays (-> mailSchema). Re-reading keeps the
 // first stamp, which is the one that answers "when did it learn".
 func (p *ProjectStore) MarkMailRead(id int64) error {
-	_, err := p.s.db.Exec(`UPDATE mail SET read_at=? WHERE id=? AND project=? AND read_at=''`,
+	res, err := p.s.db.Exec(`UPDATE mail SET read_at=? WHERE id=? AND project=? AND read_at=''`,
 		time.Now().UTC().Format(time.RFC3339), id, p.project)
 	if err != nil {
 		return fmt.Errorf("mark mail %d read: %w", id, err)
+	}
+	// Only the FIRST read is an event: re-reading changes nothing, and a trail that grew every time
+	// somebody looked would bury the delivery it exists to explain.
+	if n, aerr := res.RowsAffected(); aerr == nil && n > 0 {
+		_ = p.LogMail(id, MailRead, "")
 	}
 	return nil
 }
@@ -93,10 +98,19 @@ func (p *ProjectStore) Mail() ([]Mail, error) {
 	return queryMail(p.s.db, mailCols+` WHERE project=? ORDER BY id DESC`, p.project)
 }
 
-// UnannouncedMail counts what a nudge is about — per message, not a timer, so nothing is announced twice.
-func (p *ProjectStore) UnannouncedMail(agent string) (unannounced, unread int, err error) {
-	err = p.s.db.QueryRow(
-		`SELECT COUNT(*), COALESCE(SUM(notified = 0 AND pushed = 0), 0) FROM mail WHERE project=? AND agent=? AND read_at=''`,
+// UnannouncedMail counts what a nudge is about: unread messages the agent has not been told of SINCE
+// cutoff, and the unread total. Timed rather than once-per-message, because "we said it" is not "it
+// arrived" — a push sets pushed=1 when send-keys is accepted, and dvalin's rejection carried that
+// flag while never reaching its pane, which under a one-shot rule silenced it for good.
+func (p *ProjectStore) UnannouncedMail(agent string, cutoff time.Time) (unannounced, unread int, err error) {
+	err = p.s.db.QueryRow(`
+		SELECT COUNT(*), COALESCE(SUM(NOT EXISTS (
+			SELECT 1 FROM mail_events e
+			WHERE e.project = m.project AND e.mail = m.id
+			  AND e.type IN (?, ?) AND e.ts > ?
+		)), 0)
+		FROM mail m WHERE m.project=? AND m.agent=? AND m.read_at=''`,
+		MailAnnounced, MailPushLanded, cutoff.UTC().Format(time.RFC3339),
 		p.project, agent).Scan(&unread, &unannounced)
 	if err != nil {
 		return 0, 0, fmt.Errorf("unannounced mail for %s: %w", agent, err)
@@ -107,13 +121,38 @@ func (p *ProjectStore) UnannouncedMail(agent string) (unannounced, unread int, e
 // MarkMailAnnounced records that the agent has been told about everything now waiting — one statement, so
 // marking cannot outrun what was announced and lose a message for ever.
 func (p *ProjectStore) MarkMailAnnounced(agent string) error {
+	// Every UNREAD message, not just the ones flipping the flag: an announcement covers the mailbox
+	// as it stands, and re-announcing an already-flagged message is the whole point of repeating.
+	ids, _ := p.unreadIDs(agent)
 	_, err := p.s.db.Exec(
 		`UPDATE mail SET notified=1 WHERE project=? AND agent=? AND read_at='' AND notified=0`,
 		p.project, agent)
 	if err != nil {
 		return fmt.Errorf("mark mail announced for %s: %w", agent, err)
 	}
+	for _, id := range ids {
+		_ = p.LogMail(id, MailAnnounced, "")
+	}
 	return nil
+}
+
+// unreadIDs are the messages an announcement covers — everything still waiting for this agent.
+func (p *ProjectStore) unreadIDs(agent string) ([]int64, error) {
+	rows, err := p.s.db.Query(
+		`SELECT id FROM mail WHERE project=? AND agent=? AND read_at=''`, p.project, agent)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // UnreadMailCount is how many messages an agent has not read — what the directive reminds it of.

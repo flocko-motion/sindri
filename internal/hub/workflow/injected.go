@@ -92,6 +92,14 @@ func MsgSubmitTaskClosed(task string) string {
 	return fmt.Sprintf("[hub] Nothing to submit into: task %s closed while your gate was running, so no pull request was opened. Your work is committed and your branch is untouched. Do not submit again — if what you built is still wanted, say so with `sindri escalate`, otherwise run `sindri` for new work.", task)
 }
 
+// MsgHierarchyTaken tells a worker its feature went to whoever is already inside it. Names the other
+// agent, since "you no longer hold it" without a reason reads as work being taken away.
+func MsgHierarchyTaken(container, other string) string {
+	return fmt.Sprintf("[hub] Feature %s is released: %s is working inside it, and one tree is one agent's — "+
+		"two would put two branches on the same subtasks. Your own work on it is untouched and %s carries on "+
+		"from here. Run `sindri` for your next task.", container, other, other)
+}
+
 // MsgNoGateQuestion is what the USER reads on the escalation list, so it states the decision rather
 // than the incident: one line, naming the thing to set.
 const MsgNoGateQuestion = "This project has no quality gate: `verify:` is unset in .sindri/config.yaml, so " +

@@ -204,6 +204,14 @@ func mailShowCmd() *cobra.Command {
 				read := mailShowState(m, justRead)
 				fmt.Printf("to:     %s (%s)\nfrom:   %s\nsent:   %s\nstate:  %s\npushed: %v\n\n%s\n",
 					m.Agent, m.Repo, dash(m.Sender), m.SentAt, read, m.Pushed, strings.TrimRight(m.Body, "\n"))
+				// What BECAME of it, under the flags that only report where it stands. "pushed: true"
+				// and a pane that never showed the text is the state this answers.
+				if len(m.History) > 0 {
+					fmt.Printf("\nlifecycle:\n")
+					for _, e := range m.History {
+						fmt.Printf("  %s  %-12s %s\n", e.TS, e.Type, e.Payload)
+					}
+				}
 				return nil
 			})
 		},
