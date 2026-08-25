@@ -92,6 +92,21 @@ func MsgSubmitTaskClosed(task string) string {
 	return fmt.Sprintf("[hub] Nothing to submit into: task %s closed while your gate was running, so no pull request was opened. Your work is committed and your branch is untouched. Do not submit again — if what you built is still wanted, say so with `sindri escalate`, otherwise run `sindri` for new work.", task)
 }
 
+// MsgNoGateQuestion is what the USER reads on the escalation list, so it states the decision rather
+// than the incident: one line, naming the thing to set.
+const MsgNoGateQuestion = "This project has no quality gate: `verify:` is unset in .sindri/config.yaml, " +
+	"so nothing can be submitted here until you point it at a script that builds, tests and lints."
+
+// MsgNoGateEscalated tells the agent it has been stopped and why it is not its doing. Carries the
+// gate's own words, since they name the fix — the user may well ask the agent to make it.
+func MsgNoGateEscalated(detail string) string {
+	return "[hub] You are now ESCALATED and your submission did not go through: this project declares no " +
+		"quality gate, which only the user can set. This is NOT a fault in your work and there is nothing " +
+		"in your diff to fix — do not resubmit, and do not go looking.\n\n" + detail +
+		"\nThe user has been asked. Wait for their answer; if they ask you to write the gate script, that " +
+		"becomes your work."
+}
+
 // MsgPRSettledWithTask tells an author its PR was rejected because its task closed. Says the work
 // was not judged — the author is the one who knows whether the branch still holds something wanted,
 // and a rejection with no reading of the code reads as one otherwise.

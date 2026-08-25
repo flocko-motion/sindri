@@ -107,12 +107,32 @@ func scanJSTree(root string, ig *Ignore) (sources []string, projects map[string]
 				break
 			}
 		}
-		if LangOf(path) == LangTS && !ig.Match(path) {
+		if LangOf(path) == LangTS && !ig.Match(path) && !tsOptedOut(path) {
 			sources = append(sources, path)
 		}
 		return nil
 	})
 	return sources, projects, err
+}
+
+// tsOptedOut reports a file that has already excused itself from type-checking and linting. Demanding
+// a tsconfig over one asks for a config that would change nothing: ranke-db's generated
+// openapi.gen.ts opens `// @ts-nocheck` and `/* eslint-disable */`, and was reported all the same.
+func tsOptedOut(path string) bool {
+	src, ok := readSource(path)
+	if !ok {
+		return false
+	}
+	head := src
+	if len(head) > 512 { // the markers are a file header; scanning the body would match mere mentions
+		head = head[:512]
+	}
+	for _, m := range []string{"@generated", "@ts-nocheck", "eslint-disable"} {
+		if strings.Contains(head, m) {
+			return true
+		}
+	}
+	return false
 }
 
 // nearestProject is the project directory closest above path — the config a compiler would
@@ -158,6 +178,18 @@ func sortedKeys(m map[string]int) []string {
 func runJSTool(root string, w io.Writer, label string, bin string, args ...string) bool {
 	cmd, how := jsCommand(root, bin, args...)
 	if cmd == nil {
+		// Only where the tool itself EXISTS: with no tsc at all the missing binary is the more basic
+		// fact, and its own hint names Node.js, which is the thing to install first.
+		if _, err := exec.LookPath(bin); err == nil && !depsInstalled(root) {
+			// Named apart from a missing tool: the answer is `npm ci` where the check RUNS, and for
+			// the hub's gate that is a fresh checkout — so a `verify:` script that installs first is
+			// what makes the type-check real rather than skipped.
+			fmt.Fprintf(w, "js/%s: skipping (optional) — %s declares dependencies but node_modules is absent here, "+
+				"so no type information resolves.\n", label, root)
+			fmt.Fprintf(w, "    hint: install them where the check runs (`npm ci`); for the sindri gate, a `verify:` "+
+				"script that installs before checking is what makes this run.\n")
+			return false
+		}
 		fmt.Fprintf(w, "js/%s: %s configured but not installed — skipping (optional)\n", label, bin)
 		fmt.Fprintf(w, "    hint: %s\n", missingToolHint(bin))
 		return false
@@ -224,10 +256,24 @@ func jsCommand(root, bin string, args ...string) (argv []string, how string) {
 		}
 		return append([]string{local}, args...), "node_modules/.bin/" + bin
 	}
-	if p, err := exec.LookPath(bin); err == nil {
+	// A global tool only when the project's own dependencies are THERE to resolve: a tsconfig whose
+	// `types` names @types/node cannot type-check without them, so a global tsc over an uninstalled
+	// tree fails on every file whatever the diff says. The gate checks a commit out fresh and
+	// node_modules is gitignored, so this is its normal state, and it cost dvalin five days.
+	if p, err := exec.LookPath(bin); err == nil && depsInstalled(root) {
 		return append([]string{p}, args...), bin + " (global)"
 	}
 	return nil, ""
+}
+
+// depsInstalled reports whether root's declared dependencies are present. No package.json means none
+// were declared, so there is nothing missing and a global tool is free to run.
+func depsInstalled(root string) bool {
+	if _, err := os.Stat(filepath.Join(root, "package.json")); err != nil {
+		return true
+	}
+	_, err := os.Stat(filepath.Join(root, "node_modules"))
+	return err == nil
 }
 
 // firstPresent returns the first of names that exists under root, or "".

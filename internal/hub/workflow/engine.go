@@ -63,10 +63,11 @@ type Deps interface {
 	TaskComments(project, id string) []store.Comment
 	// AddTaskComment posts on a task's thread as author — TaskComments' write half.
 	AddTaskComment(project, id, author, body string) error
+	// Escalate stops an agent on a decision only the user can make, recording the question where a
+	// later reader looks. The hub's own verb, so a hub-raised escalation is the agent's in every way.
+	Escalate(project, name, question string) (task string, err error)
 	// KnownProjects returns the registered repos (for fleet-wide PR listing).
 	KnownProjects() []store.Project
-	// BrokkrBin locates the brokkr toolbelt binary (the lint gate shells out to it).
-	BrokkrBin() (string, error)
 	// ContextUsage reports the session's context size, window and model, off its transcript. ok=false
 	// when nothing has been recorded yet.
 	ContextUsage(project, name string) (tokens, window int, model string, ok bool)
@@ -174,9 +175,9 @@ func restPhase(role string) string {
 	}
 }
 
-// verifyCmd is the project's declared gate command, or "" when it declares none or the config
-// cannot be read (the built-ins still run either way).
-func (e *Engine) verifyCmd(project string) string {
+// VerifyCmd is the project's declared gate command, "" when it declares none or the config cannot be
+// read. Nothing stands in for it: an undeclared gate refuses every submit (-> repo.Gate).
+func (e *Engine) VerifyCmd(project string) string {
 	cfg, err := e.deps.ProjectConfig(project)
 	if err != nil {
 		return ""

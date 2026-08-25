@@ -13,7 +13,6 @@ import (
 	"net/http"
 
 	"github.com/flo-at/sindri/internal/config"
-	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/server"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/workflow"
@@ -165,13 +164,15 @@ func (d workflowDeps) AddTaskComment(project, id, author, body string) error {
 	return d.h.comments.Add(project, id, author, body)
 }
 
+func (d workflowDeps) Escalate(project, name, question string) (string, error) {
+	return d.h.Escalate(project, name, question)
+}
+
 // KnownProjects is best-effort: a skipped scan self-corrects next tick (unlike the board -> State).
 func (d workflowDeps) KnownProjects() []store.Project {
 	ps, _ := d.h.projects.Known()
 	return ps
 }
-
-func (d workflowDeps) BrokkrBin() (string, error) { return agent.BrokkrBinary() }
 
 func (d workflowDeps) ContextUsage(project, name string) (tokens, window int, model string, ok bool) {
 	return d.h.agents.ContextUsage(project, name)

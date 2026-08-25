@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// worktree builds a throwaway worktree; goMod adds a go.mod so the built-in lint applies.
+// worktree builds a throwaway worktree; goMod adds a go.mod, which no longer changes what gates it.
 func worktree(t *testing.T, goMod bool) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -31,21 +31,13 @@ func script(t *testing.T, dir, rel, body string) {
 	}
 }
 
-// noBrokkr stands in for a resolvable lint binary that passes, so a test can isolate the declared
-// gate from the built-in one.
-func passingLint(t *testing.T, dir string) func() (string, error) {
-	t.Helper()
-	script(t, dir, "fake-lint", "exit 0\n")
-	return func() (string, error) { return filepath.Join(dir, "fake-lint"), nil }
-}
-
 // TestGateRefusesOnAFailingVerify is the point of the feature: work that fails the project's own
 // checks must not reach a PR, and the reason has to come back with the refusal.
 func TestGateRefusesOnAFailingVerify(t *testing.T) {
 	wt := worktree(t, true)
 	script(t, wt, "scripts/verify.sh", "echo 'FAIL: architecture test'\nexit 1\n")
 
-	out, ok := Gate(t.Context(), wt, passingLint(t, wt), "scripts/verify.sh")
+	out, ok := Gate(t.Context(), wt, "scripts/verify.sh")
 	if ok {
 		t.Fatal("a failing verify must refuse the submit")
 	}
@@ -62,7 +54,7 @@ func TestGatePassesWhenVerifyPasses(t *testing.T) {
 	wt := worktree(t, true)
 	script(t, wt, "scripts/verify.sh", "echo all good\nexit 0\n")
 
-	out, ok := Gate(t.Context(), wt, passingLint(t, wt), "scripts/verify.sh")
+	out, ok := Gate(t.Context(), wt, "scripts/verify.sh")
 	if !ok {
 		t.Fatalf("a passing verify must let the submit through, got:\n%s", out)
 	}
@@ -71,13 +63,12 @@ func TestGatePassesWhenVerifyPasses(t *testing.T) {
 	}
 }
 
-// TestGateRunsWhateverTheLanguage is the silent-pass fix: a project with no go.mod had NO gate at
-// all. Once it declares one, that gate decides.
+// TestGateRunsWhateverTheLanguage: the declared gate decides, Go module or not.
 func TestGateRunsWhateverTheLanguage(t *testing.T) {
 	wt := worktree(t, false) // no go.mod: a TypeScript repo, say
 	script(t, wt, "verify", "echo 'tsc failed'\nexit 1\n")
 
-	out, ok := Gate(t.Context(), wt, passingLint(t, wt), "verify")
+	out, ok := Gate(t.Context(), wt, "verify")
 	if ok {
 		t.Fatalf("a declared gate must run on a non-Go tree, got:\n%s", out)
 	}
@@ -86,38 +77,18 @@ func TestGateRunsWhateverTheLanguage(t *testing.T) {
 	}
 }
 
-// TestGateUnchangedWithoutAVerifyKey: existing repos must submit exactly as before — including the
-// pass for a tree with no go.mod, which is current behaviour and not this change's to alter.
-func TestGateUnchangedWithoutAVerifyKey(t *testing.T) {
-	if out, ok := Gate(t.Context(), worktree(t, false), passingLint(t, t.TempDir()), ""); !ok || out != "" {
-		t.Errorf("a non-Go tree with no declared gate should pass silently, got ok=%v out=%q", ok, out)
-	}
-
-	wt := worktree(t, true)
-	script(t, wt, "failing-lint", "echo 'lint: bad'\nexit 1\n")
-	resolve := func() (string, error) { return filepath.Join(wt, "failing-lint"), nil }
-	if out, ok := Gate(t.Context(), wt, resolve, ""); ok {
-		t.Errorf("the built-in lint must still refuse, got:\n%s", out)
-	}
-}
-
-// TestADeclaredGateOwnsTheLinter: ONE of the two checks runs, never both. A project's verify script
-// is the thing that can run the built-in linter itself (this repo's does), so running the linter here
-// too meant paying for the same ~15 seconds twice on every gate in the fleet.
-func TestADeclaredGateOwnsTheLinter(t *testing.T) {
-	wt := worktree(t, true)
-	script(t, wt, "failing-lint", "echo 'BUILT-IN-RAN'\nexit 1\n")
-	script(t, wt, "verify", "echo VERIFY-RAN\nexit 0\n")
-
-	out, ok := Gate(t.Context(), wt, func() (string, error) { return filepath.Join(wt, "failing-lint"), nil }, "verify")
-	if !ok {
-		t.Fatalf("the declared gate passed, so the gate passes — got:\n%s", out)
-	}
-	if strings.Contains(out, "BUILT-IN-RAN") {
-		t.Errorf("the built-in linter must not run beside a declared gate:\n%s", out)
-	}
-	if !strings.Contains(out, "VERIFY-RAN") {
-		t.Errorf("the declared gate's own output must come back:\n%s", out)
+// TestAnUndeclaredGateRefuses: brokkr used to stand in here, which meant a project's real checks
+// never ran — ranke-db's Go tests were never gated and its TypeScript rode on a linter that could
+// not resolve its types. An unanswered question is not a pass, whatever the tree contains.
+func TestAnUndeclaredGateRefuses(t *testing.T) {
+	for _, goMod := range []bool{true, false} {
+		out, ok := Gate(t.Context(), worktree(t, goMod), "")
+		if ok {
+			t.Errorf("goMod=%v: a project with no declared gate passed; nothing checked it", goMod)
+		}
+		if !strings.Contains(out, "verify:") || !strings.Contains(out, ".sindri/config.yaml") {
+			t.Errorf("goMod=%v: the refusal must say what to set and where, got:\n%s", goMod, out)
+		}
 	}
 }
 
@@ -125,7 +96,7 @@ func TestADeclaredGateOwnsTheLinter(t *testing.T) {
 // fault, and saying so beats a bare non-zero exit.
 func TestGateReportsAMissingCommand(t *testing.T) {
 	wt := worktree(t, true)
-	out, ok := Gate(t.Context(), wt, passingLint(t, wt), "scripts/not-there.sh")
+	out, ok := Gate(t.Context(), wt, "scripts/not-there.sh")
 	if ok {
 		t.Fatal("a missing gate command must refuse rather than pass")
 	}

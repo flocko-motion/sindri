@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -60,15 +61,55 @@ type stubDeps struct {
 	// order, so a test can assert prepareAssignment brackets its work correctly (and always closes
 	// the bracket, even when SetModel or Compact underneath it errors).
 	assignBrackets []string
+	// escalated records Escalate calls as "name: question", in order.
+	escalated []string
 }
 
 func (d *stubDeps) ProjectRoot(string) string { return d.root }
+
+// testGate is the passing gate every fixture gets unless it declares its own. A project MUST declare
+// one (-> repo.Gate), so an unconfigured stub would refuse every submit in this package and test the
+// refusal rather than the flow under examination.
+const testGate = "sindri-test-gate.sh"
+
 func (d *stubDeps) ProjectConfig(string) (config.Config, error) {
 	if d.projectConfigErr != nil {
 		return config.Config{}, d.projectConfigErr
 	}
-	return d.projectConfig, nil
+	cfg := d.projectConfig
+	if cfg.Verify == "" && d.root != "" {
+		// Written where the gate looks for it — runVerify stats the path in the worktree it is
+		// checking, and every fixture here gates the root or a worktree built out of it.
+		d.writeTestGate(d.root)
+		cfg.Verify = testGate
+	}
+	return cfg, nil
 }
+
+// writeTestGate materialises the stub's gate, in the root and in any worktree under it, since the
+// gate runs against whichever tree the run named. Excluded from git as it is written: several tests
+// assert the gate leaves a CLEAN tree, and an untracked script of our own would be the dirt.
+func (d *stubDeps) writeTestGate(root string) {
+	_ = os.WriteFile(filepath.Join(root, ".git", "info", "exclude"), []byte(testGate+"\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(root, testGate), []byte("#!/bin/sh\nexit 0\n"), 0o755)
+	entries, err := os.ReadDir(filepath.Join(root, ".worktrees"))
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			_ = os.WriteFile(filepath.Join(root, ".worktrees", e.Name(), testGate), []byte("#!/bin/sh\nexit 0\n"), 0o755)
+		}
+	}
+}
+
+// Escalate records the question, so a test can assert the hub stopped an agent rather than merely
+// telling it something it could not act on.
+func (d *stubDeps) Escalate(_, name, question string) (string, error) {
+	d.escalated = append(d.escalated, name+": "+question)
+	return "", nil
+}
+
 func (d *stubDeps) ArchitectureDoc(string) string   { return "" }
 func (d *stubDeps) Container(_, name string) string { return name }
 func (d *stubDeps) Notify()                         {}
@@ -101,7 +142,6 @@ func (d *stubDeps) AddTaskComment(_, id, author, body string) error {
 	return nil
 }
 func (d *stubDeps) KnownProjects() []store.Project { return d.projects }
-func (d *stubDeps) BrokkrBin() (string, error)     { return "", nil }
 func (d *stubDeps) ContextUsage(_, _ string) (int, int, string, bool) {
 	return d.ctxTokens, d.ctxWindow, "", d.ctxOK
 }

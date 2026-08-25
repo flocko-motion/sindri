@@ -8,6 +8,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/hub/repo"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -162,6 +163,37 @@ func TestAChangedCommitIsGatedAgain(t *testing.T) {
 	}
 	if _, exists, _ := ps.GetPR("pr-sd-1"); exists {
 		t.Error("no PR may exist before the gate on the new commit has run")
+	}
+}
+
+// TestAnUnconfiguredGateEscalatesInsteadOfBlamingTheDiff: with no `verify:` the gate refuses every
+// submit, and only the user can change that. Delivered as an ordinary failure it would read as "fix
+// the violations", sending the agent hunting its own work for a fault that is not there — and back
+// to the same refusal on every resubmission.
+func TestAnUnconfiguredGateEscalatesInsteadOfBlamingTheDiff(t *testing.T) {
+	e, ps, _ := gateRepo(t, "bombur", "sd-1")
+	r := openGate(t, e, "bombur", gateSubmit, "my summary")
+	deps := e.deps.(*stubDeps)
+
+	if err := e.completeGate("repo", r, "failed", repo.MsgNoGate); err != nil {
+		t.Fatalf("completeGate: %v", err)
+	}
+
+	if len(deps.escalated) != 1 {
+		t.Fatalf("the agent was not escalated on a refusal only the user can clear: %v", deps.escalated)
+	}
+	if !strings.Contains(deps.escalated[0], "verify:") {
+		t.Errorf("the user's question must name what to set: %q", deps.escalated[0])
+	}
+	if _, exists, _ := ps.GetPR("pr-sd-1"); exists {
+		t.Error("an unconfigured gate must never create a PR")
+	}
+	last := deps.injectedText[len(deps.injectedText)-1]
+	if !strings.Contains(last, "ESCALATED") || !strings.Contains(last, "not") {
+		t.Errorf("the agent must be told it is stopped and that its work is not at fault: %q", last)
+	}
+	if strings.Contains(last, "fix the violations") {
+		t.Errorf("the agent was told to fix violations that do not exist: %q", last)
 	}
 }
 
