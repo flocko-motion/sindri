@@ -26,10 +26,10 @@ func prYankModel(t *testing.T) model {
 	return m
 }
 
-// TestYankFromThePRsListCopiesTheBlock: the id alone is not something you can paste anywhere
-// useful. From the list, `y` gives the PR, its author, its task with the title, and the worktree
-// path — the field nobody retypes and the reason the task was filed.
-func TestYankFromThePRsListCopiesTheBlock(t *testing.T) {
+// TestYankAllFromThePRsListCopiesTheBlock: `Y` gives the PR, its author, its task with the title,
+// and the worktree path — the fields a message or a ticket needs, and the ones nobody retypes.
+// Plain `y` stays the id, as it is on every other tab.
+func TestYankAllFromThePRsListCopiesTheBlock(t *testing.T) {
 	m := prYankModel(t)
 	m.rightFocus = false
 
@@ -39,9 +39,22 @@ func TestYankFromThePRsListCopiesTheBlock(t *testing.T) {
 			t.Errorf("the yanked block is missing %q:\n%s", want, got)
 		}
 	}
-	// It is the identifying block, not the dump: the diff belongs to the ENTER modal.
+	// The identifying block: the diff belongs to the ENTER modal, and is the one thing nobody pastes.
 	if strings.Contains(got, "diff --git") {
-		t.Errorf("the list yank should not carry the diff:\n%s", got)
+		t.Errorf("the block yank should leave the diff behind:\n%s", got)
+	}
+}
+
+// TestPlainYankOnAPRCopiesTheIdAlone: `y` means "the id" everywhere else, and a PR is no exception —
+// it used to hand over the whole block, so pasting an id meant editing four lines back down to one.
+func TestPlainYankOnAPRCopiesTheIdAlone(t *testing.T) {
+	m := prYankModel(t)
+	m.rightFocus = false
+
+	m.onKey("y")
+
+	if !strings.Contains(m.flash, "pr-sd-1") || !strings.Contains(m.flash, "copied id") {
+		t.Errorf("y should copy the PR id alone, flash said %q", m.flash)
 	}
 }
 
@@ -66,10 +79,10 @@ func TestYankInTheDetailPaneIsUnchanged(t *testing.T) {
 	}
 }
 
-// TestListYankFallsBackToTheIDBeforeTheDetailLands: the detail is fetched lazily, so pressing `y`
-// straight after moving the selection would otherwise paste the PREVIOUS PR's fields under the new
-// PR's name. Falling back to the id is wrong-shaped, never wrong.
-func TestListYankFallsBackToTheIDBeforeTheDetailLands(t *testing.T) {
+// TestListYankFallsBackBeforeTheDetailLands: the detail is fetched lazily, so pressing `Y` straight
+// after moving the selection would otherwise paste the PREVIOUS PR's fields under the new PR's name.
+// The block is withheld until the detail matches; `y` is unaffected, since an id needs no fetch.
+func TestListYankFallsBackBeforeTheDetailLands(t *testing.T) {
 	m := prYankModel(t)
 	m.rightFocus = false
 	m.prDetail = api.PRDetail{PR: api.PR{ID: "pr-sd-OTHER"}} // a stale detail, as after a cursor move
@@ -79,7 +92,7 @@ func TestListYankFallsBackToTheIDBeforeTheDetailLands(t *testing.T) {
 	}
 	m.onKey("y")
 	if m.flash != "copied id: pr-sd-1" {
-		t.Errorf("expected the id fallback, got %q", m.flash)
+		t.Errorf("y reads the row, so it answers whatever the detail is doing, got %q", m.flash)
 	}
 }
 
