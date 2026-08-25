@@ -27,6 +27,11 @@ func writeUsage(t *testing.T, project, name string, tokens int) {
 	}
 }
 
+// waitForKickoff blocks until every FireClear delayed-kickoff goroutine s has outstanding finishes.
+// FireClear returns before that goroutine does, so a fixture that tears itself down right after
+// firing a clear would otherwise race it for the fake runtime it is still calling into.
+func waitForKickoff(s *Service) { s.kickoffWG.Wait() }
+
 func itoa(n int) string {
 	if n == 0 {
 		return "0"
@@ -46,6 +51,10 @@ func itoa(n int) string {
 // That figure is why a cleared agent was told "past the point of taking on new work" by the very
 // kickoff the clear had just sent it: ContextUsage memoises for contextTTL, the kickoff lands well
 // inside that window, and the reading survived the act that made it false.
+//
+// Costs ~2.2s, almost all of it clearKickoffDelay: waitForKickoff (its own t.Cleanup, registered
+// after the fixture's) joins FireClear's delayed goroutine before the fixture tears the fake runtime
+// down, rather than let the two race. A deliberate floor on this test, not a fixture that got slow.
 func TestTheClearItselfDropsTheStaleReading(t *testing.T) {
 	t.Setenv("SINDRI_HOME", t.TempDir()) // AgentHomeDir reads this, so the transcript is ours
 	_, st := newService(t)
@@ -63,6 +72,9 @@ func TestTheClearItselfDropsTheStaleReading(t *testing.T) {
 		container.UseDefault()
 		agentport.Use(unreadablePane{})
 	})
+	// LIFO: runs before the reset above, so FireClear's delayed kickoff goroutine has already
+	// finished with the fake runtime rather than racing the next test's cleanup for it.
+	t.Cleanup(func() { waitForKickoff(s) })
 
 	writeUsage(t, "proj", "eitri", 900_000)
 	if got, _, _, ok := s.ContextUsage("proj", "eitri"); !ok || got != 900_000 {

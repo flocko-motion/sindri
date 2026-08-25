@@ -45,7 +45,10 @@ type Observation struct {
 	ToolRunning bool
 }
 
-var runtimeMemo struct {
+// runtimeMemo memoises Observe's reading per agent key, TTL-bound. A Service field, not a package
+// var: a fresh Service (every test constructs its own) then starts with no reading left over from
+// another's.
+type runtimeMemo struct {
 	mu  sync.Mutex
 	at  map[string]time.Time
 	val map[string]Observation
@@ -59,13 +62,13 @@ func (s *Service) RuntimeState(ctx context.Context, project, name string) string
 // Observe captures an agent's pane once and reports both what it says and what it looks like.
 func (s *Service) Observe(ctx context.Context, project, name string) Observation {
 	key := project + "/" + name
-	runtimeMemo.mu.Lock()
-	if at, ok := runtimeMemo.at[key]; ok && time.Since(at) < runtimeTTL {
-		v := runtimeMemo.val[key]
-		runtimeMemo.mu.Unlock()
+	s.runtimeMemo.mu.Lock()
+	if at, ok := s.runtimeMemo.at[key]; ok && time.Since(at) < runtimeTTL {
+		v := s.runtimeMemo.val[key]
+		s.runtimeMemo.mu.Unlock()
 		return v
 	}
-	runtimeMemo.mu.Unlock()
+	s.runtimeMemo.mu.Unlock()
 
 	var obs Observation
 	out, err := container.ExecContext(ctx, s.deps.ContainerName(project, name), append([]string{"tmux"}, tmux.CapturePane(name, 0, false)...)...) // plain: the text is pattern-matched
@@ -74,12 +77,12 @@ func (s *Service) Observe(ctx context.Context, project, name string) Observation
 		obs.Digest = fmt.Sprintf("%x", sha256.Sum256(out))
 		obs.ToolRunning = agentport.ToolRunning(string(out))
 	}
-	runtimeMemo.mu.Lock()
-	if runtimeMemo.at == nil {
-		runtimeMemo.at, runtimeMemo.val = map[string]time.Time{}, map[string]Observation{}
+	s.runtimeMemo.mu.Lock()
+	if s.runtimeMemo.at == nil {
+		s.runtimeMemo.at, s.runtimeMemo.val = map[string]time.Time{}, map[string]Observation{}
 	}
-	runtimeMemo.at[key], runtimeMemo.val[key] = time.Now(), obs
-	runtimeMemo.mu.Unlock()
+	s.runtimeMemo.at[key], s.runtimeMemo.val[key] = time.Now(), obs
+	s.runtimeMemo.mu.Unlock()
 	return obs
 }
 
@@ -300,7 +303,9 @@ func (s *Service) SessionAliveCtx(ctx context.Context, project, name string) boo
 // re-renders on every cursor move, and each capture is a container exec — 1.3s on a loaded host.
 const paneTTL = 2 * time.Second
 
-var paneMemo struct {
+// paneMemo memoises AgentPane's capture per agent+lines key, TTL-bound. A Service field, not a
+// package var, for the same reason runtimeMemo is: no reading survives past its own Service.
+type paneMemo struct {
 	mu  sync.Mutex
 	at  map[string]time.Time
 	val map[string]string
@@ -311,13 +316,13 @@ var paneMemo struct {
 // wait to predict what the capture itself reports, and left a window for the session to die between.
 func (s *Service) AgentPane(ctx context.Context, project, name string, lines int) (string, error) {
 	key := fmt.Sprintf("%s/%s/%d", project, name, lines)
-	paneMemo.mu.Lock()
-	if at, ok := paneMemo.at[key]; ok && time.Since(at) < paneTTL {
-		v := paneMemo.val[key]
-		paneMemo.mu.Unlock()
+	s.paneMemo.mu.Lock()
+	if at, ok := s.paneMemo.at[key]; ok && time.Since(at) < paneTTL {
+		v := s.paneMemo.val[key]
+		s.paneMemo.mu.Unlock()
 		return v, nil
 	}
-	paneMemo.mu.Unlock()
+	s.paneMemo.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
@@ -331,12 +336,12 @@ func (s *Service) AgentPane(ctx context.Context, project, name string, lines int
 		}
 		return s.LaunchOutput(project, name), nil
 	}
-	paneMemo.mu.Lock()
-	if paneMemo.at == nil {
-		paneMemo.at, paneMemo.val = map[string]time.Time{}, map[string]string{}
+	s.paneMemo.mu.Lock()
+	if s.paneMemo.at == nil {
+		s.paneMemo.at, s.paneMemo.val = map[string]time.Time{}, map[string]string{}
 	}
-	paneMemo.at[key], paneMemo.val[key] = time.Now(), pane
-	paneMemo.mu.Unlock()
+	s.paneMemo.at[key], s.paneMemo.val[key] = time.Now(), pane
+	s.paneMemo.mu.Unlock()
 	return pane, nil
 }
 

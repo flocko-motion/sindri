@@ -31,8 +31,6 @@ func compactFixture(t *testing.T) (*Service, *fakeRuntime) {
 		container.UseDefault()
 		agentport.Use(unreadablePane{})
 	})
-	forgetObservations()
-	t.Cleanup(forgetObservations)
 	s.ForgetContext("proj", "durin") // contextMemo is package-level; a prior test's reading must not leak in
 	return s, f
 }

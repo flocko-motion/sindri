@@ -125,8 +125,11 @@ func (s *Service) FireClear(ctx context.Context, project, name, next string, int
 	s.deps.Notify()
 	// The kickoff waits out the clear, so it runs on ctx rather than on the caller's return: every
 	// caller hands work-lifetime context here — a handler detaches from its request, the sweeps carry
-	// the hub's own — and one that does not means to abandon this too.
+	// the hub's own — and one that does not means to abandon this too. kickoffWG lets a test join it
+	// (-> waitForKickoff) rather than tearing its fixture down while this is still in flight.
+	s.kickoffWG.Add(1)
 	go func() {
+		defer s.kickoffWG.Done()
 		time.Sleep(clearKickoffDelay)
 		_ = s.InjectWhenReady(ctx, project, name, next)
 	}()
