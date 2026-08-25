@@ -122,17 +122,20 @@ func TestEveryRoleIsWoken(t *testing.T) {
 	}
 }
 
-// TestAnAgentThatNeedsAHumanIsNotWoken: it cannot act on mail, and a nudge it cannot answer is noise on
-// the one signal the user relies on to spot a stuck agent.
-func TestAnAgentThatNeedsAHumanIsNotWoken(t *testing.T) {
-	// busy covers every runtime that is not an empty prompt — mid-turn, blocked, signed out, cut off.
+// TestAnAgentAwayFromThePromptIsStillTold covers every runtime that is not an empty prompt — mid-turn,
+// blocked, cut off. Each is told, and the blocked one most of all: an agent waiting on a human is
+// exactly the one whose unread mail may BE the answer it is waiting for.
+//
+// What is sent is one line saying mail is waiting, so it costs a queued keystroke and nothing else.
+// The agent still chooses when to read, which it cannot do while nobody has told it.
+func TestAnAgentAwayFromThePromptIsStillTold(t *testing.T) {
 	deps := &stubDeps{busy: map[string]bool{"dvalin": true}}
 	e, _ := idleAgentWithMail(t, deps)
-	if e.NudgeMailWaiting("proj", "dvalin") {
-		t.Error("an agent that is not at an empty prompt must not be nudged")
+	if !e.NudgeMailWaiting("proj", "dvalin") {
+		t.Error("an agent away from the prompt was left untold; by the time it returns the news is stale")
 	}
-	if len(deps.delivered) != 0 {
-		t.Errorf("nothing should have been sent: %+v", deps.delivered)
+	if len(deps.delivered) != 1 || deps.delivered[0].Mail {
+		t.Errorf("the notice is push-only — the message itself is already in the mailbox: %+v", deps.delivered)
 	}
 }
 
