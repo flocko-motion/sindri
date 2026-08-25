@@ -77,6 +77,9 @@ type TaskSpec = api.TaskSpec
 
 // CreateTask creates a task via the td tool in a project and returns its id.
 func (e *Engine) CreateTask(project string, s TaskSpec) (string, error) {
+	if err := checkTier(s.Tier); err != nil {
+		return "", err
+	}
 	if err := e.checkParent(project, s.Parent, ""); err != nil {
 		return "", err
 	}
@@ -298,6 +301,9 @@ func commentBlock(comments []store.Comment) string {
 
 // EditTask applies a spec to an existing task in a project.
 func (e *Engine) EditTask(project, id string, s TaskSpec) error {
+	if err := checkTier(s.Tier); err != nil {
+		return err
+	}
 	if err := e.checkParent(project, s.Parent, id); err != nil {
 		return err
 	}
