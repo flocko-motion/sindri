@@ -95,12 +95,14 @@ func TestNarrowEnterMarksTheUsersMailReadAsTheDwellFallback(t *testing.T) {
 	}
 }
 
-// TestWideEnterLeavesMarkingToTheDwell: with room for both panes, the dwell already owns marking
-// read — ENTER there only opens the full-screen modal, a second way to look, not a second way to mark.
-func TestWideEnterLeavesMarkingToTheDwell(t *testing.T) {
+// TestEnterMarksReadWithBothPanesShowing: ENTER on a message IS reading it, whatever else is on
+// screen. It used to mark read only where the detail pane was hidden, so opening one deliberately
+// beside a visible pane left it unread until the three-second dwell caught up — a wait for something
+// the user had already done.
+func TestEnterMarksReadWithBothPanesShowing(t *testing.T) {
 	m := mailToUserModel()
-	if cmd := m.onKey("enter"); cmd != nil {
-		t.Error("on a wide terminal the dwell owns marking read, not ENTER")
+	if cmd := m.onKey("enter"); cmd == nil {
+		t.Error("ENTER should mark the user's unread mail read, pane or no pane")
 	}
 	if !m.modal {
 		t.Error("ENTER should still open the detail modal")

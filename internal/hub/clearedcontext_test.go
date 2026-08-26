@@ -53,7 +53,26 @@ func (r *clearableRuntime) joined() string {
 
 // fakeAgent is a coding-agent port whose reported context size the test controls — the adapter a
 // hub test supplies at the composition root, isolating the memo under test.
-type fakeAgent struct{ tokens *int }
+//
+// The reading is behind a MUTEX because it crosses goroutines: awaitCleared polls it from FireClear's
+// kickoff while the test writes the drop that ends the wait, which is the whole shape under test.
+type fakeAgent struct {
+	mu     *sync.Mutex
+	tokens *int
+}
+
+// newFakeAgent is the only way to build one, so the mutex can never be missing — a fake with a
+// reading and no lock panics the moment the kickoff goroutine reads it.
+func newFakeAgent(tokens int) fakeAgent {
+	return fakeAgent{mu: &sync.Mutex{}, tokens: &tokens}
+}
+
+// setTokens is how a test simulates the clear landing — the only writer, paired with the read below.
+func (f fakeAgent) setTokens(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	*f.tokens = n
+}
 
 func (f fakeAgent) DetectState(string) agentport.State { return agentport.Unknown }
 func (f fakeAgent) PrepareHome(agentport.HomeSpec) (agentport.Home, error) {
@@ -65,6 +84,8 @@ func (f fakeAgent) ContextUsage(string) (int, int, string, bool) {
 	if f.tokens == nil {
 		return 0, 0, "", false // the unwired state this package's other tests expect
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return *f.tokens, 1_000_000, "claude-opus-5", true
 }
 func (f fakeAgent) CompactionThreshold(int) int        { return 1 << 30 }     // never due; not this test's concern
@@ -75,10 +96,10 @@ func (f fakeAgent) ToolRunning(string) bool            { return false }       //
 
 // fullAgentWithWorkWaiting seeds an idle, over-threshold worker with a task waiting. The returned
 // pointer is the reported context size: set it to simulate a clear.
-func fullAgentWithWorkWaiting(t *testing.T) (*Hub, string, *int) {
+func fullAgentWithWorkWaiting(t *testing.T) (*Hub, string, fakeAgent) {
 	t.Helper()
-	tokens := 900_000
-	agentport.Use(fakeAgent{tokens: &tokens})
+	fake := newFakeAgent(900_000)
+	agentport.Use(fake)
 	t.Cleanup(func() { agentport.Use(fakeAgent{}) }) // back to reporting nothing, as an unwired hub does
 
 	h := newHub(t)
@@ -110,13 +131,13 @@ func fullAgentWithWorkWaiting(t *testing.T) (*Hub, string, *int) {
 	// The measurement memo is package-global and keyed on project/agent, so a previous test can
 	// leave a reading for the same pair — the very staleness under test, arriving by another route.
 	h.agents.ForgetContext(testProject, "dvalin")
-	return h, "dvalin", &tokens
+	return h, "dvalin", fake
 }
 
 // TestAFullWorkersOwnAskFiresAClearEndToEnd is the automatic clear-context flow, end to end. Checked
 // on the session, not a second AgentDirective call: the claim's own hand-over lands behind /clear.
 func TestAFullWorkersOwnAskFiresAClearEndToEnd(t *testing.T) {
-	h, agent, tokens := fullAgentWithWorkWaiting(t)
+	h, agent, fake := fullAgentWithWorkWaiting(t)
 	w := stillWatchdog(t, h)
 	w.record(store.Agent{Project: testProject, Name: agent}, true, 0, hubagent.Observation{Runtime: "idle", Digest: "d1"})
 	rt := &clearableRuntime{}
@@ -134,7 +155,7 @@ func TestAFullWorkersOwnAskFiresAClearEndToEnd(t *testing.T) {
 		t.Errorf("state.Task = %q, want sd-1 — the claim holds regardless of the clear firing", st.Task)
 	}
 
-	*tokens = 1_000 // the clear happens: the session's context is gone
+	fake.setTokens(1_000) // the clear happens: the session's context is gone
 	h.agents.ForgetContext(testProject, agent)
 
 	// FireClear's kickoff fires clearKickoffDelay later in its own goroutine — poll rather than
@@ -163,16 +184,17 @@ func TestAFullWorkersOwnAskFiresAClearEndToEnd(t *testing.T) {
 // TestTheBoardReportsAFreshFillAfterAClear: ContextTokens must stop reporting the pre-clear figure
 // once a clear lands — there is no status word for fullness anymore to assert on instead.
 func TestTheBoardReportsAFreshFillAfterAClear(t *testing.T) {
-	h, name, tokens := fullAgentWithWorkWaiting(t)
+	h, name, fake := fullAgentWithWorkWaiting(t)
 	w := stillWatchdog(t, h)
 	row := store.Agent{Project: testProject, Name: name}
 	w.record(row, true, 0, hubagent.Observation{Runtime: "idle", Digest: "d1"})
-	w.recordFill(row, fill{tokens: *tokens, window: 1_000_000})
-	if view := onlyAgent(t, h); view.ContextTokens != *tokens {
+	before, _, _, _ := fake.ContextUsage("")
+	w.recordFill(row, fill{tokens: before, window: 1_000_000})
+	if view := onlyAgent(t, h); view.ContextTokens != before {
 		t.Fatalf("precondition: the board should report the pre-clear fill, got %d", view.ContextTokens)
 	}
 
-	*tokens = 1_000 // the clear happens: the session's context is gone
+	fake.setTokens(1_000) // the clear happens: the session's context is gone
 	h.agents.ForgetContext(testProject, name)
 
 	if view := onlyAgent(t, h); view.ContextTokens != 0 {

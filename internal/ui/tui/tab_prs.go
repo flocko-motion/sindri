@@ -10,6 +10,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -246,6 +247,10 @@ var prTable = table.Table{
 	{Label: "repo", Width: 10, Clip: true},
 	{Label: "pr", Width: 14},
 	{Label: "status", Width: 9},
+	// How many times this PR has been put up. Blank on a first attempt, which is most of them, so
+	// the column only speaks when there is something to say — "×4" is an author reworking, and the
+	// difference between a review doing its job and a submit loop was invisible before.
+	{Label: "try", Width: 3, Right: true},
 	// Two ages, and the pair is the point: "for" is how long it has held this status, "age" how long
 	// the PR has existed. A week-old PR that went approved an hour ago reads as both at once.
 	{Label: "for", Width: 4, Right: true},
@@ -291,6 +296,7 @@ func (m model) prRow(p api.PR) row {
 		table.Cell{Text: m.repoName(p.Project), Style: m.repoStyle(p.Project).Render},
 		table.Cell{Text: p.ID, Style: sc.Render},
 		table.Cell{Text: status, Style: sc.Render},
+		table.Cell{Text: attemptCell(p.Attempt), Style: sc.Render},
 		table.Cell{Text: shortAge(p.StatusChangedAt), Style: sc.Render},
 		table.Cell{Text: shortAge(p.CreatedAt), Style: sc.Render},
 		table.Cell{Text: p.Agent, Style: sc.Render},
@@ -676,4 +682,14 @@ func (m model) prDetailLines() []string {
 		ls = append(ls, strings.Split(strings.TrimRight(d.Diff, "\n"), "\n")...)
 	}
 	return ls
+}
+
+// attemptCell renders which submission is standing, blank for the first. Most PRs land on their
+// first, so marking those would fill the column with a number that never varies — what a reader
+// wants to spot is the one on its fourth.
+func attemptCell(n int) string {
+	if n < 2 {
+		return ""
+	}
+	return "×" + strconv.Itoa(n)
 }

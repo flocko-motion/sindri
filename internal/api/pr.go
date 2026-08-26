@@ -36,6 +36,9 @@ type PR struct {
 	// planner badges alike. Derived (-> ApprovalCount), same reasoning as Reviewer: a list row has
 	// no Reviews array of its own, so the hub counts once and carries the number.
 	Approvals int `json:"approvals,omitempty"`
+	// Attempt is which submission is standing: 1 the first, 2 after one rework. Derived, since a
+	// review doing its job and an author in a submit loop looked identical without it.
+	Attempt int `json:"attempt,omitempty"`
 }
 
 // Review is one review item attached to a PR.

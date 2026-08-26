@@ -59,7 +59,7 @@ func TestTheBoardReportsTheObserversFill(t *testing.T) {
 // outright and the suite would stay green while every agent read zero tokens for ever.
 func TestTheSweepSamplesTheTranscript(t *testing.T) {
 	tokens := 640_000
-	agentport.Use(fakeAgent{tokens: &tokens})
+	agentport.Use(newFakeAgent(tokens))
 	t.Cleanup(func() { agentport.Use(fakeAgent{}) })
 
 	h := newHub(t)

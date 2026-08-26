@@ -217,3 +217,26 @@ func (p *ProjectStore) ReviewingPR(author string) (string, error) {
 	}
 	return pr, nil
 }
+
+// SubmitCounts is how many times each PR in this project has been put up — its created event plus
+// every resubmission. One query for the project rather than one per PR: the board asks for all of
+// them at once, and a query per row is what the reviewer fill already avoids.
+func (p *ProjectStore) SubmitCounts() (map[string]int, error) {
+	rows, err := p.s.db.Query(
+		`SELECT pr, COUNT(*) FROM pr_events WHERE project=? AND type IN ('created','resubmitted') GROUP BY pr`,
+		p.project)
+	if err != nil {
+		return nil, fmt.Errorf("submit counts: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var pr string
+		var n int
+		if err := rows.Scan(&pr, &n); err != nil {
+			return nil, fmt.Errorf("submit counts: %w", err)
+		}
+		out[pr] = n
+	}
+	return out, rows.Err()
+}
