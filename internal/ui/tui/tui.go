@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/client"
+	"github.com/flo-at/sindri/internal/ui/theme"
 	"github.com/flo-at/sindri/internal/ui/tui/scroll"
 )
 
@@ -420,10 +421,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) tabLabels() []string {
 	labels := make([]string, len(tuiSections))
 	for i, s := range tuiSections {
-		// The title separates the two numbers: "1 Tasks 12" reads unambiguously (hotkey, then
-		// count trailing the name it counts), where "1 12 Tasks" put an unrelated pair of bare
-		// digits side by side with nothing saying which was which.
-		labels[i] = fmt.Sprintf("%d %s %d", i+1, s.Title, m.tabCount(s))
+		// A RAISED hotkey, so the two numbers differ in shape and not only in position: "¹Tasks 12"
+		// cannot be misread the way "1 Tasks 12" could, where both were plain digits and only their
+		// place said which was which. Derived from the index, as the binding itself is, or a
+		// hand-written list disagrees with it the first time a tab is added.
+		labels[i] = fmt.Sprintf("%s%s %d", theme.Superscript(i+1), s.Title, m.tabCount(s))
 		// Fleet-wide even in repo scope: an agent or PR stuck in another repo still waits on you.
 		if n := m.state.SectionAttention(s.Key); n > 0 {
 			labels[i] += fmt.Sprintf(" (%d%s)", n, attentionGlyph)
