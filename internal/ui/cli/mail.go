@@ -176,7 +176,7 @@ func mailShowState(m api.Mail, justRead bool) string {
 	case justRead:
 		return "read just now"
 	case m.Read():
-		return "read " + theme.Age(m.ReadAt) + " ago"
+		return "read " + theme.Ago(m.ReadAt)
 	default:
 		return "unread"
 	}

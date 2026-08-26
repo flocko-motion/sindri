@@ -185,7 +185,7 @@ func (m model) mailItems() []metaItem {
 	}
 	read := "unread"
 	if msg.Read() {
-		read = "read " + theme.Age(msg.ReadAt) + " ago"
+		read = "read " + theme.Ago(msg.ReadAt)
 	}
 	from := metaItem{text: "from:    " + dash(msg.Sender)}
 	if m.isAgent(msg.Sender) { // hub/user/reviewer aren't traceable; an agent's own name is

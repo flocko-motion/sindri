@@ -353,8 +353,8 @@ func prKindLabel(kind string) string {
 // statusHeldFor suffixes the detail's status line with how long the PR has worn it (" for 3d"), or
 // nothing at all on a row predating the column — an unadorned status beats one qualified by "-".
 func statusHeldFor(p api.PR) string {
-	if age := theme.Age(p.StatusChangedAt); age != theme.Unknown {
-		return dimStyle.Render(" for " + age)
+	if held := theme.Held(p.StatusChangedAt); held != theme.Unknown {
+		return dimStyle.Render(" for " + held)
 	}
 	return ""
 }
