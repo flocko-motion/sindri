@@ -206,9 +206,10 @@ func needsYouSummary(agents []api.AgentView) string {
 	}
 	return fmt.Sprintf("%d agent(s) need you:\n  %s\nAttach to see what each is stopped on "+
 		"(`sindri agent attach <name>`). A signed-out one wants a restart once the host has "+
-		"logged in (`sindri agent restart <name>`). An escalated one wants its question answered — "+
-		"`sindri agent tell <name> \"<answer>\"` and it resumes itself; `sindri agent resume <name>` "+
-		"releases one that cannot.", len(stuck), strings.Join(stuck, "\n  "))
+		"logged in (`sindri agent restart <name>`). An unreachable one has stopped showing what it is "+
+		"told, and a restart is the only thing that reaches it. An escalated one wants its question "+
+		"answered — `sindri agent tell <name> \"<answer>\"` and it resumes itself; `sindri agent resume "+
+		"<name>` releases one that cannot.", len(stuck), strings.Join(stuck, "\n  "))
 }
 
 // agentStatsTable is the columns `sindri agent stats` prints. It had a header already, laid out from

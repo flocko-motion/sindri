@@ -125,6 +125,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			status = "stalled"
 		}
 		status = overlayEscalation(status, st.Escalation)
+		status = overlayUnreachable(status, h.agents.Unreachable(a.Project, a.Name))
 		agents = append(agents, AgentView{
 			Project: a.Project, Repo: h.repoName(a.Project), Name: a.Name, Role: a.Role,
 			Status:  status,
@@ -385,6 +386,17 @@ func overlayEscalation(status, question string) string {
 		return status
 	}
 	return api.StatusEscalated
+}
+
+// overlayUnreachable says "unreachable" where pushes stopped showing up in an agent's pane. Last of
+// all, over a stall or an escalation: those name what an agent waits for, this says it cannot be told
+// anything either. Three words outrank it, each naming a remedy where this one names none: not-up,
+// signed-out, and blocked — whose remedy IS a message, into a dialog that draws none of what it takes.
+func overlayUnreachable(status string, unreachable bool) string {
+	if !unreachable || api.AgentNotUp(status) || status == api.StatusSignedOut || status == api.StatusBlocked {
+		return status
+	}
+	return api.StatusUnreachable
 }
 
 // Refresh re-syncs tasks and notifies watchers; being the user's explicit refresh it forces the

@@ -108,3 +108,30 @@ func TestBoardCarriesItsSections(t *testing.T) {
 		}
 	}
 }
+
+// TestAnUnreachableAgentWearsTheWordAndNeedsTheUser: an agent nothing can be said to is holding work
+// nobody can redirect, and it reads "idle" while the messages vanish. The word is its own, beside the
+// two it was mistaken for — and it must count against the badge, or nothing on the board points at it.
+func TestAnUnreachableAgentWearsTheWordAndNeedsTheUser(t *testing.T) {
+	// Over what an agent is doing, and over the words for waiting: none of them can be told anything.
+	for _, was := range []string{"idle", "working", "submitted", api.StatusStalled, api.StatusEscalated} {
+		if got := overlayUnreachable(was, true); got != api.StatusUnreachable {
+			t.Errorf("overlayUnreachable(%q) = %q, want %q", was, got, api.StatusUnreachable)
+		}
+	}
+	// Three outrank it, each naming a remedy where this word names none — blocked among them, whose
+	// remedy IS a message: its dialog consumes keystrokes without drawing them, so a stale count there
+	// would replace "answer it" with "nothing reaches it" on an agent one keypress fixes.
+	// "" among them: an agent the sweep has not reached yet supports no claim, and AgentNotUp says so.
+	for _, was := range []string{"", "down", "stopped", api.StatusUnknown, "launching", api.StatusSignedOut, api.StatusBlocked} {
+		if got := overlayUnreachable(was, true); got != was {
+			t.Errorf("overlayUnreachable(%q) = %q, want it unchanged", was, got)
+		}
+	}
+	if got := overlayUnreachable("working", false); got != "working" {
+		t.Errorf("an agent whose messages land must be untouched, got %q", got)
+	}
+	if !api.AgentNeedsUser(api.AgentView{Status: api.StatusUnreachable}) {
+		t.Error("an unreachable agent must count as needing the user")
+	}
+}

@@ -73,6 +73,7 @@ var boardHandles = map[string]string{
 // a header cannot fail a build.
 var boardCalls = map[string]string{
 	"h.agents.AgentStatus":     "folds liveness + phase into a word; in-memory, no probe",
+	"h.agents.Unreachable":     "counts pushes the pane never showed — a map the injector keeps, no probe",
 	"h.wf.FleetRuns":           "ranks the runs table — a store read",
 	"container.Name":           "the backend's display name, a string it holds — not an operation on it",
 	"container.AgentContainer": "builds a pod name out of a path — string arithmetic, not a pod",

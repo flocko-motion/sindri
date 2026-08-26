@@ -58,6 +58,7 @@ type Service struct {
 	runtimeMemo runtimeMemo // Observe's TTL cache (runtime.go)
 	contextMemo contextMemo // ContextUsage's TTL cache (runtime.go)
 	paneMemo    paneMemo    // AgentPane's TTL cache (runtime.go)
+	reach       reachMemo   // consecutive pushes an agent's pane never showed (inject.go)
 
 	kickoffWG sync.WaitGroup // FireClear's delayed kickoff goroutines (-> waitForKickoff, tests only)
 }

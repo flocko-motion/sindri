@@ -5,19 +5,16 @@ import (
 	"testing"
 )
 
-func TestSendTextIsLiteralThenEnter(t *testing.T) {
-	cmds := SendText("brokkr", "[user] hello; rm -rf /")
-	if len(cmds) != 2 {
-		t.Fatalf("want 2 argvs, got %d", len(cmds))
-	}
-	// First argv must carry the -l -- literal markers immediately before the text,
+func TestSendIsLiteralThenEnter(t *testing.T) {
+	// The literal argv must carry the -l -- markers immediately before the text,
 	// so a provenance tag or shell metacharacters are never interpreted.
 	want := []string{"send-keys", "-t", "brokkr", "-l", "--", "[user] hello; rm -rf /"}
-	if !slices.Equal(cmds[0], want) {
-		t.Fatalf("literal argv wrong:\n got %q\nwant %q", cmds[0], want)
+	if got := SendLiteral("brokkr", "[user] hello; rm -rf /"); !slices.Equal(got, want) {
+		t.Fatalf("literal argv wrong:\n got %q\nwant %q", got, want)
 	}
-	if !slices.Equal(cmds[1], []string{"send-keys", "-t", "brokkr", "Enter"}) {
-		t.Fatalf("enter argv wrong: %q", cmds[1])
+	// Enter is its own command, so a caller can read the pane back while the text sits unsubmitted.
+	if got := Submit("brokkr"); !slices.Equal(got, []string{"send-keys", "-t", "brokkr", "Enter"}) {
+		t.Fatalf("enter argv wrong: %q", got)
 	}
 }
 

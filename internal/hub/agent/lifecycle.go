@@ -439,6 +439,7 @@ func (s *Service) Launch(ctx context.Context, project, name string, shell, debug
 	// Status → launching before any preflight, not after: container.Check below can start a
 	// stopped podman VM on macOS, and that wait must not read as "down" for having asked nothing yet.
 	s.setLifecycle(project, name, "launching")
+	s.clearStrikes(project, name) // a fresh pod inherits no verdict about what could not be said to the old one
 	_ = ps.Log(name, "launch", "requested")
 	s.deps.Notify()
 	defer func() {

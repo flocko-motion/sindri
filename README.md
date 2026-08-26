@@ -283,15 +283,21 @@ agent you have yet to start.
 
 ## When an agent needs you
 
-Four status words mean an agent is stuck somewhere only a human reaches. The board
+Six status words mean an agent is stuck somewhere only a human reaches. The board
 marks each one, and `sindri agent list` names them at the bottom:
 
 | Status | What it means | What clears it |
 |---|---|---|
 | `blocked` | stopped at a prompt in its own session | answer it: `agent attach`, or `agent tell` |
 | `escalated` | it asked you to decide something and stopped | `agent tell <name> "<answer>"` — it resumes itself |
+| `launch-failed` | you asked for it and it never came up | `agent start <name>` tries again; its log says why |
 | `signed-out` | its pane says to run `/login`, so anything typed there goes nowhere | log in on the host, then `agent restart <name>` |
 | `stalled` | it holds work and its screen has stood still | `agent attach` to look, `agent tell` to prod |
+| `unreachable` | it is up, and the last messages typed into it never appeared in its pane | `agent restart <name>` — a fresh session starts the count over |
+
+**Unreachable** is the one you cannot talk your way out of: the hub types into the
+session, reads the pane back, and the text is not there. Anything it holds is work
+nobody can redirect, so the word exists to stop that reading as an idle agent.
 
 **Escalation** is the agent's own verb: it stops on a decision that is yours to
 make and says what it needs. Answering with `agent tell` clears the escalation
