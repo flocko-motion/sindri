@@ -581,9 +581,10 @@ func (m *model) onKey(k string) tea.Cmd {
 		}
 		if m.selID() != "" { // open the full-screen detail modal
 			var markRead tea.Cmd
-			// Narrow terminal: the detail pane is ENTER-only, so this modal is the body's first
-			// appearance — marking read here plays the dwell's role (-> mailDwellFired).
-			if m.tab == 6 && !m.showDetail() && m.cl != nil {
+			// ENTER on a message IS reading it, whatever else is on screen. It used to mark read only
+			// where the detail pane was hidden, so opening one deliberately beside a visible pane left
+			// it unread until the dwell caught up (-> mailDwellFired) — a wait for something already done.
+			if m.tab == 6 && m.cl != nil {
 				if msg, ok := m.selMail(); ok && !msg.Read() && api.MailToUser(msg) {
 					cl := m.cl
 					markRead = mutateThenRefresh(cl, func() error { return cl.MarkMailRead(msg.ID) })

@@ -65,6 +65,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	}
 	prs = kept
 	h.fillReviewers(prs)
+	h.fillAttempts(prs)
 	// Fleet-wide and position-ranked already (-> FleetRuns), so the board never re-derives either.
 	runs, err := h.wf.FleetRuns()
 	if err != nil {
@@ -251,6 +252,25 @@ func (h *Hub) fillReviewers(prs []api.PR) {
 			byProject[pr.Project] = active
 		}
 		prs[i].Reviewer = active[pr.ID]
+	}
+}
+
+// fillAttempts stamps each PR with which submission of it is standing, counted from its own events.
+// Per project and in one query, as fillReviewers is: every PR list wants it, so a lookup per row
+// would be paid on every render.
+func (h *Hub) fillAttempts(prs []api.PR) {
+	byProject := map[string]map[string]int{}
+	for i, pr := range prs {
+		counts, ok := byProject[pr.Project]
+		if !ok {
+			var err error
+			if counts, err = h.store.For(pr.Project).SubmitCounts(); err != nil {
+				log.Printf("hub: submit counts for %s: %v", pr.Project, err)
+				counts = map[string]int{}
+			}
+			byProject[pr.Project] = counts
+		}
+		prs[i].Attempt = counts[pr.ID]
 	}
 }
 

@@ -4,6 +4,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
 // TestDigitJumpsToTab is derived over tuiSections rather than naming seven cases by hand: digit N
@@ -46,7 +49,8 @@ func TestDigitsAreDirectNotBehindThePrefix(t *testing.T) {
 }
 
 // TestTabLabelsLeadWithTheHotkeyNumber: the header must advertise the same number onKey answers
-// to, in the same order tuiSections lists them — the order the header already shows.
+// to, in the same order tuiSections lists them — RAISED, so the hotkey and the count differ in
+// shape rather than only in position, and neither can be read as the other.
 func TestTabLabelsLeadWithTheHotkeyNumber(t *testing.T) {
 	m := newModel(nil, nil, "/r/one")
 	labels := m.tabLabels()
@@ -54,17 +58,28 @@ func TestTabLabelsLeadWithTheHotkeyNumber(t *testing.T) {
 		t.Fatalf("got %d labels, want one per section (%d)", len(labels), len(tuiSections))
 	}
 	for i, s := range tuiSections {
-		want := strconv.Itoa(i + 1)
-		if !strings.HasPrefix(labels[i], want+" ") {
+		want := theme.Superscript(i + 1)
+		if !strings.HasPrefix(labels[i], want) {
 			t.Errorf("label %d (%s) = %q, want it to lead with %q", i, s.Title, labels[i], want)
+		}
+		// The digit onKey answers to must still be derivable: a raised glyph nobody can map back to
+		// its key is decoration, and the two are derived from the same index for that reason.
+		if theme.Superscript(i+1) == strconv.Itoa(i+1) {
+			t.Errorf("tab %d has no raised form, so the header shows a bare digit again", i+1)
 		}
 		if !strings.Contains(labels[i], s.Title) {
 			t.Errorf("label %d = %q, missing its title %q", i, labels[i], s.Title)
 		}
-		// A second bare digit right after the hotkey (the count badge, "1 12 Tasks") is
-		// indistinguishable from a second hotkey digit — the title must separate the two.
-		if rest := strings.TrimPrefix(labels[i], want+" "); rest != "" && rest[0] >= '0' && rest[0] <= '9' {
-			t.Errorf("label %d = %q: a bare number sits right after the hotkey with nothing between them", i, labels[i])
+	}
+}
+
+// TestEveryHotkeyIsOneCell: headerBar is exactly `width` or the frame shears, and a superscript a
+// font reports as two cells would push the layout off-screen. Measured with the SAME function the
+// layout uses, since that is the only measure that can disagree with it.
+func TestEveryHotkeyIsOneCell(t *testing.T) {
+	for i, sup := range theme.Superscripts {
+		if w := lipgloss.Width(sup); w != 1 {
+			t.Errorf("superscript %d (%q) measures %d cells, want 1 — the header would shear", i, sup, w)
 		}
 	}
 }

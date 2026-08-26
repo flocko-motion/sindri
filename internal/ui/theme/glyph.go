@@ -7,6 +7,8 @@
 // belong to the front-end drawing it (which derives that width from these).
 package theme
 
+import "strconv"
+
 // The pictorial markers are Nerd Font icons. A terminal without a patched font draws a box, which
 // is accepted: the row still aligns, because the Private Use Area carries no East Asian Width for
 // go-runewidth and the terminal to disagree over, and both count one cell whether the glyph exists
@@ -36,3 +38,27 @@ const (
 	MarkPRFinal   = "\uf407" // nf-oct-git_pull_request: the task's PR, whose merge ends it
 	MarkPRInterim = "\uf4dd" // nf-oct-git_pull_request_draft: a contribution mid-task
 )
+
+// Superscripts are the tab hotkeys: "¹Tasks 12" cannot read the key as the count. A table, not an
+// offset from '0' — ¹²³ are Latin-1 Supplement and the rest Superscripts and Subscripts.
+var Superscripts = []string{
+	"⁰", // ⁰ SUPERSCRIPT ZERO
+	"¹", // ¹ SUPERSCRIPT ONE — Latin-1 Supplement, unlike its neighbours
+	"²", // ² SUPERSCRIPT TWO — Latin-1 Supplement
+	"³", // ³ SUPERSCRIPT THREE — Latin-1 Supplement
+	"⁴", // ⁴ SUPERSCRIPT FOUR
+	"⁵", // ⁵ SUPERSCRIPT FIVE
+	"⁶", // ⁶ SUPERSCRIPT SIX
+	"⁷", // ⁷ SUPERSCRIPT SEVEN
+	"⁸", // ⁸ SUPERSCRIPT EIGHT
+	"⁹", // ⁹ SUPERSCRIPT NINE
+}
+
+// Superscript renders n raised, falling back to plain digits past the table. A tenth tab has no
+// hotkey anyway (onKey reads one character), so the fallback keeps it legible, not usable.
+func Superscript(n int) string {
+	if n < 0 || n >= len(Superscripts) {
+		return strconv.Itoa(n)
+	}
+	return Superscripts[n]
+}
