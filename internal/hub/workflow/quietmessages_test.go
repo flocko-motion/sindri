@@ -38,8 +38,8 @@ func TestGatePassedSendsNoMessage(t *testing.T) {
 	deps := &stubDeps{root: root}
 	e := New(st, deps)
 	c := registry.Caller{Project: "repo", Agent: agent, Role: "worker", Phase: "working"}
-	if code, err := e.CmdSubmit(c, []string{"fix"}, io.Discard); err != nil || code != 0 {
-		t.Fatalf("CmdSubmit: code=%d err=%v", code, err)
+	if code, out := submitAll(t, e, c, "fix"); code != 0 {
+		t.Fatalf("submit: code=%d out=%s", code, out)
 	}
 	runQueuedGate(t, e)
 	if _, ok, _ := ps.GetPR("pr-" + task); !ok {
@@ -78,8 +78,8 @@ func TestPlainMergeSendsNoMessage(t *testing.T) {
 	deps := &stubDeps{root: root}
 	e := New(st, deps)
 	c := registry.Caller{Project: "repo", Agent: agent, Role: "worker", Phase: "working"}
-	if code, err := e.CmdSubmit(c, []string{"fix"}, io.Discard); err != nil || code != 0 {
-		t.Fatalf("CmdSubmit: code=%d err=%v", code, err)
+	if code, out := submitAll(t, e, c, "fix"); code != 0 {
+		t.Fatalf("submit: code=%d out=%s", code, out)
 	}
 	runQueuedGate(t, e)
 	pr, _, _ := ps.GetPR("pr-" + task)

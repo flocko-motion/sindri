@@ -18,9 +18,8 @@ import (
 // to a feature already in the reference branch, and its task still read open.
 func TestMergingAFinishedFeatureReleasesTheWorker(t *testing.T) {
 	e, ps, c, _ := featureWorker(t, false) // no open subtasks: this PR is the feature's last
-	var out strings.Builder
-	if code, err := e.CmdSubmit(c, []string{"the feature"}, &out); err != nil || code != 0 {
-		t.Fatalf("CmdSubmit: code=%d err=%v out=%s", code, err, out.String())
+	if code, out := submitAll(t, e, c, "the feature"); code != 0 {
+		t.Fatalf("submit: code=%d out=%s", code, out)
 	}
 	runQueuedGate(t, e)
 	pr, ok, _ := ps.GetPR("pr-td-EPIC")

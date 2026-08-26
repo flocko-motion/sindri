@@ -213,9 +213,8 @@ func TestASubtaskThatGainsAChildStaysInsideItsFeature(t *testing.T) {
 // merge lands the branch as a MILESTONE and leaves the task, and its worker, on the feature.
 func TestAMergeNeverClosesATaskOverOpenChildren(t *testing.T) {
 	e, ps, c, deps := leafWorker(t, "working")
-	var out strings.Builder
-	if code, err := e.CmdSubmit(c, []string{"the leaf"}, &out); code != 0 || err != nil {
-		t.Fatalf("CmdSubmit: code=%d err=%v out=%s", code, err, out.String())
+	if code, out := submitAll(t, e, c, "the leaf"); code != 0 {
+		t.Fatalf("submit: code=%d out=%s", code, out)
 	}
 	runQueuedGate(t, e)
 	deps.alive = false
@@ -299,8 +298,8 @@ func TestNothingClosesAParentOverAChildBeingWORKED(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.refreshCachedTask("repo", child)
-	if code, err := e.CmdSubmit(c, []string{"done"}, &out); code != 0 || err != nil {
-		t.Fatalf("CmdSubmit: code=%d err=%v out=%s", code, err, out.String())
+	if code, sout := submitAll(t, e, c, "done"); code != 0 {
+		t.Fatalf("submit: code=%d out=%s", code, sout)
 	}
 	runQueuedGate(t, e)
 	if err := ps.SetParent(child, "td-LEAF"); err != nil { // …and re-attach, as a re-parent would

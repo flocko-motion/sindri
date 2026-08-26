@@ -504,6 +504,15 @@ func (e *Engine) landSubmit(project string, ps *store.ProjectStore, r api.Run) e
 	}
 	_ = ps.Log(r.Agent, "submit", pr.ID)
 	msg := e.gateCommitMessage(ps, st, r.Message)
+	// The answers go on the TASK THREAD, in the author's own name — where the reviewer's brief already
+	// sends it ("read the task first … and the comments on it"), so this needs no new surface and no
+	// new instruction. It is also what keeps the answers worth writing: they are read, and a defect in
+	// a place the author said it swept is a sharper finding than any rejection count.
+	if answers, aerr := ps.SubmitAnswers(r.Agent, r.Commit); aerr == nil {
+		for _, comment := range submitAnswerComments(answers, r.Agent) {
+			_ = e.deps.AddTaskComment(project, target, r.Agent, comment)
+		}
+	}
 	if existed {
 		_ = ps.LogPR(pr.ID, "resubmitted", "by "+r.Agent+": "+msg)
 	} else {

@@ -124,9 +124,8 @@ func TestSubmitCommitsConventionally(t *testing.T) {
 	e := New(st, &stubDeps{root: root})
 	c := registry.Caller{Project: "repo", Agent: agent, Role: "worker", Phase: "working"}
 
-	var out strings.Builder
-	if code, err := e.CmdSubmit(c, []string{"retry", "with", "backoff"}, &out); err != nil || code != 0 {
-		t.Fatalf("CmdSubmit: code=%d err=%v out=%s", code, err, out.String())
+	if code, out := submitAll(t, e, c, "retry with backoff"); code != 0 {
+		t.Fatalf("submit: code=%d out=%s", code, out)
 	}
 	runQueuedGate(t, e)
 	if got, want := lastCommitMsg(t, wt), "fix(sd-1): retry with backoff"; got != want {

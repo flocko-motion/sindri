@@ -60,10 +60,8 @@ func featureWorker(t *testing.T, openChild bool) (*Engine, *store.ProjectStore, 
 // it, exactly as it would a task of its own; a human opening the PR by hand is not a step.
 func TestFinishedFeatureSubmitsItself(t *testing.T) {
 	e, ps, c, _ := featureWorker(t, false)
-	var out strings.Builder
-	code, err := e.CmdSubmit(c, []string{"separate the front-ends from the hub"}, &out)
-	if err != nil || code != 0 {
-		t.Fatalf("CmdSubmit: code=%d err=%v out=%s", code, err, out.String())
+	if code, out := submitAll(t, e, c, "separate the front-ends from the hub"); code != 0 {
+		t.Fatalf("submit: code=%d out=%s", code, out)
 	}
 	runQueuedGate(t, e)
 	pr, ok, _ := ps.GetPR("pr-td-EPIC")
