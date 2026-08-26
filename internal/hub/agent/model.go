@@ -42,7 +42,7 @@ func (s *Service) SetModel(ctx context.Context, project, name, model, next strin
 	if !s.AgentAlive(ctx, project, name) || model == "" {
 		return nil // nothing live to retarget, or no live command yet for the account default
 	}
-	_, _, _, used := s.ContextUsage(project, name)
+	before, _, _, used := s.ContextUsage(project, name)
 	if !used {
 		// A fresh session has nothing to discard, so the switch and its instruction go straight in.
 		if err := s.Inject(ctx, project, name, "/model "+model); err != nil {
@@ -63,7 +63,7 @@ func (s *Service) SetModel(ctx context.Context, project, name, model, next strin
 	s.kickoffWG.Add(1)
 	go func() {
 		defer s.kickoffWG.Done()
-		if !s.awaitCleared(ctx, project, name) {
+		if !s.awaitCleared(ctx, project, name, before) {
 			return // the clear never took; switching now would spend the context it was to discard
 		}
 		if err := s.InjectWhenReady(ctx, project, name, "/model "+model); err != nil {
@@ -74,28 +74,30 @@ func (s *Service) SetModel(ctx context.Context, project, name, model, next strin
 	return nil
 }
 
-// awaitCleared waits until the session reports no recorded usage — the observable fact that /clear
-// finished, where a bare sleep only assumes it. ForgetContext dropped the memo just above, so what
-// this reads is a fresh sample each time rather than the figure the clear discarded.
-func (s *Service) awaitCleared(ctx context.Context, project, name string) bool {
+// awaitCleared waits for the reading to FALL below before — /clear having happened, where a sleep
+// only assumes it. A DROP is the test: context only grows within a session, and a fresh one carries
+// a few tokens at once, so emptiness would never arrive. Sampled, since ForgetContext dropped memo.
+func (s *Service) awaitCleared(ctx context.Context, project, name string, before int) bool {
 	for waited := time.Duration(0); waited < clearSettleCap; waited += clearKickoffDelay {
 		select {
 		case <-ctx.Done():
 			return false
 		case <-time.After(clearKickoffDelay):
 		}
-		if _, _, _, used := s.SampleContext(project, name); !used {
+		if now, _, _, used := s.SampleContext(project, name); !used || now < before {
 			return true
 		}
 	}
-	_ = s.store.For(project).Log(name, "model-switch-abandoned", "the /clear never took effect")
+	// Never sent blind on timeout: the clear is most likely still QUEUED behind a long turn, and a
+	// kickoff joining that queue is discarded by it — which is the silence this exists to prevent.
+	// The stall and mail nudges are the backstop for an agent left idle.
+	_ = s.store.For(project).Log(name, "clear-unconfirmed", "the /clear never took effect; nothing was sent after it")
 	return false
 }
 
-// clearSettleCap bounds that wait. Generous, because the cost of giving up early is a model switch
-// against a full session; bounded, because a pane that never clears is a fault to report, not to
-// wait on for ever.
-const clearSettleCap = 30 * time.Second
+// clearSettleCap bounds that wait. Long, because the clear waits out whatever turn was running when
+// it was typed, and a review runs for minutes; bounded, because a goroutine per clear must end.
+const clearSettleCap = 5 * time.Minute
 
 // modelLabel names an empty model as the account default, for the log line.
 func modelLabel(model string) string {

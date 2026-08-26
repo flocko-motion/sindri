@@ -70,11 +70,11 @@ func TestGlobalReviewerFollowsAReviewPastAssignment(t *testing.T) {
 	if !stamped {
 		t.Error("no recorded pass verdict from ori found on pr-1's review row")
 	}
-	if len(deps.cleared) != 1 || deps.cleared[0] != "ori" {
-		t.Errorf("cleared = %v, want exactly one FireClear(ori) — on ori's own project, not pr-1's", deps.cleared)
-	}
-	if len(deps.clearedInterrupt) != 1 || deps.clearedInterrupt[0] {
-		t.Errorf("clearedInterrupt = %v, want false — this runs inside ori's own request", deps.clearedInterrupt)
+	// No clear. Clearing is PREPARATION and belongs to the next hand-over (-> claimReview's
+	// compactIfDue): fired here it lands in the reviewer's own running turn — the one that called
+	// approve — where a queued /clear discards the kickoff queued behind it and leaves it idle.
+	if len(deps.cleared) != 0 {
+		t.Errorf("cleared = %v, want none — a session is prepared for what it is about to do", deps.cleared)
 	}
 }
 
@@ -96,8 +96,8 @@ func TestGlobalReviewerCanRejectAcrossProjects(t *testing.T) {
 	if pr.Status != "rejected" {
 		t.Errorf("pr-1 status = %q, want rejected", pr.Status)
 	}
-	if len(deps.cleared) != 1 || deps.cleared[0] != "ori" {
-		t.Errorf("cleared = %v, want exactly one FireClear(ori)", deps.cleared)
+	if len(deps.cleared) != 0 {
+		t.Errorf("cleared = %v, want none — a verdict is not a reason to reset a session", deps.cleared)
 	}
 }
 

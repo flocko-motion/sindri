@@ -115,6 +115,8 @@ func (s *Service) FireClear(ctx context.Context, project, name, next string, int
 	if interrupt {
 		_ = s.Interrupt(ctx, project, name)
 	}
+	// Read BEFORE the injection: it is the figure the kickoff waits to see fall (-> awaitCleared).
+	before, _, _, _ := s.ContextUsage(project, name)
 	if err := s.Inject(ctx, project, name, "/clear"); err != nil {
 		return err
 	}
@@ -130,7 +132,11 @@ func (s *Service) FireClear(ctx context.Context, project, name, next string, int
 	s.kickoffWG.Add(1)
 	go func() {
 		defer s.kickoffWG.Done()
-		time.Sleep(clearKickoffDelay)
+		// Waits for the clear to have HAPPENED, never for time to pass: a /clear typed mid-turn is
+		// queued, and discards the queue it is in — so a kickoff on a timer joined it and was lost.
+		if !s.awaitCleared(ctx, project, name, before) {
+			return
+		}
 		_ = s.InjectWhenReady(ctx, project, name, next)
 	}()
 	return nil

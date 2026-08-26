@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
@@ -96,10 +95,10 @@ func (e *Engine) plannerApprove(ps *store.ProjectStore, c registry.Caller, pr st
 }
 
 // completeReview stamps the verdict (a human verdict has no record) — on the review row filed under
-// prProject, never home for a GlobalProject reviewer — and clears the reviewer's OWN session at
-// home: the verdict just given is its own leaf boundary, and a session must carry nothing from one
-// review into the next. FireClear re-serves the directive itself once the reset settles, so a
-// cleared reviewer is never left waiting to be told what to do.
+// prProject, never home for a GlobalProject reviewer — and frees the reviewer at home.
+//
+// The session is left alone: clearing prepares the NEXT review (-> claimReview). Fired here it landed
+// mid-turn, and a queued /clear discards the queue it is in — vestri was left idle and told nothing.
 func (e *Engine) completeReview(prProject, home, prID, agent, verdict, findings string) {
 	if revs, err := e.store.For(prProject).Reviews(prID); err == nil {
 		for _, r := range revs {
@@ -110,11 +109,9 @@ func (e *Engine) completeReview(prProject, home, prID, agent, verdict, findings 
 		}
 	}
 	_ = e.store.For(home).SetState(store.AgentState{Agent: agent, Phase: "idle"})
-	// interrupt=false: this runs inside the reviewer's own request (CmdApprove/CmdReject), so there
-	// is nothing of its own in flight to cut off, unlike a human arming a clear from outside.
-	if err := e.deps.FireClear(home, agent, MsgKickoff, false); err != nil {
-		fmt.Fprintf(os.Stderr, "hub: clearing %s's context after its verdict on %s: %v\n", agent, prID, err)
-	}
+	// Woken, though: a verdict must not be where a reviewer's loop ends. Waking and clearing were one
+	// act here and are two things — a push queues behind the running turn and arrives as it ends.
+	_ = e.deps.Deliver(home, agent, MsgKickoff, PushOnly)
 }
 
 // ApprovePR is the human approve path (TUI/CLI): marks a project's open (or already-approved) PR
