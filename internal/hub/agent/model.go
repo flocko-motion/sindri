@@ -8,6 +8,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 // SetModel changes the model an agent runs on, "" reverting to the account default. Not running:
@@ -41,20 +42,60 @@ func (s *Service) SetModel(ctx context.Context, project, name, model, next strin
 	if !s.AgentAlive(ctx, project, name) || model == "" {
 		return nil // nothing live to retarget, or no live command yet for the account default
 	}
-	if _, _, _, ok := s.ContextUsage(project, name); ok {
-		if err := s.Inject(ctx, project, name, "/clear"); err != nil {
+	_, _, _, used := s.ContextUsage(project, name)
+	if !used {
+		// A fresh session has nothing to discard, so the switch and its instruction go straight in.
+		if err := s.Inject(ctx, project, name, "/model "+model); err != nil {
 			return err
 		}
+		return s.Inject(ctx, project, name, next)
 	}
-	if err := s.Inject(ctx, project, name, "/model "+model); err != nil {
+	if err := s.Inject(ctx, project, name, "/clear"); err != nil {
 		return err
 	}
-	if err := s.Inject(ctx, project, name, next); err != nil {
-		return err
-	}
+	// Before the wait, not after: next is composed from this measurement, and left standing it reports
+	// the size the clear just discarded.
 	s.ForgetContext(project, name)
+	// The switch waits for the clear to have HAPPENED, not just for time to pass. /model opens a
+	// confirmation dialog, and a dialog swallows whatever is typed behind it — so a /clear sent into
+	// one is eaten, and the switch runs against the context the clear was meant to discard. Which is
+	// backwards twice over: the old session is spent on the new model, and the reset lands after.
+	s.kickoffWG.Add(1)
+	go func() {
+		defer s.kickoffWG.Done()
+		if !s.awaitCleared(ctx, project, name) {
+			return // the clear never took; switching now would spend the context it was to discard
+		}
+		if err := s.InjectWhenReady(ctx, project, name, "/model "+model); err != nil {
+			return // logged as inject-skipped; sending next now would run it on the OLD model
+		}
+		_ = s.InjectWhenReady(ctx, project, name, next)
+	}()
 	return nil
 }
+
+// awaitCleared waits until the session reports no recorded usage — the observable fact that /clear
+// finished, where a bare sleep only assumes it. ForgetContext dropped the memo just above, so what
+// this reads is a fresh sample each time rather than the figure the clear discarded.
+func (s *Service) awaitCleared(ctx context.Context, project, name string) bool {
+	for waited := time.Duration(0); waited < clearSettleCap; waited += clearKickoffDelay {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(clearKickoffDelay):
+		}
+		if _, _, _, used := s.SampleContext(project, name); !used {
+			return true
+		}
+	}
+	_ = s.store.For(project).Log(name, "model-switch-abandoned", "the /clear never took effect")
+	return false
+}
+
+// clearSettleCap bounds that wait. Generous, because the cost of giving up early is a model switch
+// against a full session; bounded, because a pane that never clears is a fault to report, not to
+// wait on for ever.
+const clearSettleCap = 30 * time.Second
 
 // modelLabel names an empty model as the account default, for the log line.
 func modelLabel(model string) string {

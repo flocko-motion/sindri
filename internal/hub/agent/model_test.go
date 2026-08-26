@@ -72,11 +72,12 @@ func TestSetModelToTheSameValueIsANoOp(t *testing.T) {
 	}
 }
 
-// TestSetModelClearsSwitchesAndQueuesTheInstruction: the agent holds nothing at a model change
-// (its own boundary check runs exactly here) and the context belongs to the OLD model's reasoning,
-// so a change clears first, then switches, then queues next — the caller's real instruction — all
-// into the still-live session. No relaunch: the old container is never torn down.
-func TestSetModelClearsSwitchesAndQueuesTheInstruction(t *testing.T) {
+// TestSetModelClearsBeforeItSwitches: the context belongs to the OLD model's reasoning, so it is
+// discarded before the switch. The clear goes first and ALONE — /model opens a confirmation dialog,
+// and a dialog swallows whatever is typed behind it, so a /clear sent after one is eaten and the
+// switch runs against the very context it was meant to drop. The switch waits for the session to
+// report itself empty, which is the clear having happened rather than time having passed.
+func TestSetModelClearsBeforeItSwitches(t *testing.T) {
 	s, f := compactFixture(t)
 	writeUsage(t, "proj", "durin", 80_000) // a session with something in it, unlike a fresh one
 
@@ -84,13 +85,22 @@ func TestSetModelClearsSwitchesAndQueuesTheInstruction(t *testing.T) {
 		t.Fatalf("SetModel: %v", err)
 	}
 
+	// The clear is sent by the call itself; nothing may follow it until the session reads empty.
+	if got := f.sent; len(got) != 1 || got[0] != "/clear" {
+		t.Fatalf("sent = %v, want just the clear — the switch waits for it to take", got)
+	}
+	// It takes, the way a real /clear does: the transcript reports nothing.
+	writeUsage(t, "proj", "durin", 0)
+	waitForKickoff(s)
+
 	want := []string{"/clear", "/model claude-opus-5", "you hold td-abc123"}
-	if len(f.sent) != len(want) {
-		t.Fatalf("sent = %v, want %v in that order", f.sent, want)
+	got := f.sent
+	if len(got) != len(want) {
+		t.Fatalf("sent = %v, want %v in that order", got, want)
 	}
 	for i, w := range want {
-		if f.sent[i] != w {
-			t.Errorf("sent[%d] = %q, want %q", i, f.sent[i], w)
+		if got[i] != w {
+			t.Errorf("sent[%d] = %q, want %q", i, got[i], w)
 		}
 	}
 	if f.interrupts != 0 {
