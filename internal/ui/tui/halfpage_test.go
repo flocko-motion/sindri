@@ -31,7 +31,7 @@ func longListModel() model {
 // stays in view).
 func TestHalfPageMovesTheListWhenTheListIsFocused(t *testing.T) {
 	m := longListModel()
-	m.rightFocus = false
+	m.focus = focusList
 	m.onKey("ctrl+d")
 	if m.cursor[0] == 0 {
 		t.Fatal("ctrl+d with the list focused must move the list cursor")
@@ -48,10 +48,10 @@ func TestHalfPageMovesTheListWhenTheListIsFocused(t *testing.T) {
 
 // TestHalfPageMovesTheDetailWhenTheDetailIsFocused is the reported bug: focus the detail pane,
 // press ctrl+d, and the LIST moved — the keys decided per tab instead of asking which pane was in
-// play, so they contradicted J/K, which had asked all along.
+// play, so they contradicted plain j/k, which had asked all along.
 func TestHalfPageMovesTheDetailWhenTheDetailIsFocused(t *testing.T) {
 	m := longListModel()
-	m.rightFocus = true
+	m.focus = focusDetail
 	before := m.cursor[0]
 	m.onKey("ctrl+d")
 	if m.detail.Offset == 0 {
@@ -61,8 +61,8 @@ func TestHalfPageMovesTheDetailWhenTheDetailIsFocused(t *testing.T) {
 		t.Errorf("the list cursor moved under a detail scroll: %d then %d", before, m.cursor[0])
 	}
 	paged := m.detail.Offset
-	if paged <= detailScrollStep {
-		t.Errorf("ctrl+d moved %d lines, no more than J's %d — it should half-page", paged, detailScrollStep)
+	if paged <= 1 {
+		t.Errorf("ctrl+d moved %d lines, no more than a single j/k step — it should half-page", paged)
 	}
 	m.onKey("ctrl+u")
 	if m.detail.Offset >= paged {

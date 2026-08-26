@@ -145,10 +145,10 @@ func TestGlobalFooterAgreesWithTheLocalRowWhileFocused(t *testing.T) {
 	m.tab = 0
 	m.state = api.BoardState{Tasks: []api.Task{{ID: "td-1", Status: "open"}}}
 	m.reclamp()
-	m.rightFocus = true
+	m.focus = focusItems
 	global := m.globalFooter(500)
 	local := m.contextFooter()
-	for _, want := range []string{"j/k item", "g goto", "y copy"} {
+	for _, want := range []string{"j/k item", "g goto", "G bottom", "y copy"} {
 		if !strings.Contains(global, want) {
 			t.Errorf("the global row should read %q under focus, got %q", want, global)
 		}
@@ -158,9 +158,6 @@ func TestGlobalFooterAgreesWithTheLocalRowWhileFocused(t *testing.T) {
 	}
 	if strings.Contains(global, "j/k/g/G") {
 		t.Errorf("the global row should not still read the un-focused j/k/g/G row, got %q", global)
-	}
-	if !strings.Contains(global, "G move/top/bot") {
-		t.Errorf("G is unaffected by focus and should still read its ordinary label, got %q", global)
 	}
 }
 
@@ -172,7 +169,7 @@ func TestHelpModalMatchesTheFooterWhileFocused(t *testing.T) {
 	m.tab = 0
 	m.state = api.BoardState{Tasks: []api.Task{{ID: "td-1", Title: "a task", Status: "open"}}}
 	m.reclamp()
-	m.rightFocus = true
+	m.focus = focusItems
 	footer := m.contextFooter()
 	m.onKey(keyHelp)
 	got := strings.Join(m.modalLines(), "\n")
@@ -187,47 +184,77 @@ func TestHelpModalMatchesTheFooterWhileFocused(t *testing.T) {
 	}
 	// Every non-remapped binding must survive focus — unassign among them, one U/A/R the addendum
 	// was written to surface. Those are `when`-gated, not focus-gated (onkey.go checks neither
-	// !m.rightFocus), so they must still read even though this task holds no agent.
+	// m.focus != focusItems), so they must still read even though this task holds no agent.
 	if !strings.Contains(got, "unassign") {
 		t.Errorf("the reference should still list Tasks' un-focused bindings while focused, got:\n%s", got)
 	}
-	if strings.Contains(got, "j/k/g/G  move/top/bot") {
-		t.Errorf("the global row's j/k/g should be relabelled under focus, not left reading their un-focused meaning:\n%s", got)
-	}
-	if !strings.Contains(got, "G  move/top/bot") {
-		t.Errorf("G is unaffected by focus and should still read its ordinary label:\n%s", got)
+	if strings.Contains(got, "j/k/g/G  move/top/bot") || strings.Contains(got, "G  move/top/bot") {
+		t.Errorf("the global row's j/k/g/G should be relabelled under focus, not left reading their un-focused meaning:\n%s", got)
 	}
 }
 
 // TestFocusOverriddenKeysNeverCommitOrCarryAWhen: focusRows' relabelled branch renders the focused
 // meaning directly, not through formatRow — deliberately, since the focused action (item, details,
-// goto, copy) is a different action from whatever the un-focused binding does, and inheriting its
-// `commits`/`whenText` would describe that wrong action instead. That is only safe as long as no
-// binding whose keys intersect focusOverrides actually commits or carries a `when` — this is the
-// guard for that invariant, since nothing else would notice it slip.
+// goto, copy, scroll, top/bot) is a different action from whatever the un-focused binding does, and
+// inheriting its `commits`/`whenText` would describe that wrong action instead. That is only safe
+// as long as no binding whose keys intersect EITHER focus state's overrides actually commits or
+// carries a `when` — this is the guard for that invariant, since nothing else would notice it slip.
 func TestFocusOverriddenKeysNeverCommitOrCarryAWhen(t *testing.T) {
-	for _, b := range keymap {
-		for _, k := range strings.Split(b.keys, "/") {
-			if _, overridden := focusOverrides[k]; !overridden {
-				continue
+	for _, focus := range []focusPane{focusItems, focusDetail} {
+		overrides := focusOverrides(focus)
+		for _, b := range keymap {
+			for _, k := range strings.Split(b.keys, "/") {
+				if _, overridden := overrides[k]; !overridden {
+					continue
+				}
+				if b.commits {
+					t.Errorf("%q (%s) intersects focus %v's overrides and commits — the focused label would hide that", b.keys, b.label(newModel(nil, nil, "/r/one")), focus)
+				}
+				if b.whenText != "" {
+					t.Errorf("%q (%s) intersects focus %v's overrides and carries a `when` — the focused label would hide that", b.keys, b.label(newModel(nil, nil, "/r/one")), focus)
+				}
 			}
-			if b.commits {
-				t.Errorf("%q (%s) intersects focusOverrides and commits — the focused label would hide that", b.keys, b.label(newModel(nil, nil, "/r/one")))
-			}
-			if b.whenText != "" {
-				t.Errorf("%q (%s) intersects focusOverrides and carries a `when` — the focused label would hide that", b.keys, b.label(newModel(nil, nil, "/r/one")))
+		}
+	}
+}
+
+// TestFooterAndHelpAgreeInEveryFocusState pins the invariant rightFocusKeys/detailFocusKeys exist
+// to hold: contextFooter's hint and "?"'s reference must never describe two different worlds for
+// the same focus state. Review round 5 found focusDetail had drifted from it — the footer knew
+// j/k scroll and g/G jump top/bottom there, but helpLines still read the un-focused j/k/g/G row.
+func TestFooterAndHelpAgreeInEveryFocusState(t *testing.T) {
+	for _, tab := range []int{0, 2} { // a single-region tab and PRs' two-region one
+		for _, tc := range []struct {
+			focus focusPane
+			table []focusKey
+		}{
+			{focusItems, rightFocusKeys},
+			{focusDetail, detailFocusKeys},
+		} {
+			m := newModel(nil, nil, "/r/one")
+			m.tab = tab
+			m.focus = tc.focus
+			footer := m.contextFooter()
+			help := strings.Join(m.helpLines(), "\n")
+			for _, r := range tc.table {
+				if !strings.Contains(footer, r.keys+" "+r.label) {
+					t.Errorf("tab %d focus %v: footer is missing %q %q, got %q", tab, tc.focus, r.keys, r.label, footer)
+				}
+				if !strings.Contains(help, r.keys+"  "+r.label) {
+					t.Errorf("tab %d focus %v: help reference is missing %q  %q, got:\n%s", tab, tc.focus, r.keys, r.label, help)
+				}
 			}
 		}
 	}
 }
 
 // TestFoldWorksUnderFocus: folding the row under the cursor needs no particular column focused,
-// so onKey no longer gates h/l on !m.rightFocus — the reference has no way to mark a binding
+// so onKey no longer gates h/l on focus — the reference has no way to mark a binding
 // "disabled here" (only "remapped"), so this keeps the two agreeing without new machinery.
 func TestFoldWorksUnderFocus(t *testing.T) {
 	m := tasksTabWith(api.Task{ID: "td-1", Title: "parent", Status: "open"},
 		api.Task{ID: "td-1.1", Title: "child", Status: "open", ParentID: "td-1"})
-	m.rightFocus = true
+	m.focus = focusItems
 	m.onKey("h")
 	if !m.collapsed["td-1"] {
 		t.Error("h should collapse the row under the cursor even while the detail column has focus")
@@ -246,7 +273,7 @@ func TestHelpModalStillWorksAlongsideTheMenuWhileFocused(t *testing.T) {
 	m.tab = 0
 	m.state = api.BoardState{Tasks: []api.Task{{ID: "td-1", Title: "a task", Status: "open"}}}
 	m.reclamp()
-	m.rightFocus = true
+	m.focus = focusItems
 
 	m.onKey(keyMenu)
 	if !m.menuAccepts(keyNew) {

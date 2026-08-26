@@ -8,7 +8,7 @@
 that move it a line at a time. With the list focused they SHALL move the selection by half the body
 height, which is how a list scrolls — it has no viewport of its own, and the selected line stays in
 view. With the detail column focused they SHALL scroll that column by half its height, resolving
-which region that is exactly as `J`/`K` do, so both speeds reach the same content.
+which region that is exactly as `j`/`k` do there, so both speeds reach the same content.
 
 They SHALL NOT decide from the active tab. A tab is not what the user is looking at within it, and
 deciding that way sent the keys to the list while the detail column had the focus.
@@ -26,4 +26,4 @@ deciding that way sent the keys to the list while the detail column had the focu
 #### Scenario: A view with two scrollable regions
 
 - **WHEN** the user focuses the PRs tab's metadata column and presses `ctrl+d`
-- **THEN** the column half-pages, as `J`/`K` would move it, and the diff pane does not move
+- **THEN** the column half-pages, as `j`/`k` would move it there, and the diff pane does not move

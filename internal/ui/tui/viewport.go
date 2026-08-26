@@ -73,8 +73,8 @@ func (m *model) reclamp() {
 	if m.tab == 5 {
 		detailH = m.runsPaneHeight()
 	}
-	// Offset-driven scroll (J/K), preserved across re-layouts; reset to top only
-	// when the selection changes (syncDetail).
+	// Offset-driven scroll (focusDetail's j/k, ctrl+d/ctrl+u), preserved across re-layouts; reset to
+	// top only when the selection changes (syncDetail).
 	if m.tab == 2 { // PRs: detail pane is the big bottom-left content (any width)
 		m.detail.Resize(max(1, m.bodyHeight()-m.prListHeight()-1), len(m.prContentLines()))
 		// The right column is a second scrollable region on this tab. Resize, not SetCursor: it is
@@ -93,13 +93,22 @@ func (m *model) reclamp() {
 	}
 }
 
-// scrollTarget is the viewport J/K move. Every tab has one detail pane and J/K drive it from
-// either side, which is the pinned rule. The PRs tab is the exception the rule did not foresee: it
-// has TWO scrollable regions — the diff and the metadata column — and one pair of keys, so there
-// they follow the focus. Without this the column's reviews, findings and history had no key at all
-// and everything past the first screenful was unreachable.
+// focusPane is which region plain j/k drives: the row cursor (focusList, the default), the pane's
+// raw content one line at a time (focusDetail), or its actionable items (focusItems). Replaces
+// shift+J/K (sd-57e895) — focusDetail exists so the PRs diff, which has no items, is still reachable.
+type focusPane int
+
+const (
+	focusList focusPane = iota
+	focusDetail
+	focusItems
+)
+
+// scrollTarget is the viewport plain j/k (focusDetail) and ctrl+d/ctrl+u scroll. Every tab has one
+// detail pane; PRs is the exception with two — the diff and the metadata column — so there it
+// follows focus: the metadata column only once it is itself focused, the diff otherwise.
 func (m *model) scrollTarget() *scroll.Viewport {
-	if m.tab == 2 && m.rightFocus {
+	if m.tab == 2 && m.focus == focusItems {
 		return &m.prMeta
 	}
 	return &m.detail
@@ -113,8 +122,8 @@ const (
 	scrollUp   scrollDir = false
 )
 
-// halfPage moves the focused viewport by half its height — the coarse form of J/K, resolving its
-// target the same way, so both speeds scroll the same thing (-> scrollTarget).
+// halfPage moves the focused viewport by half its height — the coarse form of focusDetail's j/k,
+// resolving its target the same way, so both speeds scroll the same thing (-> scrollTarget).
 func (m *model) halfPage(dir scrollDir) {
 	vp := m.scrollTarget()
 	for i := 0; i < max(1, vp.Height/2); i++ {
@@ -133,8 +142,8 @@ func (m *model) syncDetail() tea.Cmd {
 		return nil
 	}
 	m.detailKey = key
-	m.detail.ScrollTop() // new selection → show its detail from the top
-	m.rightCursor = 0    // and reset the right-column cursor to its first item
+	m.detail.ScrollTop()                 // new selection → show its detail from the top
+	m.rightCursor, m.detailExcess = 0, 0 // and reset the right-column cursor to its first item
 	id := m.selID()
 	if id == "" {
 		return nil

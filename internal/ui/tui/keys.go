@@ -116,15 +116,18 @@ var keymap = []binding{
 	// Global (first footer row): compound nav rows are display-only. "C-h/C-l", not "C-h/l" — the
 	// trailing bare "l" would misread as the real, different binding tasks: expand a fold uses.
 	{keys: keyHelp, label: lbl("help"), scope: scopeGlobal}, // leads the row: kept longest if it sheds
-	{keys: "⇥/[]", label: lbl("tab"), scope: scopeGlobal},
+	{keys: "⇥/⇧⇥", label: lbl("tab"), scope: scopeGlobal},
 	// 1-N jumps straight to a tab by its header number (tui.go); out of range is inert, never a
 	// jump to whatever the last tab happens to be (-> onKey's digit case).
 	{keys: fmt.Sprintf("1-%d", len(tuiSections)), label: lbl("jump"), scope: scopeGlobal},
+	// C-l steps forward through this tab's panes past the list (its raw content, then its actionable
+	// items if any), wrapping back to the list; C-h always returns straight to it.
 	{keys: "C-h/C-l", label: lbl("pane"), scope: scopeGlobal},
+	// j/k move the row cursor by default; once a pane is focused (C-l) they move within IT instead —
+	// scrolling its content one line at a time, or stepping its actionable items (-> onKey).
 	{keys: "j/k/g/G", label: lbl("move/top/bot"), scope: scopeGlobal},
-	{keys: "J/K", label: lbl("scroll detail"), scope: scopeGlobal},
-	// "page", not "scroll detail": ctrl+d/ctrl+u half-page whichever column has focus — the list
-	// or the detail/meta column — so one fixed label would be wrong half the time.
+	// "page", not "scroll detail": ctrl+d/ctrl+u half-page whichever pane has focus — the list, or
+	// whatever C-l last focused — so one fixed label would be wrong half the time.
 	{keys: "C-d/C-u", label: lbl("page"), scope: scopeGlobal},
 	{keys: "y/Y", label: lbl("yank/all"), scope: scopeGlobal},
 	{keys: keyDetail, label: lbl("detail"), scope: scopeGlobal},
@@ -155,6 +158,9 @@ var keymap = []binding{
 	{keys: keyWhyNext, label: lbl("why next"), scope: scopeTasks},
 	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.filter) }, scope: scopeTasks},
 	{keys: keyEnter, label: lbl("full screen"), scope: scopeTasks, refOnly: true},
+	// Least decisive last on purpose: at a narrow width this is what truncation should eat first,
+	// not the tab's own actions above it (-> idsNeedingUser; Runs/Repos/Meeting have no such notion).
+	{keys: "[/]", label: lbl("needs-you"), scope: scopeTasks},
 
 	// Agents.
 	{keys: keyNew, label: lbl("new"), scope: scopeAgents, commits: true}, // same call as Tasks' N (sd-5e3032)
@@ -189,6 +195,7 @@ var keymap = []binding{
 	{keys: keyDelete, label: lbl("delete"), scope: scopeAgents, commits: true},
 	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo, m) }, scope: scopeAgents},
 	{keys: keyEnter, label: lbl("full screen"), scope: scopeAgents, refOnly: true},
+	{keys: "[/]", label: lbl("needs-you"), scope: scopeAgents},
 
 	// PRs: look (verify/editor/open/lint), then the verdicts, then merge.
 	{keys: keyVerify, label: lbl("verify"), scope: scopePRs, commits: true},
@@ -206,6 +213,7 @@ var keymap = []binding{
 	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.prFilter) }, scope: scopePRs},
 	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo, m) }, scope: scopePRs},
 	{keys: keyEnter, label: lbl("full screen"), scope: scopePRs, refOnly: true},
+	{keys: "[/]", label: lbl("needs-you"), scope: scopePRs},
 
 	// Repos. config is not redeclared here: scopeGlobal+commits already reaches every tab's menu.
 	{keys: keyEnter, label: lbl("switch"), scope: scopeRepos},
@@ -219,6 +227,7 @@ var keymap = []binding{
 	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.mailFilter) }, scope: scopeMail},
 	{keys: keyScopeTog, label: func(m model) string { return "scope: " + scopeName(m.scopeRepo, m) }, scope: scopeMail},
 	{keys: keyEnter, label: lbl("full screen"), scope: scopeMail, refOnly: true},
+	{keys: "[/]", label: lbl("needs-you"), scope: scopeMail},
 
 	// Chat.
 	{keys: keyEnter, label: lbl("compose"), scope: scopeChat},
@@ -267,7 +276,7 @@ func (m model) globalFooter(width int) string {
 			lead = b.keys + " " + b.label(m)
 			continue
 		}
-		for _, p := range focusSplit(b, m, m.rightFocus) {
+		for _, p := range focusSplit(b, m, m.focus) {
 			middle = append(middle, globalEntry{label: p.label, rank: b.label(m), text: p.keys + " " + p.label})
 		}
 	}
@@ -283,7 +292,7 @@ type globalEntry struct{ label, rank, text string }
 // longest) — sd-5e3032's own instruction, a usefulness order distinct from keymap's own reading
 // order.
 var globalShedOrder = []string{
-	"jump", "pane", "repo", "yank/all", "detail", "refresh", "page", "scroll detail",
+	"jump", "pane", "repo", "yank/all", "detail", "refresh", "page",
 	"tab", "move/top/bot", "quit",
 }
 
@@ -377,9 +386,8 @@ func tabScope(tab int) keyScope {
 	}
 }
 
-// helpLines is "?"'s reference: the current tab first (what a folded viewport must not lose),
-// GLOBAL after, unfiltered by `when`. Focus relabels only rightFocusKeys' handful of keys, never
-// replaces a whole section, or every other row still working under focus would go missing.
+// helpLines is "?"'s reference: the current tab first, GLOBAL after, unfiltered by `when`. Focus
+// relabels only its own override table's keys, never a whole section.
 func (m model) helpLines() []string {
 	global := map[string]bool{}
 	for _, b := range keymap {
@@ -388,28 +396,36 @@ func (m model) helpLines() []string {
 		}
 	}
 	lines := []string{tuiSections[m.tab].Title}
-	lines = append(lines, helpRows(m, tabScope(m.tab), global, m.rightFocus)...)
+	lines = append(lines, helpRows(m, tabScope(m.tab), global, m.focus)...)
 	lines = append(lines, "", "GLOBAL")
-	lines = append(lines, helpRows(m, scopeGlobal, map[string]bool{}, m.rightFocus)...)
+	lines = append(lines, helpRows(m, scopeGlobal, map[string]bool{}, m.focus)...)
 	return lines
 }
 
-// focusOverrides is rightFocusKeys decomposed to one entry per literal key, so a compound row
-// (e.g. "j/k/g/G") can be split into the parts focus relabels and the parts it leaves alone.
-var focusOverrides = func() map[string]string {
+// focusOverrides decomposes a focus state's table to one entry per literal key, splitting a
+// compound row (e.g. "j/k/g/G") into relabelled and ordinary parts. focusList has none.
+func focusOverrides(focus focusPane) map[string]string {
+	var table []focusKey
+	switch focus {
+	case focusItems:
+		table = rightFocusKeys
+	case focusDetail:
+		table = detailFocusKeys
+	default:
+		return nil
+	}
 	out := map[string]string{}
-	for _, r := range rightFocusKeys {
+	for _, r := range table {
 		for _, k := range strings.Split(r.keys, "/") {
 			out[k] = r.label
 		}
 	}
 	return out
-}()
+}
 
-// helpRows renders every binding in scope as one reference line (formatRow), or two under focus
-// if rightFocus's keys split between a remapped meaning and an ordinary one (-> focusRows).
-// exclude skips a binding also declared globally — a defensive guard; nothing relies on it today.
-func helpRows(m model, scope keyScope, exclude map[string]bool, rightFocus bool) []string {
+// helpRows renders every binding in scope as one reference line, or two if focus splits it between
+// a remapped meaning and an ordinary one (-> focusRows). exclude skips a binding declared globally too.
+func helpRows(m model, scope keyScope, exclude map[string]bool, focus focusPane) []string {
 	var rows []string
 	for _, b := range keymap {
 		if b.scope != scope {
@@ -419,15 +435,14 @@ func helpRows(m model, scope keyScope, exclude map[string]bool, rightFocus bool)
 		if exclude[id] {
 			continue
 		}
-		rows = append(rows, focusRows(b, m, rightFocus)...)
+		rows = append(rows, focusRows(b, m, focus)...)
 	}
 	return rows
 }
 
 // focusPart is one piece of a binding split by focus: overridden marks the relabelled half (a
-// different action, so formatRow's commits/whenText do not apply to it), false for the half left
-// with the binding's own meaning (G in "j/k/g/G", Y in "y/Y", or the whole binding when unfocused
-// or untouched by focusOverrides).
+// different action, so formatRow's commits/whenText do not apply), false for the half left with
+// the binding's own meaning.
 type focusPart struct {
 	keys       string
 	label      string
@@ -435,17 +450,16 @@ type focusPart struct {
 }
 
 // focusSplit is the one place a binding's keys are split by focus — used by both globalFooter and
-// the reference (helpRows), so the live footer and "?" cannot disagree about what a key currently
-// does. Grouped by override label first (j and k both read "item" as one entry), then whatever is
-// left keeps the binding's own label.
-func focusSplit(b binding, m model, rightFocus bool) []focusPart {
-	if !rightFocus {
+// the reference, so the two cannot disagree about what a key does in any of the three states.
+func focusSplit(b binding, m model, focus focusPane) []focusPart {
+	overrides := focusOverrides(focus)
+	if overrides == nil {
 		return []focusPart{{b.keys, b.label(m), false}}
 	}
 	byLabel := map[string][]string{}
 	var order, left []string
 	for _, k := range strings.Split(b.keys, "/") {
-		lbl, ok := focusOverrides[k]
+		lbl, ok := overrides[k]
 		if !ok {
 			left = append(left, k)
 			continue
@@ -471,9 +485,9 @@ func focusSplit(b binding, m model, rightFocus bool) []focusPart {
 // focusRows renders one binding's focusSplit parts as reference lines: formatRow for an
 // unoverridden part (keeps commits/whenText), the bare label for an overridden one — safe only
 // while TestFocusOverriddenKeysNeverCommitOrCarryAWhen holds.
-func focusRows(b binding, m model, rightFocus bool) []string {
+func focusRows(b binding, m model, focus focusPane) []string {
 	var rows []string
-	for _, p := range focusSplit(b, m, rightFocus) {
+	for _, p := range focusSplit(b, m, focus) {
 		if p.overridden {
 			rows = append(rows, p.keys+"  "+p.label)
 		} else {

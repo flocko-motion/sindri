@@ -184,6 +184,3 @@ type tickMsg time.Time
 type polledMsg api.BoardState
 
 const refreshInterval = 3 * time.Second
-
-// detailScrollStep is how many lines J/K scroll the detail pane at once.
-const detailScrollStep = 5

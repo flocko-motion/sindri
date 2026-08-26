@@ -40,7 +40,7 @@ func mailJumpModel(agent string, scopeRepo bool) model {
 	m.scopeRepo = scopeRepo
 	m.reclamp()
 	m.selectRow(agent)
-	m.rightFocus = true
+	m.focus = focusItems
 	return m
 }
 
