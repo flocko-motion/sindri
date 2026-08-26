@@ -136,20 +136,31 @@ func TestDeadcodeSkipsWithoutGoToolchain(t *testing.T) {
 	}
 }
 
-func TestDeadcodeNoMainPackage(t *testing.T) {
+// TestDeadcodeSkipsALibraryModule: reachability is traced FROM main packages, so a module with none
+// gives the analysis nothing to say. It exited 1 with "no main packages among [./...]", which reads
+// as a finding about the code and failed a gate over a perfectly valid package shape — a library, or
+// any subdirectory scoped without a main. Skipped and said, as a non-Go tree already is.
+func TestDeadcodeSkipsALibraryModule(t *testing.T) {
 	dir := writeModule(t, map[string]string{
 		"go.mod":     "module libonly\n\ngo 1.25\n",
 		"lib/lib.go": "package lib\n\nfunc Exported() {}\n",
 	})
 
-	if _, _, err := func() (string, bool, error) {
+	out, found, err := func() (string, bool, error) {
 		orig, _ := os.Getwd()
 		_ = os.Chdir(dir)
 		defer os.Chdir(orig)
 		var sb strings.Builder
 		f, e := Deadcode([]string{"./..."}, "", nil, nil, &sb)
 		return sb.String(), f, e
-	}(); err == nil {
-		t.Fatal("expected an error when no main package is present")
+	}()
+	if err != nil {
+		t.Fatalf("a library module must not fail the linter: %v", err)
+	}
+	if found {
+		t.Error("nothing can be unreachable when there is nothing to be reachable from")
+	}
+	if !strings.Contains(out, "skipping") {
+		t.Errorf("the skip must be visible, or the linter looks like it ran: %q", out)
 	}
 }
