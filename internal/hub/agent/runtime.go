@@ -98,7 +98,10 @@ type contextSample struct {
 	ok             bool
 }
 
-var contextMemo struct {
+// contextMemo caches a transcript reading per agent. A FIELD, not a package var, so each Service
+// starts with nothing left over from another — as a package global it carried a reading between two
+// tests of the same agent name, and one that wrote 900k then 1k saw the 1k on its next run.
+type contextMemo struct {
 	mu  sync.Mutex
 	at  map[string]time.Time
 	val map[string]contextSample
@@ -108,13 +111,13 @@ var contextMemo struct {
 // pane — that's pattern-matched text). ok=false when no session has recorded usage yet.
 func (s *Service) ContextUsage(project, name string) (tokens, window int, model string, ok bool) {
 	key := project + "/" + name
-	contextMemo.mu.Lock()
-	if at, cached := contextMemo.at[key]; cached && time.Since(at) < contextTTL {
-		v := contextMemo.val[key]
-		contextMemo.mu.Unlock()
+	s.contextMemo.mu.Lock()
+	if at, cached := s.contextMemo.at[key]; cached && time.Since(at) < contextTTL {
+		v := s.contextMemo.val[key]
+		s.contextMemo.mu.Unlock()
 		return v.tokens, v.window, v.model, v.ok
 	}
-	contextMemo.mu.Unlock()
+	s.contextMemo.mu.Unlock()
 	return s.SampleContext(project, name)
 }
 
@@ -123,12 +126,12 @@ func (s *Service) ContextUsage(project, name string) (tokens, window int, model 
 func (s *Service) SampleContext(project, name string) (tokens, window int, model string, ok bool) {
 	t, w, m, found := agentport.ContextUsage(paths.AgentHomeDir(project, name))
 	key := project + "/" + name
-	contextMemo.mu.Lock()
-	if contextMemo.at == nil {
-		contextMemo.at, contextMemo.val = map[string]time.Time{}, map[string]contextSample{}
+	s.contextMemo.mu.Lock()
+	if s.contextMemo.at == nil {
+		s.contextMemo.at, s.contextMemo.val = map[string]time.Time{}, map[string]contextSample{}
 	}
-	contextMemo.at[key], contextMemo.val[key] = time.Now(), contextSample{t, w, m, found}
-	contextMemo.mu.Unlock()
+	s.contextMemo.at[key], s.contextMemo.val[key] = time.Now(), contextSample{t, w, m, found}
+	s.contextMemo.mu.Unlock()
 	return t, w, m, found
 }
 
@@ -191,10 +194,10 @@ func (s *Service) recordedModel(project, name string) string {
 // memo — leaving either behind puts that bug back on the half left standing.
 func (s *Service) ForgetContext(project, name string) {
 	key := project + "/" + name
-	contextMemo.mu.Lock()
-	delete(contextMemo.at, key)
-	delete(contextMemo.val, key)
-	contextMemo.mu.Unlock()
+	s.contextMemo.mu.Lock()
+	delete(s.contextMemo.at, key)
+	delete(s.contextMemo.val, key)
+	s.contextMemo.mu.Unlock()
 	s.deps.ForgetFill(project, name)
 }
 

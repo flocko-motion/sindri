@@ -310,3 +310,24 @@ func TestAnUnknownTaskIsAnsweredNotEscalated(t *testing.T) {
 		t.Errorf("the answer should explain why the id is out of reach, got %q", out.String())
 	}
 }
+
+// TestLintOnAnUnreachablePRIsAnsweredNotEscalated: `sindri lint <pr-id>` for a PR the caller cannot
+// reach is an ANSWER. Returned as an error it reaches AgentExec as a hub failure, which
+// auto-escalates — balin was stopped for naming pr-sd-19130a, a PR in another project. approve,
+// reject and show all learned this; lint was the one verb left behind.
+func TestLintOnAnUnreachablePRIsAnsweredNotEscalated(t *testing.T) {
+	st, _, c := foreignPRFixture(t)
+	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
+
+	var out bytes.Buffer
+	code, err := e.CmdLint(c, []string{"pr-9"}, &out)
+	if err != nil {
+		t.Fatalf("an unreachable PR came back as a hub fault, which escalates the caller: %v", err)
+	}
+	if code == 0 {
+		t.Error("an unreachable PR is still a refusal, so the code must be non-zero")
+	}
+	if !strings.Contains(out.String(), "No PR pr-9") {
+		t.Errorf("the caller must be told the id is out of its reach, got %q", out.String())
+	}
+}

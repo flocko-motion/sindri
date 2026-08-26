@@ -56,6 +56,7 @@ type Service struct {
 	lifecycle map[lcKey]lifecycleIntent // transient launch/stop intent: "launching"|"stopping"|failed
 
 	runtimeMemo runtimeMemo // Observe's TTL cache (runtime.go)
+	contextMemo contextMemo // ContextUsage's TTL cache (runtime.go)
 	paneMemo    paneMemo    // AgentPane's TTL cache (runtime.go)
 
 	kickoffWG sync.WaitGroup // FireClear's delayed kickoff goroutines (-> waitForKickoff, tests only)

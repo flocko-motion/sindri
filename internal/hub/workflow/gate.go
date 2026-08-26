@@ -9,6 +9,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -164,6 +165,13 @@ func gateReusedReport(sha string, passed bool, out string) string {
 func (e *Engine) CmdLint(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) > 0 {
 		res, err := e.lintPR(e.callerPRProject(c, args[0]), args[0], c.Agent)
+		// An id this caller cannot reach is an ANSWER: reported as an error it reaches AgentExec as a
+		// hub failure, which auto-escalates. balin was stopped for naming a PR outside the project its
+		// review put it in — the sibling verbs learned this and lint was missed (-> ErrNoSuchPR).
+		if errors.Is(err, ErrNoSuchPR) {
+			fmt.Fprintln(out, ReplyNoSuchPR(args[0]))
+			return 1, nil
+		}
 		if err != nil {
 			return 1, err
 		}
