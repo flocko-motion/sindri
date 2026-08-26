@@ -33,7 +33,7 @@ func revokeFixture(t *testing.T, prStatus string) (*Engine, *store.ProjectStore,
 	}
 	if err := ps.SetState(store.AgentState{
 		Agent: "nidi", Task: "gh-285", Branch: "gh-285", Phase: "submitted",
-	}); err != nil {
+	}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	return New(st, &stubDeps{root: root, alive: true}),

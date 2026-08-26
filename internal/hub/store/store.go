@@ -154,6 +154,12 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	// state_log is debug telemetry, never durable across a restart (-> its own schema comment): a hub
+	// up for weeks must not hold weeks of flicker just because nothing else trims it.
+	if _, err := db.Exec(`DELETE FROM state_log`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("purge state log: %w", err)
+	}
 	return &Store{db: db}, nil
 }
 

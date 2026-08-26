@@ -28,7 +28,7 @@ func TestGatePassedSendsNoMessage(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: task, Title: "fix it", Type: "bug", Status: "open"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: agent, Task: task, Branch: branch, Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: agent, Task: task, Branch: branch, Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	wt := filepath.Join(root, ".worktrees", agent)
@@ -68,7 +68,7 @@ func TestPlainMergeSendsNoMessage(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: task, Title: "fix it", Type: "bug", Status: "open"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: agent, Task: task, Branch: branch, Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: agent, Task: task, Branch: branch, Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	wt := filepath.Join(root, ".worktrees", agent)

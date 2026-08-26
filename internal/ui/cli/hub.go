@@ -61,6 +61,7 @@ type backend interface {
 	ChatWatch(ctx context.Context) (<-chan api.ChatView, error)
 	State() (api.BoardState, error)
 	Log(name string) ([]api.Event, error)
+	StateLog(name string) ([]api.StateEvent, error)
 	Tasks() ([]api.Task, error)
 	TaskInfo(id string) (api.Task, error)
 	CreateTask(s api.TaskSpec) (string, error)
@@ -238,7 +239,7 @@ func NewAgentCmd() *cobra.Command {
 	// No PersistentPreRun: the runtime warning comes off the board (-> warnRuntime), which the
 	// commands that need it already fetch. Probing here cost every agent verb a `podman info`.
 	c := &cobra.Command{Use: "agent", Short: "Manage agents (workers, reviewers, planners, coauthors)"}
-	c.AddCommand(agentListCmd(), agentStatsCmd(), agentNewCmd(), agentDeleteCmd(), agentPaneCmd(), agentStartCmd(), agentStopCmd(), agentRestartCmd(), agentRebaseCmd(), agentRebuildCmd(), agentMemoryCmd(), agentRetireCmd(), agentResumeCmd(), agentClearContextCmd(), agentTellCmd(), agentMailCmd(), agentPlanCmd(), agentDirCmd(), agentAttachCmd(), agentInfoCmd())
+	c.AddCommand(agentListCmd(), agentStatsCmd(), agentNewCmd(), agentDeleteCmd(), agentPaneCmd(), agentStartCmd(), agentStopCmd(), agentRestartCmd(), agentRebaseCmd(), agentRebuildCmd(), agentMemoryCmd(), agentRetireCmd(), agentResumeCmd(), agentClearContextCmd(), agentTellCmd(), agentMailCmd(), agentPlanCmd(), agentDirCmd(), agentAttachCmd(), agentInfoCmd(), agentStatesCmd())
 	return c
 }
 

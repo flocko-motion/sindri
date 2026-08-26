@@ -156,7 +156,19 @@ func (e *Engine) finishTask(project, id string, scrap bool) error {
 	roster, _ := ps.Roster()
 	for _, a := range roster {
 		if st, _ := ps.GetState(a.Name); st.Task == id {
-			_ = ps.SetState(store.AgentState{Agent: a.Name, Phase: restPhase(a.Role)})
+			// A container holder rests onto its FEATURE, not fully idle — dropping it here
+			// silently unhooked the worker from the rest of what it still held (sd-5ef393).
+			next := store.AgentState{Agent: a.Name, Phase: restPhase(a.Role)}
+			if st.Container != "" {
+				// Phase "idle" here, not restPhase(a.Role): only a worker holds a container today, so
+				// the two agree — worth another look if a planner or coauthor ever comes to hold one.
+				next = store.AgentState{Agent: a.Name, Container: st.Container, Branch: st.Container, Phase: "idle"}
+			}
+			verb := "closed"
+			if scrap {
+				verb = "scrapped"
+			}
+			_ = ps.SetState(next, store.ReasonFreed, "task "+verb+": "+id)
 			_ = ps.Log(a.Name, "task-cancelled", id)
 			// ESC first, so the cancellation lands on an idle prompt rather than queuing behind
 			// the work it is cancelling. Only the interrupt needs the agent up; the delivery is

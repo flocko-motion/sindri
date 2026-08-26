@@ -122,7 +122,7 @@ func (e *Engine) HealPlannerTasks() {
 			continue
 		}
 		_ = e.SetStatus(a.Project, st.Task, "open")
-		_ = ps.SetState(store.AgentState{Agent: a.Name, Phase: "planning"})
+		_ = ps.SetState(store.AgentState{Agent: a.Name, Phase: "planning"}, store.ReasonFreed, "planners don't hold tasks: "+st.Task)
 		_ = ps.Log(a.Name, "unassign", st.Task+" (planners don't hold tasks)")
 	}
 }
@@ -140,7 +140,14 @@ func (e *Engine) UnassignTask(project, id string) error {
 		if e.deps.AgentAlive(project, a.Name) {
 			return fmt.Errorf("%s is alive and working on %s — stop or delete it first", a.Name, id)
 		}
-		_ = ps.SetState(store.AgentState{Agent: a.Name, Phase: "idle"})
+		// A container holder rests back onto its FEATURE, not fully idle: unassigning one subtask
+		// does not mean the feature it lives under is done (sd-5ef393 — the same shape as
+		// finishTask's own fix).
+		next := store.AgentState{Agent: a.Name, Phase: "idle"}
+		if st.Container != "" {
+			next = store.AgentState{Agent: a.Name, Container: st.Container, Branch: st.Container, Phase: "idle"}
+		}
+		_ = ps.SetState(next, store.ReasonFreed, "unassigned: "+id)
 		_ = ps.Log(a.Name, "unassign", id)
 	}
 	if err := e.SetStatus(project, id, "open"); err != nil {
@@ -362,7 +369,8 @@ func (e *Engine) directive(ctx context.Context, project, name string) (string, e
 					return "", err
 				}
 				if rejected {
-					_ = ps.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "working"})
+					_ = ps.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "working"},
+						store.ReasonRejected, "container subtask rejected: "+st.Task)
 					aim, ceiling := e.commentBudget(project)
 					return DirContainerRejected(st.Container, st.Task, feedback,
 						e.rejectionRound(project, st.Container), aim, ceiling), nil
@@ -382,7 +390,7 @@ func (e *Engine) directive(ctx context.Context, project, name string) (string, e
 				return d, err
 			}
 		}
-		_ = ps.SetState(store.AgentState{Agent: name, Phase: "idle"})
+		_ = ps.SetState(store.AgentState{Agent: name, Phase: "idle"}, store.ReasonLanded, "feature already landed: "+st.Container)
 		return e.waitForNextTask(ctx, project, name)
 	}
 	switch st.Phase {
@@ -394,7 +402,8 @@ func (e *Engine) directive(ctx context.Context, project, name string) (string, e
 			return "", err
 		}
 		if rejected {
-			_ = ps.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Phase: "working"})
+			_ = ps.SetState(store.AgentState{Agent: name, Task: st.Task, Branch: st.Branch, Phase: "working"},
+				store.ReasonRejected, "rejected: "+st.Task)
 			aim, ceiling := e.commentBudget(project)
 			return DirRejected(st.Task, feedback, e.rejectionRound(project, st.Task), aim, ceiling), nil
 		}
@@ -566,7 +575,8 @@ func (e *Engine) claimLeaf(project, worker string, t store.Task) (string, bool, 
 	if err := ps.GrantNotes(worker, NotesPerClaim); err != nil {
 		return "", false, err
 	}
-	if err := ps.SetState(store.AgentState{Agent: worker, Task: t.ID, Branch: branch, Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: worker, Task: t.ID, Branch: branch, Phase: "working"},
+		store.ReasonClaimed, "claimed "+t.ID); err != nil {
 		return "", false, err
 	}
 	_ = ps.Log(worker, "claim", t.ID+" "+t.Title)

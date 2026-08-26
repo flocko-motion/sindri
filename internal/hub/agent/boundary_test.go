@@ -19,7 +19,7 @@ func TestBeginAssignmentAdmitsAFreshClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A claim just written, exactly as claimLeaf/startSubtask leaves it: Task set, Phase "working".
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-abc123", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-abc123", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	if at, _ := s.AtLeafBoundary("proj", "eitri"); at {
@@ -47,7 +47,7 @@ func TestBeginAssignmentIsPerAgent(t *testing.T) {
 		if err := ps.PutAgent(store.Agent{Name: name, Role: "worker"}); err != nil {
 			t.Fatal(err)
 		}
-		if err := ps.SetState(store.AgentState{Agent: name, Task: "td-1", Phase: "working"}); err != nil {
+		if err := ps.SetState(store.AgentState{Agent: name, Task: "td-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -69,7 +69,7 @@ func TestAPooledReviewerMidReviewIsNotABoundary(t *testing.T) {
 	if err := st.For(api.GlobalProject).PutAgent(store.Agent{Name: "ori", Role: "reviewer"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.For(api.GlobalProject).SetState(store.AgentState{Agent: "ori", Phase: "reviewing"}); err != nil {
+	if err := st.For(api.GlobalProject).SetState(store.AgentState{Agent: "ori", Phase: "reviewing"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	repo := st.For("repo")

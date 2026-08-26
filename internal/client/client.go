@@ -546,6 +546,13 @@ func (c *HTTP) Log(name string) ([]api.Event, error) {
 	return out, c.get("/log?agent="+url.QueryEscape(name), &out)
 }
 
+// StateLog fetches an agent's debug state log — every stored state write's reason, and every
+// distinct derived-status change (-> sd-a72056). A diagnostic instrument, not the activity log.
+func (c *HTTP) StateLog(name string) ([]api.StateEvent, error) {
+	var out []api.StateEvent
+	return out, c.get("/agent/states?agent="+url.QueryEscape(name), &out)
+}
+
 // Repos lists every registered repo (the registry overview / TUI switcher source).
 func (c *HTTP) Repos() ([]api.RepoSummary, error) {
 	var out []api.RepoSummary

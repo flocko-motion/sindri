@@ -63,7 +63,7 @@ func TestTheClearItselfDropsTheStaleReading(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	container.Use(&fakeRuntime{pane: idlePane}) // a running pod with a pane to type into

@@ -113,7 +113,7 @@ func TestAnIdleWorkerTakesTheCriticalTaskOverAMidPackage(t *testing.T) {
 	if err := ps.SetParent("td-kid", "td-pkg"); err != nil {
 		t.Fatalf("set parent: %v", err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: agent, Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: agent, Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
 

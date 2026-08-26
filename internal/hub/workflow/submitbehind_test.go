@@ -45,7 +45,7 @@ func submitEngine(t *testing.T) (*Engine, *store.ProjectStore, string, registry.
 	if err := ps.PutOwnedTask(store.OwnedTask{ID: "sd-1", Title: "the task", Status: "in_progress"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "sd-1", Branch: "sd-1", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "sd-1", Branch: "sd-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	return New(st, &stubDeps{root: root}), ps, root, registry.Caller{Project: "proj", Agent: "bombur", Role: "worker"}

@@ -32,10 +32,10 @@ func nudgeStore(t *testing.T) (*Engine, *stubDeps, *store.ProjectStore) {
 		t.Fatal(err)
 	}
 	// dvalin is busy, galar plans, hepti collaborates — only nori is free.
-	_ = ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-busy", Branch: "td-busy", Phase: "working"})
-	_ = ps.SetState(store.AgentState{Agent: "galar", Phase: "planning"})
-	_ = ps.SetState(store.AgentState{Agent: "hepti", Phase: "collab"})
-	_ = ps.SetState(store.AgentState{Agent: "nori", Phase: "idle"})
+	_ = ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-busy", Branch: "td-busy", Phase: "working"}, store.ReasonClaimed, "test setup")
+	_ = ps.SetState(store.AgentState{Agent: "galar", Phase: "planning"}, store.ReasonClaimed, "test setup")
+	_ = ps.SetState(store.AgentState{Agent: "hepti", Phase: "collab"}, store.ReasonClaimed, "test setup")
+	_ = ps.SetState(store.AgentState{Agent: "nori", Phase: "idle"}, store.ReasonClaimed, "test setup")
 
 	deps := &stubDeps{root: t.TempDir(), alive: true}
 	return New(st, deps), deps, ps
@@ -92,7 +92,7 @@ func TestNudgeSkipsADeadAgent(t *testing.T) {
 // claimable task must wake only one of them, not both to race for it.
 func TestNudgeCapsAtHowManyTasksAreClaimable(t *testing.T) {
 	e, deps, ps := nudgeStore(t)
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err) // dvalin is free too now — still only one task to give out
 	}
 	e.nudgeIdleWorkers("proj", "P2")
@@ -258,7 +258,7 @@ func TestAssignPendingSubtaskReoffersAfterReopening(t *testing.T) {
 	if err := ps.SetParent("td-1", "td-EPIC"); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	deps := &stubDeps{}
@@ -334,7 +334,7 @@ func TestWakeRefusalDoesNotBlockAnAgentHoldingWork(t *testing.T) {
 			if err := ps.PutAgent(a); err != nil {
 				t.Fatal(err)
 			}
-			if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "submitted"}); err != nil {
+			if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "submitted"}, store.ReasonClaimed, "test setup"); err != nil {
 				t.Fatal(err)
 			}
 			e := New(st, &stubDeps{root: t.TempDir()})
@@ -362,7 +362,7 @@ func TestWakeRefusalIgnoresRetiredBetweenSubtasks(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: "td-EPIC", Title: "a feature", Status: "open"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	e := New(st, &stubDeps{root: t.TempDir()})
@@ -387,7 +387,7 @@ func TestWakeRefusalStillGatesClearArmedBetweenSubtasks(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: "td-EPIC", Title: "a feature", Status: "open"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	e := New(st, &stubDeps{root: t.TempDir()})
@@ -412,7 +412,7 @@ func TestWakeRefusalIgnoresRetiredAwaitingItsOwnPR(t *testing.T) {
 	if err := ps.PutPR(store.PR{ID: "pr-td-1", Task: "td-1", Agent: "dvalin", Branch: "td-1", Base: "main", Status: "rejected"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	e := New(st, &stubDeps{root: t.TempDir()})
@@ -436,7 +436,7 @@ func TestWakeRefusalNeverBlocksAPlannerOrCoauthor(t *testing.T) {
 			if err := ps.PutAgent(store.Agent{Name: "galar", Role: role, Retired: true}); err != nil {
 				t.Fatal(err)
 			}
-			if err := ps.SetState(store.AgentState{Agent: "galar", Phase: "idle"}); err != nil {
+			if err := ps.SetState(store.AgentState{Agent: "galar", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 				t.Fatal(err)
 			}
 			e := New(st, &stubDeps{root: t.TempDir()})

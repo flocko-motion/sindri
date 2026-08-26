@@ -61,7 +61,7 @@ func newSyncFixture(t *testing.T) *syncFixture {
 	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker", Workspace: ".worktrees/eitri"}); err != nil {
 		t.Fatalf("put agent: %v", err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Branch: "work", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Branch: "work", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
 	deps := &stubDeps{root: root}
@@ -174,7 +174,7 @@ func TestSyncReferenceRewriteWarnsAndLeavesTheBranchAlone(t *testing.T) {
 // the reviewer's diff shifts under it. The merge rebases it when the time comes.
 func TestSyncReferenceLeavesABranchUnderReviewAlone(t *testing.T) {
 	f := newSyncFixture(t)
-	if err := f.ps.SetState(store.AgentState{Agent: "eitri", Branch: "work", Phase: "submitted"}); err != nil {
+	if err := f.ps.SetState(store.AgentState{Agent: "eitri", Branch: "work", Phase: "submitted"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.e.SyncReference("proj"); err != nil {
@@ -215,7 +215,7 @@ func TestSyncReferenceLeavesABranchUnderReviewAlone(t *testing.T) {
 // failure the count exists to avoid. The standing figure (branch vs base) must grow 1, 2, 3.
 func TestUnderReviewSkipReportsStandingDriftAcrossSweeps(t *testing.T) {
 	f := newSyncFixture(t)
-	if err := f.ps.SetState(store.AgentState{Agent: "eitri", Branch: "work", Phase: "submitted"}); err != nil {
+	if err := f.ps.SetState(store.AgentState{Agent: "eitri", Branch: "work", Phase: "submitted"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.e.SyncReference("proj"); err != nil {

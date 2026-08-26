@@ -170,7 +170,7 @@ func TestEditTellsTheHolder(t *testing.T) {
 		} else {
 			st.Container = id
 		}
-		if err := ps.SetState(st); err != nil {
+		if err := ps.SetState(st, store.ReasonClaimed, "test setup"); err != nil {
 			t.Fatal(err)
 		}
 		var out bytes.Buffer
@@ -202,7 +202,7 @@ func TestAFailedRecordStillTellsTheHolder(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: id, Branch: id, Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: id, Branch: id, Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
@@ -237,7 +237,7 @@ func TestAnEditedTaskIsStillItsHolders(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: id, Branch: id, Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: id, Branch: id, Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
@@ -488,7 +488,7 @@ func workerEngineComments(t *testing.T, tasks []store.Task, container, current s
 			t.Fatalf("upsert %s: %v", task.ID, err)
 		}
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Container: container, Task: current, Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Container: container, Task: current, Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
 	return New(st, &stubDeps{root: root, comments: comments}), registry.Caller{Project: "proj", Agent: "eitri", Role: "worker"}

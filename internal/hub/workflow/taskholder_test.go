@@ -46,7 +46,7 @@ func holderFixture(t *testing.T) *Engine {
 			t.Fatal(err)
 		}
 	}
-	if err := ps.SetState(store.AgentState{Agent: "nori", Task: "sd-worked", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "nori", Task: "sd-worked", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	// bombur submitted and is no longer holding the task — the PR is the only trace of who did it.

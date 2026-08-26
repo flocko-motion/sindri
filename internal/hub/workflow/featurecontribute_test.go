@@ -82,7 +82,7 @@ func TestFeatureContributionMergeKeepsTheFeature(t *testing.T) {
 		t.Errorf("feature status = %q — an instalment of a feature must not finish it", feature.Status)
 	}
 	// And it is still claimable work: a merged interim PR is not the feature having landed.
-	if err := ps.SetState(store.AgentState{Agent: "dain", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dain", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	open, err := ps.OpenContainers()

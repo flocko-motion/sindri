@@ -88,3 +88,74 @@ func TestRunningStillReportsThePhase(t *testing.T) {
 		t.Errorf("a running agent with no phase reads %q, want idle", got)
 	}
 }
+
+// TestPeekStatusDoesNotRetireASettledIntent: PeekStatus exists for an observer that must not decide
+// when a launch/stop intent retires (-> statuswatch.go) — the word must match AgentStatus's, but the
+// intent behind it must survive, however many times PeekStatus is called.
+func TestPeekStatusDoesNotRetireASettledIntent(t *testing.T) {
+	s := &Service{lifecycle: map[lcKey]lifecycleIntent{{"proj", "galar"}: {state: "stopping"}}}
+	// Observed and down: the stop intent is now fulfilled, which AgentStatus would retire.
+	if got := s.PeekStatus("proj", "galar", false, true, "", false); got != "down" {
+		t.Errorf("peek reads %q, want down", got)
+	}
+	if _, still := s.lifecycle[lcKey{"proj", "galar"}]; !still {
+		t.Fatal("PeekStatus must not retire a settled intent")
+	}
+	// Calling it again must read exactly the same word — nothing about the intent moved.
+	if got := s.PeekStatus("proj", "galar", false, true, "", false); got != "down" {
+		t.Errorf("a repeat peek reads %q, want down", got)
+	}
+	if _, still := s.lifecycle[lcKey{"proj", "galar"}]; !still {
+		t.Fatal("a repeat PeekStatus must still not retire the intent")
+	}
+	// AgentStatus itself is still the one that retires it, once actually called.
+	if got := s.AgentStatus("proj", "galar", false, true, "", false); got != "down" {
+		t.Errorf("AgentStatus reads %q, want down", got)
+	}
+	if _, still := s.lifecycle[lcKey{"proj", "galar"}]; still {
+		t.Error("AgentStatus should retire the intent PeekStatus left alone")
+	}
+}
+
+// TestAgentStatusAndPeekStatusAgree: the two must answer identically for every case the switch in
+// foldStatus branches on — they are the same fold, one of them just skips the write.
+func TestAgentStatusAndPeekStatusAgree(t *testing.T) {
+	cases := []struct {
+		name                       string
+		intent                     string
+		running, observed, stopped bool
+		phase                      string
+	}{
+		{"stopping, still up", "stopping", true, true, false, ""},
+		{"stopping, observed down", "stopping", false, true, false, ""},
+		{"stopping, unobserved", "stopping", false, false, false, ""},
+		{"running with phase", "", true, true, false, "working"},
+		{"running no phase", "", true, true, false, ""},
+		{"launching", "launching", false, true, false, ""},
+		{"launch failed", api.StatusLaunchFailed, false, true, false, ""},
+		{"unobserved", "", false, false, false, ""},
+		{"stopped", "", false, true, true, ""},
+		{"down", "", false, true, false, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			lc := map[lcKey]lifecycleIntent{}
+			if c.intent != "" {
+				lc[lcKey{"proj", "galar"}] = lifecycleIntent{state: c.intent}
+			}
+			peek := &Service{lifecycle: lc}
+			gotPeek := peek.PeekStatus("proj", "galar", c.running, c.observed, c.phase, c.stopped)
+
+			lc2 := map[lcKey]lifecycleIntent{}
+			if c.intent != "" {
+				lc2[lcKey{"proj", "galar"}] = lifecycleIntent{state: c.intent}
+			}
+			real := &Service{lifecycle: lc2}
+			gotReal := real.AgentStatus("proj", "galar", c.running, c.observed, c.phase, c.stopped)
+
+			if gotPeek != gotReal {
+				t.Errorf("PeekStatus=%q AgentStatus=%q, want equal", gotPeek, gotReal)
+			}
+		})
+	}
+}

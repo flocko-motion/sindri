@@ -449,12 +449,14 @@ func (e *Engine) openMilestoneOrInterim(project string, r api.Run) (store.PR, er
 		return store.PR{}, err
 	}
 	if !done {
-		_ = ps.SetState(store.AgentState{Agent: r.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "resolving"})
+		_ = ps.SetState(store.AgentState{Agent: r.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "resolving"},
+			store.ReasonAdvanced, "contribute rebase conflicts: "+strings.Join(conflicts, ", "))
 		_ = ps.Log(r.Agent, "contribute-conflict", strings.Join(conflicts, ", "))
 		_ = e.deps.Deliver(project, r.Agent, "[hub] "+ReplyContributeConflicts(base, conflicts), MailAndPush)
 		return pr, nil
 	}
-	if err := ps.SetState(store.AgentState{Agent: r.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "submitted"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: r.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "submitted"},
+		store.ReasonAdvanced, "interim contribution submitted: "+pr.ID); err != nil {
 		return store.PR{}, err
 	}
 	_ = ps.Log(r.Agent, "contribute", pr.ID)
@@ -499,7 +501,7 @@ func (e *Engine) landSubmit(project string, ps *store.ProjectStore, r api.Run) e
 	}
 	if err := ps.SetState(store.AgentState{
 		Agent: r.Agent, Task: st.Task, Branch: branch, Container: st.Container, Phase: "submitted",
-	}); err != nil {
+	}, store.ReasonAdvanced, "submitted: "+pr.ID); err != nil {
 		return err
 	}
 	_ = ps.Log(r.Agent, "submit", pr.ID)
@@ -587,7 +589,7 @@ func (e *Engine) backToWorking(ps *store.ProjectStore, r api.Run) (store.AgentSt
 	}
 	return st, ps.SetState(store.AgentState{
 		Agent: r.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "working",
-	})
+	}, store.ReasonRejected, "gate failed: "+gateTarget(st))
 }
 
 // gateTarget names what a gate was checking, for the activity log — the container if the agent

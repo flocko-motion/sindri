@@ -27,7 +27,7 @@ func containerWorker(t *testing.T, phase string) (*Engine, *store.ProjectStore, 
 	}
 	if err := ps.SetState(store.AgentState{
 		Agent: "dvalin", Container: "td-EPIC", Branch: "td-EPIC", Task: "td-1", Phase: phase,
-	}); err != nil {
+	}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
 	deps := &stubDeps{root: t.TempDir()}

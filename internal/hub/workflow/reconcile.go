@@ -263,7 +263,8 @@ func (e *Engine) healSplit(project, name string) bool {
 		return false
 	}
 	a, _, _ := ps.GetAgent(name)
-	if serr := ps.SetState(store.AgentState{Agent: name, Phase: restPhase(a.Role)}); serr != nil {
+	if serr := ps.SetState(store.AgentState{Agent: name, Phase: restPhase(a.Role)},
+		store.ReasonFreed, "yielded "+st.Container+" to "+held); serr != nil {
 		return false
 	}
 	// The PR goes with the feature. Left standing it binds the agent to a tree it no longer holds:

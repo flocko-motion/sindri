@@ -119,13 +119,7 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			_, pr, _ = h.store.ReviewingPR(a.Project, a.Name)
 		}
 		l := obs[i]
-		status := overlayRuntime(h.agents.AgentStatus(a.Project, a.Name, l.up, observed[i], st.Phase, a.Stopped), l.runtime)
-		// A stall reads as plain "idle" otherwise, which is what let one hold a task unnoticed.
-		if _, stalled := h.stalledFor(a.Project, a.Name, st.Phase, st.Container); stalled {
-			status = "stalled"
-		}
-		status = overlayEscalation(status, st.Escalation)
-		status = overlayUnreachable(status, h.agents.Unreachable(a.Project, a.Name))
+		status := h.statusWord(a, st, l, observed[i])
 		agents = append(agents, AgentView{
 			Project: a.Project, Repo: h.repoName(a.Project), Name: a.Name, Role: a.Role,
 			Status:  status,
@@ -354,6 +348,31 @@ func (h *Hub) container(project, name string) string {
 	return Container(root, name)
 }
 
+// statusWord is one agent's derived status — phase, liveness, the stall check and escalation folded
+// into the single word the board renders. State's batch loop passes what it already fetched rather
+// than re-reading it. This is the board read that OWNS retiring a settled launch/stop intent
+// (-> AgentStatus) — an observer that must not decide that wants peekStatusWord instead.
+func (h *Hub) statusWord(a store.Agent, st store.AgentState, l liveness, observed bool) string {
+	return h.foldStatus(h.agents.AgentStatus(a.Project, a.Name, l.up, observed, st.Phase, a.Stopped), a, st, l)
+}
+
+// peekStatusWord is statusWord without retiring a settled intent (-> agent.Service.PeekStatus) — for
+// statuswatch.go's diff-check, which must not perturb the very thing it measures.
+func (h *Hub) peekStatusWord(a store.Agent, st store.AgentState, l liveness, observed bool) string {
+	return h.foldStatus(h.agents.PeekStatus(a.Project, a.Name, l.up, observed, st.Phase, a.Stopped), a, st, l)
+}
+
+// foldStatus is the rest of the fold both statusWord and peekStatusWord share: the stall check and
+// escalation overlay, neither of which has a side effect to isolate.
+func (h *Hub) foldStatus(base string, a store.Agent, st store.AgentState, l liveness) string {
+	status := overlayRuntime(base, l.runtime)
+	// A stall reads as plain "idle" otherwise, which is what let one hold a task unnoticed.
+	if _, stalled := h.stalledFor(a.Project, a.Name, st.Phase, st.Container); stalled {
+		status = "stalled"
+	}
+	return overlayEscalation(status, st.Escalation)
+}
+
 // overlayRuntime folds Claude's live runtime into the workflow status: "signed-out" = unreachable
 // until a human acts, "blocked" = needs you now (any phase), "working" = busy, "idle" = nothing
 // doing. It replaces a plain working/idle phase but keeps the meaningful ones; runtime "" (probe
@@ -410,6 +429,13 @@ func (h *Hub) Refresh(project string) error {
 // Log returns an agent's recent activity-log entries (oldest-first).
 func (h *Hub) Log(project, name string) ([]store.Event, error) {
 	return h.store.For(project).Events(name, 50)
+}
+
+// StateLog returns an agent's debug state log, newest first — every stored write's reason and every
+// distinct derived-status change. Unbounded here: state_log's own write-time cap (-> stateLogCap)
+// already bounds it, and the CLI applies its own --limit on top (-> sd-4be9f8's convention).
+func (h *Hub) StateLog(project, name string) ([]store.StateEvent, error) {
+	return h.store.For(project).StateLog(name, 0)
 }
 
 // openPRFor returns the id of an agent's still-open PR in its project, if any. Open-ness is PROpen's

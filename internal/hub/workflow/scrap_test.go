@@ -317,7 +317,7 @@ func TestDiscardPRReleasesItsAuthor(t *testing.T) {
 	if err := ps.PutPR(store.PR{ID: "pr-os-new", Task: "os-new", Agent: "galar", Status: "open"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "galar", Task: "os-new", Phase: "submitted"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "galar", Task: "os-new", Phase: "submitted"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	deps := &stubDeps{root: root, alive: true}
@@ -357,7 +357,7 @@ func TestDiscardPRLeavesAnUninvolvedAgentAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Already working something else — not waiting on this PR.
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-9", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-9", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	deps := &stubDeps{root: root, alive: true}

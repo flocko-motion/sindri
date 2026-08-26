@@ -80,7 +80,7 @@ func TestAStalledReviewerReadsAsStalledOnTheBoard(t *testing.T) {
 	if err := ps.AssignReview(id, "ori"); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "ori", Phase: "reviewing"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "ori", Phase: "reviewing"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	a := store.Agent{Project: testProject, Name: "ori"}

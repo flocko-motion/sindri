@@ -3,8 +3,8 @@
 // job:     own what the hub believes about the fleet — liveness, each session's fill and model,
 // the pod listing, the memory headroom, each repo's docs — as the ONE place that polls for
 // any of it. A board read reports the last observation; no reading flips an agent down.
-// limits:  observations only; how a status word is chosen from liveness + phase stays in
-// agent.AgentStatus, what headroom means in agent.Headroom, the board in state.go.
+// limits:  observations only, plus driving statuswatch.sweep at its tail (-> statuswatch.go) — the
+// fold itself stays in agent.AgentStatus/PeekStatus and state.go.
 package hub
 
 import (
@@ -335,6 +335,10 @@ func (w *watchdog) sweep(withProbes bool) {
 		}(a, gone)
 	}
 	wg.Wait()
+	// Every beat, not just probing ones: absence is conclusive on every beat (above), so the derived
+	// word can change every beat too, and a diff-check any slower than that can miss a word that only
+	// ever held for one. Safe here and nowhere earlier: every record() this beat started has finished.
+	w.h.status.sweep()
 }
 
 // checkStuckLaunch bounds one agent's "launching" intent against reality, so a launch that will

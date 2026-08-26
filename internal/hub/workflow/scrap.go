@@ -47,7 +47,14 @@ func (e *Engine) DiscardPR(project, prID string) error {
 			_ = e.deps.Interrupt(project, author)
 		}
 		_ = e.deps.Deliver(project, author, MsgPRScrapped(prID), MailAndPush.From(api.SenderUser))
-		_ = ps.SetState(store.AgentState{Agent: author, Phase: "idle"})
+		// A container holder rests back onto its FEATURE, not fully idle: an interim/milestone PR
+		// being discarded does not mean the feature itself is done (sd-5ef393 — the same shape as
+		// finishTask's own fix).
+		next := store.AgentState{Agent: author, Phase: "idle"}
+		if st.Container != "" {
+			next = store.AgentState{Agent: author, Container: st.Container, Branch: st.Container, Phase: "idle"}
+		}
+		_ = ps.SetState(next, store.ReasonFreed, "PR discarded: "+prID)
 	}
 	_ = ps.Log(author, "pr-scrapped", prID)
 	e.deps.Notify()
@@ -78,7 +85,7 @@ func (e *Engine) ScrapPR(project, prID string) error {
 			_ = e.deps.Deliver(project, r.Author, MsgReviewCancelled(prID), MailAndPush)
 		}
 		_ = ps.RecordVerdict(r.ID, "cancelled", "PR scrapped with its task")
-		_ = ps.SetState(store.AgentState{Agent: r.Author, Phase: "idle"})
+		_ = ps.SetState(store.AgentState{Agent: r.Author, Phase: "idle"}, store.ReasonFreed, "review cancelled: "+prID+" scrapped with its task")
 		_ = ps.Log(r.Author, "review-cancelled", prID)
 	}
 

@@ -24,7 +24,7 @@ func splitTree(t *testing.T) (*Engine, *store.ProjectStore) {
 	if err := ps.UpsertTask(store.Task{ID: "sd-LEAF", Status: "in_progress", ParentID: "sd-FEAT", Priority: "P2"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "sd-LEAF", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "sd-LEAF", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	return e, ps
@@ -47,7 +47,7 @@ func TestAContainerIsNotOfferedWhileSomebodyIsInside(t *testing.T) {
 	}
 
 	// Once its holder lets go, the tree is free again — the guard is about occupancy, not the shape.
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	containers, err = ps.OpenContainers()
@@ -69,7 +69,7 @@ func TestAContainerIsNotOfferedWhileSomebodyIsInside(t *testing.T) {
 func TestASplitHierarchyHealsItself(t *testing.T) {
 	e, ps := splitTree(t)
 	// The split, as a reparenting leaves it: sudri holding the feature dvalin is inside.
-	if err := ps.SetState(store.AgentState{Agent: "sudri", Container: "sd-FEAT", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "sudri", Container: "sd-FEAT", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -94,7 +94,7 @@ func TestASplitHierarchyHealsItself(t *testing.T) {
 func TestHealingLeavesAnUndividedFeatureAlone(t *testing.T) {
 	e, ps := splitTree(t)
 	// dvalin holds BOTH the feature and the subtask under it — the normal feature flow.
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "sd-LEAF", Container: "sd-FEAT", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "sd-LEAF", Container: "sd-FEAT", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 

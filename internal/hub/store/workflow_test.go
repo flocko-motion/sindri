@@ -242,7 +242,7 @@ func TestAgentStateRoundTrip(t *testing.T) {
 	if err != nil || st.Phase != "idle" {
 		t.Fatalf("default state: %+v err=%v", st, err)
 	}
-	if err := p.SetState(AgentState{Agent: "brokkr", Task: "td-1", Branch: "td-1", Phase: "working"}); err != nil {
+	if err := p.SetState(AgentState{Agent: "brokkr", Task: "td-1", Branch: "td-1", Phase: "working"}, ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	st, _ = p.GetState("brokkr")
@@ -250,7 +250,7 @@ func TestAgentStateRoundTrip(t *testing.T) {
 		t.Fatalf("state not persisted: %+v", st)
 	}
 	// Back to idle clears phase.
-	p.SetState(AgentState{Agent: "brokkr", Phase: "idle"})
+	p.SetState(AgentState{Agent: "brokkr", Phase: "idle"}, ReasonClaimed, "test setup")
 	st, _ = p.GetState("brokkr")
 	if st.Phase != "idle" || st.Task != "" {
 		t.Fatalf("idle not applied: %+v", st)
@@ -272,7 +272,7 @@ func TestLastNudgeRoundTrip(t *testing.T) {
 		t.Fatalf("last_nudge not persisted: %+v", st)
 	}
 	// A phase change is not a claim — the memory must survive it.
-	if err := p.SetState(AgentState{Agent: "brokkr", Phase: "working"}); err != nil {
+	if err := p.SetState(AgentState{Agent: "brokkr", Phase: "working"}, ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	if st, _ = p.GetState("brokkr"); st.LastNudge != "td-1" {
@@ -326,7 +326,7 @@ func TestOpenLeavesExcludesHeldLeaf(t *testing.T) {
 	}
 
 	// Once a worker holds gh-7, it leaves the pool (no source status flip to rely on).
-	if err := p.SetState(AgentState{Agent: "eitri", Task: "gh-7", Branch: "gh-7", Phase: "working"}); err != nil {
+	if err := p.SetState(AgentState{Agent: "eitri", Task: "gh-7", Branch: "gh-7", Phase: "working"}, ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	if got := ids(mustLeaves(t, p)); !eq(got, []string{"td-p1"}) {
@@ -357,7 +357,7 @@ func TestOpenLeavesAndChildren(t *testing.T) {
 	}
 
 	// Holding P changes nothing for the leaf pool: its children were never in it.
-	if err := p.SetState(AgentState{Agent: "brokkr", Container: "P", Branch: "P", Task: "C1", Phase: "working"}); err != nil {
+	if err := p.SetState(AgentState{Agent: "brokkr", Container: "P", Branch: "P", Task: "C1", Phase: "working"}, ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	if got := ids(mustLeaves(t, p)); !eq(got, []string{"L"}) {
@@ -392,7 +392,7 @@ func TestOpenContainersAndGetTask(t *testing.T) {
 		t.Fatalf("OpenContainers: want [G P], got %v", got)
 	}
 	// Holding P removes it from the candidates.
-	if err := p.SetState(AgentState{Agent: "brokkr", Container: "P", Branch: "P", Task: "C1", Phase: "working"}); err != nil {
+	if err := p.SetState(AgentState{Agent: "brokkr", Container: "P", Branch: "P", Task: "C1", Phase: "working"}, ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	if got := ids(mustContainers(t, p)); !eq(got, []string{"G"}) {
@@ -439,7 +439,7 @@ func mustContainers(t *testing.T, p *ProjectStore) []Task {
 
 func TestAgentStateContainerRoundTrip(t *testing.T) {
 	p := openTmpProject(t)
-	if err := p.SetState(AgentState{Agent: "brokkr", Container: "P", Branch: "P", Task: "C1", Phase: "working"}); err != nil {
+	if err := p.SetState(AgentState{Agent: "brokkr", Container: "P", Branch: "P", Task: "C1", Phase: "working"}, ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	st, _ := p.GetState("brokkr")
@@ -450,10 +450,10 @@ func TestAgentStateContainerRoundTrip(t *testing.T) {
 
 func TestSetPhaseLeavesTaskBranchAndContainerAlone(t *testing.T) {
 	p := openTmpProject(t)
-	if err := p.SetState(AgentState{Agent: "brokkr", Container: "P", Branch: "P", Task: "C1", Phase: "working"}); err != nil {
+	if err := p.SetState(AgentState{Agent: "brokkr", Container: "P", Branch: "P", Task: "C1", Phase: "working"}, ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.SetPhase("brokkr", "resolving"); err != nil {
+	if err := p.SetPhase("brokkr", "resolving", ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	st, _ := p.GetState("brokkr")
@@ -464,7 +464,7 @@ func TestSetPhaseLeavesTaskBranchAndContainerAlone(t *testing.T) {
 
 func TestSetPhaseErrorsRatherThanNoOpOnAnUnknownAgent(t *testing.T) {
 	p := openTmpProject(t)
-	if err := p.SetPhase("nobody", "working"); err == nil {
+	if err := p.SetPhase("nobody", "working", ReasonClaimed, "test setup"); err == nil {
 		t.Fatal("SetPhase against an agent with no row must error, not silently do nothing")
 	}
 }

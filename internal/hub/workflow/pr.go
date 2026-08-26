@@ -244,7 +244,8 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 	}
 	// Parked BEFORE the gate opens: a commit that already passed lands its PR inside the next call,
 	// and a phase written after that would overwrite "submitted" with a wait that is already over.
-	if err := ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: branch, Container: st.Container, Phase: "gating"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: branch, Container: st.Container, Phase: "gating"},
+		store.ReasonAdvanced, "submit queued: "+sha); err != nil {
 		return 1, err
 	}
 	// Queued, not run here: several agents submitting at once must not mean several concurrent
@@ -253,7 +254,8 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 	if err != nil {
 		// The phase goes back: "gating" has no way out on its own — Stalled ignores it and every
 		// landing verb refuses it — so an agent parked on a gate that never opened is parked for good.
-		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: branch, Container: st.Container, Phase: "working"})
+		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: branch, Container: st.Container, Phase: "working"},
+			store.ReasonAdvanced, "submit gate could not be opened")
 		return 1, err
 	}
 	if reused {
@@ -330,7 +332,8 @@ func (e *Engine) CmdOpenspec(c registry.Caller, args []string, out io.Writer) (i
 	if err := ps.PutPR(pr); err != nil {
 		return 1, err
 	}
-	if err := ps.SetState(store.AgentState{Agent: c.Agent, Task: mockSpecTask, Branch: branch, Phase: "submitted"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: c.Agent, Task: mockSpecTask, Branch: branch, Phase: "submitted"},
+		store.ReasonAdvanced, "planner submitted: "+pr.ID); err != nil {
 		return 1, err
 	}
 	_ = ps.Log(c.Agent, "submit", pr.ID)
@@ -538,7 +541,8 @@ func (e *Engine) openMilestone(project, agent, msg string) (store.PR, error) {
 	if err := ps.PutPR(pr); err != nil {
 		return store.PR{}, err
 	}
-	if err := ps.SetState(store.AgentState{Agent: agent, Container: st.Container, Branch: st.Container, Task: st.Task, Phase: "submitted"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: agent, Container: st.Container, Branch: st.Container, Task: st.Task, Phase: "submitted"},
+		store.ReasonAdvanced, "milestone submitted: "+pr.ID); err != nil {
 		return store.PR{}, err
 	}
 	if existed {
@@ -560,7 +564,8 @@ func (e *Engine) resumeContainer(project, agent string) {
 	}
 	if st.Task != "" {
 		if t, ok, _ := ps.GetTask(st.Task); ok && (t.Status == "open" || t.Status == "in_progress") {
-			_ = ps.SetState(store.AgentState{Agent: agent, Container: st.Container, Branch: st.Container, Task: st.Task, Phase: "working"})
+			_ = ps.SetState(store.AgentState{Agent: agent, Container: st.Container, Branch: st.Container, Task: st.Task, Phase: "working"},
+				store.ReasonLanded, "milestone merged, resuming "+st.Task)
 			e.deps.Notify()
 			return
 		}
@@ -571,7 +576,8 @@ func (e *Engine) resumeContainer(project, agent string) {
 		return // leave the state as it is rather than parking it on a failure it can't see
 	}
 	if !ok {
-		_ = ps.SetState(store.AgentState{Agent: agent, Container: st.Container, Branch: st.Container, Phase: "idle"})
+		_ = ps.SetState(store.AgentState{Agent: agent, Container: st.Container, Branch: st.Container, Phase: "idle"},
+			store.ReasonLanded, "milestone merged, nothing left to claim under "+st.Container)
 		e.deps.Notify()
 	}
 }

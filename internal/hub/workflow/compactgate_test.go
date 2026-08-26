@@ -245,7 +245,7 @@ func TestBetweenSubtasksClaimsThenQueuesTheDirectiveBehindCompact(t *testing.T) 
 		t.Fatalf("set parent: %v", err)
 	}
 	// Between subtasks: the feature is held, but nothing is currently assigned within it.
-	if err := ps.SetState(store.AgentState{Agent: agent, Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: agent, Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
 

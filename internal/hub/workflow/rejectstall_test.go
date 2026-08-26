@@ -26,7 +26,7 @@ func TestARejectedWorkerIsStillCaughtByTheStallNudge(t *testing.T) {
 	if err := ps.PutPR(store.PR{ID: "pr-1", Task: "td-1", Agent: "bombur", Branch: "td-1", Base: "main", Status: "open"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "td-1", Branch: "td-1", Phase: "submitted"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "td-1", Branch: "td-1", Phase: "submitted"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	deps := &stubDeps{root: t.TempDir(), alive: true}

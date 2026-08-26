@@ -96,7 +96,7 @@ func TestCheckpointCarriesOnPastAParentAndClosesOneItCompletes(t *testing.T) {
 		t.Helper()
 		if err := ps.SetState(store.AgentState{
 			Agent: "dain", Container: "os-feat", Branch: "os-feat", Task: task, Phase: "working",
-		}); err != nil {
+		}, store.ReasonClaimed, "test setup"); err != nil {
 			t.Fatalf("hold %s: %v", task, err)
 		}
 	}

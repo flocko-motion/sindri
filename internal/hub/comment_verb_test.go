@@ -18,7 +18,7 @@ func TestWorkerCanCommentOnItsOwnTask(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: "td-1", Title: "a task", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	out, code := execAs(t, h, "dvalin", "comment", "td-1", "the body is stale, needs review")
@@ -48,7 +48,7 @@ func TestWorkerCanCommentOnItsHeldContainer(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: "td-feat", Title: "a feature", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Container: "td-feat", Branch: "td-feat", Task: "td-sub", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Container: "td-feat", Branch: "td-feat", Task: "td-sub", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	out, code := execAs(t, h, "dvalin", "comment", "td-feat", "worth flagging at the feature level")
@@ -72,7 +72,7 @@ func TestWorkerCommentsWithNoID(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: "td-1", Title: "a task", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	out, code := execAs(t, h, "dvalin", "comment", "the body is stale, needs review")
@@ -99,7 +99,7 @@ func TestBareCommentKeepsAWholeSentence(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: "td-1", Title: "a task", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	const body = "sd-1c3041 is the task this corrects"
@@ -130,7 +130,7 @@ func TestFeatureWorkerCanTellWhichTaskItCommentedOn(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Container: "td-feat", Task: "td-sub", Branch: "td-feat", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Container: "td-feat", Task: "td-sub", Branch: "td-feat", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -212,10 +212,10 @@ func TestCommentHelpAsksOnlyForWhatTheRoleSupplies(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "nabbi", Container: "td-feat", Task: "td-sub", Branch: "td-feat", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "nabbi", Container: "td-feat", Task: "td-sub", Branch: "td-feat", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -265,7 +265,7 @@ func TestWorkerCannotCommentOnAnotherTask(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	out, code := execAs(t, h, "dvalin", "comment", "td-2", "not mine to touch")
@@ -390,7 +390,7 @@ func TestCommentRefusesAnEmptyBody(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: "td-1", Title: "a task", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	out, code := execAs(t, h, "dvalin", "comment", "td-1")

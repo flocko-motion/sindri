@@ -37,12 +37,14 @@ func (e *Engine) CmdContribute(c registry.Caller, args []string, out io.Writer) 
 	if err != nil {
 		return 1, err
 	}
-	if err := ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "gating"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "gating"},
+		store.ReasonAdvanced, "contribute queued: "+sha); err != nil {
 		return 1, err
 	}
 	run, reused, err := e.gateRun(c.Project, c.Agent, gateContribute, msg, sha)
 	if err != nil {
-		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "working"})
+		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "working"},
+			store.ReasonAdvanced, "contribute gate could not be opened")
 		return 1, err // see CmdSubmit: "gating" is a park with no way out if no gate was opened
 	}
 	if reused {

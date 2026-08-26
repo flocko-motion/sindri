@@ -134,7 +134,8 @@ func (e *Engine) CmdResolve(c registry.Caller, _ []string, out io.Writer) (int, 
 		return 1, err // internal git failure — AgentExec sanitizes it for the agent
 	}
 	if !done {
-		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "resolving"})
+		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "resolving"},
+			store.ReasonAdvanced, "rebase conflicts: "+strings.Join(conflicts, ", "))
 		_ = ps.Log(c.Agent, "resolve", "conflicts: "+strings.Join(conflicts, ", "))
 		fmt.Fprintln(out, ReplyResolveConflicts(base, conflicts))
 		return 0, nil
@@ -171,7 +172,8 @@ func (e *Engine) CmdResolve(c registry.Caller, _ []string, out io.Writer) (int, 
 				_ = e.RequestReview(c.Project, pr.ID, "") // one review path; the hub preps the terrain
 			}
 		}
-		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "submitted"})
+		_ = ps.SetState(store.AgentState{Agent: c.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "submitted"},
+			store.ReasonAdvanced, "resolved clean onto "+base)
 		fmt.Fprintln(out, reply)
 		e.deps.Notify()
 		return 0, nil

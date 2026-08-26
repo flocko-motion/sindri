@@ -31,7 +31,7 @@ func idleWorkerWithOpenTask(t *testing.T, deps *stubDeps) (*Engine, *store.Proje
 	if err := ps.PutOwnedTask(store.OwnedTask{ID: "td-abc123", Title: "a task", Status: "open", Priority: "P2"}); err != nil {
 		t.Fatalf("seed task: %v", err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: agent, Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: agent, Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
 	return New(st, deps), ps
@@ -136,7 +136,7 @@ func TestFullnessGatesNewWorkOnly(t *testing.T) {
 	// Holding a task: the directive is the task's, not a retirement notice.
 	if err := ps.SetState(store.AgentState{
 		Agent: "dvalin", Task: "td-abc123", Branch: "td-abc123", Phase: "working",
-	}); err != nil {
+	}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	dir, err := e.AgentDirective(context.Background(), "repo", "dvalin")
@@ -156,7 +156,7 @@ func TestFullnessGatesNewWorkOnly(t *testing.T) {
 	}
 	if err := ps.SetState(store.AgentState{
 		Agent: "dvalin", Task: "td-abc123", Branch: "td-abc123", Phase: "submitted",
-	}); err != nil {
+	}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	dir, err = e.AgentDirective(context.Background(), "repo", "dvalin")

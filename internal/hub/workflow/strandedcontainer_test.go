@@ -40,7 +40,7 @@ func TestAStrandedContainerIsClaimedToFinishIt(t *testing.T) {
 	}
 	// Idle, holding nothing — an agent free to claim, the state after a prior holder finished the
 	// last checkpoint and moved on without ever submitting the branch.
-	if err := ps.SetState(store.AgentState{Agent: agent, Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: agent, Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
 

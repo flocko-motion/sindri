@@ -110,7 +110,7 @@ func TestAnEscalationSurvivesAPhaseChange(t *testing.T) {
 	if err := ps.SetEscalation("dvalin", q); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "sd-1", Branch: "sd-1", Phase: "submitted"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "sd-1", Branch: "sd-1", Phase: "submitted"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	st, err := ps.GetState("dvalin")

@@ -22,7 +22,7 @@ func TestARetiredAgentIsNotOfferedWork(t *testing.T) {
 	if err := ps.PutAgent(a); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "oin", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "oin", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 

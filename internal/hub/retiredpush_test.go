@@ -28,7 +28,7 @@ func loggedPushSuppressed(t *testing.T, h *Hub, agent string) bool {
 // holding mailAgent's own td-1 — a retired agent holding work is the opposite case (-> WakeRefusal).
 func TestRetiredAgentPushIsSuppressed(t *testing.T) {
 	h, ps := mailAgent(t)
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	a, _, err := ps.GetAgent("dvalin")
@@ -131,7 +131,7 @@ func TestUnretiringAnEscalatedAgentStillWaitsOnTheEscalation(t *testing.T) {
 // sit silent forever instead of seeing DirRetired even once.
 func TestKickoffReachesARetiredAgent(t *testing.T) {
 	h, ps := mailAgent(t)
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	a, _, err := ps.GetAgent("dvalin")

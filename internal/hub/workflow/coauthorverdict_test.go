@@ -34,7 +34,7 @@ func coauthorFixture(t *testing.T) (*Engine, *store.ProjectStore, *stubDeps) {
 			t.Fatal(err)
 		}
 	}
-	if err := ps.SetState(store.AgentState{Agent: "brokk", Phase: restPhase("coauthor")}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "brokk", Phase: restPhase("coauthor")}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	if err := ps.PutPR(store.PR{

@@ -18,7 +18,7 @@ func noteSender(t *testing.T, name string) (*Hub, *store.ProjectStore) {
 	if err := ps.PutAgent(store.Agent{Name: name, Role: "worker", Workspace: "ws"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: name, Task: "td-1", Branch: "td-1", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: name, Task: "td-1", Branch: "td-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	if err := ps.GrantNotes(name, workflow.NotesPerClaim); err != nil {
