@@ -11,6 +11,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/flo-at/sindri/internal/api"
@@ -118,16 +119,28 @@ func (p *ProjectStore) UnannouncedMail(agent string, cutoff time.Time) (unannoun
 	return unannounced, unread, nil
 }
 
-// MarkMailAnnounced records that the agent has been told about everything now waiting — one statement, so
-// marking cannot outrun what was announced and lose a message for ever.
+// MarkMailAnnounced records that the agent has been told about everything now waiting. The id
+// collection and the UPDATE share one transaction (sd-ca8929 round 3's own fix, applied here too):
+// otherwise a message read in the gap between them still gets logged as announced off the stale list,
+// though the UPDATE's own WHERE guard means marking itself can never outrun what was announced.
 func (p *ProjectStore) MarkMailAnnounced(agent string) error {
+	tx, err := p.s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("mark mail announced for %s: %w", agent, err)
+	}
+	defer tx.Rollback()
 	// Every UNREAD message, not just the ones flipping the flag: an announcement covers the mailbox
 	// as it stands, and re-announcing an already-flagged message is the whole point of repeating.
-	ids, _ := p.unreadIDs(agent)
-	_, err := p.s.db.Exec(
-		`UPDATE mail SET notified=1 WHERE project=? AND agent=? AND read_at='' AND notified=0`,
-		p.project, agent)
+	ids, err := p.unreadIDs(tx, agent)
 	if err != nil {
+		return fmt.Errorf("mark mail announced for %s: %w", agent, err)
+	}
+	if _, err := tx.Exec(
+		`UPDATE mail SET notified=1 WHERE project=? AND agent=? AND read_at='' AND notified=0`,
+		p.project, agent); err != nil {
+		return fmt.Errorf("mark mail announced for %s: %w", agent, err)
+	}
+	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("mark mail announced for %s: %w", agent, err)
 	}
 	for _, id := range ids {
@@ -137,8 +150,8 @@ func (p *ProjectStore) MarkMailAnnounced(agent string) error {
 }
 
 // unreadIDs are the messages an announcement covers — everything still waiting for this agent.
-func (p *ProjectStore) unreadIDs(agent string) ([]int64, error) {
-	rows, err := p.s.db.Query(
+func (p *ProjectStore) unreadIDs(db querier, agent string) ([]int64, error) {
+	rows, err := db.Query(
 		`SELECT id FROM mail WHERE project=? AND agent=? AND read_at=''`, p.project, agent)
 	if err != nil {
 		return nil, err
@@ -190,16 +203,61 @@ func (s *Store) UnreadMailByAgent() (map[string]map[string]int, error) {
 	return out, rows.Err()
 }
 
-// AllMail returns the newest limit messages across every project, newest first — the fleet view's
-// window, which therefore keeps the recent end. A non-positive limit returns everything.
+// AllMail returns every unread message across the fleet regardless of age, plus READ ones filling out
+// to limit — merged newest first. An unread message is by definition something nobody has handled, so
+// ageing it out of the board's window left a badge counting messages no list could ever show
+// (sd-ca8929); read mail already has an owner who dealt with it, so it is the part safe to bound. A
+// non-positive limit returns everything.
+//
+// The two queries share one transaction: with MaxOpenConns(1), a Tx holds the sole connection until
+// it commits, so a MarkMailRead landing between them cannot make one message answer to both.
 func (s *Store) AllMail(limit int) ([]Mail, error) {
-	q := mailCols + ` ORDER BY id DESC`
-	var args []any
-	if limit > 0 {
-		q += ` LIMIT ?`
-		args = append(args, limit)
+	if limit <= 0 {
+		return queryMail(s.db, mailCols+` ORDER BY id DESC`)
 	}
-	return queryMail(s.db, q, args...)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("all mail: %w", err)
+	}
+	defer tx.Rollback()
+	unread, err := queryMail(tx, mailCols+` WHERE read_at='' ORDER BY id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	// room==0 once unread alone reaches limit: read mail is unconditionally safe to bound, "just read"
+	// included, or the read half has no real ceiling (round 3's actual blocker).
+	room := max(0, limit-len(unread))
+	// read_at DESC outranks id DESC, so a message just read rides ahead of one read long ago
+	// regardless of its id, within room. Re-sorted by id after selection for the merge's own order.
+	read, err := queryMail(tx, mailCols+` WHERE read_at<>'' ORDER BY read_at DESC, id DESC LIMIT ?`, room)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("all mail: %w", err)
+	}
+	sort.Slice(read, func(i, j int) bool { return read[i].ID > read[j].ID })
+	return mergeMailDesc(unread, read), nil
+}
+
+// mergeMailDesc merges two id-descending slices into one, so the result stays newest-first rather
+// than every unread message sorting ahead of a newer read one. Callers must sort each side by id
+// first — AllMail's read half is selected by read_at, not id, so it needs an explicit re-sort.
+func mergeMailDesc(a, b []Mail) []Mail {
+	out := make([]Mail, 0, len(a)+len(b))
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		if a[i].ID >= b[j].ID {
+			out = append(out, a[i])
+			i++
+		} else {
+			out = append(out, b[j])
+			j++
+		}
+	}
+	out = append(out, a[i:]...)
+	out = append(out, b[j:]...)
+	return out
 }
 
 // MailTallies is every board number in ONE PASS over the whole table — rebuilt per notify per client.
@@ -247,7 +305,13 @@ func (s *Store) MailByID(id int64) (Mail, bool, error) {
 	return m, true, nil
 }
 
-func queryMail(db *sql.DB, q string, args ...any) ([]Mail, error) {
+// querier is *sql.DB or *sql.Tx — AllMail and MarkMailAnnounced each run reads inside a transaction
+// where a later statement depends on an earlier one staying true.
+type querier interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+}
+
+func queryMail(db querier, q string, args ...any) ([]Mail, error) {
 	rows, err := db.Query(q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("mail: %w", err)

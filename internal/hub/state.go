@@ -174,17 +174,19 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	return withSections(board), nil
 }
 
-// MailWindow is how many messages the board carries. The mailbox is never pruned, so what needs
-// bounding is the RENDER: the counts beside this window are of the whole mailbox, so a view can say
-// what it is not showing, and older mail is reached one message at a time (-> MailBody).
+// MailWindow bounds how many READ messages the board carries — the mailbox is never pruned, so what
+// needs bounding is the render. Every unread message rides along regardless of age (-> AllMail):
+// read mail already has an owner who dealt with it, so it is the part safe to let age out of view,
+// and the fleet's older read mail is still reached one message at a time (-> MailBody).
 const MailWindow = 200
 
 // mailPreview is how much of a body the window carries: a rejection arrives with its whole findings,
 // so a row carries an opening and says it was cut rather than putting hundreds of lines on the board.
 const mailPreview = 240
 
-// mailWindow reads the newest mail for the board, each body cut to a preview, plus the tallies of the
-// WHOLE mailbox: the total, the unread count, and unread per repo for a repo-scoped view.
+// mailWindow reads the board's mail — every unread message plus the newest read ones filling out to
+// MailWindow (-> AllMail) — each body cut to a preview, plus the tallies of the WHOLE mailbox: the
+// total, the unread count, and unread per repo for a repo-scoped view.
 func (h *Hub) mailWindow() (window []AgentMail, total, unread, userUnread int, unreadByRepo map[string]int, err error) {
 	if window, err = h.store.AllMail(MailWindow); err != nil {
 		return nil, 0, 0, 0, nil, err

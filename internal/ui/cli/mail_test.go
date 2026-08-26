@@ -40,14 +40,14 @@ func TestMailLineSaysWhoWhenAndWhetherRead(t *testing.T) {
 func TestTheMailFooterSaysWhatItIsNotShowing(t *testing.T) {
 	st := mailBoard()
 	got := mailFooter(st, st.Mail, api.MailAll, "")
-	for _, want := range []string{"Showing the last 2 of 500", "120 unread", "mail show"} {
+	for _, want := range []string{"Showing 2 of 500", "every unread one included", "120 unread", "mail show"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the footer should say %q: %s", want, got)
 		}
 	}
 	// With the whole mailbox in hand there is nothing to disclose, and it says so plainly instead.
 	st.MailTotal = 2
-	if got := mailFooter(st, st.Mail, api.MailAll, ""); strings.Contains(got, "Showing the last") {
+	if got := mailFooter(st, st.Mail, api.MailAll, ""); strings.Contains(got, "Showing") {
 		t.Errorf("nothing is being withheld here: %s", got)
 	}
 	// A narrowing is named, so a short list never reads as an empty mailbox.

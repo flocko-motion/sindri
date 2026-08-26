@@ -143,11 +143,11 @@ func (m model) mailRows() []row {
 		}
 	}
 	rows := m.listingHeaded(mailTable, toUser, rest, api.MailToUserHeading(len(toUser)), api.MailLogHeading)
-	// The window is not the history: a list that stopped at its rows would present the recent end as
-	// everything, and finding last month's message is the whole reason nothing is deleted. Outside the
-	// labelled rows, since it is a note about the listing rather than a message in it.
+	// The window is not the history: every unread message rides along regardless of age (-> AllMail),
+	// so what it drops is always already read — and finding last month's message is the whole reason
+	// nothing is deleted. Outside the labelled rows, since it is a note about the listing, not a message.
 	if n, total := len(m.state.Mail), m.state.MailTotal; total > n {
-		rows = append(rows, row{dimStyle.Render(fmt.Sprintf("… showing the last %d of %d messages — older mail: `sindri mail show ml-<n>`", n, total)), ""})
+		rows = append(rows, row{dimStyle.Render(fmt.Sprintf("… showing %d of %d messages, every unread one included — older read mail: `sindri mail show ml-<n>`", n, total)), ""})
 	}
 	return rows
 }
@@ -165,7 +165,7 @@ func oneLineText(s string) string {
 func (m model) selMail() (api.Mail, bool) {
 	id, err := api.ParseMailID(m.selID())
 	if err != nil {
-		return api.Mail{}, false // the "showing the last N of M" row, which is not a message
+		return api.Mail{}, false // the "N of M" note row, which is not a message
 	}
 	for _, msg := range m.state.Mail {
 		if msg.ID == id {

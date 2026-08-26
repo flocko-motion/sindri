@@ -120,7 +120,8 @@ func mailLine(m api.Mail) string {
 
 // mailFooter says what the listing is NOT showing. The board carries a window of a mailbox that is
 // never pruned, so a bare list of rows would quietly present the recent end as the whole history —
-// and the point of keeping everything is being able to find last month's message.
+// and the point of keeping everything is being able to find last month's message. Every unread
+// message rides in the window regardless of age (-> hub.AllMail), so what it drops is always read.
 func mailFooter(st api.BoardState, shown []api.Mail, f api.MailFilter, agent string) string {
 	if st.MailTotal == 0 {
 		return "no mail yet — a message an agent must read is kept here, and reading it only marks it read"
@@ -131,8 +132,8 @@ func mailFooter(st api.BoardState, shown []api.Mail, f api.MailFilter, agent str
 	}
 	tail := ""
 	if len(st.Mail) < st.MailTotal {
-		tail = fmt.Sprintf(" Showing the last %d of %d messages; older mail is reachable by id "+
-			"(`sindri mail show ml-<n>`).", len(st.Mail), st.MailTotal)
+		tail = fmt.Sprintf(" Showing %d of %d messages, every unread one included; older read mail is "+
+			"reachable by id (`sindri mail show ml-<n>`).", len(st.Mail), st.MailTotal)
 	}
 	// The user's own unread is named separately, and fleet-wide: it is the number that asks something
 	// of them, where the mailbox total merely says how much traffic there has been.
