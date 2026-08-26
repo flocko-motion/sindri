@@ -70,11 +70,11 @@ func TestGlobalReviewerFollowsAReviewPastAssignment(t *testing.T) {
 	if !stamped {
 		t.Error("no recorded pass verdict from ori found on pr-1's review row")
 	}
-	if len(deps.cleared) != 1 || deps.cleared[0] != "ori" {
-		t.Errorf("cleared = %v, want exactly one FireClear(ori) — on ori's own project, not pr-1's", deps.cleared)
-	}
-	if len(deps.clearedInterrupt) != 1 || deps.clearedInterrupt[0] {
-		t.Errorf("clearedInterrupt = %v, want false — this runs inside ori's own request", deps.clearedInterrupt)
+	// No clear. Clearing is PREPARATION and belongs to the next hand-over (-> claimReview's
+	// compactIfDue): fired here it lands in the reviewer's own running turn — the one that called
+	// approve — where a queued /clear discards the kickoff queued behind it and leaves it idle.
+	if len(deps.cleared) != 0 {
+		t.Errorf("cleared = %v, want none — a session is prepared for what it is about to do", deps.cleared)
 	}
 }
 
@@ -96,8 +96,8 @@ func TestGlobalReviewerCanRejectAcrossProjects(t *testing.T) {
 	if pr.Status != "rejected" {
 		t.Errorf("pr-1 status = %q, want rejected", pr.Status)
 	}
-	if len(deps.cleared) != 1 || deps.cleared[0] != "ori" {
-		t.Errorf("cleared = %v, want exactly one FireClear(ori)", deps.cleared)
+	if len(deps.cleared) != 0 {
+		t.Errorf("cleared = %v, want none — a verdict is not a reason to reset a session", deps.cleared)
 	}
 }
 
@@ -308,5 +308,26 @@ func TestAnUnknownTaskIsAnsweredNotEscalated(t *testing.T) {
 	// which reads as the task having been deleted.
 	if !strings.Contains(out.String(), "pooled reviewer") {
 		t.Errorf("the answer should explain why the id is out of reach, got %q", out.String())
+	}
+}
+
+// TestLintOnAnUnreachablePRIsAnsweredNotEscalated: `sindri lint <pr-id>` for a PR the caller cannot
+// reach is an ANSWER. Returned as an error it reaches AgentExec as a hub failure, which
+// auto-escalates — balin was stopped for naming pr-sd-19130a, a PR in another project. approve,
+// reject and show all learned this; lint was the one verb left behind.
+func TestLintOnAnUnreachablePRIsAnsweredNotEscalated(t *testing.T) {
+	st, _, c := foreignPRFixture(t)
+	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
+
+	var out bytes.Buffer
+	code, err := e.CmdLint(c, []string{"pr-9"}, &out)
+	if err != nil {
+		t.Fatalf("an unreachable PR came back as a hub fault, which escalates the caller: %v", err)
+	}
+	if code == 0 {
+		t.Error("an unreachable PR is still a refusal, so the code must be non-zero")
+	}
+	if !strings.Contains(out.String(), "No PR pr-9") {
+		t.Errorf("the caller must be told the id is out of its reach, got %q", out.String())
 	}
 }

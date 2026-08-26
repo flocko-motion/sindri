@@ -11,26 +11,27 @@ import (
 // argument internal/arch/context_test.go makes for its own allowlist.
 //
 // Left out on purpose: keys onkey.go dispatches through a display-only compound row rather than a
-// literal single key match — tab/shift+tab/[/] ("⇥/[]"), ctrl+h/ctrl+l ("C-h/C-l"), ctrl+d/ctrl+u
+// literal single key match — tab/shift+tab ("⇥/⇧⇥"), ctrl+h/ctrl+l ("C-h/C-l"), ctrl+d/ctrl+u
 // ("C-d/C-u"), and the digit tab-jumps ("1-N") — plus "down"/"up", bare aliases of j/k already
 // covered by them. Also left out: keys onKey reaches only through a focused cross-reference item
 // (view/mail/resume/path/url/mailbody under "enter"'s rightFocus branch) — those describe the
 // item in the pane, not a fixed per-tab meaning, and already have their own hint line
-// (contextFooter's rightFocus case).
+// (contextFooter's rightFocus case). `]`/`[` are dispatched everywhere (moveToNeedingUser decides
+// per tab whether they do anything) but listed only on the four tabs that advertise them.
 var dispatchedKeys = map[int][]string{
-	-1: {keyHelp, keyQuit, "y", "Y", "j", "k", "J", "K", "g", "G",
+	-1: {keyHelp, keyQuit, "y", "Y", "j", "k", "g", "G",
 		keyClearFilters, keyDetail, keyRefresh, keyRepo, keyConfig},
 	0: {keyFilter, keySearch, "h", "l", keyAttach, keyNew, keyEdit, keyComment, keyBrief,
 		keyOptions, keyDelete, keyPriority, keyUnassign, keyWhyNext, keyClose, keyReject,
-		keyApprove, keyEnter},
+		keyApprove, keyEnter, "]", "["},
 	1: {keyNew, keyTell, keyComment, keyAttach, keyEdit, keyOpen, keyStartS, keyOptions, keyStats,
-		keyBrief, keyReject, keyRetire, keyClose, keyDelete, keyScopeTog, keyMerge, keyEnter},
+		keyBrief, keyReject, keyRetire, keyClose, keyDelete, keyScopeTog, keyMerge, keyEnter, "]", "["},
 	2: {keyVerify, keyEdit, keyOpen, keyAttach, keyTell, keyLint, keyApprove, keyReject, keyReview,
-		keyMerge, keyDelete, keyFilter, keyScopeTog, keyWhyNext, keyEnter},
+		keyMerge, keyDelete, keyFilter, keyScopeTog, keyWhyNext, keyEnter, "]", "["},
 	3: {keyDelete, keyColor, keyEnter},
 	4: {keyNew, keyClose, keyReject, keyApprove, keyEnter},
 	5: {keyNew, keyPriority, keyDelete, keyFilter, keyScopeTog, keyEnter},
-	6: {keyMailWho, keyComment, keyAttach, keyFilter, keyScopeTog, keyEnter},
+	6: {keyMailWho, keyComment, keyAttach, keyFilter, keyScopeTog, keyEnter, "]", "["},
 }
 
 // keymapHas reports whether some binding in scope or scopeGlobal dispatches on key k — the same

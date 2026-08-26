@@ -28,8 +28,6 @@ func sleepFixture(t *testing.T) (*Service, *fakeRuntime) {
 		container.UseDefault()
 		agentport.Use(unreadablePane{})
 	})
-	forgetObservations()
-	t.Cleanup(forgetObservations)
 	return s, f
 }
 

@@ -89,10 +89,17 @@ func TestEveryDetailPaneIsActionable(t *testing.T) {
 				t.Fatalf("tab %d (%s) offers a detail pane but nothing in it is focusable", tab, tuiSections[tab].Title)
 			}
 
-			// Focus: ctrl+l reaches the pane whenever it has something to focus.
+			// Focus: ctrl+l steps to the pane's raw content first, then (a second press) to its
+			// actionable items — the stop every tab visits before items, so a tab whose items live in
+			// a SEPARATE pane from its scrollable content (PRs: prMeta vs. the diff) still lets plain
+			// j/k reach the content pane directly (sd-57e895).
 			m.onKey("ctrl+l")
-			if !m.rightFocus {
-				t.Fatal("ctrl+l did not focus a detail pane with actionable items")
+			if m.focus != focusDetail {
+				t.Fatal("ctrl+l did not focus the detail pane's raw content")
+			}
+			m.onKey("ctrl+l")
+			if m.focus != focusItems {
+				t.Fatal("a second ctrl+l did not focus the detail pane's actionable items")
 			}
 
 			// Movement: j walks the cursor forward without ever leaving the actionable set.
@@ -128,7 +135,7 @@ func TestEveryDetailPaneIsActionable(t *testing.T) {
 				switch item.kind {
 				case "task", "agent", "pr":
 					jumped := detailPaneModel(tab)
-					jumped.rightFocus, jumped.rightCursor = true, idx
+					jumped.focus, jumped.rightCursor = focusItems, idx
 					jumped.onKey("g")
 					if got := jumped.selID(); got != item.value {
 						t.Errorf("g on %s %q should land selecting it, got %q on tab %d",
@@ -136,14 +143,14 @@ func TestEveryDetailPaneIsActionable(t *testing.T) {
 					}
 
 					peeked := detailPaneModel(tab)
-					peeked.rightFocus, peeked.rightCursor = true, idx
+					peeked.focus, peeked.rightCursor = focusItems, idx
 					peeked.onKey("enter")
 					if !peeked.modal {
 						t.Errorf("enter on %s %q should open its details modal", item.kind, item.value)
 					}
 				case "mail":
 					jumped := detailPaneModel(tab)
-					jumped.rightFocus, jumped.rightCursor = true, idx
+					jumped.focus, jumped.rightCursor = focusItems, idx
 					jumped.onKey("enter")
 					if jumped.tab != 6 {
 						t.Errorf("enter on a mail item should land on the Mail tab, got tab %d", jumped.tab)
@@ -152,7 +159,7 @@ func TestEveryDetailPaneIsActionable(t *testing.T) {
 					// Already fully shown in the pane, so enter has nothing to add — only y copies
 					// it, which the walk-then-yank block above already exercises.
 					peeked := detailPaneModel(tab)
-					peeked.rightFocus, peeked.rightCursor = true, idx
+					peeked.focus, peeked.rightCursor = focusItems, idx
 					peeked.onKey("enter")
 					if peeked.modal {
 						t.Errorf("enter on the mail body should not open a modal — it is already fully shown")

@@ -75,10 +75,10 @@ func (e *Engine) NudgeStalled(project, name, runtime string, idleFor time.Durati
 	if !e.deps.AgentUp(project, name) { // the watchdog's reading: this runs on the stall tick
 		return false
 	}
-	// A cut-off turn is answered on its own terms: it is not idling and has nothing to explain, it
-	// simply stopped mid-sentence. Sent whatever it holds, since the retry is about the turn.
+	// Regardless: finishing a turn already in flight is not new work, so it must reach the agent
+	// whatever else is true of it — parked or not (-> parkedByTheHub's own exception, below).
 	if runtime == "api-error" {
-		if err := e.deps.Deliver(project, name, MsgRetryTurn, PushOnly); err != nil {
+		if err := e.deps.Deliver(project, name, MsgRetryTurn, PushOnly.Regardless()); err != nil {
 			return false
 		}
 		_ = ps.Log(name, "nudge", "api error cut the turn off — asked it to resume")
@@ -87,6 +87,11 @@ func (e *Engine) NudgeStalled(project, name, runtime string, idleFor time.Durati
 	// Past the api-error retry, not before it: a parked agent is idle BY INSTRUCTION, so prodding it
 	// complains about the state the hub put it in. A cut-off turn still deserves resuming.
 	if e.parkedByTheHub(project, name) {
+		return false
+	}
+	// Asked directly and quietly: Deliver's own gate would log "push-suppressed" on every stall tick,
+	// and an already-declined nudge is not the caller mistake that log exists to catch.
+	if e.WakeRefusal(project, name) != "" {
 		return false
 	}
 	// The subtask if it is on one, else the feature it holds — a worker between subtasks still has

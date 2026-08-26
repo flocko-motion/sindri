@@ -9,6 +9,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -164,6 +165,13 @@ func gateReusedReport(sha string, passed bool, out string) string {
 func (e *Engine) CmdLint(c registry.Caller, args []string, out io.Writer) (int, error) {
 	if len(args) > 0 {
 		res, err := e.lintPR(e.callerPRProject(c, args[0]), args[0], c.Agent)
+		// An id this caller cannot reach is an ANSWER: reported as an error it reaches AgentExec as a
+		// hub failure, which auto-escalates. balin was stopped for naming a PR outside the project its
+		// review put it in — the sibling verbs learned this and lint was missed (-> ErrNoSuchPR).
+		if errors.Is(err, ErrNoSuchPR) {
+			fmt.Fprintln(out, ReplyNoSuchPR(args[0]))
+			return 1, nil
+		}
 		if err != nil {
 			return 1, err
 		}
@@ -496,6 +504,15 @@ func (e *Engine) landSubmit(project string, ps *store.ProjectStore, r api.Run) e
 	}
 	_ = ps.Log(r.Agent, "submit", pr.ID)
 	msg := e.gateCommitMessage(ps, st, r.Message)
+	// The answers go on the TASK THREAD, in the author's own name — where the reviewer's brief already
+	// sends it ("read the task first … and the comments on it"), so this needs no new surface and no
+	// new instruction. It is also what keeps the answers worth writing: they are read, and a defect in
+	// a place the author said it swept is a sharper finding than any rejection count.
+	if answers, aerr := ps.SubmitAnswers(r.Agent, r.Commit); aerr == nil {
+		for _, comment := range submitAnswerComments(answers, r.Agent) {
+			_ = e.deps.AddTaskComment(project, target, r.Agent, comment)
+		}
+	}
 	if existed {
 		_ = ps.LogPR(pr.ID, "resubmitted", "by "+r.Agent+": "+msg)
 	} else {
@@ -535,7 +552,8 @@ func (e *Engine) escalateNoGate(project string, ps *store.ProjectStore, r api.Ru
 	}
 	_ = ps.Log(r.Agent, "gate-unconfigured", gateTarget(mustState(ps, r.Agent)))
 	e.deps.Notify()
-	return e.deps.Deliver(project, r.Agent, MsgNoGateEscalated(repo.MsgNoGate), MailAndPush)
+	// Regardless: this push explains the very escalation that would otherwise gate it.
+	return e.deps.Deliver(project, r.Agent, MsgNoGateEscalated(repo.MsgNoGate), MailAndPush.Regardless())
 }
 
 // mustState reads a state row where its absence is not actionable: the caller is only reporting.

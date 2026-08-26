@@ -105,13 +105,8 @@ func TestTheRefusalSaysHowFarBehindAndWhatToRun(t *testing.T) {
 func TestACurrentBranchStillSubmits(t *testing.T) {
 	e, ps, _, c := submitEngine(t)
 
-	var out bytes.Buffer
-	code, err := e.CmdSubmit(c, []string{"my work"}, &out)
-	if err != nil {
-		t.Fatalf("CmdSubmit: %v", err)
-	}
-	if code != 0 {
-		t.Fatalf("a current branch should submit, got exit %d:\n%s", code, out.String())
+	if code, out := submitAll(t, e, c, "my work"); code != 0 {
+		t.Fatalf("a current branch should submit, got exit %d:\n%s", code, out)
 	}
 	runQueuedGate(t, e)
 	pr, exists, _ := ps.GetPR("pr-sd-1")
@@ -141,13 +136,8 @@ func TestSubmittingAfterRebasingWorks(t *testing.T) {
 	if _, err := e.CmdRebase(c, nil, &rb); err != nil {
 		t.Fatalf("rebase: %v (%s)", err, rb.String())
 	}
-	var out bytes.Buffer
-	code, err := e.CmdSubmit(c, nil, &out)
-	if err != nil {
-		t.Fatalf("submit after rebase: %v", err)
-	}
-	if code != 0 {
-		t.Fatalf("submit after rebase should succeed, got exit %d:\n%s", code, out.String())
+	if code, out := submitAll(t, e, c, "my work"); code != 0 {
+		t.Fatalf("submit after rebase should succeed, got exit %d:\n%s", code, out)
 	}
 	runQueuedGate(t, e)
 	if _, exists, _ := ps.GetPR("pr-sd-1"); !exists {
@@ -185,11 +175,14 @@ func revParseIn(t *testing.T, dir, ref string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// TestAnEmptyBranchIsNotSubmitted: a branch matching its base has nothing to gate, review or merge.
-// The planner's submit has always refused this; a worker's did not, so sudri — whose work had landed
-// on the reference branch by other means — put an empty PR up, was rejected, and put it up AGAIN,
-// because a live PR is the one thing that stops a task closing (-> ReplyPRStillToLand).
-func TestAnEmptyBranchIsNotSubmitted(t *testing.T) {
+// TestAnEmptyBranchIsAskedToJustifyItself: a branch matching its base is ALLOWED — a container whose
+// subtasks landed elsewhere is finished with nothing of its own to carry, which is dvalin's epic.
+// Refusing it left the author no exit, since a live PR is the one thing that stops a task closing
+// (-> ReplyPRStillToLand), and sudri resubmitted the same empty diff looking for one.
+//
+// So it is a question rather than a refusal, and the question is the one an empty diff actually
+// raises: make the case that the work is done.
+func TestAnEmptyBranchIsAskedToJustifyItself(t *testing.T) {
 	e, _, root, caller := submitEngine(t)
 	// Rewind the worker to the base: the shape a rebase leaves when the reference already carries
 	// everything the branch was for.
@@ -197,19 +190,42 @@ func TestAnEmptyBranchIsNotSubmitted(t *testing.T) {
 	run(t, wt, "reset", "--hard", "main")
 
 	var out bytes.Buffer
-	code, err := e.CmdSubmit(caller, []string{"nothing here"}, &out)
-	if err != nil {
+	if _, err := e.CmdSubmit(caller, []string{"nothing here"}, &out); err != nil {
 		t.Fatalf("CmdSubmit: %v", err)
 	}
-	if code == 0 {
-		t.Fatalf("an empty branch was submitted; said %q", out.String())
+	if !strings.Contains(out.String(), "changes nothing against its base") {
+		t.Errorf("an empty branch should be asked to justify itself, got %q", out.String())
 	}
-	if !strings.Contains(out.String(), "Nothing to submit") {
-		t.Errorf("the refusal should say there is no diff, got %q", out.String())
+	// Answered, it goes through: the author's case is on the record for the reviewer to weigh.
+	if code, sout := submitAll(t, e, caller, "nothing here"); code != 0 {
+		t.Fatalf("an answered empty submit should land, got %d: %s", code, sout)
 	}
-	// The way out matters as much as the refusal: both obvious moves are shut, so naming escalate is
-	// what stops the resubmit loop sudri fell into.
-	if !strings.Contains(out.String(), "escalate") {
-		t.Errorf("the refusal must name an exit, got %q", out.String())
+}
+
+// submitAll drives CmdSubmit through its questions the way an agent does: the summary, then an
+// answer per question, each arriving as its own `submit` call. Returns the final call's code and
+// output — the one that either lands the submission or refuses it.
+//
+// A test that wants to see a QUESTION calls CmdSubmit directly; this is for the tests whose subject
+// is what happens after the submit is taken.
+func submitAll(t *testing.T, e *Engine, c registry.Caller, summary string) (int, string) {
+	t.Helper()
+	const answer = "I swept the call sites this touches and each one is covered by a test that fails without it."
+	text := summary
+	for i := 0; i < 6; i++ { // a bound, so a flow that never settles fails loudly rather than hanging
+		var out bytes.Buffer
+		code, err := e.CmdSubmit(c, []string{text}, &out)
+		if err != nil {
+			t.Fatalf("CmdSubmit: %v", err)
+		}
+		// Both shapes mean the questionnaire is still running: a question put, or one put again
+		// because the last answer was too short to be one.
+		if !strings.Contains(out.String(), "Before this submit is taken") &&
+			!strings.Contains(out.String(), "too short") {
+			return code, out.String()
+		}
+		text = answer
 	}
+	t.Fatal("the submit questions never finished")
+	return 0, ""
 }

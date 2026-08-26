@@ -87,11 +87,14 @@ func runStatusLabel(r api.Run) string {
 	return r.Status
 }
 
-// runListTable is the columns `sindri run list` prints, its header and its rows alike.
+// runListTable is the columns `sindri run list` prints, its header and its rows alike. took's
+// Width 6 fits every capped run; a run left "running" by a hub that went away can overflow it —
+// unclipped on purpose, since a wide row beats a truncated duration.
 var runListTable = table.Table{
 	{Label: "run", Width: 14},
 	{Label: "status", Width: 12},
 	{Label: "age", Width: 4, Right: true},
+	{Label: "took", Width: 6, Right: true},
 	{Label: "queued by", Width: 10},
 	{Label: "command"},
 }
@@ -120,6 +123,7 @@ func runListCmd() *cobra.Command {
 						table.Cell{Text: r.ID},
 						table.Cell{Text: runStatusLabel(r)},
 						table.Cell{Text: shortAge(r.CreatedAt)},
+						table.Cell{Text: api.RunTook(r)},
 						table.Cell{Text: runRequester(r)},
 						table.Cell{Text: r.Command},
 					))
@@ -148,6 +152,29 @@ func runListCmd() *cobra.Command {
 	return c
 }
 
+// runInfoLines is `run info`'s body, pulled out of RunE so it can be checked without a backend to
+// dial — the same reason runRequester and runStatusLabel are their own functions.
+func runInfoLines(r api.Run) []string {
+	lines := []string{
+		fmt.Sprintf("%s  [%s]  by %s", r.ID, runStatusLabel(r), r.Agent),
+		"command: " + r.Command,
+	}
+	if r.Priority != "" {
+		lines = append(lines, "priority: "+r.Priority)
+	}
+	lines = append(lines, "created: "+r.CreatedAt)
+	if r.StartedAt != "" {
+		lines = append(lines, "started: "+r.StartedAt)
+	}
+	if r.FinishedAt != "" {
+		lines = append(lines, "finished: "+r.FinishedAt)
+	}
+	if took := api.RunTook(r); took != "" {
+		lines = append(lines, "took: "+took)
+	}
+	return lines
+}
+
 func runInfoCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "info <run-id>", Short: "Show a run's status, agent, command and timing", Args: cobra.ExactArgs(1),
@@ -157,17 +184,8 @@ func runInfoCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				r := d.Run
-				fmt.Printf("%s  [%s]  by %s\ncommand: %s\n", r.ID, runStatusLabel(r), r.Agent, r.Command)
-				if r.Priority != "" {
-					fmt.Printf("priority: %s\n", r.Priority)
-				}
-				fmt.Printf("created: %s\n", r.CreatedAt)
-				if r.StartedAt != "" {
-					fmt.Printf("started: %s\n", r.StartedAt)
-				}
-				if r.FinishedAt != "" {
-					fmt.Printf("finished: %s\n", r.FinishedAt)
+				for _, l := range runInfoLines(d.Run) {
+					fmt.Println(l)
 				}
 				return nil
 			})

@@ -283,23 +283,29 @@ func (m model) agentsBody() string {
 	if !m.showDetail() { // § hid the right column — left split takes the full width
 		return leftCol
 	}
-	// Right column from metaItems, word-wrapped like the PRs tab so a long task title or
-	// activity payload reads in full rather than losing its tail to an ellipsis. Highlight
-	// the focused actionable item.
-	items := wrapMeta(m.agentItems(), rightW)
-	lines := make([]string, len(items))
+	lines, hl := m.agentMetaLines(rightW)
+	right := pane(lines, m.detail, rightW, hl)
+	return lipgloss.JoinHorizontal(lipgloss.Top, leftCol, divider(h), right)
+}
+
+// agentMetaLines is the right column's wrapped text and the focused item's line, or -1 — same
+// shape as prMetaLines, so focusedDetailLine can read either the same way.
+func (m model) agentMetaLines(width int) (lines []string, hl int) {
+	// Word-wrapped like the PRs tab so a long task title or activity payload reads in full
+	// rather than losing its tail to an ellipsis.
+	items := wrapMeta(m.agentItems(), width)
+	lines = make([]string, len(items))
 	hl, ai := -1, 0
 	for i, it := range items {
 		lines[i] = it.text
 		if it.kind != "" {
-			if m.rightFocus && ai == m.rightCursor {
+			if m.focus == focusItems && ai == m.rightCursor {
 				hl = i
 			}
 			ai++
 		}
 	}
-	right := pane(lines, m.detail, rightW, hl)
-	return lipgloss.JoinHorizontal(lipgloss.Top, leftCol, divider(h), right)
+	return lines, hl
 }
 
 // agentItems is the selected agent's fields plus activity log; task/PR are cross-references and

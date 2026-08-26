@@ -38,8 +38,8 @@ func TestGatePassedSendsNoMessage(t *testing.T) {
 	deps := &stubDeps{root: root}
 	e := New(st, deps)
 	c := registry.Caller{Project: "repo", Agent: agent, Role: "worker", Phase: "working"}
-	if code, err := e.CmdSubmit(c, []string{"fix"}, io.Discard); err != nil || code != 0 {
-		t.Fatalf("CmdSubmit: code=%d err=%v", code, err)
+	if code, out := submitAll(t, e, c, "fix"); code != 0 {
+		t.Fatalf("submit: code=%d out=%s", code, out)
 	}
 	runQueuedGate(t, e)
 	if _, ok, _ := ps.GetPR("pr-" + task); !ok {
@@ -78,8 +78,8 @@ func TestPlainMergeSendsNoMessage(t *testing.T) {
 	deps := &stubDeps{root: root}
 	e := New(st, deps)
 	c := registry.Caller{Project: "repo", Agent: agent, Role: "worker", Phase: "working"}
-	if code, err := e.CmdSubmit(c, []string{"fix"}, io.Discard); err != nil || code != 0 {
-		t.Fatalf("CmdSubmit: code=%d err=%v", code, err)
+	if code, out := submitAll(t, e, c, "fix"); code != 0 {
+		t.Fatalf("submit: code=%d out=%s", code, out)
 	}
 	runQueuedGate(t, e)
 	pr, _, _ := ps.GetPR("pr-" + task)
@@ -139,17 +139,25 @@ func TestMilestoneAndInterimMergesArePushOnly(t *testing.T) {
 	})
 }
 
-// TestVerdictClearsTheReviewer: a verdict is the reviewer's own leaf boundary, and its session must
-// carry nothing from this review into the next — so approving fires a clear rather than leaving a
-// mailbox entry behind.
-func TestVerdictClearsTheReviewer(t *testing.T) {
+// TestAVerdictWakesWithoutClearing: a verdict frees the reviewer and tells it to carry on, and it
+// leaves the session alone. Clearing is PREPARATION — it belongs to the hand-over of the next review
+// (-> claimReview's compactIfDue), where the session is reset for what it is about to do.
+//
+// Fired here it landed in the reviewer's own running turn, the one that called `approve`. Claude Code
+// queues what is typed mid-turn, and a queued /clear discards the queue it sits in — the kickoff
+// riding behind it included. vestri gave a verdict and was left cleared, idle, and told nothing.
+func TestAVerdictWakesWithoutClearing(t *testing.T) {
 	e, _, deps := verdictFixture(t)
 	c := registry.Caller{Project: "repo", Agent: "fili", Role: "reviewer"}
 	if code, err := e.CmdApprove(c, []string{"pr-a"}, io.Discard); err != nil || code != 0 {
 		t.Fatalf("CmdApprove: code=%d err=%v", code, err)
 	}
-	if len(deps.cleared) != 1 || deps.cleared[0] != "fili" {
-		t.Errorf("cleared = %v, want exactly one FireClear(fili)", deps.cleared)
+	if len(deps.cleared) != 0 {
+		t.Errorf("cleared = %v, want none — a verdict is not a reason to reset a session", deps.cleared)
+	}
+	// A push, so it queues behind the running turn and arrives as that turn ends.
+	if len(deps.delivered) == 0 || deps.delivered[len(deps.delivered)-1].Mail {
+		t.Errorf("the wake must be push-only: %+v", deps.delivered)
 	}
 }
 

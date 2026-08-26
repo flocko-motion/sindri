@@ -31,7 +31,7 @@ func prYankModel(t *testing.T) model {
 // Plain `y` stays the id, as it is on every other tab.
 func TestYankAllFromThePRsListCopiesTheBlock(t *testing.T) {
 	m := prYankModel(t)
-	m.rightFocus = false
+	m.focus = focusList
 
 	got := strings.Join(m.prYankBlock(), "\n")
 	for _, want := range []string{"pr-sd-1", "open", "bombur", "sd-1", "Yank a PR block", "/r/one/.worktrees/bombur"} {
@@ -49,7 +49,7 @@ func TestYankAllFromThePRsListCopiesTheBlock(t *testing.T) {
 // it used to hand over the whole block, so pasting an id meant editing four lines back down to one.
 func TestPlainYankOnAPRCopiesTheIdAlone(t *testing.T) {
 	m := prYankModel(t)
-	m.rightFocus = false
+	m.focus = focusList
 
 	m.onKey("y")
 
@@ -63,7 +63,7 @@ func TestPlainYankOnAPRCopiesTheIdAlone(t *testing.T) {
 // the list block must not take it over.
 func TestYankInTheDetailPaneIsUnchanged(t *testing.T) {
 	m := prYankModel(t)
-	m.rightFocus = true
+	m.focus = focusItems
 	for i, it := range m.prActionable() {
 		if it.kind == "path" {
 			m.rightCursor = i
@@ -84,7 +84,7 @@ func TestYankInTheDetailPaneIsUnchanged(t *testing.T) {
 // The block is withheld until the detail matches; `y` is unaffected, since an id needs no fetch.
 func TestListYankFallsBackBeforeTheDetailLands(t *testing.T) {
 	m := prYankModel(t)
-	m.rightFocus = false
+	m.focus = focusList
 	m.prDetail = api.PRDetail{PR: api.PR{ID: "pr-sd-OTHER"}} // a stale detail, as after a cursor move
 
 	if block := m.prYankBlock(); block != nil {

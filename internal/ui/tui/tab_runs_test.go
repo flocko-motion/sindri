@@ -59,6 +59,53 @@ func TestRunsTabCount(t *testing.T) {
 	}
 }
 
+// TestRunRowsShowTook: the list column reads blank for a run that has not started, and the elapsed
+// span once it has — the same figure api.RunTook derives, not a second copy of the arithmetic.
+func TestRunRowsShowTook(t *testing.T) {
+	m := scopedModel()
+	m.runFilter = api.RunFilterAll // took, not filtering, is under test
+	m.state.Runs = []api.Run{
+		{ID: "run-queued", Project: "mine", Status: "queued", Command: "go test"},
+		{ID: "run-done", Project: "mine", Status: "passed", Command: "go build",
+			StartedAt: "2026-01-01T00:00:00Z", FinishedAt: "2026-01-01T00:05:00Z"},
+	}
+	rows := rowTexts(m.runRows())
+	txt := strings.Join(rows, "\n")
+	if !strings.Contains(txt, "5m0s") {
+		t.Errorf("a finished run's row should show its took, got:\n%s", txt)
+	}
+	for _, line := range rows {
+		if strings.Contains(line, "run-queued") && strings.Contains(line, "0s") {
+			t.Errorf("a queued run's took should be blank, not a zero duration, got %q", line)
+		}
+	}
+}
+
+// TestRunItemsShowTookOnlyOnceItHasOne: the detail pane names a run's took beside its other timing
+// fields, but only once RunTook has an answer — a queued run has taken no time to report.
+func TestRunItemsShowTookOnlyOnceItHasOne(t *testing.T) {
+	m := scopedModel()
+	m.tab = 5                      // Runs
+	m.runFilter = api.RunFilterAll // took, not filtering, is under test
+	m.state.Runs = []api.Run{
+		{ID: "run-done", Project: "mine", Status: "passed", Command: "go build",
+			StartedAt: "2026-01-01T00:00:00Z", FinishedAt: "2026-01-01T00:05:00Z"},
+	}
+	m.reclamp()
+	m.selectRow("run-done")
+	m.runDetail = api.RunDetail{Run: m.state.Runs[0]}
+	txt := strings.Join(itemTexts(m.runItems()), "\n")
+	if !strings.Contains(txt, "took:     5m0s") {
+		t.Errorf("the detail pane should name the run's took, got:\n%s", txt)
+	}
+
+	m.state.Runs[0] = api.Run{ID: "run-done", Project: "mine", Status: "queued", Command: "go build"}
+	m.runDetail = api.RunDetail{Run: m.state.Runs[0]}
+	if strings.Contains(strings.Join(itemTexts(m.runItems()), "\n"), "took:") {
+		t.Error("a queued run's detail should not carry a took line at all")
+	}
+}
+
 // TestRunStatusLabelShowsQueuePosition: "queued" alone never says where in line a run is.
 func TestRunStatusLabelShowsQueuePosition(t *testing.T) {
 	if got, want := runStatusLabel(api.Run{Status: "queued", Position: 3}), "queued(#3)"; got != want {

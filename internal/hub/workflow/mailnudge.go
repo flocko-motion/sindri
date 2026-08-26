@@ -39,9 +39,9 @@ func (e *Engine) NudgeMailWaiting(project, name string) bool {
 	if !e.reachable(project, name) || e.parkedByTheHub(project, name) {
 		return false
 	}
-	// The message states the WHOLE unread count, not just the new part: what the agent has to deal with
-	// is its mailbox, and "1 waiting" beside ten it never read would read as nine having gone away.
-	if err := e.deps.Deliver(project, name, MsgMailWaiting(unread), PushOnly); err != nil {
+	// The whole unread count, not just the new part — and Regardless, since this push IS the exit
+	// from a refusing state (escalated, waiting on exactly this answer), not news of more work.
+	if err := e.deps.Deliver(project, name, MsgMailWaiting(unread), PushOnly.Regardless()); err != nil {
 		return false
 	}
 	if err := ps.MarkMailAnnounced(name); err != nil {

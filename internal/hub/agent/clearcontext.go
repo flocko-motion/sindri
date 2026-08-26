@@ -115,6 +115,8 @@ func (s *Service) FireClear(ctx context.Context, project, name, next string, int
 	if interrupt {
 		_ = s.Interrupt(ctx, project, name)
 	}
+	// Read BEFORE the injection: it is the figure the kickoff waits to see fall (-> awaitCleared).
+	before, _, _, _ := s.ContextUsage(project, name)
 	if err := s.Inject(ctx, project, name, "/clear"); err != nil {
 		return err
 	}
@@ -125,9 +127,16 @@ func (s *Service) FireClear(ctx context.Context, project, name, next string, int
 	s.deps.Notify()
 	// The kickoff waits out the clear, so it runs on ctx rather than on the caller's return: every
 	// caller hands work-lifetime context here — a handler detaches from its request, the sweeps carry
-	// the hub's own — and one that does not means to abandon this too.
+	// the hub's own — and one that does not means to abandon this too. kickoffWG lets a test join it
+	// (-> waitForKickoff) rather than tearing its fixture down while this is still in flight.
+	s.kickoffWG.Add(1)
 	go func() {
-		time.Sleep(clearKickoffDelay)
+		defer s.kickoffWG.Done()
+		// Waits for the clear to have HAPPENED, never for time to pass: a /clear typed mid-turn is
+		// queued, and discards the queue it is in — so a kickoff on a timer joined it and was lost.
+		if !s.awaitCleared(ctx, project, name, before) {
+			return
+		}
 		_ = s.InjectWhenReady(ctx, project, name, next)
 	}()
 	return nil

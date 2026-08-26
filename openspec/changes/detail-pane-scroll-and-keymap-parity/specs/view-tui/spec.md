@@ -35,22 +35,57 @@ former.
 
 ### Requirement: vi navigation
 
-The TUI SHALL navigate vi-style: `ctrl+h`/`ctrl+l` switch tabs (and `1`/`2`/`3`
+The TUI SHALL navigate vi-style: `tab`/`shift+tab` switch tabs (and `1`/`2`/`3`
 jump to one); `j`/`k` move the selection, `g`/`G` jump to top/bottom; in the task
 tree `h`/`l` collapse/expand. Moving the selection SHALL update the detail pane
-immediately (no separate open step). `J`/`K` SHALL scroll the detail pane
-directly — unconditionally, from either pane, never gated by which pane
-currently has focus — the yazi-style secondary-pane scroll a terminal user
-already has in their fingers.
+immediately (no separate open step). `ctrl+l`/`ctrl+h` focus the detail pane and
+return from it; focused, `j`/`k` scroll it one line at a time instead, and `g`/`G`
+jump it to top/bottom — reaching content with no actionable item of its own,
+since the cursor never lands on it.
 
 #### Scenario: Tab switch
 
-- **WHEN** the user presses `ctrl+l`
-- **THEN** the tab switches forward and the pane focus resets
+- **WHEN** the user presses `tab`
+- **THEN** the next tab becomes active
 
-#### Scenario: Detail pane scrolls regardless of focus
+#### Scenario: Selection drives detail
 
-- **WHEN** the user presses `J` or `K`, whether or not the detail pane
-  currently has focus
-- **THEN** the detail pane scrolls down or up; the list selection and its own
-  pane are unaffected
+- **WHEN** the user moves the selection with `j`/`k`
+- **THEN** the detail pane shows the newly selected item
+
+#### Scenario: A focused detail pane scrolls with j/k
+
+- **WHEN** the user focuses the detail pane (`ctrl+l`) and presses `j` or `k`
+- **THEN** the pane scrolls down or up one line; the list selection and its
+  own pane are unaffected
+
+## ADDED Requirements
+
+### Requirement: Jump to the next/previous row needing the user
+
+`]`/`[` SHALL move the selection to the next/previous VISIBLE row that needs
+the user, on a tab whose rows can need it (Tasks, Agents, PRs, Mail) — read
+off the same predicate that already marks that row (each also feeding its
+section's attention badge, except Mail's own to-you-and-unread marker, whose
+badge parity is a separate, later fix). They SHALL NOT cycle: past the last
+match they SHALL leave the selection and say so rather than wrapping or doing
+nothing silently. A row hidden by the active filter or folded under a
+collapsed parent SHALL NOT be a candidate. On a tab with no such notion,
+`]`/`[` SHALL do nothing and SHALL NOT be advertised.
+
+#### Scenario: Jump to the next row needing the user
+
+- **WHEN** the user presses `]` on a tab with rows that can need the user
+- **THEN** the selection moves to the next visible such row, and the detail
+  pane updates for it
+
+#### Scenario: No further match
+
+- **WHEN** the user presses `]` and no later visible row needs the user
+- **THEN** the selection does not move, and the TUI says so rather than doing
+  nothing silently
+
+#### Scenario: A tab with no such notion
+
+- **WHEN** the user presses `]`/`[` on a tab with no rows that can need the user
+- **THEN** nothing happens, and the tab does not advertise the keys

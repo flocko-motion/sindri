@@ -13,7 +13,6 @@ import (
 	"io"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/registry"
@@ -310,10 +309,8 @@ func (e *Engine) CmdShowRun(c registry.Caller, args []string, out io.Writer) (in
 	}
 	r := d.Run
 	fmt.Fprintf(out, "%s  [%s]  %s\n", r.ID, r.Status, r.Command)
-	if st, err1 := time.Parse(time.RFC3339, r.StartedAt); err1 == nil {
-		if fn, err2 := time.Parse(time.RFC3339, r.FinishedAt); err2 == nil {
-			fmt.Fprintf(out, "duration: %s\n", fn.Sub(st).Round(time.Second))
-		}
+	if took := api.RunTook(r); took != "" {
+		fmt.Fprintf(out, "duration: %s\n", took)
 	}
 	if d.Output != "" {
 		fmt.Fprintf(out, "\n%s\n", strings.TrimSpace(d.Output))

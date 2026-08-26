@@ -84,12 +84,15 @@ func runRequester(r api.Run) string {
 	return r.Agent
 }
 
-// runsTable is the Runs list's columns, read by its header and every row alike.
+// runsTable is the Runs list's columns, read by its header and every row alike. took's Width 6
+// fits every capped run ("14m59s"); a run left "running" by a hub that went away can overflow it
+// (e.g. "3h27m14s") — unclipped on purpose, since a wide row beats a truncated duration.
 var runsTable = table.Table{
 	{Label: "repo", Width: 10, Clip: true},
 	{Label: "run", Width: 14},
 	{Label: "status", Width: 12},
 	{Label: "age", Width: 4, Right: true},
+	{Label: "took", Width: 6, Right: true},
 	{Label: "queued by", Width: 10},
 	{Label: "command"},
 }
@@ -105,6 +108,7 @@ func (m model) runRows() []row {
 			table.Cell{Text: r.ID},
 			table.Cell{Text: runStatusLabel(r)},
 			table.Cell{Text: shortAge(r.CreatedAt)},
+			table.Cell{Text: api.RunTook(r)},
 			table.Cell{Text: runRequester(r)},
 			table.Cell{Text: r.Command},
 		), r.ID})
@@ -151,6 +155,9 @@ func (m model) runItems() []metaItem {
 	}
 	if r.FinishedAt != "" {
 		items = append(items, metaItem{text: "finished: " + r.FinishedAt})
+	}
+	if took := api.RunTook(r); took != "" {
+		items = append(items, metaItem{text: "took:     " + took})
 	}
 	items = append(items, metaItem{text: ""}, metaItem{text: dimStyle.Render("── output ──")})
 	if d.Output == "" {

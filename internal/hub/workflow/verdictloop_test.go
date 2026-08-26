@@ -37,8 +37,11 @@ func TestApproveWakesTheReviewer(t *testing.T) {
 	if code, err := e.CmdApprove(c, []string{"pr-a"}, io.Discard); err != nil || code != 0 {
 		t.Fatalf("CmdApprove: code=%d err=%v", code, err)
 	}
-	if len(deps.cleared) == 0 || deps.cleared[len(deps.cleared)-1] != "fili" {
-		t.Fatalf("no clear fired for fili after its verdict: %v", deps.cleared)
+	if len(deps.injected) == 0 || deps.injected[len(deps.injected)-1] != "fili" {
+		t.Fatalf("fili was not woken after its verdict: %v", deps.injected)
+	}
+	if len(deps.cleared) != 0 {
+		t.Errorf("cleared = %v — waking is a push; clearing is preparation for the NEXT job", deps.cleared)
 	}
 }
 
@@ -49,7 +52,10 @@ func TestRejectWakesTheReviewer(t *testing.T) {
 	if code, err := e.CmdReject(c, []string{"pr-a", "not", "yet"}, io.Discard); err != nil || code != 0 {
 		t.Fatalf("CmdReject: code=%d err=%v", code, err)
 	}
-	if len(deps.cleared) == 0 || deps.cleared[len(deps.cleared)-1] != "fili" {
-		t.Fatalf("no clear fired for fili after its verdict: %v", deps.cleared)
+	if len(deps.injected) == 0 || deps.injected[len(deps.injected)-1] != "fili" {
+		t.Fatalf("fili was not woken after its verdict: %v", deps.injected)
+	}
+	if len(deps.cleared) != 0 {
+		t.Errorf("cleared = %v — waking is a push; clearing is preparation for the NEXT job", deps.cleared)
 	}
 }

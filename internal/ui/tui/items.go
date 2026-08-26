@@ -205,7 +205,7 @@ func (m *model) gotoItem(kind, id string) {
 	if t < 0 {
 		return
 	}
-	m.rightFocus = false
+	m.focus = focusList
 	m.tab = t
 	// Mail is reached by NARROWING rather than by selecting: the item is a count of an agent's
 	// unread messages, not one row, so what it names is a set (-> showUnreadFor).
@@ -306,8 +306,8 @@ func (m model) selID() string {
 	return ""
 }
 
-// wrappedDetail wraps the detail pane to column width (long titles scroll with J/K
-// rather than truncate), remapping the highlight index through the wrap (-1 for none).
+// wrappedDetail wraps the detail pane to column width (long titles scroll rather than truncate),
+// remapping the highlight index through the wrap (-1 for none).
 // reclamp already wrapped this frame's content before View runs, so this is normally a cache hit —
 // nil for calls, since a genuine miss here is a fallback this method cannot make reclamp reuse.
 func (m model) wrappedDetail() (lines []string, highlight int) {
@@ -316,6 +316,57 @@ func (m model) wrappedDetail() (lines []string, highlight int) {
 		return c.wrapped, c.origAt[h]
 	}
 	return c.wrapped, -1
+}
+
+// focusedDetailLine is the wrapped-line index — matching scrollTarget()'s coordinate space — of
+// the item rightCursor currently focuses, or -1. The same index prMetaLines/agentMetaLines/
+// wrappedDetail already compute for rendering the highlight, reused here so scrolling can reveal it.
+func (m model) focusedDetailLine() int {
+	if m.focus != focusItems {
+		return -1
+	}
+	switch m.tab {
+	case 2:
+		_, hl := m.prMetaLines(max(1, m.w-m.prContentWidth()-1))
+		return hl
+	case 1:
+		_, hl := m.agentMetaLines(m.agentDetailWidth())
+		return hl
+	default:
+		_, hl := m.wrappedDetail()
+		return hl
+	}
+}
+
+// revealFocusedItem scrolls scrollTarget() so the item rightCursor currently focuses sits inside
+// its window. Called wherever rightCursor changes — ctrl+l entering focusItems, and j/k stepping
+// within it — so the highlight is never left off screen (sd-57e895 round 5: ctrl+l used to clamp
+// rightCursor without ever scrolling to it, and j/k inherited that gap from the other side).
+func (m *model) revealFocusedItem() {
+	if line := m.focusedDetailLine(); line >= 0 {
+		m.scrollTarget().SetCursor(line)
+	}
+}
+
+// scrollFold moves scrollTarget() one line, folding the REAL movement into detailExcess — Scroll*
+// clamps silently at the pane's ends, so counting the call itself let k/j drift (round 8).
+func (m *model) scrollFold(forward bool) {
+	vp := m.scrollTarget()
+	before := vp.Offset
+	if forward {
+		vp.ScrollDown()
+	} else {
+		vp.ScrollUp()
+	}
+	switch moved := vp.Offset - before; {
+	case moved != 0:
+		m.detailExcess = max(0, m.detailExcess+moved)
+	case forward:
+		m.flash = "already at the bottom"
+	default:
+		m.detailExcess = 0
+		m.flash = "already at the top"
+	}
 }
 
 // rows dispatches to the active tab's row builder (tasks/agents/prs).
@@ -438,24 +489,45 @@ func scopeName(repoScoped bool, m model) string {
 	return "repo"
 }
 
-// rightFocusKeys is what j/k, enter, g and y mean while the detail/meta column has focus —
+// focusKey is one entry in a per-focus-state override table (-> rightFocusKeys, detailFocusKeys):
+// the keys it relabels and what they mean instead, while that state holds.
+type focusKey struct{ keys, label string }
+
+// rightFocusKeys is what j/k, enter, g and y mean while a detail/meta column's ITEMS have focus —
 // overriding every tab's ordinary bindings for those same letters. One table, so the footer's
 // hint and "?"'s reference (helpLines) cannot describe two different focused worlds.
-var rightFocusKeys = []struct{ keys, label string }{
+var rightFocusKeys = []focusKey{
 	{"j/k", "item"},
 	{keyEnter, "details"},
 	{"g", "goto"},
+	{"G", "bottom"}, // past the last item, into whatever the cursor cannot reach (review round 6)
 	{"y", "copy"},
+}
+
+// detailFocusKeys is j/k/g/G's meaning while a pane's raw CONTENT has focus (focusDetail) — the
+// same one-table discipline rightFocusKeys already holds focusItems to, so this state cannot
+// drift between the footer's hint and "?"'s reference either (review round 5).
+var detailFocusKeys = []focusKey{
+	{"j/k", "scroll"},
+	{"g/G", "top/bot"},
+}
+
+// footerFromTable renders a focus override table as one footer-style line.
+func footerFromTable(table []focusKey) string {
+	parts := make([]string, len(table))
+	for i, r := range table {
+		parts[i] = r.keys + " " + r.label
+	}
+	return strings.Join(parts, " · ")
 }
 
 // contextFooter is the tab's action hints, generated from the keymap so help can't drift.
 func (m model) contextFooter() string {
-	if m.rightFocus { // focused on a detail cross-reference
-		var parts []string
-		for _, r := range rightFocusKeys {
-			parts = append(parts, r.keys+" "+r.label)
-		}
-		return strings.Join(parts, " · ")
+	switch m.focus {
+	case focusItems: // focused on a detail cross-reference
+		return footerFromTable(rightFocusKeys)
+	case focusDetail: // focused on the pane's raw content
+		return footerFromTable(detailFocusKeys)
 	}
 	return m.footerFor(tabScope(m.tab))
 }
@@ -479,13 +551,77 @@ func (m model) actionableItems() []metaItem {
 	return nil // Chat (4) has no detail pane — it renders its own transcript body
 }
 
-// focusedItem is the right-column item the cursor is on (when right-focused).
+// focusedItem is the right-column item the cursor is on (when focus is focusItems).
 func (m model) focusedItem() (metaItem, bool) {
 	act := m.actionableItems()
 	if m.rightCursor >= 0 && m.rightCursor < len(act) {
 		return act[m.rightCursor], true
 	}
 	return metaItem{}, false
+}
+
+// idsNeedingUser is the ids, on the active tab, of rows that need the user — read off the exact
+// predicate that already marks that row (api.TaskNeedsUser, api.AgentNeedsUser, api.PRNeedsUser —
+// each also feeding its section's badge — and Mail's to-you-and-unread row marker, whose badge
+// parity is sd-ac1757's to land). Never a second definition, or the row and the key would disagree
+// about what needs attention. nil on a tab with no such notion.
+func (m model) idsNeedingUser() map[string]bool {
+	out := map[string]bool{}
+	switch m.tab {
+	case 0:
+		released := api.ReleasedByPriority(m.state.Tasks)
+		for _, t := range m.state.Tasks {
+			if api.TaskNeedsUser(t, released[t.ID]) {
+				out[t.ID] = true
+			}
+		}
+	case 1:
+		for _, a := range m.state.Agents {
+			if api.AgentNeedsUser(a) {
+				out[a.Name] = true
+			}
+		}
+	case 2:
+		for _, p := range m.state.PRs {
+			if api.PRNeedsUser(p, m.state.Agents) {
+				out[p.ID] = true
+			}
+		}
+	case 6:
+		for _, msg := range m.state.Mail {
+			if api.MailToUser(msg) && !msg.Read() {
+				out[api.MailID(msg.ID)] = true
+			}
+		}
+	default:
+		return nil
+	}
+	return out
+}
+
+// moveToNeedingUser moves the cursor to the next (dir>0) or previous (dir<0) VISIBLE row that needs
+// the user (-> idsNeedingUser) — visible meaning on screen right now: a match hidden by the active
+// filter or folded under a collapsed Tasks parent is not a candidate, since m.rows() already leaves
+// those out. Never cycles: past the last match it flashes rather than wrapping, since a key that
+// silently does nothing reads as broken. A tab with no such notion does nothing at all.
+func (m *model) moveToNeedingUser(dir int) {
+	needs := m.idsNeedingUser()
+	if needs == nil {
+		return
+	}
+	rows := m.rows()
+	cur := m.selRow()
+	for i := cur + dir; i >= 0 && i < len(rows); i += dir {
+		if r := rows[i]; r.selectable() && needs[r.id] {
+			m.cursor[m.tab] = i
+			return
+		}
+	}
+	if dir > 0 {
+		m.flash = "no later row needs you"
+	} else {
+		m.flash = "no earlier row needs you"
+	}
 }
 
 // unwrappedDetailItems is the raw (pre-wrap) items behind a tab's detailLines(), for tabs whose
@@ -504,7 +640,7 @@ func (m model) unwrappedDetailItems() []metaItem {
 
 // detailHighlight is the detail line to highlight, or -1.
 func (m model) detailHighlight() int {
-	if !m.rightFocus {
+	if m.focus != focusItems {
 		return -1
 	}
 	items := m.unwrappedDetailItems()

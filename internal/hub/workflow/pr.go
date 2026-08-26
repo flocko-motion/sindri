@@ -212,11 +212,10 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 	if err != nil {
 		return 1, err
 	}
-	// An empty branch is not a pull request: there is nothing to gate, nothing to review, and nothing
-	// to merge. The planner's own submit has always refused this (-> CmdOpenspec); a worker's did not,
-	// so sudri put up a branch identical to the reference tip — its work having landed by other
-	// means — and resubmitted it after the rejection, since a live PR is the one thing that blocks a
-	// task from closing (-> ReplyPRStillToLand).
+	// An empty branch is ALLOWED, and answered for. A container whose subtasks landed elsewhere is
+	// finished with nothing of its own to carry — dvalin's epic — and refusing that left the author
+	// with no exit, since a live PR is the one thing that blocks a task from closing
+	// (-> ReplyPRStillToLand). So it is a question rather than a refusal (-> qEmpty).
 	changed, cerr := git.HasChanges(wt)
 	if cerr != nil {
 		return 1, cerr
@@ -225,10 +224,7 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 	if aerr != nil {
 		return 1, aerr
 	}
-	if !changed && !ahead {
-		fmt.Fprintln(out, ReplyNothingToSubmit(target, base))
-		return 1, nil
-	}
+	emptyDiff := !changed && !ahead
 	// Before the gate, not after: a branch that must rebase will be gated again on the rebased tree,
 	// so running it now is a build and a test suite spent on a result nobody will keep.
 	if refused, rerr := e.refuseIfBehind(ps, c.Agent, wt, base, target, out); rerr != nil || refused {
@@ -240,6 +236,11 @@ func (e *Engine) CmdSubmit(c registry.Caller, args []string, out io.Writer) (int
 	sha, err := e.gateCommit(c.Project, c.Agent, desc)
 	if err != nil {
 		return 1, err
+	}
+	// The questions, keyed on the commit just made: a clean tree re-commits to the same sha, so the
+	// answers accumulate across these calls, and any edit makes a new sha and starts them over.
+	if asked, aerr := e.askSubmitQuestions(ps, c.Agent, sha, desc, emptyDiff, out); aerr != nil || asked {
+		return 0, aerr // an ordinary step in submitting, never a refusal to escalate over
 	}
 	// Parked BEFORE the gate opens: a commit that already passed lands its PR inside the next call,
 	// and a phase written after that would overwrite "submitted" with a wait that is already over.

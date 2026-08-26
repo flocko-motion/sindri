@@ -203,19 +203,20 @@ func TestGlobalFooterShedsByUsefulnessNotDeclarationOrder(t *testing.T) {
 }
 
 // TestGlobalFooterShedsByUsefulnessUnderFocusToo: focusSplit mints display labels
-// ("item", "goto", "copy") globalShedOrder has never heard of. Ranking by that display
-// label instead of the underlying binding's own label let those parts outrank named
-// entries by accident — at 80 columns focused, movement ("G move/top/bot") was shed
-// while "y copy" (unranked, so sorted last) survived. globalEntry.rank fixes this by
-// tracking a part back to its parent binding's label for shedPriority; this pins it.
+// ("item", "goto", "copy", "bottom") globalShedOrder has never heard of. Ranking by that
+// display label instead of the underlying binding's own label let those parts outrank named
+// entries by accident — at 80 columns focused, movement (now "G bottom", ranked through its
+// parent's ordinary "move/top/bot" label) was shed while "y copy" (unranked, so sorted last)
+// survived. globalEntry.rank fixes this by tracking a part back to its parent binding's label
+// for shedPriority, regardless of which override text that part actually displays; this pins it.
 func TestGlobalFooterShedsByUsefulnessUnderFocusToo(t *testing.T) {
 	m := newModel(nil, nil, "/r/one")
 	m.tab = 0
 	m.state = api.BoardState{Tasks: []api.Task{{ID: "td-1", Status: "open"}}}
 	m.reclamp()
-	m.rightFocus = true
+	m.focus = focusItems
 	got := m.globalFooter(80)
-	for _, want := range []string{"move/top/bot", keyQuit + " quit"} {
+	for _, want := range []string{"G bottom", keyQuit + " quit"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("%q should survive at 80 columns while focused, got %q", want, got)
 		}

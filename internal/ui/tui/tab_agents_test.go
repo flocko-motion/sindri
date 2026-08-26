@@ -111,7 +111,7 @@ func TestAgentWorkspaceIsAFocusablePath(t *testing.T) {
 	// And `y` on it copies the path rather than the row id, which is the whole point of the ask.
 	for i, it := range m.agentActionable() {
 		if it.kind == "path" {
-			m.rightFocus, m.rightCursor = true, i
+			m.focus, m.rightCursor = focusItems, i
 		}
 	}
 	m.onKey("y")

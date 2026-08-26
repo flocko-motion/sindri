@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"context"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/workflow"
 	"os"
@@ -15,18 +16,23 @@ import (
 
 const testProject = "proj"
 
-// newHub opens a global hub rooted at a temp state dir (via SINDRI_HOME), so tests
-// never touch the real ~/.local/state/sindri.
+// newHub opens a global hub rooted at a temp state dir (via SINDRI_HOME), so tests never touch the
+// real ~/.local/state/sindri. toolskew's two lookups default to a no-op here (-> noHostVersions,
+// noPodManifest): the real ones read a developer's actual image cache and shell out, and only
+// toolskew's own tests (internal/hub/toolskew_test.go) need anything else.
 func newHub(t *testing.T) *Hub {
 	t.Helper()
 	t.Setenv("SINDRI_HOME", t.TempDir())
-	h, err := New(t.Context())
+	h, err := open(t.Context(), noHostVersions, noPodManifest)
 	if err != nil {
 		t.Fatalf("new hub: %v", err)
 	}
 	t.Cleanup(func() { h.Close() })
 	return h
 }
+
+func noHostVersions(context.Context) map[string]string { return nil }
+func noPodManifest() (map[string]string, error)        { return nil, nil }
 
 func TestEnsureGitignore(t *testing.T) {
 	count := func(s, sub string) int { return strings.Count(s, sub) }

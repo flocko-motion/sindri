@@ -24,7 +24,7 @@ func runsBoard(n int) api.BoardState {
 func runsScreen(t *testing.T, b api.BoardState, w, h int) string {
 	t.Helper()
 	// Five tabs forward from Tasks — the Runs tab is last (-> tuiSections).
-	return ansi.Strip(Screenshot(b, w, h, "]", "]", "]", "]", "]"))
+	return ansi.Strip(Screenshot(b, w, h, "tab", "tab", "tab", "tab", "tab"))
 }
 
 // TestTheRunsTabAlwaysExplainsItself: the tab is the least self-evident of the lot, and the

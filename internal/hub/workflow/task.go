@@ -108,133 +108,6 @@ func (e *Engine) CreateTask(project string, s TaskSpec) (string, error) {
 	return id, nil
 }
 
-// nudgeIdleWorkers tells idle workers the instant rated work exists (AssignPendingWork is the periodic
-// backstop) — each pick removed from the pool first, so a herd isn't all told the same task.
-func (e *Engine) nudgeIdleWorkers(project, priority string) {
-	if priority == "" {
-		return
-	}
-	ps := e.store.For(project)
-	packages, err := ps.OpenContainers()
-	if err != nil {
-		return
-	}
-	leaves, err := ps.OpenLeaves()
-	if err != nil {
-		return
-	}
-	roster, err := ps.Roster()
-	if err != nil {
-		return
-	}
-	for _, a := range roster {
-		if len(packages) == 0 && len(leaves) == 0 {
-			return // nothing left to offer whoever is left in the roster
-		}
-		if a.Role != "worker" || !e.deps.AgentUp(project, a.Name) {
-			continue // only workers claim backlog tasks, and there is nothing to inject into a down one
-		}
-		// ExplainNext's own question, asked directly against the shrinking pool.
-		if e.agentBlocked(ps, project, a.Name) != "" {
-			continue
-		}
-		t, isPackage, ok := nextUp(packages, leaves, e.tierPrefers(project, a.Name))
-		if !ok {
-			continue
-		}
-		_ = e.deps.Deliver(project, a.Name, MsgWorkAvailable(t.ID), PushOnly)
-		_ = ps.Log(a.Name, "nudge", "work available: "+t.ID)
-		if isPackage {
-			packages = withoutTask(packages, t.ID)
-		} else {
-			leaves = withoutTask(leaves, t.ID)
-		}
-	}
-}
-
-// withoutTask drops one task by id, preserving order — how nudgeIdleWorkers simulates a pool
-// shrinking as it hands each eligible agent, in turn, whatever is left in it.
-func withoutTask(tasks []store.Task, id string) []store.Task {
-	for i, t := range tasks {
-		if t.ID == id {
-			out := make([]store.Task, 0, len(tasks)-1)
-			out = append(out, tasks[:i]...)
-			return append(out, tasks[i+1:]...)
-		}
-	}
-	return tasks
-}
-
-// AssignPendingWork nudges every idle worker toward claimable work it hasn't been told about — a push
-// only, since claiming here on the agent's behalf could race its own claim and strand it in_progress.
-func (e *Engine) AssignPendingWork(project string) {
-	_ = e.SyncTasks(project) // best-effort refresh; cached set on failure, same as claimNext's own read
-	ps := e.store.For(project)
-	packages, err := ps.OpenContainers()
-	if err != nil {
-		return
-	}
-	leaves, err := ps.OpenLeaves()
-	if err != nil {
-		return
-	}
-	roster, err := ps.Roster()
-	if err != nil {
-		return
-	}
-	for _, a := range roster {
-		if a.Role != "worker" || !e.deps.AgentIdle(project, a.Name) {
-			continue
-		}
-		st, _ := ps.GetState(a.Name)
-		if st.Phase != "" && st.Phase != "idle" {
-			continue // mid some other flow — leave it alone
-		}
-		if st.Container != "" {
-			e.assignPendingSubtask(project, a.Name, st.Container)
-			continue
-		}
-		if st.Task != "" {
-			continue // holding a plain task already
-		}
-		// Holding nothing by here, so this answers only "could it take work at all" — retired, or a
-		// clear about to land. Its sibling nudgeIdleWorkers asks the same thing; this one did not, and
-		// pushed at a retired agent every sweep, which answered "still retired, waiting quietly".
-		if e.agentBlocked(ps, project, a.Name) != "" {
-			continue
-		}
-		t, isPackage, ok := nextUp(packages, leaves, e.tierPrefers(project, a.Name))
-		if !ok {
-			continue
-		}
-		_ = e.deps.Deliver(project, a.Name, MsgWorkAvailable(t.ID), PushOnly)
-		_ = ps.Log(a.Name, "nudge", "work available: "+t.ID)
-		if isPackage {
-			packages = withoutTask(packages, t.ID)
-		} else {
-			leaves = withoutTask(leaves, t.ID)
-		}
-	}
-}
-
-// assignPendingSubtask wakes a feature worker once an approval or rejection clears its next
-// subtask — a push toward asking again, not a claim, for the same reason AssignPendingWork itself.
-func (e *Engine) assignPendingSubtask(project, agent, container string) {
-	ps := e.store.For(project)
-	if st, _ := ps.GetState(agent); st.Task != "" {
-		return // already holding a subtask
-	}
-	if e.retired(project, agent) || e.clearArmed(project, agent) {
-		return // a wait of its own, not news to push
-	}
-	children, err := ps.OpenSubtasks(container)
-	if err != nil || len(children) == 0 {
-		return // still gated, or the check failed — nothing claimable yet
-	}
-	_ = e.deps.Deliver(project, agent, MsgWorkAvailable(children[0].ID), PushOnly)
-	_ = ps.Log(agent, "nudge", "work available: "+children[0].ID)
-}
-
 // HealPlannerTasks releases any backlog task a planner is holding — an invalid
 // assignment. Self-heals stale claims; runs once at hub boot, across all projects.
 func (e *Engine) HealPlannerTasks() {
@@ -649,6 +522,9 @@ func (e *Engine) claimNext(project, agent string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
+	// The memory means "told about this while idle, and it did not claim" — a claim, whichever task it
+	// lands on, ends that, or the next time this same task comes back around nobody hears about it.
+	_ = ps.SetLastNudge(agent, "")
 	fired, err := e.prepareAssignment(project, agent, api.TierOrDefault(t.Tier), dir)
 	if err != nil {
 		return "", false, err

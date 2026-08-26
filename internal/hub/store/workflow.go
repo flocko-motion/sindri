@@ -46,6 +46,10 @@ CREATE TABLE IF NOT EXISTS agent_state (
   -- Notes to the user this agent may still send on its current claim (-> GrantNotes). Written only by
   -- GrantNotes/SetNotesLeft, never by SetState, for the same reason the escalation is not.
   notes_left INTEGER NOT NULL DEFAULT 0,
+  -- The task id this agent was last pushed a work-available nudge about ('' = none yet). Written only
+  -- by SetLastNudge, never by SetState: a sweep that finds the same task still unclaimed must not
+  -- push about it again (-> sd-72af71).
+  last_nudge TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (project, agent)
 );
 CREATE TABLE IF NOT EXISTS prs (
@@ -196,6 +200,9 @@ type AgentState struct {
 	// escalated). It rides here so every reader of the state has it — the command surface, the board,
 	// the directive — but it is NOT part of what SetState writes (-> SetState).
 	Escalation string `json:"escalation,omitempty"`
+	// LastNudge is the task id this agent was last pushed a work-available nudge about ('' = none).
+	// Also not part of what SetState writes — SetLastNudge is its only writer.
+	LastNudge string `json:"lastNudge,omitempty"`
 }
 
 // Review is one review item attached to a PR; it crosses the wire, so it is
@@ -209,8 +216,8 @@ type PR = api.PR
 // GetState returns an agent's workflow state in this project (zero value if none).
 func (p *ProjectStore) GetState(agent string) (AgentState, error) {
 	st := AgentState{Agent: agent, Phase: "idle"}
-	row := p.s.db.QueryRow(`SELECT task,branch,phase,container,escalation,notes_left FROM agent_state WHERE project=? AND agent=?`, p.project, agent)
-	err := row.Scan(&st.Task, &st.Branch, &st.Phase, &st.Container, &st.Escalation, &st.NotesLeft)
+	row := p.s.db.QueryRow(`SELECT task,branch,phase,container,escalation,notes_left,last_nudge FROM agent_state WHERE project=? AND agent=?`, p.project, agent)
+	err := row.Scan(&st.Task, &st.Branch, &st.Phase, &st.Container, &st.Escalation, &st.NotesLeft, &st.LastNudge)
 	if err == sql.ErrNoRows {
 		return st, nil
 	}
@@ -302,6 +309,19 @@ func (p *ProjectStore) NotesLeft(agent string) (int, error) {
 		return 0, fmt.Errorf("notes left for %s: %w", agent, err)
 	}
 	return n, nil
+}
+
+// SetLastNudge records the task id an agent was just pushed a work-available nudge about, so a later
+// sweep that finds the same task still unclaimed skips the push instead of repeating it.
+func (p *ProjectStore) SetLastNudge(agent, taskID string) error {
+	_, err := p.s.db.Exec(`
+		INSERT INTO agent_state (project,agent,last_nudge) VALUES (?,?,?)
+		ON CONFLICT(project,agent) DO UPDATE SET last_nudge=excluded.last_nudge`,
+		p.project, agent, taskID)
+	if err != nil {
+		return fmt.Errorf("set last nudge %s: %w", agent, err)
+	}
+	return nil
 }
 
 // ClearEscalation releases an escalated agent, whoever asked for it — the agent itself once it has

@@ -146,7 +146,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("set pragmas: %w", err)
 	}
-	if _, err := db.Exec(schema + workflowSchema + mailSchema + mailLogSchema); err != nil {
+	if _, err := db.Exec(schema + workflowSchema + mailSchema + mailLogSchema + submitGateSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
@@ -180,6 +180,7 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE prs ADD COLUMN status_changed_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE agent_state ADD COLUMN escalation TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE agent_state ADD COLUMN notes_left INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE agent_state ADD COLUMN last_nudge TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE mail ADD COLUMN in_reply_to INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE mail ADD COLUMN notified INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE pr_lint ADD COLUMN sha TEXT NOT NULL DEFAULT ''`,

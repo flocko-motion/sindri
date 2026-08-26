@@ -1,8 +1,9 @@
 // package: hub/workflow / explain
 // type:    logic (why the assigner would, or would not, hand out each task)
-// job:     answer "why is nothing being assigned" from the SAME pools the assignment
-// itself reads, so the explanation cannot drift from the decision it explains.
-// limits:  read-only; it assigns nothing and repairs nothing.
+// job:     answer "why is nothing being assigned" from the SAME pools the assignment itself reads, so
+// the explanation cannot drift from the decision it explains — and, via WakeRefusal, the one rule
+// Hub.Deliver gates every push on, so a wake and its own explanation cannot drift apart either.
+// limits:  read-only; it assigns and pushes nothing itself.
 package workflow
 
 import (
@@ -12,19 +13,15 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// ExplainNext reports what would be handed out next and where everything else stands, each answer
-// from the POOL the assignment itself reads — the open tasks for a worker, the unclaimed reviews
-// for a reviewer — since a second opinion about eligibility is the drift this exists to expose.
-// It answers for an agent, whose own state can rule everything out, or for a ROLE as a hypothetical
-// agent of it holding nothing. Both at once is refused: an agent has a role, so they can contradict.
+// ExplainNext reports what would be handed out next, from the SAME pool the assignment itself reads —
+// for an agent (its own state can rule everything out) or a role, never both: an agent has its own.
 func (e *Engine) ExplainNext(project, agent, role string) (api.NextExplain, error) {
 	ps := e.store.For(project)
 	if agent != "" && role != "" {
 		return api.NextExplain{}, fmt.Errorf("ask about an agent or about a role, not both: %s has a role of its own", agent)
 	}
 	if agent != "" {
-		// An agent brings its own role, so the answer suits the pool it is served from. One the
-		// roster never heard of falls through to the backlog question: this reports, it does not gate.
+		// An agent brings its own role; one the roster never heard of falls through to the backlog question.
 		if a, ok, err := ps.GetAgent(agent); err != nil {
 			return api.NextExplain{}, err
 		} else if ok {
@@ -144,11 +141,8 @@ func (e *Engine) ExplainNext(project, agent, role string) (api.NextExplain, erro
 
 // agentBlocked reports why an agent can be handed nothing whatever the backlog holds.
 func (e *Engine) agentBlocked(ps *store.ProjectStore, project, agent string) string {
-	if e.retired(project, agent) {
-		return fmt.Sprintf("retired by the user — `sindri agent retire %s --back` brings it back", agent)
-	}
-	if e.clearArmed(project, agent) {
-		return "a context clear is armed for it — nothing is assigned until it fires"
+	if r := e.WakeRefusal(project, agent); r != "" {
+		return r
 	}
 	st, err := ps.GetState(agent)
 	if err != nil {
@@ -160,10 +154,73 @@ func (e *Engine) agentBlocked(ps *store.ProjectStore, project, agent string) str
 	if st.Task != "" {
 		return fmt.Sprintf("holds %s", st.Task)
 	}
-	// Held until it MERGES, which is what the board has always displayed. austri was handed a second
-	// task while pr-sd-a47b61 sat rejected, because every reader here stopped at the state row.
+	// Held until it MERGES, the board's own display — austri got a second task while pr-sd-a47b61 sat rejected.
 	if pr, task, err := ps.AwaitingPR(agent); err == nil && pr != "" {
 		return fmt.Sprintf("holds %s — %s is still to land", task, pr)
+	}
+	return ""
+}
+
+// WakeRefusal reports why waking this agent would only hand it a refusal, checked before every push —
+// mirroring directive() branch for branch, since its exemptions vary per branch (below).
+func (e *Engine) WakeRefusal(project, agent string) string {
+	ps := e.store.For(project)
+	st, err := ps.GetState(agent)
+	if err != nil {
+		return ""
+	}
+	if st.Escalation != "" {
+		return "escalated — waiting on the user to decide, not on being told there is work"
+	}
+	a, ok, err := ps.GetAgent(agent)
+	if err != nil || !ok {
+		return ""
+	}
+	retiredMsg := fmt.Sprintf("retired by the user — `sindri agent retire %s --back` brings it back", agent)
+	clearMsg := "a context clear is armed for it — nothing is assigned until it fires"
+	switch a.Role {
+	case "coauthor", "planner":
+		return "" // directive() never checks retired/clear-armed for either
+	case "reviewer":
+		if held, _ := reviewHeld(e.store, project, agent); held != "" {
+			return ""
+		}
+		if a.Retired {
+			return retiredMsg
+		}
+		if e.clearArmed(project, agent) {
+			return clearMsg
+		}
+		return ""
+	}
+	active := false
+	if st.Container != "" {
+		if t, ok, _ := ps.GetTask(st.Container); ok && !featureLanded(ps, t) {
+			active = true
+		}
+	}
+	if active {
+		if st.Phase == "working" || st.Phase == "submitted" || st.Phase == "gating" {
+			return ""
+		}
+		if e.clearArmed(project, agent) { // claimNextSubtask gates only on this, never on retired
+			return clearMsg
+		}
+		return ""
+	}
+	// No container, or a landed one: directive() resets Phase to idle and falls to waitForNextTask
+	// either way, so a stale "working" left over from before it landed must not exempt it here.
+	if st.Container == "" && (st.Phase == "working" || st.Phase == "submitted" || st.Phase == "gating") {
+		return ""
+	}
+	if pr, _, err := ps.AwaitingPR(agent); err == nil && pr != "" {
+		return "" // its own PR to answer for, regardless of either state
+	}
+	if a.Retired {
+		return retiredMsg
+	}
+	if e.clearArmed(project, agent) {
+		return clearMsg
 	}
 	return ""
 }
@@ -194,15 +251,17 @@ func allChildrenGated(all []store.Task, id string) bool {
 	return any
 }
 
-// explainReview is the reviewer's answer: the review that would be picked up, from the same
-// UnclaimedReview query reviewDirective hands out from, and why each other PR would not be — the
-// states that let one sit unreviewed while a reviewer idled (-> sd-98fa96).
+// explainReview answers for a reviewer, from reviewDirective's own UnclaimedReview query — the states
+// that let a PR sit unreviewed while a reviewer idled (-> sd-98fa96).
 func (e *Engine) explainReview(project, agent string, out api.NextExplain) (api.NextExplain, error) {
 	ps := e.store.For(project)
 	if agent != "" {
 		note, err := reviewHeld(e.store, project, agent)
 		if err != nil {
 			return out, err
+		}
+		if note == "" {
+			note = e.WakeRefusal(project, agent)
 		}
 		out.AgentNote = note
 	}
@@ -251,9 +310,7 @@ func (e *Engine) explainReview(project, agent string, out api.NextExplain) (api.
 	return out, nil
 }
 
-// leftOpen accounts for a PR past "open" but not yet gone. Each state is a different person's move
-// — a rejected one is live work its author resubmits — and each note must name a command that
-// WORKS: Merge takes an approved PR and nothing else.
+// leftOpen accounts for a PR past "open" but not yet gone — each note names a command that WORKS.
 func leftOpen(p store.PR) (api.Reviewability, string) {
 	switch p.Status {
 	case "approved":
@@ -263,21 +320,18 @@ func leftOpen(p store.PR) (api.Reviewability, string) {
 	case "merging":
 		return api.ReviewMerging, "nothing to do — it is going in"
 	case "merge-failed":
-		// No verb named: the hub died mid-merge, so whether the change reached the base is unknown,
-		// and every route back out of this status is refused from it — approve included
-		// (api.PRApprovable). Pointing at one would send a confused user straight to an error.
+		// No verb named: the outcome is unknown, and every route out of this status is refused
+		// (api.PRApprovable) — naming one would send a confused user straight to an error.
 		return api.ReviewMergeFailed, "the merge outcome is unknown — inspect " + p.Base +
 			"; `sindri pr info " + p.ID + "` for what happened"
 	}
 	return api.ReviewSettled, ""
 }
 
-// reviewHeld is why a reviewer takes nothing new, "" when it is free. A hold on a PR that has left
-// "open" is NOT one: reviewDirective releases it and claims the next review, so trusting the row
-// would describe a state the agent's very next ask undoes (a human `pr approve` leaves exactly it).
+// reviewHeld is why a reviewer takes nothing new, "" when free — a PR that already left "open" does
+// not count, since the agent's own next ask releases it.
 func reviewHeld(st *store.Store, project, agent string) (string, error) {
-	// st's ReviewingPR, not a *ProjectStore's: a pooled reviewer's row is never filed under its
-	// own project.
+	// st's ReviewingPR: a pooled reviewer's row is never filed under its own project.
 	heldProject, held, err := st.ReviewingPR(project, agent)
 	if err != nil || held == "" {
 		return "", err

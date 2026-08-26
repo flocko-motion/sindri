@@ -32,8 +32,12 @@ func (m *model) lintCmd(id string) tea.Cmd {
 	m.flash = "gate " + id + "…"
 	m.prDetail.Lint = "asking the hub…" // shown immediately; replaced by the answer
 	m.prView = "lint"
-	m.rightFocus = true
-	m.rightCursor = m.viewCursor("lint")
+	if m.showDetail() { // the column exists to focus; otherwise the report itself is what needs it
+		m.focus, m.rightCursor, m.detailExcess = focusItems, m.viewCursor("lint"), 0
+		m.revealFocusedItem()
+	} else {
+		m.focus = focusDetail
+	}
 	return func() tea.Msg {
 		out, err := cl.LintPR(id)
 		if err != nil {
@@ -402,7 +406,7 @@ func (m model) prBody() string {
 	leftW := m.prContentWidth()
 
 	listBox := pane(rowTexts(m.rows()), m.list, leftW, m.selRow())
-	contentBox := pane(m.prContentLines(), m.detail, leftW, -1) // big pane: diff/lint, J/K scrolls
+	contentBox := pane(m.prContentLines(), m.detail, leftW, -1) // big pane: diff/lint
 	leftCol := strings.Join([]string{listBox, hdivider(leftW), contentBox}, "\n")
 
 	if !m.showDetail() { // § hid the right column — list + diff/lint take the full width
@@ -424,7 +428,7 @@ func (m model) prMetaLines(width int) ([]string, int) {
 	for i, it := range items {
 		lines[i] = it.text
 		if it.kind != "" {
-			if m.rightFocus && ai == m.rightCursor {
+			if m.focus == focusItems && ai == m.rightCursor {
 				hl = i
 			}
 			ai++

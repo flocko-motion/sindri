@@ -7,6 +7,7 @@
 package hub
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -21,6 +22,10 @@ import (
 // attention alone. Over-length is REFUSED, never truncated: a silent cut teaches nothing.
 const maxMessageLen = 300
 
+// errPushDidNotLand answers a push-only delivery the wake gate refused — an injection failure returns
+// its own real error instead, so this covers only the case with no underlying cause to report.
+var errPushDidNotLand = errors.New("push did not land")
+
 // senderFor is who a message is from: what the sender stated, else the hub in its own voice — which is
 // what an unattributed hub message IS, rather than a value to guess at.
 func senderFor(d workflow.Delivery) string {
@@ -31,7 +36,8 @@ func senderFor(d workflow.Delivery) string {
 }
 
 // Deliver sends text to an agent the way d says. MAIL FIRST, so a crash between the two loses only the
-// wake. A push failure is NOT returned once mail is written — only a failure to RECORD is.
+// wake. A push failure is silent once mail is written — the mailbox is the fallback; push-only, it is
+// returned instead, since nothing else would ever say the wake never landed.
 func (h *Hub) Deliver(project, name, text string, d workflow.Delivery) error {
 	if !d.Sends() {
 		return fmt.Errorf("delivery to %s/%s asks for neither mail nor push, so it is not a message", project, name)
@@ -51,19 +57,27 @@ func (h *Hub) Deliver(project, name, text string, d workflow.Delivery) error {
 	if !d.Push || name == api.SenderUser {
 		return nil
 	}
+	// Mail already carries the message, so refusing here loses only the interruption: the agent reads it
+	// on its own next ask — unless d.Unconditional says this push IS the exit from that very state.
+	if r := h.wf.WakeRefusal(project, name); r != "" && !d.Unconditional {
+		_ = ps.Log(name, "push-suppressed", r+" — not woken for: "+text)
+		if !d.Mail {
+			return errPushDidNotLand
+		}
+		return nil
+	}
 	// Under the hub's lifetime: a push is the hub telling an agent something on the fleet's timeline,
 	// and it must land whether or not whoever triggered it is still there (-> Hub.lifetime).
 	// Recorded per message: `pushed` only says send-keys was accepted (-> api.Mail.History).
 	if err := h.agents.InjectWhenReady(h.lifetime, project, name, text); err != nil {
 		_ = ps.LogMail(mailID, store.MailPushFailed, err.Error())
-		// Said whatever the class. Guarded by !d.Mail, three consecutive failures to one agent left no
-		// trace of WHY anywhere — its log records the text as inject-skipped, never the reason — and
-		// mail catching the message only helps once something tells the agent to read it.
+		// Said whatever the class. Three consecutive failures to one agent left no trace of WHY
+		// anywhere — its log records the text as inject-skipped, never the reason.
 		fmt.Fprintf(os.Stderr, "hub: push to %s/%s did not land: %v\n", project, name, err)
 		// A push with no mail behind it IS the message, so a swallowed failure reads as delivered:
 		// NudgeMailWaiting marked hepti's mailbox announced off this nil and never announced again,
-		// turning one skipped inject into permanent silence. Mail written still absorbs it — that row
-		// is the durable record, and the announcement retries until it lands.
+		// turning one skipped inject into permanent silence. The real cause, not a bare sentinel —
+		// mail written still absorbs it, and the announcement retries until it lands.
 		if !d.Mail {
 			return err
 		}

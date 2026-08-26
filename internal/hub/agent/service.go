@@ -54,6 +54,12 @@ type Service struct {
 
 	lcMu      sync.Mutex                // guards lifecycle
 	lifecycle map[lcKey]lifecycleIntent // transient launch/stop intent: "launching"|"stopping"|failed
+
+	runtimeMemo runtimeMemo // Observe's TTL cache (runtime.go)
+	contextMemo contextMemo // ContextUsage's TTL cache (runtime.go)
+	paneMemo    paneMemo    // AgentPane's TTL cache (runtime.go)
+
+	kickoffWG sync.WaitGroup // FireClear's delayed kickoff goroutines (-> waitForKickoff, tests only)
 }
 
 // New builds the agent module over the hub's store, its Deps, and the agent channel

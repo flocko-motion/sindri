@@ -89,8 +89,12 @@ type model struct {
 	hideDetail     bool              // § force-hides the detail pane (else shown when wide enough)
 	scopeRepo      bool              // TUI-wide global↔repo scope (default repo): Agents/PRs narrow to the active repo when true. Tasks is always repo-scoped regardless.
 
-	rightFocus  bool // detail (right) column has focus (h/l switch; j/k move within)
-	rightCursor int  // focused actionable item in the right column
+	focus       focusPane // which pane plain j/k drives (-> focusPane)
+	rightCursor int       // focused actionable item, when focus is focusItems
+	// detailExcess is how many lines past rightCursor's last item j has scrolled — 0 whenever
+	// rightCursor just moved or was freshly set. k unwinds it one line before ever touching
+	// rightCursor, the exact inverse of how j built it up (review round 6: j and k must round-trip).
+	detailExcess int
 
 	detailKey       string
 	detailWrapCache wrapCache // last wrap of the detail pane, reused across a cursor move that changes nothing it depends on
@@ -182,7 +186,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.reclamp()
 		if m.modal {
+			// SetHeight re-clamps by m.detail.Cursor (scroll.Viewport.follow), which the modal
+			// itself never moves — free-scroll keys only touch Offset (updateModal) — so a stale
+			// Cursor left over from whatever row was focused before the modal opened would drag
+			// the resize to that line. ScrollTop matches every modal-open call's own settle point.
 			m.detail.SetHeight(modalContentHeight(m.h))
+			m.detail.ScrollTop()
 		}
 		// A shrink leaves cells of the larger frame behind, so the new one draws over
 		// leftovers. Clear before repainting.
@@ -269,8 +278,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.pr == m.selID() { // store the result, switch to the lint view, focus it
 			m.prDetail.Lint = msg.text
 			m.prView = "lint"
-			m.rightFocus = true
-			m.rightCursor = m.viewCursor("lint")
+			if m.showDetail() {
+				m.focus, m.rightCursor, m.detailExcess = focusItems, m.viewCursor("lint"), 0
+				m.revealFocusedItem()
+			} else {
+				m.focus = focusDetail
+			}
 			m.detail.Resize(m.detail.Height, len(m.prContentLines()))
 		}
 	case milestoneMsg:

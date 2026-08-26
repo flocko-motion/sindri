@@ -34,6 +34,9 @@ func (f *fakeRuntime) Running(string) bool { return true }
 
 // RunningContext answers as Running does: a liveness check that takes a deadline is asking the same
 // question, and a fake that answered differently would make "alive" depend on which one a path used.
+// Also defence in depth for FireClear's delayed kickoff goroutine: waitForKickoff joins it before a
+// fixture tears this fake down, so it should not still be calling in by then — but if timing ever
+// slips, answering true either way keeps that from turning into a flaky failure of its own.
 func (f *fakeRuntime) RunningContext(context.Context, string) bool { return true }
 
 func (f *fakeRuntime) Exec(name string, args ...string) ([]byte, error) {
@@ -122,8 +125,6 @@ func tellFixture(t *testing.T, name, pane string) (*Service, *fakeRuntime) {
 		container.UseDefault()          // nothing running, as an unwired process finds it
 		agentport.Use(unreadablePane{}) // back to classifying nothing, as an unwired hub does
 	})
-	forgetObservations()
-	t.Cleanup(forgetObservations)
 	return s, f
 }
 
@@ -131,13 +132,6 @@ func tellFixture(t *testing.T, name, pane string) (*Service, *fakeRuntime) {
 type unreadablePane struct{ agentport.Agent }
 
 func (unreadablePane) DetectState(string) agentport.State { return agentport.Unknown }
-
-// forgetObservations clears the pane memo, so one case's screen is never another's answer.
-func forgetObservations() {
-	runtimeMemo.mu.Lock()
-	runtimeMemo.at, runtimeMemo.val = nil, nil
-	runtimeMemo.mu.Unlock()
-}
 
 // TestAHubMessageStillRefusesASignedOutPane is the half of the guard that must survive: a verdict
 // or an assignment has no human behind it to notice that it landed in an input box unread, so it

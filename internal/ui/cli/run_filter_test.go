@@ -47,6 +47,23 @@ func TestRunListAndTheTabAgreeOnActive(t *testing.T) {
 	}
 }
 
+// TestRunInfoLinesShowTook: `run info`'s counterpart to the TUI detail pane and `show <run-id>`
+// names the same figure, so all three agree — a queued run has none to show.
+func TestRunInfoLinesShowTook(t *testing.T) {
+	done := api.Run{ID: "run-done", Status: "passed", Command: "go build",
+		StartedAt: "2026-01-01T00:00:00Z", FinishedAt: "2026-01-01T00:05:00Z"}
+	txt := strings.Join(runInfoLines(done), "\n")
+	if !strings.Contains(txt, "took: 5m0s") {
+		t.Errorf("a finished run's info should name its took, got:\n%s", txt)
+	}
+
+	queued := api.Run{ID: "run-queued", Status: "queued", Command: "go build"}
+	txt = strings.Join(runInfoLines(queued), "\n")
+	if strings.Contains(txt, "took:") {
+		t.Errorf("a queued run's info should carry no took line, got:\n%s", txt)
+	}
+}
+
 // NewRunCmd must expose exactly the operations the TUI reaches: list, info, output, cancel,
 // priority — the CLI group and the tab describe the same run service, not two.
 func TestNewRunCmdExposesEveryOperation(t *testing.T) {

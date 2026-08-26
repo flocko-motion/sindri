@@ -8,6 +8,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 // SetModel changes the model an agent runs on, "" reverting to the account default. Not running:
@@ -41,20 +42,62 @@ func (s *Service) SetModel(ctx context.Context, project, name, model, next strin
 	if !s.AgentAlive(ctx, project, name) || model == "" {
 		return nil // nothing live to retarget, or no live command yet for the account default
 	}
-	if _, _, _, ok := s.ContextUsage(project, name); ok {
-		if err := s.Inject(ctx, project, name, "/clear"); err != nil {
+	before, _, _, used := s.ContextUsage(project, name)
+	if !used {
+		// A fresh session has nothing to discard, so the switch and its instruction go straight in.
+		if err := s.Inject(ctx, project, name, "/model "+model); err != nil {
 			return err
 		}
+		return s.Inject(ctx, project, name, next)
 	}
-	if err := s.Inject(ctx, project, name, "/model "+model); err != nil {
+	if err := s.Inject(ctx, project, name, "/clear"); err != nil {
 		return err
 	}
-	if err := s.Inject(ctx, project, name, next); err != nil {
-		return err
-	}
+	// Before the wait, not after: next is composed from this measurement, and left standing it reports
+	// the size the clear just discarded.
 	s.ForgetContext(project, name)
+	// The switch waits for the clear to have HAPPENED, not just for time to pass. /model opens a
+	// confirmation dialog, and a dialog swallows whatever is typed behind it — so a /clear sent into
+	// one is eaten, and the switch runs against the context the clear was meant to discard. Which is
+	// backwards twice over: the old session is spent on the new model, and the reset lands after.
+	s.kickoffWG.Add(1)
+	go func() {
+		defer s.kickoffWG.Done()
+		if !s.awaitCleared(ctx, project, name, before) {
+			return // the clear never took; switching now would spend the context it was to discard
+		}
+		if err := s.InjectWhenReady(ctx, project, name, "/model "+model); err != nil {
+			return // logged as inject-skipped; sending next now would run it on the OLD model
+		}
+		_ = s.InjectWhenReady(ctx, project, name, next)
+	}()
 	return nil
 }
+
+// awaitCleared waits for the reading to FALL below before — /clear having happened, where a sleep
+// only assumes it. A DROP is the test: context only grows within a session, and a fresh one carries
+// a few tokens at once, so emptiness would never arrive. Sampled, since ForgetContext dropped memo.
+func (s *Service) awaitCleared(ctx context.Context, project, name string, before int) bool {
+	for waited := time.Duration(0); waited < clearSettleCap; waited += clearKickoffDelay {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(clearKickoffDelay):
+		}
+		if now, _, _, used := s.SampleContext(project, name); !used || now < before {
+			return true
+		}
+	}
+	// Never sent blind on timeout: the clear is most likely still QUEUED behind a long turn, and a
+	// kickoff joining that queue is discarded by it — which is the silence this exists to prevent.
+	// The stall and mail nudges are the backstop for an agent left idle.
+	_ = s.store.For(project).Log(name, "clear-unconfirmed", "the /clear never took effect; nothing was sent after it")
+	return false
+}
+
+// clearSettleCap bounds that wait. Long, because the clear waits out whatever turn was running when
+// it was typed, and a review runs for minutes; bounded, because a goroutine per clear must end.
+const clearSettleCap = 5 * time.Minute
 
 // modelLabel names an empty model as the account default, for the log line.
 func modelLabel(model string) string {

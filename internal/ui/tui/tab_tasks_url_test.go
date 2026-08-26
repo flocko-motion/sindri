@@ -7,10 +7,11 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 )
 
-// TestTaskURLMakesTheDetailReachable: ctrl+l only focuses the detail pane when it has at least one
-// actionable item (onkey.go) — a GitHub issue with no parent/agent/PR set otherwise had NONE, so
-// its detail pane could never be entered at all, same hotkey or not. The URL fixes that as a side
-// effect of existing: it is the one thing there to focus.
+// TestTaskURLMakesTheDetailReachable: ctrl+l always reaches the pane's raw content (focusDetail) —
+// a GitHub issue with no parent/agent/PR set has nothing else to focus, and its description should
+// still be reachable. A second ctrl+l steps on to the actionable items ONLY once there is at least
+// one (onkey.go); with none, it wraps straight back to the list rather than landing somewhere with
+// nothing to select. The URL, once set, is what makes that second step land on something.
 func TestTaskURLMakesTheDetailReachable(t *testing.T) {
 	m := newModel(nil, nil, "")
 	m.tab = 0          // Tasks
@@ -25,17 +26,22 @@ func TestTaskURLMakesTheDetailReachable(t *testing.T) {
 		t.Fatalf("a task with no URL/parent/agent/PR should have 0 actionable items, got %d", got)
 	}
 	m.onKey("ctrl+l")
-	if m.rightFocus {
-		t.Fatal("ctrl+l must not focus an empty detail pane")
+	if m.focus != focusDetail {
+		t.Fatal("ctrl+l must still focus the pane's raw content with nothing actionable in it")
+	}
+	m.onKey("ctrl+l")
+	if m.focus != focusList {
+		t.Fatal("a second ctrl+l with no actionable items must wrap back to the list, not focus items")
 	}
 
 	m.state.Tasks[0].URL = "https://github.com/acme/widgets/issues/12"
 	if got := len(m.actionableItems()); got != 1 {
 		t.Fatalf("the URL should be the one actionable item, got %d", got)
 	}
-	m.onKey("ctrl+l")
-	if !m.rightFocus {
-		t.Fatal("ctrl+l must focus the detail pane once it has the URL to land on")
+	m.onKey("ctrl+l") // -> focusDetail
+	m.onKey("ctrl+l") // -> focusItems, now that there is one
+	if m.focus != focusItems {
+		t.Fatal("ctrl+l must focus the detail pane's items once it has the URL to land on")
 	}
 	it, ok := m.focusedItem()
 	if !ok || it.kind != "url" || it.value != m.state.Tasks[0].URL {
@@ -75,9 +81,10 @@ func TestEnterCopiesTheTaskURL(t *testing.T) {
 	}}
 	m.cursor[0] = 0
 	m.reclamp()
-	m.onKey("ctrl+l")
-	if !m.rightFocus {
-		t.Fatal("precondition: the URL should have made the detail pane reachable")
+	m.onKey("ctrl+l") // -> focusDetail
+	m.onKey("ctrl+l") // -> focusItems
+	if m.focus != focusItems {
+		t.Fatal("precondition: the URL should have made the detail pane's items reachable")
 	}
 
 	m.onKey("enter")

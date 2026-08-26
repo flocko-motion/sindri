@@ -40,10 +40,11 @@ func TestCursorMoveWithinOneTaskDoesNotRewrap(t *testing.T) {
 	}
 	tm = m
 
-	tm, _ = tm.Update(keyMsg("ctrl+l")) // focus the detail column: parent/url are actionable
+	tm, _ = tm.Update(keyMsg("ctrl+l")) // -> focusDetail
+	tm, _ = tm.Update(keyMsg("ctrl+l")) // -> focusItems: parent/url are actionable
 	m = tm.(model)
-	if !m.rightFocus {
-		t.Fatal("ctrl+l should focus the detail column")
+	if m.focus != focusItems {
+		t.Fatal("a second ctrl+l should focus the detail column's actionable items")
 	}
 	afterFocus := m.wrapCalls
 

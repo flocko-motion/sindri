@@ -1,9 +1,13 @@
 // package: api / run
-// type:    logic (wire types + a pure predicate)
+// type:    logic (wire types, predicates, and the shared duration derivation)
 // job:     a Run (a scheduled command in the run queue) as it crosses the wire, its
-// detail view, and the open-ness rule the section badge and the filter share.
-// limits:  data and a pure predicate only; no persistence, no scheduling.
+// detail view, the open-ness rule the section badge and the filter share, and
+// RunTook — the one place both front-ends and `show <run-id>` get "how long".
+// limits:  data and derivations only; no persistence, no scheduling. RunTook reads
+// the wall clock for an in-progress run — the only place in this file that does.
 package api
+
+import "time"
 
 // Run is one scheduled command: the ask, the hub's queue slot for it, and how it went.
 type Run struct {
@@ -69,6 +73,22 @@ func RunOpen(r Run) bool { return r.Status == "queued" || r.Status == "running" 
 // nothing treating Agent as an agent name — roster lookup, staleness, an injected result — applies.
 // One predicate, so queue, executor and both front-ends cannot disagree about whose run it is.
 func RunFromUser(r Run) bool { return r.Agent == SenderUser }
+
+// RunTook is how long r has run: "" while it is still queued (it has taken no time yet, and a zero
+// would read as instant rather than absent), the elapsed span so far while running, and the full
+// span once it has a finish time — cancelled and timed-out runs included, since both stamp one too.
+// One derivation for the list column, the detail pane and `run show`, rather than a third copy.
+func RunTook(r Run) string {
+	st, err := time.Parse(time.RFC3339, r.StartedAt)
+	if err != nil {
+		return ""
+	}
+	end := time.Now()
+	if fn, err := time.Parse(time.RFC3339, r.FinishedAt); err == nil {
+		end = fn
+	}
+	return end.Sub(st).Round(time.Second).String()
+}
 
 // RunTarget names the tree a run executes against: the same command passes in one workspace and
 // fails in another, so a row without it is uninterpretable.

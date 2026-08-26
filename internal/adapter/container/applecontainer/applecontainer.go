@@ -9,6 +9,7 @@
 package applecontainer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -403,16 +404,20 @@ func (appleBuilder) ImageExists(ref string) (bool, error) {
 	return false, fmt.Errorf("container image inspect %s: %s: %w", ref, strings.TrimSpace(string(out)), err)
 }
 
-func (appleBuilder) Build(ref, ctxDir, dockerfile string, pull bool, out io.Writer) error {
+func (appleBuilder) Build(ref, ctxDir, dockerfile string, pull bool, out io.Writer) (map[string]string, error) {
 	// pull is best-effort: `container build` has no re-pull flag, so a forced rebuild
 	// may reuse the local base. (podman does a real --pull=always.)
 	_ = pull
+	// Captured alongside streaming so a success can be scanned for the Dockerfile's version
+	// lines (-> container.ParseVersionManifest), the same way the podman builder does.
+	var captured bytes.Buffer
 	cmd := exec.Command(Binary, "build", "-t", ref, "-f", dockerfile, ctxDir)
-	cmd.Stdout, cmd.Stderr = out, out
+	cmd.Stdout = io.MultiWriter(out, &captured)
+	cmd.Stderr = io.MultiWriter(out, &captured)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("container build failed: %w", err)
+		return nil, fmt.Errorf("container build failed: %w", err)
 	}
-	return nil
+	return container.ParseVersionManifest(captured.String()), nil
 }
 
 // sortedKeys returns map keys in sorted order for deterministic argv.

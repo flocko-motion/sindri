@@ -144,6 +144,31 @@ func TestAssignPendingWorkWakesAGatedFeatureWorkerOnceApproved(t *testing.T) {
 	}
 }
 
+// TestAssignPendingSubtaskDoesNotRepeatIdenticalNudges: it shares notifyOnce's last_nudge slot with
+// the plain-task path, and a sweep still finding the same subtask unclaimed must not repeat itself.
+func TestAssignPendingSubtaskDoesNotRepeatIdenticalNudges(t *testing.T) {
+	e, ps, _ := gatedFeature(t)
+	if err := e.SetStatus("repo", "td-1", "closed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.RefreshTask("repo", "td-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ApproveTask("repo", "td-2", false); err != nil {
+		t.Fatalf("ApproveTask: %v", err)
+	}
+	deps := e.deps.(*stubDeps)
+
+	e.AssignPendingWork("repo")
+	e.AssignPendingWork("repo")
+	if len(deps.injected) != 1 {
+		t.Fatalf("the same unclaimed subtask must be pushed once, not on every sweep, got %v", deps.injected)
+	}
+}
+
 // TestAssignPendingSubtaskDoesNotPushAPendingClearNotice: an armed clear is a wait of its own, not
 // news to push, and FireArmedClears (later in the same hub tick) is what actually fires it.
 func TestAssignPendingSubtaskDoesNotPushAPendingClearNotice(t *testing.T) {

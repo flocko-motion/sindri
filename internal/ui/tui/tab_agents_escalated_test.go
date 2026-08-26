@@ -49,10 +49,10 @@ func TestTheEscalationLineReleasesTheAgent(t *testing.T) {
 	}
 	for i, it := range m.agentActionable() {
 		if it.kind == "resume" {
-			m.rightFocus, m.rightCursor = true, i
+			m.focus, m.rightCursor = focusItems, i
 		}
 	}
-	if !m.rightFocus {
+	if m.focus != focusItems {
 		t.Fatal("the escalation line is not reachable by the right-column cursor")
 	}
 	m.onKey("enter")
