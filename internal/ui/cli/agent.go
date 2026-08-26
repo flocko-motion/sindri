@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	agentport "github.com/flo-at/sindri/internal/adapter/agent"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/ui/table"
 	"github.com/flo-at/sindri/internal/ui/theme"
@@ -145,7 +146,7 @@ func agentListCmd() *cobra.Command {
 						table.Cell{Text: a.Role},
 						table.Cell{Text: a.Status},
 						table.Cell{Text: theme.ContextPercent(a.ContextTokens, a.ContextWindow)},
-						table.Cell{Text: dash(a.Model)},
+						table.Cell{Text: dash(agentport.ShortModel(a.Model))},
 						table.Cell{Text: dash(a.Task)},
 						table.Cell{Text: dash(a.PR)},
 					)
@@ -584,7 +585,7 @@ func agentInfoCmd() *cobra.Command {
 				fmt.Printf("agent:     %s\nrole:      %s\nstatus:    %s\ntask:      %s\nfeature:   %s\npr:        %s\nworkspace: %s\nmemory:    %s\ncontext:   %s\nmodel:     %s\n",
 					found.Name, found.Role, found.Status, agentTaskLabel(b, found.Task),
 					agentTaskLabel(b, found.Feature), dash(found.PR), dash(found.Workspace), memoryLabel(found.Memory, dflt),
-					theme.ContextLine(found.ContextTokens), dash(found.Model))
+					theme.ContextLine(found.ContextTokens), dash(agentport.ShortModel(found.Model)))
 				// Same reasoning as the arming below, and it bites harder: retirement shows up only
 				// when the agent next asks for work, and DirRetired told it to stop asking — so the
 				// pane goes quiet and nothing anywhere says why.
@@ -656,25 +657,6 @@ func memoryLabel(m, dflt string) string {
 		return theme.MemoryDefaultLabel(dflt)
 	}
 	return m
-}
-
-// shortAge renders an RFC3339 stamp's age as "3d"/"2h"/"5m"/"now"; "-" when unparseable.
-func shortAge(ts string) string {
-	t, err := time.Parse(time.RFC3339, ts)
-	if err != nil {
-		return "-"
-	}
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return "now"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%dd", int(d.Hours()/24))
-	}
 }
 
 // oneLine caps a payload to its first line and max runes, keeping `info` one line per event.

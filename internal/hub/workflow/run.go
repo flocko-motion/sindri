@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 
@@ -169,8 +170,11 @@ func queuePositions(runs []api.Run) map[string]int {
 	return pos
 }
 
-// FleetRuns is fleet-wide, so `run list` matches the TUI regardless of the caller's cwd —
-// matching FleetPRs.
+// FleetRuns is fleet-wide, so `run list` matches the TUI regardless of the caller's cwd — matching
+// FleetPRs. NEWEST FIRST, because this is the human-facing listing and the thing that just happened
+// was at the bottom of a growing list. The store's own reads stay oldest-first (-> store.AllRuns):
+// the same line mail draws, where the fleet listing a person reads is DESC and an agent's sequential
+// one is not.
 func (e *Engine) FleetRuns() ([]api.Run, error) {
 	runs, err := e.store.AllRuns()
 	if err != nil {
@@ -190,6 +194,10 @@ func (e *Engine) FleetRuns() ([]api.Run, error) {
 	for i := range out {
 		out[i].Position = pos[out[i].ID]
 	}
+	// Reversed AFTER ranking, never by asking the store for another order: position comes from
+	// queuePositions, whose final tiebreak is a second-precision timestamp, so runs queued within the
+	// same second fall to sort stability — and stability reads whatever order the rows arrived in.
+	slices.Reverse(out)
 	return out, nil
 }
 

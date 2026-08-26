@@ -77,6 +77,10 @@ type Agent interface {
 	// the backend does not recognise — the dispatcher's own mapping, from the backend since a
 	// second implementation would have its own names for the same idea.
 	ModelForTier(tier string) (model string, ok bool)
+	// ShortModel renders a model id for display, dropping whatever prefix this backend's ids all
+	// carry. Unrecognised comes back unchanged — a shortener that mangled an unexpected id would
+	// turn "I do not know this model" into "this agent has no model".
+	ShortModel(model string) string
 	// ModelMatches reports whether detected (read off a live transcript) is the same model as want
 	// (a plain tier id) — not always a bare string equality, since a backend may run a tier's model
 	// under a more specific id than the one it dispatches to.
@@ -129,6 +133,9 @@ func ModelWindow(model string) (int, bool) { return active.ModelWindow(model) }
 // ModelForTier resolves tier to a model via the wired backend.
 func ModelForTier(tier string) (string, bool) { return active.ModelForTier(tier) }
 
+// ShortModel renders a model id for display via the wired backend.
+func ShortModel(model string) string { return active.ShortModel(model) }
+
 // ModelMatches reports whether detected is want via the wired backend.
 func ModelMatches(want, detected string) bool { return active.ModelMatches(want, detected) }
 
@@ -139,6 +146,10 @@ func ToolRunning(screen string) bool { return active.ToolRunning(screen) }
 type noop struct{}
 
 func (noop) DetectState(string) State { return Unknown }
+
+// ShortModel returns the id UNCHANGED, which is the right answer with no backend wired for the same
+// reason it is the right answer for an unrecognised id: readable beats shortened-and-wrong.
+func (noop) ShortModel(model string) string { return model }
 
 func (noop) PrepareHome(HomeSpec) (Home, error) { return Home{}, nil }
 

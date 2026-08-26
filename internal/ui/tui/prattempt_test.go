@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
 // TestTheAttemptColumnSpeaksOnlyWhenItMatters: 66 of this fleet's PRs landed first time and one took
@@ -21,8 +22,8 @@ func TestTheAttemptColumnSpeaksOnlyWhenItMatters(t *testing.T) {
 		{2, "×2"},
 		{12, "×12"},
 	} {
-		if got := attemptCell(tc.attempt); got != tc.want {
-			t.Errorf("attemptCell(%d) = %q, want %q", tc.attempt, got, tc.want)
+		if got := theme.AttemptCell(tc.attempt); got != tc.want {
+			t.Errorf("AttemptCell(%d) = %q, want %q", tc.attempt, got, tc.want)
 		}
 	}
 }

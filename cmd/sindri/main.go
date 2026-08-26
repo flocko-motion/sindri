@@ -1,9 +1,9 @@
 // package: main (sindri) / main
 // type:    entrypoint (thin)
-// job:     wire the container backend (agent.go's preflight healthcheck needs it;
-// the hub itself is a separate process now — see cmd/sindri-hub), mirror the
-// build version into the CLI package, assemble the host CLI command tree
-// (internal/ui/cli) under the root, and dispatch.
+// job:     wire the container and coding-agent backends this process reads through (the
+// hub itself is a separate process — see cmd/sindri-hub), mirror the build version
+// into the CLI package, assemble the host CLI command tree (internal/ui/cli) under
+// the root, and dispatch.
 // limits:  no command logic here — just composition + the version ldflags anchor.
 package main
 
@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"os"
 
+	agentport "github.com/flo-at/sindri/internal/adapter/agent"
+	"github.com/flo-at/sindri/internal/adapter/agent/claude"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/tools/debug"
 	"github.com/flo-at/sindri/internal/ui/cli"
@@ -26,7 +28,11 @@ var version = "dev"
 
 func main() {
 	container.Use(chooseRuntime()) // wire the one container backend for this process
-	cli.SetVersion(version)        // mirror the ldflags build version into the CLI package
+	// The coding-agent backend too: a front-end renders what a model id MEANS (-> agent.ShortModel)
+	// and classifies a captured pane (-> ui/attach.herdrState), both of which are the backend's
+	// knowledge. Unwired, those fell to the no-op, which shortens nothing and calls every pane idle.
+	agentport.Use(claude.New())
+	cli.SetVersion(version) // mirror the ldflags build version into the CLI package
 	var projectDir string
 	var dbg bool
 	rootCmd := &cobra.Command{

@@ -447,17 +447,9 @@ func prLintCmd() *cobra.Command {
 	}
 }
 
-// prListTable is the columns `sindri pr list` prints, its header and its rows alike.
-var prListTable = table.Table{
-	{Label: "repo", Width: 10, Clip: true},
-	{Label: "pr", Width: 14},
-	{Label: "status", Width: 13},
-	{Label: "age", Width: 4, Right: true},
-	{Label: "agent", Width: 10},
-	{Label: "reviewer", Width: 10},
-	{Label: "branch", Width: 24},
-	{Label: "waiting on you"},
-}
+// prListTable is what `sindri pr list` prints: the shared set (-> table.PRList) with room to spell a
+// status out, and why it waits in a column of its own where the TUI uses a marker.
+var prListTable = table.PRList(13, table.Column{Label: "waiting on you"})
 
 func prListCmd() *cobra.Command {
 	var filter string
@@ -509,7 +501,9 @@ func prListCmd() *cobra.Command {
 						table.Cell{Text: api.RepoName(st.Projects, p.Project)},
 						table.Cell{Text: p.ID},
 						table.Cell{Text: status},
-						table.Cell{Text: shortAge(p.CreatedAt)},
+						table.Cell{Text: theme.AttemptCell(p.Attempt)},
+						table.Cell{Text: theme.Age(p.StatusChangedAt)},
+						table.Cell{Text: theme.Age(p.CreatedAt)},
 						table.Cell{Text: p.Agent},
 						table.Cell{Text: dash(p.Reviewer)},
 						table.Cell{Text: p.Branch},
@@ -666,7 +660,7 @@ func prInfoCmd() *cobra.Command {
 // lifecycleLine renders one milestone for a listing: when, what, who. Same fields as the TUI's,
 // worded for a terminal that is not redrawn.
 func lifecycleLine(ms api.PRMilestone) string {
-	line := fmt.Sprintf("%-6s %-12s", shortAge(ms.At), ms.Event)
+	line := fmt.Sprintf("%-6s %-12s", theme.Age(ms.At), ms.Event)
 	if ms.Who != "" {
 		line += " by " + ms.Who
 	}

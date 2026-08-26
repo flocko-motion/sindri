@@ -12,6 +12,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/ui/table"
+	"github.com/flo-at/sindri/internal/ui/theme"
 	"github.com/spf13/cobra"
 )
 
@@ -114,15 +115,15 @@ func runListCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				// store.AllRuns orders oldest first, so capTail keeps the newest `limit` — the same
-				// end chatLogCmd keeps from its own oldest-first transcript.
-				runs, matched := capTail(api.FilterRuns(f, all), limit)
+				// FleetRuns orders newest first, so the newest `limit` is the HEAD — the tail would now
+				// keep the oldest, which is the end of the list nobody opens this for.
+				runs, matched := capHead(api.FilterRuns(f, all), limit)
 				lines := make([]string, 0, len(runs))
 				for _, r := range runs {
 					lines = append(lines, runListTable.Line(
 						table.Cell{Text: r.ID},
 						table.Cell{Text: runStatusLabel(r)},
-						table.Cell{Text: shortAge(r.CreatedAt)},
+						table.Cell{Text: theme.Age(r.CreatedAt)},
 						table.Cell{Text: api.RunTook(r)},
 						table.Cell{Text: runRequester(r)},
 						table.Cell{Text: r.Command},

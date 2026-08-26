@@ -138,7 +138,7 @@ func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int,
 		// Who holds it, for the roles that plan around people — the PR's author included, since the
 		// name is most wanted once the work is submitted (-> api.AgentsByTask).
 		if namesHolders(c.Role) {
-			fmt.Fprintf(out, "agent:    %s\n", dash(e.holdersByTask(ps)[t.ID]))
+			fmt.Fprintf(out, "agent:    %s\n", dash(e.holdersByTask(ps)[t.ID].Agent))
 		}
 		fmt.Fprintf(out, "\n%s\n", dash(t.Description))
 		// The same thread the TUI pane and `task info` show: an agent that just filed a finding
@@ -171,7 +171,7 @@ func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int,
 	// hierarchy is how work is organised here (an openspec change parents its tasks), and a
 	// planner reads and repairs it from this view.
 	prs, _ := ps.PRs()
-	holders := map[string]string{}
+	holders := map[string]api.TaskHolder{}
 	if namesHolders(c.Role) {
 		holders = e.holdersByTask(ps)
 	}
@@ -188,7 +188,7 @@ func (e *Engine) CmdTasks(c registry.Caller, args []string, out io.Writer) (int,
 		}
 		who := ""
 		if namesHolders(c.Role) {
-			who = fmt.Sprintf("%-12s ", dash(holders[r.ID]))
+			who = fmt.Sprintf("%-12s ", dash(holders[r.ID].Agent))
 		}
 		fmt.Fprintf(out, "%-12s %-8s %-9s %-3s %s%s%s%s\n",
 			r.ID, r.Status, dash(r.Approval), dash(r.Priority), who, strings.Repeat("  ", r.Depth), r.Title, note)
@@ -341,7 +341,7 @@ func namesHolders(role string) bool { return role == "planner" || role == "coaut
 
 // holdersByTask names the agent behind each task by the rule both front-ends render, lifting the
 // roster into the board's view type rather than restating it (-> api.AgentsByTask).
-func (e *Engine) holdersByTask(ps *store.ProjectStore) map[string]string {
+func (e *Engine) holdersByTask(ps *store.ProjectStore) map[string]api.TaskHolder {
 	roster, err := ps.Roster()
 	if err != nil {
 		return nil

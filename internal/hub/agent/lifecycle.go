@@ -377,13 +377,13 @@ func previewSizeEnv(cols, lines int) map[string]string {
 	return map[string]string{"SINDRI_COLS": strconv.Itoa(cols), "SINDRI_LINES": strconv.Itoa(lines)}
 }
 
-// modelEnv is the model to launch on (-> sindri-agent.sh, both the --model flag and the status
-// line), or nothing when none is chosen — the account default, same as always.
+// modelEnv is the model to launch on (-> sindri-agent.sh): the id --model is given, plus the label
+// the status line shows, since shortening the id itself would change what the agent starts on.
 func modelEnv(model string) map[string]string {
 	if model == "" {
 		return nil
 	}
-	return map[string]string{"SINDRI_MODEL": model}
+	return map[string]string{"SINDRI_MODEL": model, "SINDRI_MODEL_LABEL": agentport.ShortModel(model)}
 }
 
 // prepareWorkspace lays down what /workspace will bind-mount: nothing to check out for a

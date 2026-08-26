@@ -87,3 +87,33 @@ func (t Table) Line(cells ...Cell) string {
 	}
 	return strings.Join(out, " ")
 }
+
+// PRList is the PR list's column set and order, shared so a column added for one front-end cannot
+// reach only that one — which is how "for" arrived on the TUI's PRs tab and never on `sindri pr
+// list`. statusW and tail stay each medium's own: a terminal column is scarce where a CLI line can
+// spell a status out, and the CLI's trailing "waiting on you" is a marker in the TUI.
+func PRList(statusW int, tail ...Column) Table {
+	t := Table{
+		{Label: "repo", Width: 10, Clip: true},
+		{Label: "pr", Width: 14},
+		{Label: "status", Width: statusW},
+		// How many times this PR has been put up, blank on a first attempt: "×4" is an author
+		// reworking, and a review doing its job looked identical to a submit loop before it.
+		{Label: "try", Width: 3, Right: true},
+		// The PAIR is the point: "for" is how long this status has held, "age" how old the PR is.
+		{Label: "for", Width: 4, Right: true},
+		{Label: "age", Width: 4, Right: true},
+		{Label: "agent", Width: 10},
+		{Label: "reviewer", Width: 10},
+		{Label: "branch"},
+	}
+	if len(tail) == 0 {
+		return t
+	}
+	// Branch takes the rest of the line unpadded, so a tail behind it needs it bounded first.
+	t[len(t)-1].Width = prListBranchW
+	return append(t, tail...)
+}
+
+// prListBranchW bounds branch when something follows it, fitting `<role>/<task-id>-<slug>`.
+const prListBranchW = 24

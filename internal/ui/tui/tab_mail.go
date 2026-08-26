@@ -17,6 +17,7 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/ui/table"
+	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
 // mailReadDwell is how long the cursor must rest on a message, body on screen, before it counts as
@@ -131,7 +132,7 @@ func (m model) mailRows() []row {
 			table.Cell{Text: dash(msg.Sender)},
 			table.Cell{Text: msg.Agent},
 			table.Cell{Text: state, Style: st.Render},
-			table.Cell{Text: shortAge(msg.SentAt), Style: dimStyle.Render},
+			table.Cell{Text: theme.Age(msg.SentAt), Style: dimStyle.Render},
 			table.Cell{Text: oneLineText(msg.Body)},
 		), api.MailID(msg.ID)}
 		// Grouped on WHO it is for, not which repo it came from: the repo column already says that, and
@@ -184,7 +185,7 @@ func (m model) mailItems() []metaItem {
 	}
 	read := "unread"
 	if msg.Read() {
-		read = "read " + shortAge(msg.ReadAt) + " ago"
+		read = "read " + theme.Age(msg.ReadAt) + " ago"
 	}
 	from := metaItem{text: "from:    " + dash(msg.Sender)}
 	if m.isAgent(msg.Sender) { // hub/user/reviewer aren't traceable; an agent's own name is

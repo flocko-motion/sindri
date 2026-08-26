@@ -1,6 +1,11 @@
 package agent
 
-import "testing"
+import (
+	"testing"
+
+	agentport "github.com/flo-at/sindri/internal/adapter/agent"
+	"github.com/flo-at/sindri/internal/adapter/agent/claude"
+)
 
 // TestPreviewSizeEnvOnlyWhenBothDimensionsSet: a launch with no preview (the CLI's every call)
 // must leave the session at tmux's own default — sindri-agent.sh only sizes it when both env vars
@@ -41,8 +46,16 @@ func TestModelEnvOnlyWhenChosen(t *testing.T) {
 		want  map[string]string
 	}{
 		{"none chosen", "", nil},
-		{"chosen", "claude-opus-5", map[string]string{"SINDRI_MODEL": "claude-opus-5"}},
+		// Two values, and the id is the one that must stay whole: it is what --model is given, while
+		// the label is only what the status bar shows (-> sindri-agent.sh).
+		{"chosen", "claude-opus-5", map[string]string{
+			"SINDRI_MODEL": "claude-opus-5", "SINDRI_MODEL_LABEL": "opus-5",
+		}},
 	}
+	// The REAL backend, because the label is its knowledge: against the no-op the shortening is a
+	// pass-through and this would assert nothing about it.
+	agentport.Use(claude.New())
+	t.Cleanup(func() { agentport.Use(unreadablePane{}) })
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			got := modelEnv(c.model)

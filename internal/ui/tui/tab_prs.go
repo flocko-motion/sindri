@@ -10,9 +10,7 @@ package tui
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -242,23 +240,9 @@ func (m *model) openReviewForm(prID string) {
 // prDetailW is the fixed width of the PRs tab's right detail column.
 const prDetailW = 44
 
-// prTable is the PRs list's columns, read by its header and every row alike.
-var prTable = table.Table{
-	{Label: "repo", Width: 10, Clip: true},
-	{Label: "pr", Width: 14},
-	{Label: "status", Width: 9},
-	// How many times this PR has been put up. Blank on a first attempt, which is most of them, so
-	// the column only speaks when there is something to say — "×4" is an author reworking, and the
-	// difference between a review doing its job and a submit loop was invisible before.
-	{Label: "try", Width: 3, Right: true},
-	// Two ages, and the pair is the point: "for" is how long it has held this status, "age" how long
-	// the PR has existed. A week-old PR that went approved an hour ago reads as both at once.
-	{Label: "for", Width: 4, Right: true},
-	{Label: "age", Width: 4, Right: true},
-	{Label: "agent", Width: 10},
-	{Label: "reviewer", Width: 10},
-	{Label: "branch"},
-}
+// prTable is the PRs list's columns, read by its header and every row alike — the shared set, with
+// a status column narrowed to what a terminal pane can spare (-> table.PRList).
+var prTable = table.PRList(9)
 
 func (m model) prRows() []row {
 	var foreign, local []row
@@ -296,9 +280,9 @@ func (m model) prRow(p api.PR) row {
 		table.Cell{Text: m.repoName(p.Project), Style: m.repoStyle(p.Project).Render},
 		table.Cell{Text: p.ID, Style: sc.Render},
 		table.Cell{Text: status, Style: sc.Render},
-		table.Cell{Text: attemptCell(p.Attempt), Style: sc.Render},
-		table.Cell{Text: shortAge(p.StatusChangedAt), Style: sc.Render},
-		table.Cell{Text: shortAge(p.CreatedAt), Style: sc.Render},
+		table.Cell{Text: theme.AttemptCell(p.Attempt), Style: sc.Render},
+		table.Cell{Text: theme.Age(p.StatusChangedAt), Style: sc.Render},
+		table.Cell{Text: theme.Age(p.CreatedAt), Style: sc.Render},
 		table.Cell{Text: p.Agent, Style: sc.Render},
 		table.Cell{Text: dash(p.Reviewer), Style: sc.Render},
 		table.Cell{Text: p.Branch, Style: sc.Render},
@@ -369,29 +353,10 @@ func prKindLabel(kind string) string {
 // statusHeldFor suffixes the detail's status line with how long the PR has worn it (" for 3d"), or
 // nothing at all on a row predating the column — an unadorned status beats one qualified by "-".
 func statusHeldFor(p api.PR) string {
-	if age := shortAge(p.StatusChangedAt); age != "-" {
+	if age := theme.Age(p.StatusChangedAt); age != theme.Unknown {
 		return dimStyle.Render(" for " + age)
 	}
 	return ""
-}
-
-// shortAge renders an RFC3339 timestamp compactly ("3d", "now"); "-" when missing, not a fake age.
-func shortAge(ts string) string {
-	t, err := time.Parse(time.RFC3339, ts)
-	if err != nil {
-		return "-"
-	}
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return "now"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%dd", int(d.Hours()/24))
-	}
 }
 
 // prListHeight is the height of the top-left PR list; the big content pane gets the rest.
@@ -682,14 +647,4 @@ func (m model) prDetailLines() []string {
 		ls = append(ls, strings.Split(strings.TrimRight(d.Diff, "\n"), "\n")...)
 	}
 	return ls
-}
-
-// attemptCell renders which submission is standing, blank for the first. Most PRs land on their
-// first, so marking those would fill the column with a number that never varies — what a reader
-// wants to spot is the one on its fourth.
-func attemptCell(n int) string {
-	if n < 2 {
-		return ""
-	}
-	return "×" + strconv.Itoa(n)
 }

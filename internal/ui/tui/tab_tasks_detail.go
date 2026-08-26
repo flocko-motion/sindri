@@ -64,11 +64,20 @@ func (m model) taskItemsFor(t api.Task, desc string, comments []api.Comment) []m
 	// One rule for who is behind the task, shared with the row marker and the CLI: a live claim,
 	// else the author of the PR under review — a submitted task still has an owner, and that is
 	// the reader's question when they open one that is waiting on a verdict.
-	assignee, pr := api.AgentOnTask(m.state.Agents, m.state.PRs, t.ID), ""
+	holder, pr := api.AgentOnTask(m.state.Agents, m.state.PRs, t.ID), ""
 	for _, p := range m.state.PRs {
 		if p.Task == t.ID && p.Status != "merged" {
 			pr = p.ID
 		}
+	}
+	// agentXref names the relationship beside the agent, never just the name: an agent holding a
+	// feature and working a leaf inside it appears against BOTH rows, and two identical lines read as
+	// two agents in one tree. The value stays the bare name, since that is what ENTER jumps to.
+	agentXref := func(h api.TaskHolder) metaItem {
+		if h.Agent == "" {
+			return metaItem{text: "agent:    -"}
+		}
+		return metaItem{text: "agent:    " + h.Agent + " — " + theme.TaskRelationLabel(h.Rel), kind: "agent", value: h.Agent}
 	}
 	xref := func(label, val, kind string) metaItem {
 		if val == "" {
@@ -100,7 +109,7 @@ func (m model) taskItemsFor(t api.Task, desc string, comments []api.Comment) []m
 	items = append(items, xref("parent:   ", t.ParentID, "task"))
 	items = append(items, childItems(m.state.Tasks, t.ID)...)
 	items = append(items,
-		xref("agent:    ", assignee, "agent"),
+		agentXref(holder),
 		xref("pr:       ", pr, "pr"),
 		xref("url:      ", t.URL, "url"), // e.g. the GitHub issue; enter copies it (onkey.go)
 		metaItem{text: "labels:   " + dash(t.Labels)},

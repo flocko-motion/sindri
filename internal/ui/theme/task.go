@@ -9,6 +9,7 @@ package theme
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -109,6 +110,27 @@ func ApprovalLabel(a string) string {
 		return "unapproved"
 	}
 	return a // "", "approved", "rejected" — each already says what it is
+}
+
+// TaskRelationLabel is the word for an agent's hold on a task, shared with the glyph the marker
+// column draws from the same relation — a mark and its explanation must not drift apart.
+func TaskRelationLabel(rel api.TaskRelation) string {
+	switch rel {
+	case api.TaskHolding:
+		return "holds this hierarchy"
+	case api.TaskSubmitted:
+		return "submitted it, awaiting a verdict"
+	}
+	return "working this task"
+}
+
+// AttemptCell renders which submission is standing, blank for the first: numbering the majority that
+// land first would bury the one on its fourth, which is what a reader scans for (-> table.PRList).
+func AttemptCell(n int) string {
+	if n < 2 {
+		return ""
+	}
+	return "×" + strconv.Itoa(n)
 }
 
 // FormatClients is shared by CLI `agent info` and the TUI detail view, so both read alike.

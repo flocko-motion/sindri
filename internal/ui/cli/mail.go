@@ -13,6 +13,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/ui/table"
+	"github.com/flo-at/sindri/internal/ui/theme"
 	"github.com/spf13/cobra"
 )
 
@@ -113,7 +114,7 @@ func mailLine(m api.Mail) string {
 		table.Cell{Text: dash(m.Sender)},
 		table.Cell{Text: m.Agent},
 		table.Cell{Text: state},
-		table.Cell{Text: shortAge(m.SentAt)},
+		table.Cell{Text: theme.Age(m.SentAt)},
 		table.Cell{Text: oneLine(m.Body, 80)},
 	)
 }
@@ -175,7 +176,7 @@ func mailShowState(m api.Mail, justRead bool) string {
 	case justRead:
 		return "read just now"
 	case m.Read():
-		return "read " + shortAge(m.ReadAt) + " ago"
+		return "read " + theme.Age(m.ReadAt) + " ago"
 	default:
 		return "unread"
 	}

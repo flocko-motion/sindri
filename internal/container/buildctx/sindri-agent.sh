@@ -50,10 +50,11 @@ set -g mode-keys vi
 set -g history-limit 50000
 TMUXCONF
 
-# Overrides status-left above, once the hub has a model to name (nothing on a first launch).
-# Stripped of '#'/'"': tmux's status format and this line's own quoting would read them as syntax.
+# Overrides status-left above, once the hub has a model to name. The LABEL, not the id: SINDRI_MODEL
+# is what --model is given. Stripped of '#'/'"', which tmux's status format would read as syntax.
 if [ -n "${SINDRI_MODEL:-}" ]; then
-	MODEL_SAFE="${SINDRI_MODEL//[\"#]/}"
+	MODEL_SAFE="${SINDRI_MODEL_LABEL:-$SINDRI_MODEL}"
+	MODEL_SAFE="${MODEL_SAFE//[\"#]/}"
 	cat >> "$HOME/.tmux.conf" <<TMUXMODEL
 set -g status-left "#[bold] sindri · #S ($MODEL_SAFE) #[default] "
 TMUXMODEL

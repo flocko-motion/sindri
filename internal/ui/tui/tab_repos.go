@@ -83,7 +83,7 @@ func (m model) repoItems() []metaItem {
 		{text: "tag:    " + tag},
 	}
 	if last != "" {
-		items = append(items, metaItem{text: "used:   " + shortAge(last) + " ago"})
+		items = append(items, metaItem{text: "used:   " + theme.Age(last) + " ago"})
 	}
 	items = append(items, metaItem{text: ""}, metaItem{text: "agents:"})
 	items = append(items, repoAgentItems(m.state.Agents, tag)...)

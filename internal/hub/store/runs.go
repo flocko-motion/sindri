@@ -51,8 +51,9 @@ func (p *ProjectStore) GetRun(id string) (Run, bool, error) {
 	return scanRun(p.s.db.QueryRow(runCols+` WHERE project=? AND id=?`, p.project, id))
 }
 
-// Runs returns this project's runs in the given statuses (empty = all), oldest first — the
-// order a queue reads naturally, before priority reorders the still-queued ones.
+// Runs returns this project's runs in the given statuses (empty = all), OLDEST FIRST — arrival order,
+// which is FIFO among runs the ranking cannot separate (-> workflow.queuePositions, whose last
+// tiebreak is a second-precision timestamp). The human-facing listing reverses it (-> FleetRuns).
 func (p *ProjectStore) Runs(statuses ...string) ([]Run, error) {
 	q := runCols + ` WHERE project=?`
 	args := []any{p.project}
@@ -66,8 +67,8 @@ func (p *ProjectStore) Runs(statuses ...string) ([]Run, error) {
 	return queryRuns(p.s.db, q, args...)
 }
 
-// AllRuns returns runs across every project in the given statuses (empty = all) — the global
-// board read, matching AllPRs.
+// AllRuns returns runs across every project in the given statuses (empty = all) — the global read,
+// matching AllPRs, and oldest first for the same reason Runs is.
 func (s *Store) AllRuns(statuses ...string) ([]Run, error) {
 	q := runCols
 	var args []any

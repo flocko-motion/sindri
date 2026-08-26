@@ -113,6 +113,7 @@ func (f fakeAgent) PrepareHome(agentport.HomeSpec) (agentport.Home, error) {
 	return agentport.Home{}, nil
 }
 func (f fakeAgent) RestageCredentials(string) (bool, error) { return false, nil }
+func (f fakeAgent) ShortModel(model string) string          { return model }
 func (f fakeAgent) HostTokenExpiry() (int64, bool)          { return 0, false }
 func (f fakeAgent) ContextUsage(string) (int, int, string, bool) {
 	if f.tokens == nil {

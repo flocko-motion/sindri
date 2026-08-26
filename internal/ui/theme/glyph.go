@@ -16,6 +16,7 @@ import "strconv"
 // only single-width icons: the Material Design range is drawn double and would undo that.
 const (
 	MarkAssigned = "\uf0ad" // nf-fa-wrench: a worker is on this task
+	MarkHolds    = "\uf0e8" // nf-fa-sitemap: a worker holds this whole hierarchy, not this row's work
 	MarkDialIn   = "\uf06e" // nf-fa-eye: humans attached to an agent's session
 	MarkWarning  = "\uf071" // nf-fa-warning: something is wrong and nobody has acted on it
 	MarkRetired  = "\uf04d" // nf-fa-stop: an agent being wound down
