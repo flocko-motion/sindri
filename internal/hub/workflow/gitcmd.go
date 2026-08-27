@@ -273,6 +273,17 @@ func rollbackNote(dropped []string) string {
 		len(dropped), strings.Join(dropped, "; "))
 }
 
+// deletedNote names the paths the reference never had, which drop DELETED rather than reverted.
+// "now match main exactly" is true of a deleted file and reads like a surviving one, and an agent
+// that expects its file back would find the gap only by tripping over it.
+func deletedNote(removed []string, refName string) string {
+	if len(removed) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" %s only ever existed on your branch, so dropping it deleted it — %s has no such path.",
+		FileList(removed), refName)
+}
+
 // gitDrop takes paths out of the agent's change for good: reverting COMMITTED work back to the
 // MERGE-BASE (not the reference's current tip, which `git change`'s three-dot diff never measures
 // against — dropping against anything else can leave the two disagreeing about the same file) and
@@ -307,7 +318,8 @@ func (e *Engine) gitDrop(c registry.Caller, wt, root string, paths []string, out
 		fmt.Fprintf(out, "%s already match %s exactly — nothing to drop, nothing recorded.\n", FileList(paths), refName)
 		return 0, nil
 	}
-	if err := git.RestoreFromRef(wt, target, paths); err != nil {
+	removed, err := git.RestoreFromRef(wt, target, paths)
+	if err != nil {
 		return 1, err
 	}
 	if !churn {
@@ -328,7 +340,8 @@ func (e *Engine) gitDrop(c registry.Caller, wt, root string, paths []string, out
 		return 1, err
 	}
 	_ = ps.Log(c.Agent, "drop", strings.Join(paths, ", ")+" (restored to "+target+")")
-	fmt.Fprintf(out, "Removed %s from your change and recorded that, so those files now match %s exactly. Your work in every other file is untouched.\n", FileList(paths), refName)
+	fmt.Fprintf(out, "Removed %s from your change and recorded that, so those files now match %s exactly.%s Your work in every other file is untouched.\n",
+		FileList(paths), refName, deletedNote(removed, refName))
 	return 0, nil
 }
 
