@@ -143,12 +143,18 @@
       the PRs group's own stated order. Moved after `scrap`, mirroring where Tasks'
       own `why next` sits relative to its verdicts. `TestWhyNoReviewSitsInThePRsBlock`
       pins the order.
-- [ ] 6.4 Non-blocking, NOT fixed — recorded in the proposal as its own follow-up: A/R
-      unreachable on a rejected-but-open task (`taskGated` vs `taskAwaitsVerdict`
-      disagree); `keyMerge`'s approve-then-merge branch dead from the keyboard
-      (`when: model.selPRApproved` excludes it before that path can run); shedding drops
-      declaration order, not necessarily usefulness order. Each is a behaviour question
-      needing its own task, per the reviewer's own framing.
+- [x] 6.4 Non-blocking, one of three fixed here; the other two are behaviour questions and
+      are filed as their own tasks, per the reviewer's own framing.
+      FIXED: A/R unreachable on a rejected-but-open task. `taskGated` (pending OR
+      rejected) is what onKey gates on and what the gate actually holds, so the keymap
+      row now carries it too — the rejected branch was unreachable, since the menu
+      refuses a letter it never offered. `TestARejectedTaskStillOffersAVerdict` pins it,
+      with both boundaries (pending still offers, closed and approved do not).
+      DEFERRED, sd-9b34c1: `keyMerge`'s approve-then-merge branch dead from the keyboard.
+      Widening the gate is a real decision rather than a repair — `TestMergeIsNotOffered\
+      OnAnUnapprovedPR` asserts today's behaviour deliberately, and the safety argument
+      (no keyboard route to merging an unreviewed PR) stands against the dead-path one.
+      DEFERRED, sd-6e972c: shedding drops declaration order, not usefulness order.
 
 ## 7. Review fixes, round 7
 

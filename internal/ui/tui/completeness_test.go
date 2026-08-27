@@ -117,16 +117,11 @@ type gateKey struct {
 // non-empty, which agentSelected does not fully capture (a real agent with no resolvable workspace
 // path would still read as selected) — the common, user-visible case is an orphan container, so
 // that is what is recorded.
-//
-// Known exception, not closed here: {0, keyApprove}/{0, keyReject} record taskAwaitsVerdict, but
-// onKey's own gate (taskGated) is wider — it also admits a rejected task, which taskAwaitsVerdict
-// does not. That gap is the revise-a-rejected-proposal behaviour question tasks.md 6.4 defers, not
-// a keymap/dispatcher drift this guard is meant to catch — recorded here so it reads as a decision.
 var dispatchGates = map[gateKey]func(model) bool{
 	{0, keyUnassign}:  taskHeld,
 	{0, keyClose}:     taskOpen,
-	{0, keyApprove}:   taskAwaitsVerdict,
-	{0, keyReject}:    taskAwaitsVerdict,
+	{0, keyApprove}:   model.taskGated,
+	{0, keyReject}:    model.taskGated,
 	{0, keyOptions}:   model.taskReopenable,
 	{1, keyTell}:      agentSelected,
 	{1, keyMail}:      agentSelected,

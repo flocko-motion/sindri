@@ -100,13 +100,6 @@ func taskHeld(m model) bool {
 	return false
 }
 
-// taskAwaitsVerdict: approve and reject decide a proposal, and a task nobody proposed has nothing
-// to decide. A verdict already given is not re-offered either.
-func taskAwaitsVerdict(m model) bool {
-	t, ok := m.selTask()
-	return ok && api.AwaitingVerdict(t)
-}
-
 // prDecidable: a PR still being decided takes a verdict or a review; a merged or scrapped one is
 // past all three.
 func prDecidable(m model) bool {
