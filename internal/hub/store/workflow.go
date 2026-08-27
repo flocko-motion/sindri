@@ -106,12 +106,14 @@ CREATE TABLE IF NOT EXISTS task_parent (
   parent_id TEXT NOT NULL,
   PRIMARY KEY (project, id)
 );
--- Durable priority we assign to tasks in our own db — survives the task-cache
--- rebuild. Used mainly for openspec items, which have no source priority.
+-- What sindri assigns locally to a task whose content belongs to another source —
+-- survives the task-cache rebuild. Both fields are sindri's own: no source carries
+-- a tier, and openspec items carry no priority either.
 CREATE TABLE IF NOT EXISTS task_priority (
   project  TEXT NOT NULL,
   id       TEXT NOT NULL,
   priority TEXT NOT NULL DEFAULT '',
+  tier     TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (project, id)
 );
 -- Review items attached to a PR. One row per requirement; its lifecycle is read

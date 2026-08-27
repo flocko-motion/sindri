@@ -659,3 +659,26 @@ func TestWorkerIdRefusalNamesTheWayBack(t *testing.T) {
 		t.Errorf("the refusal should point at the worker's own package:\n%s", out.String())
 	}
 }
+
+// TestTierIsSettableOnAMirroredTask: a task's CONTENT belongs to its source, but tier does not — no
+// source carries one, and it picks the model the work is handed to. Dropped here, every openspec
+// change sat at the default tier however senior the work was, and the CLI said "edited".
+func TestTierIsSettableOnAMirroredTask(t *testing.T) {
+	e, c, ps := plannerEngine(t, "os-9", "approved")
+	var out bytes.Buffer
+	if _, err := e.CmdEditTask(c, []string{"os-9", "--tier", "senior"}, &out); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got, err := ps.TierOverrides(); err != nil || got["os-9"] != "senior" {
+		t.Fatalf("the tier should be recorded for a mirrored task, got %v (err %v)", got, err)
+	}
+	// And it must reach the cached row the assigner reads, or it is stored somewhere nothing
+	// consults — the targeted refresh CmdEditTask already runs is what has to carry it.
+	task, ok, _ := ps.GetTask("os-9")
+	if !ok {
+		t.Fatal("the task is gone")
+	}
+	if task.Tier != "senior" {
+		t.Errorf("the tier did not reach the row the assigner reads: %q", task.Tier)
+	}
+}

@@ -207,9 +207,19 @@ func (e *Engine) EditTask(project, id string, s TaskSpec) error {
 		if err := ps.PutOwnedTask(owned); err != nil {
 			return err
 		}
-	} else if s.Priority != "" {
-		if err := ps.SetPriorityOverride(id, s.Priority); err != nil {
-			return err
+	} else {
+		// A mirrored task's CONTENT belongs to its source; priority and tier do not — no source
+		// carries either, so both are sindri's to assign on any task. Tier was dropped here, which
+		// left every openspec change stuck at the default and handed to a mid-tier model.
+		if s.Priority != "" {
+			if err := ps.SetPriorityOverride(id, s.Priority); err != nil {
+				return err
+			}
+		}
+		if s.Tier != "" {
+			if err := ps.SetTierOverride(id, s.Tier); err != nil {
+				return err
+			}
 		}
 	}
 	e.refreshCachedTask(project, id) // targeted refresh of the edited task

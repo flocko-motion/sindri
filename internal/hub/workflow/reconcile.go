@@ -62,6 +62,11 @@ func (e *Engine) refreshCachedTask(project, id string) {
 	if ov, oerr := ps.PriorityOverrides(); oerr == nil {
 		t.Priority = ov[id]
 	}
+	if ov, oerr := ps.TierOverrides(); oerr == nil {
+		if tier, set := ov[id]; set {
+			t.Tier = tier
+		}
+	}
 	// The parent too, for the reason the priority is here: both are the hub's, so a targeted refresh
 	// that skipped one showed a re-parented task as a root until some later full sync.
 	t.ParentID = ps.ParentOf(id)

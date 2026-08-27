@@ -55,6 +55,15 @@ func (e *Engine) syncTasks(project string, force bool) error {
 			}
 		}
 	}
+	// Tier the same way, and for the same reason: no source carries one, so it is sindri's to assign
+	// on any task — and it picks the model the work is handed to.
+	if ov, err := ps.TierOverrides(); err == nil {
+		for i := range rows {
+			if t, ok := ov[rows[i].ID]; ok {
+				rows[i].Tier = t
+			}
+		}
+	}
 	// Parentage is the hub's alone — no source carries it, so it is applied after the sources.
 	if links, err := ps.ParentLinks(); err == nil {
 		for i := range rows {

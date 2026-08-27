@@ -192,6 +192,7 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE pr_lint ADD COLUMN sha TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE runs ADD COLUMN commit_sha TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE submit_answers ADD COLUMN done INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE task_priority ADD COLUMN tier TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, a := range alters {
 		if _, err := db.Exec(a); err != nil && !strings.Contains(err.Error(), "duplicate column") {

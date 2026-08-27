@@ -548,6 +548,18 @@ func taskNewCmd() *cobra.Command {
 	return c
 }
 
+// editReport says where the task stands after an edit, read back from the hub. An echo of the
+// request would claim whatever was asked for: a mirrored task keeps its content at its own source
+// and takes only the fields sindri owns, so some flags land and others cannot.
+func editReport(b backend, id string) string {
+	t, err := b.TaskInfo(id)
+	if err != nil {
+		return fmt.Sprintf("edited %s, but reading it back failed: %v", id, err)
+	}
+	return fmt.Sprintf("%s is now: %s  [%s]  priority=%s tier=%s", id, t.Title, t.Status,
+		dash(t.Priority), dash(t.Tier))
+}
+
 func taskEditCmd() *cobra.Command {
 	var typ, priority, tier, parent, labels, desc, title string
 	c := &cobra.Command{
@@ -560,7 +572,9 @@ func taskEditCmd() *cobra.Command {
 				}); err != nil {
 					return err
 				}
-				fmt.Fprintf(os.Stderr, "edited %s\n", args[0])
+				// Read back rather than echoing the request: a mirrored task takes only what sindri
+				// owns, so "edited os-36fcbb" was printed over a tier that never moved.
+				fmt.Fprintln(os.Stderr, editReport(b, args[0]))
 				return nil
 			})
 		},
