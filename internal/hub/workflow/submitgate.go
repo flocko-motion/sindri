@@ -71,8 +71,8 @@ func ReplySubmitQuestion(n, of int, question string) string {
 	return fmt.Sprintf("Before this submit is taken — question %d of %d.\n\n%s\n\n"+
 		"Answer with `sindri submit \"<your answer>\"`. Your answer goes on the PR for the reviewer to "+
 		"read. Answer from the code, not from memory: if you have to go and look, that is the point of "+
-		"the question. Changing any code starts these questions over, since they are about the tree as "+
-		"it stands.", n, of, question)
+		"the question — and if answering means writing a test or fixing what you find, do that first. "+
+		"Your answers keep; what you submit is the tree as it stands when the last one lands.", n, of, question)
 }
 
 // ReplyAnswerTooShort refuses a token answer. It states the floor rather than judging the content,
@@ -96,15 +96,22 @@ func submitAnswerComments(answers []store.SubmitAnswer, agent string) []string {
 	return out
 }
 
-// askSubmitQuestions runs the questionnaire for one commit, reporting whether it asked something —
-// then the submit has not happened and the caller stops. The FIRST call carries the summary and
-// later ones answers, told apart by how many rows exist, so no new verb is needed.
+// askSubmitQuestions runs the questionnaire for one submit ATTEMPT, reporting whether it asked
+// something — then the submit has not happened and the caller stops. The FIRST call carries the
+// summary and later ones answers, told apart by how many rows exist.
+//
+// It stays on the sha the attempt opened at. Keyed on the CURRENT tree it reset itself: answering
+// these sends an author into the code, so doing it honestly asked everything again while answering
+// from memory sailed through — the gate rewarded the shallower answer.
 func (e *Engine) askSubmitQuestions(ps *store.ProjectStore, agent, sha, text string, emptyDiff bool, out io.Writer) (asked bool, err error) {
-	qs := submitQuestions(sha, emptyDiff)
-	rows, err := ps.SubmitAnswers(agent, sha)
+	open, rows, err := ps.OpenSubmitAnswers(agent)
 	if err != nil {
 		return false, err
 	}
+	if open != "" {
+		sha = open
+	}
+	qs := submitQuestions(sha, emptyDiff)
 	// Row 0 is the SUMMARY, which is also what says the questionnaire has begun — without it a second
 	// call is indistinguishable from the first, and the same question comes round for ever.
 	if len(rows) == 0 {

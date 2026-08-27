@@ -43,11 +43,13 @@ func TestSubmitAsksBeforeItTakes(t *testing.T) {
 	}
 }
 
-// TestEditingTheCodeStartsTheQuestionsOver: the answers are keyed on the COMMIT, so a change makes a
-// new sha and retires them with the tree they described. No invalidation logic of its own — the
-// answers describe the tree as submitted, or they describe nothing.
-func TestEditingTheCodeStartsTheQuestionsOver(t *testing.T) {
-	e, _, root, c := submitEngine(t)
+// TestEditingTheCodeDoesNotStartTheQuestionsOver is sudri's loop. The questions send an author into
+// the code, and "which test fails if you revert that?" is often unanswerable without writing one —
+// so keying the answers on the tree meant answering honestly reset the exercise, while answering
+// from memory sailed through. sudri wrote the test, was asked both questions again, and the second
+// time replied "unchanged from before". The gate rewarded the shallower answer.
+func TestEditingTheCodeDoesNotStartTheQuestionsOver(t *testing.T) {
+	e, ps, root, c := submitEngine(t)
 
 	var out bytes.Buffer
 	if _, err := e.CmdSubmit(c, []string{"my work"}, &out); err != nil {
@@ -62,17 +64,46 @@ func TestEditingTheCodeStartsTheQuestionsOver(t *testing.T) {
 		t.Fatalf("expected the second question, got %q", out.String())
 	}
 
-	// The author edits instead of answering: a new commit, so the questions begin again.
+	// The author does what question 2 asks: writes the test that proves the change.
 	wt := filepath.Join(root, ".worktrees", "bombur")
-	if err := os.WriteFile(filepath.Join(wt, "more.txt"), []byte("second thoughts\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(wt, "more_test.go"), []byte("the proving test\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	out.Reset()
-	if _, err := e.CmdSubmit(c, []string{"my work, again"}, &out); err != nil {
+	if _, err := e.CmdSubmit(c, []string{"TestFoo fails without it — I wrote it this round and checked by reverting."}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "question 1 of 2") {
+		t.Errorf("going to the code to answer must not re-ask what was already answered:\n%s", out.String())
+	}
+	runQueuedGate(t, e)
+	if _, exists, _ := ps.GetPR("pr-sd-1"); !exists {
+		t.Error("both questions answered, so the submit should have gone through")
+	}
+}
+
+// TestANewAttemptIsAskedAgain is the other half: a questionnaire closes with the submit it belongs
+// to, so a resubmission after a rejection is a fresh round rather than one already paid for.
+func TestANewAttemptIsAskedAgain(t *testing.T) {
+	e, ps, root, c := submitEngine(t)
+	if code, out := submitAll(t, e, c, "my work"); code != 0 {
+		t.Fatalf("submit: %d %s", code, out)
+	}
+	runQueuedGate(t, e)
+	if _, exists, _ := ps.GetPR("pr-sd-1"); !exists {
+		t.Fatal("precondition: the first submit should have landed")
+	}
+
+	if err := e.RejectPR("proj", "pr-sd-1", "another pass, please"); err != nil {
+		t.Fatal(err)
+	}
+	commitIn(t, filepath.Join(root, ".worktrees", "bombur"), "rework.txt", "answering the review\n", "rework")
+	var out bytes.Buffer
+	if _, err := e.CmdSubmit(c, []string{"reworked after the rejection"}, &out); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "question 1 of 2") {
-		t.Errorf("editing the code must restart the questions, got %q", out.String())
+		t.Errorf("a new round of review must be asked its own questions:\n%s", out.String())
 	}
 }
 
