@@ -116,23 +116,37 @@ func Proposal(projectRoot, name string) string {
 	return body
 }
 
-// OnMerged is a no-op: a change is archived at close/scrap time, not as a side effect of a merge.
-func (Source) OnMerged(root, taskID, note string) error { return nil }
+// OnMerged archives the change behind a merged os- PR. THIS is when a change is done: the same rule
+// the rest of the hub keeps — a task ends when its PR lands, never before. Archiving on the close
+// path instead let one `checkpoint` retire a change with 8 of its 10 tasks unticked, and the next
+// checkpoint escalated its author over an id that no longer resolved.
+func (Source) OnMerged(root, taskID, note string) error {
+	if task.OwnerOf(taskID) != task.OwnerOpenSpec {
+		return nil
+	}
+	name, ok := changeName(root, taskID)
+	if !ok {
+		return fmt.Errorf("%s merged, but its openspec change can't be resolved to archive", taskID)
+	}
+	return Archive(root, name)
+}
 
-// Finish archives (done) or removes (scrap) the change behind an os- id; handled is false for a
-// non-os id. An os id whose change can't be resolved is a real error (the id is a one-way hash).
+// Finish removes the change behind a SCRAPPED os- id and leaves a completed one alone: closing a
+// task is not what ends a change (-> OnMerged), and a scrap has no merge coming to end it. handled
+// is false for a non-os id. An os id whose change can't be resolved is a real error (the id is a
+// one-way hash).
 func (Source) Finish(root, taskID string, scrap bool) (bool, error) {
 	if task.OwnerOf(taskID) != task.OwnerOpenSpec {
 		return false, nil
+	}
+	if !scrap {
+		return true, nil // its PR archives it when it lands
 	}
 	name, ok := changeName(root, taskID)
 	if !ok {
 		return true, fmt.Errorf("%s: can't resolve its openspec change (re-sync and retry)", taskID)
 	}
-	if scrap {
-		return true, DeleteChange(root, name)
-	}
-	return true, Archive(root, name)
+	return true, DeleteChange(root, name)
 }
 
 // Comments: an openspec change keeps no thread of its own — ok is always false.

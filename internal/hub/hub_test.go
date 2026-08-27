@@ -325,15 +325,15 @@ func hasTaskTitled(tasks []store.Task, title string) bool {
 	return false
 }
 
-// TestCloseUnresolvableOpenspec covers the agnostic dispatch's failure path: closing
-// is routed by the task's backend, and an os- id that resolves to no known openspec
-// change (here a bogus one, with no openspec/ dir) errors clearly rather than
-// silently doing nothing. (A real os- close archives the change; that needs the
-// openspec CLI + a change, so it's exercised end-to-end, not here.)
-func TestCloseUnresolvableOpenspec(t *testing.T) {
+// TestClosingAnOpenspecTaskDoesNotArchiveIt: a change is done when its PR MERGES, the rule the rest
+// of the hub keeps for every task. Archiving on the close path meant one `checkpoint` — which closes
+// the subtask it finishes — retired a change with 8 of its 10 tasks unticked, and the next
+// checkpoint escalated its author over an id that no longer resolved. So closing no longer needs to
+// resolve the change at all, and an unresolvable id on this path is no longer an error.
+func TestClosingAnOpenspecTaskDoesNotArchiveIt(t *testing.T) {
 	h := newHub(t)
-	if err := h.wf.CloseTask(testProject, "os-abc123"); err == nil {
-		t.Fatalf("closing an unresolvable openspec row should error")
+	if err := h.wf.CloseTask(testProject, "os-abc123"); err != nil {
+		t.Fatalf("closing an openspec task should not reach for its change: %v", err)
 	}
 }
 
