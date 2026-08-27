@@ -28,8 +28,8 @@ CREATE INDEX IF NOT EXISTS mail_events_mail ON mail_events (project, mail, id);
 // The lifecycle vocabulary. Each names something that HAPPENED, so a reader reconstructs the
 // sequence rather than inferring it from flags that only ever report the latest state.
 const (
-	MailPushLanded = "push-landed" // send-keys accepted the text
-	MailPushFailed = "push-failed" // nothing was typed; the payload says why
+	MailPushLanded = "push-landed" // typed and submitted, and the pane did not contradict it
+	MailPushFailed = "push-failed" // nothing was typed, or the pane never showed it; the payload says which
 	MailAnnounced  = "announced"   // the recipient was told a message is waiting
 	MailRead       = "read"        // the recipient read it
 )

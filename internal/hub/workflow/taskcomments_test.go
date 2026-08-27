@@ -27,7 +27,7 @@ func TestAgentSeesCommentsOnTaskInfo(t *testing.T) {
 	if err := ps.PutOwnedTask(store.OwnedTask{ID: "td-9", Title: "a task", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatalf("seed task: %v", err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-9", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-9", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
 	deps := &stubDeps{root: root, comments: map[string][]store.Comment{"td-9": {
@@ -63,7 +63,7 @@ func TestAgentSeesNoCommentsSectionWhenThereAreNone(t *testing.T) {
 	if err := ps.PutOwnedTask(store.OwnedTask{ID: "td-9", Title: "a task", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatalf("seed task: %v", err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-9", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-9", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
 	e := New(st, &stubDeps{root: root})

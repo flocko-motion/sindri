@@ -17,9 +17,8 @@ import (
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
-// maxMessageLen is the longest message an agent may send, to the user or another agent — shared because
-// the reason is (brevity serves the reader), where the note grant and fleet ceiling guard the USER's
-// attention alone. Over-length is REFUSED, never truncated: a silent cut teaches nothing.
+// maxMessageLen is the longest message an agent may send anyone — one limit, since brevity serves the
+// reader either way. REFUSED over-length, never truncated: a silent cut teaches nothing.
 const maxMessageLen = 300
 
 // errPushDidNotLand answers a push-only delivery the wake gate refused — an injection failure returns
@@ -36,8 +35,7 @@ func senderFor(d workflow.Delivery) string {
 }
 
 // Deliver sends text to an agent the way d says. MAIL FIRST, so a crash between the two loses only the
-// wake. A push failure is silent once mail is written — the mailbox is the fallback; push-only, it is
-// returned instead, since nothing else would ever say the wake never landed.
+// wake, which the mailbox then absorbs; push-only, the failure is returned, nothing else saying it.
 func (h *Hub) Deliver(project, name, text string, d workflow.Delivery) error {
 	if !d.Sends() {
 		return fmt.Errorf("delivery to %s/%s asks for neither mail nor push, so it is not a message", project, name)
@@ -66,18 +64,16 @@ func (h *Hub) Deliver(project, name, text string, d workflow.Delivery) error {
 		}
 		return nil
 	}
-	// Under the hub's lifetime: a push is the hub telling an agent something on the fleet's timeline,
-	// and it must land whether or not whoever triggered it is still there (-> Hub.lifetime).
-	// Recorded per message: `pushed` only says send-keys was accepted (-> api.Mail.History).
+	// The hub's lifetime, not the caller's: a push must land whether or not whoever triggered it is
+	// still there. `pushed` means typed, submitted and not contradicted by the pane (-> api.Mail.History).
 	if err := h.agents.InjectWhenReady(h.lifetime, project, name, text); err != nil {
 		_ = ps.LogMail(mailID, store.MailPushFailed, err.Error())
 		// Said whatever the class. Three consecutive failures to one agent left no trace of WHY
-		// anywhere — its log records the text as inject-skipped, never the reason.
+		// anywhere — its log records the text as inject-skipped or inject-unconfirmed, never the reason.
 		fmt.Fprintf(os.Stderr, "hub: push to %s/%s did not land: %v\n", project, name, err)
-		// A push with no mail behind it IS the message, so a swallowed failure reads as delivered:
-		// NudgeMailWaiting marked hepti's mailbox announced off this nil and never announced again,
-		// turning one skipped inject into permanent silence. The real cause, not a bare sentinel —
-		// mail written still absorbs it, and the announcement retries until it lands.
+		// A push with no mail behind it IS the message, so a swallowed failure reads as delivered —
+		// NudgeMailWaiting announced hepti's mailbox off this nil once, and never again. The real cause,
+		// not a sentinel: mail written absorbs it, and the announcement retries until it lands.
 		if !d.Mail {
 			return err
 		}
@@ -90,9 +86,8 @@ func (h *Hub) Deliver(project, name, text string, d workflow.Delivery) error {
 	return nil
 }
 
-// MailAgent puts a user's message in an agent's mailbox and deliberately does NOT push it: choosing
-// mail over `tell` IS the choice not to interrupt. It therefore reaches an agent `tell` cannot — down,
-// restarting or signed out — since the signed-out refusal belongs to the push path alone.
+// MailAgent mailboxes a user's message and deliberately does NOT push it: choosing mail over `tell` IS
+// the choice not to interrupt, so it reaches an agent `tell` cannot — down, restarting or signed out.
 func (h *Hub) MailAgent(project, name, msg string) error {
 	if _, ok, err := h.store.For(project).GetAgent(name); err != nil {
 		return err
@@ -104,9 +99,8 @@ func (h *Hub) MailAgent(project, name, msg string) error {
 	return h.Deliver(project, name, "[user] "+msg, workflow.MailOnly.From(api.SenderUser))
 }
 
-// ReplyToMail is the user answering a message an agent sent them, from either front-end. The recipient
-// comes from the stored row for the same reason it does for an agent: whoever is reading the message
-// should not have to retype who wrote it.
+// ReplyToMail is the user answering an agent, from either front-end. The recipient comes from the
+// stored row: whoever is reading a message should not have to retype who wrote it.
 func (h *Hub) ReplyToMail(id int64, msg string) error {
 	original, ok, err := h.store.MailByID(id)
 	if err != nil {

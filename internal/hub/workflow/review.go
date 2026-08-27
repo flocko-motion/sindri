@@ -183,7 +183,8 @@ func (e *Engine) assignReview(project string, id int64, prID, reviewer, requirem
 			_ = ps.LogPR(prID, "checkout-failed", fmt.Sprintf("%s into %s: %v", pr.Branch, a.Workspace, coErr))
 		}
 	}
-	_ = hs.SetState(store.AgentState{Agent: reviewer, Phase: "reviewing"}) // board shows it working, not idle
+	// board shows it working, not idle
+	_ = hs.SetState(store.AgentState{Agent: reviewer, Phase: "reviewing"}, store.ReasonClaimed, "assigned to review "+prID)
 	_ = ps.LogPR(prID, "review-requested", "assigned to "+reviewer)
 	go e.deps.Deliver(home, reviewer, MsgReview(prID, requirement, pr.Branch, pr.Base, e.deps.ArchitectureDoc(project), checkedOut), MailAndPush) // async: don't block a worker's submit
 	e.deps.Notify()
@@ -230,7 +231,8 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 		if err := hps.CloseReviews(held, "overtaken: the PR was "+pr.Status+" before a verdict"); err != nil {
 			return "", false, err
 		}
-		_ = ps.SetState(store.AgentState{Agent: name, Phase: restPhase("reviewer")})
+		_ = ps.SetState(store.AgentState{Agent: name, Phase: restPhase("reviewer")},
+			store.ReasonFreed, "review overtaken: "+held+" was "+pr.Status+" before a verdict")
 		_ = e.deps.Deliver(project, name, MsgReviewCancelled(held), MailAndPush)
 	}
 	if e.retired(project, name) {
@@ -289,7 +291,7 @@ func (e *Engine) releaseReviewers(project, prID, why string) {
 		if r.Author == "" || r.Verdict != "" {
 			continue
 		}
-		_ = ps.SetState(store.AgentState{Agent: r.Author, Phase: restPhase("reviewer")})
+		_ = ps.SetState(store.AgentState{Agent: r.Author, Phase: restPhase("reviewer")}, store.ReasonFreed, why)
 		_ = e.deps.Deliver(project, r.Author, MsgReviewCancelled(prID), MailAndPush)
 	}
 	e.deps.Notify()

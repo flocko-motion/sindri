@@ -116,9 +116,9 @@ type BoardState struct {
 	// views exist, and the badge each shows. They ride on the board so a front-end renders the
 	// counts instead of deciding them (-> SectionAttention).
 	Sections []Section `json:"sections,omitempty"`
-	// Mail is the newest messages agents must read, fleet-wide, newest first — a WINDOW, with each
-	// body cut to a preview. MailTotal and MailUnread count the whole mailbox, so a view says
-	// "showing the last N of M" rather than presenting a window as the history (-> MailWindow).
+	// Mail is fleet-wide, newest first, each body cut to a preview — a WINDOW bounding only its READ
+	// end: unread rides regardless of age (-> MailWindow). MailTotal/MailUnread count the whole
+	// mailbox, so a view can say how much its window leaves out rather than pass it off as the history.
 	Mail       []Mail `json:"mail,omitempty"`
 	MailTotal  int    `json:"mailTotal"`
 	MailUnread int    `json:"mailUnread"`

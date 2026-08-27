@@ -80,7 +80,7 @@ func TestContributeThenMergeKeepsTaskOpen(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: agent, Role: "worker", Workspace: filepath.Join(".worktrees", agent)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: agent, Task: task, Branch: branch, Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: agent, Task: task, Branch: branch, Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	// The worker made progress it wants to land mid-task.

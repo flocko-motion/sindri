@@ -7,8 +7,8 @@ import "testing"
 // the detail could not answer once nothing held the task any more.
 func TestASubmittedTaskStillHasAnOwner(t *testing.T) {
 	prs := []PR{{ID: "pr-1", Task: "sd-1", Agent: "bombur", Status: "open"}}
-	if got := AgentOnTask(nil, prs, "sd-1"); got != "bombur" {
-		t.Errorf("agent on a submitted task = %q, want its PR's author", got)
+	if got := AgentOnTask(nil, prs, "sd-1"); got.Agent != "bombur" || got.Rel != TaskSubmitted {
+		t.Errorf("agent on a submitted task = %+v, want bombur as its PR's author", got)
 	}
 }
 
@@ -17,8 +17,8 @@ func TestASubmittedTaskStillHasAnOwner(t *testing.T) {
 func TestALiveClaimOutranksAnOldPR(t *testing.T) {
 	agents := []AgentView{{Name: "nori", Task: "sd-1"}}
 	prs := []PR{{ID: "pr-1", Task: "sd-1", Agent: "bombur", Status: "rejected"}}
-	if got := AgentOnTask(agents, prs, "sd-1"); got != "nori" {
-		t.Errorf("agent = %q, want the one working it now", got)
+	if got := AgentOnTask(agents, prs, "sd-1"); got.Agent != "nori" || got.Rel != TaskWorking {
+		t.Errorf("agent = %+v, want nori, working it now", got)
 	}
 }
 
@@ -28,11 +28,13 @@ func TestALiveClaimOutranksAnOldPR(t *testing.T) {
 func TestAFeatureNamesTheAgentHoldingIt(t *testing.T) {
 	agents := []AgentView{{Name: "dvalin", Task: "sd-2", Feature: "sd-1"}}
 	by := AgentsByTask(agents, nil)
-	if by["sd-1"] != "dvalin" {
-		t.Errorf("feature owner = %q, want dvalin", by["sd-1"])
+	// The SAME agent against both rows, told apart by the relation — the two lines that read as two
+	// agents in one tree before this carried it.
+	if by["sd-1"] != (TaskHolder{Agent: "dvalin", Rel: TaskHolding}) {
+		t.Errorf("feature owner = %+v, want dvalin holding it", by["sd-1"])
 	}
-	if by["sd-2"] != "dvalin" {
-		t.Errorf("subtask owner = %q, want dvalin — it is the task in hand", by["sd-2"])
+	if by["sd-2"] != (TaskHolder{Agent: "dvalin", Rel: TaskWorking}) {
+		t.Errorf("subtask owner = %+v, want dvalin working it", by["sd-2"])
 	}
 }
 
@@ -41,8 +43,8 @@ func TestAFeatureNamesTheAgentHoldingIt(t *testing.T) {
 func TestAFinishedPRNamesNobody(t *testing.T) {
 	for _, status := range []string{"merged", "scrapped"} {
 		prs := []PR{{ID: "pr-1", Task: "sd-1", Agent: "bombur", Status: status}}
-		if got := AgentOnTask(nil, prs, "sd-1"); got != "" {
-			t.Errorf("%s PR named %q; nobody is working that task", status, got)
+		if got := AgentOnTask(nil, prs, "sd-1"); got.Agent != "" {
+			t.Errorf("%s PR named %+v; nobody is working that task", status, got)
 		}
 	}
 }
@@ -50,7 +52,7 @@ func TestAFinishedPRNamesNobody(t *testing.T) {
 // TestATaskNobodyHoldsNamesNobody, so a caller can print the field without checking twice.
 func TestATaskNobodyHoldsNamesNobody(t *testing.T) {
 	agents := []AgentView{{Name: "nori", Task: "sd-9"}}
-	if got := AgentOnTask(agents, nil, "sd-1"); got != "" {
-		t.Errorf("agent on an unheld task = %q, want none", got)
+	if got := AgentOnTask(agents, nil, "sd-1"); got.Agent != "" {
+		t.Errorf("agent on an unheld task = %+v, want none", got)
 	}
 }

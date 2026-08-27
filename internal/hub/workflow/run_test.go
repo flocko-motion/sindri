@@ -201,3 +201,91 @@ func TestCmdScheduleRun(t *testing.T) {
 		t.Fatalf("scheduled run wrong: %+v", runs)
 	}
 }
+
+// TestTheRunsListingLeadsWithTheNewest is the reported complaint: the thing that just happened sat
+// at the bottom of a growing list. Both front-ends render what FleetRuns returns, so the order is
+// settled once, here.
+func TestTheRunsListingLeadsWithTheNewest(t *testing.T) {
+	e, _ := runEngine(t)
+	var ids []string
+	for _, cmd := range []string{"first", "second", "third"} {
+		r, err := e.ScheduleRun("repo", "bombur", cmd, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, r.ID)
+	}
+	fleet, err := e.FleetRuns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fleet) != 3 {
+		t.Fatalf("want 3 runs, got %d", len(fleet))
+	}
+	if fleet[0].ID != ids[2] || fleet[2].ID != ids[0] {
+		t.Errorf("listing runs %s…%s, want the newest first and the oldest last",
+			fleet[0].Command, fleet[2].Command)
+	}
+}
+
+// TestTheNewestIsByTimeNotArrival: the runs above share a timestamp, since created_at is stamped to
+// the second, so reversing arrival order is all that separates them. Given stamps that DIFFER, the
+// listing must lead with the latest one — which is the claim the order is actually making.
+func TestTheNewestIsByTimeNotArrival(t *testing.T) {
+	e, ps := runEngine(t)
+	// Inserted OLDEST LAST, so a listing that merely echoed the store would lead with the wrong one.
+	for _, r := range []store.Run{
+		{ID: "run-old", Agent: "bombur", Command: "old", CreatedAt: "2026-08-01T10:00:00Z"},
+		{ID: "run-new", Agent: "bombur", Command: "new", CreatedAt: "2026-08-03T10:00:00Z"},
+		{ID: "run-mid", Agent: "bombur", Command: "mid", CreatedAt: "2026-08-02T10:00:00Z"},
+	} {
+		if err := ps.PutRun(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fleet, err := e.FleetRuns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range fleet {
+		got = append(got, r.Command)
+	}
+	if len(got) != 3 || got[0] != "new" || got[1] != "mid" || got[2] != "old" {
+		t.Errorf("listing = %v, want new, mid, old", got)
+	}
+}
+
+// TestReversingTheListingLeavesTheQueueFIFO is the half the flip could have broken quietly. Position
+// comes from queuePositions, whose last tiebreak is a second-precision timestamp — runs queued inside
+// one second are equal there and fall to sort stability, which reads the order the rows arrived in.
+// So the reversal happens AFTER ranking, and the store keeps handing them over oldest first.
+func TestReversingTheListingLeavesTheQueueFIFO(t *testing.T) {
+	e, _ := runEngine(t)
+	var ids []string
+	for _, cmd := range []string{"first", "second", "third"} { // same second, so all tiebreaks are equal
+		r, err := e.ScheduleRun("repo", "bombur", cmd, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, r.ID)
+	}
+	fleet, err := e.FleetRuns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pos := map[string]int{}
+	for _, r := range fleet {
+		pos[r.ID] = r.Position
+	}
+	for i, id := range ids {
+		if pos[id] != i+1 {
+			t.Errorf("run %d of 3 queued is at position %d, want %d — first in, first out",
+				i+1, pos[id], i+1)
+		}
+	}
+	// And the scheduler agrees with the positions the listing shows.
+	if _, next, ok := e.NextQueuedRun(); !ok || next != ids[0] {
+		t.Errorf("next to run = %q, want the first queued %q", next, ids[0])
+	}
+}

@@ -3,18 +3,29 @@ package hub
 import (
 	"strings"
 	"testing"
+
+	"github.com/flo-at/sindri/internal/api"
 )
 
 // TestTheBoardCarriesAWindowAndCountsTheWholeMailbox: the mailbox is never pruned, so what has to be
-// bounded is the render. The board carries the newest MailWindow messages — and the tallies beside
-// them count EVERYTHING, which is what lets a view say "showing the last N of M" instead of
-// presenting its window as the history.
+// bounded is the render — and only the READ end of it, so a badge never counts a message no list can
+// reach (sd-ca8929). The tallies beside the window count EVERYTHING, which is what lets a view say
+// "showing the last N of M" instead of presenting its window as the history.
 func TestTheBoardCarriesAWindowAndCountsTheWholeMailbox(t *testing.T) {
 	h := newHub(t)
 	ps := h.store.For(testProject)
 	const over = MailWindow + 6
+	var oldestUnread AgentMail
 	for i := 0; i < over; i++ {
-		if _, err := ps.AddMail("dvalin", "hub", "message", false, 0); err != nil {
+		m, err := ps.AddMail("dvalin", "hub", "message", false, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			oldestUnread = m // stays unread — older than a read-only window could ever reach
+			continue
+		}
+		if err := ps.MarkMailRead(m.ID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -25,18 +36,57 @@ func TestTheBoardCarriesAWindowAndCountsTheWholeMailbox(t *testing.T) {
 	if len(window) != MailWindow {
 		t.Errorf("the window should hold %d messages, got %d", MailWindow, len(window))
 	}
-	if total != over || unread != over {
-		t.Errorf("the tallies count the whole mailbox, got total=%d unread=%d, want %d", total, unread, over)
+	found := false
+	for _, m := range window {
+		if m.ID == oldestUnread.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the one unread message must ride in the window despite being the oldest of all")
+	}
+	if total != over || unread != 1 {
+		t.Errorf("the tallies count the whole mailbox, got total=%d unread=%d, want %d and 1", total, unread, over)
 	}
 	if userUnread != 0 {
 		t.Errorf("none of this is addressed to the user, so its own tally is %d, want 0", userUnread)
 	}
-	if byRepo[testProject] != over {
-		t.Errorf("unread per repo = %v, want %d for %s", byRepo, over, testProject)
+	if byRepo[testProject] != 1 {
+		t.Errorf("unread per repo = %v, want 1 for %s", byRepo, testProject)
 	}
 	// Each row carries its repo, resolved by the hub, so a front-end renders rather than resolves it.
 	if window[0].Repo == "" {
 		t.Errorf("a row should carry its repo name: %+v", window[0])
+	}
+}
+
+// TestTheBadgeAndTheWindowAgreeByConstruction pins sd-ca8929's actual fix, not just its repro: since
+// every unread message rides in the window regardless of age, the fleet-wide unread tally and a plain
+// count over the board's own Mail slice must always match — no second rule needed to keep them in
+// step, and none left to drift.
+func TestTheBadgeAndTheWindowAgreeByConstruction(t *testing.T) {
+	h := newHub(t)
+	ps := h.store.For(testProject)
+	const over = MailWindow + 10
+	for i := 0; i < over; i++ {
+		m, err := ps.AddMail("dvalin", "hub", "message", false, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Every third message stays unread, scattered across the whole age range rather than bunched
+		// at one end — the shape most likely to expose a window that only fixed one of them.
+		if i%3 != 0 {
+			if err := ps.MarkMailRead(m.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	board, err := h.State("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := api.CountUnreadMail(board.Mail); got != board.MailUnread {
+		t.Errorf("the window's own unread count = %d, the badge = %d — they must agree", got, board.MailUnread)
 	}
 }
 

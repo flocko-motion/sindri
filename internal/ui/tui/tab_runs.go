@@ -107,7 +107,7 @@ func (m model) runRows() []row {
 			table.Cell{Text: m.repoName(r.Project), Style: m.repoStyle(r.Project).Render},
 			table.Cell{Text: r.ID},
 			table.Cell{Text: runStatusLabel(r)},
-			table.Cell{Text: shortAge(r.CreatedAt)},
+			table.Cell{Text: theme.Age(r.CreatedAt)},
 			table.Cell{Text: api.RunTook(r)},
 			table.Cell{Text: runRequester(r)},
 			table.Cell{Text: r.Command},

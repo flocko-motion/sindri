@@ -90,7 +90,7 @@ func TestResolveAfterReapplyConflictResumesAnEstablishedFeature(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The shape workflow/merge.go's own reset step leaves: Task is the real subtask, not pr.Task.
-	if err := ps.SetState(store.AgentState{Agent: "dain", Task: "td-1", Branch: "td-EPIC", Container: "td-EPIC", Phase: "resolving"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dain", Task: "td-1", Branch: "td-EPIC", Container: "td-EPIC", Phase: "resolving"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(wt, "seed"), []byte("resolved\n"), 0o644); err != nil {
@@ -122,7 +122,7 @@ func TestResolveAfterReapplyConflictResumesAJustPromotedFeature(t *testing.T) {
 		t.Fatal(err)
 	}
 	// promoteToFeature's own shape (-> adopt.go): Container set, Task left empty.
-	if err := ps.SetState(store.AgentState{Agent: "dain", Task: "", Branch: "td-EPIC", Container: "td-EPIC", Phase: "resolving"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dain", Task: "", Branch: "td-EPIC", Container: "td-EPIC", Phase: "resolving"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(wt, "seed"), []byte("resolved\n"), 0o644); err != nil {

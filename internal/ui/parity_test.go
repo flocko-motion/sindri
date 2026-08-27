@@ -36,6 +36,8 @@ var oneSided = map[string]string{
 		"call, so the repair happens either way and neither user asks for it",
 	"ScrapPR": "the TUI scraps a task's PR alongside the task; the CLI reaches the same thing with " +
 		"`task delete --prs`, which the hub applies server-side",
+	"StateLog": "a debug instrument for diagnosing a puzzling status (`agent states`), not a " +
+		"user-facing behaviour — nothing on the board reads it (sd-a72056)",
 }
 
 // TestEveryClientMethodIsReachableFromBothFrontEnds enforces ARCHITECTURE.md:42. A method only one

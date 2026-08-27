@@ -92,7 +92,7 @@ func TestExplainNextAnswersForAnAgent(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "bombur", Role: "worker", Retired: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "bombur", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "bombur", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	e := New(st, &stubDeps{root: t.TempDir()})
@@ -142,7 +142,7 @@ func TestExplainNextRulesOutARetiredOrClearArmedAgent(t *testing.T) {
 			if err := ps.PutAgent(a); err != nil {
 				t.Fatal(err)
 			}
-			if err := ps.SetState(store.AgentState{Agent: "bombur", Phase: "idle"}); err != nil {
+			if err := ps.SetState(store.AgentState{Agent: "bombur", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 				t.Fatal(err)
 			}
 			e := New(st, &stubDeps{root: t.TempDir()})

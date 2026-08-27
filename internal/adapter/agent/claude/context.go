@@ -36,6 +36,18 @@ var windows = []struct {
 	{"haiku", 200_000},
 }
 
+// modelPrefix is the vendor prefix every Claude model id carries. It therefore distinguishes nothing,
+// in a column sitting beside the context fill and the agent name.
+const modelPrefix = "claude-"
+
+// ShortModel implements agent.Agent: the model as a column wants it, the vendor prefix gone. DISPLAY
+// ONLY — the full id is what ModelWindow matches on and what the dispatcher compares, so it is
+// shortened where it is rendered and nowhere earlier. An id WITHOUT the prefix comes back unchanged:
+// "I do not know this model" must not render as "this agent has no model".
+func (Claude) ShortModel(model string) string {
+	return strings.TrimPrefix(model, modelPrefix)
+}
+
 // ModelWindow implements agent.Agent: model's window, ok=false when it matches nothing in the table
 // above — refuse rather than guess, since a window this can't state is fullness it can't judge.
 func (Claude) ModelWindow(model string) (window int, ok bool) {

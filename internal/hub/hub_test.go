@@ -359,7 +359,7 @@ func TestCloseFreesWorkingAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	ps := h.store.For(tag)
-	_ = ps.SetState(store.AgentState{Agent: "eitri", Task: id, Branch: id, Phase: "working"})
+	_ = ps.SetState(store.AgentState{Agent: "eitri", Task: id, Branch: id, Phase: "working"}, store.ReasonClaimed, "test setup")
 
 	if err := h.wf.CloseTask(tag, id); err != nil { // must NOT refuse just because eitri holds it
 		t.Fatalf("closing a held task should be allowed: %v", err)

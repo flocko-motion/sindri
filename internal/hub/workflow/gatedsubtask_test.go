@@ -49,7 +49,7 @@ func gatedFeature(t *testing.T) (*Engine, *store.ProjectStore, registry.Caller) 
 	}
 	if err := ps.SetState(store.AgentState{
 		Agent: agent, Container: "td-EPIC", Branch: "td-EPIC", Task: "td-1", Phase: "working",
-	}); err != nil {
+	}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, ".worktrees", agent, "feature.txt"), []byte("built\n"), 0o644); err != nil {
@@ -104,7 +104,7 @@ func TestAGatedFeatureWaitsRatherThanBeingDeclaredDone(t *testing.T) {
 	if err := e.RefreshTask("repo", "td-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 

@@ -21,7 +21,7 @@ func compactFixture(t *testing.T) (*Service, *fakeRuntime) {
 	if err := st.For("proj").PutAgent(store.Agent{Name: "durin", Role: "worker"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.For("proj").SetState(store.AgentState{Agent: "durin", Phase: "idle"}); err != nil {
+	if err := st.For("proj").SetState(store.AgentState{Agent: "durin", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	f := &fakeRuntime{pane: idlePane}
@@ -76,7 +76,7 @@ func TestCompactInjectsAndForgetsTheMemo(t *testing.T) {
 func TestCompactRefusesMidTask(t *testing.T) {
 	s, f := compactFixture(t)
 	writeUsage(t, "proj", "durin", 80_000)
-	if err := s.store.For("proj").SetState(store.AgentState{Agent: "durin", Task: "td-1", Phase: "working"}); err != nil {
+	if err := s.store.For("proj").SetState(store.AgentState{Agent: "durin", Task: "td-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 

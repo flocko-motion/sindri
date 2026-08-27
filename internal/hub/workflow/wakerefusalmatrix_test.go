@@ -49,7 +49,7 @@ func (c wakeRefusalCase) build(t *testing.T) *Engine {
 			}
 		}
 	}
-	if err := ps.SetState(state); err != nil {
+	if err := ps.SetState(state, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	if c.escalated {

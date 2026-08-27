@@ -183,7 +183,7 @@ func TestARetiredAgentHoldingNothingIsLeftAlone(t *testing.T) {
 func TestAnAgentHoldingWorkIsWoken(t *testing.T) {
 	deps := &stubDeps{}
 	e, ps := idleAgentWithMail(t, deps)
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "sd-1", Branch: "sd-1", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "sd-1", Branch: "sd-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	if !e.NudgeMailWaiting("proj", "dvalin") {

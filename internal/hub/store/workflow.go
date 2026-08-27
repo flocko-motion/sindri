@@ -9,6 +9,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -52,6 +53,19 @@ CREATE TABLE IF NOT EXISTS agent_state (
   last_nudge TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (project, agent)
 );
+-- Debug telemetry, not the activity log (events, above): every SetState/SetPhase write, and every
+-- distinct derived-status-word change the hub notices, so a puzzling status is a query rather than a
+-- captured pane and a classifier run by hand. Purged whole at hub restart (-> store.Open) and capped
+-- per agent at write time (-> stateLogCap) — never durable, so it can afford to be noisy.
+CREATE TABLE IF NOT EXISTS state_log (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  project TEXT NOT NULL,
+  agent   TEXT NOT NULL,
+  ts      TEXT NOT NULL,
+  reason  TEXT NOT NULL,
+  detail  TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_state_log_agent ON state_log (project, agent, id);
 CREATE TABLE IF NOT EXISTS prs (
   project    TEXT NOT NULL,
   id         TEXT NOT NULL,  -- pr-<task>
@@ -186,6 +200,70 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 `
 
+// StateReason is why an agent's stored state changed, or why its DERIVED status word did — a small
+// closed set, not free text, so a transition is grep-able rather than decaying into "state changed".
+type StateReason string
+
+const (
+	ReasonClaimed   StateReason = "claimed"   // started new work: a task, a subtask, a held container
+	ReasonAdvanced  StateReason = "advanced"  // moved within held work: gating, resolving, the next subtask
+	ReasonRejected  StateReason = "rejected"  // sent back for more work
+	ReasonLanded    StateReason = "landed"    // merged or approved — the work is done
+	ReasonFreed     StateReason = "freed"     // released back to resting: closed, scrapped, unassigned, discarded
+	ReasonEscalated StateReason = "escalated" // stopped on a question only the user can answer
+	ReasonStatus    StateReason = "status"    // the DERIVED status word changed (-> statuswatch.go), not a stored write
+)
+
+// stateLogCap bounds state_log per agent: purge-at-restart (-> store.Open) alone still lets a hub up
+// for weeks hold weeks of a flickering derived word, so writing trims the tail too.
+const stateLogCap = 500
+
+// LogState appends a state-log row and trims that agent's history back to stateLogCap, oldest first
+// — debug telemetry, not the activity log (-> state_log's own schema comment).
+func (p *ProjectStore) LogState(agent string, reason StateReason, detail string) error {
+	if _, err := p.s.db.Exec(
+		`INSERT INTO state_log (project, agent, ts, reason, detail) VALUES (?,?,?,?,?)`,
+		p.project, agent, time.Now().UTC().Format(time.RFC3339), string(reason), detail); err != nil {
+		return fmt.Errorf("log state for %s/%s: %w", p.project, agent, err)
+	}
+	if _, err := p.s.db.Exec(
+		`DELETE FROM state_log WHERE project=? AND agent=? AND id NOT IN
+		 (SELECT id FROM state_log WHERE project=? AND agent=? ORDER BY id DESC LIMIT ?)`,
+		p.project, agent, p.project, agent, stateLogCap); err != nil {
+		return fmt.Errorf("trim state log for %s/%s: %w", p.project, agent, err)
+	}
+	return nil
+}
+
+// StateEvent is one row of the debug state log; it crosses the wire, so it is internal/api.StateEvent
+// under the name every existing caller here already uses.
+type StateEvent = api.StateEvent
+
+// StateLog returns an agent's state-log rows, newest first, capped at limit (limit <= 0 means all —
+// bounded anyway by stateLogCap's own trim on write).
+func (p *ProjectStore) StateLog(agent string, limit int) ([]StateEvent, error) {
+	q := `SELECT id, project, agent, ts, reason, detail FROM state_log WHERE project=? AND agent=? ORDER BY id DESC`
+	args := []any{p.project, agent}
+	if limit > 0 {
+		q += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	rows, err := p.s.db.Query(q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("state log for %s/%s: %w", p.project, agent, err)
+	}
+	defer rows.Close()
+	var out []StateEvent
+	for rows.Next() {
+		var e StateEvent
+		if err := rows.Scan(&e.ID, &e.Project, &e.Agent, &e.TS, &e.Reason, &e.Detail); err != nil {
+			return nil, fmt.Errorf("scan state log for %s/%s: %w", p.project, agent, err)
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 // AgentState is an agent's live workflow state (durable, D11).
 type AgentState struct {
 	Agent     string `json:"agent"`
@@ -227,10 +305,10 @@ func (p *ProjectStore) GetState(agent string) (AgentState, error) {
 	return st, nil
 }
 
-// SetState writes an agent's workflow state, leaving the escalation alone: callers build a fresh
-// AgentState from the columns they care about, so writing that one from the struct would clear a live
-// escalation on the next phase change. SetEscalation and ClearEscalation are its only writers.
-func (p *ProjectStore) SetState(st AgentState) error {
+// SetState writes an agent's workflow state, leaving the escalation alone (its only writers are
+// SetEscalation/ClearEscalation). reason and detail are required (-> StateReason). A state_log
+// failure is logged, not returned: telemetry must not fail the write it observes.
+func (p *ProjectStore) SetState(st AgentState, reason StateReason, detail string) error {
 	if st.Phase == "" {
 		st.Phase = "idle"
 	}
@@ -241,13 +319,29 @@ func (p *ProjectStore) SetState(st AgentState) error {
 	if err != nil {
 		return fmt.Errorf("set state %s: %w", st.Agent, err)
 	}
+	if lerr := p.LogState(st.Agent, reason, detail+whatChanged(st.Phase, st.Task, st.Container)); lerr != nil {
+		log.Printf("hub: %v", lerr)
+	}
 	return nil
 }
 
+// whatChanged appends the written phase (and task/container) to a state_log detail — "what was it",
+// not only "why" — so a write that drops a held container leaves a trace either way.
+func whatChanged(phase, task, container string) string {
+	s := " -> phase=" + phase
+	if task != "" {
+		s += " task=" + task
+	}
+	if container != "" {
+		s += " container=" + container
+	}
+	return s
+}
+
 // SetPhase changes only an agent's phase, leaving task, branch and container as they were — skipping
-// the read-then-echo SetState forces is how a held container got dropped at four call sites. It needs
-// an existing row (SetState creates those), and errors rather than quietly writing nothing.
-func (p *ProjectStore) SetPhase(agent, phase string) error {
+// the read-then-echo SetState forces is how a held container got dropped at four call sites. Needs an
+// existing row (SetState creates those); reason/detail follow SetState's own contract.
+func (p *ProjectStore) SetPhase(agent, phase string, reason StateReason, detail string) error {
 	res, err := p.s.db.Exec(`UPDATE agent_state SET phase=? WHERE project=? AND agent=?`, phase, p.project, agent)
 	if err != nil {
 		return fmt.Errorf("set phase %s: %w", agent, err)
@@ -256,6 +350,9 @@ func (p *ProjectStore) SetPhase(agent, phase string) error {
 		return fmt.Errorf("set phase %s: %w", agent, err)
 	} else if n == 0 {
 		return fmt.Errorf("set phase %s: no existing state row (use SetState first)", agent)
+	}
+	if lerr := p.LogState(agent, reason, detail+whatChanged(phase, "", "")); lerr != nil {
+		log.Printf("hub: %v", lerr)
 	}
 	return nil
 }
@@ -269,6 +366,9 @@ func (p *ProjectStore) SetEscalation(agent, question string) error {
 		p.project, agent, question)
 	if err != nil {
 		return fmt.Errorf("set escalation %s: %w", agent, err)
+	}
+	if lerr := p.LogState(agent, ReasonEscalated, question); lerr != nil {
+		log.Printf("hub: %v", lerr)
 	}
 	return nil
 }
@@ -327,9 +427,20 @@ func (p *ProjectStore) SetLastNudge(agent, taskID string) error {
 // ClearEscalation releases an escalated agent, whoever asked for it — the agent itself once it has
 // its answer, or the user, who must be able to clear one nobody else can.
 func (p *ProjectStore) ClearEscalation(agent string) error {
+	// Read before clearing: the row is "what was cleared", the same gap SetState/SetPhase closed by
+	// appending what they wrote (-> whatChanged) — a bare "cleared" would say why but never what.
+	var question string
+	_ = p.s.db.QueryRow(`SELECT escalation FROM agent_state WHERE project=? AND agent=?`, p.project, agent).Scan(&question)
 	_, err := p.s.db.Exec(`UPDATE agent_state SET escalation='' WHERE project=? AND agent=?`, p.project, agent)
 	if err != nil {
 		return fmt.Errorf("clear escalation %s: %w", agent, err)
+	}
+	detail := "escalation cleared"
+	if question != "" {
+		detail += ": " + question
+	}
+	if lerr := p.LogState(agent, ReasonAdvanced, detail); lerr != nil {
+		log.Printf("hub: %v", lerr)
 	}
 	return nil
 }

@@ -159,10 +159,11 @@ func (c *HTTP) SetRetired(name string, retired bool) error {
 	return c.post("/agent/retire", api.NameReq{Name: name, Retired: retired})
 }
 
-// ResumeAgent clears an escalation from the host — the user's half of it. The agent clears its own
-// once it has the answer; this is for one that cannot, or should not have escalated at all.
-func (c *HTTP) ResumeAgent(name string) error {
-	return c.post("/agent/resume", api.NameReq{Name: name})
+// ResumeAgent clears an escalation from the host and tells the agent so, carrying answer when the
+// user has one. The agent clears its own once it has the answer; this is for one that cannot, or
+// should not have escalated at all.
+func (c *HTTP) ResumeAgent(name, answer string) error {
+	return c.post("/agent/resume", api.NameReq{Name: name, Answer: answer})
 }
 
 // DeleteAgent removes an agent (pod, socket, worktree, identity).
@@ -544,6 +545,13 @@ func (c *HTTP) Refresh() error { return c.post("/refresh", struct{}{}) }
 func (c *HTTP) Log(name string) ([]api.Event, error) {
 	var out []api.Event
 	return out, c.get("/log?agent="+url.QueryEscape(name), &out)
+}
+
+// StateLog fetches an agent's debug state log — every stored state write's reason, and every
+// distinct derived-status change (-> sd-a72056). A diagnostic instrument, not the activity log.
+func (c *HTTP) StateLog(name string) ([]api.StateEvent, error) {
+	var out []api.StateEvent
+	return out, c.get("/agent/states?agent="+url.QueryEscape(name), &out)
 }
 
 // Repos lists every registered repo (the registry overview / TUI switcher source).

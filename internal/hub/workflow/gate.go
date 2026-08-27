@@ -449,12 +449,14 @@ func (e *Engine) openMilestoneOrInterim(project string, r api.Run) (store.PR, er
 		return store.PR{}, err
 	}
 	if !done {
-		_ = ps.SetState(store.AgentState{Agent: r.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "resolving"})
+		_ = ps.SetState(store.AgentState{Agent: r.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "resolving"},
+			store.ReasonAdvanced, "contribute rebase conflicts: "+strings.Join(conflicts, ", "))
 		_ = ps.Log(r.Agent, "contribute-conflict", strings.Join(conflicts, ", "))
 		_ = e.deps.Deliver(project, r.Agent, "[hub] "+ReplyContributeConflicts(base, conflicts), MailAndPush)
 		return pr, nil
 	}
-	if err := ps.SetState(store.AgentState{Agent: r.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "submitted"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: r.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "submitted"},
+		store.ReasonAdvanced, "interim contribution submitted: "+pr.ID); err != nil {
 		return store.PR{}, err
 	}
 	_ = ps.Log(r.Agent, "contribute", pr.ID)
@@ -499,19 +501,20 @@ func (e *Engine) landSubmit(project string, ps *store.ProjectStore, r api.Run) e
 	}
 	if err := ps.SetState(store.AgentState{
 		Agent: r.Agent, Task: st.Task, Branch: branch, Container: st.Container, Phase: "submitted",
-	}); err != nil {
+	}, store.ReasonAdvanced, "submitted: "+pr.ID); err != nil {
 		return err
 	}
 	_ = ps.Log(r.Agent, "submit", pr.ID)
 	msg := e.gateCommitMessage(ps, st, r.Message)
-	// The answers go on the TASK THREAD, in the author's own name — where the reviewer's brief already
-	// sends it ("read the task first … and the comments on it"), so this needs no new surface and no
-	// new instruction. It is also what keeps the answers worth writing: they are read, and a defect in
-	// a place the author said it swept is a sharper finding than any rejection count.
-	if answers, aerr := ps.SubmitAnswers(r.Agent, r.Commit); aerr == nil {
+	// On the TASK THREAD in the author's own name, where the reviewer's brief already sends it — so
+	// the answers are read, and a defect where the author said it swept is the sharpest finding there
+	// is. By ATTEMPT: answering sends the author into the code, so the tree moves underneath. Closed
+	// here, so a resubmission after a rejection is asked its own questions.
+	if open, answers, aerr := ps.OpenSubmitAnswers(r.Agent); aerr == nil && open != "" {
 		for _, comment := range submitAnswerComments(answers, r.Agent) {
 			_ = e.deps.AddTaskComment(project, target, r.Agent, comment)
 		}
+		_ = ps.FinishSubmitAnswers(r.Agent, open)
 	}
 	if existed {
 		_ = ps.LogPR(pr.ID, "resubmitted", "by "+r.Agent+": "+msg)
@@ -587,7 +590,7 @@ func (e *Engine) backToWorking(ps *store.ProjectStore, r api.Run) (store.AgentSt
 	}
 	return st, ps.SetState(store.AgentState{
 		Agent: r.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "working",
-	})
+	}, store.ReasonRejected, "gate failed: "+gateTarget(st))
 }
 
 // gateTarget names what a gate was checking, for the activity log — the container if the agent

@@ -32,7 +32,7 @@ func leafWorker(t *testing.T, phase string) (*Engine, *store.ProjectStore, regis
 	if err := ps.PutOwnedTask(store.OwnedTask{ID: "td-LEAF", Title: "one task", Status: "in_progress"}); err != nil {
 		t.Fatalf("own: %v", err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: agent, Task: "td-LEAF", Branch: "td-LEAF", Phase: phase}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: agent, Task: "td-LEAF", Branch: "td-LEAF", Phase: phase}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
 	deps := &stubDeps{root: root, alive: true}
@@ -147,7 +147,7 @@ func TestSubmitOfAGrownTaskExtendsItRatherThanRefusing(t *testing.T) {
 	e, ps, c, deps := leafWorker(t, "working")
 	deps.alive = false // nobody to inject into, so the promotion at add-time does not happen
 	child := addChild(t, e, "td-LEAF", true)
-	if err := ps.SetState(store.AgentState{Agent: "dain", Task: "td-LEAF", Branch: "td-LEAF", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dain", Task: "td-LEAF", Branch: "td-LEAF", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -278,7 +278,7 @@ func TestNothingClosesAParentOverAChildBeingWORKED(t *testing.T) {
 	}
 
 	// The submit door: the leaf guard must see a child that is being worked, not just one waiting.
-	if err := ps.SetState(store.AgentState{Agent: "dain", Task: "td-LEAF", Branch: "td-LEAF", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dain", Task: "td-LEAF", Branch: "td-LEAF", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	var out strings.Builder
@@ -290,7 +290,7 @@ func TestNothingClosesAParentOverAChildBeingWORKED(t *testing.T) {
 	}
 
 	// The merge door: submit from the feature state it now holds, then land it.
-	if err := ps.SetState(store.AgentState{Agent: "dain", Task: "td-LEAF", Branch: "td-LEAF", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dain", Task: "td-LEAF", Branch: "td-LEAF", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	deps.alive = false

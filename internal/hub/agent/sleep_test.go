@@ -18,7 +18,7 @@ func sleepFixture(t *testing.T) (*Service, *fakeRuntime) {
 	if err := st.For("proj").PutAgent(store.Agent{Name: "durin", Role: "worker"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.For("proj").SetState(store.AgentState{Agent: "durin", Phase: "idle"}); err != nil {
+	if err := st.For("proj").SetState(store.AgentState{Agent: "durin", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	f := &fakeRuntime{pane: idlePane}
@@ -74,12 +74,14 @@ func TestHoldsNothingChecksEveryKindOfWork(t *testing.T) {
 		name  string
 		setup func() error
 	}{
-		{"task", func() error { return ps.SetState(store.AgentState{Agent: "durin", Task: "td-1", Phase: "working"}) }},
+		{"task", func() error {
+			return ps.SetState(store.AgentState{Agent: "durin", Task: "td-1", Phase: "working"}, store.ReasonClaimed, "test setup")
+		}},
 		{"feature", func() error {
-			return ps.SetState(store.AgentState{Agent: "durin", Container: "sd-epic", Phase: "idle"})
+			return ps.SetState(store.AgentState{Agent: "durin", Container: "sd-epic", Phase: "idle"}, store.ReasonClaimed, "test setup")
 		}},
 		{"escalation", func() error {
-			if err := ps.SetState(store.AgentState{Agent: "durin", Phase: "idle"}); err != nil {
+			if err := ps.SetState(store.AgentState{Agent: "durin", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 				return err
 			}
 			return ps.SetEscalation("durin", "which approach?")

@@ -106,7 +106,7 @@ func TestUnretiredWorkerIsServedAgain(t *testing.T) {
 // with it. Taking the task back would be the opposite — interrupting the agent being wound down.
 func TestRetiringLeavesWorkInHand(t *testing.T) {
 	_, ps, _ := retireFixture(t)
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	retire(t, ps, "dvalin")

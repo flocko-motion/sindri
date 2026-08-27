@@ -48,7 +48,8 @@ func (e *Engine) adoptChild(project, parent, child string) {
 // may go out, and it asks LATER — a proposal's approval row is written a moment after the task.
 func (e *Engine) promoteToFeature(project, agent, task string) {
 	ps := e.store.For(project)
-	_ = ps.SetState(store.AgentState{Agent: agent, Container: task, Branch: task, Phase: "idle"})
+	_ = ps.SetState(store.AgentState{Agent: agent, Container: task, Branch: task, Phase: "idle"},
+		store.ReasonClaimed, "promoted to a feature: "+task)
 	_ = ps.Log(agent, "promote", task+" gained work, so it is a feature now")
 	e.deps.Notify()
 }

@@ -3,6 +3,7 @@ package cli
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/flo-at/sindri/internal/api"
 )
@@ -40,14 +41,14 @@ func TestMailLineSaysWhoWhenAndWhetherRead(t *testing.T) {
 func TestTheMailFooterSaysWhatItIsNotShowing(t *testing.T) {
 	st := mailBoard()
 	got := mailFooter(st, st.Mail, api.MailAll, "")
-	for _, want := range []string{"Showing the last 2 of 500", "120 unread", "mail show"} {
+	for _, want := range []string{"Showing 2 of 500", "every unread one included", "120 unread", "mail show"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the footer should say %q: %s", want, got)
 		}
 	}
 	// With the whole mailbox in hand there is nothing to disclose, and it says so plainly instead.
 	st.MailTotal = 2
-	if got := mailFooter(st, st.Mail, api.MailAll, ""); strings.Contains(got, "Showing the last") {
+	if got := mailFooter(st, st.Mail, api.MailAll, ""); strings.Contains(got, "Showing") {
 		t.Errorf("nothing is being withheld here: %s", got)
 	}
 	// A narrowing is named, so a short list never reads as an empty mailbox.
@@ -111,6 +112,13 @@ func TestMailShowStateNamesAFreshMark(t *testing.T) {
 	alreadyRead := api.Mail{ReadAt: "2026-08-13T09:00:00Z"}
 	if got := mailShowState(alreadyRead, false); !strings.Contains(got, "ago") {
 		t.Errorf("mailShowState(read, false) = %q, want it to say how long ago", got)
+	}
+	// Read within the minute: the reported bug, and the case where the two branches must AGREE —
+	// justRead already said "read just now", so a mark a moment old saying "read now ago" made the
+	// same message read differently depending on which call had marked it.
+	justRead := api.Mail{ReadAt: time.Now().UTC().Format(time.RFC3339)}
+	if got := mailShowState(justRead, false); got != "read just now" {
+		t.Errorf("mailShowState(just read, false) = %q, want %q", got, "read just now")
 	}
 }
 

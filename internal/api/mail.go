@@ -12,10 +12,8 @@ import (
 	"strings"
 )
 
-// Mail is one message in an agent's mailbox. Body is the FULL text where a detail view fetched it
-// and a PREVIEW in a fleet listing, which is what Truncated says — a rejection carries its whole
-// findings and can run to hundreds of lines, so a list that inlined every body would be unreadable
-// before it was slow.
+// Mail is one message in an agent's mailbox. Body is the FULL text where a detail view fetched it and
+// a PREVIEW in a listing, which Truncated says: a rejection can run to hundreds of lines.
 type Mail struct {
 	ID      int64  `json:"id"`
 	Project string `json:"project"`
@@ -30,30 +28,24 @@ type Mail struct {
 	// InReplyTo is the message this one answers, 0 when it starts a thread — so a front-end can show an
 	// exchange as one, and a recipient is not left matching a reply against its own messages by hand.
 	InReplyTo int64 `json:"inReplyTo,omitempty"`
-	// Pushed: the same message was also injected into the agent's session, so it may have been acted
-	// on live. Carried because "pushed, and possibly missed" and "sitting here unread" are different
-	// diagnoses, and a reader looking at a quiet agent needs to tell them apart.
+	// Pushed: also injected into the agent's session, so it may have been acted on live. "Pushed and
+	// possibly missed" and "sitting here unread" are different diagnoses of the same quiet agent.
 	Pushed bool `json:"pushed,omitempty"`
-	// History is what happened to it, single fetches only. Pushed says send-keys was accepted, so it
-	// cannot answer "did this arrive" — dvalin's rejection carried it and never did.
+	// History is what happened to it, single fetches only. Pushed says typed, submitted and NOT
+	// CONTRADICTED by the pane — a narrow pane or a dialog proves nothing either way (-> agent.inject).
 	History []Event `json:"history,omitempty"`
 }
 
-// MailIDPrefix marks a mail id as an id. Every other id in sindri carries one — sd-, td-, pr-, os-,
-// gh- — and a bare integer beside agent names, repo names and ages does not read as something you can
-// address: "reply to 47" is not an instruction, "reply to ml-47" is.
+// MailIDPrefix marks a mail id as an id, as sd-, td-, pr-, os- and gh- do: "reply to 47" is not an
+// instruction beside agent names and ages, and "reply to ml-47" is.
 const MailIDPrefix = "ml-"
 
 // MailID renders a mail id for display and for anything the hub writes into a message.
 func MailID(id int64) string { return fmt.Sprintf("%s%d", MailIDPrefix, id) }
 
-// ParseMailID reads either spelling. The BARE form keeps working because it is already in users'
-// shell history and in whatever agents have been told — breaking that to gain a prefix would be a poor
-// trade, and the prefix is about how an id READS, not about what is accepted.
-//
-// It reads the WHOLE remainder or none of it: a scan that stops at the first non-digit takes "ml-47zzz"
-// for 47, and half-reading an argument an agent types from memory is worse than refusing it, since the
-// refusal is the only thing that says which part was wrong.
+// ParseMailID reads either spelling: the prefix is about how an id READS, and the bare form is already
+// in shell history and in what agents have been told. It takes the WHOLE remainder or none of it —
+// stopping at the first non-digit would read "ml-47zzz" as 47, and refusing says which part was wrong.
 func ParseMailID(s string) (int64, error) {
 	id, err := strconv.ParseInt(strings.TrimPrefix(strings.TrimSpace(s), MailIDPrefix), 10, 64)
 	if err != nil || id <= 0 {
@@ -62,9 +54,8 @@ func ParseMailID(s string) (int64, error) {
 	return id, nil
 }
 
-// MailToUser reports whether a message is addressed to the USER rather than to an agent — the only
-// part of the mailbox a person is expected to read, and the rule behind both the marker and the way
-// each front-end separates those rows out.
+// MailToUser reports a message addressed to the USER rather than an agent — the only part of the
+// mailbox a person is expected to read, and the rule behind the marker and both front-ends' split.
 func MailToUser(m Mail) bool { return m.Agent == SenderUser }
 
 // MailToUserHeading labels the messages addressed to the user, lifted above the rest of the
@@ -85,23 +76,19 @@ type MailFilter string
 
 // The segments. Their spelling is the CLI's flag value and the word the TUI footer shows.
 const (
-	// MailActive is unread OR read recently — the mail equivalent of the Tasks segment of the same
-	// name, where unread is "open" and read is "closed". It matters more here than anywhere else
-	// because no mail is ever deleted: "all" grows for the life of the machine, so it is the one view
-	// that gets less usable every day, and a bounded default is what keeps the tab readable a year on.
+	// MailActive is unread OR read recently, as the Tasks segment of the same name is. It matters most
+	// here because no mail is ever deleted: "all" grows for the life of the machine.
 	MailActive MailFilter = "active"
 	MailUnread MailFilter = "unread" // still waiting to be read
 	MailAll    MailFilter = "all"    // every message, read or not
 )
 
-// MailFilters is the order both front-ends present: the CLI lists it in its help, the TUI cycles
-// through it, so the two describe the same set the same way round. Active leads because it is what a
-// view should OPEN on; unread stays, being still the sharpest question to ask of a mailbox.
+// MailFilters is the order both front-ends present, so the CLI's help and the TUI's cycle describe the
+// same set the same way round. Active leads because it is what a view should OPEN on.
 var MailFilters = []MailFilter{MailActive, MailUnread, MailAll}
 
-// MatchesMailFilter reports whether m belongs in the view f names, narrowed to one recipient when
-// agent is given ("" = every agent). An unrecognised filter admits everything: a listing that showed
-// nothing would read as an empty mailbox, which is a lie a mistyped flag should not be able to tell.
+// MatchesMailFilter reports whether m belongs in the view f names, narrowed to one recipient when agent
+// is given ("" = all). An unrecognised filter admits everything: an empty listing would read as a lie.
 func MatchesMailFilter(f MailFilter, agent string, m Mail) bool {
 	if agent != "" && m.Agent != agent {
 		return false
@@ -117,9 +104,8 @@ func MatchesMailFilter(f MailFilter, agent string, m Mail) bool {
 	return true
 }
 
-// MailChangedAt is when a message last changed: when it was READ if it has been, else when it was
-// sent. A message sent days ago and read ten minutes ago changed ten minutes ago, and that is what
-// "recently" has to mean for the active segment to say anything useful.
+// MailChangedAt is when a message last changed: READ if it has been, else sent. One sent days ago and
+// read ten minutes ago changed ten minutes ago, which is what "recently" must mean to say anything.
 func MailChangedAt(m Mail) string {
 	if m.ReadAt != "" {
 		return m.ReadAt

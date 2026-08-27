@@ -13,6 +13,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/ui/table"
+	"github.com/flo-at/sindri/internal/ui/theme"
 	"github.com/spf13/cobra"
 )
 
@@ -113,14 +114,15 @@ func mailLine(m api.Mail) string {
 		table.Cell{Text: dash(m.Sender)},
 		table.Cell{Text: m.Agent},
 		table.Cell{Text: state},
-		table.Cell{Text: shortAge(m.SentAt)},
+		table.Cell{Text: theme.Age(m.SentAt)},
 		table.Cell{Text: oneLine(m.Body, 80)},
 	)
 }
 
 // mailFooter says what the listing is NOT showing. The board carries a window of a mailbox that is
 // never pruned, so a bare list of rows would quietly present the recent end as the whole history —
-// and the point of keeping everything is being able to find last month's message.
+// and the point of keeping everything is being able to find last month's message. Every unread
+// message rides in the window regardless of age (-> hub.AllMail), so what it drops is always read.
 func mailFooter(st api.BoardState, shown []api.Mail, f api.MailFilter, agent string) string {
 	if st.MailTotal == 0 {
 		return "no mail yet — a message an agent must read is kept here, and reading it only marks it read"
@@ -131,8 +133,8 @@ func mailFooter(st api.BoardState, shown []api.Mail, f api.MailFilter, agent str
 	}
 	tail := ""
 	if len(st.Mail) < st.MailTotal {
-		tail = fmt.Sprintf(" Showing the last %d of %d messages; older mail is reachable by id "+
-			"(`sindri mail show ml-<n>`).", len(st.Mail), st.MailTotal)
+		tail = fmt.Sprintf(" Showing %d of %d messages, every unread one included; older read mail is "+
+			"reachable by id (`sindri mail show ml-<n>`).", len(st.Mail), st.MailTotal)
 	}
 	// The user's own unread is named separately, and fleet-wide: it is the number that asks something
 	// of them, where the mailbox total merely says how much traffic there has been.
@@ -174,7 +176,7 @@ func mailShowState(m api.Mail, justRead bool) string {
 	case justRead:
 		return "read just now"
 	case m.Read():
-		return "read " + shortAge(m.ReadAt) + " ago"
+		return "read " + theme.Ago(m.ReadAt)
 	default:
 		return "unread"
 	}
@@ -204,8 +206,8 @@ func mailShowCmd() *cobra.Command {
 				read := mailShowState(m, justRead)
 				fmt.Printf("to:     %s (%s)\nfrom:   %s\nsent:   %s\nstate:  %s\npushed: %v\n\n%s\n",
 					m.Agent, m.Repo, dash(m.Sender), m.SentAt, read, m.Pushed, strings.TrimRight(m.Body, "\n"))
-				// What BECAME of it, under the flags that only report where it stands. "pushed: true"
-				// and a pane that never showed the text is the state this answers.
+				// What BECAME of it, under the flags that only report where it stands. "pushed: true" over a
+				// pane that never showed the text is the state this answers.
 				if len(m.History) > 0 {
 					fmt.Printf("\nlifecycle:\n")
 					for _, e := range m.History {

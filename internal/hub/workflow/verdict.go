@@ -108,7 +108,7 @@ func (e *Engine) completeReview(prProject, home, prID, agent, verdict, findings 
 			}
 		}
 	}
-	_ = e.store.For(home).SetState(store.AgentState{Agent: agent, Phase: "idle"})
+	_ = e.store.For(home).SetState(store.AgentState{Agent: agent, Phase: "idle"}, store.ReasonFreed, "verdict given on "+prID)
 	// Woken, though: a verdict must not be where a reviewer's loop ends. Waking and clearing were one
 	// act here and are two things — a push queues behind the running turn and arrives as it ends.
 	_ = e.deps.Deliver(home, agent, MsgKickoff, PushOnly)
@@ -173,7 +173,7 @@ func (e *Engine) CmdRevoke(c registry.Caller, args []string, out io.Writer) (int
 	// worker returns to its own tree rather than falling out of the loop.
 	if err := ps.SetState(store.AgentState{
 		Agent: c.Agent, Task: st.Task, Branch: pr.Branch, Container: st.Container, Phase: "working",
-	}); err != nil {
+	}, store.ReasonAdvanced, "PR withdrawn, resuming work: "+pr.ID); err != nil {
 		return 1, err
 	}
 	// Whoever was reading it is reading a branch about to change under them.
@@ -245,7 +245,7 @@ func (e *Engine) reject(project, prID, feedback, voice string) error {
 	prior, _ := ps.GetState(pr.Agent)
 	_ = ps.SetState(store.AgentState{
 		Agent: pr.Agent, Task: pr.Task, Branch: pr.Branch, Container: prior.Container, Phase: phase,
-	})
+	}, store.ReasonRejected, "rejected by "+voice+": "+prID)
 
 	who, msg := voice, MsgRejectedByAgent(voice, pr.ID)
 	if voice == api.SenderUser {

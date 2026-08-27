@@ -105,3 +105,50 @@ func TestFitCountsDisplayCells(t *testing.T) {
 		}
 	}
 }
+
+// TestBothFrontEndsRenderTheSamePRColumns is the guard that was missing when the TUI's PRs tab
+// gained a "for" column and `sindri pr list` did not: the same board, asked the same question,
+// answering it in one front-end only. Unification makes the drift structural rather than a matter of
+// remembering — but only while both keep asking PRList for the set, so that is what this pins.
+func TestBothFrontEndsRenderTheSamePRColumns(t *testing.T) {
+	tui := PRList(9)
+	cli := PRList(13, Column{Label: "waiting on you"})
+
+	if len(cli) != len(tui)+1 {
+		t.Fatalf("the CLI has %d columns against the TUI's %d, want the shared set plus its one tail",
+			len(cli), len(tui))
+	}
+	for i, want := range tui {
+		if cli[i].Label != want.Label {
+			t.Errorf("column %d is %q in the CLI and %q in the TUI — the sets have come apart",
+				i, cli[i].Label, want.Label)
+		}
+	}
+	// The two differences that are deliberate: a status column each medium sizes for itself, and a
+	// tail one of them adds. Everything else being equal is what makes the rest shared.
+	if tui[2].Label != "status" || cli[2].Width <= tui[2].Width {
+		t.Errorf("the CLI's status column is %d against the TUI's %d, want it wider", cli[2].Width, tui[2].Width)
+	}
+	if cli[len(cli)-1].Label != "waiting on you" {
+		t.Errorf("the tail is %q, want the CLI's own trailing column", cli[len(cli)-1].Label)
+	}
+}
+
+// TestATailBoundsTheColumnBeforeIt: the shared set ends at branch, which takes the rest of the line
+// unpadded. Append a tail behind an unbounded column and it starts wherever that row's branch
+// happened to end, so the header names one column and the rows print another.
+func TestATailBoundsTheColumnBeforeIt(t *testing.T) {
+	plain := PRList(9)
+	if w := plain[len(plain)-1].Width; w != 0 {
+		t.Errorf("with no tail the last column is width %d, want 0 so it takes the rest of the line", w)
+	}
+	tailed := PRList(9, Column{Label: "waiting on you"})
+	branch := tailed[len(tailed)-2]
+	if branch.Label != "branch" || branch.Width == 0 {
+		t.Errorf("branch is %q width %d, want it bounded once something follows it", branch.Label, branch.Width)
+	}
+	// And the tail itself is the unpadded one now.
+	if w := tailed[len(tailed)-1].Width; w != 0 {
+		t.Errorf("the tail is width %d, want 0 — it is the last column now", w)
+	}
+}

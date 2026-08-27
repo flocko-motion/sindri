@@ -75,9 +75,15 @@ func Deadcode(patterns []string, tags string, cap *Cap, ig *Ignore, w io.Writer)
 	prog, pkgs := ssautil.AllPackages(initial, ssa.InstantiateGenerics)
 	prog.Build()
 
+	// Reachability needs roots, and a main package is where they come from. A library — or any
+	// subdirectory scoped without one — has none, so there is nothing this analysis can say. SKIPPED,
+	// not failed: a valid package shape must not fail a gate, the same reason a TypeScript-only tree
+	// is skipped above. It exited 1 with "no main packages", which reads as a finding about the code.
 	mains := ssautil.MainPackages(pkgs)
 	if len(mains) == 0 {
-		return false, fmt.Errorf("no main packages among %v", patterns)
+		fmt.Fprintf(w, "deadcode: no main package under %v — skipping (nothing to trace reachability from; "+
+			"run it where a main lives, or over the whole module)\n", patterns)
+		return false, nil
 	}
 	var roots []*ssa.Function
 	for _, main := range mains {

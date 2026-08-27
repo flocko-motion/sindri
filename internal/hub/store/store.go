@@ -154,6 +154,12 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	// state_log is debug telemetry, never durable across a restart (-> its own schema comment): a hub
+	// up for weeks must not hold weeks of flicker just because nothing else trims it.
+	if _, err := db.Exec(`DELETE FROM state_log`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("purge state log: %w", err)
+	}
 	return &Store{db: db}, nil
 }
 
@@ -185,6 +191,7 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE mail ADD COLUMN notified INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE pr_lint ADD COLUMN sha TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE runs ADD COLUMN commit_sha TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE submit_answers ADD COLUMN done INTEGER NOT NULL DEFAULT 0`,
 	}
 	for _, a := range alters {
 		if _, err := db.Exec(a); err != nil && !strings.Contains(err.Error(), "duplicate column") {

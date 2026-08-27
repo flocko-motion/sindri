@@ -62,7 +62,8 @@ func (e *Engine) claimContainer(project, worker string, c store.Task) (string, b
 		return "", false, err
 	}
 	if len(children) == 0 {
-		if err := ps.SetState(store.AgentState{Agent: worker, Container: c.ID, Branch: c.ID, Phase: "idle"}); err != nil {
+		if err := ps.SetState(store.AgentState{Agent: worker, Container: c.ID, Branch: c.ID, Phase: "idle"},
+			store.ReasonClaimed, "claimed container "+c.ID+" with nothing open under it"); err != nil {
 			return "", false, err
 		}
 		_ = ps.Log(worker, "claim-container", c.ID+" "+c.Title+" (nothing left — finishing it)")
@@ -133,7 +134,8 @@ func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) 
 	// A checkpoint IS a leaf boundary, so an armed clear takes precedence over the next subtask:
 	// the agent goes idle holding the feature, and the clear fires before anything else is served.
 	if e.clearArmed(c.Project, c.Agent) {
-		_ = ps.SetState(store.AgentState{Agent: c.Agent, Container: st.Container, Branch: st.Container, Phase: "idle"})
+		_ = ps.SetState(store.AgentState{Agent: c.Agent, Container: st.Container, Branch: st.Container, Phase: "idle"},
+			store.ReasonFreed, "checkpointed "+done+" with a clear armed")
 		e.deps.Notify()
 		fmt.Fprintln(out, ReplyCheckpointedClearing(done, st.Container))
 		return 0, nil
@@ -154,7 +156,8 @@ func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) 
 	if err != nil {
 		return 1, err
 	}
-	_ = ps.SetState(store.AgentState{Agent: c.Agent, Container: st.Container, Branch: st.Container, Phase: "idle"})
+	_ = ps.SetState(store.AgentState{Agent: c.Agent, Container: st.Container, Branch: st.Container, Phase: "idle"},
+		store.ReasonAdvanced, "checkpointed "+done+", nothing left to claim under "+st.Container)
 	e.deps.Notify()
 	if len(gated) > 0 {
 		fmt.Fprintf(out, "Checkpointed %s. %s\n", done, ReplyFeatureGated(st.Container, openIDs(gated)))
@@ -288,7 +291,7 @@ func (e *Engine) startSubtask(project, agent, container string, child store.Task
 	}
 	if err := ps.SetState(store.AgentState{
 		Agent: agent, Container: container, Branch: container, Task: child.ID, Phase: "working",
-	}); err != nil {
+	}, store.ReasonClaimed, "claimed subtask "+child.ID+" under "+container); err != nil {
 		return err
 	}
 	e.deps.Notify()

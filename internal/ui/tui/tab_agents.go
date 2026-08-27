@@ -19,6 +19,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	agentport "github.com/flo-at/sindri/internal/adapter/agent"
 	"github.com/flo-at/sindri/internal/adapter/tmux"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/client"
@@ -381,7 +382,7 @@ func (m model) agentItems() []metaItem {
 		wsIt,
 		metaItem{text: "memory:    " + memoryLabelTUI(a.Memory, m.state.DefaultMemory) + dimStyle.Render("  (container RAM · e to edit)")},
 		metaItem{text: "context:   " + theme.ContextLine(a.ContextTokens)},
-		metaItem{text: "model:     " + dash(a.Model)},
+		metaItem{text: "model:     " + dash(agentport.ShortModel(a.Model))},
 		metaItem{text: pod, kind: "view", value: "pod"},
 	)
 	// The armed clear says WHEN it lands, not merely that it is set: the row's marker is the count,
@@ -593,7 +594,7 @@ func (m model) agentRow(a api.AgentView) row {
 		table.Cell{Text: a.Role, Style: ac.Render},
 		table.Cell{Text: a.Status, Style: ac.Render},
 		table.Cell{Text: theme.ContextPercent(a.ContextTokens, a.ContextWindow), Style: ac.Render},
-		table.Cell{Text: dash(a.Model), Style: ac.Render},
+		table.Cell{Text: dash(agentport.ShortModel(a.Model)), Style: ac.Render},
 		table.Cell{Text: task, Style: ac.Render},
 	), a.Name}
 }

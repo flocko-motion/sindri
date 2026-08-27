@@ -203,14 +203,12 @@ func (p *ProjectStore) GetTask(id string) (Task, bool, error) {
 }
 
 // OpenContainers returns claimable packages: approved, prioritised, unheld tasks that HAD a child
-// and have not landed. The SQL pre-filter only asks "any child at all" — whether it's workable,
-// gated, or gone entirely is OpenSubtasks'/HasOpenDescendant's answer below, not a second opinion
-// in SQL: a package with only a gated child stays excluded (the gate releases it later), while
-// one whose every child has closed is offered anyway (nothing will EVER release it otherwise).
+// and have not landed. The SQL asks only "any child at all"; whether that child is workable, gated,
+// or gone is the per-candidate pass below, so a package with only gated work stays excluded while
+// one whose children have all closed is offered anyway (nothing else will ever release it).
 //
-// "Have not landed" is the merged-PR clause, and it is load-bearing: without it a feature whose PR
-// merged but whose status was never written kept being offered, and whoever took it was told to
-// submit work already in the reference branch. An agent refused the instruction and was right to.
+// The merged-PR clause is load-bearing: a feature whose PR merged with its status never written kept
+// being offered, and whoever took it was told to submit work already in the reference branch.
 func (p *ProjectStore) OpenContainers() ([]Task, error) {
 	rows, err := p.s.db.Query(`
 		SELECT `+taskCols+taskFrom+`
@@ -233,6 +231,14 @@ func (p *ProjectStore) OpenContainers() ([]Task, error) {
 	}
 	out := make([]Task, 0, len(candidates))
 	for _, c := range candidates {
+		// A package is handed out when its PLAN is settled. A subtask awaiting a verdict is invisible
+		// to OpenSubtasks, so the package read as workable and its holder was told the feature was
+		// finished over a subtask nobody had ruled on.
+		if pending, perr := p.HasPendingDescendant(c.ID); perr != nil {
+			return nil, perr
+		} else if pending {
+			continue
+		}
 		work, err := p.OpenSubtasks(c.ID)
 		if err != nil {
 			return nil, err
@@ -278,6 +284,27 @@ func (p *ProjectStore) HeldDescendant(parentID string) (string, error) {
 		return "", fmt.Errorf("held descendant of %s: %w", parentID, err)
 	}
 	return agent, nil
+}
+
+// HasPendingDescendant reports an open descendant at ANY depth still awaiting the user's verdict.
+// PENDING ONLY: nothing ever clears a rejection, so blocking on one holds the package for ever.
+func (p *ProjectStore) HasPendingDescendant(parentID string) (bool, error) {
+	row := p.s.db.QueryRow(`
+		WITH RECURSIVE descendant(id) AS (
+			SELECT id FROM tasks WHERE project=?1 AND parent_id=?2
+			UNION
+			SELECT t.id FROM tasks t JOIN descendant d ON t.parent_id=d.id WHERE t.project=?1
+		)
+		SELECT EXISTS (
+			SELECT 1 FROM tasks t JOIN task_approval a ON a.task=t.id AND a.project=t.project
+			WHERE t.project=?1 AND t.id IN (SELECT id FROM descendant)
+			  AND t.status='open' AND a.status='pending'
+		)`, p.project, parentID)
+	var has bool
+	if err := row.Scan(&has); err != nil {
+		return false, fmt.Errorf("has pending descendant of %s: %w", parentID, err)
+	}
+	return has, nil
 }
 
 // HasOpenDescendant reports an open descendant at ANY depth, gated or not — unlike OpenSubtasks

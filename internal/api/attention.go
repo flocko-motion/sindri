@@ -16,9 +16,13 @@ const (
 	// StatusLaunchFailed: a launch was asked for and never came up (-> agent.Service.FailLaunch).
 	// Distinct from "down": here somebody asked and it did not work.
 	StatusLaunchFailed = "launch-failed"
+	// StatusUnreachable: pod up, session up, and still nothing typed into it can be shown to have
+	// arrived (-> agent.Service.Unreachable). Distinct from "down" and "signed-out": both of those are
+	// read off the pane; this is what everything else looks like while that very reading may be stale.
+	StatusUnreachable = "unreachable"
 )
 
-// AgentNeedsUser reports an agent whose state resolves ONLY IF A HUMAN ACTS — these five words today.
+// AgentNeedsUser reports an agent whose state resolves ONLY IF A HUMAN ACTS — these six words today.
 // Idle never counts, a full context included: an idle ask clears and reassigns itself. Retired is
 // checked ahead of the rest since it reaches stalled by itself (-> workflow.parkedByTheHub).
 func AgentNeedsUser(a AgentView) bool {
@@ -31,7 +35,7 @@ func AgentNeedsUser(a AgentView) bool {
 		return false
 	}
 	switch a.Status {
-	case StatusBlocked, StatusSignedOut, StatusStalled, StatusLaunchFailed:
+	case StatusBlocked, StatusSignedOut, StatusStalled, StatusLaunchFailed, StatusUnreachable:
 		return true
 	}
 	return false

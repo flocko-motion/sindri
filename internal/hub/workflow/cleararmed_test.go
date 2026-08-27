@@ -143,7 +143,7 @@ func TestTheClearLandsBeforeTheNextSubtask(t *testing.T) {
 		t.Error("mid-subtask the agent keeps working; the clear must not fire before the checkpoint")
 	}
 
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	fired, err := e.fireClearIfArmed("repo", "dvalin")

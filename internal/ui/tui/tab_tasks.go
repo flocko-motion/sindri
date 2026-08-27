@@ -53,8 +53,8 @@ func (m model) taskRows() []row {
 	}
 	arranged := api.ArrangeTasks(tasks, m.state.PRs)
 
-	// Who is behind each task (drives the worked-on marker). The same rule the detail pane names
-	// the agent by, so the mark and the name cannot contradict each other.
+	// Who is behind each task and HOW (drives the marker). The same rule the detail pane names the
+	// agent by, so the mark and the name cannot contradict each other.
 	assigned := api.AgentsByTask(m.state.Agents, m.state.PRs)
 	// Hub-side approval per task (drives the row colour for planner proposals). A gate on a task
 	// that has ended is spent, and the state word below is the status's to give.
@@ -131,7 +131,7 @@ func (m model) taskRows() []row {
 				// Age, right-aligned so the units line up under each other; the exact moment is in
 				// the detail pane, which is where a question about one task gets asked.
 				table.Cell{Text: theme.Age(tr.CreatedAt), Style: sc.Render},
-				table.Cell{Text: taskMarks(assigned[tr.ID] != "", prMarkKind(tr)), Style: sc.Render},
+				table.Cell{Text: taskMarks(assigned[tr.ID].Rel, prMarkKind(tr)), Style: sc.Render},
 				table.Cell{Text: tr.Title, Style: sc.Render},
 			),
 			tr.ID,
@@ -242,8 +242,10 @@ func treeGutter(cont []bool, depth int, last, kids, collapsed bool) string {
 
 // marksW pads the marker column so titles line up whatever a row carries. Measured from the marks
 // themselves rather than written down: a glyph swap that changed the count silently would knock
-// every title out of line, and this column has now been through one.
-var marksW = lipgloss.Width(theme.MarkAssigned) + lipgloss.Width(theme.MarkPRFinal)
+// every title out of line, and this column has now been through one. WIDEST of each slot, since a
+// row carries one agent mark and one PR mark and either slot may hold either of its two glyphs.
+var marksW = max(lipgloss.Width(theme.MarkAssigned), lipgloss.Width(theme.MarkHolds)) +
+	max(lipgloss.Width(theme.MarkPRFinal), lipgloss.Width(theme.MarkPRInterim))
 
 // prMarkKind picks which PR marker a row carries: final, interim, or "" for none. A kindless PR
 // defaults to final, the historical default, so older PRs still read as one.
@@ -257,11 +259,15 @@ func prMarkKind(tr api.TaskRow) string {
 	return "final"
 }
 
-// taskMarks is the status-marker column: the worked-on mark when an agent is on the task, then the
-// final or interim PR mark, padded to marksW so rows line up whatever they carry.
-func taskMarks(assigned bool, prKind string) string {
+// taskMarks is the status-marker column: how an agent stands to this task, then the final or interim
+// PR mark, padded to marksW so rows line up whatever they carry. The relation rather than a bare
+// "somebody is on it" — a held container and the leaf being worked inside it are different rows.
+func taskMarks(rel api.TaskRelation, prKind string) string {
 	s := ""
-	if assigned {
+	switch rel {
+	case api.TaskHolding:
+		s += theme.MarkHolds
+	case api.TaskWorking, api.TaskSubmitted:
 		s += theme.MarkAssigned
 	}
 	switch prKind {

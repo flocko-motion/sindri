@@ -17,8 +17,13 @@ import (
 // signedOutPane is Claude's auth banner as the classifier matches it.
 const signedOutPane = "● Login expired · Please run /login"
 
-// idlePane is an ordinary prompt box — an agent that will take what it is told.
-const idlePane = "\n> \n"
+// idlePane is an ordinary prompt box — an agent that will take what it is told. DRAWN, at a real
+// width: the needle is derived from the widest row, so a three-column stand-in would leave every
+// fixture too narrow to confirm anything and quietly pass whatever it was asked.
+var idlePane = idlePaneAt(paneWide)
+
+// idlePaneAt is that box at a given terminal width, for the cases about width itself.
+func idlePaneAt(cols int) string { return drawn(cols, "> ") }
 
 // fakeRuntime answers for a container backend: what the pane says, what was typed into it, and
 // which pods were torn down — the three facts these cases turn on.
@@ -28,6 +33,50 @@ type fakeRuntime struct {
 	sent              []string
 	removed           []string
 	interrupts        int
+	submits           int
+	typed             string // what SendLiteral typed and Submit has yet to send
+	cols              int    // the width this fake terminal draws at; paneWide when unset
+	blank             bool   // capture-pane comes back empty with no error: a reading that is not one
+	blankFor          int    // ... for this many captures only, then normally: a pane blank in passing
+	// swallow is a session that accepts the keystrokes and shows nothing — the failure the read-back
+	// exists for, and the one thing a fake cannot be honest about by accident.
+	swallow bool
+}
+
+// termColumns is the fake terminal's OWN idea of how wide a rune draws, deliberately not the one
+// under test: a fixture that borrowed production's answer would agree with it however wrong it was.
+func termColumns(r rune) int {
+	if r > 0x7F {
+		return 2
+	}
+	return 1
+}
+
+// drawn is what a terminal DOES to typed text, which is the whole reason the needle is derived the
+// way it is: rows wrapped at the box interior and split on newlines, each padded out behind full-width
+// chrome. A fake that echoed the raw string back would match needles no real pane ever could — and
+// width is a PARAMETER, since sindri creates panes from 9 columns up (-> tui.previewSize).
+func drawn(width int, text string) string {
+	inner := max(1, width-4)
+	var b strings.Builder
+	for line := range strings.SplitSeq(text, "\n") {
+		for {
+			row, used := "", 0
+			for _, c := range line { // by COLUMNS, as a terminal wraps — not by runes
+				if used+termColumns(c) > inner {
+					break
+				}
+				row += string(c)
+				used += termColumns(c)
+			}
+			b.WriteString("│ " + row + strings.Repeat(" ", inner-used) + " │\n")
+			line = line[len(row):]
+			if line == "" {
+				break
+			}
+		}
+	}
+	return b.String()
 }
 
 func (f *fakeRuntime) Running(string) bool { return true }
@@ -43,12 +92,47 @@ func (f *fakeRuntime) Exec(name string, args ...string) ([]byte, error) {
 	return f.ExecContext(context.Background(), name, args...)
 }
 
-func (f *fakeRuntime) ExecContext(_ context.Context, _ string, args ...string) ([]byte, error) {
+// paneWide is the default fake width, roomy enough that a case not about width never turns on it.
+const paneWide = 76
+
+func (f *fakeRuntime) width() int {
+	if f.cols > 0 {
+		return f.cols
+	}
+	return paneWide
+}
+
+// ExecContext honours ctx, as a real pod exec does — otherwise a test about an abandoned caller
+// would be answered by a runtime that never noticed the caller was gone.
+func (f *fakeRuntime) ExecContext(ctx context.Context, _ string, args ...string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	switch {
 	case containsArg(args, "capture-pane"):
+		if f.blankFor > 0 {
+			f.blankFor--
+			return nil, nil
+		}
+		if f.blank {
+			return nil, nil
+		}
 		return []byte(f.pane), nil
 	case containsArg(args, "send-keys") && containsArg(args, "-l"):
-		f.sent = append(f.sent, args[len(args)-1])
+		text := args[len(args)-1]
+		f.sent = append(f.sent, text)
+		f.typed = text
+		if !f.swallow {
+			f.pane += drawn(f.width(), text)
+		}
+	case containsArg(args, "send-keys") && containsArg(args, "Enter"):
+		f.submits++
+		// /clear is the case the read-back's POSITION exists for: submitting it wipes the transcript
+		// the text was echoed into, so a capture taken after this Enter can never find it.
+		if strings.TrimSpace(f.typed) == "/clear" {
+			f.pane = idlePane
+		}
+		f.typed = ""
 	case containsArg(args, "send-keys") && containsArg(args, "Escape"):
 		f.interrupts++
 	}
@@ -102,8 +186,11 @@ func (tellDeps) AgentClients(_, _ string) int { return 0 }
 type paneReader struct{ agentport.Agent }
 
 func (paneReader) DetectState(screen string) agentport.State {
-	if strings.Contains(strings.ToLower(screen), "please run /login") {
+	switch s := strings.ToLower(screen); {
+	case strings.Contains(s, "please run /login"):
 		return agentport.SignedOut
+	case strings.Contains(s, "do you want to proceed?"):
+		return agentport.Blocked
 	}
 	return agentport.Idle
 }

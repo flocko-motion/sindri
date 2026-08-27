@@ -93,7 +93,7 @@ func TestAssignPendingWorkPushesForAnIdleWorker(t *testing.T) {
 func TestAssignPendingWorkLeavesABusyWorkerAlone(t *testing.T) {
 	deps := &stubDeps{}
 	e, ps := idleWorkerWithOpenTask(t, deps)
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Container: "td-EPIC", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Container: "td-EPIC", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -119,7 +119,7 @@ func TestAssignPendingWorkWakesAGatedFeatureWorkerOnceApproved(t *testing.T) {
 	if err := e.RefreshTask("repo", "td-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	deps := e.deps.(*stubDeps)
@@ -154,7 +154,7 @@ func TestAssignPendingSubtaskDoesNotRepeatIdenticalNudges(t *testing.T) {
 	if err := e.RefreshTask("repo", "td-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.ApproveTask("repo", "td-2", false); err != nil {
@@ -179,7 +179,7 @@ func TestAssignPendingSubtaskDoesNotPushAPendingClearNotice(t *testing.T) {
 	if err := e.RefreshTask("repo", "td-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	a, _, _ := ps.GetAgent("dain")

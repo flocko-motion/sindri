@@ -9,14 +9,16 @@ package tmux
 
 import "fmt"
 
-// SendText builds the argv pair that injects text "as if typed": the literal
-// text (—l -- so brackets/spaces/provenance tags are never interpreted as tmux
-// key names), then a separate Enter to submit. Returns one argv per command.
-func SendText(session, text string) [][]string {
-	return [][]string{
-		{"send-keys", "-t", session, "-l", "--", text},
-		{"send-keys", "-t", session, "Enter"},
-	}
+// SendLiteral types text into a session without submitting it (-l -- so brackets, spaces and
+// provenance tags are never read as tmux key names).
+func SendLiteral(session, text string) []string {
+	return []string{"send-keys", "-t", session, "-l", "--", text}
+}
+
+// Submit is the Enter that sends what SendLiteral typed. Two calls rather than one, so a caller may
+// look at the pane in between — the one moment the text is on screen whatever the message then does.
+func Submit(session string) []string {
+	return []string{"send-keys", "-t", session, "Enter"}
 }
 
 // Interrupt builds a bare Escape keypress — "abort the current operation" to Claude and most TUIs.

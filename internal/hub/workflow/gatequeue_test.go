@@ -76,7 +76,7 @@ func TestASelfCheckMeasuresTheCommitNotTheMovingTree(t *testing.T) {
 // at once with a position, and the gate itself waits its turn in the fleet's one slot.
 func TestASelfCheckIsQueuedNotRunInTheHub(t *testing.T) {
 	e, ps, root := gateRepo(t, "bombur", "sd-1")
-	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "sd-1", Branch: "sd-1", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "sd-1", Branch: "sd-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(root, ".worktrees", "bombur", "new.txt"), "work")
@@ -136,7 +136,7 @@ func TestASelfCheckOnAnUnchangedWorkspaceAnswersFromTheStore(t *testing.T) {
 // moved on to while the gate waited.
 func TestAFailedSelfCheckLeavesTheAgentWorking(t *testing.T) {
 	e, ps, root := gateRepo(t, "bombur", "sd-1")
-	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "sd-1", Branch: "sd-1", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "sd-1", Branch: "sd-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(root, ".worktrees", "bombur", "new.txt"), "work")

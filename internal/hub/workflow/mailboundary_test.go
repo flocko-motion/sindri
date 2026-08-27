@@ -221,7 +221,7 @@ func TestMailDefersPastAModelChange(t *testing.T) {
 	if err := ps.PutOwnedTask(store.OwnedTask{ID: "td-abc123", Title: "a task", Status: "open", Priority: "P2"}); err != nil {
 		t.Fatalf("seed task: %v", err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: agent, Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: agent, Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
 	e := New(st, deps)
@@ -287,7 +287,7 @@ func TestMailDefersPastCompactionBetweenSubtasks(t *testing.T) {
 	if err := ps.SetParent("td-next", "td-EPIC"); err != nil {
 		t.Fatalf("set parent: %v", err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: agent, Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: agent, Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
 	addUnreadMail(t, ps, agent)
@@ -347,7 +347,7 @@ func TestMailOutranksAFeatureWithNothingLeftOpen(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: "td-EPIC", Title: "a feature", Status: "open", Priority: "P1", Type: "epic"}); err != nil {
 		t.Fatalf("seed feature: %v", err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: agent, Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: agent, Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
 	addUnreadMail(t, ps, agent)

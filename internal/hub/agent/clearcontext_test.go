@@ -48,7 +48,7 @@ func TestArmingWaitsForTheBoundary(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-abc123", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-abc123", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetClearArmed(t.Context(), "proj", "eitri", true); err != nil {
@@ -78,21 +78,21 @@ func TestABoundaryIsNoLeafTaskAndNoReview(t *testing.T) {
 		}
 	}
 	// Between subtasks: the feature is still held, and that is a boundary.
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Container: "td-epic", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Container: "td-epic", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	if at, err := s.AtLeafBoundary("proj", "eitri"); err != nil || !at {
 		t.Errorf("a feature between subtasks is a boundary: at=%v err=%v", at, err)
 	}
 	// Mid-subtask: not a boundary, feature or no feature.
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Container: "td-epic", Task: "td-leaf", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Container: "td-epic", Task: "td-leaf", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	if at, _ := s.AtLeafBoundary("proj", "eitri"); at {
 		t.Error("a subtask in hand is exactly what the clear must not cut into")
 	}
 	// A reviewer owing a verdict is mid-review.
-	if err := ps.SetState(store.AgentState{Agent: "nori", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "nori", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	if at, _ := s.AtLeafBoundary("proj", "nori"); !at {
@@ -122,7 +122,7 @@ func TestDisarmingIsJustTheFlag(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker", ClearArmed: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-abc123", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-abc123", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetClearArmed(t.Context(), "proj", "eitri", false); err != nil {
@@ -143,7 +143,7 @@ func TestArmingAtABoundaryNeedsALivePod(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	err := s.SetClearArmed(t.Context(), "proj", "eitri", true)
@@ -169,7 +169,7 @@ func TestFireArmedClearsPassesOverAgentsStillWorking(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker", ClearArmed: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-abc123", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-abc123", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	s.FireArmedClears(t.Context(), "proj")

@@ -86,7 +86,7 @@ func TestExecuteRunDropsAStaleRunWhenTheAgentMovedOn(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "bombur", Role: "worker", Workspace: ".worktrees/bombur"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "td-1"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "td-1"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	r, err := e.ScheduleRun("repo", "bombur", "go test ./...", "", "")
@@ -96,7 +96,7 @@ func TestExecuteRunDropsAStaleRunWhenTheAgentMovedOn(t *testing.T) {
 	if r.Task != "td-1" {
 		t.Fatalf("ScheduleRun should snapshot the agent's task: got %q, want td-1", r.Task)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "td-2"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "td-2"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.ExecuteRun(t.Context(), "repo", r.ID); err != nil {

@@ -56,6 +56,7 @@ type Hub struct {
 	creds    *credwatch        // agent credential upkeep from the host (internal/hub/credwatch.go)
 	stalls   *stallwatch       // held work nobody is working on (internal/hub/stallwatch.go)
 	runs     *runwatch         // executes the run queue, one at a time (internal/hub/runwatch.go)
+	status   *statuswatch      // diffs the derived status word into state_log (internal/hub/statuswatch.go)
 	// host/pod tool-version skew, checked once at startup (internal/hub/toolskew.go). Kept as a
 	// field only so toolskew_test.go can reach check()/said; New drives it once and nothing else does.
 	tools *toolskew
@@ -142,6 +143,9 @@ func open(ctx context.Context, hostVersions func(context.Context) map[string]str
 	h.agents = agent.New(h.store, agentDeps{h}, h.agentCh)
 	h.wf = workflow.New(h.store, workflowDeps{h}, spec.Source{}, github.Source{}).WithGates(spec.Source{})
 	h.projects = project.New(h.store, projectDeps{h})
+	// Before watch: watchdog.sweep calls h.status.sweep at its own tail, on the very first beat, so
+	// this must exist before that goroutine starts — building it takes no dependency of its own.
+	h.status = newStatuswatch(h)
 	// Last, after agents: the watchdog probes through h.agents and reads once here, so the first
 	// board read has real observations.
 	h.watch = newWatchdog(life, h)
@@ -214,6 +218,7 @@ func (h *Hub) Close() error {
 	h.creds.close()
 	h.stalls.close()
 	h.runs.close()
+	// status has no loop of its own to stop — watchdog.close() above already ended what drove it.
 	h.agentCh.CloseAll()
 	h.endLife()
 	server.FlushAccessLog() // emit any open access-log run before we go quiet

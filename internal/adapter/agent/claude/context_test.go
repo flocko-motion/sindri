@@ -295,3 +295,38 @@ func TestASyntheticTailStillResolvesTheWindow(t *testing.T) {
 		t.Errorf("model = %q, want %q — the synthetic line names no model, the one before it does", model, "claude-opus-5")
 	}
 }
+
+// TestShortModelDropsOnlyTheVendorPrefix: every Claude id carries "claude-", so it distinguishes
+// nothing in a column beside the context fill and the agent name. The case that decides whether the
+// helper is SAFE is the last one — an id nobody anticipated must still be readable, since a shortener
+// that mangled it would turn "I do not know this model" into "this agent has no model".
+func TestShortModelDropsOnlyTheVendorPrefix(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"claude-sonnet-5", "sonnet-5"},
+		{"claude-opus-5", "opus-5"},
+		{"claude-haiku-4-5", "haiku-4-5"},
+		{"gpt-5", "gpt-5"},                   // no prefix: unchanged, not mangled
+		{"sonnet-5", "sonnet-5"},             // already short: unchanged, never stripped twice
+		{"", ""},                             // no model at all stays no model
+		{"claude-claude-5", "claude-5"},      // the LEADING prefix only
+		{"a-claude-model", "a-claude-model"}, // the prefix mid-id is part of the name
+	} {
+		if got := (Claude{}).ShortModel(c.in); got != c.want {
+			t.Errorf("ShortModel(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestShorteningNeverReachesTheWindowLookup: the full id is what ModelWindow matches on, so a
+// shortened one must still resolve — proof that shortening is safe to do at the point of display and
+// nowhere earlier, which is the rule the helper's comment states.
+func TestShorteningNeverReachesTheWindowLookup(t *testing.T) {
+	for _, id := range []string{"claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5"} {
+		full, okFull := (Claude{}).ModelWindow(id)
+		short, okShort := (Claude{}).ModelWindow((Claude{}).ShortModel(id))
+		if !okFull || !okShort || full != short {
+			t.Errorf("%s: window %d/%v full, %d/%v short — the table must match either spelling",
+				id, full, okFull, short, okShort)
+		}
+	}
+}

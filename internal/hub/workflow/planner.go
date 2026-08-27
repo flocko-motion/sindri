@@ -63,7 +63,7 @@ func (e *Engine) AssignPlan(project, agent, goal, taskID string) error {
 		return err
 	}
 	st.Agent, st.Phase = agent, "planning"
-	_ = ps.SetState(st)
+	_ = ps.SetState(st, store.ReasonClaimed, "assigned to plan: "+subject)
 	_ = ps.Log(agent, "plan", subject)
 	e.deps.Notify()
 	return nil
@@ -134,7 +134,9 @@ func (e *Engine) CmdState(c registry.Caller, args []string, out io.Writer) (int,
 	ps := e.store.For(c.Project)
 	st, _ := ps.GetState(c.Agent)
 	st.Agent, st.Phase = c.Agent, args[0]
-	if err := ps.SetState(st); err != nil {
+	// Both values are the planner's OWN resting labels (CmdState's own doc), never new work claimed —
+	// so this is a release either way, whichever of the two names it settles on.
+	if err := ps.SetState(st, store.ReasonFreed, "planner set its own state to "+args[0]); err != nil {
 		return 1, err
 	}
 	e.deps.Notify()

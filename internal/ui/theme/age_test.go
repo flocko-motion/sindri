@@ -76,6 +76,84 @@ func TestWhenPairsTheMomentWithItsAge(t *testing.T) {
 	}
 }
 
+// TestAgoReadsAsProseUnderAMinute is the bug itself: three call sites appended " ago" to Age, whose
+// sub-minute answer is already a whole phrase, so a mail just read said "read now ago".
+func TestAgoReadsAsProseUnderAMinute(t *testing.T) {
+	for _, d := range []time.Duration{0, 10 * time.Second, 59 * time.Second, -5 * time.Second} {
+		got := Ago(time.Now().Add(-d).UTC().Format(time.RFC3339))
+		if got != "just now" {
+			t.Errorf("Ago(%v ago) = %q, want %q", d, got, "just now")
+		}
+		if strings.Contains(got, "now ago") {
+			t.Errorf("Ago(%v ago) = %q — the phrase this exists to prevent", d, got)
+		}
+	}
+}
+
+// TestAgoCarriesTheMagnitudeAboveAMinute: past the sub-minute case the column's own form reads
+// correctly as prose, so Ago spells it exactly as Age does and adds the word.
+func TestAgoCarriesTheMagnitudeAboveAMinute(t *testing.T) {
+	for _, c := range []struct {
+		d    time.Duration
+		want string
+	}{
+		{10 * time.Minute, "10m ago"},
+		{90 * time.Minute, "1h ago"},
+		{26 * time.Hour, "1d ago"},
+		{9 * 24 * time.Hour, "1w ago"},
+	} {
+		stamp := time.Now().Add(-c.d).UTC().Format(time.RFC3339)
+		if got := Ago(stamp); got != c.want {
+			t.Errorf("Ago(%v ago) = %q, want %q", c.d, got, c.want)
+		}
+		if got := Ago(stamp); got != Age(stamp)+" ago" {
+			t.Errorf("Ago = %q but Age = %q — the two forms must not spell a magnitude differently", got, Age(stamp))
+		}
+	}
+}
+
+// TestAgoSaysUnknownWithNoWordHungOnIt: an absent timestamp has no age, and "n/a ago" would be a
+// claim about a moment no source gave.
+func TestAgoSaysUnknownWithNoWordHungOnIt(t *testing.T) {
+	for _, s := range []string{"", "not a date", "0001-01-01T00:00:00Z"} {
+		if got := Ago(s); got != Unknown {
+			t.Errorf("Ago(%q) = %q, want %q", s, got, Unknown)
+		}
+	}
+}
+
+// TestHeldNeverSaysForNow guards the nastier sibling of "now ago": the PR detail suffixes its status
+// with " for "+age, and "open for now" is real English meaning the opposite — for the time being.
+func TestHeldNeverSaysForNow(t *testing.T) {
+	for _, d := range []time.Duration{0, 30 * time.Second, -2 * time.Second} {
+		got := Held(time.Now().Add(-d).UTC().Format(time.RFC3339))
+		if got != "under a minute" {
+			t.Errorf("Held(%v) = %q, want %q", d, got, "under a minute")
+		}
+		if "for "+got == "for now" {
+			t.Errorf("Held(%v) composes to %q, which reads as the opposite", d, "for "+got)
+		}
+	}
+	// Above a minute it is the column's own magnitude, so a detail and a cell cannot disagree.
+	stamp := time.Now().Add(-3 * time.Hour).UTC().Format(time.RFC3339)
+	if got, want := Held(stamp), Age(stamp); got != want {
+		t.Errorf("Held = %q, Age = %q — one magnitude, spelled once", got, want)
+	}
+	if got := Held("not a date"); got != Unknown {
+		t.Errorf("Held(unparseable) = %q, want %q — the caller drops the suffix on that", got, Unknown)
+	}
+}
+
+// TestWhenReadsAsProseWhenItIsFresh: When composes the same phrase, so it carried the bug too — a
+// detail pane on something just changed read "(now ago)". The task named three call sites; this
+// was the fourth, inside the helper itself.
+func TestWhenReadsAsProseWhenItIsFresh(t *testing.T) {
+	got := When(time.Now().Add(-3 * time.Second).UTC().Format(time.RFC3339))
+	if !strings.HasSuffix(got, "(just now)") {
+		t.Errorf("When = %q, want it to end with %q", got, "(just now)")
+	}
+}
+
 // TestWhenSaysUnknownRatherThanInventingOne is the honest blank the mirrored sources need: a task
 // whose source gives no timestamp is never "recent", and the detail saying so is what explains its
 // absence from the active filter. A fallback to the created time would hide exactly that.

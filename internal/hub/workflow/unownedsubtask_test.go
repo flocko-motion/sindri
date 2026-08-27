@@ -45,7 +45,7 @@ func unownedSubtask(t *testing.T) (*Engine, *store.ProjectStore) {
 	// Holding the feature, between subtasks — the state the directive and the submit gate disagreed in.
 	if err := ps.SetState(store.AgentState{
 		Agent: agent, Container: "td-feat", Branch: "td-feat", Phase: "idle",
-	}); err != nil {
+	}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
 	return New(st, &stubDeps{root: root}), ps

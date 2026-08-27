@@ -17,6 +17,7 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/client"
 	"github.com/flo-at/sindri/internal/ui/table"
+	"github.com/flo-at/sindri/internal/ui/theme"
 )
 
 // mailReadDwell is how long the cursor must rest on a message, body on screen, before it counts as
@@ -131,7 +132,7 @@ func (m model) mailRows() []row {
 			table.Cell{Text: dash(msg.Sender)},
 			table.Cell{Text: msg.Agent},
 			table.Cell{Text: state, Style: st.Render},
-			table.Cell{Text: shortAge(msg.SentAt), Style: dimStyle.Render},
+			table.Cell{Text: theme.Age(msg.SentAt), Style: dimStyle.Render},
 			table.Cell{Text: oneLineText(msg.Body)},
 		), api.MailID(msg.ID)}
 		// Grouped on WHO it is for, not which repo it came from: the repo column already says that, and
@@ -143,11 +144,11 @@ func (m model) mailRows() []row {
 		}
 	}
 	rows := m.listingHeaded(mailTable, toUser, rest, api.MailToUserHeading(len(toUser)), api.MailLogHeading)
-	// The window is not the history: a list that stopped at its rows would present the recent end as
-	// everything, and finding last month's message is the whole reason nothing is deleted. Outside the
-	// labelled rows, since it is a note about the listing rather than a message in it.
+	// The window is not the history: every unread message rides along regardless of age (-> AllMail),
+	// so what it drops is always already read — and finding last month's message is the whole reason
+	// nothing is deleted. Outside the labelled rows, since it is a note about the listing, not a message.
 	if n, total := len(m.state.Mail), m.state.MailTotal; total > n {
-		rows = append(rows, row{dimStyle.Render(fmt.Sprintf("… showing the last %d of %d messages — older mail: `sindri mail show ml-<n>`", n, total)), ""})
+		rows = append(rows, row{dimStyle.Render(fmt.Sprintf("… showing %d of %d messages, every unread one included — older read mail: `sindri mail show ml-<n>`", n, total)), ""})
 	}
 	return rows
 }
@@ -165,7 +166,7 @@ func oneLineText(s string) string {
 func (m model) selMail() (api.Mail, bool) {
 	id, err := api.ParseMailID(m.selID())
 	if err != nil {
-		return api.Mail{}, false // the "showing the last N of M" row, which is not a message
+		return api.Mail{}, false // the "N of M" note row, which is not a message
 	}
 	for _, msg := range m.state.Mail {
 		if msg.ID == id {
@@ -184,7 +185,7 @@ func (m model) mailItems() []metaItem {
 	}
 	read := "unread"
 	if msg.Read() {
-		read = "read " + shortAge(msg.ReadAt) + " ago"
+		read = "read " + theme.Ago(msg.ReadAt)
 	}
 	from := metaItem{text: "from:    " + dash(msg.Sender)}
 	if m.isAgent(msg.Sender) { // hub/user/reviewer aren't traceable; an agent's own name is

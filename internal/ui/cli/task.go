@@ -427,7 +427,7 @@ func taskListCmd() *cobra.Command {
 				// Highest priority first, then id (-> store.AllTasks), so capHead keeps what matters most.
 				tasks, matched := capHead(tasks, limit)
 				// Off the board, since a task carries no owner of its own (-> AgentsByTask).
-				holders := map[string]string{}
+				holders := map[string]api.TaskHolder{}
 				if st, serr := b.State(); serr == nil {
 					holders = api.AgentsByTask(st.Agents, st.PRs)
 				}
@@ -439,7 +439,7 @@ func taskListCmd() *cobra.Command {
 						table.Cell{Text: api.TierOrDefault(t.Tier)},
 						table.Cell{Text: taskState(t)},
 						table.Cell{Text: theme.Age(t.CreatedAt)},
-						table.Cell{Text: dash(holders[t.ID])},
+						table.Cell{Text: dash(holders[t.ID].Agent)},
 						table.Cell{Text: t.Title},
 					))
 				}
@@ -493,7 +493,12 @@ func taskInfoCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				agent := api.AgentOnTask(st.Agents, st.PRs, t.ID)
+				// Named with its relationship, as the TUI pane is: holding a hierarchy and working a leaf
+				// inside it are both true of one agent at once, and a bare name says neither.
+				agent := ""
+				if h := api.AgentOnTask(st.Agents, st.PRs, t.ID); h.Agent != "" {
+					agent = h.Agent + " — " + theme.TaskRelationLabel(h.Rel)
+				}
 				// The same fields the TUI pane and the agent's `task <id>` show.
 				fmt.Printf("id:       %s\ntitle:    %s\nstatus:   %s\ntype:     %s\npriority: %s\ntier:     %s\nparent:   %s\nagent:    %s\napproval: %s\nlabels:   %s\nurl:      %s\n",
 					t.ID, t.Title, t.Status, dash(t.Type), theme.PriorityLabel(t.Priority), api.TierOrDefault(t.Tier),

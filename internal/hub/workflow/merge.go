@@ -88,7 +88,7 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 		_ = ps.PutPR(pr)
 		// Phase only: pr.Task is the container's id for a milestone, not the subtask held — writing
 		// it, or dropping Container, would misplace or unhook a feature worker.
-		_ = ps.SetPhase(pr.Agent, "resolving")
+		_ = ps.SetPhase(pr.Agent, "resolving", store.ReasonAdvanced, "merge of "+prID+" conflicts with "+pr.Base)
 		_ = ps.LogPR(pr.ID, "conflict", "rebase onto "+pr.Base+" conflicts: "+strings.Join(res.Files, ", "))
 		_ = e.deps.Deliver(project, pr.Agent, MsgResolveNeeded(pr.Base, res.Files), MailAndPush)
 		e.deps.Notify()
@@ -159,7 +159,8 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 				if onFeature {
 					container = pr.Branch
 				}
-				_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: cur.Task, Branch: pr.Branch, Container: container, Phase: "resolving"})
+				_ = ps.SetState(store.AgentState{Agent: pr.Agent, Task: cur.Task, Branch: pr.Branch, Container: container, Phase: "resolving"},
+					store.ReasonAdvanced, "reapplying uncommitted work onto "+pr.Base+" after "+prID+" merged conflicts")
 				if rerr != nil {
 					log.Printf("hub: %s: reset %s onto %s after %s: %v", pr.Agent, pr.Branch, pr.Base, prID, rerr)
 					_ = ps.LogPR(prID, "warning", "merged, but resetting "+pr.Agent+"'s branch onto "+pr.Base+" failed (needs a manual look): "+rerr.Error())
@@ -190,7 +191,7 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 	if a, ok, _ := ps.GetAgent(pr.Agent); ok {
 		rest = restPhase(a.Role)
 	}
-	_ = ps.SetState(store.AgentState{Agent: pr.Agent, Phase: rest})
+	_ = ps.SetState(store.AgentState{Agent: pr.Agent, Phase: rest}, store.ReasonLanded, "merged: "+prID)
 	_ = ps.Log(pr.Agent, "merged", prID)
 	_ = ps.LogPR(prID, "merged", "into "+pr.Base)
 	// No message: the task left pr.Agent's hands the moment it submitted. Silence is the successful
@@ -214,7 +215,7 @@ func (e *Engine) finishPartialMerge(project string, pr store.PR, onFeature bool)
 	} else {
 		// Phase only: promoteToFeature only promotes a "working" agent, so this one never picked up
 		// a container while its interim PR was out.
-		_ = ps.SetPhase(pr.Agent, "working")
+		_ = ps.SetPhase(pr.Agent, "working", store.ReasonLanded, "interim merged: "+pr.ID)
 		_ = ps.Log(pr.Agent, "merged", pr.ID+" (interim)")
 		_ = ps.LogPR(pr.ID, "merged", "interim contribution into "+pr.Base)
 		// Push only, same reason: it resumes the same task, which its directive already says.

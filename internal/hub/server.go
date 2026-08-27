@@ -139,6 +139,11 @@ func (h *Hub) Handler() http.Handler {
 		evs, err := h.Log(h.agentReq(r, name), name)
 		writeJSON(w, evs, err)
 	})
+	mux.HandleFunc("GET /agent/states", func(w http.ResponseWriter, r *http.Request) {
+		name := r.URL.Query().Get("agent")
+		evs, err := h.StateLog(h.agentReq(r, name), name)
+		writeJSON(w, evs, err)
+	})
 	mux.HandleFunc("GET /agent/pane", func(w http.ResponseWriter, r *http.Request) {
 		lines, _ := strconv.Atoi(r.URL.Query().Get("lines"))
 		if lines <= 0 {
@@ -191,7 +196,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"resumed"}, h.Resume(h.agentReq(r, req.Name), req.Name, "escalation cleared by the user"))
+		writeJSON(w, okMsg{"resumed"}, h.ResumeByUser(h.agentReq(r, req.Name), req.Name, req.Answer))
 	})
 	mux.HandleFunc("POST /agent/delete", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq

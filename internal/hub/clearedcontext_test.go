@@ -18,11 +18,38 @@ import (
 )
 
 // clearableRuntime fakes the tmux/podman runtime, just enough for FireClear's calls to succeed with
-// no real pod. sent is mutex-guarded: FireClear's own kickoff goroutine writes it too.
+// no real pod. Mutex-guarded: FireClear's own kickoff goroutine writes it too. pane is what a terminal
+// would have DRAWN of the -l literals, since inject reads its own text back off it.
 type clearableRuntime struct {
 	container.Runtime
 	mu   sync.Mutex
 	sent []string
+	pane string
+}
+
+// paneCols is this fixture's terminal width; the needle is derived from it, so it is a value here
+// rather than an assumption baked into the drawing.
+const paneCols = 76
+
+// drawn is what a terminal does to typed text — rows wrapped at the box interior and padded out
+// behind full-width chrome. Echoing the raw string instead would match needles no pane could.
+func drawn(width int, text string) string {
+	inner := max(1, width-4)
+	var b strings.Builder
+	for line := range strings.SplitSeq(text, "\n") {
+		for {
+			row := line
+			if len([]rune(row)) > inner {
+				row = string([]rune(row)[:inner])
+			}
+			b.WriteString("│ " + row + strings.Repeat(" ", inner-len([]rune(row))) + " │\n")
+			line = line[len(row):]
+			if line == "" {
+				break
+			}
+		}
+	}
+	return b.String()
 }
 
 func (r *clearableRuntime) Running(string) bool                         { return true }
@@ -33,11 +60,18 @@ func (r *clearableRuntime) Exec(name string, args ...string) ([]byte, error) {
 func (r *clearableRuntime) ExecContext(_ context.Context, _ string, args ...string) ([]byte, error) {
 	for _, a := range args {
 		if a == "capture-pane" {
-			return []byte("\n> \n"), nil
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			return []byte("\n> \n" + r.pane), nil
 		}
 	}
 	r.mu.Lock()
 	r.sent = append(r.sent, strings.Join(args, " "))
+	// send-keys -l's literal text is the last arg, after "--"; the fake terminal draws it, so inject's
+	// own read-back finds what it just sent.
+	if n := len(args); n >= 2 && args[n-2] == "--" {
+		r.pane += drawn(paneCols, args[n-1])
+	}
 	r.mu.Unlock()
 	return nil, nil
 }
@@ -79,6 +113,7 @@ func (f fakeAgent) PrepareHome(agentport.HomeSpec) (agentport.Home, error) {
 	return agentport.Home{}, nil
 }
 func (f fakeAgent) RestageCredentials(string) (bool, error) { return false, nil }
+func (f fakeAgent) ShortModel(model string) string          { return model }
 func (f fakeAgent) HostTokenExpiry() (int64, bool)          { return 0, false }
 func (f fakeAgent) ContextUsage(string) (int, int, string, bool) {
 	if f.tokens == nil {
@@ -125,7 +160,7 @@ func fullAgentWithWorkWaiting(t *testing.T) (*Hub, string, fakeAgent) {
 	if err := ps.PutOwnedTask(store.OwnedTask{ID: "sd-1", Title: "waiting work", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "idle"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	// The measurement memo is package-global and keyed on project/agent, so a previous test can

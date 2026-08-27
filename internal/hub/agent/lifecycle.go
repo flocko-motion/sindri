@@ -76,39 +76,56 @@ func (s *Service) clearLaunching(project, name string) {
 	}
 }
 
-// AgentStatus reconciles intent with observed runtime into one status word, clearing the intent
-// once fulfilled — the single source of truth for "what is this agent doing". observed is whether
-// the runtime has been LOOKED AT at all: running=false alone must never produce "down" or retire an
-// intent, since an agent the watchdog has not reached yet supports no claim. stopped is the durable
-// flag a human's StopAgent set, checked last of all so it never outranks a truer explanation.
+// AgentStatus reconciles intent with observed runtime into one status word, clearing the intent once
+// fulfilled — called by the board read that owns retiring a settled intent (-> Hub.State, foldStatus).
 func (s *Service) AgentStatus(project, name string, running, observed bool, phase string, stopped bool) string {
 	s.lcMu.Lock()
 	defer s.lcMu.Unlock()
 	key := lcKey{project, name}
+	status, retire := s.foldStatus(key, running, observed, phase, stopped)
+	if retire {
+		delete(s.lifecycle, key)
+	}
+	return status
+}
+
+// PeekStatus is AgentStatus without retiring a settled intent — for an observer that must not
+// perturb the very thing it measures (-> statuswatch.go).
+func (s *Service) PeekStatus(project, name string, running, observed bool, phase string, stopped bool) string {
+	s.lcMu.Lock()
+	defer s.lcMu.Unlock()
+	status, _ := s.foldStatus(lcKey{project, name}, running, observed, phase, stopped)
+	return status
+}
+
+// foldStatus is the pure read both AgentStatus and PeekStatus share: the word, and whether the
+// intent behind it is now settled and may be retired. observed is whether the runtime has been
+// LOOKED AT at all — running=false alone must never read "down" or retire an intent, since an agent
+// the watchdog has not reached yet supports no claim. stopped is the durable flag StopAgent set,
+// checked last so it never outranks a truer explanation. Callers hold s.lcMu.
+func (s *Service) foldStatus(key lcKey, running, observed bool, phase string, stopped bool) (status string, retire bool) {
 	intent := s.lifecycle[key].state
 	switch {
 	case intent == "stopping":
 		if running || !observed {
-			return "stopping" // stop requested; the pod is still up, or nothing has looked yet
+			return "stopping", false // stop requested; the pod is still up, or nothing has looked yet
 		}
-		delete(s.lifecycle, key) // down now — stop intent fulfilled
-		return "down"
+		return "down", true // down now — stop intent fulfilled
 	case running:
-		delete(s.lifecycle, key) // up now — launch intent fulfilled
 		if phase == "" {
-			return "idle"
+			return "idle", true // up now — launch intent fulfilled
 		}
-		return phase
+		return phase, true
 	case intent == "launching":
-		return "launching" // requested, pod not up yet
+		return "launching", false // requested, pod not up yet
 	case intent == api.StatusLaunchFailed:
-		return api.StatusLaunchFailed // the watchdog gave up waiting; see FailLaunch
+		return api.StatusLaunchFailed, false // the watchdog gave up waiting; see FailLaunch
 	case !observed:
-		return "unknown" // registered since the last sweep; the next one answers
+		return "unknown", false // registered since the last sweep; the next one answers
 	case stopped:
-		return "stopped" // torn down on purpose, resumable — not the same claim as "down"
+		return "stopped", false // torn down on purpose, resumable — not the same claim as "down"
 	default:
-		return "down"
+		return "down", false
 	}
 }
 
@@ -360,13 +377,13 @@ func previewSizeEnv(cols, lines int) map[string]string {
 	return map[string]string{"SINDRI_COLS": strconv.Itoa(cols), "SINDRI_LINES": strconv.Itoa(lines)}
 }
 
-// modelEnv is the model to launch on (-> sindri-agent.sh, both the --model flag and the status
-// line), or nothing when none is chosen — the account default, same as always.
+// modelEnv is the model to launch on (-> sindri-agent.sh): the id --model is given, plus the label
+// the status line shows, since shortening the id itself would change what the agent starts on.
 func modelEnv(model string) map[string]string {
 	if model == "" {
 		return nil
 	}
-	return map[string]string{"SINDRI_MODEL": model}
+	return map[string]string{"SINDRI_MODEL": model, "SINDRI_MODEL_LABEL": agentport.ShortModel(model)}
 }
 
 // prepareWorkspace lays down what /workspace will bind-mount: nothing to check out for a
@@ -391,7 +408,7 @@ func (s *Service) prepareWorkspace(ps *store.ProjectStore, project, name, root, 
 		}
 		// Rest in "collab" so the dashboard shows it's standing with the user, not idle.
 		if st, _ := ps.GetState(name); st.Phase == "" || st.Phase == "idle" {
-			_ = ps.SetState(store.AgentState{Agent: name, Phase: "collab"})
+			_ = ps.SetState(store.AgentState{Agent: name, Phase: "collab"}, store.ReasonClaimed, "coauthor launched")
 		}
 	} else if err := git.WorktreeAdd(root, wt, "HEAD"); err != nil {
 		return err
@@ -414,7 +431,7 @@ func (s *Service) prepareWorkspace(ps *store.ProjectStore, project, name, root, 
 		}
 		// Rest in "planning", not "idle" — unless a PR is already in flight.
 		if st, _ := ps.GetState(name); st.Phase != "submitted" {
-			_ = ps.SetState(store.AgentState{Agent: name, Phase: "planning"})
+			_ = ps.SetState(store.AgentState{Agent: name, Phase: "planning"}, store.ReasonClaimed, "planner launched")
 		}
 	}
 	return nil
@@ -439,6 +456,7 @@ func (s *Service) Launch(ctx context.Context, project, name string, shell, debug
 	// Status → launching before any preflight, not after: container.Check below can start a
 	// stopped podman VM on macOS, and that wait must not read as "down" for having asked nothing yet.
 	s.setLifecycle(project, name, "launching")
+	s.clearStrikes(project, name) // a fresh pod inherits no verdict about what could not be said to the old one
 	_ = ps.Log(name, "launch", "requested")
 	s.deps.Notify()
 	defer func() {

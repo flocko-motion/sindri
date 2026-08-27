@@ -10,6 +10,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/spf13/cobra"
@@ -44,27 +45,40 @@ func agentRetireCmd() *cobra.Command {
 	return c
 }
 
-// agentResumeCmd clears an escalation from the host. Ordinarily the agent clears its own once it has
-// the answer — only it knows it understood — so this is the release for one that cannot: an agent
-// restarted, deleted, or simply wrong that it was blocked.
+// agentResumeCmd clears an escalation from the host and wakes the agent with the news. Ordinarily
+// the agent clears its own once it has the answer — only it knows it understood — so this is the
+// release for one that cannot: an agent restarted, deleted, or simply wrong that it was blocked.
+// The answer rides along, since an escalation is a question and a release without one sends the
+// agent back at the wall it stopped against.
 func agentResumeCmd() *cobra.Command {
 	return &cobra.Command{
-		Use: "resume <name>", Short: "Clear an agent's escalation yourself (it normally clears its own)", Args: cobra.ExactArgs(1),
+		Use: "resume <name> [answer...]", Short: "Clear an agent's escalation yourself and tell it (it normally clears its own)",
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			answer := strings.TrimSpace(strings.Join(args[1:], " "))
 			return withAgent(args[0], func(b backend, a *api.AgentView) error {
 				if a.Escalation == "" {
 					fmt.Fprintf(os.Stderr, "%s isn't escalated — nothing to clear\n", a.Name)
 					return nil
 				}
-				if err := b.ResumeAgent(a.Name); err != nil {
+				if err := b.ResumeAgent(a.Name, answer); err != nil {
 					return err
 				}
-				fmt.Fprintf(os.Stderr, "cleared %s's escalation — tell it your answer with "+
-					"'sindri agent tell %s \"<answer>\"' if you haven't\n", a.Name, a.Name)
+				fmt.Fprintf(os.Stderr, "cleared %s's escalation and told it to carry on%s\n",
+					a.Name, resumeAnswerNote(answer, a.Name))
 				return nil
 			})
 		},
 	}
+}
+
+// resumeAnswerNote says whether the release carried an answer, naming how to send one when it did
+// not: a question cleared in silence is the case where the agent resumes and escalates again.
+func resumeAnswerNote(answer, name string) string {
+	if answer != "" {
+		return ", with your answer"
+	}
+	return fmt.Sprintf(" — no answer went with it; `sindri agent resume %s \"<answer>\"` carries one", name)
 }
 
 // agentClearContextCmd arms a context clear — the remedy for a full agent. The user typing this

@@ -34,8 +34,8 @@ func TestTheEscalatedQuestionIsReadableInTheDetail(t *testing.T) {
 
 // TestTheEscalationLineReleasesTheAgent: the user's own clear, reached where the question is read
 // rather than through a hotkey of its own — it only means anything on an escalated agent, and this is
-// the one place such an agent is looked at. It confirms first, since clearing an escalation discards
-// the agent's account of why it stopped.
+// the one place such an agent is looked at. ENTER opens a form rather than committing, because what
+// the agent stopped for is a QUESTION and the release is where its answer belongs.
 func TestTheEscalationLineReleasesTheAgent(t *testing.T) {
 	m := escalatedModel("keep both?")
 	var esc metaItem
@@ -56,8 +56,11 @@ func TestTheEscalationLineReleasesTheAgent(t *testing.T) {
 		t.Fatal("the escalation line is not reachable by the right-column cursor")
 	}
 	m.onKey("enter")
-	if !m.choice.active || !strings.Contains(m.choice.title, "dvalin") {
-		t.Errorf("ENTER should ask before clearing the escalation, got %+v", m.choice)
+	if !m.form.active || !strings.Contains(m.form.title, "dvalin") {
+		t.Errorf("ENTER should open the resume form, got %+v", m.form)
+	}
+	if len(m.form.fields) != 1 {
+		t.Errorf("the form carries the answer to send with the release, got %d field(s)", len(m.form.fields))
 	}
 }
 

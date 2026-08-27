@@ -24,7 +24,7 @@ func TestPRKindMarkers(t *testing.T) {
 		{api.TaskRow{PR: "", PRKind: ""}, ""},                    // no PR → no marker
 	}
 	for _, c := range cases {
-		got := taskMarks(false, prMarkKind(c.row))
+		got := taskMarks("", prMarkKind(c.row))
 		hasFinal := strings.Contains(got, theme.MarkPRFinal)
 		hasInterim := strings.Contains(got, theme.MarkPRInterim)
 		switch c.want {
@@ -48,19 +48,34 @@ func TestPRKindMarkers(t *testing.T) {
 // column, whatever the row carries. It is measured from the marks themselves, so a glyph swap that
 // changed the count would be caught here rather than in a crooked tree.
 func TestTheMarkerColumnAlwaysFillsItsWidth(t *testing.T) {
-	for _, assigned := range []bool{false, true} {
+	// EVERY relation, not just held-or-not: each draws its own glyph into the same slot.
+	for _, rel := range []api.TaskRelation{"", api.TaskWorking, api.TaskHolding, api.TaskSubmitted} {
 		for _, kind := range []string{"", "final", "interim"} {
-			got := taskMarks(assigned, kind)
+			got := taskMarks(rel, kind)
 			if w := ansi.StringWidth(got); w != marksW {
-				t.Errorf("assigned=%v kind=%q: marks %q are %d cells, the column is %d",
-					assigned, kind, got, w, marksW)
+				t.Errorf("rel=%q kind=%q: marks %q are %d cells, the column is %d",
+					rel, kind, got, w, marksW)
 			}
 		}
 	}
-	// Both marks at once is the widest a row gets, and the width is exactly that — a column
-	// wider than its content is padding nobody asked for, narrower would truncate a mark.
-	if w := ansi.StringWidth(taskMarks(true, "final")); w != marksW {
-		t.Errorf("a row carrying both marks is %d cells against a column of %d", w, marksW)
+	// And the column is EXACTLY as wide as its widest content, measured here from the glyphs rather
+	// than from taskMarks — which pads to marksW and so agrees with any value it is given, including
+	// a hardcoded one. Wider is padding nobody asked for; narrower truncates a mark off the row.
+	widest := 0
+	for _, agentMark := range []string{"", theme.MarkAssigned, theme.MarkHolds} {
+		for _, prMark := range []string{"", theme.MarkPRFinal, theme.MarkPRInterim} {
+			widest = max(widest, ansi.StringWidth(agentMark+prMark))
+		}
+	}
+	if marksW != widest {
+		t.Errorf("the column is %d cells and its widest row is %d", marksW, widest)
+	}
+	// Nothing is truncated at that width: every glyph a row carries survives into the drawn cell.
+	for _, rel := range []api.TaskRelation{api.TaskWorking, api.TaskHolding} {
+		got := taskMarks(rel, "final")
+		if !strings.Contains(got, theme.MarkPRFinal) {
+			t.Errorf("rel=%q: the PR mark was truncated out of %q", rel, got)
+		}
 	}
 }
 

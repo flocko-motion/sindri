@@ -43,7 +43,7 @@ func featureWorker(t *testing.T, openChild bool) (*Engine, *store.ProjectStore, 
 	}
 	if err := ps.SetState(store.AgentState{
 		Agent: agent, Container: "td-EPIC", Branch: "td-EPIC", Task: "td-1", Phase: phase,
-	}); err != nil {
+	}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
 	// Work on the branch for submit to record.

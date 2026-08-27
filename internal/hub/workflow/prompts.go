@@ -563,5 +563,15 @@ func ReplyEscalationRaised(question, task string) string {
 const ReplyResumed = "Resumed — your escalation is cleared and your work verbs are open again. " +
 	"Run `sindri` for your directive."
 
-	// The feature loop's own strings live in prompts_feature.go, the submit/contribute/rebase/resolve
-	// reply set in submitreplies.go — this file was doing too many jobs at once.
+// The feature loop's strings live in prompts_feature.go, the submit/rebase/resolve set in submitreplies.go.
+
+// MsgResumedByUser is what an agent is TOLD when the user clears its escalation: it stopped because
+// it was told to, so a clear it never hears about leaves it where it was. The question rides back.
+func MsgResumedByUser(question, answer string) string {
+	msg := fmt.Sprintf("The user has settled what you escalated: %q. Your escalation is cleared and "+
+		"your work verbs are open again.", question)
+	if answer != "" {
+		msg += "\n\nTheir answer: " + answer
+	}
+	return msg + "\n\nCarry on from where you stopped — run `sindri` for your directive."
+}

@@ -52,12 +52,12 @@ func TestMailRowsSayWhoWhenAndWhetherRead(t *testing.T) {
 // finding last month's message is the entire reason nothing is deleted.
 func TestTheMailListSaysWhatItIsNotShowing(t *testing.T) {
 	m := mailModel()
-	if got := strings.Join(rowTexts(m.mailRows()), "\n"); strings.Contains(got, "showing the last") {
+	if got := strings.Join(rowTexts(m.mailRows()), "\n"); strings.Contains(got, "of 2 messages") {
 		t.Errorf("with the whole mailbox on the board there is nothing to disclose:\n%s", got)
 	}
 	m.state.MailTotal = 500 // the window is a fraction of the mailbox
 	got := strings.Join(rowTexts(m.mailRows()), "\n")
-	for _, want := range []string{"showing the last 2 of 500", "mail show"} {
+	for _, want := range []string{"showing 2 of 500", "every unread one included", "mail show"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the list should say %q:\n%s", want, got)
 		}

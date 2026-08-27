@@ -24,7 +24,7 @@ func staffFixture(t *testing.T) *Hub {
 			t.Fatal(err)
 		}
 	}
-	if err := ps.SetState(store.AgentState{Agent: "nori", Task: "sd-1", Phase: "working"}); err != nil {
+	if err := ps.SetState(store.AgentState{Agent: "nori", Task: "sd-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
 	if err := ps.PutPR(store.PR{ID: "pr-1", Task: "sd-1", Agent: "nori", Status: "open"}); err != nil {

@@ -52,7 +52,7 @@ func TestBlockedVerbExplainsItself(t *testing.T) {
 	}
 	if err := ps.SetState(store.AgentState{
 		Agent: "dvalin", Container: "td-EPIC", Branch: "td-EPIC", Task: "td-1", Phase: "working",
-	}); err != nil {
+	}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
 
@@ -83,7 +83,7 @@ func TestBlockedVerbExplainsItself(t *testing.T) {
 	// The mirror case: the same explanation runs the other way for a worker on a task of its own.
 	if err := ps.SetState(store.AgentState{
 		Agent: "dvalin", Branch: "td-9", Task: "td-9", Phase: "working",
-	}); err != nil {
+	}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
 	out, code = execAs(t, h, "dvalin", "checkpoint")

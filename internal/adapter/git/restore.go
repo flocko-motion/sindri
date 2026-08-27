@@ -12,16 +12,47 @@ import (
 	"strings"
 )
 
-// RestoreFromRef puts paths back to ref's content and stages that, so it lands as a commit and so
-// leaves the agent's change — reverting COMMITTED work, which restoring from HEAD cannot do. It
-// always writes ref's content to both, whatever was there before; check CommittedChurn/WorktreeDirty
-// first to know if that will amount to anything.
-func RestoreFromRef(dir, ref string, paths []string) error {
-	args := append([]string{"-C", dir, "checkout", ref, "--"}, paths...)
-	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
-		return fmt.Errorf("restore from %s: %s: %w", ref, strings.TrimSpace(string(out)), err)
+// RestoreFromRef puts paths back to ref's content and stages that, reverting COMMITTED work.
+// Returns the paths ref never carried, which it removed instead (-> absentFromRef).
+func RestoreFromRef(dir, ref string, paths []string) ([]string, error) {
+	present, absent, err := absentFromRef(dir, ref, paths)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	if len(present) > 0 {
+		args := append([]string{"-C", dir, "checkout", ref, "--"}, present...)
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			return nil, fmt.Errorf("restore from %s: %s: %w", ref, strings.TrimSpace(string(out)), err)
+		}
+	}
+	if len(absent) > 0 {
+		// -f: git rm refuses a path whose worktree copy differs from what was committed, and throwing
+		// exactly that away is the verb's purpose.
+		args := append([]string{"-C", dir, "rm", "-rqf", "--ignore-unmatch", "--"}, absent...)
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			return nil, fmt.Errorf("remove %s (absent from %s): %s: %w",
+				strings.Join(absent, " "), ref, strings.TrimSpace(string(out)), err)
+		}
+	}
+	return absent, nil
+}
+
+// absentFromRef splits paths by whether ref carries them. Dropping one the branch ADDED means
+// REMOVING it, which `git checkout ref -- <path>` answers by failing the whole invocation.
+func absentFromRef(dir, ref string, paths []string) (present, absent []string, err error) {
+	for _, p := range paths {
+		// ls-tree over `cat-file -e`, which answers only for blobs: a path here may be a directory.
+		out, err := exec.Command("git", "-C", dir, "ls-tree", "-r", "--name-only", ref, "--", p).Output()
+		if err != nil {
+			return nil, nil, fmt.Errorf("git ls-tree %s -- %s in %s: %s", ref, p, dir, gitError(err))
+		}
+		if strings.TrimSpace(string(out)) == "" {
+			absent = append(absent, p)
+			continue
+		}
+		present = append(present, p)
+	}
+	return present, absent, nil
 }
 
 // CommittedChurn reports whether ref's content differs from HEAD's for paths — the committed-

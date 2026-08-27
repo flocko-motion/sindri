@@ -143,3 +143,18 @@ func TestTheCursorCannotLandOnTheLabels(t *testing.T) {
 		}
 	}
 }
+
+// TestThePRsTabTakesTheSharedColumnSet: the guard above is about THIS package's tables, and the drift
+// it missed was between packages — a "for" column on this tab and not on `sindri pr list`. Pinning
+// that prTable is the shared set catches a hand-rolled table growing back here (-> table.PRList).
+func TestThePRsTabTakesTheSharedColumnSet(t *testing.T) {
+	shared := table.PRList(9)
+	if len(prTable) != len(shared) {
+		t.Fatalf("the PRs tab has %d columns, the shared set has %d", len(prTable), len(shared))
+	}
+	for i, want := range shared {
+		if prTable[i] != want {
+			t.Errorf("column %d is %+v, want the shared %+v", i, prTable[i], want)
+		}
+	}
+}
