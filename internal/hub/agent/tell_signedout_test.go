@@ -172,6 +172,7 @@ func (tellDeps) ProjectConfig(string) (config.Config, error) { return config.Con
 func (tellDeps) ArchitectureDoc(string) string               { return "" }
 func (tellDeps) RefreshTask(_, _ string) error               { return nil }
 func (tellDeps) Rehydrate(_, _ string)                       {}
+func (tellDeps) Kickoff(_, _ string) string                  { return "[hub] kickoff" }
 func (tellDeps) ForgetFill(_, _ string)                      {}
 
 // AgentUp mirrors fakeRuntime's always-up container, so the idle/clear sweeps this fixture backs

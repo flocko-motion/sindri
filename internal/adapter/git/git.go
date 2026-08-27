@@ -422,6 +422,12 @@ func StashConflict(dir string) bool {
 	return !RebaseInProgress(dir) && len(unmergedFiles(dir)) > 0
 }
 
+// RebaseStuck reports either state RebaseStep continues — a halted rebase, or a stranded autostash —
+// in ONE pass: asking the two predicates in turn re-runs RebaseInProgress on every clean branch.
+func RebaseStuck(dir string) bool {
+	return RebaseInProgress(dir) || len(unmergedFiles(dir)) > 0
+}
+
 // ResolveStashConflict accepts the worker's resolution of a StashConflict — staging is what clears
 // the index, and the stash is then spent. Files still marked come back as conflicts, so a premature
 // call re-prompts instead of staging "<<<<<<<". Returns as RebaseStart does.

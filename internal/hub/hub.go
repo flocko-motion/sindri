@@ -257,14 +257,20 @@ func (h *Hub) SetRetired(project, name string, retired bool) error {
 	return nil
 }
 
-// rehydrate injects one kickoff so a (re)launched agent asks the hub for work: AgentDirective is
-// idempotent and state-driven, so new and resuming agents alike land on their current job (D13).
+// rehydrate tells a (re)launched agent where it stands, once its session can take input.
 func (h *Hub) rehydrate(project, name string) {
 	// Let Claude boot to input-readiness first, or its Enter is eaten by the splash.
 	time.Sleep(8 * time.Second)
+	h.greet(project, name)
+}
+
+// greet is everything a session that has just come up must hear, and rehydrate is WHEN — so a test
+// reaches this without paying the boot wait. AgentDirective is idempotent and state-driven, so new
+// and resuming agents alike land on their current job (D13).
+func (h *Hub) greet(project, name string) {
 	// Push-only and Regardless: mail-less, a fresh session gated on retired would sit silent forever
 	// instead of seeing DirRetired even once — its only way to learn its own situation.
-	_ = h.Deliver(project, name, workflow.MsgKickoff, workflow.PushOnly.Regardless())
+	_ = h.Deliver(project, name, h.wf.Kickoff(project, name), workflow.PushOnly.Regardless())
 	// A relaunched chatroom member lost its durable prompt's membership cue — remind it, if the room
 	// is in a state where that means anything (-> chat.ReminderFor). Same reasoning as the kickoff:
 	// mail-less, so a gated retired or escalated member would lose the cue for good.

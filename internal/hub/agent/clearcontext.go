@@ -1,7 +1,7 @@
 // package: hub/agent / clearcontext
 // type:    logic (a worker's context reset, armed by a human or fired by the assignment gate)
 // job:     arm a context clear and fire it at the agent's next leaf boundary — Claude Code's
-// own /clear inside the session, then its directive re-served (-> workflow.claimNext).
+// own /clear inside the session, then its directive re-served (-> workflow.Engine.Kickoff).
 // Never mid-task: /clear would silently invalidate its file-tree memory.
 // limits:  the flag and the session; it never touches the pod, the worktree, or the queue.
 // Confirmation is the caller's (it executes, it doesn't ask).
@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/hub/store"
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // clearKickoffDelay lets Claude Code finish its own /clear reset (a redraw, not a cold boot) before
@@ -51,7 +50,7 @@ func (s *Service) SetClearArmed(ctx context.Context, project, name string, armed
 		s.deps.Notify()
 		return nil
 	}
-	if err := s.FireClear(ctx, project, name, workflow.MsgKickoff, true); err != nil {
+	if err := s.FireClear(ctx, project, name, s.deps.Kickoff(project, name), true); err != nil {
 		// This call said "clears now" and could not. Undo the arming rather than leave a durable
 		// flag behind an error the user reads as "nothing happened" — one that would also withhold
 		// the agent from work. A failure in the SWEEP is the opposite case: the arming was set
@@ -86,7 +85,7 @@ func (s *Service) FireArmedClears(ctx context.Context, project string) {
 		if err != nil || !at {
 			continue
 		}
-		if err := s.FireClear(ctx, project, a.Name, workflow.MsgKickoff, true); err != nil {
+		if err := s.FireClear(ctx, project, a.Name, s.deps.Kickoff(project, a.Name), true); err != nil {
 			fmt.Fprintf(os.Stderr, "hub: clearing %s's context: %v\n", a.Name, err)
 		}
 	}

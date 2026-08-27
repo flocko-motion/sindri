@@ -19,6 +19,7 @@ func (clearTestDeps) ProjectConfig(string) (config.Config, error) { return confi
 func (clearTestDeps) ArchitectureDoc(string) string               { return "" }
 func (clearTestDeps) RefreshTask(_, _ string) error               { return nil }
 func (clearTestDeps) Rehydrate(_, _ string)                       {}
+func (clearTestDeps) Kickoff(_, _ string) string                  { return "[hub] kickoff" }
 func (clearTestDeps) ForgetFill(_, _ string)                      {}
 
 // AgentUp: no watchdog here, so no reading ever says up — matching the "no container wired" liveness

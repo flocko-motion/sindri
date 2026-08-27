@@ -321,7 +321,9 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 	if err != nil {
 		return "", err
 	}
-	return preamble + dir, nil
+	// The branch warning goes ahead of the role text: an agent that cannot submit needs that before
+	// it writes anything further, whatever its role would otherwise have said.
+	return preamble + e.rebaseNotice(project, name) + dir, nil
 }
 
 // mailDeferred: DirClearPending discards this round's context, so mail waits for one that survives.
@@ -329,6 +331,18 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 // a model switch), so this reply is not the fresh context either.
 func mailDeferred(dir string) bool {
 	return dir == DirClearPending || dir == DirPreparing
+}
+
+// plannerDirective answers a planner from its phase alone — the backlog never enters it, since a
+// planner's work arrives as a conversation. Shared with Kickoff, which serves this text directly.
+func plannerDirective(st store.AgentState) string {
+	switch st.Phase {
+	case "submitted":
+		return DirSubmitted
+	case "planning": // set by AssignPlan and by `state planning` — it HAS work in hand
+		return DirPlanning
+	}
+	return DirPlanner
 }
 
 // directive is the per-role/per-phase dispatch, mail lifted out to its one caller so no branch here
@@ -360,13 +374,7 @@ func (e *Engine) directive(ctx context.Context, project, name string) (string, e
 		return d, err
 	}
 	if a.Role == "planner" {
-		switch st.Phase {
-		case "submitted":
-			return DirSubmitted, nil
-		case "planning": // set by AssignPlan and by `state planning` — it HAS work in hand
-			return DirPlanning, nil
-		}
-		return DirPlanner, nil
+		return plannerDirective(st), nil
 	}
 	// A worker holding a feature is in the subtask loop — unless that feature has already landed. A
 	// merged PR says so as plainly as its status, and covers one left held by a partial-milestone merge.

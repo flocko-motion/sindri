@@ -369,6 +369,15 @@ func CommentBudgetNote(aim, ceiling float64) string {
 		aim, ceiling, lint.DefaultMaxCommentLine)
 }
 
+// DirBranchStuck fronts any role's directive while a rebase has left its branch mid-flight; verb
+// continues it — the same one for a halted rebase and for a stranded autostash (-> repo.RebaseStep).
+func DirBranchStuck(verb string) string {
+	return fmt.Sprintf("⚠ YOUR BRANCH HAS UNRESOLVED CONFLICTS LEFT BY A REBASE, so nothing can be "+
+		"submitted from it until you clear them. They are in /workspace with <<<<<<< markers: edit "+
+		"each marked file to the intended result, remove the markers, then run `sindri %s` — repeat "+
+		"until it reports you are aligned. Do that before you write anything else.\n\n", verb)
+}
+
 // DirPlanner answers a planner with nothing in hand. Its old "nothing is assigned to you" read as
 // "only a hub-delivered brief counts": one handed work in its terminal asked for it to be re-sent.
 const DirPlanner = "Nothing has come to you through the hub — which is not the same as having nothing to do. Work reaches a planner as a CONVERSATION: anything the user has said in this terminal is yours to act on now, and a phased brief from `sindri agent plan` is one route to you rather than the only one. If they've asked you for something, get on with it; never ask them to re-send it some other way. With nothing asked of you, orient: read README.md and the architecture doc, the specs under /workspace/openspec, and the backlog (`sindri task list`, then `sindri task <id>` for detail). The thing you must not do is invent an assignment nobody asked for — and nothing is written down before the user sends GO."
