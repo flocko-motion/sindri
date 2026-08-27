@@ -229,3 +229,22 @@ func submitAll(t *testing.T, e *Engine, c registry.Caller, summary string) (int,
 	t.Fatal("the submit questions never finished")
 	return 0, ""
 }
+
+// TestAnEditedTaskCanStillBeFinished is sd-cc1aad's ONE THING TO CHECK, pinned rather than reasoned
+// about: un-approving a task pauses its RELEASE, and the claim gate is about handing work out. A
+// worker already mid-task must not be stranded because a planner corrected a line in its brief.
+func TestAnEditedTaskCanStillBeFinished(t *testing.T) {
+	e, ps, _, c := submitEngine(t)
+	// The planner's edit, in the state it leaves behind: the held task is back awaiting a verdict.
+	if err := ps.SetApproval("sd-1", "pending", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	if code, out := submitAll(t, e, c, "my work"); code != 0 {
+		t.Fatalf("a held task must still submit while unapproved, got exit %d:\n%s", code, out)
+	}
+	runQueuedGate(t, e)
+	if _, exists, _ := ps.GetPR("pr-sd-1"); !exists {
+		t.Error("no PR was recorded — the worker was stranded by its own brief being corrected")
+	}
+}
