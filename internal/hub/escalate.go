@@ -13,6 +13,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
@@ -109,6 +110,24 @@ func (h *Hub) Escalate(project, name, question string) (string, error) {
 	}
 	h.notify()
 	return on, nil
+}
+
+// ResumeByUser clears an escalation from the host and TELLS the agent, the half Resume leaves out:
+// the board moved while the agent went on waiting to be spoken to. Unconditional (-> WakeRefusal).
+func (h *Hub) ResumeByUser(project, name, answer string) error {
+	st, err := h.store.For(project).GetState(name)
+	if err != nil {
+		return err
+	}
+	question := st.Escalation
+	if err := h.Resume(project, name, "escalation cleared by the user"); err != nil {
+		return err
+	}
+	if question == "" {
+		return nil // nothing was cleared, so there is nothing to announce
+	}
+	return h.Deliver(project, name, workflow.MsgResumedByUser(question, answer),
+		workflow.MailAndPush.From(api.SenderUser).Regardless())
 }
 
 // Resume clears an agent's escalation and records why, whoever asked. The agent clears its own once

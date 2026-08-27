@@ -196,7 +196,7 @@ func (h *Hub) Handler() http.Handler {
 		if !decode(w, r, &req) {
 			return
 		}
-		writeJSON(w, okMsg{"resumed"}, h.Resume(h.agentReq(r, req.Name), req.Name, "escalation cleared by the user"))
+		writeJSON(w, okMsg{"resumed"}, h.ResumeByUser(h.agentReq(r, req.Name), req.Name, req.Answer))
 	})
 	mux.HandleFunc("POST /agent/delete", func(w http.ResponseWriter, r *http.Request) {
 		var req NameReq

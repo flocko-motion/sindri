@@ -147,21 +147,17 @@ func clearLandsWhen(a api.AgentView) string {
 	}
 }
 
-// openResumeChoice confirms clearing an agent's escalation. Confirmed rather than done on the
-// keystroke because it drops the agent's own account of why it stopped: normally the agent clears its
-// own once it has the answer, and this is the release for one that never will.
-func (m *model) openResumeChoice(name string) {
+// openResumeForm clears an agent's escalation and hands it the user's answer in the same act. A form
+// rather than a confirm, because what the agent stopped for is a QUESTION: releasing it in silence
+// sends it back at the wall it stopped against. An empty answer still resumes — a fault the user has
+// simply gone and fixed leaves nothing to say.
+func (m *model) openResumeForm(name string) {
+	answer := newTextareaField("answer", "")
 	cl := m.cl
-	m.choice = choiceModalState{
-		active: true, title: "clear " + name + "'s escalation?  (it carries on without an answer)",
-		options: []string{"cancel", "resume"}, values: []string{"cancel", "resume"},
-		apply: func(v string) tea.Cmd {
-			if v != "resume" {
-				return nil
-			}
-			return mutateThenRefresh(cl, func() error { return cl.ResumeAgent(name) })
-		},
-	}
+	m.form.open("resume "+name+" — your answer to what it escalated (optional)", []field{answer}, nil, func() tea.Cmd {
+		text := answer.value()
+		return mutateThenRefresh(cl, func() error { return cl.ResumeAgent(name, text) })
+	})
 }
 
 // openRemoveOrphanChoice confirms a direct container rm; there's no agent identity to delete.

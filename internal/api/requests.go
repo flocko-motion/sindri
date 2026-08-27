@@ -63,6 +63,10 @@ type NameReq struct {
 	// Armed is the context-clear flag (POST /agent/clear-context): arm it, or take the arming back.
 	// False is a real value here too, since disarming is the other half of the same toggle.
 	Armed bool `json:"armed"`
+	// Answer rides with POST /agent/resume: what the user decided, carried to the agent alongside the
+	// release. An escalation is a QUESTION, so a clear with no answer resumes an agent into the same
+	// wall it stopped at. Empty is ordinary — a fault the user simply fixed needs no answer.
+	Answer string `json:"answer,omitempty"`
 }
 
 // RepoReq targets a registered repo by its tag (POST /repo/forget, /repo/color).

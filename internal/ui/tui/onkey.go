@@ -555,7 +555,7 @@ func (m *model) onKey(k string) tea.Cmd {
 					m.gotoItem(it.kind, it.value)
 					return nil
 				case "resume": // Agents: release an escalated agent (its own clear is `sindri resume`)
-					m.openResumeChoice(it.value)
+					m.openResumeForm(it.value)
 					return nil
 				case "path": // open a shell in the workspace
 					return tea.ExecProcess(shellAt(it.value), resumed)
