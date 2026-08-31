@@ -123,6 +123,11 @@ func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) 
 		if err := e.finishAtSource(c.Project, wt, st.Task, false); err != nil {
 			return 1, err
 		}
+		// The step this path skipped by calling the source directly: without it advanceContainer
+		// below re-picks the subtask just finished (-> recordEnded).
+		if err := e.recordEnded(c.Project, st.Task); err != nil {
+			return 1, err
+		}
 	}
 	if err := git.CommitAll(wt, msg); err != nil {
 		return 1, err

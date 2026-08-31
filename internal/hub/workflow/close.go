@@ -78,6 +78,24 @@ func (e *Engine) finishAtSource(project, root, id string, scrap bool) error {
 	return fmt.Errorf("%s: unknown task backend", id)
 }
 
+// recordEnded writes an ending sindri must remember itself: a status living in the REPO never moves
+// for the hub, since the worker's tick is on its BRANCH. The override survives the sync's rebuild.
+func (e *Engine) recordEnded(project, id string) error {
+	ps := e.store.For(project)
+	if ps.OwnsTask(id) {
+		return nil
+	}
+	if err := ps.SetClosedOverride(id); err != nil {
+		return err
+	}
+	t, ok, err := ps.GetTask(id)
+	if err != nil || !ok {
+		return err
+	}
+	t.Status = "closed"
+	return ps.UpsertTask(t)
+}
+
 // SetStatus moves a task to want without the caller knowing where that status lives: done goes
 // through the owning source, anything else is sindri's own scheduling. Every site remembering for
 // itself is what left openspec tasks open over finished work, four times.
@@ -87,20 +105,7 @@ func (e *Engine) SetStatus(project, id, want string) error {
 		if err := e.finishAtSource(project, e.deps.ProjectRoot(project), id, false); err != nil {
 			return err
 		}
-		if ps.OwnsTask(id) {
-			return nil // its own table is the authority; the sync reads it back closed
-		}
-		// Else recorded HERE or nowhere: returning trusted the source's next listing, which never
-		// moves for a status living in the repo — the worker's tick is on its BRANCH.
-		if err := ps.SetClosedOverride(id); err != nil {
-			return err
-		}
-		t, ok, err := ps.GetTask(id)
-		if err != nil || !ok {
-			return err
-		}
-		t.Status = "closed"
-		return ps.UpsertTask(t)
+		return e.recordEnded(project, id)
 	}
 	if ps.OwnsTask(id) {
 		return ps.SetOwnedStatus(id, want)
