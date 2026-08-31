@@ -325,15 +325,19 @@ func hasTaskTitled(tasks []store.Task, title string) bool {
 	return false
 }
 
-// TestCloseUnresolvableOpenspec covers the agnostic dispatch's failure path: closing
-// is routed by the task's backend, and an os- id that resolves to no known openspec
-// change (here a bogus one, with no openspec/ dir) errors clearly rather than
-// silently doing nothing. (A real os- close archives the change; that needs the
-// openspec CLI + a change, so it's exercised end-to-end, not here.)
-func TestCloseUnresolvableOpenspec(t *testing.T) {
+// TestClosingAnAlreadyEndedOpenspecChangeSucceeds: ending the change is what closing is FOR, so a
+// change that is no longer active satisfies the postcondition. A worker archives the change itself
+// as part of the work — that is the change — and its checkpoint then failed on the hub and
+// escalated it for having finished. A SCRAP still errors: there the caller means to destroy
+// something it expects to find. (A real os- close archives the change; that needs the openspec CLI
+// and a change, so it is exercised end-to-end, not here.)
+func TestClosingAnAlreadyEndedOpenspecChangeSucceeds(t *testing.T) {
 	h := newHub(t)
-	if err := h.wf.CloseTask(testProject, "os-abc123"); err == nil {
-		t.Fatalf("closing an unresolvable openspec row should error")
+	if err := h.wf.CloseTask(testProject, "os-abc123"); err != nil {
+		t.Fatalf("an already-ended change is the postcondition, not a failure: %v", err)
+	}
+	if err := h.wf.ScrapTask(testProject, "os-abc123", false, false); err == nil {
+		t.Error("a scrap means to destroy something it expects to find, so it must still say it is missing")
 	}
 }
 
