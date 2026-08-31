@@ -173,8 +173,8 @@ func TestAMismatchedTaskChangesTheModelThenHandsItOver(t *testing.T) {
 	if len(deps.modelSet) != 1 || deps.modelSet[0] != "dvalin=claude-opus-5" {
 		t.Errorf("modelSet = %v, want exactly one SetModel(dvalin, claude-opus-5)", deps.modelSet)
 	}
-	if len(deps.modelSetWith) != 1 || !strings.Contains(deps.modelSetWith[0], "td-abc123") {
-		t.Errorf("modelSetWith = %v, want the claimed directive queued as SetModel's next", deps.modelSetWith)
+	if len(deps.injectedText) != 1 || !strings.Contains(deps.injectedText[0], "td-abc123") {
+		t.Errorf("injectedText = %v, want the claimed directive delivered once the switch answered", deps.injectedText)
 	}
 	if len(deps.compacted) != 0 {
 		t.Errorf("compacted = %v, want none — a model change clears rather than compacts", deps.compacted)

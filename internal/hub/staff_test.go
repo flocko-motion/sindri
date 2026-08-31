@@ -47,7 +47,7 @@ func staffFixture(t *testing.T) *Hub {
 func staffOf(t *testing.T, h *Hub, agent string) string {
 	t.Helper()
 	var out bytes.Buffer
-	if _, err := h.AgentExec(testProject, agent, []string{"staff"}, &out); err != nil {
+	if _, err := h.AgentExec(t.Context(), testProject, agent, []string{"staff"}, &out); err != nil {
 		t.Fatalf("staff: %v", err)
 	}
 	return out.String()

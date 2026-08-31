@@ -18,6 +18,16 @@ func addUnreadMail(t *testing.T, ps *store.ProjectStore, agent string) int64 {
 	return m.ID
 }
 
+// deliveredContaining reports whether any message the stub was handed carries needle.
+func deliveredContaining(d *stubDeps, needle string) bool {
+	for _, text := range d.injectedText {
+		if strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
+}
+
 // assertMailRead fails unless the agent's mailbox is now empty of unread mail — the ask itself is
 // what marks it read, so every non-deferred directive must leave none behind.
 func assertMailRead(t *testing.T, ps *store.ProjectStore, agent string) {
@@ -88,9 +98,9 @@ func TestMailDefersPastAnArmedClear(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fired, err := e.fireClearIfArmed("repo", "dvalin")
+	fired, err := e.fireClearIfArmed(t.Context(), "repo", "dvalin")
 	if err != nil || !fired {
-		t.Fatalf("fireClearIfArmed = (%v, %v), want fired", fired, err)
+		t.Fatalf("fireClearIfArmed = (%v, %v), want the armed clear fired", fired, err)
 	}
 	if n, _ := ps.UnreadMailCount("dvalin"); n != 1 {
 		t.Errorf("unread = %d, the message must survive since it was never shown", n)
@@ -116,9 +126,9 @@ func TestMailDefersPastAnArmedClear(t *testing.T) {
 }
 
 // TestMailDefersPastAnArmedClearForAReviewer is TestMailDefersPastAnArmedClear's counterpart for
-// reviewDirective: firing the clear must answer DirClearPending, not the empty string blocking left
-// behind as its "keep waiting" sentinel — an empty answer isn't deferred by mailDeferred, so the
-// unread mail would be marked read and rendered into the very context the clear is about to discard.
+// reviewDirective: firing the clear must answer DirPreparing, not carry on and serve the review in
+// the same reply — mailDeferred defers on DirPreparing alone, so any other answer marks the unread
+// mail read and renders it into the very context the clear has just discarded.
 func TestMailDefersPastAnArmedClearForAReviewer(t *testing.T) {
 	deps := &stubDeps{}
 	e, ps := reviewerWithUnclaimedReview(t, deps)
@@ -133,8 +143,8 @@ func TestMailDefersPastAnArmedClearForAReviewer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)
 	}
-	if dir != DirClearPending {
-		t.Errorf("directive = %q, want DirClearPending — the review claim waits for the clear to land", dir)
+	if dir != DirPreparing {
+		t.Errorf("directive = %q, want DirPreparing — the review claim waits for the clear to land", dir)
 	}
 	if n, _ := ps.UnreadMailCount("rune"); n != 1 {
 		t.Errorf("unread = %d, the message must survive since it was never shown", n)
@@ -163,8 +173,8 @@ func TestMailDefersPastCompactionOnAClaim(t *testing.T) {
 	if len(deps.compacted) != 1 || deps.compacted[0] != "dvalin" {
 		t.Errorf("compacted = %v, want exactly one Compact(dvalin) fired alongside the claim", deps.compacted)
 	}
-	if len(deps.compactedWith) != 1 || !strings.Contains(deps.compactedWith[0], "td-abc123") {
-		t.Errorf("compactedWith = %v, want the claimed directive queued behind /compact", deps.compactedWith)
+	if len(deps.injectedText) != 1 || !strings.Contains(deps.injectedText[0], "td-abc123") {
+		t.Errorf("injectedText = %v, want the claimed directive delivered after the compaction", deps.injectedText)
 	}
 	if n, _ := ps.UnreadMailCount("dvalin"); n != 1 {
 		t.Errorf("unread = %d, the message must survive since it was never shown", n)
@@ -189,8 +199,8 @@ type retieringDeps struct {
 	*stubDeps
 }
 
-func (d retieringDeps) SetModel(project, name, model, next string) error {
-	if err := d.stubDeps.SetModel(project, name, model, next); err != nil {
+func (d retieringDeps) SetModel(ctx context.Context, project, name, model string) error {
+	if err := d.stubDeps.SetModel(ctx, project, name, model); err != nil {
 		return err
 	}
 	d.stubDeps.currentModel = model
@@ -240,8 +250,8 @@ func TestMailDefersPastAModelChange(t *testing.T) {
 	if len(base.modelSet) != 1 || base.modelSet[0] != agent+"=big-model" {
 		t.Errorf("modelSet = %v, want %s switched to big-model", base.modelSet, agent)
 	}
-	if len(base.modelSetWith) != 1 || !strings.Contains(base.modelSetWith[0], "td-abc123") {
-		t.Errorf("modelSetWith = %v, want the claimed directive queued as SetModel's next", base.modelSetWith)
+	if len(base.injectedText) != 1 || !strings.Contains(base.injectedText[0], "td-abc123") {
+		t.Errorf("injectedText = %v, want the claimed directive delivered once the switch answered", base.injectedText)
 	}
 	if n, _ := ps.UnreadMailCount(agent); n != 1 {
 		t.Errorf("unread = %d, the message must survive since it was never shown", n)
@@ -308,8 +318,8 @@ func TestMailDefersPastCompactionBetweenSubtasks(t *testing.T) {
 	if len(deps.compacted) != 1 || deps.compacted[0] != agent {
 		t.Errorf("compacted = %v, want exactly one Compact(%s) fired alongside the claim", deps.compacted, agent)
 	}
-	if len(deps.compactedWith) != 1 || !strings.Contains(deps.compactedWith[0], "td-next") {
-		t.Errorf("compactedWith = %v, want the next-subtask directive queued behind /compact", deps.compactedWith)
+	if len(deps.injectedText) != 1 || !strings.Contains(deps.injectedText[0], "td-next") {
+		t.Errorf("injectedText = %v, want the next-subtask directive delivered after the compaction", deps.injectedText)
 	}
 	if n, _ := ps.UnreadMailCount(agent); n != 1 {
 		t.Errorf("unread = %d, the message must survive since it was never shown", n)
@@ -412,8 +422,10 @@ func TestMailDefersPastCompactionOnAReviewClaim(t *testing.T) {
 	if len(deps.compacted) != 1 || deps.compacted[0] != "rune" {
 		t.Errorf("compacted = %v, want exactly one Compact(rune) fired alongside the claim", deps.compacted)
 	}
-	if len(deps.compactedWith) != 1 || !strings.Contains(deps.compactedWith[0], "pr-1") {
-		t.Errorf("compactedWith = %v, want the review directive queued behind /compact", deps.compactedWith)
+	// Searched rather than counted: assignReview pushes its own "you have a review" note from a
+	// goroutine, so the number of deliveries here is not this test's to fix.
+	if !deliveredContaining(deps, "check the gate") {
+		t.Errorf("injectedText = %v, want the review directive delivered after the compaction", deps.injectedText)
 	}
 	if n, _ := ps.UnreadMailCount("rune"); n != 1 {
 		t.Errorf("unread = %d, the message must survive since it was never shown", n)

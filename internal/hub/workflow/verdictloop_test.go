@@ -28,9 +28,8 @@ func verdictFixture(t *testing.T) (*Engine, *store.ProjectStore, *stubDeps) {
 }
 
 // TestApproveWakesTheReviewer is the sd-98fa96 fix, now via sd-a19ef9's clear: a verdict must not be
-// where a reviewer's loop ends. FireClear re-serves the directive itself once its /clear settles, so
-// firing it is what wakes fili rather than leaving it on "awaiting human merge" with no reason to
-// run `sindri` again.
+// where a reviewer's loop ends. Firing the clear is what wakes fili — the kickoff behind it gives the
+// reviewer a reason to run `sindri` again, rather than leaving it on "awaiting human merge".
 func TestApproveWakesTheReviewer(t *testing.T) {
 	e, _, deps := verdictFixture(t)
 	c := registry.Caller{Project: "repo", Agent: "fili", Role: "reviewer"}

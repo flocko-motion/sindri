@@ -31,7 +31,7 @@ func TestArmedClearWithholdsTheNextTask(t *testing.T) {
 	if !e.clearArmed("repo", "dvalin") {
 		t.Fatal("the gate must read the arming the store holds")
 	}
-	if d, claimed, err := e.claimNext("repo", "dvalin"); err != nil || claimed {
+	if d, claimed, err := e.claimNext(t.Context(), "repo", "dvalin"); err != nil || claimed {
 		t.Errorf("an armed agent was handed %q: claimed=%v err=%v", d, claimed, err)
 	}
 	if st, _ := ps.GetState("dvalin"); st.Task != "" {
@@ -44,7 +44,7 @@ func TestArmedClearWithholdsTheNextTask(t *testing.T) {
 	if err := ps.PutAgent(a); err != nil {
 		t.Fatal(err)
 	}
-	if _, claimed, err := e.claimNext("repo", "dvalin"); err != nil || !claimed {
+	if _, claimed, err := e.claimNext(t.Context(), "repo", "dvalin"); err != nil || !claimed {
 		t.Errorf("with the arming gone the task should be claimable: claimed=%v err=%v", claimed, err)
 	}
 }
@@ -58,20 +58,15 @@ func TestArmedClearOutranksFullness(t *testing.T) {
 	if _, full := e.contextFull("repo", "dvalin"); !full {
 		t.Fatal("the stub should read as full — this interaction only exists for a full agent")
 	}
-	fired, err := e.fireClearIfArmed("repo", "dvalin")
+	fired, err := e.fireClearIfArmed(t.Context(), "repo", "dvalin")
 	if err != nil || !fired {
 		t.Fatalf("fireClearIfArmed = (%v, %v), want it to fire even though the agent also reads full", fired, err)
 	}
 	if len(deps.cleared) != 1 || deps.cleared[0] != "dvalin" {
-		t.Errorf("cleared = %v, want exactly one FireClear(dvalin)", deps.cleared)
+		t.Errorf("cleared = %v, want exactly one Clear(dvalin)", deps.cleared)
 	}
-	if len(deps.clearedWith) != 1 || deps.clearedWith[0] != MsgKickoff {
-		t.Errorf("clearedWith = %v, want the generic kickoff — nothing was claimed for this arming to hand over", deps.clearedWith)
-	}
-	// fireClearIfArmed runs inside the call answering this very ask, same as the automatic path —
-	// ESC here would cut off the turn computing whatever this ask answers with.
-	if len(deps.clearedInterrupt) != 1 || deps.clearedInterrupt[0] {
-		t.Errorf("clearedInterrupt = %v, want false — this fires inside the agent's own ask", deps.clearedInterrupt)
+	if len(deps.injectedText) != 1 || deps.injectedText[0] != MsgKickoff {
+		t.Errorf("injectedText = %v, want the generic kickoff — nothing was claimed for this arming to hand over", deps.injectedText)
 	}
 }
 
@@ -146,8 +141,11 @@ func TestTheClearLandsBeforeTheNextSubtask(t *testing.T) {
 	if err := ps.SetState(store.AgentState{Agent: "dvalin", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
-	fired, err := e.fireClearIfArmed("repo", "dvalin")
+	fired, err := e.fireClearIfArmed(t.Context(), "repo", "dvalin")
 	if err != nil || !fired {
 		t.Fatalf("fireClearIfArmed = (%v, %v), want it to fire now the agent is between subtasks", fired, err)
+	}
+	if len(deps.cleared) != 1 || deps.cleared[0] != "dvalin" {
+		t.Errorf("cleared = %v, want the clear fired at the subtask boundary", deps.cleared)
 	}
 }

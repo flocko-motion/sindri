@@ -1,7 +1,7 @@
 // package: hub/agent / compact
 // type:    logic (automatic context compaction)
-// job:     fire Claude Code's own /compact at a leaf boundary, then queue what to do once it
-// lands — the assignment gate decides when, for whom, and with what; this only performs it.
+// job:     fire Claude Code's own /compact and wait it out — the assignment gate decides when,
+// for whom, and what follows; this only performs it and answers.
 // limits:  the session, once; never the pod, worktree, or task queue, and never a second look at
 // whether it landed below whatever threshold triggered it — that judgment is compactDue's, not
 // this call's.
@@ -12,31 +12,25 @@ import (
 	"fmt"
 )
 
-// Compact sends /compact into name's live session, then queues next behind it. Mirrors FireClear's
-// mechanics otherwise, but never interrupts: every call runs inside the agent's own ask.
-func (s *Service) Compact(ctx context.Context, project, name, next string) error {
-	at, err := s.AtLeafBoundary(project, name)
-	if err != nil {
-		return err
-	}
-	if !at {
-		return fmt.Errorf("%s is not at a leaf boundary — compaction only applies there", name)
-	}
+// Compact sends /compact into name's live session and blocks until it takes effect or times out.
+// Whether this is a safe moment to summarise the session away is the caller's (-> AtLeafBoundary).
+// Returns an error if compaction never settles or injection fails.
+func (s *Service) Compact(ctx context.Context, project, name string) error {
 	if !s.AgentAlive(ctx, project, name) {
 		return fmt.Errorf("agent %q is not running", name)
 	}
 	tokens, window, model, ok := s.ContextUsage(project, name)
+	before := tokens
 	threshold := s.CompactionThreshold(window)
 	if err := s.Inject(ctx, project, name, "/compact"); err != nil {
 		return err
 	}
-	if err := s.Inject(ctx, project, name, next); err != nil {
-		return err
-	}
-	// Before the log/notify: a reader must see the size compaction fired ON, not the fresh one after.
 	s.ForgetContext(project, name)
+	if !s.awaitCleared(ctx, project, name, before) {
+		return fmt.Errorf("context compaction for %q timed out — session did not respond", name)
+	}
 	_ = s.store.For(project).Log(name, "compact", fmt.Sprintf(
-		"fired at a leaf boundary: fill=%d window=%d model=%s threshold=%d recorded=%v", tokens, window, model, threshold, ok))
+		"fired: fill=%d window=%d model=%s threshold=%d recorded=%v", tokens, window, model, threshold, ok))
 	s.deps.Notify()
 	return nil
 }

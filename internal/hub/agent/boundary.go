@@ -1,53 +1,14 @@
 // package: hub/agent / boundary
-// type:    logic (the safe-to-disrupt check Compact and FireClear both gate on)
-// job:     AtLeafBoundary, and the one case reading the store alone gets wrong: a claim the gate
-// just made, still preparing before the agent is told anything.
-// limits:  the read and the flag correcting it; firing on the answer is Compact's or FireClear's.
+// type:    logic (the safe-to-disrupt read a caller consults before clearing or compacting)
+// job:     AtLeafBoundary — whether the agent holds anything a session reset would cut into.
+// limits:  the read alone; acting on the answer, and deciding whether to ask at all, is the
+// caller's (a caller inside an assignment it has just claimed already knows).
 package agent
 
-import "sync"
-
-// assigning marks, per agent, a gate-claimed assignment still preparing (a model switch or
-// compaction) before the agent is told — nothing has happened under it yet, so AtLeafBoundary must
-// admit it rather than refuse the very preparation it exists to gate. In memory only: a hub
-// restart mid-preparation just costs one skipped step on the next claim.
-var assigning struct {
-	mu  sync.Mutex
-	set map[string]bool
-}
-
-// BeginAssignment opens that window — call right after the claim, before any model switch or
-// compaction, always paired with a deferred EndAssignment.
-func (s *Service) BeginAssignment(project, name string) {
-	assigning.mu.Lock()
-	defer assigning.mu.Unlock()
-	if assigning.set == nil {
-		assigning.set = map[string]bool{}
-	}
-	assigning.set[project+"/"+name] = true
-}
-
-// EndAssignment closes it: preparation is done, so AtLeafBoundary reads the store again.
-func (s *Service) EndAssignment(project, name string) {
-	assigning.mu.Lock()
-	defer assigning.mu.Unlock()
-	delete(assigning.set, project+"/"+name)
-}
-
-// midAssignment is BeginAssignment's read, private since only AtLeafBoundary consults it.
-func midAssignment(project, name string) bool {
-	assigning.mu.Lock()
-	defer assigning.mu.Unlock()
-	return assigning.set[project+"/"+name]
-}
-
 // AtLeafBoundary reports whether the agent holds nothing a clear or compaction would cut into: no
-// leaf task, no review owed, or a fresh claim still under BeginAssignment's window. A feature is
-// not such a thing — between subtasks IS a boundary. Planners and coauthors are always at one.
+// leaf task and no review owed. A feature is not such a thing — between subtasks IS a boundary.
+// Planners and coauthors are always at one.
 func (s *Service) AtLeafBoundary(project, name string) (bool, error) {
-	if midAssignment(project, name) {
-		return true, nil
-	}
 	ps := s.store.For(project)
 	st, err := ps.GetState(name)
 	if err != nil {

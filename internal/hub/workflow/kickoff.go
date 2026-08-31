@@ -4,7 +4,7 @@
 // or a context clear. A role the hub holds a job for is sent to `sindri`; a planner is
 // handed its directive here, since the hub already knows what that answer will be.
 // limits:  the choice only. The strings are injected.go's and prompts.go's, and the delivery is
-// the hub's (-> Hub.rehydrate, agent.Service.FireClear).
+// the hub's (-> Hub.rehydrate, agent.Service.Clear).
 package workflow
 
 // Kickoff is what an agent's fresh session is told. A planner is served its directive rather than

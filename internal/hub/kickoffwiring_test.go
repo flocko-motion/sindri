@@ -3,7 +3,6 @@ package hub
 import (
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/flo-at/sindri/internal/container"
 	hubagent "github.com/flo-at/sindri/internal/hub/agent"
@@ -29,19 +28,6 @@ func greetable(t *testing.T, role string) (*Hub, *clearableRuntime) {
 	container.Use(rt)
 	t.Cleanup(container.UseDefault)
 	return h, rt
-}
-
-// awaitSent polls rt for needle, since a clear's kickoff lands from its own goroutine a delay later.
-func awaitSent(t *testing.T, rt *clearableRuntime, needle string) string {
-	t.Helper()
-	deadline := time.Now().Add(6 * time.Second) // the kickoff lands one clearKickoffDelay after /clear
-	for {
-		sent := rt.joined()
-		if strings.Contains(sent, needle) || time.Now().After(deadline) {
-			return sent
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
 }
 
 // TestALaunchedPlannerIsGreetedWithItsDirective pins the wiring, not the choice: Engine.Kickoff can be
@@ -77,7 +63,7 @@ func TestAClearedPlannerIsHandedItsDirective(t *testing.T) {
 	if err := h.agents.SetClearArmed(t.Context(), testProject, "dvalin", true); err != nil {
 		t.Fatalf("SetClearArmed: %v", err)
 	}
-	sent := awaitSent(t, rt, workflow.DirPlanner)
+	sent := rt.joined()
 	if !strings.Contains(sent, "/clear") {
 		t.Fatalf("precondition: the session was never cleared: %s", sent)
 	}
@@ -107,7 +93,7 @@ func TestTheArmedClearSweepHandsThePlannerItsDirective(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.agents.FireArmedClears(t.Context(), testProject)
-	if sent := awaitSent(t, rt, workflow.DirPlanning); !strings.Contains(sent, workflow.DirPlanning) {
+	if sent := rt.joined(); !strings.Contains(sent, workflow.DirPlanning) {
 		t.Errorf("the sweep's kickoff should carry the planner's directive too: %s", sent)
 	}
 }

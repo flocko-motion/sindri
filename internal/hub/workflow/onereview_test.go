@@ -43,7 +43,7 @@ func reviewFixture(t *testing.T) (*Engine, *store.ProjectStore, *stubDeps) {
 func TestAReviewerHoldsExactlyOnePR(t *testing.T) {
 	e, ps, _ := reviewFixture(t)
 
-	first, ok, err := e.reviewDirective("repo", "fili")
+	first, ok, err := e.reviewDirective(t.Context(), "repo", "fili")
 	if err != nil || !ok {
 		t.Fatalf("reviewDirective: ok=%v err=%v", ok, err)
 	}
@@ -56,7 +56,7 @@ func TestAReviewerHoldsExactlyOnePR(t *testing.T) {
 	}
 	// Asked again and again, it gets the SAME PR — the one whose branch is checked out.
 	for i := 0; i < 3; i++ {
-		again, ok, err := e.reviewDirective("repo", "fili")
+		again, ok, err := e.reviewDirective(t.Context(), "repo", "fili")
 		if err != nil || !ok {
 			t.Fatalf("reviewDirective: ok=%v err=%v", ok, err)
 		}
@@ -77,7 +77,7 @@ func TestAReviewerHoldsExactlyOnePR(t *testing.T) {
 // freed and told, rather than left holding a verdict that can no longer decide anything.
 func TestASettledPRReleasesItsReviewer(t *testing.T) {
 	e, ps, _ := reviewFixture(t)
-	if _, ok, err := e.reviewDirective("repo", "fili"); err != nil || !ok {
+	if _, ok, err := e.reviewDirective(t.Context(), "repo", "fili"); err != nil || !ok {
 		t.Fatalf("reviewDirective: ok=%v err=%v", ok, err)
 	}
 	held, _ := ps.ReviewingPR("fili")
@@ -88,7 +88,7 @@ func TestASettledPRReleasesItsReviewer(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Its next ask releases the moot review and moves it to the other PR.
-	dir, ok, err := e.reviewDirective("repo", "fili")
+	dir, ok, err := e.reviewDirective(t.Context(), "repo", "fili")
 	if err != nil {
 		t.Fatalf("reviewDirective: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestAnApprovedPRCanStillBeRejected(t *testing.T) {
 // belong to it. A second reviewer would check that branch out from under the first.
 func TestAmendingAReviewGoesToTheAgentOnIt(t *testing.T) {
 	e, ps, _ := reviewFixture(t)
-	if _, ok, err := e.reviewDirective("repo", "fili"); err != nil || !ok {
+	if _, ok, err := e.reviewDirective(t.Context(), "repo", "fili"); err != nil || !ok {
 		t.Fatalf("reviewDirective: ok=%v err=%v", ok, err)
 	}
 	held, _ := ps.ReviewingPR("fili")
@@ -208,7 +208,7 @@ func TestANewRequestUnmakesAnApproval(t *testing.T) {
 		t.Errorf("status = %q, want open — a fresh question cannot sit behind an old answer", got.Status)
 	}
 	// And it is now claimable again, with the new requirement.
-	dir, ok, err := e.reviewDirective("repo", "fili")
+	dir, ok, err := e.reviewDirective(t.Context(), "repo", "fili")
 	if err != nil || !ok {
 		t.Fatalf("reviewDirective after reopening: ok=%v err=%v", ok, err)
 	}
@@ -240,7 +240,7 @@ func TestAMergedPRIsNotReopenedByAReviewRequest(t *testing.T) {
 // it, rather than a rejection written at nobody.
 func TestTheHandedDirectiveCarriesTheAuthor(t *testing.T) {
 	e, ps, _ := reviewFixture(t)
-	dir, ok, err := e.reviewDirective("repo", "fili")
+	dir, ok, err := e.reviewDirective(t.Context(), "repo", "fili")
 	if err != nil || !ok {
 		t.Fatalf("reviewDirective: ok=%v err=%v", ok, err)
 	}
@@ -254,7 +254,7 @@ func TestTheHandedDirectiveCarriesTheAuthor(t *testing.T) {
 	}
 	// And again on the re-ask path, which builds the directive from the HELD review rather than
 	// from a fresh claim — two call sites, one of which is easy to leave behind.
-	again, _, _ := e.reviewDirective("repo", "fili")
+	again, _, _ := e.reviewDirective(t.Context(), "repo", "fili")
 	if !strings.Contains(again, pr.Agent) {
 		t.Errorf("the re-asked directive dropped the author:\n%s", again)
 	}

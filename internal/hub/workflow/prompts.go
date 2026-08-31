@@ -524,12 +524,6 @@ const DirRetired = "[hub] You've been retired by the user: no further work will 
 // armed for the relaunch it triggers) — names no operation, asks for nothing but a beat.
 const DirPreparing = "[hub] One moment — your next instruction is right behind this."
 
-// DirClearPending answers an agent whose armed clear is about to land: no work meanwhile, since a
-// task handed out now would be cut in half by it.
-const DirClearPending = "[hub] The user has armed a context clear for you: it fires here, at this " +
-	"boundary, and your session starts empty. Nothing is assigned until it lands. Don't ask again — " +
-	"you'll be told to carry on the moment your context is clear."
-
 // --- escalation: stopped on a decision only the user can make ---
 
 // DirEscalated answers an escalated agent by repeating the question back — one relaunched mid-escalation

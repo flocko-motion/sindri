@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	agentport "github.com/flo-at/sindri/internal/adapter/agent"
 	"github.com/flo-at/sindri/internal/container"
@@ -17,14 +16,16 @@ import (
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
-// clearableRuntime fakes the tmux/podman runtime, just enough for FireClear's calls to succeed with
-// no real pod. Mutex-guarded: FireClear's own kickoff goroutine writes it too. pane is what a terminal
-// would have DRAWN of the -l literals, since inject reads its own text back off it.
+// clearableRuntime fakes the tmux/podman runtime, just enough for a clear's calls to succeed with no
+// real pod. pane is what a terminal would have DRAWN of the -l literals, since inject reads its own
+// text back off it. onSend, if set, is handed each literal as it is typed — a clear blocks until the
+// session is observed to have emptied, so a test's only way in is while the call is running.
 type clearableRuntime struct {
 	container.Runtime
-	mu   sync.Mutex
-	sent []string
-	pane string
+	mu     sync.Mutex
+	sent   []string
+	pane   string
+	onSend func(text string)
 }
 
 // paneCols is this fixture's terminal width; the needle is derived from it, so it is a value here
@@ -69,16 +70,22 @@ func (r *clearableRuntime) ExecContext(_ context.Context, _ string, args ...stri
 	r.sent = append(r.sent, strings.Join(args, " "))
 	// send-keys -l's literal text is the last arg, after "--"; the fake terminal draws it, so inject's
 	// own read-back finds what it just sent.
+	var typed string
 	if n := len(args); n >= 2 && args[n-2] == "--" {
-		r.pane += drawn(paneCols, args[n-1])
+		typed = args[n-1]
+		r.pane += drawn(paneCols, typed)
 	}
+	hook := r.onSend
 	r.mu.Unlock()
+	if typed != "" && hook != nil {
+		hook(typed)
+	}
 	return nil, nil
 }
 func (r *clearableRuntime) Logs(string, int) string { return "" }
 func (r *clearableRuntime) Check(io.Writer) error   { return nil }
 
-// joined is every command sent so far, one string, safe against the kickoff goroutine's own writes.
+// joined is every command sent so far, one string, safe against a concurrent send.
 func (r *clearableRuntime) joined() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -88,8 +95,8 @@ func (r *clearableRuntime) joined() string {
 // fakeAgent is a coding-agent port whose reported context size the test controls — the adapter a
 // hub test supplies at the composition root, isolating the memo under test.
 //
-// The reading is behind a MUTEX because it crosses goroutines: awaitCleared polls it from FireClear's
-// kickoff while the test writes the drop that ends the wait, which is the whole shape under test.
+// The reading is behind a MUTEX because it crosses goroutines: awaitCleared polls it while the fake
+// runtime writes the drop that ends the wait, which is the whole shape under test.
 type fakeAgent struct {
 	mu     *sync.Mutex
 	tokens *int
@@ -169,13 +176,21 @@ func fullAgentWithWorkWaiting(t *testing.T) (*Hub, string, fakeAgent) {
 	return h, "dvalin", fake
 }
 
-// TestAFullWorkersOwnAskFiresAClearEndToEnd is the automatic clear-context flow, end to end. Checked
-// on the session, not a second AgentDirective call: the claim's own hand-over lands behind /clear.
+// TestAFullWorkersOwnAskFiresAClearEndToEnd is the automatic clear-context flow, end to end. The
+// clear now blocks until the session is seen to empty, so the directive behind it is already sent by
+// the time the ask answers — there is nothing detached left to poll for.
 func TestAFullWorkersOwnAskFiresAClearEndToEnd(t *testing.T) {
 	h, agent, fake := fullAgentWithWorkWaiting(t)
 	w := stillWatchdog(t, h)
 	w.record(store.Agent{Project: testProject, Name: agent}, true, 0, hubagent.Observation{Runtime: "idle", Digest: "d1"})
 	rt := &clearableRuntime{}
+	// The clear taking effect, at the one moment it can: the call waits for this reading to fall, so
+	// a session that answered only after the call returned would be a session that never answered.
+	rt.onSend = func(text string) {
+		if strings.TrimSpace(text) == "/clear" {
+			fake.setTokens(1_000)
+		}
+	}
 	container.Use(rt)
 	t.Cleanup(container.UseDefault)
 
@@ -190,26 +205,12 @@ func TestAFullWorkersOwnAskFiresAClearEndToEnd(t *testing.T) {
 		t.Errorf("state.Task = %q, want sd-1 — the claim holds regardless of the clear firing", st.Task)
 	}
 
-	fake.setTokens(1_000) // the clear happens: the session's context is gone
-	h.agents.ForgetContext(testProject, agent)
-
-	// FireClear's kickoff fires clearKickoffDelay later in its own goroutine — poll rather than
-	// sleep a fixed margin over that delay, so this can't flake under a loaded gate.
-	var sent string
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		sent = rt.joined()
-		if strings.Contains(sent, "sd-1") || time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-
+	sent := rt.joined()
 	if !strings.Contains(sent, "/clear") {
 		t.Errorf("the session was never sent /clear: %s", sent)
 	}
 	if !strings.Contains(sent, "sd-1") {
-		t.Errorf("the claimed task's own directive should be queued behind the clear, not a generic kickoff: %s", sent)
+		t.Errorf("the claimed task's own directive should follow the clear, not a generic kickoff: %s", sent)
 	}
 	if strings.Contains(sent, "Escape") {
 		t.Errorf("the automatic clear interrupted the session it was answering: %s", sent)

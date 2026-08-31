@@ -6,6 +6,8 @@
 // limits:  the fill facts and firing preparation; the claim itself is the caller's.
 package workflow
 
+import "context"
+
 // ContextFullFraction is how much of its window a worker may fill before a fresh assignment
 // clears it rather than compacting it — a session that far gone is not worth summarizing.
 const ContextFullFraction = 0.85
@@ -25,23 +27,37 @@ func (e *Engine) compactDue(project, worker string) (tokens int, due bool) {
 
 // compactIfDue fires a due compaction once, queuing dir — the real instruction — behind it, so the
 // agent is never handed dir to act on and then cut off by the compaction that follows.
-func (e *Engine) compactIfDue(project, agent, dir string) (fired bool, err error) {
+func (e *Engine) compactIfDue(ctx context.Context, project, agent, dir string) (fired bool, err error) {
 	if _, due := e.compactDue(project, agent); !due {
 		return false, nil
 	}
-	return true, e.deps.Compact(project, agent, dir)
+	if err := e.deps.Compact(ctx, project, agent); err != nil {
+		return false, err
+	}
+	if err := e.deps.Deliver(project, agent, dir, PushOnly); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // prepareAssignment runs an already-claimed assignment's preparation — a model switch, else a clear
-// past ContextFullFraction, else compaction if merely due — bracketed so AtLeafBoundary admits the claim.
-func (e *Engine) prepareAssignment(project, agent, tier, dir string) (fired bool, err error) {
-	e.deps.BeginAssignment(project, agent)
-	defer e.deps.EndAssignment(project, agent)
+// past ContextFullFraction, else compaction if merely due — then delivers dir once it has landed.
+func (e *Engine) prepareAssignment(ctx context.Context, project, agent, tier, dir string) (fired bool, err error) {
 	if want, known := e.deps.ModelForTier(tier); known && !e.deps.ModelMatches(want, e.deps.CurrentModel(project, agent)) {
-		return true, e.deps.SetModel(project, agent, want, dir)
+		if err := e.deps.SetModel(ctx, project, agent, want); err != nil {
+			return false, err
+		}
+		if err := e.deps.Deliver(project, agent, dir, PushOnly); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
 	if _, full := e.contextFull(project, agent); full {
-		return true, e.deps.FireClear(project, agent, dir, false)
+		if err := e.deps.Clear(ctx, project, agent); err != nil {
+			return false, err
+		}
+		err := e.deps.Deliver(project, agent, dir, PushOnly)
+		return true, err
 	}
-	return e.compactIfDue(project, agent, dir)
+	return e.compactIfDue(ctx, project, agent, dir)
 }

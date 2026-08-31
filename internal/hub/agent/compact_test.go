@@ -47,46 +47,46 @@ func TestCompactInjectsAndForgetsTheMemo(t *testing.T) {
 		t.Fatalf("ContextUsage = (%d, %v), want the pre-compaction reading", got, ok)
 	}
 
-	if err := s.Compact(t.Context(), "proj", "durin", "the claimed directive"); err != nil {
+	// The transcript compaction leaves behind is a fresh one, written the moment /compact is
+	// submitted — which is also the evidence Compact blocks on before it answers.
+	f.afterSubmit = func() { writeUsage(t, "proj", "durin", 2_000) }
+	if err := s.Compact(t.Context(), "proj", "durin"); err != nil {
 		t.Fatalf("Compact: %v", err)
 	}
 
-	// Queued in order, never interrupted: the turn Compact is called from is the agent's own
-	// in-flight directive request, and an Escape here used to kill it before that reply landed
-	// (-> the regression this fixes). /compact runs first, then the caller's own next — its real
-	// instruction, not a generic re-ask — once Claude Code drains the queue behind the turn that
-	// is still finishing.
+	// Never interrupted: the turn Compact is called from is the agent's own in-flight directive
+	// request, and an Escape here used to kill it before that reply landed (-> the regression this
+	// fixes). Nothing rides along behind the /compact either — what follows is the caller's to send.
 	if f.interrupts != 0 {
 		t.Errorf("Compact must never interrupt — the in-flight turn is the one about to answer it, got %d escape(s)", f.interrupts)
 	}
-	if want := []string{"/compact", "the claimed directive"}; len(f.sent) != len(want) || f.sent[0] != want[0] || f.sent[1] != want[1] {
-		t.Errorf("sent = %v, want %v in that order — next must be what the caller passed, not a hardcoded kickoff", f.sent, want)
+	if len(f.sent) != 1 || f.sent[0] != "/compact" {
+		t.Errorf("sent = %v, want just [/compact] — the command carries no follow-up of its own", f.sent)
 	}
 
-	// The transcript compaction leaves behind is a fresh one — the memo must not serve the
-	// pre-compaction figure back, the same bug that had a freshly cleared agent still read as full.
-	writeUsage(t, "proj", "durin", 2_000)
+	// The memo must not serve the pre-compaction figure back, the same bug that had a freshly
+	// cleared agent still read as full.
 	if got, _, _, ok := s.ContextUsage("proj", "durin"); !ok || got != 2_000 {
 		t.Errorf("ContextUsage = (%d, %v), want the post-compaction reading (2000), not the stale one", got, ok)
 	}
 }
 
-// TestCompactRefusesMidTask: never mid-task — the same boundary clear waits for, since compaction
-// is exactly as disruptive to hold a leaf task through.
-func TestCompactRefusesMidTask(t *testing.T) {
+// TestCompactPerformsOnAJustClaimedAgent is the case the deleted assignment window existed for: the
+// gate claims first, so by the time it prepares the agent the store reads mid-task. Compact no longer
+// asks — whether this is a safe moment is the caller's, and this caller is inside its own assignment.
+func TestCompactPerformsOnAJustClaimedAgent(t *testing.T) {
 	s, f := compactFixture(t)
 	writeUsage(t, "proj", "durin", 80_000)
 	if err := s.store.For("proj").SetState(store.AgentState{Agent: "durin", Task: "td-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
+	f.afterSubmit = func() { writeUsage(t, "proj", "durin", 2_000) }
 
-	if err := s.Compact(t.Context(), "proj", "durin", "next"); err == nil {
-		t.Error("Compact should have refused a worker mid-task")
+	if err := s.Compact(t.Context(), "proj", "durin"); err != nil {
+		t.Fatalf("Compact on a just-claimed agent: %v", err)
 	}
-	for _, sent := range f.sent {
-		if sent == "/compact" {
-			t.Error("a worker mid-task was compacted anyway")
-		}
+	if len(f.sent) != 1 || f.sent[0] != "/compact" {
+		t.Errorf("sent = %v, want [/compact] — the preparation the gate asked for must have run", f.sent)
 	}
 }
 

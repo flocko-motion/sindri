@@ -7,6 +7,7 @@
 package workflow
 
 import (
+	"context"
 	"fmt"
 	"github.com/flo-at/sindri/internal/api"
 	"os"
@@ -209,7 +210,7 @@ func (e *Engine) reviewerHome(project, reviewer string) (home string, a store.Ag
 // reviewDirective is what a reviewer is told: the ONE PR it holds, whose branch sits in its one
 // workspace — serving a second while the first was still checked out left neither diff readable.
 // Free, it claims the oldest unclaimed review, also how one with no reviewer running gets picked up.
-func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
+func (e *Engine) reviewDirective(ctx context.Context, project, name string) (string, bool, error) {
 	ps := e.store.For(project)
 	// heldProject, not project: a GlobalProject reviewer's held review is filed under whatever
 	// project it was sent to, never its own.
@@ -248,13 +249,17 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 		// `sindri` answers at once: AssignPendingReviews pushes a wake once a review is claimable.
 		return DirNoReviews, true, nil
 	}
-	// An armed clear preempts the claim below, firing eagerly rather than waiting for the sweep, same
-	// as fireClearIfArmed — interrupt=false for the same reason: this runs inside the reviewer's own ask.
+	// An armed clear fires eagerly before any claim, same as fireClearIfArmed — and answers
+	// DirPreparing for the same reason: the session that asked has just been discarded, so the review
+	// is claimed on the ask that follows the kickoff rather than served into a reply nobody reads.
 	if e.clearArmed(project, name) {
-		if err := e.deps.FireClear(project, name, MsgKickoff, false); err != nil {
+		if err := e.deps.Clear(ctx, project, name); err != nil {
 			return "", false, err
 		}
-		return DirClearPending, true, nil // about to land: a review claimed now would be cut in half by it
+		if err := e.deps.Deliver(project, name, MsgKickoff, PushOnly.Regardless()); err != nil {
+			return "", false, err
+		}
+		return DirPreparing, true, nil
 	}
 	// Claim FIRST — same reason claimNext claims before it prepares: once the review is the
 	// reviewer's, no return in the middle is needed for compaction (a review has no tier, so no
@@ -265,9 +270,7 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 	}
 	pr, _, _ := ps.GetPR(prID)
 	dir := DirReview(prID, pr.Task, e.taskTitle(project, pr.Task), pr.Agent, e.deps.ArchitectureDoc(project))
-	e.deps.BeginAssignment(project, name)
-	fired, err := e.compactIfDue(project, name, dir)
-	e.deps.EndAssignment(project, name)
+	fired, err := e.compactIfDue(ctx, project, name, dir)
 	if err != nil {
 		return "", false, err
 	}

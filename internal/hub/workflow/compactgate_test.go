@@ -34,12 +34,12 @@ func reviewerWithUnclaimedReview(t *testing.T, deps *stubDeps) (*Engine, *store.
 	return New(st, deps), ps
 }
 
-// TestFillPastTheCompactionThresholdClaimsThenQueuesTheDirectiveBehindCompact: the claim comes
+// TestFillPastTheCompactionThresholdClaimsThenDeliversTheDirectiveAfterCompact: the claim comes
 // first — nothing here returns in the middle for the agent to be asked back from — but once
 // compaction fires, THIS ask answers with DirPreparing, not the claimed directive: the real
-// instruction is queued behind /compact instead, so the agent is never handed something to act on
-// moments before the compaction that would cut it off.
-func TestFillPastTheCompactionThresholdClaimsThenQueuesTheDirectiveBehindCompact(t *testing.T) {
+// instruction is delivered separately once the compaction has landed, so the agent is never handed
+// something to act on moments before the compaction that would cut it off.
+func TestFillPastTheCompactionThresholdClaimsThenDeliversTheDirectiveAfterCompact(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
 	e, ps := idleWorkerWithOpenTask(t, deps)
 
@@ -56,8 +56,8 @@ func TestFillPastTheCompactionThresholdClaimsThenQueuesTheDirectiveBehindCompact
 	if len(deps.compacted) != 1 || deps.compacted[0] != "dvalin" {
 		t.Errorf("compacted = %v, want exactly one Compact(dvalin) fired", deps.compacted)
 	}
-	if len(deps.compactedWith) != 1 || !strings.Contains(deps.compactedWith[0], "td-abc123") {
-		t.Errorf("compactedWith = %v, want the claimed directive queued behind /compact", deps.compactedWith)
+	if len(deps.injectedText) != 1 || !strings.Contains(deps.injectedText[0], "td-abc123") {
+		t.Errorf("injectedText = %v, want the claimed directive delivered after the compaction", deps.injectedText)
 	}
 }
 
@@ -89,7 +89,7 @@ func TestAnUnreadableSampleDoesNotStopANextFire(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
 	e := New(nil, deps)
 
-	if _, err := e.compactIfDue("repo", "dvalin", "dir"); err != nil {
+	if _, err := e.compactIfDue(t.Context(), "repo", "dvalin", "dir"); err != nil {
 		t.Fatalf("compactIfDue: %v", err)
 	}
 	if len(deps.compacted) != 1 {
@@ -97,7 +97,7 @@ func TestAnUnreadableSampleDoesNotStopANextFire(t *testing.T) {
 	}
 
 	deps.ctxOK = false // the transcript rotating to the fresh one /compact just wrote
-	if _, err := e.compactIfDue("repo", "dvalin", "dir"); err != nil {
+	if _, err := e.compactIfDue(t.Context(), "repo", "dvalin", "dir"); err != nil {
 		t.Fatalf("compactIfDue on an unreadable sample: %v", err)
 	}
 	if len(deps.compacted) != 1 {
@@ -105,7 +105,7 @@ func TestAnUnreadableSampleDoesNotStopANextFire(t *testing.T) {
 	}
 
 	deps.ctxOK = true
-	if _, err := e.compactIfDue("repo", "dvalin", "dir"); err != nil {
+	if _, err := e.compactIfDue(t.Context(), "repo", "dvalin", "dir"); err != nil {
 		t.Fatalf("compactIfDue: %v", err)
 	}
 	if len(deps.compacted) != 2 {
@@ -120,12 +120,12 @@ func TestCompactionFiresAgainAfterLanding(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
 	e := New(nil, deps)
 
-	if _, err := e.compactIfDue("repo", "dvalin", "dir"); err != nil {
+	if _, err := e.compactIfDue(t.Context(), "repo", "dvalin", "dir"); err != nil {
 		t.Fatalf("compactIfDue: %v", err)
 	}
 
 	deps.ctxTokens = 2_000 // landed
-	if _, err := e.compactIfDue("repo", "dvalin", "dir"); err != nil {
+	if _, err := e.compactIfDue(t.Context(), "repo", "dvalin", "dir"); err != nil {
 		t.Fatalf("compactIfDue once landed: %v", err)
 	}
 	if len(deps.compacted) != 1 {
@@ -133,7 +133,7 @@ func TestCompactionFiresAgainAfterLanding(t *testing.T) {
 	}
 
 	deps.ctxTokens = 80_000 // due again
-	if _, err := e.compactIfDue("repo", "dvalin", "dir"); err != nil {
+	if _, err := e.compactIfDue(t.Context(), "repo", "dvalin", "dir"); err != nil {
 		t.Fatalf("compactIfDue: %v", err)
 	}
 	if len(deps.compacted) != 2 {
@@ -157,15 +157,15 @@ func TestClearWinsOverCompaction(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fired, err := e.fireClearIfArmed("repo", "dvalin")
+	fired, err := e.fireClearIfArmed(t.Context(), "repo", "dvalin")
 	if err != nil || !fired {
-		t.Fatalf("fireClearIfArmed = (%v, %v), want fired", fired, err)
+		t.Fatalf("fireClearIfArmed = (%v, %v), want the armed clear fired", fired, err)
 	}
 	if len(deps.cleared) != 1 || deps.cleared[0] != "dvalin" {
-		t.Errorf("cleared = %v, want exactly one FireClear(dvalin)", deps.cleared)
+		t.Errorf("cleared = %v, want exactly one Clear(dvalin)", deps.cleared)
 	}
 
-	if _, claimed, err := e.claimNext("repo", "dvalin"); err != nil || claimed {
+	if _, claimed, err := e.claimNext(t.Context(), "repo", "dvalin"); err != nil || claimed {
 		t.Errorf("claimNext = (claimed=%v, err=%v), want nothing claimed this pass", claimed, err)
 	}
 	if len(deps.compacted) != 0 {
@@ -211,11 +211,11 @@ func TestCompactDueIgnoresAnUnknownWindow(t *testing.T) {
 	}
 }
 
-// TestBetweenSubtasksClaimsThenQueuesTheDirectiveBehindCompact: claimNextSubtask follows the same
+// TestBetweenSubtasksClaimsThenDeliversTheDirectiveAfterCompact: claimNextSubtask follows the same
 // rule claimNext does, for a worker already holding a feature and about to be handed its next
 // subtask — this ask answers with DirPreparing once compaction fires, and the real subtask
 // directive is queued behind /compact instead.
-func TestBetweenSubtasksClaimsThenQueuesTheDirectiveBehindCompact(t *testing.T) {
+func TestBetweenSubtasksClaimsThenDeliversTheDirectiveAfterCompact(t *testing.T) {
 	const agent = "dain"
 	root, _ := newWorkRepo(t, agent, "td-EPIC")
 	st, err := store.Open(root + "/s.db")
@@ -265,15 +265,15 @@ func TestBetweenSubtasksClaimsThenQueuesTheDirectiveBehindCompact(t *testing.T) 
 	if len(deps.compacted) != 1 || deps.compacted[0] != agent {
 		t.Errorf("compacted = %v, want exactly one Compact(%s) fired", deps.compacted, agent)
 	}
-	if len(deps.compactedWith) != 1 || !strings.Contains(deps.compactedWith[0], "td-next") {
-		t.Errorf("compactedWith = %v, want the next-subtask directive queued behind /compact", deps.compactedWith)
+	if len(deps.injectedText) != 1 || !strings.Contains(deps.injectedText[0], "td-next") {
+		t.Errorf("injectedText = %v, want the next-subtask directive delivered after the compaction", deps.injectedText)
 	}
 }
 
-// TestReviewerFillPastTheCompactionThresholdClaimsThenQueuesTheDirectiveBehindCompact: the same
+// TestReviewerFillPastTheCompactionThresholdClaimsThenDeliversTheDirectiveAfterCompact: the same
 // rule, for a reviewer about to be handed a new PR rather than a worker about to be handed a new
 // task.
-func TestReviewerFillPastTheCompactionThresholdClaimsThenQueuesTheDirectiveBehindCompact(t *testing.T) {
+func TestReviewerFillPastTheCompactionThresholdClaimsThenDeliversTheDirectiveAfterCompact(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
 	e, ps := reviewerWithUnclaimedReview(t, deps)
 
@@ -290,8 +290,10 @@ func TestReviewerFillPastTheCompactionThresholdClaimsThenQueuesTheDirectiveBehin
 	if len(deps.compacted) != 1 || deps.compacted[0] != "rune" {
 		t.Errorf("compacted = %v, want exactly one Compact(rune) fired", deps.compacted)
 	}
-	if len(deps.compactedWith) != 1 || !strings.Contains(deps.compactedWith[0], "pr-1") {
-		t.Errorf("compactedWith = %v, want the review directive queued behind /compact", deps.compactedWith)
+	// Searched rather than counted: assignReview pushes its own "you have a review" note from a
+	// goroutine, so the number of deliveries here is not this test's to fix.
+	if !deliveredContaining(deps, "check the gate") {
+		t.Errorf("injectedText = %v, want the review directive delivered after the compaction", deps.injectedText)
 	}
 }
 
@@ -331,7 +333,7 @@ func TestFullnessWinsOverCompaction(t *testing.T) {
 		t.Errorf("directive = %q, want DirPreparing", dir)
 	}
 	if len(deps.cleared) != 1 || deps.cleared[0] != "dvalin" {
-		t.Errorf("cleared = %v, want exactly one FireClear(dvalin)", deps.cleared)
+		t.Errorf("cleared = %v, want exactly one Clear(dvalin)", deps.cleared)
 	}
 	if len(deps.compacted) != 0 {
 		t.Errorf("compacted = %v, want none — the clear preempts it", deps.compacted)

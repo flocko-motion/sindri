@@ -9,6 +9,8 @@
 package workflow
 
 import (
+	"context"
+
 	"github.com/flo-at/sindri/internal/adapter/gate"
 	"github.com/flo-at/sindri/internal/adapter/tasks"
 	"github.com/flo-at/sindri/internal/config"
@@ -83,20 +85,12 @@ type Deps interface {
 	// ModelMatches reports whether detected is want — not always a bare equality, since a backend
 	// may run a tier's model under a more specific id than the one it dispatches to.
 	ModelMatches(want, detected string) bool
-	// SetModel changes the model an agent runs on, queuing next (the real instruction) behind the
-	// live switch if running — no relaunch.
-	SetModel(project, name, model, next string) error
-	// Compact fires /compact at a leaf boundary then queues next behind it, once, never checking
-	// whether it landed below the threshold that triggered it.
-	Compact(project, name, next string) error
-	// BeginAssignment marks an agent mid the preparation after a fresh claim, so AtLeafBoundary
-	// admits it rather than refusing the step the gate is running. Paired with EndAssignment.
-	BeginAssignment(project, name string)
-	// EndAssignment closes that window once preparation is done.
-	EndAssignment(project, name string)
-	// FireClear fires Claude Code's own /clear at a leaf boundary, then queues next behind it
-	// (agent.Service.FireClear states interrupt's rule).
-	FireClear(project, name, next string, interrupt bool) error
+	// SetModel changes the model an agent runs on, blocking until it completes or times out.
+	SetModel(ctx context.Context, project, name, model string) error
+	// Compact sends /compact into an agent's live session and blocks until it takes effect or times out.
+	Compact(ctx context.Context, project, name string) error
+	// Clear sends /clear into an agent's live session and blocks until it takes effect or times out.
+	Clear(ctx context.Context, project, name string) error
 	// HoldsNothing reports whether an agent holds nothing the hub can see: no task, no feature, no
 	// review, no escalation, nobody dialed in.
 	HoldsNothing(project, name, role string) (bool, error)
@@ -109,14 +103,18 @@ func (e *Engine) clearArmed(project, name string) bool {
 	return err == nil && ok && a.ClearArmed
 }
 
-// fireClearIfArmed fires an armed clear right now regardless of what (if anything) follows it —
-// unlike compact and model-select, a clear is a direct request, not tied to one assignment. Every
-// caller runs inside the call answering the agent's own ask, so it passes interrupt=false.
-func (e *Engine) fireClearIfArmed(project, name string) (fired bool, err error) {
+// fireClearIfArmed fires an armed clear right now and wakes the agent once it has landed. A clear is
+// a direct request, not tied to one assignment. It reports whether it fired, because the reply to
+// THIS call would go into the session the clear has just discarded: a caller that fired answers
+// DirPreparing and serves nothing it expects to be read.
+func (e *Engine) fireClearIfArmed(ctx context.Context, project, name string) (fired bool, err error) {
 	if !e.clearArmed(project, name) {
 		return false, nil
 	}
-	return true, e.deps.FireClear(project, name, MsgKickoff, false)
+	if err := e.deps.Clear(ctx, project, name); err != nil {
+		return false, err
+	}
+	return true, e.deps.Deliver(project, name, MsgKickoff, PushOnly.Regardless())
 }
 
 // Engine is the workflow orchestrator: it owns the store and drives the lifecycle

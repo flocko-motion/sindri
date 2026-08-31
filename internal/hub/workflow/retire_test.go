@@ -50,7 +50,7 @@ func TestRetiredWorkerIsHandedNothing(t *testing.T) {
 	e, ps, c := retireFixture(t)
 	retire(t, ps, "dvalin")
 
-	if _, claimed, err := e.claimNext("proj", "dvalin"); err != nil || claimed {
+	if _, claimed, err := e.claimNext(t.Context(), "proj", "dvalin"); err != nil || claimed {
 		t.Fatalf("a retired worker must claim nothing: claimed=%v err=%v", claimed, err)
 	}
 	// The task is untouched and still open for somebody else.

@@ -31,7 +31,7 @@ func TestGlobalReviewerFollowsAReviewPastAssignment(t *testing.T) {
 
 	// Asking for its own directive — from GlobalProject, its own project — must find the review it
 	// holds rather than answering DirNoReviews.
-	dir, ok, err := e.reviewDirective(GlobalProject, "ori")
+	dir, ok, err := e.reviewDirective(t.Context(), GlobalProject, "ori")
 	if err != nil {
 		t.Fatal(err)
 	}

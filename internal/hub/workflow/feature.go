@@ -9,6 +9,7 @@
 package workflow
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -227,12 +228,11 @@ func openIDs(tasks []store.Task) []string {
 	return ids
 }
 
-// claimNextSubtask is claimNext's rule for a held feature's own subtasks: the next open child, else
-// the feature is finished or still gated. It claims BEFORE preparing, which is backwards — the work
-// then rides inside the clear meant to precede it (-> prepareAssignment's dir).
-func (e *Engine) claimNextSubtask(project, agent, container string) (string, bool, error) {
+// claimNextSubtask is claimNext's rule for a held feature's subtasks: the next open child, claimed
+// FIRST so the reset that follows runs against work already held. None open means done or gated.
+func (e *Engine) claimNextSubtask(ctx context.Context, project, agent, container string) (string, bool, error) {
 	if e.clearArmed(project, agent) {
-		return DirClearPending, true, nil // about to land: a subtask claimed now would be cut in half by it
+		return "", false, nil // clear fires at leaf boundary, no subtask claimed until after
 	}
 	child, advanced, err := e.advanceContainer(project, agent, container)
 	if err != nil {
@@ -256,7 +256,7 @@ func (e *Engine) claimNextSubtask(project, agent, container string) (string, boo
 	_ = e.store.For(project).SetLastNudge(agent, "")
 	aim, ceiling := e.commentBudget(project)
 	dir := DirContainerWorking(container, child.ID, aim, ceiling)
-	fired, err := e.prepareAssignment(project, agent, api.TierOrDefault(child.Tier), dir)
+	fired, err := e.prepareAssignment(ctx, project, agent, api.TierOrDefault(child.Tier), dir)
 	if err != nil {
 		return "", false, err
 	}

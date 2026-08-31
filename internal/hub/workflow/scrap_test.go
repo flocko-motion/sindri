@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -41,26 +42,18 @@ type stubDeps struct {
 	currentModel     string                     // CurrentModel's answer; "" is fine — no real model is ever ""
 	// tierModels overrides ModelForTier's answer; nil (the default) means every tier is unknown, so
 	// the retier check never fires for a test that has not opted into it.
-	tierModels       map[string]string
-	modelSet         []string // "name=model" for every SetModel call, in order
-	modelSetWith     []string // the "next" text passed alongside each, in step with modelSet
-	setModelErr      error
-	holdsNothing     bool
-	compacted        []string // agents Compact was called for, in order
-	compactedWith    []string // the "next" text passed alongside each, in step with compacted
-	compactErr       error
-	cleared          []string // agents FireClear was called for, in order
-	clearedWith      []string // the "next" text passed alongside each, in step with cleared
-	clearedInterrupt []bool   // the "interrupt" flag passed alongside each, in step with cleared
-	fireClearErr     error
+	tierModels   map[string]string
+	modelSet     []string // "name=model" for every SetModel call, in order
+	setModelErr  error
+	holdsNothing bool
+	compacted    []string // agents Compact was called for, in order
+	compactErr   error
+	cleared      []string // agents Clear was called for, in order
+	clearErr     error
 	// projectConfig overrides ProjectConfig's answer; the zero value (no lint.max_comment_avg set)
 	// means the caller sees no override, same as an unconfigured project.
 	projectConfig    config.Config
 	projectConfigErr error
-	// assignBrackets records BeginAssignment/EndAssignment calls as "begin:name"/"end:name", in
-	// order, so a test can assert prepareAssignment brackets its work correctly (and always closes
-	// the bracket, even when SetModel or Compact underneath it errors).
-	assignBrackets []string
 	// escalated records Escalate calls as "name: question", in order.
 	escalated []string
 	started   []string // agents StartAgent was called for, in order
@@ -169,33 +162,21 @@ func (d *stubDeps) ModelMatches(want, detected string) bool {
 	return strings.Contains(detected, want)
 }
 
-func (d *stubDeps) SetModel(_, name, model, next string) error {
+func (d *stubDeps) SetModel(_ context.Context, _, name, model string) error {
 	d.modelSet = append(d.modelSet, name+"="+model)
-	d.modelSetWith = append(d.modelSetWith, next)
 	return d.setModelErr
 }
 
 func (d *stubDeps) HoldsNothing(_, _, _ string) (bool, error) { return d.holdsNothing, nil }
 
-func (d *stubDeps) Compact(_, name, next string) error {
+func (d *stubDeps) Compact(_ context.Context, _, name string) error {
 	d.compacted = append(d.compacted, name)
-	d.compactedWith = append(d.compactedWith, next)
 	return d.compactErr
 }
 
-func (d *stubDeps) FireClear(_, name, next string, interrupt bool) error {
+func (d *stubDeps) Clear(_ context.Context, _, name string) error {
 	d.cleared = append(d.cleared, name)
-	d.clearedWith = append(d.clearedWith, next)
-	d.clearedInterrupt = append(d.clearedInterrupt, interrupt)
-	return d.fireClearErr
-}
-
-func (d *stubDeps) BeginAssignment(_, name string) {
-	d.assignBrackets = append(d.assignBrackets, "begin:"+name)
-}
-
-func (d *stubDeps) EndAssignment(_, name string) {
-	d.assignBrackets = append(d.assignBrackets, "end:"+name)
+	return d.clearErr
 }
 
 func (d *stubDeps) CompactionThreshold(int) int {

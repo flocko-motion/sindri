@@ -30,6 +30,10 @@ func (d agentDeps) Rehydrate(project, name string)            { d.h.rehydrate(pr
 
 func (d agentDeps) Kickoff(project, name string) string { return d.h.wf.Kickoff(project, name) }
 
+func (d agentDeps) Deliver(project, name, text string, del workflow.Delivery) error {
+	return d.h.Deliver(project, name, text, del)
+}
+
 // ForgetFill drops the observer's fill for one agent, so the board stops reporting a figure the
 // hub has just made false. Zeroed rather than re-sampled: the transcript is rewritten by the agent,
 // not by us, so the honest answer until the next sweep is that nobody has measured it.
@@ -103,8 +107,8 @@ func (d agentchanDeps) Commands(project, name string) (any, error) {
 func (d agentchanDeps) Directive(ctx context.Context, project, name string) (string, error) {
 	return d.h.wf.AgentDirective(ctx, project, name)
 }
-func (d agentchanDeps) Exec(project, name string, args []string, out io.Writer) (int, error) {
-	return d.h.AgentExec(project, name, args, out)
+func (d agentchanDeps) Exec(ctx context.Context, project, name string, args []string, out io.Writer) (int, error) {
+	return d.h.AgentExec(ctx, project, name, args, out)
 }
 func (d agentchanDeps) TokenAgent(token string) (project, name string, ok bool, err error) {
 	return d.h.agents.ForToken(token)
@@ -202,26 +206,18 @@ func (d workflowDeps) ModelMatches(want, detected string) bool {
 	return d.h.agents.ModelMatches(want, detected)
 }
 
-func (d workflowDeps) SetModel(project, name, model, next string) error {
-	return d.h.agents.SetModel(d.h.lifetime, project, name, model, next)
+func (d workflowDeps) SetModel(ctx context.Context, project, name, model string) error {
+	return d.h.agents.SetModel(ctx, project, name, model)
 }
 
 func (d workflowDeps) HoldsNothing(project, name, role string) (bool, error) {
 	return d.h.agents.HoldsNothing(project, name, role)
 }
 
-func (d workflowDeps) Compact(project, name, next string) error {
-	return d.h.agents.Compact(d.h.lifetime, project, name, next)
+func (d workflowDeps) Compact(ctx context.Context, project, name string) error {
+	return d.h.agents.Compact(ctx, project, name)
 }
 
-func (d workflowDeps) FireClear(project, name, next string, interrupt bool) error {
-	return d.h.agents.FireClear(d.h.lifetime, project, name, next, interrupt)
-}
-
-func (d workflowDeps) BeginAssignment(project, name string) {
-	d.h.agents.BeginAssignment(project, name)
-}
-
-func (d workflowDeps) EndAssignment(project, name string) {
-	d.h.agents.EndAssignment(project, name)
+func (d workflowDeps) Clear(ctx context.Context, project, name string) error {
+	return d.h.agents.Clear(ctx, project, name)
 }

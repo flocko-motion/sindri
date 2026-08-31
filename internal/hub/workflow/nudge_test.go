@@ -299,7 +299,7 @@ func TestReviewDirectiveRefusesARetiredReviewer(t *testing.T) {
 	}
 	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
 
-	dir, _, err := e.reviewDirective("repo", "fili")
+	dir, _, err := e.reviewDirective(t.Context(), "repo", "fili")
 	if err != nil {
 		t.Fatal(err)
 	}

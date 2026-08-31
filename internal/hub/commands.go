@@ -9,6 +9,7 @@
 package hub
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -270,8 +271,9 @@ func (h *Hub) AgentCommands(project, name string) ([]CmdInfo, error) {
 }
 
 // AgentExec runs a verb for an agent, streaming to out and returning a process-style exit code.
-func (h *Hub) AgentExec(project, name string, args []string, out io.Writer) (int, error) {
+func (h *Hub) AgentExec(ctx context.Context, project, name string, args []string, out io.Writer) (int, error) {
 	c, err := h.caller(project, name)
+	c.Ctx = ctx // identity is a store read; the context belongs to this invocation, so it is attached here
 	if err != nil {
 		// A name absent from the roster is an identity answer, not a breakage: escalating it would
 		// write a state row for an agent with none, invisible on the board and asked nothing real.

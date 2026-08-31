@@ -55,13 +55,10 @@ func TestAFullWorkerIsClearedAndPreparedForTheNextTask(t *testing.T) {
 		t.Errorf("state.Task = %q, want td-abc123 — the claim holds regardless of what this ask answers", st.Task)
 	}
 	if len(deps.cleared) != 1 || deps.cleared[0] != "dvalin" {
-		t.Errorf("cleared = %v, want exactly one FireClear(dvalin) fired in place of a compaction", deps.cleared)
+		t.Errorf("cleared = %v, want exactly one Clear(dvalin) fired in place of a compaction", deps.cleared)
 	}
-	if len(deps.clearedWith) != 1 || !strings.Contains(deps.clearedWith[0], "td-abc123") {
-		t.Errorf("clearedWith = %v, want the claimed directive queued behind /clear", deps.clearedWith)
-	}
-	if len(deps.clearedInterrupt) != 1 || deps.clearedInterrupt[0] {
-		t.Errorf("clearedInterrupt = %v, want false — this runs inside the agent's own ask", deps.clearedInterrupt)
+	if len(deps.injectedText) != 1 || !strings.Contains(deps.injectedText[0], "td-abc123") {
+		t.Errorf("injectedText = %v, want the claimed directive delivered once the clear answered", deps.injectedText)
 	}
 	if len(deps.compacted) != 0 {
 		t.Errorf("compacted = %v, want none — past ContextFullFraction clears rather than compacts", deps.compacted)

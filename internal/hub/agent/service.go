@@ -14,6 +14,7 @@ import (
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/hub/agentchan"
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // Deps is what the agent-management module needs back from the hub: wake the board,
@@ -32,6 +33,9 @@ type Deps interface {
 	// Kickoff is what a session coming up fresh is told, resolved from the agent's role by the hub
 	// (-> workflow.Engine.Kickoff) — the same division as Rehydrate: here the WHEN, there the WHAT.
 	Kickoff(project, name string) string
+	// Deliver is the hub's ordinary delivery path, the one that reports its own failures. A command
+	// that resets a session sends what follows through it, rather than queueing the message itself.
+	Deliver(project, name, text string, d workflow.Delivery) error
 	// ForgetFill drops the hub's standing sample of an agent's context fill. The board reports that
 	// sample rather than this package's memo, so a reading invalidated here is invalidated there too
 	// — one of the two left standing is the stale figure reappearing on whichever half still reads it.
@@ -62,8 +66,6 @@ type Service struct {
 	contextMemo contextMemo // ContextUsage's TTL cache (runtime.go)
 	paneMemo    paneMemo    // AgentPane's TTL cache (runtime.go)
 	reach       reachMemo   // consecutive pushes an agent's pane never showed (inject.go)
-
-	kickoffWG sync.WaitGroup // FireClear's delayed kickoff goroutines (-> waitForKickoff, tests only)
 }
 
 // New builds the agent module over the hub's store, its Deps, and the agent channel
