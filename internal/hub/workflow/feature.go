@@ -116,15 +116,18 @@ func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) 
 	if oerr != nil {
 		return 1, oerr
 	}
+	if len(grew) == 0 {
+		// The agent's WORKTREE, BEFORE the commit: a status living in the repo (an openspec change's
+		// ticked boxes) exists only on its branch, so the hub's root read 0/10 for finished work and
+		// handed the subtask back. Ended here it rides the commit and lands with the merge.
+		if err := e.finishAtSource(c.Project, wt, st.Task, false); err != nil {
+			return 1, err
+		}
+	}
 	if err := git.CommitAll(wt, msg); err != nil {
 		return 1, err
 	}
 	if len(grew) == 0 {
-		// Through the source, not owned_tasks: a subtask can be an openspec change or an issue, whose
-		// status its own source keeps and a direct write would fail on.
-		if err := e.finishAtSource(c.Project, root, st.Task, false); err != nil {
-			return 1, err
-		}
 		e.settleWithTask(c.Project, st.Task)
 		_ = e.RefreshTask(c.Project, st.Task)
 		e.closeCompletedAncestors(c.Project, st.Task, st.Container)
@@ -219,10 +222,9 @@ func openIDs(tasks []store.Task) []string {
 	return ids
 }
 
-// claimNextSubtask is claimNext's one-pass rule for a held feature's own subtasks: the next open
-// child is claimed FIRST (-> advanceContainer), same reason claimNext claims before it prepares —
-// once the subtask is the agent's, no return in the middle is needed for a model switch or
-// compaction to run against it. With none open, the feature is finished or still gated.
+// claimNextSubtask is claimNext's rule for a held feature's own subtasks: the next open child, else
+// the feature is finished or still gated. It claims BEFORE preparing, which is backwards — the work
+// then rides inside the clear meant to precede it (-> prepareAssignment's dir).
 func (e *Engine) claimNextSubtask(project, agent, container string) (string, bool, error) {
 	if e.clearArmed(project, agent) {
 		return DirClearPending, true, nil // about to land: a subtask claimed now would be cut in half by it
