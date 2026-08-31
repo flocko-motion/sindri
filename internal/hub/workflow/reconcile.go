@@ -66,6 +66,9 @@ func (e *Engine) refreshCachedTask(project, id string) {
 			t.Tier = tier
 		}
 	}
+	if ov, oerr := ps.ClosedOverrides(); oerr == nil && ov[id] {
+		t.Status = "closed" // ended here, and its source cannot see that yet (-> SetClosedOverride)
+	}
 	// The parent too, for the reason the priority is here: both are the hub's, so a targeted refresh
 	// that skipped one showed a re-parented task as a root until some later full sync.
 	t.ParentID = ps.ParentOf(id)

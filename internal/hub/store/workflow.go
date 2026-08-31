@@ -114,6 +114,10 @@ CREATE TABLE IF NOT EXISTS task_priority (
   id       TEXT NOT NULL,
   priority TEXT NOT NULL DEFAULT '',
   tier     TEXT NOT NULL DEFAULT '',
+  -- Ended here while its source still lists it. A status living in the repo (an
+  -- openspec change) only moves when a branch merges, so without this the sync
+  -- reopens a subtask its worker has finished and hands it straight back.
+  closed   INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (project, id)
 );
 -- Review items attached to a PR. One row per requirement; its lifecycle is read
