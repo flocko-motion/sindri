@@ -290,10 +290,8 @@ func (m *model) onKey(k string) tea.Cmd {
 			return nil
 		}
 		if m.tab == 2 && m.selID() != "" {
-			if !m.selPRApproved() {
-				m.openApproveMergeChoice(m.selID())
-				return nil
-			}
+			// No unapproved branch: the menu never offers M on one (-> keys.go's row), so this runs
+			// only on a PR a human has already approved.
 			id := m.selID()
 			m.markMerging(id) // show "merging" on the row at once, before the hub confirms
 			return m.mergeCmd(id)

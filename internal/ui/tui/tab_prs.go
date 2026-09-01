@@ -98,23 +98,6 @@ func (m model) selPRApproved() bool {
 	return false
 }
 
-// openApproveMergeChoice offers approve (the human gate) then merge instead of failing an
-// unapproved PR's merge; confirming emits approveMergeMsg so Update marks the row before the work.
-func (m *model) openApproveMergeChoice(id string) {
-	m.choice = choiceModalState{
-		active: true, title: id + " isn't approved yet — approve and merge?",
-		// Cancel first, as every other confirm here: the cursor opens on the first option, so
-		// leading with the merge made Enter approve AND merge a PR nobody had reviewed.
-		options: []string{"cancel", "approve & merge"}, values: []string{"cancel", "merge"},
-		apply: func(v string) tea.Cmd {
-			if v != "merge" {
-				return nil
-			}
-			return func() tea.Msg { return approveMergeMsg{id: id} }
-		},
-	}
-}
-
 // markMerging shows a transient "merging" on the row (see prRows) until the hub confirms a status.
 func (m *model) markMerging(id string) {
 	if m.merging == nil {
@@ -130,24 +113,6 @@ func (m *model) mergeCmd(id string) tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		if _, err := cl.Merge(id); err != nil {
-			return mergeDoneMsg{id: id, err: err}
-		}
-		st, _ := cl.State()
-		return mergeDoneMsg{id: id, state: st}
-	}
-}
-
-// approveMergeCmd approves then merges (the "approve & merge" path), reporting via mergeDoneMsg.
-func (m *model) approveMergeCmd(id string) tea.Cmd {
-	cl := m.cl
-	if cl == nil || id == "" {
-		return nil
-	}
-	return func() tea.Msg {
-		if err := cl.ApprovePR(id); err != nil {
-			return mergeDoneMsg{id: id, err: err}
-		}
 		if _, err := cl.Merge(id); err != nil {
 			return mergeDoneMsg{id: id, err: err}
 		}
