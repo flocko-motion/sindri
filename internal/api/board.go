@@ -14,7 +14,10 @@ type AgentView struct {
 	Name    string `json:"name"`
 	Role    string `json:"role"`
 	Status  string `json:"status"`
-	Task    string `json:"task"`
+	// NeedsUser: only a human moves this agent on from here. Decided by the hub and carried, never
+	// re-derived: a front-end links no hub package, so a rule it applied itself would be a copy.
+	NeedsUser bool   `json:"needsUser,omitempty"`
+	Task      string `json:"task"`
 	// Feature is the parent task whose subtasks it is working, if any (gates the agent's verbs).
 	Feature   string `json:"feature,omitempty"`
 	Branch    string `json:"branch"`

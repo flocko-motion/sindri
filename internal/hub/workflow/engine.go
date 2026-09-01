@@ -14,6 +14,7 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/gate"
 	"github.com/flo-at/sindri/internal/adapter/tasks"
 	"github.com/flo-at/sindri/internal/config"
+	"github.com/flo-at/sindri/internal/hub/situation"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -54,6 +55,10 @@ type Deps interface {
 	// Interrupt aborts an agent's current operation (sends ESC to its session), so a
 	// scrapped-task notice lands on an idle prompt rather than queuing behind work.
 	Interrupt(project, name string) error
+	// Reading hands over the hub's standing reading of an agent — liveness, runtime, dwell, fill and
+	// the launch intent, all memoised. What every rule about that agent is derived from
+	// (-> situation.Situation), and free, since nothing here probes.
+	Reading(project, name string) situation.Reading
 	// AgentAlive PROBES: for a caller needing the answer as of now, never from a tick (-> AgentUp).
 	AgentAlive(project, name string) bool
 	// AgentUp is the watchdog's last reading of the same, free. What anything on a timer asks.
@@ -96,11 +101,11 @@ type Deps interface {
 	HoldsNothing(project, name, role string) (bool, error)
 }
 
-// clearArmed reports whether a human has armed a context clear — no new leaf work while that
-// stands, since a task claimed in between would be cut in half by it.
+// clearArmed reports whether a human has armed a context clear. Read off the situation rather than
+// the roster row, so the fact and every rule built on it come from one place.
 func (e *Engine) clearArmed(project, name string) bool {
-	a, ok, err := e.store.For(project).GetAgent(name)
-	return err == nil && ok && a.ClearArmed
+	s, err := e.sit.Of(project, name)
+	return err == nil && s.ClearArmed
 }
 
 // fireClearIfArmed fires an armed clear right now and wakes the agent once it has landed. A clear is
@@ -122,18 +127,19 @@ func (e *Engine) fireClearIfArmed(ctx context.Context, project, name string) (fi
 type Engine struct {
 	store      *store.Store
 	deps       Deps
-	sources    []tasks.Source  // external task sources, wired in at New; ownedSource is always added per-project
-	gates      []gate.Gate     // submit-path quality gates, wired in via WithGates; openspec today
-	pre        preflight       // serialises the reference-move PR checks (-> prcheck.go)
-	runCancels runCancelSet    // run ids killed mid-execution (-> execrun.go)
-	refWarn    refFallbackWarn // which repo roots have already been warned about an unconfigured reference (-> pr.go)
+	sit        *situation.Gatherer // where an agent stands, and what may happen to it (-> hub/situation)
+	sources    []tasks.Source      // external task sources, wired in at New; ownedSource is always added per-project
+	gates      []gate.Gate         // submit-path quality gates, wired in via WithGates; openspec today
+	pre        preflight           // serialises the reference-move PR checks (-> prcheck.go)
+	runCancels runCancelSet        // run ids killed mid-execution (-> execrun.go)
+	refWarn    refFallbackWarn     // which repo roots have already been warned about an unconfigured reference (-> pr.go)
 }
 
 // New builds the workflow engine over the hub's store, its Deps, and the external task sources the
 // composition root wires in — the engine never names them.
 func New(st *store.Store, deps Deps, sources ...tasks.Source) *Engine {
-	return &Engine{store: st, deps: deps, sources: sources, pre: preflight{seen: map[string]string{}},
-		refWarn: refFallbackWarn{seen: map[string]bool{}}}
+	return &Engine{store: st, deps: deps, sit: situation.NewGatherer(st, deps), sources: sources,
+		pre: preflight{seen: map[string]string{}}, refWarn: refFallbackWarn{seen: map[string]bool{}}}
 }
 
 // WithGates installs the submit path's quality gates, chainable alongside New. An engine with

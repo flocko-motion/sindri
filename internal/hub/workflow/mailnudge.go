@@ -36,7 +36,10 @@ func (e *Engine) NudgeMailWaiting(project, name string) bool {
 	// Parked stays exempt: retirement and a full context are states the hub itself put the agent in
 	// and told it to wait in, and "hands off every automatic behaviour" is the whole of what retiring
 	// means. Holding work is NOT such a state, which is the distinction this used to miss.
-	if !e.reachable(project, name) || e.parkedByTheHub(project, name) {
+	if !e.reachable(project, name) {
+		return false
+	}
+	if s, serr := e.sit.Of(project, name); serr != nil || s.ParkedByTheHub() {
 		return false
 	}
 	// The whole unread count, not just the new part — and Regardless, since this push IS the exit

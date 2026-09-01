@@ -22,7 +22,7 @@ func TestAnAgentAwaitingAVerdictIsHandedNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	why := e.agentBlocked(ps, "proj", "durin")
+	why := e.allowed("proj", "durin").Assign
 	if why == "" {
 		t.Fatal("an author waiting on a rejected PR was offered work; it still owes that task")
 	}
@@ -31,7 +31,7 @@ func TestAnAgentAwaitingAVerdictIsHandedNothing(t *testing.T) {
 	}
 }
 
-// TestAnIdleAuthorIsSentBackToItsRejectedPR closes the deadlock: agentBlocked refuses an author new
+// TestAnIdleAuthorIsSentBackToItsRejectedPR closes the deadlock: the surface refuses an author new
 // work over its unlanded PR, so an idle one that fell to the claim path waited for something it
 // could never be given. austri sat on a rejected pr-sd-a47b61 with each side waiting for the other.
 func TestAnIdleAuthorIsSentBackToItsRejectedPR(t *testing.T) {

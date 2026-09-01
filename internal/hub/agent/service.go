@@ -13,6 +13,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/hub/agentchan"
+	"github.com/flo-at/sindri/internal/hub/situation"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
@@ -40,6 +41,9 @@ type Deps interface {
 	// sample rather than this package's memo, so a reading invalidated here is invalidated there too
 	// — one of the two left standing is the stale figure reappearing on whichever half still reads it.
 	ForgetFill(project, name string)
+	// Reading hands over the hub's standing reading of an agent, all of it memoised — what the rules
+	// about that agent are derived from (-> situation.Situation). Not Observe, which PROBES.
+	Reading(project, name string) situation.Reading
 	// AgentUp is the watchdog's last liveness reading — what the hub's idle/clear ticks read instead
 	// of AgentAlive, sparing a probe per roster member per tick.
 	AgentUp(project, name string) bool
@@ -62,6 +66,8 @@ type Service struct {
 	lcMu      sync.Mutex                // guards lifecycle
 	lifecycle map[lcKey]lifecycleIntent // transient launch/stop intent: "launching"|"stopping"|failed
 
+	sit *situation.Gatherer // where an agent stands, and what may happen to it (-> hub/situation)
+
 	runtimeMemo runtimeMemo // Observe's TTL cache (runtime.go)
 	contextMemo contextMemo // ContextUsage's TTL cache (runtime.go)
 	paneMemo    paneMemo    // AgentPane's TTL cache (runtime.go)
@@ -73,6 +79,7 @@ type Service struct {
 func New(st *store.Store, deps Deps, agentCh *agentchan.Server) *Service {
 	return &Service{
 		store: st, deps: deps, agentCh: agentCh,
+		sit:       situation.NewGatherer(st, deps),
 		launch:    map[string]*safeBuffer{},
 		lifecycle: map[lcKey]lifecycleIntent{},
 	}

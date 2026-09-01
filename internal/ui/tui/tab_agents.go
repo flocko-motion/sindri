@@ -572,7 +572,7 @@ func (m model) agentRow(a api.AgentView) row {
 	// The handle's marker gives a count; this is the row behind it, saying whose move it is in the
 	// same words `sindri agent list` uses. Under repo scope it also answers why an agent from
 	// another repo is in this list at all.
-	if api.AgentNeedsUser(a) {
+	if a.NeedsUser {
 		task += "  " + stWarn.Render(warnGlyph+" needs you")
 	}
 	// Retirement rides beside the status, never in it: it is true of a busy agent too, and what

@@ -11,12 +11,59 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/hub/server"
+	"github.com/flo-at/sindri/internal/hub/situation"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
+
+// situationObserver hands a situation the readings the hub already holds in memory: the watchdog's
+// last look and the launch intent. Status is the board's word BEFORE the stall overlay — the stall
+// verdict is the surface's own, so a word that already carried it would have the two read each other.
+// PeekStatus, not AgentStatus: gathering a situation is a read, and must not retire a settled intent.
+type situationObserver struct{ h *Hub }
+
+func (o situationObserver) Reading(project, name string) situation.Reading {
+	// Nothing observed yet is a real state during startup: the gatherer exists before the watchdog,
+	// and a delivery on the way up would otherwise ask a nil observer. The watchdog is built LAST of
+	// the three read here, so this one check covers the agent service too (-> Hub.open's order).
+	if o.h.watch == nil {
+		return situation.Reading{}
+	}
+	l, observed := o.h.watch.get(project, name)
+	ps := o.h.store.For(project)
+	a, _, _ := ps.GetAgent(name)
+	st, _ := ps.GetState(name)
+	_, launching := o.h.agents.LaunchIntent(project, name)
+	base := o.h.agents.PeekStatus(project, name, l.up, observed, st.Phase, a.Stopped)
+	return situation.Reading{
+		Observed: observed, Up: l.up, Runtime: l.runtime, Clients: l.clients,
+		Status:   overlayEscalation(overlayRuntime(base, l.runtime), st.Escalation),
+		StillFor: stillFor(l), Fill: l.tokens, Window: l.window, Launching: launching,
+	}
+}
+
+// stillFor is how long the pane has stood still, zero when nothing has been observed. A cut-off turn
+// is timed from when it started saying so: its spinner keeps redrawing, so stillSince would restart
+// for ever and the retry never fire.
+func stillFor(l liveness) time.Duration {
+	if !l.up {
+		return 0
+	}
+	if l.runtime == "api-error" {
+		if l.runtimeSince.IsZero() {
+			return 0
+		}
+		return time.Since(l.runtimeSince)
+	}
+	if l.stillSince.IsZero() {
+		return 0
+	}
+	return time.Since(l.stillSince)
+}
 
 // agentDeps adapts the hub to agent.Deps.
 type agentDeps struct{ h *Hub }
@@ -29,6 +76,10 @@ func (d agentDeps) RefreshTask(project, id string) error      { return d.h.wf.Re
 func (d agentDeps) Rehydrate(project, name string)            { d.h.rehydrate(project, name) }
 
 func (d agentDeps) Kickoff(project, name string) string { return d.h.wf.Kickoff(project, name) }
+
+func (d agentDeps) Reading(project, name string) situation.Reading {
+	return situationObserver{d.h}.Reading(project, name)
+}
 
 func (d agentDeps) Deliver(project, name, text string, del workflow.Delivery) error {
 	return d.h.Deliver(project, name, text, del)
@@ -139,6 +190,10 @@ func (d workflowDeps) Deliver(project, name, text string, del workflow.Delivery)
 // Interrupt, AgentAlive and CurrentModel reach the runtime for the workflow engine, whose Deps
 // carry no context: the engine acts on the fleet's own timeline — a merge landing, a review
 // arriving — so the hub's lifetime is the honest lineage for them (-> Hub.lifetime).
+func (d workflowDeps) Reading(project, name string) situation.Reading {
+	return situationObserver{d.h}.Reading(project, name)
+}
+
 func (d workflowDeps) Interrupt(project, name string) error {
 	return d.h.agents.Interrupt(d.h.lifetime, project, name)
 }

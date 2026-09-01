@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/situation"
 )
 
 // IdleStopThreshold is how long a worker may hold nothing before the hub reclaims its pod. A first
@@ -28,69 +28,46 @@ var idleSince struct {
 }
 
 // HoldsNothing is no leaf task, no held feature, no review owed, no open escalation, nobody dialed
-// in — stricter than AtLeafBoundary, which treats a held feature as fine to compact but not to
-// reclaim the whole pod for. A coauthor is never this: its session is the user's own seat.
+// in — the question the idle reclaim asks, where AtLeafBoundary is the narrower one a session reset
+// asks. The rule itself is the surface's (-> situation.Situation.HoldsNothing); role is taken as an
+// argument still because the sweeps have the roster row in hand and pass it.
 func (s *Service) HoldsNothing(project, name, role string) (bool, error) {
 	if role == "coauthor" {
 		return false, nil
 	}
-	ps := s.store.For(project)
-	st, err := ps.GetState(name)
+	sit, err := s.sit.Of(project, name)
 	if err != nil {
 		return false, err
 	}
-	if st.Task != "" || st.Container != "" || st.Escalation != "" {
-		return false, nil
-	}
-	// A PR still in flight is held work: the agent owns that task until it merges, and a rejection
-	// hands it straight back. Missing this read a rejected author as an idle agent.
-	if pr, _, aerr := ps.AwaitingPR(name); aerr != nil || pr != "" {
-		return false, aerr
-	}
-	// store.Store's ReviewingPR, not ps's: a pooled reviewer's held review is never filed under
-	// its own project, and reading it as "" here would let the sweep stop it mid-review.
-	_, reviewing, err := s.store.ReviewingPR(project, name)
-	if err != nil {
-		return false, err
-	}
-	if reviewing != "" {
-		return false, nil
-	}
-	if s.deps.AgentClients(project, name) > 0 {
-		return false, nil // a human is dialed in; whatever they are doing, it is not the hub's to end
-	}
-	return true, nil
+	return sit.HoldsNothing(), nil
 }
 
 // FireIdleStops stops every non-retired worker that has held nothing past IdleStopThreshold.
 // Idleness alone triggers it, never memory pressure: a stop preserves the session, so reclaiming
 // costs only the next start's latency — no reason to wait for memory to be tight.
 func (s *Service) FireIdleStops(ctx context.Context, project string) {
-	roster, err := s.store.For(project).Roster()
+	roster, err := s.sit.Roster(project)
 	if err != nil {
 		return
 	}
 	now := time.Now()
-	for _, a := range roster {
-		key := lcKey{project, a.Name}
-		if a.Retired || a.Stopped {
+	for _, sit := range roster {
+		key := lcKey{project, sit.Name}
+		// One question — may this pod be taken back — and the surface answers it, holdings, retirement
+		// and an already-stopped pod together (-> situation.Surface.Reclaim).
+		if sit.Allowed().Reclaim != "" {
 			forgetIdleSince(key)
 			continue
 		}
-		if !s.deps.AgentUp(project, a.Name) {
+		if !sit.Up {
 			continue // nothing running to reclaim
-		}
-		empty, err := s.HoldsNothing(project, a.Name, a.Role)
-		if err != nil || !empty {
-			forgetIdleSince(key)
-			continue
 		}
 		since, due := idleSinceOrMark(key, now)
 		if !due {
 			continue
 		}
-		if err := s.stopAgent(ctx, project, a.Name, fmt.Sprintf("idle for %s, reclaiming its pod", now.Sub(since).Round(time.Second))); err != nil {
-			fmt.Fprintf(os.Stderr, "hub: idle-stopping %s: %v\n", a.Name, err)
+		if err := s.stopAgent(ctx, project, sit.Name, fmt.Sprintf("idle for %s, reclaiming its pod", now.Sub(since).Round(time.Second))); err != nil {
+			fmt.Fprintf(os.Stderr, "hub: idle-stopping %s: %v\n", sit.Name, err)
 			continue
 		}
 		forgetIdleSince(key)
@@ -141,7 +118,7 @@ func (s *Service) FireIdleStarts(ctx context.Context, project string) {
 	if len(packages) == 0 && len(leaves) == 0 && !hasReview {
 		return // nothing waiting to wake anyone for
 	}
-	roster, err := ps.Roster()
+	roster, err := s.sit.Roster(project)
 	if err != nil {
 		return
 	}
@@ -153,24 +130,23 @@ func (s *Service) FireIdleStarts(ctx context.Context, project string) {
 	}
 }
 
-// wakeStoppedForRole wakes the first stopped, non-retired agent of role in roster, unless a live
-// one of that SAME role already holds nothing and would claim the work itself next poll.
-func (s *Service) wakeStoppedForRole(ctx context.Context, project string, roster []store.Agent, role, reason string) {
+// wakeStoppedForRole wakes the first stopped agent of role in roster, unless a live one of that SAME
+// role already holds nothing and would claim the work itself next poll. Who may be woken at all is
+// the surface's (-> situation.Surface.Wake), which is where retirement is weighed.
+func (s *Service) wakeStoppedForRole(ctx context.Context, project string, roster []situation.Situation, role, reason string) {
 	toWake := ""
-	for _, a := range roster {
-		if a.Retired || a.Role != role {
+	for _, sit := range roster {
+		if sit.Role != role || sit.Allowed().Wake != "" {
 			continue
 		}
-		if a.Stopped {
+		if sit.Stopped {
 			if toWake == "" {
-				toWake = a.Name
+				toWake = sit.Name
 			}
 			continue
 		}
-		if s.deps.AgentUp(project, a.Name) {
-			if empty, _ := s.HoldsNothing(project, a.Name, a.Role); empty {
-				return
-			}
+		if sit.Up && sit.HoldsNothing() {
+			return
 		}
 	}
 	if toWake == "" {

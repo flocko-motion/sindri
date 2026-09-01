@@ -17,7 +17,7 @@ func mailJumpBoard() api.BoardState {
 		},
 		Agents: []api.AgentView{
 			{Project: "here", Repo: "here", Name: "nori", Role: "worker", Status: "idle", UnreadMail: 2},
-			{Project: "there", Repo: "there", Name: "dwalin", Role: "worker", Status: api.StatusBlocked, UnreadMail: 3},
+			{Project: "there", Repo: "there", Name: "dwalin", Role: "worker", Status: api.StatusBlocked, NeedsUser: true, UnreadMail: 3},
 		},
 		Mail: []api.Mail{
 			{ID: 1, Agent: "nori", Project: "here", Sender: "hub", Body: "unread one"},

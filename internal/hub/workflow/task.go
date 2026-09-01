@@ -379,7 +379,11 @@ func (e *Engine) directive(ctx context.Context, project, name string) (string, e
 	// A worker holding a feature is in the subtask loop — unless that feature has already landed. A
 	// merged PR says so as plainly as its status, and covers one left held by a partial-milestone merge.
 	if st.Container != "" {
-		if t, ok, _ := ps.GetTask(st.Container); ok && !featureLanded(ps, t) {
+		sit, serr := e.sit.Of(project, name)
+		if serr != nil {
+			return "", serr
+		}
+		if !sit.FeatureLanded {
 			switch st.Phase {
 			case "submitted":
 				feedback, rejected, err := e.prRejected(project, name, st.Container)
@@ -464,8 +468,8 @@ func (e *Engine) serveMail(project, name string) (string, error) {
 // retired reports a human-parked agent — hands off every automatic behaviour, written once so a
 // feature added later asks this instead of keeping its own copy (-> retire.go).
 func (e *Engine) retired(project, name string) bool {
-	a, ok, err := e.store.For(project).GetAgent(name)
-	return err == nil && ok && a.Retired
+	s, err := e.sit.Of(project, name)
+	return err == nil && s.Retired
 }
 
 // waitForNextTask is the idle-agent path — a name kept from when this blocked; it now answers at

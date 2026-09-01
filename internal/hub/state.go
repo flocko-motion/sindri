@@ -18,6 +18,7 @@ import (
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agent"
 	"github.com/flo-at/sindri/internal/hub/commands"
+	"github.com/flo-at/sindri/internal/hub/situation"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -35,6 +36,18 @@ type BoardState = api.BoardState
 // AgentMail is one message in an agent's mailbox; it crosses the wire, so it is internal/api.Mail,
 // named here for what it is to the hub.
 type AgentMail = api.Mail
+
+// projectsOf is the distinct projects a roster spans, in first-seen order.
+func projectsOf(agents []store.Agent) []string {
+	seen, out := map[string]bool{}, []string{}
+	for _, a := range agents {
+		if !seen[a.Project] {
+			seen[a.Project] = true
+			out = append(out, a.Project)
+		}
+	}
+	return out
+}
 
 // State assembles the board; an empty selected tag means no project is chosen, so no tasks.
 func (h *Hub) State(selected string) (BoardState, error) {
@@ -102,6 +115,18 @@ func (h *Hub) State(selected string) (BoardState, error) {
 	if err != nil {
 		return BoardState{}, err
 	}
+	// One gather per PROJECT, not per agent: the claimable pool behind it is one query for a whole
+	// roster. Keyed off the ROSTER, so an agent of a forgotten repo still renders.
+	sits := map[agentKey]situation.Situation{}
+	for _, tag := range projectsOf(agentsRow) {
+		roster, serr := h.sit.Roster(tag)
+		if serr != nil {
+			return BoardState{}, serr
+		}
+		for _, s := range roster {
+			sits[agentKey{tag, s.Name}] = s
+		}
+	}
 	known := map[string]bool{}
 	agents := make([]AgentView, 0, len(agentsRow))
 	for i, a := range agentsRow {
@@ -119,9 +144,14 @@ func (h *Hub) State(selected string) (BoardState, error) {
 			_, pr, _ = h.store.ReviewingPR(a.Project, a.Name)
 		}
 		l := obs[i]
-		status := h.statusWord(a, st, l, observed[i])
+		sit := sits[agentKey{a.Project, a.Name}]
+		allowed := sit.Allowed()
+		status := h.statusWord(a, st, l, observed[i], allowed.Stalled)
 		agents = append(agents, AgentView{
-			Project: a.Project, Repo: h.repoName(a.Project), Name: a.Name, Role: a.Role,
+			// Carried, never re-derived: a front-end links no hub package, and deciding it here off
+			// `status` would be a second copy inside the hub (-> situation.Surface).
+			NeedsUser: allowed.NeedsUser,
+			Project:   a.Project, Repo: h.repoName(a.Project), Name: a.Name, Role: a.Role,
 			Status:  status,
 			Runtime: l.runtime,
 			Task:    st.Task, Feature: st.Container, Branch: st.Branch, PR: pr, Workspace: a.Workspace,
@@ -352,22 +382,22 @@ func (h *Hub) container(project, name string) string {
 // into the single word the board renders. State's batch loop passes what it already fetched rather
 // than re-reading it. This is the board read that OWNS retiring a settled launch/stop intent
 // (-> AgentStatus) — an observer that must not decide that wants peekStatusWord instead.
-func (h *Hub) statusWord(a store.Agent, st store.AgentState, l liveness, observed bool) string {
-	return h.foldStatus(h.agents.AgentStatus(a.Project, a.Name, l.up, observed, st.Phase, a.Stopped), a, st, l)
+func (h *Hub) statusWord(a store.Agent, st store.AgentState, l liveness, observed, stalled bool) string {
+	return foldStatus(h.agents.AgentStatus(a.Project, a.Name, l.up, observed, st.Phase, a.Stopped), st, l, stalled)
 }
 
 // peekStatusWord is statusWord without retiring a settled intent (-> agent.Service.PeekStatus) — for
 // statuswatch.go's diff-check, which must not perturb the very thing it measures.
-func (h *Hub) peekStatusWord(a store.Agent, st store.AgentState, l liveness, observed bool) string {
-	return h.foldStatus(h.agents.PeekStatus(a.Project, a.Name, l.up, observed, st.Phase, a.Stopped), a, st, l)
+func (h *Hub) peekStatusWord(a store.Agent, st store.AgentState, l liveness, observed, stalled bool) string {
+	return foldStatus(h.agents.PeekStatus(a.Project, a.Name, l.up, observed, st.Phase, a.Stopped), st, l, stalled)
 }
 
-// foldStatus is the rest of the fold both statusWord and peekStatusWord share: the stall check and
-// escalation overlay, neither of which has a side effect to isolate.
-func (h *Hub) foldStatus(base string, a store.Agent, st store.AgentState, l liveness) string {
+// foldStatus is the rest of the fold both statusWord and peekStatusWord share. The stall VERDICT is
+// the surface's and arrives as an argument, rather than being derived a second time here.
+func foldStatus(base string, st store.AgentState, l liveness, stalled bool) string {
 	status := overlayRuntime(base, l.runtime)
 	// A stall reads as plain "idle" otherwise, which is what let one hold a task unnoticed.
-	if _, stalled := h.stalledFor(a.Project, a.Name, st.Phase, st.Container); stalled {
+	if stalled {
 		status = "stalled"
 	}
 	return overlayEscalation(status, st.Escalation)

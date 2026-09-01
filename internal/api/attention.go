@@ -41,10 +41,11 @@ func AgentNeedsUser(a AgentView) bool {
 	return false
 }
 
-// CountAgentsNeedingUser is how many of these agents are waiting on the user.
+// CountAgentsNeedingUser is how many of these agents are waiting on the user, off the field the hub
+// decided rather than the rule again — a count that re-derived it could disagree with the markers.
 func CountAgentsNeedingUser(agents []AgentView) (n int) {
 	for _, a := range agents {
-		if AgentNeedsUser(a) {
+		if a.NeedsUser {
 			n++
 		}
 	}

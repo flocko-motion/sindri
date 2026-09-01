@@ -11,6 +11,7 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
+	"github.com/flo-at/sindri/internal/hub/situation"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
@@ -180,6 +181,12 @@ func (tellDeps) Kickoff(_, _ string) string                  { return "[hub] kic
 func (tellDeps) ForgetFill(_, _ string)                      {}
 
 func (tellDeps) Deliver(_, _, _ string, _ workflow.Delivery) error { return nil }
+
+// Reading mirrors the always-up fake runtime this fixture backs, so the situation-derived rules see
+// the same liveness AgentUp reports.
+func (tellDeps) Reading(_, _ string) situation.Reading {
+	return situation.Reading{Observed: true, Up: true}
+}
 
 // AgentUp mirrors fakeRuntime's always-up container, so the idle/clear sweeps this fixture backs
 // see the same liveness AgentAlive would have probed. AgentClients: no test here dials in a human.

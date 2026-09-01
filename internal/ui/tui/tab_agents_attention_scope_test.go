@@ -21,7 +21,7 @@ func attentionScopeBoard() (model, api.BoardState) {
 		Agents: []api.AgentView{
 			{Name: "eitri", Project: "sin", Repo: "sindri", Status: "working"},
 			{Name: "gloin", Project: "oth", Repo: "other", Status: "working"},
-			{Name: "thrain", Project: "oth", Repo: "other", Status: api.StatusStalled},
+			{Name: "thrain", Project: "oth", Repo: "other", Status: api.StatusStalled, NeedsUser: true},
 		},
 	}
 	return m, b

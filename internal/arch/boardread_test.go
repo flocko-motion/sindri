@@ -39,12 +39,19 @@ var queryingImports = map[string]string{
 // is free of queries. Keyed by the expression text the call is made through, so a local taken from
 // one of them (ps := h.store.For(...)) counts as the same handle.
 var boardHandles = map[string]string{
-	"h.store":     "the central store IS the read model — every board fact is a row",
-	"h.projects":  "the repo registry, a store table",
-	"h.chat":      "the chat service, a projection of its own tables",
-	"h.comments":  "the comment service, likewise",
-	"h.events":    "the in-memory pub/sub the board notifies through",
-	"h.watch":     "the watchdog's standing observations — what a board read reports",
+	"h.store":    "the central store IS the read model — every board fact is a row",
+	"h.projects": "the repo registry, a store table",
+	"h.chat":     "the chat service, a projection of its own tables",
+	"h.comments": "the comment service, likewise",
+	"h.events":   "the in-memory pub/sub the board notifies through",
+	"h.watch":    "the watchdog's standing observations — what a board read reports",
+	// The situation gatherer and what it yields: store rows plus the watchdog's own reading, by
+	// construction — internal/hub/situation imports neither the container runtime nor any adapter that
+	// shells out (a guard of its own holds that: -> TestASituationCostsNoRuntimeCall).
+	"h.sit":       "gathers store rows and the observer's standing reading, once per project",
+	"sits":        "the situations gathered above; deriving from one is arithmetic over fields",
+	"sit":         "one of them",
+	"l":           "a liveness value the watchdog already took — reading its fields is not a fresh look",
 	"w.mu":        "a mutex, guarding one of those observations",
 	"h.mu":        "likewise",
 	"h.startedAt": "the hub's start time, a value it has held since New",

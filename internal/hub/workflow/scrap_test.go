@@ -10,9 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
 	"github.com/flo-at/sindri/internal/config"
+	"github.com/flo-at/sindri/internal/hub/situation"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -40,6 +42,11 @@ type stubDeps struct {
 	deliverErr       bool                       // Deliver refuses, for the paths that must not record an undelivered message
 	projects         []store.Project            // KnownProjects override; nil (the default) means none registered
 	currentModel     string                     // CurrentModel's answer; "" is fine — no real model is ever ""
+	// The observation's own fields, for the rules derived from it (-> Reading): the runtime word, how
+	// long the pane has stood still, and the status word before the stall overlay.
+	runtime  string
+	stillFor time.Duration
+	status   string
 	// tierModels overrides ModelForTier's answer; nil (the default) means every tier is unknown, so
 	// the retier check never fires for a test that has not opted into it.
 	tierModels   map[string]string
@@ -132,9 +139,19 @@ func (d *stubDeps) Interrupt(_, name string) error {
 	d.interrupted = append(d.interrupted, name)
 	return nil
 }
-func (d *stubDeps) AgentAlive(_, _ string) bool               { return d.alive }
-func (d *stubDeps) AgentUp(_, _ string) bool                  { return d.alive }
-func (d *stubDeps) AgentIdle(_, name string) bool             { return !d.busy[name] }
+func (d *stubDeps) AgentAlive(_, _ string) bool   { return d.alive }
+func (d *stubDeps) AgentUp(_, _ string) bool      { return d.alive }
+func (d *stubDeps) AgentIdle(_, name string) bool { return !d.busy[name] }
+
+// Reading is the observation every situation-derived rule reads. Off the same fields the older
+// accessors answer from, so a test that set `alive` or a fill sees it through both.
+func (d *stubDeps) Reading(_, _ string) situation.Reading {
+	return situation.Reading{
+		Observed: true, Up: d.alive, Runtime: d.runtime, StillFor: d.stillFor,
+		Status: d.status, Fill: d.ctxTokens, Window: d.ctxWindow,
+	}
+}
+
 func (d *stubDeps) TaskComments(_, id string) []store.Comment { return d.comments[id] }
 func (d *stubDeps) AddTaskComment(_, id, author, body string) error {
 	if d.postFails {

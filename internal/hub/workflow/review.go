@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/hub/situation"
 	"os"
 	"path/filepath"
 	"strings"
@@ -314,11 +315,11 @@ func (e *Engine) reviewerHolding(project, prID string) (int64, string) {
 	return 0, ""
 }
 
-// reviewerAssignable reports whether a roster row may be handed a review, from the row alone. An
-// armed clear disqualifies one: PR after PR would defer it for ever, and an assignment slipping in
-// while the tick fires the clear would clear a reviewer mid-review. (Retirement: -> idleReviewer.)
-func reviewerAssignable(a store.Agent) bool {
-	return a.Role == "reviewer" && !a.ClearArmed
+// reviewerAssignable reports whether an agent may be handed a review. The refusal is the surface's:
+// an armed clear disqualifies one because PR after PR would defer it for ever, and an assignment
+// slipping in while the tick fires the clear would clear a reviewer mid-review.
+func reviewerAssignable(s situation.Situation) bool {
+	return s.Role == "reviewer" && situation.Allows(s.Allowed().Assign)
 }
 
 // freeReviewer returns a running reviewer holding no review, checking the project's own roster
@@ -333,25 +334,19 @@ func (e *Engine) freeReviewer(project string) (string, error) {
 	return e.freeReviewerOn(GlobalProject)
 }
 
-// freeReviewerOn is freeReviewer narrowed to one project's own roster.
+// freeReviewerOn is freeReviewer narrowed to one project's own roster. One gather for the whole
+// roster, so the claimable pool behind those situations is read once rather than once per candidate.
 func (e *Engine) freeReviewerOn(home string) (string, error) {
-	roster, err := e.store.For(home).Roster()
+	roster, err := e.sit.Roster(home)
 	if err != nil {
 		return "", fmt.Errorf("load roster for %s: %w", home, err)
 	}
-	for _, a := range roster {
+	for _, s := range roster {
 		// The watchdog's standing observation, not a probe of our own — this runs off
 		// RepairReviewRows' tick, once per open PR, and a fresh exec per row is what saturated
 		// the runtime the observer now exists to prevent (-> hub/watchdog.go).
-		if !reviewerAssignable(a) || !e.deps.AgentUp(home, a.Name) {
-			continue
-		}
-		_, held, err := e.store.ReviewingPR(home, a.Name)
-		if err != nil {
-			return "", err
-		}
-		if held == "" {
-			return a.Name, nil
+		if reviewerAssignable(s) && s.Up && s.ReviewingPR == "" {
+			return s.Name, nil
 		}
 	}
 	return "", nil

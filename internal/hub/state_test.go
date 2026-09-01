@@ -97,7 +97,7 @@ func TestOrphanScanReadsTheWatchdogsListing(t *testing.T) {
 func TestBoardCarriesItsSections(t *testing.T) {
 	b := withSections(BoardState{
 		Tasks:  []api.Task{{ID: "a", Status: "open", Approval: "pending"}},
-		Agents: []api.AgentView{{Name: "dvalin", Status: api.StatusBlocked}, {Name: "fili", Status: "idle"}},
+		Agents: []api.AgentView{{Name: "dvalin", Status: api.StatusBlocked, NeedsUser: true}, {Name: "fili", Status: "idle"}},
 	})
 	if len(b.Sections) == 0 {
 		t.Fatal("the board must carry the sections the UIs draw")

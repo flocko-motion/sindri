@@ -155,7 +155,7 @@ func agentListCmd() *cobra.Command {
 					if a.UnreadMail > 0 { // a backlog is a strong signal it has stopped reading
 						line += fmt.Sprintf("  %s%d", theme.MarkMail, a.UnreadMail)
 					}
-					if api.AgentNeedsUser(a) {
+					if a.NeedsUser {
 						line += "  " + theme.MarkNeedsUser + " needs you" // the status says which state; this says whose move it is
 					}
 					if a.Retired {
@@ -167,7 +167,7 @@ func agentListCmd() *cobra.Command {
 					if a.Clients > 0 {
 						line += fmt.Sprintf("  %s%d", theme.MarkDialIn, a.Clients)
 					}
-					rows = append(rows, listRow{line, listGroupFor(a.Project, local, api.AgentNeedsUser(a))})
+					rows = append(rows, listRow{line, listGroupFor(a.Project, local, a.NeedsUser)})
 				}
 				printListing(agentListTable, rows)
 				for _, o := range st.Orphans {
@@ -195,7 +195,7 @@ func needsYouSummary(agents []api.AgentView) string {
 	var stuck []string
 	for _, a := range agents {
 		switch {
-		case !api.AgentNeedsUser(a):
+		case !a.NeedsUser:
 		case a.Escalation != "":
 			stuck = append(stuck, fmt.Sprintf("%s asks: %s", a.Name, oneLine(a.Escalation, 120)))
 		default:

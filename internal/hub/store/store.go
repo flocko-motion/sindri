@@ -142,7 +142,14 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	db.SetMaxOpenConns(1) // single writer; serialise to avoid SQLITE_BUSY
-	if _, err := db.Exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;"); err != nil {
+	// busy_timeout FIRST, and on its own: the WAL switch takes a brief EXCLUSIVE lock, and set after
+	// it in the same statement the timeout was not yet in force — so a hub opening while the previous
+	// one's connections were still draining failed outright rather than waiting the moment out.
+	if _, err := db.Exec("PRAGMA busy_timeout=5000;"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("set busy timeout: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("set pragmas: %w", err)
 	}

@@ -22,25 +22,6 @@ import (
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// featureLanded reports a feature an agent should no longer hold: closed at its source, or carried
-// in by a merged PR that is not an interim contribution's — that milestone is not the feature's own
-// end, and counting it as one stranded a worker mid-feature the moment its own `contribute` merged.
-func featureLanded(ps *store.ProjectStore, t store.Task) bool {
-	if t.Status == "closed" || t.Status == "approved" || t.Status == "merged" {
-		return true
-	}
-	prs, err := ps.PRs()
-	if err != nil {
-		return false
-	}
-	for _, p := range prs {
-		if p.Task == t.ID && p.Status == "merged" && p.Kind != "interim" {
-			return true
-		}
-	}
-	return false
-}
-
 // claimContainer assigns one package, starting its first open subtask — or, with none left,
 // holding it so the agent finishes on the SAME branch (git.EnsureBranch), never a fresh one.
 func (e *Engine) claimContainer(project, worker string, c store.Task) (string, bool, error) {

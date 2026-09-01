@@ -7,6 +7,7 @@ import (
 
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
+	"github.com/flo-at/sindri/internal/hub/situation"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
@@ -34,6 +35,11 @@ func (d clearTestDeps) Deliver(_, _, text string, _ workflow.Delivery) error {
 		*d.delivered = append(*d.delivered, text)
 	}
 	return nil
+}
+
+// Reading is the observation the situation-derived rules read, off the same `up` these cases set.
+func (d clearTestDeps) Reading(_, _ string) situation.Reading {
+	return situation.Reading{Observed: true, Up: d.up}
 }
 
 // AgentUp: false by default, matching the "no container wired" liveness most of these cases rely on.

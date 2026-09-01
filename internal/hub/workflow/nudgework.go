@@ -32,11 +32,9 @@ func (e *Engine) nudgeIdleWorkers(project, priority string) {
 		if len(packages) == 0 && len(leaves) == 0 {
 			return // nothing left to offer whoever is left in the roster
 		}
-		if a.Role != "worker" || !e.deps.AgentUp(project, a.Name) {
-			continue // only workers claim backlog tasks, and there is nothing to inject into a down one
-		}
-		// ExplainNext's own question, asked directly against the shrinking pool.
-		if e.agentBlocked(ps, project, a.Name) != "" {
+		// Any RUNNING agent: this fires the instant work is rated, and a message typed behind a busy
+		// turn still lands when it ends. The periodic backstop waits for an idle prompt instead.
+		if !e.deps.AgentUp(project, a.Name) || e.allowed(project, a.Name).Nudge != "" {
 			continue
 		}
 		st, _ := ps.GetState(a.Name)
@@ -126,27 +124,26 @@ func (e *Engine) AssignPendingWork(project string) {
 	}
 	open := openTaskIDs(packages, leaves)
 	for _, a := range roster {
-		if a.Role != "worker" || !e.deps.AgentIdle(project, a.Name) {
+		// An IDLE prompt, unlike the event-triggered sweep: this repeats every tick, so it waits for a
+		// moment the agent is actually listening rather than queuing behind whatever it is doing.
+		if !e.deps.AgentIdle(project, a.Name) {
 			continue
 		}
 		st, _ := ps.GetState(a.Name)
 		if st.Phase != "" && st.Phase != "idle" {
 			continue // mid some other flow — leave it alone
 		}
-		if e.WakeRefusal(project, a.Name) != "" {
-			continue // its next directive would be a refusal — waking it would teach it to stop asking
-		}
+		// The same question nudgeIdleWorkers asks, which is the whole point: this sweep was written
+		// three lines from that one without the guard, and pushed a retired agent "ready for you"
+		// every thirty seconds (-> sd-daf9c7). A held feature is the one case where a wake still has
+		// something to say, so it is asked first.
 		if st.Container != "" {
-			e.assignPendingSubtask(project, a.Name, st.Container)
+			if e.allowed(project, a.Name).Wake == "" {
+				e.assignPendingSubtask(project, a.Name, st.Container)
+			}
 			continue
 		}
-		if st.Task != "" {
-			continue // holding a plain task already
-		}
-		// WakeRefusal exempts this on purpose (its own PR is real work, not a refusal to wake for) —
-		// but nudgeIdleWorkers' agentBlocked already treats it as spoken for, and the two sweeps must
-		// agree on what "nothing new to offer this agent" means.
-		if pr, _, err := ps.AwaitingPR(a.Name); err == nil && pr != "" {
+		if e.allowed(project, a.Name).Nudge != "" {
 			continue
 		}
 		e.forgetStaleNudge(ps, a.Name, st.LastNudge, open)
@@ -172,9 +169,6 @@ func (e *Engine) assignPendingSubtask(project, agent, container string) {
 	st, _ := ps.GetState(agent)
 	if st.Task != "" {
 		return // already holding a subtask
-	}
-	if e.WakeRefusal(project, agent) != "" {
-		return // a wait of its own, not news to push
 	}
 	children, err := ps.OpenSubtasks(container)
 	if err != nil {

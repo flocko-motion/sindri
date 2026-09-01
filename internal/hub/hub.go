@@ -27,6 +27,7 @@ import (
 	"github.com/flo-at/sindri/internal/hub/comments"
 	"github.com/flo-at/sindri/internal/hub/project"
 	"github.com/flo-at/sindri/internal/hub/server"
+	"github.com/flo-at/sindri/internal/hub/situation"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/workflow"
 	"github.com/flo-at/sindri/internal/tools/paths"
@@ -45,18 +46,19 @@ type Hub struct {
 	lifetime context.Context
 	endLife  context.CancelFunc
 
-	chat     *chat.Service     // the user's chatroom relay (internal/hub/chat)
-	comments *comments.Service // task-comment sync (internal/hub/comments)
-	agents   *agent.Service    // agent management: identity/auth/memory/inject/runtime/lifecycle
-	wf       *workflow.Engine  // the PR/task lifecycle orchestrator (internal/hub/workflow)
-	projects *project.Service  // repo-registry management (internal/hub/project)
-	agentCh  *agentchan.Server // the inbound agent command channel (internal/hub/agentchan)
-	watch    *watchdog         // agent liveness, observed on a loop (internal/hub/watchdog.go)
-	refs     *refwatch         // reference-branch drift, on a slow loop (internal/hub/refwatch.go)
-	creds    *credwatch        // agent credential upkeep from the host (internal/hub/credwatch.go)
-	stalls   *stallwatch       // held work nobody is working on (internal/hub/stallwatch.go)
-	runs     *runwatch         // executes the run queue, one at a time (internal/hub/runwatch.go)
-	status   *statuswatch      // diffs the derived status word into state_log (internal/hub/statuswatch.go)
+	chat     *chat.Service       // the user's chatroom relay (internal/hub/chat)
+	comments *comments.Service   // task-comment sync (internal/hub/comments)
+	agents   *agent.Service      // agent management: identity/auth/memory/inject/runtime/lifecycle
+	wf       *workflow.Engine    // the PR/task lifecycle orchestrator (internal/hub/workflow)
+	projects *project.Service    // repo-registry management (internal/hub/project)
+	agentCh  *agentchan.Server   // the inbound agent command channel (internal/hub/agentchan)
+	sit      *situation.Gatherer // where each agent stands, and what may happen to it (internal/hub/situation)
+	watch    *watchdog           // agent liveness, observed on a loop (internal/hub/watchdog.go)
+	refs     *refwatch           // reference-branch drift, on a slow loop (internal/hub/refwatch.go)
+	creds    *credwatch          // agent credential upkeep from the host (internal/hub/credwatch.go)
+	stalls   *stallwatch         // held work nobody is working on (internal/hub/stallwatch.go)
+	runs     *runwatch           // executes the run queue, one at a time (internal/hub/runwatch.go)
+	status   *statuswatch        // diffs the derived status word into state_log (internal/hub/statuswatch.go)
 	// host/pod tool-version skew, checked once at startup (internal/hub/toolskew.go). Kept as a
 	// field only so toolskew_test.go can reach check()/said; New drives it once and nothing else does.
 	tools *toolskew
@@ -140,6 +142,9 @@ func open(ctx context.Context, hostVersions func(context.Context) map[string]str
 	// agentCh before agents: the lifecycle serves sockets through it, and agentchanDeps only
 	// reaches h.agents at request time.
 	h.agentCh = agentchan.New(h.store, agentchanDeps{h})
+	// Before agents and wf, which both ask it: the observer behind it reads h.watch and h.agents at
+	// CALL time, so neither has to exist yet.
+	h.sit = situation.NewGatherer(h.store, situationObserver{h})
 	h.agents = agent.New(h.store, agentDeps{h}, h.agentCh)
 	h.wf = workflow.New(h.store, workflowDeps{h}, spec.Source{}, github.Source{}).WithGates(spec.Source{})
 	h.projects = project.New(h.store, projectDeps{h})

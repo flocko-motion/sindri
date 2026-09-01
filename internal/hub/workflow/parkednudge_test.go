@@ -70,10 +70,15 @@ func TestARetiredAgentMidTaskIsStillNudged(t *testing.T) {
 // TestARetiredAgentHoldingNothingIsNotNudged is where retirement DOES park: nothing in hand means
 // the winding down is complete, and prodding then complains about a state the human chose.
 func TestARetiredAgentHoldingNothingIsNotNudged(t *testing.T) {
-	e, ps := quietWorkerHoldingWork(t, &stubDeps{holdsNothing: true})
+	e, ps := quietWorkerHoldingWork(t, &stubDeps{})
 	a, _, _ := ps.GetAgent("dvalin")
 	a.Retired = true
 	if err := ps.PutAgent(a); err != nil {
+		t.Fatal(err)
+	}
+	// Nothing in hand, written into the state rather than stated by a stub: the phase is left
+	// "working" so the screen still reads as stalled, which is what makes the exemption the reason.
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "working"}, store.ReasonFreed, "wound down"); err != nil {
 		t.Fatal(err)
 	}
 	if e.NudgeStalled("proj", "dvalin", "idle", 6*time.Minute) {

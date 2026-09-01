@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/flo-at/sindri/internal/hub/situation"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -73,7 +74,7 @@ func TestArmedClearOutranksFullness(t *testing.T) {
 // TestAnArmedReviewerIsNotHandedTheNextPR closes the door the sweep's gate left open: reviews are also
 // handed out by freeReviewer on the request path (RequestReview), which must gate the same arming.
 func TestAnArmedReviewerIsNotHandedTheNextPR(t *testing.T) {
-	armed := store.Agent{Name: "fili", Role: "reviewer", ClearArmed: true}
+	armed := situation.Situation{Name: "fili", Role: "reviewer", ClearArmed: true}
 	if reviewerAssignable(armed) {
 		t.Error("an armed reviewer must not be a candidate — the clear is waiting for it to be free")
 	}
@@ -82,8 +83,14 @@ func TestAnArmedReviewerIsNotHandedTheNextPR(t *testing.T) {
 	if !reviewerAssignable(free) {
 		t.Error("disarmed, the same reviewer takes reviews again")
 	}
-	if reviewerAssignable(store.Agent{Name: "dvalin", Role: "worker"}) {
+	if reviewerAssignable(situation.Situation{Name: "dvalin", Role: "worker"}) {
 		t.Error("only reviewers review")
+	}
+	// Retirement disqualifies one too, which is what folding this into the surface bought: the two
+	// used to be checked in different functions, and one of them forgot.
+	retired := situation.Situation{Name: "fili", Role: "reviewer", Retired: true}
+	if reviewerAssignable(retired) {
+		t.Error("a retired reviewer must not be a candidate either")
 	}
 }
 

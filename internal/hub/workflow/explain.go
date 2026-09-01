@@ -10,6 +10,7 @@ import (
 	"fmt"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/hub/situation"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -48,7 +49,7 @@ func (e *Engine) ExplainNext(project, agent, role string) (api.NextExplain, erro
 		return api.NextExplain{}, fmt.Errorf("unknown role %q (worker|reviewer|planner|coauthor)", role)
 	}
 	if agent != "" {
-		out.AgentNote = e.agentBlocked(ps, project, agent)
+		out.AgentNote = e.allowed(project, agent).Assign
 	}
 	all, err := ps.AllTasks()
 	if err != nil {
@@ -139,90 +140,21 @@ func (e *Engine) ExplainNext(project, agent, role string) (api.NextExplain, erro
 	return out, nil
 }
 
-// agentBlocked reports why an agent can be handed nothing whatever the backlog holds.
-func (e *Engine) agentBlocked(ps *store.ProjectStore, project, agent string) string {
-	if r := e.WakeRefusal(project, agent); r != "" {
-		return r
-	}
-	st, err := ps.GetState(agent)
-	if err != nil {
-		return ""
-	}
-	if st.Container != "" {
-		return fmt.Sprintf("holds feature %s", st.Container)
-	}
-	if st.Task != "" {
-		return fmt.Sprintf("holds %s", st.Task)
-	}
-	// Held until it MERGES, the board's own display — austri got a second task while pr-sd-a47b61 sat rejected.
-	if pr, task, err := ps.AwaitingPR(agent); err == nil && pr != "" {
-		return fmt.Sprintf("holds %s — %s is still to land", task, pr)
-	}
-	return ""
+// WakeRefusal reports why waking this agent would only hand it a refusal, checked before every push.
+// The rule itself is the surface's (-> situation.Surface.Wake); this is the name the delivery path
+// has always called it by.
+func (e *Engine) WakeRefusal(project, agent string) string {
+	return e.allowed(project, agent).Wake
 }
 
-// WakeRefusal reports why waking this agent would only hand it a refusal, checked before every push —
-// mirroring directive() branch for branch, since its exemptions vary per branch (below).
-func (e *Engine) WakeRefusal(project, agent string) string {
-	ps := e.store.For(project)
-	st, err := ps.GetState(agent)
+// allowed is the surface for one agent, with a gathering failure reading as "nothing is refused" —
+// every caller here is a sweep or an explanation, and neither should stop on a store hiccup.
+func (e *Engine) allowed(project, agent string) situation.Surface {
+	s, err := e.sit.Of(project, agent)
 	if err != nil {
-		return ""
+		return situation.Surface{}
 	}
-	if st.Escalation != "" {
-		return "escalated — waiting on the user to decide, not on being told there is work"
-	}
-	a, ok, err := ps.GetAgent(agent)
-	if err != nil || !ok {
-		return ""
-	}
-	retiredMsg := fmt.Sprintf("retired by the user — `sindri agent retire %s --back` brings it back", agent)
-	clearMsg := "a context clear is armed for it — nothing is assigned until it fires"
-	switch a.Role {
-	case "coauthor", "planner":
-		return "" // directive() never checks retired/clear-armed for either
-	case "reviewer":
-		if held, _ := reviewHeld(e.store, project, agent); held != "" {
-			return ""
-		}
-		if a.Retired {
-			return retiredMsg
-		}
-		if e.clearArmed(project, agent) {
-			return clearMsg
-		}
-		return ""
-	}
-	active := false
-	if st.Container != "" {
-		if t, ok, _ := ps.GetTask(st.Container); ok && !featureLanded(ps, t) {
-			active = true
-		}
-	}
-	if active {
-		if st.Phase == "working" || st.Phase == "submitted" || st.Phase == "gating" {
-			return ""
-		}
-		if e.clearArmed(project, agent) { // claimNextSubtask gates only on this, never on retired
-			return clearMsg
-		}
-		return ""
-	}
-	// No container, or a landed one: directive() resets Phase to idle and falls to waitForNextTask
-	// either way, so a stale "working" left over from before it landed must not exempt it here.
-	if st.Container == "" && (st.Phase == "working" || st.Phase == "submitted" || st.Phase == "gating") {
-		return ""
-	}
-	if pr, _, err := ps.AwaitingPR(agent); err == nil && pr != "" {
-		return "" // its own PR to answer for, regardless of either state
-	}
-	if a.Retired {
-		return retiredMsg
-	}
-	if e.clearArmed(project, agent) {
-		return clearMsg
-	}
-	return ""
+	return s.Allowed()
 }
 
 // hasAnyChild reports whether id ever had children, open or not.
