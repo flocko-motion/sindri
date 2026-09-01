@@ -155,7 +155,7 @@ func agentListCmd() *cobra.Command {
 					if a.UnreadMail > 0 { // a backlog is a strong signal it has stopped reading
 						line += fmt.Sprintf("  %s%d", theme.MarkMail, a.UnreadMail)
 					}
-					if api.AgentNeedsUser(a) {
+					if a.NeedsUser {
 						line += "  " + theme.MarkNeedsUser + " needs you" // the status says which state; this says whose move it is
 					}
 					if a.Retired {
@@ -167,7 +167,7 @@ func agentListCmd() *cobra.Command {
 					if a.Clients > 0 {
 						line += fmt.Sprintf("  %s%d", theme.MarkDialIn, a.Clients)
 					}
-					rows = append(rows, listRow{line, listGroupFor(a.Project, local, api.AgentNeedsUser(a))})
+					rows = append(rows, listRow{line, listGroupFor(a.Project, local, a.NeedsUser)})
 				}
 				printListing(agentListTable, rows)
 				for _, o := range st.Orphans {
@@ -195,7 +195,7 @@ func needsYouSummary(agents []api.AgentView) string {
 	var stuck []string
 	for _, a := range agents {
 		switch {
-		case !api.AgentNeedsUser(a):
+		case !a.NeedsUser:
 		case a.Escalation != "":
 			stuck = append(stuck, fmt.Sprintf("%s asks: %s", a.Name, oneLine(a.Escalation, 120)))
 		default:
@@ -569,6 +569,26 @@ func agentTaskLabel(b backend, id string) string {
 	return id
 }
 
+// observationLine is what the hub last SAW of an agent's box: when it looked, what the session said
+// of itself, how long the display had stood still, and who was attached. "nothing seen yet" is a
+// state of its own — the reason a fresh agent must not be reported down.
+func observationLine(a api.AgentView) string {
+	if a.ObservedAt == "" {
+		return "nothing seen yet"
+	}
+	parts := []string{a.ObservedAt}
+	if a.Runtime != "" {
+		parts = append(parts, "session says "+a.Runtime)
+	}
+	if a.StillFor != "" {
+		parts = append(parts, "still for "+a.StillFor)
+	}
+	if a.Clients > 0 {
+		parts = append(parts, fmt.Sprintf("%d attached", a.Clients))
+	}
+	return strings.Join(parts, ", ")
+}
+
 func agentInfoCmd() *cobra.Command {
 	var n int
 	var debug bool
@@ -586,6 +606,10 @@ func agentInfoCmd() *cobra.Command {
 					found.Name, found.Role, found.Status, agentTaskLabel(b, found.Task),
 					agentTaskLabel(b, found.Feature), dash(found.PR), dash(found.Workspace), memoryLabel(found.Memory, dflt),
 					theme.ContextLine(found.ContextTokens), dash(agentport.ShortModel(found.Model)))
+				// The EVIDENCE behind that status word, beside it: whether an answer is wrong because
+				// the hub saw the wrong thing or because it reasoned wrongly about the right thing is
+				// otherwise unanswerable from outside (-> hub/observe).
+				fmt.Printf("observed:  %s\n", observationLine(*found))
 				// Same reasoning as the arming below, and it bites harder: retirement shows up only
 				// when the agent next asks for work, and DirRetired told it to stop asking — so the
 				// pane goes quiet and nothing anywhere says why.

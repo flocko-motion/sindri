@@ -410,7 +410,7 @@ func (m model) inScope(project string) bool {
 // agentVisible admits an agent to the Agents tab: in scope, or waiting on the user anywhere in the
 // fleet — the attention marker beside the handle is fleet-wide by design (-> View).
 func (m model) agentVisible(a api.AgentView) bool {
-	return m.inScope(a.Project) || api.AgentNeedsUser(a)
+	return m.inScope(a.Project) || a.NeedsUser
 }
 
 // prVisible admits a PR to the PRs tab, on the same rule and reason as agentVisible: background
@@ -577,7 +577,7 @@ func (m model) idsNeedingUser() map[string]bool {
 		}
 	case 1:
 		for _, a := range m.state.Agents {
-			if api.AgentNeedsUser(a) {
+			if a.NeedsUser {
 				out[a.Name] = true
 			}
 		}

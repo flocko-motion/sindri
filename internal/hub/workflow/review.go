@@ -7,8 +7,10 @@
 package workflow
 
 import (
+	"context"
 	"fmt"
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/hub/situation"
 	"os"
 	"path/filepath"
 	"strings"
@@ -119,7 +121,7 @@ func (e *Engine) RequestReview(project, prID, requirement string) error {
 			return err
 		}
 		_ = ps.LogPR(prID, "review-amended", "further instructions to "+holder)
-		go e.deps.Deliver(project, holder, MsgReviewAmended(prID, requirement), MailAndPush.From(api.SenderUser))
+		go e.hn.Say(project, holder, MsgReviewAmended(prID, requirement), MailAndPush.From(api.SenderUser))
 		e.deps.Notify()
 		return nil
 	}
@@ -186,7 +188,7 @@ func (e *Engine) assignReview(project string, id int64, prID, reviewer, requirem
 	// board shows it working, not idle
 	_ = hs.SetState(store.AgentState{Agent: reviewer, Phase: "reviewing"}, store.ReasonClaimed, "assigned to review "+prID)
 	_ = ps.LogPR(prID, "review-requested", "assigned to "+reviewer)
-	go e.deps.Deliver(home, reviewer, MsgReview(prID, requirement, pr.Branch, pr.Base, e.deps.ArchitectureDoc(project), checkedOut), MailAndPush) // async: don't block a worker's submit
+	go e.hn.Say(home, reviewer, MsgReview(prID, requirement, pr.Branch, pr.Base, e.deps.ArchitectureDoc(project), checkedOut), MailAndPush) // async: don't block a worker's submit
 	e.deps.Notify()
 	return nil
 }
@@ -209,7 +211,7 @@ func (e *Engine) reviewerHome(project, reviewer string) (home string, a store.Ag
 // reviewDirective is what a reviewer is told: the ONE PR it holds, whose branch sits in its one
 // workspace — serving a second while the first was still checked out left neither diff readable.
 // Free, it claims the oldest unclaimed review, also how one with no reviewer running gets picked up.
-func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
+func (e *Engine) reviewDirective(ctx context.Context, project, name string) (string, bool, error) {
 	ps := e.store.For(project)
 	// heldProject, not project: a GlobalProject reviewer's held review is filed under whatever
 	// project it was sent to, never its own.
@@ -233,7 +235,7 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 		}
 		_ = ps.SetState(store.AgentState{Agent: name, Phase: restPhase("reviewer")},
 			store.ReasonFreed, "review overtaken: "+held+" was "+pr.Status+" before a verdict")
-		_ = e.deps.Deliver(project, name, MsgReviewCancelled(held), MailAndPush)
+		_ = e.hn.Say(project, name, MsgReviewCancelled(held), MailAndPush)
 	}
 	if e.retired(project, name) {
 		return DirRetired, true, nil // holds nothing now — retirement means no new claim, reviewer too
@@ -248,13 +250,17 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 		// `sindri` answers at once: AssignPendingReviews pushes a wake once a review is claimable.
 		return DirNoReviews, true, nil
 	}
-	// An armed clear preempts the claim below, firing eagerly rather than waiting for the sweep, same
-	// as fireClearIfArmed — interrupt=false for the same reason: this runs inside the reviewer's own ask.
+	// An armed clear fires eagerly before any claim, same as fireClearIfArmed — and answers
+	// DirPreparing for the same reason: the session that asked has just been discarded, so the review
+	// is claimed on the ask that follows the kickoff rather than served into a reply nobody reads.
 	if e.clearArmed(project, name) {
-		if err := e.deps.FireClear(project, name, MsgKickoff, false); err != nil {
+		if err := e.hn.Clear(ctx, project, name); err != nil {
 			return "", false, err
 		}
-		return DirClearPending, true, nil // about to land: a review claimed now would be cut in half by it
+		if err := e.hn.Say(project, name, MsgKickoff, PushOnly); err != nil {
+			return "", false, err
+		}
+		return DirPreparing, true, nil
 	}
 	// Claim FIRST — same reason claimNext claims before it prepares: once the review is the
 	// reviewer's, no return in the middle is needed for compaction (a review has no tier, so no
@@ -265,9 +271,7 @@ func (e *Engine) reviewDirective(project, name string) (string, bool, error) {
 	}
 	pr, _, _ := ps.GetPR(prID)
 	dir := DirReview(prID, pr.Task, e.taskTitle(project, pr.Task), pr.Agent, e.deps.ArchitectureDoc(project))
-	e.deps.BeginAssignment(project, name)
-	fired, err := e.compactIfDue(project, name, dir)
-	e.deps.EndAssignment(project, name)
+	fired, err := e.compactIfDue(ctx, project, name, dir)
 	if err != nil {
 		return "", false, err
 	}
@@ -292,7 +296,7 @@ func (e *Engine) releaseReviewers(project, prID, why string) {
 			continue
 		}
 		_ = ps.SetState(store.AgentState{Agent: r.Author, Phase: restPhase("reviewer")}, store.ReasonFreed, why)
-		_ = e.deps.Deliver(project, r.Author, MsgReviewCancelled(prID), MailAndPush)
+		_ = e.hn.Say(project, r.Author, MsgReviewCancelled(prID), MailAndPush)
 	}
 	e.deps.Notify()
 }
@@ -311,11 +315,11 @@ func (e *Engine) reviewerHolding(project, prID string) (int64, string) {
 	return 0, ""
 }
 
-// reviewerAssignable reports whether a roster row may be handed a review, from the row alone. An
-// armed clear disqualifies one: PR after PR would defer it for ever, and an assignment slipping in
-// while the tick fires the clear would clear a reviewer mid-review. (Retirement: -> idleReviewer.)
-func reviewerAssignable(a store.Agent) bool {
-	return a.Role == "reviewer" && !a.ClearArmed
+// reviewerAssignable reports whether an agent may be handed a review. The refusal is the surface's:
+// an armed clear disqualifies one because PR after PR would defer it for ever, and an assignment
+// slipping in while the tick fires the clear would clear a reviewer mid-review.
+func reviewerAssignable(s situation.Situation) bool {
+	return s.Role == "reviewer" && situation.Allows(s.Allowed().Assign)
 }
 
 // freeReviewer returns a running reviewer holding no review, checking the project's own roster
@@ -330,25 +334,19 @@ func (e *Engine) freeReviewer(project string) (string, error) {
 	return e.freeReviewerOn(GlobalProject)
 }
 
-// freeReviewerOn is freeReviewer narrowed to one project's own roster.
+// freeReviewerOn is freeReviewer narrowed to one project's own roster. One gather for the whole
+// roster, so the claimable pool behind those situations is read once rather than once per candidate.
 func (e *Engine) freeReviewerOn(home string) (string, error) {
-	roster, err := e.store.For(home).Roster()
+	roster, err := e.sit.Roster(home)
 	if err != nil {
 		return "", fmt.Errorf("load roster for %s: %w", home, err)
 	}
-	for _, a := range roster {
+	for _, s := range roster {
 		// The watchdog's standing observation, not a probe of our own — this runs off
 		// RepairReviewRows' tick, once per open PR, and a fresh exec per row is what saturated
 		// the runtime the observer now exists to prevent (-> hub/watchdog.go).
-		if !reviewerAssignable(a) || !e.deps.AgentUp(home, a.Name) {
-			continue
-		}
-		_, held, err := e.store.ReviewingPR(home, a.Name)
-		if err != nil {
-			return "", err
-		}
-		if held == "" {
-			return a.Name, nil
+		if reviewerAssignable(s) && s.Up && s.ReviewingPR == "" {
+			return s.Name, nil
 		}
 	}
 	return "", nil

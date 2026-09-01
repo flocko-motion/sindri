@@ -207,7 +207,11 @@ var keymap = []binding{
 	{keys: keyApprove, label: lbl("approve"), scope: scopePRs, commits: true, when: prDecidable, whenText: "while the PR is still open"},
 	{keys: keyReject, label: lbl("reject"), scope: scopePRs, commits: true},
 	{keys: keyReview, label: lbl("agent-review"), scope: scopePRs, commits: true},
-	{keys: keyMerge, label: lbl("merge"), scope: scopePRs, commits: true, when: model.selPRApproved, whenText: "once it's approved"},
+	// Approved-only, with no approve-and-merge shortcut behind it: merging is the one act no agent may
+	// perform, and approving is what the gate checks — so the two stay two decisions, as `sindri pr
+	// approve` then `sindri pr merge` are on the CLI. A on this same row is the way through.
+	{keys: keyMerge, label: lbl("merge"), scope: scopePRs, commits: true, when: model.selPRApproved,
+		whenText: "once it's approved — approve it with A first"},
 	{keys: keyDelete, label: lbl("scrap"), scope: scopePRs, commits: true},
 	{keys: keyWhyNext, label: lbl("why no review"), scope: scopePRs},
 	{keys: keyFilter, label: func(m model) string { return "filter: " + string(m.prFilter) }, scope: scopePRs},

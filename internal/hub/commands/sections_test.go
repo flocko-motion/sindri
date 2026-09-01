@@ -89,10 +89,10 @@ func TestAttentionCountsWhatOnlyTheUserCanMove(t *testing.T) {
 			{ID: "c", Status: "open"},
 		},
 		Agents: []api.AgentView{
-			{Name: "blocked", Status: api.StatusBlocked},
-			{Name: "signed-out", Status: api.StatusSignedOut},
-			{Name: "escalated", Status: api.StatusEscalated},
-			{Name: "stalled", Status: api.StatusStalled},
+			{Name: "blocked", Status: api.StatusBlocked, NeedsUser: true},
+			{Name: "signed-out", Status: api.StatusSignedOut, NeedsUser: true},
+			{Name: "escalated", Status: api.StatusEscalated, NeedsUser: true},
+			{Name: "stalled", Status: api.StatusStalled, NeedsUser: true},
 			{Name: "idle", Status: "idle"},
 			{Name: "working", Status: "working"},
 			// Retired against a status that counts: it keeps running, so this is what winding one

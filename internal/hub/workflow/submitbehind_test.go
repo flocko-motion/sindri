@@ -48,7 +48,7 @@ func submitEngine(t *testing.T) (*Engine, *store.ProjectStore, string, registry.
 	if err := ps.SetState(store.AgentState{Agent: "bombur", Task: "sd-1", Branch: "sd-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
-	return New(st, &stubDeps{root: root}), ps, root, registry.Caller{Project: "proj", Agent: "bombur", Role: "worker"}
+	return newEngine(st, &stubDeps{root: root}), ps, root, registry.Caller{Project: "proj", Agent: "bombur", Role: "worker"}
 }
 
 // TestSubmitRefusedWhenBehindTheBase is the defect. A PR recorded on a base the reference has moved

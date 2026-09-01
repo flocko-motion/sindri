@@ -41,7 +41,7 @@ func approvalTree(t *testing.T) (*Engine, *store.ProjectStore) {
 			t.Fatalf("gate %s: %v", x.id, err)
 		}
 	}
-	return New(st, &stubDeps{root: t.TempDir()}), ps
+	return newEngine(st, &stubDeps{root: t.TempDir()}), ps
 }
 
 // gateOf reads a task's approval back off the store.

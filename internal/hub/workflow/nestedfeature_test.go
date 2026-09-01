@@ -53,7 +53,7 @@ func nestedFeature(t *testing.T) (*Engine, *store.ProjectStore) {
 			}
 		}
 	}
-	return New(st, &stubDeps{root: root}), ps
+	return newEngine(st, &stubDeps{root: root}), ps
 }
 
 // TestAnEpicIsNeverHandedOutAsASubtask is the defect behind "how can the parent be done but not the

@@ -15,7 +15,7 @@ import (
 func execIn(t *testing.T, h *Hub, project, agent string, args ...string) (string, int) {
 	t.Helper()
 	var out strings.Builder
-	code, err := h.AgentExec(project, agent, args, &out)
+	code, err := h.AgentExec(t.Context(), project, agent, args, &out)
 	if err != nil {
 		t.Fatalf("AgentExec %v as %s/%s: %v", args, project, agent, err)
 	}

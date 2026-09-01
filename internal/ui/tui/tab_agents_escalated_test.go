@@ -12,7 +12,7 @@ func escalatedModel(question string) *model {
 	m := newModel(nil, nil, "")
 	m.tab, m.scopeRepo = 1, false
 	m.state = api.BoardState{Agents: []api.AgentView{{
-		Name: "dvalin", Role: "worker", Status: api.StatusEscalated, Task: "sd-1", Escalation: question,
+		Name: "dvalin", Role: "worker", Status: api.StatusEscalated, NeedsUser: true, Task: "sd-1", Escalation: question,
 	}}}
 	return &m
 }

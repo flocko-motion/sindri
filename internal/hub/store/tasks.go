@@ -362,6 +362,69 @@ func (p *ProjectStore) SetPriorityOverride(id, priority string) error {
 	return nil
 }
 
+// SetTierOverride records a tier for a task whose content belongs to another source. Tier is
+// sindri's own field whatever the task's origin — it picks the model — so a mirrored task that
+// cannot carry one is stuck at the default, which is how every openspec change was handed to a
+// mid-tier model regardless of what it asked for.
+func (p *ProjectStore) SetTierOverride(id, tier string) error {
+	_, err := p.s.db.Exec(
+		`INSERT INTO task_priority (project,id,tier) VALUES (?,?,?)
+		 ON CONFLICT(project,id) DO UPDATE SET tier=excluded.tier`, p.project, id, tier)
+	if err != nil {
+		return fmt.Errorf("set tier override %s: %w", id, err)
+	}
+	return nil
+}
+
+// SetClosedOverride records that sindri ended a task whose status lives at its source. Needed only
+// where that source cannot see the ending yet: an openspec change's ticked boxes live on the
+// worker's branch, so the sync re-reads the root, finds it open, and hands the subtask back.
+func (p *ProjectStore) SetClosedOverride(id string) error {
+	_, err := p.s.db.Exec(
+		`INSERT INTO task_priority (project,id,closed) VALUES (?,?,1)
+		 ON CONFLICT(project,id) DO UPDATE SET closed=1`, p.project, id)
+	if err != nil {
+		return fmt.Errorf("set closed override %s: %w", id, err)
+	}
+	return nil
+}
+
+// ClosedOverrides is the set of ids sindri has ended locally.
+func (p *ProjectStore) ClosedOverrides() (map[string]bool, error) {
+	rows, err := p.s.db.Query(`SELECT id FROM task_priority WHERE project=? AND closed=1`, p.project)
+	if err != nil {
+		return nil, fmt.Errorf("closed overrides: %w", err)
+	}
+	defer rows.Close()
+	m := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		m[id] = true
+	}
+	return m, rows.Err()
+}
+
+// TierOverrides returns id→tier for this project's locally-assigned tiers.
+func (p *ProjectStore) TierOverrides() (map[string]string, error) {
+	rows, err := p.s.db.Query(`SELECT id, tier FROM task_priority WHERE project=? AND tier != ''`, p.project)
+	if err != nil {
+		return nil, fmt.Errorf("tier overrides: %w", err)
+	}
+	defer rows.Close()
+	m := map[string]string{}
+	for rows.Next() {
+		var id, tier string
+		if err := rows.Scan(&id, &tier); err != nil {
+			return nil, err
+		}
+		m[id] = tier
+	}
+	return m, rows.Err()
+}
+
 // SetApproval records a task's approval state and comment in this project, now.
 func (p *ProjectStore) SetApproval(task, status, comment string) error {
 	_, err := p.s.db.Exec(

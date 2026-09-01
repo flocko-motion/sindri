@@ -24,7 +24,7 @@ func callerFor(t *testing.T, h *Hub, agent string) registry.Caller {
 func execAs(t *testing.T, h *Hub, agent string, args ...string) (string, int) {
 	t.Helper()
 	var out bytes.Buffer
-	code, err := h.AgentExec(testProject, agent, args, &out)
+	code, err := h.AgentExec(t.Context(), testProject, agent, args, &out)
 	if err != nil {
 		t.Fatalf("AgentExec %v: %v", args, err)
 	}

@@ -40,6 +40,29 @@ func (e *Engine) reattach(ps *store.ProjectStore, agent, wt string) (string, err
 	return st.Branch, nil
 }
 
+// rebaseNotice fronts an agent's directive when a rebase has left its branch mid-flight, "" otherwise.
+// A role text speaks about the next task or about the conversation, so a stuck branch went unsaid: one
+// planner sat on 49 conflicted paths reading "the hub has nothing to add".
+func (e *Engine) rebaseNotice(project, name string) string {
+	ps := e.store.For(project)
+	a, ok, err := ps.GetAgent(name)
+	if err != nil || !ok || a.Workspace == "" {
+		return ""
+	}
+	// Both states RebaseStep continues, for the reason CmdResolve pairs them: a stranded autostash
+	// leaves the same unmergeable index, and git refuses every later checkout over it.
+	wt := filepath.Join(e.deps.ProjectRoot(project), a.Workspace)
+	if !git.RebaseStuck(wt) {
+		return ""
+	}
+	st, _ := ps.GetState(name)
+	verb := "rebase"
+	if st.Phase == "resolving" { // mid-merge for its own PR — resolve is the verb that renews it
+		verb = "resolve"
+	}
+	return DirBranchStuck(verb)
+}
+
 // CmdRebase is the agent-driven "align with the reference" verb, safe any time; WIP is autostashed.
 // A conflict leaves the markers in /workspace and continues on the next `sindri rebase`.
 func (e *Engine) CmdRebase(c registry.Caller, _ []string, out io.Writer) (int, error) {
@@ -116,7 +139,7 @@ func (e *Engine) CmdResolve(c registry.Caller, _ []string, out io.Writer) (int, 
 	}
 	// A stranded autostash counts as mid-resolution too: its unmerged entries read as "uncommitted
 	// work", and git refuses to commit an unmerged index, so that advice could not be followed.
-	inProgress := git.RebaseInProgress(wt) || git.StashConflict(wt)
+	inProgress := git.RebaseStuck(wt)
 	// A rebase needs a clean worktree, so uncommitted work is sent back to be recorded first —
 	// except mid-resolution, where those edits ARE the resolution. Never touch them here.
 	if !inProgress {

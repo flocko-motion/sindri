@@ -55,7 +55,7 @@ func gatedFeature(t *testing.T) (*Engine, *store.ProjectStore, registry.Caller) 
 	if err := os.WriteFile(filepath.Join(root, ".worktrees", agent, "feature.txt"), []byte("built\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return New(st, &stubDeps{root: root}), ps, registry.Caller{Project: "repo", Agent: agent, Role: "worker", Phase: "working"}
+	return newEngine(st, &stubDeps{root: root}), ps, registry.Caller{Project: "repo", Agent: agent, Role: "worker", Phase: "working"}
 }
 
 // TestAFeatureIsNotFinishedOverGatedWork is the defect an edit inside a held feature would otherwise

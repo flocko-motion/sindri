@@ -65,7 +65,7 @@ func newSyncFixture(t *testing.T) *syncFixture {
 		t.Fatalf("set state: %v", err)
 	}
 	deps := &stubDeps{root: root}
-	return &syncFixture{e: New(st, deps), deps: deps, ps: ps, root: root, wt: wt, runIn: runIn}
+	return &syncFixture{e: newEngine(st, deps), deps: deps, ps: ps, root: root, wt: wt, runIn: runIn}
 }
 
 // moveReference adds a commit to main, advancing it.

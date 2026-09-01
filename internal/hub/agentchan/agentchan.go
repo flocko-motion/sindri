@@ -32,7 +32,7 @@ import (
 type Deps interface {
 	Commands(project, name string) (any, error)
 	Directive(ctx context.Context, project, name string) (string, error)
-	Exec(project, name string, args []string, out io.Writer) (int, error)
+	Exec(ctx context.Context, project, name string, args []string, out io.Writer) (int, error)
 	TokenAgent(token string) (project, name string, ok bool, err error)
 	LogRequests(label string, next http.Handler) http.Handler
 }
@@ -166,7 +166,9 @@ func (s *Server) handler(project, name string) http.Handler {
 		if f, ok := w.(http.Flusher); ok {
 			fw.f = f
 		}
-		exit, err := s.deps.Exec(project, name, req.Args, fw)
+		// The request's context WITHOUT its cancellation: a verb lands work — a submit, a checkpoint, a
+		// session cleared — and an agent that hangs up mid-call must not leave half of it done.
+		exit, err := s.deps.Exec(context.WithoutCancel(r.Context()), project, name, req.Args, fw)
 		if err != nil {
 			fmt.Fprintf(fw, "error: %v\n", err)
 			if exit == 0 {

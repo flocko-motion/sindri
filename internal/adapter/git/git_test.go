@@ -74,6 +74,9 @@ func TestRebaseStartLeavesConflictThenContinues(t *testing.T) {
 	if !RebaseInProgress(repo) {
 		t.Fatal("rebase should be left in progress for the worker to resolve")
 	}
+	if !RebaseStuck(repo) {
+		t.Fatal("RebaseStuck must cover the halted rebase, its first of the two states")
+	}
 
 	// Worker resolves to base's version → the branch's commit is now empty against
 	// base; RebaseContinue must --skip it and finish cleanly.
@@ -87,6 +90,9 @@ func TestRebaseStartLeavesConflictThenContinues(t *testing.T) {
 	}
 	if RebaseInProgress(repo) {
 		t.Fatal("rebase should have finished")
+	}
+	if RebaseStuck(repo) {
+		t.Fatal("a finished rebase leaves nothing stuck")
 	}
 }
 
@@ -126,6 +132,9 @@ func TestAutostashConflictIsReportedNotCalledClean(t *testing.T) {
 	if !StashConflict(repo) {
 		t.Fatal("StashConflict must recognise the unmerged index the autostash left")
 	}
+	if !RebaseStuck(repo) {
+		t.Fatal("RebaseStuck must cover the stranded autostash too, or its callers regain the trap")
+	}
 
 	// Calling again before resolving must re-prompt, not stage the markers as a resolution.
 	again, done, err := ResolveStashConflict(repo)
@@ -144,7 +153,7 @@ func TestAutostashConflictIsReportedNotCalledClean(t *testing.T) {
 	if !done || len(conflicts) > 0 {
 		t.Fatalf("expected done with no conflicts, got done=%v conflicts=%v", done, conflicts)
 	}
-	if StashConflict(repo) {
+	if StashConflict(repo) || RebaseStuck(repo) {
 		t.Fatal("the unmerged index should be cleared")
 	}
 	// The blocker was the checkout, so prove that works again — and that nothing was lost.

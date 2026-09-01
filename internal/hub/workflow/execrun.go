@@ -93,7 +93,7 @@ func (e *Engine) ExecuteRun(ctx context.Context, project, id string) error {
 	}
 	e.deps.Notify()
 
-	name := e.deps.Container(project, "run-"+id)
+	name := e.hn.Container(project, "run-"+id)
 	mounts := append([]container.Mount{{Host: mwt, Container: "/workspace", Mode: "rw"}}, cacheMounts...)
 	opts := container.RunOpts{
 		Name:       name,
@@ -186,7 +186,7 @@ func (e *Engine) finishRun(ps *store.ProjectStore, project string, r api.Run, st
 	if api.RunFromUser(r) {
 		return nil
 	}
-	_ = e.deps.Deliver(project, r.Agent, MsgRunFinished(r.ID, status, elapsed, budget), MailAndPush)
+	_ = e.hn.Say(project, r.Agent, MsgRunFinished(r.ID, status, elapsed, budget), MailAndPush)
 	return nil
 }
 
@@ -234,7 +234,7 @@ func (e *Engine) CancelRun(ctx context.Context, project, id string) error {
 		e.runCancels.request(id)
 		rmCtx, rmCancel := context.WithTimeout(context.WithoutCancel(ctx), runRemoveTimeout)
 		defer rmCancel()
-		_ = container.RmContext(rmCtx, e.deps.Container(project, "run-"+id))
+		_ = container.RmContext(rmCtx, e.hn.Container(project, "run-"+id))
 		return nil
 	}
 	if err := ps.SetRunStatus(id, "cancelled"); err != nil {
@@ -256,7 +256,7 @@ func (e *Engine) ReconcileRunningRuns(ctx context.Context) {
 	for _, r := range runs {
 		ps := e.store.For(r.Project)
 		rmCtx, rmCancel := context.WithTimeout(context.WithoutCancel(ctx), runRemoveTimeout)
-		_ = container.RmContext(rmCtx, e.deps.Container(r.Project, "run-"+r.ID))
+		_ = container.RmContext(rmCtx, e.hn.Container(r.Project, "run-"+r.ID))
 		rmCancel()
 		// "cancelled", not "failed": nothing here found a violation or a broken build, and a gate
 		// run reconciled this way must not read as one either (-> stallGate, not rejectGate).

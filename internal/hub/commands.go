@@ -9,6 +9,7 @@
 package hub
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -197,19 +198,17 @@ func landingBlocked(verb string) func(registry.Caller) string {
 // escalating a name absent from the roster would write a state row nothing else can see.
 var errUnknownAgent = errors.New("unknown agent")
 
-// caller resolves an agent's identity and role within its project.
+// caller resolves an agent's identity and role within its project, from the SITUATION the hub's own
+// rules read (-> hub/situation). The two menus — what an agent may type and what the hub may do to
+// it — then cannot disagree about the state they share, because they are looking at one gather.
 func (h *Hub) caller(project, name string) (registry.Caller, error) {
 	ps := h.store.For(project)
-	a, ok, err := ps.GetAgent(name)
-	if err != nil {
+	if _, ok, err := ps.GetAgent(name); err != nil {
 		return registry.Caller{}, err
-	}
-	if !ok {
+	} else if !ok {
 		return registry.Caller{}, fmt.Errorf("%w %q", errUnknownAgent, name)
 	}
-	// Holding a task or a collaborative container hides "next" and shows "submit" (a container
-	// swaps in "checkpoint"); an idle worker gets the reverse.
-	st, err := ps.GetState(name)
+	s, err := h.sit.Of(project, name)
 	if err != nil {
 		return registry.Caller{}, err
 	}
@@ -222,24 +221,32 @@ func (h *Hub) caller(project, name string) (registry.Caller, error) {
 	// than inferred from the phase: after a rejected feature PR the worker is back to "working" with
 	// nothing left to check point, and a phase proxy would have blocked the resubmit.
 	subtasksOpen := false
-	if st.Container != "" {
-		open, oerr := ps.OpenSubtasks(st.Container)
+	if s.Container != "" {
+		open, oerr := ps.OpenSubtasks(s.Container)
 		if oerr != nil {
 			return registry.Caller{}, oerr
 		}
 		subtasksOpen = len(open) > 0
 	}
+	// The notes grant is per CLAIM and lives only in the state row, so it is read here rather than
+	// carried on the situation, which is about what may HAPPEN to an agent (-> store.GrantNotes).
+	st, err := ps.GetState(name)
+	if err != nil {
+		return registry.Caller{}, err
+	}
 	return registry.Caller{
-		Project:      project,
-		Agent:        name,
-		Role:         a.Role,
-		HasTask:      st.Phase != "idle" || st.Container != "",
-		Container:    st.Container,
+		Project: project,
+		Agent:   name,
+		Role:    s.Role,
+		// Holding a task or a collaborative container hides "next" and shows "submit" (a container
+		// swaps in "checkpoint"); an idle worker gets the reverse.
+		HasTask:      s.Phase != "idle" || s.Container != "",
+		Container:    s.Container,
 		SubtasksOpen: subtasksOpen,
-		Task:         st.Task,
-		Phase:        st.Phase,
+		Task:         s.Task,
+		Phase:        s.Phase,
 		InChat:       inChat,
-		Escalation:   st.Escalation,
+		Escalation:   s.Escalation,
 		NotesLeft:    st.NotesLeft,
 	}, nil
 }
@@ -270,8 +277,9 @@ func (h *Hub) AgentCommands(project, name string) ([]CmdInfo, error) {
 }
 
 // AgentExec runs a verb for an agent, streaming to out and returning a process-style exit code.
-func (h *Hub) AgentExec(project, name string, args []string, out io.Writer) (int, error) {
+func (h *Hub) AgentExec(ctx context.Context, project, name string, args []string, out io.Writer) (int, error) {
 	c, err := h.caller(project, name)
+	c.Ctx = ctx // identity is a store read; the context belongs to this invocation, so it is attached here
 	if err != nil {
 		// A name absent from the roster is an identity answer, not a breakage: escalating it would
 		// write a state row for an agent with none, invisible on the board and asked nothing real.

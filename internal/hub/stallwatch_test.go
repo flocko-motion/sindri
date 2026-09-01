@@ -14,18 +14,32 @@ import (
 // or be told nothing while the board looks fine.
 func TestStalledForIsWhatTheBoardAndTheNudgeShare(t *testing.T) {
 	h := newHub(t)
-	a := store.Agent{Project: "proj", Name: "dvalin"}
+	a := store.Agent{Project: "proj", Name: "dvalin", Role: "worker"}
+	ps := h.store.For("proj")
+	if err := ps.PutAgent(a); err != nil {
+		t.Fatal(err)
+	}
+	// The phase and the feature come off the STATE now, not the caller's arguments: the verdict is
+	// the surface's, and it reads the same row every other rule does.
+	holding := func(phase, container string) {
+		t.Helper()
+		if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: phase, Container: container},
+			store.ReasonClaimed, "test setup"); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	// A screen that just changed: not stalled, whatever the phase says.
+	holding("working", "")
 	h.watch.record(a, true, 0, seen("working", "d1"))
 	h.watch.record(a, true, 0, seen("working", "d2"))
-	if _, stalled := h.stalledFor("proj", "dvalin", "working", ""); stalled {
+	if _, stalled := h.stalledFor("proj", "dvalin"); stalled {
 		t.Error("an agent whose pane is moving is not stalled")
 	}
 
 	// It has stopped moving, but the dwell has only just begun.
 	h.watch.record(a, true, 0, seen("idle", "d2"))
-	stillFor, stalled := h.stalledFor("proj", "dvalin", "working", "")
+	stillFor, stalled := h.stalledFor("proj", "dvalin")
 	if stalled {
 		t.Errorf("a fresh quiet spell is a pause, not a stall (still for %v)", stillFor)
 	}
@@ -37,7 +51,7 @@ func TestStalledForIsWhatTheBoardAndTheNudgeShare(t *testing.T) {
 	h.watch.obs[agentKey{"proj", "dvalin"}] = l
 	h.watch.mu.Unlock()
 
-	stillFor, stalled = h.stalledFor("proj", "dvalin", "working", "")
+	stillFor, stalled = h.stalledFor("proj", "dvalin")
 	if !stalled {
 		t.Errorf("a worker whose screen stood still for %v past the dwell should be stalled", stillFor)
 	}
@@ -45,17 +59,20 @@ func TestStalledForIsWhatTheBoardAndTheNudgeShare(t *testing.T) {
 		t.Errorf("stillFor should report the whole spell, got %v", stillFor)
 	}
 	// The same observation, on a phase that exists to wait, is not a stall.
-	if _, stalled := h.stalledFor("proj", "dvalin", "submitted", ""); stalled {
+	holding("submitted", "")
+	if _, stalled := h.stalledFor("proj", "dvalin"); stalled {
 		t.Error("waiting on a verdict must never read as stalled")
 	}
 	// A worker between subtasks of a feature it still holds has work to be getting on with — either
 	// the next subtask or the submit — so sitting there IS a stall. This was excluded back when a
 	// finished feature genuinely had to wait for a human to open its milestone PR.
-	if _, stalled := h.stalledFor("proj", "dvalin", "idle", "td-EPIC"); !stalled {
+	holding("idle", "td-EPIC")
+	if _, stalled := h.stalledFor("proj", "dvalin"); !stalled {
 		t.Error("a worker parked on a feature it holds should read as stalled")
 	}
 	// Holding nothing is idle, which is a state of its own and already shows as itself.
-	if _, stalled := h.stalledFor("proj", "dvalin", "idle", ""); stalled {
+	holding("idle", "")
+	if _, stalled := h.stalledFor("proj", "dvalin"); stalled {
 		t.Error("an agent holding no work is idle, not stalled")
 	}
 }
@@ -112,11 +129,18 @@ func standStill(t *testing.T, w *watchdog, project, name string) {
 // the commonest instance of this same bug once gate results started caching.
 func TestStalledForLeavesAnAgentQueuedOnTheHubAlone(t *testing.T) {
 	h := newHub(t)
-	a := store.Agent{Project: "proj", Name: "dvalin"}
+	a := store.Agent{Project: "proj", Name: "dvalin", Role: "worker"}
+	if err := h.store.For("proj").PutAgent(a); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.For("proj").SetState(store.AgentState{Agent: "dvalin", Phase: "working"},
+		store.ReasonClaimed, "test setup"); err != nil {
+		t.Fatal(err)
+	}
 	h.watch.record(a, true, 0, seen("idle", "d1"))
 	standStill(t, h.watch, "proj", "dvalin")
 
-	if _, stalled := h.stalledFor("proj", "dvalin", "working", ""); !stalled {
+	if _, stalled := h.stalledFor("proj", "dvalin"); !stalled {
 		t.Fatal("sanity: past the dwell with no run queued, this must already read as stalled")
 	}
 
@@ -124,7 +148,7 @@ func TestStalledForLeavesAnAgentQueuedOnTheHubAlone(t *testing.T) {
 	if err := ps.PutRun(store.Run{ID: "run-1", Agent: "dvalin", Status: "queued"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, stalled := h.stalledFor("proj", "dvalin", "working", ""); stalled {
+	if _, stalled := h.stalledFor("proj", "dvalin"); stalled {
 		t.Error("an agent waiting on its own queued run must not read as stalled")
 	}
 }
@@ -133,7 +157,7 @@ func TestStalledForLeavesAnAgentQueuedOnTheHubAlone(t *testing.T) {
 // not stalled — it is unknown or stopped, and both already show as themselves.
 func TestStalledForNeedsAnObservation(t *testing.T) {
 	h := newHub(t)
-	if _, stalled := h.stalledFor("proj", "never-probed", "working", ""); stalled {
+	if _, stalled := h.stalledFor("proj", "never-probed"); stalled {
 		t.Error("an unobserved agent must not read as stalled")
 	}
 
@@ -141,7 +165,7 @@ func TestStalledForNeedsAnObservation(t *testing.T) {
 	for i := 0; i <= downStrikes; i++ {
 		h.watch.record(a, false, 0, agent.Observation{}) // past the strike threshold: down
 	}
-	if _, stalled := h.stalledFor("proj", "gone", "working", ""); stalled {
+	if _, stalled := h.stalledFor("proj", "gone"); stalled {
 		t.Error("a down agent must not read as stalled")
 	}
 }

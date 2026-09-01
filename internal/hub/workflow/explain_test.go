@@ -37,7 +37,7 @@ func TestExplainNextNamesEveryReason(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	e := New(st, &stubDeps{root: t.TempDir()})
+	e := newEngine(st, &stubDeps{root: t.TempDir()})
 	x, err := e.ExplainNext("repo", "", "")
 	if err != nil {
 		t.Fatalf("ExplainNext: %v", err)
@@ -95,7 +95,7 @@ func TestExplainNextAnswersForAnAgent(t *testing.T) {
 	if err := ps.SetState(store.AgentState{Agent: "bombur", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, &stubDeps{root: t.TempDir()})
+	e := newEngine(st, &stubDeps{root: t.TempDir()})
 
 	x, err := e.ExplainNext("repo", "bombur", "")
 	if err != nil {
@@ -145,7 +145,7 @@ func TestExplainNextRulesOutARetiredOrClearArmedAgent(t *testing.T) {
 			if err := ps.SetState(store.AgentState{Agent: "bombur", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 				t.Fatal(err)
 			}
-			e := New(st, &stubDeps{root: t.TempDir()})
+			e := newEngine(st, &stubDeps{root: t.TempDir()})
 
 			x, err := e.ExplainNext("repo", "bombur", "")
 			if err != nil {

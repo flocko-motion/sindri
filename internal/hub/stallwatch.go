@@ -8,8 +8,6 @@ package hub
 
 import (
 	"time"
-
-	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // stallInterval only has to be short against the dwell, which is minutes: a stall that has already
@@ -70,40 +68,35 @@ func (s *stallwatch) sweep() {
 		// about is kept per MESSAGE in the mailbox, not in this map, so a hub restart announces nothing
 		// twice (-> workflow.NudgeMailWaiting).
 		s.h.wf.NudgeMailWaiting(a.Project, a.Name)
-		l, ok := s.h.watch.get(a.Project, a.Name)
+		obs := s.h.observed(a.Project, a.Name)
 		// The spell is keyed on whichever clock this state is judged by, so a cut-off turn that
-		// resumes and dies again is a new spell rather than one already prodded for.
-		since := l.stillSince
-		if l.runtime == "api-error" {
-			since = l.runtimeSince
+		// resumes and dies again is a new spell rather than one already prodded for. The INSTANT, which
+		// is why this cannot just call StillFor — but the rule choosing between the two clocks is the
+		// observation's, asked rather than repeated (-> observe.Observation.StillFor).
+		since := obs.StillSince
+		if obs.TurnCutOff() {
+			since = obs.StateSince
 		}
-		if !ok || !l.up || since.IsZero() {
+		if !obs.Seen() || !obs.Up || since.IsZero() {
 			delete(s.nudged, key) // moving again (or gone): the next stall is a new one
 			continue
 		}
 		if s.nudged[key].Equal(since) {
 			continue // already prodded for this spell
 		}
-		if s.h.wf.NudgeStalled(a.Project, a.Name, l.runtime, time.Since(since)) {
+		if s.h.wf.NudgeStalled(a.Project, a.Name, obs, time.Since(since)) {
 			s.nudged[key] = since
 		}
 	}
 }
 
-// stalledFor is how long an agent's screen has stood still, and whether that counts as stalled. The
-// board and the nudge read the same observation through it, so what the user sees and what the agent
-// is told can never disagree.
-func (h *Hub) stalledFor(project, name, phase, container string) (time.Duration, bool) {
-	l, ok := h.watch.get(project, name)
-	if !ok || !l.up || l.stillSince.IsZero() {
+// stalledFor is how long an agent's screen has stood still, and whether that counts as stalled — the
+// dwell measured here, the verdict asked of the surface, so what the user sees and what the agent is
+// told cannot disagree.
+func (h *Hub) stalledFor(project, name string) (time.Duration, bool) {
+	s, err := h.sit.Of(project, name)
+	if err != nil || s.StillFor == 0 {
 		return 0, false
 	}
-	// A cut-off turn is timed from when it started saying so, not from the screen going quiet: its
-	// spinner keeps redrawing, so stillSince would restart for ever and the retry never fire.
-	dwell := time.Since(l.stillSince)
-	if l.runtime == "api-error" {
-		dwell = time.Since(l.runtimeSince)
-	}
-	waiting, _ := h.store.For(project).AgentWaitingOnRun(name)
-	return dwell, workflow.Stalled(phase, container, l.runtime, waiting, dwell)
+	return s.StillFor, s.Allowed().Stalled
 }

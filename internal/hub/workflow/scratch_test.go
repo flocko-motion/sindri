@@ -65,7 +65,7 @@ func scratchEngine(t *testing.T) (*Engine, registry.Caller, string) {
 	if err := ps.PutPR(store.PR{ID: "pr-sd-1", Task: "sd-1", Agent: "dvalin", Branch: "sd-1", Base: "main", Status: "open"}); err != nil {
 		t.Fatal(err)
 	}
-	return New(st, &stubDeps{root: root}), registry.Caller{Project: "proj", Agent: "brokk", Role: "coauthor"}, scratch
+	return newEngine(st, &stubDeps{root: root}), registry.Caller{Project: "proj", Agent: "brokk", Role: "coauthor"}, scratch
 }
 
 // scratchVerb runs the verb and returns its output and exit code.

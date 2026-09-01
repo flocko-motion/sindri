@@ -9,6 +9,7 @@
 package registry
 
 import (
+	"context"
 	"io"
 	"slices"
 )
@@ -16,6 +17,10 @@ import (
 // Caller is who is asking: their identity, role, and (from Phase 3) workflow
 // state. The registry filters the surface against this.
 type Caller struct {
+	// Ctx is the invocation's own context, carried here because Caller IS the invocation: a verb that
+	// drives the harness — clearing a session, switching its model — inherits it rather than rooting
+	// one of its own. Only Run reads it; the filtering half of the registry never does.
+	Ctx       context.Context
 	Project   string // the repo (repoTag) the caller belongs to
 	Agent     string
 	Role      string // "worker" | "reviewer"

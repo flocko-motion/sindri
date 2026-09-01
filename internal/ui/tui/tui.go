@@ -212,9 +212,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reconcileBusy()
 		m.reclamp()
 		return m, tea.Batch(m.syncDetail(), m.agentLiveCmds())
-	case approveMergeMsg: // "approve & merge" confirmed — mark the row merging, then run it
-		m.markMerging(msg.id)
-		return m, m.approveMergeCmd(msg.id)
 	case mergeDoneMsg:
 		return m.mergeDone(msg)
 	case taskOpMsg: // close/scrap confirmed — mark the transient verb, then run the op

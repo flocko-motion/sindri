@@ -31,7 +31,7 @@ func plannerEngine(t *testing.T, id, approval string) (*Engine, registry.Caller,
 			t.Fatalf("set approval: %v", err)
 		}
 	}
-	e := New(st, &stubDeps{root: t.TempDir()})
+	e := newEngine(st, &stubDeps{root: t.TempDir()})
 	return e, registry.Caller{Project: "proj", Agent: "galar", Role: "planner"}, ps
 }
 
@@ -450,7 +450,7 @@ func TestSyncToleratesRepoWithoutTd(t *testing.T) {
 	if err := st.RegisterProject("proj", root); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	e := New(st, &stubDeps{root: root})
+	e := newEngine(st, &stubDeps{root: root})
 
 	if err := e.SyncTasks("proj"); err != nil {
 		t.Fatalf("a repo with no td store should sync cleanly, got: %v", err)
@@ -491,7 +491,7 @@ func workerEngineComments(t *testing.T, tasks []store.Task, container, current s
 	if err := ps.SetState(store.AgentState{Agent: "eitri", Container: container, Task: current, Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	return New(st, &stubDeps{root: root, comments: comments}), registry.Caller{Project: "proj", Agent: "eitri", Role: "worker"}
+	return newEngine(st, &stubDeps{root: root, comments: comments}), registry.Caller{Project: "proj", Agent: "eitri", Role: "worker"}
 }
 
 // TestWorkerSeesItsPackage: a package is claimed whole for the context it carries, so that
@@ -657,5 +657,28 @@ func TestWorkerIdRefusalNamesTheWayBack(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "`sindri task`") {
 		t.Errorf("the refusal should point at the worker's own package:\n%s", out.String())
+	}
+}
+
+// TestTierIsSettableOnAMirroredTask: a task's CONTENT belongs to its source, but tier does not — no
+// source carries one, and it picks the model the work is handed to. Dropped here, every openspec
+// change sat at the default tier however senior the work was, and the CLI said "edited".
+func TestTierIsSettableOnAMirroredTask(t *testing.T) {
+	e, c, ps := plannerEngine(t, "os-9", "approved")
+	var out bytes.Buffer
+	if _, err := e.CmdEditTask(c, []string{"os-9", "--tier", "senior"}, &out); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got, err := ps.TierOverrides(); err != nil || got["os-9"] != "senior" {
+		t.Fatalf("the tier should be recorded for a mirrored task, got %v (err %v)", got, err)
+	}
+	// And it must reach the cached row the assigner reads, or it is stored somewhere nothing
+	// consults — the targeted refresh CmdEditTask already runs is what has to carry it.
+	task, ok, _ := ps.GetTask("os-9")
+	if !ok {
+		t.Fatal("the task is gone")
+	}
+	if task.Tier != "senior" {
+		t.Errorf("the tier did not reach the row the assigner reads: %q", task.Tier)
 	}
 }

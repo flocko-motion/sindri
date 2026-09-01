@@ -9,9 +9,13 @@
 package workflow
 
 import (
+	"context"
+
 	"github.com/flo-at/sindri/internal/adapter/gate"
 	"github.com/flo-at/sindri/internal/adapter/tasks"
 	"github.com/flo-at/sindri/internal/config"
+	"github.com/flo-at/sindri/internal/hub/observe"
+	"github.com/flo-at/sindri/internal/hub/situation"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -33,8 +37,42 @@ func (e *Engine) TaskSourceToolMissing(root string) bool {
 	return false
 }
 
-// Deps is the seam back into the hub for everything orchestration touches that isn't the store or
-// another workflow step — keeps this package free of the hub's transport, pods, and tmux.
+// Harness is the agent's BOX and nothing else: looking at it, saying something to it, resetting or
+// steering its session, starting it. It names no task, PR, review or verdict — a method that named
+// one would be a rule the box has no business knowing, and a build check holds that line
+// (-> internal/arch).
+type Harness interface {
+	// Observe is the standing look the observer already took, free. Probe takes a FRESH one, for a
+	// caller that needs the answer as of now rather than as of the last sweep — the distinction the
+	// old AgentAlive/AgentUp pair carried, kept because it is real.
+	Observe(project, name string) observe.Observation
+	Probe(project, name string) observe.Observation
+	// Say puts a message to the agent the way d asks: mail keeps it until read, a push types it in
+	// now (-> delivery.go). It carries out what it is given and reports what happened.
+	Say(project, name, text string, d Delivery) error
+	// Clear, Compact and SetModel reset or steer the session, each blocking until it takes effect or
+	// times out (-> agent-runtime's blocking-command contract).
+	Clear(ctx context.Context, project, name string) error
+	Compact(ctx context.Context, project, name string) error
+	SetModel(ctx context.Context, project, name, model string) error
+	// Interrupt aborts whatever the session is doing (ESC), so a notice lands on an idle prompt
+	// rather than queuing behind work.
+	Interrupt(project, name string) error
+	// Start brings a stopped agent back up, its session resuming.
+	Start(project, name string) error
+	// Container names an agent's box.
+	Container(project, name string) string
+	// ModelMatches and CompactionThreshold are the BACKEND's own knowledge of its models: whether two
+	// ids name one model, and what fill is worth compacting for a window. Here rather than on Deps
+	// because only the thing running the session knows either — the hub's POLICY about models, which
+	// model a difficulty tier deserves, sits on Deps instead (-> tasks.md 3.2).
+	ModelMatches(want, detected string) bool
+	CompactionThreshold(window int) int
+}
+
+// Deps is the seam back into the rest of the hub: the project's facts, the board, the task thread.
+// Everything here names something the ORCHESTRATOR owns; anything naming a keystroke is the
+// harness's (above), and a method that names both is the next thing to pull apart.
 type Deps interface {
 	// ProjectRoot resolves a project (repoTag) to its on-disk repo root.
 	ProjectRoot(project string) string
@@ -42,23 +80,8 @@ type Deps interface {
 	ProjectConfig(project string) (config.Config, error)
 	// ArchitectureDoc returns a project's repo-relative architecture doc path.
 	ArchitectureDoc(project string) string
-	// Container returns an agent's container name.
-	Container(project, name string) string
 	// Notify wakes the board (an SSE change notification).
 	Notify()
-	// Deliver sends a message the way d says: mail keeps it until read, a push types it in now
-	// (-> delivery.go) — every hub-originated message goes through this.
-	Deliver(project, name, text string, d Delivery) error
-	// Interrupt aborts an agent's current operation (sends ESC to its session), so a
-	// scrapped-task notice lands on an idle prompt rather than queuing behind work.
-	Interrupt(project, name string) error
-	// AgentAlive PROBES: for a caller needing the answer as of now, never from a tick (-> AgentUp).
-	AgentAlive(project, name string) bool
-	// AgentUp is the watchdog's last reading of the same, free. What anything on a timer asks.
-	AgentUp(project, name string) bool
-	// AgentIdle reports an agent at an empty prompt: would a message sent NOW be acted on, or lost
-	// in an input box when the running turn ends?
-	AgentIdle(project, name string) bool
 	// TaskComments returns a task's comments for display.
 	TaskComments(project, id string) []store.Comment
 	// AddTaskComment posts on a task's thread as author — TaskComments' write half.
@@ -66,57 +89,32 @@ type Deps interface {
 	// Escalate stops an agent on a decision only the user can make, recording the question where a
 	// later reader looks. The hub's own verb, so a hub-raised escalation is the agent's in every way.
 	Escalate(project, name, question string) (task string, err error)
-	// StartAgent brings a stopped agent back up, its session resuming. The hub reclaims idle pods
-	// (-> agent.FireIdleStops) and nothing put them back, so work could arrive for an empty fleet.
-	StartAgent(project, name string) error
 	// KnownProjects returns the registered repos (for fleet-wide PR listing).
 	KnownProjects() []store.Project
-	// ContextUsage reports the session's context size, window and model, off its transcript. ok=false
-	// when nothing has been recorded yet.
-	ContextUsage(project, name string) (tokens, window int, model string, ok bool)
-	// CompactionThreshold is the token count worth compacting at, for the model window belongs to.
-	CompactionThreshold(window int) int
-	// CurrentModel is the model an agent is effectively running: detected while alive, else recorded.
-	CurrentModel(project, name string) string
-	// ModelForTier resolves a difficulty tier to its model, ok=false if unrecognised.
+	// ModelForTier resolves a difficulty tier to its model, ok=false if unrecognised. POLICY, unlike
+	// the two model questions on Harness: which model a tier deserves is the hub's to decide.
 	ModelForTier(tier string) (model string, ok bool)
-	// ModelMatches reports whether detected is want — not always a bare equality, since a backend
-	// may run a tier's model under a more specific id than the one it dispatches to.
-	ModelMatches(want, detected string) bool
-	// SetModel changes the model an agent runs on, queuing next (the real instruction) behind the
-	// live switch if running — no relaunch.
-	SetModel(project, name, model, next string) error
-	// Compact fires /compact at a leaf boundary then queues next behind it, once, never checking
-	// whether it landed below the threshold that triggered it.
-	Compact(project, name, next string) error
-	// BeginAssignment marks an agent mid the preparation after a fresh claim, so AtLeafBoundary
-	// admits it rather than refusing the step the gate is running. Paired with EndAssignment.
-	BeginAssignment(project, name string)
-	// EndAssignment closes that window once preparation is done.
-	EndAssignment(project, name string)
-	// FireClear fires Claude Code's own /clear at a leaf boundary, then queues next behind it
-	// (agent.Service.FireClear states interrupt's rule).
-	FireClear(project, name, next string, interrupt bool) error
-	// HoldsNothing reports whether an agent holds nothing the hub can see: no task, no feature, no
-	// review, no escalation, nobody dialed in.
-	HoldsNothing(project, name, role string) (bool, error)
 }
 
-// clearArmed reports whether a human has armed a context clear — no new leaf work while that
-// stands, since a task claimed in between would be cut in half by it.
+// clearArmed reports whether a human has armed a context clear. Read off the situation rather than
+// the roster row, so the fact and every rule built on it come from one place.
 func (e *Engine) clearArmed(project, name string) bool {
-	a, ok, err := e.store.For(project).GetAgent(name)
-	return err == nil && ok && a.ClearArmed
+	s, err := e.sit.Of(project, name)
+	return err == nil && s.ClearArmed
 }
 
-// fireClearIfArmed fires an armed clear right now regardless of what (if anything) follows it —
-// unlike compact and model-select, a clear is a direct request, not tied to one assignment. Every
-// caller runs inside the call answering the agent's own ask, so it passes interrupt=false.
-func (e *Engine) fireClearIfArmed(project, name string) (fired bool, err error) {
+// fireClearIfArmed fires an armed clear right now and wakes the agent once it has landed. A clear is
+// a direct request, not tied to one assignment. It reports whether it fired, because the reply to
+// THIS call would go into the session the clear has just discarded: a caller that fired answers
+// DirPreparing and serves nothing it expects to be read.
+func (e *Engine) fireClearIfArmed(ctx context.Context, project, name string) (fired bool, err error) {
 	if !e.clearArmed(project, name) {
 		return false, nil
 	}
-	return true, e.deps.FireClear(project, name, MsgKickoff, false)
+	if err := e.hn.Clear(ctx, project, name); err != nil {
+		return false, err
+	}
+	return true, e.hn.Say(project, name, MsgKickoff, PushOnly)
 }
 
 // Engine is the workflow orchestrator: it owns the store and drives the lifecycle
@@ -124,18 +122,20 @@ func (e *Engine) fireClearIfArmed(project, name string) (fired bool, err error) 
 type Engine struct {
 	store      *store.Store
 	deps       Deps
-	sources    []tasks.Source  // external task sources, wired in at New; ownedSource is always added per-project
-	gates      []gate.Gate     // submit-path quality gates, wired in via WithGates; openspec today
-	pre        preflight       // serialises the reference-move PR checks (-> prcheck.go)
-	runCancels runCancelSet    // run ids killed mid-execution (-> execrun.go)
-	refWarn    refFallbackWarn // which repo roots have already been warned about an unconfigured reference (-> pr.go)
+	hn         Harness
+	sit        *situation.Gatherer // where an agent stands, and what may happen to it (-> hub/situation)
+	sources    []tasks.Source      // external task sources, wired in at New; ownedSource is always added per-project
+	gates      []gate.Gate         // submit-path quality gates, wired in via WithGates; openspec today
+	pre        preflight           // serialises the reference-move PR checks (-> prcheck.go)
+	runCancels runCancelSet        // run ids killed mid-execution (-> execrun.go)
+	refWarn    refFallbackWarn     // which repo roots have already been warned about an unconfigured reference (-> pr.go)
 }
 
 // New builds the workflow engine over the hub's store, its Deps, and the external task sources the
 // composition root wires in — the engine never names them.
-func New(st *store.Store, deps Deps, sources ...tasks.Source) *Engine {
-	return &Engine{store: st, deps: deps, sources: sources, pre: preflight{seen: map[string]string{}},
-		refWarn: refFallbackWarn{seen: map[string]bool{}}}
+func New(st *store.Store, deps Deps, hn Harness, sources ...tasks.Source) *Engine {
+	return &Engine{store: st, deps: deps, hn: hn, sit: situation.NewGatherer(st, hn), sources: sources,
+		pre: preflight{seen: map[string]string{}}, refWarn: refFallbackWarn{seen: map[string]bool{}}}
 }
 
 // WithGates installs the submit path's quality gates, chainable alongside New. An engine with

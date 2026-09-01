@@ -110,9 +110,6 @@ type openPlanFormMsg string
 // openPlanFormMsg exists: a chooser's apply returns a cmd, and opening a form is Update's to do.
 type openTaskPlanFormMsg struct{ planner, task string }
 
-// approveMergeMsg routes the intent through Update so the "merging" marker renders before the async work.
-type approveMergeMsg struct{ id string }
-
 // mergeDoneMsg reports a finished merge; either way the transient "merging" marker is cleared.
 type mergeDoneMsg struct {
 	id    string

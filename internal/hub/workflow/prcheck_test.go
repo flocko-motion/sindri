@@ -48,7 +48,7 @@ func prCheckEngine(t *testing.T) (*Engine, *store.ProjectStore, string) {
 	if err := ps.PutPR(store.PR{ID: "pr-sd-1", Task: "sd-1", Agent: "bombur", Branch: "sd-1", Base: "main", Status: "submitted"}); err != nil {
 		t.Fatal(err)
 	}
-	return New(st, &stubDeps{root: root}), ps, root
+	return newEngine(st, &stubDeps{root: root}), ps, root
 }
 
 // checkOpenPRs sweeps and then drains what it queued. The sweep only DECIDES that a check should

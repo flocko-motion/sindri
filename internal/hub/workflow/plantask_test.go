@@ -32,7 +32,7 @@ func plannerWithTask(t *testing.T) (*Engine, *store.ProjectStore, *stubDeps, str
 		t.Fatalf("seed task: %v", err)
 	}
 	deps := &stubDeps{root: root}
-	return New(st, deps), ps, deps, id
+	return newEngine(st, deps), ps, deps, id
 }
 
 // TestHandingATaskOverOpensTheApprovalGate is what makes the workflow possible at all: edit-task is

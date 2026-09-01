@@ -29,7 +29,7 @@ func quietWorkerHoldingWork(t *testing.T, deps *stubDeps) (*Engine, *store.Proje
 	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "sd-1", Branch: "sd-1", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
-	return New(st, deps), ps
+	return newEngine(st, deps), ps
 }
 
 // TestAnOrdinaryStalledAgentIsStillNudged is the control, and it comes first: the exemption must not
@@ -37,7 +37,7 @@ func quietWorkerHoldingWork(t *testing.T, deps *stubDeps) (*Engine, *store.Proje
 // below it.
 func TestAnOrdinaryStalledAgentIsStillNudged(t *testing.T) {
 	e, _ := quietWorkerHoldingWork(t, &stubDeps{})
-	if !e.NudgeStalled("proj", "dvalin", "idle", 6*time.Minute) {
+	if !e.NudgeStalled("proj", "dvalin", saying("idle"), 6*time.Minute) {
 		t.Error("an agent that has genuinely gone quiet on held work should be nudged")
 	}
 }
@@ -47,7 +47,7 @@ func TestAnOrdinaryStalledAgentIsStillNudged(t *testing.T) {
 // is nudged exactly as any other stalled worker would be.
 func TestAFullAgentMidTaskIsStillNudged(t *testing.T) {
 	e, _ := quietWorkerHoldingWork(t, &stubDeps{ctxTokens: 900_000, ctxWindow: 1_000_000, ctxOK: true})
-	if !e.NudgeStalled("proj", "dvalin", "idle", 6*time.Minute) {
+	if !e.NudgeStalled("proj", "dvalin", saying("idle"), 6*time.Minute) {
 		t.Error("a full agent holding a task went unnudged — fullness must not park a worker mid-task")
 	}
 }
@@ -62,7 +62,7 @@ func TestARetiredAgentMidTaskIsStillNudged(t *testing.T) {
 	if err := ps.PutAgent(a); err != nil {
 		t.Fatal(err)
 	}
-	if !e.NudgeStalled("proj", "dvalin", "idle", 6*time.Minute) {
+	if !e.NudgeStalled("proj", "dvalin", saying("idle"), 6*time.Minute) {
 		t.Error("a retired agent stalled on work it still holds went unnudged, so it can never finish it")
 	}
 }
@@ -70,13 +70,18 @@ func TestARetiredAgentMidTaskIsStillNudged(t *testing.T) {
 // TestARetiredAgentHoldingNothingIsNotNudged is where retirement DOES park: nothing in hand means
 // the winding down is complete, and prodding then complains about a state the human chose.
 func TestARetiredAgentHoldingNothingIsNotNudged(t *testing.T) {
-	e, ps := quietWorkerHoldingWork(t, &stubDeps{holdsNothing: true})
+	e, ps := quietWorkerHoldingWork(t, &stubDeps{})
 	a, _, _ := ps.GetAgent("dvalin")
 	a.Retired = true
 	if err := ps.PutAgent(a); err != nil {
 		t.Fatal(err)
 	}
-	if e.NudgeStalled("proj", "dvalin", "idle", 6*time.Minute) {
+	// Nothing in hand, written into the state rather than stated by a stub: the phase is left
+	// "working" so the screen still reads as stalled, which is what makes the exemption the reason.
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "working"}, store.ReasonFreed, "wound down"); err != nil {
+		t.Fatal(err)
+	}
+	if e.NudgeStalled("proj", "dvalin", saying("idle"), 6*time.Minute) {
 		t.Error("a retired agent with nothing in hand was nudged for waiting as it was told to")
 	}
 }
@@ -112,9 +117,9 @@ func TestAGatedFeatureWorkerIsNotNudged(t *testing.T) {
 	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, deps)
+	e := newEngine(st, deps)
 
-	if e.NudgeStalled("proj", "dain", "idle", 6*time.Minute) {
+	if e.NudgeStalled("proj", "dain", saying("idle"), 6*time.Minute) {
 		t.Error("a feature worker waiting on a gate was nudged for waiting as it was told to")
 	}
 }
@@ -129,7 +134,7 @@ func TestACutOffTurnIsStillRetried(t *testing.T) {
 	if err := ps.PutAgent(a); err != nil {
 		t.Fatal(err)
 	}
-	if !e.NudgeStalled("proj", "dvalin", "api-error", 6*time.Minute) {
+	if !e.NudgeStalled("proj", "dvalin", saying("api-error"), 6*time.Minute) {
 		t.Error("a cut-off turn should still be retried, whatever the agent's standing")
 	}
 }

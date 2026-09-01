@@ -127,7 +127,14 @@ func (Source) Finish(root, taskID string, scrap bool) (bool, error) {
 	}
 	name, ok := changeName(root, taskID)
 	if !ok {
-		return true, fmt.Errorf("%s: can't resolve its openspec change (re-sync and retry)", taskID)
+		// Not among the ACTIVE changes. Ending it is what this call is for, so already ended is the
+		// postcondition, not a failure — a worker that archived the change itself, as part of the
+		// work, otherwise had its checkpoint fail on the hub and was escalated for finishing.
+		// A scrap still says so: there the caller means to destroy something it expects to find.
+		if scrap {
+			return true, fmt.Errorf("%s: can't resolve its openspec change to scrap (re-sync and retry)", taskID)
+		}
+		return true, nil
 	}
 	if scrap {
 		return true, DeleteChange(root, name)

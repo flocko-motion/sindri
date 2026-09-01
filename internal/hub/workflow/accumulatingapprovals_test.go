@@ -159,7 +159,7 @@ func TestPlannerBadgeIsAdvisoryAndNeverSatisfiesMergeAlone(t *testing.T) {
 
 	// A real reviewer's approval alongside it is what actually opens the gate — additional, not
 	// a replacement: both badges stand once it lands.
-	if _, ok, err := e.reviewDirective("repo", "fili"); err != nil || !ok {
+	if _, ok, err := e.reviewDirective(t.Context(), "repo", "fili"); err != nil || !ok {
 		t.Fatalf("reviewDirective: ok=%v err=%v", ok, err)
 	}
 	if code, err := e.CmdApprove(registry.Caller{Project: "repo", Agent: "fili", Role: "reviewer"}, []string{"pr-a"}, io.Discard); err != nil || code != 0 {

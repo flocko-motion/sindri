@@ -22,7 +22,6 @@ permissions:
 
 # Versions of the bundled tools. Bump alongside the image.
 env:
-  TD_VERSION: v0.45.0
   YQ_VERSION: v4.53.3
 
 jobs:
@@ -40,9 +39,8 @@ jobs:
           # the newest release automatically, matching ci.yml.
           go-version: stable
 
-      - name: Stage bundled tools (td, yq) onto PATH
+      - name: Stage bundled tools (yq) onto PATH
         run: |
-          go install "github.com/marcus/td@${TD_VERSION}"
           go install "github.com/mikefarah/yq/v4@${YQ_VERSION}"
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
@@ -50,7 +48,6 @@ jobs:
         run: |
           set -euo pipefail
           ver="${GITHUB_REF_NAME#v}"
-          gopath="$(go env GOPATH)"
           # brokkr reports this as its build time. Go's build info carries the COMMIT
           # time and never the build's own, so an unstamped release binary would tell
           # the user "not stamped" — stamp it here exactly as the Makefile does.
@@ -75,15 +72,9 @@ jobs:
               go build -o "$stage/sindri-worker" ./cmd/sindri-worker/
             CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
               go build -ldflags "-X main.version=${ver} -X main.buildTime=${built}" -o "$stage/brokkr-linux" ./cmd/brokkr/
-            # Bundled tools: td cross-compiled (its cross output lands in
-            # $GOPATH/bin/<os>_<arch>/, but the native pair lands in bin/), yq from its
-            # official release for that platform.
-            GOOS="$os" GOARCH="$arch" go install "github.com/marcus/td@${TD_VERSION}"
-            if [ -f "${gopath}/bin/${os}_${arch}/td" ]; then
-              cp "${gopath}/bin/${os}_${arch}/td" "$stage/td"
-            else
-              cp "${gopath}/bin/td" "$stage/td"   # native build target
-            fi
+            # Bundled tools: yq from its official release for that platform. td is NOT
+            # bundled — sindri owns its tasks now, and shipping a task tool nothing
+            # requires left a binary in the tarball that install.sh never installed.
             curl -fsSL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_${os}_${arch}" -o "$stage/yq"
             chmod +x "$stage/yq"
             # install.sh handles first-install AND in-place upgrades (atomic replace of a

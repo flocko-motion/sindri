@@ -36,7 +36,7 @@ func revokeFixture(t *testing.T, prStatus string) (*Engine, *store.ProjectStore,
 	}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
-	return New(st, &stubDeps{root: root, alive: true}),
+	return newEngine(st, &stubDeps{root: root, alive: true}),
 		ps, registry.Caller{Project: "repo", Agent: "nidi", Role: "worker", Phase: "submitted"}
 }
 

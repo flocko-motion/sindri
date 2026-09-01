@@ -46,7 +46,7 @@ func coauthorFixture(t *testing.T) (*Engine, *store.ProjectStore, *stubDeps) {
 		t.Fatal(err)
 	}
 	deps := &stubDeps{root: root, alive: true}
-	return New(st, deps), ps, deps
+	return newEngine(st, deps), ps, deps
 }
 
 // badgeFor is the verdict recorded for author on pr, if any.

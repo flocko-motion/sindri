@@ -38,7 +38,7 @@ func (e *Engine) adoptChild(project, parent, child string) {
 		}
 		// Mail-only, and no liveness gate: it MUST read this, and one that was down when the child
 		// landed would otherwise find out by being refused at its next checkpoint.
-		_ = e.deps.Deliver(project, a.Name, MsgTaskGainedChild(parent, child, promoted), MailOnly)
+		_ = e.hn.Say(project, a.Name, MsgTaskGainedChild(parent, child, promoted), MailOnly)
 	}
 }
 

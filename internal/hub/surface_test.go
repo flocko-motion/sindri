@@ -126,7 +126,7 @@ func TestEveryOfferedVerbRuns(t *testing.T) {
 				continue // the rest need a repo/worktree; surface membership is the point here
 			}
 			var out bytes.Buffer
-			if _, err := h.AgentExec(testProject, "eitri", []string{verb}, &out); err != nil {
+			if _, err := h.AgentExec(t.Context(), testProject, "eitri", []string{verb}, &out); err != nil {
 				t.Errorf("phase %q: offered verb %q errored: %v", phase, verb, err)
 			}
 			if strings.Contains(out.String(), "unknown or unavailable") {
@@ -141,7 +141,7 @@ func TestEveryOfferedVerbRuns(t *testing.T) {
 func TestUnknownVerbListsWhatIsAvailable(t *testing.T) {
 	h, names := surfaceFor(t, "submitted")
 	var out bytes.Buffer
-	code, err := h.AgentExec(testProject, "eitri", []string{"commit"}, &out)
+	code, err := h.AgentExec(t.Context(), testProject, "eitri", []string{"commit"}, &out)
 	if err != nil {
 		t.Fatalf("exec: %v", err)
 	}

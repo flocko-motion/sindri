@@ -29,7 +29,7 @@ func ownedEngine(t *testing.T, status string) (*Engine, *store.ProjectStore, str
 	if err := ps.UpsertTask(store.Task{ID: id, Title: "a task", Status: status, Priority: "P2"}); err != nil {
 		t.Fatalf("seed cache row: %v", err)
 	}
-	return New(st, &stubDeps{root: root}), ps, id
+	return newEngine(st, &stubDeps{root: root}), ps, id
 }
 
 // TestReconcileRepairsAStaleInProgress: a task marked in_progress that nobody holds is stale, which

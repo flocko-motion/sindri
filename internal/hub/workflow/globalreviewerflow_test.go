@@ -22,7 +22,7 @@ func TestGlobalReviewerFollowsAReviewPastAssignment(t *testing.T) {
 	}
 	// KnownProjects must list "repo": reviewingPR's fleet-wide scan for a GlobalProject reviewer
 	// only checks the projects the fleet knows about, exactly like AssignPendingReviews's own caller.
-	e := New(st, &stubDeps{root: t.TempDir(), alive: true, projects: []store.Project{{Tag: "repo"}}})
+	e := newEngine(st, &stubDeps{root: t.TempDir(), alive: true, projects: []store.Project{{Tag: "repo"}}})
 
 	e.AssignPendingReviews("repo")
 	if held, _ := ps.ReviewingPR("ori"); held != "pr-1" {
@@ -31,7 +31,7 @@ func TestGlobalReviewerFollowsAReviewPastAssignment(t *testing.T) {
 
 	// Asking for its own directive — from GlobalProject, its own project — must find the review it
 	// holds rather than answering DirNoReviews.
-	dir, ok, err := e.reviewDirective(GlobalProject, "ori")
+	dir, ok, err := e.reviewDirective(t.Context(), GlobalProject, "ori")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestGlobalReviewerFollowsAReviewPastAssignment(t *testing.T) {
 	// Approving, as ori itself (Caller.Project is ori's own home, GlobalProject — never pr-1's
 	// project) must still find and settle pr-1.
 	deps := &stubDeps{root: t.TempDir(), alive: true}
-	e2 := New(st, deps)
+	e2 := newEngine(st, deps)
 	c := registry.Caller{Project: GlobalProject, Agent: "ori", Role: "reviewer"}
 	if code, err := e2.CmdApprove(c, []string{"pr-1"}, io.Discard); err != nil || code != 0 {
 		t.Fatalf("CmdApprove: code=%d err=%v", code, err)
@@ -85,7 +85,7 @@ func TestGlobalReviewerCanRejectAcrossProjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	deps := &stubDeps{root: t.TempDir(), alive: true}
-	e := New(st, deps)
+	e := newEngine(st, deps)
 	e.AssignPendingReviews("repo")
 
 	c := registry.Caller{Project: GlobalProject, Agent: "ori", Role: "reviewer"}
@@ -109,7 +109,7 @@ func TestGlobalReviewerCanShowThePRItHolds(t *testing.T) {
 	if err := st.For(GlobalProject).PutAgent(store.Agent{Name: "ori", Role: "reviewer", Workspace: "ori"}); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
+	e := newEngine(st, &stubDeps{root: t.TempDir(), alive: true})
 	e.AssignPendingReviews("repo")
 	if held, _ := ps.ReviewingPR("ori"); held != "pr-1" {
 		t.Fatalf("setup: ori should hold pr-1, got %q", held)
@@ -140,7 +140,7 @@ func TestShowIsScopedUnlessTheCallerHoldsTheNamedPR(t *testing.T) {
 	if err := st.For("mine").PutAgent(store.Agent{Name: "eitri", Role: "worker"}); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
+	e := newEngine(st, &stubDeps{root: t.TempDir(), alive: true})
 	c := registry.Caller{Project: "mine", Agent: "eitri", Role: "worker"}
 
 	var out bytes.Buffer
@@ -186,7 +186,7 @@ func foreignPRFixture(t *testing.T) (*store.Store, *store.ProjectStore, registry
 // approve it. It must be refused, and the PR must be untouched.
 func TestApproveIsScopedUnlessTheCallerHoldsTheNamedPR(t *testing.T) {
 	st, other, c := foreignPRFixture(t)
-	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
+	e := newEngine(st, &stubDeps{root: t.TempDir(), alive: true})
 
 	var out bytes.Buffer
 	code, err := e.CmdApprove(c, []string{"pr-9"}, &out)
@@ -207,7 +207,7 @@ func TestApproveIsScopedUnlessTheCallerHoldsTheNamedPR(t *testing.T) {
 // TestRejectIsScopedUnlessTheCallerHoldsTheNamedPR is the same regression on the other verdict.
 func TestRejectIsScopedUnlessTheCallerHoldsTheNamedPR(t *testing.T) {
 	st, other, c := foreignPRFixture(t)
-	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
+	e := newEngine(st, &stubDeps{root: t.TempDir(), alive: true})
 
 	var out bytes.Buffer
 	code, err := e.CmdReject(c, []string{"pr-9", "no"}, &out)
@@ -241,7 +241,7 @@ func TestRequestReviewReachesThePoolDirectly(t *testing.T) {
 	if err := st.For(GlobalProject).PutAgent(store.Agent{Name: "ori", Role: "reviewer", Workspace: "ori"}); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
+	e := newEngine(st, &stubDeps{root: t.TempDir(), alive: true})
 
 	if err := e.RequestReview("repo", "pr-1", "look"); err != nil {
 		t.Fatal(err)
@@ -261,7 +261,7 @@ func TestGlobalReviewerReadsTheTasksOfTheProjectItReviewsFor(t *testing.T) {
 	if err := st.For(GlobalProject).PutAgent(store.Agent{Name: "ori", Role: "reviewer", Workspace: "ori"}); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
+	e := newEngine(st, &stubDeps{root: t.TempDir(), alive: true})
 	e.AssignPendingReviews("repo")
 	if held, _ := ps.ReviewingPR("ori"); held != "pr-1" {
 		t.Fatalf("setup: ori should hold pr-1, got %q", held)
@@ -293,7 +293,7 @@ func TestAnUnknownTaskIsAnsweredNotEscalated(t *testing.T) {
 	if err := st.For(GlobalProject).PutAgent(store.Agent{Name: "balin", Role: "reviewer", Workspace: "balin"}); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
+	e := newEngine(st, &stubDeps{root: t.TempDir(), alive: true})
 	c := registry.Caller{Project: GlobalProject, Agent: "balin", Role: "reviewer"}
 
 	var out bytes.Buffer
@@ -317,7 +317,7 @@ func TestAnUnknownTaskIsAnsweredNotEscalated(t *testing.T) {
 // reject and show all learned this; lint was the one verb left behind.
 func TestLintOnAnUnreachablePRIsAnsweredNotEscalated(t *testing.T) {
 	st, _, c := foreignPRFixture(t)
-	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
+	e := newEngine(st, &stubDeps{root: t.TempDir(), alive: true})
 
 	var out bytes.Buffer
 	code, err := e.CmdLint(c, []string{"pr-9"}, &out)

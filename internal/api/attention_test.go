@@ -54,10 +54,12 @@ func TestARetiredAgentsQuestionStillCounts(t *testing.T) {
 // TestCountAgentsNeedingUserCountsAgentsNotReasons: an agent that is both near its context window
 // and stalled is counted once, not twice — one thing to attend to either way.
 func TestCountAgentsNeedingUserCountsAgentsNotReasons(t *testing.T) {
+	// NeedsUser as the hub decided it (-> AgentNeedsUser): the count reads the field rather than the
+	// rule, so nothing downstream can disagree with the markers beside these very rows.
 	got := CountAgentsNeedingUser([]AgentView{
-		{Name: "a", Status: StatusStalled, ContextTokens: 190_000, ContextWindow: 200_000},
+		{Name: "a", Status: StatusStalled, NeedsUser: true, ContextTokens: 190_000, ContextWindow: 200_000},
 		{Name: "b", Status: "working"},
-		{Name: "c", Status: StatusBlocked},
+		{Name: "c", Status: StatusBlocked, NeedsUser: true},
 	})
 	if got != 2 {
 		t.Errorf("CountAgentsNeedingUser = %d, want 2", got)

@@ -12,7 +12,18 @@ import (
 	"time"
 )
 
+// MsgKickoff sends a fresh session to fetch its job, for the roles the hub holds one for.
 const MsgKickoff = "[hub] You're live. Run `sindri` and do exactly what it tells you — it always returns your current job, whether you're new or resuming."
+
+// MsgPlannerKickoff wakes a planner with its directive in hand: that answer never varies, so the
+// fetch cost a call and a turn to hear it. unread is what a call DOES buy, so it asks for one.
+func MsgPlannerKickoff(directive string, unread int) string {
+	head := "[hub] You're live. You are this project's PLANNER: your work reaches you as a conversation in this terminal, and this is your standing directive.\n\n"
+	if unread > 0 {
+		head = fmt.Sprintf("[hub] You're live. You are this project's PLANNER, and %d unread message(s) are waiting for you. Run `sindri` to read them. Your standing directive:\n\n", unread)
+	}
+	return head + directive
+}
 
 // MsgUnretired tells a retired agent it is back in service. DirRetired sends it away from asking
 // again on its own, so this push is the only thing that would ever reach it (-> Hub.SetRetired).

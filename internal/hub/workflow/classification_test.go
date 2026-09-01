@@ -52,9 +52,9 @@ func TestEverySenderDeclaresBothProperties(t *testing.T) {
 			switch sel.Sel.Name {
 			case "InjectWhenReady", "Inject":
 				t.Errorf("%s:%d: %s reaches past the delivery port — every message states whether it "+
-					"must be READ and whether it should WAKE (-> Deliver, delivery.go)",
+					"must be READ and whether it should WAKE (-> Harness.Say, delivery.go)",
 					path, fset.Position(call.Pos()).Line, sel.Sel.Name)
-			case "Deliver":
+			case "Say":
 				senders++
 			}
 			return true
@@ -63,7 +63,7 @@ func TestEverySenderDeclaresBothProperties(t *testing.T) {
 	// And prove the scan sees the senders it is meant to be checking: an empty result would pass the
 	// loop above vacuously, which is exactly how this guard could become decoration.
 	if senders < 15 {
-		t.Errorf("only %d Deliver call sites found — the workflow sends more than that", senders)
+		t.Errorf("only %d Say call sites found — the workflow sends more than that", senders)
 	}
 }
 
@@ -114,7 +114,7 @@ func TestARejectionIsMailedAndTheNudgeIsNot(t *testing.T) {
 		t.Fatal(err)
 	}
 	deps := &stubDeps{root: t.TempDir(), alive: true}
-	e := New(st, deps)
+	e := newEngine(st, deps)
 
 	if err := e.RejectPR("proj", "pr-1", "needs another pass"); err != nil {
 		t.Fatalf("reject: %v", err)
@@ -128,7 +128,7 @@ func TestARejectionIsMailedAndTheNudgeIsNot(t *testing.T) {
 		t.Error("a rejection should name its author as the sender")
 	}
 
-	if !e.NudgeStalled("proj", "bombur", "idle", StallDwell+time.Minute) {
+	if !e.NudgeStalled("proj", "bombur", saying("idle"), StallDwell+time.Minute) {
 		t.Fatal("a rejected worker gone quiet past the dwell should be nudged")
 	}
 	if len(deps.delivered) != 2 || deps.delivered[1].Mail || !deps.delivered[1].Push {

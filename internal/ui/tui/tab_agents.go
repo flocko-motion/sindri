@@ -239,6 +239,26 @@ func (m *model) attachTo(a api.AgentView) tea.Cmd {
 	return attachAgent(m.agentContainer(a), a.Name)
 }
 
+// observationLine is what the hub last SAW of an agent's box: when it looked, what the session said
+// of itself, how long the display had stood still, and who was attached. "nothing seen yet" is a
+// state of its own — the reason a fresh agent must not be reported down.
+func observationLine(a api.AgentView) string {
+	if a.ObservedAt == "" {
+		return "nothing seen yet"
+	}
+	parts := []string{a.ObservedAt}
+	if a.Runtime != "" {
+		parts = append(parts, "session says "+a.Runtime)
+	}
+	if a.StillFor != "" {
+		parts = append(parts, "still for "+a.StillFor)
+	}
+	if a.Clients > 0 {
+		parts = append(parts, fmt.Sprintf("%d attached", a.Clients))
+	}
+	return strings.Join(parts, ", ")
+}
+
 // agentDetailW is wide enough that activity payloads (task ids + titles) aren't chopped.
 const agentDetailW = 62
 
@@ -383,6 +403,9 @@ func (m model) agentItems() []metaItem {
 		metaItem{text: "memory:    " + memoryLabelTUI(a.Memory, m.state.DefaultMemory) + dimStyle.Render("  (container RAM · e to edit)")},
 		metaItem{text: "context:   " + theme.ContextLine(a.ContextTokens)},
 		metaItem{text: "model:     " + dash(agentport.ShortModel(a.Model))},
+		// The EVIDENCE behind the status word above, beside it — the same line `agent info` prints, so
+		// a wrong answer is one question in either front-end: bad evidence, or a bad rule.
+		metaItem{text: dimStyle.Render("observed:  " + observationLine(a))},
 		metaItem{text: pod, kind: "view", value: "pod"},
 	)
 	// The armed clear says WHEN it lands, not merely that it is set: the row's marker is the count,
@@ -572,7 +595,7 @@ func (m model) agentRow(a api.AgentView) row {
 	// The handle's marker gives a count; this is the row behind it, saying whose move it is in the
 	// same words `sindri agent list` uses. Under repo scope it also answers why an agent from
 	// another repo is in this list at all.
-	if api.AgentNeedsUser(a) {
+	if a.NeedsUser {
 		task += "  " + stWarn.Render(warnGlyph+" needs you")
 	}
 	// Retirement rides beside the status, never in it: it is true of a busy agent too, and what

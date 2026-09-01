@@ -52,8 +52,8 @@ var nameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 // plus the entrypoint starting tmux takes a while.
 const launchReadyTimeout = 45 * time.Second
 
-// setLifecycle records a transient launch/stop intent, cleared by AgentStatus once reality
-// catches up. "" clears it.
+// setLifecycle records a transient launch/stop intent, retired by SettleIntent once reality catches
+// up with it. "" clears it.
 func (s *Service) setLifecycle(project, name, state string) {
 	s.lcMu.Lock()
 	defer s.lcMu.Unlock()
@@ -76,57 +76,40 @@ func (s *Service) clearLaunching(project, name string) {
 	}
 }
 
-// AgentStatus reconciles intent with observed runtime into one status word, clearing the intent once
-// fulfilled — called by the board read that owns retiring a settled intent (-> Hub.State, foldStatus).
-func (s *Service) AgentStatus(project, name string, running, observed bool, phase string, stopped bool) string {
+// SettleIntent retires a launch or a stop that reality has caught up with: a pod seen up fulfils a
+// launch, and one seen gone fulfils a stop. The WRITE only — what word the agent then wears is the
+// orchestrator's, folded from the same facts (-> situation.Situation.Allowed).
+func (s *Service) SettleIntent(project, name string, up, seen bool) {
 	s.lcMu.Lock()
 	defer s.lcMu.Unlock()
 	key := lcKey{project, name}
-	status, retire := s.foldStatus(key, running, observed, phase, stopped)
-	if retire {
+	switch state := s.lifecycle[key].state; {
+	case state == "stopping":
+		// up=false alone must never settle it: an agent the watchdog has not reached yet supports no
+		// claim, which is what `seen` is here to say.
+		if !up && seen {
+			delete(s.lifecycle, key)
+		}
+	case up:
 		delete(s.lifecycle, key)
 	}
-	return status
 }
 
-// PeekStatus is AgentStatus without retiring a settled intent — for an observer that must not
-// perturb the very thing it measures (-> statuswatch.go).
-func (s *Service) PeekStatus(project, name string, running, observed bool, phase string, stopped bool) string {
+// Intent is the transient lifecycle state as three plain facts, for the observation the harness
+// hands over (-> hub/observe.Observation). Facts, not a word: what "launching" MEANS for the status
+// an agent wears is folded by the orchestrator.
+func (s *Service) Intent(project, name string) (launching, failed, stopping bool) {
 	s.lcMu.Lock()
 	defer s.lcMu.Unlock()
-	status, _ := s.foldStatus(lcKey{project, name}, running, observed, phase, stopped)
-	return status
-}
-
-// foldStatus is the pure read both AgentStatus and PeekStatus share: the word, and whether the
-// intent behind it is now settled and may be retired. observed is whether the runtime has been
-// LOOKED AT at all — running=false alone must never read "down" or retire an intent, since an agent
-// the watchdog has not reached yet supports no claim. stopped is the durable flag StopAgent set,
-// checked last so it never outranks a truer explanation. Callers hold s.lcMu.
-func (s *Service) foldStatus(key lcKey, running, observed bool, phase string, stopped bool) (status string, retire bool) {
-	intent := s.lifecycle[key].state
-	switch {
-	case intent == "stopping":
-		if running || !observed {
-			return "stopping", false // stop requested; the pod is still up, or nothing has looked yet
-		}
-		return "down", true // down now — stop intent fulfilled
-	case running:
-		if phase == "" {
-			return "idle", true // up now — launch intent fulfilled
-		}
-		return phase, true
-	case intent == "launching":
-		return "launching", false // requested, pod not up yet
-	case intent == api.StatusLaunchFailed:
-		return api.StatusLaunchFailed, false // the watchdog gave up waiting; see FailLaunch
-	case !observed:
-		return "unknown", false // registered since the last sweep; the next one answers
-	case stopped:
-		return "stopped", false // torn down on purpose, resumable — not the same claim as "down"
-	default:
-		return "down", false
+	switch s.lifecycle[lcKey{project, name}].state {
+	case "launching":
+		return true, false, false
+	case api.StatusLaunchFailed:
+		return false, true, false
+	case "stopping":
+		return false, false, true
 	}
+	return false, false, false
 }
 
 // LaunchIntent reports a launch in flight and when it was requested, for the watchdog's own bound

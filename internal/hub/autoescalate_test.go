@@ -21,7 +21,7 @@ func TestAnInternalErrorEscalatesTheAgentItself(t *testing.T) {
 		t.Fatalf("put agent: %v", err)
 	}
 	// A missing worktree fails inside the hub: a returned error, which is the boundary this keys on.
-	_, err := h.AgentExec(testProject, "dvalin", []string{"git", "status"}, io.Discard)
+	_, err := h.AgentExec(t.Context(), testProject, "dvalin", []string{"git", "status"}, io.Discard)
 	if err == nil {
 		t.Fatal("setup: expected an internal error from `git` against a missing worktree")
 	}
@@ -44,7 +44,7 @@ func TestAnInternalErrorEscalatesTheAgentItself(t *testing.T) {
 
 	// A second failure must not overwrite the first: the question on record is the one that stopped it.
 	first := st.Escalation
-	_, _ = h.AgentExec(testProject, "dvalin", []string{"git", "diff"}, io.Discard)
+	_, _ = h.AgentExec(t.Context(), testProject, "dvalin", []string{"git", "diff"}, io.Discard)
 	if again, _ := ps.GetState("dvalin"); again.Escalation != first {
 		t.Errorf("a further failure rewrote the escalation: %q -> %q", first, again.Escalation)
 	}
@@ -57,7 +57,7 @@ func TestAnInternalErrorEscalatesTheAgentItself(t *testing.T) {
 func TestUnknownAgentIsARefusalNotAnInternalFailure(t *testing.T) {
 	h := newHub(t)
 	ps := h.store.For(testProject)
-	_, err := h.AgentExec(testProject, "ghost", []string{"status"}, io.Discard)
+	_, err := h.AgentExec(t.Context(), testProject, "ghost", []string{"status"}, io.Discard)
 	if err == nil {
 		t.Fatal("an unknown agent must still be refused")
 	}
@@ -88,7 +88,7 @@ func TestIdentityFailureAlsoGoesThroughInternalFailure(t *testing.T) {
 	if err := h.store.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
 	}
-	_, err := h.AgentExec(testProject, "dvalin", []string{"status"}, io.Discard)
+	_, err := h.AgentExec(t.Context(), testProject, "dvalin", []string{"status"}, io.Discard)
 	if err == nil {
 		t.Fatal("a store failure resolving identity must still return an error")
 	}
@@ -106,7 +106,7 @@ func TestARefusalDoesNotEscalate(t *testing.T) {
 		t.Fatalf("put agent: %v", err)
 	}
 	// A verb this role does not have: refused on `out`, with a nil error.
-	if _, err := h.AgentExec(testProject, "dvalin", []string{"approve", "pr-1"}, io.Discard); err != nil {
+	if _, err := h.AgentExec(t.Context(), testProject, "dvalin", []string{"approve", "pr-1"}, io.Discard); err != nil {
 		t.Fatalf("a refusal must not return an error: %v", err)
 	}
 	if st, _ := ps.GetState("dvalin"); st.Escalation != "" {
@@ -188,7 +188,7 @@ func TestConfigErrorEscalatesToo(t *testing.T) {
 		t.Fatal(err)
 	}
 	project := repoTag(root)
-	_, err := h.AgentExec(project, "dvalin", []string{"git", "change"}, io.Discard)
+	_, err := h.AgentExec(t.Context(), project, "dvalin", []string{"git", "change"}, io.Discard)
 	if err == nil {
 		t.Fatal("expected the config error to surface")
 	}

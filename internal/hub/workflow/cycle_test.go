@@ -35,7 +35,7 @@ func chainEngine(t *testing.T, links map[string]string, ids ...string) (*Engine,
 			t.Fatalf("link %s under %s: %v", child, parent, err)
 		}
 	}
-	return New(st, &stubDeps{root: root}), ps
+	return newEngine(st, &stubDeps{root: root}), ps
 }
 
 // TestCycleThroughThreeTasksIsRefused is the case that slipped through: only self-parenting was

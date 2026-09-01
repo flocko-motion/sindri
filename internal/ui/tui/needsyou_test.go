@@ -125,9 +125,9 @@ func TestAgentsJumpToNeedingUser(t *testing.T) {
 		Projects: []api.Project{{Tag: "repo", Path: "/r/one"}},
 		Agents: []api.AgentView{
 			{Name: "a-idle", Project: "repo", Role: "worker", Status: "idle"},
-			{Name: "b-blocked", Project: "repo", Role: "worker", Status: api.StatusBlocked},
+			{Name: "b-blocked", Project: "repo", Role: "worker", Status: api.StatusBlocked, NeedsUser: true},
 			{Name: "c-idle", Project: "repo", Role: "worker", Status: "idle"},
-			{Name: "d-escalated", Project: "repo", Role: "worker", Status: api.StatusEscalated},
+			{Name: "d-escalated", Project: "repo", Role: "worker", Status: api.StatusEscalated, NeedsUser: true},
 		},
 	}
 	m.reclamp()

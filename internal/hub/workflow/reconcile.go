@@ -29,9 +29,8 @@ func (e *Engine) RefreshTask(project, id string) error {
 	return ps.UpsertTask(ownedToCachedTask(owned, ps.ParentOf(id)))
 }
 
-// ownedToCachedTask projects an owned task onto the cached row every source shares (store.Task),
-// so an owned task carries every field into the cache through the ONE place that does — a second
-// hand-written copy is exactly how a field added here drifted from a field added there.
+// ownedToCachedTask projects an owned task onto the cached row every source shares (store.Task).
+// The ONE place that does: a second hand-written copy is how a field added here drifted from there.
 func ownedToCachedTask(owned store.OwnedTask, parentID string) store.Task {
 	return store.Task{
 		ID: owned.ID, Title: owned.Title, Status: owned.Status, Priority: owned.Priority, Tier: owned.Tier,
@@ -40,9 +39,9 @@ func ownedToCachedTask(owned store.OwnedTask, parentID string) store.Task {
 	}
 }
 
-// refreshCachedTask updates one task's cached row after a local mutation instead of a full
+// refreshCachedTask updates one task's cached row after a local mutation, sparing a full
 // multi-source SyncTasks: an owned task is re-read from its own table, a gh-/os- one keeps its
-// synced fields under the hub's own priority and parent. Best-effort, logged host-side.
+// synced fields under the hub's own overrides. Best-effort, logged host-side.
 func (e *Engine) refreshCachedTask(project, id string) {
 	ps := e.store.For(project)
 	if ps.OwnsTask(id) {
@@ -61,6 +60,14 @@ func (e *Engine) refreshCachedTask(project, id string) {
 	}
 	if ov, oerr := ps.PriorityOverrides(); oerr == nil {
 		t.Priority = ov[id]
+	}
+	if ov, oerr := ps.TierOverrides(); oerr == nil {
+		if tier, set := ov[id]; set {
+			t.Tier = tier
+		}
+	}
+	if ov, oerr := ps.ClosedOverrides(); oerr == nil && ov[id] {
+		t.Status = "closed" // ended here, and its source cannot see that yet (-> SetClosedOverride)
 	}
 	// The parent too, for the reason the priority is here: both are the hub's, so a targeted refresh
 	// that skipped one showed a re-parented task as a root until some later full sync.
@@ -224,6 +231,9 @@ func (e *Engine) ReconcileTasks(project string) error {
 			changed = true
 		}
 	}
+	if e.scrapPRsOnClosedTasks(project, prs, tasks) {
+		changed = true
+	}
 	if e.HealSplitHierarchies(project) {
 		changed = true
 	}
@@ -231,6 +241,34 @@ func (e *Engine) ReconcileTasks(project string) error {
 		e.deps.Notify()
 	}
 	return nil
+}
+
+// scrapPRsOnClosedTasks settles a live PR whose task has closed: it can never land, so leaving it
+// open made every reader carry the exception. AwaitingPR excludes it by hand and openPRFor does
+// not, so hepti showed a PR on a task closed a week earlier while the hold rule said otherwise.
+func (e *Engine) scrapPRsOnClosedTasks(project string, prs []store.PR, tasks []store.Task) (scrapped bool) {
+	closed := map[string]bool{}
+	for _, t := range tasks {
+		if api.DoneStatus(t.Status) {
+			closed[t.ID] = true
+		}
+	}
+	ps := e.store.For(project)
+	for _, p := range prs {
+		if !api.PROpen(p) || p.Task == "" || !closed[p.Task] {
+			continue
+		}
+		p.Status = "scrapped"
+		p.Feedback = "the task closed while this was up, so there is nothing left for it to land into"
+		if err := ps.PutPR(p); err != nil {
+			fmt.Fprintf(os.Stderr, "hub: scrapping %s over closed %s: %v\n", p.ID, p.Task, err)
+			continue
+		}
+		_ = ps.LogPR(p.ID, "scrapped", "its task "+p.Task+" is closed")
+		_ = ps.Log(p.Agent, "pr-scrapped", p.ID+": "+p.Task+" is closed")
+		scrapped = true
+	}
+	return scrapped
 }
 
 // HealSplitHierarchies frees every container holder whose tree somebody else is already working —
@@ -249,9 +287,9 @@ func (e *Engine) HealSplitHierarchies(project string) (moved bool) {
 }
 
 // healSplit frees ONE container holder whose tree another agent is inside, so the hub can ask
-// wherever it already reads state: the sweep above, and every ask for work (-> directive). The
-// CONTAINER holder yields — the leaf is concrete work, and a container is held to hand out subtasks
-// it has none of. sudri held sd-ca28d3 while dvalin was a day into the subtask holding it open.
+// wherever it reads state: the sweep above, and every ask for work (-> directive). The CONTAINER
+// holder yields, since the leaf is the concrete work — sudri held sd-ca28d3 while dvalin was a day
+// into the subtask holding it open.
 func (e *Engine) healSplit(project, name string) bool {
 	ps := e.store.For(project)
 	st, err := ps.GetState(name)
@@ -272,7 +310,7 @@ func (e *Engine) healSplit(project, name string) bool {
 	// sd-ca28d3 while `sindri task` told it — correctly — that it held nothing.
 	e.settleReleasedPR(ps, project, name, st.Container, held)
 	_ = ps.Log(name, "container-released", st.Container+": "+held+" is working inside it")
-	_ = e.deps.Deliver(project, name, MsgHierarchyTaken(st.Container, held), MailAndPush)
+	_ = e.hn.Say(project, name, MsgHierarchyTaken(st.Container, held), MailAndPush)
 	return true
 }
 

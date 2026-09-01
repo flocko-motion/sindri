@@ -29,7 +29,7 @@ func retireFixture(t *testing.T) (*Engine, *store.ProjectStore, registry.Caller)
 	if err := ps.UpsertTask(store.Task{ID: "td-1", Title: "work", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
-	return New(st, &stubDeps{root: root, alive: true}), ps,
+	return newEngine(st, &stubDeps{root: root, alive: true}), ps,
 		registry.Caller{Project: "proj", Agent: "dvalin", Role: "worker", Phase: "idle"}
 }
 
@@ -50,7 +50,7 @@ func TestRetiredWorkerIsHandedNothing(t *testing.T) {
 	e, ps, c := retireFixture(t)
 	retire(t, ps, "dvalin")
 
-	if _, claimed, err := e.claimNext("proj", "dvalin"); err != nil || claimed {
+	if _, claimed, err := e.claimNext(t.Context(), "proj", "dvalin"); err != nil || claimed {
 		t.Fatalf("a retired worker must claim nothing: claimed=%v err=%v", claimed, err)
 	}
 	// The task is untouched and still open for somebody else.

@@ -29,7 +29,7 @@ func idleAgentWithMail(t *testing.T, deps *stubDeps) (*Engine, *store.ProjectSto
 	if _, err := ps.AddMail("dvalin", "nori", "the adapter shells out twice", false, 0); err != nil {
 		t.Fatal(err)
 	}
-	return New(st, deps), ps
+	return newEngine(st, deps), ps
 }
 
 // TestAnIdleAgentWithMailIsWoken is the guarantee: mail reaches an agent whenever it next asks the hub
@@ -153,6 +153,12 @@ func TestARetiredAgentHoldingWorkIsWoken(t *testing.T) {
 	if err := ps.PutAgent(a); err != nil {
 		t.Fatal(err)
 	}
+	// Holding work is the whole premise, so it is written into the state rather than stated by a stub:
+	// one rule now answers "holds nothing", and it reads this row.
+	if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "sd-1", Branch: "sd-1", Phase: "working"},
+		store.ReasonClaimed, "test setup"); err != nil {
+		t.Fatal(err)
+	}
 	if !e.NudgeMailWaiting("proj", "dvalin") {
 		t.Error("a retired agent holding work went untold; it cannot finish what it holds without the news")
 	}
@@ -161,8 +167,8 @@ func TestARetiredAgentHoldingWorkIsWoken(t *testing.T) {
 // TestARetiredAgentHoldingNothingIsLeftAlone is the other half: with nothing in hand it is done,
 // which is all retirement ever meant, so no mail can be about work it still owes.
 func TestARetiredAgentHoldingNothingIsLeftAlone(t *testing.T) {
-	deps := &stubDeps{holdsNothing: true}
-	e, ps := idleAgentWithMail(t, deps)
+	deps := &stubDeps{}
+	e, ps := idleAgentWithMail(t, deps) // the fixture leaves it holding nothing, which IS the premise
 	a, _, err := ps.GetAgent("dvalin")
 	if err != nil {
 		t.Fatal(err)

@@ -31,7 +31,7 @@ func approvalWithPlanner(t *testing.T) (*Engine, *store.ProjectStore, *stubDeps)
 		t.Fatalf("gate: %v", err)
 	}
 	deps := &stubDeps{root: t.TempDir()}
-	return New(st, deps), ps, deps
+	return newEngine(st, deps), ps, deps
 }
 
 // settle gives notifyPlanners' fire-and-forget goroutine a moment to land: the verb itself never

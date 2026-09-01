@@ -391,7 +391,7 @@ func (e *Engine) completeLintPR(project string, ps *store.ProjectStore, r api.Ru
 		return err
 	}
 	for _, agent := range waiters {
-		_ = e.deps.Deliver(project, agent, MsgPRGateFinished(r.Message, r.ID), MailAndPush)
+		_ = e.hn.Say(project, agent, MsgPRGateFinished(r.Message, r.ID), MailAndPush)
 	}
 	return nil
 }
@@ -404,7 +404,7 @@ func (e *Engine) landGate(project string, ps *store.ProjectStore, r api.Run) err
 		_, err := e.openMilestoneOrInterim(project, r)
 		return err
 	case gateLint:
-		return e.deps.Deliver(project, r.Agent, MsgLintPassed(r.ID), MailAndPush)
+		return e.hn.Say(project, r.Agent, MsgLintPassed(r.ID), MailAndPush)
 	default: // "submit"
 		return e.landSubmit(project, ps, r)
 	}
@@ -426,7 +426,7 @@ func (e *Engine) openMilestoneOrInterim(project string, r api.Run) (store.PR, er
 		}
 		// Push only: it names what just went up, which nothing else states, but it is nothing to
 		// act on now — just wait — so it need not survive being read late.
-		_ = e.deps.Deliver(project, r.Agent, "[hub] "+ReplyMilestoneContributed(pr.ID, st.Container), PushOnly)
+		_ = e.hn.Say(project, r.Agent, "[hub] "+ReplyMilestoneContributed(pr.ID, st.Container), PushOnly)
 		return pr, nil
 	}
 	root := e.deps.ProjectRoot(project)
@@ -452,7 +452,7 @@ func (e *Engine) openMilestoneOrInterim(project string, r api.Run) (store.PR, er
 		_ = ps.SetState(store.AgentState{Agent: r.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "resolving"},
 			store.ReasonAdvanced, "contribute rebase conflicts: "+strings.Join(conflicts, ", "))
 		_ = ps.Log(r.Agent, "contribute-conflict", strings.Join(conflicts, ", "))
-		_ = e.deps.Deliver(project, r.Agent, "[hub] "+ReplyContributeConflicts(base, conflicts), MailAndPush)
+		_ = e.hn.Say(project, r.Agent, "[hub] "+ReplyContributeConflicts(base, conflicts), MailAndPush)
 		return pr, nil
 	}
 	if err := ps.SetState(store.AgentState{Agent: r.Agent, Task: st.Task, Branch: st.Branch, Container: st.Container, Phase: "submitted"},
@@ -468,7 +468,7 @@ func (e *Engine) openMilestoneOrInterim(project string, r api.Run) (store.PR, er
 	}
 	e.deps.Notify()
 	// Push only, same reason as the milestone case above.
-	_ = e.deps.Deliver(project, r.Agent, "[hub] "+ReplyContributed(pr.ID), PushOnly)
+	_ = e.hn.Say(project, r.Agent, "[hub] "+ReplyContributed(pr.ID), PushOnly)
 	return pr, nil
 }
 
@@ -488,7 +488,7 @@ func (e *Engine) landSubmit(project string, ps *store.ProjectStore, r api.Run) e
 	// the only point that shuts that window, since the gate is what takes the time.
 	if t, ok, terr := ps.GetTask(target); terr == nil && ok && !api.Open(t) {
 		_ = ps.Log(r.Agent, "submit-refused", target+" closed while the gate ran")
-		return e.deps.Deliver(project, r.Agent, MsgSubmitTaskClosed(target), MailAndPush)
+		return e.hn.Say(project, r.Agent, MsgSubmitTaskClosed(target), MailAndPush)
 	}
 	base, err := e.baseBranch(e.deps.ProjectRoot(project))
 	if err != nil {
@@ -523,7 +523,7 @@ func (e *Engine) landSubmit(project string, ps *store.ProjectStore, r api.Run) e
 	}
 	if err := e.RequestReview(project, pr.ID, ""); err != nil {
 		_ = ps.Log(r.Agent, "review-request-failed", pr.ID+": "+err.Error())
-		return e.deps.Deliver(project, r.Agent, "[hub] "+ReplyReviewRequestFailed(pr.ID, err), MailAndPush)
+		return e.hn.Say(project, r.Agent, "[hub] "+ReplyReviewRequestFailed(pr.ID, err), MailAndPush)
 	}
 	// No "now up for review" message: it changes nothing the agent does — it waits either way —
 	// and the verdict that eventually arrives (a merge push, or a mailed rejection) says it all.
@@ -544,7 +544,7 @@ func (e *Engine) rejectGate(project string, ps *store.ProjectStore, r api.Run, o
 	}
 	_ = ps.Log(r.Agent, "lint-fail", gateTarget(st))
 	e.deps.Notify()
-	return e.deps.Deliver(project, r.Agent, MsgGateFailed(strings.TrimSpace(output)), MailAndPush)
+	return e.hn.Say(project, r.Agent, MsgGateFailed(strings.TrimSpace(output)), MailAndPush)
 }
 
 // escalateNoGate stops the agent on the one question it cannot answer. Escalated rather than told:
@@ -555,8 +555,8 @@ func (e *Engine) escalateNoGate(project string, ps *store.ProjectStore, r api.Ru
 	}
 	_ = ps.Log(r.Agent, "gate-unconfigured", gateTarget(mustState(ps, r.Agent)))
 	e.deps.Notify()
-	// Regardless: this push explains the very escalation that would otherwise gate it.
-	return e.deps.Deliver(project, r.Agent, MsgNoGateEscalated(repo.MsgNoGate), MailAndPush.Regardless())
+	// Ungated by construction: this push explains the very escalation that would otherwise hold it.
+	return e.hn.Say(project, r.Agent, MsgNoGateEscalated(repo.MsgNoGate), MailAndPush)
 }
 
 // mustState reads a state row where its absence is not actionable: the caller is only reporting.
@@ -576,9 +576,9 @@ func (e *Engine) stallGate(project string, ps *store.ProjectStore, r api.Run, st
 	if r.Kind == gateLint {
 		// "Submit again" is the wrong instruction for a check nobody submitted: the agent is still
 		// working, and what it lost is the answer, not the attempt.
-		return e.deps.Deliver(project, r.Agent, MsgLintIncomplete(status), MailAndPush)
+		return e.hn.Say(project, r.Agent, MsgLintIncomplete(status), MailAndPush)
 	}
-	return e.deps.Deliver(project, r.Agent, MsgGateIncomplete(status), MailAndPush)
+	return e.hn.Say(project, r.Agent, MsgGateIncomplete(status), MailAndPush)
 }
 
 // backToWorking releases an agent a landing gate parked. A self-check is exempt: it parked nobody, so

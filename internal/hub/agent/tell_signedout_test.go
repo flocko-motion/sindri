@@ -6,12 +6,15 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	agentport "github.com/flo-at/sindri/internal/adapter/agent"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
+	"github.com/flo-at/sindri/internal/hub/observe"
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // signedOutPane is Claude's auth banner as the classifier matches it.
@@ -41,6 +44,9 @@ type fakeRuntime struct {
 	// swallow is a session that accepts the keystrokes and shows nothing — the failure the read-back
 	// exists for, and the one thing a fake cannot be honest about by accident.
 	swallow bool
+	// afterSubmit runs once the Enter has gone, so a case about what a command does WHILE it waits
+	// can change the world at that exact point instead of racing it with a sleep.
+	afterSubmit func()
 }
 
 // termColumns is the fake terminal's OWN idea of how wide a rune draws, deliberately not the one
@@ -83,9 +89,6 @@ func (f *fakeRuntime) Running(string) bool { return true }
 
 // RunningContext answers as Running does: a liveness check that takes a deadline is asking the same
 // question, and a fake that answered differently would make "alive" depend on which one a path used.
-// Also defence in depth for FireClear's delayed kickoff goroutine: waitForKickoff joins it before a
-// fixture tears this fake down, so it should not still be calling in by then — but if timing ever
-// slips, answering true either way keeps that from turning into a flaky failure of its own.
 func (f *fakeRuntime) RunningContext(context.Context, string) bool { return true }
 
 func (f *fakeRuntime) Exec(name string, args ...string) ([]byte, error) {
@@ -133,6 +136,9 @@ func (f *fakeRuntime) ExecContext(ctx context.Context, _ string, args ...string)
 			f.pane = idlePane
 		}
 		f.typed = ""
+		if f.afterSubmit != nil {
+			f.afterSubmit()
+		}
 	case containsArg(args, "send-keys") && containsArg(args, "Escape"):
 		f.interrupts++
 	}
@@ -172,7 +178,16 @@ func (tellDeps) ProjectConfig(string) (config.Config, error) { return config.Con
 func (tellDeps) ArchitectureDoc(string) string               { return "" }
 func (tellDeps) RefreshTask(_, _ string) error               { return nil }
 func (tellDeps) Rehydrate(_, _ string)                       {}
+func (tellDeps) Kickoff(_, _ string) string                  { return "[hub] kickoff" }
 func (tellDeps) ForgetFill(_, _ string)                      {}
+
+func (tellDeps) Deliver(_, _, _ string, _ workflow.Delivery) error { return nil }
+
+// Observation mirrors the always-up fake runtime this fixture backs, so the situation-derived rules
+// see the same liveness AgentUp reports.
+func (tellDeps) Observation(_, _ string) observe.Observation {
+	return observe.Observation{TakenAt: time.Now(), Up: true}
+}
 
 // AgentUp mirrors fakeRuntime's always-up container, so the idle/clear sweeps this fixture backs
 // see the same liveness AgentAlive would have probed. AgentClients: no test here dials in a human.

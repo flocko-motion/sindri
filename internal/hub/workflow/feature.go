@@ -9,6 +9,7 @@
 package workflow
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -20,25 +21,6 @@ import (
 	"github.com/flo-at/sindri/internal/hub/registry"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
-
-// featureLanded reports a feature an agent should no longer hold: closed at its source, or carried
-// in by a merged PR that is not an interim contribution's — that milestone is not the feature's own
-// end, and counting it as one stranded a worker mid-feature the moment its own `contribute` merged.
-func featureLanded(ps *store.ProjectStore, t store.Task) bool {
-	if t.Status == "closed" || t.Status == "approved" || t.Status == "merged" {
-		return true
-	}
-	prs, err := ps.PRs()
-	if err != nil {
-		return false
-	}
-	for _, p := range prs {
-		if p.Task == t.ID && p.Status == "merged" && p.Kind != "interim" {
-			return true
-		}
-	}
-	return false
-}
 
 // claimContainer assigns one package, starting its first open subtask — or, with none left,
 // holding it so the agent finishes on the SAME branch (git.EnsureBranch), never a fresh one.
@@ -116,15 +98,23 @@ func (e *Engine) CmdCheckpoint(c registry.Caller, args []string, out io.Writer) 
 	if oerr != nil {
 		return 1, oerr
 	}
+	if len(grew) == 0 {
+		// The agent's WORKTREE, BEFORE the commit: a status living in the repo (an openspec change's
+		// ticked boxes) exists only on its branch, so the hub's root read 0/10 for finished work and
+		// handed the subtask back. Ended here it rides the commit and lands with the merge.
+		if err := e.finishAtSource(c.Project, wt, st.Task, false); err != nil {
+			return 1, err
+		}
+		// The step this path skipped by calling the source directly: without it advanceContainer
+		// below re-picks the subtask just finished (-> recordEnded).
+		if err := e.recordEnded(c.Project, st.Task); err != nil {
+			return 1, err
+		}
+	}
 	if err := git.CommitAll(wt, msg); err != nil {
 		return 1, err
 	}
 	if len(grew) == 0 {
-		// Through the source, not owned_tasks: a subtask can be an openspec change or an issue, whose
-		// status its own source keeps and a direct write would fail on.
-		if err := e.finishAtSource(c.Project, root, st.Task, false); err != nil {
-			return 1, err
-		}
 		e.settleWithTask(c.Project, st.Task)
 		_ = e.RefreshTask(c.Project, st.Task)
 		e.closeCompletedAncestors(c.Project, st.Task, st.Container)
@@ -219,13 +209,11 @@ func openIDs(tasks []store.Task) []string {
 	return ids
 }
 
-// claimNextSubtask is claimNext's one-pass rule for a held feature's own subtasks: the next open
-// child is claimed FIRST (-> advanceContainer), same reason claimNext claims before it prepares —
-// once the subtask is the agent's, no return in the middle is needed for a model switch or
-// compaction to run against it. With none open, the feature is finished or still gated.
-func (e *Engine) claimNextSubtask(project, agent, container string) (string, bool, error) {
+// claimNextSubtask is claimNext's rule for a held feature's subtasks: the next open child, claimed
+// FIRST so the reset that follows runs against work already held. None open means done or gated.
+func (e *Engine) claimNextSubtask(ctx context.Context, project, agent, container string) (string, bool, error) {
 	if e.clearArmed(project, agent) {
-		return DirClearPending, true, nil // about to land: a subtask claimed now would be cut in half by it
+		return "", false, nil // clear fires at leaf boundary, no subtask claimed until after
 	}
 	child, advanced, err := e.advanceContainer(project, agent, container)
 	if err != nil {
@@ -249,7 +237,7 @@ func (e *Engine) claimNextSubtask(project, agent, container string) (string, boo
 	_ = e.store.For(project).SetLastNudge(agent, "")
 	aim, ceiling := e.commentBudget(project)
 	dir := DirContainerWorking(container, child.ID, aim, ceiling)
-	fired, err := e.prepareAssignment(project, agent, api.TierOrDefault(child.Tier), dir)
+	fired, err := e.prepareAssignment(ctx, project, agent, api.TierOrDefault(child.Tier), dir)
 	if err != nil {
 		return "", false, err
 	}

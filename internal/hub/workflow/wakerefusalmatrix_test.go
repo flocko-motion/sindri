@@ -63,13 +63,13 @@ func (c wakeRefusalCase) build(t *testing.T) *Engine {
 			t.Fatal(err)
 		}
 	}
-	return New(st, &stubDeps{root: t.TempDir()})
+	return newEngine(st, &stubDeps{root: t.TempDir()})
 }
 
 // isRefusalDirective reports whether dir is one of the three answers a push must never wake an agent
-// into hearing: DirRetired, DirEscalated, or DirClearPending.
+// into hearing: DirRetired, DirEscalated, or DirPreparing.
 func isRefusalDirective(dir string) bool {
-	return dir == DirRetired || dir == DirClearPending || strings.Contains(dir, "ESCALATED")
+	return dir == DirRetired || dir == DirPreparing || strings.Contains(dir, "ESCALATED")
 }
 
 // TestWakeRefusalAgreesWithDirectiveAcrossTheMatrix asserts the invariant sd-72af71 asks for directly,

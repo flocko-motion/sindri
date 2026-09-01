@@ -36,7 +36,7 @@ func TestCloseTaskPreservesAHeldContainer(t *testing.T) {
 		store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, &stubDeps{root: root})
+	e := newEngine(st, &stubDeps{root: root})
 
 	if err := e.CloseTask("proj", "td-sub"); err != nil {
 		t.Fatalf("CloseTask: %v", err)
@@ -81,7 +81,7 @@ func TestUnassignTaskPreservesAHeldContainer(t *testing.T) {
 		store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, &stubDeps{root: root, alive: false})
+	e := newEngine(st, &stubDeps{root: root, alive: false})
 
 	if err := e.UnassignTask("proj", "td-sub"); err != nil {
 		t.Fatalf("UnassignTask: %v", err)
@@ -122,7 +122,7 @@ func TestDiscardPRPreservesAHeldContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 	deps := &stubDeps{root: root, alive: true}
-	e := New(st, deps)
+	e := newEngine(st, deps)
 
 	if err := e.DiscardPR("proj", "pr-td-feature"); err != nil {
 		t.Fatalf("DiscardPR: %v", err)

@@ -1,16 +1,25 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/flo-at/sindri/internal/config"
+	"github.com/flo-at/sindri/internal/container"
+	"github.com/flo-at/sindri/internal/hub/observe"
 	"github.com/flo-at/sindri/internal/hub/store"
+	"github.com/flo-at/sindri/internal/hub/workflow"
 )
 
 // clearTestDeps is a minimal agent.Deps: enough for the arming paths, which never reach
-// Rehydrate/RefreshTask/ProjectConfig.
-type clearTestDeps struct{}
+// Rehydrate/RefreshTask/ProjectConfig. up is the watchdog's liveness reading, and delivered collects
+// whatever a caller sent once a clear answered.
+type clearTestDeps struct {
+	up        bool
+	delivered *[]string
+}
 
 func (clearTestDeps) Notify()                                     {}
 func (clearTestDeps) ContainerName(_, name string) string         { return "no-such-container-" + name }
@@ -19,11 +28,23 @@ func (clearTestDeps) ProjectConfig(string) (config.Config, error) { return confi
 func (clearTestDeps) ArchitectureDoc(string) string               { return "" }
 func (clearTestDeps) RefreshTask(_, _ string) error               { return nil }
 func (clearTestDeps) Rehydrate(_, _ string)                       {}
+func (clearTestDeps) Kickoff(_, _ string) string                  { return "[hub] kickoff" }
 func (clearTestDeps) ForgetFill(_, _ string)                      {}
 
-// AgentUp: no watchdog here, so no reading ever says up — matching the "no container wired" liveness
-// these tests already relied on.
-func (clearTestDeps) AgentUp(_, _ string) bool     { return false }
+func (d clearTestDeps) Deliver(_, _, text string, _ workflow.Delivery) error {
+	if d.delivered != nil {
+		*d.delivered = append(*d.delivered, text)
+	}
+	return nil
+}
+
+// Observation is what the situation-derived rules read, off the same `up` these cases set.
+func (d clearTestDeps) Observation(_, _ string) observe.Observation {
+	return observe.Observation{TakenAt: time.Now(), Up: d.up}
+}
+
+// AgentUp: false by default, matching the "no container wired" liveness most of these cases rely on.
+func (d clearTestDeps) AgentUp(_, _ string) bool   { return d.up }
 func (clearTestDeps) AgentClients(_, _ string) int { return 0 }
 
 // armedFlag is the arming as the STORE holds it — what survives a hub restart, so it is read back
@@ -175,5 +196,47 @@ func TestFireArmedClearsPassesOverAgentsStillWorking(t *testing.T) {
 	s.FireArmedClears(t.Context(), "proj")
 	if !armedFlag(t, ps, "eitri") {
 		t.Error("a working agent's arming must survive the sweep — it fires at the boundary, not before")
+	}
+}
+
+// TestAClearThatNeverLandsAnswersAFailure is the failure this change exists for. A /clear typed into
+// a busy session is QUEUED, and the queue it joins is discarded by the clear itself — so the wait can
+// end with the session untouched. It used to end in a log line written by a goroutine whose caller had
+// replied long before, which is how an agent came to sit cleared of nothing with nothing to do.
+//
+// The wait is bounded by the caller's context, so the case is deterministic rather than timed: the
+// context is dropped the moment the Enter goes, standing in for a session that never answers.
+func TestAClearThatNeverLandsAnswersAFailure(t *testing.T) {
+	_, st := newService(t)
+	var delivered []string
+	s := New(st, clearTestDeps{up: true, delivered: &delivered}, nil)
+	ps := st.For("proj")
+	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetState(store.AgentState{Agent: "eitri", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, abandon := context.WithCancel(t.Context())
+	defer abandon()
+	container.Use(&fakeRuntime{pane: idlePane, afterSubmit: abandon})
+	t.Cleanup(container.UseDefault)
+
+	// Through the caller rather than Clear alone: the point is that the failure reaches whoever asked,
+	// in time for them to withhold what they would have sent next.
+	err := s.SetClearArmed(ctx, "proj", "eitri", true)
+	if err == nil {
+		t.Fatal("a clear that was never observed to take effect must answer a failure, not success")
+	}
+	if !strings.Contains(err.Error(), "eitri") {
+		t.Errorf("error = %q, want it to name the agent whose clear did not land", err)
+	}
+	// An agent left un-cleared must not also be handed the kickoff that was waiting on the clear —
+	// the kickoff would run against the context the clear was meant to discard.
+	if len(delivered) > 0 {
+		t.Errorf("delivered = %v, want nothing — the clear failed, so nothing followed it", delivered)
+	}
+	if armedFlag(t, ps, "eitri") {
+		t.Error("a failed immediate clear must leave no arming behind it")
 	}
 }

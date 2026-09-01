@@ -127,7 +127,7 @@ func TestAssignPlanRefusedWithAnOpenPR(t *testing.T) {
 	if err := ps.PutPR(store.PR{ID: "pr-os-new", Agent: "galar", Status: "open"}); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, &stubDeps{root: root, alive: true})
+	e := newEngine(st, &stubDeps{root: root, alive: true})
 
 	err = e.AssignPlan("proj", "galar", "another thing", "")
 	if err == nil {
@@ -167,7 +167,7 @@ func TestAssignPlanRejectsNonPlanners(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "eitri", Role: "worker"}); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, &stubDeps{root: root})
+	e := newEngine(st, &stubDeps{root: root})
 	if err := e.AssignPlan("proj", "eitri", "x", ""); err == nil || !strings.Contains(err.Error(), "worker") {
 		t.Errorf("a worker must be refused, naming its role: %v", err)
 	}

@@ -13,7 +13,7 @@ import (
 // TestCommentBudgetDefaultsToTheLintersOwnCeiling: an unconfigured project resolves to the same
 // numbers the gate falls back to — 2.0 the ceiling, 1.5 the aim lint.AimFor derives from it.
 func TestCommentBudgetDefaultsToTheLintersOwnCeiling(t *testing.T) {
-	e := New(nil, &stubDeps{})
+	e := newEngine(nil, &stubDeps{})
 	aim, ceiling := e.commentBudget("repo")
 	if ceiling != 2.0 {
 		t.Errorf("ceiling = %v, want the linter's own default 2.0", ceiling)
@@ -27,7 +27,7 @@ func TestCommentBudgetDefaultsToTheLintersOwnCeiling(t *testing.T) {
 // repoLintBar reads for the gate, so the brief must resolve it identically rather than the default.
 func TestCommentBudgetHonorsAProjectOverride(t *testing.T) {
 	override := 3.0
-	e := New(nil, &stubDeps{projectConfig: config.Config{Lint: api.Lint{MaxCommentAvg: &override}}})
+	e := newEngine(nil, &stubDeps{projectConfig: config.Config{Lint: api.Lint{MaxCommentAvg: &override}}})
 	aim, ceiling := e.commentBudget("repo")
 	if ceiling != 3.0 {
 		t.Errorf("ceiling = %v, want the project's own override 3.0", ceiling)
@@ -40,7 +40,7 @@ func TestCommentBudgetHonorsAProjectOverride(t *testing.T) {
 // TestCommentBudgetIgnoresAnUnreadableConfig: an unreadable project config must fall back to the
 // same default the gate itself falls back to, not error out the whole directive over it.
 func TestCommentBudgetIgnoresAnUnreadableConfig(t *testing.T) {
-	e := New(nil, &stubDeps{projectConfigErr: errors.New("config unreadable")})
+	e := newEngine(nil, &stubDeps{projectConfigErr: errors.New("config unreadable")})
 	aim, ceiling := e.commentBudget("repo")
 	if ceiling != 2.0 || aim != 1.5 {
 		t.Errorf("aim=%v ceiling=%v, want the default (1.5, 2.0) when config can't be read", aim, ceiling)

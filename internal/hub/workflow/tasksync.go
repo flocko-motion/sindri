@@ -55,6 +55,25 @@ func (e *Engine) syncTasks(project string, force bool) error {
 			}
 		}
 	}
+	// Tier the same way, and for the same reason: no source carries one, so it is sindri's to assign
+	// on any task — and it picks the model the work is handed to.
+	if ov, err := ps.TierOverrides(); err == nil {
+		for i := range rows {
+			if t, ok := ov[rows[i].ID]; ok {
+				rows[i].Tier = t
+			}
+		}
+	}
+	// An ending sindri recorded that the source cannot see yet. An openspec change's ticked boxes
+	// live on the worker's BRANCH, so this read of the root reports finished work as open — and the
+	// assigner handed the same subtask back on every checkpoint.
+	if ov, err := ps.ClosedOverrides(); err == nil {
+		for i := range rows {
+			if ov[rows[i].ID] {
+				rows[i].Status = "closed"
+			}
+		}
+	}
 	// Parentage is the hub's alone — no source carries it, so it is applied after the sources.
 	if links, err := ps.ParentLinks(); err == nil {
 		for i := range rows {

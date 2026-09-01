@@ -137,7 +137,7 @@ func (e *Engine) UnassignTask(project, id string) error {
 		if st.Task != id {
 			continue
 		}
-		if e.deps.AgentAlive(project, a.Name) {
+		if e.hn.Probe(project, a.Name).Up {
 			return fmt.Errorf("%s is alive and working on %s — stop or delete it first", a.Name, id)
 		}
 		// A container holder rests back onto its FEATURE, not fully idle: unassigning one subtask
@@ -207,9 +207,19 @@ func (e *Engine) EditTask(project, id string, s TaskSpec) error {
 		if err := ps.PutOwnedTask(owned); err != nil {
 			return err
 		}
-	} else if s.Priority != "" {
-		if err := ps.SetPriorityOverride(id, s.Priority); err != nil {
-			return err
+	} else {
+		// A mirrored task's CONTENT belongs to its source; priority and tier do not — no source
+		// carries either, so both are sindri's to assign on any task. Tier was dropped here, which
+		// left every openspec change stuck at the default and handed to a mid-tier model.
+		if s.Priority != "" {
+			if err := ps.SetPriorityOverride(id, s.Priority); err != nil {
+				return err
+			}
+		}
+		if s.Tier != "" {
+			if err := ps.SetTierOverride(id, s.Tier); err != nil {
+				return err
+			}
 		}
 	}
 	e.refreshCachedTask(project, id) // targeted refresh of the edited task
@@ -296,14 +306,14 @@ func (e *Engine) commentBudget(project string) (aim, ceiling float64) {
 // AgentDirective is the no-arg `sindri` answer, returned AT ONCE, mail served inline ahead of it
 // (-> serveMail) unless a clear or a model switch lands this round instead.
 func (e *Engine) AgentDirective(ctx context.Context, project, name string) (string, error) {
-	beforeModel := e.deps.CurrentModel(project, name)
+	beforeModel := e.hn.Observe(project, name).Model
 	dir, err := e.directive(ctx, project, name)
 	if err != nil {
 		return "", err
 	}
 	// A model switch narrates and restarts the agent inline, with no distinct text to spot in dir —
 	// only the model actually changing under this call says so.
-	retiered := e.deps.CurrentModel(project, name) != beforeModel
+	retiered := e.hn.Observe(project, name).Model != beforeModel
 	if mailDeferred(dir) || retiered {
 		return dir, nil
 	}
@@ -311,14 +321,28 @@ func (e *Engine) AgentDirective(ctx context.Context, project, name string) (stri
 	if err != nil {
 		return "", err
 	}
-	return preamble + dir, nil
+	// The branch warning goes ahead of the role text: an agent that cannot submit needs that before
+	// it writes anything further, whatever its role would otherwise have said.
+	return preamble + e.rebaseNotice(project, name) + dir, nil
 }
 
-// mailDeferred: DirClearPending discards this round's context, so mail waits for one that survives.
-// DirPreparing is the same wait: the answer follows behind whatever fired (a clear, a compaction, or
-// a model switch), so this reply is not the fresh context either.
+// mailDeferred: DirPreparing is the answer that follows behind whatever preparation fired — a clear,
+// a compaction, a model switch — so this reply is not the context the agent will be reading in.
+// Serving mail into it would mark it read and then discard it along with the session that held it.
 func mailDeferred(dir string) bool {
-	return dir == DirClearPending || dir == DirPreparing
+	return dir == DirPreparing
+}
+
+// plannerDirective answers a planner from its phase alone — the backlog never enters it, since a
+// planner's work arrives as a conversation. Shared with Kickoff, which serves this text directly.
+func plannerDirective(st store.AgentState) string {
+	switch st.Phase {
+	case "submitted":
+		return DirSubmitted
+	case "planning": // set by AssignPlan and by `state planning` — it HAS work in hand
+		return DirPlanning
+	}
+	return DirPlanner
 }
 
 // directive is the per-role/per-phase dispatch, mail lifted out to its one caller so no branch here
@@ -346,22 +370,20 @@ func (e *Engine) directive(ctx context.Context, project, name string) (string, e
 		return DirCoauthor, nil
 	}
 	if a.Role == "reviewer" {
-		d, _, err := e.reviewDirective(project, name)
+		d, _, err := e.reviewDirective(ctx, project, name)
 		return d, err
 	}
 	if a.Role == "planner" {
-		switch st.Phase {
-		case "submitted":
-			return DirSubmitted, nil
-		case "planning": // set by AssignPlan and by `state planning` — it HAS work in hand
-			return DirPlanning, nil
-		}
-		return DirPlanner, nil
+		return plannerDirective(st), nil
 	}
 	// A worker holding a feature is in the subtask loop — unless that feature has already landed. A
 	// merged PR says so as plainly as its status, and covers one left held by a partial-milestone merge.
 	if st.Container != "" {
-		if t, ok, _ := ps.GetTask(st.Container); ok && !featureLanded(ps, t) {
+		sit, serr := e.sit.Of(project, name)
+		if serr != nil {
+			return "", serr
+		}
+		if !sit.FeatureLanded {
 			switch st.Phase {
 			case "submitted":
 				feedback, rejected, err := e.prRejected(project, name, st.Container)
@@ -381,12 +403,12 @@ func (e *Engine) directive(ctx context.Context, project, name string) (string, e
 			case "working":
 				return e.workDirective(project, name, st.Task, st.Container)
 			default:
-				if fired, err := e.fireClearIfArmed(project, name); err != nil {
+				if fired, err := e.fireClearIfArmed(ctx, project, name); err != nil {
 					return "", err
 				} else if fired {
-					return DirClearPending, nil
+					return DirPreparing, nil
 				}
-				d, _, err := e.claimNextSubtask(project, name, st.Container)
+				d, _, err := e.claimNextSubtask(ctx, project, name, st.Container)
 				return d, err
 			}
 		}
@@ -446,8 +468,8 @@ func (e *Engine) serveMail(project, name string) (string, error) {
 // retired reports a human-parked agent — hands off every automatic behaviour, written once so a
 // feature added later asks this instead of keeping its own copy (-> retire.go).
 func (e *Engine) retired(project, name string) bool {
-	a, ok, err := e.store.For(project).GetAgent(name)
-	return err == nil && ok && a.Retired
+	s, err := e.sit.Of(project, name)
+	return err == nil && s.Retired
 }
 
 // waitForNextTask is the idle-agent path — a name kept from when this blocked; it now answers at
@@ -456,12 +478,12 @@ func (e *Engine) waitForNextTask(ctx context.Context, project, name string) (str
 	if e.retired(project, name) {
 		return DirRetired, nil
 	}
-	if fired, err := e.fireClearIfArmed(project, name); err != nil {
+	if fired, err := e.fireClearIfArmed(ctx, project, name); err != nil {
 		return "", err
 	} else if fired {
-		return DirClearPending, nil
+		return DirPreparing, nil
 	}
-	d, claimed, err := e.claimNext(project, name)
+	d, claimed, err := e.claimNext(ctx, project, name)
 	if err != nil {
 		return "", err
 	}
@@ -477,15 +499,18 @@ func (e *Engine) CmdNext(c registry.Caller, _ []string, out io.Writer) (int, err
 		fmt.Fprintln(out, DirRetired)
 		return 0, nil
 	}
-	if _, err := e.fireClearIfArmed(c.Project, c.Agent); err != nil {
+	if fired, err := e.fireClearIfArmed(c.Ctx, c.Project, c.Agent); err != nil {
 		return 1, err
+	} else if fired {
+		fmt.Fprintln(out, DirPreparing)
+		return 0, nil
 	}
 	preamble, err := e.serveMail(c.Project, c.Agent)
 	if err != nil {
 		return 1, err
 	}
 	fmt.Fprint(out, preamble)
-	d, claimed, err := e.claimNext(c.Project, c.Agent)
+	d, claimed, err := e.claimNext(c.Ctx, c.Project, c.Agent)
 	if err != nil {
 		return 1, err
 	}
@@ -499,7 +524,7 @@ func (e *Engine) CmdNext(c registry.Caller, _ []string, out io.Writer) (int, err
 
 // claimNext hands a worker the best-rated unit in a project (-> nextUp): the claim comes FIRST, so
 // holding the work protects it while preparation (a model switch, a clear, or compaction) runs.
-func (e *Engine) claimNext(project, agent string) (string, bool, error) {
+func (e *Engine) claimNext(ctx context.Context, project, agent string) (string, bool, error) {
 	// Retired by a human: wound down deliberately, and the gate is here rather than at the task
 	// queries so it holds however the work would have arrived.
 	if e.retired(project, agent) {
@@ -534,7 +559,7 @@ func (e *Engine) claimNext(project, agent string) (string, bool, error) {
 	// The memory means "told about this while idle, and it did not claim" — a claim, whichever task it
 	// lands on, ends that, or the next time this same task comes back around nobody hears about it.
 	_ = ps.SetLastNudge(agent, "")
-	fired, err := e.prepareAssignment(project, agent, api.TierOrDefault(t.Tier), dir)
+	fired, err := e.prepareAssignment(ctx, project, agent, api.TierOrDefault(t.Tier), dir)
 	if err != nil {
 		return "", false, err
 	}

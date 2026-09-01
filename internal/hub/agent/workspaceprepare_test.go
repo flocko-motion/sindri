@@ -92,9 +92,11 @@ func (noopAgentChanDeps) Commands(string, string) (any, error) { return nil, nil
 func (noopAgentChanDeps) Directive(context.Context, string, string) (string, error) {
 	return "", nil
 }
-func (noopAgentChanDeps) Exec(string, string, []string, io.Writer) (int, error) { return 0, nil }
-func (noopAgentChanDeps) TokenAgent(string) (string, string, bool, error)       { return "", "", false, nil }
-func (noopAgentChanDeps) LogRequests(string, http.Handler) http.Handler         { return nil }
+func (noopAgentChanDeps) Exec(context.Context, string, string, []string, io.Writer) (int, error) {
+	return 0, nil
+}
+func (noopAgentChanDeps) TokenAgent(string) (string, string, bool, error) { return "", "", false, nil }
+func (noopAgentChanDeps) LogRequests(string, http.Handler) http.Handler   { return nil }
 
 // rootedDeps is clearTestDeps with a real ProjectRoot, for a test that needs a place on disk to
 // actually materialise a workspace under.

@@ -44,7 +44,7 @@ func TestAStrandedContainerIsClaimedToFinishIt(t *testing.T) {
 		t.Fatalf("set state: %v", err)
 	}
 
-	e := New(st, &stubDeps{root: root}) // claimNext's own SyncTasks lays the owned rows into the cache
+	e := newEngine(st, &stubDeps{root: root}) // claimNext's own SyncTasks lays the owned rows into the cache
 	dir, err := e.AgentDirective(context.Background(), "repo", agent)
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)

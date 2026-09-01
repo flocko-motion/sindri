@@ -57,7 +57,7 @@ func reviewerEngine(t *testing.T) (*Engine, registry.Caller, *store.ProjectStore
 	if err := ps.PutAgent(store.Agent{Name: "rune", Role: "reviewer", Workspace: ".worktrees/rune"}); err != nil {
 		t.Fatal(err)
 	}
-	return New(st, &stubDeps{root: root}), registry.Caller{Project: "proj", Agent: "rune", Role: "reviewer"}, ps
+	return newEngine(st, &stubDeps{root: root}), registry.Caller{Project: "proj", Agent: "rune", Role: "reviewer"}, ps
 }
 
 // reviewerEngineWithComments is reviewerEngine with a thread on the reviewed task; comments live
@@ -199,7 +199,7 @@ func promptEngine(t *testing.T) (*Engine, string) {
 	if err := st.RegisterProject("proj", root); err != nil {
 		t.Fatal(err)
 	}
-	return New(st, &stubDeps{root: root}), reviewPromptPath("proj")
+	return newEngine(st, &stubDeps{root: root}), reviewPromptPath("proj")
 }
 
 // writePrompt places a review-prompt.txt, as an older sindri did on first use.

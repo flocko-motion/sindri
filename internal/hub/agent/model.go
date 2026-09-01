@@ -12,10 +12,10 @@ import (
 )
 
 // SetModel changes the model an agent runs on, "" reverting to the account default. Not running:
-// records the choice for the next Launch. Running: queues /clear (if there's anything to clear),
-// /model, then next — no relaunch. Clearing first matters: /model on cached history shows a
+// records the choice for the next Launch. Running: clears first (if needed), then injects /model,
+// and blocks until both complete. Clearing first matters: /model on cached history shows a
 // confirmation that silently drops whatever queues behind it (verified live).
-func (s *Service) SetModel(ctx context.Context, project, name, model, next string) error {
+func (s *Service) SetModel(ctx context.Context, project, name, model string) error {
 	if model != "" {
 		if _, ok := s.ModelWindow(model); !ok {
 			return fmt.Errorf("model %q has no known context window — refusing to start an agent whose fullness the hub cannot judge", model)
@@ -44,59 +44,43 @@ func (s *Service) SetModel(ctx context.Context, project, name, model, next strin
 	}
 	before, _, _, used := s.ContextUsage(project, name)
 	if !used {
-		// A fresh session has nothing to discard, so the switch and its instruction go straight in.
-		if err := s.Inject(ctx, project, name, "/model "+model); err != nil {
-			return err
-		}
-		return s.Inject(ctx, project, name, next)
+		// A fresh session has nothing to discard, so the switch goes straight in.
+		return s.Inject(ctx, project, name, "/model "+model)
 	}
+	// Clear first: /model on cached history shows a dialog that swallows whatever follows, so the
+	// clear must land before /model.
 	if err := s.Inject(ctx, project, name, "/clear"); err != nil {
 		return err
 	}
-	// Before the wait, not after: next is composed from this measurement, and left standing it reports
-	// the size the clear just discarded.
 	s.ForgetContext(project, name)
-	// The switch waits for the clear to have HAPPENED, not just for time to pass. /model opens a
-	// confirmation dialog, and a dialog swallows whatever is typed behind it — so a /clear sent into
-	// one is eaten, and the switch runs against the context the clear was meant to discard. Which is
-	// backwards twice over: the old session is spent on the new model, and the reset lands after.
-	s.kickoffWG.Add(1)
-	go func() {
-		defer s.kickoffWG.Done()
-		if !s.awaitCleared(ctx, project, name, before) {
-			return // the clear never took; switching now would spend the context it was to discard
-		}
-		if err := s.InjectWhenReady(ctx, project, name, "/model "+model); err != nil {
-			return // logged as inject-skipped; sending next now would run it on the OLD model
-		}
-		_ = s.InjectWhenReady(ctx, project, name, next)
-	}()
-	return nil
+	if !s.awaitCleared(ctx, project, name, before) {
+		return fmt.Errorf("context clear for %q timed out before model switch — session did not respond", name)
+	}
+	return s.Inject(ctx, project, name, "/model "+model)
 }
 
 // awaitCleared waits for the reading to FALL below before — /clear having happened, where a sleep
 // only assumes it. A DROP is the test: context only grows within a session, and a fresh one carries
 // a few tokens at once, so emptiness would never arrive. Sampled, since ForgetContext dropped memo.
 func (s *Service) awaitCleared(ctx context.Context, project, name string, before int) bool {
-	for waited := time.Duration(0); waited < clearSettleCap; waited += clearKickoffDelay {
+	for waited := time.Duration(0); waited < clearSettleCap; waited += clearSamplePeriod {
 		select {
 		case <-ctx.Done():
 			return false
-		case <-time.After(clearKickoffDelay):
+		case <-time.After(clearSamplePeriod):
 		}
 		if now, _, _, used := s.SampleContext(project, name); !used || now < before {
 			return true
 		}
 	}
-	// Never sent blind on timeout: the clear is most likely still QUEUED behind a long turn, and a
-	// kickoff joining that queue is discarded by it — which is the silence this exists to prevent.
-	// The stall and mail nudges are the backstop for an agent left idle.
-	_ = s.store.For(project).Log(name, "clear-unconfirmed", "the /clear never took effect; nothing was sent after it")
+	// Logged as well as returned: the caller decides what happens next, and this leaves the evidence
+	// on the agent's own record where whoever reads the failure later goes looking.
+	_ = s.store.For(project).Log(name, "clear-unconfirmed", "the /clear never took effect within the wait")
 	return false
 }
 
 // clearSettleCap bounds that wait. Long, because the clear waits out whatever turn was running when
-// it was typed, and a review runs for minutes; bounded, because a goroutine per clear must end.
+// it was typed, and a review runs for minutes; bounded, because its caller is blocked on the answer.
 const clearSettleCap = 5 * time.Minute
 
 // modelLabel names an empty model as the account default, for the log line.

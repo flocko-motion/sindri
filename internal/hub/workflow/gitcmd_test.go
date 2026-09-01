@@ -68,7 +68,7 @@ func gitEngine(t *testing.T) (*Engine, registry.Caller, string, string) {
 	if err := ps.SetState(store.AgentState{Agent: "eitri", Branch: "work", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	return New(st, &stubDeps{root: root}), registry.Caller{Project: "proj", Agent: "eitri", Role: "worker"}, wt, root
+	return newEngine(st, &stubDeps{root: root}), registry.Caller{Project: "proj", Agent: "eitri", Role: "worker"}, wt, root
 }
 
 // exec runs the git verb and returns its output plus exit code.
@@ -412,7 +412,7 @@ func manualEngine(t *testing.T, root, wt string) (*Engine, registry.Caller) {
 	if err := ps.SetState(store.AgentState{Agent: "eitri", Branch: "work", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	return New(st, &stubDeps{root: root}), registry.Caller{Project: "proj", Agent: "eitri", Role: "worker"}
+	return newEngine(st, &stubDeps{root: root}), registry.Caller{Project: "proj", Agent: "eitri", Role: "worker"}
 }
 
 // TestGitDropSaysSoWhenNothingMoved is defect A: neither step gitDrop takes can fail on a no-op

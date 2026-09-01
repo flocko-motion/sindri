@@ -78,14 +78,35 @@ func (e *Engine) finishAtSource(project, root, id string, scrap bool) error {
 	return fmt.Errorf("%s: unknown task backend", id)
 }
 
+// recordEnded writes an ending sindri must remember itself: a status living in the REPO never moves
+// for the hub, since the worker's tick is on its BRANCH. The override survives the sync's rebuild.
+func (e *Engine) recordEnded(project, id string) error {
+	ps := e.store.For(project)
+	if ps.OwnsTask(id) {
+		return nil
+	}
+	if err := ps.SetClosedOverride(id); err != nil {
+		return err
+	}
+	t, ok, err := ps.GetTask(id)
+	if err != nil || !ok {
+		return err
+	}
+	t.Status = "closed"
+	return ps.UpsertTask(t)
+}
+
 // SetStatus moves a task to want without the caller knowing where that status lives: done goes
 // through the owning source, anything else is sindri's own scheduling. Every site remembering for
 // itself is what left openspec tasks open over finished work, four times.
 func (e *Engine) SetStatus(project, id, want string) error {
-	if (task.Task{Status: want}).IsClosed() {
-		return e.finishAtSource(project, e.deps.ProjectRoot(project), id, false)
-	}
 	ps := e.store.For(project)
+	if (task.Task{Status: want}).IsClosed() {
+		if err := e.finishAtSource(project, e.deps.ProjectRoot(project), id, false); err != nil {
+			return err
+		}
+		return e.recordEnded(project, id)
+	}
 	if ps.OwnsTask(id) {
 		return ps.SetOwnedStatus(id, want)
 	}
@@ -121,7 +142,7 @@ func (e *Engine) settleWithTask(project, id string) {
 			continue
 		}
 		_ = ps.LogPR(pr.ID, "rejected", "by hub: task "+id+" is closed")
-		_ = e.deps.Deliver(project, pr.Agent, MsgPRSettledWithTask(pr.ID, id), MailAndPush)
+		_ = e.hn.Say(project, pr.Agent, MsgPRSettledWithTask(pr.ID, id), MailAndPush)
 	}
 }
 
@@ -173,10 +194,10 @@ func (e *Engine) finishTask(project, id string, scrap bool) error {
 			// ESC first, so the cancellation lands on an idle prompt rather than queuing behind
 			// the work it is cancelling. Only the interrupt needs the agent up; the delivery is
 			// made either way, since mail is precisely what reaches one that is down.
-			if e.deps.AgentUp(project, a.Name) {
-				_ = e.deps.Interrupt(project, a.Name)
+			if e.hn.Observe(project, a.Name).Up {
+				_ = e.hn.Interrupt(project, a.Name)
 			}
-			_ = e.deps.Deliver(project, a.Name, MsgTaskCancelled(id), MailAndPush)
+			_ = e.hn.Say(project, a.Name, MsgTaskCancelled(id), MailAndPush)
 		}
 	}
 	// The approval gate goes with the task: a gate left standing outlives what it asked about, and

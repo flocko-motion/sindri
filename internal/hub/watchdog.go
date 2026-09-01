@@ -3,8 +3,8 @@
 // job:     own what the hub believes about the fleet — liveness, each session's fill and model,
 // the pod listing, the memory headroom, each repo's docs — as the ONE place that polls for
 // any of it. A board read reports the last observation; no reading flips an agent down.
-// limits:  observations only, plus driving statuswatch.sweep at its tail (-> statuswatch.go) — the
-// fold itself stays in agent.AgentStatus/PeekStatus and state.go.
+// limits:  observations only, plus driving statuswatch.sweep at its tail (-> statuswatch.go). What
+// any of it MEANS is folded by the orchestrator (-> hub/situation.Situation.Allowed).
 package hub
 
 import (
@@ -16,6 +16,7 @@ import (
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
 	"github.com/flo-at/sindri/internal/hub/agent"
+	"github.com/flo-at/sindri/internal/hub/observe"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -80,7 +81,9 @@ type liveness struct {
 	fill
 	up      bool
 	clients int
-	runtime string // Claude's live runtime: working|blocked|idle|signed-out|""
+	// state is what the session said of itself, parsed at THIS boundary — the one place the tool's
+	// word is read (-> observe.ParseState). Nothing downstream sees a string to match against.
+	state   observe.State
 	digest  string // the pane's content hash, so stillness is measurable
 	strikes int    // consecutive failed probes; up is held until downStrikes
 	seen    time.Time
@@ -90,10 +93,10 @@ type liveness struct {
 	// toolSince is when the in-flight marker was first seen this streak, zero once it clears; it is
 	// what toolRunningCap measures against (-> record).
 	toolSince time.Time
-	// runtimeSince is when the runtime word last changed. A cut-off turn needs this rather than
-	// stillSince: its spinner keeps animating, so the screen never stands still even though nothing
-	// is happening — measured on gloin, two different digests 12s apart with a dead turn.
-	runtimeSince time.Time
+	// stateSince is when that account last changed. A cut-off turn needs this rather than stillSince:
+	// its spinner keeps animating, so the screen never stands still even though nothing is happening
+	// — measured on gloin, two different digests 12s apart with a dead turn.
+	stateSince time.Time
 }
 
 // watchdog observes agent liveness on a loop; one per hub, started by New, stopped by Close.
@@ -411,7 +414,8 @@ func (w *watchdog) record(a store.Agent, up bool, clients int, obs agent.Observa
 	key := agentKey{a.Project, a.Name}
 	prev := w.obs[key]
 	// The fill rides along: dropping it here would blank the board's context column every sweep.
-	next := liveness{fill: prev.fill, up: up, clients: clients, runtime: obs.Runtime, digest: obs.Digest, seen: time.Now()}
+	next := liveness{fill: prev.fill, up: up, clients: clients, state: observe.ParseState(obs.Runtime),
+		digest: obs.Digest, seen: time.Now()}
 	switch {
 	case up:
 		next.strikes = 0
@@ -419,7 +423,7 @@ func (w *watchdog) record(a store.Agent, up bool, clients int, obs agent.Observa
 		next.strikes = prev.strikes + 1
 		if next.strikes < downStrikes && prev.up {
 			// Not yet convinced: keep what the last good probe saw.
-			next.up, next.clients, next.runtime, next.digest = true, prev.clients, prev.runtime, prev.digest
+			next.up, next.clients, next.state, next.digest = true, prev.clients, prev.state, prev.digest
 		}
 	}
 	// The screen changing is the one direct evidence of an agent doing something; a failed capture
@@ -454,12 +458,12 @@ func (w *watchdog) record(a store.Agent, up bool, clients int, obs agent.Observa
 	// Activity decides working-vs-idle wherever the text did not settle it. "idle" is what the
 	// classifier says for any screen it doesn't recognise, so on its own it made a busy agent with
 	// an unfamiliar pane look stopped.
-	if next.runtime == "idle" && next.digest != "" && next.digest != prev.digest && prev.digest != "" {
-		next.runtime = "working"
+	if next.state == observe.AtPrompt && next.digest != "" && next.digest != prev.digest && prev.digest != "" {
+		next.state = observe.Working
 	}
 	// Set after the word is final, so it measures the state as reported rather than as read.
-	if next.runtimeSince = prev.runtimeSince; next.runtime != prev.runtime || next.runtimeSince.IsZero() {
-		next.runtimeSince = next.seen
+	if next.stateSince = prev.stateSince; next.state != prev.state || next.stateSince.IsZero() {
+		next.stateSince = next.seen
 	}
 	w.obs[key] = next
 }

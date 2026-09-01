@@ -31,7 +31,7 @@ func containerWorker(t *testing.T, phase string) (*Engine, *store.ProjectStore, 
 		t.Fatalf("set state: %v", err)
 	}
 	deps := &stubDeps{root: t.TempDir()}
-	return New(st, deps), ps, deps
+	return newEngine(st, deps), ps, deps
 }
 
 // TestContainerDirectiveNamesCheckpoint is the bug a worker reported from inside a feature: only the

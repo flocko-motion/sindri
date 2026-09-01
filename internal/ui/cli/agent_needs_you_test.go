@@ -12,9 +12,9 @@ import (
 // user who never opens the TUI still learns the fleet has stopped on them.
 func TestNeedsYouSummaryNamesEveryStuckAgent(t *testing.T) {
 	got := needsYouSummary([]api.AgentView{
-		{Name: "dvalin", Status: api.StatusBlocked},
-		{Name: "gloin", Status: api.StatusSignedOut},
-		{Name: "nori", Status: api.StatusStalled},
+		{Name: "dvalin", Status: api.StatusBlocked, NeedsUser: true},
+		{Name: "gloin", Status: api.StatusSignedOut, NeedsUser: true},
+		{Name: "nori", Status: api.StatusStalled, NeedsUser: true},
 		{Name: "fili", Status: "idle"},
 		{Name: "kili", Status: "working"},
 	})
@@ -39,7 +39,7 @@ func TestNeedsYouSummaryNamesEveryStuckAgent(t *testing.T) {
 func TestAnEscalatedAgentIsQuotedNotJustNamed(t *testing.T) {
 	const q = "drop the two callers or keep both?"
 	got := needsYouSummary([]api.AgentView{
-		{Name: "dvalin", Status: api.StatusEscalated, Escalation: q},
+		{Name: "dvalin", Status: api.StatusEscalated, NeedsUser: true, Escalation: q},
 		{Name: "kili", Status: "working"},
 	})
 	if !strings.Contains(got, q) {

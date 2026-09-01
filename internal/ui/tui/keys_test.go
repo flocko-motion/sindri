@@ -175,6 +175,11 @@ func TestMergeIsBehindThePrefix(t *testing.T) {
 
 // TestMergeIsNotOfferedOnAnUnapprovedPR: the menu answers "what can I do with THIS", so an action
 // the hub would refuse is invisible rather than offered — and, pressed anyway, does nothing.
+//
+// Deliberate, and the reason there is no approve-and-merge behind M (-> sd-9b34c1): merging is the
+// one act no agent may perform, approving is what that gate checks, and collapsing the two would put
+// a keyboard route to merging an unreviewed PR in the TUI that `sindri pr merge` does not have. A is
+// offered on this same row, so the way through is one keystroke away and the help says so.
 func TestMergeIsNotOfferedOnAnUnapprovedPR(t *testing.T) {
 	m := prTabWith(api.PR{ID: "pr-td-1", Status: "open", Project: "repo", Branch: "td-1"})
 	if menuHas(m, "M merge") {
@@ -185,6 +190,10 @@ func TestMergeIsNotOfferedOnAnUnapprovedPR(t *testing.T) {
 	if m.choice.active || m.flash != "" {
 		t.Errorf("a key the menu never offered must do nothing, got choice=%v flash=%q", m.choice.active, m.flash)
 	}
+	// And the way through IS offered, so "does nothing" is not a dead end: approve, then merge.
+	if !menuHas(m, "A approve") {
+		t.Errorf("approve must be offered on an open PR, or M's refusal strands the user:\n%s", menuText(m))
+	}
 }
 
 // TestConfirmModalsDefaultToCancel: the cursor opens on the first option, so a destructive one
@@ -194,7 +203,6 @@ func TestConfirmModalsDefaultToCancel(t *testing.T) {
 		what string
 		open func(*model)
 	}{
-		{"approve & merge", func(m *model) { m.openApproveMergeChoice("pr-td-1") }},
 		{"scrap PR", func(m *model) { m.openScrapPRChoice("pr-td-1") }},
 		{"scrap task", func(m *model) { m.openScrapChoice("td-1") }},
 		{"close task", func(m *model) { m.openCloseChoice("td-1", "pr-td-1") }},

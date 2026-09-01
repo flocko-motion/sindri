@@ -6,6 +6,8 @@
 // limits:  the fill facts and firing preparation; the claim itself is the caller's.
 package workflow
 
+import "context"
+
 // ContextFullFraction is how much of its window a worker may fill before a fresh assignment
 // clears it rather than compacting it — a session that far gone is not worth summarizing.
 const ContextFullFraction = 0.85
@@ -13,35 +15,49 @@ const ContextFullFraction = 0.85
 // contextFull reports whether a worker is past ContextFullFraction of its window. A window of 0,
 // or no recorded usage yet, is never full — guessing one is what this replaced.
 func (e *Engine) contextFull(project, worker string) (tokens int, full bool) {
-	tokens, window, _, ok := e.deps.ContextUsage(project, worker)
-	return tokens, ok && window > 0 && float64(tokens) >= float64(window)*ContextFullFraction
+	o := e.hn.Observe(project, worker)
+	return o.Fill, o.Window > 0 && float64(o.Fill) >= float64(o.Window)*ContextFullFraction
 }
 
 // compactDue is fill past CompactionThreshold's curve — a trigger, not the hard stop.
 func (e *Engine) compactDue(project, worker string) (tokens int, due bool) {
-	tokens, window, _, ok := e.deps.ContextUsage(project, worker)
-	return tokens, ok && window > 0 && tokens >= e.deps.CompactionThreshold(window)
+	o := e.hn.Observe(project, worker)
+	return o.Fill, o.Window > 0 && o.Fill >= e.hn.CompactionThreshold(o.Window)
 }
 
 // compactIfDue fires a due compaction once, queuing dir — the real instruction — behind it, so the
 // agent is never handed dir to act on and then cut off by the compaction that follows.
-func (e *Engine) compactIfDue(project, agent, dir string) (fired bool, err error) {
+func (e *Engine) compactIfDue(ctx context.Context, project, agent, dir string) (fired bool, err error) {
 	if _, due := e.compactDue(project, agent); !due {
 		return false, nil
 	}
-	return true, e.deps.Compact(project, agent, dir)
+	if err := e.hn.Compact(ctx, project, agent); err != nil {
+		return false, err
+	}
+	if err := e.hn.Say(project, agent, dir, PushOnly); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // prepareAssignment runs an already-claimed assignment's preparation — a model switch, else a clear
-// past ContextFullFraction, else compaction if merely due — bracketed so AtLeafBoundary admits the claim.
-func (e *Engine) prepareAssignment(project, agent, tier, dir string) (fired bool, err error) {
-	e.deps.BeginAssignment(project, agent)
-	defer e.deps.EndAssignment(project, agent)
-	if want, known := e.deps.ModelForTier(tier); known && !e.deps.ModelMatches(want, e.deps.CurrentModel(project, agent)) {
-		return true, e.deps.SetModel(project, agent, want, dir)
+// past ContextFullFraction, else compaction if merely due — then delivers dir once it has landed.
+func (e *Engine) prepareAssignment(ctx context.Context, project, agent, tier, dir string) (fired bool, err error) {
+	if want, known := e.deps.ModelForTier(tier); known && !e.hn.ModelMatches(want, e.hn.Observe(project, agent).Model) {
+		if err := e.hn.SetModel(ctx, project, agent, want); err != nil {
+			return false, err
+		}
+		if err := e.hn.Say(project, agent, dir, PushOnly); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
 	if _, full := e.contextFull(project, agent); full {
-		return true, e.deps.FireClear(project, agent, dir, false)
+		if err := e.hn.Clear(ctx, project, agent); err != nil {
+			return false, err
+		}
+		err := e.hn.Say(project, agent, dir, PushOnly)
+		return true, err
 	}
-	return e.compactIfDue(project, agent, dir)
+	return e.compactIfDue(ctx, project, agent, dir)
 }

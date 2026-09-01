@@ -93,25 +93,16 @@ func (e *Engine) idleReviewer(project string) (string, error) {
 	return e.idleReviewerOn(GlobalProject)
 }
 
-// idleReviewerOn is idleReviewer narrowed to one project's own roster.
+// idleReviewerOn is idleReviewer narrowed to one project's own roster. An idle PROMPT is the extra
+// condition here, since this answers "who could take it right now" rather than "who may be given it".
 func (e *Engine) idleReviewerOn(home string) (string, error) {
-	ps := e.store.For(home)
-	roster, err := ps.Roster()
+	roster, err := e.sit.Roster(home)
 	if err != nil {
 		return "", fmt.Errorf("load roster for %s: %w", home, err)
 	}
-	for _, a := range roster {
-		// ClearArmed for the same reason as Retired: a review handed over now would be cut in half
-		// by the clear that is about to land.
-		if a.Role != "reviewer" || a.Retired || a.ClearArmed || !e.deps.AgentIdle(home, a.Name) {
-			continue
-		}
-		_, held, err := e.store.ReviewingPR(a.Project, a.Name)
-		if err != nil {
-			return "", err
-		}
-		if held == "" {
-			return a.Name, nil
+	for _, s := range roster {
+		if reviewerAssignable(s) && s.ReviewingPR == "" && s.AtPrompt() {
+			return s.Name, nil
 		}
 	}
 	return "", nil
@@ -122,21 +113,21 @@ func (e *Engine) idleReviewerOn(home string) (string, error) {
 // One per call: a second is woken by the next tick only if a second row is still waiting.
 func (e *Engine) wakeAReviewer(project string) {
 	for _, home := range []string{project, GlobalProject} {
-		roster, err := e.store.For(home).Roster()
+		roster, err := e.sit.Roster(home)
 		if err != nil {
 			continue
 		}
-		for _, a := range roster {
+		for _, s := range roster {
 			// Stopped, never down: a pod the hub reclaimed comes back on its own session, where one
 			// that died did so for a reason a restart here would just repeat.
-			if !reviewerAssignable(a) || !a.Stopped || e.deps.AgentUp(home, a.Name) {
+			if !reviewerAssignable(s) || !s.Stopped || s.Up {
 				continue
 			}
-			if err := e.deps.StartAgent(home, a.Name); err != nil {
-				fmt.Fprintf(os.Stderr, "hub: waking %s for a waiting review: %v\n", a.Name, err)
+			if err := e.hn.Start(home, s.Name); err != nil {
+				fmt.Fprintf(os.Stderr, "hub: waking %s for a waiting review: %v\n", s.Name, err)
 				continue
 			}
-			_ = e.store.For(home).Log(a.Name, "woken", "a review is waiting and no reviewer was up")
+			_ = e.store.For(home).Log(s.Name, "woken", "a review is waiting and no reviewer was up")
 			return
 		}
 		if project == GlobalProject {

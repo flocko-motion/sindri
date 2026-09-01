@@ -150,10 +150,11 @@
       row now carries it too — the rejected branch was unreachable, since the menu
       refuses a letter it never offered. `TestARejectedTaskStillOffersAVerdict` pins it,
       with both boundaries (pending still offers, closed and approved do not).
-      DEFERRED, sd-9b34c1: `keyMerge`'s approve-then-merge branch dead from the keyboard.
-      Widening the gate is a real decision rather than a repair — `TestMergeIsNotOffered\
-      OnAnUnapprovedPR` asserts today's behaviour deliberately, and the safety argument
-      (no keyboard route to merging an unreviewed PR) stands against the dead-path one.
+      DECIDED IN sd-9b34c1: the gate stays, and the dead branch goes. `openApproveMergeChoice`
+      and its onKey branch are deleted, because the CLI has no combined verb either —
+      `sindri pr approve` then `sindri pr merge` are two deliberate acts, and a TUI-only
+      shortcut past the one gate no agent may pass would be a capability the other
+      front-end lacks. A is offered on the same row, so the way through is one keystroke.
       DEFERRED, sd-6e972c: shedding drops declaration order, not usefulness order.
 
 ## 7. Review fixes, round 7

@@ -142,7 +142,7 @@ func (r *refwatch) preflight(ctx context.Context, projects []store.Project) {
 			// A clear is armed regardless of whether any assignment ever triggers it, so an agent
 			// that never asks again still needs a backstop — unlike compact and model-select, which
 			// the gate now fires inline the moment it has an assignment to prepare for, this has no
-			// such trigger to lean on (-> workflow.Engine.claimNext, agent.Service.FireClear).
+			// such trigger to lean on (-> workflow.Engine.claimNext, agent.Service.FireArmedClears).
 			r.h.agents.FireArmedClears(ctx, p.Tag)
 			// Idleness alone reclaims a pod, and waiting work wakes one back up — both read the fleet
 			// rather than any one agent's request, so both belong on this same sweep.

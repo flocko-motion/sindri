@@ -19,7 +19,7 @@ const ReannounceAfter = 5 * time.Minute
 // mid-turn, so a one-line notice sent now arrives as that turn ends — the moment it can be acted on,
 // where waiting for an idle prompt made the news stale. The message itself waits in the mailbox.
 func (e *Engine) reachable(project, name string) bool {
-	return e.deps.AgentUp(project, name)
+	return e.hn.Observe(project, name).Up
 }
 
 // NudgeMailWaiting wakes an agent that has unread mail it has not been told about, whatever its ROLE — a
@@ -36,12 +36,15 @@ func (e *Engine) NudgeMailWaiting(project, name string) bool {
 	// Parked stays exempt: retirement and a full context are states the hub itself put the agent in
 	// and told it to wait in, and "hands off every automatic behaviour" is the whole of what retiring
 	// means. Holding work is NOT such a state, which is the distinction this used to miss.
-	if !e.reachable(project, name) || e.parkedByTheHub(project, name) {
+	if !e.reachable(project, name) {
 		return false
 	}
-	// The whole unread count, not just the new part — and Regardless, since this push IS the exit
-	// from a refusing state (escalated, waiting on exactly this answer), not news of more work.
-	if err := e.deps.Deliver(project, name, MsgMailWaiting(unread), PushOnly.Regardless()); err != nil {
+	if s, serr := e.sit.Of(project, name); serr != nil || s.ParkedByTheHub() {
+		return false
+	}
+	// The whole unread count, not just the new part. Ungated: this push IS the exit from a refusing
+	// state (escalated, waiting on exactly this answer), not news of more work.
+	if err := e.hn.Say(project, name, MsgMailWaiting(unread), PushOnly); err != nil {
 		return false
 	}
 	if err := ps.MarkMailAnnounced(name); err != nil {

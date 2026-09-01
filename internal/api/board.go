@@ -14,7 +14,14 @@ type AgentView struct {
 	Name    string `json:"name"`
 	Role    string `json:"role"`
 	Status  string `json:"status"`
-	Task    string `json:"task"`
+	// NeedsUser: only a human moves it on. Decided by the hub and carried — a front-end links no hub
+	// package, so a rule it applied itself would be a second copy of one.
+	NeedsUser bool `json:"needsUser,omitempty"`
+	// ObservedAt is when the reading behind Status was taken, StillFor how long the display had stood
+	// unchanged by then — the evidence, shown beside the conclusion drawn from it.
+	ObservedAt string `json:"observedAt,omitempty"`
+	StillFor   string `json:"stillFor,omitempty"`
+	Task       string `json:"task"`
 	// Feature is the parent task whose subtasks it is working, if any (gates the agent's verbs).
 	Feature   string `json:"feature,omitempty"`
 	Branch    string `json:"branch"`

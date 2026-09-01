@@ -11,12 +11,89 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/flo-at/sindri/internal/config"
+	"github.com/flo-at/sindri/internal/hub/observe"
 	"github.com/flo-at/sindri/internal/hub/server"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
+
+// observed is the hub's standing look at one agent, assembled from what it already holds in memory:
+// the watchdog's last sweep and the transient lifecycle intent. Evidence only — every judgement over
+// it belongs to the orchestrator (-> hub/observe, hub/situation.Surface).
+//
+// Nothing observed yet is a real state during startup: the gatherer exists before the watchdog, so a
+// delivery on the way up would otherwise ask a nil one. The watchdog is built LAST of the two read
+// here, so this one check covers the agent service too (-> Hub.open's order).
+func (h *Hub) observed(project, name string) observe.Observation {
+	if h.watch == nil {
+		return observe.Observation{}
+	}
+	l, seen := h.watch.get(project, name)
+	o := observe.Observation{
+		Up: l.up, Clients: l.clients, State: l.state, Digest: l.digest,
+		StillSince: l.stillSince, ToolSince: l.toolSince, StateSince: l.stateSince,
+		Fill: l.tokens, Window: l.window, Model: l.model,
+	}
+	if seen {
+		o.TakenAt = l.seen
+	}
+	o.Launching, o.LaunchFailed, o.Stopping = h.agents.Intent(project, name)
+	return o
+}
+
+// harness adapts the hub to workflow.Harness: the agent's box, and nothing that names a task.
+type harness struct{ h *Hub }
+
+func (x harness) Observe(project, name string) observe.Observation {
+	return x.h.observed(project, name)
+}
+
+// Probe takes a FRESH look where Observe reports the standing one — for a caller that needs the
+// answer as of now. Under the hub's lifetime, since workflow.Harness carries no context of its own.
+func (x harness) Probe(project, name string) observe.Observation {
+	o := x.h.observed(project, name)
+	o.Up = x.h.agents.AgentAlive(x.h.lifetime, project, name)
+	o.TakenAt = time.Now()
+	return o
+}
+
+func (x harness) Say(project, name, text string, d workflow.Delivery) error {
+	return x.h.Deliver(project, name, text, d)
+}
+
+func (x harness) Clear(ctx context.Context, project, name string) error {
+	return x.h.agents.Clear(ctx, project, name)
+}
+
+func (x harness) Compact(ctx context.Context, project, name string) error {
+	return x.h.agents.Compact(ctx, project, name)
+}
+
+func (x harness) SetModel(ctx context.Context, project, name, model string) error {
+	return x.h.agents.SetModel(ctx, project, name, model)
+}
+
+// Interrupt and Start run under the hub's lifetime for the same reason Probe does.
+func (x harness) Interrupt(project, name string) error {
+	return x.h.agents.Interrupt(x.h.lifetime, project, name)
+}
+
+func (x harness) Start(project, name string) error {
+	return x.h.agents.Launch(x.h.lifetime, project, name, false, false, 0, 0, io.Discard)
+}
+
+func (x harness) Container(project, name string) string { return x.h.container(project, name) }
+
+func (x harness) ModelMatches(want, detected string) bool {
+	return x.h.agents.ModelMatches(want, detected)
+}
+
+func (x harness) CompactionThreshold(window int) int {
+	return x.h.agents.CompactionThreshold(window)
+}
 
 // agentDeps adapts the hub to agent.Deps.
 type agentDeps struct{ h *Hub }
@@ -28,6 +105,16 @@ func (d agentDeps) ArchitectureDoc(project string) string     { return d.h.archi
 func (d agentDeps) RefreshTask(project, id string) error      { return d.h.wf.RefreshTask(project, id) }
 func (d agentDeps) Rehydrate(project, name string)            { d.h.rehydrate(project, name) }
 
+func (d agentDeps) Kickoff(project, name string) string { return d.h.wf.Kickoff(project, name) }
+
+func (d agentDeps) Observation(project, name string) observe.Observation {
+	return d.h.observed(project, name)
+}
+
+func (d agentDeps) Deliver(project, name, text string, del workflow.Delivery) error {
+	return d.h.Deliver(project, name, text, del)
+}
+
 // ForgetFill drops the observer's fill for one agent, so the board stops reporting a figure the
 // hub has just made false. Zeroed rather than re-sampled: the transcript is rewritten by the agent,
 // not by us, so the honest answer until the next sweep is that nobody has measured it.
@@ -35,7 +122,7 @@ func (d agentDeps) ForgetFill(project, name string) { d.h.watch.forgetFill(proje
 
 // AgentUp and AgentClients read the watchdog's last observation, for the hub's own idle/clear ticks
 // (FireIdleStops, FireArmedClears): a probe per roster member per tick is what the watchdog exists
-// to spare, the same reason workflowDeps.AgentUp reads it rather than probing (below).
+// to spare.
 func (d agentDeps) AgentUp(project, name string) bool {
 	l, ok := d.h.watch.get(project, name)
 	return ok && l.up
@@ -101,8 +188,8 @@ func (d agentchanDeps) Commands(project, name string) (any, error) {
 func (d agentchanDeps) Directive(ctx context.Context, project, name string) (string, error) {
 	return d.h.wf.AgentDirective(ctx, project, name)
 }
-func (d agentchanDeps) Exec(project, name string, args []string, out io.Writer) (int, error) {
-	return d.h.AgentExec(project, name, args, out)
+func (d agentchanDeps) Exec(ctx context.Context, project, name string, args []string, out io.Writer) (int, error) {
+	return d.h.AgentExec(ctx, project, name, args, out)
 }
 func (d agentchanDeps) TokenAgent(token string) (project, name string, ok bool, err error) {
 	return d.h.agents.ForToken(token)
@@ -122,39 +209,7 @@ func (d workflowDeps) ProjectConfig(project string) (config.Config, error) {
 
 func (d workflowDeps) ArchitectureDoc(project string) string { return d.h.architectureDoc(project) }
 
-func (d workflowDeps) Container(project, name string) string { return d.h.container(project, name) }
-
 func (d workflowDeps) Notify() { d.h.notify() }
-
-func (d workflowDeps) Deliver(project, name, text string, del workflow.Delivery) error {
-	return d.h.Deliver(project, name, text, del)
-}
-
-// Interrupt, AgentAlive and CurrentModel reach the runtime for the workflow engine, whose Deps
-// carry no context: the engine acts on the fleet's own timeline — a merge landing, a review
-// arriving — so the hub's lifetime is the honest lineage for them (-> Hub.lifetime).
-func (d workflowDeps) Interrupt(project, name string) error {
-	return d.h.agents.Interrupt(d.h.lifetime, project, name)
-}
-
-func (d workflowDeps) AgentAlive(project, name string) bool {
-	return d.h.agents.AgentAlive(d.h.lifetime, project, name)
-}
-
-// AgentIdle reads the watchdog's last observation rather than probing: the sweep classifies every
-// pane every few seconds anyway, and an answer taken here would cost an exec per agent per tick.
-func (d workflowDeps) AgentIdle(project, name string) bool {
-	l, ok := d.h.watch.get(project, name)
-	return ok && l.up && l.runtime == "idle"
-}
-
-// AgentUp answers liveness from the same observation, for the same reason. An agent nothing has
-// looked at yet reads down, which is the safe direction: it costs a tick's delay, where a probe
-// per agent per tick cost the whole runtime.
-func (d workflowDeps) AgentUp(project, name string) bool {
-	l, ok := d.h.watch.get(project, name)
-	return ok && l.up
-}
 
 func (d workflowDeps) TaskComments(project, id string) []store.Comment {
 	return d.h.comments.ForView(project, id)
@@ -168,58 +223,12 @@ func (d workflowDeps) Escalate(project, name, question string) (string, error) {
 	return d.h.Escalate(project, name, question)
 }
 
-// StartAgent runs under the hub's lifetime: bringing a reviewer back for work that has arrived is
-// the fleet's business, not the request's, and the caller is a tick with nobody waiting on it.
-func (d workflowDeps) StartAgent(project, name string) error {
-	return d.h.agents.RestartAgent(d.h.lifetime, project, name, io.Discard)
-}
-
 // KnownProjects is best-effort: a skipped scan self-corrects next tick (unlike the board -> State).
 func (d workflowDeps) KnownProjects() []store.Project {
 	ps, _ := d.h.projects.Known()
 	return ps
 }
 
-func (d workflowDeps) ContextUsage(project, name string) (tokens, window int, model string, ok bool) {
-	return d.h.agents.ContextUsage(project, name)
-}
-
-func (d workflowDeps) CompactionThreshold(window int) int {
-	return d.h.agents.CompactionThreshold(window)
-}
-
-func (d workflowDeps) CurrentModel(project, name string) string {
-	return d.h.agents.CurrentModel(d.h.lifetime, project, name)
-}
-
 func (d workflowDeps) ModelForTier(tier string) (string, bool) {
 	return d.h.agents.ModelForTier(tier)
-}
-
-func (d workflowDeps) ModelMatches(want, detected string) bool {
-	return d.h.agents.ModelMatches(want, detected)
-}
-
-func (d workflowDeps) SetModel(project, name, model, next string) error {
-	return d.h.agents.SetModel(d.h.lifetime, project, name, model, next)
-}
-
-func (d workflowDeps) HoldsNothing(project, name, role string) (bool, error) {
-	return d.h.agents.HoldsNothing(project, name, role)
-}
-
-func (d workflowDeps) Compact(project, name, next string) error {
-	return d.h.agents.Compact(d.h.lifetime, project, name, next)
-}
-
-func (d workflowDeps) FireClear(project, name, next string, interrupt bool) error {
-	return d.h.agents.FireClear(d.h.lifetime, project, name, next, interrupt)
-}
-
-func (d workflowDeps) BeginAssignment(project, name string) {
-	d.h.agents.BeginAssignment(project, name)
-}
-
-func (d workflowDeps) EndAssignment(project, name string) {
-	d.h.agents.EndAssignment(project, name)
 }

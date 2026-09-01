@@ -49,11 +49,11 @@ func (e *Engine) AssignPlan(project, agent, goal, taskID string) error {
 	}
 	// Interrupt first: the directive has to land on an idle prompt, or it queues behind whatever
 	// the agent is already doing and arrives after the work it was meant to redirect.
-	if e.deps.AgentAlive(project, agent) {
-		_ = e.deps.Interrupt(project, agent)
+	if e.hn.Probe(project, agent).Up {
+		_ = e.hn.Interrupt(project, agent)
 	}
 	brief := MsgPlanAssignment(subject, taskID, e.deps.ArchitectureDoc(project), e.planReading(project))
-	if err := e.deps.Deliver(project, agent, brief, MailAndPush); err != nil {
+	if err := e.hn.Say(project, agent, brief, MailAndPush); err != nil {
 		return err
 	}
 	st, _ := ps.GetState(agent)
@@ -484,10 +484,10 @@ func enclosing(ps *store.ProjectStore, id string) map[string]bool {
 func (e *Engine) tellOne(project, agent, id, unit, fields string) string {
 	// A down agent is not waited on (InjectWhenReady would sit there): the record on the task is
 	// what reaches it when it comes back.
-	if !e.deps.AgentAlive(project, agent) {
+	if !e.hn.Probe(project, agent).Up {
 		return fmt.Sprintf(" %s holds %s but isn't running — it will read the change on the task.", agent, unit)
 	}
-	if err := e.deps.Deliver(project, agent, MsgTaskEdited(id, unit, fields), MailOnly); err != nil {
+	if err := e.hn.Say(project, agent, MsgTaskEdited(id, unit, fields), MailOnly); err != nil {
 		return fmt.Sprintf(" %s holds %s and could not be told (%v) — say so in the meeting room.", agent, unit, err)
 	}
 	return fmt.Sprintf(" %s holds %s and was told what changed.", agent, unit)
