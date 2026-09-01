@@ -234,7 +234,7 @@ func TestMailDefersPastAModelChange(t *testing.T) {
 	if err := ps.SetState(store.AgentState{Agent: agent, Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	e := New(st, deps)
+	e := New(st, deps, deps)
 	addUnreadMail(t, ps, agent)
 
 	dir, err := e.AgentDirective(context.Background(), "repo", agent)
@@ -303,7 +303,7 @@ func TestMailDefersPastCompactionBetweenSubtasks(t *testing.T) {
 	addUnreadMail(t, ps, agent)
 
 	deps := &stubDeps{root: root, ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
-	e := New(st, deps)
+	e := New(st, deps, deps)
 
 	dir, err := e.AgentDirective(context.Background(), "repo", agent)
 	if err != nil {
@@ -362,7 +362,7 @@ func TestMailOutranksAFeatureWithNothingLeftOpen(t *testing.T) {
 	}
 	addUnreadMail(t, ps, agent)
 
-	e := New(st, &stubDeps{root: root})
+	e := newEngine(st, &stubDeps{root: root})
 	dir, err := e.AgentDirective(context.Background(), "repo", agent)
 	if err != nil {
 		t.Fatalf("AgentDirective: %v", err)

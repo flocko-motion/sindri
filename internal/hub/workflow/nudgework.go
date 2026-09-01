@@ -34,7 +34,7 @@ func (e *Engine) nudgeIdleWorkers(project, priority string) {
 		}
 		// Any RUNNING agent: this fires the instant work is rated, and a message typed behind a busy
 		// turn still lands when it ends. The periodic backstop waits for an idle prompt instead.
-		if !e.deps.AgentUp(project, a.Name) || e.allowed(project, a.Name).Nudge != "" {
+		if !e.hn.Observe(project, a.Name).Up || e.allowed(project, a.Name).Nudge != "" {
 			continue
 		}
 		st, _ := ps.GetState(a.Name)
@@ -84,7 +84,7 @@ func (e *Engine) notifyOnce(ps *store.ProjectStore, project, agent, lastNudge, t
 	}
 	// Recorded only once Deliver says it landed — a signed-out pane or a container mid-restart reports
 	// "up" but never receives it, and marking it told anyway would silence the backstop for good.
-	if err := e.deps.Deliver(project, agent, MsgWorkAvailable(taskID), PushOnly); err != nil {
+	if err := e.hn.Say(project, agent, MsgWorkAvailable(taskID), PushOnly); err != nil {
 		return false
 	}
 	_ = ps.Log(agent, "nudge", "work available: "+taskID)
@@ -126,7 +126,7 @@ func (e *Engine) AssignPendingWork(project string) {
 	for _, a := range roster {
 		// An IDLE prompt, unlike the event-triggered sweep: this repeats every tick, so it waits for a
 		// moment the agent is actually listening rather than queuing behind whatever it is doing.
-		if !e.deps.AgentIdle(project, a.Name) {
+		if !e.hn.Observe(project, a.Name).AtPrompt() {
 			continue
 		}
 		st, _ := ps.GetState(a.Name)

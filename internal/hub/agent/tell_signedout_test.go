@@ -6,12 +6,13 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	agentport "github.com/flo-at/sindri/internal/adapter/agent"
 	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/config"
 	"github.com/flo-at/sindri/internal/container"
-	"github.com/flo-at/sindri/internal/hub/situation"
+	"github.com/flo-at/sindri/internal/hub/observe"
 	"github.com/flo-at/sindri/internal/hub/store"
 	"github.com/flo-at/sindri/internal/hub/workflow"
 )
@@ -182,10 +183,10 @@ func (tellDeps) ForgetFill(_, _ string)                      {}
 
 func (tellDeps) Deliver(_, _, _ string, _ workflow.Delivery) error { return nil }
 
-// Reading mirrors the always-up fake runtime this fixture backs, so the situation-derived rules see
-// the same liveness AgentUp reports.
-func (tellDeps) Reading(_, _ string) situation.Reading {
-	return situation.Reading{Observed: true, Up: true}
+// Observation mirrors the always-up fake runtime this fixture backs, so the situation-derived rules
+// see the same liveness AgentUp reports.
+func (tellDeps) Observation(_, _ string) observe.Observation {
+	return observe.Observation{TakenAt: time.Now(), Up: true}
 }
 
 // AgentUp mirrors fakeRuntime's always-up container, so the idle/clear sweeps this fixture backs

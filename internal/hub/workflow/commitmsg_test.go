@@ -121,7 +121,7 @@ func TestSubmitCommitsConventionally(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	e := New(st, &stubDeps{root: root})
+	e := newEngine(st, &stubDeps{root: root})
 	c := registry.Caller{Project: "repo", Agent: agent, Role: "worker", Phase: "working"}
 
 	if code, out := submitAll(t, e, c, "retry with backoff"); code != 0 {
@@ -173,7 +173,7 @@ func TestCheckpointFallsBackToTaskTitle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	e := New(st, &stubDeps{root: root})
+	e := newEngine(st, &stubDeps{root: root})
 	c := registry.Caller{Project: "repo", Agent: agent, Role: "worker", Phase: "working"}
 	var out strings.Builder
 	if code, err := e.CmdCheckpoint(c, nil, &out); err != nil || code != 0 {
@@ -210,7 +210,7 @@ func TestMergeCommitIsConventional(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	e := New(st, &stubDeps{root: root})
+	e := newEngine(st, &stubDeps{root: root})
 	caller := registry.Caller{Project: "repo", Agent: agent, Role: "worker", HasTask: true, Phase: "working"}
 	if code, err := e.CmdContribute(caller, []string{"checkpoint"}, io.Discard); err != nil || code != 0 {
 		t.Fatalf("CmdContribute: code=%d err=%v", code, err)

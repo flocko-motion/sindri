@@ -51,7 +51,7 @@ func featureWorker(t *testing.T, openChild bool) (*Engine, *store.ProjectStore, 
 		t.Fatal(err)
 	}
 	deps := &stubDeps{root: root}
-	return New(st, deps), ps, registry.Caller{Project: "repo", Agent: agent, Role: "worker", Phase: phase}, deps
+	return newEngine(st, deps), ps, registry.Caller{Project: "repo", Agent: agent, Role: "worker", Phase: phase}, deps
 }
 
 // TestFinishedFeatureSubmitsItself is the answer to "why can't dain submit his work?". A parent task

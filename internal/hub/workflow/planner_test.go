@@ -31,7 +31,7 @@ func plannerEngine(t *testing.T, id, approval string) (*Engine, registry.Caller,
 			t.Fatalf("set approval: %v", err)
 		}
 	}
-	e := New(st, &stubDeps{root: t.TempDir()})
+	e := newEngine(st, &stubDeps{root: t.TempDir()})
 	return e, registry.Caller{Project: "proj", Agent: "galar", Role: "planner"}, ps
 }
 
@@ -450,7 +450,7 @@ func TestSyncToleratesRepoWithoutTd(t *testing.T) {
 	if err := st.RegisterProject("proj", root); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	e := New(st, &stubDeps{root: root})
+	e := newEngine(st, &stubDeps{root: root})
 
 	if err := e.SyncTasks("proj"); err != nil {
 		t.Fatalf("a repo with no td store should sync cleanly, got: %v", err)
@@ -491,7 +491,7 @@ func workerEngineComments(t *testing.T, tasks []store.Task, container, current s
 	if err := ps.SetState(store.AgentState{Agent: "eitri", Container: container, Task: current, Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	return New(st, &stubDeps{root: root, comments: comments}), registry.Caller{Project: "proj", Agent: "eitri", Role: "worker"}
+	return newEngine(st, &stubDeps{root: root, comments: comments}), registry.Caller{Project: "proj", Agent: "eitri", Role: "worker"}
 }
 
 // TestWorkerSeesItsPackage: a package is claimed whole for the context it carries, so that

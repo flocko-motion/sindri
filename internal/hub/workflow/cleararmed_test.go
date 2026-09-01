@@ -117,7 +117,7 @@ func TestAnArmedReviewerIsNotHandedTheNextPRThroughRequestReview(t *testing.T) {
 	if err := ps.PutPR(store.PR{ID: "pr-c", Task: "td-c", Agent: "bombur", Branch: "pr-c", Base: "main", Status: "open"}); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, &stubDeps{root: root, alive: true})
+	e := newEngine(st, &stubDeps{root: root, alive: true})
 	if err := e.RequestReview("repo", "pr-c", ""); err != nil {
 		t.Fatalf("RequestReview: %v", err)
 	}

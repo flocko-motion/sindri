@@ -7,7 +7,6 @@
 package hub
 
 import (
-	"errors"
 	"fmt"
 	"os"
 
@@ -21,10 +20,6 @@ import (
 // reader either way. REFUSED over-length, never truncated: a silent cut teaches nothing.
 const maxMessageLen = 300
 
-// errPushDidNotLand answers a push-only delivery the wake gate refused — an injection failure returns
-// its own real error instead, so this covers only the case with no underlying cause to report.
-var errPushDidNotLand = errors.New("push did not land")
-
 // senderFor is who a message is from: what the sender stated, else the hub in its own voice — which is
 // what an unattributed hub message IS, rather than a value to guess at.
 func senderFor(d workflow.Delivery) string {
@@ -36,6 +31,10 @@ func senderFor(d workflow.Delivery) string {
 
 // Deliver sends text to an agent the way d says. MAIL FIRST, so a crash between the two loses only the
 // wake, which the mailbox then absorbs; push-only, the failure is returned, nothing else saying it.
+//
+// It asks no rule whether the message is WORTH sending. That judgement belongs where the message is
+// composed — a sender knows what it is about to say and why — and asking it here made the ruleset
+// and the delivery path call each other through the composition root (-> workflow.Surface.Wake).
 func (h *Hub) Deliver(project, name, text string, d workflow.Delivery) error {
 	if !d.Sends() {
 		return fmt.Errorf("delivery to %s/%s asks for neither mail nor push, so it is not a message", project, name)
@@ -53,15 +52,6 @@ func (h *Hub) Deliver(project, name, text string, d workflow.Delivery) error {
 	// The user has no session to type into, so their mailbox IS the channel: a push to them is not a
 	// failure to report, it is a thing that does not exist.
 	if !d.Push || name == api.SenderUser {
-		return nil
-	}
-	// Mail already carries the message, so refusing here loses only the interruption: the agent reads it
-	// on its own next ask — unless d.Unconditional says this push IS the exit from that very state.
-	if r := h.wf.WakeRefusal(project, name); r != "" && !d.Unconditional {
-		_ = ps.Log(name, "push-suppressed", r+" — not woken for: "+text)
-		if !d.Mail {
-			return errPushDidNotLand
-		}
 		return nil
 	}
 	// The hub's lifetime, not the caller's: a push must land whether or not whoever triggered it is

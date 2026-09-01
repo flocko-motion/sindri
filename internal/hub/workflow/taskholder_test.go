@@ -53,7 +53,7 @@ func holderFixture(t *testing.T) *Engine {
 	if err := ps.PutPR(store.PR{ID: "pr-sd-review", Task: "sd-review", Agent: "bombur", Status: "open"}); err != nil {
 		t.Fatal(err)
 	}
-	return New(st, &stubDeps{root: root})
+	return newEngine(st, &stubDeps{root: root})
 }
 
 // taskView runs the agent-facing task verb as role and returns what it printed.

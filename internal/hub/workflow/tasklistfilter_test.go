@@ -55,7 +55,7 @@ func backlogEngine(t *testing.T) (*Engine, registry.Caller) {
 	if err := ps.PutAgent(store.Agent{Name: "nabbi", Role: "planner", Workspace: ".worktrees/nabbi"}); err != nil {
 		t.Fatal(err)
 	}
-	return New(st, &stubDeps{root: root}), registry.Caller{Project: "proj", Agent: "nabbi", Role: "planner"}
+	return newEngine(st, &stubDeps{root: root}), registry.Caller{Project: "proj", Agent: "nabbi", Role: "planner"}
 }
 
 // listTasks runs `task list` with the given arguments and returns its output and exit code.

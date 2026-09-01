@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flo-at/sindri/internal/api"
 	"github.com/flo-at/sindri/internal/container"
 )
 
@@ -36,8 +35,8 @@ func TestLaunchRecordsTheRequestEvenWhenThePreflightFails(t *testing.T) {
 	}
 	// The failure still clears the intent, same as before the reordering: nothing here should
 	// leave the board stuck reading "launching" for a launch that has already given up.
-	if got := s.AgentStatus("proj", "eitri", false, true, "", false); got != "down" {
-		t.Errorf("AgentStatus after a failed preflight = %q, want down", got)
+	if l, f, _ := s.Intent("proj", "eitri"); l || f {
+		t.Error("a failed preflight must leave no intent standing, or the board reads launching for ever")
 	}
 }
 
@@ -91,8 +90,8 @@ func TestFailLaunchMarksLogsAndReleases(t *testing.T) {
 
 	s.FailLaunch(context.Background(), "proj", "eitri", "the container exited during launch")
 
-	if got := s.AgentStatus("proj", "eitri", false, true, "", false); got != api.StatusLaunchFailed {
-		t.Errorf("AgentStatus after FailLaunch = %q, want %q", got, api.StatusLaunchFailed)
+	if _, failed, _ := s.Intent("proj", "eitri"); !failed {
+		t.Error("FailLaunch must leave the failed-launch intent standing, for the board to fold")
 	}
 	evs, _ := s.store.For("proj").Events("eitri", 0)
 	found := false
@@ -122,7 +121,7 @@ func TestFailLaunchIsANoOpOnceTheLaunchHasMovedOn(t *testing.T) {
 	s, f := tellFixture(t, "eitri", idlePane)
 	// No "launching" intent at all — e.g. it already resolved by the time the watchdog got here.
 	s.FailLaunch(context.Background(), "proj", "eitri", "too late")
-	if got := s.AgentStatus("proj", "eitri", false, true, "", false); got == api.StatusLaunchFailed {
+	if _, failed, _ := s.Intent("proj", "eitri"); failed {
 		t.Error("FailLaunch marked an agent that was never recorded as launching")
 	}
 	if len(f.removed) != 0 {
@@ -141,14 +140,14 @@ func TestTheSweepsVerdictOutlivesTheLaunchCall(t *testing.T) {
 
 	s.clearLaunching("proj", "eitri")
 
-	if got := s.AgentStatus("proj", "eitri", false, true, "", false); got != api.StatusLaunchFailed {
-		t.Errorf("AgentStatus = %q, want the sweep's %q to stand", got, api.StatusLaunchFailed)
+	if _, failed, _ := s.Intent("proj", "eitri"); !failed {
+		t.Error("the sweep's verdict must outlive the launch call that raced it")
 	}
 	// A launch still in flight is the case the cleanup IS for: that one it must retract.
 	s.setLifecycle("proj", "galar", "launching")
 	s.clearLaunching("proj", "galar")
-	if got := s.AgentStatus("proj", "galar", false, true, "", false); got != "down" {
-		t.Errorf("AgentStatus = %q, want down — the launch it set gave up", got)
+	if l, f, _ := s.Intent("proj", "galar"); l || f {
+		t.Error("clearLaunching must retract the intent the call itself set")
 	}
 }
 
@@ -174,8 +173,8 @@ func TestTheVerdictIsWrittenBeforeTheRuntimeIsAskedAnything(t *testing.T) {
 
 	s.FailLaunch(ctx, "proj", "eitri", "the container exited during launch")
 
-	if got := s.AgentStatus("proj", "eitri", false, true, "", false); got != api.StatusLaunchFailed {
-		t.Errorf("AgentStatus = %q, want %q — the verdict does not wait on the runtime", got, api.StatusLaunchFailed)
+	if _, failed, _ := s.Intent("proj", "eitri"); !failed {
+		t.Error("the verdict is written before the runtime is asked anything, so it must stand here")
 	}
 	evs, _ := s.store.For("proj").Events("eitri", 0)
 	var reason, unreleased bool

@@ -36,7 +36,7 @@ func leafWorker(t *testing.T, phase string) (*Engine, *store.ProjectStore, regis
 		t.Fatalf("set state: %v", err)
 	}
 	deps := &stubDeps{root: root, alive: true}
-	return New(st, deps), ps, registry.Caller{Project: "repo", Agent: agent, Role: "worker", Phase: phase}, deps
+	return newEngine(st, deps), ps, registry.Caller{Project: "repo", Agent: agent, Role: "worker", Phase: phase}, deps
 }
 
 // didSomeWork puts an edit in the agent's worktree. A branch matching its base has nothing to

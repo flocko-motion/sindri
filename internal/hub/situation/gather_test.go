@@ -3,6 +3,9 @@ package situation
 import (
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/flo-at/sindri/internal/hub/observe"
 
 	"github.com/flo-at/sindri/internal/hub/store"
 )
@@ -11,9 +14,9 @@ import (
 // gather per agent from one per roster.
 type countingObserver struct{ reads int }
 
-func (o *countingObserver) Reading(_, _ string) Reading {
+func (o *countingObserver) Observe(_, _ string) observe.Observation {
 	o.reads++
-	return Reading{Observed: true, Up: true}
+	return observe.Observation{TakenAt: time.Now(), Up: true}
 }
 
 // gatherFixture is one project with three agents and one claimable task.

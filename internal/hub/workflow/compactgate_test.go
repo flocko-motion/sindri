@@ -31,7 +31,7 @@ func reviewerWithUnclaimedReview(t *testing.T, deps *stubDeps) (*Engine, *store.
 	if _, err := ps.AddReview("pr-1", "check it"); err != nil {
 		t.Fatalf("add review: %v", err)
 	}
-	return New(st, deps), ps
+	return newEngine(st, deps), ps
 }
 
 // TestFillPastTheCompactionThresholdClaimsThenDeliversTheDirectiveAfterCompact: the claim comes
@@ -87,7 +87,7 @@ func TestFillUnderTheCompactionThresholdIsHandedWork(t *testing.T) {
 // reads as simply not due, and the very next due reading fires again regardless.
 func TestAnUnreadableSampleDoesNotStopANextFire(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
-	e := New(nil, deps)
+	e := newEngine(nil, deps)
 
 	if _, err := e.compactIfDue(t.Context(), "repo", "dvalin", "dir"); err != nil {
 		t.Fatalf("compactIfDue: %v", err)
@@ -118,7 +118,7 @@ func TestAnUnreadableSampleDoesNotStopANextFire(t *testing.T) {
 // Compact rather than treating the agent as permanently done compacting.
 func TestCompactionFiresAgainAfterLanding(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
-	e := New(nil, deps)
+	e := newEngine(nil, deps)
 
 	if _, err := e.compactIfDue(t.Context(), "repo", "dvalin", "dir"); err != nil {
 		t.Fatalf("compactIfDue: %v", err)
@@ -205,7 +205,7 @@ func TestRetiredIsExemptFromCompaction(t *testing.T) {
 // TestCompactDueIgnoresAnUnknownWindow mirrors contextFull's own rule: a window nobody could
 // resolve must never be treated as past a threshold computed from it.
 func TestCompactDueIgnoresAnUnknownWindow(t *testing.T) {
-	e := New(nil, &stubDeps{ctxTokens: 80_000, ctxWindow: 0, ctxOK: true, compactThreshold: 75_000})
+	e := newEngine(nil, &stubDeps{ctxTokens: 80_000, ctxWindow: 0, ctxOK: true, compactThreshold: 75_000})
 	if _, due := e.compactDue("repo", "dvalin"); due {
 		t.Error("a window of 0 must never read as past its own threshold")
 	}
@@ -250,7 +250,7 @@ func TestBetweenSubtasksClaimsThenDeliversTheDirectiveAfterCompact(t *testing.T)
 	}
 
 	deps := &stubDeps{root: root, ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
-	e := New(st, deps)
+	e := newEngine(st, deps)
 
 	dir, err := e.AgentDirective(context.Background(), "repo", agent)
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/hub/observe"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -51,7 +52,7 @@ func TestStalledOnlyCountsHeldWork(t *testing.T) {
 	} {
 		s := Situation{
 			Phase: c.phase, Container: c.container, WaitingOnRun: c.waitingOnRun,
-			Reading: Reading{Runtime: c.runtime, StillFor: c.stillFor},
+			Observation: observe.Observation{State: observe.ParseState(c.runtime)}, StillFor: c.stillFor,
 		}
 		if got := s.Allowed().Stalled; got != c.want {
 			t.Errorf("%s: Stalled(%q, %q, %q, %v, %v) = %v, want %v",
@@ -66,7 +67,7 @@ func TestStalledOnlyCountsHeldWork(t *testing.T) {
 // the agent is, including waiting on a verdict it could not act on anyway.
 func TestACutOffTurnIsRetriedInAnyPhase(t *testing.T) {
 	cutOff := func(phase string, still time.Duration) bool {
-		return Situation{Phase: phase, Reading: Reading{Runtime: "api-error", StillFor: still}}.Allowed().Stalled
+		return Situation{Phase: phase, Observation: observe.Observation{State: observe.TurnCutOff}, StillFor: still}.Allowed().Stalled
 	}
 	for _, phase := range []string{"working", "submitted", "idle", "resolving"} {
 		if !cutOff(phase, RetryDwell+time.Second) {
@@ -132,16 +133,56 @@ func TestACoauthorIsNeverReclaimed(t *testing.T) {
 	}
 }
 
-// TestNeedsUserFollowsTheBoardsOwnWord: the marker and the status cannot disagree, because the
-// marker is read off the status rather than derived a second time.
+// TestNeedsUserFollowsTheBoardsOwnWord: the marker and the status cannot disagree, because both are
+// folded here from the same evidence rather than derived twice. Each case states the EVIDENCE and
+// asserts the word it produces, so a change to the fold is caught by the same test as the marker.
 func TestNeedsUserFollowsTheBoardsOwnWord(t *testing.T) {
-	for _, word := range []string{api.StatusBlocked, api.StatusSignedOut, api.StatusLaunchFailed, api.StatusUnreachable} {
-		if !(Situation{Reading: Reading{Status: word}}).Allowed().NeedsUser {
-			t.Errorf("status %q resolves only if a human acts", word)
+	seen := time.Now()
+	for _, c := range []struct {
+		what string
+		obs  observe.Observation
+		want string
+	}{
+		{"a question at its prompt", observe.Observation{TakenAt: seen, Up: true, State: observe.AwaitingHuman}, api.StatusBlocked},
+		{"a /login banner", observe.Observation{TakenAt: seen, Up: true, State: observe.SignedOut}, api.StatusSignedOut},
+		{"a launch that never came up", observe.Observation{TakenAt: seen, LaunchFailed: true}, api.StatusLaunchFailed},
+	} {
+		got := (Situation{Observation: c.obs}).Allowed()
+		if got.Status != c.want {
+			t.Errorf("%s: status = %q, want %q", c.what, got.Status, c.want)
+		}
+		if !got.NeedsUser {
+			t.Errorf("%s: %q resolves only if a human acts", c.what, got.Status)
 		}
 	}
-	if (Situation{Reading: Reading{Status: "idle"}}).Allowed().NeedsUser {
-		t.Error("idle is nobody's problem — the next ask reassigns it")
+	// Idle is nobody's problem — the next ask reassigns it.
+	idle := (Situation{Observation: observe.Observation{TakenAt: seen, Up: true, State: observe.AtPrompt}}).Allowed()
+	if idle.Status != "idle" || idle.NeedsUser {
+		t.Errorf("an agent at an empty prompt reads %q, needsUser=%v — want idle and nobody's problem",
+			idle.Status, idle.NeedsUser)
+	}
+}
+
+// TestTheWordFollowsTheIntentUntilRealityCatchesUp: a launch asked for reads "launching" until the
+// pod is seen, and nothing observed at all is "unknown" rather than "down" — a claim no evidence
+// supports is the error this fold exists to avoid.
+func TestTheWordFollowsTheIntentUntilRealityCatchesUp(t *testing.T) {
+	seen := time.Now()
+	for _, c := range []struct {
+		what string
+		s    Situation
+		want string
+	}{
+		{"asked to start, not up yet", Situation{Observation: observe.Observation{TakenAt: seen, Launching: true}}, "launching"},
+		{"asked to stop, still up", Situation{Observation: observe.Observation{TakenAt: seen, Up: true, Stopping: true}}, "stopping"},
+		{"asked to stop, now gone", Situation{Observation: observe.Observation{TakenAt: seen, Stopping: true}}, "down"},
+		{"nothing has looked yet", Situation{}, "unknown"},
+		{"torn down on purpose", Situation{Stopped: true, Observation: observe.Observation{TakenAt: seen}}, "stopped"},
+		{"up, holding a task", Situation{Phase: "working", Observation: observe.Observation{TakenAt: seen, Up: true}}, "working"},
+	} {
+		if got := c.s.Allowed().Status; got != c.want {
+			t.Errorf("%s: status = %q, want %q", c.what, got, c.want)
+		}
 	}
 }
 

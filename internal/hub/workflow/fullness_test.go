@@ -10,7 +10,7 @@ import (
 // true so the caller answers DirPreparing rather than dir, which the switch's own clear would wipe.
 func TestPrepareAssignmentDeliversAfterAModelSwitch(t *testing.T) {
 	deps := &stubDeps{tierModels: map[string]string{"mid": "big-model"}, currentModel: "small-model"}
-	e := New(nil, deps)
+	e := newEngine(nil, deps)
 
 	fired, err := e.prepareAssignment(t.Context(), "repo", "dvalin", "mid", "you hold td-abc123")
 	if err != nil {
@@ -38,7 +38,7 @@ func TestPrepareAssignmentSendsNothingAfterAFailedSwitch(t *testing.T) {
 		tierModels: map[string]string{"mid": "big-model"}, currentModel: "small-model",
 		setModelErr: errors.New("boom"),
 	}
-	e := New(nil, deps)
+	e := newEngine(nil, deps)
 
 	if _, err := e.prepareAssignment(t.Context(), "repo", "dvalin", "mid", "dir"); err == nil {
 		t.Fatal("prepareAssignment: want the underlying SetModel error surfaced")
@@ -52,7 +52,7 @@ func TestPrepareAssignmentSendsNothingAfterAFailedSwitch(t *testing.T) {
 // and dir follows it. fired must read true.
 func TestPrepareAssignmentDeliversAfterACompaction(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 80_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
-	e := New(nil, deps)
+	e := newEngine(nil, deps)
 
 	fired, err := e.prepareAssignment(t.Context(), "repo", "dvalin", "mid", "you hold td-abc123")
 	if err != nil {
@@ -73,7 +73,7 @@ func TestPrepareAssignmentDeliversAfterACompaction(t *testing.T) {
 // far gone to summarise, so the clear wins wherever both would apply, and dir follows it.
 func TestPrepareAssignmentClearsRatherThanCompactsPastTheFraction(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 900_000, ctxWindow: 1_000_000, ctxOK: true, compactThreshold: 75_000}
-	e := New(nil, deps)
+	e := newEngine(nil, deps)
 
 	fired, err := e.prepareAssignment(t.Context(), "repo", "dvalin", "mid", "you hold td-abc123")
 	if err != nil {
@@ -97,7 +97,7 @@ func TestPrepareAssignmentClearsRatherThanCompactsPastTheFraction(t *testing.T) 
 // under threshold — fires nothing and reports fired=false, so the caller answers with dir directly.
 func TestPrepareAssignmentSkipsBothWhenNeitherApplies(t *testing.T) {
 	deps := &stubDeps{ctxTokens: 1_000, ctxWindow: 200_000, ctxOK: true, compactThreshold: 75_000}
-	e := New(nil, deps)
+	e := newEngine(nil, deps)
 
 	fired, err := e.prepareAssignment(t.Context(), "repo", "dvalin", "mid", "you hold td-abc123")
 	if err != nil {
@@ -119,7 +119,7 @@ func TestPrepareAssignmentToleratesADatedCurrentModel(t *testing.T) {
 		tierModels:   map[string]string{"junior": "claude-haiku-4-5"},
 		currentModel: "claude-haiku-4-5-20251001",
 	}
-	e := New(nil, deps)
+	e := newEngine(nil, deps)
 
 	fired, err := e.prepareAssignment(t.Context(), "repo", "dvalin", "junior", "you hold td-abc123")
 	if err != nil {

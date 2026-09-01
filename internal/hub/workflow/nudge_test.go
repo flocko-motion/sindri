@@ -38,7 +38,7 @@ func nudgeStore(t *testing.T) (*Engine, *stubDeps, *store.ProjectStore) {
 	_ = ps.SetState(store.AgentState{Agent: "nori", Phase: "idle"}, store.ReasonClaimed, "test setup")
 
 	deps := &stubDeps{root: t.TempDir(), alive: true}
-	return New(st, deps), deps, ps
+	return newEngine(st, deps), deps, ps
 }
 
 // TestNudgeReachesOnlyTheIdleWorker: Notify wakes an agent already blocked asking for work, so an
@@ -262,7 +262,7 @@ func TestAssignPendingSubtaskReoffersAfterReopening(t *testing.T) {
 		t.Fatal(err)
 	}
 	deps := &stubDeps{}
-	e := New(st, deps)
+	e := newEngine(st, deps)
 
 	e.AssignPendingWork("repo")
 	if len(deps.injected) != 1 {
@@ -297,7 +297,7 @@ func TestReviewDirectiveRefusesARetiredReviewer(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "fili", Role: "reviewer", Workspace: ".worktrees/fili", Retired: true}); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
+	e := newEngine(st, &stubDeps{root: t.TempDir(), alive: true})
 
 	dir, _, err := e.reviewDirective(t.Context(), "repo", "fili")
 	if err != nil {
@@ -337,7 +337,7 @@ func TestWakeRefusalDoesNotBlockAnAgentHoldingWork(t *testing.T) {
 			if err := ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-1", Branch: "td-1", Phase: "submitted"}, store.ReasonClaimed, "test setup"); err != nil {
 				t.Fatal(err)
 			}
-			e := New(st, &stubDeps{root: t.TempDir()})
+			e := newEngine(st, &stubDeps{root: t.TempDir()})
 
 			if r := e.WakeRefusal("repo", "dvalin"); r != "" {
 				t.Errorf("an agent holding a task must not be refused a wake, got %q", r)
@@ -365,7 +365,7 @@ func TestWakeRefusalIgnoresRetiredBetweenSubtasks(t *testing.T) {
 	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, &stubDeps{root: t.TempDir()})
+	e := newEngine(st, &stubDeps{root: t.TempDir()})
 
 	if r := e.WakeRefusal("repo", "dain"); r != "" {
 		t.Errorf("a retired feature worker between subtasks must not be refused, got %q", r)
@@ -390,7 +390,7 @@ func TestWakeRefusalStillGatesClearArmedBetweenSubtasks(t *testing.T) {
 	if err := ps.SetState(store.AgentState{Agent: "dain", Container: "td-EPIC", Branch: "td-EPIC", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, &stubDeps{root: t.TempDir()})
+	e := newEngine(st, &stubDeps{root: t.TempDir()})
 
 	if r := e.WakeRefusal("repo", "dain"); r == "" {
 		t.Error("a clear-armed feature worker between subtasks must still be refused")
@@ -415,7 +415,7 @@ func TestWakeRefusalIgnoresRetiredAwaitingItsOwnPR(t *testing.T) {
 	if err := ps.SetState(store.AgentState{Agent: "dvalin", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, &stubDeps{root: t.TempDir()})
+	e := newEngine(st, &stubDeps{root: t.TempDir()})
 
 	if r := e.WakeRefusal("repo", "dvalin"); r != "" {
 		t.Errorf("an agent awaiting its own PR must not be refused, got %q", r)
@@ -439,7 +439,7 @@ func TestWakeRefusalNeverBlocksAPlannerOrCoauthor(t *testing.T) {
 			if err := ps.SetState(store.AgentState{Agent: "galar", Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 				t.Fatal(err)
 			}
-			e := New(st, &stubDeps{root: t.TempDir()})
+			e := newEngine(st, &stubDeps{root: t.TempDir()})
 
 			if r := e.WakeRefusal("repo", "galar"); r != "" {
 				t.Errorf("a %s is never refused this way, got %q", role, r)

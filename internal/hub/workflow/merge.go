@@ -90,7 +90,7 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 		// it, or dropping Container, would misplace or unhook a feature worker.
 		_ = ps.SetPhase(pr.Agent, "resolving", store.ReasonAdvanced, "merge of "+prID+" conflicts with "+pr.Base)
 		_ = ps.LogPR(pr.ID, "conflict", "rebase onto "+pr.Base+" conflicts: "+strings.Join(res.Files, ", "))
-		_ = e.deps.Deliver(project, pr.Agent, MsgResolveNeeded(pr.Base, res.Files), MailAndPush)
+		_ = e.hn.Say(project, pr.Agent, MsgResolveNeeded(pr.Base, res.Files), MailAndPush)
 		e.deps.Notify()
 		return store.PR{}, fmt.Errorf("%s conflicts with %s — sent to %s to resolve; it returns for review once clean", prID, pr.Base, pr.Agent)
 	case repo.MergeRebaseErr:
@@ -164,11 +164,11 @@ func (e *Engine) Merge(project, prID string) (store.PR, error) {
 				if rerr != nil {
 					log.Printf("hub: %s: reset %s onto %s after %s: %v", pr.Agent, pr.Branch, pr.Base, prID, rerr)
 					_ = ps.LogPR(prID, "warning", "merged, but resetting "+pr.Agent+"'s branch onto "+pr.Base+" failed (needs a manual look): "+rerr.Error())
-					_ = e.deps.Deliver(project, pr.Agent, MsgResetFailed(prID, pr.Base), MailAndPush)
+					_ = e.hn.Say(project, pr.Agent, MsgResetFailed(prID, pr.Base), MailAndPush)
 				} else {
 					_ = ps.Log(pr.Agent, "resolve", prID+" merged, but reapplying uncommitted work onto "+pr.Base+" conflicts: "+strings.Join(conflicts, ", "))
 					_ = ps.LogPR(prID, "merged", "into "+pr.Base+"; reapplying "+pr.Agent+"'s uncommitted work conflicts")
-					_ = e.deps.Deliver(project, pr.Agent, MsgReapplyConflict(prID, pr.Base, conflicts), MailAndPush)
+					_ = e.hn.Say(project, pr.Agent, MsgReapplyConflict(prID, pr.Base, conflicts), MailAndPush)
 				}
 				e.rebasePlanners(project, pr.Base)
 				e.deps.Notify()
@@ -211,7 +211,7 @@ func (e *Engine) finishPartialMerge(project string, pr store.PR, onFeature bool)
 		e.resumeContainer(project, pr.Agent)
 		// Push only: the agent resumes the same feature it never left, which its own directive
 		// already says — nothing here needs to survive being read late.
-		_ = e.deps.Deliver(project, pr.Agent, MsgMilestoneMerged(pr.ID), PushOnly)
+		_ = e.hn.Say(project, pr.Agent, MsgMilestoneMerged(pr.ID), PushOnly)
 	} else {
 		// Phase only: promoteToFeature only promotes a "working" agent, so this one never picked up
 		// a container while its interim PR was out.
@@ -219,7 +219,7 @@ func (e *Engine) finishPartialMerge(project string, pr store.PR, onFeature bool)
 		_ = ps.Log(pr.Agent, "merged", pr.ID+" (interim)")
 		_ = ps.LogPR(pr.ID, "merged", "interim contribution into "+pr.Base)
 		// Push only, same reason: it resumes the same task, which its directive already says.
-		_ = e.deps.Deliver(project, pr.Agent, MsgContributionMerged(pr.ID, pr.Task), PushOnly)
+		_ = e.hn.Say(project, pr.Agent, MsgContributionMerged(pr.ID, pr.Task), PushOnly)
 	}
 	e.rebasePlanners(project, pr.Base) // any merge moves base → keep planners current
 	e.deps.Notify()

@@ -182,7 +182,12 @@ func fullAgentWithWorkWaiting(t *testing.T) (*Hub, string, fakeAgent) {
 func TestAFullWorkersOwnAskFiresAClearEndToEnd(t *testing.T) {
 	h, agent, fake := fullAgentWithWorkWaiting(t)
 	w := stillWatchdog(t, h)
-	w.record(store.Agent{Project: testProject, Name: agent}, true, 0, hubagent.Observation{Runtime: "idle", Digest: "d1"})
+	row := store.Agent{Project: testProject, Name: agent}
+	w.record(row, true, 0, hubagent.Observation{Runtime: "idle", Digest: "d1"})
+	// Fullness is read off the observer's standing sample now, not a live transcript read, so the
+	// sweep's own reading is what has to say the agent is full (-> hub/observe.Observation.Fill).
+	before, window, _, _ := fake.ContextUsage("")
+	w.recordFill(row, fill{tokens: before, window: window})
 	rt := &clearableRuntime{}
 	// The clear taking effect, at the one moment it can: the call waits for this reading to fall, so
 	// a session that answered only after the call returned would be a session that never answered.

@@ -64,7 +64,7 @@ func (e *Engine) tierPrefers(project, agent string) func(store.Task) bool {
 	if agent == "" {
 		return nil
 	}
-	current := e.deps.CurrentModel(project, agent)
+	current := e.hn.Observe(project, agent).Model
 	return func(t store.Task) bool {
 		want, ok := e.deps.ModelForTier(api.TierOrDefault(t.Tier))
 		return ok && want == current

@@ -117,8 +117,8 @@ func (c *credwatch) revive(project, name string) bool {
 // stuckAtLogin is the whole rule revive acts on, separated from the acting so it can be checked
 // without a runtime. The observer's standing reading, never a probe: this runs over the whole roster.
 func (c *credwatch) stuckAtLogin(project, name string) bool {
-	l, ok := c.h.watch.get(project, name)
-	return ok && l.up && l.runtime == "signed-out"
+	o := c.h.observed(project, name)
+	return o.Seen() && o.Up && o.SignedOut()
 }
 
 // watchToken reports the shared token's state as it changes: gone, lapsed, or about to lapse. Only

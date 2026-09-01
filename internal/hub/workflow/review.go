@@ -121,7 +121,7 @@ func (e *Engine) RequestReview(project, prID, requirement string) error {
 			return err
 		}
 		_ = ps.LogPR(prID, "review-amended", "further instructions to "+holder)
-		go e.deps.Deliver(project, holder, MsgReviewAmended(prID, requirement), MailAndPush.From(api.SenderUser))
+		go e.hn.Say(project, holder, MsgReviewAmended(prID, requirement), MailAndPush.From(api.SenderUser))
 		e.deps.Notify()
 		return nil
 	}
@@ -188,7 +188,7 @@ func (e *Engine) assignReview(project string, id int64, prID, reviewer, requirem
 	// board shows it working, not idle
 	_ = hs.SetState(store.AgentState{Agent: reviewer, Phase: "reviewing"}, store.ReasonClaimed, "assigned to review "+prID)
 	_ = ps.LogPR(prID, "review-requested", "assigned to "+reviewer)
-	go e.deps.Deliver(home, reviewer, MsgReview(prID, requirement, pr.Branch, pr.Base, e.deps.ArchitectureDoc(project), checkedOut), MailAndPush) // async: don't block a worker's submit
+	go e.hn.Say(home, reviewer, MsgReview(prID, requirement, pr.Branch, pr.Base, e.deps.ArchitectureDoc(project), checkedOut), MailAndPush) // async: don't block a worker's submit
 	e.deps.Notify()
 	return nil
 }
@@ -235,7 +235,7 @@ func (e *Engine) reviewDirective(ctx context.Context, project, name string) (str
 		}
 		_ = ps.SetState(store.AgentState{Agent: name, Phase: restPhase("reviewer")},
 			store.ReasonFreed, "review overtaken: "+held+" was "+pr.Status+" before a verdict")
-		_ = e.deps.Deliver(project, name, MsgReviewCancelled(held), MailAndPush)
+		_ = e.hn.Say(project, name, MsgReviewCancelled(held), MailAndPush)
 	}
 	if e.retired(project, name) {
 		return DirRetired, true, nil // holds nothing now — retirement means no new claim, reviewer too
@@ -254,10 +254,10 @@ func (e *Engine) reviewDirective(ctx context.Context, project, name string) (str
 	// DirPreparing for the same reason: the session that asked has just been discarded, so the review
 	// is claimed on the ask that follows the kickoff rather than served into a reply nobody reads.
 	if e.clearArmed(project, name) {
-		if err := e.deps.Clear(ctx, project, name); err != nil {
+		if err := e.hn.Clear(ctx, project, name); err != nil {
 			return "", false, err
 		}
-		if err := e.deps.Deliver(project, name, MsgKickoff, PushOnly.Regardless()); err != nil {
+		if err := e.hn.Say(project, name, MsgKickoff, PushOnly); err != nil {
 			return "", false, err
 		}
 		return DirPreparing, true, nil
@@ -296,7 +296,7 @@ func (e *Engine) releaseReviewers(project, prID, why string) {
 			continue
 		}
 		_ = ps.SetState(store.AgentState{Agent: r.Author, Phase: restPhase("reviewer")}, store.ReasonFreed, why)
-		_ = e.deps.Deliver(project, r.Author, MsgReviewCancelled(prID), MailAndPush)
+		_ = e.hn.Say(project, r.Author, MsgReviewCancelled(prID), MailAndPush)
 	}
 	e.deps.Notify()
 }

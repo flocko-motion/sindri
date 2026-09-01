@@ -29,7 +29,7 @@ func TestScrapTaskGoesDeepestFirst(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	e := New(st, &stubDeps{root: t.TempDir()})
+	e := newEngine(st, &stubDeps{root: t.TempDir()})
 
 	err = e.ScrapTask("proj", "zz-1", true, false)
 	if err == nil || !strings.Contains(err.Error(), "zz-3") {
@@ -59,7 +59,7 @@ func TestScrapTaskWithoutSubtreeLeavesTheChildren(t *testing.T) {
 	if err := ps.UpsertTask(store.Task{ID: "zz-2", ParentID: "zz-1"}); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, &stubDeps{root: t.TempDir()})
+	e := newEngine(st, &stubDeps{root: t.TempDir()})
 
 	err = e.ScrapTask("proj", "zz-1", false, false)
 	if err == nil || !strings.Contains(err.Error(), "zz-1") {

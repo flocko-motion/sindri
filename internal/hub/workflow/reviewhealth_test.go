@@ -69,7 +69,7 @@ func reviewerOf(t *testing.T, ps *store.ProjectStore, prID string) string {
 // ever claimed one was a reviewer choosing to ask. The hub now hands it over itself.
 func TestAnUnclaimedReviewReachesAnIdleReviewer(t *testing.T) {
 	st, ps := pendingReview(t, "fili")
-	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
+	e := newEngine(st, &stubDeps{root: t.TempDir(), alive: true})
 
 	e.AssignPendingReviews("repo")
 
@@ -87,7 +87,7 @@ func TestAnUnclaimedReviewReachesAnIdleReviewer(t *testing.T) {
 // turn ends, so the assignment would be recorded and the reviewer would never hear of it.
 func TestAReviewerMidTurnIsLeftAlone(t *testing.T) {
 	st, ps := pendingReview(t, "fili")
-	e := New(st, &stubDeps{root: t.TempDir(), alive: true, busy: map[string]bool{"fili": true}})
+	e := newEngine(st, &stubDeps{root: t.TempDir(), alive: true, busy: map[string]bool{"fili": true}})
 
 	e.AssignPendingReviews("repo")
 
@@ -111,7 +111,7 @@ func TestAReviewerAlreadyHoldingOneIsNotGivenASecond(t *testing.T) {
 	if err := ps.AssignReview(rid, "fili"); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
+	e := newEngine(st, &stubDeps{root: t.TempDir(), alive: true})
 
 	e.AssignPendingReviews("repo")
 
@@ -127,7 +127,7 @@ func TestRetirementHoldsAcrossTheReviewQueueToo(t *testing.T) {
 	if err := ps.PutAgent(store.Agent{Name: "fili", Role: "reviewer", Workspace: ".worktrees/fili", Retired: true}); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
+	e := newEngine(st, &stubDeps{root: t.TempDir(), alive: true})
 
 	e.AssignPendingReviews("repo")
 
@@ -158,7 +158,7 @@ func TestRepairReviewRowsFindsAGap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
+	e := newEngine(st, &stubDeps{root: t.TempDir(), alive: true})
 	e.RepairReviewRows("repo")
 
 	gapRevs, _ := ps.Reviews("pr-gap")

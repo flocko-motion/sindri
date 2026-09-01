@@ -88,7 +88,7 @@ func TestContributeThenMergeKeepsTaskOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	e := New(st, &stubDeps{root: root})
+	e := newEngine(st, &stubDeps{root: root})
 	caller := registry.Caller{Project: "repo", Agent: agent, Role: "worker", HasTask: true, Phase: "working"}
 	if code, err := e.CmdContribute(caller, []string{"checkpoint"}, io.Discard); err != nil || code != 0 {
 		t.Fatalf("CmdContribute: code=%d err=%v", code, err)

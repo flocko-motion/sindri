@@ -471,7 +471,7 @@ func (e *Engine) RebaseAgent(project, name string) error {
 		return fmt.Errorf("couldn't rebase %s onto %s — a conflict or uncommitted changes (git aborted, so nothing changed). Have %s resolve it interactively with `sindri rebase` (it surfaces the conflicts to fix). git said: %w", name, base, name, err)
 	}
 	_ = ps.Log(name, "rebase", "onto "+base)
-	_ = e.deps.Deliver(project, name, MsgRebased(base), PushOnly)
+	_ = e.hn.Say(project, name, MsgRebased(base), PushOnly)
 	e.deps.Notify()
 	return nil
 }
@@ -493,7 +493,7 @@ func (e *Engine) rebasePlanners(project, base string) {
 			continue
 		}
 		_ = ps.Log(a.Name, "rebase", "onto "+base)
-		_ = e.deps.Deliver(project, a.Name, MsgRebased(base), PushOnly)
+		_ = e.hn.Say(project, a.Name, MsgRebased(base), PushOnly)
 	}
 }
 

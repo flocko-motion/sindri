@@ -30,7 +30,10 @@ type Surface struct {
 	Clear   string // discard its session
 	Reclaim string // take its pod back
 	Wake    string // push it anything at all
-	// Stalled: it holds work and its screen has stopped moving. NeedsUser: only a human moves it on.
+	// Status is the ONE word for this agent, folded from the evidence and the work it holds — the
+	// harness supplies neither. Stalled: it holds work and its screen has stopped moving. NeedsUser:
+	// only a human moves it on.
+	Status    string
 	Stalled   bool
 	NeedsUser bool
 }
@@ -50,9 +53,81 @@ func (s Situation) Allowed() Surface {
 		Clear:     s.resetRefusal(),
 		Reclaim:   s.reclaimRefusal(),
 		Wake:      wake,
+		Status:    s.statusWord(),
 		Stalled:   s.stalled(),
 		NeedsUser: s.needsUser(),
 	}
+}
+
+// statusWord is the one word the board shows. Folded HERE because every layer of it is a judgement
+// — what the intent means now, what the session's own account means for the workflow's phase, and
+// whether standing still counts as a stall — and the harness reports none of those.
+func (s Situation) statusWord() string {
+	status := s.overlayRuntime(s.baseStatus())
+	// A stall reads as plain "idle" otherwise, which is what let one hold a task unnoticed.
+	if s.stalled() {
+		status = api.StatusStalled
+	}
+	return s.overlayEscalation(status)
+}
+
+// overlayEscalation says "escalated" wherever an agent waits on a decision the user must make. Last,
+// over the runtime and the stall alike: those describe a screen, this says why the screen is quiet.
+// Two words outrank it, both meaning the answer cannot be DELIVERED yet: not-up, and signed-out.
+func (s Situation) overlayEscalation(status string) string {
+	if s.Escalation == "" || api.AgentNotUp(status) || status == api.StatusSignedOut {
+		return status
+	}
+	return api.StatusEscalated
+}
+
+// baseStatus reconciles the transient intent with what was actually seen.
+func (s Situation) baseStatus() string {
+	switch {
+	case s.Stopping:
+		if s.Up || !s.Seen() {
+			return "stopping" // stop asked for; the pod is still up, or nothing has looked yet
+		}
+		return "down"
+	case s.Up:
+		if s.Phase == "" {
+			return "idle"
+		}
+		return s.Phase
+	case s.Launching:
+		return "launching"
+	case s.LaunchFailed:
+		return api.StatusLaunchFailed
+	case !s.Seen():
+		return "unknown" // registered since the last sweep; the next one answers
+	case s.Stopped:
+		return "stopped" // torn down on purpose, resumable — not the same claim as "down"
+	}
+	return "down"
+}
+
+// overlayRuntime folds the session's own account of itself into the workflow status. It replaces a
+// plain working/idle phase but keeps the meaningful ones, and a look that failed changes nothing.
+// Idleness here is what the SCREEN shows, not what the workflow holds — "working, holding nothing"
+// is honest, and what is held is a column of its own.
+func (s Situation) overlayRuntime(status string) string {
+	switch {
+	case s.SignedOut():
+		// Outranks every phase: whatever was asked of it, nothing is happening and nothing reaches it.
+		return api.StatusSignedOut
+	case s.AwaitingHuman():
+		return api.StatusBlocked
+	case s.TurnCutOff():
+		// Outranks the phase for the same reason: whatever it was doing, the turn doing it is dead.
+		// The session's own account rendered back into a word — this is the one place the observation
+		// vocabulary and the status vocabulary meet, and a second copy of the string is how they drift.
+		return s.State.String()
+	case s.Working(), s.AtPrompt():
+		if status == "working" || status == "idle" {
+			return s.State.String()
+		}
+	}
+	return status
 }
 
 // AtLeafBoundary reports the agent holding nothing a reset would cut into — no leaf task, no PR
@@ -200,10 +275,10 @@ func (s Situation) parkedRefusal() string {
 func (s Situation) stalled() bool {
 	// A cut-off turn counts in ANY phase: nothing resumes on its own, and an agent that could not
 	// finish its own sentence will not act on a verdict either.
-	if s.Runtime == "api-error" {
+	if s.TurnCutOff() {
 		return s.StillFor >= RetryDwell
 	}
-	if s.Runtime == "blocked" || s.Runtime == "signed-out" || s.WaitingOnRun || s.StillFor < StallDwell {
+	if s.AwaitingHuman() || s.SignedOut() || s.WaitingOnRun || s.StillFor < StallDwell {
 		return false
 	}
 	// "submitted" and "gating" exist to wait; reviewing does not — a reviewer with a PR is meant to
@@ -212,15 +287,10 @@ func (s Situation) stalled() bool {
 		(s.Container != "" && s.Phase != "submitted" && s.Phase != "gating")
 }
 
-// needsUser reports a state only a human resolves, read off the word the board shows so the marker
-// and the status cannot disagree. The stall is folded in HERE: it is this surface's own verdict, and
-// a Status arriving with it would have the two reading each other (-> hub.situationObserver).
+// needsUser reports a state only a human resolves, read off the very word the board shows, so the
+// marker and the status cannot disagree.
 func (s Situation) needsUser() bool {
-	status := s.Status
-	if s.stalled() {
-		status = api.StatusStalled
-	}
-	return api.AgentNeedsUser(api.AgentView{Status: status, Retired: s.Retired})
+	return api.AgentNeedsUser(api.AgentView{Status: s.statusWord(), Retired: s.Retired})
 }
 
 // ParkedByTheHub reports an agent idle because it was TOLD to be — retired and empty-handed, or a

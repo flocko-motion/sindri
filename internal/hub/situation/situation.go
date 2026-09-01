@@ -10,28 +10,15 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/api"
+	"github.com/flo-at/sindri/internal/hub/observe"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
-// Reading is the observer's last look at an agent. Zero where nothing has looked yet, which Observed
-// tells apart from a genuine "down" — reading an absent observation as down is how a freshly
-// registered agent came to be reported dead.
-type Reading struct {
-	Observed  bool
-	Up        bool
-	Status    string // the board's own word for it (-> api.AgentView.Status)
-	Runtime   string // Claude's live runtime: working|blocked|idle|signed-out|api-error|""
-	Clients   int    // humans dialed into its session
-	StillFor  time.Duration
-	Fill      int // context tokens in use, and the window they fill
-	Window    int
-	Launching bool
-}
-
-// Observer hands over that reading. A port because the situation must not probe: the watchdog holds
-// all of this in memory already, and a fresh look would put a container call behind every rule.
+// Observer hands over the harness's last look at an agent. A port because the situation must not
+// probe: the watchdog holds that look in memory already, and a fresh one would put a container call
+// behind every rule.
 type Observer interface {
-	Reading(project, name string) Reading
+	Observe(project, name string) observe.Observation
 }
 
 // Pool is what a project could hand out right now. It describes the PROJECT rather than any one
@@ -60,7 +47,10 @@ func (p Pool) GatedUnder(container string) []store.Task {
 type Situation struct {
 	Project string
 	Name    string
-	Reading
+	// The evidence, exactly as the harness saw it, and the one thing derived from it here: how long
+	// the display has stood still, measured when this was gathered so every rule reads one figure.
+	observe.Observation
+	StillFor time.Duration
 
 	// The roster row — what a human has decided about this agent.
 	Role       string
@@ -96,11 +86,20 @@ type Situation struct {
 type Gatherer struct {
 	store *store.Store
 	obs   Observer
+	clock func() time.Time // nil = time.Now; a test pins it to measure a dwell exactly
 }
 
 // NewGatherer builds one over the hub's store and its observer.
 func NewGatherer(st *store.Store, obs Observer) *Gatherer {
 	return &Gatherer{store: st, obs: obs}
+}
+
+// now is the clock every dwell in one gather is measured against, held so a test can pin it.
+func (g *Gatherer) now() time.Time {
+	if g.clock != nil {
+		return g.clock()
+	}
+	return time.Now()
 }
 
 // Of is one agent's situation, reading the project's pool for it alone. Roster is the form to reach
@@ -162,8 +161,9 @@ func (g *Gatherer) in(project, name string, pool Pool) (Situation, error) {
 	if err != nil {
 		return Situation{}, err
 	}
+	obs := g.obs.Observe(project, name)
 	s := Situation{
-		Project: project, Name: name, Reading: g.obs.Reading(project, name),
+		Project: project, Name: name, Observation: obs, StillFor: obs.StillFor(g.now()),
 		Role: a.Role, Retired: a.Retired, ClearArmed: a.ClearArmed, Stopped: a.Stopped,
 		Phase: st.Phase, Task: st.Task, Container: st.Container, Branch: st.Branch,
 		Escalation: st.Escalation, LastNudge: st.LastNudge, Pool: pool,

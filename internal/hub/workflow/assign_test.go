@@ -117,7 +117,7 @@ func TestAnIdleWorkerTakesTheCriticalTaskOverAMidPackage(t *testing.T) {
 		t.Fatalf("set state: %v", err)
 	}
 
-	e := New(st, &stubDeps{
+	e := newEngine(st, &stubDeps{
 		root:         root,
 		currentModel: "claude-sonnet-5",
 		tierModels:   map[string]string{"mid": "claude-sonnet-5"},

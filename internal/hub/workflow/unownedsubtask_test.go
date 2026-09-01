@@ -48,7 +48,7 @@ func unownedSubtask(t *testing.T) (*Engine, *store.ProjectStore) {
 	}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	return New(st, &stubDeps{root: root}), ps
+	return newEngine(st, &stubDeps{root: root}), ps
 }
 
 // TestTheDirectiveAndTheSubmitGateAgree is the loop a worker reported from inside a feature: the

@@ -41,7 +41,7 @@ func priorityTree(t *testing.T) (*Engine, *store.ProjectStore) {
 			t.Fatalf("link %s: %v", x.ID, err)
 		}
 	}
-	return New(st, &stubDeps{root: t.TempDir()}), ps
+	return newEngine(st, &stubDeps{root: t.TempDir()}), ps
 }
 
 // priorityOf reads a task's priority back off the store.

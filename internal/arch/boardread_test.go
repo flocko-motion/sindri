@@ -48,10 +48,15 @@ var boardHandles = map[string]string{
 	// The situation gatherer and what it yields: store rows plus the watchdog's own reading, by
 	// construction — internal/hub/situation imports neither the container runtime nor any adapter that
 	// shells out (a guard of its own holds that: -> TestASituationCostsNoRuntimeCall).
-	"h.sit":       "gathers store rows and the observer's standing reading, once per project",
-	"sits":        "the situations gathered above; deriving from one is arithmetic over fields",
-	"sit":         "one of them",
-	"l":           "a liveness value the watchdog already took — reading its fields is not a fresh look",
+	"h.sit": "gathers store rows and the observer's standing reading, once per project",
+	"sits":  "the situations gathered above; deriving from one is arithmetic over fields",
+	"sit":   "one of them",
+	"l":     "a liveness value the watchdog already took — reading its fields is not a fresh look",
+	// Values being formatted for the board. Named because the walk follows the expression a call is
+	// made through, and a local holding a time or a duration is still just that value.
+	"at":          "a time being formatted; clock arithmetic, no I/O",
+	"d":           "a duration being formatted, likewise",
+	"obs":         "the observations the watchdog already took; rendering a state is arithmetic over a value",
 	"w.mu":        "a mutex, guarding one of those observations",
 	"h.mu":        "likewise",
 	"h.startedAt": "the hub's start time, a value it has held since New",
@@ -79,7 +84,7 @@ var boardHandles = map[string]string{
 // every connected client. The rule it broke was already written in watchdog.go's header, and prose in
 // a header cannot fail a build.
 var boardCalls = map[string]string{
-	"h.agents.AgentStatus":     "folds liveness + phase into a word; in-memory, no probe",
+	"h.agents.SettleIntent":    "retires a settled launch/stop; an in-memory map write, no probe",
 	"h.agents.Unreachable":     "counts pushes the pane never showed — a map the injector keeps, no probe",
 	"h.wf.FleetRuns":           "ranks the runs table — a store read",
 	"container.Name":           "the backend's display name, a string it holds — not an operation on it",

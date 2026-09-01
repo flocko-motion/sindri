@@ -13,7 +13,7 @@ import (
 func TestARetiredAgentIsNotOfferedWork(t *testing.T) {
 	st, ps := poolFixture(t)
 	deps := &stubDeps{root: t.TempDir(), alive: true}
-	e := New(st, deps)
+	e := newEngine(st, deps)
 	// Owned, not a bare cache row: AssignPendingWork syncs first, which rebuilds the cache.
 	if err := ps.PutOwnedTask(store.OwnedTask{ID: "sd-free", Title: "claimable", Status: "open", Priority: "P1"}); err != nil {
 		t.Fatal(err)

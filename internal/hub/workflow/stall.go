@@ -9,6 +9,7 @@ package workflow
 import (
 	"time"
 
+	"github.com/flo-at/sindri/internal/hub/observe"
 	"github.com/flo-at/sindri/internal/hub/situation"
 )
 
@@ -20,9 +21,9 @@ const (
 )
 
 // NudgeStalled prods an agent holding work to continue or say what blocks it, reporting whether it
-// sent anything. The situation is re-gathered: the dwell is minutes old, so the agent may have moved
-// on — and idleFor is the caller's own measurement of that dwell, taken when it decided to prod.
-func (e *Engine) NudgeStalled(project, name, runtime string, idleFor time.Duration) bool {
+// sent anything. It takes the OBSERVATION the caller judged on rather than a word off it: the caller
+// measured the dwell against that reading, and re-gathering here would judge one and prod on another.
+func (e *Engine) NudgeStalled(project, name string, obs observe.Observation, idleFor time.Duration) bool {
 	ps := e.store.For(project)
 	st, err := ps.GetState(name)
 	if err != nil {
@@ -32,7 +33,7 @@ func (e *Engine) NudgeStalled(project, name, runtime string, idleFor time.Durati
 	if err != nil {
 		return false
 	}
-	s.Runtime, s.StillFor = runtime, idleFor
+	s.Observation, s.StillFor = obs, idleFor
 	allowed := s.Allowed()
 	if !allowed.Stalled {
 		return false
@@ -45,10 +46,10 @@ func (e *Engine) NudgeStalled(project, name, runtime string, idleFor time.Durati
 	if !s.Up { // the watchdog's reading: this runs on the stall tick
 		return false
 	}
-	// Regardless: finishing a turn already in flight is not new work, so it must reach the agent
-	// whatever else is true of it — parked or not (-> ParkedByTheHub's own exception, below).
-	if runtime == "api-error" {
-		if err := e.deps.Deliver(project, name, MsgRetryTurn, PushOnly.Regardless()); err != nil {
+	// Ungated, and ahead of every parked check: finishing a turn already in flight is not new work, so
+	// it must reach the agent whatever else is true of it (-> ParkedByTheHub's own exception, below).
+	if s.TurnCutOff() {
+		if err := e.hn.Say(project, name, MsgRetryTurn, PushOnly); err != nil {
 			return false
 		}
 		_ = ps.Log(name, "nudge", "api error cut the turn off — asked it to resume")
@@ -72,7 +73,7 @@ func (e *Engine) NudgeStalled(project, name, runtime string, idleFor time.Durati
 	if held == "" {
 		return false // nothing to name, so nothing useful to say
 	}
-	if err := e.deps.Deliver(project, name, MsgStalled(held, idleFor), PushOnly); err != nil {
+	if err := e.hn.Say(project, name, MsgStalled(held, idleFor), PushOnly); err != nil {
 		return false
 	}
 	_ = ps.Log(name, "nudge", "stalled on "+held+" — idle for "+idleFor.Round(time.Minute).String())

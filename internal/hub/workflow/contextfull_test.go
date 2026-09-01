@@ -34,7 +34,7 @@ func idleWorkerWithOpenTask(t *testing.T, deps *stubDeps) (*Engine, *store.Proje
 	if err := ps.SetState(store.AgentState{Agent: agent, Phase: "idle"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	return New(st, deps), ps
+	return newEngine(st, deps), ps
 }
 
 // TestAFullWorkerIsClearedAndPreparedForTheNextTask is why the retirement gate went: asking for
@@ -116,7 +116,7 @@ func TestFullnessIsRelativeToTheWindow(t *testing.T) {
 		// A window nobody could resolve must not retire anyone: guessing one is what this replaced.
 		{"measured, but no window known", 480_000, 0, false},
 	} {
-		e := New(nil, &stubDeps{ctxTokens: c.tokens, ctxWindow: c.window, ctxOK: true})
+		e := newEngine(nil, &stubDeps{ctxTokens: c.tokens, ctxWindow: c.window, ctxOK: true})
 		if _, full := e.contextFull("repo", "dvalin"); full != c.wantFull {
 			t.Errorf("%s: %d of %d full=%v, want %v", c.what, c.tokens, c.window, full, c.wantFull)
 		}

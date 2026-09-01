@@ -101,7 +101,7 @@ func (e *Engine) idleReviewerOn(home string) (string, error) {
 		return "", fmt.Errorf("load roster for %s: %w", home, err)
 	}
 	for _, s := range roster {
-		if reviewerAssignable(s) && s.ReviewingPR == "" && e.deps.AgentIdle(home, s.Name) {
+		if reviewerAssignable(s) && s.ReviewingPR == "" && s.AtPrompt() {
 			return s.Name, nil
 		}
 	}
@@ -123,7 +123,7 @@ func (e *Engine) wakeAReviewer(project string) {
 			if !reviewerAssignable(s) || !s.Stopped || s.Up {
 				continue
 			}
-			if err := e.deps.StartAgent(home, s.Name); err != nil {
+			if err := e.hn.Start(home, s.Name); err != nil {
 				fmt.Fprintf(os.Stderr, "hub: waking %s for a waiting review: %v\n", s.Name, err)
 				continue
 			}

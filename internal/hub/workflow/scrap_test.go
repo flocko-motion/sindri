@@ -13,8 +13,9 @@ import (
 	"time"
 
 	"github.com/flo-at/sindri/internal/adapter/git"
+	"github.com/flo-at/sindri/internal/adapter/tasks"
 	"github.com/flo-at/sindri/internal/config"
-	"github.com/flo-at/sindri/internal/hub/situation"
+	"github.com/flo-at/sindri/internal/hub/observe"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
 
@@ -29,7 +30,7 @@ type stubDeps struct {
 	injectedText []string // the message bodies too, for tests that assert what an agent was told
 	ctxTokens    int      // TestContextFull* set these to simulate a worker's session usage
 	ctxWindow    int      // 0 with ctxOK true means "measured, but the window is unknown"
-	ctxOK        bool
+	ctxOK        bool     // false = nothing recorded yet, which the observation says as a zero window
 	// compactThreshold overrides CompactionThreshold's answer; 0 (the default) means "never due" —
 	// no real formula returns exactly 0 for a positive window, so it is a safe sentinel rather than
 	// a real threshold every unrelated fullness test would otherwise trip on.
@@ -42,11 +43,10 @@ type stubDeps struct {
 	deliverErr       bool                       // Deliver refuses, for the paths that must not record an undelivered message
 	projects         []store.Project            // KnownProjects override; nil (the default) means none registered
 	currentModel     string                     // CurrentModel's answer; "" is fine — no real model is ever ""
-	// The observation's own fields, for the rules derived from it (-> Reading): the runtime word, how
-	// long the pane has stood still, and the status word before the stall overlay.
+	// The observation's own fields (-> Observe): the session's runtime word, and how long the pane
+	// has stood still.
 	runtime  string
 	stillFor time.Duration
-	status   string
 	// tierModels overrides ModelForTier's answer; nil (the default) means every tier is unknown, so
 	// the retier check never fires for a test that has not opted into it.
 	tierModels   map[string]string
@@ -68,6 +68,26 @@ type stubDeps struct {
 }
 
 func (d *stubDeps) ProjectRoot(string) string { return d.root }
+
+// saying is an observation of a LIVE session reporting word, for the nudge paths that used to take
+// the bare string. The word crosses inside the observation now, which is the whole point of the split.
+func saying(word string) observe.Observation {
+	return observe.Observation{TakenAt: time.Now(), Up: true, State: observe.ParseState(word)}
+}
+
+// sayingWhileDown is the same reading of a pod that is gone. Liveness rides the observation rather
+// than being asked separately, so a caller cannot judge one reading and prod on another.
+func sayingWhileDown(word string) observe.Observation {
+	o := saying(word)
+	o.Up = false
+	return o
+}
+
+// newEngine wires ONE stub as both halves of the split seam, so a test still asserts against a
+// single recorder — the split is about who may call what, not about having two fixtures.
+func newEngine(st *store.Store, d *stubDeps, sources ...tasks.Source) *Engine {
+	return New(st, d, d, sources...)
+}
 
 // testGate is the passing gate every fixture gets unless it declares its own. A project MUST declare
 // one (-> repo.Gate), so an unconfigured stub would refuse every submit in this package and test the
@@ -105,13 +125,6 @@ func (d *stubDeps) writeTestGate(root string) {
 	}
 }
 
-// StartAgent records who was woken, so a test can assert work arriving for an empty pool brings a
-// reviewer back rather than waiting for one that never comes.
-func (d *stubDeps) StartAgent(_, name string) error {
-	d.started = append(d.started, name)
-	return d.startErr
-}
-
 // Escalate records the question, so a test can assert the hub stopped an agent rather than merely
 // telling it something it could not act on.
 func (d *stubDeps) Escalate(_, name, question string) (string, error) {
@@ -139,17 +152,42 @@ func (d *stubDeps) Interrupt(_, name string) error {
 	d.interrupted = append(d.interrupted, name)
 	return nil
 }
-func (d *stubDeps) AgentAlive(_, _ string) bool   { return d.alive }
-func (d *stubDeps) AgentUp(_, _ string) bool      { return d.alive }
-func (d *stubDeps) AgentIdle(_, name string) bool { return !d.busy[name] }
 
-// Reading is the observation every situation-derived rule reads. Off the same fields the older
-// accessors answer from, so a test that set `alive` or a fill sees it through both.
-func (d *stubDeps) Reading(_, _ string) situation.Reading {
-	return situation.Reading{
-		Observed: true, Up: d.alive, Runtime: d.runtime, StillFor: d.stillFor,
-		Status: d.status, Fill: d.ctxTokens, Window: d.ctxWindow,
+// Observe is the harness's standing look, off the same fields the fixture already sets. Probe is the
+// fresh one; nothing here distinguishes them, since no test in this package turns on the difference.
+func (d *stubDeps) Observe(_, name string) observe.Observation {
+	// An agent nothing marked busy is AT A PROMPT, which is what the sweeps read; `busy` says a turn
+	// is running, and an explicit runtime beats both.
+	state := observe.ParseState(d.runtime)
+	if d.runtime == "" {
+		state = observe.AtPrompt
+		if d.busy[name] {
+			state = observe.Working
+		}
 	}
+	o := observe.Observation{
+		TakenAt: time.Now(), Up: d.alive, State: state, Model: d.currentModel,
+		StillSince: time.Now().Add(-d.stillFor),
+	}
+	if d.ctxOK {
+		// Nothing recorded yet is a zero window, which is how the observation says "unreadable" —
+		// there is no separate ok flag to carry any more.
+		o.Fill, o.Window = d.ctxTokens, d.ctxWindow
+	}
+	return o
+}
+
+func (d *stubDeps) Probe(project, name string) observe.Observation { return d.Observe(project, name) }
+
+func (d *stubDeps) Say(project, name, text string, del Delivery) error {
+	return d.Deliver(project, name, text, del)
+}
+
+// Start records who was woken, so a test can assert work arriving for an empty pool brings a
+// reviewer back rather than waiting for one that never comes.
+func (d *stubDeps) Start(_, name string) error {
+	d.started = append(d.started, name)
+	return d.startErr
 }
 
 func (d *stubDeps) TaskComments(_, id string) []store.Comment { return d.comments[id] }
@@ -227,7 +265,7 @@ func TestScrapPRStopsReviewer(t *testing.T) {
 		t.Fatalf("precondition: reviewer should be reviewing pr-1, got %q", got)
 	}
 
-	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
+	e := newEngine(st, &stubDeps{root: t.TempDir(), alive: true})
 	if err := e.ScrapPR("repo", "pr-1"); err != nil {
 		t.Fatalf("ScrapPR: %v", err)
 	}
@@ -275,7 +313,7 @@ func TestScrapEmptiesAStandingBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	e := New(st, &stubDeps{root: root, alive: false})
+	e := newEngine(st, &stubDeps{root: root, alive: false})
 	if err := e.ScrapPR("proj", "pr-plan-galar"); err != nil {
 		t.Fatalf("ScrapPR: %v", err)
 	}
@@ -319,7 +357,7 @@ func TestDiscardPRReleasesItsAuthor(t *testing.T) {
 		t.Fatal(err)
 	}
 	deps := &stubDeps{root: root, alive: true}
-	e := New(st, deps)
+	e := newEngine(st, deps)
 
 	if err := e.DiscardPR("proj", "pr-os-new"); err != nil {
 		t.Fatalf("DiscardPR: %v", err)
@@ -359,7 +397,7 @@ func TestDiscardPRLeavesAnUninvolvedAgentAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	deps := &stubDeps{root: root, alive: true}
-	e := New(st, deps)
+	e := newEngine(st, deps)
 
 	if err := e.DiscardPR("proj", "pr-td-1"); err != nil {
 		t.Fatalf("DiscardPR: %v", err)

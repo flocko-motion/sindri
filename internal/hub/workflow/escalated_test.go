@@ -70,12 +70,12 @@ func TestAnEscalatedAgentIsNotNudged(t *testing.T) {
 	if err := ps.SetEscalation("dvalin", "which of the two schemas is authoritative?"); err != nil {
 		t.Fatal(err)
 	}
-	if e.NudgeStalled("proj", "dvalin", "idle", 6*time.Minute) {
+	if e.NudgeStalled("proj", "dvalin", saying("idle"), 6*time.Minute) {
 		t.Error("an escalated agent was nudged for waiting as it was told to")
 	}
 	// A cut-off turn is exempt too, unlike the other parked states: there is nothing for a resumed
 	// turn to do while every verb that advances the work is refused.
-	if e.NudgeStalled("proj", "dvalin", "api-error", 6*time.Minute) {
+	if e.NudgeStalled("proj", "dvalin", saying("api-error"), 6*time.Minute) {
 		t.Error("an escalated agent was asked to resume a turn it has no work to resume into")
 	}
 }

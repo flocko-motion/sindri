@@ -7,7 +7,7 @@ import "testing"
 // exactly then — the verdict, the rejection, the cancellation are ABOUT the work in hand.
 func TestMailReachesAnAgentHoldingWork(t *testing.T) {
 	st, _ := poolFixture(t)
-	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
+	e := newEngine(st, &stubDeps{root: t.TempDir(), alive: true})
 	if !e.reachable("repo", "dvalin") {
 		t.Fatal("an agent up and at an empty prompt must be reachable, whatever it holds")
 	}
@@ -22,10 +22,10 @@ func TestMailReachesAnAgentHoldingWork(t *testing.T) {
 func TestAnAgentMidTurnIsStillToldAboutMail(t *testing.T) {
 	st, _ := poolFixture(t)
 	busy := &stubDeps{root: t.TempDir(), alive: true, busy: map[string]bool{"dvalin": true}}
-	if e := New(st, busy); !e.reachable("repo", "dvalin") {
+	if e := newEngine(st, busy); !e.reachable("repo", "dvalin") {
 		t.Error("a working agent was left untold — it decides when to read, and cannot while it does not know")
 	}
-	if e := New(st, &stubDeps{root: t.TempDir(), alive: false}); e.reachable("repo", "dvalin") {
+	if e := newEngine(st, &stubDeps{root: t.TempDir(), alive: false}); e.reachable("repo", "dvalin") {
 		t.Error("an agent that is down must not be nudged — there is nothing to inject into")
 	}
 }

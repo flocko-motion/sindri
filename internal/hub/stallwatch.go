@@ -68,21 +68,23 @@ func (s *stallwatch) sweep() {
 		// about is kept per MESSAGE in the mailbox, not in this map, so a hub restart announces nothing
 		// twice (-> workflow.NudgeMailWaiting).
 		s.h.wf.NudgeMailWaiting(a.Project, a.Name)
-		l, ok := s.h.watch.get(a.Project, a.Name)
+		obs := s.h.observed(a.Project, a.Name)
 		// The spell is keyed on whichever clock this state is judged by, so a cut-off turn that
-		// resumes and dies again is a new spell rather than one already prodded for.
-		since := l.stillSince
-		if l.runtime == "api-error" {
-			since = l.runtimeSince
+		// resumes and dies again is a new spell rather than one already prodded for. The INSTANT, which
+		// is why this cannot just call StillFor — but the rule choosing between the two clocks is the
+		// observation's, asked rather than repeated (-> observe.Observation.StillFor).
+		since := obs.StillSince
+		if obs.TurnCutOff() {
+			since = obs.StateSince
 		}
-		if !ok || !l.up || since.IsZero() {
+		if !obs.Seen() || !obs.Up || since.IsZero() {
 			delete(s.nudged, key) // moving again (or gone): the next stall is a new one
 			continue
 		}
 		if s.nudged[key].Equal(since) {
 			continue // already prodded for this spell
 		}
-		if s.h.wf.NudgeStalled(a.Project, a.Name, l.runtime, time.Since(since)) {
+		if s.h.wf.NudgeStalled(a.Project, a.Name, obs, time.Since(since)) {
 			s.nudged[key] = since
 		}
 	}
@@ -92,17 +94,9 @@ func (s *stallwatch) sweep() {
 // dwell measured here, the verdict asked of the surface, so what the user sees and what the agent is
 // told cannot disagree.
 func (h *Hub) stalledFor(project, name string) (time.Duration, bool) {
-	l, ok := h.watch.get(project, name)
-	if !ok {
-		return 0, false
-	}
-	dwell := stillFor(l)
-	if dwell == 0 {
-		return 0, false
-	}
 	s, err := h.sit.Of(project, name)
-	if err != nil {
-		return dwell, false
+	if err != nil || s.StillFor == 0 {
+		return 0, false
 	}
-	return dwell, s.Allowed().Stalled
+	return s.StillFor, s.Allowed().Stalled
 }

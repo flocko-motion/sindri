@@ -40,7 +40,7 @@ func gateRepo(t *testing.T, agent, task string) (*Engine, *store.ProjectStore, s
 	if err := ps.SetState(store.AgentState{Agent: agent, Task: task, Branch: task, Phase: "gating"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
-	return New(st, &stubDeps{root: root, projects: []store.Project{{Tag: "repo", Path: root}}}), ps, root
+	return newEngine(st, &stubDeps{root: root, projects: []store.Project{{Tag: "repo", Path: root}}}), ps, root
 }
 
 // openGate is the two steps every gate goes through, as a test helper: record the commit, then open

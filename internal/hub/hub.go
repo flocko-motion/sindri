@@ -144,9 +144,9 @@ func open(ctx context.Context, hostVersions func(context.Context) map[string]str
 	h.agentCh = agentchan.New(h.store, agentchanDeps{h})
 	// Before agents and wf, which both ask it: the observer behind it reads h.watch and h.agents at
 	// CALL time, so neither has to exist yet.
-	h.sit = situation.NewGatherer(h.store, situationObserver{h})
+	h.sit = situation.NewGatherer(h.store, harness{h})
 	h.agents = agent.New(h.store, agentDeps{h}, h.agentCh)
-	h.wf = workflow.New(h.store, workflowDeps{h}, spec.Source{}, github.Source{}).WithGates(spec.Source{})
+	h.wf = workflow.New(h.store, workflowDeps{h}, harness{h}, spec.Source{}, github.Source{}).WithGates(spec.Source{})
 	h.projects = project.New(h.store, projectDeps{h})
 	// Before watch: watchdog.sweep calls h.status.sweep at its own tail, on the very first beat, so
 	// this must exist before that goroutine starts — building it takes no dependency of its own.
@@ -254,12 +254,28 @@ func (h *Hub) SetRetired(project, name string, retired bool) error {
 		return err
 	}
 	if was && !retired {
-		// No .Regardless() needed: the flag above is already false by the time this runs, so
-		// WakeRefusal's own retired-check never sees it. An escalated or clear-armed agent is
-		// correctly left waiting on THAT instead — this notice is not the exit from either.
-		return h.Deliver(project, name, workflow.MsgUnretired, workflow.MailAndPush)
+		// The judgement is made HERE, where the message is composed, rather than asked of the delivery
+		// path: an agent still stuck on an escalation or an armed clear is waiting on THAT, and this
+		// notice is not the exit from either — so it is recorded and not used to interrupt.
+		d := workflow.MailAndPush
+		if why := h.wakeRefused(project, name); why != "" {
+			d = workflow.MailOnly
+			_ = h.store.For(project).Log(name, "push-suppressed", why+" — not woken for: "+workflow.MsgUnretired)
+		}
+		return h.Deliver(project, name, workflow.MsgUnretired, d)
 	}
 	return nil
+}
+
+// wakeRefused is why waking this agent would only hand it a refusal, "" when it is worth an
+// interruption. Asked at the point of COMPOSITION, so the message's author decides — and records the
+// refusal itself, since the delivery path no longer knows one happened (-> situation.Surface.Wake).
+func (h *Hub) wakeRefused(project, name string) string {
+	s, err := h.sit.Of(project, name)
+	if err != nil {
+		return ""
+	}
+	return s.Allowed().Wake
 }
 
 // rehydrate tells a (re)launched agent where it stands, once its session can take input.
@@ -273,13 +289,13 @@ func (h *Hub) rehydrate(project, name string) {
 // reaches this without paying the boot wait. AgentDirective is idempotent and state-driven, so new
 // and resuming agents alike land on their current job (D13).
 func (h *Hub) greet(project, name string) {
-	// Push-only and Regardless: mail-less, a fresh session gated on retired would sit silent forever
-	// instead of seeing DirRetired even once — its only way to learn its own situation.
-	_ = h.Deliver(project, name, h.wf.Kickoff(project, name), workflow.PushOnly.Regardless())
+	// Ungated on purpose, and mail-less: a fresh session held back on retirement would sit silent for
+	// ever instead of seeing DirRetired even once — its only way to learn its own situation.
+	_ = h.Deliver(project, name, h.wf.Kickoff(project, name), workflow.PushOnly)
 	// A relaunched chatroom member lost its durable prompt's membership cue — remind it, if the room
-	// is in a state where that means anything (-> chat.ReminderFor). Same reasoning as the kickoff:
-	// mail-less, so a gated retired or escalated member would lose the cue for good.
+	// is in a state where that means anything (-> chat.ReminderFor). Ungated for the kickoff's reason:
+	// mail-less, so a member held back would lose the cue for good.
 	if cue := h.chat.ReminderFor(project, name); cue != "" {
-		_ = h.Deliver(project, name, cue, workflow.PushOnly.Regardless())
+		_ = h.Deliver(project, name, cue, workflow.PushOnly)
 	}
 }

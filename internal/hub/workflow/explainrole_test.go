@@ -17,7 +17,7 @@ func roleFixture(t *testing.T) (*Engine, *store.ProjectStore) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	return New(st, &stubDeps{root: t.TempDir()}), st.For("repo")
+	return newEngine(st, &stubDeps{root: t.TempDir()}), st.For("repo")
 }
 
 // reasons maps each PR to the standing the explanation gave it.

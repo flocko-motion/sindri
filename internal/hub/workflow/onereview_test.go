@@ -34,7 +34,7 @@ func reviewFixture(t *testing.T) (*Engine, *store.ProjectStore, *stubDeps) {
 			t.Fatal(err)
 		}
 	}
-	return New(st, &stubDeps{root: root, alive: true}), ps, &stubDeps{}
+	return newEngine(st, &stubDeps{root: root, alive: true}), ps, &stubDeps{}
 }
 
 // TestAReviewerHoldsExactlyOnePR is the constraint the workspace imposes: one checkout, so one PR.

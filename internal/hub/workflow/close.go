@@ -142,7 +142,7 @@ func (e *Engine) settleWithTask(project, id string) {
 			continue
 		}
 		_ = ps.LogPR(pr.ID, "rejected", "by hub: task "+id+" is closed")
-		_ = e.deps.Deliver(project, pr.Agent, MsgPRSettledWithTask(pr.ID, id), MailAndPush)
+		_ = e.hn.Say(project, pr.Agent, MsgPRSettledWithTask(pr.ID, id), MailAndPush)
 	}
 }
 
@@ -194,10 +194,10 @@ func (e *Engine) finishTask(project, id string, scrap bool) error {
 			// ESC first, so the cancellation lands on an idle prompt rather than queuing behind
 			// the work it is cancelling. Only the interrupt needs the agent up; the delivery is
 			// made either way, since mail is precisely what reaches one that is down.
-			if e.deps.AgentUp(project, a.Name) {
-				_ = e.deps.Interrupt(project, a.Name)
+			if e.hn.Observe(project, a.Name).Up {
+				_ = e.hn.Interrupt(project, a.Name)
 			}
-			_ = e.deps.Deliver(project, a.Name, MsgTaskCancelled(id), MailAndPush)
+			_ = e.hn.Say(project, a.Name, MsgTaskCancelled(id), MailAndPush)
 		}
 	}
 	// The approval gate goes with the task: a gate left standing outlives what it asked about, and

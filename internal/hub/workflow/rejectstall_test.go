@@ -30,7 +30,7 @@ func TestARejectedWorkerIsStillCaughtByTheStallNudge(t *testing.T) {
 		t.Fatal(err)
 	}
 	deps := &stubDeps{root: t.TempDir(), alive: true}
-	e := New(st, deps)
+	e := newEngine(st, deps)
 
 	if err := e.RejectPR("proj", "pr-1", "needs another pass"); err != nil {
 		t.Fatalf("reject: %v", err)
@@ -40,7 +40,7 @@ func TestARejectedWorkerIsStillCaughtByTheStallNudge(t *testing.T) {
 	}
 
 	before := len(deps.injectedText)
-	if !e.NudgeStalled("proj", "bombur", "idle", StallDwell+time.Minute) {
+	if !e.NudgeStalled("proj", "bombur", saying("idle"), StallDwell+time.Minute) {
 		t.Fatal("a rejected worker gone quiet past the dwell should be nudged")
 	}
 	if len(deps.injectedText) <= before {

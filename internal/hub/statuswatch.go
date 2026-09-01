@@ -36,24 +36,22 @@ func (s *statuswatch) sweep() {
 	}
 	// One gather per project, as the board does: this runs over the whole fleet on a tick, and a
 	// situation per agent would pay the claimable-pool query once per row (-> situation.Gatherer.Roster).
-	stalled := map[agentKey]bool{}
+	// It reads the word and settles nothing: the very act of watching must not change what it measures,
+	// so retiring an intent is left to the board (-> agent.Service.SettleIntent).
+	words := map[agentKey]string{}
 	for _, tag := range projectsOf(agents) {
 		roster, rerr := s.h.sit.Roster(tag)
 		if rerr != nil {
 			return
 		}
 		for _, sit := range roster {
-			stalled[agentKey{tag, sit.Name}] = sit.Allowed().Stalled
+			words[agentKey{tag, sit.Name}] = sit.Allowed().Status
 		}
 	}
 	seen := make(map[agentKey]bool, len(agents))
 	for _, a := range agents {
-		st, _ := s.h.store.For(a.Project).GetState(a.Name)
-		l, observed := s.h.watch.get(a.Project, a.Name)
-		// peekStatusWord, not statusWord: this diff-check must not decide when a settled launch/stop
-		// intent retires, or the very act of watching would change what it measures.
-		status := s.h.peekStatusWord(a, st, l, observed, stalled[agentKey{a.Project, a.Name}])
 		key := agentKey{a.Project, a.Name}
+		status := words[key]
 		seen[key] = true
 		s.mu.Lock()
 		prior, had := s.last[key]

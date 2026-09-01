@@ -36,7 +36,7 @@ func TestGatePassedSendsNoMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	deps := &stubDeps{root: root}
-	e := New(st, deps)
+	e := newEngine(st, deps)
 	c := registry.Caller{Project: "repo", Agent: agent, Role: "worker", Phase: "working"}
 	if code, out := submitAll(t, e, c, "fix"); code != 0 {
 		t.Fatalf("submit: code=%d out=%s", code, out)
@@ -76,7 +76,7 @@ func TestPlainMergeSendsNoMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	deps := &stubDeps{root: root}
-	e := New(st, deps)
+	e := newEngine(st, deps)
 	c := registry.Caller{Project: "repo", Agent: agent, Role: "worker", Phase: "working"}
 	if code, out := submitAll(t, e, c, "fix"); code != 0 {
 		t.Fatalf("submit: code=%d out=%s", code, out)

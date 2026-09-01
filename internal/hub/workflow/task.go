@@ -137,7 +137,7 @@ func (e *Engine) UnassignTask(project, id string) error {
 		if st.Task != id {
 			continue
 		}
-		if e.deps.AgentAlive(project, a.Name) {
+		if e.hn.Probe(project, a.Name).Up {
 			return fmt.Errorf("%s is alive and working on %s — stop or delete it first", a.Name, id)
 		}
 		// A container holder rests back onto its FEATURE, not fully idle: unassigning one subtask
@@ -306,14 +306,14 @@ func (e *Engine) commentBudget(project string) (aim, ceiling float64) {
 // AgentDirective is the no-arg `sindri` answer, returned AT ONCE, mail served inline ahead of it
 // (-> serveMail) unless a clear or a model switch lands this round instead.
 func (e *Engine) AgentDirective(ctx context.Context, project, name string) (string, error) {
-	beforeModel := e.deps.CurrentModel(project, name)
+	beforeModel := e.hn.Observe(project, name).Model
 	dir, err := e.directive(ctx, project, name)
 	if err != nil {
 		return "", err
 	}
 	// A model switch narrates and restarts the agent inline, with no distinct text to spot in dir —
 	// only the model actually changing under this call says so.
-	retiered := e.deps.CurrentModel(project, name) != beforeModel
+	retiered := e.hn.Observe(project, name).Model != beforeModel
 	if mailDeferred(dir) || retiered {
 		return dir, nil
 	}

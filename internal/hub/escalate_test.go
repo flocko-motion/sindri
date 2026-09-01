@@ -324,25 +324,8 @@ func TestReEscalatingReplacesTheQuestion(t *testing.T) {
 // front-end renders, and to the marker that counts it. Without the marker an escalated agent is
 // indistinguishable from one with nothing to do, which is the whole failure being fixed.
 func TestAnEscalatedAgentWearsTheStatusAndNeedsTheUser(t *testing.T) {
-	if got := overlayEscalation("working", "which schema?"); got != api.StatusEscalated {
-		t.Errorf("status = %q, want %q", got, api.StatusEscalated)
-	}
-	// It outranks the words describing a screen: a stalled reading is the same standing still seen
-	// without the reason for it, and a runtime block is a different remedy wearing one word.
-	for _, was := range []string{api.StatusStalled, api.StatusBlocked, "idle", "submitted"} {
-		if got := overlayEscalation(was, "which schema?"); got != api.StatusEscalated {
-			t.Errorf("overlayEscalation(%q) = %q, want %q", was, got, api.StatusEscalated)
-		}
-	}
-	// Two still outrank it, both saying the answer cannot be DELIVERED until something else is fixed.
-	for _, was := range []string{"down", api.StatusUnknown, "launching", api.StatusSignedOut} {
-		if got := overlayEscalation(was, "which schema?"); got != was {
-			t.Errorf("overlayEscalation(%q) = %q, want it unchanged", was, got)
-		}
-	}
-	if got := overlayEscalation("working", ""); got != "working" {
-		t.Errorf("an agent with no escalation must be untouched, got %q", got)
-	}
+	// The word itself, and which others outrank it, are the surface's own (-> situation's status_test).
+	// What this ties down is the other half: the word counts as needing the user.
 	if !api.AgentNeedsUser(api.AgentView{Status: api.StatusEscalated}) {
 		t.Error("an escalated agent must count as needing the user")
 	}

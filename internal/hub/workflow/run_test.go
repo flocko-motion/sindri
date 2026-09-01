@@ -68,7 +68,7 @@ func runEngine(t *testing.T) (*Engine, *store.ProjectStore) {
 	}
 	ps := st.For("repo")
 	deps := &stubDeps{root: root, projects: []store.Project{{Tag: "repo", Path: root}}}
-	return New(st, deps), ps
+	return newEngine(st, deps), ps
 }
 
 func TestScheduleRunThenFleetRunsRanksIt(t *testing.T) {

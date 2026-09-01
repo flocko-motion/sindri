@@ -29,7 +29,7 @@ func stallStore(t *testing.T) (*Engine, *stubDeps, *store.ProjectStore) {
 	_ = ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-d9a8c3", Branch: "td-d9a8c3", Phase: "working"}, store.ReasonClaimed, "test setup")
 	_ = ps.SetState(store.AgentState{Agent: "nori", Task: "td-other", Branch: "td-other", Phase: "submitted"}, store.ReasonClaimed, "test setup")
 	deps := &stubDeps{root: t.TempDir(), alive: true}
-	return New(st, deps), deps, ps
+	return newEngine(st, deps), deps, ps
 }
 
 // TestNudgeStalledNamesTheTask: a stalled agent has lost the thread, so the prod has to say which
@@ -37,7 +37,7 @@ func stallStore(t *testing.T) (*Engine, *stubDeps, *store.ProjectStore) {
 func TestNudgeStalledNamesTheTask(t *testing.T) {
 	e, deps, _ := stallStore(t)
 
-	if !e.NudgeStalled("proj", "dvalin", "idle", StallDwell+time.Minute) {
+	if !e.NudgeStalled("proj", "dvalin", saying("idle"), StallDwell+time.Minute) {
 		t.Fatal("a worker holding work and gone quiet should be nudged")
 	}
 	if len(deps.injected) != 1 || deps.injected[0] != "dvalin" {
@@ -80,7 +80,7 @@ func TestAStalledReviewerIsNudgedAboutItsPR(t *testing.T) {
 	e, deps, ps := stallStore(t)
 	reviewingAgent(t, ps, "ori", "pr-42")
 
-	if !e.NudgeStalled("proj", "ori", "idle", StallDwell+time.Minute) {
+	if !e.NudgeStalled("proj", "ori", saying("idle"), StallDwell+time.Minute) {
 		t.Fatal("a reviewer holding a PR and gone quiet should be nudged")
 	}
 	if len(deps.injected) != 1 || deps.injected[0] != "ori" {
@@ -111,7 +111,7 @@ func TestAReviewerWithNothingToNameIsLeftAlone(t *testing.T) {
 	if err := ps.SetState(store.AgentState{Agent: "ori", Phase: "reviewing"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatal(err)
 	}
-	if e.NudgeStalled("proj", "ori", "idle", StallDwell+time.Minute) {
+	if e.NudgeStalled("proj", "ori", saying("idle"), StallDwell+time.Minute) {
 		t.Error("with no review held there is nothing to say, so nothing should be sent")
 	}
 	if len(deps.injected) != 0 {
@@ -123,7 +123,7 @@ func TestAReviewerWithNothingToNameIsLeftAlone(t *testing.T) {
 // hurry, so prodding it would be telling it off for doing the right thing.
 func TestNudgeStalledLeavesWaitingAgentsAlone(t *testing.T) {
 	e, deps, _ := stallStore(t)
-	if e.NudgeStalled("proj", "nori", "idle", StallDwell+time.Minute) {
+	if e.NudgeStalled("proj", "nori", saying("idle"), StallDwell+time.Minute) {
 		t.Error("an agent waiting on a verdict must not be nudged")
 	}
 	if len(deps.injected) != 0 {
@@ -137,7 +137,7 @@ func TestNudgeStalledRechecksThePhase(t *testing.T) {
 	e, deps, ps := stallStore(t)
 	_ = ps.SetState(store.AgentState{Agent: "dvalin", Task: "td-d9a8c3", Phase: "submitted"}, store.ReasonClaimed, "test setup")
 
-	if e.NudgeStalled("proj", "dvalin", "idle", StallDwell+time.Minute) {
+	if e.NudgeStalled("proj", "dvalin", saying("idle"), StallDwell+time.Minute) {
 		t.Error("an agent that moved on before the nudge landed must not be nudged")
 	}
 	if len(deps.injected) != 0 {
@@ -153,7 +153,7 @@ func TestNudgeStalledLeavesAWorkerOnItsOwnQueuedRunAlone(t *testing.T) {
 	if err := ps.PutRun(store.Run{ID: "run-1", Agent: "dvalin", Status: "queued"}); err != nil {
 		t.Fatal(err)
 	}
-	if e.NudgeStalled("proj", "dvalin", "idle", StallDwell+time.Minute) {
+	if e.NudgeStalled("proj", "dvalin", saying("idle"), StallDwell+time.Minute) {
 		t.Error("a worker waiting on its own queued run must not be nudged")
 	}
 	if len(deps.injected) != 0 {
@@ -172,7 +172,7 @@ func TestNudgeStalledLeavesAReviewerOnAnAskedLintPRAlone(t *testing.T) {
 	if err := ps.AddRunWaiter("run-pr", "ori"); err != nil {
 		t.Fatal(err)
 	}
-	if e.NudgeStalled("proj", "ori", "idle", StallDwell+time.Minute) {
+	if e.NudgeStalled("proj", "ori", saying("idle"), StallDwell+time.Minute) {
 		t.Error("a reviewer waiting on a lint-pr run it asked for must not be nudged")
 	}
 	if len(deps.injected) != 0 {
@@ -184,7 +184,7 @@ func TestNudgeStalledLeavesAReviewerOnAnAskedLintPRAlone(t *testing.T) {
 func TestNudgeStalledNeedsALiveAgent(t *testing.T) {
 	e, deps, _ := stallStore(t)
 	deps.alive = false
-	if e.NudgeStalled("proj", "dvalin", "idle", StallDwell+time.Minute) {
+	if e.NudgeStalled("proj", "dvalin", sayingWhileDown("idle"), StallDwell+time.Minute) {
 		t.Error("a down agent cannot be nudged")
 	}
 	if len(deps.injected) != 0 {
@@ -195,7 +195,7 @@ func TestNudgeStalledNeedsALiveAgent(t *testing.T) {
 // TestNudgeStalledIsLogged: the log is where a user reconstructs why an agent was prodded.
 func TestNudgeStalledIsLogged(t *testing.T) {
 	e, _, ps := stallStore(t)
-	if !e.NudgeStalled("proj", "dvalin", "idle", StallDwell+time.Minute) {
+	if !e.NudgeStalled("proj", "dvalin", saying("idle"), StallDwell+time.Minute) {
 		t.Fatal("expected a nudge")
 	}
 	events, err := ps.Events("dvalin", 0)

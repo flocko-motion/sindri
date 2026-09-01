@@ -33,7 +33,7 @@ func TestAgentSeesCommentsOnTaskInfo(t *testing.T) {
 	deps := &stubDeps{root: root, comments: map[string][]store.Comment{"td-9": {
 		{Source: "sindri", SourceRef: "abc", Author: "eitri", Body: "found a blocker", CreatedAt: "2026-01-01T00:00:00Z"},
 	}}}
-	e := New(st, deps)
+	e := newEngine(st, deps)
 	c := registry.Caller{Project: "proj", Agent: "eitri", Role: "worker"}
 
 	var out bytes.Buffer
@@ -66,7 +66,7 @@ func TestAgentSeesNoCommentsSectionWhenThereAreNone(t *testing.T) {
 	if err := ps.SetState(store.AgentState{Agent: "eitri", Task: "td-9", Phase: "working"}, store.ReasonClaimed, "test setup"); err != nil {
 		t.Fatalf("set state: %v", err)
 	}
-	e := New(st, &stubDeps{root: root})
+	e := newEngine(st, &stubDeps{root: root})
 	c := registry.Caller{Project: "proj", Agent: "eitri", Role: "worker"}
 
 	var out bytes.Buffer

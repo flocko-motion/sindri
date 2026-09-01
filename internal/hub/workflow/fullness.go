@@ -15,14 +15,14 @@ const ContextFullFraction = 0.85
 // contextFull reports whether a worker is past ContextFullFraction of its window. A window of 0,
 // or no recorded usage yet, is never full — guessing one is what this replaced.
 func (e *Engine) contextFull(project, worker string) (tokens int, full bool) {
-	tokens, window, _, ok := e.deps.ContextUsage(project, worker)
-	return tokens, ok && window > 0 && float64(tokens) >= float64(window)*ContextFullFraction
+	o := e.hn.Observe(project, worker)
+	return o.Fill, o.Window > 0 && float64(o.Fill) >= float64(o.Window)*ContextFullFraction
 }
 
 // compactDue is fill past CompactionThreshold's curve — a trigger, not the hard stop.
 func (e *Engine) compactDue(project, worker string) (tokens int, due bool) {
-	tokens, window, _, ok := e.deps.ContextUsage(project, worker)
-	return tokens, ok && window > 0 && tokens >= e.deps.CompactionThreshold(window)
+	o := e.hn.Observe(project, worker)
+	return o.Fill, o.Window > 0 && o.Fill >= e.hn.CompactionThreshold(o.Window)
 }
 
 // compactIfDue fires a due compaction once, queuing dir — the real instruction — behind it, so the
@@ -31,10 +31,10 @@ func (e *Engine) compactIfDue(ctx context.Context, project, agent, dir string) (
 	if _, due := e.compactDue(project, agent); !due {
 		return false, nil
 	}
-	if err := e.deps.Compact(ctx, project, agent); err != nil {
+	if err := e.hn.Compact(ctx, project, agent); err != nil {
 		return false, err
 	}
-	if err := e.deps.Deliver(project, agent, dir, PushOnly); err != nil {
+	if err := e.hn.Say(project, agent, dir, PushOnly); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -43,20 +43,20 @@ func (e *Engine) compactIfDue(ctx context.Context, project, agent, dir string) (
 // prepareAssignment runs an already-claimed assignment's preparation — a model switch, else a clear
 // past ContextFullFraction, else compaction if merely due — then delivers dir once it has landed.
 func (e *Engine) prepareAssignment(ctx context.Context, project, agent, tier, dir string) (fired bool, err error) {
-	if want, known := e.deps.ModelForTier(tier); known && !e.deps.ModelMatches(want, e.deps.CurrentModel(project, agent)) {
-		if err := e.deps.SetModel(ctx, project, agent, want); err != nil {
+	if want, known := e.deps.ModelForTier(tier); known && !e.hn.ModelMatches(want, e.hn.Observe(project, agent).Model) {
+		if err := e.hn.SetModel(ctx, project, agent, want); err != nil {
 			return false, err
 		}
-		if err := e.deps.Deliver(project, agent, dir, PushOnly); err != nil {
+		if err := e.hn.Say(project, agent, dir, PushOnly); err != nil {
 			return false, err
 		}
 		return true, nil
 	}
 	if _, full := e.contextFull(project, agent); full {
-		if err := e.deps.Clear(ctx, project, agent); err != nil {
+		if err := e.hn.Clear(ctx, project, agent); err != nil {
 			return false, err
 		}
-		err := e.deps.Deliver(project, agent, dir, PushOnly)
+		err := e.hn.Say(project, agent, dir, PushOnly)
 		return true, err
 	}
 	return e.compactIfDue(ctx, project, agent, dir)

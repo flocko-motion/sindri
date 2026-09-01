@@ -26,21 +26,11 @@ type Delivery struct {
 	// arrives as part of an exchange rather than as an unrelated message the recipient has to match
 	// against its own by guesswork.
 	ReplyTo int64
-	// Unconditional exempts this push from Hub.Deliver's wake gate (-> WakeRefusal) — set via
-	// .Regardless() on pushes that ARE the exit from a refusing state, not news of more work.
-	Unconditional bool
 }
 
 // Answering marks a message as the reply to another, returning a copy for the same reason From does.
 func (d Delivery) Answering(id int64) Delivery {
 	d.ReplyTo = id
-	return d
-}
-
-// Regardless marks a delivery as exempt from the wake gate, returning a copy for the same reason
-// From does.
-func (d Delivery) Regardless() Delivery {
-	d.Unconditional = true
 	return d
 }
 

@@ -37,6 +37,23 @@ type BoardState = api.BoardState
 // named here for what it is to the hub.
 type AgentMail = api.Mail
 
+// observedAt stamps a reading for the board, "" where nothing has looked yet — which the board must
+// not render as a time, since it would read as a look that happened.
+func observedAt(at time.Time) string {
+	if at.IsZero() {
+		return ""
+	}
+	return at.UTC().Format(time.RFC3339)
+}
+
+// stillLabel is how long the display had stood unchanged, "" when nothing was seen to stand still.
+func stillLabel(d time.Duration) string {
+	if d <= 0 {
+		return ""
+	}
+	return d.Round(time.Second).String()
+}
+
 // projectsOf is the distinct projects a roster spans, in first-seen order.
 func projectsOf(agents []store.Agent) []string {
 	seen, out := map[string]bool{}, []string{}
@@ -146,14 +163,18 @@ func (h *Hub) State(selected string) (BoardState, error) {
 		l := obs[i]
 		sit := sits[agentKey{a.Project, a.Name}]
 		allowed := sit.Allowed()
-		status := h.statusWord(a, st, l, observed[i], allowed.Stalled)
+		// The word is the surface's now. Retiring an intent reality has caught up with is still a
+		// WRITE, and the board is the caller that owns making it (-> agent.Service.SettleIntent).
+		h.agents.SettleIntent(a.Project, a.Name, l.up, observed[i])
+		status := allowed.Status
 		agents = append(agents, AgentView{
 			// Carried, never re-derived: a front-end links no hub package, and deciding it here off
 			// `status` would be a second copy inside the hub (-> situation.Surface).
-			NeedsUser: allowed.NeedsUser,
-			Project:   a.Project, Repo: h.repoName(a.Project), Name: a.Name, Role: a.Role,
+			NeedsUser:  allowed.NeedsUser,
+			ObservedAt: observedAt(sit.TakenAt), StillFor: stillLabel(sit.StillFor),
+			Project: a.Project, Repo: h.repoName(a.Project), Name: a.Name, Role: a.Role,
 			Status:  status,
-			Runtime: l.runtime,
+			Runtime: l.state.String(),
 			Task:    st.Task, Feature: st.Container, Branch: st.Branch, PR: pr, Workspace: a.Workspace,
 			Clients: l.clients, Container: pod, Memory: a.Memory, Retired: a.Retired,
 			ClearArmed:    a.ClearArmed,
@@ -376,65 +397,6 @@ func (h *Hub) repoName(project string) string {
 func (h *Hub) container(project, name string) string {
 	root, _ := h.projectPath(project)
 	return Container(root, name)
-}
-
-// statusWord is one agent's derived status — phase, liveness, the stall check and escalation folded
-// into the single word the board renders. State's batch loop passes what it already fetched rather
-// than re-reading it. This is the board read that OWNS retiring a settled launch/stop intent
-// (-> AgentStatus) — an observer that must not decide that wants peekStatusWord instead.
-func (h *Hub) statusWord(a store.Agent, st store.AgentState, l liveness, observed, stalled bool) string {
-	return foldStatus(h.agents.AgentStatus(a.Project, a.Name, l.up, observed, st.Phase, a.Stopped), st, l, stalled)
-}
-
-// peekStatusWord is statusWord without retiring a settled intent (-> agent.Service.PeekStatus) — for
-// statuswatch.go's diff-check, which must not perturb the very thing it measures.
-func (h *Hub) peekStatusWord(a store.Agent, st store.AgentState, l liveness, observed, stalled bool) string {
-	return foldStatus(h.agents.PeekStatus(a.Project, a.Name, l.up, observed, st.Phase, a.Stopped), st, l, stalled)
-}
-
-// foldStatus is the rest of the fold both statusWord and peekStatusWord share. The stall VERDICT is
-// the surface's and arrives as an argument, rather than being derived a second time here.
-func foldStatus(base string, st store.AgentState, l liveness, stalled bool) string {
-	status := overlayRuntime(base, l.runtime)
-	// A stall reads as plain "idle" otherwise, which is what let one hold a task unnoticed.
-	if stalled {
-		status = "stalled"
-	}
-	return overlayEscalation(status, st.Escalation)
-}
-
-// overlayRuntime folds Claude's live runtime into the workflow status: "signed-out" = unreachable
-// until a human acts, "blocked" = needs you now (any phase), "working" = busy, "idle" = nothing
-// doing. It replaces a plain working/idle phase but keeps the meaningful ones; runtime "" (probe
-// failed) changes nothing. Idleness is what the pane shows, not what the workflow holds — "working,
-// holding nothing" is honest, and what is held is the separate column the board already shows.
-func overlayRuntime(status, runtime string) string {
-	switch runtime {
-	case "signed-out":
-		// Outranks every phase: whatever was asked of it, nothing is happening and nothing can reach it.
-		return "signed-out"
-	case "blocked":
-		return "blocked"
-	case "api-error":
-		// Outranks the phase for the same reason signed-out does: whatever it was doing, the turn
-		// that was doing it is dead. The hub retries, and the word says why it went quiet meanwhile.
-		return "api-error"
-	case "working", "idle":
-		if status == "working" || status == "idle" {
-			return runtime
-		}
-	}
-	return status
-}
-
-// overlayEscalation says "escalated" wherever an agent waits on a decision the user must make. Last,
-// over the runtime and the stall alike: those describe a screen, this says why the screen is quiet.
-// Two words outrank it, both meaning the answer cannot be DELIVERED yet: not-up, and signed-out.
-func overlayEscalation(status, question string) string {
-	if question == "" || api.AgentNotUp(status) || status == api.StatusSignedOut {
-		return status
-	}
-	return api.StatusEscalated
 }
 
 // overlayUnreachable says "unreachable" where pushes stopped showing up in an agent's pane. Last of

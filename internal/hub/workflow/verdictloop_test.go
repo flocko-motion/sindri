@@ -22,7 +22,7 @@ func verdictFixture(t *testing.T) (*Engine, *store.ProjectStore, *stubDeps) {
 		t.Fatal(err)
 	}
 	deps := &stubDeps{root: t.TempDir(), alive: true}
-	e := New(st, deps)
+	e := newEngine(st, deps)
 	assignReviewer(t, ps, "pr-a", "fili")
 	return e, ps, deps
 }

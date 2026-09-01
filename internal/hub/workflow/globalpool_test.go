@@ -38,7 +38,7 @@ func TestIdleReviewerPrefersALocalOneOverTheGlobalPool(t *testing.T) {
 	if err := st.For(GlobalProject).PutAgent(store.Agent{Name: "ori", Role: "reviewer", Workspace: "ori"}); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, &stubDeps{root: t.TempDir(), alive: true})
+	e := newEngine(st, &stubDeps{root: t.TempDir(), alive: true})
 
 	got, err := e.idleReviewer("repo")
 	if err != nil {
@@ -59,7 +59,7 @@ func TestIdleReviewerFallsBackToTheGlobalPool(t *testing.T) {
 	if err := st.For(GlobalProject).PutAgent(store.Agent{Name: "ori", Role: "reviewer", Workspace: "ori"}); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, &stubDeps{root: t.TempDir(), alive: true, busy: map[string]bool{"fili": true}})
+	e := newEngine(st, &stubDeps{root: t.TempDir(), alive: true, busy: map[string]bool{"fili": true}})
 
 	got, err := e.idleReviewer("repo")
 	if err != nil {
@@ -90,7 +90,7 @@ func TestIdleReviewerSeesAGlobalReviewerBusyInAnotherProject(t *testing.T) {
 	if err := other.AssignReview(rid, "ori"); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, &stubDeps{root: t.TempDir(), alive: true, projects: []store.Project{{Tag: "other-repo"}}})
+	e := newEngine(st, &stubDeps{root: t.TempDir(), alive: true, projects: []store.Project{{Tag: "other-repo"}}})
 
 	got, err := e.idleReviewer("repo")
 	if err != nil {
@@ -126,7 +126,7 @@ func TestAssignReviewResolvesAGlobalReviewersOwnRecord(t *testing.T) {
 	if err := st.For(GlobalProject).PutAgent(store.Agent{Name: "ori", Role: "reviewer", Workspace: "ori"}); err != nil {
 		t.Fatal(err)
 	}
-	e := New(st, &stubDeps{root: root, alive: true})
+	e := newEngine(st, &stubDeps{root: root, alive: true})
 
 	rid, err := ps.AddReview("pr-1", "look again")
 	if err != nil {
@@ -199,7 +199,7 @@ func TestAssignReviewMaterialisesAGlobalReviewersWorkspaceAsPlainFiles(t *testin
 		t.Fatal(err)
 	}
 
-	e := New(st, &stubDeps{root: repoRoot, alive: true})
+	e := newEngine(st, &stubDeps{root: repoRoot, alive: true})
 	rid, err := ps.AddReview("pr-1", "look")
 	if err != nil {
 		t.Fatal(err)

@@ -63,7 +63,7 @@ func (c wakeRefusalCase) build(t *testing.T) *Engine {
 			t.Fatal(err)
 		}
 	}
-	return New(st, &stubDeps{root: t.TempDir()})
+	return newEngine(st, &stubDeps{root: t.TempDir()})
 }
 
 // isRefusalDirective reports whether dir is one of the three answers a push must never wake an agent

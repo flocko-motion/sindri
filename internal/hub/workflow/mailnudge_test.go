@@ -29,7 +29,7 @@ func idleAgentWithMail(t *testing.T, deps *stubDeps) (*Engine, *store.ProjectSto
 	if _, err := ps.AddMail("dvalin", "nori", "the adapter shells out twice", false, 0); err != nil {
 		t.Fatal(err)
 	}
-	return New(st, deps), ps
+	return newEngine(st, deps), ps
 }
 
 // TestAnIdleAgentWithMailIsWoken is the guarantee: mail reaches an agent whenever it next asks the hub

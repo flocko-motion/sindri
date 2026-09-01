@@ -14,6 +14,7 @@ import (
 	"github.com/flo-at/sindri/internal/adapter/gate"
 	"github.com/flo-at/sindri/internal/adapter/tasks"
 	"github.com/flo-at/sindri/internal/config"
+	"github.com/flo-at/sindri/internal/hub/observe"
 	"github.com/flo-at/sindri/internal/hub/situation"
 	"github.com/flo-at/sindri/internal/hub/store"
 )
@@ -36,8 +37,42 @@ func (e *Engine) TaskSourceToolMissing(root string) bool {
 	return false
 }
 
-// Deps is the seam back into the hub for everything orchestration touches that isn't the store or
-// another workflow step — keeps this package free of the hub's transport, pods, and tmux.
+// Harness is the agent's BOX and nothing else: looking at it, saying something to it, resetting or
+// steering its session, starting it. It names no task, PR, review or verdict — a method that named
+// one would be a rule the box has no business knowing, and a build check holds that line
+// (-> internal/arch).
+type Harness interface {
+	// Observe is the standing look the observer already took, free. Probe takes a FRESH one, for a
+	// caller that needs the answer as of now rather than as of the last sweep — the distinction the
+	// old AgentAlive/AgentUp pair carried, kept because it is real.
+	Observe(project, name string) observe.Observation
+	Probe(project, name string) observe.Observation
+	// Say puts a message to the agent the way d asks: mail keeps it until read, a push types it in
+	// now (-> delivery.go). It carries out what it is given and reports what happened.
+	Say(project, name, text string, d Delivery) error
+	// Clear, Compact and SetModel reset or steer the session, each blocking until it takes effect or
+	// times out (-> agent-runtime's blocking-command contract).
+	Clear(ctx context.Context, project, name string) error
+	Compact(ctx context.Context, project, name string) error
+	SetModel(ctx context.Context, project, name, model string) error
+	// Interrupt aborts whatever the session is doing (ESC), so a notice lands on an idle prompt
+	// rather than queuing behind work.
+	Interrupt(project, name string) error
+	// Start brings a stopped agent back up, its session resuming.
+	Start(project, name string) error
+	// Container names an agent's box.
+	Container(project, name string) string
+	// ModelMatches and CompactionThreshold are the BACKEND's own knowledge of its models: whether two
+	// ids name one model, and what fill is worth compacting for a window. Here rather than on Deps
+	// because only the thing running the session knows either — the hub's POLICY about models, which
+	// model a difficulty tier deserves, sits on Deps instead (-> tasks.md 3.2).
+	ModelMatches(want, detected string) bool
+	CompactionThreshold(window int) int
+}
+
+// Deps is the seam back into the rest of the hub: the project's facts, the board, the task thread.
+// Everything here names something the ORCHESTRATOR owns; anything naming a keystroke is the
+// harness's (above), and a method that names both is the next thing to pull apart.
 type Deps interface {
 	// ProjectRoot resolves a project (repoTag) to its on-disk repo root.
 	ProjectRoot(project string) string
@@ -45,27 +80,8 @@ type Deps interface {
 	ProjectConfig(project string) (config.Config, error)
 	// ArchitectureDoc returns a project's repo-relative architecture doc path.
 	ArchitectureDoc(project string) string
-	// Container returns an agent's container name.
-	Container(project, name string) string
 	// Notify wakes the board (an SSE change notification).
 	Notify()
-	// Deliver sends a message the way d says: mail keeps it until read, a push types it in now
-	// (-> delivery.go) — every hub-originated message goes through this.
-	Deliver(project, name, text string, d Delivery) error
-	// Interrupt aborts an agent's current operation (sends ESC to its session), so a
-	// scrapped-task notice lands on an idle prompt rather than queuing behind work.
-	Interrupt(project, name string) error
-	// Reading hands over the hub's standing reading of an agent — liveness, runtime, dwell, fill and
-	// the launch intent, all memoised. What every rule about that agent is derived from
-	// (-> situation.Situation), and free, since nothing here probes.
-	Reading(project, name string) situation.Reading
-	// AgentAlive PROBES: for a caller needing the answer as of now, never from a tick (-> AgentUp).
-	AgentAlive(project, name string) bool
-	// AgentUp is the watchdog's last reading of the same, free. What anything on a timer asks.
-	AgentUp(project, name string) bool
-	// AgentIdle reports an agent at an empty prompt: would a message sent NOW be acted on, or lost
-	// in an input box when the running turn ends?
-	AgentIdle(project, name string) bool
 	// TaskComments returns a task's comments for display.
 	TaskComments(project, id string) []store.Comment
 	// AddTaskComment posts on a task's thread as author — TaskComments' write half.
@@ -73,32 +89,11 @@ type Deps interface {
 	// Escalate stops an agent on a decision only the user can make, recording the question where a
 	// later reader looks. The hub's own verb, so a hub-raised escalation is the agent's in every way.
 	Escalate(project, name, question string) (task string, err error)
-	// StartAgent brings a stopped agent back up, its session resuming. The hub reclaims idle pods
-	// (-> agent.FireIdleStops) and nothing put them back, so work could arrive for an empty fleet.
-	StartAgent(project, name string) error
 	// KnownProjects returns the registered repos (for fleet-wide PR listing).
 	KnownProjects() []store.Project
-	// ContextUsage reports the session's context size, window and model, off its transcript. ok=false
-	// when nothing has been recorded yet.
-	ContextUsage(project, name string) (tokens, window int, model string, ok bool)
-	// CompactionThreshold is the token count worth compacting at, for the model window belongs to.
-	CompactionThreshold(window int) int
-	// CurrentModel is the model an agent is effectively running: detected while alive, else recorded.
-	CurrentModel(project, name string) string
-	// ModelForTier resolves a difficulty tier to its model, ok=false if unrecognised.
+	// ModelForTier resolves a difficulty tier to its model, ok=false if unrecognised. POLICY, unlike
+	// the two model questions on Harness: which model a tier deserves is the hub's to decide.
 	ModelForTier(tier string) (model string, ok bool)
-	// ModelMatches reports whether detected is want — not always a bare equality, since a backend
-	// may run a tier's model under a more specific id than the one it dispatches to.
-	ModelMatches(want, detected string) bool
-	// SetModel changes the model an agent runs on, blocking until it completes or times out.
-	SetModel(ctx context.Context, project, name, model string) error
-	// Compact sends /compact into an agent's live session and blocks until it takes effect or times out.
-	Compact(ctx context.Context, project, name string) error
-	// Clear sends /clear into an agent's live session and blocks until it takes effect or times out.
-	Clear(ctx context.Context, project, name string) error
-	// HoldsNothing reports whether an agent holds nothing the hub can see: no task, no feature, no
-	// review, no escalation, nobody dialed in.
-	HoldsNothing(project, name, role string) (bool, error)
 }
 
 // clearArmed reports whether a human has armed a context clear. Read off the situation rather than
@@ -116,10 +111,10 @@ func (e *Engine) fireClearIfArmed(ctx context.Context, project, name string) (fi
 	if !e.clearArmed(project, name) {
 		return false, nil
 	}
-	if err := e.deps.Clear(ctx, project, name); err != nil {
+	if err := e.hn.Clear(ctx, project, name); err != nil {
 		return false, err
 	}
-	return true, e.deps.Deliver(project, name, MsgKickoff, PushOnly.Regardless())
+	return true, e.hn.Say(project, name, MsgKickoff, PushOnly)
 }
 
 // Engine is the workflow orchestrator: it owns the store and drives the lifecycle
@@ -127,6 +122,7 @@ func (e *Engine) fireClearIfArmed(ctx context.Context, project, name string) (fi
 type Engine struct {
 	store      *store.Store
 	deps       Deps
+	hn         Harness
 	sit        *situation.Gatherer // where an agent stands, and what may happen to it (-> hub/situation)
 	sources    []tasks.Source      // external task sources, wired in at New; ownedSource is always added per-project
 	gates      []gate.Gate         // submit-path quality gates, wired in via WithGates; openspec today
@@ -137,8 +133,8 @@ type Engine struct {
 
 // New builds the workflow engine over the hub's store, its Deps, and the external task sources the
 // composition root wires in — the engine never names them.
-func New(st *store.Store, deps Deps, sources ...tasks.Source) *Engine {
-	return &Engine{store: st, deps: deps, sit: situation.NewGatherer(st, deps), sources: sources,
+func New(st *store.Store, deps Deps, hn Harness, sources ...tasks.Source) *Engine {
+	return &Engine{store: st, deps: deps, hn: hn, sit: situation.NewGatherer(st, hn), sources: sources,
 		pre: preflight{seen: map[string]string{}}, refWarn: refFallbackWarn{seen: map[string]bool{}}}
 }
 

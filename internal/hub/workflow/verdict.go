@@ -111,7 +111,7 @@ func (e *Engine) completeReview(prProject, home, prID, agent, verdict, findings 
 	_ = e.store.For(home).SetState(store.AgentState{Agent: agent, Phase: "idle"}, store.ReasonFreed, "verdict given on "+prID)
 	// Woken, though: a verdict must not be where a reviewer's loop ends. Waking and clearing were one
 	// act here and are two things — a push queues behind the running turn and arrives as it ends.
-	_ = e.deps.Deliver(home, agent, MsgKickoff, PushOnly)
+	_ = e.hn.Say(home, agent, MsgKickoff, PushOnly)
 }
 
 // ApprovePR is the human approve path (TUI/CLI): marks a project's open (or already-approved) PR
@@ -257,7 +257,7 @@ func (e *Engine) reject(project, prID, feedback, voice string) error {
 	_ = ps.LogPR(pr.ID, "rejected", "by "+who+": "+feedback)
 	_ = ps.Log(pr.Agent, "reject", pr.ID+" ("+who+"): "+feedback)
 	// From whoever ruled: an agent weights feedback by who it is from.
-	_ = e.deps.Deliver(project, pr.Agent, msg, MailAndPush.From(who))
+	_ = e.hn.Say(project, pr.Agent, msg, MailAndPush.From(who))
 	e.deps.Notify()
 	return nil
 }

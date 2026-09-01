@@ -310,7 +310,7 @@ func (e *Engine) healSplit(project, name string) bool {
 	// sd-ca28d3 while `sindri task` told it — correctly — that it held nothing.
 	e.settleReleasedPR(ps, project, name, st.Container, held)
 	_ = ps.Log(name, "container-released", st.Container+": "+held+" is working inside it")
-	_ = e.deps.Deliver(project, name, MsgHierarchyTaken(st.Container, held), MailAndPush)
+	_ = e.hn.Say(project, name, MsgHierarchyTaken(st.Container, held), MailAndPush)
 	return true
 }
 

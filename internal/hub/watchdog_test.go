@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"github.com/flo-at/sindri/internal/hub/observe"
 	"testing"
 	"time"
 
@@ -43,8 +44,8 @@ func TestOneLostProbeDoesNotFlipAnAgentDown(t *testing.T) {
 		if !l.up {
 			t.Errorf("strike %d of %d already reported down", i, downStrikes)
 		}
-		if l.clients != 1 || l.runtime != "working" {
-			t.Errorf("strike %d blanked the last good detail: clients=%d runtime=%q", i, l.clients, l.runtime)
+		if l.clients != 1 || l.state != observe.Working {
+			t.Errorf("strike %d blanked the last good detail: clients=%d state=%v", i, l.clients, l.state)
 		}
 	}
 
@@ -65,7 +66,7 @@ func TestSuccessClearsStrikes(t *testing.T) {
 	w.record(a, true, 0, seen("idle", "d1"))
 	w.record(a, false, 0, agent.Observation{}) // one strike
 	w.record(a, true, 2, seen("working", "d2"))
-	if l, _ := w.get("proj", "galar"); l.strikes != 0 || l.clients != 2 || l.runtime != "working" {
+	if l, _ := w.get("proj", "galar"); l.strikes != 0 || l.clients != 2 || l.state != observe.Working {
 		t.Errorf("a success must reset strikes and take the fresh reading, got %+v", l)
 	}
 	// From clean, it again takes the full threshold to go down.
@@ -96,8 +97,8 @@ func TestAbsentPodIsAStrikeLikeAnyOther(t *testing.T) {
 	if !l.up {
 		t.Error("one listing that missed the pod must not declare the agent down")
 	}
-	if l.clients != 1 || l.runtime != "working" {
-		t.Errorf("the last good detail should be held, got clients=%d runtime=%q", l.clients, l.runtime)
+	if l.clients != 1 || l.state != observe.Working {
+		t.Errorf("the last good detail should be held, got clients=%d state=%v", l.clients, l.state)
 	}
 	for i := 2; i <= downStrikes; i++ {
 		w.record(a, false, 0, agent.Observation{})
@@ -211,18 +212,18 @@ func TestActivityDecidesWorkingWhenTheWordsDoNot(t *testing.T) {
 
 	w.record(a, true, 0, seen("idle", "d1"))
 	w.record(a, true, 0, seen("idle", "d2")) // same word, different screen
-	if l, _ := w.get("proj", "dvalin"); l.runtime != "working" {
-		t.Errorf("a changing pane is a working agent, got runtime %q", l.runtime)
+	if l, _ := w.get("proj", "dvalin"); l.state != observe.Working {
+		t.Errorf("a changing pane is a working agent, got state %v", l.state)
 	}
 	// Standing still, it is idle again — and "blocked" is never overwritten, since a pane that
 	// changes while asking a question is still asking it.
 	w.record(a, true, 0, seen("idle", "d2"))
-	if l, _ := w.get("proj", "dvalin"); l.runtime != "idle" {
-		t.Errorf("an unchanged pane is idle, got %q", l.runtime)
+	if l, _ := w.get("proj", "dvalin"); l.state != observe.AtPrompt {
+		t.Errorf("an unchanged pane is idle, got %q", l.state)
 	}
 	w.record(a, true, 0, seen("blocked", "d3"))
-	if l, _ := w.get("proj", "dvalin"); l.runtime != "blocked" {
-		t.Errorf("activity must not overwrite a definite state, got %q", l.runtime)
+	if l, _ := w.get("proj", "dvalin"); l.state != observe.AwaitingHuman {
+		t.Errorf("activity must not overwrite a definite state, got %q", l.state)
 	}
 }
 
@@ -239,8 +240,8 @@ func TestALostProbeDoesNotRestartTheDwell(t *testing.T) {
 
 	w.record(a, false, 0, agent.Observation{}) // one lost probe, short of downStrikes
 	held, _ := w.get("proj", "dvalin")
-	if held.runtime != "idle" {
-		t.Fatalf("a lost probe should hold the last runtime, got %q", held.runtime)
+	if held.state != observe.AtPrompt {
+		t.Fatalf("a lost probe should hold the last state, got %v", held.state)
 	}
 	// A capture that failed saw no screen, so it is not evidence the screen changed either.
 	if !held.stillSince.Equal(started.stillSince) {
