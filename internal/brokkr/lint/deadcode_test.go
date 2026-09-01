@@ -164,3 +164,70 @@ func TestDeadcodeSkipsALibraryModule(t *testing.T) {
 		t.Errorf("the skip must be visible, or the linter looks like it ran: %q", out)
 	}
 }
+
+// TestDeadcodeFindsAModuleThatIsNotAtTheRoot is the report from a worker whose repo keeps its Go
+// code in a subdirectory. Loading "./..." from the root failed with "directory prefix . does not
+// contain main module or its selected dependencies", so the gate went red — and the worker started
+// restructuring the repository to satisfy the linter. Go is happy with a module anywhere; a linter
+// that assumes one at the top is dictating layout rather than reporting on code.
+func TestDeadcodeFindsAModuleThatIsNotAtTheRoot(t *testing.T) {
+	root := t.TempDir()
+	mod := filepath.Join(root, "tools", "templater")
+	if err := os.MkdirAll(mod, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(mod, "go.mod"), "module example.com/templater\n\ngo 1.25\n")
+	write(t, filepath.Join(mod, "main.go"), "package main\n\nfunc main() { helper() }\n\nfunc helper() {}\n\nfunc unused() {}\n")
+	write(t, filepath.Join(root, "README.md"), "no go.mod here\n")
+
+	var sb strings.Builder
+	found, err := inDir(t, root, func() (bool, error) { return Deadcode([]string{"./..."}, "", nil, nil, &sb) })
+	if err != nil {
+		t.Fatalf("a module below the root must be analysed where it lives: %v (%s)", err, sb.String())
+	}
+	if !found || !strings.Contains(sb.String(), "unused") {
+		t.Errorf("the nested module's dead function should be reported:\n%s", sb.String())
+	}
+}
+
+// TestDeadcodeSkipsATreeWithNoModule: Go files and no go.mod defines nothing to analyse, so it is a
+// stated skip — the same reasoning as a TypeScript-only tree, and not a failure of the gate.
+func TestDeadcodeSkipsATreeWithNoModule(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "x.go"), "package x\n\nfunc F() {}\n")
+
+	var sb strings.Builder
+	found, err := inDir(t, root, func() (bool, error) { return Deadcode([]string{"./..."}, "", nil, nil, &sb) })
+	if err != nil {
+		t.Fatalf("a tree with no module is a skip, not an error: %v", err)
+	}
+	if found {
+		t.Error("nothing can be found where nothing defines a module")
+	}
+	if !strings.Contains(sb.String(), "no go.mod") {
+		t.Errorf("the skip must say why:\n%s", sb.String())
+	}
+}
+
+// inDir runs fn with the process in dir, restoring the old one. The linter loads relative to the
+// working directory, which is what these two cases are about.
+func inDir(t *testing.T, dir string, fn func() (bool, error)) (bool, error) {
+	t.Helper()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(old) }()
+	return fn()
+}
+
+// write is a fatal-on-error file write for these fixtures.
+func write(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
