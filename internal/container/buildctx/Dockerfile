@@ -93,13 +93,11 @@ RUN case "$(uname -m)" in \
 # /etc/profile would otherwise reset PATH and hide GOPATH/bin.
 RUN GOBIN=/usr/local/bin go install golang.org/x/tools/gopls@latest
 
-# go-upgrade: install the Go toolchain a project's go.mod requires.
-# The base image pins GOTOOLCHAIN=local, so a go.mod newer than the image's Go makes
-# every go command refuse ("go.mod requires go >= X") rather than fetch what it needs
-# — and /usr/local/go is root-owned, so the agent can't replace it. This fetches the
-# right toolchain into the agent's own tree and links it into ~/.local/bin, which the
-# PATH below puts first. brokkr's deadcode linter names this command when it hits that
-# refusal, so the fix arrives with the failure.
+# go-upgrade: install a chosen Go toolchain, when go.mod's own answer is not the one wanted
+# — `go-upgrade latest`, or an exact version to pin. Reaching go.mod's version needs nothing
+# now that GOTOOLCHAIN=auto is set below; this fetches into the agent's own tree and links
+# into ~/.local/bin, which the PATH below puts first, since /usr/local/go is root-owned.
+# brokkr's deadcode linter still names it for a refusal a custom image recipe can bring back.
 COPY go-upgrade.sh /usr/local/bin/go-upgrade
 RUN chmod +x /usr/local/bin/go-upgrade
 
@@ -165,7 +163,15 @@ COPY shell.sh /etc/sindri/shell.sh
 RUN echo '. /etc/sindri/shell.sh' >> /home/sindri/.bashrc
 
 USER sindri
+# GOPATH, not just GOMODCACHE: the checksum-database cache lives under GOPATH/pkg/sumdb, and the
+# base image's /go/pkg is root-owned — so fetching a toolchain died on "open /go/pkg/sumdb/
+# sum.golang.org/latest: permission denied", which names verification rather than the toolchain.
+ENV GOPATH=/home/sindri/go
 ENV GOMODCACHE=/home/sindri/go/pkg/mod
+# The base image pins GOTOOLCHAIN=local, and the image only gets its Go at build time — so it falls
+# behind every project whose go.mod asks for a newer one, and every go command refuses rather than
+# fetching what it needs. `auto` makes a stale image cost one download. `go-upgrade` still pins.
+ENV GOTOOLCHAIN=auto
 # ~/.local/bin ahead of /usr/local/go/bin is what lets `go-upgrade` take effect without
 # root: a newer toolchain linked there shadows the base install for every later command.
 ENV PATH=/home/sindri/.local/bin:${PATH}
